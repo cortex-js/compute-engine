@@ -583,15 +583,18 @@ describe('COMPILE three-valued connectives — Python target', () => {
     // when `p != 0` has not already answered `False`. Since the user decision
     // of 2026-10-20 the second leaf takes no NaN test, so `1 / p` is no longer
     // bound to a parameter of its own: it is the comparison `(1 < 1 / p)`.
+    // `p` is declared `number | missing`, so the division reads a `None`
+    // input as `float('nan')` (user decision 2026-10-25), as the interpreter
+    // answers `NaN` for `1 / Missing`.
     const source = code([
       'If',
       ['And', ['NotEqual', 'p', 0], ['Greater', ['Divide', 1, 'p'], 1]],
       1,
       -1,
     ]);
-    expect(source).toContain('((1 < 1 / p))');
+    expect(source).toContain("((1 < 1 / (float('nan') if p is None else p)))");
     expect(source.indexOf('_tv2 is not None and not _tv2')).toBeLessThan(
-      source.indexOf('1 / p')
+      source.indexOf('1 / (')
     );
     // Over a `real` symbol `NaN ≠ 0` is decided (`True`, user decision
     // 2026-10-23), so the condition keeps the plain `and`, which

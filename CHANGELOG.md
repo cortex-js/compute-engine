@@ -2,6 +2,50 @@
 
 ### Resolved Issues
 
+- **Compiled JavaScript over a symbol declared `any` that holds a list** gave
+  wrong values: with `p = [1, 2]` and `q = [3, 4]`, `p + q` was the string
+  `"1,23,4"`, `p·q` was `NaN`, `Max(p, q)` was `NaN`, and `p < q` was one
+  boolean. Such an operand is now tested at run time, and a list takes the list
+  code (`[4, 6]`, `[True, True]`, `4`). A value that is not a list runs the same
+  code as before, and other types are not affected. `Multiply` and `Power` of
+  such a list are entry-wise, as for a bare `list`.
+
+- **Compiled `PointX`, `PointY` and `PointZ` of a value that is not a point**
+  (a number, a boolean, a string) gave `NaN`. They now throw a `RangeError`, as
+  the interpreter gives an `incompatible-type` error. An absent value or `NaN`
+  still gives `NaN`.
+
+- **The type of a call that maps a function with a list result over an
+  operand of unknown depth did not hold its value.** With
+  `h := (t: number) ↦ [t, 2t]` and `x: any`, `h(x)` was typed
+  `broadcastable<vector<2>>`, which does not hold the list of matrices that
+  `x = [[1, 2], [3]]` gives. It is now `R | list<R | list<any>>` over an
+  operand of a top type and `R | tensor<cells of R>` over a tensor operand
+  (`R` is the result for one element). A function with a boolean, string or
+  tuple result over an operand typed `any` is typed the same way. A compiled
+  `Max` or `Min` of `h(x)[1]` now declines, as for any operand that may hold
+  `Nothing`.
+
+- **Compiled Python raised `TypeError` for an absent input.** A `None`
+  argument (the Python spelling of `Missing`) for an input whose type admits
+  `missing` (`number | missing`, `any`) is now read as `NaN` in arithmetic, as
+  the interpreter and compiled JavaScript do: `p + 1`, `1 / p` and `np.sin(p)`
+  give `nan`. A comparison still reads the absent value, and inputs of other
+  types compile to the same code as before.
+
+- **interval-js: `≠` with an operand that has no value over the whole cell**
+  (`\sqrt{x} \ne 0` over `x = [-1, -1]`) gave `'maybe'`. It now gives
+  `'true'`, as the interpreter and the other targets give `True` for
+  `NaN ≠ 0`.
+
+- **`.N()` did not check a value assigned to a callback parameter.** The
+  parameter of a `Map` callback is typed from the source elements, and
+  `evaluate()` refuses an assignment of another type. Under `.N()`,
+  `evaluate({numericApproximation: true})` and `N(…)`, the check was skipped:
+  `Map(q ↦ (q := q + 0.5; q + 1), 1..3).N()` gave `[2.5, 3.5, 4.5]`, and a
+  list or a string was accepted too. It now gives an `incompatible-type` error
+  for each element, as `evaluate()` does.
+
 - **Static types that did not hold the value of the expression.** In each case
   below the type of the expression was not a type of its value; it now is.
   - `Map(g, t)` with `g := x ↦ x + 10` and `t := ([1, 2], 3)` is typed
@@ -318,6 +362,10 @@
   engine a pool of `n` worker threads (at most 256) and runs each program
   asynchronously, so a `findFit` with a global search scans on the workers and
   gives the same values. Without the option, nothing changes.
+  `--workers auto` picks the default pool size (the count of cores minus 1,
+  from 1 to 8). With a pool, Ctrl-C in the REPL stops the entry that runs and
+  gives the prompt back; the declarations of the session stay, and a second
+  Ctrl-C ends the process if the entry does not stop.
 - **`IsPrime` compiles to JavaScript.**
 
 ### Performance
@@ -379,6 +427,12 @@
 
 ### Behavior Changes
 
+- **A `Map` of a named function whose body is in `N(…)` compiles at machine
+  precision also when the body holds a loop or an inner collection**, as the
+  same body written as a lambda already did. `map(g, 1..200)` with
+  `g(x) = N(h(x) + 1)` and `h(x) = Sum(x/k, k = 1..10)` is now compiled; its
+  values can differ from the interpreted values in the last digits. A body
+  whose nested loops do more than 100,000 turns in total stays interpreted.
 - **`Σ 1/(n (ln n)^p)` with `p ≤ 1` evaluates to `+∞`** under `evaluate()` and
   `.N()`, and so do other series that diverge as slowly as `Σ 1/(n ln n)` (a
   limit comparison with `Σ 1/(n ln n)`). They stayed symbolic.

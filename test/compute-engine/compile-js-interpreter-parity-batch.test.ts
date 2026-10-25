@@ -113,12 +113,21 @@ describe('CE-370: Max and Min flatten every level of an element that may be a li
   test.each([
     ['Max', 'g'],
     ['Min', 'g'],
-    ['Max', 'h'],
-    ['Min', 'h'],
   ])('%s(%s(x)[1], 1)', (head, f) => {
     const ce = engineWithG();
     const expr = ce.box([head, ['At', [f, 'x'], 1], 1] as never);
     expectParity(parity(ce, expr, 'x', X_VALUES));
+  });
+
+  // `h(x)` is typed `R | list<R | list<any>>` with `R = vector<2>` (ROADMAP
+  // CE-371, user decision 2026-10-25), so `h(x)[1]` is
+  // `list<any> | missing | number`. A compiled `Max` or `Min` over a
+  // `list<any>` declines: such a list may hold `Nothing` elements, which
+  // compiled code cannot represent yet.
+  test.each([['Max'], ['Min']])('%s(h(x)[1], 1) declines', (head) => {
+    const ce = engineWithG();
+    const expr = ce.box([head, ['At', ['h', 'x'], 1], 1] as never);
+    expect(parity(ce, expr, 'x', X_VALUES)).toBe('declined');
   });
 
   test.each([['Max'], ['Min']])('%s(g(x)[1]) with one operand', (head) => {

@@ -5535,6 +5535,13 @@ export const SYS_HELPERS = {
   // it, which the compiled form cannot know to do, and a silently-wrong point
   // is worse than an absent one.
   pointSlot: (v: unknown): unknown => (Array.isArray(v) ? NaN : v),
+  // A numeric typed array (`Float64Array`, ...) as a plain array, and any
+  // other value as it is. The list code of the run-time check of a symbol
+  // declared `any` or `value` (`declaredTopGuard`, `base-compiler.ts`) reads
+  // its symbols through this helper, because the list kernels (`bcast`,
+  // `eq`) test for a plain `Array`.
+  plainList: (v: unknown): unknown =>
+    isNumericTypedArray(v) ? copyToPlainArray(v) : v,
   /**
    * Coordinate `k` (0-based) of a point-shaped value whose static type did
    * not settle whether it is ONE point or a LIST of points. Mirrors the
@@ -5567,13 +5574,20 @@ export const SYS_HELPERS = {
    *    erasure makes an empty TUPLE the same value; it takes the broadcast
    *    reading too, since a zero-component point is not a shape any compiled
    *    producer builds;
-   *  - an absent coordinate otherwise, and a non-array value (the
-   *    interpreter's `incompatible-type` error) answer `NaN`;
-   *  - an absent operand (`undefined` or `null`) answers `undefined` when the
-   *    caller states that the coordinate is not provably a number
-   *    (`keepsAbsence`): the interpreter then keeps the absence, `Missing`,
-   *    and answers `NaN` only for a coordinate that is a number (ROADMAP
-   *    CE-229).
+   *  - an absent coordinate otherwise answers `NaN`;
+   *  - a value that is not an array, not absent and not `NaN` (a number, a
+   *    boolean, a string) is not a point: the interpreter answers the
+   *    `incompatible-type` error, which compiled code cannot return, so the
+   *    helper throws a `RangeError`, as `_SYS.arr` does for an operand that
+   *    is not a list (ROADMAP CE-214.2, user decision 2026-10-25). Before,
+   *    it answered `NaN`, which a consumer could not tell from an absent
+   *    coordinate;
+   *  - an absent operand (`undefined` or `null`) answers `NaN`, or
+   *    `undefined` when the caller states that the coordinate is not provably
+   *    a number (`keepsAbsence`): the interpreter then keeps the absence,
+   *    `Missing`, and answers `NaN` only for a coordinate that is a number
+   *    (ROADMAP CE-229). A `NaN` operand, the marker of an absent value or
+   *    of an error upstream, answers `NaN`.
    */
   pointComponent: (
     v: unknown,
@@ -5583,8 +5597,21 @@ export const SYS_HELPERS = {
     undecidedNesting = false,
     keepsAbsence = false
   ): unknown => {
-    if (!Array.isArray(v))
-      return keepsAbsence && (v === undefined || v === null) ? undefined : NaN;
+    // A numeric typed array (`Float64Array`, ...) is a point, as a plain
+    // array of numbers is: it is read as one, and only a number, a boolean
+    // or a string is refused below.
+    if (isNumericTypedArray(v)) v = copyToPlainArray(v);
+    if (!Array.isArray(v)) {
+      if (v === undefined || v === null) return keepsAbsence ? undefined : NaN;
+      // `NaN` is the marker of an absent value or of an error upstream (the
+      // sum of two lists of points of different lengths), not a number the
+      // host passed: it propagates.
+      if (typeof v === 'number' && Number.isNaN(v)) return NaN;
+      throw new RangeError(
+        'Point coordinate access: the operand is not a point or a list of ' +
+          'points at run time'
+      );
+    }
     if (v.length === 0) return emptyBroadcasts ? [] : NaN;
     // The element that decides the reading is the first one that is not an
     // empty array, as in the interpreter (`firstDecidingElement`): an empty

@@ -266,9 +266,12 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
 });
 
 describe('Tycho row 425: a restricted list, a union T', () => {
-  // `h(t) = When([t, 2t], t > 0)`: `h(x)` is
-  // `broadcastable<missing | vector<2>>`. The `missing` arm cannot hold a
-  // list and adds nothing; the `vector<2>` arm adds `number`.
+  // `h(t) = When([t, 2t], t > 0)`: `h(x)` is `R | list<R | list<any>>` with
+  // `R = missing | vector<2>` (ROADMAP CE-371, user decision 2026-10-25: a
+  // list `x` of any depth is mapped at its leaves, so the value can be a
+  // list of matrices). The `missing` arm cannot hold a list and adds
+  // nothing; the `vector<2>` arm adds `number`, and the list arm adds
+  // `list<any>`.
   function whenEngine(): ComputeEngine {
     const ce = rowEngine();
     ce.declare('h', 'function');
@@ -286,18 +289,20 @@ describe('Tycho row 425: a restricted list, a union T', () => {
   test('the index into h(x) holds a number', () => {
     const ce = whenEngine();
     expect(ce.box(['h', 'x']).type.toString()).toBe(
-      'broadcastable<missing | vector<2>>'
+      'list<list<any> | missing | vector<2>> | missing | vector<2>'
     );
     expect(
       staticTypeAndValues(ce, ce.box(['At', ['h', 'x'], 1]), 'x', [
         NUMBER_X,
         LIST_X,
+        ['List', ['List', 1, 2], ['List', 3]],
       ])
     ).toEqual({
-      type: 'missing | number | vector<2>',
+      type: 'list<any> | missing | number',
       values: [
         ['3', true],
         ['[1,2]', true],
+        ['[[1,2],[2,4]]', true],
       ],
     });
   });

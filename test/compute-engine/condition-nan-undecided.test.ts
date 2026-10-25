@@ -409,11 +409,42 @@ describe('Tycho rows 411 and 413: an undefined operand makes a comparison false'
       } as never);
       expect(r.run!({ x: { lo: -1, hi: -1 } } as never)).toBe('false');
     }
-    // `≠` is not part of the decision: `maybe`, as before.
+    // `≠` is the negation of `=`: `'true'`, as the interpreter and the
+    // `javascript` and `python` targets answer `True` for `NaN ≠ 0` (user
+    // decision 2026-10-25, ROADMAP CE-396).
     const ne = compile(ce.parse('\\sqrt{x} \\ne 0'), {
       to: 'interval-js',
     } as never);
-    expect(ne.run!({ x: { lo: -1, hi: -1 } } as never)).toBe('maybe');
+    expect(ne.run!({ x: { lo: -1, hi: -1 } } as never)).toBe('true');
+  });
+
+  test('CE-396: on interval-js `≠` with an empty operand is true', () => {
+    const run = (json: unknown, lo: number, hi: number): unknown =>
+      compile(ce.box(json as never), { to: 'interval-js' } as never).run!({
+        x: { lo, hi },
+      } as never);
+    const ne = ['NotEqual', ['Sqrt', 'x'], 0];
+    // In a branch: the first arm.
+    expect(run(['If', ne, 1, 0], -1, -1)).toEqual({
+      kind: 'interval',
+      value: { lo: 1, hi: 1 },
+    });
+    expect(run(['If', ['Not', ne], 1, 0], -1, -1)).toEqual({
+      kind: 'interval',
+      value: { lo: 0, hi: 0 },
+    });
+    // In a connective: `true ∧ false` is false, `true ∨ false` is true.
+    expect(run(['And', ne, ['Less', 'x', -3]], -1, -1)).toBe('false');
+    expect(run(['And', ne, ['Less', 'x', 3]], -1, -1)).toBe('true');
+    expect(run(['Or', ne, ['Greater', 'x', 3]], -1, -1)).toBe('true');
+    // A partial operand (`\sqrt{x}` over [-1, 1] is undefined over [-1, 0)
+    // and encloses [0, 1] elsewhere). Where it is undefined `≠` holds, so the
+    // verdict is the one of the defined part: `'maybe'` when the enclosure
+    // holds 0, `'true'` when it does not.
+    expect(run(ne, -1, 1)).toBe('maybe');
+    expect(run(['NotEqual', ['Sqrt', 'x'], 5], -1, 1)).toBe('true');
+    // The other order of the operands.
+    expect(run(['NotEqual', 0, ['Sqrt', 'x']], -1, -1)).toBe('true');
   });
 
   test('row 411: a partial operand is at most maybe', () => {

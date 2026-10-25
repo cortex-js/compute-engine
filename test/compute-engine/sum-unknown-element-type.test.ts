@@ -164,7 +164,9 @@ describe('CE-361: the sum of elements that may be lists', () => {
 
   test('Sum(h(x)) and Sum(h(x)[k], k): h is not declared', () => {
     // The signature inferred from the body, `(unknown) -> vector<2>`, makes
-    // `h(x)` a `broadcastable<vector<2>>`: a number or a list of vectors.
+    // `h(x)` a `vector<2>` or a list of any depth (ROADMAP CE-371, user
+    // decision 2026-10-25: `R | list<R | list<any>>`), so the sum is a
+    // number or a list.
     const engineWithH = (): ComputeEngine => {
       const ce = new ComputeEngine();
       ce.assign(
@@ -180,7 +182,7 @@ describe('CE-361: the sum of elements that may be lists', () => {
         ['List', 1, 2],
       ])
     ).toEqual({
-      type: 'number | vector<2>',
+      type: 'list<any> | number',
       values: [
         ['9', true],
         ['[3,6]', true],
@@ -194,7 +196,7 @@ describe('CE-361: the sum of elements that may be lists', () => {
         [3, ['List', 1, 2]]
       )
     ).toEqual({
-      type: 'number | vector<2>',
+      type: 'list<any> | number',
       values: [
         ['9', true],
         ['[3,6]', true],

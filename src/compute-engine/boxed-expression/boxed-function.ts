@@ -165,6 +165,7 @@ import {
   shapedBroadcastResultType,
   isTopTypedBlockLocal,
   isRecordShapedType,
+  broadcastCellTypeOf,
 } from '../collection-utils.js';
 import {
   failedWalkErrorSince,
@@ -239,6 +240,7 @@ import {
   provablyAdmits,
   provablyDisjoint,
   resolveTypeReference,
+  tensorOf,
 } from '../../common/type/subtype.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -10786,7 +10788,10 @@ function lambdaBroadcastType(
       }
     }
     if (collectionValued && !shapeAwareGeneric)
-      return nestedBroadcastResultType(mappedTypes, perElementResult);
+      return (
+        tensorValuedBroadcastType(mappedTypes, perElementResult) ??
+        nestedBroadcastResultType(mappedTypes, perElementResult)
+      );
     // Shape-aware (§D6.1): the map preserves the source's structure. When
     // the mapped operands have different ranks (a matrix beside a list),
     // the shape-aware form gives one plain list level, but the value is
@@ -10874,9 +10879,90 @@ function lambdaBroadcastType(
       perElementResult
     );
     if (top !== undefined) return top;
+    // A per-element result that is a list (`h := (t: number) ↦ [t, 2t]`
+    // gives a `vector<2>`): `broadcastable<vector<2>>` is a `vector<2>` or a
+    // list of them, but a list operand of any depth is mapped at its leaves,
+    // so the value can be a list of matrices (`[[1, 2], [3]]` gives
+    // `[[[1, 2], [2, 4]], [[3, 6]]]`). The same holds for a scalar result
+    // that is not a number (`t ↦ t > 0` over `[[1, 2], [3]]` gives
+    // `[[True, True], [True]]`, which `broadcastable<boolean>` does not
+    // hold) when an operand is typed `any` or `value`.
+    // For a list result, the answer is `R | tensor<cells of R>` for operands that are tensors
+    // (`tensorValuedBroadcastType`), and `R | list<R | list<any>>`
+    // otherwise, which holds a list of any depth and shape. (User decision
+    // 2026-10-25, ROADMAP CE-371.)
+    const triggerTypes = triggers.map((i) => {
+      const t = ops[i].type;
+      return ops[i].possiblyCollectionTyped
+        ? t
+        : (abstractCollectionCell(t)?.cell ?? t);
+    });
+    // A result whose cells can be lists (`list<unknown>`, `any`) already
+    // holds a list of any depth in `broadcastable<R>`, and it is kept.
+    const listOfAnyDepth = (): Type =>
+      widen(perElementResult, {
+        kind: 'list',
+        elements: widen(perElementResult, { kind: 'list', elements: 'any' }),
+      });
+    if (cannotHoldAList(broadcastCellTypeOf(perElementResult))) {
+      if (!cannotHoldAList(perElementResult))
+        return (
+          tensorValuedBroadcastType(triggerTypes, perElementResult) ??
+          listOfAnyDepth()
+        );
+      // A scalar result: only for an operand typed `any` or `value`, the
+      // operands for which `topTypeOfTriggers` answers a top type when the
+      // result is a number.
+      if (
+        triggerTypes.some((t) => {
+          const r = resolveTypeAlias(t);
+          return r === 'any' || r === 'value';
+        })
+      )
+        return listOfAnyDepth();
+    }
     return broadcastableOf(perElementResult);
   }
   return undefined;
+}
+
+/**
+ * The type of a call that maps a function with the list-valued per-element
+ * result `result` over operands of the types `operandTypes`, when every
+ * operand is a tensor whose rank the type does not state
+ * (`broadcastable<number>`, `tensor<number>`), and `result` is a list of a
+ * known shape whose cells cannot be lists (`vector<2>`). The call maps
+ * each cell of a regular operand to a value of `result`, so the value is a
+ * `result` (for a scalar operand) or a regular tensor that has the cells of
+ * `result`: the answer is `result | tensor<cells of result>`
+ * (`vector<2> | tensor<number>`). `undefined` when a condition is not met:
+ * a result of an open length (`list<number>`) can give rows of different
+ * lengths, which no tensor holds. A declaration of a tensor type refuses a
+ * ragged value, so a value of such an operand is regular.
+ *
+ * For an operand of a top type (`any`, `unknown`), whose value can be a
+ * ragged list, the caller uses `result | list<result | list<any>>`
+ * instead. (User decision 2026-10-25, ROADMAP CE-371.)
+ */
+function tensorValuedBroadcastType(
+  operandTypes: ReadonlyArray<Type>,
+  result: Type
+): Type | undefined {
+  if (operandTypes.length === 0) return undefined;
+  const isTensorOperand = (t: Type): boolean => {
+    const r = resolveTypeAlias(t);
+    if (typeof r === 'string') return false;
+    if (r.kind === 'broadcastable') return cannotHoldAList(r.elements);
+    if (r.kind === 'list' && r.dimensions === null)
+      return cannotHoldAList(r.elements);
+    return false;
+  };
+  if (!operandTypes.every(isTensorOperand)) return undefined;
+  const dims = staticCollectionDims(result);
+  if (dims === null || dims.some((d) => d < 0)) return undefined;
+  const cell = broadcastCellTypeOf(result);
+  if (!cannotHoldAList(cell)) return undefined;
+  return reduceType({ kind: 'union', types: [result, tensorOf(cell)] });
 }
 
 /**

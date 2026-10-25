@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-460.
+Next free reference: CE-462.
 
 **Entry format.**
 
@@ -860,6 +860,20 @@ have each element checked against the bound. The value-bound override is in
 whose bound has a value component).
 
 ## Collections, absence and broadcasting
+
+### CE-461. The sum of a list and a `broadcastable` operand does not reduce its element union
+
+**Status:** open; defect (the form only: the type is sound).
+
+With `M: list<list<integer> | number>` and `C: broadcastable<number>`, `M + C`
+is typed `list<list<list<integer> | number> | list<integer> | number>`: a union
+nested in the element union, with an arm that another arm already holds. With
+the call types of 2026-10-25, `H(X(t), Y(t)) - g(t)` in
+`tycho-item-188-broadcastable-vector-divide.test.ts` prints
+`list<list<any> | list<any> | number>`, so that test compares the type in both
+directions instead of its printed form. The `Add` type over such operands (the
+broadcast typing in `boxed-expression/broadcast-lift-type.ts`) must reduce the
+union it builds.
 
 ### CE-70. Presence contracts: absent arguments that are not refused or not reported
 
@@ -2437,18 +2451,6 @@ iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
 
-### CE-445. `.N()` does not check a value assigned to a typed parameter
-
-**Status:** open; wrong value.
-
-The interpreter types an unannotated parameter of a range callback from the
-range elements (`integer`). With `Map(q ↦ { q = q + 0.5; q + 1 }, Range(1, 3))`,
-`evaluate()` gives an `incompatible-type` error for each element, but `.N()`
-gives `[2.5, 3.5, 4.5]`. An assignment of a list, `q = [1, 2]`, is accepted the
-same way under `.N()` (`[[1, 2], [1, 2], [1, 2]]`). The compiler declines this
-shape before its constant fold, because the fold evaluates with `.N()`. Fix: the
-numeric route makes the same assignment check as `evaluate()`.
-
 ### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
 
 **Status:** open; cause not located. Found 2026-10-23 while fixing Tycho
@@ -3156,51 +3158,17 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-395. Compiled Python arithmetic over an absent input raises `TypeError`
+### CE-460. A compiled Python input typed `unknown` raises `TypeError` for `None`
 
-**Status:** open; defect (host exception). Found 2026-10-23 while rewriting the
-tests of the `NotEqual` branch rule.
+**Status:** decision needed; defect (host exception).
 
-With `p: number | missing`, the Python target compiles `p + 1` to `p + 1`, and
-`If(p ≠ 0 ∧ 1/p > 1, 1, -1)` with the second conjunct as `1 < 1 / p`. When the
-caller passes `p = None` (the Python spelling of `Missing`), the comparison leaf
-tests `p is None`, but the arithmetic raises
-`TypeError: unsupported operand type(s) for /: 'int' and 'NoneType'`.
-`np.sin(None)` raises too. The interpreter answers `NaN` for `Missing + 1`, and
-compiled JavaScript gives `NaN` (`undefined + 1`). Decide whether a `None` input
-in a numeric slot is admitted (then arithmetic over it must read it as `NaN`) or
-refused at the call boundary (then document that a numeric slot takes `nan` for
-an absent value).
-
-### CE-396. interval-js answers `'maybe'` for `≠` over an `empty` operand
-
-**Status:** open; question. Found 2026-10-23 while fixing the `NotEqual` branch
-rule.
-
-On `interval-js`, an ordered comparison or `=` with an operand that is `empty`
-over the whole cell gives `'false'` (user decision 2026-10-20, Tycho row 411).
-`\sqrt{x} \ne 0` over `x = [-1, -1]` still gives `'maybe'`, pinned in
-`test/compute-engine/condition-nan-undecided.test.ts`. The interpreter and the
-`javascript` and `python` targets answer `True` for `NaN ≠ 0`, in a branch too
-(user decision 2026-10-23). The IEEE reading on `interval-js` would be `'true'`.
-`'maybe'` is sound (an enclosure), only less precise.
-
-### CE-371. The type of a call that broadcasts a list-valued function over an operand of unknown depth does not hold its value
-
-**Status:** decision needed; defect.
-
-With `h := (t: number) ↦ [t, 2t]`, `h(x)` is typed `broadcastable<vector<2>>`
-for `x: any` and for `x: broadcastable<number>`, and `list<vector<2>>` for
-`x: list<any>`. At `x = [[1, 2], [3]]` (or `[[1, 2], [3, 4]]`) the value is a
-list of matrices, which neither the call type nor the index type
-`missing | number | vector<2>` holds. The call result is typed in
-`boxed-function.ts` (the `broadcastableOf(perElementResult)` return), so a
-change to `indexElementType` alone is not enough. A spelling must be decided:
-`R | list<R | list<any>>` for an operand of a top type and for `list<any>`
-(sound, but compiled `Max` over the element then declines and `Power` keeps
-entry-wise code), and `R | tensor<cells of R>` for a tensor operand (sound only
-for a regular input). The unannotated `g := t ↦ [t, 2t]` is now typed
-`missing | unknown` at `g(x)[1]`, which holds every value.
+Compiled Python reads a `None` input (the Python spelling of `Missing`) as
+`NaN` in arithmetic only when the type of the input states that it admits
+`missing` (`number | missing`, `any`; the test is `provablyAdmits`). A parsed
+free symbol is typed `unknown` (`r` in `2\pi r`), so `f(r=None)` still raises
+`TypeError`. Converting an `unknown` input too changes the ordinary Python
+output of every parsed expression (`2 * np.pi * (float('nan') if r is None
+else r)`) and 8 pinned outputs in 5 test files.
 
 ### CE-209. `Sum(f(x), Element(x, xs))` does not check `xs` for raw `Nothing` positions
 
@@ -3227,15 +3195,10 @@ representation of absence (CE-218).
 
 ### CE-214. Compiled code and the interpreter disagree on empty, absent and error values
 
-**Status:** decision needed; defect.
+**Status:** decision needed; defect (see the sub-item).
 
 `g(t) = [t, 2t]` and `x: any`.
 
-- **CE-214.2** Compiled `PointX` of a number gives `NaN`; the interpreter
-  answers `incompatible-type` (reachable as `PointX(g(x)[1])` with a number
-  `x`). `_SYS.pointComponent` documents `NaN` as the compiled stand-in for the
-  error. Options: keep `NaN`, or throw a `RangeError` as `_SYS.arr` and the
-  compiled `Repeat` do. If it throws, that convention changes.
 - **CE-214.4** With `tup(t) = (t, 2t)` and `x = []`, `At(First(tup(x)), 2)` is
   `NaN` in the interpreter and `Missing` when compiled. `At(At(tup(x), 1), 1)`
   agrees (`Missing`). The interpreter reads the type: once `x` holds `[]`, the
@@ -3244,7 +3207,19 @@ representation of absence (CE-218).
   run-time value (`_SYS.atWithValueMarker`). Options: the compiled code takes
   the value from the slot types of the tuple in the static type, or the
   interpreter answers `Missing` for any index into an absent base, as the
-  literal `At(Missing, 2)` already does.
+  literal `At(Missing, 2)` already does. The user chose the second option on
+  2026-10-25; it was then measured: 16 tests in 7 files move. It reverses the
+  2026-09-26 rule (an element read of a restricted collection whose condition
+  is false is `NaN`, `docs/ERROR-MODEL.md` rule E) and the 2026-10-20 rule
+  (`At(M, 1, 1)` is `NaN`, as `First(First(M))` is), makes `At` and `First`
+  disagree, and creates a new disagreement between compiled code and the
+  interpreter (`compile-absent-collection-operand.test.ts`, "a nested read
+  keeps its own marker"). Options now: (a) every element reader (`At`,
+  `First`, `Second`, `Third`, `Last`) answers `Missing` for an absent base,
+  restricted collections included, which replaces both earlier rules; (b)
+  only for a base whose type gives no element domain (`unknown`, `any`, as in
+  `First(tup(x))`); (c) the compiled code takes the marker from the static
+  slot type, and the interpreter is unchanged.
 
 ### CE-216. A compiled power of a list that may hold points squares each entry of a square matrix
 
@@ -3269,31 +3244,14 @@ representation of points that differs from a row.
   `x = [[1, 2], [3]]` squares each cell, where the interpreter gives the matrix
   power: the element may be a matrix or a list of points. With an annotated
   `h := (t: number) ↦ [t, 2t]`, the same failure follows the type of CE-371.
+- **CE-216.4** With `p, q: any` holding two matrices, compiled `p·q` and
+  `p^2` are entry-wise, where the interpreter gives the matrix product and the
+  matrix power. The run-time check of an `any` operand (2026-10-25) sends a
+  list to the entry-wise code, as for a bare `list`, because a list of points
+  and a matrix are the same array at run time.
 - **CE-216.3** `Dot(g(x)[1], [1, 1])` with `x: any` declines: the element may be
   a matrix or a list of points, which compiled code cannot tell apart (the
   interpreter leaves `[(1, 2), (2, 4)]·[1, 1]` unevaluated).
-
-### CE-366. Compiled `p·q` and `p + q` with `p, q: any` holding lists give a wrong value
-
-**Status:** decision needed; wrong value.
-
-With `p` and `q` declared `any` and holding lists, `Multiply(p, q)` compiles to
-`_.p * _.q` (JavaScript `*` on two arrays), which gives `null`. The interpreter
-gives the matrix product of two matrices (CE-98) or the entry-wise product of
-two plain lists. Measured 2026-10-22 on `4916e3f7f`; the same before the
-`Multiply` change. The same holds for `Add`: `p + q` with `[1, 2]` and `[3, 4]`
-gives the string `"1,23,4"`, where the interpreter gives `[4, 6]`.
-
-Cause: a symbol declared `any` is read as a scalar on purpose
-(`isPossiblyCollectionTyped(…, { declaredSymbols: false })`,
-`collection-utils.ts`): Tycho declares its parameters `any`, and a broadcast
-wrapper at every arithmetic site would cost too much. Decision needed between: a
-cheap guard at each arithmetic site
-(`typeof _.p === 'number' && typeof _.q === 'number' ? _.p * _.q : _SYS.bcast(…)`,
-measure the snapshots it changes first); documenting in
-`docs/COMPILATION-MODEL.md` that such a symbol must hold a number; or a decline
-(which breaks Tycho programs). A type that may hold points keeps the entry-wise
-code (CE-216).
 
 ### CE-218. Compiled absence checks need a representation of `Nothing` distinct from `Missing`
 
@@ -4457,7 +4415,7 @@ The `Map` auto-compilation (`library/map-auto-compile.ts`) resolves the callback
 itself through its lexical binding (`namedCallbackLiteral()`,
 `map-exact-proof.ts`), as the interpreter does. The functions that the body of
 the callback CALLS are still found by name in the scope of the drain
-(`loopOrCollectionFree`, `fnLiteralEligible` and the lookup of the compiler). If
+(`fnLiteralEligible` and the lookup of the compiler). If
 the drain runs in a scope that defines another function with the same name, the
 compiled values can come from that function and the interpreted values from the
 outer one. First write the test: an outer `h(x) = x + 1`, a callback
@@ -5022,11 +4980,7 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   interpreter's `N` in the last digits (measurements: an exact loop sum
   `1.066407470350872` against the compiled `1.0664074703508735`, an exact
   product `231` against `230.99999999999994`). So the pool route of (a) is NOT
-  DONE, by decision, and its prototype is not kept. (b) The `--workers <n>`
-  option of the `epsil` command, the REPL and `epsil mcp` (0 by default: no
-  pool) leaves two choices open for the user: `--workers auto` for the pool size
-  of section 8 of the plan, and Ctrl-C to cancel a running program in the REPL
-  (the time limit is the only way to stop one now). (c) While
+  DONE, by decision, and its prototype is not kept. (c) While
   `executeEpsilAsync` waits on a statement, the engine keeps the fields of the
   run (`_epsilBatchId`, `_epsilStatementResultHook`, `_epsilDeclarationRoute`),
   because the asynchronous parts of the statement read them after their own
@@ -5044,7 +4998,9 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 
 ### CE-430. The canonical form of the data operand of `FindFit.evaluateAsync()` runs in one block
 
-**Status:** open; performance, small. Narrowed 2026-10-24.
+**Status:** on demand; performance, small. User decision 2026-10-25: do not
+add the paced canonical form below until a consumer reports a slow abort of a
+large fit.
 
 The asynchronous evaluation of a large list gives the event loop a turn about
 every 8 ms and honors an abort (`holdMapAsync()`, the `evaluateAsync` handler of
@@ -5057,8 +5013,8 @@ getter and cannot yield: 80 to 220 ms for 20,000 rows at a load average of 40 to
 50, about half of the earlier cost. Most of it is the creation of a big-number
 value for each float literal (`canonicalNumber`). A fix would make the elements
 of a raw `List` canonical in paced chunks inside the parse scope of the list and
-check that the result is the same as `.canonical`; this changes how the data
-operand of `FindFit` becomes canonical, so it needs a decision. The canonical
+check that the result is the same as `.canonical`; this adds a second way
+for the data operand of `FindFit` to become canonical. The canonical
 form of a raw node is not memoized, so each evaluation of the same `FindFit`
 expression pays it again.
 
@@ -5195,13 +5151,6 @@ Open options:
   function (exact tier at any precision, marked tier at machine precision), but
   a `Filter`/`Any` predicate is not covered: it returns a boolean, and no tier
   takes it.
-- **CE-325.3** Decision needed: the rule "a body with a loop or an inner
-  collection stays interpreted" (user decision 2026-10-24, CE-314) is applied to
-  named functions only (`loopOrCollectionFree`, `map-auto-compile.ts`). At
-  machine precision `map(x => N(h(x) + 1), 1..200)`, with `h` holding a `Sum`,
-  compiles as a lambda but stays interpreted as a named function. Applying the
-  rule to lambdas makes the two spellings agree in the last digits; lambdas with
-  such loops then lose their speed.
 
 ### CE-457. `.N()` of a geometric series with no closed form walks the whole extrapolation budget at machine precision
 

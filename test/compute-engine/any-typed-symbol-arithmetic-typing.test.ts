@@ -222,19 +222,39 @@ describe('unchanged readings', () => {
   });
 });
 
+// The scalar reading is the code for a value that is not an array. Since
+// ROADMAP CE-366 (user decision 2026-10-25), the outermost element-wise site
+// over such a symbol checks the value at run time and takes a broadcast for
+// an array, so each pin below reads the scalar branch of that check.
+const scalarBranch = (code: string | undefined, read: string): string => {
+  const prefix = `(!(Array.isArray(${read}) || ArrayBuffer.isView(${read})) ? `;
+  expect(code?.startsWith(prefix)).toBe(true);
+  const rest = code!.slice(prefix.length);
+  return rest.slice(0, rest.indexOf(' : ((_tv'));
+};
+
 describe('compiled code reads the symbol as a scalar', () => {
   test('no broadcast wrapper over a symbol declared `any` or library arithmetic over it', () => {
     const ce2 = new ComputeEngine();
     ce2.declare('a', 'any');
-    expect(compile(ce2.box(['Abs', 'a']), { to: 'javascript' }).code).toBe(
-      '_SYS.absAny(_.a)'
-    );
-    expect(compile(ce2.parse('2a + 1'), { to: 'javascript' }).code).toBe(
-      '2 * _.a + 1'
-    );
-    expect(compile(ce2.parse('\\sin(2a + 1)'), { to: 'javascript' }).code).toBe(
-      'Math.sin(2 * _.a + 1)'
-    );
+    expect(
+      scalarBranch(
+        compile(ce2.box(['Abs', 'a']), { to: 'javascript' }).code,
+        '_.a'
+      )
+    ).toBe('_SYS.absAny(_.a)');
+    expect(
+      scalarBranch(
+        compile(ce2.parse('2a + 1'), { to: 'javascript' }).code,
+        '_.a'
+      )
+    ).toBe('2 * _.a + 1');
+    expect(
+      scalarBranch(
+        compile(ce2.parse('\\sin(2a + 1)'), { to: 'javascript' }).code,
+        '_.a'
+      )
+    ).toBe('Math.sin(2 * _.a + 1)');
   });
 
   test('the scalar reading reaches the arms of a selection', () => {
@@ -248,6 +268,6 @@ describe('compiled code reads the symbol as a scalar', () => {
         to: 'javascript',
       }
     ).code;
-    expect(code).not.toContain('_SYS.bcast');
+    expect(scalarBranch(code, '_.a')).not.toContain('_SYS.bcast');
   });
 });

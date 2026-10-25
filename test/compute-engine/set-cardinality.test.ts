@@ -735,11 +735,18 @@ describe('COMPILED Abs OF AN OPERAND THAT CAN HOLD A SET OR A STRING', () => {
   test('an operand of type any is tested at run time', () => {
     const f = compile(ce2.box(['Abs', 'z']), { to: 'javascript' });
     expect(f.success).toBe(true);
-    expect(f.code).toBe('_SYS.absAny(_.z)');
+    // A value that is not an array takes `_SYS.absAny`; an array takes the
+    // broadcast, as in the interpreter (ROADMAP CE-366, user decision
+    // 2026-10-25; a list threw before).
+    expect(f.code).toBe(
+      '(!(Array.isArray(_.z) || ArrayBuffer.isView(_.z)) ? _SYS.absAny(_.z) : ' +
+        '((_tv1) => _SYS.bcastScalarAbsent([1], (_tv2) => _SYS.absAny(_tv2), _tv1))' +
+        '(_SYS.plainList(_.z)))'
+    );
     expect(f.run!({ z: -3 })).toBe(3);
     expect(() => f.run!({ z: 'abc' })).toThrow(/a string/);
     expect(() => f.run!({ z: new Set([1, 2]) })).toThrow(/a set/);
-    expect(() => f.run!({ z: [1, 2] })).toThrow(/a list/);
+    expect(f.run!({ z: [-1, 2] })).toEqual([1, 2]);
   });
 
   test('an operand of numeric type keeps Math.abs', () => {

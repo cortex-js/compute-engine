@@ -1563,6 +1563,21 @@ export interface CompileTarget<Expr = unknown> {
        * and keeps the gate.
        */
       coversValueModel?: boolean;
+      /**
+       * How the code reads an INPUT (a free symbol, a parameter of the
+       * compiled function, a `vars` source) that the caller may pass as the
+       * object null of the target, at a numeric parameter of an operator
+       * that propagates absence (`Add`, `Sin`, …). The interpreter answers
+       * `NaN` there (`Missing + 1`). `x` is the source of the read, and the
+       * hook returns the source of a read that gives the numeric marker for
+       * the null. The base compiler calls it only for an input whose type
+       * states that it admits `missing` (`number | missing`, `any`; not
+       * `unknown`), so an input of another type pays nothing. A target whose arithmetic already gives `NaN` for its
+       * null (JavaScript: `undefined + 1`) leaves it out. The Python target
+       * declares it, because `None + 1` and `np.sin(None)` raise a
+       * `TypeError`.
+       */
+      readInput?: (x: TargetSource) => TargetSource;
     };
     object?: {
       nullLiteral: TargetSource;

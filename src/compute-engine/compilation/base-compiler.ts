@@ -2060,9 +2060,74 @@ export function exactRationalDivisor(
  * itself; wrapping every use in a broadcast would cost a closure per site
  * for a consumer that declares every parameter `any`. A call of a user
  * function typed `any` and a `broadcastable<T>` type keep their reading.
+ *
+ * The JavaScript target still checks the value at run time at an arithmetic
+ * site (`declaredTopGuard` in `BaseCompiler`): it emits the scalar code and
+ * the list code, and chooses one with `Array.isArray`. The list code is
+ * compiled while `declaredTopMode` is `'list'`, and then such a symbol is
+ * read as a possible collection here.
  */
 function possiblyCollectionTypedForCompile(e: Expression): boolean {
+  if (declaredTopMode === 'list') return isPossiblyCollectionTyped(e);
   return isPossiblyCollectionTyped(e, { declaredSymbols: false });
+}
+
+/**
+ * How the compiled lanes read a symbol declared `any` or `value`, and an
+ * application over such a symbol that the compiled lanes read as a scalar
+ * (`isDeclaredTopOperand`). `undefined` is the default: an arithmetic site of
+ * the JavaScript target over such an operand emits a run-time check of the
+ * value (`declaredTopGuard` in `BaseCompiler`). The check compiles the site
+ * twice: once with `'scalar'` (the operand is a number, and the code is the
+ * code compiled before the check existed) and once with `'list'` (the operand
+ * may be a list, and the code broadcasts). Inside either compilation, no
+ * other check is emitted.
+ */
+let declaredTopMode: 'scalar' | 'list' | undefined = undefined;
+
+/**
+ * Is `e` read as a scalar by the compiled lanes only because of the rule of
+ * `possiblyCollectionTypedForCompile`? This is a symbol the user declared
+ * `any` or `value`, or a library application over such a symbol (`2p + 1`):
+ * the typing reads it as a possible collection, and the compiled lanes read
+ * it as a number.
+ */
+export function isDeclaredTopOperand(e: Expression): boolean {
+  return (
+    !isPossiblyCollectionTyped(e, { declaredSymbols: false }) &&
+    isPossiblyCollectionTyped(e)
+  );
+}
+
+/**
+ * The symbols declared `any` or `value` whose values decide whether `e` is a
+ * list at run time: `e` itself when it is such a symbol, else the symbols of
+ * its operands when `e` is an application that `isDeclaredTopOperand` admits.
+ */
+function collectDeclaredTopSymbols(
+  e: Expression,
+  out: Set<Expression>,
+  visited: Set<Expression> = new Set()
+): void {
+  // An expression can share one node at many positions (a tower where each
+  // level uses the level below twice). The walk visits each node once, so its
+  // cost grows with the number of nodes, not with the number of positions.
+  if (visited.has(e)) return;
+  visited.add(e);
+  if (!isDeclaredTopOperand(e)) return;
+  if (isSymbol(e)) out.add(e);
+  else if (isFunction(e))
+    for (const op of e.ops) collectDeclaredTopSymbols(op, out, visited);
+}
+
+/**
+ * For the JavaScript target: is `e` read as a possible collection only
+ * because the list code of a run-time check is being compiled (see
+ * `declaredTopMode`)? The JavaScript target has its own test of a possible
+ * collection, and asks this one too.
+ */
+export function isDeclaredTopListOperand(e: Expression): boolean {
+  return declaredTopMode === 'list' && isDeclaredTopOperand(e);
 }
 
 /**
@@ -4111,6 +4176,11 @@ export class BaseCompiler {
     // `finally` below knows not to freeze a report for code that was never
     // emitted.
     let emitted = false;
+    // The read of an input that may be absent depends on the head that
+    // consumes it (`readAbsentInput`), so a function node stays on the stack
+    // while its operands compile.
+    const isParent = isFunction(expr);
+    if (isParent) BaseCompiler._compileParents.push(expr);
     try {
       // Compile-time constant folding, attempted top-down at every function
       // node so the largest constant subtree folds: a pure subtree with no
@@ -4165,6 +4235,7 @@ export class BaseCompiler {
       emitted = true;
       return compiled;
     } finally {
+      if (isParent) BaseCompiler._compileParents.pop();
       BaseCompiler._compileDepth -= 1;
       BaseCompiler._callSiteTarget = prevCallSiteTarget;
       // Leaving the OUTERMOST compilation: freeze its report for the target
@@ -11472,7 +11543,11 @@ export class BaseCompiler {
     if (resolved !== undefined)
       return BaseCompiler.liftWideReference(
         expr,
-        BaseCompiler.checkedLocalRead(expr, s, resolved),
+        BaseCompiler.readAbsentInput(
+          expr,
+          BaseCompiler.checkedLocalRead(expr, s, resolved),
+          target
+        ),
         target
       );
     // The target did not resolve the symbol (no `vars` mapping, constant, or
@@ -11526,9 +11601,78 @@ export class BaseCompiler {
     // keyword used as a variable name would emit invalid shader source.
     return BaseCompiler.liftWideReference(
       expr,
-      target.mangleId ? target.mangleId(s) : s,
+      BaseCompiler.readAbsentInput(
+        expr,
+        target.mangleId ? target.mangleId(s) : s,
+        target
+      ),
       target
     );
+  }
+
+  /**
+   * The read of an input `expr` (a free symbol, a parameter of the compiled
+   * function, a `vars` source) that the caller may pass as the object null
+   * of the target (`None` on Python), at a numeric parameter of an operator
+   * that propagates absence (a parameter where a number can stand: `Add`
+   * takes a `value`). The interpreter answers `NaN` there
+   * (`Missing + 1`, `Sin(Missing)`), and the target's `readInput` hook gives
+   * the read that turns the null into its numeric marker. `code` is the
+   * read as compiled.
+   *
+   * The read is unchanged when:
+   * - the target has no `readInput` hook;
+   * - the name is bound by the compiled code (a lambda parameter, a `Sum`
+   *   index, a block local): it is not an input;
+   * - the type of the input does not state that it admits `missing`
+   *   (`provablyAdmits`): `number | missing` and `any` do, `number` does
+   *   not, and neither does `unknown`, which is an inference marker (a free
+   *   symbol of a parsed `2πr` is typed `unknown`), not a declaration of
+   *   absence. Such an input pays nothing;
+   * - the head that consumes it handles absence itself (`Equal`, `Max`,
+   *   `Coalesce`: a relation keeps its `is None` test, so `p ≠ 0` stays
+   *   undecided for an absent `p`), or does not strip `missing` at that
+   *   position, or takes no number there (`Length` takes a collection).
+   *
+   * The consumer is the function node on top of `_compileParents`. When the
+   * lowering of that node compiles a symbol that is not one of its operands
+   * (`Sin(π·p)` compiles `p` alone), the position is known only for a head
+   * with one operand.
+   */
+  private static readAbsentInput(
+    expr: Expression & SymbolInterface,
+    code: TargetSource,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    const read = target.absence?.numeric.readInput;
+    if (read === undefined || target.boundVars?.has(expr.symbol) === true)
+      return code;
+    if (!provablyAdmits('missing', expr.type.type)) return code;
+    const parent = BaseCompiler._compileParents.at(-1);
+    if (parent === undefined || !isFunction(parent)) return code;
+    const def = parent.operatorDefinition;
+    if (def === undefined || def.resolvedMissingBehavior !== 'propagate')
+      return code;
+    let i = parent.ops.indexOf(expr);
+    if (i < 0) {
+      if (parent.nops !== 1) return code;
+      i = 0;
+    }
+    if (!def.stripsMissingAt(i)) return code;
+    const p = BaseCompiler.signatureParamType(def.signature.type, i);
+    // A number can stand at the position when the parameter type holds every
+    // number (`value`, `any`) or one of its arms is numeric (`complex`, the
+    // `complex | infinity | residue` of `Divide`).
+    const arms = typeof p === 'object' && p.kind === 'union' ? p.types : [p];
+    if (
+      p === undefined ||
+      !(
+        isSubtype('number', p) ||
+        arms.some((a) => a !== undefined && isSubtype(a, 'number'))
+      )
+    )
+      return code;
+    return read(code);
   }
 
   /**
@@ -13137,6 +13281,200 @@ export class BaseCompiler {
   }
 
   /**
+   * The heads whose JavaScript code is an infix operator, or a scalar kernel,
+   * that gives a wrong value for an array operand: `[1, 2] + [3, 4]` is the
+   * string `"1,23,4"`, `[1, 2] * [3, 4]` is `NaN`, `[1, 2] < 3` is `false`
+   * where the interpreter gives `[True, True]`, and `[1, 2] = [1, 2]` is
+   * `false`. An operand declared `any` or `value` gets a run-time check of
+   * its value at these heads (`declaredTopGuard`), and at every other head
+   * whose definition is `broadcastable` (`Sin`, `Sqrt`, `Abs`, …): the scalar
+   * kernel of such a head gives `NaN` for an array (`Math.sin([1, 2])`), and
+   * `sin(2p + 1)` would apply it to the list that the check of `2p + 1`
+   * gives.
+   */
+  private static readonly DECLARED_TOP_GUARD_HEADS: ReadonlySet<string> =
+    new Set([
+      'Add',
+      'Subtract',
+      'Negate',
+      'Multiply',
+      'Divide',
+      'Power',
+      'Square',
+      'Less',
+      'LessEqual',
+      'Greater',
+      'GreaterEqual',
+      'Equal',
+      'NotEqual',
+    ]);
+
+  /**
+   * The JavaScript code of an arithmetic head, a comparison or another
+   * element-wise head (`DECLARED_TOP_GUARD_HEADS`) with an operand whose
+   * value may be a list although the compiled lanes read it as a number: a
+   * symbol declared `any` or `value`, or a library application over one
+   * (`isDeclaredTopOperand`). `undefined` when no operand is such an
+   * operand, and the caller continues as before.
+   *
+   * The compiled lanes read such a symbol as a number, because a host that
+   * declares every parameter `any` would otherwise pay for a broadcast at
+   * every arithmetic site (`possiblyCollectionTypedForCompile`). But the
+   * host can pass a list, and the JavaScript operators give a wrong value
+   * for a list: `p + q` gave the string `"1,23,4"` for `[1, 2]` and
+   * `[3, 4]`, where the interpreter gives `[4, 6]`. So the code checks the
+   * values of the declared symbols at run time:
+   *
+   * `(!(Array.isArray(_.p) || ArrayBuffer.isView(_.p)) && … ? _.p + _.q :
+   * <list code>)`
+   *
+   * The scalar branch is the code compiled before this check existed, so a
+   * value that is not an array (a number, a complex number, an absent value)
+   * gives the same result as before, and the cost for a number is one
+   * `Array.isArray` and one `ArrayBuffer.isView` test per symbol. A plain
+   * read such as `_.p` is repeated in the test; any other read is evaluated
+   * once, into a temporary. Each operand is still evaluated once, in the
+   * branch that runs. The list code is the code of an operand that may be
+   * a number or a list at run time (`_SYS.bcast`, `_SYS.eq`). For `Multiply`
+   * and `Power` it is the ENTRY-WISE code, not the matrix product or the
+   * matrix power: an `any` value may hold a list of points, and compiled code
+   * holds a list of points `[(1, 2), (3, 4)]` and the matrix
+   * `[[1, 2], [3, 4]]` as the same array, so it cannot tell them apart. The
+   * bare `list` type makes the same choice (ROADMAP CE-216).
+   *
+   * Only the outermost such site of an expression has the check: both
+   * branches are compiled with `declaredTopMode` set, and no check is emitted
+   * inside them. When the list code cannot be compiled, the scalar code is
+   * returned, as before.
+   */
+  private static declaredTopGuard(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    if (declaredTopMode !== undefined) return undefined;
+    if (!BaseCompiler.DECLARED_TOP_GUARD_HEADS.has(h)) {
+      const def = engine.lookupDefinition(h);
+      if (!isOperatorDef(def) || def.operator.broadcastable !== true)
+        return undefined;
+    }
+    const symbols = new Set<Expression>();
+    const visited = new Set<Expression>();
+    for (const a of args) collectDeclaredTopSymbols(a, symbols, visited);
+    if (symbols.size === 0) return undefined;
+
+    // The code that reads each symbol, grouped: two nodes of one symbol give
+    // the same code, and are tested once. A node that already has a
+    // replacement code (`_codeOverrides`, `_codeAliases`) is read through it
+    // and is not given a second one.
+    const nodesOfRead = new Map<string, Expression[]>();
+    for (const s of symbols) {
+      const read = BaseCompiler.compile(s, target);
+      if (BaseCompiler._codeOverrides.has(s) || BaseCompiler._codeAliases.has(s))
+        continue;
+      const nodes = nodesOfRead.get(read);
+      if (nodes === undefined) nodesOfRead.set(read, [s]);
+      else nodes.push(s);
+    }
+
+    // A read that is not a plain name or property access (a `vars` mapping
+    // can be any source, such as `_.values.shift()`) is evaluated once, into
+    // a temporary. The test and both branches then read the temporary, so
+    // the value that is tested is the value that is used. A plain read such
+    // as `_.p` stays inline, as the other run-time checks of this compiler
+    // do (`ATOMIC_FRAGMENT`).
+    const outer: Array<[string, TargetSource]> = [];
+    const reads: Array<{ code: TargetSource; nodes: Expression[] }> = [];
+    for (const [read, nodes] of nodesOfRead) {
+      if (BaseCompiler.ATOMIC_FRAGMENT.test(read)) {
+        reads.push({ code: read, nodes });
+        continue;
+      }
+      const name = BaseCompiler.tempVar(target);
+      outer.push([name, read]);
+      reads.push({ code: name, nodes });
+    }
+    const bind = (
+      bindings: Array<[string, TargetSource]>,
+      body: TargetSource
+    ): TargetSource =>
+      bindings.length === 0
+        ? body
+        : (target.bindExpr?.(bindings, body) ??
+          `((${bindings.map(([n]) => n).join(', ')}) => ${body})(${bindings.map(([, c]) => c).join(', ')})`);
+
+    // Compile `h` with the mode set and the symbol nodes read through
+    // `codes` (one code per entry of `reads`). Each compilation has its own
+    // region of common subexpressions that cannot read a temporary bound
+    // outside it (`withCseIsolatedInstance`): the same structure has scalar
+    // code in one branch and list code in the other, so a temporary bound in
+    // one branch must not be read in the other, or before the test.
+    const compileIn = (
+      mode: 'scalar' | 'list',
+      codes: ReadonlyArray<TargetSource>
+    ): TargetSource => {
+      const installed: Expression[] = [];
+      declaredTopMode = mode;
+      try {
+        reads.forEach(({ nodes }, i) => {
+          for (const s of nodes) {
+            BaseCompiler._codeAliases.set(s, codes[i]);
+            installed.push(s);
+          }
+        });
+        return BaseCompiler.withCseIsolatedInstance(target, () =>
+          BaseCompiler.compileExpr(engine, h, args, prec, target, node)
+        );
+      } finally {
+        declaredTopMode = undefined;
+        for (const s of installed) BaseCompiler._codeAliases.delete(s);
+      }
+    };
+
+    const scalar = compileIn(
+      'scalar',
+      reads.map(({ code }) => code)
+    );
+    // The list code reads each symbol through a second temporary that holds
+    // a plain array: the list kernels (`_SYS.bcast`, `_SYS.eq`) test for a
+    // plain `Array`, and a host can pass a numeric typed array
+    // (`Float64Array`) for a symbol declared `any`. `_SYS.plainList` copies
+    // such an array, and returns any other value as it is.
+    const listNames = reads.map(() => BaseCompiler.tempVar(target));
+    let list: TargetSource;
+    try {
+      list = compileIn('list', listNames);
+    } catch {
+      return bind(outer, scalar);
+    }
+    // When the list code is the scalar code with other names, the check
+    // changes nothing. The names are fresh temporaries, so they occur in the
+    // list code only where a symbol was read.
+    let listAsScalar = list;
+    listNames.forEach((name, i) => {
+      listAsScalar = listAsScalar.replace(
+        new RegExp(`\\b${name}\\b`, 'g'),
+        () => reads[i].code
+      );
+    });
+    if (listAsScalar === scalar) return bind(outer, scalar);
+    const listCode = bind(
+      listNames.map((name, i) => [name, `_SYS.plainList(${reads[i].code})`]),
+      list
+    );
+    // A numeric typed array is a list too: it takes the list code.
+    const test = reads
+      .map(
+        ({ code }) => `!(Array.isArray(${code}) || ArrayBuffer.isView(${code}))`
+      )
+      .join(' && ');
+    return bind(outer, `(${test} ? ${scalar} : ${listCode})`);
+  }
+
+  /**
    * The element-wise JavaScript broadcast of a `broadcastable` head over list
    * operands. A case of `compileExpr`: it returns the code, or `undefined` when
    * `compileExpr` continues with its next case.
@@ -13150,6 +13488,15 @@ export class BaseCompiler {
     node: Expression | undefined
   ): TargetSource | undefined {
     if (target.language === 'javascript') {
+      const guarded = BaseCompiler.declaredTopGuard(
+        engine,
+        h,
+        args,
+        prec,
+        target,
+        node
+      );
+      if (guarded !== undefined) return guarded;
       const broadcast = BaseCompiler.tryCompileBroadcast(
         engine,
         h,
@@ -17832,10 +18179,14 @@ export class BaseCompiler {
         // 4)]` and `b` holding `[2, 3]` gave `[11, 16]`, where the interpreter
         // scales each point, `[(2, 4), (9, 12)]`. The element-wise code below
         // pairs each number with a point, as the interpreter does.
+        // An operand declared `any` read as a possible list by the run-time
+        // check of `declaredTopGuard` may hold points too, so it takes the
+        // entry-wise code, as a bare `list` does.
         const pointHolder = collection.some(
           (a) =>
-            !isBoundPossiblyCollectionTyped(a, target) &&
-            typeMayHoldTuple(a.type.type)
+            isDeclaredTopListOperand(a) ||
+            (!isBoundPossiblyCollectionTyped(a, target) &&
+              typeMayHoldTuple(a.type.type))
         );
         // A matrix beside an operand that may hold points at run time (the
         // sum of a list of lists of points, `At(L, 1)` over such a list, a
@@ -25014,6 +25365,13 @@ export class BaseCompiler {
    * values may change between compilations.
    */
   private static _compileDepth = 0;
+
+  /**
+   * The function nodes that `compile()` is compiling now, the innermost
+   * last. A symbol compiles while the node that holds it is on top, so the
+   * read of an input knows which head consumes it (`readAbsentInput`).
+   */
+  private static _compileParents: Expression[] = [];
 
   /** Push a lexical frame of local complex-ness onto `_localComplex`. */
   private static _pushLocalComplex(frame: Map<string, boolean>): void {

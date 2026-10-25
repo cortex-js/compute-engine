@@ -521,6 +521,8 @@ import {
   unfaithfulComparisonAggregate,
   unionAdmitsIndexedCollection,
   isTopTypedLocalSymbol,
+  isDeclaredTopListOperand,
+  isDeclaredTopOperand,
   type LoopInvariantBinding,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
@@ -2618,6 +2620,9 @@ function isPossiblyCollectionTypedJS(e: Expression): boolean {
   // A `Block` local typed by a top type may hold a list (see
   // `isTopTypedBlockLocal`, `collection-utils.ts`).
   if (isTopTypedLocalSymbol(e)) return true;
+  // A symbol declared `any` or `value` while the list code of a run-time
+  // check of its value is compiled (`isDeclaredTopListOperand`).
+  if (isDeclaredTopListOperand(e)) return true;
   // A top-typed APPLICATION is a genuine possibly-collection signal only when
   // bound: an UNBOUND (non-canonical, non-structural) arithmetic subexpression
   // (e.g. the `{ canonical: false }` grouping-preservation path) types
@@ -14040,9 +14045,15 @@ function compileExtremum(
   // is `NaN`. An operand of a top type that may hold a list
   // (`isPossiblyCollectionTypedJS`: `missing | unknown`, the type of an
   // index into a `list<unknown>`) takes the same projection: it reached
-  // the scalar `Math.max(<array>, 1)` (ROADMAP CE-370).
+  // the scalar `Math.max(<array>, 1)` (ROADMAP CE-370). So does a symbol
+  // declared `any` or `value`, and a library application over one
+  // (`isDeclaredTopOperand`): the compiled lanes read it as a number, but
+  // the host can pass a list, and `Math.max(<array>, <array>)` is `NaN`
+  // where the interpreter flattens and reduces (ROADMAP CE-366).
   const mayBeArray = (a: Expression): boolean =>
-    couldBeIndexedCollectionOperand(a) || isPossiblyCollectionTypedJS(a);
+    couldBeIndexedCollectionOperand(a) ||
+    isPossiblyCollectionTypedJS(a) ||
+    isDeclaredTopOperand(a);
   if (
     args.length === 1 &&
     args[0] &&

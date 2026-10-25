@@ -102,8 +102,9 @@ export function hullValues(a: unknown, b: unknown): unknown {
  * as the scalar targets answer `NaN > 0` with `false` and as Desmos reads
  * it (user decision 2026-10-20, Tycho row 411). A `partial` operand, which
  * is undefined over PART of the cell only, is at most `'maybe'`
- * (`holds`), and `notEqual` keeps `'maybe'` for an `empty` operand: the
- * decision does not cover it.
+ * (`holds`). `notEqual` is the negation of `equal`, so it answers `'true'`
+ * for an `empty` operand, as the scalar targets answer `NaN ≠ 0` with `true`
+ * (user decision 2026-10-25).
  *
  * An `empty` with the `missing` flag is not such a value: it stands for an
  * ABSENT value (a `Which` with no default arm that selects no clause, a
@@ -240,17 +241,19 @@ export function equal(
 }
 
 /**
- * Not equal comparison for intervals.
+ * Not equal comparison for intervals: the negation of `equal`.
  *
- * An `empty` operand gives `'maybe'`, as it did before `equal` began to
- * answer `'false'` for one: the decision that an undefined operand makes a
- * comparison false does not cover `NotEqual` (`hasEmptyOperand`).
+ * An `empty` operand gives `'true'`, since `equal` gives `'false'` for it:
+ * the interpreter and the `javascript` and `python` targets answer `True`
+ * for `NaN ≠ 0` (user decision 2026-10-25). A `partial` operand gives
+ * `'true'` only when the enclosures do not overlap: where the operand is
+ * undefined `≠` holds too, so the verdict is the one of the defined part.
+ * An absent operand (an `empty` with the `missing` flag) gives `'maybe'`.
  */
 export function notEqual(
   a: Interval | IntervalResult,
   b: Interval | IntervalResult
 ): BoolInterval {
-  if (hasEmptyOperand(a, b)) return 'maybe';
   const eq = equal(a, b);
   if (eq === 'true') return 'false';
   if (eq === 'false') return 'true';

@@ -24,8 +24,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 
 describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position', () => {
   // The document shape from the report: `h`/`H` assigned, `g`/`X`/`Y` declared
-  // but not yet assigned, so `H(X(t), Y(t))` types
-  // `broadcastable<vector<2>>`.
+  // but not yet assigned, so `H(X(t), Y(t))` typed
+  // `broadcastable<vector<2>>`. Since ROADMAP CE-371 (user decision
+  // 2026-10-25) it is `R | list<R | list<any>>` with `R = vector<2>`,
+  // printed `list<list<any> | number>`: `X(t)` is typed `unknown`, and a
+  // list of any depth and shape is mapped at its leaves, so the value can be
+  // a list of matrices, which `broadcastable<vector<2>>` does not hold.
   const setUp = (assignCallees: boolean): ComputeEngine => {
     const ce = new ComputeEngine();
     for (const n of ['h', 'H', 'g', 'X', 'Y', 'G']) ce.declare(n, 'function');
@@ -49,7 +53,7 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
   test('the numerator really is broadcastable-wrapped (non-vacuity)', () => {
     const ce = setUp(false);
     expect(ce.parse('H(X(t), Y(t))', { strict: false }).type.toString()).toBe(
-      'broadcastable<vector<2>>'
+      'list<list<any> | number>'
     );
   });
 
@@ -127,9 +131,9 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     // branded `number` because `isFinite === false` fired for `g(t)`'s
     // non-number TYPE, making the two rows disagree).
     expect(typeOf('\\frac{H(X(t), Y(t))}{g(t)}')).toBe(
-      'broadcastable<vector<2>>'
+      'list<list<any> | number>'
     );
-    expect(typeOf('\\frac{H(X(t), Y(t))}{s}')).toBe('broadcastable<vector<2>>');
+    expect(typeOf('\\frac{H(X(t), Y(t))}{s}')).toBe('list<list<any> | number>');
     // Scalar-path parity for the same denominators (the mirror the widening
     // is defined by). Distinct symbols: `s/s` would fold to 1 at
     // canonicalization (the generic-symbol `x/x → 1` convention).
@@ -141,11 +145,20 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     expect(typeOf('\\frac{s}{g(t)}')).toBe('broadcastable<number>');
     expect(typeOf('\\frac{s}{w}')).toBe('number');
     // No denominator, no tier movement: the sibling operators echo the shape.
-    for (const latex of ['H(X(t), Y(t)) - g(t)', '-H(X(t), Y(t))'])
-      expect([latex, typeOf(latex)]).toEqual([
+    // `H(X(t), Y(t)) - g(t)` denotes the same type, but the sum of a list
+    // and a `broadcastable` operand does not reduce its element union, and
+    // it prints `list<list<any> | list<any> | number>`: the check reads the
+    // type both ways instead of the printed form.
+    const numerator = ce.parse('H(X(t), Y(t))', { strict: false }).type;
+    for (const latex of ['H(X(t), Y(t)) - g(t)', '-H(X(t), Y(t))']) {
+      const t = ce.parse(latex, { strict: false }).type;
+      expect([latex, t.matches(numerator), numerator.matches(t)]).toEqual([
         latex,
-        'broadcastable<vector<2>>',
+        true,
+        true,
       ]);
+    }
+    expect(typeOf('-H(X(t), Y(t))')).toBe('list<list<any> | number>');
   });
 
   // The first landing of this fix echoed the numerator's type verbatim and
@@ -242,12 +255,18 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
 
   test('a provably non-numeric lifted operand is still rejected', () => {
     const ce = new ComputeEngine();
-    for (const n of ['s', 'S', 'q']) ce.declare(n, 'function');
+    for (const n of ['s', 'S']) ce.declare(n, 'function');
     ce.parse('s(a) \\coloneq \\lbrack \\text{"a"}, \\text{"b"}\\rbrack', {
       strict: false,
     }).evaluate();
     ce.parse('S(a) \\coloneq s(2a)', { strict: false }).evaluate();
-    const expr = ce.parse('\\frac{S(q(t))}{2}', { strict: false });
+    // The operand is a tensor, so `S(u)` is a `tensor<string>`, which no
+    // number is. Over an operand typed `unknown` (`q(t)` for a function `q`
+    // with no value) the call is typed `R | list<R | list<any>>` since
+    // ROADMAP CE-371, and a `list<any>` element may be a number, so the
+    // quotient is not refused there.
+    ce.declare('u', 'broadcastable<number>');
+    const expr = ce.parse('\\frac{S(u)}{2}', { strict: false });
     expect(expr.isValid).toBe(false);
   });
 });

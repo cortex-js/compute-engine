@@ -231,13 +231,20 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
     expect(expr.evaluate().type.matches(expr.type)).toBe(true);
   });
 
-  test('a parameter declared any stays scalar code', () => {
+  test('a parameter declared any stays scalar code for a number', () => {
+    // The value is checked at run time (ROADMAP CE-366, user decision
+    // 2026-10-25): a value that is not an array takes the scalar code, and
+    // an array takes the broadcast.
     const ce = rowEngine('(unknown) -> list');
     const code = compile(ce.box(['Add', 'z', 1]), {
       to: 'javascript',
       fallback: false,
-    } as never).code;
-    expect(code).not.toMatch(/_SYS\.bcast/);
+    } as never).code!;
+    expect(
+      code.startsWith(
+        '(!(Array.isArray(_.z) || ArrayBuffer.isView(_.z)) ? _.z + 1 : '
+      )
+    ).toBe(true);
   });
 
   test('a global with an assigned value and a free variable stay scalar code', () => {

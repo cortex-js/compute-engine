@@ -43,7 +43,6 @@ import {
   resolvesToSystemBinding,
 } from '../boxed-expression/operand-descriptor.js';
 import { canonicalForm } from '../boxed-expression/canonical.js';
-import { isInferredTypedParameter } from '../boxed-expression/inferred-annotations.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { asSmallInteger, toInteger } from '../boxed-expression/numerics.js';
 import { MACHINE_PRECISION, SMALL_INTEGER } from '../numerics/numeric.js';
@@ -292,6 +291,7 @@ import {
   isWalkableFiniteCollection,
   mayCarryDimensions,
   shapedBroadcastResultType,
+  withApproximatedInferredParams,
 } from '../collection-utils.js';
 import { abstractCollectionCell } from '../boxed-expression/broadcast-lift-type.js';
 import { validatedLiteralApplicationOperands } from '../boxed-expression/box.js';
@@ -10365,9 +10365,12 @@ function lazyInexactElements(
  * variables of the scope of `f`.
  *
  * A parameter type that inference wrote (`isInferredTypedParameter()`) is
- * removed from `f`: it is the type of the exact elements of the source
- * (`rational` for `Map(x ↦ x/2, Range(1, 3))`), and `N` applies `f` to a
- * float. The body of `f` is kept as it is, with its scope.
+ * the type of the exact elements of the source (`rational` for
+ * `Map(x ↦ x/2, [1/2, 1/3])`), and `N` applies `f` to a float. So that type
+ * is removed from `f`, or, when the body of `f` is impure (it can assign the
+ * parameter), replaced by the type of the float
+ * (`withApproximatedInferredParams()`, `collection-utils.ts`). The body of
+ * `f` is kept as it is, with its scope.
  */
 function elementOf(
   ce: ComputeEngine,
@@ -10377,17 +10380,7 @@ function elementOf(
   if (isFunction(xs, 'Map') && xs.nops >= 2) {
     const fn = xs.op1;
     if (isSymbol(fn) || isFunction(fn, 'Function')) {
-      const applied =
-        isFunction(fn) && fn.ops.slice(1).some(isInferredTypedParameter)
-          ? ce._fn('Function', [
-              fn.op1,
-              ...fn.ops
-                .slice(1)
-                .map((p) =>
-                  isFunction(p) && isInferredTypedParameter(p) ? p.op1 : p
-                ),
-            ])
-          : fn;
+      const applied = withApproximatedInferredParams(ce, fn);
       return ce._fn(
         'Apply',
         [applied, ...xs.ops.slice(1).map((ys) => elementOf(ce, ys, source))],

@@ -109,7 +109,7 @@ describe('the run-time reading mirrors the interpreter', () => {
     expect(compile(ce.parse('\\mathrm{PointZ}(T)'), { to: 'javascript' }).run!()).toBeNaN();
   });
 
-  test('an empty list is the empty list; a non-collection is NaN', () => {
+  test('an empty list is the empty list; a non-collection throws', () => {
     const ce = engine();
     const r = compile(ce.parse('\\mathrm{PointX}(v)'), { to: 'javascript' });
     // An empty array is an empty list of points, and the coordinate
@@ -118,9 +118,22 @@ describe('the run-time reading mirrors the interpreter', () => {
     // answered the absence marker here.)
     expect(r.run!({ v: [] })).toEqual([]);
     expect(String(ce.parse('\\mathrm{PointX}([])').evaluate())).toBe('[]');
-    // A non-collection is the interpreter's `incompatible-type` error,
-    // projected to `NaN` on this target.
-    expect(r.run!({ v: 5 })).toBeNaN();
+    // A non-collection is the interpreter's `incompatible-type` error, which
+    // compiled code throws as a `RangeError` (ROADMAP CE-214.2, user
+    // decision 2026-10-25; it was `NaN` before).
+    expect(() => r.run!({ v: 5 })).toThrow(RangeError);
+  });
+
+  test('a numeric typed array is a point, not a non-collection', () => {
+    // The run-time reading refuses a value that is not an array. A
+    // `Float64Array` is read as a plain array of numbers instead, as the
+    // other list kernels of the runtime read it.
+    const ce = engine();
+    const x = compile(ce.parse('\\mathrm{PointX}(v)'), { to: 'javascript' });
+    expect(x.run!({ v: Float64Array.from([1, 2]) })).toBe(1);
+    const z = compile(ce.parse('\\mathrm{PointZ}(v)'), { to: 'javascript' });
+    expect(z.run!({ v: Float64Array.from([1, 2, 3]) })).toBe(3);
+    expect(z.run!({ v: Float64Array.from([1, 2]) })).toBeNaN();
   });
 });
 

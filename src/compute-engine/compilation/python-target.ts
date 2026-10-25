@@ -6953,6 +6953,16 @@ export class PythonTarget implements LanguageTarget<Expression> {
           isAbsent: (x) => `(lambda _c: _c is None or math.isnan(_c))(${x})`,
           coalesce: (x, d) =>
             `(lambda _c: ${d} if (_c is None or math.isnan(_c)) else _c)(${x})`,
+          // A caller passes `None` for an absent input, and `None + 1` and
+          // `np.sin(None)` raise a `TypeError`, where the interpreter answers
+          // `NaN` (decided 2026-10-25). The read gives `float('nan')` for
+          // `None` and passes any other value (a NumPy array too) through
+          // unchanged. A read that is not a name is bound to a lambda
+          // parameter, so it is evaluated once.
+          readInput: (x) =>
+            PYTHON_ATOM.test(x)
+              ? `(float('nan') if ${x} is None else ${x})`
+              : `(lambda _c: float('nan') if _c is None else _c)(${x})`,
         },
         object: {
           nullLiteral: 'None',

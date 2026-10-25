@@ -1162,6 +1162,20 @@ numeric marker, because the whole-collection rule above must keep an absent
 cell distinct from a `NaN` one, and each target's numeric absence test
 therefore reads the object null as absent too (2026-09-22).
 
+**A Python caller passes `None` for an absent INPUT, and compiled arithmetic
+reads it as `NaN`** (user decision 2026-10-25, ROADMAP CE-395). With
+`p: number | missing`, `p + 1`, `1 / p` and `np.sin(p)` raised a `TypeError`
+for `p = None`, where the interpreter answers `NaN` for `Missing + 1` and
+compiled JavaScript gives `NaN` (`undefined + 1`). The compiled code now
+reads such an input as `(float('nan') if p is None else p)` at a numeric
+parameter of an operator that propagates absence (`Add`, `Divide`, `Sin`:
+`resolvedMissingBehavior` is `propagate`). Only an input (a free symbol, a
+parameter of `compileFunction`/`compileLambda`, a `vars` source) whose type
+states that it admits `missing` (`number | missing`, `any`; not the inference
+marker `unknown`) pays for the test. An operator that handles absence keeps
+the `None`: a comparison keeps its `is None` test, so `p ≠ 0` stays undecided
+(`None`) for an absent `p`, and `Max(p, 5)` ignores it.
+
 **An absent OBJECT in compiled arithmetic is the object null too** (user
 decision of 2026-09-27). On the JavaScript target, arithmetic whose operand
 is an absent point, tuple or list (`2·P\{c\}`, `P\{c\} + Q`, `L\{c\} + 1`)

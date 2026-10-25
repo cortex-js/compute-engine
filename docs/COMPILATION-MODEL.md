@@ -382,8 +382,12 @@ value (decided by the user, 2026-10-18):
   `'maybe'`. An ordered comparison or an `Equal` with an `empty` operand
   (no value over the cell) is `'false'`, as the scalar targets answer
   `NaN > 0` with `false`; with a `partial` operand it is at most `'maybe'`.
-  A `NotEqual` with an `empty` operand is `'maybe'` (user decision
-  2026-10-20, `docs/ERROR-MODEL.md`).
+  A `NotEqual` is the negation of `Equal`, so with an `empty` operand it is
+  `'true'`, as the scalar targets answer `NaN ≠ 0` with `true` (user
+  decision 2026-10-25, ROADMAP CE-396). With a `partial` operand it is
+  `'true'` only when the enclosures do not overlap, since `≠` holds where
+  the operand is undefined. An absent operand (an `empty` with the `missing`
+  flag) gives `'maybe'` for every relation.
 
 The interpreter fallback (`success: false`, with `fallback` not `false`)
 gives the same shapes: a number is the `interval` result of a point, and an

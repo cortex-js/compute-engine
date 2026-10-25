@@ -31,6 +31,7 @@ import {
   resolveTypeReference,
 } from '../common/type/subtype.js';
 import { declarationOf } from '../common/type/reference.js';
+import { parseType } from '../common/type/parse.js';
 import { reduceType } from '../common/type/reduce.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -4231,6 +4232,18 @@ export function lazyMapNumericApproximation(
       return undefined;
   }
 
+  // A type that inference wrote for a parameter of the callback (the type of
+  // the elements of the source) can be violated only by an assignment to
+  // that parameter in the body. Each argument is an element of the source,
+  // so it always has that type. An assignment makes the body impure (an
+  // effect on its scope). So the rebuilt callback keeps the inferred types
+  // only when the body is impure, as the exact route checks them on each
+  // assignment. For a pure body they are left out: a typed parameter makes
+  // an application evaluate its argument exactly before the call, where a
+  // bare parameter lets the numeric marker read the argument as written
+  // (`applyMarkerBody`, `function-utils.ts`).
+  const keepInferredTypes = isFunction(fn, 'Function') && !fn.op1.isPure;
+
   let wrappedFn: Expression;
   // The function literal a value-bound symbol callback holds in the current
   // frame, when that is what the rewrap applies (closure branch below).
@@ -4257,9 +4270,12 @@ export function lazyMapNumericApproximation(
     // that `f` reads.
     //
     // A parameter type that inference wrote (`isInferredTypedParameter()`)
-    // is removed from `f`: it is the type of the exact elements of the
-    // source (`rational` for a source of halves), and the marker applies `f`
-    // to a float. The body of `f` is kept as it is, with its scope.
+    // is the type of the exact elements of the source (`rational` for a
+    // source of halves), and the marker applies `f` to the numeric
+    // approximation of each element (`0.5` for `1/2`). So that type is
+    // removed from `f`, or, when the body of `f` is impure, replaced by the
+    // type of that approximation (`withApproximatedInferredParams()`). The
+    // body of `f` is kept as it is, with its scope.
     //
     // A bare symbol callback that the current scope binds to a VALUE that is
     // a function literal (the parameter `h` of `f(h) := Map(h, [1, 2, 3])`
@@ -4293,18 +4309,9 @@ export function lazyMapNumericApproximation(
         ? value
         : undefined;
     })();
-    const callee =
-      isFunction(fn, 'Function') &&
-      fn.ops.slice(1).some(isInferredTypedParameter)
-        ? ce._fn('Function', [
-            fn.op1,
-            ...fn.ops
-              .slice(1)
-              .map((p) =>
-                isFunction(p) && isInferredTypedParameter(p) ? p.op1 : p
-              ),
-          ])
-        : (boundLiteral ?? fn);
+    const callee = isFunction(fn, 'Function')
+      ? withApproximatedInferredParams(ce, fn)
+      : (boundLiteral ?? fn);
     const symbols = new Set(fn.symbols);
     const params: Expression[] = [];
     let k = 0;
@@ -4339,20 +4346,97 @@ export function lazyMapNumericApproximation(
     // name that the current scope binds to another definition
     // (`readsOtherBindings()`), so the literal made again reads the same
     // definitions.
+    //
+    // When the body is impure (`keepInferredTypes`), the literal is left RAW
+    // here. The MathJSON of a parameter does not include a type that the
+    // element-type inference wrote (such as `Typed(q, "integer")` for a
+    // source `Range(1, 3)`), so the literal made again has a bare parameter.
+    // The canonicalization of the new `Map` below writes that type again
+    // from the same source, but only on a raw literal. Canonicalized before,
+    // the parameter was typed by its use in the body (`number`), and the
+    // body could assign a value that the inferred type refuses: under
+    // `.N()`, `q := q + 0.5` gave `[2.5, 3.5, 4.5]`, where `evaluate()`
+    // gives an `incompatible-type` error for each element.
     const fnJson = fn.json;
     if (body === undefined || !Array.isArray(fnJson)) return undefined;
-    wrappedFn = ce.box([
+    const json = [
       'Function',
       ['NumericApproximation', body.json],
       ...fnJson.slice(2),
-    ] as MathJsonExpression);
+    ] as MathJsonExpression;
+    wrappedFn = keepInferredTypes
+      ? ce.expr(json, { form: 'raw' })
+      : ce.box(json);
   }
-  if (!wrappedFn.isValid) return undefined;
+  if (wrappedFn.isCanonical && !wrappedFn.isValid) return undefined;
   const rewrapped = ce.function('Map', [wrappedFn, ...expr.ops.slice(1)]);
+  if (!isFunction(rewrapped, 'Map') || !rewrapped.op1.isValid) return undefined;
   // A rewrap around the literal a symbol holds NOW is valid for this frame
   // only (see the memo note in the JSDoc).
   if (boundLiteral === undefined) lazyMapNRewraps.set(expr, rewrapped);
   return rewrapped;
+}
+
+/**
+ * The function literal `fn`, made again for an application to the numeric
+ * approximation of each of its arguments (the closure branch of
+ * `lazyMapNumericApproximation()`, and the `N` operator over a lazy `Map`,
+ * `elementOf()` in `library/core.ts`). `fn` is returned as it is when no
+ * parameter has a type that inference wrote (`isInferredTypedParameter()`).
+ *
+ * Such a type is the type of the exact elements of the source (`rational`
+ * for a source of halves), and the approximation of an element can have
+ * another type (`0.5` for `1/2`). When the body of `fn` is pure, the type
+ * is removed: the body cannot assign the parameter, so the type can only
+ * refuse an argument. When the body is impure, it can assign the
+ * parameter, and the exact route refuses an assignment that the type does
+ * not admit (`q := q + 0.5` with `q` inferred `integer` from
+ * `Range(1, 3)`). The type is then replaced by the type of the approximation
+ * (`numericApproximationParamType()`), or removed when there is no such
+ * simple type. The body of `fn` is kept as it is, with its scope.
+ */
+export function withApproximatedInferredParams(
+  ce: Expression['engine'],
+  fn: Expression
+): Expression {
+  if (!isFunction(fn, 'Function')) return fn;
+  if (!fn.ops.slice(1).some(isInferredTypedParameter)) return fn;
+  const keepTypes = !fn.op1.isPure;
+  return ce._fn('Function', [
+    fn.op1,
+    ...fn.ops.slice(1).map((p) => {
+      if (!isFunction(p) || !isInferredTypedParameter(p)) return p;
+      const t =
+        keepTypes && isString(p.op2)
+          ? numericApproximationParamType(
+              parseType(p.op2.string, ce._typeResolver)
+            )
+          : undefined;
+      if (t === undefined) return p.op1;
+      const typeOperand = ce.string(typeToString(t));
+      markInferredTypeOperand(typeOperand);
+      return ce._fn('Typed', [p.op1, typeOperand], { canonical: false });
+    }),
+  ]);
+}
+
+/**
+ * The type of the numeric approximation of a value of type `t`, for a
+ * callback parameter whose argument is approximated before the call. A
+ * numeric approximation keeps an integer exact, so an integer type is kept.
+ * A non-integer exact number becomes a float: a subtype of `real` gives
+ * `real`, of `complex` gives `complex`, of `number` gives `number`. A
+ * `string` or `boolean` type is kept: the approximation does not change such
+ * a value. Any other type (a collection, a union with a collection) gives
+ * `undefined`: the parameter is then left without a type.
+ */
+function numericApproximationParamType(t: Type): Type | undefined {
+  if (isSubtype(t, 'integer')) return t;
+  if (isSubtype(t, 'real')) return 'real';
+  if (isSubtype(t, 'complex')) return 'complex';
+  if (isSubtype(t, 'number')) return 'number';
+  if (isSubtype(t, 'string') || isSubtype(t, 'boolean')) return t;
+  return undefined;
 }
 
 /**
