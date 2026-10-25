@@ -450,11 +450,11 @@ export class BigNumericValue extends NumericValue {
       )
         return this.clone({ re: Infinity, im: Infinity });
 
-      if (!this.isComplex) return this.clone(this.decimal.mul(other));
+      if (!this.isComplex) return this.clone(this.decimal.mulBounded(other));
 
       return this.clone({
-        re: this.decimal.mul(other),
-        im: this.imDecimal.mul(other),
+        re: this.decimal.mulBounded(other),
+        im: this.imDecimal.mulBounded(other),
       });
     }
     if (other instanceof BigDecimal) {
@@ -468,11 +468,11 @@ export class BigNumericValue extends NumericValue {
       if (!this.isNaN && this.isComplex && !other.isFinite() && !other.isNaN())
         return this.clone({ re: Infinity, im: Infinity });
 
-      if (!this.isComplex) return this.clone(this.decimal.mul(other));
+      if (!this.isComplex) return this.clone(this.decimal.mulBounded(other));
 
       return this.clone({
-        re: this.decimal.mul(other),
-        im: this.imDecimal.mul(other),
+        re: this.decimal.mulBounded(other),
+        im: this.imDecimal.mulBounded(other),
       });
     }
 
@@ -529,9 +529,10 @@ export class BigNumericValue extends NumericValue {
       // precision and then multiplied, and `sin(π/6)` at 21 digits was
       // `0.500…001` where the kernel answers `0.5` for a 26-digit angle.
       // The guard digits are kept in the result, as a big-decimal product
-      // keeps them (`mul` does not round to the working precision, `div`
-      // does): an angle such as `π/2 − 10⁻¹²` must carry them for
-      // `cos(π/2 − 10⁻¹²)` to be `10⁻¹²` to more than 9 digits.
+      // keeps them (`mulBounded` rounds only past twice the working
+      // precision, `div` rounds to it): an angle such as `π/2 − 10⁻¹²` must
+      // carry them for `cos(π/2 − 10⁻¹²)` to be `10⁻¹²` to more than 9
+      // digits.
       if (
         other instanceof ExactNumericValue &&
         other.radical === 1 &&
@@ -548,22 +549,28 @@ export class BigNumericValue extends NumericValue {
           BigDecimal.precision = saved;
         }
       }
-      return this.clone(this.decimal.mul(other.bignumRe ?? other.re));
+      return this.clone(this.decimal.mulBounded(other.bignumRe ?? other.re));
     }
 
     // (a + bi)(c + di) = (ac − bd) + (ad + bc)i, with every part a big
     // decimal. The double projections are not enough: for
     // `10^{400} · (1 + 10^{-400}i)` the real part `a` is `Infinity` as a
     // double and `d` is `0`, so `a·d` is NaN, where the product is `10^{400} + i`.
-    // The four products are exact and are not rounded, as the product of two
-    // real values is not (`mul` keeps the guard digits of its operands; the
-    // printed value is rounded).
+    // The four products are exact. Each part is rounded only after the two
+    // products are combined, and only past twice the working precision, as
+    // the product of two real values is: a product rounded before the
+    // subtraction can lose a small part that the subtraction cancels down
+    // to, and a part must not be removed in ring arithmetic. The bound
+    // keeps the guard digits of the operands, and stops a value that is
+    // multiplied by itself at each step of a loop from doubling its digits
+    // (`roundToProductBound`); the printed value is rounded to the working
+    // precision.
     const b = this.imDecimal;
     const c = other.bignumRe ?? new BigDecimal(other.re);
     const d = bigImaginaryPart(other);
     return this.clone({
-      re: this.decimal.mul(c).subBounded(b.mul(d)),
-      im: this.decimal.mul(d).addBounded(b.mul(c)),
+      re: this.decimal.mul(c).subBounded(b.mul(d)).roundToProductBound(),
+      im: this.decimal.mul(d).addBounded(b.mul(c)).roundToProductBound(),
     });
   }
 

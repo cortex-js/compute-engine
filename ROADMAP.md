@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-433.
+Next free reference: CE-436.
 
 **Entry format.**
 
@@ -73,6 +73,30 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Tycho ledger asks
+
+### CE-435. `m = \max(R) > 1` parses as a chain, not as a definition of `m`
+
+**Status:** decision needed; design. Tycho row 443 (filed 2026-10-24, from the
+0.166.0 adoption). Instrument in Tycho:
+`scripts/repros/2026-10-24-ce443-equal-then-inequality-repro.mts`.
+
+Since 0.166.0 (CE-411), the LaTeX parser reads a run of comparisons as a chain.
+`m = \max(R) > 1` is `["And", ["Equal", "m", ["Max", "R"]], ["Greater",
+["Max", "R"], 1]]` in the raw and the canonical forms. Up to 0.165.0 it was
+`["Equal", "m", ["Greater", ["Max", "R"], 1]]`. A Tycho document row that
+defines a name as a condition (`m=\max(R)>1`) now defines nothing, and every
+row that reads `m` is unresolved; the author must write `m = (\max(R) > 1)`.
+
+Tycho asks for a special case: an `=` whose left side is a bare symbol,
+followed by exactly one inequality, is the equation `Equal(name, ⋈(expr, c))`.
+A chain of inequalities and a run of `=` keep the CE-411 reading. Controls that
+must not change: `0<x\le1` is an `And`, `a=b=c` is one `Equal`,
+`(a\le0)=(b\le0)` is an `Equal` of two relations. Tycho also accepts a parse
+option instead of a default.
+
+The choices: (a) the special case as the default; (b) the special case behind
+a parse option that Tycho turns on; (c) no change: the chain reading is the
+usual mathematical reading of `x = y > 1`, and the author writes parentheses.
 
 ### CE-1. A `window` option of the `grid` layout of `broadcast`
 
@@ -5896,21 +5920,6 @@ application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
   `expandProducts` builds a new `Product` at each step, and each scans its
   factors linearly with `isSame`. A product of 130 000 copies of `2 + √3` takes
   about 3.6 s from source (13 s under jest).
-- **CE-319.4** `.N()` of a product of many factors is quadratic (16 000 factors
-  1.5 s, 200 000 factors 225 s): `BigDecimal.mul` and `normalize` keep every
-  digit during the fold instead of rounding to the working precision.
-- **CE-319.5** The same cause makes an iteration over decimal values
-  exponential. `evaluate()` of a product of two decimals keeps every digit of
-  the exact product: at the default precision (21),
-  `0.123456789012345678901234567 × 0.987654321098765432109876543` evaluates
-  to a 54-digit value. A step that multiplies the value by itself doubles its
-  digits, so the logistic map `x ↦ 2.8·x·(1 − x)` from `{num: '0.2'}` at
-  precision 50 holds 131 083 characters after 15 steps, and
-  `FixedPoint(x ↦ 2.8·x·(1 − x), 0.2)` (or with a maximum of 50) does not
-  finish in 2 minutes. With machine precision the same call returns
-  `0.642857…` in 11 ms. The result of an inexact product must be
-  rounded to the working precision when it is boxed. Found 2026-10-24 while
-  reviewing PR #475.
 
 ### CE-320. Compiling shared nodes under lazy operands in nested regions is exponential
 

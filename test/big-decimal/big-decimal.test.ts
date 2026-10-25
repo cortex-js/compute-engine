@@ -1262,6 +1262,38 @@ describe('add() and sub() with a large exponent gap', () => {
     expect(a.addBounded(1).subBounded(a).toString()).toBe('1');
   });
 
+  test('mulBounded() is mul() up to twice the precision plus 20 digits', () => {
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = 21;
+    try {
+      // 27 + 27 digits: the exact product has 54 digits, under the bound
+      // of 62, so it is kept whole.
+      const a = new BigDecimal('0.123456789012345678901234567');
+      const b = new BigDecimal('0.987654321098765432109876543');
+      expect(rep(a.mulBounded(b))).toEqual(rep(a.mul(b)));
+      // 40 + 40 digits: the exact product has 79 or 80 digits, rounded to 62.
+      const c = new BigDecimal('0.' + '7'.repeat(40));
+      const p = c.mulBounded(c);
+      expect(p.significand.toString().length).toBeLessThanOrEqual(62);
+      expect(rep(p)).toEqual(rep(c.mul(c).toPrecision(62)));
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  });
+
+  test('mulBounded() keeps a squaring loop at a bounded size', () => {
+    // With mul(), the significand doubles at each step: 2^20 digits.
+    const saved = BigDecimal.precision;
+    BigDecimal.precision = 50;
+    try {
+      let x = new BigDecimal('0.123456789');
+      for (let i = 0; i < 20; i++) x = x.mulBounded(x);
+      expect(x.significand.toString().length).toBeLessThanOrEqual(120);
+    } finally {
+      BigDecimal.precision = saved;
+    }
+  });
+
   test('add() and sub() past a gap of a million digits do not throw', () => {
     // The exact difference 1 − 10^(−155504635359666) needs a significand of
     // 1.5·10¹⁴ digits: it threw "Maximum BigInt size exceeded".

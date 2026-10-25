@@ -636,6 +636,33 @@ export class BigDecimal {
   }
 
   /**
+   * The product `this · other` for values that are approximations at the
+   * working precision. It is `mul()`, rounded to `maxProductDigits()`
+   * digits when the exact product has more. The bound is well above the
+   * working precision, so the guard digits that the operands carry are
+   * kept, as `mul()` keeps them. Without the bound, a value that is
+   * multiplied by itself at each step of a loop doubles its digits at each
+   * step: the logistic map `x ↦ 2.8·x·(1 − x)` held more than 100,000
+   * digits after 15 steps. Not for a caller that needs the exact digits of
+   * a product: use `mul()`.
+   */
+  mulBounded(other: BigDecimal | number): BigDecimal {
+    return this._mulToPrecision(other, maxProductDigits());
+  }
+
+  /**
+   * This value rounded to the bound of `mulBounded()`, when it has more
+   * digits. For a sum of exact products, such as a part of a complex
+   * product `ac − bd`: each product must stay exact until the sum is made,
+   * because a product rounded first can lose a small part that the sum
+   * cancels down to (`(10⁴⁰ + 1)(10⁴⁰ − 1) − 10⁸⁰` is `−1`, and is `0` when
+   * the first product is rounded to 62 digits).
+   */
+  roundToProductBound(): BigDecimal {
+    return this.toPrecision(maxProductDigits());
+  }
+
+  /**
    * Negate this value. Zero.neg() → Zero.
    */
   neg(): BigDecimal {
@@ -1498,6 +1525,16 @@ export function fromRaw(sig: bigint, exp: number): BigDecimal {
  */
 function maxExactGap(): number {
   return Math.max(10_000, 4 * BigDecimal.precision + 100);
+}
+
+/**
+ * The largest number of significant digits of a product of `mulBounded`:
+ * twice the working precision plus 20. A product of two values of at most
+ * this many digits has at most twice as many, so a loop that multiplies a
+ * value by itself keeps a bounded size instead of doubling it at each step.
+ */
+function maxProductDigits(): number {
+  return 2 * BigDecimal.precision + 20;
 }
 
 /**

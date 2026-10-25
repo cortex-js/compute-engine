@@ -38,6 +38,23 @@
 
 ### Bug Fixes
 
+- **A chain of mixed comparisons serializes as a chain** (CE-433). Since
+  0.166.0, `0 < M \le 5` parses to
+  `["And", ["Less", 0, "M"], ["LessEqual", "M", 5]]`, and the serializer wrote
+  that `And` as `0\lt M\land M\le5`. It now writes `0\lt M\le5`, which parses
+  back to the same MathJSON. An `And` is written as a chain only when the
+  chain spelling parses back to it: each link starts with the term the
+  previous link ends with, and two adjacent links have different operators
+  (`a<b \land b<c` keeps its `\land`, since `a<b<c` is one `Less`). A chain
+  inside an `\land` needs no parentheses: `0\lt x\le1\land y\gt2`.
+
+- **`broadcastAsync()` with a `deadline` settles when the workers never start**
+  (CE-434). A batch that waited for a worker that never posts `ready` (for
+  example a worker that fails only when it gets a message) never settled, even
+  with a `deadline`: the pool started to watch the deadline only when it sent
+  the task to a worker. A task that still waits at its deadline now settles
+  with no cells done, and the batch resolves at about the deadline.
+
 - **`ReplaceAll` in a function body reads a parameter as its argument**
   ([#476](https://github.com/cortex-js/compute-engine/issues/476)).
   `ReplaceAll` holds its target, so in `x ↦ ReplaceAll(x, a → b)` the rules
@@ -73,6 +90,16 @@
   the event loop a turn, about every 8 ms, and an abort during the setup
   stops it. For an interpreted model over 200 rows, the longest block went
   from about 110 ms to 12 ms; the results do not change.
+
+- **A product of decimal values no longer keeps every digit** (ROADMAP
+  CE-319.4 and CE-319.5). The product of two decimal values is rounded to
+  twice the working precision plus 20 digits when it has more. It kept every
+  digit of the exact product, so a value multiplied by itself at each step of
+  a loop doubled its digits at each step: at precision 50,
+  `FixedPoint(x ↦ 2.8·x·(1 − x), 0.2)` did not finish in 2 minutes, and now
+  takes about 40 ms. `.N()` of a product of 64,000 factors went from 43 s to
+  0.9 s. The digits past the working precision are kept as guard digits, so
+  the printed values do not change.
 
 ## 0.166.0 _2026-10-24_
 

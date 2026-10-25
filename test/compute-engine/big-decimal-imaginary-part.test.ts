@@ -503,3 +503,41 @@ describe('A NEGATIVE REAL PART AND A NON-INTEGER EXPONENT', () => {
       )
     ));
 });
+
+describe('THE BOUND ON THE DIGITS OF A COMPLEX PRODUCT', () => {
+  // Each part of a product is rounded to twice the working precision plus
+  // 20 digits (62 at 21 digits). Without the bound, a value multiplied by
+  // itself doubles its digits at each step.
+  test('a complex squaring loop keeps a bounded size', () =>
+    atPrecision(21, () => {
+      let z: NumericValue = new BigNumericValue({
+        re: new BigDecimal('0.6'),
+        im: new BigDecimal('0.7'),
+      });
+      for (let i = 0; i < 20; i++) z = z.mul(z);
+      expect(z.bignumRe!.significand.toString().length).toBeLessThanOrEqual(62);
+      expect(z.bignumIm!.significand.toString().length).toBeLessThanOrEqual(62);
+    }));
+
+  // (M + 1 + Mi)(M − 1 + Mi) = (M² − 1 − M²) + (M(M − 1) + M(M + 1))i
+  // = −1 + 2M²i for M = 10⁴⁰. Each part is rounded after the two products
+  // are combined: rounding M² − 1 to 62 digits first gave a real part of 0.
+  test('a part that cancels down to a small value is kept', () =>
+    atPrecision(21, () => {
+      const M = new BigDecimal('1e40');
+      const a = new BigNumericValue({ re: M.add(1), im: M });
+      const b = new BigNumericValue({ re: M.sub(1), im: M });
+      const p = a.mul(b);
+      expect(p.bignumRe!.eq(-1)).toBe(true);
+      expect(p.bignumIm!.eq(M.mul(M).mul(2))).toBe(true);
+    }));
+
+  test('a complex value times a real decimal keeps a bounded size', () =>
+    atPrecision(21, () => {
+      const x = new BigDecimal('0.' + '3'.repeat(40));
+      const z = new BigNumericValue({ re: x, im: x });
+      const p = z.mul(x);
+      expect(p.bignumRe!.significand.toString().length).toBeLessThanOrEqual(62);
+      expect(p.bignumIm!.significand.toString().length).toBeLessThanOrEqual(62);
+    }));
+});

@@ -8,6 +8,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { BigDecimal } from '../../src/big-decimal';
 import { isSubtype } from '../../src/common/type/subtype';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
@@ -186,6 +187,29 @@ describe('FixedPoint stop test', () => {
     expect(engine.box(slow).evaluate().operator).toBe('FixedPoint');
     engine.iterationLimit = 100_000;
     expect(engine.box(slow).evaluate().re).toBeCloseTo(1, 12);
+  });
+
+  test('a product of decimals does not double its digits at each step', () => {
+    // The logistic map multiplies the value by itself at each step. When a
+    // product of two decimals kept every digit, the value held more than
+    // 100,000 digits after 15 steps, and this call did not finish.
+    // The precision of big decimals is global: setting it on a second
+    // engine changes it for the shared engine too, so it is restored.
+    const saved = BigDecimal.precision;
+    try {
+      const engine = new ComputeEngine();
+      engine.precision = 50;
+      const logistic = [
+        'FixedPoint',
+        ['Function', ['Multiply', 2.8, 'x', ['Subtract', 1, 'x']], 'x'],
+        { num: '0.2' },
+      ];
+      const r = engine.box(logistic).evaluate();
+      expect(r.re).toBeCloseTo(9 / 14, 12);
+      expect(JSON.stringify(r.json).length).toBeLessThan(200);
+    } finally {
+      BigDecimal.precision = saved;
+    }
   });
 
   test('an explicit function of no parameter is accepted', () => {
