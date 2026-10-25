@@ -622,9 +622,10 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
 
   // The signature of `m` is `(unknown) -> list<list<unknown>>`, so an
   // element of `m(x)` is a `list<unknown>`. A numeric function over its
-  // cells of unknown type gives a number or a list for each (ROADMAP
-  // CE-378 records the spelling `list<any>` of that list arm, where the
-  // rules of `docs/TYPE-SYSTEM.md` say `tensor`).
+  // cells of unknown type gives a number or a list for each. The list arm
+  // is spelled `list<any>`, not `tensor`: a cell of unknown type can be a
+  // list whose rows differ in length (`[[1], [2, 3]]`), which is not a
+  // tensor (user decision 2026-10-25).
   test.each([
     ['m(x)[1]', '\\operatorname{At}(m(x), 1)', 'list<unknown> | missing'],
     ['sqrt(m(x)[1])', '\\sqrt{m(x)[1]}', 'list<list<any> | number> | missing'],
@@ -664,8 +665,9 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
     const ce = matrixEngine();
     const expr = ce.parse('\\sum \\operatorname{Rest}(m(x))');
     // The elements of `Rest(m(x))` are of unknown type: their sum is a
-    // number (the sum of no elements is 0) or a list (ROADMAP CE-378 for
-    // the spelling of the list arm).
+    // number (the sum of no elements is 0) or a list, spelled `list<any>`:
+    // an element can be a list whose rows differ in length, which is not a
+    // `tensor`.
     expect(expr.type.toString()).toBe('list<any> | number');
     // At x = 3 the interpreter leaves the sum of `Rest(m(3))` unevaluated.
     const result = compiledVsInterpreted(ce, expr, 'x', VALUES.slice(1));
