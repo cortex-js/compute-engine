@@ -1293,7 +1293,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         'Apply a function repeatedly, starting from an initial value, until two successive values are the same: `FixedPoint(f, x)` is the first of `f(x)`, `f(f(x))`, … that `f` maps to itself.',
         'Two values are the same when they are structurally identical, or when they are numbers, one of them a float, that agree to the working precision (their difference is at most a few units of the last digit, relative to their size), or when they are lists or tuples of the same length whose elements are the same. A sequence of exact values stops only when two of them are identical.',
         'Without a maximum, the call stays unevaluated when the iteration cannot converge: when a value contains the previous one (`FixedPoint(Cos, 1)`: `Cos(1)` is exact, and `Cos(Cos(1))` nests it), or when an exact number gains digits at each step. Start from a float (`FixedPoint(Cos, 1.0)`), or evaluate with `N`, for a numeric fixed point.',
-        'The optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit. When the maximum is reached, the last value is returned.',
+        'The optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit, and then the call stays unevaluated if the iteration has not converged by that limit (raise `ce.iterationLimit` for a slower one). An Epsil program has no iteration limit unless the host sets one, so there an iteration that does not converge stops only at a maximum or at a time limit. When an explicit maximum is reached, the last value is returned.',
       ],
       complexity: 8200,
       // The callback slot is the bare `function` primitive, as for `Iterate`:
@@ -1378,7 +1378,12 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             return undefined;
           x = y;
         }
-        return x;
+        // The default limit is a budget, not a bound the caller asked for: a
+        // value that has not converged is not a fixed point (`x ↦ 1 - x`
+        // from 0.3 cycles forever), so the call stays unevaluated, as
+        // `Any` does over an unbounded source. An explicit maximum returns
+        // the last value.
+        return maxOp === undefined ? undefined : x;
       },
     },
   },

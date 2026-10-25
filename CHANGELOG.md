@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **`FixedPoint(f, x)` stays unevaluated when the default iteration limit is
+  reached without converging**
+  ([#474](https://github.com/cortex-js/compute-engine/issues/474), contributed
+  by [enumeratio](https://github.com/enumeratio)). `FixedPoint(x ↦ 1 - x, 0.3)`
+  cycles between `0.3` and `0.7`, and used to return whichever it held after
+  `ce.iterationLimit` applications, a value that is not a fixed point. The call
+  now stays unevaluated, as the divergence guards of `FixedPoint` and `Any`
+  over an unbounded source already do. This also applies to an iteration that
+  converges too slowly for the limit: at a precision of 200 digits,
+  `FixedPoint(Cos, 1.0)` needs about 1170 steps, and it used to return a value
+  correct to about 175 digits. A larger `ce.iterationLimit` lets such an
+  iteration converge. With an explicit maximum, the last value is still
+  returned, as in Wolfram's `FixedPoint[f, x, n]`.
+
 ### New Features
 
 - **Index axes in the `grid` layout of `broadcast`** (ROADMAP CE-421, Tycho

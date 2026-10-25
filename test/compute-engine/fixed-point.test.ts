@@ -145,6 +145,49 @@ describe('FixedPoint stop test', () => {
     expect(value(['FixedPoint', 'Cos', 1, 1])).toBe('cos(1)');
   });
 
+  test('the default limit reached without converging stays unevaluated', () => {
+    // A 2-cycle and a slow drift: neither grows, so the divergence guard
+    // does not catch them, and neither is a fixed point.
+    const cycle = ['FixedPoint', ['Function', ['Subtract', 1, 'x'], 'x'], 0.3];
+    for (const mode of ['evaluate', 'N'] as const) {
+      const r = ce.box(cycle)[mode]();
+      expect(r.operator).toBe('FixedPoint');
+    }
+    const drift = [
+      'FixedPoint',
+      ['Function', ['Add', 'x', { num: '0.001' }], 'x'],
+      FLOAT_ONE,
+    ];
+    expect(ce.box(drift).evaluate().operator).toBe('FixedPoint');
+  });
+
+  test('an explicit maximum reached returns the last iterate', () => {
+    const f = ['Function', ['Subtract', 1, 'x'], 'x'];
+    expect(
+      ce.box(['FixedPoint', f, { num: '0.3' }, 3]).evaluate().re
+    ).toBeCloseTo(0.7, 12);
+    expect(
+      ce.box(['FixedPoint', f, { num: '0.3' }, 4]).evaluate().re
+    ).toBeCloseTo(0.3, 12);
+  });
+
+  test('a raised ce.iterationLimit lets a slow iteration converge', () => {
+    // x ↦ 0.99x + 0.01 from 2.0 closes on 1 by 1% a step: about 4400 steps to
+    // the default precision of 21 digits, more than the default limit.
+    // A separate engine: assigning `iterationLimit` marks it as set by the
+    // host, even when the value written back is the default, and that
+    // changes how a later Epsil program on the same engine is limited.
+    const engine = new ComputeEngine();
+    const slow = [
+      'FixedPoint',
+      ['Function', ['Add', ['Multiply', 0.99, 'x'], 0.01], 'x'],
+      { num: '2.0' },
+    ];
+    expect(engine.box(slow).evaluate().operator).toBe('FixedPoint');
+    engine.iterationLimit = 100_000;
+    expect(engine.box(slow).evaluate().re).toBeCloseTo(1, 12);
+  });
+
   test('an explicit function of no parameter is accepted', () => {
     // A function of no parameter ignores its arguments.
     expect(value(['FixedPoint', ['Function', 42], 0])).toBe('42');
@@ -213,6 +256,17 @@ describe('FixedPoint on the Epsil route', () => {
     );
     expect(r.diagnostics).toEqual([]);
     expect(Number(r.value.re)).toBeCloseTo(Math.SQRT2, 15);
+  });
+
+  test('an explicit maximum stops an iteration that does not converge', () => {
+    // An Epsil program has no default iteration limit, so a 2-cycle needs
+    // the maximum to stop. The last value is returned.
+    const r = executeEpsil(
+      new ComputeEngine(),
+      'fixedPoint(x => 1 - x, 0.3, 7)'
+    );
+    expect(r.diagnostics).toEqual([]);
+    expect(Number(r.value.re)).toBeCloseTo(0.7, 12);
   });
 });
 

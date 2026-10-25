@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-431.
+Next free reference: CE-433.
 
 **Entry format.**
 
@@ -5793,13 +5793,20 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   Done 2026-10-24 (first step): `executeEpsilAsync(ce, source, { signal })`
   (`src/epsil/execute-epsil.ts`), and `evaluateAsync` handlers for `Assign`
   and `Declare`, so that `let fit = findFit(…)` takes the asynchronous route
-  of its value. Left: (a) the pool route of a large `Map`/`Sum` drain, which
-  WAITS FOR A USER DECISION: on an engine with the default (bignum)
-  precision, a float64 batch on the pool gives different digits than the
-  interpreter (the sum above ends in `…001.847777` with bignums and in
-  `…002.2` at machine precision), so the choice is between running the pool
-  route only at machine precision (the rule of the marked tier today), or
-  also at the default precision with float64 values; (b) the `--workers N`
+  of its value. Left: (a) the pool route of a large `Map`/`Sum` drain. User
+  decision 2026-10-24: machine precision only (the rule of the marked tier).
+  A prototype was written and measured on 2026-10-24 (not landed; worktree
+  `/tmp/wt-ce3141`): before the drain of `Sum(Map(f, xs))` on the
+  asynchronous route, the pool computes the compiled `f` over the source
+  (`Apply(literal, x)` compiled to a `broadcast` result), and the runner of
+  `map-auto-compile.ts` reads the values by position. Values identical to one
+  thread, but no useful gain: for 100,000 elements at machine precision,
+  `N(sin(x) + x^2)` took 209–235 ms on one thread and 241–259 ms with a pool
+  of 4; bodies of special functions 257 → 241 ms and 364 → 290 ms. A compiled
+  element costs under 1 µs; the drain itself (the runner's checks, boxing the
+  value, adding the term) costs 2 to 3 µs per element on the calling thread.
+  The pool route pays only after CE-432, and only for bodies that CE-431
+  makes compilable; (b) the `--workers N`
   option of the `epsil` command, the REPL and the MCP server (section 5.7 of
   the plan), and their use of the asynchronous executor.
   (c) While `executeEpsilAsync` waits on a statement, the engine keeps the
@@ -5817,6 +5824,36 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   `doc/13-guide-compile.md`.
 - The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24:
   "one formula, many points"; `runMany` says less).
+
+### CE-431. A `Map` element function with a loop or an inner collection does not compile
+
+**Status:** open; performance. Found 2026-10-24 while measuring CE-314.1.
+
+The auto-compilation of a `Map` drain (`map-auto-compile.ts`, marked tier,
+machine precision) declines an element function whose body reduces an inner
+collection or calls a user function with a loop, and the drain then runs in
+the interpreter: `sum(map(x => N(sum(map(k => sin(k * x) / k, 1..200))),
+1..1000))` took 14.5 s (about 14 ms per element), and the same with
+`function f(x) { let s = 0; for k in 1..200 { s = s + sin(k * x) / k }; s }`
+did not finish 1,000 elements in 300 s. These are the costly bodies of a
+notebook cell (Tycho row 441). Find which eligibility check declines each
+(`fnLiteralEligible`, the `structural` reasons of `attemptCompile`), and
+compile them when the compiled code gives the values of the interpreter.
+
+### CE-432. The drain of a compiled `Map` costs more than the element function
+
+**Status:** open; performance. Found 2026-10-24 while measuring CE-314.1.
+
+At machine precision, `sum(map(x => N(sin(x) + x^2), 1..100000))` takes
+about 0.2 s, of which the compiled element function is a small part: each
+element is checked by the runner of `map-auto-compile.ts`, boxed as an
+inexact number, and added to the sum's terms (about 2 µs). `Sum` already
+sums a list of machine numbers on its doubles (`machineListTotal`, the
+`foldValue` of the reduction); a drain whose every element is a finite
+float from the compiled function could take the same route without boxing.
+Measure first, and check that the sum is the one the boxed terms give
+(the order of the additions and the compensation of `SumTerms`). With this,
+the pool route of CE-314.1 (a) can pay for a costly body.
 
 ### CE-430. The data operand of `FindFit.evaluateAsync()` is prepared in one block
 
@@ -5862,6 +5899,18 @@ application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
 - **CE-319.4** `.N()` of a product of many factors is quadratic (16 000 factors
   1.5 s, 200 000 factors 225 s): `BigDecimal.mul` and `normalize` keep every
   digit during the fold instead of rounding to the working precision.
+- **CE-319.5** The same cause makes an iteration over decimal values
+  exponential. `evaluate()` of a product of two decimals keeps every digit of
+  the exact product: at the default precision (21),
+  `0.123456789012345678901234567 × 0.987654321098765432109876543` evaluates
+  to a 54-digit value. A step that multiplies the value by itself doubles its
+  digits, so the logistic map `x ↦ 2.8·x·(1 − x)` from `{num: '0.2'}` at
+  precision 50 holds 131 083 characters after 15 steps, and
+  `FixedPoint(x ↦ 2.8·x·(1 − x), 0.2)` (or with a maximum of 50) does not
+  finish in 2 minutes. With machine precision the same call returns
+  `0.642857…` in 11 ms. The result of an inexact product must be
+  rounded to the working precision when it is boxed. Found 2026-10-24 while
+  reviewing PR #475.
 
 ### CE-320. Compiling shared nodes under lazy operands in nested regions is exponential
 

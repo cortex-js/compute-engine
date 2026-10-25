@@ -61,7 +61,7 @@ Two values are the same when they are structurally identical, or when they are n
 
 Without a maximum, the call stays unevaluated when the iteration cannot converge: when a value contains the previous one (`FixedPoint(Cos, 1)`: `Cos(1)` is exact, and `Cos(Cos(1))` nests it), or when an exact number gains digits at each step. Start from a float (`FixedPoint(Cos, 1.0)`), or evaluate with `N`, for a numeric fixed point.
 
-The optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit. When the maximum is reached, the last value is returned.
+The optional third argument is the maximum number of applications, a positive integer. It defaults to the engine iteration limit, and then the call stays unevaluated if the iteration has not converged by that limit (raise `ce.iterationLimit` for a slower one). An Epsil program has no iteration limit unless the host sets one, so there an iteration that does not converge stops only at a maximum or at a time limit. When an explicit maximum is reached, the last value is returned.
 
 ```epsil
 fixedPoint(x => (x + 2 / x) / 2, 1.0)
