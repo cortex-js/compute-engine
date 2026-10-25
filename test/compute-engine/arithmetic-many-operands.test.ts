@@ -56,4 +56,49 @@ describe('ARITHMETIC WITH MANY OPERANDS', () => {
     expect(product.nops).toBe(20_000);
     expect(product.N().re).toBeCloseTo(1, 10);
   }, 60_000);
+
+  // Each factor of a product was compared with every term already found,
+  // and `.N()` also built a new product for each factor: 2 000 distinct
+  // symbols took 8.6 s under `.N()`, and 20 000 would take many minutes.
+  test('a product of 20 000 distinct symbols', () => {
+    const symbols = Array.from({ length: 20_000 }, (_, i) => `x_${i}`);
+    const product = ce.box(['Multiply', ...symbols]);
+    expect(product.nops).toBe(20_000);
+    expect(product.evaluate().nops).toBe(20_000);
+    expect(product.N().nops).toBe(20_000);
+  }, 60_000);
+
+  test('the float coefficient of a product with a symbol does not underflow', () => {
+    // `.N()` multiplied the coefficients from the right, so a product such as
+    // `10⁻²⁰⁰·10⁻¹²³·10²⁰⁰·x` went through a subnormal `10⁻³²³`, and some
+    // orders of the factors gave a coefficient of 0. The coefficient is now
+    // the product of the factors in the canonical order.
+    const engine = new ComputeEngine();
+    engine.precision = 'machine';
+    const cases: [string, string, string, number][] = [
+      ['1e-200', '1e-123', '1e200', -123],
+      ['1e-200', '1e-200', '1e200', -200],
+      ['1e-200', '1e-150', '1e300', -50],
+    ];
+    for (const [a, b, c, log10] of cases) {
+      const r = engine
+        .box(['Multiply', { num: a }, { num: b }, { num: c }, 'x'])
+        .N();
+      expect(r.operator).toBe('Multiply');
+      expect(Math.log10(r.ops![0].re)).toBeCloseTo(log10, 10);
+    }
+  });
+
+  test('a repeated factor merges with its first occurrence', () => {
+    // x_0·x_1·…·x_999·x_0·x_1·…·x_999 = x_0²·x_1²·…·x_999²
+    const symbols = Array.from({ length: 1_000 }, (_, i) => `x_${i}`);
+    const product = ce.box(['Multiply', ...symbols, ...symbols]).evaluate();
+    expect(product.nops).toBe(1_000);
+    for (const op of product.ops!) {
+      expect(op.operator).toBe('Power');
+      expect(op.op2.isSame(2)).toBe(true);
+    }
+    const n = product.N();
+    expect(n.nops).toBe(1_000);
+  }, 60_000);
 });

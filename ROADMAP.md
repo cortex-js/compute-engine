@@ -5927,7 +5927,7 @@ With an operator that has only an `evaluateAsync` handler declared, each
 application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
 `function-utils.ts`) with no cache. The cost is not measured.
 
-### CE-319. Walks that are exponential on shared subtrees, and slow products with many factors
+### CE-319. Walks that are exponential on shared subtrees
 
 **Status:** open; performance.
 
@@ -5941,11 +5941,6 @@ application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
   `ce.function('Sum', [At(L, idx), Limits(k, 1, 1)])` with `idx` doubled 20
   times takes more than 3 s in `rebindToBindings` (`binders.ts`), before any
   compile.
-- **CE-319.3** A product of distinct symbols is cubic on `evaluate()` and `.N()`
-  (1000 factors 1.3 s, 2000 factors 10 s, 4000 factors 74 s): the right fold in
-  `expandProducts` builds a new `Product` at each step, and each scans its
-  factors linearly with `isSame`. A product of 130 000 copies of `2 + √3` takes
-  about 3.6 s from source (13 s under jest).
 
 ### CE-320. Compiling shared nodes under lazy operands in nested regions is exponential
 

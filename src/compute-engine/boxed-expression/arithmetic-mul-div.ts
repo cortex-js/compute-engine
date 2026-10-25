@@ -257,24 +257,46 @@ function isMatrixFactor(x: Expression): boolean {
   );
 }
 
+/**
+ * A term of a `Product`: a base and its exponent.
+ *
+ * `quotient` is `true` when a negative exponent was added to the term by a
+ * quotient (`Divide(1, g(x))`, `div()`), not by a negative power
+ * (`Power(g(x), -1)`). For a term that can be a matrix, the two are
+ * different: the quotient is element-wise, the power is the matrix inverse
+ * (see `isMatrixInversePower()`).
+ */
+type ProductTerm = {
+  term: Expression;
+  exponent: Rational;
+  quotient?: boolean;
+};
+
 export class Product {
   engine: ComputeEngine;
 
   // Running literal products (if canonical)
   coefficient: NumericValue;
 
-  // Other terms of the product, `term` is the key.
-  //
-  // `quotient` is `true` when a negative exponent was added to the term by a
-  // quotient (`Divide(1, g(x))`, `div()`), not by a negative power
-  // (`Power(g(x), -1)`). For a term that can be a matrix, the two are
-  // different: the quotient is element-wise, the power is the matrix
-  // inverse (see `isMatrixInversePower()`).
-  terms: {
-    term: Expression;
-    exponent: Rational;
-    quotient?: boolean;
-  }[] = [];
+  // Other terms of the product, `term` is the key (see `ProductTerm`). The
+  // list is read-only outside `addTerm` and `removeTermAt`, so that every
+  // change to it also changes `termIndex`. The fields of an entry can be
+  // changed in place.
+  private _terms: ProductTerm[] = [];
+  get terms(): ReadonlyArray<ProductTerm> {
+    return this._terms;
+  }
+
+  /** The entries of `terms` whose `term` has a given hash, in the order of
+   * `terms`. `findTerm` reads only the entries with the hash of its
+   * argument, so finding the term of a factor does not scan all the terms:
+   * the scan made a product of n distinct symbols take a time of the order
+   * of n². This is correct because two expressions that are `isSame` have
+   * the same hash. Entries with the same hash that are not `isSame` (a hash
+   * collision) are told apart by the `isSame` test in `findTerm`. Every
+   * change to `terms` goes through `addTerm` and `removeTermAt`, which keep
+   * this index up to date. */
+  private termIndex = new Map<number, ProductTerm[]>();
 
   // If `false`, the running products are not calculated
   private _isCanonical = true;
@@ -407,13 +429,7 @@ export class Product {
         // √(k·u)/√u would collapse to the CONSTANT √k, but the true value
         // is region-dependent (±√k across u = 0). Tally opaquely, like
         // (−u)^(p/q) above.
-        for (const x of this.terms) {
-          if (x.term.isSame(term)) {
-            x.exponent = rationalAdd(x.exponent, e);
-            return;
-          }
-        }
-        this.terms.push({ term, exponent: e });
+        this.tally(term, e);
         return;
       }
       for (const t of term.ops) this.mul(t, exp, inversePower);
@@ -425,13 +441,7 @@ export class Product {
       if (!isIntegerRational(e)) {
         // (−u)^(p/q): the −1 cannot be split off — (−1)^(p/q) is a complex
         // phase, not ±1 (e.g. (−u)^(1/4) ≠ −u^(1/4)). Tally opaquely.
-        for (const x of this.terms) {
-          if (x.term.isSame(term)) {
-            x.exponent = rationalAdd(x.exponent, e);
-            return;
-          }
-        }
-        this.terms.push({ term, exponent: e });
+        this.tally(term, e);
         return;
       }
       this.mul(term.op1, exp, inversePower);
@@ -531,7 +541,7 @@ export class Product {
             this.coefficient = this.engine._numericValue(
               resultSign < 0 ? -Infinity : Infinity
             );
-          } else this.terms.push({ term, exponent: exp });
+          } else this.addTerm({ term, exponent: exp });
           return;
         }
 
@@ -542,7 +552,7 @@ export class Product {
           // keep it symbolic (an inert Power term) rather than folding it
           // into the coefficient — mirrors the guard in arithmetic-power.ts,
           // and avoids a `Maximum BigInt size exceeded` throw.
-          this.terms.push({ term, exponent: exp });
+          this.addTerm({ term, exponent: exp });
         } else {
           // An exact number raised to a fractional power folds into the
           // coefficient only when the power is exact (`8^(2/3)` is `4`).
@@ -898,34 +908,47 @@ export class Product {
     const quotient = isNeg(tallyExp) && !inversePower;
     const tallyShaped = hasCollectionShape(tallyTerm);
     const noncommuting = tallyShaped || this.isNoncommutingTerm(tallyTerm);
+    // A term that commutes with all the terms merges with the first term of
+    // the same base, found from the index. A term that does not commute
+    // reads the terms between the two, so it scans the list.
+    if (!noncommuting) {
+      const x = this.findTerm(tallyTerm);
+      if (x) {
+        x.exponent = rationalAdd(x.exponent, tallyExp);
+        if (quotient) x.quotient = true;
+      } else
+        this.addTerm(
+          quotient
+            ? { term: tallyTerm, exponent: tallyExp, quotient }
+            : { term: tallyTerm, exponent: tallyExp }
+        );
+      return;
+    }
     let found = false;
     for (const [i, x] of this.terms.entries()) {
       if (!x.term.isSame(tallyTerm)) continue;
-      if (noncommuting) {
-        // A different term between the two that does not commute with them
-        if (
-          this.terms.some(
-            (y, j) =>
-              j > i &&
-              !y.term.isSame(tallyTerm) &&
-              (tallyShaped
-                ? hasCollectionShape(y.term) ||
-                  mayBeTensorProductOperand(y.term)
-                : this.isNoncommutingTerm(y.term))
-          )
+      // A different term between the two that does not commute with them
+      if (
+        this.terms.some(
+          (y, j) =>
+            j > i &&
+            !y.term.isSame(tallyTerm) &&
+            (tallyShaped
+              ? hasCollectionShape(y.term) || mayBeTensorProductOperand(y.term)
+              : this.isNoncommutingTerm(y.term))
         )
-          continue;
-        // One exponent is positive and the other is negative: when the term
-        // is a matrix, the two powers do not cancel in general
-        if (isNeg(x.exponent) !== isNeg(tallyExp)) continue;
-      }
+      )
+        continue;
+      // One exponent is positive and the other is negative: when the term
+      // is a matrix, the two powers do not cancel in general
+      if (isNeg(x.exponent) !== isNeg(tallyExp)) continue;
       x.exponent = rationalAdd(x.exponent, tallyExp);
       if (quotient) x.quotient = true;
       found = true;
       break;
     }
     if (!found)
-      this.terms.push(
+      this.addTerm(
         quotient
           ? { term: tallyTerm, exponent: tallyExp, quotient }
           : { term: tallyTerm, exponent: tallyExp }
@@ -992,7 +1015,7 @@ export class Product {
         return true;
       }
       const paired = this.termValue(this.terms[i]).mul(factor);
-      this.terms.splice(i, 1);
+      this.removeTermAt(i);
       if (!this.foldIntoCoefficient(paired))
         this.tally(this.engine.number(paired), [1, 1]);
       return true;
@@ -1027,13 +1050,38 @@ export class Product {
 
   /** Add `exponent` to the exponent of `term`, or add `term` as a new term. */
   private tally(term: Expression, exponent: Rational): void {
-    for (const x of this.terms) {
-      if (x.term.isSame(term)) {
-        x.exponent = rationalAdd(x.exponent, exponent);
-        return;
-      }
-    }
-    this.terms.push({ term, exponent });
+    const x = this.findTerm(term);
+    if (x) x.exponent = rationalAdd(x.exponent, exponent);
+    else this.addTerm({ term, exponent });
+  }
+
+  /** The first entry of `terms` whose `term` is the same as `term`, read
+   * from `termIndex`. */
+  private findTerm(term: Expression): ProductTerm | undefined {
+    return this.termIndex.get(term.hash)?.find((x) => x.term.isSame(term));
+  }
+
+  /** Add `entry` at the end of `terms`, and to `termIndex`. */
+  private addTerm(entry: ProductTerm): void {
+    this._terms.push(entry);
+    const h = entry.term.hash;
+    const bucket = this.termIndex.get(h);
+    if (bucket) bucket.push(entry);
+    else this.termIndex.set(h, [entry]);
+  }
+
+  /** Remove the entry at position `i` of `terms`, and from `termIndex`. */
+  private removeTermAt(i: number): void {
+    const entry = this._terms[i];
+    if (entry === undefined) return;
+    this._terms.splice(i, 1);
+    const h = entry.term.hash;
+    const bucket = this.termIndex.get(h);
+    const j = bucket ? bucket.indexOf(entry) : -1;
+    console.assert(j >= 0, 'Product: the term index lost an entry of terms');
+    if (!bucket || j < 0) return;
+    bucket.splice(j, 1);
+    if (bucket.length === 0) this.termIndex.delete(h);
   }
 
   /** Divide the product by a term of coefficient */
@@ -3691,12 +3739,37 @@ export function mulNEvaluated(
   let factors: ReadonlyArray<Expression> = xs.every((x) => isNumber(x))
     ? xs.map((x, i) => exactFactors[i] ?? x)
     : xs;
+  const floatLiteral = (r: Expression): Expression =>
+    isExactRealLiteral(r) || (isNumber(r) && !bignumPreferred(ce)) ? r.N() : r;
+  // Without a factor that `expandProducts` reads specially
+  // (`expandProductsChanges`), its fold builds, at each step, the product of
+  // the factors that `Product` builds here once, as `mulImpl` does. The fold
+  // builds a new `Product` for each factor, and each one compares the new
+  // factor with the factors it holds, so a product of n distinct symbols
+  // took a time of the order of n³: 2000 factors took 8.6 s. The same guard
+  // on the coefficient as in `mulImpl`: for a zero, `NaN` or infinite
+  // coefficient the fold gives a different answer, which is kept. A product
+  // of number literals only keeps the fold: it has no terms to compare, so
+  // its fold is fast, and the order of its float products is kept (the
+  // fold multiplies from the right, `Product` from the left, and the last
+  // digit of a machine float can differ).
+  if (!factors.every((x) => isNumber(x)) && !expandProductsChanges(factors)) {
+    const product = new Product(ce, factors);
+    const c = product.coefficient;
+    if (
+      !c.isZero &&
+      !c.isNaN &&
+      !c.isPositiveInfinity &&
+      !c.isNegativeInfinity &&
+      !c.isComplexInfinity
+    ) {
+      const r = product.asExpression({ numericApproximation: true });
+      return r.operator === 'Multiply' ? r : floatLiteral(r);
+    }
+  }
   const exp = expandProducts(ce, factors);
   if (exp) {
-    if (exp.operator !== 'Multiply')
-      return isExactRealLiteral(exp) || (isNumber(exp) && !bignumPreferred(ce))
-        ? exp.N()
-        : exp;
+    if (exp.operator !== 'Multiply') return floatLiteral(exp);
     if (isFunction(exp)) factors = exp.ops;
   }
 

@@ -101,6 +101,17 @@
   0.9 s. The digits past the working precision are kept as guard digits, so
   the printed values do not change.
 
+- **A product of many distinct factors takes a time proportional to its
+  size** (ROADMAP CE-319.3). A product looked for each new factor among all
+  the factors it already held, and `.N()` also built a new product for each
+  factor. A product of 2,000 distinct symbols took 18 ms on `evaluate()` and
+  8.6 s on `.N()`; it now takes 12 ms and 7 ms, and 64,000 symbols take
+  about 250 ms on both routes. This also fixes the float coefficient of such
+  a product under `.N()`: the coefficients were multiplied from the right,
+  so `10⁻²⁰⁰·10⁻¹²³·10²⁰⁰·x` went through a subnormal value and gave
+  `9.88·10⁻¹²⁴·x`, and some orders of large and small factors gave a
+  coefficient of `0`. It is now `10⁻¹²³·x`.
+
 ## 0.166.0 _2026-10-24_
 
 ### Breaking Changes
