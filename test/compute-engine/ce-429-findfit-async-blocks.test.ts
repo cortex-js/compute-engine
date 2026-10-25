@@ -1,5 +1,10 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine';
+import {
+  linearScanSolve,
+  linearScanSolveSteps,
+  type FitScanProblem,
+} from '../../src/compute-engine/fit-scan';
 
 // ROADMAP CE-429: on the asynchronous route of `FindFit`, one grid point of
 // the separable scan ran as one block on the calling thread (about 110 ms
@@ -39,46 +44,51 @@ const fitCall = (
   ];
 };
 
-/** Evaluate `expr` asynchronously under a time limit of `ms`, and return
- * the record with the longest time between two turns of the event loop. */
-async function longestBlock(
-  ce: ComputeEngine,
-  expr: BoxedExpression,
-  ms: number
-): Promise<{ record: BoxedExpression; longest: number }> {
-  let longest = 0;
-  let last = performance.now();
-  let on = true;
-  const tick = () => {
-    const now = performance.now();
-    longest = Math.max(longest, now - last);
-    last = now;
-    if (on) setImmediate(tick);
-  };
-  setImmediate(tick);
-  let p: Promise<BoxedExpression> | undefined;
-  ce.withTimeLimit({ ms, label: 'test:ce-429' }, () => {
-    p = expr.evaluateAsync();
-    return 0;
-  });
-  try {
-    return { record: await p!, longest };
-  } finally {
-    on = false;
-  }
-}
-
 describe('CE-429: FindFit.evaluateAsync() on the calling thread', () => {
-  test('one grid point of an interpreted model does not block the event loop', async () => {
-    const ce = new ComputeEngine();
-    const expr = ce.box(fitCall(200, { b: [0.1, 6], c: [0, 6.28] }) as any);
-    const { record, longest } = await longestBlock(ce, expr, 600);
-    expect(record.get('timedOut')?.symbol).toBe('True');
-    // One grid point took about 110 ms when it ran in one piece; the walk
-    // now yields every few rows once a millisecond passed. The bound leaves
-    // room for a loaded machine.
-    expect(longest).toBeLessThan(80);
-  }, 30_000);
+  test('one grid point yields between rows, with the result of the solve', () => {
+    // A slow model, as an interpreted one is: about 0.2 ms per call. The
+    // step form yields every few rows once a millisecond passed; the
+    // synchronous form, which the workers run, never yields. (A bound on the
+    // time between two turns of the event loop depended on the load of the
+    // machine.)
+    const slow = (r: Record<string, number>): number => {
+      const end = performance.now() + 0.2;
+      while (performance.now() < end);
+      return r.a * Math.cos(r.b * r.x) + r.d * r.x;
+    };
+    const n = 64;
+    const x = Float64Array.from({ length: n }, (_, i) => i / 8);
+    const y = Float64Array.from(x, (v) => 2 * Math.cos(2.2 * v) + 0.1 * v);
+    const problem: FitScanProblem = {
+      units: [
+        {
+          varFresh: ['x'],
+          rows: { x: [x], y },
+          model: slow,
+          columns: [(r) => Math.cos(r.b * r.x), (r) => r.x],
+        },
+      ],
+      paramFresh: ['a', 'b', 'd'],
+      linearIdx: [0, 2],
+      gridIdx: [1],
+      lo: [-Infinity, 0, -Infinity],
+      hi: [Infinity, 10, Infinity],
+      start: [1, 1, 0],
+      phases: [],
+    };
+    const steps = linearScanSolveSteps(problem, [2.2], true, () => {}, true);
+    let yields = 0;
+    let step = steps.next();
+    while (!step.done) {
+      yields += 1;
+      step = steps.next();
+    }
+    expect(yields).toBeGreaterThan(3);
+    expect(step.value).toEqual(linearScanSolve(problem, [2.2], true, () => {}));
+    // The synchronous run never stops.
+    const sync = linearScanSolveSteps(problem, [2.2], true, () => {}, false);
+    expect(sync.next().done).toBe(true);
+  });
 
   test.each([
     ['a separable scan', { b: [1, 3, 0.5], c: [0, 6.28, 1.5] }],
@@ -112,12 +122,7 @@ describe('CE-429: FindFit.evaluateAsync() on the calling thread', () => {
       [
         'List',
         ['Multiply', 'a', ['Cos', ['Add', ['Multiply', 'b', 'x'], 'c']]],
-        [
-          'Multiply',
-          2,
-          'a',
-          ['Cos', ['Add', ['Multiply', 'b', 'x'], 'c']],
-        ],
+        ['Multiply', 2, 'a', ['Cos', ['Add', ['Multiply', 'b', 'x'], 'c']]],
       ],
       ['List', 'a', 'b', 'c'],
       ['List', 'x'],

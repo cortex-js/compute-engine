@@ -113,6 +113,19 @@
 
 ### Performance
 
+- **`expr.latex` keeps its string, and prettified serialization is cheaper**
+  (ROADMAP CE-438, Tycho row 444). A second read of `.latex` on the same
+  boxed expression returns the string of the first read while nothing that
+  can change it has changed (a declaration, an assignment, an assumption, the
+  precision or another engine setting, the LaTeX options or dictionary): about
+  0.3 µs instead of about 200 µs for a 20-node expression. The prettified
+  MathJSON that `.latex` and `toLatex()` use no longer splits a product with
+  no factor that can go to a denominator into a numerator and a denominator,
+  which built and canonicalized new expressions: a first `.latex` of such an
+  expression takes about 180 µs instead of 280 to 360 µs. The output does not
+  change. `toLatex({ prettify: false })` stays the fastest form for a string
+  used as a key; `expr.digest` is the key to use for a cache.
+
 - **The sum of a compiled `Map` is computed on doubles** (ROADMAP CE-432). At
   machine precision, `Sum(Map(f, xs))` whose element function the
   auto-compilation compiles now adds the doubles of the elements, with the

@@ -2,6 +2,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { BoxedExpression } from '../../src/compute-engine';
 import { executeEpsil, executeEpsilAsync } from '../../src/epsil';
 import { compiledMapDoubles } from '../../src/compute-engine/library/collections';
+import {
+  _mapAutoCompileStats,
+  _resetMapAutoCompileStats,
+} from '../../src/compute-engine/map-auto-compile-stats';
 
 // ROADMAP CE-432: `Sum(Map(f, xs))`, when the auto-compilation compiles `f`
 // (`map-auto-compile.ts`), is summed on the doubles of the elements
@@ -112,16 +116,16 @@ describe('CE-432: the sum of a compiled Map', () => {
     ce.precision = 'machine';
     const controller = new AbortController();
     setTimeout(() => controller.abort('stop'), 30);
-    const t0 = Date.now();
+    _resetMapAutoCompileStats();
     await expect(
-      executeEpsilAsync(
-        ce,
-        'sum(map(x => N(sin(x) + x^2), 1..5000000))',
-        { signal: controller.signal }
-      )
+      executeEpsilAsync(ce, 'sum(map(x => N(sin(x) + x^2), 1..5000000))', {
+        signal: controller.signal,
+      })
     ).rejects.toMatchObject({ name: 'CancellationError', cause: 'stop' });
-    // The whole sum takes a few seconds.
-    expect(Date.now() - t0).toBeLessThan(3000);
+    // The abort stopped the reading of the elements before the end: fewer
+    // elements were computed than the source holds. (A bound on the time
+    // depended on the load of the machine.)
+    expect(_mapAutoCompileStats.compiledHits).toBeLessThan(5_000_000);
   }, 30_000);
 
   test('a sum past the safe integers declines and stays exact', () => {

@@ -77,6 +77,7 @@ import { labelFor } from './explain-labels.js';
 import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
+import { containsObject } from './object-walk.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -156,6 +157,82 @@ const LATEX_FAITHFUL_LAZY_HEADS = new Set([
   'Range',
   'Linspace',
 ]);
+
+/**
+ * The strings of the `latex` getter, by boxed expression (ROADMAP CE-438,
+ * Tycho row 444). A boxed expression does not change, but its LaTeX also
+ * depends on the engine: the serializer reads definitions, types and
+ * assumptions in the current scope (a shadowed library name, a point-list
+ * operand, the sign of a term), and the precision and the LaTeX options. A
+ * string is reused only while none of these changed:
+ *
+ * - the engine's cache generation is the same (`_cacheGeneration()`: the
+ *   `any` version, which advances on every declaration, assignment,
+ *   assumption, inference and configuration change, `precision` included,
+ *   with the facts-hidden bit and the key of an active value shield);
+ * - the current scope is the same scope object at the same depth of the
+ *   context stack (entering an existing scope advances no version);
+ * - no shadowed-parameter frame is active (the cache is not used then);
+ * - the LaTeX syntax is the same instance with the same dictionary
+ *   (`addEntries()` changes the dictionary of the instance in place, and
+ *   gives `dictionary` a new array to say so);
+ * - the LaTeX options hold the same values, an array option compared by its
+ *   elements (the options object and its arrays can be changed in place).
+ *
+ * An expression that contains a boxed object is not stored: a field of an
+ * object can change without any version advancing. A `WeakMap`, so that a
+ * box carries no extra field and a dropped box drops its string.
+ */
+const latexStrings = new WeakMap<
+  object,
+  {
+    latex: string;
+    generation: number;
+    scope: object;
+    depth: number;
+    syntax: object;
+    dictionary: unknown;
+    options: object;
+    optionValues: Record<string, unknown>;
+  }
+>();
+
+/** A copy of the LaTeX options whose array values are copied too, for
+ * `sameOptionValues()`. */
+function snapshotOptionValues(
+  options: Record<string, unknown>
+): Record<string, unknown> {
+  const values: Record<string, unknown> = {};
+  for (const key of Object.keys(options)) {
+    const v = options[key];
+    values[key] = Array.isArray(v) ? [...v] : v;
+  }
+  return values;
+}
+
+/** Whether the LaTeX options `options` hold the values `values` (a
+ * snapshot from `snapshotOptionValues()`): the same keys, each with the same
+ * value, or with an array of the same elements. */
+function sameOptionValues(
+  options: Record<string, unknown>,
+  values: Record<string, unknown>
+): boolean {
+  const keys = Object.keys(options);
+  if (keys.length !== Object.keys(values).length) return false;
+  for (const key of keys) {
+    const a = options[key];
+    const b = values[key];
+    if (a === b) continue;
+    if (
+      !Array.isArray(a) ||
+      !Array.isArray(b) ||
+      a.length !== b.length ||
+      a.some((x, k) => x !== b[k])
+    )
+      return false;
+  }
+  return true;
+}
 
 /**
  * The `repeatingDecimal` option of the MathJSON that the `latex` getter and
@@ -451,17 +528,54 @@ export abstract class _BoxedExpression implements Expression {
         if (e instanceof CancellationError) throw e;
       }
     }
-    const syntax = this.engine._requireLatexSyntax();
+    const ce = this.engine;
+    const syntax = ce._requireLatexSyntax();
+    const options = ce.latexOptions as Record<string, unknown>;
+    const useCache = !ce._hasShadowedParameterFrame();
+    const generation = ce._cacheGeneration();
+    const scope = ce.context.lexicalScope;
+    const depth = ce._evalContextStack.length;
+    const cached = useCache ? latexStrings.get(this) : undefined;
+    if (
+      cached !== undefined &&
+      cached.generation === generation &&
+      cached.scope === scope &&
+      cached.depth === depth &&
+      cached.syntax === syntax &&
+      cached.dictionary === syntax.dictionary &&
+      cached.options === options &&
+      sameOptionValues(options, cached.optionValues)
+    )
+      return cached.latex;
     const jsonOptions = {
       prettify: true,
       fractionalDigits: 'auto',
-      repeatingDecimal: jsonRepeatingDecimal(this.engine),
+      repeatingDecimal: jsonRepeatingDecimal(ce),
     } as const;
     const json = this.toMathJson(jsonOptions);
-    return syntax.serialize(
+    const latex = syntax.serialize(
       json,
-      latexSerializeOptions(this.engine, undefined, this, jsonOptions)
+      latexSerializeOptions(ce, undefined, this, jsonOptions)
     );
+    // The serialization can itself declare or infer, which advances the
+    // generation: the string is then not stored, and the next read
+    // serializes again.
+    if (
+      useCache &&
+      ce._cacheGeneration() === generation &&
+      !containsObject(this)
+    )
+      latexStrings.set(this, {
+        latex,
+        generation,
+        scope,
+        depth,
+        syntax,
+        dictionary: syntax.dictionary,
+        options,
+        optionValues: snapshotOptionValues(options),
+      });
+    return latex;
   }
 
   /**

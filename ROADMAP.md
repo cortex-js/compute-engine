@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-438.
+Next free reference: CE-440.
 
 **Entry format.**
 
@@ -5264,6 +5264,19 @@ supported by the compiler. Custom accumulator delivery policies are unchanged.
 
 ## LaTeX parsing and serialization
 
+### CE-439. A product with a float coefficient and a power with a symbolic exponent is written `(1\times0.5 …)/x^2`
+
+**Status:** open; defect, small. Found 2026-10-24 while checking CE-438 (it is
+the output of HEAD before that change too).
+
+`Multiply(0.5, Abs(x), Power(x, n), Power(Divide(1, x), 2))` is written
+`(1\times0.5\vert x\vert x^{n})/x^2`: a slash fraction whose numerator
+starts with a factor `1` written out. Without the symbolic power,
+`Multiply(0.5, y, Power(x, -2))` is written `\frac{0.5y}{x^2}`, as
+expected. Find which step of the prettified MathJSON (`serializeJson`,
+`serialize.ts`) or of the LaTeX serializer makes the `1 \times` and the
+slash, and write `\frac{0.5\vert x\vert x^{n}}{x^2}`.
+
 ### CE-417. The LaTeX of a function whose parameter is `_1` shows an empty parameter list
 
 **Status:** open; defect, small. Found 2026-10-24 while fixing CE-416.
@@ -5876,8 +5889,22 @@ application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
   once per region. But `e_k = If(c, e_(k-1), e_(k-1))` creates one region per
   chain of lazy arms, so the number of regions grows as `2^k`. This is a
   property of the region model, not of the walk.
-- **CE-320.2** A `Sin`/`Cos` chain of depth 200 overflows the compiler's own
-  recursion.
+- **CE-320.2** The compiler overflows the stack on an expression nested more
+  than about 280 levels deep. Measured 2026-10-24: a `Sin`/`Cos` chain
+  compiles at depth 250 and fails at depth 300 ("Maximum call stack size
+  exceeded"); a polynomial in Horner form, `a₀ + x(a₁ + x(a₂ + …))`, which
+  nests two levels per degree, compiles at degree 160 and fails at degree
+  200. The failure is safe: `compile()` answers `success: false` and runs
+  the interpreter, which gives the right value. One level of nesting uses 7
+  frames, about 2.5 KB of stack, and `compileExpr` alone is 1,632 bytes of
+  it (V8 frame size): it is one function of about 3,250 lines with hundreds
+  of local variables. A CSE binding does not bound the depth, because it is
+  compiled at its first occurrence, inside the same recursion. Two fixes:
+  (a) move the large blocks of `compileExpr` into helper functions, which
+  raises the limit about 2 to 3 times but keeps a limit; (b) compile a deep
+  tree from the bottom up, binding a node every N levels to a temporary
+  before the main walk, which removes the limit but is a new mechanism in
+  the region model of `cse.ts`. WAITS FOR A USER DECISION.
 
 ### CE-321. Each user-function call retires the inert evaluation memo, so a chain of calls copies each level
 

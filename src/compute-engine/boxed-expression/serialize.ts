@@ -169,6 +169,34 @@ function serializeSubtract(
 }
 
 /**
+ * Whether the factor `x` of a product can put something in the denominator
+ * when the product is written as a fraction
+ * (`Product.asNumeratorDenominator()`). `Product` takes an exact integer
+ * exponent out of a power and splits its base too (`(a/x)^2` is `a^2·x^{-2}`),
+ * and it splits a negation and a nested product into their parts, so the
+ * test looks into them the same way: an exact number that is not an integer
+ * (`1/2`), a `Divide`, a power or root whose exponent is not a known
+ * non-negative real number or whose base can contribute a denominator, and a
+ * negation or product of such a factor. Any other factor stays in the
+ * numerator, so a product of such factors is not a fraction.
+ */
+function mayContributeDenominator(x: Expression): boolean {
+  if (isNumber(x)) return x.isExact && x.isInteger !== true;
+  if (!isFunction(x)) return false;
+  const op = x.operator;
+  if (op === 'Divide') return true;
+  if (op === 'Negate' || op === 'Multiply')
+    return x.ops.some(mayContributeDenominator);
+  if (op === 'Sqrt') return mayContributeDenominator(x.op1);
+  if (op === 'Power' || op === 'Root')
+    return (
+      mayContributeDenominator(x.op1) ||
+      !(isNumber(x.op2) && x.op2.isExact && x.op2.im === 0 && x.op2.re >= 0)
+    );
+  return false;
+}
+
+/**
  * Is `x` a number literal raised to an exact negative integer other than -1
  * (`10^{-30}`, `2^{-3}`)?
  *
@@ -387,39 +415,46 @@ function serializePrettyJsonFunction(
       // written `\frac{3}{10^{30}}`, and `(3/7)·10^{-30}` is
       // `\frac{3}{7}\times10^{-30}`.
       const kept = args.filter(isNumberToNegativePower);
-      const result = new _Product(
-        ce,
-        kept.length === 0
-          ? args
-          : args.filter((x) => !isNumberToNegativePower(x)),
-        { canonical: false }
-      ).asRationalExpression();
-      // `canonicalDivide` strips a denominator of `1`, so a `Divide` here has
-      // a real denominator — except when a guard in `canonicalDivide` left the
-      // node inert (an invalid operand, for one). A `Divide(Multiply, 1)`
-      // would send this rewrite back into the same `Multiply` forever, so it
-      // is not a fraction worth displaying: fall through and serialize the
-      // product as it is.
-      const ops =
-        result.operator === 'Divide'
-          ? (result as Expression & FunctionInterface).ops
-          : null;
-      if (ops && !(isNumber(ops[1]) && ops[1].isSame(1))) {
-        if (kept.length > 0)
+      // The split into a numerator and a denominator builds and
+      // canonicalizes new expressions, and it is most of the cost of a
+      // prettified serialization (ROADMAP CE-438). A product with no factor
+      // that can go to a denominator is written as it is, which is what the
+      // split gives for it.
+      if (args.some(mayContributeDenominator)) {
+        const result = new _Product(
+          ce,
+          kept.length === 0
+            ? args
+            : args.filter((x) => !isNumberToNegativePower(x)),
+          { canonical: false }
+        ).asRationalExpression();
+        // `canonicalDivide` strips a denominator of `1`, so a `Divide` here has
+        // a real denominator — except when a guard in `canonicalDivide` left the
+        // node inert (an invalid operand, for one). A `Divide(Multiply, 1)`
+        // would send this rewrite back into the same `Multiply` forever, so it
+        // is not a fraction worth displaying: fall through and serialize the
+        // product as it is.
+        const ops =
+          result.operator === 'Divide'
+            ? (result as Expression & FunctionInterface).ops
+            : null;
+        if (ops && !(isNumber(ops[1]) && ops[1].isSame(1))) {
+          if (kept.length > 0)
+            return serializeJsonFunction(
+              ce,
+              'Multiply',
+              [ce._fn('Divide', ops, { canonical: false }), ...kept],
+              options,
+              metadata
+            );
           return serializeJsonFunction(
             ce,
-            'Multiply',
-            [ce._fn('Divide', ops, { canonical: false }), ...kept],
+            result.operator,
+            ops,
             options,
             metadata
           );
-        return serializeJsonFunction(
-          ce,
-          result.operator,
-          ops,
-          options,
-          metadata
-        );
+        }
       }
     }
   }
