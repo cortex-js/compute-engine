@@ -5805,8 +5805,10 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   of 4; bodies of special functions 257 → 241 ms and 364 → 290 ms. A compiled
   element costs under 1 µs; the drain itself (the runner's checks, boxing the
   value, adding the term) costs 2 to 3 µs per element on the calling thread.
-  The pool route pays only after CE-432, and only for bodies that CE-431
-  makes compilable; (b) the `--workers N`
+  The drain cost is now gone for `Sum` (2026-10-24: the sum of a compiled
+  `Map` is computed on doubles, about 45 ms for 100,000 elements), so the pool
+  route can pay only for a costly compiled body, which CE-431 would provide
+  and which waits for a user decision; (b) the `--workers N`
   option of the `epsil` command, the REPL and the MCP server (section 5.7 of
   the plan), and their use of the asynchronous executor.
   (c) While `executeEpsilAsync` waits on a statement, the engine keeps the
@@ -5827,7 +5829,8 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 
 ### CE-431. A `Map` element function with a loop or an inner collection does not compile
 
-**Status:** open; performance. Found 2026-10-24 while measuring CE-314.1.
+**Status:** open; performance. WAITS FOR A USER DECISION. Found 2026-10-24
+while measuring CE-314.1.
 
 The auto-compilation of a `Map` drain (`map-auto-compile.ts`, marked tier,
 machine precision) declines an element function whose body reduces an inner
@@ -5836,24 +5839,33 @@ the interpreter: `sum(map(x => N(sum(map(k => sin(k * x) / k, 1..200))),
 1..1000))` took 14.5 s (about 14 ms per element), and the same with
 `function f(x) { let s = 0; for k in 1..200 { s = s + sin(k * x) / k }; s }`
 did not finish 1,000 elements in 300 s. These are the costly bodies of a
-notebook cell (Tycho row 441). Find which eligibility check declines each
-(`fnLiteralEligible`, the `structural` reasons of `attemptCompile`), and
-compile them when the compiled code gives the values of the interpreter.
+notebook cell (Tycho row 441).
 
-### CE-432. The drain of a compiled `Map` costs more than the element function
+The two refusals are in `bodyEligible`: a collection-form `Sum`/`Product`
+(one operand) is refused as having a run-time trip count, even over a
+literal `Range`; and a `Loop` whose source is `Element(k, Range(…))` (the
+lowering of Epsil's `for k in 1..200`) is refused because only
+`Loop(body, Range(…))` is read. Lifting both was measured on 2026-10-24
+(prototype not landed; patch `map-auto-compile-ce431-full.patch` and test
+`ce-431-map-compile-loops.test.ts` in the scratchpad of session
+compute-engine-e9): 1,000 elements in 18 to 30 ms instead of 14.5 s and more
+than 300 s. But the compiled values are not always the interpreter's. Under
+`N`, the interpreter evaluates each operation in floats, which the compiled
+code matches (0 of 2,000 elements differ for `N(sin(x) + x^2)`), except where
+it computes exactly: the statements of a loop body run exactly, so the loop
+gave `1.066407470350872` where the compiled code gives `1.0664074703508735`;
+a product of exact rationals gave the exact integer `231` where the compiled
+code gives `230.99999999999994`; and an inner sum of `exp(-k / x) * cos(k)`
+differs in the last digits for 276 of 300 elements. An inner sum of
+`sin(k * x) / k`, `k * x`, `x / k` and `1 / (k + x)` gave the same values.
+The decision: compile these bodies and accept values that can differ from the
+interpreter's `N` in the last digits (and a float where the interpreter
+gives an exact integer), or keep them interpreted.
 
-**Status:** open; performance. Found 2026-10-24 while measuring CE-314.1.
-
-At machine precision, `sum(map(x => N(sin(x) + x^2), 1..100000))` takes
-about 0.2 s, of which the compiled element function is a small part: each
-element is checked by the runner of `map-auto-compile.ts`, boxed as an
-inexact number, and added to the sum's terms (about 2 µs). `Sum` already
-sums a list of machine numbers on its doubles (`machineListTotal`, the
-`foldValue` of the reduction); a drain whose every element is a finite
-float from the compiled function could take the same route without boxing.
-Measure first, and check that the sum is the one the boxed terms give
-(the order of the additions and the compensation of `SumTerms`). With this,
-the pool route of CE-314.1 (a) can pay for a costly body.
+The exact tier declines `x => x^2 + 1` (no attempt): its proof
+(`exactTierShape`, `map-exact-proof.ts`) covers one operator application per
+level, so a nested integer body is not proved. Extending the proof is a
+separate piece of work.
 
 ### CE-430. The data operand of `FindFit.evaluateAsync()` is prepared in one block
 

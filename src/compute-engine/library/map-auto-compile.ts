@@ -682,8 +682,53 @@ function attemptCompile(
  */
 export function mapAutoCompileRunner(
   expr: Expression,
-  { drainStart = false }: { drainStart?: boolean } = {}
+  options: { drainStart?: boolean } = {}
 ): ((items: ReadonlyArray<Expression>) => Expression | undefined) | undefined {
+  const classify = mapCompiledElementRunner(expr, options);
+  if (classify === undefined) return undefined;
+  const ce = expr.engine;
+  return (items) => {
+    const element = classify(items);
+    return element === undefined ? undefined : boxCompiledElement(ce, element);
+  };
+}
+
+/**
+ * The value of an element of a `Map` that the compiled function computed,
+ * before it is boxed (`boxCompiledElement()`): an exact integer, a float, or
+ * a complex float. A caller that only needs the doubles (the `Sum` of a
+ * compiled `Map`, `compiledMapDoubles()` in `collections.ts`) reads them
+ * without boxing each element.
+ */
+export type CompiledElement =
+  | { kind: 'exact'; value: number }
+  | { kind: 'float'; value: number }
+  | { kind: 'complex'; re: number; im: number };
+
+/** The element that the interpreter gives for `element`. */
+export function boxCompiledElement(
+  ce: ComputeEngine,
+  element: CompiledElement
+): Expression {
+  if (element.kind === 'exact') return ce.number(element.value);
+  if (element.kind === 'float')
+    return ce.number(ce._inexactNumericValue(element.value));
+  return ce.number(ce._inexactNumericValue({ re: element.re, im: element.im }));
+}
+
+/**
+ * `mapAutoCompileRunner` before the boxing: the runner gives the
+ * `CompiledElement` of each element, or `undefined` to have the caller
+ * evaluate that element through the interpreter. Every check, counter and
+ * fallback is the one of `mapAutoCompileRunner`, which boxes what this
+ * runner gives.
+ */
+export function mapCompiledElementRunner(
+  expr: Expression,
+  { drainStart = false }: { drainStart?: boolean } = {}
+):
+  | ((items: ReadonlyArray<Expression>) => CompiledElement | undefined)
+  | undefined {
   const ce = expr.engine;
   if (ce.jit === 'off') return undefined;
 
@@ -854,7 +899,7 @@ export function mapAutoCompileRunner(
     );
   };
 
-  return (items) => {
+  return (items): CompiledElement | undefined => {
     if ((++ticks & 0xff) === 0) checkDeadline(ce._deadlineFrame);
 
     const cache = ensure();
@@ -948,11 +993,11 @@ export function mapAutoCompileRunner(
     // converted to a float. For example, `3x` at the exact `1/3 + 2^-60` is
     // the compiled integer `1`, but the interpreter gives a float: the value
     // of the exact rational `1 + 3·2^-60` is not an integer.
-    const integerResult = (r: number): Expression | undefined => {
+    const integerResult = (r: number): CompiledElement | undefined => {
       if (marked?.inexact === true) {
         if (!Number.isSafeInteger(r)) return fallback();
         _mapAutoCompileStats.compiledHits++;
-        return ce.number(ce._inexactNumericValue(r));
+        return { kind: 'float', value: r };
       }
       if (
         cache.exactBody === true &&
@@ -966,7 +1011,7 @@ export function mapAutoCompileRunner(
         )
       ) {
         _mapAutoCompileStats.compiledHits++;
-        return ce.number(r);
+        return { kind: 'exact', value: r };
       }
       return fallback();
     };
@@ -997,7 +1042,7 @@ export function mapAutoCompileRunner(
       if (tier === 'exact') {
         if (Number.isSafeInteger(r)) {
           _mapAutoCompileStats.compiledHits++;
-          return ce.number(r);
+          return { kind: 'exact', value: r };
         }
       } else {
         // The marked tier computes a numeric approximation, as `.N()` does
@@ -1013,7 +1058,7 @@ export function mapAutoCompileRunner(
         // again by the interpreter, which alone can tell.
         if (Number.isInteger(r)) return integerResult(r);
         _mapAutoCompileStats.compiledHits++;
-        return ce.number(ce._inexactNumericValue(r));
+        return { kind: 'float', value: r };
       }
     }
     if (
@@ -1035,7 +1080,9 @@ export function mapAutoCompileRunner(
         // is in the interpreter (`N(√x)` at `-4` is the float `2.0i`).
         if (im === 0 && Number.isInteger(re)) return integerResult(re);
         _mapAutoCompileStats.compiledHits++;
-        return ce.number(ce._inexactNumericValue(im === 0 ? re : { re, im }));
+        return im === 0
+          ? { kind: 'float', value: re }
+          : { kind: 'complex', re, im };
       }
     }
 

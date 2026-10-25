@@ -434,6 +434,8 @@ import {
   rangeLast,
   hasSymbolicRangeBounds,
   enumerationDeclinedAfterWalk,
+  compiledMapDoubles,
+  compiledMapDoublesSteps,
 } from './collections.js';
 import {
   rangeExtremumClosedForm,
@@ -445,6 +447,10 @@ import {
   CancellationError,
   checkDeadline,
 } from '../../common/interruptible.js';
+import {
+  EventLoopPacer,
+  runStepsAsync,
+} from '../../common/cooperative-steps.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -13485,6 +13491,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           const summed = machineSum(first);
           if (typeof summed === 'number' || Array.isArray(summed))
             return boxMachineTotal(engine, summed);
+          // A `Map` whose element function compiles is summed on the
+          // doubles of its elements: see `compiledMapTotal`.
+          const mapTotal =
+            summed === undefined ? compiledMapTotal(first) : undefined;
+          if (mapTotal !== undefined) return boxMachineTotal(engine, mapTotal);
           // The operand `machineSum` evaluated is walked below in place of
           // `first`, so that it is not evaluated a second time.
           const source = summed ?? first;
@@ -13691,11 +13702,48 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             numericApproximation
           );
           if (closedForm !== undefined) return closedForm;
+          // A `List` of machine numbers, and a `Map` whose element function
+          // compiles, are summed on their doubles, as in the sync handler.
+          const summed = runWithEvaluationEffects(
+            engine,
+            effects,
+            () => machineSum(first),
+            _contextStack,
+            _precisionWindow
+          );
+          if (typeof summed === 'number' || Array.isArray(summed))
+            return boxMachineTotal(engine, summed);
+          // The elements of a compiled `Map` are read in steps that give the
+          // event loop a turn and check the signal, as the walk below does.
+          if (summed === undefined) {
+            const doubles = await runStepsAsync(
+              compiledMapDoublesSteps(first),
+              new EventLoopPacer(),
+              (f) => {
+                if (signal?.aborted)
+                  throw new CancellationError({ cause: signal.reason });
+                return runWithEvaluationEffects(
+                  engine,
+                  effects,
+                  f,
+                  _contextStack,
+                  _precisionWindow
+                );
+              }
+            );
+            const mapTotal =
+              doubles === undefined
+                ? undefined
+                : compiledMapDoublesTotal(doubles);
+            if (mapTotal !== undefined)
+              return boxMachineTotal(engine, mapTotal);
+          }
+          const source = summed ?? first;
           // Decline read off the fold's own walk — see the sync handler. A
           // walk that missed elements is measured as in the sync handler.
           let walked = 0;
           const nonFinite = new NonFiniteTerm();
-          const walk = new MeasuredWalk(() => first.each());
+          const walk = new MeasuredWalk(() => source.each());
           const result = await runAsync(
             // The elements are evaluated synchronously, and `runAsync`
             // suspends this handler between time slices: every step must run
@@ -15222,6 +15270,60 @@ function machineListTotal(list: Expression): number | [number] | undefined {
       return undefined;
   }
   if (total === 0) total = 0;
+  return float ? [total] : total;
+}
+
+/**
+ * The sum of `Sum(collection)` when `collection` is a `Map` whose element
+ * function the auto-compilation compiles (`compiledMapDoubles()`), computed
+ * on the doubles of the elements with the rules of the element-by-element
+ * fold (`addSumTerm`), or `undefined` when the fold must answer
+ * (`compiledMapDoublesTotal()`). The answer has the form of
+ * `machineListTotal()`: a number for an exact integer sum, a one-element
+ * array for a float sum (ROADMAP CE-432). At about 2 µs per element, the
+ * fold's checking, boxing and adding cost more than the compiled element
+ * function itself.
+ */
+function compiledMapTotal(
+  collection: Expression
+): number | [number] | undefined {
+  const doubles = compiledMapDoubles(collection);
+  return doubles === undefined ? undefined : compiledMapDoublesTotal(doubles);
+}
+
+/**
+ * The sum of the doubles of the elements of a compiled `Map`, with the rules
+ * of the fold, or `undefined` when the fold must answer.
+ *
+ * The fold boxes each element, takes the first one as its running sum, and
+ * adds each later one with `add()`: two exact integers add exactly, and a
+ * float on either side makes the addition of two doubles. Here the first
+ * double is the running sum and each later one is added with `+`, in the
+ * same order, so a float sum is the same double, `-0` included. Under a
+ * numeric approximation the fold evaluates each element numerically, which
+ * leaves an exact integer exact, so the rules do not change. The fold adds
+ * integers exactly past the safe range too, where a double may no longer
+ * hold what the fold holds: the sum declines as soon as a partial sum is an
+ * integer past the safe range, as `machineListTotal()` does. The elements
+ * are finite: the runner gives a non-finite value to the interpreter, and
+ * `compiledMapDoubles()` then declines.
+ */
+function compiledMapDoublesTotal({
+  values,
+  exact,
+}: {
+  values: Float64Array;
+  exact: Uint8Array;
+}): number | [number] | undefined {
+  let total = values[0];
+  let float = exact[0] === 0;
+  for (let i = 1; i < values.length; i++) {
+    total += values[i];
+    if (exact[i] === 0) float = true;
+    if (Number.isInteger(total) && !Number.isSafeInteger(total))
+      return undefined;
+  }
+  if (Number.isInteger(total) && !Number.isSafeInteger(total)) return undefined;
   return float ? [total] : total;
 }
 

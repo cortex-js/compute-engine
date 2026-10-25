@@ -215,7 +215,10 @@ import {
   type ArithmeticRange,
 } from './range-closed-form.js';
 import { splitGraphemeClusters } from '../../common/grapheme-splitter.js';
-import { mapAutoCompileRunner } from './map-auto-compile.js';
+import {
+  mapAutoCompileRunner,
+  mapCompiledElementRunner,
+} from './map-auto-compile.js';
 import { lowerMapSpine, makeSpineRunner } from './map-lowering.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { sumVariantInfo } from '../sum-representation.js';
@@ -249,6 +252,8 @@ import {
   roundedToWorkingPrecision,
 } from '../boxed-expression/utils.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { runStepsSync, type Steps } from '../../common/cooperative-steps.js';
+import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
   hasConstantTimeCount,
@@ -23566,6 +23571,109 @@ function mapIteratorImpl(expr: Expression): Iterator<Expression> {
       }
     },
   };
+}
+
+/** The most elements that `compiledMapDoubles()` reads. */
+const MAX_COMPILED_MAP_DOUBLES = 10_000_000;
+
+/** The elements that `compiledMapDoublesSteps()` reads between two steps. */
+const COMPILED_MAP_DOUBLES_PER_STEP = 4096;
+
+/**
+ * The elements of `collection` as doubles, when it is a `Map` (or a symbol
+ * whose value is one) of one source whose element function the
+ * auto-compilation compiles (`map-auto-compile.ts`), and the compiled
+ * function gives every element: `values[i]` is the double of element `i`,
+ * `exact[i]` is 1 when the element is an exact integer and 0 when it is a
+ * float. `undefined` when the caller must walk the collection itself. The
+ * elements are those the walk of the `Map` gives (`mapIteratorImpl`): the
+ * same source walk and the same runner, without the boxing of each element
+ * (ROADMAP CE-432). The function declines:
+ *
+ * - for a `Map` that is not of that kind, or whose source walk would
+ *   evaluate its elements again (an impure literal: `walkedSource`);
+ * - for a `Map` whose elements are deduplicated or merged by key (a set
+ *   source, `producesMergedView`): the sum reads the merged view;
+ * - for a `Map` that is not transitively pure: the walk serves the
+ *   elements of an impure `Map` from its element memo (the draws of a
+ *   `Random()` body are made once per instance), which this function does
+ *   not read or fill;
+ * - when an element is not a real number literal of the source, or the
+ *   runner hands an element to the interpreter or gives a complex value.
+ *
+ * A decline part of the way leaves the walk that follows as it would have
+ * been: the `Map` is pure, so the elements computed here draw nothing, and
+ * the auto-compilation counters are put back, so the walk counts each
+ * element once.
+ *
+ * A step function: it yields every `COMPILED_MAP_DOUBLES_PER_STEP` elements,
+ * so that the asynchronous `Sum` gives the event loop a turn and checks its
+ * signal (`compiledMapDoubles()` runs it to its end).
+ */
+export function* compiledMapDoublesSteps(
+  collection: Expression
+): Steps<{ values: Float64Array; exact: Uint8Array } | undefined> {
+  const expr = isSymbol(collection) ? collection.value : collection;
+  if (!isFunction(expr, 'Map') || expr.nops !== 2) return undefined;
+  if (producesMergedView(expr) || !isTransitivelyPure(expr)) return undefined;
+  // A `Map` that the broadcast-chain lowering serves (`lowerMapSpine()`)
+  // gives each element as the compiled runner of its level applied to the
+  // element of its base, when the spine has one level over one base (the
+  // walk of `makeSpineRunner()` does nothing else for a number literal that
+  // the runner computes). A longer spine is walked by the caller.
+  const spine = lowerMapSpine(expr);
+  if (
+    spine !== undefined &&
+    (spine.levels.length !== 1 || spine.bases.length !== 1)
+  )
+    return undefined;
+  const level = spine?.levels[0].expr ?? expr;
+  const xs = spine?.bases[0] ?? expr.op2;
+  if (
+    (isFunction(xs, 'List') || isFunction(xs, 'Tuple')) &&
+    xs._numericStore === undefined &&
+    (literalMayEraseElement(xs) || !isTransitivelyPure(xs))
+  )
+    return undefined;
+  const counted = xs.count;
+  const count = typeof counted === 'bigint' ? Number(counted) : counted;
+  if (
+    count === undefined ||
+    !Number.isSafeInteger(count) ||
+    count === 0 ||
+    count > MAX_COMPILED_MAP_DOUBLES
+  )
+    return undefined;
+  const run = mapCompiledElementRunner(level, { drainStart: true });
+  if (run === undefined) return undefined;
+  const counters = { ..._mapAutoCompileStats };
+  const decline = (): undefined => {
+    Object.assign(_mapAutoCompileStats, counters);
+    return undefined;
+  };
+  const values = new Float64Array(count);
+  const exact = new Uint8Array(count);
+  let n = 0;
+  for (const x of xs.each()) {
+    if (n >= count || !isNumber(x)) return decline();
+    if (n > 0 && n % COMPILED_MAP_DOUBLES_PER_STEP === 0) yield;
+    const element = run([x]);
+    if (element === undefined || element.kind === 'complex') return decline();
+    // An exact element is boxed as `ce.number(value)`, which makes `-0` the
+    // integer `0`: the same `+0` here.
+    values[n] = element.kind === 'exact' ? element.value + 0 : element.value;
+    exact[n] = element.kind === 'exact' ? 1 : 0;
+    n += 1;
+  }
+  if (n !== count) return decline();
+  return { values, exact };
+}
+
+/** `compiledMapDoublesSteps()` run to its end. */
+export function compiledMapDoubles(
+  collection: Expression
+): { values: Float64Array; exact: Uint8Array } | undefined {
+  return runStepsSync(compiledMapDoublesSteps(collection));
 }
 
 function isIterator(x: unknown): x is Iterator<Expression> {

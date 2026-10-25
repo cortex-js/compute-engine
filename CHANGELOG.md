@@ -113,6 +113,16 @@
 
 ### Performance
 
+- **The sum of a compiled `Map` is computed on doubles** (ROADMAP CE-432). At
+  machine precision, `Sum(Map(f, xs))` whose element function the
+  auto-compilation compiles now adds the doubles of the elements, with the
+  rules of the element-by-element sum, instead of boxing each element:
+  `sum(map(x => N(sin(x) + x^2), 1..100000))` takes about 45 ms instead of
+  about 190 ms, with the same value. The asynchronous route takes the same
+  path in steps that give the event loop a turn. A `Map` over a set, an impure
+  `Map`, and any element that the interpreter must compute keep the
+  element-by-element sum.
+
 - **`FindFit.evaluateAsync()` no longer blocks the calling thread for long**
   (ROADMAP CE-429). One grid point of the separable scan and the setup (the
   data rows, the compilation of the model and of its derivatives) now give
