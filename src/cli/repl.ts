@@ -49,6 +49,15 @@ export function runRepl(
   let outputMode = options.outputMode;
   let outputModeBeforeAst = options.outputMode;
   let showTime = false;
+  // With a kernel pool, an entry runs asynchronously (`evaluateAsync`). The
+  // entries still run one after the other, in the order they were typed: a
+  // program must not start on the engine while another one waits.
+  let previous: Promise<unknown> = Promise.resolve();
+  const evaluateInOrder = <T>(run: () => Promise<T>): Promise<T> => {
+    const result = previous.then(run);
+    previous = result.catch(() => undefined);
+    return result;
+  };
 
   output.write(`Epsil ${version}\nType .help for more information.\n\n`);
 
@@ -72,6 +81,39 @@ export function runRepl(
         }
         return;
       }
+      // With a kernel pool, the check for incomplete input also waits in the
+      // queue. The check parses the source, and the parse of a LaTeX block
+      // uses the engine, which must do no other work while the previous
+      // program waits in `evaluateAsync`. The input is paused until the
+      // check is done: if the entry is incomplete, the REPL must add the next
+      // line to it, and that line must not arrive before the answer.
+      if (session.workers !== undefined) {
+        server.pause();
+        evaluateInOrder(async () =>
+          isRecoverable(source, session.parse(source, filename))
+            ? undefined
+            : session.evaluateAsync(source, filename)
+        ).then(
+          (result) => {
+            server.resume();
+            if (result === undefined)
+              callback(
+                new Recoverable(new SyntaxError('Incomplete Epsil input')),
+                undefined
+              );
+            else callback(null, new ReplEvaluation(result));
+          },
+          (error: unknown) => {
+            server.resume();
+            callback(
+              error instanceof Error ? error : new Error(String(error)),
+              null
+            );
+          }
+        );
+        return;
+      }
+
       const diagnostics = session.parse(source, filename);
       if (isRecoverable(source, diagnostics)) {
         callback(
@@ -102,7 +144,16 @@ export function runRepl(
     },
   });
 
-  server.on('reset', () => session.reset());
+  // With a kernel pool, a reset waits in the same queue as the entries and
+  // the `.load` commands. Thus a `.clear` that follows a `.load` clears the
+  // engine after the file has run, not before.
+  server.on('reset', () => {
+    if (session.workers === undefined) session.reset();
+    else
+      void evaluateInOrder(async () => {
+        session.reset();
+      });
+  });
 
   server.defineCommand('ast', {
     help: 'toggle MathJSON output',
@@ -129,15 +180,18 @@ export function runRepl(
   server.defineCommand('load', {
     help: 'load and execute an Epsil source file',
     action(filename) {
-      loadFile(
-        this,
-        session,
-        filename,
-        outputMode,
-        options.fancySymbols === true,
-        options.color,
-        showTime
-      );
+      const load = () =>
+        loadFile(
+          this,
+          session,
+          filename,
+          outputMode,
+          options.fancySymbols === true,
+          options.color,
+          showTime
+        );
+      if (session.workers === undefined) void load();
+      else void evaluateInOrder(load);
     },
   });
 
@@ -148,7 +202,10 @@ export function runRepl(
   });
 }
 
-function loadFile(
+/** Run an Epsil file in the REPL session and write its result. With a kernel
+ * pool, the file runs asynchronously (`evaluateAsync`); without one, it runs
+ * synchronously, and the result is written before the function returns. */
+async function loadFile(
   server: REPLServer,
   session: EpsilSession,
   filename: string,
@@ -156,10 +213,14 @@ function loadFile(
   fancySymbols: boolean,
   color: boolean,
   showTime: boolean
-): void {
+): Promise<void> {
   const path = resolve(filename.trim());
   try {
-    const result = session.evaluate(readFileSync(path, 'utf8'), path);
+    const source = readFileSync(path, 'utf8');
+    const result =
+      session.workers === undefined
+        ? session.evaluate(source, path)
+        : await session.evaluateAsync(source, path);
     server.output.write(
       `${formatReplResult(result, outputMode, fancySymbols, color, showTime)}\n`
     );

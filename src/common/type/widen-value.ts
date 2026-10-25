@@ -99,6 +99,27 @@ export function widenValueTypes(t: Type): Type {
 
 type PolarityMemos = { co: Map<object, Type>; contra: Map<object, Type> };
 
+/** Is `t` the value node `+oo` or `-oo`? */
+function isSignedInfinityValue(t: Readonly<Type>): boolean {
+  return (
+    typeof t === 'object' &&
+    t.kind === 'value' &&
+    (t.value === Infinity || t.value === -Infinity)
+  );
+}
+
+/** Do the members of a union include both value nodes `+oo` and `-oo`? */
+function holdsSignedInfinityPair(types: readonly Readonly<Type>[]): boolean {
+  let pos = false;
+  let neg = false;
+  for (const x of types) {
+    if (typeof x !== 'object' || x.kind !== 'value') continue;
+    if (x.value === Infinity) pos = true;
+    else if (x.value === -Infinity) neg = true;
+  }
+  return pos && neg;
+}
+
 function widen(t: Type, covariant: boolean, memo: PolarityMemos): Type {
   if (typeof t === 'string') return t;
 
@@ -144,7 +165,17 @@ function widenNode(
 
     case 'union':
     case 'intersection': {
-      const types = t.types.map((x) => widen(x, covariant, memo));
+      // A signed infinity value widens to the pair `+oo | -oo`. When a
+      // union already holds both members of the pair, widening either one
+      // adds nothing, so both are kept as they are. Without this, the union
+      // `real | +oo | -oo` that every extended-real symbol carries was never
+      // a fixed point: each call rebuilt it and reduced it again, once per
+      // type-handler result (CE-327).
+      const keepPair =
+        covariant && t.kind === 'union' && holdsSignedInfinityPair(t.types);
+      const types = t.types.map((x) =>
+        keepPair && isSignedInfinityValue(x) ? x : widen(x, covariant, memo)
+      );
       if (types.every((x, i) => x === t.types[i])) return t;
       return reduceType({ ...t, types });
     }

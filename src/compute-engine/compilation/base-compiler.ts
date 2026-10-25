@@ -252,7 +252,11 @@ import type {
 } from './types.js';
 import { CompileDeclineError, LaneMismatchError } from './diagnostics.js';
 import { isColorValued } from './color-space-fact.js';
-import { mayBeCollectionType } from './in-place-update.js';
+import {
+  mayBeCollectionType,
+  OWNED_LOCAL_UPDATE_OPS,
+  ownedLocalUpdateChains,
+} from './in-place-update.js';
 import {
   candidateAt,
   descendantRegionAt,
@@ -426,6 +430,25 @@ type FoldCostContext = {
  * evaluation yields a correct value or a non-literal — never a wrong fold.
  */
 const CONSTANT_FOLD_MAX_COLLECTION_SIZE = 10_000;
+
+/**
+ * The maximum number of elements or iterations that one constant fold may
+ * walk (`foldCostEstimate`): the trip count of an indexed `Sum`/`Product`,
+ * and the size of a collection that a reducer, a `Map`/`Filter` or a
+ * higher-order operator (`CountIf`, `Any`, `Reduce`, …) walks. A larger
+ * walk declines the fold, whatever its cost per element.
+ *
+ * The cost per element alone does not bound the time. The interpreter pays
+ * about 10 to 20 µs for each element of a walk (it binds the index or applies
+ * the callback, and boxes the result), whatever the cost estimate of the
+ * body. So a walk of 100 000 elements with a body of cost 1 was admitted at
+ * an estimate of 100 000, and its fold took several seconds:
+ * `Sum(Filter(1..99999, IsPrime))` took 6.9 s to compile, and
+ * `Any(1..99999, x ↦ x > 99998)` 10 s. The structural lowering of the same
+ * walk runs in milliseconds. The cap is the materialization cap of the fold,
+ * so a fold walks at most as many elements as it may materialize. (CE-324.1)
+ */
+const CONSTANT_FOLD_MAX_WALK = CONSTANT_FOLD_MAX_COLLECTION_SIZE;
 
 /** The integral operators excluded from constant folding when the caller
  * requested the stochastic Monte-Carlo quadrature (see `tryConstantFold`). */
@@ -9430,8 +9453,16 @@ export class BaseCompiler {
     // single setting, so it is declined rather than folded: structural
     // compilation of that shape is already correct, and declining costs only
     // the fold.
-    const savedAngularUnit = engine.angularUnit;
-    const neutralizeAngle = savedAngularUnit !== 'rad';
+    //
+    // The neutralization uses `_withTransientAngularUnit`, not the
+    // `angularUnit` setter. The setter resets the engine and purges its
+    // caches, so a degree-mode compile paid two purges for each subtree that
+    // folded (2.2 times the radian-mode compile time over 60 angular
+    // constants). The transient window changes only the unit: the memos that
+    // hold evaluated values are neither read nor written while it is open
+    // (`_atTransientConfiguration`), so a value computed in radians is not
+    // served later in degrees. (CE-345.1)
+    const neutralizeAngle = engine.angularUnit !== 'rad';
     if (neutralizeAngle && containsDerivativeHead(expr)) return undefined;
 
     // The eligibility decision, and the LAST gate before the expensive part:
@@ -9467,7 +9498,6 @@ export class BaseCompiler {
         savedMaxCollectionSize,
         CONSTANT_FOLD_MAX_COLLECTION_SIZE
       );
-      if (neutralizeAngle) engine.angularUnit = 'rad';
       // The evaluation runs with NO wall-clock budget of its own: a per-fold
       // deadline made the fold decision depend on machine load — five
       // in-process compiles of the same source produced two different
@@ -9483,7 +9513,7 @@ export class BaseCompiler {
       // `maxCollectionSize` clamp above, and the quadrature interval
       // budget. An AMBIENT deadline armed by the caller still cancels the
       // whole compilation through the ordinary check sites.
-      value = (() => {
+      const evaluateFold = (): Expression | undefined => {
         const v =
           unsafe.length > 0
             ? BaseCompiler.exactFoldValue(expr, unsafe)
@@ -9494,7 +9524,10 @@ export class BaseCompiler {
           target.maxInlineElements ?? CONSTANT_FOLD_MAX_INLINE_ELEMENTS
         );
         return v;
-      })();
+      };
+      value = neutralizeAngle
+        ? engine._withTransientAngularUnit('rad', evaluateFold)
+        : evaluateFold();
     } catch (e) {
       // An evaluation error is a quiet decline — but a cancellation
       // raised because the AMBIENT (outer) deadline expired must keep
@@ -9505,7 +9538,6 @@ export class BaseCompiler {
       BaseCompiler._boundVarsCtx = savedBoundCtx;
       BaseCompiler._binderShield = savedShield;
       engine.maxCollectionSize = savedMaxCollectionSize;
-      engine.angularUnit = savedAngularUnit;
     }
     if (byExpr === undefined) {
       byExpr = new Map();
@@ -9678,7 +9710,8 @@ export class BaseCompiler {
       // per iteration.
       if (ops.length >= 2) {
         const trips = BaseCompiler.bigOpTripCount(expr);
-        if (trips === undefined) return Infinity;
+        if (trips === undefined || trips > CONSTANT_FOLD_MAX_WALK)
+          return Infinity;
         return 1 + trips * body;
       }
 
@@ -9696,7 +9729,45 @@ export class BaseCompiler {
       // constant fold — declining here refused it. A size that IS resolvable
       // is still priced, which is what keeps `Sum(Range(1, 1000000))` out.
       const size = BaseCompiler.staticCollectionSize(ops[0], depth + 1);
+      if (size !== undefined && size > CONSTANT_FOLD_MAX_WALK) return Infinity;
       return 1 + (size ?? 1) * body;
+    }
+
+    // A `Take` with a positive constant count `n` of a `Map` applies the
+    // callback only to the first `n` elements: the `Map` of the interpreter
+    // is lazy, so `Take(Map(f, Range(1, 100000)), 10)` walks ten elements.
+    // The walk is the size of the `Take` (`staticCollectionSize`, which is
+    // the smaller of `n` and the size of the source), so the walk cap and the
+    // cost apply to that size and not to the size of the source. The sources
+    // are priced by their own estimate, which declines a source that walks
+    // more than the cap itself (a nested `Map` or a `Filter`). A negative
+    // count takes the last elements, which walks the whole source, so it is
+    // priced by the arms below.
+    if (op === 'Take' && ops.length === 2) {
+      const map = ops[0];
+      const n = BaseCompiler.bigOpBoundConstant(ops[1]);
+      if (
+        n !== undefined &&
+        n > 0 &&
+        isFunction(map) &&
+        map.operator === 'Map' &&
+        map.ops.length >= 2
+      ) {
+        const size = BaseCompiler.staticCollectionSize(expr, depth);
+        if (size === undefined || size > CONSTANT_FOLD_MAX_WALK)
+          return Infinity;
+        const perElement = BaseCompiler.foldCostEstimate(
+          map.ops[0],
+          depth + 2,
+          c
+        );
+        let sourceCost = 0;
+        for (const source of map.ops.slice(1))
+          sourceCost += BaseCompiler.foldCostEstimate(source, depth + 2, c);
+        if (!Number.isFinite(perElement) || !Number.isFinite(sourceCost))
+          return Infinity;
+        return 3 + sourceCost + size * perElement;
+      }
     }
 
     // A collection PIPELINE costs its callback once per element. The size
@@ -9724,6 +9795,7 @@ export class BaseCompiler {
         sourceCost += BaseCompiler.foldCostEstimate(source, depth + 1, c);
       if (!Number.isFinite(perElement) || !Number.isFinite(sourceCost))
         return Infinity;
+      if (size !== undefined && size > CONSTANT_FOLD_MAX_WALK) return Infinity;
       // An UNRESOLVABLE source size is priced as a single element rather than
       // as infinite, because the bound may live in a CONSUMER above this node
       // rather than in the source below it: `Take(Map(f, 1..∞), 10)` walks ten
@@ -9757,7 +9829,60 @@ export class BaseCompiler {
       total += BaseCompiler.foldCostEstimate(operand, depth + 1, c);
       if (total >= Infinity) return Infinity;
     }
+    // A higher-order operator (`CountIf(xs, p)`, `Any(xs, p)`,
+    // `Reduce(xs, f)`, `Fold(f, x0, xs)`, …) applies its callback once per
+    // element of a collection operand. The syntax walk above counted the
+    // callback once, so the walk is priced here: the size of each collection
+    // operand times the cost of one application. An operator with no
+    // callback operand (`Length(xs)`, `Mean(xs)`) is not priced per element:
+    // several of them have a closed form over a `Range`. The callback is
+    // priced only when a collection operand has a static size: a callback
+    // operand with no collection to walk (`Apply(Derivative(f), 0.5)`) was
+    // counted once above, and pricing its body again here could only decline
+    // a fold that the walk above admitted.
+    let elements = 0;
+    for (const operand of ops) {
+      const size = BaseCompiler.staticCollectionSize(operand, depth + 1);
+      if (size !== undefined) elements += size;
+    }
+    if (elements > 0) {
+      let application: number | undefined;
+      for (const operand of ops) {
+        const cost = BaseCompiler.callbackApplicationCost(operand, depth, c);
+        if (cost !== undefined)
+          application = Math.max(application ?? 0, cost);
+      }
+      if (application !== undefined) {
+        if (!Number.isFinite(application)) return Infinity;
+        if (elements > CONSTANT_FOLD_MAX_WALK) return Infinity;
+        total += elements * application;
+      }
+    }
     return total;
+  }
+
+  /**
+   * The cost of ONE application of `operand` as a callback, for the
+   * higher-order arm of `foldCostEstimate`, or `undefined` when `operand` is
+   * not a callback. A callback is a function literal (`x ↦ x^2`), or the
+   * name of a user function or of a library operator (`IsPrime`). One
+   * application costs the call node, its argument and the body.
+   */
+  private static callbackApplicationCost(
+    operand: Expression,
+    depth: number,
+    c: FoldCostContext
+  ): number | undefined {
+    if (isFunction(operand, 'Function'))
+      return 2 + BaseCompiler.foldCostEstimate(operand.ops[0], depth + 1, c);
+    if (!isSymbol(operand)) return undefined;
+    const engine = operand.engine;
+    const name = operand.symbol;
+    if (BaseCompiler.userFunctionLiteral(engine, name) !== undefined)
+      return 2 + BaseCompiler.calleeBodyCost(engine, name, depth, c);
+    const def = engine.lookupDefinition(name);
+    if (def !== undefined && isOperatorDef(def)) return 2;
+    return undefined;
   }
 
   /**
@@ -21230,6 +21355,13 @@ export class BaseCompiler {
     if (pushedEnforced) BaseCompiler._enforcedTargets.push(enforcedLocals!);
     // The locals whose reads compile with a check (`checkedLocalReads`).
     let checkedFrame: CheckedLocalsFrame | undefined;
+    // Removes the marks of `markScalarFedLiterals`.
+    let unmarkFed: (() => void) | undefined;
+    // The list updates of this block that write in place, and the
+    // temporaries that hold the arrays the block owns
+    // (`ownedLocalUpdateChains`).
+    const ownedTemps: string[] = [];
+    const ownedOps: ReadonlyArray<Expression>[] = [];
     // The statements of the block, for the proof of the type of a local by
     // its assignments (`assignmentsProveType`).
     const blockScope = node?.localScope;
@@ -21363,6 +21495,34 @@ export class BaseCompiler {
       // ordering never interact with CSE. Each statement's own value
       // expressions are separate, bindable child regions (§5.1(c)).
       const stmts = args.filter((a) => !isSymbol(a, 'Nothing'));
+      // The function literals that this list binds to a local that is only
+      // ever called (`callOnlyLocalFunctionLiterals`) are compiled without
+      // the broadcast wrapper: each call site broadcasts by itself. The
+      // marks are removed in the `finally` below.
+      if (target.language === 'javascript')
+        unmarkFed = BaseCompiler.markScalarFedLiterals(
+          BaseCompiler.callOnlyLocalFunctionLiterals(
+            args,
+            locals,
+            reboundLocals
+          )
+        );
+      // A local that the list replaces element by element
+      // (`xs = ReplaceAt(xs, i, v)`) and never hands out is copied once, at
+      // its first update, and then written in place
+      // (`ownedLocalUpdateChains`, CE-329). JavaScript only: the other
+      // targets keep the copying form.
+      if (target.language === 'javascript')
+        for (const local of locals) {
+          const chains = ownedLocalUpdateChains(args, local);
+          if (chains === undefined) continue;
+          const temp = BaseCompiler.tempVar(target);
+          ownedTemps.push(temp);
+          for (const ops of chains) {
+            OWNED_LOCAL_UPDATE_OPS.set(ops, temp);
+            ownedOps.push(ops);
+          }
+        }
       const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
         stmts
           .flatMap((arg, i) =>
@@ -21597,6 +21757,12 @@ export class BaseCompiler {
         return '';
       }
 
+      // The temporaries of the in-place list updates (see `ownedTemps`
+      // above), declared first so that each execution of the block starts
+      // with no owned array.
+      if (ownedTemps.length > 0)
+        result.unshift(...ownedTemps.map((temp) => `let ${temp}`));
+
       // A statement list evaluated FOR EFFECT — a loop body — has no value,
       // so it is neither wrapped nor returned from: it is just its statements.
       // Going through the value paths below emitted `return <last statement>`
@@ -21695,6 +21861,8 @@ export class BaseCompiler {
       if (pushedEnforced) BaseCompiler._enforcedTargets.pop();
       if (checkedFrame !== undefined) BaseCompiler._checkedLocals.pop();
       if (blockScope !== undefined) BaseCompiler._blockStatements.pop();
+      unmarkFed?.();
+      for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
     }
   }
 
@@ -37161,6 +37329,110 @@ export class BaseCompiler {
       if (previous === undefined) map.delete(literal);
       else map.set(literal, previous);
     }
+  }
+
+  /**
+   * Mark each of `literals` as fed run-time scalars only (`'scalar'`), as
+   * `withScalarFedLiteral` marks one literal for the time of a callback. The
+   * caller runs the returned function when the compilation that needs the
+   * marks is done; it restores the marks that were there before.
+   */
+  static markScalarFedLiterals(
+    literals: ReadonlyArray<Expression>
+  ): () => void {
+    const map = BaseCompiler.scalarFedLiterals;
+    const previous = literals.map((literal) => map.get(literal));
+    for (const literal of literals) map.set(literal, 'scalar');
+    return () =>
+      literals.forEach((literal, i) => {
+        const kind = previous[i];
+        if (kind === undefined) map.delete(literal);
+        else map.set(literal, kind);
+      });
+  }
+
+  /**
+   * The function literals of the statement list `stmts` that are bound to a
+   * local function which the list only ever calls, so that the literal is
+   * never handed out as a value.
+   *
+   * A function literal is compiled with a broadcast wrapper, because a
+   * consumer of a function value (`Map`, `Filter`, …) gives it the elements
+   * as they are, and an element can be a list. A call of a block-local
+   * function does not need that wrapper: the call site broadcasts by itself
+   * (`tryCompileLocalFunctionCall`, which calls the function directly only
+   * when every argument is a scalar, and through `_SYS.bcastFn` otherwise).
+   * So when every mention of the local in the list is the head of a call,
+   * the literal is only ever given scalars, and the wrapper costs one extra
+   * call and one `Array.isArray` test per call for nothing (CE-338).
+   *
+   * A literal is accepted when it is the value of a top-level `Assign` or
+   * `Declare` of a local of the list that is bound once
+   * (`reboundLocalNames`), and the name of that local appears nowhere in
+   * the list as a symbol, except as the target of its own `Assign` or
+   * `Declare`. Any other mention, such as `Map(L, g)`, `h = g` or a
+   * function literal that returns `g`, hands the value out, and the literal
+   * keeps the wrapper. A nested scope that binds the same name is counted
+   * as a mention too, which can only keep a wrapper that is not needed.
+   */
+  private static callOnlyLocalFunctionLiterals(
+    stmts: ReadonlyArray<Expression>,
+    locals: ReadonlyArray<string>,
+    rebound: ReboundFunctionLocals
+  ): Expression[] {
+    const candidates = new Map<string, Expression>();
+    for (const stmt of stmts) {
+      if (!isFunction(stmt)) continue;
+      const assign = stmt.operator === 'Assign';
+      if (!(assign || stmt.operator === 'Declare') || !isSymbol(stmt.ops[0]))
+        continue;
+      const name = stmt.ops[0].symbol;
+      const value = assign
+        ? stmt.ops[1]
+        : BaseCompiler.declareValueOperand(stmt.ops);
+      if (
+        isFunction(value, 'Function') &&
+        locals.includes(name) &&
+        !rebound.rebound.has(name)
+      )
+        candidates.set(name, value);
+    }
+    if (candidates.size === 0) return [];
+    const mentioned = new Set<string>();
+    // The value of the last statement is the value of the block. When that
+    // statement is the `Assign` or `Declare` of a candidate, the block
+    // returns the literal, and the caller can give it a list. So the target
+    // of that statement counts as a mention, and the literal keeps the
+    // wrapper. A `Nothing` statement is skipped, as `compileBlock` does.
+    for (let i = stmts.length - 1; i >= 0; i--) {
+      const stmt = stmts[i];
+      if (isSymbol(stmt, 'Nothing')) continue;
+      if (
+        isFunction(stmt) &&
+        (stmt.operator === 'Assign' || stmt.operator === 'Declare') &&
+        isSymbol(stmt.ops[0])
+      )
+        mentioned.add(stmt.ops[0].symbol);
+      break;
+    }
+    const walk = (e: Expression, top: boolean): void => {
+      if (isSymbol(e)) {
+        mentioned.add(e.symbol);
+        return;
+      }
+      if (!isFunction(e)) return;
+      // The target of a top-level `Assign` or `Declare` names the local; it
+      // does not read its value.
+      const skipTarget =
+        top && (e.operator === 'Assign' || e.operator === 'Declare');
+      e.ops.forEach((op, i) => {
+        if (!(skipTarget && i === 0)) walk(op, false);
+      });
+    };
+    for (const stmt of stmts) walk(stmt, true);
+    return [...candidates]
+      .filter(([name]) => !mentioned.has(name))
+      .map(([, literal]) => literal);
   }
 
   /**

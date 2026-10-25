@@ -21,6 +21,7 @@ import {
 } from '../common/interruptible.js';
 import { compile } from '../compute-engine/compilation/compile-expression.js';
 import type { CompileMode } from '../compute-engine/compilation/types.js';
+import type { KernelPool } from '../compute-engine/kernel-pool-types.js';
 import { resolveLibraryNames } from '../epsil/resolve-library-names.js';
 
 import { CliUsageError, parseMcpArguments } from './arguments.js';
@@ -29,6 +30,7 @@ import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
 import type { AgentCard, CliIo } from './io.js';
 import { makeEpsilSession } from './session.js';
+import { makeCliKernelPool } from './workers.js';
 import type { EpsilSession, EvaluationResult, McpOptions } from './types.js';
 
 /**
@@ -281,10 +283,10 @@ function readOnlyAnnotations(): Record<string, boolean> {
  * call. The handler belongs to this one engine: nothing global is changed, so
  * nothing needs to be restored and no other request can observe it.
  */
-function evaluateWithConsoleCaptured(
+async function evaluateWithConsoleCaptured(
   session: EpsilSession,
   source: string
-): { result: EvaluationResult; output: string[] } {
+): Promise<{ result: EvaluationResult; output: string[] }> {
   const output: string[] = [];
   session.engine.effects = {
     console: {
@@ -294,7 +296,14 @@ function evaluateWithConsoleCaptured(
       readLine: () => undefined,
     },
   };
-  return { result: session.evaluate(source), output };
+  // With a kernel pool, the program runs asynchronously, so that its
+  // `findFit` and its other numeric work on many values can run on the
+  // workers.
+  const result =
+    session.workers === undefined
+      ? session.evaluate(source)
+      : await session.evaluateAsync(source);
+  return { result, output };
 }
 
 /** A JSON-RPC protocol error (as opposed to a tool-execution failure,
@@ -324,14 +333,31 @@ export async function runMcp(
     return 2;
   }
 
+  let workers;
+  try {
+    workers = makeCliKernelPool(options.workers, io);
+  } catch (error) {
+    io.stderr.write(
+      `epsil mcp: ${error instanceof Error ? error.message : String(error)}\n`
+    );
+    return 1;
+  }
   const server = new McpServer(
     options.timeLimit,
     io.loadCard,
-    io.installedVersion
+    io.installedVersion,
+    undefined,
+    workers
   );
-  if (options.transport === 'streamable-http')
-    return runMcpHttp(server, options, io);
-  return runMcpStdio(server, io);
+  try {
+    if (options.transport === 'streamable-http')
+      return await runMcpHttp(server, options, io);
+    return await runMcpStdio(server, io);
+  } finally {
+    // An idle worker thread keeps the process running: the pool is closed
+    // when the server ends.
+    workers?.dispose();
+  }
 }
 
 async function runMcpStdio(server: McpServer, io: CliIo): Promise<number> {
@@ -523,7 +549,11 @@ class McpServer {
     /** The version of the engine this server runs: the `version` of the
      * bundle it loaded. A test passes another one, since a source build has
      * the placeholder of the version constant. */
-    private loadedVersion: string = version
+    private loadedVersion: string = version,
+    /** The kernel pool shared by the engines of the `evaluate` calls (each
+     * call has a fresh session, and so a fresh engine). The caller owns it
+     * and disposes of it. */
+    private workers?: KernelPool
   ) {}
 
   /** Handle one incoming message (or batch) and return the responses. */
@@ -616,8 +646,8 @@ class McpServer {
     }
   }
 
-  private callTool(params: Record<string, unknown>): unknown {
-    return this.withEngineVersion(this.runTool(params));
+  private async callTool(params: Record<string, unknown>): Promise<unknown> {
+    return this.withEngineVersion(await this.runTool(params));
   }
 
   /**
@@ -678,7 +708,7 @@ class McpServer {
     };
   }
 
-  private runTool(params: Record<string, unknown>): unknown {
+  private async runTool(params: Record<string, unknown>): Promise<unknown> {
     const name = params.name;
     const args = (params.arguments ?? {}) as Record<string, unknown>;
     if (!TOOLS.some((tool) => tool.name === name))
@@ -689,7 +719,7 @@ class McpServer {
     try {
       switch (name) {
         case 'evaluate':
-          return this.evaluate(args);
+          return await this.evaluate(args);
         case 'check':
           return McpServer.check(args);
         case 'doc':
@@ -714,7 +744,7 @@ class McpServer {
     }
   }
 
-  private evaluate(args: Record<string, unknown>): unknown {
+  private async evaluate(args: Record<string, unknown>): Promise<unknown> {
     const source = requireString(args, 'source');
     const timeLimit =
       args.timeLimit === undefined
@@ -724,7 +754,7 @@ class McpServer {
     const fancySymbols = optionalBoolean(args, 'fancySymbols');
     const format = optionalFormat(args);
 
-    const session = makeEpsilSession(timeLimit);
+    const session = makeEpsilSession(timeLimit, this.workers);
     let result: EvaluationResult;
     let output: string[] = [];
     let diagnostics: unknown[];
@@ -732,7 +762,7 @@ class McpServer {
       result = session.evaluateLatex(source);
       diagnostics = latexDiagnostics(result.value.errors);
     } else {
-      ({ result, output } = evaluateWithConsoleCaptured(session, source));
+      ({ result, output } = await evaluateWithConsoleCaptured(session, source));
       diagnostics = result.diagnostics.map((x) => diagnosticToJson(x, source));
     }
     const json = formatValue(result, 'json');

@@ -17,6 +17,11 @@ import {
   isRestParameter,
 } from '../boxed-expression/function-literal.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import {
+  builtinCallbackArity,
+  builtinOperatorDefinition,
+  isPureBuiltinCallback,
+} from './builtin-callback.js';
 
 /**
  * Rewrite a collection whose WIDTH is known at compile time into straight-line
@@ -782,8 +787,9 @@ function literalPointOperands(
 /**
  * `Map(callback, [e1, …, eN])` rewritten to one node per element. Two
  * callbacks are rewritten: a `Function` LITERAL, whose body is substituted
- * (see below), and a SYMBOL that names a user-defined function, which is
- * applied to each element ({@link unrollMapOfNamedFunction}).
+ * (see below), and a SYMBOL that names a user-defined function or a library
+ * operator, which is applied to each element
+ * ({@link unrollMapOfNamedFunction}).
  *
  * For a `Function` literal, `Map(x ↦ body, [e1, …, eN])` becomes
  * `[body[x := e1], …, body[x := eN]]`.
@@ -901,7 +907,8 @@ function mapSourceElements(
 
 /**
  * `Map(h, [e1, …, eN])`, where `h` NAMES a user-defined function of one
- * parameter, rewritten to the literal list of the calls `[h(e1), …, h(eN)]`.
+ * parameter or a library operator of one required parameter, rewritten to
+ * the literal list of the calls `[h(e1), …, h(eN)]`.
  *
  * A bare name is what a caller writes for a function defined once and mapped
  * in several places, and it is the one callback shape the JavaScript target
@@ -911,15 +918,21 @@ function mapSourceElements(
  * every target compiles them.
  *
  * Sound only when:
- *  - the name resolves to a `Function` LITERAL the user defined — a library
- *    operator name such as `Sin` is left alone, because a target may lower an
- *    operator applied to a collection differently from a list of separate
- *    applications;
- *  - that literal declares exactly one plain named parameter. `Map` calls its
- *    callback with ONE argument, so this is the shape whose call is `h(e)`. A
- *    variadic (rest) parameter binds a TUPLE of the arguments rather than the
- *    element, and a destructuring pattern binds the components of one, so
- *    both are left to the target's own `Map` lowering;
+ *  - the name resolves to a `Function` LITERAL the user defined, and that
+ *    literal declares exactly one plain named parameter. `Map` calls its
+ *    callback with ONE argument, so this is the shape whose call is `h(e)`.
+ *    A variadic (rest) parameter and a destructuring pattern are left to the
+ *    target's own `Map` lowering. (A call `h(e)` to a variadic `h` is the
+ *    call `Map` makes, so the rewrite would be sound, but no target compiles
+ *    a function literal with a rest parameter, so it would gain nothing.);
+ *  - or the name is an engine-authored library operator (`Sin`, `Abs`,
+ *    `IsPrime`) with exactly ONE required parameter and no variadic tail,
+ *    that is not lazy (a lazy operator holds the unevaluated element).
+ *    This is the operator that the compiler eta-expands into the callback
+ *    `(p) ↦ Sin(p)` when it lowers the `Map` itself
+ *    (`builtinCallbackArity`), so the calls `Sin(e)` are the applications of
+ *    that callback. A name that a user definition shadows is not a library
+ *    operator here (`builtinOperatorDefinition`);
  *  - every element is pure, and so is every call the rewrite writes. The
  *    interpreter evaluates the elements first and applies `h` to them
  *    afterwards, while the unrolled list interleaves the two, and identical
@@ -932,14 +945,24 @@ function unrollMapOfNamedFunction(
   ce: Expression['engine']
 ): Expression | undefined {
   const literal = userFunctionLiteral(ce, name);
-  // A `Function` literal is `["Function", body, …params]`, so one parameter
-  // is two operands.
-  if (literal === undefined || literal.nops !== 2) return undefined;
-  const parameter = literal.ops[1];
-  if (isRestParameter(parameter)) return undefined;
-  // A destructuring pattern is a raw `Tuple` operand, for which
-  // `functionLiteralParameterName` reports no name.
-  if (!functionLiteralParameterName(parameter)) return undefined;
+  if (literal === undefined) {
+    if (builtinCallbackArity(ce, name) !== 1) return undefined;
+    if (!isPureBuiltinCallback(ce, name)) return undefined;
+    // A lazy operator (`Hold`, `N`, `Evaluate`, `Simplify`, …) receives its
+    // operand unevaluated. The call `h(e)` that the rewrite writes holds the
+    // element as written, but `Map` applies `h` to the element after it is
+    // evaluated, so the two can give different results.
+    if (builtinOperatorDefinition(ce, name)?.lazy === true) return undefined;
+  } else {
+    // A `Function` literal is `["Function", body, …params]`, so one
+    // parameter is two operands.
+    if (literal.nops !== 2) return undefined;
+    const parameter = literal.ops[1];
+    if (isRestParameter(parameter)) return undefined;
+    // A destructuring pattern is a raw `Tuple` operand, for which
+    // `functionLiteralParameterName` reports no name.
+    if (!functionLiteralParameterName(parameter)) return undefined;
+  }
   if (!elements.every((e) => e.isPure === true)) return undefined;
 
   const calls = elements.map((e) => ce.function(name, [e]));

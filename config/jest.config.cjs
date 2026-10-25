@@ -2,7 +2,11 @@ module.exports = {
   prettierPath: require.resolve('prettier-2'),
   verbose: false,
   preset: 'ts-jest',
-  testEnvironment: 'node',
+  // The `node` environment, with a global object that is not a contextified
+  // proxy: engine code reads globals such as `Math` in its inner loops, and
+  // those reads were 5 to 10 times slower in the stock environment. See the
+  // comment in the file.
+  testEnvironment: '<rootDir>/jest-environment.cjs',
   // Twelve workers on the 18-core development machine (Apple M5 Max, 6 + 12
   // cores with no efficiency cores). Measured full-suite times: 163 s with
   // 6 workers, 88 s with 12, 84 s with 16, 89 s with 18. More than 12 workers

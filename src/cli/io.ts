@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 
+import type { WorkerLike } from '../compute-engine/kernel-pool-types.js';
+
 /** The agent-facing cards served as resources by `epsil mcp`: the Epsil
  * language card, and the card for code that uses the Compute Engine's
  * JavaScript API. */
@@ -23,6 +25,12 @@ export interface CliIo {
    * installed it answers with the old one. Injected for the same reason as
    * `loadCard`. */
   installedVersion?: () => string | undefined;
+  /** Start one worker thread running the kernel-worker file, for the kernel
+   * pool that `--workers <n>` gives the engine. The installed CLI resolves
+   * the file relative to its own bundle, which needs `import.meta`, so the
+   * factory is injected for the same reason as `loadCard`. Without it,
+   * `--workers` with a value above zero is refused. */
+  createWorker?: () => WorkerLike;
 }
 
 export async function readSource(

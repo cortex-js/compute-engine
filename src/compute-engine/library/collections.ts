@@ -252,7 +252,11 @@ import {
   roundedToWorkingPrecision,
 } from '../boxed-expression/utils.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import { runStepsSync, type Steps } from '../../common/cooperative-steps.js';
+import {
+  EventLoopPacer,
+  runStepsSync,
+  type Steps,
+} from '../../common/cooperative-steps.js';
 import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import { flatten } from '../boxed-expression/flatten.js';
 import {
@@ -10293,13 +10297,23 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         _contextStack,
         _precisionWindow,
       };
+      // An `await` gives a turn to the microtasks only, so the loop waits for
+      // a macrotask about every 8 ms (`EventLoopPacer`): a timer can then run
+      // while a large literal is evaluated, and an abort of the signal stops
+      // the loop there.
       const evaluated = async (
         xs: ReadonlyArray<Expression>
       ): Promise<Expression[]> => {
         const result: Expression[] = [];
+        const pacer = new EventLoopPacer();
         for (const op of xs) {
           const value = await op.evaluateAsync(options);
           if (!isSymbol(value, 'Nothing')) result.push(value);
+          if (pacer.due) {
+            await pacer.pace();
+            if (signal?.aborted)
+              throw new CancellationError({ cause: signal.reason });
+          }
         }
         return result;
       };
@@ -13024,38 +13038,44 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       const collections = ops
         .slice(1)
         .map((c) => checkCallbackSource(engine, c));
-      const fn = canonicalCallbackOperand(
-        ops[0],
-        sourceCount === 0
-          ? undefined
-          : {
-              operator: 'Map',
-              supply:
-                sourceCount === 1
-                  ? PER_ELEMENT_SUPPLY
-                  : {
-                      count: sourceCount,
-                      describes: `one element from each of the ${sourceCount} collections`,
-                    },
-              // `Map` is callback-FIRST, so the single source of the unary
-              // form is the first of these. The zipWith form supplies one
-              // element from each source rather than one destructurable
-              // element, so its supply is not `destructurable` and the source
-              // goes unread.
-              source: collections[0],
-              // The supply signature takes one element-typed parameter per
-              // source, so the zip disjointness check is
-              // positional against each source (a position-swapped callback
-              // is provably unusable even where the join of the sources is
-              // not).
-              sources: collections,
-            }
-      );
-      if (
-        !fn ||
+      // When a source is not a collection, the call declines or reports the
+      // misorder below whatever the callback is, so the callback is not
+      // canonicalized. Canonicalizing it there as well made the misordered
+      // spelling `Map(Map(xs, f), g)` canonicalize each inner level three
+      // times, which is exponential in the depth (CE-347).
+      const sourcesInvalid =
         collections.length === 0 ||
-        collections.some((c) => isInvalidNonCollection(c))
-      ) {
+        collections.some((c) => isInvalidNonCollection(c));
+      const fn = sourcesInvalid
+        ? undefined
+        : canonicalCallbackOperand(
+            ops[0],
+            sourceCount === 0
+              ? undefined
+              : {
+                  operator: 'Map',
+                  supply:
+                    sourceCount === 1
+                      ? PER_ELEMENT_SUPPLY
+                      : {
+                          count: sourceCount,
+                          describes: `one element from each of the ${sourceCount} collections`,
+                        },
+                  // `Map` is callback-FIRST, so the single source of the unary
+                  // form is the first of these. The zipWith form supplies one
+                  // element from each source rather than one destructurable
+                  // element, so its supply is not `destructurable` and the source
+                  // goes unread.
+                  source: collections[0],
+                  // The supply signature takes one element-typed parameter per
+                  // source, so the zip disjointness check is
+                  // positional against each source (a position-swapped callback
+                  // is provably unusable even where the join of the sources is
+                  // not).
+                  sources: collections,
+                }
+          );
+      if (!fn || sourcesInvalid) {
         // Diagnose the former callback-last spelling: a call written with a
         // first operand that cannot be a function (a provable collection, or
         // any other value whose type is disjoint from `function`, such as
@@ -13272,12 +13292,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       const collection = checkCallbackSource(engine, ops[0]);
+      // The call declines when the source is not a collection, so the
+      // callback is not canonicalized then. Canonicalizing it anyway made the
+      // misordered spelling `Filter(p, Filter(p, xs))` canonicalize each
+      // inner level three times, which is exponential in the depth (CE-347).
+      if (isInvalidNonCollection(collection)) return null;
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'Filter',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (isInvalidNonCollection(collection) || !fn) return null;
+      if (!fn) return null;
 
       return engine._fn('Filter', [collection, fn]);
     },
@@ -13683,17 +13708,22 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           supply: ACCUMULATOR_SUPPLY,
           source: collection,
         };
+        // The call declines when the collection or the seed is not valid, so
+        // the reducer is not canonicalized then. Canonicalizing it anyway
+        // made the misordered spelling `Fold(Fold(xs, f, 0), f, 0)`
+        // canonicalize each inner level three times, which is exponential in
+        // the depth (CE-347).
+        if (isInvalidNonCollection(collection)) return null;
         const initial = ops[1]?.canonical;
+        if (!initial?.isValid) return null;
         const fn = canonicalFoldCombiner(
           engine,
           ops,
           ops[0],
-          () =>
-            initial?.isValid ? foldSeedType(initial, collection) : undefined,
+          () => foldSeedType(initial, collection),
           arity
         );
-        if (!fn || !initial?.isValid || isInvalidNonCollection(collection))
-          return null;
+        if (!fn) return null;
         return engine._fn('Reduce', [collection, fn, initial]);
       }),
   },
@@ -14024,12 +14054,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops[0],
         'indexed_collection'
       );
+      // The call declines when the source is not a collection, so the
+      // callback is not canonicalized then. Canonicalizing it anyway made a
+      // misordered nested call canonicalize each inner level three times,
+      // which is exponential in the depth (CE-347).
+      if (isInvalidNonCollection(collection)) return null;
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'TakeWhile',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (isInvalidNonCollection(collection) || !fn) return null;
+      if (!fn) return null;
       return engine._fn('TakeWhile', [collection, fn]);
     },
     collection: refusingUnindexedSource({
@@ -14192,12 +14227,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         ops[0],
         'indexed_collection'
       );
+      // The call declines when the source is not a collection, so the
+      // callback is not canonicalized then. Canonicalizing it anyway made a
+      // misordered nested call canonicalize each inner level three times,
+      // which is exponential in the depth (CE-347).
+      if (isInvalidNonCollection(collection)) return null;
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'DropWhile',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (isInvalidNonCollection(collection) || !fn) return null;
+      if (!fn) return null;
       return engine._fn('DropWhile', [collection, fn]);
     },
     collection: refusingUnindexedSource({
@@ -14408,12 +14448,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     },
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
+      // The call declines when the source is not a collection, so the
+      // callback is not canonicalized then. Canonicalizing it anyway made a
+      // misordered nested call canonicalize each inner level three times,
+      // which is exponential in the depth (CE-347).
+      if (isInvalidNonCollection(collection)) return null;
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'FlatMap',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (isInvalidNonCollection(collection) || !fn) return null;
+      if (!fn) return null;
       return engine._fn('FlatMap', [collection, fn]);
     },
     evaluate: (ops, { engine, materialization }) => {
@@ -18576,12 +18621,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
+      // The call declines when the source is not a collection, so the
+      // callback is not canonicalized then. Canonicalizing it anyway made a
+      // misordered nested call canonicalize each inner level three times,
+      // which is exponential in the depth (CE-347).
+      if (isInvalidNonCollection(collection)) return null;
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'MaxBy',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (isInvalidNonCollection(collection) || !fn) return null;
+      if (!fn) return null;
       return engine._fn('MaxBy', [collection, fn]);
     },
     type: (ops, context) =>
@@ -18614,12 +18664,17 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(collection<T>, key: (T) any -> unknown) -> value where T',
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
+      // The call declines when the source is not a collection, so the
+      // callback is not canonicalized then. Canonicalizing it anyway made a
+      // misordered nested call canonicalize each inner level three times,
+      // which is exponential in the depth (CE-347).
+      if (isInvalidNonCollection(collection)) return null;
       const fn = canonicalCallbackOperand(ops[1], {
         operator: 'MinBy',
         supply: PER_ELEMENT_SUPPLY,
         source: collection,
       });
-      if (isInvalidNonCollection(collection) || !fn) return null;
+      if (!fn) return null;
       return engine._fn('MinBy', [collection, fn]);
     },
     type: (ops, context) =>

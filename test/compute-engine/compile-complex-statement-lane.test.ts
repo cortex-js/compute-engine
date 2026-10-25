@@ -47,15 +47,19 @@ function engine(): ComputeEngine {
 }
 
 describe('a chain of complex operations is one block of statements', () => {
-  test('Re((x + ib)²): one arrow at the top, none nested', () => {
+  // The base contains a call (`sin x`), so the power is not written with
+  // real formulas of the parts of its base. `Re((x + ib)^2)`, whose parts
+  // are cheap, compiles to `x * x - b * b`, with no object
+  // (`tryGetJSComplexParts`).
+  test('Re((sin x + ib)²): one arrow at the top, none nested', () => {
     const ce = engine();
-    const r = js(ce.parse('\\Re((x+\\imaginaryI b)^2)'));
+    const r = js(ce.parse('\\Re((\\sin x+\\imaginaryI b)^2)'));
     expect(arrowCount(r.code)).toBe(1);
     // The three operations — the imaginary product, the sum, the square — are
     // three `const` temporaries in one block, and the real part is read off
     // the last one.
     expect(r.code).toContain('const _tv2 = ({ re: 0, im: _.b });');
-    expect(r.code).toContain('({ re: _tv2.re + _.x, im: _tv2.im })');
+    expect(r.code).toContain('({ re: _tv2.re + Math.sin(_.x), im: _tv2.im })');
     expect(r.code).toContain(
       'const _tv1_1 = { re: _tv1.re * _tv1.re - _tv1.im * _tv1.im, im: 2 * (_tv1.re * _tv1.im) };'
     );
@@ -67,16 +71,20 @@ describe('a chain of complex operations is one block of statements', () => {
     // position — so nothing is left to wrap. This is the shape the compiled
     // runner of an expression kernel also executes.
     const ce = engine();
-    const r = compile(ce.parse('(x, b) \\mapsto \\Re((x+\\imaginaryI b)^2)'), {
-      to: 'javascript',
-      fallback: false,
-    }) as unknown as {
+    const r = compile(
+      ce.parse('(x, b) \\mapsto \\Re((\\sin x+\\imaginaryI b)^2)'),
+      {
+        to: 'javascript',
+        fallback: false,
+      }
+    ) as unknown as {
       code: string;
       run: (x: number, b: number) => number;
     };
     expect(arrowCount(r.code)).toBe(0);
     expect(r.code.startsWith('(x, b) => {')).toBe(true);
-    expect(r.run(2, 3)).toBe(-5); // Re((2 + 3i)²) = 4 − 9
+    // Re((sin 2 + 3i)²) = sin² 2 − 9
+    expect(r.run(2, 3)).toBeCloseTo(Math.sin(2) ** 2 - 9, 12);
   });
 
   test.each([

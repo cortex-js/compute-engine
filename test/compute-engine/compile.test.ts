@@ -1056,6 +1056,42 @@ describe('COMPILE Binomial matches evaluate() off 0 ≤ k ≤ n', () => {
   });
 });
 
+// The compiled `IsPrime` answers what the interpreter answers: `False` for
+// `NaN`, a non-integer, a negative integer, 0 and 1. An operand beyond the
+// safe integer range, or infinite, throws, as for `Mod` and `GCD`.
+describe('COMPILE IsPrime matches evaluate()', () => {
+  const engine = new ComputeEngine();
+  const fn = compile(engine.box(['IsPrime', 'n']), { fallback: false });
+  test('the code calls the runtime helper', () => {
+    expect(fn.code).toBe('_SYS.isPrime(_.n)');
+  });
+  for (const n of [
+    NaN,
+    3.5,
+    -7,
+    0,
+    1,
+    2,
+    3,
+    4,
+    97,
+    91,
+    7919,
+    2147483647,
+    1e15 + 37,
+    1e15 + 39,
+  ]) {
+    test(`IsPrime(${n})`, () => {
+      const want = engine.box(['IsPrime', engine.number(n)]).evaluate();
+      expect(fn.run!({ n })).toBe(want.symbol === 'True');
+    });
+  }
+  test('an operand beyond the safe integer range throws', () => {
+    expect(() => fn.run!({ n: Infinity })).toThrow(RangeError);
+    expect(() => fn.run!({ n: 2 ** 60 })).toThrow(RangeError);
+  });
+});
+
 // Tier-2 special-function kernels that `.N()` produces as real floats — the
 // elliptic integrals, AGM, hypergeometric functions, Erfi, and the Choose
 // binomial — must also lower to JS so an "evaluate then compile" pipeline can
@@ -4665,24 +4701,25 @@ describe('COMPILE built-in operator name as a callback', () => {
   });
 
   it('fails CLOSED when the wrapper body has no lowering', () => {
-    // `IsPrime` eta-expands, but its application has no JavaScript mapping:
-    // a compile-time refusal, not an artifact that throws at run time.
+    // `IsComposite` eta-expands, but its application has no JavaScript
+    // mapping: a compile-time refusal, not an artifact that throws at run
+    // time.
     const e = new ComputeEngine();
     // The expression is constant, so constant folding would answer from the
     // interpreter and never reach the wrapper lowering under test.
     expect(() =>
-      compile(e.box(['CountIf', XS, 'IsPrime']), {
+      compile(e.box(['CountIf', XS, 'IsComposite']), {
         fallback: false,
         constantFold: false,
       })
     ).toThrow(/Could not compile/);
 
-    // With the fallback, the interpreter answers.
-    const r = compile(e.box(['CountIf', XS, 'IsPrime']), {
+    // With the fallback, the interpreter answers (4 is the one composite).
+    const r = compile(e.box(['CountIf', XS, 'IsComposite']), {
       constantFold: false,
     });
     expect(r?.success).toBe(false);
-    expect(r!.run!({})).toBe(3);
+    expect(r!.run!({})).toBe(1);
   });
 
   it('applies a caller `functions` override inside the wrapper', () => {

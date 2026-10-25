@@ -66,11 +66,11 @@ describe('COMPILE a block-local function definition', () => {
     );
     expect(compiled).toBe(14); // 1 + 4 + 9
     expect(interpreted).toBe('14');
-    // The local is bound to the lazy stream pipeline, through the
-    // broadcast-aware wrapper every scalar-parameter literal is handed out
-    // under…
-    expect(code).toContain('let g = ((_tv3) => (_tv4) => Array.isArray(_tv4)');
-    expect(code).toContain('(((k) =>');
+    // The local is bound to the lazy stream pipeline. The program only calls
+    // `g`, and each call site broadcasts by itself, so the literal has no
+    // broadcast wrapper…
+    expect(code).toContain('let g = ((k) =>');
+    expect(code).not.toContain('let g = ((_tv');
     // …and the call, whose argument is constant, folds (see below).
     expect(code).toContain('return 14');
   });
@@ -228,8 +228,8 @@ describe('COMPILE a `function` definition', () => {
     );
     expect(compiled).toBe(4);
     expect(interpreted).toBe('4');
-    expect(code).toContain('let h = ((_tv1) => (_tv2) => Array.isArray(_tv2)');
-    expect(code).toContain('(((k) => k + 1))');
+    // `h` is only called, so the literal has no broadcast wrapper.
+    expect(code).toContain('let h = ((k) => k + 1)');
   });
 
   it('recurses', () => {
@@ -306,10 +306,9 @@ describe('COMPILE a `function` definition', () => {
     // block-local `gd` declined.
     const src = 'function gd(x: T) -> T where T: number { 2x }\n';
     const scalar = both(`${src}gd(5)`, { constantFold: false });
-    expect(scalar.code).toContain(
-      'let gd = ((_tv1) => (_tv2) => Array.isArray(_tv2) ? ' +
-        '_SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x) => 2 * x))'
-    );
+    // `gd` is only called, so the literal has no broadcast wrapper of its
+    // own: a call with a list argument broadcasts at the call site (below).
+    expect(scalar.code).toContain('let gd = ((x) => 2 * x)');
     expect(scalar.compiled).toBe(10);
     expect(scalar.interpreted).toBe('10');
     const list = both(`${src}gd([1, 2, 3])`, { constantFold: false });

@@ -1710,9 +1710,13 @@ export function defIsCallableShaped(def: BoxedDefinition | undefined): boolean {
   if (v.operator === 'Function') return true;
   // A store-backed list (`ce.list()`) holds numbers only: no `Function`
   // literal inside, and reading its `ops` would box every element.
+  // Written-out data (`_isLiteralData()`, decided once per node) holds no
+  // `Function` literal either: a call frame that declares a parameter with a
+  // long list of strings does not scan the list at each call.
   return (
     isFunction(v) &&
     v._numericStore === undefined &&
+    !v._isLiteralData() &&
     v.ops.some((o: Expression) => o.operator === 'Function')
   );
 }

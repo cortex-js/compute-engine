@@ -3575,7 +3575,7 @@ export class BoxedFunction
   /**
    * Is this node written-out DATA that evaluates to itself under `options`:
    * a canonical `List` or `Tuple` whose every element is a number literal,
-   * a failed cell, or such a `List` or `Tuple` in turn?
+   * a string literal, a failed cell, or such a `List` or `Tuple` in turn?
    *
    * A failed cell is an `Error` node that holds no symbol at any depth (the
    * error code, its arguments and the `where` operand are strings, numbers
@@ -3592,7 +3592,12 @@ export class BoxedFunction
    * A number literal evaluates to itself, and under a numeric approximation
    * it does when `N()` answers the same object (a machine number, or a
    * big-number float already at the working precision; an exact rational
-   * does not). A list or tuple of such elements evaluates to an equal node,
+   * does not). A string literal evaluates to itself under every option. A
+   * list of strings was evaluated element by element and rebuilt at each
+   * call of a function that receives it as an argument, and the new node
+   * was typed again when the call frame declared the parameter: 8 to 15 ms
+   * per call for a list of 3,000 strings (CE-323). A list or tuple of such elements
+   * evaluates to an equal node,
    * so the node itself is the answer. The general route evaluates every
    * element as a function expression and builds a new node: 25 ms for a list
    * of ten thousand points, paid at every use of a symbol that holds one —
@@ -3637,6 +3642,9 @@ export class BoxedFunction
         if (level === 0) break;
         if (isNumber(op)) {
           if (level === 2 && op.N() !== op) level = 1;
+        } else if (isString(op)) {
+          // A string literal evaluates to itself under every option.
+          continue;
         } else if (op instanceof BoxedFunction) {
           // A list that holds its numbers unboxed is its own value under
           // every option, and asking it would box them.
@@ -4073,6 +4081,15 @@ export class BoxedFunction
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
     // Same as `evaluate()`: a store-backed list is its own value.
     if (this._numericStore !== undefined) return Promise.resolve(this);
+    // Written-out data is its own value too, as in `evaluate()`
+    // (`_isLiteralData()`). The options that carry the state of an
+    // asynchronous evaluation (the registry, the context stack, the
+    // precision window, the abort signal) do not change the value of data,
+    // so only the numeric request is given to the test. Without this test,
+    // each element was evaluated and a new node was built: about 85 ms for a
+    // list of 20,000 points, against 4 ms on the synchronous route.
+    if (this._isLiteralData(literalDataOptions(options)))
+      return Promise.resolve(this);
     // Checkpoint quiescence (`checkpoint.ts`): an async evaluation suspended
     // at an `await` holds its eval context across the suspension and hands
     // control back to the host, so — unlike a synchronous evaluation, which
@@ -4976,6 +4993,11 @@ export class BoxedFunction
 
   get isFiniteCollection(): boolean | undefined {
     if (!this.isCollection) return undefined;
+    // Written-out data (`_isLiteralData()`) is a `List` or a `Tuple` of the
+    // library, whose `isFinite` handler always answers `true`. The memo
+    // below takes a snapshot of the dependencies of the node, about 5 µs for
+    // a `Tuple` of two numbers, which is more than the answer costs.
+    if (this._operator !== 'Error' && this._isLiteralData()) return true;
     const handler = this.operatorDefinition?.collection?.isFinite;
     if (handler === undefined) return undefined;
     return this._memoizedFacet('isFinite', () => handler(this));
@@ -7742,11 +7764,17 @@ export class BoxedFunction
         sourceValues?.has(x) && !hasAsyncOnlyApplication(x, true)
           ? takeDetachedEagerSourceValue(sourceValues, x)
           : undefined;
-      const tail = await holdMapAsync(this, async (x, index) =>
-        (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
-        (exactExponent && index === 1)
-          ? await exactIntegerOperandAsync(x, options)
-          : (readValue(x) ?? (await x.evaluateAsync(operandOptions(options))))
+      // The walk gives the event loop a turn about every 8 ms, and an abort
+      // of the signal stops it there (`holdMapAsync`).
+      const tail = await holdMapAsync(
+        this,
+        async (x, index) =>
+          (exactIntegerAt !== undefined && exactIntegerAt(index)) ||
+          (exactExponent && index === 1)
+            ? await exactIntegerOperandAsync(x, options)
+            : (readValue(x) ??
+              (await x.evaluateAsync(operandOptions(options)))),
+        options?.signal
       );
 
       //
@@ -17070,6 +17098,39 @@ function materializesAfterOperands(
 function isTypedAsCollection(x: Expression): boolean {
   const t = stripMissingFromType(x.type.type);
   return t !== 'never' && isSubtype(t, COLLECTION_SHAPE_TYPE);
+}
+
+/**
+ * The options of an asynchronous evaluation in the form that
+ * `_isLiteralData()` reads. That test refuses every option except
+ * `numericApproximation`, because another option can change the value. The
+ * options that only carry the state of an asynchronous evaluation (the
+ * registry `_effects`, the `_contextStack`, the `_precisionWindow`, and an
+ * abort `signal` that is not aborted) do not change the value of data, and
+ * `materialization: false` is the default. So these options are removed.
+ * Any other option, or an aborted signal, is kept, and the evaluation takes
+ * the general route.
+ */
+function literalDataOptions(
+  options: Partial<EvaluateOptions> | undefined
+): Partial<EvaluateOptions> | undefined {
+  if (options === undefined) return undefined;
+  for (const k in options) {
+    if (
+      k === '_effects' ||
+      k === '_contextStack' ||
+      k === '_precisionWindow' ||
+      k === 'numericApproximation'
+    )
+      continue;
+    if (k === 'signal' && options.signal?.aborted !== true) continue;
+    if (k === 'materialization' && (options.materialization ?? false) === false)
+      continue;
+    return options;
+  }
+  return options.numericApproximation === true
+    ? { numericApproximation: true }
+    : undefined;
 }
 
 /**

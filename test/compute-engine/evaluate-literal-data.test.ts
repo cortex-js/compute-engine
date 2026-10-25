@@ -1,7 +1,8 @@
 /**
  * Written-out DATA evaluates to itself.
  *
- * A canonical `List` or `Tuple` whose every element is a number literal, or
+ * A canonical `List` or `Tuple` whose every element is a number literal, a
+ * string literal, or
  * such a `List` or `Tuple` in turn, has nothing to evaluate: `evaluate()`
  * answers the node itself, where the general route evaluated every element as
  * a function expression and built an equal node — 25 ms for a list of ten
@@ -32,6 +33,12 @@ describe('Written-out data evaluates to itself', () => {
     ['a nested list', ['List', ['List', 1, 2], ['List', 3, 4]]],
     ['an empty list', ['List']],
     ['NaN and the infinities', ['List', 'NaN', 'PositiveInfinity', -1]],
+    ['a list of strings', ['List', { str: 'a' }, { str: 'bc' }]],
+    ['a tuple of a string and a number', ['Tuple', { str: 'a' }, 2.5]],
+    [
+      'a nested list of strings',
+      ['List', ['List', { str: 'a' }], ['List', { str: 'b' }]],
+    ],
   ])('%s, under evaluate() and under N()', (_label, json) => {
     const e = ce.box(json as never);
     expect(e.evaluate()).toBe(e);
@@ -59,6 +66,41 @@ describe('Written-out data evaluates to itself', () => {
       4,
       8,
     ]);
+  });
+});
+
+describe('A function that receives a list of strings', () => {
+  // A list of strings was not data: each read of the symbol and each call
+  // that received the list built an equal list, and the call frame typed the
+  // new list again when it declared the parameter. A recursion of depth 200
+  // over 3,000 strings took about 15 ms per call (CE-323).
+  test('the symbol answers the same list at every use', () => {
+    const engine = new ComputeEngine();
+    const xs = engine.function(
+      'List',
+      Array.from({ length: 50 }, (_, i) => engine.string(`s${i}`))
+    );
+    engine.declare('ys', 'list<string>');
+    engine.assign('ys', xs);
+    const held = engine.box('ys').value!;
+    expect(engine.box('ys').evaluate()).toBe(held);
+    engine.declare('f', 'function');
+    engine.assign(
+      'f',
+      engine.box([
+        'Function',
+        [
+          'If',
+          ['LessEqual', 'n', 0],
+          ['Length', 'xs'],
+          ['f', 'xs', ['Subtract', 'n', 1]],
+        ],
+        'xs',
+        'n',
+      ])
+    );
+    expect(engine.box(['f', 'ys', 20]).evaluate().re).toBe(50);
+    expect(engine.box('ys').evaluate()).toBe(held);
   });
 });
 

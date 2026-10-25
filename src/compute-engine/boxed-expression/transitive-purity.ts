@@ -105,11 +105,34 @@ export function isTransitivelyPure(
   const push = (e: Expression | null | undefined): void => {
     if (e !== undefined && e !== null && !seen.has(e)) stack.push(e);
   };
-  while (stack.length > 0) {
-    const e = stack.pop()!;
+  // The expressions below a held operand position that discharges effects
+  // (the body of `WithRandomSeed(seed, body)` discharges `random`). The
+  // operator evaluates such an operand under itself, and the effects of the
+  // operator (`isPure`) already include the effects of the whole operand,
+  // less the discharged labels. So when the operator is pure, no expression
+  // of that operand has an effect that is not discharged, and their `isPure`
+  // is not checked: `RandomChoice(…)` in the body of a pure `WithRandomSeed`
+  // is impure alone, but its draws come from the seeded frame and are the
+  // same at each evaluation. What these expressions READ (the value of a
+  // symbol, the body of a function) is not part of that projection, so it
+  // is checked as usual. An expression of this set that is also read in
+  // another place is checked again there.
+  const discharged = new Set<Expression>();
+  const pending: Expression[] = [];
+  const pushDischarged = (e: Expression): void => {
+    if (!seen.has(e) && !discharged.has(e)) pending.push(e);
+  };
+  while (stack.length > 0 || pending.length > 0) {
+    const fromDischarged = stack.length === 0;
+    const e = fromDischarged ? pending.pop()! : stack.pop()!;
     if (seen.has(e)) continue;
-    seen.add(e);
-    if (e.isPure !== true) return false;
+    if (fromDischarged) {
+      if (discharged.has(e)) continue;
+      discharged.add(e);
+    } else {
+      seen.add(e);
+      if (e.isPure !== true) return false;
+    }
     // A value that is not canonical (`ce.declare('u', {value: …})` with a
     // raw value) is not bound: its symbols have no definition. An
     // evaluation reads its canonical form, so that form is checked.
@@ -120,7 +143,8 @@ export function isTransitivelyPure(
       // Its evaluation is not known: it is read as impure.
       const canonical = e.canonical;
       if (!canonical.isCanonical && !canonical.isStructural) return false;
-      push(canonical);
+      if (fromDischarged) pushDischarged(canonical);
+      else push(canonical);
       continue;
     }
 
@@ -151,8 +175,15 @@ export function isTransitivelyPure(
 
     // A store-backed list (`ce.list()`) holds numbers only, which are pure,
     // and a read of its `ops` makes an expression for each element.
-    if (isFunction(e) && e._numericStore === undefined)
-      for (const op of e.ops) push(op);
+    if (isFunction(e) && e._numericStore === undefined) {
+      const discharges =
+        operatorDef?.lazy === true ? operatorDef.discharges : undefined;
+      e.ops.forEach((op, i) => {
+        if (fromDischarged || (discharges?.[i]?.length ?? 0) > 0)
+          pushDischarged(op);
+        else push(op);
+      });
+    }
   }
   return true;
 }

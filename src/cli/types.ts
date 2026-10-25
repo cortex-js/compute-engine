@@ -1,4 +1,5 @@
 import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
+import type { KernelPool } from '../compute-engine/kernel-pool-types.js';
 import type {
   DiagnosticNote,
   ParsingDiagnostic,
@@ -27,6 +28,13 @@ export interface CliOptions {
   /** Compile the program to JavaScript and run the generated code instead
    * of interpreting it (see `evaluateCompiled`, `cli/compile.ts`). */
   compile: boolean;
+  /** The number of worker threads of the engine's kernel pool
+   * (`ce.workers`). With a value above zero, each program runs through
+   * `executeEpsilAsync`, so that the operators with an asynchronous route
+   * (`findFit`, a `broadcastAsync` of a compiled function) can run their
+   * numeric work on the workers. `0`, the default, means no pool: each
+   * program runs through `executeEpsil` on the calling thread. */
+  workers: number;
 }
 
 export interface CheckOptions {
@@ -56,6 +64,10 @@ export interface McpOptions {
   path: string;
   /** Browser origins allowed to call the HTTP endpoint. */
   allowedOrigins: string[];
+  /** The number of worker threads of the kernel pool that the engine of
+   * each `evaluate` call uses (see `CliOptions.workers`). `0`, the default,
+   * means no pool. */
+  workers: number;
 }
 
 export interface EvaluationResult {
@@ -76,7 +88,22 @@ export interface EvaluationResult {
 export interface EpsilSession {
   readonly engine: ComputeEngine;
   readonly timeLimit: number;
+  /** The kernel pool of the session's engine (`ce.workers`), kept across
+   * `reset()`. When it is present, the command line, the REPL and the MCP
+   * server run each program with `evaluateAsync`. */
+  readonly workers?: KernelPool;
   evaluate(source: string, url?: string): EvaluationResult;
+  /** Evaluate the program as `evaluate` does, with each top-level statement
+   * evaluated by `evaluateAsync()` (`executeEpsilAsync`): an operator with
+   * an asynchronous route runs it, on the engine's kernel pool when the
+   * session has one. The time limit of the session applies to the whole
+   * program. An abort of `signal` rejects the promise with a
+   * `CancellationError`. */
+  evaluateAsync(
+    source: string,
+    url?: string,
+    signal?: AbortSignal
+  ): Promise<EvaluationResult>;
   /** Evaluate a single LaTeX expression. A LaTeX parse error, or a deadline
    * breach, is an error in the value (`value.errors`): there are no
    * diagnostics, since the error expressions carry no source offsets. */

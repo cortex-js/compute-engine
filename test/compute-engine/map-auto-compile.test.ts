@@ -596,6 +596,27 @@ describe('Map auto-compile', () => {
     expect(stats.compiledHits).toBe(1);
   });
 
+  test('IsPrime of an integer beyond the safe range: the interpreter computes it', () => {
+    // The compiled `IsPrime` reads a double and throws a `RangeError` when
+    // the double is beyond the safe integers. At x = 61, `2^x − 1` is the
+    // Mersenne prime 2305843009213693951, but its double is 2^61. The
+    // interpreter computes the predicate on the exact integer.
+    ce.assign(
+      'fip',
+      ce.box([
+        'Function',
+        ['If', ['IsPrime', ['Subtract', ['Power', 2, 'x'], 1]], 0.5, 0.25],
+        'x',
+      ])
+    );
+    const m = broadcast('fip', 150);
+    const values = drainRe(m.N());
+    expect(stats.attempts).toBe(1);
+    expect(values[60]).toBe(0.5); // x = 61: prime
+    expect(values[61]).toBe(0.25); // x = 62: not prime
+    expect(values[30]).toBe(0.5); // x = 31: prime
+  });
+
   test('at()-only access recovers after a free symbol is assigned', () => {
     ce.assign('fr5', ce.box(['Function', ['Add', 'x', 'qr5'], 'x']));
     const m = broadcast('fr5', 120);

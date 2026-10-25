@@ -418,10 +418,50 @@ describe('Divergent series (GitHub #326)', () => {
     ['\\frac{1}{n-3}', 1, 'a division by zero at n = 3'],
     ['\\frac{1}{n}', 0, 'a division by zero at n = 0'],
     ['\\frac{1}{\\ln n}', 1, 'a division by zero at n = 1 (ln 1 = 0)'],
-    ['\\frac{1}{n \\ln n}', 2, 'lim n·f(n) = 0: the test is inconclusive'],
+    ['\\frac{1}{n \\ln n}', 1, 'a division by zero at n = 1 (ln 1 = 0)'],
     ['n!', 1, 'no symbolic limit for n·n!'],
   ])('Σ %s from %i stays symbolic (%s)', (body, lower) => {
     expect(sum(body, lower).evaluate().operator).toBe('Sum');
+  });
+
+  // When `lim n·f(n) = 0`, the limit comparison with `Σ 1/(n ln n)`, which
+  // diverges (Cauchy condensation: `Σ 2^k f(2^k) = Σ 1/(k ln 2)`), is tried:
+  // `lim n·ln(n)·f(n)` must be a number other than 0 or an infinity. This
+  // certifies `Σ 1/(n (ln n)^p)` for `p ≤ 1` (GitHub #326: its `.N()` used to
+  // walk the whole budget of the extrapolation before it declined).
+  test.each([
+    ['\\frac{1}{n \\ln n}', 2, 'p = 1'],
+    ['\\frac{1}{n \\sqrt{\\ln n}}', 2, 'p = 1/2'],
+    ['\\frac{1}{n (\\ln n)^{0.99}}', 2, 'p = 0.99'],
+    ['\\frac{\\ln(\\ln n)}{n \\ln n}', 2, 'a slower factor'],
+    ['\\frac{1}{(n+1) \\ln(n+1)}', 1, 'a shifted index'],
+  ])('Σ %s from %i is +∞ (%s)', (body, lower) => {
+    expect(isPlusInfinity(sum(body, lower).evaluate())).toBe(true);
+    expect(isPlusInfinity(sum(body, lower).N())).toBe(true);
+  });
+
+  test('Σ −2/(n ln n) is −∞', () => {
+    expect(
+      sum('\\frac{-2}{n \\ln n}', 2).evaluate().isSame(ce.NegativeInfinity)
+    ).toBe(true);
+    expect(sum('\\frac{-2}{n \\ln n}', 2).N().isSame(ce.NegativeInfinity)).toBe(
+      true
+    );
+  });
+
+  // `Σ 1/(n (ln n)^p)` converges for `p > 1` (the partial sums plus the
+  // integral of the tail, `(ln N)^{1−p}/(p − 1)`, are stable to 6 digits
+  // from N = 10⁴ to 10⁸), and `lim n·ln(n)·f(n) = 0`: not certified. A
+  // series below `Σ 1/(n ln n)` that diverges, `Σ 1/(n ln n ln(ln n))`, is
+  // not reached by the test either.
+  test.each([
+    ['\\frac{1}{n (\\ln n)^2}', 2],
+    ['\\frac{1}{n (\\ln n)^{1.01}}', 2],
+    ['\\frac{1}{n (\\ln n)^{3/2}}', 2],
+    ['\\frac{1}{n \\ln(n) \\ln(\\ln(n))}', 3],
+  ])('Σ %s from %i is not certified', (body, lower) => {
+    expect(sum(body, lower).evaluate().operator).toBe('Sum');
+    expect(sum(body, lower).N().operator).toBe('Sum');
   });
 
   test('a convergent series is not touched', () => {
@@ -735,5 +775,38 @@ describe('Telescoping closed forms refuse a pole at the finite bound', () => {
     expect(
       ce.parse('\\prod_{k=-3}^\\infty \\frac{k+1}{k}').evaluate().operator
     ).toBe('Product');
+  });
+});
+
+describe('the compiled walk of a numeric infinite sum (CE-326)', () => {
+  test('a body with a function whose result jumps uses the interpreter walk', () => {
+    // The interpreter rounds the exact operand `1 − 10^−30/k` below 1, so
+    // every term is 0. The compiled body rounds the operand to the double 1
+    // first, and `Math.floor` then gives 1, so a compiled walk gives
+    // Σ 1/(k² + 1) ≈ 1.0767. So the body is not compiled.
+    const sum = ce.parse(
+      '\\sum_{k=1}^{\\infty} \\frac{\\lfloor 1 - 10^{-30}/k \\rfloor}{k^2+1}'
+    );
+    const precision = ce.precision;
+    try {
+      ce.precision = 'machine';
+      expect(sum.N().re).toBe(0);
+    } finally {
+      ce.precision = precision;
+    }
+    expect(sum.N().re).toBe(0);
+  });
+
+  test('a decline of the compiled walk near its tolerance uses the interpreter walk', () => {
+    // In doubles, `√(k² + 1) − k` loses most of its digits, so the error
+    // estimate of the compiled walk is a little above its tolerance and the
+    // compiled walk declines. The interpreter walk computes each term at the
+    // working precision, and accepts the series. The value is
+    // −0.16184106258611754 (mpmath, 30 digits).
+    const value = ce
+      .parse('\\sum_{k=1}^{\\infty} (k(\\sqrt{k^2+1} - k) - \\frac12)')
+      .N();
+    expect(isNumber(value)).toBe(true);
+    expect(Math.abs(value.re - -0.16184106258611754)).toBeLessThan(1e-10);
   });
 });

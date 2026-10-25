@@ -2,6 +2,8 @@ import type { Expression } from '../global-types.js';
 
 import { flatten } from './flatten.js';
 import { isFunction, isContinuationOperand } from './type-guards.js';
+import { EventLoopPacer } from '../../common/cooperative-steps.js';
+import { CancellationError } from '../../common/interruptible.js';
 
 /** Apply the function `f` to each operand of the expression `expr`,
  * account for the 'lazy' property of the operator definition:
@@ -63,10 +65,21 @@ export function holdMap(
 }
 
 /** The asynchronous twin of `holdMap()`. The second argument of `f` is the
- * position of the operand in `expr.ops`, as for `holdMap()`. */
+ * position of the operand in `expr.ops`, as for `holdMap()`.
+ *
+ * An `await` of `f` gives a turn to the microtasks only: the event loop
+ * runs no timer, no input and no rendering until the walk ends. So, when
+ * about 8 ms passed since the walk started or since the last turn, the
+ * walk waits for a macrotask (`EventLoopPacer`) before the next operand.
+ * After that wait, an aborted `signal` stops the walk with a
+ * `CancellationError` whose `cause` is the reason of the signal. A
+ * `Tuple` or another operator that is not lazy with many slow operands
+ * then lets a timer run, and an abort that a timer makes is seen within a
+ * slice. */
 export async function holdMapAsync(
   expr: Expression,
-  f: (x: Expression, index: number) => Promise<Expression | null>
+  f: (x: Expression, index: number) => Promise<Expression | null>,
+  signal?: AbortSignal
 ): Promise<ReadonlyArray<Expression>> {
   if (!isFunction(expr)) return [];
 
@@ -90,6 +103,7 @@ export async function holdMapAsync(
   if (def.lazy) return xs;
 
   const result: Expression[] = [];
+  const pacer = new EventLoopPacer();
   for (const [k, x] of xs.entries()) {
     const h = x.operator;
     if (h === 'Hold') result.push(x);
@@ -99,6 +113,11 @@ export async function holdMapAsync(
         const y = await f(op, positions?.[k] ?? k);
         if (y !== null) result.push(y);
       }
+    }
+    if (pacer.due) {
+      await pacer.pace();
+      if (signal?.aborted)
+        throw new CancellationError({ cause: signal.reason });
     }
   }
   return def?.associative && !hasContinuation

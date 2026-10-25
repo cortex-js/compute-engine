@@ -84,6 +84,7 @@ pi * radius^2
 | `--diagnostics <fmt>` | Write diagnostics as `text` (the default) or as a `json` array. |
 | `--time-limit <ms>` | Set the evaluation deadline in milliseconds. The default is `10000`; `0` disables it. |
 | `--compile` | Compile the program to JavaScript and run the generated code instead of interpreting it. See [Running a Compiled Program](#running-a-compiled-program). |
+| `--workers <n>` | Give the engine a pool of `<n>` worker threads and run each program asynchronously. See [Worker Threads](#worker-threads). The default is `0`, no pool. The largest value is `256`. |
 | `--no-color` | Disable color in diagnostics. The [`NO_COLOR`](https://no-color.org/) environment variable is also honored. |
 | `-h`, `--help` | Display command help. |
 | `-v`, `--version` | Display the package version. |
@@ -409,3 +410,22 @@ npx epsil --time-limit 30000 long-running.epsil
 
 Set `--time-limit 0` for no deadline. The iteration and
 recursion limits continue to apply independently.
+
+## Worker Threads
+
+`--workers <n>` gives the engine a pool of `<n>` worker threads, and runs each
+program asynchronously, one top-level statement after the other. Some
+operations then do their numeric work on the workers: a `findFit` with a
+`"global"` search scans its grid on them. A program gives the same values with
+or without the pool; there is nothing to declare in the program.
+
+```shell
+npx epsil --workers 4 fit.epsil
+```
+
+The workers start when the first such operation needs them, so a program with
+none starts no worker. The deadline of `--time-limit` applies to the whole
+program. The option also applies to the REPL and to `epsil mcp`, where the
+engine of each `evaluate` call uses the same pool. `--workers` cannot be used
+with `--compile` or `--from latex`, since neither runs the program
+asynchronously. The default, `0`, runs each program on the main thread.

@@ -18,6 +18,13 @@ import { isFunction, isSymbol } from './boxed-expression/type-guards.js';
  * its parameters (`exactArgumentSources` in `function-utils.ts`), and the
  * handler of the jump re-reads one exactly when the float is near the jump
  * (`exactRealValueOf` in `boxed-expression/constraint-subject.ts`).
+ *
+ * `IsPrime` is in the set for a related reason. The interpreter computes it
+ * on the exact integer, but its compiled code reads a double and throws a
+ * `RangeError` when that double is beyond the safe integers (`2^61 − 1` is
+ * computed as the double `2^61`). In the set, a `Map` body that applies it
+ * computes an exact input by the interpreter, unless a proof shows that
+ * every intermediate integer is in the safe range.
  */
 export const JUMP_FUNCTIONS: ReadonlySet<string> = new Set([
   'Floor',
@@ -36,6 +43,7 @@ export const JUMP_FUNCTIONS: ReadonlySet<string> = new Set([
   'GreaterEqual',
   'Equal',
   'NotEqual',
+  'IsPrime',
 ]);
 
 /**

@@ -1200,6 +1200,12 @@ function triviallyAdmittedCall(
       return false;
     }
     if (isNumber(op)) {
+      // Every type is a subtype of `any`, so the type of the literal is not
+      // read. Reading it computes the value type of the literal, which for a
+      // big-number float costs about 2 µs: a third of the canonical form of
+      // a `Tuple` of two floats (the `any*` parameters of `Tuple` and
+      // `List`).
+      if (param === 'any') continue;
       if (isSubtype(op.type.type, param)) continue;
       return false;
     }

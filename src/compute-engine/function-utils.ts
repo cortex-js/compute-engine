@@ -4462,6 +4462,11 @@ function containsFreeSymbol(
     return expr.value === undefined;
   }
   if (!isFunction(expr) && !isDictionary(expr)) return false;
+  // Written-out data (a list or tuple of numbers, strings and failed cells,
+  // `_isLiteralData()`) holds no symbol. Its answer is decided once per node,
+  // so a recursion that passes a long list to each call does not walk the
+  // list again at each call.
+  if (isFunction(expr) && expr._isLiteralData()) return false;
   // A dictionary and a function node are memoized alike: a shared dictionary
   // reached on several paths is walked once too.
   const key = shadowedKey(shadowed);

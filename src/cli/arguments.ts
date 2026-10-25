@@ -41,6 +41,7 @@ export function parseCliArguments(
         'no-color': { type: 'boolean' },
         'time-limit': { type: 'string' },
         'compile': { type: 'boolean' },
+        'workers': { type: 'string' },
       },
     });
   } catch (error) {
@@ -71,6 +72,19 @@ export function parseCliArguments(
   if (values['fancy-symbols'] === true && values.epsil !== true)
     throw new CliUsageError('The --fancy-symbols option requires --epsil.');
 
+  const workers = parseWorkers(values.workers);
+  // The kernel pool serves the asynchronous evaluation of an interpreted
+  // Epsil program. A compiled program and a LaTeX expression do not take
+  // that route, so the option is refused there rather than silently ignored.
+  if (workers > 0 && values.compile === true)
+    throw new CliUsageError(
+      'The --workers option cannot be used with --compile.'
+    );
+  if (workers > 0 && values.from === 'latex')
+    throw new CliUsageError(
+      'The --workers option cannot be used with "--from latex".'
+    );
+
   return {
     eval: evalSource,
     file: positionals[0],
@@ -83,6 +97,7 @@ export function parseCliArguments(
     color: values['no-color'] !== true && env.NO_COLOR === undefined,
     timeLimit: parseTimeLimit(timeLimit),
     compile: values.compile === true,
+    workers,
   };
 }
 
@@ -169,6 +184,7 @@ export function parseMcpArguments(args: readonly string[]): McpOptions {
         'port': { type: 'string' },
         'path': { type: 'string' },
         'allow-origin': { type: 'string', multiple: true },
+        'workers': { type: 'string' },
       },
     });
   } catch (error) {
@@ -204,6 +220,7 @@ export function parseMcpArguments(args: readonly string[]): McpOptions {
     port,
     path,
     allowedOrigins,
+    workers: parseWorkers(values.workers),
   };
 }
 
@@ -292,6 +309,22 @@ function parseInputFormat(value: unknown): InputFormat {
   if (value === undefined || value === 'epsil') return 'epsil';
   if (value === 'latex') return 'latex';
   throw new CliUsageError('The --from option must be "epsil" or "latex".');
+}
+
+/** The largest value of `--workers`. Each worker is a thread, so a larger
+ * value is refused rather than started. */
+const MAX_WORKERS = 256;
+
+/** The value of `--workers`: an integer from `0` to `MAX_WORKERS`, `0` (the
+ * default) for no kernel pool. */
+function parseWorkers(value: unknown): number {
+  if (value === undefined) return 0;
+  if (typeof value !== 'string' || !/^\d+$/.test(value))
+    throw new CliUsageError('--workers must be a non-negative integer.');
+  const result = Number(value);
+  if (!Number.isSafeInteger(result) || result > MAX_WORKERS)
+    throw new CliUsageError(`--workers must be at most ${MAX_WORKERS}.`);
+  return result;
 }
 
 function parseTimeLimit(value: string | undefined): number {

@@ -14,6 +14,8 @@ import { readSource, type CliIo } from './io.js';
 import { runMcp } from './mcp.js';
 import { runRepl } from './repl.js';
 import { makeEpsilSession } from './session.js';
+import type { CliOptions, EpsilSession } from './types.js';
+import { makeCliKernelPool } from './workers.js';
 
 export type { CliIo } from './io.js';
 
@@ -65,6 +67,11 @@ Options:
       --path <path>       MCP HTTP endpoint path (default: /mcp)
       --allow-origin <o>  allow a browser origin to call the MCP HTTP endpoint;
                           may be repeated
+      --workers <n>       give the engine a pool of <n> worker threads and
+                          run each program asynchronously, so that "findFit"
+                          and other numeric work on many values can run on
+                          the workers; 0 disables it (default: 0); also for
+                          the REPL and "epsil mcp"
       --no-color          disable colored diagnostics
   -h, --help              display this help
   -v, --version           display the package version
@@ -107,7 +114,30 @@ export async function main(
     return 0;
   }
 
-  const session = makeEpsilSession(options.timeLimit);
+  let workers;
+  try {
+    workers = makeCliKernelPool(options.workers, io);
+  } catch (error) {
+    io.stderr.write(
+      `epsil: ${error instanceof Error ? error.message : String(error)}\n`
+    );
+    return 1;
+  }
+  const session = makeEpsilSession(options.timeLimit, workers);
+  try {
+    return await runSession(session, options, io);
+  } finally {
+    // An idle worker thread keeps the process running: the pool is closed
+    // when the program or the REPL ends.
+    workers?.dispose();
+  }
+}
+
+async function runSession(
+  session: EpsilSession,
+  options: CliOptions,
+  io: CliIo
+): Promise<number> {
   if (
     options.eval === undefined &&
     options.file === undefined &&
@@ -138,7 +168,9 @@ export async function main(
       ? session.compile(source, options.inputFormat, url)
       : options.inputFormat === 'latex'
         ? session.evaluateLatex(source)
-        : session.evaluate(source, url);
+        : session.workers !== undefined
+          ? await session.evaluateAsync(source, url)
+          : session.evaluate(source, url);
     if (options.diagnosticsFormat === 'json') {
       if (result.diagnostics.length > 0)
         io.stderr.write(

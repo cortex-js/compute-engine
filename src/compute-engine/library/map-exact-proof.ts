@@ -15,6 +15,10 @@ import {
 } from './map-broadcast-shape.js';
 import type { LoweredLevel, Slot } from './map-broadcast-shape.js';
 import { rangeCount } from '../numerics/range-count.js';
+import { functionLiteralParameterType } from '../boxed-expression/function-literal.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
+import { callableBindingInContext } from '../boxed-expression/binders.js';
 
 /**
  * The static proof behind the **exact-mode** auto-compilation tier for lazy
@@ -41,7 +45,9 @@ import { rangeCount } from '../numerics/range-count.js';
  * 2. **Boundedness.** Source element bounds are read structurally (literal
  *    `Range`s, literal `List`s, a nested broadcast `Map`'s own proven output
  *    interval) and propagated through the body by a per-operator interval
- *    table. The table is fail-closed — an operator with no rule declines —
+ *    table, at each node of a body that is a tree of operations
+ *    (`x ↦ x^2 + 1`, `proveNestedMap()`). The table is fail-closed — an
+ *    operator with no rule declines —
  *    and every endpoint (plus each operator's own emitted intermediates) must
  *    be a safe integer.
  *
@@ -63,10 +69,18 @@ interface SourceBounds {
 
 /** The proof outcome for an eligible instance. */
 export interface ExactTierShape {
-  /** The broadcast-shaped level (the compile target's layout). */
-  level: LoweredLevel;
-  /** The level's element `Function` literal — the compile unit. */
+  /** The broadcast-shaped level (the compile target's layout), or
+   * `undefined` when the body is a tree of operations that
+   * `proveNestedMap()` proved node by node. */
+  level?: LoweredLevel;
+  /** The level's element `Function` literal — the compile unit. For a `Map`
+   * of a named user function, the literal of that function. */
   fn: Expression;
+  /** The name of the user function whose literal `fn` is, when the `Map`
+   * names its element function (`Map(f, xs)`). The compiled code does not
+   * read this name, so the caller records it as a dependency: a
+   * redefinition of the function must compile again. */
+  named?: string;
   /** The proven element interval of each source, in row order. The runner
    * re-checks every element against these at RUNTIME: the proof is taken at
    * drain start, and the values it read (a symbol source's list, R6) can in
@@ -113,6 +127,18 @@ function literalInteger(x: Expression | undefined): number | undefined {
 }
 
 /**
+ * The exponent of a `Power` whose bounds `applyOpInterval()` can propagate:
+ * an exact integer LITERAL from 2 to 5. A symbol is not accepted, also when
+ * its value is such an integer: the JavaScript target chooses the product
+ * form of the power from a literal exponent.
+ */
+function literalPowerExponent(x: Slot | undefined): number | undefined {
+  if (x === undefined || typeof x === 'number') return undefined;
+  const n = literalInteger(x);
+  return n !== undefined && n >= 2 && n <= 5 ? n : undefined;
+}
+
+/**
  * An interval, or `undefined` when either endpoint left the exactly
  * representable integer range.
  *
@@ -133,9 +159,10 @@ function maxAbs(x: Interval): number {
 }
 
 /**
- * Interval propagation through ONE operator application (a broadcast-shaped
- * body is exactly that). Fail-closed: an operator with no rule returns
- * `undefined` and the instance declines.
+ * Interval propagation through ONE operator application: the body of a
+ * broadcast-shaped level (`proveLevel()`), or one node of a body that is a
+ * tree of operations (`proveNestedMap()`). Fail-closed: an operator with no
+ * rule returns `undefined` and the instance declines.
  *
  * Each rule bounds the operator's own EMITTED intermediates, not just its
  * result: n-ary `Add`/`Multiply` fold left-to-right exactly as the generated
@@ -147,6 +174,13 @@ function applyOpInterval(op: string, args: Interval[]): Interval | undefined {
 
   switch (op) {
     case 'Add': {
+      // The generated code can add the operands in an order other than the
+      // canonical one (`x + 1 + Mod(…)` compiles to `x + floorMod(…) + 1`), so
+      // every partial sum, in any order, must be safe: the sum of the
+      // magnitudes bounds each of them.
+      let magnitude = 0;
+      for (const a of args) magnitude += maxAbs(a);
+      if (!Number.isSafeInteger(magnitude)) return undefined;
       let acc = args[0];
       for (let i = 1; i < args.length; i++) {
         const next = interval(acc.lo + args[i].lo, acc.hi + args[i].hi);
@@ -167,6 +201,15 @@ function applyOpInterval(op: string, args: Interval[]): Interval | undefined {
     }
 
     case 'Multiply': {
+      // As for `Add`, the factors can be multiplied in any order: the product
+      // of the magnitudes (each counted as at least 1, so that a zero factor
+      // does not hide a large partial product of the others) bounds every
+      // partial product.
+      let magnitude = 1;
+      for (const a of args) {
+        magnitude *= Math.max(1, maxAbs(a));
+        if (!Number.isSafeInteger(magnitude)) return undefined;
+      }
       let acc = args[0];
       for (let i = 1; i < args.length; i++) {
         const b = args[i];
@@ -231,8 +274,39 @@ function applyOpInterval(op: string, args: Interval[]): Interval | undefined {
       return interval(0, Math.max(-a.lo, a.hi));
     }
 
+    case 'Power': {
+      // Only an exponent from 2 to 5, which the caller has read from an
+      // integer LITERAL (`literalPowerExponent()`): the JavaScript target
+      // compiles these powers to products (`x * x`, `_SYS.pow3` to
+      // `_SYS.pow5`), which are exact while every partial product is a safe
+      // integer. A larger exponent compiles to `Math.pow`, whose result the
+      // language does not promise to be exact.
+      if (args.length !== 2) return undefined;
+      const [a, e] = args;
+      const n = e.lo;
+      if (e.hi !== n || !Number.isInteger(n) || n < 2 || n > 5)
+        return undefined;
+      // Every partial product is a power `|a|^k` with `k ≤ n`, so the bound
+      // `max(1, |a|)^n` covers them all.
+      const m = Math.max(1, maxAbs(a));
+      let bound = 1;
+      for (let i = 0; i < n; i++) {
+        bound *= m;
+        if (!Number.isSafeInteger(bound)) return undefined;
+      }
+      const pow = (v: number): number => {
+        let r = 1;
+        for (let i = 0; i < n; i++) r *= v;
+        return r;
+      };
+      if (n % 2 === 1) return interval(pow(a.lo), pow(a.hi));
+      if (a.lo >= 0) return interval(pow(a.lo), pow(a.hi));
+      if (a.hi <= 0) return interval(pow(a.hi), pow(a.lo));
+      return interval(0, pow(maxAbs(a)));
+    }
+
     default:
-      // No rule → no proof. `Divide`, `Power` and `Remainder` land here.
+      // No rule → no proof. `Divide` and `Remainder` land here.
       return undefined;
   }
 }
@@ -316,9 +390,9 @@ function proveSource(
     // permanent than an admission (the source's type can improve).
     if (hasAnnotatedParams(x)) ctx.typeExprs.push(x);
     const level = lowerLevel(x);
-    if (level === undefined) return undefined;
     ctx.depth++;
-    const r = proveLevel(ctx, level);
+    const r =
+      level !== undefined ? proveLevel(ctx, level) : proveNestedMap(ctx, x);
     ctx.depth--;
     return r;
   }
@@ -436,6 +510,8 @@ function proveLevel(
   const op = level.op;
   const slots: Slot[] | undefined = level.slots;
   if (op === undefined || slots === undefined) return undefined;
+  if (op === 'Power' && literalPowerExponent(slots[1]) === undefined)
+    return undefined;
 
   const sources: SourceBounds[] = [];
   for (const s of level.sources) {
@@ -471,6 +547,298 @@ function proveLevel(
     interval: out,
     count: Math.min(...sources.map((s) => s.count)),
   };
+}
+
+/**
+ * The `Function` literal behind a user-defined function symbol: the
+ * `_lambdaLiteral` of its operator definition, or the value of a symbol whose
+ * assigned value is a `Function` literal. These are the two storage routes
+ * that the compiler's `userFunctionLiteral` covers.
+ */
+export function userFnLiteral(
+  ce: ComputeEngine,
+  id: string
+): Expression | undefined {
+  const def = ce.lookupDefinition(id);
+  if (def && 'operator' in def) {
+    const literal = (def.operator as { _lambdaLiteral?: Expression })
+      ._lambdaLiteral;
+    if (literal !== undefined && isFunction(literal, 'Function'))
+      return literal;
+  }
+  const value = ce._getSymbolValue(id);
+  if (value !== undefined && isFunction(value, 'Function')) return value;
+  return undefined;
+}
+
+/**
+ * The `Function` literal of the user function that the callback symbol
+ * `callee` of a `Map` denotes (`Map(f, xs)`), or `undefined` to decline the
+ * compilation.
+ *
+ * The interpreter applies the callback through its lexical binding
+ * (`callableBindingInContext()`): the definition of `f` where the `Map` was
+ * bound, not the definition that the name has in the scope of the drain. The
+ * literal is read by the name (`userFnLiteral()`), and the dependencies of
+ * the compiled code are also recorded by the name. Thus, when the lexical
+ * binding is not the binding that the name gives in the current scope (an
+ * inner `f(x) = x + 2` shadows the outer `f(x) = x + 1` of the `Map`), the
+ * function declines, and the interpreter computes the elements.
+ */
+export function namedCallbackLiteral(
+  ce: ComputeEngine,
+  callee: Expression
+): Expression | undefined {
+  if (!isSymbol(callee)) return undefined;
+  const name = callee.symbol;
+  const own =
+    callee.valueDefinition !== undefined
+      ? { value: callee.valueDefinition }
+      : callee.operatorDefinition !== undefined
+        ? { operator: callee.operatorDefinition }
+        : undefined;
+  if (callableBindingInContext(ce, name, own) !== ce.lookupDefinition(name))
+    return undefined;
+  return userFnLiteral(ce, name);
+}
+
+/**
+ * True if the declared signature of the user function `name` accepts an
+ * argument of type `argTypes[i]` at each parameter `i`.
+ *
+ * The interpreter checks each argument against the signature of the
+ * function, and returns an error element for an argument that the signature
+ * refuses (`f` of type `(integer<0..10>) -> integer`, applied to `11`). The
+ * compiled code does not check the arguments. So a compiled `Map` of a named
+ * function is correct only when every argument that it can receive is
+ * accepted by the signature. A signature with a different number of
+ * parameters declines. A definition whose type is not a signature (the bare
+ * type `function`) states no parameter type, and accepts every argument.
+ */
+export function declaredParametersAdmit(
+  ce: ComputeEngine,
+  name: string,
+  argTypes: ReadonlyArray<Type>
+): boolean {
+  const def = ce.lookupDefinition(name);
+  if (def === undefined) return false;
+  const type =
+    'operator' in def ? def.operator.signature.type : def.value.type.type;
+  if (typeof type !== 'object' || type.kind !== 'signature') return true;
+  const required = type.args ?? [];
+  const optional = type.optArgs ?? [];
+  if (argTypes.length < required.length) return false;
+  for (let i = 0; i < argTypes.length; i++) {
+    const param =
+      required[i] ?? optional[i - required.length] ?? type.variadicArg;
+    if (param === undefined) return false;
+    if (!isSubtype(argTypes[i], param.type)) return false;
+  }
+  return true;
+}
+
+/**
+ * The element function of a `Map`: its `Function` literal, or the literal of
+ * the user function that its first operand names (`Map(f, xs)` with
+ * `f(x) = x^2 + 1`), with the names of its parameters. `undefined` when the
+ * first operand is neither, or when a parameter is not a symbol.
+ *
+ * The interpreter enforces the annotation of a parameter
+ * (`Typed(x, "integer")`, also one that the canonical form of a lambda over
+ * a `Range` adds) at each application, and the compiled code does not. So
+ * an annotation is accepted only when every integer satisfies it: the
+ * runner gives the compiled code only exact integers (`sourceBounds`).
+ */
+export function mapElementFunction(
+  ce: ComputeEngine,
+  expr: Expression
+): { fn: Expression; params: string[]; named?: string } | undefined {
+  if (!isFunction(expr, 'Map') || expr.nops < 2) return undefined;
+  let fn = expr.op1;
+  let named: string | undefined;
+  if (isSymbol(fn)) {
+    named = fn.symbol;
+    const literal = namedCallbackLiteral(ce, fn);
+    if (literal === undefined) return undefined;
+    fn = literal;
+  }
+  if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
+  // The runner gives the compiled code only exact integers, so the
+  // signature of a named function must accept every integer.
+  if (
+    named !== undefined &&
+    !declaredParametersAdmit(
+      ce,
+      named,
+      fn.ops.slice(1).map(() => 'integer')
+    )
+  )
+    return undefined;
+  const params: string[] = [];
+  for (let p of fn.ops.slice(1)) {
+    if (isFunction(p, 'Typed')) {
+      const declared = functionLiteralParameterType(p);
+      if (declared === undefined || !isSubtype('integer', declared))
+        return undefined;
+      p = p.op1;
+    }
+    if (!isSymbol(p)) return undefined;
+    params.push(p.symbol);
+  }
+  return { fn, params, named };
+}
+
+/** Guard against a pathological nesting depth of an element function body. */
+const MAX_BODY_DEPTH = 64;
+
+/**
+ * Prove a `Map` whose element function body is a TREE of integer
+ * operations (`x ↦ x^2 + 1`), which `lowerLevel()` does not lower because an
+ * operand of the outer operation is itself an application. The element
+ * function can be a `Function` literal or a named user function
+ * (`mapElementFunction()`).
+ *
+ * The proof is the one of `proveLevel()`, applied at each node of the body,
+ * from the leaves up: a parameter has the bounds of its source, a closed
+ * operand is an exact integer literal or a symbol with such a value
+ * (`closedInteger()`), and each application propagates the bounds of its
+ * operands with `applyOpInterval()`, which also bounds the values that the
+ * generated code computes on the way. Each application must also be
+ * integer-closed: it is rebuilt over `integer` stand-in symbols, from the
+ * rebuilt operands, and its type must be `integer`. Any other node (a call
+ * of a user function, an operation with no bounds rule, a body with more
+ * than one statement) declines.
+ *
+ * Returns the bounds of the elements that the `Map` produces, and pushes the
+ * bounds of its sources into `sourcesOut` when given.
+ */
+function proveNestedMap(
+  ctx: ProofContext,
+  expr: Expression,
+  sourcesOut?: SourceBounds[]
+): SourceBounds | undefined {
+  const ce = ctx.ce;
+  const element = mapElementFunction(ce, expr);
+  if (element === undefined) return undefined;
+  // The definition of a named function is read here, so the proof is
+  // re-taken when the engine changes (a redefinition of the function).
+  if (element.named !== undefined) ctx.dynamic = true;
+  const { fn, params } = element;
+  if (!isFunction(fn) || !isFunction(expr)) return undefined;
+  const sourceOps = expr.ops.slice(1);
+  if (params.length !== sourceOps.length) return undefined;
+
+  let body: Expression = fn.op1;
+  if (isFunction(body, 'Block')) {
+    if (body.nops !== 1) return undefined;
+    body = body.op1;
+  }
+  // The numeric marker belongs to the float tier, unless the caller asks
+  // for a proof over marked levels (`numericMarker`).
+  if (
+    (isFunction(body, 'NumericApproximation') || isFunction(body, 'N')) &&
+    body.nops === 1
+  ) {
+    if (!ctx.numericMarker) return undefined;
+    body = body.op1;
+  }
+  // A bare parameter or a constant body is not an operation the compiled
+  // code can improve on.
+  if (!isFunction(body)) return undefined;
+
+  const sources: SourceBounds[] = [];
+  for (const s of sourceOps) {
+    const b = proveSource(ctx, s);
+    if (b === undefined) return undefined;
+    sources.push(b);
+  }
+
+  // The exponent of a `Power` must be a literal (`literalPowerExponent()`):
+  // only its base is an operand to prove.
+  const operandsOf = (
+    x: Expression
+  ): { operands: ReadonlyArray<Expression>; exponent?: number } | undefined => {
+    if (!isFunction(x)) return undefined;
+    if (x.operator !== 'Power') return { operands: x.ops };
+    const exponent = x.nops === 2 ? literalPowerExponent(x.op2) : undefined;
+    if (exponent === undefined) return undefined;
+    return { operands: [x.op1], exponent };
+  };
+
+  // First pass: the bounds of each node. It reads no type and declares
+  // nothing, so a body that the table cannot bound declines at little cost.
+  const boundsOf = (x: Expression, depth: number): Interval | undefined => {
+    if (depth > MAX_BODY_DEPTH) return undefined;
+    if (isSymbol(x)) {
+      const i = params.indexOf(x.symbol);
+      if (i >= 0) return sources[i].interval;
+    }
+    if (!isFunction(x)) {
+      const v = closedInteger(ctx, x);
+      return v === undefined ? undefined : { lo: v, hi: v };
+    }
+    if (params.includes(x.operator)) return undefined;
+    const shape = operandsOf(x);
+    if (shape === undefined) return undefined;
+    const bounds: Interval[] = [];
+    for (const o of shape.operands) {
+      const b = boundsOf(o, depth + 1);
+      if (b === undefined) return undefined;
+      bounds.push(b);
+    }
+    if (shape.exponent !== undefined)
+      bounds.push({ lo: shape.exponent, hi: shape.exponent });
+    return applyOpInterval(x.operator, bounds);
+  };
+
+  const out = boundsOf(body, 0);
+  if (out === undefined) return undefined;
+
+  // Second pass: each application, rebuilt over the stand-ins, must be
+  // integer-closed (see `probesIntegerClosed()`).
+  ce.pushScope();
+  try {
+    const standIns: Expression[] = [];
+    for (let i = 0; i < params.length; i++) {
+      const name = `${PROBE_SYMBOL_PREFIX}${i}`;
+      ce.declare(name, 'integer');
+      standIns.push(ce.symbol(name));
+    }
+
+    const probeOf = (x: Expression): Expression | undefined => {
+      if (isSymbol(x)) {
+        const i = params.indexOf(x.symbol);
+        if (i >= 0) return standIns[i];
+      }
+      if (!isFunction(x)) {
+        const v = closedInteger(ctx, x);
+        return v === undefined ? undefined : ce.number(v);
+      }
+      const shape = operandsOf(x);
+      if (shape === undefined) return undefined;
+      const probes: Expression[] = [];
+      for (const o of shape.operands) {
+        const p = probeOf(o);
+        if (p === undefined) return undefined;
+        probes.push(p);
+      }
+      if (shape.exponent !== undefined) probes.push(ce.number(shape.exponent));
+      const probe = ce.function(x.operator, probes);
+      if (!probe.isValid || !probe.type.matches('integer')) return undefined;
+      return probe;
+    };
+
+    if (probeOf(body) === undefined) return undefined;
+    if (sourcesOut !== undefined) sourcesOut.push(...sources);
+    return {
+      interval: out,
+      count: Math.min(...sources.map((s) => s.count)),
+    };
+  } catch {
+    return undefined;
+  } finally {
+    ce.popScope();
+  }
 }
 
 interface ExactProofMemo {
@@ -572,14 +940,23 @@ export function exactTierShape(
   };
   const level = isFunction(expr, 'Map') ? lowerLevel(expr) : undefined;
   const sources: SourceBounds[] = [];
+  // A body that is not one application (`x ↦ x^2 + 1`), or a named element
+  // function, is proved node by node (`proveNestedMap()`).
+  const element =
+    level === undefined ? mapElementFunction(ce, expr) : undefined;
   const proof =
-    level === undefined ? undefined : proveLevel(ctx, level, sources);
+    level !== undefined
+      ? proveLevel(ctx, level, sources)
+      : element !== undefined
+        ? proveNestedMap(ctx, expr, sources)
+        : undefined;
   const shape: ExactTierShape | undefined =
-    proof === undefined || level === undefined || !isFunction(expr, 'Map')
+    proof === undefined || !isFunction(expr, 'Map')
       ? undefined
       : {
           level,
-          fn: expr.op1,
+          fn: element?.fn ?? expr.op1,
+          named: element?.named,
           sourceBounds: sources.map((s) => s.interval),
           count: proof.count,
         };

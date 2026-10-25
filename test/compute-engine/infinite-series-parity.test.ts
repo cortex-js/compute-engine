@@ -112,28 +112,85 @@ describe('A CONVERGENT SERIES WITH A NON-INTEGER-POWER TAIL HAS A VALUE UNDER N(
   });
 
   // A divergent series whose divergence is certified by the limit
-  // comparison with the harmonic series (`divergentInfiniteSum`,
-  // `library/utils.ts`) is `+∞` under `.N()` as under `evaluate()`.
+  // comparison with the harmonic series, or with `Σ 1/(n ln n)` when
+  // `lim n·f(n) = 0` (`divergentInfiniteSum`, `library/utils.ts`), is `+∞`
+  // under `.N()` as under `evaluate()`.
   test.each([
     '\\sum_{n=1}^\\infty \\frac{1}{n}',
     '\\sum_{n=1}^\\infty \\frac{1}{\\sqrt{n}}',
     '\\sum_{n=1}^\\infty n',
     '\\sum_{n=1}^\\infty \\frac{\\ln(n)}{n}',
     '\\sum_{n=2}^\\infty \\frac{\\ln(\\ln(n))}{n}',
+    '\\sum_{n=2}^\\infty \\frac{1}{n\\ln(n)}',
   ])('the divergent %s is +∞', (latex) => {
     expect(ce.parse(latex).N().isSame(ce.PositiveInfinity)).toBe(true);
   });
 
   // A series with no value, and a divergent series the certificate does
-  // not reach (`lim n·f(n) = 0`), stay unevaluated: never a truncated
+  // not reach (`lim n·ln(n)·f(n) = 0`), stay unevaluated: never a truncated
   // partial sum.
   test.each([
     '\\sum_{n=1}^\\infty (-1)^n',
     '\\sum_{n=1}^\\infty (-1)^n\\sqrt{n}',
-    '\\sum_{n=2}^\\infty \\frac{1}{n\\ln(n)}',
+    '\\sum_{n=3}^\\infty \\frac{1}{n\\ln(n)\\ln(\\ln(n))}',
     // Oscillating partial sums: the exponent estimates are not finite.
     '\\sum_{n=1}^\\infty \\frac{\\sin(n)}{\\sqrt{n}} \\cdot n',
   ])('the divergent %s stays unevaluated', (latex) => {
     expect(ce.parse(latex).N().operator).toBe('Sum');
+  });
+});
+
+/**
+ * The walk of `acceleratedInfiniteSum()` (`library/utils.ts`) first runs with
+ * the machine values of the compiled body. When that walk declines, the sum
+ * declines; when it accepts a value above machine precision, the walk runs
+ * again with the interpreter, and its value is the result (GitHub #326).
+ */
+describe('THE EXTRAPOLATION OF AN INFINITE SUM WITH A COMPILED BODY', () => {
+  test('the value above machine precision has the digits of the interpreter', () => {
+    // The compiled body computes `1 + 1/k²` in doubles and loses digits: its
+    // walk gives 1.3018463986037174. The interpreter gives
+    // 1.301846398603712. The value is ln(sinh(π)/π) = 1.30184639860371267….
+    const v = ce.parse('\\sum_{k=1}^\\infty \\ln(1+\\frac{1}{k^2})').N().re;
+    expect(Math.abs(v - 1.3018463986037127)).toBeLessThan(2e-15);
+  });
+
+  test('a second .N() of the same sum has the same value', () => {
+    // The interpreter walk leaves the last index value assigned to the
+    // index. The compiled body of the next walk must not read it as a
+    // constant: it did, and the second `.N()` stayed a `Sum`.
+    const fresh = new ComputeEngine();
+    const sum = fresh.parse('\\sum_{k=1}^{\\infty} \\frac{1}{k^2+1}');
+    expect(sum.N().re).toBeCloseTo(1.0766740474685907, 12);
+    expect(sum.N().re).toBeCloseTo(1.0766740474685907, 12);
+    fresh.precision = 40;
+    expect(sum.N().re).toBeCloseTo(1.0766740474685907, 12);
+  });
+
+  test('a compiled term of 0 from an overflow comes from the interpreter', () => {
+    // For 1004 ≤ k ≤ 1023, `k²(2^k + 1)` overflows in doubles while `2^k`
+    // does not, and the compiled term is 0. With these terms the walk
+    // declined a convergent series. The value is Σ 1/k² − Σ 1/(k²(2^k + 1)),
+    // and the partial sum to k = 2000 is 1.2431794099…, about 1/2000 below.
+    const machine = new ComputeEngine();
+    machine.precision = 'machine';
+    const v = machine
+      .parse('\\sum_{k=1}^\\infty \\frac{2^k}{k^2 (2^k+1)}')
+      .N().re;
+    expect(v).toBeCloseTo(1.2436792849532812, 10);
+  });
+
+  test.each([
+    '\\sum_{k=1}^\\infty \\frac{\\cos k}{k}',
+    '\\sum_{n=2}^\\infty \\frac{1}{n (\\ln n)^2}',
+    '\\sum_{n=3}^\\infty \\frac{1}{n \\ln(n) \\ln(\\ln(n))}',
+  ])('%s declines without the interpreter walk', (latex) => {
+    const started = Date.now();
+    expect(ce.parse(latex).N().operator).toBe('Sum');
+    // The interpreter walk of these bodies took 1 to 30 s; the compiled walk
+    // takes milliseconds. The time depends on the load of the machine, so the
+    // limit is asserted only in a `CE_PERF=1` run.
+    if (process.env.CE_PERF === '1')
+      expect(Date.now() - started).toBeLessThan(500);
   });
 });

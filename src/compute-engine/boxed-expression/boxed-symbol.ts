@@ -1871,11 +1871,18 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // which the window does not advance: storing it would serve a
     // raised-precision value at the working precision after the window.
     if (this.engine._atTransientConfiguration) return compute();
-    // A written-out list or tuple is its own value: evaluating it is one
-    // pass over its elements, so remembering it buys nothing — and the walks
-    // below would READ its elements, which a store-backed numeric list
-    // (`ce.list`) keeps unboxed until something asks for them.
-    if (value.operator === 'List' || value.operator === 'Tuple')
+    // A written-out list is its own value: evaluating it is one pass over its
+    // elements, so remembering it buys nothing — and the walks below would
+    // READ its elements, which a store-backed numeric list (`ce.list`) keeps
+    // unboxed until something asks for them. A tuple that is written-out
+    // data (`_isLiteralData()`) is its own value too. Any other tuple is
+    // remembered: a point `(f(u), g(u))` that a symbol holds evaluated
+    // `f(u)` and `g(u)` again at each read of the symbol, and a tuple has
+    // few elements, so the walks below are cheap.
+    if (
+      value.operator === 'List' ||
+      (value.operator === 'Tuple' && value._isLiteralData())
+    )
       return compute();
     const ce = this.engine;
     const memos = STORED_VALUE_MEMOS.get(value);

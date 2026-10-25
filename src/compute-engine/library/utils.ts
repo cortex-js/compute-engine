@@ -63,8 +63,9 @@ import { isFunctionLiteralParameter } from '../boxed-expression/function-literal
 import { checkDeadline, isThenable } from '../../common/interruptible.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { EXTENDED_REAL_TYPE } from '../../common/type/primitive.js';
-import { MAX_ITERATION } from '../numerics/numeric.js';
+import { MACHINE_PRECISION, MAX_ITERATION } from '../numerics/numeric.js';
 import { extrapolate } from '../numerics/richardson.js';
+import { appliesJumpFunction } from '../jump-functions.js';
 import {
   reduceCollection,
   enumerationDeclinedAfterWalk,
@@ -1671,6 +1672,27 @@ export function infiniteSumClosedForm(
 }
 
 /**
+ * The compiled body `f` of a series, as a function of the index `index`, or
+ * `undefined` when the body does not compile.
+ *
+ * The index is mapped to the argument of the compiled function (the `vars`
+ * compile option). Without this mapping, the compiler replaces a symbol that
+ * has a value by that value. The interpreter walk of a series assigns each
+ * index value to the index (`assignLoopIndex()`), and the last value stays
+ * assigned: the next `.N()` of the same series compiled `1/(k² + 1)` with the
+ * constant `k = 1026`, and the compiled walk declined the series.
+ */
+function compiledSeriesTerm(
+  ce: ComputeEngine,
+  body: Expression,
+  index: string
+): ((vars: Record<string, number>) => number) | undefined {
+  return implicitCompileNumeric(ce, body, {
+    vars: { [index]: `_[${JSON.stringify(index)}]` },
+  });
+}
+
+/**
  * `+∞` or `−∞` when the series `Σ_{k=n₀}^{∞} f(k)` provably diverges to that
  * infinity; `undefined` when it converges, when its divergence is not
  * established, or when it has no value (an oscillating series such as
@@ -1680,7 +1702,10 @@ export function infiniteSumClosedForm(
  * `L = lim_{k→∞} k·f(k)`. When `L > 0` or `L = +∞`, the terms are positive
  * for every large `k` and `f(k) ≥ c/k` for some `c > 0`, so the sum is `+∞`
  * because `Σ 1/k` is. When `L < 0` or `L = −∞`, the sum is `−∞`. `L = 0` is
- * inconclusive (`Σ 1/k²` converges, `Σ 1/(k ln k)` diverges), and the sum
+ * inconclusive (`Σ 1/k²` converges, `Σ 1/(k ln k)` diverges). Then the
+ * limit comparison with `Σ 1/(k ln k)`, which diverges, is tried: the same
+ * rules apply to `L' = lim_{k→∞} k·ln(k)·f(k)`. This certifies
+ * `Σ 1/(k (ln k)^p)` for `p ≤ 1`. When `L' = 0` too (`p > 1`), the sum
  * stays symbolic.
  *
  * Three guards keep the verdict cheap and sound:
@@ -1727,7 +1752,7 @@ export function divergentInfiniteSum(
   // `f(k) = k!` is an overflow in doubles where the exact `.N()` is a
   // million bignum multiplications. A body that does not compile is not
   // certified.
-  const compiled = implicitCompileNumeric(ce, body);
+  const compiled = compiledSeriesTerm(ce, body, index);
   if (compiled === undefined) return undefined;
   const termAt = (k: number): number => compiled({ [index]: k });
 
@@ -1740,14 +1765,20 @@ export function divergentInfiniteSum(
   // sample must be at least a quarter of the first. `'nan'` reports a
   // sample that is not a number (an overflow in doubles), `0` a ladder with
   // samples of both signs, or that decays.
-  const sampleSign = (ladder: readonly number[]): number | 'nan' => {
+  // `weight(k)` is the factor that multiplies `f(k)`: `k` for the
+  // comparison with the harmonic series, `k·ln k` for the comparison with
+  // `Σ 1/(k ln k)` below.
+  const sampleSign = (
+    ladder: readonly number[],
+    weight: (k: number) => number = (k) => k
+  ): number | 'nan' => {
     let sign = 0;
     let first = 0;
     let last = 0;
     for (const base of ladder) {
       const k0 = Math.max(base, n0 * Math.max(1, base / 100));
       for (const k of [k0, k0 + 1]) {
-        const scaled = k * termAt(k);
+        const scaled = weight(k) * termAt(k);
         if (Number.isNaN(scaled)) return 'nan';
         if (scaled === 0) return 0;
         const s = Math.sign(scaled);
@@ -1759,29 +1790,46 @@ export function divergentInfiniteSum(
     }
     return last >= first / 4 ? sign : 0;
   };
-  let sign = sampleSign([1e3, 1e4, 1e5, 1e6]);
-  if (sign === 'nan') sign = sampleSign([10, 30, 100, 300]);
+  const ladder = (weight?: (k: number) => number): number | 'nan' => {
+    const sign = sampleSign([1e3, 1e4, 1e5, 1e6], weight);
+    return sign === 'nan' ? sampleSign([10, 30, 100, 300], weight) : sign;
+  };
+  const sign = ladder();
   if (sign === 'nan' || sign === 0) return undefined;
 
-  // The symbolic limit of `k·f(k)` at `+∞`, read as a signed verdict.
-  const limit = symbolicLimit(
-    ce.function('Multiply', [indexSymbol, body]),
-    index,
-    ce.PositiveInfinity,
-    undefined,
-    ce
-  );
-  if (limit === undefined) return undefined;
-  let limitSign = 0;
-  if (limit.isInfinity === true) {
-    if (limit.isPositive === true) limitSign = 1;
-    else if (limit.isNegative === true) limitSign = -1;
-  } else {
+  // The symbolic limit of `factors·f(k)` at `+∞`, read as a signed verdict:
+  // `±1` for a limit that is a number other than 0 or an infinity, `0` for a
+  // limit of 0, `undefined` when the limit is not known.
+  const limitSign = (factors: Expression[]): number | undefined => {
+    const limit = symbolicLimit(
+      ce.function('Multiply', [...factors, body]),
+      index,
+      ce.PositiveInfinity,
+      undefined,
+      ce
+    );
+    if (limit === undefined) return undefined;
+    if (limit.isInfinity === true) {
+      if (limit.isPositive === true) return 1;
+      if (limit.isNegative === true) return -1;
+      return undefined;
+    }
     const l = numericValueOf(limit);
-    if (l === undefined || l === 0) return undefined;
-    limitSign = Math.sign(l);
-  }
-  if (limitSign !== sign) return undefined;
+    return l === undefined ? undefined : Math.sign(l);
+  };
+  let verdict = limitSign([indexSymbol]);
+  // `lim k·f(k) = 0` is inconclusive. The comparison with `Σ 1/(k ln k)`,
+  // which diverges (by the Cauchy condensation test, `Σ 2^j f(2^j)` is then
+  // `Σ 1/(j ln 2)`), decides the series that diverge more slowly than the
+  // harmonic series: when `L' = lim k·ln(k)·f(k)` is a number other than 0
+  // or an infinity, `f(k)` has the sign of `L'` for every large `k`, and
+  // `|f(k)| ≥ c/(k ln k)` for some `c > 0`, so the sum is the infinity of
+  // that sign. This covers `Σ 1/(k (ln k)^p)` for `p ≤ 1`. For `p > 1`,
+  // which converges, `L' = 0`, and the sum is not certified. The samples of
+  // `k·ln(k)·f(k)` must pass the same prefilter as those of `k·f(k)`.
+  if (verdict === 0 && ladder((k) => k * Math.log(k)) === sign)
+    verdict = limitSign([indexSymbol, ce.function('Ln', [indexSymbol])]);
+  if (verdict !== sign) return undefined;
 
   // Every term must be a finite real number.
   if (!termsDefinedFrom(body, index, n0)) return undefined;
@@ -2536,6 +2584,28 @@ function fittedExponentExtrapolation(x: readonly number[]): number | undefined {
  * possibly with a `ln(N)` factor (`Σ ln(n)/n²`), is extrapolated with a
  * fitted exponent (`fittedExponentLimit`) when the integer-power tableau
  * does not converge.
+ *
+ * The walk can evaluate up to 2¹⁵ terms. The interpreter costs from about
+ * 30 µs (`1/k²`) to about 1 ms (a body with `ln`) per term, so a series that
+ * does not converge took up to 30 s to decline. When the body compiles, the
+ * walk first runs with the machine values of the compiled body, which costs
+ * milliseconds. When a compiled term is not a finite number of at least the
+ * smallest normal double (an overflow or an underflow in doubles, or a term
+ * that is 0), the walk runs again with the interpreter, which gives the
+ * result. Else, when the compiled walk declines, the sum declines, except
+ * above machine precision when the error estimate of the compiled walk was
+ * near its tolerance (`NEAR_MISS_FACTOR`): then the interpreter walk gives
+ * the result. When the compiled walk
+ * accepts a value and the precision is above machine precision, the walk
+ * runs again with the interpreter, and its value is the result: the
+ * interpreter rounds a correctly computed value to a machine float, and the
+ * compiled body can lose digits (`ln(1 + 1/k²)` computes `1 + 1/k²` in
+ * doubles), so the result keeps the digits it had. At machine precision,
+ * the interpreter also computes in doubles, and the value of the compiled
+ * walk is the result.
+ * The compiled body is used only when the body has no other free variable
+ * and no side effect, as in `divergentInfiniteSum()`, and applies no
+ * function of `JUMP_FUNCTIONS` (`jump-functions.ts`). (CE-326.)
  */
 export function acceleratedInfiniteSum(
   body: Expression | undefined,
@@ -2543,6 +2613,80 @@ export function acceleratedInfiniteSum(
   ce: ComputeEngine
 ): Expression | undefined {
   if (!body) return undefined;
+  const walk = infiniteSeriesWalk(limits);
+  if (walk === undefined) return undefined;
+  // A body that applies a function whose result jumps at a point (`Floor`,
+  // a comparison, ...) is not compiled. Its compiled term rounds the operand
+  // of that function to a double first, and a value near a jump can then
+  // be on the wrong side of it: the interpreter gives 0 for
+  // `Floor(1 − 10^−30/k)`, the compiled term gives 1.
+  const compiled =
+    body.unknowns.every((u) => u === walk.index) &&
+    isTransitivelyPure(body) &&
+    !appliesJumpFunction(ce, body)
+      ? compiledSeriesTerm(ce, body, walk.index)
+      : undefined;
+  if (compiled === undefined)
+    return extrapolatedInfiniteSum(body, limits, ce, undefined);
+  const fast: FastWalkReport = { unreliable: false, miss: Infinity };
+  const value = extrapolatedInfiniteSum(body, limits, ce, compiled, fast);
+  if (fast.unreliable)
+    return extrapolatedInfiniteSum(body, limits, ce, undefined);
+  if (ce.precision <= MACHINE_PRECISION) return value;
+  if (value === undefined && fast.miss > NEAR_MISS_FACTOR) return undefined;
+  return extrapolatedInfiniteSum(body, limits, ce, undefined);
+}
+
+/**
+ * What the compiled walk of `extrapolatedInfiniteSum()` reports to
+ * `acceleratedInfiniteSum()`. `unreliable` is true when a compiled term is
+ * not a finite number of at least the smallest normal double. `miss` is the
+ * factor by which the error estimate of the first acceptance was above its
+ * tolerance when that acceptance failed: 0 to 1 when the error estimate was
+ * within the tolerance and the check of the other parity failed, `Infinity`
+ * when the value of the extrapolation was not a finite number or the walk
+ * reached its term limit.
+ */
+type FastWalkReport = { unreliable: boolean; miss: number };
+
+/**
+ * Above machine precision, a decline of the compiled walk is final only when
+ * its error estimate missed the tolerance by more than this factor. A
+ * compiled term can lose most of its digits to cancellation in doubles
+ * (`k(√(k² + 1) − k) − 1/2` subtracts two values near `k²`), and then the
+ * error estimate of a convergent series is above the tolerance by a few
+ * orders of magnitude, while the interpreter walk, which computes each term
+ * at the working precision, accepts the series. A divergent or oscillating
+ * series misses the tolerance by a larger factor, and declines without the
+ * slower interpreter walk.
+ */
+const NEAR_MISS_FACTOR = 1e6;
+
+/** The smallest positive normal double, `2^−1022`. */
+const MIN_NORMAL_DOUBLE = 2.2250738585072014e-308;
+
+/**
+ * The walk and the extrapolation of `acceleratedInfiniteSum()`. A term is
+ * the value of `compiled` at the index when `compiled` is defined, else the
+ * value of `body` from the interpreter.
+ *
+ * A compiled term that is not a finite number of at least the smallest
+ * normal double sets `fast.unreliable`, and the result is then not used.
+ * Such a term can be wrong in doubles where the interpreter is right: an
+ * overflow gives `Infinity` or `NaN` (`2^k/k!` at `k = 1100`); an
+ * intermediate value that overflows in a denominator gives 0
+ * (`2^k/(k²(2^k + 1))` at `k = 1010` divides by `Infinity`), and with
+ * these zeros the walk declined a convergent series; a term that underflows
+ * has lost digits. A term that is 0 in exact arithmetic sets the flag too,
+ * and the interpreter walk then gives the result.
+ */
+function extrapolatedInfiniteSum(
+  body: Expression,
+  limits: Expression,
+  ce: ComputeEngine,
+  compiled: ((vars: Record<string, number>) => number) | undefined,
+  fast: FastWalkReport = { unreliable: false, miss: Infinity }
+): Expression | undefined {
   const walk = infiniteSeriesWalk(limits);
   if (walk === undefined) return undefined;
   const { index, termIndexAt, doubly } = walk;
@@ -2567,6 +2711,12 @@ export function acceleratedInfiniteSum(
 
   // Numeric value of the body at integer index `k` (real series only).
   const term = (k: number): number => {
+    if (compiled !== undefined) {
+      const v = compiled({ [index]: k });
+      if (!(Number.isFinite(v) && Math.abs(v) >= MIN_NORMAL_DOUBLE))
+        fast.unreliable = true;
+      return v;
+    }
     assignLoopIndex(ce, index, k);
     return numericValueOf(body) ?? NaN;
   };
@@ -2699,8 +2849,14 @@ export function acceleratedInfiniteSum(
         Math.abs(shifted - val) <= 10 * tol
       )
         return ce.number(val);
+      if (!overflow && Number.isFinite(shifted))
+        fast.miss = Math.max(
+          shiftedErr / tol,
+          Math.abs(shifted - val) / (10 * tol)
+        );
       return undefined;
     }
+    fast.miss = err / tol;
   }
 
   // Second acceptance, for OSCILLATING absolutely-convergent series

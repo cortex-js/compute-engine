@@ -329,10 +329,91 @@ describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
   });
 
-  it('leaves a LIBRARY operator head untouched', () => {
-    // A target may lower an operator applied to a collection differently
-    // from a list of separate applications.
-    const expr = ce.box(['Map', 'Sin', FIVE]);
+  it('applies a LIBRARY operator head of one parameter once per element', () => {
+    // The calls are the applications of the callback `(p) ↦ Sin(p)` that the
+    // compiler writes when it lowers the `Map` itself. Before the unroll,
+    // javascript emitted a runtime `.map`, and interval-js and glsl declined.
+    expect(unrolled(['Map', 'Sin', FIVE]).json).toEqual([
+      'List',
+      ['Sin', 'a'],
+      ['Sin', 'b'],
+      ['Sin', 'c'],
+      ['Sin', 'd'],
+      ['Sin', 's'],
+    ]);
+    const args = { a: 0.5, b: 2, c: 3, d: 7, s: -1.25 };
+    for (const head of ['Sin', 'Abs', 'Floor', 'Square']) {
+      const expr = ce.box(['Map', head, FIVE]);
+      const r: any = compile(expr, { to: 'javascript', fallback: false });
+      expect(r.code).not.toContain('.map(');
+      const want = Object.values(args).map((k) => ce.box([head, k]).N().re);
+      const got = r.run(args) as number[];
+      want.forEach((v, i) => expect(got[i]).toBeCloseTo(v, 12));
+    }
+    expect(compile(ce.box(['Map', 'Sin', FIVE]), { fallback: false }).code)
+      .toBe(
+        '[Math.sin(_.a), Math.sin(_.b), Math.sin(_.c), Math.sin(_.d), Math.sin(_.s)]'
+      );
+    for (const to of ['interval-js', 'glsl'] as const) {
+      const r: any = compile(ce.box(['Map', 'Sin', FIVE]), {
+        to,
+        fallback: false,
+      });
+      expect(r.success).toBe(true);
+    }
+    expect(
+      compile(ce.box(['Map', 'Sin', FIVE]), { to: 'glsl', fallback: false })
+        .code
+    ).toBe('float[5](sin(a), sin(b), sin(c), sin(d), sin(s))');
+  });
+
+  it('applies a library head to each element that is a list', () => {
+    // `Sin` of a list element broadcasts, as in the interpreter.
+    const pairs = ['List', ...['a', 'b', 'c', 'd', 's'].map((n) => ['List', n, 'a'])];
+    const expr = ce.box(['Map', 'Sin', pairs]);
+    const args = { a: 0.5, b: 2, c: 3, d: 7, s: -1.25 };
+    const r: any = compile(expr, { to: 'javascript', fallback: false });
+    expect(r.code).not.toContain('.map(');
+    const got = r.run(args) as number[][];
+    const want = Object.values(args).map((v) => [Math.sin(v), Math.sin(0.5)]);
+    want.forEach((row, i) =>
+      row.forEach((v, j) => expect(got[i][j]).toBeCloseTo(v, 12))
+    );
+  });
+
+  it('leaves a VARIADIC library head untouched', () => {
+    // `Max` has no required parameter, so the compiler has no one-argument
+    // callback for it (`builtinCallbackArity`).
+    const pairs = ['List', ...['a', 'b', 'c', 'd', 's'].map((n) => ['List', n, 'a'])];
+    const expr = ce.box(['Map', 'Max', pairs]);
+    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+  });
+
+  it('leaves a LAZY library head untouched', () => {
+    // A lazy operator receives its operand unevaluated, but `Map` applies
+    // its callback to each element after it is evaluated. The call `h(e)`
+    // would hold the element as written.
+    for (const head of [
+      'Hold',
+      'N',
+      'Evaluate',
+      'Simplify',
+      'Expand',
+      'Unevaluated',
+    ]) {
+      const expr = ce.box(['Map', head, FIVE]);
+      expect(unrollFixedWidthCollections(expr)).toBe(expr);
+    }
+  });
+
+  it('leaves a VARIADIC user head untouched', () => {
+    // A call `r(e)` is the call `Map` makes, but no target compiles a
+    // function literal with a rest parameter, so the rewrite gains nothing.
+    ce.assign(
+      'rest',
+      ce.box(['Function', ['Length', 'r'], ['Spread', 'r']] as any)
+    );
+    const expr = ce.box(['Map', 'rest', FIVE]);
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
   });
 

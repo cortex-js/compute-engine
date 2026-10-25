@@ -58,7 +58,12 @@ export function literalMayEraseElement(xs: Expression): boolean {
   const generation = xs.engine._semanticVersion;
   const memo = erasureMemo.get(xs);
   if (memo !== undefined && memo.generation === generation) return memo.value;
-  const value = xs.ops.some(mayEvaluateToNothing);
+  // Written-out data (number literals, failed cells, and lists or tuples of
+  // them: `_isLiteralData()`) has no element typed `nothing`, and that test
+  // is kept on the node. The scan reads the type of each element, which
+  // costs about 10 µs for a `Tuple` of two numbers whose type is not known
+  // yet: about 200 ms for a list of 20,000 points.
+  const value = xs._isLiteralData() ? false : xs.ops.some(mayEvaluateToNothing);
   erasureMemo.set(xs, { generation, value });
   return value;
 }

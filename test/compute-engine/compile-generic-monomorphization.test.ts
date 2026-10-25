@@ -519,12 +519,10 @@ describe('G3 lift — a BLOCK-LOCAL generic reads the same bounds', () => {
       10
     );
     const r = buildLocal('(x: T) -> T where T: number', 5);
-    // The literal keeps its ground-bound body; a scalar-parameter literal is
-    // bound through the broadcast-aware wrapper it is handed out under.
-    expect(r.code).toContain(
-      'let gd = ((_tv1) => (_tv2) => Array.isArray(_tv2) ? ' +
-        '_SYS.bcastFn(_tv1, _tv2) : _tv1(_tv2))(((x) => 2 * x))'
-    );
+    // The literal keeps its ground-bound body. The block only calls `gd`, and
+    // each call site broadcasts by itself, so the literal has no
+    // broadcast-aware wrapper (`callOnlyLocalFunctionLiterals`).
+    expect(r.code).toContain('let gd = ((x) => 2 * x);');
     expect(r.run?.({})).toBe(10);
     // The engine-level spelling of the same function.
     const engineLevel = build(doubler('(x: T) -> T where T: number'), [

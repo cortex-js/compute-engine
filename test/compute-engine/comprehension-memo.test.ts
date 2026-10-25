@@ -364,6 +364,41 @@ describe('A symbol holding a stored expression is evaluated once across reads', 
     expect(ce.box(['At', 'hchain', 3]).evaluate().re).toBe(3000);
   });
 
+  it('a tuple that the symbol holds is evaluated once across reads', () => {
+    // A point `(f(u), g(u))` stored as an expression was evaluated again at
+    // each read of the symbol: the memo skipped every `Tuple` (CE-313.2).
+    ce.assign('ptuple', ce.box(['Tuple', ['tick', 'ytuple'], ['tick', 4]]));
+    ce.assign('ytuple', 5);
+    const read = () =>
+      ce
+        .box([
+          'Add',
+          ['At', 'ptuple', 1],
+          ['At', 'ptuple', 1],
+          ['At', 'ptuple', 2],
+        ])
+        .evaluate().re;
+    const [v1, c1] = counting(read);
+    expect(v1).toBe(14);
+    expect(c1).toBe(2);
+    const [v2, c2] = counting(read);
+    expect(v2).toBe(14);
+    expect(c2).toBe(0);
+    // A write to a name that the tuple reads is seen.
+    ce.assign('ytuple', 6);
+    const [v3, c3] = counting(read);
+    expect(v3).toBe(16);
+    expect(c3).toBe(2);
+  });
+
+  it('a tuple with a random element is drawn again at each read', () => {
+    ce.assign('rtuple', ce.box(['Tuple', ['Random'], 1]));
+    const values = new Set<number>();
+    for (let k = 0; k < 8; k++)
+      values.add(ce.box(['At', 'rtuple', 1]).evaluate().re);
+    expect(values.size).toBeGreaterThan(1);
+  });
+
   it('an impure stored expression is re-drawn on every read', () => {
     ce.assign('draw', ce.box(['Add', ['Random'], 0]));
     const a = ce.box('draw').evaluate().re;

@@ -2912,10 +2912,13 @@ function withRoute(
  * setup between blocks of data rows, after the compilation of the model
  * and after each derivative (`setup` is a step function). A timer
  * can then run during a long search (an abort of the signal by a timer
- * stops it at the next check), and a page stays responsive. What still
- * runs in one piece: the canonical form and the evaluation of the data
- * operand, before the setup (about 8 ms each for 1,000 rows), and one
- * derivative with its compilation.
+ * stops it at the next check), and a page stays responsive. The
+ * evaluation of the data operand, before the setup, gives the event loop a
+ * turn too (`holdMapAsync()` and the `evaluateAsync` handler of `List`), and
+ * written-out data (a list of points with number coordinates) is its own
+ * value, with no walk. What still runs in one piece: the canonical form of
+ * the data operand, a synchronous getter (about 2.5 µs per row of two
+ * numbers), and one derivative with its compilation.
  */
 async function solveSetupAsync(
   ce: IComputeEngine,

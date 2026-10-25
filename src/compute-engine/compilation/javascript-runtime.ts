@@ -17,6 +17,7 @@ import {
   isBeyondSafeInteger,
   roundToInteger,
 } from '../numerics/numeric.js';
+import { isPrime as isPrimeNumber } from '../numerics/primes.js';
 import {
   parseColor,
   rgbToOklch,
@@ -6334,6 +6335,7 @@ export const SYS_HELPERS = {
   // `numerics/special-functions.ts`).
   binomial,
   fibonacci,
+  isPrime: isPrimeRuntime,
   // Complex helpers
   csin: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).sin()),
   ccos: (z: ComplexResult) => kernelResult(new Complex(z.re, z.im).cos()),
@@ -7559,6 +7561,18 @@ function normalizeSharedArray(r: unknown[]): unknown[] {
     out[i] = y;
   }
   return out ?? r;
+}
+
+/**
+ * The compiled `IsPrime`, with the interpreter's answers: `false` for `NaN`,
+ * for a non-integer and for an integer less than 2 (a negative integer is
+ * not prime). An operand beyond the safe integer range, or infinite, throws
+ * (`integerOperand`): its double does not identify one integer, and the
+ * interpreter gives a type error for an infinite operand.
+ */
+function isPrimeRuntime(n: number): boolean {
+  if (Number.isNaN(n)) return false;
+  return isPrimeNumber(integerOperand('IsPrime', n));
 }
 
 /**

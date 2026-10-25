@@ -72,16 +72,25 @@ describe('Open and Closed endpoint markers', () => {
     for (let i = 0; i < 5; i++)
       expect(engine.parse('A[3]').evaluate().isSame(first)).toBe(true);
     // …and the stored value is served from the memo rather than redrawn:
-    // 2,000 reads of one element take about 0.9 s when the source runs
-    // directly (`npx tsx`) and about 5 s under jest on an idle 18-core
-    // machine (measured 2026-10-16 at HEAD 6b4cc505 and with the round of
-    // that day applied, the same on both), where a redraw of the 100-element
-    // list per read took tens of seconds on the shape of item 317. The bound
-    // is 10 s: twice the measured jest time, and well under the redraw cost it
-    // guards against. Why jest runs this loop five times slower than the
-    // source is not known (it is not the custom `console.assert` of the test
-    // setup: a no-op assert measured the same); see the ROADMAP entry on the
-    // jest factor of this test.
+    // the reads do not evaluate the stored `Multiply` again. (Until
+    // 2026-10-24 the purity walk read the draw in the body of
+    // `WithRandomSeed` as impure, so the memo stored nothing and each read
+    // drew and multiplied the 100 elements again: 2,000 reads took about
+    // 0.9 s from source and 5 s under jest.)
+    engine._cacheStats.reset();
+    engine._cacheStats.enabled = true;
+    try {
+      for (let i = 0; i < 10; i++) engine.parse('A[3]').evaluate();
+    } finally {
+      engine._cacheStats.enabled = false;
+    }
+    const stored = engine._cacheStats.snapshot().caches.storedValue;
+    expect(stored.hit).toBe(10);
+    expect(stored.declineStore).toBe(0);
+    // With the memo, 2,000 reads take about 0.2 to 0.3 s, from source and
+    // under jest alike (measured 2026-10-24). The bound is 10 s, well under
+    // the cost of a redraw of the list at each read on the shape of Tycho
+    // item 317 (tens of seconds).
     const t0 = performance.now();
     for (let i = 0; i < 2000; i++) engine.parse('A[3]').evaluate();
     // The time depends on the load of the machine, so the limit is asserted

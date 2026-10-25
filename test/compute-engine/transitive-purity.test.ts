@@ -53,6 +53,36 @@ describe('TRANSITIVE PURITY', () => {
     expect(isTransitivelyPure(ce.symbol('a'))).toBe(true);
   });
 
+  test('a seeded draw is pure, and what its body reads is checked', () => {
+    // `WithRandomSeed` discharges `random` at its body: the draws come from
+    // the seeded frame and are the same at each evaluation. Other effects of
+    // the body, and the values that the body reads, are not discharged.
+    const ce = new ComputeEngine();
+    ce.declare('r', { value: ce.box(['Random'], { form: 'raw' }) });
+    expect(isTransitivelyPure(ce.box(['WithRandomSeed', 1, ['Random']]))).toBe(
+      true
+    );
+    expect(
+      isTransitivelyPure(
+        ce.box([
+          'Multiply',
+          2,
+          ['WithRandomSeed', 7, ['RandomChoice', ['Interval', 0, 1], 10]],
+        ])
+      )
+    ).toBe(true);
+    expect(
+      isTransitivelyPure(
+        ce.box(['WithRandomSeed', 1, ['Block', ['Assign', 'z', 1], ['Random']]])
+      )
+    ).toBe(false);
+    expect(
+      isTransitivelyPure(ce.box(['WithRandomSeed', 1, ['Add', 'r', 1]]))
+    ).toBe(false);
+    // The seed is not part of the body.
+    expect(isTransitivelyPure(ce.box(['WithRandomSeed', 'r', 1]))).toBe(false);
+  });
+
   test('the elements of a store-backed list are not made', () => {
     // A read of the operands of a list that `ce.list()` made makes an
     // expression for each element. Its elements are numbers, which are

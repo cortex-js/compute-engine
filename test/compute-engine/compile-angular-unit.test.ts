@@ -502,3 +502,61 @@ describe('ANGULAR UNIT — constant folding must not convert twice', () => {
     }
   });
 });
+
+//
+// ── Constant folding in a non-radian unit ───────────────────────────────
+//
+// The compile-time constant fold evaluates each constant subtree with the
+// angular unit set to radians, because the compile entry has already
+// rewritten the tree to the radian convention. It must do so without
+// resetting the engine: the `angularUnit` setter purges the caches and
+// notifies the configuration listeners, and doing that twice for each folded
+// subtree made a degree-mode compile about twice as slow as a radian-mode
+// one (CE-345.1).
+//
+describe('ANGULAR UNIT — constant fold in degree mode', () => {
+  test('folded constants and a derivative keep their degree-mode values', () => {
+    const ce = degEngine();
+    const js = ce._getCompilationTarget('javascript')!;
+    const expr = ce.parse('\\sin(30) x + \\arctan(1) + \\cos(60) x^2');
+    const compiled = js.compile(expr);
+    // The constants fold to their degree-mode values: sin 30° = 1/2,
+    // arctan 1 = 45°, cos 60° = 1/2.
+    expect(compiled.code).toBe('0.5 * (_.x * _.x) + _.x * 0.5 + 45');
+    for (const x of [0, 2, -3.5])
+      expect(compiled.run!({ x }) as number).toBeCloseTo(
+        expr.subs({ x }).N().re as number,
+        12
+      );
+
+    // A derivative next to a folded constant: d/dx sin x = (π/180)·cos x
+    // in degree mode, and sin 90° = 1.
+    const withD = ce.box(['Add', ['D', ['Sin', 'x'], 'x'], ['Sin', 90]]);
+    const run = js.compile(withD).run!;
+    for (const x of [0, 30, 90]) {
+      const expected = (Math.PI / 180) * Math.cos((Math.PI / 180) * x) + 1;
+      expect(run({ x }) as number).toBeCloseTo(expected, 12);
+      expect(withD.evaluate().subs({ x }).N().re).toBeCloseTo(expected, 12);
+    }
+  });
+
+  test('a fold does not reset the engine', () => {
+    const ce = degEngine();
+    const js = ce._getCompilationTarget('javascript')!;
+    let resets = 0;
+    const stop = ce._listenToConfigurationChange({
+      onConfigurationChange: () => {
+        resets += 1;
+      },
+    });
+    const terms: string[] = [];
+    for (let k = 1; k <= 10; k++) terms.push(`\\sin(${k}) x^{${k}}`);
+    const compiled = js.compile(ce.parse(terms.join('+')));
+    stop();
+    expect(compiled.success).toBe(true);
+    // The ten coefficients folded (no `Math.sin` call is left).
+    expect(compiled.code).not.toContain('Math.sin');
+    expect(resets).toBe(0);
+    expect(ce.angularUnit).toBe('deg');
+  });
+});

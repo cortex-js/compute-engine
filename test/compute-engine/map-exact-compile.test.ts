@@ -731,6 +731,7 @@ describe('exact Map compile — supported heads', () => {
       [['Add', '_1', 7], (i: number) => i + 7],
       [['Multiply', '_1', 3], (i: number) => i * 3],
       [['Mod', '_1', 7], (i: number) => ((i % 7) + 7) % 7],
+      [['Power', '_1', 3], (i: number) => i * i * i],
     ] as const) {
       _resetMapAutoCompileStats();
       const m = map(body);
@@ -1033,5 +1034,232 @@ describe('exact Map compile — an annotated proof is REVALIDATED, not re-taken'
       ce.box(['List', ...Array.from({ length: 80 }, (_, i) => i + 1)])
     );
     expect(exactTierShape(ce, m)).toBeDefined();
+  });
+});
+
+describe('exact Map compile — a body that is a tree of operations (CE-437)', () => {
+  // `x ↦ x^2 + 1` is not one application per level, so `lowerLevel()` does
+  // not lower it. The proof propagates the bounds through each node of the
+  // body (`proveNestedMap()`), and the compiled results are the
+  // interpreter's exact integers.
+  const lazyMap = (ce: any, body: any, lo: number, hi: number) =>
+    ce.box(['Map', ['Function', body, 'x'], ['Range', lo, hi]]);
+
+  /** The elements and the sum, interpreted and compiled, on one engine. */
+  function parity(ce: any, body: any, lo: number, hi: number) {
+    ce.jit = 'off';
+    const interpreted = drain(lazyMap(ce, body, lo, hi));
+    const interpretedSum = ce.box(['Sum', lazyMap(ce, body, lo, hi)]).evaluate();
+    ce.jit = 'auto';
+    _resetMapAutoCompileStats();
+    const compiled = drain(lazyMap(ce, body, lo, hi));
+    const hits = stats.compiledHits;
+    const compiledSum = ce.box(['Sum', lazyMap(ce, body, lo, hi)]).evaluate();
+    expect(compiled).toHaveLength(interpreted.length);
+    const same = compiled.every((x, i) => x.isSame(interpreted[i]));
+    return {
+      hits,
+      same,
+      sum: compiledSum.toString(),
+      sameSum: compiledSum.isSame(interpretedSum),
+    };
+  }
+
+  test('nested integer bodies compile and match the interpreter', () => {
+    const ce = new ComputeEngine() as any;
+    for (const body of [
+      ['Add', ['Power', 'x', 2], 1],
+      ['Add', ['Power', 'x', 3], ['Multiply', -2, 'x'], 7],
+      ['Multiply', 'x', ['Add', 'x', 1]],
+      ['Power', ['Add', 'x', 1], 2],
+      ['Mod', ['Add', ['Power', 'x', 2], ['Multiply', 3, 'x']], 1000],
+      ['Abs', ['Subtract', ['Power', 'x', 2], 50]],
+      ['Max', ['Power', 'x', 2], ['Multiply', 7, 'x']],
+      ['Power', 'x', 4],
+      ['Power', 'x', 5],
+    ]) {
+      const r = parity(ce, body, -100, 100);
+      expect([body, r.hits, r.same, r.sameSum]).toEqual([body, 201, true, true]);
+    }
+  });
+
+  test('the sum of x^2 + 1 over 1..100000 is exact', () => {
+    const ce = new ComputeEngine() as any;
+    _resetMapAutoCompileStats();
+    const sum = ce
+      .box(['Sum', lazyMap(ce, ['Add', ['Power', 'x', 2], 1], 1, 100000)])
+      .evaluate();
+    expect(stats.attempts).toBe(1);
+    expect(stats.compiledHits).toBe(100000);
+    // n(n+1)(2n+1)/6 + n for n = 100000.
+    expect(sum.isSame(333338333450000)).toBe(true);
+    expect(sum.isExact).toBe(true);
+  });
+
+  test('a power past the safe integers declines', () => {
+    const ce = new ComputeEngine() as any;
+    // 208063^3 = 9007091372906047 is a safe integer; 208064^3 =
+    // 9007221244166144 is not.
+    let r = parity(ce, ['Power', 'x', 3], 207964, 208063);
+    expect([r.hits, r.same, r.sameSum]).toEqual([100, true, true]);
+    expect(r.sum).toBe('900066482570820700');
+    r = parity(ce, ['Power', 'x', 3], 207965, 208064);
+    expect([r.hits, r.same, r.sameSum]).toEqual([0, true, true]);
+    r = parity(ce, ['Power', 'x', 3], -208063, -207964);
+    expect([r.hits, r.same, r.sameSum]).toEqual([100, true, true]);
+    r = parity(ce, ['Power', 'x', 3], -208064, -207965);
+    expect([r.hits, r.same, r.sameSum]).toEqual([0, true, true]);
+  });
+
+  test('an intermediate value past the safe integers declines', () => {
+    const ce = new ComputeEngine() as any;
+    // 94906265^2 = 9007199136250225 is safe, and so is 94906265^2 +
+    // 94906265, but 94906265^2 + 2·10^8 is not.
+    const n = 94906265;
+    let r = parity(ce, ['Add', ['Power', 'x', 2], 'x'], n - 99, n);
+    expect([r.hits, r.same, r.sameSum]).toEqual([100, true, true]);
+    r = parity(ce, ['Add', ['Power', 'x', 2], 200000000], n - 99, n);
+    expect([r.hits, r.same, r.sameSum]).toEqual([0, true, true]);
+    // The square is in bounds and the outer `Mod` keeps the result small,
+    // but the sum inside the `Mod` is not a safe integer.
+    r = parity(
+      ce,
+      ['Mod', ['Add', ['Power', 'x', 2], 200000000], 7],
+      n - 99,
+      n
+    );
+    expect([r.hits, r.same, r.sameSum]).toEqual([0, true, true]);
+  });
+
+  test('Power: only a literal exponent from 2 to 5', () => {
+    const ce = new ComputeEngine() as any;
+    // `x^6` compiles to `Math.pow`, which is not promised to be exact.
+    let r = parity(ce, ['Power', 'x', 6], -100, 100);
+    expect([r.hits, r.same]).toEqual([0, true]);
+    // An exponent that is a symbol declines, also with an integer value.
+    ce.declare('pe', 'integer');
+    ce.assign('pe', 2);
+    r = parity(ce, ['Add', ['Power', 'x', 'pe'], 1], -100, 100);
+    expect([r.hits, r.same]).toEqual([0, true]);
+  });
+
+  test('a body with an operation that has no bounds rule declines', () => {
+    const ce = new ComputeEngine() as any;
+    for (const body of [
+      ['Add', ['Divide', 'x', 2], 1],
+      ['Add', ['Sqrt', 'x'], 1],
+      ['Add', ['Remainder', 'x', 7], 1],
+    ]) {
+      const r = parity(ce, body, 1, 100);
+      expect([body, r.hits, r.same]).toEqual([body, 0, true]);
+    }
+  });
+
+  test('a closed symbol in a nested body is read through its value', () => {
+    const ce = new ComputeEngine() as any;
+    ce.declare('kc', 'integer');
+    ce.assign('kc', 5);
+    let r = parity(ce, ['Add', ['Multiply', 'kc', ['Power', 'x', 2]], 1], 1, 100);
+    expect([r.hits, r.same, r.sameSum]).toEqual([100, true, true]);
+    // A value that makes the body overflow revokes the proof.
+    ce.assign('kc', 10 ** 12);
+    r = parity(ce, ['Add', ['Multiply', 'kc', ['Power', 'x', 2]], 1], 1, 100);
+    expect([r.hits, r.same, r.sameSum]).toEqual([0, true, true]);
+  });
+});
+
+describe('exact Map compile — a named user function (CE-325.2)', () => {
+  test('Map(f, xs) compiles the literal of f, with exact results', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('fe', ce.box(['Function', ['Add', ['Power', 'x', 2], 1], 'x']));
+    const json = ['Map', 'fe', ['Range', 1, 100]];
+    ce.jit = 'off';
+    const interpreted = drain(ce.box(json));
+    ce.jit = 'auto';
+    _resetMapAutoCompileStats();
+    const compiled = drain(ce.box(json));
+    expect(stats.compiledHits).toBe(100);
+    expect(compiled.every((x, i) => x.isSame(interpreted[i]))).toBe(true);
+  });
+
+  test('a redefinition of the function compiles again', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('fr', ce.box(['Function', ['Add', ['Power', 'x', 2], 1], 'x']));
+    const sum = ce.box(['Sum', ['Map', 'fr', ['Range', 1, 100]]]);
+    expect(sum.evaluate().isSame(338450)).toBe(true);
+    ce.assign('fr', ce.box(['Function', ['Multiply', 3, 'x'], 'x']));
+    expect(sum.evaluate().isSame(15150)).toBe(true);
+    // A body that is not integer-closed: the interpreter, exactly.
+    ce.assign('fr', ce.box(['Function', ['Divide', 'x', 2], 'x']));
+    expect(sum.evaluate().isSame(ce.box(['Rational', 5050, 2]))).toBe(true);
+    ce.assign('fr', ce.box(['Function', ['Add', 'x', 1], 'x']));
+    expect(sum.evaluate().isSame(5150)).toBe(true);
+  });
+
+  test('a redefinition during a drain is honored at the next element', () => {
+    const ce = new ComputeEngine() as any;
+    ce.assign('fm', ce.box(['Function', ['Multiply', 4, 'x'], 'x']));
+    const it = ce.box(['Map', 'fm', ['Range', 1, 100]]).each();
+    expect(it.next().value.isSame(4)).toBe(true);
+    ce.assign('fm', ce.box(['Function', ['Add', 'x', 1000], 'x']));
+    expect(it.next().value.isSame(1002)).toBe(true);
+    expect(it.next().value.isSame(1003)).toBe(true);
+  });
+});
+
+describe('exact Map compile — the binding and the signature of a named function', () => {
+  test('a drain in a scope that shadows the function uses the lexical binding', () => {
+    // The `Map` is bound to the outer `fx(x) = x + 1`. The interpreter
+    // applies that binding also when an inner scope defines another `fx`.
+    const ce = new ComputeEngine() as any;
+    ce.assign('fx', ce.box(['Function', ['Add', 'x', 1], 'x']));
+    const sum = ce.box(['Sum', ['Map', 'fx', ['Range', 1, 100]]]);
+    ce.pushScope();
+    try {
+      ce.declare('fx', 'function');
+      ce.assign('fx', ce.box(['Function', ['Add', 'x', 2], 'x']));
+      _resetMapAutoCompileStats();
+      const compiled = sum.evaluate();
+      ce.jit = 'off';
+      const interpreted = sum.evaluate();
+      expect(interpreted.isSame(5150)).toBe(true);
+      expect(compiled.isSame(interpreted)).toBe(true);
+    } finally {
+      ce.popScope();
+    }
+  });
+
+  test('a declared signature that refuses some integers stays interpreted', () => {
+    // The interpreter refuses an argument above 10: the compiled code must
+    // not return a value for it.
+    const ce = new ComputeEngine() as any;
+    ce.declare('fsig', {
+      signature: '(integer<0..10>) -> integer',
+      evaluate: ce.box(['Function', ['Add', 'x', 1], 'x']),
+    });
+    const json = ['Map', 'fsig', ['Range', 1, 64]];
+    _resetMapAutoCompileStats();
+    const compiled = drain(ce.box(json));
+    expect(stats.compiledHits).toBe(0);
+    ce.jit = 'off';
+    const interpreted = drain(ce.box(json));
+    expect(compiled.map((x) => x.toString())).toEqual(
+      interpreted.map((x) => x.toString())
+    );
+  });
+
+  test('a declared signature that accepts every integer compiles', () => {
+    const ce = new ComputeEngine() as any;
+    ce.declare('fint', {
+      signature: '(integer) -> integer',
+      evaluate: ce.box(['Function', ['Add', 'x', 1], 'x']),
+    });
+    const json = ['Map', 'fint', ['Range', 1, 100]];
+    _resetMapAutoCompileStats();
+    const compiled = drain(ce.box(json));
+    expect(stats.compiledHits).toBe(100);
+    ce.jit = 'off';
+    const interpreted = drain(ce.box(json));
+    expect(compiled.every((x, i) => x.isSame(interpreted[i]))).toBe(true);
   });
 });

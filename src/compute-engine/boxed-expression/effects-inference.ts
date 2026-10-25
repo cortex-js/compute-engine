@@ -2143,7 +2143,10 @@ function collectWritesMasked(
   out: Set<string>,
   /** Nodes already scanned UNDER THE SAME MASK OBJECT — see the parameter of
    * the same name on {@link collectSymbolsMasked}. */
-  seen: Map<ReadonlySet<string>, Set<Expression>> = new Map()
+  seen: Map<ReadonlySet<string>, Set<Expression>> = new Map(),
+  /** Where the operator names that {@link collectSymbolsMasked} records go.
+   * The mask does not apply to them. */
+  operators: Set<string> = out
 ): void {
   if (!isFunction(expr) && !isDictionary(expr)) return;
   // The memo covers dictionaries too: a dictionary can hold the same
@@ -2158,16 +2161,21 @@ function collectWritesMasked(
   seenForMask.add(expr);
   if (isDictionary(expr)) {
     for (const value of expr.values)
-      collectWritesMasked(value, mask, out, seen);
+      collectWritesMasked(value, mask, out, seen, operators);
     return;
   }
   if (!isFunction(expr)) return;
   if (expr.operator === 'Function') {
-    // Every name the parameter list binds, destructuring leaves included.
-    const extended = new Set(mask);
-    for (const name of functionLiteralBoundNames(expr.ops.slice(1)))
-      extended.add(name);
-    for (const op of expr.ops) collectWritesMasked(op, extended, out, seen);
+    // The writes of a literal depend only on its own tree, and a mask only
+    // removes names, so the writes of a literal under the mask `M` are its
+    // writes under an empty mask minus `M`. Those are computed once per
+    // literal and stored. Without the memo, each literal of a nested chain
+    // (`Map((x) ↦ Map((y) ↦ …, ys), xs)`) scanned every literal below it
+    // again when its own effects were inferred, which is quadratic in the
+    // depth (CE-347).
+    const writes = literalWrites(expr);
+    for (const name of writes.masked) if (!mask.has(name)) out.add(name);
+    for (const name of writes.unmasked) operators.add(name);
     return;
   }
   if (
@@ -2178,13 +2186,46 @@ function collectWritesMasked(
     const targets = assignTargets(expr);
     if (targets.some((name) => name === undefined)) {
       const target = expr.ops[0];
-      if (target !== undefined) collectSymbolsMasked(target, mask, out);
+      if (target !== undefined)
+        collectSymbolsMasked(target, mask, out, new Map(), operators);
     }
     for (const name of targets)
       if (name !== undefined && !mask.has(name)) out.add(name);
   }
-  for (const op of expr.ops) collectWritesMasked(op, mask, out, seen);
+  for (const op of expr.ops)
+    collectWritesMasked(op, mask, out, seen, operators);
 }
+
+/** The writes of the `Function` literal `fn` as {@link collectWritesMasked}
+ * collects them under an empty mask: `masked` holds the names the mask of an
+ * enclosing scan still filters (its own parameters are already removed),
+ * `unmasked` the operator names that no mask filters. Computed once per
+ * literal object: the operands of a function expression never change after
+ * it is built, and the scan reads nothing else. */
+function literalWrites(fn: Expression): LiteralWrites {
+  let result = LITERAL_WRITES.get(fn);
+  if (result !== undefined) return result;
+  const params = new Set<string>();
+  if (isFunction(fn))
+    for (const name of functionLiteralBoundNames(fn.ops.slice(1)))
+      params.add(name);
+  const masked = new Set<string>();
+  const unmasked = new Set<string>();
+  const seen = new Map<ReadonlySet<string>, Set<Expression>>();
+  if (isFunction(fn))
+    for (const op of fn.ops)
+      collectWritesMasked(op, params, masked, seen, unmasked);
+  result = { masked, unmasked };
+  LITERAL_WRITES.set(fn, result);
+  return result;
+}
+
+type LiteralWrites = {
+  readonly masked: ReadonlySet<string>;
+  readonly unmasked: ReadonlySet<string>;
+};
+
+const LITERAL_WRITES = new WeakMap<Expression, LiteralWrites>();
 
 /**
  * Collect symbol spellings, masking each `Function` literal's OWN parameter
@@ -2206,7 +2247,9 @@ function collectSymbolsMasked(
    * within one mask a shared node's second mention adds nothing — the memo
    * keeps the collection linear in distinct nodes on a DAG that would
    * otherwise unfold once per path. */
-  seen: Map<ReadonlySet<string>, Set<Expression>> = new Map()
+  seen: Map<ReadonlySet<string>, Set<Expression>> = new Map(),
+  /** Where the operator names go; the mask does not apply to them. */
+  operators: Set<string> = out
 ): void {
   const name = sym(expr);
   if (name !== undefined) {
@@ -2221,16 +2264,18 @@ function collectSymbolsMasked(
   }
   if (seenForMask.has(expr)) return;
   seenForMask.add(expr);
-  out.add(expr.operator);
+  operators.add(expr.operator);
   if (expr.operator === 'Function') {
     // Every name the parameter list binds, destructuring leaves included.
     const extended = new Set(mask);
     for (const name of functionLiteralBoundNames(expr.ops.slice(1)))
       extended.add(name);
-    for (const op of expr.ops) collectSymbolsMasked(op, extended, out, seen);
+    for (const op of expr.ops)
+      collectSymbolsMasked(op, extended, out, seen, operators);
     return;
   }
-  for (const op of expr.ops) collectSymbolsMasked(op, mask, out, seen);
+  for (const op of expr.ops)
+    collectSymbolsMasked(op, mask, out, seen, operators);
 }
 
 class Walker {

@@ -1,6 +1,10 @@
 import type { Expression } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
-import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
+import {
+  isDictionary,
+  isFunction,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -122,6 +126,152 @@ export function inPlaceUpdateChains(
   if (!returnsOwned(step.ops[0]) || chains.length === 0) return undefined;
   return chains;
 }
+
+/**
+ * For a local `name` of the statement list `stmts` of a block, the operand
+ * arrays of the `ReplaceAt` chains that can update the value of the local in
+ * place, or `undefined` when every update must keep the copying form.
+ *
+ * The statement `xs = ReplaceAt(xs, i, v)` copies the list. In a loop that
+ * visits each element once, the copies cost O(n²). The emitted code can
+ * instead copy the list once, at the first update, and then write that copy
+ * in place, under two conditions:
+ *
+ * - The copy is known at run time. The block declares a temporary that holds
+ *   the array the block made, and an update writes in place only when the
+ *   local still holds that array; otherwise it makes a new copy first. So an
+ *   assignment of another value to the local (`xs = L`) is allowed: the next
+ *   update copies again.
+ * - No other value holds a reference to the copy. So every mention of `name`
+ *   in the list must be one of these: the target of an `Assign` or a
+ *   `Declare` that is a statement, the innermost list operand of a chain
+ *   assigned to `name`, the first operand of a read in
+ *   `NON_RETAINING_READS`, or a statement by itself. A statement of the list
+ *   gives its value to nothing but the block, and nothing in the block runs
+ *   after its last statement. A mention anywhere else, in particular in a
+ *   function literal, which can be called after an update, keeps the copying
+ *   form for every update of the local. A nested scope that binds the same
+ *   name is counted as such a mention, which can only keep a copy that is
+ *   not needed.
+ *
+ * The emitted code is in `OWNED_LOCAL_UPDATE_OPS`.
+ *
+ * The indexes and values of a chain may read `name`: the emitted code
+ * computes them before the first write, as for a fold
+ * (`inPlaceUpdateChains`). Requested in issue #386 (CE-329).
+ */
+export function ownedLocalUpdateChains(
+  stmts: ReadonlyArray<Expression>,
+  name: string
+): ReadonlyArray<Expression>[] | undefined {
+  const isName = (e: Expression): boolean => isSymbol(e, name);
+  // The values of a dictionary are walked too: a dictionary is not a
+  // function expression, but a value in it can hold the list.
+  // An expression can share subtrees (a node that is an operand of several
+  // nodes), and the count of paths through a shared tree can grow as 2^depth.
+  // So each walk keeps its answer per node: the answer of `mentions`, and the
+  // answer of `allowed` for a node whose value is used, depend only on the
+  // node, not on the path that reached it.
+  const mentionMemo = new Map<Expression, boolean>();
+  const mentions = (e: Expression): boolean => {
+    if (isName(e)) return true;
+    let result = mentionMemo.get(e);
+    if (result !== undefined) return result;
+    result =
+      (isDictionary(e) && e.values.some(mentions)) ||
+      (isFunction(e) && e.ops.some(mentions));
+    mentionMemo.set(e, result);
+    return result;
+  };
+  const chains: ReadonlyArray<Expression>[] = [];
+  // A call with `statement` false never adds to `chains` (an assignment whose
+  // value is used is refused before that), so its answer can be kept.
+  // A call with `statement` true has its own memo. Its answer also depends
+  // only on the node, and the first visit of the node has already added its
+  // chains to `chains`. So a node that is in several statement positions
+  // (`If(c, B, B)`) is walked once, and its chains are added once.
+  const allowedMemo = new Map<Expression, boolean>();
+  const statementMemo = new Map<Expression, boolean>();
+  const allowed = (e: Expression, statement = false): boolean => {
+    const memo = statement ? statementMemo : allowedMemo;
+    let result = memo.get(e);
+    if (result === undefined) {
+      result = allowedAt(e, statement);
+      memo.set(e, result);
+    }
+    return result;
+  };
+  // True when every mention of `name` in `e` is allowed. `statement` is true
+  // when the value of `e` is not used: an assignment elsewhere, such as
+  // `ys = (xs = ReplaceAt(xs, i, v))`, would give its value, the copy, to
+  // another name. A statement is a statement of a block, the body of a
+  // loop, or a branch of a conditional that is a statement. The statements
+  // of `stmts` are all counted as statements, the last one too: its value is
+  // the value of the block, and nothing in the block runs after it.
+  const allowedAt = (e: Expression, statement: boolean): boolean => {
+    if (isName(e)) return statement;
+    // A dictionary keeps a reference to each of its values, for example the
+    // attributes of `Declare(ys, Dictionary(value: xs))`, which give the
+    // list to `ys`. So a mention of `name` in a dictionary is not allowed.
+    if (isDictionary(e)) return !mentions(e);
+    if (!isFunction(e)) return true;
+    const h = e.operator;
+    if (h === 'Function') return !mentions(e);
+    if (h === 'Block' && e.localScope?.bindings.has(name)) return !mentions(e);
+    if (statement && h === 'Block')
+      return e.ops.every((x) => allowed(x, true));
+    if (statement && h === 'Loop')
+      return allowed(e.ops[0], true) && e.ops.slice(1).every((x) => allowed(x));
+    if (statement && h === 'If')
+      return e.ops.every((x, k) => allowed(x, k > 0));
+    if ((h === 'Assign' || h === 'Declare') && isName(e.ops[0])) {
+      if (!statement) return false;
+      const value = e.ops[1];
+      if (
+        h === 'Assign' &&
+        e.nops === 2 &&
+        isFunction(value, 'ReplaceAt') &&
+        value.nops === 3
+      ) {
+        let node: Expression = value;
+        while (isFunction(node, 'ReplaceAt') && node.nops === 3) {
+          if (!allowed(node.op2) || !allowed(node.op3)) return false;
+          node = node.op1;
+        }
+        if (isName(node)) {
+          chains.push(value.ops);
+          return true;
+        }
+        return allowed(node);
+      }
+      return e.ops.slice(1).every((x) => allowed(x));
+    }
+    return e.ops.every((x, k) =>
+      k === 0 && isName(x) && NON_RETAINING_READS.has(h) ? true : allowed(x)
+    );
+  };
+  const ok = stmts.every((stmt) => allowed(stmt, true));
+  return ok && chains.length > 0 ? chains : undefined;
+}
+
+/**
+ * The operand arrays of the `ReplaceAt` chains accepted by
+ * `ownedLocalUpdateChains`, each with the name of the temporary that holds
+ * the array the block owns. The block lowering (`compileBlock`) adds them for
+ * the time it compiles its statements and declares the temporary. The
+ * JavaScript `ReplaceAt` lowering, which receives the operand array as
+ * `args`, then writes `xs` in place when `xs` is that array, and otherwise
+ * writes a copy of `xs` and keeps the copy in the temporary:
+ *
+ *     (_tv1 = _SYS.replaceAtInPlace(xs === _tv1 ? xs : (_tv1 = _SYS.ownedCopy(xs)), i, v))
+ *
+ * If the compiler passes a different array, the update keeps the copying
+ * form, which is slower but correct.
+ */
+export const OWNED_LOCAL_UPDATE_OPS = new WeakMap<
+  ReadonlyArray<Expression>,
+  string
+>();
 
 /**
  * Fail closed when the seed of a fold does not fit the type the step's first

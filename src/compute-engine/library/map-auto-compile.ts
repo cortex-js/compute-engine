@@ -17,7 +17,15 @@ import { lookup } from '../function-utils.js';
 import { implicitCompile } from '../implicit-compile.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
-import { exactTierShape, MIN_EXACT_COMPILE_COUNT } from './map-exact-proof.js';
+import {
+  declaredParametersAdmit,
+  exactTierShape,
+  MIN_EXACT_COMPILE_COUNT,
+  namedCallbackLiteral,
+  userFnLiteral,
+} from './map-exact-proof.js';
+import { collectionElementType } from '../../common/type/utils.js';
+import type { Type } from '../../common/type/types.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { appliesJumpFunction } from '../jump-functions.js';
 import type { ExactTierShape, Interval } from './map-exact-proof.js';
@@ -48,8 +56,8 @@ import type { ExactTierShape, Interval } from './map-exact-proof.js';
  * - the **marked** (float) tier above, gated on the numeric marker or a
  *   user-written `N`, and restricted to machine precision;
  * - the **exact** tier (`docs/COMPILATION-MODEL.md`,
- *   ratified 2026-07-31): an UNMARKED broadcast-shaped lambda whose element
- *   function is provably integer-closed and overflow-free
+ *   ratified 2026-07-31): an UNMARKED element function (a lambda or a named
+ *   user function) whose body is provably integer-closed and overflow-free
  *   (`map-exact-proof.ts`) compiles too, and its results are re-boxed as
  *   EXACT integer literals. Float64 integer arithmetic within ±2^53 is exact,
  *   so this tier is sound at any precision — the `bignumPreferred` bail-out
@@ -183,18 +191,43 @@ export {
  * `inexact`: true for a user-written `N`, whose result is always inexact,
  * also when its value is an integer. The marker gives the result of the
  * `.N()` method, where an integer can stay exact. */
-function markedMapLambda(
-  expr: Expression
-): { fn: Expression; inner: Expression; inexact: boolean } | undefined {
+function markedMapLambda(expr: Expression):
+  | {
+      fn: Expression;
+      inner: Expression;
+      inexact: boolean;
+      named?: string;
+    }
+  | undefined {
   if (!isFunction(expr, 'Map') || expr.nops < 2) return undefined;
-  const fn = expr.op1;
+  let fn = expr.op1;
+  // A named user function (`g(x) = N(sin(x) + x^2)`, then `Map(g, xs)`):
+  // its `Function` literal is read as a lambda would be.
+  let named: string | undefined;
+  if (isSymbol(fn)) {
+    named = fn.symbol;
+    const literal = namedCallbackLiteral(expr.engine, fn);
+    if (literal === undefined) return undefined;
+    fn = literal;
+    // The compiled code receives each element of each source. The
+    // signature of the function must accept the element type of each
+    // source, as the interpreter checks each argument against it.
+    const elementTypes: Type[] = [];
+    for (const source of expr.ops.slice(1)) {
+      const t = collectionElementType(source.type.type);
+      if (t === undefined) return undefined;
+      elementTypes.push(t);
+    }
+    if (!declaredParametersAdmit(expr.engine, named, elementTypes))
+      return undefined;
+  }
   if (!isFunction(fn, 'Function') || fn.nops < 1) return undefined;
   let body: Expression = fn.op1;
   if (isFunction(body, 'Block') && body.nops === 1) body = body.op1;
   if (isFunction(body, 'NumericApproximation') && body.nops === 1)
-    return { fn, inner: body.op1, inexact: false };
+    return { fn, inner: body.op1, inexact: false, named };
   if (isFunction(body, 'N') && body.nops === 1)
-    return { fn, inner: body.op1, inexact: true };
+    return { fn, inner: body.op1, inexact: true, named };
   return undefined;
 }
 
@@ -243,21 +276,56 @@ function isLiteralBound(x: Expression | undefined): boolean {
  */
 const MAX_COMPILED_TRIP_COUNT = 100_000;
 
-/** Return the `Function` literal backing a user-defined function symbol
- * (operator definition `_lambdaLiteral`, or a symbol whose assigned value is
- * a `Function` literal) — the same two storage routes the compiler's
- * `userFunctionLiteral` covers. */
-function userFnLiteral(ce: ComputeEngine, id: string): Expression | undefined {
-  const def = ce.lookupDefinition(id);
-  if (def && 'operator' in def) {
-    const literal = (def.operator as { _lambdaLiteral?: Expression })
-      ._lambdaLiteral;
-    if (literal !== undefined && isFunction(literal, 'Function'))
-      return literal;
-  }
-  const value = ce._getSymbolValue(id);
-  if (value !== undefined && isFunction(value, 'Function')) return value;
-  return undefined;
+/** The operators of a loop: a body that applies one is not compiled when the
+ * element function is a named user function (`loopOrCollectionFree()`). */
+const LOOP_OPERATORS = new Set(['Sum', 'Product', 'Loop']);
+
+/**
+ * True if the body of the `Function` literal `literal`, and the bodies of
+ * the user functions it calls, apply no loop (`Sum`, `Product`, `Loop`) and
+ * compute no collection (a node or an operand whose type is a collection:
+ * `IntegerDigits(n)`, a `Map`, a list literal).
+ *
+ * The rule "a body with a loop or an inner collection stays interpreted"
+ * comes from a user decision of 2026-10-24 (ROADMAP CE-314): the compiled
+ * values of such a body can differ from the interpreter's `N` in the last
+ * digits (an exact loop sum `1.066407470350872` against the compiled
+ * `1.0664074703508735`). Here, the marked tier applies this rule to a `Map`
+ * of a NAMED user function only. A lambda on the marked tier is not checked
+ * by this rule: it keeps the eligibility of `bodyEligible()`. Whether the
+ * rule must also apply to a lambda is an open question, recorded in
+ * ROADMAP.md, entry CE-325 (item CE-325.3).
+ */
+function loopOrCollectionFree(
+  ce: ComputeEngine,
+  literal: Expression,
+  seenFns: Set<string>
+): boolean {
+  const visit = (e: Expression): boolean => {
+    if (isSymbol(e)) {
+      if (e.type.matches('collection')) return false;
+      const s = e.symbol;
+      if (seenFns.has(s)) return true;
+      const called = userFnLiteral(ce, s);
+      if (called === undefined) return true;
+      seenFns.add(s);
+      return loopOrCollectionFree(ce, called, seenFns);
+    }
+    if (!isFunction(e)) return true;
+    const op = e.operator;
+    if (LOOP_OPERATORS.has(op)) return false;
+    if (op !== 'Function' && e.type.matches('collection')) return false;
+    if (!seenFns.has(op)) {
+      const called = userFnLiteral(ce, op);
+      if (called !== undefined) {
+        seenFns.add(op);
+        if (!loopOrCollectionFree(ce, called, seenFns)) return false;
+      }
+    }
+    return e.ops.every(visit);
+  };
+  if (!isFunction(literal, 'Function')) return false;
+  return visit(literal.op1);
 }
 
 /**
@@ -554,7 +622,10 @@ function attemptCompile(
   ce: ComputeEngine,
   tier: MapCompileTier,
   fn: Expression,
-  inner: Expression | undefined
+  inner: Expression | undefined,
+  /** The name of the user function whose literal `fn` is, for a `Map` that
+   * names its element function. */
+  named?: string
 ): MapCompileCache | undefined {
   _mapAutoCompileStats.attempts++;
 
@@ -563,7 +634,13 @@ function attemptCompile(
   ): MapCompileCache => ({
     state: 'no-compile',
     tier,
-    reason,
+    // A structural refusal is permanent for a lambda, which cannot change.
+    // A named user function can be redefined: its resolution is the reason,
+    // so that a redefinition allows one new attempt.
+    reason:
+      reason === 'structural' && named !== undefined
+        ? resolveDep(ce, named)
+        : reason,
     generation: ce._semanticVersion,
     epoch: ce._worldVersion,
     tolerance: ce.tolerance,
@@ -575,6 +652,8 @@ function attemptCompile(
   if (tier === 'marked') {
     // Purity/boundedness gate (transitive through called user functions).
     if (!fnLiteralEligible(ce, fn, new Set())) return noCompile('structural');
+    if (named !== undefined && !loopOrCollectionFree(ce, fn, new Set([named])))
+      return noCompile('structural');
 
     // Rebuild the stripped literal from MathJSON (the same idiom as
     // `lazyMapNumericApproximation`: never re-host a canonical body under a
@@ -592,9 +671,10 @@ function attemptCompile(
     if (!literal.isValid) return noCompile('structural');
   } else {
     // The exact tier's body carries no marker to strip, and the eligibility
-    // proof already established that its single application is an
+    // proof already established that each of its applications is an
     // integer-closed, bounded arithmetic head: compile the ORIGINAL canonical
-    // literal, whose parameter-scope bindings are intact.
+    // literal (for a named user function, the function's literal), whose
+    // parameter-scope bindings are intact.
     literal = fn;
   }
 
@@ -649,6 +729,11 @@ function attemptCompile(
         return noCompile('structural');
   }
 
+  // The compiled code of a named function's literal does not read the
+  // function's name, so the compiler does not record it: record it here, so
+  // that a redefinition of the function compiles again (`depChanged()` sees
+  // the new operator definition).
+  if (named !== undefined) deps.add(named);
   const resolvedDeps = [...deps].map((name) => resolveDep(ce, name));
   return {
     state: 'compiled',
@@ -752,12 +837,14 @@ export function mapCompiledElementRunner(
   let tier: MapCompileTier;
   let fn: Expression;
   let inner: Expression | undefined;
+  let named: string | undefined;
   let sourceBounds: ReadonlyArray<Interval> = [];
   if (marked !== undefined) {
     if (bignumPreferred(ce)) return undefined;
     tier = 'marked';
     fn = marked.fn;
     inner = marked.inner;
+    named = marked.named;
   } else {
     // The exact tier: an unmarked broadcast-shaped lambda may compile to
     // float64 with NO precision gate — unlike the marked tier above —
@@ -776,8 +863,22 @@ export function mapCompiledElementRunner(
     tier = 'exact';
     fn = shape.fn;
     inner = undefined;
+    named = shape.named;
     sourceBounds = shape.sourceBounds;
   }
+
+  // The callback of a `Map` of a named user function. The memo of
+  // `exactTierShape()` can give a literal that was read in another scope, so
+  // the literal is read again in the scope of this drain
+  // (`namedCallbackLiteral()`): when the callback symbol has a lexical
+  // binding that is not the binding of its name here, or a different
+  // literal, the interpreter computes the elements.
+  const callee = isFunction(expr) ? expr.op1 : undefined;
+  if (
+    named !== undefined &&
+    (callee === undefined || namedCallbackLiteral(ce, callee) !== fn)
+  )
+    return undefined;
 
   const existing = mapCompileCaches.get(expr);
   if (drainStart && existing) existing.attemptedThisDrain = false;
@@ -796,8 +897,15 @@ export function mapCompiledElementRunner(
   // interpreter rather than compile against the stale one. `exactTierShape`
   // memoizes on `ce._semanticVersion`, so this is a pointer compare unless
   // something actually changed.
+  //
+  // For a `Map` of a named user function, the function must still have the
+  // literal that `fn` is: a redefinition during the drain leaves `fn`
+  // outdated, so the interpreter computes the rest of the drain, and the next
+  // drain reads the new literal.
   const stillEligible = (): boolean =>
-    tier !== 'exact' || exactTierShape(ce, expr) !== undefined;
+    (named === undefined ||
+      (callee !== undefined && namedCallbackLiteral(ce, callee) === fn)) &&
+    (tier !== 'exact' || exactTierShape(ce, expr) !== undefined);
 
   // Resolve (or build) a usable compiled cache record; `undefined` → the
   // caller's interpreter path serves this element.
@@ -815,7 +923,7 @@ export function mapCompiledElementRunner(
       // attempt, not a failure. Not bounded by `attemptedThisDrain`, so a
       // mid-drain reassignment is honored on the very next element.
       _mapAutoCompileStats.recompiles++;
-      const fresh = attemptCompile(ce, tier, fn, inner);
+      const fresh = attemptCompile(ce, tier, fn, inner, named);
       if (fresh === undefined) {
         mapCompileCaches.delete(expr);
         return undefined;
@@ -833,7 +941,7 @@ export function mapCompiledElementRunner(
       if (cache.attemptedThisDrain) return undefined;
       if (!stillEligible()) return undefined;
       cache.attemptedThisDrain = true;
-      const fresh = attemptCompile(ce, tier, fn, inner);
+      const fresh = attemptCompile(ce, tier, fn, inner, named);
       if (fresh === undefined) {
         mapCompileCaches.delete(expr);
         return undefined;
@@ -853,7 +961,7 @@ export function mapCompiledElementRunner(
     // Re-ask here too. This is also what stops the cached-compiled branch's
     // `delete` above from handing a revoked shape straight back to this path.
     if (!stillEligible()) return undefined;
-    const fresh = attemptCompile(ce, tier, fn, inner);
+    const fresh = attemptCompile(ce, tier, fn, inner, named);
     if (fresh === undefined) return undefined;
     fresh.attemptedThisDrain = true;
     mapCompileCaches.set(expr, fresh);

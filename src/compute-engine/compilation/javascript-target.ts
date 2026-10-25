@@ -50,6 +50,7 @@ import {
   inPlaceUpdateChains,
   isDefinitelyCollectionType,
   mayBeCollectionType,
+  OWNED_LOCAL_UPDATE_OPS,
 } from './in-place-update.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
@@ -3904,13 +3905,16 @@ function parenthesizeIdentity(
  *
  * Recognized: a real sub-expression (imaginary part zero), a number literal,
  * the imaginary unit, a product with exactly one purely-imaginary factor and
- * real remaining factors, and a sum of those. Anything else — an opaque complex
+ * real remaining factors, a sum of those, and the square or the cube of such
+ * a sum when its two parts are cheap. Anything else — an opaque complex
  * call such as `Sin(z)`, a complex-typed symbol, a product of two complex
  * factors — returns `undefined` and the caller keeps its object-building
  * lowering.
  *
- * Every operand is compiled exactly once, and each contributes its code to
- * only one of the two parts, so no sub-expression is duplicated. An operand
+ * Every operand is compiled exactly once. Outside a power, each operand
+ * contributes its code to only one of the two parts, so no sub-expression is
+ * duplicated; a power repeats the code of the parts of its base, which it
+ * accepts only when that code is short and has no call. An operand
  * with observable effects declines the split: the parts are emitted
  * imaginary-first in `Math.atan2`, which would run the effects in an order the
  * interpreter does not.
@@ -3974,6 +3978,57 @@ function tryGetJSComplexParts(
     return {
       re: reTerms.length === 0 ? '0' : join(reTerms, ' + '),
       im: imTerms.length === 0 ? '0' : join(imTerms, ' + '),
+    };
+  }
+  if (isFunction(expr, 'Power')) {
+    // The square or the cube of a value that splits: `Re((x + ib)^2)` is
+    // `x*x - b*b`, with no object. The formulas and the order of the
+    // operations are those of the object lowering of a small integer power
+    // (`z*z`, then `z*z*z`), so a finite or non-finite result is the same.
+    // Each part of the base is spliced several times, so the split is taken
+    // only when both parts are cheap: at most 40 characters of names,
+    // numbers and operators, with no call. Every other base keeps the object
+    // lowering. A `+ 0` ends each part, so that a zero result is `+0`, as
+    // in exact arithmetic: `-0` would change the sign that `Math.atan2`
+    // answers for `Argument`. (CE-331)
+    const n = expr.ops[1];
+    const k = isNumber(n) && !n.isComplex ? n.re : undefined;
+    if (k !== 2 && k !== 3) return undefined;
+    const base = tryGetJSComplexParts(expr.ops[0], compile);
+    if (base === undefined) return undefined;
+    // A part is cheap only when its code is a side-effect-free read: names
+    // (`x` or `_.x`), number literals, `+ - * /` and parentheses. The code
+    // of a symbol can come from the caller (`vars: { x: '_.x++' }`), so a
+    // short code can still have an effect, and splicing it twice would run
+    // that effect twice. Code with `++`, `--`, an assignment, a call, an
+    // index or a keyword operator (`new x`, `typeof x`) is refused.
+    const cheap = (code: string): boolean => {
+      if (code.length > 40 || /\+\+|--/.test(code)) return false;
+      const tokens =
+        code.match(
+          /[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)?|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|\S/g
+        ) ?? [];
+      let previous = '';
+      for (const token of tokens) {
+        const isOperand = /^[\w$]/.test(token);
+        if (!isOperand && !/^[-+*/()]$/.test(token)) return false;
+        const afterOperand = /^[\w$)]/.test(previous);
+        // Two operands in sequence (`new x`, `x in y`) are a keyword
+        // operator, and a `(` after an operand or a `)` is a call.
+        if ((isOperand || token === '(') && afterOperand) return false;
+        previous = token;
+      }
+      return true;
+    };
+    if (!cheap(base.re) || !cheap(base.im)) return undefined;
+    const { re: a, im: b } = base;
+    const re2 = `(${a} * ${a} - ${b} * ${b})`;
+    const im2 = `(2 * (${a} * ${b}))`;
+    // `a * a - b * b` is never `-0`, so only the imaginary part needs it.
+    if (k === 2) return { re: re2, im: `(${im2} + 0)` };
+    return {
+      re: `(${re2} * ${a} - ${im2} * ${b} + 0)`,
+      im: `(${re2} * ${b} + ${im2} * ${a} + 0)`,
     };
   }
   return undefined;
@@ -6324,6 +6379,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error('Could not compile `ReplaceAt`: missing argument');
     if (IN_PLACE_UPDATE_OPS.has(args))
       return compileInPlaceUpdateChain(args, compile);
+    const owned = OWNED_LOCAL_UPDATE_OPS.get(args);
+    if (owned !== undefined) {
+      const chain = compileInPlaceUpdateChain(args, compile, owned);
+      if (chain !== undefined) return chain;
+    }
     const coll = elementsArg('ReplaceAt', args[0], compile);
     return `_SYS.replaceAt(${coll}, ${compile(args[1])}, ${compile(args[2])})`;
   },
@@ -9023,6 +9083,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Choose: (args, compile) =>
     `_SYS.binomial(${compile(args[0])}, ${compile(args[1])})`,
   Fibonacci: '_SYS.fibonacci',
+  IsPrime: (args, compile) => `_SYS.isPrime(${compile(args[0])})`,
 
   // Complex-specific functions
   // `Real`, `Imaginary` and `Argument` each read one scalar off a complex
@@ -9702,20 +9763,57 @@ const IN_PLACE_UPDATE_OPS = new WeakSet<ReadonlyArray<Expression>>();
  * operands of its outermost node, to one `_SYS.replaceAtInPlace` call. The
  * indexes and values are listed innermost first, which is the order the
  * interpreter applies them in.
+ *
+ * With `owned`, the chain updates a block local accepted by
+ * `ownedLocalUpdateChains`, and `owned` is the temporary that holds the
+ * array the block owns: the local is written in place when it holds that
+ * array, and is copied first otherwise (`OWNED_LOCAL_UPDATE_OPS`). The local
+ * is read three times, so this form is used only when it compiles to a
+ * name; otherwise the result is `undefined` and the caller keeps the
+ * copying form.
  */
 function compileInPlaceUpdateChain(
   args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  owned: string
+): string | undefined;
+function compileInPlaceUpdateChain(
+  args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string
-): string {
-  const updates: string[] = [];
+): string;
+function compileInPlaceUpdateChain(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  owned?: string
+): string | undefined {
   let node: ReadonlyArray<Expression> = args;
+  while (isFunction(node[0], 'ReplaceAt')) node = node[0].ops;
+  let root = compile(node[0]);
+  if (owned !== undefined) {
+    if (!/^[\w$]+$/.test(root)) return undefined;
+    // The copying form reads the list through `elementsArg`, which segments
+    // a string into its characters, refuses an operand that may be a string,
+    // and adds a run-time check for an operand that is not provably an
+    // indexed collection. The owned form is used only when `elementsArg`
+    // gives the plain name, so it skips no check.
+    if (elementsArg('ReplaceAt', node[0], compile) !== root) return undefined;
+    root = `${root} === ${owned} ? ${root} : (${owned} = _SYS.ownedCopy(${root}))`;
+  }
+  const updates: string[] = [];
+  node = args;
   for (;;) {
     updates.unshift(compile(node[1]), compile(node[2]));
     const inner = node[0];
     if (!isFunction(inner, 'ReplaceAt')) break;
     node = inner.ops;
   }
-  return `_SYS.replaceAtInPlace(${compile(node[0])}, ${updates.join(', ')})`;
+  const call = `_SYS.replaceAtInPlace(${root}, ${updates.join(', ')})`;
+  // The temporary also receives the result of the update. For an array
+  // this is the array the temporary already holds. For a string, which
+  // `_SYS.ownedCopy` returns unchanged, it is the new array of characters
+  // that `_SYS.replaceAtInPlace` made, so the next update writes that array
+  // in place instead of copying it again.
+  return owned === undefined ? call : `(${owned} = ${call})`;
 }
 
 /**
@@ -13894,16 +13992,40 @@ function compileExtremum(
           checkedArray[i] !== undefined)
     )
   ) {
-    const parts = args.map((a, i) => {
-      if (isIndexedCollectionOperand(a)) return `...(${compile(a)})`;
-      if (checkedArray[i] !== undefined) return `...(${checkedArray[i]})`;
+    // Each operand is one argument of the arrow function, so it is evaluated
+    // once and in order. The body folds the elements of each collection in
+    // place, with no combined array: `Min(1, L)` read `[1, ...L]`, which
+    // copied `L` (CE-337.3). The count `_n` is kept only when no operand is
+    // a scalar, because a scalar always contributes one element.
+    const isFolded = (a: Expression, i: number): boolean =>
+      isIndexedCollectionOperand(a) || checkedArray[i] !== undefined;
+    const hasScalar = args.some(
+      (a, i) => !isFolded(a, i) && !couldBeIndexedCollectionOperand(a)
+    );
+    const params = args.map((_, i) => `_p${i}`);
+    const step = (v: string): string =>
+      `_a = ${fn}(_a, ${v});${hasScalar ? '' : ' _n++;'}`;
+    const loop = (p: string): string =>
+      `for (const _x of ${p}) { ${step('_x')} }`;
+    const body = args.map((a, i) => {
+      const p = params[i]!;
+      if (isFolded(a, i)) return loop(p);
       if (couldBeIndexedCollectionOperand(a)) {
         refuseNonNumericScalarProjection(kind, a);
-        return `...((_v) => Array.isArray(_v) ? _v : [_v])(${compile(a)})`;
+        return `if (Array.isArray(${p})) { ${loop(p)} } else { ${step(p)} }`;
       }
-      return compile(a);
+      return step(p);
     });
-    return guardedReduce(`[${parts.join(', ')}]`);
+    const values = args.map((a, i) =>
+      isIndexedCollectionOperand(a)
+        ? compile(a)
+        : (checkedArray[i] ?? compile(a))
+    );
+    const init = hasScalar
+      ? `let _a = ${identity};`
+      : `let _a = ${identity}, _n = 0;`;
+    const result = hasScalar ? '_a' : '_n === 0 ? NaN : _a';
+    return `((${params.join(', ')}) => { ${init} ${body.join(' ')} return ${result}; })(${values.join(', ')})`;
   }
   return `${fn}(${args.map(compile).join(', ')})`;
 }

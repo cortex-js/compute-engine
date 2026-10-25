@@ -883,6 +883,7 @@ describe('MCP server arguments', () => {
       port: 8000,
       path: '/mcp',
       allowedOrigins: [],
+      workers: 0,
     });
     expect(
       parseMcpArguments([
@@ -908,6 +909,7 @@ describe('MCP server arguments', () => {
       port: 3000,
       path: '/epsil',
       allowedOrigins: ['https://chatgpt.com', 'http://localhost:6274'],
+      workers: 0,
     });
   });
 

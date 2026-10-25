@@ -1036,10 +1036,68 @@ function compilePythonSumProduct(
     args.slice(1),
     target
   );
+  const reduce = (gen: string): string =>
+    kind === 'Sum' ? `sum(${gen})` : `math.prod(${gen})`;
+
+  // A subexpression of the body that does not read the index has the same
+  // value at each iteration. When it is costly (it builds a collection, or
+  // it reads a whole collection, as `Max(L)` does), it is computed once,
+  // before the generator, and the body reads a temporary
+  // (`BaseCompiler.hoistLoopInvariants`). The temporaries are bound with the
+  // sequential binding comprehension of this target (`cseBind`):
+  //
+  //     [sum(i * x + np.sin(_tv1) for i in range(1, 4)) for _tv1 in [np.max(L)]][0]
+  //
+  // The generator alone evaluates such a subexpression only when the range
+  // is not empty, so the temporaries must be computed only then: an error
+  // that the subexpression raises (`np.max` of an empty array) must not
+  // become an error of an empty sum. This is decided at compile time when
+  // both bounds are number literals. When a bound is a symbol, the bounds are
+  // compared at run time, which reads each bound once more and has no other
+  // effect. Any other bound keeps the generator as it is. Only a sum with
+  // one indexing set hoists: with several, an inner range can be empty for
+  // some values of an outer index. (CE-339.2)
+  const clause = args.length === 2 ? args[1] : undefined;
+  if (
+    target.cseBind !== undefined &&
+    isFunction(clause, 'Limits') &&
+    isSymbol(clause.ops[0])
+  ) {
+    const [, lower, upper] = clause.ops;
+    const literal = (e: Expression | undefined): number | undefined =>
+      isNumber(e) && !e.isComplex && Number.isFinite(e.re)
+        ? Math.floor(e.re)
+        : undefined;
+    const lo = literal(lower);
+    const hi = literal(upper);
+    const simple = (e: Expression | undefined): boolean =>
+      literal(e) !== undefined || isSymbol(e);
+    const decided = lo !== undefined && hi !== undefined;
+    if ((decided && lo <= hi) || (!decided && simple(lower) && simple(upper))) {
+      const { bindings, result: bodyCode } = BaseCompiler.hoistLoopInvariants(
+        body,
+        [clause.ops[0].symbol],
+        target,
+        () => BaseCompiler.compile(body, idxTarget)
+      );
+      if (bodyCode.includes('\n')) throw statementError();
+      const value = reduce(`${bodyCode} ${forClauses.join(' ')}`);
+      if (bindings.length > 0) {
+        const bound = target.cseBind(
+          bindings.map(([name, code]) => [name, code]),
+          value
+        );
+        if (decided) return bound;
+        const guard = `${compilePythonBound(lower!, target, true)} <= ${compilePythonBound(upper!, target, true)}`;
+        return `(${bound} if ${guard} else ${kind === 'Sum' ? '0' : '1'})`;
+      }
+      return value;
+    }
+  }
+
   const bodyCode = BaseCompiler.compile(body, idxTarget);
   if (bodyCode.includes('\n')) throw statementError();
-  const gen = `${bodyCode} ${forClauses.join(' ')}`;
-  return kind === 'Sum' ? `sum(${gen})` : `math.prod(${gen})`;
+  return reduce(`${bodyCode} ${forClauses.join(' ')}`);
 }
 
 /**

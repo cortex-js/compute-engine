@@ -514,6 +514,72 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
       ],
     ] as any);
     expect(compile(bounded).code).toBe('385');
+
+    // A `Take` of a `Map` over a finite source larger than the walk cap
+    // walks only the elements it keeps, so it folds too.
+    const boundedFinite = ce.box([
+      'Sum',
+      [
+        'Take',
+        ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, 100000]],
+        10,
+      ],
+    ] as any);
+    expect(compile(boundedFinite).code).toBe('385');
+
+    // A `Take` that keeps more elements than the walk cap is refused, and so
+    // is a negative count, which walks the whole source.
+    for (const count of [20000, -10]) {
+      const r = compile(
+        ce.box([
+          'Sum',
+          [
+            'Take',
+            ['Map', ['Function', ['Square', 'y'], 'y'], ['Range', 1, 100000]],
+            count,
+          ],
+        ] as any)
+      );
+      expect(r.code).not.toMatch(/^[\d.]+$/);
+    }
+  });
+
+  it('declines a walk of more than 10 000 elements, whatever its cost per element', () => {
+    // The interpreter pays about 10 to 20 µs for each element of a walk, so a
+    // walk of 100 000 cheap elements fitted the cost ceiling and folded in
+    // several seconds: the Epsil program `sum(filter(1..99999, isPrime))`
+    // took 6.9 s to compile (CE-324.1). Each shape below folded before.
+    const R = ['Range', 1, 99999];
+    const shapes = [
+      // A reducer over a `Filter` with a library predicate.
+      [['Sum', ['Filter', R, 'IsPrime']], 454396537],
+      // Higher-order operators: the callback is applied once per element.
+      [['CountIf', R, 'IsPrime'], 9592],
+      [['Any', R, ['Function', ['Greater', 'x', 99998], 'x']], true],
+      [['Reduce', R, 'Add'], 4999950000],
+      // An indexed `Sum` with 60 000 iterations.
+      [['Sum', ['Multiply', 'k', 'k'], ['Limits', 'k', 1, 60000]], 72001800010000],
+    ] as const;
+    for (const [json, value] of shapes) {
+      const r = compile(ce.box(json as any), { fallback: false });
+      // The code is the structural walk, not a folded literal.
+      expect(r.code).not.toMatch(/^[\d.]+$|^true$/);
+      expect(r.run!({})).toBe(value);
+    }
+
+    // A walk at the cap still folds.
+    expect(
+      compile(ce.box(['Sum', ['Filter', ['Range', 1, 10000], 'IsPrime']] as any))
+        .code
+    ).toBe('5736396');
+    expect(
+      compile(
+        ce.box(['Sum', ['Multiply', 'k', 'k'], ['Limits', 'k', 1, 10000]] as any)
+      ).code
+    ).toBe('333383335000');
+    // An operator with no callback is not priced per element: `Length` of
+    // a large `Range` still folds.
+    expect(compile(ce.box(['Length', R] as any)).code).toBe('99999');
   });
 });
 

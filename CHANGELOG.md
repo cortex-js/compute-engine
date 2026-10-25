@@ -1,3 +1,408 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **Static types that did not hold the value of the expression.** In each case
+  below the type of the expression was not a type of its value; it now is.
+  - `Map(g, t)` with `g := x ↦ x + 10` and `t := ([1, 2], 3)` is typed
+    `list<number | vector<2>>` (it was `list<number>`, for the value
+    `[[11, 12], 13]`) (CE-5). A function literal with an untyped parameter over
+    a `list<any>` gets a `list<any>` arm in its result: `(x ↦ (x, x))(A)` is
+    `list<list<any> | tuple<…>>` (CE-16).
+  - `(1, 2) + q` and `(1, 2)·q` with `q: unknown` have `number` components (they
+    kept `integer`, and the value for `q = 0.5` is `(1.5, 2.5)`) (CE-373).
+  - With `tv: tuple<number, number> | vector<number^2>`, `Sin(tv)`, `Sqrt(tv)`
+    and `Power(tv, 2)` are typed `tuple<number, number> | vector<2>` (they were
+    `number`) (CE-7).
+  - `Sort(tu)` with `tu: tuple<unknown, missing> := (1, Missing)` is typed
+    `list<missing | unknown>` (it was `list<missing>`) (CE-3).
+  - A tuple whose coordinate is a list with a failed cell has the same type
+    inside a list as alone (it was `error` inside a list) (CE-367).
+  - A `Fold` whose body assigns its accumulator is typed `unknown`, not from its
+    seed alone (CE-11).
+  - `Any` and `All` are typed `boolean | missing` when a cell can be absent:
+    `Any([1, Missing], x ↦ x > 2)` evaluates to `Missing` (CE-8).
+  - With the alias `cyc = cyc | list<integer>` and `k: cyc := [1, 2]`,
+    `Map(x ↦ x + 10, k)` is typed `list<integer>` and evaluates to `[11, 12]`.
+    It was typed `collection<integer>` and evaluated to `Set(11, 12)` (CE-31).
+  - `If(c, 1, 0)` with `c` of unknown type is typed
+    `integer | list<integer | list<any>>`: `c` can hold a mask. A condition that
+    can be undecided (`[1, 2] = [1, Missing]`) adds `missing` to the type of
+    `If` and `Which` (CE-22).
+  - `MatrixMultiply` of two vectors is typed as a scalar (`integer` for integer
+    vectors). A lazy `IdentityMatrix(101)` is typed `matrix<integer^(101x101)>`,
+    and `Tabulate` with literal extents has a shape. `TrigExpand`, `TrigToExp`
+    and `TrigReduce` of `Missing` or of an untyped symbol keep the operand's
+    type, not `value` (CE-39).
+  - With `f(n, s) = s if n == 0 else f(n - 1, [1, 2])`, `f(1, [0])` keeps the
+    declared result; it was typed `vector<integer^1>` for the value `[1, 2]`
+    (CE-34).
+  - `ce.box(expr, { form: 'structural' })` binds symbols to their definitions,
+    as `ce.function()` does: with `t: tuple<integer, integer>`, `Add(t, t)` is
+    typed `tuple<integer, integer>` (it was `unknown`) (CE-29).
+
+- **More precise static types.**
+  - An operand that may be absent adds `nan` to a numeric result type, instead
+    of widening the type to `number`: `Length(At(xs, 1))` is
+    `integer | nan | signed_infinity`, and `Sin(m)` with `m: real | missing` is
+    `nan | real` (CE-41). `[-2, NaN, Missing]` is typed
+    `list<integer | missing | nan^3>`.
+  - `v / g(1)` with `v: vector<integer^2>` and an integer-valued `g` is typed
+    `vector<rational^2>`, as the tuple route gives (CE-59).
+  - A list literal of points of different tuple types keeps its length:
+    `[(1/2, 1), (~oo, ~oo)]` is `list<(tuple<…> | tuple<…>)^2>` (CE-28).
+  - `First(Rest(xs))` and `First(Take(xs, 2))` over a list literal have no
+    absent member, and a numeric position proved not to exist
+    (`At([7, 8, 9], 99)`) is typed `nan` (CE-42).
+  - `Map(Sqrt, x)` over a union of vector types is typed arm by arm, and
+    `Map(Add, xs, ys)` over two `list<integer>` is typed `list<integer>` (it was
+    `list<value>`) (CE-31, CE-45).
+  - An undeclared self-recursive function that builds a list is typed
+    `-> list<number>`, and so is a declared mutually recursive pair (they were
+    `collection<number>` or `-> unknown`) (CE-37, CE-38).
+  - `Simplify` and the other lazy operators type the operands of a held
+    application from their bindings (CE-40).
+  - `assume(t ∈ ExtendedRealNumbers)` types `t` as `real | signed_infinity` (it
+    left `t` typed `unknown`); the other extended sets work the same way
+    (CE-50).
+  - `q: integer := uu`, with `uu` an undeclared symbol, narrows `uu` to
+    `integer` (CE-39).
+
+- **Arguments and values that were admitted and now are refused when boxed.**
+  - `g(S)` with `g: (integer) -> integer` and `S: list<string>` (declared, no
+    value) is an `incompatible-type` error, and so is `f(S)` with
+    `f: (matrix<2x2>) -> integer`. `h(S)` with `h: (list<integer>) -> integer`
+    stays valid, because the empty list is a value of both types (CE-24).
+  - `Map(h, s)` with `h: (T) -> T where T: number` and `s: list<string>` is
+    refused; it failed on each element (CE-30).
+  - `Q + M` with `Q` a list of lists of points and `M` a list of lists of
+    integers is one `incompatible-type` error, not a nested list of errors
+    (CE-28).
+  - After `ce.declareType("Row", "vector<integer^3>", {alias: true})`,
+    `ce.declare("R2", "list<Row^2>")` is refused with the same message as
+    `list<vector<integer^3>^2>` (CE-17).
+
+- **A value-bounded type variable accepts its own literal** (CE-52). With
+  `f: (x: T) -> T where T: 5`, `f(5)` is typed `5`; it was an
+  `incompatible-type` error. In the same way `where T: real<0..10>` accepts
+  `g(3)`.
+
+- **Setting `.value` follows the rules of `ce.assign()`** (CE-49). `n.value = 5`
+  types `n` as `integer` (it stayed `unknown`), a value that does not fit a
+  declared type is refused, and `m.value = "hi"` on an inferred `integer` symbol
+  changes the type as `ce.assign` does (the type stayed `integer`). On a boxed
+  symbol whose name a nested scope declares again, the setter writes the
+  symbol's own binding, not the inner one.
+
+- **A destructured local aliases the parameter it came from** (CE-35).
+  `g(s) = do { let (a, b) = (s, 0); take(a, 2) }` gave three `incompatible-type`
+  errors for `g([1, 2, 3])`; it gives `[1, 2]`.
+
+- **A value-bound function with a declared effects contract refuses a rebuild
+  that makes it effectful** (CE-62). With `g: (number) pure -> number` bound to
+  `x ↦ 2h(x)` and then `h := x ↦ x + Random()`, the body of `g` was silently
+  rebuilt into a random call; the rebuild now throws `EffectContractError` and
+  keeps the old body.
+
+- **Epsil: an alias of a binding that holds a function literal is checked like
+  the binding** (CE-61). After `let k = (n: integer) => n + 1` and `let g = k`,
+  `g(1.5)` is reported by the static check, as `k(1.5)` is.
+
+- **A float coefficient times a power of a reciprocal was written with a factor
+  `1\times`** (CE-439). `Multiply(0.5, y, Power(Divide(1, x), 2))` was written
+  `\frac{1\times0.5y}{x^2}`, and its prettified MathJSON had the numerator
+  `["Multiply", 1, 0.5, "y"]`. The numerator of `1/x` is `1`, raised to the
+  power 2, and the split of the product into a numerator and a denominator kept
+  that `1^2` as a factor, which does not fold with a float coefficient. It is
+  now `\frac{0.5y}{x^2}`. A long numerator over a single power of `x` is still
+  written with a solidus, `(0.5\vert x\vert x^{n})/x^2`, as before.
+
+- **The LaTeX of a function whose parameter is `_1` showed an empty parameter
+  list** (CE-417). `["Function", ["Divide", "_1", "n"], "_1"]` was written
+  `()\mapsto\frac{\operatorname{\_1}}{n}`, which looks like a function of no
+  argument. A function literal whose parameters are the wildcards of its body
+  now writes them: `\operatorname{\_1}\mapsto\frac{\operatorname{\_1}}{n}`, and
+  `(\operatorname{\_1}, \operatorname{\_2})\mapsto\operatorname{\_1}+\operatorname{\_2}`
+  for two. Both read back as the same function, as before. A body that uses a
+  bare `_` keeps `()\mapsto`.
+
+- **The type of a call whose argument may be absent did not hold the value of
+  the call** (CE-422). The type of a call of a user function is derived from its
+  body, a second time with the parameter typed `missing` when the argument may
+  be absent. The parameter is now typed as the call binds the absent value. With
+  `P: tuple<number, number> | missing`:
+  - At a parameter declared `broadcastable<tuple<number, number>>`, a string, a
+    boolean or a list, an absent argument is an `incompatible-type` error, and
+    it adds nothing to the type. With `f := a ↦ (a.x + 1, a.y + 1)`, `f(P)` was
+    typed `tuple<missing, missing> | tuple<number, number>` and is now
+    `tuple<number, number>`, as at a parameter declared `tuple<number, number>`.
+  - At a parameter declared `real` or `integer`, the absent value is read as
+    `NaN`. With `f := a ↦ (a, 1)` and `f: (real) -> unknown`, the call was typed
+    `tuple<real, integer>`, and its value `(NaN, 1)` did not fit. It is now
+    typed `tuple<nan, integer> | tuple<real, integer>`, and `f(Missing)` is
+    typed `tuple<nan, integer>` (it was `tuple<missing, integer>`).
+
+- **Compiled `Digamma`, `Trigamma` and `PolyGamma` gave `NaN` at a pole.** The
+  interpreter answers `~oo` at a non-positive integer, and compiled code spells
+  that pole `Infinity`, as it does for `Gamma`. With a variable argument the
+  compiled JavaScript gave `NaN`; it now gives `Infinity`. Compiled
+  `PolyGamma(-1, x)` gave `NaN`; it is now `LogGamma(x)`, as in the interpreter,
+  for x > 0 and at a pole.
+
+- **The GPU `LerchPhi` and `PolyLog` gave ±Infinity for some finite values** at
+  a large negative order, for example `Φ(−0.5, −30, 10) = 8.0e28`. They now give
+  the value.
+
+- **The colour reference showed wrong results.** `Color` returns an `Oklch`
+  expression, not a tuple, and `ColorFromColorspace` returns the colour
+  expression of its space (`Hsl(0, 1, 0.5)`). `doc/86-reference-colors.md` now
+  shows the real results.
+
+- **GLSL and WGSL: a product with a derivative or with a one-operand function
+  lost its grouping.** `3·h'(x)` with `h(x) = x³ + sin x` compiled to
+  `9.0 * (x * x) + cos(x)`, not `9x² + 3cos x`, and `3·Binomial(x + 1, 1)`, and
+  `ElementMax`, `ElementMin` or `Median` with one operand, compiled to `3x + 1`.
+  The substituted body is now in parentheses, so the code of a derivative at the
+  root is also in parentheses, for example `(-sin(t))`.
+
+- **GLSL and WGSL: `Oklch` and `Oklab` with an infinite or NaN channel** gave
+  the raw channels. They now give the NaN colour, as compiled JavaScript does.
+
+- **WGSL: `ContrastingColor` with a tuple background and colour candidates**
+  (`ContrastingColor((u, 1, 1), Rgb(1, 0, 0), Rgb(0, 0, 1))`) declined. It now
+  compiles, as on GLSL.
+
+- **GLSL: a loop-invariant declaration that no code reads** is no longer
+  emitted.
+
+- **Compiled Python: `And`, `Or` and `Not` over a list of booleans** read the
+  list as one truth value (`And(L, q)` gave `True` for `L = [True, False]`).
+  They are now computed element by element, as in the interpreter. Other list
+  shapes are not compiled.
+
+- **Compiled Python: `\arg(x - iy)` at `y = 0`** gave −π for a negative `x`. It
+  now gives π, as the interpreter does.
+
+- **Compiled Python: a string at a parameter of a list type** was read as a list
+  of code points, so `Length` counted `"e\u0301x"` as 3 where the interpreter
+  counts 2 characters. The compiled function now refuses a string there with a
+  `TypeError`, as compiled JavaScript does.
+
+- **A one-operand `Subtract`, `ElementMax` or `ElementMin` from raw MathJSON**
+  compiled to a wrong value: `3·Subtract(x + 1)` was `3 * (-x + 1)`, and
+  `3·ElementMax(x + 1)` was `3 * x + 1` on Python. A one-operand `Divide` or
+  `Power`, and a `Clamp` with fewer than three operands, gave invalid code or
+  `NaN`. They now compile to the operand, or are not compiled, as the
+  interpreter gives an error for them.
+
+- **Compiled `Max` and `Min` of a nested list of unknown type** gave `NaN`
+  (`Max(g(x)[1], 1)` with `g := t ↦ [t, 2t]` and a matrix element). They now
+  flatten every level, as the interpreter does.
+
+- **Compiled JavaScript added a number to a point**: `At(P, 1) + 1` with
+  `P: broadcastable<tuple<number, number>>` gave `[4, 5]`, where the interpreter
+  gives an `incompatible-type` error. It is now not compiled.
+
+- **A compiled power with a list exponent with a fractional cell** gave `NaN`
+  for a negative base (`p^[2, 0.5]` for `(-4)^0.5`). It now takes the complex
+  lane, as a scalar exponent does, and gives `2i`.
+
+- **A compiled `Root` whose degree is known only at run time** (`Root(p, 3)`
+  over a list, or `Root(x, n)`) gave `NaN` for a negative radicand. It now gives
+  the real root where the interpreter does (`Root(-8, 3)` is `-2`).
+
+- **A compiled complex function of `NaN`** (`√` of a sum with an absent cell)
+  gave `{re: 0, im: NaN}`. It now gives `NaN`.
+
+- **A compiled user function read a free name of its body in the scope of the
+  compilation.** With a global `a := 2`, `G := x ↦ x + a`, and `a` assigned 1000
+  in a new scope, compiled `G(1)` gave 1001; the interpreter gives 3. Compiled
+  code now declines a call whose body reads a name that the scope of the
+  compilation binds to a different definition.
+
+- **`vars: { g: '…' }` did not replace a user function `g`** at its calls in
+  compiled code. It now does, on JavaScript and interval-js. On GLSL and WGSL a
+  `vars` entry names a uniform, which cannot be called, so a user function keeps
+  its own definition there; the `functions` option replaces it.
+
+- **A list of points at a parameter with no type annotation** declined, and two
+  forms gave the string `"1,21"`: a list held by a `let` local at a point
+  parameter, and the same call of a function assigned in the engine. They now
+  compile and give the interpreter's value.
+
+- **Compiled arithmetic on a function value** (`g + 1` with a block-local `g`)
+  gave a string or `null`. It is now not compiled.
+
+- **Compiled code did not check some parameter types.** An argument at a `list`
+  or `tuple` parameter is now tested for its shape, and the arguments of an
+  annotated function literal applied directly are tested too; a failed test
+  gives `NaN`, as the test of an `integer` parameter does. An assignment to a
+  typed parameter of a value outside its type is now not compiled.
+
+- **`freeSymbols` listed names that the program binds**: a library function
+  passed by name (`reduce(1..20, lcm, 1)`), the index of a comprehension read by
+  its condition, and the names of a destructuring loop index. The compiled Epsil
+  programs that read them now run.
+
+- **Evaluating a dictionary that holds the same dictionary under several keys**
+  took exponential time (30 levels did not finish in 25 s). Each shared value is
+  now evaluated once: 30 levels take about 1 ms.
+
+- **A compiled power read a symbol in its exponent as unknown.** With `k = 1`,
+  `y^{k/2-1}` stayed on the real lane and gave `NaN` for a negative `y`, where
+  `y^{-1/2}` gives the complex value. The value of an assigned symbol in the
+  exponent is now used, so the two forms agree; the interpreted integral of such
+  an integrand is complex too. A free symbol keeps the real lane.
+
+- **A compiled ordering with a constant pole** (`x < 1/0`, `x < (-1)!`) was
+  `true` at `x = 1`, because `1/0` compiled to IEEE infinity. The interpreter
+  gives `False`, and compiled code now does too, on every target.
+
+- **`When(v, C)` with a mask of rank 2 or more** now selects cell by cell at
+  every level, as `If` and `Which` do, in the interpreter and in compiled code.
+  Before, compiled JavaScript read each row as one condition and gave
+  `[NaN, NaN]`, and the interpreter kept the `When` unevaluated.
+
+- **A compiled selection whose arm is a point or a list of points** read one
+  point as a list. One point is now lifted whole, as in the interpreter.
+
+### Improvements
+
+- **A comparison over a string or a tensor of strings**
+  (`S: broadcastable<string>`, `matrix<string>`) compiles again on JavaScript.
+
+- **`When(B, B < 0)` with `B: broadcastable<number>` compiles.**
+
+- **`mode: 'complex'` compiles an operand that may be a number or a list**
+  (`broadcastable<number>`, `number | list<number>`). Before, it declined.
+
+- **A function declared with a real result stays on the real lane** in
+  `mode: 'complex'` when its definition is emitted, and when it reads an
+  assigned value that is complex only by promotion.
+
+- **Compiled code calls a function returned by a call**: `let a = mk(2)` then
+  `a(1)`, when `mk` returns a function literal on every path.
+
+- **interval-js compiles an index into the tuple that a block-local function
+  returns** (`At(f(x), 1)` with `f := (u) ↦ (u + 1, 2)`).
+
+- **Compiled Python: `Equal` and `NotEqual` with one list of numbers** compile
+  to a list of booleans, as the interpreter answers. Before, they were not
+  compiled.
+
+- **Compiled Python: a function defined in a block** (`const h = (k) => k + 1`,
+  `function h(k)`) can be called when its arguments are numbers, booleans or
+  strings.
+
+- **GLSL and WGSL: `Mod(v, 1)` and `2^v` over a vector** compile to `fract(v)`
+  and `exp2(v)`. Before, these forms applied to a scalar only.
+
+- **GLSL and WGSL: `GCD` and `LCM` of any number of operands**, a vector or a
+  literal list included, compile as a fold over the components. Before, `GCD`
+  took exactly two scalars and `LCM` did not compile.
+
+- **GLSL and WGSL: a `Match` whose case body holds a loop-form `Sum` or
+  `Product`** compiles to an `if … else` chain. Before, it declined.
+
+- **GLSL and WGSL compile `Digamma`, `Trigamma` and `PolyGamma`** (order 0
+  to 24) of a real argument. Before, these heads fell back to the interpreter
+  (#340). The relative error in float32 is about 1e-6 for `Digamma` and
+  `Trigamma` and 1e-5 for `PolyGamma`.
+
+- **The GPU `Zeta(s)` answers down to s = −63.** It answered `NaN` below s =
+  −24.5.
+
+### New Features
+
+- **`epsil --workers <n>`** (also in the REPL and in `epsil mcp`) gives the
+  engine a pool of `n` worker threads (at most 256) and runs each program
+  asynchronously, so a `findFit` with a global search scans on the workers and
+  gives the same values. Without the option, nothing changes.
+- **`IsPrime` compiles to JavaScript.**
+
+### Performance
+
+- **A `Map` whose element function is a tree of integer operations is compiled
+  with exact results** when the bounds prove that no step leaves the safe
+  integers: `sum(map(x => x^2 + 1, 1..100000))` takes 0.12 s, it took about 10
+  s. `map(f, xs)` with a named user function `f` uses the same compiled element
+  function as a lambda: exact results for an integer body, and machine floats
+  for an `N(…)` body when the engine runs at machine precision.
+- **A list or a tuple of string literals evaluates to itself**, as a list of
+  numbers already did. A recursion that passes a list of 3,000 strings at each
+  call is about 30 times faster, and the cost of a call no longer grows with the
+  length of the list.
+- **A symbol that holds a tuple expression**, such as a point `(f(u), g(u))`,
+  evaluates its elements once and gives the remembered value at the next reads,
+  until a name it reads changes.
+- **A symbol assigned a seeded random draw is memoized again**
+  (`WithRandomSeed(…)`, also inside other arithmetic). Each element read drew
+  and computed the whole list again.
+- **`evaluateAsync()` of a list or a tuple of numbers returns the same
+  expression at once**, as `evaluate()` does: about 2 ms in place of 180 to 350
+  ms for 20,000 points. The data preparation of `FindFit.evaluateAsync()` is 2
+  to 3 times faster, and the asynchronous evaluation of a large list gives the
+  event loop a turn about every 8 ms: a timer can run, and an `AbortSignal`
+  aborted during the evaluation rejects it with a `CancellationError`.
+- **The compile-time constant fold no longer walks more than 10,000 elements or
+  iterations**, and `CountIf`, `Any`, `Reduce` and `Fold` are priced per
+  element: `sum(filter(1..99999, isPrime))` compiles in about 0.1 s (it took 6.9
+  s) and runs as compiled code.
+- **Compiling in degree, grad or turn mode no longer resets the caches of the
+  engine** for each constant subexpression that is folded (about 30% faster for
+  60 angular constants).
+- **Compiled JavaScript**: `Min`/`Max` of a scalar and a list, or of two lists,
+  no longer copies the lists (7 to 9 times faster at 10,000 elements); `Re`,
+  `Im`, `Abs` and `Arg` of the square or the cube of `x + iy` read the parts
+  directly, with no complex object; a block-local function that the block only
+  calls has no broadcast wrapper; a loop that replaces elements of a local list
+  (`xs = ReplaceAt(xs, i, v)`) copies the list once and then writes in place,
+  O(n) in place of O(n²), with no change to the array of the caller (#386).
+  `Map(Sin, [a, b, c, d, e])` and other one-parameter library operators over a
+  written-out list of five or more elements compile to separate calls on every
+  target, glsl, wgsl and interval-js included.
+- **`.N()` of an infinite sum whose convergence cannot be established declines
+  in milliseconds**, not in up to 30 seconds: the walk first evaluates the terms
+  with the compiled body (#326). Values above machine precision are unchanged.
+- **The Python target computes the index-independent collection work of a `Sum`
+  or a `Product` once**, not at each iteration (n = 10,000: 34 → 1.4 ms).
+- **A misordered nested call of a callback operator** (`Map(Map(xs, f), g)`,
+  `Filter(p, …)`, `Fold(xs, f, 0)`, `TakeWhile`, `DropWhile`, `FlatMap`,
+  `MaxBy`, `MinBy`) takes a time linear in its depth (it was exponential: 5 s at
+  depth 10). Canonicalizing deeply nested function literals is faster (a `Map`
+  80 levels deep: 434 → 156 ms), and arithmetic on symbols of type
+  `real | +oo | -oo` no longer builds that type again for each result.
+- **The test suite runs 6 to 9 times faster**: a custom jest environment
+  (`config/jest-environment.cjs`) makes the `vm` context of each test file with
+  an ordinary global object, so a read of `Math` or `Number` is no longer a
+  proxy trap.
+
+### Behavior Changes
+
+- **`Σ 1/(n (ln n)^p)` with `p ≤ 1` evaluates to `+∞`** under `evaluate()` and
+  `.N()`, and so do other series that diverge as slowly as `Σ 1/(n ln n)` (a
+  limit comparison with `Σ 1/(n ln n)`). They stayed symbolic.
+- **Compiled JavaScript `Arg` of a square or a cube** now gives a zero imaginary
+  part as `+0`, so `arg((0 − i)^2)` is `π`, as in the interpreter (it was `−π`).
+- **Setting `.value` on a symbol checks the value as `ce.assign()` does.**
+  `n.value = "hi"` for `n` declared `integer` now throws a
+  `TypeCompatibilityError`; before, the value was written and the type stayed
+  `integer`.
+- **A numeric result whose operand may be absent keeps its handler's type and
+  adds `nan`**, instead of becoming `number`. `Sin(m)` with `m: real | missing`
+  is typed `nan | real`; `Length(At(xs, 1))` is
+  `integer | nan | signed_infinity`. Code that compares a type string with
+  `number` sees the narrower spelling.
+- **`Any` and `All` can be typed `boolean | missing`**, when a cell can be
+  absent or the predicate can answer `Missing`.
+- **The declared result of `MatrixMultiply` is `matrix | vector | number`.** The
+  product of two vectors is a number, which the old signature `matrix | vector`
+  did not admit.
+- **More calls are refused when they are boxed**, where they failed on each
+  element at evaluation: a declared function applied to a symbol whose type
+  shares no value with the parameter (CE-24), and `Map` with a polymorphic
+  callback whose type-variable bound refuses the element type (CE-30).
+
 ## 0.167.0 _2026-10-24_
 
 ### Behavior Changes
@@ -8,8 +413,8 @@
   by [enumeratio](https://github.com/enumeratio)). `FixedPoint(x ↦ 1 - x, 0.3)`
   cycles between `0.3` and `0.7`, and used to return whichever it held after
   `ce.iterationLimit` applications, a value that is not a fixed point. The call
-  now stays unevaluated, as the divergence guards of `FixedPoint` and `Any`
-  over an unbounded source already do. This also applies to an iteration that
+  now stays unevaluated, as the divergence guards of `FixedPoint` and `Any` over
+  an unbounded source already do. This also applies to an iteration that
   converges too slowly for the limit: at a precision of 200 digits,
   `FixedPoint(Cos, 1.0)` needs about 1170 steps, and it used to return a value
   correct to about 175 digits. A larger `ce.iterationLimit` lets such an
@@ -20,16 +425,16 @@
 
 - **A worker pool for a kernel loaded with the runtime entry** (CE-436, Tycho
   row 445). The light entry `@cortex-js/compute-engine/runtime` now exports
-  `createKernelPool`, and its runtime has `loadBroadcastAsync(stored,
-  { workers })`: the `broadcastAsync()` of the compilation result, for code
-  that a host stored and loads without an engine. It takes the same options
-  (`out`, `deadline`, `signal`, `chunk`, `inline`, …) and gives the same
-  result (`done`, `route`, `reason`); the function also has `willUsePool(cells)`
-  and `shippable`. Only stored code that keeps the `shippable: true` field of
-  its compilation result goes to a worker; other code runs on the calling
-  thread (`reason: 'not-shippable'`). A worker that loads stored kernels can
-  now run them on a pool of its own without importing the engine bundle. The
-  runtime entry grows by about 15 KB minified (5 KB gzipped).
+  `createKernelPool`, and its runtime has
+  `loadBroadcastAsync(stored, { workers })`: the `broadcastAsync()` of the
+  compilation result, for code that a host stored and loads without an engine.
+  It takes the same options (`out`, `deadline`, `signal`, `chunk`, `inline`, …)
+  and gives the same result (`done`, `route`, `reason`); the function also has
+  `willUsePool(cells)` and `shippable`. Only stored code that keeps the
+  `shippable: true` field of its compilation result goes to a worker; other code
+  runs on the calling thread (`reason: 'not-shippable'`). A worker that loads
+  stored kernels can now run them on a pool of its own without importing the
+  engine bundle. The runtime entry grows by about 15 KB minified (5 KB gzipped).
 
   ```js
   import {
@@ -47,20 +452,20 @@
   const { out, done, route } = await run({ x: xs }, { deadline: 100 });
   ```
 
-- **Index axes in the `grid` layout of `broadcast`** (ROADMAP CE-421, Tycho
-  row 440). The `indexes` option names the inputs that are index axes: the
-  input of each is the axis length `n`, and at each cell the variable is the
-  cell's position along that axis, `0` to `n − 1`.
+- **Index axes in the `grid` layout of `broadcast`** (ROADMAP CE-421, Tycho row
+  440). The `indexes` option names the inputs that are index axes: the input of
+  each is the axis length `n`, and at each cell the variable is the cell's
+  position along that axis, `0` to `n − 1`.
   `f.broadcast({ m: 64, n: 64, F }, { layout: 'grid', indexes: ['m', 'n'] })`
-  gives the values of the same grid with the columns `0 … 63`, with no column
-  to build, send to a worker or read. On a marching kernel that reads eight
-  values of a shared list per cell, a 64 × 64 × 64 grid takes 3.5 ms instead
-  of 4.05 ms.
+  gives the values of the same grid with the columns `0 … 63`, with no column to
+  build, send to a worker or read. On a marching kernel that reads eight values
+  of a shared list per cell, a 64 × 64 × 64 grid takes 3.5 ms instead of 4.05
+  ms.
 
 - **`executeEpsilAsync()`** (ROADMAP CE-314.1, Tycho row 441). Runs an Epsil
   program as `executeEpsil()` does and returns a promise of the same result.
-  Each top-level statement is evaluated with `evaluateAsync()`, so a
-  `findFit` whose search runs on the worker pool, or an operator with only an
+  Each top-level statement is evaluated with `evaluateAsync()`, so a `findFit`
+  whose search runs on the worker pool, or an operator with only an
   `evaluateAsync` handler, takes its asynchronous route. The `signal` option
   stops the program: the promise rejects with a `CancellationError`. A
   `withTimeLimit()` span around the call applies to the whole program.
@@ -71,27 +476,26 @@
   0.166.0, `0 < M \le 5` parses to
   `["And", ["Less", 0, "M"], ["LessEqual", "M", 5]]`, and the serializer wrote
   that `And` as `0\lt M\land M\le5`. It now writes `0\lt M\le5`, which parses
-  back to the same MathJSON. An `And` is written as a chain only when the
-  chain spelling parses back to it: each link starts with the term the
-  previous link ends with, and two adjacent links have different operators
-  (`a<b \land b<c` keeps its `\land`, since `a<b<c` is one `Less`). A chain
-  inside an `\land` needs no parentheses: `0\lt x\le1\land y\gt2`.
+  back to the same MathJSON. An `And` is written as a chain only when the chain
+  spelling parses back to it: each link starts with the term the previous link
+  ends with, and two adjacent links have different operators (`a<b \land b<c`
+  keeps its `\land`, since `a<b<c` is one `Less`). A chain inside an `\land`
+  needs no parentheses: `0\lt x\le1\land y\gt2`.
 
 - **`broadcastAsync()` with a `deadline` settles when the workers never start**
   (CE-434). A batch that waited for a worker that never posts `ready` (for
   example a worker that fails only when it gets a message) never settled, even
   with a `deadline`: the pool started to watch the deadline only when it sent
-  the task to a worker. A task that still waits at its deadline now settles
-  with no cells done, and the batch resolves at about the deadline.
+  the task to a worker. A task that still waits at its deadline now settles with
+  no cells done, and the batch resolves at about the deadline.
 
 - **`ReplaceAll` in a function body reads a parameter as its argument**
-  ([#476](https://github.com/cortex-js/compute-engine/issues/476)).
-  `ReplaceAll` holds its target, so in `x ↦ ReplaceAll(x, a → b)` the rules
-  were matched against the symbol `x`, and the call returned its argument
-  unchanged: `FixedPoint`, `Map` or a call over a rewriting step did nothing.
-  A parameter of a running call, in the target or in a rule, now means the
-  value the call bound to it, as `Function[x, x /. a -> b][a]` does in
-  Wolfram:
+  ([#476](https://github.com/cortex-js/compute-engine/issues/476)). `ReplaceAll`
+  holds its target, so in `x ↦ ReplaceAll(x, a → b)` the rules were matched
+  against the symbol `x`, and the call returned its argument unchanged:
+  `FixedPoint`, `Map` or a call over a rewriting step did nothing. A parameter
+  of a running call, in the target or in a rule, now means the value the call
+  bound to it, as `Function[x, x /. a -> b][a]` does in Wolfram:
 
   ```js
   const f = ['Function', ['ReplaceAll', 'x', ['List', ['Rule', 'a', 'b']]], 'x'];
@@ -102,86 +506,84 @@
   ```
 
   Outside a function nothing changes: a held target keeps a symbol with an
-  assigned value as the symbol (`x := 5; ReplaceAll(x^2, x → 3)` is `9`), and
-  so does a `let` local of a function body.
+  assigned value as the symbol (`x := 5; ReplaceAll(x^2, x → 3)` is `9`), and so
+  does a `let` local of a function body.
 
 - **`Assign` and `Declare` evaluate their value on the asynchronous route.**
   With `evaluateAsync()`, `x = FindFit(…)` and `let x = FindFit(…)` ran the
   synchronous `FindFit`, and an operator with only an `evaluateAsync` handler
-  stayed unevaluated in the value. Both now await the asynchronous evaluation
-  of the value; the results of the synchronous route do not change.
+  stayed unevaluated in the value. Both now await the asynchronous evaluation of
+  the value; the results of the synchronous route do not change.
 
 ### Performance
 
 - **`expr.latex` keeps its string, and prettified serialization is cheaper**
-  (ROADMAP CE-438, Tycho row 444). A second read of `.latex` on the same
-  boxed expression returns the string of the first read while nothing that
-  can change it has changed (a declaration, an assignment, an assumption, the
-  precision or another engine setting, the LaTeX options or dictionary): about
-  0.3 µs instead of about 200 µs for a 20-node expression. The prettified
-  MathJSON that `.latex` and `toLatex()` use no longer splits a product with
-  no factor that can go to a denominator into a numerator and a denominator,
-  which built and canonicalized new expressions: a first `.latex` of such an
-  expression takes about 180 µs instead of 280 to 360 µs. The output does not
-  change. `toLatex({ prettify: false })` stays the fastest form for a string
-  used as a key; `expr.digest` is the key to use for a cache.
+  (ROADMAP CE-438, Tycho row 444). A second read of `.latex` on the same boxed
+  expression returns the string of the first read while nothing that can change
+  it has changed (a declaration, an assignment, an assumption, the precision or
+  another engine setting, the LaTeX options or dictionary): about 0.3 µs instead
+  of about 200 µs for a 20-node expression. The prettified MathJSON that
+  `.latex` and `toLatex()` use no longer splits a product with no factor that
+  can go to a denominator into a numerator and a denominator, which built and
+  canonicalized new expressions: a first `.latex` of such an expression takes
+  about 180 µs instead of 280 to 360 µs. The output does not change.
+  `toLatex({ prettify: false })` stays the fastest form for a string used as a
+  key; `expr.digest` is the key to use for a cache.
 
 - **The sum of a compiled `Map` is computed on doubles** (ROADMAP CE-432). At
   machine precision, `Sum(Map(f, xs))` whose element function the
-  auto-compilation compiles now adds the doubles of the elements, with the
-  rules of the element-by-element sum, instead of boxing each element:
-  `sum(map(x => N(sin(x) + x^2), 1..100000))` takes about 45 ms instead of
-  about 190 ms, with the same value. The asynchronous route takes the same
-  path in steps that give the event loop a turn. A `Map` over a set, an impure
-  `Map`, and any element that the interpreter must compute keep the
-  element-by-element sum.
+  auto-compilation compiles now adds the doubles of the elements, with the rules
+  of the element-by-element sum, instead of boxing each element:
+  `sum(map(x => N(sin(x) + x^2), 1..100000))` takes about 45 ms instead of about
+  190 ms, with the same value. The asynchronous route takes the same path in
+  steps that give the event loop a turn. A `Map` over a set, an impure `Map`,
+  and any element that the interpreter must compute keep the element-by-element
+  sum.
 
 - **`FindFit.evaluateAsync()` no longer blocks the calling thread for long**
-  (ROADMAP CE-429). One grid point of the separable scan and the setup (the
-  data rows, the compilation of the model and of its derivatives) now give
-  the event loop a turn, about every 8 ms, and an abort during the setup
-  stops it. For an interpreted model over 200 rows, the longest block went
-  from about 110 ms to 12 ms; the results do not change.
+  (ROADMAP CE-429). One grid point of the separable scan and the setup (the data
+  rows, the compilation of the model and of its derivatives) now give the event
+  loop a turn, about every 8 ms, and an abort during the setup stops it. For an
+  interpreted model over 200 rows, the longest block went from about 110 ms to
+  12 ms; the results do not change.
 
-- **A product of decimal values no longer keeps every digit** (ROADMAP
-  CE-319.4 and CE-319.5). The product of two decimal values is rounded to
-  twice the working precision plus 20 digits when it has more. It kept every
-  digit of the exact product, so a value multiplied by itself at each step of
-  a loop doubled its digits at each step: at precision 50,
-  `FixedPoint(x ↦ 2.8·x·(1 − x), 0.2)` did not finish in 2 minutes, and now
-  takes about 40 ms. `.N()` of a product of 64,000 factors went from 43 s to
-  0.9 s. The digits past the working precision are kept as guard digits, so
-  the printed values do not change.
+- **A product of decimal values no longer keeps every digit** (ROADMAP CE-319.4
+  and CE-319.5). The product of two decimal values is rounded to twice the
+  working precision plus 20 digits when it has more. It kept every digit of the
+  exact product, so a value multiplied by itself at each step of a loop doubled
+  its digits at each step: at precision 50, `FixedPoint(x ↦ 2.8·x·(1 − x), 0.2)`
+  did not finish in 2 minutes, and now takes about 40 ms. `.N()` of a product of
+  64,000 factors went from 43 s to 0.9 s. The digits past the working precision
+  are kept as guard digits, so the printed values do not change.
 
-- **A product of many distinct factors takes a time proportional to its
-  size** (ROADMAP CE-319.3). A product looked for each new factor among all
-  the factors it already held, and `.N()` also built a new product for each
-  factor. A product of 2,000 distinct symbols took 18 ms on `evaluate()` and
-  8.6 s on `.N()`; it now takes 12 ms and 7 ms, and 64,000 symbols take
-  about 250 ms on both routes. This also fixes the float coefficient of such
-  a product under `.N()`: the coefficients were multiplied from the right,
-  so `10⁻²⁰⁰·10⁻¹²³·10²⁰⁰·x` went through a subnormal value and gave
-  `9.88·10⁻¹²⁴·x`, and some orders of large and small factors gave a
-  coefficient of `0`. It is now `10⁻¹²³·x`.
+- **A product of many distinct factors takes a time proportional to its size**
+  (ROADMAP CE-319.3). A product looked for each new factor among all the factors
+  it already held, and `.N()` also built a new product for each factor. A
+  product of 2,000 distinct symbols took 18 ms on `evaluate()` and 8.6 s on
+  `.N()`; it now takes 12 ms and 7 ms, and 64,000 symbols take about 250 ms on
+  both routes. This also fixes the float coefficient of such a product under
+  `.N()`: the coefficients were multiplied from the right, so
+  `10⁻²⁰⁰·10⁻¹²³·10²⁰⁰·x` went through a subnormal value and gave
+  `9.88·10⁻¹²⁴·x`, and some orders of large and small factors gave a coefficient
+  of `0`. It is now `10⁻¹²³·x`.
 
-- **Compiling an expression with shared subexpressions and constant folding
-  on takes a time proportional to its distinct parts** (ROADMAP CE-319.1).
-  Before it folds a constant, the compiler checks the whole expression for a
-  name bound by the compilation, a `Sum` or `Product` with a non-finite
-  bound, and a free symbol reached through an assigned value. Each check
-  visited a shared subexpression once for each place it appears, so
-  `e = e + e` repeated 24 times over `2 + √3` took 3.9 s to compile. Each
-  check now visits a subexpression once: the same expression compiles in
-  about 110 ms, and at 60 levels in about 200 ms. The compiled code does not
-  change.
+- **Compiling an expression with shared subexpressions and constant folding on
+  takes a time proportional to its distinct parts** (ROADMAP CE-319.1). Before
+  it folds a constant, the compiler checks the whole expression for a name bound
+  by the compilation, a `Sum` or `Product` with a non-finite bound, and a free
+  symbol reached through an assigned value. Each check visited a shared
+  subexpression once for each place it appears, so `e = e + e` repeated 24 times
+  over `2 + √3` took 3.9 s to compile. Each check now visits a subexpression
+  once: the same expression compiles in about 110 ms, and at 60 levels in about
+  200 ms. The compiled code does not change.
 
-- **A more deeply nested expression compiles** (ROADMAP CE-320.2). The
-  compiler is recursive, and each level of a nested expression uses stack.
-  A chain of `Sin` and `Cos` compiled up to a depth of about 280, and a
-  polynomial in Horner form, `a₀ + x(a₁ + x(a₂ + …))`, up to a degree of
-  about 120; past that, `compile()` answered `success: false` and the call
-  ran in the interpreter. Each level now uses less stack, and the two limits
-  are about 420 and 205. The compiled code does not change.
+- **A more deeply nested expression compiles** (ROADMAP CE-320.2). The compiler
+  is recursive, and each level of a nested expression uses stack. A chain of
+  `Sin` and `Cos` compiled up to a depth of about 280, and a polynomial in
+  Horner form, `a₀ + x(a₁ + x(a₂ + …))`, up to a degree of about 120; past that,
+  `compile()` answered `success: false` and the call ran in the interpreter.
+  Each level now uses less stack, and the two limits are about 420 and 205. The
+  compiled code does not change.
 
 ## 0.166.0 _2026-10-24_
 
@@ -189,25 +591,25 @@
 
 - **A parsed comparison chain is no longer a nested tree** (ROADMAP CE-411,
   Tycho row 433). The LaTeX and Epsil parsers wrote `a < b \le c` as
-  `LessEqual(Less(a, b), c)`, and `a = b = c` as `Equal(a, Equal(b, c))`. A
-  run of one operator is now one n-ary node, `Equal(a, b, c)`, and a run of
-  mixed operators is an `And` of links that share their boundary term:
-  `a < b \le c` is `And(Less(a, b), LessEqual(b, c))`, in the raw form too.
-  MathJSON input that nests a comparison inside another comparison, such as
-  `["Less", "a", ["Less", "b", "c"]]`, now means a comparison of the inner
-  truth value, not a chain. The serializers put parentheses around a
-  comparison inside a comparison.
+  `LessEqual(Less(a, b), c)`, and `a = b = c` as `Equal(a, Equal(b, c))`. A run
+  of one operator is now one n-ary node, `Equal(a, b, c)`, and a run of mixed
+  operators is an `And` of links that share their boundary term: `a < b \le c`
+  is `And(Less(a, b), LessEqual(b, c))`, in the raw form too. MathJSON input
+  that nests a comparison inside another comparison, such as
+  `["Less", "a", ["Less", "b", "c"]]`, now means a comparison of the inner truth
+  value, not a chain. The serializers put parentheses around a comparison inside
+  a comparison.
 
 ### Behavior Changes
 
-- **A declared type of a batch input is trusted** (ROADMAP CE-410, user
-  decision 2026-10-24). In the batch body, a read `At(F, i)` whose index type
-  proves an integer of at least 1 (for example `i + 1` with `i` declared
-  `integer<0..>`) is a direct read with no run-time test; a read past the end
-  still gives `NaN`. When an input breaks its declared type (a fractional `i`
-  for `integer`, a string in a list declared `list<number>`), the result is
-  not defined. A plain array that passed the check once is not checked again
-  while its length is unchanged.
+- **A declared type of a batch input is trusted** (ROADMAP CE-410, user decision
+  2026-10-24). In the batch body, a read `At(F, i)` whose index type proves an
+  integer of at least 1 (for example `i + 1` with `i` declared `integer<0..>`)
+  is a direct read with no run-time test; a read past the end still gives `NaN`.
+  When an input breaks its declared type (a fractional `i` for `integer`, a
+  string in a list declared `list<number>`), the result is not defined. A plain
+  array that passed the check once is not checked again while its length is
+  unchanged.
 
 - **A list at an untyped parameter beside a point parameter maps** (ROADMAP
   CE-414.2, user decision 2026-10-24). A parameter with no type (`unknown`,
@@ -217,111 +619,109 @@
   `f := (P, t) ↦ (P.x + t, P.y)` declared
   `(tuple<number, number>, unknown) -> unknown`, `f((1, 2), [0, 1, 2])` is
   `[(1, 2), (2, 2), (3, 2)]`, typed `list<tuple<number, number>>`; it was
-  `([1, 2, 3], 2)`. With `(P, L) ↦ Length(L)`, `L` is refined to
-  `collection` and the list is still taken whole. Compiled JavaScript gives
-  the same values.
+  `([1, 2, 3], 2)`. With `(P, L) ↦ Length(L)`, `L` is refined to `collection`
+  and the list is still taken whole. Compiled JavaScript gives the same values.
 
-- **An absent point at a `broadcastable<tuple<…>>` parameter gives
-  `Missing`** (ROADMAP CE-420, user decision 2026-10-24), as at a
-  `tuple<…>` parameter. With `f := (a, b) ↦ (a.x + b.x, a.y + b.y)`,
-  `f([(1, 2), (3, 4)], [(10, 20), Missing])` is `[(11, 22), Missing]` for
-  every mix of the two declarations; with `broadcastable<…>` parameters the
-  second element was an `incompatible-type` error. A list of only absent
-  points, `[Missing, Missing]`, now gives `[Missing, Missing]` for every
-  declaration; at a `tuple<…>` parameter the call was an `incompatible-type`
-  error. A list of points that is absent as a whole (`P: list<tuple<…>> |
-  missing` holding `Missing`) now gives `Missing` at a
-  `broadcastable<tuple<…>>` parameter too, and the call's type has the
-  `missing` option; it was an `incompatible-type` error. Compiled JavaScript
-  gives `undefined` for an absent point, and for an absent list, at a
-  `broadcastable<tuple<…>>` parameter; it declined.
+- **An absent point at a `broadcastable<tuple<…>>` parameter gives `Missing`**
+  (ROADMAP CE-420, user decision 2026-10-24), as at a `tuple<…>` parameter. With
+  `f := (a, b) ↦ (a.x + b.x, a.y + b.y)`,
+  `f([(1, 2), (3, 4)], [(10, 20), Missing])` is `[(11, 22), Missing]` for every
+  mix of the two declarations; with `broadcastable<…>` parameters the second
+  element was an `incompatible-type` error. A list of only absent points,
+  `[Missing, Missing]`, now gives `[Missing, Missing]` for every declaration; at
+  a `tuple<…>` parameter the call was an `incompatible-type` error. A list of
+  points that is absent as a whole (`P: list<tuple<…>> | missing` holding
+  `Missing`) now gives `Missing` at a `broadcastable<tuple<…>>` parameter too,
+  and the call's type has the `missing` option; it was an `incompatible-type`
+  error. Compiled JavaScript gives `undefined` for an absent point, and for an
+  absent list, at a `broadcastable<tuple<…>>` parameter; it declined.
 
 - **A time limit applies to an asynchronous evaluation** (ROADMAP CE-424,
-  Tycho's CE-314 feedback). `ce.withTimeLimit(20, () => { p =
-  expr.evaluateAsync(); })` had no effect: the limit was removed when the
-  callback returned, before the evaluation went on after its first `await`.
-  A `FindFit` global search ran to its end (270 ms). The evaluation now keeps
-  the limit (and a `withStepBudget` budget) that is in force when
-  `evaluateAsync()` is called, until it ends. A timeout is reported as by
-  `evaluate()`: the `FindFit` search answers its best point so far with
-  `timedOut: True` after 21 ms, and the time left is given to the workers of
-  a kernel pool.
+  Tycho's CE-314 feedback).
+  `ce.withTimeLimit(20, () => { p = expr.evaluateAsync(); })` had no effect: the
+  limit was removed when the callback returned, before the evaluation went on
+  after its first `await`. A `FindFit` global search ran to its end (270 ms).
+  The evaluation now keeps the limit (and a `withStepBudget` budget) that is in
+  force when `evaluateAsync()` is called, until it ends. A timeout is reported
+  as by `evaluate()`: the `FindFit` search answers its best point so far with
+  `timedOut: True` after 21 ms, and the time left is given to the workers of a
+  kernel pool.
 
-- **`broadcastAsync()` evaluates no cell before it returns** (ROADMAP
-  CE-425.2, Tycho's CE-314 feedback). A batch that stays on the calling
-  thread (no pool, a result that cannot run on a worker, or fewer cells than
-  the inline threshold) ran its first slice, up to 16 384 cells, before the
-  call returned. The batch now yields to the event loop (a macrotask turn)
-  before its first slice, as it already did between two slices. A signal
-  aborted right after the call now stops the batch before its first cell.
+- **`broadcastAsync()` evaluates no cell before it returns** (ROADMAP CE-425.2,
+  Tycho's CE-314 feedback). A batch that stays on the calling thread (no pool, a
+  result that cannot run on a worker, or fewer cells than the inline threshold)
+  ran its first slice, up to 16 384 cells, before the call returned. The batch
+  now yields to the event loop (a macrotask turn) before its first slice, as it
+  already did between two slices. A signal aborted right after the call now
+  stops the batch before its first cell.
 
 ### New Features
 
-- **The record of `FindFit.evaluateAsync()` says where the search ran**
-  (ROADMAP CE-428, Tycho's CE-314 feedback). The record of the asynchronous
-  route of `FindFit` and `FindRoot` has a `route` entry: `"pool"` when the
-  workers of the engine's kernel pool solved the grid points, or
-  `"calling-thread"`. With `"calling-thread"`, a `reason` entry says why the
-  pool did not take the search: `"no-pool"`, `"no-global-search"`,
-  `"not-separable"`, `"not-compilable"`, `"pool-declined"` (the pool
-  rejected every slice), `"no-points-to-ship"` or `"setup-timeout"`. The
-  record of `evaluate()` has neither entry.
+- **The record of `FindFit.evaluateAsync()` says where the search ran** (ROADMAP
+  CE-428, Tycho's CE-314 feedback). The record of the asynchronous route of
+  `FindFit` and `FindRoot` has a `route` entry: `"pool"` when the workers of the
+  engine's kernel pool solved the grid points, or `"calling-thread"`. With
+  `"calling-thread"`, a `reason` entry says why the pool did not take the
+  search: `"no-pool"`, `"no-global-search"`, `"not-separable"`,
+  `"not-compilable"`, `"pool-declined"` (the pool rejected every slice),
+  `"no-points-to-ship"` or `"setup-timeout"`. The record of `evaluate()` has
+  neither entry.
 
-- **`broadcastAsync({ …, inline: false })` refuses the calling thread**
-  (ROADMAP CE-426). When the batch would not go to the worker pool, the call
-  resolves at once with `done: 0` and evaluates no cell; when a worker fails
-  during the batch, the call keeps the cells that the workers did and does
-  not complete the rest on the calling thread. `result.willUsePool(cells)`
-  of a compiled result says before the call whether a batch of that many
-  cells would go to the pool now.
+- **`broadcastAsync({ …, inline: false })` refuses the calling thread** (ROADMAP
+  CE-426). When the batch would not go to the worker pool, the call resolves at
+  once with `done: 0` and evaluates no cell; when a worker fails during the
+  batch, the call keeps the cells that the workers did and does not complete the
+  rest on the calling thread. `result.willUsePool(cells)` of a compiled result
+  says before the call whether a batch of that many cells would go to the pool
+  now.
 
 - **`result.shippable` says whether a compiled result can run on a worker**
   (ROADMAP CE-427). It is `false` when the compiled code draws random numbers
-  from the engine, names a host global (a `vars` or `functions` entry given
-  by name), or has a caller `preamble`; such a result always runs on the
-  calling thread. It is present where `broadcastAsync` is.
+  from the engine, names a host global (a `vars` or `functions` entry given by
+  name), or has a caller `preamble`; such a result always runs on the calling
+  thread. It is present where `broadcastAsync` is.
 
 - **The result of `broadcastAsync()` says where the batch ran** (ROADMAP
-  CE-428). `route` is `'pool'` or `'calling-thread'`, and `reason`, present
-  when the pool did not take the whole batch, is one of `'no-pool'`,
+  CE-428). `route` is `'pool'` or `'calling-thread'`, and `reason`, present when
+  the pool did not take the whole batch, is one of `'no-pool'`,
   `'pool-unusable'`, `'not-shippable'`, `'below-threshold'` and
-  `'pool-declined'`. The types `BroadcastAsyncRoute` and
-  `BroadcastAsyncReason` are exported.
-  `route` is a required field of `BroadcastAsyncResult`: code that builds
-  such an object itself (a mock, for example) must set it.
+  `'pool-declined'`. The types `BroadcastAsyncRoute` and `BroadcastAsyncReason`
+  are exported. `route` is a required field of `BroadcastAsyncResult`: code that
+  builds such an object itself (a mock, for example) must set it.
 
 ### Bug Fixes
 
 - **`FindFit.evaluateAsync()` lets timers run during a search on the calling
-  thread** (ROADMAP CE-425.1, Tycho's CE-314 feedback). With no kernel pool,
-  or when the pool does not take the search (a model that does not compile,
-  a search that is not separable, no `global` option), the whole search ran
-  in one piece: a 5-point fit of `a cos(b x + c) + d LogGamma(x + c)` blocked
-  the thread for more than 4 s, so a page did not respond and an
-  `AbortSignal` aborted by a timer was not seen until the end. The search now
-  gives the event loop a turn about every 8 ms (between grid points, solver
-  starts, solver iterations and groups of 8 data rows); the longest block of
-  that fit is now about 25 ms. The results do not change; a short fit is up
-  to about 5 % slower, near the noise of the measurement.
+  thread** (ROADMAP CE-425.1, Tycho's CE-314 feedback). With no kernel pool, or
+  when the pool does not take the search (a model that does not compile, a
+  search that is not separable, no `global` option), the whole search ran in one
+  piece: a 5-point fit of `a cos(b x + c) + d LogGamma(x + c)` blocked the
+  thread for more than 4 s, so a page did not respond and an `AbortSignal`
+  aborted by a timer was not seen until the end. The search now gives the event
+  loop a turn about every 8 ms (between grid points, solver starts, solver
+  iterations and groups of 8 data rows); the longest block of that fit is now
+  about 25 ms. The results do not change; a short fit is up to about 5 % slower,
+  near the noise of the measurement.
 
 - **`Equal` and `NotEqual` of two relations compare their truth values**
-  (ROADMAP CE-411, Tycho row 433). `["Equal", ["LessEqual", "a", 0],
-  ["LessEqual", "b", 0]]` was boxed as the chain `a ≤ 0 = b ≤ 0`, and the
-  LaTeX `(a\le0)=(b\le0)` evaluated as that chain after a substitution: both
-  gave `False` for `a = b = 1`. Both now give `True` when the two conditions
-  are both true or both false.
+  (ROADMAP CE-411, Tycho row 433).
+  `["Equal", ["LessEqual", "a", 0], ["LessEqual", "b", 0]]` was boxed as the
+  chain `a ≤ 0 = b ≤ 0`, and the LaTeX `(a\le0)=(b\le0)` evaluated as that chain
+  after a substitution: both gave `False` for `a = b = 1`. Both now give `True`
+  when the two conditions are both true or both false.
 
 - **A negated relation in a comparison chain negates only its own link**
-  (ROADMAP CE-411). `a < b \not\le c` is `And(Less(a, b), Not(LessEqual(b, c)))`;
-  it was `Not(And(Less(a, b), LessEqual(b, c)))`. The LaTeX commands
-  `\nleq`, `\nleqslant`, `\ngeq`, `\ngeqslant`, `\not\lt` and `\not\gt` are
-  now parsed; they gave an `unexpected-command` error.
+  (ROADMAP CE-411). `a < b \not\le c` is
+  `And(Less(a, b), Not(LessEqual(b, c)))`; it was
+  `Not(And(Less(a, b), LessEqual(b, c)))`. The LaTeX commands `\nleq`,
+  `\nleqslant`, `\ngeq`, `\ngeqslant`, `\not\lt` and `\not\gt` are now parsed;
+  they gave an `unexpected-command` error.
 
-- **A call of a function with a `broadcastable<tuple<…>>` parameter over a
-  list of points compiles** (ROADMAP CE-412, Tycho row 437). With
+- **A call of a function with a `broadcastable<tuple<…>>` parameter over a list
+  of points compiles** (ROADMAP CE-412, Tycho row 437). With
   `f := a ↦ (a.x + 1, a.y + 1)` and `P` a list of points, or a point or a list
-  of points, `compile(f(P))` declined. It now compiles to one call per point,
-  as a bare `tuple<…>` parameter does, and gives the interpreter's values.
+  of points, `compile(f(P))` declined. It now compiles to one call per point, as
+  a bare `tuple<…>` parameter does, and gives the interpreter's values.
 
 - **A bare `tuple<…>` parameter maps a list of points of unknown length**
   (ROADMAP CE-413, Tycho row 438). With `n` unbound, a call over
@@ -332,41 +732,40 @@
 - **A list in a scalar slot beside a point parameter maps** (ROADMAP CE-414,
   Tycho row 439). With `h := (P, t) ↦ P.x + t` and `t` declared `real`,
   `h((1, 2), [0, 1, 2])` was an `incompatible-type` error. It is now
-  `[1, 2, 3]`, typed as a list, in the interpreter and in compiled
-  JavaScript. This applies when the slot's type cannot hold a list (`real`,
-  `number`, `boolean`, `string`); for a slot typed `unknown`, see Behavior
-  Changes.
+  `[1, 2, 3]`, typed as a list, in the interpreter and in compiled JavaScript.
+  This applies when the slot's type cannot hold a list (`real`, `number`,
+  `boolean`, `string`); for a slot typed `unknown`, see Behavior Changes.
 
 - **A compiled call with an argument declared `broadcastable<tuple<…>>` that
   holds one point compiles** (ROADMAP CE-415). It declined; it now gives the
   interpreter's value.
 
-- **Printing a function whose parameter is `_1` no longer defines `_`**
-  (ROADMAP CE-416). `toString()` renamed the parameter with a substitution
-  that created the symbol `_` in the engine's scope, so a later lazy `Map`
-  printed `Error(incompatible-type …)` in place of a call.
+- **Printing a function whose parameter is `_1` no longer defines `_`** (ROADMAP
+  CE-416). `toString()` renamed the parameter with a substitution that created
+  the symbol `_` in the engine's scope, so a later lazy `Map` printed
+  `Error(incompatible-type …)` in place of a call.
 
 - **`broadcastAsync` reads an input that shares memory with `out` as it was
-  given.** When an input array was a view of the output buffer, each slice
-  read it after earlier slices had written their results there: with
+  given.** When an input array was a view of the output buffer, each slice read
+  it after earlier slices had written their results there: with
   `Tuple(x + 1, 10x)`, `x = [1, 2, 3, 4]` in the first half of `out` and
-  `chunk: 1`, the result was `[2, 10, 11, 100, 12, 110, 101, 1000]` instead
-  of `[2, 10, 3, 20, 4, 30, 5, 40]`. `broadcast` was correct. Such inputs are
-  now copied once before the first slice.
+  `chunk: 1`, the result was `[2, 10, 11, 100, 12, 110, 101, 1000]` instead of
+  `[2, 10, 3, 20, 4, 30, 5, 40]`. `broadcast` was correct. Such inputs are now
+  copied once before the first slice.
 
 ### Performance
 
-- **A `broadcast` kernel runs up to 15 times faster** (ROADMAP CE-410, Tycho
-  row 432). For a kernel that reads two values of a shared `list<number>` and
+- **A `broadcast` kernel runs up to 15 times faster** (ROADMAP CE-410, Tycho row
+  432). For a kernel that reads two values of a shared `list<number>` and
   returns a tuple, 250 000 cells take about 0.55 ms instead of 8.3 ms when the
   index is declared `integer<0..>`, and about 0.95 ms when it is declared
-  `integer`. A kernel that reads a shared list gets a second compiled body
-  for batches: the list is checked once per batch (a `Float64Array`, or a
-  plain array of numbers) and then read directly, and the inputs are passed
-  as arguments. A shared `Float64Array` is read in place; it was copied into
-  a plain array on every batch. The cell loop is generated for each compiled
-  body, `And`/`Or` of plain comparisons compile to a conditional, and the
-  per-cell call is direct.
+  `integer`. A kernel that reads a shared list gets a second compiled body for
+  batches: the list is checked once per batch (a `Float64Array`, or a plain
+  array of numbers) and then read directly, and the inputs are passed as
+  arguments. A shared `Float64Array` is read in place; it was copied into a
+  plain array on every batch. The cell loop is generated for each compiled body,
+  `And`/`Or` of plain comparisons compile to a conditional, and the per-cell
+  call is direct.
 
 ## 0.165.0 _2026-10-24_
 
@@ -374,16 +773,16 @@
 
 - **The `IntervalValue` type includes the answer strings of a comparison**
   (ROADMAP CE-210, Tycho row 411). A compiled `interval-js` runner returns
-  `'true'`, `'false'` or `'maybe'` for a boolean expression, but the public
-  type `IntervalValue` was `IntervalResult | Interval | IntervalValue[]`. It
-  is now `IntervalResult | BoolInterval | Interval | IntervalValue[]`. Code
-  that narrows an `IntervalValue` with a check on `kind` must first test for
-  a string.
+  `'true'`, `'false'` or `'maybe'` for a boolean expression, but the public type
+  `IntervalValue` was `IntervalResult | Interval | IntervalValue[]`. It is now
+  `IntervalResult | BoolInterval | Interval | IntervalValue[]`. Code that
+  narrows an `IntervalValue` with a check on `kind` must first test for a
+  string.
 
 ### Behavior Changes
 
-- **Compiled JavaScript keeps an absent value whose type is not known
-  through a point accessor and arithmetic** (ROADMAP CE-229). With
+- **Compiled JavaScript keeps an absent value whose type is not known through a
+  point accessor and arithmetic** (ROADMAP CE-229). With
   `W = (p, s) ↦ (s·PointX(p), s·PointY(p), s·PointZ(p))` and `L` a list of two
   points, the interpreter gives `(Missing, Missing, Missing)` for `W(L[5], 2)`,
   and compiled JavaScript gave `[NaN, NaN, NaN]`. The interpreter answers the
@@ -393,122 +792,119 @@
   compiled spelling of `Missing`) for an absent point, and an element-wise
   `Add`, `Multiply` (and the other arithmetic) whose type is not provably a
   number keeps an `undefined` operand of type `any` or `unknown`. `W(L[5], 2)`
-  compiles to `[undefined, undefined, undefined]`. Beside an operand that is
-  a list at run time the absence lands in each cell, as in the interpreter:
+  compiles to `[undefined, undefined, undefined]`. Beside an operand that is a
+  list at run time the absence lands in each cell, as in the interpreter:
   `[1, 2] + PointX(p)` with `p` absent is `[NaN, NaN]`. A numeric operation,
   such as `2·x` with `x` absent, is still `NaN`.
 
-- **A parameter declared `broadcastable<T>` maps to the cells when `T`
-  cannot hold a list** (ROADMAP CE-405, Tycho row 434; user decision
-  2026-10-24). With `f: (broadcastable<number>) -> number` and
-  `f := x ↦ x + 1`, `f([[1, 2], [3, 4]])` is `[[2, 3], [4, 5]]`, typed
-  `matrix<2x2>`. It was a list of two `incompatible-type` errors, one for each
-  row, while the call was typed `matrix<2x2>`: the declared parameter mapped
-  exactly one level down and checked each row against `number`. Since 0.162.0
-  `broadcastable<T>` is `T | tensor<T>`, and an undeclared function and the
-  compiled targets already map to the cells. This applies when `T` is a
-  number, a boolean, a string or a tuple; a tuple is not mapped into, so a
-  list of points maps one point per call. A parameter declared
-  `broadcastable<value>` keeps the one-level rule, and so does a call that
-  maps such a parameter. An element that is neither a `T` nor a collection is
-  an `incompatible-type` error that names `broadcastable<T>`. Such a function
-  now compiles to JavaScript through the element-wise call, with each cell
-  checked against `T`, where it declined. A call that maps a
-  `broadcastable<value>` parameter is typed with one list level around the
-  result (`list<value>`; it was typed from the whole shape of the argument).
+- **A parameter declared `broadcastable<T>` maps to the cells when `T` cannot
+  hold a list** (ROADMAP CE-405, Tycho row 434; user decision 2026-10-24). With
+  `f: (broadcastable<number>) -> number` and `f := x ↦ x + 1`,
+  `f([[1, 2], [3, 4]])` is `[[2, 3], [4, 5]]`, typed `matrix<2x2>`. It was a
+  list of two `incompatible-type` errors, one for each row, while the call was
+  typed `matrix<2x2>`: the declared parameter mapped exactly one level down and
+  checked each row against `number`. Since 0.162.0 `broadcastable<T>` is
+  `T | tensor<T>`, and an undeclared function and the compiled targets already
+  map to the cells. This applies when `T` is a number, a boolean, a string or a
+  tuple; a tuple is not mapped into, so a list of points maps one point per
+  call. A parameter declared `broadcastable<value>` keeps the one-level rule,
+  and so does a call that maps such a parameter. An element that is neither a
+  `T` nor a collection is an `incompatible-type` error that names
+  `broadcastable<T>`. Such a function now compiles to JavaScript through the
+  element-wise call, with each cell checked against `T`, where it declined. A
+  call that maps a `broadcastable<value>` parameter is typed with one list level
+  around the result (`list<value>`; it was typed from the whole shape of the
+  argument).
 
 - **Every result of the MCP server says which engine computed it** (ROADMAP
   CE-406). A server loads the engine when it starts and keeps it, so after an
   upgrade a running server answered with the old engine, and nothing in its
-  results showed it. A JSON result now has `engineVersion`, and an error
-  message ends with a line `Engine version: …`. When the package installed on
-  disk has another version, the result also has an `engineWarning` (or a line
-  in an error message) that says to restart the server.
+  results showed it. A JSON result now has `engineVersion`, and an error message
+  ends with a line `Engine version: …`. When the package installed on disk has
+  another version, the result also has an `engineWarning` (or a line in an error
+  message) that says to restart the server.
 
-- **The `interval-js` fallback answers a comparison, and does not read a
-  wide input as its midpoint** (ROADMAP CE-210). When the target cannot
-  compile an expression (`Greater(Fibonacci(x), 0)`: `Fibonacci` has no
-  interval lowering), the result runs the interpreter at the midpoint of each
-  interval input. A boolean value was `{ kind: 'entire' }`; it is now the
-  answer string, `'true'` or `'false'`, as compiled code gives it. When an
-  input is wider than a point, the value at its midpoint does not bound the
-  values over it, and was returned as if it did: `Fibonacci(x)` over
-  `[1, 10]` was `{ kind: 'empty' }` (no value at 5.5), although it takes the
-  values 1 to 55 there. Over such an input a boolean expression is now
-  `'maybe'` and a number is `{ kind: 'entire' }`. At a point the answers are
-  exact, as before.
+- **The `interval-js` fallback answers a comparison, and does not read a wide
+  input as its midpoint** (ROADMAP CE-210). When the target cannot compile an
+  expression (`Greater(Fibonacci(x), 0)`: `Fibonacci` has no interval lowering),
+  the result runs the interpreter at the midpoint of each interval input. A
+  boolean value was `{ kind: 'entire' }`; it is now the answer string, `'true'`
+  or `'false'`, as compiled code gives it. When an input is wider than a point,
+  the value at its midpoint does not bound the values over it, and was returned
+  as if it did: `Fibonacci(x)` over `[1, 10]` was `{ kind: 'empty' }` (no value
+  at 5.5), although it takes the values 1 to 55 there. Over such an input a
+  boolean expression is now `'maybe'` and a number is `{ kind: 'entire' }`. At a
+  point the answers are exact, as before.
 
 - **A declared collection that shares only the empty collection with a
   collection parameter is refused when the expression is boxed** (ROADMAP
   CE-402). With `R: list<list<number>>` or `B: list<boolean>`, `Mean(R)` and
   `Mean(B)` were valid and were refused only when evaluated, while
   `Histogram(R, 2)` was refused when boxed: the empty list is both a
-  `list<list<number>>` and a `collection<number>`. A collection argument is
-  now admitted at a collection parameter only when their element types can
-  match, so `Mean(R)`, `Mean(B)` and `Mean([Missing, "a"])` are refused when
-  they are boxed. A collection whose elements are not known yet (`list`,
-  `list<any>`, `set<unknown>`, `tensor`) is still admitted.
+  `list<list<number>>` and a `collection<number>`. A collection argument is now
+  admitted at a collection parameter only when their element types can match, so
+  `Mean(R)`, `Mean(B)` and `Mean([Missing, "a"])` are refused when they are
+  boxed. A collection whose elements are not known yet (`list`, `list<any>`,
+  `set<unknown>`, `tensor`) is still admitted.
 
 ### Resolved Issues
 
-- **A compiled call with an argument that is one point or a list of points
-  gave a wrong value** (ROADMAP CE-407, Tycho row 435). With
+- **A compiled call with an argument that is one point or a list of points gave
+  a wrong value** (ROADMAP CE-407, Tycho row 435). With
   `f: (tuple<number, number>) -> tuple<number, number>`,
   `f := a ↦ (a.x + 1, a.y + 1)` and
-  `L: tuple<number, number> | list<tuple<number, number>>`, the interpreter
-  maps `f(L)` over the points when `L` holds a list, and gives one point when
-  `L` holds a point. The call was typed `tuple<number, number>`, and compiled
+  `L: tuple<number, number> | list<tuple<number, number>>`, the interpreter maps
+  `f(L)` over the points when `L` holds a list, and gives one point when `L`
+  holds a point. The call was typed `tuple<number, number>`, and compiled
   JavaScript called `f` once on the whole list: for `[(1, 2), (3, 4)]` it gave
   `["1,21", "3,41"]` and reported success. The call is now typed
-  `list<tuple<number, number>> | tuple<number, number>`, and compiled
-  JavaScript tests the value at run time: it maps over a list of points and
-  gives a point whole. The same applies to an argument declared
-  `broadcastable<tuple<number, number>>`, which was typed and compiled as a
-  list of points only, so compiled code read one point as a list; a matrix
-  of points there throws at run time, as the interpreter gives an
-  `incompatible-type` error. An absent argument of such a type
-  (`… | missing`) gives `Missing`, as an absent list of points does; it was an
-  `incompatible-type` error. A union that also admits another collection
-  (`… | list<list<tuple<…>>>`, `… | list`), and a parameter with a
-  coordinate that is not a number, a boolean or a string
-  (`tuple<list<number>, number>`), are now declined by the compiler: a point
-  and a list of points cannot be told apart at run time there.
+  `list<tuple<number, number>> | tuple<number, number>`, and compiled JavaScript
+  tests the value at run time: it maps over a list of points and gives a point
+  whole. The same applies to an argument declared
+  `broadcastable<tuple<number, number>>`, which was typed and compiled as a list
+  of points only, so compiled code read one point as a list; a matrix of points
+  there throws at run time, as the interpreter gives an `incompatible-type`
+  error. An absent argument of such a type (`… | missing`) gives `Missing`, as
+  an absent list of points does; it was an `incompatible-type` error. A union
+  that also admits another collection (`… | list<list<tuple<…>>>`, `… | list`),
+  and a parameter with a coordinate that is not a number, a boolean or a string
+  (`tuple<list<number>, number>`), are now declined by the compiler: a point and
+  a list of points cannot be told apart at run time there.
 
-- **A generic parameter declared `broadcastable<T>` with a number bound
-  refused a matrix** (ROADMAP CE-409). With
+- **A generic parameter declared `broadcastable<T>` with a number bound refused
+  a matrix** (ROADMAP CE-409). With
   `w: (x: broadcastable<T>) -> list<T> where T: number` and `w := x ↦ [x]`,
-  `w([[1, 2], [3, 4]])` was the error `incompatible-type` when boxed, while
-  the same declaration without a type variable, `broadcastable<number>`, maps
-  to the cells (ROADMAP CE-405). The type solver read the matrix one level
-  down and bound `T` to the rows. It now binds `T` to the cells when the bound
-  cannot hold a list, also for a list with rows of different lengths:
+  `w([[1, 2], [3, 4]])` was the error `incompatible-type` when boxed, while the
+  same declaration without a type variable, `broadcastable<number>`, maps to the
+  cells (ROADMAP CE-405). The type solver read the matrix one level down and
+  bound `T` to the rows. It now binds `T` to the cells when the bound cannot
+  hold a list, also for a list with rows of different lengths:
   `w([[1, 2], [3, 4]])` is `[[[1], [2]], [[3], [4]]]`, typed
   `list<list<list<integer>>>`, and compiled code gives the same value. A type
   variable with no bound (`where T`) now maps each row whole, as
   `where T: value` does; each row was an `incompatible-type` error naming `T`.
 
-- **A parameter named `Return` can be called in the body of `Sum`,
-  `Integrate` and the other operators that take an expression** (ROADMAP
-  CE-401). Since 0.164.0 a `Return` statement in such a body is the error
-  `return-in-expression-body`. The check also refused a call of a parameter
-  of the enclosing function literal named `Return`:
+- **A parameter named `Return` can be called in the body of `Sum`, `Integrate`
+  and the other operators that take an expression** (ROADMAP CE-401). Since
+  0.164.0 a `Return` statement in such a body is the error
+  `return-in-expression-body`. The check also refused a call of a parameter of
+  the enclosing function literal named `Return`:
   `["Function", ["Sum", ["Return"], ["Limits", "k", 1, 3]], ["Typed", "Return", "() -> real"]]`
-  was invalid. The call is now allowed, with or without a type on the
-  parameter, and the function applied to `() ↦ 2` gives 6. A `Return` that
-  calls a bare parameter, of the function or of an enclosing function, also
-  no longer adds `nothing` to the result type of the function:
-  `Return ↦ 1 + Return()` is typed
+  was invalid. The call is now allowed, with or without a type on the parameter,
+  and the function applied to `() ↦ 2` gives 6. A `Return` that calls a bare
+  parameter, of the function or of an enclosing function, also no longer adds
+  `nothing` to the result type of the function: `Return ↦ 1 + Return()` is typed
   `(unknown) -> broadcastable<number>`, not
   `(unknown) -> broadcastable<number> | nothing`.
 
-- **The result of a function whose parameter is declared `broadcastable<T>`
-  was typed for a whole collection** (ROADMAP CE-408, Tycho row 436). With
+- **The result of a function whose parameter is declared `broadcastable<T>` was
+  typed for a whole collection** (ROADMAP CE-408, Tycho row 436). With
   `l: (broadcastable<tuple<number, number>>) -> unknown` and
   `l := A ↦ √(A.x² + A.y²)`, the signature was refined to
   `-> broadcastable<number>`, so `l(P)` over a list of points was typed
-  `list<broadcastable<number>>` and `P / l(P)` had a `tensor` arm. Each call
-  of the body receives one `T`, so the result is now typed with the parameter
-  read as `T`: `-> number`, and `l(P)` is `list<number> | number`.
+  `list<broadcastable<number>>` and `P / l(P)` had a `tensor` arm. Each call of
+  the body receives one `T`, so the result is now typed with the parameter read
+  as `T`: `-> number`, and `l(P)` is `list<number> | number`.
 
 - **The LaTeX serialization of `Reduce` and `Fold` keeps the initial value**
   (ROADMAP CE-292). `Reduce([1, 2], Add, 10)` serialized as `\sum` of the list
@@ -517,58 +913,58 @@
   `\sum`/`\prod` shorthand is used only when there is no seed.
 
 - **A symbol declared with the type `error` parses** (ROADMAP CE-294). With
-  `w: error`, `w`, `w+1` and `\int_0^1 w\,dw` gave an `unexpected-symbol`
-  error. They now parse as terms. A symbol of type `never` also parses now.
+  `w: error`, `w`, `w+1` and `\int_0^1 w\,dw` gave an `unexpected-symbol` error.
+  They now parse as terms. A symbol of type `never` also parses now.
 
 - **In lenient mode, `ab√x..5` reports `ambiguous-radical`** (ROADMAP CE-298),
-  as `ab√x` and `5..ab√x` already did. The line-level ambiguity checks now
-  read the tree after the range-precedence repair.
+  as `ab√x` and `5..ab√x` already did. The line-level ambiguity checks now read
+  the tree after the range-precedence repair.
 
-- **`Declare` with a type string that does not parse returns an error**
-  (ROADMAP CE-101). `["Declare", "r", {str: "integer<<"}]` threw when it was
-  evaluated. It now gives `Error("invalid-type-declaration", …)` with the
-  message of the type parser.
+- **`Declare` with a type string that does not parse returns an error** (ROADMAP
+  CE-101). `["Declare", "r", {str: "integer<<"}]` threw when it was evaluated.
+  It now gives `Error("invalid-type-declaration", …)` with the message of the
+  type parser.
 
 - **`Hold` around a `Function` with no body does not throw** (ROADMAP CE-106).
   Reading the type of `Hold(Function())`, or evaluating it, threw from the
-  signature of the function literal. The bodyless function literal is now
-  typed `error`.
+  signature of the function literal. The bodyless function literal is now typed
+  `error`.
 
-- **A `ce.declare()` of a value that is refused leaves no placeholder**
-  (ROADMAP CE-116, issue #394). When the value does not fit its type, a new
-  name stays undeclared and a redeclaration keeps its previous binding, as the
-  operator route already did.
+- **A `ce.declare()` of a value that is refused leaves no placeholder** (ROADMAP
+  CE-116, issue #394). When the value does not fit its type, a new name stays
+  undeclared and a redeclaration keeps its previous binding, as the operator
+  route already did.
 
 - **More boolean identities fold beside an unknown** (ROADMAP CE-119).
   `Nand(True, A)`, `Nor(False, A)`, `Nand(A, A)` and `Nor(A, A)` evaluate to
   `¬A`, `Implies(True, A)` to `A`, `Implies(A, False)` to `¬A`, and
-  `Implies(A, A)` and `Equivalent(A, A)` to `True`. An absent operand gives
-  the same results as before.
+  `Implies(A, A)` and `Equivalent(A, A)` to `True`. An absent operand gives the
+  same results as before.
 
-- **`isEqual()` of a symbol reads the bounds that pin it to a value**
-  (ROADMAP CE-104). With `b ≥ 0` and `b ≤ 0` assumed, `b.isEqual(0)` is
-  `true`; it was `undefined`, and `ce.number(0).isEqual(b)` agrees. The
-  `Equal` operator does not read bounds.
+- **`isEqual()` of a symbol reads the bounds that pin it to a value** (ROADMAP
+  CE-104). With `b ≥ 0` and `b ≤ 0` assumed, `b.isEqual(0)` is `true`; it was
+  `undefined`, and `ce.number(0).isEqual(b)` agrees. The `Equal` operator does
+  not read bounds.
 
-- **`Limit` of a function whose body is `Return(v)`** (ROADMAP CE-400) gives
-  the limit of `v`. It gave a `Return` expression as its value. A `Return`
-  inside a statement block or a branch leaves the limit unevaluated.
+- **`Limit` of a function whose body is `Return(v)`** (ROADMAP CE-400) gives the
+  limit of `v`. It gave a `Return` expression as its value. A `Return` inside a
+  statement block or a branch leaves the limit unevaluated.
 
-- **A divergent improper integral with a symbolic exponent stays
-  unevaluated** (ROADMAP CE-383). `∫₀^∞ xⁿ dx` gave a value under the
-  condition `0 < n ∧ n < 0`, which no `n` satisfies.
+- **A divergent improper integral with a symbolic exponent stays unevaluated**
+  (ROADMAP CE-383). `∫₀^∞ xⁿ dx` gave a value under the condition
+  `0 < n ∧ n < 0`, which no `n` satisfies.
 
 - **The limit at infinity of a ratio of logarithms** (ROADMAP CE-147).
   `ln(3x)/ln(x)` and `ln(3x)/ln(x^π)` give `1` and `1/π`; they stayed
   unevaluated. A ratio that is not an indeterminate form, such as
   `(2 + sin x)/(3 + sin x)`, still has no limit.
 
-- **`Determinant` and `CharacteristicPolynomial` of a matrix with float
-  entries fold their constants** (ROADMAP CE-145). `Determinant([[x + 1.5, 1],
-  [1, 2]])` is `2x + 2`; it was `2x - 1 + 3`.
+- **`Determinant` and `CharacteristicPolynomial` of a matrix with float entries
+  fold their constants** (ROADMAP CE-145). `Determinant([[x + 1.5, 1], [1, 2]])`
+  is `2x + 2`; it was `2x - 1 + 3`.
 
-- **A telescoping sum with an infinite bound and a parameter** (ROADMAP
-  CE-142). `\sum_{k=1}^\infty ((x+k+1)^2-(x+k)^2)` is `+oo`; it was
+- **A telescoping sum with an infinite bound and a parameter** (ROADMAP CE-142).
+  `\sum_{k=1}^\infty ((x+k+1)^2-(x+k)^2)` is `+oo`; it was
   `(x + 1 + oo)^2 - (x + 1)^2`. The product `\prod_{k=1}^\infty (x+k+1)/(x+k)`,
   whose sign depends on `x`, stays unevaluated. A sum whose term at the finite
   bound is a pole stays unevaluated.
@@ -578,19 +974,19 @@
   `Variance(r)`, `Max(r)` and `Min(r)` return at once; they walked every
   element.
 
-- **`Dot` of two empty lists** (ROADMAP CE-220) is `0` for two numeric
-  vectors and `[]` for two lists of points, as the compiled code gives. It
-  stayed unevaluated.
+- **`Dot` of two empty lists** (ROADMAP CE-220) is `0` for two numeric vectors
+  and `[]` for two lists of points, as the compiled code gives. It stayed
+  unevaluated.
 
 - **Compiled `Max`, `Min` and the ordering comparisons decline an operand of
-  type `color`, `regexp` or `object`** (ROADMAP CE-393). The compiled code
-  read such a value as a number, while the interpreter leaves the call
-  unevaluated. With a `fallback`, the interpreter now runs. A custom compile
-  handler of the operator still takes precedence.
+  type `color`, `regexp` or `object`** (ROADMAP CE-393). The compiled code read
+  such a value as a number, while the interpreter leaves the call unevaluated.
+  With a `fallback`, the interpreter now runs. A custom compile handler of the
+  operator still takes precedence.
 
-- **The WGSL `Mod` keeps the sign of the divisor when the quotient
-  underflows** (ROADMAP CE-246). `floor(r / b)` gave `-0` for a tiny remainder
-  of the opposite sign, so the divisor was not added.
+- **The WGSL `Mod` keeps the sign of the divisor when the quotient underflows**
+  (ROADMAP CE-246). `floor(r / b)` gave `-0` for a tiny remainder of the
+  opposite sign, so the divisor was not added.
 
 - **`NLimit` of a function that rises before it decays** (ROADMAP CE-184).
   `NLimit(t ↦ 7t/(t² + 9), ∞)` is about `0` (`−2e-22`); it was `NaN`. The
@@ -611,31 +1007,31 @@
   `signed_infinity` arm that the value cannot take.
 
 - **Epsil: the hint of a type error in an annotation is shown** (ROADMAP
-  CE-307). `let v: vector<integer^(2x3)>` now says to write `matrix<…>` for
-  two dimensions.
+  CE-307). `let v: vector<integer^(2x3)>` now says to write `matrix<…>` for two
+  dimensions.
 
-- **Epsil: an error in the body of a `match` case is underlined on that
-  case** (ROADMAP CE-308), not on the whole statement. The error frame names
-  the case (`in Match argument 3`).
+- **Epsil: an error in the body of a `match` case is underlined on that case**
+  (ROADMAP CE-308), not on the whole statement. The error frame names the case
+  (`in Match argument 3`).
 
 - **Epsil: a loop over a range whose bound is an unassigned local reports the
   error** (ROADMAP CE-309). In a function, `for k in 1..t { t = 2 }` gives
-  `read-before-declaration`, as compiled code does; it ran zero times. A
-  lambda in a pipe stage that assigns a new name,
+  `read-before-declaration`, as compiled code does; it ran zero times. A lambda
+  in a pipe stage that assigns a new name,
   `(1..3) |> map((k) => do { t = k * 2; t })`, no longer needs the `scope`
   effect.
 
 - **Faster type checks and set operations** (ROADMAP CE-315, CE-316).
-  `isSubtype` on a union whose arms are the same type node took exponential
-  time in the nesting depth. Duplicate removal in a set comprehension, in
-  `Intersection` and in `SymmetricDifference` compares an element only with
-  the elements of the same hash: 3,604 comparisons in place of 812,704 for a
+  `isSubtype` on a union whose arms are the same type node took exponential time
+  in the nesting depth. Duplicate removal in a set comprehension, in
+  `Intersection` and in `SymmetricDifference` compares an element only with the
+  elements of the same hash: 3,604 comparisons in place of 812,704 for a
   comprehension over `Range(1, 900)`.
 
-- **The structural hash of a deeply nested expression does not repeat**
-  (ROADMAP CE-318). The hash of a function expression, and of a dictionary,
-  repeated every 32 or 64 levels of nesting, so different deep expressions
-  fell into one hash bucket. Hash values of all function expressions change.
+- **The structural hash of a deeply nested expression does not repeat** (ROADMAP
+  CE-318). The hash of a function expression, and of a dictionary, repeated
+  every 32 or 64 levels of nesting, so different deep expressions fell into one
+  hash bucket. Hash values of all function expressions change.
 
 - **Compiled code: seven more corrections** (ROADMAP CE-224, CE-226, CE-230,
   CE-243, CE-251, CE-262, CE-282).
@@ -644,17 +1040,17 @@
   - A comprehension whose term assigns its own index declines to compile, and
     the interpreter runs it. The compiled code threw "Assignment to constant
     variable".
-  - A branch of `If` or `Which` behind a condition that is constant by its
-    type no longer moves the compiled result to the complex lane:
+  - A branch of `If` or `Which` behind a condition that is constant by its type
+    no longer moves the compiled result to the complex lane:
     `x + Which(1 > 0, y, True, √(y − 1))` compiles to real code.
   - The GLSL and WGSL integer-power helpers of a vector give `+∞`, not `NaN`,
     for a zero component under a negative odd exponent, as the scalar helper
     does.
   - A one-operand `Add`, `Multiply`, `And` or `Or`, and `Power(x, 1)`, from
-    non-canonical input compile with correct grouping on JavaScript and the
-    GPU targets. `3·(x+1)^1` compiled as `3·x + 1`.
-  - Compiled JavaScript `\arg(x − iy)` is `π` at `y = 0` and a negative `x`,
-    as the interpreter gives; it was `−π`.
+    non-canonical input compile with correct grouping on JavaScript and the GPU
+    targets. `3·(x+1)^1` compiled as `3·x + 1`.
+  - Compiled JavaScript `\arg(x − iy)` is `π` at `y = 0` and a negative `x`, as
+    the interpreter gives; it was `−π`.
   - `compileShader` on GLSL and WGSL converts the arguments and results of
     trigonometric functions in degree, grad and turn modes, as `compile` does.
 
@@ -667,63 +1063,62 @@
     the error.
   - An error passed to a function declared with a typed signature carries the
     frame of that call.
-  - `Sum` and `Product` with several `Limits` clauses, where a bound depends
-    on another index, evaluate in either clause order:
+  - `Sum` and `Product` with several `Limits` clauses, where a bound depends on
+    another index, evaluate in either clause order:
     `Sum(k, Limits(k, 1, n), Limits(n, 1, 10))` is `220`.
   - The `.mul()` method no longer stores the current value of a variable in a
     point or a list: with `w := 4`, `2·(w, 2)` keeps `(2w, 4)` and follows a
     later assignment of `w`.
-  - A callback written `InverseFunction(f)` or `Derivative(f, n)` is accepted
-    by the lazy collection operators: `Map(InverseFunction(Sin), xs)`.
+  - A callback written `InverseFunction(f)` or `Derivative(f, n)` is accepted by
+    the lazy collection operators: `Map(InverseFunction(Sin), xs)`.
 
 - **Numeric evaluation: more values and better accuracy** (ROADMAP CE-180,
   CE-185, CE-189, CE-192, CE-197).
-  - `.N()` of a divergent integral next to a singular bound, `∫₀¹ t⁻³⁰⁰ dt`,
-    is `+oo`; it was a `Measurement` of `+oo` with a `NaN` error.
+  - `.N()` of a divergent integral next to a singular bound, `∫₀¹ t⁻³⁰⁰ dt`, is
+    `+oo`; it was a `Measurement` of `+oo` with a `NaN` error.
   - A `Measurement` whose error is below `1e-100` prints in exponential
     notation; it printed the text of a `RangeError`.
   - `Gamma` and `Factorial` at an argument whose value is past the exponent
     range stay unevaluated, and no longer give `0` to internal callers.
-  - `Arcoth`, `Arcosh` and the other inverse functions with a branch point at
-    ±1 read an exact sum next to ±1 (`1 + 10⁻¹⁰`) exactly at machine precision:
-    `Arcoth(1 + 10⁻¹⁰)` is `11.8594990552752`; it was `11.8594990139`, the
-    value at the double.
+  - `Arcoth`, `Arcosh` and the other inverse functions with a branch point at ±1
+    read an exact sum next to ±1 (`1 + 10⁻¹⁰`) exactly at machine precision:
+    `Arcoth(1 + 10⁻¹⁰)` is `11.8594990552752`; it was `11.8594990139`, the value
+    at the double.
   - The complex `Gamma` is about 100 times more accurate for an argument with
     `Re z` above 2 (relative error 1.6e-15 on the real axis, it was 2e-13), so
     `Hypergeometric2F1` with a complex `z` is more accurate too.
-  - `PolyGamma(m, z)` of an order from 100 to 400 close to a half-integer on
-    the real axis has a value: `PolyGamma(120, -1/2 + 10⁻⁵i)`.
-  - `GammaRegularized(n, z)` for an integer `n` up to 200 and a negative `z`
-    has a value under `.N()`.
+  - `PolyGamma(m, z)` of an order from 100 to 400 close to a half-integer on the
+    real axis has a value: `PolyGamma(120, -1/2 + 10⁻⁵i)`.
+  - `GammaRegularized(n, z)` for an integer `n` up to 200 and a negative `z` has
+    a value under `.N()`.
 
 - **More precise static types** (ROADMAP CE-17, CE-44).
   - The meet of a fixed-length list with a plain list of lists is `never` (the
-    empty list for an open length). It was a type such as `list<list^3>`,
-    which the type parser refuses.
+    empty list for an open length). It was a type such as `list<list^3>`, which
+    the type parser refuses.
   - An element-wise comparison over a list that can be absent as a whole,
     `L < 3` with `L: list<integer> | missing`, is typed
     `list<boolean> | missing`; it was `list<boolean | missing>`.
 
 - **Symbolic computation: nine corrections and capabilities** (ROADMAP CE-137,
   CE-138, CE-141, CE-152, CE-154, CE-155, CE-156, CE-157, CE-158).
-  - `Solve` finds the roots of equations with sines and cosines of multiples
-    of the unknown: `sin x + sin 2x = 0`, `cos 2x + cos x = 0`,
-    `sin 2x = cos x`.
-  - `D` and `Integrate` over a parameter of a user function use the argument
-    of the call: with `g(f) := \frac{d}{dx} f`, `g(x^2)` is `2x`; it was `0`.
-    This also holds when a global symbol has the name of the parameter, and
-    for an argument that holds it: with `g(f) := \int f\,dx`, `g(f + x)` is
+  - `Solve` finds the roots of equations with sines and cosines of multiples of
+    the unknown: `sin x + sin 2x = 0`, `cos 2x + cos x = 0`, `sin 2x = cos x`.
+  - `D` and `Integrate` over a parameter of a user function use the argument of
+    the call: with `g(f) := \frac{d}{dx} f`, `g(x^2)` is `2x`; it was `0`. This
+    also holds when a global symbol has the name of the parameter, and for an
+    argument that holds it: with `g(f) := \int f\,dx`, `g(f + x)` is
     `f·x + x²/2`.
   - The definite integral of `sin(x − Round(x))/(x − Round(x))` is no longer
     evaluated through an antiderivative that ignores the jumps of `Round`; it
     gave `0`. `.N()` gives `63.1177…` on `[0, 64]`.
   - A definite integral of `|u|` or `sgn(u)` with a quadratic `u` is split at
     the real roots of `u`: `\int_{-1}^{1} |x^2 - 1/4|\,dx` is `1/2`.
-  - `TrigReduce` reduces each element of a list and each side of an equation
-    (it rewrote them in exponential form), and `TrigReduce(Missing)` stays
+  - `TrigReduce` reduces each element of a list and each side of an equation (it
+    rewrote them in exponential form), and `TrigReduce(Missing)` stays
     `Missing`.
-  - `Sum` and `Product` over `Element(j, Range(1, k))` read the value of `k`,
-    as `Limits` does.
+  - `Sum` and `Product` over `Element(j, Range(1, k))` read the value of `k`, as
+    `Limits` does.
   - `simplify()` rationalizes a quotient by a constant inside a sum or a
     product: `1/(2−√2) − 1/(2+√2)` is `√2`.
   - `simplify()` reads a negative imaginary literal as a negation, so
@@ -734,35 +1129,34 @@
 
 ### Behavior Changes
 
-- **The structural form of `ce.parse()` leaves out a spacing command
-  between the operands of a juxtaposition** (ROADMAP CE-403, Tycho row 431).
+- **The structural form of `ce.parse()` leaves out a spacing command between the
+  operands of a juxtaposition** (ROADMAP CE-403, Tycho row 431).
   `ce.parse("\\,d=2", { form: "structural" })` was
   `["Equal", ["InvisibleOperator", ["HorizontalSpacing", 3], "d"], 2]`, a
   product of a space and `d` on the left side, while `d=\,2` was
   `["Equal", "d", 2]`: the shape depended on where the space was. It is now
-  `["Equal", "d", 2]`, as `d\,=2`, `\quad d=2` and `x\,+\,y` (`["Add", "x",
-  "y"]`) are. The canonical form already left the spacing out. The raw form
-  keeps it, and so does the `structural` property of a raw expression. A
-  space still separates two tokens: `x\,.75e2` is `x` times `75`.
+  `["Equal", "d", 2]`, as `d\,=2`, `\quad d=2` and `x\,+\,y`
+  (`["Add", "x", "y"]`) are. The canonical form already left the spacing out.
+  The raw form keeps it, and so does the `structural` property of a raw
+  expression. A space still separates two tokens: `x\,.75e2` is `x` times `75`.
 
 - **`Mean` and the other statistics refuse a matrix when the expression is
-  boxed** (ROADMAP CE-13). `Mean([[1, 2], [3, 4]])` was a valid expression
-  that failed only when it was evaluated. The data parameter of `Mean`,
-  `Median`, `Mode`, `Variance`, `PopulationVariance`, `StandardDeviation`,
+  boxed** (ROADMAP CE-13). `Mean([[1, 2], [3, 4]])` was a valid expression that
+  failed only when it was evaluated. The data parameter of `Mean`, `Median`,
+  `Mode`, `Variance`, `PopulationVariance`, `StandardDeviation`,
   `PopulationStandardDeviation`, `Kurtosis`, `Skewness`, `Quartiles`,
   `InterquartileRange`, `Histogram`, `BinCounts`, `Covariance`,
   `PopulationCovariance` and `Correlation` is now a collection of numbers,
-  `collection<nothing | number>` (`collection<nothing | number | tuple>` for
-  the first operand of the bivariate statistics, which also take a collection
-  of `(x, y)` pairs), in place of `collection<any>`. A matrix, a symbol
-  declared `matrix`, a ragged list, a collection of booleans, strings or
-  residue classes, and a dictionary are now invalid when they are boxed, with
-  an `incompatible-type` error that names the data parameter. Vectors, sets,
+  `collection<nothing | number>` (`collection<nothing | number | tuple>` for the
+  first operand of the bivariate statistics, which also take a collection of
+  `(x, y)` pairs), in place of `collection<any>`. A matrix, a symbol declared
+  `matrix`, a ragged list, a collection of booleans, strings or residue classes,
+  and a dictionary are now invalid when they are boxed, with an
+  `incompatible-type` error that names the data parameter. Vectors, sets,
   ranges, tuples, data with `Missing` or `Nothing` cells, measurements and
-  symbolic data are accepted as before. The validation now reads the rank of
-  a `collection<T>` parameter whose elements cannot be lists as 1, so any
-  operator with such a parameter refuses an argument of rank 2 or more.
-  Related changes:
+  symbolic data are accepted as before. The validation now reads the rank of a
+  `collection<T>` parameter whose elements cannot be lists as 1, so any operator
+  with such a parameter refuses an argument of rank 2 or more. Related changes:
   - A symbol with no value used as statistics data (`Mean(q)`) is inferred
     `collection<nothing | number> | distribution | number`.
   - In `Histogram(P + 0.5, 1/100)` with `P` of unknown type, `P` is inferred
@@ -774,8 +1168,8 @@
   `NIntegrate`, `Limit` or `NLimit` is an error** (ROADMAP CE-96). These
   operands (the body, a bound, a variable) are expressions, computed once per
   index value or integration point, not statement blocks of the enclosing
-  function, so a `Return` there has no function to end. It stayed in the
-  value: `Sum(1 + Return("q"), (k, 1, 2))` was `2 + 2Return("q")`, and
+  function, so a `Return` there has no function to end. It stayed in the value:
+  `Sum(1 + Return("q"), (k, 1, 2))` was `2 + 2Return("q")`, and
   `D(Return(x^2), x)` was `2x·Apply(Derivative("Return", 1), x^2)`. The
   expression is now invalid, with the error `return-in-expression-body` naming
   the operator. A `Return` inside a function literal in the body ends that
@@ -785,8 +1179,8 @@
   `x: real` and no value, `x/0` was canonicalized to `ComplexInfinity`, so
   `\{x/0 > 0: 1, 0\}` compiled to `(0 < Infinity) ? 1 : 0` and gave 1 at every
   `x`, including `x = 0`, where the value is `0/0`. A quotient by the number 0
-  now folds to `ComplexInfinity` only when the numerator is provably not zero:
-  a number other than 0 (`5/0`, `π/0`, `i/0`), or an expression whose sign is
+  now folds to `ComplexInfinity` only when the numerator is provably not zero: a
+  number other than 0 (`5/0`, `π/0`, `i/0`), or an expression whose sign is
   known from its type and the assumptions (`(x^2+1)/0`, `e^x/0`). Otherwise the
   quotient stays `x/0` through `evaluate()`, `.N()` and `simplify()`, and the
   value decides: `Indeterminate` at `x = 0`, `ComplexInfinity` elsewhere. A
@@ -795,26 +1189,26 @@
   now gives 0 at `x = 0`. A limit does not take such a quotient as its value:
   `lim_{x→a⁺} x/(x−a)` with no assumption on `a` stays unevaluated.
 
-- **A vector plus a matrix adds the vector to the rows** (ROADMAP CE-399). A
-  sum of tensors whose shapes nest (the shape of each one is the start of the
-  shape of the deepest) adds element `i` of the vector to row `i` of the
-  matrix: `[1, 2] + [[1, 2, 3], [4, 5, 6]]` is `[[2, 3, 4], [6, 7, 8]]`, typed
-  `matrix<integer^(2x3)>`. It was `Error("incompatible-dimensions", "2 vs
-  2x3")` for two list literals, while the same sum of symbols that held these
-  values gave the matrix, as compiled JavaScript and `Less` did. The value is
-  now the same on every route; a compiled `Sum` over a list that holds a
-  matrix and a row gives it too, where it threw. Shapes that do not nest
-  (`[1, 2, 3] + [[1, 2], [3, 4]]`, a 2 by 2 plus a 2 by 3 matrix) are still
-  an `incompatible-dimensions` error. A product is not changed: a vector times
-  a matrix is the matrix product.
+- **A vector plus a matrix adds the vector to the rows** (ROADMAP CE-399). A sum
+  of tensors whose shapes nest (the shape of each one is the start of the shape
+  of the deepest) adds element `i` of the vector to row `i` of the matrix:
+  `[1, 2] + [[1, 2, 3], [4, 5, 6]]` is `[[2, 3, 4], [6, 7, 8]]`, typed
+  `matrix<integer^(2x3)>`. It was `Error("incompatible-dimensions", "2 vs 2x3")`
+  for two list literals, while the same sum of symbols that held these values
+  gave the matrix, as compiled JavaScript and `Less` did. The value is now the
+  same on every route; a compiled `Sum` over a list that holds a matrix and a
+  row gives it too, where it threw. Shapes that do not nest
+  (`[1, 2, 3] + [[1, 2], [3, 4]]`, a 2 by 2 plus a 2 by 3 matrix) are still an
+  `incompatible-dimensions` error. A product is not changed: a vector times a
+  matrix is the matrix product.
 
 ### New Features
 
 - **`couldMatch(other, { nonEmpty: true })`** (ROADMAP CE-397, Tycho row 429).
   `couldMatch()` answers `true` for two list types with no dimensions whatever
-  their elements, because the empty list is a value of both. With the option,
-  it answers whether a value that is not an empty collection has both types,
-  so it tells a list of numbers from a list of points:
+  their elements, because the empty list is a value of both. With the option, it
+  answers whether a value that is not an empty collection has both types, so it
+  tells a list of numbers from a list of points:
   `ce.type('list<number>').couldMatch('list<tuple<number, number>>', { nonEmpty: true })`
   is `false`, and `couldMatch('list<integer>', { nonEmpty: true })` is `true`.
   Only the outer collection must be non-empty: `[[]]` is a value of both
@@ -823,15 +1217,14 @@
 
 ### Resolved Issues
 
-- **`FindFit` with `global: true` searches an even function of a periodic
-  term on a fine enough grid** (ROADMAP CE-176, Tycho row 407). The grid spaces
-  a searched frequency by the period of the expression around the periodic
-  function. An even outer function (`Cos`, `Sec`, `Cosh`, `Sech`) of a term
-  that changes sign under a half-period shift has half the period of the term:
-  `cos(cos θ)` and `sec(sin θ)` have the period π, `cos(sin θ cos θ)` has
-  π/2. The grid recorded 2π (or π), so it was twice as coarse as the basins of
-  the residual. `cos(sin θ + 1)`, `cos(sin² θ)` and `sin(cos θ)` keep their
-  period.
+- **`FindFit` with `global: true` searches an even function of a periodic term
+  on a fine enough grid** (ROADMAP CE-176, Tycho row 407). The grid spaces a
+  searched frequency by the period of the expression around the periodic
+  function. An even outer function (`Cos`, `Sec`, `Cosh`, `Sech`) of a term that
+  changes sign under a half-period shift has half the period of the term:
+  `cos(cos θ)` and `sec(sin θ)` have the period π, `cos(sin θ cos θ)` has π/2.
+  The grid recorded 2π (or π), so it was twice as coarse as the basins of the
+  residual. `cos(sin θ + 1)`, `cos(sin² θ)` and `sin(cos θ)` keep their period.
 
 - **The type of an element-wise operation over a list of tensors or a
   `broadcastable` operand** (ROADMAP CE-398, Tycho row 430). Three kinds of
@@ -843,8 +1236,8 @@
     `U: vector<real^3>` and `M: list<broadcastable<number>>`, `U + M` is
     `list<broadcastable<number>>`. It was
     `list<broadcastable<number> | list<any>>`, an arm with no layout on the
-    compiled routes. `Sin(T)` with `T: list<tensor<number>>` was typed
-    `tensor`, which `[[sin 1, sin 2], [[sin 3]]]` is not.
+    compiled routes. `Sin(T)` with `T: list<tensor<number>>` was typed `tensor`,
+    which `[[sin 1, sin 2], [[sin 3]]]` is not.
   - An operand declared `broadcastable<number>` may hold a matrix. Beside a
     vector, the result was typed as if the operand was a number: with
     `B: broadcastable<number>` holding a 3 by 2 matrix, `U + B`, `U^B` and
@@ -859,8 +1252,8 @@
     `vector<2>`: when `b` holds a matrix the product is a matrix product
     (`[1, 2]·[[1, 2, 3], [4, 5, 6]]` is `[9, 12, 15]`).
 
-  A comparison of an element-wise application over an abstract collection
-  with a list (`Sin(P) < [1, 2]` with `P: collection<number>`) is now typed
+  A comparison of an element-wise application over an abstract collection with a
+  list (`Sin(P) < [1, 2]` with `P: collection<number>`) is now typed
   `tensor<boolean>`, not `list<boolean^2>`: `Sin(P)` is typed
   `broadcastable<number>`, which admits a matrix.
 
@@ -904,11 +1297,10 @@
     a possible number: `w/w` is `1` for it.
   - A juxtaposed class is a product: `\overline{3}_{7}x` parses to `Multiply`,
     not to a tuple. `compile()` declines an expression typed `residue` or one
-    that holds a class; an expression that only may hold one (a parameter
-    typed `number | residue`) compiles. The documentation lists the type in
-    `doc/08-guide-types.md`, the rules in
-    `docs/TYPE-SYSTEM.md`, and how an operator declares it in
-    `doc/06-guide-augmenting.md`.
+    that holds a class; an expression that only may hold one (a parameter typed
+    `number | residue`) compiles. The documentation lists the type in
+    `doc/08-guide-types.md`, the rules in `docs/TYPE-SYSTEM.md`, and how an
+    operator declares it in `doc/06-guide-augmenting.md`.
 
 - **A comparison with an absent number is absent** (ROADMAP CE-93, Tycho row
   411). With `w: number | missing` holding `Missing`, `w > 0` was `False`: a

@@ -263,6 +263,10 @@ sequenceDiagram
 - **Evaluations have a deadline.** By default a program is canceled after
   10 seconds. Start the server with `epsil mcp --time-limit <ms>` to change
   the default (`0` disables it); the assistant can also adjust it per call.
+- **Numeric work can run on worker threads.** Start the server with
+  `epsil mcp --workers <n>` to give the engines of the `evaluate` calls a
+  pool of `<n>` worker threads; a `findFit` with a global search then scans
+  on them. The values are the same with or without the pool.
 - **The computation runs locally by default.** The server is part of the npm
   package, and programs evaluate in the Node.js process that runs
   `epsil mcp`. A ChatGPT connection still uses the configured Secure MCP

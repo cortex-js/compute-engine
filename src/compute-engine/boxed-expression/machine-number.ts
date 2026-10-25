@@ -1,6 +1,8 @@
 import type { Expression } from '../types-expression.js';
 import { isNumber } from './type-guards.js';
 import { exactDoubleValue } from '../numeric-value/exact-integer-value.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import { MACHINE_PRECISION } from '../numerics/numeric.js';
 
 /**
  * The machine number a boxed number stands for, when it stands for one —
@@ -43,6 +45,20 @@ export function machineNumberOf(target: Expression): number | undefined {
   const stored = (nv as { decimal?: unknown }).decimal;
   if (typeof stored === 'number') return stored;
   const x = target.re;
+  // A big-number float (real, since a complex value is refused above) at a
+  // precision above machine precision. There `ce.number(x)` for a finite
+  // double that is not a safe integer is the big-number float
+  // `new BigDecimal(x)`, and `isSame` compares two real big-number floats
+  // by their decimals. So the comparison is made directly, without boxing
+  // `x` again: the boxing cost about 1 µs a number, most of the time of
+  // the `array` facet of a list of ten thousand such floats (CE-337).
+  if (
+    stored instanceof BigDecimal &&
+    Number.isFinite(x) &&
+    !Number.isSafeInteger(x) &&
+    target.engine.precision > MACHINE_PRECISION
+  )
+    return stored.eq(new BigDecimal(x)) ? x : undefined;
   return target.engine.number(x).isSame(target) ? x : undefined;
 }
 

@@ -63,12 +63,16 @@ export function implicitCompile(
  * `implicitCompile`). It replaced the former `realOnly: true` compile option
  * at these call sites, which has since been removed
  * (`docs/COMPILATION-MODEL.md`).
+ *
+ * `options` are compile options passed to `implicitCompile()`, such as
+ * `vars`.
  */
 export function implicitCompileNumeric(
   ce: IComputeEngine,
-  expr: Expression
+  expr: Expression,
+  options?: Record<string, unknown>
 ): ((vars: Record<string, number>) => number) | undefined {
-  return implicitCompileNumericResult(ce, expr)?.fn;
+  return implicitCompileNumericResult(ce, expr, options)?.fn;
 }
 
 /**
@@ -78,14 +82,15 @@ export function implicitCompileNumeric(
  */
 export function implicitCompileNumericResult(
   ce: IComputeEngine,
-  expr: Expression
+  expr: Expression,
+  options?: Record<string, unknown>
 ):
   | {
       fn: (vars: Record<string, number>) => number;
       result: ReturnType<IComputeEngine['_compile']>;
     }
   | undefined {
-  const compiled = implicitCompile(ce, expr);
+  const compiled = implicitCompile(ce, expr, options);
   if (!compiled?.success || typeof compiled.run !== 'function')
     return undefined;
   const run = compiled.run as (vars: Record<string, number>) => unknown;
