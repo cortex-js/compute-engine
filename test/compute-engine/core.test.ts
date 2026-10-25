@@ -31,6 +31,68 @@ describe('ReplaceAll', () => {
     const r = ce.box(['ReplaceAll', ['Add', 'y', 1], ['To', 'x', 2]]).evaluate();
     expect(r.isSame(ce.box(['Add', 'y', 1]))).toBe(true);
   });
+
+  // GitHub issue #476: in a function body, a parameter in the held target
+  // (or in a rule) means the argument of the call, not the symbol.
+  describe('in a function body', () => {
+    const rules = ['List', ['Rule', 'a', 'b']];
+    const f = ['Function', ['ReplaceAll', 'x', rules], 'x'];
+    const json = (e: any) => ce.box(e).evaluate().json;
+
+    test('the target parameter reads as its argument', () => {
+      expect(json(['Apply', f, 'a'])).toEqual('b');
+      expect(json(['Apply', f, ['Add', 'a', 1]])).toEqual(['Add', 'b', 1]);
+      expect(json(['Apply', ['Function', ['ReplaceAll', '_1', rules]], 'a'])).toEqual('b');
+    });
+
+    test('FixedPoint and Map over a rewriting step', () => {
+      expect(json(['FixedPoint', f, 'a'])).toEqual('b');
+      const chain = ['List', ['Rule', 'a', 'b'], ['Rule', 'b', 'c']];
+      expect(json(['FixedPoint', ['Function', ['ReplaceAll', 'x', chain], 'x'], 'a'])).toEqual('c');
+      const m = ce.box(['Map', f, ['List', 'a', ['Add', 'a', 1]]]).evaluate();
+      expect([...m.each()].map((e) => e.toString())).toEqual(['b', 'b + 1']);
+    });
+
+    test('a parameter in a rule reads as its argument', () => {
+      const g = ['Function', ['ReplaceAll', 'e', ['Rule', 'v', 0]], 'e', 'v'];
+      expect(json(['Apply', g, ['Add', 'a', 'c'], 'a'])).toEqual('c');
+    });
+
+    test('a parameter of an enclosing function reads as its argument', () => {
+      const outer = ['Function', ['Function', ['ReplaceAll', ['Add', 'x', 'k'], rules], 'x'], 'k'];
+      expect(json(['Apply', ['Apply', outer, 'a'], 'c'])).toEqual(['Add', 'b', 'c']);
+    });
+
+    test('a binder that re-binds the name keeps its own symbol', () => {
+      const g = ['Function', ['ReplaceAll', ['Sum', ['Multiply', 'x', 'a'], ['Limits', 'x', 1, 3]], rules], 'x'];
+      expect(json(['Apply', g, 5])).toEqual(['Multiply', 6, 'b']);
+      // A binder in a rule (the rules are held raw).
+      const h = ['Function', ['ReplaceAll', 'a', ['Rule', 'a', ['Sum', 'x', ['Limits', 'x', 1, 3]]]], 'x'];
+      expect(json(['Apply', h, 5])).toEqual(6);
+    });
+
+    test('a wildcard in a rule pattern stays a wildcard', () => {
+      const rule = ['Rule', ['Power', '_', 2], 0];
+      expect(json(['Apply', ['Function', ['ReplaceAll', ['Power', 'a', 2], rule]], 'q'])).toEqual(0);
+      expect(json(['Apply', ['Function', ['ReplaceAll', '_', rule]], ['Power', 'a', 2]])).toEqual(0);
+    });
+
+    test('a parameter that holds the rules', () => {
+      const g = ['Function', ['ReplaceAll', 'e', 'r'], 'e', 'r'];
+      expect(json(['Apply', g, ['Add', 'a', 1], ['Rule', 'a', 'b']])).toEqual(['Add', 'b', 1]);
+    });
+
+    test('parse route', () => {
+      const r = ce.parse(String.raw`(y\mapsto \operatorname{ReplaceAll}(y+1, a \to b))(a)`).evaluate();
+      expect(r.toString()).toBe('b + 1');
+    });
+
+    test('outside a function, an assigned symbol in the target stays held', () => {
+      const engine = new ComputeEngine();
+      engine.assign('x', 5);
+      expect(engine.box(['ReplaceAll', ['Power', 'x', 2], ['Rule', 'x', 3]]).evaluate().re).toBe(9);
+    });
+  });
 });
 
 describe('N / Evaluate nesting collapse', () => {

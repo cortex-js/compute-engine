@@ -68,6 +68,7 @@ import {
   canonicalWithFreshPlaceholders,
   captureNestedLocals,
   exactArgumentSources,
+  inlineCallParameters,
   isStatementListScope,
   snapshotRunVariables,
 } from '../function-utils.js';
@@ -8076,14 +8077,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         if (ops.length < 2) return ce._fn('ReplaceAll', checkArity(ce, ops, 2));
         return ce._fn('ReplaceAll', ops);
       },
-      evaluate: (ops, { engine: _ce }) => {
-        const target = ops[0]?.canonical;
-        if (target === undefined) return undefined;
+      evaluate: (ops, { engine: ce }) => {
+        // Inside a function body, a parameter of the function in the target
+        // or in a rule means the argument of the call, not the symbol:
+        // `x ↦ ReplaceAll(x, a → b)` applied to `a` is `b`.
+        const held = ops[0]?.canonical;
+        if (held === undefined) return undefined;
+        const target = inlineCallParameters(ce, held);
 
         // Gather the rule operands: the 2nd and any further arguments, plus the
-        // members of a `List`/`Set` of rules.
+        // members of a `List`/`Set` of rules. An operand that is a parameter
+        // holding the rules (`(e, r) ↦ ReplaceAll(e, r)`) reads as its value.
         const ruleOps: Expression[] = [];
-        for (const op of ops.slice(1)) {
+        for (const held of ops.slice(1)) {
+          const op = isSymbol(held)
+            ? inlineCallParameters(ce, held.canonical)
+            : held;
           if (
             isFunction(op, 'List') ||
             isFunction(op, 'Set') ||
@@ -8100,12 +8109,20 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const patternRules: Rule[] = [];
         for (const r of ruleOps) {
           if (!isFunction(r, 'To') && !isFunction(r, 'Rule')) return undefined;
-          const lhs = r.op1;
-          const rhs = r.op2;
+          // Each side is canonicalized BEFORE its parameters are inlined: the
+          // rule operands are held raw, and a binder in a raw operand
+          // (`Sum(x, Limits(x, 1, 3))`) has no scope yet, so its index would
+          // be taken for a parameter of the same name. The wildcards of the
+          // left side (`_`, `_x`) are never parameters: an anonymous function
+          // takes a `_` of its body as its parameter, also when the `_` is a
+          // pattern wildcard (`ReplaceAll(a^2, _^2 → 0)`).
+          const lhs = inlineCallParameters(ce, r.op1.canonical, {
+            keepWildcards: true,
+          });
+          const rhs = inlineCallParameters(ce, r.op2.canonical);
           const s = sym(lhs);
-          if (s !== undefined) substitution[s] = rhs.canonical;
-          else
-            patternRules.push({ match: lhs.canonical, replace: rhs.canonical });
+          if (s !== undefined) substitution[s] = rhs;
+          else patternRules.push({ match: lhs, replace: rhs });
         }
 
         let result = target;

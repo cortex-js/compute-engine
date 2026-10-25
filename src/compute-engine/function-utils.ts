@@ -10,6 +10,7 @@ import {
   bindingInContext,
   callableBindingInContext,
   evaluateInOwnBindings,
+  isParameterActivation,
   markActivation,
   markCallableFrame,
   markCallableHome,
@@ -5053,6 +5054,66 @@ function inlineFrameLocals(
     if (value === undefined) return sym;
     visited.add(live);
     return inlineFrameLocals(ce, value, captured, visited);
+  });
+}
+
+/**
+ * Replace, in a HELD operand, each symbol that denotes a parameter of a
+ * running function call with the value that the call bound to it.
+ *
+ * A lazy operator that transforms its operand as written (`ReplaceAll`) sees
+ * a parameter of the enclosing function as the bare symbol: in
+ * `x ↦ ReplaceAll(x, a → b)` applied to `a`, the rules are matched against
+ * the symbol `x`, find nothing to replace, and the call returns `a`. A
+ * function literal means the same as its body with the arguments put in
+ * place of the parameters (Wolfram's `Function[x, x /. a -> b][a]` is `b`),
+ * and the value of a call already reads that way after the body has run: a
+ * parameter left in the result, also inside a held operand, is replaced by
+ * its argument (`bindingKeyedSubs`), so `x ↦ Hold(x)` applied to `3` is
+ * `Hold(3)`. This gives the same reading to the operand BEFORE the operator
+ * transforms it.
+ *
+ * Only parameters are replaced. A `let` local of the body and a top-level
+ * symbol with an assigned value stay symbols, as a held operand keeps them
+ * everywhere else (`x := 5; ReplaceAll(x^2, x → 3)` is `9`). This differs
+ * from Wolfram, where `t = a; t /. a -> b` is `b`; the user decided on
+ * 2026-10-24 to keep both cases as they are (GitHub issue #476).
+ *
+ * An occurrence is a parameter when the binding that its NAME resolves to on
+ * the current scope chain is a parameter activation, and the occurrence
+ * carries that binding or no binding at all (a raw operand, as the box route
+ * hands it over, is not bound yet). A symbol below a binder that binds its
+ * name (`Sum(x^2, x, 1, n)`) is left alone; the binder is seen only in a
+ * canonical `expr`, so canonicalize a raw operand first.
+ *
+ * With `keepWildcards`, a symbol whose name starts with `_` is left alone:
+ * in the left side of a rule it is a pattern wildcard, also when an
+ * anonymous function took it as its parameter.
+ */
+export function inlineCallParameters(
+  ce: ComputeEngine,
+  expr: Expression,
+  options?: { keepWildcards?: boolean }
+): Expression {
+  return rewriteWithBinders(expr, (sym, shadowed) => {
+    const name = sym.symbol;
+    if (shadowed?.has(name)) return sym;
+    if (options?.keepWildcards && name.startsWith('_')) return sym;
+    let live: BoxedValueDefinition | undefined;
+    for (
+      let s: Scope | null | undefined = ce.context.lexicalScope;
+      s;
+      s = s.parent
+    ) {
+      const found = s.bindings.get(name);
+      if (found === undefined) continue;
+      if ('value' in found) live = found.value;
+      break;
+    }
+    if (live === undefined || !isParameterActivation(live)) return sym;
+    const own = sym.valueDefinition;
+    if (own !== undefined && !sameBindingDef(own, live)) return sym;
+    return live.storedValue ?? sym;
   });
 }
 

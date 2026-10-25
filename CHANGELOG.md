@@ -22,6 +22,27 @@
 
 ### Bug Fixes
 
+- **`ReplaceAll` in a function body reads a parameter as its argument**
+  ([#476](https://github.com/cortex-js/compute-engine/issues/476)).
+  `ReplaceAll` holds its target, so in `x ↦ ReplaceAll(x, a → b)` the rules
+  were matched against the symbol `x`, and the call returned its argument
+  unchanged: `FixedPoint`, `Map` or a call over a rewriting step did nothing.
+  A parameter of a running call, in the target or in a rule, now means the
+  value the call bound to it, as `Function[x, x /. a -> b][a]` does in
+  Wolfram:
+
+  ```js
+  const f = ['Function', ['ReplaceAll', 'x', ['List', ['Rule', 'a', 'b']]], 'x'];
+  ce.box(['Apply', f, ['Add', 'a', 1]]).evaluate();
+  // Before → a + 1    Now → b + 1
+  ce.box(['FixedPoint', f, 'a']).evaluate();
+  // Before → a        Now → b
+  ```
+
+  Outside a function nothing changes: a held target keeps a symbol with an
+  assigned value as the symbol (`x := 5; ReplaceAll(x^2, x → 3)` is `9`), and
+  so does a `let` local of a function body.
+
 - **`Assign` and `Declare` evaluate their value on the asynchronous route.**
   With `evaluateAsync()`, `x = FindFit(…)` and `let x = FindFit(…)` ran the
   synchronous `FindFit`, and an operator with only an `evaluateAsync` handler

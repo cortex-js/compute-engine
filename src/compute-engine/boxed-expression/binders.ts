@@ -134,6 +134,15 @@ export function markActivation(
 }
 
 /**
+ * Whether `def` is the definition that a call frame declares for a parameter
+ * of a `Function` literal (`markActivation`). A `let` local of the body, a
+ * binder index and a top-level symbol are not.
+ */
+export function isParameterActivation(def: BoxedValueDefinition): boolean {
+  return (def as Activated)._activationOf !== undefined;
+}
+
+/**
  * The static binding `def` denotes: itself, or — for a call frame's parameter
  * definition — the literal's own binding for that parameter.
  *
