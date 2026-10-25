@@ -66,6 +66,15 @@
  * as the emitted code does), and the compiled `NaN` for an absent element
  * where the interpreter gives `Missing` (ROADMAP CE-368, landed
  * 2026-10-23) was reachable from more expressions.
+ *
+ * Since ROADMAP CE-32 (user decision 2026-10-25), a product written by
+ * juxtaposition narrows its valueless symbols as `Multiply` does: the `2t`
+ * of `t ↦ [t, 2t]` makes `t` a number, as `2\cdot t` does, and `g` is
+ * `(unknown) -> vector<2>` (`g("a")` is now an `incompatible-type` error in
+ * its second element). The types below are the ones that the box route gives
+ * for `['Multiply', 2, 't']`: `g(x)` is a `list<list<any> | number>`, and an
+ * index into it is `list<any> | missing | number`. Each type still holds the
+ * values the tests read.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -145,10 +154,12 @@ const X_VALUES = [
 describe('Tycho row 425: the instrument', () => {
   test('with x: any, an index into g(x) holds the scalar case', () => {
     const ce = rowEngine();
-    expect(ce.parse('g(x)').type.toString()).toBe(
-      'broadcastable<list<unknown>>'
+    // The box route types `g(x)` and `g(x)[1]` the same way for
+    // `t ↦ [t, 2\cdot t]` (ROADMAP CE-32).
+    expect(ce.parse('g(x)').type.toString()).toBe('list<list<any> | number>');
+    expect(ce.parse('g(x)[1]').type.toString()).toBe(
+      'list<any> | missing | number'
     );
-    expect(ce.parse('g(x)[1]').type.toString()).toBe('missing | unknown');
   });
 
   test('with x: any, Repeat(0, g(x)[1]) boxes', () => {
@@ -167,18 +178,22 @@ describe('Tycho row 425: the instrument', () => {
     }
   );
 
-  test('with x: real the index is a real; with x: unknown it is unknown', () => {
+  test('with x: real the index is a real; with x: unknown it is a number', () => {
     expect(rowEngine('real').parse('g(x)[1]').type.toString()).toBe('real');
-    // `x` has no type yet, so neither has the element `t` of `g(x)`.
+    // `x` has no type yet, but the `2t` in the body of `g` makes `t` a
+    // number (ROADMAP CE-32), so the first element of `g(x)` is a number,
+    // as with `t ↦ [t, 2\cdot t]`.
     expect(rowEngine('unknown').parse('g(x)[1]').type.toString()).toBe(
-      'unknown'
+      'number'
     );
   });
 });
 
 describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
-  const INDEX = 'missing | unknown';
-  const LIST = 'list<list<unknown> | unknown>';
+  // The types that the box route gives for `t ↦ [t, 2\cdot t]` (ROADMAP
+  // CE-32): an element of `g(x)` is a number or a list.
+  const INDEX = 'list<any> | missing | number';
+  const LIST = 'list<list<any> | number>';
   const readers: [string, unknown, string, string, string][] = [
     // name, expression, static type, value for x = 3, value for x = [1, 2, 3]
     ['At', ['At', ['g', 'x'], 1], INDEX, '3', '[1,2]'],
@@ -193,23 +208,24 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
     [
       'Reverse',
       ['Reverse', ['g', 'x']],
-      'broadcastable<list<unknown>>',
+      'list<list<any> | number>',
       '[6,3]',
       '[[3,6],[2,4],[1,2]]',
     ],
   ];
 
-  test('Sum of Rest is a number or a tensor', () => {
+  test('Sum of Rest is a number or a list', () => {
     // Only for a list `x`: for `x = 3` the interpreter leaves
     // `Sum(Rest(g(x)))` unevaluated (as on the commit before this change).
-    // The elements of `Rest(g(x))` are of unknown type, and a sum of such
-    // elements is a number or a tensor of numbers (ROADMAP CE-361).
+    // The elements of `Rest(g(x))` are numbers or lists of any content, and
+    // a sum of such elements is a number or a list (ROADMAP CE-361). The
+    // box route gives this type for `t ↦ [t, 2\cdot t]` (ROADMAP CE-32).
     const ce = rowEngine();
     expect(
       staticTypeAndValues(ce, ce.box(['Sum', ['Rest', ['g', 'x']]]), 'x', [
         LIST_X,
       ])
-    ).toEqual({ type: 'broadcastable<number>', values: [['[5,10]', true]] });
+    ).toEqual({ type: 'list<any> | number', values: [['[5,10]', true]] });
   });
 
   test.each(readers)('%s', (_name, json, type, ofNumber, ofList) => {
@@ -232,9 +248,10 @@ describe('Tycho row 425: the type of a reader of g(x) holds the value', () => {
     const ce = rowEngine();
     const expr = ce.box(json as any);
     const { type, values } = staticTypeAndValues(ce, expr, 'x', [LIST_X]);
-    // The accessor keeps the unknown type of its operand, and its `missing`
-    // arm (an index past the end is absent).
-    expect(type).toBe('missing | unknown');
+    // The operand is `list<any> | missing | number`: the accessor reads the
+    // first slot of the list arm, which is of any type (ROADMAP CE-32; the
+    // box route gives the same type for `t ↦ [t, 2\cdot t]`).
+    expect(type).toBe('any');
     expect(values).toEqual([['1', true]]);
     // The accessor of a number is an error, which no type holds.
     ce.assign('x', NUMBER_X);
@@ -625,16 +642,18 @@ describe('Tycho row 425: a broadcastable whose cells are matrices', () => {
     [[], ['List']],
   ] as const;
 
-  // The signature of `m` is `(unknown) -> list<list<unknown>>`, so an
-  // element of `m(x)` is a `list<unknown>`. A numeric function over its
+  // The signature of `m` is `(unknown) -> matrix<2x2>`: the `2t` in its
+  // body makes `t` a number (ROADMAP CE-32). An element of `m(x)` is a
+  // `list<any>`, the type that the box route gives for
+  // `t ↦ [[t, 2\cdot t], [3\cdot t, 4\cdot t]]`. A numeric function over its
   // cells of unknown type gives a number or a list for each. The list arm
   // is spelled `list<any>`, not `tensor`: a cell of unknown type can be a
   // list whose rows differ in length (`[[1], [2, 3]]`), which is not a
   // tensor (user decision 2026-10-25).
   test.each([
-    ['m(x)[1]', '\\operatorname{At}(m(x), 1)', 'list<unknown> | missing'],
+    ['m(x)[1]', '\\operatorname{At}(m(x), 1)', 'list<any> | missing'],
     ['sqrt(m(x)[1])', '\\sqrt{m(x)[1]}', 'list<list<any> | number> | missing'],
-    ['2 m(x)[1]', '2 m(x)[1]', 'list<unknown> | missing'],
+    ['2 m(x)[1]', '2 m(x)[1]', 'list<any> | missing'],
     ['sin(m(x)[1])', '\\sin(m(x)[1])', 'list<list<any> | number> | missing'],
     [
       'floor(m(x)[1])',
@@ -862,15 +881,14 @@ describe('Tycho row 425: the compiled marker of a mixed element type', () => {
     ).toBe('declined');
   });
 
-  test('a chained index into g(x) is of unknown type, and arithmetic on it is numeric', () => {
+  test('a chained index into g(x) is of any type, and arithmetic on it too', () => {
     const ce = rowEngine();
-    // `g(x)[1]` is `missing | unknown`; an index into it is `unknown`,
-    // which `At` admits (an operand of unknown type is assumed to be
-    // valid), and `Add` reads as a number or a tensor of numbers.
-    expect(ce.parse('g(x)[1][2]').type.toString()).toBe('unknown');
-    expect(ce.parse('g(x)[1][2] + 1').type.toString()).toBe(
-      'broadcastable<number>'
-    );
+    // `g(x)[1]` is `list<any> | missing | number`; an index into it reads
+    // the list arm, whose elements are of any type, and `Add` keeps that
+    // type. The box route gives the same types for `t ↦ [t, 2\cdot t]`
+    // (ROADMAP CE-32).
+    expect(ce.parse('g(x)[1][2]').type.toString()).toBe('any');
+    expect(ce.parse('g(x)[1][2] + 1').type.toString()).toBe('any');
   });
 
   test('Repeat with a NaN count throws, as the interpreter answers an error', () => {

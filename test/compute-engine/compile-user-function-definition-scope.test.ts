@@ -148,8 +148,8 @@ describe('COMPILE a user function against the scope of its definition', () => {
     // Each level holds the level below twice, under a `Sum` and under a
     // `Product` that both bind `k`. The body has 2·depth + 1 distinct nodes
     // but 2^depth paths to the innermost one. The check calls the private
-    // assertion directly: the full compilation evaluates the nested sums,
-    // which takes exponential time for its own reason.
+    // assertion directly, so that only the check is timed. The time of the
+    // full compilation is tested in `compile-shared-binder-body.test.ts`.
     const ce = new ComputeEngine();
     let body = ce.box(['Multiply', 'x', 'k']);
     for (let i = 0; i < 20; i++)

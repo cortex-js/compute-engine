@@ -87,6 +87,7 @@ import {
   tupleElementType,
 } from './javascript-target.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
   MAX_UNROLLED_CONSTANT_LIST_WIDTH,
@@ -4119,7 +4120,9 @@ function compileIntervalSumProduct(
   // Unroll when both bounds are constant and range is small
   if (bothConstant) {
     const termCount = upperNum - lowerNum + 1;
-    if (termCount <= INTERVAL_UNROLL_LIMIT) {
+    // A clause whose terms would hold too many nodes in all is a loop
+    // (`unroll-budget.ts`).
+    if (unrollFits(termCount, unrolledTermSize(body), INTERVAL_UNROLL_LIMIT)) {
       const emitTerms = (): string[] => {
         const terms: string[] = [];
         for (let k = lowerNum; k <= upperNum; k++) {

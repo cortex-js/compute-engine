@@ -437,17 +437,13 @@ describe('NON-STRICT MODE (Math-ASCII/Typst-like syntax)', () => {
     });
 
     test('=> maps to Implies', () => {
-      expect(ce.parse('p => q', { strict: false })).toMatchInlineSnapshot(`
-        [
-          "Implies",
-          "p",
-          [
-            "Error",
-            ["ErrorCode", "incompatible-type", "'boolean'", "'function'"],
-            "q"
-          ]
-        ]
-      `);
+      // A fresh engine: the shared one has used `q` as a function and `p` as
+      // a factor of a product (`alpha` above is `a·a·h·l·p`, and a product
+      // narrows `p` to a number, ROADMAP CE-32), and `Implies` refuses both.
+      const e = new ComputeEngine();
+      expect(e.parse('p => q', { strict: false })).toMatchInlineSnapshot(
+        `["Implies", "p", "q"]`
+      );
     });
 
     test('<=> maps to Equivalent', () => {

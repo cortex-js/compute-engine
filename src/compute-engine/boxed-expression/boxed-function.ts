@@ -34,7 +34,12 @@ import {
   scopeActivationTemplate,
 } from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
-import { callResultType } from './call-result-type.js';
+import {
+  bindsWholeAtInferredPoint,
+  callResultType,
+  inferredPointSignature,
+  partialApplicationType,
+} from './call-result-type.js';
 import {
   expandAliasesForLift,
   freeTypeVariables,
@@ -11448,6 +11453,17 @@ function lambdaCallTypeOverDescriptors(
     const def = binding.operator;
     const sig = def.signature.type;
     if (overloadArms(sig) !== undefined) return undefined;
+    // A partial application is typed first, as on the value-definition
+    // route below and in `type()`: with `h(a, t) := a[1] + a[2] + t`, the
+    // value of `h([1, 2])` is the function of `t`, also when `h` has a
+    // point parameter (`partialApplicationType`).
+    const curried = curriedSignature(sig, heads);
+    if (curried !== undefined)
+      return partialApplicationType(
+        binding,
+        operands.map((d) => d.type),
+        curried
+      );
     if (pointListParamSlots(def) !== undefined) return undefined;
     // The signature result, as `declaredResultType()` in `type()` gives it
     // for a ground signature, and the result of a generic signature solved
@@ -11470,8 +11486,6 @@ function lambdaCallTypeOverDescriptors(
         paramsAreScalar(def)
       );
     if (tupleType) return tupleType;
-    const curried = curriedSignature(sig, heads);
-    if (curried !== undefined) return curried;
     if (hasNumericTupleOperand) return undefined;
     const declaredSlots = broadcastableParamSlots(def);
     if (!(paramsAreScalar(def) || declaredSlots)) return undefined;
@@ -11510,7 +11524,12 @@ function lambdaCallTypeOverDescriptors(
           : declaredType;
   if (overloadArms(sig) !== undefined) return undefined;
   const curried = curriedSignature(sig, heads);
-  if (curried !== undefined) return curried;
+  if (curried !== undefined)
+    return partialApplicationType(
+      binding,
+      operands.map((d) => d.type),
+      curried
+    );
   if (pointListParamSlots(sig) !== undefined) return undefined;
   const valueSlots = broadcastableParamSlots(sig);
   const threadable = paramsAreScalar(sig) || valueSlots !== undefined;
@@ -12556,15 +12575,51 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       }
     }
 
+    // A PARTIAL application of a function literal held by an operator
+    // definition is typed as the function of its remaining parameters
+    // (`curriedSignature`), for the reason given on the value-definition
+    // route below. It comes before the point-list map below, which types
+    // a call with all its arguments (`partialApplicationType`).
+    if (def instanceof _BoxedOperatorDefinition && def._isLambda) {
+      const base = resolvedOf() ?? sig;
+      const curried =
+        base === undefined ? undefined : curriedSignature(base, expr.ops);
+      if (curried !== undefined)
+        return partialApplicationType(
+          { operator: def },
+          expr.ops.map((x) => x.type.type),
+          curried
+        );
+    }
+
     // A list of points at a parameter declared as a point: the application
     // maps over the points and answers `list<R>` (`pointListParamSlots`).
     if (def instanceof _BoxedOperatorDefinition && def._isLambda) {
-      const pointType = pointListApplicationType(
-        pointListParamSlots(def),
+      const plan = pointListParamSlots(def);
+      let pointType = pointListApplicationType(
+        plan,
         expr.ops,
         sigResult,
         broadcastableParamSlots(def)
       );
+      // An argument at a point parameter of an inferred signature that is
+      // bound whole and is not a point: each call of the map gives the type
+      // that the body gives for it (`wholeBoundPointArgumentResult`).
+      if (pointType !== undefined) {
+        const element = wholeBoundPointArgumentResult(
+          expr,
+          plan,
+          { operator: def },
+          sigResult
+        );
+        if (element !== undefined)
+          pointType = pointListApplicationType(
+            plan,
+            expr.ops,
+            element,
+            broadcastableParamSlots(def)
+          );
+      }
       if (pointType !== undefined) return applyContractB(pointType);
       // A tuple at a parameter declared as a scalar: the application maps
       // over the components (`declaredScalarTupleCells`) and answers the
@@ -12582,17 +12637,6 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
           paramsAreScalar(def)
         );
       if (tupleType) return applyContractB(tupleType);
-    }
-
-    // A PARTIAL application of a function literal held by an operator
-    // definition is typed as the function of its remaining parameters
-    // (`curriedSignature`), for the reason given on the value-definition
-    // route below.
-    if (def instanceof _BoxedOperatorDefinition && def._isLambda) {
-      const base = resolvedOf() ?? sig;
-      const curried =
-        base === undefined ? undefined : curriedSignature(base, expr.ops);
-      if (curried !== undefined) return curried;
     }
 
     if (
@@ -12737,7 +12781,12 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     // variadic tail collects a short argument list), an optional parameter,
     // and a generic literal (refused with an error).
     const curried = curriedSignature(sig, expr.ops);
-    if (curried !== undefined) return curried;
+    if (curried !== undefined)
+      return partialApplicationType(
+        { value: expr.valueDefinition },
+        expr.ops.map((x) => x.type.type),
+        curried
+      );
     // As on the operator-def route: a polytype arm is instantiated at the call
     // site so no open type escapes as the expression's `.type` (§4.2). The
     // solve sees the SAME `threadable` gate this route hands
@@ -12763,12 +12812,31 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       'unknown';
     // A list of points at a parameter declared as a point: the application
     // maps over the points and answers `list<R>` (`pointListParamSlots`).
-    const pointType = pointListApplicationType(
-      pointListParamSlots(sig),
+    const plan = pointListParamSlots(sig);
+    let pointType = pointListApplicationType(
+      plan,
       expr.ops,
       sigResult,
       valueSlots
     );
+    // As on the operator-definition route: an argument at a point parameter
+    // of an inferred signature that is bound whole and is not a point
+    // (`wholeBoundPointArgumentResult`).
+    if (pointType !== undefined) {
+      const element = wholeBoundPointArgumentResult(
+        expr,
+        plan,
+        { value: expr.valueDefinition },
+        sigResult
+      );
+      if (element !== undefined)
+        pointType = pointListApplicationType(
+          plan,
+          expr.ops,
+          element,
+          valueSlots
+        );
+    }
     if (pointType !== undefined) return pointType;
     // A tuple at a parameter declared as a scalar, as on the
     // operator-definition route above.
@@ -14639,6 +14707,81 @@ function mapsAsPointList(
   return (
     isPointListArgumentType(x.type.type, slot.elements) ||
     isPointTensorArgumentType(x.type.type, slot.elements)
+  );
+}
+
+/**
+ * The result of one call of the point-list map of a function whose
+ * signature the engine INFERRED, when an argument at a point parameter is
+ * bound whole and is not a point (`pointListApplicationType` uses it as
+ * the element type of the map). `undefined` when no argument is such, or
+ * when the type cannot be derived: the signature result then describes the
+ * call.
+ *
+ * The engine does not check an argument against an inferred signature, so
+ * an argument at a point parameter that is not a list of points is bound
+ * whole, and the body computes with it. With
+ * `h(a, t) := a[1] + a[2] + t` (inferred
+ * `(tuple<number, number>, unknown) -> number`),
+ * `h([[1, 2], [3, 4]], [10, 20])` maps over the list `[10, 20]`, binds the
+ * matrix whole in each call, and evaluates to `[[14, 16], [24, 26]]`. Each
+ * call gives a list, not the signature result `number`.
+ *
+ * The result is derived from the body (`derivedBroadcastElementResult`,
+ * which calls `callResultType`): a list mapped at a scalar parameter is
+ * read as one of its cells, an argument that maps at a point parameter as
+ * one point of the parameter type, and an argument bound whole as itself.
+ * Which argument is bound whole is decided by `bindsWholeAtInferredPoint`
+ * (`call-result-type.ts`): a list of numbers (`h([1, 2], [10, 20])`) is
+ * read by index as a point, and keeps the signature result; a matrix, a
+ * number, a string are bound whole. When the body gives no type, the
+ * result is `any`. `binding` is the definition of the function: a
+ * signature that the author declared is a contract, and this function
+ * gives `undefined` for it.
+ */
+function wholeBoundPointArgumentResult(
+  expr: BoxedFunction,
+  plan: BroadcastSlotPlan | undefined,
+  binding: BoxedDefinition,
+  result: Type
+): Type | undefined {
+  if (plan === undefined || inferredPointSignature(binding) === undefined)
+    return undefined;
+  const mappedAt: boolean[] = [];
+  const operandTypes: (Type | undefined)[] = [];
+  let wholeAtPoint = false;
+  expr.ops.forEach((x, i) => {
+    const slot = plan.at(i);
+    mappedAt.push(false);
+    operandTypes.push(undefined);
+    if (!slot.mappable || slot.elements === undefined) return;
+    if (isPointParameterType(slot.elements)) {
+      if (
+        mapsAsPointOrPointList(plan, i, x) ||
+        mapsAsPointList(plan, i, x, false)
+      )
+        operandTypes[i] = slot.elements;
+      else if (
+        bindsWholeAtInferredPoint(
+          stripMissingFromType(x.type.type),
+          slot.elements
+        )
+      )
+        wholeAtPoint = true;
+      return;
+    }
+    if (!isTuple(x) && operandMapShape(x.type.type) !== 'cell')
+      mappedAt[i] = true;
+  });
+  if (!wholeAtPoint) return undefined;
+  return (
+    derivedBroadcastElementResult(
+      expr,
+      mappedAt,
+      result,
+      () => false,
+      operandTypes
+    ) ?? 'any'
   );
 }
 

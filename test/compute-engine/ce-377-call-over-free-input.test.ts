@@ -186,7 +186,12 @@ describe('A SHADER READS THE STATIC LENGTH OF THE CALL THE SAME WAY (CE-377)', (
       ['Limits', 'k', 1, 3],
     ]);
     const result = compile(expr, { to: 'glsl', fallback: false } as any) as any;
-    expect(result.code).toContain('float _tv1 = (_fn_v(x)).y;');
+    // The `2s` makes `s` a number (ROADMAP CE-32), so `v(x)` is typed
+    // `vector<2>`, as with `s ↦ [s, 2\cdot s]`: the call is bound once to a
+    // `vec2`, and its second component once to a `float`, before the loop.
+    expect(result.code).toContain(
+      'vec2 _tv1 = _fn_v(x);\nfloat _tv2 = _tv1.y;'
+    );
   });
 
   test('glsl: a list with a complex element has no shader value, and the decline names the element', () => {

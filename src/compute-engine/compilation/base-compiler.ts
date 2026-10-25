@@ -25374,6 +25374,75 @@ export class BaseCompiler {
   }
 
   /**
+   * The layers that `_pushKeyedComplexMemoLayer` made, by the enclosing
+   * complexness layer and then by the key of the context entered.
+   */
+  private static _keyedMemoLayers = new WeakMap<
+    WeakMap<object, boolean>,
+    Map<
+      string,
+      {
+        complex: WeakMap<object, boolean>;
+        lane: WeakMap<object, ElementLane>;
+        laneParent: WeakMap<object, ElementLane>;
+      }
+    >
+  >();
+
+  /**
+   * Enter a lexical context that is fully described by `key` and by the
+   * enclosing context. When the same context was entered before from the
+   * same enclosing layer, push the layers of that entry again, with their
+   * answers, instead of new empty layers. Returns the layer that was pushed,
+   * which the caller gives to `_popKeyedComplexMemoLayer`.
+   *
+   * This is sound because an enclosing layer object stands for one context:
+   * a change of that context replaces the layer object
+   * (`_resetComplexMemoTop`, `_invalidateComplexMemo`). Without it, the body
+   * of a `Sum` or `Product` was analyzed again, with an empty memo, each time
+   * its binder mask was entered, and a subtree shared by several binders was
+   * analyzed once for each path to it: exponential time in the depth of the
+   * sharing (ROADMAP CE-458).
+   */
+  private static _pushKeyedComplexMemoLayer(
+    key: string
+  ): WeakMap<object, boolean> {
+    const cStack = BaseCompiler._complexMemoStack;
+    const lStack = BaseCompiler._elementLaneMemoStack;
+    const parent = cStack[cStack.length - 1];
+    const laneParent = lStack[lStack.length - 1];
+    let byKey = BaseCompiler._keyedMemoLayers.get(parent);
+    if (byKey === undefined) {
+      byKey = new Map();
+      BaseCompiler._keyedMemoLayers.set(parent, byKey);
+    }
+    let entry = byKey.get(key);
+    if (entry === undefined || entry.laneParent !== laneParent) {
+      entry = { complex: new WeakMap(), lane: new WeakMap(), laneParent };
+      byKey.set(key, entry);
+    }
+    cStack.push(entry.complex);
+    lStack.push(entry.lane);
+    return entry.complex;
+  }
+
+  /**
+   * Leave a context entered with `_pushKeyedComplexMemoLayer`. When the
+   * layer was replaced while the context was live (`_resetComplexMemoTop`),
+   * its answers no longer describe the context: forget it, so that the next
+   * entry starts with an empty layer.
+   */
+  private static _popKeyedComplexMemoLayer(
+    key: string,
+    pushed: WeakMap<object, boolean>
+  ): void {
+    const cStack = BaseCompiler._complexMemoStack;
+    if (cStack[cStack.length - 1] !== pushed && cStack.length > 1)
+      BaseCompiler._keyedMemoLayers.get(cStack[cStack.length - 2])?.delete(key);
+    BaseCompiler._popComplexMemoLayer();
+  }
+
+  /**
    * Leave a lexical context, restoring the enclosing layer. The guard resets
    * rather than underflows if an unbalanced pop ever slips through — stale
    * reuse is the failure mode that matters, an empty memo is merely slow.
@@ -25782,7 +25851,15 @@ export class BaseCompiler {
     BaseCompiler._localComplex.push(frame);
     if (vector.size > 0) BaseCompiler._localVector.push(vector);
     BaseCompiler._binderShield.push(new Set(binder.shielded));
-    BaseCompiler._pushComplexMemoLayer();
+    // The mask is the whole context this function adds, so its names are
+    // the key of the memo layer.
+    const memoKey = JSON.stringify([
+      binder.real,
+      binder.shielded,
+      binder.complex ?? [],
+      binder.loopComplex ?? [],
+    ]);
+    const memoLayer = BaseCompiler._pushKeyedComplexMemoLayer(memoKey);
     // A binder analyzed INSIDE an unrolled term must not read that term's
     // index value for a name it binds itself — the analysis and the emission
     // would then describe different values. See
@@ -25800,7 +25877,7 @@ export class BaseCompiler {
       BaseCompiler._binderShield.pop();
       if (vector.size > 0) BaseCompiler._localVector.pop();
       BaseCompiler._localComplex.pop();
-      BaseCompiler._popComplexMemoLayer();
+      BaseCompiler._popKeyedComplexMemoLayer(memoKey, memoLayer);
     }
   }
 
@@ -34474,6 +34551,15 @@ export class BaseCompiler {
    * to a definition compiled for one point, which computes with an array as
    * if it were a coordinate: `x + 1` of an array is a string on JavaScript.
    * The call is declined rather than compiled to a different value.
+   *
+   * A parameter whose point type was INFERRED from the body (the index reads
+   * of `d(a) := a[1] + a[2]` give `tuple<number, number>`) is not a
+   * contract: the interpreter does not check an argument against it, and
+   * binds a collection that is not a list of points whole. A list of
+   * numbers is then read by index as a point is, and is one array at run
+   * time as a point is, so the compiled call gives the interpreter's value:
+   * such an arm does not decline the call (`d(S(x), [1, 1])` with `S(x)`
+   * typed `integer | vector<2>`). Any other collection arm still declines.
    */
   private static checkPointParamCollectionUnionArgs(
     engine: ComputeEngine,
@@ -34486,6 +34572,7 @@ export class BaseCompiler {
       if (pt === undefined || !isPointParameterType(pt)) return;
       const r = resolveTypeForCompilation(stripMissingFromType(a.type.type));
       if (typeof r === 'string' || r.kind !== 'union') return;
+      const inferred = BaseCompiler.userFunctionSignatureIsInferred(engine, h);
       // A bare name counts too (`list`, `range`, `matrix`), except `string`
       // and `tuple`: neither is a collection the call maps over.
       const collectionArm = r.types.some((arm) => {
@@ -34496,6 +34583,7 @@ export class BaseCompiler {
             x !== 'tuple' &&
             isSubtype(x, INDEXED_COLLECTION_SHAPE_TYPE)
           );
+        if (inferred && isSubtype(x, 'list<number>')) return false;
         return (
           x.kind !== 'tuple' && isSubtype(x, INDEXED_COLLECTION_SHAPE_TYPE)
         );
@@ -34504,7 +34592,8 @@ export class BaseCompiler {
       throw new Error(
         `Could not compile a call of \`${h}\`: argument ${i + 1} has the ` +
           `type \`${typeToString(a.type.type)}\`, which admits a collection ` +
-          `that is not a list of points, at a parameter declared as the ` +
+          `that is not a list of points, at a parameter ` +
+          `${inferred ? 'inferred' : 'declared'} as the ` +
           `point \`${typeToString(pt)}\`. The compiled call cannot tell its ` +
           `values apart at run time.`
       );

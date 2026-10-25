@@ -2999,16 +2999,15 @@ function raggedBroadcastResultType(
   }
   if (!ragged) return undefined;
 
-  // A union built here is flattened into a union that contains it, and an
-  // arm that occurs twice is kept once. Any other union (a union
-  // `elementType`) is kept as one arm.
-  const built = new WeakSet<object>();
+  // A union arm is flattened into the union that contains it (a union built
+  // here, or a union `elementType`), and an arm that occurs twice is kept
+  // once. An arm that another arm holds is dropped (see below).
   const union = (arms: ReadonlyArray<Type>): Type => {
     const keys = new Set<string>();
     const types: Type[] = [];
     const add = (arm: Type) => {
-      if (typeof arm !== 'string' && built.has(arm)) {
-        for (const m of (arm as { types: Type[] }).types) add(m);
+      if (typeof arm !== 'string' && arm.kind === 'union') {
+        for (const m of arm.types) add(m);
         return;
       }
       const key = typeToDedupKey(arm);
@@ -3031,10 +3030,28 @@ function raggedBroadcastResultType(
       types.length = 0;
       types.push(...shaped);
     }
+    // An arm that is a subtype of another arm adds no value, and it is
+    // dropped: with a cell `list<integer> | number` and a per-element result
+    // `list<integer> | number`, the mirror of the cell is
+    // `list<list<integer> | number> | list<integer> | number`, and the
+    // first arm holds the second. Of two arms that hold each other, the
+    // first is kept. An arm that states no shape (`any`, `unknown`, `value`,
+    // `expression`, or a bare collection name such as `list`) does not
+    // absorb a shaped arm, for the reason above: `list` holds
+    // `list<list<integer> | number>`, but dropping that arm loses its
+    // mirrored structure.
+    const holds = (b: Type, a: Type): boolean =>
+      !isShapeOpenType(b) && isSubtype(a, b);
+    const reduced = types.filter(
+      (a, i) =>
+        !types.some(
+          (b, j) => j !== i && holds(b, a) && (j < i || !holds(a, b))
+        )
+    );
+    types.length = 0;
+    types.push(...reduced);
     if (types.length === 1) return types[0];
-    const result: Type = { kind: 'union', types };
-    built.add(result);
-    return result;
+    return { kind: 'union', types };
   };
   const mirror = (
     t: Readonly<Type>,

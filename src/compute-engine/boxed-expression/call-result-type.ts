@@ -9,10 +9,16 @@ import type {
 import type { FunctionInterface } from '../types-expression.js';
 import type { Type } from '../../common/type/types.js';
 import { typeToString } from '../../common/type/serialize.js';
-import { isSubtype, widen } from '../../common/type/subtype.js';
+import {
+  cannotHoldAList,
+  isSubtype,
+  provablyDisjoint,
+  widen,
+} from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
 import {
   collectionElementType,
+  isWildcardFunctionType,
   resolveTypeAlias,
   stripMissingFromType,
 } from '../../common/type/utils.js';
@@ -30,7 +36,15 @@ import {
   functionLiteralParameterType,
   isRestParameter,
   isDestructuringParameter,
+  isScalarType,
 } from './function-literal.js';
+import {
+  isPointListArgumentType,
+  isPointOrPointListArgumentType,
+  isPointParameterType,
+  isTupleShapedType,
+} from '../collection-utils.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { isFunction, isSymbol } from './type-guards.js';
 
@@ -175,10 +189,22 @@ export function callResultType(
   ) => Type | undefined,
   binding?: BoxedDefinition
 ): Type | undefined {
-  if (isScalarResult(declared)) return undefined;
   if (binding && 'value' in binding && isForwardCallReference(binding.value))
     binding = callableBindingInContext(engine, head, binding);
   binding ??= engine.lookupDefinition(head);
+  const inferredSig = inferredPointSignature(binding);
+  if (inferredSig !== undefined) {
+    const t = inferredPointCallType(
+      engine,
+      binding,
+      inferredSig,
+      args,
+      declared,
+      derive
+    );
+    if (t !== undefined) return t;
+  }
+  if (isScalarResult(declared)) return undefined;
   const literal = userFunctionLiteral(binding);
   if (
     !literal ||
@@ -194,6 +220,327 @@ export function callResultType(
     derive,
     declaredParameterTypes(binding)
   );
+}
+
+/** For each signature type: does it have a point parameter (a tuple)? */
+const HAS_POINT_PARAMETER = new WeakMap<object, boolean>();
+
+/**
+ * The signature of the function that `binding` holds, when the engine
+ * INFERRED it (`inferredCallSignature`), it is not generic, and it has a
+ * point parameter (a tuple type, as `d(a) := a[1] + a[2]` infers
+ * `tuple<number, number>` from the index reads). `undefined` otherwise. The
+ * rules of `inferredPointCallType` apply only to such a signature.
+ */
+export function inferredPointSignature(
+  binding: BoxedDefinition | undefined
+): Type | undefined {
+  const sig = inferredCallSignature(binding);
+  if (
+    typeof sig !== 'object' ||
+    sig.kind !== 'signature' ||
+    sig.typeParams !== undefined
+  )
+    return undefined;
+  let has = HAS_POINT_PARAMETER.get(sig);
+  if (has === undefined) {
+    has = [...(sig.args ?? []), ...(sig.optArgs ?? [])].some((x) =>
+      isPointParameterType(x.type)
+    );
+    HAS_POINT_PARAMETER.set(sig, has);
+  }
+  return has ? sig : undefined;
+}
+
+/**
+ * The type of a PARTIAL application (fewer arguments than parameters) of
+ * the function that `binding` holds, whose type as the function of the
+ * remaining parameters is `curried` (`curriedSignature`,
+ * `boxed-function.ts`). Each route types a partial application with this
+ * function before any other rule.
+ *
+ * When the signature was INFERRED and has a point parameter
+ * (`inferredPointSignature`), the evaluation runs the point-list map before
+ * it curries: an argument that maps (`inferredArgumentMaps`) gives a list
+ * of functions. With `h(a, t) := a[1] + a[2] + t`, `h([(1, 2), (3, 4)])` is
+ * `[t ↦ t + 3, t ↦ t + 7]`, a `list<(unknown) -> number>`, and
+ * `h([1, 2])` is the function `t ↦ t + 3`. A list at a scalar parameter is
+ * mapped to its cells, so when its elements may be lists the depth is not
+ * known and the type is `list<any>`. An argument that may be a point or a
+ * list of points gives `curried | list<curried>`. A DECLARED signature is a
+ * contract and `curried` is returned unchanged.
+ */
+export function partialApplicationType(
+  binding: BoxedDefinition | undefined,
+  types: ReadonlyArray<Type>,
+  curried: Type
+): Type {
+  const sig = inferredPointSignature(binding);
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return curried;
+  const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])].map(
+    (x) => x.type
+  );
+  let maps = false;
+  let maybe = false;
+  for (let i = 0; i < types.length; i++) {
+    const t = presentPart(types[i]);
+    const m = inferredArgumentMaps(slots[i], t);
+    if (m === undefined && isPointParameterType(slots[i] ?? 'any'))
+      maybe = true;
+    if (m !== true) continue;
+    maps = true;
+    if (!isPointParameterType(slots[i])) {
+      const e = collectionElementType(t);
+      if (e === undefined || !cannotHoldAList(e))
+        return { kind: 'list', elements: 'any' };
+    }
+  }
+  if (maps) return { kind: 'list', elements: curried };
+  return maybe ? widen(curried, { kind: 'list', elements: curried }) : curried;
+}
+
+/**
+ * Whether an argument of type `t` at the parameter `slot` of an INFERRED
+ * signature with a point parameter makes the call map: `true` when its
+ * type says so, `false` when its type says it does not, `undefined` when
+ * the type does not say. The call maps over a list of points at a point
+ * parameter, and over a list at a scalar parameter (the point-list map of
+ * the evaluation, `pointListParamSlots` in `boxed-function.ts`).
+ */
+export function inferredArgumentMaps(
+  slot: Type | undefined,
+  t: Type
+): boolean | undefined {
+  if (slot === undefined) return false;
+  if (isPointParameterType(slot)) {
+    if (isPointOrPointListArgumentType(t, slot)) return undefined;
+    return isPointListArgumentType(t, slot);
+  }
+  if (!isScalarType(slot)) return false;
+  if (isSubtype(t, 'string') || isTupleShapedType(t)) return false;
+  if (isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)) return true;
+  return factsOf(t).collection === false ? false : undefined;
+}
+
+/**
+ * True when an argument of type `t` at the point parameter `point` of an
+ * INFERRED signature is bound whole to the parameter, and the signature
+ * does not describe the call. The engine inferred the parameter type from
+ * the uses in the body, so it is not a contract: the call does not check
+ * the argument against it, and the body computes with the argument as it
+ * is. The type of such a call is derived from the body
+ * (`inferredPointCallType`).
+ *
+ * The signature describes these arguments, and this function is false for
+ * them:
+ *
+ * - an argument of the parameter type (a point);
+ * - a list whose elements are numbers, or of unknown type (`[1, 2]`,
+ *   `[x, x]` with `x` of unknown type): the body reads it by index as a
+ *   point;
+ * - a list of points, or an argument that may be a point or a list of
+ *   points: the call maps over the points (`inferredArgumentMaps`);
+ * - an argument of type `unknown`, `any`, `error` or `never`: nothing in
+ *   the type shows that the signature does not describe it.
+ *
+ * Every other argument is bound whole: a list whose elements may be lists
+ * (`[[1, 2], [3, 4]]`, `list<any>`, a `tensor<U>`), a set, an `Interval`,
+ * a string, a number (`NaN` included), a boolean, an absent value.
+ */
+export function bindsWholeAtInferredPoint(t: Type, point: Type): boolean {
+  if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
+    return false;
+  if (inferredArgumentMaps(point, t) !== false) return false;
+  if (isSubtype(t, point)) return false;
+  const element = indexedElementType(t);
+  if (element === undefined) return true;
+  const e = stripMissingFromType(element);
+  return e !== 'unknown' && !isSubtype(e, 'number');
+}
+
+/**
+ * The element type of `t` when it is a collection that the body can read
+ * by index (a list, a tuple, not a string, not a set). `undefined`
+ * otherwise.
+ */
+function indexedElementType(t: Type): Type | undefined {
+  if (factsOf(t).collection !== true || isSubtype(t, 'string'))
+    return undefined;
+  if (!isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) && !isTupleShapedType(t))
+    return undefined;
+  return collectionElementType(t);
+}
+
+/**
+ * The type of a call of the function that `binding` holds, whose signature
+ * `sig` the engine INFERRED and has a point parameter
+ * (`inferredPointSignature`). An inferred signature is not a contract: the
+ * engine inferred it from the uses in the body, and it does not prove what
+ * the body does with an argument of another type. `undefined` when the
+ * signature describes the call (`declared` is the signature result), and
+ * the caller types it as any other call.
+ *
+ * With `d(a) := a[1] + a[2]` (inferred `(tuple<number, number>) ->
+ * number`):
+ *
+ * - `d([1, 2])` and `d((1, 2))`: `undefined`, the signature result
+ *   `number` describes the call.
+ * - `d([[1, 2], [3, 4]])` binds the matrix whole (`bindsWholeAtInferredPoint`),
+ *   and the type is derived from the body with the parameter typed as the
+ *   argument: `vector<integer^2>`, for the value `[4, 6]`. `d(3)`,
+ *   `d("ab")`, `d(Interval(0, 1))` are typed from the body in the same way,
+ *   and the body gives an error type for each. When the body gives no type,
+ *   the type is `any`, never the signature result, and never `error` from
+ *   the signature alone: with `f(a, b) := If(b, a[1] + a[2], 42)`,
+ *   `f(3, False)` is `42`.
+ * - A list whose elements may be numbers (`list<any>`, `list<number |
+ *   list<number>>`) may be read as a point, so the signature result is
+ *   joined to the type. A list whose elements may be points may be mapped
+ *   over by the evaluation, which reads the type of the VALUE, so
+ *   `list<R>` is joined to the type, with `R` the signature result.
+ * - When another argument makes the call map (`inferredArgumentMaps`), the
+ *   type is the list of the results of one call: the type derived from
+ *   the body with each mapped argument typed as one of its elements (a
+ *   point at a point parameter, an element of the list at a scalar
+ *   parameter), and each other argument typed as itself. With
+ *   `h(a, t) := a[1] + a[2] + t`, `h([[1, 2], [3, 4]], [10, 20])` is
+ *   `[[14, 16], [24, 26]]`, a `list<vector<integer^2>>`, and `h(P, 1)`
+ *   with `P` a list of points is a `list<number>`. When the body gives no
+ *   type, each element is `any` if an argument is bound whole, else the
+ *   signature result. An element at a scalar parameter that may be a list
+ *   is mapped to its cells, at a depth that the type does not say, and a
+ *   point argument whose elements may be points may be mapped too: the
+ *   type is then `any`.
+ * - When an argument may make the call map, and the type does not say if
+ *   it does (an argument of type `unknown` at a scalar parameter, a point
+ *   or a list of points at a point parameter), and another argument is
+ *   bound whole or maps, the type is `any`.
+ *
+ * A PARTIAL application (fewer arguments than parameters) gives
+ * `undefined`: each route types it first as the function of the remaining
+ * parameters (`curriedSignature`, `boxed-function.ts`).
+ *
+ * The boxed route (`type()` in `boxed-function.ts`) types the map of a
+ * list of points itself (`pointListApplicationType`), with the element
+ * type that this function gives for one element of the map.
+ */
+function inferredPointCallType(
+  engine: IComputeEngine,
+  binding: BoxedDefinition | undefined,
+  sig: Type,
+  args: readonly OperandDescriptor[],
+  declared: Type,
+  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
+): Type | undefined {
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return undefined;
+  const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])].map(
+    (x) => x.type
+  );
+  if (args.length < (sig.args?.length ?? 0) || args.length > slots.length)
+    return undefined;
+  const types = args.map((a) => presentPart(a.type));
+  const mapping = args.map((_, i) => inferredArgumentMaps(slots[i], types[i]));
+  const whole = args.map(
+    (_, i) =>
+      isPointParameterType(slots[i]) &&
+      bindsWholeAtInferredPoint(types[i], slots[i])
+  );
+  const maps = mapping.some((x) => x === true);
+  const bindsWhole = whole.some((x) => x);
+  if (!maps && !bindsWhole) return undefined;
+  if (mapping.some((x) => x === undefined)) return 'any';
+  // The values that the call may give besides the one derived from the
+  // body, for each argument bound whole whose elements may be numbers or
+  // points (see above).
+  let numbers = false;
+  let points = 0;
+  whole.forEach((w, i) => {
+    const element = w ? indexedElementType(types[i]) : undefined;
+    if (element === undefined) return;
+    const e = stripMissingFromType(element);
+    if (!provablyDisjoint(e, 'number')) numbers = true;
+    if (!provablyDisjoint(e, slots[i])) points += 1;
+  });
+  // With two such arguments, or one beside a mapped argument, the call may
+  // map over one of them and bind the other whole, and no type above
+  // describes that value.
+  if (points > 1 || (points > 0 && maps)) return 'any';
+  const elementArgs: OperandDescriptor[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (mapping[i] !== true) {
+      elementArgs.push(args[i]);
+      continue;
+    }
+    const slot = slots[i];
+    if (isPointParameterType(slot)) {
+      elementArgs.push(describeType(slot));
+      continue;
+    }
+    const e = collectionElementType(types[i]);
+    if (e === undefined || !cannotHoldAList(e))
+      return { kind: 'list', elements: 'any' };
+    elementArgs.push(describeType(e));
+  }
+  const literal = userFunctionLiteral(binding);
+  const body =
+    literal === undefined
+      ? undefined
+      : literalBodyResultType(
+          engine,
+          literal,
+          elementArgs,
+          'any',
+          derive,
+          declaredParameterTypes(binding)
+        );
+  // A body typed `unknown` gives no type: `unknown` marks a type not
+  // inferred yet (`d(3)` reads `3[1]`, which the derivation types
+  // `unknown`).
+  let result =
+    body === undefined || body === 'unknown'
+      ? bindsWhole
+        ? 'any'
+        : declared
+      : body;
+  if (numbers) result = widen(result, declared);
+  if (points > 0) result = widen(result, { kind: 'list', elements: declared });
+  return maps ? { kind: 'list', elements: result } : result;
+}
+
+/**
+ * The signature of the function that `binding` holds, when the engine
+ * INFERRED it from the body and the author did not declare it. `undefined`
+ * when the signature is a contract, or when `binding` holds no function.
+ *
+ * - An operator definition: its signature, when `inferredSignature` is set
+ *   (`d(a) := a[1] + a[2]`, or a function literal with no annotation that
+ *   is assigned to a name that was not declared).
+ * - A value definition (a symbol that holds a function literal): the type
+ *   of the literal, when the symbol was declared as a bare `function` (or
+ *   its type was inferred) and no parameter of the literal has a type
+ *   annotation. With `ce.declare('d', 'function')` and then
+ *   `(a) ↦ a[1] + a[2]` assigned to `d`, the parameter type
+ *   `tuple<number, number>` was inferred from the index reads, as for the
+ *   operator definition above. A symbol declared with a signature
+ *   (`ce.declare('k', '(tuple<number, number>) -> number')`) has a
+ *   contract, and so does a literal that annotates a parameter.
+ */
+export function inferredCallSignature(
+  binding: BoxedDefinition | undefined
+): Type | undefined {
+  if (!binding) return undefined;
+  if ('operator' in binding)
+    return binding.operator.inferredSignature
+      ? binding.operator.signature?.type
+      : undefined;
+  const value = binding.value;
+  if (!value.inferredType && !isWildcardFunctionType(value.type?.type))
+    return undefined;
+  const literal = value.value;
+  if (!literal || !isFunction(literal, 'Function')) return undefined;
+  if (literal.ops.slice(1).some((p) => functionLiteralParameterType(p)))
+    return undefined;
+  return literal.type.type;
 }
 
 /** Scalar declarations already describe their result's representation. This

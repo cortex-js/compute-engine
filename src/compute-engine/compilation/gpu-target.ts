@@ -99,6 +99,7 @@ import { isBroadcastableCollection } from '../collection-utils.js';
 import { literalParamsMap } from '../library/core.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
   overriddenCompilationHeads,
@@ -6597,7 +6598,16 @@ function compileGPUSumProduct(
   const canProveCounter = gpuCounterIsStable(args[0], index, target);
 
   // Unroll small constant ranges — pure inline expression
-  if (bothConstant && upperNum - lowerNum + 1 <= GPU_UNROLL_LIMIT) {
+  // A clause whose terms would hold too many nodes in all is a loop
+  // (`unroll-budget.ts`).
+  if (
+    bothConstant &&
+    unrollFits(
+      upperNum - lowerNum + 1,
+      unrolledTermSize(args[0]),
+      GPU_UNROLL_LIMIT
+    )
+  ) {
     const emitTerms = (
       invariants: ReadonlyArray<LoopInvariantBinding>
     ): string => {
@@ -6708,6 +6718,27 @@ function compileGPUSumProduct(
   // legacy bare block is returned, valid only as a top-level function body.
   const acc = BaseCompiler.tempVar(target);
   const intType = isWGSL ? 'i32' : 'int';
+
+  // The loop counter is a signed 32-bit integer (`int` in GLSL, `i32` in
+  // WGSL). A constant bound is written into the loop header as an integer
+  // literal, so it must fit that type, and the last increment, `upper + 1`,
+  // must fit too: at an upper bound of 2147483647 the counter overflows and
+  // the condition `index <= upper` stays true, so the loop does not end. A
+  // bound out of range fails the compilation, and the caller can use the
+  // interpreter. A literal bound reaches this point without the range check
+  // of `gpuBoundConstant`, which applies only to a folded bound.
+  const I32_MIN = -(2 ** 31);
+  const I32_MAX = 2 ** 31 - 1;
+  for (const [which, bound, max] of [
+    ['lower', lowerNum, I32_MAX],
+    ['upper', upperNum, I32_MAX - 1],
+  ] as const) {
+    if (bound !== undefined && (bound < I32_MIN || bound > max))
+      throw new Error(
+        `Could not compile \`${kind}\`: the ${which} bound ${bound} is outside ` +
+          `the range of the 32-bit loop counter (${I32_MIN} to ${max}).`
+      );
+  }
 
   // The body binds `index`, so it gets its OWN sink: a statement it hoists
   // belongs inside this loop (a nested Sum), not ahead of it.

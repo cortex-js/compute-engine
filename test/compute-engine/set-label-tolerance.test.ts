@@ -32,8 +32,15 @@ describe('geometry intersection idiom', () => {
 
   test('labels that bind to constants still qualify (G, E)', () => {
     expect(isClean('K = AC \\cap EG')).toBe(true);
-    expect(isClean('x \\in G \\setminus H')).toBe(true);
-    expect(isClean('x \\in G \\setminus \\{e\\}')).toBe(true);
+    // A fresh engine: in the shared one, the product `EG` above made `G` a
+    // number (ROADMAP CE-32), as `E\\cdot G` does, and a number is not a set.
+    const fresh = new ComputeEngine();
+    const isCleanIn = (s: string) => {
+      const expr = fresh.parse(s);
+      return expr.isValid && !JSON.stringify(expr.json).includes('"Error"');
+    };
+    expect(isCleanIn('x \\in G \\setminus H')).toBe(true);
+    expect(isCleanIn('x \\in G \\setminus \\{e\\}')).toBe(true);
   });
 
   test('union and membership over labels', () => {

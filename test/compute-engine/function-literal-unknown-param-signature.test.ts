@@ -142,9 +142,12 @@ describe('AN OPERAND THAT MAY BE ABSENT OR OF UNKNOWN TYPE AT A DATA PARAMETER',
   // parameter typed `string`, as it admits an operand typed `unknown` (both
   // are assumed to be valid); the evaluation checks the value, and refuses
   // a number, a list and an absent value with `incompatible-type`.
+  // The body is `[t, t]`, not `[t, 2t]`: the product `2t` narrows `t` to a
+  // number (ROADMAP CE-32), and `g(x)[1]` is then a number, a list or
+  // absent, which a `string` parameter refuses at boxing.
   test('boxes, and the evaluation checks the value', () => {
     const ce = new ComputeEngine();
-    ce.assign('g', ce.parse('t \\mapsto [t, 2t]'));
+    ce.assign('g', ce.parse('t \\mapsto [t, t]'));
     ce.declare('x', 'any');
     const expr = ce.box(['LatexString', ['At', ['g', 'x'], 1]]);
     expect(expr.isValid).toBe(true);

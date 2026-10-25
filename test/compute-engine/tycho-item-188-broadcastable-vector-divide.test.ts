@@ -145,19 +145,7 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     expect(typeOf('\\frac{s}{g(t)}')).toBe('broadcastable<number>');
     expect(typeOf('\\frac{s}{w}')).toBe('number');
     // No denominator, no tier movement: the sibling operators echo the shape.
-    // `H(X(t), Y(t)) - g(t)` denotes the same type, but the sum of a list
-    // and a `broadcastable` operand does not reduce its element union, and
-    // it prints `list<list<any> | list<any> | number>`: the check reads the
-    // type both ways instead of the printed form.
-    const numerator = ce.parse('H(X(t), Y(t))', { strict: false }).type;
-    for (const latex of ['H(X(t), Y(t)) - g(t)', '-H(X(t), Y(t))']) {
-      const t = ce.parse(latex, { strict: false }).type;
-      expect([latex, t.matches(numerator), numerator.matches(t)]).toEqual([
-        latex,
-        true,
-        true,
-      ]);
-    }
+    expect(typeOf('H(X(t), Y(t)) - g(t)')).toBe('list<list<any> | number>');
     expect(typeOf('-H(X(t), Y(t))')).toBe('list<list<any> | number>');
   });
 

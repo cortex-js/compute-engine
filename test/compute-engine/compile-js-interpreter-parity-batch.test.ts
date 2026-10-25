@@ -92,7 +92,10 @@ function expectParity(rows: Array<[unknown, unknown]> | 'declined'): void {
 function engineWithG(): ComputeEngine {
   const ce = new ComputeEngine();
   ce.declare('g', 'function');
-  ce.assign('g', ce.parse('t \\mapsto [t, 2t]'));
+  // The body of `g` is `[t, t]`, so that an element of `g(x)` is of unknown
+  // type (`missing | unknown`). With `[t, 2t]`, the product `2t` narrows `t`
+  // to a number (ROADMAP CE-32), and `g` is then typed as `h` is.
+  ce.assign('g', ce.parse('t \\mapsto [t, t]'));
   ce.declare('h', 'function');
   ce.assign('h', ce.parse('(t: number) \\mapsto [t, 2t]'));
   ce.declare('x', 'any');

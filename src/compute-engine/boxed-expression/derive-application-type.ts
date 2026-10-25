@@ -29,6 +29,7 @@ import {
   appliesToListCoordinateTuple,
   addsPointToNumberCollection,
   isPointArithmeticError,
+  isPointParameterType,
   isTupleShapedType,
   scalarOrListUnionCellType,
   typeCouldBeUnkeyedCollection,
@@ -154,6 +155,16 @@ const NUMERIC_OPERAND_CHECK: Readonly<
  * True when the ground, one-arm signature of `def` has a parameter that is
  * provably disjoint from the type of its operand in `operands`, so that the
  * boxed application is refused (`deriveApplicationType()`).
+ *
+ * A point parameter (a tuple type) of an INFERRED signature refuses no
+ * operand. The engine inferred the parameter type from the uses in the body
+ * (`d(a) := a[1] + a[2]` types `a` as `tuple<number, number>` from the
+ * index reads), so it is not a contract: the call binds the operand whole,
+ * and the body computes with it. `d([u, u])` is a number,
+ * `d([[1, 2], [3, 4]])` is `[4, 6]`, and with
+ * `f(a, b) := If(b, a[1] + a[2], 42)`, `f(3, False)` is `42`. The type of
+ * such a call is derived from the body (`inferredPointCallType`,
+ * `call-result-type.ts`).
  */
 function signatureRefusesOperandType(
   def: BoxedOperatorDefinition,
@@ -170,6 +181,7 @@ function signatureRefusesOperandType(
     if (def.stripsMissingAt(i)) t = stripMissingFromType(t);
     if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
       return false;
+    if (def.inferredSignature && isPointParameterType(param)) return false;
     // A tuple at a scalar parameter is mapped over its components, at an
     // operator that does not broadcast too (a user definition).
     if (isTupleShapedType(t)) return false;

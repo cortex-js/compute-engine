@@ -383,7 +383,9 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
     const e = new ComputeEngine();
     const m = e.parse('\\max(x, 2x-1)');
     expect(m.operator).toBe('Max');
-    expect(e.box('x').type.toString()).toBe('value');
+    // The product `2x` narrows `x` to `number`, as `2\\cdot x` does
+    // (ROADMAP CE-32); the type still has no `missing` arm.
+    expect(e.box('x').type.toString()).toBe('number');
   });
 });
 

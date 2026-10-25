@@ -57,6 +57,7 @@ import {
   OWNED_LOCAL_UPDATE_OPS,
 } from './in-place-update.js';
 import { resolveStorageHints } from './storage-hints.js';
+import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import {
   isExpression,
   isSymbol,
@@ -15430,7 +15431,12 @@ function unrolledBigOpLane(expr: Expression): boolean | undefined {
   if (
     lowerNum === undefined ||
     upperNum === undefined ||
-    upperNum - lowerNum + 1 > UNROLL_LIMIT ||
+    // The same size limit as the emitter applies below (`emitSumProduct`).
+    !unrollFits(
+      upperNum - lowerNum + 1,
+      unrolledTermSize(expr.ops[0]),
+      UNROLL_LIMIT
+    ) ||
     (target.iterationBudget !== undefined &&
       !(upperNum - lowerNum < target.iterationBudget))
   )
@@ -15543,7 +15549,9 @@ function emitSumProduct(
   // loop below.
   if (bothConstant && withinBudget && !elementwiseBody) {
     const termCount = upperNum - lowerNum + 1;
-    if (termCount <= UNROLL_LIMIT) {
+    // A clause whose terms would hold too many nodes in all is a loop
+    // (`unroll-budget.ts`).
+    if (unrollFits(termCount, unrolledTermSize(body, rest), UNROLL_LIMIT)) {
       // `bodyIsComplex` above read the body with the index merely MASKED. The
       // unrolled terms bind it to a literal integer, which can settle a sign
       // the masked reading cannot — see `unrolledClauseLane`, which

@@ -450,7 +450,9 @@ const REVIEW_CASES: ReviewCase[] = [
     decl: 'list<list<integer> | integer>',
     value: ['List', ['List', 1, 2], 3],
     expr: ['Mod', 'L', ['List', ['List', 1, 2], ['List', 3, 4]]],
-    type: 'list<list<nan | real> | list<nan | real^2> | nan | real>',
+    // `list<nan | real^2>` (a row of the matrix) is held by
+    // `list<nan | real>`, so it is dropped from the union.
+    type: 'list<list<nan | real> | nan | real>',
   },
   {
     label: 'Less over an absent row',

@@ -9,6 +9,7 @@ import type {
 } from '../global-types.js';
 import { isFunction, isSymbol, isString, isNumber } from './type-guards.js';
 import { canonicalMultiply } from './arithmetic-mul-div.js';
+import { inferNumericArgs } from './validate.js';
 import { productMayHaveMatrix } from './matrix-operand.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -806,9 +807,13 @@ function readJuxtapositionOnce(
   const y = canonicalInvisibleOperator(x.ops, { engine: ce });
   let reading: JuxtapositionReading;
   if (!y) reading = { canonical: ce.Nothing, factors: undefined };
-  else if (isFunction(y, 'Multiply') && y.isValid)
+  else if (isFunction(y, 'Multiply') && y.isValid) {
+    // Narrow the valueless factors as the `InvisibleOperator` canonical
+    // handler does (`library/core.ts`): in `3(b c)` and `a(b c)`, `b` and `c`
+    // are inferred numbers, as in `3(b\cdot c)`.
+    inferNumericArgs(ce, y.ops);
     reading = { canonical: canonicalMultiply(ce, y.ops), factors: y.ops };
-  else reading = { canonical: y, factors: undefined };
+  } else reading = { canonical: y, factors: undefined };
   // The `InvisibleOperator` in parentheses has the same canonical form
   canonicalCache?.set(x, reading.canonical);
   return reading;

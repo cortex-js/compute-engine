@@ -27,6 +27,7 @@ import {
   checkType,
   checkArity,
   expectsCharacterNotString,
+  inferNumericArgs,
 } from '../boxed-expression/validate.js';
 import {
   collectTuplePattern,
@@ -4384,8 +4385,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // made `f` an `incompatible-type` error) is returned as it is, as the
         // explicit operator (`2\times f`) returns it: an invalid product is
         // not folded or sorted.
-        if (isFunction(y, 'Multiply') && y.isValid)
+        if (isFunction(y, 'Multiply') && y.isValid) {
+          // A product written by juxtaposition narrows the type of its
+          // valueless operands as the explicit `Multiply` does: in `2t`, a
+          // `t` with no value and no declaration is inferred a number, as in
+          // `2\cdot t`. Only the types change: the product keeps the
+          // factors and the order that `canonicalMultiply` gives it.
+          inferNumericArgs(engine, y.ops);
           return canonicalMultiply(engine, y.ops);
+        }
         return y;
       },
     },

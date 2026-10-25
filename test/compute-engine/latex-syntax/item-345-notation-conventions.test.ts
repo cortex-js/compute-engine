@@ -105,7 +105,10 @@ describe('345 Beta, Zeta and Lb write conventional notation when applied', () =>
       'x',
     ]);
     expect(ce.parse('\\mathrm{B}(2, 3)').json).toEqual(['Beta', 2, 3]);
-    expect(ce.parse('\\mathrm{B}(x+1)').json).toEqual([
+    // A fresh engine: in the shared one, the product `\\mathrm{B}x` above
+    // made `B_upright` a number (ROADMAP CE-32), and a number followed by
+    // parentheses is a product, as after `\\mathrm{B}\\cdot x`.
+    expect(new ComputeEngine().parse('\\mathrm{B}(x+1)').json).toEqual([
       'B_upright',
       ['Add', 'x', 1],
     ]);

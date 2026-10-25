@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-475.
+Next free reference: CE-478.
 
 **Entry format.**
 
@@ -130,6 +130,41 @@ problem does not occur on its installed release). Report:
   row.
 
 ## Types and type inference
+
+### CE-475. The derived type of `At` does not refuse a base that cannot be indexed
+
+**Status:** open; defect.
+
+On the descriptor route (the type of `At` derived from operand types, used
+when a function literal or a call is typed from a body), the `At` type
+handler (`library/collections.ts`) does not refuse its base: a set base gives
+`nan | real` or `integer | nan`, and a number or boolean base gives `unknown`,
+where the boxed `At` gives `error`. So with `d(a) := a[1] + a[2]`,
+`d(Interval(0, 1))` is typed `nan | real` for an error value, and
+`h(3, [10, 20])` with `h(a, t) := a[1] + a[2] + t` is typed `list<integer>`
+for a list of errors (the `Add` of the body absorbs `unknown`). Fix: the
+descriptor route of `At` answers `error` for a base that is provably not an
+indexed collection, as the boxed route does.
+
+### CE-476. A partial application that reads a missing argument by index is typed as a function but evaluates to an error
+
+**Status:** open; defect.
+
+With `h(a, t) := a[1] + a[2] + t`, `h(3)` is typed `(t: unknown) -> number`
+but evaluates to an `incompatible-type` error: the evaluation reads `3[1]`
+when it builds the partial application. Decide which is right (a partial
+application that only fails when it is called, or an eager check), then make
+the type and the value agree. Also: the evaluation runs the point-list map
+before it curries, so `h([(1, 2), (3, 4)])` is a list of two functions.
+
+### CE-477. The derived route does not map a list of points at a declared point parameter
+
+**Status:** open; defect.
+
+With `k` declared `(tuple<number, number>) -> number`, the boxed `k(P)` for a
+list of points `P` maps (a list of results), but the derived route
+(`deriveApplicationType`) types it as the scalar result. Related to CE-472
+(the derived route does not check arguments against a declared signature).
 
 ### CE-472. The derived type of a call does not check the arguments against a declared signature
 
