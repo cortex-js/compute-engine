@@ -160,8 +160,7 @@ function declaredParameterTypes(
   if ('operator' in binding) {
     if (binding.operator.inferredSignature) return undefined;
     sig =
-      binding.operator._validationSignature ??
-      binding.operator.signature?.type;
+      binding.operator._validationSignature ?? binding.operator.signature?.type;
   } else {
     if (binding.value.inferredType) return undefined;
     sig = binding.value.type?.type;
@@ -664,7 +663,10 @@ function literalBodyResultType(
   literal: Expression & FunctionInterface,
   args: readonly OperandDescriptor[],
   declared: Type,
-  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined,
+  derive: (
+    head: string,
+    args: readonly OperandDescriptor[]
+  ) => Type | undefined,
   // The parameter types of the declared signature of the called function,
   // when it has one (`declaredParameterTypes`). They decide, with the
   // annotations of the literal, how an absent argument is bound.
@@ -738,11 +740,7 @@ function literalBodyResultType(
   }
   // The declared parameter types decide how an absent argument is bound, and
   // one literal can be the value of several functions declared differently.
-  const key = [
-    declared,
-    ...args.map((x) => x.type),
-    ...(declaredParams ?? []),
-  ]
+  const key = [declared, ...args.map((x) => x.type), ...(declaredParams ?? [])]
     .map((t) => typeToString(t))
     .join(';');
   if (results.has(key)) return results.get(key);

@@ -14169,9 +14169,7 @@ function compileExtremum(
     // a scalar, because a scalar always contributes one element.
     const isFolded = (a: Expression, i: number): boolean =>
       isIndexedCollectionOperand(a) || checkedArray[i] !== undefined;
-    const hasScalar = args.some(
-      (a, i) => !isFolded(a, i) && !mayBeArray(a)
-    );
+    const hasScalar = args.some((a, i) => !isFolded(a, i) && !mayBeArray(a));
     const params = args.map((_, i) => `_p${i}`);
     const step = (v: string): string =>
       `_a = ${fn}(_a, ${v});${hasScalar ? '' : ' _n++;'}`;

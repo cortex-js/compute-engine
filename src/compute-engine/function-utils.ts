@@ -66,7 +66,6 @@ import {
   isDestructuringParameter,
   isRestParameter,
   capturedSymbols,
-  isFunctionLiteralParameter,
   markFunctionLiteralParameter,
   mentionsQuantifiedVariable,
   restParameterIndex,
@@ -115,7 +114,6 @@ import {
   EffectContractError,
   inferFunctionLiteralEffects,
 } from './boxed-expression/effects-inference.js';
-import { isEffectSubset } from '../common/type/effects.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isOperatorDef } from './boxed-expression/definition-guards.js';
 import { releaseKeptEagerSourceValues } from './boxed-expression/eager-source-values.js';
@@ -131,7 +129,10 @@ import {
   type MemoDeps,
 } from './boxed-expression/collection-element-memo.js';
 import { sequenceReadStopCount } from './boxed-expression/sequence-read-stops.js';
-import { isPureComputedEffects } from '../common/type/effects.js';
+import {
+  isEffectSubset,
+  isPureComputedEffects,
+} from '../common/type/effects.js';
 import type { FunctionSignature, Type } from '../common/type/types.js';
 import { parseType } from '../common/type/parse.js';
 import { isPolymorphicType } from '../common/type/instantiate.js';

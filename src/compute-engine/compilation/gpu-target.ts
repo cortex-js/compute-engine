@@ -2707,8 +2707,7 @@ function gpuReduceSumOffset(
     }
     // Tried last: an exact multiple of π above keeps all its digits, where
     // the value of `N()` would keep only the digits of the engine precision.
-    const w =
-      target === undefined ? undefined : gpuLibraryConstant(op, target);
+    const w = target === undefined ? undefined : gpuLibraryConstant(op, target);
     if (w !== undefined) {
       literals.push(w);
       continue;
@@ -8188,8 +8187,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // interpreter has a complex value for a complex argument, so the three
   // heads are real-only lowerings (`GPU_REAL_ONLY_LOWERINGS`).
   Digamma: ([x], compile) => {
-    if (x === null)
-      throw new Error('Could not compile `Digamma`: no argument');
+    if (x === null) throw new Error('Could not compile `Digamma`: no argument');
     return `_gpu_digamma(${compile(x)})`;
   },
   Trigamma: ([x], compile) => {

@@ -250,7 +250,11 @@ function collectConstantCofactors(
     const rest = restOf(s);
     const group = [i];
     for (let j = i + 1; j < terms.length; j++)
-      if (!done.has(j) && split[j].rest.length > 0 && restOf(split[j]).isSame(rest))
+      if (
+        !done.has(j) &&
+        split[j].rest.length > 0 &&
+        restOf(split[j]).isSame(rest)
+      )
         group.push(j);
     if (group.length < 2 || !group.some((k) => split[k].hasSum)) {
       result.push(terms[i]);

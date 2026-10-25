@@ -131,9 +131,7 @@ export interface BroadcastLiftHooks {
  * `Conjugate`). `'residue'` marks an operator with residue arithmetic,
  * which admits a residue class as an operand.
  */
-const NUMERIC_OPERAND_CHECK: Readonly<
-  Record<string, 'residue' | 'number'>
-> = {
+const NUMERIC_OPERAND_CHECK: Readonly<Record<string, 'residue' | 'number'>> = {
   Add: 'residue',
   Subtract: 'residue',
   Multiply: 'residue',

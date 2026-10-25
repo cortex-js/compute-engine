@@ -13505,13 +13505,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // the cells (`list<number>`, `list<value>`). (CE-452)
       const resultType =
         bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive, true) ??
-        bareOperatorElementTypeD(
-          ops[0],
-          ops.slice(1),
-          engine,
-          derive,
-          true
-        ) ??
+        bareOperatorElementTypeD(ops[0], ops.slice(1), engine, derive, true) ??
         broadcastingCallbackElementTypeD(
           ops[0],
           ops.slice(1),

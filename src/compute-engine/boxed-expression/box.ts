@@ -1763,8 +1763,7 @@ function boxInternal(
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
     if ('sym' in expr)
       return ce.symbol(expr.sym, {
-        canonical:
-          canonical || (structural && options.unboundSymbols !== true),
+        canonical: canonical || (structural && options.unboundSymbols !== true),
         autoDeclare: canonical,
         metadata,
       });

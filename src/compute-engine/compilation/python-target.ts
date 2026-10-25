@@ -4613,11 +4613,7 @@ function compilePythonIfStatement(
     `${head}\n${indentPythonStatements(body)}`;
   const hasElse = args.length > 2 && args[2] !== undefined;
 
-  const decidability = BaseCompiler.conditionDecidability(
-    cond,
-    true,
-    target
-  );
+  const decidability = BaseCompiler.conditionDecidability(cond, true, target);
 
   // Decided by construction: the plain `if`/`else` needs no extra test.
   if (decidability === null) {
@@ -5396,9 +5392,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       // operand, spliced into the parent: a compound operand is grouped, or
       // `3·ElementMax(x + 1)` compiled to `3 * x + 1`.
       if (args.length === 1)
-        return isFunction(args[0])
-          ? `(${compile(args[0])})`
-          : compile(args[0]);
+        return isFunction(args[0]) ? `(${compile(args[0])})` : compile(args[0]);
       let result = compile(args[0]);
       for (let i = 1; i < args.length; i++)
         result = `np.maximum(${result}, ${compile(args[i])})`;
@@ -5412,9 +5406,7 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       // operand, spliced into the parent: a compound operand is grouped, or
       // `3·ElementMin(x + 1)` compiled to `3 * x + 1`.
       if (args.length === 1)
-        return isFunction(args[0])
-          ? `(${compile(args[0])})`
-          : compile(args[0]);
+        return isFunction(args[0]) ? `(${compile(args[0])})` : compile(args[0]);
       let result = compile(args[0]);
       for (let i = 1; i < args.length; i++)
         result = `np.minimum(${result}, ${compile(args[i])})`;

@@ -751,8 +751,7 @@ function serializeComparisonChain(
   const parts: string[] = [];
   for (const [k, link] of links.entries()) {
     const def = serializer.dictionary.ids.get(operator(link)) as
-      | IndexedLatexDictionaryEntry
-      | undefined;
+      IndexedLatexDictionaryEntry | undefined;
     if (def?.kind !== 'infix') return null;
     const latex = serializer.serialize(link);
     const terms = operands(link);

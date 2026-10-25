@@ -10,7 +10,6 @@ import type {
   PureEngineView,
   Scope,
   SymbolDefinitions,
-  TypeHandlerContext,
 } from '../global-types.js';
 
 import type { Type } from '../../common/type/types.js';

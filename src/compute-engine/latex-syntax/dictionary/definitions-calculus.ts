@@ -374,10 +374,7 @@ function parseSubintegrand(
       denominator !== null &&
       parseSubintegrand(denominator, binderName)[1].length > 0
     )
-      return [
-        ['Divide', op1, ['Error', "'unexpected-differential'"]],
-        [],
-      ];
+      return [['Divide', op1, ['Error', "'unexpected-differential'"]], []];
   } else {
     // Some other function, e.g. trig function, etc...
     const args = operands(expr);

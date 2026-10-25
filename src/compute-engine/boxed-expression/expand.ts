@@ -5,11 +5,7 @@ import type {
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import {
-  isContinuationOperand,
-  isFunction,
-  isNumber,
-} from './type-guards.js';
+import { isContinuationOperand, isFunction, isNumber } from './type-guards.js';
 
 import { asSmallInteger } from './numerics.js';
 import { mul, expandProducts } from './arithmetic-mul-div.js';

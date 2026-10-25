@@ -218,8 +218,7 @@ export function ownedLocalUpdateChains(
     const h = e.operator;
     if (h === 'Function') return !mentions(e);
     if (h === 'Block' && e.localScope?.bindings.has(name)) return !mentions(e);
-    if (statement && h === 'Block')
-      return e.ops.every((x) => allowed(x, true));
+    if (statement && h === 'Block') return e.ops.every((x) => allowed(x, true));
     if (statement && h === 'Loop')
       return allowed(e.ops[0], true) && e.ops.slice(1).every((x) => allowed(x));
     if (statement && h === 'If')

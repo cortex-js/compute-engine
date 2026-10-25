@@ -679,9 +679,7 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
  * (`collectionElementType()` gives `tuple<string, any>` for its entries).
  * (CE-77)
  */
-export function dictionaryValueValuesType(
-  t: Readonly<Type>
-): Type | undefined {
+export function dictionaryValueValuesType(t: Readonly<Type>): Type | undefined {
   if (typeof t === 'string') return undefined;
   if (t.kind === 'dictionary') return t.values;
   if (t.kind === 'record') return widen(...Object.values(t.elements));
@@ -1790,7 +1788,8 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
   // `number`, as before.
   if (t === 'missing') return 'nan';
   if (t === 'never') return 'number';
-  if (typeof t === 'string') return isSubtype(t, 'number') ? widenWithNan(t) : t;
+  if (typeof t === 'string')
+    return isSubtype(t, 'number') ? widenWithNan(t) : t;
   switch (t.kind) {
     case 'union': {
       // A `missing` arm beside present arms that are all tuples is an
@@ -3044,9 +3043,7 @@ function raggedBroadcastResultType(
       !isShapeOpenType(b) && isSubtype(a, b);
     const reduced = types.filter(
       (a, i) =>
-        !types.some(
-          (b, j) => j !== i && holds(b, a) && (j < i || !holds(a, b))
-        )
+        !types.some((b, j) => j !== i && holds(b, a) && (j < i || !holds(a, b)))
     );
     types.length = 0;
     types.push(...reduced);

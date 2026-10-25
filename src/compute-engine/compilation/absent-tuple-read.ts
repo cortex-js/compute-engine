@@ -42,7 +42,10 @@ import { isOperatorDef } from '../boxed-expression/definition-guards.js';
  * `First`, `Second`, `Third` and `Last` lowerings read the slot type
  * instead, as the interpreter does.
  */
-export function tupleSlotReadType(baseType: Type, position: number): Type | undefined {
+export function tupleSlotReadType(
+  baseType: Type,
+  position: number
+): Type | undefined {
   if (!Number.isInteger(position) || position === 0) return undefined;
   const r = resolveTypeForCompilation(stripMissingFromType(baseType));
   if (typeof r === 'string' || r.kind !== 'tuple') return undefined;

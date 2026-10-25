@@ -2485,8 +2485,7 @@ export function divergentInfiniteProduct(
     const n = pn.length - 1;
     const lead = Math.abs(pn[n]);
     let bound = 0;
-    for (let i = 0; i < n; i++)
-      bound = Math.max(bound, Math.abs(pn[i]) / lead);
+    for (let i = 0; i < n; i++) bound = Math.max(bound, Math.abs(pn[i]) / lead);
     const top = Math.floor(1 + bound);
     for (let k = Math.max(a, -top); k <= top; k++) {
       let value = pn[n];
@@ -2509,9 +2508,7 @@ export function divergentInfiniteProduct(
     isNumber(x) && x.isExact ? x : undefined;
   // The limit of the factors, exactly: `ratio` is `L` when the degrees are
   // equal.
-  const ratio = exactNumber(
-    ce.function('Divide', [pe[dp], qe[dq]]).evaluate()
-  );
+  const ratio = exactNumber(ce.function('Divide', [pe[dp], qe[dq]]).evaluate());
   const lowerOrder = (): Expression | undefined => {
     // `r(k) − 1 = (p(k) − q(k))/q(k)`; with `p` and `q` of degree `d` and
     // the same leading coefficient `ℓ`, it is `c/k + O(1/k²)` with
@@ -2536,8 +2533,7 @@ export function divergentInfiniteProduct(
     if (!ratio) return undefined;
     // `|L| < 1`, whatever the sign of `L`: the magnitude of the partial
     // products tends to 0.
-    if (ratio.isLess(1) === true && ratio.isGreater(-1) === true)
-      grows = false;
+    if (ratio.isLess(1) === true && ratio.isGreater(-1) === true) grows = false;
     else if (ratio.isPositive !== true) return undefined;
     else if (ratio.isGreater(1) === true) grows = true;
     else if (ratio.isSame(1)) {

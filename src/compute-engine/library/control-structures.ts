@@ -98,13 +98,13 @@ import {
   errorValue,
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
-import { resolvesToSystemBinding } from '../boxed-expression/operand-descriptor.js';
 import {
   isErrorTypedOperand,
   isErrorTypedWithoutErrorValue,
 } from '../boxed-expression/error-typed-operand.js';
 import { noteFailedWalk } from '../boxed-expression/incomplete-walks.js';
 import {
+  resolvesToSystemBinding,
   deriveApplicationOf,
   describeBoundSymbol,
 } from '../boxed-expression/operand-descriptor.js';
@@ -308,27 +308,6 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
   evaluate: evaluateBlock,
   evaluateAsync: evaluateBlockAsync,
 };
-
-/**
- * True when the branch of a conditional is a bare symbol whose type is not
- * known (an untyped parameter `s`). Such a branch makes the result of the
- * conditional `unknown`: `widen` drops `unknown` from a join, so
- * `If(n = 0, s, [1, 2])` claimed `vector<integer^2>` while `f(0, 5)` with
- * `f(n, s) = s if n == 0 else f(n - 1, [1, 2])` is `5`.
- *
- * Only a SYMBOL counts. An application typed `unknown` keeps the join of the
- * other branches, for two reasons. A `Return` branch yields no value in
- * place (it leaves the enclosing function), so `If(c, Return(1), 2)` is an
- * `integer` where it is read. And a recursive call `f(n - 1)` reads the
- * signature of `f` while that signature is derived, where its result is the
- * placeholder `unknown`: the join of the other branches is the seed of the
- * fixpoint, and `f(n) = If(n = 0, 1, f(n - 1))` is typed `integer` through
- * it. A symbol's `unknown` is not a placeholder: nothing refines it later
- * at this site.
- */
-function untypedSymbolArm(branch: OperandDescriptor): boolean {
-  return branch.type === 'unknown' && branch.structureOf?.()?.kind === 'symbol';
-}
 
 /**
  * True when the branch of a conditional is typed `unknown` because of the
@@ -1207,9 +1186,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           // A clause before the first mask whose condition is an undecided
           // whole-collection comparison makes the `Which` `Missing`
           // (`evaluateWhich`).
-          if (
-            mayBeUndecidedCondition(conds.slice(0, shape.firstMask))
-          )
+          if (mayBeUndecidedCondition(conds.slice(0, shape.firstMask)))
             whole.push('missing');
           return BoxedType.forResult(
             whole.length === 0
@@ -3077,9 +3054,7 @@ function mayBeUndecidedCondition(
     if (t === 'any' || !provablyAdmits('missing', t)) return false;
     const s = c.structureOf?.();
     if (s?.kind === 'application' && BRANCH_RELATIONS.has(s.head))
-      return (
-        s.children.filter((x) => !cannotHoldAList(x.type)).length >= 2
-      );
+      return s.children.filter((x) => !cannotHoldAList(x.type)).length >= 2;
     return true;
   });
 }
