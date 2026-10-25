@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-437.
+Next free reference: CE-438.
 
 **Entry format.**
 
@@ -5807,8 +5807,13 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   value, adding the term) costs 2 to 3 µs per element on the calling thread.
   The drain cost is now gone for `Sum` (2026-10-24: the sum of a compiled
   `Map` is computed on doubles, about 45 ms for 100,000 elements), so the pool
-  route can pay only for a costly compiled body, which CE-431 would provide
-  and which waits for a user decision; (b) the `--workers N`
+  route could pay only for a costly compiled body. User decision 2026-10-24:
+  a body with a loop or an inner collection stays interpreted, because its
+  compiled values can differ from the interpreter's `N` in the last digits
+  (measurements: an exact loop sum `1.066407470350872` against the compiled
+  `1.0664074703508735`, an exact product `231` against `230.99999999999994`).
+  So the pool route of (a) is NOT DONE, by decision, and its prototype is not
+  kept; (b) the `--workers N`
   option of the `epsil` command, the REPL and the MCP server (section 5.7 of
   the plan), and their use of the asynchronous executor.
   (c) While `executeEpsilAsync` waits on a statement, the engine keeps the
@@ -5827,45 +5832,19 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
 - The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24:
   "one formula, many points"; `runMany` says less).
 
-### CE-431. A `Map` element function with a loop or an inner collection does not compile
+### CE-437. The exact tier of the `Map` auto-compilation proves one operator application per level
 
-**Status:** open; performance. WAITS FOR A USER DECISION. Found 2026-10-24
-while measuring CE-314.1.
+**Status:** open; performance. Found 2026-10-24 while measuring which `Map` bodies the auto-compilation compiles.
 
-The auto-compilation of a `Map` drain (`map-auto-compile.ts`, marked tier,
-machine precision) declines an element function whose body reduces an inner
-collection or calls a user function with a loop, and the drain then runs in
-the interpreter: `sum(map(x => N(sum(map(k => sin(k * x) / k, 1..200))),
-1..1000))` took 14.5 s (about 14 ms per element), and the same with
-`function f(x) { let s = 0; for k in 1..200 { s = s + sin(k * x) / k }; s }`
-did not finish 1,000 elements in 300 s. These are the costly bodies of a
-notebook cell (Tycho row 441).
-
-The two refusals are in `bodyEligible`: a collection-form `Sum`/`Product`
-(one operand) is refused as having a run-time trip count, even over a
-literal `Range`; and a `Loop` whose source is `Element(k, Range(…))` (the
-lowering of Epsil's `for k in 1..200`) is refused because only
-`Loop(body, Range(…))` is read. Lifting both was measured on 2026-10-24
-(prototype not landed; patch `map-auto-compile-ce431-full.patch` and test
-`ce-431-map-compile-loops.test.ts` in the scratchpad of session
-compute-engine-e9): 1,000 elements in 18 to 30 ms instead of 14.5 s and more
-than 300 s. But the compiled values are not always the interpreter's. Under
-`N`, the interpreter evaluates each operation in floats, which the compiled
-code matches (0 of 2,000 elements differ for `N(sin(x) + x^2)`), except where
-it computes exactly: the statements of a loop body run exactly, so the loop
-gave `1.066407470350872` where the compiled code gives `1.0664074703508735`;
-a product of exact rationals gave the exact integer `231` where the compiled
-code gives `230.99999999999994`; and an inner sum of `exp(-k / x) * cos(k)`
-differs in the last digits for 276 of 300 elements. An inner sum of
-`sin(k * x) / k`, `k * x`, `x / k` and `1 / (k + x)` gave the same values.
-The decision: compile these bodies and accept values that can differ from the
-interpreter's `N` in the last digits (and a float where the interpreter
-gives an exact integer), or keep them interpreted.
-
-The exact tier declines `x => x^2 + 1` (no attempt): its proof
-(`exactTierShape`, `map-exact-proof.ts`) covers one operator application per
-level, so a nested integer body is not proved. Extending the proof is a
-separate piece of work.
+The exact tier of `map-auto-compile.ts` compiles an unmarked `Map` whose
+element function is proved integer-closed and overflow-free
+(`exactTierShape`, `map-exact-proof.ts`). The proof reads one operator
+application per level (`lowerLevel`), so a nested integer body is not
+proved and not compiled: `sum(map(x => x^2 + 1, 1..100000))` makes no
+compile attempt and takes about 4.7 s in the interpreter (about 47 µs per
+element). Extending the proof to a nested body of integer operations
+(propagating the bounds through each operation, as the per-level proof
+does) would compile it with exact results.
 
 ### CE-430. The data operand of `FindFit.evaluateAsync()` is prepared in one block
 
@@ -5888,15 +5867,6 @@ literal. Measure first where the time of the 20,000-row case goes.
 With an operator that has only an `evaluateAsync` handler declared, each
 application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
 `function-utils.ts`) with no cache. The cost is not measured.
-
-### CE-319. Walks that are exponential on shared subtrees
-
-**Status:** open; performance.
-
-- **CE-319.2** Building a `Sum` whose body has a shared subtree is exponential:
-  `ce.function('Sum', [At(L, idx), Limits(k, 1, 1)])` with `idx` doubled 20
-  times takes more than 3 s in `rebindToBindings` (`binders.ts`), before any
-  compile.
 
 ### CE-320. Compiling shared nodes under lazy operands in nested regions is exponential
 
