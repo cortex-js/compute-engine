@@ -141,9 +141,16 @@ describe('user function over a valueless collection-typed symbol', () => {
       'h',
       ['Function', ['Add', 'n', 1], typed('n', 'integer')],
     ]).evaluate();
+    // No element of a `list<string>` can be an integer, and the list is not
+    // an integer either, so the call is refused when it is boxed, as
+    // `h("a")` is. It is not held for a value that cannot fit.
     const call = ce.box(['h', 'ss']);
-    expect(call.evaluate().json).toEqual(['h', 'ss']);
+    expect(call.isValid).toBe(false);
+    expect(call.toString()).toContain('incompatible-type');
     ce.assign('ss', ce.box(['List', { str: 'a' }]));
     expect(call.evaluate().toString()).toContain('incompatible-type');
+    expect(ce.box(['h', 'ss']).evaluate().toString()).toContain(
+      'incompatible-type'
+    );
   });
 });

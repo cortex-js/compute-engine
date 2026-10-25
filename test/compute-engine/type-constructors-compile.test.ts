@@ -808,8 +808,15 @@ describe('NOMINAL ATOMICITY at a user-function call site (ruled 2026-08-12)', ()
         .evaluate()
         .toString()
     ).toContain('incompatible-type');
-    expect(() =>
-      compile(ce.box(['k', 'B'] as never), { fallback: false })
-    ).toThrow(/broadcastable<T>/);
+    // A nominal `bag` shares no value with `broadcastable<number>`, whole or
+    // by its elements, so the call with the valueless `B` is refused when it
+    // is boxed, as the interpreter refuses the literal. The compiler then
+    // refuses the invalid expression.
+    const call = ce.box(['k', 'B'] as never);
+    expect(call.isValid).toBe(false);
+    expect(call.toString()).toContain('incompatible-type');
+    expect(() => compile(call, { fallback: false })).toThrow(
+      /invalid expression/
+    );
   });
 });

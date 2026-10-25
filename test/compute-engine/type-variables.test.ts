@@ -1959,3 +1959,61 @@ describe('ARM-AWARE `at`-HANDLER CHECK (§6)', () => {
     ).toThrow(/no arm of the signature .* can return an indexed collection/);
   });
 });
+
+describe('A TYPE VARIABLE WHOSE BOUND RESTRICTS THE VALUES', () => {
+  // The solver projects a literal to its tier (`5` to `finite_integer`),
+  // which a bound such as `5` or `real<0..10>` refuses. Such a variable
+  // binds the literal type of the operand instead.
+  const ce = new ComputeEngine();
+  ce.declare('f', '(x: T) -> T where T: 5');
+  ce.declare('g', '(x: T) -> T where T: real<0..10>');
+  ce.declare('k', '(x: T, y: T) -> T where T: real<0..10>');
+  const typeOf = (e: unknown) => ce.box(e as any).type.toString();
+  const isValid = (e: unknown) => ce.box(e as any).isValid;
+
+  test('the literal of the bound is accepted', () => {
+    expect(isValid(['f', 5])).toBe(true);
+    expect(typeOf(['f', 5])).toBe('5');
+  });
+
+  test('a literal inside a ranged bound is accepted', () => {
+    expect(isValid(['g', 3])).toBe(true);
+    expect(typeOf(['g', 3])).toBe('3');
+    expect(isValid(['g', 2.5])).toBe(true);
+  });
+
+  test('two literals inside the bound bind their union', () => {
+    expect(isValid(['k', 3, 4])).toBe(true);
+    expect(typeOf(['k', 3, 4])).toBe('3 | 4');
+  });
+
+  test('a literal outside the bound is refused', () => {
+    expect(isValid(['f', 6])).toBe(false);
+    expect(isValid(['g', 11])).toBe(false);
+    expect(isValid(['k', 3, 40])).toBe(false);
+  });
+
+  test('a lift-admitted list binds the element, not the list', () => {
+    // A broadcastable function maps over a list operand, so `T` denotes one
+    // element. Binding `T` to the whole list made the result lift add a
+    // second list level that the value does not have.
+    const ce = new ComputeEngine();
+    ce.declare('g', {
+      signature: '(x: T) -> T where T: real<0..10>',
+      broadcastable: true,
+      evaluate: (ops) => ops[0],
+    });
+    for (const arg of [
+      ['List', 1, 2],
+      ['List', ['List', 1, 2]],
+    ]) {
+      const expr = ce.box(['g', arg]);
+      expect(expr.isValid).toBe(true);
+      const value = expr.evaluate();
+      expect(expr.type.toString()).toBe(value.type.toString());
+    }
+    expect(ce.box(['g', ['List', 1, 2]]).type.toString()).toBe(
+      'vector<integer^2>'
+    );
+  });
+});

@@ -3942,7 +3942,27 @@ function addTypeOnTypes(
     const componentwise = tupleComponentwiseAddType(args);
     if (componentwise !== undefined)
       return withFloatRationalCellsAsReal(args, componentwise);
-    return widenAll(args.map((x) => stripNumericRanges(x.type)));
+    // An operand that is not a point and whose number type the user did not
+    // state (`unknown`, or a number type inferred from a use) can hold a
+    // point at run time, and its components can be any number: with
+    // `q: unknown`, `(1, 2) + q` is `(1.5, 2.5)` when `q` is `(0.5, 0.5)`.
+    // The join is neutral in `unknown`, and it kept the integer components
+    // of the point. So the numeric components of each point are widened to
+    // `number`, as the scalar and the list routes widen their cells.
+    const opaque = args.some(
+      (x) =>
+        !typeCouldBeNumericTuple(x.type) &&
+        (x.type === 'unknown' ||
+          (factsOf(x.type).belowNumber &&
+            !isProvenScalarNumberOperand(x, engine)))
+    );
+    return widenAll(
+      args.map((x) => {
+        const t = stripNumericRanges(x.type);
+        if (!opaque || !typeCouldBeNumericTuple(t)) return t;
+        return mapProductCells(t, (c) => widen(c, 'number')) ?? t;
+      })
+    );
   }
   // Element-wise sum of a single tensor (vector/matrix) with scalars keeps
   // the tensor's shape/type.
@@ -6807,6 +6827,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               context.engine._typeResolver
             );
         }
+        // A list with dimensions whose cells are numbers (`vector<integer^2>`,
+        // a matrix), divided by a scalar number: each cell is divided by the
+        // scalar, so the quotient keeps the shape and each cell is typed as a
+        // scalar quotient (`quotientComponentType`), as for the tuple branch
+        // above. Without this branch the scalar widening below answered
+        // `number`, and `v / g(1)` with `g: (integer) -> integer<1..5>` was a
+        // `vector<2>`, while `p / g(1)` for a point `p` had rational
+        // coordinates.
+        {
+          const nt = resolveTypeAlias(num.type);
+          if (
+            typeof nt !== 'string' &&
+            nt.kind === 'list' &&
+            Array.isArray(nt.dimensions) &&
+            nt.elements !== 'never' &&
+            isSubtype(nt.elements, 'number') &&
+            den.type !== 'never' &&
+            isSubtype(den.type, 'number')
+          )
+            return BoxedType.forResult(
+              quotientShapeType(nt, den, hasInexactRationalComponent(num)),
+              context.engine._typeResolver
+            );
+        }
         // A proven-NaN operand: DECLINE, so the claim comes from the
         // declaration and the Contract B derivation rather than from this
         // handler. A handler answer is never widened NOR sharpened by the
@@ -9604,16 +9648,27 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // whose value is the rational point `(1/3, 0)` — the component-type
           // lie under the zip `Subtract` of Tycho item 212. Same rule as the
           // tensor branch below: only a factor whose number type is DECLARED
-          // carries a tier to combine; an inferred or `unknown` factor leaves
-          // the tuple type as written.
+          // carries a tier to combine. An inferred or `unknown` factor can
+          // hold any number at run time (`(1, 2) · q` is `(0.5, 1)` when
+          // `q` is `0.5`), so it scales the numeric components as a factor
+          // typed `number` does.
           const others = ops.filter((x) => x !== tupleOps[0]);
-          if (others.every((x) => isDeclaredScalarNumberOperand(x, engine)))
+          if (
+            others.every(
+              (x) =>
+                isDeclaredScalarNumberOperand(x, engine) ||
+                x.type === 'unknown' ||
+                factsOf(x.type).belowNumber
+            )
+          )
             return BoxedType.forResult(
               withFloatRationalCellsAsReal(
                 ops,
                 scaleTupleComponents(
                   tupleOps[0].type,
-                  others.map((x) => x.type)
+                  others.map((x) =>
+                    isDeclaredScalarNumberOperand(x, engine) ? x.type : 'number'
+                  )
                 )
               ),
               engine._typeResolver

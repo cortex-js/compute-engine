@@ -224,7 +224,9 @@ describe('isSubtypeOfBroadcastOrIndexed with a structural alias', () => {
         elements: Parameters<typeof isSubtypeOfBroadcastOrIndexed>[1];
       }
     ).elements;
-    for (const t of ['list<Colors^3>', 'list<Colors^2> | list<Colors^3>'])
+    // An alias of a collection cannot be the cell type of a list with a
+    // length, so the arms are plain lists.
+    for (const t of ['list<Colors>', 'list<Colors> | list<list<Colors>>'])
       expect(isSubtypeOfBroadcastOrIndexed(ce.type(t).type, elements)).toBe(
         true
       );
@@ -1129,14 +1131,19 @@ describe('a branching chain of row aliases', () => {
   it('is searched in a bounded time', () => {
     const ce = new ComputeEngine();
     ce.declareType('R0', 'string', { alias: true });
+    // The cells of a list with a length cannot be lists, and an alias of a
+    // list is refused as such a cell, so the chain uses tuples of fixed
+    // lengths.
     for (let n = 1; n <= 20; n++)
-      ce.declareType(`R${n}`, `list<R${n - 1}^2> | list<R${n - 1}^3>`, {
-        alias: true,
-      });
+      ce.declareType(
+        `R${n}`,
+        `tuple<R${n - 1}, R${n - 1}> | tuple<R${n - 1}, R${n - 1}, R${n - 1}>`,
+        { alias: true }
+      );
     const T = (s: string) => ce.type(s).type;
     const start = Date.now();
-    // Every arm of `R20` is a fixed-length list of lists: never empty, and
-    // its elements are not numbers.
+    // Every arm of `R20` is a tuple of fixed length: never empty, and its
+    // elements are not numbers.
     expect(typesOverlap(T('R20'), T('collection<number>'))).toBe(false);
     expect(Date.now() - start).toBeLessThan(5000);
   });
@@ -1358,19 +1365,17 @@ describe('chains of aliases with two branches at each level', () => {
     ce.declareType('B0', 'string', { alias: true });
     ce.declareType('R0', 'integer', { alias: true });
     ce.declareType('S0', 'number', { alias: true });
+    // The cells of a list with a length cannot be lists, and an alias of a
+    // list is refused as such a cell, so the chains use tuples.
+    const pairOrTriple = (x: string) =>
+      `tuple<${x}, ${x}> | tuple<${x}, ${x}, ${x}>`;
     for (let n = 1; n <= 32; n++) {
-      ce.declareType(`A${n}`, `list<A${n - 1}^2> | list<A${n - 1}^3>`, {
-        alias: true,
-      });
-      ce.declareType(`B${n}`, `list<B${n - 1}^2> | list<B${n - 1}^3>`, {
-        alias: true,
-      });
-      ce.declareType(`R${n}`, `list<R${n - 1}^2> | list<R${n - 1}^-1>`, {
-        alias: true,
-      });
+      ce.declareType(`A${n}`, pairOrTriple(`A${n - 1}`), { alias: true });
+      ce.declareType(`B${n}`, pairOrTriple(`B${n - 1}`), { alias: true });
+      ce.declareType(`R${n}`, pairOrTriple(`R${n - 1}`), { alias: true });
       ce.declareType(
         `S${n}`,
-        `matrix<S${n - 1}^(2x-1)> | matrix<S${n - 1}^(-1x2)>`,
+        `tuple<S${n - 1}> | tuple<S${n - 1}, S${n - 1}>`,
         { alias: true }
       );
     }
@@ -1382,10 +1387,10 @@ describe('chains of aliases with two branches at each level', () => {
     const start = Date.now();
     expect(typesOverlap(T('A32'), T('B32'))).toBe(false);
     expect(couldMatch(T('A32'), T('B32'))).toBe(false);
-    expect(provablyDisjoint(T('A32'), T('B32'))).toBe(false);
+    expect(provablyDisjoint(T('A32'), T('B32'))).toBe(true);
     meet('A32', 'B32');
     meet('R32', 'S32');
-    meet('matrix<R32^(2x-1)>', 'matrix<S32^(-1x3)>');
+    meet('tuple<R32, R32>', 'tuple<S32, S32>');
     expect(Date.now() - start).toBeLessThan(5000);
   });
 });
@@ -1549,9 +1554,13 @@ describe('cases of the third review', () => {
     }
     alias('R0', 'list<R0> | integer');
     alias('S0', 'list<integer | list<integer | list<number>>> | integer');
+    // The cells of a list with a length cannot be lists, and an alias of a
+    // list is refused as such a cell, so the chains use tuples.
     for (let n = 1; n <= 22; n++) {
-      alias(`R${n}`, `list<R${n - 1}^2> | list<R${n - 1}^3>`);
-      alias(`S${n}`, `list<S${n - 1}^2> | list<S${n - 1}^3>`);
+      const r = `R${n - 1}`;
+      const s = `S${n - 1}`;
+      alias(`R${n}`, `tuple<${r}, ${r}> | tuple<${r}, ${r}, ${r}>`);
+      alias(`S${n}`, `tuple<${s}, ${s}> | tuple<${s}, ${s}, ${s}>`);
     }
     const T = (s: string) => ce.type(s).type;
     // About 100 s at depth 24 before, and 23 s for the subtype test.
@@ -1678,10 +1687,13 @@ describe('cases of the review of the scalar elements of a vector', () => {
           xs.map((x) => ce.symbol(x))
         )
         .type.toString();
-    // An operand of another length or rank gives no bound to `T`.
-    expect(call('g3', 'mtt')).toBe('unknown');
-    expect(call('m', 'vfive')).toBe('unknown');
-    expect(call('h', 'vfive', 's')).toBe('string');
+    // An operand of another length or rank gives no bound to `T`. Such an
+    // operand shares no value with the parameter (no 2×3 matrix is a list
+    // of length 3, no list of length 5 is a matrix), so the call is refused
+    // when it is boxed, as a library operator refuses it.
+    expect(call('g3', 'mtt')).toBe('error');
+    expect(call('m', 'vfive')).toBe('error');
+    expect(call('h', 'vfive', 's')).toBe('error');
     // A generic nominal constructor refuses a payload of another length.
     ce.declareType('vthree', 'list<T^3>', { typeParams: ['T'] });
     ce.assign(

@@ -3000,13 +3000,10 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
     // `NaN ∈ number` absorbed the marker arm. The finite-by-default lattice
     // flip repealed the premise — the bare tiers are finite and `NaN` has its
     // own singleton type — so the marker is additive and the element tier
-    // survives.
-    expect(ce.box(['At', ['List', 1, 2, 3], 99]).type.toString()).toBe(
-      'integer | nan'
-    );
-    expect(ce.box(['At', ['List', 1.5, 2.5], 9]).type.toString()).toBe(
-      'nan | real'
-    );
+    // survives. A position that the literal is proved NOT to hold is
+    // typed as the marker alone, `nan`.
+    expect(ce.box(['At', ['List', 1, 2, 3], 99]).type.toString()).toBe('nan');
+    expect(ce.box(['At', ['List', 1.5, 2.5], 9]).type.toString()).toBe('nan');
     // An access that may find nothing: the length of a filter's result is
     // not known before evaluation.
     const kept = ['Filter', ['List', 1, 2, 3], ['Function', ['Less', 'x', 9], 'x']];

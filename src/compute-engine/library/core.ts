@@ -152,6 +152,7 @@ import {
   parseTypeParameterClause,
 } from '../../common/type/parse.js';
 import { canonicalMultiply } from '../boxed-expression/arithmetic-mul-div.js';
+import { heldOperandType } from './held-operand-type.js';
 import {
   canonicalSolve,
   evaluateSolve,
@@ -1813,85 +1814,6 @@ function bindStageParameter(
     return result;
   }
   return d;
-}
-
-/**
- * The type of a HELD operand — one a `lazy` operator received unbound, whose
- * descriptor therefore carries `unknown` where a bound operand would carry a
- * real type.
- *
- * Every branch is a pure read: a symbol's own binding through
- * `lookupDefinition`, a literal's structural view, an application's derived
- * type. An operand that already carries a type (the `ce.function` route boxes
- * its arguments first) is reported as it stands.
- */
-function heldOperandType(
-  context: TypeHandlerContext,
-  d: OperandDescriptor | undefined
-): Type {
-  if (d === undefined) return 'unknown';
-  if (d.type !== 'unknown') return d.type;
-  const s = d.structureOf?.();
-  if (s === undefined) return 'unknown';
-  switch (s.kind) {
-    case 'symbol': {
-      const def = context.engine.lookupDefinition(s.name);
-      if (def?.value !== undefined) return def.value.type.type;
-      if (def?.operator !== undefined) return def.operator.signature.type;
-      return 'unknown';
-    }
-    case 'string':
-      return 'string';
-    case 'number':
-    case 'function-literal':
-      return d.type;
-    // A held tuple or list literal is typed as a stored contract: a number
-    // literal component contributes its tier, never its literal type
-    // (`storedComponentTypeD`); any other component is typed as a held
-    // operand in its own right.
-    case 'tuple':
-      return {
-        kind: 'tuple',
-        elements: s.elements.map((e) => ({
-          type: heldComponentType(context, e),
-        })),
-      };
-    case 'list-literal': {
-      const rows: Type = widen(
-        ...s.elements.map((e) => heldComponentType(context, e))
-      );
-      if (s.shape.length === 0) return { kind: 'list', elements: rows };
-      // A shape of rank r > 1 (`[[1, 2], [3, 4]]` is 2×2) puts the LEAF type
-      // in `elements`: the components are rows, so descend r − 1 ranks. The
-      // row type in a 2×2 shape counted the inner rank twice (a 2×2 shape
-      // whose cells were `vector<integer^2>`).
-      let elements: Type = rows;
-      for (let k = 1; k < s.shape.length; k++)
-        elements = collectionElementType(elements) ?? 'unknown';
-      // The shape is written as a dimension list only when the leaf cells
-      // may carry one (`mayCarryDimensions`: a cell that cannot be a list),
-      // as the `List` type handler does (`shapedListTypeD`,
-      // `library/collections.ts`): a held `[True, False]` is a
-      // `list<boolean^2>`. Otherwise the literal is a plain list of its
-      // components.
-      return mayCarryDimensions(elements)
-        ? { kind: 'list', elements, dimensions: [...s.shape] }
-        : { kind: 'list', elements: rows };
-    }
-    case 'application':
-      return deriveApplicationOf(s, s.children, context) ?? 'unknown';
-  }
-}
-
-/** The type a component of a HELD tuple or list literal contributes to the
- * literal's stored type: a number literal's tier, otherwise the component's
- * own held-operand type. */
-function heldComponentType(
-  context: TypeHandlerContext,
-  d: OperandDescriptor
-): Type {
-  const s = d.structureOf?.();
-  return s?.kind === 'number' ? s.tier : heldOperandType(context, d);
 }
 
 /**
@@ -6725,6 +6647,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             recordPatternEvidence(ce, symbolExpr, () => value.type.type, {
               currentScopeOnly: true,
             });
+            recordPatternAliases(symbolExpr, value);
             return;
           }
           if (!isSymbol(symbolExpr)) return;
@@ -6734,14 +6657,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             () => (value.type.isUnknown ? undefined : value.type.type),
             { currentScopeOnly: true }
           );
-          // An initializer that is a bare untyped symbol (`let out = acc`
-          // with `acc` a bare parameter) records nothing above, since its
-          // type is `unknown`. The local remembers it instead, so that a use
-          // that narrows the local before any assignment to it narrows the
-          // initializer too (`_initializerAlias`, read by
-          // `BoxedSymbol._inferWithoutFacts` in `boxed-symbol.ts`; every
-          // later assignment to the local clears it, see
-          // `joinAssignmentEvidence`).
+          recordAlias(symbolExpr.symbol, value);
+        };
+
+        // An initializer that is a bare untyped symbol (`let out = acc`
+        // with `acc` a bare parameter) records no evidence, since its type
+        // is `unknown`. The local remembers it instead, so that a use that
+        // narrows the local before any assignment to it narrows the
+        // initializer too (`_initializerAlias`, read by
+        // `BoxedSymbol._inferWithoutFacts` in `boxed-symbol.ts`; every later
+        // assignment to the local clears it, see `joinAssignmentEvidence`).
+        const recordAlias = (name: string, value: Expression): void => {
           if (!isSymbol(value)) return;
           const source = value.valueDefinition;
           if (
@@ -6752,9 +6678,29 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
             !source.type.isUnknown
           )
             return;
-          const local = ce.context.lexicalScope.bindings.get(symbolExpr.symbol);
+          const local = ce.context.lexicalScope.bindings.get(name);
           if (local !== undefined && isValueDef(local))
             local.value._initializerAlias = value;
+        };
+
+        // A destructuring `let (a, b) = (s, 0)` with a tuple literal of the
+        // same arity as its initializer gives each leaf the component at
+        // its position: the leaf `a` is an alias of `s`, as `let a = s` is.
+        // Without this, a use of `a` as a list (`take(a, 2)`) did not reach
+        // the parameter `s`, so `s` kept a scalar slot and a call with a
+        // list argument was applied to each element of the list.
+        const recordPatternAliases = (
+          pattern: Expression,
+          value: Expression
+        ): void => {
+          if (!isFunction(pattern, 'Tuple') || !isFunction(value, 'Tuple'))
+            return;
+          if (pattern.nops !== value.nops) return;
+          for (let i = 0; i < pattern.nops; i++) {
+            const leaf = pattern.ops[i];
+            if (isSymbol(leaf)) recordAlias(leaf.symbol, value.ops[i]);
+            else recordPatternAliases(leaf, value.ops[i]);
+          }
         };
 
         if (args.length === 2) {

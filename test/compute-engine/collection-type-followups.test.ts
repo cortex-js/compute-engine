@@ -71,22 +71,22 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
       '[1,1,"Missing","Missing"]',
     ],
     [['Function', 'x', 'x'], 'list<missing | unknown>', '[1,"Missing"]'],
-    [['Function', ['Add', 'x', 1], 'x'], 'list<number>', '[2,NaN]'],
-    ['Sqrt', 'list<number>', '[1,NaN]'],
+    [['Function', ['Add', 'x', 1], 'x'], 'list<integer | nan>', '[2,NaN]'],
+    ['Sqrt', 'list<complex | infinity | nan>', '[1,NaN]'],
     // `IsPrime(Missing)` is `Missing`: before, typed `list<boolean>`.
     ['IsPrime', 'list<boolean | missing>', '["False","Missing"]'],
     // An annotated parameter refuses the absent cell, which gives `NaN`: the
     // result is widened as for a declared callback.
     [
       ['Function', ['List', 'x'], ['Typed', 'x', "'integer'"]],
-      'list<number>',
+      'list<integer | nan>',
       '[1,NaN]',
     ],
     // A `Missing` the callback returns for a present cell is kept beside the
     // `NaN` of the absent cell.
     [
       ['Function', ['List', 'x', 'Missing'], ['Typed', 'x', "'integer'"]],
-      'list<missing | number>',
+      'list<integer | missing | nan>',
       '[1,"Missing",NaN,"Missing"]',
     ],
   ] as [MathJsonExpression, string, string][])('%j', (fn, type, value) => {
@@ -109,7 +109,7 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
         engine.parse(
           '\\operatorname{FlatMap}(l, (x: \\mathrm{integer}) \\mapsto [x])'
         ),
-        'list<number>'
+        'list<integer | nan>'
       )
     ).toBe('[1,NaN]');
   });
@@ -121,7 +121,7 @@ describe('1. FLATMAP OVER A SOURCE WITH ABSENT CELLS', () => {
         engine.parse(
           '\\operatorname{FlatMap}(l, (x: \\mathrm{integer}) \\mapsto [x, \\mathrm{Missing}])'
         ),
-        'list<missing | number>'
+        'list<integer | missing | nan>'
       )
     ).toBe('[1,"Missing",NaN,"Missing"]');
   });
@@ -192,15 +192,15 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
   ];
 
   test.each([
-    [['Add', 'x', 1], 'list<number>', '[2,NaN]'],
-    [['List', 'x'], 'list<vector<1>>', '[[1],[NaN]]'],
+    [['Add', 'x', 1], 'list<integer | nan>', '[2,NaN]'],
+    [['List', 'x'], 'list<list<integer | nan^1>>', '[[1],[NaN]]'],
     // A `Missing` that the body returns for a present cell is kept. For the
     // absent cell `x` is `NaN`, and `NaN > 0` is `False` (user decision
     // 2026-10-20), so the else arm gives `NaN` (before the decision the `If`
     // took no arm and gave `Missing`).
     [
       ['If', ['Greater', 'x', 0], 'Missing', 'x'],
-      'list<missing | number>',
+      'list<integer | missing | nan>',
       '["Missing",NaN]',
     ],
     [['Greater', 'x', 0], 'list<boolean>', '["True","False"]'],
@@ -240,7 +240,11 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
       ),
     ])
       expect(
-        expectTypeHoldsValue(e, expr, 'indexed_collection<missing | number>')
+        expectTypeHoldsValue(
+          e,
+          expr,
+          'indexed_collection<integer | missing | nan>'
+        )
       ).toBe('["Missing",NaN]');
   });
 
@@ -251,7 +255,7 @@ describe('1b. MAP OF A LITERAL WITH AN ANNOTATED PARAMETER OVER ABSENT CELLS', (
         engine.parse(
           '\\operatorname{Map}((x: \\mathrm{integer}) \\mapsto x + 1, m)'
         ),
-        'list<number>'
+        'list<integer | nan>'
       )
     ).toBe('[2,NaN]');
   });
@@ -466,8 +470,8 @@ describe('8. MAP OVER AN ALIAS OF A TUPLE', () => {
   engine.assign('q', engine.box(['Tuple', 1, 'Missing']));
 
   test.each([
-    [ADD_10, 'list<number>', '[11,NaN]'],
-    ['Sqrt', 'list<number>', '[1,NaN]'],
+    [ADD_10, 'list<integer | nan>', '[11,NaN]'],
+    ['Sqrt', 'list<complex | infinity | nan>', '[1,NaN]'],
   ] as [MathJsonExpression, string, string][])('%j', (fn, type, value) => {
     expect(
       expectTypeHoldsValue(engine, engine.box(['Map', fn, 'q']), type)
@@ -479,7 +483,7 @@ describe('8. MAP OVER AN ALIAS OF A TUPLE', () => {
       expectTypeHoldsValue(
         engine,
         engine.parse('\\operatorname{Map}(x \\mapsto x + 10, q)'),
-        'list<number>'
+        'list<integer | nan>'
       )
     ).toBe('[11,NaN]');
   });
@@ -628,7 +632,11 @@ describe('9. FILTER AND DEDUP OVER A DICTIONARY', () => {
         '\\operatorname{Map}(x \\mapsto \\operatorname{At}(x, 2), w)'
       ),
     ]) {
-      expect(expr.type.toString()).toBe('collection<missing | unknown>');
+      // The type is the join of the `Map` of each arm of the source: the
+      // values of the dictionary arm are `integer | missing`.
+      expect(expr.type.toString()).toBe(
+        'collection<integer | missing> | list<missing | unknown>'
+      );
       const value = expr.evaluate({ materialization: true });
       expect(value.toString()).toBe('Set("Missing")');
       expect(value.type.matches(expr.type)).toBe(true);
@@ -1193,7 +1201,7 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
           'ys',
           ['Function', ['List', 'x'], ['Typed', 'x', "'integer'"]],
         ]),
-        'list<number>'
+        'list<integer | nan>'
       )
     ).toBe('[1,NaN]');
     expect(
@@ -1218,7 +1226,7 @@ describe('14. ABSENT ELEMENTS AND THE CALLBACK OF A MAP', () => {
       ],
       's',
     ]);
-    expect(expr.type.toString()).toBe('set<missing | number>');
+    expect(expr.type.toString()).toBe('set<integer | missing | nan>');
     const v = expr.evaluate({ materialization: true });
     expect(v.toString()).toBe('Set(-2, NaN, "Missing")');
     expect(v.type.matches(expr.type)).toBe(true);

@@ -303,3 +303,33 @@ describe('EPSIL STATIC — arguments of a call to a function literal', () => {
     });
   });
 });
+
+describe('AN ALIAS OF A BINDING THAT HOLDS A FUNCTION LITERAL', () => {
+  // `let g = k` copies the literal that `k` holds, so the calls of `g` are
+  // checked against the same signature as the calls of `k`
+  // (`pinnedAliasOf`, src/epsil/static-diagnostics.ts).
+  test.each([
+    ['let k = (n: integer) => n + 1\nlet g = k\ng(1.5)'],
+    ['let k = (n: integer) => n + 1\nconst g = k\ng(1.5)'],
+    ['let k = (n: integer) => n + 1\ng := k\ng(1.5)'],
+  ])('%s is reported', (source) => {
+    expect(check(source).map((d) => d[1])).toEqual(['incompatible-type']);
+    // The run time refuses the argument too, with an error value.
+    expect(run(source).value.operator).toBe('Error');
+  });
+
+  test('a valid call of the alias is not reported', () => {
+    const source = 'let k = (n: integer) => n + 1\nlet g = k\ng(2)';
+    expect(check(source)).toEqual([]);
+    expect(run(source).value.re).toBe(3);
+  });
+
+  test('the alias takes the signature in force when the statement runs', () => {
+    const source =
+      'let k = (n: integer) => n + 1\nk = (s: string) => s\nlet g = k\n';
+    expect(check(source + 'g("a")')).toEqual([]);
+    expect(check(source + 'g(1)').map((d) => d[1])).toEqual([
+      'incompatible-type',
+    ]);
+  });
+});

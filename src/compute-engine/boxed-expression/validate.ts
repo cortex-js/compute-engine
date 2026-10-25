@@ -1,4 +1,5 @@
 import {
+  broadcastCellTypeOf,
   couldBeUnkeyedCollectionOperand,
   isFiniteIndexedCollection,
   isPointListArgumentType,
@@ -273,6 +274,51 @@ function validateThreadableOperand(
   )
     return ce.typeError(displayParam ?? param, op.type, op);
   return op;
+}
+
+/**
+ * Check an operand admitted through a threadable parameter.
+ *
+ * An operator that opts in (`checkNumericCollections`) refuses a collection
+ * whose cells are provably not numbers (`validateThreadableOperand`). A user
+ * function refuses an operand whose type shares no value with the
+ * parameter, whole or by its elements (`liftedOperandCannotFit`). Any other
+ * operand is admitted as it is.
+ */
+function checkThreadableOperand(
+  ce: ComputeEngine,
+  op: Expression,
+  param: Type,
+  displayParam: Type | undefined,
+  internals: ValidateArgumentsInternals | undefined
+): Expression {
+  if (internals?.checkNumericCollections)
+    return validateThreadableOperand(ce, op, param, displayParam);
+  if (internals?.userFunction && liftedOperandCannotFit(op, param))
+    return ce.typeError(displayParam ?? param, op.type, op);
+  return op;
+}
+
+/**
+ * True when no value of the type of `op` can be an argument of a user
+ * function at the threadable parameter `param`: the type shares no value with
+ * the parameter, its elements share none, and its cells share none. Each of
+ * these is a way for the call to apply: to the whole operand, or mapped over
+ * the elements (to each cell for a nested collection).
+ *
+ * With `g: (integer) -> integer` and `S: list<string>` (no value), `g(S)` is
+ * refused when it is boxed, as `g("a")` is. A collection that holds its
+ * elements (a literal list, or a symbol that holds one) is not refused here:
+ * the application maps over its elements and reports an error for each
+ * element that does not fit, with the position of that element.
+ */
+function liftedOperandCannotFit(op: Expression, param: Type): boolean {
+  if (isFiniteIndexedCollection(op)) return false;
+  const t = op.type.type;
+  if (typesOverlap(t, param)) return false;
+  const element = collectionElementType(t);
+  if (element === undefined || typesOverlap(element, param)) return false;
+  return !typesOverlap(broadcastCellTypeOf(t), param);
 }
 
 /**
@@ -3611,9 +3657,13 @@ export function validateArguments(
       isThreadableAt(threadable, idx) &&
       couldBeUnkeyedCollectionOperand(op)
     ) {
-      const checked = internals?.checkNumericCollections
-        ? validateThreadableOperand(ce, op, param, displayParams[idx])
-        : op;
+      const checked = checkThreadableOperand(
+        ce,
+        op,
+        param,
+        displayParams[idx],
+        internals
+      );
       result.push(checked);
       if (!checked.isValid) isValid = false;
       continue;
@@ -3967,14 +4017,13 @@ export function validateArguments(
       continue;
     }
     if (isThreadableAt(threadable, i) && couldBeUnkeyedCollectionOperand(op)) {
-      const checked = internals?.checkNumericCollections
-        ? validateThreadableOperand(
-            ce,
-            op,
-            param,
-            displayOptParams[i - params.length]
-          )
-        : op;
+      const checked = checkThreadableOperand(
+        ce,
+        op,
+        param,
+        displayOptParams[i - params.length],
+        internals
+      );
       result.push(checked);
       if (!checked.isValid) isValid = false;
       i += 1;
@@ -4249,9 +4298,13 @@ export function validateArguments(
         isThreadableAt(threadable, i - 1) &&
         couldBeUnkeyedCollectionOperand(op)
       ) {
-        const checked = internals?.checkNumericCollections
-          ? validateThreadableOperand(ce, op, varParam, displayVarParam)
-          : op;
+        const checked = checkThreadableOperand(
+          ce,
+          op,
+          varParam,
+          displayVarParam,
+          internals
+        );
         result.push(checked);
         if (!checked.isValid) isValid = false;
         continue;

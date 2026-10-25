@@ -274,8 +274,9 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     // as `list<integer>` and binds `T` to its leaves, `integer`
     // (`expandAliasesForLift`). The type parameter bound to the alias name
     // gave `list<tuple<lcyc, lcyc>>`, which does not hold the value: the
-    // value holds tuples of integers. The rank of `lcyc` is not read
-    // statically, so the result also admits list elements.
+    // value holds tuples of integers. The alias resolves to
+    // `list<integer>` (`resolveTypeAlias` drops the arm that names the
+    // alias itself), so the rank is known and no list arm is added.
     const ce = new ComputeEngine();
     ce.declareType('lcyc', 'lcyc | list<integer>', { alias: true });
     ce.assign('g', [
@@ -286,9 +287,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     ce.declare('v', 'lcyc');
     ce.assign('v', ce.box(['List', 1, 2]));
     const call = ce.box(['g', 'v']);
-    expect(call.type.toString()).toBe(
-      'list<list<any> | tuple<integer, integer>>'
-    );
+    expect(call.type.toString()).toBe('list<tuple<integer, integer>>');
     const value = call.evaluate();
     expect(value.toString()).toBe('[(1, 1),(2, 2)]');
     expect(value.type.matches(call.type)).toBe(true);
@@ -370,7 +369,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     ce.declare('v', 'lcyc');
     ce.assign('v', ce.box(['List', 1, 2]));
     const call = ce.box(['h', 'v']);
-    expect(call.type.toString()).toBe('list<tuple<unknown, unknown>>');
+    expect(call.type.toString()).toBe('list<tuple<integer, integer>>');
     const value = call.evaluate();
     expect(value.toString()).toBe('[(1, 1),(2, 2)]');
     expect(value.type.matches(call.type)).toBe(true);
@@ -600,9 +599,11 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
           'tuple<integer, integer>'
         );
         expect(signature(ce, 'k_1')).toBe('(unknown) -> tuple<number, number>');
-        // A list broadcasts: each element is a scalar argument of `f`.
+        // A list broadcasts: each element is a scalar argument of `f`. The
+        // parameter `a` is not typed, so an element `a` can be a list, which
+        // `f` maps at its leaves: an element of the result can be a list.
         expect(signature(ce, 'h')).toBe(
-          '(unknown) -> list<tuple<number, number>>'
+          '(unknown) -> list<list<any> | tuple<number, number>>'
         );
         // The call `h(1)` is typed from the body `f([a, a])` with `a` typed
         // `integer`, and the call of `f` over the list maps `f` over its

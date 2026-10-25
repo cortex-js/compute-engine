@@ -558,7 +558,7 @@ matrix([[1, 2], [3, 4]])
 
 ### matrixMultiply
 
-MathJSON `MatrixMultiply` · `(matrix | vector, matrix | vector) -> matrix | vector`
+MathJSON `MatrixMultiply` · `(matrix | vector, matrix | vector) -> matrix | number | vector`
 
 Matrix and vector multiplication.
 

@@ -884,12 +884,17 @@ describe('type handler', () => {
     expect(e.type.matches(parseType('list<integer>'))).toBe(true);
   });
 
-  test('a condition typing plain unknown does NOT flip the result type', () => {
+  test('a condition typing plain unknown adds the type of a mask of unknown rank', () => {
     const ce = engine();
     ce.declare('u', 'unknown');
-    expect(ce.box(['Which', 'u', 1, 'True', 0]).type.toString()).toBe(
-      'integer'
-    );
+    // At run time `u` can hold a mask of any rank: with `u := [True,
+    // False]`, the value is `[1, 0]`, which `integer` does not hold.
+    const e = ce.box(['Which', 'u', 1, 'True', 0]);
+    expect(e.type.toString()).toBe('integer | list<integer | list<any>>');
+    ce.assign('u', ce.box(['List', 'True', 'False']));
+    const v = e.evaluate();
+    expect(v.toString()).toBe('[1,0]');
+    expect(v.type.matches(e.type)).toBe(true);
   });
 
   test('a TUPLE-valued arm is lifted whole, and types whole', () => {
@@ -1646,5 +1651,59 @@ describe('the result type when the shape of a condition is not known', () => {
         { P: ['List', 'True', 'False'] }
       )
     ).toEqual({ type: 'list<integer>', value: '[1,0]', holds: true });
+  });
+});
+
+describe('a condition whose type cannot be read (CE-22)', () => {
+  test('If with a condition of unknown type may give a list', () => {
+    const ce = engine();
+    const e = ce.box(['If', 'c', 1, 0]);
+    expect(e.type.toString()).toBe('integer | list<integer | list<any>>');
+    ce.assign('c', ce.box(['List', 'True', 'False']));
+    const v = e.evaluate();
+    expect(v.toString()).toBe('[1,0]');
+    expect(v.type.matches(e.type)).toBe(true);
+  });
+
+  test('Which with two conditions that are scalars or masks may give a list', () => {
+    const ce = engine();
+    ce.declare('B1', 'boolean | list<boolean>');
+    ce.declare('B2', 'boolean | list<boolean>');
+    const e = ce.box(['Which', 'B1', 1, 'B2', 2]);
+    expect(e.type.toString()).toBe(
+      'integer | list<list<any> | number> | missing'
+    );
+  });
+
+  test('an undecided whole-collection comparison adds a missing arm', () => {
+    const ce = engine();
+    ce.assign('L', ce.box(['List', 1, 2]));
+    const cond = ['Equal', 'L', ['List', 1, 'Missing']];
+    for (const json of [
+      ['If', cond, 5, 0],
+      ['Which', cond, 5, 'True', 0],
+      ['Which', cond, 5, ['List', 'True', 'False'], 1, 'True', 0],
+    ]) {
+      const e = ce.box(json as any);
+      const v = e.evaluate();
+      expect(v.toString()).toBe('"Missing"');
+      expect(v.type.matches(e.type)).toBe(true);
+    }
+  });
+
+  test('a comparison with one collection operand adds no missing arm', () => {
+    // `At(s, 2)` can be absent, so `At(s, 2) = 0` is typed with a `missing`
+    // arm. That comparison is not a whole-collection comparison: when it is
+    // `Missing`, the `If` is the absent-condition error, not `Missing`.
+    const ce = engine();
+    ce.declare('s', 'list<list<integer> | integer>');
+    // The element `At(s, 2)` can be a list, which makes the comparison a
+    // mask, so the result can be a list.
+    const e = ce.box(['If', ['Equal', ['At', 's', 2], 0], 5, 0]);
+    expect(e.type.toString()).toBe('integer | list<integer>');
+    ce.assign('s', ce.box(['List', ['List', 1], 0]));
+    const v = e.evaluate();
+    expect(v.toString()).toBe('5');
+    expect(v.type.matches(e.type)).toBe(true);
   });
 });

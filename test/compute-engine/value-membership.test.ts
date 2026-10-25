@@ -292,3 +292,49 @@ describe('VALUE MEMBERSHIP — argument validation', () => {
     expect(ce.box('k').type.toString()).not.toBe('0');
   });
 });
+
+describe('VALUE MEMBERSHIP — aliases and nominal references', () => {
+  it('an applied parameterized alias substitutes its type arguments', () => {
+    // A reference to `Small<T> = T | 0` applied to `5`. Its definition is
+    // read with `T` replaced by `5`, as the subtype relation reads it.
+    const ref = {
+      kind: 'reference',
+      name: 'Small',
+      alias: true,
+      def: {
+        kind: 'union',
+        types: [
+          { kind: 'variable', name: 'T' },
+          { kind: 'value', value: 0 },
+        ],
+      },
+      typeParams: [{ name: 'T' }],
+      args: [{ kind: 'value', value: 5 }],
+    } as any;
+    expect(typeAcceptsValue(ce.box(5), ref)).toBe(true);
+    expect(typeAcceptsValue(ce.box(0), ref)).toBe(true);
+    expect(typeAcceptsValue(ce.box(7), ref)).toBe(false);
+    expect(admissionOf(ce.box(7), ref)).toBe('refute');
+  });
+
+  it('a self-negating alias terminates', () => {
+    // `nn = !nn` has no fixed point. The cycle guard stops the unfold; the
+    // verdict itself is not specified.
+    ce.declareType('nn', '!nn', { alias: true });
+    const t = ce.type('nn').type;
+    expect(typeof typeAcceptsValue(ce.box(5), t)).toBe('boolean');
+    expect(['admit', 'refute', 'undecidable']).toContain(
+      admissionOf(ce.box(5), t)
+    );
+  });
+
+  it('a concrete tuple is refuted by a nominal tuple type', () => {
+    // A nominal type is not a supertype of its definition, so a plain tuple
+    // value is not a `Pt`, as `isSubtype` also answers.
+    ce.declareType('Pt', 'tuple<real, real>');
+    const t = ce.type('Pt').type;
+    expect(admissionOf(ce.box(['Tuple', 1, 2]), t)).toBe('refute');
+    expect(admissionOf(ce.box(['Tuple', "'a'", 2]), t)).toBe('refute');
+    expect(ce.box(['Tuple', 1, 2]).type.matches(ce.type('Pt'))).toBe(false);
+  });
+});

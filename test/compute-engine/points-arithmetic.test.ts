@@ -6,6 +6,7 @@ import { typeHandlerContext } from '../../src/compute-engine/boxed-expression/de
 import { describeType } from '../../src/compute-engine/boxed-expression/operand-descriptor';
 import { parseType } from '../../src/common/type/parse';
 import { typeToString } from '../../src/common/type/serialize';
+import { isProvablyNumberList } from '../../src/compute-engine/collection-utils';
 
 /**
  * Vector-space semantics for numeric tuples (points/vectors in ℝⁿ).
@@ -2883,10 +2884,24 @@ describe('a list of numbers plus a point is typed error', () => {
       ['List', ['List', 1, 2], ['List', 3, 4]],
       ['Tuple', 1, 1],
     ]);
+    // A list of rows of numbers beside a point is refused when it is
+    // boxed, as a flat list of numbers is: every element of the sum is a
+    // point plus a number.
     expect(expr.type.toString()).toBe('error');
     expect(expr.evaluate().toString()).toBe(
-      `[[${INCOMPATIBLE},${INCOMPATIBLE}],[${INCOMPATIBLE},${INCOMPATIBLE}]]`
+      'Error(ErrorCode("incompatible-type", "tuple", "list<number>"))'
     );
+  });
+
+  test('a recursive list alias is not a list of numbers', () => {
+    // `R = list<R>` resolves its element type to the same list type, so
+    // the walk over the rows must stop at the cycle instead of overflowing
+    // the stack. Such a list holds no number at any depth.
+    const ce = new ComputeEngine();
+    ce.declareType('R', 'list<R>', { alias: true });
+    ce.declare('r', 'R');
+    expect(isProvablyNumberList(ce.symbol('r'))).toBe(false);
+    expect(() => ce.box(['Add', ['Tuple', 1, 2], 'r'])).not.toThrow();
   });
 
   test('a list of points plus a list of numbers is typed error', () => {

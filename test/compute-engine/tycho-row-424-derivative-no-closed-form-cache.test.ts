@@ -149,8 +149,9 @@ describe('a point accessor of a list of symbolic points', () => {
       'PointY',
       ['List', ['At', 'P', ['Ceil', 'u']], ['At', 'P', 2], ['At', 'P', 3]],
     ]);
-    expect(e.type.toString()).toBe('list<missing | number>');
+    expect(e.type.toString()).toBe('list<integer | missing | nan^3>');
     const v = e.evaluate();
+    expect(v.type.matches(e.type)).toBe(true);
     // It was `(3, 4)`, the second element, read as the y of one point.
     expect(v.operator).toBe('List');
     expect(v.nops).toBe(3);

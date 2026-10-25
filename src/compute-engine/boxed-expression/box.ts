@@ -424,7 +424,34 @@ type BoxFunctionOptions = {
   canonical?: CanonicalOptions;
   structural?: boolean;
   scope?: Scope;
+  /** Structural form only: `true` when this node is an operand (at any
+   * depth) of a BINDER, an operator whose definition is `scoped` (`Sum`,
+   * `Function`, `D`, …). A symbol is then boxed unbound, as the raw form
+   * boxes it. A structural binder creates no scope, so the variable it
+   * binds would otherwise bind to the definition that the same name has in
+   * the enclosing scope (with `k: list<integer>`, the index of
+   * `Sum(k^2, Limits(k, 1, 3))` was typed `list<integer>`). Set by
+   * `boxFunctionInternal` (`isStructuralBinder`). */
+  unboundSymbols?: boolean;
 };
+
+/**
+ * True when `name` is a BINDER: an operator that declares its own variables
+ * in a scope of its own when it is canonicalized. That is an operator whose
+ * definition is `scoped` (the index of a `Sum`, the variable of a `D`), and
+ * `Function`, which is not `scoped` but whose `canonical` handler makes the
+ * scope of its parameters. The structural form boxes the operands of a
+ * binder with unbound symbols (`unboundSymbols`).
+ */
+function isStructuralBinder(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  scope: Scope | undefined
+): boolean {
+  if (name === 'Function') return true;
+  const def = lookupApplicable(name, scope ?? ce.context.lexicalScope, ce);
+  return def !== undefined && !isValueDef(def) && def.operator.scoped;
+}
 
 /**
  * Stride for the canonicalization walk's deadline check (see
@@ -481,6 +508,15 @@ function boxFunctionInternal(
   }
 
   const structural = options.structural ?? false;
+
+  // The operands of a structural binder, at any depth, box their symbols
+  // unbound (see `BoxFunctionOptions.unboundSymbols`).
+  if (
+    structural &&
+    options.unboundSymbols !== true &&
+    isStructuralBinder(ce, name, options.scope)
+  )
+    options.unboundSymbols = true;
 
   // Deep tree: box what is left of it with an explicit work stack instead of
   // recursing into it (see `preboxDeepOperands`). The operands come back
@@ -734,6 +770,7 @@ function boxFunctionInternal(
     canonical: options.canonical,
     structural,
     scope: options.scope,
+    unboundSymbols: options.unboundSymbols,
   };
   const boxOne =
     ce._inferenceTxDepth > 0 && ce._boxingState.isRootActive
@@ -778,6 +815,7 @@ type PreboxOperandOptions =
       canonical: CanonicalOptions;
       structural: boolean;
       scope: Scope | undefined;
+      unboundSymbols: boolean | undefined;
     };
 
 /**
@@ -795,14 +833,20 @@ function mayPreboxOperands(
   name: string,
   ops: ReadonlyArray<ExpressionInput>,
   fullyCanonical: boolean,
-  scope: Scope | undefined
+  scope: Scope | undefined,
+  declineBinders: boolean
 ): boolean {
   if (PREBOX_OPAQUE_HEADS.has(name)) return false;
 
   // A construction that canonicalizes nothing boxes every operand with one
   // and the same set of options (the tail of `boxFunctionInternal`), so
-  // nothing below applies to it.
-  if (!fullyCanonical) return true;
+  // nothing below applies to it, except one case: a structural BINDER boxes
+  // its operands with unbound symbols (`BoxFunctionOptions.unboundSymbols`),
+  // which are not the options of the construction that contains it. With
+  // `declineBinders`, such a node is left to the recursion, which sets that
+  // option.
+  if (!fullyCanonical)
+    return !(declineBinders && isStructuralBinder(ce, name, scope));
 
   // A named call is permuted into declaration order before any operand is
   // read by position, and a `Spread` operand leaves the final positional
@@ -881,6 +925,7 @@ function buildPreboxedNode(
       canonical: forms === true,
       structural: operandOptions?.structural ?? false,
       scope: operandOptions?.scope,
+      unboundSymbols: operandOptions?.unboundSymbols,
     });
     return canonicalForm(fn, forms, operandOptions?.scope);
   }
@@ -955,7 +1000,18 @@ function preboxDeepOperands(
     }
   if (!deep) return null;
 
-  if (!mayPreboxOperands(ce, name, ops, fullyCanonical, options.scope))
+  if (
+    !mayPreboxOperands(
+      ce,
+      name,
+      ops,
+      fullyCanonical,
+      options.scope,
+      // The options of this construction already say whether its operands
+      // box their symbols unbound.
+      false
+    )
+  )
     return null;
 
   const operandOptions: PreboxOperandOptions = fullyCanonical
@@ -964,6 +1020,7 @@ function preboxDeepOperands(
         canonical: options.canonical!,
         structural: options.structural ?? false,
         scope: options.scope,
+        unboundSymbols: options.unboundSymbols,
       };
 
   type Frame = {
@@ -1006,7 +1063,9 @@ function preboxDeepOperands(
             node.name,
             node.ops,
             fullyCanonical,
-            operandOptions?.scope
+            operandOptions?.scope,
+            operandOptions?.structural === true &&
+              operandOptions.unboundSymbols !== true
           )
         ) {
           const child: Frame = {
@@ -1350,6 +1409,7 @@ export function box(
     canonical?: CanonicalOptions;
     structural?: boolean;
     scope?: Scope;
+    unboundSymbols?: boolean;
   }
 ): Expression {
   beginInferenceTransaction(ce);
@@ -1454,25 +1514,40 @@ export function rebind(
     }
     return out;
   };
-  const rebuild = (node: Expression): Expression => {
-    let out = rebuilt.get(node);
+  // In the structural form, a node below a BINDER (a `scoped` operator such
+  // as `Sum` or `Function`) boxes its symbols unbound, as `box()` does
+  // (`BoxFunctionOptions.unboundSymbols`). The same node can be shared by a
+  // part of the tree that is below a binder and a part that is not, so each
+  // case has its own cache.
+  const rebuiltUnderBinder = new Map<Expression, Expression>();
+  const rebuild = (node: Expression, underBinder: boolean): Expression => {
+    const cache = underBinder ? rebuiltUnderBinder : rebuilt;
+    let out = cache.get(node);
     if (out === undefined) {
       if (isFunction(node)) {
         const ops = serializedOperands(node);
+        const opsUnderBinder =
+          underBinder ||
+          (structural && isStructuralBinder(ce, node.operator, scope));
         out = boxFunction(
           ce,
           node.operator,
           node.operator === 'Hold' && ops.length === 1
             ? [rebuildHeld(ops[0])]
-            : ops.map(rebuild),
+            : ops.map((x) => rebuild(x, opsUnderBinder)),
           nodeOptions
         );
-      } else out = box(ce, node.json, nodeOptions);
-      rebuilt.set(node, out);
+      } else
+        out = box(
+          ce,
+          node.json,
+          underBinder ? { ...nodeOptions, unboundSymbols: true } : nodeOptions
+        );
+      cache.set(node, out);
     }
     return out;
   };
-  return rebuild(expr);
+  return rebuild(expr, false);
 }
 
 /** The operands `get json()` serializes for a function node: those of its
@@ -1499,6 +1574,7 @@ function boxInternal(
     canonical?: CanonicalOptions;
     structural?: boolean;
     scope?: Scope;
+    unboundSymbols?: boolean;
   }
 ): Expression {
   if (expr === null || expr === undefined) return ce.error('missing');
@@ -1581,6 +1657,7 @@ function boxInternal(
       canonical,
       structural,
       scope: options?.scope,
+      unboundSymbols: options.unboundSymbols,
     });
     boxingDepth -= 1;
     return canonicalForm(fn, options?.canonical ?? true, options?.scope);
@@ -1624,8 +1701,18 @@ function boxInternal(
       // more predictable, & ensures substitution as per above
       // A partial form resolves symbols but never DECLARES them: its output is
       // not fully canonical, so it follows the structural symbol contract and
-      // leaves the caller's scope untouched (`autoDeclare: false`).
-      const canonicalSymbol = canonical || options.canonical !== false;
+      // leaves the caller's scope untouched (`autoDeclare: false`). The
+      // structural form follows the same contract: a symbol binds to the
+      // definition its name resolves to, so that the type handler of the
+      // enclosing function reads its declared type (with `t: tuple<integer,
+      // integer>`, `["Add", "t", "t"]` is typed `tuple<integer, integer>`,
+      // as on the `ce.function()` route). An unbound symbol is typed
+      // `unknown`. A symbol below a structural binder stays unbound
+      // (`BoxFunctionOptions.unboundSymbols`).
+      const canonicalSymbol =
+        canonical ||
+        (structural && options.unboundSymbols !== true) ||
+        options.canonical !== false;
       return ce.symbol(sym, {
         canonical: canonicalSymbol,
         autoDeclare: canonical,
@@ -1661,12 +1748,23 @@ function boxInternal(
       boxingDepth += 1;
       const fn = (
         ce._boxingState.isRootActive ? boxFunctionInternal : boxFunction
-      )(ce, fnName, ops, { canonical, structural, metadata });
+      )(ce, fnName, ops, {
+        canonical,
+        structural,
+        metadata,
+        unboundSymbols: options.unboundSymbols,
+      });
       boxingDepth -= 1;
       return canonicalForm(fn, options.canonical!, options.scope);
     }
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
-    if ('sym' in expr) return ce.symbol(expr.sym, { canonical, metadata });
+    if ('sym' in expr)
+      return ce.symbol(expr.sym, {
+        canonical:
+          canonical || (structural && options.unboundSymbols !== true),
+        autoDeclare: canonical,
+        metadata,
+      });
     if ('num' in expr) return ce.number(expr, { canonical, metadata });
     if ('dict' in expr) {
       // A malformed entry yields a boxed error, not a raw throw — the same
@@ -2273,7 +2371,18 @@ function keepProvisionalOperands(
       )
     ) {
       const params = candidateParamsAt(checkedType, i);
-      if (params.length > 0 && params.every((p) => orig.type.isDisjointFrom(p)))
+      // `isDisjointFrom` is conservative: it does not read the dimensions of
+      // a collection type, so `list<string>` is not disjoint from
+      // `matrix<2x2>` for it, although no list of strings is a 2×2 matrix.
+      // `typesOverlap` reads them, and still finds the value that two
+      // collection types share through the empty list (`list<string>` and
+      // `list<integer>`), so it refuses only an operand that cannot fit.
+      if (
+        params.length > 0 &&
+        params.every(
+          (p) => orig.type.isDisjointFrom(p) || !typesOverlap(orig.type.type, p)
+        )
+      )
         return r;
       if (
         enforcesAnnotations &&

@@ -607,8 +607,9 @@ describe('INDETERMINATE — the list-cell repair keeps it', () => {
       ['List', 'Missing', ['Tuple', 1, 2]],
     ]);
     expect(expression.type.toString()).toBe(
-      'list<missing | tuple<number, number>>'
+      'list<(missing | tuple<integer | nan, integer | nan>)^2>'
     );
+    expect(expression.evaluate().type.matches(expression.type)).toBe(true);
     const result = markAbsentPointCells(
       ce,
       expression,

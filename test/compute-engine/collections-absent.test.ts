@@ -92,12 +92,33 @@ describe('Rule A: positional operators keep an absent cell', () => {
           L(1, 'Missing', 3),
         ])
         .type.toString()
-    ).toBe('vector<3>');
+    ).toBe('list<integer | nan^3>');
     ce.declare('q', 'integer<1..3> | missing');
-    expect(ce.box(['Multiply', 2, 'q']).type.toString()).toBe('number');
-    expect(ce.box(['Add', 'q', 1]).type.toString()).toBe('number');
+    expect(ce.box(['Multiply', 2, 'q']).type.toString()).toBe('integer | nan');
+    expect(ce.box(['Add', 'q', 1]).type.toString()).toBe('integer | nan');
     ce.declare('r', 'real<0..1> | missing');
-    expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe('number');
+    expect(ce.box(['Multiply', 2, 'r']).type.toString()).toBe('nan | real');
+  });
+});
+
+describe('an operand that may be absent adds `nan` to the numeric result (CE-41)', () => {
+  // The absorption of an absent operand keeps the type the handler answered
+  // and adds `nan`. Before, every numeric arm was replaced by `number`.
+  test('Length of a row that may be absent', () => {
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list<list<real>>');
+    expect(ce.box(['Length', ['At', 'xs', 1]]).type.toString()).toBe(
+      'integer | nan | signed_infinity'
+    );
+  });
+
+  test('Sin of a real that may be absent', () => {
+    const ce = new ComputeEngine();
+    ce.declare('m', 'real | missing');
+    const e = ce.box(['Sin', 'm']);
+    expect(e.type.toString()).toBe('nan | real');
+    ce.assign('m', ce.box('Missing'));
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
   });
 });
 
@@ -266,6 +287,32 @@ describe('Rule D: selection keeps a decided True, quantifiers are Kleene', () =>
         '\\operatorname{All}([1, \\operatorname{Missing}, 3], x \\mapsto x > 0)'
       )
     ).toBe('"Missing"');
+  });
+
+  test('a quantifier over cells that can be absent is typed boolean | missing', () => {
+    // The static type must hold the `Missing` answer of Kleene logic.
+    const ce = new ComputeEngine();
+    for (const json of [
+      ['Any', L(1, 'Missing'), gt2],
+      ['All', L(1, 'Missing', 3), gt0],
+      ['Any', L('False', 'Missing')],
+      ['All', ['Tuple', 1, 'Missing'], gt0],
+    ]) {
+      const e = ce.box(json as never);
+      expect(e.type.toString()).toBe('boolean | missing');
+      expect(e.evaluate().type.matches(e.type)).toBe(true);
+    }
+    // No cell can be absent: the answer is a boolean.
+    expect(ce.box(['Any', L(1, 2), gt2] as never).type.toString()).toBe(
+      'boolean'
+    );
+    expect(
+      ce
+        .parse(
+          '\\operatorname{Any}([1, \\operatorname{Missing}], x \\mapsto x > 2)'
+        )
+        .type.toString()
+    ).toBe('boolean | missing');
   });
 
   test('a symbolic predicate answer still keeps the quantifier inert', () => {

@@ -715,18 +715,18 @@ first three in `_invalidValue()`,
   status: the frozen container is *preserved and iterable*, but its tree
   is still **invalid** — `isValid` is `false` for any tree containing an
   `Error` node, container or not (`error-value.ts`). Its type is still a
-  collection type: a failed cell makes the element type `unknown`, so
-  `[1, err, 3]` retains a collection type, not the whole-value type `error`, and
-  `ListJoin` splices it as it splices any list. A variable declared `list`
-  accepts it; one declared `list<number>` does not, because `error` is not
-  a subtype of `number`. Giving containers a validity notion distinct from
-  their cells (a valid list with invalid cells) is a possible future
-  refinement, not current behavior.
+  collection type: the element type of a list literal leaves the failed cell
+  out (`[1, err, 3]` is typed `vector<integer^3>`), so `[1, err, 3]` retains a
+  collection type, not the whole-value type `error`, and `ListJoin` splices it
+  as it splices any list. A declared variable still refuses it: assigning
+  `[1, err, 3]` to a variable declared `list<number>` throws, because the
+  assignment checks each cell and `error` is not a subtype of `number`.
+  Giving containers a validity notion distinct from their cells (a valid list
+  with invalid cells) is a possible future refinement, not current behavior.
 
-  The `unknown` element type here is a fallback, not a contract stating
-  that the cells are present and successful: an unresolved type proves
-  nothing either way. The meaning of `unknown` does not change error
-  propagation or container validity.
+  The element type is a statement about the cells that did not fail, not a
+  contract that every cell is present and successful. It does not change
+  error propagation or container validity.
 
   **A `List` or `Set` literal with a failed cell is a collection that can be
   iterated** (decided 2026-10-19). Although its tree is invalid,

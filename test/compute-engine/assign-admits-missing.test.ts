@@ -454,7 +454,7 @@ describe('the absence helpers read through a structural alias', () => {
     expect(ce.expr(['Dot', ['Tuple', 1, 2], 'n']).type.toString()).toBe(
       'number'
     );
-    expect(ce.expr(['Norm', 'n']).type.toString()).toBe('number');
+    expect(ce.expr(['Norm', 'n']).type.toString()).toBe('+oo | nan | real');
   });
 
   test('`Dot` of a list of points with a list of an alias is valid', () => {

@@ -17,9 +17,11 @@ describe('Transpose of an operand with no known shape', () => {
     const e = ce.box(['MatrixMultiply', 'q', ['Transpose', 'q']]);
     expect(e.isValid).toBe(true);
     expect(e.evaluate().toString()).toBe('MatrixMultiply(q, Transpose(q))');
-    expect(e.type.toString()).toBe('matrix | vector');
+    // The product of two vectors is a number.
+    expect(e.type.toString()).toBe('matrix | number | vector');
     // The same expression evaluates once `q` has a value
     ce.assign('q', ['List', ['List', 1, 2], ['List', 3, 4]]);
+    expect(e.evaluate().type.matches(e.type)).toBe(true);
     expect(e.evaluate().json).toEqual([
       'List',
       ['List', 5, 11],

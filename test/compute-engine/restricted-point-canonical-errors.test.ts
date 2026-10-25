@@ -385,7 +385,7 @@ describe('Dot of a restricted point or a restricted list of points', () => {
       'list<integer> | missing'
     );
     expect(ce.box(['Dot', RP, ['Tuple', 1, 1]] as never).type.toString()).toBe(
-      'number'
+      'integer | nan'
     );
   });
 

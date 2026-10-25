@@ -709,9 +709,16 @@ const ABSENT_CELLS_PASS_THROUGH: ReadonlySet<string> = new Set([
  * (`Reduce([Missing], Max)` is `Missing`), so its handler must see the
  * `missing` arm of the cells to put it in the result type. The handler also
  * does the numeric widening that the absorption of `absorbOperandAbsence`
- * does for the other operands.
+ * does for the other operands. `Any` and `All` apply a predicate to each
+ * cell and answer `Missing` when an absent cell (or an absent answer of the
+ * predicate) leaves the result undecided, so their handler reads the
+ * `missing` arm of the cells and types the result `boolean | missing`.
  */
-const ABSENT_CELLS_READ_BY_HANDLER: ReadonlySet<string> = new Set(['Reduce']);
+const ABSENT_CELLS_READ_BY_HANDLER: ReadonlySet<string> = new Set([
+  'Reduce',
+  'Any',
+  'All',
+]);
 
 /**
  * True when `operator` is one of the operators of
@@ -1724,6 +1731,28 @@ function isPointOrPointListUnion(t: Type): boolean {
   });
 }
 
+/**
+ * Whether `t` is a union whose every arm is a point (a tuple whose
+ * components are scalars, `hasTupleArm`) or a list with dimensions, with at
+ * least one arm of each kind: `tuple<number, number> | vector<number^2>`.
+ * A tensor of unknown rank (`dimensions` is `null`) is not a list with
+ * dimensions.
+ */
+function isPointOrShapedListUnion(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return false;
+  let point = false;
+  let list = false;
+  for (const arm of r.types) {
+    const a = resolveTypeAlias(arm);
+    if (typeof a !== 'string' && a.kind === 'list' && !!a.dimensions)
+      list = true;
+    else if (isTupleShapedType(a) && hasTupleArm(a)) point = true;
+    else return false;
+  }
+  return point && list;
+}
+
 function hasTupleBranch(t: Type, seen?: AliasDescent): boolean {
   // The alias unfolds under the descent guard (`unfoldAliasOnDescent`): a
   // self-referential alias (`type alias cyc = cyc | tuple<number, number>`)
@@ -1856,6 +1885,56 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   const views = input.views.map(presentView);
   const mappable = (i: number) =>
     input.mappable === undefined || input.mappable(i);
+
+  // An operand whose type is a union of points and of lists with
+  // dimensions (`tuple<number, number> | vector<number^2>`) is typed arm by
+  // arm, and the answers are joined. The value is a point or a list, and the
+  // application has the shape of that value: `Sin` of the point is a point,
+  // `Sin` of the vector a vector. No arm below reads such a union: it is not
+  // a collection of a fixed shape, and its tuple arm is not a scalar beside
+  // a list. So the application was typed as one cell (`number`), which
+  // neither value is. An arm that does not lift (a norm head reads a point
+  // as one value) has the answer of the handler.
+  const split = views.findIndex(
+    (v, i) => mappable(i) && isPointOrShapedListUnion(v.type)
+  );
+  if (split >= 0) {
+    const base = views[split];
+    const union = resolveTypeAlias(base.type) as { types: Type[] };
+    const results: Type[] = [];
+    for (const arm of union.types) {
+      const a = resolveTypeAlias(arm);
+      const isPoint = isTupleShapedType(a);
+      const dims =
+        typeof a !== 'string' && a.kind === 'list' ? a.dimensions : undefined;
+      const view: BroadcastOperandView = {
+        type: arm,
+        isSymbol: base.isSymbol,
+        isApplication: base.isApplication,
+        declaredTopSymbol: false,
+        topTypedBlockLocal: false,
+        get isCollection() {
+          return !isPoint && base.isCollection;
+        },
+        get finiteBroadcastParticipant() {
+          return !isPoint && base.finiteBroadcastParticipant;
+        },
+        tuple: isPoint,
+        textAtom: false,
+        tensorShape: false,
+        matrixFact: !!dims && dims.length === 2,
+        typeIsUnknown: false,
+        holdsUnindexedCollection: false,
+      };
+      results.push(
+        broadcastLiftType({
+          ...input,
+          views: views.map((v, k) => (k === split ? view : v)),
+        }) ?? sigResult
+      );
+    }
+    return reduceType({ kind: 'union', types: results });
+  }
 
   // An operator with the `'whole-collection-compare'` exemption over two or
   // more definite collections applies whole-value semantics — a scalar

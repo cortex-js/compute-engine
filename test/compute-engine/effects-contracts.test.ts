@@ -2391,3 +2391,44 @@ describe('a return-type ascription does not project the returned lambda', () => 
     expect(effectsOf(ce.box(['make']))).toBeUndefined();
   });
 });
+
+describe('A REBUILT VALUE-BOUND LITERAL IS CHECKED AGAINST ITS DECLARED EFFECTS', () => {
+  // `g` is declared with an effects contract and assigned a literal whose
+  // body reads `2h(x)` as a product, because `h` is not a function yet. When
+  // `h` becomes a function, the body is rebuilt as an application of `h`
+  // (`installRebuiltLiteral`, function-utils.ts), and the effects of the
+  // rebuilt body are checked against the contract, as for an operator
+  // definition.
+  function setup(contract: string): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('h', 'unknown');
+    ce.declare('g', contract);
+    ce.assign('g', ce.parse('x \\mapsto 2h(x)'));
+    return ce;
+  }
+  const randomH = ['Function', ['Add', 'x', ['Random']], 'x'] as const;
+
+  test('a rebuild that breaks a pure contract is refused', () => {
+    const ce = setup('(number) pure -> number');
+    expect(() => ce.assign('h', ce.box(randomH as any))).toThrow(
+      /declared effects `pure` do not cover/
+    );
+    // The previous body stays: it does not call `h`.
+    const g = ce.lookupDefinition('g')!;
+    expect(JSON.stringify(g.value!.value!.json)).not.toContain('["h"');
+  });
+
+  test('a rebuild within the contract is installed', () => {
+    const ce = setup('(number) random -> number');
+    ce.assign('h', ce.box(randomH as any));
+    const g = ce.lookupDefinition('g')!;
+    expect(JSON.stringify(g.value!.value!.json)).toContain('["h","x"]');
+  });
+
+  test('a rebuild with no contract is installed', () => {
+    const ce = setup('(number) -> number');
+    ce.assign('h', ce.box(randomH as any));
+    const g = ce.lookupDefinition('g')!;
+    expect(JSON.stringify(g.value!.value!.json)).toContain('["h","x"]');
+  });
+});

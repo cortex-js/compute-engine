@@ -67,7 +67,8 @@ describe('UNDEFINED in a numeric slot', () => {
     // So the type of an arithmetic application with an `Undefined` operand
     // was the type of its PRESENT operands: `Undefined · [1, 2, 3]` claimed
     // `vector<integer^3>` while its value is `[NaN, NaN, NaN]`. The operand
-    // is now typed like `Missing`, and each numeric cell widens to `number`.
+    // is now typed like `Missing`, and each numeric cell gains a `nan` arm
+    // (`integer | nan`, `absorbNumericAbsence`).
     it('an application with an Undefined operand types as the Missing one does', () => {
       for (const head of ['Add', 'Subtract', 'Multiply', 'Divide', 'Power']) {
         for (const ops of [
@@ -86,9 +87,11 @@ describe('UNDEFINED in a numeric slot', () => {
       }
       expect(
         ce.box(['Multiply', 'Undefined', ['List', 1, 2, 3]]).type.toString()
-      ).toBe('vector<3>');
-      expect(ce.box(['Add', 'Undefined', 1]).type.toString()).toBe('number');
-      expect(ce.box(['Negate', 'Undefined']).type.toString()).toBe('number');
+      ).toBe('list<integer | nan^3>');
+      expect(ce.box(['Add', 'Undefined', 1]).type.toString()).toBe(
+        'integer | nan'
+      );
+      expect(ce.box(['Negate', 'Undefined']).type.toString()).toBe('nan');
     });
 
     it('the static type admits the evaluated value', () => {

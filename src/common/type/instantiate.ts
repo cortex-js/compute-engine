@@ -1087,6 +1087,12 @@ export interface TypeAlgebra {
   /** Whether no value of the type is a list (`cannotHoldAList` in
    * `subtype.ts`). */
   cannotHoldAList: (t: Type) => boolean;
+  /** The join of the types of a value's cells, which keeps an `unknown`
+   * member as an arm (`joinUnresolvedArm` in `subtype.ts`). */
+  joinUnresolvedArm: (
+    types: ReadonlyArray<Type>,
+    besideMarkersOnly?: boolean
+  ) => Type;
 }
 
 let _algebra: TypeAlgebra | undefined;
@@ -1260,6 +1266,10 @@ interface SolverState {
    * reads "expected `vector<real^3>`, got `vector<integer^2>`". */
   valueFailures: TypeInferenceFailure[];
   rawType?: (index: number) => Type | undefined;
+  /** The `lifted` option of the solve: true when the operand at `index` was
+   * admitted by a broadcast lift, so its contributed actual is its element
+   * type, not the whole operand. */
+  liftedAt?: (index: number) => boolean;
 }
 
 /**
@@ -1378,6 +1388,7 @@ export function solveTypeArguments(
     values: new Map(),
     valueFailures: [],
     rawType: opts?.rawType,
+    liftedAt: opts?.lifted,
   };
 
   const positions = parameterPositions(arm, actuals.length);
@@ -1446,6 +1457,23 @@ export function solveTypeArguments(
     if (lowers && lowers.length > 0) {
       const joined = joinBounds(lowers, opts?.waiveNestedUnknown === true);
       bindings[p.name] = joined.type;
+      // The join of two literals is their tier (`widen(3, 4)` is
+      // `integer`), which a variable whose declared bound restricts the
+      // values (`where T: real<0..10>`) cannot hold. Such a variable then
+      // binds the union of its lower bounds (`3 | 4`) when that union
+      // satisfies the bound.
+      if (
+        p.bound !== undefined &&
+        lowers.length > 1 &&
+        !joined.absorbed &&
+        boundRestrictsValues(p.bound) &&
+        !algebra().isSubtype(joined.type, p.bound)
+      ) {
+        const arms = new Map<string, Type>();
+        for (const b of lowers) arms.set(typeToString(b.type), b.type);
+        const union: Type = { kind: 'union', types: [...arms.values()] };
+        if (algebra().isSubtype(union, p.bound)) bindings[p.name] = union;
+      }
       if (joined.absorbed) absorbed.add(p.name);
     } else if (uppers.length > 0) {
       bindings[p.name] = algebra().narrow(...uppers.map((b) => b.type));
@@ -1736,6 +1764,39 @@ export function readTypeVariablesAsBounds(t: Type): Type {
 //
 // ── Solver internals ─────────────────────────────────────────────────────────
 //
+
+/**
+ * Whether the declared bound `t` of a type variable names a value or a
+ * numeric range: a literal (`5`, `"a"`), a ranged numeric type
+ * (`real<0..10>`), or a union, intersection, negation or transparent alias
+ * with such a part. The test is syntactic, on the type tree.
+ */
+function boundRestrictsValues(
+  t: Type,
+  seenAliases?: ReadonlySet<string>
+): boolean {
+  if (typeof t === 'string') return false;
+  switch (t.kind) {
+    case 'value':
+    case 'numeric':
+      return true;
+    case 'union':
+    case 'intersection':
+      return t.types.some((x) => boundRestrictsValues(x, seenAliases));
+    case 'negation':
+      return boundRestrictsValues(t.type, seenAliases);
+    case 'reference': {
+      if (!t.alias || t.def === undefined) return false;
+      if (seenAliases?.has(t.name)) return false;
+      return boundRestrictsValues(
+        t.def,
+        new Set([...(seenAliases ?? []), t.name])
+      );
+    }
+    default:
+      return false;
+  }
+}
 
 function isVariable(t: Type): t is { kind: 'variable'; name: string } {
   return typeof t === 'object' && t.kind === 'variable';
@@ -2178,8 +2239,16 @@ function elementTypeOf(type: Type): Type | undefined {
   }
   if (type.kind === 'set') return type.elements;
   if (type.kind === 'broadcastable') return type.elements;
+  // The slots of a tuple are the cells of a value, so an `unknown` slot
+  // beside absence markers only is kept as an arm, as `collectionElementType`
+  // does: the element of `tuple<unknown, missing>` is `missing | unknown`.
+  // The plain `widen` drops the `unknown` slot, and `Sort` of a value of that
+  // type was typed `list<missing>` for the value `[1, Missing]`.
   if (type.kind === 'tuple')
-    return algebra().widen(...type.elements.map((x) => x.type));
+    return algebra().joinUnresolvedArm(
+      type.elements.map((x) => x.type),
+      true
+    );
   // Indexing a dictionary or a record yields a `(key, value)` entry. Built as
   // a `Type` object rather than through `parseType` (which this module must not
   // depend on); `widen()` of no types is `never`, matching the
@@ -2489,6 +2558,33 @@ function walkPattern(
         algebra().isSubtype(RANGE_STRUCTURAL_TYPE, bound)
       )
         actual = RANGE_STRUCTURAL_TYPE;
+    }
+    // The actual has every literal projected to its tier, so `5` reaches
+    // here as `finite_integer`. A variable whose declared bound restricts
+    // the values (`where T: 5`, `where T: real<0..10>`) cannot hold a tier,
+    // so at depth 0 it reads the unwidened public type of the operand: the
+    // literal `5` binds `T = 5` and satisfies the bound `5`.
+    if (
+      phase === 'lower' &&
+      covariant &&
+      topLevel &&
+      index !== undefined &&
+      s.rawType !== undefined
+    ) {
+      const bound = s.declared.get(pattern.name);
+      if (bound !== undefined && boundRestrictsValues(bound)) {
+        let raw = s.rawType(index);
+        // A lift-admitted operand contributes its ELEMENT type (the
+        // runtime maps over it), so its public type is projected the same
+        // way. Without this, `g([1, 2])` with `g: (T) -> T where
+        // T: real<0..10>` bound `T` to the whole list, and the result lift
+        // added a second list level that the value does not have.
+        if (raw !== undefined && s.liftedAt?.(index)) {
+          const expanded = expandAliasesForLift(raw);
+          raw = expanded === null ? undefined : liftedElementTypeOf(expanded);
+        }
+        if (raw !== undefined) actual = raw;
+      }
     }
     if (phase === 'lower' && covariant)
       addBound(s.lower, pattern.name, actual, index, topLevel);

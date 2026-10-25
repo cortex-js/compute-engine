@@ -438,7 +438,10 @@ const LIST_FAMILY_NAMES: ReadonlySet<string> = new Set([
  * one-line change here: `return cellTypeCanHoldANumber(t);`. Every site
  * asks this question through this function.
  */
-export function cellTypeMayCarryDimensions(t: Type): boolean {
+export function cellTypeMayCarryDimensions(
+  t: Type,
+  seenAliases?: ReadonlySet<string>
+): boolean {
   if (typeof t === 'string') return !LIST_FAMILY_NAMES.has(t);
   switch (t.kind) {
     case 'list':
@@ -448,7 +451,22 @@ export function cellTypeMayCarryDimensions(t: Type): boolean {
       return false;
     case 'union':
     case 'intersection':
-      return t.types.every(cellTypeMayCarryDimensions);
+      return t.types.every((x) => cellTypeMayCarryDimensions(x, seenAliases));
+    case 'reference': {
+      // An alias denotes the same values as its definition, so the rule
+      // applies to the definition: after `Row` is declared as an alias of
+      // `vector<integer^3>`, `list<Row^2>` is refused as
+      // `list<vector<integer^3>^2>` is. A nominal type is opaque (it is not
+      // a subtype of its definition), so a nominal reference is accepted.
+      // An alias with no definition yet (a forward reference) is accepted,
+      // and a recursive alias stops at its second visit.
+      if (!t.alias || t.def === undefined) return true;
+      if (seenAliases?.has(t.name)) return true;
+      return cellTypeMayCarryDimensions(
+        t.def,
+        new Set([...(seenAliases ?? []), t.name])
+      );
+    }
     default:
       // A tuple, record, object, dictionary, set, signature, symbol,
       // expression, numeric range, literal, type variable, reference or

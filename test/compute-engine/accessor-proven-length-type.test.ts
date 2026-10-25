@@ -5,7 +5,9 @@
  * decision 2026-09-30). When the operand is PROVED to hold the position, the
  * result is the element type. The proof is read from pure sources
  * (`provenLengthD`, `library/collections.ts`): a list type with a length,
- * a list literal, a string literal, a `Range` with literal bounds.
+ * a list literal, a string literal, a `Range` with literal bounds, and
+ * `Rest`, `Most`, `Take` and `Drop` (with a literal count) of such an
+ * operand.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
@@ -57,6 +59,14 @@ describe('an access into an operand proved to hold the position', () => {
     // A matrix type states its rows.
     ['First', ['m23'], 'vector<3>'],
     ['Last', ['m23'], 'vector<3>'],
+    // `Rest`, `Most`, `Take` and `Drop` of an operand with a proved length,
+    // with a literal count, have a proved length too.
+    ['First', [['Rest', POINTS]], 'tuple<integer, integer>'],
+    ['First', [['Rest', ['List', 1, 2, 3]]], 'integer'],
+    ['First', [['Take', ['List', 1, 2, 3], 2]], 'integer'],
+    ['Second', [['Take', ['List', 1, 2, 3], -2]], 'integer'],
+    ['First', [['Drop', ['List', 1, 2, 3], 2]], 'integer'],
+    ['Last', [['Most', ['List', 1, 2, 3]]], 'integer'],
   ])('%s%j is typed %s', (head, args, expected) => {
     expect(typeOf(ce, [head, ...(args as unknown[])])).toBe(expected);
   });
@@ -65,7 +75,8 @@ describe('an access into an operand proved to hold the position', () => {
 describe('an access into an operand proved NOT to hold the position', () => {
   const ce = engine();
 
-  // The value is always the marker, but the type keeps `T | marker(T)`: a
+  // The value is always the marker. For number elements the type is the
+  // marker `nan`. For other elements the type keeps `T | marker(T)`: a
   // chained read chooses its marker from the element type the inner access
   // states (`M[7][1]` over a matrix answers `NaN` because `M[7]` is typed
   // `missing | vector<…>`, a row of numbers).
@@ -73,9 +84,14 @@ describe('an access into an operand proved NOT to hold the position', () => {
     ['Third', [POINTS], 'missing | tuple<integer, integer>'],
     ['At', [POINTS, 9], 'missing | tuple<integer, integer>'],
     ['At', [POINTS, 0], 'missing | tuple<integer, integer>'],
-    ['At', [['List', 7, 8, 9], 9], 'integer | nan'],
-    ['At', ['v3', 4], 'number'],
+    ['At', [['List', 7, 8, 9], 9], 'nan'],
+    ['At', ['v3', 4], 'nan'],
     ['At', [{ str: 'abc' }, 9], 'character | missing'],
+    // A range that holds fewer elements than the position.
+    ['Third', [['Range', 1, 2]], 'nan'],
+    ['First', [['Range', 1, 5, -1]], 'nan'],
+    ['Second', [['Drop', ['List', 1, 2, 3], 2]], 'nan'],
+    ['First', [['Rest', ['List', 1]]], 'nan'],
   ])('%s%j is typed %s', (head, args, expected) => {
     expect(typeOf(ce, [head, ...(args as unknown[])])).toBe(expected);
   });
@@ -88,6 +104,28 @@ describe('an access into an operand proved NOT to hold the position', () => {
         .toString()
     ).toBe('"Missing"');
     expect(ce.box(['At', ['List', 7, 8, 9], 9]).evaluate().isNaN).toBe(true);
+    for (const json of [
+      ['Third', ['Range', 1, 2]],
+      ['First', ['Range', 1, 5, -1]],
+      ['Second', ['Drop', ['List', 1, 2, 3], 2]],
+      ['First', ['Rest', ['List', 1]]],
+    ])
+      expect(ce.box(json as any).evaluate().isNaN).toBe(true);
+  });
+
+  test('the value of an access through Rest, Most, Take or Drop has the type', () => {
+    for (const [json, value] of [
+      [['First', ['Rest', ['List', 1, 2, 3]]], '2'],
+      [['First', ['Take', ['List', 1, 2, 3], 2]], '1'],
+      [['Second', ['Take', ['List', 1, 2, 3], -2]], '3'],
+      [['First', ['Drop', ['List', 1, 2, 3], 2]], '3'],
+      [['Last', ['Most', ['List', 1, 2, 3]]], '2'],
+    ] as [unknown, string][]) {
+      const expr = ce.box(json as any);
+      const v = expr.evaluate();
+      expect(v.toString()).toBe(value);
+      expect(v.type.matches(expr.type)).toBe(true);
+    }
   });
 
   test('a chained read past the end of a matrix answers the numeric marker', () => {
@@ -109,16 +147,16 @@ describe('an access that can find nothing keeps its absent member', () => {
   test.each([
     // A filter can select nothing.
     ['First', [filter], 'missing | tuple<integer, integer>'],
-    // The type of `Rest` has no length, so an empty result is possible.
-    ['First', [['Rest', POINTS]], 'missing | tuple<integer, integer>'],
+    // The source of `Rest` has no proved length, so an empty result is
+    // possible.
+    ['First', [['Rest', 'pts']], 'missing | tuple<number, number>'],
+    // A count that is not a literal.
+    ['First', [['Take', POINTS, 'n']], 'missing | tuple<integer, integer>'],
     // A declaration with no length: the value can be replaced by `[]`.
     ['First', ['pts'], 'missing | tuple<number, number>'],
     ['First', ['held'], 'missing | tuple<number, number>'],
     // A range with a symbolic bound.
     ['First', [['Range', 1, 'n']], 'integer | nan'],
-    // A range that holds fewer elements than the position.
-    ['Third', [['Range', 1, 2]], 'integer | nan'],
-    ['First', [['Range', 1, 5, -1]], 'integer | nan'],
     // A variable index.
     ['At', [POINTS, 'n'], 'missing | tuple<integer, integer>'],
   ])('%s%j is typed %s', (head, args, expected) => {

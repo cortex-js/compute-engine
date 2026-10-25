@@ -3,7 +3,7 @@ import {
   unfoldAliasOnDescent,
   type AliasDescent,
 } from './utils.js';
-import { freeTypeVariables } from './instantiate.js';
+import { freeTypeVariables, readTypeVariablesAsBounds } from './instantiate.js';
 import { provablyDisjoint } from './subtype.js';
 import type { FunctionSignature, Type } from './types.js';
 
@@ -163,6 +163,15 @@ function armIncompatibility(
   supply: Readonly<FunctionSignature>,
   arm: FunctionSignature
 ): CallbackIncompatibility | undefined {
+  // A type variable of a polymorphic arm stands for a type below its bound
+  // (`(T) -> T where T: number` accepts only numbers), so its parameters are
+  // judged at their bounds. A variable with no bound reads as `unknown`,
+  // which is disjoint from no type, so it never refuses.
+  if ((arm.typeParams?.length ?? 0) > 0) {
+    const bounded = readTypeVariablesAsBounds(arm);
+    if (typeof bounded !== 'string' && bounded.kind === 'signature')
+      arm = bounded;
+  }
   const supplied = supply.args ?? [];
   for (let i = 0; i < supplied.length; i++) {
     const p = supplied[i].type;

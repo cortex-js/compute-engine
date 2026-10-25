@@ -283,7 +283,12 @@ describe('Map: a lambda callback and the named operator agree on an absent eleme
     const named = boxed(['Map', 'Abs', numbers]);
     expect(lambda.evaluate().toString()).toBe('[1,NaN,2]');
     expect(named.evaluate().toString()).toBe('[1,NaN,2]');
-    expect(lambda.type.toString()).toBe(named.type.toString());
+    // Both types hold the value. The lambda keeps the integer cells and adds
+    // the `NaN` of the absent cell; the named callback is typed `number`.
+    expect(lambda.type.toString()).toBe('list<integer | nan^3>');
+    expect(named.type.toString()).toBe('vector<3>');
+    expect(lambda.evaluate().type.matches(lambda.type)).toBe(true);
+    expect(named.evaluate().type.matches(named.type)).toBe(true);
     expect(
       boxed(['Map', ['Function', ['Add', 'x', 1], 'x'], numbers])
         .evaluate()

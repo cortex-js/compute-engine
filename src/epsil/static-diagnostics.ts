@@ -1917,6 +1917,15 @@ function registerPinnedSignature(
       assignOverUserFunction(ce, name, rhs)
     )
       return;
+    if (rhs !== undefined && isSymbol(rhs)) {
+      // `g := k`, with `k` pinned from a function literal: see
+      // `pinnedAliasOf`.
+      const alias = pinnedAliasOf(ce, rhs.symbol, pinned);
+      if (alias !== undefined) {
+        type = alias.type;
+        literalCallee = alias.literal;
+      }
+    }
     if (rhs !== undefined && rhs.operator === 'Function') {
       type = rhs.type.type;
       literalCallee = rhs;
@@ -1960,7 +1969,18 @@ function registerPinnedSignature(
       // own signature is what the declaration will pin.
       const last = boxed.ops[boxed.ops.length - 1];
       const init = isDictionary(last) ? last.get('value') : undefined;
-      if (init !== undefined && init.operator === 'Function') {
+      // `let g = k`, with `k` pinned from a function literal: `g` holds the
+      // same literal (`pinnedAliasOf`).
+      const alias =
+        init !== undefined && isSymbol(init)
+          ? pinnedAliasOf(ce, init.symbol, pinned)
+          : undefined;
+      if (alias !== undefined) {
+        type = alias.type;
+        const constant = isDictionary(last) ? last.get('constant') : undefined;
+        firstWins = constant !== undefined && isSymbol(constant, 'True');
+        literalCallee = alias.literal;
+      } else if (init !== undefined && init.operator === 'Function') {
         type = init.type.type;
         // A `let` binding is replaced by a later assignment; a `const`
         // binding refuses it (the assignment is a runtime error that leaves
@@ -2017,6 +2037,34 @@ function registerPinnedSignature(
   const pinnedDef = sym.valueDefinition;
   if (literalCallee !== undefined && pinnedDef !== undefined)
     ce._staticPinnedCallees?.set(pinnedDef, literalCallee);
+}
+
+/**
+ * The pin of an ALIAS: a statement `let g = k` or `g := k` where `k` is pinned
+ * from a function literal (`let k = (n: integer) => n + 1`). At run time the
+ * statement copies the value of `k`, that literal, into `g`, so `g` takes the
+ * signature of the pin of `k` and the same literal for the validation of
+ * its calls: `g(1.5)` is then reported, as `k(1.5)` is. The result is
+ * `undefined` when `k` has no pin, or when its pin did not come from a
+ * function literal (an annotation alone pins a declared type, which is not
+ * the value that `g` receives).
+ *
+ * The pin of `k` is the one in force when the statement is reached, which is
+ * the value that the statement copies; a later assignment to `k` does not
+ * change `g`.
+ */
+function pinnedAliasOf(
+  ce: ComputeEngine,
+  source: string,
+  pinned: Map<string, PinnedSignature>
+): { type: Type; literal: ReturnType<ComputeEngine['box']> } | undefined {
+  const pin = pinned.get(source);
+  if (pin === undefined) return undefined;
+  const def = ce.box(source).valueDefinition;
+  const literal =
+    def === undefined ? undefined : ce._staticPinnedCallees?.get(def);
+  if (literal === undefined) return undefined;
+  return { type: pin.type, literal };
 }
 
 /**

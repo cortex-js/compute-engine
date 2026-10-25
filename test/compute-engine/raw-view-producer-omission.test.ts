@@ -325,7 +325,10 @@ test('Shape treats tuple cells as scalars beside omitted coordinates', () => {
 });
 
 test.each([
-  [[0, 3], [0]],
+  [
+    [0, 3],
+    [0, 3],
+  ],
   [
     [2, 0],
     [2, 0],
@@ -338,4 +341,5 @@ test.each([
     ...dimensions,
   ]);
   expect(ce.box(['Shape', view]).evaluate().json).toEqual(['Tuple', ...shape]);
+  expect(view.evaluate().type.matches(view.type)).toBe(true);
 });

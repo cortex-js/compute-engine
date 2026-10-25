@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../../src/compute-engine';
 import { isSubtype } from '../../../src/common/type/subtype';
+import { typeAcceptsValue } from '../../../src/compute-engine/boxed-expression/value-membership';
 
 /**
  * NIGHTLY — full type-soundness grid (~1,600 checks).
@@ -89,7 +90,21 @@ function soundness(label: string, expr: any, violations: string[]): void {
     return;
   }
   if (!v.isValid) return;
-  if (!isSubtype(v.type.type, staticT.type)) {
+  // The type of a big-decimal value is a compact enclosure with two
+  // significant digits (`real<1.1..1.2>` for `1.1666…67`), which can be
+  // wider than a static range that interval arithmetic gives
+  // (`real<1.16..1.171>` for `2/3 + 0.5`). Two range spellings with
+  // different numbers of digits are then not subtypes, although the value
+  // is inside the static range. So the oracle also asks whether the VALUE
+  // is a member of the static type. A result that is not a number literal
+  // (`0.27027…·π` for `π/3.7`, `√2·√√2`) has a type built from the
+  // enclosures of its parts; the oracle then asks whether its numeric
+  // value is a member.
+  const n = v.isNumberLiteral ? v : v.N();
+  if (
+    !isSubtype(v.type.type, staticT.type) &&
+    !(n.isNumberLiteral && typeAcceptsValue(n, staticT.type))
+  ) {
     if (v.isInfinity === true || v.isNaN === true) {
       NONFINITE_TAIL.add(label);
       return;

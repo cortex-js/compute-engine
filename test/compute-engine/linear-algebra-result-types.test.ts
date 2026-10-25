@@ -292,12 +292,13 @@ describe('MatrixMultiply', () => {
     sound(ce, ['MatrixMultiply', 'm', L(1, 2, 3)], 'vector<integer>');
   });
   test('an inner extent mismatch declines', () => {
-    declines(ce, ['MatrixMultiply', R, A], 'matrix | vector');
+    declines(ce, ['MatrixMultiply', R, A], 'matrix | number | vector');
   });
-  test('two vectors decline: the product is a scalar', () => {
+  test('two vectors give a scalar, their inner product', () => {
     const e = ce.box(['MatrixMultiply', L(1, 2, 3), L(1, 2, 3)]);
-    expect(e.type.toString()).toBe('matrix | vector');
+    expect(e.type.toString()).toBe('integer');
     expect(e.evaluate().toString()).toBe('14');
+    sound(ce, ['MatrixMultiply', L(['Rational', 1, 2], 1), L(1, 3)], 'real');
   });
 });
 

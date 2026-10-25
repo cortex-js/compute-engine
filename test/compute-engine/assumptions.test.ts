@@ -622,6 +622,33 @@ describe('domainToType SIGNED-SET COVERAGE (SYM P2-11)', () => {
   });
 });
 
+describe('AN EXTENDED NUMBER SET PROVES ITS TIER', () => {
+  // The extended sets add the infinite values to the finite tier. An
+  // assumption of membership in one of them refines the type of the symbol
+  // as the finite sets do.
+  test.each([
+    ['ExtendedRealNumbers', 'real | signed_infinity'],
+    ['ExtendedRationalNumbers', 'rational | signed_infinity'],
+    ['ExtendedIntegers', 'integer | signed_infinity'],
+    ['ExtendedComplexNumbers', 'complex | infinity'],
+  ])('t ∈ %s ⇒ %s', (set, type) => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.box(['Element', 't', set]))).toBe('ok');
+    expect(ce.box('t').type.toString()).toBe(type);
+    expect(ce.box('t').isNumber).toBe(true);
+    expect(ce.box(['Element', 't', set]).evaluate().symbol).toBe('True');
+  });
+
+  test('an extended real is not proven finite', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Element', 't', 'ExtendedRealNumbers']));
+    expect(ce.box('t').isFinite).toBeUndefined();
+    expect(ce.box(['Element', 't', 'RealNumbers']).evaluate().symbol).not.toBe(
+      'True'
+    );
+  });
+});
+
 describe('A UNION OF RANGES OR INTERVALS PROVES A TIER', () => {
   // A union yields a disjunction of bounds, which the fact layer does not
   // represent, so only the tier reaches the reader. The set must be recorded

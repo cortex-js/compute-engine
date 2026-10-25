@@ -1943,6 +1943,12 @@ export function updateDef(
     if (resubscribe !== undefined) window.recordDelta(resubscribe);
   }
 
+  // The inferred signature of a self-recursive function literal is refined
+  // now that the record holds the new half: its recursive calls must
+  // resolve to it (`_refineRecursiveListResult`). The half is new, so the
+  // journals above need no entry for the write.
+  constructedOperatorHalf?._refineRecursiveListResult();
+
   if (supersededValue !== undefined && supersededValue !== mutableDef.value)
     unregisterProvisionalDependent(supersededValue);
   if (

@@ -53,7 +53,9 @@ describe('a call of a function literal over a collection operand', () => {
       ce.assign('f', ce.box(PAIR as any));
     };
     const cases: [string, string][] = [
-      ['list<unknown>', 'list<tuple<number, number>>'],
+      // An element typed `unknown` can be a list, and the literal maps it at
+      // its leaves too, so an element of the result can be a list.
+      ['list<unknown>', 'list<list<any> | tuple<number, number>>'],
       ['list<integer>', 'list<tuple<integer, integer>>'],
       // The literal maps over the cells of a matrix, as over the elements
       // of a list of lists.

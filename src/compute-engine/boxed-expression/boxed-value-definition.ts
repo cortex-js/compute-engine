@@ -15,6 +15,10 @@ import {
   inListHypothesisPass,
   resultUnderDeclaredParameters,
   verifiedListHypothesis,
+  beginSignatureDerivation,
+  endSignatureDerivation,
+  noteReentrantSignatureRead,
+  type SignatureDerivationFrame,
   withSignatureResult,
   type HomeScope,
 } from './declared-parameter-result.js';
@@ -46,7 +50,7 @@ import {
 import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
-import { isFunction, isNumber } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   hasSignaturePlaceholder,
   matchesDeclaredTypeAxes,
@@ -485,6 +489,21 @@ export class _BoxedValueDefinition
             throw declaredTypeError(this.name, this._value, this._type);
           }
         }
+        // A symbol with no value and no type as the value of a DECLARED type
+        // is a use of that symbol at the declared type: narrow it, as the
+        // assignment route does (`assignFn`, `engine-declarations.ts`).
+        // Without this, `ce.declare('r', { type: 'real', value: zz })` left
+        // `zz` typed `unknown`, a type that the declared `real` does not
+        // contain.
+        else if (
+          !this.inferredType &&
+          isSymbol(this._value) &&
+          this._value.type.isUnknown &&
+          this._value.value === undefined
+        ) {
+          const contract = this._placeholderSkeleton ?? this._type.type;
+          this._value._infer(() => contract, 'narrow');
+        }
         // A declared placeholder skeleton refines from the initializer,
         // exactly as it refines from an assignment (Phase 1 rulings, ruled
         // 2026-08-18): `let a: list = [1, 2, 3]` reports
@@ -916,6 +935,7 @@ export class _BoxedValueDefinition
     const v = this.storedValue;
     if (v === undefined) return recorded;
     if (this._derivingSignature) {
+      noteReentrantSignatureRead(this);
       const candidate = this._recursionResult;
       if (candidate === undefined) return recorded;
       return new BoxedType(
@@ -923,6 +943,22 @@ export class _BoxedValueDefinition
         this._engine._typeResolver
       );
     }
+    const frame = beginSignatureDerivation(this);
+    try {
+      return this._deriveSignatureOnce(recorded, skeleton, v, frame);
+    } finally {
+      endSignatureDerivation(frame);
+    }
+  }
+
+  /** The body of {@link _deriveSignature}, run inside the derivation frame
+   * `frame` (`beginSignatureDerivation`). */
+  private _deriveSignatureOnce(
+    recorded: BoxedType,
+    skeleton: Type,
+    v: Expression,
+    frame: SignatureDerivationFrame
+  ): BoxedType {
     let valueType: BoxedType;
     this._derivingSignature = true;
     try {
@@ -1010,8 +1046,14 @@ export class _BoxedValueDefinition
     // after the rollback.
     // Nor while a list-hypothesis pass of any definition runs: this
     // derivation may have read a hypothesis that is then refuted
-    // (`inListHypothesisPass`).
-    if (this._engine._rollbackFrames.length === 0 && !inListHypothesisPass())
+    // (`inListHypothesisPass`). Nor when it read the provisional signature
+    // of a function whose own derivation was still running
+    // (`noteReentrantSignatureRead`).
+    if (
+      this._engine._rollbackFrames.length === 0 &&
+      !inListHypothesisPass() &&
+      !frame.tainted
+    )
       this._signatureMemo = {
         skeleton,
         value: v,

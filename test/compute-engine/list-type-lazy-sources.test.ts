@@ -79,12 +79,32 @@ describe('Range, Linspace, Comprehension and Tabulate are lists', () => {
   });
 
   test('a tabulation is a list', () => {
+    // The extent is a literal, so the length is known.
     expect(typeOf(['Tabulate', ['Function', ['Square', 'i'], 'i'], 3])).toBe(
-      'list<number>'
+      'vector<3>'
     );
     expect(
       typeOf(['Tabulate', ['Function', ['Multiply', 'i', 'j'], 'i', 'j'], 2, 3])
-    ).toBe('list<list<number>>');
+    ).toBe('matrix<2x3>');
+  });
+
+  test('a generator with rows of unknown length gives no matrix', () => {
+    // `vector<integer>` does not fix the length of a row, so the rows of
+    // the tabulation can have different lengths: `[[1], [1, 2], [1, 2, 3]]`.
+    const ce = new ComputeEngine();
+    ce.declare('f', '(integer) -> vector<integer>');
+    ce.assign('f', ce.box(['Function', ['Range', 1, 'i'], 'i']));
+    const e = ce.box(['Tabulate', 'f', 3]);
+    const value = e.evaluate();
+    expect(value.toString()).toBe('[[1],[1,2],[1,2,3]]');
+    expect(e.type.toString()).toBe('list<vector<integer>>');
+    expect(value.type.matches(e.type)).toBe(true);
+    // Rows of a fixed length still give a matrix.
+    ce.declare('g', '(integer) -> vector<integer^2>');
+    ce.assign('g', ce.box(['Function', ['List', 'i', 'i'], 'i']));
+    const m = ce.box(['Tabulate', 'g', 3]);
+    expect(m.type.toString()).toBe('matrix<integer^(3x2)>');
+    expect(m.evaluate().type.matches(m.type)).toBe(true);
   });
 });
 

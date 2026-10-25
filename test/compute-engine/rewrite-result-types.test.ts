@@ -198,23 +198,30 @@ describe('TRIGREDUCE RESULT TYPE', () => {
 });
 
 describe('TRIG REWRITES OF AN OPERAND THAT MAY NOT BE A VALUE', () => {
-  // These operands keep the declared result `value`. The value of each one
-  // (`Missing`, `Nothing`, an error, a symbol with no type, a possibly
-  // absent symbol) is not a subtype of `value`, so the subtype check is not
-  // made here: that gap is in the declared signature, not in the handler.
-  test.each<[string, unknown, string]>([
-    ['Missing', ['TrigExpand', 'Missing'], 'missing'],
-    ['possibly absent symbol', ['TrigExpand', 'M'], 'missing | number'],
-    ['symbol with no type', ['TrigToExp', 'zz'], 'unknown'],
+  // An operand whose type is not below `value` (`Missing`, a symbol with no
+  // type, a possibly absent symbol) gives its own type: the declared result
+  // `value` does not hold such a value. A tuple keeps the declared `value`.
+  test.each<[string, unknown, string, string]>([
+    ['Missing', ['TrigExpand', 'Missing'], 'missing', 'missing'],
+    [
+      'possibly absent symbol',
+      ['TrigExpand', 'M'],
+      'missing | number',
+      'missing | number',
+    ],
+    ['symbol with no type', ['TrigToExp', 'zz'], 'unknown', 'unknown'],
     [
       'tuple under TrigReduce',
       ['TrigReduce', ['Tuple', ['Sin', 'a'], 3]],
+      'value',
       'tuple<real, integer>',
     ],
-  ])('%s', (_label, json, valueType) => {
+  ])('%s', (_label, json, staticType, valueType) => {
     const expr = ce.box(json as any);
-    expect(expr.type.toString()).toBe('value');
-    expect(expr.evaluate().type.toString()).toBe(valueType);
+    expect(expr.type.toString()).toBe(staticType);
+    const v = expr.evaluate();
+    expect(v.type.toString()).toBe(valueType);
+    expect(v.type.matches(expr.type)).toBe(true);
   });
 
   test('a `Nothing` operand is erased, as for any operator', () => {

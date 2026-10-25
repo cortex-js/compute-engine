@@ -709,7 +709,9 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
       const value = call.evaluate();
       expect(value.isFiniteCollection).toBe(false);
       expect(value.at(3)?.toString()).toBe(third);
-      expect(call.type.toString()).toMatch(/^list<tuple</);
+      // `Cycle([1, 2])` is typed as a bare `list`, whose elements can be
+      // lists, so an element of the result can be a list too.
+      expect(call.type.toString()).toMatch(/^list<(list<any> \| )?tuple</);
     }
   });
 

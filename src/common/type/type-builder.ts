@@ -86,8 +86,21 @@ function checkTensorCells(
   const cellText = typeToString(cells);
   const spelled =
     outer === undefined ? `tensor<${cellText}>` : `${head}<${cellText}^…>`;
-  const nested = nestedListSpelling(cells, outer);
-  const merged = mergedShapeSpelling(cells, outer);
+  // The advice reads the definition of an alias (`Row` for
+  // `vector<integer^3>` gives `matrix<integer^(2x3)>`).
+  let shapeCells = cells;
+  for (let i = 0; i < 16; i++) {
+    if (
+      typeof shapeCells === 'string' ||
+      shapeCells.kind !== 'reference' ||
+      !shapeCells.alias ||
+      shapeCells.def === undefined
+    )
+      break;
+    shapeCells = shapeCells.def;
+  }
+  const nested = nestedListSpelling(shapeCells, outer);
+  const merged = mergedShapeSpelling(shapeCells, outer);
   const advice =
     nested !== undefined
       ? `Write \`${nested}\` for rows of any lengths`

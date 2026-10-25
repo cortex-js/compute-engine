@@ -271,7 +271,7 @@ describe('THE DERIVE ROUTE OVER NESTED LISTS', () => {
       'list<list<tuple<integer, integer>> | missing>',
       ['Divide', 'L', 2],
       ['List', ['List', ['Tuple', 1, 2]], 'Missing'],
-      'list<list<missing | tuple<number, number>> | missing>',
+      'list<list<missing | tuple<infinity | nan | real, infinity | nan | real>> | missing>',
     ],
   ])('%s', (_, decl, expr, value, type) => {
     const ce = new ComputeEngine();
@@ -309,7 +309,7 @@ describe('THE DERIVE ROUTE OVER NESTED LISTS', () => {
     [
       'list<list<tuple<integer, integer>> | missing>',
       ['List', ['List', ['Tuple', 1, 2]], 'Missing'],
-      'list<list<missing | tuple<number, number>> | missing>',
+      'list<list<missing | tuple<infinity | nan | real, infinity | nan | real>> | missing>',
     ],
   ])('%s divided by a symbol (box)', (decl, value, type) => {
     const ce = new ComputeEngine();
@@ -490,7 +490,9 @@ describe('POINTS BESIDE NUMBERS WITH AN ABSENT CELL', () => {
       NQ,
       'list<integer | missing>',
       ['List', 2, 'Missing'],
-      'list<list<missing | tuple<number, number>>>',
+      op === 'Mod'
+        ? 'list<list<missing | tuple<nan | real, nan | real>>>'
+        : 'list<list<missing | tuple<number, number>>>',
     ]);
     CASES.push([
       op,
@@ -500,7 +502,9 @@ describe('POINTS BESIDE NUMBERS WITH AN ABSENT CELL', () => {
       ['List', ['List', 1, 'Missing'], ['List', 3, 4]],
       op === 'Divide'
         ? 'list<list<missing | tuple<number, number>>>'
-        : 'list<list<number>>',
+        : op === 'Mod'
+          ? 'list<list<nan | real>>'
+          : 'list<list<number>>',
     ]);
   }
   test.each(CASES)('%s of a %s and a %s', (op, dq, vq, dm, vm, type) => {
@@ -759,5 +763,59 @@ describe('a vector beside a list of lists keeps the integer arm', () => {
     ce.declare('P', 'tuple<number, number> | list<tuple<number, number>>');
     ce.declare('Q', 'tuple<number, number> | list<tuple<number, number>>');
     expect(ce.box(['Multiply', 'P', 'Q']).type.toString()).toBe('error');
+  });
+});
+
+describe('a list of points beside a list of rows of numbers', () => {
+  // Arithmetic maps over the rows to each number, so every element of the sum
+  // is a point plus a number, which has no value. The sum is refused when it
+  // is boxed, as it is beside a flat list of numbers. Before, the static type
+  // was `error`, but the value was a nested list of errors (CE-28.2).
+  test('a declared list of rows', () => {
+    const ce = new ComputeEngine();
+    ce.declare('Q', 'list<list<tuple<integer, integer>>>');
+    ce.declare('M', 'list<list<integer>>');
+    const e = ce.box(['Add', 'Q', 'M']);
+    expect(e.type.toString()).toBe('error');
+    expect(e.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "list<tuple>", "list<number>"))'
+    );
+  });
+
+  test('a literal list of rows beside a point', () => {
+    const ce = new ComputeEngine();
+    const e = ce.parse('(0,1)+[[1,2],[3]]');
+    expect(e.toString()).toBe(
+      'Error(ErrorCode("incompatible-type", "tuple", "list<number>"))'
+    );
+  });
+});
+
+describe('a list with dimensions divided by a scalar call (CE-59)', () => {
+  // Each cell is divided by the scalar, so the cells are typed as the
+  // quotient of a point coordinate by that scalar. Before, the quotient of a
+  // vector by a call was a `vector<2>`, and that of a point `rational`.
+  test.each<[unknown, string]>([
+    [['Divide', 'v', ['g', 1]], 'vector<rational^2>'],
+    [['Divide', 'p', ['g', 1]], 'tuple<rational, rational>'],
+    [['Divide', 'm', ['g', 1]], 'matrix<rational^(2x2)>'],
+    // `k` may be zero: `1/0` is `~oo` and `0/0` is `NaN`.
+    [['Divide', 'v', 'k'], 'list<infinity | nan | real^2>'],
+  ])('%j', (json, type) => {
+    const ce = new ComputeEngine();
+    ce.declare('v', 'vector<integer^2>');
+    ce.declare('p', 'tuple<integer, integer>');
+    ce.declare('m', 'matrix<integer^(2x2)>');
+    ce.declare('k', 'integer');
+    ce.declare('g', '(integer) -> integer<1..5>');
+    const e = ce.box(json as any);
+    expect(e.type.toString()).toBe(type);
+    ce.assign('v', ce.box(['List', 3, 4]));
+    ce.assign('p', ce.box(['Tuple', 3, 4]));
+    ce.assign('m', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    ce.assign('k', 2);
+    ce.assign('g', ce.box(['Function', ['Add', 'x', 1], 'x']));
+    const v = ce.box(json as any).evaluate();
+    expect(v.type.matches(e.type)).toBe(true);
   });
 });

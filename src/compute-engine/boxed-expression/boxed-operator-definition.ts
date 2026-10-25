@@ -14,6 +14,10 @@ import {
   resultUnderDeclaredParameters,
   verifiedListHypothesis,
   withSignatureResult,
+  beginSignatureDerivation,
+  endSignatureDerivation,
+  noteReentrantSignatureRead,
+  type SignatureDerivationFrame,
   type HomeScope,
 } from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -846,7 +850,26 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // the recursion fixpoint below, the stored signature with the current
     // candidate as its result) and is not memoized, so the cycle stops after
     // one level.
-    if (this._derivingSignature) return this._recursiveReadSignature();
+    if (this._derivingSignature) {
+      noteReentrantSignatureRead(this);
+      return this._recursiveReadSignature();
+    }
+    const frame = beginSignatureDerivation(this);
+    try {
+      return this._deriveSignatureOnce(stored, skeleton, literal, frame);
+    } finally {
+      endSignatureDerivation(frame);
+    }
+  }
+
+  /** The body of {@link _deriveSignature}, run inside the derivation frame
+   * `frame` (`beginSignatureDerivation`). */
+  private _deriveSignatureOnce(
+    stored: BoxedType,
+    skeleton: Type,
+    literal: Expression,
+    frame: SignatureDerivationFrame
+  ): BoxedType {
     let lambdaType: BoxedType;
     this._derivingSignature = true;
     try {
@@ -958,8 +981,14 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // the same reason).
     // Nor while a list-hypothesis pass of any definition runs: this
     // derivation may have read a hypothesis that is then refuted
-    // (`inListHypothesisPass`).
-    if (this.engine._rollbackFrames.length === 0 && !inListHypothesisPass())
+    // (`inListHypothesisPass`). Nor when it read the provisional signature
+    // of a function whose own derivation was still running
+    // (`noteReentrantSignatureRead`).
+    if (
+      this.engine._rollbackFrames.length === 0 &&
+      !inListHypothesisPass() &&
+      !frame.tainted
+    )
       this._signatureMemo = {
         stored,
         skeleton,
@@ -971,6 +1000,60 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         type,
       };
     return this._noted(type, calleeHomes);
+  }
+
+  /**
+   * Refine the INFERRED signature of a self-recursive function literal whose
+   * result is an abstract collection: the body is typed again under the
+   * hypothesis that the result is a list, as for a declared placeholder
+   * signature (`_deriveSignature`), and the hypothesis is kept only when
+   * that pass bears it out (`verifiedListHypothesis`, which explains the
+   * rule). During the pass, a recursive call reads this signature with the
+   * candidate as its result.
+   *
+   * Without it, `G := (n, K) ↦ …join([n], G(n + 1, K))` assigned to an
+   * undeclared name was typed `-> collection<number>`: the recursive call
+   * is typed `unknown`, and an `unknown` operand of `Join` may hold a set.
+   *
+   * The caller installs this definition in its binding record first: the
+   * recursive call of the body must resolve to this definition. Nothing is
+   * written when the hypothesis does not apply or is refuted. The caller
+   * reports the state event of the installation.
+   * @internal
+   */
+  _refineRecursiveListResult(): void {
+    const literal = this._lambdaLiteral;
+    if (!this._isLambda || !this.inferredSignature || literal === undefined)
+      return;
+    const t = this._signature.type;
+    if (typeof t !== 'object' || t.kind !== 'signature') return;
+    const verified = verifiedListHypothesis(
+      this.engine,
+      literal,
+      { ...t, result: 'unknown' },
+      this.name,
+      t.result,
+      (candidate, thunk) => {
+        const saved = this._signature;
+        this._signature = new BoxedType(
+          withSignatureResult(t, candidate),
+          this.engine._typeResolver
+        );
+        try {
+          return thunk();
+        } finally {
+          this._signature = saved;
+        }
+      }
+    );
+    if (verified === undefined) return;
+    this._setSignature(
+      () =>
+        new BoxedType(
+          withSignatureResult(t, verified.result),
+          this.engine._typeResolver
+        )
+    );
   }
 
   /** `type`, after recording this function's home scope and the home scopes

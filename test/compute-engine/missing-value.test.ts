@@ -142,14 +142,16 @@ describe('P1 — `Nothing` erasure (§3.G)', () => {
 });
 
 describe('P1 — out-of-band access markers (§3.C)', () => {
-  test('At(list<integer>, oob) : integer | nan = NaN', () => {
+  test('At(list<integer^3>, oob) : nan = NaN', () => {
     // The marker of a numeric element type is the `nan` singleton, so the arm
     // is ADDITIVE and the element tier survives. It used to absorb to a bare
     // `number` on the reasoning that `NaN` was a member of `number`; the
     // finite-by-default lattice flip repealed that premise (see the
-    // 2026-08-28 `markerType` entry in `docs/ERROR-MODEL.md` §7).
+    // 2026-08-28 `markerType` entry in `docs/ERROR-MODEL.md` §7). The
+    // literal is proved NOT to hold position 9, so the type is the marker
+    // alone.
     const e = ce.box(['At', ['List', 10, 20, 30], 9]);
-    expect(e.type.toString()).toBe('integer | nan');
+    expect(e.type.toString()).toBe('nan');
     expect(e.evaluate().isNaN).toBe(true);
   });
 
@@ -304,13 +306,13 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
 
   test('Add(Missing, 1) : number = NaN', () => {
     const e = ce.box(['Add', 'Missing', 1]);
-    expect(e.type.toString()).toBe('number');
+    expect(e.type.toString()).toBe('integer | nan');
     expect(e.evaluate().isNaN).toBe(true);
   });
 
   test('Negate(Missing) : number = NaN (bare-missing base widens)', () => {
     const e = ce.box(['Negate', 'Missing']);
-    expect(e.type.toString()).toBe('number');
+    expect(e.type.toString()).toBe('nan');
     expect(e.evaluate().isNaN).toBe(true);
   });
 
@@ -345,7 +347,7 @@ describe('P2 — strip & absorption (§3.B, propagate)', () => {
       'Missing',
       ['List', ['List', 1, 2], ['List', 3, 4]],
     ]);
-    expect(m.type.toString()).toBe('matrix<2x2>');
+    expect(m.type.toString()).toBe('matrix<integer | nan^(2x2)>');
     const v = m.evaluate();
     for (const row of v.each())
       for (const cell of row.each()) expect(cell.isNaN).toBe(true);
@@ -398,7 +400,7 @@ describe('P2 — runtime gate: element level & short path (§3.E)', () => {
     const e = ce.box(['Add', ['List', 1, 'Missing'], ['List', 10, 20]]);
     // The (unevaluated) static type absorbs to a numeric vector of the
     // length of the operands.
-    expect(e.type.toString()).toBe('vector<2>');
+    expect(e.type.toString()).toBe('list<integer | nan^2>');
     const v = e.evaluate();
     expect(v.op1.re).toBe(11);
     expect(v.op2.isNaN).toBe(true);

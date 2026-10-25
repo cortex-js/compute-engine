@@ -393,7 +393,7 @@ describe('all-numeric absences still absorb into `NaN`', () => {
     // sum is typed `number`, so the numeric marker is the answer.
     const ce = new ComputeEngine();
     ce.parse('g(t) := \\begin{cases} 0.5 & t < 1 \\end{cases}').evaluate();
-    expect(ce.box(['Add', ['g', 3], 1]).type.toString()).toBe('number');
+    expect(ce.box(['Add', ['g', 3], 1]).type.toString()).toBe('nan | real');
     expect(
       ce
         .box(['Add', ['g', 3], 1])
@@ -544,7 +544,7 @@ describe('a point with an absent coordinate', () => {
     // A tuple component that is only absent was stripped to the bottom type
     // `never` before the type handler read it: `Dot(pAbsent, (1, 1))` was
     // typed `infinity` and `Norm(pAbsent)` `list<number>`.
-    expect(type(['Norm', 'pAbsent'])).toBe('number');
+    expect(type(['Norm', 'pAbsent'])).toBe('+oo | nan | real');
     expect(value(['Norm', 'pAbsent'])).toBe('NaN');
   });
 
@@ -559,7 +559,11 @@ describe('a point with an absent coordinate', () => {
     [['Last', ['Tuple', 1, 'Missing']], 'missing', '"Missing"'],
     [['Third', ['Tuple', 1, 2, 'Missing']], 'missing', '"Missing"'],
     [['PointZ', ['Tuple', 1, 2, 'Missing']], 'missing', '"Missing"'],
-    [['PointY', ['List', 1, 'Missing']], 'missing | number', '"Missing"'],
+    [
+      ['PointY', ['List', 1, 'Missing']],
+      'integer | missing | nan',
+      '"Missing"',
+    ],
     [
       ['PointY', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 2, 3]]],
       'list<integer | missing>',
@@ -567,7 +571,7 @@ describe('a point with an absent coordinate', () => {
     ],
     [
       ['PointX', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 2, 3]]],
-      'list<integer>',
+      'vector<integer^2>',
       '[1,2]',
     ],
   ])(

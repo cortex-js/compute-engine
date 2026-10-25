@@ -127,11 +127,10 @@ describe('a list-building self-recursion is typed list<T> (Tycho row 338)', () =
   });
 });
 
-describe('mutual recursion is not covered by the hypothesis (pinned)', () => {
-  /** `F` builds the collection through `G`, and `G` calls `F` back. `F`
-   * does not name itself, so the list hypothesis does not run: both keep
-   * the reading the plain derivation gives. Recorded in `ROADMAP.md`
-   * ("A mutually recursive pair..."). */
+describe('a mutually recursive pair is covered by the hypothesis', () => {
+  /** `F` builds the collection through `G`, and `G` calls `F` back. The
+   * hypothesis runs for a function whose body reaches its own name through
+   * the functions it calls, so both are typed `list<number>`. */
   function mutual(base: string): ComputeEngine {
     const ce = new ComputeEngine();
     ce.declare('F', '(unknown, unknown) -> unknown');
@@ -155,13 +154,13 @@ describe('mutual recursion is not covered by the hypothesis (pinned)', () => {
     return ce;
   }
 
-  test('a list base clause still derives the abstract collection', () => {
+  test('a list base clause derives a list', () => {
     const ce = mutual('List');
     expect(ce.box('F').type.toString()).toBe(
-      '(unknown, unknown) -> collection<number>'
+      '(unknown, unknown) -> list<number>'
     );
     expect(ce.box('G').type.toString()).toBe(
-      '(unknown, unknown) -> collection<number>'
+      '(unknown, unknown) -> list<number>'
     );
     expect(ce.box(['G', 0, 4]).evaluate().toString()).toBe('[0,1,2,3]');
   });
@@ -170,5 +169,114 @@ describe('mutual recursion is not covered by the hypothesis (pinned)', () => {
     const ce = mutual('Set');
     expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set<any>');
     expect(ce.box('G').type.toString()).toBe('(unknown, unknown) -> set<any>');
+  });
+});
+
+describe('a pair that is also self-recursive', () => {
+  // `F` calls itself and `G`, and `G` calls `F`. The signature of `G` is
+  // derived while the one of `F` is, and reads a provisional `F`: that
+  // result is not memoized, so `G` is derived again once `F` is settled.
+  function pair(order: string): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('F', '(unknown, unknown) -> unknown');
+    ce.declare('G', '(unknown, unknown) -> unknown');
+    const F = [
+      'Function',
+      [
+        'Which',
+        ['Equal', 'n', ['Subtract', 'K', 1]],
+        ['List', 'n'],
+        ['Equal', 'n', ['Subtract', 'K', 2]],
+        ['Join', ['List', 'n'], ['F', ['Add', 'n', 1], 'K']],
+        'True',
+        ['Join', ['List', 'n'], ['G', ['Add', 'n', 1], 'K']],
+      ],
+      'n',
+      'K',
+    ];
+    const G = ['Function', ['F', 'n', 'K'], 'n', 'K'];
+    for (const name of order) ce.assign(name, ce.box(name === 'F' ? F : G));
+    return ce;
+  }
+
+  test.each(['FG', 'GF'])('assigned in the order %s', (order) => {
+    const ce = pair(order);
+    expect(ce.box('F').type.toString()).toBe(
+      '(unknown, unknown) -> list<number>'
+    );
+    expect(ce.box('G').type.toString()).toBe(
+      '(unknown, unknown) -> list<number>'
+    );
+    expect(ce.box(['G', 0, 4]).evaluate().toString()).toBe('[0,1,2,3]');
+    // A second read gives the same answer.
+    expect(ce.box('G').type.toString()).toBe(
+      '(unknown, unknown) -> list<number>'
+    );
+  });
+});
+
+describe('a list-building self-recursion assigned without a declaration', () => {
+  // The inferred signature of the undeclared name takes the hypothesis too
+  // (`_refineRecursiveListResult`).
+  test('is typed list<number>', () => {
+    const ce = new ComputeEngine();
+    ce.assign('F', ce.box(recursion('Join', 'List')));
+    expect(ce.box('F').type.toString()).toBe(
+      '(unknown, unknown) -> list<number>'
+    );
+    expect(ce.box(['F', 0, 5]).type.toString()).toBe('list<number>');
+    expect(ce.box(['F', 0, 5]).evaluate().toString()).toBe('[0,1,2,3,4]');
+  });
+
+  test('a set base clause refutes the hypothesis', () => {
+    const ce = new ComputeEngine();
+    ce.assign('F', ce.box(recursion('Join', 'Set')));
+    // Bare `set` and `set<any>` denote the same type.
+    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set');
+  });
+});
+
+describe('a call typed from the body of a recursive function', () => {
+  // The body of `m` is typed with each parameter set to the type of its
+  // argument (`callResultType`, call-result-type.ts). The self-call in the
+  // other branch has no derived type, and a join with it kept only the base
+  // case: `m(1, [0])` was typed `vector<integer^1>` and evaluates to
+  // `[1, 2]`. The call now keeps the declared result.
+  const body = [
+    'Function',
+    ['If', ['Equal', 'n', 0], 's', ['m', ['Subtract', 'n', 1], ['List', 1, 2]]],
+    'n',
+    's',
+  ];
+
+  test.each([
+    ['assigned', false],
+    ['declared as a function, then assigned', true],
+  ])('%s', (_, declare) => {
+    const ce = new ComputeEngine();
+    if (declare) ce.declare('m', 'function');
+    ce.assign('m', ce.box(body));
+    const call = ce.box(['m', 1, ['List', 0]]);
+    expect(call.evaluate().toString()).toBe('[1,2]');
+    expect(call.type.toString()).not.toBe('vector<integer^1>');
+    expect(call.type.isUnknown).toBe(true);
+  });
+
+  test('a recursion that is not a branch evaluates as before', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'fact',
+      ce.box([
+        'Function',
+        [
+          'If',
+          ['LessEqual', 'n', 1],
+          1,
+          ['Multiply', 'n', ['fact', ['Subtract', 'n', 1]]],
+        ],
+        'n',
+      ])
+    );
+    expect(ce.box(['fact', 5]).evaluate().toString()).toBe('120');
   });
 });

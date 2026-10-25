@@ -46,17 +46,20 @@ describe('point accessor over a list whose element type is a union of tuples', (
   const js = new JavaScriptTarget();
 
   test('the element type is the union the defect is about', () => {
+    // The literal has two points, so its type states the length 2.
     const ce = engineWithInferredUnionList();
-    expect(ce.box('Q').type.toString()).toBe(UNION_LIST_TYPE);
+    expect(ce.box('Q').type.toString()).toBe(
+      'list<(tuple<integer, number> | tuple<number, integer>)^2>'
+    );
   });
 
   test('the accessor types as the coordinate LIST, not as one point', () => {
     const ce = engineWithInferredUnionList();
-    expect(ce.box(['PointY', 'Q']).type.toString()).toBe('list<number>');
+    expect(ce.box(['PointY', 'Q']).type.toString()).toBe('vector<2>');
     // The type the compiler reads for the sum. Before the fix this was
     // `number | tuple<number, number>` and the emitted code was scalar.
     expect(ce.box(['Add', ['PointY', 'Q'], 1]).type.toString()).toBe(
-      'list<number>'
+      'vector<2>'
     );
   });
 

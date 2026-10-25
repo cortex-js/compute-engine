@@ -3593,6 +3593,27 @@ export function assignFn(
     const valueDef = def.value;
     ce._withoutFacts(() => deriveAndWriteAssignedType(ce, valueDef, value));
 
+    // A symbol with no value and no type that becomes the value of a symbol
+    // with a DECLARED type is a use of that symbol at the declared type, as
+    // an argument of a declared parameter is: narrow it. Without this,
+    // `q: integer := uu` left `uu` typed `unknown`, and `Tuple(q)` was typed
+    // `tuple<integer>` while its value was typed `tuple<unknown>`. A symbol
+    // that has a value or a type is not changed: the check above holds it to
+    // the declared type.
+    if (
+      !valueDef.inferredType &&
+      !valueDef.type.isUnknown &&
+      isSymbol(value) &&
+      value.type.isUnknown &&
+      value.value === undefined
+    ) {
+      const contract =
+        valueDef._placeholderSkeleton !== undefined
+          ? valueDef._placeholderSkeleton
+          : valueDef.type.type;
+      value._infer(() => contract, 'narrow');
+    }
+
     // ... and set the value
     ce._setSymbolValue(id, value);
 

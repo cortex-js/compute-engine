@@ -66,6 +66,7 @@ import { reduceType } from '../../common/type/reduce.js';
 import {
   cannotHoldAList,
   isSubtype,
+  provablyAdmits,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
@@ -437,18 +438,48 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // element-wise result of its masks: with `c := [True, False]`,
         // `If(c, 1, 0)` is `[1, 0]`.
         const mixed = scalarOrMaskConditionShape([cond?.type]);
+        // A whole-collection comparison that is undecided (`[1, 2] = [1,
+        // Missing]`) selects no branch, and the `If` is `Missing`
+        // (`evaluateCondition`). Such a condition is typed `boolean |
+        // missing`, so the result keeps a `missing` arm.
+        const undecided = mayBeUndecidedCondition([cond]);
         if (mixed)
           return BoxedType.forResult(
-            reduceType({
-              kind: 'union',
-              types: [
-                scalar,
-                elementwiseResultType(armList, mixed, ifFalse !== undefined),
-              ],
-            }),
+            withUndecidedArm(
+              reduceType({
+                kind: 'union',
+                types: [
+                  scalar,
+                  elementwiseResultType(armList, mixed, ifFalse !== undefined),
+                ],
+              }),
+              undecided
+            ),
             context.engine._typeResolver
           );
-        return BoxedType.forResult(scalar, context.engine._typeResolver);
+        // A condition whose type cannot be read and that may hold a list (an
+        // operand of type `unknown`) can be a mask of any rank at run time:
+        // with `c := [True, False]`, `If(c, 1, 0)` is `[1, 0]`. The result is
+        // the scalar result or the element-wise result for a mask of unknown
+        // rank.
+        if (cond !== undefined && unreadableConditionMayBeMask(cond.type))
+          return BoxedType.forResult(
+            withUndecidedArm(
+              reduceType({
+                kind: 'union',
+                types: [
+                  scalar,
+                  elementwiseResultType(armList, {}, ifFalse !== undefined),
+                ],
+              }),
+              undecided
+            ),
+            context.engine._typeResolver
+          );
+        return BoxedType.forResult(
+          withUndecidedArm(scalar, undecided),
+          context.engine._typeResolver
+        );
       },
       canonical: (ops, { engine }) => {
         // The condition (op 0) is an ordinary expression, checked for a
@@ -1089,6 +1120,13 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           const whole = arms
             .slice(0, shape.firstMask)
             .map((x): Type => (untypedSymbolArm(x) ? 'unknown' : x.type));
+          // A clause before the first mask whose condition is an undecided
+          // whole-collection comparison makes the `Which` `Missing`
+          // (`evaluateWhich`).
+          if (
+            mayBeUndecidedCondition(conds.slice(0, shape.firstMask))
+          )
+            whole.push('missing');
           return BoxedType.forResult(
             whole.length === 0
               ? elementwise
@@ -1138,22 +1176,43 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // When another condition is not a scalar either, the scalar typing
         // above is kept.
         const mixed = scalarOrMaskConditionShape(conds.map((c) => c?.type));
-        if (mixed)
+        // An undecided whole-collection comparison makes the `Which`
+        // `Missing` (`evaluateWhich`), also when a default clause follows.
+        const undecided = mayBeUndecidedCondition(conds);
+        // Otherwise, when a condition that is not a scalar cannot be read
+        // and may hold a list (two conditions of type `boolean |
+        // list<boolean>`, an operand of type `unknown`), it can be a mask of
+        // any rank at run time, and the element-wise result for a mask of
+        // unknown rank is added to the scalar result.
+        const shapeOfMasks =
+          mixed ??
+          (conds.some(
+            (c) => c !== undefined && unreadableConditionMayBeMask(c.type)
+          )
+            ? {}
+            : undefined);
+        if (shapeOfMasks)
           return BoxedType.forResult(
-            reduceType({
-              kind: 'union',
-              types: [
-                scalar,
-                elementwiseResultType(
-                  arms.map((x) => x.type),
-                  mixed,
-                  dflt >= 0
-                ),
-              ],
-            }),
+            withUndecidedArm(
+              reduceType({
+                kind: 'union',
+                types: [
+                  scalar,
+                  elementwiseResultType(
+                    arms.map((x) => x.type),
+                    shapeOfMasks,
+                    dflt >= 0
+                  ),
+                ],
+              }),
+              undecided
+            ),
             context.engine._typeResolver
           );
-        return BoxedType.forResult(scalar, context.engine._typeResolver);
+        return BoxedType.forResult(
+          withUndecidedArm(scalar, undecided),
+          context.engine._typeResolver
+        );
       },
       canonical: (args, options) => {
         // The operands are strictly PAIRED `(condition, value)`, so the
@@ -2898,6 +2957,52 @@ function possiblyElementwiseCondition(
   return conds.some(
     (t) => t !== undefined && conditionShape(t).kind === 'possible'
   );
+}
+
+/**
+ * True when a condition of type `t` cannot be read (`conditionShape` is
+ * `unreadable`: `unknown`, `any`, a union of a scalar and a mask) and may
+ * hold a list. At run time such a condition can be a mask of any rank, and
+ * the selection is then element-wise. A condition that cannot hold a list (a
+ * number, which the canonical form refuses) is not read as a mask.
+ */
+function unreadableConditionMayBeMask(t: Type): boolean {
+  return conditionShape(t).kind === 'unreadable' && !cannotHoldAList(t);
+}
+
+/**
+ * True when one of the conditions `conds` states that it may be `missing`,
+ * the value of a whole-collection comparison that is undecided (`[1, 2] =
+ * [1, Missing]`, typed `boolean | missing`). Such a condition selects no
+ * clause, and the `If` or `Which` is `Missing` (`evaluateCondition`). An
+ * `unknown` arm and the type `any` state nothing (`provablyAdmits`): such a
+ * condition is not a comparison whose type is known.
+ *
+ * A comparison is undecided only when two or more of its operands are
+ * collections (`evaluateCondition`). A comparison with at most one operand
+ * that can hold a list (`At(s, 2) = 0`) that is `Missing` has an absent
+ * operand: the `If` or `Which` is then the absent-condition error, which the
+ * type does not show. So such a comparison adds no `missing` arm.
+ */
+function mayBeUndecidedCondition(
+  conds: ReadonlyArray<OperandDescriptor | undefined>
+): boolean {
+  return conds.some((c) => {
+    if (c === undefined) return false;
+    const t = c.type;
+    if (t === 'any' || !provablyAdmits('missing', t)) return false;
+    const s = c.structureOf?.();
+    if (s?.kind === 'application' && BRANCH_RELATIONS.has(s.head))
+      return (
+        s.children.filter((x) => !cannotHoldAList(x.type)).length >= 2
+      );
+    return true;
+  });
+}
+
+/** The type `t` with a `missing` arm when `undecided` is true. */
+function withUndecidedArm(t: Type, undecided: boolean): Type {
+  return undecided ? reduceType({ kind: 'union', types: [t, 'missing'] }) : t;
 }
 
 /**

@@ -91,3 +91,55 @@ describe('BoxedSymbol.value setter', () => {
     expect(ce.parse('g(3)').evaluate().toString()).toEqual('13');
   });
 });
+
+// The setter follows the type rules of `ce.assign()`: an inferred type is
+// refined or widened to hold the value, and a value that does not fit a
+// declared type is refused. Before, the setter wrote only the value.
+describe('BoxedSymbol.value setter applies the type rules of assign', () => {
+  let ce: ComputeEngine;
+  beforeEach(() => {
+    ce = new ComputeEngine();
+  });
+
+  test('a value refines the type of a symbol with no type', () => {
+    const n = ce.expr('n');
+    n.value = 5;
+    expect(n.type.toString()).toBe('integer');
+    expect(n.value?.toString()).toBe('5');
+  });
+
+  test('a value that does not fit an inferred type widens it, as assign does', () => {
+    ce.assign('m', 1);
+    const m = ce.expr('m');
+    m.value = ce.string('hi');
+    ce.assign('m2', 1);
+    ce.assign('m2', ce.string('hi'));
+    expect(m.type.toString()).toBe(ce.expr('m2').type.toString());
+    expect(m.type.matches('string')).toBe(true);
+  });
+
+  test('a value that does not fit a declared type is refused', () => {
+    ce.declare('k', 'integer');
+    const k = ce.expr('k');
+    expect(() => {
+      k.value = ce.string('hi');
+    }).toThrow();
+    expect(k.value).toBeUndefined();
+    k.value = 3;
+    expect(k.type.toString()).toBe('integer');
+    expect(k.value?.toString()).toBe('3');
+  });
+
+  test('the value is written to the binding of the symbol, not to a shadowing one', () => {
+    const g = ce.expr('g');
+    g.value = 1;
+    ce.pushScope();
+    ce.declare('g', 'string');
+    g.value = 7;
+    expect(ce.expr('g').value).toBeUndefined();
+    expect(ce.expr('g').type.toString()).toBe('string');
+    ce.popScope();
+    expect(g.value?.toString()).toBe('7');
+    expect(g.type.toString()).toBe('integer');
+  });
+});

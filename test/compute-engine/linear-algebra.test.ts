@@ -1623,8 +1623,9 @@ describe('Constant matrices: hybrid laziness for huge dimensions', () => {
     // The element type is the exact `integer`, as in the eager form: the index
     // parameters of the nested `Tabulate` generators are annotated `integer`
     // (`lazyConstantMatrix`), so the lambda-body widening has no `unknown`
-    // parameter slot to widen the cell's finite claim against.
-    expect(result.type.toString()).toBe('list<list<integer>>');
+    // parameter slot to widen the cell's finite claim against. The extents
+    // are literals, so the lazy matrix keeps the shape of the eager one.
+    expect(result.type.toString()).toBe('matrix<integer^(1000000x1000000)>');
   });
 
   it('the lazy IdentityMatrix is a GENUINE identity, not an all-zero matrix', () => {

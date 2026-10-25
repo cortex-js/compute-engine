@@ -357,3 +357,18 @@ describe('alias unfold: shaped aliases evaluate once assigned', () => {
     ).toBe('[2,4,6]');
   });
 });
+
+describe('a self-referencing alias reads as the union of its other arms', () => {
+  test('Map over a value of the alias is a list', () => {
+    // `cyc = cyc | list<integer>` holds the values of `list<integer>`.
+    // Before, `Map` met the unresolved `cyc` arm, typed the result
+    // `collection<integer>` and evaluated it to the set `Set(11, 12)`.
+    const ce = new ComputeEngine();
+    ce.declareType('cyc', 'cyc | list<integer>', { alias: true });
+    ce.declare('k', 'cyc');
+    ce.assign('k', ce.box(['List', 1, 2]));
+    const m = ce.box(['Map', ['Function', ['Add', 'x', 10], 'x'], 'k']);
+    expect(m.type.toString()).toBe('list<integer>');
+    expect(m.evaluate().toString()).toBe('[11,12]');
+  });
+});

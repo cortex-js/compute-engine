@@ -250,3 +250,53 @@ describe('Map callback types follow lexical bindings', () => {
     );
   });
 });
+
+describe('Map over a union source, and the zip form of Add', () => {
+  test('a union of vectors is mapped arm by arm', () => {
+    // Before, `Map(Sqrt, x)` was typed
+    // `collection<complex | indexed_collection<any> | infinity>`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'vector<integer^1> | vector<integer^2>');
+    const m = ce.box(['Map', 'Sqrt', 'x']);
+    expect(m.type.toString()).toBe(
+      'list<complex | infinity^1> | list<complex | infinity^2>'
+    );
+    ce.assign('x', ce.box(['List', 4, 9]));
+    const v = m.evaluate({ materialization: true });
+    expect(v.toString()).toBe('[2,3]');
+    expect(v.type.matches(m.type)).toBe(true);
+  });
+
+  test('a union source with a callback of unknown result holds each value', () => {
+    // The join of the arm results does not drop an arm whose elements are
+    // `unknown`: the value of each arm is in the type of the `Map`.
+    const ce = new ComputeEngine();
+    ce.declare('u', 'list<integer> | tuple<integer, string>');
+    const m = ce.box(['Map', ['Function', ['h', 'x'], 'x'], 'u']);
+    expect(m.type.toString()).toBe('list<nothing | unknown>');
+    for (const value of [
+      ['List', 1, 2],
+      ['Tuple', 1, { str: 'a' }],
+    ]) {
+      ce.assign('u', ce.box(value as any));
+      const v = m.evaluate({ materialization: true });
+      expect(v.type.matches(m.type)).toBe(true);
+    }
+  });
+
+  test('the zip Map(Add, xs, ys) is typed by the type handler of Add', () => {
+    // `Add` is declared `(value+) -> value`, which says nothing about the
+    // result. Before, the zip was typed `list<value>`.
+    const ce = new ComputeEngine();
+    ce.declare('xs', 'list<integer>');
+    ce.declare('ys', 'list<integer>');
+    expect(ce.box(['Map', 'Add', 'xs', 'ys']).type.toString()).toBe(
+      'list<integer>'
+    );
+    const lit = ce.box(['Map', 'Add', ['List', 1, 2], ['List', 3, 4]]);
+    expect(lit.type.toString()).toBe('vector<integer^2>');
+    const v = lit.evaluate({ materialization: true });
+    expect(v.toString()).toBe('[4,6]');
+    expect(v.type.matches(lit.type)).toBe(true);
+  });
+});

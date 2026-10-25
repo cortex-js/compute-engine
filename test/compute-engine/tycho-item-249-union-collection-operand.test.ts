@@ -246,16 +246,17 @@ describe('Tycho item 249 — typing of a union with a dimensioned list branch', 
 
   it('a union with no genuine scalar branch is not recruited by the lift', () => {
     // A fixed-shape branch broadcasts against a SCALAR sibling. Beside a
-    // tuple there is nothing to broadcast against, and typing the tuple
-    // branch through the scalar lift would describe a tuple value by a
-    // scalar cell — so that union keeps the typing it had (the tensor
-    // handlers' gap for a union is unchanged by this change). A union of
+    // tuple there is nothing to broadcast against. A union of a point and a
+    // fixed shape is typed arm by arm: the value of `Sin(tv)` is a point or
+    // a vector, and `number` held neither. A union of
     // fixed shapes alone is mapped as each of its lists is
     // (`isFixedShapeCollectionTypeOf`, Tycho row 425): `2·vv` is a list of
     // numbers, which `number` did not hold.
     ce.declare('tv', 'tuple<number, number> | vector<number^2>');
     ce.declare('vv', 'vector<2> | vector<3>');
-    expect(ce.box(['Sin', 'tv']).type.toString()).toBe('number');
+    expect(ce.box(['Sin', 'tv']).type.toString()).toBe(
+      'tuple<number, number> | vector<2>'
+    );
     expect(ce.box(['Multiply', 2, 'vv']).type.toString()).toBe('list<number>');
   });
 

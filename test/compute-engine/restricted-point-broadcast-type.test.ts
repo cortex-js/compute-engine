@@ -52,10 +52,12 @@ describe('a broadcast over a restricted point keeps the point and the absence', 
     ],
     ['Power', `(${PC})^2`, 'missing | tuple<number, number>', '(0, 1)'],
     ['Negate', `-${PC}`, 'missing | tuple<integer, integer>', '(0, -1)'],
+    // `t` has no declared type, so the type is read before `t` has a value,
+    // and `t` can be any number: the components are `number`.
     [
       'a scalar factor',
       String.raw`t\cdot${PC}`,
-      'missing | tuple<integer, integer>',
+      'missing | tuple<number, number>',
       '(0, 1)',
     ],
     [
@@ -196,6 +198,17 @@ describe('a list that holds a restricted point or masked points', () => {
     ['Greater', ['List', 1, 2, 3], 2],
   ];
   const POINTS = 'list<missing | tuple<number, number>>';
+  // The type of a list literal of two such points: the literal states its
+  // length.
+  const POINT_PAIR = 'list<(missing | tuple<number, number>)^2>';
+  // A sum, a difference, a negation or a product by an integer of points
+  // with integer coordinates: a coordinate is an integer, or `NaN` when an
+  // operand is absent.
+  const INTEGER_POINTS = 'list<missing | tuple<integer | nan, integer | nan>>';
+  const INTEGER_POINT_PAIR =
+    'list<(missing | tuple<integer | nan, integer | nan>)^2>';
+  const MATRIX_OF_INTEGER_POINTS =
+    'matrix<(missing | tuple<integer | nan, integer | nan>)^(2x2)>';
   // The type of a 2×2 matrix of such points. A literal of rank 2 whose cells
   // are `missing | tuple<…>` was typed as a list of rank 1,
   // `list<missing | tuple<…>>`, which claimed that its elements are the
@@ -221,45 +234,52 @@ describe('a list that holds a restricted point or masked points', () => {
       ['Add', PJ, PTS],
       '["Missing",(3, 5)]',
       '["Missing","Missing"]',
+      INTEGER_POINTS,
     ],
     [
       'a restricted point times masked numbers',
       ['Multiply', PJ, NUMS],
       '[(NaN, NaN),(NaN, NaN),(0, 30)]',
       '["Missing","Missing","Missing"]',
+      POINTS,
     ],
     [
       'Sin of a list holding a restricted point',
       ['Sin', ['List', PJ, ['Tuple', 2, 3]]],
       '[(0, sin(1)),(sin(2), sin(3))]',
       '["Missing",(sin(2), sin(3))]',
+      POINT_PAIR,
     ],
     [
       'a scalar times a list holding a restricted point',
       ['Multiply', 2, ['List', PJ, ['Tuple', 2, 3]]],
       '[(0, 2),(4, 6)]',
       '["Missing",(4, 6)]',
+      INTEGER_POINT_PAIR,
     ],
     [
       'a list holding a restricted point plus a point',
       ['Add', ['List', PJ, ['Tuple', 2, 3]], ['Tuple', 1, 1]],
       '[(1, 2),(3, 4)]',
       '["Missing",(3, 4)]',
+      INTEGER_POINTS,
     ],
     [
       'Sin of masked points',
       ['Sin', PTS],
       '["Missing",(sin(3), sin(4))]',
       '["Missing",(sin(3), sin(4))]',
+      POINTS,
     ],
     [
       'a scalar times masked points',
       ['Multiply', 2, PTS],
       '["Missing",(6, 8)]',
       '["Missing",(6, 8)]',
+      INTEGER_POINTS,
     ],
-  ])('%s', (_label, json, present, absent) => {
-    expect(new ComputeEngine().box(json).type.toString()).toBe(POINTS);
+  ])('%s', (_label, json, present, absent, type) => {
+    expect(new ComputeEngine().box(json).type.toString()).toBe(type);
     expect(at(json, 1)).toBe(present);
     expect(at(json, -1)).toBe(absent);
     // `N()` marks the same cells.
@@ -280,7 +300,7 @@ describe('a list that holds a restricted point or masked points', () => {
     ];
     const json = ['Add', M, ['When', ['Tuple', 1, 1], ['Less', 0, 't']]];
     expect(new ComputeEngine().box(json).type.toString()).toBe(
-      MATRIX_OF_POINTS
+      MATRIX_OF_INTEGER_POINTS
     );
     expect(at(json, -1)).toBe('[["Missing","Missing"],["Missing","Missing"]]');
     expect(at(json, -1, true)).toBe(
@@ -324,10 +344,10 @@ describe('a list that holds a restricted point or masked points', () => {
     ce.assign('t', -1);
     const L = String.raw`[${PC}, (2,3)]`;
     const sin = ce.parse(String.raw`\sin(${L})`);
-    expect(sin.type.toString()).toBe(POINTS);
+    expect(sin.type.toString()).toBe(POINT_PAIR);
     expect(sin.evaluate().toString()).toBe('["Missing",(sin(2), sin(3))]');
     const scaled = ce.parse(String.raw`2\cdot${L}`);
-    expect(scaled.type.toString()).toBe(POINTS);
+    expect(scaled.type.toString()).toBe(INTEGER_POINT_PAIR);
     expect(scaled.evaluate().toString()).toBe('["Missing",(4, 6)]');
   });
 
@@ -362,11 +382,17 @@ describe('a list that holds a restricted point or masked points', () => {
       Negate: '[(-1, -4),(-9, -16)]',
       Sqrt: '[(1, 2),(3, 4)]',
     };
+    // `Negate` keeps integer coordinates; `Sin` and `Sqrt` give numbers.
+    const TYPES: Record<string, [string, string]> = {
+      Sin: [POINT_PAIR, MATRIX_OF_POINTS],
+      Negate: [INTEGER_POINT_PAIR, MATRIX_OF_INTEGER_POINTS],
+      Sqrt: [POINT_PAIR, MATRIX_OF_POINTS],
+    };
 
     test.each(cases)('%s, box route, rank 1', async (op, expected) => {
       const ce = new ComputeEngine();
       const e = ce.box([op, ROW]);
-      expect(e.type.toString()).toBe(POINTS);
+      expect(e.type.toString()).toBe(TYPES[op][0]);
       const v = e.evaluate();
       expect(v.type.matches(e.type)).toBe(true);
       expect(v.toString()).toBe(expected);
@@ -379,7 +405,7 @@ describe('a list that holds a restricted point or masked points', () => {
     test.each(cases)('%s, box route, rank 2', async (op, expected) => {
       const ce = new ComputeEngine();
       const e = ce.box([op, MATRIX]);
-      expect(e.type.toString()).toBe(MATRIX_OF_POINTS);
+      expect(e.type.toString()).toBe(TYPES[op][1]);
       const want = `[${expected},${MATRIX_ROW2[op]}]`;
       const v = e.evaluate();
       expect(v.type.matches(e.type)).toBe(true);
@@ -406,8 +432,8 @@ describe('a list that holds a restricted point or masked points', () => {
         const call = (x: string) =>
           cmd === '\\sqrt' ? `\\sqrt{${x}}` : `${cmd}(${x})`;
         for (const [src, want, type] of [
-          [call('L'), expected, POINTS],
-          [call('M'), `[${expected},${MATRIX_ROW2[op]}]`, MATRIX_OF_POINTS],
+          [call('L'), expected, TYPES[op][0]],
+          [call('M'), `[${expected},${MATRIX_ROW2[op]}]`, TYPES[op][1]],
         ]) {
           const e = ce.parse(src);
           expect(e.operator).toBe(op);
@@ -427,9 +453,9 @@ describe('a list that holds a restricted point or masked points', () => {
       const ce = new ComputeEngine();
       ce.assign('t', -1);
       for (const [src, want, type] of [
-        [String.raw`\sin([(1,2)\{0<t\}, (3,4)])`, cases[0][1], POINTS],
-        [String.raw`-[(1,2)\{0<t\}, (3,4)]`, cases[1][1], POINTS],
-        [String.raw`\sqrt{[(1,2)\{0<t\}, (3,4)]}`, cases[2][1], POINTS],
+        [String.raw`\sin([(1,2)\{0<t\}, (3,4)])`, cases[0][1], POINT_PAIR],
+        [String.raw`-[(1,2)\{0<t\}, (3,4)]`, cases[1][1], INTEGER_POINT_PAIR],
+        [String.raw`\sqrt{[(1,2)\{0<t\}, (3,4)]}`, cases[2][1], POINT_PAIR],
         [
           String.raw`\sin([[(1,2)\{0<t\}, (3,4)], [(1,4), (9,16)]])`,
           `[${cases[0][1]},${MATRIX_ROW2.Sin}]`,

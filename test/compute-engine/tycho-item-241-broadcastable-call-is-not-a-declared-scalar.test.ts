@@ -25,7 +25,9 @@ describe('a function literal subtracting its parameter from a tuple', () => {
   ])('%s binds', (_label, json) => {
     const literal = ce.box(json as any);
     expect(literal.isValid).toBe(true);
-    expect(String(literal.type)).toBe('(unknown) -> number | tuple<integer, integer>');
+    // A tuple argument can have components of any number type, so the
+    // components of the tuple arm are `number`.
+    expect(String(literal.type)).toBe('(unknown) -> number | tuple<number, number>');
   });
 
   test('applies to a tuple component-wise', () => {

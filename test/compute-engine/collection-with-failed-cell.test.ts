@@ -239,3 +239,27 @@ describe('A LIST WHERE EVERY CELL FAILED, GROWN IN A LOOP', () => {
     10_000
   );
 });
+
+describe('a tuple whose coordinate is a list with a failed cell', () => {
+  // The tuple is bound when it is boxed alone, so it must be bound in the
+  // same way when it is an element of a list: its type is the same in both
+  // places. Before, inside a list it stayed unbound and was typed `error`.
+  test('has the same type alone and inside a list', () => {
+    const ce = new ComputeEngine();
+    const E = ['Error', { str: 'x' }];
+    const alone = ce.box(['Tuple', ['List', 1, E], 2] as any);
+    const inner = ce.box(['List', ['Tuple', ['List', 1, E], 2]] as any).ops![0];
+    expect(alone.type.toString()).toBe('tuple<vector<integer^2>, integer>');
+    expect(inner.type.toString()).toBe(alone.type.toString());
+    expect(inner.isCanonical).toBe(true);
+  });
+
+  test('a tuple with a failed coordinate stays frozen', () => {
+    const ce = new ComputeEngine();
+    const inner = ce.box([
+      'List',
+      ['Tuple', ['Error', { str: 'x' }], 2],
+    ] as any).ops![0];
+    expect(inner.isCanonical).toBe(false);
+  });
+});

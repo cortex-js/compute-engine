@@ -81,9 +81,9 @@ const ROWS: Row[] = [
     name: 'Map',
     json: (s) => ['Map', ADD_10, s],
     latex: '\\operatorname{Map}(x \\mapsto x + 10, %)',
-    absentSlot: ['list<number>', '[11,NaN]'],
+    absentSlot: ['list<integer | nan>', '[11,NaN]'],
     values: 'list<integer>',
-    list: 'list<number>',
+    list: 'list<integer | nan>',
   },
   {
     name: 'Filter',
@@ -137,25 +137,27 @@ const ROWS: Row[] = [
     name: 'FlatMap',
     json: (s) => ['FlatMap', s, ['Function', ['List', ['Add', 'x', 1]], 'x']],
     latex: '\\operatorname{FlatMap}(%, x \\mapsto [x + 1])',
-    absentSlot: ['list<number>', '[2,NaN]'],
+    absentSlot: ['list<integer | nan>', '[2,NaN]'],
     values: 'list<integer>',
-    list: 'list<number>',
+    list: 'list<integer | nan>',
   },
   {
     name: 'Any',
     json: (s) => ['Any', s, POSITIVE],
     latex: '\\operatorname{Any}(%, x \\mapsto x > 0)',
-    absentSlot: ['boolean', '"True"'],
+    // An absent element can leave the answer undecided (`Missing`).
+    absentSlot: ['boolean | missing', '"True"'],
     values: 'boolean',
-    list: 'boolean',
+    list: 'boolean | missing',
   },
   {
     name: 'All',
     json: (s) => ['All', s, ABOVE_5],
     latex: '\\operatorname{All}(%, x \\mapsto x > 5)',
-    absentSlot: ['boolean', '"False"'],
+    // An absent element can leave the answer undecided (`Missing`).
+    absentSlot: ['boolean | missing', '"False"'],
     values: 'boolean',
-    list: 'boolean',
+    list: 'boolean | missing',
   },
   {
     name: 'MaxBy',
@@ -203,7 +205,7 @@ const ROWS: Row[] = [
     latex: '\\operatorname{Differences}(%)',
     absentSlot: ['list<number>', '[NaN]'],
     values: 'list<integer>',
-    list: 'list<number>',
+    list: 'list<integer | nan>',
   },
 ];
 
@@ -357,13 +359,13 @@ describe('PASS-THROUGH OPERATORS OVER AN OPERAND THAT CAN BE ABSENT AS A WHOLE',
     [
       'MaxBy',
       (s: string) => ['MaxBy', s, IDENTITY],
-      'missing | number',
+      'integer | missing | nan',
       undefined,
     ],
     [
       'MinBy',
       (s: string) => ['MinBy', s, IDENTITY],
-      'missing | number',
+      'integer | missing | nan',
       undefined,
     ],
   ] as [
@@ -662,14 +664,14 @@ describe('AN ALIAS SOURCE WITH ABSENT CELLS', () => {
   test.each([
     [['Dedup', 'a'], 'L'],
     [['ArgMax', 'a'], 'integer'],
-    // The alias is read as its definition (`list<number>`, not the abstract
-    // `collection<number>`).
-    [['Map', ['Function', ['Add', 'x', 1], 'x'], 'a'], 'list<number>'],
+    // The alias is read as its definition (a `list`, not the abstract
+    // `collection`).
+    [['Map', ['Function', ['Add', 'x', 1], 'x'], 'a'], 'list<integer | nan>'],
     [['Dedup', 'b'], 'list<integer | missing> | missing'],
-    [['ArgMax', 'b'], 'number'],
+    [['ArgMax', 'b'], 'integer | nan'],
     [
       ['Map', ['Function', ['Add', 'x', 1], 'x'], 'b'],
-      'list<number> | missing',
+      'list<integer | nan> | missing',
     ],
   ] as [MathJsonExpression, string][])('%j is admitted', (json, type) => {
     const expr = engine.box(json);

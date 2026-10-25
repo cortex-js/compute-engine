@@ -18,6 +18,7 @@
  * meet and the join, and runs a corpus check for covariance, transitivity,
  * antisymmetry and the soundness of `narrow`.
  */
+import { ComputeEngine } from '../../../src/compute-engine';
 import { parseType } from '../../../src/common/type/parse';
 import {
   cannotHoldAList,
@@ -1568,4 +1569,36 @@ describe('CORPUS CHECK', () => {
       }
     expect(violations).toEqual([]);
   }, 120000);
+});
+
+describe('an alias as a cell type', () => {
+  // An alias denotes the values of its definition, so an alias of a list
+  // is refused as a cell type, as the spelled-out definition is. A nominal
+  // type is opaque and stays accepted.
+  const ce = new ComputeEngine();
+  ce.declareType('Row', 'vector<integer^3>', { alias: true });
+  ce.declareType('Num', 'integer | rational', { alias: true });
+  ce.declareType('NominalRow', 'vector<integer^3>');
+
+  test.each(['list<Row^2>', 'matrix<Row^(2x2)>', 'tensor<Row>', 'vector<Row>'])(
+    '%s is refused',
+    (s) => {
+      expect(() => ce.declare(`x${s.length}${s[0]}`, s)).toThrow(
+        /cannot be lists/
+      );
+    }
+  );
+
+  test('the message names the spelling with one shape', () => {
+    expect(() => ce.declare('r2', 'list<Row^2>')).toThrow(
+      '`matrix<integer^(2x3)>`'
+    );
+  });
+
+  test.each(['list<Row>', 'list<Num^2>', 'list<NominalRow^2>'])(
+    '%s is accepted',
+    (s) => {
+      expect(() => ce.type(s)).not.toThrow();
+    }
+  );
 });

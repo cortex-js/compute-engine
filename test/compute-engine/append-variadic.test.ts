@@ -651,15 +651,12 @@ describe('Append: a source whose type does not fix its kind', () => {
   test.each(['a', 'u'])(
     'the structural form of the nested expression over %s is a collection',
     (src) =>
-      // The structural form does not bind the symbol, so the inner node sees
-      // a source typed `unknown` whatever the declaration is, and the
-      // appended values refine the placeholder element type. The canonical
-      // form reads the declaration (`a`) or infers `u` as `collection<any>`
-      // from the signature, so it gives `collection<any>`. Both forms are
-      // `collection`.
+      // The structural form binds the symbol to its definition, as the
+      // canonical form does, so the inner node reads the declared source
+      // type, and both forms give `collection<any>`.
       expect(
         freshStructural(['Append', ['Append', src, 1], 2]).type.toString()
-      ).toBe('collection<integer>')
+      ).toBe('collection<any>')
   );
 
   test('the value of an `any` source decides the kind', () => {

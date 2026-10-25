@@ -222,6 +222,23 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
     ).toMatch(/Error/);
   });
 
+  it('a body that assigns the accumulator is not typed from the seed', () => {
+    // The fixpoint reads the body's result with the accumulator declared at
+    // the seed's type, and an assignment inside the body is not seen by
+    // that declaration. Before, this fold was typed `list<string^1>`.
+    const ce = new ComputeEngine();
+    const fold = ce.box([
+      'Fold',
+      ['Function', ['Block', ['Assign', 'a', ['List', 1, 2]], 'a'], 'a', 'k'],
+      ['List', "'s'"],
+      ['Range', 1, 2],
+    ] as any);
+    const value = fold.evaluate();
+    expect(value.toString()).toBe('[1,2]');
+    expect(value.type.matches(fold.type)).toBe(true);
+    expect(fold.type.toString()).not.toContain('string');
+  });
+
   it('a block local holding the fold is typed precisely, so its consumers compile statically', () => {
     const ce = engine();
     const program = ce.box(

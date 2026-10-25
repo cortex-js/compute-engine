@@ -42,6 +42,11 @@ const cache = new WeakMap<
   }
 >();
 const active = new WeakMap<IComputeEngine, Set<Expression>>();
+/** The number of derivations, per engine, that were declined because the
+ * literal was already being derived (a recursive call). The body walk reads
+ * it before and after a nested call to know whether the nested call reached
+ * a recursion. */
+const recursionDeclines = new WeakMap<IComputeEngine, number>();
 
 function userFunctionLiteral(binding: BoxedDefinition | undefined) {
   const literal =
@@ -333,7 +338,10 @@ function literalBodyResultType(
   )
     return undefined;
   const running = active.get(engine) ?? new Set<Expression>();
-  if (running.has(literal)) return undefined;
+  if (running.has(literal)) {
+    recursionDeclines.set(engine, (recursionDeclines.get(engine) ?? 0) + 1);
+    return undefined;
+  }
   active.set(engine, running);
   // Each parameter is typed as the PRESENT part of its argument. An argument
   // that may be absent (`missing | T`) is derived a second time below with
@@ -394,6 +402,9 @@ function literalBodyResultType(
   running.add(literal);
   try {
     const memo = new Map<Expression, OperandDescriptor | undefined>();
+    // The descriptors of the calls typed `unknown` because they reached a
+    // recursion (see the test on `If` and `Which` below).
+    const recursive = new WeakSet<OperandDescriptor>();
     let blockDepth = 0;
     const walk = (expr: Expression): OperandDescriptor | undefined => {
       if (isSymbol(expr)) return env.get(expr.symbol) ?? describe(expr);
@@ -525,6 +536,21 @@ function literalBodyResultType(
       const children = expr.ops.map(walk);
       if (children.some((x) => x === undefined)) return undefined;
       const operands = children as OperandDescriptor[];
+      // A call that reaches a function whose body is being derived (a
+      // self-call, or a call of a mutually recursive function) has no
+      // derived type: it is typed `unknown`. A join with `unknown` keeps
+      // only the other arm, so a conditional with such a call as a branch
+      // would be typed by its other branch alone: with
+      // `f(n, s) = s if n == 0 else f(n - 1, [1, 2])`, `f(1, [0])` was typed
+      // `vector<integer^1>`, and it evaluates to `[1, 2]`. So the derivation
+      // stops there, and the call keeps its declared result.
+      if (
+        (expr.operator === 'If' &&
+          operands.slice(1).some((x) => recursive.has(x))) ||
+        (expr.operator === 'Which' &&
+          operands.some((x, i) => i % 2 === 1 && recursive.has(x)))
+      )
+        return undefined;
       // An application over an ABSENT operand (a parameter typed `missing`,
       // or a value derived as absent) is typed as the evaluation of the body
       // answers it, not as the operator's type handler types a literal
@@ -575,6 +601,7 @@ function literalBodyResultType(
         }
       }
       const callee = describeCallee(expr);
+      const declines = recursionDeclines.get(engine) ?? 0;
       let t = deriveApplicationOf({ head: expr.operator, callee }, operands, {
         engine,
         derive,
@@ -618,6 +645,12 @@ function literalBodyResultType(
                 }),
               }
             : describeType(t);
+      if (
+        result !== undefined &&
+        t === 'unknown' &&
+        (recursionDeclines.get(engine) ?? 0) !== declines
+      )
+        recursive.add(result);
       memo.set(expr, result);
       return result;
     };

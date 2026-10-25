@@ -1996,7 +1996,18 @@ export class BoxedFunction
     // through this getter: without it, `Sum([1, Error(…), 3])` boxed from
     // MathJSON got an unbound list, which is not a collection, and an inner
     // list of `[[1, Error(…)], 2] + 1` stayed raw in the broadcast.
-    if (this.isCanonical || (!this.isValid && !isIterableWithFailedCells(this)))
+    // A `Tuple` whose only errors sit in the cells of such literals
+    // (`failedCellsAreIterable()`) is bound too: `([1, Error(…)], 2)` is a
+    // point whose first coordinate is a list with a failed cell. The box
+    // route binds it when it is boxed alone, so this getter must bind it
+    // when it is an element of a list literal. Otherwise its type is a tuple
+    // type in one place and `error` in the other.
+    if (
+      this.isCanonical ||
+      (!this.isValid &&
+        !isIterableWithFailedCells(this) &&
+        !(this._operator === 'Tuple' && failedCellsAreIterable(this)))
+    )
       return this;
     // Thread the source position through (a raw statement's `.canonical` is
     // how a `Block`/`Loop` body canonicalizes — without this, no statement

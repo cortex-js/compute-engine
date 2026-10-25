@@ -1168,6 +1168,25 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       return;
     }
 
+    // A value for a value definition that the current scope resolves for
+    // this name goes through `ce.assign()`, so that the setter applies the
+    // same type rules: a value that does not fit a declared type is refused,
+    // and an inferred type is refined or widened to hold the value. A write
+    // only to the value left the type unchanged: `n.value = 5` kept `n`
+    // typed `unknown`, and a symbol typed `integer` could hold `"hi"`.
+    // The assignment runs in the scope that holds this definition: when a
+    // nested scope shadows the name, an assignment in the current scope
+    // would write the other binding.
+    if (v !== undefined && isValueDef(symbolDef)) {
+      let scope: Scope | null = ce.context.lexicalScope;
+      while (scope && scope.bindings.get(this._id) !== symbolDef)
+        scope = scope.parent;
+      if (scope) {
+        ce._inScope(scope, () => ce.assign(this._id, v));
+        return;
+      }
+    }
+
     ce._setSymbolValue(this._id, v);
   }
 

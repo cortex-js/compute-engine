@@ -115,13 +115,15 @@ describe('Map over a tuple yields an ordered list', () => {
     ).toBe('list<indexed_collection<any> | nothing | number>');
 
     // Assigned-symbol callback: its inferred signature `(unknown) -> number`
-    // gives the element type, and the bare `tuple` source is demoted to a
+    // describes a scalar element only. A coordinate of a bare `tuple` can be
+    // a list, which the body maps over, so the element type is the one of
+    // the inline callback, and the bare `tuple` source is demoted to a
     // `list` as well.
     const ce2 = new ComputeEngine();
     ce2.declare('t', 'tuple');
     ce2.assign('g', ce2.parse('x \\mapsto x + 10'));
     expect(ce2.box(['Map', 'g', 't']).type.toString()).toBe(
-      'list<nothing | number>'
+      'list<indexed_collection<any> | nothing | number>'
     );
   });
 

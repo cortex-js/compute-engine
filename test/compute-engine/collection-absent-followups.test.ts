@@ -236,13 +236,13 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('a source typed `any`', () =>
     check(
       engine.box(['Map', 'Sqrt', 'U']),
-      'list<indexed_collection<any> | nothing | number>'
+      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
     ));
 
   test('a source typed `list<any>`', () =>
     check(
       engine.box(['Map', 'Sqrt', 'La']),
-      'list<indexed_collection<any> | nothing | number>'
+      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
     ));
 
   test('a source whose element type has a list arm', () =>
@@ -265,11 +265,11 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
   test('parse route', () => {
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, U)'),
-      'list<indexed_collection<any> | nothing | number>'
+      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
     );
     check(
       engine.parse('\\mathrm{Map}(\\mathrm{Sqrt}, \\mathrm{La})'),
-      'list<indexed_collection<any> | nothing | number>'
+      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
     );
   });
 });
@@ -288,7 +288,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('an element nested two levels deep', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Sqrt', 'Ld']),
-      'list<indexed_collection<any> | nothing | number>'
+      'list<complex | indexed_collection<any> | infinity | nan | nothing>'
     );
     expect(v.toString()).toBe('[2,[[3]]]');
   });
@@ -320,7 +320,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('a numeric result over an absent cell has no `missing` arm', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Sqrt', 'Lim']),
-      'list<number>'
+      'list<complex | infinity | nan>'
     );
     expect(v.toString()).toBe('[2,NaN]');
   });

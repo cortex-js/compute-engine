@@ -2274,7 +2274,7 @@ function matrixMapType(
  * The dimensions of the matrix product of operands with the dimensions `a`
  * and `b` (each of rank 1 or 2), as the `MatrixMultiply` evaluate handler
  * computes it, or `undefined`: for two vectors (the result is a scalar,
- * which the declared `matrix | vector` result does not admit), and for inner
+ * which the caller types separately), and for inner
  * extents that are known and not equal (the handler answers
  * `incompatible-dimensions`).
  */
@@ -3414,17 +3414,27 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       examples: ['MatrixMultiply([[1, 2], [3, 4]], [[5, 6], [7, 8]])'],
       description: 'Matrix and vector multiplication.',
       complexity: 8300,
-      signature: '(matrix|vector, matrix|vector) -> matrix|vector',
+      // The product of two vectors is their inner product, a number, so the
+      // declared result includes `number`.
+      signature: '(matrix|vector, matrix|vector) -> matrix|vector|number',
       // An m×n matrix times an n×p matrix is m×p, times a vector of n cells
       // is a vector of m cells, and a vector of m cells times an m×n matrix
       // is a vector of n cells (`matrixProductDims()`). The cells are sums of
-      // products of cells (`matrixResultCellType()`, `'ring'`). The handler
-      // declines for two vectors, whose product is a scalar, and for inner
-      // extents that are known and not equal.
+      // products of cells (`matrixResultCellType()`, `'ring'`). Two vectors
+      // of the same extent give a scalar of that cell type. The handler
+      // declines for inner extents that are known and not equal.
       type: ([a, b], context) => {
         const A = matrixOperandShape(a);
         const B = matrixOperandShape(b);
         if (A === undefined || B === undefined) return undefined;
+        if (A.dims.length === 1 && B.dims.length === 1) {
+          if (commonExtent(A.dims[0], B.dims[0]) === undefined)
+            return undefined;
+          return BoxedType.forResult(
+            matrixResultCellType(widerCellTier(A.tier, B.tier), 'ring'),
+            context.engine._typeResolver
+          );
+        }
         const dims = matrixProductDims(A.dims, B.dims);
         if (dims === undefined) return undefined;
         return BoxedType.forResult(

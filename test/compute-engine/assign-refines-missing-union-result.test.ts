@@ -96,7 +96,7 @@ describe('assign keeps a `missing | T` result under a bare `function` declaratio
     const ce = engine();
     ce.declare('l', 'function');
     ce.assign('l', literal(ce, WHICH_BODY));
-    expect(ce.parse('\\sin(l(t))').type.toString()).toBe('number');
+    expect(ce.parse('\\sin(l(t))').type.toString()).toBe('nan | real');
   });
 
   it('keeps an else-less `If` result and the other absence marker', () => {

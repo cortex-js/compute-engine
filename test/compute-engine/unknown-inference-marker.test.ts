@@ -145,9 +145,14 @@ describe('D4: a value-derived join keeps the unresolved arm', () => {
     ]);
     expect(filtered.type.toString()).toBe('list<missing | unknown>');
     expect(filtered.evaluate().toString()).toBe('[1]');
-    // `Sort(tu)` goes through the generic solver, which drops a nested
-    // `unknown` bound when another slot says something, and is still typed
-    // `list<missing>` for the value `[1, Missing]` (ROADMAP).
+    // `Sort(tu)` goes through the generic solver. The element type of a
+    // tuple, read for the pattern `indexed_collection<T>`, keeps the
+    // `unknown` slot beside the `missing` slot, as `Filter` does.
+    const sorted = ce.box(['Sort', 'tu']);
+    expect(sorted.type.toString()).toBe('list<missing | unknown>');
+    const value = sorted.evaluate();
+    expect(value.toString()).toBe('[1,"Missing"]');
+    expect(value.type.matches(sorted.type)).toBe(true);
   });
 
   test('a comparator whose parameters are not inferred yet is no evidence for the element variable', () => {

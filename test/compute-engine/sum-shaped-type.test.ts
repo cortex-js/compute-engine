@@ -37,9 +37,9 @@ describe('SUM OF A COLLECTION OF POINTS OR ROWS', () => {
   test('a NaN component keeps the point shape', () => {
     const e = ce.box(['Sum', ['List', ['Tuple', 1, 'NaN'], ['Tuple', 2, 3]]]);
     expect(e.evaluate().toString()).toBe('(3, NaN)');
-    // The element types differ, so the literal's type is a list with no
-    // length, and the union keeps the `integer` of an empty sum.
-    expect(e.type.toString()).toBe('integer | tuple<integer, integer | nan>');
+    // The element types differ, but the literal's type still states its
+    // length, so the sum is not empty and has no `integer` arm.
+    expect(e.type.toString()).toBe('tuple<integer, integer | nan>');
     expect(e.evaluate().type.matches(e.type)).toBe(true);
   });
 

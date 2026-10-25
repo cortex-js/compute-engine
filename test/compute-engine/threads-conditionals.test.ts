@@ -206,7 +206,7 @@ describe('Point accessors over a list whose cells can be absent', () => {
 
   test('the coordinate list is typed with a missing cell', () => {
     expect(type(['PointY', ['List', RP, ['Tuple', 6, 8]]])).toBe(
-      'list<missing | number>'
+      'list<integer | missing | nan^2>'
     );
     expect(value(['PointY', ['List', RP, ['Tuple', 6, 8]]], -1)).toBe(
       '["Missing",8]'

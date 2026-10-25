@@ -310,6 +310,89 @@ function listHypothesisOf(t: Type): Type | undefined {
   return undefined;
 }
 
+/**
+ * True when `literal` names `name`, directly or through the function
+ * literals of the user functions its body calls, transitively: the function
+ * named `name` is then recursive, alone (`F` calls `F`) or with others (`F`
+ * calls `G`, and `G` calls `F`). A callee is read from the definition its
+ * call is bound to, so a parameter or a local of the same name is not
+ * followed. Each literal is read once.
+ */
+function callsReach(
+  literal: Expression,
+  name: string,
+  seen: Set<Expression> = new Set()
+): boolean {
+  if (seen.has(literal)) return false;
+  seen.add(literal);
+  if (literal.has(name)) return true;
+  const visit = (expr: Expression): boolean => {
+    if (!isFunction(expr)) return false;
+    const callee = calleeLiteral(expr);
+    if (callee !== undefined && callsReach(callee, name, seen)) return true;
+    return expr.ops.some((op) => visit(op));
+  };
+  return visit(literal);
+}
+
+/** The function literal of the user function that the application `expr`
+ * calls, or `undefined`. */
+function calleeLiteral(expr: Expression): Expression | undefined {
+  const opDef = expr.operatorDefinition as
+    { _lambdaLiteral?: Expression } | undefined;
+  const literal = opDef?._lambdaLiteral ?? expr.valueDefinition?.value;
+  return literal !== undefined && isFunction(literal, 'Function')
+    ? literal
+    : undefined;
+}
+
+/** A signature derivation in flight (`_deriveSignature` of an operator or a
+ * value definition). `tainted` becomes true when the derivation read the
+ * provisional signature of a definition whose own derivation was running
+ * below it on the stack: the result then depends on an answer that is not
+ * final, and must not be memoized. */
+export type SignatureDerivationFrame = { owner: object; tainted: boolean };
+
+/** The signature derivations in flight, in this process, innermost last (a
+ * derivation is a dynamic extent of the host call stack). */
+const derivationStack: SignatureDerivationFrame[] = [];
+
+/** Push a frame for a signature derivation of `owner`. The caller pops it
+ * with {@link endSignatureDerivation}, in a `finally`. */
+export function beginSignatureDerivation(
+  owner: object
+): SignatureDerivationFrame {
+  const frame = { owner, tainted: false };
+  derivationStack.push(frame);
+  return frame;
+}
+
+export function endSignatureDerivation(frame: SignatureDerivationFrame): void {
+  const i = derivationStack.lastIndexOf(frame);
+  if (i >= 0) derivationStack.splice(i, 1);
+}
+
+/**
+ * Record a re-entrant read of the signature of `owner` while its derivation
+ * runs: the read answers a provisional signature (the recorded one, or the
+ * candidate of a list-hypothesis pass). Every derivation that started after
+ * the one of `owner` made that read, directly or through the derivation of
+ * a callee, so its result depends on the provisional answer and it is
+ * marked as tainted. The derivation of `owner` itself is not: a read of its
+ * own signature is the recursion that its derivation handles.
+ *
+ * Without this, in a mutually recursive pair (`F` calls `G`, `G` calls `F`),
+ * the signature of `G` derived inside the derivation of `F` read `F` as
+ * `-> unknown`, was memoized, and stayed `-> unknown` after `F` settled.
+ */
+export function noteReentrantSignatureRead(owner: object): void {
+  let i = derivationStack.length - 1;
+  while (i >= 0 && derivationStack[i].owner !== owner) i -= 1;
+  if (i < 0) return;
+  for (let j = i + 1; j < derivationStack.length; j++)
+    derivationStack[j].tainted = true;
+}
+
 /** The number of list-hypothesis passes in flight, in this process (a pass
  * is a dynamic extent of the host call stack, as the object-dependency
  * collectors are). Read by {@link inListHypothesisPass}. */
@@ -351,8 +434,9 @@ export function inListHypothesisPass(): boolean {
  * `set<T>`), and the caller keeps `derived`. Seeding a fixpoint iteration
  * with `never` was tried first and rejected: an operand typed `never` is read
  * as an absent value, and a conditional with such an arm is typed `never` as
- * a whole. Only a body that names the function and derives an abstract
- * collection is re-boxed; every other body pays nothing.
+ * a whole. Only a body that derives an abstract collection and names the
+ * function, directly or through the functions it calls ({@link callsReach}),
+ * is re-boxed; every other body pays nothing.
  */
 export function verifiedListHypothesis(
   ce: IComputeEngine,
@@ -366,12 +450,13 @@ export function verifiedListHypothesis(
     typeof skeleton !== 'object' ||
     skeleton.kind !== 'signature' ||
     skeleton.result !== 'unknown' ||
-    derived === undefined ||
-    !literal.has(name)
+    derived === undefined
   )
     return undefined;
+  // The cheap test first: most bodies derive no abstract collection, and
+  // the walk of the call graph is then not needed.
   const hypothesis = listHypothesisOf(derived);
-  if (hypothesis === undefined) return undefined;
+  if (hypothesis === undefined || !callsReach(literal, name)) return undefined;
   let result: Type | undefined;
   let homes: HomeScope[] = [];
   hypothesisPassDepth += 1;

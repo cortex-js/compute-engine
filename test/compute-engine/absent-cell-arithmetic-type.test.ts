@@ -16,7 +16,8 @@ import { typeToString } from '../../src/common/type/serialize';
 // `[[2, 3], NaN]`: the absent cell becomes the number `NaN`. The static type
 // must have an arm for it. Before, `L + 1` was typed `list<list<number>>`,
 // and `Sin(L)` was typed `list<number>`, which does not hold the row
-// `[Sin(1), Sin(2)]` either. Now both are typed `list<list<number> | nan>`.
+// `[Sin(1), Sin(2)]` either. Now `L + 1` is typed
+// `list<list<integer | nan> | nan>` and `Sin(L)` `list<list<number> | nan>`.
 //
 // A row of points that is absent stays `Missing` (an absent point is
 // `Missing`, `docs/ERROR-MODEL.md`), so its cell type gains a `missing` arm.
@@ -61,15 +62,15 @@ const FAMILIES: Family[] = [
     decl: 'list<list<integer> | missing>',
     value: ['List', ['List', 1, 2], 'Missing'],
     types: {
-      'L + 0.5': ROWS,
-      'L + 1': ROWS,
-      'L - 1': ROWS,
-      '0.5 L': ROWS,
-      'L / 2': ROWS,
-      '-L': ROWS,
+      'L + 0.5': 'list<list<nan | real> | nan>',
+      'L + 1': 'list<list<integer | nan> | nan>',
+      'L - 1': 'list<list<integer | nan> | nan>',
+      '0.5 L': 'list<list<nan | real> | nan>',
+      'L / 2': 'list<list<nan | rational> | nan>',
+      '-L': 'list<list<integer | nan> | nan>',
       'L^2': ROWS,
       'Sqrt(L)': ROWS,
-      'Abs(L)': ROWS,
+      'Abs(L)': 'list<list<integer | nan> | nan>',
       'Sin(L)': ROWS,
       'Exp(L)': ROWS,
       'Ln(L)': ROWS,
@@ -83,15 +84,15 @@ const FAMILIES: Family[] = [
     decl: 'list<list<list<integer>> | missing>',
     value: ['List', ['List', ['List', 1, 2], ['List', 3, 4]], 'Missing'],
     types: {
-      'L + 0.5': NESTED_ROWS,
-      'L + 1': NESTED_ROWS,
-      'L - 1': NESTED_ROWS,
-      '0.5 L': NESTED_ROWS,
-      'L / 2': NESTED_ROWS,
-      '-L': NESTED_ROWS,
+      'L + 0.5': 'list<list<list<nan | real>> | nan>',
+      'L + 1': 'list<list<list<integer | nan>> | nan>',
+      'L - 1': 'list<list<list<integer | nan>> | nan>',
+      '0.5 L': 'list<list<list<nan | real>> | nan>',
+      'L / 2': 'list<list<list<nan | rational>> | nan>',
+      '-L': 'list<list<list<integer | nan>> | nan>',
       'L^2': NESTED_ROWS,
       'Sqrt(L)': NESTED_ROWS,
-      'Abs(L)': NESTED_ROWS,
+      'Abs(L)': 'list<list<list<integer | nan>> | nan>',
       'Sin(L)': NESTED_ROWS,
       'Exp(L)': NESTED_ROWS,
       'Ln(L)': NESTED_ROWS,
@@ -106,12 +107,12 @@ const FAMILIES: Family[] = [
       'L + 0.5': 'error',
       'L + 1': 'error',
       'L - 1': 'error',
-      '0.5 L': POINTS,
-      'L / 2': POINTS,
-      '-L': POINTS,
+      '0.5 L': 'list<missing | tuple<nan | real, nan | real>>',
+      'L / 2': 'list<missing | tuple<nan | rational, nan | rational>>',
+      '-L': 'list<missing | tuple<integer | nan, integer | nan>>',
       'L^2': POINTS,
       'Sqrt(L)': POINTS,
-      'Abs(L)': 'list<number>',
+      'Abs(L)': 'list<nan | real | signed_infinity>',
       'Sin(L)': POINTS,
       'Exp(L)': POINTS,
       'Ln(L)': POINTS,
@@ -123,15 +124,15 @@ const FAMILIES: Family[] = [
     decl: 'list<list<integer> | integer | missing>',
     value: ['List', ['List', 1, 2], 3, 'Missing'],
     types: {
-      'L + 0.5': MIXED,
-      'L + 1': MIXED,
-      'L - 1': MIXED,
-      '0.5 L': MIXED,
-      'L / 2': MIXED,
-      '-L': MIXED,
+      'L + 0.5': 'list<list<nan | real> | nan | real>',
+      'L + 1': 'list<integer | list<integer | nan> | nan>',
+      'L - 1': 'list<integer | list<integer | nan> | nan>',
+      '0.5 L': 'list<list<nan | real> | nan | real>',
+      'L / 2': 'list<list<nan | rational> | nan | rational>',
+      '-L': 'list<integer | list<integer | nan> | nan>',
       'L^2': MIXED,
       'Sqrt(L)': MIXED,
-      'Abs(L)': MIXED,
+      'Abs(L)': 'list<+oo | list<nan | real | signed_infinity> | nan | real>',
       'Sin(L)': MIXED,
       'Exp(L)': MIXED,
       'Ln(L)': MIXED,
@@ -143,12 +144,13 @@ const FAMILIES: Family[] = [
     decl: 'list<list<tuple<integer, integer>> | missing>',
     value: ['List', ['List', ['Tuple', 1, 2]], 'Missing'],
     types: {
-      '0.5 L': POINT_ROWS,
-      'L / 2': POINT_ROWS,
-      '-L': POINT_ROWS,
+      '0.5 L': 'list<list<missing | tuple<nan | real, nan | real>> | missing>',
+      'L / 2':
+        'list<list<missing | tuple<nan | rational, nan | rational>> | missing>',
+      '-L': 'list<list<missing | tuple<integer | nan, integer | nan>> | missing>',
       'L^2': POINT_ROWS,
       'Sqrt(L)': POINT_ROWS,
-      'Abs(L)': ROWS,
+      'Abs(L)': 'list<list<nan | real | signed_infinity> | nan>',
       'Sin(L)': POINT_ROWS,
       'Exp(L)': POINT_ROWS,
       'Ln(L)': POINT_ROWS,
@@ -176,17 +178,26 @@ const FAMILIES: Family[] = [
   {
     decl: 'list<integer | missing>',
     value: ['List', 1, 'Missing'],
-    types: { 'L + 1': 'list<number>', 'L + 0.5': 'list<number>' },
+    types: {
+      'L + 1': 'list<integer | nan>',
+      'L + 0.5': 'list<nan | real>',
+    },
   },
   {
     decl: 'list<list<integer>>',
     value: ['List', ['List', 1, 2], ['List', 3, 4]],
-    types: { 'L + 1': 'list<list<integer>>', 'Sin(L)': 'list<list<number>>' },
+    types: {
+      'L + 1': 'list<list<integer>>',
+      'Sin(L)': 'list<list<number>>',
+    },
   },
   {
     decl: 'list<list<integer | missing>>',
     value: ['List', ['List', 1, 'Missing']],
-    types: { 'L + 1': 'list<list<number>>', 'Sin(L)': 'list<list<number>>' },
+    types: {
+      'L + 1': 'list<list<integer | nan>>',
+      'Sin(L)': 'list<list<number>>',
+    },
   },
 ];
 
@@ -390,7 +401,7 @@ const REVIEW_CASES: ReviewCase[] = [
     // of the product are points, as for `L·2`. The absent row stays absent:
     // the type of the product says that a row may be `Missing`, and the
     // evaluation marks the absent row so (`markAbsentPointCells()`).
-    type: 'list<list<missing | tuple<number, number>> | missing>',
+    type: 'list<list<missing | tuple<integer | nan, integer | nan>> | missing>',
     evaluated: '[[(2, 4)],"Missing"]',
   },
   {
@@ -462,7 +473,7 @@ const REVIEW_CASES: ReviewCase[] = [
     decl: 'list<list<integer> | missing>',
     value: ['List', ['List', 1, 2], 'Missing'],
     expr: ['Add', 'L', ['List', ['List', 1, 2], ['List', 3, 4]]],
-    type: 'list<list<number>>',
+    type: 'list<list<integer | nan>>',
     evaluated: '[[2,4],[NaN,NaN]]',
   },
 ];

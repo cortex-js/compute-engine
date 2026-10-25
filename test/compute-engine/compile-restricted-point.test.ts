@@ -672,9 +672,7 @@ describe('The norm of a point with a restricted list component', () => {
   });
 
   test('the norm types as a list, or NaN for an absent coordinate', () => {
-    expect(ceR.box(tuple as never).type.toString()).toBe(
-      'list<number> | number'
-    );
+    expect(ceR.box(tuple as never).type.toString()).toBe('list<number> | nan');
   });
 
   test('a restricted list of points on the interval target', () => {

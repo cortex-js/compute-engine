@@ -106,8 +106,14 @@ import {
 } from './boxed-expression/exact-argument-source.js';
 import {
   effectsContractStateOf,
+  latestDeclaredEffectsSite,
   recordEffectsTransition,
 } from './boxed-expression/effects-provenance.js';
+import {
+  EffectContractError,
+  inferFunctionLiteralEffects,
+} from './boxed-expression/effects-inference.js';
+import { isEffectSubset } from '../common/type/effects.js';
 import { effectsOf } from './boxed-expression/effects-of.js';
 import { isOperatorDef } from './boxed-expression/definition-guards.js';
 import { releaseKeptEagerSourceValues } from './boxed-expression/eager-source-values.js';
@@ -1123,6 +1129,32 @@ function installRebuiltLiteral(
       rebuilt
     );
   } else {
+    // A value definition under a DECLARED effects contract (`(number) pure
+    // -> number`) checks the rebuilt literal against it, as the operator
+    // branch does inside `_update()`: a body that a product reading kept
+    // pure (`x ↦ 2h(x)` with `h` not yet a function) can become an
+    // effectful application when `h` gains a definition. The check throws
+    // before the write, so the previous literal stays, and the caller keeps
+    // the definition registered and reports the error. A walk that saw an
+    // unresolved head cannot decide the check, and the literal is installed
+    // as for the operator branch.
+    const declared = signatureEffects(def.type.type);
+    const name = dependentName(def);
+    if (name !== undefined && (declared !== undefined || def.effectsDeclared)) {
+      const inferred = inferFunctionLiteralEffects(ce, rebuilt, {
+        selfName: name,
+      });
+      if (
+        !inferred.unresolvedHead &&
+        !isEffectSubset(inferred.effects, declared)
+      )
+        throw new EffectContractError(
+          name,
+          declared,
+          inferred.effects,
+          latestDeclaredEffectsSite(def)
+        );
+    }
     if (frame !== undefined) {
       const snapshot = def._typeSlotSnapshot();
       frame.record({ undo: () => def._restoreTypeSlots(snapshot) });
@@ -1136,9 +1168,7 @@ function installRebuiltLiteral(
     // recording would make is identical by construction and could never
     // produce an entry. (W2 of the effects-axis provenance design covers the
     // OPERATOR branch above, whose `_update()` genuinely re-derives and
-    // re-stamps the effect set.) Note the flip side, recorded in ROADMAP.md:
-    // a value-bound literal under a DECLARED effects contract is rebuilt here
-    // with no contract re-verification at all.
+    // re-stamps the effect set.)
   }
 }
 

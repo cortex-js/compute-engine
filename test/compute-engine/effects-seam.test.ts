@@ -100,6 +100,12 @@ describe('The Function-literal construction seam is the only builder', () => {
       // arrow.
       'compute-engine/compilation/base-compiler.ts',
       'compute-engine/engine-declarations.ts',
+      // The provisional re-derivation checks a rebuilt VALUE-bound literal
+      // against its declared effects contract (`installRebuiltLiteral`): it
+      // RUNS the walk over the rebuilt literal to read the inferred set and
+      // `unresolvedHead`, and builds `EffectContractError` for the message.
+      // It builds no arrow.
+      'compute-engine/function-utils.ts',
       // The protocol dispatcher's DERIVED effect set: a function requirement
       // with a bare effect specifier imposes no bound, so the dispatcher's
       // effects are the union of the inferred effects of the registered

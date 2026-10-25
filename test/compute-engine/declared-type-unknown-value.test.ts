@@ -128,3 +128,40 @@ describe('a declared FUNCTION SIGNATURE still refuses an unknown value', () => {
     ).not.toThrow();
   });
 });
+
+// A bare symbol with no value and no type that becomes the value of a symbol
+// with a declared type is a use of that symbol at the declared type. It is
+// narrowed, as an argument at a declared parameter is, so that the static type
+// of an expression that reads the declared symbol holds its value.
+describe('a valueless untyped symbol as the value of a declared symbol is narrowed', () => {
+  test('assign route', () => {
+    const ce = new ComputeEngine();
+    ce.declare('q', 'integer');
+    ce.assign('q', ce.box('uu'));
+    expect(ce.box('uu').type.toString()).toBe('integer');
+    const t = ce.box(['Tuple', 'q']);
+    expect(t.type.toString()).toBe('tuple<integer>');
+    expect(t.evaluate().type.toString()).toBe('tuple<integer>');
+  });
+
+  test('declare-with-value route', () => {
+    const ce = new ComputeEngine();
+    ce.declare('r', { type: 'real', value: ce.box('zz') });
+    expect(ce.box('zz').type.toString()).toBe('real');
+  });
+
+  test('a symbol with a value is not narrowed', () => {
+    const ce = new ComputeEngine();
+    ce.assign('w', 5);
+    ce.declare('n', 'number');
+    ce.assign('n', ce.box('w'));
+    expect(ce.box('w').type.toString()).toBe('integer');
+  });
+
+  test('a target with an inferred type does not narrow the value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('m', 1);
+    ce.assign('m', ce.box('vv'));
+    expect(ce.box('vv').type.toString()).toBe('unknown');
+  });
+});

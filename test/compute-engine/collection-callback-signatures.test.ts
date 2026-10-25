@@ -867,3 +867,42 @@ describe('an application that gives a function is a valid raw callback (CE-129)'
     expect(e.evaluate().toString()).toBe('[1/2 * pi,0]');
   });
 });
+
+// A polymorphic callback is judged at the bounds of its type variables: with
+// `h: (T) -> T where T: number`, `h` cannot take a string, so `Map(h, s)`
+// over strings is refused when it is boxed, as the direct call `h("a")` is.
+describe('a bounded type variable of a callback is checked against the elements', () => {
+  test('Map refuses a callback whose bound excludes the elements', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(T) -> T where T: number');
+    ce.assign('h', ce.parse('x \\mapsto x'));
+    ce.declare('s', 'list<string>');
+    ce.declare('rows', 'list<list<string>>');
+    expect(ce.box(['h', { str: 'a' }]).isValid).toBe(false);
+    expect(ce.box(['Map', 'h', 's']).isValid).toBe(false);
+    expect(ce.box(['Map', 'h', 'rows']).isValid).toBe(false);
+    expect(ce.box(['Map', 'h', ['List', { str: 'a' }]]).isValid).toBe(false);
+  });
+
+  test('Map admits a callback whose bound contains the elements', () => {
+    const ce = new ComputeEngine();
+    ce.declare('h', '(T) -> T where T: number');
+    ce.assign('h', ce.parse('x \\mapsto x'));
+    ce.declare('ns', 'list<integer>');
+    ce.declare('nr', 'list<list<integer>>');
+    expect(ce.box(['Map', 'h', 'ns']).isValid).toBe(true);
+    expect(ce.box(['Map', 'h', 'nr']).isValid).toBe(true);
+    expect(
+      ce.box(['Map', 'h', ['List', ['List', 1, 2], ['List', 3]]]).evaluate()
+        .toString()
+    ).toBe('[[1,2],[3]]');
+  });
+
+  test('an unbounded type variable admits any element', () => {
+    const ce = new ComputeEngine();
+    ce.declare('id', '(T) -> T where T');
+    ce.assign('id', ce.parse('x \\mapsto x'));
+    ce.declare('s', 'list<string>');
+    expect(ce.box(['Map', 'id', 's']).isValid).toBe(true);
+  });
+});

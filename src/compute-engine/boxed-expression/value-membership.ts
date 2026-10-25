@@ -4,6 +4,7 @@ import {
   isIndeterminateValue,
 } from '../../common/type/types.js';
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import { aliasDefinitionAt } from '../../common/type/instantiate.js';
 
 import type { Expression } from '../global-types.js';
 
@@ -164,13 +165,17 @@ function valueComponent(
     case 'negation':
       return valueComponent(t.type, seen);
     case 'reference': {
-      // Structural aliases unfold; a nominal reference stays opaque.
-      if (t.alias !== true || t.def === undefined) return false;
+      // Structural aliases unfold; a nominal reference stays opaque. The
+      // definition is read with the type arguments of a parameterized alias
+      // substituted (`aliasDefinitionAt`), as the subtype relation reads it.
+      if (t.alias !== true) return false;
+      const def = aliasDefinitionAt(t);
+      if (def === undefined) return false;
       if (seen === undefined) seen = new Set();
       else if (seen.has(t)) return false; // cycle — cut the back edge
       seen.add(t);
       try {
-        return valueComponent(t.def, seen);
+        return valueComponent(def, seen);
       } finally {
         seen.delete(t);
       }
@@ -335,6 +340,11 @@ function accepts(
     case 'reference': {
       // Nominal references are opaque — synthesized subtyping decides.
       if (!t.alias || t.def === undefined) return isSubtype(v.type.type, t);
+      // The definition with the type arguments of a parameterized alias
+      // substituted, as the subtype relation reads it. A reference whose
+      // arguments do not match the parameters has no definition to unfold.
+      const def = aliasDefinitionAt(t);
+      if (def === undefined) return isSubtype(v.type.type, t);
 
       // Structural aliases unfold, under a cycle guard keyed on the PAIR
       // (the alias record + the IDENTITY of the value being tested) — the
@@ -371,7 +381,7 @@ function accepts(
       else if (values.has(v)) return false;
       values.add(v);
       try {
-        return accepts(v, t.def, seen);
+        return accepts(v, def, seen);
       } finally {
         // Path-scoped: each frame drops its OWN entry, so a sibling arm asked
         // later at the same value still gets a full unfold.

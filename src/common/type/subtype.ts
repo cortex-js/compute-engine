@@ -4597,7 +4597,10 @@ export function widenAll(types: ReadonlyArray<Readonly<Type>>): Readonly<Type> {
  * infinity present, and `nan` when present (`list<real | signed_infinity>`,
  * not `list<number>`). `widen` joins `integer` and `+oo`, or `real` and
  * `nan`, to their common supertype `number`, which a host reads as possibly
- * complex (user decision 2026-09-25).
+ * complex (user decision 2026-09-25). An absent element (`missing`) beside
+ * such elements is kept as its own arm: `[-2, NaN, Missing]` is a
+ * `list<integer | missing | nan>`, the type an operator that answers `NaN`
+ * for an absent cell gives (`absorbNumericAbsence`, `utils.ts`).
  */
 export function widenElementTypes(
   types: ReadonlyArray<Readonly<Type>>
@@ -4610,9 +4613,11 @@ export function widenElementTypes(
   let hasPlus = false;
   let hasMinus = false;
   let hasNaN = false;
+  let hasMissing = false;
   const finite: Type[] = [];
   for (const m of members) {
     if (m === 'nan') hasNaN = true;
+    else if (m === 'missing') hasMissing = true;
     else if (isSubtype(m, plusInf)) hasPlus = true;
     else if (isSubtype(m, minusInf)) hasMinus = true;
     else if (isSubtype(m, 'real')) finite.push(m);
@@ -4624,6 +4629,7 @@ export function widenElementTypes(
   if (hasPlus) result.push(plusInf);
   if (hasMinus) result.push(minusInf);
   if (hasNaN) result.push('nan');
+  if (hasMissing) result.push('missing');
   return result.length === 1 ? result[0] : { kind: 'union', types: result };
 }
 
@@ -4743,4 +4749,8 @@ _setTypeAlgebra({
   widen: widen as (...t: Type[]) => Type,
   narrow,
   cannotHoldAList,
+  joinUnresolvedArm: joinUnresolvedArm as (
+    types: ReadonlyArray<Type>,
+    besideMarkersOnly?: boolean
+  ) => Type,
 });

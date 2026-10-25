@@ -132,7 +132,7 @@ describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', 
   test('an absent operand still types `number` (missing-value P2 §3.B)', () => {
     const ce = engine();
     const e = ce.box(['Negate', 'Missing']);
-    expect(e.type.toString()).toBe('number'); // was `value` under the clause
+    expect(e.type.toString()).toBe('nan'); // was `value` under the clause
     expect(e.evaluate().toString()).toBe('NaN');
     expect(ce.box('Negate').operatorDefinition!.resolvedMissingBehavior).toBe(
       'propagate'

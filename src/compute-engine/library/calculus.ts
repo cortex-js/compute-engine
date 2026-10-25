@@ -1,8 +1,6 @@
-import {
-  deriveApplicationOf,
-  describeType,
-} from '../boxed-expression/operand-descriptor.js';
+import { describeType } from '../boxed-expression/operand-descriptor.js';
 import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
+import { heldDenotedType } from './held-operand-type.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   BoxedValueDefinition,
@@ -3131,55 +3129,6 @@ function heldValueTypeOf(
 }
 
 /**
- * The type of the VALUE an operand denotes, for an operand that a lazy
- * operator receives raw.
- *
- * A held operand is unbound, so its own type is `unknown` — even for
- * `Sin(x)` or for a symbol declared with a signature. Two pure channels
- * recover the answer: an application is typed by `derive`, which runs the
- * head's own `type` handler and otherwise instantiates its declared
- * signature; a symbol is read from its definition, and where that names a
- * function, from what the function RETURNS (its declaration first, then the
- * lambda it holds, which is the only codomain a head declared as a bare
- * `function` has).
- */
-function denotedTypeOf(
-  d: OperandDescriptor,
-  { engine, derive }: TypeHandlerContext
-): Type {
-  const structure = d.structureOf?.();
-  if (structure?.kind === 'application')
-    return (
-      deriveApplicationOf(structure, structure.children, { engine, derive }) ??
-      d.type
-    );
-  if (structure?.kind === 'symbol') {
-    // Four places a symbol's codomain can live, in decreasing precision: the
-    // operand's own type (a bound symbol carries its signature there, while
-    // a RAW held one is still `unknown`), the value declaration, the lambda
-    // the symbol holds — the only codomain a head declared as a bare
-    // `function` has — and, for a symbol that a lambda assignment made
-    // CALLABLE, the operator half's signature, which is where that
-    // assignment records the inferred codomain.
-    const binding = engine.lookupDefinition(structure.name);
-    const def = binding?.value;
-    for (const t of [
-      d.type,
-      def?.type.type,
-      def?.value?.type.type,
-      binding?.operator?.signature.type,
-    ]) {
-      if (t === undefined) continue;
-      const result = functionResult(t);
-      if (result !== undefined && result !== 'any' && result !== 'unknown')
-        return result;
-    }
-    return def?.type.type ?? d.type;
-  }
-  return d.type;
-}
-
-/**
  * Collect the dependent-function symbol name(s) from the second argument of
  * `DSolve`/`NDSolve` (a symbol or a `List` of symbols).
  */
@@ -5034,7 +4983,7 @@ volumes
             structure.body.kind === 'list-literal')
         )
           return BoxedType.forResult('matrix', context.engine._typeResolver);
-        const denoted = denotedTypeOf(fs, context);
+        const denoted = heldDenotedType(context, fs);
         if (isSubtype(denoted, JACOBIAN_LIST_SHAPE_TYPE))
           return BoxedType.forResult('matrix', context.engine._typeResolver);
         if (isSubtype(denoted, 'number'))

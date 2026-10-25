@@ -173,6 +173,7 @@ import {
   narrow,
   narrowingPreservesEffects,
   resolveTypeAlias,
+  signatureArms,
   staticCollectionDims,
   stripMissingFromType,
   stripNumericRanges,
@@ -2742,6 +2743,15 @@ function refinedFoldCombiner(
   const current = accumulatorBindingType(accepted);
   if (current !== undefined && !accumulatorTypeIsImprecise(current))
     return admitted();
+  // The fixpoint declares the accumulator in advance at each step's type and
+  // reads the type of the body's result from that declaration. An assignment
+  // to the accumulator inside the body replaces its value with a value of
+  // any type, which that declaration does not see, so the iteration can
+  // settle on the seed's type while the fold gives another value: with the
+  // body `a := [1, 2]; a` and the seed `["s"]`, the fold was typed
+  // `list<string^1>` and its value is `[1, 2]`. Such a body keeps the type
+  // of the admission pass.
+  if (isFunction(raw) && rawBodyAssigns(raw.ops[0], accName)) return admitted();
   const settled = fixpointLiteral(
     state,
     raw!,
@@ -2809,6 +2819,23 @@ function accumulatorUsedOnlyInArithmetic(
     return true;
   };
   return walk(body, undefined) && used;
+}
+
+/**
+ * True when the RAW body `body` holds an `Assign` whose target names
+ * `accName` (the target itself, or a symbol of a destructuring target). An
+ * assignment inside a nested literal that declares the same name is counted
+ * too, which only makes the answer `true` more often.
+ */
+function rawBodyAssigns(body: Expression, accName: string): boolean {
+  const names = (e: Expression): boolean =>
+    isSymbol(e) ? e.symbol === accName : isFunction(e) && e.ops.some(names);
+  const walk = (e: Expression): boolean => {
+    if (!isFunction(e) || e._numericStore !== undefined) return false;
+    if (e.operator === 'Assign' && e.nops > 0 && names(e.ops[0])) return true;
+    return e.ops.some(walk);
+  };
+  return walk(body);
 }
 
 /** The type of the binding of a canonical literal's first parameter (its
@@ -4391,7 +4418,19 @@ function bareOperatorElementTypeD(
     if (t === undefined) return undefined;
     elementTypes.push(t);
   }
-  if (!elementTypes.some((t) => isTupleShapedType(t))) return undefined;
+  // Over scalar elements, the declared result is kept, except when it says
+  // nothing about the value: `Add` is declared `(value+) -> value`, so the
+  // zip `Map(Add, xs, ys)` of two lists of integers was typed `list<value>`.
+  // The operator's own type handler then gives the element type (`integer`),
+  // as it does for the body of `(a, b) ↦ a + b`.
+  const declared = functionResult(sig);
+  const declaredSaysNothing =
+    declared === 'value' ||
+    declared === 'any' ||
+    declared === 'unknown' ||
+    declared === 'expression';
+  if (!declaredSaysNothing && !elementTypes.some((t) => isTupleShapedType(t)))
+    return undefined;
   const t = derive(
     s.name,
     elementTypes.map((t, k) => describeBoundElement(t, k))
@@ -4668,9 +4707,70 @@ function declaredOrCallElementTypeD(
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
   const declared = callbackResultTypeD(fn, engine);
-  if (declared !== undefined && declared !== 'unknown' && declared !== 'any')
-    return declared;
+  if (declared !== undefined && declared !== 'unknown' && declared !== 'any') {
+    // A signature with a parameter typed `unknown` was inferred from the
+    // body with that parameter not known. Its result says nothing about an
+    // element that is a collection, because the body then broadcasts over
+    // the element: `g := x ↦ x + 10` has the signature `(unknown) -> number`,
+    // and `g([1, 2])` is `[11, 12]`. The call on the element type is then
+    // read first, and the inferred result is the fallback.
+    if (!callbackHasUnresolvedParameterD(fn, engine)) return declared;
+    const called = callbackCallElementTypeD(fn, sources, engine, derive);
+    if (called !== undefined) return called;
+    // The call on the element has no known type. When an element can be a
+    // collection whose depth the type does not state (the element of a
+    // `list<any>`), the body can broadcast over it to any depth, and the
+    // element of the result can be such a collection too: `Map(g, L)` with
+    // `L := [[1, 2], 3]` is `[[11, 12], 13]`. This is the answer that
+    // `openDepthLiteralResult` gives for a function literal, which the
+    // caller applies to a literal itself.
+    if (fn.structureOf?.()?.kind === 'function-literal') return declared;
+    const openElement = sources.some((s) => {
+      const element = s.facts.elementType ?? collectionElementType(s.type);
+      return element === undefined
+        ? s.type === 'any' || s.type === 'value'
+        : hasOpenContentDepth(element);
+    });
+    return openElement
+      ? {
+          kind: 'union',
+          types: [declared, { kind: 'indexed_collection', elements: 'any' }],
+        }
+      : declared;
+  }
   return callbackCallElementTypeD(fn, sources, engine, derive) ?? declared;
+}
+
+/**
+ * Whether the signature of the callback `fn` (its own type, or the type in
+ * the definition of the symbol that it names) has a parameter typed
+ * `unknown`: a signature that the engine inferred from a function literal
+ * whose parameter it could not type.
+ */
+function callbackHasUnresolvedParameterD(
+  fn: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  let signature: Type | undefined =
+    signatureArms(fn.type) !== undefined ? fn.type : undefined;
+  if (signature === undefined) {
+    const s = fn.structureOf?.();
+    if (s?.kind !== 'symbol' || s.lookupByName === false) return false;
+    const def = engine.lookupDefinition(s.name);
+    signature =
+      def?.operator !== undefined
+        ? def.operator.signature.type
+        : def?.value?.type?.type;
+  }
+  const arms = signatureArms(signature);
+  if (arms === undefined) return false;
+  return arms.some((arm) =>
+    [
+      ...(arm.args ?? []),
+      ...(arm.optArgs ?? []),
+      ...(arm.variadicArg !== undefined ? [arm.variadicArg] : []),
+    ].some((p) => p.type === 'unknown')
+  );
 }
 
 /**
@@ -5092,10 +5192,16 @@ function tupleOf(
  * - a `Range` whose bounds and step are number literals, counted as its
  *   own `count` handler counts it (`rangeElementCount()`).
  *
- * A symbol declared `list<T>` with no length, a `Filter`, a `Rest`, a range
- * with a symbolic bound answer `undefined`: their length is a fact of the
- * value, which can change or is not known before evaluation. A tuple type is
- * not read here; the callers take its component types, one per position.
+ * - `Rest`, `Most`, `Take` and `Drop` of an operand with a proved length,
+ *   with an integer literal count for `Take` and `Drop`: `Rest` and `Most`
+ *   remove one element (none from an empty operand), `Take(xs, k)` keeps
+ *   `min(|k|, n)` elements and `Drop(xs, k)` keeps `max(n - |k|, 0)`, from
+ *   the start for a positive `k` and from the end for a negative `k`.
+ *
+ * A symbol declared `list<T>` with no length, a `Filter`, a range with a
+ * symbolic bound answer `undefined`: their length is a fact of the value,
+ * which can change or is not known before evaluation. A tuple type is not
+ * read here; the callers take its component types, one per position.
  */
 function provenLengthD(d: OperandDescriptor): number | undefined {
   const t = resolveTypeAlias(d.type);
@@ -5110,6 +5216,27 @@ function provenLengthD(d: OperandDescriptor): number | undefined {
       ? undefined
       : s.elements.length;
   if (s.kind === 'string') return splitGraphemeClusters(s.text).length;
+  if (
+    s.kind === 'application' &&
+    (s.head === 'Rest' || s.head === 'Most') &&
+    s.children.length === 1
+  ) {
+    const n = provenLengthD(s.children[0]);
+    return n === undefined ? undefined : Math.max(n - 1, 0);
+  }
+  if (
+    s.kind === 'application' &&
+    (s.head === 'Take' || s.head === 'Drop') &&
+    s.children.length === 2
+  ) {
+    const n = provenLengthD(s.children[0]);
+    const k = descriptorLiteralValue(s.children[1]);
+    if (n === undefined || k === undefined || !Number.isInteger(k))
+      return undefined;
+    return s.head === 'Take'
+      ? Math.min(Math.abs(k), n)
+      : Math.max(n - Math.abs(k), 0);
+  }
   if (s.kind === 'application' && s.head === 'Range') {
     const bounds = s.children.map((c) => descriptorLiteralValue(c));
     if (bounds.length === 0 || bounds.length > 3) return undefined;
@@ -5160,12 +5287,16 @@ function provenLengthD(d: OperandDescriptor): number | undefined {
  * `missing | tuple<integer, integer>`, while `First(Filter(xs, p))` keeps the
  * member, because a filter can find nothing.
  *
- * A position proved NOT to exist keeps `T | marker(T)` on purpose, although
- * the value is always the marker. A chained read chooses its marker from the
- * element type the inner access states: with `M` a matrix of two rows,
- * `M[7]` is typed `missing | vector<…>`, so `M[7][1]` is typed
- * `number | nan` and answers `NaN`. Typed `missing` alone, the inner access
- * no longer says that a row holds numbers, and `M[7][1]` answered `Missing`.
+ * A position proved NOT to exist is typed `nan` when the marker of the
+ * element type is `nan` (the elements are numbers): `At([7, 8, 9], 99)` is
+ * `NaN`, typed `nan`. For any other element type, such a position keeps
+ * `T | marker(T)` on purpose, although the value is always the marker. A
+ * chained read chooses its marker from the element type the inner access
+ * states: with `M` a matrix of two rows, `M[7]` is typed
+ * `missing | vector<…>`, so `M[7][1]` is typed `number | nan` and answers
+ * `NaN`. Typed `missing` alone, the inner access no longer says that a row
+ * holds numbers, and `M[7][1]` answered `Missing`. A number has no element
+ * to read, so the type `nan` loses nothing that a chained read needs.
  */
 function provenAccessType(
   element: Type,
@@ -5174,7 +5305,8 @@ function provenAccessType(
 ): Type | undefined {
   if (element === 'unknown' || element === 'any') return undefined;
   const i = position < 0 ? length + position + 1 : position;
-  return i >= 1 && i <= length ? element : undefined;
+  if (i >= 1 && i <= length) return element;
+  return markerType(element) === 'nan' ? 'nan' : undefined;
 }
 
 /**
@@ -7405,13 +7537,16 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
  * the unknown and unsoundly claim `list<color>` for `[x, Rgb]`. A NUMERIC
  * union (`real | +oo | -oo`, the carrier a declared-domain operator infers
  * into a fresh symbol) is not heterogeneous, and keeps its shape claim.
- * Neither is, at rank 2 or more, a union of TUPLE types of one arity (with
- * `missing`, the type of an absent point, or without it): points
- * whose components have different types (`(1, 1/2)` and `(1/2, 1)`) are
- * cells of one kind, and a matrix of them is
- * `matrix<(tuple<integer, rational> | tuple<rational, integer>)^(2x2)>`. A list
- * of rank 1 of such points keeps the type `list<tuple<…> | tuple<…>>`, which
- * the point accessors read as a list of points.
+ * Neither is a union of TUPLE types of one arity (with `missing`, the type
+ * of an absent point, or without it): points whose components have
+ * different types (`(1, 1/2)` and `(1/2, 1)`) are cells of one kind, and a
+ * matrix of them is
+ * `matrix<(tuple<integer, rational> | tuple<rational, integer>)^(2x2)>`. A
+ * list of rank 1 of such points keeps its length too:
+ * `[(1/2, 1), (~oo, ~oo)]` is
+ * `list<(tuple<infinity, infinity> | tuple<rational, integer>)^2>`. Without
+ * the length, the value of `[(1, 2), (3, 4)] / [2, 0]` was not a member of
+ * its static type `list<tuple<number, number>^2>`.
  *
  * A heterogeneous literal of rank 2 or more keeps its nesting, without
  * dimensions: `[[1, "a"], [2, "b"]]` is `list<list<integer | string>>`. A
@@ -7452,8 +7587,8 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   // is a `matrix<boolean^(2x2)>`. Any other cell population is spelled as
   // nested plain lists, one level per dimension. So is a union of cells
   // that is not a number type (`[[1, True], [2, False]]` is a
-  // `list<list<boolean | integer>>`), except a union of tuples of one arity
-  // at rank 2 or more, which keeps the shape. Numbers that may be absent
+  // `list<list<boolean | integer>>`), except a union of tuples of one arity,
+  // which keeps the shape. Numbers that may be absent
   // (`[[2, Missing], [3, 4]]`) keep the shape too: the literal is a
   // `matrix<(integer | missing)^(2x2)>`, and can be assigned to a symbol
   // declared with that type. It was a `list<list<integer | missing>>`, which
@@ -7464,7 +7599,7 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
       widened.kind === 'union' &&
       !isSubtype(widened, 'number') &&
       !isNumberThatMayBeAbsent(widened.types) &&
-      !(dims.length > 1 && isUnionOfTuplesOfOneArity(widened.types)))
+      !isUnionOfTuplesOfOneArity(widened.types))
   )
     return internType(nestedPlainListType(widened as Type, dims.length));
 
@@ -12732,6 +12867,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+    type: (ops, { engine }) => quantifierResultType(ops, engine),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
@@ -12775,6 +12911,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     threadsConditionals: true,
     signature:
       '(collection<T>, predicate: ((T) any -> boolean)?) -> boolean where T',
+    type: (ops, { engine }) => quantifierResultType(ops, engine),
     canonical: (ops, { engine }) => {
       const collection = checkCollectionOperand(engine, ops[0]);
       if (isInvalidNonCollection(collection)) return null;
@@ -12867,6 +13004,36 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             'indexed_collection',
             engine._typeResolver
           );
+        // A source whose type is a union of collection types holds a value
+        // of one of the arms, so the result is the join of the `Map` of each
+        // arm. Read as one type, the union gives an element type that joins
+        // the elements of the arms with the arms themselves, and an abstract
+        // collection: `Map(Sqrt, x)` with
+        // `x: vector<integer^1> | vector<integer^2>` was typed
+        // `collection<complex | indexed_collection<any> | infinity>`.
+        const source = sourceType(0);
+        if (
+          typeof source !== 'string' &&
+          source.kind === 'union' &&
+          source.types.every((arm) => isSubtype(arm, COLLECTION_SHAPE_TYPE))
+        ) {
+          const arms = source.types.map((arm) =>
+            derive('Map', [ops[0], describeBoundSymbol(arm, '__mapSourceArm')])
+          );
+          // The join `widen` is neutral in `unknown` (`widen('unknown', T)` is
+          // `T`), so an arm typed `unknown` would not be held by the joined
+          // type. Such an arm, or an arm typed `any`, falls to the reading of
+          // the union as one type below.
+          if (
+            arms.every(
+              (arm) => arm !== undefined && arm !== 'unknown' && arm !== 'any'
+            )
+          )
+            return BoxedType.forResult(
+              widen(...(arms as Type[])),
+              engine._typeResolver
+            );
+        }
         // A bare symbol callback is unbound on the parse route and its own type
         // reads `unknown`, so its declared signature is read from its definition
         // (`callbackResultTypeD`). Only a symbol with no function type falls to
@@ -18964,6 +19131,40 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         if (resultMayBeNothing(ops[0], engine, true, elements))
           elements = withNothing(elements);
       }
+      // When every extent is a non-negative integer literal and the cells are
+      // numbers, the tabulation has a known shape: `Tabulate(f, 2, 3)` is a
+      // `matrix<…^(2x3)>`. A generator whose result is itself a tabulation
+      // with a known shape adds its extents: the lazy form of
+      // `IdentityMatrix(101)`, a tabulation of tabulations, is a
+      // `matrix<integer^(101x101)>`, as the materialized matrix is. A
+      // generator that may give `Nothing` (an erased element) or a cell that
+      // is not a number gives no shape. The extents of the generator's result
+      // are added only when each one is fixed: an unknown extent (`-1`, as in
+      // `vector<integer>`) lets each call give a row of a different length,
+      // and the rows of `Tabulate(i ↦ Range(1, i), 3)` are not a matrix.
+      const extents = ops.slice(1).map((op) => descriptorLiteralValue(op));
+      if (
+        dimensions > 0 &&
+        extents.every((n) => n !== undefined && Number.isInteger(n) && n >= 0)
+      ) {
+        let cells: Type = elements;
+        let dims = extents as number[];
+        const r = resolveTypeAlias(cells);
+        if (
+          typeof r !== 'string' &&
+          r.kind === 'list' &&
+          Array.isArray(r.dimensions) &&
+          r.dimensions.every((n) => n >= 0)
+        ) {
+          cells = r.elements;
+          dims = [...dims, ...r.dimensions];
+        }
+        if (cells !== 'never' && isSubtype(cells, 'number'))
+          return BoxedType.forResult(
+            { kind: 'list', elements: cells, dimensions: dims },
+            engine._typeResolver
+          );
+      }
       // Omission belongs at the leaf, not at the row: indexing a 2-D
       // tabulation returns a lazy row whose own positions remain intact.
       for (let i = 1; i < dimensions; i++)
@@ -21128,6 +21329,38 @@ function isSymbolicOperand(op: Expression | undefined): boolean {
  * instead of hanging; `runWalkAsync` drives the same walk under
  * `evaluateAsync`.
  */
+/**
+ * The result type of `Any` and `All`. The walk answers `Missing` when an
+ * element, or the answer of the predicate for an element, is absent and no
+ * other element decides (Kleene's third value): `Any([1, Missing], x ↦ x >
+ * 2)` is `Missing`. So the result is `boolean | missing` when an element
+ * can be absent (its type admits `missing`, or is `any`; an `unknown`
+ * element is no evidence) or when the predicate's result type admits
+ * `missing`, and `boolean` otherwise.
+ */
+function quantifierResultType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView
+): BoxedType {
+  const source = ops[0];
+  const element =
+    source === undefined
+      ? undefined
+      : (source.facts.elementType ?? collectionElementType(source.type));
+  const absentElement =
+    element !== undefined &&
+    (typeContainsMissing(element) || provablyAdmits('missing', element));
+  const answer = callbackResultTypeD(ops[1], engine);
+  const absentAnswer =
+    answer !== undefined && provablyAdmits('missing', answer);
+  return BoxedType.forResult(
+    absentElement || absentAnswer
+      ? { kind: 'union', types: ['boolean', 'missing'] }
+      : 'boolean',
+    engine._typeResolver
+  );
+}
+
 function quantifierWalk(
   kind: 'Any' | 'All',
   collection: Expression,

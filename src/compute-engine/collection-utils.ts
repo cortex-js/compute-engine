@@ -2973,10 +2973,21 @@ export function isProvablyScalarNumber(expr: Expression): boolean {
  * absence arm, is a list of numbers. Anything else — an unknown-typed operand,
  * a list of points, a list whose element type was only inferred — is not
  * proof.
+ *
+ * A list of rows of numbers counts too: a `List` literal whose every element
+ * is a provable scalar or a provable list of numbers (`[[1, 2], [3]]`), and a
+ * symbol declared `list<list<number>>`. Arithmetic maps over the rows to each
+ * number, so a point (or a list of points) beside such a list makes every
+ * element of the sum the `tuple + number` mistake, as with a flat list.
  */
 export function isProvablyNumberList(expr: Expression): boolean {
   if (isFunction(expr, 'List'))
-    return expr.nops > 0 && expr.ops.every((op) => isProvablyScalarNumber(op));
+    return (
+      expr.nops > 0 &&
+      expr.ops.every(
+        (op) => isProvablyScalarNumber(op) || isProvablyNumberList(op)
+      )
+    );
   if (isFunction(expr, 'When') && expr.nops === 2)
     return isProvablyNumberList(expr.op1);
   // The negation of a list of numbers is a list of numbers. A difference is
@@ -2986,12 +2997,31 @@ export function isProvablyNumberList(expr: Expression): boolean {
   if (isSymbol(expr)) {
     const def = expr.valueDefinition;
     if (def === undefined || def.inferredType) return false;
-    const t = stripMissingFromType(resolveTypeAlias(expr.type.type));
-    if (typeof t === 'string' || t.kind !== 'list') return false;
-    const el = resolveTypeAlias(t.elements);
-    return el !== 'never' && isSubtype(el, 'number');
+    return isNumberListType(
+      stripMissingFromType(resolveTypeAlias(expr.type.type))
+    );
   }
   return false;
+}
+
+/** True when `t` is a list whose elements are numbers, or lists (at any
+ * depth) whose elements are numbers. An element type `never` (the empty
+ * list) is not a list of numbers.
+ *
+ * A recursive alias such as `R = list<R>` resolves its element type to the
+ * same list type again. `visited` holds the list types met on the current
+ * descent, and a list type met a second time is not proof (it holds no
+ * number at any depth), so the walk stops there instead of overflowing the
+ * stack. */
+function isNumberListType(t: Type, visited?: Set<Type>): boolean {
+  if (typeof t === 'string' || t.kind !== 'list') return false;
+  if (visited?.has(t)) return false;
+  const el = resolveTypeAlias(t.elements);
+  if (el === 'never') return false;
+  if (isSubtype(el, 'number')) return true;
+  visited ??= new Set();
+  visited.add(t);
+  return isNumberListType(el, visited);
 }
 
 /**

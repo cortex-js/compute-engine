@@ -1310,12 +1310,12 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     // lattice flip repealed that premise (`docs/ERROR-MODEL.md` §7, the
     // 2026-08-28 `markerType` entry). The type of `vec` states its length,
     // so position 1 exists and is typed `integer` (user decision
-    // 2026-09-30); a position past the end keeps the marker.
+    // 2026-09-30); a position past the end is typed as the marker `nan`.
     expect(engine.box(['At', 'vec', 1]).type.toString()).toMatchInlineSnapshot(
       `integer`
     );
     expect(engine.box(['At', 'vec', 99]).type.toString()).toMatchInlineSnapshot(
-      `integer | nan`
+      `nan`
     );
     expect(evaluate(['At', 'vec', 1])).toMatchInlineSnapshot(`7`);
   });

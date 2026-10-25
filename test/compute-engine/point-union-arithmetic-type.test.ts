@@ -269,12 +269,14 @@ describe('a union with a tuple arm beside a list of numbers is typed arm by arm'
   test('a tuple beside an inferred scalar is not rejected by the handler', () => {
     // `q` is a bare lambda parameter: its number type is inferred from the
     // sum and may be retracted by a tuple argument, so the sum binds and the
-    // literal types the tuple arm (Tycho item 241).
+    // literal types the tuple arm (Tycho item 241). A tuple argument can
+    // have components of any number type, so the components of the tuple
+    // arm are `number`: `q = (0.5, 0.5)` gives `(1.5, 2.5)`.
     const ce2 = new ComputeEngine();
     const lit = ce2.box(['Function', ['Add', 'q', ['Tuple', 1, 2]], 'q']);
     expect(lit.isValid).toBe(true);
     expect(String(lit.type)).toBe(
-      '(unknown) -> number | tuple<integer, integer>'
+      '(unknown) -> number | tuple<number, number>'
     );
   });
 
@@ -698,7 +700,7 @@ describe('a tuple arm of a scalar union or of a broadcastable element keeps its 
     });
     const sq = ce.box(['Power', 'G', 2]);
     expect(sq.type.toString()).toBe(
-      'list<missing | nan | tuple<number, number>> | list<number> | number'
+      'list<missing | nan | tuple<number, number>> | list<nan | number> | number'
     );
     ce.assign('G', ce.box(['List', 'Missing', 3]));
     expect(sq.evaluate().toString()).toBe('[NaN,9]');
@@ -862,5 +864,26 @@ describe('a quotient by a point is an error before any cancellation', () => {
     expect(
       ce.box(['Divide', ['List', 1, 2], ['List', 1, 2]]).evaluate().toString()
     ).toBe('[1,1]');
+  });
+});
+
+describe('a list literal of points of two tuple types', () => {
+  test('keeps its length', () => {
+    // Before, `[(1/2, 1), (~oo, ~oo)]` was typed with no length, so the
+    // value of `[(1, 2), (3, 4)] / [2, 0]` was not a member of the static
+    // type of the quotient, `list<tuple<number, number>^2>`.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'List',
+      ['Tuple', ['Rational', 1, 2], 1],
+      ['Tuple', 'ComplexInfinity', 'ComplexInfinity'],
+    ]);
+    expect(literal.type.toString()).toBe(
+      'list<(tuple<infinity, infinity> | tuple<rational, integer>)^2>'
+    );
+    const q = ce.parse('[(1, 2), (3, 4)] / [2, 0]');
+    const v = q.evaluate();
+    expect(v.toString()).toBe('[(1/2, 1),(~oo, ~oo)]');
+    expect(v.type.matches(q.type)).toBe(true);
   });
 });

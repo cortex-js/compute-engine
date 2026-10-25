@@ -275,10 +275,11 @@ const ARCTAN_CARRIER = parseType('complex | signed_infinity');
  * defined for a boolean operand (the boolean value it gives today comes
  * from the shortcut `0 + b = b`, not from the rewrite).
  *
- * Any other operand (a collection, a string, an absent value, an operand
- * whose type is not known) gives `undefined`: the declared result, `value`,
- * stands. A collection operand keeps its shape under all three verbs, but
- * no shape is claimed.
+ * An operand whose type is not below `value` (an absent value, a symbol
+ * with no type) is given back unchanged, so it gives its own type. Any
+ * other operand (a collection, a string) gives `undefined`: the declared
+ * result, `value`, stands. A collection operand keeps its shape under all
+ * three verbs, but no shape is claimed.
  *
  * The three verbs are `lazy`, so their operand is not evaluated first, but
  * their `canonical` handler binds it (`.canonical`, which evaluates
@@ -298,6 +299,11 @@ function trigRewriteType(
   if (t === 'never') return undefined;
   if (isSubtype(t, 'number')) return 'number';
   if (booleans && isSubtype(t, 'boolean')) return 'boolean';
+  // An operand that may not be a value (an absent value, a symbol with no
+  // type, a `Nothing`) is given back unchanged when the rewrite does not
+  // apply to it, so the result has the type of the operand. The declared
+  // result `value` does not contain `missing` or `unknown`.
+  if (!isSubtype(t, 'value')) return t;
   return undefined;
 }
 

@@ -83,7 +83,7 @@ describe('the two evaluation routes agree', () => {
     [
       'Length([1,2]{c})',
       ['Length', ['When', ['List', 1, 2], C]],
-      'number',
+      'integer | nan',
       'NaN',
     ],
     ['Sum([1,2]{c})', ['Sum', ['When', ['List', 1, 2], C]], 'number', 'NaN'],

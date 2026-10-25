@@ -1243,6 +1243,29 @@ export function resolveTypeAlias(t: Readonly<Type>): Type {
         if (args[i] !== undefined) bindings[typeParams[i].name] = args[i];
       result = substituteTypeVariables(result.def, bindings);
     } else result = result.def;
+    // A union arm that is the alias itself (or an alias already unfolded on
+    // this walk) adds no value to the union: `cyc = cyc | list<integer>`
+    // holds the values of `list<integer>` and nothing else. So such arms are
+    // removed, and the walk goes on with the other arms. Without this,
+    // `cyc` resolved to `cyc | list<integer>`, and a reader of the arms (the
+    // source type of `Map`) met the unresolved `cyc` arm again. When no other
+    // arm remains (`c = c | c`), the union is kept as it is.
+    if (typeof result === 'object' && result.kind === 'union') {
+      const visited = seen;
+      const others = result.types.filter(
+        (arm) =>
+          !(
+            typeof arm === 'object' &&
+            arm.kind === 'reference' &&
+            arm.alias === true &&
+            arm.def !== undefined &&
+            visited.has(declarationOf(arm))
+          )
+      );
+      if (others.length > 0 && others.length < result.types.length)
+        result =
+          others.length === 1 ? others[0] : { kind: 'union', types: others };
+    }
   }
   return result;
 }
@@ -1733,11 +1756,14 @@ export function widenNumericCellsWithNan(
 }
 
 export function absorbNumericAbsence(t: Readonly<Type>): Type {
-  // A whole `missing`/`never` cell in a `propagate` result is numeric-domain
-  // (I6): its runtime value is `NaN`, so it is `number`. (`never <: number`,
-  // so the string branch below already maps `never` → `number`.)
-  if (t === 'missing') return 'number';
-  if (typeof t === 'string') return isSubtype(t, 'number') ? 'number' : t;
+  // A whole `missing` cell in a `propagate` result is numeric-domain (I6):
+  // its runtime value is `NaN`, so it is `nan`. A numeric arm keeps the type
+  // the handler answered and gains a `nan` arm: `Length` of a list that may
+  // be absent is `integer | +oo | nan`, not `number`. A `never` cell stays
+  // `number`, as before.
+  if (t === 'missing') return 'nan';
+  if (t === 'never') return 'number';
+  if (typeof t === 'string') return isSubtype(t, 'number') ? widenWithNan(t) : t;
   switch (t.kind) {
     case 'union': {
       // A `missing` arm beside present arms that are all tuples is an
@@ -1745,7 +1771,7 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
       // absence is not absorbed into a `NaN` coordinate: the cell answers
       // `Missing` (`docs/ERROR-MODEL.md`, the section on `Missing` in a
       // numeric slot), and the arm stays. `list<missing | tuple<…>>` stays
-      // as it is; `list<missing | integer>` becomes `list<number>`. The
+      // as it is; `list<missing | integer>` becomes `list<integer | nan>`. The
       // bare `tuple`, a point of no stated arity, is a tuple arm too.
       // Without it, the sum of a `list<tuple<number, number>> | tuple` and
       // a `list<missing | tuple<number, number>> | tuple<number, number>`,
@@ -1765,6 +1791,18 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
       if (keepMissing) arms.push('missing');
       if (arms.length === 0) return 'never';
       if (arms.length === 1) return arms[0];
+      // Numeric arms are kept side by side, not joined: `widen` joins
+      // `integer | nan` and `+oo | nan` to `number`, which loses the arms the
+      // handler answered.
+      if (arms.every((x) => isSubtype(x, 'number'))) {
+        const flat: Type[] = [];
+        for (const arm of arms)
+          for (const x of typeof arm !== 'string' && arm.kind === 'union'
+            ? arm.types
+            : [arm])
+            if (!flat.includes(x)) flat.push(x);
+        return flat.length === 1 ? flat[0] : { kind: 'union', types: flat };
+      }
       return widen(...arms);
     }
     case 'intersection':
@@ -1787,14 +1825,18 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
       };
     // A RANGED or literal numeric type (`integer<1..3>`, `real<0..1>`) is a
     // number, and an absent operand makes its value `NaN`, which no range
-    // admits: it widens to `number` exactly as the bare numeric primitives
-    // do in the string branch above. Without this arm `2·y` with
+    // admits: it widens to its bare tier and gains a `nan` arm, as the bare
+    // numeric primitives do in the string branch above. The range is
+    // removed because the value of a literal is typed without its range
+    // (`[1, NaN]` is a `list<integer | nan>`, not a list of `integer<0..>`),
+    // so the type of the value of `Abs(L)` would not be a subtype of a
+    // ranged result. Without this arm `2·y` with
     // `y: integer<1..3> | missing` was typed `integer<2..6>`, while the same
-    // product over `y: integer | missing` was `number`, and a `Map` of `2x`
+    // product over `y: integer | missing` was wider, and a `Map` of `2x`
     // over `[1, Missing, 3]` claimed `list<integer<2..6>>` for a value that
     // holds `NaN` (found 2026-09-26).
     case 'numeric':
-      return 'number';
+      return widenWithNan(stripNumericRanges(t));
     default:
       return t;
   }
@@ -2138,6 +2180,12 @@ export function nestedBroadcastResultType(
   // The bound on the ranks read: a type does not nest deeper in practice,
   // and it stops a recursive alias from looping.
   const MAX_RANK = 8;
+  // Set when an element of an operand has a type that does not state its
+  // depth (`any`, `unknown`, `value`: the element of a `list<any>`). A value
+  // of that element can be a list, and the broadcast maps it at its leaves
+  // too, so an element of the innermost level of the result is the
+  // per-element result or a list of any depth.
+  let openLeaf = false;
   // The ranks a broadcast descends into `t`: none for a tuple, a string or a
   // non-indexed type; one more than its element for an indexed collection;
   // the deepest member for a union of collections (`list<integer^2> |
@@ -2160,6 +2208,10 @@ export function nestedBroadcastResultType(
     const unfolded = unfoldAliasOnDescent(t0, seen);
     if (unfolded === undefined) return undefined;
     const t = unfolded.type;
+    if (d > 0 && (t === 'any' || t === 'unknown' || t === 'value')) {
+      openLeaf = true;
+      return 0;
+    }
     if (typeof t === 'object' && t.kind === 'tuple') return 0;
     if (isSubtype(t, 'string')) return 0;
     if (typeof t === 'object' && t.kind === 'union') {
@@ -2190,7 +2242,14 @@ export function nestedBroadcastResultType(
     if (d === undefined) return broadcastResultType('any');
     depth = Math.max(depth, d);
   }
-  let result = elementType as Type;
+  // An element result that is `unknown` or `any` already admits a list, and
+  // it is kept: the join is neutral in `unknown`, so
+  // `widen('unknown', list<any>)` is `list<any>`, which is narrower than
+  // `unknown`.
+  let result =
+    openLeaf && elementType !== 'unknown' && elementType !== 'any'
+      ? widen(elementType as Type, { kind: 'list', elements: 'any' })
+      : (elementType as Type);
   for (let k = 0; k < depth; k++) result = broadcastResultType(result);
   return result;
 }

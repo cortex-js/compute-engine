@@ -475,3 +475,22 @@ describe('Tycho item 92 — a union is assignable only when EVERY arm is', () =>
     );
   });
 });
+
+describe('THE TYPE OF A HELD APPLICATION READS ITS OPERANDS AS HELD', () => {
+  // A lazy operator receives its operands unbound. Each operand of a held
+  // application is typed from its binding before the application is
+  // derived (`heldOperandType`, library/held-operand-type.ts).
+  test('Simplify of a product with a boolean factor is not typed broadcastable', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'boolean');
+    const e = ce.box(['Simplify', ['Multiply', ['Sin', 'r'], 'P']]);
+    expect(e.type.toString()).not.toBe('broadcastable<number>');
+  });
+
+  test('Simplify of a numeric expression keeps its type', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Simplify', ['Divide', ['Sin', 'x'], 'x']]).type.toString()
+    ).toBe('number');
+  });
+});

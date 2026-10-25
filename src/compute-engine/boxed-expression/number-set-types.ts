@@ -1,4 +1,8 @@
 import type { Type } from '../../common/type/types.js';
+import {
+  EXTENDED_REAL_TYPE,
+  SIGNED_INFINITY_TYPE,
+} from '../../common/type/primitive.js';
 import type { Expression } from '../global-types.js';
 import { isSymbol } from './type-guards.js';
 
@@ -12,10 +16,30 @@ import { isSymbol } from './type-guards.js';
  * imports that could close a dependency cycle.
  */
 
+/** The type an extended number set proves about its members: the finite
+ * tier of the set together with its infinite values. Each type is the
+ * element type that the definition of the set in `library/sets.ts` declares
+ * (`elttype`), so `assume(x ∈ S)` and `x ∈ S` read the same tier. */
+const EXTENDED_SET_TYPES: Record<string, Type> = {
+  ExtendedRealNumbers: EXTENDED_REAL_TYPE,
+  ExtendedRationalNumbers: {
+    kind: 'union',
+    types: ['rational', SIGNED_INFINITY_TYPE],
+  },
+  ExtendedIntegers: { kind: 'union', types: ['integer', SIGNED_INFINITY_TYPE] },
+  ExtendedComplexNumbers: { kind: 'union', types: ['complex', 'infinity'] },
+};
+
 /** The type a PRIMITIVE (unsigned) number set proves about its members, or
- * `'unknown'` when the expression names no such set. */
+ * `'unknown'` when the expression names no such set. The extended sets
+ * (`ExtendedRealNumbers` and the others) are primitive sets too: their type
+ * adds the infinite values to the finite tier. */
 export function domainToType(expr: Expression): Type {
   if (!isSymbol(expr)) return 'unknown';
+  // An own-property check: a symbol named `constructor`, `toString` or
+  // `__proto__` must not read a value inherited from `Object.prototype`.
+  if (Object.hasOwn(EXTENDED_SET_TYPES, expr.symbol))
+    return EXTENDED_SET_TYPES[expr.symbol];
   if (expr.symbol === 'Numbers') return 'number';
   if (expr.symbol === 'ComplexNumbers') return 'complex';
   if (expr.symbol === 'ImaginaryNumbers') return 'imaginary';

@@ -289,16 +289,20 @@ describe('A DECLARED CALLBACK ON AN ABSENT CELL', () => {
   };
 
   test.each([
-    [['Map', 'Sqrt', 'L'], 'list<number>', '[1,NaN,sqrt(3)]'],
-    [['Map', 'Ln', 'L'], 'list<number>', '[0,NaN,ln(3)]'],
-    [['Map', 'Floor', 'L'], 'list<number>', '[1,NaN,3]'],
-    [['Map', 'g', 'L'], 'list<number>', '[2,NaN,4]'],
-    [['Map', 'Length', 'K'], 'list<number>', '[2,NaN]'],
-    [['Map', 'Sqrt', ['Take', 'L', 3]], 'list<number>', '[1,NaN,sqrt(3)]'],
+    [['Map', 'Sqrt', 'L'], 'list<complex | infinity | nan>', '[1,NaN,sqrt(3)]'],
+    [['Map', 'Ln', 'L'], 'list<complex | infinity | nan>', '[0,NaN,ln(3)]'],
+    [['Map', 'Floor', 'L'], 'list<infinity | nan | real>', '[1,NaN,3]'],
+    [['Map', 'g', 'L'], 'list<integer | nan>', '[2,NaN,4]'],
+    [['Map', 'Length', 'K'], 'list<infinity | integer | nan>', '[2,NaN]'],
+    [
+      ['Map', 'Sqrt', ['Take', 'L', 3]],
+      'list<complex | infinity | nan>',
+      '[1,NaN,sqrt(3)]',
+    ],
     // An absent point gives an absent point.
     [
       ['Map', 'Negate', 'P'],
-      'list<missing | tuple<number, number>>',
+      'list<missing | tuple<integer | nan, integer | nan>>',
       '[(-1, -2),"Missing"]',
     ],
     [['Map', 'a', 'L'], 'list<integer | missing>', '[1,"Missing",3]'],
@@ -462,8 +466,11 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
     [['DictionaryFrom', 'Q'], 'dictionary<any>'],
     // An element typed `any` can be a list, nested to any depth, which
     // `Sqrt` maps over: the element of the result is a number or a list.
-    [['Map', 'Sqrt', 'B'], 'list<indexed_collection<any> | nothing | number>'],
-    [['Map', 'g', 'B'], 'list<nothing | number>'],
+    [
+      ['Map', 'Sqrt', 'B'],
+      'list<complex | indexed_collection<any> | infinity | nan | nothing>',
+    ],
+    [['Map', 'g', 'B'], 'list<integer | nan | nothing>'],
   ])('%j', (json, type) => {
     const expr = ce4.box(json as any);
     expect(expr.type.toString()).toBe(type);
