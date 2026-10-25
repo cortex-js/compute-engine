@@ -291,4 +291,38 @@ describe('a pool that cannot take the batch (CE-428)', () => {
     expect(res.reason).toBe('pool-unusable');
     pool.dispose();
   });
+
+  // CE-434 (Tycho, 0.166.0): a task that waited for a worker that never
+  // posts `ready` (and fails only when it gets a message) never settled,
+  // because the watchdog of the deadline is armed only when a task is sent.
+  test('workers that never become ready: the deadline settles the batch', async () => {
+    const pool = createKernelPool({
+      create: () => {
+        const errors: ((e: unknown) => void)[] = [];
+        return {
+          postMessage: () => {
+            setTimeout(() => errors.forEach((h) => h({ message: 'no' })), 0);
+          },
+          terminate: () => undefined,
+          addEventListener: (event: string, h: (e: unknown) => void) => {
+            if (event === 'error') errors.push(h);
+          },
+        };
+      },
+      size: 2,
+      cancelGrace: 10,
+    });
+    const own = new ComputeEngine({ workers: pool });
+    const r = compile(own.parse('x^2'));
+    const xs = samples(40_000);
+    expect(r.willUsePool!(xs.length)).toBe(true);
+    const start = Date.now();
+    const res = await r.broadcastAsync!(
+      { x: xs },
+      { deadline: 200, inline: false }
+    );
+    expect(Date.now() - start).toBeLessThan(2_000);
+    expect(res.done).toBe(0);
+    pool.dispose();
+  });
 });

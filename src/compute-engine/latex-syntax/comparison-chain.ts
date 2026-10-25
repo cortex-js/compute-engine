@@ -1,5 +1,6 @@
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { operator, operands } from '../../math-json/utils.js';
+import type { Serializer } from './types.js';
 
 /**
  * The comparison operators that the LaTeX parser reads as a chain when they
@@ -102,6 +103,66 @@ function readChain(expr: MathJsonExpression): Chain | null {
     return { terms, links };
   }
   return null;
+}
+
+/**
+ * The links of `expr` when `expr` is an `And` that the LaTeX parser reads
+ * back from the chain spelling, else `null`. The serializer writes such an
+ * `And` as a chain: `["And", ["Less", 0, "M"], ["LessEqual", "M", 5]]` is
+ * `0\lt M\le5`, not `0\lt M\land M\le5`.
+ *
+ * Conditions, so that the chain spelling parses back to the same MathJSON:
+ * - every operand is a comparison of `CHAINABLE_COMPARISONS` with two or
+ *   more operands, or of `NEGATED_COMPARISONS` with exactly two (a `Not` of
+ *   a link has no chain spelling here);
+ * - each link starts with the term that the previous link ends with;
+ * - two adjacent links have different operators, except for a negated
+ *   head. The parser joins a run of the same operator into one n-ary
+ *   comparison, so `a < b \land b < c` (an `And` of two `Less`) does not
+ *   come back from `a < b < c` (one `Less`). A run of a negated head stays
+ *   a run of pairs (see `NEGATED_COMPARISONS`).
+ */
+export function comparisonChainLinks(
+  expr: MathJsonExpression
+): ReadonlyArray<MathJsonExpression> | null {
+  if (operator(expr) !== 'And') return null;
+  const links = operands(expr);
+  if (links.length < 2) return null;
+  for (let k = 0; k < links.length; k++) {
+    const op = operator(links[k]);
+    const count = operands(links[k]).length;
+    if (!isChainingComparison(op) || count < 2) return null;
+    // The parser never makes an n-ary negated link: `a \nless b \nless c`
+    // is two `NotLess` pairs.
+    if (NEGATED_COMPARISONS.has(op) && count > 2) return null;
+    if (k === 0) continue;
+    const previous = links[k - 1];
+    if (op === operator(previous) && !NEGATED_COMPARISONS.has(op)) return null;
+    const boundary = operands(previous);
+    if (
+      JSON.stringify(boundary[boundary.length - 1]) !==
+      JSON.stringify(operands(links[k])[0])
+    )
+      return null;
+  }
+  return links;
+}
+
+/**
+ * The LaTeX of the operand `val` of a comparison whose operator has the
+ * precedence `prec`. A comparison operand is always wrapped:
+ * `LessEqual(Less(a, b), c)` is `(a\lt b)\le c`, since `a\lt b\le c`
+ * parses back as a chain. Other operands are wrapped when their precedence
+ * is not above `prec`.
+ */
+export function wrapComparisonOperand(
+  serializer: Serializer,
+  val: MathJsonExpression,
+  prec: number
+): string {
+  return isChainingComparison(operator(val))
+    ? serializer.wrap(val, Infinity)
+    : serializer.wrap(val, prec + 1);
 }
 
 /** Whether `expr` is a link of a chain (see `CHAINABLE_COMPARISONS`). */

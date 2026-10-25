@@ -693,6 +693,16 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
   /** Queue `task` on `slot` and send it when the worker is free. */
   private enqueue(slot: Slot, task: QueuedTask): void {
     slot.queue.push(task);
+    // The slot that holds the task now: the task may have moved to another
+    // slot since it was queued, because a slot whose worker was replaced
+    // gives its queue to the new one.
+    const owner = (): Slot =>
+      this.slots.find(
+        (s) =>
+          s !== undefined &&
+          (s.running?.task === task || s.queue.includes(task))
+      ) ?? slot;
+    const cleanups: (() => void)[] = [];
     // An abort settles the task here, whether it waits in the queue or
     // runs on the worker. A queued task leaves the queue. A running task
     // stays the slot's running job until the worker replies (the worker is
@@ -703,33 +713,52 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     const signal = task.signal;
     if (signal !== undefined) {
       const onAbort = (): void => {
-        // The task may have moved to another slot since it was queued: a
-        // slot whose worker was replaced gives its queue to the new one.
-        const owner =
-          this.slots.find(
-            (s) =>
-              s !== undefined &&
-              (s.running?.task === task || s.queue.includes(task))
-          ) ?? slot;
-        const q = owner.queue.indexOf(task);
-        if (q >= 0) owner.queue.splice(q, 1);
-        else if (owner.running?.task === task) this.cancelRunning(owner);
+        const holder = owner();
+        const q = holder.queue.indexOf(task);
+        if (q >= 0) holder.queue.splice(q, 1);
+        else if (holder.running?.task === task) this.cancelRunning(holder);
         task.resolve({ out: new Float64Array(0), done: 0 });
         // The aborted task may be the one a pending `pump()` waits to send:
         // that call then stops, and this one sends the next task.
-        void this.pump(owner);
+        void this.pump(holder);
       };
       signal.addEventListener('abort', onAbort, { once: true });
       // The listener holds the task, and a fit task holds every row of the
       // problem: remove it when the task settles, so that a long-lived
       // signal shared by many evaluations does not keep their data alive.
+      cleanups.push(() => signal.removeEventListener('abort', onAbort));
+    }
+    // A task that still waits in a queue at its deadline is settled with no
+    // cells or points done. Without this timer, a task that waits for a
+    // worker that never becomes ready (a worker that never posts `ready`
+    // and fails only when it gets a message) never settles: the watchdog
+    // of the deadline is armed only when the task is sent (`armDeadline()`).
+    // A task that runs on the worker at its deadline is the watchdog's.
+    const deadline = task.type === 'fit' ? task.deadline : task.slice.deadline;
+    if (deadline !== undefined) {
+      // One millisecond after the deadline, so that `deadlinePassed()` is
+      // true for both kinds of task when the timer fires.
+      const delay = Math.max(0, deadline + 1 - Date.now());
+      if (delay <= MAX_TIMER_DELAY) {
+        const timer = setTimeout(() => {
+          const holder = owner();
+          const q = holder.queue.indexOf(task);
+          if (q < 0) return;
+          holder.queue.splice(q, 1);
+          task.resolve({ out: new Float64Array(0), done: 0 });
+          void this.pump(holder);
+        }, delay);
+        cleanups.push(() => clearTimeout(timer));
+      }
+    }
+    if (cleanups.length > 0) {
       const { resolve, reject } = task;
       task.resolve = (r) => {
-        signal.removeEventListener('abort', onAbort);
+        for (const cleanup of cleanups) cleanup();
         resolve(r);
       };
       task.reject = (e) => {
-        signal.removeEventListener('abort', onAbort);
+        for (const cleanup of cleanups) cleanup();
         reject(e);
       };
     }
@@ -838,15 +867,21 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
   /** Send the slot's next queued task once the worker is ready and idle. */
   private async pump(slot: Slot): Promise<void> {
     if (slot.running || slot.queue.length === 0 || slot.dead) return;
-    const task = slot.queue[0];
+    // The task is read after the worker is ready, not before: a call that
+    // waits for a worker that never becomes ready must not keep a task that
+    // an abort or its deadline settled (a fit task holds every row of its
+    // problem). From here to `slot.running = …` the code is synchronous, so
+    // a second call that resumes after this one sees `slot.running` and
+    // stops.
     try {
       await slot.ready;
     } catch {
-      // The slot failed while this task waited: `fail()` rejected it.
+      // The slot failed while this call waited: `fail()` rejected its tasks.
       return;
     }
-    if (slot.dead || slot.running || slot.queue[0] !== task) return;
-    slot.queue.shift();
+    if (slot.dead || slot.running) return;
+    const task = slot.queue.shift();
+    if (task === undefined) return;
     // An aborted task, or one whose deadline has passed (the worker would
     // stop before its first cell or point), is settled here and not sent.
     if (task.signal?.aborted || deadlinePassed(task)) {

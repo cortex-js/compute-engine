@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-436.
+Next free reference: CE-437.
 
 **Entry format.**
 
@@ -97,6 +97,32 @@ option instead of a default.
 The choices: (a) the special case as the default; (b) the special case behind
 a parse option that Tycho turns on; (c) no change: the chain reading is the
 usual mathematical reading of `x = y > 1`, and the author writes parentheses.
+
+### CE-436. A pool route for a kernel loaded through the runtime entry
+
+**Status:** decision needed; capability. Tycho row 445 (filed 2026-10-24).
+Instrument in Tycho:
+`scripts/repros/2026-10-24-ce445-runtime-pool-route-probe.mts` (NOT READY on
+0.166.0).
+
+Tycho's implicit-surface workers load stored kernels with
+`createJavaScriptRuntime().load(stored)` from `@cortex-js/compute-engine/runtime`
+(about 324 KB). That entry exports only `createJavaScriptRuntime`,
+`runtimeVersion` and `version`, and a loaded batch has no asynchronous pooled
+form. To run the cell kernel of the 3-D implicit march on a pool inside each
+worker (a Tycho owner decision of 2026-10-24: 62 to 71 cells per axis instead
+of 58 to 60 at 100 ms), each worker now imports the whole engine bundle (about
+5 MB), starts `createKernelPool` with nested module workers, sets `ce.workers`,
+and compiles the kernel again from MathJSON.
+
+The ask: (1) a pool factory in the runtime entry, or a kernel-worker route that
+a host can start from it; (2) a pooled asynchronous form of a loaded batch
+(`loadBroadcastAsync(stored)`, or `broadcastAsync` on what `loadBroadcast`
+returns), with the `out`, `deadline` and `inline` options of `broadcastAsync`.
+
+To decide: the public API of the runtime entry (names, and whether
+`createKernelPool` moves there or is re-exported), and the size budget of that
+entry once it holds the pool code.
 
 ### CE-1. A `window` option of the `grid` layout of `broadcast`
 

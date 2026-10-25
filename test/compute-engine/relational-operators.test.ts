@@ -1,4 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
+import { LatexSyntax, LATEX_DICTIONARY } from '../../src/latex-syntax';
 
 const ce = new ComputeEngine();
 
@@ -316,6 +317,101 @@ describe('Mixed chained inequalities (playground 5≤b<7)', () => {
     expect(ce.parse('5 \\le 8 \\lt 7').evaluate().json).toBe('False');
     // Regression: 3 ≤ 2 < 7 must be False (the first link 3 ≤ 2 is false)
     expect(ce.parse('3 \\le 2 \\lt 7').evaluate().json).toBe('False');
+  });
+});
+
+// CE-433 (Tycho row 442): an `And` of comparison links that the parser reads
+// back from the chain spelling is serialized as that chain, not with `\land`.
+describe('A mixed chain serializes as a chain (CE-433)', () => {
+  const roundTrip = (latex: string, form?: 'raw') => {
+    const expr = form ? ce.parse(latex, { form }) : ce.parse(latex);
+    const out = expr.latex;
+    const back = form ? ce.parse(out, { form }) : ce.parse(out);
+    expect(back.json).toEqual(expr.json);
+    return out;
+  };
+
+  it('writes the chain in the canonical and the raw form', () => {
+    expect(roundTrip('0<M\\le5')).toBe('0\\lt M\\le5');
+    expect(roundTrip('0<M\\le5', 'raw')).toBe('0\\lt M\\le5');
+    expect(roundTrip('0<x<y\\le3')).toBe('0\\lt x\\lt y\\le3');
+    expect(roundTrip('4\\ge x>1', 'raw')).toBe('4\\ge x\\gt1');
+    expect(roundTrip('a=b=c\\le d', 'raw')).toBe('a=b=c\\le d');
+    expect(roundTrip('a<b\\nless c\\nless d', 'raw')).toBe(
+      'a\\lt b\\nless c\\nless d'
+    );
+  });
+
+  it('a chain inside an And needs no parentheses', () => {
+    expect(roundTrip('0<x\\le1\\land y>2', 'raw')).toBe(
+      '0\\lt x\\le1\\land y\\gt2'
+    );
+    expect(roundTrip('a<b\\land b\\le c\\land c<d', 'raw')).toBe(
+      'a\\lt b\\land b\\le c\\lt d'
+    );
+  });
+
+  it('keeps \\land where the chain spelling would parse differently', () => {
+    // Two links that do not share a term.
+    expect(roundTrip('x<3\\land y<3')).toBe('x\\lt3\\land y\\lt3');
+    // Two adjacent links with the same operator: `a<b<c` is one `Less`.
+    expect(roundTrip('a<b\\land b<c', 'raw')).toBe('a\\lt b\\land b\\lt c');
+    // A canonical form that reorders the links.
+    expect(roundTrip('4\\ge x>1')).toBe('x\\le4\\land1\\lt x');
+    // A chain as the operand of a comparison stays wrapped.
+    expect(
+      ce.box(
+        ['Equal', ['And', ['Less', 'a', 'b'], ['LessEqual', 'b', 'c']], 'P'],
+        { form: 'raw' }
+      ).latex
+    ).toBe('(a\\lt b\\le c)=P');
+    // A negated link with three operands: the parser makes only pairs.
+    expect(
+      ce.box(
+        ['And', ['NotLess', 'a', 'b', 'c'], ['Less', 'c', 'd']],
+        { form: 'raw' }
+      ).latex
+    ).toBe('a\\nless b\\nless c\\land c\\lt d');
+  });
+
+  it('a custom serializer replaces the chain spelling', () => {
+    const custom = (entries: object[]) =>
+      new ComputeEngine({
+        latexSyntax: new LatexSyntax({
+          dictionary: [...LATEX_DICTIONARY, ...(entries as never[])],
+        }),
+      });
+    const chain = ['And', ['Less', 'a', 'b'], ['LessEqual', 'b', 'c']];
+    // A custom `And` serializer is called for a chain too.
+    const wedge = custom([
+      {
+        name: 'And',
+        kind: 'infix',
+        latexTrigger: '\\wedge',
+        precedence: 235,
+        serialize: (s: any, e: any) =>
+          e.slice(1).map((x: any) => s.serialize(x)).join('\\wedge '),
+      },
+    ]);
+    expect(wedge.box(chain as never, { form: 'raw' }).latex).toBe(
+      'a\\lt b\\wedge b\\le c'
+    );
+    // A comparison serializer that writes its terms in the other order
+    // (`b\gt a` for `Less(a, b)`) gives no chain: `b\gt a\le c` would
+    // compare `a` and `c`.
+    const reversed = custom([
+      {
+        name: 'Less',
+        kind: 'infix',
+        latexTrigger: '\\lt',
+        precedence: 245,
+        serialize: (s: any, e: any) =>
+          `${s.serialize(e[2])}\\gt ${s.serialize(e[1])}`,
+      },
+    ]);
+    expect(reversed.box(chain as never, { form: 'raw' }).latex).toBe(
+      'b\\gt a\\land b\\le c'
+    );
   });
 });
 

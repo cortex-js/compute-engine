@@ -374,7 +374,7 @@ describe('review (deadline frames)', () => {
     checks: number,
     wrap: (fn: () => void) => void = (fn) => fn()
   ) {
-    const run = { checks: 0, stopped: false, elapsed: 0 };
+    const run = { checks: 0, stopped: false, elapsed: 0, end: 0 };
     ce.declare(name, {
       signature: '() -> number',
       evaluateAsync: async (_ops: unknown, options: any) => {
@@ -395,7 +395,8 @@ describe('review (deadline frames)', () => {
           run.stopped = true;
           throw e;
         } finally {
-          run.elapsed = Date.now() - t0;
+          run.end = Date.now();
+          run.elapsed = run.end - t0;
         }
         return ce.Zero;
       },
@@ -408,10 +409,12 @@ describe('review (deadline frames)', () => {
     const inner = declarePoller(ce, 'InnerWork', 5, 80);
     const sibling = declarePoller(ce, 'SiblingWork', 5, 30);
     let innerError: unknown;
+    let limitStart = 0;
     ce.declare('OuterWork', {
       signature: '() -> number',
       evaluateAsync: async (_ops: unknown, options: any) => {
         let p: Promise<BoxedExpression> | undefined;
+        limitStart = Date.now();
         ce.withTimeLimit({ ms: 50, label: 'test:inner' }, () => {
           p = ce.box(['InnerWork']).evaluateAsync(options);
           return 0;
@@ -429,9 +432,11 @@ describe('review (deadline frames)', () => {
     expect(inner.stopped).toBe(true);
     expect(innerError).toMatchObject({ name: 'CancellationError' });
     // Stopped after at least one `await`, near its 50 ms limit (80 checks
-    // of 5 ms would take 400 ms or more).
+    // of 5 ms would take 400 ms or more). The limit counts from the entry
+    // into `withTimeLimit`, not from the start of the handler, which a
+    // loaded machine can delay: measure from the entry.
     expect(inner.checks).toBeGreaterThan(0);
-    expect(inner.elapsed).toBeGreaterThanOrEqual(45);
+    expect(inner.end - limitStart).toBeGreaterThanOrEqual(45);
     expect(inner.elapsed).toBeLessThan(300);
     // The sibling of the same evaluation ran all its checks.
     expect(sibling.stopped).toBe(false);

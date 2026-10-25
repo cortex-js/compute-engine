@@ -16,8 +16,10 @@ import { SYMBOLS } from './definitions-symbols.js';
 import {
   NEGATED_COMPARISONS,
   chainComparison,
+  comparisonChainLinks,
   isChainingComparison,
   isComparisonChainLink,
+  wrapComparisonOperand,
 } from '../comparison-chain.js';
 
 import {
@@ -725,6 +727,52 @@ function serializeTabularBody(
     .join(' \\\\\n');
 }
 
+/**
+ * The LaTeX of an `And` of comparison links as the chain that the parser
+ * reads back to that `And`: `["And", ["Less", 0, "M"], ["LessEqual", "M", 5]]`
+ * is `0\lt M\le5`, not `0\lt M\land M\le5`. Return `null` when `expr` is not
+ * such an `And` (`comparisonChainLinks()`); the caller then writes the
+ * `And` with `\land`.
+ *
+ * Each link is serialized by its own entry. A link after the first one
+ * gives its LaTeX without its first term, which is the last term of the
+ * previous link. The chain is written only when the LaTeX of each link
+ * starts with the LaTeX of its first term and ends with the LaTeX of its
+ * last term, else `null`: a link with no infix entry, or a custom serializer
+ * that writes the terms in another order (`b>a` for `Less(a, b)`), would
+ * give a chain that compares other terms.
+ */
+function serializeComparisonChain(
+  serializer: Serializer,
+  expr: MathJsonExpression
+): string | null {
+  const links = comparisonChainLinks(expr);
+  if (links === null) return null;
+  const parts: string[] = [];
+  for (const [k, link] of links.entries()) {
+    const def = serializer.dictionary.ids.get(operator(link)) as
+      | IndexedLatexDictionaryEntry
+      | undefined;
+    if (def?.kind !== 'infix') return null;
+    const latex = serializer.serialize(link);
+    const terms = operands(link);
+    const first = wrapComparisonOperand(serializer, terms[0], def.precedence);
+    const last = wrapComparisonOperand(
+      serializer,
+      terms[terms.length - 1],
+      def.precedence
+    );
+    if (
+      latex.length <= first.length + last.length ||
+      !latex.startsWith(first) ||
+      !latex.endsWith(last)
+    )
+      return null;
+    parts.push(k === 0 ? latex : latex.slice(first.length));
+  }
+  return joinLatex(parts);
+}
+
 function makeSerializeHandler(
   entry: LatexDictionaryEntry,
   latexTrigger: LatexToken[] | null,
@@ -794,13 +842,26 @@ function makeSerializeHandler(
         // `LessEqual(Less(a, b), c)` is `(a\lt b)\le c`, since `a\lt b\le c`
         // re-parses as a chain (see `chainComparison()`).
         const isComparison = isChainingComparison(operator(expr));
+        // An `And` of comparison links is written as the chain that the
+        // parser reads back to it (`serializeComparisonChain()`). This is
+        // the default `And` serializer: a custom `serialize` of an `And`
+        // entry replaces it, chain included.
+        const isAnd = operator(expr) === 'And';
+        if (isAnd) {
+          const chain = serializeComparisonChain(serializer, expr);
+          if (chain !== null) return chain;
+        }
         // Insert the operator (latex) between each argument
         return joinLatex(
           operands(expr).flatMap((val, i) => {
-            const arg =
-              isComparison && isChainingComparison(operator(val))
-                ? serializer.wrap(val, Infinity)
-                : serializer.wrap(val, prec + 1);
+            // An operand of an `And` that is written as a chain needs no
+            // parentheses: the chain binds tighter than `\land`.
+            // `["And", ["And", ["Less", 0, "x"], ["LessEqual", "x", 1]], y]`
+            // is `0\lt x\le1\land y`, and parses back to the same MathJSON.
+            const arg = isComparison
+              ? wrapComparisonOperand(serializer, val, prec)
+              : ((isAnd ? serializeComparisonChain(serializer, val) : null) ??
+                serializer.wrap(val, prec + 1));
             return i < n - 1 ? [arg, latex!] : [arg];
           })
         );
