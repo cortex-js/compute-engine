@@ -308,7 +308,8 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
     if (unit === 'rad') {
       expect(glsl).toBe('atan(y, x)');
       expect(wgsl).toBe('atan2(y, x)');
-      expect(py).toBe('np.angle(x + complex(0, 1) * y)');
+      // `np.add(…, 0)` makes a `-0` part `+0` (CE-262).
+      expect(py).toBe('np.angle(np.add(x + complex(0, 1) * y, 0))');
       return;
     }
     // A shader literal is the shortest decimal that reads back as the same
@@ -319,7 +320,9 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
     expect(Math.fround(Number(shader))).toBe(Math.fround(FACTOR[unit]));
     expect(glsl).toBe(`${shader} * atan(y, x)`);
     expect(wgsl).toBe(`${shader} * atan2(y, x)`);
-    expect(py).toBe(`${FACTOR[unit]} * np.angle(x + complex(0, 1) * y)`);
+    expect(py).toBe(
+      `${FACTOR[unit]} * np.angle(np.add(x + complex(0, 1) * y, 0))`
+    );
   });
 });
 

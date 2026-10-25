@@ -25,6 +25,7 @@ import {
   gpuHurwitzZetaModel,
   gpuLerchPhiModel,
   gpuPolyLogModel,
+  gpuZetaModel,
   setGpuErrorModel,
 } from './gpu-lerch-f32-model';
 
@@ -234,6 +235,8 @@ describe('GPU LerchPhi / PolyLog continuation: emitted text', () => {
       expect(integral).toContain('3.0e-5 * abs(res)');
       expect(hermite).toMatch(/p < 16;/);
       expect(hermite).toContain('3.0e-5 * abs(res)');
+      // An infinite result declines (ROADMAP CE-235).
+      expect(hermite).toContain('!(abs(res) < 3.4e38)');
     }
   );
 });
@@ -337,6 +340,35 @@ describe('GPU HurwitzZeta: f32 model of the GLSL helpers', () => {
     close(gpuLerchPhiModel(1, 0.5, 0.3), 0.011152731209085116);
   });
 
+  test.each([
+    // zeta(s) below s = -24.5, from Stirling's series in the reflection
+    // (it answered NaN there; ROADMAP CE-288.3). mpmath at the f32 s.
+    [-25.5, -78486.148569217687],
+    [-31.189207077026367, 613119702.46375172],
+    [-40.25, -1874114270610148.0],
+    [-47, 2.5180471921451096e21],
+    [-55.5, 1.0719086258305834e29],
+    [-62.9900016784668, 3.1963757382908854e36],
+    [-63, 3.2715634236478716e36],
+  ])('ζ(%p) ≈ %p down to s = -63', (s, ref) => {
+    close(gpuZetaModel(s), ref);
+    close(gpuHurwitzZetaModel(s, 1), ref);
+  });
+
+  test('below s = -63 zeta(s) is NaN, and the trivial zeros stay 0', () => {
+    expect(gpuZetaModel(-63.5)).toBeNaN();
+    expect(gpuZetaModel(-80.25)).toBeNaN();
+    expect(gpuZetaModel(-64)).toBe(0);
+    expect(gpuZetaModel(-70)).toBe(0);
+  });
+
+  test('below s = -24.5 the Taylor series of zeta(s, a) still declines', () => {
+    // With zeta(s) defined below s = -24.5, the series in a - round(a) was
+    // more than 3e-5 off at 46 of 1500 points from s = -63.5 to -24.5, so
+    // it keeps its old limit. mpmath: zeta(-30, 0.5) = -7.6e10 (not used).
+    expect(gpuHurwitzZetaModel(-30, 0.5)).toBeNaN();
+  });
+
   describe('with pow and log2 a few ulp off', () => {
     beforeEach(() => setGpuErrorModel(true));
     afterEach(() => setGpuErrorModel(false));
@@ -345,6 +377,19 @@ describe('GPU HurwitzZeta: f32 model of the GLSL helpers', () => {
       // The Lanczos Gamma(1 - s) was 3.3e-5 off here.
       // mpmath: zeta(-21.856075286865234) = -183.9372070856711
       close(gpuHurwitzZetaModel(-21.856075286865234, 1), -183.9372070856711);
+    });
+
+    test('zeta(s) down to s = -63 stays within 3e-5', () => {
+      // The worst points of the 1864-point measurement (2.9e-5 at most).
+      // mpmath at the f32 s.
+      for (const [s, ref] of [
+        [-55.5, 1.0719086258305834e29],
+        [-62.9900016784668, 3.1963757382908854e36],
+        [-63, 3.2715634236478716e36],
+      ])
+        expect(Math.abs(gpuZetaModel(s) - ref) / Math.abs(ref)).toBeLessThan(
+          3e-5
+        );
     });
   });
 });
@@ -385,6 +430,11 @@ describe('GPU LerchPhi / PolyLog continuation: f32 model of the GLSL helpers', (
     // The s = -2 closed form a²/w + 2az/w² + z(1+z)/w³ cancelled to
     // 2.9e-5 relative; mpmath: 1.5694176601164853e-5
     [-95.0697250366211, -2, 1.0982577800750732, 1.5694176601164853e-5],
+    // The Hermite form answered -inf and +inf here: a term past the f32
+    // range passed its error test (inf <= inf). It declines now, and the
+    // mode sum answers. mpmath: 8.0007363617747669e28, 1.5171635017661392e28
+    [-0.5, -30, 10, 8.0007363617747669e28],
+    [-0.9, -29.5, 10, 1.5171635017661392e28],
   ])('Φ(%p, %p, %p) ≈ %p', (z, s, a, ref) => {
     close(gpuLerchPhiModel(z, s, a), ref);
   });

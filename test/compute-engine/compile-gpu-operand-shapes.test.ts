@@ -241,7 +241,8 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   // source no GLSL driver accepts — behind `success: true`.
 
   it('GLSL `mod(genType, float)` takes its scalar LAST', () => {
-    expect(g(['Mod', V3, 1])).toBe('mod(vec3(1.0, 2.0, 3.0), 1.0)');
+    // A divisor of 2: a divisor of 1 is the `fract` peephole (CE-254).
+    expect(g(['Mod', V3, 2])).toBe('mod(vec3(1.0, 2.0, 3.0), 2.0)');
     expect(() => g(['Mod', 1, V3])).toThrow(
       /^Could not compile `Mod`: the shader builtin `mod` takes a scalar only in argument 2, but here the scalar stands in argument 1/
     );
@@ -320,7 +321,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     expect(() => gv(['ElementMax', 2, 'v'])).toThrow(
       /takes a scalar only in argument 2, but here the scalar stands in argument 1/
     );
-    expect(gv(['Mod', 'v', 1])).toBe('mod(v, 1.0)');
+    expect(gv(['Mod', 'v', 2])).toBe('mod(v, 2.0)');
     expect(() => gv(['Mod', 1, 'v'])).toThrow(
       /takes a scalar only in argument 2/
     );

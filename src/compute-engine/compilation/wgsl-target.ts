@@ -7,6 +7,8 @@ import {
   assertGPUScalarComponents,
   gpuUniformVectorWidth,
   gpuOperandShape,
+  gpuAbsorbedConstant,
+  markOperandConsuming,
   gpuAssertExpressionBody,
   type GPUShapeRules,
 } from './gpu-target.js';
@@ -76,14 +78,11 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // below with one instruction, and it needs no impurity guard: the
       // dividend is emitted once.
       //
-      // A SCALAR dividend only: `fract` takes one argument, and the operand-
-      // shape gate reads the emitted call against the head's operands, so a
-      // `vecN` dividend beside the scalar divisor would be judged a genType
-      // mismatch on the one-argument call and decline. The vector form keeps
-      // the `%` expression below, whose mixed scalar/vector arithmetic WGSL
-      // defines.
-      if (tryGetConstant(b) === 1 && gpuOperandShape(a) === 'scalar')
-        return `fract(${compile(a)})`;
+      // The divisor is left out of the emitted call, which the lowering
+      // declares after this table (`markOperandConsuming`). So the
+      // operand-shape check judges `fract(v)` against the dividend alone, and
+      // a `vecN` dividend takes the peephole too.
+      if (tryGetConstant(b) === 1) return `fract(${compile(a)})`;
       // WGSL `%` on floats is the *truncated* remainder (sign of the dividend);
       // the interpreter's `Mod` is *floored* (sign of the divisor, D1). With
       // `r = a % b`, the floored modulo is `r - b · floor(r / b)`: `|r / b|` is
@@ -185,6 +184,10 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return compileWGSLList(args, compile, 'PointList');
   },
 };
+
+// `Mod(a, 1)` emits `fract(a)` and leaves the divisor out of the emitted call;
+// the operand-shape check reads that declaration (`markOperandConsuming`).
+markOperandConsuming(WGSL_FUNCTIONS.Mod, gpuAbsorbedConstant('fract', 1, 1));
 
 /** Map common GLSL/MathJSON types to WGSL types */
 const WGSL_TYPE_MAP: Record<string, string> = {

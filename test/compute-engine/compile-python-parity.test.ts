@@ -324,6 +324,28 @@ const CASES: Case[] = [
     inputs: [{}],
   },
   {
+    // A nested list of strings is a tensor of strings (ROADMAP CE-219): the
+    // helper compares the nested lists whole, cell by cell.
+    name: 'eq_coll_strings_nested_equal',
+    expr: [
+      'Equal',
+      ['List', ['List', { str: 'a' }, { str: 'b' }]],
+      ['List', ['List', { str: 'a' }, { str: 'b' }]],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
+    name: 'eq_coll_strings_nested_unequal',
+    expr: [
+      'Equal',
+      ['List', ['List', { str: 'a' }, { str: 'b' }]],
+      ['List', ['List', { str: 'a' }, { str: 'c' }]],
+    ],
+    params: [],
+    inputs: [{}],
+  },
+  {
     // Numeric-looking STRINGS: `np.asarray(..., dtype=float)` parses them, so
     // this answered True while the interpreter compares the strings (verified:
     // `Equal(["1"],["1.0"])` → False). The helper now picks the tolerance path
@@ -1977,3 +1999,301 @@ describeMaybe('PYTHON — predicates with a result that is not provably a boolea
     expect(value).toEqual([]);
   });
 });
+
+/**
+ * Each case compiles one function with typed parameters in a fresh engine,
+ * runs it in Python on each list of arguments, and compares the value with
+ * the interpreter's. A case whose expected value is `'ValueError'` or
+ * `'TypeError'` must raise that exception.
+ */
+describeMaybe(
+  'PYTHON EXECUTION PARITY — connectives, equality, Arg, string entry (venv)',
+  () => {
+    const python = new PythonTarget();
+
+    type Run = {
+      expr: any;
+      decl: Record<string, string>;
+      args: any[][];
+      lambda?: boolean;
+    };
+
+    /** The Python value of each call, serialized: a list for an array. */
+    function runPython(c: Run): any[] {
+      const e = new ComputeEngine();
+      for (const [k, t] of Object.entries(c.decl)) e.declare(k, t as any);
+      const params = Object.keys(c.decl);
+      const code = c.lambda
+        ? `fn = ${python.compileLambda(e.box(c.expr), params)}\n`
+        : python.compileFunction(e.box(c.expr), 'fn', params);
+      const src =
+        'import numpy as np\nimport json\n\n' +
+        `${code}\n` +
+        'def _ser(z):\n' +
+        '    if isinstance(z, np.ndarray): return _ser(z.tolist())\n' +
+        '    if isinstance(z, (bool, np.bool_)): return bool(z)\n' +
+        '    if isinstance(z, (list, tuple)): return [_ser(v) for v in z]\n' +
+        '    return float(z)\n' +
+        'def _run(args):\n' +
+        '    try:\n' +
+        '        return _ser(fn(*args))\n' +
+        '    except (ValueError, TypeError) as err:\n' +
+        '        return type(err).__name__\n' +
+        `print(json.dumps([_run(a) for a in json.loads(${JSON.stringify(JSON.stringify(c.args))})]))\n`;
+      const file = path.join(os.tmpdir(), `ce-py-conn-${process.pid}.py`);
+      fs.writeFileSync(file, src);
+      try {
+        return JSON.parse(
+          execFileSync(VENV_PYTHON, [file], { encoding: 'utf8' })
+        );
+      } finally {
+        fs.unlinkSync(file);
+      }
+    }
+
+    /** The interpreter's value for each list of arguments. */
+    function interpret(c: Run): any[] {
+      const toJs = (v: any): any =>
+        v.operator === 'List'
+          ? v.ops.map(toJs)
+          : v.symbol === 'True'
+            ? true
+            : v.symbol === 'False'
+              ? false
+              : v.re;
+      const toJson = (v: any): any =>
+        Array.isArray(v)
+          ? ['List', ...v.map(toJson)]
+          : typeof v === 'boolean'
+            ? v
+              ? 'True'
+              : 'False'
+            : v;
+      return c.args.map((a) => {
+        const e = new ComputeEngine();
+        const params = Object.keys(c.decl);
+        params.forEach((k, i) => {
+          e.declare(k, c.decl[k] as any);
+          e.assign(k, e.box(toJson(a[i])));
+        });
+        return toJs(e.box(c.expr).N());
+      });
+    }
+
+    // CE-278. The infix `and`/`or`/`not` read the truthiness of a list:
+    // `And(L, True)` answered `True` and `Not(L)` answered `False`.
+    it.each<[string, Run]>([
+      [
+        'And',
+        {
+          expr: ['And', 'L', 'q'],
+          decl: { L: 'list<boolean>', q: 'boolean' },
+          args: [
+            [[true, false], true],
+            [[true, false], false],
+          ],
+        },
+      ],
+      [
+        'Or',
+        {
+          expr: ['Or', 'L', 'q', 'r'],
+          decl: { L: 'list<boolean>', q: 'boolean', r: 'boolean' },
+          args: [
+            [[true, false], false, false],
+            [[true, false], false, true],
+          ],
+        },
+      ],
+      [
+        'Not',
+        {
+          expr: ['Not', 'L'],
+          decl: { L: 'list<boolean>' },
+          args: [[[true, false]]],
+        },
+      ],
+      [
+        'And of two lists',
+        {
+          expr: ['And', 'L', 'M'],
+          decl: { L: 'list<boolean>', M: 'list<boolean>' },
+          args: [
+            [
+              [true, true],
+              [true, false],
+            ],
+          ],
+        },
+      ],
+    ])('%s over a list of booleans broadcasts', (_name, c) => {
+      expect(runPython(c)).toEqual(interpret(c));
+    });
+
+    it('And of two lists of different lengths raises, as the interpreter refuses it', () => {
+      // NumPy recycles a one-element list; the interpreter answers
+      // `incompatible-dimensions`.
+      expect(
+        runPython({
+          expr: ['And', 'L', 'M'],
+          decl: { L: 'list<boolean>', M: 'list<boolean>' },
+          args: [[[true], [true, false]]],
+        })
+      ).toEqual(['ValueError']);
+    });
+
+    it.each([
+      [
+        'broadcastable<boolean>',
+        /operand 1 has the type `broadcastable<boolean>`/,
+      ],
+      [
+        'list<boolean | missing>',
+        /operand 1 has the type `list<boolean \| missing>`/,
+      ],
+      ['list<list<boolean>>', /operand 1 has the type `list<list<boolean>>`/],
+    ])('And over a `%s` operand fails closed', (type, message) => {
+      const e = new ComputeEngine();
+      e.declare('L', type as any);
+      e.declare('q', 'boolean');
+      expect(() =>
+        python.compileFunction(e.box(['And', 'L', 'q']), 'fn', ['L', 'q'])
+      ).toThrow(message);
+    });
+
+    // CE-281.1. One collection operand broadcasts the exact scalar test.
+    it.each<[string, Run]>([
+      [
+        'Equal',
+        {
+          expr: ['Equal', 'L', 5],
+          decl: { L: 'list<integer>' },
+          args: [[[5, 6, 5]], [[]]],
+        },
+      ],
+      [
+        'NotEqual',
+        {
+          expr: ['NotEqual', 'x', 'L'],
+          decl: { L: 'list<real>', x: 'real' },
+          args: [[[5, 6.5], 5]],
+        },
+      ],
+      [
+        'a chained Equal',
+        {
+          expr: ['Equal', 'L', 5, 'y'],
+          decl: { L: 'list<integer>', y: 'integer' },
+          args: [
+            [[5, 6], 5],
+            [[5, 6], 6],
+          ],
+        },
+      ],
+    ])('%s with one list operand broadcasts', (_name, c) => {
+      expect(runPython(c)).toEqual(interpret(c));
+    });
+
+    // CE-262. `complex(0, -1) * y` at `y = 0` is `-0j`, and `np.angle` of
+    // `-3 - 0j` is `-π`, where the interpreter answers `π`.
+    it('Arg(x - iy) at a zero imaginary part agrees with the interpreter', () => {
+      const c: Run = {
+        expr: ce.parse('\\arg(x - iy)').json,
+        decl: { x: 'real', y: 'real' },
+        args: [
+          [-3, 0],
+          [3, 0],
+          [-3, 2],
+          [-3, -2],
+        ],
+      };
+      const got = runPython(c);
+      const want = interpret(c);
+      expect(got.length).toBe(want.length);
+      got.forEach((v, i) => expect(v).toBeCloseTo(want[i], 12));
+      expect(got[0]).toBeCloseTo(Math.PI, 12);
+    });
+
+    // CE-231. Python reads a string as a sequence of code points: `len` of
+    // `"e" + U+0301 + "x"` is 3 where the interpreter counts 2 characters. A
+    // parameter of a list type refuses a string at entry; a list still runs.
+    it.each([false, true])(
+      'a string argument for a list parameter raises (lambda: %s)',
+      (lambda) => {
+        for (const type of ['list<integer>', 'list', 'indexed_collection']) {
+          const got = runPython({
+            expr: ['Length', 's'],
+            decl: { s: type },
+            args: [['éx'], [[1, 2]]],
+            lambda,
+          });
+          expect([type, got]).toEqual([type, ['TypeError', 2]]);
+        }
+      }
+    );
+
+    // The string test must not use the bare names `isinstance` and `str`: a
+    // parameter with one of these names hides the builtin, and a valid list
+    // then raised `TypeError`.
+    it.each([false, true])(
+      'a list parameter named like a builtin accepts a list (lambda: %s)',
+      (lambda) => {
+        for (const name of ['str', 'isinstance', 'TypeError']) {
+          const got = runPython({
+            expr: ['Length', name],
+            decl: { [name]: 'list<integer>' },
+            args: [['éx'], [[1, 2, 3]]],
+            lambda,
+          });
+          expect([name, got]).toEqual([name, ['TypeError', 3]]);
+        }
+      }
+    );
+
+    // The generated code calls builtins by their names (`isinstance(b, (bool,
+    // np.bool_))` for the condition of an `If`, `isinstance(_q, str)` for the
+    // order of a `Norm`). A user name that hides one of them made the code
+    // call or test against the argument, so the compilation fails instead.
+    it.each([false, true])(
+      'a user name that hides a builtin the code uses fails closed (lambda: %s)',
+      (lambda) => {
+        const cases: [any, Record<string, string>, string][] = [
+          [['If', 'bool', 1, 2], { bool: 'boolean' }, 'bool'],
+          [
+            ['Norm', 'x', 'isinstance'],
+            { x: 'list<real>', isinstance: 'any' },
+            'isinstance',
+          ],
+          [['Add', ['Length', 'x'], 'len'], { x: 'list<real>', len: 'real' }, 'len'],
+        ];
+        for (const [expr, decl, name] of cases) {
+          const e = new ComputeEngine();
+          for (const [k, t] of Object.entries(decl)) e.declare(k, t as any);
+          const params = Object.keys(decl);
+          expect(() =>
+            lambda
+              ? python.compileLambda(e.box(expr), params)
+              : python.compileFunction(e.box(expr), 'fn', params)
+          ).toThrow(new RegExp(`"${name}" is the name of a Python builtin`));
+        }
+      }
+    );
+
+    it('a user name that the code only reads as a value still compiles', () => {
+      const got = runPython({
+        expr: ['Multiply', 'float', ['Sin', 'str']],
+        decl: { float: 'real', str: 'real' },
+        args: [[3, Math.PI / 2]],
+      });
+      expect(got).toEqual([3]);
+    });
+
+    it('a parameter whose type admits text keeps failing closed at compile time', () => {
+      const e = new ComputeEngine();
+      e.declare('s', 'indexed_collection<character>');
+      expect(() =>
+        python.compileFunction(e.box(['Length', 's']), 'fn', ['s'])
+      ).toThrow(/grapheme/);
+    });
+  }
+);

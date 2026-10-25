@@ -81,10 +81,19 @@ describe('TYCHO ROW 422: AN INTEGRAND THAT IS NaN ON A PART OF THE INTERVAL', ()
     expect(Number(compiled.run({ x: 1 }))).toBeCloseTo(0.3173105078629141, 8);
   });
 
-  test.each([-0.2, -1])('x = %p is NaN at once, interpreted', (x) => {
-    const [value, ms] = timed(() => interpreted(x));
-    expect(value).toBeNaN();
-    expect(ms).toBeLessThan(MAX_MS);
+  // The interpreter compiles the integrand with the value of `k` in its
+  // exponent (`y^{-1/2}`, user decision 2026-10-23, ROADMAP CE-213), so the
+  // integrand has its principal complex value for `y < 0`, and the integral
+  // is the complex value of the integral written with the number `-1/2`.
+  test.each([
+    [-0.2, 1.0000000161683475, -0.36908448183721915],
+    [-1, 1.0000000000000169, -0.9534382569845405],
+  ])('x = %p is complex, interpreted', (x, re, im) => {
+    // No time limit: this integral has a value, and the quadrature of its
+    // integrable singularity at 0 takes the usual time.
+    const value = ce.parse(CHI_SQUARE_TAIL.replace('_{x}', `_{${x}}`)).N();
+    expect(value.re).toBeCloseTo(re, 8);
+    expect(value.im).toBeCloseTo(im, 8);
   });
 
   test.each([-0.2, -1])('x = %p is NaN at once, compiled', (x) => {
@@ -377,15 +386,26 @@ describe('TYCHO ROW 422: THE REVIEW CASES ON BOTH ROUTES', () => {
     expect(Number(out.run({ t: 0 }))).toBeGreaterThan(1);
   });
 
-  test('the chi-square tail with k = 43 at x = -0.2 is NaN on both routes', () => {
-    // A `NaN` set next to a zero of high order: the quadrature does not
-    // stop early, and the Monte-Carlo fallback samples the `NaN` set. The
-    // answer is `NaN`, not the integral on `[0, ∞)`.
+  test('the chi-square tail with k = 43 at x = -0.2: complex interpreted, NaN compiled', () => {
+    // The interpreter compiles the integrand with the exponent `41/2`
+    // (ROADMAP CE-213), so its value for `y < 0` is complex, and the integral
+    // is the one written with the number `41/2`. The compiled `_SYS.integrate`
+    // is real only: there the integrand is `NaN` on a set next to a zero of
+    // high order, the quadrature does not stop early, and the Monte-Carlo
+    // fallback samples the `NaN` set. The answer is `NaN`, not the integral
+    // on `[0, ∞)`.
     const ce43 = new ComputeEngine();
     ce43.assign('k', 43);
-    expect(
-      ce43.parse(CHI_SQUARE_TAIL.replace('_{x}', '_{-0.2}')).N().re
-    ).toBeNaN();
+    const interpreted = ce43
+      .parse(CHI_SQUARE_TAIL.replace('_{x}', '_{-0.2}'))
+      .N();
+    const literal = ce43
+      .parse(
+        '\\int_{-0.2}^{\\infty}\\frac{y^{\\frac{41}{2}}e^{-\\frac{y}{2}}}{2^{\\frac{43}{2}}\\Gamma(\\frac{43}{2})}dy'
+      )
+      .N();
+    expect(interpreted.re).toBeCloseTo(literal.re, 10);
+    expect(interpreted.im).toBeCloseTo(literal.im, 10);
     const out = compile(ce43.parse(CHI_SQUARE_TAIL), {
       to: 'javascript',
     }) as unknown as {

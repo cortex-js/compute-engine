@@ -606,14 +606,39 @@ export class BoxedDictionary
     // method, so the asynchronous route counts the same way.
     if (ce._evaluationEffects === undefined && ce._evaluationDepth === 0)
       beginTopLevelEvaluation(ce);
+    // A dictionary can hold the same dictionary under several keys, level
+    // after level (`{p: d, q: d}`), so the number of paths is exponential
+    // in the depth while the number of nodes is linear. Within the
+    // evaluation of the outermost dictionary, the value of each pure
+    // dictionary node is computed once (`dictionaryEvaluationMemo`). CE-372.
+    const version = ce._anyVersion;
+    const pure = this.isPure;
+    if (pure) {
+      const hit = dictionaryEvaluationMemo?.get(this);
+      if (
+        hit !== undefined &&
+        hit.options === options &&
+        hit.version === version
+      )
+        return hit.value;
+    }
+    const outermost = dictionaryEvaluationMemo === undefined;
+    if (outermost) dictionaryEvaluationMemo = new WeakMap();
+    const memo = dictionaryEvaluationMemo!;
     ce._evaluationDepth += 1;
     try {
       const pairs = entries.map(([k, v]) =>
         ce._fn('KeyValuePair', [ce.string(k), v.evaluate(options)])
       );
-      return new BoxedDictionary(ce, ce._fn('Dictionary', pairs));
+      const value = new BoxedDictionary(ce, ce._fn('Dictionary', pairs));
+      // Not stored when the evaluation changed the state of the engine (an
+      // assignment in a value): a later read can then give another value.
+      if (pure && ce._anyVersion === version)
+        memo.set(this, { options, version, value });
+      return value;
     } finally {
       ce._evaluationDepth -= 1;
+      if (outermost) dictionaryEvaluationMemo = undefined;
     }
   }
 
@@ -698,6 +723,26 @@ function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {
     ? { fn: json as [string, ...MathJsonExpression[]] }
     : json;
 }
+
+/**
+ * The values of the dictionaries evaluated during the evaluation of the
+ * outermost dictionary that is being evaluated, keyed by the dictionary
+ * node; `undefined` when no dictionary is being evaluated. An entry is
+ * used only for the same evaluation options and while the engine's
+ * `_anyVersion` is the one it was computed at, so a state change (an
+ * assignment, a declaration) makes it unused. Only a pure dictionary is
+ * stored: one with a `Random()` value draws again at each evaluation.
+ */
+let dictionaryEvaluationMemo:
+  | WeakMap<
+      Expression,
+      {
+        options: Partial<EvaluateOptions> | undefined;
+        version: number;
+        value: Expression;
+      }
+    >
+  | undefined;
 
 /** Is `v` an already fully-evaluated dictionary value for the requested
  * evaluation mode? (Mirrors the `List` fast-path predicate.) */

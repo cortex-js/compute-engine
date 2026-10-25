@@ -211,6 +211,34 @@ describe('the compiled JavaScript route agrees with the interpreter', () => {
     ]);
   });
 
+  // A source only SOME of whose elements are collections: each row
+  // broadcasts and each number is a direct call, on both routes (user
+  // decision 2026-09-22 (a), ROADMAP CE-257). The compiled code gave
+  // `[NaN, 6]` when the declared-scalar callback refused a row.
+  test.each([
+    ['Map(f, S)', ['Map', 'f', 'S']],
+    ['k(S) with k := L ↦ Map(f, L)', ['k', 'S']],
+    ['k3(S) with a typed parameter', ['k3', 'S']],
+  ])('a partly nested source: %s', (_name, json) => {
+    const ce = engineWithScalarF();
+    ce.declare('k', 'function');
+    ce.assign('k', ce.box(['Function', ['Map', 'f', 'L'], 'L']));
+    ce.declare('k3', 'function');
+    ce.assign(
+      'k3',
+      ce.parse(
+        '(L: list<list<number> | number>) \\mapsto \\operatorname{Map}(f, L)'
+      )
+    );
+    ce.declare('S', 'list<list<number> | number>');
+    const expr = ce.box(json as any);
+    const result = compile(expr, { to: 'javascript', fallback: false });
+    expect(result.success).toBe(true);
+    ce.assign('S', ce.box(['List', ['List', 1, 2], 3]));
+    expect(expr.evaluate().toString()).toBe('[[2,4],6]');
+    expect(result.run!({ S: [[1, 2], 3] } as any)).toEqual([[2, 4], 6]);
+  });
+
   test('an untyped named callback already broadcast', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(DOUBLE));

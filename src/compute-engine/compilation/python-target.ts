@@ -96,6 +96,7 @@ import {
   collectionMayHoldAbsentCell,
   PREDICATE_RESULT_MODES,
   predicateResultCheck,
+  stringRefusedEntryType,
 } from './javascript-target.js';
 
 /**
@@ -347,6 +348,132 @@ function pythonDistinctIdentifiers(
   for (let i = 0; i < parts.length; i += 2)
     parts[i] = parts[i].replace(PYTHON_IDENTIFIER_TOKEN, name);
   return { body: parts.join(''), name };
+}
+
+/**
+ * The names of the Python builtins (Python 3.14, without `True`, `False` and
+ * `None`, which are keywords), and the module names that the generated code
+ * reads (`np`, `math`, `cmath`, `scipy`). See
+ * `pythonAssertNoShadowedBuiltin()`.
+ */
+const PYTHON_BUILTIN_NAMES: ReadonlySet<string> = new Set(
+  (
+    'ArithmeticError AssertionError AttributeError BaseException ' +
+    'BaseExceptionGroup BlockingIOError BrokenPipeError BufferError ' +
+    'BytesWarning ChildProcessError ConnectionAbortedError ConnectionError ' +
+    'ConnectionRefusedError ConnectionResetError DeprecationWarning EOFError ' +
+    'Ellipsis EncodingWarning EnvironmentError Exception ExceptionGroup ' +
+    'FileExistsError FileNotFoundError FloatingPointError FutureWarning ' +
+    'GeneratorExit IOError ImportError ImportWarning IndentationError ' +
+    'IndexError InterruptedError IsADirectoryError KeyError ' +
+    'KeyboardInterrupt LookupError MemoryError ModuleNotFoundError NameError ' +
+    'NotADirectoryError NotImplemented NotImplementedError OSError ' +
+    'OverflowError PendingDeprecationWarning PermissionError ' +
+    'ProcessLookupError PythonFinalizationError RecursionError ' +
+    'ReferenceError ResourceWarning RuntimeError RuntimeWarning ' +
+    'StopAsyncIteration StopIteration SyntaxError SyntaxWarning SystemError ' +
+    'SystemExit TabError TimeoutError TypeError UnboundLocalError ' +
+    'UnicodeDecodeError UnicodeEncodeError UnicodeError ' +
+    'UnicodeTranslateError UnicodeWarning UserWarning ValueError Warning ' +
+    'ZeroDivisionError __import__ abs aiter all anext any ascii bin bool ' +
+    'breakpoint bytearray bytes callable chr classmethod compile complex ' +
+    'copyright credits delattr dict dir divmod enumerate eval exec exit ' +
+    'filter float format frozenset getattr globals hasattr hash help hex id ' +
+    'input int isinstance issubclass iter len license list locals map max ' +
+    'memoryview min next object oct open ord pow print property quit range ' +
+    'repr reversed round set setattr slice sorted staticmethod str sum super ' +
+    'tuple type vars zip np math cmath scipy'
+  ).split(' ')
+);
+
+/**
+ * The names that the Python source `code` uses as a builtin or as a module:
+ * a name that is called (`len(`), whose attribute is read (`np.`), that is a
+ * class argument of `isinstance` (the `str` of `isinstance(x, str)`), or that
+ * an `except` clause names. A name after a `.` is an attribute, not a name of
+ * the scope, and is not included. The names are in their NFKC form, the form
+ * in which Python reads an identifier.
+ */
+function pythonBuiltinRoleNames(code: string): Set<string> {
+  const source = pythonSplitStringLiterals(code)
+    .map((part, i) => (i % 2 === 0 ? part : '""'))
+    .join('');
+  const result = new Set<string>();
+  const tokens = [...source.matchAll(PYTHON_IDENTIFIER_TOKEN)];
+  // The source between `start` and the parenthesis that closes the one
+  // that opens just before `start`.
+  const closingParenthesis = (start: number): number => {
+    let depth = 1;
+    for (let i = start; i < source.length; i++) {
+      if ('([{'.includes(source[i])) depth += 1;
+      else if (')]}'.includes(source[i]) && --depth === 0) return i;
+    }
+    return source.length;
+  };
+  const classRanges: Array<[number, number]> = [];
+  for (const m of tokens) {
+    const start = m.index!;
+    const end = start + m[0].length;
+    if (source[start - 1] === '.') continue;
+    const next = source.slice(end).match(/^\s*(\S)/)?.[1];
+    const inClassRange = classRanges.some(([a, b]) => start >= a && end <= b);
+    if (next === '(' || next === '.' || inClassRange)
+      result.add(m[0].normalize('NFKC'));
+    if (m[0] === 'isinstance' && next === '(') {
+      // The class argument: after the first comma at the top level of the
+      // call.
+      const open = source.indexOf('(', end) + 1;
+      const close = closingParenthesis(open);
+      let depth = 0;
+      for (let i = open; i < close; i++) {
+        if ('([{'.includes(source[i])) depth += 1;
+        else if (')]}'.includes(source[i])) depth -= 1;
+        else if (source[i] === ',' && depth === 0) {
+          classRanges.push([i, close]);
+          break;
+        }
+      }
+    }
+    if (m[0] === 'except') {
+      const colon = source.indexOf(':', end);
+      classRanges.push([end, colon < 0 ? source.length : colon]);
+    }
+  }
+  return result;
+}
+
+/**
+ * Fail closed when a name of the user (a parameter, a local, an index, a
+ * free symbol, the name of the function) has, in its NFKC form, the name of
+ * a Python builtin or of a module that the generated code `code` uses as a
+ * builtin or as a module (`pythonBuiltinRoleNames()`).
+ *
+ * The generated code calls builtins by their names (`len(xs)`,
+ * `float('nan')`, `isinstance(b, (bool, np.bool_))`), and these names are
+ * valid names for a parameter, a local or a module global. A parameter named
+ * `bool` that holds a boolean made `isinstance(bool, (bool, np.bool_))`
+ * receive the boolean as its second argument and raise `TypeError`, and a
+ * parameter named `len` made each emitted `len(…)` call the argument. The
+ * code cannot tell such a builtin from the user's name, so the compilation
+ * fails, with a message that asks to rename the symbol. A user name that
+ * the code uses only as a value (a list parameter named `str` that is only
+ * read) is accepted: the string test of a parameter does not call
+ * `isinstance` or `str` by these names (`pythonIsStringTest`).
+ */
+function pythonAssertNoShadowedBuiltin(
+  code: string,
+  userNames: Iterable<string>
+): void {
+  let roles: Set<string> | undefined;
+  for (const name of userNames) {
+    const form = name.normalize('NFKC');
+    if (!PYTHON_BUILTIN_NAMES.has(form) && !form.startsWith('_ce_')) continue;
+    roles ??= pythonBuiltinRoleNames(code);
+    if (roles.has(form))
+      throw new Error(
+        `"${name}" is the name of a Python builtin or module ("${form}") that the compiled Python code uses, and cannot be used as a symbol, parameter or function name. Rename it before compiling to Python (fail closed).`
+      );
+  }
 }
 
 /** The `vars` sources of the caller that are spliced into the code. */
@@ -797,8 +924,13 @@ const PY_ALWAYS_NUMBER_HEADS = new Set([
  *   folds to one `bool` — a length/shape mismatch is `False`, not an error.
  *   The scalar form cannot represent this shape.
  * - exactly one collection operand: the interpreter broadcasts, returning a
- *   *list* of booleans (`Equal([1,2],5)` → `["False","False"]`), a different
- *   different result kind and therefore declines rather than guessing.
+ *   *list* of booleans (`Equal([1,2],5)` → `["False","False"]`). When that
+ *   operand is an ordered list of numbers and every other operand is provably
+ *   a number, it is lowered to a list comprehension whose element test is the
+ *   same exact `==`/`!=` (`[(_tv1) == (5) for _tv1 in L]`). Every other shape
+ *   declines: a nested list or a list of non-numbers (the interpreter
+ *   recurses into it), a set (no order), and a companion that may itself be a
+ *   collection.
  *
  * An operand whose type does not statically pin it as a collection is treated
  * as scalar (today's emission), as everywhere else on this target.
@@ -806,7 +938,8 @@ const PY_ALWAYS_NUMBER_HEADS = new Set([
 function compilePythonEquality(
   kind: 'Equal' | 'NotEqual',
   args: ReadonlyArray<Expression>,
-  compile: (e: Expression) => string
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
 ): string {
   if (args.length < 2)
     throw new Error(
@@ -847,8 +980,9 @@ function compilePythonEquality(
   // `eq_coll_numeric_strings`, `eq_coll_numeric_strings_same`). Everything else
   // with string evidence declines: the scalar form raises `TypeError`, and the
   // admission side is the narrow `isFlatAllStringComparisonParticipant` so a
-  // mixed (`list<string | number>`) or NESTED all-string participant fails
-  // closed even though `_ce_eqcoll` was probed faithful on it.
+  // mixed participant (`list<string | number>`) fails closed even though
+  // `_ce_eqcoll` was probed faithful on it. A tensor of strings is admitted
+  // (ROADMAP CE-219; `eq_coll_strings_nested_equal`).
   const tupleEquality =
     args.length === 2 &&
     args.every(isProvablyTupleParticipant) &&
@@ -865,12 +999,43 @@ function compilePythonEquality(
     const op = kind === 'Equal' ? '==' : '!=';
     return `((${compile(args[0])}) ${op} (${compile(args[1])}))`;
   }
-  if (collCount === 1)
-    throw new Error(
-      `Could not compile \`${kind}\`: a single collection operand broadcasts element-wise in the ` +
-        `interpreter (a list of booleans, not a boolean); that shape is not ` +
-        `yet implemented on the Python target.`
-    );
+  if (collCount === 1) {
+    // The element-wise broadcast of the interpreter, as a list comprehension
+    // with the scalar test below as its element test. Only an ordered list of
+    // numbers is a source, and every other operand must be a number, so no
+    // operand of the element test can be `None` and the test needs no guard.
+    // A scalar operand is compiled inside the comprehension, so it is
+    // evaluated once per element. That is only safe while this target has no
+    // impure lowering (`Random` and friends decline today). CE-281.1.
+    const index = args.findIndex(isPyCollectionOperand);
+    const isNumberType = (t: Type): boolean => {
+      const r = resolveTypeForCompilation(t);
+      return r !== 'never' && isSubtype(r, 'number');
+    };
+    const source = args[index];
+    const elt = source.type.matches('list<any>')
+      ? collectionElementType(resolveTypeForCompilation(source.type.type))
+      : undefined;
+    if (
+      elt === undefined ||
+      !isNumberType(elt) ||
+      !args.every((a, i) => i === index || isNumberType(a.type.type))
+    )
+      throw new Error(
+        `Could not compile \`${kind}\`: a single collection operand broadcasts element-wise in the ` +
+          `interpreter (a list of booleans, not a boolean). The Python target ` +
+          `compiles that shape only for an ordered list of numbers whose other ` +
+          `operands are numbers.`
+      );
+    const v = BaseCompiler.tempVar(target);
+    const codes = args.map((a, i) => (i === index ? v : compile(a)));
+    const op = kind === 'Equal' ? '==' : '!=';
+    const tests: string[] = [];
+    for (let i = 0; i < args.length - 1; i++)
+      tests.push(`((${codes[i]}) ${op} (${codes[i + 1]}))`);
+    const test = tests.length === 1 ? tests[0] : `(${tests.join(' and ')})`;
+    return `[${test} for ${v} in ${compile(source)}]`;
+  }
   if (collCount >= 2) {
     // Whole-collection equality per adjacent pair, folded with the scalar
     // `and` — every pair is a Python `bool` here, so the chain is well-formed.
@@ -3659,18 +3824,78 @@ function compilePythonRelation(
  * `np.logical_and`/`np.logical_or` are binary ufuncs whose third positional
  * parameter is `out` — see `compilePythonRelation`. These are associative, so a
  * plain pairwise fold suffices (no operand is shared between pairs).
+ *
+ * Each pair goes through the `_ce_ord` shape guard, because NumPy recycles a
+ * one-element list over a longer one where the interpreter answers
+ * `incompatible-dimensions` (`And([True], [True, False])`). The operands are
+ * checked first (`assertPyBroadcastableConnective`).
  */
 function compilePythonLogical(
+  head: 'And' | 'Or',
   fn: string,
   args: ReadonlyArray<Expression>,
   compile: (e: Expression) => string
 ): string {
   if (args.length === 0 || args[0] == null)
     throw new Error(`Could not compile \`${fn}\`: no operand`);
+  assertPyBroadcastableConnective(head, args, 'list<boolean>');
   let result = compile(args[0]);
   for (let i = 1; i < args.length; i++)
-    result = `${fn}(${result}, ${compile(args[i])})`;
+    result = `_ce_ord(${fn}, ${result}, ${compile(args[i])})`;
   return result;
+}
+
+/** The heads whose Python codegen receives a collection operand whole
+ * (`CompileTarget.collectionAwareHeads`). */
+const PYTHON_COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
+  'Not',
+  'Argument',
+]);
+
+/**
+ * The operand rule of the function form of a connective (`And`, `Or`, `Not`).
+ * The base compiler sends a connective to this form when an operand is, or
+ * may be, a collection, since the infix `and`/`or`/`not` would read the
+ * truthiness of a Python list. NumPy's `np.logical_*` agrees with the
+ * interpreter's element-wise broadcast only when every operand is a boolean
+ * or a collection of booleans of the type `collectionType`:
+ *
+ * - an operand that is only POSSIBLY a collection (`broadcastable<boolean>`,
+ *   a value of unknown type) can be a scalar at run time, and the result is
+ *   then a NumPy boolean, not the Python `bool` that the scalar lowering
+ *   gives;
+ * - a collection that may hold an absent element (`list<boolean | missing>`)
+ *   or a non-boolean is read by truthiness: NumPy answers `True` for a `nan`
+ *   element where the interpreter keeps it absent;
+ * - for `And`/`Or`, a nested collection is refused (`collectionType` is
+ *   `list<boolean>`), because `_ce_ord` checks the length of the outer axis
+ *   only and NumPy recycles a one-element inner axis.
+ *
+ * Every other shape fails closed, and the interpreter evaluates it. CE-278.
+ */
+function assertPyBroadcastableConnective(
+  head: string,
+  args: ReadonlyArray<Expression>,
+  collectionType: string
+): void {
+  args.forEach((a, i) => {
+    // `isSubtype`, not `.matches`: a value of unknown type matches `boolean`,
+    // but it is no evidence that the operand is a boolean.
+    const t = resolveTypeForCompilation(a.type.type);
+    if (t !== 'never' && isSubtype(t, 'boolean')) return;
+    if (
+      t !== 'never' &&
+      !isProvablyStringOperand(a) &&
+      isSubtype(t, collectionType)
+    )
+      return;
+    throw new Error(
+      `Could not compile \`${head}\`: operand ${i + 1} has the type ` +
+        `\`${a.type.toString()}\`. A logical connective over a collection ` +
+        `compiles only when every operand is a boolean or a collection of ` +
+        `the type \`${collectionType}\`. The interpreter evaluates it instead.`
+    );
+  });
 }
 
 /**
@@ -5099,6 +5324,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // on a non-(1-vs-N) length mismatch.
   ElementMax: (args, compile) => {
     if (!args.some(isPyCollectionOperand)) {
+      // With one operand (only from non-canonical input) the result is that
+      // operand, spliced into the parent: a compound operand is grouped, or
+      // `3·ElementMax(x + 1)` compiled to `3 * x + 1`.
+      if (args.length === 1)
+        return isFunction(args[0])
+          ? `(${compile(args[0])})`
+          : compile(args[0]);
       let result = compile(args[0]);
       for (let i = 1; i < args.length; i++)
         result = `np.maximum(${result}, ${compile(args[i])})`;
@@ -5108,6 +5340,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   ElementMin: (args, compile) => {
     if (!args.some(isPyCollectionOperand)) {
+      // With one operand (only from non-canonical input) the result is that
+      // operand, spliced into the parent: a compound operand is grouped, or
+      // `3·ElementMin(x + 1)` compiled to `3 * x + 1`.
+      if (args.length === 1)
+        return isFunction(args[0])
+          ? `(${compile(args[0])})`
+          : compile(args[0]);
       let result = compile(args[0]);
       for (let i = 1; i < args.length; i++)
         result = `np.minimum(${result}, ${compile(args[i])})`;
@@ -5153,7 +5392,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Complex numbers
   Real: 'np.real',
   Imaginary: 'np.imag',
-  Argument: 'np.angle',
+  // `np.add(z, 0)` makes a zero part `+0`. A product with a negative factor
+  // gives `-0` for a zero factor (`complex(0, -1) * y` at `y = 0` is `-0j`),
+  // and `np.angle(-3 - 0j)` is `-π`, where the interpreter, which has no
+  // signed zero, answers `π`. `np.add` and not `+`, because the operand may
+  // be a Python list. CE-262.
+  Argument: (args, compile) => {
+    if (args.length !== 1)
+      throw new Error('Could not compile `Argument`: expected one operand');
+    return `np.angle(np.add(${compile(args[0])}, 0))`;
+  },
   Conjugate: 'np.conj',
 
   // Array/Vector operations
@@ -5497,8 +5745,10 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // `_ce_eqcoll` helper instead. Less/Greater stay as the infix relational
   // operators from PYTHON_OPERATORS; their function forms below serve the
   // collection path.
-  Equal: (args, compile) => compilePythonEquality('Equal', args, compile),
-  NotEqual: (args, compile) => compilePythonEquality('NotEqual', args, compile),
+  Equal: (args, compile, target) =>
+    compilePythonEquality('Equal', args, compile, target),
+  NotEqual: (args, compile, target) =>
+    compilePythonEquality('NotEqual', args, compile, target),
   // Chained (3+ operand) forms fold pairwise — a bare `np.less(a, b, c)` would
   // consume the third operand as numpy's `out`. See `compilePythonRelation`.
   Less: (args, compile) =>
@@ -5509,9 +5759,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     compilePythonRelation('np.greater', args, compile, 'Greater'),
   GreaterEqual: (args, compile) =>
     compilePythonRelation('np.greater_equal', args, compile, 'GreaterEqual'),
-  And: (args, compile) => compilePythonLogical('np.logical_and', args, compile),
-  Or: (args, compile) => compilePythonLogical('np.logical_or', args, compile),
-  Not: 'np.logical_not',
+  And: (args, compile) =>
+    compilePythonLogical('And', 'np.logical_and', args, compile),
+  Or: (args, compile) =>
+    compilePythonLogical('Or', 'np.logical_or', args, compile),
+  Not: (args, compile) => {
+    if (args.length !== 1)
+      throw new Error('Could not compile `Not`: expected one operand');
+    assertPyBroadcastableConnective('Not', args, 'tensor<boolean>');
+    return `np.logical_not(${compile(args[0])})`;
+  },
 
   // Control flow — the base compiler's default emits JS ternaries and a bare
   // `NaN`, both of which are Python SyntaxErrors. Emit Python conditional
@@ -5791,10 +6048,19 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       .map((x) =>
         pythonCheckBindingName(functionLiteralParameterName(x) || '_')
       );
-    const bodyCode = BaseCompiler.compile(body.canonical, {
+    // A lambda body runs when the lambda is called, so a call of a sibling
+    // block-local function resolves against the whole enclosing statement
+    // list (`CompileTarget.lexicalFunctions`), as on the JavaScript target:
+    // a Python closure reads the sibling's binding at call time. The
+    // parameters still shadow those siblings (`withBoundScope`).
+    const scope: CompileTarget<Expression> = {
       ...target,
+      localFunctions: target.lexicalFunctions ?? target.localFunctions,
+    };
+    const bodyCode = BaseCompiler.compile(body.canonical, {
+      ...scope,
       var: (id) => (params.includes(id) ? id : target.var(id)),
-      ...BaseCompiler.withBoundScope(target, params),
+      ...BaseCompiler.withBoundScope(scope, params),
     });
     return `(lambda ${params.join(', ')}: ${bodyCode})`;
   },
@@ -6491,6 +6757,59 @@ function pythonIsRealOnlyLowering(
   );
 }
 
+/**
+ * The parameters of a compiled Python function that must refuse a string
+ * argument, each with the message of the `TypeError` it raises.
+ *
+ * The compiled code reads a parameter of a collection type as a Python
+ * sequence, and Python reads a string as a sequence of code points: `len` of
+ * `"e" + U+0301 + "x"` is 3, where the interpreter counts 2 characters
+ * (grapheme clusters), and `s[0]` is a part of a character. A parameter
+ * refuses a string when the JavaScript target refuses one for the same
+ * declared type (`stringRefusedEntryType`, javascript-target.ts): every type
+ * whose members are lists, indexed collections or collections, bare or with
+ * an element type, except a type that a string inhabits as text
+ * (`indexed_collection<character>`, `string | list<number>`), whose
+ * collection lowerings fail closed at compile time instead. CE-231.
+ *
+ * `name` gives the Python identifier of a parameter. Each entry is the
+ * Python condition that is true for a string argument, and the message.
+ *
+ * The condition and the raise reach `isinstance`, `str` and `TypeError`
+ * through `__import__("builtins")`, because these three names are valid
+ * names for a parameter or a local: with a list parameter named `str`, the
+ * bare test `isinstance(str, str)` received the list as its second argument
+ * and raised `TypeError` for a valid list. A user name `__import__` fails
+ * closed (`pythonAssertNoShadowedBuiltin()`).
+ */
+function pythonStringEntryRefusals(
+  expr: Expression,
+  parameters: ReadonlyArray<string>,
+  name: (p: string) => string
+): Array<[string, string]> {
+  const result: Array<[string, string]> = [];
+  for (const p of parameters) {
+    const t = expr.engine.symbol(p).type?.type;
+    if (t === undefined || !stringRefusedEntryType(t)) continue;
+    result.push([
+      name(p),
+      `"${p}" (type \`${BaseCompiler.declaredTypeText(t)}\`) is compiled as a ` +
+        `Python sequence, and compiled code does not accept a string for it: ` +
+        `it would read the string as code points, not as characters. Pass a ` +
+        `list, or declare the parameter \`string\` to compile text.`,
+    ]);
+  }
+  return result;
+}
+
+/** The Python test that is true when `p` holds a string (see above). */
+const pythonIsStringTest = (p: string): string =>
+  `__import__("builtins").isinstance(${p}, __import__("builtins").str)`;
+
+/** The Python expression of a `TypeError` with this message (see above). */
+const pythonTypeError = (message: string): string =>
+  `__import__("builtins").TypeError(${JSON.stringify(message)})`;
+
 export class PythonTarget implements LanguageTarget<Expression> {
   /** Whether to include 'import numpy as np' in generated code */
   private includeImports: boolean;
@@ -6583,6 +6902,12 @@ export class PythonTarget implements LanguageTarget<Expression> {
         const v = BaseCompiler.tempVar(bcTarget);
         return `[${lowering.element(v)} for ${v} in ${lowering.collection()}]`;
       },
+      // `Not` and `Argument` take their collection operand whole: NumPy's
+      // `np.logical_not` and `np.angle` are element-wise. The codegen of
+      // `Not` checks that the operand is a collection of booleans
+      // (`assertPyBroadcastableConnective`), and a fan-out would hand that
+      // check one element of unknown type instead.
+      collectionAwareHeads: PYTHON_COLLECTION_AWARE_HEADS,
       operators: (op) => PYTHON_OPERATORS[op],
       functions: (id) => PYTHON_FUNCTIONS[id],
       // Resolve a mathematical constant; otherwise return `undefined` so
@@ -6898,6 +7223,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
         ).freeSymbols,
     }).body;
     let code = withPythonHelpers(body);
+    pythonAssertNoShadowedBuiltin(
+      code,
+      expr.symbols.filter((s) => typeof vars?.[s] !== 'string')
+    );
     if (this.includeImports) code = this.withImports(code);
 
     const result: CompilationResult<'python'> = {
@@ -6982,6 +7311,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
             vars ? new Set(Object.keys(vars)) : undefined
           ).freeSymbols,
       }).body
+    );
+    pythonAssertNoShadowedBuiltin(
+      code,
+      expr.symbols.filter((s) => typeof vars?.[s] !== 'string')
     );
     return this.includeImports ? this.withImports(code) : code;
   }
@@ -7132,6 +7465,15 @@ export class PythonTarget implements LanguageTarget<Expression> {
       code += `    r"""${docstring}"""\n`;
     }
 
+    // A string argument for a parameter that the body reads as a sequence is
+    // refused before the body runs (`pythonStringEntryRefusals`).
+    for (const [p, message] of pythonStringEntryRefusals(
+      expr,
+      parameters,
+      ids.name
+    ))
+      code += `    if ${pythonIsStringTest(p)}:\n        raise ${pythonTypeError(message)}\n`;
+
     if (body.includes('\n')) {
       // Block body — the block hook already put `return` on the last line.
       // Indent each statement under the `def`; do not wrap in `return`.
@@ -7148,6 +7490,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
       code += `    return ${body}\n`;
     }
 
+    pythonAssertNoShadowedBuiltin(
+      code,
+      [functionName, ...parameters, ...expr.symbols].map(ids.name)
+    );
     return code;
   }
 
@@ -7186,6 +7532,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     code += `# Vectorized version\n`;
     code += `${functionName} = np.vectorize(_${functionName}_scalar)\n`;
 
+    pythonAssertNoShadowedBuiltin(code, [functionName]);
     return code;
   }
 
@@ -7286,6 +7633,23 @@ export class PythonTarget implements LanguageTarget<Expression> {
         ),
     });
     const params = parameters.map(ids.name).join(', ');
-    return `lambda ${params}: ${ids.body}`;
+    // The string refusal of `compileFunction()`, as an expression: a lambda
+    // body cannot hold a `raise` statement, and the `throw()` of a new
+    // generator raises its argument at once.
+    let lambdaBody = ids.body;
+    const refusals = pythonStringEntryRefusals(expr, parameters, ids.name);
+    if (refusals.length > 0)
+      lambdaBody = `${refusals
+        .map(
+          ([p, message]) =>
+            `(_ for _ in ()).throw(${pythonTypeError(message)}) if ${pythonIsStringTest(p)} else `
+        )
+        .join('')}(${lambdaBody})`;
+    const code = `lambda ${params}: ${lambdaBody}`;
+    pythonAssertNoShadowedBuiltin(
+      code,
+      [...parameters, ...expr.symbols].map(ids.name)
+    );
+    return code;
   }
 }

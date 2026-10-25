@@ -657,7 +657,9 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
     ce.declare('k', '(list<number>) -> number');
     ce.assign('k', ce.box(['Function', ['Sum', 'L'], 'L'] as any));
     const r = build(ce, ['Map', 'k', ['List', ['List', 1, 2], ['List', 3, 4]]]);
-    expect(r.code).toContain('(_fn_k)');
+    // The reference is the checking shim of `k`, which tests that each
+    // element is an array (CE-226.2), with no broadcast wrapper.
+    expect(r.code).toContain('(_fn_k$t)');
     expect(r.code).not.toContain('_fn_k$b');
     expect(r.run({})).toEqual([3, 7]);
     expect(

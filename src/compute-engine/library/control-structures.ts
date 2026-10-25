@@ -709,6 +709,19 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // finite collection of boolean cells, so a condition typed
         // `set<boolean>` or `indexed_collection<boolean>` is a mask as much
         // as a `list<boolean>` is.
+        // A mask of rank 2 or more, or a mask whose rank the type does not
+        // give, selects cell by cell at every level, as the else-less
+        // `If(cond, expr)` does (see the `evaluate` handler), so the result
+        // has the type of that `If`.
+        const shape =
+          cond === undefined
+            ? undefined
+            : elementwiseConditionShape([cond.type]);
+        if (shape !== undefined && shape.rank !== 1)
+          return BoxedType.forResult(
+            elementwiseResultType([expr.type], shape, false),
+            context.engine._typeResolver
+          );
         if (cond !== undefined && isSubtype(cond.type, BOOLEAN_MASK_TYPE)) {
           // Built structurally, not from a type STRING: a literal element
           // type (`When(1, [c1, c2])` types `list<1 | missing>`) has no
@@ -886,6 +899,27 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           // empty list, as the element-wise `Which` answers it. (Before, the
           // empty list fell through to the branch below and distributed the
           // value into held restrictions, `[10{[]}, 20{[]}, …]`.)
+          // A mask of rank 2 or more (a list with a list of conditions in
+          // it, such as `M < 0` over a matrix `M`) selects cell by cell at
+          // every level, as `If` and `Which` do (user decision 2026-10-23,
+          // ROADMAP CE-223.1): `When(v, C)` is the else-less `If(C, v)`. A
+          // cell that no condition selects is the masked value of the cell
+          // (`NaN` for a number, `Missing` otherwise), and a value of lower
+          // rank than the mask is an `incompatible-dimensions` error. When
+          // the selection cannot be computed now, the restriction is held.
+          const mask = conditionCells(c);
+          if (
+            mask !== undefined &&
+            mask.cells.some((cell) => typeof cell !== 'string')
+          )
+            return (
+              evaluateElementwiseSelection(
+                ce,
+                [{ cond, arm: expr }],
+                { cond: c, mask },
+                options
+              ) ?? ce._fn('When', [expr, c])
+            );
           if (
             conds.every(
               (ci) =>

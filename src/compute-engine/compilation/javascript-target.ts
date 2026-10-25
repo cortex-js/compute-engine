@@ -1212,10 +1212,10 @@ function isStringScalarEquality(args: ReadonlyArray<Expression>): boolean {
  * `Equal(["a","b"], "a")` the element-wise `[True, False]` (both probed).
  *
  * This mirrors the Python target's `_ce_eqcoll` admission. The deliberately
- * narrow predicate excludes a mixed
- * (`list<string | number>`) or NESTED all-string participant fails closed even
- * though the kernel was probed faithful on it, and a numeric participant
- * (`Equal(["a","b"], 1)`) fails closed under the tier-0 mixed ruling.
+ * narrow predicate excludes a mixed participant (`list<string | number>`),
+ * which fails closed even though the kernel was probed faithful on it, and a
+ * numeric participant (`Equal(["a","b"], 1)`) fails closed under the tier-0
+ * mixed ruling. A tensor of strings of any rank is admitted (ROADMAP CE-219).
  */
 function isStringCollectionEquality(args: ReadonlyArray<Expression>): boolean {
   return (
@@ -1944,6 +1944,15 @@ function compileJSSelection(
     // (its element), and a scalar arm is lifted.
     const cellOf = (t: Type): Type => {
       if (mayBePointArm(t)) return t;
+      // A point or a list of points: each cell is a point (the point lifted
+      // whole, or an element of the list).
+      if (pointOrPointListDepth(t) !== undefined) {
+        const resolved = resolveTypeAlias(t);
+        if (typeof resolved !== 'string' && resolved.kind === 'union') {
+          const point = resolved.types.find((arm) => isPointElementType(arm));
+          if (point !== undefined) return point;
+        }
+      }
       if (isSubtype(t, 'indexed_collection<any>'))
         return collectionElementType(t) ?? 'unknown';
       return t;
@@ -2009,6 +2018,16 @@ function compileJSSelection(
       if (i % 2 === 0) return `() => (${compile(x, i)})`;
       if (mayBePointArm(x.type.type))
         return `() => _SYS.wholeArm(${compile(x, i)})`;
+      // An arm that is one point or a list of points (`tuple<…> |
+      // list<tuple<…>>`): a point is an array of scalar coordinates at run
+      // time, a list of points an array of arrays, so the value tells the
+      // two apart. A point is lifted whole, as the interpreter lifts it, and
+      // a list of points is indexed, with its points whole at their depth
+      // under a mask that may be nested (`_SYS.pointOrPoints`, ROADMAP
+      // CE-223.2).
+      const pointOrList = pointOrPointListDepth(x.type.type);
+      if (pointOrList !== undefined)
+        return `() => _SYS.pointOrPoints(${flat ? 0 : pointOrList}, ${compile(x, i)})`;
       // A list of points under a mask that may be nested: its points are
       // whole at their depth (`WholeArm`).
       const depth = flat ? undefined : pointDepthOfArm(x.type.type);
@@ -2042,6 +2061,36 @@ function pointDepthOfArm(t: Type): number | undefined {
     cell = next;
   }
   return undefined;
+}
+
+/**
+ * The depth of the points of the list arm of `t`, when `t` is a union of
+ * points with scalar coordinates and lists of such points at one depth
+ * (`tuple<real, real> | list<tuple<real, real>>` gives 1), and `undefined`
+ * for any other type. A value of such a type is a point when it is an array
+ * with no array in it, and a list of points otherwise.
+ */
+function pointOrPointListDepth(t: Type): number | undefined {
+  const resolved = resolveTypeAlias(t);
+  if (typeof resolved === 'string' || resolved.kind !== 'union')
+    return undefined;
+  const scalar = (x: Type): boolean =>
+    isSubtype(x, 'number') || isSubtype(x, 'boolean') || isSubtype(x, 'string');
+  let point = false;
+  let depth: number | undefined;
+  for (const arm of resolved.types) {
+    const r = resolveTypeAlias(arm);
+    if (typeof r !== 'string' && r.kind === 'tuple') {
+      if (!r.elements.every((e) => scalar(e.type))) return undefined;
+      point = true;
+      continue;
+    }
+    const d = pointDepthOfArm(arm);
+    if (d === undefined || (depth !== undefined && depth !== d))
+      return undefined;
+    depth = d;
+  }
+  return point ? depth : undefined;
 }
 
 /**
@@ -7003,6 +7052,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // without the broadcast wrapper and the closure that binds it, which were
     // otherwise built again at every evaluation of the application.
     const literal = args[0];
+    // An argument that an annotation of the literal does not prove is
+    // tested at run time.
+    if (isFunction(literal, 'Function')) {
+      const checked = BaseCompiler.appliedLiteralCheckedCall(
+        literal,
+        () => compile(literal),
+        args.slice(1),
+        target
+      );
+      if (checked !== undefined) return checked;
+    }
     const callee =
       isFunction(literal, 'Function') &&
       literal.nops === args.length &&
@@ -7738,6 +7798,12 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const exp = args[1];
     if (base === null)
       throw new Error('Could not compile `Power`: no argument');
+    // Only non-canonical input has one operand; the interpreter answers an
+    // error for it. Without this check it emitted `_SYS.pow(x, )`.
+    if (exp === undefined || exp === null)
+      throw new Error(
+        'Could not compile `Power`: expected two operands, got one'
+      );
     if (
       BaseCompiler.isComplexValued(base) ||
       BaseCompiler.isComplexValued(exp)
@@ -8150,7 +8216,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     if (nConst !== undefined && realRoot !== undefined)
       return `Math.pow(Math.abs(${compile(arg)}), ${1 / nConst})`;
     if (nConst !== undefined) return `Math.pow(${compile(arg)}, ${1 / nConst})`;
-    return `Math.pow(${compile(arg)}, 1 / (${compile(exp)}))`;
+    // The degree is known only at run time (a variable, or the element of a
+    // broadcast, `Root(p, 3)` over a list `p`): `_SYS.root` gives the real
+    // root of a negative radicand where the interpreter does.
+    return `_SYS.root(${compile(arg)}, ${compile(exp)})`;
   },
   // EXACTLY ONE draw, for every domain kind.
   //
@@ -10525,6 +10594,10 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       options,
       JS_SUPPORTED_MODES.includes('complex')
     ).options;
+    options = BaseCompiler.withVarsMappedUserFunctionHeads(
+      expr.engine,
+      options
+    );
     // The `storage` hints describe shader storage and are IGNORED by this
     // target's lowering — but validated here all the same, outside the
     // fallback `try`: an unknown storage kind or a hint naming something that
@@ -11044,7 +11117,7 @@ function isListEntryType(t: Type): boolean {
  * the layout of its definition: `type seq = indexed_collection` refuses a
  * string as `indexed_collection` does.
  */
-function stringRefusedEntryType(t: Type): boolean {
+export function stringRefusedEntryType(t: Type): boolean {
   if (admitsStringAsText(t)) return false;
   if (isArrayLoweredCollectionType(t)) return true;
   // A union of a scalar and a collection that no member lets a string into
@@ -13961,15 +14034,24 @@ function compileExtremum(
   // A list operand whose value may be the absent `NaN` of a run-time length
   // mismatch (`mayAnswerAbsenceAtRunTime`) is projected on the run-time
   // shape too: the extremum of the absent value is `NaN`.
+  // The interpreter flattens every level of a list operand
+  // (`Max([[1, 2], [2, 4]], 1)` is 4), so the projection flattens every
+  // level too: an array spread one level gave `Math.max(<row>, …)`, which
+  // is `NaN`. An operand of a top type that may hold a list
+  // (`isPossiblyCollectionTypedJS`: `missing | unknown`, the type of an
+  // index into a `list<unknown>`) takes the same projection: it reached
+  // the scalar `Math.max(<array>, 1)` (ROADMAP CE-370).
+  const mayBeArray = (a: Expression): boolean =>
+    couldBeIndexedCollectionOperand(a) || isPossiblyCollectionTypedJS(a);
   if (
     args.length === 1 &&
     args[0] &&
-    (couldBeIndexedCollectionOperand(args[0]) ||
+    (mayBeArray(args[0]) ||
       (isIndexedCollectionOperand(args[0]) &&
         mayAnswerAbsenceAtRunTime(args[0])))
   ) {
     refuseNonNumericScalarProjection(kind, args[0]);
-    return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v')} : ${fn}(_v))(${compile(args[0])})`;
+    return `((_v) => Array.isArray(_v) ? ${guardedReduce('_v.flat(Infinity)')} : ${fn}(_v))(${compile(args[0])})`;
   }
   // Mixed scalars + collection operand(s): `Max`/`Min` REDUCE — fold the
   // scalars and every collection's elements into a single scalar (matching
@@ -13988,7 +14070,7 @@ function compileExtremum(
       (a, i) =>
         a &&
         (isIndexedCollectionOperand(a) ||
-          couldBeIndexedCollectionOperand(a) ||
+          mayBeArray(a) ||
           checkedArray[i] !== undefined)
     )
   ) {
@@ -14000,7 +14082,7 @@ function compileExtremum(
     const isFolded = (a: Expression, i: number): boolean =>
       isIndexedCollectionOperand(a) || checkedArray[i] !== undefined;
     const hasScalar = args.some(
-      (a, i) => !isFolded(a, i) && !couldBeIndexedCollectionOperand(a)
+      (a, i) => !isFolded(a, i) && !mayBeArray(a)
     );
     const params = args.map((_, i) => `_p${i}`);
     const step = (v: string): string =>
@@ -14010,9 +14092,12 @@ function compileExtremum(
     const body = args.map((a, i) => {
       const p = params[i]!;
       if (isFolded(a, i)) return loop(p);
-      if (couldBeIndexedCollectionOperand(a)) {
+      // An operand that may be an array at run time is flattened at every
+      // level, as in the single-operand projection above: its type does not
+      // say how deep its rows are.
+      if (mayBeArray(a)) {
         refuseNonNumericScalarProjection(kind, a);
-        return `if (Array.isArray(${p})) { ${loop(p)} } else { ${step(p)} }`;
+        return `if (Array.isArray(${p})) { ${loop(`${p}.flat(Infinity)`)} } else { ${step(p)} }`;
       }
       return step(p);
     });

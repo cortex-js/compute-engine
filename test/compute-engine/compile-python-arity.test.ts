@@ -220,9 +220,26 @@ describe('PYTHON ARITY — chained relations / logic over collections', () => {
   });
 
   it('And/Or fold pairwise', () => {
+    // Each pair goes through the `_ce_ord` shape guard, which refuses two
+    // lists of different lengths.
     expect(
+      src([
+        'And',
+        ['List', 'True', 'False'],
+        ['List', 'True', 'True'],
+        ['List', 'False', 'True'],
+      ])
+    ).toContain(
+      '_ce_ord(np.logical_and, _ce_ord(np.logical_and, [True, False], [True, True]), [False, True])'
+    );
+  });
+
+  it('And over a list of numbers fails closed', () => {
+    // The interpreter answers `[5, False]`; NumPy reads 5 as true and answers
+    // `[True, False]`.
+    expect(() =>
       src(['And', ['List', 'True', 'False'], ['List', 'True', 'True'], C])
-    ).toContain('np.logical_and(np.logical_and(');
+    ).toThrow(/operand 3 has the type/);
   });
 });
 

@@ -209,7 +209,12 @@ describe('the guard is NOT emitted where a broadcast would be wrong', () => {
     ce.declare('p', 'tuple<number, number>');
     for (const arg of ['p', 'q']) {
       const r = build(ce, ['mid', arg]);
-      expect(r?.code).toBe(`_fn_mid(_.${arg})`);
+      // The undeclared `q` can hold any value at run time, so the call goes
+      // through the checking shim, which tests that the value is an array of
+      // two elements (CE-226.2). The declared `p` needs no test.
+      expect(r?.code).toBe(
+        arg === 'p' ? `_fn_mid(_.${arg})` : `_fn_mid$t(_.${arg})`
+      );
       expect(r?.code).not.toContain('Array.isArray');
       expect(r?.code).not.toContain('_SYS.bcastFn');
       expect(r?.run?.({ [arg]: [3, 5] })).toBe(4);

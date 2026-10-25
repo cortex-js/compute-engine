@@ -1066,7 +1066,7 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
     const result = wgsl.compile(ce.parse('f(x)'));
     expect(result.code).toBe('_fn_f(x)');
     expect(result.preamble).toContain(
-      'fn _fn_f(t: f32) -> f32 {\n  return 3.0 * (t * t) + cos(t);\n}'
+      'fn _fn_f(t: f32) -> f32 {\n  return (3.0 * (t * t) + cos(t));\n}'
     );
   });
 
@@ -1082,11 +1082,11 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
   it('compiles a partial derivative of a function of two arguments', () => {
     const code = (f: string, k1: number, k2: number) =>
       wgsl.compile(ce.box(['Apply', ['Derivative', f, k1, k2], 'x', 'y'])).code;
-    expect(code('Power', 1, 0)).toBe('y * pow(x, y + -1.0)');
-    expect(code('Power', 0, 1)).toBe('log(x) * pow(x, y)');
-    expect(code('Arctan2', 1, 0)).toBe('y / ((x * x) + (y * y))');
-    expect(code('Arctan2', 0, 1)).toBe('-x / ((x * x) + (y * y))');
-    expect(code('Mod', 0, 1)).toBe('-floor(x / y)');
+    expect(code('Power', 1, 0)).toBe('(y * pow(x, y + -1.0))');
+    expect(code('Power', 0, 1)).toBe('(log(x) * pow(x, y))');
+    expect(code('Arctan2', 1, 0)).toBe('(y / ((x * x) + (y * y)))');
+    expect(code('Arctan2', 0, 1)).toBe('(-x / ((x * x) + (y * y)))');
+    expect(code('Mod', 0, 1)).toBe('(-floor(x / y))');
   });
 
   const SQUARE = ['Function', ['Square', 'k'], 'k'];
@@ -1140,7 +1140,7 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('substitutes a scalar argument whole', () => {
     expect(wgsl.compile(ce.box(['Apply', DOUBLE, 'a']), NO_FOLD).code).toBe(
-      '2.0 * a'
+      '(2.0 * a)'
     );
   });
 
@@ -1161,9 +1161,9 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
     ce.declare('V', 'list<real^2>');
     const tuple = ce.box(['Apply', DOUBLE, ['Tuple', 'a', 'b']]);
     expect(tuple.evaluate().toString()).toBe('(2a, 2b)');
-    expect(wgsl.compile(tuple, NO_FOLD).code).toBe('vec2f(2.0 * a, 2.0 * b)');
+    expect(wgsl.compile(tuple, NO_FOLD).code).toBe('vec2f((2.0 * a), (2.0 * b))');
     expect(wgsl.compile(ce.box(['Apply', DOUBLE, 'P']), NO_FOLD).code).toBe(
-      'vec2f(2.0 * P.x, 2.0 * P.y)'
+      'vec2f((2.0 * P.x), (2.0 * P.y))'
     );
     // A list of tuples maps over the list, then over each tuple.
     expect(
@@ -1206,7 +1206,7 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
         ]),
         NO_FOLD
       ).code
-    ).toBe('2.0 * vec2f(a, b)');
+    ).toBe('(2.0 * vec2f(a, b))');
   });
 });
 

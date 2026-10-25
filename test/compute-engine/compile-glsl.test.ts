@@ -839,12 +839,12 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('compiles the prime of a library function from its closed form', () => {
     expect(glsl.compile(ce.parse("\\sin'(t)")).code).toBe('cos(t)');
-    expect(glsl.compile(ce.parse("\\sin''(t)")).code).toBe('-sin(t)');
+    expect(glsl.compile(ce.parse("\\sin''(t)")).code).toBe('(-sin(t))');
   });
 
   it('compiles the prime of a user function from its closed form', () => {
     const code = glsl.compile(ce.parse("h'(x)")).code!;
-    expect(code).toBe('3.0 * (x * x) + cos(x)');
+    expect(code).toBe('(3.0 * (x * x) + cos(x))');
     for (const x of [-2, 0.5, 3])
       expect(run(code, x)).toBeCloseTo(
         ce.parse("h'(x)").subs({ x }).N().re,
@@ -856,7 +856,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
     const result = glsl.compile(ce.parse('f(x)'));
     expect(result.code).toBe('_fn_f(x)');
     expect(result.preamble).toContain(
-      'float _fn_f(float t) {\n  return 3.0 * (t * t) + cos(t);\n}'
+      'float _fn_f(float t) {\n  return (3.0 * (t * t) + cos(t));\n}'
     );
   });
 
@@ -872,11 +872,11 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
   it('compiles a partial derivative of a function of two arguments', () => {
     const code = (f: string, k1: number, k2: number) =>
       glsl.compile(ce.box(['Apply', ['Derivative', f, k1, k2], 'x', 'y'])).code;
-    expect(code('Power', 1, 0)).toBe('y * pow(x, y + -1.0)');
-    expect(code('Power', 0, 1)).toBe('log(x) * pow(x, y)');
-    expect(code('Arctan2', 1, 0)).toBe('y / ((x * x) + (y * y))');
-    expect(code('Arctan2', 0, 1)).toBe('-x / ((x * x) + (y * y))');
-    expect(code('Mod', 0, 1)).toBe('-floor(x / y)');
+    expect(code('Power', 1, 0)).toBe('(y * pow(x, y + -1.0))');
+    expect(code('Power', 0, 1)).toBe('(log(x) * pow(x, y))');
+    expect(code('Arctan2', 1, 0)).toBe('(y / ((x * x) + (y * y)))');
+    expect(code('Arctan2', 0, 1)).toBe('(-x / ((x * x) + (y * y)))');
+    expect(code('Mod', 0, 1)).toBe('(-floor(x / y))');
   });
 
   it('declines an application that would repeat an effect', () => {
@@ -961,7 +961,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('substitutes a scalar argument whole', () => {
     expect(glsl.compile(ce.box(['Apply', DOUBLE, 'a']), NO_FOLD).code).toBe(
-      '2.0 * a'
+      '(2.0 * a)'
     );
   });
 
@@ -995,9 +995,9 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
     ce.declare('V', 'list<real^2>');
     const tuple = ce.box(['Apply', DOUBLE, ['Tuple', 'a', 'b']]);
     expect(tuple.evaluate().toString()).toBe('(2a, 2b)');
-    expect(glsl.compile(tuple, NO_FOLD).code).toBe('vec2(2.0 * a, 2.0 * b)');
+    expect(glsl.compile(tuple, NO_FOLD).code).toBe('vec2((2.0 * a), (2.0 * b))');
     expect(glsl.compile(ce.box(['Apply', DOUBLE, 'P']), NO_FOLD).code).toBe(
-      'vec2(2.0 * P.x, 2.0 * P.y)'
+      'vec2((2.0 * P.x), (2.0 * P.y))'
     );
     // A list of tuples maps over the list, then over each tuple.
     expect(
@@ -1040,7 +1040,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
         ]),
         NO_FOLD
       ).code
-    ).toBe('2.0 * vec2(a, b)');
+    ).toBe('(2.0 * vec2(a, b))');
   });
 });
 

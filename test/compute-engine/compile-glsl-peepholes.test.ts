@@ -210,13 +210,18 @@ describe('small emission peepholes', () => {
     expect(wgsl(['Mod', 'x', 2]).code).toBe(
       '((((x) % (2.0)) - (2.0) * (((sign((x) % (2.0)) * sign((2.0))) - abs((sign((x) % (2.0)) * sign((2.0))))) * 0.5)) % (2.0))'
     );
-    // A `vecN` dividend keeps it too: `fract` takes one argument, and the
-    // operand-shape gate reads the emitted call against the head's two
-    // operands, so a one-argument call beside a scalar divisor is judged a
-    // genType mismatch and declines.
+    // A `vecN` dividend takes the peephole too (CE-254): the lowering
+    // declares that `fract` leaves the divisor out of the call, so the
+    // operand-shape check judges `fract(v)` against the dividend alone.
     const cev = fresh();
     cev.declare('v', 'vector<2>');
-    expect(glsl(['Mod', 'v', 1], cev).code).toBe('mod(v, 1.0)');
+    expect(glsl(['Mod', 'v', 1], cev).code).toBe('fract(v)');
+    expect(wgsl(['Mod', 'v', 1], cev).code).toBe('fract(v)');
+    // A dividend with no `fract` overload (a matrix) still declines.
+    cev.declare('M', 'matrix<real^(2x2)>');
+    expect(() => glsl(['Mod', 'M', 1], cev)).toThrow(
+      /`fract` .* has no `matN` overload/
+    );
   });
 
   it('the fractional part agrees with the interpreter below zero', () => {

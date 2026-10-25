@@ -520,10 +520,9 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
       ).toThrow(/incompatible-type/);
     // A tuple with list components is data, not a point.
     expect(() =>
-      glsl.compile(
-        ce.expr(['f', ['Tuple', ['List', 1, 2], ['List', 3, 4]]]),
-        { constantFold: false }
-      )
+      glsl.compile(ce.expr(['f', ['Tuple', ['List', 1, 2], ['List', 3, 4]]]), {
+        constantFold: false,
+      })
     ).toThrow(/has a component that is a collection/);
   });
 
@@ -857,10 +856,30 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
     );
   });
 
-  it('a loop-form Sum inside a case BODY still fails closed', () => {
+  it('a loop-form Sum inside a case BODY runs inside its case (CE-274)', () => {
     const ce = new ComputeEngine();
+    // The statement form of `If`/`Which`: the loop runs in the branch of
+    // its case, only when the case is selected.
+    const code = glsl.compile(
+      ce.box([
+        'Match',
+        'x',
+        ['MatchCase', 1, bigSum],
+        ['MatchCase', '_', -1],
+      ] as any),
+      NO_FOLD
+    ).code!;
+    const loop = code.indexOf('for (int i = 1; i <= 1000; i++)');
+    expect(code).toMatch(/if \(x == 1\.0\) \{/);
+    expect(loop).toBeGreaterThan(code.indexOf('if ('));
+    expect(loop).toBeLessThan(code.indexOf('} else {'));
+  });
+
+  it('a loop-form Sum in a case BODY fails closed where no statement fits', () => {
+    const ce = new ComputeEngine();
+    // `compileToSource()` answers one expression and has no statement sink.
     expect(() =>
-      glsl.compile(
+      glsl.compileToSource(
         ce.box([
           'Match',
           'x',
@@ -869,7 +888,7 @@ describe('GPU MATCH — the SUBJECT is unconditional', () => {
         ] as any),
         NO_FOLD
       )
-    ).toThrow(/Could not compile `Match`: a conditionally-evaluated branch/);
+    ).toThrow(/Could not compile/);
   });
 });
 

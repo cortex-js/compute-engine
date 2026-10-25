@@ -278,6 +278,34 @@ describe('J5: a complex value built as a + i·b stays on the real lane', () => {
     ).toBe(9);
   });
 
+  test('a one-operand Subtract is its operand, and a one-operand Divide or Power fails closed (CE-251)', () => {
+    // `Subtract(x)` evaluates to `x`. Read as a prefix `-` it emitted
+    // `3 * (-x + 1)`, which answered -3 at x = 2 where the interpreter
+    // answers 9. `Divide(x)` and `Power(x)` evaluate to `Error("missing")`,
+    // and emitted invalid code (`/(x + 1)`, `_SYS.pow(x + 1, )`).
+    const raw = (json: unknown) => ce.box(json as never, { form: 'raw' });
+    const sub = raw(['Multiply', 3, ['Subtract', ['Add', 'x', 1]]]);
+    expect(sub.canonical.subs({ x: 2 }).evaluate().re).toBe(9);
+    for (const to of ['javascript', 'glsl', 'wgsl']) {
+      const code = compile(sub, { to, fallback: false } as never)
+        .code as string;
+      expect(code).toMatch(/^3(\.0)? \* \((_\.)?x \+ 1(\.0)?\)$/);
+    }
+    expect(
+      compile(sub, { to: 'javascript', fallback: false } as never).run!({
+        x: 2,
+      })
+    ).toBe(9);
+    for (const to of ['javascript', 'glsl', 'wgsl'])
+      for (const head of ['Divide', 'Power'])
+        expect(() =>
+          compile(raw(['Multiply', 3, [head, ['Add', 'x', 1]]]), {
+            to,
+            fallback: false,
+          } as never)
+        ).toThrow(/expected two operands, got one/);
+  });
+
   test('an opaque complex value keeps the object-building lowering', () => {
     expect(codeOf(ce, '\\arg(\\sin(x + iy))')).toContain('_SYS.carg(');
   });

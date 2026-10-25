@@ -443,14 +443,14 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
   });
 
   test('a closed form the target cannot lower declines, without throwing', () => {
-    // `d/dx Γ(x) = Γ(x)ψ(x)` — a closed form, but glsl has no `Digamma`.
-    // The handler catches the inner throw and DECLINES, so the report is the
-    // generic `D`-level decline, not the more informative inner
-    // `Digamma: … no lowering` message. That trade-off is deliberate: a
+    // `d/dx W(x) = W(x)/(x(1 + W(x)))` — a closed form, but glsl has no
+    // `LambertW`. The handler catches the inner throw and DECLINES, so the
+    // report is the generic `D`-level decline, not the more informative inner
+    // `LambertW: … no lowering` message. That trade-off is deliberate: a
     // per-operator handler runs BEFORE the target's function table, so letting
     // the inner error escape would pre-empt a custom target that maps
-    // `Digamma`. Do not "restore" the leaked inner message here.
-    const expr = ce.box(['D', ['Gamma', 'x'], 'x']);
+    // `LambertW`. Do not "restore" the leaked inner message here.
+    const expr = ce.box(['D', ['LambertW', 'x'], 'x']);
     expect(compile(expr).success).toBe(true);
     let result: ReturnType<typeof compile>;
     expect(() => {
@@ -459,7 +459,7 @@ describe('COMPILE DERIVATIVE — no closed form declines cleanly', () => {
     expect(result!.success).toBe(false);
     expect(result!.error).toContain('Could not compile `D`: ');
     expect(result!.error).toContain('Could not compile');
-    expect(result!.error).not.toContain('Digamma');
+    expect(result!.error).not.toContain('LambertW');
   });
 });
 

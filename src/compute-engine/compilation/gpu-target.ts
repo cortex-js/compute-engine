@@ -71,7 +71,10 @@ import {
   pointHasBroadcastComponent,
   statementBodyHead,
 } from './base-compiler.js';
-import type { LoopInvariantBinding } from './base-compiler.js';
+import type {
+  LoopInvariantBinding,
+  MatchStatementClause,
+} from './base-compiler.js';
 import { complexContinuation } from './complex-continuation.js';
 import {
   signatureEffects,
@@ -702,6 +705,29 @@ const GPU_COLOR_SPACES: ReadonlySet<string> = new Set([
   'hsl',
   'hsv',
 ]);
+
+/**
+ * The `vec3` of the three channels of an `Oklch` or `Oklab` color, wrapped in
+ * the run-time channel check `_gpu_finite_color` (see
+ * `GPU_FINITE_COLOR_GLSL`), which gives the `NaN` color for an infinite or
+ * `NaN` channel, as the javascript target does.
+ *
+ * The check is left out when the three channels are finite number literals:
+ * such a triple passes it in every fragment. This keeps the emission of a
+ * constant color as short as it was. CE-241.3.
+ */
+function gpuFiniteColorChannels(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression> | undefined
+): string {
+  const channels = args.slice(0, 3);
+  const code = `${gpuVec3(target)}(${channels.map((x) => compile(x)).join(', ')})`;
+  const finiteLiterals = channels.every(
+    (x) => isNumber(x) && x.im === 0 && Number.isFinite(x.re)
+  );
+  return finiteLiterals ? code : `_gpu_finite_color(${code})`;
+}
 
 /**
  * Compile an operand that sits at a COLOR position.
@@ -1583,6 +1609,78 @@ function compileGPUStatementSelection(
     lines.map(terminated).join('\n')
   );
   return tv;
+}
+
+/**
+ * A `Match` as a STATEMENT (`compileGPUStatementSelection`), for a match
+ * whose case body or guard needs statements a ternary cannot hold
+ * (`gpuNeedsStatements`): `Match(n, 1 -> Σ_{k=1}^{⌊t⌋} cos(kt), _ -> 0)`
+ * runs the loop inside the branch of its case, only when the case is
+ * selected, as the interpreter does. The ternary form declined it, because
+ * the loop could only be hoisted ahead of the ternary, where it would run
+ * for every case.
+ *
+ * The cases (`MatchStatementClause`, from `BaseCompiler.compileMatchTernary`)
+ * are given to the statement form as `Which` clauses: the case test is the
+ * condition and the case body the value, and an irrefutable last case is the
+ * `True` clause. The statement form reads the clause EXPRESSIONS for its
+ * requirements (no effect in a clause, no write outside the clauses, one
+ * static type for every value); the expression for a case test is its guard,
+ * or `False` for a case with no guard, because a pattern is a constant with
+ * no effect. The clause CODE comes from the functions of the case, so the
+ * comparisons with the subject are those of the ternary form.
+ *
+ * `undefined`, and the ternary form, when no case needs statements, when the
+ * subject has an effect (its evaluation would move ahead of the siblings of
+ * the selection), when a case value is complex (the ternary form does not
+ * lift a real case value to a `vec2`, and neither does this form), and in
+ * every case where the statement form itself answers `undefined`. CE-274.
+ */
+function compileGPUMatchStatement(
+  subject: Expression,
+  clauses: ReadonlyArray<MatchStatementClause>,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (
+    !clauses.some(
+      (c) =>
+        gpuNeedsStatements(c.body) ||
+        (c.guard !== undefined && gpuNeedsStatements(c.guard))
+    )
+  )
+    return undefined;
+  if (BaseCompiler.hasObservableEffect(subject)) return undefined;
+  const ce = subject.engine;
+  // The statement form reads a condition that is the symbol `True` as the
+  // default branch: it emits the value with no test and drops the clauses
+  // after it. So only a case that always matches (no test) gets `True`. A
+  // case that can fail gets its guard, which is read only for effects and
+  // writes, or `False` when the guard is absent or is the symbol `True`.
+  const whichArgs = clauses.flatMap((c) => [
+    c.test === undefined
+      ? ce.True
+      : c.guard === undefined || isSymbol(c.guard, 'True')
+        ? ce.False
+        : c.guard,
+    c.body,
+  ]);
+  if (gpuSelectionIsComplex('Which', whichArgs)) return undefined;
+  return compileGPUStatementSelection(
+    whichArgs,
+    (_, i) => {
+      const clause = clauses[Math.floor(i / 2)];
+      // An odd position is a case value. A position past the first is
+      // evaluated only when the clauses before it did not match, so it is
+      // compiled through `compileGPUConditionalArm`: the statement form
+      // captures the statements of such a piece into its branch and lets the
+      // guard of that function pass them once.
+      if (i % 2 === 1)
+        return compileGPUConditionalArm('Match', clause.compileBody, target);
+      const test = clause.test!;
+      return i === 0 ? test() : compileGPUConditionalArm('Match', test, target);
+    },
+    target
+  );
 }
 
 /**
@@ -3159,6 +3257,74 @@ function markAggregateConsuming<T extends CompiledFunction<Expression>>(
 }
 
 /**
+ * Lowerings that, in one of their forms, leave an operand out of the emitted
+ * call because a peephole has absorbed it. GLSL's and WGSL's `Mod(a, 1)` emit
+ * `fract(a)` (the divisor 1 is absorbed), and `Power(2, y)` emits `exp2(y)`
+ * (the base 2 is absorbed). The emitted call then has fewer arguments than
+ * the head has operands, and judging it against all of the operand shapes
+ * gives a false decline for a `vecN` operand: `fract(v)` beside a scalar
+ * divisor read as a `vecN` and a scalar given to a builtin that requires
+ * matching genTypes. So these peepholes applied to scalar operands only.
+ *
+ * The value is a function of the operands and of the emitted source. It
+ * answers the 0-based positions of the operands the emission left out, or
+ * `undefined` when the emission is not the form that leaves them out (the
+ * same head can emit `mod(a, 2.0)`, or the exact form of a sine hash). The
+ * shape check then judges the emission against the other operands only, so a
+ * `matN` or an array dividend of `fract` still declines. Declared with
+ * `markOperandConsuming` next to the table that defines the lowering, never
+ * inferred from the head name alone. CE-254.
+ */
+const GPU_OPERAND_CONSUMING = new WeakMap<
+  object,
+  (
+    args: ReadonlyArray<Expression>,
+    code: string
+  ) => ReadonlySet<number> | undefined
+>();
+
+/**
+ * Declare that `fn` leaves out the operands `consumed` answers — see
+ * `GPU_OPERAND_CONSUMING`.
+ */
+export function markOperandConsuming<T extends CompiledFunction<Expression>>(
+  fn: T,
+  consumed: (
+    args: ReadonlyArray<Expression>,
+    code: string
+  ) => ReadonlySet<number> | undefined
+): T {
+  if (typeof fn === 'function') GPU_OPERAND_CONSUMING.set(fn, consumed);
+  return fn;
+}
+
+/**
+ * The `consumed` predicate of a peephole that emits the ONE-argument builtin
+ * `callee` in place of a two-operand head and leaves out operand `slot` when
+ * that operand is the constant `value`: `Mod(a, 1)` → `fract(a)` is
+ * `gpuAbsorbedConstant('fract', 1, 1)`, `Power(2, y)` → `exp2(y)` is
+ * `gpuAbsorbedConstant('exp2', 0, 2)`.
+ */
+export function gpuAbsorbedConstant(
+  callee: string,
+  slot: number,
+  value: number
+): (
+  args: ReadonlyArray<Expression>,
+  code: string
+) => ReadonlySet<number> | undefined {
+  return (args, code) => {
+    const operand = args[slot];
+    if (args.length !== 2 || operand === null || operand === undefined)
+      return undefined;
+    if (tryGetConstant(operand) !== value) return undefined;
+    const call = gpuTopLevelCall(code);
+    if (call?.callee !== callee || call.argCount !== 1) return undefined;
+    return new Set([slot]);
+  };
+}
+
+/**
  * `Median` and `Variance` destructure a SINGLE `List` operand into its
  * elements; given N scalar arguments instead they use them one for one, and
  * the gate must go on judging that form.
@@ -3317,6 +3483,9 @@ const GPU_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'InverseHaversine',
   'Gamma',
   'Factorial',
+  'Digamma',
+  'Trigamma',
+  'PolyGamma',
   'Zeta',
   'HurwitzZeta',
   'LerchPhi',
@@ -3375,6 +3544,17 @@ function gpuCheckOperandShapes(
   if (typeof lowering === 'function') {
     const consumes = GPU_AGGREGATE_CONSUMING.get(lowering);
     if (consumes?.(args) === true) return;
+    // A peephole that left an operand out of its emission is judged against
+    // the operands it emitted (`GPU_OPERAND_CONSUMING`).
+    const consumed = GPU_OPERAND_CONSUMING.get(lowering)?.(args, code);
+    if (consumed !== undefined && consumed.size > 0)
+      return gpuCheckOperandShapes(
+        head,
+        args.filter((_, i) => !consumed.has(i)),
+        code,
+        rules,
+        preambleFor
+      );
   }
 
   // Annotated (rather than inferred) so a `decline(…)` call narrows what
@@ -3736,13 +3916,19 @@ function foldNaryBuiltin(
   head: string,
   args: ReadonlyArray<Expression>,
   compile: (e: Expression) => string,
-  rules: GPUShapeRules | undefined
+  rules: GPUShapeRules | undefined,
+  target?: CompileTarget<Expression>
 ): string {
   if (args.length === 0)
     throw new Error(
       `Could not compile \`${name}\`: needs at least one argument`
     );
-  if (args.length === 1) return compile(args[0]);
+  // One operand: no call is emitted and the lowering is the operand's own
+  // code, so it keeps its grouping in an infix parent
+  // (`gpuIdentityPassthrough`): `3·ElementMax(x + 1)` emitted `3.0 * x + 1.0`.
+  // CE-251.1.
+  if (args.length === 1)
+    return gpuIdentityPassthrough(args[0], compile, target);
   const shapes = args.map(gpuOperandShape);
   const slots = rules?.scalarGenTypeSlots.get(name);
   // A builtin the language gives no scalar/genType overload AT ALL is judged
@@ -3900,6 +4086,65 @@ function compileGPUExtremum(
   // reduction has no extremum), and the shader NaN is reachable for a literal.
   if (parts.length === 0) return `(${gpuNaN(target)})`;
   return `(${fold(parts)})`;
+}
+
+/**
+ * Lower `GCD`/`LCM` as a left fold of the two-argument preamble helper
+ * (`_gpu_gcd`, `_gpu_lcm`) over the scalar components of the operands, the
+ * reading of the interpreter and of the javascript target, where a
+ * collection operand contributes its elements: `GCD(v)` for a `vector<3>`
+ * `v` is `_gpu_gcd(_gpu_gcd(v.x, v.y), v.z)`, and `GCD(v, 4)` folds the 4
+ * in as well.
+ *
+ * A collection operand is read through `gpuScalarComponents`, as by the
+ * `Max`/`Min` reduction (`compileGPUExtremum`): a compound vector operand is
+ * bound to a temporary first, and an operand with no compile-time component
+ * list (a matrix, an array of run-time length) declines. An EMPTY collection
+ * contributes nothing. With no component left the value is the identity of
+ * the fold (0 for `GCD`, 1 for `LCM`), and with one component it is the
+ * absolute value of the component, as in the interpreter (`GCD(-12)` is 12).
+ * CE-280.11.
+ */
+function compileGPUGcdLcm(
+  head: 'GCD' | 'LCM',
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const helper = head === 'GCD' ? '_gpu_gcd' : '_gpu_lcm';
+  const parts: string[] = [];
+  for (const a of args) {
+    if (a === null || a === undefined)
+      throw new Error(`Could not compile \`${head}\`: missing argument`);
+    // Recognized before the operand is compiled: `[]` lowers to `float[0]()`,
+    // which `gpuScalarComponents` would refuse.
+    if (a.isCollection && a.count === 0) continue;
+    // Each operand is compiled exactly once: a second `compile()` would
+    // advance the `_gpu_rnd_draw` counter again.
+    const code = compile(a);
+    const call = gpuTopLevelCall(code);
+    const aggregate =
+      gpuOperandShape(a) !== 'scalar' ||
+      (call !== undefined && GPU_AGGREGATE_CONSTRUCTOR.test(call.callee));
+    if (!aggregate) {
+      parts.push(code);
+      continue;
+    }
+    const comps = gpuScalarComponents(a, code, target);
+    if (comps === undefined)
+      throw new Error(
+        `Could not compile \`${head}\`: the operand \`${a.toString()}\` lowers to a shader ` +
+          `${gpuShapeName(gpuOperandShape(a))} with no compile-time component ` +
+          `list, so there is nothing for the fold to run over.`
+      );
+    parts.push(...comps);
+  }
+  if (parts.length === 0)
+    return formatFloat(head === 'GCD' ? 0 : 1, target.language);
+  if (parts.length === 1) return `abs(${parts[0]})`;
+  let acc = parts[0];
+  for (let i = 1; i < parts.length; i++) acc = `${helper}(${acc}, ${parts[i]})`;
+  return acc;
 }
 
 /**
@@ -5887,7 +6132,9 @@ const gpuBinomial: CompiledFunction<Expression> = ([n, k], compile, target) => {
       );
     return formatFloat(1, target.language);
   }
-  if (kConst === 1) return compile(n);
+  // `Binomial(n, 1)` is `n`: an identity lowering, so the operand keeps its
+  // grouping in an infix parent (`gpuIdentityPassthrough`). CE-251.1.
+  if (kConst === 1) return gpuIdentityPassthrough(n, compile, target);
   // The operand is spliced `k` times — bind an impure (Random-family) one to
   // a hoisted temporary; a pure one compiles directly (byte-identical).
   const c = gpuOperandOnce('Binomial', n, compile, target);
@@ -6144,6 +6391,40 @@ function gpuBoundIsOneRead(code: string): boolean {
 }
 
 /**
+ * The loop-invariant bindings (`BaseCompiler.hoistLoopInvariants`) that some
+ * code reads, in their original order.
+ *
+ * A binding can be left with no reader. The pass binds each class it hoists,
+ * but the lowering of a later class may fold its operand away instead of
+ * reading it: in `\sum_{i=1}^{200}(i x + \min([1,2,3]))` the list literal is
+ * bound as its own class, and `Min` of the list then folds to `1.0` without
+ * reading the binding. The declaration of such a binding is dead code. It is
+ * valid source, but it is removed here so the emitted shader declares only
+ * what it reads.
+ *
+ * `readers` is the code that runs after the declarations (the loop body, the
+ * statements the body hoisted, the unrolled terms). A binding is kept when its
+ * name occurs there or in the code of a LATER binding that is kept: the
+ * bindings come in dependency order, so a binding reads only earlier ones.
+ * CE-258.
+ */
+function gpuReadInvariants(
+  invariants: ReadonlyArray<LoopInvariantBinding>,
+  readers: ReadonlyArray<string>
+): LoopInvariantBinding[] {
+  const kept: LoopInvariantBinding[] = [];
+  const read = [...readers];
+  for (let i = invariants.length - 1; i >= 0; i--) {
+    const [name, code] = invariants[i];
+    const ref = new RegExp(`(?<![\\w$])${name}(?![\\w$])`);
+    if (!read.some((c) => ref.test(c))) continue;
+    kept.unshift(invariants[i]);
+    read.push(code);
+  }
+  return kept;
+}
+
+/**
  * The declaration of one loop-invariant binding
  * (`BaseCompiler.hoistLoopInvariants`) in the shader language.
  *
@@ -6264,12 +6545,11 @@ function compileGPUSumProduct(
     ): string => {
       // A subexpression the terms all share because it mentions no index is
       // declared once, ahead of them. Every unrolled term runs, so the local is
-      // evaluated exactly when the terms are.
-      for (const [name, code, node] of invariants)
-        BaseCompiler.hoistStatement(
-          target,
-          gpuInvariantDeclaration(name, code, node, isWGSL)
-        );
+      // evaluated exactly when the terms are. The declarations are inserted
+      // at this position of the sink once the terms are compiled, so that a
+      // binding no term reads is left out (`gpuReadInvariants`).
+      const sink = target.hoist?.stmts;
+      const declarationsAt = sink?.length ?? 0;
       const terms: string[] = [];
       // Statements a term hoists (a nested loop-form Sum with a symbolic bound)
       // are drained into the ENCLOSING sink: the index is substituted as a
@@ -6335,7 +6615,19 @@ function compileGPUSumProduct(
         );
         terms.push(`(${tv})`);
       }
-      return `(${terms.reduce((a, b) => combine(a, b))})`;
+      const result = `(${terms.reduce((a, b) => combine(a, b))})`;
+      if (sink !== undefined && invariants.length > 0)
+        sink.splice(
+          declarationsAt,
+          0,
+          ...gpuReadInvariants(invariants, [
+            result,
+            ...sink.slice(declarationsAt),
+          ]).map(([name, code, node]) =>
+            gpuInvariantDeclaration(name, code, node, isWGSL)
+          )
+        );
+      return result;
     };
     // The bindings are STATEMENTS, so they can only be emitted where the
     // enclosing position accepts hoisted statements. Without a sink the
@@ -6501,8 +6793,8 @@ function compileGPUSumProduct(
 
   const loop = [
     ...boundDecl,
-    ...invariants.map(([name, code, node]) =>
-      gpuInvariantDeclaration(name, code, node, isWGSL)
+    ...gpuReadInvariants(invariants, [body, ...bodySink.stmts]).map(
+      ([name, code, node]) => gpuInvariantDeclaration(name, code, node, isWGSL)
     ),
     `${accDecl} = ${identity};`,
     `for (${indexDecl} = ${lowerStr}; ${index} <= ${upperRef}; ${index}++) {`,
@@ -6900,9 +7192,23 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // rejects `ElementMax([1,2,3])` as missing an argument), so the reduction
   // case does not arise. (`Clamp` is mapped to the native `clamp` above.)
   ElementMax: (args, compile, target) =>
-    foldNaryBuiltin('max', 'ElementMax', args, compile, gpuShapeRules(target)),
+    foldNaryBuiltin(
+      'max',
+      'ElementMax',
+      args,
+      compile,
+      gpuShapeRules(target),
+      target
+    ),
   ElementMin: (args, compile, target) =>
-    foldNaryBuiltin('min', 'ElementMin', args, compile, gpuShapeRules(target)),
+    foldNaryBuiltin(
+      'min',
+      'ElementMin',
+      args,
+      compile,
+      gpuShapeRules(target),
+      target
+    ),
   Mix: 'mix',
   // Control-flow forms — the base compiler's default emits a JS ternary and a
   // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
@@ -7097,6 +7403,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // guard, and each condition past the first — the way the `If`/`Which`
   // lowerings do. The SUBJECT stays outside it: it is compiled first and
   // evaluated unconditionally, so a loop-form `Sum` there is safe to hoist.
+  //
+  // A case body or guard that needs statements (a loop-form `Sum`) takes the
+  // statement form of `If`/`Which` (`compileGPUMatchStatement`).
   Match: (args, _compile, target) =>
     BaseCompiler.compileMatchTernary(args[0]!.engine, args, target, {
       ternary: (c, t, e) => gpuConditional(c, t, e, target),
@@ -7104,12 +7413,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       noMatch: gpuNaN(target),
       allowStrings: false,
       arm: (f) => compileGPUConditionalArm('Match', f, target),
+      statement: (clauses) =>
+        compileGPUMatchStatement(args[0]!, clauses, target),
     }),
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
     if (base === null)
       throw new Error('Could not compile `Power`: no argument');
+    // Only non-canonical input has one operand; the interpreter answers an
+    // error for it. Without this check the lowering read a property of the
+    // absent exponent and failed with a `TypeError`.
+    if (exp === undefined || exp === null)
+      throw new Error(
+        'Could not compile `Power`: expected two operands, got one'
+      );
     // A base that may be negative under an exponent that may be a float:
     // the interpreter gives the real root when the rational recovered from
     // the exponent has an odd denominator (`BaseCompiler.negativeBaseFloatPower`).
@@ -7250,13 +7568,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // `exp2(y * log2(2.0))`, so this drops a logarithm the compiler would
     // otherwise have to fold.
     //
-    // A SCALAR exponent only: the base is consumed, so the emitted call has
-    // one argument where the head has two operands, and the operand-shape
-    // gate reads the two against each other. A `vecN` exponent beside the
-    // scalar base would be judged a genType mismatch and decline, where the
-    // `pow` form below widens the base into the vector itself.
-    if (bConst === 2 && gpuOperandShape(exp) === 'scalar')
-      return `exp2(${compile(exp)})`;
+    // The base is left out of the emitted call, which is declared after this
+    // table (`markOperandConsuming`). So the operand-shape check judges
+    // `exp2(v)` against the exponent alone, and a `vecN` exponent compiles
+    // too.
+    if (bConst === 2) return `exp2(${compile(exp)})`;
     // Literal integer exponent: emit sign-preserving code. GLSL/WGSL `pow(x, y)`
     // is spec-defined as `exp2(y·log2(x))` and is undefined for a negative base
     // even when `y` is an integer-valued literal — on a real GPU `pow(-2.0, 3.0)`
@@ -7779,6 +8095,24 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (x === null) throw new Error('Could not compile `Erf`: no argument');
     return `_gpu_erf(${compile(x)})`;
   },
+  // ψ, ψ₁ and ψ⁽ⁿ⁾ of a real argument (`GPU_POLYGAMMA_PREAMBLE_GLSL`). The
+  // interpreter has a complex value for a complex argument, so the three
+  // heads are real-only lowerings (`GPU_REAL_ONLY_LOWERINGS`).
+  Digamma: ([x], compile) => {
+    if (x === null)
+      throw new Error('Could not compile `Digamma`: no argument');
+    return `_gpu_digamma(${compile(x)})`;
+  },
+  Trigamma: ([x], compile) => {
+    if (x === null)
+      throw new Error('Could not compile `Trigamma`: no argument');
+    return `_gpu_trigamma(${compile(x)})`;
+  },
+  PolyGamma: (args, compile) => {
+    if (args.length !== 2 || args[0] === null || args[1] === null)
+      throw new Error('Could not compile `PolyGamma`: need two arguments');
+    return `_gpu_polygamma(${compile(args[0])}, ${compile(args[1])})`;
+  },
   // The two-argument form is Wolfram's generalized `Zeta[s, a]`: the Hurwitz
   // zeta for a > 0, but real |k + a|^(−s) terms and no pole for a ≤ 0, as the
   // interpreter's `evaluateGeneralizedZeta` computes it — so it lowers to
@@ -8088,7 +8422,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       target
     )}, ${gpuColorOperand('ColorContrast', fg, compile, target)})`;
   },
-  ContrastingColor: (args, compile, target) => {
+  // `markAggregateConsuming`: every colour operand goes through
+  // `gpuColorOperand`, which checks its shape and converts it to an OKLCh
+  // `vec3` itself. The emitted `select(fg2, fg1, cond)` of WGSL has as many
+  // arguments as the head has operands, but its arguments are the converted
+  // colours and a boolean condition, not the operands. Judged against the
+  // operand shapes, a colour literal such as `Rgb(1, 0, 0)` (a scalar shape)
+  // beside a tuple background (a `vec3` shape) made the shape check refuse
+  // valid source. CE-241.2.
+  ContrastingColor: markAggregateConsuming((args, compile, target) => {
     if (args.length === 0)
       throw new Error('Could not compile `ContrastingColor`: no argument');
     // WGSL has no ternary operator: the selection must be spelled `select`.
@@ -8170,7 +8512,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       white,
       black
     );
-  },
+  }),
   ColorToColorspace: ([color, space], compile, target) => {
     if (color === null || space === null)
       throw new Error(
@@ -8342,17 +8684,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (args.length < 3)
       throw new Error('Could not compile `Oklab`: need 3 components');
     assertNoGPUAlpha('Oklab', args);
-    const v3 = gpuVec3(target);
-    return `_gpu_oklab_to_oklch(${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])}))`;
+    return `_gpu_oklab_to_oklch(${gpuFiniteColorChannels(args, compile, target)})`;
   },
 
   Oklch: (args, compile, target) => {
     if (args.length < 3)
       throw new Error('Could not compile `Oklch`: need 3 components');
     assertNoGPUAlpha('Oklch', args);
-    // Already in canonical form — no conversion needed.
-    const v3 = gpuVec3(target);
-    return `${v3}(${compile(args[0])}, ${compile(args[1])}, ${compile(args[2])})`;
+    // Already in canonical form — no conversion needed, only the channel
+    // check of `gpuFiniteColorChannels`.
+    return gpuFiniteColorChannels(args, compile, target);
   },
 
   // ---------------------------------------------------------------------------
@@ -8675,24 +9016,19 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Statistical functions
 
   /**
-   * GCD of two scalar arguments.
+   * GCD and LCM of any number of scalar, vector or literal-list operands: a
+   * fold of the two-argument preamble helpers `_gpu_gcd` (Euclidean algorithm
+   * via `mod`) and `_gpu_lcm` over the components (`compileGPUGcdLcm`).
    *
-   * Uses a preamble helper `_gpu_gcd` (Euclidean algorithm via `mod`).
-   * Only two-argument form is supported in GPU targets.
+   * `markAggregateConsuming`: the fold DESTRUCTURES its collection operands
+   * into scalar components, as the `Max`/`Min` reduction does.
    */
-  GCD: (args, compile) => {
-    if (args.length < 2)
-      throw new Error('Could not compile `GCD`: need at least two arguments');
-    if (args.length > 2)
-      throw new Error(
-        'Could not compile `GCD`: GPU target supports only two-argument GCD'
-      );
-    const a = args[0];
-    const b = args[1];
-    if (a === null || b === null)
-      throw new Error('Could not compile `GCD`: missing argument');
-    return `_gpu_gcd(${compile(a)}, ${compile(b)})`;
-  },
+  GCD: markAggregateConsuming((args, compile, target) =>
+    compileGPUGcdLcm('GCD', args, compile, target)
+  ),
+  LCM: markAggregateConsuming((args, compile, target) =>
+    compileGPUGcdLcm('LCM', args, compile, target)
+  ),
 
   /**
    * Variance of a compile-time-known list.
@@ -8755,7 +9091,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
    * none of the operand's aggregate shape. The N-scalar-argument form passes
    * its operands through and stays gated.
    */
-  Median: markAggregateConsuming((args, compile) => {
+  Median: markAggregateConsuming((args, compile, target) => {
     // Normalise to element list
     let elems: ReadonlyArray<Expression>;
     if (args.length === 1 && isFunction(args[0], 'List')) {
@@ -8781,8 +9117,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Then return the middle element (or average of two middles for even N).
     const compiled = elems.map((e) => compile(e));
 
-    // For N=1, median is the single element
-    if (n === 1) return compiled[0];
+    // For N=1, median is the single element. That is an identity lowering, so
+    // the element keeps its grouping in an infix parent
+    // (`gpuParenthesizeIdentity`). CE-251.1.
+    if (n === 1) return gpuParenthesizeIdentity(elems[0], compiled[0], target);
 
     // Build a small inline sort using a Batcher odd-even sort network.
     // We represent the "array" as a mutable JS array of code strings.
@@ -8903,12 +9241,16 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // `Apply(Derivative(f, 1), x)`. A shader has no function values, so the
   // callee cannot be emitted as a lambda. Instead, the arguments are
   // substituted into the body of the callee's function literal, and the
-  // substituted body is compiled (`gpuAppliedBody`).
+  // substituted body is compiled (`gpuAppliedBody`). The `Apply` node is a
+  // function call to its parent, so its code is spliced into an infix
+  // parent as one operand: a body with an infix head (`9x² + cos x`, the
+  // derivative of `x³ + sin x`) is parenthesized, or `3·h'(x)` compiled to
+  // `9.0 * (x * x) + cos(x)`.
   Apply: (args, compile, target) => {
     const body = gpuAppliedBody(args, target);
     if (typeof body === 'string')
       throw new Error(`Could not compile \`Apply\`: ${body}`);
-    return compile(body);
+    return gpuIdentityPassthrough(body, compile, target);
   },
 
   // Function (lambda) — not supported in GPU
@@ -8918,6 +9260,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     );
   },
 };
+
+// `Power(2, y)` emits `exp2(y)` and leaves the base out of the emitted call;
+// the operand-shape check reads that declaration (`GPU_OPERAND_CONSUMING`).
+markOperandConsuming(GPU_FUNCTIONS.Power, gpuAbsorbedConstant('exp2', 0, 2));
 
 /**
  * The body of the callee of `Apply(callee, args…)` with the arguments
@@ -9886,6 +10232,283 @@ fn _gpu_gammaln(z: f32) -> f32 {
 `;
 
 /**
+ * GPU digamma, trigamma and polygamma functions, real-valued (f32), ported
+ * from `digamma`, `trigamma` and `polygamma` in
+ * `numerics/special-functions.ts`. GLSL syntax.
+ *
+ * - `_gpu_digamma(x)` is ψ(x): for x < 0 the reflection
+ *   ψ(x) = ψ(1 − x) − π cot(πr), with r = x − round(x) exact, then the
+ *   recurrence ψ(z) = ψ(z + 1) − 1/z up to z >= 6, then the asymptotic
+ *   series ln z − 1/(2z) − Σ B₂ₖ/(2k z^(2k)) to B₈. `_gpu_trigamma(x)` is
+ *   ψ₁(x), the same way: ψ₁(x) = π²/sin²(πr) − ψ₁(1 − x), ψ₁(z) =
+ *   ψ₁(z + 1) + 1/z², and 1/z + 1/(2z²) + Σ B₂ₖ/z^(2k+1) to B₈.
+ * - `_gpu_polygamma(n, x)` is ψ⁽ⁿ⁾(x) for an integer order 0 <= n <= 24
+ *   (n = 0 and 1 call the two helpers above): the sum of the terms
+ *   (−1)^(n+1) n!/(x + k)^(n+1) up to x + k >= n + 10, then the asymptotic
+ *   series of the double kernel. Each term is exp(ln n! − (n + 1) ln|z|),
+ *   so that neither n! nor z^(n+1) overflows. A negative x with an even n
+ *   gives terms of both signs, and the helper answers NaN when the
+ *   estimated error, 6e−8·(6 + the largest exponent)·(the sum of the term
+ *   sizes), exceeds 3e−5 of the value: next to a zero, and next to a
+ *   half-integer x, where the two largest terms cancel (about 1% of the
+ *   points of the grid below with x < 0).
+ *
+ * At a pole (a non-positive integer x) the three helpers answer +∞, the
+ * float projection of the interpreter's undirected infinity, as
+ * `_gpu_gamma` does and as a pole folded at compile time is spelled
+ * (pole-encoding ruling of 2026-08-28, `docs/COMPILATION-MODEL.md`); the
+ * double kernels answer NaN there. NaN: −∞, a non-integer order, an order
+ * outside 0..24, and x < −4096 for n >= 2 (the recurrence costs one term
+ * per unit of |x|; ψ and ψ₁ use the reflection instead and have no such
+ * limit). At +∞, ψ is +∞ and ψ₁ and ψ⁽ⁿ⁾ are 0, as in the interpreter.
+ * Cost: ψ and ψ₁ at most 6 recurrence steps; ψ⁽ⁿ⁾ at most |x| + n + 11
+ * terms, each with an exp and a log, and 10 series terms.
+ *
+ * Accuracy, measured with an f32 model of this text (every operation
+ * rounded to f32 with `Math.fround`, every built-in the double result
+ * rounded once; `test/compute-engine/compile-gpu-polygamma.test.ts`)
+ * against the double kernels at the f32 operands, on x from −30 to 60 in
+ * steps of 0.01, |x| from 1e−8 to 1e8, and the points 1e−6, 1e−4 and 1e−2
+ * from 0, −1, −2, −5, −10, −25 and −1000: ψ is within 9.3e−7 relative
+ * where |ψ(x)| is at least 1/10 of the size of its parts (the reflection
+ * term, the recurrence terms and ln z), and within 2.2e−7 of that size
+ * everywhere (next to a zero of ψ, such as x = 1.4616…, the error is
+ * absolute); ψ₁ is within 2.9e−7 relative; ψ⁽ⁿ⁾ for 2 <= n <= 24 is
+ * within 1.0e−5 relative where it is not NaN. With exp, log and pow that
+ * scale their argument the way GPU drivers do and a log2 2.5 ulp off (a
+ * worse GPU than an Apple M5 Max): ψ 2.2e−6 and 4.6e−7, ψ₁ 2.9e−7, ψ⁽ⁿ⁾
+ * 3.2e−5 for n <= 16 and 5.0e−5 for n <= 24 (the exponents of the terms
+ * reach about 90, and the error of exp grows with its argument). On an
+ * Apple M5 Max GPU (headless Chromium, WebGL2 through ANGLE Metal and
+ * WebGPU, which gave the same values), on the same grid for n = 0, 1, 2,
+ * 3, 4, 6, 10, 16 and 24: ψ within 5.9e−6 relative where |ψ(x)| >= 0.1,
+ * ψ₁ within 3.7e−7, ψ⁽ⁿ⁾ within 1.5e−5 where it is not NaN.
+ */
+export const GPU_POLYGAMMA_PREAMBLE_GLSL = `
+float _gpu_digamma(float x) {
+  const float PI = 3.14159265358979;
+  // A pole (a non-positive integer) answers the float projection of the
+  // interpreter's undirected infinity, +Infinity, as _gpu_gamma does. The
+  // lower bound keeps -inf out: it satisfies x == floor(x), and the
+  // interpreter answers NaN there.
+  if (x <= 0.0 && x == floor(x))
+    return x >= -3.4028234663852886e38 ? _gpu_inf() : _gpu_nan();
+  float result = 0.0;
+  float z = x;
+  if (x < 0.0) {
+    // cot(PI x) = cot(PI r) with r = x - round(x), which is exact: the
+    // product PI x keeps only an absolute accuracy next to an integer.
+    float r = x - floor(x + 0.5);
+    result = -PI / tan(PI * r);
+    z = 1.0 - x;
+  }
+  for (int k = 0; k < 6; k++) {
+    if (z >= 6.0) break;
+    result -= 1.0 / z;
+    z += 1.0;
+  }
+  float z2 = 1.0 / (z * z);
+  return result + (log(z) - 0.5 / z -
+    z2 * (1.0 / 12.0 - z2 * (1.0 / 120.0 - z2 * (1.0 / 252.0 - z2 / 240.0))));
+}
+
+float _gpu_trigamma(float x) {
+  const float PI = 3.14159265358979;
+  if (x <= 0.0 && x == floor(x)) // a pole, and -inf: see _gpu_digamma
+    return x >= -3.4028234663852886e38 ? _gpu_inf() : _gpu_nan();
+  float result = 0.0;
+  float sgn = 1.0;
+  float z = x;
+  if (x < 0.0) {
+    float sr = sin(PI * (x - floor(x + 0.5)));
+    result = PI * PI / (sr * sr);
+    sgn = -1.0;
+    z = 1.0 - x;
+  }
+  float t = 0.0;
+  for (int k = 0; k < 6; k++) {
+    if (z >= 6.0) break;
+    t += 1.0 / (z * z);
+    z += 1.0;
+  }
+  float z2 = 1.0 / (z * z);
+  t += 1.0 / z + 0.5 * z2 +
+    z2 / z * (1.0 / 6.0 - z2 * (1.0 / 30.0 - z2 * (1.0 / 42.0 - z2 / 30.0)));
+  return result + sgn * t;
+}
+
+float _gpu_polygamma(float n, float x) {
+  if (n == 0.0) return _gpu_digamma(x);
+  if (n == 1.0) return _gpu_trigamma(x);
+  if (n != floor(n) || n < 0.0 || n > 24.0) return _gpu_nan();
+  if (x <= 0.0 && x == floor(x)) // a pole, and -inf: see _gpu_digamma
+    return x >= -3.4028234663852886e38 ? _gpu_inf() : _gpu_nan();
+  if (x < -4096.0) return _gpu_nan(); // one term per unit of |x|
+  if (x > 3.4e38) return 0.0; // +inf
+  float fact = 1.0;
+  for (int j = 2; j <= 24; j++) {
+    if (float(j) > n) break;
+    fact *= float(j);
+  }
+  float lf = log(fact);
+  float n1 = n + 1.0;
+  // With an odd power n + 1, a term at a negative z is negative.
+  bool oddPower = mod(n1, 2.0) == 1.0;
+  float sum = 0.0;
+  float mag = 0.0;
+  float xmax = 0.0;
+  float z = x;
+  for (int k = 0; k < 4132; k++) {
+    if (z >= n + 10.0) break;
+    float e = lf - n1 * log(abs(z));
+    float t = exp(e);
+    sum += (z < 0.0 && oddPower) ? -t : t;
+    mag += t;
+    xmax = max(xmax, abs(e));
+    z += 1.0;
+  }
+  // The asymptotic series of the double kernel, from a = n!/z^(n+1):
+  // (n-1)!/z^n + n!/(2 z^(n+1)) + sum B_2k (2k+n-1)!/((2k)! z^(2k+n)).
+  float a = exp(lf - n1 * log(z));
+  float tail = a * z / n + 0.5 * a;
+  float f = a * n1 / (2.0 * z);
+  float b[10] = float[10](
+    1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0,
+    -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0, 43867.0 / 798.0,
+    -174611.0 / 330.0
+  );
+  float prev = 3.0e38;
+  for (int k = 1; k <= 10; k++) {
+    float term = b[k - 1] * f;
+    if (abs(term) >= prev) break;
+    tail += term;
+    prev = abs(term);
+    float m = float(2 * k);
+    f = f * (m + n) * (m + n + 1.0) / ((m + 1.0) * (m + 2.0) * z * z);
+  }
+  float res = sum + tail;
+  // 500 = 3e-5 / 6e-8: the terms of both signs cancel where res is small
+  // against their sizes. The ratio, not a product, so that nothing
+  // overflows next to f32's largest value.
+  if (x < 0.0 && oddPower && !((mag + abs(tail)) / abs(res) <= 500.0 / (6.0 + xmax)))
+    return _gpu_nan();
+  return mod(n, 2.0) == 0.0 ? -res : res;
+}
+`;
+
+/**
+ * GPU digamma, trigamma and polygamma preamble (WGSL syntax). See
+ * `GPU_POLYGAMMA_PREAMBLE_GLSL`.
+ */
+export const GPU_POLYGAMMA_PREAMBLE_WGSL = `
+fn _gpu_digamma(x: f32) -> f32 {
+  let PI = 3.14159265358979;
+  // See the GLSL preamble: +Infinity at a pole, NaN at -inf.
+  if (x <= 0.0 && x == floor(x)) {
+    return select(_gpu_nan(), _gpu_inf(), x >= -3.4028234663852886e38);
+  }
+  var result: f32 = 0.0;
+  var z: f32 = x;
+  if (x < 0.0) {
+    let r = x - floor(x + 0.5);
+    result = -PI / tan(PI * r);
+    z = 1.0 - x;
+  }
+  for (var k: i32 = 0; k < 6; k = k + 1) {
+    if (z >= 6.0) { break; }
+    result = result - 1.0 / z;
+    z = z + 1.0;
+  }
+  let z2 = 1.0 / (z * z);
+  return result + (log(z) - 0.5 / z -
+    z2 * (1.0 / 12.0 - z2 * (1.0 / 120.0 - z2 * (1.0 / 252.0 - z2 / 240.0))));
+}
+
+fn _gpu_trigamma(x: f32) -> f32 {
+  let PI = 3.14159265358979;
+  if (x <= 0.0 && x == floor(x)) { // a pole, and -inf: see _gpu_digamma
+    return select(_gpu_nan(), _gpu_inf(), x >= -3.4028234663852886e38);
+  }
+  var result: f32 = 0.0;
+  var sgn: f32 = 1.0;
+  var z: f32 = x;
+  if (x < 0.0) {
+    let sr = sin(PI * (x - floor(x + 0.5)));
+    result = PI * PI / (sr * sr);
+    sgn = -1.0;
+    z = 1.0 - x;
+  }
+  var t: f32 = 0.0;
+  for (var k: i32 = 0; k < 6; k = k + 1) {
+    if (z >= 6.0) { break; }
+    t = t + 1.0 / (z * z);
+    z = z + 1.0;
+  }
+  let z2 = 1.0 / (z * z);
+  t = t + (1.0 / z + 0.5 * z2 +
+    z2 / z * (1.0 / 6.0 - z2 * (1.0 / 30.0 - z2 * (1.0 / 42.0 - z2 / 30.0))));
+  return result + sgn * t;
+}
+
+fn _gpu_polygamma(n: f32, x: f32) -> f32 {
+  if (n == 0.0) { return _gpu_digamma(x); }
+  if (n == 1.0) { return _gpu_trigamma(x); }
+  if (n != floor(n) || n < 0.0 || n > 24.0) { return _gpu_nan(); }
+  if (x <= 0.0 && x == floor(x)) { // a pole, and -inf: see _gpu_digamma
+    return select(_gpu_nan(), _gpu_inf(), x >= -3.4028234663852886e38);
+  }
+  if (x < -4096.0) { return _gpu_nan(); } // one term per unit of |x|
+  if (x > 3.4e38) { return 0.0; } // +inf
+  var fact: f32 = 1.0;
+  for (var j: i32 = 2; j <= 24; j = j + 1) {
+    if (f32(j) > n) { break; }
+    fact = fact * f32(j);
+  }
+  let lf = log(fact);
+  let n1 = n + 1.0;
+  // With an odd power n + 1, a term at a negative z is negative.
+  let oddPower = (n1 % 2.0) == 1.0;
+  var sum: f32 = 0.0;
+  var mag: f32 = 0.0;
+  var xmax: f32 = 0.0;
+  var z: f32 = x;
+  for (var k: i32 = 0; k < 4132; k = k + 1) {
+    if (z >= n + 10.0) { break; }
+    let e = lf - n1 * log(abs(z));
+    let t = exp(e);
+    sum = sum + select(t, -t, z < 0.0 && oddPower);
+    mag = mag + t;
+    xmax = max(xmax, abs(e));
+    z = z + 1.0;
+  }
+  // See the GLSL preamble: the asymptotic series from a = n!/z^(n+1).
+  let a = exp(lf - n1 * log(z));
+  var tail: f32 = a * z / n + 0.5 * a;
+  var f: f32 = a * n1 / (2.0 * z);
+  let b = array<f32, 10>(
+    1.0 / 6.0, -1.0 / 30.0, 1.0 / 42.0, -1.0 / 30.0, 5.0 / 66.0,
+    -691.0 / 2730.0, 7.0 / 6.0, -3617.0 / 510.0, 43867.0 / 798.0,
+    -174611.0 / 330.0
+  );
+  var prev: f32 = 3.0e38;
+  for (var k: i32 = 1; k <= 10; k = k + 1) {
+    let term = b[k - 1] * f;
+    if (abs(term) >= prev) { break; }
+    tail = tail + term;
+    prev = abs(term);
+    let m = f32(2 * k);
+    f = f * (m + n) * (m + n + 1.0) / ((m + 1.0) * (m + 2.0) * z * z);
+  }
+  let res = sum + tail;
+  // See the GLSL preamble: 500 = 3e-5 / 6e-8, as a ratio.
+  if (x < 0.0 && oddPower && !((mag + abs(tail)) / abs(res) <= 500.0 / (6.0 + xmax))) {
+    return _gpu_nan();
+  }
+  return select(res, -res, (n % 2.0) == 0.0);
+}
+`;
+
+/**
  * GPU Hurwitz/Riemann/generalized zeta, real-valued (f32) — ported from
  * `hurwitzEMComplex` and `hurwitzZetaComplex` in
  * `numerics/numeric-complex.ts`, at im = 0 throughout, with the value
@@ -9899,8 +10522,19 @@ fn _gpu_gammaln(z: f32) -> f32 {
  * - `_gpu_hurwitz_zeta_em` is the raw Euler-Maclaurin sum; `_gpu_zeta` and
  *   `_gpu_hurwitz_zeta` add the functional-equation / base-point dispatch
  *   that avoids its cancellation at s < 1/2.
- * - `_gpu_zeta` reflects only for s < 0 and returns NaN below s = −24.5,
- *   where the Lanczos `_gpu_gamma(1 − s)` used to overflow. The reflection
+ * - `_gpu_zeta` reflects only for s < 0 and returns NaN below s = −63. The
+ *   limit was s = −24.5, where the Lanczos `_gpu_gamma(1 − s)` used to
+ *   overflow; Stirling's series below carries the reflection further, and
+ *   near s = −64.8 its pow(y/(2πe), y) overflows. Against mpmath at 1864
+ *   f32 values of s from −80 to −24.5 (steps of 1/16, the points 1e−6 to
+ *   0.3 from each integer, and 400 random values), the f32 model of this
+ *   text is within 5.2e−6 relative from −24.5 to −63 (1.2e−5 from −63
+ *   to −64); with its log2 2.5 ulp off, within 2.9e−5 (3.5e−5 from −63 to
+ *   −64). On an Apple M5 Max GPU (WebGL2 and WebGPU), the 1306 of these
+ *   points from −63 to −24.5 are within 7.3e−6, and every point below −63
+ *   is NaN (or 0 at an even integer). `_gpu_zeta_near_one` keeps the old
+ *   limit (see there). The
+ *   reflection
  *   takes 2^s π^(s−1) Γ(1 − s) = 2 Γ(1 − s)/(2π)^(1−s) from the Lanczos
  *   `_gpu_gamma` for 1 − s < 8, and from Stirling's series
  *   (`_gpu_zeta_gamma_2pi`) from 1 − s = 8 on: the pow arguments of the
@@ -10013,7 +10647,8 @@ float _gpu_hurwitz_zeta_em(float s, float a, float sm1) {
 // multiplied by (2 pi)^(y-x). Neither Gamma(x) nor (2 pi)^x is formed (they
 // overflow f32 near x = 35 and x = 48), and the largest pow argument is
 // about y log2(y/(2 pi e)), 15 at x = 25.5, where the Lanczos _gpu_gamma
-// calls pow with an argument of about 126.
+// calls pow with an argument of about 126, and 122 at x = 64, the end of
+// the range _gpu_riemann_zeta uses.
 vec2 _gpu_zeta_gamma_2pi(float x) {
   const float PI = 3.14159265358979;
   float p = 1.0;
@@ -10039,7 +10674,9 @@ float _gpu_riemann_zeta(float s, float sm1) {
   if (s == 0.0) return -0.5;
   if (s < 0.0) {
     if (s == floor(s) && mod(s, 2.0) == 0.0) return 0.0; // trivial zero
-    if (s < -24.5) return _gpu_nan(); // f32 _gpu_gamma(1 - s) overflows
+    // Below s = -63 the f32 error passes 3e-5 in an f32 model whose log2 is
+    // 2.5 ulp off, and near s = -64.8 pow(y / (2 pi e), y) overflows.
+    if (s < -63.0) return _gpu_nan();
     // sin(PI s/2) = (-1)^n sin(PI (s/2 - n)): s/2 - n is exact, so the
     // sine keeps its relative accuracy next to an even s.
     float hs = s / 2.0;
@@ -10067,8 +10704,11 @@ float _gpu_zeta(float s) {
 // zeta(s, 1+h) = sum C(-s,k) h^k zeta(s+k), |h| < 1 — no cancellation,
 // since each zeta(s+k) reflects to Re >= 0. See zetaNearOneComplex. The
 // stop tolerance is near the f32 epsilon (1.2e-7), and 100 terms reach it
-// for every s >= -24.5 (below that _gpu_zeta is NaN).
+// for every s >= -24.5. Below, the series answers NaN: with _gpu_zeta
+// defined down to s = -63, 46 of 1500 values of zeta(s, a) for s from -63.5
+// to -24.5 were more than 3e-5 off.
 float _gpu_zeta_near_one(float s, float h) {
+  if (s < -24.5) return _gpu_nan();
   float sum = _gpu_zeta(s);
   float c = 1.0;
   float hk = 1.0;
@@ -10358,7 +10998,7 @@ fn _gpu_riemann_zeta(s: f32, sm1: f32) -> f32 {
   if (s == 0.0) { return -0.5; }
   if (s < 0.0) {
     if (s == floor(s) && (s % 2.0) == 0.0) { return 0.0; } // trivial zero
-    if (s < -24.5) { return _gpu_nan(); } // f32 gamma overflows
+    if (s < -63.0) { return _gpu_nan(); } // see the GLSL version
     // sin(PI s/2) = (-1)^n sin(PI (s/2 - n)), with s/2 - n exact.
     let hs = s / 2.0;
     let n = floor(hs + 0.5);
@@ -10383,6 +11023,7 @@ fn _gpu_zeta(s: f32) -> f32 {
 
 // zeta(s, 1+h) = sum C(-s,k) h^k zeta(s+k) — see GLSL's _gpu_zeta_near_one.
 fn _gpu_zeta_near_one(s: f32, h: f32) -> f32 {
+  if (s < -24.5) { return _gpu_nan(); } // see the GLSL version
   var sum = _gpu_zeta(s);
   var c = 1.0;
   var hk = 1.0;
@@ -10640,7 +11281,21 @@ fn _gpu_zeta_generalized(s: f32, a: f32) -> f32 {
  *   Hermite-type representation (mpmath's), with the upper incomplete gamma
  *   at the complex argument −a·log z computed in f32 (series, continued
  *   fraction, or the closed form for an integer s) and an integral of at
- *   most 16 panels. Its terms cancel as |z| grows.
+ *   most 16 panels. Its terms cancel as |z| grows. The panels are not cut
+ *   by the phase rate |s|/b of the integrand (the interpreter's
+ *   `hermiteTail` cuts its panels to 12 radians): the 16-panel limit
+ *   already declines every call with b = 1 below s ≈ −16.9 (at s = −30 it
+ *   would need 28 panels), and where a panel holds up to 27 radians the
+ *   phase changes fast only near t = 0, where e^(−2πt) is not yet small
+ *   but (b² + t²)^(−s/2) is. In the f32 model, on 60000 random points (s
+ *   from −30 to −1, half of them integers, z from −1100 to −0.05 and from
+ *   1.1 to 150, a from 0.05 to 6), the 16100 values it answers are within
+ *   4.9e−6, and computed in double the quadrature error of the panels is
+ *   at most 3.8e−6 of |Φ| on the 33589 points of a denser grid it
+ *   answers. Cutting the panels to 12 radians answered 1927 fewer of the
+ *   60000 values, with about the same worst error (4.6e−6), because more
+ *   calls passed the 16-panel limit (CE-235). It also declines an infinite
+ *   result: a term past the f32 range passed its error test (∞ <= ∞).
  * - PolyLog below z = −1 with a negative non-integer order, where those
  *   decline: Jonquière's inversion formula (`_gpu_poly_log_inversion`).
  * - Last, for z < 0 and −30 <= s <= −3, where every method above declines
@@ -11281,7 +11936,10 @@ vec2 _gpu_lerch_hermite(float z, float s, float a) {
   float e2 = t2abs * (2.0 + abs(sig * log2(b))) + bs * h.z;
   float ephi = (e1 + e2) + (a3 + 3.0 * (t1 + t2abs + abs(t3)));
   float bound = EPS * (err + abs(zk) * (ephi + (float(m) + 2.0) * abs(phi)) + abs(res));
-  if (!(bound <= 3.0e-5 * abs(res))) return vec2(0.0);
+  // An infinite res passes the test above (inf <= inf) although it is a
+  // term past the f32 range, not the value: Phi(-0.5, -30, 10) = 8.0e28
+  // was -inf. The other methods then answer, or the call is NaN.
+  if (!(bound <= 3.0e-5 * abs(res)) || !(abs(res) < 3.4e38)) return vec2(0.0);
   return vec2(res, 1.0);
 }
 
@@ -12177,7 +12835,8 @@ fn _gpu_lerch_hermite(z: f32, s: f32, a: f32) -> vec2<f32> {
   let e2 = t2abs * (2.0 + abs(sig * log2(b))) + bs * h.z;
   let ephi = (e1 + e2) + (a3 + 3.0 * (t1 + t2abs + abs(t3)));
   let bound = EPS * (err + abs(zk) * (ephi + (f32(m) + 2.0) * abs(phi)) + abs(res));
-  if (!(bound <= 3.0e-5 * abs(res))) { return vec2<f32>(0.0); }
+  // See the GLSL version: an infinite res is a term that overflowed.
+  if (!(bound <= 3.0e-5 * abs(res)) || !(abs(res) < 3.4e38)) { return vec2<f32>(0.0); }
   return vec2<f32>(res, 1.0);
 }
 
@@ -13169,6 +13828,11 @@ fn _fractal_julia(z_in: vec2f, c: vec2f, maxIter: i32) -> f32 {
  * Euclid path with no tolerance — mirrors the JS realGcd so integer inputs
  * never regress (e.g. `_gpu_gcd(4000000.0, 2.0) == 2.0`). The final
  * scale-mismatch guard keeps the result <= min(|a|, |b|).
+ *
+ * `_gpu_lcm` is `|a| / gcd(a, b) · |b|`, and 0 when an operand is 0, the
+ * value the javascript target gives for real operands (`LCM(4.5, 6)` is 18).
+ * Dividing before multiplying keeps the intermediate value no larger than
+ * the result.
  */
 export const GPU_GCD_PREAMBLE_GLSL = `
 float _gpu_gcd(float a, float b) {
@@ -13193,6 +13857,11 @@ float _gpu_gcd(float a, float b) {
     b = t;
   }
   return a > mn ? mn : a;
+}
+
+float _gpu_lcm(float a, float b) {
+  if (a == 0.0 || b == 0.0) return 0.0;
+  return abs(a) / _gpu_gcd(a, b) * abs(b);
 }
 `;
 
@@ -13224,6 +13893,11 @@ fn _gpu_gcd(a_in: f32, b_in: f32) -> f32 {
   }
   if (a > mn) { return mn; }
   return a;
+}
+
+fn _gpu_lcm(a: f32, b: f32) -> f32 {
+  if (a == 0.0 || b == 0.0) { return 0.0; }
+  return abs(a) / _gpu_gcd(a, b) * abs(b);
 }
 `;
 
@@ -14193,11 +14867,41 @@ fn _gpu_srgb_roundtrip(rgb: vec3f) -> vec3f {
 }
 `;
 
+/**
+ * The channel check of the `Oklch` and `Oklab` lowerings (GLSL syntax): the
+ * triple itself when its three channels are finite, and the `NaN` color
+ * (three `NaN` channels) otherwise.
+ *
+ * OKLab and OKLCh channels have no bound, so an infinite or `NaN` channel is
+ * not a color: the interpreter refuses it with `incompatible-type`, and the
+ * javascript target answers the `NaN` color (`readColorChannels`,
+ * `numerics/color-conversion.ts`). The `Oklch` lowering passes its channels
+ * through without a conversion, and `_gpu_oklab_to_oklch` keeps the lightness
+ * as it is, so without this check `Oklch(+oo, 0.1, 30)` gave the raw channels
+ * `(Inf, 0.1, 30)`. The test is against `3.4028234663852886e38`, the largest
+ * finite 32-bit float, because WGSL has no `isinf`: every finite channel
+ * passes it, and an infinite or `NaN` channel fails it.
+ */
+const GPU_FINITE_COLOR_GLSL = `
+vec3 _gpu_finite_color(vec3 c) {
+  if (abs(c.x) <= 3.4028234663852886e38 && abs(c.y) <= 3.4028234663852886e38 && abs(c.z) <= 3.4028234663852886e38) return c;
+  return vec3(intBitsToFloat(0x7FC00000));
+}
+`;
+
+/** The channel check (WGSL syntax). See `GPU_FINITE_COLOR_GLSL`. */
+const GPU_FINITE_COLOR_WGSL = `
+fn _gpu_finite_color(c: vec3f) -> vec3f {
+  if (abs(c.x) <= 3.4028234663852886e38 && abs(c.y) <= 3.4028234663852886e38 && abs(c.z) <= 3.4028234663852886e38) { return c; }
+  return vec3f(_gpu_nan());
+}
+`;
+
 /** The whole colour library, round trip included, in one dependency order. */
 const GPU_COLOR_LIBRARY_GLSL =
-  GPU_COLOR_PREAMBLE_GLSL + GPU_SRGB_ROUNDTRIP_GLSL;
+  GPU_COLOR_PREAMBLE_GLSL + GPU_SRGB_ROUNDTRIP_GLSL + GPU_FINITE_COLOR_GLSL;
 const GPU_COLOR_LIBRARY_WGSL =
-  GPU_COLOR_PREAMBLE_WGSL + GPU_SRGB_ROUNDTRIP_WGSL;
+  GPU_COLOR_PREAMBLE_WGSL + GPU_SRGB_ROUNDTRIP_WGSL + GPU_FINITE_COLOR_WGSL;
 
 /**
  * Per-function complex arithmetic definitions with dependency metadata.
@@ -17229,6 +17933,13 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       options,
       GPU_SUPPORTED_MODES.includes('complex')
     ).options;
+    // A `vars` entry is not given to the calls of a user function here, as
+    // the JavaScript target does (`BaseCompiler.withVarsMappedUserFunctionHeads`).
+    // On a shader a `vars` entry names a uniform or an input, which cannot be
+    // called: `vars: { g: 'u_g' }` would compile `g(x)` to `u_g(x)`, which is
+    // not valid shader source. A call of `g` compiles the engine definition of
+    // `g` (`_fn_g`) instead. A caller that has a shader function to call
+    // names it in the `functions` option.
     // The `storage` hints, validated OUTSIDE the fallback `try`: an unknown
     // storage kind, or a hint naming something that is not a free symbol of
     // `expr`, is an option-contract error (the same class as an unknown
@@ -17624,6 +18335,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // emitted code either (only `_gpu_poly_log` itself appears there), so it
     // shares this flag.
     const usesLerch = /_gpu_(lerch|poly_log)/.test(code);
+    // `_gpu_digamma`, `_gpu_trigamma` and `_gpu_polygamma` call `_gpu_nan()`
+    // and `_gpu_inf()` from their bodies (at -inf and at a pole).
+    const usesPolygamma = /_gpu_(di|tri|poly)gamma\(/.test(code);
     if (
       !isWGSL &&
       (code.includes('_gpu_nan') ||
@@ -17631,7 +18345,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         atPointShapes.length > 0 ||
         texAtWidths.length > 0 ||
         usesZeta ||
-        usesLerch)
+        usesLerch ||
+        usesPolygamma)
     )
       preamble += GPU_NAN_PREAMBLE_GLSL;
     // `_gpu_gamma` calls `_gpu_inf()` from its BODY at a pole (the float
@@ -17649,7 +18364,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         code.includes('_gpu_gamma') ||
         /_gpu_ipi_\w+\(/.test(code) ||
         usesZeta ||
-        usesLerch)
+        usesLerch ||
+        usesPolygamma)
     )
       preamble += GPU_INF_PREAMBLE_GLSL;
     // AFTER the NaN branches, and that ORDER is load-bearing: GLSL requires a
@@ -17700,6 +18416,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     preamble += gpuLibrarySubset(
       usesZeta || usesLerch ? `${code} _gpu_gamma(` : code,
       isWGSL ? GPU_GAMMA_PREAMBLE_WGSL : GPU_GAMMA_PREAMBLE_GLSL
+    );
+    // AFTER the NaN and Infinity helpers, which the three bodies call.
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_POLYGAMMA_PREAMBLE_WGSL : GPU_POLYGAMMA_PREAMBLE_GLSL
     );
     // `_gpu_lerch_phi` calls `_gpu_zeta_pow` and `_gpu_hurwitz_zeta` from
     // its own body without naming them in the emitted code (only
@@ -17782,7 +18503,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         isWGSL ? GPU_PCG3D_PREAMBLE_WGSL : GPU_PCG3D_PREAMBLE_GLSL
       );
     }
-    if (code.includes('_gpu_gcd'))
+    if (code.includes('_gpu_gcd') || code.includes('_gpu_lcm'))
       preamble +=
         this.languageId === 'wgsl'
           ? GPU_GCD_PREAMBLE_WGSL

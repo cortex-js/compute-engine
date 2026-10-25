@@ -113,16 +113,13 @@ describe('A CALL OF A USER FUNCTION OVER AN UNTYPED FREE INPUT (CE-377)', () => 
     // The complex lane reads a free input as one complex scalar
     // (`_SYS.cplx(_.x)`), with no run-time shape dispatch: `x + 1` is `NaN`
     // at `x = [1, 2]`, and so is `h(x) + 1` with `h := t ↦ 2t`, which
-    // compiled before this fix. `g(x)[1] + 1` now compiles and reads the
-    // same way; it declined before, and the decline fell back to the
-    // interpreter.
+    // compiled before this fix.
     // One engine per expression: a use such as `x + 1` narrows the type of
     // the free input `x` to `number` by inference, and the next expression
     // would then be typed and compiled for a declared number.
     for (const json of [
       ['Add', 'x', 1],
       ['Add', ['h', 'x'], 1],
-      ['Add', ['At', ['g', 'x'], 1], 1],
     ]) {
       const ce = listEngine();
       ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't']));
@@ -131,15 +128,30 @@ describe('A CALL OF A USER FUNCTION OVER AN UNTYPED FREE INPUT (CE-377)', () => 
       };
       expect(value.re).toBeNaN();
     }
+    // `g(x)[1]` may be a number or a list, and the complex lane dispatches
+    // on the shape of its value when the code runs (ROADMAP CE-215.2): the
+    // element read is the list `[1, 2]`, and the sum is the interpreter's
+    // `[2, 3]`.
+    const ce = listEngine();
+    const expr = ce.box(['Add', ['At', ['g', 'x'], 1], 1]);
+    expect(js(expr, 'complex', { x: [1, 2] })).toEqual([2, 3]);
+    expect(
+      expr
+        .subs({ x: ce.box(['List', 1, 2]) })
+        .evaluate()
+        .toString()
+    ).toBe('[2,3]');
   });
 });
 
 describe('THE DECLINE NAMES AN OPERAND THAT ONLY MAY BE A LIST (CE-377)', () => {
   test('h(x) + 1 with h declared (unknown) -> unknown and no body', () => {
-    // No body to read, so `h(x)` stays of unknown type, and the complex
-    // lane declines. The message said "a list-valued operand" for an
-    // operand that only may be one at run time; it now names the operand
-    // and its type.
+    // No body to read, so `h(x)` stays of unknown type. The complex lane
+    // admits an operand that may be a list (ROADMAP CE-215.2), so the
+    // decline is now the one of the call itself: `h` has no body, and the
+    // target has no lowering for it. (The message said "a list-valued
+    // operand" for an operand that only may be one at run time, and then
+    // named the operand and its type.)
     const ce = new ComputeEngine();
     ce.declare('h', { signature: '(unknown) -> unknown' });
     const expr = ce.box(['Add', ['h', 'x'], 1]);
@@ -149,9 +161,7 @@ describe('THE DECLINE NAMES AN OPERAND THAT ONLY MAY BE A LIST (CE-377)', () => 
         mode: 'complex',
         fallback: false,
       } as any)
-    ).toThrow(
-      /scalar arithmetic over a possibly list-valued operand \(`h\(x\)`, of type `unknown`\)/
-    );
+    ).toThrow(/Could not compile `h`: .* has no lowering for it/);
   });
 });
 

@@ -163,6 +163,41 @@ describe('IDENTITY PASSTHROUGH PARENTHESES — Python', () => {
     expect(python.compile(expr, NO_FOLD).code).toBe('3 * (x + 1)');
   });
 
+  // Only non-canonical input has a one-operand sum, product, connective,
+  // `Subtract` or power of 1 (CE-251.1). `Subtract(x)` is `x` in the
+  // interpreter: read as a prefix `-` it emitted `3 * (-x + 1)`, which is
+  // both negated and regrouped.
+  test('a one-operand n-ary operator from raw input keeps its grouping', () => {
+    const raw = (json: unknown) => ce.box(json as never, { form: 'raw' });
+    const X1 = ['Add', 'x', 1];
+    for (const json of [
+      ['Multiply', 3, ['Multiply', X1]],
+      ['Multiply', 3, ['Add', X1]],
+      ['Multiply', 3, ['Subtract', X1]],
+    ])
+      expect(python.compile(raw(json), NO_FOLD).code).toBe('3 * (x + 1)');
+    expect(
+      python.compile(raw(['Multiply', 3, ['Power', X1, 1]]), NO_FOLD).code
+    ).toBe('3 * (x + 1) ** 1');
+    expect(
+      python.compile(raw(['And', 'P', ['Or', ['Or', 'Q', 'R']]]), NO_FOLD).code
+    ).toBe('P and (Q or R)');
+    for (const head of ['ElementMax', 'ElementMin'])
+      expect(
+        python.compile(raw(['Multiply', 3, [head, X1]]), NO_FOLD).code
+      ).toBe('3 * (x + 1)');
+  });
+
+  // `Divide(x)` and `Power(x)` evaluate to `Error("missing")`. They emitted
+  // `/(x + 1)` and `**(x + 1)`, which are not valid Python.
+  test('a binary operator with one operand fails closed', () => {
+    const raw = (json: unknown) => ce.box(json as never, { form: 'raw' });
+    for (const head of ['Divide', 'Power'])
+      expect(() =>
+        python.compile(raw(['Multiply', 3, [head, ['Add', 'x', 1]]]), NO_FOLD)
+      ).toThrow(/expected two operands, got one/);
+  });
+
   describe('negative control — an atomic operand stays bare', () => {
     test('Identity of a symbol', () => {
       const expr = ce.box(['Multiply', 3, ['Identity', 'x']]);

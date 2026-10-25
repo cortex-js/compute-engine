@@ -7004,11 +7004,15 @@ describe('COMPILE a call of a block local or a parameter with a library name', (
         expect(interval.success).toBe(true);
         expect(midpoint(interval.run!({ x: 3 } as never))).toBe(4);
       }
-      // Python binds the local as a value but has no call of it; the GPU
-      // targets have no function values.
-      expect(() =>
-        compile(engine().box(local), { to: 'python', fallback: false })
-      ).toThrow(new RegExp(`\`${name}\` is bound in this compilation`));
+      // Python binds the local as a value and calls it (CE-237): the library
+      // function of the same name is spelled `np.…`, so the local name does
+      // not hide it. The GPU targets have no function values.
+      const py = compile(engine().box(local), {
+        to: 'python',
+        fallback: false,
+      }).code as string;
+      expect(py).toContain(`${name} = (lambda t: t + 1)`);
+      expect(py).toContain(`return ${name}(x)`);
       expect(() =>
         compile(engine().box(local), { to: 'glsl', fallback: false })
       ).toThrow();

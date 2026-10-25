@@ -450,20 +450,19 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
       }
     );
 
-    test('a NESTED all-string ordering declines (parity unverified)', () => {
-      // The `every` admission side is deliberately the FLAT test: only
-      // `list<string>`-deep all-string shapes are verified to agree with
-      // interpretation. A nested one broadcasts to a nested list of verdicts,
-      // which the flat compiled lowering has no pinned parity for, so it fails
-      // closed rather than compiling on a guess.
-      failsClosed(
-        ce.box([
-          'Less',
-          ['List', { str: 'a' }],
-          ['List', ['List', { str: 'x' }]],
-        ]),
-        '[["True"]]'
-      );
+    test('a NESTED all-string ordering compiles, with run() parity', () => {
+      // A tensor of strings is admitted (ROADMAP CE-219): the compiled
+      // broadcast maps each cell of the nested arrays, as the interpreter
+      // compares each cell. Verified against interpretation.
+      const expr = ce.box([
+        'Less',
+        ['List', { str: 'a' }],
+        ['List', ['List', { str: 'x' }]],
+      ]);
+      expect(expr.evaluate().toString()).toBe('[["True"]]');
+      const r = compile(expr, { constantFold: false, fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.run!()).toEqual([[true]]);
     });
 
     test('the interpreter fallback leaves the comparisons INERT', () => {
@@ -565,16 +564,6 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
         ['Equal', ['List', { str: 'a' }, { str: 'b' }], 1],
         '["False","False"]',
       ],
-      // One peel yields `list<string>`, which is not a subtype of `string`.
-      [
-        'a NESTED string list',
-        [
-          'Equal',
-          ['List', ['List', { str: 'a' }]],
-          ['List', ['List', { str: 'a' }]],
-        ],
-        '"True"',
-      ],
       // The widened element type (`number | string`) is not WHOLLY string.
       [
         'a MIXED string/number list',
@@ -583,6 +572,27 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
       ],
     ] as const)('%s declines', (_label, json, expected) => {
       failsClosed(ce.box(json as any), expected);
+    });
+
+    test('a NESTED string list compiles, with run() parity', () => {
+      // A tensor of strings is admitted (ROADMAP CE-219): `_SYS.eq` compares
+      // the nested arrays whole, cell by cell, as the interpreter does.
+      for (const [b, expected] of [
+        ['a', true],
+        ['b', false],
+      ] as const) {
+        const expr = ce.box([
+          'Equal',
+          ['List', ['List', { str: 'a' }]],
+          ['List', ['List', { str: b }]],
+        ]);
+        expect(expr.evaluate().toString()).toBe(
+          expected ? '"True"' : '"False"'
+        );
+        const r = compile(expr, { constantFold: false, fallback: false });
+        expect(r.success).toBe(true);
+        expect(r.run!()).toBe(expected);
+      }
     });
   });
 
@@ -1015,14 +1025,18 @@ describe('the string-evidence walk has no depth cutoff', () => {
     return v;
   }
 
-  // Depth 1 is the FLAT `list<string>` shape tier 2 admits (pinned above); the
-  // walk's depth behavior is exercised from depth 2 on, where the participant
-  // is no longer flat and must still decline.
+  // Depth 1 is the FLAT `list<string>` shape tier 2 admits (pinned above).
+  // A nested list of strings is a tensor of strings, which compiles (ROADMAP
+  // CE-219) with the interpreter's value, at every depth.
   test.each([2, 8, 9, 12, 20])(
-    'Equal over a %i-deep nested string list declines (interpreter: True)',
+    'Equal over a %i-deep nested string list compiles (interpreter: True)',
     (depth) => {
       const json = nestedStringList(depth);
-      failsClosed(ce.box(['Equal', json, json] as any), '"True"');
+      const expr = ce.box(['Equal', json, json] as any);
+      expect(expr.evaluate().toString()).toBe('"True"');
+      const r = compile(expr, { constantFold: false, fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.run!()).toBe(true);
     }
   );
 
@@ -1386,12 +1400,21 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
   // interpreter broadcasts to a list) and a wrong value, behind `success:
   // true`. The gate now uses the union-aware `couldBeCollectionParticipant`.
 
-  test('a DECLARED `string | list<string>` participant declines, both heads', () => {
+  test('a DECLARED `string | list<string>` participant takes the run-time dispatch, both heads', () => {
+    // Such a participant is a string or a tensor of strings
+    // (`broadcastable<string>`), which compiles to `_SYS.eq`/`_SYS.neq`
+    // (ROADMAP CE-219): the dispatch compares a string to a string and a
+    // list cell by cell, as the interpreter does. Never the scalar `===`.
     ce.declare('uq', 'string | list<string>');
     for (const head of ['Equal', 'NotEqual'] as const) {
-      const r = compile(ce.box([head, 'uq', { str: 'a' }] as any));
-      expect(r.success).toBe(false);
-      expect(r.error).toMatch(/string-valued operands/);
+      const r = compile(ce.box([head, 'uq', { str: 'a' }] as any), {
+        fallback: false,
+      });
+      expect(r.success).toBe(true);
+      expect(r.code).not.toContain('===');
+      const eq = head === 'Equal';
+      expect((r.run as any)({ uq: 'a' })).toBe(eq);
+      expect((r.run as any)({ uq: ['a', 'b'] })).toEqual([eq, !eq]);
     }
   });
 

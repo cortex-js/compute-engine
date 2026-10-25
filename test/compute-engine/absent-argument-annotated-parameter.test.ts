@@ -416,19 +416,26 @@ describe('a block-local function called with a list of points', () => {
     expect(compiled(expr)).toEqual([2, undefined]);
   });
 
-  // The type of a bare parameter is inferred from the body, which is then
-  // compiled for one point; the interpreter binds the list whole and maps
-  // inside the body, at the call of `h`.
-  test('a bare parameter inferred as one point fails closed', () => {
+  // The type of a bare parameter is inferred from the body as one point; the
+  // interpreter binds the list whole and maps inside the body, at the call
+  // of `h`. The compiled call is written with the body of `g`, so the call
+  // of `h` maps over the list as well (CE-238). It declined before.
+  test('a bare parameter inferred as one point receives the list whole', () => {
     const src =
       'function h(q: tuple<number, number>) { q[1] + 1 }\nconst g = (p) => h(p)\ng(xs)';
     const [program] = parseEpsil(src);
     const ce = new ComputeEngine();
     ce.declare('xs', 'list<tuple<number, number>>');
     const expr = ce.box(resolveLibraryNames(program, src, ce));
-    const result = compile(expr, { to: 'javascript' });
-    expect(result.success).toBe(false);
-    expect(result.error).toContain('at a parameter with no annotation');
+    const result = compile(expr, { to: 'javascript', fallback: false });
+    expect(result.success).toBe(true);
+    const xs = [
+      [1, 2],
+      [3, 4],
+    ];
+    expect(result.run!({ xs })).toEqual([2, 4]);
+    ce.assign('xs', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    expect(expr.evaluate().toString()).toBe('[2,4]');
   });
 });
 

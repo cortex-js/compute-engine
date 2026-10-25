@@ -74,7 +74,6 @@ differences are accepted; they are not defects:
 | `Heaviside(x)` | `x = ~oo` | `1` | `Error(incompatible-type, "real \| signed_infinity", "~oo")` |
 | `x > 0` | `x = ~oo` | `true` | `False` (`~oo` has no order, user decision 2026-10-21; before, `0 < ~oo`, not decided) |
 | `\{1/x > 0: 1, 0\}` | `x = 0` | `1` (also `python`, with a NumPy `x`) | `0` (`~oo` has no order, user decision 2026-10-21) |
-| `x < 1/0` | `x = 1` | `true` (`_.x < Infinity`; also `python` and `interval-js`) | `False` (`~oo` has no order, user decision 2026-10-21) |
 | `Sign(1/x)` | `x = 0` | `1` | `Indeterminate` (`evaluate()`), `NaN` (`.N()`) |
 | `Floor(1/x)` | `x = 0` | `Infinity` | `~oo` |
 
@@ -82,12 +81,27 @@ In the first two rows, the argument `~oo` (`{re: Infinity, im: Infinity}`)
 becomes `Infinity` at the entry of the compiled function. In the third
 row and the last two rows, the pole is computed inside the compiled code:
 `1/0` is the double `Infinity`, and the comparison, `Sign` and `Floor` read
-it as `+∞`. In the fourth row, the constant pole is the literal `Infinity`
-next to the variable. A comparison with no variable is not a divergence:
-`0 < 1/0` and `1/0 = 1/0` fold to `false` on `javascript`, `glsl`, `wgsl`
-and `python`, also under `constantFold: false`, as the interpreter answers.
-`interval-js` does not fold a comparison and answers `'true'` for both
-(`docs/ERROR-MODEL.md`, "a value with no order").
+it as `+∞`.
+
+A CONSTANT pole in an ordering comparison is not a divergence. When an
+operand of `Less`, `LessEqual`, `Greater` or `GreaterEqual` is a closed
+operand whose exact value is `~oo` (`1/0`, `(-1)!`, `1/0 + 2`, a symbol
+assigned `1/0`), the comparison compiles to the target's `False` on every
+target, as the interpreter answers (`~oo` has no order, user decision
+2026-10-21): `x < 1/0` at `x = 1` is `false` on `javascript`, `python`,
+`glsl`, `wgsl` and `interval-js` (`'false'`), and so is `0 < 1/0`. This
+applies when the other operands are pure and cannot be lists at run time;
+otherwise the comparison keeps its code, with the pole as `Infinity`
+(`constantPoleOrdering` in `base-compiler.ts`, ROADMAP CE-211). The value
+`False` was chosen because no single compiled value of the pole gives the
+interpreter's answers both in an ordering and in arithmetic: `NaN` gives
+`false` in every ordering, but `x + 1/0` would then be `NaN` where the
+interpreter answers `~oo`, which the projection spells `Infinity`. An
+equality is not changed: `x = 1/0` compiles to `x === Infinity`, `false`
+for a finite `x`, as the interpreter answers, and `1/0 = 1/0` folds to
+`false` on `javascript`, `glsl`, `wgsl` and `python`, also under
+`constantFold: false`. `interval-js` does not fold an equality and answers
+`'true'` for `1/0 = 1/0` (`docs/ERROR-MODEL.md`, "a value with no order").
 
 A point (a tuple of numbers) divided by zero is the same case, coordinate by
 coordinate. The interpreter gives `~oo` for each nonzero coordinate, and the
@@ -482,13 +496,21 @@ The rule applies only where it changes the lane of the body:
   such a node as complex without promotion: a parameter declared `unknown`
   (`(unknown) -> real`), and also a radical over a parameter that the
   function literal leaves untyped, which types `number`. A call that the
-  compiler inlines substitutes the typed argument and avoids this; a call of an
-  emitted definition (a recursive function, for example) declines in the
-  `complex` mode.
+  compiler inlines substitutes the typed argument and avoids this. An emitted
+  definition (a recursive function, for example) is compiled in the `complex`
+  mode with the parameter types of the declared signature when they are real
+  types narrower than the literal's, so `p: (real) -> real` assigned a
+  recursive `k ↦ …` compiles there too (ROADMAP CE-230.1).
 - A result type that admits a complex value (`-> number`, `-> complex`) is not
   a real result, and the body promotes as before.
-- The value of an assigned symbol that the body reads is compiled with the
-  promotion of the mode, like a user-function definition.
+- The value of an assigned symbol that the body reads is compiled with
+  promotion off too, as the rest of the body: with `a := √(c − 1)` and
+  `p := y ↦ a·y`, `p(x)` reads `Math.sqrt(c - 1)`, `NaN` for `c < 1`. The
+  shared preamble local of the value (`_val_a`) keeps the promotion of the
+  mode for the other readers; a value that is complex only by promotion gets a
+  second local with promotion off (`_val_a$r`) for the readers in a real
+  ascription (ROADMAP CE-230.2). A user-function definition is not recompiled
+  this way: it is shared by every call site.
 - The shader targets never promote, so nothing changes there.
 
 A `Sum` or `Product` over a small constant range is unrolled by mapping the

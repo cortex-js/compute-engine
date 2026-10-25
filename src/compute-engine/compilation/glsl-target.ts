@@ -9,6 +9,8 @@ import {
   gpuUniformVectorWidth,
   gpuAssertExpressionBody,
   gpuOperandShape,
+  gpuAbsorbedConstant,
+  markOperandConsuming,
   type GPUShapeRules,
 } from './gpu-target.js';
 import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
@@ -68,13 +70,11 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // floored convention the interpreter's `Mod` uses as well). `fract` is a
       // single hardware instruction and needs no second operand.
       //
-      // A SCALAR dividend only: `fract` takes one argument, and the operand-
-      // shape gate reads the emitted call against the head's operands, so a
-      // `vecN` dividend beside the scalar divisor would be judged a genType
-      // mismatch on the one-argument call and decline. The vector form keeps
-      // `mod(v, 1.0)`, which the gate knows takes its scalar last.
-      if (tryGetConstant(b) === 1 && gpuOperandShape(a) === 'scalar')
-        return `fract(${compile(a)})`;
+      // The divisor is left out of the emitted call, which the lowering
+      // declares after this table (`markOperandConsuming`). So the
+      // operand-shape check judges `fract(v)` against the dividend alone, and
+      // a `vecN` dividend takes the peephole too.
+      if (tryGetConstant(b) === 1) return `fract(${compile(a)})`;
       return `mod(${compile(a)}, ${compile(b)})`;
     };
     // A trigonometric value amplified by a large constant (the "sine hash")
@@ -118,6 +118,10 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
     return compileGLSLList(args, compile, 'PointList');
   },
 };
+
+// `Mod(a, 1)` emits `fract(a)` and leaves the divisor out of the emitted call;
+// the operand-shape check reads that declaration (`markOperandConsuming`).
+markOperandConsuming(GLSL_FUNCTIONS.Mod, gpuAbsorbedConstant('fract', 1, 1));
 
 /**
  * Where GLSL admits a SCALAR among otherwise-`vecN` operands.

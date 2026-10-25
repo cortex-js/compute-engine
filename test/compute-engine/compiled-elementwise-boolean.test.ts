@@ -499,13 +499,15 @@ describe('other targets keep their existing lowering', () => {
     expect(r!.code).toMatch(/np\.less/);
   });
 
-  test('Python equality over a collection fails closed', () => {
-    // Collection equality fails closed on the Python target pending the
-    // semantics ruling (the `abs(a - b)` form raises on a Python list).
+  test('Python equality with one list of numbers compiles to a comprehension', () => {
+    // The interpreter broadcasts `Equal([1, 2], 2)` to `[False, True]`. The
+    // Python target compiles the same element-wise test as a list
+    // comprehension with the exact `==` of the scalar form (CE-281.1).
     const r = compile(engine.box(['Equal', ['List', 1, 2], 2] as any), {
       to: 'python',
     });
-    expect(r?.success).toBe(false);
+    expect(r?.success).toBe(true);
+    expect(r!.code).toMatch(/^\[\(\((_tv\d+)\) == \(2\)\) for \1 in \[1, 2\]\]$/);
   });
 
   test('Python equality keeps its tolerance-aware lowering on scalars', () => {

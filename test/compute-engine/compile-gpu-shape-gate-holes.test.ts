@@ -235,8 +235,9 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     expect(w(['Mod', 1, V3])).toBe(
       '((((1.0) % (vec3f(1.0, 2.0, 3.0))) - (vec3f(1.0, 2.0, 3.0)) * (((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))) - abs((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))))) * 0.5)) % (vec3f(1.0, 2.0, 3.0)))'
     );
-    expect(w(['Mod', V3, 1])).toBe(
-      '((((vec3f(1.0, 2.0, 3.0)) % (1.0)) - (1.0) * (((sign((vec3f(1.0, 2.0, 3.0)) % (1.0)) * sign((1.0))) - abs((sign((vec3f(1.0, 2.0, 3.0)) % (1.0)) * sign((1.0))))) * 0.5)) % (1.0))'
+    // A divisor of 2: a divisor of 1 is the `fract` peephole (CE-254).
+    expect(w(['Mod', V3, 2])).toBe(
+      '((((vec3f(1.0, 2.0, 3.0)) % (2.0)) - (2.0) * (((sign((vec3f(1.0, 2.0, 3.0)) % (2.0)) * sign((2.0))) - abs((sign((vec3f(1.0, 2.0, 3.0)) % (2.0)) * sign((2.0))))) * 0.5)) % (2.0))'
     );
   });
 
@@ -353,7 +354,7 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     expect(g(['Smoothstep', 0, 1, V3])).toBe(
       'smoothstep(0.0, 1.0, vec3(1.0, 2.0, 3.0))'
     );
-    expect(g(['Mod', V3, 1])).toBe('mod(vec3(1.0, 2.0, 3.0), 1.0)');
+    expect(g(['Mod', V3, 2])).toBe('mod(vec3(1.0, 2.0, 3.0), 2.0)');
     expect(g(['Step', 1, V3])).toBe('step(1.0, vec3(1.0, 2.0, 3.0))');
   });
 

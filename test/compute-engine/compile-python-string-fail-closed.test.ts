@@ -233,8 +233,13 @@ describe('Python: EQUALITY fails closed on string evidence', () => {
     ).toThrow(/Equal.*string-valued operands/s);
   });
 
-  test('Equal over a NESTED all-string collection declines', () => {
-    expect(() =>
+  test('Equal over a NESTED all-string collection lowers to _ce_eqcoll', () => {
+    // A nested list of strings is a tensor of strings (ROADMAP CE-219). The
+    // helper compares the nested lists whole, cell by cell, with Python's
+    // `==` at the leaves; executed parity is pinned in
+    // `compile-python-parity.test.ts` (`eq_coll_strings_nested_equal`,
+    // `eq_coll_strings_nested_unequal`).
+    expect(
       code(
         ce.box([
           'Equal',
@@ -242,7 +247,7 @@ describe('Python: EQUALITY fails closed on string evidence', () => {
           ['List', ['List', { str: 'a' }]],
         ])
       )
-    ).toThrow(/Equal.*string-valued operands/s);
+    ).toContain('_ce_eqcoll(');
   });
 });
 

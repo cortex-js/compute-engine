@@ -168,27 +168,25 @@ describe('a parameter the body reassigns', () => {
     expect(js(body('Greater')).run!({})).toEqual([2, 2, 2]);
   });
 
-  test('a parameter assigned a list is not read as a scalar', () => {
+  test('a parameter assigned a list is refused', () => {
     // The interpreter refuses this write, because it types `q` from the range
-    // elements. The compiled body must still not treat `q` as a scalar after
-    // the write: the inner `Apply` keeps its broadcast dispatch.
-    const r = js([
-      'Map',
-      [
-        'Function',
+    // elements, and the compilation fails closed (CE-228). Until 2026-10-24
+    // the compiled code answered `[[2, 4], [2, 4]]`, and this case pinned
+    // that the body did not read `q` as a scalar after the write.
+    expect(() =>
+      js([
+        'Map',
         [
-          'Block',
-          ['Assign', 'q', ['List', 1, 2]],
-          ['Apply', ['Function', ['Multiply', 2, 'z'], 'z'], 'q'],
+          'Function',
+          [
+            'Block',
+            ['Assign', 'q', ['List', 1, 2]],
+            ['Apply', ['Function', ['Multiply', 2, 'z'], 'z'], 'q'],
+          ],
+          'q',
         ],
-        'q',
-      ],
-      ['Range', 1, 2],
-    ]);
-    expect(r.code).toContain('bcastFn');
-    expect(r.run!({})).toEqual([
-      [2, 4],
-      [2, 4],
-    ]);
+        ['Range', 1, 2],
+      ])
+    ).toThrow(/assigns `\[1,2\]`.*parameter `q` of type `integer`/);
   });
 });

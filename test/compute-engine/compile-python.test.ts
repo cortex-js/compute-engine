@@ -1217,19 +1217,40 @@ describe('PYTHON TARGET', () => {
     // Exactly ONE collection operand: the interpreter BROADCASTS element-wise
     // and returns a *list* of booleans (`Equal([1,2],5)` → `["False","False"]`)
     // — a different result kind than the scalar the collection branch above
-    // implements. Still fails closed rather than guessing.
-    it('a single (broadcasting) collection operand fails closed', () => {
-      expect(() =>
-        python.compile(ce.box(['Equal', ['List', 1, 2, 3], 2] as any))
-      ).toThrow(/Equal.*broadcasts element-wise/s);
-      expect(() =>
-        python.compile(ce.box(['NotEqual', 2, ['List', 1, 2, 3]] as any))
-      ).toThrow(/NotEqual/s);
+    // implements. An ordered list of numbers compiles to a list
+    // comprehension with the exact scalar test (CE-281.1); the executed
+    // parity is in `compile-python-parity.test.ts`.
+    it('a single (broadcasting) collection operand compiles to a comprehension', () => {
+      expect(
+        python.compile(ce.box(['Equal', ['List', 1, 2, 3], 2] as any)).code
+      ).toMatch(/^\[\(\((_tv\d+)\) == \(2\)\) for \1 in \[1, 2, 3\]\]$/);
+      expect(
+        python.compile(ce.box(['NotEqual', 2, ['List', 1, 2, 3]] as any)).code
+      ).toMatch(/^\[\(\(2\) != \((_tv\d+)\)\) for \1 in \[1, 2, 3\]\]$/);
       const scoped = new ComputeEngine();
       scoped.declare('eqList', 'list<real>');
-      expect(() =>
-        python.compile(scoped.box(['Equal', 'eqList', 2] as any))
-      ).toThrow(/Could not compile/);
+      expect(
+        python.compile(scoped.box(['Equal', 'eqList', 2] as any)).code
+      ).toMatch(/^\[\(\((_tv\d+)\) == \(2\)\) for \1 in eqList\]$/);
+    });
+
+    it('a single collection operand that is not a list of numbers fails closed', () => {
+      const scoped = new ComputeEngine();
+      // The interpreter recurses into a nested list.
+      scoped.declare('nested', 'list<list<real>>');
+      // An absent element is not a number.
+      scoped.declare('gappy', 'list<real | missing>');
+      // A companion that may itself be a list.
+      scoped.declare('xs', 'list<real>');
+      scoped.declare('b', 'broadcastable<number>');
+      for (const expr of [
+        ['Equal', 'nested', 2],
+        ['Equal', 'gappy', 2],
+        ['NotEqual', 'xs', 'b'],
+      ])
+        expect(() => python.compile(scoped.box(expr as any))).toThrow(
+          /broadcasts element-wise/
+        );
     });
   });
 

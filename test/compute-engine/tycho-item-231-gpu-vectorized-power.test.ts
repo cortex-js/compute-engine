@@ -214,11 +214,19 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
       'pow(x + vec3(1.0, 2.0, 3.0), vec3(y))'
     );
     // …in either position: a scalar BASE with a vector exponent too.
+    expect(g(['Power', 3, ['Add', 'x', V3]])).toBe(
+      'pow(vec3(3.0), x + vec3(1.0, 2.0, 3.0))'
+    );
+    expect(w(['Power', 3, ['Add', 'x', V3]])).toBe(
+      'pow(vec3f(3.0), x + vec3f(1.0, 2.0, 3.0))'
+    );
+    // The base 2 is the `exp2` peephole, which leaves the base out of the
+    // call and so applies to a vector exponent as well (CE-254).
     expect(g(['Power', 2, ['Add', 'x', V3]])).toBe(
-      'pow(vec3(2.0), x + vec3(1.0, 2.0, 3.0))'
+      'exp2(x + vec3(1.0, 2.0, 3.0))'
     );
     expect(w(['Power', 2, ['Add', 'x', V3]])).toBe(
-      'pow(vec3f(2.0), x + vec3f(1.0, 2.0, 3.0))'
+      'exp2(x + vec3f(1.0, 2.0, 3.0))'
     );
   });
 

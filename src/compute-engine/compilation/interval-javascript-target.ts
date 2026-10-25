@@ -5576,6 +5576,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       options,
       INTERVAL_SUPPORTED_MODES.includes('complex')
     ).options;
+    options = BaseCompiler.withVarsMappedUserFunctionHeads(
+      expr.engine,
+      options
+    );
     // The `storage` hints are shader-only and ignored by this target, but
     // validated on every target (see `javascript-target.ts`).
     if (options.storage !== undefined)

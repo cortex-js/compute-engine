@@ -198,7 +198,7 @@ function _gpu_riemann_zeta(s: number, sm1: number): number {
   if (s === 0) return -0.5;
   if (s < 0) {
     if (s === floor(s) && s % 2 === 0) return 0;
-    if (s < -24.5) return NaN;
+    if (s < -63) return NaN;
     const hs = div(s, 2);
     const n = floor(add(hs, 0.5));
     let sinHalfPiS = sin(mul(PI, sub(hs, n)));
@@ -225,6 +225,7 @@ function _gpu_zeta(s: number): number {
 }
 
 function _gpu_zeta_near_one(s: number, h: number): number {
+  if (s < -24.5) return NaN;
   let sum = _gpu_zeta(s);
   let c = 1;
   let hk = 1;
@@ -425,6 +426,11 @@ function _gpu_hurwitz_zeta(s: number, a: number): number {
     z = m > 0 ? sub(z, t) : add(z, t);
   }
   return z;
+}
+
+/** The model of `_gpu_zeta(s)`, at the f32-rounded operand. */
+export function gpuZetaModel(s: number): number {
+  return _gpu_zeta(fr(s));
 }
 
 /** The model of `_gpu_hurwitz_zeta(s, a)`, at the f32-rounded operands. */
@@ -964,7 +970,7 @@ function _gpu_lerch_hermite(z: number, s: number, a: number): Result {
     EPS,
     add(add(err, mul(abs(zk), add(ephi, mul(add(m, 2), abs(phi))))), abs(res))
   );
-  if (!(bound <= mul(TOL, abs(res)))) return DECLINE;
+  if (!(bound <= mul(TOL, abs(res))) || !(abs(res) < fr(3.4e38))) return DECLINE;
   return [res, true];
 }
 

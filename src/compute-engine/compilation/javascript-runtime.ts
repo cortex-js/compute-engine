@@ -264,8 +264,15 @@ const negativeBaseRealPow = (
  * `1.9·10⁻¹⁶ − 1.175i`, `2^(10⁻¹⁰⁰·i)` is `1 + 6.93·10⁻¹⁰¹i`). A negative
  * zero part is made `+0`, since the interpreter does not keep the sign of a
  * zero.
+ *
+ * A part that is `NaN` means that the kernel has no value (a `NaN`
+ * argument), and the interpreter answers the real `NaN` there: the result
+ * is `{re: NaN, im: 0}`, which the runner returns as `NaN`, as
+ * `continuedKernel` does. `√NaN` gave `{re: 0, im: NaN}` (ROADMAP
+ * CE-214.5).
  */
 function kernelResult(c: Complex): { re: number; im: number } {
+  if (Number.isNaN(c.re) || Number.isNaN(c.im)) return { re: NaN, im: 0 };
   return { re: c.re === 0 ? 0 : c.re, im: c.im === 0 ? 0 : c.im };
 }
 
@@ -4605,10 +4612,13 @@ export const SYS_HELPERS = {
   // runtime rule (`BaseCompiler.realOperandGuard`) hands a real-only head's
   // array operand through this, so the real lowering that follows sees plain
   // numbers and answers NaN (or `false`, for an ordering) exactly at the
-  // complex positions: `⌊√L⌋` at `L = [4, -1]` is `[2, NaN]`.
+  // complex positions: `⌊√L⌋` at `L = [4, -1]` is `[2, NaN]`. An absent
+  // element (`undefined` or `null`, the absent object) stays absent, so the
+  // broadcast that follows makes its position absent, as it does without
+  // the projection (`p[2] < 1` with an absent `p[2]`, ROADMAP CE-368).
   crealElements: function crealElements(x: unknown): unknown {
     if (Array.isArray(x)) return x.map(crealElements);
-    if (typeof x === 'number') return x;
+    if (typeof x === 'number' || x === undefined || x === null) return x;
     return typeof x === 'object' &&
       x !== null &&
       (x as { im: unknown }).im === 0 &&
@@ -4665,6 +4675,27 @@ export const SYS_HELPERS = {
   // goes to the helper unchanged.
   gamma: (z: number): number =>
     Number.isInteger(z) && z <= 0 ? Infinity : gamma(z),
+  // ψ, ψ₁ and ψ⁽ⁿ⁾ have a pole at every non-positive integer, where the
+  // interpreter answers `~oo`. The shared helpers answer `NaN` there, so the
+  // pole is spelled `Infinity` here, as for `gamma` above. The order −1 is
+  // the antiderivative of ψ, `LogGamma`, which the interpreter computes for
+  // `PolyGamma(-1, x)`: it is real for x > 0 (the logarithm of the positive
+  // Γ(x)) and +∞ at a pole; at a negative non-integer x it is complex, and
+  // this real lane answers `NaN`. Any other negative order is `NaN`, where
+  // the interpreter stays symbolic.
+  digamma: (x: number): number =>
+    Number.isInteger(x) && x <= 0 ? Infinity : digamma(x),
+  trigamma: (x: number): number =>
+    Number.isInteger(x) && x <= 0 ? Infinity : trigamma(x),
+  polygamma: (n: number, x: number): number => {
+    if (n === -1) {
+      if (Number.isInteger(x) && x <= 0) return Infinity;
+      return x > 0 ? lnAbsGamma(x) : NaN;
+    }
+    if (Number.isInteger(n) && n >= 0 && Number.isInteger(x) && x <= 0)
+      return Infinity;
+    return polygamma(n, x);
+  },
   // The bound of a compiled `Sum` or `Product` loop: the floor of a number,
   // or of a complex value with no imaginary part; anything else, a string,
   // a boolean or an array, is `NaN`, and the loop answers `NaN`. A bound may
@@ -4827,6 +4858,22 @@ export const SYS_HELPERS = {
     }
     return Math.pow(base, exp);
   },
+  // `Root(x, n)` on the real lane when the degree `n` is known only at run
+  // time (a variable, or the element of a broadcast). A negative radicand
+  // has the real root the interpreter answers when `n` is an odd integer
+  // (`Root(-8, 3)` is `-2`), or when `1/n` is a rational with an odd
+  // denominator (`Root(-8, 2.2)` reads `(-8)^(5/11)`, as `pow` does). Any
+  // other negative radicand gives `NaN`. `Math.pow(x, 1/n)` gave `NaN` for
+  // every negative radicand.
+  root: (x: number, n: number): number => {
+    if (x < 0 && Number.isInteger(n) && n % 2 !== 0)
+      return -Math.pow(-x, 1 / n);
+    if (x < 0) {
+      const r = negativeBaseRealPow(x, null, 1 / n);
+      if (r !== undefined) return r;
+    }
+    return Math.pow(x, 1 / n);
+  },
   // Fail-closed Which/When condition guard. The interpreter requires a
   // condition to evaluate to True/False and throws otherwise; a compiled
   // ternary would silently treat a non-boolean (notably NaN) as falsy and take
@@ -4848,6 +4895,19 @@ export const SYS_HELPERS = {
   // rank 2 or more does not index (`selectNested`).
   wholeAt: (depth: number, value: unknown): WholeArm =>
     new WholeArm(value, depth),
+  // An arm whose type is a point or a list of points: an array with no
+  // array in it is the point, lifted whole; any other value is the list,
+  // whose points are whole `depth` levels down under a mask of rank 2 or
+  // more (`depth` is 0 under a flat mask, where the list is an ordinary
+  // list arm).
+  pointOrPoints: (depth: number, value: unknown): unknown =>
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((x) => !Array.isArray(x))
+      ? new WholeArm(value)
+      : depth > 0
+        ? new WholeArm(value, depth)
+        : value,
   // A list arm whose type does not give the depth of its points: an
   // ordinary list arm, but `selectNested` throws where a point of it cannot
   // be told from a row (`WholeArm`).
@@ -4864,16 +4924,18 @@ export const SYS_HELPERS = {
   // value (`zip`) is aligned with the conditions element by element and
   // truncated to the shorter of the two, exactly as the interpreter aligns
   // them; any other value — a number, a point — is one value, repeated at
-  // every position. A condition that is not an array at run time is one
-  // scalar condition.
+  // every position. A `zip` of `null` aligns a value that is an array at run
+  // time and repeats any other: the compiler passes it for a value that
+  // cannot be a point (`broadcastable<number>`). A condition that is not an
+  // array at run time is one scalar condition.
   restrict: (
     conds: unknown,
     value: unknown,
-    zip: boolean,
+    zip: boolean | null,
     absent: unknown
   ): unknown => {
     if (!Array.isArray(conds)) return conds === true ? value : absent;
-    if (zip) {
+    if (zip ?? Array.isArray(value)) {
       if (!Array.isArray(value)) return absent;
       const n = Math.min(conds.length, value.length);
       const out = new Array<unknown>(n);
@@ -4883,6 +4945,12 @@ export const SYS_HELPERS = {
     }
     return conds.map((c) => (c === true ? value : absent));
   },
+  // Is the condition `c` a mask of rank 2 or more at run time (an array with
+  // an array in it)? A compiled `When` whose type does not give the rank of
+  // its mask selects as the else-less `If` for such a mask, and restricts
+  // otherwise (`restrict`).
+  isNestedMask: (c: unknown): boolean =>
+    Array.isArray(c) && c.some((x) => Array.isArray(x)),
   // NaN propagates (Contract B `propagate` default, ratified 2026-08-27):
   // without the leading arm both comparisons are false for NaN and the
   // kernel answered the final arm's `1` — a fail-closed violation.
@@ -6251,9 +6319,6 @@ export const SYS_HELPERS = {
   gammaQ,
   gammaUpper: incompleteGammaUpper,
   betaRegularized,
-  digamma,
-  trigamma,
-  polygamma,
   zeta,
   hurwitzZeta,
   zetaGeneralized,
