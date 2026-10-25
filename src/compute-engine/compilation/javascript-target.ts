@@ -45,6 +45,10 @@ import {
 import { compileWithAutoEscalation } from './auto-escalation.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import {
+  absentBaseReadIsNumeric,
+  tupleSlotReadType,
+} from './absent-tuple-read.js';
+import {
   assertAccumulatorFitsStep,
   elementsMayBeCollections,
   inPlaceUpdateChains,
@@ -2878,7 +2882,11 @@ function compileNthElement(
   // decide the absence marker: it is picked from the value, as the
   // interpreter picks it, and as the `At` lowering does. The helper answers
   // `undefined` for an absent operand, as `?.` does.
-  const eltT = indexElementType(withoutNumberArms(collT, arg));
+  // A base typed by one tuple reads the type of the slot
+  // (`tupleSlotReadType`), not the join of all the slots.
+  const eltT =
+    tupleSlotReadType(jsType(arg), idx + 1) ??
+    indexElementType(withoutNumberArms(collT, arg));
   if (
     (hasNumberArm(eltT) &&
       !isSubtype(
@@ -2887,7 +2895,7 @@ function compileNthElement(
       )) ||
     (eltT === undefined && isUnionWithCollectionOrAbsentArm(jsType(arg)))
   )
-    return `_SYS.atWithValueMarker(${compile(arg)}, ${idx + 1})`;
+    return `_SYS.atWithValueMarker(${compile(arg)}, ${idx + 1}${absentBaseReadIsNumeric(arg, idx + 1) ? ', true' : ''})`;
   const present =
     eltT === undefined
       ? undefined
@@ -2901,6 +2909,15 @@ function compileNthElement(
     return `${compile(arg)}${read}[${idx}]`;
   if (decided && read === '' && !typeContainsMissing(eltT!))
     return `(${compile(arg)}[${idx}] ?? NaN)`;
+  // When the type of the read does not decide the marker (`unknown`, a
+  // position past the end of `tuple<unknown, number>`), `_SYS.nth` answers
+  // `undefined` for an absent base. The interpreter can answer `NaN` there
+  // (`absentBaseReadIsNumeric`), as the `At` lowering does: `Third(p)` for
+  // `p: missing | tuple<unknown, number>` must agree with `At(p, 3)`. The
+  // `numeric` flag of `_SYS.nth` cannot be used, because it also changes
+  // the marker of a position past the end of a present base.
+  if (!decided && absentBaseReadIsNumeric(arg, idx + 1))
+    return `_SYS.atWithValueMarker(${compile(arg)}, ${idx + 1}, true)`;
   return `_SYS.nth(${compile(arg)}, ${idx}${decided ? ', true' : ''})`;
 }
 
@@ -5186,11 +5203,25 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // the base (`missing | number | vector<2>`, the base of `g(x)[1][2]`)
     // is skipped, as the `At` type handler skips it: an index into a number
     // is an error.
+    // A literal integer index into a base typed by one tuple reads the type
+    // of that slot (`tupleSlotReadType`), not the join of all the slots.
+    const position =
+      isNumber(index) && Number.isInteger(index.re) ? index.re : undefined;
+    const slotT =
+      stringBase || position === undefined
+        ? undefined
+        : tupleSlotReadType(jsType(coll), position);
     const eltT = stringBase
       ? 'character'
-      : indexElementType(
+      : (slotT ??
+        indexElementType(
           withoutNumberArms(stripMissingFromType(jsType(coll)), coll)
-        );
+        ));
+    // The third argument of `_SYS.atWithValueMarker`: `NaN` for an absent
+    // base when the slots of the tuples in the type of the base are numbers
+    // (`absentBaseReadIsNumeric`).
+    const absentNaN = (): string =>
+      absentBaseReadIsNumeric(coll, position) ? ', true' : '';
     const scalarIndex =
       !isIndexedCollectionOperand(index) &&
       !index.type.matches('collection<any>');
@@ -5216,7 +5247,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // The helper reads a gather index (an index typed `list<integer>`) as
     // well, with the same marker for each entry out of range.
     if (objectDomain && !stringBase && hasNumberArm(eltT))
-      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)})`;
+      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)}${absentNaN()})`;
     // A union base whose element type is not known (`indexElementType`
     // answers nothing for it) but that may be a collection or absent: the
     // marker is picked from the value too, and an absent base is absent.
@@ -5226,7 +5257,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       !stringBase &&
       isUnionWithCollectionOrAbsentArm(jsType(coll))
     )
-      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)})`;
+      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)}${absentNaN()})`;
     // A base whose elements are of unknown type (`At(m(x), 1)` with
     // `m := t ↦ [[t, 2t], [3t, 4t]]` and `x: any`, typed
     // `list<unknown> | missing`): the interpreter picks the marker of an
@@ -5235,7 +5266,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // gave `NaN` for both, where the interpreter gives `Missing` (ROADMAP
     // CE-368).
     if ((eltT === 'unknown' || eltT === 'any') && scalarIndex && !stringBase)
-      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)})`;
+      return `_SYS.atWithValueMarker(${collCode()}, ${compile(index)}${absentNaN()})`;
     if (objectDomain && scalarIndex)
       return `((_v) => (typeof _v === 'number' && Number.isNaN(_v)) ? undefined : _v)(${base})`;
     // A NUMERIC element type is trusted by every consumer of this read: the
@@ -5494,6 +5525,22 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = args[0];
     if (coll != null && isGatedIndexedCollection(coll))
       return compile(coll.engine._fn('At', [coll, coll.engine.number(-1)]));
+    // A base whose type admits an indexed collection without proving one
+    // (`couldBeIndexedCollectionOperand`) is read as `At(coll, -1)` too. The
+    // witness is `At(tup(x), 1)` with `tup := t ↦ (t, 2t)` and `x: any`,
+    // typed `list<any> | missing | number | tuple<number, number>`: `First`
+    // and `Second` compiled it, and `Last` declined because the operand is
+    // not provably a list. The `At` lowering admits such a base with a
+    // numeric index and takes the marker of an absent base from the tuples
+    // in its type, as `First` does.
+    if (
+      coll != null &&
+      !isProvablyStringOperand(coll) &&
+      !isIndexedCollectionOperand(coll) &&
+      !admitsRuntimeCheckedArray(coll) &&
+      couldBeIndexedCollectionOperand(coll)
+    )
+      return compile(coll.engine._fn('At', [coll, coll.engine.number(-1)]));
     // `_SYS.at` answers `NaN` for the last element of an empty list, the
     // marker of a numeric list. When the elements are not numbers, or may
     // be numbers or lists (`indexElementType`), the interpreter answers
@@ -5502,12 +5549,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // A union base whose element type is not known but that may be a
     // collection or absent (`isUnionWithCollectionOrAbsentArm`) reads the
     // same way, as the `At` lowering does.
+    // A base typed by one tuple reads the type of its last slot
+    // (`tupleSlotReadType`), not the join of all the slots.
     const eltT =
       coll == null || isProvablyStringOperand(coll)
         ? undefined
-        : indexElementType(
+        : (tupleSlotReadType(jsType(coll), -1) ??
+          indexElementType(
             withoutNumberArms(stripMissingFromType(jsType(coll)), coll)
-          );
+          ));
     const present =
       eltT === undefined
         ? undefined
@@ -5523,7 +5573,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         !isProvablyStringOperand(coll) &&
         isUnionWithCollectionOrAbsentArm(jsType(coll)))
     )
-      return `_SYS.atWithValueMarker(${elementsArg('Last', coll, compile)}, -1)`;
+      return `_SYS.atWithValueMarker(${elementsArg('Last', coll, compile)}, -1${absentBaseReadIsNumeric(coll!, -1) ? ', true' : ''})`;
     return `_SYS.at(${elementsArg('Last', coll, compile)}, -1)`;
   },
   // All-but-first / all-but-first-n / first-n. A negative `Take`/`Drop` count

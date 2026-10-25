@@ -143,7 +143,7 @@ describe('PYTHON TARGET', () => {
     it('should compile expression with constants', () => {
       const expr = ce.parse('2\\pi r');
       const code = python.compile(expr).code;
-      expect(code).toBe('2 * np.pi * r');
+      expect(code).toBe("2 * np.pi * (float('nan') if r is None else r)");
     });
   });
 

@@ -1440,16 +1440,26 @@ function indexValue(v: unknown): number {
  * (an index typed `integer | list<integer>`) is a gather, read position by
  * position with the same marker, or, when every entry is a boolean, a mask,
  * read by `_SYS.at`.
+ *
+ * `absentIsNaN` is true when the compiler found, from the static type of
+ * the base, that the read of an absent base is a number: the read of an
+ * absent base is then `NaN`, not `undefined` (see
+ * `absentBaseReadIsNumeric()` in `absent-tuple-read.ts`).
  */
-function atWithValueMarker(arr: unknown, i: unknown): unknown {
+function atWithValueMarker(
+  arr: unknown,
+  i: unknown,
+  absentIsNaN = false
+): unknown {
   // An absent base (`undefined`, or `NaN`, the absent value of a numeric
-  // slot) has no element: `Missing`, as the interpreter answers.
+  // slot) has no element: `Missing`, as the interpreter answers, or `NaN`
+  // when the compiler found that the read is a number.
   if (
     arr === undefined ||
     arr === null ||
     (typeof arr === 'number' && Number.isNaN(arr))
   )
-    return undefined;
+    return absentIsNaN ? NaN : undefined;
   // A string is read by its characters (grapheme clusters), as the
   // interpreter reads it: `Last("abc")` is `"c"`, and a position past the
   // end is `Missing`, the marker of text.

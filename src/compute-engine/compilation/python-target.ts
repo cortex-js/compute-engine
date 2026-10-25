@@ -65,6 +65,10 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import {
+  absentBaseReadIsNumeric,
+  tupleSlotReadType,
+} from './absent-tuple-read.js';
+import {
   isPointListValue,
   isTuple,
   leafwardElementType,
@@ -4024,7 +4028,14 @@ function pyAbsenceMarker(coll: Expression): string {
   const collT = stripMissingFromType(resolveTypeForCompilation(coll.type.type));
   // What an index returns (`indexElementType`): for a `broadcastable<T>`
   // whose `T` can hold a list, the elements of `T` too.
-  const eltT = indexElementType(collT);
+  return pyAbsenceMarkerOfElementType(indexElementType(collT));
+}
+
+/**
+ * The Python expression of the absence marker for a read whose type is
+ * `eltT` (see `pyAbsenceMarker`). `undefined` is a type that is not known.
+ */
+function pyAbsenceMarkerOfElementType(eltT: Type | undefined): string {
   const present =
     eltT === undefined
       ? undefined
@@ -4057,6 +4068,49 @@ function pyAbsenceMarker(coll: Expression): string {
   // read as a list of lists.
   const probe = mixed ? 'list(_l)' : 'list(_l)[:10]';
   return `((lambda _c: float('nan') if len(_c) > 0 and all(isinstance(_x, (int, float, complex, np.number)) and not isinstance(_x, (bool, np.bool_)) for _x in _c) else None)([_x for _x in ${probe} if _x is not None]) if isinstance(_l, (list, tuple, np.ndarray)) else None)`;
+}
+
+/**
+ * The two absence markers of the element read at the 1-based `position` (a
+ * negative position counts from the end; `undefined` when the position is
+ * not a literal integer) of `coll`:
+ * - `absent`, when `coll` is absent at run time (`None`);
+ * - `outOfRange`, when the position selects no element.
+ *
+ * Both are the marker of the element domain (`pyAbsenceMarker`), except
+ * for a base typed by a tuple, where the interpreter reads the type of one
+ * slot, not the join of all the slots:
+ * - a position outside the tuple of a value takes the marker from the
+ *   slot type (`tupleSlotReadType`): `tuple<unknown, number>` has an
+ *   `unknown` slot, so the marker is picked from the cells of the value
+ *   (`Missing` for `("s", 2)`, `NaN` for `(3, 2)`), not `NaN` from the join;
+ * - an absent base gives `float('nan')` when the read is a number and
+ *   `None` otherwise (`absentBaseReadIsNumeric`). So with
+ *   `b: list<tuple<number, string>>` and `b = []`, `At(At(b, 1), 1)` is
+ *   `NaN` and `At(At(b, 1), 2)` is `Missing`, as in the interpreter. Before,
+ *   both were `None`.
+ *
+ * The JavaScript target applies the same rule (`absent-tuple-read.ts`).
+ */
+function pyReadMarkers(
+  coll: Expression,
+  position: number | undefined
+): { absent: string; outOfRange: string } {
+  const marker = pyAbsenceMarker(coll);
+  if (position === undefined || !Number.isInteger(position) || position === 0)
+    return { absent: marker, outOfRange: marker };
+  const collT = resolveTypeForCompilation(coll.type.type);
+  const slotT = tupleSlotReadType(collT, position);
+  const outOfRange =
+    slotT === undefined ? marker : pyAbsenceMarkerOfElementType(slotT);
+  const present = resolveTypeForCompilation(stripMissingFromType(collT));
+  const isTuple = typeof present !== 'string' && present.kind === 'tuple';
+  const absent = absentBaseReadIsNumeric(coll, position)
+    ? "float('nan')"
+    : isTuple
+      ? 'None'
+      : marker;
+  return { absent, outOfRange };
 }
 
 /**
@@ -4094,10 +4148,10 @@ function pyNthElement(
       code = compile(arg);
     }
   } else code = pyCollArg(kind, arg, compile);
-  const marker = pyAbsenceMarker(arg!);
+  const { absent, outOfRange } = pyReadMarkers(arg!, k < 0 ? k : k + 1);
   const read =
     k < 0 ? `_l[${k}] if len(_l) >= ${-k}` : `_l[${k}] if len(_l) > ${k}`;
-  return `(lambda _l: ${marker} if _l is None else (${read} else ${marker}))(${code})`;
+  return `(lambda _l: ${absent} if _l is None else (${read} else ${outOfRange}))(${code})`;
 }
 
 /**
@@ -6136,8 +6190,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // otherwise. Any other base that is not a sequence at run time (the
     // dictionary arm of an admitted union) projects to nan, mirroring the
     // JavaScript `_SYS.at` runtime dispatch.
-    const marker = pyAbsenceMarker(base);
-    return `(lambda _l, _i: (${marker} if _l is None else float('nan')) if not isinstance(_l, (list, tuple, np.ndarray)) else (_l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else ${marker})))(${compile(base)}, ${compile(index)})`;
+    // A base typed by a tuple reads the slot type at a literal position
+    // (`pyReadMarkers`).
+    const { absent, outOfRange } = pyReadMarkers(
+      base,
+      isNumber(index) && Number.isInteger(index.re) ? index.re : undefined
+    );
+    return `(lambda _l, _i: (${absent} if _l is None else float('nan')) if not isinstance(_l, (list, tuple, np.ndarray)) else (_l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else ${outOfRange})))(${compile(base)}, ${compile(index)})`;
   },
   First: (args, compile) => pyNthElement('First', args[0], 0, compile),
   Second: (args, compile) => pyNthElement('Second', args[0], 1, compile),

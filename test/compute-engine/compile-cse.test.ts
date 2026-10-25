@@ -726,7 +726,9 @@ describe('COMPILE CSE — capture', () => {
     // One binding clause, whose right-hand side reads the ENCLOSING `n` (the
     // generator's `for n in range(...)` has its own scope in Python).
     expect(occurrences(code, 'for _cse')).toBe(1);
-    expect(code).toContain('for _cse1 in [np.sin(6 * n)]');
+    expect(code).toContain(
+      "for _cse1 in [np.sin(6 * (float('nan') if n is None else n))]"
+    );
     const genexp = code.slice(code.indexOf('sum('), code.indexOf(') + _cse1'));
     expect(genexp).not.toContain('_cse');
   });

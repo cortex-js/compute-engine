@@ -15,8 +15,9 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * where the interpreter answers `NaN` (`Missing + 1`) and compiled
  * JavaScript gives `NaN` (`undefined + 1`). The compiled code reads such an
  * input as `float('nan')` at a numeric operand of an operator that
- * propagates absence. Only an input whose type states that it admits
- * `missing` (`number | missing`, `any`) pays for the test. A comparison
+ * propagates absence. Only an input whose type can hold `missing`
+ * (`number | missing`, `any`, and `unknown`, the type of a free symbol of a
+ * parsed expression: ROADMAP CE-460) pays for the test. A comparison
  * keeps its own `is None` test, so `p ≠ 0` stays undecided for an absent
  * `p`.
  */
@@ -46,9 +47,14 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
   it('leaves an input that cannot be absent unchanged', () => {
     expect(src(['Add', 'x', 1])).toBe('x + 1');
     expect(src(['Sin', 'x'])).toBe('np.sin(x)');
-    // A parsed free symbol is typed `unknown`, an inference marker that
-    // states nothing about absence.
-    expect(python.compile(ce.parse('2\\pi r')).code).toBe('2 * np.pi * r');
+  });
+
+  it('reads an input typed `unknown` as NaN in arithmetic (CE-460)', () => {
+    // A parsed free symbol is typed `unknown`. A caller can pass `None` for
+    // it, so its read is converted too (user decision 2026-10-25).
+    expect(python.compile(ce.parse('2\\pi r')).code).toBe(
+      "2 * np.pi * (float('nan') if r is None else r)"
+    );
   });
 
   it('keeps the `is None` test of a comparison', () => {
@@ -172,6 +178,24 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
     expect(run(['If', ['NotEqual', 'p', 0], 1, -1], ['None'])).toEqual([
       'nan nan',
     ]);
+  });
+
+  it('answers NaN for an absent input typed `unknown` (CE-460)', () => {
+    // `r` is a free symbol of a parsed expression, typed `unknown`.
+    const e = ce.parse('2\\pi r');
+    expect(ce.symbol('r').type.toString()).toBe('unknown');
+    expect(e.subs({ r: ce.Missing }).evaluate().isNaN).toBe(true);
+    const script =
+      `import numpy as np\nimport math\n` +
+      `${python.compileFunction(e, 'f', ['r'])}\n` +
+      `print(repr(float(f(None))), repr(float(f(1.0))))\n`;
+    const [absent, present] = execFileSync(VENV_PYTHON, ['-c', script], {
+      encoding: 'utf-8',
+    })
+      .trim()
+      .split(' ');
+    expect(absent).toBe('nan');
+    expect(Number(present)).toBeCloseTo(e.subs({ r: 1 }).N().re, 12);
   });
 
   it('reads an absent cell of an array through np.vectorize', () => {

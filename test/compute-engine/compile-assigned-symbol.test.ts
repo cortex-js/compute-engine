@@ -172,7 +172,7 @@ describe('COMPILE: assigned-symbol folding', () => {
     expect(
       ce._getCompilationTarget('python')!.compile(expr, { constantFold: false })
         .code
-    ).toBe('np.sin((0.5 * np.pi) * x)');
+    ).toBe("np.sin((0.5 * np.pi) * (float('nan') if x is None else x))");
   });
 
   // A symbol assigned a *symbolic* value whose value itself references a free
@@ -200,7 +200,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       expect(r.run!({ c: 2, x: 3 })).toBe(9); // (2+1)*3
       expect(
         ce._getCompilationTarget('python')!.compile(ce.parse('b x')).code
-      ).toBe('(c + 1) * x');
+      ).toBe("(c + 1) * (float('nan') if x is None else x)");
     });
 
     it('parenthesizes the compound value under a coefficient and a power', () => {

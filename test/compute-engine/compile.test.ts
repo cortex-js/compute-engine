@@ -6054,7 +6054,7 @@ describe('the expression-only Python route declines statement bodies', () => {
         e.parse('\\sin(6u)^2+\\frac{\\sin(6u)}{\\sin(6u)+2}')
       )
     ).toBe(
-      '[_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * u)]][0]'
+      "[_cse1 ** 2 + _cse1 / (_cse1 + 2) for _cse1 in [np.sin(6 * (float('nan') if u is None else u))]][0]"
     );
   });
 

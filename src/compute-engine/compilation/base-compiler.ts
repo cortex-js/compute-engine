@@ -11625,11 +11625,12 @@ export class BaseCompiler {
    * - the target has no `readInput` hook;
    * - the name is bound by the compiled code (a lambda parameter, a `Sum`
    *   index, a block local): it is not an input;
-   * - the type of the input does not state that it admits `missing`
-   *   (`provablyAdmits`): `number | missing` and `any` do, `number` does
-   *   not, and neither does `unknown`, which is an inference marker (a free
-   *   symbol of a parsed `2πr` is typed `unknown`), not a declaration of
-   *   absence. Such an input pays nothing;
+   * - the type of the input cannot hold `missing` (`isSubtype('missing',
+   *   t)`): `number | missing`, `any` and `unknown` can, `number` cannot.
+   *   An input typed `unknown` is read too (user decision 2026-10-25): a
+   *   free symbol of a parsed `2πr` is typed `unknown`, and a caller can
+   *   pass `None` for it. An input whose type cannot hold `missing` pays
+   *   nothing;
    * - the head that consumes it handles absence itself (`Equal`, `Max`,
    *   `Coalesce`: a relation keeps its `is None` test, so `p ≠ 0` stays
    *   undecided for an absent `p`), or does not strip `missing` at that
@@ -11648,7 +11649,7 @@ export class BaseCompiler {
     const read = target.absence?.numeric.readInput;
     if (read === undefined || target.boundVars?.has(expr.symbol) === true)
       return code;
-    if (!provablyAdmits('missing', expr.type.type)) return code;
+    if (!isSubtype('missing', expr.type.type)) return code;
     const parent = BaseCompiler._compileParents.at(-1);
     if (parent === undefined || !isFunction(parent)) return code;
     const def = parent.operatorDefinition;

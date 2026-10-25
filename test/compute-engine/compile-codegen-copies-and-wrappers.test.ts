@@ -237,13 +237,13 @@ describe('the Python target hoists the invariants of a sum (CE-339.2)', () => {
 
   test('constant bounds: the temporary is bound once', () => {
     expect(compile(sum3, { to: 'python' }).code).toBe(
-      `[sum(i * x + np.sin(_tv1) for i in range(1, 4)) for _tv1 in [np.max(L)]][0]`
+      `[sum(i * (float('nan') if x is None else x) + np.sin(_tv1) for i in range(1, 4)) for _tv1 in [np.max(L)]][0]`
     );
   });
 
   test('symbolic bounds: the temporary is computed only for a range that is not empty', () => {
     expect(compile(sumN, { to: 'python' }).code).toBe(
-      `([sum(i * x + np.sin(_tv1) for i in range(1, n + 1)) for _tv1 in [np.max(L)]][0] if 1 <= n else 0)`
+      `([sum(i * (float('nan') if x is None else x) + np.sin(_tv1) for i in range(1, n + 1)) for _tv1 in [np.max(L)]][0] if 1 <= n else 0)`
     );
   });
 
@@ -252,7 +252,9 @@ describe('the Python target hoists the invariants of a sum (CE-339.2)', () => {
       ce.parse('\\sum_{i=3}^{1} (i x + \\sin(\\operatorname{Max}(L)))'),
       { to: 'python' }
     ).code;
-    expect(code).toBe('sum(i * x + np.sin(np.max(L)) for i in range(3, 2))');
+    expect(code).toBe(
+      "sum(i * (float('nan') if x is None else x) + np.sin(np.max(L)) for i in range(3, 2))"
+    );
   });
 
   const python = TEST_PYTHON;
