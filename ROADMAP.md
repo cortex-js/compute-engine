@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-474.
+Next free reference: CE-475.
 
 **Entry format.**
 
@@ -4894,24 +4894,29 @@ value before its memo key is built. A cache of the derived signature stamped
 with the cache generation, checked before the key is built, gave no measurable
 gain at these depths: do not try it again as the fix.
 
-### CE-332. Symbolic differentiation grows super-exponentially with the order
+### CE-332. Higher-order symbolic derivatives of nested expressions still reach the size budget at order four
 
-**Status:** open; performance. User decision 2026-09-22: first fix `factor()` on
-nested quotients, then measure the snapshot churn of factored derivatives and
-decide on that number.
+**Status:** open; performance.
 
-Witness: `f(x) := √(x+√(x+√(x+√(x+x))))`. With `factor()` memoized per engine on
-the structural digest (`boxed-expression/factor.ts`), the third derivative does
-1,091 factorizations and takes 5.4 s. A factored build (`mulFactored`) is larger
-at order three (150,008 characters against 72,637) and takes 44 s, so the chain
-rule keeps `.mul()`. The remaining cost is in the expansion: the profile names
-`expandProduct`/`expandProducts` (9 s of the 11.7 s third derivative) and `add`,
-because the chain rule distributes each level over the previous one.
+Since 2026-10-25 each derivative of order 1 or more is simplified before it is
+differentiated again, and so is the inner derivative of a nested `D`
+(`derivative()` and `differentiateNode()`, `symbolic/derivative.ts`; user
+decision 2026-10-25, measured with no test or snapshot change). With
+`f(x) := √(x+√(x+√(x+√(x+x))))`, the third derivative went from about 6 s and
+31,386 characters to about 2.2 s and 19,919 characters, and three nested `D`
+from 78,793 to 30,070 characters. The step is skipped while `simplify()`
+folds a constant (`isFoldingConstant()`), so that route is not faster.
 
-- **CE-332.1** Options not tried: build the derivative of a nested radical as a
-  product of powers without opening it, or simplify per order before
-  differentiating again. Either changes the shape of `evaluate()` results and
-  needs a snapshot-churn measurement.
+What remains: the fourth derivative of the radical, and of
+`ln(1+ln(1+ln(1+x)))`, exceeds the size budget (`MAX_DERIVATIVE_NODES`) and
+declines; the decline of the `ln` witness takes 5.3 s (3.3 s before, because
+the third iterate is now simplified before the budget stops the work).
+
+Rejected (measured 2026-10-25): building the derivative of a nested power as a
+product of powers without expanding it. The third derivative of the radical
+went from 4.6 s to 32 s and from 31,386 to 67,501 characters, and the full test
+suite did not finish.
+
 
 ### CE-334. Each call of a user function invalidates every generation-keyed cache
 
@@ -5422,6 +5427,16 @@ machine. `D` is `lazy`, so the memo of inert evaluations leaves it out, and
 `withDeclinedDerivativeMemo` (`library/calculus.ts`) records only declines.
 Possible fix: record a successful result with the same dependency stamps as a
 decline.
+
+### CE-474. `simplify()` of a definite integral of a second derivative takes about 6 seconds
+
+**Status:** open; performance. Found 2026-10-25 while landing CE-332.
+
+`simplify()` of `Integrate(t ↦ D(D(√(t+√t), t), t), [1, 2])` takes about 6 s
+(5.9 s at HEAD `472df47ee`, 6.9 s with the CE-332 change). The derivative
+itself is fast; the time is probably the antiderivative attempt of the
+integration. Profile it first, then find whether the integral could use the
+antiderivative of the second derivative (the first derivative) directly.
 
 ## Tests, tools, documentation and release tasks
 

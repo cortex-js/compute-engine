@@ -155,6 +155,22 @@ const ODD_SPECIAL_FUNCTIONS = new Set([
  *     count `upper - lower + 1`, `upper + 1`, and the closed-form result of a
  *     sum of the index (`(b(b+1) - a(a-1)) / 2`). Each has one fewer level of
  *     Sum/Product than the input, so the recursion terminates.
+ *   - `derivative()` (`symbolic/derivative.ts`, the per-order iterate
+ *     `result.simplify()`): a derivative of order 2 or more simplifies each
+ *     intermediate derivative before it differentiates it again. The call
+ *     runs on a derivative of the body, which does not contain the
+ *     `Derivative` expression whose evaluation started the differentiation.
+ *     When that evaluation is a constant fold of `simplify()`
+ *     (`isFoldingConstant()`, `boxed-expression/simplify.ts`), the call is
+ *     skipped. Other evaluations inside `simplify()` (`elementWise()` above,
+ *     the residue-class arithmetic in `simplify.ts`) are not detected; on
+ *     those routes termination rests on the same fact.
+ *   - `differentiateNode()` (`symbolic/derivative.ts`, the inner derivative
+ *     of a nested `D`, `evaluated.simplify()`): the call runs on the
+ *     evaluated inner derivative, which has no `D` at its root and does not
+ *     contain the `D` node whose evaluation started the differentiation. It
+ *     is skipped inside a constant fold, as above, and the same fact gives
+ *     termination on the other routes.
  *
  * The former `sqrt(-n) -> i·sqrt(n)` site was removed: canonicalization already
  * folds `Sqrt` of the positive numeric operand, so no `.simplify()` was needed.

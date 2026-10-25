@@ -29,6 +29,7 @@ import {
   isOperatorDef,
 } from '../boxed-expression/utils.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { isFoldingConstant } from '../boxed-expression/simplify.js';
 import type { Type } from '../../common/type/types.js';
 import {
   type AliasDescent,
@@ -610,6 +611,16 @@ function containsSame(expr: Expression, node: Expression): boolean {
  * the chain starts from) and the FINISHED result of each order (the iterate
  * with the closing `simplify()` of order >= 2 applied).
  *
+ * Only a request made inside a constant fold of `simplify()` fills
+ * `iterates` (sub-keys that end in `:raw`), with the state each step read
+ * in `iterateReads`. Outside a fold, each
+ * intermediate derivative is simplified before it is differentiated again,
+ * so an iterate depends on the state of the engine like a finished result
+ * does. Such iterates are not cached: a request starts from the finished
+ * result of the highest valid lower order, and the dependencies of a
+ * finished result include the symbols of every intermediate derivative that
+ * was simplified to compute it.
+ *
  * The two halves are guarded on DIFFERENT engine counters, because they read
  * different state:
  *
@@ -655,6 +666,12 @@ function containsSame(expr: Expression, node: Expression): boolean {
 type DerivativeChainCache = {
   semanticVersion: number;
   iterates: Map<string, (Expression | undefined)[]>;
+  /** For each chain of `iterates`, the state that the differentiation step
+   * which built `iterates[k]` read (`iterateReads[k]`; index 0 is empty). A
+   * raw iterate can hold the result of a nested request (the evaluation of
+   * a nested `Derivative`), whose value depends on that state. A request
+   * that reuses `iterates[k]` adds the reads of steps 1 to k to its own. */
+  iterateReads: Map<string, StateReads[]>;
   results: Map<string, Map<number, FinishedDerivative>>;
   /** The `generation` of the finished result that {@link derivative} last
    * returned from this entry, from the cache or newly recorded. It is
@@ -830,6 +847,42 @@ function finishedDerivative(
 }
 
 /**
+ * The sub-key of a cache entry for `base` in one of the two modes of
+ * {@link derivative}. Inside a constant fold of `simplify()`
+ * (`isFoldingConstant()`) the intermediate derivatives are not simplified,
+ * so a result has another form than outside a fold. The suffix `:raw` keeps
+ * the results of the two modes apart, so that the form of a result does not
+ * depend on the mode of an earlier request.
+ */
+function derivativeSubKey(base: string, foldMode: boolean): string {
+  return foldMode ? `${base}:raw` : base;
+}
+
+/**
+ * The symbol dependencies (see {@link FinishedDerivative}) that the
+ * simplifications made during one request of {@link derivative} read.
+ * `complete` is false when one of them cannot be validated: the result is
+ * then recorded without `deps`, and is valid only at its exact generation.
+ */
+type StateReads = { deps: SymbolDependency[]; complete: boolean };
+
+/**
+ * The {@link StateReads} of the request of {@link derivative} that runs now,
+ * or `undefined` outside a request. A request that starts inside another one
+ * (the evaluation of a nested `Derivative`) adds the dependencies of its
+ * result to the reads of the enclosing request: the enclosing result can be
+ * built from the inner one.
+ */
+let activeStateReads: StateReads | undefined;
+
+/** Add `deps` to the reads of the request that runs now, if any. */
+function noteStateReads(deps: SymbolDependency[] | undefined): void {
+  if (activeStateReads === undefined) return;
+  if (deps === undefined) activeStateReads.complete = false;
+  else activeStateReads.deps.push(...deps);
+}
+
+/**
  * Memoize the result of `compute`, the univariate arm of the `Derivative`
  * evaluate handler, per function literal, route and order.
  *
@@ -868,9 +921,15 @@ export function memoizedDerivativeResult(
   if (cacheKey === undefined) return compute();
   const ce = fn.engine;
   const cache = derivativeChainCache(ce, cacheKey);
-  const subKey = isSymbol(fn) ? 'result:apply' : 'result:body';
+  const subKey = derivativeSubKey(
+    isSymbol(fn) ? 'result:apply' : 'result:body',
+    isFoldingConstant()
+  );
   const finished = finishedDerivative(ce, cache, subKey, order);
-  if (finished !== undefined) return finished.value;
+  if (finished !== undefined) {
+    noteStateReads(finished.deps);
+    return finished.value;
+  }
   const before = ce._cacheGeneration();
   const anyBefore = ce._anyVersion;
   cache.lastFinishedGeneration = undefined;
@@ -938,6 +997,7 @@ function partialDerivativeCache(
     entry = {
       semanticVersion: version,
       iterates: new Map(),
+      iterateReads: new Map(),
       results: new Map(),
     };
     byKey.set(key, entry);
@@ -985,10 +1045,36 @@ export function memoizedPartialDerivative(
   if (key === undefined) return compute();
   const ce = fn.engine;
   const cache = partialDerivativeCache(ce, key);
-  const subKey = `result:partial:${orders.join(',')}`;
+  const subKey = derivativeSubKey(
+    `result:partial:${orders.join(',')}`,
+    isFoldingConstant()
+  );
   const finished = finishedDerivative(ce, cache, subKey, 0);
-  if (finished !== undefined) return finished.value;
-  const value = compute();
+  if (finished !== undefined) {
+    noteStateReads(finished.deps);
+    return finished.value;
+  }
+  // `compute` calls `differentiate()`, which simplifies the inner derivative
+  // of a nested `D` (`differentiateNode()`), and can reuse the results of
+  // other requests. The symbols those read are part of the dependencies of
+  // the result: with `b` an integer, the inner derivative `3u²·sin(πb)`
+  // simplifies to 0, and the result holds no `b`.
+  const reads: StateReads = { deps: [], complete: true };
+  const outerReads = activeStateReads;
+  activeStateReads = reads;
+  let value: Expression | undefined;
+  try {
+    value = compute();
+  } finally {
+    activeStateReads = outerReads;
+  }
+  let deps = restampDisposed(
+    symbolDependencies(...freeSymbolNodes(source), ...freeSymbolNodes(value))
+  );
+  if (deps !== undefined && reads.complete)
+    deps = [...restampDisposed(reads.deps)!, ...deps];
+  else deps = undefined;
+  noteStateReads(deps);
   // A definition changed during `compute`: the entry no longer describes
   // the state of the engine.
   if (ce._semanticVersion !== cache.semanticVersion) return value;
@@ -1001,9 +1087,7 @@ export function memoizedPartialDerivative(
     generation: ce._cacheGeneration(),
     any: ce._anyVersion,
     value,
-    deps: restampDisposed(
-      symbolDependencies(...freeSymbolNodes(source), ...freeSymbolNodes(value))
-    ),
+    deps,
   });
   return value;
 }
@@ -1071,6 +1155,7 @@ function derivativeChainCache(
     entry = {
       semanticVersion: version,
       iterates: new Map(),
+      iterateReads: new Map(),
       results: new Map(),
     };
     derivativeChains.set(key, entry);
@@ -1137,11 +1222,17 @@ export function derivative(
     // the lookup below applies.
     if (cacheKey !== undefined) {
       const earlyCache = derivativeChainCache(ce, cacheKey);
-      const early = finishedDerivative(ce, earlyCache, 'apply:_', order);
+      const early = finishedDerivative(
+        ce,
+        earlyCache,
+        derivativeSubKey('apply:_', isFoldingConstant()),
+        order
+      );
       if (early !== undefined) {
         earlyCache.lastFinishedGeneration = early.generation;
         earlyCache.lastFinishedAny = early.any;
         earlyCache.lastFinishedDeps = early.deps;
+        noteStateReads(early.deps);
         return early.value;
       }
     }
@@ -1172,28 +1263,126 @@ export function derivative(
   // literal whose parameter is spelled `_` differentiates its BODY with
   // respect to `_`, which is a different chain from the application `f(_)`
   // the symbol route builds, under the same variable name.
-  const subKey = appliedForm ? `apply:${v}` : `body:${v}`;
+  // Inside a constant fold of `simplify()` (`isFoldingConstant()`) the
+  // intermediate derivatives are not simplified (see the loop below), so the
+  // results have another form. The `:raw` suffix keeps the two modes in
+  // separate entries: the form of a result does not depend on the mode of an
+  // earlier request.
+  const foldMode = isFoldingConstant();
+  const subKey = derivativeSubKey(
+    appliedForm ? `apply:${v}` : `body:${v}`,
+    foldMode
+  );
   const finished = finishedDerivative(ce, cache, subKey, originalOrder);
   if (finished !== undefined) {
     cache!.lastFinishedGeneration = finished.generation;
     cache!.lastFinishedAny = finished.any;
     cache!.lastFinishedDeps = finished.deps;
+    noteStateReads(finished.deps);
     return finished.value;
   }
 
-  // The chain of raw iterates, extended in place: an order already computed
-  // for this literal is the starting point, so `f'''` costs one
-  // differentiation step once `f''` has been asked for.
-  const chain = cache?.iterates.get(subKey) ?? [fn];
-  let result: Expression | undefined =
-    order < chain.length ? chain[order] : chain[chain.length - 1];
-  let step = order < chain.length ? order : chain.length - 1;
-  while (step < order && result) {
-    result = differentiate(result, v);
-    step += 1;
-    chain[step] = result;
+  // The state that the simplifications of this request read: the
+  // simplification of each intermediate derivative below, of the inner
+  // derivative of a nested `D` (`differentiateNode()`), and the finished
+  // results of other requests that this request uses. They are part of the
+  // dependencies of the result.
+  const reads: StateReads = { deps: [], complete: true };
+  const outerReads = activeStateReads;
+  activeStateReads = reads;
+  let result: Expression | undefined;
+  try {
+    if (foldMode) {
+      // The chain of raw iterates, extended in place: an order already
+      // computed for this literal is the starting point, so `f'''` costs one
+      // differentiation step once `f''` has been asked for. No iterate is
+      // simplified here, but an iterate can hold the result of a nested
+      // request, which depends on the state of the engine. So the state that
+      // each step read is stored next to the iterate it built, and is added
+      // to the reads of this request when the iterate is reused.
+      const chain = cache?.iterates.get(subKey) ?? [fn];
+      const chainReads: StateReads[] = cache?.iterateReads.get(subKey) ?? [
+        { deps: [], complete: true },
+      ];
+      result = order < chain.length ? chain[order] : chain[chain.length - 1];
+      let step = order < chain.length ? order : chain.length - 1;
+      for (let k = 1; k <= step; k++) {
+        const r = chainReads[k];
+        noteStateReads(r === undefined || !r.complete ? undefined : r.deps);
+      }
+      while (step < order && result) {
+        const stepReads: StateReads = { deps: [], complete: true };
+        activeStateReads = stepReads;
+        try {
+          result = differentiate(result, v);
+        } finally {
+          activeStateReads = reads;
+        }
+        noteStateReads(stepReads.complete ? stepReads.deps : undefined);
+        step += 1;
+        chain[step] = result;
+        chainReads[step] = stepReads;
+      }
+      cache?.iterates.set(subKey, chain);
+      cache?.iterateReads.set(subKey, chainReads);
+    } else {
+      // Simplify each derivative of order 1 or more before it is
+      // differentiated again. The chain rule and the product rule distribute
+      // each level over the result of the previous one, so a derivative that
+      // is not simplified grows quickly with the order. With this step the
+      // third derivative of √(x+√(x+√(x+√(x+x)))) prints 37% shorter and
+      // takes about a third of the time (measured 2026-10-25: 19,919 against
+      // 31,386 characters, 2.2 s against 6.0 s).
+      //
+      // A simplified iterate depends on the state of the engine (declared
+      // types, assumptions, whether the facts are hidden): with `b` an
+      // integer, `3x²·sin(πb)` simplifies to 0. So the iterates are not
+      // cached. The starting point is the finished result of the highest
+      // lower order that is still valid (`finishedDerivative()` checks it).
+      // A finished result of order 2 or more is the simplified iterate of
+      // that order, so it is not simplified again. The symbols of each
+      // iterate that is simplified are recorded in `reads`, so the result
+      // is not served after a write to one of them, even when the
+      // simplification removed the symbol.
+      //
+      // This `simplify()` cannot recurse without end: it runs on a
+      // derivative of the body, which does not contain the `Derivative`
+      // expression whose evaluation started this differentiation. When that
+      // evaluation is a constant fold of `simplify()` (`f'''(2)` in
+      // `1 + f'''(2)`), the other branch above runs and nothing is
+      // simplified, so that route adds no call to `simplify()`. Other
+      // evaluations inside `simplify()` (`elementWise()` in
+      // `simplify-rules.ts`, the residue-class arithmetic in
+      // `simplify.ts`) are not detected; on those routes, termination
+      // rests on the same fact: the simplified iterate does not contain the
+      // node whose evaluation started this differentiation.
+      // ROADMAP CE-332 has the measurements.
+      result = fn;
+      let step = 0;
+      let simplified = false;
+      for (let k = order - 1; k >= 1; k--) {
+        const lower = finishedDerivative(ce, cache, subKey, k);
+        if (lower?.value === undefined) continue;
+        result = lower.value;
+        step = k;
+        simplified = k >= 2;
+        noteStateReads(lower.deps);
+        break;
+      }
+      while (step < order && result) {
+        let next = result;
+        if (step >= 1 && !simplified) {
+          next = result.simplify();
+          noteStateReads(symbolDependencies(result, next));
+        }
+        simplified = false;
+        result = differentiate(next, v);
+        step += 1;
+      }
+    }
+  } finally {
+    activeStateReads = outerReads;
   }
-  cache?.iterates.set(subKey, chain);
 
   // The iterated product/quotient rule squares the denominator at each step,
   // so an r-th derivative can carry x^(2^r)-scale exponents (e.g. the 75th
@@ -1206,6 +1395,12 @@ export function derivative(
   // derivative cannot blow up), which also leaves the common case untouched.
   const raw = result;
   if (result && originalOrder >= 2) result = result.simplify();
+  // The symbols the closing simplify read are those of the raw iterate; the
+  // ones of the result are included in case the simplify introduced one.
+  let deps = symbolDependencies(raw, result);
+  if (deps !== undefined && reads.complete) deps = [...reads.deps, ...deps];
+  else deps = undefined;
+  noteStateReads(deps);
   if (cache !== undefined) {
     let byOrder = cache.results.get(subKey);
     if (byOrder === undefined) {
@@ -1216,9 +1411,6 @@ export function derivative(
     // describes, and the simplify itself can advance the axis (it pushes and
     // pops scopes).
     const generation = ce._cacheGeneration();
-    // The symbols the simplify read are those of the raw iterate; the ones of
-    // the result are included in case the simplify introduced one.
-    const deps = symbolDependencies(raw, result);
     const any = ce._anyVersion;
     byOrder.set(originalOrder, { generation, any, value: result, deps });
     cache.lastFinishedGeneration = generation;
@@ -2364,7 +2556,30 @@ function differentiateNode(
     recordD(trace, expr, v, 'derivative.rewrite', () =>
       dPlaceholder(evaluated, v)
     );
-    return differentiate(evaluated, v, depth + 1, trace);
+    // Simplify the inner derivative before it is differentiated again. The
+    // chain rule distributes the outer derivative over every term of the
+    // inner one, so an inner derivative that is not simplified makes the
+    // result grow quickly with the number of nested `D`.
+    //
+    // This `simplify()` cannot recurse without end: it runs on the evaluated
+    // inner derivative, which has no `D` at its root (the test above returns
+    // first) and does not contain the `D` node whose evaluation started this
+    // differentiation. Inside a constant fold of `simplify()`
+    // (`isFoldingConstant()`) the step is skipped, so that route adds no
+    // call to `simplify()`. Other evaluations inside `simplify()`
+    // (`elementWise()` in `simplify-rules.ts`, the residue-class arithmetic
+    // in `simplify.ts`) are not detected; on those routes, termination rests
+    // on the same fact.
+    //
+    // The simplified form depends on the state of the engine (with `b` an
+    // integer, `3x²·sin(πb)` simplifies to 0), so the symbols it read are
+    // added to the dependencies of the request of `derivative()` that runs
+    // now, if any (`noteStateReads()`).
+    if (isFoldingConstant())
+      return differentiate(evaluated, v, depth + 1, trace);
+    const simplified = evaluated.simplify();
+    noteStateReads(symbolDependencies(evaluated, simplified));
+    return differentiate(simplified, v, depth + 1, trace);
   }
 
   // Differentiate an already-symbolic partial derivative, applying the chain

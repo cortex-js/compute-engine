@@ -596,6 +596,12 @@
 
 ### Performance
 
+- **Derivatives of order 3 or more of nested expressions are faster and shorter**:
+  each intermediate derivative is simplified before it is differentiated again.
+  The third derivative of `√(x+√(x+√(x+√(x+x))))` takes about a third of the
+  time and prints 37% shorter.
+
+
 - **A coordinate of point arithmetic over a list of points held by a symbol**
   (`PointX(4·P + 0.3·(t, t))` with `P: list<tuple<number, number>>`) is compiled
   as `4·PointX(P) + 0.3·t` on the JavaScript and interval targets, so the points

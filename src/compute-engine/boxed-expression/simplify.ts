@@ -218,6 +218,17 @@ function containsUnfoldableHead(expr: Expression): boolean {
 
 const foldsInProgress: Expression[] = [];
 
+/**
+ * True while `simplify()` evaluates a constant subexpression to fold it
+ * (`foldedConstant()`). The evaluation can run any evaluate handler, for
+ * example the one of `Derivative` or `Integrate`, so code that calls
+ * `simplify()` from an evaluate handler can read this to know that it runs
+ * inside a simplification.
+ */
+export function isFoldingConstant(): boolean {
+  return foldsInProgress.length > 0;
+}
+
 /** True when `e` is the cancellation that the engine throws when an
  * evaluation exceeds `recursionLimit` or `iterationLimit`. Such a limit is
  * reached by the expression that is evaluated (a user function that recurses
