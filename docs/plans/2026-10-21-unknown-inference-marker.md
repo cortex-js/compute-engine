@@ -3,7 +3,9 @@
 Status: decided 2026-10-21 (user: D1 yes, D2 yes, D3 yes, D4 yes, D5 option
 (a), D6 yes); implemented 2026-10-21 (slices 1 to 4; D4 narrowed and D6 not
 applied, see section 5). The user confirmed the narrowed D4 on 2026-10-22;
-D6 was measured on 2026-10-22 (section 5). This note
+D6 was measured on 2026-10-22 (section 5). On 2026-10-23 the user decided
+not to apply D6 (confirmed 2026-10-24): the library signatures keep
+`-> unknown`, because `-> any` stops the inference of the type downstream. This note
 answers questions Q2, Q7 and Q8 of
 [the collection types proposal](2026-10-20-bare-tuple-record-any.md). It is
 limited to `unknown` and inference. Presence assertions and the diagnostic

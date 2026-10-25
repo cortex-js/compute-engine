@@ -380,6 +380,27 @@ claim available at that expression. `ce.box(21).type` is `21` and
 Consumers may read the bounds of an enclosing range as a type fact. A domain
 check does exactly that, which is why `Arcsin(1/3)` types `real`.
 
+The static type of an expression and the type of its value can use different
+range bounds, so a test of soundness compares the VALUE with the static type,
+not the two types. The interval arithmetic of the type handlers keeps four
+significant digits: `2.0 + 1/3` is typed `real<2.329..2.341>`, and its value
+`2.333…` is typed `real<2.3..2.4>`. The value is in the static range, but
+`real<2.3..2.4>` is not a subtype of `real<2.329..2.341>`. A probe of a ranged
+or composite static type asks `typeAcceptsValue(value, staticType)`, as the
+nightly soundness grid does (`test/compute-engine/nightly/type-soundness-grid.test.ts`),
+never `isSubtype(value.type, staticType)`. The engine itself already works this
+way: an assignment checks the value against the declared type, not the value's
+compact type, so `t: real<0..0.334>` accepts `1/3` and `list<real<0..1>>`
+accepts a computed `[0.666…]` (measured 2026-10-25). Rounding the static
+ranges outward to the two-digit grid of the value was measured and rejected
+(user decision 2026-10-25): the rounding adds up through nested
+subexpressions, so `√(1 − ((k − 0.5)/40)²)` with `k` from 1 to 40 became
+`complex`. In the same way, the cells of a list literal are typed by their tier
+without a range: `Abs([1, 2])` is typed `list<integer<0..>^2>`, and its value
+`[1, 2]` is typed `vector<integer^2>`. Typing literal cells with a sign range
+was measured and rejected too (user decision 2026-10-25): the handlers then
+derive tighter ranges than a sign range on the value can state.
+
 A literal type lives at an EXPRESSION position only. Every storage position
 widens it back to its tier: an inferred declaration, a solved type variable
 (`identity(5)` binds `T = integer`, never `5`), a derived function-literal
