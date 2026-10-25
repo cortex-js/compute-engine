@@ -22,7 +22,7 @@ describe('SERIALIZING SETS', () => {
     expect(
       latex(['Filter', 'Numbers', ['NotEqual', '_', 0]])
     ).toMatchInlineSnapshot(
-      `\\mathrm{Filter}(\\mathrm{Numbers}, ()\\mapsto\\operatorname{\\_1}\\ne0)`
+      `\\mathrm{Filter}(\\mathrm{Numbers}, \\operatorname{\\_1}\\mapsto\\operatorname{\\_1}\\ne0)`
     );
   });
 

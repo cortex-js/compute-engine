@@ -685,7 +685,11 @@ export class Product {
     // base to the x^0 → 1 fold — a generic-symbol fold like x/x → 1: `z^0`
     // canonicalizes to 1 even while `z := 0`. Only the literal `0^0` falls
     // through and canonicalizes to NaN.)
-    if (isLiteral(term, 1) && (!exp || isOne(exp))) return;
+    // An exact 1 is dropped at any exponent: `exp` is a rational, and 1 to a
+    // rational power is 1. The numerator of `(1/x)^2` reaches here as `1`
+    // with the exponent 2; kept as a term, it was written as a factor
+    // `1\times` next to a float coefficient, which does not fold with it.
+    if (isLiteral(term, 1)) return;
     if (term.isSame(0) === false && exp && isZero(exp)) return;
     if (isLiteral(term, 0)) {
       if (exp && isZero(exp)) this.coefficient = this.engine._numericValue(NaN);

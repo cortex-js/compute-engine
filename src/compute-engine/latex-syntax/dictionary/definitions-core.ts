@@ -1857,7 +1857,9 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // `Nothing` as a parameter instead made `() \mapsto 2` a ONE-parameter
       // function whose parameter was named `Nothing`, and left the `_` of
       // `() \mapsto \_ + 1` unbound. The `Function` serializer below writes
-      // the wildcard-parameter form as `()\mapsto…`, which this reads back.
+      // the wildcard-parameter form as `()\mapsto…` only when the body has
+      // no wildcard or uses a bare `_`; with numbered wildcards it writes
+      // them as the parameter list.
       let explicitParams = true;
       if (operator(lhs) === 'Delimiter') {
         const inner = operand(lhs, 1);
@@ -1963,17 +1965,32 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       // same literal. Written as a block, it is fenced (`x\mapsto\left(f;
       // \right)`), as `prettify` already avoided.
       const body = functionLiteralBody(operand(expr, 1));
-      // A literal with no parameter operand, `["Function", body]`, is
-      // written `()\mapsto body`. That is not an empty parameter list: the
-      // parser above reads `()` as "the parameters are the wildcards of the
-      // body", so `()\mapsto\operatorname{\_1}+1` is the one-parameter
-      // function `_1 \mapsto _1 + 1`. The pretty MathJSON serializer
-      // (`serializePrettyJsonFunction`, `boxed-expression/serialize.ts`)
-      // only drops a parameter list that this rule reconstructs, so the
-      // LaTeX round-trips. A body with no wildcard, `()\mapsto 2`, is a
-      // function of no argument.
-      if (args.length === 1)
-        return joinLatex(['()', '\\mapsto', serializer.serialize(body)]);
+      // A literal with no parameter operand, `["Function", body]`, takes its
+      // parameters from the wildcards of its body. The pretty MathJSON
+      // serializer (`serializePrettyJsonFunction`,
+      // `boxed-expression/serialize.ts`) only drops a parameter list that
+      // this reading reconstructs.
+      //
+      // When the body uses the numbered wildcards `_1` to `_9`, they are
+      // written as the parameter list (`\operatorname{\_1}\mapsto
+      // \frac{\operatorname{\_1}}{n}`, `freeWildcardParameters()`). Otherwise
+      // the literal is written `()\mapsto body`: a body with no wildcard,
+      // `()\mapsto 2`, is a function of no argument, and the parser reads
+      // `()` with a body that uses a bare `_` as the function of that
+      // wildcard. Both forms read back as the same literal; `()\mapsto` with
+      // a body that uses `\_1` does too, but it looks like a function of no
+      // argument.
+      if (args.length === 1) {
+        const params = freeWildcardParameters(operand(expr, 1)!);
+        if (params === null || params.length === 0)
+          return joinLatex(['()', '\\mapsto', serializer.serialize(body)]);
+        const list = params.map((p) => serializer.serialize(p)).join(', ');
+        return joinLatex([
+          params.length === 1 ? list : serializer.wrapString(list, 'normal'),
+          '\\mapsto',
+          serializer.serialize(body),
+        ]);
+      }
 
       if (args.length === 2 && !isTyped(operand(expr, 2)!)) {
         return joinLatex([
@@ -7095,6 +7112,70 @@ function undecorated(expr: MathJsonExpression): MathJsonExpression {
   )
     return expr.fn as MathJsonExpression;
   return expr;
+}
+
+/**
+ * The parameters of a function literal with no parameter list,
+ * `["Function", body]`, written out for its LaTeX: the numbered wildcards
+ * (`_1` to `_9`) that are free in `body`, in index order. Boxing gives such
+ * a literal one parameter for each of them (`anonymousParameters`,
+ * `function-utils.ts`), and the parser reads `\operatorname{\_1}\mapsto …`
+ * back as the literal with the parameter `_1`.
+ *
+ * The walk reads the slots as `freeAnonymousSlots()`
+ * (`boxed-expression/function-literal.ts`) reads them on a boxed expression:
+ * a nested literal with no parameter list owns every slot of its body, a
+ * nested literal with a parameter list binds the names it declares (a name,
+ * a `Typed` name, a rest parameter `Spread(name)`, and the leaf names of a
+ * destructuring pattern `Tuple(…)`, as `functionLiteralParameterNames()`
+ * reads them), and the stage of a `Pipe` takes its slots from the piped
+ * value.
+ *
+ * Returns `null` when the body uses a bare `_`: boxing renames it, and the
+ * literal is then written `()\mapsto …`, which the parser reads the same way.
+ */
+function freeWildcardParameters(body: MathJsonExpression): string[] | null {
+  const slots = new Set<string>();
+  const isSlot = (s: string): boolean => s === '_' || /^_[1-9]$/.test(s);
+  // The names that one parameter operand binds.
+  const bind = (p: MathJsonExpression, names: Set<string>): void => {
+    const op = operator(p);
+    if (op === 'Tuple') {
+      for (const x of operands(p)) {
+        // A `_` position in a destructuring pattern binds nothing.
+        if (symbol(x) !== '_') bind(x, names);
+      }
+      return;
+    }
+    const name = symbol(op === 'Typed' || op === 'Spread' ? operand(p, 1) : p);
+    if (name !== null) names.add(name);
+  };
+  const visit = (e: MathJsonExpression, bound: ReadonlySet<string>): void => {
+    const s = symbol(e);
+    if (s !== null) {
+      if (isSlot(s) && !bound.has(s)) slots.add(s);
+      return;
+    }
+    const op = operator(e);
+    if (!op) return;
+    const args = operands(e);
+    if (op === 'Function') {
+      if (args.length < 2) return;
+      const names = new Set(bound);
+      for (const p of args.slice(1)) bind(p, names);
+      visit(args[0], names);
+      return;
+    }
+    if (isSlot(op) && !bound.has(op)) slots.add(op);
+    if (op === 'Pipe' && args.length === 2) {
+      visit(args[0], bound);
+      return;
+    }
+    for (const x of args) visit(x, bound);
+  };
+  visit(body, new Set());
+  if (slots.has('_')) return null;
+  return [...slots].sort();
 }
 
 /**

@@ -27,6 +27,7 @@ import {
 import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
+  functionLiteralParameterType,
   isRestParameter,
   isDestructuringParameter,
 } from './function-literal.js';
@@ -117,6 +118,44 @@ function bindsArgumentsWhole(
   );
 }
 
+/**
+ * The parameter types of the signature DECLARED for `binding` (not one
+ * inferred from the value), in order, required parameters first. A call
+ * checks its arguments against them: with `f: (string) -> unknown`, `f(P)`
+ * with `P` absent is an `incompatible-type` error, and with
+ * `f: (real) -> unknown` the absent value is read as `NaN`, although the
+ * function literal assigned to `f` has no annotation. `undefined` when no
+ * signature was declared, or when it is generic.
+ *
+ * An operator definition whose literal annotates only some of its
+ * parameters has a `_validationSignature`, the signature the arguments are
+ * checked against: there a bare parameter is `any`, and its type in
+ * `signature` was only inferred from the body. That signature is read, so
+ * that an inferred type is not read as a contract.
+ */
+function declaredParameterTypes(
+  binding: BoxedDefinition | undefined
+): ReadonlyArray<Type> | undefined {
+  if (!binding) return undefined;
+  let sig: Type | undefined;
+  if ('operator' in binding) {
+    if (binding.operator.inferredSignature) return undefined;
+    sig =
+      binding.operator._validationSignature ??
+      binding.operator.signature?.type;
+  } else {
+    if (binding.value.inferredType) return undefined;
+    sig = binding.value.type?.type;
+  }
+  if (
+    typeof sig !== 'object' ||
+    sig.kind !== 'signature' ||
+    sig.typeParams !== undefined
+  )
+    return undefined;
+  return [...(sig.args ?? []), ...(sig.optArgs ?? [])].map((a) => a.type);
+}
+
 /** Derive a call's result from its body without changing the callable contract.
  * Parameters and straight-line locals carry descriptors, never runtime values.
  * Unsupported control flow and recursive calls keep the declared result. */
@@ -142,7 +181,14 @@ export function callResultType(
       !bindsArgumentsWhole(binding, literal))
   )
     return undefined;
-  return literalBodyResultType(engine, literal, args, declared, derive);
+  return literalBodyResultType(
+    engine,
+    literal,
+    args,
+    declared,
+    derive,
+    declaredParameterTypes(binding)
+  );
 }
 
 /** Scalar declarations already describe their result's representation. This
@@ -266,7 +312,11 @@ function literalBodyResultType(
   literal: Expression & FunctionInterface,
   args: readonly OperandDescriptor[],
   declared: Type,
-  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
+  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined,
+  // The parameter types of the declared signature of the called function,
+  // when it has one (`declaredParameterTypes`). They decide, with the
+  // annotations of the literal, how an absent argument is bound.
+  declaredParams?: ReadonlyArray<Type>
 ): Type | undefined {
   // A number literal argument is typed by its tier (`integer`, `real`, …),
   // not by its value: the result of `(x ↦ (2x, x))(3)` is a pair of
@@ -287,7 +337,8 @@ function literalBodyResultType(
   active.set(engine, running);
   // Each parameter is typed as the PRESENT part of its argument. An argument
   // that may be absent (`missing | T`) is derived a second time below with
-  // that parameter typed `missing`, and the two results are joined: a body
+  // that parameter typed as the call binds an absent value (`missing`, or
+  // `nan` at a numeric parameter), and the two results are joined: a body
   // that passes the parameter through (`p ↦ p`) or stores it (`(p, s) ↦
   // (p, s)`) gives the absent value back, and the first derivation alone
   // would type the call as if the argument were always present.
@@ -330,7 +381,13 @@ function literalBodyResultType(
     results = new Map();
     stored.literals.set(literal, results);
   }
-  const key = [declared, ...args.map((x) => x.type)]
+  // The declared parameter types decide how an absent argument is bound, and
+  // one literal can be the value of several functions declared differently.
+  const key = [
+    declared,
+    ...args.map((x) => x.type),
+    ...(declaredParams ?? []),
+  ]
     .map((t) => typeToString(t))
     .join(';');
   if (results.has(key)) return results.get(key);
@@ -564,42 +621,102 @@ function literalBodyResultType(
       memo.set(expr, result);
       return result;
     };
-    let result = walk(literal.op1)?.type;
-    // The absent arms: for every combination of the arguments that may be
-    // absent (each one present or absent on its own), the body is typed with
-    // those parameters typed `missing`, and the results are joined with the
-    // present arm. With `(p, q) ↦ (p, q)` over two index reads, one absent
-    // and one present gives a tuple with one absent coordinate, which neither
-    // the all-present nor the all-absent arm contains. More than three such
-    // arguments (eight combinations) is declined: the call keeps the declared
-    // result.
-    const gated = present
-      .map((t, i) => (t !== args[i].type ? i : -1))
-      .filter((i) => i >= 0);
-    if (result !== undefined && gated.length > 3) result = undefined;
-    for (
-      let mask = 1;
-      result !== undefined && mask < 1 << gated.length;
-      mask++
-    ) {
-      const absentAt = new Set(gated.filter((_, j) => (mask >> j) & 1));
-      env = new Map(
-        names.map((name, i) => [
-          name,
-          describeType(absentAt.has(i) ? 'missing' : present[i]),
-        ])
-      );
+    // The arms: for every combination of the arguments that may be absent
+    // (each one present or absent on its own), the body is typed with those
+    // parameters typed as an absent value, and the results are joined. With
+    // `(p, q) ↦ (p, q)` over two index reads, one absent and one present
+    // gives a tuple with one absent coordinate, which neither the all-present
+    // nor the all-absent arm contains. More than three such arguments (eight
+    // combinations) is declined: the call keeps the declared result. An
+    // argument typed `missing` (always absent) is absent in every arm.
+    //
+    // The parameter of an absent argument is typed as the call binds the
+    // absent value. The type of the parameter is its annotation in the
+    // literal, else its type in the declared signature of the function.
+    // At a numeric type the absent value is read as `NaN` (`apply()`,
+    // `function-utils.ts`), so the parameter is typed `nan`. With no type,
+    // or a type with a `missing` member, it is typed `missing`. At any other
+    // type (a point, a list, a string) the call is an `incompatible-type`
+    // error, so a combination with an absent argument there gives no value
+    // and adds nothing to the type. Before, the parameter was typed
+    // `missing` in every case, and `f(P)` with
+    // `f: (broadcastable<tuple<number, number>>) -> unknown`, the body
+    // `a ↦ (a.x + 1, a.y + 1)` and `P: tuple<number, number> | missing` was
+    // typed `tuple<missing, missing> | tuple<number, number>`.
+    const absentType = (i: number): Type | undefined => {
+      const annotation =
+        functionLiteralParameterType(params[i]) ?? declaredParams?.[i];
+      if (
+        annotation === undefined ||
+        annotation === 'unknown' ||
+        isSubtype('missing', annotation)
+      )
+        return 'missing';
+      if (isSubtype(annotation, 'number')) return 'nan';
+      return undefined;
+    };
+    // The type of the body when the arguments at `absentAt` are absent:
+    // `null` when the call refuses one of them (no value, nothing to add),
+    // `undefined` when the body gives no type. With `forBound`, an absent
+    // argument is typed `missing` even where it is read as `NaN`, for the
+    // check against the declared result below.
+    const armType = (
+      absentAt: ReadonlySet<number>,
+      forBound: boolean
+    ): Type | undefined | null => {
+      const types: Type[] = [];
+      for (let i = 0; i < names.length; i++) {
+        if (!absentAt.has(i)) {
+          types.push(present[i]);
+          continue;
+        }
+        const t = absentType(i);
+        if (t === undefined) return null;
+        types.push(forBound ? 'missing' : t);
+      }
+      env = new Map(names.map((name, i) => [name, describeType(types[i])]));
       memo.clear();
-      const arm = walk(literal.op1)?.type;
-      result = arm === undefined ? undefined : widen(result, arm);
+      return walk(literal.op1)?.type;
+    };
+    const alwaysAbsent = args
+      .map((a, i) => (resolveTypeAlias(a.type) === 'missing' ? i : -1))
+      .filter((i) => i >= 0);
+    const gated = args
+      .map((a, i) =>
+        !alwaysAbsent.includes(i) && presentPart(a.type) !== a.type ? i : -1
+      )
+      .filter((i) => i >= 0);
+    // The declared result bounds the PRESENT values, so each arm is checked
+    // against it with its `missing` arms stripped: `missing` is a subtype of
+    // no values-only type. An argument that a numeric parameter reads as
+    // `NaN` is typed `missing` for that check (with `f: (real) -> unknown`
+    // and `a ↦ (a, 1)`, the inferred result is `tuple<real, integer>`, and
+    // `f(Missing)` is `(NaN, 1)`, whose `nan` coordinate is outside it).
+    let result: Type | undefined;
+    let declined = gated.length > 3;
+    for (let mask = 0; !declined && mask < 1 << gated.length; mask++) {
+      const absentAt = new Set([
+        ...alwaysAbsent,
+        ...gated.filter((_, j) => (mask >> j) & 1),
+      ]);
+      const arm = armType(absentAt, false);
+      if (arm === null) continue;
+      const bound = [...absentAt].some((i) => absentType(i) === 'nan')
+        ? armType(absentAt, true)
+        : arm;
+      if (
+        arm === undefined ||
+        bound === undefined ||
+        bound === null ||
+        !isSubtype(stripMissingFromType(bound), declared)
+      ) {
+        declined = true;
+        break;
+      }
+      result = result === undefined ? arm : widen(result, arm);
     }
-    // The declared result bounds the PRESENT values; a `missing` arm the
-    // absent arm added is outside it by nature (`missing` is a subtype of no
-    // values-only type), so the bound is checked with that arm stripped.
     const refined =
-      result === undefined ||
-      result === 'never' ||
-      !isSubtype(stripMissingFromType(result), declared)
+      declined || result === undefined || result === 'never'
         ? undefined
         : result;
     // Repeated calls with literal argument types must not retain an unbounded

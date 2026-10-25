@@ -959,3 +959,36 @@ describe('a product with a `never`-typed factor serializes', () => {
     expect(ce.box(['Multiply', 'm', 'x']).latex).toBe('mx');
   });
 });
+
+// The numerator of `(1/x)^2` is the exact `1`, raised to the power 2. The
+// split of a product into a numerator and a denominator (`Product`, in
+// `arithmetic-mul-div.ts`) kept that `1^2` as a factor, and next to a float
+// coefficient it was written out: `\frac{1\times0.5y}{x^2}`. An exact 1 is now
+// dropped at any exponent. A long numerator over a single power of `x` is still
+// written with a solidus (`getFractionStyle()`, `serializer-style.ts`).
+describe('a float coefficient times a power of a reciprocal', () => {
+  test.each([
+    [
+      ['Multiply', 0.5, 'y', ['Power', ['Divide', 1, 'x'], 2]],
+      '\\frac{0.5y}{x^2}',
+    ],
+    [['Multiply', 0.5, ['Power', ['Divide', 1, 'x'], 2]], '\\frac{0.5}{x^2}'],
+    [
+      ['Multiply', 0.5, ['Abs', 'x'], ['Power', ['Divide', 1, 'x'], 2]],
+      '\\frac{0.5\\vert x\\vert}{x^2}',
+    ],
+    [
+      [
+        'Multiply',
+        0.5,
+        ['Abs', 'x'],
+        ['Power', 'x', 'n'],
+        ['Power', ['Divide', 1, 'x'], 2],
+      ],
+      '(0.5\\vert x\\vert x^{n})/x^2',
+    ],
+    [['Multiply', 2, 'y', ['Power', ['Divide', 1, 'x'], 2]], '\\frac{2y}{x^2}'],
+  ])('%j', (json, latex) => {
+    expect(ce.box(json as any).latex).toBe(latex);
+  });
+});

@@ -95,15 +95,32 @@ describe('Anonymous functions, anon params arg', () => {
     expect(f.type.toString()).toBe('() -> integer');
     expect(ce.box(['Apply', f.json]).evaluate().json).toBe(2);
   });
-  // The LaTeX of a wildcard-parameter literal is `()\mapsto body`; it reads
-  // back as the same literal. A parameter list the wildcard reading would not
-  // reconstruct (a named parameter, an unused or gapped `_k`) is printed.
+  // The LaTeX of a wildcard-parameter literal writes the wildcards of the body
+  // as its parameters (`\_1\mapsto body`, not `()\mapsto body`, which looks
+  // like a function of no argument); it reads back as the same literal. A
+  // parameter list the wildcard reading would not reconstruct (a named
+  // parameter, an unused or gapped `_k`) is printed as it is.
   test('Wildcard-parameter literals round-trip through LaTeX', () => {
     const cases: [any, string][] = [
-      [['Function', ['Add', '_1', 1]], '()\\mapsto\\operatorname{\\_1}+1'],
+      [
+        ['Function', ['Add', '_1', 1]],
+        '\\operatorname{\\_1}\\mapsto\\operatorname{\\_1}+1',
+      ],
       [
         ['Function', ['Add', '_1', '_2']],
-        '()\\mapsto\\operatorname{\\_1}+\\operatorname{\\_2}',
+        '(\\operatorname{\\_1}, \\operatorname{\\_2})\\mapsto\\operatorname{\\_1}+\\operatorname{\\_2}',
+      ],
+      // The `\frac{1}{n}\cdot[0...n]` of ROADMAP CE-417: the literal of the
+      // `Map` has the parameter `_1`.
+      [
+        ['Function', ['Divide', '_1', 'n'], '_1'],
+        '\\operatorname{\\_1}\\mapsto\\frac{\\operatorname{\\_1}}{n}',
+      ],
+      // A `_` that a nested literal uses from the outer literal stays the
+      // name of the outer parameter (`anonymousParameters`).
+      [
+        ['Function', ['Apply', ['Function', ['Add', '_1', '_'], '_1'], 2]],
+        '\\operatorname{\\_}\\mapsto(\\operatorname{\\_1}\\mapsto\\operatorname{\\_}+\\operatorname{\\_1})(2)',
       ],
       [['Function', ['Add', 'x_1', 1], 'x_1'], 'x_1\\mapsto x_1+1'],
       [
@@ -132,6 +149,21 @@ describe('Anonymous functions, anon params arg', () => {
     const f10 = ce.box(['Function', ['Add', ...ten], ...ten]);
     expect((f10.toMathJson() as any[]).slice(2)).toEqual(ten);
     expect(ce.box(f10.toMathJson()).isSame(f10)).toBe(true);
+  });
+  // A wildcard that a nested literal binds, through a rest parameter or a
+  // destructuring pattern, is not a parameter of the outer literal: the
+  // outer literal has the one parameter `_2`, as boxing reads it. (The
+  // LaTeX of the nested parameter itself does not round-trip: ROADMAP
+  // CE-441.)
+  test('A wildcard bound by a nested rest or destructuring parameter', () => {
+    for (const inner of [
+      ['Function', ['Multiply', '_1', 2], ['Spread', '_1']],
+      ['Function', ['Multiply', '_1', 'y'], ['Tuple', '_1', 'y']],
+    ]) {
+      const f = ce.box(['Function', ['Add', '_2', ['Apply', inner, 3]]]);
+      expect((f.json as any[]).slice(2)).toEqual(['_2']);
+      expect(f.latex.startsWith('\\operatorname{\\_2}\\mapsto')).toBe(true);
+    }
   });
 });
 
