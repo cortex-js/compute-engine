@@ -123,6 +123,9 @@ import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { sequenceReadStopCount } from './sequence-read-stops.js';
 import { assertLiveBinding } from './binding-tombstone.js';
+import { isFunctionLiteralParameter } from './function-literal.js';
+import { assignmentLocalsOf } from '../assignment-locals.js';
+import { isProvisionalHead } from './provisional-application.js';
 import {
   asyncEvaluationOf,
   beginAsyncEvaluation,
@@ -639,6 +642,84 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     return false;
   }
 
+  /**
+   * Write the narrowing `t` of this symbol on its outer binding too, when
+   * this symbol is a free symbol of the body of a function literal that is
+   * being canonicalized, bound to the copy that the body scope declared for
+   * it.
+   *
+   * A free symbol of a body (`y` in `x ↦ [-x, y]`) that has no binding yet
+   * is declared in the scope of the body. A call of the literal hides that
+   * valueless copy and reads the binding of the scope that the literal is
+   * written in. So a narrowing written only on the copy (the list `[-x, y]`
+   * infers `y: number`) gave the literal a type that relied on `y: number`
+   * while the outer `y` could hold a string. The narrowing is written on the
+   * outer binding as a use of the symbol outside the literal writes it: the
+   * outer binding is narrowed, or it is declared with the type `t` (an
+   * inferred type) in the scope that the outermost literal is written in.
+   * That declaration also requests a rebuild of the expression that is being
+   * boxed (`noteDeclarationIn()`, `engine-boxing-state.ts`): the rebuild binds
+   * the body to the outer binding, and the type of the literal then follows
+   * a later assignment of that binding.
+   *
+   * A narrowing to a function type is not written: an unresolved call head
+   * has its own mechanism (`markForwardCallReference()`).
+   * (User decision 2026-10-25, option (a) of CE-473 in `ROADMAP.md`.)
+   */
+  private _inferOnOuterBinding(t: Type): void {
+    const ce = this.engine;
+    const boundary = ce._functionLiteralDefiningScope();
+    if (boundary === undefined) return;
+    if (isSubtype(t, 'function')) return;
+    const def = this._def;
+    if (def === undefined || !isValueDef(def)) return;
+    const value = def.value;
+    if (
+      value.isConstant ||
+      value.value !== undefined ||
+      value._blockLocal === true ||
+      isFunctionLiteralParameter(value)
+    )
+      return;
+    const name = this._id;
+    if (name.startsWith('_') || ce._isShadowedParameter(name)) return;
+    // A narrowing that comes from a reading the engine revises later is not
+    // written outside: the product reading of a juxtaposition whose head has
+    // no definition yet (`(g)(t)` read as `g·t`) is re-derived as an
+    // application when `g` gets a function definition
+    // (`repairProvisionalDependents()`), and an outer binding narrowed to
+    // `number` would stop that repair.
+    if (isProvisionalHead(name)) return;
+    // The scope of the copy: a scope between the current scope and the
+    // scope that the outermost literal is written in. A binding at or above
+    // that scope is already the outer binding.
+    let home: Scope | undefined;
+    for (
+      let s: Scope | null | undefined = ce.context?.lexicalScope;
+      s && s !== boundary;
+      s = s.parent
+    ) {
+      const b = s.bindings.get(name);
+      if (b === undefined) continue;
+      if (b === def) home = s;
+      break;
+    }
+    if (home === undefined) return;
+    if (home.binderNames?.has(name) === true) return;
+    if (assignmentLocalsOf(home)?.includes(name) === true) return;
+    let outerScope = boundary;
+    while (outerScope.noAutoDeclare && outerScope.parent)
+      outerScope = outerScope.parent;
+    for (let s: Scope | null | undefined = boundary; s; s = s.parent) {
+      const b = s.bindings.get(name);
+      if (b === undefined) continue;
+      if (!isValueDef(b)) return;
+      ce._bindingSymbol(name, s)?._infer(() => t, 'narrow');
+      return;
+    }
+    ce._declareSymbolValue(name, { type: t, inferred: true }, outerScope);
+  }
+
   private _inferWithoutFacts(
     t: Type,
     inferenceMode: 'narrow' | 'widen' | 'replace'
@@ -785,6 +866,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
           )
             alias._infer(() => inferred.type, 'narrow');
         }
+        if (inferenceMode === 'narrow')
+          this._inferOnOuterBinding(inferred.type);
         return true;
       }
       return false;

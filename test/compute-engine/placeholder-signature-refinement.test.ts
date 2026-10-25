@@ -246,7 +246,17 @@ describe('the refined signature follows the body', () => {
     ce.declare('f', '(unknown) -> unknown');
     ce.assign('f', ce.parse('(x) \\mapsto 1 + a x'));
     ce.assign('a', ce.parse('[1,2,3]'));
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> list<number>');
+    // The use `a x` in the body declares the outer `a` and the body reads
+    // that binding, so the type of the literal follows the assignment of
+    // `a` (user decision 2026-10-25 on CE-473 in `ROADMAP.md`). The result
+    // is typed as the product of `a` and the parameter, `vector<integer^3>`,
+    // which holds the value of `f(2)`. The `Multiply` type handler leaves a
+    // scalar factor of an inferred type out of the cell type, so `f(0.5)`,
+    // whose value is `[1.5, 2, 2.5]`, is typed `vector<integer^3>` too: that
+    // is a defect of the handler, not of this refinement.
+    expect(ce.box('f').type.toString()).toBe(
+      '(unknown) -> vector<integer^3>'
+    );
     const call = ce.box(['f', 2]);
     expect(call.evaluate().toString()).toBe('[3,5,7]');
     expect(call.evaluate().type.matches(call.type)).toBe(true);

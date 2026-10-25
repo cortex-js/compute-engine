@@ -65,7 +65,9 @@ import type {
 
 import {
   applicable,
+  capturedValueMismatchNow,
   exactArgumentSources,
+  withCallerCapturedCheck,
   type ApplyOptions,
 } from '../function-utils.js';
 import { runWithEvaluationEffects } from '../effects-registry.js';
@@ -79,6 +81,9 @@ import {
   inferredSignatureParameterName,
   restParameterIndex,
   restParameterSignatureTail,
+  capturedTypesWidened,
+  noteDefinitionCapturedTypes,
+  resultOutsideCallType,
 } from './function-literal.js';
 import {
   broadcastCellType,
@@ -2428,6 +2433,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       if (isFunction(boxedFn) && boxedFn.operator === 'Function') {
         this._isLambda = true;
         this._lambdaLiteral = boxedFn;
+        // The types of the bindings that a call of the literal reads for its
+        // captured symbols, for the check of a call after one of them
+        // changed (`capturedTypesWidened()`).
+        noteDefinitionCapturedTypes(this, boxedFn);
 
         // If the body froze a juxtaposition as multiplication only because its
         // leading symbol had no function definition yet, wait on that symbol:
@@ -2569,17 +2578,49 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         options.expression.nops === xs.length
           ? exactArgumentSources(this.engine, options.expression.ops)
           : undefined;
-      evaluate = (xs, options) =>
-        fn(
-          xs,
-          this.lazy
-            ? { ...options, holdArguments: true, arityFrame }
-            : {
-                ...options,
-                arityFrame,
-                exactSources: exactSources(xs, options),
-              }
-        );
+      // The signature that the engine derived from the literal when the
+      // definition was made is not derived again when a captured symbol of
+      // the body changes type later (an assignment to `y` in
+      // `g(x) := [-x, y]`), and a captured symbol can hold a value of
+      // another type than the body was typed with. In both cases the value
+      // of the call is compared with the static type of the call node, and
+      // a value outside it is an `incompatible-type` error
+      // (`resultOutsideCallType()`). The node type describes a mapped or a
+      // partial application too. The literal does not refuse the call
+      // itself while this check runs (`withCallerCapturedCheck()`).
+      // (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+      const capturedCheck = (): boolean =>
+        isFunction(boxedFn, 'Function') &&
+        ((this.inferredSignature && capturedTypesWidened(this)) ||
+          capturedValueMismatchNow(boxedFn));
+      const checkedCall = <T>(
+        callNode: Expression | undefined,
+        call: () => T
+      ): T => {
+        if (!capturedCheck()) return call();
+        const callType =
+          callNode?.type ??
+          this.engine.type(functionResult(this.signature.type) ?? 'unknown');
+        const check = (result: Expression | undefined) =>
+          resultOutsideCallType(this.engine, callType, true, result) ?? result;
+        const result: unknown = withCallerCapturedCheck(boxedFn, call);
+        if (result instanceof Promise)
+          return result.then((x: Expression | undefined) => check(x)) as T;
+        return check(result as Expression | undefined) as T;
+      };
+      evaluate = (xs, options) => {
+        const applyOptions: ApplyOptions = this.lazy
+          ? { ...options, holdArguments: true, arityFrame }
+          : {
+              ...options,
+              arityFrame,
+              exactSources: exactSources(xs, options),
+            };
+        // The common case calls the literal directly: a recursion adds no
+        // stack frame for the check.
+        if (!capturedCheck()) return fn(xs, applyOptions);
+        return checkedCall(options.expression, () => fn(xs, applyOptions));
+      };
       Object.defineProperty(evaluate, 'toString', {
         value: () => boxedFn.toString(),
       }); // For debugging/_printScope
@@ -2613,13 +2654,33 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
                   }
                 ),
           };
-          return runWithEvaluationEffects(
-            engine,
-            effects,
+          const run = () =>
+            runWithEvaluationEffects(
+              engine,
+              effects,
+              () =>
+                fn(
+                  xs,
+                  this.lazy ? { ...carried, holdArguments: true } : carried
+                ),
+              stack,
+              options._precisionWindow
+            );
+          if (!capturedCheck()) return run();
+          return checkedCall(
+            (options as { expression?: Expression }).expression,
             () =>
-              fn(xs, this.lazy ? { ...carried, holdArguments: true } : carried),
-            stack,
-            options._precisionWindow
+              runWithEvaluationEffects(
+                engine,
+                effects,
+                () =>
+                  fn(
+                    xs,
+                    this.lazy ? { ...carried, holdArguments: true } : carried
+                  ),
+                stack,
+                options._precisionWindow
+              )
           );
         },
       });

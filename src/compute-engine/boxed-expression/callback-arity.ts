@@ -76,6 +76,11 @@ export function callbackArity(fn: Expression): CallbackArity | undefined {
   if (isFunction(fn, 'Function')) {
     const n = fn.nops - 1;
     if (n === 0) return { required: 0, max: Infinity };
+    // A rest parameter (`(a, ...rest) => …`, a `Spread` as the last
+    // parameter) takes any number of arguments, none included: only the
+    // parameters before it are required.
+    if (isFunction(fn.ops[n], 'Spread'))
+      return { required: n - 1, max: Infinity };
     return { required: n, max: n };
   }
   if (!isSymbol(fn)) return undefined;

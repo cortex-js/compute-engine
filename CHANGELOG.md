@@ -16,7 +16,49 @@
   and `broadcast()` from one result (Tycho's plot rows) passes the option at its
   compile site, or its implicit plots lose the 0.166.0 speed.
 
+- **A product written by juxtaposition now types its symbols as numbers**
+  (ROADMAP CE-32). `ce.parse('2t')`, `ce.parse('x y')` and
+  `ce.box(['InvisibleOperator', 2, 't'])` left a symbol with no value and no
+  declaration `unknown`, where `2\cdot t` types it `number`. They now type it
+  `number` too. The product itself (its factors, their order and its LaTeX) is
+  unchanged, and a function application such as `f(x)` keeps its reading. Types
+  derived from such a product change: `t ↦ (t, 2t)` is
+  `(unknown) -> tuple<number, number>` (it was
+  `(unknown) -> tuple<unknown, number>`) and `t ↦ [t, 2t]` is
+  `(unknown) -> vector<2>`. The inferred type stays for the lifetime of the
+  engine, so in an engine used for several expressions, a symbol used as a
+  factor is a number in later expressions: after `\mathrm{B}x`,
+  `\mathrm{B}(x+1)` is a product, and after `EG`, `x \in G \setminus H` reports
+  an error, as it already did after `E\cdot G`. Use a fresh engine, or declare
+  the symbol, when a name has two roles.
+
+- **Compiled Python reads a `None` input as `NaN` in arithmetic** (ROADMAP
+  CE-395 and CE-460, user decisions 2026-10-25). `None` is the Python spelling
+  of `Missing`; `p + 1`, `1 / p`, `np.sin(p)` and `r^2 + 1` raised `TypeError`
+  for it, and now give `nan`, as the interpreter and compiled JavaScript do. The
+  conversion applies to an input whose type admits `missing`
+  (`number | missing`, `any`), is `unknown` (a free symbol of a parsed
+  expression, `r` in `2\pi r`), or was inferred as `number` (`r` in `\sin(r)`).
+  The generated code changes for those inputs: each read is
+  `(float('nan') if r is None else r)`, which costs about 6 to 15 % in a hot
+  loop. An input declared `number` (`ce.declare('r', 'number')`) compiles to the
+  same code as before and pays nothing; declare an input to keep the previous
+  code. A comparison still reads the absent value (`p ≠ 0` stays undecided). A
+  `vars` source that is a number literal is not wrapped.
+
 ### Resolved Issues
+
+- **A float plus a fraction was written as a mixed number** (CE-471).
+  `["Add", {"num": "2.0"}, ["Rational", 1, 3]]` was written `2.0\frac{1}{3}`,
+  which reads back as a product (0.666…). It is now `2.0+\frac{1}{3}`.
+  `Add(2, 1/3)` is still `2\frac{1}{3}`.
+- **A point function with a second argument was typed `any`** (CE-469). With
+  `f: (broadcastable<tuple<real, real>>, tuple<real, real>) -> real`,
+  `f([[(1,2),(3,4)],[(5,6),(7,8)]], (1,1))` is typed `matrix<real^(2x2)>`, and
+  `f((1,2), (1,1))` is `real`.
+- **A function literal with a rest parameter is accepted as a callback.**
+  `Map((a, ...xs) => …, …)` was refused with a `callback-arity` error that
+  counted the rest parameter as required.
 
 - **The interval target wrote a constant list out one term per element at any
   width**, and `Max`, `Min`, `Sum` or `Reduce` over a list of 2,000 numbers
@@ -42,18 +84,6 @@
   message of a call that still fails says whether the point type was inferred or
   declared.
 
-- **A product written by juxtaposition did not infer the type of its symbols.**
-  `ce.parse('2t')`, `ce.parse('x y')` and
-  `ce.box(['InvisibleOperator', 2, 't'])` left a symbol with no value and no
-  declaration `unknown`, where `2\cdot t` types it `number`. They now type it
-  `number` too. The product itself (its factors, their order and its LaTeX) is
-  unchanged, and a function application such as `f(x)` keeps its reading. A
-  function literal is typed from it: `t ↦ (t, 2t)` is
-  `(unknown) -> tuple<number, number>` and `t ↦ [t, 2t]` is
-  `(unknown) -> vector<2>`, as with `2\cdot t`. In an engine used for several
-  expressions, a symbol used as a factor stays a number: after `\mathrm{B}x`,
-  `\mathrm{B}(x+1)` is a product.
-
 - **The type of a broadcast over a list whose elements have different ranks
   repeated an element arm.** `M + C` with `M: list<list<integer> | number>` and
   `C: broadcastable<number>` was typed
@@ -67,12 +97,6 @@
   `Σ_{a=1}^{60}Σ_{b=1}^{60}Σ_{c=1}^{60} abcx` compiled in 12.7 s to 18 MB of
   code, and now in a few milliseconds. A body shared by a `Sum` and a `Product`
   at each of 10 levels compiles in 1.7 s instead of 55 s.
-
-- **Compiled Python raised `TypeError` for a `None` input whose type was
-  inferred.** `\sin(r)` and `r^2+1` called with `r=None` now give `nan`, as the
-  interpreter does. An input declared `number` is unchanged and pays nothing. A
-  `vars` source that is a number literal is no longer wrapped in a `None` test
-  (it gave a Python `SyntaxWarning`).
 
 - **Compiled Python gave another absence value than the interpreter for an
   element read of an absent tuple.** With `b: list<tuple<number, string>>` and
@@ -226,10 +250,6 @@
   (`Missing`, not `NaN`), and a numeric slot of `tuple<number, string>`, or a
   position outside the tuple, gives `NaN`.
 
-- **Compiled Python raised `TypeError` for a `None` input typed `unknown`** (a
-  free symbol of a parsed expression, `r` in `2\pi r`). It is now read as `NaN`
-  in arithmetic, as the interpreter does.
-
 - **Compiled JavaScript over a symbol declared `any` that holds a list** gave
   wrong values: with `p = [1, 2]` and `q = [3, 4]`, `p + q` was the string
   `"1,23,4"`, `p·q` was `NaN`, `Max(p, q)` was `NaN`, and `p < q` was one
@@ -252,13 +272,6 @@
   element). A function with a boolean, string or tuple result over an operand
   typed `any` is typed the same way. A compiled `Max` or `Min` of `h(x)[1]` now
   declines, as for any operand that may hold `Nothing`.
-
-- **Compiled Python raised `TypeError` for an absent input.** A `None` argument
-  (the Python spelling of `Missing`) for an input whose type admits `missing`
-  (`number | missing`, `any`) is now read as `NaN` in arithmetic, as the
-  interpreter and compiled JavaScript do: `p + 1`, `1 / p` and `np.sin(p)` give
-  `nan`. A comparison still reads the absent value, and inputs of other types
-  compile to the same code as before.
 
 - **interval-js: `≠` with an operand that has no value over the whole cell**
   (`\sqrt{x} \ne 0` over `x = [-1, -1]`) gave `'maybe'`. It now gives `'true'`,
@@ -596,10 +609,10 @@
 
 ### Performance
 
-- **Derivatives of order 3 or more of nested expressions are faster and shorter**:
-  each intermediate derivative is simplified before it is differentiated again.
-  The third derivative of `√(x+√(x+√(x+√(x+x))))` takes about a third of the
-  time and prints 37% shorter.
+- **Derivatives of order 3 or more of nested expressions are faster and
+  shorter**: each intermediate derivative is simplified before it is
+  differentiated again. The third derivative of `√(x+√(x+√(x+√(x+x))))` takes
+  about a third of the time and prints 37% shorter.
 
 - **A coordinate of point arithmetic over a list of points held by a symbol**
   (`PointX(4·P + 0.3·(t, t))` with `P: list<tuple<number, number>>`) is compiled
@@ -729,6 +742,26 @@
   and is `broadcastable<real>`; for `T: tensor<tuple<real, real>>`, `g(T)` was
   typed `error` and is `tensor<real>`. Compiled JavaScript maps the same calls;
   it threw "not a point" at rank 2.
+- **A captured free symbol of a function literal is inferred on its outer
+  binding, and a call checks the captured values** (CE-473). In
+  `g := x ↦ [-x, y]`, `y` was left `unknown` outside the literal; it is now
+  inferred `number` where it is declared. After `y := "abc"`, a call of a named
+  function whose captured value no longer fits the type its signature relied on
+  (`g(3)` was `[-3, "abc"]`, typed `vector<2>`) gives `incompatible-type`;
+  `Apply` of the literal is typed from the current value; compiled JavaScript
+  refuses such a call. A symbol read as the head of a provisional product
+  (`(g)(t)` before `g` is a function) is not narrowed outside the literal.
+- **A call never maps over the arguments of a rest parameter.**
+  `h(...xs) = Length(xs)` with `h([1,2,3])` gave `[1,1,1]` and is `1`;
+  `h([1,2],[3])` gave `[2,2]` and is `2`. A fixed parameter before the rest
+  parameter still maps a list. The same holds for `Apply` and `Map`.
+- **A rest parameter is typed `tuple` in the body** (CE-470), and `Length` and
+  `Count` of a tuple are `integer`: `h(a, ...rest) = Length(rest)` was typed
+  `-> integer | signed_infinity` and is `-> integer`.
+- **A point-function call over a collection symbol with no value stays
+  symbolic** (CE-468). With `g: (tuple<real, real>) -> real` and a valueless
+  `L: list<tuple<real, real>>`, `g(L).evaluate()` gave `incompatible-type` and
+  is now `g(L)`; after `L` has a value, it maps.
 
 ## 0.167.0 _2026-10-24_
 
@@ -929,28 +962,26 @@
 
 ### Behavior Changes
 
-- **A declared type of a batch input is trusted** (ROADMAP CE-410, user decision
-  2026-10-24). In the batch body, a read `At(F, i)` whose index type proves an
-  integer of at least 1 (for example `i + 1` with `i` declared `integer<0..>`)
-  is a direct read with no run-time test; a read past the end still gives `NaN`.
-  When an input breaks its declared type (a fractional `i` for `integer`, a
-  string in a list declared `list<number>`), the result is not defined. A plain
-  array that passed the check once is not checked again while its length is
-  unchanged.
+- **A declared type of a batch input is trusted** (ROADMAP CE-410). In the batch
+  body, a read `At(F, i)` whose index type proves an integer of at least 1 (for
+  example `i + 1` with `i` declared `integer<0..>`) is a direct read with no
+  run-time test; a read past the end still gives `NaN`. When an input breaks its
+  declared type (a fractional `i` for `integer`, a string in a list declared
+  `list<number>`), the result is not defined. A plain array that passed the
+  check once is not checked again while its length is unchanged.
 
 - **A list at an untyped parameter beside a point parameter maps** (ROADMAP
-  CE-414.2, user decision 2026-10-24). A parameter with no type (`unknown`,
-  `any`, no annotation) of a function that also has a point parameter now
-  follows the rule of a one-parameter function: its type is refined from the
-  body, and it maps a list unless the body uses it as a collection. With
-  `f := (P, t) ↦ (P.x + t, P.y)` declared
-  `(tuple<number, number>, unknown) -> unknown`, `f((1, 2), [0, 1, 2])` is
-  `[(1, 2), (2, 2), (3, 2)]`, typed `list<tuple<number, number>>`; it was
+  CE-414.2). A parameter with no type (`unknown`, `any`, no annotation) of a
+  function that also has a point parameter now follows the rule of a
+  one-parameter function: its type is refined from the body, and it maps a list
+  unless the body uses it as a collection. With `f := (P, t) ↦ (P.x + t, P.y)`
+  declared `(tuple<number, number>, unknown) -> unknown`, `f((1, 2), [0, 1, 2])`
+  is `[(1, 2), (2, 2), (3, 2)]`, typed `list<tuple<number, number>>`; it was
   `([1, 2, 3], 2)`. With `(P, L) ↦ Length(L)`, `L` is refined to `collection`
   and the list is still taken whole. Compiled JavaScript gives the same values.
 
 - **An absent point at a `broadcastable<tuple<…>>` parameter gives `Missing`**
-  (ROADMAP CE-420, user decision 2026-10-24), as at a `tuple<…>` parameter. With
+  (ROADMAP CE-420), as at a `tuple<…>` parameter. With
   `f := (a, b) ↦ (a.x + b.x, a.y + b.y)`,
   `f([(1, 2), (3, 4)], [(10, 20), Missing])` is `[(11, 22), Missing]` for every
   mix of the two declarations; with `broadcastable<…>` parameters the second
@@ -1125,7 +1156,7 @@
   such as `2·x` with `x` absent, is still `NaN`.
 
 - **A parameter declared `broadcastable<T>` maps to the cells when `T` cannot
-  hold a list** (ROADMAP CE-405, Tycho row 434; user decision 2026-10-24). With
+  hold a list** (ROADMAP CE-405, Tycho row 434). With
   `f: (broadcastable<number>) -> number` and `f := x ↦ x + 1`,
   `f([[1, 2], [3, 4]])` is `[[2, 3], [4, 5]]`, typed `matrix<2x2>`. It was a
   list of two `incompatible-type` errors, one for each row, while the call was
@@ -1978,16 +2009,16 @@
 ### Breaking Changes
 
 - **`Multiply` of two matrices is the matrix product, however the factors are
-  written** (user decision 2026-10-22, ROADMAP CE-98). A product of two matrix
-  values is now the matrix product, as `MatrixMultiply`, also when the factors
-  are symbols typed `tensor<number>`, `list<list<number>>`, `list`, `any`,
-  `broadcastable<number>` or `number | matrix`, and under `.N()`. Before, a
-  product of two such symbols multiplied each entry (and `.N()` did so even for
-  `matrix<number>` symbols), while a literal or computed factor gave the matrix
-  product; so `p·p` now equals `p^2`. **Migration:** use `HadamardProduct(p, q)`
-  for the product of each entry. Unchanged: a vector or a plain list times a
-  vector or a plain list multiplies each entry, and a number times a matrix
-  scales each entry. Related changes:
+  written** (ROADMAP CE-98). A product of two matrix values is now the matrix
+  product, as `MatrixMultiply`, also when the factors are symbols typed
+  `tensor<number>`, `list<list<number>>`, `list`, `any`, `broadcastable<number>`
+  or `number | matrix`, and under `.N()`. Before, a product of two such symbols
+  multiplied each entry (and `.N()` did so even for `matrix<number>` symbols),
+  while a literal or computed factor gave the matrix product; so `p·p` now
+  equals `p^2`. **Migration:** use `HadamardProduct(p, q)` for the product of
+  each entry. Unchanged: a vector or a plain list times a vector or a plain list
+  multiplies each entry, and a number times a matrix scales each entry. Related
+  changes:
   - The canonical form keeps the written order of factors that may be matrices
     (`q·p` stays `q·p`; `p·q − q·p` is no longer 0), and `isSame()` and the hash
     tell them apart. `simplify()`, `Expand`, `Factor` and `D` keep that order:
@@ -2392,9 +2423,8 @@
   `Sum(1 + v(x)[2], …)` with `v := s ↦ [s, k]` on the JavaScript and GLSL
   targets, `Product(Rest(g(x)))` and `Max(At(m(x), 1))`. The workaround is a
   declaration, `x: number` or `g: (number) -> matrix`; ROADMAP CE-377 records
-  the compiler change that removes the declines. ROADMAP CE-25, user decision
-  2026-10-22; the rationale is in `docs/TYPE-SYSTEM.md`, "The inferred signature
-  of a function literal".
+  the compiler change that removes the declines. ROADMAP CE-25; the rationale is
+  in `docs/TYPE-SYSTEM.md`, "The inferred signature of a function literal".
 
 - **The type of a list or set literal that holds an error value describes its
   other elements.** A type describes the successful values, so an element whose
@@ -2448,10 +2478,10 @@
     `unknown`: `Map(u ↦ Q, M)` is `list<unknown>` (it was `list<real>`).
 
 - **Inside a function or a `Block`, a stored value takes the current values of
-  the variables it names; a closure keeps the variable** (user decision
-  2026-10-22). When `Assign`, `Declare` with a value, or a destructuring stores
-  a value that names a parameter or a block local, those names are replaced by
-  their values at that moment: with
+  the variables it names; a closure keeps the variable**. When `Assign`,
+  `Declare` with a value, or a destructuring stores a value that names a
+  parameter or a block local, those names are replaced by their values at that
+  moment: with
   `f := x ↦ Block(Declare(r), Assign(r, If(x > y, x, 0)), Assign(x, 100), r)`,
   `f(3)` is `If(y < 3, 3, 0)`, and a block local no longer escapes its block
   unbound (it gave `If(y < 3, b, 0)`). A destructuring reads every variable as
@@ -3767,20 +3797,19 @@
 
 - The subtype relation of lists now reads a value in every way it can be read,
   so the relation is transitive and a union or a meet of list types no longer
-  drops values (user decisions 2026-10-21). Three rules changed. The rows of a
-  list with dimensions are read whether or not its scalar element matches the
-  target's element: `matrix<string>` is a `vector<collection>` as
-  `matrix<integer>` always was (a string is a collection, so only its rank was
-  read before), and `matrix<integer>` is a `vector<integer | list>`; the
-  elements of a `vector<unknown>` or `vector<any>` stay scalars, and
-  `matrix<unknown>` is not a `vector<unknown>`. A list declared in the nested
-  spelling answers as its flat spelling toward every target:
-  `list<vector<integer^1>^2>` is a `list<number>`, a `collection<number>` and an
-  `indexed_collection<real>`, as `list<integer^(2x1)>` is (it was a `matrix`
-  only). `collection<E>` and `indexed_collection<E>` peel any number of outer
-  axes, as `list<E>` does: `list<boolean^(2x2x2)>` is a
-  `collection<vector<boolean^2>>`. The meet follows:
-  `list<string> & vector<collection>` keeps the string matrices (it was
+  drops values. Three rules changed. The rows of a list with dimensions are read
+  whether or not its scalar element matches the target's element:
+  `matrix<string>` is a `vector<collection>` as `matrix<integer>` always was (a
+  string is a collection, so only its rank was read before), and
+  `matrix<integer>` is a `vector<integer | list>`; the elements of a
+  `vector<unknown>` or `vector<any>` stay scalars, and `matrix<unknown>` is not
+  a `vector<unknown>`. A list declared in the nested spelling answers as its
+  flat spelling toward every target: `list<vector<integer^1>^2>` is a
+  `list<number>`, a `collection<number>` and an `indexed_collection<real>`, as
+  `list<integer^(2x1)>` is (it was a `matrix` only). `collection<E>` and
+  `indexed_collection<E>` peel any number of outer axes, as `list<E>` does:
+  `list<boolean^(2x2x2)>` is a `collection<vector<boolean^2>>`. The meet
+  follows: `list<string> & vector<collection>` keeps the string matrices (it was
   `vector<string>`). An outer list with no dimensions admits any shape of its
   rows, so its flat spelling has no dimensions: `list<vector<integer^3>>` is a
   `list<integer>` and a `collection<integer>` but not a `matrix<integer>` (its
@@ -4197,11 +4226,11 @@ they are given expanded, also with a negative leading coefficient
   taken from the function literal, with the arguments in place of the
   parameters, and is not evaluated, so `D(h(k), x)` is `2kx` with and without a
   value of `x`. The derivative follows the name of its variable into the body of
-  a called function in both cases (user decision 2026-10-20); `Integrate`,
-  `Limit`, `Solve` and `Sum` keep the rule of 2026-09-21, under which their
-  variable does not reach into a called function. A free symbol of the body that
-  is not the variable still reads its value: the derivative of `q` in its
-  parameter, with `q(a) := a x²` and `x := 5`, is `25`.
+  a called function in both cases; `Integrate`, `Limit`, `Solve` and `Sum` keep
+  the rule of 2026-09-21, under which their variable does not reach into a
+  called function. A free symbol of the body that is not the variable still
+  reads its value: the derivative of `q` in its parameter, with `q(a) := a x²`
+  and `x := 5`, is `25`.
 
 - A parameter used as the name of a called function now takes a function
   argument in a derivative. With `G := (f, a) ↦ f(a)`, `D(G(h, k), x)` stayed
@@ -4289,23 +4318,22 @@ they are given expanded, also with a negative leading coefficient
 ### Behavior Changes
 
 - A read past the end of a declared numeric list that holds no element is `NaN`,
-  taken from the declared element type (user decision 2026-10-20). With
-  `E: list<integer>` assigned `[]`, `First(E)`, `Last(E)`, `At(E, 5)` and `E[1]`
-  were `Missing`, which their type `integer | nan` does not hold; they are now
-  `NaN`, as a read past the end of a non-empty numeric list already was. A list
-  of strings, an undeclared `E := []` and the literal `First([])` stay
-  `Missing`.
+  taken from the declared element type. With `E: list<integer>` assigned `[]`,
+  `First(E)`, `Last(E)`, `At(E, 5)` and `E[1]` were `Missing`, which their type
+  `integer | nan` does not hold; they are now `NaN`, as a read past the end of a
+  non-empty numeric list already was. A list of strings, an undeclared `E := []`
+  and the literal `First([])` stay `Missing`.
 
 - A lazy view keeps a `Nothing` result in its own display, and erases it when it
-  becomes a list (user decision 2026-10-20). With
-  `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2])`, `m.toString()` was `[1]` while
-  `m` counted 2 elements and `m.at(2)` was `Nothing`; it now prints
-  `[1, Nothing]`. The same holds for `Tabulate`, `Table`, `Scan` and `Iterate`.
-  A list built from the view erases `Nothing` as a list literal does, and its
-  count agrees: `ListFrom(m)`, `m.evaluate({ materialization: true })`,
-  `[...m, 9]`, `ListJoin(m, [9])`, `Sort(m)` and `Tally(m)` hold only `1`, and
-  `Length(Sort(m))` is `1` (it was `3`). A set-kind view does not count
-  `Nothing`: `Map(x ↦ If(x > 1, Nothing, x), Set(1, 2, 3))` has 1 element.
+  becomes a list. With `m = Map(x ↦ If(x > 1, Nothing, x), [1, 2])`,
+  `m.toString()` was `[1]` while `m` counted 2 elements and `m.at(2)` was
+  `Nothing`; it now prints `[1, Nothing]`. The same holds for `Tabulate`,
+  `Table`, `Scan` and `Iterate`. A list built from the view erases `Nothing` as
+  a list literal does, and its count agrees: `ListFrom(m)`,
+  `m.evaluate({ materialization: true })`, `[...m, 9]`, `ListJoin(m, [9])`,
+  `Sort(m)` and `Tally(m)` hold only `1`, and `Length(Sort(m))` is `1` (it was
+  `3`). A set-kind view does not count `Nothing`:
+  `Map(x ↦ If(x > 1, Nothing, x), Set(1, 2, 3))` has 1 element.
 
 - An overloaded function now accepts a symbol declared `error` that has no
   value, as a function with one signature does. With `ce.declare('e', 'error')`
@@ -4579,18 +4607,17 @@ they are given expanded, also with a negative leading coefficient
   `k` outside the block, is written `\mathrm{Assign}(k, v)` and reads back
   without a `Declare`: it was written `k\coloneq v`, which read back as a local,
   so a LaTeX round trip left the outer `k` unchanged. A typed `Declare` in a
-  block was dropped and is written with `let` (user decision 2026-10-19). `let`
-  also works in a `where` clause and in a row of a one-column `cases` block. A
-  function defined as `f(x)\coloneq\left(j\coloneq x; j\right)` has the block as
-  its body; the body was a block inside a block. `\mathrm{let}` is now a
-  keyword, so a symbol named `let` is read as one, as `if` and `where` already
-  are. After `let`, `=` is also the assignment, as in Epsil
-  (`\operatorname{let} k = 2`), and a type that is not one
-  (`\operatorname{let} s\colon\mathbb{Z}`) is an `invalid-type` error. A name is
-  declared once per block: `x\coloneq 1; x\coloneq x+1; x` is `2` (it was a
-  `variable-redeclaration` error). The rows of a one-column `cases` block are
-  read as a `;` list is, so a `k\coloneq v` row declares a local `k` (it changed
-  the `k` outside).
+  block was dropped and is written with `let`. `let` also works in a `where`
+  clause and in a row of a one-column `cases` block. A function defined as
+  `f(x)\coloneq\left(j\coloneq x; j\right)` has the block as its body; the body
+  was a block inside a block. `\mathrm{let}` is now a keyword, so a symbol named
+  `let` is read as one, as `if` and `where` already are. After `let`, `=` is
+  also the assignment, as in Epsil (`\operatorname{let} k = 2`), and a type that
+  is not one (`\operatorname{let} s\colon\mathbb{Z}`) is an `invalid-type`
+  error. A name is declared once per block: `x\coloneq 1; x\coloneq x+1; x` is
+  `2` (it was a `variable-redeclaration` error). The rows of a one-column
+  `cases` block are read as a `;` list is, so a `k\coloneq v` row declares a
+  local `k` (it changed the `k` outside).
 
 - Assigning a value to a constant has a stable error code, and `epsil check`
   reports it. `ce.assign()` and the `Assign` operator still throw
@@ -5167,12 +5194,11 @@ they are given expanded, also with a negative leading coefficient
   `cyc = cyc | tuple<number, number>`, no longer overflows the stack. Spread,
   `Join`, arithmetic, comparisons and `At` of a symbol of such a type threw or
   logged `Maximum call stack size exceeded`. Such an alias is now a subtype of
-  what its other arms are subtypes of (user decision 2026-10-19): with
-  `cyc = cyc | 0`, `Norm(c)` is valid and evaluates to `|c|`, where it was an
-  `incompatible-type` error, and `Join([3, 4], c)` with
-  `cyc = cyc | tuple<number, number>` appends `c` as one element. An alias that
-  names itself inside a constructor, such as `json = list<json> | integer`, is
-  unchanged.
+  what its other arms are subtypes of: with `cyc = cyc | 0`, `Norm(c)` is valid
+  and evaluates to `|c|`, where it was an `incompatible-type` error, and
+  `Join([3, 4], c)` with `cyc = cyc | tuple<number, number>` appends `c` as one
+  element. An alias that names itself inside a constructor, such as
+  `json = list<json> | integer`, is unchanged.
 
 - The static type of a list plus or times a number contains the result when an
   element of the list is itself a collection. `[[1, 2], 3] + 0.5` was typed

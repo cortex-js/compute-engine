@@ -83,10 +83,14 @@ function cDepAndWrapper(ce: ComputeEngine, D: ReturnType<typeof makeD>) {
     resolved: unknown;
   };
   // Non-vacuity: the storm's shape — a valueless pinned binding whose name
-  // chain-resolves to nothing.
+  // chain-resolves to no value. Since the use `cos(c)` in the body narrows
+  // the outer binding of `c` (user decision 2026-10-25 on CE-473 in
+  // `ROADMAP.md`), the chain resolves `c` to that outer binding, which
+  // holds no value.
   expect(cDep).toBeDefined();
   expect(cDep.valueDef.value).toBeUndefined();
-  expect(cDep.resolved).toBeUndefined();
+  const resolved = cDep.resolved as { value?: { value?: unknown } } | undefined;
+  expect(resolved?.value?.value).toBeUndefined();
   return { deps: deps!, cDep, wrapper: cDep.occurrence._def };
 }
 

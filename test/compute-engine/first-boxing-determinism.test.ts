@@ -102,14 +102,19 @@ describe('first-boxing determinism (Tycho 178(a)+(c))', () => {
   // The two contracts the rejected fix attempts violated (both recorded in
   // the design doc). The repair must keep BOTH.
 
-  test('a body-only free symbol still does not leak to the caller', () => {
-    // Attempt 1 (promote the body's declaration outward) failed this: boxing
-    // a Function literal must not declare the body's free symbols anywhere
-    // the caller can see. The rebuild repair declares nothing new, so the
-    // read stays invisible.
+  test('a body-only free symbol is declared where the caller reads it', () => {
+    // A call of the literal reads the binding of the scope that the literal
+    // is written in. So the use `z_9 + 1` in the body narrows that outer
+    // binding, as a use outside the literal does, and declares it when there
+    // is none (user decision 2026-10-25, option (a) of CE-473 in
+    // `ROADMAP.md`). Before, the binding stayed in the body scope, and the
+    // type of the literal could rely on a type that the outer binding did
+    // not have.
     const ce = new ComputeEngine();
-    ce.box(['Function', ['Add', 'z_9', 1], 'u_9']);
-    expect(ce.lookupDefinition('z_9')).toBeUndefined();
+    const T: MathJsonExpression = ['Function', ['Add', 'z_9', 1], 'u_9'];
+    const first = ce.box(T);
+    expect(ce.box('z_9').type.toString()).toBe('number');
+    expect(first.isSame(ce.box(T))).toBe(true);
   });
 
   test('capture through an assigned value still works after the repair', () => {
@@ -125,11 +130,11 @@ describe('first-boxing determinism (Tycho 178(a)+(c))', () => {
     expect(ce.box(['f_c', 2]).evaluate().isSame(20)).toBe(true);
   });
 
-  test('two binder bodies sharing a free name, no sibling: stable, no leak', () => {
-    // No occurrence outside a binder → nothing may be declared, and the two
-    // independently body-local bindings must still compare isSame across
-    // boxings (they did before the fix too — pinned so the repair never
-    // regresses it into either declaring or diverging).
+  test('two binder bodies sharing a free name, no sibling: stable', () => {
+    // No occurrence outside a binder. The use in each body declares the outer
+    // binding of `r_7` (user decision 2026-10-25, option (a) of CE-473 in
+    // `ROADMAP.md`), and the two bodies must still compare isSame across
+    // boxings.
     const ce = new ComputeEngine();
     const T: MathJsonExpression = [
       'List',
@@ -137,7 +142,7 @@ describe('first-boxing determinism (Tycho 178(a)+(c))', () => {
       ['Function', ['Add', 'r_7', 2], 't_7'],
     ];
     expect(ce.box(T).isSame(ce.box(T))).toBe(true);
-    expect(ce.lookupDefinition('r_7')).toBeUndefined();
+    expect(ce.box('r_7').type.toString()).toBe('number');
   });
 
   test('pre-declaring the symbol remains stable', () => {

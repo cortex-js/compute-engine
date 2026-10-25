@@ -880,11 +880,10 @@ export function pipeStageAsCall(
 export function literalParamsMap(sig: Type): boolean {
   if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
   if (isPolymorphicType(sig)) return false;
-  const params = [
-    ...(sig.args ?? []),
-    ...(sig.optArgs ?? []),
-    ...(sig.variadicArg ? [sig.variadicArg] : []),
-  ];
+  // The variadic tail (a rest parameter) is not read here: it collects its
+  // arguments into one tuple and never maps over them
+  // (`mappedArgumentCount`). Only the fixed parameters decide.
+  const params = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
   return params.every(
     (p) =>
       (isTupleShapedType(p.type) && !isIndexReadTuple(p.type)) ||
@@ -918,6 +917,22 @@ export function literalParamsMap(sig: Type): boolean {
  * A literal whose parameter is a collection by its signature
  * (`x ↦ Length(x)` infers `x: collection`) still binds the argument whole.
  */
+/**
+ * The number of leading arguments of a call of a function of signature
+ * `sig` that a map can go over: the fixed parameters when the signature has
+ * a variadic tail, and all the arguments otherwise. A variadic tail (the
+ * rest parameter of a function literal, `(a, ...rest) ↦ …`) collects its
+ * arguments into ONE tuple, so a list argument there is an element of the
+ * tuple, never a list to map over: `Apply((...xs) ↦ Length(xs), [1, 2, 3])`
+ * is `1`.
+ */
+export function mappedArgumentCount(sig: Type): number {
+  if (typeof sig !== 'object' || sig.kind !== 'signature')
+    return Number.POSITIVE_INFINITY;
+  if (sig.variadicArg === undefined) return Number.POSITIVE_INFINITY;
+  return (sig.args?.length ?? 0) + (sig.optArgs?.length ?? 0);
+}
+
 function applyLiteralMaps(
   fn: Expression,
   args: ReadonlyArray<Expression>
@@ -934,9 +949,11 @@ function applyLiteralMaps(
   // of a different shape: `Apply(u ↦ 7, v)` gave `7`. A set or a
   // dictionary is never mapped over, so an argument of such a type does not
   // take this route (`isUnresolvedMappableOperand`).
-  return args.some(
-    (a) => isBroadcastableCollection(a) || isUnresolvedMappableOperand(a)
-  );
+  return args
+    .slice(0, mappedArgumentCount(fn.type.type))
+    .some(
+      (a) => isBroadcastableCollection(a) || isUnresolvedMappableOperand(a)
+    );
 }
 
 /**
@@ -1061,6 +1078,8 @@ function applyLiteralMapType(
     (perElement0 === 'unknown' || isSubtype(perElement0, 'number'))
   )
     return 'any';
+  // A rest parameter takes its arguments whole (`mappedArgumentCount`).
+  args = args.slice(0, mappedArgumentCount(fn.type));
   const collections = args.filter((a) => mapsOver(a.type));
   if (collections.length === 0) {
     // A scalar-or-list argument (`u: number | list<number>`) maps when it
@@ -1152,6 +1171,11 @@ function applyLiteralMapped(
   numericApproximation: boolean | undefined
 ): Expression | undefined {
   const mapped = (x: Expression) => isBroadcastableCollection(x);
+  // The arguments of a rest parameter are bound whole, after the mapped
+  // ones, in every cell (`mappedArgumentCount`).
+  const fixed = Math.min(args.length, mappedArgumentCount(fn.type.type));
+  const rest = args.slice(fixed);
+  args = args.slice(0, fixed);
   const mismatch = broadcastLengthMismatch(ce, args.filter(mapped));
   if (mismatch) return mismatch;
   // A collection argument with no value yet (a symbol declared `list<…>`)
@@ -1162,12 +1186,12 @@ function applyLiteralMapped(
   // than the mapped type of the call. Evaluating the held application again
   // after the symbol has a value maps it.
   if (args.some((x) => !mapped(x) && isUnresolvedMappableOperand(x)))
-    return ce._fn('Apply', [fn, ...args]);
+    return ce._fn('Apply', [fn, ...args, ...rest]);
   const lazy = lazyBroadcastMapIfNeeded(
     ce,
     'Apply',
-    [fn, ...args],
-    (x, i) => i > 0 && mapped(x),
+    [fn, ...args, ...rest],
+    (x, i) => i > 0 && i <= fixed && mapped(x),
     numericApproximation === true
   );
   if (lazy) return lazy;
@@ -1177,7 +1201,9 @@ function applyLiteralMapped(
     const { done, value } = rows.next();
     if (done) break;
     results.push(
-      ce._fn('Apply', [fn, ...value]).evaluate({ numericApproximation })
+      ce
+        ._fn('Apply', [fn, ...value, ...rest])
+        .evaluate({ numericApproximation })
     );
   }
   // An element that fails says that the application was element-wise, as

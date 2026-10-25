@@ -1,4 +1,10 @@
-import type { Expression, FunctionInterface } from '../global-types.js';
+import type {
+  BoxedValueDefinition,
+  Expression,
+  FunctionInterface,
+  Scope,
+} from '../global-types.js';
+import { assignmentLocalsOf } from '../assignment-locals.js';
 import type {
   EffectSet,
   FunctionSignature,
@@ -12,7 +18,9 @@ import {
   isGroupedTypeText,
   signatureEffects,
 } from '../../common/type/utils.js';
-import { isFunction, isString, sym } from './type-guards.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import type { BoxedType } from '../../common/type/boxed-type.js';
+import { isFunction, isString, isSymbol, sym } from './type-guards.js';
 import { tuplePatternNames } from './tuple-pattern.js';
 import { journalCheckpointMemoEntry } from '../checkpoint-journal.js';
 
@@ -629,4 +637,192 @@ export function freeAnonymousSlots(expr: Expression): Set<string> {
     for (const x of e.ops) pending.push([x, bound]);
   }
   return result;
+}
+
+/**
+ * A captured symbol of a function literal: a name that the body reads from
+ * the scope that the literal is defined in, with one occurrence of it in the
+ * body. The type of the occurrence is the type that the body, and so the
+ * type of the literal, was derived with.
+ */
+export type CapturedSymbol = { name: string; occurrence: Expression };
+
+/** The captured symbols of each canonical function literal, see
+ * `capturedSymbols()`. A canonical literal does not change, so its body is
+ * walked one time. */
+const CAPTURED_SYMBOLS = new WeakMap<object, readonly CapturedSymbol[]>();
+
+/**
+ * The symbols of the body of the canonical function literal `literal` that
+ * a call reads from the scope the literal is defined in, one entry for each
+ * name. An occurrence is captured when it is bound to a binding outside the
+ * literal, or to the valueless copy that the body scope declared for a free
+ * symbol (a call frame hides that copy, and the call reads the outer binding
+ * of the name). These are not captured: a constant, a parameter of a
+ * function literal, a binding of a nested scope of the body (the index of a
+ * `Sum`, a local of a nested block), and a local of the body scope (a `let`
+ * local, an assignment local).
+ *
+ * The walk reads each node of the body one time, so a body that shares its
+ * operands is not unfolded.
+ */
+export function capturedSymbols(
+  literal: Expression
+): readonly CapturedSymbol[] {
+  const cached = CAPTURED_SYMBOLS.get(literal);
+  if (cached !== undefined) return cached;
+  const result: CapturedSymbol[] = [];
+  if (!isFunction(literal, 'Function')) return result;
+  const body = literal.ops[0];
+  const bodyScope = body.isScoped ? body.localScope : undefined;
+  const occurrences = new Map<string, Expression>();
+  const nested = new Set<object>();
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): void => {
+    if (seen.has(e)) return;
+    seen.add(e);
+    if (isSymbol(e)) {
+      if (!occurrences.has(e.symbol)) occurrences.set(e.symbol, e);
+      return;
+    }
+    if (!isFunction(e) || e._numericStore !== undefined) return;
+    if (e !== body && e.isScoped && e.localScope !== undefined)
+      for (const b of e.localScope.bindings.values())
+        if ('value' in b) nested.add(b.value);
+    for (const op of e.ops) visit(op);
+  };
+  visit(body);
+  const assignmentLocals =
+    bodyScope === undefined ? undefined : assignmentLocalsOf(bodyScope);
+  for (const [name, occurrence] of occurrences) {
+    const def = occurrence.valueDefinition;
+    if (def === undefined || def.isConstant || def._blockLocal === true)
+      continue;
+    if (isFunctionLiteralParameter(def) || nested.has(def)) continue;
+    const own = bodyScope?.bindings.get(name);
+    if (own !== undefined && 'value' in own && own.value === def) {
+      // A binding of the body scope is captured only when it is the
+      // valueless copy that the body scope declared for a free symbol.
+      if (!def.inferredType || def.value !== undefined) continue;
+      if (assignmentLocals?.includes(name) === true) continue;
+    }
+    result.push({ name, occurrence });
+  }
+  CAPTURED_SYMBOLS.set(literal, result);
+  return result;
+}
+
+/** The binding that a call of `literal` reads for the captured symbol
+ * `entry`: the binding of the name in the scope that encloses the body of
+ * the literal, or `undefined` when there is none. */
+function outerBindingOf(
+  literal: Expression,
+  entry: CapturedSymbol
+): BoxedValueDefinition | undefined {
+  const body = isFunction(literal, 'Function') ? literal.ops[0] : undefined;
+  const bodyScope = body?.isScoped ? body.localScope : undefined;
+  for (let s: Scope | null | undefined = bodyScope?.parent; s; s = s.parent) {
+    const b = s.bindings.get(entry.name);
+    if (b === undefined) continue;
+    return 'value' in b ? b.value : undefined;
+  }
+  return undefined;
+}
+
+/** For each definition made from a function literal, the type of each
+ * binding that a call of the literal reads for a captured symbol, when the
+ * type of the definition was inferred (`noteDefinitionCapturedTypes()`). */
+const DEFINITION_CAPTURED_TYPES = new WeakMap<
+  object,
+  ReadonlyArray<readonly [BoxedValueDefinition, BoxedType]>
+>();
+
+/**
+ * Record, for the definition `def` whose type the engine infers from the
+ * function literal `literal` now, the type of each binding that a call of
+ * the literal reads for a captured symbol (`capturedSymbols()`): the
+ * binding of the occurrence, or, for a copy that the body scope declared,
+ * the outer binding of the name. A later change of one of these types is
+ * what makes the inferred type of `def` outdated (`capturedTypesWidened()`).
+ *
+ * The record is journaled: a restore of a checkpoint brings back the record
+ * that was in force (`journalCheckpointMemoEntry()`).
+ */
+export function noteDefinitionCapturedTypes(
+  def: object,
+  literal: Expression
+): void {
+  if (!isFunction(literal, 'Function')) return;
+  const bindings: Array<readonly [BoxedValueDefinition, BoxedType]> = [];
+  for (const entry of capturedSymbols(literal)) {
+    const own = entry.occurrence.valueDefinition;
+    const binding =
+      own !== undefined && own.inferredType && own.value === undefined
+        ? (outerBindingOf(literal, entry) ?? own)
+        : own;
+    if (binding !== undefined) bindings.push([binding, binding.type] as const);
+  }
+  if (bindings.length === 0 && !DEFINITION_CAPTURED_TYPES.has(def)) return;
+  journalCheckpointMemoEntry(
+    literal.engine,
+    DEFINITION_CAPTURED_TYPES,
+    def,
+    'definition-captured-types'
+  );
+  if (bindings.length === 0) DEFINITION_CAPTURED_TYPES.delete(def);
+  else DEFINITION_CAPTURED_TYPES.set(def, bindings);
+}
+
+/**
+ * True when a binding that a call of the literal of the definition `def`
+ * reads for a captured symbol has a type now that is not a subtype of its
+ * type when the type of `def` was inferred (`noteDefinitionCapturedTypes()`).
+ *
+ * The type that a definition inferred from its literal (the signature of
+ * `g(x) := [-x, y]`, or the type of `let g = (x) => [-x, y]`) is not
+ * inferred again when such a type changes, so a call can then give a value
+ * outside the type that the call is typed with. A change to `unknown` gives
+ * no evidence of that.
+ * (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+ */
+export function capturedTypesWidened(def: object): boolean {
+  const snapshot = DEFINITION_CAPTURED_TYPES.get(def);
+  if (snapshot === undefined) return false;
+  for (const [binding, before] of snapshot) {
+    const now = binding.type;
+    if (now === before || now.isUnknown) continue;
+    if (!isSubtype(now.type, before.type)) return true;
+  }
+  return false;
+}
+
+/**
+ * The value of a call of a definition made from a function literal, when
+ * `checked` is true (a captured symbol of the literal changed type since the
+ * type of the definition was inferred, or holds a value of another type than
+ * the body was typed with) and `result`, the value of the call, is not of
+ * `callType`, the static type of the call: an `incompatible-type` error, as
+ * a library operator gives for an operand of the wrong type. `undefined`
+ * otherwise.
+ *
+ * The comparison is with the type of the call node, not with the result of
+ * the signature: a call that maps the function over a list
+ * (`g([1, 2])`), or a partial application (`g(1)` for a function of two
+ * parameters), is typed by its node, which describes that value.
+ * (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+ */
+export function resultOutsideCallType(
+  ce: Expression['engine'],
+  callType: BoxedType,
+  checked: boolean,
+  result: Expression | undefined
+): Expression | undefined {
+  if (!checked || result === undefined || !result.isValid) return undefined;
+  if (
+    callType.isUnknown ||
+    result.type.isUnknown ||
+    result.type.matches(callType)
+  )
+    return undefined;
+  return ce.typeError(callType.type, result.type, result);
 }

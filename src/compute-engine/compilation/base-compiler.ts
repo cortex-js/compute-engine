@@ -59,7 +59,10 @@ import {
   paramsAreScalar,
   type BroadcastSlotPlan,
 } from '../boxed-expression/boxed-function.js';
-import { lookupApplicable } from '../function-utils.js';
+import {
+  capturedValueMismatchNow,
+  lookupApplicable,
+} from '../function-utils.js';
 import {
   broadcastingComponentKind,
   couldBeNumericTuple,
@@ -189,6 +192,7 @@ import {
   isDestructuringParameter,
   isRestParameter,
   isScalarType,
+  capturedTypesWidened,
 } from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import { listRecursionPlan } from '../boxed-expression/recursive-list-builder.js';
@@ -10479,8 +10483,7 @@ export class BaseCompiler {
       let application: number | undefined;
       for (const operand of ops) {
         const cost = BaseCompiler.callbackApplicationCost(operand, depth, c);
-        if (cost !== undefined)
-          application = Math.max(application ?? 0, cost);
+        if (cost !== undefined) application = Math.max(application ?? 0, cost);
       }
       if (application !== undefined) {
         if (!Number.isFinite(application)) return Infinity;
@@ -11570,6 +11573,32 @@ export class BaseCompiler {
         ? undefined
         : BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
     if (folded !== undefined) {
+      // The code that reads the symbol was compiled for the type of the
+      // symbol. A value of another type (a host wrote the value of the
+      // definition directly) is refused here, as the interpreter refuses a
+      // call of a function literal whose captured symbol holds such a value
+      // (`capturedValueMismatch()`, `function-utils.ts`).
+      // (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+      // Only the value of a definition that is not a constant is checked: a
+      // constant (`i`, `Pi`) has a library value that no host writes, and
+      // its name can also be the variable of a binder in the expression.
+      const heldDef = expr.engine.lookupDefinition(s);
+      const held =
+        isValueDef(heldDef) && !heldDef.value.isConstant
+          ? heldDef.value.value
+          : undefined;
+      if (
+        held !== undefined &&
+        !expr.type.isUnknown &&
+        !held.type.isUnknown &&
+        !held.type.matches(expr.type)
+      )
+        throw new Error(
+          `Could not compile the symbol '${s}': its value has the type ` +
+            `'${held.type.toString()}', which is not the type ` +
+            `'${expr.type.toString()}' that the expression was typed with. ` +
+            `The interpreter evaluates it instead.`
+        );
       // A folded value is BAKED — there is no run-time binding, so the
       // "coerced at every entry" exemption that leaves a declared-complex
       // REFERENCE unlifted (see `liftWideReference`) does not apply here.
@@ -13414,7 +13443,10 @@ export class BaseCompiler {
     const nodesOfRead = new Map<string, Expression[]>();
     for (const s of symbols) {
       const read = BaseCompiler.compile(s, target);
-      if (BaseCompiler._codeOverrides.has(s) || BaseCompiler._codeAliases.has(s))
+      if (
+        BaseCompiler._codeOverrides.has(s) ||
+        BaseCompiler._codeAliases.has(s)
+      )
         continue;
       const nodes = nodesOfRead.get(read);
       if (nodes === undefined) nodesOfRead.set(read, [s]);
@@ -32335,12 +32367,58 @@ export class BaseCompiler {
     if (def && 'operator' in def) {
       const literal = (def.operator as { _lambdaLiteral?: Expression })
         ._lambdaLiteral;
-      if (literal !== undefined && isFunction(literal, 'Function'))
+      if (literal !== undefined && isFunction(literal, 'Function')) {
+        BaseCompiler.assertCapturedTypesCurrent(id, literal, def.operator);
         return literal;
+      }
     }
     const value = engine._getSymbolValue(id);
-    if (value !== undefined && isFunction(value, 'Function')) return value;
+    if (value !== undefined && isFunction(value, 'Function')) {
+      BaseCompiler.assertCapturedTypesCurrent(
+        id,
+        value,
+        isValueDef(def) ? def.value : undefined
+      );
+      return value;
+    }
     return undefined;
+  }
+
+  /**
+   * Refuse to compile a call of the user function `id` whose literal is
+   * `literal` when a captured symbol of the body makes the static type of
+   * the call doubtful, as the interpreter checks such a call:
+   * - the symbol holds a value of another type than the body was typed with
+   *   (`capturedValueMismatchNow()`, `function-utils.ts`), whatever the
+   *   provenance of the type of the definition;
+   * - `def`, the definition that holds the literal, has a captured symbol
+   *   that changed type since the literal was stored
+   *   (`capturedTypesWidened()`), whatever the provenance of the type of
+   *   `def`: the body was typed with the earlier type, and its compiled
+   *   operators do not check their operands (with `y` changed from a number
+   *   to a string, `x + y` compiles to a string concatenation, where the
+   *   interpreter gives the `incompatible-type` error of `Add`).
+   * The interpreter checks such a call (`resultOutsideCallType()`,
+   * `boxed-expression/function-literal.ts`, and the operators of the body).
+   * The compiled code has no such check, so the compile fails closed and the
+   * interpreter evaluates the call.
+   * (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+   */
+  private static assertCapturedTypesCurrent(
+    id: string,
+    literal: Expression,
+    def: object | undefined
+  ): void {
+    if (
+      !(def !== undefined && capturedTypesWidened(def)) &&
+      !capturedValueMismatchNow(literal)
+    )
+      return;
+    throw new Error(
+      `Could not compile the function '${id}': a symbol that its body reads ` +
+        `has a value or a type other than the one its type was inferred with. ` +
+        `The interpreter evaluates it instead.`
+    );
   }
 
   /**

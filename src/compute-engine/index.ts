@@ -3293,6 +3293,32 @@ export class ComputeEngine implements IComputeEngine {
     return undefined;
   }
 
+  /** See `IComputeEngine._functionLiteralDefiningScope`. @internal */
+  _functionLiteralDefiningScope(): Scope | undefined {
+    const stack = this._shadowedParameterStack;
+    let result: Scope | undefined = undefined;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const frame = stack[i];
+      if (!frame.functionLiteral) continue;
+      // Only a literal that encloses the current scope counts: a frame of
+      // another canonicalization (a literal canonicalized while a call of
+      // another literal runs) has a boundary that is not on the current chain.
+      let onChain = false;
+      for (
+        let s: Scope | null | undefined = this.context?.lexicalScope;
+        s;
+        s = s.parent
+      )
+        if (s === frame.boundary) {
+          onChain = true;
+          break;
+        }
+      if (!onChain) break;
+      result = frame.boundary;
+    }
+    return result;
+  }
+
   /** The binding already auto-declared for an active shadowed parameter during
    * this body's canonicalization, if any. @internal */
   _shadowedParameterDef(name: string): BoxedDefinition | undefined {

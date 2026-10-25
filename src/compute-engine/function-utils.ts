@@ -65,6 +65,8 @@ import {
   freeAnonymousSlots,
   isDestructuringParameter,
   isRestParameter,
+  capturedSymbols,
+  isFunctionLiteralParameter,
   markFunctionLiteralParameter,
   mentionsQuantifiedVariable,
   restParameterIndex,
@@ -148,6 +150,7 @@ import {
   isGroupedTypeText,
   returnTypeText,
   signatureEffects,
+  stripNumericRanges,
 } from '../common/type/utils.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 import {
@@ -786,6 +789,11 @@ export function canonicalFunctionLiteralArguments(
     shadowNames.push(...names);
     const t = functionLiteralParameterType(param);
     if (t !== undefined) shadowTypes.set(names[0], t);
+    // A rest parameter has no annotation, but its value is always a `Tuple`
+    // of the trailing arguments: a finite tuple of any arity. Declare it as
+    // `tuple` in the body, so that `Length(rest)` is an `integer`, not an
+    // `integer` that can also be infinite.
+    else if (isFunction(param, 'Spread')) shadowTypes.set(names[0], 'tuple');
   }
 
   // A body-slot return-type ascription `["Typed", body, type]` is normalized
@@ -5152,6 +5160,130 @@ export function inlineCallParameters(
   });
 }
 
+/**
+ * The value of a call of a function literal when a captured symbol of its
+ * body (`capturedSymbols()`) holds, at the time of the call, a value that
+ * is not of the type the body was typed with: an `incompatible-type` error,
+ * as a library operator gives for an operand of the wrong type. `undefined`
+ * when each captured value is of its type.
+ *
+ * The type of the literal relies on the type of each captured symbol. The
+ * use-inference writes on the outer binding of the symbol too
+ * (`_inferOnOuterBinding()`, `boxed-expression/boxed-symbol.ts`), and an
+ * assignment of a value of another type to that binding changes its type,
+ * and so the type of the literal. But a value can reach a binding that the
+ * inference did not see: a body that kept a copy of the symbol in its own
+ * scope (the narrowing was made where no expression was being boxed), or a
+ * host that writes the value of a definition directly. Without this check,
+ * the call then gave a value outside its static type.
+ *
+ * `capturedScope` is the scope the literal was defined in, the parent of
+ * each call frame: the body reads a captured symbol there.
+ * (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+ */
+function capturedValueMismatch(
+  ce: ComputeEngine,
+  fnExpr: Expression & FunctionInterface,
+  capturedScope: Scope
+): Expression | undefined {
+  if (CALLER_CHECKED.has(fnExpr)) return undefined;
+  const captured = capturedSymbols(fnExpr);
+  if (captured.length === 0) return undefined;
+  for (const { name, occurrence } of captured) {
+    let binding: BoxedDefinition | undefined;
+    for (let s: Scope | null | undefined = capturedScope; s; s = s.parent) {
+      binding = s.bindings.get(name);
+      if (binding !== undefined) break;
+    }
+    if (binding === undefined || !('value' in binding)) continue;
+    const def = binding.value;
+    // A constant has a library value that no host writes. A held symbol is
+    // read as the symbol, not as its value.
+    if (def.isConstant) continue;
+    if (def.holdUntil !== 'evaluate' && def.holdUntil !== 'never') continue;
+    const value = def.value;
+    if (value === undefined || value.operator === 'Unevaluated') continue;
+    const expected = occurrence.type;
+    // A value of type `unknown` (an expression whose type is not inferred
+    // yet) gives no evidence of a mismatch. The ranges of a numeric type are
+    // not compared: the type of a number value does not always carry its
+    // value (the index `i` of `Sum(…, (i, 1, 3))` is typed `integer<1..3>`,
+    // and the value `1` that it holds can be typed `integer`).
+    if (
+      expected.isUnknown ||
+      value.type.isUnknown ||
+      value.type.matches(expected) ||
+      value.type.matches(stripNumericRanges(expected.type))
+    )
+      continue;
+    return ce.typeError(expected.type, value.type, value);
+  }
+  return undefined;
+}
+
+/**
+ * The function literals whose call is checked by its caller, with the
+ * number of such calls running. The caller (a call of a named definition,
+ * `withCallerCapturedCheck()`) compares the value of the call with the
+ * static type of the call node, which describes a mapped or a partial
+ * application too, so the literal does not refuse the call itself
+ * (`capturedValueMismatch()`).
+ */
+const CALLER_CHECKED = new Map<Expression, number>();
+
+/**
+ * Run `f`, a call of the canonical function literal `literal` whose caller
+ * checks the value against the static type of the call node, with the check
+ * of the literal itself (`capturedValueMismatch()`) turned off for
+ * `literal`. A `Promise` answer turns the check on again when it settles.
+ */
+export function withCallerCapturedCheck<T>(literal: Expression, f: () => T): T {
+  CALLER_CHECKED.set(literal, (CALLER_CHECKED.get(literal) ?? 0) + 1);
+  const release = () => {
+    const n = (CALLER_CHECKED.get(literal) ?? 1) - 1;
+    if (n <= 0) CALLER_CHECKED.delete(literal);
+    else CALLER_CHECKED.set(literal, n);
+  };
+  let result: T;
+  try {
+    result = f();
+  } catch (e) {
+    release();
+    throw e;
+  }
+  if (result instanceof Promise) {
+    return result.finally(release) as unknown as T;
+  }
+  release();
+  return result;
+}
+
+/**
+ * True when a captured symbol of the canonical function literal `literal`
+ * holds now a value that is not of the type the body was typed with
+ * (`capturedValueMismatch()`), read in the scope the literal was defined in.
+ */
+export function capturedValueMismatchNow(literal: Expression): boolean {
+  if (!isFunction(literal, 'Function')) return false;
+  const body = literal.ops[0];
+  if (!body.isScoped || body.localScope === undefined) return false;
+  const ce = literal.engine;
+  const capturedScope =
+    definingScopeOf(ce, body.localScope) ?? ce.context.lexicalScope;
+  const fnExpr = literal as Expression & FunctionInterface;
+  if (CALLER_CHECKED.has(fnExpr)) {
+    // The check of the literal is off while its caller runs; ask it anyway.
+    const n = CALLER_CHECKED.get(fnExpr)!;
+    CALLER_CHECKED.delete(fnExpr);
+    try {
+      return capturedValueMismatch(ce, fnExpr, capturedScope) !== undefined;
+    } finally {
+      CALLER_CHECKED.set(fnExpr, n);
+    }
+  }
+  return capturedValueMismatch(ce, fnExpr, capturedScope) !== undefined;
+}
+
 function makeLambda(
   expr: Expression,
   errorPolicy: ErrorArgPolicy = 'bubble'
@@ -5246,6 +5378,8 @@ function makeLambda(
       const bodyScope = nullaryBody.localScope!;
       const capturedScope =
         definingScopeOf(ce, bodyScope) ?? ce.context.lexicalScope;
+      const mismatch = capturedValueMismatch(ce, fnExpr, capturedScope);
+      if (mismatch !== undefined) return mismatch;
       const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
       FROZEN_CHAIN_SCOPES.add(freshScope);
       const savedParent = bodyScope.parent;
@@ -5798,6 +5932,11 @@ function makeLambda(
     // through (`inlineFrameLocals`).
     const capturedScope =
       definingScopeOf(ce, bodyFn.localScope!) ?? ce.context.lexicalScope;
+
+    // A captured symbol that holds a value of a type other than the one the
+    // body was typed with makes the call an error (`capturedValueMismatch`).
+    const mismatch = capturedValueMismatch(ce, fnExpr, capturedScope);
+    if (mismatch !== undefined) return mismatch;
 
     // A `hold` application binds each argument as WRITTEN. `.canonical` is
     // value-safe — it binds structure (a held operand reaching here from the

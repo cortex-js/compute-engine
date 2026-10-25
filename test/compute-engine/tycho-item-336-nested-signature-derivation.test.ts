@@ -404,8 +404,15 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     const home = ce.context.lexicalScope;
     const body = ['Block', ['Add', 'freeZ', ['PointX', 'ceArg_1']]];
     ce.declare('W', { signature: `(unknown, ${POINT}) -> unknown` });
+    // The boxing of the literal itself declares `freeZ` in the home scope:
+    // the use `freeZ + …` in the body narrows the outer binding of the free
+    // symbol, as a use outside the literal does (user decision 2026-10-25 on
+    // CE-473 in `ROADMAP.md`). The derivation of the signature declares
+    // nothing more.
+    const literal = ce.box(['Function', body, 'ceArg_0', 'ceArg_1'] as any);
+    expect(home.bindings.has('freeZ')).toBe(true);
     const before = new Set(home.bindings.keys());
-    ce.assign('W', ce.box(['Function', body, 'ceArg_0', 'ceArg_1'] as any));
+    ce.assign('W', literal);
     const derived = ce.box('W').type.toString();
     expect([...home.bindings.keys()].filter((k) => !before.has(k))).toEqual([]);
     // The same result as the boxing of the body directly under the home

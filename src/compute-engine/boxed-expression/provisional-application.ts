@@ -104,6 +104,15 @@ export function isProvisionalCaptureOpen(): boolean {
   return FRAMES.length > 0;
 }
 
+/** True when a body that is being canonicalized read `name` as a
+ * multiplication operand where an application was also possible
+ * (`noteProvisionalApplication()`), in any open frame. That reading is
+ * revised when `name` gets a function definition. */
+export function isProvisionalHead(name: string): boolean {
+  for (const frame of FRAMES) if (frame?.has(name)) return true;
+  return false;
+}
+
 /** Record that `name` was read as a multiplication operand where an
  * application was also possible. */
 export function noteProvisionalApplication(name: string): void {

@@ -4994,6 +4994,15 @@ function userCallbackOverRowsTypeD(
   const element = mappingSourceElementTypeD(source);
   if (element === undefined) return undefined;
   const signature = def?.operator?.signature.type ?? def?.value?.type?.type;
+  // A variadic tail of a user function is a rest parameter: it collects its
+  // arguments into one tuple, and the call does not map over a collection
+  // element there (`paramsAreScalar`, `boxed-expression/boxed-function.ts`).
+  if (
+    typeof signature === 'object' &&
+    signature.kind === 'signature' &&
+    signature.variadicArg !== undefined
+  )
+    return undefined;
   return signature === undefined
     ? undefined
     : broadcastCallbackResultType(signature, element);
@@ -11082,8 +11091,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         )
           return BoxedType.forResult('integer', context.engine._typeResolver);
         const t = xs.type;
+        // The bare `tuple` is a tuple of any arity, and every tuple is finite.
         if (
           t === 'string' ||
+          t === 'tuple' ||
           (typeof t !== 'string' &&
             ((t.kind === 'list' && t.dimensions) || t.kind === 'tuple'))
         )
@@ -12859,7 +12870,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // source declines, and a declined call stays inert with no value at all,
     // so it never contradicts the `integer`.
     //
-    // The 1-arg form reports the wide claim for every source EXCEPT the two
+    // The 1-arg form reports the wide claim for every source EXCEPT the
     // structural cases below, which are finite by construction. Narrowing it
     // in general would mean asking the source whether it is finite, and that
     // facet dispatches the per-operator `isFinite` collection handler. Where
@@ -12872,11 +12883,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     // own `evaluate` answers `+oo` for one structural case only (an unbounded
     // `Range`), which the type channel decides without dispatching anything.
     //
-    // The two structural cases the 1-arg form can decide without dispatching
+    // The structural cases the 1-arg form can decide without dispatching
     // anything: a literal `List`/`Set` node holds exactly the operands it was
-    // written with, and a list type carrying declared DIMENSIONS
+    // written with, a list type carrying declared DIMENSIONS
     // (`vector<integer^3>`, `matrix<real^(2x3)>`) fixes the element count in the
-    // type itself. Both are finite, so they report the exact `integer`.
+    // type itself, and a tuple always has a finite arity. All are finite, so
+    // they report the exact `integer`.
     //
     // The handler's `+oo` singleton does not survive as written: a handler
     // result is passed through `widenValueTypes()`
@@ -12901,8 +12913,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           (source?.kind === 'application' && source.head === 'Set')
         )
           return BoxedType.forResult('integer', context.engine._typeResolver);
+        // A tuple is finite: a tuple literal, a `tuple<…>` type and the bare
+        // `tuple` (a tuple of any arity, the type of a rest parameter).
+        if (source?.kind === 'tuple')
+          return BoxedType.forResult('integer', context.engine._typeResolver);
         const t = xs.type;
-        if (typeof t !== 'string' && t.kind === 'list' && t.dimensions)
+        if (
+          t === 'tuple' ||
+          (typeof t !== 'string' &&
+            ((t.kind === 'list' && t.dimensions) || t.kind === 'tuple'))
+        )
           return BoxedType.forResult('integer', context.engine._typeResolver);
       }
       return BoxedType.forResult(

@@ -94,6 +94,7 @@ import {
   isNumericTupleArgumentType,
   isNumericTupleType,
   mayBeNumericTupleType,
+  parameterAdmitsTuple,
   parameterReachesBody,
   runsLibraryCanonicalForm,
   typeHandlerContext,
@@ -379,8 +380,10 @@ import { cycleDetectionCount } from './cycle-guard.js';
 import {
   apply,
   callableApplication,
+  capturedValueMismatchNow,
   exactArgumentSources,
   lookupApplicable,
+  withCallerCapturedCheck,
 } from '../function-utils.js';
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
@@ -406,6 +409,8 @@ import {
   functionLiteralParameterNames,
   functionLiteralParameterType,
   isScalarType,
+  capturedTypesWidened,
+  resultOutsideCallType,
 } from './function-literal.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { applicationEffects, publicEffects } from './effects-of.js';
@@ -7067,6 +7072,7 @@ export class BoxedFunction
           tail.length === this.ops.length ? this.ops : undefined,
           options
         );
+        if (mapped === 'hold') return this._withSameBinding(tail);
         if (mapped) return mapped;
       }
 
@@ -8305,6 +8311,7 @@ export class BoxedFunction
           tail.length === this.ops.length ? this.ops : undefined,
           options
         );
+        if (mapped === 'hold') return this._withSameBinding(tail);
         if (mapped) return mapped;
       }
 
@@ -10488,13 +10495,19 @@ function wholeAbsentTupleArgumentType(
   ops: ReadonlyArray<Expression>,
   perElementResult: Type,
   inferredResult: boolean,
-  literal: Expression | undefined
+  literal: Expression | undefined,
+  // The signature of the function. A tuple at a parameter that it types to
+  // take a tuple (a point, a collection, a `broadcastable<P>`) binds to that
+  // parameter, and the declared result describes it
+  // (`parameterAdmitsTuple`), as on the descriptor route.
+  signature?: Type
 ): Type | undefined {
   if (
     (inferredResult || isSubtype(perElementResult, 'number')) &&
     ops.some(
       (x, i) =>
         isNumericTupleArgumentType(x.type.type) &&
+        !(signature !== undefined && parameterAdmitsTuple(signature, i)) &&
         parameterReachesBody(literal, i)
     )
   )
@@ -10619,10 +10632,26 @@ function lambdaBroadcastType(
   // here: the derivation from the body (`callResultType`) types it first,
   // and `wholeAbsentTupleArgumentType` applies this rule only when that
   // derivation declines.
+  // The rule is for a SCALAR parameter only. A tuple at a slot of the
+  // declared plan `slots` that binds whole (a parameter declared as a point
+  // or as a collection), or that is one element of a declared
+  // `broadcastable<P>` with `P` a point type, binds to a parameter of the
+  // tuple's own kind, and the declared result describes it: with
+  // `f: (broadcastable<tuple<real, real>>, tuple<real, real>) -> real`,
+  // `f((1, 2), (1, 1))` is a `real`.
+  const bindsAtScalarSlot = (i: number): boolean => {
+    if (slots === undefined) return true;
+    const slot = slots.at(i);
+    return (
+      slot.mappable &&
+      (slot.elements === undefined || !isPointParameterType(slot.elements))
+    );
+  };
   if (
     ops.some(
       (_x, i) =>
         (isNumericTupleType(typeAt(i)) || mayBeNumericTupleType(typeAt(i))) &&
+        bindsAtScalarSlot(i) &&
         parameterReachesBody(literal, i)
     ) &&
     (inferredResult || isSubtype(perElementResult, 'number'))
@@ -12725,7 +12754,8 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         expr.ops,
         sigResult,
         def.inferredSignature,
-        lambdaLiteralOf(def)
+        lambdaLiteralOf(def),
+        resolvedOf() ?? sig
       );
       if (whole !== undefined) return applyContractB(whole);
     }
@@ -12917,7 +12947,8 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
             sigResult,
             expr.valueDefinition.inferredType ||
               isWildcardFunctionType(declaredType),
-            heldValue
+            heldValue,
+            sig
           )
         : undefined) ??
       sigResult
@@ -13117,12 +13148,22 @@ async function applyFunctionLiteralAsync(
     for (const x of expr.ops)
       ops.push(await x.evaluateAsync(operandOptions(carried)));
   }
-  return await runWithEvaluationEffects(
-    engine,
-    effects,
-    () => applyFunctionLiteralWith(expr, def, carried, value, ops, true),
-    contextStack,
-    options?._precisionWindow
+  if (!capturedCheckApplies(def, value))
+    return await runWithEvaluationEffects(
+      engine,
+      effects,
+      () => applyFunctionLiteralWith(expr, def, carried, value, ops, true),
+      contextStack,
+      options?._precisionWindow
+    );
+  return await checkedLiteralCall(expr, value!, () =>
+    runWithEvaluationEffects(
+      engine,
+      effects,
+      () => applyFunctionLiteralWith(expr, def, carried, value, ops, true),
+      contextStack,
+      options?._precisionWindow
+    )
   );
 }
 
@@ -13334,12 +13375,61 @@ function applyFunctionLiteral(
   def: BoxedValueDefinition,
   options?: Partial<EvaluateOptions>
 ): Expression {
-  return applyFunctionLiteralWith(
+  const value = calleeValue(expr, def);
+  // The common case applies the literal directly: a recursion adds no stack
+  // frame for the check.
+  if (!capturedCheckApplies(def, value))
+    return applyFunctionLiteralWith(expr, def, options, value) as Expression;
+  return checkedLiteralCall(
     expr,
-    def,
-    options,
-    calleeValue(expr, def)
-  ) as Expression;
+    value!,
+    () => applyFunctionLiteralWith(expr, def, options, value) as Expression
+  );
+}
+
+/** True when a call of the function literal `value`, held by the value
+ * definition `def`, is checked by `checkedLiteralCall()`. */
+function capturedCheckApplies(
+  def: BoxedValueDefinition,
+  value: Expression | undefined
+): boolean {
+  return (
+    value !== undefined &&
+    isFunction(value, 'Function') &&
+    ((def.inferredType && capturedTypesWidened(def)) ||
+      capturedValueMismatchNow(value))
+  );
+}
+
+/**
+ * Run `call`, the application `expr` of the function literal `value` held
+ * by a value definition, and check its value against the static type of
+ * `expr`. The caller runs this only when a captured symbol of the literal
+ * makes that type doubtful (`capturedCheckApplies()`): the symbol changed
+ * type since the engine inferred the type of the definition from the
+ * literal (an assignment to `y` in `let g = (x) => [-x, y]`,
+ * `capturedTypesWidened()`), or it holds a value of another type than the
+ * body was typed with
+ * (`capturedValueMismatchNow()`). A value outside the type of `expr` is an
+ * `incompatible-type` error (`resultOutsideCallType()`). The type of `expr`
+ * describes a mapped or a partial application too, so such a call is not
+ * refused when its value is of that type.
+ * (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+ */
+function checkedLiteralCall<T extends Expression | Promise<Expression>>(
+  expr: BoxedFunction,
+  value: Expression,
+  call: () => T
+): T {
+  const callType = expr.type;
+  const check = (result: Expression): Expression =>
+    resultOutsideCallType(expr.engine, callType, true, result) ?? result;
+  const result: Expression | Promise<Expression> = withCallerCapturedCheck(
+    value,
+    call
+  );
+  if (result instanceof Promise) return result.then(check) as T;
+  return check(result) as T;
 }
 
 /**
@@ -13839,6 +13929,11 @@ function applyFunctionLiteralWith(
     );
   };
   const pointPlan = pointListParamSlots(broadcastGateType);
+  // The call over the evaluated arguments, unevaluated: the answer when an
+  // argument at a point slot has no value yet (`holdsForValuelessPointList`).
+  // Rebuilt with the binding of `expr`, not looked up again in the current
+  // scope: a binding of the same name there would take the held call.
+  const held = (): Expression => expr._withSameBinding(ops);
   const applyPointOrWhole = (): Expression | Promise<Expression> => {
     if (pointPlan) {
       const canonicalOps =
@@ -13852,9 +13947,10 @@ function applyFunctionLiteralWith(
           ops,
           canonicalOps,
           options
-        ).then(
-          (mapped) =>
-            mapped ?? expr.engine.withEvaluationContext(options, applyWhole)
+        ).then((mapped) =>
+          mapped === 'hold'
+            ? held()
+            : (mapped ?? expr.engine.withEvaluationContext(options, applyWhole))
         );
       const mapped = pointListBroadcast(
         expr.engine,
@@ -13865,6 +13961,7 @@ function applyFunctionLiteralWith(
         canonicalOps,
         options
       );
+      if (mapped === 'hold') return held();
       if (mapped) return mapped;
     }
     return applyWhole();
@@ -14389,6 +14486,21 @@ export function paramsAreScalar(
     ? source.signature?.type
     : source;
   if (!sigType) return true;
+  // Every caller of this function asks about a USER function, where a
+  // variadic tail is a rest parameter: it collects its arguments into ONE
+  // tuple, so a call never maps over the arguments of the tail
+  // (`h(...xs) = Length(xs)` gives `1` for `h([1, 2, 3])`, not `[1, 1, 1]`).
+  // Such a signature is therefore not all-scalar. The fixed parameters
+  // before the tail still map a list argument, through the per-slot plan of
+  // `pointListParamSlots`, where the tail binds whole. A library operator
+  // with a variadic signature (`Multiply` as a callback) is read by
+  // `signatureParamsAreScalar` directly, and keeps its reading.
+  if (
+    typeof sigType === 'object' &&
+    sigType.kind === 'signature' &&
+    sigType.variadicArg !== undefined
+  )
+    return false;
   // The type-only reading lives in a leaf module because the callback
   // admission in `boxed-expression/validate.ts` needs it too, and that module
   // cannot import this one (this one imports it).
@@ -14588,13 +14700,21 @@ export function pointListParamSlots(
         : WHOLE_SLOT;
     }
   );
-  // Only a POINT slot puts a signature on this plan: a signature whose
-  // parameters are all scalar keeps the `paramsAreScalar` route.
-  const plan = slots.some(
-    (s) => s.elements !== undefined && isPointParameterType(s.elements)
-  )
-    ? { at: (i: number) => slots[i] ?? WHOLE_SLOT }
-    : null;
+  // Only a POINT slot or a variadic tail puts a signature on this plan: a
+  // signature whose parameters are all scalar keeps the `paramsAreScalar`
+  // route. A variadic tail (a rest parameter) collects its arguments into
+  // one tuple, so `paramsAreScalar` is false for it, and this plan maps the
+  // fixed parameters before the tail while the tail binds whole
+  // (`WHOLE_SLOT` past the fixed slots): with `k(a, ...xs) = (a, xs)`,
+  // `k([1, 2], 3)` is `[(1, (3)), (2, (3))]` and `k(1, [1, 2])` is
+  // `(1, ([1, 2]))`.
+  const plan =
+    sigType.variadicArg !== undefined ||
+    slots.some(
+      (s) => s.elements !== undefined && isPointParameterType(s.elements)
+    )
+      ? { at: (i: number) => slots[i] ?? WHOLE_SLOT }
+      : null;
   POINT_SLOT_PLANS.set(sigType, plan);
   return plan ?? undefined;
 }
@@ -14953,8 +15073,7 @@ function pointListApplicationType(
     ? { kind: 'union', types: [result, 'missing'] }
     : result;
   let mapType = mapShapeType(shape, cellResult, pointOps);
-  if (deepDepths.size > 0)
-    mapType = withMissingAtDepths(mapType, deepDepths);
+  if (deepDepths.size > 0) mapType = withMissingAtDepths(mapType, deepDepths);
   if (deepWhole) mapType = { kind: 'union', types: [mapType, 'missing'] };
   return absence === undefined
     ? mapType
@@ -15326,11 +15445,36 @@ function mapsAsEvaluatedPointList(
 }
 
 /**
+ * Whether an operand at a slot of the point-list plan `plan` is a symbol with
+ * no value yet (`isValuelessCollectionSymbol`) whose type says that the call
+ * maps over it: a list of points, a tensor of points, a
+ * `broadcastable<P>`, or a list at a scalar slot. The call is then HELD, as
+ * the call of a function with scalar parameters is held for a valueless list
+ * symbol: binding the symbol whole to the point parameter is an
+ * `incompatible-type` error, but the call maps over the points once the
+ * symbol has a value. With `g: (tuple<real, real>) -> real` and a valueless
+ * `L: list<tuple<real, real>>`, `g(L)` stays `g(L)`.
+ */
+function holdsForValuelessPointList(
+  plan: BroadcastSlotPlan,
+  ops: ReadonlyArray<Expression>
+): boolean {
+  return ops.some(
+    (x, i) =>
+      isValuelessCollectionSymbol(x) &&
+      (mapsAsPointList(plan, i, x, false) || isDeepPointOperand(plan, i, x))
+  );
+}
+
+/**
  * Run the point-list map for one application (see `pointListParamSlots`), or
  * return `undefined` when no operand at a point slot is a list of points. The
  * operands `ops` must already be evaluated; `canonicalOps` are the operands
  * of the canonical application, whose types decide whether an absent operand
- * stood for a list of points (`pointListAbsence`).
+ * stood for a list of points (`pointListAbsence`). The answer is `'hold'`
+ * when the call must stay unevaluated until an operand has a value
+ * (`holdsForValuelessPointList`): the caller then returns the call over the
+ * evaluated operands.
  */
 function pointListBroadcast(
   ce: Expression['engine'],
@@ -15340,9 +15484,10 @@ function pointListBroadcast(
   ops: ReadonlyArray<Expression>,
   canonicalOps: ReadonlyArray<Expression> | undefined,
   options: Partial<EvaluateOptions> | undefined
-): Expression | undefined {
+): Expression | 'hold' | undefined {
   const absence = pointListAbsence(plan, ops, canonicalOps);
   if (absence.whole) return ce.Missing;
+  if (holdsForValuelessPointList(plan, ops)) return 'hold';
   if (!ops.some((x, i) => mapsAsEvaluatedPointList(plan, i, x, canonicalOps)))
     return undefined;
   return markAbsentPointListCells(
@@ -15369,9 +15514,10 @@ async function pointListBroadcastAsync(
   ops: ReadonlyArray<Expression>,
   canonicalOps: ReadonlyArray<Expression> | undefined,
   options: Partial<EvaluateOptions> | undefined
-): Promise<Expression | undefined> {
+): Promise<Expression | 'hold' | undefined> {
   const absence = pointListAbsence(plan, ops, canonicalOps);
   if (absence.whole) return ce.Missing;
+  if (holdsForValuelessPointList(plan, ops)) return 'hold';
   if (!ops.some((x, i) => mapsAsEvaluatedPointList(plan, i, x, canonicalOps)))
     return undefined;
   return markAbsentPointListCells(

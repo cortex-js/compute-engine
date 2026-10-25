@@ -1,6 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/free-functions';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import type { MathJsonExpression } from '../../src/math-json/types';
 import { describe as describeOperand } from '../../src/compute-engine/boxed-expression/operand-descriptor';
@@ -356,14 +357,14 @@ describe('Rest parameter — typing', () => {
       ['Spread', 'rest'],
     ]);
     expect(f.type.toString()).toBe(
-      '(a: unknown, any*) -> tuple<unknown, unknown>'
+      '(a: unknown, any*) -> tuple<unknown, tuple>'
     );
   });
 
   test('a rest-only literal has an all-variadic signature', () => {
     const ce = new ComputeEngine();
     const f = ce.box(['Function', ['Length', 'args'], ['Spread', 'args']]);
-    expect(f.type.toString()).toBe('(any*) -> integer | signed_infinity');
+    expect(f.type.toString()).toBe('(any*) -> integer');
   });
 });
 
@@ -423,7 +424,7 @@ describe('Rest parameter — named definitions', () => {
       ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']])
     );
     expect(ce.symbol('f').type.toString()).toBe(
-      '(a: unknown, any*) -> integer | signed_infinity'
+      '(a: unknown, any*) -> integer'
     );
   });
 
@@ -435,7 +436,7 @@ describe('Rest parameter — named definitions', () => {
       ['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']],
     ]).evaluate();
     expect(ce.symbol('g').type.toString()).toBe(
-      '(a: unknown, any*) -> integer | signed_infinity'
+      '(a: unknown, any*) -> integer'
     );
   });
 
@@ -445,9 +446,7 @@ describe('Rest parameter — named definitions', () => {
       'f',
       ce.box(['Function', ['Length', 'args'], ['Spread', 'args']])
     );
-    expect(ce.symbol('f').type.toString()).toBe(
-      '(any*) -> integer | signed_infinity'
-    );
+    expect(ce.symbol('f').type.toString()).toBe('(any*) -> integer');
   });
 
   test('call arities on the box route', () => {
@@ -477,7 +476,7 @@ describe('Rest parameter — named definitions', () => {
       ])
     );
     expect(ce.symbol('g').type.toString()).toBe(
-      '(a: integer, any*) -> integer | signed_infinity'
+      '(a: integer, any*) -> integer'
     );
     expect(ce.box(['g', 1]).evaluate().toString()).toBe('0');
     expect(ce.box(['g', 1, 2, 3]).evaluate().toString()).toBe('2');
@@ -742,5 +741,206 @@ describe('Rest parameter — declared signatures', () => {
         .evaluate()
         .toString()
     ).toContain('invalid-clause-definition');
+  });
+});
+
+// A rest parameter always holds a finite tuple, so its length is a finite
+// integer. `Length` and `Count` of a tuple are typed `integer`, with no
+// infinite arm.
+describe('Rest parameter — the length is finite', () => {
+  /** Evaluate an Epsil program on the engine `ce`. */
+  const run = (ce: ComputeEngine, source: string) =>
+    ce.box(parseEpsil(source)[0] as MathJsonExpression).evaluate();
+
+  test('the named definition `h(a, ...rest) = Length(rest)` is typed -> integer', () => {
+    const ce = new ComputeEngine();
+    run(ce, 'h(a, ...rest) = Length(rest)');
+    expect(ce.symbol('h').type.toString()).toBe(
+      '(a: unknown, any*) -> integer'
+    );
+    const call = ce.box(['h', 1, 2, 3]);
+    const value = call.evaluate();
+    expect(value.toString()).toBe('2');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('`Count(rest)` is typed -> integer', () => {
+    const ce = new ComputeEngine();
+    run(ce, 'h(...rest) = Count(rest)');
+    expect(ce.symbol('h').type.toString()).toBe('(any*) -> integer');
+  });
+
+  test('the rest parameter is a tuple in the body', () => {
+    const ce = new ComputeEngine();
+    run(ce, 'k(...xs) = xs');
+    expect(ce.symbol('k').type.toString()).toBe('(any*) -> tuple');
+    const call = ce.box(['k', 1, 2]);
+    const value = call.evaluate();
+    expect(value.toString()).toBe('(1, 2)');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test.each([
+    ['Length', ['Tuple', 1, 2]],
+    ['Count', ['Tuple', 1, 2]],
+    ['Count', ['Tuple']],
+  ])('%s of a tuple literal is an integer', (op, tuple) => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([op, tuple] as MathJsonExpression);
+    expect(expr.type.toString()).toBe('integer');
+    expect(expr.evaluate().type.matches(expr.type)).toBe(true);
+  });
+
+  test('Length and Count of a symbol declared as a bare tuple are integers', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'tuple');
+    expect(ce.box(['Length', 't']).type.toString()).toBe('integer');
+    expect(ce.box(['Count', 't']).type.toString()).toBe('integer');
+  });
+});
+
+// A rest parameter collects its arguments into ONE tuple, so a call never
+// maps over the arguments of the rest parameter: a list there is one element
+// of the tuple. A fixed parameter before the rest parameter keeps the
+// broadcast rule of a scalar parameter. The static type of each call agrees
+// with its value.
+describe('Rest parameter — a call does not broadcast over the rest', () => {
+  // `executeEpsil` declares the definitions of the program in the scope of
+  // the engine, so a later `ce.box()` sees them.
+  const run = (ce: ComputeEngine, source: string) => executeEpsil(ce, source);
+
+  /** The value of `json` as a string, with the check that the value matches
+   * the static type of the call. */
+  const valueOf = (ce: ComputeEngine, json: unknown): string => {
+    const call = ce.box(json as MathJsonExpression);
+    const value = call.evaluate();
+    expect(value.type.matches(call.type)).toBe(true);
+    return value.toString();
+  };
+
+  test.each([
+    [['h', ['List', 1, 2, 3]], '1', 'integer'],
+    [['h', ['List', 1, 2], ['List', 3]], '2', 'integer'],
+    [['h', 1, 2, 3], '3', 'integer'],
+    [['k', ['List', 1, 2], 3], '[(1, (3)),(2, (3))]', undefined],
+    [['k', 1, ['List', 1, 2]], '(1, ([1,2]))', undefined],
+    [['m', ['List', 1, 2]], '([1,2])', 'tuple'],
+  ])('named definitions: %j is %s', (json, value, type) => {
+    const ce = new ComputeEngine();
+    run(ce, 'h(...xs) = Length(xs)\nk(a, ...xs) = (a, xs)\nm(...xs) = xs');
+    expect(valueOf(ce, json)).toBe(value);
+    if (type !== undefined)
+      expect(ce.box(json as MathJsonExpression).type.toString()).toBe(type);
+  });
+
+  test('a list symbol with no value at the rest parameter is bound whole', () => {
+    const ce = new ComputeEngine();
+    run(ce, 'h(...xs) = Length(xs)\nk(a, ...xs) = (a, xs)');
+    ce.declare('V', 'list<integer>');
+    expect(valueOf(ce, ['h', 'V'])).toBe('1');
+    expect(valueOf(ce, ['k', 1, 'V'])).toBe('(1, (V))');
+    // At the fixed parameter, the call is held until `V` has a value.
+    expect(valueOf(ce, ['k', 'V', 1])).toBe('k(V, 1)');
+  });
+
+  test('the Epsil route', () => {
+    expect(epsilValue('h(...xs) = Length(xs)\nh([1, 2, 3])')).toBe('1');
+    expect(epsilValue('h(...xs) = Length(xs)\nh([1, 2], [3])')).toBe('2');
+    expect(epsilValue('let h = (...xs) => Length(xs)\nh([1, 2, 3])')).toBe('1');
+  });
+
+  test('a declared variadic signature', () => {
+    const ce = new ComputeEngine();
+    ce.declare('e', '(any*) -> integer');
+    ce.assign(
+      'e',
+      ce.box(['Function', ['Length', 'rest'], ['Spread', 'rest']])
+    );
+    ce.declare('d', '(integer, any*) -> integer');
+    ce.assign(
+      'd',
+      ce.box([
+        'Function',
+        ['Add', 'a', ['Length', 'rest']],
+        'a',
+        ['Spread', 'rest'],
+      ])
+    );
+    expect(valueOf(ce, ['e', ['List', 1, 2, 3]])).toBe('1');
+    expect(valueOf(ce, ['e', ['List', 1, 2], ['List', 3]])).toBe('2');
+    expect(valueOf(ce, ['d', ['List', 1, 2], ['List', 3]])).toBe('[2,3]');
+  });
+
+  test('Apply of a function literal with a rest parameter', () => {
+    const ce = new ComputeEngine();
+    expect(
+      valueOf(ce, [
+        'Apply',
+        ['Function', ['Length', 'xs'], ['Spread', 'xs']],
+        ['List', 1, 2, 3],
+      ])
+    ).toBe('1');
+    expect(
+      valueOf(ce, [
+        'Apply',
+        ['Function', ['Tuple', 'a', ['Length', 'xs']], 'a', ['Spread', 'xs']],
+        ['List', 1, 2],
+        ['List', 3, 4],
+        5,
+      ])
+    ).toBe('[(1, 2),(2, 2)]');
+  });
+
+  test('a rest-parameter callback of Map takes each element whole', () => {
+    const ce = new ComputeEngine();
+    expect(
+      valueOf(ce, [
+        'Map',
+        ['Function', ['Length', 'xs'], ['Spread', 'xs']],
+        ['List', ['List', 1, 2], ['List', 3]],
+      ])
+    ).toBe('[1,1]');
+    // A named function with a rest parameter, as the callback: each row is
+    // one element of the tuple, and the type says so (it was typed as a
+    // list of lists).
+    run(ce, 'h(...xs) = Length(xs)');
+    const named = ce.box([
+      'Map',
+      'h',
+      ['List', ['List', 1, 2], ['List', 3]],
+    ] as MathJsonExpression);
+    expect(named.type.toString()).toBe('list<integer>');
+    expect(
+      valueOf(ce, ['Map', 'h', ['List', ['List', 1, 2], ['List', 3]]])
+    ).toBe('[1,1]');
+    // `(a, ...xs)` accepts the one argument `Map` supplies.
+    expect(
+      valueOf(ce, [
+        'Map',
+        ['Function', ['Tuple', 'a', 'xs'], 'a', ['Spread', 'xs']],
+        ['List', 1, 2],
+      ])
+    ).toBe('[(1, ()),(2, ())]');
+  });
+
+  test('compiled JavaScript gives the same value or refuses', () => {
+    const ce = new ComputeEngine();
+    run(ce, 'h(...xs) = Length(xs)\nk(a, ...xs) = a + Length(xs)');
+    for (const json of [
+      ['h', ['List', 'x', 2, 3]],
+      ['h', ['List', 'x', 2], ['List', 3]],
+      ['k', ['List', 'x', 2], 3],
+      [
+        'Apply',
+        ['Function', ['Length', 'xs'], ['Spread', 'xs']],
+        ['List', 'x', 2, 3],
+      ],
+    ]) {
+      const expr = ce.box(json as MathJsonExpression);
+      const compiled = compile(expr);
+      const interpreted = expr.subs({ x: 5 }).evaluate();
+      if (compiled.success)
+        expect(compiled.run({ x: 5 })).toEqual(interpreted.json);
+    }
   });
 });

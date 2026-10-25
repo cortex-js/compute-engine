@@ -57,6 +57,7 @@ import {
   refineDeclaredPlaceholders,
 } from './effects-inference.js';
 import { declaredTypeError } from './type-compatibility-error.js';
+import { noteDefinitionCapturedTypes } from './function-literal.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
@@ -436,6 +437,10 @@ export class _BoxedValueDefinition
     this.effectsDeclared = def.effectsDeclared ?? false;
 
     this._value = dynamicValue(this._engine, def.value);
+    // As in the `value` setter: record the captured types of a function
+    // literal that the definition is made with (`noteDefinitionCapturedTypes()`).
+    if (this._value && isFunction(this._value, 'Function'))
+      noteDefinitionCapturedTypes(this, this._value);
     this._isSelfReferential = isSelfReferentialValue(this.name, this._value);
     noteSymbolValue(this._engine, this._value);
 
@@ -650,6 +655,13 @@ export class _BoxedValueDefinition
     journalDefinitionRecord(this._engine, this, 'value-write');
     const prev = this._value;
     this._value = v;
+    // The type of a definition that holds a function literal is inferred
+    // from the literal now: record the types of the bindings that its body
+    // reads from outside it, so that a call after one of them changed type
+    // is checked (`capturedTypesWidened()`, `function-literal.ts`).
+    // (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+    if (v !== undefined && isFunction(v, 'Function'))
+      noteDefinitionCapturedTypes(this, v);
     this._isSelfReferential = isSelfReferentialValue(this.name, v);
     noteSymbolValue(this._engine, v);
 

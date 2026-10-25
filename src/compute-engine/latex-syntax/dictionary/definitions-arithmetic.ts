@@ -2525,6 +2525,9 @@ function mixedNumberLatex(
     if (
       lhsValue !== null &&
       rhsValue !== null &&
+      // A float with an integer value (`2.0`) is not a whole part: the
+      // parser reads `2.0\frac{1}{3}` as a product, not as a sum.
+      isIntegerLiteralJson(lhs) &&
       Number.isInteger(lhsValue) &&
       lhsValue >= 0 &&
       lhsValue <= 1000 &&

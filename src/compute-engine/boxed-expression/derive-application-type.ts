@@ -323,7 +323,7 @@ export function parameterReachesBody(
 /** Whether parameter `i` of the signature `ft` is typed to take a tuple
  * (a tuple, a collection, or any type a tuple inhabits other than the open
  * `unknown`/`any`, which bind a tuple whole as a scalar parameter does). */
-function parameterAdmitsTuple(ft: Type, i: number): boolean {
+export function parameterAdmitsTuple(ft: Type, i: number): boolean {
   if (typeof ft !== 'object' || ft.kind !== 'signature') return false;
   const param =
     ft.args?.[i]?.type ??

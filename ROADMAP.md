@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-478.
+Next free reference: CE-482.
 
 **Entry format.**
 
@@ -135,27 +135,27 @@ problem does not occur on its installed release). Report:
 
 **Status:** open; defect.
 
-On the descriptor route (the type of `At` derived from operand types, used
-when a function literal or a call is typed from a body), the `At` type
-handler (`library/collections.ts`) does not refuse its base: a set base gives
+On the descriptor route (the type of `At` derived from operand types, used when
+a function literal or a call is typed from a body), the `At` type handler
+(`library/collections.ts`) does not refuse its base: a set base gives
 `nan | real` or `integer | nan`, and a number or boolean base gives `unknown`,
 where the boxed `At` gives `error`. So with `d(a) := a[1] + a[2]`,
 `d(Interval(0, 1))` is typed `nan | real` for an error value, and
-`h(3, [10, 20])` with `h(a, t) := a[1] + a[2] + t` is typed `list<integer>`
-for a list of errors (the `Add` of the body absorbs `unknown`). Fix: the
-descriptor route of `At` answers `error` for a base that is provably not an
-indexed collection, as the boxed route does.
+`h(3, [10, 20])` with `h(a, t) := a[1] + a[2] + t` is typed `list<integer>` for
+a list of errors (the `Add` of the body absorbs `unknown`). Fix: the descriptor
+route of `At` answers `error` for a base that is provably not an indexed
+collection, as the boxed route does.
 
 ### CE-476. A partial application that reads a missing argument by index is typed as a function but evaluates to an error
 
 **Status:** open; defect.
 
-With `h(a, t) := a[1] + a[2] + t`, `h(3)` is typed `(t: unknown) -> number`
-but evaluates to an `incompatible-type` error: the evaluation reads `3[1]`
-when it builds the partial application. Decide which is right (a partial
-application that only fails when it is called, or an eager check), then make
-the type and the value agree. Also: the evaluation runs the point-list map
-before it curries, so `h([(1, 2), (3, 4)])` is a list of two functions.
+With `h(a, t) := a[1] + a[2] + t`, `h(3)` is typed `(t: unknown) -> number` but
+evaluates to an `incompatible-type` error: the evaluation reads `3[1]` when it
+builds the partial application. Decide which is right (a partial application
+that only fails when it is called, or an eager check), then make the type and
+the value agree. Also: the evaluation runs the point-list map before it curries,
+so `h([(1, 2), (3, 4)])` is a list of two functions.
 
 ### CE-477. The derived route does not map a list of points at a declared point parameter
 
@@ -163,8 +163,8 @@ before it curries, so `h([(1, 2), (3, 4)])` is a list of two functions.
 
 With `k` declared `(tuple<number, number>) -> number`, the boxed `k(P)` for a
 list of points `P` maps (a list of results), but the derived route
-(`deriveApplicationType`) types it as the scalar result. Related to CE-472
-(the derived route does not check arguments against a declared signature).
+(`deriveApplicationType`) types it as the scalar result. Related to CE-472 (the
+derived route does not check arguments against a declared signature).
 
 ### CE-472. The derived type of a call does not check the arguments against a declared signature
 
@@ -293,8 +293,10 @@ assigning `F` then `G` gives `collection<number>` for both; `G` then `F` gives
 
 ### CE-39. Static types that do not contain the value of the expression
 
-**Status:** in progress; defect. CE-39.1 still needs a decision; CE-39.2, 39.3,
-39.4 and 39.6 were decided on 2026-10-25.
+**Status:** decision needed; defect. CE-39.1 and CE-39.3 need a decision.
+CE-39.2 and the sign-range part of CE-39.3 were closed by user decision
+2026-10-25: keep the current ranges (`docs/TYPE-SYSTEM.md`, "Number literal
+types").
 
 The probes check `isSubtype(value type, static type)`. These defects are in code
 that existed before the result type handlers of `FindRoot`, `FindFit`, the
@@ -310,46 +312,13 @@ linear-algebra operators, the trigonometric rewrites and `TupleFrom`.
   a table that never claims `rational` from a product or a quotient
   (`matrixResultCellType`, `library/linear-algebra.ts`). The options: the older
   handlers use the same table, or a float literal stops being typed `integer`.
-- **CE-39.2** (decision needed again: option (a), decided 2026-10-25, was
-  implemented in a worktree and loses precision in nested expressions; see the
-  end of this item) The range of a sum with a float operand does not contain the
-  value type. `2.0 + 1/3` is typed `real<2.329..2.341>`, and its value is typed
-  `real<2.3..2.4>`, which is not a subtype of it: a computed value that is not
-  exactly a double gets a range with two significant digits (`ENCLOSURE_DIGITS`,
-  `boxed-number.ts`). Options: (a) round the static ranges outward to the same
-  grid (many pinned range types change); (b) give computed values a tighter
-  range (undoes the compact-type design). The nightly soundness grid compares
-  the value with the static range, so it passes. Measured 2026-10-25 with option
-  (a) (outward rounding in `attachInterval`, `numerics/interval-arithmetic.ts`):
-  the value types hold, but the rounding adds up through nested subexpressions.
-  `√(1 − ((k − 0.5)/40)²)` for `k` from 1 to 40 becomes `complex` (it was
-  `real`): `(k − 0.5)/40` is `real<0.012..1.1>`, its square `..1.3`, so `1 − …`
-  is `real<-0.31..1>`. Two tests fail on it. Options: (i) accept the loss; (ii)
-  the handlers read unrounded internal intervals and only the reported type is
-  rounded (a separate internal range channel, a larger change); (iii) return to
-  the old ranges and compare the value with the range in the nightly check.
-- **CE-39.3** (decision needed again: option (b), decided 2026-10-25, does not
-  work; see the end of this item) With `x := 0.5`, `Tuple(Abs(x))` is typed
-  `tuple<real<0..>>`, and its value `(0.5)` is typed `tuple<real>`, because a
-  literal in a composite is typed by its tier without a range.
-  `composite-type-synthesis.test.ts` ("non-literal components keep their own
-  claims") and the comment of `storedComponentTypeD` keep the range on purpose.
-  Options: (a) strip ranges from the component types of composites (loses
-  information); (b) type literal components with a sign range (changes the value
-  type of every list literal). The same gap: `Abs([1, 2])` is typed
-  `list<integer<0..>^2>`, its value `vector<integer^2>`. Also
-  `Tuple(Range(1, 3))` is typed `tuple<range>`, and its value
-  `tuple<vector<integer^3>>`. Typing the component `list<integer>` made a
-  variable declared `list<range>` refuse `[Range(1, 3)]`, and admitting the
-  literal stored `[[1, 2, 3]]`, which is not in `list<range>`: a fix must decide
-  what a `list<range>` declaration holds. Measured 2026-10-25 with option (b):
-  830 tests fail in 152 suites, and it makes a new gap in the other direction.
-  With `f := x ↦ 2x + 1` declared
-  `(broadcastable<number>) -> broadcastable<number>`, `f([1, 2, 3])` is typed
-  `list<integer<1..>^3>` while its value is typed `list<integer<0..>^3>`: the
-  handlers derive tighter ranges from sign-ranged cells than the value carries.
-  Remaining options: (a) strip ranges from composite components; (c) accept the
-  gap (recommended).
+- **CE-39.3** (decision needed) `Tuple(Range(1, 3))` is typed `tuple<range>`,
+  and its value `tuple<vector<integer^3>>`. Typing the component `list<integer>`
+  made a variable declared `list<range>` refuse `[Range(1, 3)]`, and admitting
+  the literal stored `[[1, 2, 3]]`, which is not in `list<range>`: a fix must
+  decide what a `list<range>` declaration holds (the range kept as a range, or a
+  list of integers). The sign-range part of this item was closed by user
+  decision 2026-10-25 (option (c), keep the gap).
 
 ### CE-40. The type of a held operand of a lazy operator is read without its binding
 
@@ -720,49 +689,44 @@ With the alias `nn = !nn`, `typeAcceptsValue(5, nn)` is `false` and
 `admissionOf(5, nn)` is `'admit'`. The type has no fixed point, so neither
 answer is specified, but the two functions should agree.
 
-### CE-468. A call of a point function on a collection symbol with no value is an error
+### CE-478. A captured symbol of type `unknown` lets a signature claim a scalar result
 
-**Status:** open; defect, small.
+**Status:** open; wrong value.
 
-With `g: (tuple<real, real>) -> real` and `L: list<tuple<real, real>>` with no
-value, `g(L).evaluate()` gives `incompatible-type` (expected
-`tuple<real, real>`). The same for `T: tensor<tuple<…>>` and
-`S: list<list<tuple<…>>>`. The call should stay `g(L)` until `L` has a value.
-The static type of the call is correct (`list<real>`, `tensor<real>`).
+With `g := s ↦ 2s` and `f := t ↦ g(y)`, `f` is typed `(t: unknown) -> number`
+while `y` stays `unknown`. After `y := [1, 2, 3]`, `f(1)` is typed `number` and
+its value is `[2, 4, 6]`. The call check of CE-473 does not catch it, because
+the body was typed with `y: unknown`. Cause: `Multiply` and the call of `g` type
+an `unknown` operand as a scalar. `compile-userfn-result-shape.test.ts` ("an
+INFERRED captured symbol keeps the enclosing guard") pins the list value.
 
-### CE-469. A call with a literal matrix of points at a `broadcastable` parameter is typed `any`
+### CE-479. The stored signature of a recursive function over `Map` does not hold its value
 
-**Status:** open; defect, small.
+**Status:** open; wrong value.
 
-With `f: (broadcastable<tuple<real, real>>, tuple<real, real>) -> real`,
-`f([[(1,2),(3,4)],[(5,6),(7,8)]], (1,1))` is typed `any`; its value
-`[[11,13],[15,17]]` is a `list<list<real>>`. Sound but imprecise.
+`m(n) := Map(x ↦ If(x < 1, 0, m(x - 1)), [n])` stores `-> list<number>`, but
+`m(1)` is `[[0]]`.
 
-### CE-470. The length of a rest parameter is typed with a `signed_infinity` arm
+### CE-480. Epsil: a hoisted function is typed from a binding declared after the call
 
-**Status:** open; defect, small.
+**Status:** open; wrong value.
 
-`h(a, ...rest) = Length(rest)` has the signature
-`(a: unknown, any*) -> integer | signed_infinity`, while
-`src/epsil/docs/control-flow.md` documents `-> integer`. A rest parameter is
-always a finite list, so its length is a finite integer.
+In `let a = g(); let i = 2; function g() { i^2 }`, `g` gets the result type
+`integer<0..>`, but the call before `let i` reads the constant `i` and returns
+`-1`. `function-declaration-hoisting.test.ts` pins the value `-1`.
 
-### CE-473. A captured free symbol of a function literal is narrowed on its local copy, not on the outer binding
+### CE-481. `Multiply` leaves a scalar factor of an inferred type out of the cell type
 
-**Status:** decision needed; wrong value.
+**Status:** open; wrong value.
 
-A free symbol in the body of a function literal (`y` in `x ↦ [-x, y]`) is
-auto-declared in the literal's own scope. Use-inference, including the inference
-a list literal makes on its free symbols, narrows that local copy to `number`,
-and the literal's result is typed `vector<2>`. At a call, the body reads the
-outer binding of `y`, which is not narrowed. With `y := "abc"`, `Apply(g, 3)`
-has the static type `vector<2>` and the value `[-3, "abc"]`. An operator that
-checks its operand at evaluation (`x ↦ Not(y)`) gives `incompatible-type` there,
-but a container does not check. Options: (a) put the narrowing on the outer
-binding, as a use at the top level does; (b) do not narrow a captured copy, and
-type the cell `unknown` (`x ↦ [-x, y]` would be `list<unknown>`); (c) check the
-captured values against the narrowed types at call time. Neighbouring cases:
-`test/compute-engine/ce-39-literal-cell-types.test.ts`.
+With `L: list<integer>` and a symbol `u` inferred `number`, `L·u` is typed
+`list<integer>`. With `a := [1, 2, 3]`, `x ↦ a·x` is typed
+`(x: unknown) -> vector<integer^3>`, and `Apply` of it to `0.5` gives
+`[0.5, 1, 1.5]`, which that type does not hold. Cause:
+`isDeclaredScalarNumberOperand()` in `library/arithmetic.ts` does not count a
+factor whose type is `number` or inferred, so the factor's type is not merged
+into the cells. `Add` types the same operands as `vector<3>`. Measure the tests
+that move before changing the rule (the rule is used at 11 places).
 
 ## Collections, absence and broadcasting
 
@@ -4183,16 +4147,6 @@ supported by the compiler. Custom accumulator delivery policies are unchanged.
 
 ## LaTeX parsing and serialization
 
-### CE-471. A float plus a fraction is written as a mixed number
-
-**Status:** open; wrong value, small.
-
-`["Add", {"num": "2.0"}, ["Rational", 1, 3]]` is written `2.0\frac{1}{3}`, the
-mixed-number form. The parser reads it back as `["Multiply", 2.0, 1/3]`, so a
-round trip changes the value from 2.333… to 0.666…. With `2.5` the output is
-`\frac{1}{3}+2.5`, which is correct. The mixed-number form must be used only
-when the integer part is an exact integer literal.
-
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
 **Status:** design needed; defect.
@@ -4939,19 +4893,18 @@ differentiated again, and so is the inner derivative of a nested `D`
 decision 2026-10-25, measured with no test or snapshot change). With
 `f(x) := √(x+√(x+√(x+√(x+x))))`, the third derivative went from about 6 s and
 31,386 characters to about 2.2 s and 19,919 characters, and three nested `D`
-from 78,793 to 30,070 characters. The step is skipped while `simplify()`
-folds a constant (`isFoldingConstant()`), so that route is not faster.
+from 78,793 to 30,070 characters. The step is skipped while `simplify()` folds a
+constant (`isFoldingConstant()`), so that route is not faster.
 
 What remains: the fourth derivative of the radical, and of
 `ln(1+ln(1+ln(1+x)))`, exceeds the size budget (`MAX_DERIVATIVE_NODES`) and
-declines; the decline of the `ln` witness takes 5.3 s (3.3 s before, because
-the third iterate is now simplified before the budget stops the work).
+declines; the decline of the `ln` witness takes 5.3 s (3.3 s before, because the
+third iterate is now simplified before the budget stops the work).
 
 Rejected (measured 2026-10-25): building the derivative of a nested power as a
-product of powers without expanding it. The third derivative of the radical
-went from 4.6 s to 32 s and from 31,386 to 67,501 characters, and the full test
-suite did not finish.
-
+product of powers without expanding it. The third derivative of the radical went
+from 4.6 s to 32 s and from 31,386 to 67,501 characters, and the full test suite
+did not finish.
 
 ### CE-334. Each call of a user function invalidates every generation-keyed cache
 
@@ -5468,10 +5421,10 @@ decline.
 **Status:** open; performance. Found 2026-10-25 while landing CE-332.
 
 `simplify()` of `Integrate(t ↦ D(D(√(t+√t), t), t), [1, 2])` takes about 6 s
-(5.9 s at HEAD `472df47ee`, 6.9 s with the CE-332 change). The derivative
-itself is fast; the time is probably the antiderivative attempt of the
-integration. Profile it first, then find whether the integral could use the
-antiderivative of the second derivative (the first derivative) directly.
+(5.9 s at HEAD `472df47ee`, 6.9 s with the CE-332 change). The derivative itself
+is fast; the time is probably the antiderivative attempt of the integration.
+Profile it first, then find whether the integral could use the antiderivative of
+the second derivative (the first derivative) directly.
 
 ## Tests, tools, documentation and release tasks
 

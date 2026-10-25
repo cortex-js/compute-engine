@@ -45,3 +45,36 @@ describe('MIXED NUMBER: A FLOAT LITERAL MAKES A PRODUCT', () => {
     }
   );
 });
+
+// The serializer writes a sum as a mixed number only when the whole part is
+// an exact integer literal. A float whole part (`2.0`) is written with a `+`,
+// so that the parser reads back the same value.
+describe('MIXED NUMBER: SERIALIZE A FLOAT WHOLE PART AS A SUM', () => {
+  test.each([
+    ['Add', { num: '2.0' }, ['Rational', 1, 3]],
+    ['Add', ['Rational', 1, 3], { num: '2.0' }],
+    ['Add', { num: '2.5' }, ['Rational', 1, 3]],
+    ['Add', 2, ['Rational', 1, 3]],
+  ])('%j keeps its value through a round trip', (...json) => {
+    const expr = ce.box(json as any, { form: 'raw' });
+    const latex = expr.latex;
+    expect(ce.parse(latex).N().re).toBeCloseTo(expr.N().re, 12);
+  });
+
+  test('2.0 + 1/3 is not written as a mixed number', () => {
+    const expr = ce.box(['Add', { num: '2.0' }, ['Rational', 1, 3]], {
+      form: 'raw',
+    });
+    expect(expr.latex).toBe('2.0+\\frac{1}{3}');
+  });
+
+  test('the canonical form of 2.0 + 1/3 is not written as a mixed number', () => {
+    const expr = ce.box(['Add', { num: '2.0' }, ['Rational', 1, 3]]);
+    expect(expr.latex).toBe('2.0+\\frac{1}{3}');
+  });
+
+  test('2 + 1/3 is still written as a mixed number', () => {
+    const expr = ce.box(['Add', 2, ['Rational', 1, 3]], { form: 'raw' });
+    expect(expr.latex).toBe('2\\frac{1}{3}');
+  });
+});
