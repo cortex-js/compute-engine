@@ -33,8 +33,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # The tests that run compiled Python code need a python3 with NumPy and
+      # SciPy. `test/compute-engine/test-python.ts` reads `CE_PYTHON`, which
+      # must be the path of an existing file, so the interpreter path that
+      # setup-python outputs is passed, not the bare name `python3`. Without
+      # it those tests are skipped, with a warning in each test file that
+      # runs Python.
+      - name: Setup Python
+        id: python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install NumPy and SciPy
+        run: python -m pip install numpy scipy
+
       - name: Run tests
         run: npm test
+        env:
+          CE_PYTHON: ${{ steps.python.outputs.python-path }}
 
   corpus-pipeline:
     runs-on: ubuntu-latest

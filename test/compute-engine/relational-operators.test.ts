@@ -375,12 +375,22 @@ describe('A mixed chain serializes as a chain (CE-433)', () => {
   });
 
   it('a custom serializer replaces the chain spelling', () => {
-    const custom = (entries: object[]) =>
-      new ComputeEngine({
+    // Each custom entry REPLACES the default entry of the same name. Two
+    // entries with one name is a duplicate definition, which the dictionary
+    // index reports on the console.
+    const custom = (entries: { name: string }[]) => {
+      const replaced = new Set(entries.map((entry) => entry.name));
+      return new ComputeEngine({
         latexSyntax: new LatexSyntax({
-          dictionary: [...LATEX_DICTIONARY, ...(entries as never[])],
+          dictionary: [
+            ...LATEX_DICTIONARY.filter(
+              (entry) => !replaced.has((entry as { name?: string }).name ?? '')
+            ),
+            ...(entries as never[]),
+          ],
         }),
       });
+    };
     const chain = ['And', ['Less', 'a', 'b'], ['LessEqual', 'b', 'c']];
     // A custom `And` serializer is called for a chain too.
     const wedge = custom([

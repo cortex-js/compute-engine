@@ -20,6 +20,24 @@ import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
 
+// `parseColor()` (from `@arnog/colors`) warns on the console for a string that
+// names no color. The refusal cases below pass such strings on purpose, so
+// drop that one warning here and let every other warning through.
+const originalWarn = console.warn;
+beforeAll(() => {
+  console.warn = (...message: unknown[]) => {
+    if (
+      typeof message[0] === 'string' &&
+      message[0].startsWith('parseColor: unrecognized color')
+    )
+      return;
+    originalWarn(...message);
+  };
+});
+afterAll(() => {
+  console.warn = originalWarn;
+});
+
 /**
  * Compile-time constant folding is off for every compiled probe here. Each
  * probe is a fully literal color expression, which the compiler would

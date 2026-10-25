@@ -542,9 +542,22 @@ describe('DISPLAY DIGITS', () => {
 
     test('digits takes precedence over fractionalDigits', () => {
       const e = ce.parse('\\pi').N();
-      expect(
-        e.toMathJson({ digits: { significant: 3 }, fractionalDigits: 6 })
-      ).toEqual('3.14');
+      // Giving both options warns on the console, by design. Keep the
+      // warning out of the test output and check that it is emitted.
+      const warnings: string[] = [];
+      const original = console.warn;
+      console.warn = (message: unknown) => {
+        warnings.push(String(message));
+      };
+      try {
+        expect(
+          e.toMathJson({ digits: { significant: 3 }, fractionalDigits: 6 })
+        ).toEqual('3.14');
+      } finally {
+        console.warn = original;
+      }
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/`digits` takes precedence/);
     });
   });
 

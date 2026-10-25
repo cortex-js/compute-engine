@@ -223,6 +223,25 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
 });
 
 describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () => {
+  // The cases below pass the deprecated `complexPromotion` option on purpose,
+  // to check that it still maps to the complex mode. Its one-time deprecation
+  // warnings are expected here; keep them out of the test output and let
+  // every other warning through.
+  const originalWarn = console.warn;
+  beforeAll(() => {
+    console.warn = (...message: unknown[]) => {
+      if (
+        typeof message[0] === 'string' &&
+        message[0].includes('`complexPromotion`')
+      )
+        return;
+      originalWarn(...message);
+    };
+  });
+  afterAll(() => {
+    console.warn = originalWarn;
+  });
+
   test('strict keeps the real kernel and its NaN; the default does not', () => {
     // Was "OFF by default: the witness keeps the real kernel and its NaN".
     // Promotion is the default since the compile-mode migration (step 4,

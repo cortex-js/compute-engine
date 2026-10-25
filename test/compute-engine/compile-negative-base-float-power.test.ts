@@ -115,8 +115,14 @@ describe('Python', () => {
       program += `r = f_xy(np.array([-8.0, 8.0, -8.0]), np.array([0.4, 0.4, 0.3333333333333333]))\n`;
       program += `out.append([float(v) for v in r])\n`;
       program += 'print(json.dumps(out))\n';
+      // The array-base line makes numpy warn on its standard error
+      // ("invalid value encountered in power") for the element whose real
+      // power is NaN; the warning is expected. Capture the standard error
+      // instead of inheriting it, so it stays out of the test output; a
+      // failing run still carries it on the thrown error.
       const raw = execFileSync(TEST_PYTHON!, ['-c', program], {
         encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
       const values = JSON.parse(raw.replace(/NaN/g, 'null')) as (
         number | null

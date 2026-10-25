@@ -247,11 +247,8 @@ if __name__ == '__main__':
     log(`   python benchmarks/python-performance.py`);
     log(`\nOr with timing:`);
     log(`   time python benchmarks/python-performance.py`);
-    if (!verbose) {
-      writeLine(
-        '\u001b[2K\u001b[80D\u001b[32m✔ \u001b[0m Generated Python benchmark script. \u001b[0;2mSet BENCH_VERBOSE=1 for details.\u001b[0m'
-      );
-    }
+    // Silent unless `BENCH_VERBOSE=1`: a line on standard output from a
+    // passing test is noise in a full-suite run.
     expect(fs.existsSync(outputPath)).toBe(true);
   });
 });

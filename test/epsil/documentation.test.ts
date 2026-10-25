@@ -178,6 +178,13 @@ describe('EPSIL DOCUMENTATION', () => {
     for (const block of executable) {
       if (block.expectsDiagnostics) continue;
       const ce = new ComputeEngine();
+      // A documented `print(...)` example writes to the host console by
+      // default, which lands in the test output. Route the console effect to
+      // a sink instead; `input(...)` reads an empty line rather than the
+      // terminal.
+      ce.effects = {
+        console: { log: () => undefined, readLine: () => undefined },
+      };
       const result = executeEpsil(ce, block.source, {
         url: displayBlock(block),
         parseLatex: (latex) => ce.parse(latex).json,

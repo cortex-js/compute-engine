@@ -3,6 +3,24 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const ce = new ComputeEngine();
 
+// `parseColor()` (from `@arnog/colors`) warns on the console for a string that
+// names no color. The invalid-input cases below pass such strings on purpose,
+// so drop that one warning here and let every other warning through.
+const originalWarn = console.warn;
+beforeAll(() => {
+  console.warn = (...message: unknown[]) => {
+    if (
+      typeof message[0] === 'string' &&
+      message[0].startsWith('parseColor: unrecognized color')
+    )
+      return;
+    originalWarn(...message);
+  };
+});
+afterAll(() => {
+  console.warn = originalWarn;
+});
+
 function evaluateColor(input: string) {
   const expr = ce.expr(['Color', `'${input}'`]);
   const result = expr.evaluate();

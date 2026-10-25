@@ -107,7 +107,12 @@ describe('CE-429: FindFit.evaluateAsync() on the calling thread', () => {
       expect(rec.get('residualNorm')?.re).toBe(sync.get('residualNorm')?.re);
       expect(rec.get('iterations')?.re).toBe(sync.get('iterations')?.re);
     },
-    30_000
+    // The case with no global option scans the default grid with an
+    // interpreted model, twice: 1.5 s on the development machine, and more
+    // than 30 s on the 4-core continuous-integration runner with one jest
+    // worker per core. The limit guards against a hang, not against a slow
+    // machine.
+    120_000
   );
 
   test('a joint fit (two models): the record of evaluateAsync() is the record of evaluate()', async () => {
