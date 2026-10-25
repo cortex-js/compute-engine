@@ -34,6 +34,9 @@ ce.declare('Z', 'list<complex>');
 // possibly a collection: the two shapes the Python fan-out must still refuse.
 ce.declare('M', 'matrix<2x2>');
 ce.declare('B', 'broadcastable<number>');
+// A scalar input. Python reads an input with an INFERRED `number` type
+// through a `None` test (ROADMAP CE-460), and a DECLARED `number` as is.
+ce.declare('x', 'number');
 // A SET-typed operand: it matches neither `list<any>` nor
 // `indexed_collection<any>`, so a guard written with those spellings lets it
 // through — `Add(SN, 1)` emitted `SN + 1` on both scalar-infix targets where

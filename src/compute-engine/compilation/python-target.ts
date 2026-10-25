@@ -4285,6 +4285,14 @@ const pyOperand = (code: string): string =>
 const PYTHON_ATOM = /^[\w.]+$/;
 
 /**
+ * A complete Python real number literal, with an optional sign: `9`, `-9`,
+ * `2.5`, `.5`, `1e-3`, `1_000`. The whole string must match, so an
+ * expression that starts with a digit (`0 or None`) does not.
+ */
+const PYTHON_NUMBER_LITERAL =
+  /^[-+]?(?:\d[\d_]*(?:\.[\d_]*)?|\.\d[\d_]*)(?:[eE][-+]?\d[\d_]*)?$/;
+
+/**
  * Python’s test that a branch condition’s value is exactly a boolean.
  *
  * `is True` alone would be wrong: a comparison compiles to a NumPy call, whose
@@ -7019,14 +7027,20 @@ export class PythonTarget implements LanguageTarget<Expression> {
             `(lambda _c: ${d} if (_c is None or math.isnan(_c)) else _c)(${x})`,
           // A caller passes `None` for an absent input, and `None + 1` and
           // `np.sin(None)` raise a `TypeError`, where the interpreter answers
-          // `NaN` (decided 2026-10-25). The read gives `float('nan')` for
-          // `None` and passes any other value (a NumPy array too) through
-          // unchanged. A read that is not a name is bound to a lambda
-          // parameter, so it is evaluated once.
+          // `NaN`. The read gives `float('nan')` for `None` and passes any
+          // other value (a NumPy array too) through unchanged. A read that is
+          // not a name is bound to a lambda parameter, so it is evaluated
+          // once. A complete number literal (a `vars` source such as `'9'`,
+          // `'-2.5e3'` or `'.5'`) cannot be `None`, and `9 is None` makes
+          // Python print a `SyntaxWarning`, so it is returned unchanged. Only
+          // the WHOLE source is tested: an expression that starts with a
+          // digit (`'0 or None'`, `'2*p'`) can be `None` and keeps the read.
           readInput: (x) =>
-            PYTHON_ATOM.test(x)
-              ? `(float('nan') if ${x} is None else ${x})`
-              : `(lambda _c: float('nan') if _c is None else _c)(${x})`,
+            PYTHON_NUMBER_LITERAL.test(x)
+              ? x
+              : PYTHON_ATOM.test(x)
+                ? `(float('nan') if ${x} is None else ${x})`
+                : `(lambda _c: float('nan') if _c is None else _c)(${x})`,
         },
         object: {
           nullLiteral: 'None',

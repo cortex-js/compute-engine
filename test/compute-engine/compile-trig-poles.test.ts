@@ -233,6 +233,10 @@ describe('an operand used twice in the emitted code is computed once', () => {
 describe('compiled Python answers the pole', () => {
   const py = new PythonTarget();
   const ce = machineEngine();
+  // The tests check the pole rule, not how an input is read. Python reads an
+  // input with an INFERRED `number` type through a `None` test (ROADMAP
+  // CE-460), and a DECLARED `number` as is. So `x` is declared.
+  ce.declare('x', 'number');
 
   test('a complex argument does not get the pole rule', () => {
     const z = ce.box(['Complex', 0, 1e-7]);

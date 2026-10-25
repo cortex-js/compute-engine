@@ -19,6 +19,10 @@ import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
+// The tests check the division, not how an input is read. Python reads an
+// input with an INFERRED `number` type through a `None` test (ROADMAP
+// CE-460), and a DECLARED `number` as is. So `x` is declared.
+ce.declare('x', 'number');
 
 function codeOf(latex: string, to: 'javascript' | 'glsl' | 'python'): string {
   const r = compile(ce.parse(latex), { to });

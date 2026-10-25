@@ -364,12 +364,16 @@ describe('INDETERMINATE — compiled routes', () => {
     ['python', 'x + np.nan'],
     ['interval-js', '_IA.add(_.x, _k1)'],
   ])('%s spells it as the target NaN', (to, code) => {
-    const r = compile(ce.box(['Add', 'x', 'Indeterminate']), { to } as never);
+    // `x` is declared: Python reads an input with an inferred `number` type
+    // through a `None` test, and a declared one as is (ROADMAP CE-460).
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    const r = compile(e.box(['Add', 'x', 'Indeterminate']), { to } as never);
     expect(r.success).toBe(true);
     expect(r.code).toBe(code);
-    const raw = ce.function(
+    const raw = e.function(
       'Add',
-      [ce.symbol('x'), ce.box('Indeterminate', { form: 'raw' })],
+      [e.symbol('x'), e.box('Indeterminate', { form: 'raw' })],
       { form: 'raw' }
     );
     expect(compile(raw, { to } as never).code).toBe(code);

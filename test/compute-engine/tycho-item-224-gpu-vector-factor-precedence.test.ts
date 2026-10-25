@@ -138,7 +138,12 @@ describe('a single-statement Block keeps its grouping as a sub-expression', () =
     } as any);
     expect(js.success).toBe(true);
     expect(js.code).toBe('_.x * (_.t + 1)');
-    const py = compile(ce.box(expr as any), {
+    // Python reads an input with an INFERRED `number` type through a `None`
+    // test, and a DECLARED `number` as is (ROADMAP CE-460).
+    const pe = new ComputeEngine();
+    pe.declare('x', 'number');
+    pe.declare('t', 'number');
+    const py = compile(pe.box(expr as any), {
       to: 'python',
       constantFold: false,
     } as any);

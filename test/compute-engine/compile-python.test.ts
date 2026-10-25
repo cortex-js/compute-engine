@@ -38,6 +38,14 @@ function gn(x: string, ord?: string): string {
 
 describe('PYTHON TARGET', () => {
   const python = new PythonTarget();
+  // Most tests below check how an operator compiles, not how an input is
+  // read. A free symbol with an INFERRED `number` type is read through a
+  // `None` test (`(float('nan') if x is None else x)`, ROADMAP CE-460); a
+  // DECLARED `number` is read as is. So the free symbols of these tests are
+  // declared.
+  for (const s of ['x', 'y', 'z', 'a', 'b', 'c', 't', 'u', 's', 'k'])
+    ce.declare(s, 'number');
+  for (const s of ['acc', 'lambda', 'match']) ce.declare(s, 'number');
   const pythonWithImports = new PythonTarget({ includeImports: true });
 
   describe('Basic Arithmetic', () => {
@@ -80,6 +88,9 @@ describe('PYTHON TARGET', () => {
 
     it('should not parenthesize a right-nested power (already right-assoc)', () => {
       const engine = new ComputeEngine();
+      engine.declare('a', 'real');
+      engine.declare('b', 'real');
+      engine.declare('c', 'number');
       engine.assume(engine.box(['Greater', 'a', 0]));
       engine.assume(engine.box(['Greater', 'b', 0]));
       const expr = engine.box(['Power', 'a', ['Power', 'b', 'c']]);
@@ -1062,6 +1073,7 @@ describe('PYTHON TARGET', () => {
     it('folds an assigned symbol into the code (like the JS target)', () => {
       const scoped = new ComputeEngine();
       scoped.assign('k', 5);
+      scoped.declare('x', 'number');
       const code = python.compile(scoped.box(['Multiply', 'k', 'x'])).code;
       expect(code).toBe('5 * x');
     });
@@ -1069,6 +1081,7 @@ describe('PYTHON TARGET', () => {
     it('honors a `vars` mapping over folding', () => {
       const scoped = new ComputeEngine();
       scoped.assign('k', 5);
+      scoped.declare('x', 'number');
       const code = python.compile(scoped.box(['Multiply', 'k', 'x']), {
         vars: { k: 9 } as any,
       }).code;

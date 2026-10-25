@@ -18,6 +18,12 @@
 
 ### Resolved Issues
 
+- **Compiled Python raised `TypeError` for a `None` input whose type was
+  inferred.** `\sin(r)` and `r^2+1` called with `r=None` now give `nan`, as the
+  interpreter does. An input declared `number` is unchanged and pays nothing.
+  A `vars` source that is a number literal is no longer wrapped in a `None`
+  test (it gave a Python `SyntaxWarning`).
+
 - **Compiled Python gave another absence value than the interpreter for an
   element read of an absent tuple.** With `b: list<tuple<number, string>>` and
   `b = []`, `At(At(b, 1), 1)` was `None` (`Missing`); it is now `nan`, as in the

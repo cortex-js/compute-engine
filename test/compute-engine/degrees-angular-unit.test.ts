@@ -125,6 +125,9 @@ describe('DEGREE LITERALS — compiled output agrees with evaluate()', () => {
 
   test('rad: python lowers Degrees to radians', () => {
     const ce = engine('rad');
+    // A declared `number` input is read as is; an inferred one is read
+    // through a `None` test (ROADMAP CE-460).
+    ce.declare('x', 'number');
     const py = ce._getCompilationTarget('python')!;
     expect(py.compile(ce.parse('\\sin(x^\\circ)')).code).toBe(
       'np.sin((x * np.pi / 180))'
@@ -298,6 +301,10 @@ describe('ARGUMENT — compiled output agrees with .N()', () => {
 
   test.each(UNITS)('%s: glsl, wgsl and python scale the result', (unit) => {
     const ce = engine(unit);
+    // A declared `number` input is read as is in Python; an inferred one is
+    // read through a `None` test (ROADMAP CE-460).
+    ce.declare('x', 'number');
+    ce.declare('y', 'number');
     const z = ce.box([
       'Argument',
       ['Add', 'x', ['Multiply', 'ImaginaryUnit', 'y']],

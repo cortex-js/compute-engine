@@ -20,6 +20,10 @@ import { TEST_PYTHON } from './test-python';
 import { execFileSync } from 'child_process';
 
 const ce = new ComputeEngine();
+// The tests check names, not how an input is read. A free symbol with an
+// INFERRED `number` type is read through a `None` test (ROADMAP CE-460); a
+// DECLARED `number` is read as is. So the symbols are declared.
+for (const s of ['ﬁ', 'fi', '𝑥', 'x', '_uFB01_']) ce.declare(s, 'number');
 const py = new PythonTarget();
 const fi = { sym: 'ﬁ' };
 const sum = ce.box(['Add', fi, 'fi']);

@@ -773,9 +773,15 @@ describeScipyMaybe(
 
     const header =
       'import numpy as np\nimport cmath\nimport scipy.special\nimport json\n\n';
+    // The inputs are declared: Python reads an input with an INFERRED
+    // `number` type through a `None` test, and a DECLARED `number` as is
+    // (ROADMAP CE-460). The tests check the lowering of the gamma functions.
+    const ge = new ComputeEngine();
+    ge.declare('a', 'number');
+    ge.declare('z', 'number');
     const fns =
-      `${python.compileFunction(ce.box(['GammaRegularized', 'a', 'z']), 'fn_q', ['a', 'z'])}\n` +
-      `${python.compileFunction(ce.box(['Gamma', 'a', 'z']), 'fn_g', ['a', 'z'])}\n`;
+      `${python.compileFunction(ge.box(['GammaRegularized', 'a', 'z']), 'fn_q', ['a', 'z'])}\n` +
+      `${python.compileFunction(ge.box(['Gamma', 'a', 'z']), 'fn_g', ['a', 'z'])}\n`;
 
     it('the order is a variable: the lowering goes through the helper', () => {
       expect(fns).toContain('return _ce_ugamma(a, z, True)');

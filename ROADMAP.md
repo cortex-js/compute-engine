@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-465.
+Next free reference: CE-466.
 
 **Entry format.**
 
@@ -129,6 +129,17 @@ problem does not occur on its installed release). Report:
   operator" declines (importer binding), and the 2× re-compile of every declined
   row.
 
+### CE-465. Ask Tycho to test the row of its item 284 again
+
+**Status:** open; Tycho ask. Moved from CE-332 on 2026-10-25.
+
+The corpus row of Tycho item 284,
+`\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with
+`F := [f, f', f'', f''']`, parses as the application of a list element
+(`["At", ["F", "epsilon"], ["Add", "i", 1]]` inside the `Sum`), so Tycho can
+test the row again. The explicit four-term sum compiles in 65 ms and matches
+`.N()`. Close this entry when Tycho answers.
+
 ## Types and type inference
 
 ### CE-3. `unknown` as an inference marker: what the migration left open
@@ -180,26 +191,6 @@ named-argument calls through a constant receiver).
   `unknown`. Do this with the plan's implementation. Measured again 2026-10-24:
   see CE-4 (61 failing tests in 10 suites, mostly real regressions).
 
-### CE-362. `list` and `list<unknown>` give different result types
-
-**Status:** decision needed; defect.
-
-The two spellings denote one set of values, but with `g := t ↦ [t, 2t]` and
-`x: any`, `g(x)[1] + 1` is typed `any` when `g` is declared `(unknown) -> list`
-and `broadcastable<number> | missing` when it is declared
-`(unknown) -> list<unknown>`. The cause: an element of bare `list` reads as
-`any`, an element of `list<unknown>` reads as `unknown`. Making bare `list` read
-its elements as `unknown` (`collectionElementType` in `common/type/utils.ts`,
-`instantiate.ts`, `collection-utils.ts`) aligns the two spellings and makes 12
-tests fail in 9 suites, several of which state the current reading on purpose
-("a declared bare list keeps reading its elements as any",
-`bare-families.test.ts`; "P: list, P[i] is any"). Question for the user: is an
-element of a bare `list` read as `unknown` (each use narrows it; `g(x)[1] + 1`
-is numeric) or as `any` (`g(x)[1] + 1` is `any`)? If not decided, the two
-spellings keep giving different types. The compiled statistics already refuse a
-`list<unknown>` operand as they refuse a bare `list` (`refuseNestedData`,
-`compilation/javascript-target.ts`).
-
 ### CE-27. An access over `any` or `unknown` elements has no `missing` arm
 
 **Status:** design needed; design. User decision 2026-10-20: a design item, not
@@ -228,7 +219,9 @@ and solve `T` with `inferTypeArguments`.
 
 ### CE-32. The parse route does not infer the type of a symbol in a juxtaposed product
 
-**Status:** open; defect, small.
+**Status:** in progress; defect, small. User decision 2026-10-25: a product
+written by juxtaposition narrows its valueless symbols as `Multiply` does, on
+every route; review the Tycho row 425 expectations that move.
 
 `ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
 `ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the type
@@ -243,8 +236,8 @@ its type, and the types become those of the box route (`t ↦ [t, 2t]` becomes
 
 Another example (2026-10-25): `ce.parse('t \mapsto (t, 2t)')` is typed
 `(unknown) -> tuple<unknown, number>`, while `t \mapsto (t, 2\cdot t)`,
-`ce.box(['Function', ['Tuple', 't', ['Multiply', 2, 't']], 't'])` and the
-Epsil `tup(t) = (t, 2*t)` give `tuple<number, number>`. The box route with an
+`ce.box(['Function', ['Tuple', 't', ['Multiply', 2, 't']], 't'])` and the Epsil
+`tup(t) = (t, 2*t)` give `tuple<number, number>`. The box route with an
 `InvisibleOperator` gives `tuple<unknown, number>` too. Both types are sound;
 `tuple<number, number>` follows the rule that a use of a valueless symbol
 narrows it. A fix also changes a test of `compile-python-absent-input.test.ts`
@@ -287,7 +280,8 @@ assigning `F` then `G` gives `collection<number>` for both; `G` then `F` gives
 
 ### CE-39. Static types that do not contain the value of the expression
 
-**Status:** decision needed; defect.
+**Status:** in progress; defect. CE-39.1 still needs a decision; CE-39.2, 39.3,
+39.4 and 39.6 were decided on 2026-10-25.
 
 The probes check `isSubtype(value type, static type)`. These defects are in code
 that existed before the result type handlers of `FindRoot`, `FindFit`, the
@@ -303,38 +297,39 @@ linear-algebra operators, the trigonometric rewrites and `TupleFrom`.
   a table that never claims `rational` from a product or a quotient
   (`matrixResultCellType`, `library/linear-algebra.ts`). The options: the older
   handlers use the same table, or a float literal stops being typed `integer`.
-- **CE-39.2** (decision needed) The range of a sum with a float operand does not
-  contain the value type. `2.0 + 1/3` is typed `real<2.329..2.341>`, and its
-  value is typed `real<2.3..2.4>`, which is not a subtype of it: a computed
-  value that is not exactly a double gets a range with two significant digits
-  (`ENCLOSURE_DIGITS`, `boxed-number.ts`). Options: (a) round the static ranges
-  outward to the same grid (many pinned range types change); (b) give computed
-  values a tighter range (undoes the compact-type design). The nightly soundness
-  grid compares the value with the static range, so it passes.
-- **CE-39.3** (decision needed) With `x := 0.5`, `Tuple(Abs(x))` is typed
-  `tuple<real<0..>>`, and its value `(0.5)` is typed `tuple<real>`, because a
-  literal in a composite is typed by its tier without a range.
-  `composite-type-synthesis.test.ts` ("non-literal components keep their own
-  claims") and the comment of `storedComponentTypeD` keep the range on purpose.
-  Options: (a) strip ranges from the component types of composites (loses
-  information); (b) type literal components with a sign range (changes the value
-  type of every list literal). The same gap: `Abs([1, 2])` is typed
+- **CE-39.2** (user decision 2026-10-25: option (a)) The range of a sum with a
+  float operand does not contain the value type. `2.0 + 1/3` is typed
+  `real<2.329..2.341>`, and its value is typed `real<2.3..2.4>`, which is not a
+  subtype of it: a computed value that is not exactly a double gets a range with
+  two significant digits (`ENCLOSURE_DIGITS`, `boxed-number.ts`). Options: (a)
+  round the static ranges outward to the same grid (many pinned range types
+  change); (b) give computed values a tighter range (undoes the compact-type
+  design). The nightly soundness grid compares the value with the static range,
+  so it passes.
+- **CE-39.3** (user decision 2026-10-25: option (b)) With `x := 0.5`,
+  `Tuple(Abs(x))` is typed `tuple<real<0..>>`, and its value `(0.5)` is typed
+  `tuple<real>`, because a literal in a composite is typed by its tier without a
+  range. `composite-type-synthesis.test.ts` ("non-literal components keep their
+  own claims") and the comment of `storedComponentTypeD` keep the range on
+  purpose. Options: (a) strip ranges from the component types of composites
+  (loses information); (b) type literal components with a sign range (changes
+  the value type of every list literal). The same gap: `Abs([1, 2])` is typed
   `list<integer<0..>^2>`, its value `vector<integer^2>`. Also
   `Tuple(Range(1, 3))` is typed `tuple<range>`, and its value
   `tuple<vector<integer^3>>`. Typing the component `list<integer>` made a
   variable declared `list<range>` refuse `[Range(1, 3)]`, and admitting the
   literal stored `[[1, 2, 3]]`, which is not in `list<range>`: a fix must decide
   what a `list<range>` declaration holds.
-- **CE-39.4** (decision needed) With `L := [u, v]`, `At(L, 1)` is typed `number`
-  and its value `u` is typed `unknown`. The generic-symbol fold of
-  `classifyCellD` (`library/collections.ts`) reads a free symbol in a list
-  literal as a `number` cell. Options: (a) the literal narrows its free symbols
-  to `number` (can retype a symbol later used as a boolean); (b) the literal is
-  typed `list<unknown>` (changes the type of every symbolic matrix, see
-  CE-39.6); (c) keep the convention and accept the gap.
-- **CE-39.6** (decision needed) A matrix of symbols with no type
-  (`[[x, y], [z, w]]`, typed `matrix<2x2>`): its `AdjugateMatrix` value is typed
-  `list<list<unknown>>` and its `PseudoInverse` value
+- **CE-39.4** (user decision 2026-10-25: option (a)) With `L := [u, v]`,
+  `At(L, 1)` is typed `number` and its value `u` is typed `unknown`. The
+  generic-symbol fold of `classifyCellD` (`library/collections.ts`) reads a free
+  symbol in a list literal as a `number` cell. Options: (a) the literal narrows
+  its free symbols to `number` (can retype a symbol later used as a boolean);
+  (b) the literal is typed `list<unknown>` (changes the type of every symbolic
+  matrix, see CE-39.6); (c) keep the convention and accept the gap.
+- **CE-39.6** (user decision 2026-10-25: option (a)) A matrix of symbols with no
+  type (`[[x, y], [z, w]]`, typed `matrix<2x2>`): its `AdjugateMatrix` value is
+  typed `list<list<unknown>>` and its `PseudoInverse` value
   `list<list<broadcastable<number>>>`. The result cells are built with `.neg()`
   and `.div()`, which do not infer types. Options: (a) extend the number reading
   of list literals to arithmetic over free symbols; (b) the handlers decline
@@ -396,16 +391,22 @@ unsound (`[1.5]` typed `vector<integer^1>`).
 
 ### CE-45. `Map` with a bare-symbol callback types its elements from the declared signature only
 
-**Status:** decision needed; defect, low priority.
+**Status:** in progress; defect, low priority.
 
 A bare-symbol callback with a known signature types the elements of `Map` from
 that signature's result type (user decision 2026-09-27); the source type is
 copied only when the callback is unknown.
 
-- **CE-45.2** (needs a change of the decision of 2026-09-27) Running the
-  operator's own type handler on the source element type would give narrower
-  types (`Sin` over integers gives `real`). An assigned lambda `x ↦ x + 10` over
-  integers types `number` elements where the copied type said `integer`.
+- **CE-45.2** (user decision 2026-10-25: option (b)) With `xs: list<integer>`,
+  `Map(Abs, xs)` is `list<number>`, while `Map(x ↦ Abs(x), xs)` and `Abs(xs)`
+  are `list<integer<0..>>`; `Map(Sin, xs)` is `list<number>` and
+  `Map(x ↦ Sin(x), xs)` is `list<real>`; with `g := x ↦ x + 10`, `Map(g, xs)` is
+  `list<number>` and the inline lambda gives `list<integer>`. Options: (a) keep
+  the decision of 2026-09-27 (sound, less precise); (b) a library operator given
+  by name runs its type handler on the element type, a user-declared function
+  keeps its signature (recommended); (c) as (b), and an assigned lambda given by
+  name is typed from its body (the type of `Map(g, xs)` then changes when `g` is
+  reassigned). No decision: (a).
 
 ### CE-46. Extended-real declarations widen to `number` through a call of a function declared `function`
 
@@ -576,7 +577,8 @@ apart, and that does not cover a top-level Epsil `let`.
 
 ### CE-60. A named-argument call to an unannotated function literal held in a binding declines
 
-**Status:** decision needed; defect.
+**Status:** in progress; defect. User decision 2026-10-25: an inferred signature
+keeps and prints its parameter names.
 
 The lowering contract of named-argument calls is in `docs/LANGUAGE-MODEL.md`;
 the full specification is in `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C. Decision
@@ -738,7 +740,8 @@ string.
 
 ### CE-448. A declared function with a point parameter refuses a matrix of points that its `broadcastable` argument admits
 
-**Status:** decision needed; defect.
+**Status:** in progress; defect. User decision 2026-10-25: map the call at every
+rank and type it `broadcastable<real>`.
 
 With `g: (tuple<real, real>) -> real` and `P: broadcastable<tuple<real, real>>`,
 `P := [[(1,2),(3,4)],[(5,6),(7,8)]]` is a valid value of `P`, but `g(P)`
@@ -2979,20 +2982,6 @@ bindings of `vars`-mapped symbols near lines 13400 to 13435).
 
 First write the two tests; if they pass, delete this entry.
 
-### CE-460. A compiled Python input with an inferred `number` type raises `TypeError` for `None`
-
-**Status:** decision needed; defect (host exception).
-
-Compiled Python reads a `None` input (the Python spelling of `Missing`) as `NaN`
-in arithmetic when the type of the input admits `missing`, `unknown` included
-(`readAbsentInput`, `compilation/base-compiler.ts`). Type inference often
-narrows a parsed free symbol to `number`: `r` in `r^2 + 1`, `\sin(r)`, `x + y`.
-Such an input is not converted, so `f(r=None)` raises `TypeError`, where the
-interpreter answers `NaN`; whether `None` is accepted then depends on the
-operator the symbol appears in. Decide whether an INFERRED `number` (not a
-declared one) is converted too. Cost: a test `is None` at each read of such an
-input, also inside a `Sum` generator (it is not moved out of the loop).
-
 ### CE-209. `Sum(f(x), Element(x, xs))` does not check `xs` for raw `Nothing` positions
 
 **Status:** open; defect. Part of CE-218.
@@ -4949,12 +4938,6 @@ because the chain rule distributes each level over the previous one.
   product of powers without opening it, or simplify per order before
   differentiating again. Either changes the shape of `evaluate()` results and
   needs a snapshot-churn measurement.
-- **CE-332.2** The corpus row of Tycho item 284,
-  `\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with
-  `F := [f, f', f'', f''']`, parses as the application of a list element
-  (`["At", ["F", "epsilon"], ["Add", "i", 1]]` inside the `Sum`), so Tycho can
-  test the row again. The explicit four-term sum compiles in 65 ms and matches
-  `.N()`.
 
 ### CE-333. Coordinate projection through point arithmetic: two shapes are not rewritten
 
@@ -5128,7 +5111,7 @@ if interpreted loops of many thousands of turns become important:
 
 ### CE-458. The constant fold of a compile evaluates a shared subtree under a binder once per path
 
-**Status:** open; performance.
+**Status:** in progress; performance.
 
 A user function whose body holds a nested `Sum` or `Product` over a subtree that
 is shared (the same node reached through several parents) takes exponential time

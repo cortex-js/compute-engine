@@ -493,8 +493,14 @@ describe('MCP server compile tool', () => {
   });
 
   test('compiles an Epsil program to Python', async () => {
+    // `x` is declared: Python reads an input with an inferred `number` type
+    // through a `None` test, and a declared one as is (ROADMAP CE-460).
     const [response] = await runServer([
-      callTool(1, 'compile', { source: 'x^2 + 1', to: 'python' }),
+      callTool(1, 'compile', {
+        source: 'x^2 + 1',
+        to: 'python',
+        declarations: { x: 'number' },
+      }),
     ]);
     const result = payload(response);
     expect(result.ok).toBe(true);

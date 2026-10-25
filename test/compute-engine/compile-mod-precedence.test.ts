@@ -70,7 +70,11 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
 
   it('Python Remainder parenthesizes the compiled dividend', () => {
     const py = new PythonTarget();
-    const code = py.compile(ce.box(['Remainder', ['Add', 'x', 29], 9]), {
+    // `x` is declared: Python reads an input with an inferred `number` type
+    // through a `None` test, and a declared one as is (ROADMAP CE-460).
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    const code = py.compile(e.box(['Remainder', ['Add', 'x', 29], 9]), {
       vars: { x: 'x' },
     }).code;
     // The dividend is an argument of the `_ce_remainder` helper, which

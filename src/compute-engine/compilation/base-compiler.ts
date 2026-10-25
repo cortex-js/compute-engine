@@ -11626,11 +11626,14 @@ export class BaseCompiler {
    * - the name is bound by the compiled code (a lambda parameter, a `Sum`
    *   index, a block local): it is not an input;
    * - the type of the input cannot hold `missing` (`isSubtype('missing',
-   *   t)`): `number | missing`, `any` and `unknown` can, `number` cannot.
-   *   An input typed `unknown` is read too (user decision 2026-10-25): a
-   *   free symbol of a parsed `2πr` is typed `unknown`, and a caller can
-   *   pass `None` for it. An input whose type cannot hold `missing` pays
-   *   nothing;
+   *   t)`) and is not a numeric type that inference gave the symbol. The
+   *   types `number | missing`, `any` and `unknown` can hold `missing`: a
+   *   free symbol of a parsed `2πr` is typed `unknown`. A free symbol with
+   *   an INFERRED numeric type (`inferredType`) is read too: a use narrows
+   *   it to `number` (`r` in `r^2 + 1` or `\sin(r)`), but the caller can
+   *   still pass `None` for it. A DECLARED
+   *   `number` (`ce.declare('x', 'number')`) is a promise that the input
+   *   is present: its read is unchanged and pays nothing;
    * - the head that consumes it handles absence itself (`Equal`, `Max`,
    *   `Coalesce`: a relation keeps its `is None` test, so `p ≠ 0` stays
    *   undecided for an absent `p`), or does not strip `missing` at that
@@ -11649,7 +11652,12 @@ export class BaseCompiler {
     const read = target.absence?.numeric.readInput;
     if (read === undefined || target.boundVars?.has(expr.symbol) === true)
       return code;
-    if (!isSubtype('missing', expr.type.type)) return code;
+    const t = expr.type.type;
+    if (
+      !isSubtype('missing', t) &&
+      !(expr.valueDefinition?.inferredType === true && isSubtype(t, 'number'))
+    )
+      return code;
     const parent = BaseCompiler._compileParents.at(-1);
     if (parent === undefined || !isFunction(parent)) return code;
     const def = parent.operatorDefinition;

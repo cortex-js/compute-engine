@@ -276,7 +276,12 @@ describe('compiled code', () => {
 
   test('Python binds the operand and the step as arguments', () => {
     const python = new PythonTarget();
-    const code = python.compileLambda(ce.box(['Floor', 'x', 'a']), ['x', 'a']);
+    // A declared `number` input is read as is; an inferred one is read
+    // through a `None` test (ROADMAP CE-460).
+    const e = new ComputeEngine();
+    e.declare('x', 'number');
+    e.declare('a', 'number');
+    const code = python.compileLambda(e.box(['Floor', 'x', 'a']), ['x', 'a']);
     expect(code.startsWith('lambda x, a: (lambda _ce_x, _ce_k: ')).toBe(true);
     expect(code.endsWith('(np.asarray(x, dtype=float), np.abs(a))')).toBe(true);
   });

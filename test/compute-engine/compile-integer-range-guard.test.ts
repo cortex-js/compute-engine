@@ -347,22 +347,27 @@ describe('constant fold of an operand beyond the safe integer range', () => {
 
 describe('Python target', () => {
   const py = new PythonTarget();
+  // An engine whose inputs are declared: a declared `number` input is read
+  // as is, an inferred one through a `None` test (ROADMAP CE-460). The tests
+  // that use it check the integer test of the operands.
+  const pe = new ComputeEngine();
+  pe.declare('x', 'number');
 
   it('Mod and Remainder check a non-literal operand', () => {
-    const mod = py.compile(ce.box(['Mod', 'x', 10])).code;
+    const mod = py.compile(pe.box(['Mod', 'x', 10])).code;
     expect(mod).toContain("np.mod(*_ce_int_operands('Mod', False, x, 10))");
     expect(mod).toContain('def _ce_int_operands(_op, _all, _a, _b):');
-    const rem = py.compile(ce.box(['Remainder', 'x', 7])).code;
+    const rem = py.compile(pe.box(['Remainder', 'x', 7])).code;
     expect(rem).toContain('_ce_remainder(x, 7)');
     expect(rem).toContain("_ce_int_operands('Remainder', True, _a, _b)");
     // A bare lambda has no module helper: the check is inline.
-    const lambda = py.compileLambda(ce.box(['Mod', 'x', 10]), ['x']);
+    const lambda = py.compileLambda(pe.box(['Mod', 'x', 10]), ['x']);
     expect(lambda).not.toContain('_ce_int_operand');
     expect(lambda).toContain('ValueError(');
   });
 
   it('Mod by the literal 1 is not checked', () => {
-    expect(py.compile(ce.box(['Mod', 'x', 1])).code).toBe('np.mod(x, 1)');
+    expect(py.compile(pe.box(['Mod', 'x', 1])).code).toBe('np.mod(x, 1)');
   });
 
   const hasNumpy = (() => {
@@ -578,8 +583,13 @@ describe('Python target: the effective dtype of the Mod and Remainder operands',
   });
 
   it('the Remainder lambda writes each operand once', () => {
+    // A declared `number` input is read as is; an inferred one is read
+    // through a `None` test, which names it twice (ROADMAP CE-460).
+    const pe = new ComputeEngine();
+    pe.declare('x', 'number');
+    pe.declare('m', 'number');
     const lambda = py.compileLambda(
-      ce.box(['Remainder', ['Add', 'x', 29], ['Add', 'm', 3]]),
+      pe.box(['Remainder', ['Add', 'x', 29], ['Add', 'm', 3]]),
       ['x', 'm']
     );
     // Once as a parameter of the lambda, once as an operand.

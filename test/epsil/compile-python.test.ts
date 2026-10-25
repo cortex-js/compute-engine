@@ -21,6 +21,10 @@ import { operator } from '../../src/math-json/utils';
 //
 
 const ce = new ComputeEngine();
+// The tests check statement lowerings, not how an input is read. Python reads
+// an input with an INFERRED `number` type through a `None` test (ROADMAP
+// CE-460), and a DECLARED `number` as is. So the input `x` is declared.
+ce.declare('x', 'number');
 
 function compileToPythonDef(
   source: string,

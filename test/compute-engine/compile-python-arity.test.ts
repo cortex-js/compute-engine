@@ -82,6 +82,10 @@ import { TEST_PYTHON } from './test-python';
  */
 
 const python = new PythonTarget();
+// The tests pin lowerings, not how an input is read. A free symbol with an
+// INFERRED `number` type is read through a `None` test (ROADMAP CE-460); a
+// DECLARED `number` is read as is. So the inputs are declared.
+for (const s of ['x', 'k']) ce.declare(s, 'number');
 // `constantFold: false`: these assertions pin the LOWERING of each operator,
 // and every operand below is a literal — with compile-time constant folding
 // on (the default) a fully constant call is evaluated at compile time and

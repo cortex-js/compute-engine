@@ -34,55 +34,55 @@ def is_verbose() -> bool:
 import numpy as np
 def simple_power(x, y, z):
     r"""Simple Power: x^2 + y^2 + z^2"""
-    return x ** 2 + y ** 2 + z ** 2
+    return (float('nan') if x is None else x) ** 2 + (float('nan') if y is None else y) ** 2 + (float('nan') if z is None else z) ** 2
 
 
 import numpy as np
 def polynomial(x):
     r"""Polynomial: x^4 + 3x^3 + 2x^2 + x + 1"""
-    return x ** 4 + 3 * x ** 3 + 2 * x ** 2 + x + 1
+    return (float('nan') if x is None else x) ** 4 + 3 * (float('nan') if x is None else x) ** 3 + 2 * (float('nan') if x is None else x) ** 2 + (float('nan') if x is None else x) + 1
 
 
 import numpy as np
 def trigonometric(x, y, z):
     r"""Trigonometric: \sin(x) + \cos(y) + \tan(z)"""
-    return np.sin(x) + np.cos(y) + (lambda _x: (lambda _y: np.where(np.isinf(_y) & (_x != 0) & (np.abs(_x) < 1.5707963267948966), _y, np.where(np.isinf(_y) | (np.abs(_y) * np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 >= 1), np.inf, _y))[()])(np.tan(_x)))(z)
+    return np.sin((float('nan') if x is None else x)) + np.cos((float('nan') if y is None else y)) + (lambda _x: (lambda _y: np.where(np.isinf(_y) & (_x != 0) & (np.abs(_x) < 1.5707963267948966), _y, np.where(np.isinf(_y) | (np.abs(_y) * np.minimum(np.abs(_x), 1099511627776.0) * 1.1102230246251565e-14 >= 1), np.inf, _y))[()])(np.tan(_x)))((float('nan') if z is None else z))
 
 
 import numpy as np
 def nested_expression(x, y, z, a, b, c):
     r"""Nested Expression: \sqrt{(x-a)^2 + (y-b)^2 + (z-c)^2}"""
-    return np.sqrt((-a + x) ** 2 + (-b + y) ** 2 + (-c + z) ** 2)
+    return np.sqrt((-(float('nan') if a is None else a) + (float('nan') if x is None else x)) ** 2 + (-(float('nan') if b is None else b) + (float('nan') if y is None else y)) ** 2 + (-(float('nan') if c is None else c) + (float('nan') if z is None else z)) ** 2)
 
 
 import numpy as np
 def large_expression__50_terms_(x):
     r"""Large Expression (50 terms): x^0 + x^1 + x^2 + x^3 + x^4 + x^5 + x^6 + x^7 + x^8 + x^9 + x^10 + x^11 + x^12 + x^13 + x^14 + x^15 + x^16 + x^17 + x^18 + x^19 + x^20 + x^21 + x^22 + x^23 + x^24 + x^25 + x^26 + x^27 + x^28 + x^29 + x^30 + x^31 + x^32 + x^33 + x^34 + x^35 + x^36 + x^37 + x^38 + x^39 + x^40 + x^41 + x^42 + x^43 + x^44 + x^45 + x^46 + x^47 + x^48 + x^49"""
-    return x ** 9 + x ** 8 + x ** 7 + x ** 6 + x ** 5 + 0 * x ** 4 + 2 * x ** 4 + 3 * x ** 4 + 4 * x ** 4 + 5 * x ** 4 + 6 * x ** 4 + 7 * x ** 4 + 8 * x ** 4 + 9 * x ** 4 + x ** 4 + x ** 4 + 0 * x ** 3 + 2 * x ** 3 + 3 * x ** 3 + 4 * x ** 3 + 5 * x ** 3 + 6 * x ** 3 + 7 * x ** 3 + 8 * x ** 3 + 9 * x ** 3 + x ** 3 + x ** 3 + 0 * x ** 2 + 2 * x ** 2 + 3 * x ** 2 + 4 * x ** 2 + 5 * x ** 2 + 6 * x ** 2 + 7 * x ** 2 + 8 * x ** 2 + 9 * x ** 2 + x ** 2 + x ** 2 + x + x + 0 * x + 2 * x + 3 * x + 4 * x + 5 * x + 6 * x + 7 * x + 8 * x + 9 * x + x ** 0
+    return (float('nan') if x is None else x) ** 9 + (float('nan') if x is None else x) ** 8 + (float('nan') if x is None else x) ** 7 + (float('nan') if x is None else x) ** 6 + (float('nan') if x is None else x) ** 5 + 0 * (float('nan') if x is None else x) ** 4 + 2 * (float('nan') if x is None else x) ** 4 + 3 * (float('nan') if x is None else x) ** 4 + 4 * (float('nan') if x is None else x) ** 4 + 5 * (float('nan') if x is None else x) ** 4 + 6 * (float('nan') if x is None else x) ** 4 + 7 * (float('nan') if x is None else x) ** 4 + 8 * (float('nan') if x is None else x) ** 4 + 9 * (float('nan') if x is None else x) ** 4 + (float('nan') if x is None else x) ** 4 + (float('nan') if x is None else x) ** 4 + 0 * (float('nan') if x is None else x) ** 3 + 2 * (float('nan') if x is None else x) ** 3 + 3 * (float('nan') if x is None else x) ** 3 + 4 * (float('nan') if x is None else x) ** 3 + 5 * (float('nan') if x is None else x) ** 3 + 6 * (float('nan') if x is None else x) ** 3 + 7 * (float('nan') if x is None else x) ** 3 + 8 * (float('nan') if x is None else x) ** 3 + 9 * (float('nan') if x is None else x) ** 3 + (float('nan') if x is None else x) ** 3 + (float('nan') if x is None else x) ** 3 + 0 * (float('nan') if x is None else x) ** 2 + 2 * (float('nan') if x is None else x) ** 2 + 3 * (float('nan') if x is None else x) ** 2 + 4 * (float('nan') if x is None else x) ** 2 + 5 * (float('nan') if x is None else x) ** 2 + 6 * (float('nan') if x is None else x) ** 2 + 7 * (float('nan') if x is None else x) ** 2 + 8 * (float('nan') if x is None else x) ** 2 + 9 * (float('nan') if x is None else x) ** 2 + (float('nan') if x is None else x) ** 2 + (float('nan') if x is None else x) ** 2 + (float('nan') if x is None else x) + (float('nan') if x is None else x) + 0 * (float('nan') if x is None else x) + 2 * (float('nan') if x is None else x) + 3 * (float('nan') if x is None else x) + 4 * (float('nan') if x is None else x) + 5 * (float('nan') if x is None else x) + 6 * (float('nan') if x is None else x) + 7 * (float('nan') if x is None else x) + 8 * (float('nan') if x is None else x) + 9 * (float('nan') if x is None else x) + (float('nan') if x is None else x) ** 0
 
 
 import numpy as np
 def many_variables__20_vars_(x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8, x_9, x_10, x_11, x_12, x_13, x_14, x_15, x_16, x_17, x_18, x_19):
     r"""Many Variables (20 vars): x_{0} + x_{1} + x_{2} + x_{3} + x_{4} + x_{5} + x_{6} + x_{7} + x_{8} + x_{9} + x_{10} + x_{11} + x_{12} + x_{13} + x_{14} + x_{15} + x_{16} + x_{17} + x_{18} + x_{19}"""
-    return x_0 + x_1 + x_10 + x_11 + x_12 + x_13 + x_14 + x_15 + x_16 + x_17 + x_18 + x_19 + x_2 + x_3 + x_4 + x_5 + x_6 + x_7 + x_8 + x_9
+    return (float('nan') if x_0 is None else x_0) + (float('nan') if x_1 is None else x_1) + (float('nan') if x_10 is None else x_10) + (float('nan') if x_11 is None else x_11) + (float('nan') if x_12 is None else x_12) + (float('nan') if x_13 is None else x_13) + (float('nan') if x_14 is None else x_14) + (float('nan') if x_15 is None else x_15) + (float('nan') if x_16 is None else x_16) + (float('nan') if x_17 is None else x_17) + (float('nan') if x_18 is None else x_18) + (float('nan') if x_19 is None else x_19) + (float('nan') if x_2 is None else x_2) + (float('nan') if x_3 is None else x_3) + (float('nan') if x_4 is None else x_4) + (float('nan') if x_5 is None else x_5) + (float('nan') if x_6 is None else x_6) + (float('nan') if x_7 is None else x_7) + (float('nan') if x_8 is None else x_8) + (float('nan') if x_9 is None else x_9)
 
 
 import numpy as np
 def distance_formula(x_1, y_1, x_2, y_2):
     r"""Distance Formula: \sqrt{(x_2-x_1)^2 + (y_2-y_1)^2}"""
-    return np.sqrt((-x_1 + x_2) ** 2 + (-y_1 + y_2) ** 2)
+    return np.sqrt((-(float('nan') if x_1 is None else x_1) + (float('nan') if x_2 is None else x_2)) ** 2 + (-(float('nan') if y_1 is None else y_1) + (float('nan') if y_2 is None else y_2)) ** 2)
 
 
 import numpy as np
 def quadratic_formula(a, b, c):
     r"""Quadratic Formula: \frac{-b + \sqrt{b^2 - 4ac}}{2a}"""
-    return (-b + np.emath.sqrt(b ** 2 + -4 * a * c)) / (2 * a)
+    return (-(float('nan') if b is None else b) + np.emath.sqrt((float('nan') if b is None else b) ** 2 + -4 * (float('nan') if a is None else a) * (float('nan') if c is None else c))) / (2 * (float('nan') if a is None else a))
 
 
 import numpy as np
 def kinematics(u, a, t):
     r"""Kinematics: u \cdot t + \frac{1}{2} a \cdot t^2"""
-    return 0.5 * a * t ** 2 + t * u
+    return 0.5 * (float('nan') if a is None else a) * (float('nan') if t is None else t) ** 2 + (float('nan') if t is None else t) * (float('nan') if u is None else u)
 
 
 # Benchmark suite

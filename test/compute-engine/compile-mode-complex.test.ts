@@ -691,7 +691,10 @@ describe('complex mode — D2/D6 runtime rules', () => {
     // types its operand real and the runtime rule is statically elided —
     // `Erf` keeps the wide carrier, so its operand stays possibly-complex
     // and the emission this test pins still fires.
+    // `a` is declared: Python reads an input with an INFERRED `number` type
+    // through a `None` test, and a DECLARED `number` as is (ROADMAP CE-460).
     const e = new ComputeEngine();
+    e.declare('a', 'number');
     const r = compile(e.box(['Less', ['Erf', 'a'], 2]), {
       mode: 'complex',
       to: 'python',

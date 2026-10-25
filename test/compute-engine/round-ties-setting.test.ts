@@ -367,6 +367,9 @@ describe('the Python code of each rule', () => {
 
   test.each(RULES)('%s', (rule) => {
     const ce = engine(rule);
+    // A declared `number` input is read as is; an inferred one is read
+    // through a `None` test (ROADMAP CE-460).
+    ce.declare('x', 'number');
     const code = python.compile(ce.box(['Round', 'x'])).code;
     if (rule === 'to-even') expect(code).toBe('np.round(x)');
     else {

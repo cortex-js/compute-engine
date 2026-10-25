@@ -15,6 +15,12 @@ import type { Expression } from '../../src/compute-engine/global-types';
 
 const glsl = new GLSLTarget();
 
+// The tests check which subexpressions are bound, not how an input is read.
+// In Python, a free symbol with an INFERRED `number` type is read through a
+// `None` test (ROADMAP CE-460); a DECLARED `number` is read as is. So the
+// inputs are declared.
+for (const s of ['u', '_cse1']) ce.declare(s, 'number');
+
 /** The design's motivating probe: `sin(6u)` three times in one expression. */
 const PROBE_LATEX = '\\sin(6u)^2 + \\frac{\\sin(6u)}{2+\\sin(6u)}';
 

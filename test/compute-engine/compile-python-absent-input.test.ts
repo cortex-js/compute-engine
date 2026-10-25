@@ -17,7 +17,8 @@ import { PythonTarget } from '../../src/compute-engine/compilation/python-target
  * input as `float('nan')` at a numeric operand of an operator that
  * propagates absence. Only an input whose type can hold `missing`
  * (`number | missing`, `any`, and `unknown`, the type of a free symbol of a
- * parsed expression: ROADMAP CE-460) pays for the test. A comparison
+ * parsed expression), or whose `number` type was inferred, not declared
+ * (ROADMAP CE-460), pays for the test. A comparison
  * keeps its own `is None` test, so `p ≠ 0` stays undecided for an absent
  * `p`.
  */
@@ -50,11 +51,37 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
   });
 
   it('reads an input typed `unknown` as NaN in arithmetic (CE-460)', () => {
-    // A parsed free symbol is typed `unknown`. A caller can pass `None` for
-    // it, so its read is converted too (user decision 2026-10-25).
+    // A parsed free symbol is typed `unknown`, or `number` when its use
+    // narrows it. Both types are inferred, and a caller can pass `None` for
+    // the input, so its read is converted (user decision 2026-10-25).
     expect(python.compile(ce.parse('2\\pi r')).code).toBe(
       "2 * np.pi * (float('nan') if r is None else r)"
     );
+  });
+
+  it('reads an input with an inferred `number` type as NaN (CE-460)', () => {
+    // A use narrows each free symbol to `number`. The type is inferred, not
+    // declared, so the caller can still pass `None` (user decision
+    // 2026-10-25).
+    const ce = new ComputeEngine();
+    const code = (latex: string): string =>
+      python.compile(ce.parse(latex)).code;
+    expect(code('\\sin(s)')).toBe("np.sin((float('nan') if s is None else s))");
+    expect(ce.symbol('s').type.toString()).toBe('number');
+    expect(ce.symbol('s').valueDefinition?.inferredType).toBe(true);
+    expect(code('t^2+1')).toBe("(float('nan') if t is None else t) ** 2 + 1");
+    expect(code('u+v')).toBe(
+      "(float('nan') if u is None else u) + (float('nan') if v is None else v)"
+    );
+  });
+
+  it('leaves an input with a declared `number` type unchanged (CE-460)', () => {
+    // A declaration is a promise that the input is present: no test.
+    const ce = new ComputeEngine();
+    ce.declare('s', 'number');
+    ce.declare('t', 'integer');
+    expect(python.compile(ce.parse('\\sin(s)')).code).toBe('np.sin(s)');
+    expect(python.compile(ce.parse('t^2+1')).code).toBe('t ** 2 + 1');
   });
 
   it('keeps the `is None` test of a comparison', () => {
@@ -90,6 +117,21 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
     expect(
       python.compile(e, { vars: { p: 'd["p"]' } as never }).code
     ).toBe("(lambda _c: float('nan') if _c is None else _c)(d[\"p\"]) + 1");
+    // A `vars` source that is a number literal cannot be `None`: no test
+    // (`9 is None` makes Python print a `SyntaxWarning`).
+    expect(python.compile(e, { vars: { p: '9' } as never }).code).toBe(
+      '9 + 1'
+    );
+    for (const literal of ['.5', '-2.5e3', '1_000'])
+      expect(
+        python.compile(e, { vars: { p: literal } as never }).code
+      ).not.toContain('is None');
+    // Only a WHOLE literal skips the test: an expression that starts with a
+    // digit can be `None`, so it keeps the read (and its grouping).
+    for (const source of ['0 or None', '2*q'])
+      expect(python.compile(e, { vars: { p: source } as never }).code).toBe(
+        `(lambda _c: float('nan') if _c is None else _c)(${source}) + 1`
+      );
   });
 
   it('leaves a bound name unchanged', () => {
@@ -181,9 +223,10 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
   });
 
   it('answers NaN for an absent input typed `unknown` (CE-460)', () => {
-    // `r` is a free symbol of a parsed expression, typed `unknown`.
+    // `r` is a free symbol of a parsed expression. Its type is inferred:
+    // `unknown`, or `number` if the product narrows its symbols.
     const e = ce.parse('2\\pi r');
-    expect(ce.symbol('r').type.toString()).toBe('unknown');
+    expect(ce.symbol('r').valueDefinition?.inferredType).toBe(true);
     expect(e.subs({ r: ce.Missing }).evaluate().isNaN).toBe(true);
     const script =
       `import numpy as np\nimport math\n` +
@@ -196,6 +239,26 @@ describePython('COMPILE Python: an absent input, run (CE-395)', () => {
       .split(' ');
     expect(absent).toBe('nan');
     expect(Number(present)).toBeCloseTo(e.subs({ r: 1 }).N().re, 12);
+  });
+
+  it('answers NaN for an absent input with an inferred `number` type (CE-460)', () => {
+    const ce = new ComputeEngine();
+    for (const latex of ['\\sin(r)', 'r^2+1', '\\sum_{k=1}^{10} k r']) {
+      const e = ce.parse(latex);
+      expect(ce.symbol('r').type.toString()).toBe('number');
+      expect(e.subs({ r: ce.Missing }).evaluate().isNaN).toBe(true);
+      const script =
+        `import numpy as np\nimport math\n` +
+        `${python.compileFunction(e, 'f', ['r'])}\n` +
+        `print(repr(float(f(None))), repr(float(f(0.5))))\n`;
+      const [absent, present] = execFileSync(VENV_PYTHON, ['-c', script], {
+        encoding: 'utf-8',
+      })
+        .trim()
+        .split(' ');
+      expect(absent).toBe('nan');
+      expect(Number(present)).toBeCloseTo(e.subs({ r: 0.5 }).N().re, 12);
+    }
   });
 
   it('reads an absent cell of an array through np.vectorize', () => {

@@ -9,6 +9,9 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 // promoted lowering that the `Power` handler gives.
 
 const ce = new ComputeEngine();
+// A declared input is read as is; an input with an inferred numeric type is
+// read through a `None` test (ROADMAP CE-460). The tests check the power.
+ce.declare('t', 'real');
 
 type Options = Parameters<typeof compile>[1];
 
