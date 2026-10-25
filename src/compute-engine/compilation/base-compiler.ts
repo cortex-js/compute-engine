@@ -7411,9 +7411,18 @@ export class BaseCompiler {
    * This is the predicate half of the rule `isComplexValued` already applies
    * for complex-ness.
    */
-  private static mentionsCompileBoundName(expr: Expression): boolean {
+  private static mentionsCompileBoundName(
+    expr: Expression,
+    seen: Set<Expression> = new Set()
+  ): boolean {
     if (isSymbol(expr)) return BaseCompiler.isCompileBoundName(expr.symbol);
     if (isFunction(expr)) {
+      // A node object can be at several positions of the tree (`Add(e, e)`).
+      // A node already seen in this walk answered `false`, since a `true`
+      // ends the walk, so it is not walked again: the walk is linear in the
+      // distinct nodes, where it was exponential in the depth of such a tree.
+      if (seen.has(expr)) return false;
+      seen.add(expr);
       // The application HEAD counts as a mention, exactly as it does in
       // `mentionsExcludedName` below: a call whose head is a bound name applies
       // that BINDING, so evaluating the call through the engine here would
@@ -7423,7 +7432,9 @@ export class BaseCompiler {
       // to `(g) => 3` — ignoring its argument, and disagreeing with the
       // interpreter, which applies the parameter.
       if (BaseCompiler.isCompileBoundName(expr.operator)) return true;
-      return expr.ops.some((op) => BaseCompiler.mentionsCompileBoundName(op));
+      return expr.ops.some((op) =>
+        BaseCompiler.mentionsCompileBoundName(op, seen)
+      );
     }
     return false;
   }
@@ -7604,22 +7615,40 @@ export class BaseCompiler {
    * lazy pipeline (`Take(Map(f, 1..∞), n)`), which evaluates finitely — but
    * it IS recursed into, so a nested unbounded big op inside it still trips.
    */
-  private static containsUnboundedBigOp(expr: Expression): boolean {
-    if (isDictionary(expr))
-      return expr.values.some((v) => BaseCompiler.containsUnboundedBigOp(v));
+  private static containsUnboundedBigOp(
+    expr: Expression,
+    seen: Set<Expression> = new Set()
+  ): boolean {
+    // A node already seen in this walk answered `false` (see
+    // `mentionsCompileBoundName`), so it is not walked again.
+    if (seen.has(expr)) return false;
+    if (isDictionary(expr)) {
+      seen.add(expr);
+      return expr.values.some((v) =>
+        BaseCompiler.containsUnboundedBigOp(v, seen)
+      );
+    }
     if (!isFunction(expr)) return false;
+    seen.add(expr);
     if (expr.operator === 'Sum' || expr.operator === 'Product') {
       const ops = expr.ops;
       for (let i = 1; i < ops.length; i++)
         if (BaseCompiler.containsNonFiniteLiteral(ops[i])) return true;
     }
-    return expr.ops.some((op) => BaseCompiler.containsUnboundedBigOp(op));
+    return expr.ops.some((op) => BaseCompiler.containsUnboundedBigOp(op, seen));
   }
 
   /** Whether the subtree contains a non-finite number literal, one of the
    * infinity symbols, or a symbol whose VALUE is non-finite (see
-   * `containsUnboundedBigOp`). */
-  private static containsNonFiniteLiteral(expr: Expression): boolean {
+   * `containsUnboundedBigOp`). A node already seen in this walk answered
+   * `false`, since a `true` ends the walk, so a node object at several
+   * positions of a bound (`Add(e, e)`) is walked once. */
+  private static containsNonFiniteLiteral(
+    expr: Expression,
+    seen: Set<Expression> = new Set()
+  ): boolean {
+    if (seen.has(expr)) return false;
+    seen.add(expr);
     if (isNumber(expr))
       return !Number.isFinite(expr.re) || !Number.isFinite(expr.im);
     if (isSymbol(expr)) {
@@ -7642,9 +7671,13 @@ export class BaseCompiler {
       return false;
     }
     if (isDictionary(expr))
-      return expr.values.some((v) => BaseCompiler.containsNonFiniteLiteral(v));
+      return expr.values.some((v) =>
+        BaseCompiler.containsNonFiniteLiteral(v, seen)
+      );
     if (isFunction(expr))
-      return expr.ops.some((op) => BaseCompiler.containsNonFiniteLiteral(op));
+      return expr.ops.some((op) =>
+        BaseCompiler.containsNonFiniteLiteral(op, seen)
+      );
     return false;
   }
 
@@ -8770,7 +8803,12 @@ export class BaseCompiler {
     let reaches = expr.unknowns.length > 0 || !expr.isPure;
     if (!reaches) {
       const engine = expr.engine;
+      // A node object at several positions of the tree is visited once: a
+      // node seen before answered `false`, since a `true` ends the visit.
+      const seen = new Set<Expression>();
       const visit = (node: Expression): boolean => {
+        if (seen.has(node)) return false;
+        seen.add(node);
         if (isSymbol(node)) {
           const v = engine._getSymbolValue(node.symbol);
           return v !== undefined && BaseCompiler.foldValueBlocked(v);

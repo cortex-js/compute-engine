@@ -218,3 +218,34 @@ describe('CSE over shared subtrees: the same output as an unshared tree', () => 
     expect(summary(shared)).toEqual(summary(unshare(shared)));
   });
 });
+
+// With constant folding on (the default), the fold first asks several
+// questions of the whole tree: does it mention a name bound by the
+// compilation, does it contain a `Sum` or `Product` with a non-finite bound,
+// does it reach a free symbol through an assigned value. Each question
+// walked every path, so a doubling tree of depth 24 took about 4 s, where it
+// compiles in a few milliseconds without the fold. Each walk now visits a
+// node object once.
+describe('Constant folding over shared subtrees: linear walks', () => {
+  it('checks a 40-level doubling DAG of a constant for a fold fast', () => {
+    const d = 40;
+    let e: Expression = F('Add', ce.number(2), F('Sqrt', ce.number(3)));
+    for (let k = 0; k < d; k++) e = doubling(e);
+    const [result, ms] = timed(() => compile(e));
+    expect(ms).toBeLessThan(2000);
+    expect(result.success).toBe(true);
+    // The whole tree is too large to fold (its cost estimate counts every
+    // path), but a lower level is folded, so `√3` is not in the code.
+    expect(result.code).not.toMatch(/Math\.sqrt/);
+    expect(result.run!() as number).toBeCloseTo(2 ** d * (2 + Math.sqrt(3)), 0);
+  });
+
+  it('compiles a 40-level doubling DAG of x + 1 fast with the fold on', () => {
+    const d = 40;
+    const e = levels(d, doubling)[d];
+    const [result, ms] = timed(() => compile(e));
+    expect(ms).toBeLessThan(2000);
+    expect(result.success).toBe(true);
+    expect(result.run!({ x: 1 }) as number).toBeCloseTo(2 ** d * 2, 0);
+  });
+});
