@@ -175,6 +175,14 @@
   about 110 ms, and at 60 levels in about 200 ms. The compiled code does not
   change.
 
+- **A more deeply nested expression compiles** (ROADMAP CE-320.2). The
+  compiler is recursive, and each level of a nested expression uses stack.
+  A chain of `Sin` and `Cos` compiled up to a depth of about 280, and a
+  polynomial in Horner form, `a₀ + x(a₁ + x(a₂ + …))`, up to a degree of
+  about 120; past that, `compile()` answered `success: false` and the call
+  ran in the interpreter. Each level now uses less stack, and the two limits
+  are about 420 and 205. The compiled code does not change.
+
 ## 0.166.0 _2026-10-24_
 
 ### Breaking Changes

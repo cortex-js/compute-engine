@@ -1816,6 +1816,39 @@ function getUnknowns(expr: Expression, result: Set<string>): void {
 }
 
 /**
+ * The memo of `getReferences`: the free variables and the referenced
+ * functions of each function node or dictionary already walked. Only `get`
+ * and `set` are used, so a `Map` (for one walk) or a `WeakMap` (kept between
+ * walks, without keeping the expressions alive) can be one.
+ */
+export type ReferencesMemo = {
+  get(key: Expression): readonly [Set<string>, Set<string>] | undefined;
+  set(key: Expression, value: readonly [Set<string>, Set<string>]): unknown;
+};
+
+/**
+ * Whether `expr` has unknowns (the same answer as `expr.unknowns.length >
+ * 0`), with a memo that the caller keeps between calls. The memo holds the
+ * answer of each function node already walked, so a caller that asks the
+ * question of a node and then of the nodes below it walks the tree once.
+ * The compiler asks it at each level of an expression that it compiles: the
+ * walk of a node deep in the expression then reads the memo, instead of
+ * recursing through the rest of the tree on top of the compiler's own stack
+ * (ROADMAP CE-320.2).
+ *
+ * The memo is valid only while the values of the symbols, and the scopes
+ * that bind them, do not change: the compiler keeps one for a compilation.
+ */
+export function hasUnknownsWithMemo(
+  expr: Expression,
+  memo: ReferencesMemo
+): boolean {
+  const result = new Set<string>();
+  getReferences(expr, result, new Set<string>(), memo);
+  return result.size > 0;
+}
+
+/**
  * Return the applied user functions in the expression, recursively. See
  * {@link getReferences} for the shared traversal and scoping rules.
  */
@@ -1921,7 +1954,7 @@ function getReferences(
   expr: Expression,
   freeVars: Set<string>,
   refFns: Set<string>,
-  memo: Map<Expression, readonly [Set<string>, Set<string>]> = new Map()
+  memo: ReferencesMemo = new Map()
 ): void {
   // A dictionary is memoized as a function node is: the same dictionary can
   // be the value of several keys, or of several dictionaries.
@@ -1957,7 +1990,7 @@ function collectReferences(
   expr: Expression,
   freeVars: Set<string>,
   refFns: Set<string>,
-  memo: Map<Expression, readonly [Set<string>, Set<string>]>
+  memo: ReferencesMemo
 ): void {
   if (isSymbol(expr)) {
     const s = expr.symbol;

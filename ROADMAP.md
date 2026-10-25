@@ -5889,22 +5889,23 @@ application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
   once per region. But `e_k = If(c, e_(k-1), e_(k-1))` creates one region per
   chain of lazy arms, so the number of regions grows as `2^k`. This is a
   property of the region model, not of the walk.
-- **CE-320.2** The compiler overflows the stack on an expression nested more
-  than about 280 levels deep. Measured 2026-10-24: a `Sin`/`Cos` chain
-  compiles at depth 250 and fails at depth 300 ("Maximum call stack size
-  exceeded"); a polynomial in Horner form, `a₀ + x(a₁ + x(a₂ + …))`, which
-  nests two levels per degree, compiles at degree 160 and fails at degree
-  200. The failure is safe: `compile()` answers `success: false` and runs
-  the interpreter, which gives the right value. One level of nesting uses 7
-  frames, about 2.5 KB of stack, and `compileExpr` alone is 1,632 bytes of
-  it (V8 frame size): it is one function of about 3,250 lines with hundreds
-  of local variables. A CSE binding does not bound the depth, because it is
-  compiled at its first occurrence, inside the same recursion. Two fixes:
-  (a) move the large blocks of `compileExpr` into helper functions, which
-  raises the limit about 2 to 3 times but keeps a limit; (b) compile a deep
-  tree from the bottom up, binding a node every N levels to a temporary
-  before the main walk, which removes the limit but is a new mechanism in
-  the region model of `cse.ts`. WAITS FOR A USER DECISION.
+- **CE-320.2** The compiler is recursive, so an expression nested deeply
+  enough overflows the stack. The failure is safe: `compile()` answers
+  `success: false` and runs the interpreter, which gives the right value.
+  User decision 2026-10-24: raise the limit, do not remove it. The limit was
+  raised on 2026-10-24: the large cases of `compileExpr` and `_compileInner`
+  moved to helper functions (the frame of `compileExpr` went from 1,632 to
+  328 bytes), two callbacks on the path of every operand were removed, and
+  the fold check reads `unknowns` from a memo of the compilation. Measured
+  with one compile per process: a `Sin`/`Cos` chain compiles up to a depth
+  of 421 (it was 278), and a polynomial in Horner form,
+  `a₀ + x(a₁ + x(a₂ + …))`, up to a degree of 208 (it was 119); the test is
+  `compile-deep-nesting.test.ts`. Not done, by the same decision: removing
+  the limit, by compiling a deep tree from the bottom up with a temporary
+  every N levels before the main walk. A CSE binding does not bound the
+  depth by itself, because it is compiled at its first occurrence, inside
+  the same recursion, so this would be a new mechanism in the region model
+  of `cse.ts`.
 
 ### CE-321. Each user-function call retires the inert evaluation memo, so a chain of calls copies each level
 

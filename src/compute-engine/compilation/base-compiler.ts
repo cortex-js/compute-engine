@@ -4,6 +4,11 @@ import {
 } from '../boxed-expression/operand-descriptor.js';
 import { isShadowedSymbol, shadowsLibraryName } from '../library-shadowing.js';
 import { deriveApplicationType } from '../boxed-expression/derive-application-type.js';
+import {
+  hasUnknownsWithMemo,
+  type ReferencesMemo,
+} from '../boxed-expression/abstract-boxed-expression.js';
+import type { SymbolInterface } from '../types-expression.js';
 import type {
   Expression,
   FunctionInterface,
@@ -3605,6 +3610,7 @@ export class BaseCompiler {
       // values are stable within one compilation but not across them.
       BaseCompiler._foldValueMemo = new WeakMap();
       BaseCompiler._foldValueBlockedMemo = new Map();
+      BaseCompiler._unknownsMemo = new WeakMap();
       BaseCompiler._foldValueImpureMemo = new Map();
       BaseCompiler._foldValueMentionsMemo = new Map();
       BaseCompiler._unsafeOperandsMemo = new WeakMap();
@@ -7986,6 +7992,22 @@ export class BaseCompiler {
    */
   private static _foldValueBlockedMemo = new Map<Expression, boolean>();
 
+  /** The references of each function node walked by `hasUnknowns` in this
+   * compilation (see `hasUnknownsWithMemo`). Reset with the other fold memos
+   * at the outermost compilation, since the values of the engine symbols are
+   * stable within one compilation only. A `WeakMap`, because it holds every
+   * node of the compiled expression: it must not keep the expression alive
+   * after the compilation. */
+  private static _unknownsMemo: ReferencesMemo = new WeakMap();
+
+  /** `expr.unknowns.length > 0`, from the memo of this compilation. The fold
+   * asks it at each level of the expression it compiles: without the memo,
+   * each answer walked the subtree again, on top of the compiler's own stack,
+   * and a deep expression overflowed the stack there (ROADMAP CE-320.2). */
+  private static hasUnknowns(expr: Expression): boolean {
+    return hasUnknownsWithMemo(expr, BaseCompiler._unknownsMemo);
+  }
+
   /**
    * Per-compilation memo of `foldValueImpure`, keyed by node identity; reset
    * with `_foldValueMemo` at each outermost compilation entry.
@@ -8800,7 +8822,7 @@ export class BaseCompiler {
     if (cached !== undefined) return cached;
     // Provisional answer for a re-entrant reference.
     memo.set(expr, false);
-    let reaches = expr.unknowns.length > 0 || !expr.isPure;
+    let reaches = BaseCompiler.hasUnknowns(expr) || !expr.isPure;
     if (!reaches) {
       const engine = expr.engine;
       // A node object at several positions of the tree is visited once: a
@@ -9283,7 +9305,7 @@ export class BaseCompiler {
     )
       return undefined;
 
-    if (expr.unknowns.length > 0) return undefined;
+    if (BaseCompiler.hasUnknowns(expr)) return undefined;
     if (!expr.isPure) return undefined;
     // A free symbol or an impure operation reached only THROUGH an assigned
     // value also disqualifies the evaluation, which `unknowns` and `isPure`
@@ -10340,347 +10362,7 @@ export class BaseCompiler {
     }
 
     // Is it a symbol?
-    if (isSymbol(expr)) {
-      const s = expr.symbol;
-      const op = target.operators?.(s);
-      if (op !== undefined) {
-        // A bare operator symbol used in value position (a first-class function
-        // — e.g. a `Reduce` combiner or `Map` mapper). Only genuinely binary
-        // arithmetic operators lower to a valid binary infix lambda; unary
-        // (Negate/Not), relational, and logical operator symbols fail closed
-        // (D6) so the engine falls back to the interpreter instead of emitting
-        // wrong-arity, invalid, or silently-diverging source (finding: Reduce/
-        // Map over-accepted any operator symbol as a combiner/mapper).
-        if (!BaseCompiler.BINARY_INFIX_VALUE_OPERATORS.has(s)) {
-          // …but a UNARY operator symbol (`Negate`, `Not`) is a perfectly good
-          // callback: eta-expand it here, before failing closed, exactly as
-          // the bare-symbol route below does for an unmapped built-in. Its
-          // wrapper BODY is an ordinary application, so it lowers through this
-          // very operator mapping (`_fn_Negate = (_tv1) => -_tv1`). Guarded
-          // like the route below so a BOUND name or a `vars` key spelled
-          // `Negate` keeps its current meaning (there, its current meaning is
-          // the refusal below).
-          const registry = target.userFunctions;
-          const isBoundOrMapped =
-            target.boundVars?.has(s) === true ||
-            target.varsKeys?.has(s) === true;
-          if (registry && !isBoundOrMapped) {
-            const etaFn = BaseCompiler.ensureBuiltinCallbackEmitted(
-              expr.engine,
-              s,
-              target
-            );
-            if (etaFn !== undefined && registry.lowering)
-              return registry.lowering.value({ id: s, name: etaFn, target });
-            if (etaFn !== undefined) return etaFn;
-          }
-          throw new Error(BaseCompiler.builtinCallbackRefusal(s));
-        }
-        // We're compiling something like "Add"
-        return `(a,b) => a ${op[0]} b`;
-      }
-      // A WRITTEN absence symbol (`Missing`, `Undefined`) is a VALUE, not an
-      // input the caller supplies (2026-09-22). Without this branch it fell
-      // through to the free-symbol read `_.Missing`, so the artifact reported
-      // `freeSymbols: ["Missing"]` and every absence test ran against whatever
-      // the caller happened to bind: `IsMissing(Missing)` answered `false`,
-      // `Coalesce(Missing, 2)` answered `undefined` and `Median([1, Missing,
-      // 3])` answered `3`, where the interpreter answers `True`, `2` and
-      // `NaN`.
-      //
-      // The lowering is the target's OBJECT-domain null (`undefined` on
-      // JavaScript, `None` on Python). It cannot be the numeric marker: a list
-      // cell holding the numeric marker is a number that equals nothing, which
-      // the whole-collection equality rule of 2026-09-21 must keep distinct
-      // from an ABSENT cell (`Equal([1, Missing], [1, Missing])` is undecided,
-      // while `Equal([1, NaN], [1, NaN])` is false). On a target with no
-      // object axis (the shader targets, the interval target) the numeric
-      // marker is the only spelling there is, and it is used. A target with no
-      // absence capability at all fails closed.
-      //
-      // The guard reads `boundVars`/`varsKeys` only — it runs BEFORE
-      // `target.var()` is consulted, so that resolving the name does not
-      // record a vars-object reference the lambda route would then refuse. A
-      // bound name or a caller `vars` key spelled `Missing` is a genuine
-      // variable and keeps its meaning.
-      if (
-        isAbsentSymbol(expr) &&
-        target.boundVars?.has(s) !== true &&
-        target.varsKeys?.has(s) !== true
-      ) {
-        if (
-          target.absence?.object !== undefined &&
-          target.absence.writtenSymbol !== 'numeric'
-        )
-          return target.absence.object.nullLiteral;
-        if (target.absence?.numeric !== undefined)
-          return target.absence.numeric.make();
-        throw new Error(
-          `Could not compile \`${s}\`: target '${target.language ?? 'unknown'}' has no absence ` +
-            `representation (no 'absence' capability), so the absence marker ` +
-            `cannot be spelled.`
-        );
-      }
-      // Resolving a free symbol RECORDS it as a vars-object reference (see
-      // `CompileTarget.varsObjectRefs`), and the lambda route refuses a body
-      // holding any. The two function-value routes below never emit that
-      // reference, so the record has to be rolled back when one of them
-      // answers — otherwise `t ↦ Sum(Map(Sin, xs))` is refused for a
-      // "dangling" `Sin` the artifact does not contain. Only a record THIS
-      // resolution introduced is removed.
-      const hadVarsRef = target.varsObjectRefs?.has(s) === true;
-      let resolved = target.var?.(s);
-      // A target reads a library constant (`Pi`, `ExponentialE`,
-      // `ImaginaryUnit`, …) from its constants table by NAME. When a user
-      // binding gives the name another value (`ce.declare('Pi', { value: 1
-      // })` in a nested scope, `isShadowedSymbol`), the symbol is not the
-      // constant: it is read as any other symbol, so its value is folded
-      // below, or it is a free symbol. Before, `Pi·x` compiled to
-      // `Math.PI * x` there, where the interpreter computes `1·x`.
-      if (
-        resolved !== undefined &&
-        resolved === target.constant?.(s) &&
-        isShadowedSymbol(expr)
-      )
-        resolved = undefined;
-      // The other direction. The `var` hook of a target can only see the
-      // NAME, so it tests the scope chain at the compile site: a scope that
-      // declares `Pi` makes it skip the constant. The interpreter reads the
-      // definition the symbol is bound to, and a symbol boxed while `Pi` was
-      // the library constant still denotes π inside such a scope. That
-      // symbol is read from the constants table, and a vars-object reference
-      // the hook recorded is rolled back.
-      // A local of the compiled code with the same name hides the constant
-      // too, when the symbol was boxed before the local was declared: in
-      // `function g() { i + 1 }; let i = 2; g()`, the top-level block of the
-      // program declares `i` only at its `let` (`canonicalBlock()`,
-      // `library/control-structures.ts`), so the `i` of `g` is bound to the
-      // library constant, as when the run reads one statement at a time.
-      else if (
-        resolved !== target.constant?.(s) &&
-        (BaseCompiler.libraryBoundConstantHidden(expr, s, target) ||
-          (target.constant?.(s) !== undefined &&
-            target.boundVars?.has(s) === true &&
-            target.varsKeys?.has(s) !== true &&
-            expr.valueDefinition !== undefined &&
-            !isShadowedSymbol(expr)))
-      ) {
-        resolved = target.constant!(s);
-        if (!hadVarsRef) target.varsObjectRefs?.delete(s);
-      }
-      // A bare symbol naming a user-defined function, used in value position (a
-      // higher-order operand such as `Map(f, list)` / `Filter(list, f)`),
-      // resolves to the shared emitted local `_fn_f` — the same definition the
-      // call-site path emits — rather than a dangling `_.f`. But two kinds of
-      // symbol must NOT be captured this way, or a same-named user function
-      // would silently shadow them:
-      //   - a **bound** name (a parameter / block local / loop index): the
-      //     enclosing binding form's `var` override resolves it to the bare
-      //     identifier (`resolved === s`), whereas the base resolver only ever
-      //     emits `_.<s>`, a constant, or a mapped literal — so `resolved === s`
-      //     uniquely identifies a bound name;
-      //   - a **`vars`-mapped** key: the caller's external-input contract, which
-      //     always wins (see `CompileTarget.vars`).
-      const registry = target.userFunctions;
-      // A name is bound when an enclosing binding form recorded it in
-      // `boundVars` (lambda param, Sum/Product/Loop index, Block local,
-      // comprehension var, Match capture). `resolved === s` is kept as an
-      // additional signal for binding forms that resolve a bound name to its
-      // own bare identifier (the common loop path) and is harmless — the base
-      // resolver never returns a bare identifier for a free user-function
-      // symbol (it returns `_.<s>`). The explicit `boundVars` set covers the
-      // cases where a binding form resolves the name to NON-identity code
-      // (an unrolled-Sum numeric literal, an interval `_IA.point(i)` wrap, a
-      // Match `subject[i]` accessor), which `resolved === s` misses (A2).
-      const isBoundOrMapped =
-        resolved === s ||
-        target.boundVars?.has(s) === true ||
-        target.varsKeys?.has(s) === true;
-      // `Nothing` is the engine's ERASURE marker, not a value: an arithmetic
-      // operand spelled `Nothing` is dropped at canonicalization, and a form
-      // evaluated for effect — a `Loop` that runs to completion without a
-      // `Break`/`Return` value — evaluates to the bare symbol. Reaching this
-      // point means an emitter is about to splice it in as an ordinary
-      // operand, and every target's free-symbol plumbing then produces
-      // something that looks like success: the shader
-      // targets emitted the undefined identifier `Nothing` (a driver-side
-      // compile error behind `success: true`), the Python target the
-      // undefined name `Nothing`, and the interval target a `_.Nothing`
-      // vars-object read that is `undefined` at run time. Fail closed
-      // for every target here, on the one route they share. The JavaScript
-      // target's own `var` hook refuses it first with the same message, so
-      // this guard is what the other targets rely on. A BOUND name or a
-      // caller `vars` key spelled `Nothing` is a genuine variable and is
-      // served above.
-      if (s === 'Nothing' && !isBoundOrMapped)
-        throw new Error(
-          'Could not compile `Nothing`: the erasure marker is not a value, so it cannot be read as a variable.'
-        );
-      if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
-        // The VALUE position, so a declared-complex parameter needs the
-        // coercing shim: this reference may end up as `Map`'s callback, which
-        // passes raw elements (see `ensureUserFunctionValueRef`).
-        const decline: DeclineNote = {};
-        const userFn = BaseCompiler.ensureUserFunctionValueRef(
-          expr.engine,
-          s,
-          target,
-          decline
-        );
-        // A target whose language has no function VALUES (the shader targets)
-        // decides what this reference means — in practice, fails closed.
-        if (userFn !== undefined && !hadVarsRef)
-          target.varsObjectRefs?.delete(s);
-        if (userFn !== undefined && registry.lowering)
-          return registry.lowering.value({ id: s, name: userFn, target });
-        if (userFn !== undefined) return userFn;
-        // The symbol names a function the USER defined, and the target
-        // declined to emit its definition. Falling through to the
-        // free-symbol read `_.<s>` produced an artifact that reported
-        // `success: true` and then threw `TypeError: _f is not a function`,
-        // because nothing binds that key: with a nominal `type meters =
-        // number`, the clause set `w(d: meters) := 2` / `w(x, y) := x + y`
-        // has no faithful JavaScript guard for its first clause, and
-        // `Map(w, [1, 2, 3])` compiled to
-        // `((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_.w)`. Refuse instead,
-        // the same answer a built-in operator name in this position gets
-        // just below; with the default `fallback: true` the caller reads the
-        // interpreter's value. A symbol that is NOT a user function keeps
-        // the free-symbol read and the negative memo below.
-        if (BaseCompiler.isUserDefinedFunction(expr.engine, s))
-          throw new Error(
-            BaseCompiler.userFunctionValueRefRefusal(s, target, decline.reason)
-          );
-        // Memoize the negative lookup so a repeated free symbol doesn't re-hit
-        // `lookupDefinition` on every occurrence during this compile.
-        (registry.misses ??= new Set()).add(s);
-      }
-      // A bare BUILT-IN operator symbol in value position (`Map(Sin, xs)`,
-      // `CountIf(xs, IsPrime)`) is eta-expanded into `(p) ↦ Sin(p)` and
-      // emitted through the SAME shared-local machinery user functions use.
-      // Without this it fell through to the free-symbol read `_.Sin` and the
-      // artifact threw `_f is not a function` at RUN time — a broken artifact
-      // where the fail-closed principle wants either working code or a
-      // compile-time refusal. Tried AFTER the user-function route (a user
-      // definition shadowing the name wins) and only from THIS path, so an
-      // application HEAD (`Sin(x)` → `Math.sin(x)`) is untouched.
-      if (registry && !isBoundOrMapped) {
-        const etaFn = BaseCompiler.ensureBuiltinCallbackEmitted(
-          expr.engine,
-          s,
-          target
-        );
-        // As for user functions: a target whose language has no function
-        // VALUES (the shader targets) decides what this reference means — in
-        // practice, fails closed.
-        if (etaFn !== undefined && !hadVarsRef)
-          target.varsObjectRefs?.delete(s);
-        if (etaFn !== undefined && registry.lowering)
-          return registry.lowering.value({ id: s, name: etaFn, target });
-        if (etaFn !== undefined) return etaFn;
-        // A BUILT-IN operator name that could not be expanded (variadic,
-        // zero-required like `Random`, or a wrapper body that does not
-        // canonicalize) must not fall through to `_.Random`: that artifact
-        // compiles "successfully" and throws `_f is not a function` at run
-        // time. Fail closed — with the default `fallback: true` route
-        // this becomes an interpreter fallback. Scoped to a system-provenance
-        // operator name that is not one the engine itself reads as a variable
-        // (`isRefusableBuiltinCallback`): a plain free symbol, a value
-        // definition, a `vars` key, or a bound name is not affected.
-        if (isRefusableBuiltinCallback(expr.engine, s))
-          throw new Error(BaseCompiler.builtinCallbackRefusal(s));
-        // An operator the HOST declared with a JavaScript `evaluate` handler
-        // (or a definition that shadows a built-in name) is neither a
-        // function literal (the user-function route above) nor the built-in
-        // (the eta-expansion above). When the compiled code can apply it
-        // (a `compile` handler on its definition, or a lowering of the
-        // target, such as the `functions` option of `compile()`), it is
-        // eta-expanded into `(p) ↦ s(p)`, and the body compiles through that
-        // lowering, as `Map(Function(MyOp(t), t), xs)` does. Otherwise it has
-        // no function value the compiled code can call: fail closed, as for
-        // a built-in that does not expand. `Map(MySqrt, xs)` fell through to
-        // the free-symbol read `_.MySqrt`, and the artifact threw
-        // `_f is not a function` at run time.
-        if (isHostOperatorCallback(expr.engine, s)) {
-          const hostFn = BaseCompiler.ensureHostOperatorCallbackEmitted(
-            expr.engine,
-            s,
-            target
-          );
-          if (hostFn !== undefined && !hadVarsRef)
-            target.varsObjectRefs?.delete(s);
-          if (hostFn !== undefined && registry.lowering)
-            return registry.lowering.value({ id: s, name: hostFn, target });
-          if (hostFn !== undefined) return hostFn;
-          throw new Error(
-            `Could not compile \`${s}\` as a first-class function: the operator ` +
-              `has no function value that the compiled code can call. A ` +
-              `caller using the default \`fallback: true\` falls back to ` +
-              `interpreted evaluation.`
-          );
-        }
-      }
-      if (resolved !== undefined)
-        return BaseCompiler.liftWideReference(
-          expr,
-          BaseCompiler.checkedLocalRead(expr, s, resolved),
-          target
-        );
-      // The target did not resolve the symbol (no `vars` mapping, constant, or
-      // free-symbol plumbing). Before falling back to a bare reference — which
-      // is a dangling identifier for a symbol the engine actually knows — fold
-      // an assigned value / declared constant, matching `evaluate()`. This also
-      // covers the direct-target `compile(expr, { target })` path, where the
-      // raw target has no engine context of its own.
-      // A `vars`-mapped symbol is a live input and its value is never folded.
-      // It reaches this point only on a direct custom target, whose own `var`
-      // hook knows nothing of `vars`: it is emitted by name below, like a free
-      // symbol.
-      const folded =
-        target.varsKeys?.has(s) === true
-          ? undefined
-          : BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
-      if (folded !== undefined) {
-        // A folded value is BAKED — there is no run-time binding, so the
-        // "coerced at every entry" exemption that leaves a declared-complex
-        // REFERENCE unlifted (see `liftWideReference`) does not apply here.
-        // Consumers of a symbol whose analysis says complex read the
-        // target's {re, im} encoding, but a real-valued assignment
-        // (`z: complex` with `z := 5`) compiles to a bare real literal, and
-        // reading `.re` off it yields NaN. Wrap the emission in the
-        // target's idempotent `complexLift`. Only a provably scalar-numeric
-        // value whose own emission is real-shaped is wrapped; a value
-        // already complex-shaped (`isComplexValued`) or non-scalar stays as
-        // emitted.
-        // The gate is `isComplexValued`, NOT `complexDiscipline`: consumers
-        // decide their {re, im} reads with that same predicate, and it is
-        // true for a declared-complex symbol under every mode — including
-        // `auto`'s per-node promotion, which stays in the strict-lanes
-        // discipline. Gating on mode left `auto` emitting `.re` reads
-        // against a bare folded literal.
-        if (
-          target.complexLift !== undefined &&
-          BaseCompiler.isComplexValued(expr)
-        ) {
-          const value = expr.engine._getSymbolValue(s);
-          if (
-            value !== undefined &&
-            !BaseCompiler.isComplexValued(value) &&
-            isSubtype(value.type.type, 'number')
-          )
-            return target.complexLift(folded);
-        }
-        return folded;
-      }
-      // Genuinely free symbol: emit its bare identifier. Give the target a
-      // chance to mangle it or fail closed — e.g. a GLSL/WGSL reserved
-      // keyword used as a variable name would emit invalid shader source.
-      return BaseCompiler.liftWideReference(
-        expr,
-        target.mangleId ? target.mangleId(s) : s,
-        target
-      );
-    }
+    if (isSymbol(expr)) return BaseCompiler.compileInnerSymbol(expr, target);
 
     // Is it a number?
     if (isNumber(expr)) {
@@ -10778,6 +10460,354 @@ export class BaseCompiler {
     } finally {
       BaseCompiler._cseParent = prevCseParent;
     }
+  }
+
+  /**
+   * The code of a symbol. A case of `_compileInner`, in a function of its
+   * own so that the stack frame of `_compileInner` stays small: each level of
+   * a nested expression keeps one such frame on the stack, and a deep
+   * expression overflowed it (ROADMAP CE-320.2).
+   */
+  private static compileInnerSymbol(
+    expr: Expression & SymbolInterface,
+    target: CompileTarget<Expression>
+  ): TargetSource {
+    const s = expr.symbol;
+    const op = target.operators?.(s);
+    if (op !== undefined) {
+      // A bare operator symbol used in value position (a first-class function
+      // — e.g. a `Reduce` combiner or `Map` mapper). Only genuinely binary
+      // arithmetic operators lower to a valid binary infix lambda; unary
+      // (Negate/Not), relational, and logical operator symbols fail closed
+      // (D6) so the engine falls back to the interpreter instead of emitting
+      // wrong-arity, invalid, or silently-diverging source (finding: Reduce/
+      // Map over-accepted any operator symbol as a combiner/mapper).
+      if (!BaseCompiler.BINARY_INFIX_VALUE_OPERATORS.has(s)) {
+        // …but a UNARY operator symbol (`Negate`, `Not`) is a perfectly good
+        // callback: eta-expand it here, before failing closed, exactly as
+        // the bare-symbol route below does for an unmapped built-in. Its
+        // wrapper BODY is an ordinary application, so it lowers through this
+        // very operator mapping (`_fn_Negate = (_tv1) => -_tv1`). Guarded
+        // like the route below so a BOUND name or a `vars` key spelled
+        // `Negate` keeps its current meaning (there, its current meaning is
+        // the refusal below).
+        const registry = target.userFunctions;
+        const isBoundOrMapped =
+          target.boundVars?.has(s) === true || target.varsKeys?.has(s) === true;
+        if (registry && !isBoundOrMapped) {
+          const etaFn = BaseCompiler.ensureBuiltinCallbackEmitted(
+            expr.engine,
+            s,
+            target
+          );
+          if (etaFn !== undefined && registry.lowering)
+            return registry.lowering.value({ id: s, name: etaFn, target });
+          if (etaFn !== undefined) return etaFn;
+        }
+        throw new Error(BaseCompiler.builtinCallbackRefusal(s));
+      }
+      // We're compiling something like "Add"
+      return `(a,b) => a ${op[0]} b`;
+    }
+    // A WRITTEN absence symbol (`Missing`, `Undefined`) is a VALUE, not an
+    // input the caller supplies (2026-09-22). Without this branch it fell
+    // through to the free-symbol read `_.Missing`, so the artifact reported
+    // `freeSymbols: ["Missing"]` and every absence test ran against whatever
+    // the caller happened to bind: `IsMissing(Missing)` answered `false`,
+    // `Coalesce(Missing, 2)` answered `undefined` and `Median([1, Missing,
+    // 3])` answered `3`, where the interpreter answers `True`, `2` and
+    // `NaN`.
+    //
+    // The lowering is the target's OBJECT-domain null (`undefined` on
+    // JavaScript, `None` on Python). It cannot be the numeric marker: a list
+    // cell holding the numeric marker is a number that equals nothing, which
+    // the whole-collection equality rule of 2026-09-21 must keep distinct
+    // from an ABSENT cell (`Equal([1, Missing], [1, Missing])` is undecided,
+    // while `Equal([1, NaN], [1, NaN])` is false). On a target with no
+    // object axis (the shader targets, the interval target) the numeric
+    // marker is the only spelling there is, and it is used. A target with no
+    // absence capability at all fails closed.
+    //
+    // The guard reads `boundVars`/`varsKeys` only — it runs BEFORE
+    // `target.var()` is consulted, so that resolving the name does not
+    // record a vars-object reference the lambda route would then refuse. A
+    // bound name or a caller `vars` key spelled `Missing` is a genuine
+    // variable and keeps its meaning.
+    if (
+      isAbsentSymbol(expr) &&
+      target.boundVars?.has(s) !== true &&
+      target.varsKeys?.has(s) !== true
+    ) {
+      if (
+        target.absence?.object !== undefined &&
+        target.absence.writtenSymbol !== 'numeric'
+      )
+        return target.absence.object.nullLiteral;
+      if (target.absence?.numeric !== undefined)
+        return target.absence.numeric.make();
+      throw new Error(
+        `Could not compile \`${s}\`: target '${target.language ?? 'unknown'}' has no absence ` +
+          `representation (no 'absence' capability), so the absence marker ` +
+          `cannot be spelled.`
+      );
+    }
+    // Resolving a free symbol RECORDS it as a vars-object reference (see
+    // `CompileTarget.varsObjectRefs`), and the lambda route refuses a body
+    // holding any. The two function-value routes below never emit that
+    // reference, so the record has to be rolled back when one of them
+    // answers — otherwise `t ↦ Sum(Map(Sin, xs))` is refused for a
+    // "dangling" `Sin` the artifact does not contain. Only a record THIS
+    // resolution introduced is removed.
+    const hadVarsRef = target.varsObjectRefs?.has(s) === true;
+    let resolved = target.var?.(s);
+    // A target reads a library constant (`Pi`, `ExponentialE`,
+    // `ImaginaryUnit`, …) from its constants table by NAME. When a user
+    // binding gives the name another value (`ce.declare('Pi', { value: 1
+    // })` in a nested scope, `isShadowedSymbol`), the symbol is not the
+    // constant: it is read as any other symbol, so its value is folded
+    // below, or it is a free symbol. Before, `Pi·x` compiled to
+    // `Math.PI * x` there, where the interpreter computes `1·x`.
+    if (
+      resolved !== undefined &&
+      resolved === target.constant?.(s) &&
+      isShadowedSymbol(expr)
+    )
+      resolved = undefined;
+    // The other direction. The `var` hook of a target can only see the
+    // NAME, so it tests the scope chain at the compile site: a scope that
+    // declares `Pi` makes it skip the constant. The interpreter reads the
+    // definition the symbol is bound to, and a symbol boxed while `Pi` was
+    // the library constant still denotes π inside such a scope. That
+    // symbol is read from the constants table, and a vars-object reference
+    // the hook recorded is rolled back.
+    // A local of the compiled code with the same name hides the constant
+    // too, when the symbol was boxed before the local was declared: in
+    // `function g() { i + 1 }; let i = 2; g()`, the top-level block of the
+    // program declares `i` only at its `let` (`canonicalBlock()`,
+    // `library/control-structures.ts`), so the `i` of `g` is bound to the
+    // library constant, as when the run reads one statement at a time.
+    else if (
+      resolved !== target.constant?.(s) &&
+      (BaseCompiler.libraryBoundConstantHidden(expr, s, target) ||
+        (target.constant?.(s) !== undefined &&
+          target.boundVars?.has(s) === true &&
+          target.varsKeys?.has(s) !== true &&
+          expr.valueDefinition !== undefined &&
+          !isShadowedSymbol(expr)))
+    ) {
+      resolved = target.constant!(s);
+      if (!hadVarsRef) target.varsObjectRefs?.delete(s);
+    }
+    // A bare symbol naming a user-defined function, used in value position (a
+    // higher-order operand such as `Map(f, list)` / `Filter(list, f)`),
+    // resolves to the shared emitted local `_fn_f` — the same definition the
+    // call-site path emits — rather than a dangling `_.f`. But two kinds of
+    // symbol must NOT be captured this way, or a same-named user function
+    // would silently shadow them:
+    //   - a **bound** name (a parameter / block local / loop index): the
+    //     enclosing binding form's `var` override resolves it to the bare
+    //     identifier (`resolved === s`), whereas the base resolver only ever
+    //     emits `_.<s>`, a constant, or a mapped literal — so `resolved === s`
+    //     uniquely identifies a bound name;
+    //   - a **`vars`-mapped** key: the caller's external-input contract, which
+    //     always wins (see `CompileTarget.vars`).
+    const registry = target.userFunctions;
+    // A name is bound when an enclosing binding form recorded it in
+    // `boundVars` (lambda param, Sum/Product/Loop index, Block local,
+    // comprehension var, Match capture). `resolved === s` is kept as an
+    // additional signal for binding forms that resolve a bound name to its
+    // own bare identifier (the common loop path) and is harmless — the base
+    // resolver never returns a bare identifier for a free user-function
+    // symbol (it returns `_.<s>`). The explicit `boundVars` set covers the
+    // cases where a binding form resolves the name to NON-identity code
+    // (an unrolled-Sum numeric literal, an interval `_IA.point(i)` wrap, a
+    // Match `subject[i]` accessor), which `resolved === s` misses (A2).
+    const isBoundOrMapped =
+      resolved === s ||
+      target.boundVars?.has(s) === true ||
+      target.varsKeys?.has(s) === true;
+    // `Nothing` is the engine's ERASURE marker, not a value: an arithmetic
+    // operand spelled `Nothing` is dropped at canonicalization, and a form
+    // evaluated for effect — a `Loop` that runs to completion without a
+    // `Break`/`Return` value — evaluates to the bare symbol. Reaching this
+    // point means an emitter is about to splice it in as an ordinary
+    // operand, and every target's free-symbol plumbing then produces
+    // something that looks like success: the shader
+    // targets emitted the undefined identifier `Nothing` (a driver-side
+    // compile error behind `success: true`), the Python target the
+    // undefined name `Nothing`, and the interval target a `_.Nothing`
+    // vars-object read that is `undefined` at run time. Fail closed
+    // for every target here, on the one route they share. The JavaScript
+    // target's own `var` hook refuses it first with the same message, so
+    // this guard is what the other targets rely on. A BOUND name or a
+    // caller `vars` key spelled `Nothing` is a genuine variable and is
+    // served above.
+    if (s === 'Nothing' && !isBoundOrMapped)
+      throw new Error(
+        'Could not compile `Nothing`: the erasure marker is not a value, so it cannot be read as a variable.'
+      );
+    if (registry && !isBoundOrMapped && !registry.misses?.has(s)) {
+      // The VALUE position, so a declared-complex parameter needs the
+      // coercing shim: this reference may end up as `Map`'s callback, which
+      // passes raw elements (see `ensureUserFunctionValueRef`).
+      const decline: DeclineNote = {};
+      const userFn = BaseCompiler.ensureUserFunctionValueRef(
+        expr.engine,
+        s,
+        target,
+        decline
+      );
+      // A target whose language has no function VALUES (the shader targets)
+      // decides what this reference means — in practice, fails closed.
+      if (userFn !== undefined && !hadVarsRef) target.varsObjectRefs?.delete(s);
+      if (userFn !== undefined && registry.lowering)
+        return registry.lowering.value({ id: s, name: userFn, target });
+      if (userFn !== undefined) return userFn;
+      // The symbol names a function the USER defined, and the target
+      // declined to emit its definition. Falling through to the
+      // free-symbol read `_.<s>` produced an artifact that reported
+      // `success: true` and then threw `TypeError: _f is not a function`,
+      // because nothing binds that key: with a nominal `type meters =
+      // number`, the clause set `w(d: meters) := 2` / `w(x, y) := x + y`
+      // has no faithful JavaScript guard for its first clause, and
+      // `Map(w, [1, 2, 3])` compiled to
+      // `((_f) => ([1, 2, 3]).map((_x) => _f(_x)))(_.w)`. Refuse instead,
+      // the same answer a built-in operator name in this position gets
+      // just below; with the default `fallback: true` the caller reads the
+      // interpreter's value. A symbol that is NOT a user function keeps
+      // the free-symbol read and the negative memo below.
+      if (BaseCompiler.isUserDefinedFunction(expr.engine, s))
+        throw new Error(
+          BaseCompiler.userFunctionValueRefRefusal(s, target, decline.reason)
+        );
+      // Memoize the negative lookup so a repeated free symbol doesn't re-hit
+      // `lookupDefinition` on every occurrence during this compile.
+      (registry.misses ??= new Set()).add(s);
+    }
+    // A bare BUILT-IN operator symbol in value position (`Map(Sin, xs)`,
+    // `CountIf(xs, IsPrime)`) is eta-expanded into `(p) ↦ Sin(p)` and
+    // emitted through the SAME shared-local machinery user functions use.
+    // Without this it fell through to the free-symbol read `_.Sin` and the
+    // artifact threw `_f is not a function` at RUN time — a broken artifact
+    // where the fail-closed principle wants either working code or a
+    // compile-time refusal. Tried AFTER the user-function route (a user
+    // definition shadowing the name wins) and only from THIS path, so an
+    // application HEAD (`Sin(x)` → `Math.sin(x)`) is untouched.
+    if (registry && !isBoundOrMapped) {
+      const etaFn = BaseCompiler.ensureBuiltinCallbackEmitted(
+        expr.engine,
+        s,
+        target
+      );
+      // As for user functions: a target whose language has no function
+      // VALUES (the shader targets) decides what this reference means — in
+      // practice, fails closed.
+      if (etaFn !== undefined && !hadVarsRef) target.varsObjectRefs?.delete(s);
+      if (etaFn !== undefined && registry.lowering)
+        return registry.lowering.value({ id: s, name: etaFn, target });
+      if (etaFn !== undefined) return etaFn;
+      // A BUILT-IN operator name that could not be expanded (variadic,
+      // zero-required like `Random`, or a wrapper body that does not
+      // canonicalize) must not fall through to `_.Random`: that artifact
+      // compiles "successfully" and throws `_f is not a function` at run
+      // time. Fail closed — with the default `fallback: true` route
+      // this becomes an interpreter fallback. Scoped to a system-provenance
+      // operator name that is not one the engine itself reads as a variable
+      // (`isRefusableBuiltinCallback`): a plain free symbol, a value
+      // definition, a `vars` key, or a bound name is not affected.
+      if (isRefusableBuiltinCallback(expr.engine, s))
+        throw new Error(BaseCompiler.builtinCallbackRefusal(s));
+      // An operator the HOST declared with a JavaScript `evaluate` handler
+      // (or a definition that shadows a built-in name) is neither a
+      // function literal (the user-function route above) nor the built-in
+      // (the eta-expansion above). When the compiled code can apply it
+      // (a `compile` handler on its definition, or a lowering of the
+      // target, such as the `functions` option of `compile()`), it is
+      // eta-expanded into `(p) ↦ s(p)`, and the body compiles through that
+      // lowering, as `Map(Function(MyOp(t), t), xs)` does. Otherwise it has
+      // no function value the compiled code can call: fail closed, as for
+      // a built-in that does not expand. `Map(MySqrt, xs)` fell through to
+      // the free-symbol read `_.MySqrt`, and the artifact threw
+      // `_f is not a function` at run time.
+      if (isHostOperatorCallback(expr.engine, s)) {
+        const hostFn = BaseCompiler.ensureHostOperatorCallbackEmitted(
+          expr.engine,
+          s,
+          target
+        );
+        if (hostFn !== undefined && !hadVarsRef)
+          target.varsObjectRefs?.delete(s);
+        if (hostFn !== undefined && registry.lowering)
+          return registry.lowering.value({ id: s, name: hostFn, target });
+        if (hostFn !== undefined) return hostFn;
+        throw new Error(
+          `Could not compile \`${s}\` as a first-class function: the operator ` +
+            `has no function value that the compiled code can call. A ` +
+            `caller using the default \`fallback: true\` falls back to ` +
+            `interpreted evaluation.`
+        );
+      }
+    }
+    if (resolved !== undefined)
+      return BaseCompiler.liftWideReference(
+        expr,
+        BaseCompiler.checkedLocalRead(expr, s, resolved),
+        target
+      );
+    // The target did not resolve the symbol (no `vars` mapping, constant, or
+    // free-symbol plumbing). Before falling back to a bare reference — which
+    // is a dangling identifier for a symbol the engine actually knows — fold
+    // an assigned value / declared constant, matching `evaluate()`. This also
+    // covers the direct-target `compile(expr, { target })` path, where the
+    // raw target has no engine context of its own.
+    // A `vars`-mapped symbol is a live input and its value is never folded.
+    // It reaches this point only on a direct custom target, whose own `var`
+    // hook knows nothing of `vars`: it is emitted by name below, like a free
+    // symbol.
+    const folded =
+      target.varsKeys?.has(s) === true
+        ? undefined
+        : BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
+    if (folded !== undefined) {
+      // A folded value is BAKED — there is no run-time binding, so the
+      // "coerced at every entry" exemption that leaves a declared-complex
+      // REFERENCE unlifted (see `liftWideReference`) does not apply here.
+      // Consumers of a symbol whose analysis says complex read the
+      // target's {re, im} encoding, but a real-valued assignment
+      // (`z: complex` with `z := 5`) compiles to a bare real literal, and
+      // reading `.re` off it yields NaN. Wrap the emission in the
+      // target's idempotent `complexLift`. Only a provably scalar-numeric
+      // value whose own emission is real-shaped is wrapped; a value
+      // already complex-shaped (`isComplexValued`) or non-scalar stays as
+      // emitted.
+      // The gate is `isComplexValued`, NOT `complexDiscipline`: consumers
+      // decide their {re, im} reads with that same predicate, and it is
+      // true for a declared-complex symbol under every mode — including
+      // `auto`'s per-node promotion, which stays in the strict-lanes
+      // discipline. Gating on mode left `auto` emitting `.re` reads
+      // against a bare folded literal.
+      if (
+        target.complexLift !== undefined &&
+        BaseCompiler.isComplexValued(expr)
+      ) {
+        const value = expr.engine._getSymbolValue(s);
+        if (
+          value !== undefined &&
+          !BaseCompiler.isComplexValued(value) &&
+          isSubtype(value.type.type, 'number')
+        )
+          return target.complexLift(folded);
+      }
+      return folded;
+    }
+    // Genuinely free symbol: emit its bare identifier. Give the target a
+    // chance to mangle it or fail closed — e.g. a GLSL/WGSL reserved
+    // keyword used as a variable name would emit invalid shader source.
+    return BaseCompiler.liftWideReference(
+      expr,
+      target.mangleId ? target.mangleId(s) : s,
+      target
+    );
   }
 
   /**
@@ -11299,46 +11329,21 @@ export class BaseCompiler {
      * it costs only the optimization — no region is pushed. */
     node?: Expression
   ): TargetSource {
+    // Most cases of this function are in functions of their own
+    // (`compileExprOperator`, `compileExprFunctionCall`, …), each called as
+    // `sub = …; if (sub !== undefined) return sub;`. The compiler is
+    // recursive, and each level of a nested expression keeps one frame of
+    // this function on the stack: with all its cases inline, the frame was
+    // 1,632 bytes, and an expression nested about 280 levels deep overflowed
+    // the stack. The helpers keep the frame small (ROADMAP CE-320.2).
+    let sub: TargetSource | undefined;
     if (h === 'Error') throw new Error('Error');
 
     // A known captured function body cannot be replaced by a different
     // ambient function. Forward placeholders and target operator overrides
     // still resolve actively; local compilation bindings supply their own code.
-    if (
-      node !== undefined &&
-      isFunction(node) &&
-      node.operator === h &&
-      !BaseCompiler.CONTROL_FLOW_HEADS.has(h) &&
-      !BaseCompiler.isCompileBoundName(h) &&
-      target.varsKeys?.has(h) !== true &&
-      BaseCompiler.blockLocalFunction(h, target) === undefined
-    ) {
-      const value = node.valueDefinition;
-      const operator = node.operatorDefinition;
-      const held =
-        value?.value ??
-        (operator as { _lambdaLiteral?: Expression } | undefined)
-          ?._lambdaLiteral;
-      const ambient =
-        held !== undefined && isFunction(held, 'Function')
-          ? lookupApplicable(h, engine.context.lexicalScope)
-          : undefined;
-      if (
-        held !== undefined &&
-        isFunction(held, 'Function') &&
-        ((value !== undefined &&
-          (!ambient || !isValueDef(ambient) || ambient.value !== value)) ||
-          (operator !== undefined &&
-            (!ambient ||
-              !isOperatorDef(ambient) ||
-              ambient.operator !== operator)))
-      )
-        throw new Error(
-          ambient === undefined
-            ? `Could not compile \`${h}\`: the captured callable definition is not in scope.`
-            : `Could not compile \`${h}\`: the captured callable has a different binding from the ambient function.`
-        );
-    }
+    sub = BaseCompiler.compileExprCapturedBody(engine, h, target, node);
+    if (sub !== undefined) return sub;
 
     BaseCompiler.assertCollectionOmissionSupported(h, args, node, target);
 
@@ -11357,111 +11362,8 @@ export class BaseCompiler {
     // A TUPLE argument at a parameter declared as a scalar maps over its
     // components (user decision 2026-10-03), so the call is compiled as the
     // tuple of the calls at each component (`declaredScalarTupleCall`).
-    {
-      const mappedArgs = new Set<number>();
-      let tupleCall = BaseCompiler.declaredScalarTupleCall(
-        engine,
-        h,
-        args,
-        target,
-        mappedArgs
-      );
-      // The interpreter evaluates each argument once, then maps the call over
-      // the components. The rewrite writes an argument that is not mapped
-      // (`Random()` in `Apply((u: real, w: real) ↦ w, (1, 2), Random())`)
-      // into each component call, which would evaluate it once per
-      // component. Thus each argument with an effect is first bound to a
-      // temporary of the same type, and the component calls read the
-      // temporary. A `Tuple` or `List` literal that the rewrite maps over is
-      // not bound whole: its parts are the mapped components, and each one is
-      // read once. But each component call reads its part where the call is
-      // emitted, after the temporaries of the other arguments, and the
-      // interpreter evaluates all the arguments, in order, before any call.
-      // Thus each part with an effect is bound to its own temporary too, in
-      // the order of the arguments, and the literal is written again with
-      // the temporaries. A part that is itself a `Tuple` or `List` literal
-      // maps again, so its own parts are bound the same way.
-      // `Apply((u: real, w: real) ↦ w - u, (Random(), Random()), Random())`
-      // draws the two components before `w`, as the interpreter does. A
-      // literal at a position that is not mapped (a parameter with no
-      // declared type, or a `list<…>` parameter that receives the list whole)
-      // is written whole into each component call, so it is bound like any
-      // other argument. A target with no value binding (a shader) keeps the
-      // rewrite as it is.
-      const bindings: Array<[string, TargetSource]> = [];
-      let inner = target;
-      if (
-        tupleCall !== undefined &&
-        target.bindExpr !== undefined &&
-        args.some((a) => a.isPure === false)
-      ) {
-        const names: string[] = [];
-        const bind = (a: Expression): Expression => {
-          const name = BaseCompiler.tempVar(target);
-          names.push(name);
-          bindings.push([name, BaseCompiler.compileValueOperand(a, target)]);
-          return BaseCompiler.typedTemp(engine, name, a.type.type);
-        };
-        const bindParts = (a: Expression): Expression => {
-          if (a.isPure !== false) return a;
-          if (!isFunction(a, 'Tuple') && !isFunction(a, 'List')) return bind(a);
-          return engine.function(a.operator, a.ops.map(bindParts));
-        };
-        const boundArgs = args.map((a, i) => {
-          if ((h === 'Apply' && i === 0) || a.isPure !== false) return a;
-          if (
-            mappedArgs.has(i) &&
-            (isFunction(a, 'Tuple') || isFunction(a, 'List'))
-          )
-            return bindParts(a);
-          return bind(a);
-        });
-        if (names.length > 0) {
-          tupleCall = BaseCompiler.declaredScalarTupleCall(
-            engine,
-            h,
-            boundArgs,
-            target
-          );
-          // The temporaries are parameters of the binding emitted below, so
-          // they are read by their own names, not as keys of the variables
-          // object.
-          inner = {
-            ...target,
-            var: (id) => (names.includes(id) ? id : target.var(id)),
-            ...BaseCompiler.withBoundScope(target, names),
-          };
-        }
-      }
-      if (tupleCall !== undefined) {
-        // A shader writes a tuple as a float vector (`vec2`), which cannot
-        // hold the booleans of a tuple of boolean results, as for
-        // `Not((A, B))`.
-        if (
-          (target.language === 'glsl' || target.language === 'wgsl') &&
-          isFunction(tupleCall) &&
-          tupleCall.ops.some((x) => x.type.matches('boolean'))
-        )
-          throw new Error(
-            `Could not compile a call over the tuple argument of \`${h}\`: ` +
-              `the result is a tuple of booleans, which target ` +
-              `'${target.language}' cannot represent as a vector.`
-          );
-        if (bindings.length > 0)
-          return target.bindExpr!(
-            bindings,
-            BaseCompiler.compile(tupleCall, inner, 0)
-          );
-        return BaseCompiler.compile(tupleCall, target, prec);
-      }
-      // On the JavaScript target, a tuple at a parameter with no declared
-      // type is bound whole (`wholeTupleCall`).
-      if (target.language === 'javascript') {
-        const whole = BaseCompiler.wholeTupleCall(engine, h, args, target);
-        if (whole !== undefined)
-          return BaseCompiler.compile(whole, target, prec);
-      }
-    }
+    sub = BaseCompiler.compileExprTupleCall(engine, h, args, prec, target);
+    if (sub !== undefined) return sub;
 
     if (h === 'Sequence') {
       if (args.length === 0) return '';
@@ -11775,63 +11677,15 @@ export class BaseCompiler {
     // Emits a `_SYS.bcast` call wrapping the head's own scalar codegen — see
     // `tryCompileBroadcast`. Other targets have native vector types (GLSL/WGSL
     // `vec3 + vec3`) or their own broadcasting, so this is JavaScript-only.
-    if (target.language === 'javascript') {
-      const broadcast = BaseCompiler.tryCompileBroadcast(
-        engine,
-        h,
-        args,
-        target,
-        node
-      );
-      if (broadcast !== null) return broadcast;
-      // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,
-      // `Erf`, …) whose array operand has a complex element lane, and the
-      // list-arithmetic residue below would then fail the form closed before
-      // the real-only gates further down (`isRealOnlyLowering`) ever see
-      // it. Apply the element-wise run-time realness rule here: at each
-      // position, the real lowering runs on the real part of an element whose
-      // imaginary part is exactly zero, and any other element gives NaN (the
-      // D2/D6 rule of `realOperandGuard`). The operands are projected onto
-      // the real lane and the head is re-emitted, which re-enters the closure above with real element
-      // lanes — `⌊√L⌋` at `L = [4, -1]` compiles to `[2, NaN]`.
-      // (A form without an array operand is left to those gates, so its
-      // scalar emission is unchanged.)
-      if (
-        BaseCompiler.isRealOnlyLowering(target, h) &&
-        args.some((a) => BaseCompiler.isArrayOperand(a))
-      ) {
-        const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
-        if (
-          guardArgs.some((a) =>
-            BaseCompiler.realGuardCandidate(a, engine, target)
-          )
-        ) {
-          const complex = BaseCompiler.complexLoweringOf(target, h);
-          if (complex !== undefined)
-            return complex.lowering(
-              args,
-              BaseCompiler.operandCompiler(node, target),
-              target
-            );
-          const guarded = BaseCompiler.realOperandGuard(
-            engine,
-            h,
-            guardArgs,
-            target,
-            () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-            BaseCompiler.realOnlyResultKind(h)
-          );
-          if (guarded !== undefined) return guarded;
-          // The rule declined (a maybe-complex set or dictionary operand, an
-          // undecided element lane): fail closed here rather than fall
-          // through to the later gate, which would repeat the same analysis
-          // before reaching the same decline.
-          throw new Error(
-            `Could not compile \`${h}\`: the target's lowering for this head is real-only and cannot represent a complex-valued argument.`
-          );
-        }
-      }
-    }
+    sub = BaseCompiler.compileExprElementwiseBroadcast(
+      engine,
+      h,
+      args,
+      prec,
+      target,
+      node
+    );
+    if (sub !== undefined) return sub;
 
     // A declaration CONTRADICTED by its body, sitting in a scalar-consuming
     // position (2026-08-12 ruling — the adjacency half of the
@@ -11891,6 +11745,1209 @@ export class BaseCompiler {
     // (`isPossiblyCollectionTyped`: a `broadcastable<T>` node or a top-typed
     // application). After the F1 widening, most such operands compile through
     // `_SYS.bcast` and never reach here.
+    sub = BaseCompiler.compileExprBroadcastJavaScript(engine, h, args, target);
+    if (sub !== undefined) return sub;
+
+    // Python target: arithmetic over a collection-typed or possibly-collection
+    // operand (a concrete/declared `list`/`indexed_collection`, a
+    // `broadcastable<T>`, or a top-typed application such as `h(x)` — the same
+    // operand predicate as the JS D6 guard above) cannot be lowered to the
+    // target's INFIX arithmetic. Python's arithmetic operators do NOT broadcast
+    // a plain `list`: `2 * [1, 2]` REPEATS (`[1, 2, 1, 2]`), `[1, 2] - 1`
+    // raises — both diverge from the interpreter's element-wise result
+    // (`[2, 4]` / `[0, 1]`). A NumPy array WOULD broadcast, but the compiled
+    // artifact cannot constrain what the caller binds, so the outcome is
+    // binding-dependent.
+    //
+    // What IS soundly expressible is a fan-out over the ONE collection operand
+    // (`tryCompilePythonElementwise`): the target spells the element-wise map
+    // as a list comprehension, which is element-wise for a plain Python list,
+    // a tuple and an ndarray alike. When that route declines, fail closed
+    // and let the engine fall back to the interpreter, which broadcasts
+    // correctly. Only infix-lowering arithmetic heads are affected;
+    // element-wise math functions (`Sin` → `np.sin`) broadcast natively over a
+    // NumPy array and are left untouched. Bare unknown symbols are NOT
+    // possibly-collection-typed, so plain scalar plot bodies are unaffected.
+    sub = BaseCompiler.compileExprBroadcastPython(engine, h, args, target);
+    if (sub !== undefined) return sub;
+
+    // A comparison with an operand that may be absent (`w > 0` with
+    // `w: number | missing`) is absent when that operand is absent, on a
+    // target with object absence (ROADMAP CE-93, `absentComparisonGuard`).
+    {
+      const guarded = BaseCompiler.absentComparisonGuard(h, args, target, () =>
+        BaseCompiler.compileExpr(engine, h, args, prec, target, node)
+      );
+      if (guarded !== undefined) return guarded;
+    }
+
+    // GPU shader targets: a comparison or logical connective over a non-scalar
+    // operand must not lower through the scalar infix operators — GLSL rejects
+    // `vecN < float` outright, and where an infix form IS legal it means the
+    // wrong thing (WGSL `vecN == vecN` is a `vecN<bool>`, not the scalar bool
+    // the surrounding expression expects; GLSL `vecN == vecN` is ATOMIC
+    // aggregate equality where the interpreter broadcasts a `List`
+    // element-wise). The element-wise `Which`/`If` selection path builds its
+    // boolean-vector masks directly (`compileGPUSelection`) and never routes a
+    // condition through here; everything else fails closed. One shape is
+    // deliberately admitted: GLSL `Equal`/`NotEqual` over TUPLE-shaped
+    // operands — a tuple (point) is atomic in the interpreter too, and GLSL
+    // `==` on two vecNs is scalar aggregate equality, so that lowering is
+    // faithful. (On WGSL the same `==` is component-wise — excluded.)
+    // Complex operands are excluded: they already skip the infix path below
+    // and fail closed in function dispatch.
+    sub = BaseCompiler.compileExprGpuRelational(h, args, target);
+    if (sub !== undefined) return sub;
+
+    // GPU shader targets: the point rules of the interpreter. A point lowers
+    // to a `vecN`, and the shader operators are component-wise over vectors
+    // and broadcast a scalar over a vector, so every shape below compiled to
+    // a plausible vector where the interpreter answers an error:
+    //  - `Multiply` of two points: `no-product-between-points`;
+    //  - `Divide` by a point: `no-division-by-point`;
+    //  - `Add` of a point and a term that is not a point: `incompatible-type`.
+    // Canonicalization already turns most of these into an `Error` for a
+    // plain point, but not for a GATED point (`isGatedPoint`: a restricted
+    // point such as `When((t, 1), c)`, whose `missing` arm hides the tuple
+    // type), and not for `t + P` with an undeclared `t`. Fail closed instead.
+    sub = BaseCompiler.compileExprGpuPoint(h, args, target);
+    if (sub !== undefined) return sub;
+
+    // A comparison with a WRITTEN absence operand (`Missing`, `Undefined`) is
+    // undecided: the interpreter answers `Missing` for `Less(Missing, t)` and
+    // for `Equal(Undefined, 1)`, whatever the other operand holds (Kleene).
+    // The compiled value is the target's object null, which is also the
+    // undecided value of its three-valued conditions, so an `If`/`Which` over
+    // it takes no arm (`conditionNode` reads such a relation by its value).
+    // Before, the absence symbol lowered to `undefined` and the plain
+    // comparison answered a confident `false` (`true` for `NotEqual`), so an
+    // `If` over it took an arm. A target without an object axis keeps its
+    // plain lowering.
+    if (
+      BaseCompiler.BRANCH_RELATIONS.has(h) &&
+      target.absence?.object !== undefined &&
+      args.some(BaseCompiler.isAbsenceSymbol)
+    )
+      return BaseCompiler.compileAbsentRelation(
+        engine,
+        h,
+        args,
+        target,
+        target.absence.object.nullLiteral
+      );
+
+    // An ORDERING comparison over a complex-valued operand has no lowering:
+    // the complex numbers are not ordered, so the interpreter leaves
+    // `Less(i·x, 0)` symbolic (no truth value) while `x` has no value, and
+    // answers `False` once the value of an operand is not a real number,
+    // whatever the other operands are (`x < i` is `False` with `x` free;
+    // user decision of 2026-10-21, `nonRealKind()` in
+    // `library/relational-operator.ts`), while both the infix path
+    // below and the function codegen it falls through to emit a raw `<` over
+    // the `{re, im}` object — a silent `false` behind `success: true`. Fail
+    // closed instead. `Equal`/`NotEqual` are NOT affected: they have
+    // their own complex-aware codegen (`_SYS.eq`/`_SYS.neq`). An operand of
+    // merely UNKNOWN sign over a real kernel (`Sqrt(x)`) is not complex-valued
+    // by `isComplexValued`'s carve-out, so `Less(Sqrt(x), 2)` still compiles.
+    if (BaseCompiler.ORDERING_HEADS.has(h)) {
+      // D2 (design §8, `docs/COMPILATION-MODEL.md`): an
+      // operand that MAY be complex — a `complex`-typed symbol, a wide binding
+      // under the complex discipline, a promoted radical — takes the RUNTIME
+      // rule (bind once, compare the real parts when every imaginary part is
+      // exactly zero, `false` otherwise); only a STATICALLY non-real operand
+      // is the compile-time decline, raised inside `realOperandGuard`.
+      // A CHAIN (`a < b < c`) binds each operand at its own edge so a later
+      // operand is never evaluated when an earlier edge already failed — the
+      // interpreter's short-circuit order (`realOperandChain`). A chain with
+      // an ARRAY operand is element-wise: every operand is an argument of
+      // one broadcast closure (evaluated exactly once, the edges conjoined
+      // per element), so it takes the element-wise form of
+      // `realOperandGuard`, which projects the operands and re-emits the
+      // closure over the projections.
+      const guarded =
+        args.length > 2 && !args.some((a) => BaseCompiler.isArrayOperand(a))
+          ? BaseCompiler.realOperandChain(h, args, target)
+          : BaseCompiler.realOperandGuard(
+              engine,
+              h,
+              args,
+              target,
+              () =>
+                BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+              'boolean'
+            );
+      if (guarded !== undefined) return guarded;
+      const complexOperand = args.find((a) =>
+        BaseCompiler.realGuardCandidate(a, engine, target)
+      );
+      if (complexOperand !== undefined)
+        throw new Error(
+          `Could not compile \`${h}\`: an ordering comparison over the ` +
+            `complex-valued operand \`${complexOperand.toString()}\` — the ` +
+            `complex numbers are not ordered. The interpreter answers ` +
+            `\`False\` when an operand has a value that is not a real ` +
+            `number, whatever the other operands are (\`x < i\` is ` +
+            `\`False\`), and leaves the comparison symbolic while the ` +
+            `operand depends on a free symbol (\`i·x < 0\`).`
+        );
+    }
+
+    // Handle operators
+    const op = target.operators?.(h);
+
+    // A Python power that may need the real root of a negative base (an
+    // exact rational or a float exponent, see `negativeBaseFloatPower`)
+    // goes to the `Power` function lowering instead of the `**` operator.
+    const realPythonPower =
+      target.language === 'python' &&
+      h === 'Power' &&
+      op?.[0] === '**' &&
+      (BaseCompiler.realPowerExponent(args) !== undefined ||
+        BaseCompiler.negativeBaseFloatPower(args) !== undefined);
+    sub = BaseCompiler.compileExprOperator(
+      h,
+      args,
+      prec,
+      target,
+      node,
+      op,
+      realPythonPower
+    );
+    if (sub !== undefined) return sub;
+
+    // Handle special constructs
+    sub = BaseCompiler.compileExprFunctionLiteral(
+      engine,
+      h,
+      args,
+      target,
+      node
+    );
+    if (sub !== undefined) return sub;
+
+    sub = BaseCompiler.compileExprDeclare(h, args, target, node);
+    if (sub !== undefined) return sub;
+    sub = BaseCompiler.compileExprAssign(engine, h, args, prec, target, node);
+    if (sub !== undefined) return sub;
+    if (h === 'Return') {
+      // A target with a statically typed signature checks the returned value's
+      // shape against it HERE, while the emitter's local frames are still
+      // pushed (see `CompileTarget.onReturn`).
+      target.onReturn?.(args[0]);
+      return `return ${BaseCompiler.compileOp(node, 0, target, 0, args[0])}`;
+    }
+    if (h === 'Break') return 'break';
+    if (h === 'Continue') return 'continue';
+
+    if (h === 'Loop') {
+      const loopFn = target.functions?.(h);
+      if (typeof loopFn === 'function')
+        return loopFn(
+          args,
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
+          target
+        );
+      return BaseCompiler.compileForLoop(args, target, node);
+    }
+
+    if (h === 'Comprehension') {
+      const compFn = target.functions?.(h);
+      if (typeof compFn === 'function')
+        return compFn(
+          args,
+          (expr) => BaseCompiler.compileValueOperand(expr, target),
+          target
+        );
+      return BaseCompiler.compileComprehension(args, target, node);
+    }
+
+    if (h === 'If' && args.length !== 2 && args.length !== 3)
+      throw new Error('Could not compile `If`: wrong number of arguments');
+    // The else-less `If(c, t)` is the one-clause `Which(c, t)`: when the
+    // condition is false no branch is selected, and the value is the
+    // codomain's absence marker (`NaN` for a number), exactly what a `Which`
+    // that matched no clause answers (no-selection ruling of 2026-08-27,
+    // `docs/ERROR-MODEL.md`). The operand indices of the two shapes agree
+    // (0 → condition, 1 → arm), so the `Which` branch below compiles the
+    // `If` node as it stands, CSE regions included, and every target's own
+    // `Which` handler lowers it. Before this the two-operand shape was
+    // refused on every target with "wrong number of arguments" while the
+    // interpreter answered `Missing` for it.
+    //
+    // Only the VALUE form is routed this way: a two-operand `If` whose arm is
+    // a statement (an assignment, a block, a loop, a jump) is a guard
+    // statement that reached the expression compiler from a block, and each
+    // target decides that shape on its own terms — plain JavaScript
+    // statement-forms it in the block dispatcher before this point, and the
+    // other targets decline it here, each for a verified reason
+    // (`test/compute-engine/compile-elseless-if-statement.test.ts`). Wrapping
+    // such an arm in a conditional expression would emit an assignment inside
+    // an expression, which Python refuses and the GPU statement model does
+    // not admit.
+    const selectionHead =
+      h === 'If' && args.length === 2 && !BaseCompiler.isStatementArm(args[1])
+        ? 'Which'
+        : h;
+    if (h === 'If' && args.length === 2 && selectionHead === 'If')
+      throw new Error('Could not compile `If`: wrong number of arguments');
+
+    sub = BaseCompiler.compileExprIf(
+      engine,
+      h,
+      args,
+      target,
+      node,
+      selectionHead
+    );
+    if (sub !== undefined) return sub;
+
+    sub = BaseCompiler.compileExprWhich(args, target, node, selectionHead);
+    if (sub !== undefined) return sub;
+
+    sub = BaseCompiler.compileExprWhen(h, args, target, node);
+    if (sub !== undefined) return sub;
+
+    if (h === 'Match') {
+      // A target may override the whole construct (GPU emits target-specific
+      // ternaries; interval/Python fail closed). Otherwise the default is the
+      // JavaScript emission (chained `if`/`switch` in an arrow-IIFE).
+      //
+      // `Match` is fully CSE-inert in Phase 1 (§2): its guards and bodies are
+      // compiled from plan-constructed closure trees, not from these operands,
+      // so emission runs under a blind instance — no candidate resolves inside,
+      // and no enclosing region's candidate can leak in through a shared node.
+      return BaseCompiler.withCseBlind(target, () => {
+        const fn = target.functions?.(h);
+        if (typeof fn === 'function')
+          return fn(
+            args,
+            (expr) => BaseCompiler.compileValueOperand(expr, target),
+            target
+          );
+        return BaseCompiler.compileMatchJS(engine, args, target);
+      });
+    }
+
+    if (h === 'Block') {
+      const collectionValue =
+        node !== undefined && node === BaseCompiler._collectionValueBlock;
+      if (collectionValue) BaseCompiler._collectionValueBlock = undefined;
+      return BaseCompiler.compileBlock(
+        args,
+        target,
+        node,
+        true,
+        prec,
+        collectionValue
+      );
+    }
+
+    // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
+    // the target-supplied absence capability, choosing the numeric or object
+    // axis by the operand's (result's) domain (I6). A target lacking the needed
+    // axis — GPU has no `isAbsent`, interval/GPU have no `object` axis — fails
+    // closed with a diagnostic (propagation stays native; discharge does not).
+    if (h === 'IsMissing') {
+      if (args.length !== 1)
+        throw new Error(
+          'Could not compile `IsMissing`: expected exactly one argument'
+        );
+      if (provablyAdmits('nothing', compilationType(args[0])))
+        throw new Error(
+          `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' ` +
+            `cannot distinguish a possible 'Nothing' input from an absent datum.`
+        );
+      const axis = BaseCompiler.absenceAxisForType(
+        args[0].type.type,
+        target,
+        'IsMissing'
+      );
+      if (axis.isAbsent === undefined)
+        throw new Error(
+          `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' cannot test ` +
+            `absence (no 'isAbsent' capability — e.g. GPU fast-math cannot ` +
+            `guarantee 'isnan' survives).`
+        );
+      return axis.isAbsent(BaseCompiler.compileValueOperand(args[0], target));
+    }
+
+    // The presence assertion `AssertPresent(x)` (Epsil `x?!`): `x` unless it
+    // is absent, else a raised run-time error `expected-present` naming the
+    // operand as written (the interpreter's `Error("expected-present", …)`).
+    //
+    // - A static proof removes the check: an operand whose compilation type
+    //   has no `missing` member and does not admit `nan` can only be present,
+    //   so the operand compiles as is. This is the only way the check is
+    //   omitted (user decision P4).
+    // - A target with no `raise` (a shader) compiles the assertion as the
+    //   identity; the author accepts the absent value flowing on (user
+    //   decision P5, 2026-10-21). The operand is compiled with its OWN type,
+    //   not the asserted one, so nothing downstream reads the assertion as a
+    //   proof: the node's `Present(T)` type is not consulted here, and a
+    //   later `IsMissing`/`Coalesce` on the value keeps its test.
+    // - An operand that may be `Nothing` is declined, as for `IsMissing`: the
+    //   targets cannot tell an omission from an absent datum.
+    sub = BaseCompiler.compileExprAssertPresent(h, args, target);
+    if (sub !== undefined) return sub;
+
+    sub = BaseCompiler.compileExprCoalesce(h, args, target, node);
+    if (sub !== undefined) return sub;
+
+    // Kleene/IEEE `Equal`/`NotEqual` guarded lowering (§3.D, amended
+    // 2026-07-24; extended to `NotEqual` 2026-08-08).
+    // Comparisons are IEEE over `NaN` and Kleene over the `Missing` symbol. For
+    // a NUMERIC-domain operand a raw `==`/tolerant-compare already IS the IEEE
+    // semantics (`NaN == NaN` is `false`), so no guard is emitted — the plain
+    // codegen below runs and interpreter/compiled agree by construction. The
+    // guard is kept ONLY when an operand can hold an OBJECT-domain hole (e.g.
+    // `string | missing`), where a `Missing` must lower to the target null:
+    // emit `isAbsent(a) || isAbsent(b) ? <object null> : <a == b>`. The absent
+    // boolean is an OBJECT-domain value, so a target without the object axis
+    // (GPU) fails closed.
+    //
+    // `NotEqual` is guarded on exactly the same terms, and for the same reason
+    // `Equal` is: the interpreter answers `Missing` for BOTH
+    // (`NotEqual(Missing, 1)` → `Missing`, pinned in `missing-value.test.ts`
+    // §P3). It was `Equal`-only while every string-bearing `NotEqual` failed
+    // closed on the string gate; once the tier-2 admissions started compiling
+    // `NotEqual(s, "x")` for `s: string | missing` (the literal supplies the
+    // string evidence, and the union is neither provably numeric nor a
+    // collection), the unguarded lowering emitted `undefined !== "x"` — a bare
+    // `true` where the interpreter answers `Missing`.
+    sub = BaseCompiler.compileExprMissingEquality(h, args, target);
+    if (sub !== undefined) return sub;
+
+    // `Typed(value, type)` is a transparent runtime ascription — it constrains
+    // the static type but has no runtime effect, so it compiles to its value
+    // operand on every target (the interpreter ignores it likewise, and
+    // returns the value even when it contradicts the ascribed type). Without
+    // this, a helper declared with a precise return type (e.g. `(number) ->
+    // vector<11>`) wraps its body in `Typed`, and every compiled call throws
+    // `Unknown operator \`Typed\`` at the dispatch below.
+    //
+    // A target that keeps complex values apart from real ones (a `{re, im}`
+    // object in JavaScript, a `vec2` in a shader) needs more. A consumer of
+    // the ascription (the enclosing lowering, or the call sites of a user
+    // function whose body is the ascription) reads the lane of the `Typed`
+    // node, which follows the ascribed type. The value operand is emitted in
+    // its own lane. The two must agree, or the consumer reads the value in
+    // the wrong representation:
+    //
+    //  - A complex ascription over a real scalar value is lifted: a real
+    //    number is a complex number. With `s: (complex) -> complex` and
+    //    `s := z ↦ Re(z)`, the body is `Typed(Re(z), complex)`, and the
+    //    definition returns a complex value. The declared-signature
+    //    canonicalization also wraps an all-real function body in
+    //    `Typed(body, "complex")`, so that a function declared to return a
+    //    complex value returns a `{re, im}` object from every body, a real
+    //    base case included (Tycho item 60).
+    //  - A complex ascription over a value that is not a scalar (a point,
+    //    a color, a boolean) contradicts the value. Fail closed.
+    //  - A real ascription over a value that is complex only because of
+    //    promotion selects the real lane for the value. Under a mode that
+    //    promotes (`auto`, `complex`), an unknown-sign `Sqrt`, `Ln`, `Log`,
+    //    even `Root` or non-integer `Power` lowers through a complex kernel,
+    //    and makes the value complex. The ascription says that the value is
+    //    real, so the value compiles with promotion off
+    //    (`withPromotionSuppressed`), as `mode: 'strict'` compiles it: such a
+    //    head gives NaN outside its real domain. NaN is the value that a
+    //    real-typed result has when it has no real value. With
+    //    `p: (real) -> real` and `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, the
+    //    definition is `Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))`
+    //    in every mode, and `promoted` stays `false`. "Complex only because
+    //    of promotion" means: complex with promotion on, real with promotion
+    //    off. A value that is real with promotion on (`|√k|`) keeps its
+    //    promoted heads.
+    //  - A real ascription over a value that is complex also with promotion
+    //    off contradicts the value: the value has a complex-typed operand
+    //    (or, under `mode: 'complex'`, a node whose type admits a complex
+    //    value, which that mode reads as complex). With `q: (unknown) -> real` and `q := z ↦ z²`, the call `q(1+i)` is
+    //    `2i`. JavaScript read the `{re, im}` object that `_fn_q` returns as
+    //    a real number, and `q(w) + 1` returned the string
+    //    `"[object Object]1"`; a shader has no conversion from a `vec2` to a
+    //    `float` that keeps the value. Fail closed, and ask for a corrected
+    //    signature. A call in the value of a user function whose definition
+    //    is complex is such an operand: the definition is shared by every
+    //    call site, so it is compiled with the promotion of the mode
+    //    (`withPromotionUnsuppressed`), and its recorded lane is complex.
+    //
+    // With these rules, the lane of the `Typed` node is the lane of the value
+    // it emits, so the lane recorded for a user function whose body is the
+    // ascription (`recordUserFunctionLane`) is the lane of what its
+    // definition returns.
+    sub = BaseCompiler.compileExprTyped(engine, h, args, target, node);
+    if (sub !== undefined) return sub;
+
+    // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
+    // to `Apply(Field(Comparable, "compare"), x, y)` and STAYS that (the
+    // `ProtocolMember` node only appears when the `Field` EVALUATE handler's
+    // wrapper literal beta-reduces). Intercept it BEFORE the target's `Apply`
+    // mapping, which would otherwise compile the protocol-naming `Field`
+    // operand and die inside it. When the dispatch tier declines, fail closed
+    // for the whole unit rather than falling through to the generic `Apply`
+    // lowering (ruled 2026-08-12, `docs/COMPILATION-MODEL.md`).
+    sub = BaseCompiler.compileExprApplyField(engine, h, args, target);
+    if (sub !== undefined) return sub;
+
+    // Handle function calls
+    const fn = target.functions?.(h);
+    if (!fn) {
+      // A four-operand `ProtocolProperty` is a property STORE, not a call — the
+      // shape a hand-built expression spells, and what `p.(P.name) = v` folds
+      // to at evaluation. Refused with the same message as the `Assign`
+      // spellings of the same write: a store writes a mutable object, and
+      // objects have no compiled representation yet.
+      if (h === 'ProtocolProperty' && args.length === 4)
+        throw new Error(
+          `Could not compile \`${isString(args[1]) ? args[1].string : 'property'}\`: this protocol ` +
+            `property assignment has no lowering on target ` +
+            `'${target.language ?? 'javascript'}' (a property store writes a ` +
+            `mutable object, and objects have no compiled representation).`
+        );
+
+      // A protocol call — a bare dispatcher head (`compare(x, y)`), the
+      // `ProtocolMember`/`ProtocolProperty` operators, or a `Field` read that
+      // only a protocol property can answer. Compiled as a direct call
+      // (static resolution) or a reified guard chain (dynamic dispatch); a
+      // decline falls through to the standard fail-closed throw below.
+      const protoCall = BaseCompiler.protocolCallParts(engine, h, args);
+      if (protoCall !== undefined) {
+        const code = BaseCompiler.tryCompileProtocolDispatch(
+          engine,
+          protoCall,
+          target
+        );
+        if (code !== undefined) return code;
+      }
+
+      // `h` may name a function-valued BLOCK LOCAL of an enclosing statement
+      // list (`const g = (k) => …`, then `g(3)`). That binding is emitted by
+      // the block itself, so the call is an ordinary call of it — and it must
+      // be resolved BEFORE the engine lookup below, which a same-named engine
+      // symbol would otherwise win.
+      const localFn = BaseCompiler.tryCompileLocalFunctionCall(h, args, target);
+      if (localFn !== undefined) return localFn;
+
+      // `h` may be a symbol whose engine definition is a user-defined function
+      // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
+      // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
+      // unknown operator (no such definition) or a target that opts out.
+      //
+      // Skipped when `h` names a BOUND variable of the enclosing compilation —
+      // a function literal's parameter, a loop index, a block local. That
+      // binding is what the call applies, and it shadows any same-named engine
+      // definition; resolving the engine definition instead emitted a call to
+      // the WRONG function. With `f` assigned at engine level, the literal
+      // `(f, x) ↦ f(x)` emitted `_fn_f(x)` and so ignored its own `f`
+      // argument, disagreeing with the interpreter. A bound head that is a
+      // block-local FUNCTION was already resolved by
+      // `tryCompileLocalFunctionCall` above and never reaches this line;
+      // anything else falls through to the fail-closed throw below, so the
+      // interpreter — which resolves the parameter correctly — runs the call.
+      // Ruled by the user 2026-08-14: fail closed now; compiling such a call as
+      // a direct call of the bound parameter (true higher-order compilation)
+      // remains a possible future feature, not a bug fix.
+      const userFn = target.boundVars?.has(h)
+        ? undefined
+        : BaseCompiler.tryCompileUserFunction(engine, h, args, target, node);
+      if (userFn !== undefined) return userFn;
+      throw new Error(
+        BaseCompiler.noLoweringMessage(
+          engine,
+          h,
+          args,
+          target,
+          declinedByCustomHandler
+        )
+      );
+    }
+
+    sub = BaseCompiler.compileExprFunctionCall(
+      engine,
+      h,
+      args,
+      prec,
+      target,
+      node,
+      fn
+    );
+    if (sub !== undefined) return sub;
+
+    // `fn` is a plain string: the target maps this head to a helper. When
+    // the target declares the helper real-only (`isRealOnlyLowering`: by
+    // default every helper name, e.g. JS `_SYS.erf`), it takes a real
+    // scalar, and handing it a complex value silently returns garbage
+    // (compiled `Erf(z)` for complex z → −1, not NaN). Fail closed with
+    // the offending head. A helper the target declares complex-capable
+    // (Python `scipy.special.erf`) receives the complex value as it is.
+    if (
+      BaseCompiler.isRealOnlyLowering(target, h) &&
+      args.some((a) => BaseCompiler.realGuardCandidate(a, engine, target))
+    ) {
+      // D6 runtime rule (design §8): `Erf(x)` for a maybe-complex `x` runs
+      // the real helper on the real part when the imaginary part is exactly
+      // zero and answers `NaN` otherwise; a statically non-real operand is
+      // the compile-time decline (inside `realOperandGuard`). Over an array
+      // operand (`Erf(√L)`) the rule is element-wise and the helper
+      // broadcasts over the projected array.
+      const guarded = BaseCompiler.realOperandGuard(
+        engine,
+        h,
+        args,
+        target,
+        () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+        'number'
+      );
+      if (guarded !== undefined) return guarded;
+      throw new Error(
+        `Could not compile \`${h}\`: real-only target helper "${fn}" cannot represent a complex-valued argument.`
+      );
+    }
+
+    const call = `${fn}(${args
+      .map((x) => BaseCompiler.compileValueOperand(x, target))
+      .join(', ')})`;
+    // Same shape gate as the function-codegen path above: a string-mapped
+    // helper is a scalar/genType signature too (`atan`, `clamp`, `mod`), and
+    // handing it a `vecN`/`matN` operand it has no overload for is invalid
+    // source, not a runtime concern.
+    target.checkOperandShapes?.(h, args, call, target);
+    return call;
+  }
+
+  /**
+   * The call of a function whose body was captured, which an ambient function
+   * of the same name cannot replace. A case of `compileExpr`: it returns the
+   * code, or `undefined` when `compileExpr` continues with its next case.
+   */
+  private static compileExprCapturedBody(
+    engine: ComputeEngine,
+    h: string,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    if (
+      node !== undefined &&
+      isFunction(node) &&
+      node.operator === h &&
+      !BaseCompiler.CONTROL_FLOW_HEADS.has(h) &&
+      !BaseCompiler.isCompileBoundName(h) &&
+      target.varsKeys?.has(h) !== true &&
+      BaseCompiler.blockLocalFunction(h, target) === undefined
+    ) {
+      const value = node.valueDefinition;
+      const operator = node.operatorDefinition;
+      const held =
+        value?.value ??
+        (operator as { _lambdaLiteral?: Expression } | undefined)
+          ?._lambdaLiteral;
+      const ambient =
+        held !== undefined && isFunction(held, 'Function')
+          ? lookupApplicable(h, engine.context.lexicalScope)
+          : undefined;
+      if (
+        held !== undefined &&
+        isFunction(held, 'Function') &&
+        ((value !== undefined &&
+          (!ambient || !isValueDef(ambient) || ambient.value !== value)) ||
+          (operator !== undefined &&
+            (!ambient ||
+              !isOperatorDef(ambient) ||
+              ambient.operator !== operator)))
+      )
+        throw new Error(
+          ambient === undefined
+            ? `Could not compile \`${h}\`: the captured callable definition is not in scope.`
+            : `Could not compile \`${h}\`: the captured callable has a different binding from the ambient function.`
+        );
+    }
+    return undefined;
+  }
+
+  /**
+   * The element-wise JavaScript broadcast of a `broadcastable` head over list
+   * operands. A case of `compileExpr`: it returns the code, or `undefined` when
+   * `compileExpr` continues with its next case.
+   */
+  private static compileExprElementwiseBroadcast(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    if (target.language === 'javascript') {
+      const broadcast = BaseCompiler.tryCompileBroadcast(
+        engine,
+        h,
+        args,
+        target,
+        node
+      );
+      if (broadcast !== null) return broadcast;
+      // The broadcast closure declines a REAL-ONLY head (`Floor`, `Mod`,
+      // `Erf`, …) whose array operand has a complex element lane, and the
+      // list-arithmetic residue below would then fail the form closed before
+      // the real-only gates further down (`isRealOnlyLowering`) ever see
+      // it. Apply the element-wise run-time realness rule here: at each
+      // position, the real lowering runs on the real part of an element whose
+      // imaginary part is exactly zero, and any other element gives NaN (the
+      // D2/D6 rule of `realOperandGuard`). The operands are projected onto
+      // the real lane and the head is re-emitted, which re-enters the closure above with real element
+      // lanes — `⌊√L⌋` at `L = [4, -1]` compiles to `[2, NaN]`.
+      // (A form without an array operand is left to those gates, so its
+      // scalar emission is unchanged.)
+      if (
+        BaseCompiler.isRealOnlyLowering(target, h) &&
+        args.some((a) => BaseCompiler.isArrayOperand(a))
+      ) {
+        const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
+        if (
+          guardArgs.some((a) =>
+            BaseCompiler.realGuardCandidate(a, engine, target)
+          )
+        ) {
+          const complex = BaseCompiler.complexLoweringOf(target, h);
+          if (complex !== undefined)
+            return complex.lowering(
+              args,
+              BaseCompiler.operandCompiler(node, target),
+              target
+            );
+          const guarded = BaseCompiler.realOperandGuard(
+            engine,
+            h,
+            guardArgs,
+            target,
+            () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+            BaseCompiler.realOnlyResultKind(h)
+          );
+          if (guarded !== undefined) return guarded;
+          // The rule declined (a maybe-complex set or dictionary operand, an
+          // undecided element lane): fail closed here rather than fall
+          // through to the later gate, which would repeat the same analysis
+          // before reaching the same decline.
+          throw new Error(
+            `Could not compile \`${h}\`: the target's lowering for this head is real-only and cannot represent a complex-valued argument.`
+          );
+        }
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * A relational or logical head over tuple operands on the GLSL and WGSL
+   * targets. A case of `compileExpr`: it returns the code, or `undefined` when
+   * `compileExpr` continues with its next case.
+   */
+  private static compileExprGpuRelational(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    if (
+      (target.language === 'glsl' || target.language === 'wgsl') &&
+      (isRelationalOperator(h) || BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h))
+    ) {
+      const isTupleShaped = (a: Expression): boolean => {
+        if (isFunction(a, 'Tuple')) return true;
+        const t = compilationType(a);
+        return typeof t !== 'string' && t.kind === 'tuple';
+      };
+      const tupleEquality =
+        target.language === 'glsl' && (h === 'Equal' || h === 'NotEqual');
+      const offending = args.find(
+        (a) =>
+          !BaseCompiler.isComplexValued(a) &&
+          BaseCompiler.isNonScalarShape(a) &&
+          !(tupleEquality && isTupleShaped(a))
+      );
+      if (offending !== undefined)
+        throw new Error(
+          `Could not compile \`${h}\`: a comparison or logical connective over the ` +
+            `non-scalar operand \`${offending.toString()}\` on the ` +
+            `${target.language} target — the shader infix operators are ` +
+            `scalar-only (element-wise conditions compile only inside a ` +
+            `\`Which\`/\`If\` selection).`
+        );
+    }
+    return undefined;
+  }
+
+  /**
+   * The products and sums of points that the GLSL and WGSL targets refuse. A
+   * case of `compileExpr`: it returns the code, or `undefined` when
+   * `compileExpr` continues with its next case.
+   */
+  private static compileExprGpuPoint(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    if (target.language === 'glsl' || target.language === 'wgsl') {
+      const isPoint = (a: Expression): boolean =>
+        isNumericTuple(a) || isGatedPoint(a);
+      if (args.some(isPoint)) {
+        let reason: string | undefined;
+        if (h === 'Multiply' && args.filter(isPoint).length > 1)
+          reason = 'two points have no product';
+        else if (h === 'Divide' && args.slice(1).some(isPoint))
+          reason = 'a point has no reciprocal';
+        else if (
+          (h === 'Add' || h === 'Subtract') &&
+          args.some((a) => !isPoint(a) && !couldBeNumericTuple(a))
+        )
+          reason = 'a point does not add to a number';
+        if (reason !== undefined)
+          throw new Error(
+            `Could not compile \`${h}\`: ${reason}, and the ` +
+              `${target.language} vector operators would compute a ` +
+              `component-wise value where the interpreter answers an error.`
+          );
+      }
+      // A point beside a LIST: a shader lowers both to a `vecN`, so a point
+      // and a list of the same length combine component-wise. The
+      // interpreter does not: `[1, 2]·(x, 1)` is the list of points
+      // `[(x, 1), (2x, 2)]`, which has no shader value, and `(3, 1) / [1, 2]`
+      // stays unevaluated. Both compiled to a plausible `vec2`. The point is
+      // read by the COULD-form here (`couldBeNumericTuple`), so a point whose
+      // component types are only possibly numeric (`PointList(t, 1)` with
+      // `t` free) is a point too. `Add` is not listed: a point beside a
+      // list is refused above, as a point beside a non-point.
+      if (h === 'Multiply' || h === 'Divide') {
+        const isAnyPoint = (a: Expression): boolean =>
+          isPoint(a) || couldBeNumericTuple(a);
+        if (
+          args.some(isAnyPoint) &&
+          args.some(
+            (a) =>
+              !isAnyPoint(a) &&
+              !isTupleShapedType(compilationType(a)) &&
+              a.type.matches('list<any>')
+          )
+        )
+          throw new Error(
+            `Could not compile \`${h}\`: ` +
+              (h === 'Multiply'
+                ? 'a point times a list is a list of points in the interpreter'
+                : 'a point divided by a list has no value in the interpreter') +
+              `, and the ${target.language} vector operators would combine ` +
+              `the point and the list component-wise.`
+          );
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * A `Declare`. A case of `compileExpr`: it returns the code, or `undefined`
+   * when `compileExpr` continues with its next case.
+   */
+  private static compileExprDeclare(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    if (h === 'Declare') {
+      // A destructuring declare (`let (x, y) = …`) is desugared at the block
+      // level, into per-leaf declares; one reaching here is in value position
+      // (or outside a block entirely) and would compile as `let _ = …`, its
+      // pattern names silently reading as NaN — fail closed.
+      if (isFunction(args[0], 'Tuple'))
+        throw new Error(
+          `Could not compile a destructuring declaration in value position. ` +
+            `It is desugared to per-leaf declares only in STATEMENT ` +
+            `position (a block's non-final statement, or a loop body).`
+        );
+      const name = isSymbol(args[0]) ? args[0].symbol : '_';
+      // Targets with a `declare` hook handle any initial value at the block
+      // level (as a separate assignment statement — see `compileBlock`). For
+      // the default path (no hook), emit a combined initializer so a
+      // value-carrying `Declare(sym, type, value)` isn't dropped.
+      if (target.declare) return target.declare(name);
+      const value = BaseCompiler.declareValueOperand(args);
+      if (value === undefined) return `let ${name}`;
+      // The value may not be an operand of `node` at all (it can come from a
+      // trailing attributes dictionary), and `-1` is the WHOLE-NODE region
+      // sentinel — compile it plainly rather than open the wrong region.
+      const valueIndex = args.indexOf(value);
+      const valueCode =
+        valueIndex < 0
+          ? BaseCompiler.compile(value, target)
+          : BaseCompiler.compileOp(node, valueIndex, target, 0, value);
+      return `let ${name} = ${valueCode}`;
+    }
+    return undefined;
+  }
+
+  /**
+   * A `Coalesce`. A case of `compileExpr`: it returns the code, or `undefined`
+   * when `compileExpr` continues with its next case.
+   */
+  private static compileExprCoalesce(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    if (h === 'Coalesce') {
+      if (args.length === 0)
+        throw new Error(
+          'Could not compile `Coalesce`: expected at least one argument'
+        );
+      if (
+        args
+          .slice(0, -1)
+          .some((a) => provablyAdmits('nothing', compilationType(a)))
+      )
+        throw new Error(
+          `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' ` +
+            `cannot distinguish a possible 'Nothing' input from an absent datum.`
+        );
+      // Test the domain of each operand, not the result: a numeric marker
+      // still needs a NaN check when the fallback is a string or a collection.
+      const axes = args
+        .slice(0, Math.max(1, args.length - 1))
+        .map((a) =>
+          BaseCompiler.absenceAxisForType(
+            compilationType(a),
+            target,
+            'Coalesce'
+          )
+        );
+      if (axes.some((axis) => axis.coalesce === undefined))
+        throw new Error(
+          `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' cannot ` +
+            `discharge absence (no 'coalesce' capability).`
+        );
+      // Compiled coalescing evaluates the defaults lazily, left to right: the
+      // operands after the first are their own regions (§5.1(b)).
+      const codes = args.map((a, i) =>
+        i === 0
+          ? BaseCompiler.compileValueOperand(a, target)
+          : BaseCompiler.compileOpValue(node, i, target, 0, a)
+      );
+      // Fold right: coalesce(a0, coalesce(a1, … coalesce(a_{n-1}, a_n))).
+      let acc = codes[codes.length - 1];
+      for (let i = codes.length - 2; i >= 0; i--)
+        acc = axes[i].coalesce!(codes[i], acc);
+      return acc;
+    }
+    return undefined;
+  }
+
+  /**
+   * An `Apply` of a `Field`. A case of `compileExpr`: it returns the code, or
+   * `undefined` when `compileExpr` continues with its next case.
+   */
+  private static compileExprApplyField(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    if (h === 'Apply' && args.length >= 2 && isFunction(args[0], 'Field')) {
+      const fieldOps = args[0].ops;
+      const record = protocolOfSymbol(engine, fieldOps[0]);
+      const member = isString(fieldOps[1]) ? fieldOps[1].string : undefined;
+      if (record !== undefined && member !== undefined) {
+        const code = BaseCompiler.tryCompileProtocolDispatch(
+          engine,
+          {
+            implKey: member,
+            member,
+            protocol: record.name,
+            args: args.slice(1),
+          },
+          target
+        );
+        if (code !== undefined) return code;
+        throw new Error(
+          `Could not compile \`${record.name}.${member}\`: this protocol call has no lowering on ` +
+            `target '${target.language ?? 'javascript'}' (dynamic dispatch ` +
+            `could not be proven compilable).`
+        );
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The call of a function whose lowering is a function of the target. A case
+   * of `compileExpr`: it returns the code, or `undefined` when `compileExpr`
+   * continues with its next case.
+   */
+  private static compileExprFunctionCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined,
+    fn: CompiledFunction<Expression> | undefined
+  ): TargetSource | undefined {
+    if (typeof fn === 'function') {
+      // The same real-only rule the string-mapped branch below applies, for
+      // the heads whose lowering is real-only but spelled as function codegen
+      // (`Math.floor`, `sign(x)·round(|x|)`, `Math.max`, `np.floor`, …). See
+      // `REAL_ONLY_BY_DEFINITION` for the families and the NaN each one was
+      // measured producing behind `success: true`, and `isRealOnlyLowering`
+      // for the heads each target declares real-only.
+      if (BaseCompiler.isRealOnlyLowering(target, h)) {
+        // The operands the gate scans and binds — the args themselves,
+        // except `ColorFromColorspace`, whose maybe-complex scalars live
+        // INSIDE its literal components tuple (`realOnlyGuardOperands`).
+        const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
+        if (
+          guardArgs.some((a) =>
+            BaseCompiler.realGuardCandidate(a, engine, target)
+          )
+        ) {
+          // D2/D6 runtime rule (see `realOperandGuard`): each maybe-complex
+          // scalar operand is bound once and the real lowering runs on its
+          // real part when every imaginary part is exactly zero; otherwise
+          // the failing branch has the SAME shape the head returns — scalar
+          // NaN for the scalar heads, an equally-sized NaN-filled array for
+          // the color constructors (`realOnlyResultKind`). An ARRAY operand
+          // whose elements may be complex takes the element-wise form: the
+          // real lowering broadcasts or reduces over the projected array.
+          // A head the target also lowers for complex operands
+          // (`complexLowering`: the mean and the variance of complex data)
+          // takes that lowering instead.
+          const complex = BaseCompiler.complexLoweringOf(target, h);
+          if (complex !== undefined)
+            return complex.lowering(
+              args,
+              BaseCompiler.operandCompiler(node, target),
+              target
+            );
+          const guarded = BaseCompiler.realOperandGuard(
+            engine,
+            h,
+            guardArgs,
+            target,
+            () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+            BaseCompiler.realOnlyResultKind(h)
+          );
+          if (guarded !== undefined) return guarded;
+          throw new Error(
+            `Could not compile \`${h}\`: the target's lowering for this head is real-only and cannot represent a complex-valued argument.`
+          );
+        }
+      }
+
+      // A `broadcastable` head over a single finite indexed collection:
+      // apply the head's scalar element lowering across the collection. How
+      // that is spelled is a property of the TARGET LANGUAGE, not of the base
+      // compiler — Python fans out with a comprehension, the shader languages
+      // are already componentwise on a `vecN` and do not fan out at all — so
+      // it is delegated to the target's `broadcastUnary` hook. A target
+      // without one fails closed; the base compiler used to emit a
+      // JavaScript `.map((v) => …)` arrow here for EVERY target, which is not
+      // valid GLSL, WGSL or Python.
+      //
+      // A tuple operand of a head that declares the `'tuples'` broadcast
+      // exemption is NOT a source of cells here: the head owns that shape and
+      // consumes it whole, so the fan-out stands aside and the head's own
+      // codegen (`fn`, below) receives the tuple entire — see
+      // `isBroadcastExemptTupleOperand`.
+      //
+      // A head named in `CompileTarget.collectionAwareHeads` stands the
+      // fan-out down for the whole operand, for the same reason and with the
+      // same consequence: its codegen dispatches on the collection itself, or
+      // declines. A provably STRING operand is included: a string is a
+      // finite indexed collection of its grapheme clusters, so the fan-out
+      // used to intercept `AsRgb("red")` and decline for want of a
+      // `broadcastUnary` lowering, while the head's own codegen reads that
+      // string as ONE CSS color and compiles it.
+      const def = engine.lookupDefinition(h);
+      const collectionAwareHead =
+        target.collectionAwareHeads?.has(h) === true && args.length === 1;
+      if (
+        isOperatorDef(def) &&
+        def.operator.broadcastable &&
+        args.length === 1 &&
+        isFiniteIndexedCollection(args[0]) &&
+        !collectionAwareHead &&
+        !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, args[0])
+      ) {
+        const broadcast = BaseCompiler.compileBroadcastUnary(
+          engine,
+          h,
+          args[0],
+          fn,
+          target
+        );
+        if (broadcast !== undefined) return broadcast;
+        throw new Error(
+          `Could not compile \`${h}\`: an element-wise broadcast over the collection ` +
+            `\`${args[0].toString()}\` on the ${
+              target.language ?? 'javascript'
+            } target has no \`broadcastUnary\` lowering for this shape. ` +
+            `Materialize the collection with evaluate() and ` +
+            `compile a scalar element function instead.`
+        );
+      }
+      // The index-aware operand compiler (`OperandCompiler`): a handler that
+      // lowers a construct with conditionally-evaluated operand positions
+      // passes the index for those positions and gets the matching CSE region
+      // instance. A handler that omits it compiles exactly as before.
+      const code = fn(args, BaseCompiler.operandCompiler(node, target), target);
+      // A target with a static type system gets to reject the emission for the
+      // operand shapes it was given (`CompileTarget.checkOperandShapes`); it
+      // throws to fail closed. No hook: unchanged.
+      target.checkOperandShapes?.(h, args, code, target);
+      // A head that ALSO has an infix spelling gets the same precedence
+      // treatment its infix emission would have received. A function handler
+      // takes over when the infix path declines — a collection operand, a
+      // complex one — but it lowers the very same operator, so its emission
+      // binds just as loosely: the GPU `Add` handler emits
+      // `vec2(a, b) + vec2(c, d)` for a sum of two points, and splicing that
+      // into an enclosing `s * …` without parentheses yielded
+      // `s * vec2(a, b) + vec2(c, d)`, read as `(s * P) + Q`. Wrapping here on
+      // `op[1] < prec` mirrors the infix path's own rule verbatim.
+      const opPrec = target.operators?.(h)?.[1];
+      if (opPrec !== undefined && opPrec < prec) return `(${code})`;
+      return code;
+    }
+    return undefined;
+  }
+
+  /**
+   * The call of a function whose scalar parameter receives a tuple, compiled as
+   * the tuple of the calls at each component. A case of `compileExpr`: it
+   * returns the code, or `undefined` when `compileExpr` continues with its next
+   * case.
+   */
+  private static compileExprTupleCall(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
+    {
+      const mappedArgs = new Set<number>();
+      let tupleCall = BaseCompiler.declaredScalarTupleCall(
+        engine,
+        h,
+        args,
+        target,
+        mappedArgs
+      );
+      // The interpreter evaluates each argument once, then maps the call over
+      // the components. The rewrite writes an argument that is not mapped
+      // (`Random()` in `Apply((u: real, w: real) ↦ w, (1, 2), Random())`)
+      // into each component call, which would evaluate it once per
+      // component. Thus each argument with an effect is first bound to a
+      // temporary of the same type, and the component calls read the
+      // temporary. A `Tuple` or `List` literal that the rewrite maps over is
+      // not bound whole: its parts are the mapped components, and each one is
+      // read once. But each component call reads its part where the call is
+      // emitted, after the temporaries of the other arguments, and the
+      // interpreter evaluates all the arguments, in order, before any call.
+      // Thus each part with an effect is bound to its own temporary too, in
+      // the order of the arguments, and the literal is written again with
+      // the temporaries. A part that is itself a `Tuple` or `List` literal
+      // maps again, so its own parts are bound the same way.
+      // `Apply((u: real, w: real) ↦ w - u, (Random(), Random()), Random())`
+      // draws the two components before `w`, as the interpreter does. A
+      // literal at a position that is not mapped (a parameter with no
+      // declared type, or a `list<…>` parameter that receives the list whole)
+      // is written whole into each component call, so it is bound like any
+      // other argument. A target with no value binding (a shader) keeps the
+      // rewrite as it is.
+      const bindings: Array<[string, TargetSource]> = [];
+      let inner = target;
+      if (
+        tupleCall !== undefined &&
+        target.bindExpr !== undefined &&
+        args.some((a) => a.isPure === false)
+      ) {
+        const names: string[] = [];
+        const bind = (a: Expression): Expression => {
+          const name = BaseCompiler.tempVar(target);
+          names.push(name);
+          bindings.push([name, BaseCompiler.compileValueOperand(a, target)]);
+          return BaseCompiler.typedTemp(engine, name, a.type.type);
+        };
+        const bindParts = (a: Expression): Expression => {
+          if (a.isPure !== false) return a;
+          if (!isFunction(a, 'Tuple') && !isFunction(a, 'List')) return bind(a);
+          return engine.function(a.operator, a.ops.map(bindParts));
+        };
+        const boundArgs = args.map((a, i) => {
+          if ((h === 'Apply' && i === 0) || a.isPure !== false) return a;
+          if (
+            mappedArgs.has(i) &&
+            (isFunction(a, 'Tuple') || isFunction(a, 'List'))
+          )
+            return bindParts(a);
+          return bind(a);
+        });
+        if (names.length > 0) {
+          tupleCall = BaseCompiler.declaredScalarTupleCall(
+            engine,
+            h,
+            boundArgs,
+            target
+          );
+          // The temporaries are parameters of the binding emitted below, so
+          // they are read by their own names, not as keys of the variables
+          // object.
+          inner = {
+            ...target,
+            var: (id) => (names.includes(id) ? id : target.var(id)),
+            ...BaseCompiler.withBoundScope(target, names),
+          };
+        }
+      }
+      if (tupleCall !== undefined) {
+        // A shader writes a tuple as a float vector (`vec2`), which cannot
+        // hold the booleans of a tuple of boolean results, as for
+        // `Not((A, B))`.
+        if (
+          (target.language === 'glsl' || target.language === 'wgsl') &&
+          isFunction(tupleCall) &&
+          tupleCall.ops.some((x) => x.type.matches('boolean'))
+        )
+          throw new Error(
+            `Could not compile a call over the tuple argument of \`${h}\`: ` +
+              `the result is a tuple of booleans, which target ` +
+              `'${target.language}' cannot represent as a vector.`
+          );
+        if (bindings.length > 0)
+          return target.bindExpr!(
+            bindings,
+            BaseCompiler.compile(tupleCall, inner, 0)
+          );
+        return BaseCompiler.compile(tupleCall, target, prec);
+      }
+      // On the JavaScript target, a tuple at a parameter with no declared
+      // type is bound whole (`wholeTupleCall`).
+      if (target.language === 'javascript') {
+        const whole = BaseCompiler.wholeTupleCall(engine, h, args, target);
+        if (whole !== undefined)
+          return BaseCompiler.compile(whole, target, prec);
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * The JavaScript broadcast of a call whose operands may be collections. A
+   * case of `compileExpr`: it returns the code, or `undefined` when
+   * `compileExpr` continues with its next case.
+   */
+  private static compileExprBroadcastJavaScript(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
     if (target.language === 'javascript') {
       const def = engine.lookupDefinition(h);
       // A block-local function shadows an engine-level function with the
@@ -12051,27 +13108,20 @@ export class BaseCompiler {
         }
       }
     }
+    return undefined;
+  }
 
-    // Python target: arithmetic over a collection-typed or possibly-collection
-    // operand (a concrete/declared `list`/`indexed_collection`, a
-    // `broadcastable<T>`, or a top-typed application such as `h(x)` — the same
-    // operand predicate as the JS D6 guard above) cannot be lowered to the
-    // target's INFIX arithmetic. Python's arithmetic operators do NOT broadcast
-    // a plain `list`: `2 * [1, 2]` REPEATS (`[1, 2, 1, 2]`), `[1, 2] - 1`
-    // raises — both diverge from the interpreter's element-wise result
-    // (`[2, 4]` / `[0, 1]`). A NumPy array WOULD broadcast, but the compiled
-    // artifact cannot constrain what the caller binds, so the outcome is
-    // binding-dependent.
-    //
-    // What IS soundly expressible is a fan-out over the ONE collection operand
-    // (`tryCompilePythonElementwise`): the target spells the element-wise map
-    // as a list comprehension, which is element-wise for a plain Python list,
-    // a tuple and an ndarray alike. When that route declines, fail closed
-    // and let the engine fall back to the interpreter, which broadcasts
-    // correctly. Only infix-lowering arithmetic heads are affected;
-    // element-wise math functions (`Sin` → `np.sin`) broadcast natively over a
-    // NumPy array and are left untouched. Bare unknown symbols are NOT
-    // possibly-collection-typed, so plain scalar plot bodies are unaffected.
+  /**
+   * The Python broadcast of a call whose operands may be collections. A case of
+   * `compileExpr`: it returns the code, or `undefined` when `compileExpr`
+   * continues with its next case.
+   */
+  private static compileExprBroadcastPython(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
     if (target.language === 'python') {
       const def = engine.lookupDefinition(h);
       const isArithmeticInfixHead =
@@ -12132,214 +13182,23 @@ export class BaseCompiler {
         );
       }
     }
+    return undefined;
+  }
 
-    // A comparison with an operand that may be absent (`w > 0` with
-    // `w: number | missing`) is absent when that operand is absent, on a
-    // target with object absence (ROADMAP CE-93, `absentComparisonGuard`).
-    {
-      const guarded = BaseCompiler.absentComparisonGuard(h, args, target, () =>
-        BaseCompiler.compileExpr(engine, h, args, prec, target, node)
-      );
-      if (guarded !== undefined) return guarded;
-    }
-
-    // GPU shader targets: a comparison or logical connective over a non-scalar
-    // operand must not lower through the scalar infix operators — GLSL rejects
-    // `vecN < float` outright, and where an infix form IS legal it means the
-    // wrong thing (WGSL `vecN == vecN` is a `vecN<bool>`, not the scalar bool
-    // the surrounding expression expects; GLSL `vecN == vecN` is ATOMIC
-    // aggregate equality where the interpreter broadcasts a `List`
-    // element-wise). The element-wise `Which`/`If` selection path builds its
-    // boolean-vector masks directly (`compileGPUSelection`) and never routes a
-    // condition through here; everything else fails closed. One shape is
-    // deliberately admitted: GLSL `Equal`/`NotEqual` over TUPLE-shaped
-    // operands — a tuple (point) is atomic in the interpreter too, and GLSL
-    // `==` on two vecNs is scalar aggregate equality, so that lowering is
-    // faithful. (On WGSL the same `==` is component-wise — excluded.)
-    // Complex operands are excluded: they already skip the infix path below
-    // and fail closed in function dispatch.
-    if (
-      (target.language === 'glsl' || target.language === 'wgsl') &&
-      (isRelationalOperator(h) || BaseCompiler.LOGICAL_BROADCAST_HEADS.has(h))
-    ) {
-      const isTupleShaped = (a: Expression): boolean => {
-        if (isFunction(a, 'Tuple')) return true;
-        const t = compilationType(a);
-        return typeof t !== 'string' && t.kind === 'tuple';
-      };
-      const tupleEquality =
-        target.language === 'glsl' && (h === 'Equal' || h === 'NotEqual');
-      const offending = args.find(
-        (a) =>
-          !BaseCompiler.isComplexValued(a) &&
-          BaseCompiler.isNonScalarShape(a) &&
-          !(tupleEquality && isTupleShaped(a))
-      );
-      if (offending !== undefined)
-        throw new Error(
-          `Could not compile \`${h}\`: a comparison or logical connective over the ` +
-            `non-scalar operand \`${offending.toString()}\` on the ` +
-            `${target.language} target — the shader infix operators are ` +
-            `scalar-only (element-wise conditions compile only inside a ` +
-            `\`Which\`/\`If\` selection).`
-        );
-    }
-
-    // GPU shader targets: the point rules of the interpreter. A point lowers
-    // to a `vecN`, and the shader operators are component-wise over vectors
-    // and broadcast a scalar over a vector, so every shape below compiled to
-    // a plausible vector where the interpreter answers an error:
-    //  - `Multiply` of two points: `no-product-between-points`;
-    //  - `Divide` by a point: `no-division-by-point`;
-    //  - `Add` of a point and a term that is not a point: `incompatible-type`.
-    // Canonicalization already turns most of these into an `Error` for a
-    // plain point, but not for a GATED point (`isGatedPoint`: a restricted
-    // point such as `When((t, 1), c)`, whose `missing` arm hides the tuple
-    // type), and not for `t + P` with an undeclared `t`. Fail closed instead.
-    if (target.language === 'glsl' || target.language === 'wgsl') {
-      const isPoint = (a: Expression): boolean =>
-        isNumericTuple(a) || isGatedPoint(a);
-      if (args.some(isPoint)) {
-        let reason: string | undefined;
-        if (h === 'Multiply' && args.filter(isPoint).length > 1)
-          reason = 'two points have no product';
-        else if (h === 'Divide' && args.slice(1).some(isPoint))
-          reason = 'a point has no reciprocal';
-        else if (
-          (h === 'Add' || h === 'Subtract') &&
-          args.some((a) => !isPoint(a) && !couldBeNumericTuple(a))
-        )
-          reason = 'a point does not add to a number';
-        if (reason !== undefined)
-          throw new Error(
-            `Could not compile \`${h}\`: ${reason}, and the ` +
-              `${target.language} vector operators would compute a ` +
-              `component-wise value where the interpreter answers an error.`
-          );
-      }
-      // A point beside a LIST: a shader lowers both to a `vecN`, so a point
-      // and a list of the same length combine component-wise. The
-      // interpreter does not: `[1, 2]·(x, 1)` is the list of points
-      // `[(x, 1), (2x, 2)]`, which has no shader value, and `(3, 1) / [1, 2]`
-      // stays unevaluated. Both compiled to a plausible `vec2`. The point is
-      // read by the COULD-form here (`couldBeNumericTuple`), so a point whose
-      // component types are only possibly numeric (`PointList(t, 1)` with
-      // `t` free) is a point too. `Add` is not listed: a point beside a
-      // list is refused above, as a point beside a non-point.
-      if (h === 'Multiply' || h === 'Divide') {
-        const isAnyPoint = (a: Expression): boolean =>
-          isPoint(a) || couldBeNumericTuple(a);
-        if (
-          args.some(isAnyPoint) &&
-          args.some(
-            (a) =>
-              !isAnyPoint(a) &&
-              !isTupleShapedType(compilationType(a)) &&
-              a.type.matches('list<any>')
-          )
-        )
-          throw new Error(
-            `Could not compile \`${h}\`: ` +
-              (h === 'Multiply'
-                ? 'a point times a list is a list of points in the interpreter'
-                : 'a point divided by a list has no value in the interpreter') +
-              `, and the ${target.language} vector operators would combine ` +
-              `the point and the list component-wise.`
-          );
-      }
-    }
-
-    // A comparison with a WRITTEN absence operand (`Missing`, `Undefined`) is
-    // undecided: the interpreter answers `Missing` for `Less(Missing, t)` and
-    // for `Equal(Undefined, 1)`, whatever the other operand holds (Kleene).
-    // The compiled value is the target's object null, which is also the
-    // undecided value of its three-valued conditions, so an `If`/`Which` over
-    // it takes no arm (`conditionNode` reads such a relation by its value).
-    // Before, the absence symbol lowered to `undefined` and the plain
-    // comparison answered a confident `false` (`true` for `NotEqual`), so an
-    // `If` over it took an arm. A target without an object axis keeps its
-    // plain lowering.
-    if (
-      BaseCompiler.BRANCH_RELATIONS.has(h) &&
-      target.absence?.object !== undefined &&
-      args.some(BaseCompiler.isAbsenceSymbol)
-    )
-      return BaseCompiler.compileAbsentRelation(
-        engine,
-        h,
-        args,
-        target,
-        target.absence.object.nullLiteral
-      );
-
-    // An ORDERING comparison over a complex-valued operand has no lowering:
-    // the complex numbers are not ordered, so the interpreter leaves
-    // `Less(i·x, 0)` symbolic (no truth value) while `x` has no value, and
-    // answers `False` once the value of an operand is not a real number,
-    // whatever the other operands are (`x < i` is `False` with `x` free;
-    // user decision of 2026-10-21, `nonRealKind()` in
-    // `library/relational-operator.ts`), while both the infix path
-    // below and the function codegen it falls through to emit a raw `<` over
-    // the `{re, im}` object — a silent `false` behind `success: true`. Fail
-    // closed instead. `Equal`/`NotEqual` are NOT affected: they have
-    // their own complex-aware codegen (`_SYS.eq`/`_SYS.neq`). An operand of
-    // merely UNKNOWN sign over a real kernel (`Sqrt(x)`) is not complex-valued
-    // by `isComplexValued`'s carve-out, so `Less(Sqrt(x), 2)` still compiles.
-    if (BaseCompiler.ORDERING_HEADS.has(h)) {
-      // D2 (design §8, `docs/COMPILATION-MODEL.md`): an
-      // operand that MAY be complex — a `complex`-typed symbol, a wide binding
-      // under the complex discipline, a promoted radical — takes the RUNTIME
-      // rule (bind once, compare the real parts when every imaginary part is
-      // exactly zero, `false` otherwise); only a STATICALLY non-real operand
-      // is the compile-time decline, raised inside `realOperandGuard`.
-      // A CHAIN (`a < b < c`) binds each operand at its own edge so a later
-      // operand is never evaluated when an earlier edge already failed — the
-      // interpreter's short-circuit order (`realOperandChain`). A chain with
-      // an ARRAY operand is element-wise: every operand is an argument of
-      // one broadcast closure (evaluated exactly once, the edges conjoined
-      // per element), so it takes the element-wise form of
-      // `realOperandGuard`, which projects the operands and re-emits the
-      // closure over the projections.
-      const guarded =
-        args.length > 2 && !args.some((a) => BaseCompiler.isArrayOperand(a))
-          ? BaseCompiler.realOperandChain(h, args, target)
-          : BaseCompiler.realOperandGuard(
-              engine,
-              h,
-              args,
-              target,
-              () =>
-                BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-              'boolean'
-            );
-      if (guarded !== undefined) return guarded;
-      const complexOperand = args.find((a) =>
-        BaseCompiler.realGuardCandidate(a, engine, target)
-      );
-      if (complexOperand !== undefined)
-        throw new Error(
-          `Could not compile \`${h}\`: an ordering comparison over the ` +
-            `complex-valued operand \`${complexOperand.toString()}\` — the ` +
-            `complex numbers are not ordered. The interpreter answers ` +
-            `\`False\` when an operand has a value that is not a real ` +
-            `number, whatever the other operands are (\`x < i\` is ` +
-            `\`False\`), and leaves the comparison symbolic while the ` +
-            `operand depends on a free symbol (\`i·x < 0\`).`
-        );
-    }
-
-    // Handle operators
-    const op = target.operators?.(h);
-
-    // A Python power that may need the real root of a negative base (an
-    // exact rational or a float exponent, see `negativeBaseFloatPower`)
-    // goes to the `Power` function lowering instead of the `**` operator.
-    const realPythonPower =
-      target.language === 'python' &&
-      h === 'Power' &&
-      op?.[0] === '**' &&
-      (BaseCompiler.realPowerExponent(args) !== undefined ||
-        BaseCompiler.negativeBaseFloatPower(args) !== undefined);
+  /**
+   * An operator of the target (`+`, `*`, `**`, …). A case of `compileExpr`: it
+   * returns the code, or `undefined` when `compileExpr` continues with its next
+   * case.
+   */
+  private static compileExprOperator(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined,
+    op: [string, number] | undefined,
+    realPythonPower: boolean
+  ): TargetSource | undefined {
     if (op !== undefined && !realPythonPower) {
       // Skip infix operators for complex operands — fall through to function
       // dispatch. An operand the D2 runtime rule has bound to a real
@@ -12685,7 +13544,11 @@ export class BaseCompiler {
               // operands need no extra parens.
               const leftAssocNonAssociative =
                 h === 'Subtract' || h === 'Divide';
-              const operandCodes = args.map((arg, i) => {
+              // A loop, not `args.map`: the callback and the frame of `map`
+              // would be two more frames for each level of a nested
+              // expression (ROADMAP CE-320.2).
+              const operandCodes: TargetSource[] = [];
+              for (let i = 0; i < args.length; i++) {
                 let operandPrec = op[1];
                 if (rightAssoc && i < args.length - 1) operandPrec = op[1] + 1;
                 else if (leftAssocNonAssociative && i > 0)
@@ -12694,14 +13557,16 @@ export class BaseCompiler {
                 // connective (`And`/`Or`, whose operands after the first are
                 // lazy edges) pushes its region instance; a non-region edge
                 // compiles exactly as before.
-                return BaseCompiler.compileOpValue(
-                  node,
-                  i,
-                  target,
-                  operandPrec,
-                  arg
+                operandCodes.push(
+                  BaseCompiler.compileOpValue(
+                    node,
+                    i,
+                    target,
+                    operandPrec,
+                    args[i]
+                  )
                 );
-              });
+              }
               /**
                * Drop a factor that the emitted code spells as the exact `1` of
                * the product above it.
@@ -12906,8 +13771,20 @@ export class BaseCompiler {
         }
       }
     }
+    return undefined;
+  }
 
-    // Handle special constructs
+  /**
+   * A `Function` literal. A case of `compileExpr`: it returns the code, or
+   * `undefined` when `compileExpr` continues with its next case.
+   */
+  private static compileExprFunctionLiteral(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
     if (h === 'Function') {
       // Dispatch to target-specific handler if available (e.g. GPU throws)
       const fnFn = target.functions?.(h);
@@ -13274,36 +14151,21 @@ export class BaseCompiler {
       }
       return callee;
     }
+    return undefined;
+  }
 
-    if (h === 'Declare') {
-      // A destructuring declare (`let (x, y) = …`) is desugared at the block
-      // level, into per-leaf declares; one reaching here is in value position
-      // (or outside a block entirely) and would compile as `let _ = …`, its
-      // pattern names silently reading as NaN — fail closed.
-      if (isFunction(args[0], 'Tuple'))
-        throw new Error(
-          `Could not compile a destructuring declaration in value position. ` +
-            `It is desugared to per-leaf declares only in STATEMENT ` +
-            `position (a block's non-final statement, or a loop body).`
-        );
-      const name = isSymbol(args[0]) ? args[0].symbol : '_';
-      // Targets with a `declare` hook handle any initial value at the block
-      // level (as a separate assignment statement — see `compileBlock`). For
-      // the default path (no hook), emit a combined initializer so a
-      // value-carrying `Declare(sym, type, value)` isn't dropped.
-      if (target.declare) return target.declare(name);
-      const value = BaseCompiler.declareValueOperand(args);
-      if (value === undefined) return `let ${name}`;
-      // The value may not be an operand of `node` at all (it can come from a
-      // trailing attributes dictionary), and `-1` is the WHOLE-NODE region
-      // sentinel — compile it plainly rather than open the wrong region.
-      const valueIndex = args.indexOf(value);
-      const valueCode =
-        valueIndex < 0
-          ? BaseCompiler.compile(value, target)
-          : BaseCompiler.compileOp(node, valueIndex, target, 0, value);
-      return `let ${name} = ${valueCode}`;
-    }
+  /**
+   * An `Assign`. A case of `compileExpr`: it returns the code, or `undefined`
+   * when `compileExpr` continues with its next case.
+   */
+  private static compileExprAssign(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    prec: number,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
     if (h === 'Assign') {
       // A destructuring assignment (`(x, y) := …`) is desugared at the block
       // level, into temporaries + writes; a bare one reaching here has no
@@ -13402,68 +14264,21 @@ export class BaseCompiler {
       }
       return `${name} = ${stored}`;
     }
-    if (h === 'Return') {
-      // A target with a statically typed signature checks the returned value's
-      // shape against it HERE, while the emitter's local frames are still
-      // pushed (see `CompileTarget.onReturn`).
-      target.onReturn?.(args[0]);
-      return `return ${BaseCompiler.compileOp(node, 0, target, 0, args[0])}`;
-    }
-    if (h === 'Break') return 'break';
-    if (h === 'Continue') return 'continue';
+    return undefined;
+  }
 
-    if (h === 'Loop') {
-      const loopFn = target.functions?.(h);
-      if (typeof loopFn === 'function')
-        return loopFn(
-          args,
-          (expr) => BaseCompiler.compileValueOperand(expr, target),
-          target
-        );
-      return BaseCompiler.compileForLoop(args, target, node);
-    }
-
-    if (h === 'Comprehension') {
-      const compFn = target.functions?.(h);
-      if (typeof compFn === 'function')
-        return compFn(
-          args,
-          (expr) => BaseCompiler.compileValueOperand(expr, target),
-          target
-        );
-      return BaseCompiler.compileComprehension(args, target, node);
-    }
-
-    if (h === 'If' && args.length !== 2 && args.length !== 3)
-      throw new Error('Could not compile `If`: wrong number of arguments');
-    // The else-less `If(c, t)` is the one-clause `Which(c, t)`: when the
-    // condition is false no branch is selected, and the value is the
-    // codomain's absence marker (`NaN` for a number), exactly what a `Which`
-    // that matched no clause answers (no-selection ruling of 2026-08-27,
-    // `docs/ERROR-MODEL.md`). The operand indices of the two shapes agree
-    // (0 → condition, 1 → arm), so the `Which` branch below compiles the
-    // `If` node as it stands, CSE regions included, and every target's own
-    // `Which` handler lowers it. Before this the two-operand shape was
-    // refused on every target with "wrong number of arguments" while the
-    // interpreter answered `Missing` for it.
-    //
-    // Only the VALUE form is routed this way: a two-operand `If` whose arm is
-    // a statement (an assignment, a block, a loop, a jump) is a guard
-    // statement that reached the expression compiler from a block, and each
-    // target decides that shape on its own terms — plain JavaScript
-    // statement-forms it in the block dispatcher before this point, and the
-    // other targets decline it here, each for a verified reason
-    // (`test/compute-engine/compile-elseless-if-statement.test.ts`). Wrapping
-    // such an arm in a conditional expression would emit an assignment inside
-    // an expression, which Python refuses and the GPU statement model does
-    // not admit.
-    const selectionHead =
-      h === 'If' && args.length === 2 && !BaseCompiler.isStatementArm(args[1])
-        ? 'Which'
-        : h;
-    if (h === 'If' && args.length === 2 && selectionHead === 'If')
-      throw new Error('Could not compile `If`: wrong number of arguments');
-
+  /**
+   * An `If` in statement form. A case of `compileExpr`: it returns the code, or
+   * `undefined` when `compileExpr` continues with its next case.
+   */
+  private static compileExprIf(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined,
+    selectionHead: string
+  ): TargetSource | undefined {
     if (selectionHead === 'If') {
       // A condition that may be an indexed collection at run time selects
       // ELEMENT-WISE: `If(c, t, f)` is the two-clause `Which(c, t, True, f)`
@@ -13557,7 +14372,19 @@ export class BaseCompiler {
         target
       );
     }
+    return undefined;
+  }
 
+  /**
+   * A `Which`, and an `If` read as one. A case of `compileExpr`: it returns the
+   * code, or `undefined` when `compileExpr` continues with its next case.
+   */
+  private static compileExprWhich(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined,
+    selectionHead: string
+  ): TargetSource | undefined {
     if (selectionHead === 'Which') {
       if (args.length < 2 || args.length % 2 !== 0)
         throw new Error(
@@ -13692,7 +14519,19 @@ export class BaseCompiler {
       };
       return compilePair(0);
     }
+    return undefined;
+  }
 
+  /**
+   * A `When`. A case of `compileExpr`: it returns the code, or `undefined` when
+   * `compileExpr` continues with its next case.
+   */
+  private static compileExprWhen(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
     if (h === 'When') {
       if (args.length !== 2)
         throw new Error(
@@ -13803,87 +14642,18 @@ export class BaseCompiler {
       const cond = BaseCompiler.guardCondition(args[1], target);
       return `((${cond}) ? (${val}) : ${nan})`;
     }
+    return undefined;
+  }
 
-    if (h === 'Match') {
-      // A target may override the whole construct (GPU emits target-specific
-      // ternaries; interval/Python fail closed). Otherwise the default is the
-      // JavaScript emission (chained `if`/`switch` in an arrow-IIFE).
-      //
-      // `Match` is fully CSE-inert in Phase 1 (§2): its guards and bodies are
-      // compiled from plan-constructed closure trees, not from these operands,
-      // so emission runs under a blind instance — no candidate resolves inside,
-      // and no enclosing region's candidate can leak in through a shared node.
-      return BaseCompiler.withCseBlind(target, () => {
-        const fn = target.functions?.(h);
-        if (typeof fn === 'function')
-          return fn(
-            args,
-            (expr) => BaseCompiler.compileValueOperand(expr, target),
-            target
-          );
-        return BaseCompiler.compileMatchJS(engine, args, target);
-      });
-    }
-
-    if (h === 'Block') {
-      const collectionValue =
-        node !== undefined && node === BaseCompiler._collectionValueBlock;
-      if (collectionValue) BaseCompiler._collectionValueBlock = undefined;
-      return BaseCompiler.compileBlock(
-        args,
-        target,
-        node,
-        true,
-        prec,
-        collectionValue
-      );
-    }
-
-    // Absence-discharge primitives (§3.F). `IsMissing`/`Coalesce` lower through
-    // the target-supplied absence capability, choosing the numeric or object
-    // axis by the operand's (result's) domain (I6). A target lacking the needed
-    // axis — GPU has no `isAbsent`, interval/GPU have no `object` axis — fails
-    // closed with a diagnostic (propagation stays native; discharge does not).
-    if (h === 'IsMissing') {
-      if (args.length !== 1)
-        throw new Error(
-          'Could not compile `IsMissing`: expected exactly one argument'
-        );
-      if (provablyAdmits('nothing', compilationType(args[0])))
-        throw new Error(
-          `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' ` +
-            `cannot distinguish a possible 'Nothing' input from an absent datum.`
-        );
-      const axis = BaseCompiler.absenceAxisForType(
-        args[0].type.type,
-        target,
-        'IsMissing'
-      );
-      if (axis.isAbsent === undefined)
-        throw new Error(
-          `Could not compile \`IsMissing\`: target '${target.language ?? 'unknown'}' cannot test ` +
-            `absence (no 'isAbsent' capability — e.g. GPU fast-math cannot ` +
-            `guarantee 'isnan' survives).`
-        );
-      return axis.isAbsent(BaseCompiler.compileValueOperand(args[0], target));
-    }
-
-    // The presence assertion `AssertPresent(x)` (Epsil `x?!`): `x` unless it
-    // is absent, else a raised run-time error `expected-present` naming the
-    // operand as written (the interpreter's `Error("expected-present", …)`).
-    //
-    // - A static proof removes the check: an operand whose compilation type
-    //   has no `missing` member and does not admit `nan` can only be present,
-    //   so the operand compiles as is. This is the only way the check is
-    //   omitted (user decision P4).
-    // - A target with no `raise` (a shader) compiles the assertion as the
-    //   identity; the author accepts the absent value flowing on (user
-    //   decision P5, 2026-10-21). The operand is compiled with its OWN type,
-    //   not the asserted one, so nothing downstream reads the assertion as a
-    //   proof: the node's `Present(T)` type is not consulted here, and a
-    //   later `IsMissing`/`Coalesce` on the value keeps its test.
-    // - An operand that may be `Nothing` is declined, as for `IsMissing`: the
-    //   targets cannot tell an omission from an absent datum.
+  /**
+   * An `AssertPresent`. A case of `compileExpr`: it returns the code, or
+   * `undefined` when `compileExpr` continues with its next case.
+   */
+  private static compileExprAssertPresent(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
     if (h === 'AssertPresent') {
       if (args.length !== 1)
         throw new Error(
@@ -13919,72 +14689,19 @@ export class BaseCompiler {
       // branch, so the raise fires only then.
       return axis.coalesce(code, raise(message));
     }
+    return undefined;
+  }
 
-    if (h === 'Coalesce') {
-      if (args.length === 0)
-        throw new Error(
-          'Could not compile `Coalesce`: expected at least one argument'
-        );
-      if (
-        args
-          .slice(0, -1)
-          .some((a) => provablyAdmits('nothing', compilationType(a)))
-      )
-        throw new Error(
-          `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' ` +
-            `cannot distinguish a possible 'Nothing' input from an absent datum.`
-        );
-      // Test the domain of each operand, not the result: a numeric marker
-      // still needs a NaN check when the fallback is a string or a collection.
-      const axes = args
-        .slice(0, Math.max(1, args.length - 1))
-        .map((a) =>
-          BaseCompiler.absenceAxisForType(
-            compilationType(a),
-            target,
-            'Coalesce'
-          )
-        );
-      if (axes.some((axis) => axis.coalesce === undefined))
-        throw new Error(
-          `Could not compile \`Coalesce\`: target '${target.language ?? 'unknown'}' cannot ` +
-            `discharge absence (no 'coalesce' capability).`
-        );
-      // Compiled coalescing evaluates the defaults lazily, left to right: the
-      // operands after the first are their own regions (§5.1(b)).
-      const codes = args.map((a, i) =>
-        i === 0
-          ? BaseCompiler.compileValueOperand(a, target)
-          : BaseCompiler.compileOpValue(node, i, target, 0, a)
-      );
-      // Fold right: coalesce(a0, coalesce(a1, … coalesce(a_{n-1}, a_n))).
-      let acc = codes[codes.length - 1];
-      for (let i = codes.length - 2; i >= 0; i--)
-        acc = axes[i].coalesce!(codes[i], acc);
-      return acc;
-    }
-
-    // Kleene/IEEE `Equal`/`NotEqual` guarded lowering (§3.D, amended
-    // 2026-07-24; extended to `NotEqual` 2026-08-08).
-    // Comparisons are IEEE over `NaN` and Kleene over the `Missing` symbol. For
-    // a NUMERIC-domain operand a raw `==`/tolerant-compare already IS the IEEE
-    // semantics (`NaN == NaN` is `false`), so no guard is emitted — the plain
-    // codegen below runs and interpreter/compiled agree by construction. The
-    // guard is kept ONLY when an operand can hold an OBJECT-domain hole (e.g.
-    // `string | missing`), where a `Missing` must lower to the target null:
-    // emit `isAbsent(a) || isAbsent(b) ? <object null> : <a == b>`. The absent
-    // boolean is an OBJECT-domain value, so a target without the object axis
-    // (GPU) fails closed.
-    //
-    // `NotEqual` is guarded on exactly the same terms, and for the same reason
-    // `Equal` is: the interpreter answers `Missing` for BOTH
-    // (`NotEqual(Missing, 1)` → `Missing`, pinned in `missing-value.test.ts`
-    // §P3). It was `Equal`-only while every string-bearing `NotEqual` failed
-    // closed on the string gate; once the tier-2 admissions started compiling
-    // `NotEqual(s, "x")` for `s: string | missing` (the literal supplies the
-    // string evidence, and the union is neither provably numeric nor a
-    // collection), the unguarded lowering emitted `undefined !== "x"` — a bare
-    // `true` where the interpreter answers `Missing`.
+  /**
+   * An `Equal` or `NotEqual` with an operand that may be absent. A case of
+   * `compileExpr`: it returns the code, or `undefined` when `compileExpr`
+   * continues with its next case.
+   */
+  private static compileExprMissingEquality(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): TargetSource | undefined {
     const isObjectDomainMissing = BaseCompiler.isObjectDomainMissingOperand;
     if (
       (h === 'Equal' || h === 'NotEqual') &&
@@ -14106,65 +14823,20 @@ export class BaseCompiler {
         ? `(lambda ${names}: ${guarded})(${values})`
         : `((${names}) => ${guarded})(${values})`;
     }
+    return undefined;
+  }
 
-    // `Typed(value, type)` is a transparent runtime ascription — it constrains
-    // the static type but has no runtime effect, so it compiles to its value
-    // operand on every target (the interpreter ignores it likewise, and
-    // returns the value even when it contradicts the ascribed type). Without
-    // this, a helper declared with a precise return type (e.g. `(number) ->
-    // vector<11>`) wraps its body in `Typed`, and every compiled call throws
-    // `Unknown operator \`Typed\`` at the dispatch below.
-    //
-    // A target that keeps complex values apart from real ones (a `{re, im}`
-    // object in JavaScript, a `vec2` in a shader) needs more. A consumer of
-    // the ascription (the enclosing lowering, or the call sites of a user
-    // function whose body is the ascription) reads the lane of the `Typed`
-    // node, which follows the ascribed type. The value operand is emitted in
-    // its own lane. The two must agree, or the consumer reads the value in
-    // the wrong representation:
-    //
-    //  - A complex ascription over a real scalar value is lifted: a real
-    //    number is a complex number. With `s: (complex) -> complex` and
-    //    `s := z ↦ Re(z)`, the body is `Typed(Re(z), complex)`, and the
-    //    definition returns a complex value. The declared-signature
-    //    canonicalization also wraps an all-real function body in
-    //    `Typed(body, "complex")`, so that a function declared to return a
-    //    complex value returns a `{re, im}` object from every body, a real
-    //    base case included (Tycho item 60).
-    //  - A complex ascription over a value that is not a scalar (a point,
-    //    a color, a boolean) contradicts the value. Fail closed.
-    //  - A real ascription over a value that is complex only because of
-    //    promotion selects the real lane for the value. Under a mode that
-    //    promotes (`auto`, `complex`), an unknown-sign `Sqrt`, `Ln`, `Log`,
-    //    even `Root` or non-integer `Power` lowers through a complex kernel,
-    //    and makes the value complex. The ascription says that the value is
-    //    real, so the value compiles with promotion off
-    //    (`withPromotionSuppressed`), as `mode: 'strict'` compiles it: such a
-    //    head gives NaN outside its real domain. NaN is the value that a
-    //    real-typed result has when it has no real value. With
-    //    `p: (real) -> real` and `p := k ↦ sin(2.4k)·√((k − 0.5)/16)`, the
-    //    definition is `Math.sin(2.4 * k) * Math.sqrt(0.0625 * (k + -0.5))`
-    //    in every mode, and `promoted` stays `false`. "Complex only because
-    //    of promotion" means: complex with promotion on, real with promotion
-    //    off. A value that is real with promotion on (`|√k|`) keeps its
-    //    promoted heads.
-    //  - A real ascription over a value that is complex also with promotion
-    //    off contradicts the value: the value has a complex-typed operand
-    //    (or, under `mode: 'complex'`, a node whose type admits a complex
-    //    value, which that mode reads as complex). With `q: (unknown) -> real` and `q := z ↦ z²`, the call `q(1+i)` is
-    //    `2i`. JavaScript read the `{re, im}` object that `_fn_q` returns as
-    //    a real number, and `q(w) + 1` returned the string
-    //    `"[object Object]1"`; a shader has no conversion from a `vec2` to a
-    //    `float` that keeps the value. Fail closed, and ask for a corrected
-    //    signature. A call in the value of a user function whose definition
-    //    is complex is such an operand: the definition is shared by every
-    //    call site, so it is compiled with the promotion of the mode
-    //    (`withPromotionUnsuppressed`), and its recorded lane is complex.
-    //
-    // With these rules, the lane of the `Typed` node is the lane of the value
-    // it emits, so the lane recorded for a user function whose body is the
-    // ascription (`recordUserFunctionLane`) is the lane of what its
-    // definition returns.
+  /**
+   * A `Typed`. A case of `compileExpr`: it returns the code, or `undefined`
+   * when `compileExpr` continues with its next case.
+   */
+  private static compileExprTyped(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
     if (h === 'Typed') {
       const value = args[0];
       if (!BaseCompiler.LANE_RECORD_LANGUAGES.has(target.language ?? ''))
@@ -14245,277 +14917,7 @@ export class BaseCompiler {
       const vec2 = target.language === 'wgsl' ? 'vec2f' : 'vec2';
       return `${vec2}(${code}, 0.0)`;
     }
-
-    // A qualified protocol call — `Comparable.compare(x, y)` — canonicalizes
-    // to `Apply(Field(Comparable, "compare"), x, y)` and STAYS that (the
-    // `ProtocolMember` node only appears when the `Field` EVALUATE handler's
-    // wrapper literal beta-reduces). Intercept it BEFORE the target's `Apply`
-    // mapping, which would otherwise compile the protocol-naming `Field`
-    // operand and die inside it. When the dispatch tier declines, fail closed
-    // for the whole unit rather than falling through to the generic `Apply`
-    // lowering (ruled 2026-08-12, `docs/COMPILATION-MODEL.md`).
-    if (h === 'Apply' && args.length >= 2 && isFunction(args[0], 'Field')) {
-      const fieldOps = args[0].ops;
-      const record = protocolOfSymbol(engine, fieldOps[0]);
-      const member = isString(fieldOps[1]) ? fieldOps[1].string : undefined;
-      if (record !== undefined && member !== undefined) {
-        const code = BaseCompiler.tryCompileProtocolDispatch(
-          engine,
-          {
-            implKey: member,
-            member,
-            protocol: record.name,
-            args: args.slice(1),
-          },
-          target
-        );
-        if (code !== undefined) return code;
-        throw new Error(
-          `Could not compile \`${record.name}.${member}\`: this protocol call has no lowering on ` +
-            `target '${target.language ?? 'javascript'}' (dynamic dispatch ` +
-            `could not be proven compilable).`
-        );
-      }
-    }
-
-    // Handle function calls
-    const fn = target.functions?.(h);
-    if (!fn) {
-      // A four-operand `ProtocolProperty` is a property STORE, not a call — the
-      // shape a hand-built expression spells, and what `p.(P.name) = v` folds
-      // to at evaluation. Refused with the same message as the `Assign`
-      // spellings of the same write: a store writes a mutable object, and
-      // objects have no compiled representation yet.
-      if (h === 'ProtocolProperty' && args.length === 4)
-        throw new Error(
-          `Could not compile \`${isString(args[1]) ? args[1].string : 'property'}\`: this protocol ` +
-            `property assignment has no lowering on target ` +
-            `'${target.language ?? 'javascript'}' (a property store writes a ` +
-            `mutable object, and objects have no compiled representation).`
-        );
-
-      // A protocol call — a bare dispatcher head (`compare(x, y)`), the
-      // `ProtocolMember`/`ProtocolProperty` operators, or a `Field` read that
-      // only a protocol property can answer. Compiled as a direct call
-      // (static resolution) or a reified guard chain (dynamic dispatch); a
-      // decline falls through to the standard fail-closed throw below.
-      const protoCall = BaseCompiler.protocolCallParts(engine, h, args);
-      if (protoCall !== undefined) {
-        const code = BaseCompiler.tryCompileProtocolDispatch(
-          engine,
-          protoCall,
-          target
-        );
-        if (code !== undefined) return code;
-      }
-
-      // `h` may name a function-valued BLOCK LOCAL of an enclosing statement
-      // list (`const g = (k) => …`, then `g(3)`). That binding is emitted by
-      // the block itself, so the call is an ordinary call of it — and it must
-      // be resolved BEFORE the engine lookup below, which a same-named engine
-      // symbol would otherwise win.
-      const localFn = BaseCompiler.tryCompileLocalFunctionCall(h, args, target);
-      if (localFn !== undefined) return localFn;
-
-      // `h` may be a symbol whose engine definition is a user-defined function
-      // literal (`f(x) := …`, `x ↦ …`). Emit it as a named local function and
-      // compile the call site as `_fn_f(arg)`. Returns undefined for a truly
-      // unknown operator (no such definition) or a target that opts out.
-      //
-      // Skipped when `h` names a BOUND variable of the enclosing compilation —
-      // a function literal's parameter, a loop index, a block local. That
-      // binding is what the call applies, and it shadows any same-named engine
-      // definition; resolving the engine definition instead emitted a call to
-      // the WRONG function. With `f` assigned at engine level, the literal
-      // `(f, x) ↦ f(x)` emitted `_fn_f(x)` and so ignored its own `f`
-      // argument, disagreeing with the interpreter. A bound head that is a
-      // block-local FUNCTION was already resolved by
-      // `tryCompileLocalFunctionCall` above and never reaches this line;
-      // anything else falls through to the fail-closed throw below, so the
-      // interpreter — which resolves the parameter correctly — runs the call.
-      // Ruled by the user 2026-08-14: fail closed now; compiling such a call as
-      // a direct call of the bound parameter (true higher-order compilation)
-      // remains a possible future feature, not a bug fix.
-      const userFn = target.boundVars?.has(h)
-        ? undefined
-        : BaseCompiler.tryCompileUserFunction(engine, h, args, target, node);
-      if (userFn !== undefined) return userFn;
-      throw new Error(
-        BaseCompiler.noLoweringMessage(
-          engine,
-          h,
-          args,
-          target,
-          declinedByCustomHandler
-        )
-      );
-    }
-
-    if (typeof fn === 'function') {
-      // The same real-only rule the string-mapped branch below applies, for
-      // the heads whose lowering is real-only but spelled as function codegen
-      // (`Math.floor`, `sign(x)·round(|x|)`, `Math.max`, `np.floor`, …). See
-      // `REAL_ONLY_BY_DEFINITION` for the families and the NaN each one was
-      // measured producing behind `success: true`, and `isRealOnlyLowering`
-      // for the heads each target declares real-only.
-      if (BaseCompiler.isRealOnlyLowering(target, h)) {
-        // The operands the gate scans and binds — the args themselves,
-        // except `ColorFromColorspace`, whose maybe-complex scalars live
-        // INSIDE its literal components tuple (`realOnlyGuardOperands`).
-        const guardArgs = BaseCompiler.realOnlyGuardOperands(h, args);
-        if (
-          guardArgs.some((a) =>
-            BaseCompiler.realGuardCandidate(a, engine, target)
-          )
-        ) {
-          // D2/D6 runtime rule (see `realOperandGuard`): each maybe-complex
-          // scalar operand is bound once and the real lowering runs on its
-          // real part when every imaginary part is exactly zero; otherwise
-          // the failing branch has the SAME shape the head returns — scalar
-          // NaN for the scalar heads, an equally-sized NaN-filled array for
-          // the color constructors (`realOnlyResultKind`). An ARRAY operand
-          // whose elements may be complex takes the element-wise form: the
-          // real lowering broadcasts or reduces over the projected array.
-          // A head the target also lowers for complex operands
-          // (`complexLowering`: the mean and the variance of complex data)
-          // takes that lowering instead.
-          const complex = BaseCompiler.complexLoweringOf(target, h);
-          if (complex !== undefined)
-            return complex.lowering(
-              args,
-              BaseCompiler.operandCompiler(node, target),
-              target
-            );
-          const guarded = BaseCompiler.realOperandGuard(
-            engine,
-            h,
-            guardArgs,
-            target,
-            () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-            BaseCompiler.realOnlyResultKind(h)
-          );
-          if (guarded !== undefined) return guarded;
-          throw new Error(
-            `Could not compile \`${h}\`: the target's lowering for this head is real-only and cannot represent a complex-valued argument.`
-          );
-        }
-      }
-
-      // A `broadcastable` head over a single finite indexed collection:
-      // apply the head's scalar element lowering across the collection. How
-      // that is spelled is a property of the TARGET LANGUAGE, not of the base
-      // compiler — Python fans out with a comprehension, the shader languages
-      // are already componentwise on a `vecN` and do not fan out at all — so
-      // it is delegated to the target's `broadcastUnary` hook. A target
-      // without one fails closed; the base compiler used to emit a
-      // JavaScript `.map((v) => …)` arrow here for EVERY target, which is not
-      // valid GLSL, WGSL or Python.
-      //
-      // A tuple operand of a head that declares the `'tuples'` broadcast
-      // exemption is NOT a source of cells here: the head owns that shape and
-      // consumes it whole, so the fan-out stands aside and the head's own
-      // codegen (`fn`, below) receives the tuple entire — see
-      // `isBroadcastExemptTupleOperand`.
-      //
-      // A head named in `CompileTarget.collectionAwareHeads` stands the
-      // fan-out down for the whole operand, for the same reason and with the
-      // same consequence: its codegen dispatches on the collection itself, or
-      // declines. A provably STRING operand is included: a string is a
-      // finite indexed collection of its grapheme clusters, so the fan-out
-      // used to intercept `AsRgb("red")` and decline for want of a
-      // `broadcastUnary` lowering, while the head's own codegen reads that
-      // string as ONE CSS color and compiles it.
-      const def = engine.lookupDefinition(h);
-      const collectionAwareHead =
-        target.collectionAwareHeads?.has(h) === true && args.length === 1;
-      if (
-        isOperatorDef(def) &&
-        def.operator.broadcastable &&
-        args.length === 1 &&
-        isFiniteIndexedCollection(args[0]) &&
-        !collectionAwareHead &&
-        !BaseCompiler.isBroadcastExemptTupleOperand(engine, h, args[0])
-      ) {
-        const broadcast = BaseCompiler.compileBroadcastUnary(
-          engine,
-          h,
-          args[0],
-          fn,
-          target
-        );
-        if (broadcast !== undefined) return broadcast;
-        throw new Error(
-          `Could not compile \`${h}\`: an element-wise broadcast over the collection ` +
-            `\`${args[0].toString()}\` on the ${
-              target.language ?? 'javascript'
-            } target has no \`broadcastUnary\` lowering for this shape. ` +
-            `Materialize the collection with evaluate() and ` +
-            `compile a scalar element function instead.`
-        );
-      }
-      // The index-aware operand compiler (`OperandCompiler`): a handler that
-      // lowers a construct with conditionally-evaluated operand positions
-      // passes the index for those positions and gets the matching CSE region
-      // instance. A handler that omits it compiles exactly as before.
-      const code = fn(args, BaseCompiler.operandCompiler(node, target), target);
-      // A target with a static type system gets to reject the emission for the
-      // operand shapes it was given (`CompileTarget.checkOperandShapes`); it
-      // throws to fail closed. No hook: unchanged.
-      target.checkOperandShapes?.(h, args, code, target);
-      // A head that ALSO has an infix spelling gets the same precedence
-      // treatment its infix emission would have received. A function handler
-      // takes over when the infix path declines — a collection operand, a
-      // complex one — but it lowers the very same operator, so its emission
-      // binds just as loosely: the GPU `Add` handler emits
-      // `vec2(a, b) + vec2(c, d)` for a sum of two points, and splicing that
-      // into an enclosing `s * …` without parentheses yielded
-      // `s * vec2(a, b) + vec2(c, d)`, read as `(s * P) + Q`. Wrapping here on
-      // `op[1] < prec` mirrors the infix path's own rule verbatim.
-      const opPrec = target.operators?.(h)?.[1];
-      if (opPrec !== undefined && opPrec < prec) return `(${code})`;
-      return code;
-    }
-
-    // `fn` is a plain string: the target maps this head to a helper. When
-    // the target declares the helper real-only (`isRealOnlyLowering`: by
-    // default every helper name, e.g. JS `_SYS.erf`), it takes a real
-    // scalar, and handing it a complex value silently returns garbage
-    // (compiled `Erf(z)` for complex z → −1, not NaN). Fail closed with
-    // the offending head. A helper the target declares complex-capable
-    // (Python `scipy.special.erf`) receives the complex value as it is.
-    if (
-      BaseCompiler.isRealOnlyLowering(target, h) &&
-      args.some((a) => BaseCompiler.realGuardCandidate(a, engine, target))
-    ) {
-      // D6 runtime rule (design §8): `Erf(x)` for a maybe-complex `x` runs
-      // the real helper on the real part when the imaginary part is exactly
-      // zero and answers `NaN` otherwise; a statically non-real operand is
-      // the compile-time decline (inside `realOperandGuard`). Over an array
-      // operand (`Erf(√L)`) the rule is element-wise and the helper
-      // broadcasts over the projected array.
-      const guarded = BaseCompiler.realOperandGuard(
-        engine,
-        h,
-        args,
-        target,
-        () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
-        'number'
-      );
-      if (guarded !== undefined) return guarded;
-      throw new Error(
-        `Could not compile \`${h}\`: real-only target helper "${fn}" cannot represent a complex-valued argument.`
-      );
-    }
-
-    const call = `${fn}(${args
-      .map((x) => BaseCompiler.compileValueOperand(x, target))
-      .join(', ')})`;
-    // Same shape gate as the function-codegen path above: a string-mapped
-    // helper is a scalar/genType signature too (`atan`, `clamp`, `mod`), and
-    // handing it a `vecN`/`matN` operand it has no overload for is invalid
-    // source, not a runtime concern.
-    target.checkOperandShapes?.(h, args, call, target);
-    return call;
+    return undefined;
   }
 
   /**
@@ -40915,6 +41317,20 @@ export class BaseCompiler {
       target.lazyOperand !== undefined &&
       isFunction(parent) &&
       lazyOperandRegions(parent).some((site) => site.index === opIndex);
+    // An edge that is not lazy and has no region of its own compiles its
+    // operand directly, as `withCseOperand` would: without the two frames
+    // of the callback, each level of a nested expression uses less stack
+    // (ROADMAP CE-320.2).
+    if (!lazy) {
+      const top = BaseCompiler.cseTop(target);
+      if (
+        top === undefined ||
+        parent === undefined ||
+        descendantRegionAt(BaseCompiler.cseRegionOf(top), parent, opIndex) ===
+          undefined
+      )
+        return BaseCompiler.compileValueOperand(expr, target, prec);
+    }
     return BaseCompiler.withCseOperand(parent, opIndex, target, () =>
       lazy
         ? target.lazyOperand!(
