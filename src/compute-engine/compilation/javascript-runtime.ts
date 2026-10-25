@@ -1,4 +1,5 @@
 import { Complex } from 'complex.js';
+import { RUNTIME_VERSION } from '../../common/runtime-versions.js';
 import {
   chop,
   factorial,
@@ -188,6 +189,8 @@ import {
   type BroadcastSlice,
 } from './broadcast.js';
 import type {
+  BroadcastAsyncOptions,
+  BroadcastAsyncResult,
   BroadcastInputs,
   BroadcastOptions,
   CompiledColor,
@@ -196,6 +199,14 @@ import type {
   StoredBatchBody,
   StoredEntryPlan,
 } from './types.js';
+import {
+  isKernelPool,
+  isShippableCode,
+  makeBroadcastAsync,
+  makeWillUsePool,
+  type BroadcastAsyncSpec,
+} from '../kernel-pool.js';
+import type { KernelPool } from '../kernel-pool-types.js';
 
 /**
  * The number of significant digits the float exponent of a negative base is
@@ -7567,12 +7578,8 @@ function fibonacci(n: number): number {
   return b;
 }
 
-/**
- * The version of the helper set. Compilation results and runtimes carry it, so
- * a host that stores code and runs it elsewhere can tell that the two ends
- * were built from different releases: compare the strings.
- */
-export const RUNTIME_VERSION = '{{SDK_VERSION}}';
+// The version of the helper set (`common/runtime-versions.ts`).
+export { RUNTIME_VERSION };
 
 /** A `WithRandomSeed` frame given to a runtime: the folded seed and the
  * counter (`{ seedLo, seedHi, next }`, what the engine holds), or the seed
@@ -7628,6 +7635,10 @@ export type StoredJavaScript = {
   batch?: StoredBatchBody;
   /** Required by `load()`. */
   runtimeVersion?: string;
+  /** The `shippable` field of the compilation result. `loadBroadcastAsync()`
+   * sends a batch to a worker only when it is `true`: without it, every
+   * batch runs on the calling thread (`reason: 'not-shippable'`). */
+  shippable?: boolean;
 };
 
 /**
@@ -7672,7 +7683,36 @@ export interface JavaScriptRuntime {
     out: Float64Array,
     slice: BroadcastSlice
   ) => number;
+  /** The asynchronous form of `loadBroadcast`: the `broadcastAsync()` of the
+   * compilation result, with the same options (`out`, `deadline`, `signal`,
+   * `chunk`, `inline`, …) and result (`done`, `route`, `reason`). A large
+   * batch goes to the kernel pool `workers` (from `createKernelPool()`),
+   * other batches run on the calling thread in slices, with a turn of the
+   * event loop between them. With no `workers`, every batch runs on the
+   * calling thread (`reason: 'no-pool'`). Only stored code with
+   * `shippable: true` (the field of the compilation result) goes to a
+   * worker. The stored fields are copied at the call: a later change to
+   * `stored` does not reach the function. The function also has
+   * `willUsePool(cells)` and `shippable`, as the compilation result has.
+   * Code compiled from an expression only; a lambda throws, and so does a
+   * `workers` value that is not a pool from `createKernelPool()`. */
+  loadBroadcastAsync(
+    stored: StoredJavaScript,
+    options?: { workers?: KernelPool }
+  ): LoadedBroadcastAsync;
 }
+
+/** What `loadBroadcastAsync()` returns: the batch function, with the
+ * `willUsePool` and `shippable` entries of a compilation result. */
+export type LoadedBroadcastAsync = ((
+  inputs: BroadcastInputs,
+  options?: BroadcastAsyncOptions
+) => Promise<BroadcastAsyncResult>) & {
+  /** Whether a batch of `cells` cells would go to the pool now. */
+  willUsePool: (cells: number) => boolean;
+  /** Whether the code can run on a worker of the pool. */
+  readonly shippable: boolean;
+};
 
 /** A runtime together with its helper table, for the engine's own tests. */
 export type SysRuntime = JavaScriptRuntime & SysHelpers;
@@ -7890,6 +7930,83 @@ export function createSysRuntime(
             setReconstructionDigits(previous);
           }
         };
+      },
+    },
+    loadBroadcastAsync: {
+      value: (
+        stored: StoredJavaScript,
+        loadOptions: { workers?: KernelPool } = {}
+      ): LoadedBroadcastAsync => {
+        const workers = loadOptions.workers;
+        if (workers !== undefined && !isKernelPool(workers))
+          throw new TypeError(
+            'loadBroadcastAsync: `workers` must be a pool from createKernelPool()'
+          );
+        // A copy of the stored fields, taken now. A stored result is plain
+        // data that the host can change; the pool keys its kernel id and its
+        // calibration on this object, and a worker reads its fields when it
+        // gets its first task. With a copy, the calling thread and the
+        // workers run the same code, and a later change to the host's
+        // object (or a second load of it) does not reach this function.
+        const own: StoredJavaScript = {
+          code: stored.code,
+          preamble: stored.preamble,
+          preambleOnce: stored.preambleOnce,
+          preamblePerCall: stored.preamblePerCall,
+          callCode: stored.callCode,
+          calling: stored.calling,
+          reconstructionDigits: stored.reconstructionDigits,
+          entryPlan:
+            stored.entryPlan === undefined
+              ? undefined
+              : structuredClone(stored.entryPlan),
+          broadcastOutputs: stored.broadcastOutputs,
+          batch:
+            stored.batch === undefined
+              ? undefined
+              : structuredClone(stored.batch),
+          runtimeVersion: stored.runtimeVersion,
+          shippable: stored.shippable,
+        };
+        // The slice loop of the calling thread. It also checks the stored
+        // code (its runtime version; a lambda is refused), before any batch.
+        const slice = sys.loadBroadcastSlice(own);
+        const entryPlan = own.entryPlan;
+        const spec: BroadcastAsyncSpec = {
+          kind: 'javascript',
+          stored: own,
+          // A `vars` plan is keyed by symbol name.
+          lists:
+            entryPlan?.kind === 'vars'
+              ? entryPlan.lists.filter(
+                  (name): name is string => typeof name === 'string'
+                )
+              : undefined,
+          // Only code that the compiler marked shippable goes to a worker.
+          // The text of the code shows a draw from the random stream, but
+          // not a variable given by the name of a host global or a caller
+          // preamble, which fail on a worker: stored code without the
+          // `shippable: true` field of its compilation result stays on the
+          // calling thread.
+          shippable:
+            own.shippable === true &&
+            isShippableCode(
+              [
+                own.preamble,
+                own.preambleOnce,
+                own.preamblePerCall,
+                own.code,
+              ].join('\n')
+            ),
+          slice,
+          workers: () => workers,
+          iterationLimit: () => iterationLimit,
+        };
+        const run = makeBroadcastAsync(spec);
+        return Object.assign(run, {
+          shippable: spec.shippable,
+          willUsePool: makeWillUsePool(spec),
+        });
       },
     },
   });

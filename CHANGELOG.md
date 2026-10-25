@@ -18,6 +18,35 @@
 
 ### New Features
 
+- **A worker pool for a kernel loaded with the runtime entry** (CE-436, Tycho
+  row 445). The light entry `@cortex-js/compute-engine/runtime` now exports
+  `createKernelPool`, and its runtime has `loadBroadcastAsync(stored,
+  { workers })`: the `broadcastAsync()` of the compilation result, for code
+  that a host stored and loads without an engine. It takes the same options
+  (`out`, `deadline`, `signal`, `chunk`, `inline`, …) and gives the same
+  result (`done`, `route`, `reason`); the function also has `willUsePool(cells)`
+  and `shippable`. Only stored code that keeps the `shippable: true` field of
+  its compilation result goes to a worker; other code runs on the calling
+  thread (`reason: 'not-shippable'`). A worker that loads stored kernels can
+  now run them on a pool of its own without importing the engine bundle. The
+  runtime entry grows by about 15 KB minified (5 KB gzipped).
+
+  ```js
+  import {
+    createJavaScriptRuntime,
+    createKernelPool,
+  } from '@cortex-js/compute-engine/runtime';
+  const workers = createKernelPool({
+    create: () =>
+      new Worker(
+        new URL('@cortex-js/compute-engine/kernel-worker', import.meta.url),
+        { type: 'module' }
+      ),
+  });
+  const run = createJavaScriptRuntime().loadBroadcastAsync(stored, { workers });
+  const { out, done, route } = await run({ x: xs }, { deadline: 100 });
+  ```
+
 - **Index axes in the `grid` layout of `broadcast`** (ROADMAP CE-421, Tycho
   row 440). The `indexes` option names the inputs that are index axes: the
   input of each is the axis length `n`, and at each cell the variable is the
@@ -111,6 +140,17 @@
   so `10⁻²⁰⁰·10⁻¹²³·10²⁰⁰·x` went through a subnormal value and gave
   `9.88·10⁻¹²⁴·x`, and some orders of large and small factors gave a
   coefficient of `0`. It is now `10⁻¹²³·x`.
+
+- **Compiling an expression with shared subexpressions and constant folding
+  on takes a time proportional to its distinct parts** (ROADMAP CE-319.1).
+  Before it folds a constant, the compiler checks the whole expression for a
+  name bound by the compilation, a `Sum` or `Product` with a non-finite
+  bound, and a free symbol reached through an assigned value. Each check
+  visited a shared subexpression once for each place it appears, so
+  `e = e + e` repeated 24 times over `2 + √3` took 3.9 s to compile. Each
+  check now visits a subexpression once: the same expression compiles in
+  about 110 ms, and at 60 levels in about 200 ms. The compiled code does not
+  change.
 
 ## 0.166.0 _2026-10-24_
 

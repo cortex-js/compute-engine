@@ -344,6 +344,13 @@ describe('the entry point has no engine in it', () => {
       // `broadcast.ts` is the batch loop of `loadBroadcast()`: it imports
       // types only.
       /^src\/compute-engine\/compilation\/(javascript-runtime|jet-helpers|broadcast)\.ts$/,
+      // The kernel pool of `loadBroadcastAsync()` and `createKernelPool()`
+      // (ROADMAP CE-436). Its value imports are `broadcast.ts`, the two
+      // runtime version strings (a module with no imports, so that the
+      // interval library stays out) and `cooperative-steps.ts` (no imports).
+      /^src\/compute-engine\/kernel-pool\.ts$/,
+      /^src\/common\/runtime-versions\.ts$/,
+      /^src\/common\/cooperative-steps\.ts$/,
       /node_modules\/(complex\.js|@arnog\/colors)\//,
     ];
     const inputs = Object.keys(metafile.inputs);

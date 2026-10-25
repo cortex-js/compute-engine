@@ -74,56 +74,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Tycho ledger asks
 
-### CE-435. `m = \max(R) > 1` parses as a chain, not as a definition of `m`
-
-**Status:** decision needed; design. Tycho row 443 (filed 2026-10-24, from the
-0.166.0 adoption). Instrument in Tycho:
-`scripts/repros/2026-10-24-ce443-equal-then-inequality-repro.mts`.
-
-Since 0.166.0 (CE-411), the LaTeX parser reads a run of comparisons as a chain.
-`m = \max(R) > 1` is `["And", ["Equal", "m", ["Max", "R"]], ["Greater",
-["Max", "R"], 1]]` in the raw and the canonical forms. Up to 0.165.0 it was
-`["Equal", "m", ["Greater", ["Max", "R"], 1]]`. A Tycho document row that
-defines a name as a condition (`m=\max(R)>1`) now defines nothing, and every
-row that reads `m` is unresolved; the author must write `m = (\max(R) > 1)`.
-
-Tycho asks for a special case: an `=` whose left side is a bare symbol,
-followed by exactly one inequality, is the equation `Equal(name, ⋈(expr, c))`.
-A chain of inequalities and a run of `=` keep the CE-411 reading. Controls that
-must not change: `0<x\le1` is an `And`, `a=b=c` is one `Equal`,
-`(a\le0)=(b\le0)` is an `Equal` of two relations. Tycho also accepts a parse
-option instead of a default.
-
-The choices: (a) the special case as the default; (b) the special case behind
-a parse option that Tycho turns on; (c) no change: the chain reading is the
-usual mathematical reading of `x = y > 1`, and the author writes parentheses.
-
-### CE-436. A pool route for a kernel loaded through the runtime entry
-
-**Status:** decision needed; capability. Tycho row 445 (filed 2026-10-24).
-Instrument in Tycho:
-`scripts/repros/2026-10-24-ce445-runtime-pool-route-probe.mts` (NOT READY on
-0.166.0).
-
-Tycho's implicit-surface workers load stored kernels with
-`createJavaScriptRuntime().load(stored)` from `@cortex-js/compute-engine/runtime`
-(about 324 KB). That entry exports only `createJavaScriptRuntime`,
-`runtimeVersion` and `version`, and a loaded batch has no asynchronous pooled
-form. To run the cell kernel of the 3-D implicit march on a pool inside each
-worker (a Tycho owner decision of 2026-10-24: 62 to 71 cells per axis instead
-of 58 to 60 at 100 ms), each worker now imports the whole engine bundle (about
-5 MB), starts `createKernelPool` with nested module workers, sets `ce.workers`,
-and compiles the kernel again from MathJSON.
-
-The ask: (1) a pool factory in the runtime entry, or a kernel-worker route that
-a host can start from it; (2) a pooled asynchronous form of a loaded batch
-(`loadBroadcastAsync(stored)`, or `broadcastAsync` on what `loadBroadcast`
-returns), with the `out`, `deadline` and `inline` options of `broadcastAsync`.
-
-To decide: the public API of the runtime entry (names, and whether
-`createKernelPool` moves there or is re-exported), and the size budget of that
-entry once it holds the pool code.
-
 ### CE-1. A `window` option of the `grid` layout of `broadcast`
 
 **Status:** on demand; capability. Waits for a measurement by Tycho. Part (3) of
@@ -5931,12 +5881,6 @@ application on the asynchronous route walks the body (`hasAsyncOnlyApplication`,
 
 **Status:** open; performance.
 
-- **CE-319.1** The constant-folding walks of `compilation/base-compiler.ts`
-  (`mentionsCompileBoundName`, `containsUnboundedBigOp`, `foldValueBlocked`,
-  `tryConstantFold`) walk every path of a tree with shared nodes. With constant
-  folding on (the default), compiling `e = Add(e, e)` over `2 + √3` takes 92 ms
-  at depth 18 and 3012 ms at depth 24 (with `constantFold: false` it is linear).
-  Each walk needs a memo keyed by node.
 - **CE-319.2** Building a `Sum` whose body has a shared subtree is exponential:
   `ce.function('Sum', [At(L, idx), Limits(k, 1, 1)])` with `idx` doubled 20
   times takes more than 3 s in `rebindToBindings` (`binders.ts`), before any

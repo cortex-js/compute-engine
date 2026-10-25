@@ -26,3 +26,19 @@ export type {
   BroadcastOptions,
 } from './compute-engine/compilation/types.js';
 export type { BroadcastSlice } from './compute-engine/compilation/broadcast.js';
+
+// The pooled batch form (`runtime.loadBroadcastAsync()`): a kernel pool whose
+// workers run the `@cortex-js/compute-engine/kernel-worker` entry.
+export { createKernelPool } from './compute-engine/kernel-pool.js';
+export type {
+  KernelPool,
+  KernelPoolOptions,
+  WorkerLike,
+} from './compute-engine/kernel-pool-types.js';
+export type {
+  BroadcastAsyncOptions,
+  BroadcastAsyncReason,
+  BroadcastAsyncResult,
+  BroadcastAsyncRoute,
+} from './compute-engine/compilation/types.js';
+export type { LoadedBroadcastAsync } from './compute-engine/compilation/javascript-runtime.js';

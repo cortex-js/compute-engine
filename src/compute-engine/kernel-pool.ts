@@ -73,11 +73,15 @@ import {
   sharedInputsReadInPlace,
   type BroadcastSlice,
 } from './compilation/broadcast.js';
-import { RUNTIME_VERSION } from './compilation/javascript-runtime.js';
+// The runtime versions come from a module with no imports: the pool is part
+// of the light runtime entry, which must not hold the interval library.
+import {
+  INTERVAL_RUNTIME_VERSION,
+  RUNTIME_VERSION,
+} from '../common/runtime-versions.js';
 // The inline slices yield a macrotask between them (and before the first), so
 // that rendering and input get their turn.
 import { yieldToEventLoop } from '../common/cooperative-steps.js';
-import { INTERVAL_RUNTIME_VERSION } from './interval/index.js';
 import type {
   KernelKind,
   MainToWorkerMessage,

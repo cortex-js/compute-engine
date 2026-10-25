@@ -300,15 +300,9 @@ export {
 } from './collections.js';
 export type { SeededChoiceDomain } from './collections.js';
 
-/**
- * The version of the interval library that compiled `interval-js` code calls
- * as `_IA`. An `interval-js` compilation result carries it as
- * `runtimeVersion`, so a host that stores the code and rebuilds the function
- * elsewhere (a worker, another page) can tell that the two ends were built
- * from different releases: compare the strings. The placeholder is replaced
- * with the package version by the build (`scripts/build.sh`).
- */
-export const INTERVAL_RUNTIME_VERSION = '{{SDK_VERSION}}';
+// The version of the interval library that compiled `interval-js` code calls
+// as `_IA` (`common/runtime-versions.ts`).
+export { INTERVAL_RUNTIME_VERSION } from '../../common/runtime-versions.js';
 
 /**
  * The complete interval arithmetic library object.
