@@ -535,8 +535,10 @@ import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
 import {
   MIN_UNROLLED_WIDTH,
   overriddenCompilationHeads,
+  overriddenHeadPredicate,
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
+import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import {
   broadcastNumbers,
@@ -5338,9 +5340,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Reduce\`: first operand is not an indexed collection ` +
           `(list/vector/range).`
       );
-    refuseBuiltinFoldOfNonNumbers('Reduce', coll, op);
+    // The refusal speaks of the library kernel, so it applies only to a
+    // library combiner; another combiner takes the custom-combiner route.
+    const library = isLibraryFoldCombiner(op, target);
+    if (library) refuseBuiltinFoldOfNonNumbers('Reduce', coll, op);
     // Product's canonical collection form is Reduce(Map(...), Multiply, 1).
     if (
+      library &&
       isSymbol(op) &&
       (op.symbol === 'Add' || op.symbol === 'Multiply') &&
       isNumber(init) &&
@@ -5354,13 +5360,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       );
       if (mapped !== undefined) return mapped;
     }
-    let combiner =
-      nestedElementCombiner('Reduce', coll, op, init) ??
-      builtinCombiner(
-        op,
-        BaseCompiler.foldLaneIsComplex(coll, init),
-        elementsMayBeAbsent(coll)
-      );
+    let combiner = !library
+      ? undefined
+      : (nestedElementCombiner('Reduce', coll, op, init) ??
+        builtinCombiner(
+          op,
+          BaseCompiler.foldLaneIsComplex(coll, init),
+          elementsMayBeAbsent(coll)
+        ));
     // The seed's code when the accumulator lane is complex and the seed is
     // real (`combinerPlan.coerceSeed`); `undefined` = compile `init` as-is.
     let seed: string | undefined;
@@ -6910,14 +6917,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`Scan\`: first operand is not an indexed collection ` +
           `(list/vector/range).`
       );
-    refuseBuiltinFoldOfNonNumbers('Scan', coll, op);
-    const builtin =
-      nestedElementCombiner('Scan', coll, op, init) ??
-      builtinCombiner(
-        op,
-        BaseCompiler.foldLaneIsComplex(coll, init),
-        elementsMayBeAbsent(coll)
-      );
+    // As `Reduce`: the refusal applies only to a library combiner.
+    const library = isLibraryFoldCombiner(op, target);
+    if (library) refuseBuiltinFoldOfNonNumbers('Scan', coll, op);
+    const builtin = !library
+      ? undefined
+      : (nestedElementCombiner('Scan', coll, op, init) ??
+        builtinCombiner(
+          op,
+          BaseCompiler.foldLaneIsComplex(coll, init),
+          elementsMayBeAbsent(coll)
+        ));
     // As `Reduce`: the accumulator's annotation is judged against the lane
     // `combinerPlan` chose, or else against the join of the seed's type (the
     // first element's, for a seedless scan) and the combiner's result type.
@@ -10835,6 +10845,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       options.operators,
       options.functions
     );
+    // See `CompileTarget.overridesHead`.
+    const overridesHead = overriddenHeadPredicate(
+      options.operators,
+      options.functions
+    );
     // A string `vars` entry is caller source unless it is the spelling this
     // target emits for the symbol anyway (`isOpaqueVarsSource`). A compiled
     // `Function` literal has no vars object, so there every string is.
@@ -10846,8 +10861,11 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       );
     expr = unrollFixedWidthCollections(expr, {
       skipHeads: unrollSkipHeads,
+      overridesHead,
       iterationBudget: options.iterationBudget,
       readsLiveSource: opaqueVar,
+      // See `CompileTarget.unrollTypedPointLists`.
+      typedPointLists: true,
     });
     const {
       operators,
@@ -10965,6 +10983,8 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
       // See `CompileTarget.unrollSkipHeads`: the same answer the entry above
       // used, for the definition bodies this entry never sees.
       unrollSkipHeads,
+      overridesHead,
+      unrollTypedPointLists: true,
       operators: operatorLookup,
       varsObjectRefs,
       // See `CompileTarget.inputWrites`.

@@ -16,6 +16,7 @@
 
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { unrollFixedWidthCollections } from '../../src/compute-engine/compilation/fixed-width-unroll';
 
 const ce = new ComputeEngine();
 for (const s of ['t', 'a', 'b', 'c']) ce.declare(s, 'real');
@@ -264,5 +265,190 @@ describe('Point arithmetic — when the points are still built', () => {
     });
     expect(r.success).toBe(true);
     expect(r.code).toContain('_IA.bcastPoint');
+  });
+});
+
+/**
+ * A list of points held by a SYMBOL, known only by its type (ROADMAP
+ * CE-333.2; records 687 and 688 of the targeted Tycho audit, the
+ * `woeywky0kj` setup rows). The accessor is applied to the symbol itself:
+ * `PointX(4·P + 0.3·(t, t))` is `4·PointX(P) + 0.3·t`. Only the JavaScript
+ * and interval targets ask for it (`UnrollOptions.typedPointLists`): the
+ * width of `P` is not known, and a narrow list of points is a native vector
+ * on the shader targets.
+ */
+describe('A coordinate of point arithmetic over a list of points held by a symbol', () => {
+  const ceP = new ComputeEngine();
+  ceP.declare('t', 'real');
+  ceP.declare('P', 'list<tuple<number, number>>');
+  ceP.declare('Q', 'list<tuple<number, number>>');
+  ceP.declare('U', 'tuple<number, number> | list<tuple<number, number>>');
+  const POINTS = [
+    [1, 2],
+    [3, -4],
+    [0.5, 0.25],
+  ];
+  const scaled = (p: string) => [
+    'Add',
+    ['Multiply', 4, p],
+    ['Multiply', 0.3, ['Tuple', 't', 't']],
+  ];
+
+  function interpretedP(json: unknown, t: number, points = POINTS): number[] {
+    const P = ceP.box(['List', ...points.map((p) => ['Tuple', ...p])] as never);
+    const v = ceP
+      .box(json as never)
+      .subs({ P, Q: P, U: P, t: ceP.number(t) })
+      .N();
+    return Array.from(v.each()).map((c) => c.re);
+  }
+
+  function compileP(json: unknown, to: string) {
+    return compile(ceP.box(json as never), {
+      to: to as never,
+      fallback: false,
+    });
+  }
+
+  test('javascript reads one coordinate of P and builds no point', () => {
+    for (const [accessor, json] of [
+      [0, ['PointX', scaled('P')]],
+      [1, ['PointY', ['Negate', scaled('P')]]],
+      [0, ['Sin', ['PointX', scaled('P')]]],
+    ] as const) {
+      const r = compileP(json, 'javascript');
+      expect(r.success).toBe(true);
+      // One pass over P, reading the one coordinate.
+      expect(r.code.match(/\.map\(/g)).toHaveLength(1);
+      expect(r.code).toContain(`(_.P).map((_pt) => _pt[${accessor}] ?? NaN)`);
+      expect(r.code).not.toContain(`_pt[${1 - accessor}]`);
+      for (const t of [0, 0.5, 2])
+        for (const points of [POINTS, []]) {
+          const got = r.run!({ t, P: points }) as number[];
+          const want = interpretedP(json, t, points);
+          expect(got).toHaveLength(want.length);
+          got.forEach((c, k) => expect(c).toBeCloseTo(want[k], 12));
+        }
+    }
+  });
+
+  test('interval-js reads one coordinate of P and builds no point', () => {
+    const json = ['PointX', scaled('P')];
+    const r = compileP(json, 'interval-js');
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_IA.pointComponent(_.P, 0, true, true)');
+    expect(r.code).not.toContain('bcastPoint');
+    for (const t of [0, 0.5, 2]) {
+      const got = r.run!({ t: { lo: t, hi: t }, P: POINTS }) as unknown as {
+        value: { lo: number; hi: number };
+      }[];
+      const want = interpretedP(json, t);
+      expect(got).toHaveLength(want.length);
+      got.forEach((cell, k) => {
+        expect(cell.value.lo).toBeLessThanOrEqual(want[k] + 1e-12);
+        expect(cell.value.hi).toBeGreaterThanOrEqual(want[k] - 1e-12);
+      });
+    }
+  });
+
+  test('the shader targets do not ask for the rewrite', () => {
+    const json = ceP.box(['PointX', scaled('P')] as never);
+    expect(unrollFixedWidthCollections(json).isSame(json)).toBe(true);
+    expect(
+      unrollFixedWidthCollections(json, { typedPointLists: true }).toString()
+    ).toBe('4PointX(P) + 0.3 * t');
+  });
+
+  test('a union of a point and a list of points keeps the run-time dispatch', () => {
+    const r = compileP(['PointX', scaled('U')], 'javascript');
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.pointComponent(');
+    expect(r.run!({ t: 0.5, U: POINTS })).toEqual(
+      interpretedP(['PointX', scaled('U')], 0.5)
+    );
+  });
+
+  test('two lists of unknown width are not folded: their widths can differ', () => {
+    const r = compileP(['PointX', ['Add', 'P', 'Q']], 'javascript');
+    expect(r.success).toBe(true);
+    expect(r.code).toContain('_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.P, _.Q)');
+  });
+
+  test('points of another arity are not folded', () => {
+    const json = ['PointX', ['Add', 'P', ['Tuple', 1, 2, 3]]];
+    const folded = unrollFixedWidthCollections(ceP.box(json as never), {
+      typedPointLists: true,
+    });
+    expect(folded.operator).toBe('PointX');
+  });
+
+  test('a list of bare tuples is not folded: a coordinate can be a string', () => {
+    // The interpreter reports `incompatible-type` for `4·("a", 2)`.
+    ceP.declare('R', 'list<tuple>');
+    for (const json of [
+      ['PointX', ['Multiply', 4, 'R']],
+      ['PointX', ['Negate', 'R']],
+    ]) {
+      const folded = unrollFixedWidthCollections(ceP.box(json as never), {
+        typedPointLists: true,
+      });
+      expect(folded.operator).toBe('PointX');
+    }
+  });
+
+  test('a point whose coordinate may be a list is not folded', () => {
+    // With `S = [10, 20]`, the interpreter reports `incompatible-type` for
+    // `P + (S, S)`. The folded form `PointX(P) + S` added the lists
+    // element-wise.
+    ceP.declare('S', 'number | list<number>');
+    const json = ['PointX', ['Add', 'P', ['Tuple', 'S', 'S']]];
+    const folded = unrollFixedWidthCollections(ceP.box(json as never), {
+      typedPointLists: true,
+    });
+    expect(folded.operator).toBe('PointX');
+  });
+
+  test('a point whose DROPPED coordinate may be a list is not folded', () => {
+    // `PointX(P + (t, S2))` reads only `t`, but with `S2 = [10, 20]` the
+    // interpreter reports `incompatible-type` for the sum. The folded form
+    // `PointX(P) + t` dropped `S2` and answered.
+    ceP.declare('S2', 'number | list<number>');
+    const json = ['PointX', ['Add', 'P', ['Tuple', 't', 'S2']]];
+    const folded = unrollFixedWidthCollections(ceP.box(json as never), {
+      typedPointLists: true,
+    });
+    expect(folded.operator).toBe('PointX');
+  });
+
+  test('interval-js: the folded sum adds the terms in the order of the points', () => {
+    // Canonical order would be `PointX(P) + 1e16 + 0.1 + 0.7`, which gives
+    // the bounds 9999999999999994 and 10000000000000006. The expected cells
+    // are the result before the fold existed, when the target added the
+    // points at run time (`_IA.bcastPoint`).
+    const json = [
+      'PointX',
+      [
+        'Add',
+        'P',
+        ['Tuple', 0.7, 0.3],
+        ['Tuple', 1e16, 0.2],
+        ['Tuple', 0.1, 0.2],
+      ],
+    ];
+    const r = compileP(json, 'interval-js');
+    expect(r.success).toBe(true);
+    expect(r.code).not.toContain('bcastPoint');
+    const got = r.run!({
+      P: [
+        [0.1, 0.2],
+        [0.3, -0.7],
+        [1e-17, 3],
+      ],
+    }) as unknown as { value: { lo: number; hi: number } }[];
+    expect(got.map((cell) => cell.value)).toEqual([
+      { lo: 9999999999999996, hi: 10000000000000004 },
+      { lo: 9999999999999996, hi: 10000000000000006 },
+      { lo: 9999999999999996, hi: 10000000000000004 },
+    ]);
   });
 });

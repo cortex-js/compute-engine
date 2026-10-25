@@ -685,6 +685,75 @@ describe('FIXED-WIDTH UNROLL — reductions over a literal list', () => {
     const expr = ce.box(['Reduce', ['List', 1, 2, 3, 4, 5], 'Add', 0]);
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
   });
+
+  it('leaves a combiner that a user definition shadows untouched', () => {
+    // A binary, non-associative `Max`: the fold is `Max(Max(a, b), c)`, which
+    // the n-ary form `Max(a, b, c)` does not compute.
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    engine.declare('Max', {
+      signature: '(number, number) -> number',
+      evaluate: ([a, b], { engine: e }) =>
+        e.box(['Add', ['Multiply', 2, a], b]).evaluate(),
+    });
+    const expr = engine.box([
+      'Reduce',
+      ['List', 'x', ['Add', 'x', 1], ['Add', 'x', 2]],
+      'Max',
+    ]);
+    const result = unrollFixedWidthCollections(expr);
+    expect(result).toBe(expr);
+    const at = (e: typeof expr) => e.subs({ x: 1 }).evaluate().re;
+    // 2·(2·1 + 2) + 3
+    expect(at(expr)).toBe(11);
+    expect(at(result)).toBe(at(expr));
+  });
+
+  it('leaves a combiner or a head that the caller supplies untouched', () => {
+    // The caller's function would be called once with every element, where
+    // the fold calls it with two arguments at a time.
+    for (const [json, head] of [
+      [['Reduce', FIVE, 'Max'], 'Max'],
+      [['Sum', FIVE], 'Add'],
+    ] as const) {
+      const expr = ce.box(json as never);
+      expect(
+        unrollFixedWidthCollections(expr, { skipHeads: new Set([head]) })
+      ).toBe(expr);
+      // The predicate that asks the caller's options for one name.
+      expect(
+        unrollFixedWidthCollections(expr, {
+          overridesHead: (name) => name === head,
+        })
+      ).toBe(expr);
+    }
+  });
+
+  it('rewrites when the override predicate names another head', () => {
+    // A function-form `operators` that answers for no fold head keeps the
+    // rewrite.
+    expect(
+      unrollFixedWidthCollections(ce.box(['Reduce', FIVE, 'Max']), {
+        overridesHead: (name) => name === 'Sin',
+      }).operator
+    ).toBe('Max');
+  });
+
+  it('leaves a block-local function named Max untouched', () => {
+    // The local `Max` is a value (a function literal), not the library
+    // operator: the block folds with `2a + b`.
+    const engine = new ComputeEngine();
+    engine.declare('x', 'real');
+    const expr = engine.box([
+      'Block',
+      ['Declare', 'Max', "'function'"],
+      ['Assign', 'Max', ['Function', ['Add', ['Multiply', 2, 'a'], 'b'], 'a', 'b']],
+      ['Reduce', ['List', 'x', ['Add', 'x', 1], ['Add', 'x', 2]], 'Max'],
+    ]);
+    const result = unrollFixedWidthCollections(expr);
+    expect(result.toString()).toBe(expr.toString());
+    expect(result.subs({ x: 1 }).evaluate().re).toBe(11);
+  });
 });
 
 describe('FIXED-WIDTH UNROLL — scalar-versus-list arithmetic', () => {

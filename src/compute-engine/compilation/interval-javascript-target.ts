@@ -89,10 +89,14 @@ import {
 import { rewriteAngularUnit } from './angular-unit.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
+  MAX_UNROLLED_CONSTANT_LIST_WIDTH,
   overriddenCompilationHeads,
+  overriddenHeadPredicate,
   readsCallerSource,
+  staticListWidth,
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
+import { isLibraryFoldCombiner } from './builtin-callback.js';
 import type {
   CompileDiagnostic,
   CompileMode,
@@ -1348,7 +1352,9 @@ function intervalVarsAccess(id: string): string {
  * binders `Sum`/`Product`/`Integrate`, whose handlers judge their own body and
  * limits with more specific diagnostics (`assertScalarBigOpBody`,
  * `compileIntervalIntegrate`); `Max`/`Min`, whose one-collection form is
- * a reduction and whose scalar fold runs the gate itself; and the selection
+ * a reduction and whose scalar fold runs the gate itself; `Reduce`, whose
+ * first operand is the collection it reduces and whose handler
+ * (`compileIntervalReduce`) checks the elements itself; and the selection
  * forms `Which`/`When`, whose ARMS may be collection values (a list handed
  * whole to whichever arm is selected — the run-time `piecewise`, `restrict`
  * and `hull` read an array arm in its own domain) while their conditions
@@ -1365,6 +1371,7 @@ const COLLECTION_AWARE_HEADS: ReadonlySet<string> = new Set([
   'Norm',
   'Sum',
   'Product',
+  'Reduce',
   'Max',
   'Min',
   'Integrate',
@@ -3161,6 +3168,7 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     compileIntervalSumProduct('Sum', args, compile, target),
   Product: (args, compile, target) =>
     compileIntervalSumProduct('Product', args, compile, target),
+  Reduce: (args, _compile, target) => compileIntervalReduce(args, target),
 
   // Integration
   Integrate: (args, compile, target) =>
@@ -3413,8 +3421,10 @@ INTERVAL_JAVASCRIPT_FUNCTIONS.ApplyWhole = INTERVAL_JAVASCRIPT_FUNCTIONS.Apply;
 // The fixed-width pass writes a literal range out under its own, smaller cap
 // (`MAX_UNROLLED_RANGE_WIDTH` in `fixed-width-unroll.ts`, 64 elements); a
 // literal range between the two caps reaches this target still as a `Range`
-// and is written out here.
-const INTERVAL_UNROLL_LIMIT = 100;
+// and is written out here. The cap is the one the fixed-width pass applies to
+// a literal list of number literals, so a constant list that pass leaves
+// whole is never written out here either.
+const INTERVAL_UNROLL_LIMIT = MAX_UNROLLED_CONSTANT_LIST_WIDTH;
 
 /**
  * Extract index, lower, and upper from a Limits expression.
@@ -3597,6 +3607,24 @@ function intervalCollectionElements(
       elements = decomposed;
     }
     if (collectionAt === -1 || elements === undefined) return undefined;
+    // Each scalar operand is repeated once per element: `[1, 2] + x` is
+    // `[1 + x, 2 + x]`. The run-time broadcast evaluates `x` once, so the
+    // repetition is the same value only for a pure operand that reads no
+    // caller source (a `vars` entry such as `nextInterval()`). Otherwise the
+    // collection is left to the run-time fold.
+    if (
+      elements.length > 1 &&
+      node.ops.some(
+        (op, i) =>
+          i !== collectionAt &&
+          (op.isPure !== true ||
+            readsCallerSource(op, {
+              readsLiveSource: target.cse?.harvestOptions?.isStringVar,
+              skipHeads: target.unrollSkipHeads,
+            }))
+      )
+    )
+      return undefined;
     return elements.map((el) =>
       ce.function(
         node.operator,
@@ -3720,7 +3748,11 @@ function compileIntervalCollectionReduce(
   target: CompileTarget<Expression>,
   // The answer for an EMPTY collection, when it is not the reduction's own:
   // see `compileIntervalExtremum`.
-  emptyAnswer?: string
+  emptyAnswer?: string,
+  // When true, the run-time fold starts from the first element, not from
+  // the identity of the reduction. `Reduce` folds that way: `Reduce([-0],
+  // Add)` is `-0`, while `0 + -0` is `+0`.
+  seedless = false
 ): string {
   const { op: iaOp, identity } = INTERVAL_REDUCTIONS[kind];
   const empty = emptyAnswer ?? INTERVAL_REDUCTIONS[kind].empty;
@@ -3808,11 +3840,90 @@ function compileIntervalCollectionReduce(
   // An empty run-time array answers the reduction's empty case (`Max([])`
   // is the absence marker, `Sum([])` the identity); a non-array is the
   // interpreter's `Sum(scalar) = scalar`.
+  if (seedless)
+    return (
+      `((_c) => Array.isArray(_c) ? (_c.length === 0 ? ${empty} : ` +
+      `_c.map((_b) => typeof _b === 'number' ? _IA.point(_b) : _b)` +
+      `.reduce((_a, _b) => ${iaOp}(_a, _b))) : _c)(${code})`
+    );
   return (
     `((_c) => Array.isArray(_c) ? (_c.length === 0 ? ${empty} : ` +
     `_c.reduce((_a, _b) => ` +
     `${iaOp}(_a, typeof _b === 'number' ? _IA.point(_b) : _b), ${identity}))` +
     ` : _c)(${code})`
+  );
+}
+
+/** The reduction of `compileIntervalCollectionReduce` that each library
+ * combiner of `Reduce` computes. */
+const INTERVAL_REDUCE_COMBINERS: Readonly<
+  Record<string, 'Sum' | 'Product' | 'Max' | 'Min'>
+> = {
+  __proto__: null as never,
+  Add: 'Sum',
+  Multiply: 'Product',
+  Max: 'Max',
+  Min: 'Min',
+};
+
+/**
+ * `Reduce(L, f)` on the interval target, for a combiner `f` that is one of
+ * the library heads `Add`, `Multiply`, `Max` and `Min` and no initial value:
+ * the reduction of `compileIntervalCollectionReduce` that `f` computes
+ * (`Reduce(L, Add)` is `Sum(L)`).
+ *
+ * The fixed-width pass (`unrollReduction` in `fixed-width-unroll.ts`)
+ * rewrites such a `Reduce` over a WRITTEN-OUT list to the n-ary head. This
+ * lowering is for a list that is not written out, for example the result of
+ * arithmetic over a constant list wider than the pass writes out
+ * (`Reduce((M − x·L)², Add)`).
+ *
+ * The combiner must be the library operator (`isLibraryFoldCombiner` in
+ * `builtin-callback.ts`). A function the caller supplies under that name
+ * through the `functions` option, a definition that shadows the library
+ * name, and a parameter or a local function with that name compute
+ * something else, so they are declined.
+ *
+ * The list must have at least one element, and its STRUCTURE must prove it
+ * (`staticListWidth` in `fixed-width-unroll.ts`): arithmetic over a
+ * written-out list of numbers. A declared width is not enough, because a
+ * value passed in `vars` is not checked against its declared type and can be
+ * empty. `Reduce` of an empty list is `Nothing`, which is not an interval,
+ * while the reduction answers the identity or the absence marker. The fold
+ * starts from the first element, as `Reduce` does, so the identity of the
+ * reduction does not change a `-0` to `+0`. A list of unknown width, a tuple,
+ * a custom combiner, and an initial value are declined, as they were before
+ * this lowering existed.
+ */
+function compileIntervalReduce(
+  args: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): string {
+  const [operand, combiner] = args;
+  const name =
+    args.length === 2 && isSymbol(combiner) ? combiner.symbol : undefined;
+  const kind =
+    name !== undefined && isLibraryFoldCombiner(combiner, target)
+      ? INTERVAL_REDUCE_COMBINERS[name]
+      : undefined;
+  if (kind === undefined)
+    throw new Error(
+      'Could not compile `Reduce`: this target reduces only with the ' +
+        'library operators `Add`, `Multiply`, `Max` or `Min` and no ' +
+        'initial value.'
+    );
+  const width = staticListWidth(operand);
+  if (width === undefined || width < 1)
+    throw new Error(
+      'Could not compile `Reduce`: the structure of the collection does ' +
+        'not prove a list of at least one number.'
+    );
+  return compileIntervalCollectionReduce(
+    kind,
+    operand,
+    target,
+    undefined,
+    true
   );
 }
 
@@ -5712,14 +5823,20 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         options.vars?.[name],
         lambdaRoute ? undefined : varsObjectSpelling(name)
       );
+    // See `CompileTarget.overridesHead`. This target reads no `operators`
+    // option.
+    const overridesHead = overriddenHeadPredicate(undefined, options.functions);
     const unrollOptions = {
       skipHeads: unrollSkipHeads,
+      overridesHead,
       iterationBudget: options.iterationBudget,
       readsLiveSource: opaqueVar,
       // This target has no list lowering at all, so a list of ANY width is
       // written out (`CompileTarget.unrollMinWidth`).
       minWidth: 1,
       unrollConstantLists: true,
+      // See `CompileTarget.unrollTypedPointLists`.
+      typedPointLists: true,
     };
     expr = unrollFixedWidthCollections(expr, unrollOptions);
     const { functions, vars, preamble } = options;
@@ -5790,8 +5907,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // See `CompileTarget.unrollSkipHeads`: the same answer the entry above
       // used, for the definition bodies this entry never sees.
       unrollSkipHeads,
+      overridesHead,
       unrollMinWidth: 1,
       unrollConstantLists: true,
+      unrollTypedPointLists: true,
       // The SOUND fold — evaluating a closed constant subtree's own interval
       // code at compile time (`foldConstantIntervalCode`) — is on by default
       // and honors the caller's `constantFold: false`, which promises the

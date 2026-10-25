@@ -2634,10 +2634,12 @@ export function explicitBroadcastPointNorm(
   // element instead of a run-time broadcast).
   return unrollFixedWidthCollections(norm, {
     skipHeads: target.unrollSkipHeads,
+    overridesHead: target.overridesHead,
     iterationBudget: target.iterationBudget,
     readsLiveSource: target.cse?.harvestOptions?.isStringVar,
     minWidth: target.unrollMinWidth,
     unrollConstantLists: target.unrollConstantLists,
+    typedPointLists: target.unrollTypedPointLists,
     unrollComprehensions: target.unrollComprehensions,
   });
 }
@@ -36440,10 +36442,12 @@ export class BaseCompiler {
         // definition — so the heads the caller overrode are read from the
         // target (`CompileTarget.unrollSkipHeads`).
         skipHeads: target.unrollSkipHeads,
+        overridesHead: target.overridesHead,
         iterationBudget: target.iterationBudget,
         readsLiveSource: target.cse?.harvestOptions?.isStringVar,
         minWidth: target.unrollMinWidth,
         unrollConstantLists: target.unrollConstantLists,
+        typedPointLists: target.unrollTypedPointLists,
         unrollComprehensions: target.unrollComprehensions,
       }
     );
@@ -40080,10 +40084,12 @@ export class BaseCompiler {
       ),
       {
         skipHeads: target.unrollSkipHeads,
+        overridesHead: target.overridesHead,
         iterationBudget: target.iterationBudget,
         readsLiveSource: target.cse?.harvestOptions?.isStringVar,
         minWidth: target.unrollMinWidth,
         unrollConstantLists: target.unrollConstantLists,
+        typedPointLists: target.unrollTypedPointLists,
         unrollComprehensions: target.unrollComprehensions,
       }
     );

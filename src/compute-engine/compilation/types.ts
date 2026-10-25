@@ -1327,6 +1327,18 @@ export interface CompileTarget<Expr = unknown> {
   unrollSkipHeads?: ReadonlySet<MathJsonSymbol>;
 
   /**
+   * Does the caller supply its own implementation of the head `name`
+   * through the `functions` or `operators` compilation option? It asks the
+   * caller's option itself: a function-form `operators` is asked for the
+   * name. `unrollSkipHeads` cannot answer this, because for a function-form
+   * `operators` it holds every head the fixed-width pass rewrites. A fold
+   * that writes the library kernel for its combiner reads it
+   * (`isLibraryFoldCombiner` in `builtin-callback.ts`). Absent means no
+   * override.
+   */
+  overridesHead?: (name: MathJsonSymbol) => boolean;
+
+  /**
    * The narrowest literal list the fixed-width unroll fans out on this
    * target, and whether it fans out a list of number literals as well
    * (`UnrollOptions.minWidth` / `unrollConstantLists` in
@@ -1338,6 +1350,15 @@ export interface CompileTarget<Expr = unknown> {
    */
   unrollMinWidth?: number;
   unrollConstantLists?: boolean;
+
+  /**
+   * Fold a point accessor through point arithmetic down to an operand whose
+   * TYPE is a list of points (`UnrollOptions.typedPointLists` in
+   * `fixed-width-unroll.ts`). Set by the JavaScript and interval targets;
+   * absent on the shader targets, where a narrow list of points is a native
+   * vector.
+   */
+  unrollTypedPointLists?: boolean;
 
   /**
    * Spell a collection-valued expression as this target's run-time

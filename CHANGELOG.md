@@ -18,6 +18,20 @@
 
 ### Resolved Issues
 
+- **The interval target wrote a constant list out one term per element at any
+  width**, and `Max`, `Min`, `Sum` or `Reduce` over a list of 2,000 numbers
+  overflowed the stack of the compiler. A list wider than 100 numbers is now
+  one table read at run time: `Sin(x + 4·L)` over 2,000 numbers compiles to
+  135 characters, where it was 60,876.
+- **Compiled `Reduce` and `Scan` used the library kernel for a combiner that
+  only had the same name.** With a user-declared `Max(a, b) = 2a + b`,
+  `Reduce([1, 2, 3], Max)` compiled to `Math.max` and gave 3, where the
+  interpreter gives 11; the same held for a parameter or a block-local function
+  named `Max`, for a `Max` given in the `functions` option, and on the
+  Python and interval targets. Such a fold now takes the route of a custom
+  combiner or declines.
+
+
 - **Compiled Python raised `TypeError` for a `None` input whose type was
   inferred.** `\sin(r)` and `r^2+1` called with `r=None` now give `nan`, as the
   interpreter does. An input declared `number` is unchanged and pays nothing.
@@ -545,6 +559,14 @@
 - **`IsPrime` compiles to JavaScript.**
 
 ### Performance
+
+- **A coordinate of point arithmetic over a list of points held by a symbol**
+  (`PointX(4·P + 0.3·(t, t))` with `P: list<tuple<number, number>>`) is
+  compiled as `4·PointX(P) + 0.3·t` on the JavaScript and interval targets, so
+  the points are not built. `Reduce(L, Add)` (also `Multiply`, `Max`, `Min`)
+  compiles on the interval target when `L` is not written out but its width is
+  known from its structure.
+
 
 - **A `Map` whose element function is a tree of integer operations is compiled
   with exact results** when the bounds prove that no step leaves the safe

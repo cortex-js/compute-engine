@@ -129,17 +129,6 @@ problem does not occur on its installed release). Report:
   operator" declines (importer binding), and the 2× re-compile of every declined
   row.
 
-### CE-465. Ask Tycho to test the row of its item 284 again
-
-**Status:** open; Tycho ask. Moved from CE-332 on 2026-10-25.
-
-The corpus row of Tycho item 284,
-`\sum_{i=0}^{3}\frac{(x-\epsilon)^i}{i!}F(\epsilon)[i+1]` with
-`F := [f, f', f'', f''']`, parses as the application of a list element
-(`["At", ["F", "epsilon"], ["Add", "i", 1]]` inside the `Sum`), so Tycho can
-test the row again. The explicit four-term sum compiles in 65 ms and matches
-`.N()`. Close this entry when Tycho answers.
-
 ## Types and type inference
 
 ### CE-3. `unknown` as an inference marker: what the migration left open
@@ -4938,48 +4927,6 @@ because the chain rule distributes each level over the previous one.
   product of powers without opening it, or simplify per order before
   differentiating again. Either changes the shape of `evaluate()` results and
   needs a snapshot-churn measurement.
-
-### CE-333. Coordinate projection through point arithmetic: two shapes are not rewritten
-
-**Status:** open; performance. Plan: item 1 of
-`docs/plans/2026-09-19-codegen-reassessment-ce1313.md`.
-
-The pre-pass (`foldPointAccessor` in `compilation/fixed-width-unroll.ts`)
-rewrites `PointX(p + k·[points])` to `PointX(p) + k·[first coordinates]` when
-the list of points is written out and has five or more elements.
-
-- **CE-333.1** The interval target writes a constant list of numbers out element
-  by element, with no upper width: `distributeOverList` has a lower width limit
-  only, and the interval target turns it on for constant lists
-  (`UnrollOptions.unrollConstantLists`). `Sin(x + 4·[2,000 numbers])` compiles
-  on `interval-js` to a 60,876-character body; the same arithmetic over 2,000
-  POINTS gives a 307-character body that reads a table bound once per artifact
-  (`_IA.bcastPoint`). So the projection rule is withheld on that target when a
-  list of points in the arithmetic has a number literal at the read coordinate
-  in every point (`isPointArithmeticOverWideList`); without this exception the
-  7,225-point witness grew from 413 to 202,510 characters.
-
-  An upper fan-out limit of 100 elements (`INTERVAL_UNROLL_LIMIT`) was tried. At
-  150 elements, the interval bodies of `Sin(x + 4·L)`, `Max(x + 4·L)`,
-  `Sum((M − x·L)²)`, a run-time index into `x + 4·L`, and `x·L + M` went from
-  3,075–8,671 characters to 113–338, with identical enclosures, but
-  `Reduce((M − x·L)², Add)` declined, because the interval `Reduce` lowering
-  only accepts the written-out list. The plan asks for a new whole-corpus
-  baseline before a change of which interval rows compile. To land it: give the
-  interval `Reduce` lowering a run-time list operand (or keep the fan-out under
-  `Reduce`), apply the limit, then remove the constant-list exception from
-  `isPointArithmeticOverWideList`.
-
-- **CE-333.2** A list of points that is a symbol, not a written-out list.
-  `PointX(4·P + 0.3·(t, t))` with `P` declared `list<tuple<number, number>>`
-  still builds every transformed point and maps over them twice (records 687 and
-  688 of the targeted audit, `woeywky0kj` setup rows). The rewrite needs a
-  fourth leaf in `coordinateAndArity`: an operand whose TYPE is a list of
-  points, to which the accessor is applied again (`4·PointX(P) + 0.3·t`). Open
-  questions: the minimum width (the rule cannot see the width of `P`, and a
-  narrow list is a native vector on the shader targets), and a `P` whose type is
-  the union of a point and a list of points, where `PointX(P)` dispatches at run
-  time.
 
 ### CE-334. Each call of a user function invalidates every generation-keyed cache
 

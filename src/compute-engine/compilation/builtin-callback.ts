@@ -24,9 +24,12 @@
 import type {
   BoxedDefinition,
   BoxedOperatorDefinition,
+  Expression,
   IComputeEngine as ComputeEngine,
 } from '../global-types.js';
+import type { CompileTarget } from './types.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
+import { isSymbol } from '../boxed-expression/type-guards.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 
 /**
@@ -77,6 +80,71 @@ export function builtinOperatorDefinition(
   // too (`shadowsLibraryName()`).
   if (def !== system && shadowsLibraryName(engine, name)) return undefined;
   return def.operator;
+}
+
+/**
+ * Is `e`, a symbol or a function expression named `name`, the library
+ * operator of that name? The engine must have a library definition for the
+ * name that no user definition shadows ({@link builtinOperatorDefinition}),
+ * and `e` must be bound to that library definition, or to no definition at
+ * all. A definition in a local scope shadows the name only there, so the
+ * binding of `e` is checked too. A symbol bound to a VALUE definition (a
+ * function parameter or a local variable named `Max`) is not the library
+ * operator: its `operatorDefinition` is `undefined`, but its value is
+ * whatever the parameter or the variable holds.
+ *
+ * A fold that writes the library kernel for a combiner (`Reduce(L, Max)` as
+ * `Max(a, b, c)` or as `Math.max`) asks this first: a user definition with
+ * the same name can be binary or not associative, and computes another
+ * value.
+ */
+export function isLibraryOperator(e: Expression, name: string): boolean {
+  const library = builtinOperatorDefinition(e.engine, name);
+  if (library === undefined) return false;
+  if (e.valueDefinition !== undefined) return false;
+  const bound = e.operatorDefinition;
+  return bound === undefined || bound === library;
+}
+
+/**
+ * May a compiled `Reduce` or `Scan` fold with the kernel that the name of
+ * its combiner symbol `op` spells (`Math.max` or `max` for `Max`, `+` for
+ * `Add`)? Only when all of these are true:
+ *
+ * - the symbol is the library operator ({@link isLibraryOperator});
+ * - the compilation does not bind the name itself: a lambda parameter or a
+ *   block local (`CompileTarget.boundVars`), a block-local function
+ *   (`CompileTarget.localFunctions`, `CompileTarget.lexicalFunctions`), or a
+ *   `vars` mapping (`CompileTarget.varsKeys`);
+ * - the caller does not supply a function under the name through the
+ *   `functions` or `operators` option (`CompileTarget.overridesHead`).
+ *
+ * Otherwise the fold takes the target's custom-combiner route, which calls
+ * the combiner two arguments at a time, as the interpreter does, or
+ * declines.
+ */
+export function isLibraryFoldCombiner(
+  op: Expression,
+  target: Pick<
+    CompileTarget<Expression>,
+    | 'boundVars'
+    | 'localFunctions'
+    | 'lexicalFunctions'
+    | 'varsKeys'
+    | 'overridesHead'
+  >
+): boolean {
+  if (!isSymbol(op)) return false;
+  const name = op.symbol;
+  if (
+    target.boundVars?.has(name) === true ||
+    target.localFunctions?.has(name) === true ||
+    target.lexicalFunctions?.has(name) === true ||
+    target.varsKeys?.has(name) === true ||
+    target.overridesHead?.(name) === true
+  )
+    return false;
+  return isLibraryOperator(op, name);
 }
 
 /**

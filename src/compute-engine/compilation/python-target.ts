@@ -47,6 +47,7 @@ import {
   isDefinitelyCollectionType,
 } from './in-place-update.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
+import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
   COINCIDENCE_BUDGET,
@@ -6495,20 +6496,25 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // with no initial value yields nan (the interpreter's `Nothing`). A custom
   // combiner must be a binary `Function` literal and requires an explicit
   // initial value (same rule as the JavaScript target).
-  Reduce: (args, compile) => {
+  Reduce: (args, compile, target) => {
     const coll = pyCollArg('Reduce', args[0], compile);
     const op = args[1];
     const init = args[2];
     if (op == null)
       throw new Error('Could not compile `Reduce`: missing combiner');
-    const builtin = isSymbol(op)
-      ? {
-          Add: 'sum(_l)',
-          Multiply: '__import__("math").prod(_l)',
-          Min: 'min(_l)',
-          Max: 'max(_l)',
-        }[op.symbol]
-      : undefined;
+    // The reduction the name spells is used only for the library operator
+    // (`isLibraryFoldCombiner` in `builtin-callback.ts`): a user definition
+    // named `Max` can be binary and not associative, and `max` would compute
+    // another value.
+    const builtin =
+      isSymbol(op) && isLibraryFoldCombiner(op, target)
+        ? {
+            Add: 'sum(_l)',
+            Multiply: '__import__("math").prod(_l)',
+            Min: 'min(_l)',
+            Max: 'max(_l)',
+          }[op.symbol]
+        : undefined;
     if (builtin !== undefined) {
       pyRefuseBuiltinFoldOverCollections('Reduce', args[0]);
       if (init !== undefined && init !== null) {
@@ -6561,20 +6567,21 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   // Running fold: `itertools.accumulate`. With an initial value the
   // accumulated seed is not emitted (slice it off, matching the
   // interpreter); without one the first element seeds and is emitted as-is.
-  Scan: (args, compile) => {
+  Scan: (args, compile, target) => {
     const coll = pyCollArg('Scan', args[0], compile);
     const op = args[1];
     const init = args[2];
     if (op == null)
       throw new Error('Could not compile `Scan`: missing combiner');
-    const builtin = isSymbol(op)
-      ? {
-          Add: '(lambda _a, _b: _a + _b)',
-          Multiply: '(lambda _a, _b: _a * _b)',
-          Min: '(lambda _a, _b: min(_a, _b))',
-          Max: '(lambda _a, _b: max(_a, _b))',
-        }[op.symbol]
-      : undefined;
+    const builtin =
+      isSymbol(op) && isLibraryFoldCombiner(op, target)
+        ? {
+            Add: '(lambda _a, _b: _a + _b)',
+            Multiply: '(lambda _a, _b: _a * _b)',
+            Min: '(lambda _a, _b: min(_a, _b))',
+            Max: '(lambda _a, _b: max(_a, _b))',
+          }[op.symbol]
+        : undefined;
     if (builtin !== undefined)
       pyRefuseBuiltinFoldOverCollections('Scan', args[0]);
     else assertAccumulatorFitsStep('Scan', op, init);

@@ -12,6 +12,7 @@ import {
   resolveTypeAlias,
 } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
+import { isSubtype } from '../../common/type/subtype.js';
 import {
   functionLiteralParameterName,
   isRestParameter,
@@ -20,6 +21,7 @@ import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   builtinCallbackArity,
   builtinOperatorDefinition,
+  isLibraryOperator,
   isPureBuiltinCallback,
 } from './builtin-callback.js';
 
@@ -94,6 +96,16 @@ export interface UnrollOptions {
   readonly skipHeads?: ReadonlySet<string>;
 
   /**
+   * Does the caller supply its own implementation of the head `name`? It
+   * asks the caller's `functions` and `operators` options for the name
+   * ({@link overriddenHeadPredicate}). The reduction rule reads it to
+   * decline a combiner that the caller supplies: `skipHeads` holds every
+   * head this pass rewrites when `operators` is a function, so it cannot
+   * answer for one name.
+   */
+  readonly overridesHead?: (name: string) => boolean;
+
+  /**
    * The compilation's iteration budget (`CompileTarget.iterationBudget`),
    * when the target has one. The JavaScript `PointList` lowering caps the
    * zip of column sources at this many points, so a rewrite that reads a
@@ -131,6 +143,17 @@ export interface UnrollOptions {
    * fold works on emitted code, and a list has none.
    */
   readonly unrollConstantLists?: boolean;
+
+  /**
+   * Also fold a point accessor through point arithmetic down to an operand
+   * whose TYPE is a list of points (`P: list<tuple<number, number>>`), when
+   * the list is not written out: `PointX(4·P + 0.3·(t, t))` becomes
+   * `4·PointX(P) + 0.3·t` (`pointListOperandArity`). Off by default. The
+   * JavaScript and interval targets set it. The shader targets do not: the
+   * rule cannot see the width of `P`, and a list of two to four points is a
+   * native vector there, which the target transforms whole.
+   */
+  readonly typedPointLists?: boolean;
 
   /**
    * Write a `Comprehension` over LITERAL domains out as the literal list of
@@ -180,6 +203,27 @@ export function overriddenCompilationHeads(
     ...(operators ? Object.keys(operators) : []),
   ];
   return names.length === 0 ? undefined : new Set(names);
+}
+
+/**
+ * A predicate that tells if the caller supplies its own implementation of a
+ * head, given the caller's `operators` and `functions` compilation options,
+ * or `undefined` when the caller overrode nothing. Unlike
+ * {@link overriddenCompilationHeads}, a function-form `operators` is asked
+ * for the name, so an `operators` function that answers `undefined` for
+ * `Max` does not override `Max`.
+ */
+export function overriddenHeadPredicate(
+  operators:
+    Readonly<Record<string, unknown>> | ((op: string) => unknown) | undefined,
+  functions: Readonly<Record<string, unknown>> | undefined
+): ((name: string) => boolean) | undefined {
+  if (operators === undefined && functions === undefined) return undefined;
+  return (name) =>
+    (functions !== undefined && Object.hasOwn(functions, name)) ||
+    (typeof operators === 'function'
+      ? operators(name) !== undefined
+      : operators !== undefined && Object.hasOwn(operators, name));
 }
 
 /**
@@ -274,7 +318,7 @@ function rewrite(
     const next =
       foldPointAccessor(node, options) ??
       tryUnrollMap(node, options) ??
-      unrollReduction(node) ??
+      unrollReduction(node, options) ??
       distributeOverList(node, options) ??
       foldLiteralIndex(node, options) ??
       unrollComprehension(node, options) ??
@@ -369,7 +413,11 @@ const POINT_ACCESSOR_POSITION: Readonly<Record<string, number>> = {
  * coordinates (document `woeywky0kj`, a 295,869-character kernel). The width
  * floor is checked once, over the whole arithmetic: at least one list in it
  * must be wide. Arithmetic over single points, or over narrow lists only, is
- * left to the targets, for the reason given above.
+ * left to the targets, for the reason given above. On a target that sets
+ * `UnrollOptions.typedPointLists`, a list of points known only by its TYPE
+ * (a symbol `P: list<tuple<number, number>>`) also counts as a wide list:
+ * the accessor is applied to it (`4·PointX(P) + 0.3·t`), and it may not be
+ * added to another list, since the two widths can differ at run time.
  *
  * Returns `undefined` — leaving the node for the target's own lowering, or
  * its own decline — when the operand is none of those shapes, when the
@@ -415,11 +463,15 @@ function foldPointAccessor(
  * element (`UnrollOptions.unrollConstantLists`, the interval target) when a
  * list the walk reaches has a NUMBER LITERAL at `position` in every point.
  * The projected list would be a constant list of numbers, which the
- * element-wise rule then fans out with no upper width: the 7,225-point
- * witness named on `foldPointAccessor` became a 202,510-character interval
- * kernel, where the unprojected arithmetic compiles to a 413-character one
- * that reads the point table through the run-time broadcast. On a target that
- * keeps a constant list whole, the projection has no such cost.
+ * element-wise rule writes out one term per element up to
+ * {@link MAX_UNROLLED_CONSTANT_LIST_WIDTH} elements: at 100 points the
+ * projected audit shape is a 5,915-character interval body, where the
+ * unprojected arithmetic is a 398-character one that reads the point table
+ * through the run-time broadcast (`_IA.bcastPoint`). A wider projected list
+ * stays one table, but the projection still moves the coordinate into the
+ * sum around the accessor, and canonicalization then adds the terms in
+ * another order, which changes the last bits of the interval bounds. On a
+ * target that keeps a constant list whole, the projection has neither cost.
  */
 function isPointArithmeticOverWideList(
   point: Expression & FunctionInterface,
@@ -438,6 +490,21 @@ function isPointArithmeticOverWideList(
   let wide = false;
   let constant = false;
   const walk = (e: Expression, depth: number): void => {
+    // A list of points known only by its type counts as wide: its width is
+    // not known, and the targets that ask for it map over it at run time
+    // (`UnrollOptions.typedPointLists`).
+    if (
+      depth > 0 &&
+      options.typedPointLists === true &&
+      !(
+        isFunction(e) &&
+        (POINT_ARITHMETIC_HEADS.has(e.operator) || e.operator === 'List')
+      ) &&
+      pointListOperandArity(e) !== undefined
+    ) {
+      wide = true;
+      return;
+    }
     if (!isFunction(e)) return;
     if (depth > 0 && e.operator === 'List') {
       if (isUnrollableList(e, options)) wide = true;
@@ -525,14 +592,18 @@ export function readsCallerSource(
  * a value handed to the compiled code through `vars` is never checked
  * against its declared type. Read by the column projection
  * (`projectPointListColumn`), by the literal index fold (`foldLiteralIndex`)
- * and by the selection fan-out (`distributeSelection`); `indexInto` walks
- * exactly the heads this function walks.
+ * and by the selection fan-out (`distributeSelection`), and by the interval
+ * target's `Reduce` lowering (`compileIntervalReduce`), which needs a list
+ * proven not empty; `indexInto` walks exactly the heads this function walks.
  *
  * A `Range` is a compile-time constant that no target builds as a list; the
  * rules that INDEX into the width read through it (`ranges`), while the
  * column projection, which hands the column on whole, does not.
  */
-function staticListWidth(e: Expression, ranges = false): number | undefined {
+export function staticListWidth(
+  e: Expression,
+  ranges = false
+): number | undefined {
   if (!isFunction(e)) return undefined;
   if (e.operator === 'List')
     return e.ops.every(isProvablyScalar) ? e.nops : undefined;
@@ -586,9 +657,12 @@ function isUnrollableList(
   options: UnrollOptions
 ): e is Expression & FunctionInterface {
   if (!isFunction(e, 'List') || e.nops === 0) return false;
-  if (options.unrollConstantLists !== true && !isNonConstantLiteralList(e))
-    return false;
-  return e.nops >= (options.minWidth ?? MIN_UNROLLED_WIDTH);
+  const width = e.nops;
+  if (!isNonConstantLiteralList(e)) {
+    if (options.unrollConstantLists !== true) return false;
+    if (width > MAX_UNROLLED_CONSTANT_LIST_WIDTH) return false;
+  }
+  return width >= (options.minWidth ?? MIN_UNROLLED_WIDTH);
 }
 
 /**
@@ -616,9 +690,16 @@ function coordinateOf(
  * pass cannot name one count: a value typed as a bare `tuple`, or a list
  * whose points do not all have the same count (a valid list on its own, but
  * not one a point can be added to). `width` is how many points a written-out
- * list holds, or `undefined` for a single point.
+ * list holds, `null` for a list of points known only by its type (its width
+ * is not known), or `undefined` for a single point. `numeric` is `true` when
+ * every coordinate of every point is provably a number, the coordinates the
+ * rewrite drops included.
  */
-type PointShape = { arity: number | undefined; width: number | undefined };
+type PointShape = {
+  arity: number | undefined;
+  width: number | null | undefined;
+  numeric: boolean;
+};
 
 /**
  * {@link coordinateOf}, together with the shape of the points the operand
@@ -670,6 +751,7 @@ function coordinateAndArity(
       coordinate: literal[position - 1],
       arity: literal.length,
       width: undefined,
+      numeric: literal.every(isProvablyScalar),
     };
   }
 
@@ -688,17 +770,47 @@ function coordinateAndArity(
     const arities = new Set(shapes.map((shape) => shape.arity));
     const [firstArity] = arities;
     const arity = arities.size === 1 ? firstArity : undefined;
-    const coordinate = ce.function(point.operator, parts);
-    if (point.operator === 'List')
-      return { coordinate, arity, width: point.nops };
-    // The operands of a sum must agree: see the shape rule above.
-    const widths = new Set(
-      shapes.map((shape) => shape.width).filter((w) => w !== undefined)
-    );
-    if (point.nops > 1 && (arity === undefined || widths.size > 1))
+    const numeric = shapes.every((shape) => shape.numeric);
+    // A sum is STRUCTURAL, so its terms stay in the order of the points.
+    // Canonicalization can reorder three or more terms, and on the interval
+    // target another order of the additions gives other bounds in the last
+    // bits.
+    const coordinate =
+      point.operator === 'Add'
+        ? ce.function('Add', parts, { form: 'structural' })
+        : ce.function(point.operator, parts);
+    if (point.operator === 'List') {
+      // An element that is a list of points of unknown width makes a nested
+      // list whose shape the rewrite cannot prove; leave it to the target.
+      if (shapes.some((shape) => shape.width === null)) return undefined;
+      return { coordinate, arity, width: point.nops, numeric };
+    }
+    // The operands of a sum must agree: see the shape rule above. A list of
+    // unknown width (`null`) agrees with no other list, since the two widths
+    // can differ at run time.
+    const lists = shapes
+      .map((shape) => shape.width)
+      .filter((w) => w !== undefined);
+    const widths = new Set(lists);
+    if (
+      point.nops > 1 &&
+      (arity === undefined ||
+        widths.size > 1 ||
+        (widths.has(null) && lists.length > 1))
+    )
+      return undefined;
+    // A single point with a coordinate that may be a list (a point `(t, S)`
+    // with `S: number | list<number>`) is not a point the interpreter adds:
+    // it reports `incompatible-type`. The rewrite would add the projected
+    // coordinate element-wise, or drop `S`. So every coordinate of a single
+    // point in a sum must be provably a number, not only the projected one.
+    if (
+      point.nops > 1 &&
+      shapes.some((shape) => shape.width === undefined && !shape.numeric)
+    )
       return undefined;
     const [width] = widths;
-    return { coordinate, arity, width };
+    return { coordinate, arity, width, numeric };
   }
 
   if (isFunction(point, 'Negate') && point.nops === 1) {
@@ -739,9 +851,76 @@ function coordinateAndArity(
       coordinate: ce.function(accessor, [point]),
       arity: tupleTypeArity(point.type.type),
       width: undefined,
+      numeric: tupleTypeIsNumeric(point.type.type),
     };
 
+  // An operand whose static type is a list of points, on a target that asks
+  // for it (`UnrollOptions.typedPointLists`): the accessor applied to the
+  // whole list is the list of the coordinates, which every such target
+  // already lowers. A coordinate past the arity of the points is left to the
+  // target, as for a literal point.
+  if (options.typedPointLists === true) {
+    const arity = pointListOperandArity(point);
+    if (arity !== undefined) {
+      if (position > arity) return undefined;
+      return {
+        coordinate: ce.function(accessor, [point]),
+        arity,
+        width: null,
+        // `pointListOperandArity` admits only points of numbers.
+        numeric: true,
+      };
+    }
+  }
+
   return undefined;
+}
+
+/** The heads of point arithmetic that `coordinateAndArity` descends into. */
+const POINT_ARITHMETIC_HEADS: ReadonlySet<string> = new Set([
+  'Add',
+  'Negate',
+  'Multiply',
+]);
+
+/**
+ * When the static TYPE of `e` is a list of points (`list<tuple<number,
+ * number>>`), the number of coordinates of each point. `undefined` for any
+ * other type.
+ *
+ * Only a plain list of tuples whose coordinates are all numbers is admitted.
+ * A UNION of a point and a list of points (`tuple<number, number> |
+ * list<tuple<number, number>>`) is not: the accessor then reads a coordinate
+ * of one point or maps over a list depending on the run-time value, and the
+ * rewrite would have to prove which. A list with dimensions (a matrix) and a
+ * list of lists of points are not lists of points either.
+ */
+function pointListOperandArity(e: Expression): number | undefined {
+  const t = resolveTypeAlias(e.type.type);
+  if (typeof t === 'string' || t.kind !== 'list') return undefined;
+  if (t.dimensions !== undefined) return undefined;
+  const element = resolveTypeAlias(t.elements);
+  // A bare `tuple` element states no coordinate type, so it can hold a
+  // string or a list. The interpreter reports `incompatible-type` for
+  // arithmetic over such a point, which the rewrite would hide.
+  if (typeof element === 'string' || element.kind !== 'tuple') return undefined;
+  if (!element.elements.every((slot) => isSubtype(slot.type, 'number')))
+    return undefined;
+  return element.elements.length;
+}
+
+/**
+ * Is every slot of a tuple type a number? `false` for the bare `tuple`,
+ * whose slots can hold anything. A transparent alias is unfolded first; a
+ * nominal reference stays opaque.
+ */
+function tupleTypeIsNumeric(t: Readonly<Type>): boolean {
+  const resolved = resolveTypeAlias(t);
+  return (
+    typeof resolved !== 'string' &&
+    resolved.kind === 'tuple' &&
+    resolved.elements.every((slot) => isSubtype(slot.type, 'number'))
+  );
 }
 
 /**
@@ -1088,11 +1267,35 @@ function reductionShape(expr: Expression & FunctionInterface):
 }
 
 function unrollReduction(
-  expr: Expression & FunctionInterface
+  expr: Expression & FunctionInterface,
+  options: UnrollOptions
 ): Expression | undefined {
   const reduction = reductionShape(expr);
   if (reduction === undefined) return undefined;
   const { head, list } = reduction;
+  // The flat n-ary form equals the fold only for the library operators,
+  // which are associative and commutative. A user definition with the same
+  // name can be binary or not associative: `Reduce([a, b, c], Max)` is then
+  // `Max(Max(a, b), c)`, not `Max(a, b, c)`. So the reduction head (`Sum`,
+  // `Max`, …) or the combiner of a `Reduce`, and the n-ary head the rewrite
+  // writes, must all be the library definitions.
+  const named = isFunction(expr, 'Reduce') ? expr.op2 : expr;
+  if (!isLibraryOperator(named, isSymbol(named) ? named.symbol : expr.operator))
+    return undefined;
+  if (builtinOperatorDefinition(expr.engine, head) === undefined)
+    return undefined;
+  // A head the caller supplies through the `functions` or `operators` option
+  // (`UnrollOptions.overridesHead`) is emitted as a call to the caller's
+  // function. The n-ary form calls it once with every element, where the
+  // fold calls it with two arguments at a time, so the two can give
+  // different values. A target that gives no predicate is answered by
+  // `skipHeads`: there a function-form `operators` withholds `Reduce` and the
+  // reduction heads from the whole pass, so this rule never sees them.
+  const overrides =
+    options.overridesHead ??
+    ((name: string) => options.skipHeads?.has(name) === true);
+  if (overrides(head)) return undefined;
+  if (isSymbol(named) && overrides(named.symbol)) return undefined;
   // An EMPTY list is left alone: each of these heads has its own identity
   // element for it, which the interpreter supplies and this rewrite would not.
   // Every other width is rewritten — the n-ary form is at least as good as a
@@ -1687,6 +1890,23 @@ function distributeSelection(
  * builds it at run time.
  */
 const MAX_UNROLLED_RANGE_WIDTH = 64;
+
+/**
+ * The most elements a literal `List` of NUMBER LITERALS is written out into
+ * by the fan-out rules on a target that asks for constant lists
+ * (`UnrollOptions.unrollConstantLists`, the interval target). That target's
+ * own cap on emitted terms (`INTERVAL_UNROLL_LIMIT` in
+ * `interval-javascript-target.ts`) is defined as this constant, so the two
+ * caps stay equal.
+ *
+ * The interval target spells a constant list as one table bound once per
+ * compiled function (`_IA.points([…])`) and broadcasts arithmetic over it at
+ * run time, so a wider constant list is left to it. Without the cap the
+ * fan-out wrote one term per element: `Sin(x + 4·L)` over 2,000 numbers was a
+ * 60,876-character body, and an n-ary reduction over 2,000 such terms (`Max`,
+ * `Min`, `Sum`, `Reduce`) overflowed the stack of the code generator.
+ */
+export const MAX_UNROLLED_CONSTANT_LIST_WIDTH = 100;
 
 /**
  * The elements of a literal `Range` operand that `distributeOverList` fans
