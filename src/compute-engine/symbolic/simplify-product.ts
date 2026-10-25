@@ -198,7 +198,20 @@ function simplifyProductRules(x: Expression): RuleStep | undefined {
       constTerm = op1;
     }
 
-    if (indexTerm && constTerm) {
+    // A negative integer `c` is excluded: `c!` is a pole there, and the
+    // product has a zero factor at `n = −c` only when `b ≥ −c`, so the
+    // quotient is not the product (`Π_{k=1}^n (k−3)` became `0`, which is
+    // wrong for n = 1 and n = 2, and the infinite product `Indeterminate`
+    // instead of `0`).
+    if (
+      indexTerm &&
+      constTerm &&
+      !(
+        isNumber(constTerm) &&
+        constTerm.isInteger === true &&
+        constTerm.isNegative === true
+      )
+    ) {
       // Product(n+c, [n, 1, b]) = (b+c)! / c!
       const b = upper;
       const c = constTerm;

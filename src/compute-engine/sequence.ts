@@ -1517,10 +1517,33 @@ function pendingScopeOf(ce: ComputeEngine, name: string): Scope {
     scope && scope !== system;
     scope = scope.parent
   ) {
-    if (scope.bindings.has(name) || pending?.get(scope)?.has(name))
+    if (scope.bindings.has(name) || pending?.get(scope)?.has(name)) {
+      // A function closure can reach, through its `parent` chain, a scope
+      // whose evaluation context was already discarded. Nothing discards
+      // that scope again, so a pending definition recorded under it stayed
+      // in the map and in every checkpoint snapshot. Its bindings are
+      // disposed, so the definition goes to the current scope instead: it
+      // is removed when the current scope is discarded. (CE-110)
+      if (isDiscardedScope(ce, scope)) return current;
       return scope;
+    }
   }
   return current;
+}
+
+/**
+ * The scopes whose evaluation context was discarded
+ * (`_discardPendingSequencesOfScope()`). A scope object can be pushed again
+ * after it is discarded (a canonical `Sum` or `Block` pushes its local scope
+ * on each evaluation), so a scope in this set that is on the evaluation
+ * context stack again is live (`isDiscardedScope()`).
+ */
+const discardedScopes = new WeakSet<Scope>();
+
+/** True when `scope` was discarded and is not on the context stack again. */
+function isDiscardedScope(ce: ComputeEngine, scope: Scope): boolean {
+  if (!discardedScopes.has(scope)) return false;
+  return !ce._evalContextStack.some((frame) => frame.lexicalScope === scope);
 }
 
 /** The pending definition of `name` visible from the current scope. */
@@ -1610,6 +1633,7 @@ export function _discardPendingSequencesOfScope(
   scope: Scope
 ): void {
   pendingSequences.get(ce)?.delete(scope);
+  discardedScopes.add(scope);
 }
 
 /**

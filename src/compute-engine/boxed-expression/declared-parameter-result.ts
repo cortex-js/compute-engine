@@ -292,11 +292,23 @@ export function withSignatureResult(t: Type, result: Type): Type {
  * `list` of the same elements, at the top level and in the arms of a union.
  * `undefined` when `t` holds no abstract collection, so there is nothing to
  * hypothesize.
+ *
+ * A `broadcastable<T>` of a number type `T` is replaced by `T`. The
+ * recursive call `fact(n − 1)` of `fact := n ↦ If(n ≤ 1, 1, n·fact(n − 1))`
+ * reads the result of the function while its body is typed, and the first
+ * reading of an undeclared name is a function whose result may be a
+ * collection, so the product was typed `broadcastable<number>` and so was
+ * the function. Under the hypothesis `number`, the body is typed `number`,
+ * which bears it out: a call over a list argument maps the function over
+ * the elements, so one call gives one number. The same literal assigned to
+ * a name declared `(unknown) -> unknown` derives `-> number` (CE-454).
  */
 function listHypothesisOf(t: Type): Type | undefined {
   if (t === 'collection') return 'list';
   if (typeof t !== 'object') return undefined;
   if (t.kind === 'collection') return { kind: 'list', elements: t.elements };
+  if (t.kind === 'broadcastable' && isSubtype(t.elements, 'number'))
+    return t.elements;
   if (t.kind === 'union') {
     let changed = false;
     const types = t.types.map((arm) => {

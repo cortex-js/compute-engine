@@ -242,10 +242,10 @@ describe('THE ONE-SIDED LIMIT OF THE ANTIDERIVATIVE AT A FINITE BOUND', () => {
     expect(lim('\\lim_{t\\to 0^+} \\ln(t)^2')).toBe('+oo');
     expect(lim('\\lim_{t\\to 0^+} (2\\ln t - 1)')).toBe('-oo');
     // Two-sided, the real logarithm is undefined on the left: inert.
-    expect(lim('\\lim_{x\\to 0} x\\ln x')).toBe('lim_(0) {x * ln(x)}');
+    expect(lim('\\lim_{x\\to 0} x\\ln x')).toBe('lim_(x -> 0) {x * ln(x)}');
     // A complex exponent: the magnitude grows but the phase turns.
     expect(lim('\\lim_{t\\to 0^+} (\\ln t)^{2+3i}')).toBe(
-      'lim_(0) {ln(t)^(2 + 3i)}'
+      'lim_(t -> 0) {ln(t)^(2 + 3i)}'
     );
   });
 

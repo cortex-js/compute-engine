@@ -238,9 +238,13 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
       // non-negative integer, and a provably non-integer one (`v ** 0.5` is a
       // float on a plain list and on an integer ndarray alike). The float
       // exponent `0.5` stays a `Power`: only the exact `1/2` canonicalizes to
-      // `Sqrt` (user decision 2026-09-27: a float operand is kept).
+      // `Sqrt` (user decision 2026-09-27: a float operand is kept). That
+      // power is promoted to the complex lane, as the analysis reads it, so
+      // it is `np.emath.power` (CE-230.6).
       expect(p(['Power', 'L', 3])).toBe('[_tv1 ** 3 for _tv1 in L]');
-      expect(p(['Power', 'L', 0.5])).toBe('[_tv1 ** 0.5 for _tv1 in L]');
+      expect(p(['Power', 'L', 0.5])).toBe(
+        '[np.emath.power(_tv1, 0.5) for _tv1 in L]'
+      );
       expect(p(['Power', 'L', ['Rational', 1, 2]])).toBe('np.emath.sqrt(L)');
     });
 

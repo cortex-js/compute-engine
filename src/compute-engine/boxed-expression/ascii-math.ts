@@ -635,7 +635,10 @@ const FUNCTIONS: Record<
     const [fn, val] = expr.ops;
 
     if (isFunction(fn, 'Function')) {
-      const args = fn.ops.slice(2);
+      // The operands of a `Function` are the body, then the parameters, so
+      // the parameters start at index 1 (CE-161: index 2 dropped the
+      // variable, which printed `lim_(a)` instead of `lim_(x -> a)`).
+      const args = fn.ops.slice(1);
       const body = fn.op1 ?? fn;
       let arg: Expression | null = null;
       if (args.length === 1) arg = args[0];

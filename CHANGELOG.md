@@ -2,6 +2,162 @@
 
 ### Resolved Issues
 
+- **Compiled Python gave another absence value than the interpreter for an
+  element read of an absent tuple.** With `b: list<tuple<number, string>>` and
+  `b = []`, `At(At(b, 1), 1)` was `None` (`Missing`); it is now `nan`, as in the
+  interpreter. A read past the end of a tuple with an `unknown` slot picks the
+  value from the elements, as the interpreter does.
+
+- **Compiled `Last` declined an operand that `First` compiles**, such as
+  `At(tup(x), 1)` with `x: any`. It now compiles as `At(…, -1)`.
+
+- **The ASCII `toString()` of a `Limit` left out the variable**: `lim_(a) …`. It
+  now prints `lim_(x -> a) …`.
+
+- **`NLimit` of a function that decays to `0` gave a tiny residue** such as
+  `−2e-22` for `7t/(t² + 9)` at infinity. A result whose magnitude is below its
+  error estimate is now extrapolated again with a tighter tolerance and snapped
+  to `0` when it stays below the estimate; a small true limit such as
+  `1e-20·(1 + 2/t)` is kept.
+
+- **`simplify()` did not collect like terms of a numerator over a sum
+  denominator**: `(t − t + 1)/(y + z)` stayed as written; it is now `1/(y + z)`.
+
+- **`simplify()` did not collect constant cofactors of like terms**:
+  `π(√2 − 1) + π(√2 + 1)` is now `2π√2`, so the integral
+  `∫ (x² − 1)/((x − 1)(x⁴ + 1)) dx` over the real line gives `π/√2`.
+
+- **Infinite sums and products**: a two-term body whose second term is not a
+  `Negate` now telescopes (`Σ 1/(k+x) − 1/(k+x+1)` from `1` to `∞` is
+  `1/(x+1)`); `evaluate()` and `.N()` now give the limit of a divergent or
+  vanishing infinite product of a rational body (`Π k` and `Π (k+1)/k` are `+∞`,
+  `Π k/(k+1)` is `0`); the shifted-factorial rule no longer simplifies
+  `Π_{k=1}^n (k − 3)` to `0`.
+
+- **An unevaluated `Solve` from a parse kept `InvisibleOperator` and `Delimiter`
+  in its MathJSON.** It now holds the canonical equation, so the parse route and
+  the box route give the same result.
+
+- **`simplify()` of `−(2·4·…·2n)` distributed the sign into the product** and
+  folded it to `−16·…·n`. An ellipsis product is no longer expanded, and
+  `−(1 + 2 + … + n)` keeps its pattern order.
+
+- **`Map(x ↦ x + 1, [[(1, 2)], Missing])` gave `[NaN, NaN]`.** The first cell is
+  now a list holding the `incompatible-type` error, as without the `Missing`.
+
+- **`Mean`, `Median`, `Variance` and `StandardDeviation` of an exact `Range`
+  under `.N()`** walked the float range and gave `-8.50000000000000060577` for
+  `Mean(Range(-17, 0, 1/3))`. They now read the held operand and use the closed
+  form: `-8.5`.
+
+- **The display preview of an unevaluated `Dedup`, `Reverse` or `Filter` of a
+  string-typed symbol printed a list**, while the value was a string. The
+  preview now evaluates its source.
+
+- **A base case assigned in a closure could record a pending sequence definition
+  under a discarded scope**, which stayed in the map and in every checkpoint. A
+  discarded scope is now skipped.
+
+- **A qualified call on an unknown protocol name**
+  (`Comparable.compare("a", "b")` with `Comparable` undeclared) gave an arity
+  error. It now gives a `protocol-unknown` error that names the symbol.
+
+- **`IdentityMatrix(n)`, `ZeroMatrix(2, n)` and `OnesMatrix(n)` with a symbolic
+  extent** gave an `expected-positive-integer` error; `Kernel(n)` for a
+  valueless `n: integer` gave `[]`; `Shape(m)` for an unassigned
+  `m: matrix<integer>` gave `(-1, -1)`, and `Shape(q)`/`Rank(q)` of a free
+  symbol gave `()`/`0`. Each now stays unevaluated.
+
+- **`Sum(Rest(g(3)))` and `Reduce(Rest(g(3)), Add, 0)` with `g(t) = [t, 2t]`
+  stayed unevaluated.** A lazy view over a held call is now resolved before the
+  reduction; `Most`, `Reverse`, `Filter` and `Join` over `g(3)` too.
+
+- **The entry type of a declared open record left out its undeclared fields**,
+  so `FlatMap(ra, x ↦ [At(x, 2)])` with `ra: record{a: integer}` holding
+  `{a: 1, b: Missing}` was an `incompatible-type` error. A declared record now
+  reads `tuple<string, any>` entries and `Values(ra)` is `list<any>`; a
+  dictionary literal keeps its field types.
+
+- **`Tabulate(w, 3)` with `w` holding an error** gave three copies of the error;
+  it is now the error once, as `Map(w, …)` is.
+
+- **Static types that did not hold the value of the expression.** In each case
+  the type is now a type of the value:
+  - `Length([1, Error("x")])`, `Count` and `IsEmpty` over a list with a failed
+    cell were typed `error` for the value `2`; `First`, `Last`, `At`, `IsError`,
+    `Element`, `Contains` and `IndexOf` over such a list are now `unknown`, and
+    `Sin([1, err, 3])` and `[1, err, 3] + 1` are typed as lists over the valid
+    cells.
+  - `PointY([(1, Missing), (2, 3)])` keeps its length:
+    `list<integer | missing^2>`.
+  - A type derived from operand descriptors now refuses what boxing refuses:
+    `derive('Add', [string, integer])` is `error`, so
+    `Map((a, b) ↦ a + b, ss, ys)` over strings and integers is `list<unknown>`;
+    `Simplify(Sin(r)·P)` with `P: boolean` is `error`; `Sin` over a
+    `list<string>` is `error`.
+  - `Map(Abs, [1, Missing, 2])` and `Map(Negate, …)` are
+    `list<integer | nan^3>`, as the lambda form is; `Abs(w)` with `w: nan` is
+    `nan`.
+  - An undeclared self-recursive numeric function
+    (`fact := n ↦ If(n ≤ 1, 1, n·fact(n − 1))`) is typed `(unknown) -> number`,
+    as when declared.
+  - A conditional with a branch typed `unknown` from a parameter is typed
+    `unknown` instead of by its other branch:
+    `f := (n, s) ↦ If(n = 0, s[1], [1, 2])` applied to `(0, [7])` gives `7`,
+    which `vector<integer^2>` did not hold.
+
+- **A component read of a tuple local did not type the parameter**:
+  `g(s) = do { let q = (s, 0); take(q[1], 2) }` applied to `[1, 2, 3]` gave
+  element-wise errors. `q[1]` now aliases `s`, which is read as a list.
+
+- **`\keyword{if} x > 0 \keyword{then} x` without `else`** parsed to text next
+  to the operands and reported no error. It now parses to the two-operand `If`,
+  which is `Missing` when the condition is false, and it stops at an outer comma
+  or semicolon.
+
+- **`\int dx` and `\int (dx)` were an `unexpected-command` error.** They now
+  parse to `Integrate(1, x)`.
+
+- **LaTeX parser cases that were marked `@fixme`**: a chained `\over`
+  (`1\over 2\over 3`) now gives a `non-associative-operator` error, as TeX
+  rejects it; `\tan(90-0.000001)\degree` applies the degree sign to the
+  argument; a differential inside a denominator (`\int\frac{3x}{5dx}`, also
+  inside a sum, a product or a function argument) gives an
+  `unexpected-differential` error.
+
+- **The compiled `Map` element function found the functions its callback calls
+  by name in the drain scope.** With an outer `h(x) = sin(x) + 1.5`, a callback
+  `f(x) = N(h(x))` and a block that declares `h(x) = sin(x) + 2.5`, the compiled
+  sum used the inner `h`. The callees of a named or literal callback are now
+  resolved through the callback's lexical binding, and the drain falls back to
+  the interpreter when they differ.
+
+- **A sum or product with one bound** (`\sum_{k=1} k`) failed to compile with a
+  message about `Nothing`; it now declines on every target with a message that
+  says the form has no value.
+
+- **Python target: `Power` with a float exponent** was emitted as `t ** 0.3` in
+  `auto` mode while the analysis read it as promoted. It is now
+  `np.emath.power(t, 0.3)`, as the analysis says.
+
+- **Shader targets: a trigonometric argument with a constant term that calls a
+  library function** (`\sin(x + \Gamma(20))`) was not reduced by whole periods,
+  so its float32 value was far from the JavaScript value. A pure constant term
+  is now folded for the reduction unless it reaches a function mapped through
+  the `functions` option or a `vars` input.
+
+- **Compiled JavaScript gave another absence value than the interpreter for an
+  element read of an absent tuple.** With `tup := t ↦ (t, 2t)`, `x: any` and
+  `x = []`, compiled `At(At(tup(x), 1), 2)` gave `Missing`; it now gives `NaN`,
+  as the interpreter does. The compiled code now takes the value from the slot
+  types of the tuple, so a slot typed `unknown` is no longer read as a number
+  (`Missing`, not `NaN`), and a numeric slot of `tuple<number, string>`, or a
+  position outside the tuple, gives `NaN`.
+
+- **Compiled Python raised `TypeError` for a `None` input typed `unknown`** (a
+  free symbol of a parsed expression, `r` in `2\pi r`). It is now read as `NaN`
+  in arithmetic, as the interpreter does.
+
 - **Compiled JavaScript over a symbol declared `any` that holds a list** gave
   wrong values: with `p = [1, 2]` and `q = [3, 4]`, `p + q` was the string
   `"1,23,4"`, `p·q` was `NaN`, `Max(p, q)` was `NaN`, and `p < q` was one
@@ -10,41 +166,39 @@
   code as before, and other types are not affected. `Multiply` and `Power` of
   such a list are entry-wise, as for a bare `list`.
 
-- **Compiled `PointX`, `PointY` and `PointZ` of a value that is not a point**
-  (a number, a boolean, a string) gave `NaN`. They now throw a `RangeError`, as
-  the interpreter gives an `incompatible-type` error. An absent value or `NaN`
-  still gives `NaN`.
+- **Compiled `PointX`, `PointY` and `PointZ` of a value that is not a point** (a
+  number, a boolean, a string) gave `NaN`. They now throw a `RangeError`, as the
+  interpreter gives an `incompatible-type` error. An absent value or `NaN` still
+  gives `NaN`.
 
-- **The type of a call that maps a function with a list result over an
-  operand of unknown depth did not hold its value.** With
-  `h := (t: number) ↦ [t, 2t]` and `x: any`, `h(x)` was typed
-  `broadcastable<vector<2>>`, which does not hold the list of matrices that
-  `x = [[1, 2], [3]]` gives. It is now `R | list<R | list<any>>` over an
-  operand of a top type and `R | tensor<cells of R>` over a tensor operand
-  (`R` is the result for one element). A function with a boolean, string or
-  tuple result over an operand typed `any` is typed the same way. A compiled
-  `Max` or `Min` of `h(x)[1]` now declines, as for any operand that may hold
-  `Nothing`.
+- **The type of a call that maps a function with a list result over an operand
+  of unknown depth did not hold its value.** With `h := (t: number) ↦ [t, 2t]`
+  and `x: any`, `h(x)` was typed `broadcastable<vector<2>>`, which does not hold
+  the list of matrices that `x = [[1, 2], [3]]` gives. It is now
+  `R | list<R | list<any>>` over an operand of a top type and
+  `R | tensor<cells of R>` over a tensor operand (`R` is the result for one
+  element). A function with a boolean, string or tuple result over an operand
+  typed `any` is typed the same way. A compiled `Max` or `Min` of `h(x)[1]` now
+  declines, as for any operand that may hold `Nothing`.
 
-- **Compiled Python raised `TypeError` for an absent input.** A `None`
-  argument (the Python spelling of `Missing`) for an input whose type admits
-  `missing` (`number | missing`, `any`) is now read as `NaN` in arithmetic, as
-  the interpreter and compiled JavaScript do: `p + 1`, `1 / p` and `np.sin(p)`
-  give `nan`. A comparison still reads the absent value, and inputs of other
-  types compile to the same code as before.
+- **Compiled Python raised `TypeError` for an absent input.** A `None` argument
+  (the Python spelling of `Missing`) for an input whose type admits `missing`
+  (`number | missing`, `any`) is now read as `NaN` in arithmetic, as the
+  interpreter and compiled JavaScript do: `p + 1`, `1 / p` and `np.sin(p)` give
+  `nan`. A comparison still reads the absent value, and inputs of other types
+  compile to the same code as before.
 
 - **interval-js: `≠` with an operand that has no value over the whole cell**
-  (`\sqrt{x} \ne 0` over `x = [-1, -1]`) gave `'maybe'`. It now gives
-  `'true'`, as the interpreter and the other targets give `True` for
-  `NaN ≠ 0`.
+  (`\sqrt{x} \ne 0` over `x = [-1, -1]`) gave `'maybe'`. It now gives `'true'`,
+  as the interpreter and the other targets give `True` for `NaN ≠ 0`.
 
 - **`.N()` did not check a value assigned to a callback parameter.** The
   parameter of a `Map` callback is typed from the source elements, and
   `evaluate()` refuses an assignment of another type. Under `.N()`,
   `evaluate({numericApproximation: true})` and `N(…)`, the check was skipped:
-  `Map(q ↦ (q := q + 0.5; q + 1), 1..3).N()` gave `[2.5, 3.5, 4.5]`, and a
-  list or a string was accepted too. It now gives an `incompatible-type` error
-  for each element, as `evaluate()` does.
+  `Map(q ↦ (q := q + 0.5; q + 1), 1..3).N()` gave `[2.5, 3.5, 4.5]`, and a list
+  or a string was accepted too. It now gives an `incompatible-type` error for
+  each element, as `evaluate()` does.
 
 - **Static types that did not hold the value of the expression.** In each case
   below the type of the expression was not a type of its value; it now is.
@@ -361,11 +515,11 @@
 - **`epsil --workers <n>`** (also in the REPL and in `epsil mcp`) gives the
   engine a pool of `n` worker threads (at most 256) and runs each program
   asynchronously, so a `findFit` with a global search scans on the workers and
-  gives the same values. Without the option, nothing changes.
-  `--workers auto` picks the default pool size (the count of cores minus 1,
-  from 1 to 8). With a pool, Ctrl-C in the REPL stops the entry that runs and
-  gives the prompt back; the declarations of the session stay, and a second
-  Ctrl-C ends the process if the entry does not stop.
+  gives the same values. Without the option, nothing changes. `--workers auto`
+  picks the default pool size (the count of cores minus 1, from 1 to 8). With a
+  pool, Ctrl-C in the REPL stops the entry that runs and gives the prompt back;
+  the declarations of the session stay, and a second Ctrl-C ends the process if
+  the entry does not stop.
 - **`IsPrime` compiles to JavaScript.**
 
 ### Performance
@@ -431,8 +585,8 @@
   precision also when the body holds a loop or an inner collection**, as the
   same body written as a lambda already did. `map(g, 1..200)` with
   `g(x) = N(h(x) + 1)` and `h(x) = Sum(x/k, k = 1..10)` is now compiled; its
-  values can differ from the interpreted values in the last digits. A body
-  whose nested loops do more than 100,000 turns in total stays interpreted.
+  values can differ from the interpreted values in the last digits. A body whose
+  nested loops do more than 100,000 turns in total stays interpreted.
 - **`Σ 1/(n (ln n)^p)` with `p ≤ 1` evaluates to `+∞`** under `evaluate()` and
   `.N()`, and so do other series that diverge as slowly as `Σ 1/(n ln n)` (a
   limit comparison with `Σ 1/(n ln n)`). They stayed symbolic.

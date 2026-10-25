@@ -5,7 +5,11 @@ import type {
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { checkDeadline } from '../../common/interruptible.js';
-import { isFunction, isNumber } from './type-guards.js';
+import {
+  isContinuationOperand,
+  isFunction,
+  isNumber,
+} from './type-guards.js';
 
 import { asSmallInteger } from './numerics.js';
 import { mul, expandProducts } from './arithmetic-mul-div.js';
@@ -292,6 +296,16 @@ export function expand(expr: Expression): Expression {
   // expression is folded by the residue rules instead
   // (`residueFoldOrKeep()`).
   if (containsResidueClass(expr)) return residueFoldOrKeep(expr);
+
+  // A sum or product with a direct `ContinuationPlaceholder` operand
+  // (`2 · 4 · … · 2n`) is a notational object, not an arithmetic one, and so
+  // is its negation: the expansion would fold the samples across the
+  // ellipsis (`−(2 · 4 · … · 2n)` became `−16 · … · n` under `simplify()`,
+  // CE-163). It is left as it is, as by the other fold barriers.
+  const notational = (e: Expression): boolean =>
+    isFunction(e) && e.ops.some((x) => isContinuationOperand(x));
+  if (notational(expr) || (isFunction(expr, 'Negate') && notational(expr.op1)))
+    return expr;
 
   //
   // Expand relational operators

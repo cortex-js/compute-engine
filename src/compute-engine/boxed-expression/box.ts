@@ -80,6 +80,7 @@ import {
   contextualCallbackPlan,
   hasCallbackParam,
   instantiateCallbackSlots,
+  dictionaryValueSolveTypeAt,
 } from './generic-instantiation.js';
 import { BoxedString } from './boxed-string.js';
 import { BoxedDictionary } from './boxed-dictionary.js';
@@ -118,6 +119,7 @@ import { typeToString } from '../../common/type/serialize.js';
 import {
   freeTypeVariables,
   groundSkeleton,
+  parameterPositions,
   readTypeVariablesAsBounds,
 } from '../../common/type/instantiate.js';
 import type { FunctionSignature, Type } from '../../common/type/types.js';
@@ -2134,6 +2136,7 @@ function annotateCallbacksFromContextualSolve(
   // CANONICAL form onward (canonical-of-canonical is the identity, so the
   // operator's own operand check does not redo the work).
   const actuals: (Type | undefined)[] = new Array(ops.length).fill(undefined);
+  const positions = parameterPositions(arm, ops.length);
   for (const i of plan.sources) {
     const src = ops[i];
     if (src === undefined) continue;
@@ -2143,7 +2146,13 @@ function annotateCallbacksFromContextualSolve(
       result ??= [...ops];
       result[i] = canonicalSrc;
     }
-    actuals[i] = resolveType(canonicalSrc.type.type);
+    // A dictionary value is solved from the fields it has, not from its open
+    // record type, at the parameters where the solve of a call reads it so
+    // (`dictionaryValueSolveTypeAt()`): `Map(x ↦ At(x, 2), {a: 1, b: 2})`
+    // stamps `x: tuple<string, integer>`. (CE-77)
+    actuals[i] =
+      dictionaryValueSolveTypeAt(canonicalSrc, positions[i]) ??
+      resolveType(canonicalSrc.type.type);
   }
 
   // §5 step 2 + step 3.

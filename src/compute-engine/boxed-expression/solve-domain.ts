@@ -43,6 +43,7 @@ import {
 } from './diophantine.js';
 import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 import { containsResidueClass } from './residue-class.js';
+import { sameSyntactic } from './compare.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { halfTurnAngle } from './trigonometry.js';
 import { smallCount } from './collection-count.js';
@@ -565,8 +566,31 @@ function commonRoots(
  *   univariate/enumeration path);
  * - exactly one domain spec → the univariate domain pipeline below;
  * - several domain specs → the multi-variable enumeration pipeline (Phase 2).
+ *
+ * When there is no answer, the result is the `Solve` with its equation in
+ * canonical form. `canonicalSolve()` keeps the equation as written, because
+ * `Solve` holds its operands, so an unevaluated `Solve` from a parse kept
+ * the parse forms `InvisibleOperator` and `Delimiter` in its MathJSON
+ * (CE-150). The canonical form of an equation is still an equation
+ * (`x − x = 0` keeps its `Equal`: only evaluation collapses it to a
+ * boolean), and the equation is canonicalized here in any case before it is
+ * solved. A deferred pipeline stage (an equation that holds the topic `_`)
+ * is returned as written, since `_` is bound only when the stage is applied.
  */
 export function evaluateSolve(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  const result = evaluateSolveOperands(ce, ops);
+  if (result !== undefined) return result;
+  const eq = ops[0];
+  if (eq === undefined || eq.isCanonical || eq.has('_')) return undefined;
+  const canonical = eq.canonical;
+  if (sameSyntactic(canonical, eq)) return undefined;
+  return ce._fn('Solve', [canonical, ...ops.slice(1)]);
+}
+
+function evaluateSolveOperands(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
 ): Expression | undefined {

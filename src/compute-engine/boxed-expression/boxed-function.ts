@@ -332,6 +332,7 @@ import {
   withOwnHead,
 } from './utils.js';
 import {
+  answersWithoutFailedCells,
   broadcastContextMessage,
   defersErrorAbsorption,
   errorOpsWithoutTrace,
@@ -6427,7 +6428,19 @@ export class BoxedFunction
       // `evaluate` handler too (`Dedup`): the handler declines for the
       // preview, and the materialization of its result evaluated the operand.
       if (previewHoldsEagerOperand(this, options)) return this;
-      if (materialization !== false && !def.evaluate && this.isLazyCollection) {
+      // A view over a symbol of a type wider than `string` that holds a
+      // string (`heldWiderStringSource()`) is not materialized here: the
+      // walk of the view over the symbol gives the characters as a list.
+      // The evaluation of the operands (step 4) reads the string, and the
+      // view over the string keeps the kind of its source. With
+      // `c: list<integer> | string := "aab"`, `Reverse(c)` evaluates to
+      // `"baa"`, and its display preview was `["b", "a", "a"]`. (CE-102)
+      if (
+        materialization !== false &&
+        !def.evaluate &&
+        this.isLazyCollection &&
+        !readsWiderStringSource(this)
+      ) {
         if (
           !mayBeAbsentAsWhole(this) &&
           !materializesAfterOperands(this, def, options)
@@ -7721,7 +7734,14 @@ export class BoxedFunction
       // `evaluate` handler too (`Dedup`): the handler declines for the
       // preview, and the materialization of its result evaluated the operand.
       if (previewHoldsEagerOperand(this, options)) return this;
-      if (materialization !== false && !def.evaluate && this.isLazyCollection) {
+      // A view over a symbol that holds a string is not materialized here,
+      // as on the synchronous route (`readsWiderStringSource()`).
+      if (
+        materialization !== false &&
+        !def.evaluate &&
+        this.isLazyCollection &&
+        !readsWiderStringSource(this)
+      ) {
         if (
           !mayBeAbsentAsWhole(this) &&
           !materializesAfterOperands(this, def, options)
@@ -10010,7 +10030,8 @@ function restrictCells(
  * w)`, `Any([1, 2], w)` and `Reduce([1, 2], w)` cannot apply `w`, so they
  * evaluate to the error of `w`, as the eager `Sort([2, 1], w)` does.
  *
- * Only the parameters that {@link callbackSlots} gives are checked. The
+ * Only the parameters that {@link callbackSlots} gives are checked, and the
+ * bare `function` parameters of `BARE_FUNCTION_CALLBACK_SLOTS`. The
  * caller runs this only for a node with no scope of its own, so the symbol
  * is read in the scope where the operator applies its callback.
  */
@@ -10018,7 +10039,20 @@ function heldErrorCallback(
   expr: BoxedFunction,
   def: BoxedOperatorDefinition
 ): Expression | undefined {
-  for (const i of callbackSlots(def)) {
+  // The table is keyed by operator name, so it applies only to the library
+  // definition: a definition of the same name in a user scope can have other
+  // parameters.
+  const system = expr.engine.contextStack[0]?.lexicalScope.bindings.get(
+    expr.operator
+  );
+  const bare =
+    def.lazy === true &&
+    system !== undefined &&
+    'operator' in system &&
+    system.operator === def
+      ? (BARE_FUNCTION_CALLBACK_SLOTS[expr.operator] ?? [])
+      : [];
+  for (const i of [...callbackSlots(def), ...bare]) {
     const op = expr.ops[i];
     if (op === undefined || !isSymbol(op) || isWildcard(op)) continue;
     // A symbol with no value definition is not canonicalized: that would
@@ -10079,6 +10113,24 @@ function callbackSlots(def: BoxedOperatorDefinition): readonly number[] {
   CALLBACK_SLOTS.set(def, { version: def._writeVersion, slots: found });
   return found;
 }
+
+/**
+ * The callback parameters of lazy operators that are typed with the bare
+ * `function` on purpose, by operator name, which `heldErrorCallback()` checks
+ * in addition to the slots of `callbackSlots()`. The generator of `Tabulate`
+ * has a parametric contract that a signature type cannot express, so it
+ * keeps the bare `function` (`effects-call-boundary.test.ts` pins this), and
+ * `callbackSlots()` does not see it. With `w` holding an error,
+ * `Tabulate(w, 3)` was then a list of three copies of the error, while
+ * `Map(w, [1, 2, 3])` is the error. (CE-108.2)
+ *
+ * `Iterate` also has a bare `function` slot, but it is not a lazy operator:
+ * its operand is checked when the expression is boxed, and an error-typed
+ * `w` is refused there.
+ */
+const BARE_FUNCTION_CALLBACK_SLOTS: Readonly<
+  Record<string, readonly number[]>
+> = { Tabulate: [0] };
 
 /** True when the parameter type `t` is a signature, or a union whose every
  * member is a signature. */
@@ -11747,9 +11799,50 @@ function type(expr: BoxedFunction): Type | BoxedType {
     // literals (`Map(f, [1, <error>])`, `Reverse([1, <error>])`) is a
     // collection too, typed by its own type handler: it materializes as a
     // list when its source is a list, and not as a set.
-    if (isInvalidNonCollection(expr) || expr.operatorDefinition === undefined)
-      return 'error';
+    if (expr.operatorDefinition === undefined) return 'error';
+    // Any other operator whose only errors sit in the cells of such
+    // literals runs its evaluate handler, which reads the literal as a
+    // collection (`_operandErrorDisposition()`). An operator that reads
+    // only the number of cells answers a value (`Length([1, <error>])` is
+    // `2`), and so does an application whose failed cells are all read by
+    // such an operator (`Length([1, <error>]) + 1` is `3`): these are typed
+    // as the same call over valid cells (`answersWithoutFailedCells()`).
+    //
+    // An operator that reads the cells answers either a value
+    // (`First([1, <error>])` is `1`, `Contains([1, <error>], 1)` is `True`)
+    // or the error of a failed cell (`Sum([1, <error>])`): its type is the
+    // type it has over valid cells, joined with the `unknown` of a failed
+    // cell, which reduces to `unknown` (`error` is a subtype of `unknown`).
+    // A broadcastable operator over such a list (`Sin([1, <error>])`,
+    // `[1, <error>] + 1`) gives a list that keeps the failed cell in place,
+    // as `Map` does, so it is typed as the list over valid cells, whose
+    // element type says nothing about the failed cell (`docs/ERROR-MODEL.md`
+    // §3). (CE-450)
+    if (isInvalidNonCollection(expr)) {
+      if (!failedCellsAreIterable(expr)) return 'error';
+      if (!answersWithoutFailedCells(expr)) {
+        const bound = boundCallType(expr);
+        const t = bound instanceof BoxedType ? bound.type : bound;
+        if (expr.operatorDefinition.broadcastable && isListResultType(t))
+          return bound;
+        return 'unknown';
+      }
+    }
   }
+  return boundCallType(expr);
+}
+
+/** True when `t` is a list type (a `list`, `vector`, `matrix` or `tensor`),
+ * the result of a broadcast over a list operand. */
+function isListResultType(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  return r === 'list' || (typeof r === 'object' && r.kind === 'list');
+}
+
+/** The type of the bound application `expr` read from its definition, its
+ * signature and its type handler, after `type()` has handled an invalid
+ * tree. */
+function boundCallType(expr: BoxedFunction): Type | BoxedType {
   // A call that its callee accepted has the type of the same call boxed
   // against the definition that the name holds now, when that definition
   // changed after the call was boxed (`_reboxedForCallee()`).
@@ -16575,6 +16668,27 @@ function isHeldEagerSource(x: Expression): boolean {
 }
 
 /**
+ * Whether `x` is a lazy view whose finiteness is not decided because one of
+ * its sources, at any depth of nested views, is not a collection value yet
+ * (`isHeldEagerSource()`: a call of a user function, an element read). With
+ * `g(t) = [t, 2t]`, `Rest(g(3))` has no count before `g(3)` is evaluated, so
+ * a reducer that holds it (`Sum`, `Reduce`) found it not known to be finite
+ * and stayed unevaluated, while `Take(g(3), 1)`, whose count is bounded by
+ * its literal, was summed. The evaluation of such a view materializes it
+ * over the value of its source, so the reducer reads that value instead.
+ * (CE-97.1)
+ */
+export function isViewOverHeldEagerSource(x: Expression, depth = 0): boolean {
+  if (depth > 8 || !isFunction(x) || x.isLazyCollection !== true) return false;
+  if (x.isFiniteCollection !== undefined) return false;
+  return x.ops.some(
+    (op) =>
+      (isTypedAsCollection(op) && isHeldEagerSource(op)) ||
+      isViewOverHeldEagerSource(op, depth + 1)
+  );
+}
+
+/**
  * Whether `x`, an operand of the lazy operator application `expr`, is a
  * symbol whose type is wider than `string` and whose value is a string
  * (`c: list<integer> | string` holding `"aab"`), at an application whose
@@ -16628,6 +16742,18 @@ function heldWiderStringSource(
   if (!isSymbol(x) || x.valueDefinition?.isSelfReferential) return false;
   const value = x.value;
   return value !== undefined && isString(value);
+}
+
+/**
+ * Whether an operand of the view `expr` is a symbol of a type wider than
+ * `string` that holds a string, or a view over such a symbol
+ * (`heldWiderStringSource()`). The materialization of such a view walks the
+ * symbol and gives a list of characters, while the view over the string is
+ * a string, so the view is evaluated over the value of its operands
+ * instead. (CE-102)
+ */
+function readsWiderStringSource(expr: BoxedFunction): boolean {
+  return expr.ops.some((x) => heldWiderStringSource(expr, x));
 }
 
 /**
@@ -16697,7 +16823,26 @@ function heldEagerSources(
   options: Partial<EvaluateOptions> | undefined
 ): HeldEagerSource[] {
   if (def.lazy !== true) return [];
-  if (isDisplayPreviewOf(expr, options)) return [];
+  // The preview does not evaluate the operands of a view, with one
+  // exception: a symbol of a type wider than `string` that holds a string,
+  // or a view over such a symbol (`heldWiderStringSource()`). The view over
+  // the string keeps the kind of its source: with
+  // `c: list<integer> | string := "aab"`, `Dedup(c)` evaluates to `"ab"`,
+  // and its preview was the walk of the view over the symbol, the list
+  // `["a", "b"]`. The walk of the preview evaluates the same callbacks, so
+  // the evaluation of the source adds no effect, and a view whose
+  // evaluation has an effect is excluded (`previewRunsEffect()`). (CE-102)
+  if (isDisplayPreviewOf(expr, options)) {
+    if (!isCollectionSourceOperator(expr.operator) || previewRunsEffect(expr))
+      return [];
+    const sources: HeldEagerSource[] = [];
+    expr.ops.forEach((x, index) => {
+      if (!heldWiderStringSource(expr, x)) return;
+      const expected = collectionSourceSlot(def.signature.type, index);
+      if (expected !== undefined) sources.push({ index, source: x, expected });
+    });
+    return sources;
+  }
   const ops = expr.ops;
   if (def.scoped !== false) {
     if (expr.operator !== 'Comprehension') return [];
@@ -16728,7 +16873,10 @@ function heldEagerSources(
         (isFunction(x, 'When') || isFunction(x, 'Which'))
       )
         return;
-      const held = isHeldEagerSource(x) || heldWiderStringSource(expr, x);
+      const held =
+        isHeldEagerSource(x) ||
+        heldWiderStringSource(expr, x) ||
+        isViewOverHeldEagerSource(x);
       // A collection without positions (a set held by a symbol of a wider
       // declared type) at a slot that reads its source by position is a
       // source too: its value is refused by `settleHeldEagerSources()`.

@@ -650,14 +650,41 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type.kind === 'dictionary')
     return parseType(`tuple<string, ${typeToString(type.values)}>`);
 
+  // A record type is open: `record{a: integer}` matches `{a: 1, b: Missing}`,
+  // a value with fields it does not declare, of any type. An entry of such a
+  // value is `("b", Missing)`, so the entry type is `tuple<string, any>`,
+  // not the join of the declared fields: with that join, `FlatMap(ra, x ↦
+  // [At(x, 2)])` refused the entry `("b", Missing)` with an
+  // `incompatible-type` error. (CE-77)
   if (type.kind === 'record')
     return {
       kind: 'tuple',
-      elements: [
-        { type: 'string' },
-        { type: widen(...Object.values(type.elements)) },
-      ],
+      elements: [{ type: 'string' }, { type: 'any' }],
     };
+  return undefined;
+}
+
+/**
+ * The type of the values of a dictionary VALUE whose type is `t`: the join
+ * of its field types when `t` is a record type, the value type of a
+ * `dictionary<V>`, otherwise `undefined`.
+ *
+ * Only for the type of a dictionary value itself, never for a declared type.
+ * The callers decide which types those are: a dictionary literal, or a symbol
+ * whose type was inferred from the dictionary it holds
+ * (`closedDictionaryType()`, `boxed-expression/generic-instantiation.ts`).
+ * The type of a dictionary value is
+ * the record of exactly the fields it has (`BoxedDictionary`), so the join of
+ * those fields holds every value. A declared record type is open
+ * (`collectionElementType()` gives `tuple<string, any>` for its entries).
+ * (CE-77)
+ */
+export function dictionaryValueValuesType(
+  t: Readonly<Type>
+): Type | undefined {
+  if (typeof t === 'string') return undefined;
+  if (t.kind === 'dictionary') return t.values;
+  if (t.kind === 'record') return widen(...Object.values(t.elements));
   return undefined;
 }
 

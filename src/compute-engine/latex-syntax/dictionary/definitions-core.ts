@@ -6692,6 +6692,28 @@ const STOP_AT_TO = (p: Parser) => peekKeyword(p, 'to');
 const STOP_AT_DO = (p: Parser) => peekKeyword(p, 'do');
 
 /**
+ * The condition that ends the true branch of an `if`: the `else` keyword, or
+ * the condition of the outer terminator when the `if` has no `else`. The
+ * combined function for one outer condition is kept, so that it is the same
+ * function at each call (see the note on `STOP_AT_THEN` above).
+ */
+const STOP_AT_ELSE_OR = new WeakMap<
+  (p: Parser) => boolean,
+  (p: Parser) => boolean
+>();
+function stopAtElseOr(
+  outer: ((p: Parser) => boolean) | undefined
+): (p: Parser) => boolean {
+  if (!outer) return STOP_AT_ELSE;
+  let result = STOP_AT_ELSE_OR.get(outer);
+  if (!result) {
+    result = (p: Parser) => peekKeyword(p, 'else') || outer(p);
+    STOP_AT_ELSE_OR.set(outer, result);
+  }
+  return result;
+}
+
+/**
  * Parse the body of an if expression after the "if" keyword has been consumed.
  * Parses: condition \text{then} trueBranch \text{else} falseBranch
  */
@@ -6716,15 +6738,32 @@ function parseIfExpression(
 
   parser.skipVisualSpace();
 
-  // Parse true branch — stop at "else" keyword
+  // Parse true branch — stop at the "else" keyword, or where the outer
+  // terminator stops, because the "else" branch is optional (CE-300).
+  const trueStart = parser.index;
+  const diagCp = parser._diagnosticsCheckpoint();
   const trueBranch = parser.parseExpression({
     minPrec: 0,
-    condition: STOP_AT_ELSE,
+    condition: stopAtElseOr(until?.condition),
   });
   if (trueBranch === null) return null;
 
-  // Consume "else"
-  if (!matchKeyword(parser, 'else')) return null;
+  // Consume "else". Without it, the `If` has two operands: it gives
+  // `Missing` when the condition is false. The parse above used `minPrec: 0`
+  // and read a comma or a semicolon of the outer level into the branch
+  // (`[\keyword{if} x>0 \keyword{then} x, 2]`). So the true branch is parsed
+  // again with the outer terminator, and it stops where the false branch of
+  // the "else" form stops. The diagnostics of the first parse are removed.
+  if (!matchKeyword(parser, 'else')) {
+    parser.index = trueStart;
+    parser._rollbackDiagnostics(diagCp);
+    const branch = parser.parseExpression({
+      ...until,
+      condition: until?.condition,
+    });
+    if (branch === null) return null;
+    return ['If', condition, branch] as MathJsonExpression;
+  }
 
   parser.skipVisualSpace();
 

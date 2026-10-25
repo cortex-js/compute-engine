@@ -171,7 +171,7 @@ function excludedFromScalarInference(op: Expression): boolean {
  * first so that it cannot mask a non-numeric carrier: the absence admission
  * (`typeContainsMissing`) is decided on what is left.
  */
-function collectionCellsProvablyNonNumeric(
+export function collectionCellsProvablyNonNumeric(
   t: Type,
   admitsResidue = false
 ): boolean {
@@ -201,6 +201,52 @@ function admitsResidueClassOperand(t: Type): boolean {
   if (!hasResidueArm(carrier)) return false;
   const rest = withoutResidueArm(carrier);
   return rest === 'never' || isSubtype(rest, 'number');
+}
+
+/**
+ * True when `checkNumericArgs` refuses every operand of type `t`, read from
+ * the type alone: a type derivation from operand descriptors
+ * (`deriveApplicationType()`) then types the application `error`, as the
+ * boxed application is typed. The branches follow those of
+ * `checkNumericArgs` that a type can decide:
+ *
+ * - `error`, `unknown`, `any` and a number type are admitted;
+ * - with `admitsResidue`, a residue class (with numbers only beside it);
+ * - a collection whose cells are provably not numbers is refused
+ *   (`list<string>`);
+ * - a type with an absence arm is refused only when the rest of it is
+ *   provably not a number, a numeric collection or a numeric tuple
+ *   (`string | missing`);
+ * - a type that could be a numeric collection or a numeric tuple is
+ *   admitted, and so is a type that overlaps `number`
+ *   (`integer | string`, `value`);
+ * - every other type is refused (`string`, `boolean`, a function type).
+ *
+ * The refusals of `checkNumericArgs` that read the operand expression (the
+ * elements of a list literal of unknown element type) are not decided here,
+ * so this answer is `false` for them.
+ */
+export function numericOperandTypeRefused(
+  t: Type,
+  admitsResidue: boolean
+): boolean {
+  if (t === 'error' || t === 'unknown' || t === 'any' || t === 'never')
+    return false;
+  if (isSubtype(t, 'number')) return false;
+  if (admitsResidue && admitsResidueClassOperand(t)) return false;
+  if (collectionCellsProvablyNonNumeric(t, admitsResidue)) return true;
+  if (typeContainsMissing(t)) {
+    const carrier = stripMissingFromType(t);
+    return (
+      carrier !== 'never' &&
+      provablyDisjoint(carrier, 'number') &&
+      !typeCouldBeNumericCollection(carrier) &&
+      !typeCouldBeNumericTuple(carrier)
+    );
+  }
+  if (typeCouldBeNumericCollection(t) || typeCouldBeNumericTuple(t))
+    return false;
+  return provablyDisjoint(t, 'number');
 }
 
 /**
@@ -2125,9 +2171,16 @@ function strictTrialRefusesUnheldError(
  *   polices (`runtimeCheckExemptParam` is the shared classifier): the
  *   specialized admissions that already declined are the AUTHORITY for
  *   their kinds — re-admitting after `overlapsForDeferredValidation`
- *   refuted a rank mismatch would undo D6.2 (`typesOverlap` reads
- *   `list<number> ∧ matrix` as the inhabited `list<never>`, since the empty
- *   list inhabits it), re-admitting after `arrowSlotAdmission` refused
+ *   refuted a collection would undo D6.2: `typesOverlap` reads
+ *   `list<list<string>> ∧ matrix` as inhabited (the empty list is a value
+ *   of both), so without this rule `Determinant(lls)` with
+ *   `lls: list<list<string>>` is admitted at boxing (measured 2026-10-25,
+ *   `broadcast-shape-lift.test.ts`). `typesOverlap(list<number>, matrix)`
+ *   is `false` (measured 2026-10-24), so a plain rank mismatch does not
+ *   need the rule. Without the rule, the type of a self-referential alias
+ *   at a collection parameter also overflows the stack
+ *   (`tuple-shape-gates.test.ts`, measured 2026-10-25). Re-admitting after
+ *   `arrowSlotAdmission` refused
  *   would undo Design E, and a nested `any` operand (`tuple<any>`) must stay
  *   refused at a tuple parameter (D8 waives a TOP-LEVEL `any` only; a
  *   nested `unknown` is deferred by `overlapsForDeferredValidation` itself

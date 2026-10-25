@@ -20,8 +20,12 @@ import type {
 import type { Type } from '../../common/type/types.js';
 
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
-import { signOfType } from '../../common/type/utils.js';
+import {
+  dictionaryValueValuesType,
+  signOfType,
+} from '../../common/type/utils.js';
 import { isFunction, isNumber, isString, isSymbol } from './type-guards.js';
+import { closedDictionaryType } from './generic-instantiation.js';
 import { asRational } from './numerics.js';
 import { numberLiteralTierType } from './literal-tier.js';
 import { COUNT_STATS } from '../../common/cache-stats.js';
@@ -745,10 +749,21 @@ class ExpressionOperandFacts implements OperandFacts {
     if (!(this._computed & ELEMENT_TYPE_COMPUTED)) {
       this._computed |= ELEMENT_TYPE_COMPUTED;
       const op = this.#op;
+      // A dictionary VALUE (a literal, or the value of a symbol with an
+      // inferred type, `closedDictionaryType()`) has exactly the fields of
+      // its record type, so its entries are typed by the join of those
+      // fields. The type alone cannot say so: a declared `record{…}` is
+      // open, and `collectionElementType()` gives `tuple<string, any>` for
+      // its entries. (CE-77)
+      const closed = closedDictionaryType(op);
+      const values =
+        closed === undefined ? undefined : dictionaryValueValuesType(closed);
       this._elementType =
-        !isFunction(op) || this.collection === false
-          ? undefined
-          : op.operatorDefinition?.collection?.elttype?.(op);
+        values !== undefined
+          ? { kind: 'tuple', elements: [{ type: 'string' }, { type: values }] }
+          : !isFunction(op) || this.collection === false
+            ? undefined
+            : op.operatorDefinition?.collection?.elttype?.(op);
     }
     return this._elementType;
   }

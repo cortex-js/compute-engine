@@ -4352,7 +4352,8 @@ function compilePythonBranch(
 ): string {
   const decidability = BaseCompiler.conditionDecidability(
     cond,
-    target.bindExpr !== undefined
+    target.bindExpr !== undefined,
+    target
   );
   // The condition is decidable by construction, so it needs no extra test.
   if (decidability === null)
@@ -4549,7 +4550,11 @@ function compilePythonIfStatement(
     `${head}\n${indentPythonStatements(body)}`;
   const hasElse = args.length > 2 && args[2] !== undefined;
 
-  const decidability = BaseCompiler.conditionDecidability(cond);
+  const decidability = BaseCompiler.conditionDecidability(
+    cond,
+    true,
+    target
+  );
 
   // Decided by construction: the plain `if`/`else` needs no extra test.
   if (decidability === null) {

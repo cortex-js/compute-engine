@@ -47,6 +47,7 @@ import {
   machineListOf,
 } from '../boxed-expression/machine-broadcast.js';
 import { boxStoreElement } from '../boxed-expression/machine-number.js';
+import { isViewOverHeldEagerSource } from '../boxed-expression/boxed-function.js';
 import {
   runWithEvaluationEffects,
   withEvaluationEffects,
@@ -216,6 +217,7 @@ import {
   infiniteSumClosedForm,
   divergentInfiniteSum,
   infiniteProductClosedForm,
+  divergentInfiniteProduct,
   acceleratedInfiniteSum,
   acceleratedInfiniteProduct,
   euclideanNormType,
@@ -13190,12 +13192,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           return undefined;
         }
         if (mode === 'numeric' && !numeric) {
+          // A product whose partial products tend to 0 or to an infinity
+          // has that limit as its value (`divergentInfiniteProduct`).
           if (bounds.length === 1)
-            return infiniteProductClosedForm(ops[0], bounds[0], ce);
+            return (
+              infiniteProductClosedForm(ops[0], bounds[0], ce) ??
+              divergentInfiniteProduct(ops[0], bounds[0], ce)
+            );
           return undefined;
         }
         if (mode === 'numeric' && numeric) {
           if (bounds.length === 1) {
+            const limit = divergentInfiniteProduct(ops[0], bounds[0], ce);
+            if (limit !== undefined) return limit.N();
             const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
             if (accel !== undefined) return accel;
           }
@@ -13346,12 +13355,18 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           }
           if (mode === 'numeric' && asyncTerms) return undefined;
           if (mode === 'numeric' && !numeric) {
+            // As in the synchronous handler.
             if (bounds.length === 1)
-              return infiniteProductClosedForm(ops[0], bounds[0], ce);
+              return (
+                infiniteProductClosedForm(ops[0], bounds[0], ce) ??
+                divergentInfiniteProduct(ops[0], bounds[0], ce)
+              );
             return undefined;
           }
           if (mode === 'numeric' && numeric) {
             if (bounds.length === 1) {
+              const limit = divergentInfiniteProduct(ops[0], bounds[0], ce);
+              if (limit !== undefined) return limit.N();
               const accel = acceleratedInfiniteProduct(ops[0], bounds[0], ce);
               if (accel !== undefined) return accel;
             }
@@ -13525,6 +13540,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const resolved = withAbsentableOperandResolved([first, ...rest]);
         if (resolved === undefined) return engine.NaN;
         first = resolved[0];
+        // A view over a source that is not a collection value yet
+        // (`Rest(g(3))`) is not known to be finite before it is evaluated:
+        // read its value (`isViewOverHeldEagerSource()`). (CE-97.1)
+        if (
+          rest.length === 0 &&
+          first !== undefined &&
+          isViewOverHeldEagerSource(first)
+        )
+          first = first.evaluate();
         // Arity-1 collection-reducer form: Sum(L).
         if (rest.length === 0 && first?.isCollection) {
           // Non-finite collections stay symbolic — infinite iteration would
@@ -13735,6 +13759,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           if (resolved === undefined) return engine.NaN;
           first = resolved[0];
         }
+        // A view over a source that is not a collection value yet: as in the
+        // synchronous handler. (CE-97.1)
+        if (
+          rest.length === 0 &&
+          first !== undefined &&
+          isViewOverHeldEagerSource(first)
+        )
+          first = await first.evaluateAsync({
+            signal,
+            _effects: effects,
+            _contextStack,
+            _precisionWindow,
+          });
         // Arity-1 collection-reducer form: Sum(L). A literal collection
         // whose elements hold an asynchronous-only application is evaluated
         // first, which awaits them (`List` evaluates its elements); the

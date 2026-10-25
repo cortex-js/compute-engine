@@ -66,8 +66,11 @@ describe('A LIST LITERAL WITH A FAILED CELL IS TYPED AS A COLLECTION', () => {
     expect(ce.box(ERR).type.toString()).toBe('error');
     expect(ce.box(['Sin', ERR]).type.toString()).toBe('error');
     // The failed cell is in the list, not in an operand of `Sin`: the
-    // application stays inert, and it is invalid.
-    expect(ce.box(['Sin', ['List', 1, ERR]]).type.toString()).toBe('error');
+    // broadcast gives a list that keeps the failed cell in place
+    // (`[sin(1), <error>]`), typed as the list over the valid cells (CE-450).
+    expect(ce.box(['Sin', ['List', 1, ERR]]).type.toString()).toBe(
+      'vector<2>'
+    );
   });
 
   test('the value of the evaluation has the same type', () => {

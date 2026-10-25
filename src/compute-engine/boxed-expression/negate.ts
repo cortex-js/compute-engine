@@ -147,6 +147,11 @@ export function negate(expr: Expression): Expression {
     // Negate(Add(a, b)) -> Add(Negate(a), Negate(b))
     if (expr.operator === 'Add') {
       const negated = expr.ops.map((x) => negate(x));
+      // A sum with a continuation operand (`1 + 2 + … + n`) is notational:
+      // the order of its terms is the order of the pattern, so the negated
+      // terms are not sorted (CE-163: the sorted form was `−n − 2 − 1 − …`).
+      if (expr.ops.some((x) => isContinuationOperand(x)))
+        return ce._fn('Add', negated);
       return ce._fn('Add', sortAddTerms(negated));
     }
 

@@ -1116,6 +1116,12 @@ export function absFunctionType(x: OperandDescriptor | undefined): Type {
   // values only, so any of them would exclude the value the operand
   // actually has.
   if (f.infinity) return SIGNED_INFINITY_TYPE;
+  // An operand typed `nan` (a symbol declared `nan`) has the magnitude
+  // `|NaN| = NaN`. The type test below skips the bare `nan` (it strips the
+  // `nan` arm of a wider union), and the claim at the end of this function
+  // leaves `nan` out, so `Abs(w)` with `w: nan` was typed
+  // `real<0..> | signed_infinity` (CE-453).
+  if (resolveTypeAlias(t) === 'nan') return 'nan';
   // NaN's static type is just `number`, so only the value channel proves
   // it — and the descriptor carries that channel for a held value as well
   // as for a literal, hence no literal gate here.

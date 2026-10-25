@@ -599,7 +599,85 @@ export function namedCallbackLiteral(
         : undefined;
   if (callableBindingInContext(ce, name, own) !== ce.lookupDefinition(name))
     return undefined;
-  return userFnLiteral(ce, name);
+  const literal = userFnLiteral(ce, name);
+  if (
+    literal !== undefined &&
+    !calleesResolveLexically(ce, literal, new Set([name]))
+  )
+    return undefined;
+  return literal;
+}
+
+/**
+ * True if each user function that the body of the `Function` literal
+ * `literal` calls or names, and each user function that those call in turn,
+ * has the same definition in the current scope as its lexical binding.
+ *
+ * The interpreter evaluates a call in the body of a user function through
+ * the definition that the call was bound to when the function was defined.
+ * The compiler reads the functions that a body calls by name in the current
+ * scope (the scope of the drain). So when the drain runs in a scope that
+ * defines another function with the same name (an outer `h(x) = x + 1`
+ * called by `f(x) = h(x)`, drained in a block that defines
+ * `h(x) = x + 2`), the compiled code would call the inner `h` while the
+ * interpreter calls the outer one. This function returns false in that case,
+ * and the interpreter computes the elements (CE-446).
+ *
+ * A name is checked when its lexical binding is a user function, or when the
+ * name gives a user function in the current scope. Thus a drain scope that
+ * defines the name as something that is not a user function (a constant
+ * `h = 3`) also makes the function return false.
+ *
+ * `seen` holds the names already checked; it starts with the name of the
+ * callback, so that a recursive function is not visited again. The
+ * expression nodes already visited are also kept, so that a body that uses
+ * the same subexpression more than once (`Beta(t, t)`, nested) is visited
+ * once per node, not once per path to it.
+ */
+export function calleesResolveLexically(
+  ce: ComputeEngine,
+  literal: Expression,
+  seen: Set<string>
+): boolean {
+  type Own = Parameters<typeof callableBindingInContext>[2];
+  const visited = new Set<Expression>();
+  const isUserFn = (own: Own): boolean => {
+    if (own === undefined) return false;
+    if ('operator' in own)
+      return isFunction(
+        (own.operator as { _lambdaLiteral?: Expression })._lambdaLiteral,
+        'Function'
+      );
+    return isFunction(own.value.value, 'Function');
+  };
+  const check = (name: string, own: Own): boolean => {
+    if (seen.has(name)) return true;
+    if (!isUserFn(own) && userFnLiteral(ce, name) === undefined) return true;
+    if (callableBindingInContext(ce, name, own) !== ce.lookupDefinition(name))
+      return false;
+    seen.add(name);
+    const called = userFnLiteral(ce, name);
+    return !isFunction(called, 'Function') || visit(called.op1);
+  };
+  const visit = (e: Expression): boolean => {
+    if (visited.has(e)) return true;
+    visited.add(e);
+    if (isSymbol(e))
+      return check(
+        e.symbol,
+        e.valueDefinition !== undefined
+          ? { value: e.valueDefinition }
+          : e.operatorDefinition !== undefined
+            ? { operator: e.operatorDefinition }
+            : undefined
+      );
+    if (!isFunction(e)) return true;
+    const def = e.operatorDefinition;
+    if (!check(e.operator, def !== undefined ? { operator: def } : undefined))
+      return false;
+    return e.ops.every(visit);
+  };
+  return isFunction(literal, 'Function') && visit(literal.op1);
 }
 
 /**

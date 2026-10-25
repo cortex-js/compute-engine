@@ -187,6 +187,7 @@ import {
   unfoldAliasOnDescent,
   isCutOnDescent,
   withoutResidueArm,
+  dictionaryValueValuesType,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
@@ -197,7 +198,10 @@ import {
   freeTypeVariables,
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
-import { contextualSlotSignature } from '../boxed-expression/generic-instantiation.js';
+import {
+  closedDictionaryType,
+  contextualSlotSignature,
+} from '../boxed-expression/generic-instantiation.js';
 import {
   broadcastAdmitsCollectionElement,
   broadcastCallbackResultType,
@@ -3726,14 +3730,18 @@ function zipMapResultType(
  * as for a list literal (`shapedListTypeD`): `["x", 6]` is
  * `list<integer | string>`, not `list<integer | string^2>`. With the length,
  * the value of `Map(x ↦ If(x = 1, "x", x), [1, 2])`, once listed, did not
- * match the type of the `Map`.
+ * match the type of the `Map`. A number that may be absent
+ * (`integer | missing`) keeps the length, as it does in a list literal:
+ * `[Missing, 3]` is `list<integer | missing^2>`, and so is
+ * `PointY([(1, Missing), (2, 3)])` (CE-451).
  */
 function listOfLengthType(length: number, element: Type): ListType {
   const cell = resolveTypeAlias(element);
   const mixed =
     typeof cell !== 'string' &&
     cell.kind === 'union' &&
-    !isSubtype(cell, 'number');
+    !isSubtype(cell, 'number') &&
+    !isNumberThatMayBeAbsent(cell.types);
   if (mixed) return { kind: 'list', elements: element };
   if (mayCarryDimensions(element))
     return { kind: 'list', elements: element, dimensions: [length] };
@@ -4265,12 +4273,19 @@ function structureMentionsParameter(
  * evaluation is the type of its operand). Nothing is declared, canonicalized or evaluated, so no memo is
  * needed: the whole derivation is type algebra over descriptors the call
  * site already built.
+ *
+ * With `keepError`, a body whose application derives `error` (the body
+ * refuses the elements: `(a, b) ↦ a + b` over strings and integers) gives
+ * `error` instead of `undefined`, so that the caller knows every cell of
+ * the value is an error. An `error` derived for a nested application still
+ * gives `undefined`: the enclosing operator may not select it.
  */
 function bareMappingElementTypeD(
   fn: OperandDescriptor,
   sources: ReadonlyArray<OperandDescriptor>,
   engine: PureEngineView,
-  derive: TypeHandlerContext['derive']
+  derive: TypeHandlerContext['derive'],
+  keepError = false
 ): Type | undefined {
   const literal = fn.structureOf?.();
   if (literal?.kind !== 'function-literal') return undefined;
@@ -4360,12 +4375,15 @@ function bareMappingElementTypeD(
       args.push(describeBoundSymbol(t, `__derivedOperand${i}`));
     }
     const t = deriveApplicationOf(app, args, { engine, derive });
+    if (t === 'error' && app === body) bodyRefused = true;
     if (t === undefined || t === 'unknown' || t === 'any' || t === 'error')
       return undefined;
     return t;
   };
+  let bodyRefused = false;
   const t = deriveApplication(body);
   if (!referenced) return undefined;
+  if (keepError && bodyRefused) return 'error';
   return t;
 }
 
@@ -4383,12 +4401,17 @@ function bareMappingElementTypeD(
  * handler: one descriptor per source, of its element type. The operator must
  * accept as many operands as there are sources, because the handlers do not
  * check their arity.
+ *
+ * With `keepError`, an application that derives `error` (the operator
+ * refuses the elements) gives `error` instead of `undefined`, as for
+ * `bareMappingElementTypeD`.
  */
 function bareOperatorElementTypeD(
   fn: OperandDescriptor,
   sources: ReadonlyArray<OperandDescriptor>,
   engine: PureEngineView,
-  derive: TypeHandlerContext['derive']
+  derive: TypeHandlerContext['derive'],
+  keepError = false
 ): Type | undefined {
   const s = fn.structureOf?.();
   if (
@@ -4435,6 +4458,7 @@ function bareOperatorElementTypeD(
     s.name,
     elementTypes.map((t, k) => describeBoundElement(t, k))
   );
+  if (keepError && t === 'error') return 'error';
   if (
     t === undefined ||
     t === 'unknown' ||
@@ -4714,7 +4738,11 @@ function declaredOrCallElementTypeD(
     // the element: `g := x ↦ x + 10` has the signature `(unknown) -> number`,
     // and `g([1, 2])` is `[11, 12]`. The call on the element type is then
     // read first, and the inferred result is the fallback.
-    if (!callbackHasUnresolvedParameterD(fn, engine)) return declared;
+    if (!callbackHasUnresolvedParameterD(fn, engine))
+      return (
+        numericOperatorCallElementTypeD(fn, sources, declared, engine, derive) ??
+        declared
+      );
     const called = callbackCallElementTypeD(fn, sources, engine, derive);
     if (called !== undefined) return called;
     // The call on the element has no known type. When an element can be a
@@ -4771,6 +4799,49 @@ function callbackHasUnresolvedParameterD(
       ...(arm.variadicArg !== undefined ? [arm.variadicArg] : []),
     ].some((p) => p.type === 'unknown')
   );
+}
+
+/**
+ * The element type of `Map(f, xs, …)` when `f` is a bare symbol that names
+ * a library operator with a `type` handler and a numeric declared result
+ * `declared`, and an element of a source can be absent: the type of the
+ * operator applied to an element of each source, when it is a subtype of
+ * `declared`, or `undefined`.
+ *
+ * The declared result of `Abs` is `number`, so `Map(Abs, [1, Missing, 2])`
+ * was a `vector<3>`, while `Map(x ↦ |x|, [1, Missing, 2])`, whose body is
+ * typed by the `Abs` handler, is a `list<integer | nan^3>`: the absent cell
+ * gives `NaN` (CE-453). The handler types the named callback the same way.
+ */
+function numericOperatorCallElementTypeD(
+  fn: OperandDescriptor,
+  sources: ReadonlyArray<OperandDescriptor>,
+  declared: Type,
+  engine: PureEngineView,
+  derive: TypeHandlerContext['derive']
+): Type | undefined {
+  const s = fn.structureOf?.();
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
+  if (!isSubtype(declared, 'number')) return undefined;
+  const def = engine.lookupDefinition(s.name)?.operator;
+  if (def === undefined || typeof def.type !== 'function') return undefined;
+  const elementTypes: Type[] = [];
+  for (const source of sources) {
+    const t = mappingSourceElementTypeD(source);
+    if (t === undefined) return undefined;
+    elementTypes.push(t);
+  }
+  // Over elements that cannot be absent the declared result is kept, so
+  // that `Map(Negate, [1, 2])` stays a `vector<2>`, as the tests of
+  // `map-bare-operator-points.test.ts` require.
+  if (!elementTypes.some((t) => typeContainsMissing(t))) return undefined;
+  const t = derive(
+    s.name,
+    elementTypes.map((t, k) => describeBoundElement(t, k))
+  );
+  if (t === undefined || t === 'never' || !isSubtype(t, declared))
+    return undefined;
+  return t;
 }
 
 /**
@@ -5552,6 +5623,59 @@ function parameterIndexReadType(
 }
 
 /**
+ * When `xs` is a valueless block local that an untyped `let` initialized
+ * from a tuple literal (`let q = (s, 0)`, recorded as `_initializerAlias` by
+ * the `Declare` canonical handler, `library/core.ts`), and `index` is a
+ * literal integer, the requirement `r` on the read `xs[index]` is also a
+ * requirement on the component of the literal at that position, when that
+ * component is an untyped, valueless symbol (a bare parameter `s`). That
+ * symbol is narrowed with `r`, as a use of the leaf `a` of
+ * `let (a, b) = (s, 0)` narrows `s`.
+ *
+ * Without this, in `g(s) = do { let q = (s, 0); take(q[1], 2) }` the use of
+ * `q[1]` as a list did not reach `s`, which kept a scalar parameter type,
+ * and `g([1, 2, 3])` applied `g` to each element of the list (CE-35).
+ *
+ * The write goes through the ordinary inference path (`_infer`), with the
+ * guards of the alias of a bare symbol initializer
+ * (`BoxedSymbol._inferWithoutFacts`, `boxed-symbol.ts`). An assignment to
+ * the local clears the alias (`joinAssignmentEvidence`, `library/core.ts`).
+ */
+function narrowTupleInitializerComponent(
+  xs: Expression,
+  index: Expression,
+  r: Type
+): void {
+  if (!isSymbol(xs)) return;
+  const binding = xs.engine.lookupDefinition(xs.symbol);
+  if (binding === undefined || !('value' in binding)) return;
+  const local = binding.value;
+  if (local !== xs.valueDefinition || local.value !== undefined) return;
+  const literal = local._initializerAlias;
+  if (!isFunction(literal, 'Tuple')) return;
+  if (!isSubtype(index.type.type, 'integer')) return;
+  let position = toInteger(index);
+  if (position === null) return;
+  // A negative index counts from the end, as for `At`: `q[-1]` is the last
+  // component.
+  if (position < 0) position = literal.nops + position + 1;
+  if (position < 1 || position > literal.nops) return;
+  const source = literal.ops[position - 1];
+  if (!isSymbol(source)) return;
+  const def = source.valueDefinition;
+  if (
+    def === undefined ||
+    !def.inferredType ||
+    def.isConstant ||
+    def.value !== undefined ||
+    !def.type.isUnknown ||
+    xs.engine._staticAssignmentEvidence?.get(def) !== undefined
+  )
+    return;
+  source._infer(() => r, 'narrow');
+}
+
+/**
  * `At`'s side of the same contract. The base learns `indexed_collection<r>`
  * under a numeric index, `dictionary<r>` under a string index, and the
  * two-arm shape its validation already wrote (`dictionary<r> |
@@ -5586,6 +5710,7 @@ function elementRequirementOfAt(
   if (ops.length !== 2) return undefined;
   const [xs, index] = ops;
   if (isRingConstant(xs)) return undefined;
+  narrowTupleInitializerComponent(xs, index, r);
   const indexType = index.type.type;
   // The index kind selects the arm when it is provable: a numeric index or a
   // gather/mask reads an indexed collection, a string key reads a keyed one.
@@ -7690,6 +7815,60 @@ function fieldBearingType(
 }
 
 /**
+ * True when `base.name(…)` with `count` arguments is a qualified call on a
+ * name that is not a protocol: `base` is a symbol that is not a protocol
+ * name, has no value and no decided type, and every protocol that declares
+ * the function member `name` accepts `count` arguments for it but not
+ * `count + 1`. The dot-call reading passes `base` as the first argument, so
+ * it has one argument too many. (CE-122)
+ */
+function isUnknownProtocolName(
+  ce: ComputeEngine,
+  base: Expression,
+  name: string,
+  count: number
+): boolean {
+  if (!isSymbol(base) || base.value !== undefined) return false;
+  if (protocolOfSymbol(ce, base) !== undefined) return false;
+  if (base.type.type !== 'unknown') return false;
+  // Only a top-level name, or a name with no binding: a parameter with no
+  // type (`function g(a, b, c) { a.compare(b, c) }`) is a receiver, and its
+  // arity error stays the error of the dot-call. The frame of the Epsil
+  // static check stands for the global scope while that check runs (the
+  // same test as `dispatcherScope()` in `engine-protocols.ts`).
+  const topLevel = new Set<Scope | undefined>([
+    ce.contextStack[1]?.lexicalScope,
+  ]);
+  if (ce._staticTypeCheckDepth > 0)
+    for (const frame of ce.contextStack)
+      if (frame.name === 'epsil:static-check') topLevel.add(frame.lexicalScope);
+  for (
+    let scope: Scope | null | undefined = ce.context.lexicalScope;
+    scope;
+    scope = scope.parent
+  ) {
+    if (scope.bindings.has(base.symbol)) {
+      if (!topLevel.has(scope)) return false;
+      break;
+    }
+  }
+  const owners = protocolsWithMember(ce, name);
+  if (owners.length === 0) return false;
+  const accepts = (sig: FunctionSignature, n: number): boolean => {
+    const min = sig.args?.length ?? 0;
+    const max =
+      sig.variadicArg !== undefined
+        ? Infinity
+        : min + (sig.optArgs?.length ?? 0);
+    return n >= min && n <= max;
+  };
+  return owners.every((record) => {
+    const sig = protocolMemberSignature(ce, record, name);
+    return sig !== null && accepts(sig, count) && !accepts(sig, count + 1);
+  });
+}
+
+/**
  * The canonical form of a member call, `receiver.name(args)` in Epsil and
  * `MemberCall(receiver, "name", args…)` in MathJSON. The operands arrive as
  * WRITTEN (the operator holds them), and the result is one of the shapes the
@@ -7773,6 +7952,23 @@ function canonicalMemberCall(
 
   // 3. A protocol function member: the bare dispatcher call.
   const def = lookupApplicable(name, ce.context.lexicalScope, ce);
+  const owners = protocolsWithMember(ce, name);
+  // A qualified call on a name that is not a protocol (`Comparable` not
+  // declared, `Comparator` declares `compare`): `Comparable.compare("a",
+  // "b")` reads as the dot-call `compare(Comparable, "a", "b")`, and the
+  // error was the arity error of that call ("unexpected argument"), which
+  // does not say what is wrong. When the receiver is a symbol with no value
+  // and no decided type, and the arguments fit the member without the
+  // receiver but not with it, the error says that the name is not a
+  // protocol. (CE-122)
+  if (owners.length > 0 && isUnknownProtocolName(ce, base, name, args.length))
+    return ce.error(
+      [
+        'protocol-unknown',
+        `\`${sym(base)}\` is not a protocol: \`${sym(base)}.${name}(…)\` passes \`${sym(base)}\` as the first of ${args.length + 1} arguments of \`${name}\`, which takes ${args.length}`,
+      ],
+      sym(base) ?? base.toString()
+    );
   if (isProtocolDispatcher(def)) return ce.function(name, [base, ...args]);
   // The bare name may be TAKEN by a definition of the author's own, which
   // shadows the dispatcher for the bare call (`area(c)` runs the author's
@@ -7781,7 +7977,6 @@ function canonicalMemberCall(
   // With several protocols declaring the member, the receiver's static type
   // picks the one that applies when it can decide; otherwise the field
   // route below reports the read with its qualified-name advice.
-  const owners = protocolsWithMember(ce, name);
   if (owners.length > 0) {
     const applicable =
       owners.length === 1
@@ -8549,8 +8744,15 @@ function absenceMarker(
   const xt = xs.type.type;
   let t: Type | undefined;
   if (typeof xt !== 'string' && xt.kind === 'dictionary') t = xt.values;
+  // A dictionary value (a literal, or the value of a symbol with an inferred
+  // type, `closedDictionaryType()`) has exactly the fields of its record
+  // type, so its values are the join of those fields. A declared record type
+  // is open: a value can hold other fields, of any type. (CE-77)
   else if (typeof xt !== 'string' && xt.kind === 'record')
-    t = widen(...Object.values(xt.elements)) as Type;
+    t =
+      closedDictionaryType(xs) !== undefined
+        ? dictionaryValueValuesType(xt)
+        : 'any';
   else
     t =
       xs.operatorDefinition?.collection?.elttype?.(xs) ??
@@ -11487,14 +11689,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           { kind: 'list', elements: t.values },
           context.engine._typeResolver
         );
-      if (typeof t === 'object' && t.kind === 'record')
+      // A dictionary value (a literal, or the value of a symbol with an
+      // inferred type, `closedDictionaryType()`) gives the type of its
+      // entries (`facts.elementType`, `tuple<string, V>`), and its values
+      // are `V`. A
+      // declared record type is open: a value can hold other fields, of any
+      // type, so its values are `any`. (CE-77)
+      if (typeof t === 'object' && t.kind === 'record') {
+        const entry = dict.facts.elementType;
+        const values =
+          typeof entry === 'object' &&
+          entry.kind === 'tuple' &&
+          entry.elements.length === 2
+            ? entry.elements[1].type
+            : 'any';
         return BoxedType.forResult(
-          {
-            kind: 'list',
-            elements: widen(...Object.values(t.elements)),
-          },
+          { kind: 'list', elements: values },
           context.engine._typeResolver
         );
+      }
       return BoxedType.forResult(
         parseType('list<any>'),
         context.engine._typeResolver
@@ -13170,9 +13383,21 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           engine._typeResolver
         );
       }
+      // A callback that refuses the elements (`(a, b) ↦ a + b` or `Add` over
+      // a list of strings and a list of integers) derives `error`: every
+      // cell of the value is an `incompatible-type` error, and the list is
+      // typed as the literal of failed cells `[<error>, <error>]` is,
+      // `list<unknown>`. Before, the declared result of the callback typed
+      // the cells (`list<number>`, `list<value>`). (CE-452)
       const resultType =
-        bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive) ??
-        bareOperatorElementTypeD(ops[0], ops.slice(1), engine, derive) ??
+        bareMappingElementTypeD(ops[0], ops.slice(1), engine, derive, true) ??
+        bareOperatorElementTypeD(
+          ops[0],
+          ops.slice(1),
+          engine,
+          derive,
+          true
+        ) ??
         broadcastingCallbackElementTypeD(
           ops[0],
           ops.slice(1),
@@ -13183,7 +13408,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       return BoxedType.forResult(
         zipMapResultType(
           ops.slice(1).map((_, i) => sourceType(i)),
-          !resultType || resultType === 'unknown' || resultType === 'any'
+          !resultType ||
+            resultType === 'unknown' ||
+            resultType === 'any' ||
+            resultType === 'error'
             ? 'unknown'
             : resultType
         ),
@@ -15675,7 +15903,19 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
             const fieldType = t.elements[key];
             if (fieldType) return fieldType;
           }
-          return widen(...Object.values(t.elements)) as Type;
+          // Another key: a dictionary value (a literal) has exactly its
+          // fields, so the read is one of their values. A declared record
+          // type is open, and the value of a field it does not declare can
+          // be anything (`At(ra, "b")` with `ra: record{a: integer}` holding
+          // `{a: 1, b: Missing}`). (CE-77)
+          const entry = ops[0].facts.elementType;
+          if (
+            typeof entry === 'object' &&
+            entry.kind === 'tuple' &&
+            entry.elements.length === 2
+          )
+            return entry.elements[1].type;
+          return 'any';
         } else if (t.kind === 'tuple') {
           // A literal integer index selects that slot's type (1-based,
           // negatives count from the end); otherwise `collectionElementType`
@@ -15804,14 +16044,25 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         } else if (t.kind === 'dictionary') {
           return elementReadType(ops[0], t.values);
         } else if (t.kind === 'record') {
+          // A dictionary value (a literal) has exactly the fields of its
+          // record type: a key it does not have is absent. A declared record
+          // type is open: a key it does not declare can hold any value, or
+          // be absent, so the read is `any`. (CE-77)
+          const entry = ops[0].facts.elementType;
+          const isValue =
+            typeof entry === 'object' &&
+            entry.kind === 'tuple' &&
+            entry.elements.length === 2;
           const fields = widen(...Object.values(t.elements)) as Type;
           const name = key === undefined ? undefined : stringLiteralOf(key);
           if (name !== undefined) {
             const fieldType = t.elements[name];
             if (fieldType) return fieldType; // present literal → exact
-            return markerType(fields); // absent literal → marker(⊔V)
+            // absent literal → marker(⊔V)
+            return isValue ? markerType(fields) : 'any';
           }
-          return elementReadType(ops[0], fields); // dynamic string → ⊔V | marker(⊔V)
+          // dynamic string → ⊔V | marker(⊔V)
+          return elementReadType(ops[0], isValue ? fields : 'any');
         } else if (t.kind === 'tuple') {
           return tupleResult(t);
         }

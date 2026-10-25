@@ -190,6 +190,70 @@ function elementWise(x: Expression, because: string): RuleStep | undefined {
   return value.isSame(x) ? undefined : { value, because };
 }
 
+/**
+ * The terms of a sum, with the terms that differ only by a constant factor
+ * put together: `π(√2 − 1) + π(√2 + 1)` is `(2√2)·π`. A term is read as a
+ * constant cofactor (its number literals and its sums of numbers, such as
+ * `√2 − 1`) times the product of its other factors. `add()` collects terms
+ * with a number coefficient, but it keeps a factor `√2 − 1` as part of the
+ * term, so the two products above were different terms for it (CE-154).
+ * Only a group with a sum of numbers among its cofactors is rewritten: the
+ * other like terms are already collected by `add()`. The rewrite is the
+ * distributive law, so it holds whatever the factors are.
+ */
+function collectConstantCofactors(
+  terms: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (terms.length < 2) return terms;
+  const isConstantSum = (f: Expression): boolean =>
+    isFunction(f, 'Add') && f.symbols.length === 0 && f.isPure === true;
+  const split = terms.map((t) => {
+    if (!isFunction(t, 'Multiply'))
+      return { coef: [] as Expression[], rest: [t], hasSum: false };
+    const coef: Expression[] = [];
+    const rest: Expression[] = [];
+    for (const f of t.ops)
+      if (isNumber(f) || isConstantSum(f)) coef.push(f);
+      else rest.push(f);
+    return { coef, rest, hasSum: coef.some(isConstantSum) };
+  });
+  if (!split.some((s) => s.hasSum && s.rest.length > 0)) return terms;
+
+  const ce = terms[0].engine;
+  const restOf = (s: { rest: Expression[] }): Expression =>
+    s.rest.length === 1 ? s.rest[0] : ce.function('Multiply', s.rest);
+  const done = new Set<number>();
+  const result: Expression[] = [];
+  for (let i = 0; i < terms.length; i++) {
+    if (done.has(i)) continue;
+    const s = split[i];
+    if (s.rest.length === 0) {
+      result.push(terms[i]);
+      continue;
+    }
+    const rest = restOf(s);
+    const group = [i];
+    for (let j = i + 1; j < terms.length; j++)
+      if (!done.has(j) && split[j].rest.length > 0 && restOf(split[j]).isSame(rest))
+        group.push(j);
+    if (group.length < 2 || !group.some((k) => split[k].hasSum)) {
+      result.push(terms[i]);
+      continue;
+    }
+    for (const k of group) done.add(k);
+    const cofactor = add(
+      ...group.map((k) => {
+        const c = split[k].coef;
+        if (c.length === 0) return ce.One;
+        if (c.length === 1) return c[0];
+        return ce.function('Multiply', c);
+      })
+    );
+    result.push(ce.function('Multiply', [cofactor, ...s.rest]));
+  }
+  return result;
+}
+
 export const SIMPLIFY_RULES: Rule[] = [
   // The Golden Ratio, a constant that can be simplified
   {
@@ -330,7 +394,25 @@ export const SIMPLIFY_RULES: Rule[] = [
     // and discarding the cancellation). Division by a monomial denominator
     // (number, symbol, or power) is still expanded, since there each split
     // term genuinely simplifies.
-    if (isFunction(x, 'Divide') && isFunction(x.op2, 'Add')) return undefined;
+    //
+    // The like terms of a sum numerator are still collected, without an
+    // expansion: `simplify()` only folds the constants of a `Divide` operand,
+    // so the `addition` rule never sees the numerator, and
+    // `(t − t + 1)/(y + z)` stayed as written (CE-155.2). `add()` keeps a
+    // factored term as it is, so the result is used only when it has fewer
+    // terms.
+    if (isFunction(x, 'Divide') && isFunction(x.op2, 'Add')) {
+      const num = x.op1;
+      if (!isFunction(num, 'Add') || num.ops.some(isCollectionShaped))
+        return undefined;
+      const collected = add(...num.ops.map((op) => op.canonical));
+      if (isFunction(collected, 'Add') && collected.nops >= num.nops)
+        return undefined;
+      return {
+        value: x.engine.function('Divide', [collected, x.op2]),
+        because: 'addition',
+      };
+    }
 
     // Skip a negated sum, e.g. -(x+1). The `negation` rule below produces the
     // identical result and tags it `purpose: 'transform'`, which is what
@@ -391,7 +473,7 @@ export const SIMPLIFY_RULES: Rule[] = [
     // rule, so that a caller's own rule list gets the same folding.
     // IMPORTANT: Don't call .simplify() on operands to avoid infinite recursion.
     return {
-      value: add(...x.ops.map((op) => op.canonical)),
+      value: add(...collectConstantCofactors(x.ops.map((op) => op.canonical))),
       because: 'addition',
     };
   },

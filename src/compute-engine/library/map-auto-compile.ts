@@ -18,6 +18,7 @@ import { implicitCompile } from '../implicit-compile.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import { _mapAutoCompileStats } from '../map-auto-compile-stats.js';
 import {
+  calleesResolveLexically,
   declaredParametersAdmit,
   exactTierShape,
   MIN_EXACT_COMPILE_COUNT,
@@ -875,6 +876,12 @@ export function mapCompiledElementRunner(
     (callee === undefined || namedCallbackLiteral(ce, callee) !== fn)
   )
     return undefined;
+  // The same check for a `Function` literal callback (`Map(x -> N(h(x)),
+  // xs)`): when a user function that its body calls has another binding in
+  // the scope of this drain than its lexical binding, the compiled code would
+  // call the other one, so the interpreter computes the elements (CE-446).
+  if (named === undefined && !calleesResolveLexically(ce, fn, new Set()))
+    return undefined;
 
   const existing = mapCompileCaches.get(expr);
   if (drainStart && existing) existing.attemptedThisDrain = false;
@@ -899,8 +906,9 @@ export function mapCompiledElementRunner(
   // outdated, so the interpreter computes the rest of the drain, and the next
   // drain reads the new literal.
   const stillEligible = (): boolean =>
-    (named === undefined ||
-      (callee !== undefined && namedCallbackLiteral(ce, callee) === fn)) &&
+    (named === undefined
+      ? calleesResolveLexically(ce, fn, new Set())
+      : callee !== undefined && namedCallbackLiteral(ce, callee) === fn) &&
     (tier !== 'exact' || exactTierShape(ce, expr) !== undefined);
 
   // Resolve (or build) a usable compiled cache record; `undefined` → the

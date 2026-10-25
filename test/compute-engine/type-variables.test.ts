@@ -845,18 +845,20 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     expect(
       solvedVar('(collection<T>) -> T where T', ['dictionary<number>'], 'T')
     ).toBe('tuple<string, number>');
+    // A record type is open (a value can have more fields, of any type), so
+    // the value of an entry is `any` (CE-77).
     expect(
       typeToString(
         collectionElementType(parseType('record{a: integer, b: string}'))!
       )
-    ).toBe('tuple<string, integer | string>');
+    ).toBe('tuple<string, any>');
     expect(
       solvedVar(
         '(collection<T>) -> T where T',
         ['record{a: integer, b: string}'],
         'T'
       )
-    ).toBe('tuple<string, integer | string>');
+    ).toBe('tuple<string, any>');
     // End to end: the operand pins `T`; it does not fall to the S3 `unknown`.
     const ce = fresh();
     ce.declare('entryOf', { signature: '(collection<T>) -> T where T' });
@@ -867,6 +869,9 @@ describe('SOLVER — the §4.7 worked examples (unit)', () => {
     ]);
     const e = ce.box(['entryOf', d]);
     expect(e.isValid).toBe(true);
+    // The literal has exactly its fields, so it is solved as
+    // `dictionary<integer>` (CE-77), while the declared record type above is
+    // open.
     expect(e.type.toString()).toBe('tuple<string, integer>');
   });
 

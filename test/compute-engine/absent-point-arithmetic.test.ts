@@ -566,7 +566,7 @@ describe('a point with an absent coordinate', () => {
     ],
     [
       ['PointY', ['List', ['Tuple', 1, 'Missing'], ['Tuple', 2, 3]]],
-      'list<integer | missing>',
+      'list<integer | missing^2>',
       '["Missing",3]',
     ],
     [

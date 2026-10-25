@@ -584,28 +584,31 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
   }
 
   for (const mode of ['strict', 'auto'] as const) {
-    // Without a declaration, `r` types `broadcastable<number>`: a call may
-    // be a scalar or a list, so the body's `+ 1` over the complex recursive
-    // call has no compiled form, and the compilation fails closed. Before,
-    // the body added `1` to the `{re, im}` object of the recursive call as a
-    // string, and `r(n) + x` answered `"1[object Object]111"`.
-    it(`javascript ${mode}: an undeclared function fails closed`, () => {
+    // Without a declaration, `r` is typed `(unknown) -> number`, as the
+    // declared `(integer) -> number` is (CE-454: the self-recursive hypothesis
+    // confirms the number result), so the body compiles with the complex
+    // recursive call, as above. Until 2026-10-25 the undeclared `r` was typed
+    // `broadcastable<number>`, a call could be a scalar or a list, and the
+    // compilation failed closed; before that, the body added `1` to the
+    // `{re, im}` object of the recursive call as a string, and `r(n) + x`
+    // answered `"1[object Object]111"`.
+    it(`javascript ${mode}: an undeclared function compiles like the declared one`, () => {
       const ce = new ComputeEngine();
       ce.assign('r', ce.parse(BODY));
-      for (const latex of ['r(n) + x', 'r(n)'])
-        expect(() =>
-          compile(ce.parse(latex), {
-            to: 'javascript',
-            mode,
-            fallback: false,
-          } as any)
-        ).toThrow(/list-valued operand|Declare the signature of `r`/);
-      const fallback = compile(ce.parse('r(n) + x'), {
+      expect(ce.box('r').type.toString()).toBe('(unknown) -> number');
+      const result = compile(ce.parse('r(n) + x'), {
         to: 'javascript',
         mode,
+        fallback: false,
       } as any) as any;
-      expect(fallback.success).toBe(false);
-      expect(fallback.run({ n: 3, x: 1 })).toEqual({ re: 4, im: 1 });
+      expect(result.success).toBe(true);
+      expect(result.run({ n: 3, x: 1 })).toEqual({ re: 4, im: 1 });
+      const alone = compile(ce.parse('r(n)'), {
+        to: 'javascript',
+        mode,
+        fallback: false,
+      } as any) as any;
+      expect(alone.run({ n: 3 })).toEqual({ re: 3, im: 1 });
     });
 
     it(`javascript ${mode}: the declared complex signature compiles`, () => {

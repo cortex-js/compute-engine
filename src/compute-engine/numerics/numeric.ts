@@ -1083,6 +1083,28 @@ function limitFromStart(
   // limits report err ≲ 1e-10 relative; require 1e-6.
   if (Number.isFinite(val) && err > 1e-6 * Math.max(1, Math.abs(val)))
     return { value: NaN, horizon };
+  // An accepted estimate whose magnitude is below its own error estimate may
+  // be rounding noise around 0 (`7t/(t²+9)` at ∞ gives -2e-22 with an error
+  // of 7e-17), or a small limit that the extrapolation did not refine,
+  // because its error was already below the default absolute tolerance of
+  // `extrapolate()` (1e-16): `1e-20·(1 + 2/t)` gives 1e-20 with an error of
+  // 2e-20 after one step. The error measures the change between two
+  // estimates, not the rounding noise, so it cannot tell the two apart.
+  // Extrapolate again with an absolute tolerance tied to the magnitude of
+  // the estimate. If the refined estimate is still below its own error, it
+  // has no significant digit: return 0, which is within the error bar of the
+  // true limit. Otherwise return the refined estimate (CE-184).
+  if (Math.abs(val) < err) {
+    const [refined, refinedErr] = extrapolate(f, x, {
+      step,
+      deadline,
+      atol: Math.max(Math.abs(val) * 1e-3, Number.MIN_VALUE),
+      ...(Number.isFinite(clean) ? { maxeval: clean } : {}),
+    });
+    if (!Number.isFinite(refined) || Math.abs(refined) < refinedErr)
+      return { value: 0, horizon };
+    return { value: refined, horizon };
+  }
   return { value: val, horizon };
 }
 

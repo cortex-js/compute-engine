@@ -10,6 +10,7 @@ import {
 import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
 import { widenValueTypes } from '../../common/type/widen-value.js';
 import {
+  dictionaryValueValuesType,
   functionResult,
   stripNumericRanges,
   typeContainsMissing,
@@ -23,6 +24,7 @@ import type {
 
 import { couldBeUnkeyedCollectionOperand } from '../collection-utils.js';
 import type { Expression } from '../global-types.js';
+import { isDictionary, isSymbol } from './type-guards.js';
 
 /**
  * The call-site solver's EMBEDDING (§4.3/§4.5 of
@@ -148,6 +150,117 @@ export interface SolveActual {
    * answer walks the value's `count`, and the solver never needs it
    * elsewhere. Implementations compute it on first read. */
   readonly liftable: boolean;
+  /** The type the solve binds variables from, when it differs from `type`.
+   * A dictionary VALUE (a literal) is typed `record{a: integer, b:
+   * integer}`, and a record type is open, so `collection<T>` binds `T` to
+   * `tuple<string, any>` from it. The value has exactly those fields, so it
+   * is solved as `dictionary<integer>`, and `T` is `tuple<string,
+   * integer>`. Admission still reads `type`. (CE-77) */
+  readonly solveType?: Type;
+}
+
+/**
+ * The type of the dictionary value `op` is or holds, read as the type of a
+ * value that has exactly the fields of that type, or `undefined`.
+ *
+ * - When `op` is a dictionary value (a literal), its type.
+ * - When `op` is a symbol whose type was inferred (not declared) and whose
+ *   value is a dictionary of the same type (`dd := {a: 1, b: 2}`), the type
+ *   of the symbol. A later assignment of a dictionary with other fields
+ *   changes the type of the symbol, and the two types no longer agree.
+ *
+ * A declared record type is open: a symbol declared `record{a: integer}`
+ * can hold a value with other fields, of any type, so it gives `undefined`.
+ * (CE-77)
+ */
+export function closedDictionaryType(op: Expression): Type | undefined {
+  if (isDictionary(op)) return op.type.type;
+  if (!isSymbol(op) || !op.valueDefinition?.inferredType) return undefined;
+  const value = op.value;
+  if (!isDictionary(value)) return undefined;
+  const t = op.type.type;
+  const v = value.type.type;
+  return isSubtype(t, v) && isSubtype(v, t) ? t : undefined;
+}
+
+/**
+ * The type a dictionary value is solved as: `dictionary<V>`, where `V` is
+ * the join of the values it holds (`dictionaryValueValuesType()`), or
+ * `undefined` when `op` is not a dictionary value
+ * (`closedDictionaryType()`). (CE-77)
+ */
+export function dictionaryValueSolveType(op: Expression): Type | undefined {
+  const t = closedDictionaryType(op);
+  if (t === undefined) return undefined;
+  const values = dictionaryValueValuesType(t);
+  return values === undefined ? undefined : { kind: 'dictionary', values };
+}
+
+/**
+ * True when a dictionary value at a parameter of type `param` is solved as
+ * `dictionary<V>` (`dictionaryValueSolveType()`) instead of its record type:
+ * the parameter is a collection type whose element type mentions a type
+ * variable (`collection<T>`, `indexed_collection<T>`), so the solve binds
+ * the variable from the entries of the value.
+ *
+ * At any other parameter the record type is kept. A record parameter
+ * (`record{a: T}`), alone or as an arm of a union, does not match a
+ * `dictionary<V>`. A bare type variable (`(T) -> T`) would bind to
+ * `dictionary<V>` and lose the field types, and a variable bounded by a
+ * record type (`T: record{a: integer}`) would fail its bound. (CE-77)
+ */
+function solvesDictionaryByEntries(param: Type | undefined): boolean {
+  return (
+    typeof param === 'object' &&
+    (param.kind === 'collection' || param.kind === 'indexed_collection') &&
+    hasFreeTypeVariables(param.elements)
+  );
+}
+
+/**
+ * The type a dictionary value `op` is solved as at a parameter of type
+ * `param`: `dictionaryValueSolveType(op)` when the parameter solves a
+ * dictionary by its entries (`solvesDictionaryByEntries()`), otherwise
+ * `undefined` (the solve reads the type of `op`). The solve of a call
+ * (`actualOfOperand()`) and the solve that stamps the parameters of a
+ * callback literal (`box.ts`) both use this choice. (CE-77)
+ */
+export function dictionaryValueSolveTypeAt(
+  op: Expression,
+  param: Type | undefined
+): Type | undefined {
+  return solvesDictionaryByEntries(param)
+    ? dictionaryValueSolveType(op)
+    : undefined;
+}
+
+/** The type `op` is solved from at a parameter of type `param`: its
+ * `solveType` when it has one and the parameter solves a dictionary by its
+ * entries (`solvesDictionaryByEntries()`), its `type` otherwise. */
+function solveTypeAt(op: SolveActual, param: Type | undefined): Type {
+  if (op.solveType === undefined || !solvesDictionaryByEntries(param))
+    return op.type;
+  return op.solveType;
+}
+
+/**
+ * True when `op` is an application typed `unknown` whose operator forwards a
+ * requirement on its result to its operands (`inferOperandTypes`, such as
+ * `At`). Like a symbol whose inferred type is still `unknown`, it
+ * contributes no bound to a type variable, and the narrowing after the
+ * solve reaches its operands: with `let q = (s, 0)`, `Take(q[1], 2)`
+ * narrows `s` to a collection (CE-35). Read as a bound, its `unknown`
+ * solved the `T: string` arm of `Take` to `T = unknown`, and the join of
+ * the viable arms then wrote nothing on `q[1]`.
+ */
+function forwardsRequirementWhileUnknown(op: Expression): boolean {
+  if (!op.type.isUnknown) return false;
+  const def = op.operatorDefinition;
+  return (
+    def !== undefined &&
+    'inferOperandTypes' in def &&
+    def.inferOperandTypes !== undefined
+  );
 }
 
 /** The solver's view of an operand expression. `liftable` is computed on
@@ -157,11 +270,13 @@ export function actualOfOperand(op: Expression): SolveActual {
   let liftable: boolean | undefined;
   return {
     type,
+    solveType: dictionaryValueSolveType(op),
     literal: op._literalType !== undefined,
     valid: op.isValid,
     inferable:
-      !!op.valueDefinition?.inferredType &&
-      (op.type.isUnknown || type === 'any'),
+      (!!op.valueDefinition?.inferredType &&
+        (op.type.isUnknown || type === 'any')) ||
+      forwardsRequirementWhileUnknown(op),
     get liftable(): boolean {
       return (liftable ??= couldBeUnkeyedCollectionOperand(op));
     },
@@ -276,11 +391,11 @@ export function solveArmOverActuals(
     // types). Ground parameters with a declared value component
     // (`(0) -> 0`) never reach the solver, so exact value admission is
     // unaffected.
-    ops.map((op) =>
+    ops.map((op, i) =>
       op
         ? op.literal
           ? stripNumericRanges(op.type)
-          : widenValueTypes(op.type)
+          : widenValueTypes(solveTypeAt(op, positions[i]))
         : undefined
     ),
     {

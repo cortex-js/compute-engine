@@ -195,6 +195,19 @@ function shapeOfOperand(
     !isTupleShapedType(xs.type.type)
   )
     return undefined;
+  // A symbol with no value whose type is not decided (a free `q`, typed
+  // `unknown` or `value`) may hold a collection, so its shape is not known
+  // either: `()` would claim it is a scalar. (CE-117.3)
+  if (
+    shape.length === 0 &&
+    isSymbol(xs) &&
+    xs.value === undefined &&
+    (xs.type.isUnknown ||
+      xs.type.type === 'value' ||
+      xs.type.type === 'any' ||
+      xs.type.type === 'expression')
+  )
+    return undefined;
   if (shape.length === 0 && isFunction(xs, 'List')) {
     const empty = emptyAxisListShape(xs);
     if (empty !== undefined) return empty;
@@ -2302,7 +2315,8 @@ function matrixProductDims(
  * matrix constructor (`IdentityMatrix`, `ZeroMatrix`, `OnesMatrix`), or
  * `undefined` when the operand is not such a literal. A symbolic operand, or
  * a literal that is not a positive integer, gives `undefined`: the evaluate
- * handlers answer `expected-positive-integer` for it.
+ * handlers answer `expected-positive-integer` for such a literal, and leave
+ * the constructor unevaluated for a symbolic operand.
  */
 function positiveIntegerLiteral(
   d: OperandDescriptor | undefined
@@ -2415,7 +2429,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // The evaluate handler declines (stays unevaluated) only for a
       // collection that `shapeOfOperand()` cannot give a shape: a collection
       // that is not indexed, an infinite collection, one with an unknown
-      // count, or a collection-typed operand with no value. A scalar number, a tuple, an eager `List` and an operand whose
+      // count, a collection-typed operand with no value, or an operand whose
+      // type has an axis of unknown extent (a valueless `m: matrix<integer>`).
+      // A scalar number, a tuple, an eager `List` and an operand whose
       // type has the dimensions always give a shape tuple. Other operands
       // are decided when they are evaluated. See `canEnumerate`
       // (types-definitions.ts).
@@ -2423,6 +2439,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!isFunction(expr)) return undefined;
         const xs = expr.op1;
         if (xs === undefined) return undefined;
+        if (xs.shape.some((n) => n < 0)) return false;
         if (
           xs.shape.length > 0 ||
           isFunction(xs, 'List') ||
@@ -2437,7 +2454,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: ([xs], { engine: ce }) => {
         const shape = shapeOfOperand(ce, xs);
-        return shape === undefined ? undefined : ce.tuple(...shape);
+        // An axis of unknown extent is `-1` in `shape` (a valueless
+        // `m: matrix<integer>`). The shape tuple `(-1, -1)` is not a shape,
+        // so `Shape(m)` stays unevaluated. `Rank(m)` is still known.
+        // (CE-117.3)
+        if (shape === undefined || shape.some((n) => n < 0)) return undefined;
+        return ce.tuple(...shape);
       },
     },
 
@@ -3293,7 +3315,21 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         // Kernel of scalar map x -> a*x over R
         if (op.isNumber) {
-          if (op.isSame(0)) return ce.expr(['List', ['List', 1]]);
+          // The kernel of a symbolic scalar depends on whether it is zero.
+          // When its sign does not say, the kernel stays unevaluated: for a
+          // valueless `n: integer`, the answer `[]` assumed `n ≠ 0`.
+          // (CE-117.2)
+          const zero = isNumber(op)
+            ? op.isSame(0)
+            : op.sgn === 'zero'
+              ? true
+              : op.sgn === 'positive' ||
+                  op.sgn === 'negative' ||
+                  op.sgn === 'not-zero'
+                ? false
+                : undefined;
+          if (zero === undefined) return undefined;
+          if (zero) return ce.expr(['List', ['List', 1]]);
           return ce.expr(['List']);
         }
 
@@ -4728,6 +4764,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const nExpr = ops[0];
+        // A symbolic size (`IdentityMatrix(n)` with `n` valueless) stays
+        // unevaluated: it is not known to be wrong. (CE-117.1)
+        if (!isNumber(nExpr)) return undefined;
         const n = nExpr.re;
 
         if (n === undefined || !Number.isSafeInteger(n) || n < 1)
@@ -4766,6 +4805,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const mExpr = ops[0];
+        // A symbolic extent (`ZeroMatrix(2, n)` with `n` valueless) stays
+        // unevaluated: it is not known to be wrong. (CE-117.1)
+        if (ops.some((x) => !isNumber(x))) return undefined;
         const m = mExpr.re;
 
         if (m === undefined || !Number.isSafeInteger(m) || m < 1)
@@ -4812,6 +4854,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         const mExpr = ops[0];
+        // A symbolic extent stays unevaluated, as for `ZeroMatrix`.
+        if (ops.some((x) => !isNumber(x))) return undefined;
         const m = mExpr.re;
 
         if (m === undefined || !Number.isSafeInteger(m) || m < 1)

@@ -2251,20 +2251,19 @@ function elementTypeOf(type: Type): Type | undefined {
     );
   // Indexing a dictionary or a record yields a `(key, value)` entry. Built as
   // a `Type` object rather than through `parseType` (which this module must not
-  // depend on); `widen()` of no types is `never`, matching the
-  // `tuple<string, never>` an empty record produces in `utils.ts`.
+  // depend on).
   if (type.kind === 'dictionary')
     return {
       kind: 'tuple',
       elements: [{ type: 'string' }, { type: type.values }],
     };
+  // A record type is open: a value can have fields it does not declare, of
+  // any type, so the value of an entry is `any`, as in
+  // `collectionElementType()` (`utils.ts`). (CE-77)
   if (type.kind === 'record')
     return {
       kind: 'tuple',
-      elements: [
-        { type: 'string' },
-        { type: algebra().widen(...Object.values(type.elements)) },
-      ],
+      elements: [{ type: 'string' }, { type: 'any' }],
     };
   return undefined;
 }

@@ -109,6 +109,97 @@ export function failedCellsAreIterable(expr: Expression): boolean {
 }
 
 /**
+ * Operators that read only the number of cells of their one operand, never
+ * the value of a cell: over a `List` or `Set` literal that holds a failed
+ * cell they answer a value (`Length([1, <error>, 3])` is `3`,
+ * `docs/ERROR-MODEL.md` §3). `Count` with a predicate applies the predicate
+ * to each cell, so only its one-operand form is in this set.
+ */
+const CELL_COUNT_OPERATORS = new Set(['Length', 'Count', 'IsEmpty']);
+
+/**
+ * Collection views that keep or drop cells by their position, never by their
+ * value: the number of cells of the view does not depend on the value of a
+ * failed cell. A view that compares cells to get its cells (`Dedup`, `Union`,
+ * `Intersection`, `Difference`, `Sort`, …) or applies a predicate to them
+ * (`Filter`) is not in this set: over a failed cell, its count, and so the
+ * value of `Length` over it, can be the error of that cell.
+ *
+ * `Map` keeps one cell for each cell of a list, but a `Map` over a set
+ * removes the duplicate values of the callback, which compares them. So a
+ * `Map` is accepted only when the literals under it are lists
+ * (`countsCellsWithoutValues()`).
+ */
+const POSITIONAL_VIEW_OPERATORS = new Set([
+  'Rest',
+  'Most',
+  'Reverse',
+  'Take',
+  'Drop',
+  'Join',
+  'Map',
+]);
+
+/**
+ * True when the number of cells of the collection value `expr` does not
+ * depend on the value of a failed cell: `expr` is valid, or a `List` or
+ * `Set` literal, or a view of `POSITIONAL_VIEW_OPERATORS` whose operands are
+ * such values. When `listsOnly` is true, a `Set` literal gives `false`.
+ */
+function countsCellsWithoutValues(
+  expr: Expression,
+  listsOnly = false
+): boolean {
+  if (expr.isValid) return true;
+  if (isIterableWithFailedCells(expr))
+    return !listsOnly || expr.operator === 'List';
+  if (!isFunction(expr) || !POSITIONAL_VIEW_OPERATORS.has(expr.operator))
+    return false;
+  const lists = listsOnly || expr.operator === 'Map';
+  return expr.ops.every((op) => countsCellsWithoutValues(op, lists));
+}
+
+/**
+ * True when the value of the invalid application `expr` does not depend on
+ * the value of a failed cell, so the evaluate handler answers the value it
+ * gives over valid cells. The caller has already found that every error of
+ * `expr` sits in a cell of a collection value (`failedCellsAreIterable()`).
+ *
+ * Each invalid operand must be one of:
+ * - a collection value that holds a failed cell, read by an operator of
+ *   `CELL_COUNT_OPERATORS` with one operand. The value must be a `List` or
+ *   `Set` literal, or a view that keeps cells by position
+ *   (`countsCellsWithoutValues()`). A view that compares the cells, such as
+ *   `Length(Dedup([1, <error>, 3]))`, gives `false`: its count can be the
+ *   error of the failed cell;
+ * - an application for which this function is `true`, such as the
+ *   `Length([1, <error>])` of `Length([1, <error>]) + 1`.
+ *
+ * An `Error` operand, or an operand under a selecting operator
+ * (`defersErrorAbsorption()`), gives `false`. So does an operator that reads
+ * the cells (`Sum([1, <error>])`, `First([1, <error>])`): its value can be
+ * the error of a failed cell or a valid value, so `type()` in
+ * `boxed-function.ts` types it `unknown`, or, for a broadcastable operator
+ * whose result is a list (`Sin([1, <error>])`), as the list over the valid
+ * cells.
+ */
+export function answersWithoutFailedCells(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const countsCells =
+    expr.nops === 1 && CELL_COUNT_OPERATORS.has(expr.operator);
+  for (const op of expr.ops) {
+    if (op.isValid) continue;
+    if (!isInvalidNonCollection(op)) {
+      if (!countsCells || !countsCellsWithoutValues(op)) return false;
+      continue;
+    }
+    if (isFunction(op, 'Error') || defersErrorAbsorption(op)) return false;
+    if (!answersWithoutFailedCells(op)) return false;
+  }
+  return true;
+}
+
+/**
  * The error of a failed cell: the first `Error` at any depth of `cell`, or
  * `undefined` when `cell` is valid. An operator that demands the value of a
  * cell (`Sum`, `Max`, `Mean`, `Sort`) answers this error.

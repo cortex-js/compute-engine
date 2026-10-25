@@ -2,7 +2,7 @@
 
 exports[` 1`] = `
 \\lim_{x\\to\\infty}f(x)
-lim_(+oo) {f(x)}
+lim_(x -> +oo) {f(x)}
 ["Limit", ["Function", ["f", "x"], "x"], "PositiveInfinity"]
 `;
 
@@ -10,7 +10,7 @@ exports[` 2`] = `["Limit", ["Function", ["Divide", ["Sin", "x"], "x"], "x"], 0]`
 
 exports[` 3`] = `
 \\lim_{x\\to\\infty}f(x)
-lim_(+oo) {f(x)}
+lim_(x -> +oo) {f(x)}
 ["Limit", ["Function", ["f", "x"], "x"], "PositiveInfinity"]
 `;
 
@@ -168,19 +168,18 @@ exports[`EXOTIC INTEGRALS \\smallint 1`] = `
 `;
 
 exports[`INDEFINITE INTEGRAL INVALID index in denominator 1`] = `
-\\int\\!\\frac{3x}{5dx}=2
-int((3x) / (5d * x) dd  dx) == 2
+\\int\\!\\frac{3x}{\\error{\\blacksquare}}=2
+int(InvisibleOperator(3, x) / Error("unexpected-differential")) == 2
 [
   "Equal",
   [
     "Integrate",
     [
-      "Function",
-      ["Divide", ["Multiply", 3, "x"], ["Multiply", 5, "d", "x"]],
-      "d",
-      "x"
+      "Divide",
+      ["InvisibleOperator", 3, "x"],
+      ["Error", "unexpected-differential"]
     ],
-    ["Limits", "Nothing", "Nothing", "Nothing"]
+    "Nothing"
   ],
   2
 ]

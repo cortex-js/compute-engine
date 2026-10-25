@@ -37,12 +37,17 @@ import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   functionResult,
+  hasResidueArm,
   resolveTypeAlias,
   stripMissingFromType,
   typeContainsMissing,
   withoutResidueArm,
 } from '../../common/type/utils.js';
 import { describeType, guardedTypeHandlerCall } from './operand-descriptor.js';
+import {
+  collectionCellsProvablyNonNumeric,
+  numericOperandTypeRefused,
+} from './validate.js';
 import {
   functionLiteralParameterName,
   isDestructuringParameter,
@@ -118,6 +123,75 @@ export interface BroadcastLiftHooks {
     operands: ReadonlyArray<OperandDescriptor>
   ) => Type | undefined;
 }
+/**
+ * The operators whose library canonical form checks each operand with
+ * `checkNumericArgs` (`canonicalNumericOperator()`, `canonical-numeric.ts`,
+ * and the `canonical` handlers of `Subtract`, `Exp2`, `PlusMinus` and
+ * `Conjugate`). `'residue'` marks an operator with residue arithmetic,
+ * which admits a residue class as an operand.
+ */
+const NUMERIC_OPERAND_CHECK: Readonly<
+  Record<string, 'residue' | 'number'>
+> = {
+  Add: 'residue',
+  Subtract: 'residue',
+  Multiply: 'residue',
+  Divide: 'residue',
+  Negate: 'residue',
+  Square: 'residue',
+  Sqrt: 'residue',
+  Power: 'residue',
+  Root: 'residue',
+  Exp: 'number',
+  Ln: 'number',
+  Log: 'number',
+  Exp2: 'number',
+  PlusMinus: 'number',
+  Conjugate: 'number',
+};
+
+/**
+ * True when the ground, one-arm signature of `def` has a parameter that is
+ * provably disjoint from the type of its operand in `operands`, so that the
+ * boxed application is refused (`deriveApplicationType()`).
+ */
+function signatureRefusesOperandType(
+  def: BoxedOperatorDefinition,
+  operands: ReadonlyArray<OperandDescriptor>
+): boolean {
+  const sig = def.signature.type;
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
+  if (sig.typeParams !== undefined || freeTypeVariables(sig).size > 0)
+    return false;
+  return operands.some((d, i) => {
+    const param = paramAt(sig, i);
+    if (param === undefined) return false;
+    let t = d.type;
+    if (def.stripsMissingAt(i)) t = stripMissingFromType(t);
+    if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
+      return false;
+    // A tuple at a scalar parameter is mapped over its components, at an
+    // operator that does not broadcast too (a user definition).
+    if (isTupleShapedType(t)) return false;
+    // A collection at a numeric parameter of an operator that broadcasts
+    // maps over its cells, and the boxed application refuses it when its
+    // cells are provably not numbers (`Sin(L)` with `L: list<string>`, the
+    // check of `validateThreadableOperand`, `validate.ts`). Any other
+    // collection is admitted, as at the boxed route.
+    if (def.broadcastable && typeCouldBeUnkeyedCollection(t))
+      return (
+        isSubtype(param, 'number') &&
+        collectionCellsProvablyNonNumeric(t, hasResidueArm(param))
+      );
+    // A number at a numeric parameter is admitted, `NaN` and the infinities
+    // included: the operator answers for such a point (`Abs(NaN)` is
+    // `NaN`), as the signature promises under Contract B
+    // (`docs/ERROR-MODEL.md` §4).
+    if (isSubtype(t, 'number') && isSubtype(param, 'number')) return false;
+    return provablyDisjoint(t, param);
+  });
+}
+
 let broadcastLiftHooks: BroadcastLiftHooks | undefined;
 export function installBroadcastLiftHooks(hooks: BroadcastLiftHooks): void {
   broadcastLiftHooks = hooks;
@@ -503,6 +577,37 @@ export function deriveApplicationType(
       operands.map((d) => d.type),
       (i) => isProvablyScalarDescriptor(operands[i])
     )
+  )
+    return 'error';
+  // The library canonical form of an arithmetic operator checks that each
+  // operand can be a number (`checkNumericArgs`, `validate.ts`), and the
+  // boxed application of an operand it refuses (a string, a boolean) is
+  // typed `error`. This route never canonicalizes, so it applies the same
+  // test to the operand types: with `s: string` and `n: integer`,
+  // `Add(s, n)` was typed `integer | string` here, and so was
+  // `Map((a, b) ↦ a + b, ss, ys)` over lists of them, while every cell of
+  // its value is an `incompatible-type` error (CE-452, CE-40.1).
+  const numericCheck = NUMERIC_OPERAND_CHECK[operator];
+  if (
+    numericCheck !== undefined &&
+    runsLibraryCanonicalForm(engine, operator, def) &&
+    operands.some((d) =>
+      numericOperandTypeRefused(d.type, numericCheck === 'residue')
+    )
+  )
+    return 'error';
+  // The other operators check their operands against the declared
+  // signature (`validateArguments`, `validate.ts`), which refuses an operand
+  // whose type is provably disjoint from its parameter: `Sin(s)` with
+  // `s: string` is typed `error` when boxed. The same test is applied here
+  // to a ground signature with one arm. An operand that the check does not
+  // decide from its type alone is not refused: `unknown`, `any`, an absent
+  // operand at a position that strips `missing`, and an operand that could
+  // be a collection or a tuple at an operator that broadcasts.
+  if (
+    numericCheck === undefined &&
+    !def.lazy &&
+    signatureRefusesOperandType(def, operands)
   )
     return 'error';
 

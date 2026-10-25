@@ -405,11 +405,19 @@ describe('IdentityMatrix, ZeroMatrix, OnesMatrix', () => {
     expect(ce.box(['ZeroMatrix', 100, 101]).type.toString()).toBe('matrix');
     expect(ce.box(['OnesMatrix', 101]).type.toString()).toBe('matrix');
   });
-  test('a symbolic or non-positive extent declines', () => {
-    declines(ce, ['IdentityMatrix', 'n'], 'matrix');
+  test('a non-positive extent declines', () => {
     declines(ce, ['IdentityMatrix', 0], 'matrix');
-    declines(ce, ['ZeroMatrix', 2, 'n'], 'matrix');
     declines(ce, ['OnesMatrix', -1], 'matrix');
+  });
+  test('a symbolic extent declines and stays unevaluated (CE-117.1)', () => {
+    for (const input of [
+      ['IdentityMatrix', 'n'],
+      ['ZeroMatrix', 2, 'n'],
+    ]) {
+      const e = expr(ce, input);
+      expect(e.type.toString()).toBe('matrix');
+      expect(e.evaluate().isSame(e)).toBe(true);
+    }
   });
 });
 

@@ -81,14 +81,15 @@ describe('TRIGONOMETRIC FUNCTIONS', () => {
 });
 
 describe('TRIGONOMETRIC DEGREES', () => {
-  // @fixme. Precedence of postfix operator is not correct. Should parse as `\\tan ((90-0.000001)\\degree)`
+  // A degree sign after a parenthesized argument applies to the argument:
+  // this is `\tan((90-0.000001)\degree)`, about 180/(π·10⁻⁶) (CE-305.3).
   test('\\tan (90-0.000001)\\degree', () =>
     expect(check('\\tan (90-0.000001)\\degree')).toMatchInlineSnapshot(`
-      box       = ["Degrees", ["Tan", ["Subtract", 90, 0.000001]]]
-      canonical = ["Degrees", ["Tan", ["Add", 90, -0.000001]]]
-      simplify  = -0.0348229033621455533306
-      eval-auto = -0.0348229033621455533306
-      eval-mach = -0.03482290336214534
+      box       = ["Tan", ["Degrees", ["Subtract", 90, 0.000001]]]
+      canonical = ["Tan", ["Degrees", ["Add", 90, -0.000001]]]
+      simplify  = 57295779.5130823143841
+      eval-auto = 57295779.5130823143841
+      eval-mach = 57295779.81445014
     `));
 
   test('\\cos(30\\degree)', () =>

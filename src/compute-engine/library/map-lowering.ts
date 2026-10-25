@@ -11,7 +11,10 @@ import {
   sourceElementTypeKey,
 } from './map-broadcast-shape.js';
 import { mapAutoCompileRunner } from './map-auto-compile.js';
-import { errorValue } from '../boxed-expression/error-value.js';
+import {
+  errorValue,
+  isInvalidNonCollection,
+} from '../boxed-expression/error-value.js';
 import { isNumber, isSymbol } from '../boxed-expression/type-guards.js';
 import { liveScopeOf } from '../boxed-expression/ambient-chain.js';
 
@@ -391,7 +394,13 @@ export function makeSpineRunner(
         rowEvaluated = true;
         continue;
       }
-      if (v === undefined || v.isValid === false) {
+      // A collection whose only errors are in its cells (a broadcast such as
+      // `[(1, 2)] + 1`, which is `[<error>]`) is the value of the element, as
+      // on the general route: an error in a cell is not a failure of the
+      // collection. Read as a level failure, it was replaced by the absence
+      // marker, so `Map(x ↦ x + 1, [[(1, 2)], Missing])` gave `[NaN, NaN]`
+      // (CE-76).
+      if (v === undefined || isInvalidNonCollection(v)) {
         v = onLevelFailure(level.expr);
         if (v === undefined) return undefined;
       }

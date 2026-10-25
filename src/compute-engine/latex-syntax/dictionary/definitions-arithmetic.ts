@@ -2001,6 +2001,63 @@ function unwrapSingleItemList(expr: MathJsonExpression): MathJsonExpression {
   return expr;
 }
 
+/** True when the next token, after any space, is `\over` or `\choose`.
+ * The index does not change. */
+function atGeneralizedFraction(parser: Parser): boolean {
+  const start = parser.index;
+  parser.skipSpace();
+  const result = parser.peek === '\\over' || parser.peek === '\\choose';
+  parser.index = start;
+  return result;
+}
+
+/**
+ * Parse the right operand of the TeX primitives `\over` and `\choose`.
+ *
+ * These operators are not associative: TeX accepts one of them in a group
+ * and reports "Ambiguous; you need another { and }" for a second one. A
+ * chain such as `1\over 2\over 3` therefore gives a
+ * `non-associative-operator` error for the right operand, which holds the
+ * text of the chain from the first right operand to its end, instead of a
+ * silent right-associative reading (CE-305.2). A braced group, as in
+ * `{1\over 2}\over 3`, is one operand and stays valid.
+ */
+function parseGeneralizedFraction(
+  h: 'Divide' | 'Binomial'
+): (
+  parser: Parser,
+  lhs: MathJsonExpression,
+  until: Readonly<Terminator>
+) => MathJsonExpression | null {
+  return (parser, lhs, until) => {
+    if (lhs === null) return null;
+    const condition = (p: Parser) =>
+      atGeneralizedFraction(p) || (until.condition?.(p) ?? false);
+    parser.skipSpace();
+    const rhsStart = parser.index;
+    const rhs = missingIfEmpty(
+      parser.parseExpression({
+        ...until,
+        minPrec: DIVISION_PRECEDENCE,
+        condition,
+      })
+    );
+    if (!atGeneralizedFraction(parser)) return [h, lhs, rhs];
+
+    // Read the rest of the chain, so that the error holds all of it.
+    while (atGeneralizedFraction(parser)) {
+      parser.skipSpace();
+      parser.nextToken();
+      parser.parseExpression({
+        ...until,
+        minPrec: DIVISION_PRECEDENCE,
+        condition,
+      });
+    }
+    return [h, lhs, parser.error('non-associative-operator', rhsStart)];
+  };
+}
+
 function parseSlashDivide(
   parser: Parser,
   lhs: MathJsonExpression,
@@ -3364,7 +3421,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\over',
     associativity: 'none', // In LaTeX, the \over command is not associative
     precedence: DIVISION_PRECEDENCE,
-    parse: 'Divide',
+    parse: parseGeneralizedFraction('Divide'),
   },
   {
     // TeX primitive `{n \choose k}`, same grammar as `\over`. Serializes as
@@ -3373,7 +3430,7 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     latexTrigger: '\\choose',
     associativity: 'none',
     precedence: DIVISION_PRECEDENCE,
-    parse: 'Binomial',
+    parse: parseGeneralizedFraction('Binomial'),
   },
   {
     // The \/ command is recognized by MathLive, but not by KaTeX, so we

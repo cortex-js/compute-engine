@@ -6667,15 +6667,28 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // initializer too (`_initializerAlias`, read by
         // `BoxedSymbol._inferWithoutFacts` in `boxed-symbol.ts`; every later
         // assignment to the local clears it, see `joinAssignmentEvidence`).
-        const recordAlias = (name: string, value: Expression): void => {
-          if (!isSymbol(value)) return;
+        //
+        // An initializer that is a tuple literal with such a symbol as a
+        // component (`let q = (s, 0)`) is remembered whole: a component read
+        // of the local at a literal index (`q[1]`) that narrows the read
+        // narrows the symbol at that position too (`elementRequirementOfAt`,
+        // `library/collections.ts`), as a destructuring `let (a, b) = (s, 0)`
+        // does for its leaf `a` (CE-35).
+        const isAliasableSymbol = (value: Expression): boolean => {
+          if (!isSymbol(value)) return false;
           const source = value.valueDefinition;
+          return (
+            source !== undefined &&
+            source.inferredType &&
+            !source.isConstant &&
+            source.value === undefined &&
+            source.type.isUnknown
+          );
+        };
+        const recordAlias = (name: string, value: Expression): void => {
           if (
-            source === undefined ||
-            !source.inferredType ||
-            source.isConstant ||
-            source.value !== undefined ||
-            !source.type.isUnknown
+            !isAliasableSymbol(value) &&
+            !(isFunction(value, 'Tuple') && value.ops.some(isAliasableSymbol))
           )
             return;
           const local = ce.context.lexicalScope.bindings.get(name);

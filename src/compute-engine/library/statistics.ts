@@ -134,6 +134,44 @@ import { guardDigitsN } from './exact-operands-under-n.js';
 // Harmonic mean:
 
 /**
+ * The closed form `closedForm` of a statistic of one `Range` operand, read
+ * from the operand as written when it applies there.
+ *
+ * Under `.N()`, the evaluation makes each operand numeric before the handler
+ * runs, so `Range(-17, 0, 1/3)` arrives with the float step `0.333…`. The
+ * closed forms of `library/range-closed-form.ts` read an exact range only, so
+ * the handler walked the float elements and `Mean(Range(-17, 0, 1/3)).N()`
+ * was `-8.50000000000000060577`, not `-8.5`. The operand as written
+ * (`options.expression`) is still exact: the closed form is read there first,
+ * and the closed form makes its result numeric. When it does not apply there
+ * (the written operand is not a `Range`), the evaluated operand is read, as
+ * before. `Sum` gets the same result because it holds its operand. (CE-80.2)
+ */
+function rangeClosedFormOfOperand(
+  ops: ReadonlyArray<Expression>,
+  expression: Expression | undefined,
+  numericApproximation: boolean | undefined,
+  closedForm: (operand: Expression) => Expression | undefined
+): Expression | undefined {
+  if (ops.length !== 1) return undefined;
+  // The written operand is read only when it is pure. The evaluation of the
+  // operand has already run the effects of an impure bound
+  // (`Range(1, next())`), and the closed form evaluates the bounds of the
+  // written operand again, so it would run them a second time and read a
+  // different value.
+  if (
+    numericApproximation &&
+    isFunction(expression) &&
+    expression.nops === 1 &&
+    expression.ops[0].isPure
+  ) {
+    const written = closedForm(expression.ops[0]);
+    if (written !== undefined) return written;
+  }
+  return closedForm(ops[0]);
+}
+
+/**
  * Shared binning for `Histogram`/`BinCounts`. Returns the bin edges and the
  * count in each bin, `{ rejected }` naming a datum or bin edge the binning
  * refuses and the constraint it failed, or `undefined` if the input is not a
@@ -697,17 +735,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Arithmetic mean (average) of a collection of numbers.' +
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       keywords: ['average'],
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionMean(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
         // A `Range` with exact rational bounds and step has a closed-form
         // mean, the mean of its first and last elements: it is not walked.
-        if (ops.length === 1) {
-          const m = rangeMeanClosedForm(engine, ops[0], numericApproximation);
-          if (m !== undefined) return m;
-        }
+        const m = rangeClosedFormOfOperand(
+          ops,
+          expression,
+          numericApproximation,
+          (x) => rangeMeanClosedForm(engine, x, numericApproximation)
+        );
+        if (m !== undefined) return m;
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -796,14 +837,17 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
         'Median of a collection of numbers.' +
         ' Immediate Nothing data are omitted; sample sizes count retained data.',
       examples: ['Median([3, 1, 4, 2])  // 5/2'],
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         // The elements of an exact `Range` are an arithmetic sequence, so its
         // median is its mean, the mean of its first and last elements: it is
         // not sorted.
-        if (ops.length === 1) {
-          const m = rangeMeanClosedForm(engine, ops[0], numericApproximation);
-          if (m !== undefined) return m;
-        }
+        const m = rangeClosedFormOfOperand(
+          ops,
+          expression,
+          numericApproximation,
+          (x) => rangeMeanClosedForm(engine, x, numericApproximation)
+        );
+        if (m !== undefined) return m;
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -893,22 +937,20 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionVariance(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
         }
         // A `Range` with exact rational bounds and step has a closed-form
         // variance: see `rangeVarianceClosedForm`.
-        if (ops.length === 1) {
-          const v = rangeVarianceClosedForm(
-            engine,
-            ops[0],
-            false,
-            numericApproximation
-          );
-          if (v !== undefined) return v;
-        }
+        const v = rangeClosedFormOfOperand(
+          ops,
+          expression,
+          numericApproximation,
+          (x) => rangeVarianceClosedForm(engine, x, false, numericApproximation)
+        );
+        if (v !== undefined) return v;
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -989,18 +1031,16 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         // A `Range` with exact rational bounds and step has a closed-form
         // variance: see `rangeVarianceClosedForm`.
-        if (ops.length === 1) {
-          const v = rangeVarianceClosedForm(
-            engine,
-            ops[0],
-            true,
-            numericApproximation
-          );
-          if (v !== undefined) return v;
-        }
+        const v = rangeClosedFormOfOperand(
+          ops,
+          expression,
+          numericApproximation,
+          (x) => rangeVarianceClosedForm(engine, x, true, numericApproximation)
+        );
+        if (v !== undefined) return v;
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to
@@ -1093,10 +1133,19 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
         if (ops.length === 1 && isDistributionExpression(ops[0])) {
           const r = distributionStandardDeviation(engine, ops[0]);
           return numericApproximation ? r?.N() : r;
+        }
+        // Under `.N()`, the square root of the closed-form variance of an
+        // exact `Range` as written: the walk of its float elements lost the
+        // last digits (`rangeClosedFormOfOperand()`).
+        if (numericApproximation) {
+          const v = rangeClosedFormOfOperand(ops, expression, true, (x) =>
+            rangeVarianceClosedForm(engine, x, false, false)
+          );
+          if (v !== undefined) return engine.function('Sqrt', [v]).N();
         }
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
@@ -1194,7 +1243,15 @@ export const STATISTICS_LIBRARY: SymbolDefinitions[] = [
       // admitted, so the handler can apply the §3.C absent-data rule.
       nanBehavior: 'handle',
       missingBehavior: 'handle',
-      evaluate: (ops, { engine, numericApproximation }) => {
+      evaluate: (ops, { engine, numericApproximation, expression }) => {
+        // Under `.N()`, the square root of the closed-form variance of an
+        // exact `Range` as written (see `StandardDeviation`).
+        if (numericApproximation) {
+          const v = rangeClosedFormOfOperand(ops, expression, true, (x) =>
+            rangeVarianceClosedForm(engine, x, true, false)
+          );
+          if (v !== undefined) return engine.function('Sqrt', [v]).N();
+        }
         // ONE walk of the data decides all three verdicts — an absent datum
         // or empty input (`NaN`), a provably non-numeric datum (an error), or
         // symbolic data (stay inert rather than fold a valueless symbol to

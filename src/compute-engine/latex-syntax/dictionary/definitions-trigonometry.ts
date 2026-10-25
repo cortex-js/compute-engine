@@ -120,6 +120,23 @@ function parseTrig(op: string): ExpressionParseHandler {
     // (`x |> \cos^2` → cos²x); standalone it displays as `\cos(\square)^2`.
     if (args === null && sup !== null) args = [PIPE_TOPIC_MARKER];
 
+    // A degree sign after a parenthesized argument marks the unit of the
+    // argument, not of the result: `\tan(90-x)\degree` is `\tan((90-x)°)`
+    // (CE-305.3). Other postfix operators (`\sin(x)!`) still apply to the
+    // call: the caller reads them after this function returns. Their parse
+    // here is discarded with its diagnostics, so that the caller's parse
+    // does not report them a second time.
+    if (args?.length === 1) {
+      const start = parser.index;
+      const cp = parser._diagnosticsCheckpoint();
+      const pf = parser.parsePostfixOperator(args[0], until);
+      if (Array.isArray(pf) && pf[0] === 'Degrees') args = [pf];
+      else {
+        parser._rollbackDiagnostics(cp);
+        parser.index = start;
+      }
+    }
+
     // Desmos compatibility: `\arctan(y, x)` and `\tan^{-1}(y, x)` are
     // both 2-arg atan2. We must lower to Arctan2 here, before the operator
     // is resolved: by the time `['InverseFunction', 'Tan']` becomes

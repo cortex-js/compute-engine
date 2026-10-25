@@ -23,7 +23,10 @@ import {
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import { asFloat } from '../boxed-expression/float-result.js';
-import { polynomialDegree } from '../boxed-expression/polynomials.js';
+import {
+  getPolynomialCoefficients,
+  polynomialDegree,
+} from '../boxed-expression/polynomials.js';
 import {
   hasInexactLiteral,
   hasIntegerRootFrom,
@@ -600,23 +603,46 @@ function telescopingParts(
     if (isFunction(t, 'Negate')) {
       if (neg) return undefined; // two negated terms → not a telescoping pair
       neg = t.op1;
-    } else {
-      if (pos) return undefined;
-      pos = t;
-    }
+    } else pos = t;
   }
-  if (!pos || !neg) return undefined;
 
-  // Both parts must reference the index (guards against degenerate matches).
-  if (!new Set(pos.unknowns).has(index)) return undefined;
-  if (!new Set(neg.unknowns).has(index)) return undefined;
+  // A canonical difference often has no `Negate` term: the sign is in a
+  // coefficient (`1/(k+x) − 1/(k+x+1)` is `Add(1/(k+x), −1/(k+x+1))`). Then
+  // try each term as the negative part: with `neg = −b`, the body `a + b` is
+  // `a − neg`, whichever term is chosen, and the shift test below decides
+  // (CE-142.4).
+  // The two choices give the same value; the one with the lower cost is tried
+  // first, so that `1/(k+x) − 1/(k+x+1)` gives `1/(x+1) − …` and not
+  // `−(−1/(x+1)) …`.
+  const pairs: [Expression, Expression][] =
+    pos && neg
+      ? [[pos, neg]]
+      : (
+          [
+            [body.ops[0], body.ops[1].neg()],
+            [body.ops[1], body.ops[0].neg()],
+          ] as [Expression, Expression][]
+        ).sort(
+          ([p1, n1], [p2, n2]) =>
+            ce.costFunction(p1) +
+            ce.costFunction(n1) -
+            ce.costFunction(p2) -
+            ce.costFunction(n2)
+        );
 
-  // forward: neg shifted by k→k+1 equals pos  ⇒ body = neg(k+1) − neg(k)
-  if (shiftIndex(neg, index, ce).isSame(pos))
-    return { pos, neg, forward: true };
-  // mirror: pos shifted by k→k+1 equals neg  ⇒ body = pos(k) − pos(k+1)
-  if (shiftIndex(pos, index, ce).isSame(neg))
-    return { pos, neg, forward: false };
+  for (const [p, n] of pairs) {
+    // Both parts must reference the index (guards against degenerate
+    // matches).
+    if (!new Set(p.unknowns).has(index)) continue;
+    if (!new Set(n.unknowns).has(index)) continue;
+
+    // forward: neg shifted by k→k+1 equals pos  ⇒ body = neg(k+1) − neg(k)
+    if (shiftIndex(n, index, ce).isSame(p))
+      return { pos: p, neg: n, forward: true };
+    // mirror: pos shifted by k→k+1 equals neg  ⇒ body = pos(k) − pos(k+1)
+    if (shiftIndex(p, index, ce).isSame(n))
+      return { pos: p, neg: n, forward: false };
+  }
 
   return undefined;
 }
@@ -788,6 +814,9 @@ function telescopingDifference(
     return isProvablyFinite(lo) ? hi : undefined;
   if (isNumber(lo) && lo.isInfinity === true && !holdsInfinity(hi))
     return isProvablyFinite(hi) ? lo.neg() : undefined;
+  // A term that tends to 0 at an infinite bound is not written as `− 0`.
+  if (isNumber(lo) && lo.isSame(0)) return hi;
+  if (isNumber(hi) && hi.isSame(0)) return lo.neg();
   return ce.function('Subtract', [hi, lo], { form: 'structural' });
 }
 
@@ -827,8 +856,55 @@ function termAtBound(
   const value = term.subs({ [index]: bound });
   if (bound.isInfinity !== true) return value;
   const folded = value.evaluate();
+  // A term that folds to a number with a value at the infinite bound is that
+  // number (its limit): `−1/(x + 1 + ∞)` is `0`, and the closed form must not
+  // keep the infinity in an unfolded quotient. A term that folds to `NaN` or
+  // `Indeterminate` (`(∞ + x)/(∞ + x + 1)` is `∞/∞`) has no limit by
+  // substitution: its limit is read from the degrees of its numerator and
+  // denominator when it is a rational function of the index.
+  if (isNumber(folded)) {
+    if (folded.isNaN !== true) return folded;
+    return rationalLimitAtInfinity(term, index);
+  }
   if (!holdsInfinity(folded)) return value;
-  return isNumber(folded) ? folded : undefined;
+  return rationalLimitAtInfinity(term, index);
+}
+
+/**
+ * The limit of `term` as `index` tends to `+∞` or `−∞`, when `term` is a
+ * rational function `p/q` of `index` whose denominator has a leading
+ * coefficient that is an exact nonzero number. The other coefficients may be
+ * symbolic. With `p` of degree `dp` and `q` of degree `dq`, the limit is `0`
+ * when `dp < dq` and the ratio of the leading coefficients when `dp = dq`; it
+ * is the same at both infinities. Undefined otherwise (`dp > dq`, where the
+ * term grows without bound, or a term that is not rational in `index`).
+ */
+function rationalLimitAtInfinity(
+  term: Expression,
+  index: string
+): Expression | undefined {
+  const ce = term.engine;
+  const parts = rationalPartsAsWritten(term);
+  if (!parts) return undefined;
+  const p = getPolynomialCoefficients(parts[0], index);
+  const q = getPolynomialCoefficients(parts[1], index);
+  if (!p || !q) return undefined;
+  // The coefficients are evaluated, so that a coefficient such as `1 − 1` is
+  // the literal `0` and is not taken as the leading one.
+  const trim = (c: Expression[]): Expression[] => {
+    const e = c.map((x) => x.evaluate());
+    let n = e.length;
+    while (n > 1 && isNumber(e[n - 1]) && e[n - 1].isSame(0)) n -= 1;
+    return e.slice(0, n);
+  };
+  const pe = trim(p);
+  const qe = trim(q);
+  const ql = qe[qe.length - 1];
+  if (!isNumber(ql) || !ql.isExact || ql.isSame(0)) return undefined;
+  if (pe.length < qe.length) return ce.Zero;
+  if (pe.length > qe.length) return undefined;
+  const limit = ce.function('Divide', [pe[pe.length - 1], ql]).evaluate();
+  return holdsInfinity(limit) || limit.isNaN === true ? undefined : limit;
 }
 
 /**
@@ -2303,6 +2379,216 @@ export function infiniteProductClosedForm(
   }
 
   return undefined;
+}
+
+/**
+ * The limit of the partial products of `Product(r(k), [k, a, +∞])`, for an
+ * exact rational body `r` with no pole at an integer `k ≥ a`, when that
+ * limit is `0` or an infinity (CE-142.2, CE-142.7). With `L` the limit of
+ * `r(k)` as `k → ∞`:
+ *   - a factor that is `0` at an integer `k ≥ a`: the partial products are
+ *     eventually `0`, so the limit is `0`;
+ *   - `|L| < 1`, whatever the sign of `L` (a denominator of higher degree
+ *     included): the factors are eventually below a constant less than 1
+ *     in magnitude, so the limit is `0` (`Π −k/(2k+1)` is `0`);
+ *   - `L > 1` (a numerator of higher degree with a positive leading ratio
+ *     included): the magnitude grows without bound, and the factors are
+ *     eventually positive, so the limit is the sign of the partial product
+ *     up to the last sign change times `+∞` (`Π k` is `+∞`);
+ *   - `L = 1`, with `r(k) = 1 + c/k + O(1/k²)`: `ln r(k)` is about `c/k`,
+ *     whose sum diverges, so the limit is that sign times `+∞` for `c > 0`
+ *     (`Π (k+1)/k`) and `0` for `c < 0` (`Π k/(k+1)`).
+ * A zero factor is confirmed with exact arithmetic: a machine value within
+ * rounding of zero (`k − 0.9999999999999` at `k = 1`) is only a candidate.
+ * Otherwise undefined: `L ≤ −1` (the signs alternate and the magnitude does
+ * not tend to 0), `L = 1` with `c = 0` (the product converges to a finite
+ * value, which only a closed form gives), an `L` or a `c` that is not an
+ * exact number, a body with a float literal, or a body that is not rational
+ * with numeric coefficients. The sign scan stops at the Cauchy bound of the
+ * roots of the numerator and the denominator, past which neither changes
+ * sign; it is declined when more than 10 000 integers are below that bound.
+ */
+export function divergentInfiniteProduct(
+  body: Expression | undefined,
+  limits: Expression,
+  ce: ComputeEngine
+): Expression | undefined {
+  if (!body || !isFunction(limits, 'Limits')) return undefined;
+  const index = isSymbol(limits.op1) ? limits.op1.symbol : undefined;
+  const lower = limits.op2;
+  const upper = limits.op3;
+  if (!index || !lower || !upper) return undefined;
+  if (!(upper.isInfinity === true && upper.isPositive === true))
+    return undefined;
+  if (!isNumber(lower) || !lower.isInteger) return undefined;
+  const a = lower.re;
+  if (!Number.isSafeInteger(a)) return undefined;
+  if (hasInexactLiteral(body)) return undefined;
+  if (!body.symbols.includes(index)) return undefined;
+
+  // `reducedRationalBody` declines a pole (or a `0/0` factor) at an integer
+  // `k ≥ a`, so every factor of the product has a value.
+  const reduced = reducedRationalBody(body, index, a);
+  if (!reduced) return undefined;
+  const parts = rationalPartsAsWritten(reduced);
+  if (!parts) return undefined;
+  const p = getPolynomialCoefficients(parts[0], index);
+  const q = getPolynomialCoefficients(parts[1], index);
+  const pm = machineCoefficients(parts[0], index);
+  const qm = machineCoefficients(parts[1], index);
+  if (!p || !q || !pm || !qm) return undefined;
+  const trim = <T>(c: T[], isZero: (x: T) => boolean): T[] => {
+    let n = c.length;
+    while (n > 1 && isZero(c[n - 1])) n -= 1;
+    return c.slice(0, n);
+  };
+  // The coefficients are evaluated, as `machineCoefficients` does, so that
+  // a coefficient such as `1 − 1` is the literal `0`.
+  const pe = trim(
+    p.map((x) => x.evaluate()),
+    (x) => x.isSame(0)
+  );
+  const qe = trim(
+    q.map((x) => x.evaluate()),
+    (x) => x.isSame(0)
+  );
+  const pn = trim(pm, (x) => x === 0);
+  const qn = trim(qm, (x) => x === 0);
+  if (pe.length !== pn.length || qe.length !== qn.length) return undefined;
+  const dp = pe.length - 1;
+  const dq = qe.length - 1;
+
+  // The value of the polynomial with the exact coefficients `c` (constant
+  // term first) at the integer `k`, computed with exact arithmetic.
+  const exactValueAt = (c: Expression[], k: number): Expression =>
+    ce
+      .function(
+        'Add',
+        c.map((x, i) =>
+          ce.function('Multiply', [
+            x,
+            ce.function('Power', [ce.number(k), ce.number(i)]),
+          ])
+        )
+      )
+      .evaluate();
+
+  // A zero factor at an integer `k ≥ a`. `hasIntegerRootFrom` counts a
+  // machine value within rounding of zero as a root, so a `true` answer only
+  // says that candidates exist: each integer where the machine value is near
+  // zero is checked with the exact coefficients. A candidate whose exact
+  // value is not a number literal cannot be decided, and the product is
+  // declined.
+  const zero = hasIntegerRootFrom(pn, a);
+  if (zero === undefined) return undefined;
+  if (zero) {
+    const n = pn.length - 1;
+    const lead = Math.abs(pn[n]);
+    let bound = 0;
+    for (let i = 0; i < n; i++)
+      bound = Math.max(bound, Math.abs(pn[i]) / lead);
+    const top = Math.floor(1 + bound);
+    for (let k = Math.max(a, -top); k <= top; k++) {
+      let value = pn[n];
+      let scale = Math.abs(pn[n]);
+      for (let i = n - 1; i >= 0; i--) {
+        value = value * k + pn[i];
+        scale = scale * Math.abs(k) + Math.abs(pn[i]);
+      }
+      if (Math.abs(value) > 1e-12 * Math.max(1, scale)) continue;
+      const exact = exactValueAt(pe, k);
+      if (!isNumber(exact) || !exact.isExact) return undefined;
+      if (exact.isSame(0)) return ce.Zero;
+    }
+  }
+
+  // An exact number, or undefined: `ratio` and `c` below decide the branch
+  // with exact tests (`isSame(1)`, `isLess(1)`, the sign of `c`), which a
+  // float such as `1.0000000000000002` would answer wrongly.
+  const exactNumber = (x: Expression): Expression | undefined =>
+    isNumber(x) && x.isExact ? x : undefined;
+  // The limit of the factors, exactly: `ratio` is `L` when the degrees are
+  // equal.
+  const ratio = exactNumber(
+    ce.function('Divide', [pe[dp], qe[dq]]).evaluate()
+  );
+  const lowerOrder = (): Expression | undefined => {
+    // `r(k) − 1 = (p(k) − q(k))/q(k)`; with `p` and `q` of degree `d` and
+    // the same leading coefficient `ℓ`, it is `c/k + O(1/k²)` with
+    // `c = (p_{d−1} − q_{d−1})/ℓ`.
+    if (dp === 0) return undefined;
+    return exactNumber(
+      ce
+        .function('Divide', [
+          ce.function('Subtract', [pe[dp - 1], qe[dq - 1]]),
+          qe[dq],
+        ])
+        .evaluate()
+    );
+  };
+
+  let grows: boolean;
+  if (dp < dq) grows = false;
+  else if (dp > dq) {
+    if (ratio?.isPositive !== true) return undefined;
+    grows = true;
+  } else {
+    if (!ratio) return undefined;
+    // `|L| < 1`, whatever the sign of `L`: the magnitude of the partial
+    // products tends to 0.
+    if (ratio.isLess(1) === true && ratio.isGreater(-1) === true)
+      grows = false;
+    else if (ratio.isPositive !== true) return undefined;
+    else if (ratio.isGreater(1) === true) grows = true;
+    else if (ratio.isSame(1)) {
+      const c = lowerOrder();
+      if (c === undefined) return undefined;
+      if (c.isPositive === true) grows = true;
+      else if (c.isNegative === true) grows = false;
+      else return undefined;
+    } else return undefined;
+  }
+  if (!grows) return ce.Zero;
+
+  // The sign of the partial product: the factors past the Cauchy bound of
+  // the roots of both polynomials are positive (their limit is positive).
+  const cauchy = (c: readonly number[]): number => {
+    const n = c.length - 1;
+    let m = 0;
+    for (let i = 0; i < n; i++) m = Math.max(m, Math.abs(c[i] / c[n]));
+    return Math.floor(1 + m);
+  };
+  const top = Math.max(cauchy(pn), cauchy(qn));
+  if (!Number.isSafeInteger(top) || top - a > 10_000) return undefined;
+  const signAt = (
+    c: readonly number[],
+    exact: Expression[],
+    k: number
+  ): number | undefined => {
+    let value = c[c.length - 1];
+    let scale = Math.abs(value);
+    for (let i = c.length - 2; i >= 0; i--) {
+      value = value * k + c[i];
+      scale = scale * Math.abs(k) + Math.abs(c[i]);
+    }
+    // A machine value within rounding of zero has no reliable sign: the
+    // sign is read from the exact value.
+    if (Math.abs(value) <= 1e-12 * Math.max(1, scale)) {
+      const v = exactValueAt(exact, k);
+      if (v.isPositive === true) return 1;
+      if (v.isNegative === true) return -1;
+      return undefined;
+    }
+    return Math.sign(value);
+  };
+  let sign = 1;
+  for (let k = a; k <= top; k++) {
+    const sp = signAt(pn, pe, k);
+    const sq = signAt(qn, qe, k);
+    if (sp === undefined || sq === undefined) return undefined;
+    sign *= sp * sq;
+  }
+  return sign > 0 ? ce.PositiveInfinity : ce.NegativeInfinity;
 }
 
 /**

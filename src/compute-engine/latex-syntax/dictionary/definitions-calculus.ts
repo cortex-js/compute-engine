@@ -156,6 +156,16 @@ function parseIntegral(command: string, nIntegrals = 1) {
 
     if (fn !== null && indexes.length > 0) fn = rebind(fn);
 
+    // A body that is only the differential (`\int dx`, `\int (dx)`) is the
+    // integral of 1 (CE-291).
+    if (fn === null && indexes.length > 0) fn = 1;
+
+    // With no differential found, a differential at the end of a denominator
+    // anywhere in the body (`\int 2\frac{3x}{5dx}`, `\int \sin\frac{x}{5dx}`)
+    // is malformed: that denominator is replaced by an error (CE-305.5).
+    if (fn !== null && indexes.length === 0)
+      fn = markDenominatorDifferentials(fn, binderName);
+
     //
     // 3/ Put together the limits, the function and the indexes
     //
@@ -357,6 +367,17 @@ function parseSubintegrand(
     const [fn2, indexes] = parseSubintegrand(op1, binderName);
     if (indexes.length > 0)
       return [['Divide', fn2 ?? 1, operand(expr, 2)!], indexes];
+    // A differential at the end of the denominator (`\frac{3x}{5dx}`) is
+    // malformed: the denominator is replaced by an error (CE-305.5).
+    const denominator = operand(expr, 2);
+    if (
+      denominator !== null &&
+      parseSubintegrand(denominator, binderName)[1].length > 0
+    )
+      return [
+        ['Divide', op1, ['Error', "'unexpected-differential'"]],
+        [],
+      ];
   } else {
     // Some other function, e.g. trig function, etc...
     const args = operands(expr);
@@ -370,6 +391,38 @@ function parseSubintegrand(
   }
 
   return [expr, []];
+}
+
+/**
+ * Replace by an `unexpected-differential` error the denominator of each
+ * `Divide` in `expr` that ends with a differential (`\frac{3x}{5dx}`), at any
+ * depth. `parseSubintegrand` detects such a denominator only when the
+ * fraction is the whole body; a fraction inside a product, a sum, a negation,
+ * parentheses or a function argument is found here. Return `expr` itself
+ * when no denominator ends with a differential.
+ */
+function markDenominatorDifferentials(
+  expr: MathJsonExpression,
+  binderName: (expr: MathJsonExpression | null | undefined) => string | null
+): MathJsonExpression {
+  const h = operator(expr);
+  if (!h) return expr;
+  const args = operands(expr);
+  if (h === 'Divide' && args.length === 2) {
+    if (parseSubintegrand(args[1], binderName)[1].length > 0)
+      return [
+        'Divide',
+        markDenominatorDifferentials(args[0], binderName),
+        ['Error', "'unexpected-differential'"],
+      ];
+  }
+  let changed = false;
+  const newArgs = args.map((arg) => {
+    const result = markDenominatorDifferentials(arg, binderName);
+    if (result !== arg) changed = true;
+    return result;
+  });
+  return changed ? ([h, ...newArgs] as MathJsonExpression) : expr;
 }
 
 /**

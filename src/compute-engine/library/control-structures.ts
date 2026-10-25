@@ -98,6 +98,7 @@ import {
   errorValue,
   surplusOperandError,
 } from '../boxed-expression/error-value.js';
+import { resolvesToSystemBinding } from '../boxed-expression/operand-descriptor.js';
 import {
   isErrorTypedOperand,
   isErrorTypedWithoutErrorValue,
@@ -329,6 +330,52 @@ function untypedSymbolArm(branch: OperandDescriptor): boolean {
   return branch.type === 'unknown' && branch.structureOf?.()?.kind === 'symbol';
 }
 
+/**
+ * True when the branch of a conditional is typed `unknown` because of the
+ * types of its operands, not because it reaches a function whose result is
+ * still being derived: an untyped symbol (`untypedSymbolArm`), or an
+ * application of a library operator whose `unknown` operands are such
+ * branches too, or that has none (`At(s, 1)` with `s` a parameter typed
+ * `indexed_collection<any>`). Such a branch makes the result of the
+ * conditional `unknown`. With `f := (n, s) ↦ If(n = 0, s[1], [1, 2])`,
+ * `f(0, [7])` is `7`, and the conditional was typed `vector<integer^2>`, by
+ * its other branch alone (CE-447).
+ *
+ * The exclusions of `untypedSymbolArm` stay: an application of a function
+ * that is not a library operator (a recursive call, typed `unknown` while
+ * the signature it reads is derived), and a `Return`, `Break` or `Continue`,
+ * which gives no value in place. A `Block` and a nested conditional are
+ * excluded too, since their last statement or branch can be such a call.
+ * The walk stops at a depth of 8.
+ */
+function untypedArm(
+  branch: OperandDescriptor,
+  engine: TypeHandlerContext['engine'],
+  depth = 0
+): boolean {
+  if (branch.type !== 'unknown') return false;
+  const s = branch.structureOf?.();
+  if (s?.kind === 'symbol') return true;
+  if (s?.kind !== 'application' || s.callee !== undefined || depth >= 8)
+    return false;
+  if (NOT_A_VALUE_IN_PLACE.has(s.head)) return false;
+  if (!resolvesToSystemBinding(engine, s.head)) return false;
+  return s.children.every(
+    (c) => c.type !== 'unknown' || untypedArm(c, engine, depth + 1)
+  );
+}
+
+/** The heads whose `unknown` type `untypedArm` does not read as the type
+ * of a value given in place. */
+const NOT_A_VALUE_IN_PLACE = new Set([
+  'Return',
+  'Break',
+  'Continue',
+  'Block',
+  'If',
+  'Which',
+]);
+
 export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
   {
     // A condition expression tests for one or more conditions of an expression.
@@ -430,7 +477,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
                 kind: 'union',
                 types: [ifTrue.type, 'missing'],
               })
-            : untypedSymbolArm(ifTrue) || untypedSymbolArm(ifFalse)
+            : untypedArm(ifTrue, context.engine) ||
+                untypedArm(ifFalse, context.engine)
               ? 'unknown'
               : widen(ifTrue.type, ifFalse.type);
         // A condition that is a scalar or a mask (`boolean | list<boolean>`,
@@ -1153,7 +1201,9 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           // scalar typing (`untypedSymbolArm`).
           const whole = arms
             .slice(0, shape.firstMask)
-            .map((x): Type => (untypedSymbolArm(x) ? 'unknown' : x.type));
+            .map((x): Type =>
+              untypedArm(x, context.engine) ? 'unknown' : x.type
+            );
           // A clause before the first mask whose condition is an undecided
           // whole-collection comparison makes the `Which` `Missing`
           // (`evaluateWhich`).
@@ -1196,7 +1246,7 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
           return BoxedType.forResult('missing', context.engine._typeResolver);
         // An untyped symbol among the values makes the result unknown, as
         // for `If` (`untypedSymbolArm`).
-        const armType = arms.some(untypedSymbolArm)
+        const armType = arms.some((x) => untypedArm(x, context.engine))
           ? 'unknown'
           : widen(...arms.map((x) => x.type));
         const scalar: Type =

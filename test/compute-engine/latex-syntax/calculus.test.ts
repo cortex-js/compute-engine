@@ -316,7 +316,8 @@ describe('INDEFINITE INTEGRAL', () => {
     expect(parse('\\int f(t) \\cdot dt')).toMatchSnapshot());
 
   test('INVALID index in denominator', () =>
-    expect(parse('\\int\\frac{3x}{5dx} = 2')).toMatchSnapshot()); // @fixme, should error
+    // A differential in the denominator is an error (CE-305.5)
+    expect(parse('\\int\\frac{3x}{5dx} = 2')).toMatchSnapshot());
 });
 
 /** Integral with limits */
@@ -411,7 +412,7 @@ describe('LIMIT', () => {
     `["Limit", ["Function", ["Divide", ["Sin", "x"], "x"], "x"], 0]`
   );
   expect(parse('\\lim_{x\\to\\infty} f(x)')).toMatchSnapshot(`
-  lim_(+oo) {f(x)}
+  lim_(x -> +oo) {f(x)}
   \\lim_{x\\to\\infty}f(x)
   Limit,Function,f,x,x,PositiveInfinity
 `);

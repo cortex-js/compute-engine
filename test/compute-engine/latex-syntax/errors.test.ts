@@ -398,11 +398,15 @@ check('VALID infix command', () =>
   expect(engine.parse('1\\over 2')).toMatchInlineSnapshot(`["Rational", 1, 2]`)
 );
 
-// @fixme
+// `\over` is not associative: TeX accepts one `\over` in a group (CE-305.2)
 check('Too many infix commands', () =>
-  expect(engine.parse('1\\over 2 \\over 3')).toMatchInlineSnapshot(
-    `["Rational", 3, 2]`
-  )
+  expect(engine.parse('1\\over 2 \\over 3')).toMatchInlineSnapshot(`
+    [
+      "Divide",
+      1,
+      ["Error", "non-associative-operator", ["LatexString", "2 \\over3"]]
+    ]
+  `)
 );
 
 check('Command in string', () =>

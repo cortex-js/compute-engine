@@ -173,8 +173,11 @@ describe('Python', () => {
     const constant = py.compile(ce.box(['Power', 'x', 0.4])).code;
     expect(constant).not.toContain('_ce_pow');
     expect(constant).toContain('np.power(np.abs(');
-    // An even denominator keeps the power of Python.
-    expect(py.compile(ce.box(['Power', 'x', 0.25])).code).toBe('x ** 0.25');
+    // An even denominator has no real root at a negative base: the power is
+    // promoted to the complex lane, as the analysis reads it (CE-230.6).
+    expect(py.compile(ce.box(['Power', 'x', 0.25])).code).toBe(
+      'np.emath.power(x, 0.25)'
+    );
   });
 });
 

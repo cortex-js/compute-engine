@@ -147,6 +147,7 @@ import {
   isRelationalOperator,
 } from '../latex-syntax/utils.js';
 import {
+  hasOneSidedLimits,
   normalizeIndexingSet,
   withDefaultBigOpBounds,
 } from '../library/utils.js';
@@ -12254,6 +12255,24 @@ export class BaseCompiler {
     }
 
     if (h === 'Sum' || h === 'Product') {
+      // A clause with only one bound (`\sum_{k=1} k`, `Limits(k, 1,
+      // Nothing)`) has no value: the interpreter keeps the operator
+      // unevaluated and chooses no default for the missing bound
+      // (`hasOneSidedLimits()`). Every target declines it here with that
+      // reason. Before, the targets read the `Nothing` marker of the missing
+      // bound as a variable and declined with a message about `Nothing`
+      // (CE-142.5). A caller that maps a run-time input named `Nothing`
+      // through the `vars` option keeps that input as the bound.
+      if (
+        args.length > 1 &&
+        !target.varsKeys?.has('Nothing') &&
+        hasOneSidedLimits(args.slice(1))
+      )
+        throw new Error(
+          `Could not compile \`${h}\`: a ${h === 'Sum' ? 'sum' : 'product'} ` +
+            `with only one bound has no value, and the interpreter keeps it ` +
+            `unevaluated.`
+        );
       // A clause with no bounds (`\sum_k f`) runs over 1..+∞, as in the
       // interpreter, so the targets read the bounds 1 and +∞ (and decline the
       // infinite bound by name) instead of the `Nothing` marker.
@@ -12804,12 +12823,21 @@ export class BaseCompiler {
     // A Python power that may need the real root of a negative base (an
     // exact rational or a float exponent, see `negativeBaseFloatPower`)
     // goes to the `Power` function lowering instead of the `**` operator.
+    // So does a power that the analysis reads as promoted to the complex
+    // lane (an unknown-sign real base with a float exponent, `t^0.3`, in the
+    // `auto` mode, see `promotesRadicalToComplex`): the function lowering
+    // emits `np.emath.power` for it, which gives the complex value for a
+    // negative base, as the analysis reports to the parent. Before, the
+    // `**` operator was emitted for this form in every mode, so the emission
+    // did not match the analysis (CE-230.6).
     const realPythonPower =
       target.language === 'python' &&
       h === 'Power' &&
       op?.[0] === '**' &&
       (BaseCompiler.realPowerExponent(args) !== undefined ||
-        BaseCompiler.negativeBaseFloatPower(args) !== undefined);
+        BaseCompiler.negativeBaseFloatPower(args) !== undefined ||
+        (!args.some((a) => BaseCompiler.isComplexValued(a)) &&
+          BaseCompiler.promotesRadicalToComplex('Power', args)));
     sub = BaseCompiler.compileExprOperator(
       h,
       args,
@@ -28541,7 +28569,7 @@ export class BaseCompiler {
     // the undecided one. The operand test below would see no numeric operand
     // to test and call the relation decided, so the plain comparison took an
     // arm (the else arm for `Less(Missing, t)`). A caller that passes no
-    // target (the Python target's selection handlers) has an object null too.
+    // target is read as a target with an object null.
     if (
       (target === undefined || target.absence?.object !== undefined) &&
       (cond.ops.some(BaseCompiler.isAbsenceSymbol) ||
