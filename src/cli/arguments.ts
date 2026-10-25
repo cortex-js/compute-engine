@@ -1,5 +1,7 @@
 import { parseArgs } from 'node:util';
 
+import { defaultPoolSize } from '../compute-engine/kernel-pool.js';
+
 import type {
   CheckOptions,
   CliOptions,
@@ -316,11 +318,15 @@ function parseInputFormat(value: unknown): InputFormat {
 const MAX_WORKERS = 256;
 
 /** The value of `--workers`: an integer from `0` to `MAX_WORKERS`, `0` (the
- * default) for no kernel pool. */
+ * default) for no kernel pool. `auto` is the default size of a kernel pool
+ * (`defaultPoolSize()`: the number of cores minus one, from 1 to 8). */
 function parseWorkers(value: unknown): number {
   if (value === undefined) return 0;
+  if (value === 'auto') return defaultPoolSize();
   if (typeof value !== 'string' || !/^\d+$/.test(value))
-    throw new CliUsageError('--workers must be a non-negative integer.');
+    throw new CliUsageError(
+      '--workers must be a non-negative integer or "auto".'
+    );
   const result = Number(value);
   if (!Number.isSafeInteger(result) || result > MAX_WORKERS)
     throw new CliUsageError(`--workers must be at most ${MAX_WORKERS}.`);

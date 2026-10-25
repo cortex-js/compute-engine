@@ -265,7 +265,9 @@ function isLiteralBound(x: Expression | undefined): boolean {
 }
 
 /**
- * Cap on the trip count of a literal-bounded loop the auto path will compile.
+ * Cap on the total trip count of the literal-bounded loops the auto path will
+ * compile: the product of the trip counts of nested loops, including the loops
+ * of the user functions that a loop body calls.
  * Compiled loops are emitted UNGUARDED (no per-iteration deadline check), so
  * a single compiled element containing a huge literal `Sum`/`Product`/`Loop`
  * would stall past any `withTimeLimit` deadline — the interpreter path is
@@ -275,58 +277,6 @@ function isLiteralBound(x: Expression | undefined): boolean {
  * (the design repro is a 40-term `Sum`) and far below a perceptible stall.
  */
 const MAX_COMPILED_TRIP_COUNT = 100_000;
-
-/** The operators of a loop: a body that applies one is not compiled when the
- * element function is a named user function (`loopOrCollectionFree()`). */
-const LOOP_OPERATORS = new Set(['Sum', 'Product', 'Loop']);
-
-/**
- * True if the body of the `Function` literal `literal`, and the bodies of
- * the user functions it calls, apply no loop (`Sum`, `Product`, `Loop`) and
- * compute no collection (a node or an operand whose type is a collection:
- * `IntegerDigits(n)`, a `Map`, a list literal).
- *
- * The rule "a body with a loop or an inner collection stays interpreted"
- * comes from a user decision of 2026-10-24 (ROADMAP CE-314): the compiled
- * values of such a body can differ from the interpreter's `N` in the last
- * digits (an exact loop sum `1.066407470350872` against the compiled
- * `1.0664074703508735`). Here, the marked tier applies this rule to a `Map`
- * of a NAMED user function only. A lambda on the marked tier is not checked
- * by this rule: it keeps the eligibility of `bodyEligible()`. Whether the
- * rule must also apply to a lambda is an open question, recorded in
- * ROADMAP.md, entry CE-325 (item CE-325.3).
- */
-function loopOrCollectionFree(
-  ce: ComputeEngine,
-  literal: Expression,
-  seenFns: Set<string>
-): boolean {
-  const visit = (e: Expression): boolean => {
-    if (isSymbol(e)) {
-      if (e.type.matches('collection')) return false;
-      const s = e.symbol;
-      if (seenFns.has(s)) return true;
-      const called = userFnLiteral(ce, s);
-      if (called === undefined) return true;
-      seenFns.add(s);
-      return loopOrCollectionFree(ce, called, seenFns);
-    }
-    if (!isFunction(e)) return true;
-    const op = e.operator;
-    if (LOOP_OPERATORS.has(op)) return false;
-    if (op !== 'Function' && e.type.matches('collection')) return false;
-    if (!seenFns.has(op)) {
-      const called = userFnLiteral(ce, op);
-      if (called !== undefined) {
-        seenFns.add(op);
-        if (!loopOrCollectionFree(ce, called, seenFns)) return false;
-      }
-    }
-    return e.ops.every(visit);
-  };
-  if (!isFunction(literal, 'Function')) return false;
-  return visit(literal.op1);
-}
 
 /**
  * The purity/boundedness eligibility gate (D2), applied transitively through
@@ -342,17 +292,18 @@ function bodyEligible(
   ce: ComputeEngine,
   e: Expression,
   bound: ReadonlySet<string>,
-  seenFns: Set<string>
+  seenFns: SeenFunctions,
+  /** The product of the trip counts of the loops that enclose `e`. */
+  outer = 1
 ): boolean {
   if (isSymbol(e)) {
     // A bare symbol naming a user function (a higher-order operand) — its
     // body is compiled too: descend.
     const s = e.symbol;
-    if (bound.has(s) || seenFns.has(s)) return true;
+    if (bound.has(s) || !visitFunction(seenFns, s, outer)) return true;
     const literal = userFnLiteral(ce, s);
     if (literal === undefined) return true;
-    seenFns.add(s);
-    return fnLiteralEligible(ce, literal, seenFns);
+    return fnLiteralEligible(ce, literal, seenFns, outer);
   }
   if (!isFunction(e)) return true;
 
@@ -361,21 +312,26 @@ function bodyEligible(
   if (op === 'Assign') {
     const target = e.op1;
     if (!isSymbol(target) || !bound.has(target.symbol)) return false;
-    return bodyEligible(ce, e.op2, bound, seenFns);
+    return bodyEligible(ce, e.op2, bound, seenFns, outer);
   }
 
   if (op === 'Sum' || op === 'Product') {
+    // Each `Limits` of one `Sum`/`Product` is a nested loop: their trip
+    // counts multiply, and they multiply the trip counts of the loops that
+    // enclose this one.
     const inner = new Set(bound);
+    let total = outer;
     for (const l of e.ops.slice(1)) {
       if (!isFunction(l, 'Limits')) return false;
       if (!isLiteralBound(l.op2) || !isLiteralBound(l.op3)) return false;
-      if (l.op3.re - l.op2.re + 1 > MAX_COMPILED_TRIP_COUNT) return false;
+      total *= Math.max(1, l.op3.re - l.op2.re + 1);
+      if (total > MAX_COMPILED_TRIP_COUNT) return false;
       if (isSymbol(l.op1)) inner.add(l.op1.symbol);
     }
     // A bounds-less Sum/Product (single operand) reduces a collection —
     // runtime-valued trip count: ineligible.
     if (e.nops < 2) return false;
-    return bodyEligible(ce, e.op1, inner, seenFns);
+    return bodyEligible(ce, e.op1, inner, seenFns, total);
   }
 
   if (op === 'Loop') {
@@ -384,6 +340,7 @@ function bodyEligible(
     // big-ops above.
     if (e.nops < 2) return false; // bare Loop: unbounded
     const src = e.op2;
+    let total = outer;
     if (isFunction(src, 'Range')) {
       if (!src.ops.every((b) => isLiteralBound(b))) return false;
       const [lo, hi, step] =
@@ -397,10 +354,12 @@ function bodyEligible(
               src.nops > 2 ? src.op3.re : src.op2.re >= src.op1.re ? 1 : -1,
             ];
       if (step === 0) return false;
-      if (rangeCount(lo, hi, step) > MAX_COMPILED_TRIP_COUNT) return false;
-    } else if (!isFunction(src, 'List') && !isFunction(src, 'Tuple'))
-      return false;
-    return bodyEligible(ce, e.op1, bound, seenFns);
+      total *= Math.max(1, rangeCount(lo, hi, step));
+    } else if (isFunction(src, 'List') || isFunction(src, 'Tuple'))
+      total *= Math.max(1, src.nops);
+    else return false;
+    if (total > MAX_COMPILED_TRIP_COUNT) return false;
+    return bodyEligible(ce, e.op1, bound, seenFns, total);
   }
 
   if (op === 'Block' || op === 'Declare' || op === 'Function') {
@@ -408,14 +367,16 @@ function bodyEligible(
     const inner = new Set(bound);
     if (op === 'Declare') {
       if (isSymbol(e.op1)) inner.add(e.op1.symbol);
-      return e.ops.slice(1).every((x) => bodyEligible(ce, x, inner, seenFns));
+      return e.ops
+        .slice(1)
+        .every((x) => bodyEligible(ce, x, inner, seenFns, outer));
     }
     if (op === 'Function') {
       for (const p of e.ops.slice(1)) {
         const name = functionLiteralParameterName(p);
         if (name) inner.add(name);
       }
-      return bodyEligible(ce, e.op1, inner, seenFns);
+      return bodyEligible(ce, e.op1, inner, seenFns, outer);
     }
     // Block: statements evaluated in sequence; a Declare statement
     // introduces a local visible to subsequent statements. An `Assign` is
@@ -429,14 +390,16 @@ function bodyEligible(
     for (const stmt of e.ops) {
       if (isFunction(stmt, 'Declare') && isSymbol(stmt.op1)) {
         if (
-          !stmt.ops.slice(1).every((x) => bodyEligible(ce, x, inner, seenFns))
+          !stmt.ops
+            .slice(1)
+            .every((x) => bodyEligible(ce, x, inner, seenFns, outer))
         )
           return false;
         inner.add(stmt.op1.symbol);
       } else if (isFunction(stmt, 'Assign') && isSymbol(stmt.op1)) {
         if (!inner.has(stmt.op1.symbol)) return false;
-        if (!bodyEligible(ce, stmt.op2, inner, seenFns)) return false;
-      } else if (!bodyEligible(ce, stmt, inner, seenFns)) return false;
+        if (!bodyEligible(ce, stmt.op2, inner, seenFns, outer)) return false;
+      } else if (!bodyEligible(ce, stmt, inner, seenFns, outer)) return false;
     }
     return true;
   }
@@ -448,21 +411,46 @@ function bodyEligible(
   // top of this file.
 
   // A user-function call in head position: descend into its body.
-  if (!bound.has(op) && !seenFns.has(op)) {
+  if (!bound.has(op) && visitFunction(seenFns, op, outer)) {
     const literal = userFnLiteral(ce, op);
     if (literal !== undefined) {
-      seenFns.add(op);
-      if (!fnLiteralEligible(ce, literal, seenFns)) return false;
+      if (!fnLiteralEligible(ce, literal, seenFns, outer)) return false;
     }
   }
 
-  return e.ops.every((x) => bodyEligible(ce, x, bound, seenFns));
+  return e.ops.every((x) => bodyEligible(ce, x, bound, seenFns, outer));
+}
+
+/**
+ * The user functions that the eligibility check has visited, each with the
+ * largest product of enclosing trip counts at which it was checked. A
+ * function is checked again only when a call has a larger product: a
+ * function that is called first outside a loop and then inside a loop must
+ * have its loops counted at the second call too. A recursive call at the same
+ * product is not checked again, so the check ends. A recursive call inside a
+ * loop has a larger product at each level, so the product goes above
+ * `MAX_COMPILED_TRIP_COUNT` and the check refuses the body.
+ */
+type SeenFunctions = Map<string, number>;
+
+/** Record a check of the user function `name` at the product `outer` of the
+ * enclosing trip counts. True if the function must be checked. */
+function visitFunction(
+  seenFns: SeenFunctions,
+  name: string,
+  outer: number
+): boolean {
+  const previous = seenFns.get(name);
+  if (previous !== undefined && previous >= outer) return false;
+  seenFns.set(name, outer);
+  return true;
 }
 
 function fnLiteralEligible(
   ce: ComputeEngine,
   literal: Expression,
-  seenFns: Set<string>
+  seenFns: SeenFunctions,
+  outer = 1
 ): boolean {
   if (!isFunction(literal)) return false;
   const params = new Set<string>();
@@ -470,7 +458,7 @@ function fnLiteralEligible(
     const name = functionLiteralParameterName(p);
     if (name) params.add(name);
   }
-  return bodyEligible(ce, literal.ops[0], params, seenFns);
+  return bodyEligible(ce, literal.ops[0], params, seenFns, outer);
 }
 
 /** Snapshot the ambient-scope resolution of a symbol. */
@@ -651,9 +639,17 @@ function attemptCompile(
   let literal: Expression;
   if (tier === 'marked') {
     // Purity/boundedness gate (transitive through called user functions).
-    if (!fnLiteralEligible(ce, fn, new Set())) return noCompile('structural');
-    if (named !== undefined && !loopOrCollectionFree(ce, fn, new Set([named])))
-      return noCompile('structural');
+    //
+    // A body in `N(…)` (or the `NumericApproximation` marker of `.N()`)
+    // permits the compiled code to compute at machine precision. Thus a body
+    // that applies a loop (`Sum`, `Product`, `Loop`) or computes an inner
+    // collection compiles when this gate accepts it, also when its values
+    // differ from the interpreter's values in the last digits. The rule is the
+    // same for a named user function (`g(x) = N(h(x) + 1)`, then `Map(g, xs)`)
+    // and for a lambda (`Map(x => N(h(x) + 1), xs)`). The exact tier, which
+    // gives exact integer results, does not use this rule. (User decision
+    // 2026-10-25, ROADMAP.md entry CE-325, item CE-325.3.)
+    if (!fnLiteralEligible(ce, fn, new Map())) return noCompile('structural');
 
     // Rebuild the stripped literal from MathJSON (the same idiom as
     // `lazyMapNumericApproximation`: never re-host a canonical body under a

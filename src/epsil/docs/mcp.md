@@ -266,7 +266,8 @@ sequenceDiagram
 - **Numeric work can run on worker threads.** Start the server with
   `epsil mcp --workers <n>` to give the engines of the `evaluate` calls a
   pool of `<n>` worker threads; a `findFit` with a global search then scans
-  on them. The values are the same with or without the pool.
+  on them. `--workers auto` uses the number of processor cores minus one,
+  from 1 to 8. The values are the same with or without the pool.
 - **The computation runs locally by default.** The server is part of the npm
   package, and programs evaluate in the Node.js process that runs
   `epsil mcp`. A ChatGPT connection still uses the configured Secure MCP

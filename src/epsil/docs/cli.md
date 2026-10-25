@@ -84,7 +84,7 @@ pi * radius^2
 | `--diagnostics <fmt>` | Write diagnostics as `text` (the default) or as a `json` array. |
 | `--time-limit <ms>` | Set the evaluation deadline in milliseconds. The default is `10000`; `0` disables it. |
 | `--compile` | Compile the program to JavaScript and run the generated code instead of interpreting it. See [Running a Compiled Program](#running-a-compiled-program). |
-| `--workers <n>` | Give the engine a pool of `<n>` worker threads and run each program asynchronously. See [Worker Threads](#worker-threads). The default is `0`, no pool. The largest value is `256`. |
+| `--workers <n>` | Give the engine a pool of `<n>` worker threads and run each program asynchronously. See [Worker Threads](#worker-threads). The default is `0`, no pool. The largest value is `256`. `--workers auto` uses the number of processor cores minus one, from 1 to 8. |
 | `--no-color` | Disable color in diagnostics. The [`NO_COLOR`](https://no-color.org/) environment variable is also honored. |
 | `-h`, `--help` | Display command help. |
 | `-v`, `--version` | Display the package version. |
@@ -423,9 +423,28 @@ or without the pool; there is nothing to declare in the program.
 npx epsil --workers 4 fit.epsil
 ```
 
+`--workers auto` selects the size of the pool from the computer: the number of
+processor cores minus one (one core stays for the main thread), at least 1 and
+at most 8.
+
 The workers start when the first such operation needs them, so a program with
 none starts no worker. The deadline of `--time-limit` applies to the whole
 program. The option also applies to the REPL and to `epsil mcp`, where the
 engine of each `evaluate` call uses the same pool. `--workers` cannot be used
 with `--compile` or `--from latex`, since neither runs the program
 asynchronously. The default, `0`, runs each program on the main thread.
+
+In the REPL with `--workers`, Ctrl-C stops the entry that runs (or the file of
+a `.load` that runs). The REPL writes
+`error: the entry was interrupted (Ctrl-C)` and shows the prompt again. The
+session keeps its declarations, including those of the statements of the
+stopped entry that ran before Ctrl-C. Entries that already wait their turn,
+for example the next lines of a paste, run after it, one after the other:
+press Ctrl-C again to stop each of them. If an entry does not stop after
+Ctrl-C (for example, during long work that does not check for the
+interruption), a second Ctrl-C on the same entry ends the process at once
+(the shell reports the exit code 130). While an entry or a `.load`
+runs, the REPL reads no input: the lines typed in that time, `.exit` included,
+are read after it. When no entry runs, Ctrl-C does what
+it does in the Node REPL: it clears the current line, and a second Ctrl-C on
+an empty line exits. Without `--workers`, Ctrl-C does not stop an entry.

@@ -1,3 +1,4 @@
+import type { EventEmitter } from 'node:events';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve } from 'node:path';
@@ -34,11 +35,25 @@ export interface ReplOptions {
   historyPath?: string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
+  /** The source of the `'SIGINT'` event that stops the entry that runs, when
+   * the session has a kernel pool (default: `process`). */
+  interrupts?: Pick<EventEmitter, 'on' | 'off'>;
 }
 
 class ReplEvaluation {
   constructor(readonly result: EvaluationResult) {}
 }
+
+/** The result of an entry or a `.load` that Ctrl-C stopped. */
+const INTERRUPTED = Symbol('interrupted');
+
+const INTERRUPTED_MESSAGE = 'error: the entry was interrupted (Ctrl-C)';
+
+/** Run an asynchronous evaluation with an abort signal that Ctrl-C
+ * triggers. The result is `INTERRUPTED` when the signal stopped it. */
+type Interruptible = <T>(
+  run: (signal: AbortSignal) => Promise<T>
+) => Promise<T | typeof INTERRUPTED>;
 
 export function runRepl(
   session: EpsilSession,
@@ -59,15 +74,71 @@ export function runRepl(
     return result;
   };
 
+  const terminal = Boolean(
+    (input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY
+  );
+
+  // With a kernel pool, Ctrl-C stops the entry (or the `.load`) that runs:
+  // the evaluation rejects, the REPL writes a message and shows the prompt.
+  // The declarations of the session stay. The entries that wait in the queue
+  // run after it, each in its turn. Without an entry that runs, Ctrl-C does
+  // what it does in the Node REPL.
+  //
+  // In a terminal, the REPL reads the input in raw mode, where Ctrl-C is a
+  // character of the input and not a signal. While an entry runs, the input
+  // is paused, so that character would not be read. Thus raw mode is off
+  // while the entry runs: the terminal then sends SIGINT to the process for
+  // Ctrl-C. The Node REPL does the same while it evaluates JavaScript with
+  // `breakEvalOnSigint`. The listener is added before raw mode goes off, so
+  // that a SIGINT never finds the process with no listener (which would end
+  // the process).
+  //
+  // An entry can fail to stop after the abort, for example during long
+  // synchronous work, which also keeps a listener from running. So the first
+  // Ctrl-C aborts the entry and removes the listener: a second Ctrl-C while
+  // the same entry runs gets the default action of the operating system,
+  // which ends the process at once (a shell reports the exit code 130).
+  //
+  // When the REPL closes (`.exit`, or the end of the input), the entry that
+  // runs is aborted, the entries that wait in the queue do not run, and raw
+  // mode is not turned on again, because the REPL no longer reads the input.
+  const interrupts = options.interrupts ?? process;
+  let closed = false;
+  let active: AbortController | undefined;
+  const interruptible: Interruptible = async (run) => {
+    if (closed) return INTERRUPTED;
+    const controller = new AbortController();
+    active = controller;
+    const onInterrupt = () => {
+      interrupts.off('SIGINT', onInterrupt);
+      controller.abort(new Error('Interrupted'));
+    };
+    interrupts.on('SIGINT', onInterrupt);
+    const tty = input as NodeJS.ReadStream;
+    let rawModeChanged = false;
+    try {
+      if (terminal && tty.isRaw === true) {
+        tty.setRawMode(false);
+        rawModeChanged = true;
+      }
+      return await run(controller.signal);
+    } catch (error) {
+      if (controller.signal.aborted) return INTERRUPTED;
+      throw error;
+    } finally {
+      if (active === controller) active = undefined;
+      if (rawModeChanged && !closed) tty.setRawMode(true);
+      interrupts.off('SIGINT', onInterrupt);
+    }
+  };
+
   output.write(`Epsil ${version}\nType .help for more information.\n\n`);
 
   const server = startNodeRepl({
     prompt: 'epsil> ',
     input,
     output,
-    terminal: Boolean(
-      (input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY
-    ),
+    terminal,
     ignoreUndefined: true,
     eval(source, _context, filename, callback) {
       if (options.inputFormat === 'latex') {
@@ -92,18 +163,26 @@ export function runRepl(
         evaluateInOrder(async () =>
           isRecoverable(source, session.parse(source, filename))
             ? undefined
-            : session.evaluateAsync(source, filename)
+            : interruptible((signal) =>
+                session.evaluateAsync(source, filename, signal)
+              )
         ).then(
           (result) => {
+            // A closed REPL writes nothing more.
+            if (closed) return;
             server.resume();
             if (result === undefined)
               callback(
                 new Recoverable(new SyntaxError('Incomplete Epsil input')),
                 undefined
               );
-            else callback(null, new ReplEvaluation(result));
+            else if (result === INTERRUPTED) {
+              output.write(`${INTERRUPTED_MESSAGE}\n`);
+              callback(null, undefined);
+            } else callback(null, new ReplEvaluation(result));
           },
           (error: unknown) => {
+            if (closed) return;
             server.resume();
             callback(
               error instanceof Error ? error : new Error(String(error)),
@@ -188,14 +267,31 @@ export function runRepl(
           outputMode,
           options.fancySymbols === true,
           options.color,
-          showTime
+          showTime,
+          interruptible,
+          () => closed
         );
-      if (session.workers === undefined) void load();
-      else void evaluateInOrder(load);
+      if (session.workers === undefined) {
+        void load();
+        return;
+      }
+      // With a kernel pool, the input is paused while the file runs, as it
+      // is while an entry runs. Thus the terminal does not echo the input a
+      // second time in cooked mode, and a `.exit` typed during the load
+      // closes the REPL only after the file has run.
+      this.pause();
+      void evaluateInOrder(load).finally(() => {
+        if (!closed) this.resume();
+      });
     },
   });
 
   setupHistory(server, options.historyPath);
+
+  server.once('exit', () => {
+    closed = true;
+    active?.abort(new Error('The REPL was closed'));
+  });
 
   return new Promise((resolveExit) => {
     server.once('exit', () => resolveExit(0));
@@ -203,8 +299,10 @@ export function runRepl(
 }
 
 /** Run an Epsil file in the REPL session and write its result. With a kernel
- * pool, the file runs asynchronously (`evaluateAsync`); without one, it runs
- * synchronously, and the result is written before the function returns. */
+ * pool, the file runs asynchronously (`evaluateAsync`), and Ctrl-C stops it
+ * (`interruptible`); without one, it runs synchronously, and the result is
+ * written before the function returns. When `isClosed()` is true after the
+ * file has run, the REPL was closed during the load: nothing is written. */
 async function loadFile(
   server: REPLServer,
   session: EpsilSession,
@@ -212,7 +310,9 @@ async function loadFile(
   outputMode: OutputMode,
   fancySymbols: boolean,
   color: boolean,
-  showTime: boolean
+  showTime: boolean,
+  interruptible: Interruptible,
+  isClosed: () => boolean
 ): Promise<void> {
   const path = resolve(filename.trim());
   try {
@@ -220,11 +320,17 @@ async function loadFile(
     const result =
       session.workers === undefined
         ? session.evaluate(source, path)
-        : await session.evaluateAsync(source, path);
+        : await interruptible((signal) =>
+            session.evaluateAsync(source, path, signal)
+          );
+    if (isClosed()) return;
     server.output.write(
-      `${formatReplResult(result, outputMode, fancySymbols, color, showTime)}\n`
+      result === INTERRUPTED
+        ? `${INTERRUPTED_MESSAGE}\n`
+        : `${formatReplResult(result, outputMode, fancySymbols, color, showTime)}\n`
     );
   } catch (error) {
+    if (isClosed()) return;
     server.output.write(
       `error: ${error instanceof Error ? error.message : String(error)}\n`
     );

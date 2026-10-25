@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { Worker } from 'node:worker_threads';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ import {
 import { main, type CliIo } from '../../src/cli/main';
 import { runRepl } from '../../src/cli/repl';
 import { makeEpsilSession } from '../../src/cli/session';
-import { createKernelPool } from '../../src/compute-engine';
+import { createKernelPool, defaultPoolSize } from '../../src/compute-engine';
 
 // The `--workers <n>` option of the `epsil` command, the REPL and the MCP
 // server (ROADMAP CE-314.1, design section 5.7 of
@@ -104,6 +105,22 @@ describe('the --workers option: arguments', () => {
     expect(parseCliArguments(['--workers', '0'], {}).workers).toBe(0);
     expect(parseMcpArguments([]).workers).toBe(0);
     expect(parseMcpArguments(['--workers', '2']).workers).toBe(2);
+  });
+
+  test('"auto" gives the default pool size, from 1 to 8', () => {
+    const size = defaultPoolSize();
+    expect(size).toBeGreaterThanOrEqual(1);
+    expect(size).toBeLessThanOrEqual(8);
+    expect(parseCliArguments(['--workers', 'auto'], {}).workers).toBe(size);
+    expect(parseMcpArguments(['--workers', 'auto']).workers).toBe(size);
+    // A pool, so the options that do not run asynchronously are refused.
+    expect(() =>
+      parseCliArguments(['--workers', 'auto', '--compile', '-e', '1'], {})
+    ).toThrow(CliUsageError);
+    // The name is case-sensitive, as the other option values are.
+    expect(() => parseCliArguments(['--workers', 'AUTO'], {})).toThrow(
+      CliUsageError
+    );
   });
 
   test('rejects a value that is not a non-negative integer', () => {
@@ -331,6 +348,198 @@ describe('the --workers option: the REPL', () => {
     expect(exitCode).toBe(0);
     expect(text).toContain('21');
     expect(parsedWhileRunning).toBe(false);
+  }, 30_000);
+});
+
+describe('the --workers option: Ctrl-C in the REPL', () => {
+  test('stops the entry that runs; the session and the next entries stay', async () => {
+    const factory = countingFactory();
+    const pool = createKernelPool({ create: factory.createWorker, size: 1 });
+    const session = makeEpsilSession(0, pool);
+    let running = 0;
+    const evaluateAsync = session.evaluateAsync.bind(session);
+    session.evaluateAsync = async (source, url, signal) => {
+      running++;
+      try {
+        return await evaluateAsync(source, url, signal);
+      } finally {
+        running--;
+      }
+    };
+    const interrupts = new EventEmitter();
+    const input = new PassThrough();
+    const output = new PassThrough();
+    let text = '';
+    output.on('data', (chunk) => (text += String(chunk)));
+    const exited = runRepl(session, {
+      color: false,
+      outputMode: 'value',
+      historyPath: '',
+      input,
+      output,
+      interrupts,
+    });
+    const waitFor = async (done: () => boolean, ms = 25, count = 400) => {
+      for (let i = 0; i < count && !done(); i++)
+        await new Promise((resolve) => setTimeout(resolve, ms));
+    };
+    input.write('let keep = 7\n');
+    await waitFor(() => text.includes('7'));
+    // Without an entry that runs, the REPL does not listen to the event.
+    expect(interrupts.listenerCount('SIGINT')).toBe(0);
+    // An interpreted fit with a global search: seconds of work, which gives
+    // the event loop a turn every few milliseconds. The entry after it is
+    // written at the same time, so it waits for the fit.
+    const xs = [1, 3.22, 5.27, 10.49, 7.12];
+    const ys = [4.3, 1.18, 0.01, 1.48, 3.44];
+    const data = xs.map((x, i) => `(${x}, ${ys[i]})`).join(', ');
+    input.write(
+      `findFit([${data}], a * cos(b * x + c) + d * logGamma(x + c), [a, b, c, d], [x], {"global" -> {"b" -> [0.1, 6], "c" -> [0, 6.28]}})\n` +
+        'keep + 1\n'
+    );
+    await waitFor(() => running > 0, 5);
+    const t0 = Date.now();
+    interrupts.emit('SIGINT');
+    await waitFor(() => text.includes('8'));
+    const elapsed = Date.now() - t0;
+    const listeners = interrupts.listenerCount('SIGINT');
+    // Close the REPL and the pool before the assertions, so that a failed
+    // assertion does not leave a worker thread that keeps jest running.
+    input.write('.exit\n');
+    const exitCode = await exited;
+    pool.dispose();
+    expect(exitCode).toBe(0);
+    expect(text).toContain('error: the entry was interrupted (Ctrl-C)');
+    // The entry that waited ran, with the declaration of the session.
+    expect(text).toMatch(/interrupted \(Ctrl-C\)\n[\s\S]*8/);
+    expect(elapsed).toBeLessThan(2000);
+    expect(listeners).toBe(0);
+    expect(factory.terminated()).toBe(factory.created());
+  }, 30_000);
+
+  /** A REPL in a fake terminal, with a pool that starts no worker and an
+   * `evaluateAsync` that runs until the test calls `release()`. The entry
+   * does not read its abort signal, as an entry that does long work. */
+  function fakeTerminalRepl() {
+    const pool = createKernelPool({
+      create: () => {
+        throw new Error('no worker in this test');
+      },
+      size: 1,
+    });
+    const session = makeEpsilSession(0, pool);
+    let running = 0;
+    let release: () => void = () => {};
+    session.evaluateAsync = async (source) => {
+      running++;
+      try {
+        await new Promise<void>((resolve) => (release = resolve));
+        return {
+          diagnostics: [],
+          source,
+          value: session.engine.box(1),
+          elapsedMs: 0,
+        };
+      } finally {
+        running--;
+      }
+    };
+    // The raw-mode calls, and whether each one came after the REPL closed.
+    const rawModeCalls: { raw: boolean; afterClose: boolean }[] = [];
+    let closed = false;
+    const input = Object.assign(new PassThrough(), {
+      isTTY: true,
+      isRaw: false,
+      setRawMode(raw: boolean) {
+        rawModeCalls.push({ raw, afterClose: closed });
+        input.isRaw = raw;
+        return input;
+      },
+    });
+    const output = Object.assign(new PassThrough(), {
+      isTTY: true,
+      columns: 80,
+    });
+    let text = '';
+    output.on('data', (chunk) => (text += String(chunk)));
+    const interrupts = new EventEmitter();
+    const exited = runRepl(session, {
+      color: false,
+      outputMode: 'value',
+      historyPath: '',
+      input,
+      output,
+      interrupts,
+    }).then((code) => {
+      closed = true;
+      return code;
+    });
+    let exitedYet = false;
+    void exited.then(() => (exitedYet = true));
+    return {
+      pool,
+      input,
+      interrupts,
+      exited,
+      rawModeCalls,
+      text: () => text,
+      running: () => running,
+      release: () => release(),
+      exitedYet: () => exitedYet,
+    };
+  }
+
+  const waitFor = async (done: () => boolean, ms = 5, count = 400) => {
+    for (let i = 0; i < count && !done(); i++)
+      await new Promise((resolve) => setTimeout(resolve, ms));
+  };
+
+  test('a .exit typed during a pooled .load waits for the file; raw mode is not turned on after the close', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'epsil-repl-'));
+    const file = join(dir, 'slow.epsil');
+    writeFileSync(file, '1');
+    const repl = fakeTerminalRepl();
+    expect(repl.input.isRaw).toBe(true);
+    repl.input.write(`.load ${file}\r`);
+    await waitFor(() => repl.running() > 0);
+    // Raw mode is off while the file runs, so that Ctrl-C is a signal.
+    expect(repl.input.isRaw).toBe(false);
+    repl.input.write('.exit\r');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // The input is paused during the load: the `.exit` is not read yet.
+    const exitedDuringLoad = repl.exitedYet();
+    repl.release();
+    const exitCode = await repl.exited;
+    repl.pool.dispose();
+    rmSync(dir, { recursive: true, force: true });
+    expect(exitedDuringLoad).toBe(false);
+    expect(exitCode).toBe(0);
+    expect(repl.input.isRaw).toBe(false);
+    expect(repl.rawModeCalls.filter((c) => c.afterClose)).toEqual([]);
+  }, 30_000);
+
+  test('the first Ctrl-C removes the listener, so a second Ctrl-C gets the default action of the process', async () => {
+    const repl = fakeTerminalRepl();
+    repl.input.write('1 + 1\r');
+    await waitFor(() => repl.running() > 0);
+    expect(repl.interrupts.listenerCount('SIGINT')).toBe(1);
+    // The first Ctrl-C aborts the entry, which does not stop at once (it
+    // waits for `release`). The listener is removed at once: with no
+    // listener, a second SIGINT ends the process, even when long work keeps
+    // the event loop from running a listener.
+    repl.interrupts.emit('SIGINT');
+    expect(repl.interrupts.listenerCount('SIGINT')).toBe(0);
+    expect(repl.exitedYet()).toBe(false);
+    // This entry does not read the signal, so it ends with its value when it
+    // is released. The REPL then shows the prompt and reads input again.
+    repl.release();
+    await waitFor(() => repl.running() === 0 && repl.input.isRaw === true);
+    expect(repl.input.isRaw).toBe(true);
+    repl.input.write('.exit\r');
+    const exitCode = await repl.exited;
+    repl.pool.dispose();
+    expect(exitCode).toBe(0);
+    expect(repl.interrupts.listenerCount('SIGINT')).toBe(0);
   }, 30_000);
 });
 

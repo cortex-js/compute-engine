@@ -70,8 +70,10 @@ Options:
       --workers <n>       give the engine a pool of <n> worker threads and
                           run each program asynchronously, so that "findFit"
                           and other numeric work on many values can run on
-                          the workers; 0 disables it (default: 0); also for
-                          the REPL and "epsil mcp"
+                          the workers; 0 disables it (default: 0); "auto"
+                          uses the number of cores minus one, from 1 to 8;
+                          also for "epsil mcp" and the REPL, where Ctrl-C
+                          then stops the entry that runs
       --no-color          disable colored diagnostics
   -h, --help              display this help
   -v, --version           display the package version
