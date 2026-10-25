@@ -4637,22 +4637,6 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
-### CE-423. The batch body of a compiled kernel adds 35 to 48% to the compile time of an expression that reads a shared list
-
-**Status:** open; performance. Found 2026-10-24 in the review of CE-410.
-
-Since CE-410, `compile()` of an expression that reads a free list at a scalar
-index also compiles a batch body for `broadcast` (a second full compilation),
-also when the caller only uses `run()`. Measured: 35 to 48% more compile time
-(Tycho's march kernel 1.40 to 1.68 ms, of which 0.65 to 0.78 ms is the batch
-body). Building it lazily on the first `broadcast` is not safe: the compilation
-reads the engine state (assigned values, declarations, angular unit, precision)
-and module globals (`BigDecimal.precision`, reconstruction digits) while it
-generates code, so a later build could fold other values; a guard on the engine
-version would almost never let the lazy build run. Options: an option of
-`compile()` that asks for the batch body, or one compilation pass that emits
-both bodies.
-
 ### CE-313. Evaluating a symbolic closed form again after a state change rebuilds its nodes
 
 **Status:** open; performance. Same cause as CE-321; fix with that design.

@@ -42,9 +42,10 @@
  * `cells` layout and not an axis of the `grid` layout. The ordinary compiled
  * body reads plain arrays only (its `at` helper gives `NaN` for a typed
  * array), so for it a `Float64Array` is copied into a plain array once,
- * before the cell loop. The batch body of the result (see
- * `BroadcastBatchBody`) reads a `Float64Array` in place. A plain array for
- * any other variable throws.
+ * before the cell loop. The batch body of a result compiled with
+ * `broadcast: true` (`CompilationOptions.broadcast`, see
+ * `BroadcastBatchBody`) reads a `Float64Array` in place; without it, every
+ * batch reads the copy. A plain array for any other variable throws.
  *
  * **Output.** `javascript`: `outputs` values per cell (`options.outputs`, or
  * the default the result gives: the arity of an expression whose type is a

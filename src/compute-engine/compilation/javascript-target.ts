@@ -10720,11 +10720,16 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
     const prepared = this.prepareCompilation(expr, options);
+    // The batch body is a second compilation of the same size as the first
+    // (ROADMAP CE-423), so it is built only when the caller asks for it with
+    // `broadcast: true`; otherwise `broadcast()` runs the ordinary body.
     const result = compileToTarget(
       prepared.expr,
       prepared.target,
       options.entryChecks !== false,
-      (names) => this.compileBatchBody(expr, options, names)
+      options.broadcast === true
+        ? (names) => this.compileBatchBody(expr, options, names)
+        : undefined
     );
     return BaseCompiler.withReferences(
       result,
@@ -11555,8 +11560,9 @@ function compileToTarget(
       : statementBody,
     reconstructionDigits
   );
-  // The batch body of `broadcast()` (ROADMAP CE-410), compiled when the body
-  // reads a shared list of numbers at a scalar index
+  // The batch body of `broadcast()` (ROADMAP CE-410), compiled when the
+  // caller asked for it (`batchBody` is given with `broadcast: true`, ROADMAP
+  // CE-423) and the body reads a shared list of numbers at a scalar index
   // (`CompileTarget.batchReads`). A failure of its compilation leaves the
   // result without one; the batches then run the ordinary body.
   const candidates = target.batchReads?.candidates;

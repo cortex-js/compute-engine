@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   ComputeEngine,
-  compile,
+  compile as compileExpression,
   createKernelPool,
 } from '../../src/compute-engine';
 import { createJavaScriptRuntime } from '../../src/runtime';
@@ -26,6 +26,16 @@ import type { StoredBatchBody } from '../../src/compute-engine/compilation/types
 // proves an integer of 1 or more. A batch whose check fails runs the
 // ordinary body. For every input that respects its declared type, the values
 // are those of the ordinary body (`run()`).
+//
+// The batch body is built only on request since ROADMAP CE-423 (user decision
+// 2026-10-25): every compilation of this file asks for it.
+
+/** `compile()` with the batch body requested. */
+const compile = (
+  expr: Parameters<typeof compileExpression>[0],
+  options?: Parameters<typeof compileExpression>[1]
+): ReturnType<typeof compileExpression> =>
+  compileExpression(expr, { broadcast: true, ...options });
 
 /** The value of `f()`, or `undefined` when it throws. */
 const attempt = (f: () => unknown): unknown => {

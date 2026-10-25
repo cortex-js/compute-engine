@@ -69,7 +69,10 @@ function marchEngine(): ComputeEngine {
 }
 
 describe('CE-421: index axes of the grid layout', () => {
-  const march = compile(marchEngine().box(MARCH as never));
+  // The batch body is built on request (ROADMAP CE-423).
+  const march = compile(marchEngine().box(MARCH as never), {
+    broadcast: true,
+  });
 
   test('the march kernel has a batch body that reads F directly', () => {
     expect(march.success).toBe(true);

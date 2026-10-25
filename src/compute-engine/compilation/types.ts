@@ -967,7 +967,8 @@ export interface CompileTarget<Expr = unknown> {
    * - `candidates`: set on the ordinary compilation. The `At` lowering adds
    *   the name of each free list symbol, declared as a list of numbers, that
    *   it reads with `_SYS.atNumeric` at a scalar index. A non-empty set after
-   *   the compilation asks for the batch body.
+   *   the compilation asks for the batch body, when the caller compiled with
+   *   `broadcast: true` (`CompilationOptions.broadcast`, ROADMAP CE-423).
    * - `direct`: set on the batch compilation. For each such name, the local
    *   variable that holds the checked array. The `At` lowering reads it with
    *   no per-read test of the array.
@@ -2272,6 +2273,30 @@ export interface CompilationOptions<Expr = unknown> {
   entryChecks?: boolean;
 
   /**
+   * The JavaScript target only: `true` asks for the `broadcast()` batch body
+   * (ROADMAP CE-410 and CE-423). When the compiled code reads a shared list
+   * declared as a list of numbers at a scalar index (`F_{i+1}` with
+   * `F: list<number>`), the target then compiles the same expression a
+   * second time into a body that a batch runs in place of the ordinary one:
+   * the list is checked once per batch and read directly in each cell, and
+   * the inputs arrive as arguments (`CompilationResult.batch`). That is what
+   * makes such a kernel run up to 15 times faster under `broadcast()`, and
+   * it costs about as much as the first compilation (the two emissions are
+   * the same size; measured 2026-10-25, 46% of the compile of a kernel that
+   * reads a shared list).
+   *
+   * The default, `false`, skips the second compilation: the result has no
+   * `batch` field, and `broadcast()`, `broadcastAsync()` and a kernel worker
+   * run the ordinary body for every cell, with the same values. A caller
+   * that only calls `run()` keeps the default; a caller that broadcasts a
+   * kernel over many cells passes `true`. The other targets ignore the
+   * option: only the JavaScript target builds a batch body. The engine's own
+   * compilations (`implicitCompile`) keep the default; none of them reads the
+   * batch body (user decision 2026-10-25).
+   */
+  broadcast?: boolean;
+
+  /**
    * Deprecated compatibility option superseded by `mode`. Consulted only when
    * `mode` is absent: `true` maps to `mode: 'complex'` (a one-time console
    * warning), and is dropped on a target that does not offer complex mode
@@ -3219,8 +3244,9 @@ export type CompilationResult<
   broadcastOutputs?: number;
 
   /**
-   * JavaScript only, on a result called with a vars object that reads a
-   * shared list of numbers at a scalar index. A second body that
+   * JavaScript only, on a result compiled with `broadcast: true`
+   * (`CompilationOptions.broadcast`) and called with a vars object that reads
+   * a shared list of numbers at a scalar index. A second body that
    * `broadcast()` runs in place of `code` when each shared list it reads
    * directly passes a check made once per batch. Stored with the result so
    * that a runtime that rebuilds it (`loadBroadcast()`, a kernel worker) runs

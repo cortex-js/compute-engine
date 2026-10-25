@@ -1,5 +1,21 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The `broadcast()` batch body is built on request** (ROADMAP CE-423, user
+  decision 2026-10-25). Since 0.166.0, `compile()` of an expression that reads a
+  shared list of numbers at a scalar index (`F_{i+1}` with `F: list<number>`)
+  also compiled the batch body that makes `broadcast()` up to 15 times faster,
+  a second compilation of the same size as the first (about 45 % of the compile
+  time of such a kernel). It is now compiled only with
+  `compile(expr, { broadcast: true })`. Without the option the result has no
+  `batch` field, and `broadcast()`, `broadcastAsync()` and a kernel worker run
+  the ordinary body for every cell, with the same values. A caller that
+  broadcasts such a kernel over many cells passes the option; a caller that
+  only calls `run()` saves the second compilation. A consumer that reads both
+  `run()` and `broadcast()` from one result (Tycho's plot rows) passes the
+  option at its compile site, or its implicit plots lose the 0.166.0 speed.
+
 ### Resolved Issues
 
 - **Compiled Python gave another absence value than the interpreter for an

@@ -363,6 +363,15 @@ export function assertCompilationOptionsContract(
     );
   }
 
+  if (
+    options.broadcast !== undefined &&
+    typeof options.broadcast !== 'boolean'
+  ) {
+    throw new Error(
+      'Invalid compilation option "broadcast": expected a boolean'
+    );
+  }
+
   // The shape half of the `storage` contract (an object of known storage
   // kinds). The name half — every hinted name is a free symbol of the
   // expression — needs the expression, and runs in `compile()` itself.

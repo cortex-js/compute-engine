@@ -39,6 +39,7 @@ export type CompileExpressionOptions<T extends string = string> = {
   complexPromotion?: boolean;
   mode?: CompileMode;
   entryChecks?: boolean;
+  broadcast?: boolean;
   iterationBudget?: number;
   quadrature?: 'adaptive' | 'monte-carlo';
   symbolDeps?: Set<MathJsonSymbol>;
@@ -361,6 +362,7 @@ export function compile<
       complexPromotion: options?.complexPromotion,
       mode: options?.mode,
       entryChecks: options?.entryChecks,
+      broadcast: options?.broadcast,
       iterationBudget: options?.iterationBudget,
       quadrature: options?.quadrature,
       symbolDeps: options?.symbolDeps,
