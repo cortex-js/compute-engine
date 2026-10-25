@@ -258,9 +258,9 @@ describe('broadcast over a collection with a complex element', () => {
   });
 });
 
-describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', () => {
-  // The opt-in promotes an unknown-sign radical to the complex lane. It always
-  // promoted INSIDE a collection-valued body — `_fn_w` returned
+describe('promotion over a collection-valued body (ROADMAP 2026-08-15)', () => {
+  // A promoting mode lowers an unknown-sign radical through the complex lane.
+  // It always promoted INSIDE a collection-valued body — `_fn_w` returned
   // `[{re, im}, {re, im}]` — but the call site read that array's elements as
   // plain numbers, so the item's witness stayed NaN with the option ON,
   // indistinguishable from OFF. Classifying the element fixes it; nothing about
@@ -348,10 +348,10 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
 
 /**
  * Scalar arithmetic consuming a collection-valued call as a WHOLE operand,
- * under the `complexPromotion` opt-in (ROADMAP 2026-08-15, reported by a
- * consumer's enablement pricing: 9 of 25 compiled-band losses).
+ * in a promoting mode (ROADMAP 2026-08-15, reported by a consumer's
+ * enablement pricing: 9 of 25 compiled-band losses).
  *
- * With `w(t) := [√(t−1), √(t−2)]`, turning the opt-in on made `2·w(t)`,
+ * With `w(t) := [√(t−1), √(t−2)]`, turning promotion on made `2·w(t)`,
  * `w(t)+1` and `w(t)/2` DECLINE with "cannot compile scalar arithmetic over a
  * list-valued operand", where with it off all three compiled — and compiled
  * correctly, at both ends of the domain. The loss was in `tryCompileBroadcast`,
@@ -366,7 +366,7 @@ describe('complexPromotion over a collection-valued body (ROADMAP 2026-08-15)', 
  * radical, consumed whole — so both controls are pinned here alongside it, and
  * so is the indexed case, which compiled throughout and must keep doing so.
  */
-describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 2026-08-15)', () => {
+describe('whole-collection scalar arithmetic in a promoting mode (ROADMAP 2026-08-15)', () => {
   const W = [
     'List',
     ['Sqrt', ['Subtract', 't', 1]],
@@ -427,9 +427,9 @@ describe('whole-collection scalar arithmetic under complexPromotion (ROADMAP 202
     // Promotion must not change what an unaffected shape compiles to. The
     // no-radical control below is that shape: its elements never promote, so
     // the default `auto` emits the same real `_SYS.bcast` closure as `strict`.
-    // (The comparison used to be ON vs OFF of `complexPromotion`; that option
-    // now maps to `mode: 'complex'`, whose single lane lifts wide symbols by
-    // design — compile-mode step 4, 2026-08-16.)
+    // (The comparison used to be ON vs OFF of a promotion opt-in option; its
+    // replacement `mode: 'complex'` has a single lane that lifts wide symbols
+    // by design — compile-mode step 4, 2026-08-16.)
     const mj = ['Multiply', 2, ['w', 't']];
     const P = ['List', ['Multiply', 2, 't'], ['Add', 't', 1]];
     const strict = compile(withFn('w', P).box(mj as any), { mode: 'strict' })!;

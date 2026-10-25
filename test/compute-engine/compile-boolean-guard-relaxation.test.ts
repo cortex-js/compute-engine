@@ -17,12 +17,12 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /** Interpretation, projected the way a real (JavaScript) target represents it. */
-function interpreted(expr: BoxedExpression): unknown {
-  const project = (x: BoxedExpression): unknown => {
+function interpreted(expr: Expression): unknown {
+  const project = (x: Expression): unknown => {
     if (x.symbol === 'True') return true;
     if (x.symbol === 'False') return false;
     if (x.symbol === 'Nothing' || x.symbol === 'Undefined') return NaN;
@@ -33,7 +33,7 @@ function interpreted(expr: BoxedExpression): unknown {
   return project(expr.evaluate());
 }
 
-function parity(expr: BoxedExpression): unknown {
+function parity(expr: Expression): unknown {
   const r = compile(expr, { fallback: false });
   expect(r?.success).toBe(true);
   const value = r!.run!();

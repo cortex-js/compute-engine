@@ -1,6 +1,6 @@
 /**
  * Pure-number Levenberg–Marquardt core for bound-constrained nonlinear
- * least squares. No `BoxedExpression`/library dependencies — the public
+ * least squares. No `Expression`/library dependencies — the public
  * `FindFit`/`FindRoot` operators lower to this.
  *
  * Minimizes `F(θ) = ½‖r(θ)‖²` subject to `lo ≤ θ ≤ hi`, given callbacks for

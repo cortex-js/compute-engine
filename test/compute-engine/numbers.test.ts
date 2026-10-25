@@ -1,4 +1,3 @@
-import { Expression } from '../../src/math-json/types.ts';
 import type { Expression } from '../../src/compute-engine/global-types.ts';
 import { engine as ce } from '../utils';
 import { BigDecimal } from '../../src/big-decimal';
@@ -728,6 +727,6 @@ describe('JSON round-trip fidelity (lossless .json contract)', () => {
     expect(x.json).toEqual(['Divide', ['Sqrt', 3], 2]);
     expect(ce.box(['Divide', ['Sqrt', 3], 2]).isNumberLiteral).toBe(true);
     // `.json` and the max-fidelity toMathJson agree.
-    expect(x.toMathJson({ fractionalDigits: 'max' })).toEqual(x.json);
+    expect(x.toMathJson({ digits: 'max' })).toEqual(x.json);
   });
 });

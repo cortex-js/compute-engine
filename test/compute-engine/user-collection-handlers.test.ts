@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { isFunction } from '../../src/compute-engine/boxed-expression/type-guards';
 
 /**
@@ -18,7 +18,7 @@ import { isFunction } from '../../src/compute-engine/boxed-expression/type-guard
  */
 
 /** The count a `MyColl(n)` / `NotAColl(n)` instance was applied to. */
-function argOf(expr: BoxedExpression): number {
+function argOf(expr: Expression): number {
   // `op1` lives on the `FunctionInterface` narrowing, not on the bare
   // `Expression` type, so a handler that reads its operands must go through
   // the `isFunction()` guard.
@@ -31,7 +31,7 @@ function argOf(expr: BoxedExpression): number {
 function upTo(
   ce: ComputeEngine,
   n: number
-): Iterator<BoxedExpression, undefined> {
+): Iterator<Expression, undefined> {
   let i = 0;
   return {
     next: () =>
@@ -267,7 +267,7 @@ describe('registration-time validation of a handler block', () => {
     expect(() =>
       ce.declare('BadNoIterator', {
         signature: '(integer) -> list<integer>',
-        collection: { count: (expr: BoxedExpression) => argOf(expr) } as any,
+        collection: { count: (expr: Expression) => argOf(expr) } as any,
       })
     ).toThrow(
       'A collection must have at least an "iterator" and a "count" handler'
@@ -280,8 +280,8 @@ describe('registration-time validation of a handler block', () => {
       ce.declare('BadNoAt', {
         signature: '(integer) -> list<integer>',
         collection: {
-          iterator: (expr: BoxedExpression) => upTo(ce, argOf(expr)),
-          count: (expr: BoxedExpression) => argOf(expr),
+          iterator: (expr: Expression) => upTo(ce, argOf(expr)),
+          count: (expr: Expression) => argOf(expr),
           indexWhere: () => 1,
         } as any,
       })

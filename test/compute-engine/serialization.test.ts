@@ -1,5 +1,5 @@
 import { engine as ce } from '../utils';
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, LatexSyntax } from '../../src/compute-engine';
 import { BigDecimal } from '../../src/big-decimal';
 import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
 
@@ -182,9 +182,9 @@ describe('CUSTOM JSON SERIALIZATION', () => {
 
   test(`Approximate numbers (precision), with custom precision`, () => {
     const expr = ce.parse('1.2345678912345678901234');
-    expect(expr.toMathJson({ fractionalDigits: 6 })).toMatchInlineSnapshot(
-      `1.234568`
-    );
+    expect(
+      expr.toMathJson({ digits: { fractional: 6 } })
+    ).toMatchInlineSnapshot(`1.234568`);
   });
   test(`Approximate numbers (range to infinity)`, () => {
     const expr = ce.parse('1.23456789e400');
@@ -525,62 +525,30 @@ describe('DISPLAY DIGITS', () => {
     });
   });
 
-  describe('back-compat with fractionalDigits', () => {
-    test('legacy fractionalDigits: n behaves as { fractional: n }', () => {
-      const e = ce.parse('\\pi').N();
-      expect(e.toMathJson({ fractionalDigits: 2 })).toEqual(
-        e.toMathJson({ digits: { fractional: 2 } })
+  // A bare number is not a `DisplayDigits` value. It is rejected with the
+  // validation error, which names the accepted values, on every route that
+  // takes `digits`. (It crashed with `RangeError: The number NaN cannot be
+  // converted to a BigInt` on a bignum-precision engine in Tycho 0.72.0; it
+  // was then accepted with the convention of the removed `fractionalDigits`
+  // option, until that option was removed.)
+  describe('invalid digits values are a validation error, not a crash', () => {
+    test('a bare number is rejected by toLatex() and toMathJson()', () => {
+      const e = ce.parse('1/3').N();
+      expect(() => e.toLatex({ digits: 6 as any })).toThrow(
+        /Invalid `digits` option: 6/
+      );
+      expect(() => e.toMathJson({ digits: -4 as any })).toThrow(
+        /Invalid `digits` option: -4/
       );
     });
 
-    test("digits: 'max' matches legacy fractionalDigits: 'max'", () => {
-      const e = ce.parse('\\pi').N();
-      expect(e.toMathJson({ digits: 'max' })).toEqual(
-        e.toMathJson({ fractionalDigits: 'max' })
-      );
-    });
-
-    test('digits takes precedence over fractionalDigits', () => {
-      const e = ce.parse('\\pi').N();
-      // Giving both options warns on the console, by design. Keep the
-      // warning out of the test output and check that it is emitted.
-      const warnings: string[] = [];
-      const original = console.warn;
-      console.warn = (message: unknown) => {
-        warnings.push(String(message));
-      };
-      try {
-        expect(
-          e.toMathJson({ digits: { significant: 3 }, fractionalDigits: 6 })
-        ).toEqual('3.14');
-      } finally {
-        console.warn = original;
-      }
-      expect(warnings).toHaveLength(1);
-      expect(warnings[0]).toMatch(/`digits` takes precedence/);
-    });
-  });
-
-  // A bare number is not part of `DisplayDigits`, but it is an easy author
-  // mistake (and the exact shape of a mechanical `fractionalDigits: n` →
-  // `digits: n` migration), so it is accepted at runtime with the deprecated
-  // numeric convention: n ≥ 0 = fractional digits, n < 0 = significant
-  // digits. It previously crashed with `RangeError: The number NaN cannot be
-  // converted to a BigInt` on a bignum-precision engine (Tycho, 0.72.0).
-  describe('bare-number digits (Tycho 0.72.0 report)', () => {
-    test('digits: n rounds to n fractional digits on a bignum engine', () => {
-      expect(ce.parse('1/3').N().toLatex({ digits: 6 })).toEqual('0.333\\,333');
-    });
-
-    test('digits: -n rounds to n significant digits', () => {
-      expect(ce.parse('\\pi').N().toLatex({ digits: -4 })).toEqual('3.142');
-    });
-
-    test('digits: n matches { fractional: n }', () => {
-      const e = ce.parse('\\pi').N();
-      expect(e.toLatex({ digits: 2 })).toEqual(
-        e.toLatex({ digits: { fractional: 2 } })
-      );
+    test('a bare number is rejected by a standalone LatexSyntax and by AsciiMath', () => {
+      expect(() =>
+        new LatexSyntax({ digits: 2 as any }).serialize({ num: '1.23456' })
+      ).toThrow(/Invalid `digits` option/);
+      expect(() =>
+        toAsciiMath(ce.parse('1/3').N(), { digits: 2 as any })
+      ).toThrow(/Invalid `digits` option/);
     });
 
     test('an invalid digits shape is a validation error, not a crash', () => {
@@ -1003,5 +971,24 @@ describe('a float coefficient times a power of a reciprocal', () => {
     [['Multiply', 2, 'y', ['Power', ['Divide', 1, 'x'], 2]], '\\frac{2y}{x^2}'],
   ])('%j', (json, latex) => {
     expect(ce.box(json as any).latex).toBe(latex);
+  });
+});
+
+// The engine-wide `ce.latexOptions.digits` chooses the number of digits of
+// `.latex` and `toLatex()`; a per-call `digits` takes precedence. (Before the
+// `fractionalDigits` option was removed, only that option was read from the
+// engine-wide settings, so `digits` set there had no effect.)
+describe('engine-wide digits', () => {
+  test('ce.latexOptions.digits applies to .latex and toLatex()', () => {
+    const engine = new ComputeEngine();
+    const x = engine.number(1.23456);
+    expect(x.latex).toBe('1.234\\,56');
+    engine.latexOptions = {
+      ...engine.latexOptions,
+      digits: { fractional: 2 },
+    };
+    expect(x.latex).toBe('1.23');
+    expect(x.toLatex()).toBe('1.23');
+    expect(x.toLatex({ digits: 'max' })).toBe('1.234\\,56');
   });
 });

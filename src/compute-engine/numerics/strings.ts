@@ -59,6 +59,42 @@ export function roundToDecimalPlace(
 }
 
 /**
+ * Validate a `digits` serialization option ({@link DisplayDigits}) and return
+ * it with `n` rounded to an integer, or `undefined` when no option is given.
+ *
+ * The accepted values are `'auto'`, `'max'`, `{ significant: n }` with
+ * `n ≥ 1` and `{ fractional: n }` with `n ≥ 0`. Any other value, a bare
+ * number included, throws an `Error` that names the accepted values: a
+ * misspelled option fails at once instead of being ignored. (A bare number
+ * was accepted until the `fractionalDigits` option was removed, with that
+ * option's convention; it is no longer.)
+ *
+ * The MathJSON, LaTeX and AsciiMath serializers all call this function, so
+ * they accept and reject the same values.
+ */
+export function validateDisplayDigits(d: unknown): DisplayDigits | undefined {
+  if (d === undefined || d === 'auto' || d === 'max') return d;
+  if (typeof d === 'object' && d !== null) {
+    const v = d as { significant?: unknown; fractional?: unknown };
+    if (
+      typeof v.significant === 'number' &&
+      Number.isFinite(v.significant) &&
+      v.significant >= 1
+    )
+      return { significant: Math.round(v.significant) };
+    if (
+      typeof v.fractional === 'number' &&
+      Number.isFinite(v.fractional) &&
+      v.fractional >= 0
+    )
+      return { fractional: Math.round(v.fractional) };
+  }
+  throw new Error(
+    `Invalid \`digits\` option: ${JSON.stringify(d)}. Expected 'auto', 'max', { significant: n } with n ≥ 1, or { fractional: n } with n ≥ 0.`
+  );
+}
+
+/**
  * Error-aware display rounding for a Measurement `value ± error`, honoring the
  * `digits` serialization control ({@link DisplayDigits}). Returns the two
  * formatted decimal strings.
@@ -85,8 +121,11 @@ export function roundToDecimalPlace(
 export function roundMeasurementForDisplay(
   value: number,
   error: number,
-  digits: DisplayDigits = 'auto'
+  digitsOption: DisplayDigits = 'auto'
 ): { value: string; error: string } {
+  // An invalid value (a bare number, for example) throws, as in the number
+  // serializers.
+  const digits = validateDisplayDigits(digitsOption) ?? 'auto';
   // No rounding.
   if (digits === 'max') return { value: String(value), error: String(error) };
 

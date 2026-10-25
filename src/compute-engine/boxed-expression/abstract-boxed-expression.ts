@@ -197,22 +197,33 @@ const latexStrings = new WeakMap<
   }
 >();
 
-/** A copy of the LaTeX options whose array values are copied too, for
- * `sameOptionValues()`. */
+/** Whether `v` is a plain object (an object literal), such as the
+ * `{ fractional: 2 }` value of the `digits` option. */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+}
+
+/** A copy of the LaTeX options for `sameOptionValues()`. An array value and
+ * a plain-object value (`digits: { fractional: 2 }`) are copied one level
+ * deep, so that a later change made in place (`digits.fractional = 3`) is
+ * seen as a change. */
 function snapshotOptionValues(
   options: Record<string, unknown>
 ): Record<string, unknown> {
   const values: Record<string, unknown> = {};
   for (const key of Object.keys(options)) {
     const v = options[key];
-    values[key] = Array.isArray(v) ? [...v] : v;
+    values[key] = Array.isArray(v) ? [...v] : isPlainObject(v) ? { ...v } : v;
   }
   return values;
 }
 
 /** Whether the LaTeX options `options` hold the values `values` (a
  * snapshot from `snapshotOptionValues()`): the same keys, each with the same
- * value, or with an array of the same elements. */
+ * value, with an array of the same elements, or with a plain object of the
+ * same keys and field values. */
 function sameOptionValues(
   options: Record<string, unknown>,
   values: Record<string, unknown>
@@ -223,13 +234,20 @@ function sameOptionValues(
     const a = options[key];
     const b = values[key];
     if (a === b) continue;
-    if (
-      !Array.isArray(a) ||
-      !Array.isArray(b) ||
-      a.length !== b.length ||
-      a.some((x, k) => x !== b[k])
-    )
-      return false;
+    if (Array.isArray(a) && Array.isArray(b)) {
+      if (a.length !== b.length || a.some((x, k) => x !== b[k])) return false;
+      continue;
+    }
+    if (isPlainObject(a) && isPlainObject(b)) {
+      const aKeys = Object.keys(a);
+      if (
+        aKeys.length !== Object.keys(b).length ||
+        aKeys.some((k) => a[k] !== b[k])
+      )
+        return false;
+      continue;
+    }
+    return false;
   }
   return true;
 }
@@ -489,9 +507,10 @@ export abstract class _BoxedExpression implements Expression {
    * reflects the canonical/simplified structure, matching the behavior
    * of the engine-based serializer.
    *
-   * Numeric values are rounded to `ce.precision` significant digits
-   * (via `fractionalDigits: 'auto'`). This ensures that noise digits
-   * from precision-bounded operations are not displayed.
+   * Numbers are written with the engine-wide `ce.latexOptions.digits`. When
+   * it is not set, they are rounded to `ce.precision` significant digits
+   * (`digits: 'auto'`), so that noise digits from precision-bounded
+   * operations are not displayed.
    */
   get latex(): string {
     // Materialize lazy collections before serializing.
@@ -547,11 +566,15 @@ export abstract class _BoxedExpression implements Expression {
       sameOptionValues(options, cached.optionValues)
     )
       return cached.latex;
-    const jsonOptions = {
+    // The engine-wide `ce.latexOptions.digits` chooses the number of digits;
+    // without it, numbers are rounded to the engine precision. The cache
+    // check above compares the values of `ce.latexOptions`, so a change of
+    // this setting is not served from the cache.
+    const jsonOptions: Partial<JsonSerializationOptions> = {
       prettify: true,
-      fractionalDigits: 'auto',
+      digits: (options.digits as JsonSerializationOptions['digits']) ?? 'auto',
       repeatingDecimal: jsonRepeatingDecimal(ce),
-    } as const;
+    };
     const json = this.toMathJson(jsonOptions);
     const latex = syntax.serialize(
       json,
@@ -586,7 +609,7 @@ export abstract class _BoxedExpression implements Expression {
    * Uses `toMathJson()` to get the canonical/simplified form.
    *
    * Numeric values are rounded to `ce.precision` significant digits
-   * (via `fractionalDigits: 'auto'`).
+   * (via `digits: 'auto'`) unless `options.digits` says otherwise.
    *
    * If `options.verbatim` is `true` and `verbatimLatex` is set on this
    * expression (i.e. it was parsed with `preserveLatex: true`), return
@@ -633,22 +656,16 @@ export abstract class _BoxedExpression implements Expression {
       }
     }
 
-    // Round numbers at the MathJSON (kernel) layer so the LaTeX layer only
-    // lays out the already-rounded digits (it must not re-crop). When the
-    // caller supplies `digits`, thread it through; otherwise default to
-    // `'auto'` (round to engine precision), matching prior behavior.
-    const jsonOptions: Partial<JsonSerializationOptions> =
-      options?.digits !== undefined
-        ? {
-            prettify: options?.prettify ?? true,
-            digits: options.digits,
-            repeatingDecimal: jsonRepeatingDecimal(this.engine, options),
-          }
-        : {
-            prettify: options?.prettify ?? true,
-            fractionalDigits: 'auto',
-            repeatingDecimal: jsonRepeatingDecimal(this.engine, options),
-          };
+    // Round numbers when they are serialized to MathJSON, where `'auto'` can
+    // read the engine precision. The LaTeX serializer receives the same
+    // `digits` and rounds a float again, which gives the same digits. The
+    // per-call `digits` wins, then the engine-wide `ce.latexOptions.digits`,
+    // then `'auto'` (round to the engine precision).
+    const jsonOptions: Partial<JsonSerializationOptions> = {
+      prettify: options?.prettify ?? true,
+      digits: options?.digits ?? this.engine.latexOptions.digits ?? 'auto',
+      repeatingDecimal: jsonRepeatingDecimal(this.engine, options),
+    };
     const json = this.toMathJson(jsonOptions);
 
     const syntax = this.engine._requireLatexSyntax();
@@ -664,8 +681,7 @@ export abstract class _BoxedExpression implements Expression {
    *
    * Returns the full raw value with no precision rounding, identical to
    * `.json`. This preserves data fidelity for lossless round-tripping.
-   * For precision-rounded MathJSON, use
-   * `toMathJson({ fractionalDigits: 'auto' })`.
+   * For precision-rounded MathJSON, use `toMathJson({ digits: 'auto' })`.
    */
   toJSON(): MathJsonExpression {
     return this.json;
@@ -674,14 +690,12 @@ export abstract class _BoxedExpression implements Expression {
   /**
    * Serialize to MathJSON with configurable options.
    *
-   * The `fractionalDigits` option controls how many digits are emitted
-   * for arbitrary-precision numbers:
+   * The `digits` option controls how many digits are emitted for a number
+   * (see `DisplayDigits`):
    * - `'max'` (default): all available digits, no rounding
    * - `'auto'`: round to `ce.precision` significant digits
-   * - `n` (number >= 0): exactly `n` digits after the decimal point
-   *
-   * Internally, `'auto'` is converted to `-ce.precision` to signal
-   * total significant digits (negative value) to the serializer.
+   * - `{ significant: n }`: round to `n` significant digits
+   * - `{ fractional: n }`: exactly `n` digits after the decimal point
    *
    * A float keeps its digits by default. With `repeatingDecimal: true`, the
    * repeating digits of a float are written as a repetend (`"0.(3)"`), which
@@ -694,7 +708,7 @@ export abstract class _BoxedExpression implements Expression {
       exclude: [],
       shorthands: ['function', 'symbol', 'string', 'number', 'dictionary'],
       metadata: [],
-      fractionalDigits: 'max',
+      digits: 'max',
       repeatingDecimal: false,
       prettify: true,
     };
@@ -723,35 +737,12 @@ export abstract class _BoxedExpression implements Expression {
       } else if (Array.isArray(options.metadata)) {
         defaultOptions.metadata = options.metadata;
       }
-      if (options.fractionalDigits === 'auto')
-        defaultOptions.fractionalDigits = -this.engine.precision; // When negative, indicate that the number of digits should be less than the number of whole digits + this value
-      if (typeof options.fractionalDigits === 'number')
-        defaultOptions.fractionalDigits = options.fractionalDigits;
-
-      // Resolve the number-display control. The current `digits` option takes
-      // precedence over the deprecated `fractionalDigits`.
-      if (options.digits !== undefined) {
-        if (options.fractionalDigits !== undefined)
-          console.warn(
-            '`digits` and `fractionalDigits` were both specified; `digits` takes precedence. `fractionalDigits` is deprecated — use `digits` instead.'
-          );
-        defaultOptions.digits = options.digits;
-      } else if (options.fractionalDigits === 'auto') {
-        defaultOptions.digits = 'auto';
-      } else if (options.fractionalDigits === 'max') {
-        defaultOptions.digits = 'max';
-      } else if (typeof options.fractionalDigits === 'number') {
-        defaultOptions.digits =
-          options.fractionalDigits < 0
-            ? { significant: -options.fractionalDigits }
-            : { fractional: options.fractionalDigits };
-      }
+      if (options.digits !== undefined) defaultOptions.digits = options.digits;
     }
     const opts: JsonSerializationOptions = {
       ...defaultOptions,
       ...options,
       digits: defaultOptions.digits,
-      fractionalDigits: defaultOptions.fractionalDigits,
       shorthands: defaultOptions.shorthands,
       metadata: defaultOptions.metadata,
     };

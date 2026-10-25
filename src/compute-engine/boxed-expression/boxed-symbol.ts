@@ -1167,7 +1167,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     if (typeof value === 'string') value = ce.string(value);
     if (typeof value === 'object' && value !== null) {
       // An already-boxed expression must be recognized BEFORE the
-      // `{re, im}` sniff below: every BoxedExpression has `re`/`im`
+      // `{re, im}` sniff below: every Expression has `re`/`im`
       // getters, so the sniff used to convert a boxed non-numeric value
       // (a lambda, a symbol, a list) into a complex number whose parts
       // are NaN. `ce.expr()` below passes a boxed value through

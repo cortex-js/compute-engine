@@ -1,6 +1,6 @@
 import { performance } from 'node:perf_hooks';
 
-import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
+import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { Type } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
 import {
@@ -52,8 +52,8 @@ export function evaluateCompiled(
   const start = performance.now();
   const diagnostics: ParsingDiagnostic[] = [];
 
-  const run = (): BoxedExpression => {
-    let expr: BoxedExpression;
+  const run = (): Expression => {
+    let expr: Expression;
     if (options.inputFormat === 'latex') {
       expr = engine.parse(source);
       // A LaTeX parse error is an error in the value, as on the interpreted
@@ -127,7 +127,7 @@ export function evaluateCompiled(
     }
   };
 
-  let value: BoxedExpression;
+  let value: Expression;
   try {
     value =
       options.timeLimit > 0
@@ -184,7 +184,7 @@ function boxCompiledValue(
   engine: ComputeEngine,
   value: unknown,
   type: Type | undefined
-): BoxedExpression {
+): Expression {
   if (typeof value === 'number')
     return engine.number(engine._inexactNumericValue(value));
   if (typeof value === 'boolean') return engine.box(value);
@@ -291,7 +291,7 @@ function arrayShape(
   return { tuple: false, elementType: () => elements };
 }
 
-function unprintable(engine: ComputeEngine, what: string): BoxedExpression {
+function unprintable(engine: ComputeEngine, what: string): Expression {
   return errorValue(
     engine,
     'unprintable-value',
@@ -302,7 +302,7 @@ function unprintable(engine: ComputeEngine, what: string): BoxedExpression {
 /** The error value of a throw: `["Error", message, cause]` for a
  * cancellation (the shape `executeEpsil` builds, whose cause operand the
  * description does not render as a site), `["Error", message]` otherwise. */
-function thrownValue(engine: ComputeEngine, error: unknown): BoxedExpression {
+function thrownValue(engine: ComputeEngine, error: unknown): Expression {
   const message = error instanceof Error ? error.message : String(error);
   const cause = cancellationCause(error);
   return engine.box(
@@ -333,6 +333,6 @@ function errorValue(
   engine: ComputeEngine,
   code: string,
   message: string
-): BoxedExpression {
+): Expression {
   return engine.box(['Error', ['ErrorCode', { str: code }, { str: message }]]);
 }

@@ -3,7 +3,6 @@ import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
-import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import { resolveStorageHints } from './storage-hints.js';
@@ -5153,8 +5152,8 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.recordPromotion('Ln', args);
       return `cmath.log(${compile(args[0])})`;
     }
-    // The caller's `complexPromotion` opt-in: an operand of unknown sign takes
-    // the complex lane so the compiled value matches the interpreter's
+    // Promotion (the `auto` and `complex` modes): an operand of unknown sign
+    // takes the complex lane so the compiled value matches the interpreter's
     // promotion. Uses the SAME predicate `BaseCompiler.isComplexValued`
     // reports to the enclosing node, or the parent reads a real where a
     // complex is returned.
@@ -5163,15 +5162,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // sign, so zero is in range, and `cmath.log(0)` raises `ValueError` where
     // the interpreter answers `-∞` (and the unpromoted `np.log(0)` yields
     // `-inf`). `np.emath` is numpy's domain-relaxed variant — complex for a
-    // negative input, `-inf` at zero — which is exactly this option's
+    // negative input, `-inf` at zero — which is exactly the promotion's
     // semantics, and it accepts arrays as the rest of this target does.
     if (BaseCompiler.promotesRadicalToComplex('Ln', args))
       return `np.emath.log(${compile(args[0])})`;
     return `np.log(${compile(args[0])})`;
   },
   Log: (args, compile) => {
-    // Log with base: log(x, base). Under the caller's `complexPromotion`
-    // opt-in an operand of unknown sign — value OR base, since a negative base
+    // Log with base: log(x, base). In a promoting mode (`auto`, `complex`)
+    // an operand of unknown sign — value OR base, since a negative base
     // makes the quotient complex too — routes through `np.emath`, numpy's
     // domain-relaxed variant (complex for a negative input, `-inf` at zero).
     // See `Ln` above for why `cmath` is the wrong helper for a REAL operand:
@@ -5265,12 +5264,12 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       BaseCompiler.recordPromotion('Sqrt', args);
       return `cmath.sqrt(${compile(args[0])})`;
     }
-    // The `complexPromotion` opt-in — see `Ln` above. `np.emath.sqrt` rather
-    // than `cmath.sqrt` for the same two reasons that matter across all three
-    // promoted heads: the operand is a REAL of unknown sign (so the whole real
-    // line, zero included, is in range) and `cmath` accepts only Python
-    // scalars, raising `TypeError` on the numpy arrays this target otherwise
-    // supports throughout.
+    // Promotion of an unknown-sign operand — see `Ln` above. `np.emath.sqrt`
+    // rather than `cmath.sqrt` for the same two reasons that matter across all
+    // three promoted heads: the operand is a REAL of unknown sign (so the
+    // whole real line, zero included, is in range) and `cmath` accepts only
+    // Python scalars, raising `TypeError` on the numpy arrays this target
+    // otherwise supports throughout.
     if (BaseCompiler.promotesRadicalToComplex('Sqrt', args))
       return `np.emath.sqrt(${compile(args[0])})`;
     return `np.sqrt(${compile(args[0])})`;
@@ -7159,16 +7158,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'python'> {
-    // See the note in `javascript-target.ts`: the target-level route bypasses
-    // the standalone `compile()` export, where these deprecations were warned
-    // about and where the `complexPromotion` alias is mapped onto `mode`, so
-    // each target entry warns and normalizes for itself — otherwise the flag
-    // reaches `BaseCompiler`'s legacy promotion latch and promotes even under
-    // an explicit `mode: 'strict'`. Once-per-process per key.
-    options = normalizeDeprecatedCompileOptions(
-      options,
-      PYTHON_SUPPORTED_MODES.includes('complex')
-    ).options;
     // The `storage` hints are shader-only and ignored by this target, but
     // validated on every target (see `javascript-target.ts`).
     if (options.storage !== undefined)
@@ -7255,7 +7244,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // has an engine value (`CompileTarget.varsKeys`).
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       constantFold: options.constantFold,
-      complexPromotion: options.complexPromotion,
       // The caller's requested compile mode; validated against
       // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
       mode: options.mode,
@@ -7361,7 +7349,6 @@ export class PythonTarget implements LanguageTarget<Expression> {
       var: this.makeVarResolver(vars),
       varsKeys: vars ? new Set(Object.keys(vars)) : undefined,
       constantFold: options.constantFold,
-      complexPromotion: options.complexPromotion,
       // The caller's requested compile mode; validated against
       // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
       mode: options.mode,

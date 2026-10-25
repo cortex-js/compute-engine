@@ -13,7 +13,6 @@ import { BaseCompiler } from './base-compiler.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { resolveStorageHints } from './storage-hints.js';
 import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
-import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
   overriddenCompilationHeads,
@@ -36,7 +35,6 @@ export type CompileExpressionOptions<T extends string = string> = {
   imports?: unknown[];
   preamble?: string;
   fallback?: boolean;
-  complexPromotion?: boolean;
   mode?: CompileMode;
   entryChecks?: boolean;
   broadcast?: boolean;
@@ -94,19 +92,10 @@ export function compile<
   options?: CompileExpressionOptions<T>
 ): CompilationResult<T, R> {
   assertCompilationOptionsContract(options);
-  // The deprecated `complexPromotion: true` maps to `mode: 'complex'` — but
-  // only where the target offers complex mode. The flag is ignored on shader
-  // targets, which keep the real kernel. A caller passing it globally must not
-  // see a shader compilation decline with `unsupported-mode`; on such a
-  // target the alias is dropped and the target's default mode applies.
   // (The shared per-compilation budgets — the antiderivative pool — are NOT
   // reset here: this entry is not the only compilation route (a registered
   // target invoked directly bypasses it), so the reset lives at the depth-0
   // boundary of `BaseCompiler.compile`, which every route crosses.)
-
-  const deprecated = applyDeprecatedModeOptions(options);
-  options = deprecated.options;
-  const modeFromAlias = deprecated.modeFromAlias;
 
   // An option-contract violation, not a compilation failure: raised outside
   // the `try` so the interpreter fallback cannot swallow it. A direct custom
@@ -228,13 +217,10 @@ export function compile<
       // default), or a target reused after a `constantFold: false` call would
       // silently keep folding disabled.
       options.target.constantFold = options.constantFold;
-      // Stamped unconditionally for the same reason as `constantFold` above: an
-      // omitted option must reset the field, or a target reused after a
-      // `complexPromotion: true` call would silently keep promoting.
-      options.target.complexPromotion = options.complexPromotion;
       // No storage hints reach a direct target (refused above when non-empty),
-      // and the field is cleared per call for the same reason as the two
-      // above: a reused caller target must not carry stale state.
+      // and the field is cleared per call for the same reason as the
+      // `constantFold` stamp above: a reused caller target must not carry
+      // state from a previous call.
       options.target.storage = undefined;
       // The effective compile mode, resolved for a DIRECT target and stamped
       // per call (an omitted option must reset the field, like the two
@@ -247,10 +233,7 @@ export function compile<
       // raised by `BaseCompiler.compile` when it latches the mode.
       options.target.mode = resolveDirectTargetMode(
         options.target,
-        modeFromAlias &&
-          !(options.target.supportedModes ?? ['strict']).includes('complex')
-          ? undefined
-          : options.mode
+        options.mode
       );
       // A `vars`-mapped symbol is compiled as the valueless input of its
       // declared type (`withVarsValuesHidden`), as on a registered target.
@@ -359,7 +342,6 @@ export function compile<
       vars: options?.vars,
       imports: options?.imports,
       preamble: options?.preamble,
-      complexPromotion: options?.complexPromotion,
       mode: options?.mode,
       entryChecks: options?.entryChecks,
       broadcast: options?.broadcast,
@@ -371,10 +353,6 @@ export function compile<
       constantFold: options?.constantFold,
       storage: options?.storage,
     };
-    // The alias is dropped on a target that does not offer complex mode (see
-    // `modeFromAlias` above): the target's default applies.
-    if (modeFromAlias && !targetSupportsMode(languageTarget, 'complex'))
-      targetOptions.mode = undefined;
     // The `auto` escalation (design §4) is NOT applied here: a registered
     // target owns it, inside its own `compile()`
     // (`compileWithAutoEscalation`, `auto-escalation.ts`), so that a caller
@@ -493,54 +471,6 @@ function strictTypesChecked<T extends string, R>(
 }
 
 /**
- * Whether a registered target offers `mode` — read once per `LanguageTarget`
- * instance from a target it creates (`supportedModes`), so the decision costs
- * nothing per compilation after the first.
- */
-const modeSupport = new WeakMap<object, readonly CompileMode[]>();
-function targetSupportsMode(
-  lt: { createTarget(): CompileTarget<Expression> },
-  mode: CompileMode
-): boolean {
-  let known = modeSupport.get(lt);
-  if (known === undefined) {
-    known = lt.createTarget().supportedModes ?? ['strict'];
-    modeSupport.set(lt, known);
-  }
-  return known.includes(mode);
-}
-
-/**
- * Map the deprecated pre-mode `complexPromotion` option at the public entry
- * before anything is compiled. It is consulted only when `mode` is absent:
- * `true` maps to `mode: 'complex'`; `false` selects nothing. With an explicit
- * `mode` the flag is ignored (no conflict error). Every present spelling gets
- * a one-time console warning. It is not passed on to the target: the
- * discipline now carries the promotion.
- *
- * The removed `realOnly` option is warned about here too, on the same route,
- * so an untyped caller still passing it learns the projection is gone.
- */
-function applyDeprecatedModeOptions<T extends string>(
-  options: CompileExpressionOptions<T> | undefined
-): {
-  options: CompileExpressionOptions<T> | undefined;
-  modeFromAlias: boolean;
-} {
-  if (options === undefined) return { options, modeFromAlias: false };
-  // Both the warning and the mapping live in `deprecation-warnings.ts`,
-  // because the target-level `.compile()` route owes the caller the same ones
-  // and cannot reach this module (see that file's header). The target is not
-  // known yet here, so the alias is mapped onto `mode` unconditionally and the
-  // returned `modeFromAlias` lets the caller drop it once the target turns out
-  // not to offer complex mode. `normalizeDeprecatedCompileOptions` warns at
-  // most once per process per deprecated option, so a compilation that passes
-  // through this entry and the target's own `compile()` still produces exactly
-  // one warning.
-  return normalizeDeprecatedCompileOptions(options);
-}
-
-/**
  * The effective compile mode for a direct, caller-owned target. Its declared
  * `supportedModes` (default `['strict']`) are narrowed by
  * the hooks each needs — `'complex'` needs `complexLift` and `complexIsReal`
@@ -552,8 +482,8 @@ function applyDeprecatedModeOptions<T extends string>(
  * validate against the declared list (the `unsupported-mode` decline).
  *
  * Only the per-call `options.mode` is requested. The resolved value is
- * recorded on `target.mode` by the caller (like `constantFold` and
- * `complexPromotion`), so on a reused direct target `target.mode` holds the
+ * recorded on `target.mode` by the caller (like `constantFold`), so on a
+ * reused direct target `target.mode` holds the
  * PREVIOUS call's resolution — reading it back as a request would make an
  * omitted `mode` inherit the last explicit choice instead of resetting to the
  * target's default.

@@ -44,11 +44,7 @@ export function formatValue(
         // Materialization is best-effort: fall back to the structural form.
       }
     }
-    return JSON.stringify(
-      value.toMathJson({ fractionalDigits: 'auto' }),
-      null,
-      2
-    );
+    return JSON.stringify(value.toMathJson({ digits: 'auto' }), null, 2);
   }
   // The MathJSON export prettifies `Power(x, 2)` into `Square(x)`, a head
   // meant for LaTeX display: Epsil source spells a square `x ^ 2` (or `x²` in
@@ -61,7 +57,7 @@ export function formatValue(
     const engine = result.value.engine;
     return serializeEpsil(
       result.value.toMathJson({
-        fractionalDigits: 'auto',
+        digits: 'auto',
         exclude: ['Square'],
       }),
       {

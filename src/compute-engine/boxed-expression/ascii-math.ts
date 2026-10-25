@@ -12,6 +12,7 @@ import {
   roundToSignificant,
   roundToDecimalPlace,
   roundMeasurementForDisplay,
+  validateDisplayDigits,
 } from '../numerics/strings.js';
 import {
   isFunction,
@@ -216,14 +217,16 @@ export type AsciiMathOptions = {
 
 /**
  * Apply the `digits` display control to a real number value for AsciiMath
- * output. Returns the numeric string, or `undefined` to fall through to the
- * default serialization.
+ * output and return the numeric string. An invalid `digits` value (a bare
+ * number, for example) throws, as in the MathJSON and LaTeX serializers
+ * (`validateDisplayDigits()`).
  */
 function serializeAsciiNumber(
   value: number | BigDecimal,
   isExact: boolean,
-  digits: DisplayDigits | undefined
+  digitsOption: DisplayDigits | undefined
 ): string {
+  const digits = validateDisplayDigits(digitsOption);
   if (digits === undefined || digits === 'auto' || digits === 'max')
     return value.toString();
   if ('significant' in digits) {

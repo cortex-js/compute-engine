@@ -1,7 +1,6 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
 import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
-import { resetDeprecationWarnings } from '../../src/compute-engine/compilation/deprecation-warnings';
 import {
   CompileDeclineError,
   LaneMismatchError,
@@ -37,9 +36,10 @@ import type { Expression } from '../../src/compute-engine/global-types';
  * Migration step 4 (2026-08-16) landed the `auto` default on `javascript` and
  * `python`: the pins below that used to read "accepted but compiled as
  * `strict`" now read the shipped behavior — `auto` promotes an unknown-sign
- * radical and escalates once to `complex` at a wide binding, and
- * `complexPromotion: true` is deprecated to `mode: 'complex'`. A test whose
- * subject is the non-promoting discipline passes `mode: 'strict'` explicitly.
+ * radical and escalates once to `complex` at a wide binding. (The former
+ * `complexPromotion: true` option, deprecated to `mode: 'complex'` at that
+ * step, was removed after 0.167.0.) A test whose subject is the
+ * non-promoting discipline passes `mode: 'strict'` explicitly.
  */
 
 /** A minimal direct custom target (the RPN shape of `compile-plugin.test.ts`). */
@@ -205,21 +205,19 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     );
   });
 
-  it('an unsupported-mode decline leaves both latches restored (thrown before the try/finally)', () => {
-    // The mode is resolved BEFORE `_complexPromotion`/`_mode` are written:
-    // the decline throws outside the try/finally that restores them, so a
-    // latch mutated ahead of the resolution would stay stuck.
+  it('an unsupported-mode decline leaves the mode latch restored (thrown before the try/finally)', () => {
+    // The mode is resolved BEFORE `_mode` is written: the decline throws
+    // outside the try/finally that restores it, so a latch mutated ahead of
+    // the resolution would stay stuck.
     const glsl = ce._getCompilationTarget('glsl')!.createTarget();
     expect(() =>
       compile(ce.parse('x'), {
         target: glsl,
         mode: 'complex',
-        complexPromotion: true,
         fallback: false,
       })
     ).toThrow(/not offered/);
     expect(BaseCompiler.mode).toBe('strict');
-    expect(BaseCompiler.complexPromotion).toBe(false);
   });
 
   it('is strict outside any compilation, and restored after one', () => {
@@ -265,7 +263,7 @@ describe('compile mode — effective-mode resolution (step 1)', () => {
     expect(withReset.mode).toBe('auto');
     // A reused direct target does NOT inherit the previous call's explicit
     // mode: an omitted option resets to the target's default (the
-    // `constantFold`/`complexPromotion` stamping pattern).
+    // `constantFold` stamping pattern).
     compile(ce.parse('x + 1'), { target: withReset, mode: 'strict' });
     expect(withReset.mode).toBe('strict');
     compile(ce.parse('x + 1'), { target: withReset });
@@ -392,49 +390,6 @@ describe('result convention (design §5) — exact im !== 0 at the boundary, ker
       re: 0,
       im: Math.SQRT2,
     });
-  });
-
-  it('the removed realOnly option no longer projects the result', () => {
-    const e = new ComputeEngine();
-    // The removal warning fires once per PROCESS, so an earlier case (here or
-    // in another file sharing this module registry) would otherwise starve the
-    // assertion below of its message.
-    resetDeprecationWarnings();
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      // The default `auto` promotes the unknown-sign radical (compile-mode
-      // step 4, 2026-08-16). The projection that used to turn the promoted
-      // `√(−4)` into `NaN` and the boolean `x < 3` into `NaN` is gone: both
-      // now come back in the runner's own convention.
-      // @ts-expect-error — `realOnly` was removed from the compile options.
-      const r = compile(e.parse('\\sqrt{x}'), { realOnly: true });
-      expect(r.run({ x: 4 })).toBe(2);
-      expect(r.run({ x: -4 })).toEqual({ re: 0, im: 2 });
-      // @ts-expect-error — `realOnly` was removed from the compile options.
-      expect(compile(e.parse('x < 3'), { realOnly: true }).run({ x: 1 })).toBe(
-        true
-      );
-      // …and the caller is told, once, rather than silently losing it.
-      expect(
-        warn.mock.calls.filter((c) => String(c[0]).includes('realOnly')).length
-      ).toBeGreaterThan(0);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
-  it('complexPromotion still promotes, now as the deprecated spelling of mode: complex', () => {
-    const e = new ComputeEngine();
-    const r = compile(e.parse('\\sqrt{x}'), { complexPromotion: true });
-    expect(r.code).toContain('csqrt');
-    expect(r.run!({ x: -4 })).toEqual({ re: 0, im: 2 });
-    // …and a promoted real value comes back as a number (dust chopped).
-    expect(r.run!({ x: 4 })).toBe(2);
-    // `complexPromotion: true` now maps to `mode: 'complex'` (compile-mode
-    // step 4, 2026-08-16), so the wide `x` is lifted at run time and the
-    // report names the complex lane.
-    expect(r.code).toContain('_SYS.cplx(_.x)');
-    expect(r.mode).toBe('complex');
   });
 });
 

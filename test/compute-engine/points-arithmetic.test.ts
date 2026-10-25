@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { expectTypeBetween } from '../utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { typeHandlerContext } from '../../src/compute-engine/boxed-expression/derive-application-type';
@@ -21,7 +21,7 @@ import { isProvablyNumberList } from '../../src/compute-engine/collection-utils'
  */
 
 /** The `incompatible-type` (or other) code of an `Error` expression, if any. */
-function errorCode(expr: BoxedExpression): string | undefined {
+function errorCode(expr: Expression): string | undefined {
   if (expr.operator !== 'Error') return undefined;
   const code = expr.op1;
   if (code.operator === 'ErrorCode') return code.op1.string ?? undefined;
@@ -3026,7 +3026,7 @@ describe('the .mul() method keeps a variable of a point component (CE-121)', () 
     ce.assign('w', 4);
     for (const head of ['List', 'Tuple']) {
       const product = ce.number(0.5).mul(ce.box([head, 'w', 'Pi']));
-      const cells = (product as any).ops.map((c: BoxedExpression) => c.toString());
+      const cells = (product as any).ops.map((c: Expression) => c.toString());
       expect(cells[0]).toBe('0.5 * w');
       expect(cells[1]).toMatch(/^1\.5707963/);
     }

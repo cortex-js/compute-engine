@@ -15,7 +15,7 @@
  *    engine process outright (the VS Code debug adapter runs the debuggee in
  *    a dedicated worker). It is NOT part of the public engine API.
  *
- * The statement is a `BoxedExpression`; the type here is `unknown` so this
+ * The statement is an `Expression`; the type here is `unknown` so this
  * module has zero imports (it sits in `common/`, below the engine layers).
  * Consumers cast.
  *

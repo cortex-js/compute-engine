@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
  * Assigning a function literal to a symbol declared with the bare `function`
@@ -39,7 +39,7 @@ function engine(): ComputeEngine {
   return ce;
 }
 
-function literal(ce: ComputeEngine, body: unknown): BoxedExpression {
+function literal(ce: ComputeEngine, body: unknown): Expression {
   return ce.box(['Function', ['Block', body as any], 't'] as any);
 }
 

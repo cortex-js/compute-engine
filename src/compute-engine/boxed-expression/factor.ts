@@ -943,7 +943,7 @@ type FactorMemoEntry = {
  * The `factor()` answers computed for each engine, keyed by the digest of the
  * factored expression.
  *
- * Why this memo exists: `factor()` and `BoxedExpression.toNumericValue()` are
+ * Why this memo exists: `factor()` and `Expression.toNumericValue()` are
  * mutually recursive — `toNumericValue()` of a sum factors it, and `factor()`
  * of a sum reads `toNumericValue()` of every term — so factoring a nested
  * quotient walks the expression as a TREE. The engine does not share

@@ -694,7 +694,7 @@ describe('Dictionary structural equality (RT-P1-2)', () => {
 // inside the serializer: `serializeJson()` used to route every
 // dictionary-*typed* expression (including symbols merely typed or valued
 // `dictionary`) back through `expr.toMathJson()`, which recursed forever and
-// re-tripped the digits/fractionalDigits deprecation warning on each pass
+// re-tripped a number-option deprecation warning (since removed) on each pass
 // (Tycho 0.72.0 report: warning flood + stack overflow).
 describe('Dictionary serialization boundary (Tycho 0.72.0 report)', () => {
   let ce: ComputeEngine;

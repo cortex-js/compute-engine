@@ -8,7 +8,7 @@ import {
 import type { AddressInfo } from 'node:net';
 
 import { ComputeEngine, serializeEpsil, version } from '../epsil.js';
-import type { BoxedExpression } from '../compute-engine.js';
+import type { Expression } from '../compute-engine.js';
 import {
   isFunction,
   isString,
@@ -894,7 +894,7 @@ class McpServer {
     // server for the other clients of an HTTP transport.
     const run = (): unknown => {
       // Parse first: a source with parse errors has no meaningful compilation.
-      let expr: BoxedExpression;
+      let expr: Expression;
       let diagnostics: unknown[];
       if (format === 'latex') {
         expr = ce.parse(source);
@@ -996,9 +996,7 @@ interface LatexDiagnostic {
   latex?: string;
 }
 
-function latexDiagnostics(
-  errors: readonly BoxedExpression[]
-): LatexDiagnostic[] {
+function latexDiagnostics(errors: readonly Expression[]): LatexDiagnostic[] {
   return errors.map((error) => {
     const [first, ...rest] = isFunction(error) ? error.ops : [];
     // A timeout is `["Error", message, "timeout"]`, the error value of a

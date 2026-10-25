@@ -47,7 +47,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { PythonTarget } from '../../src/compute-engine/compilation/python-target';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { execFileSync } from 'child_process';
@@ -67,7 +67,7 @@ beforeEach(() => {
  * Compiled with `constantFold: false`: this suite pins gate/lowering behavior,
  * and a constant expression would otherwise fold to a literal before any gate
  * is consulted. */
-function code(expr: BoxedExpression): string {
+function code(expr: Expression): string {
   return python.compileFunction(expr, 'f', [], undefined, {
     constantFold: false,
   });
@@ -540,9 +540,9 @@ function venvHasNumpy(): boolean {
 type Json = boolean | number | string | Json[];
 
 /** The interpreter's answer, in the same JSON shape the emitted code prints. */
-function interpreted(expr: BoxedExpression): Json {
+function interpreted(expr: Expression): Json {
   const v = expr.evaluate();
-  const scalar = (x: BoxedExpression): Json => {
+  const scalar = (x: Expression): Json => {
     if (x.symbol === 'True') return true;
     if (x.symbol === 'False') return false;
     return x.re;

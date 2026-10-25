@@ -20,22 +20,20 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 
 const ce = new ComputeEngine();
 
-const field = (
-  rec: BoxedExpression,
-  key: string
-): BoxedExpression | undefined => (rec as any).get(key);
-const param = (rec: BoxedExpression, name: string): number =>
+const field = (rec: Expression, key: string): Expression | undefined =>
+  (rec as any).get(key);
+const param = (rec: Expression, name: string): number =>
   field(field(rec, 'parameters')!, name)!.re;
-const flag = (rec: BoxedExpression, key: string): boolean | undefined => {
+const flag = (rec: Expression, key: string): boolean | undefined => {
   const v = field(rec, key);
   if (v === undefined) return undefined;
   return (v as any).symbol === 'True';
 };
-const residualNorm = (rec: BoxedExpression): number =>
+const residualNorm = (rec: Expression): number =>
   field(rec, 'residualNorm')!.re;
 
 /** `FindRoot` through the box route, with an optional options argument. */
@@ -43,7 +41,7 @@ const findRoot = (
   equations: unknown,
   params: unknown,
   options?: unknown
-): BoxedExpression =>
+): Expression =>
   ce
     .box([
       'FindRoot',
@@ -53,7 +51,7 @@ const findRoot = (
     ] as any)
     .evaluate();
 
-const oneParam = (equation: unknown, start = 1): BoxedExpression =>
+const oneParam = (equation: unknown, start = 1): Expression =>
   findRoot(['List', equation], ['List', ['Tuple', 'a', start]]);
 
 describe('row 414: `converged` is true only at a root', () => {
@@ -313,7 +311,7 @@ describe('row 408: the `global` option of `FindRoot`', () => {
     ['Equal', 'd', 0],
   ];
   const PARAMS = ['List', 'a', 'b', 'c', 'd'];
-  const rss = (rec: BoxedExpression) => residualNorm(rec) ** 2;
+  const rss = (rec: Expression) => residualNorm(rec) ** 2;
 
   test('the search over b in [0.1, 6] finds the lowest residual of the system', () => {
     const rec = findRoot(EQUATIONS, PARAMS, {

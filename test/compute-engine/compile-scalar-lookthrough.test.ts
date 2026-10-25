@@ -23,7 +23,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 function make(): ComputeEngine {
   const ce = new ComputeEngine();
@@ -41,7 +41,7 @@ function compileJS(
   | { ok: true; code: string; run: (args?: object) => unknown }
   | { ok: false; error: string } {
   const jt = (ce as any)._getCompilationTarget('javascript');
-  const expr = ce.parse(latex) as BoxedExpression;
+  const expr = ce.parse(latex) as Expression;
   try {
     const r = jt.compile(expr);
     return {

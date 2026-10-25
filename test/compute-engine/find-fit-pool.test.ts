@@ -6,7 +6,7 @@ import {
   createKernelPool,
   type KernelPool,
 } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import { findFitAsync } from '../../src/compute-engine/nonlinear-fit';
 import { fitSlicePool } from '../../src/compute-engine/kernel-pool';
 import type { WireFitProblem } from '../../src/compute-engine/kernel-protocol';
@@ -105,9 +105,9 @@ function countingPool(size = 2): {
   return counting;
 }
 
-const param = (rec: BoxedExpression, name: string): number =>
+const param = (rec: Expression, name: string): number =>
   Number(rec.get('parameters')?.get(name)?.re);
-const residualNorm = (rec: BoxedExpression): number =>
+const residualNorm = (rec: Expression): number =>
   Number(rec.get('residualNorm')?.re);
 
 /** `a cos(b x + c) + d x + e`, where `e` is Euler's number. */
@@ -148,7 +148,7 @@ async function expectParity(
   pooled: ComputeEngine,
   call: unknown[],
   names = ['a', 'b', 'c', 'd']
-): Promise<BoxedExpression> {
+): Promise<Expression> {
   const sync = new ComputeEngine().box(call as any).evaluate();
   const rec = await pooled.box(call as any).evaluateAsync();
   expect(rec.operator).toBe('Dictionary');
@@ -327,22 +327,22 @@ describe('FindFit.evaluateAsync on a kernel pool', () => {
       pooled.box(
         fitCall(xs, ys, { b: [0.3, 628], c: [0, 2 * Math.PI] }) as any
       ) as any
-    ).ops as BoxedExpression[];
+    ).ops as Expression[];
     // `findFitAsync` is called directly inside the span: it captures the
     // frame armed when it is called (the public route, `evaluateAsync()`
     // inside a span, is tested in ce-424-425-findfit-async.test.ts). Raise
     // the budget until
     // the setup fits in it; the first such budget is far too short for the
     // scan of 2,000 grid points.
-    const fit = (ms: number): Promise<BoxedExpression | undefined> => {
-      let p: Promise<BoxedExpression | undefined> | undefined;
+    const fit = (ms: number): Promise<Expression | undefined> => {
+      let p: Promise<Expression | undefined> | undefined;
       pooled.withTimeLimit({ ms, label: 'test:pool-scan-budget' }, () => {
-        p = findFitAsync(pooled, ops) as Promise<BoxedExpression | undefined>;
+        p = findFitAsync(pooled, ops) as Promise<Expression | undefined>;
         return 0;
       });
       return p!;
     };
-    let r: BoxedExpression | undefined;
+    let r: Expression | undefined;
     for (let ms = 10; ms < 5000; ms = Math.ceil(ms * 1.5)) {
       r = await fit(ms);
       if (r?.get('phase')?.string !== 'setup') break;
@@ -441,7 +441,7 @@ describe('FindFit.evaluateAsync without the pool', () => {
       const call = ranges
         ? fitCall(xs, ys, ranges)
         : fitCall(xs, ys, {}).slice(0, 5);
-      const ops = (ce.box(call as any) as any).ops as BoxedExpression[];
+      const ops = (ce.box(call as any) as any).ops as Expression[];
       // A fit with a signal that never aborts: the count of reads of the
       // signal (one per row of each pass over the rows, and per iteration).
       const probe = abortAfterReads(Infinity, 'timeout');

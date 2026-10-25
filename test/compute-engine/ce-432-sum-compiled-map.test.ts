@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import { executeEpsil, executeEpsilAsync } from '../../src/epsil';
 import { compiledMapDoubles } from '../../src/compute-engine/library/collections';
 import {
@@ -14,7 +14,7 @@ import {
 // gives: the first element, then `add()` of each later element in order.
 
 /** The engine and the `Map` of an Epsil expression `map(…)`. */
-function mapOf(source: string, machine = true): BoxedExpression {
+function mapOf(source: string, machine = true): Expression {
   const ce = new ComputeEngine();
   if (machine) ce.precision = 'machine';
   return executeEpsil(ce, source).value;
@@ -22,13 +22,13 @@ function mapOf(source: string, machine = true): BoxedExpression {
 
 /** The sum that the fold gives for `map`: each element as the walk of the
  * `Map` gives it, added in order with `add()`. */
-function foldSum(map: BoxedExpression): BoxedExpression {
-  let acc: BoxedExpression | undefined;
+function foldSum(map: Expression): Expression {
+  let acc: Expression | undefined;
   for (const x of map.each()) acc = acc === undefined ? x : acc.add(x);
   return acc!;
 }
 
-const expectSameNumber = (a: BoxedExpression, b: BoxedExpression) => {
+const expectSameNumber = (a: Expression, b: Expression) => {
   expect(Object.is(a.re, b.re)).toBe(true);
   expect(a.im).toBe(b.im);
   expect(a.isExact).toBe(b.isExact);

@@ -6,7 +6,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   fresnelS,
@@ -342,7 +342,7 @@ describe('FRESNEL - huge arguments at raised precision', () => {
   // the corrections here are around 1e-161 and 1e-401: `Divide` on operands
   // whose machine projection has underflowed to -0 answers NaN, so a relative
   // error computed that way is unusable.
-  const leadingDigits = (v: BoxedExpression, n = 40) => v.toString().slice(0, n);
+  const leadingDigits = (v: Expression, n = 40) => v.toString().slice(0, n);
 
   test('S(1e160) at 200 digits is 1/2 - 1/(pi x)', () => {
     atPrecision(200, () => {

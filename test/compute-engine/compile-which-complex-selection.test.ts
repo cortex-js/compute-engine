@@ -19,7 +19,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
@@ -30,8 +30,8 @@ const ce = new ComputeEngine();
  * number (the complex helpers collapse a zero imaginary part back to a number,
  * so `_SYS.csqrt({re: 6, im: 0})` is `2.449…`, not `{re: 2.449…, im: 0}`).
  */
-function interpreted(expr: BoxedExpression): unknown {
-  const project = (x: BoxedExpression): unknown => {
+function interpreted(expr: Expression): unknown {
+  const project = (x: Expression): unknown => {
     if (x.symbol === 'True') return true;
     if (x.symbol === 'False') return false;
     if (x.symbol === 'Nothing' || x.symbol === 'Missing') return NaN;
@@ -52,7 +52,7 @@ function interpreted(expr: BoxedExpression): unknown {
  * may be evaluated and emitted as a value, which never exercises the
  * `_SYS.select` lowering these cases are about.
  */
-function parity(expr: BoxedExpression): unknown {
+function parity(expr: Expression): unknown {
   let value: unknown;
   for (const constantFold of [true, false]) {
     const r = compile(expr, { fallback: false, constantFold });
@@ -64,7 +64,7 @@ function parity(expr: BoxedExpression): unknown {
 }
 
 /** The emitted source, with compile-time constant folding turned off. */
-function code(expr: BoxedExpression): string {
+function code(expr: Expression): string {
   return compile(expr, { fallback: false, constantFold: false })!.code ?? '';
 }
 

@@ -2593,7 +2593,7 @@ export class BoxedFunction
     // `isFinite === true` before the expression is evaluated to a number,
     // rather than the conservative `undefined` returned by the fallthrough.
     // "Definitely nonzero" is established via a known sign, mirroring the
-    // ∞/finite divide rule. (BoxedExpression has no `isZero` getter; the
+    // ∞/finite divide rule. (Expression has no `isZero` getter; the
     // public expression surface exposes the sign predicates, and a definite
     // sign — e.g. π is positive — entails nonzero.)
     const isNonZero = (x: Expression): boolean =>

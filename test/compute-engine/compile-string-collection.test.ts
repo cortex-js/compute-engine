@@ -29,7 +29,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   isCharacter,
@@ -57,7 +57,7 @@ const FLAG_FR = '\u{1F1EB}\u{1F1F7}';
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /** `CharacterFrom("x")` — canonicalizes to the character value itself (D7). */
-function char(s: string): BoxedExpression {
+function char(s: string): Expression {
   return ce.box(['CharacterFrom', { str: s }]);
 }
 
@@ -71,7 +71,7 @@ function char(s: string): BoxedExpression {
  * agree. `Nothing`/`Missing` project to `undefined`, which is what the emitted
  * out-of-band access yields for a non-numeric element domain.
  */
-function project(v: BoxedExpression): unknown {
+function project(v: Expression): unknown {
   if (v.symbol === 'True') return true;
   if (v.symbol === 'False') return false;
   if (v.symbol === 'Nothing' || v.symbol === 'Missing') return undefined;
@@ -90,7 +90,7 @@ function project(v: BoxedExpression): unknown {
  * cell that stops compiling fails the test loudly with its own diagnostic.
  */
 function agreesWithInterpreter(
-  expr: BoxedExpression,
+  expr: Expression,
   vars: Record<string, unknown> = {}
 ): void {
   const r = compile(expr, { fallback: false, constantFold: false });
@@ -102,12 +102,12 @@ function agreesWithInterpreter(
 
 /** Assert `expr` declines to compile — the engine reports `success: false` and
  * falls back to the interpreter, which answers correctly. */
-function failsClosed(expr: BoxedExpression): void {
+function failsClosed(expr: Expression): void {
   expect(compile(expr, { constantFold: false }).success).toBe(false);
 }
 
 /** The emitted JavaScript source for `expr`. */
-function code(expr: BoxedExpression): string {
+function code(expr: Expression): string {
   return compile(expr, { fallback: false, constantFold: false }).code;
 }
 

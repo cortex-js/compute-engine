@@ -20,6 +20,7 @@ import {
   numberToString,
   roundToSignificant,
   roundToDecimalPlace,
+  validateDisplayDigits,
   withFractionPart,
 } from '../numerics/strings.js';
 import { isFloatSpelling, numberToExpression } from '../numerics/expression.js';
@@ -818,9 +819,7 @@ function serializeJsonFunction(
   // authority — otherwise a `{ significant: n }` control would crop the nominal
   // before the measurement rounding runs.
   const argOptions: Readonly<JsonSerializationOptions> =
-    name === 'Measurement'
-      ? { ...options, digits: 'max', fractionalDigits: 'max' }
-      : options;
+    name === 'Measurement' ? { ...options, digits: 'max' } : options;
 
   const fn: MathJsonExpression = [
     jsonHead,
@@ -982,13 +981,6 @@ function serializeRepeatingDecimals(
   while (fractionalPart.endsWith('0'))
     fractionalPart = fractionalPart.slice(0, -1);
 
-  if (
-    typeof options.fractionalDigits === 'number' &&
-    options.fractionalDigits > 0
-  ) {
-    fractionalPart = fractionalPart.slice(0, options.fractionalDigits);
-  }
-
   if (exponent)
     return `${wholepart}.${fractionalPart}${exponent.toLowerCase()}`;
   return `${wholepart}.${fractionalPart}`;
@@ -997,48 +989,15 @@ function serializeRepeatingDecimals(
 /**
  * Resolve the effective number-display control from the serialization options.
  *
- * `options.digits` (the current control) takes precedence; when it is absent
- * (e.g. options constructed directly rather than via `toMathJson()`), fall back
- * to interpreting the deprecated `options.fractionalDigits` field.
+ * `options.digits` can be absent when the options are constructed directly
+ * rather than by `toMathJson()`; the control is then `'max'` (all digits).
  */
 function effectiveDigits(
   options: Readonly<JsonSerializationOptions>
 ): DisplayDigits {
-  const d = options.digits as DisplayDigits | number | undefined;
-  if (d !== undefined) {
-    if (d === 'auto' || d === 'max') return d;
-    // A bare number is accepted (though not part of `DisplayDigits`) and
-    // follows the deprecated `fractionalDigits` numeric convention:
-    // n ≥ 0 = digits after the decimal point, n < 0 = total significant
-    // digits. Normalizing here keeps a mechanical `fractionalDigits: n` →
-    // `digits: n` migration working instead of crashing downstream.
-    if (typeof d === 'number' && Number.isFinite(d))
-      return d < 0
-        ? { significant: Math.max(1, Math.round(-d)) }
-        : { fractional: Math.round(d) };
-    if (typeof d === 'object' && d !== null) {
-      if (
-        'significant' in d &&
-        Number.isFinite(d.significant) &&
-        d.significant >= 1
-      )
-        return { significant: Math.round(d.significant) };
-      if (
-        'fractional' in d &&
-        Number.isFinite(d.fractional) &&
-        d.fractional >= 0
-      )
-        return { fractional: Math.round(d.fractional) };
-    }
-    throw new Error(
-      `Invalid \`digits\` option: ${JSON.stringify(d)}. Expected 'auto', 'max', { significant: n } with n ≥ 1, or { fractional: n } with n ≥ 0.`
-    );
-  }
-  const fd = options.fractionalDigits;
-  if (fd === 'auto' || fd === 'max') return fd;
-  if (typeof fd === 'number')
-    return fd < 0 ? { significant: -fd } : { fractional: fd };
-  return 'max';
+  // An invalid value (a bare number included) throws, with a message that
+  // names the accepted values (`validateDisplayDigits()`).
+  return validateDisplayDigits(options.digits) ?? 'max';
 }
 
 function serializeJsonNumber(
@@ -1194,7 +1153,6 @@ function serializeJsonNumberSpelling(
       const partOptions: Readonly<JsonSerializationOptions> = {
         ...options,
         digits: 'max',
-        fractionalDigits: 'max',
       };
       const rationalExpr = (r: Rational) => {
         if (isInteger(r)) return serializeJsonNumber(ce, r[0], partOptions);
@@ -1435,8 +1393,8 @@ function serializeJsonNumberSpelling(
       if (metadata.latex !== undefined)
         return { num: value.toString(), latex: metadata.latex };
       return shorthandAllowed
-        ? numberToExpression(value, options.fractionalDigits)
-        : { num: numberToString(value, options.fractionalDigits) };
+        ? numberToExpression(value)
+        : { num: numberToString(value) };
     }
   }
 

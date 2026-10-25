@@ -5,7 +5,7 @@
 // not depend on `scripts/`; the tooling imports them back from here.
 
 import type {
-  Expression as BoxedExpression,
+  Expression,
   FunctionInterface,
   SymbolInterface,
   NumberLiteralInterface,
@@ -19,7 +19,7 @@ import type {
  * site. `.ops`/`.op1`/`.op2`/`.op3` are retyped to `Expr` so the widening
  * carries recursively through the operand tree. Assignable to and from the base
  * `Expression` (the extra members are optional). */
-export type Expr = BoxedExpression &
+export type Expr = Expression &
   Partial<Omit<FunctionInterface, 'ops' | 'op1' | 'op2' | 'op3'>> &
   Partial<SymbolInterface> &
   Partial<NumberLiteralInterface> & {

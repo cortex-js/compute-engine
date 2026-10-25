@@ -30,7 +30,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
@@ -357,7 +357,7 @@ describe('an EMPTY block — effect position compiles, value position declines',
 
 describe('the admission is plain-JavaScript only', () => {
   /** `{ let s = 1; if x > 0 { s = -1 }; s }` — the shape fixed above. */
-  function elselessBlock(engine: ComputeEngine): BoxedExpression {
+  function elselessBlock(engine: ComputeEngine): Expression {
     engine.declare('x', 'number');
     return engine.box([
       'Block',
@@ -466,7 +466,7 @@ describe('the admission is plain-JavaScript only', () => {
  */
 describe('a statement-form If takes no branch on an undecided condition', () => {
   /** `Block(Declare(s, 1), Loop(Block(k := k+1, <guarded>, exit at k = 3)), (s, k))`. */
-  function loopOver(engine: ComputeEngine, guarded: unknown): BoxedExpression {
+  function loopOver(engine: ComputeEngine, guarded: unknown): Expression {
     return engine.box([
       'Block',
       ['Declare', 's', { str: 'unknown' }, 0],

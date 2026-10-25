@@ -23,7 +23,6 @@ import type {
 } from '../global-types.js';
 import { typeToString } from '../../common/type/serialize.js';
 import type { MathJsonSymbol } from '../../math-json/types.js';
-import { normalizeDeprecatedCompileOptions } from './deprecation-warnings.js';
 import { entryIsPure, entrySource } from './function-purity.js';
 import {
   isCallerMapped,
@@ -4960,9 +4959,9 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // Real-emitted operand with a complex result — a PROVABLY negative operand
     // (`Ln(-2)`, or `a := -2` → `Ln(a)` is `complex`), or an
-    // unknown-sign one under the caller's `complexPromotion` opt-in. The
+    // unknown-sign one in a promoting mode (`auto`, `complex`). The
     // parent emits `{re, im}` arithmetic, so `Math.log` — a `NaN` number —
-    // must not be the lowering. Without the opt-in an unknown-sign operand
+    // must not be the lowering. In `strict` mode an unknown-sign operand
     // keeps the real kernel (pinned; `promotesToComplexLane` mirrors the
     // `isComplexValued` Sqrt/Ln/Log carve-out, which makes the parent agree).
     if (promotesToComplexLane('Ln', args))
@@ -7673,10 +7672,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Log: (args, compile, target) => {
     // Complex either because an operand is, or because the RESULT is complex —
     // from a PROVABLY negative argument (`Log(-2)`, or `a := -2` making
-    // `Log(a)` `complex`), or from an unknown-sign argument under the
-    // caller's `complexPromotion` opt-in. Either way the enclosing expression
+    // `Log(a)` `complex`), or from an unknown-sign argument in a promoting
+    // mode (`auto`, `complex`). Either way the enclosing expression
     // reads `{re, im}`, so `Math.log10` — a `NaN` number — must not be the
-    // lowering. Without the opt-in an unknown-sign operand keeps the real
+    // lowering. In `strict` mode an unknown-sign operand keeps the real
     // kernel (pinned; `promotesToComplexLane` mirrors the `isComplexValued`
     // Sqrt/Ln/Log carve-out, which makes the parent agree on the shape).
     //
@@ -8477,10 +8476,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     // The operand is real-emitted but the result is complex — because the
     // operand is PROVABLY negative (`a := -2` → `Sqrt(a)` is `complex`),
-    // or because the caller opted in to promoting an unknown-sign operand
-    // (`complexPromotion`). The enclosing expression reads `{re, im}` off this
+    // or because a promoting mode (`auto`, `complex`) promotes an
+    // unknown-sign operand. The enclosing expression reads `{re, im}` off this
     // node, so `Math.sqrt` — which yields a `NaN` *number* there — would
-    // NaN-poison it. Without the opt-in an unknown-sign operand keeps
+    // NaN-poison it. In `strict` mode an unknown-sign operand keeps
     // `Math.sqrt` (pinned; `promotesToComplexLane` mirrors the
     // `isComplexValued` Sqrt/Ln/Log carve-out so the parent agrees).
     if (promotesToComplexLane('Sqrt', args))
@@ -9833,15 +9832,15 @@ function resultIsWideUnderComplexDiscipline(
  * a parent reading `{re, im}` around a child that emitted a bare number is
  * `NaN` everywhere. So both sides apply the same two conditions — a PROVABLY
  * negative operand always promotes, and an operand of merely UNKNOWN sign
- * promotes only when the caller opted in with `complexPromotion`.
+ * promotes only in a promoting mode (`auto`, `complex`), never in `strict`.
  */
 function promotesToComplexLane(
   head: MathJsonSymbol,
   args: ReadonlyArray<Expression>
 ): boolean {
-  // The caller's opt-in, decided by the same predicate `isComplexValued` uses
-  // — never by the node's type, which is the wide `number` for exactly
-  // the unknown-sign operands the option targets.
+  // Promotion in the `auto` and `complex` modes, decided by the same
+  // predicate that `isComplexValued` uses, never by the node's type, which is
+  // the wide `number` for an operand of unknown sign.
   if (BaseCompiler.promotesRadicalToComplex(head, args)) return true;
   // The default: only a PROVABLY negative operand promotes, and only when the
   // result type confirms it.
@@ -10643,23 +10642,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'javascript'> {
-    // A caller reaching a target through `ce._getCompilationTarget(name)` and
-    // invoking this method never passes through the standalone `compile()`
-    // export, which is where the deprecated pre-`mode` options used to be
-    // warned about AND resolved. The options kept WORKING on this route, so
-    // the omission was silent — and this is the route an integration takes
-    // once it needs a specific target, i.e. the callers with the most sites to
-    // migrate. Normalizing here as well is what makes the warning's wording
-    // true on this route: it maps
-    // `complexPromotion: true` onto `mode: 'complex'` and clears the alias, so
-    // the flag can no longer reach `BaseCompiler`'s legacy promotion latch and
-    // promote under an explicit `mode: 'strict'`. Warning is once-per-process
-    // per key, so a call that also goes through the standalone entry still
-    // produces exactly one.
-    options = normalizeDeprecatedCompileOptions(
-      options,
-      JS_SUPPORTED_MODES.includes('complex')
-    ).options;
     options = BaseCompiler.withVarsMappedUserFunctionHeads(
       expr.engine,
       options
@@ -10976,7 +10958,6 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
 
     const target = this.createTarget({
       constantFold,
-      complexPromotion: options.complexPromotion,
       // The caller's requested compile mode; validated against
       // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
       mode: options.mode,

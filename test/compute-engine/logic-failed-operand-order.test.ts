@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 //
 // The connectives `Or`, `And`, `Nand`, `Nor`, `Implies` and the quantifiers
@@ -26,7 +26,7 @@ import type { BoxedExpression } from '../../src/compute-engine/global-types';
 const ce = new ComputeEngine();
 
 /** A symbol answer as its name (`True`, `A`), any other answer as text. */
-const show = (x: BoxedExpression): string => x.symbol ?? x.toString();
+const show = (x: Expression): string => x.symbol ?? x.toString();
 
 const ERR = 'Error(ErrorCode("incompatible-type", "number", "string"), "a")';
 const ERR_B = 'Error(ErrorCode("incompatible-type", "number", "string"), "b")';

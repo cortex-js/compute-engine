@@ -32,17 +32,18 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
  *   a fully concrete `real` parameter — maximal type information, complex
  *   admission present — and still measuring `Math.sqrt` and `NaN`.
  *
- * RESOLUTION for half 2 (ruled 2026-08-15, SUPERSEDED 2026-08-16): the
- * opt-in `complexPromotion` was the first answer. The compile-mode migration
+ * RESOLUTION for half 2 (ruled 2026-08-15, SUPERSEDED 2026-08-16): an opt-in
+ * compile option was the first answer. The compile-mode migration
  * (`docs/COMPILATION-MODEL.md`, step 4) then made
  * promotion the DEFAULT: `mode: 'auto'` on `javascript`/`python` promotes
  * `Sqrt`/`Ln`/`Log` of an operand of unknown sign, and an ordering comparison
  * over such a value compiles under the D2 runtime rule instead of declining,
  * so nothing is lost by promoting. `mode: 'strict'` is where the old
- * real-kernel contract lives, and `complexPromotion: true` is deprecated to
- * `mode: 'complex'`. The tests below therefore read as a BEFORE/AFTER pair:
- * each one that documented the real-kernel default now pins the promoted
- * default beside the strict-mode lowering it replaced.
+ * real-kernel contract lives, and `mode: 'complex'` forces the promotion
+ * (the opt-in option was removed after 0.167.0). The tests below therefore
+ * read as a BEFORE/AFTER pair: each one that documented the real-kernel
+ * default now pins the promoted default beside the strict-mode lowering it
+ * replaced.
  */
 
 const Z_DEF = 'z(t) \\coloneq \\sqrt{t-1}';
@@ -222,26 +223,7 @@ describe('half 2 — Tycho item 190: the real-kernel carve-out, not refinement',
   });
 });
 
-describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () => {
-  // The cases below pass the deprecated `complexPromotion` option on purpose,
-  // to check that it still maps to the complex mode. Its one-time deprecation
-  // warnings are expected here; keep them out of the test output and let
-  // every other warning through.
-  const originalWarn = console.warn;
-  beforeAll(() => {
-    console.warn = (...message: unknown[]) => {
-      if (
-        typeof message[0] === 'string' &&
-        message[0].includes('`complexPromotion`')
-      )
-        return;
-      originalWarn(...message);
-    };
-  });
-  afterAll(() => {
-    console.warn = originalWarn;
-  });
-
+describe('promotion in mode: complex (ruled 2026-08-15, now the default)', () => {
   test('strict keeps the real kernel and its NaN; the default does not', () => {
     // Was "OFF by default: the witness keeps the real kernel and its NaN".
     // Promotion is the default since the compile-mode migration (step 4,
@@ -264,7 +246,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
     const ce = new ComputeEngine();
     ce.parse(Z_DEF, { strict: false }).evaluate();
     const r = compile(ce.parse(Z_CHAIN, { strict: false }), {
-      complexPromotion: true,
+      mode: 'complex',
     })!;
     expect(r.success).toBe(true);
     expect(r.run!({ t: 0.3 })).toBeCloseTo(PROMOTED, 12);
@@ -272,11 +254,11 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
 
   test('ON: the inline chain matches too, taking plain real inputs', () => {
     // A real-typed free symbol is lifted to `{re, im: 0}` by the emitter, so
-    // enabling the option does not change the caller's argument convention.
+    // the complex mode does not change the caller's argument convention.
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
     const r = compile(ce.parse(INLINE_CHAIN, { strict: false }), {
-      complexPromotion: true,
+      mode: 'complex',
     })!;
     expect(r.run!({ u: 0.3 })).toBeCloseTo(PROMOTED, 12);
   });
@@ -288,7 +270,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
     ce.declare('u', 'real');
     const r = compile(
       ce.parse('\\left|\\frac{\\sqrt{u+1}}{2} - 1\\right|', { strict: false }),
-      { complexPromotion: true }
+      { mode: 'complex' }
     )!;
     expect(r.run!({ u: 0.3 })).toBeCloseTo(0.429912287450431, 12);
   });
@@ -298,7 +280,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
     ce.declare('u', 'real');
     const chain = '\\left|\\ln(u-1)\\right|';
     const r = compile(ce.parse(chain, { strict: false }), {
-      complexPromotion: true,
+      mode: 'complex',
     })!;
     const ce2 = new ComputeEngine();
     ce2.declare('u', 'real');
@@ -337,7 +319,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
   test('the mode does not leak between compilations', () => {
     // Latched per outermost compile and restored on the way out: a promoted
     // compile must not leave the next one promoting. (The witness used to be
-    // `complexPromotion: true` followed by the plain default; the default now
+    // a promoting compile followed by the plain default; the default now
     // promotes on its own, so the second compile asks for `strict`.)
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
@@ -355,8 +337,8 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
   test('python: promotion reaches that target too', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'real');
-    // `np.sqrt` is now the STRICT lowering; the default and the deprecated
-    // opt-in both promote (compile-mode step 4, 2026-08-16).
+    // `np.sqrt` is now the STRICT lowering; the default and the explicit
+    // complex mode both promote (compile-mode step 4, 2026-08-16).
     const off = compile(ce.parse('\\sqrt{u-1}', { strict: false }), {
       to: 'python',
       mode: 'strict',
@@ -365,7 +347,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
     expect(off.code).not.toContain('np.emath.sqrt');
     for (const options of [
       { to: 'python' as const },
-      { to: 'python' as const, complexPromotion: true },
+      { to: 'python' as const, mode: 'complex' as const },
     ]) {
       const on = compile(ce.parse('\\sqrt{u-1}', { strict: false }), options)!;
       // `np.emath`, not `cmath` — see the zero-domain test below.
@@ -382,23 +364,20 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
     const ce = new ComputeEngine();
     ce.parse('g(t) \\coloneq [\\sqrt{t-1}, 1]', { strict: false }).evaluate();
     const r = compile(ce.parse('g(t)[2] + 1', { strict: false }), {
-      complexPromotion: true,
+      mode: 'complex',
     })!;
     expect(r.success).toBe(true);
     expect(r.run!({ t: 0.3 })).toEqual(2);
   });
 
   test('a DIRECT (non-registered) shader target never promotes; a complex mode request declines', () => {
-    // The direct `compile(expr, { target })` route stamps the caller's option
+    // The direct `compile(expr, { target })` route stamps the caller's mode
     // onto whatever target object it is handed, so the language restriction
-    // has to be enforced where the option is latched rather than at the
+    // has to be enforced where the mode is latched rather than at the
     // registered-target entry. GLSL has no complex lane at all: with no mode
-    // requested it emits the real kernel, in the default mode as in `strict`.
-    // The deprecated `complexPromotion: true` maps to `mode: 'complex'` only
-    // where the target OFFERS complex mode; on a shader target the alias is
-    // dropped and the real kernel is emitted (the option was always documented
-    // as ignored there) — an EXPLICIT `mode: 'complex'` request is the
-    // `unsupported-mode` capability decline (compile-mode step 4, 2026-08-16).
+    // requested it emits the real kernel, in the default mode as in `strict`,
+    // and an EXPLICIT `mode: 'complex'` request is the `unsupported-mode`
+    // capability decline (compile-mode step 4, 2026-08-16).
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const expr = ce.box([
@@ -415,10 +394,6 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
       expected
     );
 
-    const promoted = ce._getCompilationTarget('glsl')!.createTarget();
-    expect(
-      compile(expr, { target: promoted, complexPromotion: true }).code
-    ).toBe(expected);
     const explicit = ce._getCompilationTarget('glsl')!.createTarget();
     const r = compile(expr, { target: explicit, mode: 'complex' });
     expect(r.success).toBe(false);
@@ -434,7 +409,7 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
     ce.declare('u', 'real');
     const on = compile(ce.parse('\\ln(u-1)', { strict: false }), {
       to: 'python',
-      complexPromotion: true,
+      mode: 'complex',
     })!;
     expect(on.code).toContain('np.emath.log');
     expect(on.code).not.toContain('cmath.log');
@@ -446,16 +421,13 @@ describe('the complexPromotion opt-in (ruled 2026-08-15, now the default)', () =
   test('glsl keeps the real kernel regardless (item 144’s render states)', () => {
     // The shader targets have no runtime-failure channel and their
     // unknown-sign behavior is pinned by the Desmos corpus, so they never
-    // promote: the real kernel in the default mode, in `strict`, and under
-    // the deprecated `complexPromotion: true` (its alias to `mode: 'complex'`
-    // is dropped where the target does not offer complex mode); an EXPLICIT
-    // `mode: 'complex'` is the `unsupported-mode` decline rather than a
-    // promotion (compile-mode step 4, 2026-08-16).
+    // promote: the real kernel in the default mode and in `strict`; an
+    // EXPLICIT `mode: 'complex'` is the `unsupported-mode` decline rather
+    // than a promotion (compile-mode step 4, 2026-08-16).
     const ce = new ComputeEngine();
     for (const options of [
       { to: 'glsl' as const },
       { to: 'glsl' as const, mode: 'strict' as const },
-      { to: 'glsl' as const, complexPromotion: true },
     ]) {
       const r = compile(ce.box(['Sqrt', ['Subtract', 'x', 1]]), options)!;
       expect(r.success).toBe(true);

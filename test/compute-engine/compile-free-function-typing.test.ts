@@ -33,21 +33,6 @@ describe('root compile() export typing', () => {
     expect(r.run({ x: 3 })).toEqual(4);
   });
 
-  test('the removed `realOnly` option is rejected by the option type', () => {
-    // The option no longer exists. An untyped JavaScript caller can still
-    // reach the key (and gets a one-time removal warning at run time), but the
-    // typed surface must reject it so a migrating consumer sees the break at
-    // build time rather than silently losing the projection.
-    const warn = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      // @ts-expect-error — `realOnly` was removed from the compile options.
-      const r = compile(ce.parse('x + 1'), { realOnly: true });
-      expect(r.run({ x: 2 })).toEqual(3);
-    } finally {
-      warn.mockRestore();
-    }
-  });
-
   test('the default result type spans everything a runner returns', () => {
     // The default `R` is `CompiledValue`, which is deliberately wider than
     // the numeric case: the same `run` returns a boolean for a predicate, a

@@ -3,7 +3,7 @@
 
 export const version = '{{SDK_VERSION}}';
 
-// The compile() function — takes a BoxedExpression and produces code
+// The compile() function — takes an Expression and produces code
 export { compile } from './compute-engine/compilation/compile-expression.js';
 
 // Built-in compilation targets

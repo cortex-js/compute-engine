@@ -19,8 +19,7 @@ export interface ComputeEngineConstructor {
  * The `ComputeEngine` value is the engine constructor; the `ComputeEngine`
  * type is the structural `IComputeEngine` interface. Exporting the interface
  * (rather than the class, whose private fields make its type nominal) keeps
- * `new ComputeEngine()`, `expr.engine` and `ExpressionComputeEngine`
- * mutually assignable without casts.
+ * `new ComputeEngine()` and `expr.engine` mutually assignable without casts.
  */
 export const ComputeEngine: ComputeEngineConstructor = ComputeEngineImpl;
 export type ComputeEngine = IComputeEngine;
@@ -135,7 +134,7 @@ export {
   type WorkerLike,
 } from './compute-engine/kernel-pool.js';
 
-// ── Free functions (accept string | MathJSON | BoxedExpression) ─────
+// ── Free functions (accept string | MathJSON | Expression) ─────
 // `compile` is also imported as a value so it can be placed on the global
 // registration slot below — bundle-external consumers (which may only
 // `import type` from this package) need the standalone wrapper, not just

@@ -18,7 +18,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import {
   provableApplicationKind,
   provableTopLevelKind,
@@ -120,7 +120,7 @@ const heatMapEngine = (): ComputeEngine => (sharedHeatMap ??= heatMap());
  * collection-shaped. A bare `unknown` symbol passes, because at a top-level
  * call site it is a free plot variable.
  */
-const argIsScalar = (a: BoxedExpression): boolean =>
+const argIsScalar = (a: Expression): boolean =>
   !a.type.matches('collection<any>');
 
 const kindOf = (ce: ComputeEngine, latex: string): ProvableKind | undefined =>

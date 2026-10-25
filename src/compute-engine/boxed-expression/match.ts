@@ -1487,7 +1487,7 @@ export function match(
         { canonical: false }
       );
   } else if ('engine' in (pattern as object)) {
-    // Already a BoxedExpression
+    // Already an Expression
     boxedPattern = pattern as Expression;
   } else {
     // Raw MathJSON — box it

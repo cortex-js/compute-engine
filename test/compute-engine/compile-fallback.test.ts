@@ -230,7 +230,7 @@ describe('Compilation of scalar↔list arithmetic (broadcast + complex fail-clos
     // lowering. Verified against interpretation — `2·[1+i, 3+i]` is
     // `[2+2i, 6+2i]`. Before the element parameters could carry complexness
     // this declined with the same "list-valued operand" diagnostic as the
-    // mixed case above, which is what made enabling `complexPromotion` lose
+    // mixed case above, which is what made a promoting mode lose
     // whole-collection arithmetic over a radical body (ROADMAP 2026-08-15).
     const r = compile(
       ce.box(['Multiply', 2, ['List', ['Complex', 1, 1], ['Complex', 3, 1]]]),

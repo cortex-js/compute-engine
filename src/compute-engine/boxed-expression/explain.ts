@@ -31,7 +31,7 @@ const BOOKKEEPING_IDS = new Set(['initial', 'simplified operands']);
 
 /**
  * Build a structured, step-by-step `Explanation` for an operation applied
- * to `expr`. See `BoxedExpression.explain()` for the public contract.
+ * to `expr`. See `Expression.explain()` for the public contract.
  *
  * The explanation runs the same engine code as the plain method — for
  * `'simplify'`, the internal `simplify()` already threads a complete

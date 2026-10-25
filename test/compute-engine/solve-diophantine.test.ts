@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 // A dedicated engine: several tests DECLARE integer-typed unknowns (and one
 // ASSIGNS a value to a would-be parameter name), which mutate the global scope;
@@ -9,7 +9,7 @@ const ce = new ComputeEngine();
 /** Evaluate a multi-variable `Solve` and return its tuples as arrays of numbers
  *  (each coordinate numericized). Throws if the result is not a `List` of
  *  `Tuple`s. Order is preserved. */
-function tuples(expr: BoxedExpression): number[][] {
+function tuples(expr: Expression): number[][] {
   const r = expr.evaluate();
   if (r.operator !== 'List')
     throw new Error(`Expected a List, got ${r.operator}: ${r.toString()}`);
@@ -21,7 +21,7 @@ function tuples(expr: BoxedExpression): number[][] {
 }
 
 /** True if the `Solve` expression stayed unevaluated (undecided / inert). */
-function isInert(expr: BoxedExpression): boolean {
+function isInert(expr: Expression): boolean {
   return expr.evaluate().operator === 'Solve';
 }
 
@@ -431,7 +431,7 @@ describe('DIOPHANTINE — Pythagorean triples (3 unknowns, homogeneous)', () => 
           'z',
         ])
         .evaluate();
-      const engine = (tuple: BoxedExpression, tv: number, t1: number, t2: number) => {
+      const engine = (tuple: Expression, tv: number, t1: number, t2: number) => {
         const sub = { t: ce.number(tv), t_1: ce.number(t1), t_2: ce.number(t2) };
         return [
           tuple.op1.subs(sub).evaluate().re,
@@ -545,7 +545,7 @@ describe('DIOPHANTINE — Pythagorean triples (3 unknowns, homogeneous)', () => 
       expect(r.operator).toBe('List');
       expect(r.nops).toBe(2);
       // z has the hypotenuse role (last unknown) ⇒ family A === famA / B === famB.
-      const engine = (tuple: BoxedExpression, tv: number, t1: number, t2: number) => {
+      const engine = (tuple: Expression, tv: number, t1: number, t2: number) => {
         const sub = { t: ce.number(tv), t_1: ce.number(t1), t_2: ce.number(t2) };
         return [
           tuple.op1.subs(sub).evaluate().re,

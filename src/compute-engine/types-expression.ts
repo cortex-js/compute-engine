@@ -44,19 +44,21 @@ import type {
 } from './types-kernel-evaluation.js';
 
 /**
- * Compute engine surface used by expression types.
+ * Compute engine surface used by the expression and definition types.
  *
- * This interface is augmented by `types-engine.ts` with the concrete
- * `IComputeEngine` members to avoid type-layer circular dependencies.
- *
- * @deprecated Use `ComputeEngine` (the type exported from the package entry
- * points) or `IComputeEngine` instead — the three are interchangeable, and
- * this alias will be removed in a future release.
+ * This interface is empty here and augmented by `types-engine.ts` with the
+ * members of `IComputeEngine`. The expression types cannot import
+ * `IComputeEngine` directly: `types-engine.ts` imports this file, and the
+ * repository allows no import cycle, not even between type-only modules.
+ * `types-definitions.ts` imports this interface from here for the same
+ * reason. The package entry points export their own `ComputeEngine` type
+ * (`IComputeEngine`), which takes precedence over this one; the two are
+ * structurally identical.
  *
  * @category Compute Engine
  */
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ExpressionComputeEngine {}
+export interface ComputeEngine {}
 
 type Sign =
   | 'zero'
@@ -238,7 +240,7 @@ interface BoxedValueDefinition extends BoxedBaseDefinition {
   subscriptEvaluate?: (
     subscript: Expression,
     options: {
-      engine: ExpressionComputeEngine;
+      engine: ComputeEngine;
       numericApproximation?: boolean;
     }
   ) => Expression | undefined;
@@ -528,23 +530,23 @@ interface BoxedOperatorDefinition
   ) => BoxedType | undefined;
   sgn?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ExpressionComputeEngine }
+    options: { engine: ComputeEngine }
   ) => Sign | undefined;
   /** See `OperatorDefinition.eq` (types-definitions.ts) for `prover`. */
   eq?: (a: Expression, b: Expression, prover?: boolean) => boolean | undefined;
   neq?: (a: Expression, b: Expression) => boolean | undefined;
   canonical?: (
     ops: ReadonlyArray<Expression>,
-    options: { engine: ExpressionComputeEngine; scope: Scope | undefined }
+    options: { engine: ComputeEngine; scope: Scope | undefined }
   ) => Expression | null;
   /** The options are `EvaluateHandlerOptions` — spelled out here because that
    * alias lives in `types-definitions.ts`, which imports this file, and
-   * because the engine member is narrowed to `ExpressionComputeEngine`. Keep
+   * because the engine member is narrowed to `ComputeEngine`. Keep
    * the two in sync; `EvaluateHandlerOptions` documents the fields. */
   evaluate?: (
     ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & {
-      engine: ExpressionComputeEngine;
+      engine: ComputeEngine;
       expression?: Expression;
       precision?: number;
       effects: EffectHandlers;
@@ -553,7 +555,7 @@ interface BoxedOperatorDefinition
   evaluateAsync?: (
     ops: ReadonlyArray<Expression>,
     options: Partial<EvaluateOptions> & {
-      engine: ExpressionComputeEngine;
+      engine: ComputeEngine;
       expression?: Expression;
       precision?: number;
       effects: EffectHandlers;
@@ -561,7 +563,7 @@ interface BoxedOperatorDefinition
   ) => Promise<Expression | undefined>;
   evalDimension?: (
     ops: ReadonlyArray<Expression>,
-    options: Partial<EvaluateOptions> & { engine: ExpressionComputeEngine }
+    options: Partial<EvaluateOptions> & { engine: ComputeEngine }
   ) => Expression;
   /** The partial derivatives of the operator. Mirror of
    * `OperatorDerivative` (types-definitions.ts, which imports this file, so
@@ -570,7 +572,7 @@ interface BoxedOperatorDefinition
     | ReadonlyArray<ExpressionInput | Expression>
     | ((
         ops: ReadonlyArray<Expression>,
-        options: { engine: ExpressionComputeEngine; argument: number }
+        options: { engine: ComputeEngine; argument: number }
       ) => Expression | undefined);
   compile?: OperatorCompileHandler;
   _update(def: unknown): void;
@@ -605,9 +607,9 @@ type BoxedDefinition =
 
 type Scope = KernelScope<BoxedDefinition>;
 type EvaluateOptions = KernelEvaluateOptions;
-type Rule = KernelRule<Expression, ExpressionInput, ExpressionComputeEngine>;
-type BoxedRule = KernelBoxedRule<Expression, ExpressionComputeEngine>;
-type BoxedRuleSet = KernelBoxedRuleSet<Expression, ExpressionComputeEngine>;
+type Rule = KernelRule<Expression, ExpressionInput, ComputeEngine>;
+type BoxedRule = KernelBoxedRule<Expression, ComputeEngine>;
+type BoxedRuleSet = KernelBoxedRuleSet<Expression, ComputeEngine>;
 
 type SimplifyOptions = {
   rules?: null | Rule | ReadonlyArray<BoxedRule | Rule> | BoxedRuleSet;
@@ -1148,7 +1150,7 @@ export interface Expression {
    * a context in which to interpret it, such as definition of symbols
    * and functions.
    */
-  readonly engine: ExpressionComputeEngine;
+  readonly engine: ComputeEngine;
 
   /**
    *
@@ -1223,7 +1225,7 @@ export interface Expression {
    * The output preserves the full raw `BigDecimal` value with no rounding,
    * ensuring lossless round-tripping via `ce.expr(expr.json)`. Digits beyond
    * `ce.precision` may be present but are not guaranteed to be accurate.
-   * Use `toMathJson({ fractionalDigits: 'auto' })` for precision-rounded
+   * Use `toMathJson({ digits: 'auto' })` for precision-rounded
    * MathJSON output.
    *
    * @category Primitive Methods
@@ -1233,7 +1235,7 @@ export interface Expression {
   /**
    * Serialize to a MathJSON expression with specified options.
    *
-   * Use `{ fractionalDigits: 'auto' }` to round arbitrary-precision
+   * Use `{ digits: 'auto' }` to round arbitrary-precision
    * numbers to `ce.precision` significant digits. The default
    * (`'max'`) emits all available digits with no rounding.
    */
@@ -1259,7 +1261,7 @@ export interface Expression {
    * emitted with no rounding (same as `toJSON()`). This preserves data
    * fidelity for round-tripping but may include trailing digits beyond
    * `ce.precision` that are not meaningful. Use
-   * `toMathJson({ fractionalDigits: 'auto' })` for rounded output.
+   * `toMathJson({ digits: 'auto' })` for rounded output.
    *
    * :::info[Note]
    * Applicable to canonical and non-canonical expressions.
@@ -2132,7 +2134,7 @@ export interface Expression {
    *   are filtered out. `useVariations` and `matchMissingTerms` default to
    *   `true`. Unprefixed keys are accepted in `substitution`.
    * - A **MathJSON array** (e.g., `['Add', '_a', '_b']`): boxed automatically.
-   * - A **BoxedExpression**: used directly.
+   * - An **Expression**: used directly.
    *
    * Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rules/).
    *
@@ -2472,7 +2474,7 @@ export interface Expression {
    *   3D implicit rendering rarely uses chained relations, but if it
    *   does, callers should decompose first.
    */
-  toSignedFunction(): BoxedExpression | undefined;
+  toSignedFunction(): Expression | undefined;
 
   /**
    * For an expression representing a domain restriction (a `When` whose
@@ -3415,9 +3417,3 @@ export interface EqHandlers {
   eq: (a: Expression, b: Expression) => boolean | undefined;
   neq: (a: Expression, b: Expression) => boolean | undefined;
 }
-
-/** @deprecated Use `Expression` instead. */
-export type BoxedExpression = Expression;
-
-/** @deprecated Use `ExpressionInput` instead. */
-export type SemiBoxedExpression = ExpressionInput;

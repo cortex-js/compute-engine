@@ -1,6 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import { resetDeprecationWarnings } from '../../src/compute-engine/compilation/deprecation-warnings';
 
 /**
  * Two consumer-reported items from the 0.115.0 adoption, both fixed
@@ -24,39 +23,14 @@ import { resetDeprecationWarnings } from '../../src/compute-engine/compilation/d
  * oracle nor a shader-portability test; the only sound per-sample test of a
  * returned value's shape is `typeof v === 'number'`.
  *
- * **202 — the deprecation warnings reach the target-level entry.** They used
- * to live only in the standalone `compile()` export, so a caller going
- * through `ce._getCompilationTarget(name).compile(...)` — the route an
- * integration takes once it needs a specific target — got no signal at all
- * while `realOnly`/`complexPromotion` kept working. `realOnly` has since been
- * REMOVED; both routes still warn about the key so an untyped caller learns
- * the projection is gone rather than silently losing it.
+ * (The second item, 202, made the warnings about the deprecated
+ * `realOnly`/`complexPromotion` options reach the target-level entry. Both
+ * options and their warnings have since been removed, and its tests with
+ * them.)
  *
  * `x = -1` throughout: `\sqrt{x}` promotes there, and `\sqrt{x^2+1}` is the
  * "wide is real" control that must NOT promote.
  */
-
-function capture(fn: () => void): string[] {
-  const seen: string[] = [];
-  const original = console.warn;
-  console.warn = (m: unknown) => {
-    seen.push(String(m));
-  };
-  try {
-    fn();
-  } finally {
-    console.warn = original;
-  }
-  return seen;
-}
-
-// The once-per-process warning keys are consumed by the FIRST case that
-// touches them, so a case that asserts on a key an earlier case already
-// consumed sees silence and reads it as a regression — which is how this file
-// first failed. The reset is at FILE scope, not inside the 202 describe, so a
-// case in any other describe that consumes a key cannot starve one that
-// asserts on it (jest may run describes in any order, `--randomize`).
-beforeEach(() => resetDeprecationWarnings());
 
 describe('201 — mode reports the resolved discipline', () => {
   test('the auto default reports complex when a head was promoted', () => {
@@ -181,100 +155,5 @@ describe('201 — mode reports the resolved discipline', () => {
     // for both.
     expect(typeof r.run({ x: 4 })).toBe('number');
     expect(typeof r.run({ x: -1 })).toBe('object');
-  });
-});
-
-describe('202 — deprecation warnings reach the target-level compile entry', () => {
-  test('a target-level compile with no deprecated option warns about none', () => {
-    const ce = new ComputeEngine();
-    const target = (ce as any)._getCompilationTarget('javascript');
-    const warnings = capture(() =>
-      target.compile(ce.parse('\\sqrt{x}'), { mode: 'strict' })
-    );
-    expect(
-      warnings.filter((w) => /realOnly|complexPromotion/.test(w))
-    ).toHaveLength(0);
-  });
-
-  // `realOnly` is REMOVED, not merely deprecated: it no longer projects
-  // anything. The warning stays because an untyped JavaScript caller can still
-  // pass the key, and silence would let the projection disappear unnoticed.
-  test('a target-level compile warns about the removed realOnly, once', () => {
-    const ce = new ComputeEngine();
-    const target = (ce as any)._getCompilationTarget('javascript');
-    const first = capture(() =>
-      target.compile(ce.parse('\\sqrt{x}'), { realOnly: true })
-    );
-    expect(first.filter((w) => w.includes('realOnly')).length).toBeGreaterThan(
-      0
-    );
-    // Once per process: a second call on the same key stays silent.
-    const second = capture(() =>
-      target.compile(ce.parse('\\sqrt{x}'), { realOnly: true })
-    );
-    expect(second.filter((w) => w.includes('realOnly'))).toHaveLength(0);
-  });
-
-  test('a target-level compile warns about complexPromotion', () => {
-    const ce = new ComputeEngine();
-    const target = (ce as any)._getCompilationTarget('javascript');
-    const warnings = capture(() =>
-      target.compile(ce.parse('\\sqrt{x}'), { complexPromotion: true })
-    );
-    expect(
-      warnings.filter((w) => w.includes('complexPromotion')).length
-    ).toBeGreaterThan(0);
-  });
-
-  // A standalone `compile()` call passes through BOTH warning sites: the
-  // standalone entry warns and normalizes the deprecated option onto `mode`,
-  // then hands off to the target, whose own entry would warn again — the
-  // once-per-key Set is what keeps it to a single message. Nothing else pins
-  // that, so a change to the normalization could start double-warning
-  // undetected.
-  test('the standalone entry warns exactly once about the removed realOnly, across both routes', () => {
-    const ce = new ComputeEngine();
-    const warnings = capture(() =>
-      compile(ce.parse('\\sqrt{x}'), {
-        to: 'javascript',
-        realOnly: true,
-      } as any)
-    );
-    expect(warnings.filter((w) => w.includes('realOnly'))).toHaveLength(1);
-  });
-
-  test('the standalone entry warns exactly once about complexPromotion, across both routes', () => {
-    const ce = new ComputeEngine();
-    const warnings = capture(() =>
-      compile(ce.parse('\\sqrt{x}'), {
-        to: 'javascript',
-        complexPromotion: true,
-      } as any)
-    );
-    expect(warnings.filter((w) => w.includes('complexPromotion'))).toHaveLength(
-      1
-    );
-  });
-
-  // Under `auto`, a promotable unknown-sign radical reaching a user
-  // function's wide parameter is a `LaneMismatch`: the strict attempt
-  // declines and the TARGET is compiled a second time in complex mode. That
-  // doubles the number of times the target-level warning site is reached, so
-  // it is the sharpest test of the once-per-key suppression.
-  test('the auto escalation retry compiles the target twice but still warns once', () => {
-    const ce = new ComputeEngine();
-    ce.parse('f(t) \\coloneq t + 1').evaluate();
-    let r: any;
-    const warnings = capture(() => {
-      r = compile(ce.parse('f(\\sqrt{k})'), {
-        to: 'javascript',
-        realOnly: true,
-      } as any) as any;
-    });
-    // Witness that the retry actually happened — `escalation` carries the
-    // diagnostic of the failed strict attempt.
-    expect(r.success).toBe(true);
-    expect(r.escalation).toBeDefined();
-    expect(warnings.filter((w) => w.includes('realOnly'))).toHaveLength(1);
   });
 });

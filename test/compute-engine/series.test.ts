@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { toAsciiMath } from '../../src/compute-engine/boxed-expression/ascii-math';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 export const ce = new ComputeEngine();
 // Series expansion is compute-heavy; the default 2s internal time limit is
@@ -16,8 +16,8 @@ function seriesArgs(
   fLatex: string,
   x0Latex?: string,
   n?: number
-): BoxedExpression[] {
-  const args: BoxedExpression[] = [ce.parse(fLatex), ce.symbol('x')];
+): Expression[] {
+  const args: Expression[] = [ce.parse(fLatex), ce.symbol('x')];
   // `x0` is positional before `n`; default it to 0 when only `n` is supplied.
   if (x0Latex !== undefined) args.push(ce.parse(x0Latex));
   else if (n !== undefined) args.push(ce.Zero);
@@ -29,12 +29,12 @@ function series(
   fLatex: string,
   x0Latex?: string,
   n?: number
-): BoxedExpression {
+): Expression {
   return ce.function('Series', seriesArgs(fLatex, x0Latex, n)).evaluate();
 }
 
 /** The truncated polynomial `Normal(Series(f, x, x0, n))`. */
-function normal(fLatex: string, x0Latex?: string, n?: number): BoxedExpression {
+function normal(fLatex: string, x0Latex?: string, n?: number): Expression {
   return ce
     .function('Normal', [ce.function('Series', seriesArgs(fLatex, x0Latex, n))])
     .evaluate();
@@ -452,7 +452,7 @@ describe('series display order', () => {
 /** The residue (coefficient of `(x−x0)⁻¹`) extracted from the Series: the
  * constant term of `Series((x−x0)·f, x, x0, 0)`, which is `(x−x0)·f` evaluated
  * at the (removable) pole. */
-function seriesResidue(fLatex: string, x0Latex: string): BoxedExpression {
+function seriesResidue(fLatex: string, x0Latex: string): Expression {
   const p = ce.parse(x0Latex);
   const g = ce.function('Multiply', [ce.symbol('x').sub(p), ce.parse(fLatex)]);
   const s = ce
@@ -464,7 +464,7 @@ function seriesResidue(fLatex: string, x0Latex: string): BoxedExpression {
 /** Assert `Normal(Series(f, x, x0, n))` matches `f` numerically at points near
  * the pole, within a relative tolerance. */
 function expectNumericNearPole(
-  poly: BoxedExpression,
+  poly: Expression,
   f: (x: number) => number,
   x0: number,
   dxs: number[],

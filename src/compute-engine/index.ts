@@ -86,6 +86,7 @@ import type {
   SerializeLatexOptions,
 } from './latex-syntax/types.js';
 import { validateStyleOptions } from './latex-syntax/style-options.js';
+import { validateDisplayDigits } from './numerics/strings.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
 import { isInferredDefinition } from './boxed-expression/definition-guards.js';
 import { markExternalFact } from './boxed-expression/forward-call-reference.js';
@@ -1709,6 +1710,7 @@ export class ComputeEngine implements IComputeEngine {
     // Store engine-wide LaTeX options (merged into every parse/serialize call)
     if (options?.latexOptions) {
       validateStyleOptions(options.latexOptions);
+      validateDisplayDigits(options.latexOptions.digits);
       this._latexOptions = { ...options.latexOptions };
     }
 
@@ -3893,6 +3895,9 @@ export class ComputeEngine implements IComputeEngine {
     // `rootStyle: 'sold'`) is reported here, rather than resulting in an
     // empty serialization later on.
     validateStyleOptions(options);
+    // An invalid `digits` is reported here too, rather than at the next
+    // `.latex` read of any expression.
+    validateDisplayDigits(options.digits);
     this._latexOptions = { ...options };
   }
 
@@ -4745,7 +4750,7 @@ export class ComputeEngine implements IComputeEngine {
    * `false` when its negation is provable, and `undefined` when neither can be
    * decided. `And`/`Or`/`Not` are combined three-valued.
    *
-   * The `query` may be a `BoxedExpression`, a MathJSON expression, or a
+   * The `query` may be an `Expression`, a MathJSON expression, or a
    * **string** parsed as LaTeX (`'x > 0'`, `'$x > 0$'`, or `'\\pi > 0'`); an
    * unparseable string throws.
    *

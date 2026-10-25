@@ -640,7 +640,7 @@ function negateNumberLiteral(
 
 /**
  * Raw-MathJSON predicate mirroring `isContinuationOperand` (its
- * BoxedExpression counterpart in `boxed-expression/type-guards.ts`): true when
+ * Expression counterpart in `boxed-expression/type-guards.ts`): true when
  * `expr` carries a `ContinuationPlaceholder` reachable through additive
  * structure (`Add`/`Subtract`/`Negate`). Used at parse time, where operands are
  * still raw MathJSON, to detect an ellipsis buried in the bottom-up `Subtract`
@@ -855,7 +855,7 @@ function findSeriesVariable(expr: MathJsonExpression): string | null {
  *
  * Deliberately NOT a reuse of `boxed-expression/polynomials.ts`'s
  * `polynomialDegree`: that helper is scoped to genuine (non-negative-integer
- * exponent) polynomials, and operates on `BoxedExpression`, not raw
+ * exponent) polynomials, and operates on `Expression`, not raw
  * MathJSON — neither fits the Laurent-degree, serialization-time need here.
  */
 function seriesTermDegree(

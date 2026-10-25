@@ -186,10 +186,8 @@ describe('SERIALIZATION OPTIONS', () => {
   });
 
   test('LaTeX', () => {
-    expect(x.toLatex({ fractionalDigits: 2 })).toBe('2.0');
-    // A request for no fractional digits is honored, with no truncation
-    // marker since only a zero is dropped
-    expect(x.toLatex({ fractionalDigits: 0 })).toBe('2');
+    // A request for no fractional digits is honored
+    expect(x.toLatex({ digits: { fractional: 0 } })).toBe('2');
     expect(x.toLatex({ decimalSeparator: '{,}' })).toBe('2{,}0');
     expect(x.toLatex({ notation: 'scientific' })).toBe('2.0');
     expect(x.toLatex({ notation: 'engineering' })).toBe('2.0');

@@ -1,7 +1,7 @@
 import type { MathJsonExpression } from '../math-json/types.js';
 import { operands, operator, symbol } from '../math-json/utils.js';
 
-import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
+import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { BoxedDefinition } from '../compute-engine/global-types.js';
 import type { Type } from '../common/type/types.js';
 import { typeToString } from '../common/type/serialize.js';
@@ -227,7 +227,7 @@ export function binderSitesOf(
 
   const selector = def.operator.bindingSites;
   if (selector !== undefined) {
-    let boxed: BoxedExpression[] | undefined;
+    let boxed: Expression[] | undefined;
     try {
       boxed = ops.map((op) => ce.box(op, { form: 'raw' }));
     } catch {

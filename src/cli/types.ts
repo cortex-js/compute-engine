@@ -1,4 +1,4 @@
-import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
+import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { KernelPool } from '../compute-engine/kernel-pool-types.js';
 import type {
   DiagnosticNote,
@@ -72,7 +72,7 @@ export interface McpOptions {
 
 export interface EvaluationResult {
   source: string;
-  value: BoxedExpression;
+  value: Expression;
   diagnostics: ParsingDiagnostic[];
   /** Source range of the statement that produced `value` (see
    * `ExecuteEpsilResult.valueRange`) — the anchor for rendering an

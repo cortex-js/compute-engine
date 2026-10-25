@@ -7,7 +7,7 @@ import {
   parseEpsil,
   type ExecuteEpsilResult,
 } from '../epsil.js';
-import type { BoxedExpression } from '../compute-engine.js';
+import type { Expression } from '../compute-engine.js';
 import {
   budgetCauseOf,
   isTimeoutCancellation,
@@ -94,7 +94,7 @@ export function makeEpsilSession(
 
     evaluateLatex(latex: string): EvaluationResult {
       const start = performance.now();
-      let value: BoxedExpression;
+      let value: Expression;
       try {
         const run = () => engine.parse(latex).evaluate();
         value =

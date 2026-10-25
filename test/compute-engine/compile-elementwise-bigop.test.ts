@@ -14,7 +14,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
@@ -24,8 +24,8 @@ ce.declare('M', 'list<number>');
 ce.declare('n', 'integer');
 
 /** Interpretation, projected the way the JavaScript target represents it. */
-function interpreted(expr: BoxedExpression): unknown {
-  const project = (x: BoxedExpression): unknown => {
+function interpreted(expr: Expression): unknown {
+  const project = (x: Expression): unknown => {
     if (x.operator === 'List') return (x.ops ?? []).map(project);
     return x.re;
   };
@@ -33,7 +33,7 @@ function interpreted(expr: BoxedExpression): unknown {
 }
 
 /** Compile `expr`, run it, and assert it matches interpretation. */
-function parity(expr: BoxedExpression): unknown {
+function parity(expr: Expression): unknown {
   const r = compile(expr, { fallback: false });
   expect(r?.success).toBe(true);
   const value = r!.run!({});

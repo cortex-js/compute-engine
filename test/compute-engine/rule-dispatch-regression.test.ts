@@ -67,7 +67,7 @@ describe('solve for x', () => {
   for (const src of SOLVE_CORPUS) {
     test(src, () => {
       const roots = engine.parse(src).solve('x');
-      // Serialize each root through the BoxedExpression snapshot serializer;
+      // Serialize each root through the Expression snapshot serializer;
       // `null` (no solutions found) is snapshotted as-is.
       expect(roots ? [...roots] : null).toMatchSnapshot();
     });

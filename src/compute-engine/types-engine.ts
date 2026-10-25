@@ -2747,10 +2747,5 @@ export interface IComputeEngine {
 
 declare module './types-expression.js' {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  interface ExpressionComputeEngine extends IComputeEngine {}
-}
-
-declare module './types-definitions.js' {
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   interface ComputeEngine extends IComputeEngine {}
 }

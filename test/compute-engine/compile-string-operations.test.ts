@@ -48,7 +48,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import {
   isCharacter,
@@ -85,7 +85,7 @@ const FLAG_FR = '\u{1F1EB}\u{1F1F7}';
  * OBJECT-domain access already takes on this target, and what `RangeOf` emits
  * for a needle it does not find.
  */
-function project(v: BoxedExpression): unknown {
+function project(v: Expression): unknown {
   if (v.symbol === 'True') return true;
   if (v.symbol === 'False') return false;
   if (v.symbol === 'Nothing' || v.symbol === 'Missing') return undefined;
@@ -103,7 +103,7 @@ function project(v: BoxedExpression): unknown {
  * cell that stops compiling fails loudly with its own diagnostic.
  */
 function agreesWithInterpreter(
-  expr: BoxedExpression,
+  expr: Expression,
   vars: Record<string, unknown> = {}
 ): void {
   const r = compile(expr, { fallback: false, constantFold: false });
@@ -122,7 +122,7 @@ function agreesWithInterpreter(
  * domain-deciding operand takes (`PadStart(s, w)` with `w` bound at run time).
  */
 function agreesWithInterpreterAtRuntime(
-  expr: BoxedExpression,
+  expr: Expression,
   vars: Record<string, string | number>
 ): void {
   const r = compile(expr, { fallback: false, constantFold: false });
@@ -136,9 +136,9 @@ function agreesWithInterpreterAtRuntime(
  * would see, so a compiled run and an interpreted one are given the same
  * operands. */
 function substitute(
-  expr: BoxedExpression,
+  expr: Expression,
   vars: Record<string, string | number>
-): BoxedExpression {
+): Expression {
   return expr.subs(
     Object.fromEntries(
       Object.entries(vars).map(([k, v]) => [
@@ -170,7 +170,7 @@ function substitute(
  * cross-check would silently stop testing anything.
  */
 function throwsAtRuntime(
-  expr: BoxedExpression,
+  expr: Expression,
   vars: Record<string, string | number>,
   message: string,
   expectedInterpreterError: string
@@ -192,12 +192,12 @@ function throwsAtRuntime(
 
 /** Assert `expr` declines to compile — the engine reports `success: false` and
  * falls back to the interpreter, which answers correctly. */
-function failsClosed(expr: BoxedExpression): void {
+function failsClosed(expr: Expression): void {
   expect(compile(expr, { constantFold: false }).success).toBe(false);
 }
 
 /** `expr` compiled for a non-JavaScript target. */
-function compileTo(expr: BoxedExpression, to: 'python' | 'glsl' | 'wgsl') {
+function compileTo(expr: Expression, to: 'python' | 'glsl' | 'wgsl') {
   return compile(expr, { to, constantFold: false } as never);
 }
 

@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { collectionElementType } from '../../src/common/type/utils';
 import { isSubtype } from '../../src/common/type/subtype';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { expectTypeBetween } from '../utils';
 
 /**
@@ -27,7 +27,7 @@ import { expectTypeBetween } from '../utils';
 const ce = new ComputeEngine();
 
 /** Declared type is a collection (list/vector), never a bare scalar. */
-function expectIsList(expr: BoxedExpression): void {
+function expectIsList(expr: Expression): void {
   expect(expr.type.matches('list<any>')).toBe(true);
   expect(expr.type.matches('number')).toBe(false);
   expect(expr.type.matches('boolean')).toBe(false);
@@ -38,7 +38,7 @@ function expectIsList(expr: BoxedExpression): void {
  * the evaluated type is a subtype of (or equal to) the declared type — i.e.
  * they never disagree.
  */
-function expectHonestBroadcast(expr: BoxedExpression): void {
+function expectHonestBroadcast(expr: Expression): void {
   expectIsList(expr);
   const evaluated = expr.evaluate();
   if (evaluated.type.matches(expr.type.type)) return;

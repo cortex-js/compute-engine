@@ -1,5 +1,5 @@
 import { engine as ce } from '../utils';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 
 //
 // Tests for the trigonometric rewrite verbs: TrigExpand, TrigToExp, TrigReduce.
@@ -11,8 +11,8 @@ import type { BoxedExpression } from '../../src/compute-engine';
  * a value from `points`.
  */
 function assertNumericallyEqual(
-  original: BoxedExpression,
-  transformed: BoxedExpression,
+  original: Expression,
+  transformed: Expression,
   vars: string[],
   { complex = false, tol = 1e-9 }: { complex?: boolean; tol?: number } = {}
 ) {
@@ -32,7 +32,7 @@ function assertNumericallyEqual(
 
   for (let i = 0; i < points.length; i++) {
     // Assign each variable a distinct point (rotate through the list).
-    const sub: Record<string, BoxedExpression> = {};
+    const sub: Record<string, Expression> = {};
     for (let v = 0; v < vars.length; v++) {
       const p = points[(i + v) % points.length];
       sub[vars[v]] =
@@ -65,12 +65,12 @@ function assertNumericallyEqual(
   }
 }
 
-function apply(op: string, latex: string): BoxedExpression {
+function apply(op: string, latex: string): Expression {
   return ce.function(op, [ce.parse(latex)]).evaluate();
 }
 
 /** Does the JSON of `expr` contain any non-integer (decimal) numeric literal? */
-function hasDecimalLiteral(expr: BoxedExpression): boolean {
+function hasDecimalLiteral(expr: Expression): boolean {
   const json = JSON.stringify(expr.json);
   // Matches a number token with a fractional or exponent part.
   return /-?\d+\.\d+|-?\d+e[-+]?\d+/i.test(json);

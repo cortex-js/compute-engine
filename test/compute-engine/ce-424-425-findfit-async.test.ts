@@ -2,7 +2,7 @@ import { Worker } from 'node:worker_threads';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { ComputeEngine, createKernelPool } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import { CancellationError } from '../../src/compute-engine';
 import { checkDeadline } from '../../src/common/interruptible';
 
@@ -23,9 +23,9 @@ import { checkDeadline } from '../../src/common/interruptible';
 // - CE-428: the record of the asynchronous route has `route` (`"pool"` or
 //   `"calling-thread"`) and, on the calling thread, `reason`.
 
-const param = (rec: BoxedExpression, name: string): number =>
+const param = (rec: Expression, name: string): number =>
   Number(rec.get('parameters')?.get(name)?.re);
-const residualNorm = (rec: BoxedExpression): number =>
+const residualNorm = (rec: Expression): number =>
   Number(rec.get('residualNorm')?.re);
 
 /** `a cos(b x + c) + d x + e`, where `e` is Euler's number: it compiles, and
@@ -88,10 +88,10 @@ const slowLatex = String.raw`\operatorname{FindFit}(\lbrack ${FIVE_X.map(
  * milliseconds; the span closes when the call returns its promise. */
 function evaluateWithin(
   ce: ComputeEngine,
-  expr: BoxedExpression,
+  expr: Expression,
   ms: number
-): Promise<BoxedExpression> {
-  let p: Promise<BoxedExpression> | undefined;
+): Promise<Expression> {
+  let p: Promise<Expression> | undefined;
   ce.withTimeLimit({ ms, label: 'test:async-fit' }, () => {
     p = expr.evaluateAsync();
     return 0;
@@ -286,7 +286,7 @@ describe('CE-428: the route of the search, with a kernel pool', () => {
     expect(r).toBe('pool');
     expect(reason).toBeUndefined();
     const sync = new ComputeEngine().box(call as any).evaluate();
-    expect(residualNorm(rec as BoxedExpression)).toBe(residualNorm(sync));
+    expect(residualNorm(rec as Expression)).toBe(residualNorm(sync));
   }, 60_000);
 
   test('a multi-start stays on this thread: not-separable', async () => {
@@ -335,7 +335,7 @@ describe('CE-428: the route of the search, with a kernel pool', () => {
     );
     expect([r, reason]).toEqual(['calling-thread', 'pool-declined']);
     const sync = new ComputeEngine().box(call as any).evaluate();
-    expect(residualNorm(rec as BoxedExpression)).toBe(residualNorm(sync));
+    expect(residualNorm(rec as Expression)).toBe(residualNorm(sync));
     failing.dispose();
   }, 60_000);
 
@@ -347,7 +347,7 @@ describe('CE-428: the route of the search, with a kernel pool', () => {
     await expr.evaluateAsync();
     // Raise the budget until the setup fits in it; the first such budget is
     // far too short for the scan.
-    let r: BoxedExpression | undefined;
+    let r: Expression | undefined;
     for (let ms = 5; ms < 5000; ms = Math.ceil(ms * 1.5)) {
       r = await evaluateWithin(ce, expr, ms);
       if (r.get('phase')?.string !== 'setup') break;
@@ -413,7 +413,7 @@ describe('review (deadline frames)', () => {
     ce.declare('OuterWork', {
       signature: '() -> number',
       evaluateAsync: async (_ops: unknown, options: any) => {
-        let p: Promise<BoxedExpression> | undefined;
+        let p: Promise<Expression> | undefined;
         limitStart = Date.now();
         ce.withTimeLimit({ ms: 50, label: 'test:inner' }, () => {
           p = ce.box(['InnerWork']).evaluateAsync(options);
@@ -453,7 +453,7 @@ describe('review (deadline frames)', () => {
         return 0;
       });
     });
-    let p: Promise<BoxedExpression> | undefined;
+    let p: Promise<Expression> | undefined;
     ce.withStepBudget({ steps: 10, label: 'test:budget' }, () => {
       p = ce.box(['BudgetWork']).evaluateAsync();
       return 0;
@@ -526,7 +526,7 @@ describe('review (fit)', () => {
       // Without a budget the pool takes the scan.
       const pooled = await ce.box(call as any).evaluateAsync();
       expect(pooled.get('route')?.string).toBe('pool');
-      let p: Promise<BoxedExpression> | undefined;
+      let p: Promise<Expression> | undefined;
       ce.withStepBudget({ steps: 1e12, label: 'test:fit-budget' }, () => {
         p = ce.box(call as any).evaluateAsync();
         return 0;

@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import { CancellationError } from '../../src/common/interruptible';
 
 //
@@ -19,7 +19,7 @@ beforeEach(() => {
 // --- helpers ---------------------------------------------------------------
 
 /** A `List` of `(x, y)` tuples. */
-function dataset(pts: [number, number][]): BoxedExpression {
+function dataset(pts: [number, number][]): Expression {
   return ce.function(
     'List',
     pts.map(([x, y]) => ce.tuple(ce.number(x), ce.number(y)))
@@ -28,11 +28,11 @@ function dataset(pts: [number, number][]): BoxedExpression {
 
 /** Run `FindFit` and return the result record. */
 function findFit(
-  data: BoxedExpression,
+  data: Expression,
   model: any,
   params: any,
   vars: any
-): BoxedExpression {
+): Expression {
   return ce
     .function('FindFit', [
       data,
@@ -44,17 +44,17 @@ function findFit(
 }
 
 /** Run `FindRoot` and return the result record. */
-function findRoot(equations: any, params: any): BoxedExpression {
+function findRoot(equations: any, params: any): Expression {
   return ce.function('FindRoot', [ce.box(equations), ce.box(params)]).evaluate();
 }
 
-const param = (rec: BoxedExpression, name: string): number =>
+const param = (rec: Expression, name: string): number =>
   Number(rec.get('parameters')?.get(name)?.re);
-const converged = (rec: BoxedExpression): boolean =>
+const converged = (rec: Expression): boolean =>
   rec.get('converged')?.symbol === 'True';
-const residualNorm = (rec: BoxedExpression): number =>
+const residualNorm = (rec: Expression): number =>
   Number(rec.get('residualNorm')?.re);
-const iterations = (rec: BoxedExpression): number =>
+const iterations = (rec: Expression): number =>
   Number(rec.get('iterations')?.re);
 
 /** Deterministic LCG so the "random" non-convergence data is reproducible. */
@@ -796,7 +796,7 @@ describe('FindFit / FindRoot LaTeX round-trip', () => {
 
 describe('FindFit / FindRoot empty lists', () => {
   test('empty model list is an error, not a throw', () => {
-    let rec: BoxedExpression;
+    let rec: Expression;
     expect(() => {
       rec = findFit(
         dataset([
@@ -813,7 +813,7 @@ describe('FindFit / FindRoot empty lists', () => {
   });
 
   test('empty equation list is an error, not a throw', () => {
-    let rec: BoxedExpression;
+    let rec: Expression;
     expect(() => {
       rec = findRoot(['List'], ['List', ['Tuple', 'x', 1]]);
     }).not.toThrow();
@@ -897,7 +897,7 @@ describe('FindFit global option (Tycho row 404)', () => {
   const GLOBAL_B = { dict: { global: { dict: { b: [0.1, 6] } } } };
 
   /** Sum of squared residuals of the fitted record on the points (X, ys). */
-  const rss = (rec: BoxedExpression, ys: number[]): number => {
+  const rss = (rec: Expression, ys: number[]): number => {
     const a = param(rec, 'a');
     const b = param(rec, 'b');
     const c = param(rec, 'c');

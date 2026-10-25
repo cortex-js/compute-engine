@@ -1657,7 +1657,7 @@ export class BoxedNumber
     // symmetric.
     if (other.operator === 'Quantity') return other.is(this, tolerance);
 
-    // BoxedExpression: evaluate other side and compare numerically
+    // Expression: evaluate other side and compare numerically
     if (other.freeVariables.length > 0) return false;
     const nOther = other.N();
     if (!isNumber(nOther)) return false;

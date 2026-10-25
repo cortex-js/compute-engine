@@ -6,7 +6,7 @@ import { ComputeEngine } from '../../src/compute-engine';
  * Two defects fixed 2026-08-18, both pinned here:
  *
  * 1. The input dispatch sniffed `'re' in value && 'im' in value` BEFORE
- *    recognizing an already-boxed expression — and every BoxedExpression
+ *    recognizing an already-boxed expression — and every Expression
  *    has `re`/`im` getters, so any boxed non-numeric value (a lambda, a
  *    list, a radical) was silently converted to a complex number whose
  *    parts are NaN. A MathJSON function expression (an array) was

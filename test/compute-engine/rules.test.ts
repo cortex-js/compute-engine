@@ -299,25 +299,6 @@ describe('ReplaceOptions form', () => {
     expect(result?.json).toEqual(['Add', ['Add', 1, 1], 5]);
   });
 
-  it('deprecated canonical: true behaves like form: canonical', () => {
-    const expr = ce.parse('x + 1');
-    const result = expr.replace(rule, { recursive: true, canonical: true });
-    expect(result?.toString()).toBe('3');
-  });
-
-  it('deprecated canonical: false behaves like form: raw', () => {
-    const expr = ce.expr(['Add', 'x', 5], { form: 'raw' });
-    const result = expr.replace(rule, { recursive: true, canonical: false });
-    expect(result?.json).toEqual(['Add', ['Add', 1, 1], 5]);
-  });
-
-  it('specifying both form and canonical throws', () => {
-    const expr = ce.parse('x + 1');
-    expect(() =>
-      expr.replace(rule, { form: 'canonical', canonical: true })
-    ).toThrow(/mutually exclusive/);
-  });
-
   it('a replacement that only changes the form counts as a change', () => {
     // The rule returns the canonical variant of a raw expression: the value
     // is structurally the same, but the form differs. Before PR #305 this

@@ -4766,7 +4766,7 @@ export function* reduceBigOp<T>(
     // Properly iterate the generator to capture both yielded values and the
     // return value. Re-yield each intermediate accumulator so a wrapping
     // `run()` / `runAsync()` can enforce the engine deadline *between*
-    // iterations. The accumulators are `BoxedExpression` objects; an earlier
+    // iterations. The accumulators are `Expression` objects; an earlier
     // `typeof result !== 'object'` guard here silently swallowed every one of
     // them, so nothing was ever yielded, a single `gen.next()` ran the whole
     // (possibly 10⁴-term) reduction to completion, and an infinite or

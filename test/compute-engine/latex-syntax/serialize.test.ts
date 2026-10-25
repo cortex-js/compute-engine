@@ -383,8 +383,8 @@ describe('CUSTOM LATEX SERIALIZING', () => {
 
   test('Numbers', () => {
     expect(
-      ce.expr(1.2345678912345).toLatex({ fractionalDigits: 6 })
-    ).toMatchInlineSnapshot(`1.234\\,567\\ldots`);
+      ce.expr(1.2345678912345).toLatex({ digits: { fractional: 6 } })
+    ).toMatchInlineSnapshot(`1.234\\,568`);
   });
 });
 

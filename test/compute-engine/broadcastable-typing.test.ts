@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { expectTypeBetween } from '../utils';
 
 /**
@@ -11,7 +11,7 @@ import { expectTypeBetween } from '../utils';
  */
 
 /** True when any node in the tree is an `Error` operand. */
-function hasErrorOperand(expr: BoxedExpression): boolean {
+function hasErrorOperand(expr: Expression): boolean {
   if (expr.operator === 'Error') return true;
   return (expr.ops ?? []).some((op) => hasErrorOperand(op));
 }

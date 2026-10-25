@@ -47,7 +47,7 @@ const fail = (why: string): never => {
 };
 
 // ---------------------------------------------------------------------------
-// Builder: corpus MathJSON + bindings → BoxedExpression
+// Builder: corpus MathJSON + bindings → Expression
 // ---------------------------------------------------------------------------
 
 /** Structural ReplaceAll: return `u` with every subexpression structurally

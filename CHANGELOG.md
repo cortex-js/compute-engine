@@ -2,6 +2,79 @@
 
 ### Breaking Changes
 
+- **The `complexPromotion` compile option is removed.** It was deprecated in
+  0.115.0 as an alias of `mode: 'complex'`, with a one-time console warning.
+  The option is no longer on `CompilationOptions`, `CompileTarget` or the
+  options of `compile()`, and a JavaScript caller that still passes it gets no
+  warning: the key is ignored and the compilation runs in the default
+  `mode: 'auto'`. That mode promotes an unknown-sign `Sqrt`, `Ln`, `Log` or
+  `Power` through the complex kernels, but unlike `mode: 'complex'` it does not
+  treat every wide numeric binding as complex, so the emitted code and the
+  reported `mode` can differ from what `complexPromotion: true` gave. Pass
+  `mode: 'complex'` to keep the old behavior, or `mode: 'strict'` to forbid
+  promotion.
+
+- **The warning for the removed `realOnly` compile option is gone.** The option
+  itself was removed earlier. A JavaScript caller that still passes the key no
+  longer gets a console warning; the key is ignored.
+
+- **Deprecated type aliases are removed.** Use the name on the right:
+
+  | Removed                   | Use               |
+  | :------------------------ | :---------------- |
+  | `BoxedExpression`         | `Expression`      |
+  | `SemiBoxedExpression`     | `ExpressionInput` |
+  | `ExpressionComputeEngine` | `ComputeEngine`   |
+
+  The three were identical to their replacements, so a rename is the whole
+  migration.
+
+- **The `fractionalDigits` serialization option is removed** from
+  `toMathJson()`, `toLatex()` and the LaTeX number format
+  (`JsonSerializationOptions`, `NumberSerializationFormat` and the options of
+  `LatexSyntax`). Use `digits` instead: `fractionalDigits: n` becomes
+  `digits: { fractional: n }`, and `'auto'` and `'max'` keep their names.
+
+  With `toMathJson()`, the replacement gives the same output as before. With
+  `toLatex()`, it does not:
+
+  | Call                             | Before (`fractionalDigits`) | Now (`digits`) |
+  | :------------------------------- | :-------------------------- | :------------- |
+  | π, `toMathJson`, 6 digits        | `3.141593`                  | `3.141593`     |
+  | π, `toLatex`, 3 digits           | `3.141\ldots`               | `3.142`        |
+  | `2.0`, `toLatex`, 2 digits       | `2`                         | `2.00`         |
+
+  `toLatex({ fractionalDigits: n })` cut the digits after the `n`th, wrote a
+  `\ldots` marker when a digit was cut, and dropped trailing zeros.
+  `toLatex({ digits: { fractional: n } })` rounds to exactly `n` digits after
+  the decimal point and writes no marker. The `truncationMarker` option is now
+  read only by the parser.
+
+  An engine-wide `digits` (`ce.latexOptions = { …, digits: { fractional: 2 } }`)
+  now applies to `.latex` and `toLatex()`, as an engine-wide `fractionalDigits`
+  did. Before, only `fractionalDigits` was read from the engine-wide settings.
+
+  A standalone `LatexSyntax` serializer (one used without an engine) now
+  accepts `digits`, in its constructor and per call:
+  `new LatexSyntax({ digits: { fractional: 3 } })` writes `{ num: "3.14159265" }`
+  as `3.142`. It rounds a float and writes an exact number in full. With
+  `"auto"` or `"max"` it writes every digit, since it has no engine precision
+  to round to.
+
+- **A bare number is no longer a `digits` value.** `toLatex({ digits: -4 })`
+  and `toMathJson({ digits: 6 })` were accepted at runtime, although the
+  `DisplayDigits` type does not allow a number: `n ≥ 0` meant
+  `{ fractional: n }` and `n < 0` meant `{ significant: -n }`. Such a call now
+  throws an error that names the accepted values, in `toMathJson()`,
+  `toLatex()` and a standalone `LatexSyntax`. An invalid `digits` set on
+  `ce.latexOptions` throws when it is set. Write
+  `{ fractional: n }` or `{ significant: n }`.
+
+- **The `canonical` option of `replace()` is removed.** Use `form`:
+  `canonical: true` becomes `form: 'canonical'`, `canonical: false` becomes
+  `form: 'raw'`, and a canonical form or a list of forms is passed to `form`
+  unchanged.
+
 - **The `broadcast()` batch body is built on request** (ROADMAP CE-423, user
   decision 2026-10-25). Since 0.166.0, `compile()` of an expression that reads a
   shared list of numbers at a scalar index (`F_{i+1}` with `F: list<number>`)

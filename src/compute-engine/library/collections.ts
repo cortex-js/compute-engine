@@ -3217,7 +3217,7 @@ function iterateArgs(
  * their own iterator (`Filter`, `Drop`, `Rest`, …, all of which already handle
  * a computed source), and read their source's finiteness through
  * `eagerViewSource` below; `Map` is the one that delegates all of them to its
- * source, so the resolution lives here rather than on `BoxedExpression`.
+ * source, so the resolution lives here rather than on `Expression`.
  * Reporting such an operand as a collection engine-wide is NOT a safe
  * generalization — it
  * reclassifies broadcast results for `Sum`/`Product` body typing and for the

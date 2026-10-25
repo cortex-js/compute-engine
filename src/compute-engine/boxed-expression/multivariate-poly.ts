@@ -11,7 +11,7 @@ import { isFunction, isNumber, isSymbol } from './type-guards.js';
  * `PolynomialGCD` operators for the multivariate case (ROADMAP B11). It is
  * deliberately engine-free — pure `bigint` arithmetic on a map from
  * exponent-vectors to coefficients — so the GCD algorithms (`multivariate-gcd.ts`)
- * can run hot without boxing overhead. Convert to/from `BoxedExpression` only at
+ * can run hot without boxing overhead. Convert to/from `Expression` only at
  * the boundary, with {@link mpolyFromBoxed} / {@link mpolyToBoxed}.
  *
  * Representation:

@@ -75,7 +75,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 
@@ -86,7 +86,7 @@ beforeEach(() => {
 
 /** Assert the expression declines to compile, and that the interpreter — which
  * `compile()` falls back to — still answers `expected`. */
-function failsClosed(expr: BoxedExpression, expected: string): void {
+function failsClosed(expr: Expression, expected: string): void {
   expect(compile(expr, { constantFold: false }).success).toBe(false);
   expect(expr.evaluate().toString()).toBe(expected);
 }
@@ -371,7 +371,7 @@ describe('broadcast route: string PARTICIPANTS, not just string operands', () =>
   // silently behind a `success: true`.
 
   /** The interpreter's element-wise verdicts, as booleans. */
-  function interpretedBooleans(expr: BoxedExpression): boolean[] {
+  function interpretedBooleans(expr: Expression): boolean[] {
     return expr.evaluate().ops!.map((op) => op.symbol === 'True');
   }
 
@@ -809,7 +809,7 @@ describe('tuple-vs-tuple EQUALITY is admitted (the aggregate gate carve-out)', (
   // provably numeric (`isNumericTupleParticipant`). Orderings never consult it.
 
   /** Compile with no fallback, assert success, and return the run result. */
-  function runCompiled(expr: BoxedExpression, ...args: unknown[]): unknown {
+  function runCompiled(expr: Expression, ...args: unknown[]): unknown {
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     return (r.run as any)(...args);
@@ -1219,7 +1219,7 @@ describe('tier 2: scalar string equality lowers to exact content equality', () =
   // are already conditioned.
 
   /** Compile with no fallback, assert success, and return the run result. */
-  function runCompiled(expr: BoxedExpression, ...args: unknown[]): unknown {
+  function runCompiled(expr: Expression, ...args: unknown[]): unknown {
     const r = compile(expr, { fallback: false });
     expect(r.success).toBe(true);
     return (r.run as any)(...args);

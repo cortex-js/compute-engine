@@ -9,6 +9,8 @@
  */
 
 import type { MathJsonExpression } from '../../math-json/types.js';
+import type { DisplayDigits } from '../types-kernel-serialization.js';
+import { validateDisplayDigits } from '../numerics/strings.js';
 import type {
   LatexDictionaryEntry,
   LatexString,
@@ -82,8 +84,21 @@ export interface LatexSyntaxOptions {
 
   // --- Serialize-specific ---
 
-  /** @default `"max"` */
-  fractionalDigits?: 'auto' | 'max' | number;
+  /**
+   * How many digits a float is written with: `{ fractional: n }` (`n` digits
+   * after the decimal point) or `{ significant: n }` (`n` significant
+   * digits). The number is rounded, not cut. An exact number (an integer, or
+   * a repeating decimal such as `"0.(3)"`) is written in full.
+   *
+   * `"auto"`, `"max"` and no value write every digit of the MathJSON
+   * number: a standalone serializer has no engine precision to round to.
+   * (A `Measurement` is the exception: with no value, or with `"auto"`, its
+   * error is rounded to 2 significant digits and its value to the same
+   * decimal place.)
+   *
+   * @default no rounding
+   */
+  digits?: DisplayDigits;
 
   /** @default `"auto"` */
   notation?: 'auto' | 'engineering' | 'scientific' | 'adaptiveScientific';
@@ -157,8 +172,11 @@ function defaultSerializeOptions(
     truncationMarker: '\\ldots',
     repeatingDecimal: 'auto',
 
-    // NumberSerializationFormat fields
-    fractionalDigits: opts.fractionalDigits ?? 'max',
+    // NumberSerializationFormat fields. `digits` stays `undefined` when not
+    // given: a number is then written with every digit, and a `Measurement`
+    // keeps its own default rounding (`roundMeasurementForDisplay()`, which
+    // treats `undefined` as `'auto'`).
+    digits: opts.digits,
     notation: opts.notation ?? 'auto',
     avoidExponentsInRange: opts.avoidExponentsInRange ?? [-7, 20],
 
@@ -211,6 +229,9 @@ export class LatexSyntax {
     ReadonlyArray<{ name: string; triggers: string[] }> | undefined;
 
   constructor(options?: LatexSyntaxOptions) {
+    // An invalid `digits` throws here, with a message that names the
+    // accepted values, rather than later (see `serialize()`).
+    validateDisplayDigits(options?.digits);
     this._options = options ?? {};
   }
 
@@ -337,6 +358,10 @@ export class LatexSyntax {
     options?: Partial<SerializeLatexOptions>
   ): string {
     const defaults = defaultSerializeOptions(this._options);
+    // The serializer catches the errors of a sub-expression and writes an
+    // empty string for it, so an invalid `digits` must be rejected before
+    // serializing: otherwise each number would silently disappear.
+    validateDisplayDigits(options?.digits);
     return serializeImpl(expr, this.indexed, { ...defaults, ...options });
   }
 

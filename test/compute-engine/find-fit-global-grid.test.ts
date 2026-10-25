@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import {
   analyzeGlobalShape,
   gridCounts,
@@ -36,11 +36,11 @@ beforeEach(() => {
   ce = new ComputeEngine();
 });
 
-const param = (rec: BoxedExpression, name: string): number =>
+const param = (rec: Expression, name: string): number =>
   Number(rec.get('parameters')?.get(name)?.re);
-const converged = (rec: BoxedExpression): boolean =>
+const converged = (rec: Expression): boolean =>
   rec.get('converged')?.symbol === 'True';
-const residualNorm = (rec: BoxedExpression): number =>
+const residualNorm = (rec: Expression): number =>
   Number(rec.get('residualNorm')?.re);
 
 /** `a cos(b x + c) + d x + e`, where `e` is Euler's number: the model of the
@@ -73,7 +73,7 @@ function globalFit(
   ys: number[],
   ranges: Record<string, number[]>,
   params: any = PARAMS
-): BoxedExpression {
+): Expression {
   return ce
     .box([
       'FindFit',
@@ -86,7 +86,7 @@ function globalFit(
     .evaluate();
 }
 
-const rss = (rec: BoxedExpression): number => residualNorm(rec) ** 2;
+const rss = (rec: Expression): number => residualNorm(rec) ** 2;
 
 // The top of Tycho's frequency range on 200 points: `2π / (smallest gap)`.
 const HI_200 = (2 * Math.PI) / (10 / 199);
@@ -197,7 +197,7 @@ describe('FindFit global grid: the phase solved by least squares', () => {
     c: number,
     ranges: Record<string, number[]>,
     fn: 'Cos' | 'Sin' = 'Cos'
-  ): BoxedExpression => {
+  ): Expression => {
     const g = fn === 'Cos' ? Math.cos : Math.sin;
     const xs = Array.from({ length: n }, (_, i) => (span * i) / (n - 1));
     const ys = xs.map((x) => 2 * g(b * x + c) + 0.1 * x);

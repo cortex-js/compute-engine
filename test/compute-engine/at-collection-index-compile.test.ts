@@ -18,7 +18,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 
@@ -27,7 +27,7 @@ const ce = new ComputeEngine();
 const P = ['List', 10, 20, 30];
 
 /** The interpreted value of `expr`, projected the way a real target would. */
-function interpreted(expr: BoxedExpression): number | number[] {
+function interpreted(expr: Expression): number | number[] {
   const v = expr.evaluate();
   if (v.operator === 'List') return (v.ops ?? []).map((x) => x.re as number);
   // The absence marker (`Missing`/`NaN`, out-of-band access), an unevaluated
@@ -44,7 +44,7 @@ function interpreted(expr: BoxedExpression): number | number[] {
 }
 
 /** Compile `expr`, run it, and assert it matches interpretation. */
-function parity(expr: BoxedExpression): number | number[] {
+function parity(expr: Expression): number | number[] {
   const r = compile(expr);
   expect(r?.success).toBe(true);
   const compiled = r!.run!() as number | number[];
@@ -486,7 +486,7 @@ describe('Route parity with the GLSL lowering (`At` on the GPU)', () => {
   }
 
   /** Compiled JS === interpreted projection === the folded GLSL emission. */
-  function tripleParity(expr: BoxedExpression): void {
+  function tripleParity(expr: Expression): void {
     expect(glslFold(glsl.compile(expr).code!)).toEqual(parity(expr));
   }
 

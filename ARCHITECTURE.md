@@ -544,7 +544,7 @@ Types are written as strings in a small grammar and parsed through
 `reduce.ts` implement compatibility checking and simplification; `serialize.ts`
 renders types back to strings. `boxed-type.ts` provides `BoxedType`, the
 immutable wrapper used throughout the engine and exposed on every
-`BoxedExpression` via `.type`.
+`Expression` via `.type`.
 
 `src/common/` also hosts other shared utilities (an interruptible/cancellation
 helper, JSON/JSON5, Markdown rendering, grapheme handling, fuzzy string
@@ -629,7 +629,7 @@ The assumptions subsystem (`engine-assumptions.ts`, `assume.ts`,
 otherwise-free symbols and query them back. Its public surface is `assume()`,
 `ask()`, `verify()`, and `forget()`.
 
-**Predicate forms.** `assume()` accepts a `BoxedExpression`, a MathJSON
+**Predicate forms.** `assume()` accepts an `Expression`, a MathJSON
 expression, or a **string** (parsed as LaTeX — `'x > 0'`, `'$x > 0$'`, or
 `'\pi > 0'`; `verify()` accepts the same three forms). The supported predicates
 are membership (`Element` / `NotElement`), (dis)equality (`Equal` / `NotEqual`),

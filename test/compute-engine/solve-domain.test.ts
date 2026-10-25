@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
-import type { Expression } from '../../src/math-json/types.ts';
+import type { Expression } from '../../src/compute-engine/global-types';
+import type { MathJsonExpression } from '../../src/math-json/types.ts';
 
 import { engine } from '../utils';
 
@@ -8,7 +8,7 @@ const ce = engine;
 
 /** Evaluate a `Solve` expression and return its solution values as numbers,
  *  sorted ascending. Throws if the result is not a decided `List`. */
-function solutions(expr: BoxedExpression): number[] {
+function solutions(expr: Expression): number[] {
   const r = expr.evaluate();
   if (r.operator !== 'List')
     throw new Error(`Expected a List, got ${r.operator}: ${r.toString()}`);
@@ -18,14 +18,14 @@ function solutions(expr: BoxedExpression): number[] {
 }
 
 /** True if the `Solve` expression stayed unevaluated (undecided). */
-function isUnevaluated(expr: BoxedExpression): boolean {
+function isUnevaluated(expr: Expression): boolean {
   return expr.evaluate().operator === 'Solve';
 }
 
 /** Evaluate a multi-variable `Solve` and return its solution tuples as arrays
  *  of numbers, in the (lexicographic) order the engine produced them. Throws if
  *  the result is not a decided `List` of `Tuple`s. */
-function tuples(expr: BoxedExpression): number[][] {
+function tuples(expr: Expression): number[][] {
   const r = expr.evaluate();
   if (r.operator !== 'List')
     throw new Error(`Expected a List, got ${r.operator}: ${r.toString()}`);
@@ -352,7 +352,7 @@ describe('SOLVE OVER A DOMAIN — periodic root-family expansion', () => {
   }
 
   /** True if every solution value is exact (a π-multiple or 0), not a float. */
-  function allExactPi(expr: BoxedExpression): boolean {
+  function allExactPi(expr: Expression): boolean {
     const r = expr.evaluate();
     if (r.operator !== 'List') return false;
     return r.ops!.every((o) => {
@@ -550,8 +550,8 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
   const cases: Array<
     [
       name: string,
-      lhs: Expression,
-      rhs: Expression,
+      lhs: MathJsonExpression,
+      rhs: MathJsonExpression,
       lo: number,
       hi: number,
       f: (x: number) => number,
@@ -707,7 +707,7 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
   // The solver finds only some of the roots of these equations. A partial
   // list is not an answer: the `Solve` stays unevaluated.
   const incomplete: Array<
-    [name: string, lhs: Expression, lo: number, hi: number]
+    [name: string, lhs: MathJsonExpression, lo: number, hi: number]
   > = [
     // Roots: 2π/3, π, 4π/3, 2π. The solver finds none of them: it does not
     // take the common factor `sin x` out of a sum that has no multiple angle.
@@ -760,7 +760,7 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
   // Each factor gives its own roots, and two roots that are `1.6·10^-9`
   // apart (`π/a` and `π`) are two roots.
   test('sin(x) sin(a x) = 0 over [0, 10] with a = 2000000001/2000000000', () => {
-    const a: Expression = ['Rational', 2000000001, 2000000000];
+    const a: MathJsonExpression = ['Rational', 2000000001, 2000000000];
     const result = ce
       .box([
         'Solve',
@@ -818,10 +818,10 @@ describe('SOLVE OVER A DOMAIN — periodic root families are complete', () => {
 
 describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () => {
   const solve = (
-    lhs: Expression,
-    rhs: Expression,
-    lo: Expression,
-    hi: Expression,
+    lhs: MathJsonExpression,
+    rhs: MathJsonExpression,
+    lo: MathJsonExpression,
+    hi: MathJsonExpression,
     engine: ComputeEngine = ce
   ) =>
     engine.box([
@@ -908,7 +908,7 @@ describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () 
   // x·√(cos x + 99/100) is not real between arccos(-0.99) and
   // 2π - arccos(-0.99), and it is 0 at both ends of that interval.
   test('a root at the edge of a region where f is not real', () => {
-    const lhs: Expression = [
+    const lhs: MathJsonExpression = [
       'Multiply',
       'x',
       ['Sqrt', ['Add', ['Cos', 'x'], ['Rational', 99, 100]]],
@@ -944,7 +944,7 @@ describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () 
       0,
       7,
     ],
-  ] as Array<[string, Expression, Expression, number, number]>)(
+  ] as Array<[string, MathJsonExpression, MathJsonExpression, number, number]>)(
     '%s has no root',
     (_name, lhs, rhs, lo, hi) => {
       expect(solutions(solve(lhs, rhs, lo, hi))).toEqual([]);
@@ -964,12 +964,12 @@ describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () 
     engine.angularUnit = unit;
     // `k` half turns. An end of the domain at a multiple of π is exact in
     // radians.
-    const halfTurns = (k: number): Expression =>
+    const halfTurns = (k: number): MathJsonExpression =>
       unit === 'rad' ? ['Multiply', k, 'Pi'] : k * h;
 
     // The upper end of the domain and the roots, in half turns
     const cases: Array<
-      [lhs: Expression, rhs: Expression, hi: number, expected: number[]]
+      [lhs: MathJsonExpression, rhs: MathJsonExpression, hi: number, expected: number[]]
     > = [
       [['Sin', 'x'], ['Rational', 1, 2], 4, [1, 5, 13, 17].map((k) => k / 6)],
       [['Sin', ['Multiply', 2, 'x']], 0, 2, [0, 0.5, 1, 1.5, 2]],
@@ -997,13 +997,13 @@ describe('SOLVE OVER A DOMAIN — the numeric scan that checks a root list', () 
 
 describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete', () => {
   const solveIn = (
-    f: Expression,
-    domain: Expression,
+    f: MathJsonExpression,
+    domain: MathJsonExpression,
     engine: ComputeEngine = ce
   ) => engine.box(['Solve', f, ['Element', 'x', domain]]);
 
   // Each value is a root of `f`, numerically.
-  const expectRoots = (f: Expression, roots: number[]) => {
+  const expectRoots = (f: MathJsonExpression, roots: number[]) => {
     const fn = ce.box(f);
     for (const x of roots)
       expect(Math.abs(fn.subs({ x: ce.number(x) }).N().re)).toBeLessThan(1e-9);
@@ -1013,7 +1013,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // positions were compared to 10^-9 of the spacing, so one family was lost:
   // the result was a list of 3 of the 6 roots.
   test('two principal roots that are very near give two families', () => {
-    const f: Expression = [
+    const f: MathJsonExpression = [
       'Multiply',
       ['Subtract', ['Sin', 'x'], ['Rational', 1, 2]],
       [
@@ -1067,7 +1067,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
       ],
       ['Interval', 3, 3.3],
     ],
-  ] as Array<[string, Expression, Expression]>)(
+  ] as Array<[string, MathJsonExpression, MathJsonExpression]>)(
     '%s stays unevaluated',
     (_name, f, domain) => {
       expect(isUnevaluated(solveIn(f, domain))).toBe(true);
@@ -1103,7 +1103,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // only over the whole real line and the complex numbers. `sin(πx) = 0`
   // over the integers was `[0]`, but each integer is a root.
   test('a periodic equation over an unbounded domain', () => {
-    const sinPiX: Expression = ['Sin', ['Multiply', 'Pi', 'x']];
+    const sinPiX: MathJsonExpression = ['Sin', ['Multiply', 'Pi', 'x']];
     expect(isUnevaluated(solveIn(sinPiX, 'Integers'))).toBe(true);
     expect(solutions(solveIn(sinPiX, ['Range', -3, 3]))).toEqual([
       -3, -2, -1, 0, 1, 2, 3,
@@ -1139,7 +1139,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     expect(
       solutions(solveIn(['Power', ['Cos', 'x'], 20], ['Interval', 0, 7]))
     ).toEqual([Math.PI / 2, (3 * Math.PI) / 2]);
-    const f: Expression = [
+    const f: MathJsonExpression = [
       'Multiply',
       ['Power', ['Subtract', 'x', 1], 9],
       ['Sin', 'x'],
@@ -1151,7 +1151,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // A function that the root finder cannot invert and that is not periodic
   // has no such families: the list `[1]` was only a part of the roots.
   test('a function that is not periodic, over ℝ and without a domain', () => {
-    const f: Expression = [
+    const f: MathJsonExpression = [
       'Multiply',
       ['Subtract', 'x', 1],
       ['BesselJ', 0, 'x'],
@@ -1167,7 +1167,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // `x + e^x = 0` has the root -W(1) ≈ -0.567143, which the root finder does
   // not find. The answer was `[2]`.
   test('a factor with no closed-form root', () => {
-    const f: Expression = [
+    const f: MathJsonExpression = [
       'Multiply',
       ['Subtract', 'x', 2],
       ['Add', 'x', ['Exp', 'x']],
@@ -1179,7 +1179,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     expect(isUnevaluated(solveIn(f, ['Interval', -1, 3]))).toBe(true);
 
     // A factor with no root is shown to have none: these do not change
-    const cases: Array<[Expression, number[]]> = [
+    const cases: Array<[MathJsonExpression, number[]]> = [
       [
         ['Multiply', ['Subtract', 'x', 2], ['Add', 'x', 3]],
         [-3, 2],
@@ -1209,15 +1209,15 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // `expr.solve()` returns `null` (no answer) for a list that is only a
   // part of the roots. It returned `[1]` and `[2]`.
   test('expr.solve() gives no partial list', () => {
-    const solve = (f: Expression) => ce.box(f).solve('x');
+    const solve = (f: MathJsonExpression) => ce.box(f).solve('x');
     expect(
       solve(['Multiply', ['Subtract', 'x', 1], ['BesselJ', 0, 'x']])
     ).toBeNull();
     expect(
       solve(['Multiply', ['Subtract', 'x', 2], ['Add', 'x', ['Exp', 'x']]])
     ).toBeNull();
-    const values = (f: Expression) =>
-      (solve(f) as ReadonlyArray<BoxedExpression>)
+    const values = (f: MathJsonExpression) =>
+      (solve(f) as ReadonlyArray<Expression>)
         .map((r) => r.N().re)
         .sort((a, b) => a - b);
     expect(values(['Multiply', ['Subtract', 'x', 2], ['Exp', 'x']])).toEqual([
@@ -1237,12 +1237,12 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // candidates of an equation that gives all its roots. A list where each
   // equation gives only a part of its roots has no answer: it was `[2]`.
   test('the common roots of equations that give a part of their roots', () => {
-    const f: Expression = [
+    const f: MathJsonExpression = [
       'Equal',
       ['Multiply', ['Subtract', 'x', 2], ['Add', 'x', ['Exp', 'x']]],
       0,
     ];
-    const g: Expression = [
+    const g: MathJsonExpression = [
       'Equal',
       [
         'Multiply',
@@ -1272,7 +1272,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // The alternatives of an `Or` have the union of their roots as solutions.
   // When one alternative has no answer, the union is not an answer.
   test('expr.solve() of alternatives with a partial list', () => {
-    const partial: Expression = [
+    const partial: MathJsonExpression = [
       'Equal',
       ['Multiply', ['Subtract', 'x', 1], ['BesselJ', 0, 'x']],
       0,
@@ -1280,7 +1280,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     expect(ce.box(['Or', ['Equal', 'x', 3], partial]).solve('x')).toBeNull();
     const both = ce
       .box(['Or', ['Equal', 'x', 3], ['Equal', 'x', 4]])
-      .solve('x') as ReadonlyArray<BoxedExpression>;
+      .solve('x') as ReadonlyArray<Expression>;
     expect(both.map((r) => r.re)).toEqual([3, 4]);
   });
 
@@ -1317,13 +1317,13 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
   // cannot invert. J₁(0) = 0.
   test('a user root template for a function the solver cannot invert', () => {
     const engine = new ComputeEngine();
-    const j1: Expression = ['BesselJ', 1, 'x'];
+    const j1: MathJsonExpression = ['BesselJ', 1, 'x'];
     expect(engine.box(j1).solve('x')).toBeNull();
     engine.solveRules.push({ match: ['BesselJ', 1, '_x'], replace: 0 });
-    const roots = engine.box(j1).solve('x') as ReadonlyArray<BoxedExpression>;
+    const roots = engine.box(j1).solve('x') as ReadonlyArray<Expression>;
     expect(roots.map((r) => r.re)).toEqual([0]);
     expect(solutions(engine.box(['Solve', j1, 'x']))).toEqual([0]);
-    const product: Expression = ['Multiply', ['Subtract', 'x', 1], j1];
+    const product: MathJsonExpression = ['Multiply', ['Subtract', 'x', 1], j1];
     expect(solutions(engine.box(['Solve', product, 'x']))).toEqual([0, 1]);
     expect(
       engine.box(product).explain('solve', { variable: 'x' }).result.operator
@@ -1343,7 +1343,7 @@ describe('SOLVE OVER A DOMAIN — a root list is given only when it is complete'
     // J₀ has real roots (2.405, …), thus `[1]` is not all the roots.
     const zero = new ComputeEngine();
     zero.solveRules.push({ match: ['BesselJ', 0, '_x'], replace: 0 });
-    const j0Product: Expression = [
+    const j0Product: MathJsonExpression = [
       'Multiply',
       ['Subtract', 'x', 1],
       ['BesselJ', 0, 'x'],
@@ -1459,7 +1459,7 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
   // A fresh engine per test: assumptions are process-global within an engine's
   // scope, and these tests deliberately install bound assumptions — use an
   // isolated engine so nothing leaks into the shared `engine` other suites use.
-  const roots = (r: BoxedExpression): number[] => {
+  const roots = (r: Expression): number[] => {
     const v = r.evaluate();
     if (v.operator !== 'List')
       throw new Error(`Expected a List, got ${v.operator}: ${v.toString()}`);
@@ -1474,7 +1474,7 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
       roots(e.box(['Solve', ['Equal', ['Power', 'n', 2], 16], 'n']))
     ).toEqual([4]);
     // Via `expr.solve('n')` (same outer boundary).
-    const m = e.parse('n^2 = 16').solve('n') as BoxedExpression[];
+    const m = e.parse('n^2 = 16').solve('n') as Expression[];
     expect(m.map((x) => x.N().re).sort((a, b) => a - b)).toEqual([4]);
   });
 
@@ -1520,7 +1520,7 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
     const e = new ComputeEngine();
     e.assume(e.parse('a > 0'));
     e.assume(e.parse('x > 0'));
-    const m = e.parse('x^2 = a').solve('x') as BoxedExpression[];
+    const m = e.parse('x^2 = a').solve('x') as Expression[];
     expect(m.map((x) => x.toString()).sort()).toEqual(
       ['-sqrt(a)', 'sqrt(a)'].sort()
     );
@@ -1530,11 +1530,11 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
     const e = new ComputeEngine();
     e.pushScope();
     e.assume(e.parse('n > 0'));
-    let m = e.parse('n^2 = 16').solve('n') as BoxedExpression[];
+    let m = e.parse('n^2 = 16').solve('n') as Expression[];
     expect(m.map((x) => x.N().re).sort((a, b) => a - b)).toEqual([4]);
     e.popScope();
     // The assumption is gone with its scope → both roots return.
-    m = e.parse('n^2 = 16').solve('n') as BoxedExpression[];
+    m = e.parse('n^2 = 16').solve('n') as Expression[];
     expect(m.map((x) => x.N().re).sort((a, b) => a - b)).toEqual([-4, 4]);
   });
 
@@ -1553,7 +1553,7 @@ describe('SOLVE — assumption bounds routed through root filtering', () => {
 
 describe('SOLVE — collection-shaped first argument (lifted constraints)', () => {
   // The digit puzzle: 100a+10b+c = 11(a²+b²+c²), a ∈ 1..9, b,c ∈ 0..9.
-  const digitEq: Expression = [
+  const digitEq: MathJsonExpression = [
     'Equal',
     ['Add', ['Multiply', 100, 'a'], ['Multiply', 10, 'b'], 'c'],
     [
@@ -1593,8 +1593,8 @@ describe('SOLVE — collection-shaped first argument (lifted constraints)', () =
   });
 
   test('pure system spelled as a Set solves like the List form', () => {
-    const eq1: Expression = ['Equal', ['Add', 'x', 'y'], 3];
-    const eq2: Expression = ['Equal', ['Subtract', 'x', 'y'], 1];
+    const eq1: MathJsonExpression = ['Equal', ['Add', 'x', 'y'], 3];
+    const eq2: MathJsonExpression = ['Equal', ['Subtract', 'x', 'y'], 1];
     const asSet = ce.box(['Solve', ['Set', eq1, eq2], ['List', 'x', 'y']]);
     const asList = ce.box(['Solve', ['List', eq1, eq2], ['List', 'x', 'y']]);
     expect(tuples(asSet)).toEqual([[2, 1]]);
@@ -1639,7 +1639,7 @@ describe('SOLVE — collection-shaped first argument (lifted constraints)', () =
   test('duplicate domain merges conjunctively (intersection honored)', () => {
     // 2a = a + 5 → a = 5. The lifted domain 1..9 and the arg-position domain
     // 1..5 both hold at a = 5.
-    const eq: Expression = ['Equal', ['Multiply', 2, 'a'], ['Add', 'a', 5]];
+    const eq: MathJsonExpression = ['Equal', ['Multiply', 2, 'a'], ['Add', 'a', 5]];
     // A single unknown → Phase 1 univariate pipeline → a List of scalar values.
     const inBoth = ce.box([
       'Solve',
@@ -1650,7 +1650,7 @@ describe('SOLVE — collection-shaped first argument (lifted constraints)', () =
 
     // 2a = a + 7 → a = 7: inside the lifted 1..9 but outside the arg 1..5, so
     // the intersection rules it out (decided empty).
-    const eqOut: Expression = ['Equal', ['Multiply', 2, 'a'], ['Add', 'a', 7]];
+    const eqOut: MathJsonExpression = ['Equal', ['Multiply', 2, 'a'], ['Add', 'a', 7]];
     const outside = ce.box([
       'Solve',
       ['Set', eqOut, ['Element', 'a', ['Range', 1, 9]]],
@@ -1678,12 +1678,12 @@ describe('SOLVE — collection-shaped first argument (lifted constraints)', () =
   test('a value-bound bundled unknown is shielded (§D)', () => {
     const fresh = new ComputeEngine();
     fresh.assign('w', 9);
-    const eqn: Expression = [
+    const eqn: MathJsonExpression = [
       'Equal',
       ['Simplify', ['Subtract', 9, ['Power', 'w', 2]]],
       8,
     ];
-    const elem: Expression = ['Element', 'w', ['Range', -3, 3]];
+    const elem: MathJsonExpression = ['Element', 'w', ['Range', -3, 3]];
     // The positional form already conforms; the bundled form must match it.
     const positional = fresh.box(['Solve', eqn, elem]);
     const bundled = fresh.box(['Solve', ['Set', eqn, elem]]);
@@ -1920,7 +1920,7 @@ describe('SOLVE — the type of the unknown and free parameters', () => {
     ])
       expect(
         ce
-          .box(['Solve', eq, 't'] as Expression)
+          .box(['Solve', eq, 't'] as MathJsonExpression)
           .evaluate()
           .toString()
       ).toBe('[1 / x]');
@@ -1936,9 +1936,9 @@ describe('SOLVE — the type of the unknown and free parameters', () => {
   test('an unknown with a value has no type from that value', () => {
     const ce = new ComputeEngine();
     ce.assign('x', 5);
-    const solve = (eq: Expression) =>
+    const solve = (eq: MathJsonExpression) =>
       ce
-        .box(['Solve', eq, 'x'] as Expression)
+        .box(['Solve', eq, 'x'] as MathJsonExpression)
         .evaluate()
         .toString();
     expect(solve(['Equal', ['Multiply', 2, 'x'], 1])).toBe('[1/2]');
@@ -1949,9 +1949,9 @@ describe('SOLVE — the type of the unknown and free parameters', () => {
     const declared = new ComputeEngine();
     declared.declare('x', 'integer');
     declared.assign('x', 5);
-    const solveDeclared = (eq: Expression) =>
+    const solveDeclared = (eq: MathJsonExpression) =>
       declared
-        .box(['Solve', eq, 'x'] as Expression)
+        .box(['Solve', eq, 'x'] as MathJsonExpression)
         .evaluate()
         .toString();
     expect(solveDeclared(['Equal', ['Multiply', 2, 'x'], 1])).toBe('[]');
@@ -1967,7 +1967,7 @@ describe('SOLVE — the type of the unknown and free parameters', () => {
       'Solve',
       ['Equal', ['Add', ['Multiply', 2, 'x'], ['Multiply', 4, 'y']], 1],
       ['List', 'x', 'y'],
-    ] as Expression;
+    ] as MathJsonExpression;
     const fresh = new ComputeEngine().box(json).evaluate().toString();
     const ce = new ComputeEngine();
     ce.assign('x', 3);

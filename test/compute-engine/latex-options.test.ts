@@ -220,7 +220,8 @@ describe('Style options accept a constant as well as a function', () => {
 
   test('an invalid constant throws from the constructor', () => {
     expect(
-      () => new ComputeEngine({ latexOptions: { fractionStyle: 'nope' as any } })
+      () =>
+        new ComputeEngine({ latexOptions: { fractionStyle: 'nope' as any } })
     ).toThrow(/fractionStyle/);
   });
 });
@@ -306,5 +307,113 @@ describe('Tycho item 145 — `invisibleMultiply` and `\\bmod` parenthesization',
         invisibleMultiply: '\\cdot',
       })
     ).toEqual('\\frac{x}{5}\\bmod2');
+  });
+});
+
+// A standalone `LatexSyntax` serializer has no MathJSON step and no engine
+// precision, so it applies `digits` itself: `{ fractional: n }` and
+// `{ significant: n }` round a float number literal; an exact number is
+// written in full; `"auto"` and `"max"` write every digit. (It replaces the
+// removed `fractionalDigits` constructor option, which cut the digits and
+// wrote a `\ldots` marker.)
+describe('standalone LatexSyntax digits', () => {
+  test('{ fractional: n } rounds a float, as a string or a JSON number', () => {
+    const s = new LatexSyntax({ digits: { fractional: 3 } });
+    expect(s.serialize({ num: '3.14159265' })).toBe('3.142');
+    expect(s.serialize(3.14159265)).toBe('3.142');
+    expect(s.serialize({ num: '2.0' })).toBe('2.000');
+  });
+
+  test('an exact number is written in full', () => {
+    const s = new LatexSyntax({ digits: { fractional: 3 } });
+    expect(s.serialize(314)).toBe('314');
+    expect(s.serialize({ num: '0.(3)' })).toBe('0.\\overline{3}');
+  });
+
+  test('{ fractional: 0 } gives an integer spelling', () => {
+    const s = new LatexSyntax({ digits: { fractional: 0 } });
+    expect(s.serialize({ num: '2.7' })).toBe('3');
+  });
+
+  test('{ significant: n } rounds to n significant digits', () => {
+    const s = new LatexSyntax({ digits: { significant: 4 } });
+    // The integer-valued result keeps a float spelling, as in `toMathJson()`
+    // (`"12350.0"`), so that it is not read back as an exact integer.
+    expect(s.serialize({ num: '12345.678' })).toBe('12\\,350.0');
+  });
+
+  test('a per-call digits overrides the constructor option', () => {
+    expect(
+      new LatexSyntax().serialize(
+        { num: '1.23456' },
+        { digits: { fractional: 2 } }
+      )
+    ).toBe('1.23');
+  });
+
+  test('without digits, every digit is written', () => {
+    expect(new LatexSyntax().serialize({ num: '1.23456789' })).toBe(
+      '1.234\\,567\\,89'
+    );
+  });
+});
+
+// The LaTeX layer rounds a float with the rules of the MathJSON
+// serialization, so `toLatex()` (which rounds at both steps) and a
+// standalone serializer agree with `toMathJson()`.
+describe('LaTeX digits follow the MathJSON rounding rules', () => {
+  const sig3 = { digits: { significant: 3 } } as const;
+
+  test('{ significant: n } keeps an integer-valued float and its float spelling', () => {
+    const ce = new ComputeEngine();
+    expect(ce.parse('123456.0').toMathJson(sig3)).toBe('123456.0');
+    expect(ce.parse('123456.0').toLatex(sig3)).toBe('123\\,456.0');
+    expect(ce.parse('123.456').toMathJson(sig3)).toBe('123.0');
+    expect(ce.parse('123.456').toLatex(sig3)).toBe('123.0');
+    const s = new LatexSyntax(sig3);
+    expect(s.serialize({ num: '123.456' })).toBe('123.0');
+    expect(s.serialize({ num: '123456.0' })).toBe('123\\,456.0');
+  });
+
+  test('a count of more than 100 significant digits keeps the number', () => {
+    const ce = new ComputeEngine();
+    const d = { digits: { significant: 150 } } as const;
+    expect(ce.box(['Add', 0.1, 'x']).toLatex(d)).toBe('x+0.1');
+    expect(new LatexSyntax(d).serialize(['Add', 0.1, 'x'])).toBe('0.1+x');
+  });
+
+  test('a float written with a negative exponent is rounded', () => {
+    const s = new LatexSyntax({ digits: { fractional: 2 } });
+    expect(s.serialize({ num: '1e-5' })).toBe('0.00');
+    expect(s.serialize({ num: '12e-3' })).toBe('0.01');
+  });
+
+  test('a JSON number and a number string round the same way, and -0 is 0', () => {
+    const s0 = new LatexSyntax({ digits: { fractional: 0 } });
+    expect(s0.serialize(2.5)).toBe(s0.serialize({ num: '2.5' }));
+    const s2 = new LatexSyntax({ digits: { fractional: 2 } });
+    expect(s2.serialize(-0.000123456)).toBe('0.00');
+  });
+
+  test('a number string with no digit after the point is written with one', () => {
+    expect(new LatexSyntax().serialize({ num: '5.' })).toBe('5.0');
+  });
+});
+
+describe('engine-wide digits validation and cache', () => {
+  test('an invalid ce.latexOptions.digits throws when it is set', () => {
+    const ce = new ComputeEngine();
+    expect(() => {
+      ce.latexOptions = { digits: 3 as any };
+    }).toThrow(/Invalid `digits` option/);
+  });
+
+  test('a change of ce.latexOptions.digits made in place is not served from the cache', () => {
+    const ce = new ComputeEngine();
+    const x = ce.number(1.23456);
+    ce.latexOptions = { ...ce.latexOptions, digits: { fractional: 2 } };
+    expect(x.latex).toBe('1.23');
+    (ce.latexOptions.digits as { fractional: number }).fractional = 3;
+    expect(x.latex).toBe('1.235');
   });
 });

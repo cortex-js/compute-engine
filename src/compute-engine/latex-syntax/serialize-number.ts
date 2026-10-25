@@ -1,5 +1,13 @@
 import { MathJsonExpression } from '../../math-json/types.js';
 import { isNumberObject, machineValue } from '../../math-json/utils.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import {
+  roundToDecimalPlace,
+  roundToSignificant,
+  validateDisplayDigits,
+  withFractionPart,
+} from '../numerics/strings.js';
+import { isFloatSpelling } from '../numerics/expression.js';
 import { NumberFormat, NumberSerializationFormat } from './types.js';
 
 // Some vocabulary:
@@ -12,16 +20,70 @@ import { NumberFormat, NumberSerializationFormat } from './types.js';
 // Avoid using mantissa which has several definitions and is ambiguous.
 
 /**
- * Return a formatted fractional part by detecting repeating patterns.
- * 1234567 -> 123 456 7...
- * 1233333 -> 12(3)
+ * Round the MathJSON number `num` as the `digits` option asks, when `num` is
+ * a float. A float is what `isFloatSpelling()` says: a JSON number that is
+ * not a safe integer, or a number string with a fraction part or a negative
+ * exponent (`"3.14159"`, `"1e-5"`). An exact number (`314`, `"1e+800"`, and
+ * a repeating decimal such as `"0.(3)"`) is returned unchanged, as in the
+ * MathJSON serialization.
  *
- * digitsCount is the number of digits in the whole part and fractional part
+ * The rules are those of the MathJSON serialization of a float, so that a
+ * number already rounded by `toMathJson()` with the same `digits` (the
+ * `toLatex()` route) is returned with the same digits and the same spelling:
+ * - `{ fractional: n }` rounds to `n` digits after the decimal point and pads
+ *   with zeros (`toFixed` semantics). With `n = 0` the result is an integer
+ *   spelling.
+ * - `{ significant: n }` rounds to `n` significant digits. A float with an
+ *   integer value (`"123456.0"`) is not rounded, and a result with an integer
+ *   value keeps a float spelling (`123.456` gives `"123.0"`), so that it is
+ *   not read back as an exact integer.
+ * The value is rounded as a decimal (a `BigDecimal`), a JSON number included:
+ * a JSON number and the same value as a number string give the same digits,
+ * and a count of more than 100 digits, which `Number.toPrecision()` refuses,
+ * works. A negative zero is written `0`.
  *
+ * `"auto"`, `"max"` and `undefined` leave `num` unchanged: this layer has no
+ * engine precision to round to. Any other value, a bare number included, is
+ * rejected before serialization starts, by `LatexSyntax` and by
+ * `toMathJson()` (`validateDisplayDigits()`): an error thrown here would be
+ * caught by the serializer, which writes an empty string for the number.
+ *
+ * A standalone `LatexSyntax` serializer has no MathJSON step, so this is
+ * where its `digits` option is applied.
+ */
+function roundFloatForDisplay(
+  num: string | number,
+  digits: unknown
+): string | number {
+  const d = validateDisplayDigits(digits);
+  if (d === undefined || d === 'auto' || d === 'max') return num;
+  if (!isFloatSpelling(num) || (typeof num === 'string' && num.includes('(')))
+    return num;
+
+  const value = new BigDecimal(typeof num === 'number' ? String(num) : num);
+  let result: string;
+  if ('fractional' in d) {
+    result = roundToDecimalPlace(value, d.fractional);
+  } else {
+    if (value.isInteger()) return num;
+    result = withFractionPart(
+      roundToSignificant(value, d.significant).toString()
+    );
+  }
+  // `-0.00` and `-0` have the value zero: write them without the sign.
+  if (/^-0(\.0*)?$/.test(result)) result = result.slice(1);
+  return result;
+}
+
+/**
+ * Return the formatted fractional part of a number. When
+ * `options.repeatingDecimal` asks for it, a repeating pattern is written with
+ * the selected notation (`1233333` -> `12(3)`); otherwise the digits are
+ * written as given, with the fractional group separators. The number of
+ * digits is chosen before this point (`roundFloatForDisplay()`).
  */
 function formatFractionalPart(
   digits: string,
-  wholeDigitsCount: number,
   options: NumberSerializationFormat
 ): string {
   if (options.repeatingDecimal && options.repeatingDecimal !== 'none') {
@@ -69,29 +131,11 @@ function formatFractionalPart(
   // There was no repeating pattern we could find...
   //
 
-  // Are we displaying fewer digits than were provided?
-  // Display a truncation marker.
-  let maxFractionalDigits =
-    typeof options.fractionalDigits === 'number'
-      ? options.fractionalDigits
-      : Infinity;
-  if (maxFractionalDigits < 0)
-    maxFractionalDigits = maxFractionalDigits - wholeDigitsCount;
-  if (maxFractionalDigits < 0) maxFractionalDigits = 0;
-  // The truncation marker is shown only when a digit that is not zero is
-  // dropped: `2.0` with no fractional digits is written `2`, not `2.\ldots`
-  const extraDigits =
-    digits.length > maxFractionalDigits &&
-    !/^0*$/.test(digits.substring(maxFractionalDigits));
-  if (digits.length > maxFractionalDigits)
-    digits = digits.substring(0, maxFractionalDigits);
+  // The digits are written as given: the `digits` option was applied before
+  // this point (`roundFloatForDisplay()`).
 
   // Insert group separators if necessary
-  digits = insertFractionalGroupSeparator(digits, options);
-
-  if (extraDigits) digits += options.truncationMarker;
-
-  return digits;
+  return insertFractionalGroupSeparator(digits, options);
 }
 
 function formatExponent(exp: string, options: NumberFormat): string {
@@ -121,6 +165,15 @@ export function serializeNumber(
   } else if (typeof expr === 'object' && 'num' in expr) {
     num = expr.num;
   } else return '';
+
+  // A number string with a decimal point and no digit after it (`"5."`,
+  // `"5.e3"`) is a float with an empty fraction part. Give it the fraction
+  // part `0` here, once: the layout functions below assume a digit after the
+  // point, and wrote `"5."` as `5..0`.
+  if (typeof num === 'string')
+    num = num.replace(/^([+-]?\d+)\.(?=$|[eE])/, '$1.0');
+
+  num = roundFloatForDisplay(num, options.digits);
 
   // With `repeatingDecimal: 'auto'` (the default), only an EXACT repeating
   // decimal gets a repetend mark. In MathJSON, a number string with a
@@ -415,15 +468,12 @@ function serializeScientificNotationNumber(
 
   const expString = formatExponent(Number(exponent).toString(), options);
 
-  fractionalPart = formatFractionalPart(
-    fractionalPart,
-    wholePart.length,
-    options
-  );
-  // An integer-valued float keeps one zero after the decimal separator,
-  // unless the caller asked for no fractional digits
-  if (!fractionalPart && isFloat && options.fractionalDigits !== 0)
-    fractionalPart = '0';
+  fractionalPart = formatFractionalPart(fractionalPart, options);
+  // An integer-valued float keeps one zero after the decimal separator. (A
+  // request for no fractional digits, `digits: { fractional: 0 }`, rounds
+  // the float to an integer spelling first, so it does not reach this line
+  // as a float.)
+  if (!fractionalPart && isFloat) fractionalPart = '0';
   if (fractionalPart)
     fractionalPart = options.decimalSeparator + fractionalPart;
 
@@ -495,15 +545,10 @@ function serializeAutoNotationNumber(
   const exponent = formatExponent(exp.toString(), options);
 
   if (fractionalPart)
-    fractionalPart = formatFractionalPart(
-      fractionalPart,
-      wholePart.length,
-      options
-    );
-  // An integer-valued float keeps one zero after the decimal separator,
-  // unless the caller asked for no fractional digits
-  if (!fractionalPart && isFloat && options.fractionalDigits !== 0)
-    fractionalPart = '0';
+    fractionalPart = formatFractionalPart(fractionalPart, options);
+  // An integer-valued float keeps one zero after the decimal separator (see
+  // the same rule above).
+  if (!fractionalPart && isFloat) fractionalPart = '0';
   if (fractionalPart)
     fractionalPart = options.decimalSeparator + fractionalPart;
 

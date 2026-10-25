@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { isTypeCompatibilityError } from '../../src/compute-engine/boxed-expression/type-compatibility-error';
 
@@ -46,14 +46,14 @@ function engine(): ComputeEngine {
  * side by side. Either `'ok'`, the operator route's error-value string, or
  * `'throw: <first line of the message>'`. */
 /** The `ErrorCode` head of an `["Error", ["ErrorCode", code, …], where?]`. */
-function errorCode(e: BoxedExpression): string | undefined {
+function errorCode(e: Expression): string | undefined {
   const cause = e.op1;
   if (cause.operator !== 'ErrorCode') return undefined;
   return cause.op1.string ?? undefined;
 }
 
 /** The `ErrorCode` payload, after the code. */
-function errorPayload(e: BoxedExpression): string[] {
+function errorPayload(e: Expression): string[] {
   const cause = e.op1;
   if (cause.operator !== 'ErrorCode') return [];
   return cause.ops.slice(1).map((x) => x.string ?? x.toString());

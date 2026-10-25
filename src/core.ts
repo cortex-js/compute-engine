@@ -19,8 +19,7 @@ export interface ComputeEngineConstructor {
  * The `ComputeEngine` value is the engine constructor; the `ComputeEngine`
  * type is the structural `IComputeEngine` interface. Exporting the interface
  * (rather than the class, whose private fields make its type nominal) keeps
- * `new ComputeEngine()`, `expr.engine` and `ExpressionComputeEngine`
- * mutually assignable without casts.
+ * `new ComputeEngine()` and `expr.engine` mutually assignable without casts.
  */
 export const ComputeEngine: ComputeEngineConstructor = ComputeEngineImpl;
 export type ComputeEngine = IComputeEngine;

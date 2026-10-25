@@ -70,7 +70,6 @@ export const NUMBER_FORMATTING_OPTIONS: NumberSerializationFormat = {
 
   repeatingDecimal: 'none',
 
-  fractionalDigits: 'max',
   notation: 'auto',
   avoidExponentsInRange: [-7, 20],
 };

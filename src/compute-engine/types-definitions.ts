@@ -9,6 +9,7 @@ import type {
 import type { BoxedType } from '../common/type/boxed-type.js';
 import type { LatexString } from './latex-syntax/types.js';
 import type {
+  ComputeEngine,
   Expression,
   ExpressionInput,
   OperatorCompileHandler,
@@ -23,16 +24,9 @@ import type {
 } from './types-kernel-evaluation.js';
 import type { EffectHandlers } from './types-effects.js';
 
-/**
- * Compute engine surface used by definition callbacks.
- *
- * This interface is augmented by `types-engine.ts` with the concrete
- * `IComputeEngine` members to avoid type-layer circular dependencies.
- *
- * @category Compute Engine
- */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface ComputeEngine {}
+// `ComputeEngine` (imported above) is the engine surface of the definition
+// callbacks: an interface declared in `types-expression.ts` and augmented by
+// `types-engine.ts` with the members of `IComputeEngine`.
 
 type EvaluateOptions = KernelEvaluateOptions;
 

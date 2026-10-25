@@ -5,7 +5,7 @@ import {
 } from '../../src/compute-engine/boxed-expression/factor';
 
 /**
- * `factor()` and `BoxedExpression.toNumericValue()` are mutually recursive:
+ * `factor()` and `Expression.toNumericValue()` are mutually recursive:
  * the numeric-value of a sum factors it, and factoring a sum reads the
  * numeric-value of every term. Nothing shares structure between the nodes the
  * engine builds on the way, so before the memo of 2026-09-22 the same

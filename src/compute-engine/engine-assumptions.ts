@@ -28,7 +28,7 @@ import { parse as parseLatex } from './latex-syntax/latex-syntax.js';
 /**
  * Normalize a predicate argument that may be a string.
  *
- * `assume()` and `verify()` accept a predicate as a `BoxedExpression`, a
+ * `assume()` and `verify()` accept a predicate as an `Expression`, a
  * MathJSON expression, or a **string**. A string is parsed as LaTeX:
  *
  * - `$…$` / `$$…$$`-delimited: the delimiters are stripped, then parsed
@@ -41,7 +41,7 @@ import { parse as parseLatex } from './latex-syntax/latex-syntax.js';
  * expression.
  *
  * A **non-string** input is boxed raw, exactly preserving the previous
- * behavior (an already-canonical `BoxedExpression` stays canonical).
+ * behavior (an already-canonical `Expression` stays canonical).
  *
  * A **string** is boxed CANONICALLY for `verify()`: a freshly parsed
  * relational such as `Less(x, 0)` only reduces against the assumptions DB

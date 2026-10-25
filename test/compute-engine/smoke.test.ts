@@ -33,7 +33,7 @@ function evaluateToJson(latex: string): Expression {
 
 function NToJson(latex: string): Expression {
   // toMathJson() produces a sugared expression, unlike .json
-  return engine.parse(latex).N().toMathJson({ fractionalDigits: 'max' });
+  return engine.parse(latex).N().toMathJson({ digits: 'max' });
 }
 
 function customCanonical(expr) {

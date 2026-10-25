@@ -4,7 +4,7 @@ export type Hold = 'none' | 'all' | 'first' | 'rest' | 'last' | 'most';
 /**
  * An opt-in parse-time diagnostic, collected when a LaTeX string is parsed
  * with `ce.parse(latex, { diagnostics: true })` and exposed on the top-level
- * result via `BoxedExpression.parseDiagnostics`.
+ * result via `Expression.parseDiagnostics`.
  *
  * Diagnostics flag *charitable* parse decisions that are usually errors in
  * machine-generated LaTeX (LLM output, OCR): a name read as multiplication
@@ -277,37 +277,13 @@ export type JsonSerializationOptions = {
   repeatingDecimal: boolean;
 
   /**
-   * Controls how many digits a number is displayed with. See
+   * How many digits `toMathJson()` writes for a number. See
    * {@link DisplayDigits}.
    *
-   * When both `digits` and the deprecated `fractionalDigits` are provided,
-   * `digits` takes precedence.
-   *
-   * **Default**: `"max"` for `toMathJson()`, `"auto"` for the `.latex` getter.
+   * **Default**: `"max"`, every stored digit, so that a MathJSON round trip
+   * keeps the value.
    */
   digits?: DisplayDigits;
-
-  /**
-   * Controls how many digits are emitted for arbitrary-precision numbers.
-   *
-   * - `"max"`: all available digits from the raw `BigDecimal` value,
-   *   including digits beyond the working precision (no rounding).
-   * - `"auto"`: round to `ce.precision` significant digits. Internally
-   *   converted to `-ce.precision` (negative = total significant digits).
-   * - A non-negative number: exactly that many digits after the decimal
-   *   point (passed to `BigDecimal.toFixed()`).
-   *
-   * The `.json` property and `toJSON()` use `"max"` for lossless data
-   * interchange. The `.latex` getter uses `"auto"` so that noise digits
-   * from precision-bounded operations are not displayed.
-   *
-   * **Default**: `"max"` (when called via `toMathJson()` directly)
-   *
-   * @deprecated Use {@link digits} instead. `fractionalDigits: n` (n ≥ 0) maps
-   * to `{ fractional: n }`, `"auto"`/`"max"` map to the same `digits` values,
-   * and the internal negative-`n` overload maps to `{ significant: -n }`.
-   */
-  fractionalDigits: 'auto' | 'max' | number;
 };
 
 /**
@@ -394,17 +370,6 @@ export type ReplaceOptions = {
   iterationLimit: number;
 
   /**
-   * Canonical-status of replaced sub-expressions.
-   *
-   * Equivalent to `form`: `true` maps to `'canonical'`, `false` to `'raw'`,
-   * and a `CanonicalForm` (or array of them) is used as-is. Specifying both
-   * `canonical` and `form` is an error.
-   *
-   * @deprecated Use `form` instead, which covers a wider range of forms.
-   */
-  canonical?: CanonicalOptions;
-
-  /**
    * The form (`'canonical'`, `'structural'`, `'raw'`, or specific canonical
    * transforms) applied to *replaced* sub-expressions.
    *
@@ -417,7 +382,7 @@ export type ReplaceOptions = {
    * already in the requested form before replacing, or request the form on the
    * result after replacement (e.g. with `.canonical`).
    *
-   * If no `form` (or `canonical`) option is specified, the form of each
+   * If no `form` option is specified, the form of each
    * replacement is determined by the rule itself: see `replace()`.
    *
    * Note: a `'raw'` form does not undo a form the replacement already has,

@@ -1044,23 +1044,6 @@ function canonicalMatchLosesWildcards(match: Expression): boolean {
   return result;
 }
 
-function normalizeReplaceForm(
-  options?: Readonly<Partial<ReplaceOptions>>
-): FormOption | undefined {
-  if (options?.canonical !== undefined && options?.form !== undefined)
-    throw new Error(
-      'replace(): options.canonical and options.form are mutually exclusive'
-    );
-
-  if (options?.canonical !== undefined) {
-    if (options.canonical === true) return 'canonical';
-    if (options.canonical === false) return 'raw';
-    return options.canonical;
-  }
-
-  return options?.form;
-}
-
 /**
  * Apply a rule to an expression, assuming an incoming substitution
  * @param rule the rule to apply
@@ -1076,7 +1059,7 @@ export function applyRule(
   options?: Readonly<Partial<ReplaceOptions>>
 ): RuleStep | null {
   if (!rule) return null;
-  const requestedForm = normalizeReplaceForm(options);
+  const requestedForm = options?.form;
 
   // eslint-disable-next-line prefer-const
   let { match, replace, condition, id, onMatch, onBeforeMatch, purpose } = rule;
@@ -1376,7 +1359,6 @@ export function replace(
   const iterationLimit = options?.iterationLimit ?? 1;
   let iterationCount = 0;
   const once = options?.once ?? false;
-  normalizeReplaceForm(options);
 
   // Normalize the ruleset
   let ruleSet: ReadonlyArray<BoxedRule>;

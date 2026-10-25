@@ -750,22 +750,14 @@ export type NumberSerializationFormat = NumberFormat & {
    * Controls how many digits a number is displayed with. See
    * {@link DisplayDigits}.
    *
-   * When serializing via `.toLatex({ digits })`, rounding is applied at the
-   * MathJSON (kernel) layer; the LaTeX layer only lays out the already-rounded
-   * digits.
+   * The LaTeX serializer rounds a float number literal with
+   * `{ fractional: n }` and `{ significant: n }`, and writes an exact number
+   * in full. `"auto"` needs the engine precision, so only `toLatex()` and the
+   * `.latex` getter apply it, when they serialize the expression to MathJSON;
+   * the LaTeX serializer writes every digit of the MathJSON number for
+   * `"auto"` and `"max"`.
    */
   digits?: DisplayDigits;
-
-  /**
-   * The maximum number of significant digits in serialized numbers.
-   * - `"max"`: all availabe digits are serialized.
-   * - `"auto"`: use the same precision as the compute engine.
-   *
-   * Default: `"auto"`
-   *
-   * @deprecated Use {@link digits} instead.
-   */
-  fractionalDigits: 'auto' | 'max' | number;
   notation: 'auto' | 'engineering' | 'scientific' | 'adaptiveScientific'; // @todo: add | 'percent'
   avoidExponentsInRange:
     undefined | null | [negativeExponent: number, positiveExponent: number];

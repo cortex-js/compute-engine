@@ -4037,37 +4037,20 @@ export class BaseCompiler {
       // re-enters at depth 0 and gets its own pool.
       BaseCompiler.resetSharedCompilationBudgets();
     }
-    // The complex-promotion opt-in is latched from the OUTERMOST compilation
-    // only (`complexPromotion`). The analysis here and every target emitter
-    // must agree on each node's value SHAPE — a parent that read `{re, im}`
-    // around a child that emitted a bare number is NaN everywhere — so the
-    // lane must be one answer for a whole compilation. Nested targets (a user
-    // function's body, a broadcast element) are constructed internally and do
-    // not carry the caller's option, so reading it at depth > 0 would flip the
-    // lane back mid-compile.
-    // Only the languages whose emitters implement the promotion may latch it.
-    // The option reaches a target two ways — the registered route, and the
-    // direct `compile(expr, { target })` route, which stamps the caller's
-    // choice onto whatever target object it was handed — and neither knows the
-    // language. A shader target's `Sqrt`/`Ln`/`Log` emitters never consult
-    // `promotesRadicalToComplex`, so letting the flag through there would make
-    // the ANALYSIS report complex over emitters still producing a scalar:
-    // measured, `compile(Mod(1e5·√(x−1), 1), { target: glslRaw,
-    // complexPromotion: true })` turned a working
-    // `mod(100000.0 * sqrt(x + -1.0), 1.0)` into a D6 decline. Restricting the
-    // latch here — the one choke-point every target funnels through — enforces
-    // the option's documented scope on every entry path at once.
-    // The compile MODE (`CompileMode`) is latched here too, from the outermost
-    // compilation only and for the same reason: the analysis and every
-    // emitter must agree on each node's value SHAPE for the whole
-    // compilation. `resolveCompileMode` validates the requested mode against
+    // The compile MODE (`CompileMode`) is latched from the OUTERMOST
+    // compilation only. The analysis here and every target emitter must agree
+    // on each node's value SHAPE — a parent that read `{re, im}` around a
+    // child that emitted a bare number is NaN everywhere — so the lane must be
+    // one answer for a whole compilation. Nested targets (a user function's
+    // body, a broadcast element) are constructed internally and do not carry
+    // the caller's option, so reading it at depth > 0 would flip the lane back
+    // mid-compile. `resolveCompileMode` validates the requested mode against
     // the target's `supportedModes` — a mode the target does not offer is a
     // `capability` decline, thrown here so it surfaces through the target's
     // ordinary decline channel — and supplies the target's default when none
-    // was requested. It is resolved BEFORE either latch is written: the throw
+    // was requested. It is resolved BEFORE the latch is written: the throw
     // happens outside the `try`/`finally` below, so a latch mutated ahead of
     // it would never be restored.
-    const prevPromotion = BaseCompiler._complexPromotion;
     const prevMode = BaseCompiler._mode;
     const prevRealOnlyLowering = BaseCompiler._realOnlyLowering;
     // Fold-before-shape for the complexness oracle (Tycho item 229): with
@@ -4140,9 +4123,6 @@ export class BaseCompiler {
       // Written only after `resolveCompileMode`, like the latches above: its
       // throw escapes the `try`/`finally` below, which is what restores this.
       BaseCompiler._unrolledIndexValues = [];
-      BaseCompiler._complexPromotion =
-        target.complexPromotion === true &&
-        BaseCompiler.COMPLEX_PROMOTION_LANGUAGES.has(target.language ?? '');
       BaseCompiler._mode = nextMode;
       // The per-compilation report (`modeReport`) starts fresh: no head
       // promoted yet; the discipline is the one just latched.
@@ -4308,7 +4288,6 @@ export class BaseCompiler {
           promotedOutsideDefinitions: BaseCompiler._promoted,
         };
       }
-      BaseCompiler._complexPromotion = prevPromotion;
       BaseCompiler._mode = prevMode;
       BaseCompiler._realOnlyLowering = prevRealOnlyLowering;
       // Restore the caller's oracle-fold latch (undefined at depth 0:
@@ -4419,23 +4398,6 @@ export class BaseCompiler {
   private static _boundVarsCtx: ReadonlySet<string> | undefined;
 
   /**
-   * Whether the OUTERMOST compilation opted in to complex promotion for
-   * `Sqrt`/`Ln`/`Log` over an operand of unknown sign (`complexPromotion`).
-   * Latched by `compile()` at depth 0 and restored on the way out.
-   */
-  private static _complexPromotion = false;
-
-  /**
-   * Whether the compilation in progress promotes an unknown-sign
-   * `Sqrt`/`Ln`/`Log` to the complex lane. Target emitters read this so their
-   * lowering agrees with `isComplexValued`'s report to the enclosing node —
-   * the shape invariant compiled correctness rests on.
-   */
-  static get complexPromotion(): boolean {
-    return BaseCompiler._complexPromotion;
-  }
-
-  /**
    * The compile mode of the OUTERMOST compilation (`CompileMode`), latched by
    * `compile()` at depth 0 from the target's `mode` (validated against its
    * `supportedModes`, defaulting per `resolveCompileMode`) and restored on
@@ -4474,8 +4436,8 @@ export class BaseCompiler {
    * Whether the compilation in progress PROMOTES: an unknown-sign
    * `Sqrt`/`Ln`/`Log` (and the real-typed operand of an inverse-trig head of
    * unknown magnitude) lowers through the complex kernels — the `auto` and
-   * `complex` disciplines, and the deprecated `complexPromotion` opt-in.
-   * `strict` never promotes (the shader targets' model).
+   * `complex` disciplines. `strict` never promotes (the shader targets'
+   * model).
    *
    * Promotion is off, in every mode, inside the value of a `Typed` node whose
    * ascribed type is real when that value is complex only because of
@@ -4489,8 +4451,8 @@ export class BaseCompiler {
   }
 
   /**
-   * Whether the compile mode promotes (`auto`, `complex`, or the deprecated
-   * `complexPromotion` opt-in), also inside the value of a real ascription
+   * Whether the compile mode promotes (`auto` or `complex`), also inside the
+   * value of a real ascription
    * (`withPromotionSuppressed`). A module-level definition (a user function)
    * is always compiled with the promotion of the mode
    * (`withPromotionUnsuppressed`), so the choice of the definition to emit
@@ -4500,11 +4462,7 @@ export class BaseCompiler {
    * compiled with promotion on and reused by every later call.
    */
   private static get modePromotes(): boolean {
-    return (
-      BaseCompiler._complexPromotion ||
-      BaseCompiler._mode === 'auto' ||
-      BaseCompiler._mode === 'complex'
-    );
+    return BaseCompiler._mode === 'auto' || BaseCompiler._mode === 'complex';
   }
 
   /**
@@ -5570,19 +5528,6 @@ export class BaseCompiler {
     return requested;
   }
 
-  /**
-   * The target languages whose `Sqrt`/`Ln`/`Log` emitters consult
-   * `promotesRadicalToComplex`, and so may honor the `complexPromotion`
-   * option. Any other language — the shader targets, the interval target, a
-   * caller's custom target — keeps the real kernel unconditionally, because
-   * its emitters would otherwise disagree with the analysis about a node's
-   * value shape.
-   */
-  private static readonly COMPLEX_PROMOTION_LANGUAGES = new Set([
-    'javascript',
-    'python',
-  ]);
-
   /** The heads whose real kernel can silently swallow a complex result. */
   private static readonly PROMOTABLE_RADICAL_HEADS = new Set([
     'Sqrt',
@@ -6231,10 +6176,10 @@ export class BaseCompiler {
 
   /**
    * Whether applying `head` to `args` takes the COMPLEX lane purely because
-   * the caller opted in to complex promotion (`complexPromotion`).
+   * the compile mode promotes (`auto`, `complex`).
    *
    * The rule is deliberately NOT "the node's type admits complex". That test
-   * is too weak in both directions and misses the case the option exists for:
+   * is too weak in both directions and misses the case promotion exists for:
    * `√(t−1)` types the wide `number` — not a non-real type — whenever
    * `t` is an undeclared symbol or an `unknown` parameter, which is exactly
    * the shape a user function's body has. Keying off the type there would
@@ -6268,7 +6213,7 @@ export class BaseCompiler {
   ): boolean {
     // The `auto` and `complex` disciplines promote (design §2: "unknown-sign
     // radicals/logarithms promote" — the interpreter's `√(−1)`, `ln(−2)` fall
-    // out), as does the deprecated `complexPromotion` opt-in; strict never.
+    // out); strict never.
     if (!BaseCompiler.promotionActive) return false;
     // Broadcast closures re-invoke the head's scalar codegen on synthetic
     // element temps, which carry no sign or type information of their own —
@@ -7230,7 +7175,7 @@ export class BaseCompiler {
    * would not follow this rule and is left to decline.
    *
    * Reading arithmetic this way is what lets an enclosing form see the elements
-   * the closure actually produces. Under `complexPromotion` with
+   * the closure actually produces. In a promoting mode with
    * `w(t) := [√(t−1), √(t−2)]`, `_fn_w` returns `[{re, im}, {re, im}]`, so
    * `2·w(t)` is an array of complex objects; without this route an enclosing
    * `(2·w(t))[1] + 1` would classify the whole `Multiply` from
@@ -26281,7 +26226,7 @@ export class BaseCompiler {
         if (viaElement !== undefined) return viaElement;
       }
     }
-    // The `complexPromotion` opt-in is answered BEFORE the type branches
+    // Promotion is answered BEFORE the type branches
     // below, because the types it has to override are the WIDE ones: an
     // unknown-sign `√(t−1)` types `number`, which is neither non-real
     // (so the `isNonRealNumber` arm never fires) nor `real`. See
@@ -26495,9 +26440,9 @@ export class BaseCompiler {
         expr.operator === 'Ln' ||
         expr.operator === 'Log'
       ) {
-        // The `complexPromotion` opt-in is NOT re-checked here: the gate at
+        // Promotion is NOT re-checked here: the gate at
         // the top of this function already answered `true` for every promoted
-        // case, so reaching this line under the opt-in means
+        // case, so reaching this line in a promoting mode means
         // `promotesRadicalToComplex` declined — every operand is provably
         // non-negative — and the emitters' `promotesToComplexLane` will
         // decline identically. Returning `true` here would therefore report
@@ -39957,7 +39902,7 @@ export class BaseCompiler {
         // object, i.e. `re: '[object Object]0'` behind `success: true`.
         //
         // This is not radical PROMOTION and does not go through
-        // `complexPromotion`: nothing is being inferred complex from an
+        // `promotesRadicalToComplex`: nothing is being inferred complex from an
         // operand's sign. The author WROTE `(complex) -> complex`, and the
         // call site is made to honour it (`coerceToComplex` /`_SYS.cplx`), so
         // the lane here is that declaration being read back — which is why

@@ -1407,7 +1407,7 @@ describe('isFinite propagation (B3 latent finiteness gap)', () => {
   // Finiteness is now propagated structurally through Sqrt/Root/Power/Divide of
   // finite operands, so finite symbolic constants report isFinite = true before
   // being evaluated to a number (previously undefined). "Definitely nonzero" is
-  // established via a known sign (BoxedExpression has no isZero getter).
+  // established via a known sign (Expression has no isZero getter).
   test('finite symbolic constants are known finite', () => {
     expect(engine.parse('\\sqrt{\\pi}').isFinite).toBe(true);
     expect(engine.parse('\\frac{1}{\\pi}').isFinite).toBe(true);

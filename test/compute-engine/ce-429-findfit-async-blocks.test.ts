@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine';
+import type { Expression } from '../../src/compute-engine';
 import {
   linearScanSolve,
   linearScanSolveSteps,
@@ -99,7 +99,7 @@ describe('CE-429: FindFit.evaluateAsync() on the calling thread', () => {
       const call = fitCall(12, ranges);
       const sync = new ComputeEngine().box(call as any).evaluate();
       const rec = await new ComputeEngine().box(call as any).evaluateAsync();
-      const params = (r: BoxedExpression) =>
+      const params = (r: Expression) =>
         ['a', 'b', 'c', 'd'].map((p) =>
           Number(r.get('parameters')?.get(p)?.re)
         );

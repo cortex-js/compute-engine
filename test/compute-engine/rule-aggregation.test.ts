@@ -24,7 +24,7 @@ import { aggregateHotHeadDispatch } from '../../src/compute-engine/boxed-express
 import { replace } from '../../src/compute-engine/boxed-expression/rules';
 import { SIMPLIFY_CORPUS_FLAT } from './rule-dispatch-corpus';
 import type {
-  BoxedExpression,
+  Expression,
   BoxedRule,
   BoxedRuleSet,
   RuleStep,
@@ -40,9 +40,9 @@ import type {
 function foldableRule(
   head: string,
   id: string,
-  fire: (expr: BoxedExpression) => BoxedExpression | undefined
+  fire: (expr: Expression) => Expression | undefined
 ): BoxedRule {
-  const replaceFn = (expr: BoxedExpression): RuleStep | undefined => {
+  const replaceFn = (expr: Expression): RuleStep | undefined => {
     const value = fire(expr);
     if (value === undefined) return undefined;
     return { value, because: id, purpose: 'simplify' } as RuleStep;
@@ -101,11 +101,11 @@ describe('aggregateHotHeadDispatch — synthetic firing path', () => {
     expect(typeof aggSet.rules[0].replace).toBe('function');
   });
 
-  const finalValue = (set: BoxedRuleSet, expr: BoxedExpression) => {
+  const finalValue = (set: BoxedRuleSet, expr: Expression) => {
     const steps = replace(expr, set, REPLACE_OPTS);
     return steps.length ? steps[steps.length - 1].value : expr;
   };
-  const trailingBecause = (set: BoxedRuleSet, expr: BoxedExpression) => {
+  const trailingBecause = (set: BoxedRuleSet, expr: Expression) => {
     const steps = replace(expr, set, REPLACE_OPTS);
     return steps.length ? steps[steps.length - 1].because : null;
   };
@@ -211,7 +211,7 @@ describe('aggregateHotHeadDispatch — real-corpus differential', () => {
     '\\ln(-1)\\cdot\\Gamma(1/2)', // hot-head fire × non-hot fire
   ];
 
-  const corpus: BoxedExpression[] = [
+  const corpus: Expression[] = [
     ...SIMPLIFY_CORPUS_FLAT.map((src) => ce.parse(src)),
     ...FUNGRIM_TRIGGERS.map((src) => ce.parse(src)),
   ].filter((e) => e.isValid);

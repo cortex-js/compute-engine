@@ -6,7 +6,7 @@
  * `sympy/solvers/diophantine/diophantine.py` (SymPy 1.14.0, BSD-3), plus a
  * direct implementation of Tonelli–Shanks / Hensel modular square roots. It is
  * deliberately engine-free: every function takes and returns `bigint`s (no
- * `BoxedExpression`, no `ComputeEngine`). Per the `numerics/` layering rule it
+ * `Expression`, no `ComputeEngine`). Per the `numerics/` layering rule it
  * imports only from other `numerics/` files and `common/`.
  *
  * References throughout cite the SymPy source as `SymPy diophantine.py:<line>`

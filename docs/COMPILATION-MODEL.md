@@ -603,10 +603,13 @@ complex scalar `w` is `false` at every element (the value keeps the head's
 shape). In `strict` mode nothing changes: such an operand fails closed.
 Targets provide the projection through the `complexRealElements` hook
 (`_SYS.crealElements` on JavaScript, `_ce_creal_elems` on Python); a target
-without it keeps the compile-time decline. The deprecated
-`complexPromotion` option is a compatibility shim, not separate semantics. The
-`realOnly` option, which projected a compiled unit's RESULT to a real number
-(or `NaN`) after the kernel had run, is removed: a compiled value whose
+without it keeps the compile-time decline. The `complexPromotion` option, a
+compatibility alias of `mode: 'complex'` since 0.115.0, is removed with no
+warning: a call that still passes `true` is compiled in the default `auto`
+mode, which promotes unknown-sign radicals but does not lift wide bindings as
+`complex` does. The `realOnly` option, which projected a compiled unit's
+RESULT to a real number (or `NaN`) after the kernel had run, is removed, and
+so is its warning: a compiled value whose
 imaginary part is exactly zero is already returned as a plain number, so a
 consumer tests `typeof v === 'number'` per sample and maps a `{re, im}` at its
 own value boundary.

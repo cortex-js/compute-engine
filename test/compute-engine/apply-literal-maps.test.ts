@@ -8,7 +8,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const SUM_BODY = ['Sum', ['Cos', 'n'], ['Limits', 'n', 1, 'i']];
@@ -286,7 +286,7 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
     ];
     const bodies = [7, ['Add', 'u', 1]];
     const params = { untyped: 'u', typed: ['Typed', 'u', 'real'] };
-    const outcome = (call: BoxedExpression): string => {
+    const outcome = (call: Expression): string => {
       const result = call.evaluate();
       if (result.isSame(call)) return 'held';
       const json = JSON.stringify(result.json);
@@ -335,7 +335,7 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
       ce: ComputeEngine,
       literal: unknown,
       ...args: unknown[]
-    ): BoxedExpression[] => {
+    ): Expression[] => {
       ce.assign('h', ce.box(literal as never));
       ce.declare('f', 'function');
       ce.assign('f', ce.box(literal as never));

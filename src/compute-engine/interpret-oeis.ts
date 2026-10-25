@@ -191,7 +191,7 @@ function closedFormCandidates(line: string): string[] {
 }
 
 /**
- * Parse an ASCII-ish OEIS RHS into a `BoxedExpression` in the single index
+ * Parse an ASCII-ish OEIS RHS into an `Expression` in the single index
  * variable `n`, or `null` when it can't be parsed cleanly.
  *
  * `ce.parse` reads LaTeX, so a small set of multi-letter function spellings is

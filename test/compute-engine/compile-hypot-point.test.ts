@@ -14,7 +14,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
@@ -322,7 +322,7 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     // item 251 design, `docs/COMPILATION-MODEL.md` "Complex modes"), so a
     // mixed list compiles and the complex cell answers NaN. A list whose
     // every element is provably non-real still declines at compile time.
-    const mixed: BoxedExpression = ce.box([
+    const mixed: Expression = ce.box([
       'Hypot',
       ['List', ['Complex', 1, 1], 2],
       3,
@@ -334,7 +334,7 @@ describe('a compiled Hypot consumes a point leg whole', () => {
     expect(Number.isNaN(value[0])).toBe(true);
     expect(value[1]).toBeCloseTo(Math.hypot(2, 3), 12);
 
-    const allComplex: BoxedExpression = ce.box([
+    const allComplex: Expression = ce.box([
       'Hypot',
       ['List', ['Complex', 1, 1], ['Complex', 0, 2]],
       3,

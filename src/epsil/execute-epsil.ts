@@ -20,7 +20,7 @@ import {
 // adds no runtime dependency (and no `compute-engine` cycle — the engine never
 // imports `epsil`). The engine is injected at call time, mirroring the
 // `parseLatex`/`ILatexSyntax` injection pattern used elsewhere in `src/epsil`.
-import type { BoxedExpression, ComputeEngine } from '../compute-engine.js';
+import type { Expression, ComputeEngine } from '../compute-engine.js';
 import type { Type } from '../common/type/types.js';
 
 import {
@@ -87,7 +87,7 @@ export interface ExecuteEpsilAsyncOptions extends ExecuteEpsilOptions {
 export interface ExecuteEpsilResult {
   /** The value of the last executed statement (or `Nothing`). Runtime problems
    * surface here as `["Error", …]` values, never as thrown exceptions. */
-  value: BoxedExpression;
+  value: Expression;
   /** Parse-time (and a few execution-time) problems: unparseable syntax, gated
    * host pragmas, a `#error` directive — plus a `static-type-error` diagnostic
    * for each type error the engine detects when the program is canonicalized
@@ -161,7 +161,7 @@ export function executeEpsil(
   while (!step.done) {
     // An exception of `evaluate()` goes back into the run, at the statement
     // that yielded: its `catch` makes the error the value of the statement.
-    let value: BoxedExpression;
+    let value: Expression;
     try {
       value = step.value.evaluate();
     } catch (e) {
@@ -230,7 +230,7 @@ export async function executeEpsilAsync(
     while (!step.done) {
       // The evaluation starts here, with the fields of the run in place: it
       // reads the deadline frame when it starts.
-      let pending: Promise<BoxedExpression>;
+      let pending: Promise<Expression>;
       try {
         pending = step.value.evaluateAsync({ signal });
       } catch (e) {
@@ -238,7 +238,7 @@ export async function executeEpsilAsync(
         continue;
       }
       ce._deadlineFrame = outsideFrame;
-      let value: BoxedExpression | undefined;
+      let value: Expression | undefined;
       let failure: { error: unknown } | undefined;
       try {
         value = await pending;
@@ -275,7 +275,7 @@ function* executeEpsilRun(
   ce: ComputeEngine,
   source: string,
   options: ExecuteEpsilOptions | undefined
-): Generator<BoxedExpression, ExecuteEpsilResult, BoxedExpression> {
+): Generator<Expression, ExecuteEpsilResult, Expression> {
   // The BATCH (ruling P47): everything below — the static pre-pass and the
   // evaluation loop alike — runs under one id, which the protocol registry
   // stamps on the implementations it installs so that a second implementation
@@ -356,7 +356,7 @@ function* executeEpsilSteps(
   source: string,
   options: ExecuteEpsilOptions | undefined,
   laterDeclarations: LaterDeclarations
-): Generator<BoxedExpression, ExecuteEpsilResult, BoxedExpression> {
+): Generator<Expression, ExecuteEpsilResult, Expression> {
   const diagnostics: ParsingDiagnostic[] = [];
 
   let ast: MathJsonExpression;
@@ -480,7 +480,7 @@ function* executeEpsilSteps(
       );
   }
 
-  let value: BoxedExpression = ce.Nothing;
+  let value: Expression = ce.Nothing;
   let valueRange: [number, number] | undefined;
   // The statement whose value is `value`: the last statement that ran.
   let valueStatement: MathJsonExpression | undefined;
@@ -507,7 +507,7 @@ function* executeEpsilSteps(
   // check of the loop below records the cancellation.
   const prepared = budgetExpired
     ? {
-        preboxed: new Map<number, BoxedExpression>(),
+        preboxed: new Map<number, Expression>(),
         scanned: new Set<number>(),
       }
     : prepareFunctionDeclarations(
@@ -561,7 +561,7 @@ function* executeEpsilSteps(
     let redeclared: string | undefined;
     // The canonical form of the statement, which maps an error's frame back
     // to the written operand of a reordered call (`canonicalOrderOf`).
-    let boxedStmt: BoxedExpression | undefined;
+    let boxedStmt: Expression | undefined;
 
     // Run BEFORE the statement is boxed: this scan reads the RAW ast and needs
     // no value, and boxing an application INFERS a function signature for an
@@ -1085,11 +1085,11 @@ function prepareFunctionDeclarations(
   laterDeclarations: LaterDeclarations
 ): {
   /** The boxed `function` statements, keyed by statement index. */
-  preboxed: Map<number, BoxedExpression>;
+  preboxed: Map<number, Expression>;
   /** The statements that `scanProtocolPropertyCalls` scanned already. */
   scanned: Set<number>;
 } {
-  const preboxed = new Map<number, BoxedExpression>();
+  const preboxed = new Map<number, Expression>();
   const scanned = new Set<number>();
   if (!statements.some((s) => operator(s) === 'DefineFunction'))
     return { preboxed, scanned };
@@ -1394,7 +1394,7 @@ type NameWrite = {
 function statementWrites(
   ce: ComputeEngine,
   statements: ReadonlyArray<MathJsonExpression>,
-  raw: ReadonlyArray<BoxedExpression | undefined>
+  raw: ReadonlyArray<Expression | undefined>
 ): Map<string, NameWrite[]> {
   const writes = new Map<string, NameWrite[]>();
   const add = (name: string, write: NameWrite): void => {
@@ -1554,7 +1554,7 @@ function namesIn(expr: MathJsonExpression): Set<string> {
  */
 function writtenNames(
   statement: MathJsonExpression,
-  boxed: BoxedExpression | undefined
+  boxed: Expression | undefined
 ): string[] {
   const head = operator(statement);
   if (head === 'Assign')
@@ -1618,7 +1618,7 @@ function narrowErrorRange(
   error: MathJsonExpression,
   stmt: MathJsonExpression,
   fallback: [number, number],
-  boxedStmt?: BoxedExpression
+  boxedStmt?: Expression
 ): [number, number] {
   // The engine resolves the callee's declared parameter names so a NAMED
   // call's frame index (which counts declaration slots after the seam's
@@ -1651,7 +1651,7 @@ function narrowErrorRange(
  */
 function canonicalOrderOf(
   ce: ComputeEngine,
-  boxedStmt: BoxedExpression | undefined
+  boxedStmt: Expression | undefined
 ): CanonicalOrder | undefined {
   if (boxedStmt === undefined) return undefined;
   return {
@@ -1661,7 +1661,7 @@ function canonicalOrderOf(
       return def.operator.commutative || def.operator.associative;
     },
     argumentOffsets: (operatorName, callRange, index) => {
-      const pending: BoxedExpression[] = [boxedStmt];
+      const pending: Expression[] = [boxedStmt];
       while (pending.length > 0) {
         const node = pending.pop()!;
         // The value of a `let` is in the `Dictionary` of its `Declare`.
@@ -1674,7 +1674,7 @@ function canonicalOrderOf(
           o[0] === callRange[0] &&
           o[1] === callRange[1]
         ) {
-          const op: BoxedExpression | undefined = node.ops[index - 1];
+          const op: Expression | undefined = node.ops[index - 1];
           if (op === undefined) return undefined;
           // A lazy operator such as `Add` or `Multiply` evaluates its
           // operands in its own handler. An error that the evaluation of an
@@ -1720,14 +1720,14 @@ function canonicalOrderOf(
  */
 function errorValueDiagnostic(
   ce: ComputeEngine,
-  error: BoxedExpression,
+  error: Expression,
   stmt: MathJsonExpression,
   fallback: [number, number],
   defSites: ReturnType<typeof definitionSites>,
   cancellation?: CancellationCause,
   /** The canonical form of `stmt`, when it is known (see
    * {@link canonicalOrderOf}). */
-  boxedStmt?: BoxedExpression
+  boxedStmt?: Expression
 ): ParsingDiagnostic {
   // An error that BUBBLED out of a subexpression carries a breadcrumb
   // of `(operator, operand index)` frames (engine design §2a). Rendered
@@ -1776,7 +1776,7 @@ function errorValueDiagnostic(
  * A first operand that is a symbol can be shared by different errors, so
  * the error itself is the key then.
  */
-function failureKey(error: BoxedExpression): object {
+function failureKey(error: Expression): object {
   if (!isFunction(error) || error.nops === 0) return error;
   const first = error.op1;
   return isFunction(first) || isString(first) ? first : error;
@@ -1923,8 +1923,8 @@ function nestedStatementSites(
  */
 function lazyViewCellError(
   ce: ComputeEngine,
-  value: BoxedExpression
-): BoxedExpression | undefined {
+  value: Expression
+): Expression | undefined {
   const source = isFunction(value, 'Map')
     ? value.nops === 2
       ? value.op2
@@ -1971,10 +1971,7 @@ function lazyViewCellError(
  * whose operator canonicalization changes (`a - b` becomes `Add`) is
  * rejected too, and is then not reported.
  */
-function isSameStatement(
-  boxed: BoxedExpression,
-  raw: MathJsonExpression
-): boolean {
+function isSameStatement(boxed: Expression, raw: MathJsonExpression): boolean {
   const name = symbol(raw);
   if (name !== null) return isSymbol(boxed) && boxed.symbol === name;
   const head = operator(raw);
@@ -2028,16 +2025,16 @@ function nestedStatementReporter(
   defSites: ReturnType<typeof definitionSites>,
   diagnostics: ParsingDiagnostic[],
   failures: Set<object>
-): (statement: BoxedExpression, result: BoxedExpression) => void {
+): (statement: Expression, result: Expression) => void {
   const sites = nestedStatementSites(statements);
   const reported = new Set<string>();
   // The site where a value passed up from an inner block was made, with the
   // canonical form of its statement.
   const madeAt = new WeakMap<
-    BoxedExpression,
-    { site: NestedStatementSite; statement: BoxedExpression }
+    Expression,
+    { site: NestedStatementSite; statement: Expression }
   >();
-  const hook = (statement: BoxedExpression, result: BoxedExpression): void => {
+  const hook = (statement: Expression, result: Expression): void => {
     // `isValid` is false exactly when the value holds an `Error`, and it is
     // memoized on each node, so this test does not walk a list again on
     // each iteration of the loop that grows it. A valid `Map` or `Filter`
@@ -2548,7 +2545,7 @@ function constantAssignmentName(e: unknown): string | undefined {
  * does not report it a second time.
  */
 function reportedAsReadBeforeDeclaration(
-  error: BoxedExpression,
+  error: Expression,
   diagnostics: ReadonlyArray<ParsingDiagnostic>
 ): boolean {
   const site = readBeforeDeclarationSite(error);

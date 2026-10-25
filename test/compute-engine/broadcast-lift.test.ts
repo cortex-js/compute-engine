@@ -1,5 +1,5 @@
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
  * Broadcast typing lift — Phase 1 (validator gap fix).
@@ -27,7 +27,7 @@ function mapValues(
   ce: ComputeEngine,
   op: string,
   xs: number[],
-  rest: BoxedExpression[] = []
+  rest: Expression[] = []
 ): unknown {
   return ce
     .box([
@@ -106,7 +106,7 @@ describe('BROADCAST LIFT Phase 1 — declared type is honest where the wrapper f
 
   /** For finite (materialized) collections the declared type is a list and
    * the evaluated type never disagrees (expr.type ⊇ expr.evaluate().type). */
-  function expectHonestBroadcast(expr: BoxedExpression): void {
+  function expectHonestBroadcast(expr: Expression): void {
     expect(expr.isValid).toBe(true);
     expect(expr.type.matches('list<any>')).toBe(true);
     expect(expr.type.matches('number')).toBe(false);
@@ -158,7 +158,7 @@ describe('BROADCAST LIFT Phase 2 — declared type agrees with the broadcast val
 
   /** The declared type is an unbounded list (no scalar/union artifact), and the
    * evaluated type is a subtype of it (`expr.type ⊇ expr.evaluate().type`). */
-  function expectListTyped(expr: BoxedExpression): void {
+  function expectListTyped(expr: Expression): void {
     expect(expr.isValid).toBe(true);
     expect(expr.type.matches('list<any>')).toBe(true);
     expect(expr.type.matches('number')).toBe(false);

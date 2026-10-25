@@ -1153,31 +1153,14 @@ export interface CompileTarget<Expr = unknown> {
   storage?: ReadonlyMap<MathJsonSymbol, StorageKind>;
 
   /**
-   * The promotion of an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` through the
-   * complex kernels is now a property of the compile MODE (`mode`: `auto`,
-   * the default on JavaScript/Python, and `complex` promote; `strict` never
-   * does). Both public routes into a compilation — the engine-level
-   * `compile()` and a registered target's own `compile()` — map the
-   * deprecated caller option onto `mode` and clear it, so they never set this
-   * field.
-   *
-   * A target that sets it BY HAND still gets the promotion, and that is the
-   * one remaining way the deprecated flag can outvote an explicit discipline:
-   * `BaseCompiler.promotionActive` reads this latch with `||` against the
-   * mode, so a hand-built target carrying `complexPromotion: true` promotes
-   * even under `mode: 'strict'`. Set `mode` instead.
-   *
-   * @deprecated Superseded by `mode`. Use
-   * `mode: 'complex'` — or the default `auto` — rather than this field.
-   */
-  complexPromotion?: boolean;
-
-  /**
-   * The compile mode requested for this compilation (`CompileMode`). Set by
+   * The compile mode requested for this compilation (`CompileMode`). The
+   * promotion of an unknown-sign `Sqrt`/`Ln`/`Log`/`Power` through the
+   * complex kernels is a property of the mode (`auto`, the default on
+   * JavaScript/Python, and `complex` promote; `strict` never does). Set by
    * the built-in targets from the caller's `mode` option, and by the direct
    * custom-target route (`compile(expr, { target })`), which records the
-   * resolved effective mode here per call — like `constantFold` and
-   * `complexPromotion`, an omitted option resets the field, so a reused
+   * resolved effective mode here per call — like `constantFold`, an omitted
+   * option resets the field, so a reused
    * caller target never carries a previous call's choice. Read ONCE, at the
    * outermost compilation (`BaseCompiler.compile` at depth 0), where it is
    * validated against `supportedModes` — a requested mode the target does
@@ -2261,9 +2244,7 @@ export interface CompilationOptions<Expr = unknown> {
    * `compileWithAutoEscalation` helper (`compilation/auto-escalation.ts`)
    * inside their `compile()`, and a CUSTOM registered target that declares
    * `'auto'` support must do the same, or its callers get the raw
-   * `LaneMismatchError` instead of the retry. The older `complexPromotion` flag
-   * is deprecated and subordinate to this option: `true` maps to
-   * `mode: 'complex'` only when no `mode` is given. See `CompileMode` for the
+   * `LaneMismatchError` instead of the retry. See `CompileMode` for the
    * disciplines.
    */
   mode?: CompileMode;
@@ -2316,18 +2297,6 @@ export interface CompilationOptions<Expr = unknown> {
    * batch body (user decision 2026-10-25).
    */
   broadcast?: boolean;
-
-  /**
-   * Deprecated compatibility option superseded by `mode`. Consulted only when
-   * `mode` is absent: `true` maps to `mode: 'complex'` (a one-time console
-   * warning), and is dropped on a target that does not offer complex mode
-   * (the shader targets keep the real kernel, as this flag was always
-   * documented to do there); `false` is ignored; beside an explicit `mode`
-   * it is ignored with a warning. The default `auto` mode already promotes an
-   * unknown-sign `Sqrt`/`Ln`/`Log`/`Power`, so most callers can drop this flag.
-   * @deprecated
-   */
-  complexPromotion?: boolean;
 
   /**
    * Cap the trip count of emitted `Sum`/`Product` loops: a loop whose

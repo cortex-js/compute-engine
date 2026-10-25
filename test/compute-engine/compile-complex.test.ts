@@ -1122,8 +1122,8 @@ describe('an unused complex operand leaves the result real', () => {
 // Before the per-lane emission the call site's verdict was discarded at the
 // user-call boundary: `b(x) := 2x` was analyzed with `x` masked real and
 // emitted once, in the real lane, so `_fn_b({re, im})` computed `2 * {re, im}`
-// = NaN behind `success: true`. It was filed against the `complexPromotion`
-// opt-in (`b(a(t))` with `a(t) := √(t−1)`) but was never specific to it — a
+// = NaN behind `success: true`. It was filed against the former promotion
+// opt-in option (`b(a(t))` with `a(t) := √(t−1)`) but was never specific to it — a
 // declared-complex `w` took the same path on the default route. Per-call-site
 // lane specialization (`_fn_b$z1`) served this for one release; since the
 // compile-mode migration (step 4, 2026-08-16) the default mode `auto` answers
@@ -1372,7 +1372,7 @@ describe('COMPILE COMPLEX - a declared `complex` PARAMETER', () => {
   // shapes are what distinguish the branches, and a value assertion alone
   // passes for whichever branch happens to run.
   //
-  // This is NOT radical promotion and does not consult `complexPromotion`:
+  // This is NOT radical promotion and does not depend on the compile mode:
   // the author WROTE `(complex) -> complex`.
   //
   // `constantFold: false` throughout is load-bearing, not boilerplate: the

@@ -17,15 +17,15 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
-import type { BoxedExpression } from '../../src/compute-engine/global-types';
+import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
 
 const ce = new ComputeEngine();
 
 /** Interpretation, projected the way a real (JavaScript) target represents it. */
-function interpreted(expr: BoxedExpression): unknown {
-  const project = (x: BoxedExpression): unknown => {
+function interpreted(expr: Expression): unknown {
+  const project = (x: Expression): unknown => {
     if (x.symbol === 'True') return true;
     if (x.symbol === 'False') return false;
     if (x.symbol === 'Nothing' || x.symbol === 'Missing') return NaN;
@@ -37,7 +37,7 @@ function interpreted(expr: BoxedExpression): unknown {
 }
 
 /** Compile `expr`, run it, and assert it matches interpretation. */
-function parity(expr: BoxedExpression, vars?: object): unknown {
+function parity(expr: Expression, vars?: object): unknown {
   const r = compile(expr, { fallback: false });
   expect(r?.success).toBe(true);
   const value = r!.run!(vars ?? {});
@@ -54,7 +54,7 @@ function parity(expr: BoxedExpression, vars?: object): unknown {
  * `_SYS.select` LOWERING, which folding short-circuits. `parity()` keeps
  * folding on, so the folded value is still checked against the interpreter.
  */
-function code(expr: BoxedExpression): string {
+function code(expr: Expression): string {
   return compile(expr, { fallback: false, constantFold: false })!.code ?? '';
 }
 
@@ -535,7 +535,7 @@ describe('element-wise selection: a mask of rank 2 or more', () => {
       : v === undefined || (typeof v === 'number' && Number.isNaN(v))
         ? ABSENT
         : v;
-  const projected = (x: BoxedExpression): unknown => {
+  const projected = (x: Expression): unknown => {
     if (x.symbol === 'True') return true;
     if (x.symbol === 'False') return false;
     if (x.symbol === 'Missing' || x.operator === 'Error') return ABSENT;
@@ -966,7 +966,7 @@ describe('compiled If/Which take no branch on an undecided condition', () => {
     return engine;
   }
 
-  function run(expr: BoxedExpression, vars: object): unknown {
+  function run(expr: Expression, vars: object): unknown {
     const r = compile(expr, { fallback: false })!;
     expect(r.success).toBe(true);
     return r.run!(vars);
