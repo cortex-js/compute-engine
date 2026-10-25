@@ -26,7 +26,7 @@ describe('A DESTRUCTURED PARAMETER IS AN ALIAS OF THE PARAMETER', () => {
   ])('%s binds a list argument whole', (definition) => {
     const { value, signature } = run(`${definition}\ng([1, 2, 3])`);
     expect(value).toBe('[1,2]');
-    expect(signature.startsWith('(indexed_collection<any>) ->')).toBe(true);
+    expect(signature.startsWith('(s: indexed_collection<any>) ->')).toBe(true);
   });
 
   test('an infinite lazy argument is bound whole', () => {

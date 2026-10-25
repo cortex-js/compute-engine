@@ -1853,7 +1853,7 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     expect(first.operator).toBeDefined();
     expect(first.operator.broadcastable).toBe(true);
     expect(first.operator.lambda).toBeDefined();
-    expect(first.operator.signature.toString()).toBe('(unknown) -> number');
+    expect(first.operator.signature.toString()).toBe('(x: unknown) -> number');
 
     ce.assign('f', lit());
     const second = ce.lookupDefinition('f') as any;
@@ -1895,7 +1895,7 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
   test('the literal types by the marker’s RESULT, and broadcast typing follows', () => {
     const ce = fresh();
     const f = e2(ce, ['Multiply', 2, 'x'], '(x: number) -> number', 'x');
-    expect(f.type.toString()).toBe('(unknown) -> number');
+    expect(f.type.toString()).toBe('(x: unknown) -> number');
     ce.assign('f', f);
     const call = ce.box(['f', ['List', 1, 2, 3]] as any);
     expect(call.evaluate().toString()).toBe('[2,4,6]');
@@ -1905,7 +1905,7 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
   test('the GROUPED spelling keeps the returns-a-function reading', () => {
     const ce = fresh();
     const f = e2(ce, ['Multiply', 2, 'x'], '((x: number) -> number)', 'x');
-    expect(f.type.toString()).toBe('(unknown) -> (x: number) -> number');
+    expect(f.type.toString()).toBe('(x: unknown) -> (x: number) -> number');
   });
 
   test('a plain arrow states NO effects (not a stated-pure contract)', () => {
@@ -1970,7 +1970,7 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
       expect(
         e2Block(ce, ['Add', 'x', 1], '(a: integer) -> integer', 'x').type
           .toString()
-      ).toBe('(unknown) -> integer');
+      ).toBe('(x: unknown) -> integer');
     });
 
     test('a POLYTYPE marker erases its quantified parameters', () => {
@@ -2036,7 +2036,7 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
       'n',
     ]);
     expect(ce.box('f').evaluate().type.toString()).toBe(
-      '(unknown, unknown) -> number'
+      '(x: unknown, n: unknown) -> number'
     );
   });
 
@@ -2055,7 +2055,7 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
     ce.assign('g', ce.box(['Function', 'x', 'x']));
     expect(ce.box('g').type.toString()).toBe('(x: integer) -> integer');
     // The stored literal still loses the PARAMETER type — out of R1's scope.
-    expect(ce.box('g').evaluate().type.toString()).toBe('(unknown) -> integer');
+    expect(ce.box('g').evaluate().type.toString()).toBe('(x: unknown) -> integer');
   });
 });
 
@@ -2073,10 +2073,10 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
   test('annotated then untyped: the derived signature is discarded', () => {
     const ce = fresh();
     ce.assign('g', annotated(ce));
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> integer');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> integer');
     ce.assign('g', untyped(ce));
     // Re-inferred from the NEW body — the old return annotation is gone.
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> number');
     expect(ce.box(['g', 1.5] as any).evaluate().toString()).toBe('3');
     // …and the representation stays an operator definition with a lambda.
     const def = ce.lookupDefinition('g');
@@ -2093,7 +2093,7 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
     expect(ce.box(['g', 1.5] as any).isValid).toBe(false);
     ce.assign('g', untyped(ce));
     expect(ce.box(['g', 1.5] as any).isValid).toBe(true);
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> number');
   });
 
   test('a GENERIC annotation is derived the same way', () => {
@@ -2102,7 +2102,7 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
     expect(ce.box('g').type.toString()).toBe('(x: T) -> T where T');
     ce.assign('g', untyped(ce));
     expect(ce.box('g').type.isPolymorphic).toBe(false);
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> number');
   });
 
   test('a DECLARED signature stays sticky (string form)', () => {
@@ -2128,7 +2128,7 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
     const ce = fresh();
     ce.assign('g', annotated(ce));
     ce.assign('g', annotated(ce));
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> integer');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> integer');
 
     expect(() =>
       ce.assign(

@@ -50,12 +50,22 @@ describe('Parsing environments', () => {
   });
 
   it('should parse a dcases', () => {
-    const result = ce.parse('\\begin{dcases} a & b \\\\ c & d \\end{dcases}');
+    // A fresh engine: the matrices above infer `a`, `b`, `c` and `d` as
+    // numbers (a literal list infers its free symbols as numbers), and a
+    // number is not a condition of `Which`.
+    const result = new ComputeEngine().parse(
+      '\\begin{dcases} a & b \\\\ c & d \\end{dcases}'
+    );
     expect(result.toString()).toMatchInlineSnapshot(`Which(b, a, d, c)`);
   });
 
   it('should parse a rcases', () => {
-    const result = ce.parse('\\begin{rcases} a & b \\\\ c & d \\end{rcases}');
+    // A fresh engine: the matrices above infer `a`, `b`, `c` and `d` as
+    // numbers (a literal list infers its free symbols as numbers), and a
+    // number is not a condition of `Which`.
+    const result = new ComputeEngine().parse(
+      '\\begin{rcases} a & b \\\\ c & d \\end{rcases}'
+    );
     expect(result.toString()).toMatchInlineSnapshot(`Which(b, a, d, c)`);
   });
 

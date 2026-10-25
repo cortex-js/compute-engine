@@ -37,6 +37,7 @@ import {
   isRestParameter,
 } from './function-literal.js';
 import { declaredBinderNamesOf } from './binding-sites.js';
+import { isFreeSymbol } from './canonical-utils.js';
 
 /** Derive an application without replacing a recorded lexical callee by an
  * ambient function with the same name. Shared by structural rewrite walks. */
@@ -446,6 +447,7 @@ function structureOfExpression(
         node.lookupByName = false;
       if (def.inferredType === true) node.inferred = true;
       if (def._blockLocal === true) node.local = true;
+      if (isFreeSymbol(op)) node.free = true;
       const systemBinding =
         op.engine.contextStack[0]?.lexicalScope.bindings.get(op.symbol);
       if (

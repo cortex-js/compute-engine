@@ -86,6 +86,7 @@ import {
   functionLiteralParameters,
   functionLiteralReturnMarker,
   functionLiteralReturnType,
+  inferredSignatureParameterName,
   isDestructuringParameter,
   isFunctionLiteralParameter,
   isScalarType,
@@ -1547,8 +1548,9 @@ export function functionLiteralSignatureType(expr: Expression): Type {
       : bodyTypeSource.type;
 
   // Parameter slots: an annotated param carries its declared type, named
-  // (`x: integer`); a bare param stays `unknown` as today. The Type OBJECT is
-  // carried through — never serialized and re-parsed: an annotation may name
+  // (`x: integer`); a bare param is `unknown` and keeps its name, so that a
+  // named call can find the slot (`inferredSignatureParameterName`). The Type
+  // OBJECT is carried through — never serialized and re-parsed: an annotation may name
   // a SCOPE-LOCAL type (resolved when the literal was canonicalized), and a
   // text round-trip here — possibly after that scope popped — either threw
   // `Unknown type` or silently dropped the annotation. Same hazard class as
@@ -1577,8 +1579,12 @@ export function functionLiteralSignatureType(expr: Expression): Type {
           const inferred =
             inferredCollectionParameterType(paramOps[i]) ??
             wholeCollectionParameterType(paramOps[i], body);
-          if (inferred !== undefined) return { name: p.name, type: inferred };
-          return { type: 'unknown' as Type };
+          const name =
+            paramOps[i] !== undefined
+              ? inferredSignatureParameterName(paramOps[i])
+              : undefined;
+          const type = inferred ?? ('unknown' as Type);
+          return name !== undefined ? { name, type } : { type };
         })
       : undefined;
 

@@ -145,8 +145,9 @@ describe('A KEYED JOIN WITH AN ELEMENT THAT IS NOT AN ENTRY', () => {
   test('an element with no value keeps the lazy join', () => {
     const boxed = ce.box(['Join', dict, ['List', 'z']] as any);
     expect(boxed.operator).toBe('Join');
+    // The literal list infers its free symbol `z` as a number (CE-39.4).
     expect(boxed.evaluate().toString()).toBe(
-      'Error(ErrorCode("incompatible-type", "tuple<string, any>", "unknown"), z)'
+      'Error(ErrorCode("incompatible-type", "tuple<string, any>", "number"), z)'
     );
   });
 

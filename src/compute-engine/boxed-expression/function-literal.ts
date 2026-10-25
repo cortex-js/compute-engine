@@ -195,6 +195,26 @@ export function functionLiteralParameterName(param: Expression): string {
   return sym(param) ?? '';
 }
 
+/** The name that an INFERRED signature gives to the slot of a parameter with
+ * no annotation, or `undefined` when the slot has no name.
+ *
+ * An inferred signature keeps the parameter names of the literal, so a named
+ * call can find each slot: with `f := (a, b) => a - b`, the call
+ * `f(b: 2, a: 10)` gives 8, and the arrow prints `(a: unknown, b: unknown) ->
+ * number`. A slot has no name when the operand is not a symbol (a
+ * destructuring pattern), and when the name is a wildcard (`_`, `_1`, `_2`):
+ * a wildcard parameter is positional, and its name is not one that a caller
+ * writes. The names do not change how two signatures compare: matching and
+ * subtyping read only the slot types. */
+export function inferredSignatureParameterName(
+  param: Expression
+): string | undefined {
+  const name = sym(param);
+  if (name === undefined || name === '' || /^_\d*$/.test(name))
+    return undefined;
+  return name;
+}
+
 /**
  * True when a `Function` parameter operand is a DESTRUCTURING PATTERN — a raw
  * `["Tuple", …]` node — rather than a plain (possibly annotated) name.

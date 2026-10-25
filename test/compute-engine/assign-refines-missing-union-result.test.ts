@@ -47,7 +47,7 @@ describe('assign keeps a `missing | T` result under a bare `function` declaratio
   it('types the literal itself as `missing | rational`', () => {
     const ce = engine();
     expect(literal(ce, WHICH_BODY).type.toString()).toBe(
-      '(unknown) -> missing | rational'
+      '(t: unknown) -> missing | rational'
     );
   });
 

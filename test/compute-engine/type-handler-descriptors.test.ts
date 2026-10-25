@@ -124,7 +124,13 @@ describe('describe() on symbols', () => {
     const d = describeOperand(ce.box('p'));
     expect(d.facts.sgn).toBe('positive');
     expect(d.facts.collection).toBe(false);
-    expect(d.structureOf?.()).toEqual({ kind: 'symbol', name: 'p' });
+    // A symbol with no value that a scope binds is free (`free`): a list
+    // literal may infer it as a number when its type is not known.
+    expect(d.structureOf?.()).toEqual({
+      kind: 'symbol',
+      name: 'p',
+      free: true,
+    });
   });
 
   test('a valueless collection-typed symbol is a collection by SHAPE', () => {
@@ -140,12 +146,13 @@ describe('describe() on symbols', () => {
     // A numeric use of a valueless symbol infers its type (evidence
     // inference); the structure node records that the recorded type is
     // subject to revision. A DECLARED symbol's node carries no such mark
-    // (see the ranged-declaration test above, whose node is bare).
+    // (see the ranged-declaration test above, which has no `inferred`).
     expect(ce.box(['Add', 'zz', 1]).type).toBeDefined();
     expect(describeOperand(ce.box('zz')).structureOf?.()).toEqual({
       kind: 'symbol',
       name: 'zz',
       inferred: true,
+      free: true,
     });
   });
 

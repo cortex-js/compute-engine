@@ -319,7 +319,9 @@ describe('MAX/MIN OF AN INFERRED COLLECTION PARAMETER', () => {
     test(`h(a) := ${label} needs numeric annotation to exclude omission`, () => {
       const ce = new ComputeEngine();
       ce.box(['Assign', 'h', ['Function', body, 'a']] as any).evaluate();
-      expect(ce.box('h').type.toString()).toBe('(collection<any>) -> number');
+      expect(ce.box('h').type.toString()).toBe(
+        '(a: collection<any>) -> number'
+      );
       expect(() => compile(ce.box('h'), { fallback: false })).toThrow(
         /Nothing/
       );

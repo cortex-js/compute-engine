@@ -296,7 +296,7 @@ describe('A PARAMETER THAT REACHES A WHOLE-COLLECTION OPERATOR INDIRECTLY', () =
       ['Add', 'x', ['Sum', ['Max', 'x'], ['Limits', 'x', 1, 3]]],
       'x',
     ]);
-    expect(k.type.toString()).toBe('(unknown) -> number');
+    expect(k.type.toString()).toBe('(x: unknown) -> number');
   });
 
   test('a lifted function handed to Map binds each row whole on both routes', () => {

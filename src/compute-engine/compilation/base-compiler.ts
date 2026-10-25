@@ -76,6 +76,8 @@ import {
   isTupleShapedType,
   isTupleWithListCoordinate,
   isPointListArgumentType,
+  isPointTensorArgumentType,
+  isBroadcastablePointArgumentType,
   isPointOrPointListArgumentType,
   isPointParameterType,
   leafwardElementType,
@@ -33786,7 +33788,8 @@ export class BaseCompiler {
         pt !== undefined &&
         !maybe[i] &&
         !isTuple(a) &&
-        isPointListArgumentType(a.type.type, pt)
+        (isPointListArgumentType(a.type.type, pt) ||
+          isPointTensorArgumentType(a.type.type, pt))
       );
     });
     let at = mapped.indexOf(true);
@@ -33917,6 +33920,23 @@ export class BaseCompiler {
           r !== undefined && typeof r !== 'string' && r.kind === 'broadcastable'
         );
       });
+      // A tensor of points of rank 2 or more, or of a rank the type does not
+      // give (`matrix<tuple<…>^(2x2)>`, `tensor<tuple<…>>`): the interpreter
+      // maps the call to the points at every depth, and pairs the `unknown`
+      // argument with the rows (ROADMAP CE-448). The compiled pairing below
+      // maps over one level only, and would give each row whole to the
+      // function, so the call is not compiled.
+      if (
+        params[at] !== undefined &&
+        isPointTensorArgumentType(args[at].type.type, params[at]!)
+      )
+        throw new Error(
+          `Could not compile a call of \`${h}\`: argument ${at + 1} is a ` +
+            `tensor of points of rank 2 or more, and another argument, at a ` +
+            `parameter with no declared type, may be a list. The interpreter ` +
+            `maps the call to the points at every depth and pairs the list ` +
+            `with the rows, and the compiled call pairs one level only.`
+        );
       if (
         !dispatch &&
         !declaredPlan &&
@@ -33962,7 +33982,21 @@ export class BaseCompiler {
     // (`tuple<list<real>, real>`, `tuple<any, any>`), and also a tuple
     // (`tuple<tuple<number, number>, number>`), which is not a list but
     // compiles to an array. Then a point and a list of points look the same.
-    if (dispatch) {
+    //
+    // A `broadcastable<tuple<…>>` value can also be a tensor of points of
+    // rank 2 or more (`[[(1, 2)], [(3, 4)]]`), and a tensor of points
+    // (`tensor<tuple<…>>`, `list<list<tuple<…>>>`) is one. The interpreter
+    // maps the call to the points at every depth (user decision 2026-10-25,
+    // ROADMAP CE-448), as for a parameter declared `broadcastable<P>`, so
+    // the compiled call maps recursively too (`deep`, see below).
+    const deep =
+      untypedSlot < 0 &&
+      untypedElement === undefined &&
+      params[at] !== undefined &&
+      ((dispatch && cells[at]) ||
+        isPointTensorArgumentType(args[at].type.type, params[at]!) ||
+        isBroadcastablePointArgumentType(args[at].type.type, params[at]!));
+    if (dispatch || deep) {
       const pt = resolveTypeForCompilation(params[at]!);
       if (
         typeof pt === 'string' ||
@@ -34075,28 +34109,9 @@ export class BaseCompiler {
       );
     const listGuard = absent ? `${temps[at]} === undefined ? undefined : ` : '';
     const pointGuard = absent ? `${point} === undefined ? undefined : ` : '';
-    // A `broadcastable<tuple<…>>` value can also be a tensor of points of
-    // rank 2 or more (`[[(1, 2)], [(3, 4)]]`). The interpreter answers an
-    // `incompatible-type` error for it: an element of the outer list is not
-    // a point. The compiled map throws for an element whose first coordinate
-    // is an array, rather than give that element to the function.
-    const argType = resolveTypeForCompilation(
-      stripMissingFromType(args[at].type.type)
-    );
-    const nestedGuard =
-      dispatch &&
-      !cells[at] &&
-      typeof argType !== 'string' &&
-      argType.kind === 'broadcastable'
-        ? `Array.isArray(${point}?.[0]) ? (() => { throw new TypeError(` +
-          `${JSON.stringify(
-            `\`${h}\` maps over a list of points, and an element of the ` +
-              `list is not a point (a tensor of points of rank 2 or more)`
-          )}); })() : `
-        : '';
     const map =
       `${temps[at]}.map((${point}) => ` +
-      `${pointGuard}${nestedGuard}${name}(${callArgs.join(', ')}))`;
+      `${pointGuard}${name}(${callArgs.join(', ')}))`;
     const head = `(${temps.join(', ')}) => ${listGuard}`;
     if (untypedSlot >= 0) {
       // When the value of the `unknown` argument is an array, point `i` is
@@ -34127,7 +34142,7 @@ export class BaseCompiler {
         `(${codes.join(', ')})`
       );
     }
-    if (!dispatch) return `(${head}${map})(${codes.join(', ')})`;
+    if (!dispatch && !deep) return `(${head}${map})(${codes.join(', ')})`;
     // One point or a list of points: an empty array, or an array whose first
     // element is an array, is a list of points (see the coordinate check
     // above); any other value is one point, given whole to the function.
@@ -34144,7 +34159,7 @@ export class BaseCompiler {
       `Array.isArray(${x}) && ((${e}) => ${e} === undefined || ` +
       `Array.isArray(${e}))(${x}.find((${e}) => ${e} !== undefined))`;
     const isList = isListOf(v);
-    if (cells[at]) {
+    if (deep) {
       // A `broadcastable<P>` parameter maps to the cells at every depth: a
       // named function expression applies the same test to each element,
       // maps again over a list, and calls the function on a point.
@@ -38760,6 +38775,31 @@ export class BaseCompiler {
       const declared = functionLiteralParameterType(p);
       const actual = actuals[i];
       if (declared === undefined || actual === undefined) continue;
+      // At a parameter declared as a point (`p: tuple<real, real>`), the
+      // interpreter maps the call over a list of points, and over a tensor of
+      // points at every depth (user decisions 2026-09-25 and 2026-10-25,
+      // ROADMAP CE-448). A value that may be one point or a collection of
+      // points (`broadcastable<tuple<…>>`) is mapped when it is a list. The
+      // application compiled here binds the argument whole, so it would give
+      // a different value: it is declined. A call of a user function whose
+      // signature declares the point parameter is mapped before this check
+      // (`tryCompilePointListCall`); this check is reached for a function
+      // literal, and for a user function declared with the bare type
+      // `function`.
+      if (
+        !isTuple(actual) &&
+        (isPointListArgumentType(actual.type.type, declared) ||
+          isPointTensorArgumentType(actual.type.type, declared) ||
+          isPointOrPointListArgumentType(actual.type.type, declared))
+      )
+        return (
+          `the argument \`${actual.toString()}\` has the type ` +
+          `\`${typeToString(actual.type.type)}\`, a collection of points or ` +
+          `a value that may be one, at the parameter ` +
+          `\`${functionLiteralParameterName(p)}\` declared as the point ` +
+          `\`${typeToString(declared)}\`. The interpreter maps the call over ` +
+          `the points, and the compiled application binds the argument whole.`
+        );
       let type = boundType(actual.type.type);
       if (isDeclaredScalarType(declared) && isTupleShapedType(type)) {
         const bad = componentMismatch(type, declared);

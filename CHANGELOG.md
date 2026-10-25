@@ -5,38 +5,74 @@
 - **The `broadcast()` batch body is built on request** (ROADMAP CE-423, user
   decision 2026-10-25). Since 0.166.0, `compile()` of an expression that reads a
   shared list of numbers at a scalar index (`F_{i+1}` with `F: list<number>`)
-  also compiled the batch body that makes `broadcast()` up to 15 times faster,
-  a second compilation of the same size as the first (about 45 % of the compile
+  also compiled the batch body that makes `broadcast()` up to 15 times faster, a
+  second compilation of the same size as the first (about 45 % of the compile
   time of such a kernel). It is now compiled only with
   `compile(expr, { broadcast: true })`. Without the option the result has no
   `batch` field, and `broadcast()`, `broadcastAsync()` and a kernel worker run
   the ordinary body for every cell, with the same values. A caller that
-  broadcasts such a kernel over many cells passes the option; a caller that
-  only calls `run()` saves the second compilation. A consumer that reads both
-  `run()` and `broadcast()` from one result (Tycho's plot rows) passes the
-  option at its compile site, or its implicit plots lose the 0.166.0 speed.
+  broadcasts such a kernel over many cells passes the option; a caller that only
+  calls `run()` saves the second compilation. A consumer that reads both `run()`
+  and `broadcast()` from one result (Tycho's plot rows) passes the option at its
+  compile site, or its implicit plots lose the 0.166.0 speed.
 
 ### Resolved Issues
 
 - **The interval target wrote a constant list out one term per element at any
   width**, and `Max`, `Min`, `Sum` or `Reduce` over a list of 2,000 numbers
-  overflowed the stack of the compiler. A list wider than 100 numbers is now
-  one table read at run time: `Sin(x + 4·L)` over 2,000 numbers compiles to
-  135 characters, where it was 60,876.
+  overflowed the stack of the compiler. A list wider than 100 numbers is now one
+  table read at run time: `Sin(x + 4·L)` over 2,000 numbers compiles to 135
+  characters, where it was 60,876.
 - **Compiled `Reduce` and `Scan` used the library kernel for a combiner that
   only had the same name.** With a user-declared `Max(a, b) = 2a + b`,
   `Reduce([1, 2, 3], Max)` compiled to `Math.max` and gave 3, where the
   interpreter gives 11; the same held for a parameter or a block-local function
-  named `Max`, for a `Max` given in the `functions` option, and on the
-  Python and interval targets. Such a fold now takes the route of a custom
-  combiner or declines.
+  named `Max`, for a `Max` given in the `functions` option, and on the Python
+  and interval targets. Such a fold now takes the route of a custom combiner or
+  declines.
 
+- **A function literal that passes a list to a function with an inferred point
+  parameter was typed `-> error`.** With `d(a) := a[1] + a[2]`, `x ↦ d([x, x])`
+  is now typed `(unknown) -> number`; it evaluates. A signature that the engine
+  inferred is not a contract, so the derived type of a call no longer checks the
+  arguments against it. A call that passes a list of lists there is typed from
+  the body: `d([[1, 2], [3, 4]])` evaluates to `[4, 6]` and is now typed
+  `vector<integer^2>`, not `number`. Compiled code accepts a number or a list of
+  numbers at such a parameter (`d(S(x), [1, 1])` on interval-js), and the
+  message of a call that still fails says whether the point type was inferred or
+  declared.
+
+- **A product written by juxtaposition did not infer the type of its symbols.**
+  `ce.parse('2t')`, `ce.parse('x y')` and
+  `ce.box(['InvisibleOperator', 2, 't'])` left a symbol with no value and no
+  declaration `unknown`, where `2\cdot t` types it `number`. They now type it
+  `number` too. The product itself (its factors, their order and its LaTeX) is
+  unchanged, and a function application such as `f(x)` keeps its reading. A
+  function literal is typed from it: `t ↦ (t, 2t)` is
+  `(unknown) -> tuple<number, number>` and `t ↦ [t, 2t]` is
+  `(unknown) -> vector<2>`, as with `2\cdot t`. In an engine used for several
+  expressions, a symbol used as a factor stays a number: after `\mathrm{B}x`,
+  `\mathrm{B}(x+1)` is a product.
+
+- **The type of a broadcast over a list whose elements have different ranks
+  repeated an element arm.** `M + C` with `M: list<list<integer> | number>` and
+  `C: broadcastable<number>` was typed
+  `list<list<integer> | list<list<integer> | number> | number>`; an arm that
+  another arm holds is now dropped, and a union inside the element union is
+  flattened: `list<list<list<integer> | number> | number>`.
+
+- **Compiling nested `Sum` and `Product` was exponential in the nesting.** The
+  unrolled form of a clause is now limited to 10,000 nodes in total, and a
+  larger clause is emitted as a loop:
+  `Σ_{a=1}^{60}Σ_{b=1}^{60}Σ_{c=1}^{60} abcx` compiled in 12.7 s to 18 MB of
+  code, and now in a few milliseconds. A body shared by a `Sum` and a `Product`
+  at each of 10 levels compiles in 1.7 s instead of 55 s.
 
 - **Compiled Python raised `TypeError` for a `None` input whose type was
   inferred.** `\sin(r)` and `r^2+1` called with `r=None` now give `nan`, as the
-  interpreter does. An input declared `number` is unchanged and pays nothing.
-  A `vars` source that is a number literal is no longer wrapped in a `None`
-  test (it gave a Python `SyntaxWarning`).
+  interpreter does. An input declared `number` is unchanged and pays nothing. A
+  `vars` source that is a number literal is no longer wrapped in a `None` test
+  (it gave a Python `SyntaxWarning`).
 
 - **Compiled Python gave another absence value than the interpreter for an
   element read of an absent tuple.** With `b: list<tuple<number, string>>` and
@@ -561,12 +597,11 @@
 ### Performance
 
 - **A coordinate of point arithmetic over a list of points held by a symbol**
-  (`PointX(4·P + 0.3·(t, t))` with `P: list<tuple<number, number>>`) is
-  compiled as `4·PointX(P) + 0.3·t` on the JavaScript and interval targets, so
-  the points are not built. `Reduce(L, Add)` (also `Multiply`, `Max`, `Min`)
-  compiles on the interval target when `L` is not written out but its width is
-  known from its structure.
-
+  (`PointX(4·P + 0.3·(t, t))` with `P: list<tuple<number, number>>`) is compiled
+  as `4·PointX(P) + 0.3·t` on the JavaScript and interval targets, so the points
+  are not built. `Reduce(L, Add)` (also `Multiply`, `Max`, `Min`) compiles on
+  the interval target when `L` is not written out but its width is known from
+  its structure.
 
 - **A `Map` whose element function is a tree of integer operations is compiled
   with exact results** when the bounds prove that no step leaves the safe
@@ -654,6 +689,41 @@
   element at evaluation: a declared function applied to a symbol whose type
   shares no value with the parameter (CE-24), and `Map` with a polymorphic
   callback whose type-variable bound refuses the element type (CE-30).
+- **An inferred signature keeps its parameter names** (CE-60). `(x) => x + 1`
+  has the type `(x: unknown) -> number`; it printed `(unknown) -> number`. A
+  wildcard parameter (`_`, `_1`) and a destructuring pattern have no name. The
+  names do not change how types compare. So a named call to an unannotated
+  function literal held in a binding works:
+  `f := (a, b) => a - b; f(b: 2, a: 10)` gives `8` (it was
+  `argument-name-unknown`), and in Epsil `ns.D(k: 1, x: 10)` with
+  `const ns = {D -> ((x, k) => x - k)}` no longer reports
+  `argument-names-unavailable`. When a call names a parameter that the function
+  does not have, the error lists the declared names.
+- **A library operator given by name to `Map` is typed by its own type handler**
+  (CE-45.2), as `x ↦ f(x)` is. With `xs: list<integer>`, `Map(Abs, xs)` was
+  `list<number>` and is `list<integer<0..>>`; `Map(Sin, xs)` was `list<number>`
+  and is `list<real>`; `Map(Conjugate, xs)` was `list<unknown>` and is
+  `list<integer>`. A function you declare keeps its declared result. A more
+  precise type can change a value: with `L: list<vector<number>>`,
+  `Map(Reverse, L) · Map(Reverse, L)` was an entry-by-entry product and is now
+  the matrix product, as `L · L` and the lambda form `Map(x ↦ Reverse(x), L)`
+  give.
+- **A free symbol in a list literal is inferred as a number** (CE-39.4), as in
+  `x + 1`. With `L := [u, v]`, the value of `At(L, 1)` was typed `unknown` and
+  is `number`. A symbol used in a list literal and later used as a boolean
+  condition gives an `incompatible-type` error. A parameter of a function
+  literal is not affected (`x ↦ [x]` keeps the result `list<unknown>`).
+  Arithmetic over free symbols in a list literal is read as a number too
+  (CE-39.6): `AdjugateMatrix([[x, y], [z, w]])` evaluated to a value typed
+  `list<list<unknown>>` and is a `matrix<2x2>`.
+- **A function with a point parameter maps over a matrix or tensor of points**
+  (CE-448). With `g: (tuple<real, real>) -> real` and
+  `P := [[(1,2),(3,4)],[(5,6),(7,8)]]`, `g(P)` was an `incompatible-type` error
+  and is the 2×2 matrix of `g` at each point, as `PointX` and `Abs` give. For
+  `P: broadcastable<tuple<real, real>>`, `g(P)` was typed `list<real> | real`
+  and is `broadcastable<real>`; for `T: tensor<tuple<real, real>>`, `g(T)` was
+  typed `error` and is `tensor<real>`. Compiled JavaScript maps the same calls;
+  it threw "not a point" at rank 2.
 
 ## 0.167.0 _2026-10-24_
 

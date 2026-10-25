@@ -404,7 +404,7 @@ describe('a SCALAR-TYPED parameter is a scalar inside the body', () => {
     // macro chain has, where no parameter can be annotated.
     const def = (ce as any).lookupDefinition('q');
     expect(def.operator.signature.toString()).toBe(
-      '(unknown, unknown) -> number'
+      '(x: unknown, y: unknown) -> number'
     );
     const r = build(ce, ['q', 'u', 2]);
     expect(r.preamble).toContain('const _fn_q = (x, y) => _fn_r_e(x, y) + 1;');
@@ -491,7 +491,7 @@ describe('a user function REFERENCED AS A VALUE takes a shape-aware wrapper', ()
     // The engine infers an OPEN parameter, whatever the body computes with
     // it, and the interpreter broadcasts such a function over a row.
     const def = (ce as any).lookupDefinition('f');
-    expect(def.operator.signature.toString()).toBe('(unknown) -> number');
+    expect(def.operator.signature.toString()).toBe('(x: unknown) -> number');
 
     // The source is a caller input, so its element shape is unknown to the
     // emission — the run-time test in the wrapper is what decides.

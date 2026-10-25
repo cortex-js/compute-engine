@@ -156,7 +156,7 @@ describe('(b) inference: an At-indexing body infers a non-scalar parameter', () 
     // bare parameter is a two-component tuple (index reads of a bare
     // parameter are recorded per index, `docs/INFERENCE_ROADMAP.md` §5).
     expect(ce.box('h').type.toString()).toBe(
-      '(tuple<number, number>) -> number'
+      '(v: tuple<number, number>) -> number'
     );
     // Before the fix this was `[h(3),h(4)]`.
     expect(
@@ -321,7 +321,7 @@ describe('(c2) a KEYED access over a could-be base fails closed', () => {
   test('the interpreter reads the key', () => {
     const ce = keyedEngine();
     expect(ce.box('k').type.toString()).toBe(
-      '(dictionary<any> | indexed_collection<any>) -> unknown'
+      '(v: dictionary<any> | indexed_collection<any>) -> unknown'
     );
     expect(ce.box(['k', REC]).evaluate().toString()).toBe('5');
   });
@@ -402,7 +402,7 @@ describe('(d) inference: a point-accessor body infers a non-scalar parameter', (
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', ['PointX', 'a'], 'a']]).evaluate();
     expect(ce.box('g').type.toString()).toBe(
-      '(collection<any> | tuple) -> unknown'
+      '(a: collection<any> | tuple) -> unknown'
     );
     // Before the fix: `[g(3), g(4)]`, and `[null,null]` once compiled.
     expect(
@@ -591,7 +591,7 @@ describe('(f) a declared NON-SCALAR parameter reaches the compiled body', () => 
     ce.declare('g', '(number) -> number');
     ce.assign('g', ce.parse('x \\mapsto 2x'));
     const stored = (ce.lookupDefinition('g') as any)?.value?.value;
-    expect(stored.type.toString()).toBe('(unknown) -> number');
+    expect(stored.type.toString()).toBe('(x: unknown) -> number');
     // and a tuple argument still broadcasts componentwise, staying a Tuple
     expect(ce.parse('g((1,2))').evaluate().json).toEqual(['Tuple', 2, 4]);
   });
@@ -616,7 +616,7 @@ describe('non-regressions', () => {
     // infinity widens to the pair when the type is STORED (`widenValueTypes`),
     // which is why the `+oo` arm prints as `signed_infinity` here.
     expect(ce.box('n').type.toString()).toBe(
-      '(unknown) -> nan | real | signed_infinity'
+      '(a: unknown) -> nan | real | signed_infinity'
     );
     // `Norm` does not bind a list parameter whole
     // (`wholeCollectionParameterType`): a list argument is applied element
@@ -633,7 +633,7 @@ describe('non-regressions', () => {
   test('a SCALAR-bodied function still broadcasts over a list argument', () => {
     const ce = new ComputeEngine();
     ce.box(['Assign', 'g', ['Function', ['Multiply', 2, 'x'], 'x']]).evaluate();
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> number');
     expect(
       ce
         .box(['g', ['List', 1, 2, 3]])
@@ -656,7 +656,7 @@ describe('non-regressions', () => {
     ]).evaluate();
     // The body's indexed read types `integer | nan` (the out-of-band access
     // marker of a numeric element type), and adding `1` keeps both arms.
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> integer | nan');
+    expect(ce.box('f').type.toString()).toBe('(t: unknown) -> integer | nan');
     expect(ce.box(['f', 2]).evaluate().toString()).toBe('21');
   });
 });

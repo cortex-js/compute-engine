@@ -277,7 +277,7 @@ describe('external symbol facts', () => {
       ['Block', ['Multiply', 'f', 'x']],
       'x',
     ]);
-    expect(raw.canonical.type.toString()).toBe('(unknown) -> list<real>');
+    expect(raw.canonical.type.toString()).toBe('(x: unknown) -> list<real>');
     expect(ce.lookupDefinition('f')).toBeUndefined();
   });
 

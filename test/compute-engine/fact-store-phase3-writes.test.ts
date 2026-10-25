@@ -50,12 +50,12 @@ describe('a stored signature never carries a proof over an assumption', () => {
     expect(ce.box(['Greater', 'p', 2]).type.toString()).toBe('true');
     // The STORED signature does not.
     ce.assign('f', ce.box(lambda(['Greater', 'p', 2])));
-    expect(storedType(ce, 'f')).toBe('(unknown) -> boolean');
+    expect(storedType(ce, 'f')).toBe('(t: unknown) -> boolean');
 
     // ... and it is unchanged by the retraction, because it never depended on
     // the fact.
     ce.forget('p');
-    expect(storedType(ce, 'f')).toBe('(unknown) -> boolean');
+    expect(storedType(ce, 'f')).toBe('(t: unknown) -> boolean');
     expect(ce.box('p').type.toString()).toBe('real');
   });
 
@@ -64,7 +64,7 @@ describe('a stored signature never carries a proof over an assumption', () => {
     ce.declare('p2', 'real<3<..>');
     ce.assign('g', ce.box(lambda(['Greater', 'p2', 2])));
     // A declaration is a contract, so a proof taken over it is one too.
-    expect(storedType(ce, 'g')).toBe('(unknown) -> true');
+    expect(storedType(ce, 'g')).toBe('(t: unknown) -> true');
   });
 
   test('the SIGN channel is hidden at a write too', () => {
@@ -73,9 +73,9 @@ describe('a stored signature never carries a proof over an assumption', () => {
     expect(ce.assume(ce.parse('q > 0'))).toBe('ok');
     // `√q` of a positive `q` is real; of a `number` it is not.
     ce.assign('r', ce.box(lambda(['Sqrt', 'q'])));
-    expect(storedType(ce, 'r')).toBe('(unknown) -> number');
+    expect(storedType(ce, 'r')).toBe('(t: unknown) -> number');
     ce.forget('q');
-    expect(storedType(ce, 'r')).toBe('(unknown) -> number');
+    expect(storedType(ce, 'r')).toBe('(t: unknown) -> number');
   });
 
   test('a generic instantiation reached from a write inherits the hiding', () => {
@@ -204,7 +204,7 @@ describe('scopes', () => {
     expect(ce.box('u').type.toString()).toBe('real<3<..>');
     // ... and the write inside the scope still does not.
     ce.assign('w', ce.box(lambda(['Greater', 'u', 1])));
-    expect(storedType(ce, 'w')).toBe('(unknown) -> boolean');
+    expect(storedType(ce, 'w')).toBe('(t: unknown) -> boolean');
     ce.popScope();
   });
 
@@ -217,7 +217,7 @@ describe('scopes', () => {
     ce.assign('h', ce.box(lambda(['Greater', 'x', 2])));
     ce.popScope();
     // `h` outlives the scope that assumed; its signature must outlive it too.
-    expect(storedType(ce, 'h')).toBe('(unknown) -> boolean');
+    expect(storedType(ce, 'h')).toBe('(t: unknown) -> boolean');
   });
 });
 

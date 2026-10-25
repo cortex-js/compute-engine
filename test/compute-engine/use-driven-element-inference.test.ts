@@ -96,7 +96,7 @@ describe('route parity', () => {
     executeEpsil(ce, 'let f = (v) => v[1] + 1');
     expect(typeOf(ce, 'f')).toBe('(v: tuple<number>) -> number');
     executeEpsil(ce, 'function g(a) { First(a) + 1 }');
-    expect(typeOf(ce, 'g')).toBe('(indexed_collection<number>) -> number');
+    expect(typeOf(ce, 'g')).toBe('(a: indexed_collection<number>) -> number');
   });
 });
 
@@ -382,7 +382,7 @@ describe('the compiled route reads the refined type', () => {
     ce.assign('h', ce.box(['Function', ['Add', ['At', 'v', 1], 1], 'v']));
     // A read at a literal index makes the bare parameter a tuple; the inferred
     // tuple is not enforced at application, so a list argument still works.
-    expect(typeOf(ce, 'h')).toBe('(tuple<number>) -> number');
+    expect(typeOf(ce, 'h')).toBe('(v: tuple<number>) -> number');
     const call = ce.box(['h', 'xs']);
     const compiled = compile(call) as unknown as
       | { run: (env: unknown) => unknown }

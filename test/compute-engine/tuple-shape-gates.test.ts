@@ -447,7 +447,7 @@ describe('A PARAMETER SLOT WITH AN ALIAS OF A RECORD UNION', () => {
         engine.number(7),
     } as never);
     const fn = ce.box(['Function', ['g', 'xs'], 'xs']);
-    expect(fn.type.toString()).toBe('(unknown) -> number');
+    expect(fn.type.toString()).toBe('(xs: unknown) -> number');
     ce.declare('h', 'function');
     ce.assign('h', fn);
     expect(ce.box(['h', ['List', 1, 2]]).evaluate().json).toEqual([

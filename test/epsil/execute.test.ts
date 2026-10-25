@@ -1695,17 +1695,13 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     expect(value.re).toBe(4);
   });
 
-  test('a named call to an UNANNOTATED `:=`-assigned literal still declines', () => {
-    // Type inference drops parameter names (`effects-inference.ts` types a
-    // bare parameter `{ type: 'unknown' }`), so this named call fails at
-    // runtime too — the static diagnostics are TRUE predictions and must
-    // keep firing (ROADMAP "Named-argument calls — v1 residuals").
+  test('a named call to an UNANNOTATED `:=`-assigned literal is statically clean', () => {
+    // An inferred signature keeps the parameter names of the literal
+    // (`(x: unknown, y: unknown) -> number`), so the named call finds each
+    // slot, at run time and in the static tier (user decision 2026-10-25).
     const { value, diagnostics } = run('h := (x, y) => x + 3\nh(y: 2, x: 1)');
-    expect(diagnostics.map((d) => d.message[3])).toEqual([
-      'argument-names-unavailable',
-      'argument-names-unavailable',
-    ]);
-    expect(value.errors.length).toBeGreaterThan(0);
+    expect(diagnostics).toEqual([]);
+    expect(value.re).toBe(4);
   });
 
   test('a named call written BEFORE the assignment still declines', () => {
@@ -1768,16 +1764,14 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     expect(text.value.toString()).toBe('"s"');
   });
 
-  test('reassignment of a partly annotated literal: a bare parameter has no name', () => {
-    // The signature of a partly annotated literal names only its annotated
-    // parameters, at run time and in the static tier.
+  test('reassignment of a partly annotated literal: a bare parameter keeps its name', () => {
+    // The signature of a partly annotated literal names all its parameters,
+    // the bare ones too, at run time and in the static tier.
     const head =
       'h := (x: real, y: real) => x - y\nh := (y, x: real) => x - y\n';
     const named = run(head + 'h(y: 5, x: 3)');
-    expect(
-      named.diagnostics.map((d) => [d.message[0], d.message[3]])
-    ).toEqual([['static-type-error', 'argument-name-unknown']]);
-    expect(named.value.errors.length).toBeGreaterThan(0);
+    expect(named.diagnostics).toEqual([]);
+    expect(named.value.re).toBe(-2);
     const mixed = run(head + 'h(5, x: 3)');
     expect(mixed.diagnostics).toEqual([]);
     expect(mixed.value.re).toBe(-2);
@@ -1822,8 +1816,8 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     expect(first.diagnostics).toEqual([]);
     expect(first.value.re).toBe(3);
     const second = run(head + 'h(u: 3)');
-    expect(codes(second)).toEqual(NAME_UNKNOWN);
-    expect(second.value.errors.length).toBeGreaterThan(0);
+    expect(second.diagnostics).toEqual([]);
+    expect(second.value.toString()).toBe('"s"');
 
     // The same for a `let` binding that holds a literal.
     const declared = run(
@@ -1844,13 +1838,17 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
   });
 
   test('an assignment over a `function` statement follows the reassignment rules', () => {
-    // An unannotated literal replaces the definition: no parameter names.
+    // An unannotated literal replaces the definition, and its signature
+    // has the names of the literal.
     const bare = 'function h(x: integer) { x }\nh := (u) => "s"\n';
     const named = run(bare + 'h(x: 3)');
     expect(codes(named)).toEqual(NAME_UNKNOWN);
     expect(named.value.toString()).toBe(
-      'Error(ErrorCode("argument-name-unknown", "x", "this function declares no parameter names"))'
+      'Error(ErrorCode("argument-name-unknown", "x", "declared parameter names: `u`"))'
     );
+    const renamed = run(bare + 'h(u: 3)');
+    expect(renamed.diagnostics).toEqual([]);
+    expect(renamed.value.toString()).toBe('"s"');
     const positional = run(bare + 'h(3)');
     expect(positional.diagnostics).toEqual([]);
     expect(positional.value.toString()).toBe('"s"');
@@ -1906,7 +1904,8 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
         return { diagnostics, result: executeEpsil(ce, source) };
       };
 
-      // An unannotated literal replaces the definition: no parameter names.
+      // An unannotated literal replaces the definition, and its signature
+      // has the names of the literal.
       const bare = check(
         'function h(x: integer) { x }',
         'h := (u) => "s"\nh(x: 3)'
@@ -1914,7 +1913,7 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
       expect(bare.diagnostics).toEqual(NAME_UNKNOWN);
       expect(codes(bare.result)).toEqual(NAME_UNKNOWN);
       expect(bare.result.value.toString()).toBe(
-        'Error(ErrorCode("argument-name-unknown", "x", "this function declares no parameter names"))'
+        'Error(ErrorCode("argument-name-unknown", "x", "declared parameter names: `u`"))'
       );
 
       // A compatible annotated literal gives its names.
@@ -2038,10 +2037,11 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
     );
   });
 
-  test('reassignment of an unannotated literal: the names are gone', () => {
+  test('reassignment of an unannotated literal: the names change', () => {
     // At run time the unannotated literal replaces the signature that the
-    // first literal gave, and the new signature has no parameter names. The
-    // static tier replaces the pin too, and reports the same error.
+    // first literal gave, and the new signature has the names of the new
+    // literal. The static tier replaces the pin too, and reports the same
+    // error.
     const head =
       'f := (x: number, y: number) => x + 3\nf := (a, b) => a * b\n';
     const named = run(head + 'f(x: 2, y: 5)');
@@ -2049,8 +2049,11 @@ describe('EPSIL EXECUTE — named calls to `:=`-assigned callees (static tier)',
       named.diagnostics.map((d) => [d.message[0], d.message[3]])
     ).toEqual([['static-type-error', 'argument-name-unknown']]);
     expect(named.value.toString()).toBe(
-      'Error(ErrorCode("argument-name-unknown", "x", "this function declares no parameter names"))'
+      'Error(ErrorCode("argument-name-unknown", "x", "declared parameter names: `a`, `b`"))'
     );
+    const renamed = run(head + 'f(b: 2, a: 5)');
+    expect(renamed.diagnostics).toEqual([]);
+    expect(renamed.value.re).toBe(10);
     const positional = run(head + 'f(2, 5)');
     expect(positional.diagnostics).toEqual([]);
     expect(positional.value.re).toBe(10);

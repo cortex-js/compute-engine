@@ -201,7 +201,7 @@ describe('SYM P1-19 — higher-order result types are sound', () => {
     // (x ↦ x²)(∞) = +∞, so the result type must widen to `number`.
     const ce = strictEngine();
     const lam = ce.box(['Function', ['Square', 'x'], 'x']);
-    expect(lam.type.toString()).toBe('(unknown) -> number');
+    expect(lam.type.toString()).toBe('(x: unknown) -> number');
     expect(lam.type.matches('(any) -> number')).toBe(false);
   });
 

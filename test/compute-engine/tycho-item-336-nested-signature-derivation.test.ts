@@ -322,7 +322,7 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
       literalA
     );
     expect(ce._inScope(nested, () => ce.box('fA').type.toString())).toBe(
-      '(unknown) -> string'
+      '(x: unknown) -> string'
     );
     expect(storedLiteral(ce, 'fB')).toBe(literalB);
     expect(_provisionalDependentCount(ce, 'g')).toBe(1);
@@ -330,7 +330,7 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     // A declaration that `fB` can see still re-derives it.
     ce.declare('g', '(real) -> integer');
     expect(storedLiteral(ce, 'fB')).not.toBe(literalB);
-    expect(ce.box('fB').type.toString()).toBe('(unknown) -> integer');
+    expect(ce.box('fB').type.toString()).toBe('(x: unknown) -> integer');
   });
 
   test('an update of a scratch binding by any route is a scratch repair', () => {
@@ -396,7 +396,7 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     ce.declare('g', '(real) -> string');
     expect(storedLiteral(ce, 'k')).not.toBe(literal);
     expect(ce._definitionVersion).toBeGreaterThan(version);
-    expect(ce.box('k').type.toString()).toBe('(unknown) -> string');
+    expect(ce.box('k').type.toString()).toBe('(x: unknown) -> string');
   });
 
   test('a free name of a derived body leaves no binding in the home scope', () => {
@@ -459,9 +459,9 @@ describe('A CHAIN OF FUNCTIONS THAT EACH CALL THE NEXT TWICE', () => {
   });
 
   test.each([
-    [['Add', ['Random'], 'x'], '(unknown) random -> number', false],
-    [['b', 'x'], '(unknown) any -> broadcastable<number>', false],
-    [['Add', 'x', 1], '(unknown) -> number', true],
+    [['Add', ['Random'], 'x'], '(y: unknown) random -> number', false],
+    [['b', 'x'], '(y: unknown) any -> broadcastable<number>', false],
+    [['Add', 'x', 1], '(y: unknown) -> number', true],
   ])('the effects of %j still reach the first function', (last, type, pure) => {
     const ce = chain(5, last);
     const f = ce.box(['Function', ['Add', ['W_1', 'y'], ['W_2', 'y']], 'y']);

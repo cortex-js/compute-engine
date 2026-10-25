@@ -98,13 +98,13 @@ describe('Annotated function literal — typing (§6.1, §6.2)', () => {
   test('untyped literal is unchanged: widening case x + 1', () => {
     const ce = new ComputeEngine();
     const f = ce.box(['Function', ['Add', 'x', 1], 'x']);
-    expect(f.type.toString()).toBe('(unknown) -> number');
+    expect(f.type.toString()).toBe('(x: unknown) -> number');
   });
 
   test('untyped literal is unchanged: widening case x / 2', () => {
     const ce = new ComputeEngine();
     const f = ce.box(['Function', ['Divide', 'x', 2], 'x']);
-    expect(f.type.toString()).toBe('(unknown) -> number');
+    expect(f.type.toString()).toBe('(x: unknown) -> number');
   });
 
   test('an annotated param that proves finiteness suppresses the widening', () => {
@@ -133,7 +133,7 @@ describe('Annotated function literal — typing (§6.1, §6.2)', () => {
     // A bare (unannotated) parameter proves nothing and widens as before.
     expect(
       ce.box(['Function', ['Divide', 'x', 2], 'x']).type.toString()
-    ).toBe('(unknown) -> number');
+    ).toBe('(x: unknown) -> number');
   });
 });
 
@@ -422,7 +422,7 @@ describe('Phase 3 — signature derivation for annotated literals (§9.2)', () =
   test('an untyped literal keeps an inferred signature (pinned behavior)', () => {
     const ce = new ComputeEngine();
     ce.assign('f', ce.box(['Function', ['Add', 'x', 1], 'x']));
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> number');
+    expect(ce.box('f').type.toString()).toBe('(x: unknown) -> number');
     const def = ce.lookupDefinition('f')!;
     expect((def as any).operator.inferredSignature).toBe(true);
     // No apply-time validation: a mixed-type argument is not error-marked, and
@@ -783,7 +783,7 @@ describe('Phase 3 — declared-signature reconciliation (§6.3)', () => {
     expect(() =>
       ce.assign('f', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']))
     ).not.toThrow();
-    expect(ce.box('f').type.toString()).toBe('(unknown, unknown) -> number');
+    expect(ce.box('f').type.toString()).toBe('(x: unknown, y: unknown) -> number');
     expect(ce.box(['f', 3, 4]).evaluate().json).toBe(7);
   });
 

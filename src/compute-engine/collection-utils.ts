@@ -5850,6 +5850,86 @@ export function isPointListArgumentType(arg: Type, param: Type): boolean {
 }
 
 /**
+ * Whether an argument of type `arg` is a TENSOR OF POINTS of rank 2 or more,
+ * or of a rank that the type does not give, at a user-function parameter
+ * declared as the point type `param`: a matrix of points
+ * (`matrix<tuple<real, real>^(2x2)>`), a list of lists of points
+ * (`list<list<tuple<real, real>>>`), or a tensor of points of unknown rank
+ * (`tensor<tuple<real, real>>`). The point cells must be subtypes of
+ * `param`. A list of points of rank 1 is `isPointListArgumentType`, and this
+ * predicate answers `false` for it.
+ *
+ * Such a call maps to the points at every depth and answers a collection of
+ * the same shape (user decision 2026-10-25, ROADMAP CE-448), as `PointX` and
+ * `Abs` do. Before, the call was an `incompatible-type` error.
+ *
+ * The `missing` arms of `arg` are ignored at every level, as in
+ * `isPointListArgumentType`. A row or a tensor whose elements are all absent
+ * (`matrix<missing^(1x1)>`, the type of `[[Missing]]`, or
+ * `list<list<missing^1> | list<tuple<…>^2>>`) is a collection of absent
+ * points: each of its cells in the result is `Missing`, as for a list of
+ * points of rank 1 (`hasOnlyAbsentElements`). Before, such a value was
+ * refused with an `incompatible-type` error.
+ */
+export function isPointTensorArgumentType(arg: Type, param: Type): boolean {
+  if (!isPointParameterType(param)) return false;
+  return pointTensorOf(arg, param, 0);
+}
+
+/**
+ * Whether an argument of type `arg` is `broadcastable<P>`, with `P` a subtype
+ * of the point type `param`: one point, or a tensor of points of any rank. A
+ * call of a user function whose parameter is declared as the point `param`
+ * maps over such a value at every depth when it is a list, and binds it whole
+ * when it is one point (user decision 2026-10-25, ROADMAP CE-448). The
+ * `missing` arms are removed from `arg` first.
+ */
+export function isBroadcastablePointArgumentType(
+  arg: Type,
+  param: Type
+): boolean {
+  if (!isPointParameterType(param)) return false;
+  const stripped = stripMissingFromType(arg);
+  const a = resolveTypeReference(stripped) ?? stripped;
+  if (typeof a === 'string' || a.kind !== 'broadcastable') return false;
+  const e = stripMissingFromType(a.elements);
+  return e !== 'never' && isSubtype(e, param);
+}
+
+function pointTensorOf(t: Type, param: Type, depth: number): boolean {
+  // A deep nesting of lists is read up to a fixed depth only.
+  if (depth > 8) return false;
+  const a = resolveTypeReference(t) ?? t;
+  if (typeof a === 'string') return false;
+  if (a.kind === 'union') {
+    const arms = a.types.filter((x) => x !== 'missing');
+    return arms.length > 0 && arms.every((x) => pointTensorOf(x, param, depth));
+  }
+  if (a.kind !== 'list') return false;
+  const dims = a.dimensions;
+  if (dims === null || (dims !== undefined && dims.length >= 2)) {
+    const stripped = stripMissingFromType(a.elements);
+    const cell = resolveTypeReference(stripped) ?? stripped;
+    // All the cells are absent (`matrix<missing^(1x1)>`).
+    if (cell === 'never') return a.elements === 'missing';
+    return isSubtype(cell, param);
+  }
+  // A list with one dimension (`list<P^3>`) holds its cells as elements: it
+  // is a list of points of rank 1, not a tensor of points.
+  if (dims !== undefined) return false;
+  // The rows: lists of points, tensors of points, or, for a ragged list,
+  // a union of the two (a row whose points are all absent,
+  // `list<missing^1>`, beside a row of points).
+  const row = (x: Type) =>
+    isPointListArgumentType(x, param) || pointTensorOf(x, param, depth + 1);
+  if (row(a.elements)) return true;
+  const e = resolveTypeReference(a.elements) ?? a.elements;
+  if (typeof e === 'string' || e.kind !== 'union') return false;
+  const arms = e.types.filter((x) => x !== 'missing');
+  return arms.length > 0 && arms.every(row);
+}
+
+/**
  * Whether `arg` is the type of a non-empty list whose elements are all
  * absent (`list<missing^2>`, the type of `[Missing, Missing]`), with or
  * without a `missing` arm of its own. At a parameter declared as a point,

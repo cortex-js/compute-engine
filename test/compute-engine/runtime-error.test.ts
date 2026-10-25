@@ -55,7 +55,7 @@ describe('RuntimeError — the boxed application', () => {
       'x',
     ]);
     expect(g.isValid).toBe(true);
-    expect(g.type.toString()).toBe('(unknown) -> number');
+    expect(g.type.toString()).toBe('(x: unknown) -> number');
   });
 
   test('a user function returns the error value on the failing branch', () => {

@@ -276,7 +276,7 @@ describe('a union with a tuple arm beside a list of numbers is typed arm by arm'
     const lit = ce2.box(['Function', ['Add', 'q', ['Tuple', 1, 2]], 'q']);
     expect(lit.isValid).toBe(true);
     expect(String(lit.type)).toBe(
-      '(unknown) -> number | tuple<number, number>'
+      '(q: unknown) -> number | tuple<number, number>'
     );
   });
 

@@ -256,9 +256,11 @@ describe('MAP OF A BROADCASTABLE OPERATOR OVER ELEMENTS THAT MAY BE LISTS', () =
     expect(v.toString()).toBe('[[-1,-2],[-3]]');
   });
 
-  test('a source of scalars keeps the declared result', () => {
+  // Over scalars, the `Sqrt` type handler types the elements, as for the
+  // lambda spelling (user decision 2026-10-25, ROADMAP CE-45.2).
+  test('a source of scalars is typed by the handler of the operator', () => {
     expect(engine.box(['Map', 'Sqrt', ['List', 1, 4]]).type.toString()).toBe(
-      'list<complex | infinity^2>'
+      'vector<complex^2>'
     );
   });
 
@@ -320,7 +322,7 @@ describe('MAP: NESTED ELEMENTS, SEVERAL SOURCES, ABSENT CELLS', () => {
   test('a numeric result over an absent cell has no `missing` arm', () => {
     const v = expectTypeHoldsValue(
       engine.box(['Map', 'Sqrt', 'Lim']),
-      'list<complex | infinity | nan>'
+      'list<complex | nan>'
     );
     expect(v.toString()).toBe('[2,NaN]');
   });

@@ -222,7 +222,7 @@ describe('a list-building self-recursion assigned without a declaration', () => 
     const ce = new ComputeEngine();
     ce.assign('F', ce.box(recursion('Join', 'List')));
     expect(ce.box('F').type.toString()).toBe(
-      '(unknown, unknown) -> list<number>'
+      '(n: unknown, K: unknown) -> list<number>'
     );
     expect(ce.box(['F', 0, 5]).type.toString()).toBe('list<number>');
     expect(ce.box(['F', 0, 5]).evaluate().toString()).toBe('[0,1,2,3,4]');
@@ -232,7 +232,7 @@ describe('a list-building self-recursion assigned without a declaration', () => 
     const ce = new ComputeEngine();
     ce.assign('F', ce.box(recursion('Join', 'Set')));
     // Bare `set` and `set<any>` denote the same type.
-    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set');
+    expect(ce.box('F').type.toString()).toBe('(n: unknown, K: unknown) -> set');
   });
 });
 

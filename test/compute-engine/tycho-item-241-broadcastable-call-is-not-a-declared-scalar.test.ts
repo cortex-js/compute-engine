@@ -27,7 +27,7 @@ describe('a function literal subtracting its parameter from a tuple', () => {
     expect(literal.isValid).toBe(true);
     // A tuple argument can have components of any number type, so the
     // components of the tuple arm are `number`.
-    expect(String(literal.type)).toBe('(unknown) -> number | tuple<number, number>');
+    expect(String(literal.type)).toBe('(q: unknown) -> number | tuple<number, number>');
   });
 
   test('applies to a tuple component-wise', () => {

@@ -288,15 +288,21 @@ describe('A DECLARED CALLBACK ON AN ABSENT CELL', () => {
     return ce2.function('List', [...v.each()]);
   };
 
+  // A library operator given by name is typed by its own type handler, as
+  // the lambda spelling is (user decision 2026-10-25, ROADMAP CE-45.2).
   test.each([
-    [['Map', 'Sqrt', 'L'], 'list<complex | infinity | nan>', '[1,NaN,sqrt(3)]'],
-    [['Map', 'Ln', 'L'], 'list<complex | infinity | nan>', '[0,NaN,ln(3)]'],
-    [['Map', 'Floor', 'L'], 'list<infinity | nan | real>', '[1,NaN,3]'],
+    [['Map', 'Sqrt', 'L'], 'list<complex | nan>', '[1,NaN,sqrt(3)]'],
+    [
+      ['Map', 'Ln', 'L'],
+      'list<complex | nan | signed_infinity>',
+      '[0,NaN,ln(3)]',
+    ],
+    [['Map', 'Floor', 'L'], 'list<integer | nan>', '[1,NaN,3]'],
     [['Map', 'g', 'L'], 'list<integer | nan>', '[2,NaN,4]'],
-    [['Map', 'Length', 'K'], 'list<infinity | integer | nan>', '[2,NaN]'],
+    [['Map', 'Length', 'K'], 'list<integer | nan>', '[2,NaN]'],
     [
       ['Map', 'Sqrt', ['Take', 'L', 3]],
-      'list<complex | infinity | nan>',
+      'list<complex | nan>',
       '[1,NaN,sqrt(3)]',
     ],
     // An absent point gives an absent point.
@@ -486,7 +492,8 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
     [['Cycle', 'I'], 'list'],
     [['Zip', 'I', 'I'], 'list<tuple<integer, integer>>'],
     [['Join', 'N', ['Set', 2]], 'set'],
-    [['Map', 'Sqrt', 'I'], 'list<complex | infinity>'],
+    // The `Sqrt` type handler types the elements (ROADMAP CE-45.2).
+    [['Map', 'Sqrt', 'I'], 'list<complex>'],
   ])('%j keeps the declared result', (json, type) => {
     expect(ce4.box(json as any).type.toString()).toBe(type);
   });

@@ -883,7 +883,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
     ]);
     expect(seedless.ops[1].type.toString()).toBe(
-      '(unknown, x: integer) -> number'
+      '(a: unknown, x: integer) -> number'
     );
     expect(seedless.evaluate().toString()).toBe('6');
 
@@ -961,7 +961,7 @@ describe('phase 2: the folds convert — `Reduce` / `Scan` / `Fold`', () => {
       0,
     ]);
     expect(seeded.ops[1].type.toString()).toBe(
-      '(unknown, x: integer) -> number'
+      '(a: unknown, x: integer) -> number'
     );
     expect(seeded.evaluate().toString()).toBe('[1,3,6]');
     expect(

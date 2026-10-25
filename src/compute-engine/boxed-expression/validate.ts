@@ -3,6 +3,7 @@ import {
   couldBeUnkeyedCollectionOperand,
   isFiniteIndexedCollection,
   isPointListArgumentType,
+  isPointTensorArgumentType,
   isPointParameterType,
   isTupleWithListCoordinate,
   typeCouldBeCollection,
@@ -3727,6 +3728,7 @@ export function validateArguments(
     if (
       internals?.mapsPointLists &&
       (isPointListArgumentType(op.type.type, param) ||
+        isPointTensorArgumentType(op.type.type, param) ||
         (isPointParameterType(param) &&
           isFunction(op, 'List') &&
           op.nops === 0) ||
@@ -4087,6 +4089,7 @@ export function validateArguments(
     if (
       internals?.mapsPointLists &&
       (isPointListArgumentType(op.type.type, param) ||
+        isPointTensorArgumentType(op.type.type, param) ||
         (isPointParameterType(param) &&
           isFunction(op, 'List') &&
           op.nops === 0) ||

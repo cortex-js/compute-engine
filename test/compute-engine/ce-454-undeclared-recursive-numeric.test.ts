@@ -32,7 +32,9 @@ describe('AN UNDECLARED RECURSIVE NUMERIC FUNCTION (CE-454)', () => {
     const declared = new ComputeEngine();
     declared.declare('fact', '(unknown) -> unknown');
     declared.assign('fact', declared.box(FACT as any));
-    expect(undeclared.box('fact').type.toString()).toBe('(unknown) -> number');
+    expect(undeclared.box('fact').type.toString()).toBe(
+      '(n: unknown) -> number'
+    );
     expect(declared.box('fact').type.toString()).toBe('(unknown) -> number');
   });
 

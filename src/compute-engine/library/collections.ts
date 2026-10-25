@@ -196,6 +196,8 @@ import {
 } from '../../common/type/compatibility.js';
 import {
   freeTypeVariables,
+  isPolymorphicType,
+  readTypeVariablesAsBounds,
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
 import {
@@ -245,7 +247,11 @@ import type {
   Scope,
 } from '../global-types.js';
 // BoxedDictionary dynamically imported to avoid circular dependency
-import { canonical } from '../boxed-expression/canonical-utils.js';
+import {
+  canonical,
+  FREE_SYMBOL_ARITHMETIC_OPERATORS,
+  narrowFreeSymbolCells,
+} from '../boxed-expression/canonical-utils.js';
 import {
   awaitedOperandOptions,
   bignumPreferred,
@@ -4740,8 +4746,13 @@ function declaredOrCallElementTypeD(
     // read first, and the inferred result is the fallback.
     if (!callbackHasUnresolvedParameterD(fn, engine))
       return (
-        numericOperatorCallElementTypeD(fn, sources, declared, engine, derive) ??
-        declared
+        libraryOperatorCallElementTypeD(
+          fn,
+          sources,
+          declared,
+          engine,
+          derive
+        ) ?? declared
       );
     const called = callbackCallElementTypeD(fn, sources, engine, derive);
     if (called !== undefined) return called;
@@ -4766,7 +4777,20 @@ function declaredOrCallElementTypeD(
         }
       : declared;
   }
-  return callbackCallElementTypeD(fn, sources, engine, derive) ?? declared;
+  // The declared result of a generic operator reads `unknown` without its
+  // arguments (`Conjugate` is declared `(T) -> T`), so the operator is
+  // instantiated on the elements (`libraryOperatorCallElementTypeD`).
+  return (
+    callbackCallElementTypeD(fn, sources, engine, derive) ??
+    libraryOperatorCallElementTypeD(
+      fn,
+      sources,
+      declared ?? 'unknown',
+      engine,
+      derive
+    ) ??
+    declared
+  );
 }
 
 /**
@@ -4803,17 +4827,32 @@ function callbackHasUnresolvedParameterD(
 
 /**
  * The element type of `Map(f, xs, …)` when `f` is a bare symbol that names
- * a library operator with a `type` handler and a numeric declared result
- * `declared`, and an element of a source can be absent: the type of the
- * operator applied to an element of each source, when it is a subtype of
- * `declared`, or `undefined`.
+ * a library operator with a `type` handler or a generic signature, from
+ * that handler (or the signature instantiated on the arguments) applied to
+ * an element of each source, or `undefined`. The answer is used only when
+ * it is a subtype of `declared`, the declared result of the operator (with
+ * each type variable read as its bound), or of `declared | nan`, so it can
+ * only narrow the declared result. The `nan` arm is admitted because an
+ * absent cell gives `NaN` (`Floor(Missing)` is `NaN`), and the handler
+ * types that case.
  *
- * The declared result of `Abs` is `number`, so `Map(Abs, [1, Missing, 2])`
- * was a `vector<3>`, while `Map(x ↦ |x|, [1, Missing, 2])`, whose body is
- * typed by the `Abs` handler, is a `list<integer | nan^3>`: the absent cell
- * gives `NaN` (CE-453). The handler types the named callback the same way.
+ * The callback is typed as the body of the lambda spelling is typed (user
+ * decision 2026-10-25, ROADMAP CE-45.2): with `xs: list<integer>`,
+ * `Map(Abs, xs)` is `list<integer<0..>>` and `Map(Sin, xs)` is
+ * `list<real>`, as `Map(x ↦ |x|, xs)` and `Map(x ↦ Sin(x), xs)` are. They
+ * were `list<number>`, the declared result of `Abs` and `Sin`. An absent
+ * cell is typed by the handler too: `Map(Abs, [1, Missing, 2])` is
+ * `list<integer | nan^3>`, not `vector<3>` (CE-453). A generic operator is
+ * instantiated on the element: `Map(Conjugate, xs)` is `list<integer>`, as
+ * `Conjugate` is declared `(T) -> T`. It was `list<unknown>`, because the
+ * declared result `T` was read without its argument.
+ *
+ * A user function is not typed this way: a function declared with a
+ * signature (`h: (number) -> number`), or defined from a function literal
+ * (`g := x ↦ x + 10`), keeps its declared result (user decision
+ * 2026-09-27).
  */
-function numericOperatorCallElementTypeD(
+function libraryOperatorCallElementTypeD(
   fn: OperandDescriptor,
   sources: ReadonlyArray<OperandDescriptor>,
   declared: Type,
@@ -4822,24 +4861,39 @@ function numericOperatorCallElementTypeD(
 ): Type | undefined {
   const s = fn.structureOf?.();
   if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
-  if (!isSubtype(declared, 'number')) return undefined;
   const def = engine.lookupDefinition(s.name)?.operator;
-  if (def === undefined || typeof def.type !== 'function') return undefined;
+  if (def === undefined || def.isUserFunctionDefinition) return undefined;
+  const signature = def.signature.type;
+  const generic = isPolymorphicType(signature);
+  // A declared result that says nothing (`any`, `unknown`) is kept unless
+  // it comes from a generic signature, whose result is read with its
+  // arguments.
+  if (
+    !generic &&
+    (typeof def.type !== 'function' ||
+      declared === 'unknown' ||
+      declared === 'any')
+  )
+    return undefined;
+  const bound = generic
+    ? (functionResult(readTypeVariablesAsBounds(signature)) ?? declared)
+    : declared;
   const elementTypes: Type[] = [];
   for (const source of sources) {
     const t = mappingSourceElementTypeD(source);
     if (t === undefined) return undefined;
     elementTypes.push(t);
   }
-  // Over elements that cannot be absent the declared result is kept, so
-  // that `Map(Negate, [1, 2])` stays a `vector<2>`, as the tests of
-  // `map-bare-operator-points.test.ts` require.
-  if (!elementTypes.some((t) => typeContainsMissing(t))) return undefined;
   const t = derive(
     s.name,
     elementTypes.map((t, k) => describeBoundElement(t, k))
   );
-  if (t === undefined || t === 'never' || !isSubtype(t, declared))
+  if (
+    t === undefined ||
+    t === 'never' ||
+    isPolymorphicType(t) ||
+    !isSubtype(t, { kind: 'union', types: [bound, 'nan'] })
+  )
     return undefined;
   return t;
 }
@@ -7464,20 +7518,60 @@ function classifyCellD(op: OperandDescriptor): Type | null {
   if (t === 'error') return null;
 
   if (t === 'unknown' || t === 'any') {
-    // The generic-symbol fold is for a FREE symbol. A block-local binding a
-    // `Block` hoisted for a `let` that has not run yet (`s.local`) is not a
-    // generic value but a variable whose type is simply not known yet, so
-    // it blocks the shape claim and the literal falls back on the honest
-    // `list<unknown>`: with `let c = match …` and `out = join(out, [c])`,
-    // `out` was typed `list<number>` from the fold, and a later
-    // `stringJoin(listFrom(out))` was refused statically (and at run time)
-    // although `out` only ever held characters.
-    if (t === 'unknown' && s?.kind === 'symbol' && s.local !== true)
+    // The generic-symbol fold is for a FREE symbol (`s.free`, set from
+    // `isFreeSymbol()` in `boxed-expression/canonical-utils.ts`), the same
+    // symbols that the canonical form of the list infers as numbers. Other
+    // symbols of type `unknown` block the shape claim, and the literal falls
+    // back on the honest `list<unknown>`:
+    // - A block-local binding a `Block` hoisted for a `let` that has not run
+    //   yet is a variable whose type is simply not known yet: with
+    //   `let c = match …` and `out = join(out, [c])`, `out` was typed
+    //   `list<number>` from the fold, and a later
+    //   `stringJoin(listFrom(out))` was refused statically (and at run
+    //   time) although `out` only ever held characters.
+    // - A parameter of a function literal can receive any value: the body
+    //   of `x ↦ [x]` is `list<unknown>`, as the result of the literal is.
+    // - The variable of a binder is typed by its binder, and a pattern
+    //   wildcard (`_a`) matches any expression.
+    if (t === 'unknown' && s?.kind === 'symbol' && s.free === true)
       return 'number';
+    // An arithmetic cell over free symbols (`-t`, `x/(x·w - y·z)`, built by
+    // `.neg()` or `.div()` without operand inference) is read as a number,
+    // as a free symbol is. The canonical form of the list infers its free
+    // symbols as numbers (`narrowFreeSymbolCells()`,
+    // `boxed-expression/canonical-utils.ts`). User decision 2026-10-25,
+    // option (a) of CE-39.6 in `ROADMAP.md`.
+    if (t === 'unknown' && isArithmeticOverFreeSymbolsD(op)) return 'number';
     return null;
   }
   if (isAtomicValueType(t)) return t;
   return null;
+}
+
+/**
+ * True when the operand `op` is an application of type `unknown` of one of
+ * the `FREE_SYMBOL_ARITHMETIC_OPERATORS`, and each of its operands is a
+ * number literal, a free symbol of type `unknown` (a symbol node that has
+ * the `free` fact), an operand of a numeric type, or such an application. This is the descriptor form of
+ * `isArithmeticOverFreeSymbols()` (`boxed-expression/canonical-utils.ts`).
+ */
+function isArithmeticOverFreeSymbolsD(op: OperandDescriptor): boolean {
+  const s = op.structureOf?.();
+  if (s?.kind !== 'application') return false;
+  if (!FREE_SYMBOL_ARITHMETIC_OPERATORS.has(s.head)) return false;
+  if (op.type !== 'unknown') return false;
+  for (const x of s.children) {
+    const c = x.structureOf?.();
+    if (c?.kind === 'number') continue;
+    if (c?.kind === 'symbol' && x.type === 'unknown') {
+      if (c.free === true) continue;
+      return false;
+    }
+    if (isArithmeticOverFreeSymbolsD(x)) continue;
+    if (x.type !== 'unknown' && isSubtype(x.type, 'number')) continue;
+    return false;
+  }
+  return true;
 }
 
 /** One level's analysis: its dimensions and the DISTINCT cell types it
@@ -22300,7 +22394,7 @@ function canonicalList(
   // must never be STORED as an element) and erases `Nothing`, the erasure
   // marker (`[12, Nothing, 34]` is a 2-element list; use `Missing` for an
   // absent-but-positioned value).
-  return ce._fn('List', flatten(ops.map(element)));
+  return narrowFreeSymbolCells(ce._fn('List', flatten(ops.map(element))));
 }
 
 function canonicalSet(

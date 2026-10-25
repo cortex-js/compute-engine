@@ -1730,11 +1730,14 @@ describe('a lazy collection of vectors or matrices', () => {
     expect(literal).toMatch(/\*/);
   });
 
-  // `Map(Reverse, L)` is typed `list<unknown>`, and its rows are `Reverse`
-  // views. Beside a matrix whose shape is known, the values decide, and a
-  // nested lazy row is read as a list. Two such Maps keep the product of
-  // each entry, as compiled code computes it: a list of unknown elements
-  // may hold points, and compiled code cannot tell a point from a row.
+  // `Map(Reverse, L)` is typed `list<vector>`: the generic signature of
+  // `Reverse` is instantiated on the rows of `L`, as for the lambda
+  // spelling `x ↦ Reverse(x)` (user decision 2026-10-25, ROADMAP CE-45.2).
+  // Its rows are `Reverse` views. Beside a matrix whose shape is known, the
+  // values decide, and a nested lazy row is read as a list. The product of
+  // two such Maps is the matrix product, as `Multiply(L, L)` is. It was the
+  // product of each entry while `Map(Reverse, L)` was typed
+  // `list<unknown>`.
   it('a Map whose values are a matrix', () => {
     expect(
       evaluate('list<vector<number>>', VECTORS, [
@@ -1749,7 +1752,7 @@ describe('a lazy collection of vectors or matrices', () => {
         ['Map', 'Reverse', 'L'],
         ['Map', 'Reverse', 'L'],
       ])
-    ).toBe('[[4,1],[16,9]]');
+    ).toBe('[[8,5],[20,13]]');
   });
 
   it('two Maps whose values are vectors stay the product of each entry', () => {

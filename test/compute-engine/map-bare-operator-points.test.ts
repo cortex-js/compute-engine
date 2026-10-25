@@ -107,7 +107,11 @@ describe('A BARE OPERATOR NAME OVER POINTS', () => {
   });
 });
 
-describe('A BARE OPERATOR NAME OVER NUMBERS IS UNCHANGED', () => {
+// Over numbers, the element type comes from the type handler of the
+// operator, as for the lambda spelling `(x, y) ↦ x - y` (user decision
+// 2026-10-25, ROADMAP CE-45.2). It was the declared result `number`
+// (`vector<2>`).
+describe('A BARE OPERATOR NAME OVER NUMBERS IS TYPED BY ITS HANDLER', () => {
   test.each([
     [
       'Subtract',
@@ -117,8 +121,9 @@ describe('A BARE OPERATOR NAME OVER NUMBERS IS UNCHANGED', () => {
       ],
       '[1, 2], [3, 4]',
       '[-2,-2]',
+      'vector<integer^2>',
     ],
-    ['Negate', [['List', 1, 2]], '[1, 2]', '[-1,-2]'],
+    ['Negate', [['List', 1, 2]], '[1, 2]', '[-1,-2]', 'vector<integer^2>'],
     [
       'Multiply',
       [
@@ -127,6 +132,7 @@ describe('A BARE OPERATOR NAME OVER NUMBERS IS UNCHANGED', () => {
       ],
       '[1, 2], [3, 4]',
       '[3,8]',
+      'vector<integer^2>',
     ],
     [
       'Divide',
@@ -136,14 +142,15 @@ describe('A BARE OPERATOR NAME OVER NUMBERS IS UNCHANGED', () => {
       ],
       '[1, 2], [3, 4]',
       '[1/3,1/2]',
+      'list<infinity | nan | real^2>',
     ],
-  ])('%s', (name, sources, latex, value) => {
+  ])('%s', (name, sources, latex, value, type) => {
     expect(
       both(
         ['Map', name, ...(sources as unknown[])],
         `\\operatorname{Map}(${op(name)}, ${latex})`
       )
-    ).toEqual({ value, type: 'vector<2>' });
+    ).toEqual({ value, type });
   });
 });
 

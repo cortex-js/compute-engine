@@ -791,7 +791,7 @@ The [Linear algebra reference](/epsil/reference/linear-algebra/) has the full de
 | `luDecomposition` | `LUDecomposition` | `(matrix) -> tuple` | LU decomposition of a square matrix. |
 | `linearSolve` | `LinearSolve` | `(matrix, matrix \| vector) -> value` | Solve the linear system A·x = b for x. |
 | `matrix` | `Matrix` | `(matrix, string?, string?) -> matrix` | Matrix constructor and canonicalizer. |
-| `matrixMultiply` | `MatrixMultiply` | `(matrix \| vector, matrix \| vector) -> matrix \| vector` | Matrix and vector multiplication. |
+| `matrixMultiply` | `MatrixMultiply` | `(matrix \| vector, matrix \| vector) -> matrix \| number \| vector` | Matrix and vector multiplication. |
 | `matrixPower` | `MatrixPower` | `(matrix, real) -> matrix` | Square matrix raised to a power. |
 | `matrixRank` | `MatrixRank` | `(value) -> integer` | Rank of a matrix (number of linearly independent rows/columns). |
 | `norm` | `Norm` | `(list<tuple> \| number \| tensor \| tuple, (+oo \| real \| string)?) -> +oo \| nan \| real` | Vector or matrix norm. |

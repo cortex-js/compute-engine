@@ -6,8 +6,9 @@
  * `Abs` is `number`), while `Map(x ↦ |x|, [1, Missing, 2])` is
  * `list<integer | nan^3>`: the `Abs` type handler types the body, and the
  * absent cell gives `NaN`. The named callback is now typed by the same
- * handler when an element of the source can be absent. Over elements that
- * cannot be absent, the declared result is kept.
+ * handler when an element of the source can be absent. Since the user
+ * decision of 2026-10-25 (ROADMAP CE-45.2), the handler types the named
+ * callback over elements that cannot be absent too.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
@@ -30,9 +31,9 @@ describe('A NAMED NUMERIC CALLBACK OVER AN ABSENT CELL (CE-453)', () => {
     }
   );
 
-  test('a named callback over present elements keeps the declared result', () => {
+  test('a named callback over present elements is typed by its handler', () => {
     expect(ce.box(['Map', 'Negate', ['List', 1, 2]]).type.toString()).toBe(
-      'vector<2>'
+      'vector<integer^2>'
     );
   });
 });

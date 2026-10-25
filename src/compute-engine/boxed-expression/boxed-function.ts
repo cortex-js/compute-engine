@@ -136,6 +136,8 @@ import {
   isFiniteBroadcastParticipant,
   isPointListArgumentType,
   isPointOrPointListArgumentType,
+  isPointTensorArgumentType,
+  isBroadcastablePointArgumentType,
   isPointParameterType,
   isFixedShapeCollection,
   isKnownFinitenessBroadcast,
@@ -14631,7 +14633,13 @@ function mapsAsPointList(
     if (finite) return true;
     return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) && !isTupleShapedType(t);
   }
-  return isPointListArgumentType(x.type.type, slot.elements);
+  // A tensor of points of rank 2 or more maps too, to the points at every
+  // depth (`isPointTensorArgumentType`): each row is a list of points that
+  // the map enters again (`mapsToCells`).
+  return (
+    isPointListArgumentType(x.type.type, slot.elements) ||
+    isPointTensorArgumentType(x.type.type, slot.elements)
+  );
 }
 
 /**
@@ -14675,10 +14683,46 @@ function pointListApplicationType(
   // `h((1, 2), U)` with `U: real | list<list<real>>` as `R | list<R>`, while
   // the value of a matrix `U` is a `list<list<R>>`.
   let shape: MapShape = 'cell';
+  let deepWhole = false;
+  let deepCell = false;
+  const deepDepths = new Set<number>();
   ops.forEach((x, i) => {
     const slot = plan.at(i);
     if (!slot.mappable || slot.elements === undefined) return;
     if (isPointParameterType(slot.elements)) {
+      // A tensor of points of rank 2 or more, and `broadcastable<P>` (one
+      // point, or a tensor of points of any rank), map to the points at
+      // every depth (user decision 2026-10-25, ROADMAP CE-448). The shape
+      // follows the type down to the points (`operandMapShape`, which reads
+      // a point as a cell): a matrix of points gives a list of lists of
+      // results, `tensor<P>` gives `tensor<R>`, and `broadcastable<P>` gives
+      // `R | tensor<R>`, that is `broadcastable<R>`. Before, the call over
+      // `broadcastable<P>` was typed `R | list<R>`, and the value for a
+      // matrix of points was an `incompatible-type` error.
+      //
+      // The absences of such an operand are read here, not by
+      // `pointListMapType`, which reads one list level only: an absent point
+      // or row at any depth is a `Missing` element of the result at the same
+      // depth, so the elements of the result at that depth get a `missing`
+      // arm, and an operand that is absent as a whole
+      // makes the call `Missing`.
+      if (isDeepPointOperand(plan, i, x)) {
+        const t = x.type.type;
+        const present = withoutTopLevelMissing(t);
+        if (present !== t) deepWhole = true;
+        // Each absent element is `Missing` at its own depth in the result:
+        // with `S: list<list<P> | missing>`, an absent row is an element of
+        // the top list, so `g(S)` is `list<list<R> | missing>`, not
+        // `list<list<R | missing>>`. An absence that the list levels do not
+        // show (a `broadcastable<P | missing>`) is put on the cells.
+        const s = stripAbsentPoints(present, slot.elements, 0, deepDepths);
+        if (typeContainsMissing(s)) deepCell = true;
+        shape = combineMapShapes(
+          shape,
+          operandMapShape(stripMissingFromType(s))
+        );
+        return;
+      }
       if (mapsAsPointOrPointList(plan, i, x))
         shape = combineMapShapes(
           shape,
@@ -14758,13 +14802,41 @@ function pointListApplicationType(
     return (
       slot.elements !== undefined &&
       isPointParameterType(slot.elements) &&
+      !isDeepPointOperand(plan, i, x) &&
       (mapsAsPointOrPointList(plan, i, x) || mapsAsPointList(plan, i, x, false))
     );
   });
-  const mapType = mapShapeType(shape, result, pointOps);
+  const cellResult: Type = deepCell
+    ? { kind: 'union', types: [result, 'missing'] }
+    : result;
+  let mapType = mapShapeType(shape, cellResult, pointOps);
+  if (deepDepths.size > 0)
+    mapType = withMissingAtDepths(mapType, deepDepths);
+  if (deepWhole) mapType = { kind: 'union', types: [mapType, 'missing'] };
   return absence === undefined
     ? mapType
     : withMissingAtDepths(mapType, absence.depths, 0, absence.whole);
+}
+
+/**
+ * Whether operand `x`, at a point slot `i` of the point-list plan `plan`, is
+ * typed as a tensor of points of rank 2 or more
+ * (`isPointTensorArgumentType`) or as `broadcastable<P>`
+ * (`isBroadcastablePointArgumentType`). The call maps over such an operand to
+ * the points at every depth (user decision 2026-10-25, ROADMAP CE-448).
+ */
+function isDeepPointOperand(
+  plan: BroadcastSlotPlan,
+  i: number,
+  x: Expression
+): boolean {
+  const slot = plan.at(i);
+  if (!slot.mappable || slot.elements === undefined) return false;
+  if (!isPointParameterType(slot.elements) || isTuple(x)) return false;
+  return (
+    isPointTensorArgumentType(x.type.type, slot.elements) ||
+    isBroadcastablePointArgumentType(x.type.type, slot.elements)
+  );
 }
 
 /**
@@ -14901,6 +14973,22 @@ function mapShapeType(
     return pointListMapType(pointOps, unknownRankMapType(result), true);
   if (shape === 'list') return pointListMapType(pointOps, 'list', true);
   if ('union' in shape) {
+    // One value or a tensor of values of unknown rank, with no absent cell:
+    // that is `broadcastable<R>`, which says it in one arm.
+    if (
+      shape.union.length === 2 &&
+      shape.union.includes('cell') &&
+      shape.union.includes('tensor')
+    ) {
+      const tensor = mapShapeType('tensor', result, pointOps);
+      if (
+        typeof tensor !== 'string' &&
+        tensor.kind === 'list' &&
+        tensor.dimensions === null &&
+        tensor.elements === result
+      )
+        return broadcastableOf(result);
+    }
     const types: Type[] = [];
     for (const s of shape.union) {
       const t = mapShapeType(s, result, pointOps);
@@ -15031,6 +15119,7 @@ function pointListAbsence(
         c !== undefined &&
         !isTuple(c) &&
         (isPointListArgumentType(c.type.type, slot.elements) ||
+          isPointTensorArgumentType(c.type.type, slot.elements) ||
           isPointOrPointListArgumentType(c.type.type, slot.elements))
       )
         whole = true;
@@ -15626,28 +15715,8 @@ function declaredPointAbsence(
   const depths = new Set<number>();
   let whole = false;
   const stripped: Array<Type | undefined> = types.map(() => undefined);
-  const strip = (t: Type, point: Type, d: number): Type => {
-    const r = resolveTypeReference(t) ?? t;
-    if (typeof r === 'string') return t;
-    if (r.kind === 'union') {
-      const arms = r.types.map((a) => strip(a, point, d));
-      return arms.every((a, k) => a === r.types[k])
-        ? t
-        : { kind: 'union', types: arms };
-    }
-    if (r.kind !== 'list') return t;
-    const rank =
-      r.dimensions === null ? undefined : (r.dimensions?.length ?? 1);
-    const at = rank === undefined ? -1 : d + rank - 1;
-    let elements = r.elements;
-    const present = withoutTopLevelMissing(elements);
-    if (present !== elements || present === 'missing') {
-      depths.add(at);
-      elements = present === 'never' || present === 'missing' ? point : present;
-    }
-    elements = rank === undefined ? elements : strip(elements, point, at + 1);
-    return elements === r.elements ? t : { ...r, elements };
-  };
+  const strip = (t: Type, point: Type, d: number): Type =>
+    stripAbsentPoints(t, point, d, depths);
   types.forEach((t, i) => {
     if (skip(i)) return;
     const slot = slots.at(i);
@@ -15672,6 +15741,49 @@ function declaredPointAbsence(
   return depths.size === 0 && !whole
     ? undefined
     : { depths, whole, types: stripped };
+}
+
+/**
+ * `t`, the type of a collection of points, with the `missing` arms of the
+ * elements of each list level removed, starting at depth `d`. The depth of
+ * each removed arm is added to `depths`: 0 for an element of the top list, 1
+ * for an element of a row, and so on, and `-1` for a tensor of unknown rank
+ * (any depth). An element type that is only `missing` (`list<missing^2>`, a
+ * list whose elements are all absent) is replaced with `point`.
+ *
+ * Used by `declaredPointAbsence` and by `pointListApplicationType`, which
+ * add a `missing` arm back to the result of the map at each of these depths
+ * (`withMissingAtDepths`): an absent element of the argument at a depth is a
+ * `Missing` element of the result at the same depth.
+ */
+function stripAbsentPoints(
+  t: Type,
+  point: Type,
+  d: number,
+  depths: Set<number>
+): Type {
+  const r = resolveTypeReference(t) ?? t;
+  if (typeof r === 'string') return t;
+  if (r.kind === 'union') {
+    const arms = r.types.map((a) => stripAbsentPoints(a, point, d, depths));
+    return arms.every((a, k) => a === r.types[k])
+      ? t
+      : { kind: 'union', types: arms };
+  }
+  if (r.kind !== 'list') return t;
+  const rank = r.dimensions === null ? undefined : (r.dimensions?.length ?? 1);
+  const at = rank === undefined ? -1 : d + rank - 1;
+  let elements = r.elements;
+  const present = withoutTopLevelMissing(elements);
+  if (present !== elements || present === 'missing') {
+    depths.add(at);
+    elements = present === 'never' || present === 'missing' ? point : present;
+  }
+  elements =
+    rank === undefined
+      ? elements
+      : stripAbsentPoints(elements, point, at + 1, depths);
+  return elements === r.elements ? t : { ...r, elements };
 }
 
 /**

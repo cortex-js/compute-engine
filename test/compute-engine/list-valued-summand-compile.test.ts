@@ -28,10 +28,10 @@ describe('list-valued function applications keep their signature under numeric u
     const a: any = ce.lookupDefinition('a');
     const B: any = ce.lookupDefinition('B');
     expect(a?.operator?.signature?.toString()).toEqual(
-      '(unknown) -> vector<2>'
+      '(t: unknown) -> vector<2>'
     );
     expect(B?.operator?.signature?.toString()).toEqual(
-      '(unknown) -> vector<2>'
+      '(t: unknown) -> vector<2>'
     );
   });
 

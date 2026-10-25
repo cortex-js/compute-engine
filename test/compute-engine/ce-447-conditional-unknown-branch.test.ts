@@ -28,7 +28,7 @@ describe('A CONDITIONAL WITH AN UNKNOWN BRANCH (CE-447)', () => {
       ])
     );
     expect(ce.box('f').type.toString()).toBe(
-      '(unknown, dictionary<any> | indexed_collection<any>) -> unknown'
+      '(n: unknown, s: dictionary<any> | indexed_collection<any>) -> unknown'
     );
     const call = ce.box(['f', 0, ['List', 7]]);
     const value = call.evaluate();
@@ -54,7 +54,7 @@ describe('A CONDITIONAL WITH AN UNKNOWN BRANCH (CE-447)', () => {
       ])
     );
     expect(ce.box('w').type.toString()).toBe(
-      '(unknown, dictionary<any> | indexed_collection<any>) -> unknown'
+      '(n: unknown, s: dictionary<any> | indexed_collection<any>) -> unknown'
     );
   });
 
@@ -68,6 +68,6 @@ describe('A CONDITIONAL WITH AN UNKNOWN BRANCH (CE-447)', () => {
         'n',
       ])
     );
-    expect(ce.box('r').type.toString()).toBe('(unknown) -> integer');
+    expect(ce.box('r').type.toString()).toBe('(n: unknown) -> integer');
   });
 });

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-466.
+Next free reference: CE-474.
 
 **Entry format.**
 
@@ -131,6 +131,21 @@ problem does not occur on its installed release). Report:
 
 ## Types and type inference
 
+### CE-472. The derived type of a call does not check the arguments against a declared signature
+
+**Status:** open; defect.
+
+With `k` declared `(tuple<number, number>) -> number` and assigned a function
+literal, the boxed `k(3)`, `k(True)`, `k(NaN)` and `k([1, 2])` are typed `error`
+(`validateArguments`, `boxed-function.ts`), but
+`deriveApplicationType(ce, 'k', …)` gives `number` for all of them: the value
+branch of `deriveApplicationType()`
+(`boxed-expression/derive-application-type.ts`) never checks the operands
+against a declared signature. A type derived for a function literal that calls
+`k` can then miss the error. Fix: the same contract check in that branch as on
+the boxed route. An INFERRED signature is not a contract and keeps its own rules
+(`inferredCallSignature()`, `call-result-type.ts`).
+
 ### CE-3. `unknown` as an inference marker: what the migration left open
 
 **Status:** open; defect, small. Plan:
@@ -206,32 +221,6 @@ because `signatureParamsAreScalar` is false for an arrow parameter, but the
 evaluation maps over the rows. A fix must find which mapping the run time does
 and solve `T` with `inferTypeArguments`.
 
-### CE-32. The parse route does not infer the type of a symbol in a juxtaposed product
-
-**Status:** in progress; defect, small. User decision 2026-10-25: a product
-written by juxtaposition narrows its valueless symbols as `Multiply` does, on
-every route; review the Tycho row 425 expectations that move.
-
-`ce.parse('x y')` leaves `x` typed `unknown`, while `ce.parse('x+1')` and
-`ce.box(['Multiply', 'x', 'y'])` infer `number`. The parse route skips the type
-narrowing of `Multiply`. A product with a matrix treats an undeclared symbol as
-a scalar on both routes (see `mayBeTensorProductOperand()` in
-`boxed-expression/order.ts`), so the difference does not change a product's
-order today. Measured 2026-10-24: running `canonicalNumericOperator` in the
-`InvisibleOperator` handler makes 27 tests fail in 6 suites (21 in
-`tycho-row-425-index-of-broadcastable-call.test.ts`). Every value still holds
-its type, and the types become those of the box route (`t ↦ [t, 2t]` becomes
-`-> vector<2>`). The change needs a review of the Tycho row 425 expectations.
-
-Another example (2026-10-25): `ce.parse('t \mapsto (t, 2t)')` is typed
-`(unknown) -> tuple<unknown, number>`, while `t \mapsto (t, 2\cdot t)`,
-`ce.box(['Function', ['Tuple', 't', ['Multiply', 2, 't']], 't'])` and the Epsil
-`tup(t) = (t, 2*t)` give `tuple<number, number>`. The box route with an
-`InvisibleOperator` gives `tuple<unknown, number>` too. Both types are sound;
-`tuple<number, number>` follows the rule that a use of a valueless symbol
-narrows it. A fix also changes a test of `compile-python-absent-input.test.ts`
-that uses `ce.parse('2\pi r')` as its example of an input typed `unknown`.
-
 ### CE-36. A signature derivation inside a cached type read can miss a widening in its own scope
 
 **Status:** open; defect, small.
@@ -286,43 +275,46 @@ linear-algebra operators, the trigonometric rewrites and `TupleFrom`.
   a table that never claims `rational` from a product or a quotient
   (`matrixResultCellType`, `library/linear-algebra.ts`). The options: the older
   handlers use the same table, or a float literal stops being typed `integer`.
-- **CE-39.2** (user decision 2026-10-25: option (a)) The range of a sum with a
-  float operand does not contain the value type. `2.0 + 1/3` is typed
-  `real<2.329..2.341>`, and its value is typed `real<2.3..2.4>`, which is not a
-  subtype of it: a computed value that is not exactly a double gets a range with
-  two significant digits (`ENCLOSURE_DIGITS`, `boxed-number.ts`). Options: (a)
-  round the static ranges outward to the same grid (many pinned range types
-  change); (b) give computed values a tighter range (undoes the compact-type
-  design). The nightly soundness grid compares the value with the static range,
-  so it passes.
-- **CE-39.3** (user decision 2026-10-25: option (b)) With `x := 0.5`,
-  `Tuple(Abs(x))` is typed `tuple<real<0..>>`, and its value `(0.5)` is typed
-  `tuple<real>`, because a literal in a composite is typed by its tier without a
-  range. `composite-type-synthesis.test.ts` ("non-literal components keep their
-  own claims") and the comment of `storedComponentTypeD` keep the range on
-  purpose. Options: (a) strip ranges from the component types of composites
-  (loses information); (b) type literal components with a sign range (changes
-  the value type of every list literal). The same gap: `Abs([1, 2])` is typed
+- **CE-39.2** (decision needed again: option (a), decided 2026-10-25, was
+  implemented in a worktree and loses precision in nested expressions; see the
+  end of this item) The range of a sum with a float operand does not contain the
+  value type. `2.0 + 1/3` is typed `real<2.329..2.341>`, and its value is typed
+  `real<2.3..2.4>`, which is not a subtype of it: a computed value that is not
+  exactly a double gets a range with two significant digits (`ENCLOSURE_DIGITS`,
+  `boxed-number.ts`). Options: (a) round the static ranges outward to the same
+  grid (many pinned range types change); (b) give computed values a tighter
+  range (undoes the compact-type design). The nightly soundness grid compares
+  the value with the static range, so it passes. Measured 2026-10-25 with option
+  (a) (outward rounding in `attachInterval`, `numerics/interval-arithmetic.ts`):
+  the value types hold, but the rounding adds up through nested subexpressions.
+  `√(1 − ((k − 0.5)/40)²)` for `k` from 1 to 40 becomes `complex` (it was
+  `real`): `(k − 0.5)/40` is `real<0.012..1.1>`, its square `..1.3`, so `1 − …`
+  is `real<-0.31..1>`. Two tests fail on it. Options: (i) accept the loss; (ii)
+  the handlers read unrounded internal intervals and only the reported type is
+  rounded (a separate internal range channel, a larger change); (iii) return to
+  the old ranges and compare the value with the range in the nightly check.
+- **CE-39.3** (decision needed again: option (b), decided 2026-10-25, does not
+  work; see the end of this item) With `x := 0.5`, `Tuple(Abs(x))` is typed
+  `tuple<real<0..>>`, and its value `(0.5)` is typed `tuple<real>`, because a
+  literal in a composite is typed by its tier without a range.
+  `composite-type-synthesis.test.ts` ("non-literal components keep their own
+  claims") and the comment of `storedComponentTypeD` keep the range on purpose.
+  Options: (a) strip ranges from the component types of composites (loses
+  information); (b) type literal components with a sign range (changes the value
+  type of every list literal). The same gap: `Abs([1, 2])` is typed
   `list<integer<0..>^2>`, its value `vector<integer^2>`. Also
   `Tuple(Range(1, 3))` is typed `tuple<range>`, and its value
   `tuple<vector<integer^3>>`. Typing the component `list<integer>` made a
   variable declared `list<range>` refuse `[Range(1, 3)]`, and admitting the
   literal stored `[[1, 2, 3]]`, which is not in `list<range>`: a fix must decide
-  what a `list<range>` declaration holds.
-- **CE-39.4** (user decision 2026-10-25: option (a)) With `L := [u, v]`,
-  `At(L, 1)` is typed `number` and its value `u` is typed `unknown`. The
-  generic-symbol fold of `classifyCellD` (`library/collections.ts`) reads a free
-  symbol in a list literal as a `number` cell. Options: (a) the literal narrows
-  its free symbols to `number` (can retype a symbol later used as a boolean);
-  (b) the literal is typed `list<unknown>` (changes the type of every symbolic
-  matrix, see CE-39.6); (c) keep the convention and accept the gap.
-- **CE-39.6** (user decision 2026-10-25: option (a)) A matrix of symbols with no
-  type (`[[x, y], [z, w]]`, typed `matrix<2x2>`): its `AdjugateMatrix` value is
-  typed `list<list<unknown>>` and its `PseudoInverse` value
-  `list<list<broadcastable<number>>>`. The result cells are built with `.neg()`
-  and `.div()`, which do not infer types. Options: (a) extend the number reading
-  of list literals to arithmetic over free symbols; (b) the handlers decline
-  when the cells are symbolic.
+  what a `list<range>` declaration holds. Measured 2026-10-25 with option (b):
+  830 tests fail in 152 suites, and it makes a new gap in the other direction.
+  With `f := x ↦ 2x + 1` declared
+  `(broadcastable<number>) -> broadcastable<number>`, `f([1, 2, 3])` is typed
+  `list<integer<1..>^3>` while its value is typed `list<integer<0..>^3>`: the
+  handlers derive tighter ranges from sign-ranged cells than the value carries.
+  Remaining options: (a) strip ranges from composite components; (c) accept the
+  gap (recommended).
 
 ### CE-40. The type of a held operand of a lazy operator is read without its binding
 
@@ -377,25 +369,6 @@ letting the first assignment replace a type that came from uses only removes the
 order dependence, but `while let [h, ...] = xs { …; xs = Rest(xs) }` stops
 compiling (a `string` arm passes through `Rest`), and a meet with the uses is
 unsound (`[1.5]` typed `vector<integer^1>`).
-
-### CE-45. `Map` with a bare-symbol callback types its elements from the declared signature only
-
-**Status:** in progress; defect, low priority.
-
-A bare-symbol callback with a known signature types the elements of `Map` from
-that signature's result type (user decision 2026-09-27); the source type is
-copied only when the callback is unknown.
-
-- **CE-45.2** (user decision 2026-10-25: option (b)) With `xs: list<integer>`,
-  `Map(Abs, xs)` is `list<number>`, while `Map(x ↦ Abs(x), xs)` and `Abs(xs)`
-  are `list<integer<0..>>`; `Map(Sin, xs)` is `list<number>` and
-  `Map(x ↦ Sin(x), xs)` is `list<real>`; with `g := x ↦ x + 10`, `Map(g, xs)` is
-  `list<number>` and the inline lambda gives `list<integer>`. Options: (a) keep
-  the decision of 2026-09-27 (sound, less precise); (b) a library operator given
-  by name runs its type handler on the element type, a user-declared function
-  keeps its signature (recommended); (c) as (b), and an assigned lambda given by
-  name is typed from its body (the type of `Map(g, xs)` then changes when `g` is
-  reassigned). No decision: (a).
 
 ### CE-46. Extended-real declarations widen to `number` through a call of a function declared `function`
 
@@ -564,46 +537,6 @@ missing is the refusal. Checked 2026-10-24: block-local `let` declarations reach
 which calls the public `ce.declare()`, so only a direct host call can be told
 apart, and that does not cover a top-level Epsil `let`.
 
-### CE-60. A named-argument call to an unannotated function literal held in a binding declines
-
-**Status:** in progress; defect. User decision 2026-10-25: an inferred signature
-keeps and prints its parameter names.
-
-The lowering contract of named-argument calls is in `docs/LANGUAGE-MODEL.md`;
-the full specification is in `docs/TYPE_SYSTEM_ROADMAP.md` Appendix C. Decision
-2026-08-13 (design doc §4): when a declared-only overload set has a more
-specific arm after name elimination, a named call declines; the engine asks the
-author to be explicit. Through `Apply`, a callee whose names cannot be known
-also declines: a symbol callee (`Apply(f, x: 1)`; write `f(x: 1)`), a literal
-with a parameter that is not a bare symbol or a `Typed` annotation, and a field
-callee (`bob.S(x: 1)`, that is `Apply(Field(bob, "S"), …)`) whose receiver is
-not a constant record or dictionary and is not typed as a record that gives the
-field a named signature (issue #390).
-
-The open limit: type inference drops parameter names (`effects-inference.ts`
-types a bare parameter as `{ type: 'unknown' }`). So
-`f := (a, b) => …; f(a: 1, b: 2)` declines, although the same literal applied
-inline works. The same loss reaches a field call in Epsil: with
-`const ns = {D -> ((x, k) => x - k)}`, `ns.D(k: 1, x: 10)` runs and gives 9, but
-the static check reports `argument-names-unavailable`. The static check makes
-the program canonical before `ns` has its value, so it reads only the type of
-`ns`, `record{D: (unknown, unknown) -> number}`, which has no names. An
-annotated literal (`(x: number, k: number) => x - k`) works.
-
-Measured 2026-08-13: the one-line fix breaks 37 tests across 11 suites and 1
-snapshot, including semantic suites (`effects-contracts`,
-`application-validation-regressions`, the callback-contract and lambda-inference
-tests). It needs a dedicated round, not a snapshot update.
-
-Measured again 2026-10-24: the names are needed in two places, the literal's own
-arrow (`effects-inference.ts`) and the inferred signature built in `update()`
-(`boxed-operator-definition.ts`). With both,
-`f := (a, b) => a - b; f(b: 2, a: 10)` gives 8, and 107 tests fail in 18 suites,
-all of them pinned type strings: `(unknown) -> number` prints
-`(x: unknown) -> number`. Question for the user: should an inferred signature
-keep and print its parameter names? If not decided, a named call to an
-unannotated literal held in a binding keeps declining.
-
 ### CE-61. Two kinds of user-defined callee are not checked statically
 
 **Status:** open; capability. User decision 2026-10-17: canonicalization owns
@@ -727,20 +660,6 @@ converted array in its temporary whatever the type says). First reproduce it
 with `ce.box(...).type` on the block, then find where the assignment widens the
 string.
 
-### CE-448. A declared function with a point parameter refuses a matrix of points that its `broadcastable` argument admits
-
-**Status:** in progress; defect. User decision 2026-10-25: map the call at every
-rank and type it `broadcastable<real>`.
-
-With `g: (tuple<real, real>) -> real` and `P: broadcastable<tuple<real, real>>`,
-`P := [[(1,2),(3,4)],[(5,6),(7,8)]]` is a valid value of `P`, but `g(P)`
-evaluates to `incompatible-type` (expected `tuple<real, real>`, got
-`matrix<tuple<integer, integer>^(2x2)>`). The static type `list<real> | real`
-agrees with that refusal, but `PointX` and `Abs` map over a matrix of points.
-`g(T)` with `T: tensor<tuple<real, real>>` is typed `error`. Options: map the
-call at every rank and type it `broadcastable<real>`, or keep the refusal and
-document it.
-
 ### CE-449. The meet of a chain of list aliases grows exponentially with depth
 
 **Status:** open; performance.
@@ -766,21 +685,64 @@ With the alias `nn = !nn`, `typeAcceptsValue(5, nn)` is `false` and
 `admissionOf(5, nn)` is `'admit'`. The type has no fixed point, so neither
 answer is specified, but the two functions should agree.
 
+### CE-468. A call of a point function on a collection symbol with no value is an error
+
+**Status:** open; defect, small.
+
+With `g: (tuple<real, real>) -> real` and `L: list<tuple<real, real>>` with no
+value, `g(L).evaluate()` gives `incompatible-type` (expected
+`tuple<real, real>`). The same for `T: tensor<tuple<…>>` and
+`S: list<list<tuple<…>>>`. The call should stay `g(L)` until `L` has a value.
+The static type of the call is correct (`list<real>`, `tensor<real>`).
+
+### CE-469. A call with a literal matrix of points at a `broadcastable` parameter is typed `any`
+
+**Status:** open; defect, small.
+
+With `f: (broadcastable<tuple<real, real>>, tuple<real, real>) -> real`,
+`f([[(1,2),(3,4)],[(5,6),(7,8)]], (1,1))` is typed `any`; its value
+`[[11,13],[15,17]]` is a `list<list<real>>`. Sound but imprecise.
+
+### CE-470. The length of a rest parameter is typed with a `signed_infinity` arm
+
+**Status:** open; defect, small.
+
+`h(a, ...rest) = Length(rest)` has the signature
+`(a: unknown, any*) -> integer | signed_infinity`, while
+`src/epsil/docs/control-flow.md` documents `-> integer`. A rest parameter is
+always a finite list, so its length is a finite integer.
+
+### CE-473. A captured free symbol of a function literal is narrowed on its local copy, not on the outer binding
+
+**Status:** decision needed; wrong value.
+
+A free symbol in the body of a function literal (`y` in `x ↦ [-x, y]`) is
+auto-declared in the literal's own scope. Use-inference, including the inference
+a list literal makes on its free symbols, narrows that local copy to `number`,
+and the literal's result is typed `vector<2>`. At a call, the body reads the
+outer binding of `y`, which is not narrowed. With `y := "abc"`, `Apply(g, 3)`
+has the static type `vector<2>` and the value `[-3, "abc"]`. An operator that
+checks its operand at evaluation (`x ↦ Not(y)`) gives `incompatible-type` there,
+but a container does not check. Options: (a) put the narrowing on the outer
+binding, as a use at the top level does; (b) do not narrow a captured copy, and
+type the cell `unknown` (`x ↦ [-x, y]` would be `list<unknown>`); (c) check the
+captured values against the narrowed types at call time. Neighbouring cases:
+`test/compute-engine/ce-39-literal-cell-types.test.ts`.
+
 ## Collections, absence and broadcasting
 
-### CE-461. The sum of a list and a `broadcastable` operand does not reduce its element union
+### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 
-**Status:** open; defect (the form only: the type is sound).
+**Status:** open; task (precision; the type is sound).
 
 With `M: list<list<integer> | number>` and `C: broadcastable<number>`, `M + C`
-is typed `list<list<list<integer> | number> | list<integer> | number>`: a union
-nested in the element union, with an arm that another arm already holds. With
-the call types of 2026-10-25, `H(X(t), Y(t)) - g(t)` in
-`tycho-item-188-broadcastable-vector-divide.test.ts` prints
-`list<list<any> | list<any> | number>`, so that test compares the type in both
-directions instead of its printed form. The `Add` type over such operands (the
-broadcast typing in `boxed-expression/broadcast-lift-type.ts`) must reduce the
-union it builds.
+is typed `list<list<list<integer> | number> | number>`, while `M · C` is typed
+`list<list<number> | number>`. For one cell, `Add` gives the broadcast typing
+its answer for one element (`list<integer> | number`), where `Multiply` gives
+`number`. `broadcastLiftType` (`boxed-expression/broadcast-lift-type.ts`) asks
+the handler again for the cell type only when the answer is a
+`broadcastable<…>`; asking it also when the answer can hold a list would give
+`list<list<number> | number>` for `M + C`. Measure the pins that move first.
 
 ### CE-70. Presence contracts: absent arguments that are not refused or not reported
 
@@ -2952,6 +2914,19 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-467. A `range` argument at an inferred point parameter declines to compile
+
+**Status:** open; capability, small.
+
+With `d(a) := a[1] + a[2]` (the index reads infer `a: tuple<number, number>`)
+and an argument typed `integer | range`, compiled `d(r)` declines on the
+JavaScript and interval targets (`checkPointParamCollectionUnionArgs`,
+`compilation/base-compiler.ts`), while an argument typed `integer | vector` or
+`integer | vector<2>` compiles. The interpreter binds a range of numbers whole
+at that parameter, as it binds a list of numbers. Check how a range value
+reaches compiled code at run time (an array, or a lazy range object) before
+accepting it there.
+
 ### CE-463. Compiled effectful input reads are merged by emitted source and reordered
 
 **Status:** open; possible defect, not verified. Reported by a reviewer on the
@@ -4173,6 +4148,16 @@ supported by the compiler. Custom accumulator delivery policies are unchanged.
 
 ## LaTeX parsing and serialization
 
+### CE-471. A float plus a fraction is written as a mixed number
+
+**Status:** open; wrong value, small.
+
+`["Add", {"num": "2.0"}, ["Rational", 1, 3]]` is written `2.0\frac{1}{3}`, the
+mixed-number form. The parser reads it back as `["Multiply", 2.0, 1/3]`, so a
+round trip changes the value from 2.333… to 0.666…. With `2.5` the output is
+`\frac{1}{3}+2.5`, which is correct. The mixed-number form must be used only
+when the integer part is an exact integer literal.
+
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
 
 **Status:** design needed; defect.
@@ -5056,21 +5041,31 @@ if interpreted loops of many thousands of turns become important:
   own prefix), together with an incremental type for the new node;
 - a per-node descriptor cache on the invalidation axis of the type cache.
 
-### CE-458. The constant fold of a compile evaluates a shared subtree under a binder once per path
+### CE-458. Compiling a body that several binders share is exponential in the depth of the sharing
 
-**Status:** in progress; performance.
+**Status:** open; performance, design.
 
-A user function whose body holds a nested `Sum` or `Product` over a subtree that
-is shared (the same node reached through several parents) takes exponential time
-to compile: `compile(H(x))` took 55 s at a sharing depth of 10 (measured
-2026-10-24). The constant fold of the compiler evaluates the nested big
-operators, and the evaluation walks each path to the shared node again. The
-check of the free names of a user-function body
-(`assertUserFunctionFreeBindings`, `compilation/base-compiler.ts`) is linear on
-the same body (19 ms at depth 18), and assigning such a function is CE-341. Fix:
-memoize the fold's evaluation by node within one compile, as the evaluation of a
-dictionary does (`dictionaryEvaluationMemo`, `boxed-dictionary.ts`), or skip the
-fold of a subtree whose size, counted with sharing, is above a limit.
+A user function whose body holds a `Sum` and a `Product` over the same subtree,
+nested to depth _d_ (the level below shared by both), took 55 s to compile at
+_d_ = 10 (measured 2026-10-24). Nothing is evaluated during the compile. Two
+causes were fixed on 2026-10-25: unrolled clauses multiplied with no limit on
+their total size (`MAX_UNROLLED_NODES`, `compilation/unroll-budget.ts`, read by
+the JavaScript, interval and GPU targets), and the complexness analysis started
+with an empty memo each time it entered a binder mask (now one memo layer is
+kept for each enclosing layer and mask, `_pushKeyedComplexMemoLayer`,
+`base-compiler.ts`). Depth 10 now compiles in 1.7 s and depth 12 in 7.8 s (load
+10 on 18 cores); the test is `compile-shared-binder-body.test.ts`.
+
+What remains doubles at each level: the shared subtree is emitted once under the
+`Sum` and once under the `Product`, because the common-subexpression pass
+(`compilation/cse.ts`) does not share a node between two sibling binder bodies.
+Two changes are needed: the test of whether a candidate can leave a binder
+region must use the FREE names of the candidate (`symbolsOf` and
+`mentionsVarying` in `loopInvariantHoistCandidates` count a name that an inner
+binder binds again), and a temporary must be placed in the nearest common
+ancestor region even when that region holds no occurrence itself. Related to
+CE-320.1. The size estimate of `unroll-budget.ts` reads literal bounds only, so
+a nested clause whose bounds become constant only after a fold counts as a loop.
 
 ### CE-341. Assigning a function literal whose body shares operands is exponential in the sharing depth
 

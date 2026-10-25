@@ -89,7 +89,7 @@ describe('§5 — the minted constructor is `where`-quantified', () => {
     // The user's own `x => x` survives INTACT: the exact signature, not merely
     // "does not mention Duo<" — which a dropped or clobbered binding would
     // also satisfy.
-    expect(signatureOf(ce, 'Duo')).toBe('(unknown) -> unknown');
+    expect(signatureOf(ce, 'Duo')).toBe('(x: unknown) -> unknown');
   });
 
   test('a parameterized NOMINAL does claim the value namespace', () => {

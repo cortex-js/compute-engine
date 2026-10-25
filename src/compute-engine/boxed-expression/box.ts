@@ -138,6 +138,7 @@ import {
   imaginaryNumber,
   exactComplexParts,
   exactComplexLiteral,
+  narrowFreeSymbolCells,
 } from './canonical-utils.js';
 import {
   isNumber,
@@ -2689,10 +2690,14 @@ function makeCanonicalFunctionCore(
       undefined,
       false
     );
-    return new BoxedFunction(ce, 'List', canonicalOps, {
-      metadata,
-      canonical: true,
-    });
+    // The free symbols of the literal are inferred as numbers here too, as
+    // in `canonicalList` (`narrowFreeSymbolCells`, `canonical-utils.ts`).
+    return narrowFreeSymbolCells(
+      new BoxedFunction(ce, 'List', canonicalOps, {
+        metadata,
+        canonical: true,
+      })
+    );
   }
 
   // A `Spread` entry (`{-> , ...d, "k" -> v}` merge) takes the normal path

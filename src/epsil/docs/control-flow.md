@@ -338,7 +338,7 @@ function h(a, ...rest) {
 
 Either one behaves exactly like `let h = (a, ...rest) => Length(rest)`, and the
 name it declares reports the arity it really accepts — `h` above has the type
-`(unknown, any*) -> integer`, "one argument or more".
+`(a: unknown, any*) -> integer`, "one argument or more".
 
 Only the last parameter may be a rest parameter, and it carries no type
 annotation. A rest parameter is an interpreted-only feature: `compile()`

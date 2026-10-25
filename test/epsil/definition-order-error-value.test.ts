@@ -27,7 +27,7 @@ function runtimeErrors(source: string): [unknown, unknown][] {
     .map((d) => [d.message[1], d.message[3]]);
 }
 
-const TYPE_ERROR = 'expected `number`, got `(unknown) -> number` at `a(t)`';
+const TYPE_ERROR = 'expected `number`, got `(y: unknown) -> number` at `a(t)`';
 
 describe('A TYPE ERROR OF A BODY IS AN ERROR VALUE IN EITHER DEFINITION ORDER', () => {
   test('the callee first: the definition of the caller is the error', () => {

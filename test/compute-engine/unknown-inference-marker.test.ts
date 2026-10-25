@@ -177,7 +177,7 @@ describe('D4: a value-derived join keeps the unresolved arm', () => {
     );
     expect(r.value?.toString()).toBe('[3,2,1]');
     expect(ce2.symbol('h').type.toString()).toBe(
-      '(indexed_collection<any>) -> list<any> | string'
+      '(xs: indexed_collection<any>) -> list<any> | string'
     );
   });
 

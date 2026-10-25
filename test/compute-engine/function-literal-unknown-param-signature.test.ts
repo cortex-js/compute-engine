@@ -18,19 +18,19 @@ describe('THE SIGNATURE OF A FUNCTION LITERAL THAT RETURNS A LIST', () => {
   test('a parameter of type unknown is not a number cell', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(['Function', ['List', 'x'], 'x']));
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> list<unknown>');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> list<unknown>');
   });
 
   test('the parse route gives the same signature', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto [x]'));
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> list<unknown>');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> list<unknown>');
   });
 
   test('a function defined with `:=` gives the same signature', () => {
     const ce = new ComputeEngine();
     ce.parse('f(x) := [x]').evaluate();
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> list<unknown>');
+    expect(ce.box('f').type.toString()).toBe('(x: unknown) -> list<unknown>');
   });
 
   test.each([
@@ -38,7 +38,7 @@ describe('THE SIGNATURE OF A FUNCTION LITERAL THAT RETURNS A LIST', () => {
     [
       'x ↦ [x + 1]',
       ['Function', ['List', ['Add', 'x', 1]], 'x'],
-      '(unknown) -> vector<1>',
+      '(x: unknown) -> vector<1>',
     ],
     [
       '(x: real) ↦ [x]',
@@ -48,27 +48,27 @@ describe('THE SIGNATURE OF A FUNCTION LITERAL THAT RETURNS A LIST', () => {
     [
       '(x, y) ↦ [x, y]',
       ['Function', ['List', 'x', 'y'], 'x', 'y'],
-      '(unknown, unknown) -> list<unknown>',
+      '(x: unknown, y: unknown) -> list<unknown>',
     ],
     [
       'x ↦ [[x]]',
       ['Function', ['List', ['List', 'x']], 'x'],
-      '(unknown) -> list<list<unknown>>',
+      '(x: unknown) -> list<list<unknown>>',
     ],
     [
       'x ↦ [x, 1]',
       ['Function', ['List', 'x', 1], 'x'],
-      '(unknown) -> list<unknown>',
+      '(x: unknown) -> list<unknown>',
     ],
     [
       'x ↦ ([x], 1)',
       ['Function', ['Tuple', ['List', 'x'], 1], 'x'],
-      '(unknown) -> tuple<list<unknown>, integer>',
+      '(x: unknown) -> tuple<list<unknown>, integer>',
     ],
     [
       'x ↦ If(C, [x], [1])',
       ['Function', ['If', 'C', ['List', 'x'], ['List', 1]], 'x'],
-      '(unknown) -> list<unknown>',
+      '(x: unknown) -> list<unknown>',
     ],
     [
       '((p, q)) ↦ [p, q]',
@@ -79,7 +79,7 @@ describe('THE SIGNATURE OF A FUNCTION LITERAL THAT RETURNS A LIST', () => {
     [
       'x ↦ [x] ascribed list<real>',
       ['Function', ['Typed', ['List', 'x'], "'list<real>'"], 'x'],
-      '(unknown) -> list<real>',
+      '(x: unknown) -> list<real>',
     ],
   ])('%s', (_, fn, expected) => {
     expect(signatureOf(new ComputeEngine(), 'h', fn)).toBe(expected);
@@ -129,7 +129,7 @@ describe('A CALL HOLDS ITS VALUE', () => {
     ce.assign('m', ce.parse('t \\mapsto [[t, 1], [2, 3]]'));
     ce.declare('r', 'real');
     expect(ce.box('m').type.toString()).toBe(
-      '(unknown) -> list<list<unknown>>'
+      '(t: unknown) -> list<list<unknown>>'
     );
     expect(ce.box(['m', 2]).type.toString()).toBe('matrix<integer^(2x2)>');
     expect(ce.box(['m', 'r']).type.toString()).toBe('matrix<real^(2x2)>');
@@ -175,7 +175,7 @@ describe('A USE DOES NOT REWRITE A SIGNATURE DERIVED FROM A BODY', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('t \\mapsto [[t, 1], [2, 3]]'));
     const before = ce.box('g').type.toString();
-    expect(before).toBe('(unknown) -> list<list<unknown>>');
+    expect(before).toBe('(t: unknown) -> list<list<unknown>>');
     ce.box(['Trace', ['g', 2]]);
     ce.box(['Add', ['Trace', ['g', 'x']], 1])
       .subs({ x: 2 })
@@ -189,9 +189,9 @@ describe('A USE DOES NOT REWRITE A SIGNATURE DERIVED FROM A BODY', () => {
   test('a result the body leaves unknown is refined by a use', () => {
     const ce = new ComputeEngine();
     ce.assign('k', ce.parse('x \\mapsto x'));
-    expect(ce.box('k').type.toString()).toBe('(unknown) -> unknown');
+    expect(ce.box('k').type.toString()).toBe('(x: unknown) -> unknown');
     ce.box(['Add', ['k', 1], 2]);
-    expect(ce.box('k').type.toString()).toBe('(unknown) -> real');
+    expect(ce.box('k').type.toString()).toBe('(x: unknown) -> real');
   });
 });
 
@@ -361,7 +361,7 @@ describe('A NESTED LITERAL THAT CAPTURES A PARAMETER (CE-379)', () => {
         'x',
       ])
     );
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> () -> integer');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> () -> integer');
   });
 
   test('the arms of an early Return of the nested body are kept', () => {
@@ -394,7 +394,7 @@ describe('A NESTED LITERAL THAT CAPTURES A PARAMETER (CE-379)', () => {
         'x',
       ])
     );
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> list<unknown>');
+    expect(ce.box('g').type.toString()).toBe('(x: unknown) -> list<unknown>');
     expect(ce.box(['g', "'a'"]).evaluate().toString()).toBe('["a",1]');
   });
 
@@ -405,17 +405,17 @@ describe('A NESTED LITERAL THAT CAPTURES A PARAMETER (CE-379)', () => {
   // the nested literal again with the enclosing parameters added to its
   // own (ROADMAP CE-379, landed 2026-10-23).
   test.each([
-    ['x ↦ (() ↦ [x])', '(unknown) -> () -> list<unknown>'],
-    ['x ↦ (y ↦ [x, y])', '(unknown) -> (unknown) -> list<unknown>'],
-    ['x ↦ (() ↦ [[x]])', '(unknown) -> () -> list<list<unknown>>'],
-    ['x ↦ (() ↦ (() ↦ [x]))', '(unknown) -> () -> () -> list<unknown>'],
+    ['x ↦ (() ↦ [x])', '(x: unknown) -> () -> list<unknown>'],
+    ['x ↦ (y ↦ [x, y])', '(x: unknown) -> (y: unknown) -> list<unknown>'],
+    ['x ↦ (() ↦ [[x]])', '(x: unknown) -> () -> list<list<unknown>>'],
+    ['x ↦ (() ↦ (() ↦ [x]))', '(x: unknown) -> () -> () -> list<unknown>'],
     // A use that narrows the parameter keeps the number cell.
-    ['x ↦ (() ↦ [x + 1])', '(unknown) -> () -> vector<1>'],
+    ['x ↦ (() ↦ [x + 1])', '(x: unknown) -> () -> vector<1>'],
     // A parameter of the nested literal that shadows the captured name is
     // read as its own.
-    ['x ↦ ((x: real) ↦ [x])', '(unknown) -> (x: real) -> vector<real^1>'],
+    ['x ↦ ((x: real) ↦ [x])', '(x: unknown) -> (x: real) -> vector<real^1>'],
     // A nested literal that is a cell, not a reader of a cell.
-    ['x ↦ [x, (() ↦ x)]', '(unknown) -> list<unknown>'],
+    ['x ↦ [x, (() ↦ x)]', '(x: unknown) -> list<unknown>'],
   ])('%s is %s', (latex, expected) => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse(latex.replace(/↦/g, '\\mapsto')));

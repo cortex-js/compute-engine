@@ -148,7 +148,7 @@ describe('for-in is collection evidence', () => {
       signatureOf(
         'function f(k) { let t = 0\nfor c in [1,2,3] { t = t + c }\nt }'
       )
-    ).toMatch(/\(unknown\)/);
+    ).toMatch(/\(k: unknown\)/);
   });
 });
 
@@ -283,10 +283,10 @@ describe('callee defined after caller', () => {
     // Before the callee exists: nothing known, and the result type carries the
     // `broadcastable<>` marker that says the lambda will map over a list.
     expect(signatureIn(ce, 'process')).toBe(
-      '(unknown) any -> broadcastable<number>'
+      '(cs: unknown) any -> broadcastable<number>'
     );
     executeEpsil(ce, CALLEE_DECLARED);
-    expect(signatureIn(ce, 'process')).toBe('(list<number>) -> number');
+    expect(signatureIn(ce, 'process')).toBe('(cs: list<number>) -> number');
   });
 
   test('a callee whose collection param is INFERRED from its own body', () => {
@@ -309,8 +309,8 @@ describe('callee defined after caller', () => {
   test('a DECLARATION alone repairs the caller — no body needed', () => {
     const ce = new ComputeEngine();
     executeEpsil(ce, CALLER_BARE);
-    ce.declare('clean', '(list<number>) -> number');
-    expect(signatureIn(ce, 'process')).toBe('(list<number>) -> number');
+    ce.declare('clean', '(cs: list<number>) -> number');
+    expect(signatureIn(ce, 'process')).toBe('(cs: list<number>) -> number');
     // ...and the program still runs once the body arrives.
     executeEpsil(ce, CALLEE_DECLARED);
     expect(executeEpsil(ce, 'process([10,20,30])').value?.toString()).toBe(
@@ -360,12 +360,12 @@ describe('callee defined after caller', () => {
         'function process(cs) { twice(cs) + 1 }\nfunction twice(v) { 2 * v }',
         'process'
       )
-    ).toMatch(/\(unknown\)/);
+    ).toMatch(/\(cs: unknown\)/);
   });
 
   test('a callee that never gains a definition is left alone', () => {
     expect(signatureOf(CALLER_BARE, 'process')).toBe(
-      '(unknown) any -> broadcastable<number>'
+      '(cs: unknown) any -> broadcastable<number>'
     );
   });
 
@@ -444,7 +444,7 @@ describe('callee defined after caller', () => {
       const ce = new ComputeEngine();
       assignCaller(ce);
       assignCallee(ce);
-      expect(signatureIn(ce, 'process')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'process')).toBe('(cs: list<number>) -> number');
       expect(
         ce
           .box(['process', ['List', 10, 20, 30]])
@@ -459,9 +459,9 @@ describe('callee defined after caller', () => {
       const ce = new ComputeEngine();
       assignCaller(ce);
       ce.assign('clean', ce.box(['Function', ['Multiply', 2, 'v'], 'v']));
-      expect(signatureIn(ce, 'process')).toBe('(unknown) -> number');
+      expect(signatureIn(ce, 'process')).toBe('(cs: unknown) -> number');
       assignCallee(ce);
-      expect(signatureIn(ce, 'process')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'process')).toBe('(cs: list<number>) -> number');
     });
   });
 
@@ -487,12 +487,12 @@ describe('callee defined after caller', () => {
       executeEpsil(ce, CHAIN3[1]);
       // Nothing known yet at either level.
       expect(signatureIn(ce, 'outer')).toBe(
-        '(unknown) any -> broadcastable<number>'
+        '(cs: unknown) any -> broadcastable<number>'
       );
       executeEpsil(ce, CHAIN3[2]);
       // `inner` repairs `middle`; `middle`'s rebuild cascades to `outer`.
-      expect(signatureIn(ce, 'middle')).toBe('(list<number>) -> number');
-      expect(signatureIn(ce, 'outer')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'middle')).toBe('(cs: list<number>) -> number');
+      expect(signatureIn(ce, 'outer')).toBe('(cs: list<number>) -> number');
       // Bound whole: 10 + 1 + 1. Before the cascade this broadcast into
       // `[1 + middle(10), 1 + middle(20), 1 + middle(30)]`.
       expect(executeEpsil(ce, 'outer([10,20,30])').value?.toString()).toBe(
@@ -518,7 +518,7 @@ describe('callee defined after caller', () => {
           ['Typed', 'v', { str: 'list<number>' }],
         ])
       );
-      expect(signatureIn(ce, 'outerB')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'outerB')).toBe('(cs: list<number>) -> number');
       expect(
         ce
           .box(['outerB', ['List', 10, 20, 30]])
@@ -534,7 +534,7 @@ describe('callee defined after caller', () => {
       executeEpsil(ce, 'function lvl3(cs) { lvl4(cs) + 1 }');
       executeEpsil(ce, 'function lvl4(v: list<number>) { v[1] }');
       for (const name of ['lvl1', 'lvl2', 'lvl3'])
-        expect(signatureIn(ce, name)).toBe('(list<number>) -> number');
+        expect(signatureIn(ce, name)).toBe('(cs: list<number>) -> number');
       expect(executeEpsil(ce, 'lvl1([10,20,30])').value?.toString()).toBe('13');
     });
 
@@ -548,9 +548,9 @@ describe('callee defined after caller', () => {
       executeEpsil(ce, 'function leftD(cs) { baseD(cs) }');
       executeEpsil(ce, 'function rightD(cs) { baseD(cs) }');
       executeEpsil(ce, 'function baseD(v: list<number>) { v[1] }');
-      expect(signatureIn(ce, 'leftD')).toBe('(list<number>) -> number');
-      expect(signatureIn(ce, 'rightD')).toBe('(list<number>) -> number');
-      expect(signatureIn(ce, 'topD')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'leftD')).toBe('(cs: list<number>) -> number');
+      expect(signatureIn(ce, 'rightD')).toBe('(cs: list<number>) -> number');
+      expect(signatureIn(ce, 'topD')).toBe('(cs: list<number>) -> number');
       expect(executeEpsil(ce, 'topD([10,20,30])').value?.toString()).toBe('20');
     });
 
@@ -566,8 +566,8 @@ describe('callee defined after caller', () => {
       executeEpsil(ce, 'function baseC(v: list<number>) { v[1] }');
       // Both parameters bound the collection whole (the result type still
       // carries the broadcast marker from the unresolved mutual call).
-      expect(signatureIn(ce, 'cycA')).toMatch(/^\(list<number>\)/);
-      expect(signatureIn(ce, 'cycB')).toMatch(/^\(list<number>\)/);
+      expect(signatureIn(ce, 'cycA')).toMatch(/^\(cs: list<number>\)/);
+      expect(signatureIn(ce, 'cycB')).toMatch(/^\(cs: list<number>\)/);
     });
 
     test('a sibling skipped under the repair guard is still repaired', () => {
@@ -581,9 +581,9 @@ describe('callee defined after caller', () => {
       executeEpsil(ce, 'function outerX(a, b) { middleX(a) + baseX(b) }');
       executeEpsil(ce, 'function middleX(a) { baseX(a) }');
       executeEpsil(ce, 'function baseX(v: list<number>) { v[1] }');
-      expect(signatureIn(ce, 'middleX')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'middleX')).toBe('(a: list<number>) -> number');
       expect(signatureIn(ce, 'outerX')).toBe(
-        '(list<number>, list<number>) -> number'
+        '(a: list<number>, b: list<number>) -> number'
       );
       // Both arguments bound WHOLE: 10 + 30.
       expect(
@@ -602,7 +602,7 @@ describe('callee defined after caller', () => {
       executeEpsil(ce, 'function sc1(cs) { sc2(cs) + 1 }');
       executeEpsil(ce, 'function sc2(cs) { sc3(cs) + 1 }');
       executeEpsil(ce, 'function sc3(v) { 2 * v }');
-      expect(signatureIn(ce, 'sc1')).toMatch(/^\(unknown\)/);
+      expect(signatureIn(ce, 'sc1')).toMatch(/^\(cs: unknown\)/);
       expect(executeEpsil(ce, 'sc1(5)').value?.toString()).toBe('12');
       expect(executeEpsil(ce, 'sc1([10,20,30])').value?.toString()).toBe(
         '[22,42,62]'
@@ -660,7 +660,9 @@ describe('callee defined after caller', () => {
       // list, as the evaluation below shows: `2·a(t)` is a list and
       // `clean(t)` a number. (The signature read `-> number` while it kept
       // the type computed before `t` was narrowed.)
-      expect(signatureIn(ce, 'mixed')).toBe('(list<number>) -> list<number>');
+      expect(signatureIn(ce, 'mixed')).toBe(
+        '(t: list<number>) -> list<number>'
+      );
       expect(
         ce
           .box(['mixed', ['List', 3, 4, 5]])
@@ -719,10 +721,10 @@ describe('wildcard-declared callees', () => {
       // wildcard carries no effect specifier — so the caller's signature has
       // no `any` effects marker.)
       expect(signatureIn(ce, 'proc')).toBe(
-        '(unknown) -> broadcastable<number>'
+        '(cs: unknown) -> broadcastable<number>'
       );
       ce.assign('clean', listCallee(ce));
-      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'proc')).toBe('(cs: list<number>) -> number');
       expect(
         ce
           .box(['proc', ['List', 10, 20, 30]])
@@ -736,10 +738,10 @@ describe('wildcard-declared callees', () => {
       ce.declare('clean', 'function');
       executeEpsil(ce, 'function proc(cs) { clean(cs) + 1 }');
       expect(signatureIn(ce, 'proc')).toBe(
-        '(unknown) -> broadcastable<number>'
+        '(cs: unknown) -> broadcastable<number>'
       );
       executeEpsil(ce, 'function clean(v: list<number>) { v[1] }');
-      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'proc')).toBe('(cs: list<number>) -> number');
       expect(executeEpsil(ce, 'proc([10,20,30])').value?.toString()).toBe('11');
     });
 
@@ -764,7 +766,7 @@ describe('wildcard-declared callees', () => {
       ce.declare('clean', 'function');
       ce.assign('clean', listCallee(ce));
       ce.assign('proc', boxCaller(ce));
-      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'proc')).toBe('(cs: list<number>) -> number');
       expect(
         ce
           .box(['proc', ['List', 10, 20, 30]])
@@ -779,7 +781,7 @@ describe('wildcard-declared callees', () => {
       ce.declare('clean', 'function');
       executeEpsil(ce, 'function clean(v: list<number>) { v[1] }');
       executeEpsil(ce, 'function proc(cs) { clean(cs) + 1 }');
-      expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+      expect(signatureIn(ce, 'proc')).toBe('(cs: list<number>) -> number');
       expect(executeEpsil(ce, 'proc([10,20,30])').value?.toString()).toBe('11');
       expect(takeProvisionalDependents(ce, 'clean')).toBeUndefined();
     });
@@ -828,7 +830,7 @@ describe('wildcard-declared callees', () => {
     ce.declare('twice', 'function');
     executeEpsil(ce, 'function bproc(cs) { twice(cs) + 1 }');
     executeEpsil(ce, 'function twice(v) { 2 * v }');
-    expect(signatureIn(ce, 'bproc')).toMatch(/^\(unknown\)/);
+    expect(signatureIn(ce, 'bproc')).toMatch(/^\(cs: unknown\)/);
     expect(executeEpsil(ce, 'bproc([10,20,30])').value?.toString()).toBe(
       '[21,41,61]'
     );
@@ -841,16 +843,18 @@ describe('wildcard-declared callees', () => {
     ce.declare('clean', 'function');
     ce.assign('proc', boxCaller(ce));
     ce.assign('clean', ce.box(['Function', ['Multiply', 2, 'v'], 'v']));
-    expect(signatureIn(ce, 'proc')).toMatch(/^\(unknown\)/);
+    expect(signatureIn(ce, 'proc')).toMatch(/^\(cs: unknown\)/);
     ce.assign('clean', listCallee(ce));
-    expect(signatureIn(ce, 'proc')).toBe('(list<number>) -> number');
+    expect(signatureIn(ce, 'proc')).toBe('(cs: list<number>) -> number');
   });
 
   test('a wildcard callee that is never assigned is left alone', () => {
     const ce = new ComputeEngine();
     ce.declare('never2', 'function');
     executeEpsil(ce, 'function nproc(cs) { never2(cs) + 1 }');
-    expect(signatureIn(ce, 'nproc')).toBe('(unknown) -> broadcastable<number>');
+    expect(signatureIn(ce, 'nproc')).toBe(
+      '(cs: unknown) -> broadcastable<number>'
+    );
     // No error, and the vectorization default holds: the call broadcasts and
     // the unresolved applications surface inert.
     expect(executeEpsil(ce, 'nproc([1,2,3])').value?.toString()).toBe(
@@ -882,7 +886,9 @@ describe('a collection passed in a self-call types the parameter', () => {
     // function can pass any elements. Only the parameters are checked: the
     // result type does not include the type of `s`, which the `n == 0`
     // branch returns.
-    expect(signatureOf(F).startsWith('(unknown, list<any>) ->')).toBe(true);
+    expect(signatureOf(F).startsWith('(n: unknown, s: list<any>) ->')).toBe(
+      true
+    );
   });
 
   test.each([
@@ -1078,7 +1084,9 @@ describe('a collection passed in a self-call types the parameter', () => {
 
     test('the bare slot reads the self-call', () => {
       expect(run(G + 'f(1, [0])')).toBe('[1,2]');
-      expect(signatureOf(G).startsWith('(n: number, list<any>) ->')).toBe(true);
+      expect(signatureOf(G).startsWith('(n: number, s: list<any>) ->')).toBe(
+        true
+      );
     });
 
     test('held as a value', () => {
@@ -1109,7 +1117,7 @@ describe('a collection passed in a self-call types the parameter', () => {
   ])('%s in a self-call is no evidence', (_, arg) => {
     expect(
       signatureOf(`f(n, s) = s if n == 0 else f(n - 1, ${arg})`).startsWith(
-        '(unknown, unknown) ->'
+        '(n: unknown, s: unknown) ->'
       )
     ).toBe(true);
   });

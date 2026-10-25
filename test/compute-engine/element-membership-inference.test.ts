@@ -56,7 +56,7 @@ describe('Element membership element-type inference (function parameters)', () =
 
     // …but the arrow keeps an `unknown` slot (scalar evidence is filtered so
     // the broadcast lift stays available).
-    expect(ce.box('isDigit').type.toString()).toBe('(unknown) -> boolean');
+    expect(ce.box('isDigit').type.toString()).toBe('(c: unknown) -> boolean');
   });
 
   test('parse route: a mapsto literal records the element type too', () => {

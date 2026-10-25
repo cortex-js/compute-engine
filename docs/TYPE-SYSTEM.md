@@ -537,9 +537,9 @@ The signature of a function literal says what its body proves about every
 call, and nothing more (user decision 2026-10-22, ROADMAP CE-25, landed
 2026-10-23). A parameter with no annotation and no use that narrows it has the
 type `unknown`, and it can receive any value, so a list literal that holds it
-is a list of elements of unknown type: `x ↦ [x]` is `(unknown) -> list<unknown>`
-and `x ↦ [[x]]` is `(unknown) -> list<list<unknown>>`. It was
-`(unknown) -> vector<1>`, which reads the parameter as a number: `g("a")` is
+is a list of elements of unknown type: `x ↦ [x]` is
+`(x: unknown) -> list<unknown>` and `x ↦ [[x]]` is
+`(x: unknown) -> list<list<unknown>>`. It was `(unknown) -> vector<1>`, which reads the parameter as a number: `g("a")` is
 `["a"]` and `g(Set(1, 2))` is `[Set(1, 2)]`, calls that succeed and that a
 `vector<1>` does not hold. A false type is worse than an imprecise one,
 because other code decides on it: with the honest signature, three defects
@@ -551,13 +551,13 @@ A nested function literal has a type of its own, and its body can read a
 parameter of the enclosing literal: in `x ↦ (() ↦ [x])`, the inner literal's
 own typing read the captured `x` as a number cell. The derivation types a
 nested literal again with the parameters of the enclosing literals added to
-its own, so the signature is `(unknown) -> () -> list<unknown>` (ROADMAP
+its own, so the signature is `(x: unknown) -> () -> list<unknown>` (ROADMAP
 CE-379, landed 2026-10-23). A parameter of the nested literal that shadows the
 captured name is read as its own: `x ↦ ((x: real) ↦ [x])` keeps
 `(x: real) -> vector<real^1>`.
 
 The engine reads an operand of unknown type as a number in one place: where an
-operation demands a number. `x ↦ x + 1` is `(unknown) -> number` because `Add`
+operation demands a number. `x ↦ x + 1` is `(x: unknown) -> number` because `Add`
 accepts nothing else: a string argument fails anyway, so the type describes
 every call that succeeds (the rule of 2026-10-23 above, under "Lists, tensors
 and `broadcastable`"). That is inference from evidence. A list literal demands

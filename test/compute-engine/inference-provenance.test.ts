@@ -161,7 +161,8 @@ describe('ASSIGNMENT NARROWING — a refining value narrows a use-inferred type 
     ] as const;
     const ce = new ComputeEngine();
     ce.box(J as any);
-    expect(ce.box('y_r').type.toString()).toBe('unknown');
+    // The literal list infers its free element `y_r` as a number (CE-39.4).
+    expect(ce.box('y_r').type.toString()).toBe('number');
     ce.assign('y_r', 5);
     expect(ce.box('y_r').type.toString()).toBe('integer');
     // Control: assign-first lands on the same type.

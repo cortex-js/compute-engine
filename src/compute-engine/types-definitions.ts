@@ -540,11 +540,20 @@ export type OperandStructure =
       inferred?: boolean;
       /** Present (`true`) when the symbol is a block-local binding a `Block`
        * hoisted for a `let` or a block-introducing assignment, still waiting
-       * for the statement that gives it a value. The `List`-fold handler
-       * reads it to keep the generic-symbol fold (an unknown bare symbol is
-       * a number) for FREE symbols only: such a local is not a generic
-       * value, its type is simply not known yet. */
+       * for the statement that gives it a value. Such a local is not a
+       * generic value, its type is simply not known yet: the handlers that
+       * ask whether an operand may hold a list read it. */
       local?: boolean;
+      /** Present (`true`) when the symbol is free: it has no value, it is
+       * not a constant, not `Undefined` and not a pattern wildcard (a name
+       * that starts with `_`), and a scope of the current context other
+       * than the system scope binds it, but not as a parameter of a
+       * function literal, a local of a `Block` or the variable of a binder
+       * (a `Sum` index). The `List` type handler reads a symbol of type
+       * `unknown` as a number cell only when this is present: these are the
+       * symbols that the canonical form of a literal list infers as
+       * numbers. */
+      free?: true;
     }
   | { kind: 'string'; text: string }
   | {

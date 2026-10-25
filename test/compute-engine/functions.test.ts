@@ -69,7 +69,7 @@ describe('Infer function signature', () => {
 
   test('declared function signature with expression body', () =>
     expect(engine.expr('fn4').type.toString()).toMatchInlineSnapshot(
-      `(unknown) -> number`
+      `(x: unknown) -> number`
     ));
 
   test('declared function signature with JS body', () =>

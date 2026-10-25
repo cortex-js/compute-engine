@@ -9,7 +9,7 @@ describe('a big op over an untyped symbol infers a collection', () => {
   test('a user function summing its parameter', () => {
     const ce = new ComputeEngine();
     ce.parse('f(L) \\coloneq \\mathrm{Sum}(L)').evaluate();
-    expect(ce.symbol('f').type.toString()).toBe('(collection) -> number');
+    expect(ce.symbol('f').type.toString()).toBe('(L: collection) -> number');
     expect(ce.parse('f([1,2,3])').evaluate().toString()).toBe('6');
     ce.parse('g(L) \\coloneq \\mathrm{Product}(L)').evaluate();
     expect(ce.parse('g([1,2,3])').evaluate().toString()).toBe('6');
@@ -29,7 +29,7 @@ describe('a big op over an untyped symbol infers a collection', () => {
   test('a user function over an unannotated scalar parameter still maps', () => {
     const ce = new ComputeEngine();
     ce.parse('h(x) \\coloneq [x, -x]').evaluate();
-    expect(ce.symbol('h').type.toString()).toBe('(unknown) -> vector<2>');
+    expect(ce.symbol('h').type.toString()).toBe('(x: unknown) -> vector<2>');
     expect(ce.parse('h([1,2])').evaluate().toString()).toBe('[[1,-1],[2,-2]]');
   });
 

@@ -52,7 +52,9 @@ describe('a narrowing reaches the types of expressions boxed before it', () => {
         expect(l.type.toString()).toBe('vector<real^1>');
       })
     );
-    expect(ce.symbol('z').type.toString()).toBe('unknown');
+    // The literal list infers its free symbol `z` as a number (CE-39.4), so
+    // the rollback restores `number`.
+    expect(ce.symbol('z').type.toString()).toBe('number');
     expect(l.type.toString()).toBe(ce.box(['List', 'z']).type.toString());
   });
 });

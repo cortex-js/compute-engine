@@ -36,51 +36,51 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Mean',
     'mean(xs)',
-    '(collection<nothing | number> | value) -> number',
+    '(xs: collection<nothing | number> | value) -> number',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Median',
     'median(xs)',
-    '(collection<nothing | number> | value) -> nan | real | signed_infinity',
+    '(xs: collection<nothing | number> | value) -> nan | real | signed_infinity',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Variance',
     'variance(xs)',
-    '(collection<nothing | number> | value) -> nan | real<0..>',
+    '(xs: collection<nothing | number> | value) -> nan | real<0..>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'StandardDeviation',
     'standardDeviation(xs)',
-    '(collection<nothing | number> | value) -> nan | real<0..>',
+    '(xs: collection<nothing | number> | value) -> nan | real<0..>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Mode',
     'mode(xs)',
-    '(collection<nothing | number> | value) -> nan | real | signed_infinity',
+    '(xs: collection<nothing | number> | value) -> nan | real | signed_infinity',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Quartiles',
     'quartiles(xs)',
-    '(collection<nothing | number> | value) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>',
+    '(xs: collection<nothing | number> | value) -> tuple<lower: nan | real | signed_infinity, mid: nan | real | signed_infinity, upper: nan | real | signed_infinity>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Flatten',
     'flatten(xs)',
-    '(collection<any> | value) -> list',
+    '(xs: collection<any> | value) -> list',
     [LIST, NESTED, SCALAR],
   ],
-  ['Sum', 'sum(xs)', '(collection) -> number', [LIST, NESTED, SCALAR]],
-  ['Product', 'product(xs)', '(collection) -> number', [LIST, SCALAR]],
+  ['Sum', 'sum(xs)', '(xs: collection) -> number', [LIST, NESTED, SCALAR]],
+  ['Product', 'product(xs)', '(xs: collection) -> number', [LIST, SCALAR]],
   [
     'Length',
     'length(xs)',
-    '(collection) -> integer | signed_infinity',
+    '(xs: collection) -> integer | signed_infinity',
     [LIST, NESTED, SCALAR],
   ],
   [
@@ -88,31 +88,31 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     'join(xs)',
     // `Join`/`Append` over an operand typed as an abstract collection are
     // typed `collection<…>` since 2026-09-29: the operand may hold a set.
-    '(collection<any>) -> collection<any>',
+    '(xs: collection<any>) -> collection<any>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'Append',
     'append(xs, 9)',
-    '(collection<any>) -> collection<any>',
+    '(xs: collection<any>) -> collection<any>',
     [LIST, NESTED],
   ],
   [
     'SetFrom',
     'setFrom(xs)',
-    '(collection<any> | value) -> set<unknown>',
+    '(xs: collection<any> | value) -> set<unknown>',
     [LIST, NESTED, SCALAR],
   ],
   [
     'TupleFrom',
     'tupleFrom(xs)',
-    '(collection<any> | value) -> tuple',
+    '(xs: collection<any> | value) -> tuple',
     [LIST, NESTED, SCALAR],
   ],
   [
     'StringJoin',
     'stringJoin(xs)',
-    '(collection<character | string>) -> string',
+    '(xs: collection<character | string>) -> string',
     ['["a", "b"]'],
   ],
   // A parameter used both whole and element-wise is consumed whole: the
@@ -130,7 +130,7 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     // `value` arm. A point argument does not reach the result: `mean` of a
     // point is a number, and a number plus a point is an `incompatible-type`
     // error, as it was before.
-    '(collection<nothing | number> | value) -> broadcastable<expression<BinomialDistribution> | expression<ExponentialDistribution> | expression<NormalDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | nothing | number>',
+    '(xs: collection<nothing | number> | value) -> broadcastable<expression<BinomialDistribution> | expression<ExponentialDistribution> | expression<NormalDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | nothing | number>',
     [LIST, NESTED, SCALAR],
   ],
 ];
@@ -360,7 +360,7 @@ describe('Lifted: Max, Min, GCD, LCM, Sum, Product, ListFrom', () => {
         value
       );
       expect(ce.symbol('h').type.toString()).toBe(
-        '(collection<any> | value) -> number'
+        '(xs: collection<any> | value) -> number'
       );
     });
   }
@@ -394,13 +394,13 @@ describe('Element-wise uses still broadcast', () => {
     // signature is checked on another name.
     const ce2 = new ComputeEngine();
     epsilValue(ce2, 'function sw(xs) { sin(xs) }');
-    expect(ce2.symbol('sw').type.toString()).toBe('(unknown) -> number');
+    expect(ce2.symbol('sw').type.toString()).toBe('(xs: unknown) -> number');
   });
 
   test('x + 1', () => {
     const ce = new ComputeEngine();
     expect(epsilValue(ce, 'function p(x) { x + 1 }\np([1, 2])')).toBe('[2,3]');
-    expect(ce.symbol('p').type.toString()).toBe('(unknown) -> number');
+    expect(ce.symbol('p').type.toString()).toBe('(x: unknown) -> number');
   });
 
   test('an index of At is a gather, which is element-wise', () => {
@@ -410,7 +410,7 @@ describe('Element-wise uses still broadcast', () => {
     ).toBe('[10,30]');
     // The index parameter keeps its `unknown` slot.
     expect(ce.symbol('a').type.toString()).toBe(
-      '(dictionary<any> | indexed_collection<any>, unknown) -> unknown'
+      '(xs: dictionary<any> | indexed_collection<any>, i: unknown) -> unknown'
     );
     const ce2 = new ComputeEngine();
     expect(
@@ -419,7 +419,7 @@ describe('Element-wise uses still broadcast', () => {
         'let L = [10, 20, 30]\nfunction g(t) { L[t] + 1 }\ng([1, 3])'
       )
     ).toBe('[11,31]');
-    expect(ce2.symbol('g').type.toString()).toBe('(unknown) -> integer | nan');
+    expect(ce2.symbol('g').type.toString()).toBe('(t: unknown) -> integer | nan');
   });
 
   test('a container operand is not a whole use: a point maps over a list', () => {
@@ -443,7 +443,7 @@ describe('Element-wise uses still broadcast', () => {
       ce,
       'function h(xs) { map(xs => mean(xs), [[1, 2], [3]]) + xs }'
     );
-    expect(ce.symbol('h').type.toString()).toBe('(unknown) -> list<number>');
+    expect(ce.symbol('h').type.toString()).toBe('(xs: unknown) -> list<number>');
   });
 
   test('a use inside an inner function is a use of the outer parameter', () => {
@@ -616,7 +616,7 @@ describe('Limitations of the rule, as they behave today', () => {
       epsilValue(ce, 'function h(xs) { let ys = xs\nmean(ys) }\nh([1, 2, 3])')
     ).toBe('2');
     expect(ce.symbol('h').type.toString()).toBe(
-      '(collection<nothing | number> | value) -> number'
+      '(xs: collection<nothing | number> | value) -> number'
     );
   });
 
@@ -638,7 +638,7 @@ describe('Limitations of the rule, as they behave today', () => {
       const ce = new ComputeEngine();
       expect(epsilValue(ce, `${source}\nk([1, 2, 3])`)).toBe('2');
       expect(ce.symbol('k').type.toString()).toBe(
-        '(collection<nothing | number> | value) -> number'
+        '(xs: collection<nothing | number> | value) -> number'
       );
     }
     // The box route, `k` assigned before `h`.
@@ -666,7 +666,7 @@ describe('Limitations of the rule, as they behave today', () => {
     // clause's `number`; it was the broadcast guess `broadcastable<unknown>`
     // that a bare `function` callee gives over a collection argument.
     expect(ce.symbol('r').type.toString()).toBe(
-      '(collection<nothing | number> | value, unknown) -> number'
+      '(xs: collection<nothing | number> | value, n: unknown) -> number'
     );
   });
 });

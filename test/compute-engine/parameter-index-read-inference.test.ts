@@ -139,7 +139,7 @@ describe('a read at an index that is not a literal joins the requirements', () =
     const ce = new ComputeEngine();
     const f = ce.box(['Function', ['Add', ['At', 'p', 'k'], 1], 'p', 'k']);
     expect(f.type.toString()).toBe(
-      '(p: dictionary<number> | indexed_collection<number>, unknown) -> number'
+      '(p: dictionary<number> | indexed_collection<number>, k: unknown) -> number'
     );
   });
 });
@@ -365,7 +365,7 @@ describe('the compiled route checks an inferred tuple base', () => {
   test('a matrix given to a kernel compiled for `v: tuple<number>` fails loudly', () => {
     const ce = new ComputeEngine();
     ce.assign('h', ce.box(['Function', ['Add', ['At', 'v', 1], 1], 'v']));
-    expect(ce.symbol('h').type.toString()).toBe('(tuple<number>) -> number');
+    expect(ce.symbol('h').type.toString()).toBe('(v: tuple<number>) -> number');
     const compiled = compile(ce.box(['h', 'xs'])) as unknown as
       { run: (env: unknown) => unknown } | ((env: unknown) => unknown);
     const runIt = typeof compiled === 'function' ? compiled : compiled.run;

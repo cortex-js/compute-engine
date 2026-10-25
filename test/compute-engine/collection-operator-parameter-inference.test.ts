@@ -29,55 +29,55 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
   [
     'Map',
     'map(x => 2 * x, xs)',
-    '(collection<unknown>) -> collection<number>',
+    '(xs: collection<unknown>) -> collection<number>',
     [LIST, SET],
   ],
   [
     'Filter',
     'filter(xs, x => x > 1)',
-    '(collection<unknown>) -> collection<unknown>',
+    '(xs: collection<unknown>) -> collection<unknown>',
     [LIST, SET],
   ],
   [
     'Reduce',
     'reduce(xs, (a, x) => a + x, 0)',
-    '(collection<unknown>) -> number',
+    '(xs: collection<unknown>) -> number',
     [LIST, SET],
   ],
   [
     'Scan',
     'scan(xs, (a, x) => a + x)',
-    '(indexed_collection<unknown>) -> indexed_collection<unknown>',
+    '(xs: indexed_collection<unknown>) -> indexed_collection<unknown>',
     [LIST],
   ],
   [
     'Fold',
     'fold((a, x) => a + x, 0, xs)',
-    '(collection<unknown>) -> number',
+    '(xs: collection<unknown>) -> number',
     [LIST, SET],
   ],
   [
     'Any',
     'any(xs, x => x > 2)',
-    '(collection<unknown>) -> boolean',
+    '(xs: collection<unknown>) -> boolean',
     [LIST, SET],
   ],
   [
     'All',
     'all(xs, x => x > 0)',
-    '(collection<unknown>) -> boolean',
+    '(xs: collection<unknown>) -> boolean',
     [LIST, SET],
   ],
   [
     'TakeWhile',
     'takeWhile(xs, x => x < 3)',
-    '(indexed_collection<unknown>) -> indexed_collection<unknown>',
+    '(xs: indexed_collection<unknown>) -> indexed_collection<unknown>',
     [LIST],
   ],
   [
     'DropWhile',
     'dropWhile(xs, x => x < 2)',
-    '(indexed_collection<unknown>) -> indexed_collection<unknown>',
+    '(xs: indexed_collection<unknown>) -> indexed_collection<unknown>',
     [LIST],
   ],
   [
@@ -85,63 +85,63 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     'flatMap(xs, x => [x, x])',
     // The elements of `xs` can be any values, and so can the elements of
     // the result.
-    '(collection<unknown>) -> list<unknown>',
+    '(xs: collection<unknown>) -> list<unknown>',
     [LIST],
   ],
   [
     'MaxBy',
     'maxBy(xs, x => -x)',
-    '(collection<unknown>) -> unknown',
+    '(xs: collection<unknown>) -> unknown',
     [LIST, SET],
   ],
   [
     'MinBy',
     'minBy(xs, x => -x)',
-    '(collection<unknown>) -> unknown',
+    '(xs: collection<unknown>) -> unknown',
     [LIST, SET],
   ],
   [
     'ArgMax',
     'argMax(xs, x => -x)',
-    '(indexed_collection<unknown>) -> integer',
+    '(xs: indexed_collection<unknown>) -> integer',
     [LIST],
   ],
   [
     'ArgMin',
     'argMin(xs, x => -x)',
-    '(indexed_collection<unknown>) -> integer',
+    '(xs: indexed_collection<unknown>) -> integer',
     [LIST],
   ],
-  ['Dedup', 'dedup(xs)', '(collection<any>) -> collection<any>', [LIST]],
+  ['Dedup', 'dedup(xs)', '(xs: collection<any>) -> collection<any>', [LIST]],
   [
     'Differences',
     'differences(xs)',
-    '(indexed_collection<any>) -> list',
+    '(xs: indexed_collection<any>) -> list',
     [LIST],
   ],
   // These operators also constrain the source to its collection family.
   [
     'Find',
     'find(xs, x => x > 1)',
-    '(indexed_collection<any>) -> any',
+    '(xs: indexed_collection<any>) -> any',
     [LIST],
   ],
   [
     'IndexWhere',
     'indexWhere(xs, x => x > 1)',
-    '(indexed_collection<unknown>) -> integer',
+    '(xs: indexed_collection<unknown>) -> integer',
     [LIST],
   ],
   [
     'CountIf',
     'countIf(xs, x => x > 1)',
-    '(collection<unknown>) -> integer',
+    '(xs: collection<unknown>) -> integer',
     [LIST, SET],
   ],
   [
     'Count',
     'count(xs, x => x > 1)',
-    '(collection<any>) -> integer',
+    '(xs: collection<any>) -> integer',
     [LIST, SET],
   ],
   [
@@ -150,25 +150,25 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     // An untyped `xs` is only known to be an indexed collection, which can be
     // a string, and sorting a string gives a string: the result type is the
     // join of the list and the string results.
-    '(indexed_collection<any>) -> list<any> | string',
+    '(xs: indexed_collection<any>) -> list<any> | string',
     [LIST],
   ],
   [
     'GroupBy',
     'groupBy(xs, x => x > 1)',
-    '(collection<unknown>) -> dictionary<list>',
+    '(xs: collection<unknown>) -> dictionary<list>',
     [LIST],
   ],
   [
     'Partition',
     'partition(xs, x => x > 1)',
-    '(indexed_collection<any>) -> list<list<any>>',
+    '(xs: indexed_collection<any>) -> list<list<any>>',
     [LIST],
   ],
   [
     'Position',
     'position(xs, x => x > 1)',
-    '(indexed_collection<any>) -> list<integer>',
+    '(xs: indexed_collection<any>) -> list<integer>',
     [LIST],
   ],
   [
@@ -177,30 +177,30 @@ const EPSIL_CASES: [string, string, string, string[]][] = [
     // The parameter is inferred as `indexed_collection<any>`, and `any`
     // admits an absent element, so a pair can be absent: `h([1, Missing, 3])`
     // is `[(1, 1), Missing, (3, 3)]` (user decision 2026-10-19).
-    '(indexed_collection<any>) -> list<tuple<any, any>>',
+    '(xs: indexed_collection<any>) -> list<tuple<any, any>>',
     [LIST],
   ],
   [
     'Tally',
     'tally(xs)',
-    '(collection<unknown>) -> tuple<list<unknown>, list<integer>>',
+    '(xs: collection<unknown>) -> tuple<list<unknown>, list<integer>>',
     [LIST, SET],
   ],
   [
     'Unique',
     'unique(xs)',
     // The join of the list and the string results, as for `Sort` above.
-    '(collection<any>) -> list<any> | string',
+    '(xs: collection<any>) -> list<any> | string',
     [LIST],
   ],
-  ['Sum', 'sum(xs)', '(collection) -> number', [LIST, SET]],
-  ['Contains', 'contains(xs, 2)', '(collection<any>) -> boolean', [LIST, SET]],
-  ['First', 'first(xs)', '(indexed_collection<any>) -> unknown', [LIST]],
-  ['Last', 'last(xs)', '(indexed_collection<any>) -> unknown', [LIST]],
+  ['Sum', 'sum(xs)', '(xs: collection) -> number', [LIST, SET]],
+  ['Contains', 'contains(xs, 2)', '(xs: collection<any>) -> boolean', [LIST, SET]],
+  ['First', 'first(xs)', '(xs: indexed_collection<any>) -> unknown', [LIST]],
+  ['Last', 'last(xs)', '(xs: indexed_collection<any>) -> unknown', [LIST]],
   [
     'At',
     'xs[2]',
-    '(dictionary<any> | indexed_collection<any>) -> unknown',
+    '(xs: dictionary<any> | indexed_collection<any>) -> unknown',
     [LIST],
   ],
 ];

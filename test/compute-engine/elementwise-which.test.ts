@@ -967,7 +967,7 @@ describe('type handler', () => {
       'f',
       ce.parse('(n) \\mapsto \\operatorname{If}(n = 0, 1, f(n - 1))')
     );
-    expect(ce.box('f').type.toString()).toBe('(unknown) -> integer');
+    expect(ce.box('f').type.toString()).toBe('(n: unknown) -> integer');
     expect(
       ce.box(['If', ['Greater', 'y', 0], ['Return', 1], 2]).type.toString()
     ).toBe('integer');

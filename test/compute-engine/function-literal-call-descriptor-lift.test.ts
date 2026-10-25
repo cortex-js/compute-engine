@@ -233,7 +233,7 @@ describe('a call of a function literal over a collection operand', () => {
       ce.assign('h', ce.box(['Function', ['Add', 'x', 'y'], 'x', 'y']));
     for (const operand of ['list<integer>', 'number']) {
       const { expression, descriptor } = routes(setup, 'h', operand);
-      expect(expression).toBe('(unknown) -> number');
+      expect(expression).toBe('(y: unknown) -> number');
       expect(descriptor).toBe(expression);
     }
   });

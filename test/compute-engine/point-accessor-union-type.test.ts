@@ -385,12 +385,14 @@ describe('a broadcastable point is read as a point or a list of points', () => {
   });
 
   test('a function of a point maps over a broadcastable point list, or takes one point', () => {
-    // The call maps only when the value is a list of points, so its type is
-    // `R | list<R>` (ROADMAP CE-407).
+    // The call maps to the points at every depth when the value is a
+    // collection of points, and takes one point whole, so its type is
+    // `broadcastable<R>` (user decision 2026-10-25, ROADMAP CE-448). It was
+    // `R | list<R>` (ROADMAP CE-407), which a matrix of points does not fit.
     const ce = new ComputeEngine();
     ce.declare('P', POINT);
     ce.declare('g', '(tuple<real, real>) -> real');
-    expect(ce.box(['g', 'P']).type.toString()).toBe('list<real> | real');
+    expect(ce.box(['g', 'P']).type.toString()).toBe('broadcastable<real>');
   });
 
   test('PointList refuses a broadcastable point component, as a list of points', () => {

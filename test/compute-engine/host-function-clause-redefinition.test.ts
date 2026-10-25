@@ -122,7 +122,7 @@ describe('A HOST FUNCTION REDEFINED BY AN EPSIL FUNCTION STATEMENT', () => {
       '"a"'
     );
     expect(ce.box('k').type.toString()).toBe(
-      '((unknown) -> number) & ((x: string) -> string)'
+      '((x: unknown) -> number) & ((x: string) -> string)'
     );
     expect(ce.box(['k', 3]).evaluate().toString()).toBe('6');
   });
@@ -148,7 +148,7 @@ describe('A HOST FUNCTION REDEFINED BY AN EPSIL FUNCTION STATEMENT', () => {
     ce.assign('k', ce.box(['Function', ['Multiply', 2, 'x'], 'x']));
     expect(run(ce, 'function k(x: integer) -> integer { x }\nk(3)')).toBe('3');
     expect(ce.box('k').type.toString()).toBe(
-      '((unknown) -> number) & ((x: integer) -> integer)'
+      '((x: unknown) -> number) & ((x: integer) -> integer)'
     );
     expect(ce.box(['k', 2.5]).evaluate().toString()).toBe('5');
   });

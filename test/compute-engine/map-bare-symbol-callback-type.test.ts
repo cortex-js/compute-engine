@@ -36,19 +36,21 @@ function mapTypes(
 }
 
 describe('Map with a bare symbol callback', () => {
-  test('a library function uses its declared signature', () => {
+  test('a library function is typed by its own type handler', () => {
     const ce = new ComputeEngine();
-    // `Sin` is declared `(number) -> number`: the kind and the dimensions of
-    // the source are kept, the element type is the signature's result.
+    // `Sin` is declared `(number) -> number`, but its type handler gives
+    // `real` for an integer argument. The element type comes from the
+    // handler, as for `x ↦ Sin(x)` (user decision 2026-10-25, ROADMAP
+    // CE-45.2). It was the declared result, `vector<2>`.
     expect(mapTypes(ce, '\\sin', 'Sin')).toEqual([
-      'vector<2>',
-      'vector<2>',
-      'vector<2>',
+      'vector<real^2>',
+      'vector<real^2>',
+      'vector<real^2>',
     ]);
     expect(mapTypes(ce, '\\operatorname{Abs}', 'Abs')).toEqual([
-      'vector<2>',
-      'vector<2>',
-      'vector<2>',
+      'list<integer<0..>^2>',
+      'list<integer<0..>^2>',
+      'list<integer<0..>^2>',
     ]);
   });
 
@@ -258,9 +260,9 @@ describe('Map over a union source, and the zip form of Add', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'vector<integer^1> | vector<integer^2>');
     const m = ce.box(['Map', 'Sqrt', 'x']);
-    expect(m.type.toString()).toBe(
-      'list<complex | infinity^1> | list<complex | infinity^2>'
-    );
+    // The `Sqrt` type handler gives `complex` for an integer argument (it
+    // was the declared result `complex | infinity`).
+    expect(m.type.toString()).toBe('vector<complex^1> | vector<complex^2>');
     ce.assign('x', ce.box(['List', 4, 9]));
     const v = m.evaluate({ materialization: true });
     expect(v.toString()).toBe('[2,3]');

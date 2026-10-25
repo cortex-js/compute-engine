@@ -75,7 +75,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
   test('the declared results carry the unknown of the pass-through (by design)', () => {
     const ce = rotationChain();
     expect(ce.box('r_zz').type.toString()).toBe(
-      '(unknown, unknown, unknown, unknown) -> unknown'
+      '(x: unknown, y: unknown, z: unknown, theta: unknown) -> unknown'
     );
     expect(ce.box('R_Z2').type.toString()).toContain('broadcastable<unknown>');
   });
@@ -115,7 +115,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
     const ce = new ComputeEngine();
     ce.parse('F_1(x,y,z) := (-y, z, x)').evaluate();
     expect(ce.box('F_1').type.toString()).toBe(
-      '(unknown, unknown, unknown) -> tuple<number, unknown, unknown>'
+      '(x: unknown, y: unknown, z: unknown) -> tuple<number, unknown, unknown>'
     );
     const call = ce.parse('F_1([1,2],[3,4],[5,6])');
     expect(call.type.toString()).toBe('list<tuple<integer, integer, integer>>');
@@ -574,12 +574,12 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       const route = declared ? 'declared function' : 'undeclared';
       test(`${route}: the inferred result is any, and the value fits`, () => {
         const ce = engine(declared);
-        expect(signature(ce, 'g')).toBe('(unknown) -> any');
+        expect(signature(ce, 'g')).toBe('(a: unknown) -> any');
         const call = ce.parse('g(1)');
         expect(call.type.toString()).toBe('any');
         expect(call.evaluate().toString()).toBe('((-1, -1), (1, 1))');
         // A tuple with a free symbol as a component reads the same way.
-        expect(signature(ce, 'm')).toBe('(unknown) -> any');
+        expect(signature(ce, 'm')).toBe('(a: unknown) -> any');
         expect(ce.parse('m(1)').type.toString()).toBe('any');
         expect(ce.parse('m(1)').evaluate().toString()).toBe(
           '((-1, -u), (1, u))'
@@ -594,16 +594,20 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
 
       test(`${route}: a scalar or a list argument keeps its type`, () => {
         const ce = engine(declared);
-        expect(signature(ce, 'k')).toBe('(unknown) -> tuple<number, number>');
+        expect(signature(ce, 'k')).toBe(
+          '(a: unknown) -> tuple<number, number>'
+        );
         expect(ce.parse('k(1)').type.toString()).toBe(
           'tuple<integer, integer>'
         );
-        expect(signature(ce, 'k_1')).toBe('(unknown) -> tuple<number, number>');
+        expect(signature(ce, 'k_1')).toBe(
+          '(a: unknown) -> tuple<number, number>'
+        );
         // A list broadcasts: each element is a scalar argument of `f`. The
         // parameter `a` is not typed, so an element `a` can be a list, which
         // `f` maps at its leaves: an element of the result can be a list.
         expect(signature(ce, 'h')).toBe(
-          '(unknown) -> list<list<any> | tuple<number, number>>'
+          '(a: unknown) -> list<list<any> | tuple<number, number>>'
         );
         // The call `h(1)` is typed from the body `f([a, a])` with `a` typed
         // `integer`, and the call of `f` over the list maps `f` over its
@@ -787,7 +791,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       ]);
       ce.declare('g2', 'function');
       ce.assign('g2', ['Function', ['f2', ['Tuple', 'a', 'a']], 'a']);
-      expect(signature(ce, 'g2')).toBe('(unknown) -> number');
+      expect(signature(ce, 'g2')).toBe('(a: unknown) -> number');
       const call = ce.box(['g2', 1]);
       expect(call.type.toString()).toBe('number');
       expect(call.evaluate().toString()).toBe('2');
@@ -800,7 +804,7 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       const ce = new ComputeEngine();
       ce.assign('p', ['Function', 'x', 'x']);
       ce.assign('q', ['Function', ['p', ['Tuple', 'a', 'a']], 'a']);
-      expect(signature(ce, 'q')).toBe('(unknown) -> any');
+      expect(signature(ce, 'q')).toBe('(a: unknown) -> any');
       expect(ce.box(['q', 1]).type.toString()).toBe('tuple<integer, integer>');
       expect(ce.box(['q', 1]).evaluate().toString()).toBe('(1, 1)');
     });

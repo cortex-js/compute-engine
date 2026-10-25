@@ -330,7 +330,8 @@ describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () =
   // is the one that runs (the Epsil pin is "reassignment: the LATEST
   // annotated literal owns the names" in `test/epsil/execute.test.ts`). A
   // later assignment of a literal with no annotation replaces the signature,
-  // which then has no parameter names.
+  // which then has the parameter names of that literal (here `v` and `u`,
+  // which the call does not name).
   //
   // The call keeps the names it was written with, and they are matched
   // again against the definition that `h` holds when the call is evaluated.
@@ -342,7 +343,7 @@ describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () =
     ['Typed', 'x', 'real'],
     ['Typed', 'factor', 'real'],
   ];
-  const BARE_FX = ['Function', ['Subtract', 'x', 'factor'], 'factor', 'x'];
+  const BARE_FX = ['Function', ['Subtract', 'u', 'v'], 'v', 'u'];
   // The same body, with the annotated parameters in the other order.
   const FX = [
     'Function',
@@ -446,13 +447,13 @@ describe('A NAMED CALL OF A USER FUNCTION MATCHES THE NAMES AT EVALUATION', () =
       new ComputeEngine(),
       'function h(x: number, factor: number) { x - factor }\n' +
         'function g() { h(factor: 5, x: 3) }\nlet a = g()\n' +
-        'h = (factor, x) => x - factor\n[a, g()]'
+        'h = (v, u) => u - v\n[a, g()]'
     );
     expect(r.diagnostics).toEqual([]);
     const direct = executeEpsil(
       new ComputeEngine(),
       'function h(x: number, factor: number) { x - factor }\n' +
-        'h = (factor, x) => x - factor\nh(factor: 5, x: 3)'
+        'h = (v, u) => u - v\nh(factor: 5, x: 3)'
     );
     expect(direct.value.toString()).toContain('argument-name-unknown');
     expect(r.value.toString()).toBe(`[-2,${direct.value.toString()}]`);

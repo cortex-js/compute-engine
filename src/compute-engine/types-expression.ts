@@ -350,15 +350,18 @@ type OperandFactsMirror = {
 type OperandStructureMirror =
   /** `local`: the symbol is a block-local binding a `Block` hoisted for a
    * `let` or a block-introducing assignment, still waiting for the statement
-   * that gives it a value. Present only when true. A list-literal type
-   * handler reads it to keep the generic-symbol fold (an unknown bare symbol
-   * is a number) for free symbols only. */
+   * that gives it a value. Present only when true. `free`: the symbol is free (no
+   * value, not a constant, not a wildcard, not a function-literal
+   * parameter, a block local or a binder variable). Present only when true.
+   * The list-literal type handler reads an unknown symbol as a number cell
+   * only when it is present. */
   | {
       kind: 'symbol';
       name: string;
       system?: boolean;
       inferred?: boolean;
       local?: boolean;
+      free?: true;
     }
   | { kind: 'string'; text: string }
   | {

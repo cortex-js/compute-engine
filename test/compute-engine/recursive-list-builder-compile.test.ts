@@ -60,7 +60,7 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
     );
     // `g` is unknown, so `out = g(acc)` records no evidence and `out` stays
     // `unknown`; the narrowing by `out + 1` must not reach `acc`.
-    expect(signatureOf(expr, 'f')).toBe('(unknown) any -> number');
+    expect(signatureOf(expr, 'f')).toBe('(acc: unknown) any -> number');
     expect(ce._recursionKnots.size).toBe(0);
   });
 
@@ -75,7 +75,7 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
     const { expr } = box(
       'function g(acc) { let out = acc; out = 5; out + 1 }\ng(2)'
     );
-    expect(signatureOf(expr, 'g')).toBe('(unknown) -> number');
+    expect(signatureOf(expr, 'g')).toBe('(acc: unknown) -> number');
     expect(expr.evaluate().toString()).toBe('6');
   });
 
@@ -84,7 +84,7 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
       'function f(n, acc) { let out = acc; if n > 0 { out = [...out, n]; out = f(n - 1, out) }; out }\nf(3, [])'
     );
     expect(signatureOf(expr, 'f')).toBe(
-      '(unknown, acc: collection<any>) any -> collection<any>'
+      '(n: unknown, acc: collection<any>) any -> collection<any>'
     );
     expect(compiled(expr)).toEqual([3, 2, 1]);
     expect(expr.evaluate().toString()).toBe('[3,2,1]');
@@ -95,7 +95,7 @@ describe('a local copied from an untyped parameter (Tycho row 339)', () => {
       'function r(xs, n) { if n <= 0 { mean(xs) } else { r(xs, n - 1) } }\nr([1, 2, 3], 2)'
     );
     expect(signatureOf(expr, 'r')).toBe(
-      '(xs: collection<nothing | number> | value, unknown) any -> number'
+      '(xs: collection<nothing | number> | value, n: unknown) any -> number'
     );
     expect(expr.evaluate().toString()).toBe('2');
   });

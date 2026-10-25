@@ -210,7 +210,7 @@ describe('a function that returns a class', () => {
   test('its inferred signature says so, and its calls are protected', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.box(['Function', ['ResidueClass', 'k', 4], 'k']));
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> residue');
+    expect(ce.box('g').type.toString()).toBe('(k: unknown) -> residue');
     expect(ce.box(['Divide', ['g', 2], ['g', 2]]).simplify().json).toEqual([
       'Divide',
       ['ResidueClass', 2, 4],

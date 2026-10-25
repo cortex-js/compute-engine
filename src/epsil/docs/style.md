@@ -222,7 +222,7 @@ performs none is pure by inference.
 ```epsil
 roll(n) = random(1..n)
 type(roll)
-// ➔ TypeFrom("(unknown) random -> integer")
+// ➔ TypeFrom("(n: unknown) random -> integer")
 ```
 
 **Write the specifier where the effect is part of the interface.** A

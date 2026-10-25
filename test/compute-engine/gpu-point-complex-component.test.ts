@@ -595,7 +595,7 @@ describe('A RECURSIVE CALL OF A FUNCTION WITH A WIDE RESULT TYPE', () => {
     it(`javascript ${mode}: an undeclared function compiles like the declared one`, () => {
       const ce = new ComputeEngine();
       ce.assign('r', ce.parse(BODY));
-      expect(ce.box('r').type.toString()).toBe('(unknown) -> number');
+      expect(ce.box('r').type.toString()).toBe('(n: unknown) -> number');
       const result = compile(ce.parse('r(n) + x'), {
         to: 'javascript',
         mode,

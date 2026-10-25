@@ -566,7 +566,7 @@ function k(x) pure { x.id = "Z" }`);
     const { ce, value } = run(`type M = object{id: string}
 function rename(x) { x.id = "X" }
 Type(rename)`);
-    expect(value).toBe('TypeFrom("(unknown) state -> string")');
+    expect(value).toBe('TypeFrom("(x: unknown) state -> string")');
     expect(run('let m = M(id: "a")\nrename(m)\nm.id', ce).value).toBe('"X"');
   });
 

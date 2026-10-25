@@ -356,7 +356,7 @@ describe('Rest parameter — typing', () => {
       ['Spread', 'rest'],
     ]);
     expect(f.type.toString()).toBe(
-      '(unknown, any*) -> tuple<unknown, unknown>'
+      '(a: unknown, any*) -> tuple<unknown, unknown>'
     );
   });
 
@@ -423,7 +423,7 @@ describe('Rest parameter — named definitions', () => {
       ce.box(['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']])
     );
     expect(ce.symbol('f').type.toString()).toBe(
-      '(unknown, any*) -> integer | signed_infinity'
+      '(a: unknown, any*) -> integer | signed_infinity'
     );
   });
 
@@ -435,7 +435,7 @@ describe('Rest parameter — named definitions', () => {
       ['Function', ['Length', 'rest'], 'a', ['Spread', 'rest']],
     ]).evaluate();
     expect(ce.symbol('g').type.toString()).toBe(
-      '(unknown, any*) -> integer | signed_infinity'
+      '(a: unknown, any*) -> integer | signed_infinity'
     );
   });
 

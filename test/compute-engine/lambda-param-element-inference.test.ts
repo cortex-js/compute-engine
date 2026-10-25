@@ -380,7 +380,7 @@ describe('the multi-collection (zip) form does not stamp its n-ary callback', ()
       'ss',
     ]);
     expect(expr.ops[0].type.toString()).toBe(
-      '(unknown, unknown) -> tuple<unknown, unknown>'
+      '(n: unknown, s: unknown) -> tuple<unknown, unknown>'
     );
     expect(expr.evaluate().toString()).toBe('[(1, "a"),(2, "bb"),(3, "ccc")]');
   });
@@ -497,7 +497,9 @@ describe('follow-up (4): a parameter with NO source stays bare', () => {
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
       0,
     ]);
-    expect(expr.ops[1].type.toString()).toBe('(unknown, x: integer) -> number');
+    expect(expr.ops[1].type.toString()).toBe(
+      '(a: unknown, x: integer) -> number'
+    );
     expect(expr.evaluate().toString()).toBe('[1,3,6]');
   });
 
@@ -546,7 +548,9 @@ describe('follow-up (4): a parameter with NO source stays bare', () => {
       'cs',
       ['Function', ['Add', 'a', 'x'], 'a', ['Typed', 'x', "'integer'"]],
     ]);
-    expect(expr.ops[1].type.toString()).toBe('(unknown, x: integer) -> number');
+    expect(expr.ops[1].type.toString()).toBe(
+      '(a: unknown, x: integer) -> number'
+    );
     // Seedless (the shape that used to error) and seeded both fold.
     expect(expr.evaluate().toString()).toBe('6');
     expect(
@@ -734,7 +738,7 @@ describe('§6.4: a BARE parameter imposes no constraint (ruled 2026-08-09)', () 
       'a',
       ['Typed', 'x', { str: 'integer' }],
     ]);
-    expect(f.type.toString()).toBe('(unknown, x: integer) -> number');
+    expect(f.type.toString()).toBe('(a: unknown, x: integer) -> number');
     const fn = applicable(f)!;
     // `nothing` in the BARE slot: admitted (it was rejected against `unknown`).
     expect(fn([ce.Nothing, ce.box(2)])?.toString()).toBe('2');

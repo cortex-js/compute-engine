@@ -80,7 +80,7 @@ describe('a callback whose result type is unknown is a valid operand', () => {
   it('`x ↦ g(x)` with an undeclared `g` passes the predicate slot', () => {
     const ce = new ComputeEngine();
     const cb = ce.box(['Function', ['g', 'x'], 'x']);
-    expect(cb.type.toString()).toBe('(unknown) any -> unknown');
+    expect(cb.type.toString()).toBe('(x: unknown) any -> unknown');
     expect(cb.type.matches('(unknown) any -> boolean')).toBe(false);
     expect(ce.box(['CountIf', XS, ['Function', ['g', 'x'], 'x']]).isValid).toBe(
       true

@@ -64,7 +64,7 @@ describe('only the annotated slots of a function literal are a contract', () => 
     // slot is read at the literal index 1 only, so it is a one-component
     // tuple (`docs/INFERENCE_ROADMAP.md` §5).
     expect(signatureOf(expr, 'k')).toBe(
-      '(p: tuple<number>, unknown, acc: list<number>) -> list<number>'
+      '(p: tuple<number>, d: unknown, acc: list<number>) -> list<number>'
     );
     expect(expr.evaluate().toString()).toBe('[1,5]');
   });

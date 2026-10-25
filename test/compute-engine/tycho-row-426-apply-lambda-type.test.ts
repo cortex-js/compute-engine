@@ -430,7 +430,7 @@ describe('row 426 review: a literal whose body returns early', () => {
     // is a control effect.
     const ce = rowEngine();
     expect(ce.box(literal).type.toString()).toBe(
-      '(unknown) any -> number | tuple<number, number>'
+      '(x: unknown) any -> number | tuple<number, number>'
     );
   });
 
@@ -477,11 +477,11 @@ describe('row 426 review: names and scopes', () => {
       )
     );
     expect(typeOf(ce, F(['Tuple', sum, 'k'], 'k'))).toBe(
-      '(unknown) -> tuple<integer, unknown>'
+      '(k: unknown) -> tuple<integer, unknown>'
     );
     // The parse route agrees.
     expect(ce.parse('k \\mapsto (\\sum_{k=1}^3 2k, k)').type.toString()).toBe(
-      '(unknown) -> tuple<integer, unknown>'
+      '(k: unknown) -> tuple<integer, unknown>'
     );
   });
 
@@ -587,7 +587,7 @@ describe('row 426 second review: Return', () => {
       'x'
     );
     expect(ce.box(literal).type.toString()).toBe(
-      '(unknown) any -> nothing | number'
+      '(x: unknown) any -> nothing | number'
     );
     const applied = ce.box(['Apply', literal, 3]);
     expect(applied.type.toString()).toBe('nothing | number');
@@ -814,7 +814,7 @@ describe('row 426 third review: a shared tower in a function literal', () => {
 
   test('the literal, with and without an early Return', () => {
     expect(ce.function('Function', [tower, x]).type.toString()).toBe(
-      '(unknown) -> number'
+      '(x: unknown) -> number'
     );
     const early = ce.function('Function', [
       ce.function('Block', [

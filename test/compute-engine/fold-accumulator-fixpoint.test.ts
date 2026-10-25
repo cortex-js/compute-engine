@@ -119,7 +119,9 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       0,
       RANGE,
     ] as any);
-    expect(sum.ops[1].type.toString()).toBe('(unknown, i: integer) -> number');
+    expect(sum.ops[1].type.toString()).toBe(
+      '(acc: unknown, i: integer) -> number'
+    );
     expect(sum.evaluate().toString()).toBe('6');
     // The fold tolerance of the Design D audit: an accumulator that changes
     // type mid-fold (1 → 1/2 → 1/6) is not rejected.
@@ -155,7 +157,9 @@ describe('a list-building fold is typed to the fixpoint of seed and result', () 
       'p',
       ['Function', ['Add', 'a', 'x'], 'a', 'x'],
     ] as any);
-    expect(scan.ops[1].type.toString()).toBe('(unknown, x: integer) -> number');
+    expect(scan.ops[1].type.toString()).toBe(
+      '(a: unknown, x: integer) -> number'
+    );
     expect(scan.evaluate().toString()).toBe('[3,4,6]');
   });
 

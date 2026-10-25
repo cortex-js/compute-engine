@@ -138,7 +138,7 @@ describe('Apply with a callee of unknown type (issue #426)', () => {
     // on the `Apply` route.
     const m = ce.box(['Map', ['g', 'f'], ['List', 1, 2]]);
     ce.assign('g', ce.box(['Function', ['Add', 'a', 'b'], 'a', 'b']));
-    expect(ce.box(['g', 'f']).type.toString()).toBe('(unknown) -> number');
+    expect(ce.box(['g', 'f']).type.toString()).toBe('(b: unknown) -> number');
     expect(ce.box(['ListFrom', m]).evaluate().json).toEqual([
       'List',
       ['Add', 'f', 1],

@@ -2155,8 +2155,8 @@ function assignOverUserFunction(
  *
  * Example: after `h := (x: integer) => x` and `function h(u) -> string {
  * "s" }`, `h` has the two clauses `(x: integer) -> integer` and
- * `(unknown) -> string`, so `h(x: 3)` is valid and gives `3`. Without the
- * first clause, the pass would read `h` as `(unknown) -> string` only and
+ * `(u: unknown) -> string`, so `h(x: 3)` is valid and gives `3`. Without the
+ * first clause, the pass would read `h` as `(u: unknown) -> string` only and
  * report `argument-name-unknown`.
  *
  * The pin is then removed: the binding is a user function, and a later

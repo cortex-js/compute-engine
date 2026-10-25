@@ -285,7 +285,7 @@ describe('EPSIL EFFECTS — regressions (no specifier anywhere)', () => {
     // Same arrow type on both sides of the round trip.
     const ce = new ComputeEngine();
     expect(ce.box(def[2] as MathJsonExpression).type.toString()).toBe(
-      '(unknown) -> number'
+      '(x: unknown) -> number'
     );
     expect(
       ce
@@ -295,7 +295,7 @@ describe('EPSIL EFFECTS — regressions (no specifier anywhere)', () => {
           'x',
         ] as MathJsonExpression)
         .type.toString()
-    ).toBe('(unknown) -> number');
+    ).toBe('(x: unknown) -> number');
   });
 });
 
@@ -334,18 +334,18 @@ describe('EPSIL EFFECTS — anonymous contract literals (option B, ruled 2026-08
       'x',
     ] as MathJsonExpression;
     const ce = new ComputeEngine();
-    expect(ce.box(lit).type.toString()).toBe('(unknown) -> integer');
+    expect(ce.box(lit).type.toString()).toBe('(x: unknown) -> integer');
     // …and the reading it would have degraded to.
     expect(
       ce.box(['Function', ['Add', 'x', 1], 'x'] as MathJsonExpression).type.toString()
-    ).toBe('(unknown) -> number');
+    ).toBe('(x: unknown) -> number');
 
     const out = serializeEpsil(lit);
     expect(out).toBe('Function(Typed(x + 1, "(x: integer) -> integer"), x)');
     expect(validEpsil(out)).toStrictEqual(lit);
     // The round trip preserves the arrow, not just the shape.
     expect(ce.box(validEpsil(out) as MathJsonExpression).type.toString()).toBe(
-      '(unknown) -> integer'
+      '(x: unknown) -> integer'
     );
   });
 
@@ -402,7 +402,7 @@ describe('EPSIL EFFECTS — end to end through the engine', () => {
       'function roll(n) random -> integer {Random(Range(1, n))}\nroll(6)'
     );
     expect(diagnostics).toEqual([]);
-    expect(ce.box('roll').type.toString()).toBe('(unknown) random -> integer');
+    expect(ce.box('roll').type.toString()).toBe('(n: unknown) random -> integer');
   });
 
   test('an effects-only annotation leaves the return type inferred', () => {
@@ -479,7 +479,7 @@ describe('EPSIL EFFECTS — end to end through the engine', () => {
     );
     expect(diagnostics).toEqual([]);
     expect(value.toString()).toBe('9');
-    expect(ce.box('h').type.toString()).toBe('(unknown) -> unknown');
+    expect(ce.box('h').type.toString()).toBe('(n: unknown) -> unknown');
   });
 
   test('applying a `let`-bound lambda that writes a local requires `scope`', () => {

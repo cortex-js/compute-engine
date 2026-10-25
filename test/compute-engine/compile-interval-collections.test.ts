@@ -1074,7 +1074,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     // that operand.)
     ce.parse('d(a, b) := a[1] b[1] + a[2] b[2]').evaluate();
     ce.parse('P(x, y) := d([x, y], [x, y])').evaluate();
-    expect(ce.box('P').type.toString()).toBe('(unknown, unknown) -> number');
+    expect(ce.box('P').type.toString()).toBe('(x: unknown, y: unknown) -> number');
     const plot = compile(ce.parse('P(x, y) < 1'), {
       to: 'interval-js',
       fallback: false,

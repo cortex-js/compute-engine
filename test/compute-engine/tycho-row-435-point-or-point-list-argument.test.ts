@@ -100,10 +100,13 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     expect(ce.parse('f(L)').evaluate().json).toBe('Missing');
   });
 
-  test('`broadcastable<tuple<…>>`: typed as a point or a list of points', () => {
+  test('`broadcastable<tuple<…>>`: typed as a point or a tensor of points', () => {
+    // The call maps to the points at every depth, so a value of
+    // `broadcastable<P>` gives a value of `broadcastable<R>` (user decision
+    // 2026-10-25, ROADMAP CE-448). It was `R | list<R>`.
     const ce = engine(BROADCASTABLE);
     expect(ce.parse('f(L)').type.toString()).toBe(
-      'list<tuple<number, number>> | tuple<number, number>'
+      'broadcastable<tuple<number, number>>'
     );
   });
 
@@ -120,13 +123,20 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     ]);
   });
 
-  test('`broadcastable<tuple<…>>`: a matrix of points throws, as the interpreter errors', () => {
-    expect(() => run(engine(BROADCASTABLE), [[[1, 2]], [[3, 4]]])).toThrow(
-      /not a point/
-    );
+  test('`broadcastable<tuple<…>>`: a matrix of points maps at rank 2, as the interpreter does', () => {
+    // Before the user decision of 2026-10-25 (ROADMAP CE-448), the
+    // interpreter answered an `incompatible-type` error and the compiled
+    // call threw.
+    expect(run(engine(BROADCASTABLE), [[[1, 2]], [[3, 4]]])).toEqual([
+      [[2, 3]],
+      [[4, 5]],
+    ]);
     const ce = engine(BROADCASTABLE);
+    const type = ce.parse('f(L)').type;
     ce.assign('L', ce.parse('[[(1,2)],[(3,4)]]'));
-    expect(ce.parse('f(L)').evaluate().toString()).toMatch(/incompatible-type/);
+    const value = ce.parse('f(L)').evaluate();
+    expect(value.toString()).toBe('[[(2, 3)],[(4, 5)]]');
+    expect(value.type.matches(type)).toBe(true);
   });
 
   test('a union with another collection arm is declined', () => {

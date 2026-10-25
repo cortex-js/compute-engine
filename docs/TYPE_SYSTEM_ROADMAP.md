@@ -3499,13 +3499,12 @@ this appendix originally anticipated (both deliberate, v1):
 
 - **Parameters without declared names are positional-only.** Most of
   the built-in library declares unnamed parameters (only ~60 of ~530
-  library signatures carry any name), and an **unannotated** function
-  literal reached through a BINDING is not name-addressable —
-  signature inference drops the names of bare parameters
-  (`(a, b) => a + b` types as `(unknown, unknown) -> …`), so a name
-  can only address it where the literal itself is visible (the inline
-  case below). Carrying inferred names through the type is a measured
-  follow-up (ROADMAP, v1 residuals).
+  library signatures carry any name). An **unannotated** function
+  literal reached through a BINDING is name-addressable since
+  2026-10-25 (user decision, ROADMAP CE-60): signature inference keeps
+  the names of bare parameters (`(a, b) => a + b` types as
+  `(a: unknown, b: unknown) -> …`). A wildcard parameter (`_`, `_1`)
+  and a destructuring pattern stay positional-only.
 - **Inline-literal callees permute against their own parameter list**
   (fixed 2026-08-13 — they declined in the original v1):
   `((x: number) => x + 1)(x: 5)` evaluates to 6. The `Apply` path

@@ -281,7 +281,7 @@ describe('THE SCOPE OF A NAME IS DECIDED WHERE THE FUNCTION IS DEFINED', () => {
       'g',
       ['Function', ['Block', ['Assign', 't', ['Add', 'k', 1]], 't'], 'k'],
     ]).evaluate();
-    expect(ce.box('g').type.toString()).toBe('(unknown) -> number');
+    expect(ce.box('g').type.toString()).toBe('(k: unknown) -> number');
     ce.assign('t', 10);
     expect(ce.box(['g', 1]).evaluate().json).toBe(2);
     expect(ce.box('t').evaluate().json).toBe(10);

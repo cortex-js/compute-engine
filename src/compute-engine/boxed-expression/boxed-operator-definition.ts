@@ -76,6 +76,7 @@ import { isExpression, isFunction } from './type-guards.js';
 import {
   functionLiteralBody,
   functionLiteralParameters,
+  inferredSignatureParameterName,
   restParameterIndex,
   restParameterSignatureTail,
 } from './function-literal.js';
@@ -2375,13 +2376,18 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             // signature reads the self-calls.
             ...(fixedParams.length > 0
               ? {
-                  args: fixedParams.map((p, i) => ({
-                    type:
+                  // Each slot keeps the name of its parameter, as in the
+                  // literal's own arrow, so that a named call to the function
+                  // can find the slot (`inferredSignatureParameterName`).
+                  args: fixedParams.map((p, i) => {
+                    const name = inferredSignatureParameterName(p);
+                    const type =
                       inferredCollectionParameterType(p) ??
                       selfCallTypes[i] ??
                       wholeCollectionParameterType(p, body) ??
-                      'unknown',
-                  })),
+                      'unknown';
+                    return name !== undefined ? { name, type } : { type };
+                  }),
                 }
               : {}),
             ...restParameterSignatureTail(params),

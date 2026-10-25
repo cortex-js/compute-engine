@@ -30,7 +30,7 @@ describe('A COMPONENT READ OF A TUPLE LOCAL (CE-35)', () => {
   ])('%s binds a list argument whole', (definition) => {
     const { value, signature } = run(`${definition}\ng([1, 2, 3])`);
     expect(value).toBe('[1,2]');
-    expect(signature.startsWith('(indexed_collection<any>) ->')).toBe(true);
+    expect(signature.startsWith('(s: indexed_collection<any>) ->')).toBe(true);
   });
 
   test('a numeric use of the component keeps a scalar parameter', () => {
@@ -38,13 +38,13 @@ describe('A COMPONENT READ OF A TUPLE LOCAL (CE-35)', () => {
       'g(s) = do { let q = (s, 0); q[1] + 1 }\ng([1, 2, 3])'
     );
     expect(value).toBe('[2,3,4]');
-    expect(signature).toBe('(unknown) -> number');
+    expect(signature).toBe('(s: unknown) -> number');
   });
 
   test('an assignment to the local before the read ends the alias', () => {
     const { signature } = run(
       'g(s) = do { let q = (s, 0); q = (1, 2); take(q[1], 2) }'
     );
-    expect(signature.startsWith('(unknown) ->')).toBe(true);
+    expect(signature.startsWith('(s: unknown) ->')).toBe(true);
   });
 });

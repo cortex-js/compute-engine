@@ -1709,7 +1709,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
         ['Typed', DRAWING_BODY, { str: '(n: unknown) random -> integer' }],
         'n',
       ]);
-      expect(f.type.toString()).toBe('(unknown) random -> integer');
+      expect(f.type.toString()).toBe('(n: unknown) random -> integer');
       // The declared RESULT is `integer`, not the whole signature: the marker
       // decomposed.
       expect(typeToString(functionLiteralReturnType(f)!)).toBe('integer');
@@ -1738,7 +1738,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       ]);
       // `[]` is the stated empty set, not `undefined` — the spelling survives.
       expect(functionLiteralDeclaredEffects(f)).toEqual([]);
-      expect(f.type.toString()).toBe('(unknown) pure -> real');
+      expect(f.type.toString()).toBe('(x: unknown) pure -> real');
       expect(f.isPure).toBe(true);
     });
 
@@ -1758,7 +1758,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       expect(functionLiteralReturnType(f)).toBe(undefined);
       // …so inference supplies it (and the finite-numeric widening rule still
       // applies over the last statement's own type) — `unknown` is NOT forced.
-      expect(f.type.toString()).toBe('(unknown) scope -> number');
+      expect(f.type.toString()).toBe('(x: unknown) scope -> number');
     });
 
     it('the inferred effects UNION with the declared ones', () => {
@@ -1770,7 +1770,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
         ['Typed', ['Add', 'n', 1], { str: '(n: unknown) random scope -> integer' }],
         'n',
       ]);
-      expect(f.type.toString()).toBe('(unknown) random scope -> integer');
+      expect(f.type.toString()).toBe('(n: unknown) random scope -> integer');
     });
   });
 
@@ -1796,7 +1796,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
       // The declared RETURN type is now the signature's RESULT.
       expect(typeToString(functionLiteralReturnType(f)!)).toBe('integer');
-      expect(f.type.toString()).toBe('(unknown) -> integer');
+      expect(f.type.toString()).toBe('(x: unknown) -> integer');
     });
 
     it('the GROUPED spelling is the migration path for a returned function', () => {
@@ -1811,7 +1811,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       expect(typeToString(functionLiteralReturnType(f)!)).toBe(
         '(integer) -> integer'
       );
-      expect(f.type.toString()).toBe('(unknown) -> (integer) -> integer');
+      expect(f.type.toString()).toBe('(x: unknown) -> (integer) -> integer');
     });
 
     it('an ARITY-MISMATCHED ground marker is rejected, like a quantified one', () => {
@@ -1837,7 +1837,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
         'x',
       ]);
       expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
-      expect(f.type.toString()).toBe('(unknown) -> integer');
+      expect(f.type.toString()).toBe('(x: unknown) -> integer');
     });
 
     it('a PARENTHESIZED effect-bearing signature is a grouped RETURN type, not a contract (ruled 2026-08-01)', () => {
@@ -1852,7 +1852,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
         'x',
       ]);
       expect(functionLiteralDeclaredEffects(f)).toBe(undefined);
-      expect(f.type.toString()).toBe('(unknown) -> (real) random -> real');
+      expect(f.type.toString()).toBe('(x: unknown) -> (real) random -> real');
     });
   });
 
@@ -1926,13 +1926,13 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
         ],
       ]).evaluate();
       const def = ce.lookupDefinition('h3')!['operator'];
-      expect(def.signature.toString()).toBe('(unknown) random -> integer');
+      expect(def.signature.toString()).toBe('(n: unknown) random -> integer');
       expect(def.effects).toEqual(['random']);
       // The marker is AUTHOR-stated, so it sets the provenance bit (an
       // inference-produced arrow is stripped instead).
       expect(def.effectsDeclared).toBe(true);
       expect(def.pure).toBe(false);
-      expect(ce.box('h3').type.toString()).toBe('(unknown) random -> integer');
+      expect(ce.box('h3').type.toString()).toBe('(n: unknown) random -> integer');
       expect(eff(ce.box(['h3', 5]))).toEqual(['random']);
       expect(ce.box(['h3', 5]).isPure).toBe(false);
     });
@@ -1956,7 +1956,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       expect(def.effects).toEqual(['random', 'scope']);
       expect(def.effectsDeclared).toBe(true);
       expect(def.signature.toString()).toBe(
-        '(unknown) random scope -> integer'
+        '(n: unknown) random scope -> integer'
       );
     });
 
@@ -1991,7 +1991,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       expect(def.effects).toEqual([]);
       expect(def.effectsDeclared).toBe(true);
       expect(def.pure).toBe(true);
-      expect(def.signature.toString()).toBe('(unknown) pure -> integer');
+      expect(def.signature.toString()).toBe('(n: unknown) pure -> integer');
     });
   });
 
@@ -2048,7 +2048,7 @@ describe('STAGE 3 — full-signature `Typed` markers', () => {
       const def = ce.lookupDefinition('r9b')!['operator']!;
       expect(def.effectsDeclared).toBe(true);
       expect(def.effects).toEqual(['random']);
-      expect(def.signature.toString()).toBe('(unknown) random -> integer');
+      expect(def.signature.toString()).toBe('(n: unknown) random -> integer');
     });
   });
 
@@ -2372,13 +2372,13 @@ describe('a return-type ascription does not project the returned lambda', () => 
     ).toBe('() -> (number) random -> number');
     // The same body with no ascription infers the same outer arrow.
     expect(arrowOf('function mk() { x => Random() * x }', 'mk')).toBe(
-      '() -> (unknown) random -> number'
+      '() -> (x: unknown) random -> number'
     );
   });
 
   test('a `pure` contract on a function that returns a drawing lambda holds', () => {
     expect(arrowOf('function mk() pure { x => Random() * x }', 'mk')).toBe(
-      '() pure -> (unknown) random -> number'
+      '() pure -> (x: unknown) random -> number'
     );
   });
 
