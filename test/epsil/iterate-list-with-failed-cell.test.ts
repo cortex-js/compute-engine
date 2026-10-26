@@ -214,6 +214,9 @@ describe('EPSIL A FAILED CELL IN A LOOP OR COMPREHENSION HEADER', () => {
   test('a comprehension reads each cell', () => {
     expect(run('[x + 1 for x in xs]').value).toBe(`[2,${ERR},4]`);
     expect(run('[x for x in [1, g("a"), 3]]').value).toBe(`[1,${ERR},3]`);
+    // The failed cell of the header is in the value of the last statement,
+    // so it is not reported as a diagnostic at the header too.
+    expect(run('[x for x in [1, g("a"), 3]]').at).toEqual([LET_XS]);
     expect(run('[isError(x) for x in xs]').value).toBe(
       '["False","True","False"]'
     );

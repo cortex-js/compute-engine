@@ -225,10 +225,14 @@ eigenvalues([[2, 1], [1, 2]])
 // ➔ [3,1]
 ```
 
-The decompositions `luDecomposition`, `qrDecomposition`,
-`choleskyDecomposition` and `svd` use numeric algorithms. Their factors can
-contain decimal values even when the argument is exact. Multiply the factors
-to check a decomposition:
+The decompositions `luDecomposition`, `qrDecomposition` and
+`choleskyDecomposition` of a matrix of exact rational entries give exact
+factors: rationals for `luDecomposition`, and rationals times square roots
+for `qrDecomposition` and `choleskyDecomposition`. The diagonal of the `R`
+factor of `qrDecomposition` is not negative. `svd`, and these decompositions
+of a matrix with a decimal entry or under `N`, use numeric algorithms, so
+their factors contain decimal values. Multiply the factors to check a
+decomposition:
 
 ```epsil
 let (P, L, U) = luDecomposition([[4, 3], [2, 1]])

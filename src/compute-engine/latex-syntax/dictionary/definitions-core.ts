@@ -1225,10 +1225,25 @@ const KEYWORDS: KeywordDef[] = [
       ] as MathJsonExpression,
   },
   {
+    surface: 'implies',
+    kind: 'infix',
+    precedence: 220, // Same as \implies
+    associativity: 'right',
+    operatorname: true,
+    build: (parser, lhs, until) =>
+      [
+        'Implies',
+        lhs,
+        parser.parseExpression({ ...until, minPrec: 220 }) ??
+          parser.error('missing', parser.index),
+      ] as MathJsonExpression,
+  },
+  {
     surface: 'iff',
     kind: 'infix',
     precedence: 219, // Same as \iff
     associativity: 'right',
+    operatorname: true,
     build: (parser, lhs, until) =>
       [
         'Equivalent',
@@ -3573,6 +3588,11 @@ export const DEFINITIONS_CORE: LatexDictionary = [
           textContent += serializer.serialize(args[i]);
         else textContent += '$' + serializer.serialize(args[i]) + '$';
       }
+      // The parser reads `\text{and}` as the keyword `and`, not as text. An
+      // empty group before the text, `\text{{}and}`, prints the same and is
+      // read back as text. A nested group, `\text{{iff}}`, is not enough: the
+      // `\operatorname` keywords (`iff`, `implies`) still match it.
+      if (isKeywordText(textContent)) textContent = '{}' + textContent;
       parts.push('\\text{' + textContent + '}');
 
       // Math args after the text run

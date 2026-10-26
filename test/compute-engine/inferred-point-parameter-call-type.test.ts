@@ -215,9 +215,9 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
   test('an operand that cannot be a collection is typed from the body', () => {
     // The inferred signature does not prove that the call fails: the type
     // is derived from the body with the operand bound to the parameter.
-    // The body reads `3[1]`, which the derivation types `unknown`, so the
-    // type is `any`. Before, both routes typed the call `error` from the
-    // signature alone.
+    // The body reads `3[1]`, which the derivation of `At` types `error`, as
+    // the boxed `3[1]` is, so the type is `error`, as the
+    // value is.
     const ce = new ComputeEngine();
     ce.parse('d(a) := a[1] + a[2]').evaluate();
     for (const arg of ['True', 3] as const) {
@@ -225,11 +225,11 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
       const derived = deriveApplicationType(ce, 'd', [
         describeType(ce.box(arg).type.type),
       ]);
-      expect(derived).toBe('any');
+      expect(derived).toBe('error');
       expect(isSubtype(value.type.type, derived!)).toBe(true);
-      expect(ce.box(['d', arg]).type.toString()).toBe('any');
+      expect(ce.box(['d', arg]).type.toString()).toBe('error');
       const f = ce.box(['Function', ['d', arg], 'y']);
-      expect(f.type.toString()).toBe('(y: unknown) -> any');
+      expect(f.type.toString()).toBe('(y: unknown) -> error');
       const applied = ce.box(['Apply', f, 1]).evaluate();
       expect(valueFits(applied, resultOf(f.type.type))).toBe(true);
     }
@@ -295,15 +295,17 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
   test('a function held by a symbol declared `function`: both routes', () => {
     // The signature of the literal, `(tuple<number, number>) -> number`,
     // was inferred from the index reads, so the rules of an inferred
-    // signature apply: `d(3)` and `d(True)` are typed from the body (`any`,
-    // the body gives no type), and `d(M)` (a matrix) is a list.
+    // signature apply: `d(3)` and `d(True)` are typed from the body
+    // (`error`, as the boxed `3[1]` is), `d(NaN)` and
+    // `d(Missing)` are `any` (the body gives no type), and `d(M)` (a matrix)
+    // is a list.
     const ce = new ComputeEngine();
     ce.declare('d', 'function');
     ce.assign('d', ce.parse('(a) \\mapsto a[1] + a[2]'));
     const m = ['List', ['List', 1, 2], ['List', 3, 4]];
     for (const [arg, expected] of [
-      [3, 'any'],
-      ['True', 'any'],
+      [3, 'error'],
+      ['True', 'error'],
       ['NaN', 'any'],
       ['Missing', 'any'],
       [['List', 1, 2], 'number'],
@@ -400,10 +402,13 @@ describe('An inferred signature is not a contract', () => {
           value: '[4,6]',
           type: 'vector<integer^2>',
         });
-        // The body gives no type for `3[1]`, `True[1]`, `NaN[1]`,
-        // `Missing[1]`: the call is typed `any`, not `error` (before, `3`
-        // and `True` were refused from the signature alone).
-        for (const arg of [3, 'True', 'NaN', 'Missing'])
+        // The body reads `3[1]` and `True[1]`, which the derivation of `At`
+        // types `error`, as the boxed access is, and the
+        // values are errors. It gives no type for `NaN[1]` and `Missing[1]`,
+        // whose values are `NaN`: the call is typed `any`.
+        for (const arg of [3, 'True'])
+          expect(routes(ce, 'd', [arg]).type).toBe('error');
+        for (const arg of ['NaN', 'Missing'])
           expect(routes(ce, 'd', [arg]).type).toBe('any');
         expect(routes(ce, 'd', ['NaN']).value).toBe('NaN');
         expect(routes(ce, 'd', ['Missing']).value).toBe('NaN');
@@ -413,7 +418,9 @@ describe('An inferred signature is not a contract', () => {
 
       test('a call that the signature would refuse evaluates', () => {
         // Before, both calls were typed `error`, and their values are `42`
-        // and `"A"`.
+        // and `"A"`. The branch `3[1] + 3[2]` of the first is typed `error`,
+        // and its value when `b` is `True` is an error, so the type of the
+        // call is `any`, which holds both values.
         const ce = new ComputeEngine();
         define(ce, how, 'f', [
           'Function',
@@ -423,7 +430,7 @@ describe('An inferred signature is not a contract', () => {
         ]);
         expect(routes(ce, 'f', [3, 'False'])).toEqual({
           value: '42',
-          type: 'integer',
+          type: 'any',
         });
         define(ce, how, 'u', [
           'Function',

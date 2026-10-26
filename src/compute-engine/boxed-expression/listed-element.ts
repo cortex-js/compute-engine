@@ -140,6 +140,132 @@ export function listingCountUpperBound(
     // Each appended operand is one element.
     const source = listingCountUpperBound(x.op1, memo);
     if (source !== undefined) count = source + x.nops - 1;
+  } else if (isFunction(x, 'Comprehension') && x.nops >= 2) {
+    // A comprehension emits at most one element for each combination of the
+    // elements of its clause domains: a guard and a `Nothing` body only
+    // remove elements. The bound reads the domains, never the body. Without
+    // this case, a comprehension whose body is impure (a body that assigns a
+    // local, `[do { t = k * 2; t } for k in 1..3]`) had no callback-free
+    // bound and stayed a view inside a list literal, printed as its recipe.
+    const clauses = x.ops.slice(1);
+    const indices: string[] = [];
+    // An impure body, guard or domain can change a symbol that a later
+    // clause domain reads (`[do { n = n + 1; j } for i in 1..3, j in 1..n]`,
+    // or a guard that appends to `xs` before a later clause `j in xs`), so a
+    // bound read before the walk says nothing about the domains of the later
+    // iterations. Only the domain of the first clause is read once, before
+    // any of them runs.
+    const allPure =
+      isTransitivelyPure(x.op1) &&
+      clauses.every(
+        (clause) =>
+          !isFunction(clause) ||
+          clause.ops.slice(1).every((op) => isTransitivelyPure(op))
+      );
+    // A clause with a guard or a destructuring index can emit one error cell
+    // for a combination of the elements of the clauses up to it, instead of
+    // the combinations of the later clauses (a guard that evaluates to an
+    // error, an element that does not match the pattern). The walk then does
+    // not read the later domains for that combination, so an empty later
+    // domain does not remove that cell.
+    const canFail = (clause: Expression): boolean =>
+      isFunction(clause, 'Element') &&
+      ((clause.nops > 2 && !isSymbol(clause.ops[2], 'Nothing')) ||
+        isFunction(clause.ops[0], 'Tuple'));
+    let dependent = false;
+    let product = 1;
+    // The number of error cells that the clauses with a guard or a
+    // destructuring index can emit: for each such clause, the product of
+    // the bounds of the clauses up to it and including it.
+    let failed = 0;
+    for (const clause of clauses) {
+      if (!isFunction(clause, 'Element') || clause.nops < 2) {
+        product = -1;
+        break;
+      }
+      const domain = clause.ops[1];
+      if (
+        !allPure &&
+        indices.length > 0 &&
+        domain.symbols.some((s) => !indices.includes(s))
+      ) {
+        product = -1;
+        break;
+      }
+      // A domain that names the index of an earlier clause
+      // (`for i in 1..3, j in 1..i`) has no bound of its own: the index can
+      // keep the value of an earlier walk, and that value says nothing about
+      // the other iterations. The bound of a dependent comprehension is
+      // computed after this loop; the loop continues only to collect the
+      // indices for the purity test above.
+      if (dependent || (indices.length > 0 && domain.has(indices))) {
+        dependent = true;
+        indices.push(...clause.ops[0].symbols);
+        continue;
+      }
+      const bound = listingCountUpperBound(domain, memo);
+      if (bound === undefined) {
+        product = -1;
+        break;
+      }
+      product *= bound;
+      if (canFail(clause)) failed += product;
+      // The index is a symbol or a destructuring pattern (`for (p, q) in
+      // pairs`): each symbol of it is an index.
+      indices.push(...clause.ops[0].symbols);
+    }
+    // The walk of the copy below reads each clause domain. A domain such as
+    // `Filter(Range(1, i), keep)` calls `keep` during that walk, before the
+    // listing checks the purity of the comprehension or the budget. So the
+    // copy is counted only when each clause domain is transitively pure.
+    // The copy has no guards, so for a combination where a guard evaluates
+    // to an error it counts the combinations of the later clauses, and that
+    // count can be 0 where the walk emits one error cell. A guard on the
+    // last clause does not change the count: there the error cell takes the
+    // place of the one element of the combination. A destructuring index is
+    // kept in the copy, so its error cells are counted.
+    const domainsArePure = clauses.every(
+      (clause) => !isFunction(clause) || isTransitivelyPure(clause.ops[1])
+    );
+    const earlierGuard = clauses
+      .slice(0, -1)
+      .some(
+        (clause) =>
+          isFunction(clause, 'Element') &&
+          clause.nops > 2 &&
+          !isSymbol(clause.ops[2], 'Nothing')
+      );
+    if (dependent && product >= 0 && domainsArePure && !earlierGuard) {
+      // A dependent comprehension is counted by a walk of its domains
+      // (`comprehensionEnumeratedCount`, `library/control-structures.ts`).
+      // The walk is done on a copy that has no guards and a `Nothing` body,
+      // so it runs no guard and no body. A guard can only remove elements,
+      // so the count of the copy is an upper bound whatever the guards do,
+      // even when a guard reads a value that the body changes. The copy
+      // uses the scope of the comprehension, so a dependent domain still
+      // resolves the earlier indices.
+      const unguarded = x.engine._fn(
+        'Comprehension',
+        [
+          x.engine.Nothing,
+          ...clauses.map((clause) =>
+            isFunction(clause) && clause.nops > 2
+              ? x.engine._fn('Element', clause.ops.slice(0, 2))
+              : clause
+          ),
+        ],
+        { scope: x.localScope }
+      );
+      const n = unguarded.count;
+      if (n !== undefined && Number.isFinite(Number(n))) count = Number(n);
+    } else if (!dependent && product >= 0) {
+      // The cells are the elements of the full combinations (at most
+      // `product`) and the error cells (at most `failed`). An error cell of
+      // the last clause takes the place of the element of its combination,
+      // and `failed` then already holds `product` for that clause.
+      const last = clauses[clauses.length - 1];
+      count = canFail(last) ? failed : product + failed;
+    }
   } else if (hasConstantTimeCount(x)) {
     const n = x.count;
     if (n !== undefined) count = Number(n);
@@ -193,13 +319,19 @@ export function listedElement(
   let isKeyed = false;
   let reserved: number | undefined;
   try {
+    const bound = listingCountUpperBound(x);
+    const pure = isTransitivelyPure(x);
+    // An impure view with no callback-free bound is never listed. Return it
+    // before the finiteness test, because that test can walk the domains of
+    // the view and call their callbacks: the finiteness of a dependent
+    // comprehension `[i for i in 1..3, j in Filter(1..i, keep)]` is found by
+    // a walk that calls `keep`.
+    if (!pure && (!allowImpure || bound === undefined)) return x;
     if (!isWalkableFiniteCollection(x)) return x;
     isSet = !x.isIndexedCollection && x.type.matches('set<any>');
     isKeyed =
       !isSet && !x.isIndexedCollection && admitKeyed && producesKeyed(x);
     if (!isSet && !isKeyed && !x.isIndexedCollection) return x;
-    const bound = listingCountUpperBound(x);
-    const pure = isTransitivelyPure(x);
     const fits = bound !== undefined && bound <= budget.max - budget.used;
     if (!pure && (!allowImpure || !fits)) return x;
     if (!fits && bound !== undefined && hasConstantTimeCount(x)) return x;

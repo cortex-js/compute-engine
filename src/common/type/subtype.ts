@@ -2923,8 +2923,20 @@ function isSubtypeRules(
   // is true (reflexivity).
   if (lhs === 'never') return true;
 
-  // `never` is the bottom type, no other type is a subtype of `never`
-  if (rhs === 'never') return false;
+  // `never` is the bottom type, no other type is a subtype of `never`, with
+  // one exception: an intersection is a subtype of `never` when one of its
+  // arms is, by the same rule as for any other right-hand side (an
+  // intersection is a subtype of a type when one of its arms is). So
+  // `integer & never`, which the parser does not reduce, is a subtype of
+  // `never` and of itself. Other empty types (`vector<never^3>`) are not
+  // treated as subtypes of `never`: the other rules do not make them
+  // subtypes of every type, and the relation would not be transitive.
+  if (rhs === 'never')
+    return (
+      typeof lhs !== 'string' &&
+      lhs.kind === 'intersection' &&
+      lhs.types.some((t) => isSubtype(t, 'never'))
+    );
 
   // No type is a subtype of `error`, except itself
   if (rhs === 'error') return lhs === 'error';

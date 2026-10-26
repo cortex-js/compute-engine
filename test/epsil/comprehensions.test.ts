@@ -1,6 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { MathJsonExpression } from '../../src/math-json/types';
-import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { executeEpsil, executeEpsilAsync } from '../../src/epsil/execute-epsil';
 import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
 import { invalidEpsil, validEpsil } from '../utils';
@@ -268,6 +268,213 @@ describe('EPSIL COMPREHENSIONS — evaluation', () => {
     // `a` has no value: `x > a` cannot decide, and an element the guard cannot
     // keep is not in the comprehension.
     expect(run('[x for x in 1..3 if x > a]')).toBe('[]');
+  });
+});
+
+//
+// The result of a program is a value: a finite comprehension is a `List`
+// (user decision 2026-10-25). These tests read the MathJSON
+// of the value, because `toString()` prints the elements of a lazy
+// comprehension too and cannot show the difference.
+//
+
+/** The MathJSON of the value of `source`, on the synchronous route and on
+ * the asynchronous route, each with a fresh engine. */
+async function resultJson(source: string): Promise<[string, string]> {
+  const ce = new ComputeEngine();
+  const parseLatex = (latex: string): MathJsonExpression =>
+    ce.parse(latex).json;
+  const sync = executeEpsil(ce, source, { parseLatex });
+  expect(sync.diagnostics).toEqual([]);
+  const ce2 = new ComputeEngine();
+  const async = await executeEpsilAsync(ce2, source, {
+    parseLatex: (latex) => ce2.parse(latex).json,
+  });
+  expect(async.diagnostics).toEqual([]);
+  return [JSON.stringify(sync.value.json), JSON.stringify(async.value.json)];
+}
+
+describe('EPSIL COMPREHENSIONS — the result is a list', () => {
+  test.each([
+    ['[k * 2 for k in 1..3]', '["List",2,4,6]'],
+    ['[do { k * 2 } for k in 1..3]', '["List",2,4,6]'],
+    ['let xs = [do { k * 2 } for k in 1..3]', '["List",2,4,6]'],
+    ['let xs = [do { k * 2 } for k in 1..3]; xs', '["List",2,4,6]'],
+    [
+      'let xs = [if k > 1 { k } else { 0 } for k in 1..3]; xs',
+      '["List",0,2,3]',
+    ],
+    ['let xs = [do { let y = k * 2; y } for k in 1..3]; xs', '["List",2,4,6]'],
+    ['[k for k in 1..4 if k % 2 == 0]', '["List",2,4]'],
+    ['[do { t = i; t } for i in 1..3, j in 1..i]', '["List",1,2,2,3,3,3]'],
+    // A dependent clause with a guard: the bound of the listing is the count
+    // of the domains without the guard.
+    ['[do { t = i; t } for i in 1..3, j in 1..i if j > 1]', '["List",2,3,3]'],
+  ])('%s', async (source, expected) => {
+    expect(await resultJson(source)).toEqual([expected, expected]);
+  });
+
+  test('an infinite comprehension stays as it is', async () => {
+    const [sync, async] = await resultJson('[k for k in 1..oo]');
+    expect(sync).toMatch(/^\["Comprehension"/);
+    expect(async).toBe(sync);
+  });
+
+  test('a list literal lists a comprehension whose body assigns a local', async () => {
+    const source =
+      'function g() { let xs = [do { t = k * 2; t } for k in 1..3]; xs }\n[g(), g()]';
+    const expected = '["List",["List",2,4,6],["List",2,4,6]]';
+    expect(await resultJson(source)).toEqual([expected, expected]);
+  });
+
+  test('the body is evaluated once for each element', () => {
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const value = (source: string): string =>
+      JSON.stringify(executeEpsil(ce, source, { parseLatex }).value.json);
+    expect(value('let c = 0')).toBe('0');
+    expect(value('[do { c = c + 1; c } for i in 1..3, j in 1..i]')).toBe(
+      '["List",1,2,3,4,5,6]'
+    );
+    expect(value('c')).toBe('6');
+  });
+
+  test('a guard that reads a value the body changes does not lower the bound', () => {
+    // The guard keeps one element for `i = 1` before the body sets `c`, and
+    // every element after. The comprehension has 6 elements, more than the
+    // budget of 3 elements, so it stays as it is. A bound computed with the
+    // guards (3 elements) let the listing emit 6 elements.
+    const ce = new ComputeEngine();
+    ce.maxCollectionSize = 3;
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const source =
+      'let c = 0; [do { c = 1; j } for i in 1..3, j in 1..i if j == 1 || c == 1]';
+    const result = executeEpsil(ce, source, { parseLatex });
+    expect(result.diagnostics).toEqual([]);
+    expect(result.value.operator).toBe('Comprehension');
+  });
+
+  test('the same comprehension within the budget is listed', async () => {
+    const source =
+      'let c = 0; [do { c = 1; j } for i in 1..3, j in 1..i if j == 1 || c == 1]';
+    const expected = '["List",1,1,2,1,2,3]';
+    expect(await resultJson(source)).toEqual([expected, expected]);
+  });
+
+  test('a dependent comprehension with an impure guard is listed, and the guard runs once for each combination', () => {
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const value = (source: string): string =>
+      JSON.stringify(executeEpsil(ce, source, { parseLatex }).value.json);
+    expect(value('let calls = 0')).toBe('0');
+    value('function keep(j) scope { calls = calls + 1; j > 1 }');
+    expect(value('[do { t = i; t } for i in 1..3, j in 1..i if keep(j)]')).toBe(
+      '["List",2,3,3]'
+    );
+    expect(value('calls')).toBe('6');
+  });
+
+  test('an impure body and a later domain that reads another symbol: no listing', () => {
+    // The body changes `n`, which the domain of the second clause reads, so
+    // the domains of the later iterations are not known before the walk.
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const result = executeEpsil(
+      ce,
+      'let n = 1; [do { n = n + 1; j } for i in 1..3, j in 1..n]',
+      { parseLatex }
+    );
+    expect(result.value.operator).toBe('Comprehension');
+  });
+
+  test('the bound of the listing does not call the callback of a domain', () => {
+    // The domain `filter(1..i, keep)` reads `i` and calls `keep`, which is
+    // impure. The comprehension has no bound that is found without a walk,
+    // so it stays as it is, and `keep` is not called before the walk.
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const run = (source: string) => executeEpsil(ce, source, { parseLatex });
+    run('let calls = 0');
+    run('function keep(j) scope { calls = calls + 1; j > 0 }');
+    const result = run('[i for i in 1..3, j in filter(1..i, keep)]');
+    expect(result.value.operator).toBe('Comprehension');
+    expect(JSON.stringify(run('calls').value.json)).toBe('0');
+  });
+
+  test('an impure guard and a later domain that reads another symbol: no listing', () => {
+    // The guard appends to `xs`, which the domain of the second clause
+    // reads, so the comprehension has 2 + 3 + 4 = 9 elements, not the
+    // 3 × 1 that the domains give before the walk.
+    const ce = new ComputeEngine();
+    ce.maxCollectionSize = 5;
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const run = (source: string) => executeEpsil(ce, source, { parseLatex });
+    run('let xs = [1]');
+    run('function grow() scope { xs = [...xs, 0]; true }');
+    const result = run('[j for i in 1..3 if grow(), j in xs]');
+    expect(result.value.operator).toBe('Comprehension');
+  });
+
+  test('the bound of the listing counts the error cells of a destructuring index', () => {
+    // The elements `5` and `6` do not match the pattern `(p, q)`: each one
+    // gives an error cell, and the walk does not read the empty domain of
+    // the second clause for them. The comprehension has 2 elements, not the
+    // 4 × 0 that the domains give.
+    const source = '[j for (p, q) in [(1, 2), 5, (3, 4), 6], j in take(1..3, 0)]';
+    const value = (max: number) => {
+      const ce = new ComputeEngine();
+      ce.maxCollectionSize = max;
+      return executeEpsil(ce, source, {
+        parseLatex: (latex) => ce.parse(latex).json,
+      }).value;
+    };
+    // Over the budget of 1 element: the comprehension stays as it is.
+    expect(value(1).operator).toBe('Comprehension');
+    const listed = value(2);
+    expect(listed.operator).toBe('List');
+    expect(listed.nops).toBe(2);
+    expect(listed.ops!.every((cell) => cell.operator === 'Error')).toBe(true);
+  });
+
+  test('a failure in a body statement whose value is discarded is reported', async () => {
+    // As for the same statement in a `do` block that is not listed.
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const listed = executeEpsil(
+      ce,
+      '[do { let ignored = [RuntimeError("bad")]; k } for k in 1..3]',
+      { parseLatex }
+    );
+    expect(JSON.stringify(listed.value.json)).toBe('["List",1,2,3]');
+    const ce2 = new ComputeEngine();
+    const single = executeEpsil(
+      ce2,
+      'do { let ignored = [RuntimeError("bad")]; 3 }',
+      { parseLatex: (latex) => ce2.parse(latex).json }
+    );
+    expect(listed.diagnostics.map((d) => d.message)).toEqual(
+      single.diagnostics.map((d) => d.message)
+    );
+    expect(listed.diagnostics.map((d) => d.message)).toEqual([
+      ['runtime-error', 'bad', '', 'bad'],
+    ]);
+    // The asynchronous route reports it too.
+    const ce3 = new ComputeEngine();
+    const async = await executeEpsilAsync(
+      ce3,
+      '[do { let ignored = [RuntimeError("bad")]; k } for k in 1..3]',
+      { parseLatex: (latex) => ce3.parse(latex).json }
+    );
+    expect(async.diagnostics.map((d) => d.message)).toEqual([
+      ['runtime-error', 'bad', '', 'bad'],
+    ]);
   });
 });
 

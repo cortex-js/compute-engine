@@ -1,4 +1,5 @@
 import { callableBindingInContext } from '../boxed-expression/binders.js';
+import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
@@ -765,6 +766,65 @@ function hasIndexableMember(expr: Expression): boolean {
       isSubtype(m, INDEXED_COLLECTION_SHAPE_TYPE) ||
       isSubtype(m, DICTIONARY_SHAPE_TYPE)
   );
+}
+
+/**
+ * True when the `At` canonical handler refuses the base `d` of an access:
+ * the type of the base is provably not an indexed collection or a
+ * dictionary (a number, a boolean, a set, an interval), and the base is not
+ * one that the handler keeps because it can still be a collection.
+ *
+ * The handler keeps a number base whose type is only inferred (a symbol or
+ * a call of a function with an inferred signature): the same test as
+ * `isDeclaredScalarNumber` (`collection-utils.ts`), read on the structural
+ * view of the descriptor. A descriptor with no structural view
+ * (`describeType`) is a type that a derivation computed from argument types,
+ * such as a parameter of a function literal typed by its argument, and
+ * there is no inference to retract. A type that can hold an absent value
+ * or `NaN` is not refused: the handler admits an absent base, and the
+ * evaluation reads a `NaN` base as absent.
+ *
+ * The descriptor route of `At` (the type of a body typed from the argument
+ * types of a call) then answers `error`, as the boxed `At` does. Before,
+ * with `d(a) := a[1] + a[2]`, `d(Interval(0, 1))` was typed `nan | real`
+ * for an error value.
+ */
+function atRefusesBase(d: OperandDescriptor, engine: PureEngineView): boolean {
+  const t = d.type;
+  if (
+    t === 'unknown' ||
+    t === 'any' ||
+    t === 'error' ||
+    t === 'never' ||
+    t === 'value' ||
+    t === 'expression'
+  )
+    return false;
+  if (provablyAdmits('missing', t) || provablyAdmits('nothing', t))
+    return false;
+  // The evaluation of an access reads a `NaN` base as absent and gives
+  // `NaN`: with `d(a) := a[1] + a[2]`, `d(NaN)` is `NaN`.
+  if (!provablyDisjoint(t, 'nan')) return false;
+  if (!provablyDisjoint(t, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
+  if (!provablyDisjoint(t, DICTIONARY_SHAPE_TYPE)) return false;
+  if (!isSubtype(t, 'number')) return true;
+  if (d.structureOf === undefined) return true;
+  const s = d.structureOf();
+  if (s === undefined) return false;
+  if (s.kind === 'number') return true;
+  if (s.kind === 'symbol') return s.inferred !== true;
+  if (s.kind === 'application') {
+    // The structural view carries a callee only when the call is bound to a
+    // definition other than the one the name has in the engine's current
+    // scope (a local or shadowing binding). A lookup of the name then reads
+    // a different binding, and the callee does not tell if the signature of
+    // the bound definition is inferred. So the base is not refused.
+    if (s.callee !== undefined) return false;
+    const def = engine.lookupDefinition(s.head);
+    if (def?.operator !== undefined) return !def.operator.inferredSignature;
+    return def?.value !== undefined && !def.value.inferredType;
+  }
+  return false;
 }
 
 // The index type of `AT_SIGNATURE`, reported as the expected type when an
@@ -4744,6 +4804,37 @@ function declaredOrCallElementTypeD(
     // the element: `g := x ↦ x + 10` has the signature `(unknown) -> number`,
     // and `g([1, 2])` is `[11, 12]`. The call on the element type is then
     // read first, and the inferred result is the fallback.
+    //
+    // A function literal whose parameter is a point or a collection, typed
+    // only from its uses in the body, binds an element outside that type
+    // too, and its scalar result then says nothing about the element: with
+    // `k` declared `(tuple<number, number>) -> number`, `L ↦ k(L)` is
+    // `(L: tuple<number, number>) -> number`, and over the lists of points
+    // `[[(1, 2), (3, 4)], [(5, 6)]]` the `Map` is `[[3, 7], [11]]`. The
+    // application of the literal to the element is then typed from the
+    // body (`appliedLiteralResultType`). When the result is a scalar, that
+    // function answers only for an element outside the parameter type; when
+    // the result is not a scalar, only for an element inside it. Before, the
+    // `Map` was typed `list<number>`. An `error` answer is not used here: the
+    // declared result is kept.
+    if (fn.structureOf?.()?.kind === 'function-literal') {
+      const elementTypes = sources.map((x) => mappingSourceElementTypeD(x));
+      if (elementTypes.every((t) => t !== undefined)) {
+        const applied = appliedLiteralResultType(
+          fn,
+          elementTypes.map((t, k) => describeBoundElement(t!, k)),
+          declared,
+          derive
+        );
+        if (
+          applied !== undefined &&
+          applied !== 'unknown' &&
+          applied !== 'any' &&
+          applied !== 'error'
+        )
+          return applied;
+      }
+    }
     if (!callbackHasUnresolvedParameterD(fn, engine))
       return (
         libraryOperatorCallElementTypeD(
@@ -15923,6 +16014,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           adjoinTypeD(ops),
           context.engine._typeResolver
         );
+
+      // A base that the canonical handler refuses (`atRefusesBase`). The
+      // handler refuses it only when the engine is strict.
+      if (
+        ops.length >= 2 &&
+        context.engine.strict &&
+        atRefusesBase(ops[0], context.engine)
+      )
+        return context.engine.type('error');
 
       // The RAW type of the element(s) a single index selects (no absence
       // marker). Used as the inner element type of a gather and as the peeled

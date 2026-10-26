@@ -68,8 +68,10 @@ describe('CE-405: A broadcastable<T> PARAMETER MAPS TO THE CELLS', () => {
     ).toBe('[[(2, 3)],[(4, 5)]]');
   });
   test('broadcastable<value> keeps the one-rank rule, typed one level', () => {
+    // Each element of the list is a row, `vector<integer^2> |
+    // vector<integer^3>`, and the body `(x, x)` is typed with that row.
     expect(holds(engine(), ['m', L(L(1, 2), L(3, 4, 5))])).toEqual({
-      type: 'list<value>',
+      type: 'list<tuple<vector<integer^2> | vector<integer^3>, vector<integer^2> | vector<integer^3>>>',
       value: '[([1,2], [1,2]),([3,4,5], [3,4,5])]',
     });
   });

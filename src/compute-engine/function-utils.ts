@@ -6119,11 +6119,22 @@ function makeLambda(
 
       // Rename remaining params to fresh names in the body. A destructuring
       // parameter is not renamed (see `extras` above), so it contributes none.
-      const substitutions: Record<string, Expression> = {};
+      // The rename is keyed on the binding of the parameter
+      // (`bindingKeyedSubs`), not on its name: an argument can hold a free
+      // symbol with the name of an unapplied parameter. With `m(a, b) :=
+      // a + b`, `m(b)` was `(_1) ↦ _1 + _1`, which gave `2` for the
+      // argument `1` instead of `b + 1`.
+      const substitutions: ParameterSub[] = [];
       for (let i = 0; i < unappliedParams.length; i++) {
         if (isDestructuringParameter(unappliedParams[i])) continue;
         const name = functionLiteralParameterName(unappliedParams[i]);
-        if (name) substitutions[name] = extraSymbols[i];
+        if (name)
+          substitutions.push([
+            staticParameterBinding(unappliedParams[i], name, bodyFn.localScope),
+            name,
+            extraSymbols[i],
+            false,
+          ]);
       }
 
       // Evaluate body with known args in a fresh scope
@@ -6276,6 +6287,32 @@ function makeLambda(
       let newBody: Expression;
       try {
         newBody = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
+        // A held operand of the body (a branch of an `If` whose condition
+        // reads an unapplied parameter) is not evaluated, so it still names
+        // an applied parameter. That name has no value once the frame is
+        // popped, so the value of each applied parameter is substituted
+        // into the result here, as a saturated call does after its body
+        // (`bindingKeyedSubs`, which does not substitute an occurrence that
+        // a nested binder rebinds). Before, with `f(a, b) := If(b, a[1] +
+        // a[2], 42)`, `f((1, 2))` was `(_1) ↦ If(_1, a[1] + a[2], 42)`, and
+        // applied to `True` it gave `a[1] + a[2]`, not `3`.
+        const prefixSubs: ParameterSub[] = [];
+        for (const leaf of boundPrefix.leaves) {
+          if (!hasReferencedName(newBody, leaf.name)) continue;
+          const frame = freshScope.bindings.get(leaf.name);
+          const value =
+            (frame !== undefined && 'value' in frame
+              ? frame.value.storedValue
+              : undefined) ?? leaf.value;
+          prefixSubs.push([
+            staticParameterBinding(leaf.site, leaf.name, bodyScope),
+            leaf.name,
+            value,
+            hasReferencedName(value, leaf.name),
+          ]);
+        }
+        if (prefixSubs.length > 0)
+          newBody = bindingKeyedSubs(newBody, prefixSubs);
       } finally {
         ce.popScope();
         ACTIVE_FRAMES.delete(freshScope);
@@ -6290,7 +6327,10 @@ function makeLambda(
       // `newBody` is the evaluated body (the marker was consumed by
       // evaluation), so wrap it again; canonicalization re-normalizes the
       // ascription inside the Block (Phase 1).
-      const curriedBody = newBody.subs(substitutions);
+      const curriedBody =
+        substitutions.length > 0
+          ? bindingKeyedSubs(newBody, substitutions)
+          : newBody;
       const finalBody =
         returnTypeOp !== undefined
           ? ce._fn('Typed', [curriedBody, returnTypeOp], { canonical: false })

@@ -682,6 +682,11 @@ export interface PureEngineView {
    * membership handler consults (`Element` declines rather than refute a
    * near-match inside it). */
   readonly tolerance: number;
+  /** True when the engine checks the types of operands when it boxes an
+   * expression (`ComputeEngine.strict`). A handler that answers `error` for
+   * an operand that the boxing check refuses reads it, so that a non-strict
+   * engine keeps the unevaluated application. */
+  readonly strict: boolean;
   /** The protocol registry, keyed by protocol name. Its records are typed
    * opaquely here because the record type lives in `types-engine.ts`,
    * which imports this file; the protocol readers in `engine-protocols.ts`

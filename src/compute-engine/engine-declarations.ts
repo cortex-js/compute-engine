@@ -910,6 +910,52 @@ function normalizeDeclaredTypeParams(
   return params;
 }
 
+/**
+ * Whether the definition `def` of the alias record `target` reaches `target`
+ * under an odd number of negations, through unions, intersections, negations
+ * and other transparent aliases only. A constructor (`list<…>`, `tuple<…>`, a
+ * record, a function signature, …) and a nominal type stop the walk: an
+ * occurrence there does not make the definition contradict itself.
+ *
+ * A union with an arm `any` (the top type) is `any` whatever its other arms
+ * are, and an intersection with an arm `never` (the bottom type) is `never`.
+ * Such a union or intersection does not depend on `target`, so the walk does
+ * not look inside it: `type alias a = !a | any` has the fixed point `any`,
+ * and `type alias b = !b & never` has the fixed point `never`. Only the
+ * literal arms `any` and `never` count. `unknown` does not count as a top
+ * type here, because it is an inference marker, not the set of all values.
+ *
+ * The walk visits each alias record at most once for each parity, so a cycle
+ * of aliases terminates.
+ */
+function reachesItselfNegated(target: TypeReference, def: Type): boolean {
+  const seen: [Set<TypeReference>, Set<TypeReference>] = [
+    new Set(),
+    new Set(),
+  ];
+  const walk = (t: Type, odd: boolean): boolean => {
+    if (typeof t !== 'object') return false;
+    if (t.kind === 'negation') return walk(t.type, !odd);
+    if (t.kind === 'union' || t.kind === 'intersection') {
+      const absorbing = t.kind === 'union' ? 'any' : 'never';
+      if (t.types.some((x) => x === absorbing)) return false;
+      return t.types.some((x) => walk(x, odd));
+    }
+    if (t.kind !== 'reference') return false;
+    // An applied reference with arguments is a parameterized nominal type
+    // (a generic alias is expanded when it is built), and it is opaque.
+    if (t.args !== undefined) return false;
+    const decl = declarationOf(t);
+    if (decl === target) return odd;
+    if (!decl.alias || decl.def === undefined) return false;
+    const visited = seen[odd ? 1 : 0];
+    if (visited.has(decl)) return false;
+    visited.add(decl);
+    return walk(decl.def, odd);
+  };
+  return walk(def, false);
+}
+
 export function declareType(
   ce: IComputeEngine,
   name: string,
@@ -1271,6 +1317,23 @@ export function declareType(
     throw new TypeVariableError(
       'generic-alias-self-reference',
       `The definition of the nominal type "${name}" cannot be just an application of itself: a recursive occurrence must appear under some structure (a tuple field, \`list<${name}<…>>\`, …)`
+    );
+  }
+
+  // A transparent alias is the set of values that satisfy its definition. If
+  // the definition reaches the alias again under an odd number of negations,
+  // through unions, intersections and other aliases only, a value is in the
+  // set exactly when it is not in it (`type alias nn = !nn`). No set
+  // satisfies that, and the membership and subtype tests then give different
+  // answers for the same value, so the declaration is refused. A recursive
+  // occurrence inside a constructor (`type alias tree = list<tree> | integer`,
+  // or `list<!t>`) stays legal: the value inside is smaller than the value
+  // that holds it, so the definition decides each value from smaller ones.
+  if (alias === true && reachesItselfNegated(registry[name], def)) {
+    rollbackTypeHalf();
+    throw new TypeVariableError(
+      'alias-without-fixed-point',
+      `The type alias "${name}" has no fixed point: its definition refers to "${name}" under a negation (\`!\`) that is not inside a constructor such as \`list<…>\` or \`tuple<…>\`, so no set of values satisfies it`
     );
   }
 

@@ -6009,10 +6009,22 @@ function comprehensionIsDependent(clauses: ReadonlyArray<Expression>): boolean {
  * comprehension body. Returns `undefined` if the domain is unbounded (the
  * iteration-limit cancellation); a genuine time-budget cancellation propagates.
  */
-function comprehensionEnumeratedCount(expr: Expression): number | undefined {
+function comprehensionEnumeratedCount(
+  expr: Expression,
+  unguarded = false
+): number | undefined {
   if (!isFunction(expr)) return undefined;
   const ce = expr.engine;
-  const elements = expr.ops.slice(1);
+  // With `unguarded`, the guards (the third operand of an `Element` clause)
+  // are removed and are not evaluated. A guard only removes elements, so
+  // that count is an upper bound of the count.
+  const elements = expr.ops
+    .slice(1)
+    .map((clause) =>
+      unguarded && isFunction(clause, 'Element') && clause.nops > 2
+        ? ce._fn('Element', clause.ops.slice(0, 2))
+        : clause
+    );
   // The count drive binds the indices in the shared `localScope` (where
   // dependent clause domains resolve them), bracketed by a
   // ComprehensionIndexFrame: reading `.count` while another walk is paused
@@ -6156,7 +6168,11 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
   const clauses = expr.ops.slice(1);
   if (clauses.length === 0) return undefined;
   if (comprehensionIsDependent(clauses)) {
-    const c = comprehensionCount(expr);
+    // The walk does not evaluate the guards: a guard only removes elements,
+    // so the comprehension is finite when the walk with no guards is
+    // finite. A guard can have a side effect, and a test of finiteness must
+    // not run it.
+    const c = comprehensionEnumeratedCount(expr, true);
     return c === undefined ? undefined : Number.isFinite(c);
   }
 

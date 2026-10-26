@@ -2097,21 +2097,26 @@ function canEnumerateTensorOperands(expr: Expression): boolean | undefined {
  * The type of a power `A^k` of a square matrix `A`, for the `MatrixPower`
  * type handler. `exponent` tells what is known about `k`:
  *
- * - `'non-negative-integer'`: the result is a sum of products of the
- *   entries (the identity matrix when `k = 0`), so it stays inside the ring
- *   the entries live in: an integer matrix has an integer power.
- * - `'integer'`: `k` can be negative, and a negative power is an inverse.
- *   An inverse of an integer matrix has rational entries (`[[1, 2], [3,
- *   4]]^-1` is `[[-2, 1], [3/2, -1/2]]`), so the narrowest tier is
- *   `rational`.
+ * - `'non-negative-integer'`: the result cells are sums of products of the
+ *   entries (the identity matrix when `k = 0`), so the cell type is the
+ *   `'ring'` type of `matrixResultCellType()`: an integer matrix has an
+ *   integer power, and a rational or real matrix has real entries.
+ * - `'integer'`: `k` can be negative, and a negative power is an inverse,
+ *   whose cells are also quotients of entries. The cell type is the
+ *   `'field'` type of `matrixResultCellType()`: an integer or rational
+ *   matrix gives `real` entries, and a real or complex matrix gives
+ *   `number`. The type `rational` is not claimed, because a cell typed
+ *   `integer` can be a float with an integer value (`2.0`): the inverse of
+ *   `[[2.0, 1], [1, 3]]` has float entries.
  * - `'any'`: `k` is not known to be an integer (a half-integer power is a
  *   matrix square root). No element tier is claimed, only `number`.
  *
  * The result has the shape of the operand, and the shape is square: when
  * only one extent is known, the other extent of a power that has a value
- * is the same. The element tiers are tested from the narrowest outwards,
- * as the `Determinant` handler does. An element type that is in no tier
- * (it admits an infinity or NaN, which can give `∞ − ∞`) gives `number`.
+ * is the same. The cell tier of the operand is the narrowest of
+ * `MATRIX_CELL_TIERS` that holds the entries. An element type that is in no
+ * tier (it admits an infinity or NaN, which can give `∞ − ∞`) gives
+ * `number`.
  *
  * This DECLINES (returns `undefined`, so the declared result applies) when
  * the operand is not a matrix of known rank 2, or when its two extents are
@@ -2136,14 +2141,14 @@ function squareMatrixPowerType(
   // to the entries, as it reads through the flat one (`matrix<integer^(2x2)>`).
   const cell = broadcastCellType(m.type);
   if (isSubtype(cell, 'never')) return undefined;
-  const tiers =
-    exponent === 'non-negative-integer'
-      ? (['integer', 'rational', 'real', 'complex'] as const)
-      : exponent === 'integer'
-        ? (['rational', 'real', 'complex'] as const)
-        : [];
+  const tier = MATRIX_CELL_TIERS.find((t) => isSubtype(cell, t));
   const elements: Type =
-    tiers.find((tier) => isSubtype(cell, tier)) ?? 'number';
+    tier === undefined || exponent === 'any'
+      ? 'number'
+      : matrixResultCellType(
+          tier,
+          exponent === 'non-negative-integer' ? 'ring' : 'field'
+        );
   return BoxedType.forResult(
     { kind: 'list', elements, dimensions: [size, size] },
     context.engine._typeResolver
@@ -2184,6 +2189,34 @@ function matrixOperandShape(
   const tier = MATRIX_CELL_TIERS.find((t) => isSubtype(cell, t));
   if (tier === undefined) return undefined;
   return { dims, tier };
+}
+
+/**
+ * Is the operand a matrix literal whose cells are all exact rational number
+ * literals (`[[1, 2], [3, 1/2]]`)? A float cell (`2.0`), a radical, a
+ * symbol, or an operand that is not a literal (a symbol that holds a
+ * matrix) gives `false`.
+ *
+ * The decompositions compute such a matrix in exact arithmetic, so their
+ * type handlers can state exact cell types for it.
+ */
+function isExactRationalMatrixLiteral(
+  d: OperandDescriptor | undefined
+): boolean {
+  let s = d?.structureOf?.();
+  // The LaTeX parser wraps a `pmatrix` literal in `Matrix`, whose first
+  // operand is the list of rows
+  if (s?.kind === 'application' && s.head === 'Matrix')
+    s = s.children[0]?.structureOf?.();
+  if (s?.kind !== 'list-literal' || s.elements.length === 0) return false;
+  return s.elements.every((row) => {
+    const r = row.structureOf?.();
+    if (r?.kind !== 'list-literal' || r.elements.length === 0) return false;
+    return r.elements.every((cell) => {
+      const c = cell.structureOf?.();
+      return c?.kind === 'number' && c.rational !== undefined;
+    });
+  });
 }
 
 /** The wider of two cell tiers. */
@@ -2822,9 +2855,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // `docs/plans/2026-08-30-error-model-implementation.md`.
       nanBehavior: 'reject',
       // A determinant is a polynomial in the entries — sums of products — so
-      // it stays inside the ring or field the entries live in: an integer
-      // matrix has an integer determinant, a rational one a rational, and so
-      // on. The tiers are tested from the narrowest outwards. Anything else
+      // its type is the `'ring'` cell type of `matrixResultCellType()` for
+      // the narrowest tier of `MATRIX_CELL_TIERS` that holds the entries: an
+      // integer matrix has an integer determinant, and a rational or real
+      // matrix a real one. The type `rational` is not claimed, because a cell
+      // typed `integer` can be a float with an integer value: the determinant
+      // of `[[2.0, 1/3], [1, 3]]` is a float. A complex matrix gives `number`
+      // (a product of complex floats can overflow). Anything else
       // DECLINES so the declared `number` applies: an entry type admitting an
       // infinity or NaN can give `∞ − ∞`, and a symbolic entry gives an
       // expression whose type this cannot read. The empty bottom type is
@@ -2853,10 +2890,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           dims[0] !== dims[1]
         )
           return undefined;
-        for (const tier of ['integer', 'rational', 'real', 'complex'] as const)
-          if (isSubtype(t.elements, tier))
-            return BoxedType.forResult(tier, context.engine._typeResolver);
-        return undefined;
+        const tier = MATRIX_CELL_TIERS.find((c) => isSubtype(t.elements, c));
+        if (tier === undefined) return undefined;
+        return BoxedType.forResult(
+          matrixResultCellType(tier, 'ring'),
+          context.engine._typeResolver
+        );
       },
       evaluate: (ops, { engine: ce }) => {
         // An absent cell of a matrix of numbers is `NaN` (`absentCellsAsNaN`):
@@ -2934,8 +2973,8 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // The inverse is the power with exponent -1, so it is typed as
       // `MatrixPower` with a negative integer exponent
       // (`squareMatrixPowerType`): a square integer or rational matrix gives
-      // rational entries, a real matrix real entries and a complex matrix
-      // complex entries, with the shape of the operand. A non-square operand
+      // real entries, and a real or complex matrix gives `number` entries,
+      // with the shape of the operand. A non-square operand
       // has no inverse (the evaluate handler answers
       // `expected-square-matrix`), and the handler declines for it and for
       // an operand of unknown rank, so the declared `matrix` applies. With
@@ -4367,7 +4406,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // about the exponent (`squareMatrixPowerType`): with `m` declared
       // `matrix<integer^(2x2)>`, `MatrixPower(m, 2)` is
       // `matrix<integer^(2x2)>`, and `MatrixPower(m, -2)` is
-      // `matrix<rational^(2x2)>`. A non-square operand or an operand of
+      // `matrix<real^(2x2)>`. A non-square operand or an operand of
       // unknown rank keeps the declared `matrix`.
       type: ([m, exponent], context) =>
         squareMatrixPowerType(
@@ -5896,15 +5935,19 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8600,
       signature: '(matrix) -> tuple',
       // The triple `(P, L, U)` of n×n matrices for an n×n matrix. P is a
-      // permutation matrix of the integers 0 and 1. L and U are computed in
-      // machine precision (`matrixResultCellType()`, `'numeric'`), so their
-      // cells are `number`.
+      // permutation matrix of the integers 0 and 1. For a matrix literal of
+      // exact rational cells, L and U are computed in exact rational
+      // arithmetic, so their cells are `rational`. Otherwise they are
+      // computed in machine precision (`matrixResultCellType()`,
+      // `'numeric'`), so their cells are `number`.
       type: ([m], context) => {
         const operand = matrixOperandShape(m);
         if (operand === undefined) return undefined;
         const n = squareMatrixExtent(operand.dims);
         if (n === undefined) return undefined;
-        const cell = matrixResultCellType(operand.tier, 'numeric');
+        const cell = isExactRationalMatrixLiteral(m)
+          ? 'rational'
+          : matrixResultCellType(operand.tier, 'numeric');
         return BoxedType.forResult(
           {
             kind: 'tuple',
@@ -5921,7 +5964,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.
       canEnumerate: canEnumerateFiniteSource,
-      evaluate: (ops, { engine: ce }): Expression | undefined => {
+      evaluate: (
+        ops,
+        { engine: ce, numericApproximation }
+      ): Expression | undefined => {
         const M = ops[0];
 
         if (!isTensorValue(M)) return undefined;
@@ -5933,7 +5979,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
 
         const n = shape[0];
-        const result = computeLU(M, n, ce);
+        // `evaluate()` of a matrix of exact entries gives exact cells, or
+        // stays unevaluated when an entry is not rational (`√2`, `π`).
+        // `.N()` and a matrix with a float entry use machine precision.
+        const result =
+          numericApproximation || hasFloatEntry(M)
+            ? computeLU(M, n, ce)
+            : exactLU(M, n, ce);
         if (!result) return undefined;
 
         const { P, L, U } = result;
@@ -5948,15 +6000,20 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'QR decomposition of a matrix.',
       complexity: 8600,
       signature: '(matrix) -> tuple',
-      // The pair `(Q, R)` for an m×n matrix: Q is m×m and R is m×n. Both are
-      // computed in machine precision (`matrixResultCellType()`,
-      // `'numeric'`), so their cells are `number`.
+      // The pair `(Q, R)` for an m×n matrix: Q is m×m and R is m×n. For a
+      // matrix literal of exact rational cells, both are computed exactly,
+      // and each cell is a rational times the square root of a positive
+      // integer, so the cells are `real`. Otherwise both are computed in
+      // machine precision (`matrixResultCellType()`, `'numeric'`), so their
+      // cells are `number`.
       type: ([m], context) => {
         const operand = matrixOperandShape(m);
         if (operand === undefined || operand.dims.length !== 2)
           return undefined;
         const [rows, columns] = operand.dims;
-        const cell = matrixResultCellType(operand.tier, 'numeric');
+        const cell = isExactRationalMatrixLiteral(m)
+          ? 'real'
+          : matrixResultCellType(operand.tier, 'numeric');
         return BoxedType.forResult(
           {
             kind: 'tuple',
@@ -5972,7 +6029,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       // value); success is not cheaply decidable — see
       // `canEnumerateFiniteSource`.
       canEnumerate: canEnumerateFiniteSource,
-      evaluate: (ops, { engine: ce }): Expression | undefined => {
+      evaluate: (
+        ops,
+        { engine: ce, numericApproximation }
+      ): Expression | undefined => {
         const M = ops[0];
 
         if (!isTensorValue(M)) return undefined;
@@ -5984,7 +6044,13 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
 
         const [m, n] = shape;
-        const result = computeQR(M, m, n, ce);
+        // `evaluate()` of a matrix of exact entries gives exact cells, or
+        // stays unevaluated when an entry is not rational (`√2`, `π`).
+        // `.N()` and a matrix with a float entry use machine precision.
+        const result =
+          numericApproximation || hasFloatEntry(M)
+            ? computeQR(M, m, n, ce)
+            : exactQR(M, m, n, ce);
         if (!result) return undefined;
 
         const { Q, R } = result;
@@ -5999,22 +6065,35 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       description: 'Cholesky decomposition of a positive-definite matrix.',
       complexity: 8600,
       signature: '(matrix) -> matrix',
-      // The n×n factor L of an n×n matrix, computed in machine precision
+      // The n×n factor L of an n×n matrix. For a matrix literal of exact
+      // rational cells, L is computed exactly, and each cell is a rational
+      // times the square root of a non-negative rational, so the cells are
+      // `real`. Otherwise L is computed in machine precision
       // (`matrixResultCellType()`, `'numeric'`), so its cells are `number`.
       // A matrix that is not positive definite gives the error
       // `expected-positive-definite-matrix`, which no matrix type admits:
       // the declared `matrix` does not admit it either.
-      type: ([m], context) =>
-        matrixMapType(
-          m,
-          'numeric',
-          (dims) => {
-            const n = squareMatrixExtent(dims);
-            return n === undefined ? undefined : [n, n];
-          },
-          context
-        ),
-      evaluate: (ops, { engine: ce }): Expression | undefined => {
+      type: ([m], context) => {
+        const shape = (dims: number[]) => {
+          const n = squareMatrixExtent(dims);
+          return n === undefined ? undefined : [n, n];
+        };
+        if (!isExactRationalMatrixLiteral(m))
+          return matrixMapType(m, 'numeric', shape, context);
+        const operand = matrixOperandShape(m);
+        if (operand === undefined || operand.dims.length !== 2)
+          return undefined;
+        const dims = shape(operand.dims);
+        if (dims === undefined) return undefined;
+        return BoxedType.forResult(
+          tensorType('real', dims),
+          context.engine._typeResolver
+        );
+      },
+      evaluate: (
+        ops,
+        { engine: ce, numericApproximation }
+      ): Expression | undefined => {
         const M = ops[0];
 
         if (!isTensorValue(M)) return undefined;
@@ -6026,7 +6105,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
 
         const n = shape[0];
-        return computeCholesky(M, n, ce);
+        // `evaluate()` of a matrix of exact entries gives exact cells, or
+        // stays unevaluated when an entry is not rational (`√2`, `π`).
+        // `.N()` and a matrix with a float entry use machine precision.
+        return numericApproximation || hasFloatEntry(M)
+          ? computeCholesky(M, n, ce)
+          : exactCholesky(M, n, ce);
       },
     },
 
@@ -6247,27 +6331,31 @@ function computeLU(
     }
   }
 
-  // Build permutation matrix P
-  const P: Expression[][] = [];
-  for (let i = 0; i < n; i++) {
-    P[i] = [];
-    for (let j = 0; j < n; j++) {
-      P[i][j] = perm[i] === j ? ce.One : ce.Zero;
-    }
-  }
-
-  // Build result matrices
-  const PExpr = ce.expr(['List', ...P.map((row) => ce.expr(['List', ...row]))]);
+  // Build result matrices. This route is used under `.N()` or for a matrix
+  // with a float entry, so the cells of L and U are floats
+  // (`matrixRoutineNumber()`).
+  const box = (x: number) => matrixRoutineNumber(ce, x, true);
   const LExpr = ce.expr([
     'List',
-    ...L.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...L.map((row) => ce.expr(['List', ...row.map(box)])),
   ]);
   const UExpr = ce.expr([
     'List',
-    ...U.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...U.map((row) => ce.expr(['List', ...row.map(box)])),
   ]);
 
-  return { P: PExpr, L: LExpr, U: UExpr };
+  return { P: permutationMatrix(ce, perm), L: LExpr, U: UExpr };
+}
+
+/** The n×n permutation matrix P with `P[i][perm[i]] = 1`, with exact 0 and
+ * 1 cells. */
+function permutationMatrix(ce: ComputeEngine, perm: number[]): Expression {
+  return ce.expr([
+    'List',
+    ...perm.map((p) =>
+      ce.expr(['List', ...perm.map((_, j) => (p === j ? ce.One : ce.Zero))])
+    ),
+  ]);
 }
 
 /**
@@ -6357,10 +6445,20 @@ function computeQR(
     }
   }
 
-  // Build result matrices: floats when the input has a float entry
-  // (`matrixRoutineNumber()`)
-  const inexact = hasFloatEntry(M);
-  const box = (x: number) => matrixRoutineNumber(ce, x, inexact);
+  // The Householder reflections can give a negative diagonal entry in R.
+  // The convention is a non-negative diagonal, the same as the exact route
+  // (`exactQR()`): when `R[j][j] < 0`, negate row j of R and column j of Q.
+  // The product QR does not change. A zero diagonal entry (a column that
+  // depends on the columns before it) is kept.
+  for (let j = 0; j < minMN; j++) {
+    if (R[j][j] >= 0) continue;
+    for (let c = 0; c < n; c++) R[j][c] = -R[j][c];
+    for (let i = 0; i < m; i++) Q[i][j] = -Q[i][j];
+  }
+
+  // Build result matrices. This route is used under `.N()` or for a matrix
+  // with a float entry, so the cells are floats (`matrixRoutineNumber()`).
+  const box = (x: number) => matrixRoutineNumber(ce, x, true);
   const QExpr = ce.expr([
     'List',
     ...Q.map((row) => ce.expr(['List', ...row.map(box)])),
@@ -6389,6 +6487,16 @@ function computeCholesky(
   // real part of a complex entry would give a wrong result.
   const A = tensorToNumericMatrix(M, n, n);
   if (!A) return undefined;
+
+  // The algorithm reads only the lower triangle, so a matrix that is not
+  // symmetric would give an L with L·Lᵀ ≠ A. A difference within the
+  // rounding error of the two entries is accepted.
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < i; j++) {
+      const scale = Math.max(1, Math.abs(A[i][j]), Math.abs(A[j][i]));
+      if (Math.abs(A[i][j] - A[j][i]) > 1e-10 * scale)
+        return ce.error('expected-symmetric-matrix', M.toString());
+    }
 
   // Initialize L as zero matrix
   const L: number[][] = Array(n)
@@ -6423,10 +6531,245 @@ function computeCholesky(
     }
   }
 
-  // Build result matrix
+  // Build result matrix. This route is used under `.N()` or for a matrix
+  // with a float entry, so the cells are floats (`matrixRoutineNumber()`).
   return ce.expr([
     'List',
-    ...L.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ...L.map((row) =>
+      ce.expr(['List', ...row.map((x) => matrixRoutineNumber(ce, x, true))])
+    ),
+  ]);
+}
+
+/** `|a| > |b|` for two exact rationals (the denominators are positive). */
+function ratAbsGreater([an, ad]: BigRat, [bn, bd]: BigRat): boolean {
+  const a = an < 0n ? -an : an;
+  const b = bn < 0n ? -bn : bn;
+  return a * bd > b * ad;
+}
+
+/** The dot product of two vectors of exact rationals. */
+function ratDot(u: ReadonlyArray<BigRat>, v: ReadonlyArray<BigRat>): BigRat {
+  let sum: BigRat = [0n, 1n];
+  for (let i = 0; i < u.length; i++) sum = ratAdd(sum, ratMul(u[i], v[i]));
+  return sum;
+}
+
+/**
+ * The exact cell `r·√s`, for an exact rational `r` and a non-negative exact
+ * rational `s`. The cell is built with `ce.function()`, so the canonical
+ * form keeps the radical exact (`2/3·√8` is `4/3·√2`, `√25` is `5`).
+ */
+function radicalCell(ce: ComputeEngine, r: BigRat, s: BigRat): Expression {
+  if (r[0] === 0n || s[0] === 0n) return ce.Zero;
+  return ce.function('Multiply', [
+    ce.number(r),
+    ce.function('Sqrt', [ce.number(s)]),
+  ]);
+}
+
+/**
+ * The LU decomposition `PA = LU` of an n×n matrix of exact rational entries,
+ * in exact rational arithmetic. The pivot rule is the rule of the machine
+ * precision route (`computeLU()`): in column k, the row with the entry of
+ * largest magnitude, the first such row for a tie, and no pivot for a
+ * column of zeros. So both routes give the same P, except when a rounding
+ * error in machine precision changes the result of a comparison.
+ *
+ * `undefined` when an entry is not an exact rational (a radical, a symbol):
+ * the application then stays unevaluated.
+ */
+function exactLU(
+  M: Expression,
+  n: number,
+  ce: ComputeEngine
+): { P: Expression; L: Expression; U: Expression } | undefined {
+  const A = tensorToRationalMatrix(M, n, n);
+  if (!A) return undefined;
+
+  const L: BigRat[][] = A.map((_, i) =>
+    A.map((_, j): BigRat => (i === j ? [1n, 1n] : [0n, 1n]))
+  );
+  const U: BigRat[][] = A.map((row) => [...row]);
+  const perm: number[] = A.map((_, i) => i);
+
+  for (let k = 0; k < n - 1; k++) {
+    let maxRow = k;
+    for (let i = k + 1; i < n; i++)
+      if (ratAbsGreater(U[i][k], U[maxRow][k])) maxRow = i;
+
+    if (U[maxRow][k][0] === 0n) continue; // The column is zero
+
+    if (maxRow !== k) {
+      [U[k], U[maxRow]] = [U[maxRow], U[k]];
+      [perm[k], perm[maxRow]] = [perm[maxRow], perm[k]];
+      for (let j = 0; j < k; j++)
+        [L[k][j], L[maxRow][j]] = [L[maxRow][j], L[k][j]];
+    }
+
+    for (let i = k + 1; i < n; i++) {
+      const factor = ratDiv(U[i][k], U[k][k]);
+      L[i][k] = factor;
+      for (let j = k; j < n; j++)
+        U[i][j] = ratSub(U[i][j], ratMul(factor, U[k][j]));
+    }
+  }
+
+  const box = (rows: BigRat[][]) =>
+    ce.expr([
+      'List',
+      ...rows.map((row) => ce.expr(['List', ...row.map((x) => ce.number(x))])),
+    ]);
+  return { P: permutationMatrix(ce, perm), L: box(L), U: box(U) };
+}
+
+/**
+ * The QR decomposition `A = QR` of an m×n matrix of exact rational entries,
+ * by the Gram–Schmidt process in exact arithmetic. Q is m×m and orthogonal,
+ * R is m×n and upper triangular, and the diagonal of R is non-negative, the
+ * same convention as the machine precision route (`computeQR()`).
+ *
+ * Column k of Q is `w / √s`, where `w` is a vector of integers with no
+ * common factor and `s = w·w`. `w` is the part of column k of A that is
+ * orthogonal to the columns of Q before it. When that part is zero (column
+ * k of A depends on the columns before it), or when k ≥ n, `w` comes from
+ * the first standard basis vector that is not in the span of the columns
+ * before it, and `R[k][k]` is 0. Each cell of Q and R is a rational times
+ * `√s`.
+ *
+ * `undefined` when an entry is not an exact rational (a radical, a symbol):
+ * the application then stays unevaluated.
+ */
+function exactQR(
+  M: Expression,
+  m: number,
+  n: number,
+  ce: ComputeEngine
+): { Q: Expression; R: Expression } | undefined {
+  const A = tensorToRationalMatrix(M, m, n);
+  if (!A) return undefined;
+
+  const zero: BigRat = [0n, 1n];
+  const column = (j: number): BigRat[] => A.map((row) => row[j]);
+  // The orthogonal vectors (integer entries) and their squared norms
+  const W: BigRat[][] = [];
+  const S: BigRat[] = [];
+
+  // The part of `v` that is orthogonal to the vectors in `W`
+  const residual = (v: BigRat[]): BigRat[] => {
+    let r = v;
+    for (let i = 0; i < W.length; i++) {
+      const c = ratDiv(ratDot(r, W[i]), S[i]);
+      if (c[0] !== 0n) r = r.map((x, k) => ratSub(x, ratMul(c, W[i][k])));
+    }
+    return r;
+  };
+
+  // A positive multiple of `v` with integer entries that have no common
+  // factor
+  const primitive = (v: BigRat[]): BigRat[] => {
+    let lcm = 1n;
+    for (const [, d] of v) lcm = (lcm / ratGcd(lcm, d)) * d;
+    const ints = v.map(([num, d]) => num * (lcm / d));
+    let g = 0n;
+    for (const x of ints) g = ratGcd(g, x);
+    return ints.map((x): BigRat => [x / g, 1n]);
+  };
+
+  let nextBasis = 0;
+  for (let k = 0; k < m; k++) {
+    let v = k < n ? residual(column(k)) : undefined;
+    if (v === undefined || v.every((x) => x[0] === 0n)) {
+      v = undefined;
+      while (v === undefined && nextBasis < m) {
+        const e = A.map((_, i): BigRat => (i === nextBasis ? [1n, 1n] : zero));
+        nextBasis += 1;
+        const r = residual(e);
+        if (r.some((x) => x[0] !== 0n)) v = r;
+      }
+      // Unreachable: fewer than m orthogonal vectors do not span the space
+      if (v === undefined) return undefined;
+    }
+    const w = primitive(v);
+    W.push(w);
+    S.push(ratDot(w, w));
+  }
+
+  // Q[i][k] = (w_k[i] / s_k)·√s_k and R[k][j] = (a_j·w_k / s_k)·√s_k. For
+  // a column w_k of the Gram–Schmidt process, a_k·w_k = |v_k|·|w_k| > 0.
+  const Q = A.map((_, i) =>
+    W.map((w, k) => radicalCell(ce, ratDiv(w[i], S[k]), S[k]))
+  );
+  const R = A.map((_, k) =>
+    A[0].map((_, j) =>
+      j < k
+        ? ce.Zero
+        : radicalCell(ce, ratDiv(ratDot(column(j), W[k]), S[k]), S[k])
+    )
+  );
+
+  const box = (rows: Expression[][]) =>
+    ce.expr(['List', ...rows.map((row) => ce.expr(['List', ...row]))]);
+  return { Q: box(Q), R: box(R) };
+}
+
+/**
+ * The Cholesky decomposition `A = L Lᵀ` of an n×n matrix of exact rational
+ * entries, in exact arithmetic, as `L = L̃ √D` from the decomposition
+ * `A = L̃ D L̃ᵀ`: `L̃` is lower triangular with a unit diagonal and `D` is
+ * diagonal, both rational. So `L[i][j] = L̃[i][j]·√D[j]`.
+ *
+ * As in the machine precision route (`computeCholesky()`), the result is
+ * the error `expected-symmetric-matrix` when A is not symmetric, and the
+ * error `expected-positive-definite-matrix` when an entry of D is negative,
+ * or when an entry of D other than the last one is zero.
+ *
+ * `undefined` when an entry is not an exact rational (a radical, a symbol):
+ * the application then stays unevaluated.
+ */
+function exactCholesky(
+  M: Expression,
+  n: number,
+  ce: ComputeEngine
+): Expression | undefined {
+  const A = tensorToRationalMatrix(M, n, n);
+  if (!A) return undefined;
+
+  // The algorithm reads only the lower triangle, so a matrix that is not
+  // symmetric would give an L with L·Lᵀ ≠ A.
+  for (let i = 0; i < n; i++)
+    for (let j = 0; j < i; j++)
+      if (ratSub(A[i][j], A[j][i])[0] !== 0n)
+        return ce.error('expected-symmetric-matrix', M.toString());
+
+  const Lt: BigRat[][] = A.map((_, i) =>
+    A.map((_, j): BigRat => (i === j ? [1n, 1n] : [0n, 1n]))
+  );
+  const D: BigRat[] = [];
+
+  for (let j = 0; j < n; j++) {
+    let d = A[j][j];
+    for (let k = 0; k < j; k++)
+      d = ratSub(d, ratMul(ratMul(Lt[j][k], Lt[j][k]), D[k]));
+    if (d[0] < 0n || (d[0] === 0n && j < n - 1))
+      return ce.error('expected-positive-definite-matrix', M.toString());
+    D.push(d);
+    for (let i = j + 1; i < n; i++) {
+      let x = A[i][j];
+      for (let k = 0; k < j; k++)
+        x = ratSub(x, ratMul(ratMul(Lt[i][k], Lt[j][k]), D[k]));
+      Lt[i][j] = ratDiv(x, d);
+    }
+  }
+
+  return ce.expr([
+    'List',
+    ...Lt.map((row, i) =>
+      ce.expr([
+        'List',
+        ...row.map((x, j) => (j > i ? ce.Zero : radicalCell(ce, x, D[j]))),
+      ])
+    ),
   ]);
 }
 

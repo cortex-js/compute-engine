@@ -828,3 +828,140 @@ describe('GENERIC TYPE ALIASES — Epsil statement route', () => {
     expect(ce.type('gen<integer>').toString()).toBe('gen<integer>');
   });
 });
+
+//
+// An alias with no fixed point is refused when it is declared.
+// `type alias nn = !nn` says that a value is an `nn` exactly when it
+// is not an `nn`: no set of values satisfies it. The refusal applies when the
+// self-reference is reached under an odd number of negations through unions,
+// intersections and other aliases. An occurrence inside a constructor
+// (`list<…>`) stays legal, and so does an even number of negations.
+//
+describe('TYPE ALIASES — an alias with no fixed point is refused', () => {
+  function aliasError(ce: ComputeEngine, name: string, def: string): string {
+    try {
+      ce.declareType(name, def, { alias: true });
+    } catch (e) {
+      return e instanceof Error ? e.message : String(e);
+    }
+    return '<no error>';
+  }
+
+  test.each([
+    ['nn', '!nn'],
+    ['u1', '!u1 | integer'],
+    ['i1', '!(i1 | string) & integer'],
+    ['n2', '!n2 | list<n2>'],
+  ])('host route: `%s = %s` is refused and not registered', (name, def) => {
+    const ce = new ComputeEngine();
+    const msg = aliasError(ce, name, def);
+    expect(msg).toMatch(/^alias-without-fixed-point: /);
+    expect(msg).toContain(`"${name}"`);
+    expect(() => ce.type(name)).toThrow();
+  });
+
+  test('a generic alias that negates its argument is followed', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('Neg', '!T', { alias: true, typeParams: ['T'] });
+    expect(aliasError(ce, 'g1', 'Neg<g1>')).toMatch(
+      /^alias-without-fixed-point: .*"g1"/
+    );
+    // Two negations cancel: `g2 = !!g2` has fixed points.
+    expect(aliasError(ce, 'g2', 'Neg<Neg<g2>>')).toBe('<no error>');
+  });
+
+  test.each([
+    ['dd', '!!dd'],
+    ['tree', 'list<tree> | integer'],
+    ['lneg', 'list<!lneg> | integer'],
+    ['grow', 'grow | integer'],
+  ])('host route: `%s = %s` is accepted', (name, def) => {
+    const ce = new ComputeEngine();
+    expect(aliasError(ce, name, def)).toBe('<no error>');
+    expect(ce.type(name).toString()).toBe(name);
+  });
+
+  test('a union with an arm `any` has a fixed point and is accepted', () => {
+    // `a = !a | any` is `any` whatever `a` is, so `any` is its fixed point.
+    const ce = new ComputeEngine();
+    expect(aliasError(ce, 'a', '!a | any')).toBe('<no error>');
+    expect(ce.box(5).type.matches(ce.type('a'))).toBe(true);
+  });
+
+  test('an intersection with an arm `never` has a fixed point and is accepted', () => {
+    // `b = !b & never` is `never` whatever `b` is, so `never` is its fixed
+    // point.
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declareType('b', '!b & never', { alias: true })
+    ).not.toThrow();
+    expect(ce.box(5).type.matches(ce.type('b'))).toBe(false);
+  });
+
+  test('an alias whose definition is an empty intersection is declared', () => {
+    // Minting the constructor compares the signature `(integer & never) ->
+    // integer & never` with itself. That comparison failed while an empty
+    // type that is not spelled `never` was not a subtype of `never`.
+    const ce = new ComputeEngine();
+    expect(() =>
+      ce.declareType('q', 'integer & never', { alias: true })
+    ).not.toThrow();
+    expect(ce.type('integer & never').matches(ce.type('never'))).toBe(true);
+    expect(
+      ce.type('integer & never').matches(ce.type('integer & never'))
+    ).toBe(true);
+    expect(ce.type('integer').matches(ce.type('never'))).toBe(false);
+  });
+
+  test('a negation of another alias is accepted', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('ok1', 'integer', { alias: true });
+    expect(aliasError(ce, 'ok2', '!ok1')).toBe('<no error>');
+    expect(ce.box(5).type.matches(ce.type('ok2'))).toBe(false);
+  });
+
+  test('a nominal type is not checked: it is opaque', () => {
+    const ce = new ComputeEngine();
+    expect(() => ce.declareType('Nn', '!Nn')).not.toThrow();
+  });
+
+  test('box route: the refusal is an error value', () => {
+    const ce = new ComputeEngine();
+    const r = ce
+      .box([
+        'DeclareType',
+        'zz',
+        { str: '!zz' },
+        ['Dictionary', ['KeyValuePair', 'alias', 'True']],
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Error');
+    expect(r.toString()).toContain('alias-without-fixed-point');
+    expect(r.toString()).toContain('"zz"');
+  });
+
+  test('Epsil route: a direct self-negation is refused', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(ce, 'type alias a = !a');
+    expect(r.value.operator).toBe('Error');
+    expect(r.value.toString()).toContain('alias-without-fixed-point');
+  });
+
+  test('Epsil route: a cycle through a forward reference is refused', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(ce, 'type alias p = !(type q)\ntype alias q = p');
+    expect(r.value.operator).toBe('Error');
+    expect(r.value.toString()).toContain('alias-without-fixed-point');
+    expect(r.value.toString()).toContain('"q"');
+  });
+
+  test('Epsil route: a cycle under a constructor is accepted', () => {
+    const ce = new ComputeEngine();
+    const r = executeEpsil(
+      ce,
+      'type alias p = !(type q)\ntype alias q = list<p>'
+    );
+    expect(r.diagnostics.map((d) => d.message)).toEqual([]);
+    expect(r.value.operator).not.toBe('Error');
+  });
+});

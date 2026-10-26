@@ -242,6 +242,7 @@ import { parseType } from '../../common/type/parse.js';
 import { boundTypeSize } from '../../common/type/size-cap.js';
 import { internType, isInternedType } from '../../common/type/intern.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { declarationOf } from '../../common/type/reference.js';
 import {
   cannotHoldAList,
   couldMatch,
@@ -278,6 +279,7 @@ import {
   collectionElementType,
   resolveTypeAlias,
   unfoldAliasOnDescent,
+  recordUnfoldOnDescent,
   descendIntoConstructor,
   type AliasDescent,
   typeContainsMissing,
@@ -11573,11 +11575,14 @@ function lambdaCallTypeOverDescriptors(
     const curried = curriedSignature(sig, heads);
     if (curried !== undefined)
       return partialApplicationType(
+        engine,
         binding,
-        operands.map((d) => d.type),
-        curried
+        operands,
+        curried,
+        (h, a) => deriveApplicationType(engine, h, a)
       );
-    if (pointListParamSlots(def) !== undefined) return undefined;
+    const pointPlan = pointListParamSlots(def);
+    if (pointPlan !== undefined && def.inferredSignature) return undefined;
     // The signature result, as `declaredResultType()` in `type()` gives it
     // for a ground signature, and the result of a generic signature solved
     // against the operands.
@@ -11586,6 +11591,15 @@ function lambdaCallTypeOverDescriptors(
       resolver,
     });
     const sigResult = functionResult(sig) ?? 'unknown';
+    // A list of points at a parameter declared as a point, as on the
+    // value-definition route below.
+    if (pointPlan !== undefined)
+      return pointListApplicationType(
+        pointPlan,
+        operands.map(pointListOperandOfDescriptor),
+        instantiated ?? sigResult,
+        broadcastableParamSlots(def)
+      );
     const isScalarParam = declaredScalarParams(
       lambdaLiteralOf(def),
       def.inferredSignature ? undefined : sig
@@ -11638,12 +11652,12 @@ function lambdaCallTypeOverDescriptors(
   if (overloadArms(sig) !== undefined) return undefined;
   const curried = curriedSignature(sig, heads);
   if (curried !== undefined)
-    return partialApplicationType(
-      binding,
-      operands.map((d) => d.type),
-      curried
+    return partialApplicationType(engine, binding, operands, curried, (h, a) =>
+      deriveApplicationType(engine, h, a)
     );
-  if (pointListParamSlots(sig) !== undefined) return undefined;
+  const pointPlan = pointListParamSlots(sig);
+  if (pointPlan !== undefined && inferredPointSignature(binding) !== undefined)
+    return undefined;
   const valueSlots = broadcastableParamSlots(sig);
   const threadable = paramsAreScalar(sig) || valueSlots !== undefined;
   const solveContext: ArmInferenceContext = {
@@ -11657,6 +11671,20 @@ function lambdaCallTypeOverDescriptors(
     instantiatedResultTypeOverActuals(sig, actuals, solveContext) ??
     functionResult(sig) ??
     'unknown';
+  // A list of points at a parameter declared as a point: the call maps over
+  // the points, as on the expression route (`pointListApplicationType`).
+  // With `k` declared `(tuple<number, number>) -> number`, `k(P)` for a list
+  // of points `P` is a `list<number>`. Before, this route typed it as the
+  // signature result `number`. A signature that the engine
+  // inferred keeps the rules of `inferredPointCallType`
+  // (`call-result-type.ts`), which read the body.
+  if (pointPlan !== undefined)
+    return pointListApplicationType(
+      pointPlan,
+      operands.map(pointListOperandOfDescriptor),
+      sigResult,
+      valueSlots
+    );
   const inferredResult =
     binding.value.inferredType || isWildcardFunctionType(declaredType);
   const isScalarParam = declaredScalarParams(
@@ -12699,9 +12727,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         base === undefined ? undefined : curriedSignature(base, expr.ops);
       if (curried !== undefined)
         return partialApplicationType(
+          expr.engine,
           { operator: def },
-          expr.ops.map((x) => x.type.type),
-          curried
+          expr.ops.map((x) => describeOperand(x)),
+          curried,
+          (h, a) => deriveApplicationType(expr.engine, h, a)
         );
     }
 
@@ -12711,7 +12741,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       const plan = pointListParamSlots(def);
       let pointType = pointListApplicationType(
         plan,
-        expr.ops,
+        expr.ops.map(pointListOperandOf),
         sigResult,
         broadcastableParamSlots(def)
       );
@@ -12728,7 +12758,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
         if (element !== undefined)
           pointType = pointListApplicationType(
             plan,
-            expr.ops,
+            expr.ops.map(pointListOperandOf),
             element,
             broadcastableParamSlots(def)
           );
@@ -12897,9 +12927,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     const curried = curriedSignature(sig, expr.ops);
     if (curried !== undefined)
       return partialApplicationType(
+        expr.engine,
         { value: expr.valueDefinition },
-        expr.ops.map((x) => x.type.type),
-        curried
+        expr.ops.map((x) => describeOperand(x)),
+        curried,
+        (h, a) => deriveApplicationType(expr.engine, h, a)
       );
     // As on the operator-def route: a polytype arm is instantiated at the call
     // site so no open type escapes as the expression's `.type` (§4.2). The
@@ -12929,7 +12961,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     const plan = pointListParamSlots(sig);
     let pointType = pointListApplicationType(
       plan,
-      expr.ops,
+      expr.ops.map(pointListOperandOf),
       sigResult,
       valueSlots
     );
@@ -12946,7 +12978,7 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       if (element !== undefined)
         pointType = pointListApplicationType(
           plan,
-          expr.ops,
+          expr.ops.map(pointListOperandOf),
           element,
           valueSlots
         );
@@ -14879,38 +14911,90 @@ function mapsAsPointList(
   x: Expression,
   finite: boolean
 ): boolean {
+  if (!finite) return mapsAsPointListByType(plan, i, pointListOperandOf(x));
   const slot = plan.at(i);
   if (!slot.mappable || slot.elements === undefined) return false;
   if (isTuple(x)) return false;
-  if (finite && isFunction(x, 'List') && x.nops === 0) return true;
+  if (isFunction(x, 'List') && x.nops === 0) return true;
   // A collection whose length is not known yet (a lazy `Map` over
   // `Range(0, n)` with `n` unbound) is mapped too: the map is then lazy
   // (`lazyBroadcastMapIfNeeded` in `setupDeclaredBroadcast`), as for a
   // declared `broadcastable<tuple<…>>` parameter. Before, the call fell
   // through to the argument check, which refused the list (ROADMAP CE-413).
-  if (
-    finite &&
-    !isFiniteBroadcastParticipant(x) &&
-    !isUnknownLengthBroadcast(x)
-  )
+  if (!isFiniteBroadcastParticipant(x) && !isUnknownLengthBroadcast(x))
     return false;
   // A scalar slot (see `pointListParamSlots`) maps any list, as a function
   // whose parameters are all scalar does; each element is checked against
-  // the slot's type where it is bound. The typing (`finite` false) asks for
-  // a type that is surely a list: not a tuple and not a string. A string is
-  // not mapped on either branch.
-  if (!isPointParameterType(slot.elements)) {
-    const t = x.type.type;
-    if (isSubtype(t, 'string')) return false;
-    if (finite) return true;
-    return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) && !isTupleShapedType(t);
-  }
+  // the slot's type where it is bound. A string is not mapped.
+  if (!isPointParameterType(slot.elements))
+    return !isSubtype(x.type.type, 'string');
   // A tensor of points of rank 2 or more maps too, to the points at every
   // depth (`isPointTensorArgumentType`): each row is a list of points that
   // the map enters again (`mapsToCells`).
   return (
     isPointListArgumentType(x.type.type, slot.elements) ||
     isPointTensorArgumentType(x.type.type, slot.elements)
+  );
+}
+
+/**
+ * What the typing of the point-list map reads from an operand: its type,
+ * and whether it is a tuple (`isTuple`). The expression route reads them
+ * from the operand expression (`pointListOperandOf`), and the descriptor
+ * route from the operand descriptor (`viewOfDescriptor`), so that both
+ * routes type the map with the same functions (`pointListApplicationType`).
+ */
+interface PointListOperand {
+  readonly type: Type;
+  readonly tuple: boolean;
+}
+
+/** The {@link PointListOperand} of the operand expression `x`. Each fact is
+ * a getter, so that only the facts the typing asks for are computed. */
+function pointListOperandOf(x: Expression): PointListOperand {
+  return {
+    get type() {
+      return x.type.type;
+    },
+    get tuple() {
+      return isTuple(x);
+    },
+  };
+}
+
+/** The {@link PointListOperand} of the operand descriptor `d`. */
+function pointListOperandOfDescriptor(d: OperandDescriptor): PointListOperand {
+  return { type: d.type, tuple: viewOfDescriptor(d).tuple };
+}
+
+/**
+ * `mapsAsPointList` without `finite`, read from the type of the operand
+ * alone: the slot `i` of `plan` maps, `x` is not a tuple, and its type says
+ * that the map enters it. At a scalar slot, that is a type that is surely a
+ * list (not a tuple, not a string). At a point slot, that is a list of
+ * points or a tensor of points.
+ */
+function mapsAsPointListByType(
+  plan: BroadcastSlotPlan,
+  i: number,
+  x: PointListOperand
+): boolean {
+  const slot = plan.at(i);
+  if (!slot.mappable || slot.elements === undefined) return false;
+  if (x.tuple) return false;
+  const t = x.type;
+  // A scalar slot maps any list (see `mapsAsPointList`). The type alone
+  // must say that the operand is surely a list: not a tuple and not a
+  // string. A string is not mapped.
+  if (!isPointParameterType(slot.elements))
+    return (
+      !isSubtype(t, 'string') &&
+      isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+      !isTupleShapedType(t)
+    );
+  return (
+    isPointListArgumentType(t, slot.elements) ||
+    isPointTensorArgumentType(t, slot.elements)
   );
 }
 
@@ -14961,7 +15045,7 @@ function wholeBoundPointArgumentResult(
     if (!slot.mappable || slot.elements === undefined) return;
     if (isPointParameterType(slot.elements)) {
       if (
-        mapsAsPointOrPointList(plan, i, x) ||
+        mapsAsPointOrPointList(plan, i, pointListOperandOf(x)) ||
         mapsAsPointList(plan, i, x, false)
       )
         operandTypes[i] = slot.elements;
@@ -15010,7 +15094,7 @@ function wholeBoundPointArgumentResult(
  */
 function pointListApplicationType(
   plan: BroadcastSlotPlan | undefined,
-  ops: ReadonlyArray<Expression>,
+  ops: ReadonlyArray<PointListOperand>,
   result: Type,
   declared?: BroadcastSlotPlan
 ): Type | undefined {
@@ -15054,7 +15138,7 @@ function pointListApplicationType(
       // arm, and an operand that is absent as a whole
       // makes the call `Missing`.
       if (isDeepPointOperand(plan, i, x)) {
-        const t = x.type.type;
+        const t = x.type;
         const present = withoutTopLevelMissing(t);
         if (present !== t) deepWhole = true;
         // Each absent element is `Missing` at its own depth in the result:
@@ -15075,12 +15159,11 @@ function pointListApplicationType(
           shape,
           mapShapeUnion(['cell', { list: 'cell' }])
         );
-      else if (mapsAsPointList(plan, i, x, false))
+      else if (mapsAsPointListByType(plan, i, x))
         shape = combineMapShapes(shape, { list: 'cell' });
       return;
     }
-    if (!isTuple(x))
-      shape = combineMapShapes(shape, operandMapShape(x.type.type));
+    if (!x.tuple) shape = combineMapShapes(shape, operandMapShape(x.type));
   });
   if (shape === 'cell') return undefined;
   // A DECLARED `broadcastable<P>` slot whose `P` cannot hold a list (a
@@ -15099,12 +15182,12 @@ function pointListApplicationType(
       ? undefined
       : declaredPointAbsence(
           declared,
-          ops.map((x) => x.type.type),
-          (i) => plan.at(i).mappable || isTuple(ops[i])
+          ops.map((x) => x.type),
+          (i) => plan.at(i).mappable || ops[i].tuple
         );
   if (declared !== undefined)
     ops.forEach((x, i) => {
-      if (plan.at(i).mappable || isTuple(x)) return;
+      if (plan.at(i).mappable || x.tuple) return;
       const slot = declared.at(i);
       if (
         slot.mappable &&
@@ -15114,7 +15197,7 @@ function pointListApplicationType(
       )
         shape = combineMapShapes(
           shape,
-          operandMapShape(absence?.types[i] ?? x.type.type)
+          operandMapShape(absence?.types[i] ?? x.type)
         );
     });
   // The evaluation maps every slot one rank down, and binds each element
@@ -15131,8 +15214,8 @@ function pointListApplicationType(
     let surely = false;
     let maybe = false;
     ops.forEach((x, i) => {
-      if (isTuple(x) || !slotMapsOneRank(declared, i)) return;
-      const s = operandMapShape(x.type.type);
+      if (x.tuple || !slotMapsOneRank(declared, i)) return;
+      const s = operandMapShape(x.type);
       if (s === 'cell') return;
       if (typeof s !== 'string' && 'union' in s && s.union.includes('cell'))
         maybe = true;
@@ -15150,13 +15233,17 @@ function pointListApplicationType(
       slot.elements !== undefined &&
       isPointParameterType(slot.elements) &&
       !isDeepPointOperand(plan, i, x) &&
-      (mapsAsPointOrPointList(plan, i, x) || mapsAsPointList(plan, i, x, false))
+      (mapsAsPointOrPointList(plan, i, x) || mapsAsPointListByType(plan, i, x))
     );
   });
   const cellResult: Type = deepCell
     ? { kind: 'union', types: [result, 'missing'] }
     : result;
-  let mapType = mapShapeType(shape, cellResult, pointOps);
+  let mapType = mapShapeType(
+    shape,
+    cellResult,
+    pointOps.map((x) => x.type)
+  );
   if (deepDepths.size > 0) mapType = withMissingAtDepths(mapType, deepDepths);
   if (deepWhole) mapType = { kind: 'union', types: [mapType, 'missing'] };
   return absence === undefined
@@ -15174,14 +15261,14 @@ function pointListApplicationType(
 function isDeepPointOperand(
   plan: BroadcastSlotPlan,
   i: number,
-  x: Expression
+  x: PointListOperand
 ): boolean {
   const slot = plan.at(i);
   if (!slot.mappable || slot.elements === undefined) return false;
-  if (!isPointParameterType(slot.elements) || isTuple(x)) return false;
+  if (!isPointParameterType(slot.elements) || x.tuple) return false;
   return (
-    isPointTensorArgumentType(x.type.type, slot.elements) ||
-    isBroadcastablePointArgumentType(x.type.type, slot.elements)
+    isPointTensorArgumentType(x.type, slot.elements) ||
+    isBroadcastablePointArgumentType(x.type, slot.elements)
   );
 }
 
@@ -15244,11 +15331,33 @@ function combineMapShapes(a: MapShape, b: MapShape): MapShape {
  * top level, an element type that is not surely a list but can hold one
  * (`unknown`, `any`) gives `'cell'` or `'list'`: the map enters such an
  * element when its value is a list.
+ *
+ * A union arm that is a reference (alias or nominal) is unfolded under the
+ * descent guard `seen` (`recordUnfoldOnDescent`). A self-referential
+ * declaration (`type A = A | list<list<tuple<number, number>>>`) reaches
+ * itself through a bare arm at the same depth, and when that arm has spent
+ * its unfolds, it adds no value that the other arms do not hold, so the walk
+ * ignores it. The elements start a new descent: the depth limit already
+ * stops the walk through the list elements.
  */
-function operandMapShape(t: Type, depth = 0): MapShape {
+function operandMapShape(
+  t: Type,
+  depth = 0,
+  seen?: AliasDescent
+): MapShape {
   const r = resolveTypeReference(t) ?? t;
-  if (typeof r !== 'string' && r.kind === 'union')
-    return mapShapeUnion(r.types.map((arm) => operandMapShape(arm, depth)));
+  if (typeof r !== 'string' && r.kind === 'union') {
+    const shapes: MapShape[] = [];
+    for (const arm of r.types) {
+      let next = seen;
+      if (typeof arm === 'object' && arm.kind === 'reference') {
+        next = recordUnfoldOnDescent(declarationOf(arm), seen);
+        if (next === undefined) continue;
+      }
+      shapes.push(operandMapShape(arm, depth, next));
+    }
+    return shapes.length === 0 ? 'cell' : mapShapeUnion(shapes);
+  }
   if (typeof r !== 'string' && r.kind === 'broadcastable')
     return mapShapeUnion([operandMapShape(r.elements, depth), 'tensor']);
   const surelyList =
@@ -15312,7 +15421,7 @@ function mapShapeInnerType(shape: MapShape, result: Type): Type {
 function mapShapeType(
   shape: MapShape,
   result: Type,
-  pointOps: ReadonlyArray<Expression>
+  pointOps: ReadonlyArray<Type>
 ): Type {
   if (shape === 'cell') return result;
   if (shape === 'tensor')
@@ -15354,26 +15463,26 @@ function mapShapeType(
 function mapsAsPointOrPointList(
   plan: BroadcastSlotPlan,
   i: number,
-  x: Expression
+  x: PointListOperand
 ): boolean {
   const slot = plan.at(i);
   if (!slot.mappable || slot.elements === undefined) return false;
-  if (isTuple(x)) return false;
-  return isPointOrPointListArgumentType(x.type.type, slot.elements);
+  if (x.tuple) return false;
+  return isPointOrPointListArgumentType(x.type, slot.elements);
 }
 
 /** The type `list<R>` of the point-list map over the operands `mapped`, with
  * the absences they may carry (see `pointListApplicationType`). */
 function pointListMapType(
-  mapped: ReadonlyArray<Expression>,
+  mapped: ReadonlyArray<Type>,
   result: Type,
   unknownRank = false
 ): Type {
   let wholeAbsent = false;
   let cellAbsent = false;
   for (const x of mapped) {
-    const present = withoutTopLevelMissing(x.type.type);
-    if (present !== x.type.type) wholeAbsent = true;
+    const present = withoutTopLevelMissing(x);
+    if (present !== x) wholeAbsent = true;
     // A union that holds one point or a list of points
     // (`tuple<…> | list<missing | tuple<…>>`) is read arm by arm:
     // `collectionElementType` of the union is `undefined`, and the point arm
@@ -15546,7 +15655,8 @@ function holdsForValuelessPointList(
   return ops.some(
     (x, i) =>
       isValuelessCollectionSymbol(x) &&
-      (mapsAsPointList(plan, i, x, false) || isDeepPointOperand(plan, i, x))
+      (mapsAsPointList(plan, i, x, false) ||
+        isDeepPointOperand(plan, i, pointListOperandOf(x)))
   );
 }
 
@@ -16128,17 +16238,31 @@ function declaredPointAbsence(
  * add a `missing` arm back to the result of the map at each of these depths
  * (`withMissingAtDepths`): an absent element of the argument at a depth is a
  * `Missing` element of the result at the same depth.
+ *
+ * A reference (alias or nominal) is unfolded under the descent guard `seen`
+ * (`recordUnfoldOnDescent`). A self-referential declaration
+ * (`type A = A | list<list<tuple<number, number>>>`) reaches itself again,
+ * and when it has spent its unfolds on this path, the reference is kept
+ * unchanged. Without the guard, the walk did not stop.
  */
 function stripAbsentPoints(
   t: Type,
   point: Type,
   d: number,
-  depths: Set<number>
+  depths: Set<number>,
+  seen?: AliasDescent
 ): Type {
+  if (typeof t === 'object' && t.kind === 'reference') {
+    const next = recordUnfoldOnDescent(declarationOf(t), seen);
+    if (next === undefined) return t;
+    seen = next;
+  }
   const r = resolveTypeReference(t) ?? t;
   if (typeof r === 'string') return t;
   if (r.kind === 'union') {
-    const arms = r.types.map((a) => stripAbsentPoints(a, point, d, depths));
+    const arms = r.types.map((a) =>
+      stripAbsentPoints(a, point, d, depths, seen)
+    );
     return arms.every((a, k) => a === r.types[k])
       ? t
       : { kind: 'union', types: arms };
@@ -16155,7 +16279,7 @@ function stripAbsentPoints(
   elements =
     rank === undefined
       ? elements
-      : stripAbsentPoints(elements, point, at + 1, depths);
+      : stripAbsentPoints(elements, point, at + 1, depths, seen);
   return elements === r.elements ? t : { ...r, elements };
 }
 

@@ -35,6 +35,7 @@ import {
   isSymbol,
 } from '../compute-engine/boxed-expression/type-guards.js';
 import { readBeforeDeclarationSite } from '../compute-engine/boxed-expression/read-before-declaration.js';
+import { listedElement } from '../compute-engine/boxed-expression/listed-element.js';
 import {
   isOperatorDef,
   isValueDef,
@@ -533,7 +534,8 @@ function* executeEpsilSteps(
   // The failures (`failureKey()`) that the hook reported during the
   // evaluation of the current top-level statement. The value of the
   // statement can hold the same failure, which is then not reported again.
-  const nestedFailures = new Set<object>();
+  // Each failure maps to the diagnostic that reports it.
+  const nestedFailures = new Map<object, ParsingDiagnostic | undefined>();
   ce._epsilStatementResultHook = nestedStatementReporter(
     ce,
     statements,
@@ -621,6 +623,40 @@ function* executeEpsilSteps(
         // The driver evaluates the statement: `evaluate()` in
         // `executeEpsil`, `evaluateAsync()` in `executeEpsilAsync`.
         value = yield boxedStmt;
+        // The result of the program is a value: a finite comprehension is
+        // listed, as it is when it is an element of a list literal
+        // (`listedElement`, the same rules and the same budget of
+        // `ce.maxCollectionSize` elements). Without this, the result was the
+        // lazy `Comprehension` itself, which a host that reads `value.json`
+        // receives as the recipe, not the elements. An infinite comprehension,
+        // or one whose elements cannot be computed, stays as it is. Only the
+        // last statement is listed: the value of another statement is not
+        // returned.
+        //
+        // The nested-statement hook stays on while the listing evaluates the
+        // clauses and the body, so a failure in a body statement whose value
+        // is discarded is reported as a diagnostic. The problems of the last
+        // statement stay in its value and are not reported as diagnostics:
+        // a failure that the listed value holds (a failed cell of a clause
+        // domain, `[x for x in [1, g("a"), 3]]`) is removed from the
+        // diagnostics that the hook added during the listing.
+        if (i === statements.length - 1 && isFunction(value, 'Comprehension')) {
+          const reportedBefore = new Set(nestedFailures.keys());
+          value = listedElement(ce, value, {
+            used: 0,
+            max: ce.maxCollectionSize,
+          });
+          const listed = value;
+          const held = new Set<object>();
+          walkValue({ error: undefined }, () => {
+            for (const error of listed.errors) held.add(failureKey(error));
+          });
+          for (const [failure, diagnostic] of nestedFailures) {
+            if (reportedBefore.has(failure) || !held.has(failure)) continue;
+            const k = diagnostic ? diagnostics.indexOf(diagnostic) : -1;
+            if (k >= 0) diagnostics.splice(k, 1);
+          }
+        }
       } else value = ce.error(['variable-redeclaration', redeclared]);
       // An error value narrows the anchor to its breadcrumb's innermost
       // source-mapped frame, so a host that reports the error points at the
@@ -2069,15 +2105,16 @@ function isSameStatement(boxed: Expression, raw: MathJsonExpression): boolean {
  * The first report of a range is kept. Also once per failure
  * (`failureKey()`): a failed cell of a loop header is reported at the
  * header, and not again at a statement of the body that holds it. The
- * failures reported are added to `failures`, which the caller clears at
- * each top-level statement.
+ * failures reported are added to `failures`, with the diagnostic that
+ * reports each one, and the caller clears `failures` at each top-level
+ * statement.
  */
 function nestedStatementReporter(
   ce: ComputeEngine,
   statements: ReadonlyArray<MathJsonExpression>,
   defSites: ReturnType<typeof definitionSites>,
   diagnostics: ParsingDiagnostic[],
-  failures: Set<object>
+  failures: Map<object, ParsingDiagnostic | undefined>
 ): (statement: Expression, result: Expression) => void {
   const sites = nestedStatementSites(statements);
   const reported = new Set<string>();
@@ -2138,18 +2175,18 @@ function nestedStatementReporter(
         !failures.has(failureKey(errors[0])) &&
         !reportedAsReadBeforeDeclaration(errors[0], diagnostics)
       ) {
-        failures.add(failureKey(errors[0]));
-        diagnostics.push(
-          errorValueDiagnostic(
-            ce,
-            errors[0],
-            origin.stmt,
-            origin.range,
-            defSites,
-            undefined,
-            made?.statement ?? statement
-          )
+        failures.set(failureKey(errors[0]), undefined);
+        const diagnostic = errorValueDiagnostic(
+          ce,
+          errors[0],
+          origin.stmt,
+          origin.range,
+          defSites,
+          undefined,
+          made?.statement ?? statement
         );
+        failures.set(failureKey(errors[0]), diagnostic);
+        diagnostics.push(diagnostic);
       }
     } catch (e) {
       // A report is advisory: a failure while it is built must not become

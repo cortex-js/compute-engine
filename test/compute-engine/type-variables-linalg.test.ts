@@ -188,11 +188,12 @@ describe('Conjugate — (T) -> T where T: number', () => {
 });
 
 describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', () => {
-  test('a square integer matrix has rational entries; a non-square one declines', () => {
+  test('a square integer matrix has real entries; a non-square one declines', () => {
     const ce = fresh();
-    expect(ce.box(['Inverse', M22]).type.toString()).toBe(
-      'matrix<rational^(2x2)>'
-    );
+    // The entries of the value are rational, but the type `rational` is not
+    // claimed: a cell typed `integer` can be a float such as `2.0`, and the
+    // inverse of a matrix with such a cell has float entries.
+    expect(ce.box(['Inverse', M22]).type.toString()).toBe('matrix<real^(2x2)>');
     // A non-square matrix has no inverse (the value is an
     // `expected-square-matrix` error). The handler declines, so the declared
     // `matrix` applies, as for `MatrixPower` with a negative exponent.
@@ -210,20 +211,16 @@ describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', ()
   test('a declared matrix symbol is typed from its element type and shape', () => {
     const ce = fresh();
     ce.declare('MM', 'matrix<integer^(2x2)>');
-    expect(ce.box(['Inverse', 'MM']).type.toString()).toBe(
-      'matrix<rational^(2x2)>'
-    );
+    expect(ce.box(['Inverse', 'MM']).type.toString()).toBe('matrix<real^(2x2)>');
+    // The reciprocal of a subnormal real cell overflows to an infinity, and
+    // a product of complex floats can overflow: no cell tier is claimed.
     ce.declare('R', 'matrix<real^(3x3)>');
-    expect(ce.box(['Inverse', 'R']).type.toString()).toBe('matrix<real^(3x3)>');
+    expect(ce.box(['Inverse', 'R']).type.toString()).toBe('matrix<3x3>');
     ce.declare('Z', 'matrix<complex^(2x2)>');
-    expect(ce.box(['Inverse', 'Z']).type.toString()).toBe(
-      'matrix<complex^(2x2)>'
-    );
+    expect(ce.box(['Inverse', 'Z']).type.toString()).toBe('matrix<2x2>');
     // The `list` spelling of a square integer matrix.
     ce.declare('NN', 'matrix<integer^(2x2)>');
-    expect(ce.box(['Inverse', 'NN']).type.toString()).toBe(
-      'matrix<rational^(2x2)>'
-    );
+    expect(ce.box(['Inverse', 'NN']).type.toString()).toBe('matrix<real^(2x2)>');
   });
 
   test('an operand with no known shape keeps a shape-free matrix type', () => {
@@ -231,7 +228,7 @@ describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', ()
     ce.declare('P', 'matrix');
     expect(ce.box(['Inverse', 'P']).type.toString()).toBe('matrix');
     ce.declare('Q', 'matrix<integer>');
-    expect(ce.box(['Inverse', 'Q']).type.toString()).toBe('matrix<rational>');
+    expect(ce.box(['Inverse', 'Q']).type.toString()).toBe('matrix<real>');
   });
 
   test('m^-1 and m^-2 have the same element type', () => {
@@ -241,14 +238,16 @@ describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', ()
     const square = ce.parse('\\mathrm{MM}^{-2}');
     expect(inverse.operator).toBe('Inverse');
     expect(square.operator).toBe('MatrixPower');
-    expect(inverse.type.toString()).toBe('matrix<rational^(2x2)>');
+    expect(inverse.type.toString()).toBe('matrix<real^(2x2)>');
     expect(square.type.toString()).toBe(inverse.type.toString());
   });
 
-  test('nested application stays rational', () => {
+  test('nested application widens real cells to number', () => {
     const ce = fresh();
+    // The inner inverse has real cells, and the reciprocal of a subnormal
+    // real cell overflows to an infinity.
     expect(ce.box(['Inverse', ['Inverse', M22]]).type.toString()).toBe(
-      'matrix<rational^(2x2)>'
+      'matrix<2x2>'
     );
   });
 
@@ -322,24 +321,22 @@ describe('Inverse — (matrix) -> matrix, typed as a power with exponent -1', ()
     expect(viaParse.operator).toBe('Inverse');
     expect(viaParse2.operator).toBe('Inverse');
     for (const e of [viaFunction, viaBox, viaParse, viaParse2])
-      expect(e.type.toString()).toBe('matrix<rational^(2x2)>');
+      expect(e.type.toString()).toBe('matrix<real^(2x2)>');
   });
 
   test('route parity — a matrix literal on all three routes', () => {
     const ce = fresh();
     const m = ce.box(M22);
     expect(ce.function('Inverse', [m]).type.toString()).toBe(
-      'matrix<rational^(2x2)>'
+      'matrix<real^(2x2)>'
     );
-    expect(ce.box(['Inverse', M22]).type.toString()).toBe(
-      'matrix<rational^(2x2)>'
-    );
+    expect(ce.box(['Inverse', M22]).type.toString()).toBe('matrix<real^(2x2)>');
     expect(
       ce
         .parse(
           '\\operatorname{Inverse}(\\lbrack\\lbrack 1,2\\rbrack,\\lbrack 3,4\\rbrack\\rbrack)'
         )
         .type.toString()
-    ).toBe('matrix<rational^(2x2)>');
+    ).toBe('matrix<real^(2x2)>');
   });
 });

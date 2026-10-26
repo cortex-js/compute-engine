@@ -77,8 +77,8 @@
   `Text(p, "and", q)` was written `p\text{and}q`, which parses as `And(p, q)`.
   It is now written `p\text{{}and}q`, which prints the same and parses back as
   text.
-- **A type with no values is a subtype of `never` when it is not spelled
-  `never`.** `integer & never` was not a subtype of `never`, nor of itself, so
+- **An intersection with a `never` arm is a subtype of `never`.**
+  `integer & never` was not a subtype of `never`, nor of itself, so
   `ce.declareType('q', 'integer & never', { alias: true })` threw
   `signature "(integer & never) -> integer & never" does not match`.
 - **A product with a scalar factor of inferred or `unknown` type has `number`

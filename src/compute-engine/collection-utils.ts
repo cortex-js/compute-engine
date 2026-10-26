@@ -5833,13 +5833,48 @@ export function isPointParameterType(param: Type): boolean {
  * `list<missing | tuple<integer, integer>>`) conform. The map absorbs the
  * absence: an absent list makes the call `Missing`, and an absent point makes
  * that cell `Missing`.
+ *
+ * `seen` is the descent guard of the union arms (`recordUnfoldOnDescent`):
+ * the declarations this walk already unfolded on the current path.
  */
-export function isPointListArgumentType(arg: Type, param: Type): boolean {
+export function isPointListArgumentType(
+  arg: Type,
+  param: Type,
+  seen?: AliasDescent
+): boolean {
   if (!isPointParameterType(param)) return false;
   const stripped = stripMissingFromType(arg);
   const a = resolveTypeReference(stripped) ?? stripped;
   if (typeof a === 'string') return false;
   if (a.kind === 'tuple') return false;
+  // A union of lists of points (`list<P^1> | list<P^2>`, the type of an
+  // element of a ragged list of lists of points) is a list of points when
+  // each of its arms is one: the call maps over the points of the value,
+  // whichever arm it is in. Before, the union was refused, though each
+  // of its arms maps.
+  //
+  // An arm that is a reference (alias or nominal) is unfolded under the
+  // descent guard. A self-referential declaration such as
+  // `type A = A | list<tuple<number, number>>` reaches itself through a bare
+  // arm, because this walk never enters a constructor. When that arm has
+  // spent its unfolds, it adds no value that the other arms do not hold, so
+  // the walk ignores it. Without the guard, the walk did not stop.
+  if (a.kind === 'union') {
+    const arms: [Type, AliasDescent][] = [];
+    for (const x of a.types) {
+      if (x === 'missing') continue;
+      let next = seen;
+      if (typeof x === 'object' && x.kind === 'reference') {
+        next = recordUnfoldOnDescent(declarationOf(x), seen);
+        if (next === undefined) continue;
+      }
+      arms.push([x, next]);
+    }
+    return (
+      arms.length > 0 &&
+      arms.every(([x, next]) => isPointListArgumentType(x, param, next))
+    );
+  }
   if (!isSubtype(a, INDEXED_COLLECTION_SHAPE_TYPE)) return false;
   // A `broadcastable<T>` is read by its `T` (`pointCollectionElementType`).
   const element = pointCollectionElementType(a);
@@ -5896,14 +5931,36 @@ export function isBroadcastablePointArgumentType(
   return e !== 'never' && isSubtype(e, param);
 }
 
-function pointTensorOf(t: Type, param: Type, depth: number): boolean {
+function pointTensorOf(
+  t: Type,
+  param: Type,
+  depth: number,
+  seen?: AliasDescent
+): boolean {
   // A deep nesting of lists is read up to a fixed depth only.
   if (depth > 8) return false;
   const a = resolveTypeReference(t) ?? t;
   if (typeof a === 'string') return false;
+  // An arm that is a reference is unfolded under the descent guard, as in
+  // `isPointListArgumentType`: a self-referential declaration reaches itself
+  // through a bare arm at the same depth, and when that arm has spent its
+  // unfolds, the walk ignores it. The rows below start a new descent: the
+  // depth limit already stops the walk through the list elements.
   if (a.kind === 'union') {
-    const arms = a.types.filter((x) => x !== 'missing');
-    return arms.length > 0 && arms.every((x) => pointTensorOf(x, param, depth));
+    const arms: [Type, AliasDescent][] = [];
+    for (const x of a.types) {
+      if (x === 'missing') continue;
+      let next = seen;
+      if (typeof x === 'object' && x.kind === 'reference') {
+        next = recordUnfoldOnDescent(declarationOf(x), seen);
+        if (next === undefined) continue;
+      }
+      arms.push([x, next]);
+    }
+    return (
+      arms.length > 0 &&
+      arms.every(([x, next]) => pointTensorOf(x, param, depth, next))
+    );
   }
   if (a.kind !== 'list') return false;
   const dims = a.dimensions;

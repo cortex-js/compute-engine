@@ -20,6 +20,8 @@ import {
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
 import {
+  cannotHoldAList,
+  couldMatchNonEmpty,
   isSubtype,
   provablyDisjoint,
   widen,
@@ -28,8 +30,12 @@ import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   appliesToListCoordinateTuple,
   addsPointToNumberCollection,
+  isBroadcastablePointArgumentType,
   isPointArithmeticError,
+  isPointListArgumentType,
+  isPointOrPointListArgumentType,
   isPointParameterType,
+  isPointTensorArgumentType,
   isTupleShapedType,
   scalarOrListUnionCellType,
   typeCouldBeUnkeyedCollection,
@@ -37,6 +43,7 @@ import {
 import type { FunctionSignature, Type } from '../../common/type/types.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
+  collectionElementType,
   functionResult,
   hasResidueArm,
   resolveTypeAlias,
@@ -180,6 +187,15 @@ function signatureRefusesOperandType(
     if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
       return false;
     if (def.inferredSignature && isPointParameterType(param)) return false;
+    // A user function maps over a list of points at a point parameter
+    // (`pointListParamSlots`, `boxed-function.ts`), so such a list is not
+    // refused there (`operandTypeRefusedAt` reads the point lists).
+    if (
+      def.isUserFunctionDefinition &&
+      isPointParameterType(param) &&
+      !operandTypeRefusedAt(t, param)
+    )
+      return false;
     // A tuple at a scalar parameter is mapped over its components, at an
     // operator that does not broadcast too (a user definition).
     if (isTupleShapedType(t)) return false;
@@ -200,6 +216,139 @@ function signatureRefusesOperandType(
     if (isSubtype(t, 'number') && isSubtype(param, 'number')) return false;
     return provablyDisjoint(t, param);
   });
+}
+
+/**
+ * True when the DECLARED signature `sig` of a function symbol (a ground
+ * signature with one arm) refuses the type of an operand in `operands`. The
+ * boxed call checks each argument against a declared signature
+ * (`validateArguments`, `validate.ts`) and is typed `error` when the check
+ * refuses one. The value branch of `deriveApplicationType()` applies this
+ * test, so that the two routes give the same type: with `k` declared
+ * `(tuple<number, number>) -> number`, the boxed `k(3)` is `error`, and the
+ * derived `k(3)` was `number`.
+ *
+ * The test reads the operand types only, and it refuses an operand only
+ * when every value of its type is refused (`operandTypeRefusedAt`). A
+ * type that the boxed check admits for some values (a union with an arm
+ * that fits) is not refused, and the caller keeps its own type.
+ */
+function declaredSignatureRefusesOperand(
+  sig: Type,
+  operands: ReadonlyArray<OperandDescriptor>
+): boolean {
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
+  if (sig.typeParams !== undefined || freeTypeVariables(sig).size > 0)
+    return false;
+  return operands.some((d, i) => {
+    const param = paramAt(sig, i);
+    return param !== undefined && operandTypeRefusedAt(d.type, param);
+  });
+}
+
+/**
+ * True when every value of the type `t0` is refused at the parameter
+ * `param` of a declared signature, as the boxed call refuses it
+ * (`declaredSignatureRefusesOperand`):
+ *
+ * - `unknown`, `any`, `error` and `never` are not refused: the type does not
+ *   show the value.
+ * - An absent value (`missing`) is refused at a parameter that is not
+ *   numeric and does not admit it. At a numeric parameter it reads as
+ *   `NaN`. A type with a `missing` arm is read without that arm.
+ * - A number is not refused at a numeric parameter (`NaN` included): the
+ *   function answers for such a value.
+ * - At a point parameter (a tuple type), a list of points, a tensor of
+ *   points, and a point or a list of points are not refused: the call maps
+ *   over the points (`pointListParamSlots`, `boxed-function.ts`).
+ * - At a scalar parameter (a number, a boolean, a string), a tuple or a
+ *   collection is mapped over its components or its cells. It is refused
+ *   when each component, or the element type, is refused. Such an operand
+ *   is also refused when it is bound whole, since a tuple or a collection
+ *   is not a scalar.
+ * - A union is refused when each of its arms is refused, and an arm that is
+ *   a tuple or a collection at a scalar parameter is not refused: the boxed
+ *   check admits it.
+ * - Any other type is refused when it is provably disjoint from the
+ *   parameter.
+ */
+function operandTypeRefusedAt(t0: Type, param: Type): boolean {
+  if (t0 === 'unknown' || t0 === 'any' || t0 === 'error' || t0 === 'never')
+    return false;
+  if (t0 === 'missing')
+    return !isSubtype(param, 'number') && provablyDisjoint('missing', param);
+  const scalarParam =
+    !isPointParameterType(param) &&
+    (isSubtype(param, 'number') ||
+      isSubtype(param, 'boolean') ||
+      isSubtype(param, 'string'));
+  const isCompound = (x: Type): boolean =>
+    isTupleShapedType(x) ||
+    (typeCouldBeUnkeyedCollection(x) && !isSubtype(x, 'string'));
+  // The arms of a union are read before the `missing` arm is removed, so
+  // that `tuple<integer, integer> | missing` at a `string` parameter keeps
+  // its tuple arm, which the boxed check admits.
+  const u = resolveTypeAlias(t0);
+  if (typeof u === 'object' && u.kind === 'union')
+    return u.types.every(
+      (arm) =>
+        !(scalarParam && isCompound(arm)) && operandTypeRefusedAt(arm, param)
+    );
+  const t = resolveTypeAlias(stripMissingFromType(u));
+  if (t === 'never') return false;
+  if (isSubtype(t, 'number') && isSubtype(param, 'number')) return false;
+  if (isPointParameterType(param)) {
+    if (
+      isPointListArgumentType(t, param) ||
+      isPointTensorArgumentType(t, param) ||
+      isBroadcastablePointArgumentType(t, param) ||
+      isPointOrPointListArgumentType(t, param)
+    )
+      return false;
+    return provablyDisjoint(t, param);
+  }
+  if (scalarParam) {
+    if (typeof t === 'object' && t.kind === 'tuple')
+      return (
+        t.elements.length > 0 &&
+        t.elements.every((e) => operandTypeRefusedAt(e.type, param))
+      );
+    if (isCompound(t)) {
+      const element = collectionElementType(t);
+      return element !== undefined && operandTypeRefusedAt(element, param);
+    }
+  }
+  // A list whose shape proves that it is not empty, at a collection
+  // parameter, is refused when no value that is not empty fits both types
+  // (`couldMatchNonEmpty`). The two types can share only the empty list,
+  // which such a list is not, so `provablyDisjoint` below does not refuse
+  // it. With `g` declared `(list<integer>) -> integer`, the boxed
+  // `g([[1, 2], [3, 4]])` is `error`, since a matrix is a list of rows, not
+  // a list of integers, and the derived call with a
+  // `matrix<integer^(2x2)>` operand was `integer`.
+  if (
+    isSubtype(param, COLLECTION_SHAPE_TYPE) &&
+    isProvablyNonEmptyListType(t) &&
+    !couldMatchNonEmpty(t, param)
+  )
+    return true;
+  // A tuple or a collection at a parameter that cannot hold one (a
+  // function type) may be mapped, and the type does not say how.
+  if (cannotHoldAList(param) && isCompound(t)) return false;
+  return provablyDisjoint(t, param);
+}
+
+/** True when `t` is a list type with a shape whose every axis has a length
+ * greater than 0 (`matrix<integer^(2x2)>`, `vector<real^3>`): each of its
+ * values has at least one element. */
+function isProvablyNonEmptyListType(t: Type): boolean {
+  return (
+    typeof t === 'object' &&
+    t.kind === 'list' &&
+    Array.isArray(t.dimensions) &&
+    t.dimensions.length > 0 &&
+    t.dimensions.every((d) => d > 0)
+  );
 }
 
 let broadcastLiftHooks: BroadcastLiftHooks | undefined;
@@ -475,7 +624,17 @@ export function deriveApplicationType(
       const lt = literal === undefined ? undefined : literal.type.type;
       if (typeof lt !== 'object' || lt.kind !== 'signature') return undefined;
       ft = lt;
-    }
+    } else if (
+      engine.strict &&
+      !binding.value.inferredType &&
+      declaredSignatureRefusesOperand(ft, operands)
+    )
+      // A declared signature is a contract: the boxed call checks each
+      // argument against it and is typed `error` when it refuses one
+      // (`declaredSignatureRefusesOperand`). A signature that the engine
+      // inferred is not a contract, and keeps the rules of
+      // `inferredCallSignature()` (`call-result-type.ts`).
+      return 'error';
     // A call of a function literal over a collection operand maps the
     // literal over the collection, and is typed as the expression route
     // types it, before the derivation from the body: that derivation binds

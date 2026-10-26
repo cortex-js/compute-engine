@@ -420,6 +420,7 @@ interface PureEngineViewMirror {
   type(type: Type | TypeString | BoxedType): BoxedType;
   readonly _typeResolver: import('../common/type/types.js').TypeResolver;
   readonly tolerance: number;
+  readonly strict: boolean;
   readonly _protocolRegistry: Readonly<Record<string, object>>;
   lookupDefinition(id: string):
     | {

@@ -5,6 +5,7 @@ import { isTensor } from '../../src/compute-engine/boxed-expression/type-guards'
 import { packTensor } from '../../src/compute-engine/boxed-expression/tensor-view';
 import { makeTensor } from '../../src/compute-engine/tensor/tensors';
 import { getSupertype } from '../../src/compute-engine/tensor/tensor-fields';
+import { isSubtype } from '../../src/common/type/subtype';
 
 const v2_n: Expression = ['List', 7, 11];
 
@@ -1319,18 +1320,19 @@ describe('Inverse', () => {
   });
 
   // The static type of `Inverse` is the type of the power with exponent -1:
-  // an integer matrix has an inverse with rational entries, and a
-  // non-square matrix (which has no inverse) keeps the declared `matrix`.
+  // an integer matrix has an inverse with real entries (not `rational`: a
+  // cell typed `integer` can be a float such as `2.0`), and a non-square
+  // matrix (which has no inverse) keeps the declared `matrix`.
   it('is typed with the entries and shape of the inverse', () => {
     const A: Expression = ['List', ['List', 2, 1], ['List', 1, 3]];
-    expect(ce.expr(['Inverse', A]).type.toString()).toBe(
-      'matrix<rational^(2x2)>'
-    );
+    expect(ce.expr(['Inverse', A]).type.toString()).toBe('matrix<real^(2x2)>');
     expect(ce.expr(['Inverse', A]).type.toString()).toBe(
       ce.expr(['MatrixPower', A, -1]).type.toString()
     );
+    // A real cell can be subnormal, and its reciprocal overflows to an
+    // infinity: no cell tier is claimed.
     const F: Expression = ['List', ['List', 0.5, 1], ['List', 1, 3]];
-    expect(ce.expr(['Inverse', F]).type.toString()).toBe('matrix<real^(2x2)>');
+    expect(ce.expr(['Inverse', F]).type.toString()).toBe('matrix<2x2>');
     const N: Expression = ['List', ['List', 1, 2, 3], ['List', 4, 5, 6]];
     expect(ce.expr(['Inverse', N]).type.toString()).toBe('matrix');
     expect(ce.expr(['Inverse', N]).evaluate().toString()).toBe(
@@ -2739,6 +2741,227 @@ describe('Matrix Decompositions (LA-7)', () => {
     });
   });
 
+  describe('exact decompositions of exact matrices', () => {
+    // `evaluate()` of a matrix of exact rational entries gives exact cells;
+    // `.N()` and a float entry give floats (the exactness contract).
+    const mul = (a: unknown, b: unknown) =>
+      ce.box(['MatrixMultiply', a, b] as Expression).evaluate();
+    const tr = (a: unknown) =>
+      ce.box(['Transpose', a] as Expression).evaluate();
+    const cells = (x: unknown): number[] => {
+      const e = x as {
+        operator: string;
+        ops: unknown[];
+        N(): { re: number };
+      };
+      return e.operator === 'List' || e.operator === 'Tuple'
+        ? e.ops.flatMap(cells)
+        : [e.N().re];
+    };
+    const closeTo = (a: unknown, b: unknown) => {
+      const p = cells(a);
+      const q = cells(b);
+      expect(p.length).toBe(q.length);
+      p.forEach((x, i) => expect(x).toBeCloseTo(q[i], 9));
+    };
+    const isExactCell = (x: unknown): boolean => {
+      const e = x as { operator: string; ops: unknown[]; isExact?: boolean };
+      if (e.operator === 'List' || e.operator === 'Tuple')
+        return e.ops.every(isExactCell);
+      // A cell that is a number literal is exact; a radical cell (`√2`,
+      // `3/5·√5`) is a function application of exact numbers
+      return e.isExact !== false;
+    };
+
+    it('LU: rational cells, PA = LU, same P as .N()', () => {
+      const A: Expression = ['List', ['List', 4, 3], ['List', 6, 3]];
+      const e = ce.box(['LUDecomposition', A]);
+      const r = e.evaluate();
+      expect(r.toString()).toBe(
+        '([[0,1],[1,0]], [[1,0],[2/3,1]], [[6,3],[0,1]])'
+      );
+      const [P, L, U] = r.ops!;
+      expect(mul(P, ce.box(A)).isSame(mul(L, U))).toBe(true);
+      const n = e.N();
+      expect(n.ops![0].isSame(P)).toBe(true);
+      expect(n.ops![1].ops![1].ops![0].isExact).toBe(false);
+      closeTo(r, n);
+    });
+
+    it('LU of a 3×3 matrix with a row exchange', () => {
+      const A: Expression = [
+        'List',
+        ['List', 2, 1, 1],
+        ['List', 4, 3, 3],
+        ['List', 8, 7, 9],
+      ];
+      const e = ce.box(['LUDecomposition', A]);
+      const r = e.evaluate();
+      const [P, L, U] = r.ops!;
+      expect(isExactCell(r)).toBe(true);
+      expect(mul(P, ce.box(A)).isSame(mul(L, U))).toBe(true);
+      expect(e.N().ops![0].isSame(P)).toBe(true);
+      closeTo(r, e.N());
+    });
+
+    it('QR: positive diagonal of R on both routes', () => {
+      const A: Expression = ['List', ['List', 3, 4], ['List', 4, 3]];
+      const e = ce.box(['QRDecomposition', A]);
+      const r = e.evaluate();
+      expect(r.toString()).toBe('([[3/5,4/5],[4/5,-3/5]], [[5,24/5],[0,7/5]])');
+      const [Q, R] = r.ops!;
+      expect(mul(Q, R).isSame(ce.box(A))).toBe(true);
+      const n = e.N();
+      expect(n.ops![1].ops![0].ops![0].re).toBeCloseTo(5, 12);
+      expect(n.ops![1].ops![1].ops![1].re).toBeGreaterThan(0);
+      closeTo(r, n);
+      // A float entry uses machine precision, with the same signs
+      const f = ce
+        .box(['QRDecomposition', ['List', ['List', 3.5, 4], ['List', 4, 3]]])
+        .evaluate();
+      expect(f.ops![1].ops![0].ops![0].re).toBeGreaterThan(0);
+      expect(f.ops![1].ops![1].ops![1].re).toBeGreaterThan(0);
+    });
+
+    it('QR of a 3×3 matrix: exact radicals, QR = A, QᵀQ = I', () => {
+      const A: Expression = [
+        'List',
+        ['List', 2, 1, 1],
+        ['List', 4, 3, 3],
+        ['List', 8, 7, 9],
+      ];
+      const e = ce.box(['QRDecomposition', A]);
+      const r = e.evaluate();
+      expect(isExactCell(r)).toBe(true);
+      const [Q, R] = r.ops!;
+      expect(R.ops![0].ops![0].toString()).toBe('2sqrt(21)');
+      expect(mul(Q, R).isSame(ce.box(A))).toBe(true);
+      expect(
+        mul(tr(Q), Q).isSame(ce.box(['IdentityMatrix', 3]).evaluate())
+      ).toBe(true);
+      closeTo(r, e.N());
+    });
+
+    it('QR of a 3×2 matrix completes Q to an orthogonal 3×3 matrix', () => {
+      const A: Expression = [
+        'List',
+        ['List', 1, 2],
+        ['List', 3, 4],
+        ['List', 5, 6],
+      ];
+      const r = ce.box(['QRDecomposition', A]).evaluate();
+      const [Q, R] = r.ops!;
+      expect(mul(Q, R).isSame(ce.box(A))).toBe(true);
+      expect(
+        mul(tr(Q), Q).isSame(ce.box(['IdentityMatrix', 3]).evaluate())
+      ).toBe(true);
+      expect(R.toString()).toBe(
+        '[[sqrt(35),44/35sqrt(35)],[0,2/35sqrt(210)],[0,0]]'
+      );
+    });
+
+    it('QR of a matrix of rank 1 has a zero diagonal entry in R', () => {
+      const A: Expression = ['List', ['List', 1, 2], ['List', 2, 4]];
+      const r = ce.box(['QRDecomposition', A]).evaluate();
+      const [Q, R] = r.ops!;
+      expect(R.toString()).toBe('[[sqrt(5),2sqrt(5)],[0,0]]');
+      expect(mul(Q, R).isSame(ce.box(A))).toBe(true);
+      expect(
+        mul(tr(Q), Q).isSame(ce.box(['IdentityMatrix', 2]).evaluate())
+      ).toBe(true);
+    });
+
+    it('Cholesky: exact radicals, L·Lᵀ = A', () => {
+      const A: Expression = ['List', ['List', 4, 2], ['List', 2, 3]];
+      const e = ce.box(['CholeskyDecomposition', A]);
+      const r = e.evaluate();
+      expect(r.toString()).toBe('[[2,0],[1,sqrt(2)]]');
+      expect(mul(r, tr(r)).isSame(ce.box(A))).toBe(true);
+      const n = e.N();
+      expect(n.ops![0].ops![0].isExact).toBe(false);
+      closeTo(r, n);
+
+      const B: Expression = [
+        'List',
+        ['List', ['Rational', 1, 2], 1],
+        ['List', 1, 3],
+      ];
+      const b = ce.box(['CholeskyDecomposition', B]).evaluate();
+      expect(b.toString()).toBe('[[sqrt(2)/2,0],[sqrt(2),1]]');
+      expect(mul(b, tr(b)).isSame(ce.box(B))).toBe(true);
+    });
+
+    it('Cholesky: a matrix that is not positive definite is an error on both routes', () => {
+      const A: Expression = ['List', ['List', 1, 2], ['List', 2, 1]];
+      const e = ce.box(['CholeskyDecomposition', A]);
+      expect(e.evaluate().toString()).toContain(
+        'expected-positive-definite-matrix'
+      );
+      expect(e.N().toString()).toContain('expected-positive-definite-matrix');
+      // A zero pivot before the last one is an error, as on the float route
+      const Z: Expression = ['List', ['List', 0, 0], ['List', 0, 1]];
+      expect(
+        ce.box(['CholeskyDecomposition', Z]).evaluate().toString()
+      ).toContain('expected-positive-definite-matrix');
+    });
+
+    it('Cholesky: a matrix that is not symmetric is an error on both routes', () => {
+      // Only the lower triangle is read, so without the check the result of
+      // [[4, 0], [2, 3]] was an L with L·Lᵀ = [[4, 2], [2, 3]].
+      for (const A of [
+        ['List', ['List', 4, 0], ['List', 2, 3]],
+        ['List', ['List', 4, 2], ['List', 0, 3]],
+        ['List', ['List', { num: '4.0' }, 2], ['List', 0, 3]],
+      ] as Expression[]) {
+        const e = ce.box(['CholeskyDecomposition', A]);
+        expect(e.evaluate().toString()).toContain('expected-symmetric-matrix');
+        expect(e.N().toString()).toContain('expected-symmetric-matrix');
+      }
+      // A float matrix that is symmetric within rounding is accepted.
+      const F: Expression = [
+        'List',
+        ['List', 4, 0.1 + 0.2],
+        ['List', 0.3, 5],
+      ];
+      expect(
+        ce.box(['CholeskyDecomposition', F]).N().toString()
+      ).not.toContain('Error');
+    });
+
+    it('an exact entry that is not rational stays unevaluated under evaluate()', () => {
+      const A: Expression = ['List', ['List', ['Sqrt', 2], 1], ['List', 1, 3]];
+      for (const op of [
+        'LUDecomposition',
+        'QRDecomposition',
+        'CholeskyDecomposition',
+      ]) {
+        const e = ce.box([op, A]);
+        expect(e.evaluate().operator).toBe(op);
+        expect(e.N().operator).not.toBe(op);
+      }
+    });
+
+    it('the parse route gives the same exact result', () => {
+      expect(
+        ce
+          .parse(
+            '\\operatorname{CholeskyDecomposition}(\\begin{pmatrix}4&2\\\\2&3\\end{pmatrix})'
+          )
+          .evaluate()
+          .toString()
+      ).toBe('[[2,0],[1,sqrt(2)]]');
+      const qr = ce.parse(
+        '\\operatorname{QRDecomposition}(\\begin{pmatrix}3&4\\\\4&3\\end{pmatrix})'
+      );
+      expect(qr.type.toString()).toBe(
+        'tuple<matrix<real^(2x2)>, matrix<real^(2x2)>>'
+      );
+      expect(qr.evaluate().toString()).toBe(
+        '([[3/5,4/5],[4/5,-3/5]], [[5,24/5],[0,7/5]])'
+      );
+    });
+  });
+
   describe('SVD (Singular Value Decomposition)', () => {
     // The decomposition is computed in machine precision, so a matrix of
     // exact entries is decomposed only under `.N()`; `evaluate()` keeps it
@@ -3466,16 +3689,20 @@ describe('MatrixPower', () => {
       ['matrix<integer^(2x2)>', 2, 'matrix<integer^(2x2)>'],
       // The identity matrix has integer entries.
       ['matrix<integer^(2x2)>', 0, 'matrix<integer^(2x2)>'],
-      // A negative power is an inverse: rational entries.
-      ['matrix<integer^(2x2)>', -2, 'matrix<rational^(2x2)>'],
+      // A negative power is an inverse: real entries. The type `rational` is
+      // not claimed: a cell typed `integer` can be a float (`2.0`).
+      ['matrix<integer^(2x2)>', -2, 'matrix<real^(2x2)>'],
       // An integer exponent of unknown sign can be negative.
-      ['matrix<integer^(2x2)>', 'n', 'matrix<rational^(2x2)>'],
+      ['matrix<integer^(2x2)>', 'n', 'matrix<real^(2x2)>'],
       // A half-integer power is a matrix square root: no element tier.
       ['matrix<integer^(2x2)>', ['Rational', 1, 2], 'matrix<2x2>'],
       ['matrix<real^(3x3)>', 3, 'matrix<real^(3x3)>'],
-      ['matrix<real^(3x3)>', -1, 'matrix<real^(3x3)>'],
-      ['matrix<rational^(2x2)>', -3, 'matrix<rational^(2x2)>'],
-      ['matrix<complex^(2x2)>', 2, 'matrix<complex^(2x2)>'],
+      // The reciprocal of a subnormal real cell overflows to an infinity.
+      ['matrix<real^(3x3)>', -1, 'matrix<3x3>'],
+      ['matrix<rational^(2x2)>', -3, 'matrix<real^(2x2)>'],
+      ['matrix<rational^(2x2)>', 2, 'matrix<real^(2x2)>'],
+      // A product of complex floats can overflow.
+      ['matrix<complex^(2x2)>', 2, 'matrix<2x2>'],
       // The `tensor` spelling of a 2×2 matrix types as the `matrix` one.
       ['tensor<integer^(2x2)>', 2, 'matrix<integer^(2x2)>'],
       // The shape is unknown: the element type is kept.
@@ -3493,15 +3720,15 @@ describe('MatrixPower', () => {
       );
     });
 
-    it('agrees with the type of the evaluated power', () => {
+    it('holds the type of the evaluated power', () => {
       const engine = new ComputeEngine();
       for (const k of [2, 0, -2]) {
         const e = engine.box(['MatrixPower', m, k]);
-        expect(e.type.toString()).toBe(e.evaluate().type.toString());
+        expect(isSubtype(e.evaluate().type.type, e.type.type)).toBe(true);
       }
       // The value: [[7,10],[15,22]], [[1,0],[0,1]], [[11/2,-5/2],[-15/4,7/4]].
       expect(engine.box(['MatrixPower', m, -2]).type.toString()).toBe(
-        'matrix<rational^(2x2)>'
+        'matrix<real^(2x2)>'
       );
     });
 
@@ -4697,7 +4924,9 @@ describe('Norm order 1 and order ∞ of exact entries outside the float64 range'
 describe('Float kernels decline an entry a float64 cannot hold', () => {
   // The exact `10^400` reads as +Infinity and a nonzero `10^-400` reads as 0
   // in a machine matrix: the LU, QR and eigenvalue kernels would return NaN
-  // or a wrong answer. The application stays unevaluated instead.
+  // or a wrong answer. Under `.N()` the application stays unevaluated
+  // instead. Under `evaluate()`, LU and QR use exact arithmetic, which holds
+  // such an entry.
   const eng = new ComputeEngine();
   const m2 = (x: Expression): Expression => [
     'List',
@@ -4710,7 +4939,8 @@ describe('Float kernels decline an entry a float64 cannot hold', () => {
       ['Power', 10, -400],
     ] as Expression[]) {
       it(`${op} of ${JSON.stringify(x)}`, () => {
-        expect(eng.box([op, m2(x)]).evaluate().operator).toBe(op);
+        expect(eng.box([op, m2(x)]).N().operator).toBe(op);
+        expect(eng.box([op, m2(x)]).evaluate().operator).toBe('Tuple');
       });
     }
   }

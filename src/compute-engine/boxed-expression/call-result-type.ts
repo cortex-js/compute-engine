@@ -16,6 +16,8 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
+import { isPureComputedEffects } from '../../common/type/effects.js';
+import { effectsOf } from './effects-of.js';
 import {
   collectionElementType,
   isWildcardFunctionType,
@@ -254,7 +256,16 @@ export function callResultType(
     );
     if (t !== undefined) return t;
   }
-  if (isScalarResult(declared)) return undefined;
+  // The result of an inferred signature describes only the arguments that
+  // fit its parameters (`argumentOutsideInferredSignature`), so it does not
+  // bound the type derived from the body for another argument. That type
+  // replaces the scalar result only when the result does not hold it.
+  let scalar: Type | undefined;
+  if (isScalarResult(declared)) {
+    if (!argumentOutsideInferredSignature(binding, args)) return undefined;
+    scalar = declared;
+    declared = 'any';
+  }
   const literal = userFunctionLiteral(binding);
   if (
     !literal ||
@@ -262,7 +273,7 @@ export function callResultType(
       !bindsArgumentsWhole(binding, literal))
   )
     return undefined;
-  return literalBodyResultType(
+  const t = literalBodyResultType(
     engine,
     literal,
     args,
@@ -270,6 +281,20 @@ export function callResultType(
     derive,
     declaredParameterTypes(binding)
   );
+  return scalar === undefined ? t : outsideScalarResult(t, scalar);
+}
+
+/**
+ * `t`, the type of a call derived from the body, when the scalar result
+ * `scalar` of the signature does not hold it, and `undefined` (the caller
+ * keeps `scalar`) when it does, or when `t` gives no type.
+ */
+function outsideScalarResult(
+  t: Type | undefined,
+  scalar: Type
+): Type | undefined {
+  if (t === undefined || t === 'unknown' || t === 'any') return undefined;
+  return isSubtype(t, scalar) ? undefined : t;
 }
 
 /** For each signature type: does it have a point parameter (a tuple)? */
@@ -319,14 +344,29 @@ export function inferredPointSignature(
  * known and the type is `list<any>`. An argument that may be a point or a
  * list of points gives `curried | list<curried>`. A DECLARED signature is a
  * contract and `curried` is returned unchanged.
+ *
+ * When the signature was INFERRED and the call does not map, the type is
+ * `error` when the body, typed with the given arguments, is `error`
+ * (`partialBodyIsError`). The evaluation of a partial application
+ * evaluates the body with the given arguments before it curries, and its
+ * value is then that error: with `h(a, t) := a[1] + a[2] + t`, `h("ab")`
+ * evaluates `"a" + "b" + t`, an `incompatible-type` error.
+ * `operands` are the descriptors of the arguments, and `derive` types an
+ * application in the body.
  */
 export function partialApplicationType(
+  engine: IComputeEngine,
   binding: BoxedDefinition | undefined,
-  types: ReadonlyArray<Type>,
-  curried: Type
+  operands: readonly OperandDescriptor[],
+  curried: Type,
+  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
 ): Type {
+  const types = operands.map((d) => d.type);
   const sig = inferredPointSignature(binding);
-  if (typeof sig !== 'object' || sig.kind !== 'signature') return curried;
+  if (typeof sig !== 'object' || sig.kind !== 'signature')
+    return partialBodyIsError(engine, binding, operands, derive)
+      ? 'error'
+      : curried;
   const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])].map(
     (x) => x.type
   );
@@ -346,7 +386,54 @@ export function partialApplicationType(
     }
   }
   if (maps) return { kind: 'list', elements: curried };
-  return maybe ? widen(curried, { kind: 'list', elements: curried }) : curried;
+  if (maybe) return widen(curried, { kind: 'list', elements: curried });
+  return partialBodyIsError(engine, binding, operands, derive)
+    ? 'error'
+    : curried;
+}
+
+/**
+ * True when the function that `binding` holds has a signature that the
+ * engine INFERRED (`inferredCallSignature`), and its body, typed with the
+ * first parameters typed as the arguments `operands` and each other
+ * parameter typed as its parameter type, is `error`.
+ *
+ * The evaluation of a partial application of a function literal with a
+ * pure body evaluates the body with the given arguments, and gives the
+ * value of the body when it is an error (`apply` in `function-utils.ts`).
+ * A body with an effect is not evaluated then: the value is a function,
+ * and this function is false for it. A declared signature is a contract,
+ * and this function is false for it too: the partial application is typed
+ * as the function of the other parameters.
+ */
+function partialBodyIsError(
+  engine: IComputeEngine,
+  binding: BoxedDefinition | undefined,
+  operands: readonly OperandDescriptor[],
+  derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
+): boolean {
+  const sig = inferredCallSignature(binding);
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
+  const literal = userFunctionLiteral(binding);
+  if (literal === undefined) return false;
+  if (!isPureComputedEffects(effectsOf(literal.op1))) return false;
+  const params = sig.args ?? [];
+  if (operands.length >= params.length) return false;
+  const args = [
+    ...operands,
+    ...params.slice(operands.length).map((p) => describeType(p.type)),
+  ];
+  return (
+    literalBodyResultType(
+      engine,
+      literal,
+      args,
+      'any',
+      derive,
+      declaredParameterTypes(binding),
+      operands.length
+    ) === 'error'
+  );
 }
 
 /**
@@ -593,6 +680,60 @@ export function inferredCallSignature(
   return literal.type.type;
 }
 
+/**
+ * True when the signature of the function that `binding` holds was
+ * INFERRED (`inferredCallSignature`), and the type of an argument in `args`
+ * is outside the type of its parameter there, with a parameter that is not
+ * a scalar (a collection or a point), so that the argument is bound whole.
+ *
+ * The engine infers a parameter type from the uses of the parameter in the
+ * body, and the inferred result is the result for such arguments only. An
+ * argument outside the parameter type can give another value. With `k`
+ * declared `(tuple<number, number>) -> number` and `U(L) := k(First(L))`,
+ * the inferred signature of `U` is
+ * `(L: indexed_collection<tuple<number, number>>) -> number`. With the
+ * argument `[[(1, 2), (3, 4)]]`, `First(L)` is a list of points, the call of
+ * `k` maps over it, and the value of `U([[(1, 2), (3, 4)]])` is `[3, 7]`,
+ * which the inferred result `number` does not hold. A
+ * caller then types the call from the body.
+ *
+ * An argument typed `unknown`, `any` or `error` shows nothing, and a
+ * scalar parameter maps over a collection argument, which the broadcast
+ * rules type: neither is read here.
+ */
+function argumentOutsideInferredSignature(
+  binding: BoxedDefinition | undefined,
+  args: readonly OperandDescriptor[]
+): boolean {
+  const sig = inferredCallSignature(binding);
+  if (
+    typeof sig !== 'object' ||
+    sig.kind !== 'signature' ||
+    sig.typeParams !== undefined ||
+    signatureParamsAreScalar(sig)
+  )
+    return false;
+  const params = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
+  return args.some((d, i) => {
+    const param = params[i]?.type;
+    if (param === undefined) return false;
+    const t = presentPart(d.type);
+    if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
+      return false;
+    return !isScalarParameter(param) && !isSubtype(t, param);
+  });
+}
+
+/** True when a call maps over a collection argument at a parameter of type
+ * `t` (`signatureParamsAreScalar`, read for one parameter). */
+function isScalarParameter(t: Type): boolean {
+  return signatureParamsAreScalar({
+    kind: 'signature',
+    args: [{ type: t }],
+    result: 'any',
+  });
+}
+
 /** Scalar declarations already describe their result's representation. This
  * analysis refines collection alternatives, not numeric domains. */
 function isScalarResult(declared: Type): boolean {
@@ -622,11 +763,15 @@ function isScalarResult(declared: Type): boolean {
  * reals, a `list<number>` (Tycho ledger row 426).
  *
  * `undefined` (the caller keeps `declared`) when `fn` is not a canonical
- * function literal, when its result is a scalar, when the signature is
- * generic (its instantiation types the call), when the literal maps over a
- * collection argument (its parameters are scalars: the mapping types the
- * call), and when an argument does not fit the type of its parameter, the
- * contract of the literal.
+ * function literal, when the signature is generic (its instantiation types
+ * the call), when the literal maps over a collection argument (its
+ * parameters are scalars: the mapping types the call), and when an argument
+ * does not fit the type of its parameter, the contract of the literal.
+ * There is one exception to the last case, and it is the only case in which
+ * a scalar result is not kept: when the result is a scalar and an argument
+ * is outside the type of a parameter that the literal does not annotate and
+ * that is not a scalar, the type is derived from the body, and it can be
+ * `error` (see the comment in the function).
  */
 export function appliedLiteralResultType(
   fn: OperandDescriptor,
@@ -634,7 +779,6 @@ export function appliedLiteralResultType(
   declared: Type,
   derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
 ): Type | undefined {
-  if (isScalarResult(declared)) return undefined;
   const sig = fn.type;
   if (
     typeof sig !== 'object' ||
@@ -647,14 +791,46 @@ export function appliedLiteralResultType(
     signatureParamsAreScalar(sig)
   )
     return undefined;
-  const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
-  for (let i = 0; i < args.length; i++) {
-    const slot = slots[i]?.type;
-    if (slot !== undefined && !isSubtype(presentPart(args[i].type), slot))
-      return undefined;
-  }
   const literal = describedFunctionLiteral(fn);
   if (!isFunction(literal, 'Function')) return undefined;
+  // A parameter that the literal does not annotate has a type inferred from
+  // its uses in the body, and the literal binds an argument outside that
+  // type too, when the parameter is not a scalar (a point or a collection):
+  // the type is not a contract. When the result of the signature is a
+  // scalar, it then does not bound the result of this application, which
+  // is typed from the body when the result of the signature does not hold
+  // that type (`outsideScalarResult`). With `k` declared
+  // `(tuple<number, number>) -> number`, `L ↦ k(L)` has the signature
+  // `(L: tuple<number, number>) -> number`, and applied to a list of points
+  // its value is a list of numbers. That type can be `error`: applied to
+  // `3`, the body `k(3)` is an `incompatible-type` error, and so is the
+  // value of the application.
+  // An argument outside an annotated parameter, or outside a scalar one,
+  // keeps the result of the signature. So does an argument outside the
+  // parameter type when the result of the signature is not a scalar.
+  const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
+  let outside = false;
+  for (let i = 0; i < args.length; i++) {
+    const slot = slots[i]?.type;
+    if (slot === undefined) continue;
+    const t = presentPart(args[i].type);
+    if (isSubtype(t, slot)) continue;
+    if (
+      t === 'unknown' ||
+      t === 'any' ||
+      t === 'error' ||
+      functionLiteralParameterType(literal.ops[i + 1]) !== undefined ||
+      isScalarParameter(slot)
+    )
+      return undefined;
+    outside = true;
+  }
+  let scalar: Type | undefined;
+  if (isScalarResult(declared)) {
+    if (!outside) return undefined;
+    scalar = declared;
+    declared = 'any';
+  } else if (outside) return undefined;
   // An applied literal in the body of another is typed by this function
   // again, and the walk of its body is not memoized across the different
   // argument types it meets. Beyond a depth of 8 the result type of the
@@ -662,13 +838,14 @@ export function appliedLiteralResultType(
   if (appliedLiteralDepth >= 8) return undefined;
   appliedLiteralDepth += 1;
   try {
-    return literalBodyResultType(
+    const t = literalBodyResultType(
       literal.engine,
       literal,
       args,
       declared,
       derive
     );
+    return scalar === undefined ? t : outsideScalarResult(t, scalar);
   } finally {
     appliedLiteralDepth -= 1;
   }
@@ -721,7 +898,12 @@ function literalBodyResultType(
   // The parameter types of the declared signature of the called function,
   // when it has one (`declaredParameterTypes`). They decide, with the
   // annotations of the literal, how an absent argument is bound.
-  declaredParams?: ReadonlyArray<Type>
+  declaredParams?: ReadonlyArray<Type>,
+  // The number of arguments of a PARTIAL application (`partialBodyIsError`).
+  // Each parameter from this index on has no argument, and its descriptor
+  // in `args` is its parameter type. Such a parameter is typed by that
+  // type even when it is `unknown`: the caller reads only an `error` result.
+  partialArgCount?: number
 ): Type | undefined {
   // A number literal argument is typed by its tier (`integer`, `real`, …),
   // not by its value: the result of `(x ↦ (2x, x))(3)` is a pair of
@@ -763,17 +945,22 @@ function literalBodyResultType(
     // result by treating an unknown parameter as a numeric operand. A union
     // whose every member is a scalar (`real | nan`, the type of a value that
     // may be undefined) cannot be a collection, so it is typed like any other
-    // scalar argument.
+    // scalar argument. A union whose every member is an indexed collection
+    // (`list<P^1> | list<P^2>`, an element of a ragged list of lists) is a
+    // collection, and is typed as it is: an operator of the body reads the
+    // members of the union.
     if (
-      t === 'unknown' ||
-      t === 'any' ||
-      t === 'value' ||
-      (typeof t === 'object' &&
-        (t.kind === 'broadcastable' ||
-          (t.kind === 'union' &&
-            !isSubtype(t, 'number') &&
-            !isSubtype(t, 'boolean') &&
-            !isSubtype(t, 'string'))))
+      (partialArgCount === undefined || i < partialArgCount) &&
+      (t === 'unknown' ||
+        t === 'any' ||
+        t === 'value' ||
+        (typeof t === 'object' &&
+          (t.kind === 'broadcastable' ||
+            (t.kind === 'union' &&
+              !isSubtype(t, 'number') &&
+              !isSubtype(t, 'boolean') &&
+              !isSubtype(t, 'string') &&
+              !isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE)))))
     )
       return undefined;
     env.set(name, describeType(t));
@@ -791,9 +978,11 @@ function literalBodyResultType(
   }
   // The declared parameter types decide how an absent argument is bound, and
   // one literal can be the value of several functions declared differently.
-  const key = [declared, ...args.map((x) => x.type), ...(declaredParams ?? [])]
-    .map((t) => typeToString(t))
-    .join(';');
+  const key =
+    [declared, ...args.map((x) => x.type), ...(declaredParams ?? [])]
+      .map((t) => typeToString(t))
+      .join(';') +
+    (partialArgCount === undefined ? '' : `;partial ${partialArgCount}`);
   if (results.has(key)) return results.get(key);
   running.add(literal);
   try {
@@ -970,6 +1159,32 @@ function literalBodyResultType(
           operands.some((x, i) => i % 2 === 1 && recursive.has(x)))
       )
         return undefined;
+      // A branch typed `error` is an error only when it is selected. A type
+      // that holds an error and another value does not exist (the join of
+      // `error` and `integer` is `error`), so a conditional with an `error`
+      // branch and a branch that is not an error has no type here, and the
+      // derivation stops. With `f(a, b) := If(b, a[1] + a[2], 42)`, the
+      // value of `f(3, False)` is `42`, and the branch `3[1] + 3[2]` is
+      // typed `error`. An `If` with no else branch, and a `Which` whose last
+      // condition is not the literal `True`, also have an outcome that is
+      // not written: when no branch is selected, the value is `Missing`.
+      // That outcome is a branch that is not an error: with
+      // `f(a, b) := If(b, a[1] + a[2])`, the value of `f(3, False)` is
+      // `Missing`.
+      if (expr.operator === 'If' || expr.operator === 'Which') {
+        const branches = operands.filter((_, i) =>
+          expr.operator === 'If' ? i > 0 : i % 2 === 1
+        );
+        const errors = branches.filter((x) => x.type === 'error').length;
+        const noMatchOutcome =
+          expr.operator === 'If'
+            ? expr.nops < 3
+            : expr.nops % 2 === 1 ||
+              expr.nops < 2 ||
+              !isSymbol(expr.ops[expr.nops - 2], 'True');
+        if (errors > 0 && (errors < branches.length || noMatchOutcome))
+          return undefined;
+      }
       // An application over an ABSENT operand (a parameter typed `missing`,
       // or a value derived as absent) is typed as the evaluation of the body
       // answers it, not as the operator's type handler types a literal

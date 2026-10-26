@@ -451,15 +451,18 @@ describe('Determinant — Contract B declaration', () => {
 
   test('the result stays in the entries ring or field', () => {
     // A determinant is a polynomial in the entries — sums of products — so
-    // the tier of the entries carries over.
+    // an integer tier carries over. A rational tier gives `real`: a cell
+    // typed `integer` can be a float such as `2.0`, and its product with an
+    // exact rational is a float. A complex tier gives `number`: a product of
+    // complex floats can overflow.
     const ce = new ComputeEngine();
     const type = (m: any) => ce.box(['Determinant', m] as any).type.toString();
     expect(type(M)).toBe('integer');
     expect(type(['List', ['List', ['Divide', 1, 2], 2], ['List', 3, 4]])).toBe(
-      'rational'
+      'real'
     );
     expect(type(['List', ['List', 1.5, 2], ['List', 3, 4]])).toBe('real');
-    expect(type(['List', ['List', 'i', 2], ['List', 3, 4]])).toBe('complex');
+    expect(type(['List', ['List', 'i', 2], ['List', 3, 4]])).toBe('number');
     // An entry that may be an infinity or NaN can give `∞ − ∞`, a symbolic
     // entry gives an expression, and a statically non-square matrix has no
     // determinant at all: each declines to the declared `number`.

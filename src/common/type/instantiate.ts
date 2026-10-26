@@ -79,7 +79,12 @@ export type TypeVariableErrorCode =
    * for `type permutation<N> = list<integer^N>`). The other direction — a
    * value where a type parameter expects a type (`tree<3>`) — is a legal
    * singleton type and is admitted by the ordinary bound check. */
-  | 'type-argument-kind';
+  | 'type-argument-kind'
+  /** A type alias whose definition refers to the alias itself under an odd
+   * number of negations, with no constructor (`list<…>`, `tuple<…>`, …)
+   * between the alias and its occurrence: `type alias nn = !nn`. No set of
+   * values satisfies such a definition, so the declaration is refused. */
+  | 'alias-without-fixed-point';
 
 /** An `Error` carrying one of the {@link TypeVariableErrorCode}s.
  *

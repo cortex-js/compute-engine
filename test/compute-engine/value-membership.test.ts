@@ -317,11 +317,24 @@ describe('VALUE MEMBERSHIP — aliases and nominal references', () => {
     expect(admissionOf(ce.box(7), ref)).toBe('refute');
   });
 
-  it('a self-negating alias terminates', () => {
-    // `nn = !nn` has no fixed point. The cycle guard stops the unfold; the
-    // verdict itself is not specified.
-    ce.declareType('nn', '!nn', { alias: true });
-    const t = ce.type('nn').type;
+  it('a self-negating alias is refused when it is declared', () => {
+    // `nn = !nn` has no fixed point, so neither function can give it a
+    // specified answer. The declaration is refused.
+    expect(() => ce.declareType('nn', '!nn', { alias: true })).toThrow(
+      /alias-without-fixed-point/
+    );
+  });
+
+  it('a hand-built self-negating alias terminates', () => {
+    // A structural `Type` can still build the cycle without `declareType`.
+    // The cycle guard stops the unfold; the verdict itself is not specified.
+    const t = {
+      kind: 'reference',
+      name: 'nn',
+      alias: true,
+      def: undefined,
+    } as any;
+    t.def = { kind: 'negation', type: t };
     expect(typeof typeAcceptsValue(ce.box(5), t)).toBe('boolean');
     expect(['admit', 'refute', 'undecidable']).toContain(
       admissionOf(ce.box(5), t)

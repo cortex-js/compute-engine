@@ -418,13 +418,44 @@ describe('Logic', () => {
     `);
     expect(ce.parse('p \\operatorname{implies} q').json).toMatchInlineSnapshot(`
       [
-        Tuple,
+        Implies,
         p,
-        implies,
         q,
       ]
     `);
-  }); // @fixme
+    expect(ce.parse('p \\mathrm{implies} q').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        p,
+        q,
+      ]
+    `);
+    expect(ce.parse('p \\text{implies} q').json).toMatchInlineSnapshot(`
+      [
+        Implies,
+        p,
+        q,
+      ]
+    `);
+    // Same precedence and associativity as `\\implies`.
+    expect(
+      ce.parse('p \\lor q \\operatorname{implies} r \\operatorname{iff} s').json
+    ).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        [
+          Implies,
+          [
+            Or,
+            p,
+            q,
+          ],
+          r,
+        ],
+        s,
+      ]
+    `);
+  });
 
   // \rightarrow used to parse as Implies (issue #156); it is now the
   // mapping arrow To, same as \to — `f: A \rightarrow B` is far more common
@@ -485,13 +516,26 @@ describe('Logic', () => {
     `);
     expect(ce.parse('p \\operatorname{iff} q').json).toMatchInlineSnapshot(`
       [
-        Tuple,
+        Equivalent,
         p,
-        iff,
         q,
       ]
     `);
-  }); // @fixme
+    expect(ce.parse('p \\mathrm{iff} q').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        p,
+        q,
+      ]
+    `);
+    expect(ce.parse('p \\text{iff} q').json).toMatchInlineSnapshot(`
+      [
+        Equivalent,
+        p,
+        q,
+      ]
+    `);
+  });
 
   // https://github.com/cortex-js/compute-engine/issues/156
   it('should parse lowercase arrow as Equivalent', () => {

@@ -554,3 +554,20 @@ describe('A CUSTOM \\text ENTRY THAT DECLINES', () => {
     ]);
   });
 });
+
+describe('A TEXT RUN WHOSE WORDS ARE A KEYWORD', () => {
+  // `\text{and}` parses as the keyword `and`. The `Text` serializer writes an
+  // empty group before such a run, `\text{{}and}`, so it parses back as text.
+  const words = ['and', 'or', 'if', 'for', 'iff', 'implies', 'such that'];
+  test.each(words)('Text(p, "%s", q) round-trips', (w) => {
+    const e = ce.box(['Text', 'p', { str: w }, 'q']);
+    expect(e.latex).toBe(`p\\text{{}${w}}q`);
+    expect(ce.parse(e.latex).json).toEqual(['Text', 'p', `'${w}'`, 'q']);
+  });
+
+  test('a run that is not a keyword is written as before', () => {
+    expect(ce.box(['Text', 'p', { str: 'hello' }, 'q']).latex).toBe(
+      'p\\text{hello}q'
+    );
+  });
+});

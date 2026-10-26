@@ -469,20 +469,32 @@ describe('Eigenvalues, Eigenvectors, Eigen', () => {
 describe('LUDecomposition, QRDecomposition, CholeskyDecomposition', () => {
   const ce = engine();
   test('LU of an n×n matrix', () => {
+    // A matrix literal of exact rational cells is decomposed exactly
     sound(
       ce,
       ['LUDecomposition', A],
-      'tuple<matrix<integer^(2x2)>, matrix<2x2>, matrix<2x2>>'
+      'tuple<matrix<integer^(2x2)>, matrix<rational^(2x2)>, matrix<rational^(2x2)>>'
     );
     sound(
       ce,
       ['LUDecomposition', B3],
-      'tuple<matrix<integer^(3x3)>, matrix<3x3>, matrix<3x3>>'
+      'tuple<matrix<integer^(3x3)>, matrix<rational^(3x3)>, matrix<rational^(3x3)>>'
     );
     sound(
       ce,
       ['LUDecomposition', L(L(5))],
-      'tuple<matrix<integer^(1x1)>, matrix<1x1>, matrix<1x1>>'
+      'tuple<matrix<integer^(1x1)>, matrix<rational^(1x1)>, matrix<rational^(1x1)>>'
+    );
+    sound(
+      ce,
+      ['LUDecomposition', Q],
+      'tuple<matrix<integer^(2x2)>, matrix<rational^(2x2)>, matrix<rational^(2x2)>>'
+    );
+    // A float cell uses machine precision
+    sound(
+      ce,
+      ['LUDecomposition', L(L(1.5, 2), L(3, 1))],
+      'tuple<matrix<integer^(2x2)>, matrix<2x2>, matrix<2x2>>'
     );
   });
   test('an overflow in machine precision gives an infinite cell', () => {
@@ -495,21 +507,37 @@ describe('LUDecomposition, QRDecomposition, CholeskyDecomposition', () => {
     ).toContain('oo');
   });
   test('QR of an m×n matrix', () => {
-    sound(ce, ['QRDecomposition', A], 'tuple<matrix<2x2>, matrix<2x2>>');
-    sound(ce, ['QRDecomposition', R], 'tuple<matrix<2x2>, matrix<2x3>>');
-    sound(ce, ['QRDecomposition', T], 'tuple<matrix<3x3>, matrix<3x2>>');
+    // A matrix literal of exact rational cells is decomposed exactly: the
+    // cells are rationals times square roots
+    sound(
+      ce,
+      ['QRDecomposition', A],
+      'tuple<matrix<real^(2x2)>, matrix<real^(2x2)>>'
+    );
+    sound(
+      ce,
+      ['QRDecomposition', R],
+      'tuple<matrix<real^(2x2)>, matrix<real^(2x3)>>'
+    );
+    sound(
+      ce,
+      ['QRDecomposition', T],
+      'tuple<matrix<real^(3x3)>, matrix<real^(3x2)>>'
+    );
     sound(ce, ['QRDecomposition', C], 'tuple<matrix<2x2>, matrix<2x2>>');
+    sound(ce, ['QRDecomposition', F], 'tuple<matrix<2x2>, matrix<2x2>>');
   });
   test('Cholesky of an n×n matrix', () => {
-    sound(ce, ['CholeskyDecomposition', SPD], 'matrix<2x2>');
-    sound(ce, ['CholeskyDecomposition', S], 'matrix<2x2>');
-    sound(ce, ['CholeskyDecomposition', L(L(5))], 'matrix<1x1>');
+    sound(ce, ['CholeskyDecomposition', SPD], 'matrix<real^(2x2)>');
+    sound(ce, ['CholeskyDecomposition', S], 'matrix<real^(2x2)>');
+    sound(ce, ['CholeskyDecomposition', L(L(5))], 'matrix<real^(1x1)>');
     sound(ce, ['CholeskyDecomposition', C], 'matrix<2x2>');
+    sound(ce, ['CholeskyDecomposition', L(L(4.5, 2), L(2, 3))], 'matrix<2x2>');
   });
   test('a matrix that is not positive definite is an error', () => {
     // The declared `matrix` does not admit the error either.
     const e = ce.box(['CholeskyDecomposition', A]);
-    expect(e.type.toString()).toBe('matrix<2x2>');
+    expect(e.type.toString()).toBe('matrix<real^(2x2)>');
     expect(e.evaluate().operator).toBe('Error');
   });
   test('a non-square matrix declines', () => {

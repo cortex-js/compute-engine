@@ -911,14 +911,15 @@ describe('a collection passed in a self-call types the parameter', () => {
   });
 
   test('a comprehension in the self-call', () => {
-    // The result is the (lazy) `Comprehension` itself; its elements are 1, 2.
+    // The result of an Epsil program lists a finite comprehension (user
+    // decision 2026-10-25), so the result is the `List` of
+    // its elements 1, 2.
     const ce = new ComputeEngine();
     const r = executeEpsil(
       ce,
       'f7(n, s) = s if n == 0 else f7(n - 1, [x for x in 1..2])\nf7(2, [0])'
     );
-    expect(r.value?.operator).toBe('Comprehension');
-    expect(r.value?.evaluate().toString()).toBe('[1,2]');
+    expect(r.value?.json).toEqual(['List', 1, 2]);
   });
 
   test('the collection parameter in the first position', () => {
