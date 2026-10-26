@@ -8098,10 +8098,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // (`compileRealOperand`), as the interpreter reads it: `Range(1, 5, 2+i)`
     // is `[1, 3, 5]`.
     const operand = (a: Expression): string => compileRealOperand(a, compile);
-    if (args.length === 1) return `_SYS.range(1, ${operand(args[0])}, 1)`;
-
-    let start = operand(args[0]);
-    let stop = operand(args[1]);
+    // A one-operand `Range(n)` is `Range(1, n)`: it takes the two-operand
+    // branch below, so `Range(0)` descends to [1, 0] as the interpreter does.
+    let start = args.length === 1 ? '1' : operand(args[0]);
+    let stop = args.length === 1 ? operand(args[0]) : operand(args[1]);
     const step = args[2] ? operand(args[2]) : '1';
     if (start === null) throw new Error('Could not compile `Range`: no start');
     if (stop === null) {

@@ -283,12 +283,13 @@ export const MAX_RANGE_IDENTITY_COUNT = 10_000;
  * If `expr` is a finite `Range` of integers, return its first element, its
  * step and its element count. Otherwise return `undefined`.
  *
- * The range must have two or three operands (the canonical form: `Range(n)`
- * is canonicalized to `Range(1, n)`), each a number literal with a safe
- * integer value, a step that is not zero, and at most
- * `MAX_RANGE_IDENTITY_COUNT` elements. With two operands, the step is `1`
- * when the upper bound is not less than the lower bound and `-1` otherwise,
- * as for the `Range` operator.
+ * The range must have one, two or three operands, each a number literal with
+ * a safe integer value, a step that is not zero, and at most
+ * `MAX_RANGE_IDENTITY_COUNT` elements. One operand `n` is read as
+ * `Range(1, n)`, which is its canonical form; a raw or structural `Range(n)`
+ * keeps the one operand. With no step operand, the step is `1` when the
+ * upper bound is not less than the lower bound and `-1` otherwise, as for
+ * the `Range` operator: `Range(0)` is the descending range `[1, 0]`.
  *
  * Such a range and the `List` literal of its integers are the same element
  * for `isSame` and have the same `hash`: `Range(1, 3)`, `Range(1, 3, 1)` and
@@ -306,14 +307,14 @@ export function integerRangeElements(
 ): { start: number; step: number; count: number } | undefined {
   if (!isFunction(expr, 'Range')) return undefined;
   const nops = expr.nops;
-  if (nops !== 2 && nops !== 3) return undefined;
+  if (nops < 1 || nops > 3) return undefined;
   const read = (op: Expression): number | undefined => {
     if (!isNumber(op) || op.im !== 0 || !op.isInteger) return undefined;
     const v = op.re;
     return Number.isSafeInteger(v) ? v : undefined;
   };
-  const start = read(expr.op1);
-  const end = read(expr.op2);
+  const start = nops === 1 ? 1 : read(expr.op1);
+  const end = read(nops === 1 ? expr.op1 : expr.op2);
   if (start === undefined || end === undefined) return undefined;
   const step = nops === 3 ? read(expr.op3) : end >= start ? 1 : -1;
   if (step === undefined || step === 0) return undefined;
@@ -590,6 +591,21 @@ export function isFoldBarrierProduct(
   expr: Expression | null | undefined
 ): boolean {
   return isFunction(expr, 'Multiply') && containsContinuationOperand(expr);
+}
+
+/**
+ * A product with a direct `ContinuationPlaceholder` operand, such as
+ * `2 · 4 · … · 2n`. Such a product is a notation, not an arithmetic value:
+ * its operands must not be lifted into an enclosing product, and no factor of
+ * the enclosing product must be folded into it.
+ */
+export function isNotationalProduct(
+  expr: Expression | null | undefined
+): boolean {
+  return (
+    isFunction(expr, 'Multiply') &&
+    expr.ops.some((x) => isContinuationOperand(x))
+  );
 }
 
 /**

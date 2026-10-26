@@ -37,6 +37,7 @@ import {
   numericValue,
   isContinuationOperand,
   containsContinuationOperand,
+  isNotationalProduct,
   isInexactOperand,
   nanOperandAnswer,
   indeterminateFormAnswer,
@@ -98,7 +99,11 @@ import {
 } from './order.js';
 import { asRadical, isMatrixTyped } from './arithmetic-power.js';
 import { mayBeMatrixPowerBase, typeMayHoldMatrix } from './matrix-operand.js';
-import { flatten, flattenHoldingBarriers } from './flatten.js';
+import {
+  flatten,
+  flattenHoldingBarriers,
+  flattenKeepingNotationalProducts,
+} from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
@@ -2915,6 +2920,15 @@ function expandProduct(
     return addArray(terms);
   }
 
+  // A notational product (`2 · 4 · … · 2n`) is kept whole: the `Product`
+  // below would lift its factors and fold them across the ellipsis.
+  if (containsContinuationOperand(lhs) || containsContinuationOperand(rhs))
+    return mulAroundNotationalProducts([lhs, rhs], (rest) =>
+      rest.length === 1
+        ? rest[0]
+        : new Product(ce, rest, { matrixContext }).asExpression()
+    );
+
   return new Product(ce, [lhs, rhs], { matrixContext }).asExpression();
 }
 
@@ -3177,6 +3191,10 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
       'Multiply',
       xs.map((x) => x.canonical)
     );
+  // A factor that is (or holds) a notational product: multiply the other
+  // factors and keep the notational product whole.
+  if (xs.some((x) => containsContinuationOperand(x)))
+    return mulAroundNotationalProducts(xs, (rest) => mulImpl(rest, expand));
 
   // An `Indeterminate` factor beside a factor that reads a variable with an
   // assigned value: the answer is `NaN` or `Indeterminate` depending on the
@@ -3539,6 +3557,53 @@ function exactCoefficientOutOfRange(
   return [nv.bignumRe, rest];
 }
 
+/**
+ * The product of the factors `xs` when one or more of them is a product
+ * with a direct `ContinuationPlaceholder` operand (`isNotationalProduct()`),
+ * such as the `2 · 4 · … · 2n` of `3(2 · 4 · … · 2n)`, or holds one in a
+ * nested product.
+ *
+ * Such a product is a notation, not an arithmetic value. When its operands
+ * are lifted into the enclosing product, the factors on each side of the
+ * ellipsis are folded together and the last sample `2n` becomes the two
+ * factors `2` and `n`: `3(2 · 4 · … · 2n)` became `48 · … · n`. So the
+ * notational products are kept whole, the other factors are multiplied with
+ * `mulRest`, and the result is that product times the notational products:
+ * `3 · 5 · (2 · 4 · … · 2n)` is `15 · (2 · 4 · … · 2n)`. `expand()` keeps
+ * such a product whole for the same reason. `negate()` does not: it negates
+ * the first sample, and `-(2 · 4 · … · 2n)` is `(-2) · 4 · … · 2n`
+ * (`test/compute-engine/ce-163-negated-continuation.test.ts`). A coefficient
+ * `0`, `NaN` or `Indeterminate` gives the answer of `Product` for that
+ * coefficient (`0`, `NaN` or `Indeterminate`). (ROADMAP CE-462.)
+ */
+export function mulAroundNotationalProducts(
+  xs: ReadonlyArray<Expression>,
+  mulRest: (rest: ReadonlyArray<Expression>) => Expression
+): Expression {
+  const ce = xs[0].engine;
+  const flat = flattenKeepingNotationalProducts(xs, 'Multiply');
+  const notational = flat.filter((x) => isNotationalProduct(x));
+  const rest = flat.filter((x) => !isNotationalProduct(x));
+  const factors: Expression[] = [];
+  if (rest.length > 0) {
+    const coefficient = mulRest(rest);
+    // A `0`, `NaN` or `Indeterminate` coefficient follows the usual rules of
+    // a product: `Product` answers `0` (or the `NaN` of `0 · ∞`) for a zero
+    // coefficient and `NaN` or `Indeterminate` for a `NaN`-valued one. With
+    // such a coefficient, `Product` does not lift the factors of the
+    // notational products into the result.
+    if (isNumber(coefficient) && (coefficient.isNaN || coefficient.isSame(0)))
+      return new Product(ce, [coefficient, ...notational]).asExpression();
+    if (!(isNumber(coefficient) && coefficient.isSame(1)))
+      factors.push(coefficient);
+  }
+  factors.push(...notational);
+  const result = flattenKeepingNotationalProducts(factors, 'Multiply');
+  if (result.length === 0) return ce.One;
+  if (result.length === 1) return result[0];
+  return ce._fn('Multiply', result);
+}
+
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   return mulNEvaluated(xs);
 }
@@ -3568,6 +3633,10 @@ export function mulNEvaluated(
       'Multiply',
       xs.map((x) => x.canonical)
     );
+  // A factor that is (or holds) a notational product: multiply the other
+  // factors and keep the notational product whole.
+  if (xs.some((x) => containsContinuationOperand(x)))
+    return mulAroundNotationalProducts(xs, (rest) => mulNEvaluated(rest));
   // A collection-TYPED but valueless co-factor vetoes the element-wise
   // dispatch here exactly as it does on the exact route (see `mulImpl`).
   let unresolvedFactor = hasUnresolvedCollectionOperand(

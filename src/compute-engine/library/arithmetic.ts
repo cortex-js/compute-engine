@@ -194,6 +194,7 @@ import {
 import {
   mulFactoredArray,
   mulNEvaluated,
+  mulAroundNotationalProducts,
   isOutOfDoubleRangeLiteral,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
@@ -472,6 +473,7 @@ import {
   isCharacter,
   isSymbol,
   isContinuationOperand,
+  containsContinuationOperand,
   isAbsentValue,
   isAbsentSymbol,
   isAbsentArithmeticOperand,
@@ -10246,6 +10248,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? x.evaluate({ numericApproximation: true })
             : x.evaluate()
         );
+        if (evaluated.some((x) => containsContinuationOperand(x)))
+          return mulAroundFoldBarriers(ops, evaluated, {
+            numericApproximation,
+            engine,
+            expression,
+          });
         return mulEvaluatedOperands(ops, evaluated, {
           numericApproximation,
           engine,
@@ -10298,11 +10306,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           engine,
           effects,
           () =>
-            mulEvaluatedOperands(ops, evaluated, {
-              numericApproximation,
-              engine,
-              expression,
-            }),
+            evaluated.some((x) => containsContinuationOperand(x))
+              ? mulAroundFoldBarriers(ops, evaluated, {
+                  numericApproximation,
+                  engine,
+                  expression,
+                })
+              : mulEvaluatedOperands(ops, evaluated, {
+                  numericApproximation,
+                  engine,
+                  expression,
+                }),
           _contextStack,
           _precisionWindow
         );
@@ -16368,6 +16382,46 @@ function addEvaluatedOperands(
   )
     return result.N();
   return markAbsentPointCells(engine!, expression, result);
+}
+
+/**
+ * The value of a product where one or more evaluated operands are a
+ * product with a direct `ContinuationPlaceholder` operand, such as the
+ * `2 · 4 · … · 2n` of `3(2 · 4 · … · 2n)`. Such a product is a notation, not
+ * an arithmetic value, and it is kept whole: the other operands are
+ * multiplied together, and the result is that product times each notational
+ * product (`mulAroundNotationalProducts()`). (ROADMAP CE-462.)
+ */
+function mulAroundFoldBarriers(
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  options: Pick<
+    EvaluateHandlerOptions,
+    'numericApproximation' | 'engine' | 'expression'
+  >
+): Expression {
+  const ce = options.engine!;
+  const kept = evaluated.map((x) => containsContinuationOperand(x));
+  const restOps = ops.filter((_, i) => !kept[i]);
+  const restValues = evaluated.filter((_, i) => !kept[i]);
+  return mulAroundNotationalProducts(evaluated, (rest) => {
+    if (rest.length === 1) return rest[0];
+    // The usual case: the other factors are the evaluated operands that are
+    // not notational, and the fold of the handler applies to them.
+    if (
+      rest.length === restValues.length &&
+      rest.every((x, i) => x === restValues[i])
+    )
+      return (
+        mulEvaluatedOperands(restOps, restValues, options) ??
+        ce._fn('Multiply', rest)
+      );
+    // An evaluated operand held a notational product in a nested product:
+    // the other factors are not all operands of this product.
+    return options.numericApproximation
+      ? mulNEvaluated(rest)
+      : mulFactoredArray(rest);
+  });
 }
 
 /**

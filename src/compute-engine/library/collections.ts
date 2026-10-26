@@ -22119,7 +22119,7 @@ async function runWalkAsync<R>(
 /**
  * Normalize the arguments of range:
  * - [from, to] -> [from, to, 1] if to > from, or [from, to, -1] if to < from
- * - [x] -> [1, x, 1]
+ * - [x] -> [1, x, 1] if x >= 1, or [1, x, -1] if x < 1
  *
  * Bounds and step are kept as raw numeric values (not rounded). The step is
  * trusted as-given when provided explicitly; iteration produces an empty
@@ -22145,7 +22145,10 @@ export function literalRange(
   if (expr.nops === 0) return [1, 0, 0];
 
   const op1 = expr.op1.re;
-  if (expr.nops === 1) return [1, op1, 1];
+  // `Range(n)` is `Range(1, n)`, and the step direction follows the same
+  // rule as the two-operand form: `Range(0)` is the descending range [1, 0],
+  // as its canonical form `Range(1, 0)` is.
+  if (expr.nops === 1) return [1, op1, op1 >= 1 ? 1 : -1];
 
   const op2 = expr.op2.re;
   if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];
@@ -22305,7 +22308,10 @@ export function range(
   // `Count(Range(1, n)) → 1` class of wrong scalars.) An exact bound with a
   // known value (`50π`) reads through `.N()`.
   const op1 = operandNumericValue(expr.op1);
-  if (expr.nops === 1) return [1, op1, 1];
+  // `Range(n)` is `Range(1, n)`, and the step direction follows the same
+  // rule as the two-operand form: `Range(0)` is the descending range [1, 0],
+  // as its canonical form `Range(1, 0)` is.
+  if (expr.nops === 1) return [1, op1, op1 >= 1 ? 1 : -1];
 
   const op2 = operandNumericValue(expr.op2);
   if (expr.nops === 2) return [op1, op2, op2 >= op1 ? 1 : -1];

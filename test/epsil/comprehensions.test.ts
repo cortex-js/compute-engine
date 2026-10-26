@@ -406,6 +406,56 @@ describe('EPSIL COMPREHENSIONS — the result is a list', () => {
     expect(JSON.stringify(run('calls').value.json)).toBe('0');
   });
 
+  test('a `let` of a comprehension does not call the callback of a domain', () => {
+    // The assignment asks whether the value is a finite collection that can
+    // be walked. That test is read from the form of the domains: `1..i` is
+    // finite for each `i` of `1..3`, and so is a filter of it. It does not
+    // walk the domains, so `keep` is not called.
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const run = (source: string) => executeEpsil(ce, source, { parseLatex });
+    run('let calls = 0');
+    run('function keep(j) scope { calls = calls + 1; j > 0 }');
+    run('let r = [i for i in 1..3, j in filter(1..i, keep)]');
+    expect(JSON.stringify(run('calls').value.json)).toBe('0');
+    const r = run('r').value;
+    expect(r.operator).toBe('Comprehension');
+    expect(r.isFiniteCollection).toBe(true);
+    expect(JSON.stringify(run('calls').value.json)).toBe('0');
+    // The walk calls `keep` once for each element of each domain, and the
+    // count agrees with the walk.
+    expect([...r.each()].map((x) => x.toString())).toEqual([
+      '1',
+      '2',
+      '2',
+      '3',
+      '3',
+      '3',
+    ]);
+    expect(JSON.stringify(run('calls').value.json)).toBe('6');
+    expect(r.count).toBe(6);
+  });
+
+  test('a guard that gives an error before an empty clause gives error cells', () => {
+    // A failed guard gives an error cell at that prefix, and the walk does
+    // not visit the later clauses. So the empty last clause does not make
+    // the count 0.
+    const ce = new ComputeEngine();
+    const parseLatex = (latex: string): MathJsonExpression =>
+      ce.parse(latex).json;
+    const run = (source: string) => executeEpsil(ce, source, { parseLatex });
+    run('function g(x) { 1/x }');
+    run('function bad(i) { g("a") > i }');
+    const c = run('[j for i in 1..3 if bad(i), j in []]').value;
+    const cells = [...c.each()];
+    expect(cells.length).toBe(3);
+    expect(cells.every((cell) => cell.operator === 'Error')).toBe(true);
+    expect(c.count).toBe(3);
+    expect(c.isEmptyCollection).toBe(false);
+    expect(c.isFiniteCollection).toBe(true);
+  });
+
   test('an impure guard and a later domain that reads another symbol: no listing', () => {
     // The guard appends to `xs`, which the domain of the second clause
     // reads, so the comprehension has 2 + 3 + 4 = 9 elements, not the

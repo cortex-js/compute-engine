@@ -209,6 +209,7 @@ import {
   isSymbol,
   isContinuationOperand,
   isFoldBarrierProduct,
+  isNotationalProduct,
   nanOperandAnswer,
   indeterminateFormAnswer,
   isUnorderedSet,
@@ -880,6 +881,16 @@ export class BoxedFunction
    * `rechecked` keeps the last new call, with the definition and the counter
    * it was boxed against, so that the call is boxed again only once for
    * each change.
+   *
+   * `operator` is set when the call was written with another operator,
+   * which its canonical handler replaced (`Fold(f, x, L)` becomes
+   * `Reduce(L, f, x)`): the call is boxed again with that operator and
+   * `ops`.
+   *
+   * `scope` is set when `ops` holds an operand that is not bound (a
+   * callback literal as written): the call is boxed again in that lexical
+   * scope, which was the current scope when the call was boxed, so that the
+   * names in the operand have the bindings that they had then.
    * @internal */
   _calleeStamp:
     | {
@@ -889,6 +900,8 @@ export class BoxedFunction
           ReadonlyArray<{ name: string | undefined; slot: number }> | undefined;
         ops?: ReadonlyArray<Expression>;
         receiver?: { _writeVersion: number };
+        operator?: string;
+        scope?: Scope;
         rechecked?: {
           half: { _writeVersion: number };
           version: number;
@@ -911,12 +924,14 @@ export class BoxedFunction
    * derived for the function.
    *
    * `receiver` is the definition to record in place of the definition of
-   * the name of the call (see `_calleeStamp`).
+   * the name of the call (see `_calleeStamp`). `options` sets the
+   * `operator` and the `scope` of the record (see `_calleeStamp`).
    * @internal */
   _stampCallee(
     written?: ReadonlyArray<{ name: string | undefined; slot: number }>,
     ops?: ReadonlyArray<Expression>,
-    receiver?: { _writeVersion: number }
+    receiver?: { _writeVersion: number },
+    options?: { operator?: string; scope?: Scope }
   ): void {
     if (this._calleeStamp !== undefined) return;
     if (this.engine._recursionKnots.has(this._operator)) return;
@@ -924,6 +939,9 @@ export class BoxedFunction
     if (half === undefined) return;
     this._calleeStamp = { half, version: half._writeVersion, written };
     if (receiver !== undefined) this._calleeStamp.receiver = receiver;
+    if (options?.operator !== undefined)
+      this._calleeStamp.operator = options.operator;
+    if (options?.scope !== undefined) this._calleeStamp.scope = options.scope;
     const own = this._ops;
     if (
       ops !== undefined &&
@@ -991,10 +1009,12 @@ export class BoxedFunction
       ) !== this._def
     )
       return undefined;
-    const fresh = withCallableBinding(this, () =>
-      this.engine.function(
-        this._operator,
-        this._writtenOperands(stamp.ops ?? this._ops)
+    const fresh = this.engine._inScope(stamp.scope, () =>
+      withCallableBinding(this, () =>
+        this.engine.function(
+          stamp.operator ?? this._operator,
+          this._writtenOperands(stamp.ops ?? this._ops)
+        )
       )
     );
     // The counter is read after the new call was boxed: boxing it can
@@ -2286,9 +2306,20 @@ export class BoxedFunction
     // Multiply
     //
     if (isFunction(expr, 'Multiply')) {
+      // A product with a direct `ContinuationPlaceholder` operand
+      // (`2 · 4 · … · 2n`) is a notation, not an arithmetic value: it has no
+      // coefficient. If its samples gave their numbers to the coefficient,
+      // `2n` became the two factors `2` and `n`, and a sum such as
+      // `x + 3(2 · 4 · … · 2n)` was collected as `x + 48 · … · n`. Such a
+      // product is kept whole, as the rest of the term.
+      if (isNotationalProduct(expr)) return [ce._numericValue(1), expr];
       const rest: Expression[] = [];
       let coef = ce._numericValue(1);
       for (const arg of expr.ops) {
+        if (isNotationalProduct(arg)) {
+          rest.push(arg);
+          continue;
+        }
         const [c, r] = arg.toNumericValue();
         // A float 1 is multiplied in, so the coefficient becomes a float
         if (!c.isOne || !c.isExact) {

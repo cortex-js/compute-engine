@@ -516,24 +516,20 @@ round: `R | indexed_collection<any>`). It changes the arithmetic typing of
 **Status:** open; wrong value.
 
 `c := (P, t) ↦ t·P/(P[1] − 1)` (the body is `Divide(Multiply(t, P), …)`) is
-typed `(P: unknown, t: unknown) -> never` (also at HEAD 8092e4cb0). `c([3, 2], 2)`
-evaluates to a list of `incompatible-type` errors, which `list<never>` does not
-hold. The form `t·(P/(P[1] − 1))` infers correctly.
+typed `(P: unknown, t: unknown) -> never` (also at HEAD 8092e4cb0).
+`c([3, 2], 2)` evaluates to a list of `incompatible-type` errors, which
+`list<never>` does not hold. The form `t·(P/(P[1] − 1))` infers correctly.
 
 ## Collections, absence and broadcasting
 
-### CE-494. The finiteness test and the count of a comprehension still run some user code
+### CE-494. The count of a comprehension over a `filter` domain walks the filter twice
 
 **Status:** open; defect, small.
 
 Since 2026-10-25 the finiteness test of a comprehension does not evaluate a
-guard, and it reads a dependent domain from its form (`comprehensionIsFinite()`,
-`library/control-structures.ts`). Two cases are left:
+guard or an impure domain, and it reads a dependent domain from its form
+(`comprehensionIsFinite()`, `library/control-structures.ts`). One case is left:
 
-- **CE-494.1** A domain that reads no earlier index is still evaluated by the
-  finiteness test, so `[x for x in makeList()]`, where `makeList` has a side
-  effect, runs it once more than the walk. Not evaluating it risks refusing to
-  list such a comprehension; the fix needs care.
 - **CE-494.2** The count of `[i for i in filter(1..3, keep)]` calls `keep` 4
   times, not 3: `scanIndependentClauses` reads both `smallCount(coll)` and
   `coll.isEmptyCollection`, and each one walks the filter. The value is right.
@@ -550,25 +546,6 @@ read a range row as a row (`listedLazyRows()`, `library/linear-algebra.ts`).
 Accepting such a list at a `matrix` parameter needs a rule: is a list of finite
 ranges of equal length a matrix type? The test in
 `ce-39-3-range-element-stays-range.test.ts` is marked `test.failing`.
-
-### CE-496. `Negate` and `Sum` over a list of range rows have types that do not hold their values
-
-**Status:** open; defect.
-
-`Negate([1..3, 4..6])` is typed `list<range>`, and its value is a
-`matrix<integer^(2x3)>`. `Sum([1..2, 3..4])` is typed `number`, and its value is
-`[4, 6]`. `Add` and `Multiply` over the same operands are typed correctly
-(`list<list<integer>>`).
-
-### CE-497. `Range(0)` is read in two ways
-
-**Status:** open; defect, small.
-
-The canonical form of `Range(0)` is `Range(1, 0)`, which counts down and
-evaluates to `[1, 0]`, but the `range()` helper of `library/collections.ts`
-reads a raw `Range(0)` as empty. A one-operand `Range(n)` is therefore left out
-of the rule that a finite range and the list of its integers are the same
-element (`integerRangeElements()`, `boxed-expression/type-guards.ts`).
 
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 
@@ -729,22 +706,6 @@ case remains:
   (`_SYS.range(1, n, …).reduce(…)`, `_SYS.mean(_SYS.range(…))`), so the memory
   use grows with `n`. The closed form, or a counted loop, would not.
 
-### CE-464. A callback stamped from a symbol's current value is outdated after the symbol is reassigned
-
-**Status:** open; defect, small.
-
-The contextual callback solve (`annotateCallbacksFromContextualSolve()`,
-`boxed-expression/box.ts`) stamps the parameter type of a `Map` callback from
-the VALUE a source symbol holds when the expression is boxed. With `L := [1, 2]`
-and `m = Map(x ↦ x + 1, L)`, a later `L := [["a"]]` makes `m.evaluate()` a list
-of `incompatible-type` errors, while a fresh box of the same expression gives
-the right value. A dictionary symbol with an inferred type behaves the same way
-since the CE-77 change (`dd := {a: 1}`, `m = Map(x ↦ x, dd)`, then
-`dd := {c: "x"}` gives `Set(Error(...))` on `m` and `Set("x")` on a fresh box).
-The stamp should follow the symbol's type at evaluation, or the value-derived
-stamp should be retired when the symbol is reassigned, as the value-type caches
-are. Pinned in `test/compute-engine/ce-77-open-record-entry-type.test.ts`.
-
 ### CE-81. Three lazy collections assigned to a variable stay a live view of the variables they read
 
 **Status:** open; defect, small.
@@ -875,22 +836,6 @@ and `Chunk` have it (pins in
   correct broadcast type lift. Both are tracked in CE-103.
 
 ## Evaluation, canonical forms and scoping
-
-### CE-500. `subs()` on a lone bound symbol boxes the replacement canonically, even when the symbol was boxed structurally
-
-**Status:** open; defect, small. Tycho ledger row 449.
-
-With `x` declared `real`, `ce.expr('x', { form: 'structural' })` is a bound
-symbol, and `.subs({ x: X + i })` (with `X + i` structural) gives
-`X + (0 + 1i)`: `BoxedSymbol.subs()` (`boxed-symbol.ts`) uses
-`options.canonical ?? this.isCanonical`, and a bound symbol reports
-`isCanonical: true`. The same symbol as an operand of a structural function is
-handled: `BoxedFunction._subsInParseScope()` (`boxed-function.ts`) boxes the
-replacement of a bound symbol operand in the structural form. A symbol does not
-record whether it was boxed structurally or canonically, so the lone case has no
-information to act on. Options: record the form on the boxed symbol (a field set
-by the structural boxing route, `boxStructuralSymbol()` in `box.ts`), or let a
-caller pass `{ form: 'structural' }` to `subs()`.
 
 ### CE-91. Define value capture on assignment, mutable-object boundaries and view reads
 
@@ -2037,16 +1982,6 @@ policy for even, odd and irrational exponents is in
   a marker, not planned work.
 - **CE-174.2** A Liouville–Riemann fractional derivative (`@todo` in
   `library/calculus.ts`). Not planned.
-
-### CE-462. A coefficient times an ellipsis product splits the last sample
-
-**Status:** open; defect, small.
-
-`3(2·4·\dots·2n)` evaluates to `3·2·4·…·2·n`: flattening the product splits the
-last sample `2n` of the `ContinuationPlaceholder` pattern into two factors, so
-the pattern no longer reads as `2k`. `expand()` and `negate()` keep such a
-product intact (`boxed-expression/expand.ts`, `negate.ts`); the `Multiply`
-canonical flatten does not.
 
 ### CE-175. A multi-index big operator with a dependent bound stays symbolic
 

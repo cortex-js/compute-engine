@@ -24,11 +24,11 @@
   tuple with a tuple or string component is `any`; `h(((1, 2), 3))` was typed
   `number` for the value `((2, 4), 6)`.
 - **`Map` over elements whose depth the type does not state admits nested
-  lists**: `Map(k, L)` with `k: (real) -> real` and `L: list<unknown>`
-  (or `list<any>`, `list<list<unknown>>`) was typed `list<real>`, which did
-  not hold a ragged or nested element, and is `list<indexed_collection<any> |
-  real>`. An operand typed `any` at a declared scalar parameter types the same
-  on the box and derived routes (CE-485).
+  lists**: `Map(k, L)` with `k: (real) -> real` and `L: list<unknown>` (or
+  `list<any>`, `list<list<unknown>>`) was typed `list<real>`, which did not hold
+  a ragged or nested element, and is `list<indexed_collection<any> | real>`. An
+  operand typed `any` at a declared scalar parameter types the same on the box
+  and derived routes (CE-485).
 - **A nominal list-of-points type is not read through its definition** (CE-488):
   `k(x)` with `k: (tuple<number, number>) -> number` and `x` of a nominal
   `list<tuple<…>>` type was typed `list<number>` and is `error`, as its value
@@ -47,9 +47,17 @@
 
 ### Resolved Issues
 
+- **`subs()` on a structural expression that is a lone symbol keeps a constant
+  name in the replacement.** With `x` declared `real`, the structural `x` with
+  `x` replaced by the structural `t + i` gave `t + (0 + 1i)` in 0.168.0 to
+  0.169.1, so a sum with an index `i` over an inlined `f(x) = x` gave complex
+  values: with `X = [1, 2, 3]`, `Σ_{i=1}^{3} f(X + i)` gave
+  `[3+3i, 6+3i, 9+3i]`. It gives `[9, 12, 15]` again. A requested form
+  (`subs(…, { canonical: true })`) is still honored.
+
 - **The count of a comprehension matches its cells when a clause can fail.**
-  `[j for i in 1..3 if bad(i), j in []]`, where the guard gives an error, had
-  a count of 0 but yields 3 error cells; its count is now 3.
+  `[j for i in 1..3 if bad(i), j in []]`, where the guard gives an error, had a
+  count of 0 but yields 3 error cells; its count is now 3.
 - **Testing whether a comprehension is finite no longer runs user code.** The
   test does not evaluate a guard or an impure domain, so
   `let r = [i for i in 1..3, j in filter(1..i, keep)]` no longer calls `keep`.
@@ -61,10 +69,12 @@
   `Range(0)` and the compiled JavaScript `Range(0)` were empty; they are now
   `[1, 0]`, as the canonical form already was.
 - **A coefficient times an ellipsis product keeps the product whole.**
-  `3(2·4·…·2n)` evaluated, expanded and simplified to `3·2·4·…·2·n` or
-  `48·…·n`; it now stays `3·(2·4·…·2n)`.
-- **The type of `Negate`, `Sqrt` and the other element-wise functions of a
-  list of range rows holds its value.** `Negate([1..3, 4..6])` was typed
+  `3(2·4·…·2n)` evaluated, expanded and simplified to `3·2·4·…·2·n` or `48·…·n`;
+  it now stays `3·(2·4·…·2n)`. The same holds in a sum: `x + 3(2·4·…·2n)` was
+  `x + 48·(…·n)`, and like terms still collect
+  (`(2·4·…·2n) + (2·4·…·2n)` is `2(2·4·…·2n)`).
+- **The type of `Negate`, `Sqrt` and the other element-wise functions of a list
+  of range rows holds its value.** `Negate([1..3, 4..6])` was typed
   `list<range>` for a matrix of integers; it is now `list<list<integer>>`.
   `Sum([1..2, 3..4])` is typed `integer | list<integer>` (it was `number`, for
   the value `[4, 6]`).

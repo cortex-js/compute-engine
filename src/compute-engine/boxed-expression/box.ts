@@ -2004,7 +2004,8 @@ function concreteCallbackParamType(t: Type): Type | undefined {
 function annotateCallbacksFromSignature(
   ce: ComputeEngine,
   ops: ReadonlyArray<ExpressionInput>,
-  sigType: Type | undefined
+  sigType: Type | undefined,
+  out?: { stamp?: ValueDerivedStamp }
 ): ReadonlyArray<ExpressionInput> {
   if (sigType === undefined || typeof sigType === 'string') return ops;
   const arms = overloadArms(sigType);
@@ -2015,7 +2016,7 @@ function annotateCallbacksFromSignature(
     // ratified conservative skip.
     const arm = resolveContextualArm(arms, ops.length);
     if (arm === undefined) return ops;
-    return annotateCallbacksFromContextualSolve(ce, ops, arm);
+    return annotateCallbacksFromContextualSolve(ce, ops, arm, out);
   }
   if (sigType.kind !== 'signature') return ops;
   // A POLYMORPHIC callee takes the CONTEXTUAL route instead (Design D): its
@@ -2025,7 +2026,7 @@ function annotateCallbacksFromSignature(
   // slot is contextually typed there, and only after `S` has been
   // instantiated from the sibling operands.
   if (sigType.typeParams !== undefined && sigType.typeParams.length > 0)
-    return annotateCallbacksFromContextualSolve(ce, ops, sigType);
+    return annotateCallbacksFromContextualSolve(ce, ops, sigType, out);
 
   return annotateFromDeclaredParams(ce, ops, sigType);
 }
@@ -2112,7 +2113,8 @@ function annotateFromDeclaredParams(
 function annotateCallbacksFromContextualSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<ExpressionInput>,
-  arm: FunctionSignature
+  arm: FunctionSignature,
+  out?: { stamp?: ValueDerivedStamp }
 ): ReadonlyArray<ExpressionInput> {
   // Discriminate FIRST, in strictly increasing cost, so an application with no
   // stampable literal at all — the overwhelmingly common case, including every
@@ -2169,6 +2171,8 @@ function annotateCallbacksFromContextualSolve(
   if (stampable.length === 0) return ops;
 
   let result: ExpressionInput[] | undefined;
+  // The literals as written, at each index whose literal is stamped below.
+  let literals: Map<number, Expression> | undefined;
 
   // §5 step 1: canonicalize only the operands the solve needs, and hand the
   // CANONICAL form onward (canonical-of-canonical is the identity, so the
@@ -2223,9 +2227,112 @@ function annotateCallbacksFromContextualSolve(
     if (literal === undefined) continue;
     result ??= [...ops];
     result[slot.index] = literal;
+    if (out !== undefined) (literals ??= new Map()).set(slot.index, raw);
+  }
+
+  // A parameter type solved from the type of a source operand that holds a
+  // variable can become wrong when a variable is assigned again: the type
+  // of the operand changes. This is true for a variable with an inferred
+  // type, for a variable declared with a bare constructor (`list`), whose
+  // element type follows each assignment, and for a variable whose value
+  // reads another variable. Record each such operand with its type now, so
+  // that the caller can box the call again when the type of the operand
+  // changes (`recordValueDerivedStamp()`). An operand that holds no
+  // variable, or only constants, is not recorded.
+  if (out !== undefined && literals !== undefined) {
+    const sources: { expr: Expression; type: Type }[] = [];
+    for (const i of plan.sources) {
+      const src = result?.[i] ?? ops[i];
+      if (!(src instanceof _BoxedExpression)) continue;
+      const holdsVariable = src.symbols.some((name) => {
+        const def = ce.lookupDefinition(name);
+        return isValueDef(def) && !def.value.isConstant;
+      });
+      if (holdsVariable) sources.push({ expr: src, type: src.type.type });
+    }
+    if (sources.length > 0) out.stamp = { literals, sources, ops: [] };
   }
 
   return result ?? ops;
+}
+
+/** What the contextual callback solve read to stamp a callback literal from
+ * the value of a variable. `literals` holds, for each operand index whose
+ * literal was stamped, the literal as written (with no stamp). `sources`
+ * holds each source operand that the solve read and that holds a variable,
+ * with the type that the operand had when the solve read it. `ops` holds
+ * the operands after the stamp. */
+type ValueDerivedStamp = {
+  literals: Map<number, Expression>;
+  sources: { expr: Expression; type: Type }[];
+  ops: ReadonlyArray<ExpressionInput>;
+};
+
+/**
+ * Make the call `result` follow the variables that its callback stamp was
+ * solved from.
+ *
+ * The contextual callback solve gives the parameter of an inline callback
+ * the element type of the value that a variable holds when the call is
+ * boxed. Example: with `L := [1, 2]`, `Map(x ↦ x + 1, L)` stamps
+ * `x: integer`. After `L := [1.5, 2.5]`, the stamp refuses each element,
+ * and the evaluation gave a list of `incompatible-type` errors, while the
+ * same call boxed after the assignment gave `[2.5, 3.5]`.
+ *
+ * The call records, as its receiver (`BoxedFunction._stampCallee()`), the
+ * source operands that the solve read, with their types then, and its
+ * operands as written. The counter of the receiver moves each time the
+ * type of a source operand is not the type that it had at the last read.
+ * Then the type and the value of the call are those of the same call boxed
+ * again (`BoxedFunction._reboxedForCallee()`), and the solve reads the type
+ * that the operand has now. The types are compared, not the change
+ * counters of the variables: the type of the operand `s`, when `s` holds
+ * `Reverse(L)`, changes when `L` is assigned again, and the counter of `s`
+ * does not move.
+ *
+ * The literal as written is not bound. It is boxed again in the lexical
+ * scope of this call, so that a name in its body has the binding that it
+ * had when the call was boxed, also after that scope was left.
+ *
+ * A canonical handler can give a call of another operator: `Fold(f, x, L)`
+ * becomes `Reduce(L, f, x)`. The record is then put on that call, with the
+ * operator and the operands of the call as written, and the call is boxed
+ * again from them. (ROADMAP CE-464)
+ */
+function recordValueDerivedStamp(
+  ce: ComputeEngine,
+  result: Expression,
+  name: MathJsonSymbol,
+  record: ValueDerivedStamp
+): void {
+  const ops = record.ops;
+  if (!(result instanceof BoxedFunction)) return;
+  if (result.operator === name && result.nops !== ops.length) return;
+  const written = ops.map(
+    (op, i) =>
+      record.literals.get(i) ??
+      (op instanceof _BoxedExpression ? op : ce.expr(op, { form: 'raw' }))
+  );
+  const sources = record.sources;
+  const seen = sources.map((x) => x.type);
+  let version = 0;
+  const receiver = {
+    get _writeVersion(): number {
+      for (let i = 0; i < sources.length; i++) {
+        const t = sources[i].expr.type.type;
+        const before = seen[i];
+        if (t === before) continue;
+        if (isSubtype(t, before) && isSubtype(before, t)) continue;
+        seen[i] = t;
+        version += 1;
+      }
+      return version;
+    },
+  };
+  result._stampCallee(undefined, written, receiver, {
+    operator: result.operator === name ? undefined : name,
+    scope: ce.context.lexicalScope,
+  });
 }
 
 /** Could `op` be an inline `Function` literal? A purely SYNTACTIC test on the
@@ -3439,8 +3546,12 @@ function makeCanonicalFunctionCore(
       applyOperatorDefinition(ce, name, ops, metadata, scope, opDef)
     );
 
-  // Receives the operands as boxed before the check against `opDef`.
-  const checked: { ops?: ReadonlyArray<Expression> } = {};
+  // Receives the operands as boxed before the check against `opDef`, and
+  // what a callback stamp read from the value of a variable.
+  const checked: {
+    ops?: ReadonlyArray<Expression>;
+    stamp?: ValueDerivedStamp;
+  } = {};
   const result = applyOperatorDefinition(
     ce,
     name,
@@ -3484,6 +3595,10 @@ function makeCanonicalFunctionCore(
     result.nops === ops.length
   )
     result._stampCallee(writtenArguments, undefined, fieldReceiver);
+  // A callback literal stamped from the value of a variable: the call is
+  // boxed again after an assignment to the variable.
+  if (checked.stamp !== undefined)
+    recordValueDerivedStamp(ce, result, name, checked.stamp);
   return result;
 }
 
@@ -3739,7 +3854,10 @@ function applyOperatorDefinition(
   scope: Scope | undefined,
   opDef: BoxedOperatorDefinition,
   rawOps?: ReadonlyArray<Expression>,
-  checkedOut?: { ops?: ReadonlyArray<Expression> }
+  checkedOut?: {
+    ops?: ReadonlyArray<Expression>;
+    stamp?: ValueDerivedStamp;
+  }
 ): Expression {
   let result: Expression | null;
 
@@ -3757,8 +3875,15 @@ function applyOperatorDefinition(
   // converted operator declares binding sites, so nothing reaches the other
   // route today. TRIPWIRE: a converted operator that also BINDS variables must
   // re-visit this gate — it would silently stamp nothing.
-  if (rawOps === undefined && !ops.some(isSpreadOperand))
-    ops = annotateCallbacksFromSignature(ce, ops, opDef.signature.type);
+  if (rawOps === undefined && !ops.some(isSpreadOperand)) {
+    ops = annotateCallbacksFromSignature(
+      ce,
+      ops,
+      opDef.signature.type,
+      checkedOut
+    );
+    if (checkedOut?.stamp !== undefined) checkedOut.stamp.ops = ops;
+  }
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments

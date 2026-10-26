@@ -88,6 +88,7 @@ import {
   shapedOrPlainListType,
   broadcastCellTypeOf,
   broadcastElementTypeOf,
+  rangeElementsAsLists,
 } from '../collection-utils.js';
 
 /** The facts about one operand the broadcast lift reads. Every member is a
@@ -536,12 +537,15 @@ export function gatedCollectionPresentType(t: Type): Type | undefined {
 }
 
 /** `v` with a gated collection type (`gatedCollectionPresentType`) replaced
- * by its present part. Every other fact is read from `v`. */
+ * by its present part, and with each `range` element of a collection read
+ * as a `list<integer>` (`rangeElementsAsLists`). Every other fact is read
+ * from `v`. */
 function presentView(v: BroadcastOperandView): BroadcastOperandView {
   const present = gatedCollectionPresentType(v.type);
-  if (present === undefined) return v;
+  const t = rangeElementsAsLists(present ?? v.type);
+  if (t === v.type) return v;
   return {
-    type: present,
+    type: t,
     get isSymbol() {
       return v.isSymbol;
     },
@@ -1878,7 +1882,11 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
   // Operands that are all numeric scalars make every arm decline
   // (`isNumericScalarOperandView`).
   if (input.views.every(isNumericScalarOperandView)) return undefined;
-  const { def, sigResult, hasTensors } = input;
+  const { def, hasTensors } = input;
+  // A handler that echoes the type of its collection operand (`Negate`
+  // answers `list<range>` for `[1..3, 4..6]`) is read with the same
+  // `list<integer>` reading of a `range` element as the operands below.
+  const sigResult = rangeElementsAsLists(input.sigResult);
   // A gated collection operand (a restricted point or list) lifts as its
   // present part. The caller adds the `missing` arm back
   // (`absorbOperandAbsence`).

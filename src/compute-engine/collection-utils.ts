@@ -17,6 +17,7 @@ import {
   descendIntoConstructor,
   isBareCutOnDescent,
   isCutOnDescent,
+  MAX_CELL_DEPTH,
   type AliasDescent,
 } from '../common/type/utils.js';
 import {
@@ -1783,6 +1784,76 @@ export function leafwardElementType(t: Readonly<Type>): Type | undefined {
   if (typeof r !== 'string' && r.kind === 'list' && r.dimensions === null)
     return r.elements;
   return collectionElementType(t);
+}
+
+/**
+ * The type `t` with each `range` element of a collection replaced by
+ * `list<integer>`, at any depth; `t` itself (the same object) when it has no
+ * such element. A `range` is a list of integers, but the name does not show
+ * the list level: `[1..3, 4..6]` is typed `list<range>`, and the lift read
+ * it as a list of rank 1 whose cells are `range` values. So `Negate` of it
+ * was typed `list<range>` and `Sqrt` of it `list<number>`, while the value is
+ * a list of lists of numbers. Read as `list<list<integer>>`, the operand has
+ * the shape of its value, and its cells are typed as they are for the
+ * sum `[1..3, 4..6] + [1..3, 4..6]` (`absorbScalarsIntoCell()`,
+ * `arithmetic-add.ts`, reads a `range` cell the same way). A `range` at the
+ * top level is not replaced: the readers read it as a list of integers
+ * already. The broadcast lift (`broadcastLiftType()`) and the type of
+ * `Sum(L)` and `Product(L)` (`bigOpResultType()`) read their operands
+ * through this function. (ROADMAP CE-496.)
+ *
+ * A transparent alias is unfolded before its constructors are read, under
+ * the descent guard (`unfoldAliasOnDescent()`), so a self-referential alias
+ * stops the walk. Thus `Rows` declared as an alias of `list<range>` is read
+ * as `list<list<integer>>`. When the alias holds no `range` element, the
+ * alias itself is returned. A nominal type is not unfolded: its name is the
+ * contract.
+ */
+export function rangeElementsAsLists(
+  t: Type,
+  depth = 0,
+  isElement = false,
+  seen?: AliasDescent
+): Type {
+  if (typeof t === 'object' && t.kind === 'reference' && t.alias === true) {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined || unfolded.type === t) return t;
+    const r = rangeElementsAsLists(
+      unfolded.type,
+      depth + 1,
+      isElement,
+      unfolded.seen
+    );
+    return r === unfolded.type ? t : r;
+  }
+  // An element `range` is read as a list, also as an arm of a union
+  // element (`list<integer | range>` for `[1..3, 5]`).
+  if (t === 'range')
+    return isElement ? { kind: 'list', elements: 'integer' } : t;
+  if (typeof t === 'string' || depth > MAX_CELL_DEPTH) return t;
+  if (t.kind === 'union') {
+    const arms = t.types.map((x) =>
+      rangeElementsAsLists(x, depth + 1, isElement, seen)
+    );
+    return arms.every((x, i) => x === t.types[i])
+      ? t
+      : reduceType({ kind: 'union', types: arms });
+  }
+  if (
+    (t.kind === 'list' && t.dimensions === undefined) ||
+    t.kind === 'set' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  ) {
+    const el = rangeElementsAsLists(
+      t.elements,
+      depth + 1,
+      true,
+      descendIntoConstructor(seen)
+    );
+    return el === t.elements ? t : { ...t, elements: el };
+  }
+  return t;
 }
 
 /**
