@@ -289,6 +289,7 @@ import {
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
   descendIntoConstructor,
+  isBareCutOnDescent,
   type AliasDescent,
   typeContainsMissing,
   typeHasNanFreeNumericCell,
@@ -15392,7 +15393,16 @@ function pointListApplicationType(
       // makes the call `Missing`.
       if (isDeepPointOperand(plan, i, x)) {
         const t = x.type;
-        const present = withoutTopLevelMissing(t);
+        // An alias whose definition has a `missing` arm at the top
+        // (`type A = list<A> | list<P> | missing`) is absent as a whole when
+        // its value is `Missing`: its definition is read one level for that
+        // arm.
+        let present = withoutTopLevelMissing(t);
+        if (present === t && typeof t === 'object' && t.kind === 'reference') {
+          const def = resolveTypeReference(t) ?? t;
+          const presentDef = withoutTopLevelMissing(def);
+          if (presentDef !== def) present = presentDef;
+        }
         if (present !== t) deepWhole = true;
         // Each absent element is `Missing` at its own depth in the result:
         // with `S: list<list<P> | missing>`, an absent row is an element of
@@ -15401,10 +15411,12 @@ function pointListApplicationType(
         // show (a `broadcastable<P | missing>`) is put on the cells.
         const s = stripAbsentPoints(present, slot.elements, 0, deepDepths);
         if (typeContainsMissing(s)) deepCell = true;
-        shape = combineMapShapes(
-          shape,
-          operandMapShape(stripMissingFromType(s))
-        );
+        // The shape is read from the type of the operand, with its `missing`
+        // arms skipped, not from `s`: `stripAbsentPoints` unfolds a
+        // recursive alias, and a walk over `s` would meet its
+        // self-reference deeper, so the type would repeat the alias at each
+        // level down to the descent limit.
+        shape = combineMapShapes(shape, operandMapShape(t, 0, undefined, true));
         return;
       }
       if (mapsAsPointOrPointList(plan, i, x))
@@ -15590,25 +15602,77 @@ function combineMapShapes(a: MapShape, b: MapShape): MapShape {
  * declaration (`type A = A | list<list<tuple<number, number>>>`) reaches
  * itself through a bare arm at the same depth, and when that arm has spent
  * its unfolds, it adds no value that the other arms do not hold, so the walk
- * ignores it. The elements start a new descent: the depth limit already
- * stops the walk through the list elements.
+ * ignores it.
+ *
+ * The elements keep the descent, so that a declaration that reaches itself
+ * through a constructor (`type A = list<A> | list<tuple<number, number>>`)
+ * is cut too. Such an occurrence stands for the values deeper in the
+ * structure, whose depth the type does not fix: the walk gives `'list'` for
+ * it when the declaration is surely a list, else `'cell'` or `'list'`. So
+ * the map over `A` is typed `list<list<list> | list<R>> | list<R>`, not
+ * a union of lists nested to the depth limit (ROADMAP CE-489).
  */
-function operandMapShape(t: Type, depth = 0, seen?: AliasDescent): MapShape {
+function operandMapShape(
+  t: Type,
+  depth = 0,
+  seen?: AliasDescent,
+  skipMissing = false
+): MapShape {
+  return operandMapShapeOrCut(t, depth, seen, skipMissing) ?? 'cell';
+}
+
+/**
+ * `operandMapShape`, or `null` for an alias that reaches itself as a bare
+ * arm of its own union: a union drops such an arm. An occurrence that the
+ * descent guard cuts after the walk entered a constructor gives `'list'`
+ * when the declaration is surely a list, else `'cell'` or `'list'`.
+ *
+ * With `skipMissing`, a `missing` arm of a union adds no shape: the caller
+ * reads the absences apart (`stripAbsentPoints`). This is used in place of
+ * `stripMissingFromType`, which unfolds an alias with a `missing` arm in
+ * place: the walk would then meet the self-reference of a recursive alias
+ * deeper, and the type of the map would repeat the alias at each level
+ * down to the descent limit.
+ */
+function operandMapShapeOrCut(
+  t: Type,
+  depth: number,
+  seen: AliasDescent,
+  skipMissing = false
+): MapShape | null {
+  if (typeof t === 'object' && t.kind === 'reference') {
+    const next = recordUnfoldOnDescent(declarationOf(t), seen);
+    if (next === undefined) {
+      if (isBareCutOnDescent(t, seen)) return null;
+      const d = resolveTypeReference(t) ?? t;
+      return isSubtype(d, INDEXED_COLLECTION_SHAPE_TYPE) &&
+        !isTupleShapedType(d) &&
+        !isSubtype(d, 'string')
+        ? 'list'
+        : mapShapeUnion(['cell', 'list']);
+    }
+    seen = next;
+  }
   const r = resolveTypeReference(t) ?? t;
   if (typeof r !== 'string' && r.kind === 'union') {
     const shapes: MapShape[] = [];
     for (const arm of r.types) {
-      let next = seen;
-      if (typeof arm === 'object' && arm.kind === 'reference') {
-        next = recordUnfoldOnDescent(declarationOf(arm), seen);
-        if (next === undefined) continue;
-      }
-      shapes.push(operandMapShape(arm, depth, next));
+      if (skipMissing && arm === 'missing') continue;
+      const s = operandMapShapeOrCut(arm, depth, seen, skipMissing);
+      if (s !== null) shapes.push(s);
     }
     return shapes.length === 0 ? 'cell' : mapShapeUnion(shapes);
   }
   if (typeof r !== 'string' && r.kind === 'broadcastable')
-    return mapShapeUnion([operandMapShape(r.elements, depth), 'tensor']);
+    return mapShapeUnion([
+      operandMapShape(
+        r.elements,
+        depth,
+        descendIntoConstructor(seen),
+        skipMissing
+      ),
+      'tensor',
+    ]);
   const surelyList =
     isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE) &&
     !isTupleShapedType(r) &&
@@ -15622,7 +15686,14 @@ function operandMapShape(t: Type, depth = 0, seen?: AliasDescent): MapShape {
   if (depth >= 8) return 'list';
   const element = collectionElementType(r);
   if (element === undefined) return 'list';
-  return { list: operandMapShape(element, depth + 1) };
+  return {
+    list: operandMapShape(
+      element,
+      depth + 1,
+      descendIntoConstructor(seen),
+      skipMissing
+    ),
+  };
 }
 
 /** The shape `s` cut after its first list level: the shape of a map that
@@ -16524,6 +16595,13 @@ function stripAbsentPoints(
   if (present !== elements || present === 'missing') {
     depths.add(at);
     elements = present === 'never' || present === 'missing' ? point : present;
+  } else if (typeof elements === 'object' && elements.kind === 'reference') {
+    // An element that is an alias whose definition has a `missing` arm at
+    // the top (`list<A>` with `type A = list<A> | list<P> | missing`) can be
+    // absent too. The reference is kept, so that the walk below meets it
+    // under the descent guard.
+    const def = resolveTypeReference(elements) ?? elements;
+    if (withoutTopLevelMissing(def) !== def) depths.add(at);
   }
   elements =
     rank === undefined
@@ -16570,9 +16648,19 @@ function withMissingAtDepths(
     rank === undefined
       ? r.elements
       : withMissingAtDepths(r.elements, depths, d + rank);
+  // An element type that already has a `missing` arm, also in a nested
+  // union, does not get a second one.
+  const hasMissingArm = (x: Type): boolean =>
+    x === 'missing' ||
+    (typeof x === 'object' &&
+      x.kind === 'union' &&
+      x.types.some(hasMissingArm));
   return {
     ...r,
-    elements: absentHere ? { kind: 'union', types: [inner, 'missing'] } : inner,
+    elements:
+      absentHere && !hasMissingArm(inner)
+        ? { kind: 'union', types: [inner, 'missing'] }
+        : inner,
   };
 }
 

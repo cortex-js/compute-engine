@@ -2,6 +2,19 @@
 
 ### Behavior Changes
 
+- **A list of ranges of the same length is accepted as a matrix by the
+  linear-algebra functions.** `Determinant([1..2, 3..4])` is `-2`, and
+  `Inverse`, `MatrixMultiply`, `Dot`, `LinearSolve` and the other functions
+  whose parameter is a matrix read each range as a row; they refused the list
+  with `incompatible-type`. The list keeps its `list<range>` type, so
+  `[1..2, 3..4]^{-1}` and `\cdot` still apply element by element.
+- **A recursive alias of lists of points is accepted at a point parameter.**
+  With `A = list<A> | list<tuple<number, number>>` and `y: A`, `k(y)` maps by
+  the depth of the value (`[(1, 2), (3, 4)]` gives `[3, 7]`); it was refused.
+  A union of a list of points and a list of lists of points
+  (`list<P> | list<list<P>>`) also maps by the depth of the value, and the
+  compiled call of a point-or-point-list union now gives the same values as
+  the interpreter (it was refused).
 - **An element-wise operation over an operand of type `unknown` holds a ragged
   list or a point** (CE-502). With `L: list<unknown>`, `2·L[1]` was typed
   `broadcastable<number>`, which does not hold `[[1], [2, 3]]` or `(1, 2)` in

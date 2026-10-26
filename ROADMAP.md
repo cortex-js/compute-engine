@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-505.
+Next free reference: CE-507.
 
 **Entry format.**
 
@@ -130,20 +130,6 @@ problem does not occur on its installed release). Report:
   row.
 
 ## Types and type inference
-
-### CE-489. A point parameter refuses a recursive alias whose self-reference is inside a constructor
-
-**Status:** design needed; capability.
-
-With `k` declared `(tuple<number, number>) -> number` and the alias
-`A = list<A> | list<tuple<number, number>>`, a symbol `y: A` that holds
-`[(1, 2), (3, 4)]` gives `k(y)` the type `error`, and the value
-`incompatible-type`, though the value is a list of points that maps. The walk
-that finds the rank of a point argument (`pointTensorOf()`,
-`collection-utils.ts`) asks each row to be a list or tensor of points and
-answers `false` at its depth limit. Accepting such a type needs a rule for the
-rank of a recursive collection type. An alias whose self-reference is not inside
-a constructor (`A = A | list<tuple<number, number>>`) maps.
 
 ### CE-27. An access over `any` or `unknown` elements has no `missing` arm
 
@@ -475,18 +461,28 @@ admit a list of points of any depth when the other operand may be a list.
 
 ## Collections, absence and broadcasting
 
-### CE-495. A list of range rows is refused at a `matrix` parameter
+### CE-505. A point argument of a recursive alias whose arms mix points and lists is refused
 
-**Status:** design needed; capability.
+**Status:** open; defect.
 
-Since a range in a collection stays a range, `[1..2, 3..4]` is typed
-`list<range>`. `Determinant`, `Inverse`, `MatrixMultiply`, `Dot` and every other
-operator whose parameter is typed `matrix` refuse it with `incompatible-type`,
-while `[[1, 2], [3, 4]]` works. The operators whose parameter accepts any value
-read a range row as a row (`listedLazyRows()`, `library/linear-algebra.ts`).
-Accepting such a list at a `matrix` parameter needs a rule: is a list of finite
-ranges of equal length a matrix type? The test in
-`ce-39-3-range-element-stays-range.test.ts` is marked `test.failing`.
+With `k` declared `(tuple<number, number>) -> number` and the alias
+`B = list<B> | tuple<number, number>`, a symbol `y: B` that holds the point
+`(1, 2)` gives `k(y)` the type `error` and an `incompatible-type` value,
+though `k((1, 2))` is `3`. A value of `B` can also be a list whose elements
+mix points and lists (`[(1, 2), [(3, 4)]]`), which the map over points refuses,
+so the walk (`recursivePointNesting()`, `collection-utils.ts`) refuses the
+whole alias. The call could instead be accepted, typed by the depth it reads
+from the value, and refuse only a value whose elements mix depths.
+
+### CE-506. A call at a point parameter with an empty list is typed as one result
+
+**Status:** open; defect.
+
+With `k` declared `(tuple<number, number>) -> number`, `k([])` is typed
+`number`, and its value is `[]`. A comment on `isPointListArgumentType()`
+(`collection-utils.ts`) says that `list<never>` is left out on purpose; the
+type of the call should still hold the value, for example
+`number | list<never>`.
 
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 

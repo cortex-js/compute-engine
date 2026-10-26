@@ -37,6 +37,7 @@ import { totalDegree } from '../boxed-expression/polynomial-degree.js';
 import {
   absentScalarMarker,
   checkArity,
+  hasMatrixArm,
 } from '../boxed-expression/validate.js';
 import {
   broadcastLengthMismatch,
@@ -61,6 +62,7 @@ import {
   ExpressionInput,
   IComputeEngine as ComputeEngine,
   OperandDescriptor,
+  OperatorDefinition,
   OperatorTypeHandlerOnTypes,
   PureEngineView,
   SymbolDefinitions,
@@ -417,6 +419,94 @@ function listedLazyRows(
     ops.push(row);
   }
   return changed ? ce.function('List', ops) : xs;
+}
+
+/**
+ * The operand `xs` at a matrix parameter `param`, with its `Range` rows
+ * listed (`listedLazyRows()`): `[1..2, 3..4]` gives `[[1, 2], [3, 4]]`.
+ *
+ * A list of `Range` rows is typed `list<range>`, and the argument check
+ * admits it at a matrix parameter (`admitsRangeRowsAsMatrix()`,
+ * `boxed-expression/validate.ts`) because a list of finite ranges of the
+ * same length is a matrix of integers (user decision 2026-10-26). The value
+ * is checked here:
+ *
+ * - When a row is an infinite range, or when the rows have different
+ *   lengths, the value is not a matrix, and the result is an
+ *   `incompatible-type` error.
+ * - When the rows have more than `MAX_LAZY_SHAPE_ELEMENTS` elements in
+ *   total, or a row has a count that is not known, the result is
+ *   `undefined`: the operator then stays unevaluated.
+ *
+ * The result is `xs` itself when `xs` has no lazy row.
+ */
+function rangeRowsAsMatrix(
+  ce: ComputeEngine,
+  xs: Expression,
+  param: Type
+): Expression | undefined {
+  if (!isFunction(xs, 'List') || xs.shape.length > 0) return xs;
+  if (
+    xs.ops.some(
+      (row) =>
+        !isFunction(row, 'List') &&
+        row.isLazyCollection &&
+        row.isFiniteCollection === false
+    )
+  )
+    return ce.typeError(param, xs.type, xs);
+  const listed = listedLazyRows(ce, xs);
+  if (listed === undefined || listed === xs) return listed;
+  if (listed.shape.length !== 2) return ce.typeError(param, xs.type, xs);
+  return listed;
+}
+
+/**
+ * The operator definition `def` with an evaluate handler that reads a list
+ * of `Range` rows at a matrix parameter as the matrix of its integers.
+ *
+ * Before the handler of `def` runs, each operand at a parameter that has a
+ * matrix arm (`hasMatrixArm()`, `boxed-expression/validate.ts`) is replaced
+ * by the result of `rangeRowsAsMatrix()`. A parameter typed `any`, `value`
+ * or `expression` accepts a matrix too, but it has no matrix arm, so its
+ * operand is not changed. When that result is an error, the error is the
+ * value of the call. When that result is `undefined`, the call stays
+ * unevaluated. The operands at other parameters are not changed.
+ */
+function withRangeRowsListed(def: OperatorDefinition): OperatorDefinition {
+  const evaluate = def.evaluate;
+  const signature =
+    typeof def.signature === 'string' ? parseType(def.signature) : undefined;
+  if (
+    typeof evaluate !== 'function' ||
+    typeof signature !== 'object' ||
+    signature.kind !== 'signature'
+  )
+    return def;
+  const params = [...(signature.args ?? []), ...(signature.optArgs ?? [])].map(
+    (arg) => arg.type
+  );
+  const matrixParams = params.map((param) =>
+    hasMatrixArm(param) ? param : undefined
+  );
+  return {
+    ...def,
+    evaluate: (ops, options) => {
+      let listedOps: Expression[] | undefined;
+      for (let i = 0; i < ops.length; i++) {
+        const param = matrixParams[i];
+        if (param === undefined) continue;
+        const listed = rangeRowsAsMatrix(options.engine, ops[i], param);
+        if (listed === undefined) return undefined;
+        if (!listed.isValid) return listed;
+        if (listed !== ops[i]) {
+          listedOps ??= [...ops];
+          listedOps[i] = listed;
+        }
+      }
+      return evaluate(listedOps ?? ops, options);
+    },
+  };
 }
 
 /** The sum of `terms`, in groups: one `add(...terms)` of more than about a
@@ -3081,7 +3171,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    Determinant: {
+    Determinant: withRangeRowsListed({
       examples: ['Determinant([[1, 2], [3, 4]])'],
       description: 'Determinant of a square matrix.',
       complexity: 8200,
@@ -3182,7 +3272,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return undefined;
       },
-    },
+    }),
 
     // `Det` is the Wolfram Language name of `Determinant`. The one-operand
     // form `Det[m]` has the same meaning, so the canonical form is
@@ -3200,7 +3290,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine: ce }) => ce.function('Determinant', ops),
     },
 
-    Inverse: {
+    Inverse: withRangeRowsListed({
       examples: ['Inverse([[1, 2], [3, 4]])'],
       description: 'Multiplicative inverse of a square matrix.',
       complexity: 8200,
@@ -3283,9 +3373,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return undefined;
       },
-    },
+    }),
 
-    PseudoInverse: {
+    PseudoInverse: withRangeRowsListed({
       examples: ['PseudoInverse([[1, 2], [3, 4], [5, 6]])'],
       description: 'Moore-Penrose pseudoinverse of a matrix.',
       complexity: 8200,
@@ -3312,10 +3402,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return undefined;
       },
-    },
+    }),
 
     // Solve the linear system A·x = b for the unknown vector (or matrix) x.
-    LinearSolve: {
+    LinearSolve: withRangeRowsListed({
       examples: ['LinearSolve([[2, 1], [1, 3]], [3, 5])'],
       description: 'Solve the linear system A·x = b for x.',
       keywords: ['linear system', 'solve'],
@@ -3367,7 +3457,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           .function('MatrixMultiply', [inv, B])
           .evaluate({ numericApproximation });
       },
-    },
+    }),
 
     // Adjoint: {
     //   complexity: 8200,
@@ -3382,7 +3472,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //   },
     // },
 
-    AdjugateMatrix: {
+    AdjugateMatrix: withRangeRowsListed({
       examples: ['AdjugateMatrix([[1, 2], [3, 4]])'],
       description: 'Adjugate (classical adjoint) of a square matrix.',
       complexity: 8200,
@@ -3412,7 +3502,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return undefined;
       },
-    },
+    }),
 
     // Minor: {
     //   complexity: 8200,
@@ -3431,7 +3521,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     // For matrices: returns scalar
     // For rank > 2 tensors: returns tensor of traces over last two axes (batch trace)
     // Optional axis1, axis2 to specify which axes to trace over (default: last two)
-    Trace: {
+    Trace: withRangeRowsListed({
       examples: ['Trace([[1, 2], [3, 4]])'],
       description: 'Trace of a matrix or pair of tensor axes.',
       complexity: 8200,
@@ -3559,7 +3649,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return undefined;
       },
-    },
+    }),
 
     Kernel: {
       examples: ['Kernel([[1, 2], [2, 4]])'],
@@ -3732,7 +3822,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
     // Matrix multiplication: A (m×n) × B (n×p) → result (m×p)
     // Handles matrix × matrix, matrix × vector, vector × matrix
-    MatrixMultiply: {
+    MatrixMultiply: withRangeRowsListed({
       examples: ['MatrixMultiply([[1, 2], [3, 4]], [[5, 6], [7, 8]])'],
       description: 'Matrix and vector multiplication.',
       complexity: 8300,
@@ -3915,9 +4005,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Unsupported tensor ranks
         return undefined;
       },
-    },
+    }),
 
-    Dot: {
+    Dot: withRangeRowsListed({
       examples: ['Dot([1, 2, 3], [4, 5, 6])'],
       description: 'Dot product (vector inner product) or matrix product.',
       keywords: ['dot product', 'inner product', 'scalar product'],
@@ -4271,9 +4361,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         }
         return ce.function('MatrixMultiply', lowered).evaluate();
       },
-    },
+    }),
 
-    HadamardProduct: {
+    HadamardProduct: withRangeRowsListed({
       examples: ['HadamardProduct([[1, 2], [3, 4]], [[5, 6], [7, 8]])'],
       description:
         'Hadamard (element-wise) product of two vectors or matrices of the same shape.',
@@ -4331,7 +4421,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // Element-wise product (reuses the tensor field's broadcast multiply).
         return aTensor.multiply(bTensor).expression;
       },
-    },
+    }),
 
     MatrixRank: {
       examples: ['MatrixRank([[1, 2], [2, 4]])'],
@@ -4637,7 +4727,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
-    MatrixPower: {
+    MatrixPower: withRangeRowsListed({
       examples: ['MatrixPower([[1, 1], [1, 0]], 10)'],
       description:
         'Square matrix raised to a power. Integer powers are the repeated ' +
@@ -4814,9 +4904,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
             .evaluate({ numericApproximation });
         return result;
       },
-    },
+    }),
 
-    CharacteristicPolynomial: {
+    CharacteristicPolynomial: withRangeRowsListed({
       examples: ['CharacteristicPolynomial([[2, 1], [1, 2]], x)'],
       description:
         'Characteristic polynomial det(x·I − A) of a square matrix (monic).',
@@ -4893,9 +4983,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           ? undefined
           : foldInexactTerms(xIminusA!.field.expression(det));
       },
-    },
+    }),
 
-    RowReduce: {
+    RowReduce: withRangeRowsListed({
       examples: ['RowReduce([[1, 2, 3], [4, 5, 6]])'],
       description: 'Reduced row echelon form (RREF) of a matrix.',
       complexity: 8200,
@@ -4941,7 +5031,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           ),
         ]);
       },
-    },
+    }),
 
     // Diagonal can be used to:
     // 1. Create a diagonal matrix from a vector
@@ -5193,7 +5283,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
     //   - Frobenius (default, and `"Frobenius"`): √(ΣΣ|aij|²)
     //   - order 2: the spectral norm, the largest singular value
     //   - order 1: max column sum; order ∞: max row sum
-    Norm: {
+    Norm: withRangeRowsListed({
       examples: ['Norm([3, 4])', 'Norm([3, 4], 1)'],
       description: 'Vector or matrix norm.',
       complexity: 8200,
@@ -5927,12 +6017,12 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return undefined;
       },
-    },
+    }),
 
     // Compute the eigenvalues of a square matrix
     // For 2×2 matrices: uses characteristic polynomial (symbolic)
     // For larger matrices: uses QR algorithm (numeric)
-    Eigenvalues: {
+    Eigenvalues: withRangeRowsListed({
       examples: ['Eigenvalues([[2, 1], [1, 2]])'],
       description: 'Eigenvalues of a square matrix.',
       complexity: 8500,
@@ -6049,11 +6139,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const values = computeEigenvaluesQR(M, n, ce);
         return numericApproximation ? values?.N() : values;
       },
-    },
+    }),
 
     // Compute the eigenvectors of a square matrix
     // Returns a list of eigenvectors (as column vectors)
-    Eigenvectors: {
+    Eigenvectors: withRangeRowsListed({
       examples: ['Eigenvectors([[2, 1], [1, 2]])'],
       description: 'Eigenvectors of a square matrix.',
       complexity: 8600,
@@ -6126,11 +6216,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return ce.expr(['List', ...eigenvectors]);
       },
-    },
+    }),
 
     // Compute both eigenvalues and eigenvectors
     // Returns a tuple: [eigenvalues, eigenvectors]
-    Eigen: {
+    Eigen: withRangeRowsListed({
       examples: ['Eigen([[2, 1], [1, 2]])'],
       description: 'Eigenvalue-eigenvector decomposition of a square matrix.',
       complexity: 8700,
@@ -6184,11 +6274,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
 
         return ce.expr(['Tuple', eigenvalues, eigenvectors]);
       },
-    },
+    }),
 
     // LU Decomposition: A = LU (or PA = LU with pivoting)
     // Returns [L, U] for no pivoting or [P, L, U] with pivoting
-    LUDecomposition: {
+    LUDecomposition: withRangeRowsListed({
       examples: ['LUDecomposition([[4, 3], [2, 1]])'],
       description: 'LU decomposition of a square matrix.',
       complexity: 8600,
@@ -6250,11 +6340,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const { P, L, U } = result;
         return ce.expr(['Tuple', P, L, U]);
       },
-    },
+    }),
 
     // QR Decomposition: A = QR
     // Returns [Q, R] where Q is orthogonal and R is upper triangular
-    QRDecomposition: {
+    QRDecomposition: withRangeRowsListed({
       examples: ['QRDecomposition([[0, 1], [1, 1]])'],
       description: 'QR decomposition of a matrix.',
       complexity: 8600,
@@ -6315,11 +6405,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const { Q, R } = result;
         return ce.expr(['Tuple', Q, R]);
       },
-    },
+    }),
 
     // Cholesky Decomposition: A = LL^T (for positive definite matrices)
     // Returns L (lower triangular matrix)
-    CholeskyDecomposition: {
+    CholeskyDecomposition: withRangeRowsListed({
       examples: ['CholeskyDecomposition([[4, 2], [2, 5]])'],
       description: 'Cholesky decomposition of a positive-definite matrix.',
       complexity: 8600,
@@ -6371,11 +6461,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           ? computeCholesky(M, n, ce)
           : exactCholesky(M, n, ce);
       },
-    },
+    }),
 
     // Singular Value Decomposition: A = UΣV^T
     // Returns [U, Σ, V] where U and V are orthogonal, Σ is diagonal
-    SVD: {
+    SVD: withRangeRowsListed({
       examples: ['N(SVD([[3, 0], [0, 4]]))'],
       description: 'Singular value decomposition of a matrix.',
       complexity: 8700,
@@ -6418,9 +6508,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         const { U, S, V } = result;
         return ce.expr(['Tuple', U, S, V]);
       },
-    },
+    }),
 
-    SingularValues: {
+    SingularValues: withRangeRowsListed({
       examples: ['SingularValues([[3, 0], [0, 4]])'],
       description:
         'The singular values of a matrix, sorted in descending order ' +
@@ -6520,7 +6610,7 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
           ...vals.map((v) => scaledNumber(ce, v, 0, inexact)),
         ]);
       },
-    },
+    }),
   },
 ];
 

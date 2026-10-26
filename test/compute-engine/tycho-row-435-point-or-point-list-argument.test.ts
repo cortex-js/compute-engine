@@ -139,11 +139,51 @@ describe('A POINT OR A LIST OF POINTS at a point parameter (CE-407)', () => {
     expect(value.type.matches(type)).toBe(true);
   });
 
-  test('a union with another collection arm is declined', () => {
-    const ce = engine(`${UNION} | list<list<${POINT}>>`);
-    expect(() =>
-      compile(ce.parse('f(L)'), { fallback: false } as never)
-    ).toThrow(/admits a collection that is not a list of points/);
+  test('a union with a list of lists of points maps by the depth of the value', () => {
+    // Each arm is a point, a list of points or a list of lists of points,
+    // so the interpreter and the compiled call read the depth from the
+    // value (ROADMAP CE-489). Before, the compiled call was declined, and
+    // the interpreter typed the call as one point.
+    const type = `${UNION} | list<list<${POINT}>>`;
+    expect(run(engine(type), [1, 2])).toEqual([2, 3]);
+    expect(
+      run(engine(type), [
+        [1, 2],
+        [3, 4],
+      ])
+    ).toEqual([
+      [2, 3],
+      [4, 5],
+    ]);
+    expect(run(engine(type), [[[1, 2]], [[3, 4]]])).toEqual([
+      [[2, 3]],
+      [[4, 5]],
+    ]);
+    // Each interpreter value fits the static type of the call, and is the
+    // value of the compiled call. A `List` or a `Tuple` of the MathJSON
+    // value is an array of the compiled value.
+    const plain = (x: unknown): unknown =>
+      Array.isArray(x) && (x[0] === 'List' || x[0] === 'Tuple')
+        ? x.slice(1).map(plain)
+        : x;
+    const ce = engine(type);
+    const t = ce.parse('f(L)').type;
+    for (const [v, js] of [
+      ['(1,2)', [1, 2]],
+      [
+        '[(1,2),(3,4)]',
+        [
+          [1, 2],
+          [3, 4],
+        ],
+      ],
+      ['[[(1,2)],[(3,4)]]', [[[1, 2]], [[3, 4]]]],
+    ] as const) {
+      ce.assign('L', ce.parse(v));
+      const value = ce.parse('f(L)').evaluate();
+      expect(value.type.matches(t)).toBe(true);
+      expect(plain(value.json)).toEqual(run(engine(type), js));
+    }
   });
 
   test('a parameter whose coordinate can hold a list is declined', () => {

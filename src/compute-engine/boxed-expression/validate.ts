@@ -1812,6 +1812,68 @@ function admittedByDeferredOverlap(op: Expression, param: Type): boolean {
   );
 }
 
+const MATRIX_OF_INTEGERS = parseType('matrix<integer>');
+const LIST_OF_NUMBERS = parseType('list<number>');
+
+/**
+ * Whether the parameter type `param` has an arm that is a matrix type, or a
+ * tensor type that accepts a matrix of integers: `matrix`, `matrix | vector`,
+ * `number | tensor`.
+ *
+ * A type that accepts a matrix only because it accepts every value, or every
+ * list, has no matrix arm: `any`, `unknown`, `value`, `expression`, `list`,
+ * `collection` and `list<any>` give `false`. A list of `Range` rows is read
+ * as a matrix only at a parameter that asks for a matrix. At a parameter of
+ * the other kinds, the list is an ordinary value and stays as it is.
+ */
+export function hasMatrixArm(param: Type): boolean {
+  return paramArms(param).some(
+    (arm) =>
+      typeof arm !== 'string' &&
+      arm.kind === 'list' &&
+      arm.dimensions !== undefined &&
+      isSubtype(MATRIX_OF_INTEGERS, arm)
+  );
+}
+
+/**
+ * Whether the operand `op` is a list of `Range` rows (`[1..2, 3..4]`, typed
+ * `list<range>`) at a parameter `param` of a library operator that has a
+ * matrix arm (`matrix`, `matrix | vector`, `number | tensor`; see
+ * `hasMatrixArm()`).
+ *
+ * A `Range` element of a `List` stays a range, so the type of such a list is
+ * `list<range>`. This type has no dimensions, so it does not match a matrix
+ * type. But a list of finite ranges of the same length is a matrix of
+ * integers: each range is a row (user decision 2026-10-26). The operand is
+ * admitted, and the list keeps its value and its type. The evaluate handler
+ * of the operator lists the rows (`rangeRowsAsMatrix()`,
+ * `library/linear-algebra.ts`) and refuses a value that is not a matrix: rows
+ * of different lengths, an infinite range, or too many cells.
+ *
+ * The elements must all be ranges or lists of numbers, and at least one
+ * must be a range: `list<range | vector<integer^2>>` is admitted. A
+ * parameter of a user function is not included: its declared type is the
+ * type of the value that the body receives, and a list of ranges is not a
+ * value of a matrix type.
+ */
+function admitsRangeRowsAsMatrix(
+  op: Expression,
+  param: Type,
+  internals: ValidateArgumentsInternals | undefined
+): boolean {
+  if (internals?.userFunction === true) return false;
+  if (!hasMatrixArm(param)) return false;
+  const t = resolveTypeAlias(op.type.type);
+  if (typeof t === 'string' || t.kind !== 'list' || t.dimensions !== undefined)
+    return false;
+  const element = t.elements;
+  return (
+    isSubtype(element, LIST_OF_NUMBERS) &&
+    paramArms(element).some((arm) => arm === 'range')
+  );
+}
+
 /**
  * True when a parameter is a UNION that mixes CALLABLE arms with VALUE arms
  * and every value arm is numeric — the shape of a "size or predicate"
@@ -4077,8 +4139,13 @@ export function validateArguments(
       // nested lists) is accepted provisionally; runtime conformance is the
       // operator's own evaluate-time gate (handler precedence — a
       // nonconforming or still-symbolic operand stays inert or gets the
-      // handler's specific error, e.g. `expected-square-matrix`).
-      if (admittedByDeferredOverlap(op, param)) {
+      // handler's specific error, e.g. `expected-square-matrix`). A list of
+      // `Range` rows at a matrix parameter is deferred too
+      // (`admitsRangeRowsAsMatrix`).
+      if (
+        admittedByDeferredOverlap(op, param) ||
+        admitsRangeRowsAsMatrix(op, param, internals)
+      ) {
         result.push(op);
         deferredIdx.add(result.length - 1);
         continue;
@@ -4361,7 +4428,10 @@ export function validateArguments(
         }
       }
       // Overlap-deferred validation (§D6.2) — see the required-param gate.
-      if (admittedByDeferredOverlap(op, param)) {
+      if (
+        admittedByDeferredOverlap(op, param) ||
+        admitsRangeRowsAsMatrix(op, param, internals)
+      ) {
         result.push(op);
         deferredIdx.add(result.length - 1);
         i += 1;
@@ -4595,7 +4665,10 @@ export function validateArguments(
           }
         }
         // Overlap-deferred validation (§D6.2) — see the required-param gate.
-        if (admittedByDeferredOverlap(op, varParam)) {
+        if (
+          admittedByDeferredOverlap(op, varParam) ||
+          admitsRangeRowsAsMatrix(op, varParam, internals)
+        ) {
           result.push(op);
           deferredIdx.add(result.length - 1);
           continue;
