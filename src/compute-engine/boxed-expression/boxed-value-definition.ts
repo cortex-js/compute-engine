@@ -122,9 +122,13 @@ export const CHECKPOINT_DEF_KEY = 'definition-fields';
  * - When the type is changed, the value is preserved if it is compatible
  *   with the new type, otherwise it is reset to no value.
  *
- * - When the value is changed, the type is unaffected. If the value is not
- *   compatible with the type (setting a def with a numeric type to a value
- *   of `True` for example), the value is discarded.
+ * - When the value is changed, the type is unaffected, and the setter does
+ *   not check the value against the type: a definition declared `integer`
+ *   keeps the string `"abc"` written to it. `ce.assign()` is the route that
+ *   checks a value against the declared type (and types a function literal
+ *   with the declared signature). A value written here that is not of the
+ *   type is caught later, when a function literal that reads the symbol is
+ *   called or compiled (`capturedValueMismatch()`, `function-utils.ts`).
  *
  */
 
