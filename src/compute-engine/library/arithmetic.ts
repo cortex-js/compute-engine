@@ -247,6 +247,7 @@ import {
   descendIntoConstructor,
   isBareCutOnDescent,
   topTypeBesideAbsence,
+  openDepthScalarArms,
   blockLocalTypeMayHoldList,
   unfoldAliasOnDescent,
   widen,
@@ -3342,6 +3343,12 @@ function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
     return operandChildren(d) !== undefined;
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>`
+  // (`openDepthScalarArms`), the type of an element-wise application over
+  // an operand of type `unknown`, may be a collection, as a
+  // `broadcastable<R>` may (`isPossiblyCollectionTyped`,
+  // `collection-utils.ts`).
+  if (openDepthScalarArms(t) !== undefined) return true;
   if (t.kind !== 'union') return false;
   return t.types.some((branch) => {
     const b = resolveTypeAlias(branch);
@@ -3374,8 +3381,10 @@ function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
  *
  * An auto-declared symbol does not qualify: it is typed `unknown`, not
  * `any`, and the arithmetic's own inference refines it to a scalar. A call
- * of an undeclared function is typed `unknown` too, and keeps the
- * `broadcastable<number>` reading. The cell of an abstract collection
+ * of an undeclared function is typed `unknown` too. The broadcast lift
+ * types an application over it `number | tuple | list<number | tuple | list<any>>`
+ * (`openTriggerBroadcastType`, `broadcast-lift-type.ts`): its value can be
+ * a ragged list or a point. The cell of an abstract collection
  * (`P: collection<any>`) keeps the structural view of the symbol `P` with
  * the cell type `any` (`describeOperand(x, cell)` in `boxed-function.ts`,
  * and the `structureOf` carried over in `derive-application-type.ts`), so
@@ -3437,6 +3446,12 @@ function hasBroadcastableArm(d: OperandDescriptor): boolean {
   const t = resolveTypeAlias(d.type);
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>`
+  // (`openDepthScalarArms`), the type of an element-wise application over
+  // an operand of type `unknown`, may be a collection, as a
+  // `broadcastable<R>` may (`isPossiblyCollectionTyped`,
+  // `collection-utils.ts`).
+  if (openDepthScalarArms(t) !== undefined) return true;
   if (t.kind !== 'union') return false;
   return t.types.some((branch) => {
     const b = resolveTypeAlias(branch);

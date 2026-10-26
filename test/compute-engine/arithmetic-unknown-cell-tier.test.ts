@@ -16,24 +16,25 @@ describe('ARITHMETIC OVER A CELL OF UNKNOWN TYPE', () => {
     // Before: broadcastable<integer> for the first two, broadcastable<real>
     // for the third.
     expect(ce.box(['Multiply', 2, 'u']).type.toString()).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
     expect(ce.box(['Add', 2, 'u']).type.toString()).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
     expect(ce.box(['Multiply', 0.9, 'u']).type.toString()).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
   });
 
   test('a list beside a broadcastable of unknown cells is typed by the broadcastable route', () => {
     const ce = fresh();
     ce.declare('u', 'broadcastable<unknown>');
-    // Before: vector<integer^2> for each. `u` may hold a matrix, and its
-    // cells may be any number.
+    // Before: vector<integer^2> for each. `u` may hold a matrix or a ragged
+    // list, and its cells may be any number, so each element of the result
+    // is a number, a list of any depth or a point (ROADMAP CE-502).
     for (const op of ['Multiply', 'Add', 'Subtract'])
       expect(ce.box([op, ['List', 1, 2], 'u']).type.toString()).toBe(
-        'broadcastable<number>'
+        'list<list<list<any> | number | tuple> | number | tuple>'
       );
   });
 

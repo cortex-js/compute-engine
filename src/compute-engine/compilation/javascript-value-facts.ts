@@ -10,7 +10,9 @@ import type { CompileTarget } from './types.js';
 import { isCallerMapped, isCseAdmissible } from './cse.js';
 import { POINT_CONSTRUCTOR_HEADS } from './provable-kind.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { resolveTypeForCompilation } from '../../common/type/utils.js';
+// The compiled lanes read the open form of a broadcast over an operand of
+// type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 
 type IntegerRange = { min: number; max: number };

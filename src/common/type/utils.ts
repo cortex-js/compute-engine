@@ -3993,6 +3993,10 @@ export function containsBroadcastableType(type: Readonly<Type>): boolean {
   const t = resolveTypeAlias(type);
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>` (`openDepthScalarArms`),
+  // the type of an element-wise application over an operand of type
+  // `unknown`, is also a scalar or a collection decided at run time.
+  if (openDepthScalarArms(t) !== undefined) return true;
   if (t.kind === 'union') return t.types.some(containsBroadcastableType);
   return false;
 }
@@ -4095,4 +4099,76 @@ export function placeholderSlotsAs(
       declared[i].type === 'unknown' ? { ...a, type: replacement } : a
     ),
   };
+}
+
+/**
+ * The scalar arms of a type of the open form that
+ * `openTriggerBroadcastType` (`broadcast-lift-type.ts`) answers,
+ * `R | list<R | list<any>>` with or without a `tuple` arm: a union with one
+ * or more arms that are a plain list whose elements are `list<any>` and
+ * types that cannot hold a list, and other arms that are a tuple or types
+ * that cannot hold a list. The answer is the union of the arms that are not
+ * lists and not tuples (`R`), or `undefined` for a type of another form, or
+ * for such a type with no scalar arm. A plain `R | list<any>` is not of this
+ * form: an element read of a `list<any>` is typed so.
+ */
+export function openDepthScalarArms(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  const isListOfAny = (x: Type): boolean => {
+    const a = resolveTypeAlias(x);
+    return (
+      typeof a !== 'string' &&
+      a.kind === 'list' &&
+      a.dimensions === undefined &&
+      a.elements === 'any'
+    );
+  };
+  const openList = (x: Type): boolean => {
+    const a = resolveTypeAlias(x);
+    if (typeof a === 'string' || a.kind !== 'list') return false;
+    if (a.dimensions !== undefined) return false;
+    const e = resolveTypeAlias(a.elements);
+    if (typeof e === 'string' || e.kind !== 'union') return false;
+    return (
+      e.types.some(isListOfAny) &&
+      e.types.every((m) => isListOfAny(m) || cannotHoldAList(m))
+    );
+  };
+  let hasOpenList = false;
+  const scalars: Type[] = [];
+  for (const arm of r.types) {
+    if (openList(arm)) {
+      hasOpenList = true;
+      continue;
+    }
+    const a = resolveTypeAlias(arm);
+    if (a === 'tuple' || (typeof a !== 'string' && a.kind === 'tuple'))
+      continue;
+    if (!cannotHoldAList(a)) return undefined;
+    scalars.push(arm);
+  }
+  if (!hasOpenList || scalars.length === 0) return undefined;
+  return scalars.length === 1 ? scalars[0] : widen(...scalars);
+}
+
+/**
+ * `resolveTypeForCompilation`, for the compiled lanes: the open form
+ * `R | tuple | list<R | tuple | list<any>>` of a scalar type `R`
+ * (`openDepthScalarArms`) is read as `broadcastable<R>`.
+ *
+ * The open form is the type of an element-wise application over an operand
+ * of type `unknown` (an element read of a `list<unknown>`, a call of an
+ * undeclared function). The compiled code does not read the shape from the
+ * type: it checks the value at run time (`Array.isArray`) and maps over an
+ * array at any depth, which is how it compiles a `broadcastable<R>` operand.
+ * So the compiled lanes read both types in the same way. The typing keeps
+ * the open form, because `broadcastable<R>` (`R | tensor<R>`) does not hold
+ * a ragged list or a point. (ROADMAP CE-502.)
+ */
+export function resolveTypeForCompiledLanes(t: Readonly<Type>): Type {
+  const r = resolveTypeForCompilation(t);
+  const scalar = openDepthScalarArms(r);
+  if (scalar === undefined || !cannotHoldAList(scalar)) return r;
+  return { kind: 'broadcastable', elements: scalar };
 }

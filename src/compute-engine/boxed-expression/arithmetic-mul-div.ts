@@ -3178,6 +3178,29 @@ export function mulFactoredArray(xs: ReadonlyArray<Expression>): Expression {
   return mulImpl(xs, false);
 }
 
+/**
+ * True when two or more of the factors `xs` are each a point or a list of
+ * points (`isTupleCarrier`, `isPointListCarrier`). Such a product has no
+ * value: `canonicalMultiply` answers the `no-product-between-points` error
+ * at boxing, and the evaluation must give the same answer for a product that
+ * was boxed before its operands had values. Without this test, the
+ * evaluation of `x·x[1]` in the body of `x ↦ x·x[1]`, with `x` bound to
+ * `[(3, 2), (1, 4)]`, mapped the product over the list of points and gave a
+ * list of two errors, where the same product written with the list
+ * (`[(3, 2), (1, 4)]·(3, 2)`) is one error, and the call was typed `error`
+ * (ROADMAP CE-491). This is the twin of the test for a divisor that is a
+ * point or a list of points in `div()`.
+ */
+function hasPointProductOperands(xs: ReadonlyArray<Expression>): boolean {
+  let count = 0;
+  for (const x of xs)
+    if (isTupleCarrier(x) || isPointListCarrier(x)) {
+      count += 1;
+      if (count >= 2) return true;
+    }
+  return false;
+}
+
 function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   console.assert(xs.length > 0);
   if (xs.length === 1) return xs[0];
@@ -3202,6 +3225,10 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // is kept (`indeterminateAnswerReadsVariable()`).
   if (indeterminateAnswerReadsVariable(xs))
     return ce.function('Multiply', [...xs]);
+
+  // Two factors that are each a point or a list of points have no product
+  // (`hasPointProductOperands()`).
+  if (hasPointProductOperands(xs)) return pointProductError(ce, xs);
 
   // A factor that is collection-TYPED but has no collection value yet (a
   // declared-but-unassigned `list<number>` symbol) is not a broadcast
@@ -3637,6 +3664,9 @@ export function mulNEvaluated(
   // factors and keep the notational product whole.
   if (xs.some((x) => containsContinuationOperand(x)))
     return mulAroundNotationalProducts(xs, (rest) => mulNEvaluated(rest));
+  // Two factors that are each a point or a list of points have no product
+  // (see `mulImpl`).
+  if (hasPointProductOperands(xs)) return pointProductError(ce, xs);
   // A collection-TYPED but valueless co-factor vetoes the element-wise
   // dispatch here exactly as it does on the exact route (see `mulImpl`).
   let unresolvedFactor = hasUnresolvedCollectionOperand(

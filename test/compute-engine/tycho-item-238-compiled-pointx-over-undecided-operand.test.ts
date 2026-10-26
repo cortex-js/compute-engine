@@ -51,7 +51,7 @@ describe('PointX over a parameter that may be a point or a list of points', () =
     const ce = engine();
     define(ce, 'g(v):=\\mathrm{PointX}(v)+1');
     expect(String(ce.symbol('g').value?.type)).toBe(
-      '(v: collection<any> | tuple) -> broadcastable<number>'
+      '(v: collection<any> | tuple) -> list<list<any> | number | tuple> | number | tuple'
     );
   });
 

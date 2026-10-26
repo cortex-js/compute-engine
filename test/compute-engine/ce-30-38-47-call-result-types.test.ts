@@ -15,13 +15,14 @@
  *   inferred point parameter is typed from the body.
  */
 import type { Expression } from '../../src/compute-engine';
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, isString } from '../../src/compute-engine';
 
 /** The value `v` with every element evaluated, as a list literal. A lazy
  * collection has the type of its expression, so the check reads the
- * elements instead. */
+ * elements instead. A string is a collection of characters, but is kept as
+ * it is. */
 function materialize(ce: ComputeEngine, v: Expression): Expression {
-  if (!v.isCollection || v.operator === 'Tuple') return v;
+  if (!v.isCollection || v.operator === 'Tuple' || isString(v)) return v;
   return ce.function(
     'List',
     [...v.each()].map((x) => materialize(ce, x.evaluate()))
@@ -52,11 +53,13 @@ describe('CE-38: AN UNDECLARED MUTUALLY RECURSIVE PAIR THAT BUILDS A LIST', () =
 
   // When `G` is assigned before `F` is boxed, the body of `F` reads the
   // call of `G` as `-> unknown`, and an `unknown` operand of `Join` gives
-  // elements of type `any`: the pair is typed `list<any>`, which holds the
-  // values, but is not as precise as `list<number>`.
+  // elements of type `any`. The pair was typed `list<any>`, which holds the
+  // values, but is not as precise as `list<number>`. A pass that starts
+  // below the result (`list<never>`) now proposes `list<number>`, which the
+  // bodies verify.
   test.each([
     ['F then G, each boxed before it is assigned', 'FG', false, 'list<number>'],
-    ['G then F, each boxed before it is assigned', 'GF', false, 'list<any>'],
+    ['G then F, each boxed before it is assigned', 'GF', false, 'list<number>'],
     ['F then G, both boxed first', 'FG', true, 'list<number>'],
     ['G then F, both boxed first', 'GF', true, 'list<number>'],
   ])('%s', (_label, order, boxFirst, result) => {
@@ -75,6 +78,35 @@ describe('CE-38: AN UNDECLARED MUTUALLY RECURSIVE PAIR THAT BUILDS A LIST', () =
     const call = ce.box(['G', 0, 4]);
     expect(call.evaluate().toString()).toBe('[0,1,2,3]');
     expect(checkedType(ce, call)).toBe(result);
+  });
+
+  test('the result does not hide the elements a caller joins (G then F)', () => {
+    const ce = new ComputeEngine();
+    ce.assign('G', ce.box(G as any));
+    ce.assign('F', ce.box(F('List') as any));
+    // A result read as `list<unknown>` would make this `list<string>`.
+    const joined = ce.box(['Join', ['F', 0, 4], ['List', { str: 'a' }]]);
+    expect(joined.evaluate().toString()).toBe('[0,1,2,3,"a"]');
+    expect(checkedType(ce, joined)).toBe('list<number | string>');
+  });
+
+  test('a function of the cycle that adds strings is in the result', () => {
+    // `G` returns `["a"]` when `n > 2`, so a list of numbers does not hold
+    // the value of a call: the proposal `list<number>` is refuted.
+    const G2 = [
+      'Function',
+      ['If', ['Greater', 'n', 2], ['List', { str: 'a' }], ['F', 'n', 'K']],
+      'n',
+      'K',
+    ];
+    for (const order of ['GF', 'FG']) {
+      const ce = new ComputeEngine();
+      const literals = { F: ce.box(F('List') as any), G: ce.box(G2 as any) };
+      for (const name of order) ce.assign(name, literals[name as 'F' | 'G']);
+      const call = ce.box(['G', 0, 6]);
+      expect(call.evaluate().toString()).toBe('[0,1,2,"a"]');
+      expect(checkedType(ce, call)).not.toBe('list<number>');
+    }
   });
 
   test('a set base clause gives `set` in either order', () => {

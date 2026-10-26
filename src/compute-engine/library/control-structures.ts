@@ -37,6 +37,7 @@ import {
   functionResult,
   resolveTypeAlias,
   resolveTypeForCompilation,
+  openDepthScalarArms,
   widen,
   stripMissingFromType,
   stripNumericRanges,
@@ -956,7 +957,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             conds.every(
               (ci) =>
                 ci.type.matches('boolean') ||
-                possiblyElementwiseCondition([ci.type.type])
+                possiblyElementwiseCondition([ci.type.type]) ||
+                isOpenConditionCell(ci.type.type)
             )
           ) {
             // If `expr` itself evaluates to a finite indexed collection, zip
@@ -3043,6 +3045,18 @@ function possiblyElementwiseCondition(
   return conds.some(
     (t) => t !== undefined && conditionShape(t).kind === 'possible'
   );
+}
+
+/**
+ * True when `t` is the open form `B | list<B | list<any>>`
+ * (`openDepthScalarArms`) of a condition type `B`: the type of a comparison
+ * over an operand of type `unknown` (`h(x) ≤ 1` with `h` undeclared). As a
+ * cell of a materialized mask, such a comparison is one scalar relation, as
+ * a cell typed `broadcastable<boolean>` is.
+ */
+function isOpenConditionCell(t: Type): boolean {
+  const open = openDepthScalarArms(t);
+  return open !== undefined && isSubtype(open, CONDITION_CELL_TYPE);
 }
 
 /**

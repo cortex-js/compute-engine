@@ -72,12 +72,15 @@ function rotationChain(): ComputeEngine {
 }
 
 describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
+  // `R_Z2` passes the value of `R_Y` through `r_zz`. That value can be a
+  // point, a ragged list or a number (ROADMAP CE-502), and the body of the
+  // callee decides the shape of a call over a point, so the result is `any`.
   test('the declared results carry the unknown of the pass-through (by design)', () => {
     const ce = rotationChain();
     expect(ce.box('r_zz').type.toString()).toBe(
       '(x: unknown, y: unknown, z: unknown, theta: unknown) -> unknown'
     );
-    expect(ce.box('R_Z2').type.toString()).toContain('broadcastable<unknown>');
+    expect(ce.box('R_Z2').type.toString()).toMatch(/-> any$/);
   });
 
   test('scalar calls type from the body (unchanged)', () => {
@@ -632,11 +635,16 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
       // and the actual type. Before, `-x` stayed the inert `-("s", a)`.
       test(`${route}: a tuple with a string or boolean component is an incompatible-type error`, () => {
         const ce = engine(declared);
+        // The call with a string is typed from the body: the value is a
+        // tuple with a failed cell, which has the type `error`. It kept the
+        // signature result `tuple<number, number>` (ROADMAP CE-490).
         const scalar = ce.parse('f("s")');
-        expect(scalar.type.toString()).toBe('tuple<number, number>');
-        expect(scalar.evaluate().toString()).toBe(
+        expect(scalar.type.toString()).toBe('error');
+        const scalarValue = scalar.evaluate();
+        expect(scalarValue.toString()).toBe(
           '(Error(ErrorCode("incompatible-type", "number", "string"), "s"), "s")'
         );
+        expect(scalarValue.type.matches(scalar.type)).toBe(true);
         const expected =
           '(Error(ErrorCode("incompatible-type", "number", "tuple<string, unknown>"), ("s", a)), ("s", a))';
         const parsed = ce.parse('f(("s", a))');
@@ -960,8 +968,6 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
 
   test('an untyped (undeclared) argument still reads unknown: no promise is made', () => {
     const ce = rotationChain();
-    expect(ce.parse('R_{Z2}(u,u,u,0,0,18)').type.toString()).toBe(
-      'broadcastable<unknown>'
-    );
+    expect(ce.parse('R_{Z2}(u,u,u,0,0,18)').type.toString()).toBe('any');
   });
 });

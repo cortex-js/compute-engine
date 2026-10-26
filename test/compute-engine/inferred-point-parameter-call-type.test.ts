@@ -256,12 +256,18 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
 
   test('a parameter that is not a point is not refused', () => {
     // `f(x) := x + 1` infers `(unknown) -> number`: the call keeps the
-    // signature result for any operand.
+    // signature result for a number. A boolean or a string argument is
+    // typed from the body, which is an `incompatible-type` error: the value
+    // is that error, which `number` does not hold (ROADMAP CE-490).
     const ce = new ComputeEngine();
     ce.parse('f(x) := x + 1').evaluate();
     expect(ce.box('f').type.toString()).toBe('(x: unknown) -> number');
-    for (const arg of [3, 'True', { str: 'a' }] as const)
-      expect(ce.box(['f', arg as never]).type.toString()).toBe('number');
+    expect(ce.box(['f', 3]).type.toString()).toBe('number');
+    for (const arg of ['True', { str: 'a' }] as const) {
+      const call = ce.box(['f', arg as never]);
+      expect(call.type.toString()).toBe('error');
+      expect(valueFits(call.evaluate(), call.type.type)).toBe(true);
+    }
   });
 
   test('a list of lists bound whole while another argument maps', () => {

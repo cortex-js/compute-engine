@@ -96,7 +96,13 @@ import {
   isPointElementType,
   nonNegativeRangeType,
   resolveTypeAlias,
-  resolveTypeForCompilation,
+  // The compiled lanes read the open form of a broadcast over an operand
+  // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
+  // The shape checks read the declared type as it is: the open form keeps
+  // its `tuple` arm there, and a point has no shape the run-time value
+  // tells apart from a list.
+  resolveTypeForCompilation as resolveDeclaredTypeForCompilation,
   signatureArms,
   signatureEffects,
   stripMissingFromType,
@@ -1716,11 +1722,15 @@ export function isGatedIndexedCollection(a: Expression): boolean {
  */
 export function shapeOperandRefusal(a: Expression): string | undefined {
   if (a.isFiniteCollection === false) return 'is an infinite collection';
+  // The declared type is read without the compiled-lane reading of the open
+  // form (`resolveTypeForCompiledLanes`), which would hide its `tuple` arm:
+  // `Rank` of a value of that form that is the point `(3, 4)` is `0` in the
+  // interpreter, and the run-time shape of its array is `[2]`.
   const refusal = (t: Type, depth: number): string | undefined => {
-    const r = resolveTypeForCompilation(t);
+    const r = resolveDeclaredTypeForCompilation(t);
     const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
     for (const arm of arms) {
-      const b = resolveTypeForCompilation(arm);
+      const b = resolveDeclaredTypeForCompilation(arm);
       if (b === 'never') continue;
       if (isTupleShapedType(b))
         return (

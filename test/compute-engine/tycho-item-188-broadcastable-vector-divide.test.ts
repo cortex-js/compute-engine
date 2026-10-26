@@ -131,7 +131,7 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     // branded `number` because `isFinite === false` fired for `g(t)`'s
     // non-number TYPE, making the two rows disagree).
     expect(typeOf('\\frac{H(X(t), Y(t))}{g(t)}')).toBe(
-      'list<list<any> | number>'
+      'list<any>'
     );
     expect(typeOf('\\frac{H(X(t), Y(t))}{s}')).toBe('list<list<any> | number>');
     // Scalar-path parity for the same denominators (the mirror the widening
@@ -142,10 +142,12 @@ describe('Tycho item 188: broadcastable<vector<n>> in numeric operand position',
     // collection dividing `s` elementwise — so the parity reads at the
     // ELEMENT: `number`, matching the scalar row `s/w` below and the
     // vector's components above.)
-    expect(typeOf('\\frac{s}{g(t)}')).toBe('broadcastable<number>');
+    expect(typeOf('\\frac{s}{g(t)}')).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
     expect(typeOf('\\frac{s}{w}')).toBe('number');
     // No denominator, no tier movement: the sibling operators echo the shape.
-    expect(typeOf('H(X(t), Y(t)) - g(t)')).toBe('list<list<any> | number>');
+    expect(typeOf('H(X(t), Y(t)) - g(t)')).toBe('list<any>');
     expect(typeOf('-H(X(t), Y(t))')).toBe('list<list<any> | number>');
   });
 

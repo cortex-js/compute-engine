@@ -56,6 +56,7 @@ import type {
 
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
+import { typeCouldBeNumericCollection } from '../collection-utils.js';
 import { readBeforeDeclarationError } from './read-before-declaration.js';
 import { noteFailedWalk } from './incomplete-walks.js';
 
@@ -221,6 +222,74 @@ function valueOfBinding(
   return binding !== undefined && 'value' in binding
     ? binding.value.value
     : undefined;
+}
+
+/**
+ * For a value definition whose inferred type is a scalar numeric type: true
+ * when every use that required a number was an operand of an operator that
+ * maps over a collection (a `broadcastable` operator such as `Multiply`,
+ * `Add` or `Sin`), false when at least one was not (the bound of `Range`,
+ * the count of `Take`). No entry means that no such use was recorded.
+ * `narrowInferredType` reads it.
+ */
+const SCALAR_USES_MAP = new WeakMap<object, boolean>();
+
+/**
+ * The type that a narrow write stores on a binding whose type is inferred,
+ * from its current type `current` and the requirement `requirement` of a
+ * new use. `scalarUsesMap` is true when every earlier use that gave the
+ * binding a scalar numeric type was an operand of an operator that maps
+ * over a collection (`SCALAR_USES_MAP`).
+ *
+ * This is the meet of the two types, with one exception. A numeric context
+ * of a mapping operator (`x + 1`, `t·x`) infers a scalar numeric type, but
+ * the operator maps over a numeric collection, so the use does not prove
+ * that the value is a scalar. When a later use requires a collection that
+ * can hold numbers (an index read `x[1]` requires
+ * `indexed_collection<number>`), the meet is `never`, and the binding then
+ * has a type that no value has. The requirement of the collection use is
+ * stored instead. The other order of the two uses also gives a collection
+ * type: a binding that already has a collection type is not given a scalar
+ * type by a numeric context (`excludedFromScalarInference()`,
+ * `validate.ts`). Without this rule, `(P, t) ↦ t·P/(P[1] − 1)` was typed
+ * `(unknown, unknown) -> never`, while `(P, t) ↦ t·(P/(P[1] − 1))` was typed
+ * correctly (ROADMAP CE-503).
+ *
+ * When one of the earlier uses requires a scalar and does not map (the bound
+ * of `Range`, the count of `Take`), no value can satisfy both uses, and the
+ * meet `never` is kept: `n ↦ Range(n) + n[1]` gives an `incompatible-type`
+ * error for a list argument, and a collection type for `n` would type the
+ * call with a value that it cannot have.
+ */
+function narrowInferredType(
+  current: Type,
+  requirement: Type,
+  scalarUsesMap: boolean
+): Type {
+  const meet = contractTupleOfNarrow(narrow(current, requirement), requirement);
+  if (
+    scalarUsesMap &&
+    meet === 'never' &&
+    current !== 'never' &&
+    isSubtype(current, 'number') &&
+    typeCouldBeNumericCollection(requirement)
+  )
+    return requirement;
+  return meet;
+}
+
+/** True when the operator that is being canonicalized while an inference
+ * is written (`_inferenceCause`) maps over a collection operand: its
+ * definition is `broadcastable`. A juxtaposition (`InvisibleOperator`, the
+ * `t P` of a parsed `\frac{t P}{…}`) counts too: it writes a numeric type
+ * on an operand only when it reads the juxtaposition as a product, and
+ * `Multiply` maps. */
+function inferenceCauseMaps(ce: ComputeEngine): boolean {
+  const name = ce._inferenceCause?.operator;
+  if (name === undefined) return false;
+  if (name === 'InvisibleOperator') return true;
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && isOperatorDef(def) && def.operator.broadcastable;
 }
 
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
@@ -828,8 +897,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
             ? t
             : inferenceMode === 'widen'
               ? widen(def.value.type.type, t)
-              : contractTupleOfNarrow(narrow(def.value.type.type, t), t)
+              : narrowInferredType(
+                  def.value.type.type,
+                  t,
+                  SCALAR_USES_MAP.get(def.value) === true
+                )
         );
+        // Record whether the uses that require a number map over a
+        // collection (`SCALAR_USES_MAP`). The record is written before the
+        // no-op test below: a use of `Range` after `n + 1` does not change
+        // the type `number`, but it is a use that does not map.
+        if (inferenceMode === 'narrow') {
+          if (isSubtype(t, 'number'))
+            SCALAR_USES_MAP.set(
+              def.value,
+              (SCALAR_USES_MAP.get(def.value) ?? true) &&
+                inferenceCauseMaps(this.engine)
+            );
+          else if (!isSubtype(inferred.type, 'number'))
+            SCALAR_USES_MAP.delete(def.value);
+        }
         // Inferring `unknown` adds no information — the argument's type is
         // still open. It is a no-op, so skip the write: assigning `unknown`
         // to the value definition's type triggers the value-reset in the type

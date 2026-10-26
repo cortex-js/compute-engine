@@ -1,3 +1,38 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **An element-wise operation over an operand of type `unknown` holds a ragged
+  list or a point** (CE-502). With `L: list<unknown>`, `2·L[1]` was typed
+  `broadcastable<number>`, which does not hold `[[1], [2, 3]]` or `(1, 2)` in
+  `L[1]`; it is now `list<list<any> | number | tuple> | number | tuple`. The
+  same holds for `k(L[1])` with `k: (real) -> real`, and for a call of an
+  undeclared function. A comparison over such an operand can be one boolean
+  (`[1, 2] = L[1]` compares two whole lists). Compiled code is unchanged. A
+  valueless symbol used as a number is still inferred `number`.
+- **A function with an inferred signature, called with a string or a boolean,
+  is typed from its body** (CE-490). With `f := x ↦ (-x, x)`, `f("s")` was
+  typed `tuple<number, number>` and is `error`; with `g := x ↦ x + 1`,
+  `g("s")` was `number` and is `error`.
+- **A parameter used in arithmetic before an index read has a sound signature**
+  (CE-503). `(P, t) ↦ t·P/(P[1] − 1)` was `(P: unknown, t: unknown) -> never`
+  and is `(P: indexed_collection<number>, t: unknown) -> list<number>`;
+  applied to `([3, 2], 2)` it gives `[3, 2]`, not a list of errors.
+- **A product of a list of points and a point is one
+  `no-product-between-points` error at evaluation**, as it already was when
+  boxed (CE-491). With `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` was a list of
+  two errors.
+
+### Resolved Issues
+
+- **A part of a loop body printed or evaluated outside its operator keeps its
+  index** (CE-498). `ReplaceAt([1,2,3], i, 9)` taken from
+  `Loop(…, Element(i, Range(1, 3)))` printed an `incompatible-type` error, with
+  `i` read as the imaginary unit; it now prints `ReplaceAt([1,2,3], i, 9)`.
+- **An undeclared recursive pair that builds a list is typed `-> list<number>`
+  in every install order** (CE-38). Assigning `G := (n, K) ↦ F(n, K)` before
+  `F` gave `-> list<any>`.
+
 ## 0.169.2 _2026-10-26_
 
 ### Behavior Changes

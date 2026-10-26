@@ -237,12 +237,78 @@ export function callResultType(
   if (binding && 'value' in binding && isForwardCallReference(binding.value))
     binding = callableBindingInContext(engine, head, binding);
   binding ??= engine.lookupDefinition(head);
+  const literal = userFunctionLiteral(binding);
+  const inferred =
+    literal !== undefined && inferredCallSignature(binding) !== undefined;
+  // An argument that is an error: a call of a user function with an error
+  // argument is that error (`docs/ERROR-MODEL.md`, section 3), whatever
+  // its signature says. The body of `r := x ↦ If(x = 0, 0, r(x − 1) + 1)`
+  // calls `r("s" − 1)`, and the derivation of `r("s")` reads that call.
+  if (inferred && args.some((x) => x.type === 'error')) return 'error';
+  // A parameter whose uses require types that no value has (`n` in
+  // `n ↦ Range(n) + n[1]`, a scalar bound and a collection) is typed
+  // `never` (`narrowInferredType`, `boxed-symbol.ts`). Every call of such a
+  // function is an error: a list argument at that parameter fails the scalar
+  // use, and any other argument fails the index read. The result of the
+  // signature, derived from a body with a parameter of type `never`, does
+  // not describe that value.
+  if (
+    inferred &&
+    !args.some((x) => mayBroadcast(presentPart(x.type))) &&
+    literal.ops.slice(1).some((p) => isSymbol(p) && p.type.type === 'never')
+  )
+    return 'error';
+  // A string or a boolean argument of a function whose signature was
+  // inferred: the result of the signature can be false for it, and so can
+  // the candidate result of a cycle of recursive calls, which was derived
+  // with numeric arguments (`provisionalRecursionResult`). When the rules
+  // below keep the result of the signature (`undefined`), the call is
+  // typed from the body (`dataArgumentCallType`).
+  const dataArgument = inferred && args.some((x) => isNonNumericDatum(x.type));
+  const t = callResultTypeOfBinding(
+    engine,
+    args,
+    declared,
+    derive,
+    binding,
+    dataArgument
+  );
+  if (t !== undefined || !dataArgument) return t;
+  return dataArgumentCallType(
+    literalBodyResultType(
+      engine,
+      literal,
+      args,
+      'any',
+      derive,
+      declaredParameterTypes(binding)
+    ),
+    declared
+  );
+}
+
+/** The part of `callResultType` that reads the binding of the called
+ * function, after it is resolved. With `skipProvisional`, the candidate
+ * result of a cycle of recursive calls is not read. */
+function callResultTypeOfBinding(
+  engine: IComputeEngine,
+  args: readonly OperandDescriptor[],
+  declared: Type,
+  derive: (
+    head: string,
+    args: readonly OperandDescriptor[]
+  ) => Type | undefined,
+  binding: BoxedDefinition | undefined,
+  skipProvisional: boolean
+): Type | undefined {
   // A call of a function of a cycle of calls whose result is verified is
   // typed by the candidate result of that function
   // (`provisionalRecursionResult`).
   const called = userFunctionLiteral(binding);
   const provisional =
-    called === undefined ? undefined : provisionalRecursionResult(called);
+    called === undefined || skipProvisional
+      ? undefined
+      : provisionalRecursionResult(called);
   if (provisional !== undefined) return provisional;
   const inferredSig = inferredPointSignature(binding);
   if (inferredSig !== undefined) {
@@ -282,6 +348,69 @@ export function callResultType(
     declaredParameterTypes(binding)
   );
   return scalar === undefined ? t : outsideScalarResult(t, scalar);
+}
+
+/**
+ * True when an argument of type `type` is a string or a boolean (an absent
+ * arm aside): a value that is not a number and that a call does not map
+ * over.
+ */
+function isNonNumericDatum(type: Type): boolean {
+  const t = presentPart(type);
+  if (t === 'never' || t === 'unknown' || t === 'any' || t === 'error')
+    return false;
+  return isSubtype(t, 'string') || isSubtype(t, 'boolean');
+}
+
+/** True when `t` is a tuple type with a slot of type `error`, or with a
+ * slot that is such a tuple (`dataArgumentCallType`). */
+function isTupleWithErrorSlot(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  return (
+    typeof r === 'object' &&
+    r.kind === 'tuple' &&
+    r.elements.some((x) => x.type === 'error' || isTupleWithErrorSlot(x.type))
+  );
+}
+
+/**
+ * The type of a call of a function with an inferred signature that has a
+ * string or a boolean argument, from `derived`, the type of the body with
+ * each parameter typed as its argument (`literalBodyResultType`, with no
+ * bound on the result).
+ *
+ * The engine infers the signature from the uses of each parameter in the
+ * body, and a numeric use (`-x`) reads the parameter as a number. The
+ * result of the signature is then a numeric type, which does not describe
+ * a call with a string: with `f := x ↦ (-x, x)`, the signature is
+ * `(x: unknown) -> tuple<number, number>`, and `f("s")` evaluates to
+ * `(Error(incompatible-type), "s")`, which has the type `error`. So the
+ * call is typed from the body. When the body gives no type, the call is
+ * typed `any`, which holds every value. When the result of the signature,
+ * `declared`, holds the derived type and is not `unknown` or `any`, the
+ * call keeps that result
+ * (`undefined` is returned): with `h := u ↦ 1`, `h("abc")` is typed
+ * `integer`, not `1`.
+ *
+ * The derivation types the body `(-x, x)` as `tuple<error, string>`, a
+ * tuple with an `error` slot. A tuple value with a failed cell has the type
+ * `error`: only a `List` or a `Set` literal keeps a collection type for a
+ * failed cell (`docs/ERROR-MODEL.md`, section 3). So a derived tuple type
+ * with an `error` slot gives the type `error`, also when the slot is in a
+ * nested tuple (`x ↦ ((-x, 1), x)`): the inner tuple is then an error, which
+ * is a failed cell of the outer one.
+ * (ROADMAP CE-490.)
+ */
+function dataArgumentCallType(
+  derived: Type | undefined,
+  declared: Type
+): Type | undefined {
+  if (derived === undefined || derived === 'unknown') return 'any';
+  if (isTupleWithErrorSlot(derived)) return 'error';
+  // Every type is a subtype of `unknown` and of `any`: such a result says
+  // nothing, and the derived type is kept.
+  if (declared === 'unknown' || declared === 'any') return derived;
+  return isSubtype(derived, declared) ? undefined : derived;
 }
 
 /**
@@ -895,12 +1024,22 @@ export function appliedLiteralResultType(
       return undefined;
     outside = true;
   }
+  // A string or a boolean argument at a parameter that the literal does not
+  // annotate: when the rules below keep the result of the signature, that
+  // result was inferred with the parameter read as a number, so the call is
+  // typed from the body (`dataArgumentCallType`).
+  const dataArgument = args.some(
+    (x, i) =>
+      isNonNumericDatum(x.type) &&
+      functionLiteralParameterType(literal.ops[i + 1]) === undefined
+  );
   let scalar: Type | undefined;
+  let derives = true;
   if (isScalarResult(declared)) {
-    if (!outside) return undefined;
-    scalar = declared;
-    declared = 'any';
-  } else if (outside) return undefined;
+    if (!outside) derives = false;
+    else scalar = declared;
+  } else if (outside) derives = false;
+  if (!derives && !dataArgument) return undefined;
   // An applied literal in the body of another is typed by this function
   // again, and the walk of its body is not memoized across the different
   // argument types it meets. Beyond a depth of 8 the result type of the
@@ -908,14 +1047,21 @@ export function appliedLiteralResultType(
   if (appliedLiteralDepth >= 8) return undefined;
   appliedLiteralDepth += 1;
   try {
-    const t = literalBodyResultType(
-      literal.engine,
-      literal,
-      args,
-      declared,
-      derive
+    if (derives) {
+      const t = literalBodyResultType(
+        literal.engine,
+        literal,
+        args,
+        scalar === undefined ? declared : 'any',
+        derive
+      );
+      const result = scalar === undefined ? t : outsideScalarResult(t, scalar);
+      if (result !== undefined || !dataArgument) return result;
+    }
+    return dataArgumentCallType(
+      literalBodyResultType(literal.engine, literal, args, 'any', derive),
+      declared
     );
-    return scalar === undefined ? t : outsideScalarResult(t, scalar);
   } finally {
     appliedLiteralDepth -= 1;
   }

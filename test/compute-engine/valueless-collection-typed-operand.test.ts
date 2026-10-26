@@ -1175,7 +1175,9 @@ describe('a big op over a body that MIGHT be a collection stays inert', () => {
   it('declines a broadcastable-typed body and an undeclared application', () => {
     const ce = new ComputeEngine();
     const lifted = ce.box(['Sum', ['Add', 2, ['h', 'x']]]);
-    expect(lifted.ops![0].type.toString()).toBe('broadcastable<number>');
+    expect(lifted.ops![0].type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
     expect(lifted.evaluate().operator).toBe('Sum');
     expect(ce.box(['Sum', ['h', 'x']]).evaluate().operator).toBe('Sum');
     ce.declare('b', 'broadcastable<number>');

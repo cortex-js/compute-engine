@@ -202,7 +202,9 @@ describe('CE-360: compiled operators over an element that may be a list', () => 
     const ce = rowEngine('(unknown) -> list<unknown>');
     const expr = ce.box(['Sin', ELEMENT]);
     const type = expr.type;
-    expect(type.toString()).toBe('broadcastable<number> | missing');
+    expect(type.toString()).toBe(
+      'list<list<any> | number | tuple> | missing | number | tuple'
+    );
     ce.assign('x', ce.box(['List', 1, 2]));
     expect(expr.evaluate().type.matches(type)).toBe(true);
   });

@@ -121,6 +121,7 @@ import {
   type BroadcastOperandView,
   broadcastableOf,
   topTypeOfTriggers,
+  openTriggerBroadcastType,
   viewOfDescriptor,
   isBroadcastCollectionTypeOf,
   isFixedShapeCollectionTypeOf,
@@ -283,6 +284,8 @@ import {
   stripMissingFromType,
   collectionElementType,
   resolveTypeAlias,
+  topTypeBesideAbsence,
+  openDepthScalarArms,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
   descendIntoConstructor,
@@ -11251,6 +11254,30 @@ function lambdaBroadcastType(
       )
         return listOfAnyDepth();
     }
+    // An operand typed `unknown` (an element read `L[1]` of `L:
+    // list<unknown>`, a call of an undeclared function) can hold a ragged
+    // list, which the call maps at its leaves, or a point, which binds whole
+    // to the parameter and which a numeric body maps: with `k: (real) ->
+    // real` holding `x ↦ 2x`, `k(L[1])` is `[[2], [4, 6]]` for
+    // `L := [[[1], [2, 3]]]` and `(2, 4)` for `L := [(1, 2)]`.
+    // `broadcastable<R>` holds neither value (ROADMAP CE-502). An operand
+    // typed `broadcastable<unknown>` (`unknown | list<unknown>`), or with
+    // the open form of such an application (`openDepthScalarArms`), can
+    // hold the same values.
+    if (
+      triggers.some((i) => {
+        const r = resolveTypeAlias(ops[i].type);
+        const t = topTypeBesideAbsence(r) ?? r;
+        if (t === 'unknown' || openDepthScalarArms(t) !== undefined)
+          return true;
+        return (
+          typeof t !== 'string' &&
+          t.kind === 'broadcastable' &&
+          resolveTypeAlias(t.elements) === 'unknown'
+        );
+      })
+    )
+      return openTriggerBroadcastType(perElementResult, true);
     return broadcastableOf(perElementResult);
   }
   return undefined;

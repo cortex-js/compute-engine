@@ -100,7 +100,9 @@ describe('issue #454: a selection on a possibly element-wise condition', () => {
   it('If keeps an arm whose elements are unknown', () => {
     const ce = selectionEngine();
     const expr = ce.box(['If', COND, 'p', 'u'] as any);
-    expect(expr.type.toString()).toEqual('broadcastable<any>');
+    // The condition can be a ragged mask (ROADMAP CE-502): the value is the
+    // point `p`, the list `u`, or a list of selections.
+    expect(expr.type.toString()).toEqual('list | tuple<integer>');
     ce.assign('u', ce.box(['List', 1, 0, 3]));
     const value = expr.evaluate();
     expect(value.json).toEqual(['List', 1, 0, 3]);
@@ -110,14 +112,14 @@ describe('issue #454: a selection on a possibly element-wise condition', () => {
   it('Which keeps an arm whose elements are unknown', () => {
     const ce = selectionEngine();
     const expr = ce.box(['Which', COND, 5, 'True', 'u'] as any);
-    expect(expr.type.toString()).toEqual('broadcastable<any>');
+    expect(expr.type.toString()).toEqual('integer | list');
   });
 
   it('an arm the broadcastable type admits adds nothing (unchanged)', () => {
     const ce = selectionEngine();
     ce.declare('xs', 'list<integer>');
     expect(ce.box(['If', COND, 5, 'xs'] as any).type.toString()).toEqual(
-      'broadcastable<integer>'
+      'integer | list<integer | list<any>>'
     );
   });
 });

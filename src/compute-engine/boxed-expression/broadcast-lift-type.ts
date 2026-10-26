@@ -55,6 +55,7 @@ import {
   descendIntoConstructor,
   isBareCutOnDescent,
   topTypeBesideAbsence,
+  openDepthScalarArms,
   blockLocalTypeMayHoldList,
   unfoldAliasOnDescent,
   type AliasDescent,
@@ -328,6 +329,9 @@ export function isPossiblyCollectionTypedView(
   if (t === 'unknown' || t === 'any' || t === 'value') return v.isApplication;
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form of an application over an operand of type `unknown`
+  // (`openDepthScalarArms`) may be a collection, as a `broadcastable<R>`.
+  if (openDepthScalarArms(t) !== undefined) return true;
   if (t.kind !== 'union') return false;
   return t.types.some((branch) => {
     const b = resolveTypeAlias(branch);
@@ -1944,6 +1948,87 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     return reduceType({ kind: 'union', types: results });
   }
 
+  // An operand of the open form `R | list<R | list<any>>` (with or without a
+  // `tuple` arm, `openDepthScalarArms`) is the result of an element-wise
+  // application over an operand whose type says nothing about its value
+  // (`openTriggerBroadcastType`). Its value can be a scalar of `R`, a point
+  // or a list of any depth and shape, so an element-wise application over
+  // it has the same open form: the handler is called again with the
+  // operand typed as its scalar arms, and the answer for one cell is put in
+  // the open form. With `L: list<unknown>`, `\sin(2·L[1])` is
+  // `number | tuple | list<number | tuple | list<any>>`, as `2·L[1]` is: for
+  // `L := [(1, 2)]` the value is the point `(sin 2, sin 4)`. Only when each
+  // other operand is a scalar that cannot be a list or a point, or has an
+  // open type too: a visible collection beside it takes the arms below.
+  const openArms = views.map((v, i) =>
+    mappable(i) ? openDepthScalarArms(v.type) : undefined
+  );
+  if (
+    openArms.some((a) => a !== undefined) &&
+    views.every(
+      (v, i) =>
+        openArms[i] !== undefined ||
+        !mappable(i) ||
+        (isPossiblyCollectionTypedView(v) && hasOpenTopType(v)) ||
+        (cannotHoldAList(v.type) && !hasTupleBranch(v.type) && !v.tuple)
+    )
+  ) {
+    const cell = input.abstractCellResult?.(openArms) ?? sigResult;
+    if (cell === 'error' || cell === 'never') return cell;
+    return openTriggerBroadcastType(cell, input.armwiseTupleArms === true);
+  }
+
+  // A visible collection beside an operand whose type says nothing about
+  // its value (`hasOpenTopType`: an application typed `unknown`, the open
+  // form, `broadcastable<unknown>`). The operator maps the collection, and
+  // each cell is combined with the open operand, whose value can be a
+  // scalar, a ragged list or a point: with `L: list<unknown>` and
+  // `L := [[[1], [2, 3]]]`, `[1, 2] + L[1]` is `[[2], [4, 5]]`, which the
+  // shape of the visible collection (`vector<integer^2>`) does not hold.
+  // The value is a list whose elements have the open form of the result for
+  // one cell. The handler is called again with each visible collection
+  // typed as its cell.
+  // A top type `any` or `value` keeps its own rules (`topTypeOfTriggers`),
+  // and only a collection that is a list for every value of its type takes
+  // this branch: a union with a scalar arm can give a scalar.
+  const openIndex = views.findIndex(
+    (v, i) =>
+      mappable(i) &&
+      isPossiblyCollectionTypedView(v) &&
+      hasOpenTopType(v) &&
+      !hasDeclaredTopType(v)
+  );
+  const isVisibleCollection = (v: BroadcastOperandView): boolean =>
+    !v.tuple && !v.textAtom && isSubtype(v.type, LIST_OF_ANY);
+  if (
+    openIndex >= 0 &&
+    views.some(
+      (v, i) => mappable(i) && i !== openIndex && isVisibleCollection(v)
+    )
+  ) {
+    const cell =
+      input.abstractCellResult?.(
+        views.map((v, i) =>
+          mappable(i) && isVisibleCollection(v)
+            ? broadcastCellTypeOf(v.type)
+            : openArms[i]
+        )
+      ) ?? sigResult;
+    if (cell === 'error' || cell === 'never') return cell;
+    const lifted: Type = {
+      kind: 'list',
+      elements: openTriggerBroadcastType(cell, input.armwiseTupleArms === true),
+    };
+    // An operator with the `'whole-collection-compare'` exemption compares
+    // two collections as whole values: when the open operand holds a
+    // collection at run time, the answer is one scalar (`[1, 2] = L[1]` is
+    // `True` for `L := [[1, 2]]`). The run-time shape of the open operand
+    // decides, so the answer is the scalar result or the list.
+    if (def.broadcastExemptions.includes('whole-collection-compare'))
+      return widen(cell, lifted);
+    return lifted;
+  }
+
   // An operator with the `'whole-collection-compare'` exemption over two or
   // more definite collections applies whole-value semantics — a scalar
   // `boolean`, never a broadcast. The value-level skip tests `isCollection`,
@@ -2601,6 +2686,24 @@ export function broadcastLiftType(input: BroadcastLiftInput): Type | undefined {
     );
     if (nested.length > 0)
       elements = nestedBroadcastResultType(nested, elements);
+    // A trigger whose type says nothing about its value (an application
+    // typed `unknown`, such as an element read `L[1]` of `L: list<unknown>`
+    // or a call of an undeclared function, or a trigger of a top type that
+    // the numeric rule above did not answer) can hold a ragged list. The
+    // operator maps such a list at its leaves, and `broadcastable<E>`
+    // (`E | tensor<E>`) does not hold the value: with `L := [[[1], [2, 3]]]`,
+    // `2·L[1]` is `[[2], [4, 6]]`. The answer is then `E | list<E |
+    // list<any>>`, which holds a list of any depth and shape.
+    if (
+      views.some(
+        (v, i) =>
+          mappable(i) && isPossiblyCollectionTypedView(v) && hasOpenTopType(v)
+      )
+    )
+      return openTriggerBroadcastType(
+        elements,
+        input.armwiseTupleArms === true
+      );
     return broadcastableOf(elements);
   }
 
@@ -2734,6 +2837,107 @@ export function topTypeOfTriggers(
     if (t === 'value') result = 'value';
   }
   return result;
+}
+
+/** The plain list of any elements, for the shape test of a list operand. */
+const LIST_OF_ANY: Type = Object.freeze({
+  kind: 'list',
+  elements: 'any',
+}) as Type;
+
+/** Whether the type of the operand is a top type `any` or `value` (for an
+ * application, also beside absence markers, `topTypeBesideAbsence`), or a
+ * `broadcastable` of such cells. */
+function hasDeclaredTopType(v: BroadcastOperandView): boolean {
+  const resolved = resolveTypeAlias(v.type);
+  const t =
+    (v.isApplication ? topTypeBesideAbsence(resolved) : undefined) ?? resolved;
+  if (t === 'any' || t === 'value') return true;
+  const elements = broadcastableElementsOf(t);
+  if (elements === undefined) return false;
+  const e = resolveTypeAlias(elements);
+  return e === 'any' || e === 'value';
+}
+
+/**
+ * Whether the operand of a broadcast has a type that says nothing about its
+ * value: `unknown`, `any` or `value` (for an application, also such a type
+ * beside absence markers, `topTypeBesideAbsence`), a `Block` local typed by
+ * a top type, the open form (`openDepthScalarArms`), or a
+ * `broadcastable<E>` whose cells `E` are a top type
+ * (`broadcastable<unknown>`, which is `unknown | list<unknown>`). The value
+ * of such an operand can be a ragged list.
+ */
+export function hasOpenTopType(v: BroadcastOperandView): boolean {
+  if (v.topTypedBlockLocal) return true;
+  const resolved = resolveTypeAlias(v.type);
+  const t =
+    (v.isApplication ? topTypeBesideAbsence(resolved) : undefined) ?? resolved;
+  if (t === 'unknown' || t === 'any' || t === 'value') return true;
+  if (openDepthScalarArms(t) !== undefined) return true;
+  const elements = broadcastableElementsOf(t);
+  if (elements === undefined) return false;
+  const e = resolveTypeAlias(elements);
+  return e === 'unknown' || e === 'any' || e === 'value';
+}
+
+/**
+ * The type of an element-wise application with the per-element result `R`
+ * over an operand whose type says nothing about its value
+ * (`hasOpenTopType`). The value of the operand can be a scalar, or a list of
+ * any depth and shape, which the operator maps at its leaves, so the result
+ * is `R | list<R | list<any>>`. `broadcastable<R>` (`R | tensor<R>`) does
+ * not hold a ragged result.
+ *
+ * When `tupleArm` is true (the operator maps a point component-wise or
+ * combines points, `typesTupleArmsAsCells`) and `R` is numeric, the value of
+ * the operand can also be a point, at the top level or as an element of a
+ * list at any depth, and the result is then a point there: `2·(1, 2)` is
+ * `(2, 4)`. The answer then has a `tuple` arm, at the top level and in the
+ * elements of its list arm: `R | tuple | list<R | tuple | list<any>>`.
+ * (ROADMAP CE-502.)
+ */
+export function openTriggerBroadcastType(
+  elements: Type,
+  tupleArm: boolean
+): Type {
+  let r = resolveTypeAlias(elements);
+  if (r === 'any' || r === 'value') return r;
+  // A per-element result that is itself a `broadcastable<E>` or of the open
+  // form is read by its cells `E`: the open form of `E` holds every value
+  // of such a result. A `tuple` arm of an open result is kept.
+  const open = openDepthScalarArms(r);
+  if (open !== undefined) {
+    if (
+      typeof r !== 'string' &&
+      r.kind === 'union' &&
+      r.types.some((m) => {
+        const a = resolveTypeAlias(m);
+        return a === 'tuple' || (typeof a !== 'string' && a.kind === 'tuple');
+      })
+    )
+      tupleArm = true;
+    elements = open;
+    r = resolveTypeAlias(open);
+  } else if (typeof r !== 'string' && r.kind === 'broadcastable') {
+    elements = r.elements;
+    r = resolveTypeAlias(r.elements);
+  }
+  // A result whose cells can be lists (`unknown`, `list<unknown>`) already
+  // holds a list of any depth in `broadcastable<R>` (`R | list<R>`), and it
+  // is kept. The join below is neutral in `unknown`, and it would drop the
+  // scalar arm of such a result.
+  if (!cannotHoldAList(broadcastCellTypeOf(elements)))
+    return broadcastableOf(elements);
+  // A point is a value of the operand at any depth: an element of a list
+  // can be a point too (`2·L[1]` for `L := [[(1, 2)]]` is `[(2, 4)]`), so
+  // the `tuple` arm is also an arm of the list elements.
+  const cell: Type =
+    tupleArm && isSubtype(r, 'number') ? widen(elements, 'tuple') : elements;
+  return widen(cell, {
+    kind: 'list',
+    elements: widen(cell, { kind: 'list', elements: 'any' }),
+  });
 }
 
 /**

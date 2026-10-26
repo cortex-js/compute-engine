@@ -10,6 +10,7 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   topTypeBesideAbsence,
+  openDepthScalarArms,
   blockLocalTypeMayHoldList,
   isPointElementType,
   unfoldAliasOnDescent,
@@ -1595,8 +1596,15 @@ export function typeCouldBeNumericTuple(
   if (typeof type === 'string') return type === 'tuple';
   if (type.kind === 'tuple')
     return type.elements.every((el) => couldBeNumericElement(el.type, seen));
-  if (type.kind === 'union')
+  if (type.kind === 'union') {
+    // The open form `R | tuple | list<R | tuple | list<any>>`
+    // (`openDepthScalarArms`), the type of an element-wise application over
+    // an operand of type `unknown`, is read as a possible collection
+    // (`isPossiblyCollectionTyped`), not as a point: its `tuple` arm only
+    // records that the operand of the application can be a point.
+    if (openDepthScalarArms(type) !== undefined) return false;
     return type.types.some((t) => typeCouldBeNumericTuple(t, seen));
+  }
   return false;
 }
 
@@ -1631,6 +1639,11 @@ export function typeCouldBeNumericTupleCollection(
   type = unfolded.type;
   seen = unfolded.seen;
   if (typeof type === 'string') return false;
+  // The open form (`openDepthScalarArms`) is read as a possible collection
+  // of numbers, as in `typeCouldBeNumericTuple`: the `tuple` arm of its
+  // elements only records that the operand of the application can hold
+  // points.
+  if (openDepthScalarArms(type) !== undefined) return false;
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeNumericTupleCollection(t, seen));
   if (
@@ -2854,6 +2867,11 @@ export function isPossiblyCollectionTyped(
   }
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>` (`openDepthScalarArms`)
+  // is the type of an element-wise application over an operand of type
+  // `unknown`. Like a `broadcastable<R>`, its value is a scalar or a
+  // collection that only the run-time value decides.
+  if (openDepthScalarArms(t) !== undefined) return true;
   // A `broadcastable<…>` branch inside a union hides its collection-ness the
   // same way a bare `broadcastable<…>` does: a valueless `b: number |
   // broadcastable<number>` may hold a list at runtime, so `2b` typed as a

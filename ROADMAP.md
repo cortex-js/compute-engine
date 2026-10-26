@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-504.
+Next free reference: CE-505.
 
 **Entry format.**
 
@@ -171,18 +171,6 @@ then be read once more, and the memoized result may be narrower than it should
 be. No reachable witness was found. Closing it needs an immediate advance for a
 widening inside the derivation's scope, which the deferred design avoids on
 purpose.
-
-### CE-38. An undeclared recursive pair installed callee-first is typed `list<any>`
-
-**Status:** open; defect, small.
-
-When `G := (n, K) ↦ F(n, K)` is assigned before `F` (which builds a list with
-`join([n], G(n + 1, K))`) is boxed, both are typed `-> list<any>`: sound, but
-not `list<number>`, which the other three install orders give. The body of `F`
-reads `G` as `-> unknown`, an `unknown` operand of `Join` gives `any` elements,
-and the list hypothesis `list<any>` is accepted at once. A fix needs a pass that
-can start below `list<any>` without storing a `list<unknown>` result (`unknown`
-is neutral in a join, so `Join(F(…), ["a"])` would be typed `list<string>`).
 
 ### CE-40. The type of a held operand of a lazy operator is read without its binding
 
@@ -463,22 +451,6 @@ The effects walker stops at a depth of 8 nested function literals
 the safe direction but loses precision. A fix needs a design choice: the nested
 walk shares its confinement state with the enclosing literal.
 
-### CE-490. A string argument at an inferred scalar parameter keeps the numeric signature result
-
-**Status:** open; wrong value, small.
-
-With `f := x ↦ (-x, x)`, `f("s")` is typed `tuple<number, number>`, and its
-value `(Error(incompatible-type), "s")` holds a string. Pinned in
-`tycho-373-passthrough-broadcast-typing.test.ts`.
-
-### CE-491. A list of points mapped over a failing body is typed `error`
-
-**Status:** open; defect, small.
-
-With `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` is typed `error`; its value is a
-list of two `no-product-between-points` errors. The static type should be a
-list, as a positional operator keeps a failed cell (`docs/ERROR-MODEL.md` §3).
-
 ### CE-492. `Field` reports a static error for a key an open record type does not list
 
 **Status:** open; design.
@@ -488,37 +460,18 @@ list, as a positional operator keeps a failed cell (`docs/ERROR-MODEL.md` §3).
 hold other fields), so the key may exist at run time. The check catches typos,
 but it refuses programs that are correct for a record with more fields.
 
-### CE-498. A sub-expression printed outside its `Loop` shows a loop index named `i` as an error
-
-**Status:** open; defect, small.
-
-The `toString()` of a part of a loop body taken outside its `Loop` prints a loop
-index named `i` as an `incompatible-type` error (read as the imaginary unit),
-for example `ReplaceAt([1,2,3], i, 9)`. The value is correct; only the printed
-form of the detached part is wrong.
-
-### CE-502. A call over an operand of type `unknown` is typed `broadcastable<R>`, which does not hold a ragged element
+### CE-504. A point multiplied by an operand that may be a list is typed as one point
 
 **Status:** open; wrong value.
 
-With `Lu: list<unknown>` and no value, `k(Lu[1])` (`k: (real) -> real`) is typed
-`broadcastable<real>` and `2·Lu[1]` is `broadcastable<number>`
-(`boxed-function.ts`, about line 11204, and `broadcast-lift-type.ts`). An
-element of `list<unknown>` can be a ragged list, which `broadcastable<R>`
-(`R | tensor<R>`) does not hold; the 2026-10-25 decision on CE-378 keeps
-`list<any>` for that reason. Once the symbol has a value the type comes from the
-value. A sound type is `R | list<any>`-like (the form `Map` uses since this
-round: `R | indexed_collection<any>`). It changes the arithmetic typing of
-`unknown` operands across the engine: measure first.
-
-### CE-503. `t·P/(P[1] − 1)` infers `-> never` for a function literal
-
-**Status:** open; wrong value.
-
-`c := (P, t) ↦ t·P/(P[1] − 1)` (the body is `Divide(Multiply(t, P), …)`) is
-typed `(P: unknown, t: unknown) -> never` (also at HEAD 8092e4cb0).
-`c([3, 2], 2)` evaluates to a list of `incompatible-type` errors, which
-`list<never>` does not hold. The form `t·(P/(P[1] − 1))` infers correctly.
+`(x, y)·(2·Lu[1])` with `Lu: list<unknown>` is typed `tuple<number, number>`;
+with `Lu := [[1, 2]]` the value is `[(6, 8), (12, 16)]`, and with
+`Lu := [[[1], [2, 3]]]` it is a ragged list of points. A `broadcastable<number>`
+operand has the same defect: `(x, y)·b` and `(x, y)/b` are typed
+`tuple<number, number>`. `(x, y)/(2·Lu[1])` is typed
+`list<tuple<number, number>> | tuple<number, number>`, which still does not hold
+the ragged value. The point-arithmetic route (`library/arithmetic.ts`) must
+admit a list of points of any depth when the other operand may be a list.
 
 ## Collections, absence and broadcasting
 

@@ -41,7 +41,7 @@ describe('P1 — the `unknown` widening happens at boxing, not in the derivation
     // claim for the inferred/number tier.
     expect(ce.box(['h', 'x']).type.toString()).toBe('unknown');
     expect(ce.box(['Add', ['h', 'x'], 1]).type.toString()).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
   });
 

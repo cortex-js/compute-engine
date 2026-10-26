@@ -166,6 +166,7 @@ import {
   broadcastableIndexElementTypeOf,
   collectionElementType,
   containsBroadcastableType,
+  openDepthScalarArms,
   indexElementType,
   functionResult,
   functionArity,
@@ -11778,6 +11779,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // component returns `undefined` → default compilation, which has no
       // `PointList` lowering and reports it as uncompilable (fail closed).
       const isProvablyNonScalar = (t: Type): boolean => {
+        // The open form (`openDepthScalarArms`) is a scalar or a list decided
+        // at run time, as a `broadcastable<T>` is (see `undecided` below).
+        if (openDepthScalarArms(t) !== undefined) return false;
         if (typeof t !== 'string' && t.kind === 'union')
           return t.types.some(isProvablyNonScalar);
         // A STRING is a subtype of `collection` (its elements are its grapheme

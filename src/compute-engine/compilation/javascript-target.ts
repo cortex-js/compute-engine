@@ -95,7 +95,9 @@ import {
   isNonRealNumber,
   isPointElementType,
   resolveTypeAlias,
-  resolveTypeForCompilation,
+  // The compiled lanes read the open form of a broadcast over an operand
+  // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
   topTypeBesideAbsence,
   typeContainsMissing,

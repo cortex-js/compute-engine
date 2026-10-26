@@ -478,7 +478,7 @@ describe('an element read over a base that declares any elements', () => {
     expect(ce.symbol('P').type.toString()).toBe('indexed_collection<any>');
     expect(typeOf(ce, ['At', ['Rest', 'P'], 1])).toBe('unknown');
     expect(typeOf(ce, ['Add', ['At', ['Rest', 'P'], 1], 1])).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
   });
 
@@ -492,7 +492,9 @@ describe('an element read over a base that declares any elements', () => {
       expect(typeOf(ce, ['At', part, 'i'])).toBe('unknown');
       const sum = ce.box(['Add', ['At', part, 'i'], 1] as any);
       expect(sum.isValid).toBe(true);
-      expect(sum.type.toString()).toBe('broadcastable<number>');
+      expect(sum.type.toString()).toBe(
+        'list<list<any> | number | tuple> | number | tuple'
+      );
     }
   );
 });

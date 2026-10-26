@@ -218,7 +218,7 @@ describe('the refined signature follows the body', () => {
     ce.declare('phi', '(unknown) -> unknown');
     ce.assign('phi', ce.parse(PHI));
     expect(ce.box('phi').type.toString()).toBe(
-      '(unknown) -> broadcastable<number>'
+      '(unknown) -> list<list<any> | number | tuple> | number | tuple'
     );
   });
 
@@ -326,7 +326,9 @@ describe('the refined signature follows the body', () => {
       evaluate: ce.parse('(x) \\mapsto x + 1'),
     });
     ce.assign('k', ce.parse('(x) \\mapsto 1 + c(x)'));
-    expect(ce.box(['k', 'x']).type.toString()).toBe('broadcastable<number>');
+    expect(ce.box(['k', 'x']).type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
     ce.assign('c', ce.parse('(i) \\mapsto 2i'));
     expect(ce.box(['k', 'x']).type.toString()).toBe('number');
     // No use narrows `x`, so the signature says `list<unknown>`: a call
