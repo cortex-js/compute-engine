@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-498.
+Next free reference: CE-501.
 
 **Entry format.**
 
@@ -205,22 +205,6 @@ operand's type are now one module, `library/held-operand-type.ts`
   fix records, when the lazy operator is canonicalized, which held names a local
   scope binds. `TrigExpand`, `TrigToExp` and `TrigReduce` avoid the problem by
   binding their operand at canonicalization.
-
-### CE-42. Accessors keep an absent member when the operand length is not proved
-
-**Status:** open; defect.
-
-`First`, `Second`, `Third`, `Last` and `At` with a literal index lose their
-absent member when the operand is proved to hold the position. The proof reads
-the length from a list type with a length, a list literal, a string literal, a
-`Range` with literal bounds, and `Rest`/`Most`/`Take`/`Drop` of those
-(`provenLengthD`, `library/collections.ts`).
-
-- **CE-42.3** A position proved NOT to exist keeps `T | marker(T)` when the
-  elements are not numbers, although its value is always the marker (a numeric
-  position is typed `nan`: `At([7, 8, 9], 99)`). A chained read (`M[7][1]` over
-  a matrix) chooses `NaN` or `Missing` from the element type that the inner
-  access states, so the row type must stay.
 
 ### CE-46. Extended-real declarations widen to `number` through a call of a function declared `function`
 
@@ -479,33 +463,6 @@ The effects walker stops at a depth of 8 nested function literals
 the safe direction but loses precision. A fix needs a design choice: the nested
 walk shares its confinement state with the enclosing literal.
 
-### CE-444. A local declared `any` and assigned a string is typed `indexed_collection<string>` at a `ReplaceAt` update
-
-**Status:** open; types. Found 2026-10-24 by the review fixes of CE-329; not
-reproduced outside the compiler yet.
-
-In a compiled block, a local declared `any`, assigned a string and then updated
-with `xs = ReplaceAt(xs, i, "z")` has the type `indexed_collection<string>` at
-the update. A string does not match that type (the elements of a string are
-characters), so the type contradicts the value the local holds. The JavaScript
-in-place update does not depend on it (`compileInPlaceUpdateChain` stores the
-converted array in its temporary whatever the type says). First reproduce it
-with `ce.box(...).type` on the block, then find where the assignment widens the
-string.
-
-### CE-449. The meet of a chain of list aliases grows exponentially with depth
-
-**Status:** open; performance.
-
-With aliases `A(n) = list<A(n-1)> | list<list<A(n-1)>>` (or `list<X> | set<X>`),
-`reduceType` of the intersection of `A(n)` and `B(n)` takes 4.8 s at depth 10
-and 11.4 s at depth 14. With `tuple<X, X> | list<X>` against
-`list<list<X>> | tuple<X, X>`, `typesOverlap` takes 0.9 s at depth 12 and 23 s
-at depth 16, and the meet does not finish at depth 32. Chains of tuples only are
-fast. The fixes that stopped this growth for lists with lengths do not reach
-plain lists or a mix of tuples and lists. The four timing tests of
-`broadcastable-list-meaning.test.ts` now use tuple chains.
-
 ### CE-490. A string argument at an inferred scalar parameter keeps the numeric signature result
 
 **Status:** open; wrong value, small.
@@ -531,53 +488,53 @@ list, as a positional operator keeps a failed cell (`docs/ERROR-MODEL.md` §3).
 hold other fields), so the key may exist at run time. The check catches typos,
 but it refuses programs that are correct for a record with more fields.
 
+### CE-498. A sub-expression printed outside its `Loop` shows a loop index named `i` as an error
+
+**Status:** open; defect, small.
+
+The `toString()` of a part of a loop body taken outside its `Loop` prints a loop
+index named `i` as an `incompatible-type` error (read as the imaginary unit),
+for example `ReplaceAt([1,2,3], i, 9)`. The value is correct; only the printed
+form of the detached part is wrong.
+
 ## Collections, absence and broadcasting
 
-### CE-493. The count of a comprehension is 0 when an earlier clause can fail and a later clause is empty
+### CE-494. The finiteness test and the count of a comprehension still run some user code
 
-**Status:** open; wrong value.
+**Status:** open; defect, small.
 
-`[j for i in 1..3 if bad(i), j in []]`, where the guard `bad` gives an error,
-has `.count` 0, but its walk yields 3 error cells: a failed guard yields an
-error cell at that prefix, without visiting the later clauses. The shortcut
-"an empty clause gives 0" in `comprehensionCount`
-(`library/control-structures.ts`) does not hold when an earlier clause has a
-guard or a destructuring pattern that can fail. The listing bound
-(`listingCountUpperBound()`, `boxed-expression/listed-element.ts`) already
-counts these cells.
+Since 2026-10-25 the finiteness test of a comprehension does not evaluate a
+guard, and it reads a dependent domain from its form (`comprehensionIsFinite()`,
+`library/control-structures.ts`). Two cases are left:
 
-### CE-494. The finiteness test of a comprehension runs the callbacks of its domains
-
-**Status:** open; defect.
-
-`comprehensionIsFinite` calls `comprehensionEnumeratedCount(expr, true)`,
-which walks the domains, so a domain such as `filter(1..i, keep)` runs `keep`
-for each caller of `isWalkableFiniteCollection`. The listing of an Epsil
-result avoids this for an impure view, but other callers do not. The
-statement `let r = [i for i in 1..3, j in filter(1..i, keep)]` also calls
-`keep` 6 times, though the value stays a view; the cause is not yet found.
+- **CE-494.1** A domain that reads no earlier index is still evaluated by the
+  finiteness test, so `[x for x in makeList()]`, where `makeList` has a side
+  effect, runs it once more than the walk. Not evaluating it risks refusing to
+  list such a comprehension; the fix needs care.
+- **CE-494.2** The count of `[i for i in filter(1..3, keep)]` calls `keep` 4
+  times, not 3: `scanIndependentClauses` reads both `smallCount(coll)` and
+  `coll.isEmptyCollection`, and each one walks the filter. The value is right.
 
 ### CE-495. A list of range rows is refused at a `matrix` parameter
 
 **Status:** design needed; capability.
 
 Since a range in a collection stays a range, `[1..2, 3..4]` is typed
-`list<range>`. `Determinant`, `Inverse`, `MatrixMultiply`, `Dot` and every
-other operator whose parameter is typed `matrix` refuse it with
-`incompatible-type`, while `[[1, 2], [3, 4]]` works. The operators whose
-parameter accepts any value read a range row as a row (`listedLazyRows()`,
-`library/linear-algebra.ts`). Accepting such a list at a `matrix` parameter
-needs a rule: is a list of finite ranges of equal length a matrix type? The
-test in `ce-39-3-range-element-stays-range.test.ts` is marked
-`test.failing`.
+`list<range>`. `Determinant`, `Inverse`, `MatrixMultiply`, `Dot` and every other
+operator whose parameter is typed `matrix` refuse it with `incompatible-type`,
+while `[[1, 2], [3, 4]]` works. The operators whose parameter accepts any value
+read a range row as a row (`listedLazyRows()`, `library/linear-algebra.ts`).
+Accepting such a list at a `matrix` parameter needs a rule: is a list of finite
+ranges of equal length a matrix type? The test in
+`ce-39-3-range-element-stays-range.test.ts` is marked `test.failing`.
 
 ### CE-496. `Negate` and `Sum` over a list of range rows have types that do not hold their values
 
 **Status:** open; defect.
 
 `Negate([1..3, 4..6])` is typed `list<range>`, and its value is a
-`matrix<integer^(2x3)>`. `Sum([1..2, 3..4])` is typed `number`, and its value
-is `[4, 6]`. `Add` and `Multiply` over the same operands are typed correctly
+`matrix<integer^(2x3)>`. `Sum([1..2, 3..4])` is typed `number`, and its value is
+`[4, 6]`. `Add` and `Multiply` over the same operands are typed correctly
 (`list<list<integer>>`).
 
 ### CE-497. `Range(0)` is read in two ways
@@ -586,8 +543,8 @@ is `[4, 6]`. `Add` and `Multiply` over the same operands are typed correctly
 
 The canonical form of `Range(0)` is `Range(1, 0)`, which counts down and
 evaluates to `[1, 0]`, but the `range()` helper of `library/collections.ts`
-reads a raw `Range(0)` as empty. A one-operand `Range(n)` is therefore left
-out of the rule that a finite range and the list of its integers are the same
+reads a raw `Range(0)` as empty. A one-operand `Range(n)` is therefore left out
+of the rule that a finite range and the list of its integers are the same
 element (`integerRangeElements()`, `boxed-expression/type-guards.ts`).
 
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
@@ -895,6 +852,22 @@ and `Chunk` have it (pins in
   correct broadcast type lift. Both are tracked in CE-103.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-500. `subs()` on a lone bound symbol boxes the replacement canonically, even when the symbol was boxed structurally
+
+**Status:** open; defect, small. Tycho ledger row 449.
+
+With `x` declared `real`, `ce.expr('x', { form: 'structural' })` is a bound
+symbol, and `.subs({ x: X + i })` (with `X + i` structural) gives
+`X + (0 + 1i)`: `BoxedSymbol.subs()` (`boxed-symbol.ts`) uses
+`options.canonical ?? this.isCanonical`, and a bound symbol reports
+`isCanonical: true`. The same symbol as an operand of a structural function is
+handled: `BoxedFunction._subsInParseScope()` (`boxed-function.ts`) boxes the
+replacement of a bound symbol operand in the structural form. A symbol does not
+record whether it was boxed structurally or canonically, so the lone case has no
+information to act on. Options: record the form on the boxed symbol (a field set
+by the structural boxing route, `boxStructuralSymbol()` in `box.ts`), or let a
+caller pass `{ form: 'structural' }` to `subs()`.
 
 ### CE-91. Define value capture on assignment, mutable-object boundaries and view reads
 

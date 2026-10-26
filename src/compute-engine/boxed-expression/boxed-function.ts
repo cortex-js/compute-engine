@@ -2427,10 +2427,27 @@ export class BoxedFunction
     // is returned by identity when nothing in it matched — while a held raw
     // operand stays raw.
     const opOptions = structuralForm ? { canonical: undefined } : options;
-    const ops = this._ops.map((x) =>
-      options!.canonical === true && !x.isCanonical
-        ? x.subs(sub, { canonical: false })
-        : x.subs(sub, opOptions)
+    // A symbol operand of a structural node that is bound to a definition
+    // (the structural form binds a declared symbol) reports `isCanonical`,
+    // so its own `subs()` would box the replacement canonically: with
+    // `x: real`, `x + 1` with `x` replaced by the structural `X + i` gave
+    // `X + (0 + 1i) + 1`. Its replacement is boxed in the structural form,
+    // which keeps the written names. An unbound symbol operand (an
+    // undeclared name, or a name below a binder) keeps its own `subs()`,
+    // which boxes the replacement raw.
+    const structuralReplacement = (x: Expression): Expression | undefined => {
+      if (!structuralForm || !isSymbol(x) || !x.isCanonical) return undefined;
+      const name = x.symbol;
+      if (!Object.hasOwn(sub, name) || sub[name] === undefined)
+        return undefined;
+      return this.engine.expr(sub[name], { form: 'structural' });
+    };
+    const ops = this._ops.map(
+      (x) =>
+        structuralReplacement(x) ??
+        (options!.canonical === true && !x.isCanonical
+          ? x.subs(sub, { canonical: false })
+          : x.subs(sub, opOptions))
     );
 
     const form = structuralForm

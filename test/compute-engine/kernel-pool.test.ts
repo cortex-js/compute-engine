@@ -106,7 +106,11 @@ describe('broadcastAsync without a pool', () => {
       { x: samples(200_000) },
       { deadline: 2, chunk: 4096, out }
     );
-    expect(done).toBeGreaterThan(0);
+    // `done` can be 0: the loop checks the clock at its first cell, and on a
+    // loaded machine 2 ms can pass before that check (the test above). What
+    // holds in every case is that the cells before `done` are computed and
+    // the cells after it are untouched.
+    expect(done).toBeGreaterThanOrEqual(0);
     expect(done).toBeLessThanOrEqual(200_000);
     for (let i = 0; i < done; i++) expect(out[i]).not.toBe(-7);
     for (let i = done; i < 200_000; i += 997) expect(out[i]).toBe(-7);

@@ -160,6 +160,22 @@ describe('a structural expression boxed from MathJSON', () => {
     expect(boxed.type.toString()).toBe('integer');
   });
 
+  // A declared symbol of a structural expression is bound, and a bound
+  // symbol reports `isCanonical`. Its replacement by `subs()` is still boxed
+  // in the structural form, so a constant name in it is kept. Tycho row 449.
+  test.each(['real', 'unknown', undefined])(
+    'subs() keeps a constant name in the replacement of x: %s',
+    (type) => {
+      const ce = new ComputeEngine();
+      if (type !== undefined) ce.declare('x', type);
+      const body = ce.box(['Add', 'x', 1], { form: 'structural' });
+      const arg = ce.box(['Add', 'X', 'i'], { form: 'structural' });
+      const result = body.subs({ x: arg });
+      expect(JSON.stringify(result.json)).toBe('["Add",["Add","X","i"],1]');
+      expect(result.isStructural).toBe(true);
+    }
+  );
+
   test('a kept constant name is still the constant once canonical', () => {
     const ce = new ComputeEngine();
     const boxed = ce.box(['Power', 'i', 2], { form: 'structural' });

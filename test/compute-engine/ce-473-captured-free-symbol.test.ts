@@ -313,3 +313,83 @@ describe('CE-473 (c): A CHECKPOINT RESTORES THE RECORDED CAPTURED TYPES', () => 
     );
   });
 });
+
+describe('CE-473 (c): A FUNCTION VALUE IS READ WITH ITS DECLARED PARAMETERS', () => {
+  // `f` is declared with a placeholder result. The stored literal reads its
+  // parameter as `unknown`, so its own type is `(ceArg_0: unknown) ->
+  // number`, while the definition reports the result under the declared
+  // parameter, `nan | real | signed_infinity`. A body that reads `f` as a
+  // value (`f'`) is typed with the definition. Tycho row 448.
+  const ER = 'real | signed_infinity | nan';
+  const F = [
+    'Function',
+    ['Block', ['Add', 'ceArg_0', ['Multiply', 'A', ['Cos', 'ceArg_0']], 'd']],
+    'ceArg_0',
+  ];
+
+  test.each(["g(t):=f'(t)+1", 'g(t):=f(t)+1'])(
+    'a function that reads f compiles: %s',
+    (src) => {
+      const ce = new ComputeEngine();
+      ce.declare('A', 'real');
+      ce.declare('d', 'real');
+      ce.declare('f', { signature: `(${ER}) -> unknown` });
+      ce.assign('f', ce.box(F as any));
+      ce.parse(src).evaluate();
+      expect(compile(ce.parse('x-g(y)'), { fallback: false }).success).toBe(
+        true
+      );
+    }
+  );
+
+  test.each(['(unknown) -> real', '(real) -> unknown'])(
+    'a string function written directly on f is refused: %s',
+    (signature) => {
+      // The derived signature is read only for a declared `unknown` result:
+      // a declared `real` result says nothing about the value.
+      const ce = new ComputeEngine();
+      ce.declare('f', { signature });
+      ce.assign('f', ce.parse('x \\mapsto x+1'));
+      ce.parse("g(t):=f'(t)+1").evaluate();
+      const def = ce.lookupDefinition('f') as {
+        value: { value: Expression | undefined };
+      };
+      def.value.value = ce.box(['Function', { str: 'abc' }, 'x']);
+      expect(() => compile(ce.parse('x-g(y)'), { fallback: false })).toThrow(
+        /Could not compile the function 'g'/
+      );
+    }
+  );
+
+  test.each(["g(t):=f'(t)+1", 'g(t):=f(t)+1'])(
+    'a function that reads a recursive f compiles: %s',
+    (src) => {
+      const ce = new ComputeEngine();
+      ce.declare('f', { signature: '(real) -> unknown' });
+      ce.assign(
+        'f',
+        ce.parse('n \\mapsto \\operatorname{If}(n \\le 1, 1, n f(n-1))')
+      );
+      ce.parse(src).evaluate();
+      expect(compile(ce.parse('x-g(y)'), { fallback: false }).success).toBe(
+        true
+      );
+    }
+  );
+
+  test.each(["g(t):=f'(t)+1", 'g(t):=f(t)+1'])(
+    'it is refused after a symbol that f reads changes type: %s',
+    (src) => {
+      const ce = new ComputeEngine();
+      ce.assign('A', 0.95);
+      ce.declare('d', 'real');
+      ce.declare('f', { signature: `(${ER}) -> unknown` });
+      ce.assign('f', ce.box(F as any));
+      ce.parse(src).evaluate();
+      ce.assign('A', ce.parse('2i'));
+      expect(() => compile(ce.parse('x-g(y)'), { fallback: false })).toThrow(
+        /Could not compile the function/
+      );
+    }
+  );
+});
