@@ -239,7 +239,10 @@ describe('a symbol a body CAPTURES carries its own evidence', () => {
     // enclosing call must map over it.
     const ce = captured(false);
     const r = build(ce, ['g', ['f', 1]]);
-    expect(r.code).toContain('Array.isArray');
+    // The signature of `f` admits a list result,
+    // `(t: unknown) -> broadcastable<number>` (ROADMAP CE-478), so the
+    // enclosing call takes the run-time broadcast.
+    expect(r.code).toBe('_SYS.bcastFn(_fn_g, _fn_f(1))');
     expect(r.run({ y: [1, 2, 3] })).toEqual([4, 8, 12]);
     // The interpreter's own answer for the same list, on a separate engine so
     // that assigning `y` a value cannot change what the compiler above sees.

@@ -4,6 +4,7 @@ import { parseEpsil } from '../../src/epsil/parse-epsil';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { isString } from '../../src/compute-engine/boxed-expression/type-guards';
 import type { Expression } from '../../src/compute-engine/global-types';
+import type { Type } from '../../src/common/type/types';
 
 //
 // A `function` statement (`DefineFunction` with a `Function` literal) is
@@ -318,6 +319,117 @@ describe('A HOST BINDING AND A VARIABLE OF THE SAME NAME', () => {
         'let a = String(g())\nlet c = 2\nfunction g() { c^2 }\n[a, g()]'
       )
     ).toEqual(['100', 4]);
+  });
+});
+
+describe('THE SIGNATURE OF A PREPARED FUNCTION HOLDS A CALL BEFORE THE `let`', () => {
+  // A call of a prepared function before the `let` of a name that an
+  // enclosing scope defines reads the outer definition in the body (the
+  // tests above). The signature that the body infers must hold the value of
+  // that call, so the binding that the preparation gives the body has the
+  // union of the two types. The host operator `Snap` reads the signature of
+  // `g` when its statement runs, before the `function` statement runs and
+  // installs `g` again with the binding of the `let`.
+  //
+  // Provenance: ROADMAP entry CE-480.
+  function run(
+    source: string,
+    host?: (ce: ComputeEngine) => void
+  ): { value: Expression; result: string; matches: boolean } {
+    const ce = new ComputeEngine();
+    host?.(ce);
+    let signature: string | undefined = undefined;
+    let resultType: Type | undefined = undefined;
+    ce.declare('Snap', {
+      signature: '() -> integer',
+      evaluate: (_ops, { engine }) => {
+        const def = engine.lookupDefinition('g');
+        if (def !== undefined && 'operator' in def) {
+          signature = def.operator.signature.toString();
+          const t = def.operator.signature.type;
+          if (typeof t === 'object' && t.kind === 'signature')
+            resultType = t.result;
+        }
+        return engine.number(0);
+      },
+    });
+    const { value, diagnostics } = executeEpsil(ce, source);
+    expect(diagnostics).toEqual([]);
+    expect(resultType).toBeDefined();
+    return {
+      value,
+      result: signature!,
+      matches: value.type.matches(ce.type(resultType!)),
+    };
+  }
+
+  test('a body that squares the constant `i`', () => {
+    // Before: the signature was `() -> integer<0..>`, and the value `-1`.
+    const r = run('let a = g()\nSnap()\nlet i = 2\nfunction g() { i^2 }\na');
+    expect(r.value.json).toEqual(-1);
+    expect(r.result).toEqual('() -> number');
+    expect(r.matches).toBe(true);
+  });
+
+  test('a body that adds 1 to the constant `i`', () => {
+    // Before: the signature was `() -> integer`, and the value `1 + i`.
+    const r = run('let a = g()\nSnap()\nlet i = 2\nfunction g() { i + 1 }\na');
+    expect(r.value.toString()).toEqual('(1 + i)');
+    expect(r.result).toEqual('() -> complex');
+    expect(r.matches).toBe(true);
+  });
+
+  test('a host binding of another type', () => {
+    // Before: the signature was `() -> integer<0..>`, and the value `2.25`.
+    const r = run(
+      'let a = g()\nSnap()\nlet c = 2\nfunction g() { c^2 }\na',
+      (ce) => {
+        ce.declare('c', 'real');
+        ce.assign('c', 1.5);
+        ce.pushScope();
+      }
+    );
+    expect(r.value.json).toEqual(2.25);
+    expect(r.matches).toBe(true);
+  });
+
+  test('a host binding that holds `Nothing`', () => {
+    // The union keeps the `nothing` arm. Before: the signature was
+    // `() -> integer`, and the value `Nothing`.
+    const r = run(
+      'let a = g()\nSnap()\nlet v = 2\nfunction g() { v }\na',
+      (ce) => {
+        ce.declare('v', 'integer | nothing');
+        ce.assign('v', ce.Nothing);
+        ce.pushScope();
+      }
+    );
+    expect(r.value.symbol).toEqual('Nothing');
+    expect(r.result).toEqual('() -> integer | nothing');
+    expect(r.matches).toBe(true);
+  });
+
+  test('a host binding of type `unknown`', () => {
+    // An outer type that is `unknown` makes the binding `unknown`, which
+    // admits every value. Before: the signature was `() -> integer`.
+    const r = run(
+      'let a = g()\nSnap()\nlet v = 2\nfunction g() { v }\na',
+      (ce) => {
+        ce.declare('v', 'unknown');
+        ce.pushScope();
+      }
+    );
+    expect(r.result).toEqual('() -> unknown');
+    expect(r.matches).toBe(true);
+  });
+
+  test('no call before the `let`: the signature keeps the variable type', () => {
+    const r = run(
+      'let a = i^2\nlet i = 2\nlet b = g()\nSnap()\nfunction g() { i^2 }\nb'
+    );
+    expect(r.value.json).toEqual(4);
+    expect(r.result).toEqual('() -> integer<0..>');
+    expect(r.matches).toBe(true);
   });
 });
 

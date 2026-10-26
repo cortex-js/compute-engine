@@ -249,17 +249,17 @@ describe('the refined signature follows the body', () => {
     // The use `a x` in the body declares the outer `a` and the body reads
     // that binding, so the type of the literal follows the assignment of
     // `a` (user decision 2026-10-25 on CE-473 in `ROADMAP.md`). The result
-    // is typed as the product of `a` and the parameter, `vector<integer^3>`,
-    // which holds the value of `f(2)`. The `Multiply` type handler leaves a
-    // scalar factor of an inferred type out of the cell type, so `f(0.5)`,
-    // whose value is `[1.5, 2, 2.5]`, is typed `vector<integer^3>` too: that
-    // is a defect of the handler, not of this refinement.
-    expect(ce.box('f').type.toString()).toBe(
-      '(unknown) -> vector<integer^3>'
-    );
+    // is typed as the product of `a` and the parameter. The parameter can
+    // hold any number, so the cells are `number` (ROADMAP CE-481): the
+    // result `vector<3>` holds the value of `f(2)` and of `f(0.5)`, which is
+    // `[1.5, 2, 2.5]`.
+    expect(ce.box('f').type.toString()).toBe('(unknown) -> vector<3>');
     const call = ce.box(['f', 2]);
     expect(call.evaluate().toString()).toBe('[3,5,7]');
     expect(call.evaluate().type.matches(call.type)).toBe(true);
+    const half = ce.box(['f', 0.5]);
+    expect(half.evaluate().toString()).toBe('[1.5,2,2.5]');
+    expect(half.evaluate().type.matches(half.type)).toBe(true);
   });
 
   test('a concrete declared slot stays the contract', () => {

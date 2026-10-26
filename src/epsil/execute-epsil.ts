@@ -36,6 +36,11 @@ import {
 } from '../compute-engine/boxed-expression/type-guards.js';
 import { readBeforeDeclarationSite } from '../compute-engine/boxed-expression/read-before-declaration.js';
 import {
+  isOperatorDef,
+  isValueDef,
+} from '../compute-engine/boxed-expression/definition-guards.js';
+import { reduceType } from '../common/type/reduce.js';
+import {
   closedLiteralType,
   isHoistedFunctionDefinition,
   laterDeclarationReached,
@@ -1200,6 +1205,12 @@ function prepareFunctionDeclarations(
     }
     return found;
   };
+  // True when a statement before the statement at index `at` (other than a
+  // function definition) can call the function `name` when it runs.
+  const canCallBefore = (name: string, at: number): boolean =>
+    statements.some(
+      (s, k) => k < at && operator(s) !== 'DefineFunction' && reach(k).has(name)
+    );
   const prepared = new Set<string>();
   statements.forEach((s, k) => {
     if (operator(s) === 'DefineFunction') return;
@@ -1276,6 +1287,34 @@ function prepareFunctionDeclarations(
         if (n === 'Nothing' || scope.bindings.has(n)) continue;
         let type: Type | undefined = undefined;
         for (const w of lets) type = w.type ?? type;
+        // A name that an enclosing scope defines (the constant `i`, a host
+        // binding) has two bindings for the body: a call of the function
+        // made before the first `let` of the name reads the outer
+        // definition (step 3), and a call made after it reads the variable.
+        // When a statement before that `let` can call the function, the
+        // binding gets the union of the two types, so that the signature
+        // that the body infers holds the value of each call. In
+        // `let a = g(); let i = 2; function g() { i^2 }`, the first call
+        // gives `-1`, and the result type of `g` is not `integer<0..>`. A
+        // binding with no static type, or the type `unknown`, admits both
+        // values already, and is not changed. The union is a real union
+        // (`reduceType()`), not the inference join `widen()`: the join
+        // drops a `nothing` arm (a host binding that holds `Nothing`) and
+        // an `unknown` operand, and the type would then not hold the value
+        // of the early call. An outer type that is `unknown`, or that is
+        // not found, makes the binding `unknown`, which admits every value.
+        if (
+          type !== undefined &&
+          type !== 'unknown' &&
+          hasOuterDefinition(scope, n) &&
+          canCallBefore(name, lets[0].index)
+        ) {
+          const outer = outerDefinitionType(ce, n);
+          type =
+            outer === undefined || outer === 'unknown'
+              ? 'unknown'
+              : reduceType({ kind: 'union', types: [type, outer] });
+        }
         ce._declareSymbolValue(
           n,
           { type: type ?? 'unknown', inferred: true },
@@ -1355,6 +1394,20 @@ function hasOuterDefinition(
   for (let s = scope.parent; s; s = s.parent)
     if (s.bindings.has(name)) return true;
   return false;
+}
+
+/** The type of a read of `name` through the definition that a scope around
+ * the program scope gives it: the type of a value binding (`imaginary` for
+ * the constant `i`), or the signature of an operator. `undefined` when no
+ * definition is found. */
+function outerDefinitionType(
+  ce: ComputeEngine,
+  name: string
+): Type | undefined {
+  const def = ce.lookupDefinition(name);
+  if (isValueDef(def)) return def.value.type.type;
+  if (isOperatorDef(def)) return def.operator.signature.type;
+  return undefined;
 }
 
 /** A top-level statement of the program that declares or writes a name

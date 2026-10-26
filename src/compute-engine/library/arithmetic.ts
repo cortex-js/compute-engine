@@ -3530,6 +3530,45 @@ function isDeclaredScalarNumberOperand(
 }
 
 /**
+ * The type that a scalar factor of a product contributes to the cells of a
+ * collection (or to the components of a point) that the product scales, or
+ * `undefined` when the factor is not read as a scalar number.
+ *
+ * A factor whose number type the user stated contributes that type
+ * (`isDeclaredScalarNumberOperand`). A factor whose number type was only
+ * inferred, or whose type is `unknown`, can hold any number at run time, so
+ * it contributes `number`: with `L: list<integer>` and `u` inferred
+ * `number`, `L·u` is `[0.5, 1]` when `L` is `[1, 2]` and `u` is `0.5`, and
+ * its type must have `number` cells. When such a factor was left out, the
+ * product kept the cell type of the collection (`list<integer>`), which does
+ * not hold that value (ROADMAP CE-481).
+ */
+function scalarFactorCellType(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): Type | undefined {
+  if (isDeclaredScalarNumberOperand(d, engine)) return d.type;
+  if (resolveTypeAlias(d.type) === 'unknown' || factsOf(d.type).belowNumber)
+    return 'number';
+  return undefined;
+}
+
+/** `scalarFactorCellType` of each factor, or `undefined` when one of the
+ * factors is not read as a scalar number. */
+function scalarFactorCellTypes(
+  ds: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView
+): Type[] | undefined {
+  const result: Type[] = [];
+  for (const d of ds) {
+    const t = scalarFactorCellType(d, engine);
+    if (t === undefined) return undefined;
+    result.push(t);
+  }
+  return result;
+}
+
+/**
  * A type that is statically a list of points of any rank: a list of points
  * (`list<tuple<…>>`), a matrix of points (`matrix<tuple<…>^(2x2)>`), or a list
  * of such lists (`list<list<tuple<…>>>`). A cell can also be a union of
@@ -9509,7 +9548,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // Scalar factors scale the cells: `2 · [(1, 2), (3, 4)] · M` is the
         // same matrix of points, scaled. They are merged into the cell type
         // as in the point branch below: a scalar whose number type is not
-        // declared leaves the point type as written.
+        // declared contributes `number` (`scalarFactorCellType`).
         const scalarFactors = ops.filter((x) => isSubtype(x.type, 'number'));
         const shapedFactors = ops.filter((x) => !isSubtype(x.type, 'number'));
         if (shapedFactors.length === 2) {
@@ -9539,14 +9578,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               withFloatRationalCellsAsReal(
                 ops,
                 shapedOrPlainListType(
-                  scaleTupleComponents(
-                    point,
-                    scalarFactors.every((x) =>
-                      isDeclaredScalarNumberOperand(x, engine)
-                    )
-                      ? [cell, ...scalarFactors.map((x) => x.type)]
-                      : [cell]
-                  ),
+                  scaleTupleComponents(point, [
+                    cell,
+                    ...(scalarFactorCellTypes(scalarFactors, engine) ?? []),
+                  ]),
                   m.dimensions
                 )
               ),
@@ -9585,8 +9620,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // `indexed_collection`) still contributes SOME numeric factor per
           // element, so its contribution is `number` — echoing the literal's
           // integer tiers would claim coordinates the elements need not have.
-          // A scalar factor whose number type is not declared leaves the
-          // tuple type as written, as in the single-tuple branch below.
+          // A scalar factor whose number type is not declared contributes
+          // `number`, as in the single-tuple branch below
+          // (`scalarFactorCellType`).
           const factorTypes = ops
             .filter((x) => !couldBeTuple(x))
             .map((x) => {
@@ -9598,9 +9634,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
                   ? 'number'
                   : elt;
               }
-              return isDeclaredScalarNumberOperand(x, engine)
-                ? x.type
-                : undefined;
+              return scalarFactorCellType(x, engine);
             });
           const scaled = factorTypes.every(
             (t) => t !== undefined && factsOf(t).belowNumber
@@ -9802,25 +9836,21 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // they must widen the ELEMENT type, exactly as in `addTypeOnTypes`.
           // Echoing the collection operand's type verbatim claimed `integer`
           // cells for a product whose values are rationals.
-          // Only DECLARED scalar numbers participate — a literal, or a symbol
-          // or call whose numeric type the user stated. An `unknown`-typed
-          // factor carries no tier to combine (and would widen every cell to
-          // `any`); a merely INFERRED numeric type is retractable evidence —
-          // the same rule `canonicalAdd` applies to its scalar-plus-tuple
-          // rejection — and letting a guess of `number` widen the cells makes
-          // the literal's result type disagree with a declared signature that
-          // the operand types actually satisfy.
+          // A DECLARED scalar number (a literal, or a symbol or call whose
+          // numeric type the user stated) contributes its own type. A factor
+          // whose numeric type was only inferred, or whose type is
+          // `unknown`, can hold any number at run time, so it contributes
+          // `number` (`scalarFactorCellType`): with `a := [1, 2, 3]`, the
+          // product `a·x` is `[0.5, 1, 1.5]` when `x` is `0.5`.
           const others = ops.filter(
             (x) => !isLinearAlgebraCollectionType(x.type)
           );
-          if (others.every((x) => isDeclaredScalarNumberOperand(x, engine)))
+          const scalarTypes = scalarFactorCellTypes(others, engine);
+          if (scalarTypes !== undefined)
             return BoxedType.forResult(
               withFloatRationalCellsAsReal(
                 ops,
-                absorbScalarsIntoCells(
-                  collectionOps[0].type,
-                  others.map((x) => x.type)
-                )
+                absorbScalarsIntoCells(collectionOps[0].type, scalarTypes)
               ),
               engine._typeResolver
             );
@@ -9933,14 +9963,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // The SCALAR factors beside the collections scale every cell too:
           // `[1, 2]·[3, 4]·(1/3)` is `[1, 8/3]`, so they widen the cell type
           // as in the single-collection branch above. Without them the
-          // product was typed `vector<integer^2>`. Only declared scalar
-          // numbers carry a tier to combine, as in that branch.
+          // product was typed `vector<integer^2>`. A factor whose number
+          // type is not declared contributes `number`, as in that branch.
           const scalarFactors = ops.filter((x) => !collectionOps.includes(x));
-          const scalarTypes = scalarFactors.every((x) =>
-            isDeclaredScalarNumberOperand(x, engine)
-          )
-            ? scalarFactors.map((x) => x.type)
-            : [];
+          const scalarTypes =
+            scalarFactorCellTypes(scalarFactors, engine) ?? [];
           if (siblingsAreRank1Scalars)
             return BoxedType.forResult(
               withFloatRationalCellsAsReal(

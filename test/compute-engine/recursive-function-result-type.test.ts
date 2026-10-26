@@ -167,8 +167,9 @@ describe('a mutually recursive pair is covered by the hypothesis', () => {
 
   test('a set base clause derives set', () => {
     const ce = mutual('Set');
-    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set<any>');
-    expect(ce.box('G').type.toString()).toBe('(unknown, unknown) -> set<any>');
+    // Bare `set` and `set<any>` denote the same type.
+    expect(ce.box('F').type.toString()).toBe('(unknown, unknown) -> set');
+    expect(ce.box('G').type.toString()).toBe('(unknown, unknown) -> set');
   });
 });
 

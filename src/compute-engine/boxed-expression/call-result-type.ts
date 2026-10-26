@@ -47,6 +47,7 @@ import {
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { isFunction, isSymbol } from './type-guards.js';
+import { provisionalRecursionResult } from './declared-parameter-result.js';
 
 const cache = new WeakMap<
   IComputeEngine,
@@ -69,6 +70,49 @@ function userFunctionLiteral(binding: BoxedDefinition | undefined) {
       ? (binding.operator as { _lambdaLiteral?: Expression })._lambdaLiteral
       : binding.value.value);
   return literal && isFunction(literal, 'Function') ? literal : undefined;
+}
+
+/** True when `expr` is a call of a user function whose literal is in
+ * `running` (a function whose body a call-result derivation is walking), or
+ * a symbol bound to such a function. */
+function namesRunningLiteral(
+  expr: Expression,
+  running: ReadonlySet<Expression>
+): boolean {
+  const binding: BoxedDefinition | undefined =
+    expr.valueDefinition !== undefined
+      ? { value: expr.valueDefinition }
+      : expr.operatorDefinition !== undefined
+        ? { operator: expr.operatorDefinition }
+        : undefined;
+  const literal = userFunctionLiteral(binding);
+  return literal !== undefined && running.has(literal);
+}
+
+/** True when `expr` holds a call of a user function whose literal is in
+ * `running`, or a symbol bound to such a function
+ * (`namesRunningLiteral`), directly or through the literals of the user
+ * functions it calls: `x ↦ hb(x − 1)` in the body of `ha`, when `hb` calls
+ * `ha`. Each literal is read once (`seen`). */
+function callsRunningLiteral(
+  expr: Expression,
+  running: ReadonlySet<Expression>,
+  seen: Set<Expression> = new Set()
+): boolean {
+  if (namesRunningLiteral(expr, running)) return true;
+  const binding: BoxedDefinition | undefined =
+    expr.valueDefinition !== undefined
+      ? { value: expr.valueDefinition }
+      : expr.operatorDefinition !== undefined
+        ? { operator: expr.operatorDefinition }
+        : undefined;
+  const callee = userFunctionLiteral(binding);
+  if (callee !== undefined && !seen.has(callee)) {
+    seen.add(callee);
+    if (callsRunningLiteral(callee, running, seen)) return true;
+  }
+  if (!isFunction(expr)) return false;
+  return expr.ops.some((op) => callsRunningLiteral(op, running, seen));
 }
 
 /**
@@ -191,6 +235,13 @@ export function callResultType(
   if (binding && 'value' in binding && isForwardCallReference(binding.value))
     binding = callableBindingInContext(engine, head, binding);
   binding ??= engine.lookupDefinition(head);
+  // A call of a function of a cycle of calls whose result is verified is
+  // typed by the candidate result of that function
+  // (`provisionalRecursionResult`).
+  const called = userFunctionLiteral(binding);
+  const provisional =
+    called === undefined ? undefined : provisionalRecursionResult(called);
+  if (provisional !== undefined) return provisional;
   const inferredSig = inferredPointSignature(binding);
   if (inferredSig !== undefined) {
     const t = inferredPointCallType(
@@ -752,7 +803,18 @@ function literalBodyResultType(
     const recursive = new WeakSet<OperandDescriptor>();
     let blockDepth = 0;
     const walk = (expr: Expression): OperandDescriptor | undefined => {
-      if (isSymbol(expr)) return env.get(expr.symbol) ?? describe(expr);
+      if (isSymbol(expr)) {
+        const local = env.get(expr.symbol);
+        if (local !== undefined) return local;
+        // A function whose body is being walked, passed by name (`p` in
+        // `p := n ↦ If(n < 1, 0, Map(p, [n − 1]))`), is typed by its
+        // signature, which was derived with this call typed `unknown`. The
+        // derivation stops there, and the call keeps the result of the
+        // signature: `p(2)` was typed `integer | list<unknown^1>` for the
+        // value `[[0]]`.
+        if (namesRunningLiteral(expr, running)) return undefined;
+        return describe(expr);
+      }
       if (!isFunction(expr)) return describe(expr);
       if (expr.operator === 'Block') {
         const saved = env;
@@ -863,8 +925,20 @@ function literalBodyResultType(
       // parameter) has a signature typed with that name at its declared or
       // inferred type, not at the type of the argument, so its result says
       // nothing about this call and the derivation stops.
+      // The derivation also stops at a nested literal that calls a function
+      // whose body is being walked (a recursive call in a callback). The
+      // type of such a literal is cached, and it can have been computed while
+      // the signature of that function was not yet derived, with the call
+      // typed `unknown`. A join with `unknown` keeps only the other arm, so
+      // the callback of `m := n ↦ Map(x ↦ If(x < 1, 0, m(x − 1)), [n])` was
+      // typed `-> integer`, and `m(8)` was typed `list<integer | vector<1>>`
+      // for the value `[[[[[[[[[0]]]]]]]]]` (CE-479). The call then keeps
+      // the result of the signature, which the derivation of the signature
+      // verifies (`verifiedListHypothesis`, `declared-parameter-result.ts`).
       if (expr.operator === 'Function')
-        return readsAnyName(expr, env) ? undefined : describe(expr);
+        return readsAnyName(expr, env) || callsRunningLiteral(expr, running)
+          ? undefined
+          : describe(expr);
       if (
         expr.operatorDefinition?.scoped ||
         ['Assign', 'Declare', 'Return', 'Loop', 'Break', 'Continue'].includes(

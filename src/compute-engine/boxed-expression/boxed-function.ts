@@ -1,3 +1,4 @@
+import { isCapturedValuelessSymbol } from './canonical-utils.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import {
   callableBindingInContext,
@@ -10423,6 +10424,40 @@ interface LambdaCallOperand {
   /** The operand holds a collection now that is not indexed, such as a set
    * (`holdsUnindexedCollection`): the call does not map over it. */
   readonly holdsUnindexedCollection: boolean;
+  /** The operand is an occurrence in the body of a function literal that
+   * reads a symbol of type `unknown` with no value from outside the literal
+   * (`isUnknownCapturedSymbol`). A later value of the symbol can be a
+   * number, a tuple or a list of any depth. */
+  readonly unknownCapture: boolean;
+}
+
+/**
+ * Whether `x` is a symbol of type `unknown` that the body of a function
+ * literal reads and that is not one of its parameters or a `let` local of
+ * the body, and that has no value (`isCapturedValuelessSymbol`). When the
+ * body is evaluated, the symbol reads the value that an outer scope holds at
+ * that time, which can be a list.
+ *
+ * A call of a function literal maps over such an operand when it holds a
+ * list, and the call does not refine the symbol from the parameter it
+ * binds. So the call may be a collection, and its type must admit the
+ * broadcast. With `g := s ↦ 2s` and `f := t ↦ g(y)`, `f` was typed
+ * `(t: unknown) -> number`, and after `y := [1, 2, 3]` the call `f(1)` was
+ * typed `number` while its value is `[2, 4, 6]` (ROADMAP CE-478).
+ *
+ * Three other symbols of type `unknown` are not read this way. A parameter
+ * of the enclosing literal: a call of that literal types its body again,
+ * with the parameter typed by its argument. A symbol outside every function
+ * literal (`g(y)` at the top level): the type of the call is read again
+ * when the symbol gets a value, and the compiled code reads such a free
+ * input as a scalar. A bare arithmetic operand (`2y`): the arithmetic infers
+ * the symbol as a number, and the scalar reading is the convention
+ * (`isPossiblyCollectionTyped`).
+ */
+function isUnknownCapturedSymbol(x: Expression): boolean {
+  return (
+    isSymbol(x) && x.type.type === 'unknown' && isCapturedValuelessSymbol(x)
+  );
 }
 
 /** The facts of {@link LambdaCallOperand} read from an operand expression,
@@ -10434,14 +10469,31 @@ class LambdaCallOperandOfExpression implements LambdaCallOperand {
     return this.x.type.type;
   }
   get participates(): boolean {
-    return isLambdaBroadcastParticipant(this.x);
+    // A captured symbol of type `unknown` is typed by the envelope of
+    // `lambdaBroadcastType` for such an operand, not by the value it holds
+    // now (`unknownCapture`).
+    return (
+      !isUnknownCapturedSymbol(this.x) && isLambdaBroadcastParticipant(this.x)
+    );
   }
   get possiblyCollectionTyped(): boolean {
-    return isPossiblyCollectionTyped(this.x);
+    return isPossiblyCollectionTyped(this.x) || isUnknownCapturedSymbol(this.x);
   }
   get holdsUnindexedCollection(): boolean {
     return holdsUnindexedCollection(this.x);
   }
+  get unknownCapture(): boolean {
+    return isUnknownCapturedSymbol(this.x);
+  }
+}
+
+/** The descriptor twin of `isUnknownCapturedSymbol` (the caller tests the
+ * type): a symbol node with the `captured` fact
+ * (`isCapturedValuelessSymbol`). */
+function isCapturedSymbolStructure(
+  s: ReturnType<NonNullable<OperandDescriptor['structureOf']>>
+): boolean {
+  return s?.kind === 'symbol' && s.captured === true;
 }
 
 /**
@@ -10453,20 +10505,32 @@ class LambdaCallOperandOfExpression implements LambdaCallOperand {
  * list or an indexed collection (or a union with such an arm), or a list
  * type with dimensions. A descriptor cannot show a symbol that holds a set
  * now, so `holdsUnindexedCollection` is `false`, as in `viewOfDescriptor`.
+ * A captured symbol of type `unknown` may hold a collection
+ * (`isUnknownCapturedSymbol`).
  */
 function lambdaCallOperandOfDescriptor(
   d: OperandDescriptor
 ): LambdaCallOperand {
   const view = viewOfDescriptor(d);
   const t = resolveTypeAlias(d.type);
+  // The facts of a captured symbol of type `unknown` can be read from the
+  // value that the symbol holds now (a tuple reads as a finite indexed
+  // collection), which is not the value that a later call reads. Such an
+  // operand is typed by the envelope of `lambdaBroadcastType`
+  // (`unknownCapture`), and it does not take part in the broadcast.
+  const unknownCapture =
+    view.typeIsUnknown && isCapturedSymbolStructure(d.structureOf?.());
   return {
     type: d.type,
     participates:
-      view.finiteBroadcastParticipant ||
-      isBroadcastCollectionTypeOf(d.type) ||
-      (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions),
-    possiblyCollectionTyped: isPossiblyCollectionTypedView(view),
+      !unknownCapture &&
+      (view.finiteBroadcastParticipant ||
+        isBroadcastCollectionTypeOf(d.type) ||
+        (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions)),
+    possiblyCollectionTyped:
+      isPossiblyCollectionTypedView(view) || unknownCapture,
     holdsUnindexedCollection: false,
+    unknownCapture,
   };
 }
 
@@ -10967,6 +11031,26 @@ function lambdaBroadcastType(
       perElementResult
     );
     if (top !== undefined) return top;
+    // A symbol of type `unknown` that the body of a function literal reads
+    // from outside the literal can get any value before the call: a list of
+    // any depth, which the call maps over, or a tuple, which binds whole to
+    // the parameter. With `g := s ↦ 2s` and `f := t ↦ g(y)`, `f(1)` is
+    // `[2, 4, 6]` for `y := [1, 2, 3]`, `[[2], [4, 6]]` for
+    // `y := [[1], [2, 3]]` and `(2, 4)` for `y := (1, 2)`. For a tuple
+    // argument the body decides the shape of the value, and the answer is
+    // `any` when the result was inferred or is a number type, as for a tuple
+    // operand above. A declared result of another type describes a tuple
+    // argument, and a list of any depth is `R | list<R | list<any>>`, as
+    // below for an operand typed `any` (ROADMAP CE-478). This applies to a
+    // callee whose function literal is known: a function with no value
+    // does not evaluate, and its call is typed again when it gets one.
+    if (literal !== undefined && triggers.some((i) => ops[i].unknownCapture)) {
+      if (inferredResult || isSubtype(perElementResult, 'number')) return 'any';
+      return widen(perElementResult, {
+        kind: 'list',
+        elements: widen(perElementResult, { kind: 'list', elements: 'any' }),
+      });
+    }
     // A per-element result that is a list (`h := (t: number) ↦ [t, 2t]`
     // gives a `vector<2>`): `broadcastable<vector<2>>` is a `vector<2>` or a
     // list of them, but a list operand of any depth is mapped at its leaves,

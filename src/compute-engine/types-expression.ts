@@ -356,7 +356,9 @@ type OperandStructureMirror =
    * value, not a constant, not a wildcard, not a function-literal
    * parameter, a block local or a binder variable). Present only when true.
    * The list-literal type handler reads an unknown symbol as a number cell
-   * only when it is present. */
+   * only when it is present. `captured`: the body of a function literal reads
+   * the symbol, which has no value and is not a parameter of the literal or
+   * a `let` local of the body. Present only when true. */
   | {
       kind: 'symbol';
       name: string;
@@ -364,6 +366,7 @@ type OperandStructureMirror =
       inferred?: boolean;
       local?: boolean;
       free?: true;
+      captured?: true;
     }
   | { kind: 'string'; text: string }
   | {

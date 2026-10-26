@@ -67,6 +67,7 @@ import {
   isRestParameter,
   capturedSymbols,
   markFunctionLiteralParameter,
+  markFunctionLiteralCaptures,
   mentionsQuantifiedVariable,
   restParameterIndex,
   restParameterSymbol,
@@ -1053,6 +1054,12 @@ export function canonicalFunctionLiteralArguments(
   // operands are TEXT, which no longer resolves from where a later reader
   // stands. See `RESOLVED_TYPE_OPERANDS` (`function-literal.ts`).
   resolveFunctionLiteralTypes(literal);
+
+  // Record the occurrences of the body that read a symbol from outside the
+  // literal (`markFunctionLiteralCaptures()`): when the body is evaluated
+  // they read the value that the symbol has at that time, so their type now
+  // does not bound the value that a call reads.
+  if (isFunction(literal)) markFunctionLiteralCaptures(literal.ops[0]);
 
   // Definition order must not change semantics. If the body froze a
   // juxtaposition as multiplication only because its leading symbol had no

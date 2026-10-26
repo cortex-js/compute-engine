@@ -1948,6 +1948,10 @@ export function updateDef(
   // resolve to it (`_refineRecursiveListResult`). The half is new, so the
   // journals above need no entry for the write.
   constructedOperatorHalf?._refineRecursiveListResult();
+  // The other functions of its cycle of calls, installed before it, were
+  // not recursive when they were installed: their inferred signatures are
+  // refined now (`_refineRecursiveCycleMembers`).
+  constructedOperatorHalf?._refineRecursiveCycleMembers();
 
   if (supersededValue !== undefined && supersededValue !== mutableDef.value)
     unregisterProvisionalDependent(supersededValue);

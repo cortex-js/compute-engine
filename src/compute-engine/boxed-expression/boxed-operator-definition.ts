@@ -13,6 +13,7 @@ import {
   inListHypothesisPass,
   resultUnderDeclaredParameters,
   verifiedListHypothesis,
+  cycleMemberDefinitions,
   withSignatureResult,
   beginSignatureDerivation,
   endSignatureDerivation,
@@ -1060,6 +1061,28 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
           this.engine._typeResolver
         )
     );
+  }
+
+  /**
+   * Refine again the inferred signatures of the other functions of the
+   * cycle of calls of this function (`cycleMemberDefinitions`), as
+   * {@link _refineRecursiveListResult} does for this one.
+   *
+   * A function installed before the other functions of its cycle exist is
+   * not recursive yet, so its inferred signature is not verified then. With
+   * `ha := n ↦ Map(x ↦ If(x < 1, 0, hb(x − 1)), [n])` assigned before
+   * `hb := n ↦ Map(x ↦ If(x < 1, 0, ha(x − 1)), [n])`, `ha` kept
+   * `-> list<number>`, and `ha(1)` is `[[0]]` (CE-479). The caller calls this
+   * after it installed this definition, and reports the state event of the
+   * installation.
+   * @internal
+   */
+  _refineRecursiveCycleMembers(): void {
+    const literal = this._lambdaLiteral;
+    if (!this._isLambda || literal === undefined) return;
+    for (const def of cycleMemberDefinitions(literal, this.name))
+      if (def instanceof _BoxedOperatorDefinition && def !== this)
+        def._refineRecursiveListResult();
   }
 
   /** `type`, after recording this function's home scope and the home scopes

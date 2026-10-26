@@ -8,7 +8,10 @@ import { isZero } from '../numerics/rationals.js';
 import { SMALL_INTEGER } from '../numerics/numeric.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
-import { isFunctionLiteralParameter } from './function-literal.js';
+import {
+  isFunctionLiteralCapture,
+  isFunctionLiteralParameter,
+} from './function-literal.js';
 
 /**
  * Ensure all expressions in the array are in canonical form
@@ -193,6 +196,24 @@ export function isFreeSymbol(op: Expression): boolean {
     return s !== system && s.binderNames?.has(op.symbol) !== true;
   }
   return false;
+}
+
+/**
+ * True when `op` is an occurrence of the body of a function literal that
+ * reads a symbol from outside the literal (`isFunctionLiteralCapture()`),
+ * and the symbol has no value now. When the body is evaluated, the
+ * occurrence reads the value that the symbol has at that time: with
+ * `f := t ↦ g(y)`, a later `y := [1, 2, 3]` is the value that `f(1)` reads.
+ * The type of the symbol is not tested.
+ *
+ * The symbol node of an operand descriptor carries this fact (`captured`,
+ * set by `structureOfExpression()` in `operand-descriptor.ts`).
+ */
+export function isCapturedValuelessSymbol(op: Expression): boolean {
+  if (!isSymbol(op) || !isFunctionLiteralCapture(op)) return false;
+  const def = op.valueDefinition;
+  if (def === undefined) return true;
+  return def.value === undefined && !def.isConstant;
 }
 
 /** True when `op` is a free symbol (`isFreeSymbol()`) of type `unknown`. */

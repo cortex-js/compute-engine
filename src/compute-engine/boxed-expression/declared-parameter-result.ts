@@ -1,11 +1,15 @@
 import type { Type } from '../../common/type/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import type { Expression, IComputeEngine, Scope } from '../global-types.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import { isSubtype, widen } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { functionResult, returnTypeText } from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
-import { functionLiteralParameterType } from './function-literal.js';
+import {
+  functionLiteralParameterNames,
+  functionLiteralParameterType,
+} from './function-literal.js';
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
 import { withScratchScope } from '../scratch-scopes.js';
 
@@ -337,7 +341,7 @@ function callsReach(
 ): boolean {
   if (seen.has(literal)) return false;
   seen.add(literal);
-  if (literal.has(name)) return true;
+  if (namesFunction(literal, name)) return true;
   const visit = (expr: Expression): boolean => {
     if (!isFunction(expr)) return false;
     const callee = calleeLiteral(expr);
@@ -347,12 +351,46 @@ function callsReach(
   return visit(literal);
 }
 
+/** True when `expr` names `name`, as a head or as a symbol, outside the
+ * function literals in it that bind a parameter of that name. A parameter
+ * `p` of a function that the function `p` calls is not a call of `p`: with
+ * `p_rand := p ↦ …` called by `p`, `p` was read as recursive. */
+function namesFunction(expr: Expression, name: string): boolean {
+  if (isSymbol(expr)) return expr.symbol === name;
+  if (!isFunction(expr)) return false;
+  if (
+    expr.operator === 'Function' &&
+    expr.ops
+      .slice(1)
+      .some((param) => functionLiteralParameterNames(param).includes(name))
+  )
+    return false;
+  if (expr.operator === name) return true;
+  return expr.ops.some((op) => namesFunction(op, name));
+}
+
 /** The function literal of the user function that the application `expr`
  * calls, or `undefined`. */
 function calleeLiteral(expr: Expression): Expression | undefined {
   const opDef = expr.operatorDefinition as
     { _lambdaLiteral?: Expression } | undefined;
-  const literal = opDef?._lambdaLiteral ?? expr.valueDefinition?.value;
+  let literal = opDef?._lambdaLiteral ?? expr.valueDefinition?.value;
+  // A call bound when its head was not yet assigned keeps the value
+  // definition declared then (a forward reference), which holds no literal:
+  // `hb(x − 1)` in the body of `ha` when `ha` was assigned before `hb`. The
+  // current definition of the head is read instead.
+  if (
+    literal === undefined &&
+    expr.valueDefinition !== undefined &&
+    isFunction(expr)
+  ) {
+    const current = expr.engine.lookupDefinition(expr.operator);
+    if (current !== undefined)
+      literal =
+        'operator' in current
+          ? (current.operator as { _lambdaLiteral?: Expression })._lambdaLiteral
+          : current.value.value;
+  }
   return literal !== undefined && isFunction(literal, 'Function')
     ? literal
     : undefined;
@@ -423,10 +461,37 @@ export function inListHypothesisPass(): boolean {
   return hypothesisPassDepth > 0;
 }
 
+/** The candidate results of the function literals that
+ * {@link verifiedListHypothesis} is verifying, in this process: the
+ * function being verified and the other functions of its cycle of calls.
+ * Read by {@link provisionalRecursionResult}. */
+const provisionalResults = new Map<Expression, Type>();
+
+/**
+ * The candidate result of the function literal `literal` while
+ * {@link verifiedListHypothesis} runs a pass for a cycle of calls that holds
+ * it, or `undefined`. A call of that function in the body is then typed by
+ * the candidate, and not by a walk of the stored literal's body
+ * (`callResultType`, `call-result-type.ts`). That walk reads the types
+ * cached on the stored literal, which were computed from an earlier
+ * signature, so the pass would not test the candidate: with
+ * `m := n ↦ Map(x ↦ If(x < 1, 0, m(x − 1)), [n])`, each pass nested the
+ * result one level deeper than the one before it. For a function of the
+ * cycle other than the one verified (`hb` when `ha` calls `hb` and `hb`
+ * calls `ha`), the stored signature was derived before the cycle was
+ * complete, so it does not hold the values either.
+ */
+export function provisionalRecursionResult(
+  literal: Expression
+): Type | undefined {
+  return provisionalResults.get(literal);
+}
+
 /**
  * The result type of a SELF-RECURSIVE function literal, verified under the
- * hypothesis that it is a list, or `undefined` when the hypothesis does not
- * apply or is refuted.
+ * hypothesis that it is a list or by a fixpoint iteration (see the comments
+ * in the body), or `undefined` when the function is not recursive or the
+ * verified result is the same type as `derived`.
  *
  * The recursive call reads the declared result, `unknown`, while the body is
  * typed, and an `unknown` operand of `Join` or `Append` says nothing about
@@ -443,12 +508,12 @@ export function inListHypothesisPass(): boolean {
  * above the least fixpoint, which is the function's true result, and so does
  * `f(T)`, which is the tighter of the two and is what is returned. A base
  * clause that builds a set refutes the hypothesis (the pass answers
- * `set<T>`), and the caller keeps `derived`. Seeding a fixpoint iteration
- * with `never` was tried first and rejected: an operand typed `never` is read
- * as an absent value, and a conditional with such an arm is typed `never` as
- * a whole. Only a body that derives an abstract collection and names the
- * function, directly or through the functions it calls ({@link callsReach}),
- * is re-boxed; every other body pays nothing.
+ * `set<T>`), and the fixpoint iteration below gives the result. Seeding a
+ * fixpoint iteration with `never` was tried first and rejected: an operand
+ * typed `never` is read as an absent value, and a conditional with such an
+ * arm is typed `never` as a whole. Only a body that names the function,
+ * directly or through the functions it calls ({@link callsReach}), is
+ * re-boxed; every other body pays only that walk.
  */
 export function verifiedListHypothesis(
   ce: IComputeEngine,
@@ -465,22 +530,369 @@ export function verifiedListHypothesis(
     derived === undefined
   )
     return undefined;
-  // The cheap test first: most bodies derive no abstract collection, and
-  // the walk of the call graph is then not needed.
-  const hypothesis = listHypothesisOf(derived);
-  if (hypothesis === undefined || !callsReach(literal, name)) return undefined;
-  let result: Type | undefined;
-  let homes: HomeScope[] = [];
+  // A result that is already a placeholder or the top type holds every
+  // value: there is nothing to verify.
+  if (derived === 'unknown' || derived === 'any') return undefined;
+  if (!callsReach(literal, name)) return undefined;
+  // The other functions of the cycle of calls (`hb` when `ha` calls `hb`
+  // and `hb` calls `ha`). Their calls read candidates too, which the
+  // iteration below verifies with the candidate of this function.
+  const members = cycleMembers(literal, name);
+  // A numeric derived result is kept, with no pass, when no nested function
+  // literal calls a function of the cycle. The recursive call can then reach
+  // the result only as the value of a branch of a conditional, which is the
+  // value of a base case, or as the operand of an operation, which the plain
+  // derivation types `number` too (CE-447). The values of the result are
+  // then numbers of the derived type.
+  if (
+    isSubtype(derived, 'number') &&
+    !nestedLiteralCallsCycle(literal, [literal, ...members])
+  )
+    return undefined;
+  // A verification inside a pass of another verification is bounded: each
+  // level boxes the bodies again, and a result derived in a pass is not
+  // kept (`inListHypothesisPass`).
+  if (hypothesisPassDepth >= MAX_NESTED_VERIFICATIONS) return undefined;
+  // The candidates of the functions of the cycle other than this one.
+  const memberCandidates = new Map<Expression, Type>(
+    members.map((g) => [g, 'unknown'])
+  );
+  // One pass: the body boxed again, with a recursive call reading
+  // `candidate` as the function's result and a call of another function of
+  // the cycle reading its candidate.
+  const pass = (
+    candidate: Type
+  ): { result: Type | undefined; homes: HomeScope[] } => {
+    const saved = new Map(provisionalResults);
+    provisionalResults.set(literal, candidate);
+    for (const [g, t] of memberCandidates) provisionalResults.set(g, t);
+    try {
+      return withCandidate(candidate, () =>
+        collectCalleeHomes(() =>
+          resultUnderDeclaredParameters(ce, literal, skeleton, { rebox: true })
+        )
+      );
+    } finally {
+      provisionalResults.clear();
+      for (const [g, t] of saved) provisionalResults.set(g, t);
+    }
+  };
+  // The results of the other functions of the cycle under the same
+  // candidates. A function whose result cannot be derived is `any`: an
+  // `unknown` candidate would be dropped by a join (see below).
+  const memberResults = (candidate: Type): Map<Expression, Type> => {
+    const saved = new Map(provisionalResults);
+    provisionalResults.set(literal, candidate);
+    for (const [g, t] of memberCandidates) provisionalResults.set(g, t);
+    try {
+      // This function answers a read of its signature with the candidate,
+      // as in a pass.
+      return withCandidate(candidate, () => {
+        const out = new Map<Expression, Type>();
+        for (const g of members)
+          out.set(
+            g,
+            resultUnderDeclaredParameters(ce, g, unknownSkeletonOf(g), {
+              rebox: true,
+            }) ?? 'any'
+          );
+        return out;
+      });
+    } finally {
+      provisionalResults.clear();
+      for (const [g, t] of saved) provisionalResults.set(g, t);
+    }
+  };
+  /** True when every other function of the cycle verifies its candidate
+   * under `candidate`; otherwise the candidates of the others are widened
+   * to the join with their results. */
+  const membersSettle = (candidate: Type): boolean => {
+    if (members.length === 0) return true;
+    let settled = true;
+    for (const [g, t] of memberResults(candidate)) {
+      const c = memberCandidates.get(g)!;
+      // Every type is a subtype of `unknown`, so the first candidate of a
+      // function, `unknown`, is never verified: it is replaced by the
+      // function's result.
+      if (c !== 'unknown' && isSubtype(t, c)) continue;
+      settled = false;
+      memberCandidates.set(g, c === 'unknown' ? t : widen(c, t));
+    }
+    return settled;
+  };
   hypothesisPassDepth += 1;
   try {
-    ({ result, homes } = withCandidate(hypothesis, () =>
-      collectCalleeHomes(() =>
-        resultUnderDeclaredParameters(ce, literal, skeleton, { rebox: true })
+    // The pass under a list hypothesis `h`. The other functions of the
+    // cycle read their results under `h`, with the same hypothesis applied,
+    // and must verify them too. The result is `undefined` when the
+    // hypothesis is refuted.
+    const tryHypothesis = (
+      h: Type
+    ): { result: Type; homes: HomeScope[] } | undefined => {
+      for (const [g, t] of members.length > 0 ? memberResults(h) : [])
+        memberCandidates.set(g, listHypothesisOf(t) ?? t);
+      const settled = membersSettle(h);
+      const r = pass(h);
+      for (const g of members) memberCandidates.set(g, 'unknown');
+      return settled && r.result !== undefined && isSubtype(r.result, h)
+        ? { result: r.result, homes: r.homes }
+        : undefined;
+    };
+    const hypothesis = listHypothesisOf(derived);
+    if (hypothesis !== undefined) {
+      const r = tryHypothesis(hypothesis);
+      if (r !== undefined) return r;
+    }
+    // The plain derivation read the recursive call as `unknown`, and the
+    // join of an `unknown` arm with a type is that type (`widen`). So the
+    // derived result can leave out what the recursive call returns: the
+    // callback of `m := n ↦ Map(x ↦ If(x < 1, 0, m(x − 1)), [n])` was typed
+    // `integer` and the function `-> list<number>`, but `m(1)` is `[[0]]`
+    // (CE-479). The plain derivation also reads types cached on the stored
+    // literal, which were computed from the signature of an earlier read,
+    // so it can give a different result on each read.
+    //
+    // So the result is computed again by a fixpoint iteration that reads
+    // only fresh passes. The first candidate is the result of a pass with
+    // the recursive call read as `unknown`. When the pass under a candidate
+    // gives a subtype of the candidate, and every other function of the
+    // cycle gives a subtype of its own candidate, that pass's result is
+    // returned (see above for why it holds every value). Otherwise each
+    // candidate is widened to the join of the two and the passes run again,
+    // at most `RECURSION_PASS_LIMIT` times.
+    const answer = (r: { result: Type; homes: HomeScope[] }) =>
+      // A result equal to the derived one leaves the derived result as it
+      // is written (bare `set` stays `set`, not `set<any>`).
+      isSubtype(r.result, derived) && isSubtype(derived, r.result)
+        ? undefined
+        : r;
+    // The derived result is kept when the pass under it gives it back: it
+    // is then a fixpoint. A pass that gives a subtype of it is not enough to
+    // keep it, since the next read would derive the deeper result of that
+    // pass: the result of `m` would get one level deeper on each read.
+    // A numeric derived result is also kept when the pass gives a number.
+    // In a pass, a recursive call over a parameter typed `unknown` is typed
+    // `number`, so `r := n ↦ If(n = 0, 1, r(n − 1))` gives `-> number` in
+    // each pass, where the derived result is the type of the base case,
+    // `-> integer` (CE-447). The other functions of a cycle have no
+    // derived result to read, so this applies only to a function that calls
+    // itself alone.
+    if (members.length === 0) {
+      const again = pass(derived).result;
+      if (
+        again !== undefined &&
+        ((isSubtype(again, derived) && isSubtype(derived, again)) ||
+          (isSubtype(derived, 'number') && isSubtype(again, 'number')))
       )
-    ));
+        return undefined;
+    }
+    // The iteration below reads only fresh passes, so its result depends on
+    // the bodies and on the engine state, not on the derived result: it is
+    // kept in a memo (`fixpointMemo`). Without it, each read of the
+    // signature of a pair of functions declared `-> unknown` that call each
+    // other from a `Map` callback ran the iteration again, since their
+    // derived results differ from one read to the next.
+    const memoKey = [literal, ...members]
+      .map((l) => declaredResultMemoKey(ce, l))
+      .concat(typeToString(skeleton))
+      .join('|');
+    const cached = fixpointMemo.get(literal);
+    if (cached !== undefined && cached.key === memoKey)
+      return cached.value === undefined ? undefined : answer(cached.value);
+    const iterate = (): { result: Type; homes: HomeScope[] } | undefined => {
+      // When the pass with the recursive call read as `unknown` gives no
+      // result, the body cannot be boxed again and the caller keeps the
+      // derived result.
+      const first = pass('unknown').result;
+      if (first === undefined) return undefined;
+      let candidate: Type = first;
+      // The list hypothesis of that first result is tried first, as for the
+      // derived result above.
+      const seeded = listHypothesisOf(candidate);
+      if (seeded !== undefined) {
+        const r = tryHypothesis(seeded);
+        if (r !== undefined) return r;
+      }
+      for (let i = 0; i < RECURSION_PASS_LIMIT; i++) {
+        const settled = membersSettle(candidate);
+        const r = pass(candidate);
+        // The body read with this candidate is typed `unknown`.
+        if (r.result === undefined)
+          return { result: 'unknown', homes: r.homes };
+        if (settled && isSubtype(r.result, candidate))
+          return { result: r.result, homes: r.homes };
+        if (!isSubtype(r.result, candidate))
+          candidate = widen(candidate, r.result);
+      }
+      // No finite type was found: the result of `m` above is nested one level
+      // deeper for each level of recursion. Each candidate is replaced by a
+      // bare type above it: first the bare type of each arm of a union
+      // (`integer | list<…>` gives `integer | list`), then each type of
+      // `RECURSION_FALLBACK_TYPES` that holds it, from the narrowest to the
+      // widest (`list` admits lists of any contents). The first set of
+      // candidates that the bodies verify gives the result. When none does,
+      // the result is `unknown`, which holds every value.
+      const options = (t: Type): Type[] => {
+        const out: Type[] = [];
+        const arms = bareArmsOf(t);
+        if (arms !== undefined) out.push(arms);
+        for (const top of RECURSION_FALLBACK_TYPES)
+          if (isSubtype(t, top)) out.push(top);
+        return out;
+      };
+      const own = options(candidate);
+      const others = new Map(
+        [...memberCandidates].map(([g, t]) => [g, options(t)] as const)
+      );
+      let homes: HomeScope[] = [];
+      for (let j = 0; j < own.length; j++) {
+        for (const [g, list] of others) {
+          // A function of the cycle with no bare type above its candidate
+          // reads `any`.
+          memberCandidates.set(g, list[Math.min(j, list.length - 1)] ?? 'any');
+        }
+        const settled = membersSettle(own[j]);
+        const r = pass(own[j]);
+        homes = r.homes;
+        if (settled && r.result !== undefined && isSubtype(r.result, own[j]))
+          return { result: r.result, homes: r.homes };
+      }
+      return { result: 'unknown', homes };
+    };
+    const value = iterate();
+    // Not stored inside a pass of another verification, whose candidates
+    // are not final, nor while an inference rollback frame is open (see
+    // the memo of `_deriveSignature`, `boxed-operator-definition.ts`).
+    if (hypothesisPassDepth === 1 && ce._rollbackFrames.length === 0)
+      fixpointMemo.set(literal, { key: memoKey, value });
+    return value === undefined ? undefined : answer(value);
   } finally {
     hypothesisPassDepth -= 1;
   }
-  if (result === undefined || !isSubtype(result, hypothesis)) return undefined;
-  return { result, homes };
 }
+
+/** The function literals, other than `literal`, of the user functions that
+ * `literal` calls, directly or transitively, and that call the function
+ * named `name` in turn ({@link callsReach}): the other functions of its
+ * cycle of calls. */
+function cycleMembers(literal: Expression, name: string): Expression[] {
+  const seen = new Set<Expression>([literal]);
+  const out: Expression[] = [];
+  const visit = (expr: Expression): void => {
+    if (!isFunction(expr)) return;
+    const callee = calleeLiteral(expr);
+    if (callee !== undefined && !seen.has(callee)) {
+      seen.add(callee);
+      if (callsReach(callee, name)) out.push(callee);
+      visit(callee);
+    }
+    for (const op of expr.ops) visit(op);
+  };
+  visit(literal);
+  return out;
+}
+
+/** The definitions bound to the calls, in `literal` and in the literals of
+ * the functions it calls transitively, of the functions of the cycle of
+ * calls of the function named `name` ({@link cycleMembers}), other than
+ * that function. Each is the `operatorDefinition` of a call. */
+export function cycleMemberDefinitions(
+  literal: Expression,
+  name: string
+): unknown[] {
+  const members = new Set(cycleMembers(literal, name));
+  const out: unknown[] = [];
+  const seen = new Set<Expression>([literal]);
+  const visit = (expr: Expression): void => {
+    if (!isFunction(expr)) return;
+    const callee = calleeLiteral(expr);
+    if (callee !== undefined && !seen.has(callee)) {
+      seen.add(callee);
+      if (members.has(callee) && expr.operatorDefinition !== undefined)
+        out.push(expr.operatorDefinition);
+      visit(callee);
+    }
+    for (const op of expr.ops) visit(op);
+  };
+  visit(literal);
+  return out;
+}
+
+/** True when a function literal nested in `literal`, or in one of the
+ * literals of `cycle`, calls a function whose literal is in `cycle`, or
+ * passes such a function by name. */
+function nestedLiteralCallsCycle(
+  literal: Expression,
+  cycle: readonly Expression[]
+): boolean {
+  const inCycle = (expr: Expression): boolean => {
+    const callee = calleeLiteral(expr);
+    if (callee !== undefined && cycle.includes(callee)) return true;
+    if (isFunction(expr)) return expr.ops.some(inCycle);
+    return false;
+  };
+  const visit = (expr: Expression, nested: boolean): boolean => {
+    if (!isFunction(expr)) return nested && inCycle(expr);
+    if (nested && inCycle(expr)) return true;
+    const inner = nested || (expr.operator === 'Function' && expr !== literal);
+    return expr.ops.some((op) => visit(op, inner));
+  };
+  return [literal, ...cycle].some((l) =>
+    isFunction(l, 'Function') ? visit(l.ops[0], false) : false
+  );
+}
+
+/** A signature for the function literal `literal` with every parameter and
+ * the result typed `unknown`, for {@link resultUnderDeclaredParameters}. */
+function unknownSkeletonOf(literal: Expression): Type {
+  const params = isFunction(literal, 'Function') ? literal.ops.slice(1) : [];
+  return {
+    kind: 'signature',
+    args: params.map(() => ({ type: 'unknown' as Type })),
+    result: 'unknown',
+  };
+}
+
+/** `t` with each arm of a union replaced by the first type of
+ * `RECURSION_FALLBACK_TYPES` that holds it, or `undefined` when `t` is not
+ * a union or an arm has no such type. */
+function bareArmsOf(t: Type): Type | undefined {
+  if (typeof t !== 'object' || t.kind !== 'union') return undefined;
+  const types: Type[] = [];
+  for (const arm of t.types) {
+    const top = RECURSION_FALLBACK_TYPES.find((x) => isSubtype(arm, x));
+    if (top === undefined) return undefined;
+    if (!types.includes(top)) types.push(top);
+  }
+  return types.length === 1 ? types[0] : { kind: 'union', types };
+}
+
+/** The results of the fixpoint iterations of {@link verifiedListHypothesis},
+ * by function literal, with the key of the engine state they were computed
+ * in. */
+const fixpointMemo = new WeakMap<
+  Expression,
+  { key: string; value: { result: Type; homes: HomeScope[] } | undefined }
+>();
+
+/** The number of verifications ({@link verifiedListHypothesis}) that can
+ * run inside one another. A pass types a call of a function of the cycle
+ * by its candidate (`provisionalRecursionResult`), so a verification inside
+ * a pass would only re-check a result that the pass does not read. With
+ * more than one level, a pair of functions declared `-> unknown` that call
+ * each other from a `Map` callback took more than 10 s to type one call. */
+const MAX_NESTED_VERIFICATIONS = 1;
+
+/** The number of passes of {@link verifiedListHypothesis} that widen the
+ * candidate result before it uses a bare type. */
+const RECURSION_PASS_LIMIT = 3;
+
+/** The bare types {@link verifiedListHypothesis} tries, in this order, when
+ * the widened candidates do not reach a fixpoint. */
+const RECURSION_FALLBACK_TYPES: Type[] = [
+  'integer',
+  'real',
+  'number',
+  'list',
+  'collection',
+];

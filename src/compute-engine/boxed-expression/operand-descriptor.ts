@@ -37,7 +37,10 @@ import {
   isRestParameter,
 } from './function-literal.js';
 import { declaredBinderNamesOf } from './binding-sites.js';
-import { isFreeSymbol } from './canonical-utils.js';
+import {
+  isCapturedValuelessSymbol,
+  isFreeSymbol,
+} from './canonical-utils.js';
 
 /** Derive an application without replacing a recorded lexical callee by an
  * ambient function with the same name. Shared by structural rewrite walks. */
@@ -457,6 +460,7 @@ function structureOfExpression(
       )
         node.system = true;
     }
+    if (isCapturedValuelessSymbol(op)) node.captured = true;
     return node;
   }
   if (isString(op)) return { kind: 'string', text: op.string };

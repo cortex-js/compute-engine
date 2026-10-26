@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-482.
+Next free reference: CE-490.
 
 **Entry format.**
 
@@ -131,55 +131,41 @@ problem does not occur on its installed release). Report:
 
 ## Types and type inference
 
-### CE-475. The derived type of `At` does not refuse a base that cannot be indexed
+### CE-488. A call at a point parameter has a list type for an argument of a nominal list-of-points type, but its value is an error
 
 **Status:** open; defect.
 
-On the descriptor route (the type of `At` derived from operand types, used when
-a function literal or a call is typed from a body), the `At` type handler
-(`library/collections.ts`) does not refuse its base: a set base gives
-`nan | real` or `integer | nan`, and a number or boolean base gives `unknown`,
-where the boxed `At` gives `error`. So with `d(a) := a[1] + a[2]`,
-`d(Interval(0, 1))` is typed `nan | real` for an error value, and
-`h(3, [10, 20])` with `h(a, t) := a[1] + a[2] + t` is typed `list<integer>` for
-a list of errors (the `Add` of the body absorbs `unknown`). Fix: the descriptor
-route of `At` answers `error` for a base that is provably not an indexed
-collection, as the boxed route does.
+With `k` declared `(tuple<number, number>) -> number`, the nominal type
+`B = list<tuple<number, number>>` and `x` declared `B` with no value, `k(x)` is
+typed `list<number>`, and its value is
+`Error(ErrorCode("incompatible-type", "tuple<number, number>", "B"), x)`. The
+typing reads through the nominal type to its list of points and maps; the
+evaluation does not map over a nominal value. One of the two must change so that
+the type holds the value: either the evaluation maps over a nominal list of
+points, or the typing does not read through a nominal type at a point parameter.
 
-### CE-476. A partial application that reads a missing argument by index is typed as a function but evaluates to an error
+### CE-489. A point parameter refuses a recursive alias whose self-reference is inside a constructor
 
-**Status:** open; defect.
+**Status:** design needed; capability.
 
-With `h(a, t) := a[1] + a[2] + t`, `h(3)` is typed `(t: unknown) -> number` but
-evaluates to an `incompatible-type` error: the evaluation reads `3[1]` when it
-builds the partial application. Decide which is right (a partial application
-that only fails when it is called, or an eager check), then make the type and
-the value agree. Also: the evaluation runs the point-list map before it curries,
-so `h([(1, 2), (3, 4)])` is a list of two functions.
+With `k` declared `(tuple<number, number>) -> number` and the alias
+`A = list<A> | list<tuple<number, number>>`, a symbol `y: A` that holds
+`[(1, 2), (3, 4)]` gives `k(y)` the type `error`, and the value
+`incompatible-type`, though the value is a list of points that maps. The walk
+that finds the rank of a point argument (`pointTensorOf()`,
+`collection-utils.ts`) asks each row to be a list or tensor of points and
+answers `false` at its depth limit. Accepting such a type needs a rule for the
+rank of a recursive collection type. An alias whose self-reference is not inside
+a constructor (`A = A | list<tuple<number, number>>`) maps.
 
-### CE-477. The derived route does not map a list of points at a declared point parameter
-
-**Status:** open; defect.
-
-With `k` declared `(tuple<number, number>) -> number`, the boxed `k(P)` for a
-list of points `P` maps (a list of results), but the derived route
-(`deriveApplicationType`) types it as the scalar result. Related to CE-472 (the
-derived route does not check arguments against a declared signature).
-
-### CE-472. The derived type of a call does not check the arguments against a declared signature
+### CE-485. An `any` operand at a declared scalar parameter types differently on the box and derived routes
 
 **Status:** open; defect.
 
-With `k` declared `(tuple<number, number>) -> number` and assigned a function
-literal, the boxed `k(3)`, `k(True)`, `k(NaN)` and `k([1, 2])` are typed `error`
-(`validateArguments`, `boxed-function.ts`), but
-`deriveApplicationType(ce, 'k', …)` gives `number` for all of them: the value
-branch of `deriveApplicationType()`
-(`boxed-expression/derive-application-type.ts`) never checks the operands
-against a declared signature. A type derived for a function literal that calls
-`k` can then miss the error. Fix: the same contract check in that branch as on
-the boxed route. An INFERRED signature is not a contract and keeps its own rules
-(`inferredCallSignature()`, `call-result-type.ts`).
+At a parameter of a declared signature with a scalar type, an operand typed
+`any` gives the result type `any` on the box route and the declared scalar
+result on the derived route. The fix belongs in
+`lambdaCallOperandOfDescriptor()` (`boxed-function.ts`).
 
 ### CE-3. `unknown` as an inference marker: what the migration left open
 
@@ -293,32 +279,25 @@ assigning `F` then `G` gives `collection<number>` for both; `G` then `F` gives
 
 ### CE-39. Static types that do not contain the value of the expression
 
-**Status:** decision needed; defect. CE-39.1 and CE-39.3 need a decision.
-CE-39.2 and the sign-range part of CE-39.3 were closed by user decision
-2026-10-25: keep the current ranges (`docs/TYPE-SYSTEM.md`, "Number literal
-types").
+**Status:** in progress; defect. CE-39.3 has a user decision (2026-10-25, see
+the item). CE-39.2 and the sign-range part of CE-39.3 were closed by user
+decision 2026-10-25: keep the current ranges (`docs/TYPE-SYSTEM.md`, "Number
+literal types").
 
 The probes check `isSubtype(value type, static type)`. These defects are in code
 that existed before the result type handlers of `FindRoot`, `FindFit`, the
 linear-algebra operators, the trigonometric rewrites and `TupleFrom`.
 
-- **CE-39.1** A float cell can be typed `integer`, so a handler that claims
-  `rational` is not sound (decision needed). A parsed `2.0` is typed `integer`,
-  and `1.5e308` is too. `Inverse` and `MatrixPower` with a negative exponent
-  claim `rational` cells: `Inverse` of `[[2.0, 1], [1, 3]]` is typed
-  `matrix<rational^(2x2)>`, and its value is `matrix<real^(2x2)>`. `Determinant`
-  of `[[2.0, 1/3], [1, 3]]` is typed `rational`, and its value is a float. The
-  matrix product of the same operands has the same defect. The new handlers use
-  a table that never claims `rational` from a product or a quotient
-  (`matrixResultCellType`, `library/linear-algebra.ts`). The options: the older
-  handlers use the same table, or a float literal stops being typed `integer`.
-- **CE-39.3** (decision needed) `Tuple(Range(1, 3))` is typed `tuple<range>`,
-  and its value `tuple<vector<integer^3>>`. Typing the component `list<integer>`
-  made a variable declared `list<range>` refuse `[Range(1, 3)]`, and admitting
-  the literal stored `[[1, 2, 3]]`, which is not in `list<range>`: a fix must
-  decide what a `list<range>` declaration holds (the range kept as a range, or a
-  list of integers). The sign-range part of this item was closed by user
-  decision 2026-10-25 (option (c), keep the gap).
+- **CE-39.3** User decision 2026-10-25: a range that is an element of a
+  collection stays a range, so the value of `Tuple(Range(1, 3))` is
+  `(Range(1, 3))`; report the number of changed tests before landing.
+  `Tuple(Range(1, 3))` is typed `tuple<range>`, and its value
+  `tuple<vector<integer^3>>`. Typing the component `list<integer>` made a
+  variable declared `list<range>` refuse `[Range(1, 3)]`, and admitting the
+  literal stored `[[1, 2, 3]]`, which is not in `list<range>`: a fix must decide
+  what a `list<range>` declaration holds (the range kept as a range, or a list
+  of integers). The sign-range part of this item was closed by user decision
+  2026-10-25 (option (c), keep the gap).
 
 ### CE-40. The type of a held operand of a lazy operator is read without its binding
 
@@ -676,57 +655,6 @@ at depth 16, and the meet does not finish at depth 32. Chains of tuples only are
 fast. The fixes that stopped this growth for lists with lengths do not reach
 plain lists or a mix of tuples and lists. The four timing tests of
 `broadcastable-list-meaning.test.ts` now use tuple chains.
-
-### CE-455. `admissionOf` and `typeAcceptsValue` disagree on a self-negating alias
-
-**Status:** decision needed; defect, low priority. Making `typeAcceptsValue`
-give the subtype answer breaks two tests of `value-membership.test.ts` ("bails
-(false) when the type has no value component", the `list<0>` case), which pin
-its contract as a fallback that answers `false` when the type has no value
-component. Agreement needs a decision on that contract.
-
-With the alias `nn = !nn`, `typeAcceptsValue(5, nn)` is `false` and
-`admissionOf(5, nn)` is `'admit'`. The type has no fixed point, so neither
-answer is specified, but the two functions should agree.
-
-### CE-478. A captured symbol of type `unknown` lets a signature claim a scalar result
-
-**Status:** open; wrong value.
-
-With `g := s ↦ 2s` and `f := t ↦ g(y)`, `f` is typed `(t: unknown) -> number`
-while `y` stays `unknown`. After `y := [1, 2, 3]`, `f(1)` is typed `number` and
-its value is `[2, 4, 6]`. The call check of CE-473 does not catch it, because
-the body was typed with `y: unknown`. Cause: `Multiply` and the call of `g` type
-an `unknown` operand as a scalar. `compile-userfn-result-shape.test.ts` ("an
-INFERRED captured symbol keeps the enclosing guard") pins the list value.
-
-### CE-479. The stored signature of a recursive function over `Map` does not hold its value
-
-**Status:** open; wrong value.
-
-`m(n) := Map(x ↦ If(x < 1, 0, m(x - 1)), [n])` stores `-> list<number>`, but
-`m(1)` is `[[0]]`.
-
-### CE-480. Epsil: a hoisted function is typed from a binding declared after the call
-
-**Status:** open; wrong value.
-
-In `let a = g(); let i = 2; function g() { i^2 }`, `g` gets the result type
-`integer<0..>`, but the call before `let i` reads the constant `i` and returns
-`-1`. `function-declaration-hoisting.test.ts` pins the value `-1`.
-
-### CE-481. `Multiply` leaves a scalar factor of an inferred type out of the cell type
-
-**Status:** open; wrong value.
-
-With `L: list<integer>` and a symbol `u` inferred `number`, `L·u` is typed
-`list<integer>`. With `a := [1, 2, 3]`, `x ↦ a·x` is typed
-`(x: unknown) -> vector<integer^3>`, and `Apply` of it to `0.5` gives
-`[0.5, 1, 1.5]`, which that type does not hold. Cause:
-`isDeclaredScalarNumberOperand()` in `library/arithmetic.ts` does not count a
-factor whose type is `number` or inferred, so the factor's type is not merged
-into the cells. `Add` types the same operands as `vector<3>`. Measure the tests
-that move before changing the rule (the rule is used at 11 places).
 
 ## Collections, absence and broadcasting
 
@@ -1260,14 +1188,6 @@ repository.
 - **CE-117.5** `Kernel([[1.5e308, 1.5e308, 1], [1.5e308, -1.5e308, 1]])` gives
   `[[0, 0, 1]]`, which is not in the kernel: the chop sets the small component
   to zero.
-- **CE-117.6** (decision needed) `LUDecomposition`, `QRDecomposition` and
-  `CholeskyDecomposition` of exact integer matrices return floats under
-  `evaluate()`. An exact route needs: a rational LU with the same pivot choice
-  as the float one; an exact Cholesky (LDLᵀ with rational `D`, entries rational
-  × √rational); an exact QR by Gram–Schmidt (entries rational/√rational), whose
-  signs differ from the Householder floats (negative diagonals in `R`), so the
-  sign convention is a decision; type handlers that state exact cell types
-  instead of `numeric`; and `.N()` reading the exact result.
 
 ### CE-118. Engine code that builds a node by name picks up a user binding in the active scope
 
@@ -2557,13 +2477,6 @@ result with `ce.number(n)` and so makes it exact is visible.
 
 - **CE-190.1** Audit the kernel bridges and the compiled-value readers that call
   `ce.number(double)`; the float route is `ce._inexactNumericValue`.
-- **CE-190.2** (decision needed) At machine precision `1.0e800` overflows to
-  `PositiveInfinity`, which reports `isExact === true`. `BoxedNumber.isExact`
-  (`boxed-number.ts`) states that the signed infinities are exact on purpose,
-  there is no inexact-infinity value, and `fromNumericValue` maps every infinite
-  value to the `PositiveInfinity`/`NegativeInfinity` constants; overflow under
-  `.N()` (`10^{800}`) gives the same exact infinity. Changing this needs an
-  inexact-infinity concept, which is a design decision.
 - **CE-190.3** The compiled `N()` of a lazy `Map` boxes an integer-valued result
   as exact when its operands and the lambda are exact. An elementary function of
   an exact integer whose double is exactly an integer near 2^53 (`exp(36)`) is
@@ -4441,13 +4354,6 @@ file.
   over a multi-letter argument (`supsub.test.ts`).
 - **CE-305.4** Partial-derivative fraction forms
   `\frac{\partial^2}{\partial_{x,y}} f(x,y)` (2 skips, `operators.test.ts`).
-- **CE-305.6** (decision needed) `p \operatorname{implies} q` and
-  `p \operatorname{iff} q` parse to `Tuple(p, implies, q)` and
-  `Tuple(p, iff, q)` (`logic.test.ts`, two `@fixme` markers). `\keyword{iff}`
-  gives `Equivalent`, but the `iff` keyword has no `operatorname: true` flag,
-  and no `implies` keyword exists. Question: are `\operatorname{iff}` and
-  `implies` keyword spellings? That adds notation. The lowercase-arrow
-  expectations themselves are current (`\rightarrow` gives `To`).
 
 ## Epsil
 
@@ -4469,17 +4375,6 @@ only the empty list, which dispatches as ambiguous. The two nested types share
 whose only shared elements are empty lists count like the empty list? Probe: run
 the Epsil source above with `executeEpsil()` (`src/epsil/execute-epsil.ts`) and
 print the `value` of the result.
-
-### CE-309. A list literal of comprehensions with a statement body shows unevaluated `Comprehension` elements
-
-**Status:** decision needed; defect, small.
-
-- **CE-309.3** `let xs = [if k > 1 { k } else { 0 } for k in 1..3]; xs` and
-  `[do { k * 2 } for k in 1..3]` show unevaluated `Comprehension(…)` elements,
-  with or without an assignment local in the body, while `[k * 2 for k in 1..3]`
-  materializes to a `List`. Cause: `Comprehension` is a lazy indexed collection
-  with no `evaluate` handler. Decision needed: should an Epsil result
-  materialize a lazy comprehension?
 
 ### CE-310. An Epsil function redefined in a later program cannot change its result type
 

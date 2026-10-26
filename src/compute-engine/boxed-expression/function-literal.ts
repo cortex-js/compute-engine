@@ -308,6 +308,84 @@ export function isFunctionLiteralParameter(def: object | undefined): boolean {
 }
 
 /**
+ * The symbol occurrences of the bodies of canonical function literals that
+ * read a symbol from outside the literal (`y` in `t ↦ g(y)`): the symbol is
+ * not a parameter of the literal or of a nested literal, not the variable of
+ * a binder of the body (a `Sum` index), and not a local of a block of the
+ * body (a `let` local or an assignment local). The definition of the symbol
+ * can be in any scope: a binding that the canonicalization of the body
+ * declared in a scope of the body, or the binding of an outer scope that
+ * existed before the literal. When the body is evaluated, the occurrence
+ * reads the value that the symbol has at that time.
+ *
+ * So, when the signature of the literal is inferred, the type of such a
+ * symbol is not the type of the value that a later call reads. A call of a
+ * function literal over such an occurrence of type `unknown` may get a
+ * list, a tuple or a nested list, and its type must admit the result
+ * (`isUnknownCapturedSymbol()` in `boxed-function.ts`).
+ *
+ * The record is for the occurrence (each occurrence of a symbol is its own
+ * expression), not for the definition: the same symbol outside every
+ * literal (`g(y)` at the top level) is typed again when the symbol gets a
+ * value, and it keeps the scalar reading.
+ */
+const FUNCTION_LITERAL_CAPTURES = new WeakSet<Expression>();
+
+/**
+ * Record the occurrences of `body`, the body of a canonical function
+ * literal, that read a symbol from outside the literal
+ * (`FUNCTION_LITERAL_CAPTURES`). The walk goes into every nested
+ * expression, nested blocks included (a branch of an `If`). The bindings of
+ * a scoped expression that is not a block (the variable of a `Sum`, the
+ * parameters of a nested literal) and the locals of each block are not
+ * recorded.
+ */
+export function markFunctionLiteralCaptures(body: Expression): void {
+  const bound = new Set<object>();
+  const seen = new Set<Expression>();
+  const occurrences: Expression[] = [];
+  const visit = (e: Expression): void => {
+    if (seen.has(e)) return;
+    seen.add(e);
+    if (isSymbol(e)) {
+      occurrences.push(e);
+      return;
+    }
+    if (!isFunction(e) || e._numericStore !== undefined) return;
+    const scope = e.isScoped ? e.localScope : undefined;
+    if (scope !== undefined) {
+      const locals =
+        e.operator === 'Block' ? assignmentLocalsOf(scope) : undefined;
+      for (const [name, b] of scope.bindings) {
+        if (!('value' in b)) continue;
+        // A binding of a block that is not a local is the valueless copy
+        // that the canonicalization declared for a symbol read from
+        // outside: it is not bound here.
+        if (e.operator === 'Block' && locals?.includes(name) !== true) continue;
+        bound.add(b.value);
+      }
+    }
+    for (const op of e.ops) visit(op);
+  };
+  visit(body);
+  for (const op of occurrences) {
+    const def = op.valueDefinition;
+    if (def !== undefined) {
+      if (def.isConstant || def._blockLocal === true) continue;
+      if (isFunctionLiteralParameter(def) || bound.has(def)) continue;
+    } else if (op.operatorDefinition !== undefined) continue;
+    FUNCTION_LITERAL_CAPTURES.add(op);
+  }
+}
+
+/** True when `op` is an occurrence of the body of a canonical function
+ * literal that reads a symbol from outside the literal
+ * (`FUNCTION_LITERAL_CAPTURES`). */
+export function isFunctionLiteralCapture(op: Expression): boolean {
+  return FUNCTION_LITERAL_CAPTURES.has(op);
+}
+
+/**
  * The type a destructuring parameter's argument must have: a tuple whose
  * arity is the pattern's, with a nested tuple type at each nested pattern
  * position and `unknown` everywhere else.

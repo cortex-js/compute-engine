@@ -1,18 +1,120 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **`LUDecomposition`, `QRDecomposition` and `CholeskyDecomposition` of a matrix
+  of exact rational entries give exact factors under `evaluate()`.** The LU of
+  `[[4, 3], [6, 3]]` is `([[0,1],[1,0]], [[1,0],[2/3,1]], [[6,3],[0,1]])` (the
+  lower factor held `0.6666666666666666`), and the QR of `[[3, 4], [4, 3]]` is
+  `([[3/5,4/5],[4/5,-3/5]], [[5,24/5],[0,7/5]])`. `.N()` and a matrix with a
+  float entry still give floats, with the same permutation. A matrix with an
+  exact entry that is not rational, such as `√2`, now stays unevaluated under
+  `evaluate()` (it gave floats); `.N()` decomposes it. The result types state
+  the exact cells: `rational` for the LU factors, `real` for QR and Cholesky.
+- **The `R` factor of `QRDecomposition` has a non-negative diagonal** on the
+  exact and the float route. The float route gave `R[0][0] = -5` for
+  `[[3, 4], [4, 3]]`, with `Q` negated to match; it now gives `5`.
+- **`CholeskyDecomposition` of a matrix that is not symmetric is the error
+  `expected-symmetric-matrix`.** It read only the lower triangle, so
+  `[[4, 0], [2, 3]]` gave a factor `L` with `L·Lᵀ = [[4, 2], [2, 3]]`. A float
+  matrix that is symmetric within rounding error is accepted.
+- **`Inverse`, `MatrixPower` and `Determinant` no longer claim `rational`
+  cells.** A float that holds a whole number (`2.0`) is typed as an integer, so
+  the claim was wrong for `Inverse([[2.0, 1], [1, 3]])`, typed
+  `matrix<rational^(2x2)>` with float cells. The inverse of an integer matrix is
+  now typed `matrix<real^(2x2)>`, and the determinant of a rational matrix
+  `real`. The values do not change.
+- **A type alias with no fixed point is refused when it is declared.**
+  `ce.declareType('nn', '!nn', { alias: true })` throws the error
+  `alias-without-fixed-point`, and the `DeclareType` and Epsil `type alias`
+  routes give an `invalid-type-declaration` error. Recursive aliases such as
+  `tree = list<tree> | integer`, and aliases that have a fixed point such as
+  `!a | any`, are still accepted.
+- **An Epsil program whose result is a finite comprehension gives a `List`.**
+  `[do { k * 2 } for k in 1..3]` and
+  `let xs = [if k > 1 { k } else { 0 } for k in 1..3]; xs` gave an unevaluated
+  `Comprehension`; they give `[2, 4, 6]` and `[0, 2, 3]`. An infinite
+  comprehension stays as it is.
+- **`\operatorname{implies}` and `\operatorname{iff}` parse as `Implies` and
+  `Equivalent`.** `p \operatorname{implies} q` was a product of the symbols
+  `implies`, `p` and `q`. `\mathrm{…}`, `\text{…}` and `\keyword{…}` spellings
+  of the two words parse the same way.
+- **The type of a call checks the arguments against a declared signature on
+  every route.** With `k` declared `(tuple<number, number>) -> number`, the type
+  of a function whose body calls `k(3)` is `error`, as the value is; it was
+  `number`. A list of points at a declared point parameter maps on that route
+  too, so the derived type of `k(P)` is `list<number>`.
+
+### New Features
+
+- **A type handler can read whether the engine is strict.** The engine view that
+  a `type` handler receives (`PureEngineView`) has a `strict` property, the same
+  value as `ce.strict`.
+
+### Resolved Issues
+
+- **A partial application keeps its argument inside a held operand.** With
+  `f(a, b) := If(b, a[1] + a[2], 42)`, `f((1, 2))` gave
+  `(_) => If(_, At(a, 1) + At(a, 2), 42)`, and applying it to `True` gave
+  `a[1] + a[2]` instead of `3`. With `m(a, b) := a + b`, `m(b)` applied to `1`
+  gave `2` instead of `b + 1`: the free parameter was renamed by name and
+  captured the argument `b`.
+- **The type of a call holds its value in more cases.**
+  - The derived type of `At` is `error` for a base that cannot be indexed (a
+    number, a boolean, a set, an interval), as the boxed `At` is. So with
+    `h(a, t) := a[1] + a[2] + t`, the partial application `h(3)` is typed
+    `error`, as its value is, not `(t: unknown) -> number`.
+  - With `k` declared `(tuple<number, number>) -> number` and
+    `U(L) := k(First(L))`, `U([[(1, 2), (3, 4)]])` was typed `number` for the
+    value `[3, 7]`. A call whose argument is outside an inferred parameter type
+    is now typed from the body.
+  - A union of lists of points maps at a declared point parameter, so
+    `Map(L ↦ k(L), [[(1, 2), (3, 4)], [(5, 6)]])` is typed `list<list<number>>`
+    (it was `list<number>`).
+  - The type of a call in the body of a function refuses a matrix at a declared
+    `list<integer>` parameter, as the boxed call does.
+- **A `Text` run whose words are a keyword round-trips through LaTeX.**
+  `Text(p, "and", q)` was written `p\text{and}q`, which parses as `And(p, q)`.
+  It is now written `p\text{{}and}q`, which prints the same and parses back as
+  text.
+- **A type with no values is a subtype of `never` when it is not spelled
+  `never`.** `integer & never` was not a subtype of `never`, nor of itself, so
+  `ce.declareType('q', 'integer & never', { alias: true })` threw
+  `signature "(integer & never) -> integer & never" does not match`.
+- **A product with a scalar factor of inferred or `unknown` type has `number`
+  cells** (CE-481). `L·u` with `L: list<integer>` and `u` inferred `number` was
+  `list<integer>` and is `list<number>`; `x ↦ a·x` with `a := [1, 2, 3]` was
+  `(x: unknown) -> vector<integer^3>`, which did not hold `[0.5, 1, 1.5]`, and
+  is `(x: unknown) -> vector<3>`.
+- **A call over a captured symbol of type `unknown` no longer claims a scalar
+  result** (CE-478). With `g := s ↦ 2s` and `f := t ↦ g(y)`, `f` was typed
+  `(t: unknown) -> number`, and after `y := [1, 2, 3]` the value of `f(1)` was
+  `[2, 4, 6]`. It is now `(t: unknown) -> any`, which holds a list, a tuple or a
+  ragged list in `y`.
+- **The signature of a function that calls itself from a `Map` callback holds
+  its values** (CE-479). `m(n) := Map(x ↦ If(x < 1, 0, m(x − 1)), [n])` was
+  `-> list<number>` (`m(1)` is `[[0]]`) and is `-> list<integer | list>`. The
+  same holds for a mutually recursive pair, in either assignment order.
+- **Epsil: a function called before a later `let` of a name its body reads is
+  typed for both bindings** (CE-480). In
+  `let a = g(); let i = 2; function g() { i^2 }`, `g` was typed
+  `() -> integer<0..>` for the value `-1` (the first call reads the constant
+  `i`); it is now `() -> number`.
+
 ## 0.168.0 _2026-10-25_
 
 ### Breaking Changes
 
 - **The `complexPromotion` compile option is removed.** It was deprecated in
-  0.115.0 as an alias of `mode: 'complex'`, with a one-time console warning.
-  The option is no longer on `CompilationOptions`, `CompileTarget` or the
-  options of `compile()`, and a JavaScript caller that still passes it gets no
-  warning: the key is ignored and the compilation runs in the default
-  `mode: 'auto'`. That mode promotes an unknown-sign `Sqrt`, `Ln`, `Log` or
-  `Power` through the complex kernels, but unlike `mode: 'complex'` it does not
-  treat every wide numeric binding as complex, so the emitted code and the
-  reported `mode` can differ from what `complexPromotion: true` gave. Pass
-  `mode: 'complex'` to keep the old behavior, or `mode: 'strict'` to forbid
-  promotion.
+  0.115.0 as an alias of `mode: 'complex'`, with a one-time console warning. The
+  option is no longer on `CompilationOptions`, `CompileTarget` or the options of
+  `compile()`, and a JavaScript caller that still passes it gets no warning: the
+  key is ignored and the compilation runs in the default `mode: 'auto'`. That
+  mode promotes an unknown-sign `Sqrt`, `Ln`, `Log` or `Power` through the
+  complex kernels, but unlike `mode: 'complex'` it does not treat every wide
+  numeric binding as complex, so the emitted code and the reported `mode` can
+  differ from what `complexPromotion: true` gave. Pass `mode: 'complex'` to keep
+  the old behavior, or `mode: 'strict'` to forbid promotion.
 
 - **The warning for the removed `realOnly` compile option is gone.** The option
   itself was removed earlier. A JavaScript caller that still passes the key no
@@ -38,11 +140,11 @@
   With `toMathJson()`, the replacement gives the same output as before. With
   `toLatex()`, it does not:
 
-  | Call                             | Before (`fractionalDigits`) | Now (`digits`) |
-  | :------------------------------- | :-------------------------- | :------------- |
-  | π, `toMathJson`, 6 digits        | `3.141593`                  | `3.141593`     |
-  | π, `toLatex`, 3 digits           | `3.141\ldots`               | `3.142`        |
-  | `2.0`, `toLatex`, 2 digits       | `2`                         | `2.00`         |
+  | Call                       | Before (`fractionalDigits`) | Now (`digits`) |
+  | :------------------------- | :-------------------------- | :------------- |
+  | π, `toMathJson`, 6 digits  | `3.141593`                  | `3.141593`     |
+  | π, `toLatex`, 3 digits     | `3.141\ldots`               | `3.142`        |
+  | `2.0`, `toLatex`, 2 digits | `2`                         | `2.00`         |
 
   `toLatex({ fractionalDigits: n })` cut the digits after the `n`th, wrote a
   `\ldots` marker when a digit was cut, and dropped trailing zeros.
@@ -54,21 +156,20 @@
   now applies to `.latex` and `toLatex()`, as an engine-wide `fractionalDigits`
   did. Before, only `fractionalDigits` was read from the engine-wide settings.
 
-  A standalone `LatexSyntax` serializer (one used without an engine) now
-  accepts `digits`, in its constructor and per call:
-  `new LatexSyntax({ digits: { fractional: 3 } })` writes `{ num: "3.14159265" }`
-  as `3.142`. It rounds a float and writes an exact number in full. With
-  `"auto"` or `"max"` it writes every digit, since it has no engine precision
-  to round to.
+  A standalone `LatexSyntax` serializer (one used without an engine) now accepts
+  `digits`, in its constructor and per call:
+  `new LatexSyntax({ digits: { fractional: 3 } })` writes
+  `{ num: "3.14159265" }` as `3.142`. It rounds a float and writes an exact
+  number in full. With `"auto"` or `"max"` it writes every digit, since it has
+  no engine precision to round to.
 
-- **A bare number is no longer a `digits` value.** `toLatex({ digits: -4 })`
-  and `toMathJson({ digits: 6 })` were accepted at runtime, although the
+- **A bare number is no longer a `digits` value.** `toLatex({ digits: -4 })` and
+  `toMathJson({ digits: 6 })` were accepted at runtime, although the
   `DisplayDigits` type does not allow a number: `n ≥ 0` meant
   `{ fractional: n }` and `n < 0` meant `{ significant: -n }`. Such a call now
-  throws an error that names the accepted values, in `toMathJson()`,
-  `toLatex()` and a standalone `LatexSyntax`. An invalid `digits` set on
-  `ce.latexOptions` throws when it is set. Write
-  `{ fractional: n }` or `{ significant: n }`.
+  throws an error that names the accepted values, in `toMathJson()`, `toLatex()`
+  and a standalone `LatexSyntax`. An invalid `digits` set on `ce.latexOptions`
+  throws when it is set. Write `{ fractional: n }` or `{ significant: n }`.
 
 - **The `canonical` option of `replace()` is removed.** Use `form`:
   `canonical: true` becomes `form: 'canonical'`, `canonical: false` becomes

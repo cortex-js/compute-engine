@@ -548,6 +548,13 @@ export type OperandStructure =
        * symbols that the canonical form of a literal list infers as
        * numbers. */
       free?: true;
+      /** Present (`true`) when the body of a function literal reads the
+       * symbol, and the symbol has no value and is not a parameter of the
+       * literal or a `let` local of the body (`isCapturedValuelessSymbol`).
+       * When the body is evaluated, the symbol reads the value that an outer
+       * scope holds at that time. A call of a function literal reads such a
+       * symbol of type `unknown` as an operand that may hold a list. */
+      captured?: true;
     }
   | { kind: 'string'; text: string }
   | {

@@ -257,7 +257,9 @@ describe('external symbol facts', () => {
       },
     });
     expect(outer.canonical.json).toEqual(['Multiply', 'f', 'x']);
-    expect(outer.canonical.type.toString()).toBe('list<real>');
+    // `x` has no declared type, so it can hold any number, and the cells of
+    // the product are `number` (ROADMAP CE-481).
+    expect(outer.canonical.type.toString()).toBe('list<number>');
     expect(nested?.canonical.json).toEqual(['f', 'x']);
     expect(ce.lookupDefinition('f')).toBeUndefined();
   });
@@ -277,7 +279,11 @@ describe('external symbol facts', () => {
       ['Block', ['Multiply', 'f', 'x']],
       'x',
     ]);
-    expect(raw.canonical.type.toString()).toBe('(x: unknown) -> list<real>');
+    // The parameter `x` can hold any number, so the cells of the product
+    // are `number` (ROADMAP CE-481).
+    expect(raw.canonical.type.toString()).toBe(
+      '(x: unknown) -> list<number>'
+    );
     expect(ce.lookupDefinition('f')).toBeUndefined();
   });
 
