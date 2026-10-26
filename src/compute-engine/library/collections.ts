@@ -189,10 +189,13 @@ import {
   widenElementTypes,
   unfoldAliasOnDescent,
   isCutOnDescent,
-  withoutResidueArm,
+  withoutKindArms,
+  hasKindArm,
   dictionaryValueValuesType,
   type AliasDescent,
 } from '../../common/type/utils.js';
+import { kindTypeNames } from '../boxed-expression/value-kinds.js';
+import { groupOneCallbackType } from '../boxed-expression/kind-admission.js';
 import {
   arityProvablyIncapable,
   callbackIncompatibility,
@@ -2034,6 +2037,15 @@ function callbackCompatibilityError(
         : fnDef && 'value' in fnDef
           ? fnDef.value.type?.type
           : undefined);
+    // An arithmetic operator of the value kinds admits a kind value as its
+    // operand check does (`groupOneCallbackType()`).
+    if (opType !== undefined)
+      opType = groupOneCallbackType(
+        ce,
+        fn.symbol,
+        opType,
+        fnDef && 'operator' in fnDef ? fnDef.operator : undefined
+      );
   } else opType = widenUnannotatedLiteralParams(fn, fn.type.type);
   if (opType === undefined || typeof opType === 'string') return undefined;
   if (freeTypeVariables(opType).size > 0) return undefined;
@@ -4460,8 +4472,9 @@ function bareMappingElementTypeD(
  * The element type of a `Map` whose mapping is a bare OPERATOR name that
  * combines points itself (the `'tuples'` broadcast exemption: `Add`,
  * `Subtract`, `Negate`, `Multiply`, `Divide`), when a source supplies
- * points — or `undefined` when this does not apply and the caller keeps the
- * declared result of the operator.
+ * points, or whose mapping is any bare operator name when a source supplies
+ * values that can be of a value kind — or `undefined` when this does not
+ * apply and the caller keeps the declared result of the operator.
  *
  * The callback check admits such an operator over points by its type handler
  * (`pointArithmeticAdmits()`), and the value is then a list of points:
@@ -4498,8 +4511,7 @@ function bareOperatorElementTypeD(
   }
   if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
   const def = engine.lookupDefinition(s.name)?.operator;
-  if (def === undefined || !def.broadcastExemptions.includes('tuples'))
-    return undefined;
+  if (def === undefined) return undefined;
   const sig = def.signature.type;
   if (typeof sig !== 'object' || sig.kind !== 'signature') return undefined;
   const { min, max } = arityBounds(sig);
@@ -4510,6 +4522,14 @@ function bareOperatorElementTypeD(
     if (t === undefined) return undefined;
     elementTypes.push(t);
   }
+  // Over elements that can be kind values, any operator is typed by its
+  // application (`Map(Sin, [U1, U2])` is a list of `umeasurement`, the
+  // type of `Sin(U1)`); else only an operator that combines points itself.
+  const kindElements = elementTypes.some((t) =>
+    hasKindArm(t, kindTypeNames(engine))
+  );
+  if (!kindElements && !def.broadcastExemptions.includes('tuples'))
+    return undefined;
   // Over scalar elements, the declared result is kept, except when it says
   // nothing about the value: `Add` is declared `(value+) -> value`, so the
   // zip `Map(Add, xs, ys)` of two lists of integers was typed `list<value>`.
@@ -4521,7 +4541,15 @@ function bareOperatorElementTypeD(
     declared === 'any' ||
     declared === 'unknown' ||
     declared === 'expression';
-  if (!declaredSaysNothing && !elementTypes.some((t) => isTupleShapedType(t)))
+  // Over elements that can be kind values (residue classes), the declared
+  // result (`number`) is not kept either: the operator's type handler gives
+  // the type by the rules of the kinds (`Map(Negate, [c1, c2])` is a list of
+  // `residue`, `docs/plans/2026-10-26-value-kinds.md`, section 4.5).
+  if (
+    !declaredSaysNothing &&
+    !elementTypes.some((t) => isTupleShapedType(t)) &&
+    !kindElements
+  )
     return undefined;
   const t = derive(
     s.name,
@@ -4585,13 +4613,16 @@ function broadcastingCallbackElementTypeD(
   const parameters = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
   for (let i = 0; i < sources.length; i++) {
     const parameter = (parameters[i] ?? sig.variadicArg)?.type;
-    // A parameter that admits a residue class beside its numbers (the
-    // arithmetic operators) is a scalar parameter here (`withoutResidueArm`).
+    // A parameter that admits a kind value beside its numbers (the
+    // arithmetic operators admit a residue class) is a scalar parameter here
+    // (`withoutKindArms`).
     if (
       parameter === undefined ||
       !(
-        isSubtype(withoutResidueArm(parameter), 'number') ||
-        isSubtype(parameter, 'boolean')
+        isSubtype(
+          withoutKindArms(parameter, kindTypeNames(engine)),
+          'number'
+        ) || isSubtype(parameter, 'boolean')
       )
     )
       return undefined;
@@ -6897,7 +6928,8 @@ function foldResultTypeD(
   op: OperandDescriptor | undefined,
   init: OperandDescriptor | undefined,
   engine: PureEngineView,
-  scan = false
+  scan = false,
+  derive?: TypeHandlerContext['derive']
 ): Type | undefined {
   if (op === undefined) return undefined;
   // The collection operand is given with the `missing` arm of its cells
@@ -6927,6 +6959,25 @@ function foldResultTypeD(
     BUILTIN_FOLD_HEADS.has(s.name) &&
     engine.lookupDefinition(s.name)?.operator !== undefined
   ) {
+    // An `Add` or `Multiply` fold over elements that can be kind values (a
+    // list of residue classes) is typed as the operator over an element and
+    // the accumulator, by the rules of the kinds
+    // (`docs/plans/2026-10-26-value-kinds.md`, section 4.5):
+    // `Reduce([c1, c2], Add)` is `residue`.
+    if (
+      derive !== undefined &&
+      (s.name === 'Add' || s.name === 'Multiply') &&
+      elt !== undefined &&
+      hasKindArm(elt, kindTypeNames(engine))
+    ) {
+      const element = describeBoundElement(elt, 1);
+      const t = derive(s.name, [describeBoundElement(elt, 0), element]);
+      if (t === undefined || init === undefined) return withFirst(t);
+      const seeded = derive(s.name, [init, element]);
+      return seeded === undefined
+        ? t
+        : reduceType({ kind: 'union', types: [t, seeded] });
+    }
     // Product(collection) is a seeded Multiply fold. Multiply discards an
     // omitted factor; an unseeded fold may instead return its first cell.
     const supplied =
@@ -6991,10 +7042,11 @@ function foldResultTypeD(
  */
 function seededFoldResultType(
   ops: ReadonlyArray<OperandDescriptor>,
-  engine: PureEngineView
+  engine: PureEngineView,
+  derive?: TypeHandlerContext['derive']
 ): Type | undefined {
   const [coll, op, init] = ops;
-  const t = foldResultTypeD(coll, op, init, engine);
+  const t = foldResultTypeD(coll, op, init, engine, false, derive);
   if (t === undefined || init === undefined) return t;
   if (coll !== undefined && provablyNonEmptyCollection(coll)) return t;
   if (isSubtype(init.type, t)) return t;
@@ -14409,9 +14461,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         return engine._fn('Reduce', [collection, fn]);
       }),
 
-    type: (ops, { engine }) =>
+    type: (ops, { engine, derive }) =>
       BoxedType.forResult(
-        parseType(seededFoldResultType(ops, engine) ?? 'unknown'),
+        parseType(seededFoldResultType(ops, engine, derive) ?? 'unknown'),
         engine._typeResolver
       ),
 

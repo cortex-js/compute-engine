@@ -10,10 +10,12 @@ import { holdMap } from './hold.js';
 import { expToTrig } from './exp-to-trig.js';
 import { expand } from './expand.js';
 import {
-  containsResidueClass,
+  holdsKindValue,
   isResidueClass,
   RESIDUE_ARITHMETIC,
 } from './residue-class.js';
+import { isKindType } from './value-kinds.js';
+import { isApplySiteCall } from './apply-site.js';
 import {
   rebindEscaping,
   hasAssignedVariable,
@@ -166,7 +168,8 @@ function containsNegatedOddEvenCall(expr: Expression): boolean {
  *   value (`w²` with `w := 5` stays `w²`, since substituting a value is the
  *   job of `evaluate()`, not of `simplify()`); the library constants (`Pi`,
  *   `ExponentialE`) are not variables, so `cos(π)` folds;
- * - its evaluation is a number literal or a residue class. The exactness
+ * - its evaluation is a number literal, or a value of a value kind (a
+ *   residue class; a value whose type is a kind type). The exactness
  *   contract of `evaluate()` keeps `ln 2`, `√2`, `2^(3/5)` and `e²`
  *   symbolic, so those are not folded; `ln e`, `3!`, `sin π`, `|−3|` and the
  *   determinant of a numeric matrix are.
@@ -269,8 +272,14 @@ function foldedConstant(expr: Expression): Expression | undefined {
   } finally {
     foldsInProgress.pop();
   }
-  if (!isNumber(evaluated) && !isResidueClass(evaluated)) return undefined;
-  // A residue class evaluates to itself: no fold, and no step to report.
+  if (
+    !isNumber(evaluated) &&
+    !isResidueClass(evaluated) &&
+    !isKindType(evaluated.engine, evaluated.type.type)
+  )
+    return undefined;
+  // A kind value (a residue class) evaluates to itself: no fold, and no step
+  // to report.
   if (sameSyntactic(evaluated, expr)) return undefined;
   return evaluated;
 }
@@ -405,7 +414,7 @@ export function simplifyValueBlind(
   // `q := ResidueClass(2, 4)` simplifies to 1, and `1/q` has no value. The
   // barrier then keeps every arithmetic expression with `q` as it is.
   const shadow = assignedVariableNames(expr).filter(
-    (n) => !containsResidueClass(ce.box(n))
+    (n) => !holdsKindValue(ce.box(n))
   );
   if (shadow.length === 0) return simplify(expr, options);
 
@@ -726,7 +735,7 @@ export function simplify(
   if (
     !options.noExpansionTrial &&
     !rulesWereNull &&
-    !containsResidueClass(expr) &&
+    !holdsKindValue(expr) &&
     mightExpand(expr) &&
     expandedTermBound(expr) <= MAX_TRIAL_EXPANSION_TERMS
   ) {
@@ -1260,6 +1269,21 @@ function simplifyExpression(
     expr = alt;
   }
 
+  // The barrier of the VALUE KINDS (`docs/plans/2026-10-26-value-kinds.md`,
+  // section 4.6): at a node whose operator is an arithmetic operator
+  // (`RESIDUE_ARITHMETIC`, group 1) or an APPLY SITE of a kind (an operator
+  // such as `Sin` that admits a kind value only through the `admittedAs`
+  // carrier of the kind, `isApplySiteCall()`), and that holds a kind value
+  // at any depth by the non-strict reading (`holdsKindValue()`: a residue
+  // class, a value of a kind registered by the host, a symbol declared with
+  // a kind type or with a kind arm beside numbers), no rewrite rule applies;
+  // only the evaluation through the kind's own hooks and the folding of the
+  // kind-free terms run. Every other node (`Equal`, `If`, `Tuple`, …)
+  // simplifies as before, after its kind-free operands. The identities of
+  // the numbers are wrong for a kind: for a measurement `U` with
+  // independent errors, `Sin(U)^2 + Cos(U)^2` is not `1` (`Add` and
+  // `Power` are of group 1, `Sin` and `Cos` are apply sites).
+  //
   // Arithmetic on residue classes is the job of the evaluate handlers, which
   // know the ring: `ResidueClass(5, 7) + ResidueClass(4, 7)` is
   // `ResidueClass(2, 7)`, and `ResidueClass(1, 5) + ResidueClass(2, 5) + x`
@@ -1267,7 +1291,7 @@ function simplifyExpression(
   // simplification stops here. The generic rules do not know the ring: they
   // read `c/c` as the integer 1 even when the class `c` has no inverse
   // (`ResidueClass(2, 4)`), and `c - c` as the integer 0. The test looks
-  // through every operator (`containsResidueClass()`): `S/S` with
+  // through every operator (`holdsKindValue()`): `S/S` with
   // `S := Sum(ResidueClass(k, 4), k, 1, 3)` has no value either.
   //
   // The terms of a sum (the factors of a product) with no class are
@@ -1279,14 +1303,13 @@ function simplifyExpression(
   // `x·ResidueClass(0, n)`.
   if (
     isFunction(expr) &&
-    RESIDUE_ARITHMETIC.includes(expr.operator) &&
-    containsResidueClass(expr)
+    holdsKindValue(expr) &&
+    (RESIDUE_ARITHMETIC.includes(expr.operator) || isApplySiteCall(expr))
   ) {
     if (expr.isPure !== true || hasAssignedVariable(expr)) return steps;
     let value: Expression = expr;
     if (expr.operator === 'Add' || expr.operator === 'Multiply') {
-      const isFree = (x: Expression) =>
-        !isNumber(x) && !containsResidueClass(x);
+      const isFree = (x: Expression) => !isNumber(x) && !holdsKindValue(x);
       const free = expr.ops.filter(isFree);
       if (free.length >= 2) {
         const together = simplify(expr.engine.function(expr.operator, free), {
@@ -1301,7 +1324,15 @@ function simplifyExpression(
     }
     const folded = value.evaluate();
     if (sameSyntactic(folded, expr)) return steps;
-    return [...steps, { value: folded, because: 'residue class arithmetic' }];
+    return [
+      ...steps,
+      {
+        value: folded,
+        because: RESIDUE_ARITHMETIC.includes(expr.operator)
+          ? 'residue class arithmetic'
+          : 'value kind',
+      },
+    ];
   }
 
   // A `NaN` or `Indeterminate` operand at a position whose NaN policy is

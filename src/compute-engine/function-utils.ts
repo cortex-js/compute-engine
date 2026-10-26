@@ -53,6 +53,7 @@ import {
   isString,
   isNumber,
   isAbsentSymbol,
+  isExpression,
   sym,
 } from './boxed-expression/type-guards.js';
 import {
@@ -149,11 +150,14 @@ import { substituteDeclaredBounds } from './boxed-expression/generic-instantiati
 import { isSubtype } from '../common/type/subtype.js';
 import { typeToString } from '../common/type/serialize.js';
 import {
+  hasKindArm,
   isGroupedTypeText,
   returnTypeText,
+  signatureArms,
   signatureEffects,
   stripNumericRanges,
 } from '../common/type/utils.js';
+import { kindTypeNames } from './boxed-expression/value-kinds.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 import {
   _BoxedValueDefinition,
@@ -286,6 +290,35 @@ export function order(
  *
  *
  */
+/**
+ * The written (non-canonical) form of the canonical function literal `x`,
+ * when `x` was canonicalized from a `["Function", body, ...params]` literal
+ * whose parameters are all unannotated, and `undefined` otherwise.
+ *
+ * The canonical body of such a literal reads each parameter as a possible
+ * number, so it may have folded `x/x` to `1`. A binder over the values of a
+ * VALUE KIND (`Map(f, [ResidueClass(2, 4), ResidueClass(3, 4)])`, with `f`
+ * boxed before the call) must not apply that body: the parameter takes the
+ * element type, a kind type, and the body is canonicalized again from this
+ * written form with that type, as an inline literal is
+ * (`docs/plans/2026-10-26-value-kinds.md`, section 4.2, decision B).
+ */
+export function writtenUntypedFunctionLiteral(
+  x: Expression
+): Expression | undefined {
+  // The map keeps only the written operands. The non-canonical `Function`
+  // expression is built here, when a caller asks for it, because few
+  // literals are ever given values of a kind.
+  const ops = WRITTEN_UNTYPED_LITERALS.get(x);
+  if (ops === undefined) return undefined;
+  return x.engine._fn('Function', [...ops], { canonical: false });
+}
+
+const WRITTEN_UNTYPED_LITERALS = new WeakMap<
+  Expression,
+  ReadonlyArray<Expression>
+>();
+
 export function canonicalFunctionLiteral(
   expr: Expression | undefined,
   options?: {
@@ -526,6 +559,55 @@ export function annotateFunctionLiteralParams(
 }
 
 /**
+ * The function literal `literal` with each untyped parameter that the
+ * declared function type `declared` types with a value kind annotated with
+ * that type, as a `Typed` parameter is (`annotateFunctionLiteralParams()`).
+ * `literal` is the MathJSON or the boxed value of a declaration
+ * (`ce.declare('g', { signature, evaluate: literal })`) or of an assignment
+ * to a symbol declared with a function type. A canonical literal is read
+ * from its written form (`writtenUntypedFunctionLiteral()`).
+ *
+ * The body of an untyped parameter is canonicalized with the parameter
+ * `unknown`, which folds `x/x` to `1` before a call can pass a kind value.
+ * Typed by the declaration (`(real | umeasurement) -> …`,
+ * `(residue) -> residue`), the parameter holds a possible kind value, and
+ * the body keeps `x/x` (`docs/plans/2026-10-26-value-kinds.md`, section
+ * 4.2, decision B).
+ *
+ * Only the parameters whose declared type has a kind arm are annotated: the
+ * other parameters keep the reading of an untyped parameter. The annotation
+ * is marked as inferred, so the literal prints as written. `undefined` when
+ * no parameter is annotated: `declared` is not one signature, or no
+ * parameter type has a kind arm, or the literal has no parameter list or
+ * annotates its parameters itself.
+ */
+export function kindTypedFunctionLiteral(
+  ce: ComputeEngine,
+  literal: unknown,
+  declared: Type
+): Expression | undefined {
+  let input: ExpressionInput;
+  if (Array.isArray(literal) && literal[0] === 'Function')
+    input = literal as unknown as ExpressionInput;
+  else if (isExpression(literal) && isFunction(literal, 'Function')) {
+    const x = literal as Expression;
+    const written = x.isCanonical ? writtenUntypedFunctionLiteral(x) : x;
+    if (written === undefined) return undefined;
+    input = written;
+  } else return undefined;
+  const arms = signatureArms(declared);
+  if (arms === undefined || arms.length !== 1) return undefined;
+  const params = arms[0].args ?? [];
+  if (params.length === 0) return undefined;
+  const kinds = kindTypeNames(ce);
+  const types = params.map((p) =>
+    hasKindArm(p.type, kinds) ? p.type : undefined
+  );
+  if (types.every((t) => t === undefined)) return undefined;
+  return annotateFunctionLiteralParams(ce, input, types);
+}
+
+/**
  * Canonicalize the operands of a `["Function", …]` literal — the body followed
  * by its parameter list.
  *
@@ -567,7 +649,17 @@ export function canonicalFunctionLiteralOperands(
     if (params.length > 0)
       return canonicalFunctionLiteralArguments(ce, [body, ...params], options);
   }
-  return canonicalFunctionLiteralArguments(ce, ops, options);
+  const result = canonicalFunctionLiteralArguments(ce, ops, options);
+  // A literal with explicit parameters, none of them annotated, keeps its
+  // written form: see `writtenUntypedFunctionLiteral()`.
+  if (
+    result !== undefined &&
+    ops.length > 1 &&
+    !ops.every((x) => x.isCanonical) &&
+    ops.slice(1).every((x) => isSymbol(x))
+  )
+    WRITTEN_UNTYPED_LITERALS.set(result, ops);
+  return result;
 }
 
 /**

@@ -71,6 +71,7 @@ import type {
   BoxedValueDefinition,
   BoxedOperatorDefinition,
   LibraryDefinition,
+  KindRegistryState,
 } from './types-definitions.js';
 import type {
   AssumeResult,
@@ -585,6 +586,20 @@ export interface IComputeEngine {
    * Epsil static pre-pass alongside it.
    * @internal */
   _protocolRegistryRollbackPoint(): () => void;
+
+  /** The engine-level KIND registry: the value kinds declared by the
+   * `arithmetic` field of operator definitions. Engine-level like the type
+   * registry: a head declared with a kind in a nested scope registers its
+   * type for the engine, and popping the scope does not unregister it. Read
+   * and written through `boxed-expression/value-kinds.ts` only.
+   * @internal */
+  readonly _kindRegistry: KindRegistryState;
+
+  /** Capture the kind registry's state; the returned thunk restores it and
+   * increments its generation. Used by the checkpoint model
+   * (`checkpoint.ts`), beside {@link _typeRegistryRollbackPoint}.
+   * @internal */
+  _kindRegistryRollbackPoint(): () => void;
 
   /** A monotone counter that advances on every mutation of the protocol /
    * conformance registry — a protocol declaration or re-declaration, a
@@ -2367,6 +2382,13 @@ export interface IComputeEngine {
     options?: {
       alias?: boolean;
       fromStatement?: boolean;
+      /** Whether the declaration also declares a value-level constructor
+       * of the same name (`point(1, 2)` for `type point = tuple<…>`). Default
+       * `true`. A VALUE KIND uses `false`: its type is a nominal type defined
+       * as exactly `value` (`ce.declareType('gf8', 'value', { mint: false })`),
+       * and its values are made by the head that declares its arithmetic
+       * (`GF8(3)`), so a second constructor with no arithmetic must not
+       * exist. See the `arithmetic` field of `OperatorDefinition`. */
       mint?: boolean;
       typeParams?: TypeParamsOption;
     }

@@ -88,6 +88,7 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from './type-guards.js';
+import { isKindValue } from './kind-compare.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 import {
@@ -1579,6 +1580,11 @@ export class BoxedNumber
     tolerance?: number
   ): boolean {
     if (this.isSame(other)) return true;
+
+    // A value of a value kind makes the comparison (`kindIs()`), as
+    // `.is()` is symmetric.
+    if (other instanceof _BoxedExpression && isKindValue(other))
+      return other.is(this, tolerance);
 
     // An exact value (a rational, a radical, an exact complex, a large
     // integer) is compared with a number, a bigint or another exact value

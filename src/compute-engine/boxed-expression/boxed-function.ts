@@ -305,7 +305,7 @@ import {
   signatureSlotType,
   signatureArms,
   staticCollectionDims,
-  withoutResidueArm,
+  withoutKindArms,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -340,11 +340,20 @@ import {
   hasSymbolOrOperator,
 } from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
+import { holdsKindValue } from './residue-class.js';
 import {
-  containsResidueClass,
-  noteResidueClass,
-  residueArithmetic,
-} from './residue-class.js';
+  kindApply,
+  kindArithmetic,
+  type KindApplyAnswer,
+} from './kind-dispatch.js';
+import { isKindValue } from './kind-compare.js';
+import { applySiteOperands, applySiteResultType } from './apply-site.js';
+import {
+  kindTypeNames,
+  kindTypesOfHeadName,
+  noteKindHeadValue,
+  noteKindValue,
+} from './value-kinds.js';
 import {
   digest128,
   hashCode,
@@ -1394,8 +1403,6 @@ export class BoxedFunction
     super(ce, options?.metadata);
 
     this._operator = operator;
-    // Lets `containsResidueClass()` skip its walk in an engine with no class.
-    if (operator === 'ResidueClass') noteResidueClass(ce);
     const store = options?.numericStore;
     if (store !== undefined) {
       // The store is the list's literal content. Any other head would give
@@ -1421,12 +1428,29 @@ export class BoxedFunction
     this._localScope = options?.scope;
 
     this._isStructural = options?.structural ?? false;
-    if (options?.canonical || this._isStructural) this._bind();
-    // `null` is "not bound" — as documented on `_def`, and as distinct from
-    // the `undefined` `_bind()` leaves when it finds no definition. Only
-    // `evaluate()` reads the two apart (see `_canonicalToEvaluate()`); every
-    // other use tests `_def` for falsiness.
-    else this._def = null;
+    if (options?.canonical || this._isStructural) {
+      this._bind();
+      // A value of a head that declares a value kind opens the value gate of
+      // its kind type for the engine (`noteKindHeadValue()`,
+      // `value-kinds.ts`), which lets `holdsKindValue()` skip its walk in an
+      // engine that has made no kind value.
+      const bound = this._def;
+      if (bound && 'operator' in bound && bound.operator.arithmetic)
+        noteKindHeadValue(ce, bound.operator);
+    } else {
+      // `null` is "not bound" — as documented on `_def`, and as distinct from
+      // the `undefined` `_bind()` leaves when it finds no definition. Only
+      // `evaluate()` reads the two apart (see `_canonicalToEvaluate()`);
+      // every other use tests `_def` for falsiness.
+      this._def = null;
+      // A call that is not bound (a non-canonical `ResidueClass(…)`) has
+      // only its name: a registered kind head of that name opens the gates
+      // of its kind types. Recognition reads such a call by name too
+      // (`isKindHeadCall()`, `residue-class.ts`).
+      const kindTypes = kindTypesOfHeadName(ce, operator);
+      if (kindTypes !== undefined)
+        for (const t of kindTypes) noteKindValue(ce, t);
+    }
   }
 
   // NOTE: this hash folds bound-variable NAMES (via each symbol operand's
@@ -2719,6 +2743,11 @@ export class BoxedFunction
 
   // Not +- Infinity, not NaN
   get isFinite(): boolean | undefined {
+    // A value of a value kind (`isKindValue()`) is not a number, and has no
+    // numeric property to read: the answer is `undefined`, so a fold that
+    // reads it does not fire (`docs/plans/2026-10-26-value-kinds.md`,
+    // section 4.3). Only the kind's hooks decide.
+    if (isKindValue(this)) return undefined;
     if (this.isNumber !== true) return false;
     if (this.isNaN === true || this.isInfinity === true) return false;
 
@@ -2990,10 +3019,10 @@ export class BoxedFunction
   inv(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
-    // The reciprocal of an expression with a residue class: only the residue
-    // rules apply. The rules below read `(1/c)^{-1}` as `c` even when `1/c`
-    // has no value.
-    const residue = residueArithmetic(this.engine, 'Divide', [
+    // The reciprocal of an expression with a kind value (a residue class):
+    // only the hooks of the kinds apply. The rules below read `(1/c)^{-1}` as
+    // `c` even when `1/c` has no value.
+    const residue = kindArithmetic(this.engine, 'Divide', [
       this.engine.One,
       this,
     ]);
@@ -3057,7 +3086,7 @@ export class BoxedFunction
     // A product with a residue class goes to `mul()`, which broadcasts over
     // a collection and then applies only the residue rules. The shortcuts
     // below read `c · 0` as the integer 0.
-    if (containsResidueClass(this))
+    if (holdsKindValue(this))
       return mul(
         this,
         rhs instanceof NumericValue
@@ -3093,8 +3122,9 @@ export class BoxedFunction
       (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
     )
       throw new Error('Not canonical');
-    // A root of a residue class is kept as written (`residueArithmetic()`).
-    const residue = residueArithmetic(this.engine, 'Root', [
+    // A root of a kind value: the `power` hook of its kind, with the exponent
+    // `1/n`, or the root as written (`kindArithmetic()`).
+    const residue = kindArithmetic(this.engine, 'Root', [
       this,
       this.engine.expr(exp),
     ]);
@@ -3320,17 +3350,23 @@ export class BoxedFunction
   }
 
   get isInteger(): boolean | undefined {
+    // A kind value: see `isFinite`.
+    if (isKindValue(this)) return undefined;
     if (this.type.isUnknown) return undefined;
     return staticMembership(this.type.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
+    // A kind value: see `isFinite`.
+    if (isKindValue(this)) return undefined;
     if (this.type.isUnknown) return undefined;
     // Every integer is a rational: `integer` is below `rational`.
     return staticMembership(this.type.type, 'rational');
   }
 
   get isExtendedReal(): boolean | undefined {
+    // A kind value: see `isFinite`.
+    if (isKindValue(this)) return undefined;
     const t = this.type;
     if (t.isUnknown) return undefined;
     // Rationals and integers are real. `+oo | -oo` is admitted
@@ -4611,7 +4647,7 @@ export class BoxedFunction
     // An equation that holds a residue class is not solved (see
     // `evaluateSolve()`): `null`, as for any equation the solver cannot
     // solve, and not an empty list of roots.
-    if (containsResidueClass(this)) return null;
+    if (holdsKindValue(this)) return null;
 
     const varNames = normalizedUnknownsForSolve(vars ?? this.unknowns);
 
@@ -7319,36 +7355,52 @@ export class BoxedFunction
       const failuresBefore = failedWalksMeasuredBy(def);
       let evalResult: Expression | undefined;
       try {
-        evalResult = def.evaluate?.(handlerOperands, {
-          numericApproximation,
-          engine: this.engine,
-          materialization: materialization,
-          // The node itself, so a handler can reach its RAW (pre-numericized)
-          // operands — `tail` has already been evaluated. See
-          // `EvaluateHandlerOptions.expression`.
-          expression: this,
-          // The digits requested by an enclosing `N(x, p)`, else the
-          // precision of the engine. Only for a numeric approximation: an
-          // exact evaluation has no precision.
-          precision: numericApproximation
-            ? (this.engine._requestedPrecision ?? this.engine.precision)
-            : undefined,
-          // Set by the enclosing `evaluate()`; the fallback covers a caller
-          // that reaches this step without going through it.
-          effects: this.engine._evaluationEffects ?? this.engine.effects,
-        });
-        // A copy of a library definition under another name keeps its head
-        // (`withOwnHead()`): the library handler of `Sin` returns `Sin(x)`
-        // for `MySin(x)`, and the nodes that the handler builds with the
-        // name `Sin` get the name `MySin`.
-        evalResult = withOwnHead(
-          this.engine,
-          this._operator,
-          'evaluate',
-          def.evaluate,
-          evalResult,
-          () => tail
+        // 6-kind/ At an APPLY SITE of a value kind (`applySiteOperands()`),
+        // the `apply` hook of the kind of a value among the operands is
+        // called in place of the handler (`kindApply()`). A threadable
+        // operator has mapped its collection operands above; the elements of
+        // an operand at a collection parameter are enumerated once.
+        const kindAnswer = this._kindApplyAnswer(
+          def,
+          handlerOperands,
+          tail,
+          numericApproximation
         );
+        if (kindAnswer === 'unevaluated') evalResult = undefined;
+        else if (kindAnswer !== undefined && 'value' in kindAnswer)
+          evalResult = kindAnswer.value;
+        else {
+          evalResult = def.evaluate?.(kindAnswer?.operands ?? handlerOperands, {
+            numericApproximation,
+            engine: this.engine,
+            materialization: materialization,
+            // The node itself, so a handler can reach its RAW (pre-numericized)
+            // operands — `tail` has already been evaluated. See
+            // `EvaluateHandlerOptions.expression`.
+            expression: this,
+            // The digits requested by an enclosing `N(x, p)`, else the
+            // precision of the engine. Only for a numeric approximation: an
+            // exact evaluation has no precision.
+            precision: numericApproximation
+              ? (this.engine._requestedPrecision ?? this.engine.precision)
+              : undefined,
+            // Set by the enclosing `evaluate()`; the fallback covers a caller
+            // that reaches this step without going through it.
+            effects: this.engine._evaluationEffects ?? this.engine.effects,
+          });
+          // A copy of a library definition under another name keeps its head
+          // (`withOwnHead()`): the library handler of `Sin` returns `Sin(x)`
+          // for `MySin(x)`, and the nodes that the handler builds with the
+          // name `Sin` get the name `MySin`.
+          evalResult = withOwnHead(
+            this.engine,
+            this._operator,
+            'evaluate',
+            def.evaluate,
+            evalResult,
+            () => tail
+          );
+        }
       } catch (e) {
         // An assignment to a constant keeps the source range of the
         // `Assign` node that made it, so that Epsil can match it to the
@@ -7384,6 +7436,15 @@ export class BoxedFunction
       // operators WITH a handler that declined (e.g. a symbolic `Sum`, whose
       // re-canonicalization performs big-op cleanups the rubi pipeline
       // depends on).
+      //
+      // The re-box keeps the binding of this node (`withCallableBinding()`):
+      // a lookup of the name in the current scope can find another
+      // definition (a head declared again in an inner scope, or a scope
+      // that was popped), and the result must denote the definition this
+      // node was bound to (`docs/SCOPING-MODEL.md`, "Callable resolution").
+      // The hooks of a value kind are read from that definition: `GF8(1)`
+      // made before a scope that declares another `GF8` keeps the hooks of
+      // the first `GF8` when it is evaluated in that scope.
       const result =
         evalResult ??
         (isScoped &&
@@ -7392,7 +7453,9 @@ export class BoxedFunction
         tail.every((x, i) => x === this._ops[i])
           ? this
           : this._withParseScope(() =>
-              this.engine.function(this._operator, tail)
+              withCallableBinding(this, () =>
+                this.engine.function(this._operator, tail)
+              )
             ));
 
       // 6a/ String preservation, re-checked on the RESULT. Step 2d could only
@@ -7421,6 +7484,34 @@ export class BoxedFunction
 
   /** `sourceValues` holds the values of eager operands that the finiteness
    * read of this evaluation computed (`_evaluateAsyncUncounted()`). */
+  /**
+   * The answer of the `apply` dispatch of the value kinds for this call
+   * (`kindApply()`, `kind-dispatch.ts`), or `undefined` when this call is
+   * not an apply site (`applySiteOperands()`) or the dispatch leaves the
+   * call to the handler with its own operands. `operands` are the evaluated
+   * operands the handler would receive; `tail` the operands as evaluated
+   * by the call, aligned with the operands as written when it has as many.
+   * At an operator that is not threadable, an operand at an apply-site
+   * position that is a collection is enumerated once.
+   */
+  private _kindApplyAnswer(
+    def: BoxedOperatorDefinition,
+    operands: ReadonlyArray<Expression>,
+    tail: ReadonlyArray<Expression>,
+    numericApproximation: boolean
+  ): KindApplyAnswer | undefined {
+    const sites = applySiteOperands(this);
+    if (sites.length === 0) return undefined;
+    return kindApply(
+      this.engine,
+      this._operator,
+      operands,
+      tail.length === this.ops.length ? this.ops : undefined,
+      numericApproximation,
+      def.broadcastable === true ? [] : sites
+    );
+  }
+
   _computeValueAsync(
     options?: Partial<EvaluateOptions>,
     sourceValues?: EagerSourceValues
@@ -8709,13 +8800,29 @@ export class BoxedFunction
             const enclosingNumericRequest = engine._numericRequest;
             engine._numericRequest = numericApproximation;
             try {
+              // At an apply site of a value kind, the `apply` hook answers in
+              // place of the handler, as on the synchronous route
+              // (`_kindApplyAnswer()`).
+              const kindAnswer = this._kindApplyAnswer(
+                def,
+                handlerOps,
+                tail,
+                numericApproximation
+              );
+              if (kindAnswer === 'unevaluated') return undefined;
+              if (kindAnswer !== undefined && 'value' in kindAnswer)
+                return kindAnswer.value;
+              if (kindAnswer !== undefined) handlerOps = kindAnswer.operands;
               if (def.evaluateAsync !== undefined) {
                 // A walk that failed in the synchronous part of the call
                 // (before its first `await`), where no other evaluation can
                 // run, gives its error to a handler that declines
                 // (`failedWalksMeasuredBy()`).
                 const failuresBefore = failedWalksMeasuredBy(def);
-                const answer = def.evaluateAsync(declaredOps, opts);
+                const answer = def.evaluateAsync(
+                  kindAnswer !== undefined ? handlerOps : declaredOps,
+                  opts
+                );
                 asyncSliceFailure = handlerWalkFailure(failuresBefore);
                 return answer;
               }
@@ -8811,7 +8918,11 @@ export class BoxedFunction
           this.isCanonical &&
           tail.every((x, i) => x === this._ops[i])
             ? this
-            : this._withParseScope(() => engine.function(this._operator, tail)))
+            : this._withParseScope(() =>
+                withCallableBinding(this, () =>
+                  engine.function(this._operator, tail)
+                )
+              ))
       );
 
       // 5a/ String preservation, re-checked on the RESULT. The step that
@@ -10723,7 +10834,10 @@ function wholeAbsentTupleArgumentType(
     ops.some(
       (x, i) =>
         isNumericTupleArgumentType(x.type.type) &&
-        !(signature !== undefined && parameterAdmitsTuple(signature, i)) &&
+        !(
+          signature !== undefined &&
+          parameterAdmitsTuple(signature, i, kindTypeNames(x.engine))
+        ) &&
         parameterReachesBody(literal, i)
     )
   )
@@ -12279,6 +12393,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       )
     )
       return 'error';
+    // An APPLY SITE of a value kind (a measurement at `Sin`) is typed by the
+    // rules of the kinds (`applySiteResultType()`): the `apply` hook of the
+    // kind answers in place of the operator's handler.
+    const applySiteType = applySiteResultType(expr);
+    if (applySiteType !== undefined) return applySiteType;
     const sig =
       def.signature instanceof BoxedType
         ? def.signature.type
@@ -13353,11 +13472,13 @@ function declaredScalarConformance(
     if (i < args.length + opt.length) return opt[i - args.length].type;
     return declared.variadicArg?.type;
   };
-  // A parameter that admits a residue class beside its numbers (the
-  // arithmetic operators) is numeric here (`withoutResidueArm`).
+  // A parameter that admits a kind value beside its numbers (the
+  // arithmetic operators admit a residue class) is numeric here
+  // (`withoutKindArms`).
+  const kinds = kindTypeNames(ce);
   const isNumericParam = (i: number): boolean => {
     const p = paramAt(i);
-    return p !== undefined && isSubtype(withoutResidueArm(p), 'number');
+    return p !== undefined && isSubtype(withoutKindArms(p, kinds), 'number');
   };
   for (let i = 0; i < ops.length; i++) {
     if (!isAbsentScalarSymbol(ops[i])) continue;
@@ -13365,7 +13486,7 @@ function declaredScalarConformance(
     if (
       p === undefined ||
       runtimeCheckExemptParam(p) ||
-      isSubtype(withoutResidueArm(p), 'number') ||
+      isSubtype(withoutKindArms(p, kinds), 'number') ||
       provablyAdmits('missing', p)
     )
       continue;
@@ -17153,9 +17274,13 @@ function unindexedOperandBroadcast(
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
-    // A parameter that admits a residue class beside its numbers (the
-    // arithmetic operators) is a numeric slot here (`withoutResidueArm`).
-    if (param === undefined || isSubtype(withoutResidueArm(param), 'number'))
+    // A parameter that admits a kind value beside its numbers (the
+    // arithmetic operators admit a residue class) is a numeric slot here
+    // (`withoutKindArms`).
+    if (
+      param === undefined ||
+      isSubtype(withoutKindArms(param, kindTypeNames(ops[i].engine)), 'number')
+    )
       return 'veto';
   }
   return 'lift';
@@ -17240,7 +17365,10 @@ function unindexedCollectionOperandError(
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
-    if (param === undefined || !isSubtype(withoutResidueArm(param), 'number'))
+    if (
+      param === undefined ||
+      !isSubtype(withoutKindArms(param, kindTypeNames(ce)), 'number')
+    )
       continue;
     const err = nonNumericOperandError(ce, [ops[i]]);
     if (err !== undefined) return err;
@@ -17916,7 +18044,10 @@ function heldEagerSources(
       return [];
     ops.forEach((x, index) => {
       const slot = signatureSlotType(signature, index);
-      if (slot === undefined || !isSubtype(withoutResidueArm(slot), 'number'))
+      if (
+        slot === undefined ||
+        !isSubtype(withoutKindArms(slot, kindTypeNames(expr.engine)), 'number')
+      )
         return;
       if (isHeldEagerSource(x) && isTypedAsCollection(x))
         sources.push({ index, source: x, expected: undefined });

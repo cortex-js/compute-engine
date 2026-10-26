@@ -211,10 +211,20 @@ function outer(k) -> boolean {
     // Defined across separate programs on one engine (the REPL route), the
     // first definition's forward reference is fulfilled by the second.
     const ce = new ComputeEngine();
-    const first = executeEpsil(ce, 'even = n => true if n == 0 else odd(n - 1)');
-    const second = executeEpsil(ce, 'odd = n => false if n == 0 else even(n - 1)');
+    const first = executeEpsil(
+      ce,
+      'even = n => true if n == 0 else odd(n - 1)'
+    );
+    const second = executeEpsil(
+      ce,
+      'odd = n => false if n == 0 else even(n - 1)'
+    );
     const call = executeEpsil(ce, 'even(4)');
-    expect([...first.diagnostics, ...second.diagnostics, ...call.diagnostics]).toEqual([]);
+    expect([
+      ...first.diagnostics,
+      ...second.diagnostics,
+      ...call.diagnostics,
+    ]).toEqual([]);
     expect(call.value.toString()).toBe('"True"');
   });
 });
@@ -521,7 +531,7 @@ let inputs = [16, -4, "banana", 81]
 Map(x => Sqrt(x), inputs)`);
     expect(diagnostics).toEqual([]);
     expect(text).toBe(
-      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity | residue", "string"), "banana"),9]'
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
     );
   });
 });

@@ -873,6 +873,18 @@ function provablyDisjointRules(a: Type, b: Type): boolean {
   // on the DECLARATION record (an application is a fresh object each time it
   // is instantiated, so the node itself is not a stable key); on a cycle we
   // answer `false` — "may overlap" — which is this predicate's safe direction.
+  //
+  // One kind of nominal reference is NOT answered from its definition: a
+  // nominal type defined as exactly `value` (a value kind, see
+  // `valueKindDeclaration()`). Its definition overlaps numbers, strings and
+  // collections, but its values are none of them: it is disjoint from every
+  // type except `value`, `expression`, `any`, `unknown` and itself, as the
+  // `residue` primitive is. Two such types of different names are disjoint.
+  const kindA = valueKindDeclaration(a);
+  const kindB = valueKindDeclaration(b);
+  if (kindA !== undefined && kindB !== undefined) return kindA !== kindB;
+  if (kindA !== undefined) return valueKindDisjointFrom(a, b);
+  if (kindB !== undefined) return valueKindDisjointFrom(b, a);
   if (typeof a === 'object' && a.kind === 'reference') {
     const def = resolveTypeReference(a);
     if (def === undefined) return false;
@@ -4126,7 +4138,95 @@ function fitsBroadcastOrIndexed(
  * (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, ruling B6).
  */
 function isValue(type: Type): boolean {
-  return isScalar(type) || isCollection(type) || isObjectType(type);
+  return (
+    isScalar(type) ||
+    isCollection(type) ||
+    isObjectType(type) ||
+    valueKindDeclaration(type) !== undefined
+  );
+}
+
+/**
+ * The declaration record of `type` when `type` is a reference to a NOMINAL
+ * type whose definition is exactly the primitive `value`
+ * (`ce.declareType('gf8', 'value', { mint: false })`), else `undefined`.
+ *
+ * Such a type is the form of a VALUE KIND that a library user declares
+ * (`docs/plans/2026-10-26-value-kinds.md`, section 4.1.1). Two rules of this
+ * file read it, from the definition alone, so they hold before any head of
+ * the kind is declared and do not depend on the kind registry of an engine:
+ *
+ * - It is a subtype of `value`, and so of `expression` (`isValue()`). A
+ *   nominal type is otherwise opaque, not a subtype of its definition; this
+ *   is the same exception as the one that makes a declared object type a
+ *   subtype of `object` (`isObjectType()`).
+ * - It is disjoint from every type except `value`, `expression`, `any`,
+ *   `unknown` and itself (`provablyDisjointRules()`), as the `residue`
+ *   primitive is by its entry in the subtype table. This is what keeps the
+ *   number rules away from a value of the kind.
+ *
+ * An applied reference (`gf<7>`), a declaration with type parameters, an
+ * alias, and a nominal type defined as another nominal type (`type h =
+ * gf8`) do not qualify.
+ */
+export function valueKindDeclaration(type: Type): TypeReference | undefined {
+  if (typeof type !== 'object' || type.kind !== 'reference') return undefined;
+  if (type.args !== undefined) return undefined;
+  const decl = declarationOf(type);
+  if (decl.alias || decl.typeParams !== undefined) return undefined;
+  return decl.def === 'value' ? decl : undefined;
+}
+
+/**
+ * Whether the value kind declared by `kind` (a record returned by
+ * {@link valueKindDeclaration}) is provably disjoint from `other`, which is
+ * not itself a value kind of that form. See {@link valueKindDeclaration}.
+ */
+function valueKindDisjointFrom(kind: Type, other: Type): boolean {
+  if (typeof other === 'string')
+    return !(
+      other === 'value' ||
+      other === 'expression' ||
+      other === 'any' ||
+      other === 'unknown'
+    );
+  switch (other.kind) {
+    case 'union':
+      return other.types.every((t) => provablyDisjoint(kind, t));
+    case 'intersection':
+      return other.types.some((t) => provablyDisjoint(kind, t));
+    case 'negation':
+      return isSubtype(kind, other.type);
+    case 'broadcastable':
+      return (
+        provablyDisjoint(kind, other.elements) &&
+        provablyDisjoint(kind, broadcastCollectionArm(other.elements))
+      );
+    case 'reference': {
+      // Another reference: an alias is its definition, and a nominal type is
+      // disjoint from the kind when its definition is (every value of the
+      // nominal type has the shape of its definition).
+      const def = resolveTypeReference(other);
+      if (def === undefined) return false;
+      const frame = declarationOf(other);
+      if (!beginUnfold(frame)) return false;
+      try {
+        return provablyDisjoint(kind, def);
+      } finally {
+        endUnfold(frame);
+      }
+    }
+    case 'expression':
+    case 'symbol':
+      // A value of the kind is an expression (a call of its head), so an
+      // `expression<…>` or `symbol<…>` type is not provably disjoint from
+      // it: "may overlap" is the safe answer.
+      return false;
+    default:
+      // Numbers, ranges, literal values, collections, tuples, records,
+      // objects, functions, dictionaries: none holds a value of the kind.
+      return true;
+  }
 }
 
 function isFunction(type: Type): boolean {

@@ -114,12 +114,31 @@ import {
   typeElementCount,
   unfoldAliasOnDescent,
   widen,
+  kindArmNames,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
-  holdsResidueClassForCertain,
-  typeIsResidueForCertain,
+  holdsKindValue,
+  holdsKindValueForCertain,
+  kindTypesHeldBy,
+  typeIsKindForCertain,
 } from '../boxed-expression/residue-class.js';
+import {
+  arithmeticOf,
+  kindTypeNames,
+  kindTypesOfHead,
+} from '../boxed-expression/value-kinds.js';
+import {
+  certainKindTypesOf,
+  holdsKindCollection,
+  kindContractOf,
+  loweredKindType,
+  multiKindSymbols,
+  newKindLowering,
+  refusedRepresentationMessage,
+  type KindLowering,
+  type KindTypeContract,
+} from './kind-lowering.js';
 import {
   cannotHoldAList as typeCannotHoldAList,
   couldMatch,
@@ -3793,6 +3812,213 @@ export class BaseCompiler {
     }
   }
 
+  /**
+   * The kind lowering of the compilation in progress (`kind-lowering.ts`):
+   * set at the compile boundary when the expression holds a kind value and
+   * every kind type found has a representation on the target, `undefined`
+   * otherwise. Read by `compileKindOperation()`. Compilation is synchronous,
+   * so one static serves, like `_mode`; it is cleared when the outermost
+   * compilation ends.
+   */
+  private static _kindLowering: KindLowering | undefined;
+
+  /** The kind lowering of the most recent outermost compilation, kept after
+   * it ends for the target that builds the result (`kindLoweringReport()`). */
+  private static _lastKindLowering: KindLowering | undefined;
+
+  /**
+   * The kind types of the kind lowering of the most recent outermost
+   * compilation, with their contracts, or `undefined` when that compilation
+   * had no kind lowering. A kind type is listed when the expression holds a
+   * value of it or its result type names it (a bare symbol `g: gf8` is
+   * compiled with no hook, and its value is still a kind value), or when a
+   * hook of its contract emitted code. The JavaScript target reads it to
+   * build the result: the result of a kind lowering is returned raw, is not
+   * shippable unless every contract says so, and cannot be stored.
+   */
+  static kindLoweringReport():
+    | {
+        kinds: ReadonlyArray<string>;
+        contracts: ReadonlyArray<KindTypeContract>;
+      }
+    | undefined {
+    const lowering = BaseCompiler._lastKindLowering;
+    if (lowering === undefined) return undefined;
+    const kinds: string[] = [];
+    const contracts: KindTypeContract[] = [];
+    for (const [k, entry] of lowering.contracts) {
+      if (entry === undefined) continue;
+      kinds.push(k);
+      contracts.push(entry.contract);
+    }
+    return kinds.length === 0 ? undefined : { kinds, contracts };
+  }
+
+  /**
+   * The kind lowering of `expr`, which holds a kind value for certain, on
+   * `target`: every kind type that `expr` holds, or that its result type
+   * names, has a contract whose `lowered()` answers for the target. Throws
+   * for an expression that holds a collection of kind values, for the
+   * `interval-js` target, and for a representation that the runner would
+   * read as a number, a complex or a list. `undefined` when a kind type has
+   * no representation on the target (the caller declines with the general
+   * message).
+   */
+  private static kindLoweringOf(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): KindLowering | undefined {
+    const ce = expr.engine;
+    const kinds = new Set([
+      ...kindTypesHeldBy(expr),
+      ...kindArmNames(expr.type.type, kindTypeNames(ce)),
+    ]);
+    if (kinds.size === 0) return undefined;
+    const language = target.language ?? 'javascript';
+    const lowering = newKindLowering(ce, {
+      language,
+      typeOf: (x) => BaseCompiler.operandTypeInContext(x, target),
+    });
+    for (const k of kinds)
+      if (kindContractOf(lowering, k) === undefined) return undefined;
+    const names = [...kinds].map((t) => `'${t}'`).join(', ');
+    if (language.startsWith('interval'))
+      throw new Error(
+        `Could not compile an expression that holds a value of the kind ` +
+          `type ${names} to target '${language}': the run-time check of a ` +
+          `kind value given by the host is not available on this target.`
+      );
+    if (holdsKindCollection(expr))
+      throw new Error(
+        `Could not compile an expression that holds a collection of values ` +
+          `of the kind type ${names} to target '${language}': the compiled ` +
+          `representation of a value kind describes one value, not a ` +
+          `collection of them.`
+      );
+    const mixed = multiKindSymbols(expr)[0];
+    if (mixed !== undefined)
+      throw new Error(
+        `Could not compile an expression with the symbol "${mixed.name}" ` +
+          `of the type ${mixed.kinds.map((k) => `'${k}'`).join(' | ')} to ` +
+          `target '${language}': a binding of a union of kind types has no ` +
+          `run-time check, since the entry check of a binding reads the ` +
+          `contract of one kind type.`
+      );
+    for (const k of kinds) {
+      const message = refusedRepresentationMessage(
+        k,
+        kindContractOf(lowering, k)!.lowered,
+        language
+      );
+      if (message !== undefined) throw new Error(message);
+    }
+    return lowering;
+  }
+
+  /**
+   * The code of the function node `node` (operator `h`, operands `args`)
+   * through the kind contracts of the compilation (`_kindLowering`), or
+   * `undefined` when the node is compiled as usual:
+   *
+   * - a call of a kind head is a literal value of the head: its
+   *   `compile.value` gives the code, and a head without it declines;
+   * - a structural or control-flow operator (`If`, `Block`, `List`, `Tuple`,
+   *   `Assign`, `Hold`, …) and a call of a user function are compiled as
+   *   usual, and treat the representation of a kind value as an opaque
+   *   value;
+   * - an `Add` (a `Multiply`) with an operand that is a kind value for
+   *   certain is lowered by the `add` (`multiply`) of the kind type; any
+   *   other operator with such an operand by its `apply`. With operands of
+   *   two kind types, the types are asked in the order of their first
+   *   operand, and the first answer is the code.
+   *
+   * A hook that answers `undefined` (or an empty string) declines; when no
+   * kind type answers, the compilation declines. A kind type with no
+   * representation on the target declines too.
+   */
+  private static compileKindOperation(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    const lowering = BaseCompiler._kindLowering;
+    if (lowering === undefined || node === undefined || !isFunction(node))
+      return undefined;
+    const ce = node.engine;
+    const language = lowering.context.language;
+    const compile = (x: Expression): string =>
+      BaseCompiler.compileValueOperand(x, target);
+    const noLowering = (kind: string, what: string): Error =>
+      new Error(
+        `Could not compile ${what} to target '${language}': the kind type ` +
+          `'${kind}' has no compiled lowering for it.`
+      );
+
+    // A literal value of a kind head.
+    const def = node.operatorDefinition;
+    const headKinds = def !== undefined ? kindTypesOfHead(ce, def) : undefined;
+    if (def !== undefined && headKinds !== undefined) {
+      for (const k of headKinds)
+        if (kindContractOf(lowering, k) === undefined)
+          throw noLowering(k, `a value of \`${h}\``);
+      const value = arithmeticOf(ce, def)?.compile?.value;
+      const code = value?.(node, compile, lowering.context);
+      if (typeof code !== 'string' || code === '')
+        throw new Error(
+          `Could not compile a value of \`${h}\` to target '${language}': ` +
+            `the head has no \`compile.value\` for this target.`
+        );
+      return code;
+    }
+
+    if (
+      BaseCompiler.CONTROL_FLOW_HEADS.has(h) ||
+      BaseCompiler.KIND_OPAQUE_HEADS.has(h) ||
+      BaseCompiler.userFunctionLiteral(ce, h) !== undefined ||
+      multiClauseState(ce.lookupDefinition(h)) !== undefined
+    )
+      return undefined;
+
+    // The kind types of the operands, in the order of their first operand.
+    const kinds: string[] = [];
+    for (const x of args)
+      for (const k of certainKindTypesOf(x))
+        if (!kinds.includes(k)) kinds.push(k);
+    if (kinds.length === 0) return undefined;
+    for (const k of kinds)
+      if (kindContractOf(lowering, k) === undefined)
+        throw noLowering(k, `\`${h}\``);
+    for (const k of kinds) {
+      const { contract } = kindContractOf(lowering, k)!;
+      const code =
+        h === 'Add'
+          ? contract.add?.(args, compile, lowering.context)
+          : h === 'Multiply'
+            ? contract.multiply?.(args, compile, lowering.context)
+            : contract.apply?.(h, args, compile, lowering.context);
+      if (typeof code === 'string' && code !== '') return code;
+    }
+    throw new Error(
+      `Could not compile \`${h}\` with an operand of the kind type ` +
+        `${kinds.map((k) => `'${k}'`).join(', ')} to target '${language}': ` +
+        `the compiled lowering of the kind does not define it.`
+    );
+  }
+
+  /**
+   * The structural operators that `compileKindOperation()` leaves to their
+   * usual lowering, beside `CONTROL_FLOW_HEADS`: they hold or pass a kind
+   * value without computing with it, so the representation is an opaque
+   * value for them.
+   */
+  private static readonly KIND_OPAQUE_HEADS: ReadonlySet<string> = new Set([
+    'List',
+    'Tuple',
+    'Hold',
+    'Apply',
+  ]);
+
   static compile(
     expr: Expression | undefined,
     target: CompileTarget<Expression>,
@@ -3853,28 +4079,80 @@ export class BaseCompiler {
           `'${target.language ?? 'unknown'}': a reified type expression has ` +
           `no compiled representation.`
       );
-    // A residue class (an element of ℤ/nℤ, type `residue`) has no compiled
+    // A value of a VALUE KIND (a residue class, an element of ℤ/nℤ, type
+    // `residue`; a value of a kind registered by the host) has no compiled
     // representation either: the targets compute over numbers, and the
-    // arithmetic of a class is the arithmetic of its ring. The test is the
-    // engine's own (`containsResidueClass`): a `ResidueClass(…)` call, a call
-    // of a head declared `-> residue`, a symbol declared `residue` or holding
-    // a class, at any depth; or a result that is a class for certain. Read at
-    // the compile boundary once, so that a class in an operand position
-    // (`Equal(r, r)` with `r: residue`) is refused as a class in the result
-    // is. A result that MAY be a class (`number | residue`, the sum of a
-    // parameter typed from a signature that admits a class) is not refused:
-    // the compiled code computes the number it is given.
+    // arithmetic of a kind value is its own. The test is the engine's own
+    // STRICT recognition (`holdsKindValueForCertain`): a call of a kind head,
+    // a call of a head declared to return a kind type, a symbol declared
+    // with a kind type or holding a kind value, at any depth; or a result
+    // that is a kind value for certain. Read at the compile boundary once, so
+    // that a class in an operand position (`Equal(r, r)` with `r: residue`)
+    // is refused as a class in the result is. A result that MAY be a kind
+    // value (`number | residue`, the sum of a parameter typed from a
+    // signature that admits a class) is not refused: the compiled code
+    // computes the number it is given. The message names the kind types
+    // found.
+    //
+    // A kind type whose `compile.type` contract answers `lowered()` for the
+    // target HAS a representation there (`kind-lowering.ts`): the expression
+    // is then compiled, and `compileKindOperation()` lowers each operation
+    // with an operand of the kind through the contract. Two limits of phase 1
+    // of the design (`docs/plans/2026-10-26-value-kinds.md`, section 4.8)
+    // decline anyway: a COLLECTION of kind values (`entry` and `lowered()`
+    // describe one value), and the `interval-js` target (its runner has no
+    // entry check of a kind binding).
+    if (BaseCompiler._compileDepth === 0) {
+      BaseCompiler._kindLowering = undefined;
+      BaseCompiler._lastKindLowering = undefined;
+    }
     if (
       BaseCompiler._compileDepth === 0 &&
-      (typeIsResidueForCertain(expr.type.type) ||
-        holdsResidueClassForCertain(expr))
-    )
-      throw new Error(
-        `Could not compile an expression that holds a residue class (type ` +
-          `'residue') to target '${target.language ?? 'unknown'}': the ` +
-          `compiled targets compute over numbers, and a class of ℤ/nℤ has ` +
-          `no compiled representation.`
+      (typeIsKindForCertain(expr.type.type, expr.engine) ||
+        holdsKindValueForCertain(expr))
+    ) {
+      const lowering = BaseCompiler.kindLoweringOf(expr, target);
+      if (lowering !== undefined) {
+        BaseCompiler._kindLowering = lowering;
+        BaseCompiler._lastKindLowering = lowering;
+      }
+    }
+    if (
+      BaseCompiler._compileDepth === 0 &&
+      BaseCompiler._kindLowering === undefined &&
+      (typeIsKindForCertain(expr.type.type, expr.engine) ||
+        holdsKindValueForCertain(expr))
+    ) {
+      // The kinds whose values the expression holds, else the kinds of its
+      // result type. The held kinds are read first because they name the
+      // kinds more precisely: the result type of an arithmetic operator
+      // over kind values (`residueResultType()`) can be a union of the kind
+      // types of its operands, or a type that a `resultType` hook gives.
+      const held = kindTypesHeldBy(expr);
+      const kindTypes = new Set(
+        held.length > 0
+          ? held
+          : kindArmNames(expr.type.type, kindTypeNames(expr.engine))
       );
+      const target_ = target.language ?? 'unknown';
+      if (
+        kindTypes.size === 0 ||
+        (kindTypes.size === 1 && kindTypes.has('residue'))
+      )
+        throw new Error(
+          `Could not compile an expression that holds a residue class (type ` +
+            `'residue') to target '${target_}': the ` +
+            `compiled targets compute over numbers, and a class of ℤ/nℤ has ` +
+            `no compiled representation.`
+        );
+      const names = [...kindTypes].map((t) => `'${t}'`).join(', ');
+      throw new Error(
+        `Could not compile an expression that holds a value of the kind ` +
+          `type ${names} to target '${target_}': the compiled targets ` +
+          `compute over numbers, and the value kind has no compiled ` +
+          `representation.`
+      );
+    }
     if (
       isFunction(expr, 'Subtype') ||
       isFunction(expr, 'MatchesType') ||
@@ -4193,7 +4471,14 @@ export class BaseCompiler {
       // (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`) instead of lowering
       // structurally. Runs before the CSE walk so eliminated regions are
       // never inventoried. All the safety gates live in `tryConstantFold`.
-      if (isFunction(expr)) {
+      // A node that may hold a kind value is not folded under a kind
+      // lowering: the fold would evaluate it to a kind value, which has no
+      // literal of the target; its operations are lowered by the kind's
+      // contract instead (`compileKindOperation`).
+      if (
+        isFunction(expr) &&
+        !(BaseCompiler._kindLowering !== undefined && holdsKindValue(expr))
+      ) {
         const folded = BaseCompiler.tryConstantFold(expr, target, prec);
         if (folded !== undefined) {
           emitted = true;
@@ -4243,6 +4528,8 @@ export class BaseCompiler {
       if (isParent) BaseCompiler._compileParents.pop();
       BaseCompiler._compileDepth -= 1;
       BaseCompiler._callSiteTarget = prevCallSiteTarget;
+      if (BaseCompiler._compileDepth === 0)
+        BaseCompiler._kindLowering = undefined;
       // Leaving the OUTERMOST compilation: freeze its report for the target
       // to attach (`withReferences` → `modeReport`), before the latches are
       // restored.
@@ -5785,6 +6072,11 @@ export class BaseCompiler {
    * at an integer or a half-integer `u` has an exact zero part: `sin(πx)` at
    * `x = 2` is `0`, where `Math.sin(Math.PI * 2)` is `−2.4·10⁻¹⁶`, and
    * `e^{iπx}` at `x = 1` is `−1`, as in the interpreter for the exact `x`.
+   * A quotient `π·u / d` whose denominator has no `Pi` and is real is
+   * `π·(u / d)`: `sin(2πs/P)` at `s = 2`, `P = −2` is `0`, where
+   * `Math.sin(2π·2 / −2)` is `2.4·10⁻¹⁶`, which made a test `sin(…) > 0`
+   * true in the compiled code and false in the interpreter (Tycho's
+   * `exoplanet-transit` document, 2026-10-26).
    * Returns `undefined` for any other expression.
    */
   static piMultiple(x: Expression): Expression | undefined {
@@ -5792,6 +6084,13 @@ export class BaseCompiler {
     // `−π·u` is `π·(−u)`. A product with the factor `−1` canonicalizes to a
     // `Negate`, so `e^{−iπx}` reaches this function as `Negate(π·x)`.
     if (isFunction(x, 'Negate')) return BaseCompiler.piMultiple(x.op1)?.neg();
+    if (isFunction(x, 'Divide')) {
+      const d = x.op2;
+      if (d.symbols.includes('Pi') || BaseCompiler.isComplexValued(d))
+        return undefined;
+      const u = BaseCompiler.piMultiple(x.op1);
+      return u === undefined ? undefined : ce.function('Divide', [u, d]);
+    }
     if (isSymbol(x, 'Pi'))
       return BaseCompiler.isLibraryPi(x) ? ce.One : undefined;
     if (!isFunction(x, 'Multiply')) return undefined;
@@ -5817,8 +6116,17 @@ export class BaseCompiler {
    * `x = 1`, is exact. Returns `undefined` for any other expression.
    */
   static imaginaryPiMultiple(x: Expression): Expression | undefined {
-    if (!isFunction(x, 'Multiply')) return undefined;
     const ce = x.engine;
+    // A quotient `i·π·u / d` with a real denominator that has no `Pi` is
+    // `i·π·(u / d)`, as in `piMultiple`.
+    if (isFunction(x, 'Divide')) {
+      const d = x.op2;
+      if (d.symbols.includes('Pi') || BaseCompiler.isComplexValued(d))
+        return undefined;
+      const u = BaseCompiler.imaginaryPiMultiple(x.op1);
+      return u === undefined ? undefined : ce.function('Divide', [u, d]);
+    }
+    if (!isFunction(x, 'Multiply')) return undefined;
     let scale: Expression | undefined = undefined;
     const rest: Expression[] = [];
     for (const op of x.ops) {
@@ -12245,6 +12553,11 @@ export class BaseCompiler {
 
     BaseCompiler.assertCollectionOmissionSupported(h, args, node, target);
     BaseCompiler.assertNoProvedAbsentObjectOperand(engine, h, args);
+
+    // An operation with a value of a value kind, lowered by the kind's
+    // compile contract (`compileKindOperation`).
+    sub = BaseCompiler.compileKindOperation(h, args, target, node);
+    if (sub !== undefined) return sub;
 
     // A node whose TYPE is the value `true` or `false` — a comparison proven
     // by its operands' types (`Equal(a, a)` over a NaN-free `a`), a
@@ -42890,7 +43203,12 @@ export class BaseCompiler {
       const declared = valueDef !== undefined && !valueDef.inferredType;
       let lowered: string | undefined;
       try {
+        // A symbol of a kind type is read as the representation that the
+        // kind's compile contract gives (`compile.type.lowered()`).
         lowered =
+          loweredKindType(ce, symbol.type.type, {
+            language: target.language ?? 'javascript',
+          }) ??
           target.loweredSymbolType?.(symbol) ??
           BaseCompiler.defaultLoweredSymbolType(symbol, target.language);
       } catch (e) {

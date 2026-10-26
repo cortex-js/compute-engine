@@ -108,7 +108,8 @@ import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
 import { addArray } from './arithmetic-add.js';
-import { containsResidueClass, residueArithmetic } from './residue-class.js';
+import { holdsKindValue } from './residue-class.js';
+import { kindArithmetic } from './kind-dispatch.js';
 
 // Maximum number of decimal digits allowed in a *materialized* exact power
 // folded into a product's coefficient. Beyond this the factor is kept symbolic
@@ -1768,9 +1769,9 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // A quotient with a residue class is kept as it is: only the residue rules
   // of the evaluate handler know its ring. The rules below would read
   // `c/c` as 1 when `c` has no inverse, `c/0` as `~∞` and `c/∞` as 0 (see
-  // `containsResidueClass()`). A point divisor was rejected above, as for
+  // `holdsKindValue()`). A point divisor was rejected above, as for
   // any numerator. Division by an exact 1 is the same in every ring.
-  if (containsResidueClass(op1) || containsResidueClass(op2))
+  if (holdsKindValue(op1) || holdsKindValue(op2))
     return isLiteral(op2, 1) ? op1 : ce._fn('Divide', [op1, op2]);
 
   // An absent operand (`Missing` or `Undefined`) folds to `NaN` here, as a
@@ -2243,9 +2244,9 @@ export function div(num: Expression, denom: number | Expression): Expression {
     }
   }
 
-  // A residue class in the quotient: only the residue rules apply, after
-  // the point numerator above (`residueArithmetic()`).
-  const residue = residueArithmetic(ce, 'Divide', [
+  // A kind value in the quotient (a residue class): only the hooks of the
+  // kinds apply, after the point numerator above (`kindArithmetic()`).
+  const residue = kindArithmetic(ce, 'Divide', [
     num,
     typeof denom === 'number' ? ce.number(denom) : denom,
   ]);
@@ -2501,8 +2502,8 @@ export function canonicalMultiply(
   // A product with a residue class is only flattened and sorted: only the
   // residue rules of the evaluate handler know its ring. The folds below
   // would read `0·c` as the integer 0, `c·(1/c)` as 1 and `0.0·c` as `0.0`
-  // (see `containsResidueClass()`).
-  if (ops.some(containsResidueClass))
+  // (see `holdsKindValue()`).
+  if (ops.some(holdsKindValue))
     return ops.length === 1
       ? ops[0]
       : ce._fn('Multiply', sortProductOperands(ops));
@@ -3327,9 +3328,13 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   )
     return ce.NaN;
 
-  // A residue class among the factors: only the residue rules apply, after
-  // the broadcast over a collection above (`residueArithmetic()`).
-  const residue = residueArithmetic(ce, 'Multiply', xs);
+  // A kind value among the factors (a residue class): only the hooks of the
+  // kinds apply, after the broadcast over a collection above
+  // (`kindArithmetic()`). The factors that hold no kind value are multiplied
+  // by this function.
+  const residue = kindArithmetic(ce, 'Multiply', xs, (rest) =>
+    mulImpl(rest, expand)
+  );
   if (residue !== undefined) return residue;
 
   // A zero factor beside a factor that reads a variable with an assigned

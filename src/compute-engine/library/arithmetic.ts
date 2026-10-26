@@ -252,11 +252,19 @@ import {
   unfoldAliasOnDescent,
   widen,
   widenAll,
-  hasResidueArm,
-  withoutResidueArmDeep,
-  isUninhabitedWithoutResidue,
+  hasKindArm,
+  isKindArm,
+  withoutKindArmsDeep,
+  isUninhabitedWithoutKinds,
+  kindArmNames,
+  type KindTypeNames,
   type AliasDescent,
 } from '../../common/type/utils.js';
+import {
+  kindTypeHasHook,
+  kindTypeNames,
+} from '../boxed-expression/value-kinds.js';
+import { isKindValue } from '../boxed-expression/kind-compare.js';
 import {
   couldMatch,
   isEmptyType,
@@ -407,17 +415,17 @@ import {
 } from './quantity-arithmetic.js';
 import { usesExpressionArithmetic } from './units.js';
 import {
-  containsResidueClass,
+  holdsKindValue,
   residueResultType,
-  typeIsResidueForCertain,
+  typeIsKindForCertain,
   isResidueClass,
-  isResidueClassOperand,
-  residueArithmetic,
-  residueDivide,
-  residueFold,
-  residueNegate,
-  residuePower,
+  isKindOperand,
+  typeWithoutShape,
 } from '../boxed-expression/residue-class.js';
+import {
+  kindOperation,
+  kindSumOrProduct,
+} from '../boxed-expression/kind-dispatch.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
   foldMeasurementOperands,
@@ -4503,21 +4511,30 @@ function closeImaginaryPointComponents(t: Type): Type {
  * operator, or `context.derive`) over the operands with each class read as
  * an integer cell: a class scales a list or a point cell by cell, as a
  * number does.
+ *
+ * The cell type is read from the `resultType` hook of each kind type among
+ * the operands (`residueResultType()`, `docs/plans/2026-10-26-value-kinds.md`,
+ * section 4.5). `operator` is the operator the hooks are asked for: `'Add'`
+ * for `Subtract`, `'Power'` for `Sqrt` and `Root`, which give the type of
+ * their implied exponent in `operandTypes`.
  */
 function residueShapedResultType(
   ops: ReadonlyArray<OperandDescriptor>,
   engine: PureEngineView,
-  numericType: (ops: ReadonlyArray<OperandDescriptor>) => Type | undefined
+  numericType: (ops: ReadonlyArray<OperandDescriptor>) => Type | undefined,
+  operator: string,
+  operandTypes?: ReadonlyArray<Type>
 ): Type {
-  const cell = residueResultType(ops);
+  const cell = residueResultType(ops, engine, operator, operandTypes);
+  const kinds = kindTypeNames(engine);
   // The shape comes from the operator's own derivation over the operands
   // with each class read as an integer cell: `c · (1, 2)` is a tuple of
   // classes because `Multiply` scales a point, where `Add` of a scalar and
   // a point is an error.
   const placeholders = ops.map((x) =>
-    isResidueClassOperand(x, engine)
+    isKindOperand(x, engine)
       ? describeType(
-          hasResidueArm(x.type) ? residueAsInteger(x.type) : 'integer'
+          hasKindArm(x.type, kinds) ? kindAsInteger(x.type, kinds) : 'integer'
         )
       : x
   );
@@ -4531,48 +4548,53 @@ function residueShapedResultType(
   // `rational | residue`, not `integer | residue`).
   if (ops.some((x) => isCertainlyResidueClass(x, engine))) return shaped;
   const numeric = ops.map((x) =>
-    hasResidueArm(x.type) ? describeType(withoutResidueArmDeep(x.type)) : x
+    hasKindArm(x.type, kinds)
+      ? describeType(withoutKindArmsDeep(x.type, kinds))
+      : x
   );
   const alternative = numericType(numeric);
   return alternative === undefined ? shaped : widen(shaped, alternative);
 }
 
 /**
- * Whether the operand is a residue class for certain: its type is `residue`
- * (an absent or `NaN` arm beside it aside), or its structure holds a
- * `ResidueClass` call or a symbol whose value holds one
- * (`isResidueClassOperand` with a type that does not say `residue`).
+ * Whether the operand is a kind value (a residue class) for certain: its
+ * type is a kind type (an absent or `NaN` arm beside it aside), or its
+ * structure holds a call of a kind head or a symbol whose value holds one
+ * (`isKindOperand` with a type that does not name a kind type).
  */
 function isCertainlyResidueClass(
   d: OperandDescriptor,
   engine: PureEngineView
 ): boolean {
-  if (!hasResidueArm(d.type)) return isResidueClassOperand(d, engine);
-  // `residue`, `nan | residue`, `list<residue^2>`: nothing but classes.
-  return isUninhabitedWithoutResidue(stripMissingFromType(d.type));
+  const kinds = kindTypeNames(engine);
+  if (!hasKindArm(d.type, kinds)) return isKindOperand(d, engine);
+  // `residue`, `nan | residue`, `list<residue^2>`: nothing but kind values.
+  return isUninhabitedWithoutKinds(stripMissingFromType(d.type), kinds);
 }
 
-/** `t` with `residue` read as `integer` at every level (`list<residue^2>`
- * is `list<integer^2>`, `integer | residue` is `integer`): the operand of
- * the operator's own derivation, which gives the shape of the result. */
-function residueAsInteger(t: Type): Type {
-  if (t === 'residue') return 'integer';
+/** `t` with each kind type of `kinds` read as `integer` at every level
+ * (`list<residue^2>` is `list<integer^2>`, `integer | residue` is
+ * `integer`): the operand of the operator's own derivation, which gives the
+ * shape of the result. */
+function kindAsInteger(t: Type, kinds: KindTypeNames): Type {
+  if (isKindArm(t, kinds)) return 'integer';
   if (typeof t === 'string') return t;
+  const asInteger = (x: Type) => kindAsInteger(x, kinds);
   switch (t.kind) {
     case 'union':
-      return reduceType({ ...t, types: t.types.map(residueAsInteger) });
+      return reduceType({ ...t, types: t.types.map(asInteger) });
     case 'list':
     case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return { ...t, elements: residueAsInteger(t.elements) };
+      return { ...t, elements: asInteger(t.elements) };
     case 'tuple':
       return {
         ...t,
         elements: t.elements.map((e) => ({
           ...e,
-          type: residueAsInteger(e.type),
+          type: asInteger(e.type),
         })),
       };
     default:
@@ -4605,6 +4627,39 @@ function withResidueCells(shape: Type, cell: Type): Type {
   }
 }
 
+/**
+ * The type of the reduction `Sum(L)` (`operator` is `Add`) or `Product(L)`
+ * (`Multiply`) of a collection whose elements can be kind values (a list of
+ * residue classes): the type of `operator` applied to two elements, by the
+ * rules of the kinds (`residueShapedResultType()`,
+ * `docs/plans/2026-10-26-value-kinds.md`, section 4.5): `Sum([c1, c2])` is
+ * `residue`. A collection that is not provably non-empty can give the
+ * neutral element (`0`, `1`), so `integer` is joined in. `undefined` for any
+ * other operand: the big-operator rules apply.
+ */
+function kindReductionType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext,
+  operator: 'Add' | 'Multiply'
+): Type | undefined {
+  if (ops.length !== 1) return undefined;
+  const element = collectionElementType(ops[0].type);
+  if (
+    element === undefined ||
+    !hasKindArm(element, kindTypeNames(context.engine))
+  )
+    return undefined;
+  const t = context.derive(operator, [
+    describeType(element),
+    describeType(element),
+  ]);
+  if (t === undefined) return undefined;
+  const n = ops[0].facts.shape?.[0];
+  return n !== undefined && n > 0
+    ? t
+    : reduceType({ kind: 'union', types: [t, 'integer'] });
+}
+
 /** The type handler of `Add`, also used by `Subtract`
  * (`subtractTypeHandler`). */
 function addTypeHandler(
@@ -4612,9 +4667,12 @@ function addTypeHandler(
   context: TypeHandlerContext
 ): BoxedType | undefined {
   return BoxedType.forResult(
-    ops.some((x) => isResidueClassOperand(x, context.engine))
-      ? residueShapedResultType(ops, context.engine, (o) =>
-          addTypeOnTypes(o, context.engine)
+    ops.some((x) => isKindOperand(x, context.engine))
+      ? residueShapedResultType(
+          ops,
+          context.engine,
+          (o) => addTypeOnTypes(o, context.engine),
+          'Add'
         )
       : signedInfinitySum(
           ops,
@@ -4643,10 +4701,13 @@ function subtractTypeHandler(
   context: TypeHandlerContext
 ): BoxedType | undefined {
   if (ops.length < 2) return undefined;
-  if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+  if (ops.some((x) => isKindOperand(x, context.engine)))
     return BoxedType.forResult(
-      residueShapedResultType(ops, context.engine, (o) =>
-        context.derive('Subtract', o)
+      residueShapedResultType(
+        ops,
+        context.engine,
+        (o) => context.derive('Subtract', o),
+        'Add'
       ),
       context.engine._typeResolver
     );
@@ -7057,8 +7118,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
-      signature:
-        '(complex | infinity | residue, (complex | infinity | residue)+) -> number',
+      signature: '(complex | infinity, (complex | infinity)+) -> number',
       examples: ['[6 / 4, x / 2]'],
       nanBehavior: 'propagate',
       type: (ops, context) => {
@@ -7079,10 +7139,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const [num, den] = ops;
         // A quotient that holds a residue class is not a number: it is a
         // class, or it stays unevaluated (see the `evaluate` handler).
-        if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+        if (ops.some((x) => isKindOperand(x, context.engine)))
           return BoxedType.forResult(
-            residueShapedResultType(ops, context.engine, (o) =>
-              context.derive('Divide', o)
+            residueShapedResultType(
+              ops,
+              context.engine,
+              (o) => context.derive('Divide', o),
+              'Divide'
             ),
             context.engine._typeResolver
           );
@@ -7463,7 +7526,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([num, den], { numericApproximation, engine, expression }) => {
         // Non-lazy operator: operands arrive already evaluated by the
         // driver (`_computeValue` step 4) — do not re-evaluate them.
-        const nonNumeric = nonNumericOperandError(engine!, [num, den]);
+        const nonNumeric = nonNumericOperandError(
+          engine!,
+          [num, den],
+          'Divide'
+        );
         if (nonNumeric !== undefined) return nonNumeric;
         // A tuple with a list coordinate is data, not a point: arithmetic
         // over it is an error (see `listCoordinateTupleOperandError`).
@@ -7471,21 +7538,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (listTuple !== undefined) return listTuple;
         const evalNum = num;
         const evalDen = den;
-        // A quotient with a residue class is a class, or it stays
-        // unevaluated: the generic division below reads `c/c` as 1 even
-        // when the class `c` has no inverse. A class is exact, so under
-        // `.N()` a pure operand is read from its exact value.
-        if (containsResidueClass(evalNum) || containsResidueClass(evalDen)) {
-          const originals =
-            numericApproximation && expression && isFunction(expression)
-              ? expression.ops
-              : undefined;
-          const exact =
-            originals?.length === 2
-              ? exactOperands(originals, [evalNum, evalDen], true)
-              : [evalNum, evalDen];
-          return residueDivide(engine!, exact[0], exact[1]);
-        }
+        // A quotient with a kind value (a residue class) is the answer of
+        // the `divide` hook of the first kind among the operands that
+        // answers, or it stays unevaluated: the generic division below reads
+        // `c/c` as 1 even when the class `c` has no inverse. Under `.N()` a
+        // hook reads the exact value of an operand through `exact()`.
+        if (holdsKindValue(evalNum) || holdsKindValue(evalDen))
+          return kindOperation(
+            engine!,
+            'divide',
+            [evalNum, evalDen],
+            writtenOperands(expression, 2),
+            numericApproximation === true
+          );
         if (
           evalNum.operator === 'Quantity' ||
           evalDen.operator === 'Quantity'
@@ -9668,14 +9733,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The canonical form is the one `makeNumericFunction` (`box.ts`) also
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Multiply'),
-      signature: '((number | residue)*) -> number',
+      signature: '(number*) -> number',
       examples: ['2 * x * 3 * x'],
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
-        if (ops.some((x) => isResidueClassOperand(x, engine)))
+        if (ops.some((x) => isKindOperand(x, engine)))
           return BoxedType.forResult(
-            residueShapedResultType(ops, engine, (o) => derive('Multiply', o)),
+            residueShapedResultType(
+              ops,
+              engine,
+              (o) => derive('Multiply', o),
+              'Multiply'
+            ),
             engine._typeResolver
           );
         if (ops.length === 1)
@@ -10780,7 +10850,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // enforcement seam is being bypassed, the folded literal types more
       // sharply than the unfolded node, and the folded value is exactly
       // what the gate would answer.
-      signature: '(complex | infinity | residue) -> number',
+      signature: '(complex | infinity) -> number',
       examples: ['-(x - 1)'],
       nanBehavior: 'propagate',
       partiality: 'total',
@@ -10796,39 +10866,56 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (`withoutNonArithmeticArms`): a negation never yields one.
       type: ([x], context) =>
         BoxedType.forResult(
-          negateNumericType(
-            resolveShapedTypeAlias(withoutNonArithmeticArms(x).type)
-          ),
+          // The negation of a kind value: the cell type from the
+          // `resultType` hook of its kind type (`residueShapedResultType()`).
+          isKindOperand(x, context.engine)
+            ? residueShapedResultType(
+                [x],
+                context.engine,
+                ([y]) =>
+                  negateNumericType(
+                    resolveShapedTypeAlias(withoutNonArithmeticArms(y).type)
+                  ),
+                'Negate'
+              )
+            : negateNumericType(
+                resolveShapedTypeAlias(withoutNonArithmeticArms(x).type)
+              ),
           context.engine._typeResolver
         ),
       sgn: ([x]) => oppositeSgn(x.sgn),
       // The canonical form is the one `makeNumericFunction` (`box.ts`) also
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Negate'),
-      evaluate: ([x], { numericApproximation, engine }) => {
+      evaluate: ([x], { numericApproximation, engine, expression }) => {
         // Non-lazy: `x` is already evaluated by the driver.
-        const nonNumeric = nonNumericOperandError(engine!, [x]);
+        const nonNumeric = nonNumericOperandError(engine!, [x], 'Negate');
         if (nonNumeric !== undefined) return nonNumeric;
         // A tuple with a list coordinate is data, not a point: arithmetic
         // over it is an error (see `listCoordinateTupleOperandError`).
         const listTuple = listCoordinateTupleOperandError(engine!, [x]);
         if (listTuple !== undefined) return listTuple;
         const evalX = x;
-        if (isResidueClass(evalX)) return residueNegate(engine, evalX);
-        // The negation of a sum or product that holds a class is distributed
-        // by `neg()`, then its classes are folded: `-(x + c)` is `-x - c`,
-        // and `-c` is the class `-c` (`residueFold()` reads it so).
-        if (containsResidueClass(evalX)) {
+        // The negation of a kind value (a residue class) is the answer of
+        // the `negate` hook of its kind, or it stays unevaluated.
+        if (holdsKindValue(evalX)) {
+          const negated = kindOperation(
+            engine,
+            'negate',
+            [evalX],
+            writtenOperands(expression, 1),
+            numericApproximation === true
+          );
+          if (negated !== undefined) return negated;
+          // The negation of a sum or product that holds a kind value is
+          // distributed by `neg()`, then evaluated, so that each negated
+          // kind value goes to the `negate` hook of its kind and the terms
+          // go to the `add` hooks: `-(x + c)` is `-x + (-c)`, with `-c` the
+          // class `-c`.
           const r = evalX.neg();
           if (isFunction(r, 'Add') || isFunction(r, 'Multiply'))
-            return (
-              residueArithmetic(
-                engine,
-                r.operator as 'Add' | 'Multiply',
-                r.ops
-              ) ?? r
-            );
-          return r;
+            return numericApproximation ? r.N() : r.evaluate();
+          return isFunction(r, 'Negate') && r.op1 === evalX ? undefined : r;
         }
         if (isQuantity(evalX)) {
           // A symbolic magnitude has no numeric value (its `.re` is `NaN`),
@@ -10989,8 +11076,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // discipline relies on it (`resultIsComplexValued`,
       // javascript-target.ts), and the per-call sharpness lives in the
       // type handler below.
-      signature:
-        '(complex | infinity | residue, complex | signed_infinity | residue) -> number',
+      signature: '(complex | infinity, complex | signed_infinity) -> number',
       examples: ['[2^10, 2^(1/2), x^2 * x^3]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -11001,10 +11087,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             const [base, exp] = ops;
             // A power that holds a residue class, in its base or in its
             // exponent, is not a number.
-            if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+            if (ops.some((x) => isKindOperand(x, context.engine)))
               return BoxedType.forResult(
-                residueShapedResultType(ops, context.engine, (o) =>
-                  context.derive('Power', o)
+                residueShapedResultType(
+                  ops,
+                  context.engine,
+                  (o) => context.derive('Power', o),
+                  'Power'
                 ),
                 context.engine._typeResolver
               );
@@ -11396,7 +11485,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // 2026-07-19 symbolic-recursion re-walk). Only LAZY operators
           // (`Add`, `Multiply`, `Sum`, …) receive raw operands and own their
           // evaluation.
-          const nonNumeric = nonNumericOperandError(engine!, [x, n]);
+          const nonNumeric = nonNumericOperandError(engine!, [x, n], 'Power');
           if (nonNumeric !== undefined) return nonNumeric;
           // A tuple with a list coordinate is data, not a point: arithmetic
           // over it is an error (see `listCoordinateTupleOperandError`).
@@ -11423,24 +11512,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           )
             return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
           const evalBase = x;
-          // A power of a residue class is a class, or it stays unevaluated (a
+          // A power with a kind value (a residue class), in its base or in
+          // its exponent, is the answer of the `power` hook of the first kind
+          // among the operands that answers, or it stays unevaluated (a
           // negative power of a class with no inverse, a call that is not a
-          // class yet, a base with a class inside it): the generic power reads
-          // `c^0` as 1 and `(1/c)^{-1}` as `c`.
-          if (containsResidueClass(evalBase)) {
-            // A class is exact: under `.N()`, a pure exponent is read from its
-            // exact value, not its approximation (`10^{20}` is not an exact
-            // integer as a float). See the same rule in `Divide`.
-            const original =
-              numericApproximation && expression && isFunction(expression)
-                ? expression.ops[1]
-                : undefined;
-            const exponent =
-              original !== undefined
-                ? exactOperands([original], [n], true)[0]
-                : n;
-            return residuePower(engine!, evalBase, exponent);
-          }
+          // class yet, a base with a class inside it): the generic power
+          // reads `c^0` as 1 and `(1/c)^{-1}` as `c`. Under `.N()` a hook
+          // reads the exact value of an operand through `exact()` (`10^{20}`
+          // is not an exact integer as a float).
+          if (holdsKindValue(evalBase) || holdsKindValue(n))
+            return kindOperation(
+              engine!,
+              'power',
+              [evalBase, n],
+              writtenOperands(expression, 2),
+              numericApproximation === true
+            );
           if (evalBase.operator === 'Quantity') {
             const r = quantityPower(engine!, evalBase, n);
             // An exact or Measurement magnitude is made numeric under `.N()`.
@@ -11654,8 +11741,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `complex`, so the policy derived from the signature would be
       // `reject`). The values are folded by `root()` (arithmetic-power.ts),
       // which delegates the non-finite cases to `pow`.
-      signature:
-        '(complex | infinity | residue, complex | infinity | residue) -> number',
+      signature: '(complex | infinity, complex | infinity) -> number',
       examples: ['[Root(8, 3), N(Root(2, 3))]'],
       nanBehavior: 'propagate',
       requires: ([, n]) => {
@@ -11666,12 +11752,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A root that holds a residue class, in its radicand or in its
         // index, is not a number (it stays unevaluated).
         if (
-          isResidueClassOperand(base, context.engine) ||
-          isResidueClassOperand(exp, context.engine)
+          isKindOperand(base, context.engine) ||
+          isKindOperand(exp, context.engine)
         )
           return BoxedType.forResult(
-            residueShapedResultType([base, exp], context.engine, (o) =>
-              context.derive('Root', o)
+            residueShapedResultType(
+              [base, exp],
+              context.engine,
+              (o) => context.derive('Root', o),
+              'Power',
+              // The exponent of the `power` hook is `1/n`.
+              [
+                typeWithoutShape(base.type),
+                isSubtype(exp.type, 'integer') ? 'rational' : 'number',
+              ]
             ),
             context.engine._typeResolver
           );
@@ -11759,9 +11853,31 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: guardDigitsN(
         ([x, n], { numericApproximation, engine, expression }) => {
           // Non-lazy: operands are already evaluated by the driver.
-          const nonNumeric = nonNumericOperandError(engine, [x, n]);
+          const nonNumeric = nonNumericOperandError(engine, [x, n], 'Root');
           if (nonNumeric !== undefined) return nonNumeric;
           const evalX = x;
+          // A root with a kind value (a residue class) is the answer of the
+          // `power` hook of its kind with the exponent `1/n`, or it stays
+          // unevaluated.
+          if (holdsKindValue(evalX) || holdsKindValue(n)) {
+            const writtenIndex = operandOf(expression, 1);
+            const exponent = engine.function('Divide', [engine.One, n]);
+            return kindOperation(
+              engine,
+              'power',
+              [
+                evalX,
+                numericApproximation ? exponent.N() : exponent.evaluate(),
+              ],
+              [
+                operandOf(expression, 0),
+                writtenIndex === undefined
+                  ? undefined
+                  : engine.function('Divide', [engine.One, writtenIndex]),
+              ],
+              numericApproximation === true
+            );
+          }
           if (evalX.operator === 'Quantity') {
             const nVal = n.re;
             if (nVal !== undefined && nVal !== 0) {
@@ -12223,17 +12339,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // live in `BoxedNumber.sqrt()`, which both routes call. The result
       // needs the `infinity` arm because `√(−∞)` and `√(~oo)` are `~oo`,
       // which the signed pair excludes.
-      signature: '(complex | infinity | residue) -> complex | infinity',
+      signature: '(complex | infinity) -> complex | infinity',
       examples: ['[Sqrt(8), Sqrt(-4), N(Sqrt(2))]'],
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
       type: ([x], context) => {
         // A root of a residue class is not a number (it stays unevaluated).
-        if (isResidueClassOperand(x, context.engine))
+        if (isKindOperand(x, context.engine))
           return BoxedType.forResult(
-            residueShapedResultType([x], context.engine, (o) =>
-              context.derive('Sqrt', o)
+            residueShapedResultType(
+              [x],
+              context.engine,
+              (o) => context.derive('Sqrt', o),
+              'Power',
+              // The exponent of the `power` hook is `1/2`.
+              [typeWithoutShape(x.type), 'rational']
             ),
             context.engine._typeResolver
           );
@@ -12347,9 +12468,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: guardDigitsN(
         ([x], { numericApproximation, engine, expression }) => {
           // Non-lazy: `x` is already evaluated by the driver.
-          const nonNumeric = nonNumericOperandError(engine, [x]);
+          const nonNumeric = nonNumericOperandError(engine, [x], 'Sqrt');
           if (nonNumeric !== undefined) return nonNumeric;
           const evalX = x;
+          // A square root of a kind value (a residue class) is the answer of
+          // the `power` hook of its kind with the exponent `1/2`, or it stays
+          // unevaluated.
+          if (holdsKindValue(evalX))
+            return kindOperation(
+              engine,
+              'power',
+              [evalX, engine.Half],
+              [operandOf(expression, 0), engine.Half],
+              numericApproximation === true
+            );
           if (evalX.operator === 'Quantity') {
             // The exact one half, not the float 0.5: the root of an exact
             // magnitude stays exact under `evaluate()`.
@@ -12416,7 +12548,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Square(±∞) = +∞`, and `Square(~oo) = ~oo` (a positive power of
       // `~oo` is `~oo` in every direction of approach). A precise carrier
       // declared here would be a claim nothing consults.
-      signature: '(number | residue) -> number',
+      signature: '(number) -> number',
       examples: ['[Square(3), Square(x + 1)]'],
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
@@ -12458,11 +12590,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastExemptions: ['tuples', 'collection-result'],
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
-      signature: '((number | residue)+) -> number',
+      signature: '(number+) -> number',
       examples: ['5 - 3 - x'],
       type: subtractTypeHandler,
       canonical: (args, { engine }) => {
-        args = checkNumericArgs(engine, args, { residue: true });
+        args = checkNumericArgs(engine, args, { kindHook: 'add' });
         if (args.length === 0) return engine.error('missing');
         // Unary `Subtract(x)` folds to `x` through `canonicalAdd`, erasing
         // the operator before the arithmetic evaluate guard can examine the
@@ -13231,7 +13363,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult(
           // A residue class has no order: the call is an error
           // (`residueExtremumError`).
-          residueExtremumError(ops) ?? extremumTypeOnTypes(ops, 'max'),
+          residueExtremumError(ops, context.engine) ??
+            kindExtremumType(ops, context.engine, (o) =>
+              extremumTypeOnTypes(o, 'max')
+            ) ??
+            extremumTypeOnTypes(ops, 'max'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {
@@ -13269,7 +13405,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
-          residueExtremumError(ops) ?? extremumTypeOnTypes(ops, 'min'),
+          residueExtremumError(ops, context.engine) ??
+            kindExtremumType(ops, context.engine, (o) =>
+              extremumTypeOnTypes(o, 'min')
+            ) ??
+            extremumTypeOnTypes(ops, 'min'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {
@@ -13367,7 +13507,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumRangeTypeOnTypes('clamp', ops) ??
+          // A value of a kind with `compare` is ordered by its hook, and the
+          // result is the operand or a bound as written
+          // (`kindExtremumType()`).
+          kindExtremumType(
+            ops,
+            context.engine,
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+          ) ??
+            extremumRangeTypeOnTypes('clamp', ops) ??
             elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
@@ -13587,7 +13735,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['Product(k, (k, 1, 5))', 'Product(1 - 1/k^2, (k, 2, 10))'],
       type: (ops, context) =>
         BoxedType.forResult(
-          bigOpResultTypeOnTypes(ops, 'Product'),
+          kindReductionType(ops, context, 'Multiply') ??
+            bigOpResultTypeOnTypes(ops, 'Product'),
           context.engine._typeResolver
         ),
 
@@ -13954,7 +14103,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['Sum(k^2, (k, 1, 10))', 'Sum(1/k^2, (k, 1, oo))'],
       type: (ops, context) =>
         BoxedType.forResult(
-          bigOpResultTypeOnTypes(ops, 'Sum'),
+          kindReductionType(ops, context, 'Add') ??
+            bigOpResultTypeOnTypes(ops, 'Sum'),
           context.engine._typeResolver
         ),
 
@@ -15502,8 +15652,19 @@ function processMinMaxItem(
   // `value`-typed operand turned out to hold, is an `incompatible-type`
   // error, as a dictionary is. (A call with an operand typed `residue` is
   // typed `error` when it is boxed, `residueExtremumError`.)
-  if (isResidueClass(item) || typeIsResidueForCertain(item.type.type))
-    return [ce.typeError('number', item.type, item), []];
+  //
+  // A value of a kind whose kind type declares `compare` (a measurement
+  // declared by a user) is a datum, ordered by the hook (`exactOrder()`,
+  // `kindCompare()`), and the chosen operand is returned as it is. An operand
+  // typed with such a kind that is not a value (a symbol with no value)
+  // stays in the unevaluated result.
+  if (isResidueClass(item) || typeIsKindForCertain(item.type.type, ce)) {
+    if (!kindTypesHaveCompare(ce, item.type.type))
+      return [ce.typeError('number', item.type, item), []];
+    if (isKindValue(item)) return [item, []];
+    // A collection of such values is walked below, element by element.
+    if (item.isCollection !== true) return [undefined, [item]];
+  }
 
   // An interval is continuous
   if (isFunction(item, 'Interval')) {
@@ -15998,8 +16159,16 @@ function extremumOrder(
 ): boolean | undefined {
   const order = exactOrder(candidate, current, { tieWithinTolerance: true });
   if (order === undefined) return undefined;
+  // A tie with a kind value keeps the first operand: the kind value is not
+  // replaced by a number literal of the same order (`Max(U, 2)` for a
+  // measurement `U` with the nominal 2 is `U`).
   if (order === 0)
-    return preferLiteralOnTie && isNumber(candidate) && !isNumber(current);
+    return (
+      preferLiteralOnTie &&
+      isNumber(candidate) &&
+      !isNumber(current) &&
+      !isKindValue(current)
+    );
   return upper ? order > 0 : order < 0;
 }
 
@@ -16121,12 +16290,77 @@ function linspaceHasInexactSample(list: Expression): boolean {
  * `value`-typed symbol) is refused when the call is evaluated only.
  */
 function residueExtremumError(
-  ops: ReadonlyArray<OperandDescriptor>
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView
 ): Type | undefined {
   // The strict reading: an operand typed `integer | residue` may be a
   // number, and the call is typed as if it were one; a class among its
   // values is refused when the call is evaluated (`processMinMaxItem`).
-  return ops.some((x) => typeIsResidueForCertain(x.type)) ? 'error' : undefined;
+  // A kind type that declares `compare` (any registered head of the type)
+  // has an order: its values are data of the extremum
+  // (`kindExtremumType()`).
+  return ops.some(
+    (x) =>
+      typeIsKindForCertain(x.type, engine) &&
+      !kindTypesHaveCompare(engine, x.type)
+  )
+    ? 'error'
+    : undefined;
+}
+
+/**
+ * True when every kind type that `t` has as an arm, at any level, declares
+ * `compare` (a registered head of the type declares it, the reading per
+ * type of `docs/plans/2026-10-26-value-kinds.md`, section 4.5), and `t` has
+ * at least one kind arm.
+ */
+function kindTypesHaveCompare(engine: PureEngineView, t: Type): boolean {
+  const names = kindArmNames(t, kindTypeNames(engine));
+  return (
+    names.length > 0 &&
+    names.every((n) => kindTypeHasHook(engine as ComputeEngine, n, 'compare'))
+  );
+}
+
+/**
+ * The type of `Max`, `Min` or `Clamp` when an operand has an arm of a kind
+ * type that declares `compare` (`docs/plans/2026-10-26-value-kinds.md`,
+ * section 4.5): the result is one of the operands as it is, so its type is
+ * the union of the kind arms of the operands (of their elements, for a
+ * collection operand) and of `ordinary`, the type of the operator over the
+ * operands without their kind arms. `Max(U, 3)` for a measurement `U` is
+ * `integer | umeasurement`; `Max(U1, U2)` is `umeasurement`. An operand
+ * that holds kind values only (`umeasurement`, `list<umeasurement>`) takes
+ * no part in `ordinary`. `undefined` when no operand has such a kind arm:
+ * the ordinary rules apply.
+ */
+function kindExtremumType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  ordinary: (ops: ReadonlyArray<OperandDescriptor>) => Type
+): Type | undefined {
+  const kinds = kindTypeNames(engine);
+  const arms: string[] = [];
+  for (const d of ops)
+    for (const name of kindArmNames(d.type, kinds))
+      if (
+        !arms.includes(name) &&
+        kindTypeHasHook(engine as ComputeEngine, name, 'compare')
+      )
+        arms.push(name);
+  if (arms.length === 0) return undefined;
+  const free = ops
+    .filter(
+      (d) => !isUninhabitedWithoutKinds(stripMissingFromType(d.type), kinds)
+    )
+    .map((d) =>
+      hasKindArm(d.type, kinds)
+        ? describeType(withoutKindArmsDeep(d.type, kinds))
+        : d
+    );
+  const types: Type[] = arms.map((name) => engine.type(name).type);
+  if (free.length > 0) types.unshift(ordinary(free));
+  return types.length === 1 ? types[0] : reduceType({ kind: 'union', types });
 }
 
 function evaluateMinMax(
@@ -16417,63 +16651,16 @@ function divideFromExactValues(
 }
 
 /**
- * The value of a sum or a product when one of its evaluated operands
- * `evaluated` contains a residue class. `ops` are the operands before the
- * evaluation.
- *
- * Only the residue rules fold: the classes of one ring among the operands,
- * and the exact integer or rational literals that read in that ring, become
- * one class (`residueFold()`). Every other operand is kept as it is, beside
- * the class, and the result is built with no other fold: no like terms are
- * combined, no reciprocals cancel, and a zero, a float or an infinity does
- * not absorb the class.
- *
- * - `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`.
- * - `ResidueClass(1, 5) + ResidueClass(2, 5) + x` is
- *   `x + ResidueClass(3, 5)`.
- * - `ResidueClass(2, 5) + ∞` and `ResidueClass(2, 4) + ResidueClass(1, 6)`
- *   stay sums.
- * - `d·x - d·x` stays a sum: the generic sum would make it the integer 0.
- * - An operand that is `NaN` or `Indeterminate` decides the result, by the
- *   rule of `nanOperandAnswer()`: `Indeterminate + c` is `Indeterminate`,
- *   and under `.N()` the result is `NaN`.
- *
- * A class is exact, so under `.N()` the class is computed from the exact
- * values of the operands: `ResidueClass(5, 7) + 1/3` is `ResidueClass(3, 7)`
- * and not a sum with the float `0.333…`. A pure operand is evaluated again
- * without the numeric approximation. An impure operand (a `Random()` draw,
- * an assignment) keeps its value from `evaluated`, so that it runs once. The
- * operands that are not folded keep their numeric value: `(c·π).N()` is
- * `3.14159…·c`.
- */
-function residueOperands(
-  ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>,
-  evaluated: ReadonlyArray<Expression>,
-  numericApproximation: boolean | undefined,
-  operator: 'Add' | 'Multiply'
-): Expression {
-  if (evaluated.some((x) => isNumber(x) && x.isNaN))
-    return numericApproximation ? ce.NaN : nanOperandAnswer(ce, evaluated);
-  const exact = exactOperands(ops, evaluated, numericApproximation);
-  const fold = residueFold(ce, exact, operator === 'Add' ? 'add' : 'multiply');
-  if (fold === undefined) return ce.function(operator, evaluated);
-  if (fold.rest.length === 0) return fold.value;
-  return ce.function(operator, [
-    fold.value,
-    ...fold.rest.map((i) => evaluated[i]),
-  ]);
-}
-
-/**
- * The exact values of the operands `ops` of an operation with a residue
- * class, when `evaluated` holds their values under `.N()`. A class is exact,
- * so the residue rules read the exact value of an operand (`1/3`, not
- * `0.333…`). An operand is evaluated again only when that cannot run a side
- * effect twice (`isTransitivelyPure()`: a symbol whose value is an impure
- * call is not evaluated again); otherwise its value from `evaluated` is
- * kept, and a float does not read as a class. Without a numeric
- * approximation, `evaluated` already holds the exact values.
+ * The exact values of the operands `ops` of a sum or a product with a kind
+ * value and a collection operand, when `evaluated` holds their values under
+ * `.N()`. A kind whose values are exact (a residue class) reads the exact
+ * value of an operand (`1/3`, not `0.333…`). An operand is evaluated again
+ * only when that cannot run a side effect twice (`isTransitivelyPure()`: a
+ * symbol whose value is an impure call is not evaluated again); otherwise
+ * its value from `evaluated` is kept, and a float does not read as a class.
+ * Without a numeric approximation, `evaluated` already holds the exact
+ * values. The hooks of the kinds read the same rule through `exact(i)`
+ * (`kind-dispatch.ts`).
  */
 function exactOperands(
   ops: ReadonlyArray<Expression>,
@@ -16482,9 +16669,7 @@ function exactOperands(
 ): ReadonlyArray<Expression> {
   if (!numericApproximation) return evaluated;
   return ops.map((op, i) =>
-    evaluated[i].operator !== 'ResidueClass' && isTransitivelyPure(op)
-      ? op.evaluate()
-      : evaluated[i]
+    isTransitivelyPure(op) ? op.evaluate() : evaluated[i]
   );
 }
 
@@ -16570,6 +16755,20 @@ function rescueExactCoefficients(
   }
 }
 
+/** The operands of `expression` before their evaluation, when it is a
+ * function expression with `count` operands: the written forms that the hooks
+ * of the value kinds read (`kindOperation()`). */
+function writtenOperands(
+  expression: Expression | undefined,
+  count: number
+): ReadonlyArray<Expression> | undefined {
+  return expression !== undefined &&
+    isFunction(expression) &&
+    expression.nops === count
+    ? expression.ops
+    : undefined;
+}
+
 /** The operand `i` of `expression` before its evaluation, if any. */
 function operandOf(
   expression: Expression | undefined,
@@ -16609,6 +16808,61 @@ function floorModFloat(a: Expression, b: Expression): Expression | undefined {
 }
 
 /**
+ * The value of a sum (`operator` is `Add`) or a product (`Multiply`) when
+ * one of its evaluated operands `evaluated` holds a kind value (a residue
+ * class, a value of a kind that a library user declared). `ops` are the
+ * operands before the evaluation.
+ *
+ * The hooks of the kinds fold (`kindSumOrProduct()`, `kind-dispatch.ts`),
+ * and the operands that hold no kind value are summed (multiplied) by the
+ * ordinary fold of this handler, as one sub-sum: `x + x + ResidueClass(1,
+ * 5)` is `2x + ResidueClass(1, 5)`, and `(√2 + π + ResidueClass(1, 5)).N()`
+ * adds the two floats. The operands that hold a kind value are placed
+ * beside the sub-sum with no other fold: no like terms are combined with
+ * them, no reciprocal cancels against them, and a zero, a float or an
+ * infinity does not absorb them.
+ *
+ * - `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`.
+ * - `ResidueClass(2, 5) + ∞` and `ResidueClass(2, 4) + ResidueClass(1, 6)`
+ *   stay sums.
+ * - An operand that is `NaN` or `Indeterminate` decides the result, by the
+ *   rule of `nanOperandAnswer()`: `Indeterminate + c` is `Indeterminate`,
+ *   and under `.N()` the result is `NaN`.
+ *
+ * Under `.N()` a hook reads the exact value of an operand through
+ * `exact(i)` and returns its own numeric form: the result of a hook is not
+ * numericized again here.
+ */
+function kindEvaluatedOperands(
+  operator: 'Add' | 'Multiply',
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  options: Pick<EvaluateHandlerOptions, 'numericApproximation' | 'engine'>
+): Expression {
+  const ce = options.engine!;
+  const numericApproximation = options.numericApproximation === true;
+  if (evaluated.some((x) => isNumber(x) && x.isNaN))
+    return numericApproximation ? ce.NaN : nanOperandAnswer(ce, evaluated);
+  return kindSumOrProduct(
+    ce,
+    operator,
+    evaluated,
+    ops,
+    numericApproximation,
+    (written, values) =>
+      (operator === 'Add'
+        ? addEvaluatedOperands(written, values, {
+            numericApproximation,
+            engine: ce,
+          })
+        : mulEvaluatedOperands(written, values, {
+            numericApproximation,
+            engine: ce,
+          })) ?? ce.function(operator, values)
+  );
+}
+
+/**
  * The value of `Add(...ops)` from the values `evaluated` of its operands (one
  * value per operand, in order). `Add` is lazy: the handler evaluates the
  * operands itself, synchronously in `evaluate` and with `evaluateAsync` in
@@ -16635,7 +16889,7 @@ function addEvaluatedOperands(
     numericApproximation
   );
   if (rethreaded !== undefined) return rethreaded;
-  const nonNumeric = nonNumericOperandError(engine!, evaluated);
+  const nonNumeric = nonNumericOperandError(engine!, evaluated, 'Add');
   if (nonNumeric !== undefined) return nonNumeric;
   // A tuple with a list coordinate is data, not a point: arithmetic
   // over it is an error (see `listCoordinateTupleOperandError`).
@@ -16682,25 +16936,25 @@ function addEvaluatedOperands(
     if (hasAbsentScalarOperand(evaluated))
       return absentArithmeticMarker(engine!, expression, ops, evaluated);
   }
-  // A sum with a residue class is folded by the residue rules only.
-  // The generic sum below does not know the ring of the class. A
-  // collection operand is first broadcast by the generic sum, and each
-  // element sum then comes back here: `ResidueClass(1, 5) + [1, 2]` is
-  // `[ResidueClass(2, 5), ResidueClass(3, 5)]`.
-  if (evaluated.some(containsResidueClass)) {
+  // A sum with a kind value (a residue class) is folded by the hooks of
+  // the kinds (`kindSumOrProduct()`): the generic sum below does not know
+  // their arithmetic. The operands that hold no kind value are summed by
+  // this function, as one sub-sum. A collection operand is first broadcast
+  // by the generic sum, and each element sum then comes back here:
+  // `ResidueClass(1, 5) + [1, 2]` is `[ResidueClass(2, 5), ResidueClass(3,
+  // 5)]`. The name-based `Quantity` and `Measurement` branches below run
+  // only when no operand holds a kind value.
+  if (evaluated.some(holdsKindValue)) {
     // The broadcast is the exact `add()`, also under `.N()`: the
     // numeric route does not evaluate the elements it builds.
     if (evaluated.some((x) => x.isCollection)) {
       const r = addArray(exactOperands(ops, evaluated, numericApproximation));
       return numericApproximation ? r.N() : r;
     }
-    return residueOperands(
-      engine!,
-      ops,
-      evaluated,
+    return kindEvaluatedOperands('Add', ops, evaluated, {
       numericApproximation,
-      'Add'
-    );
+      engine,
+    });
   }
   if (evaluated.some((x) => x.operator === 'Quantity')) {
     const r = quantityAdd(engine!, evaluated, ops);
@@ -16869,7 +17123,7 @@ function mulEvaluatedOperands(
     numericApproximation
   );
   if (rethreaded !== undefined) return rethreaded;
-  const nonNumeric = nonNumericOperandError(engine!, evaluated);
+  const nonNumeric = nonNumericOperandError(engine!, evaluated, 'Multiply');
   if (nonNumeric !== undefined) return nonNumeric;
   // A tuple with a list coordinate is data, not a point: arithmetic
   // over it is an error (see `listCoordinateTupleOperandError`).
@@ -16901,21 +17155,18 @@ function mulEvaluatedOperands(
     if (hasAbsentScalarOperand(evaluated))
       return absentArithmeticMarker(engine!, expression, ops, evaluated);
   }
-  // A product with a residue class: see the matching comment in `Add`.
-  if (evaluated.some(containsResidueClass)) {
+  // A product with a kind value: see the matching comment in `Add`.
+  if (evaluated.some(holdsKindValue)) {
     if (evaluated.some((x) => x.isCollection)) {
       const r = mulFactoredArray(
         exactOperands(ops, evaluated, numericApproximation)
       );
       return numericApproximation ? r.N() : r;
     }
-    return residueOperands(
-      engine!,
-      ops,
-      evaluated,
+    return kindEvaluatedOperands('Multiply', ops, evaluated, {
       numericApproximation,
-      'Multiply'
-    );
+      engine,
+    });
   }
   if (evaluated.some((x) => x.operator === 'Quantity')) {
     const r = quantityMultiply(engine!, evaluated);

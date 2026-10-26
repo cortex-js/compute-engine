@@ -223,6 +223,11 @@ import {
   assignFn as assignFnImpl,
   undeclare as undeclareImpl,
 } from './engine-declarations.js';
+import type { KindRegistryState } from './types-definitions.js';
+import {
+  createKindRegistry,
+  kindRegistryRollbackPoint,
+} from './boxed-expression/value-kinds.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
 import { markFunctionLiteralParameter } from './boxed-expression/function-literal.js';
 import {
@@ -643,6 +648,17 @@ export class ComputeEngine implements IComputeEngine {
   readonly _protocolRegistry: Record<string, ProtocolRecord> =
     Object.create(null);
 
+  /** The engine-level KIND registry: the value kinds declared by the
+   * `arithmetic` field of operator definitions. Read and written through
+   * `boxed-expression/value-kinds.ts` only.
+   * @internal */
+  readonly _kindRegistry: KindRegistryState = createKindRegistry();
+
+  /** See `IComputeEngine._kindRegistryRollbackPoint`. @internal */
+  _kindRegistryRollbackPoint(): () => void {
+    return kindRegistryRollbackPoint(this);
+  }
+
   /** Backing store for {@link _conformanceVersion}. */
   private _conformanceVersionCounter = 0;
 
@@ -718,6 +734,10 @@ export class ComputeEngine implements IComputeEngine {
         // `type-redefinition`. See
         // `docs/TYPE-SYSTEM.md`.
         declOrigin: r._declOrigin,
+        // Whether the declaration minted a constructor: read by the kind
+        // registration (`boxed-expression/value-kinds.ts`), so a rolled-back
+        // declaration must not leave it behind.
+        minted: r._minted,
       };
     });
     return () => {
@@ -787,6 +807,9 @@ export class ComputeEngine implements IComputeEngine {
         // the same reason.)
         if (s.declOrigin === undefined) delete r._declOrigin;
         else r._declOrigin = s.declOrigin;
+        if (r._minted !== s.minted) changed = true;
+        if (s.minted === undefined) delete r._minted;
+        else r._minted = s.minted;
         // A record that vanished from the table but is still captured by a
         // pre-pass-built type keeps its restored fields — same contract as a
         // statement replacement rollback.
@@ -1074,6 +1097,13 @@ export class ComputeEngine implements IComputeEngine {
     options?: {
       alias?: boolean;
       fromStatement?: boolean;
+      /** Whether the declaration also declares a value-level constructor
+       * of the same name (`point(1, 2)` for `type point = tuple<…>`). Default
+       * `true`. A VALUE KIND uses `false`: its type is a nominal type defined
+       * as exactly `value` (`ce.declareType('gf8', 'value', { mint: false })`),
+       * and its values are made by the head that declares its arithmetic
+       * (`GF8(3)`), so a second constructor with no arithmetic must not
+       * exist. See the `arithmetic` field of `OperatorDefinition`. */
       mint?: boolean;
       /** A generic type ALIAS's parameter clause
        * (`{ alias: true, typeParams: ['T'] }`): the body is then parsed with

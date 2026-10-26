@@ -79,6 +79,7 @@ import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { kindIs } from './kind-compare.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -972,6 +973,12 @@ export abstract class _BoxedExpression implements Expression {
     // Fast path: exact structural/value check
     if (this.isSame(other)) return true;
 
+    // A value of a value kind: `Equal` decides when the kind type declares
+    // `compare`, `isSame` otherwise (`kindIs()`). The tolerance does not
+    // apply: the `compare` hook has its own.
+    const kindAnswer = kindIs(this, other);
+    if (kindAnswer !== undefined) return kindAnswer;
+
     // Try expansion — catches equivalences like (x+1)^2 vs x^2+2x+1
     // even when the expression has free variables (where the numeric
     // fallback below would bail out).
@@ -1059,14 +1066,11 @@ export abstract class _BoxedExpression implements Expression {
       if (other.freeVariables.length > 0) return false;
       const nThis = this.N();
       const nOther = other.N();
-      // A value that is not a number (a residue class) has no tolerance:
-      // the two values are the same or they are not.
-      // `ResidueClass(1, 5) + 1` is `ResidueClass(2, 5)`.
-      if (
-        nThis.operator === 'ResidueClass' &&
-        nOther.operator === 'ResidueClass'
-      )
-        return nThis.isSame(nOther);
+      // A kind value that only the evaluation made: `ResidueClass(1, 5) + 1`
+      // is `ResidueClass(2, 5)`, `GF8(1) + GF8(2)` is `GF8(3)`. The
+      // tolerance does not apply (`kindIs()`).
+      const evaluatedKindAnswer = kindIs(nThis, nOther);
+      if (evaluatedKindAnswer !== undefined) return evaluatedKindAnswer;
       if (!isNumber(nThis) || !isNumber(nOther)) return false;
       const tol = tolerance ?? this.engine.tolerance;
       return (

@@ -746,6 +746,16 @@ export type TypeReference = {
    * DECLARATION, like {@link _sumOf}: never part of a type's structure,
    * serialization or comparison. */
   _declOrigin?: DeclarationOrigin;
+
+  /** Whether the declaration of this record asked for a value-level
+   * constructor of the same name (the `mint` option of `declareType()`,
+   * `true` by default). `false` only for a declaration made with
+   * `{ mint: false }`, the form a value kind needs: a kind has its own head
+   * as constructor, and a minted one would be a second head of the kind type
+   * with no arithmetic. Absent on a record that no declaration completed (a
+   * forward reference). Metadata about the DECLARATION, like
+   * {@link _declOrigin}. */
+  _minted?: boolean;
 };
 
 /**

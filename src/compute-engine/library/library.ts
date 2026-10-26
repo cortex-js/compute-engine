@@ -37,6 +37,10 @@ import type {
   Expression,
 } from '../global-types.js';
 import { _BoxedOperatorDefinition } from '../boxed-expression/boxed-operator-definition.js';
+import {
+  commitKindRegistration,
+  prepareKindRegistration,
+} from '../boxed-expression/value-kinds.js';
 
 /**
  * A unit symbol (`m`, `J`, `K`, …) for the `Quantity` value of a physical
@@ -442,9 +446,25 @@ export function setSymbolDefinitions(
               )}\n`
             );
 
-          bindings.set(name, {
-            operator: new _BoxedOperatorDefinition(engine, name, entry),
-          });
+          const operator = new _BoxedOperatorDefinition(engine, name, entry);
+          // A library value kind (the `arithmetic` field): checked before the
+          // binding is installed, so a refused definition is reported and
+          // skipped like any other. A library registration does not open the
+          // per-engine gates of its kind type (an engine that never makes a
+          // value of the kind pays nothing for it).
+          const kind =
+            operator.arithmetic === undefined
+              ? undefined
+              : prepareKindRegistration(
+                  engine,
+                  name,
+                  operator.signature.type,
+                  operator.arithmetic,
+                  { library: true }
+                );
+          bindings.set(name, { operator });
+          if (kind !== undefined)
+            commitKindRegistration(engine, operator, kind);
         } catch (e) {
           console.error(
             [

@@ -13,6 +13,7 @@ import type {
   Expression,
   ExpressionInput,
   OperatorCompileHandler,
+  OperatorCompileContext,
 } from './types-expression.js';
 import type {
   EvaluateOptions as KernelEvaluateOptions,
@@ -1188,6 +1189,28 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     collection?: CollectionHandlers;
 
     /**
+     * Declares that the values this operator constructs are a VALUE KIND:
+     * values with their own arithmetic (a residue class, a measurement, an
+     * element of a finite field). See {@link ArithmeticDefinition}.
+     *
+     * The result type of every arm of the signature must be a KIND TYPE: a
+     * kind primitive (`residue`), or a nominal type whose definition is
+     * exactly `value`, declared with
+     * `ce.declareType(name, 'value', { mint: false })`. The marker arms
+     * `nan`, `missing`, `nothing` and `error` may be added. Any other result
+     * type (a number type, `boolean`, `string`, a collection, `value`,
+     * `any`, `expression`, a nominal type with another definition) is
+     * refused when the operator is declared. A definition that gives `add`
+     * must also give `negate`.
+     *
+     * The fields `admittedAs`, `resultType` and `compile.type` belong to the
+     * kind TYPE, not to this operator: the operators of one kind type that
+     * are declared at the same time must give equal values for them (or
+     * leave them out).
+     */
+    arithmetic?: ArithmeticDefinition;
+
+    /**
      * For an operator that RETURNS a collection but has no `collection`
      * handlers (an EAGER producer — `Characters`, `Divisors`, `Eigenvalues`,
      * …): can `evaluate()` produce the collection's elements in the current
@@ -1802,6 +1825,311 @@ export interface IndexedCollectionHandlers {
  */
 export type CollectionHandlers = BaseCollectionHandlers &
   Partial<IndexedCollectionHandlers>;
+
+/**
+ * The context passed to the hooks of an {@link ArithmeticDefinition}.
+ *
+ * @category Definitions
+ */
+export interface ArithmeticContext {
+  readonly engine: ComputeEngine;
+  /** `true` under `.N()`. The hook numericizes its own result: a kind whose
+   * values are exact (a residue class) computes the exact value anyway; a
+   * kind whose values carry a float (a measurement, an interval) returns the
+   * numeric form. The caller does not apply `.N()` to the result. */
+  readonly numericApproximation: boolean;
+}
+
+/**
+ * The operands of an `add`, `multiply` or `apply` hook of an
+ * {@link ArithmeticDefinition}.
+ *
+ * @category Definitions
+ */
+export interface KindOperands {
+  /** The evaluated operands. */
+  readonly evaluated: ReadonlyArray<Expression>;
+  /** The operands as they were written before evaluation, aligned with
+   * `evaluated`. `undefined` for a value that an earlier fold made, which
+   * has no written form. A kind whose rule depends on how a term was
+   * written reads it here (a temperature with an offset reads `Negate(b)` in
+   * `a - b`). */
+  readonly written: ReadonlyArray<Expression | undefined>;
+  /** The exact value of operand `i`: `evaluated[i]` outside `.N()`. Under
+   * `.N()`, the operand evaluated again without the numeric approximation
+   * when it is transitively pure (evaluating it again cannot repeat a side
+   * effect), else `evaluated[i]`. The result is memoized. */
+  exact(i: number): Expression;
+  /** At an operator whose parameter is a collection type, the elements of
+   * collection operand `i`, enumerated once by the engine. `undefined` for an
+   * operand that is not a collection, or that was not enumerated (a
+   * collection larger than `engine.maxCollectionSize`, of unknown or
+   * infinite count, or whose element type cannot hold a value of a kind). */
+  elements(i: number): ReadonlyArray<Expression> | undefined;
+}
+
+/**
+ * One operand of a `negate`, `divide`, `power` or `compare` hook of an
+ * {@link ArithmeticDefinition}. The fields have the meaning of the fields of
+ * {@link KindOperands} with the same name.
+ *
+ * @category Definitions
+ */
+export type KindOperand = {
+  readonly evaluated: Expression;
+  readonly written: Expression | undefined;
+  exact(): Expression;
+};
+
+/**
+ * The result of an `add` or `multiply` hook of an
+ * {@link ArithmeticDefinition}: the operands that the hook combined, by their
+ * index in `ops.evaluated`, and the value they make.
+ *
+ * @category Definitions
+ */
+export interface KindFold {
+  readonly value: Expression;
+  readonly operands: ReadonlyArray<number>;
+}
+
+/**
+ * The compiled form of a value kind (the `compile` field of an
+ * {@link ArithmeticDefinition}).
+ *
+ * The hooks branch on `context.language`, like the `compile` handler of an
+ * operator definition. `undefined` from a hook declines: the compilation
+ * then fails with a diagnostic that names the kind type.
+ *
+ * @category Compiling
+ */
+export interface ArithmeticCompile {
+  /** The representation of the kind TYPE and its operations. It belongs to
+   * the kind type, not to one operator: the operators of one kind type that
+   * are declared at the same time must give the same object (or none, and
+   * then they use the one another operator gave). */
+  type?: {
+    /** The target representation of a free symbol of the kind's type, as
+     * `freeSymbolTypes[].lowered` reports it, or `undefined` when the
+     * target has none (the compilation then declines). */
+    lowered(context: OperatorCompileContext): string | undefined;
+    /** A sum with an operand of the kind. A number operand beside a kind
+     * value is the hook's to promote. */
+    add?(
+      args: ReadonlyArray<Expression>,
+      compile: (expr: Expression) => string,
+      context: OperatorCompileContext
+    ): string | undefined;
+    /** A product with an operand of the kind. */
+    multiply?(
+      args: ReadonlyArray<Expression>,
+      compile: (expr: Expression) => string,
+      context: OperatorCompileContext
+    ): string | undefined;
+    /** The other arithmetic operators, the comparisons, and the other
+     * operators with an operand of the kind. Not the structural and
+     * control-flow operators (`If`, `Block`, `List`, `Tuple`, `Assign`,
+     * `Hold`, a call of a user function): they treat the representation as
+     * an opaque value. */
+    apply?(
+      operator: string,
+      args: ReadonlyArray<Expression>,
+      compile: (expr: Expression) => string,
+      context: OperatorCompileContext
+    ): string | undefined;
+    /** The check, at run time, of a host value passed for a free symbol of
+     * the kind's type. */
+    entry(value: unknown, context: OperatorCompileContext): boolean;
+    /** Whether code from this lowering may be sent to a worker as text.
+     * Default `false`. A compilation result is shippable only when every
+     * kind contract it uses says `true` and lists no `hostNames`, and no
+     * input of the code is a value of a kind (its `entry` check is a
+     * function of the host, which a worker does not have). */
+    shippable?: boolean;
+    /** The helpers of the host that the code of this lowering calls. A worker
+     * has no way to receive them, so a non-empty list makes the result not
+     * shippable, whatever `shippable` says. */
+    hostNames?: ReadonlyArray<string>;
+  };
+  /** The source of a literal value of THIS operator, in the representation of
+   * the kind type. An operator without it declines a literal of its own. */
+  value?(
+    value: Expression,
+    compile: (expr: Expression) => string,
+    context: OperatorCompileContext
+  ): string | undefined;
+}
+
+/**
+ * The arithmetic of a VALUE KIND, given by the `arithmetic` field of the
+ * operator definition of the head that constructs its values.
+ *
+ * The fields marked PER TYPE belong to the kind type (the result type of the
+ * head), because a symbol of that type has no head to ask: `admittedAs`,
+ * `resultType` and `compile.type`. The other fields belong to the head.
+ *
+ * Rules for a hook:
+ * - The operands of `add` and `multiply` arrive in canonical order, and
+ *   `multiply` must commute.
+ * - A hook may build and evaluate expressions through the engine, including
+ *   expressions with values of another kind. A hook never calls
+ *   `.simplify()`.
+ * - A hook that throws propagates the error, as an `evaluate` handler does.
+ * - A fold that names an operand index out of range or twice is an error in
+ *   the definition of the kind and throws.
+ *
+ * @category Definitions
+ */
+export interface ArithmeticDefinition {
+  /** PER TYPE. Where a value of this kind is admitted beyond the arithmetic
+   * operators and the parameters that name its type or admit `value`.
+   * Default `'none'`. */
+  admittedAs?: 'none' | 'real' | 'number';
+
+  /**
+   * The sum of the operands of which at least one is a value of this kind.
+   * `ops` are the evaluated operands. A fold names the operands it combined,
+   * by their index in `ops.evaluated`, and the value they make. A hook may
+   * return several folds and must not name an operand twice. A fold may name
+   * an operand of another kind only to absorb it into its own value. A
+   * fold's `value` may be a value of another kind or a plain number.
+   * `undefined`, or an empty list, folds nothing.
+   */
+  add?(
+    ops: KindOperands,
+    context: ArithmeticContext
+  ): ReadonlyArray<KindFold> | undefined;
+
+  /** The product of the operands of which at least one is a value of this
+   * kind. The contract is the one of `add`. */
+  multiply?(
+    ops: KindOperands,
+    context: ArithmeticContext
+  ): ReadonlyArray<KindFold> | undefined;
+
+  /** `-x`. `undefined` declines. */
+  negate?(x: KindOperand, context: ArithmeticContext): Expression | undefined;
+
+  /** `a / b`, at least one operand of this kind. `undefined` declines. */
+  divide?(
+    a: KindOperand,
+    b: KindOperand,
+    context: ArithmeticContext
+  ): Expression | undefined;
+
+  /** `base ^ exponent`, at least one operand of this kind. `Sqrt(x)` calls it
+   * with the exponent `1/2`, `Root(x, n)` with `1/n`, `Square(x)` with `2`.
+   * `undefined` declines. */
+  power?(
+    base: KindOperand,
+    exponent: KindOperand,
+    context: ArithmeticContext
+  ): Expression | undefined;
+
+  /**
+   * The order of two values of which at least one is of this kind, for the
+   * comparison operators, `Max`, `Min`, `Sort`, `Clamp` and the comparison
+   * methods: `-1`, `0`, `1`, or `undefined` when the two are not comparable.
+   * A kind without `compare` has no order.
+   */
+  compare?(
+    a: KindOperand,
+    b: KindOperand,
+    context: ArithmeticContext
+  ): -1 | 0 | 1 | undefined;
+
+  /**
+   * Called in place of the `evaluate` handler of `operator` when at least one
+   * operand is a value of this kind that the operator admitted only because
+   * of `admittedAs`. `undefined` leaves the expression unevaluated.
+   */
+  apply?(
+    operator: string,
+    ops: KindOperands,
+    context: ArithmeticContext
+  ): Expression | undefined;
+
+  /**
+   * PER TYPE. The static result type of a cell of `operator` with an operand
+   * of this kind's type, from the operand types without their shapes, or
+   * `undefined` for the default. `operator` is the dispatched operator:
+   * `'Add'` for a sum or a difference, `'Power'` for `Sqrt`, `Root` and
+   * `Square`, with the type of the implied exponent among `operandTypes`.
+   * A type string is parsed in the engine (`'number | uq'`).
+   */
+  resultType?(
+    operator: string,
+    operandTypes: ReadonlyArray<Type>
+  ): Type | TypeString | undefined;
+
+  /** The compiled form of the kind. Absent: every target declines an
+   * expression that holds a value of the kind. */
+  compile?: ArithmeticCompile;
+}
+
+/**
+ * The record of one kind type in the kind registry of an engine
+ * (`boxed-expression/value-kinds.ts`): the fields that belong to the type,
+ * and the heads that declare a kind with this type as their result.
+ *
+ * @internal
+ */
+export interface KindTypeRecord {
+  /** The admission of the type. A head that gave no `admittedAs` counts as
+   * `'none'`. */
+  admittedAs: 'none' | 'real' | 'number';
+  /** The `resultType` hook of the type, or `undefined` when no head gave
+   * one. */
+  resultType: ArithmeticDefinition['resultType'];
+  /** The `compile.type` contract of the type, or `undefined` when no head
+   * gave one. */
+  compileType: ArithmeticCompile['type'];
+  /** The heads that declare a kind of this type and are still registered
+   * (the LIVE heads). A head stays registered after its scope is popped,
+   * because values bound to it can still exist. */
+  heads: Set<BoxedOperatorDefinition>;
+  /** True when the type was first registered by a library definition while
+   * the engine was being constructed. A head declared later cannot give
+   * such a type a `resultType` or a `compile.type` that its library heads
+   * left out. */
+  library: boolean;
+}
+
+/**
+ * The kind registry of an engine (`boxed-expression/value-kinds.ts`). One
+ * per engine, held by `IComputeEngine._kindRegistry`.
+ *
+ * @internal
+ */
+export interface KindRegistryState {
+  /** The TYPE part: kind type name to its record. */
+  types: Map<string, KindTypeRecord>;
+  /** The DISPATCH part: a bound operator definition to its arithmetic and
+   * to the kind types of its result. Keyed by the definition object, not by
+   * the name of the head, so an expression keeps the hooks of the definition
+   * it was bound to. */
+  dispatch: Map<
+    BoxedOperatorDefinition,
+    {
+      arithmetic: ArithmeticDefinition;
+      kindTypes: ReadonlyArray<string>;
+      /** The name of the head, for an expression that is not bound to a
+       * definition and has only its name. */
+      name: string;
+    }
+  >;
+  /** Incremented by every registration, replacement, removal and checkpoint
+   * restore. A cache of a recognition result stores the generation it was
+   * computed under. */
+  generation: number;
+  /** The kind types for which the engine has constructed a value. */
+  withValues: Set<string>;
+  /** The kind types for which a symbol of the engine was given a value. */
+  withAssignedValues: Set<string>;
+  /** The kind types with which a symbol or a callable of the engine was
+   * declared. */
+  withDeclarations: Set<string>;
+}
 
 /**
  *
@@ -3132,6 +3460,11 @@ export interface BoxedOperatorDefinition
   derivative?: OperatorDerivative;
 
   compile?: OperatorCompileHandler;
+
+  /** The arithmetic of the value kind this operator constructs, as given by
+   * the `arithmetic` field of its definition. See
+   * {@link ArithmeticDefinition}. */
+  arithmetic?: ArithmeticDefinition;
 
   /** @internal */
   _update(def: OperatorDefinition): void;

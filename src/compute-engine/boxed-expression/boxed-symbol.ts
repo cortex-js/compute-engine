@@ -1,6 +1,6 @@
 import { isDeclaredLocal } from './declared-local.js';
 import { isScratchBinding } from '../scratch-scopes.js';
-import { noteResidueDeclaration } from './residue-class.js';
+import { noteKindTypeDeclaration } from './residue-class.js';
 import type {
   MathJsonExpression,
   MathJsonSymbol,
@@ -98,6 +98,7 @@ import {
   isNumber,
   isSymbol,
 } from './type-guards.js';
+import { isKindValue } from './kind-compare.js';
 import { realExponentValue } from './imaginary-part.js';
 import {
   memoDepsStillValid,
@@ -465,6 +466,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // (`π` is `180 deg`): the quantity makes the comparison, with the exact
     // value of a constant such as `π`, as `.is()` is symmetric.
     if (other instanceof _BoxedExpression && other.operator === 'Quantity')
+      return other.is(this, tolerance);
+    // A value of a value kind makes the comparison, as `.is()` is
+    // symmetric: it follows the value of this symbol.
+    if (other instanceof _BoxedExpression && isKindValue(other))
       return other.is(this, tolerance);
 
     // The structural check never follows the binding, so if we have a bound
@@ -1476,11 +1481,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         `The type of the wildcard "${this._id}" cannot be changed`
       );
 
-    // A type that can hold a residue class (`r.type = 'residue'`) lets an
-    // expression of the engine hold a class: the engine joins the set that
-    // enables the test for classes, as a declaration does
+    // A type that can hold a value of a value kind (`r.type = 'residue'`,
+    // a function type that returns `gf8`) lets an expression of the engine
+    // hold such a value: the engine opens the gates of the kind type that
+    // enable the recognition of its values, as a declaration does
     // (`engine-declarations.ts`, `residue-class.ts`).
-    noteResidueDeclaration(this.engine, this.engine.type(t).type);
+    noteKindTypeDeclaration(this.engine, this.engine.type(t).type);
 
     // Clear assumptions about this symbol.
     //

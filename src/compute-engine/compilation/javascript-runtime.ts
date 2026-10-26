@@ -7388,6 +7388,7 @@ export type EntryPlan =
       complex: string[];
       lists: string[];
       strings: Map<string, string>;
+      kinds?: Map<string, KindEntry>;
     }
   | {
       kind: 'args';
@@ -7395,7 +7396,28 @@ export type EntryPlan =
       complex: number[];
       lists: number[];
       strings: Map<number, string>;
+      kinds?: Map<number, KindEntry>;
     };
+
+/**
+ * The entry check of a binding of a VALUE KIND type (`gf8`, a type declared
+ * by the host with a compile contract): the binding is not read as a number
+ * or a collection, and the value given for it must pass `check`, the `entry`
+ * of the kind's contract (`ArithmeticCompile`). `label` names the binding and
+ * its type in the error. A stored plan cannot carry `check`, which is a
+ * function of the host: a plan with such a binding is not stored, and a
+ * runtime refuses to load code compiled with one (`restoreEntryPlan`).
+ */
+export type KindEntry = {
+  label: string;
+  check: (value: unknown) => boolean;
+};
+
+function kindEntryError(label: string): TypeError {
+  return new TypeError(
+    `${label} is compiled as a value of its kind type, and the value given for it is not one: the entry check of the kind refused it.`
+  );
+}
 
 /**
  * Throw when the binding `key` is in `strings`, the bindings of an entry plan
@@ -7506,6 +7528,11 @@ export function checkEntry(
     // complex value still throws: reading `3 + 4i` as a number would be
     // silently wrong, while reading `~oo` as `Infinity` is the documented
     // float encoding of it.
+    // A binding of a kind type is checked by the kind's own `entry`, and by
+    // no other rule.
+    if (plan.kinds !== undefined)
+      for (const [id, k] of plan.kinds)
+        if (!k.check(v[id])) throw kindEntryError(k.label);
     for (const id of plan.real) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
@@ -7534,6 +7561,9 @@ export function checkEntry(
     return lifted === undefined ? argumentsList : [lifted];
   }
   let lifted: unknown[] | undefined;
+  if (plan.kinds !== undefined)
+    for (const [i, k] of plan.kinds)
+      if (!k.check(argumentsList[i])) throw kindEntryError(k.label);
   // The positional-parameter route makes the same `~oo` projection as the
   // free-symbol route above.
   for (const i of plan.real) {
@@ -7573,10 +7603,22 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
     complex: [...plan.complex],
     lists: [...plan.lists],
     strings: [...plan.strings],
+    // The bindings of a kind type, by name only: their check is a function
+    // of the host, which stored data cannot carry.
+    ...(plan.kinds !== undefined && plan.kinds.size > 0
+      ? { kinds: [...plan.kinds.keys()] }
+      : {}),
   };
 }
 
 function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
+  // A binding of a kind type is checked by a function of the host that
+  // compiled the code (`KindEntry`), which stored code does not carry: code
+  // that needs that check is not run without it.
+  if (stored.kinds !== undefined && stored.kinds.length > 0)
+    throw new Error(
+      `The stored code reads a value of a value kind (${stored.kinds.map((k) => `"${k}"`).join(', ')}), whose entry check is a function of the host that compiled it: it cannot be loaded. Run it with the \`run()\` of the compilation result.`
+    );
   return {
     kind: stored.kind,
     real: [...stored.real],
@@ -7751,6 +7793,11 @@ export type StoredJavaScript = {
   batch?: StoredBatchBody;
   /** Required by `load()`. */
   runtimeVersion?: string;
+  /** The `valueKinds` field of the compilation result: the value kind types
+   * whose compiled representation the code reads or makes. `load()` and
+   * the batch loaders refuse such code, whatever its `shippable` field
+   * (`refuseStoredValueKinds`). */
+  valueKinds?: string[];
   /** The `shippable` field of the compilation result. `loadBroadcastAsync()`
    * sends a batch to a worker only when it is `true`: without it, every
    * batch runs on the calling thread (`reason: 'not-shippable'`). */
@@ -7905,6 +7952,7 @@ export function createSysRuntime(
     },
     load: {
       value: (stored: StoredJavaScript): ((...args: unknown[]) => unknown) => {
+        refuseStoredValueKinds(stored, false);
         if (stored.runtimeVersion === undefined)
           throw new Error(
             'The stored code has no runtimeVersion: it cannot be matched to this runtime'
@@ -8083,6 +8131,10 @@ export function createSysRuntime(
               : structuredClone(stored.batch),
           runtimeVersion: stored.runtimeVersion,
           shippable: stored.shippable,
+          valueKinds:
+            stored.valueKinds === undefined
+              ? undefined
+              : [...stored.valueKinds],
         };
         // The slice loop of the calling thread. It also checks the stored
         // code (its runtime version; a lambda is refused), before any batch.
@@ -8130,6 +8182,48 @@ export function createSysRuntime(
 }
 
 /**
+ * The error of a batch run (`broadcast()`, `broadcastAsync()` and the batch
+ * loaders of stored code) of code that reads or makes a value of the kind
+ * types `kinds`. The batch runner reads each input column as numbers and
+ * writes each result into a `Float64Array`: it does not run the `entry`
+ * check of a kind binding, and it cannot hold the representation of a kind
+ * value (an object). A batch would then give a `NaN` or a wrong number with
+ * no error, so it is refused.
+ */
+export function kindBroadcastError(kinds: Iterable<string>): Error {
+  const names = [...kinds].map((k) => `'${k}'`).join(', ');
+  return new Error(
+    `A value-kind result cannot be broadcast: the code reads or makes a ` +
+      `value of the kind type ${names}, and the batch runner reads and ` +
+      `writes numbers only. Call \`run()\` for each value.`
+  );
+}
+
+/**
+ * Throw for stored code compiled with the compile contract of a value kind
+ * (`valueKinds`). The run-time checks of a kind are functions of the host
+ * that compiled the code (`ArithmeticCompile`), and stored code does not
+ * carry them, so `load()` refuses such code. The batch loaders (`batch`
+ * true) refuse it whatever its `shippable` field says, with the error of
+ * `broadcast()` (`kindBroadcastError()`): the batch runner writes numbers
+ * only, so it would write the representation of a kind value into the
+ * numeric output with no error. A worker of the kernel pool loads its code
+ * with `loadBroadcastSlice()`, so no worker runs such code, and
+ * `loadBroadcastAsync()` throws before it makes a `willUsePool`.
+ */
+function refuseStoredValueKinds(
+  stored: StoredJavaScript,
+  batch: boolean
+): void {
+  const kinds = stored.valueKinds;
+  if (kinds === undefined || kinds.length === 0) return;
+  if (batch) throw kindBroadcastError(kinds);
+  throw new Error(
+    `The stored code was compiled with the compile contract of the value kind type ${kinds.map((k) => `'${k}'`).join(', ')}, whose run-time checks are functions of the host that compiled it: it cannot be loaded. Run it with the \`run()\` of the compilation result.`
+  );
+}
+
+/**
  * The raw function of stored code compiled from an expression, for the batch
  * loaders: the same construction as `load()` (the once-only definitions
  * evaluated here, the per-call ones on every call, the exponent digits fixed
@@ -8153,6 +8247,7 @@ function storedExpressionRunner(
     throw new Error(
       'The stored code is a lambda (positional arguments): it has no broadcast'
     );
+  refuseStoredValueKinds(stored, true);
   if (stored.runtimeVersion === undefined)
     throw new Error(
       'The stored code has no runtimeVersion: it cannot be matched to this runtime'

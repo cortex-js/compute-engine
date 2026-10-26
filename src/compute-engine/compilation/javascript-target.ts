@@ -9,11 +9,13 @@ import {
   namedEntryError,
   storeEntryPlan,
   type EntryPlan,
+  type KindEntry,
   setNestedQuadratureBudget,
   setReconstructionDigits,
   RUNTIME_VERSION,
   type RuntimeSource,
   type SysHelpers,
+  kindBroadcastError,
 } from './javascript-runtime.js';
 import type {
   Expression,
@@ -532,6 +534,7 @@ import {
   type LoopInvariantBinding,
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import { compileJetDerivative, jetDerivativeTarget } from './jet-derivative.js';
 import {
@@ -10340,7 +10343,11 @@ export class ComputeEngineFunction extends Function {
     entry?: EntryPlan,
     hoisted = '',
     statementBody?: string,
-    reconstructionDigits?: number
+    reconstructionDigits?: number,
+    /** The value of a call is returned as the code makes it, without
+     * `normalizeRunResult()`: the code of a value kind lowering returns the
+     * representation of the kind (`CompilationResult.valueKinds`). */
+    rawResult = false
   ) {
     const perCallCode = `${perCall}${perCall ? ';' : ''}${statementBody ?? `return ${body}`}`;
     super('_SYS', '_', perCallCode);
@@ -10380,11 +10387,11 @@ export class ComputeEngineFunction extends Function {
         try {
           const args = entry ? checkEntry(entry, argumentsList) : argumentsList;
           try {
-            return normalizeRunResult(
+            const value =
               inner !== undefined
                 ? inner.apply(thisArg, args)
-                : super.apply(thisArg, [this.SYS, ...args])
-            );
+                : super.apply(thisArg, [this.SYS, ...args]);
+            return rawResult ? value : normalizeRunResult(value);
           } catch (error) {
             // A body error caused by a scalar in an array-read binding is
             // named after that binding (`namedEntryError`).
@@ -10417,7 +10424,10 @@ export class ComputeEngineFunctionLiteral extends Function {
     entry?: EntryPlan,
     hoisted = '',
     statementBody?: string,
-    reconstructionDigits?: number
+    reconstructionDigits?: number,
+    /** As for `ComputeEngineFunction`: the value is returned without
+     * `normalizeRunResult()`. */
+    rawResult = false
   ) {
     const perCallCode = `${perCall}${statementBody ?? `return ${body}`}`;
     super('_SYS', ...args, perCallCode);
@@ -10445,11 +10455,11 @@ export class ComputeEngineFunctionLiteral extends Function {
             ? checkEntry(entry, argumentsList)
             : argumentsList;
           try {
-            return normalizeRunResult(
+            const value =
               inner !== undefined
                 ? inner.apply(thisArg, callArgs)
-                : super.apply(thisArg, [this.SYS, ...callArgs])
-            );
+                : super.apply(thisArg, [this.SYS, ...callArgs]);
+            return rawResult ? value : normalizeRunResult(value);
           } catch (error) {
             // As in the expression runner above (`namedEntryError`).
             throw namedEntryError(entry, callArgs, error);
@@ -11254,10 +11264,22 @@ function lambdaEntryPlan(
   const complex: number[] = [];
   const lists: number[] = [];
   const strings = new Map<number, string>();
+  const kinds = new Map<number, KindEntry>();
   literalParams.forEach((p, i) => {
     // The shared accessor reads a user-declared type name too (with the
     // engine's type resolver), not only a built-in type.
     const t = functionLiteralParameterType(p);
+    // A parameter of a value kind type is checked by the kind's `entry`
+    // (`kindEntryCheck`), and by no numeric or collection rule.
+    const kind =
+      t !== undefined ? kindEntryCheck(p.engine, t, 'javascript') : undefined;
+    if (kind !== undefined) {
+      kinds.set(i, {
+        label: `argument ${i + 1} (type \`${kind.kind}\`)`,
+        check: kind.check,
+      });
+      return;
+    }
     // A string is refused for an annotated parameter and for an unannotated
     // one whose type the engine inferred from its uses alike: either way the
     // compiled code reads the parameter as an array, and the refusal is
@@ -11282,7 +11304,14 @@ function lambdaEntryPlan(
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
   });
-  return { kind: 'args', real, complex, lists, strings };
+  return {
+    kind: 'args',
+    real,
+    complex,
+    lists,
+    strings,
+    ...(kinds.size > 0 ? { kinds } : {}),
+  };
 }
 
 /**
@@ -11303,12 +11332,26 @@ function varsEntryPlan(
   const complex: string[] = [];
   const lists: string[] = [];
   const strings = new Map<string, string>();
+  const kinds = new Map<string, KindEntry>();
   for (const id of refs) {
     const sym = engine.symbol(id);
     // A symbol whose declared type proves an array is classed as a list
     // instead of as a number: the real/complex rules read the value as a
     // scalar, which an array is not.
     const declared = sym.type?.type;
+    // A symbol of a value kind type is checked by the kind's `entry`
+    // (`kindEntryCheck`), and by no numeric or collection rule.
+    const kind =
+      declared !== undefined
+        ? kindEntryCheck(engine, declared, 'javascript')
+        : undefined;
+    if (kind !== undefined) {
+      kinds.set(id, {
+        label: `"${id}" (type \`${kind.kind}\`)`,
+        check: kind.check,
+      });
+      continue;
+    }
     // A declared type and a type the engine inferred for an undeclared
     // symbol from its uses refuse a string alike (the same rule as the
     // lambda route above): the compiled code reads the symbol as an array
@@ -11329,7 +11372,14 @@ function varsEntryPlan(
       (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
     (isComplex ? complex : real).push(id);
   }
-  return { kind: 'vars', real, complex, lists, strings };
+  return {
+    kind: 'vars',
+    real,
+    complex,
+    lists,
+    strings,
+    ...(kinds.size > 0 ? { kinds } : {}),
+  };
 }
 
 /**
@@ -11400,6 +11450,9 @@ function compileToTarget(
           BaseCompiler.compileOp(expr, 0, lambdaTarget, 0, args[0].canonical)
         )
     );
+    // The value kinds whose compile contracts the code reads or makes: the
+    // value of a call is then returned raw (`valueKindFields`).
+    const kinds = BaseCompiler.kindLoweringReport();
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
     // definitions as a preamble inside the lambda's own body. A pure
     // definition the artifact calls from two or more places is wrapped in a
@@ -11453,7 +11506,8 @@ function compileToTarget(
       entryPlan,
       split.hoisted,
       statementBody,
-      reconstructionDigits
+      reconstructionDigits,
+      kinds !== undefined
     );
     return {
       target: 'javascript' as const,
@@ -11477,6 +11531,7 @@ function compileToTarget(
       calling: 'lambda' as const,
       reconstructionDigits,
       ...(entryPlan ? { entryPlan: storeEntryPlan(entryPlan) } : {}),
+      ...(kinds !== undefined ? { valueKinds: [...kinds.kinds] } : {}),
       run: fn as unknown as CompiledRunner<
         CompiledValue,
         number | ComplexResult
@@ -11506,6 +11561,10 @@ function compileToTarget(
   }
 
   const js = BaseCompiler.compileCseRoot(expr, target);
+  // The value kinds whose compile contracts the code reads or makes: the
+  // value of a call is then returned raw, the code cannot be stored, and it
+  // is shippable only when every contract says so (below).
+  const kinds = BaseCompiler.kindLoweringReport();
   // Collect any user-defined function definitions accumulated while compiling
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
   // and prepend them to the preamble so their named local functions are in
@@ -11562,7 +11621,8 @@ function compileToTarget(
     localVars && statementBody
       ? `${localVars};\n${statementBody}`
       : statementBody,
-    reconstructionDigits
+    reconstructionDigits,
+    kinds !== undefined
   );
   // The batch body of `broadcast()` (ROADMAP CE-410), compiled when the
   // caller asked for it (`batchBody` is given with `broadcast: true`, ROADMAP
@@ -11610,6 +11670,7 @@ function compileToTarget(
     calling: 'expression' as const,
     reconstructionDigits,
     ...(entryPlan ? { entryPlan: storeEntryPlan(entryPlan) } : {}),
+    ...(kinds !== undefined ? { valueKinds: [...kinds.kinds] } : {}),
     // The default count of values per cell of `broadcast()`, stored so that
     // a runtime that rebuilds the result applies the same default.
     ...(broadcastOutputs > 1 ? { broadcastOutputs } : {}),
@@ -11620,6 +11681,7 @@ function compileToTarget(
     // The whole batch runs inside one reconstruction-digit frame, as each
     // `run()` call does (see the constructor of `ComputeEngineFunction`).
     broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {
+      if (kinds !== undefined) throw kindBroadcastError(kinds.kinds);
       const previous = setReconstructionDigits(reconstructionDigits);
       try {
         return broadcastNumbers(
@@ -11647,9 +11709,11 @@ function compileToTarget(
     // from the engine's random stream stays on this thread.
     shippable:
       target.hostNames !== true &&
-      isShippableCode(`${split.hoisted}\n${perCall ?? ''}\n${result.code}`),
+      isShippableCode(`${split.hoisted}\n${perCall ?? ''}\n${result.code}`) &&
+      kindCodeIsShippable(kinds?.contracts, entryPlan),
     iterationLimit: () => engine.iterationLimit,
     slice: (inputs, options, out, slice) => {
+      if (kinds !== undefined) throw kindBroadcastError(kinds.kinds);
       const previous = setReconstructionDigits(reconstructionDigits);
       try {
         return broadcastNumbersSlice(
@@ -11668,10 +11732,43 @@ function compileToTarget(
     },
     workers: () => engine.workers,
   };
-  result.broadcastAsync = makeBroadcastAsync(asyncSpec);
+  // A batch of code that reads or makes a value of a kind is refused before
+  // it reaches the pool or a slice (see `kindBroadcastError()`).
+  result.broadcastAsync =
+    kinds !== undefined
+      ? () => Promise.reject(kindBroadcastError(kinds.kinds))
+      : makeBroadcastAsync(asyncSpec);
   result.shippable = asyncSpec.shippable;
-  result.willUsePool = makeWillUsePool(asyncSpec);
+  // `broadcastAsync` of such code rejects, so it never uses the pool.
+  result.willUsePool =
+    kinds !== undefined ? () => false : makeWillUsePool(asyncSpec);
   return result;
+}
+
+/**
+ * Whether code compiled with the compile contracts `contracts` of value kinds
+ * may be sent to a worker of the kernel pool: every contract declares
+ * `shippable: true` and names no helper of the host (`hostNames`), and no
+ * input of the code is a value of a kind. A worker has no engine and no
+ * host: the `entry` check of a kind input is a function of the host, and a
+ * helper that the code names exists only where the code was compiled (the
+ * pool has no way to carry it in this version). `undefined` contracts (no
+ * kind involved) answer `true`.
+ */
+function kindCodeIsShippable(
+  contracts:
+    | ReadonlyArray<{
+        shippable?: boolean;
+        hostNames?: ReadonlyArray<string>;
+      }>
+    | undefined,
+  entryPlan: EntryPlan | undefined
+): boolean {
+  if (contracts === undefined) return true;
+  if (entryPlan?.kinds !== undefined && entryPlan.kinds.size > 0) return false;
+  return contracts.every(
+    (c) => c.shippable === true && (c.hostNames ?? []).length === 0
+  );
 }
 
 /**

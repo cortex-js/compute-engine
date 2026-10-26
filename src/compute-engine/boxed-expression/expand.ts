@@ -11,7 +11,7 @@ import { asSmallInteger } from './numerics.js';
 import { mul, expandProducts } from './arithmetic-mul-div.js';
 import { add } from './arithmetic-add.js';
 import { mayBeMatrixValued, typeMayHoldNumber } from './matrix-operand.js';
-import { containsResidueClass, residueFoldOrKeep } from './residue-class.js';
+import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
 
 const binomials = [
   [1],
@@ -204,7 +204,7 @@ export function expandFunction(
   ops: ReadonlyArray<Expression>
 ): Expression | null {
   // See `expand()`: an expression with a residue class is not expanded.
-  if (ops.some(containsResidueClass)) return null;
+  if (ops.some(holdsKindValue)) return null;
   let result: Expression | null = null;
 
   //
@@ -291,7 +291,7 @@ export function expand(expr: Expression): Expression {
   // (`(c·(x + 1))/c` is not `x + 1` when `c` has no inverse). A closed
   // expression is folded by the residue rules instead
   // (`residueFoldOrKeep()`).
-  if (containsResidueClass(expr)) return residueFoldOrKeep(expr);
+  if (holdsKindValue(expr)) return residueFoldOrKeep(expr);
 
   // A sum or product with a direct `ContinuationPlaceholder` operand
   // (`2 · 4 · … · 2n`) is a notational object, not an arithmetic one, and so

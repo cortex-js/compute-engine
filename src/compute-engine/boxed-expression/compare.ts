@@ -32,6 +32,13 @@ import { isShadowedSymbol } from '../library-shadowing.js';
 import { boundVariableBindings, sameBindingDef } from './binders.js';
 import { isTensorValue } from './tensor-view.js';
 import { stochasticEqual } from './stochastic-equal.js';
+import {
+  isComparableKindValue,
+  isKindValuePair,
+  kindCompare,
+  kindEqual,
+} from './kind-compare.js';
+import { engineHasKindValues } from './value-kinds.js';
 
 // Lazy reference to break circular dependency:
 // expand → arithmetic-add → boxed-tensor → abstract-boxed-expression → compare
@@ -699,6 +706,24 @@ function eqImpl(
   if (isObject(a) || (typeof inputB !== 'number' && isObject(inputB)))
     return (a as unknown) === (inputB as unknown);
 
+  // A pair of values with a value of a value kind (a residue class, a
+  // measurement declared by a user) is decided by the dispatch of the kinds
+  // (`kindEqual()`): the `compare` hook, then the `eq` handlers of the
+  // heads, then the disjointness of the types. The numeric rules below do
+  // not know the arithmetic of a kind. An operand that is not a value yet (a
+  // sum of classes, a symbol whose value is a kind value) is evaluated
+  // first, and the pair is tested again after that. An engine that has made
+  // no kind value skips the dispatch (`engineHasKindValues()`).
+  const hasKindValues = engineHasKindValues(a.engine);
+  if (hasKindValues) {
+    const boxedB =
+      typeof inputB === 'number' ? a.engine.number(inputB) : inputB;
+    if (isKindValuePair(a, boxedB)) {
+      const kindAnswer = kindEqual(a, boxedB, { prover });
+      if (kindAnswer !== 'not-applicable') return kindAnswer;
+    }
+  }
+
   // We want to give a chance to the eq handler of the functions first.
   // The tier is passed to the handler: a handler that does prover-tier work
   // (e.g. relation equivalence) declines when `prover` is false.
@@ -748,6 +773,13 @@ function eqImpl(
   //
   if (isObject(a) || isObject(b))
     return (a as Expression) === (b as Expression);
+
+  // A pair with a kind value after the evaluation (see the dispatch at the
+  // top of this function): `ResidueClass(1, 5) + 1` is `ResidueClass(2, 5)`.
+  if (hasKindValues) {
+    const evaluatedKindAnswer = kindEqual(a, b, { prover });
+    if (evaluatedKindAnswer !== 'not-applicable') return evaluatedKindAnswer;
+  }
 
   // Two quantities with units of the same dimension compare by their
   // physical value: `1000 m` is equal to `1 km`, and `6 A·V` to `6 W`. Two
@@ -1123,6 +1155,29 @@ export function cmp(
   b: number | Expression,
   tolerance: number = a.engine.tolerance
 ): '<' | '=' | '>' | '>=' | '<=' | undefined {
+  // A pair with a value of a value kind whose kind type declares `compare`
+  // is ordered by the hooks (`kindCompare()`); a pair that the hooks do not
+  // order has no order here. An operand beside a kind value that is not a
+  // value yet (`U1 + U2`) is evaluated first, only beside a kind value whose
+  // kind type has `compare`. An engine that has made no kind value skips
+  // the dispatch (`engineHasKindValues()`).
+  if (engineHasKindValues(a.engine)) {
+    const boxedB = typeof b === 'number' ? a.engine.number(b) : b;
+    const kindPair =
+      (isComparableKindValue(a) || isComparableKindValue(boxedB)) &&
+      !isKindValuePair(a, boxedB)
+        ? [a.evaluate(), boxedB.evaluate()]
+        : [a, boxedB];
+    const kindOrder = kindCompare(kindPair[0], kindPair[1]);
+    if (kindOrder !== undefined)
+      return kindOrder === 'incomparable'
+        ? undefined
+        : kindOrder < 0
+          ? '<'
+          : kindOrder > 0
+            ? '>'
+            : '=';
+  }
   // Two quantities with units of the same dimension are ordered by their
   // physical value: `999 m` is less than `1 km`. See `quantityOrder()`.
   const quantity = quantityOrder(a, b, tolerance, true);
@@ -1683,6 +1738,14 @@ export function exactOrder(
   b: Expression,
   options?: { tieWithinTolerance?: boolean }
 ): -1 | 0 | 1 | undefined {
+  // A pair with a value of a value kind whose kind type declares `compare`
+  // is ordered by the hooks (`kindCompare()`), for `Max`, `Min`, `Clamp`
+  // and `Sort`; a pair that the hooks do not order is not ordered.
+  const kindOrder = engineHasKindValues(a.engine)
+    ? kindCompare(a, b)
+    : undefined;
+  if (kindOrder !== undefined)
+    return kindOrder === 'incomparable' ? undefined : kindOrder;
   // Two quantities with units of the same dimension are ordered by their
   // physical value: `Max(1 km, 999 m)` is `1 km`. The tolerance is 0, so the
   // order is exact, as it is for two numbers here: two different values are

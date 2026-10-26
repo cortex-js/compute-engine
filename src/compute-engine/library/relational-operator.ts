@@ -67,6 +67,11 @@ import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
 import { compareQuantities } from './quantity-compare.js';
 import {
+  isKindValue,
+  kindCompare,
+  kindEqual,
+} from '../boxed-expression/kind-compare.js';
+import {
   nonNumericOperandError,
   isAbsentScalarSymbol,
 } from '../boxed-expression/validate.js';
@@ -87,6 +92,32 @@ function quantityCompare(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
     exact: true,
     nominal: true,
   });
+}
+
+/**
+ * The options of `kindCompare()` and `kindEqual()` for the pair of evaluated
+ * operands `ops[i]` and `ops[j]` of a comparison: whether the comparison
+ * runs under `.N()`, and the operands as written, `rawOps[i]` and
+ * `rawOps[j]`, so that `exact()` evaluates a pure operand again without the
+ * approximation. The values are aligned with the written operands: a value
+ * that the near-tie rule replaced (`exactPairAtNearTie()`) is the exact
+ * value of the same written operand. When the two lists do not have the
+ * same length, the written operands are not given.
+ */
+function kindPairOptions(
+  numericApproximation: boolean | undefined,
+  rawOps: ReadonlyArray<Expression>,
+  ops: ReadonlyArray<Expression>,
+  i: number,
+  j: number
+): {
+  numericApproximation: boolean;
+  written?: readonly [Expression, Expression];
+} {
+  return {
+    numericApproximation: numericApproximation === true,
+    written: rawOps.length === ops.length ? [rawOps[i], rawOps[j]] : undefined,
+  };
 }
 
 /**
@@ -195,7 +226,11 @@ function evaluateChainOperands(
   ce: ComputeEngine,
   rawOps: ReadonlyArray<Expression>,
   numericApproximation: boolean | undefined,
-  pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
+  pairIsFalse: (
+    lhs: Expression,
+    rhs: Expression,
+    written: readonly [Expression, Expression]
+  ) => boolean
 ): Expression[] | Expression {
   const evalOptions = { numericApproximation };
   // A `Measurement(v, σ)` operand is compared through its nominal `v`
@@ -244,7 +279,11 @@ function chainStep(
   v: Expression,
   ops: Expression[],
   numericApproximation: boolean | undefined,
-  pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
+  pairIsFalse: (
+    lhs: Expression,
+    rhs: Expression,
+    written: readonly [Expression, Expression]
+  ) => boolean
 ): Expression | undefined {
   if (!v.isValid) return v;
   if (numericApproximation && ops.length > 0) {
@@ -259,7 +298,11 @@ function chainStep(
       v = exact[1];
     }
   }
-  if (ops.length > 0 && pairIsFalse(ops[ops.length - 1], v)) return ce.False;
+  if (
+    ops.length > 0 &&
+    pairIsFalse(ops[ops.length - 1], v, [rawOps[i - 1], rawOps[i]])
+  )
+    return ce.False;
   ops.push(v);
   return undefined;
 }
@@ -283,7 +326,11 @@ async function evaluateChainOperandsAsync(
     _contextStack: EvaluateOptions['_contextStack'] | undefined;
     _precisionWindow: EvaluateOptions['_precisionWindow'] | undefined;
   },
-  pairIsFalse: (lhs: Expression, rhs: Expression) => boolean
+  pairIsFalse: (
+    lhs: Expression,
+    rhs: Expression,
+    written: readonly [Expression, Expression]
+  ) => boolean
 ): Promise<Expression[] | Expression> {
   const {
     numericApproximation,
@@ -352,6 +399,12 @@ function exactPairAtNearTie(
   rawB: Expression,
   b: Expression
 ): [Expression, Expression] | undefined {
+  // A kind value is compared by its `compare` hook, which reads the exact
+  // operand itself (`exact()`, from the operand as written): it is not
+  // replaced by an exact number here. Two kind values with identical
+  // approximate values are compared again by their exact values in
+  // `kindCompare()` and `kindEqual()`.
+  if (isKindValue(a) || isKindValue(b)) return undefined;
   if (isFunction(a, 'Quantity') && isFunction(b, 'Quantity'))
     return exactQuantityPair(rawA, a, rawB, b);
   if (isFunction(a, 'Quantity'))
@@ -581,47 +634,109 @@ function exactLiteralOrder(
   return exactCompareNumbers(a, b);
 }
 
+/** The options of `kindCompare()` and `kindEqual()` for an adjacent pair of
+ * a chain: whether the chain runs under `.N()`, and the two operands as
+ * written (see `kindPairOptions()`). */
+function chainKindOptions(
+  numericApproximation: boolean | undefined,
+  written: readonly [Expression, Expression]
+): {
+  numericApproximation: boolean;
+  written: readonly [Expression, Expression];
+} {
+  return { numericApproximation: numericApproximation === true, written };
+}
+
 /** The adjacent-pair deciders of `evaluateChainOperands`, one per chainable
  * relation — each the `False` branch of the corresponding handler's own
- * pairwise loop. */
+ * pairwise loop. `written` holds the two operands as written, for the
+ * exact values of the kind values under `.N()`. */
 const CHAIN_PAIR_IS_FALSE = {
-  Equal: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
-    const q = quantityCompare(a, b);
-    if (q !== undefined) return q !== 0;
-    if (unorderedChainPair(a, b, false, 'pole')) return true;
-    const o = exactLiteralOrder(a, b);
-    if (o !== undefined) return o !== 0;
-    return eq(a, b) === false;
-  },
-  NotEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
-    const q = quantityCompare(a, b);
-    if (q !== undefined) return q === 0;
-    const o = exactLiteralOrder(a, b);
-    if (o !== undefined) return o === 0;
-    return a.isEqual(b) === true;
-  },
-  Less: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
-    const q = quantityCompare(a, b);
-    if (q !== undefined) return q >= 0;
-    if (unorderedChainPair(a, b, false)) return true;
-    const o = exactLiteralOrder(a, b);
-    if (o !== undefined) return o >= 0;
-    const cmp = a.isLess(b) ?? compareFromAssumedBounds(a, b, true);
-    if (cmp === undefined) return unorderedChainPair(a, b, true);
-    return cmp === false;
-  },
-  LessEqual: (_ce: ComputeEngine) => (a: Expression, b: Expression) => {
-    const q = quantityCompare(a, b);
-    if (q !== undefined) return q > 0;
-    if (unorderedChainPair(a, b, false)) return true;
-    const o = exactLiteralOrder(a, b);
-    if (o !== undefined) return o > 0;
-    const cmp = a.isLessEqual(b) ?? compareFromAssumedBounds(a, b, false);
-    // A `true` can come from a zero difference of two values with no order
-    // (`Ln(-1) ≤ Ln(-1)`): see `trueOrderedRelation()`.
-    if (cmp === false) return true;
-    return unorderedChainPair(a, b, true);
-  },
+  Equal:
+    (_ce: ComputeEngine, numericApproximation: boolean | undefined) =>
+    (
+      a: Expression,
+      b: Expression,
+      written: readonly [Expression, Expression]
+    ) => {
+      const k = kindEqual(
+        a,
+        b,
+        chainKindOptions(numericApproximation, written)
+      );
+      if (k !== 'not-applicable') return k === false;
+      const q = quantityCompare(a, b);
+      if (q !== undefined) return q !== 0;
+      if (unorderedChainPair(a, b, false, 'pole')) return true;
+      const o = exactLiteralOrder(a, b);
+      if (o !== undefined) return o !== 0;
+      return eq(a, b) === false;
+    },
+  NotEqual:
+    (_ce: ComputeEngine, numericApproximation: boolean | undefined) =>
+    (
+      a: Expression,
+      b: Expression,
+      written: readonly [Expression, Expression]
+    ) => {
+      const k = kindEqual(
+        a,
+        b,
+        chainKindOptions(numericApproximation, written)
+      );
+      if (k !== 'not-applicable') return k === true;
+      const q = quantityCompare(a, b);
+      if (q !== undefined) return q === 0;
+      const o = exactLiteralOrder(a, b);
+      if (o !== undefined) return o === 0;
+      return a.isEqual(b) === true;
+    },
+  Less:
+    (_ce: ComputeEngine, numericApproximation: boolean | undefined) =>
+    (
+      a: Expression,
+      b: Expression,
+      written: readonly [Expression, Expression]
+    ) => {
+      const k = kindCompare(
+        a,
+        b,
+        chainKindOptions(numericApproximation, written)
+      );
+      if (k !== undefined) return k !== 'incomparable' && k >= 0;
+      const q = quantityCompare(a, b);
+      if (q !== undefined) return q >= 0;
+      if (unorderedChainPair(a, b, false)) return true;
+      const o = exactLiteralOrder(a, b);
+      if (o !== undefined) return o >= 0;
+      const cmp = a.isLess(b) ?? compareFromAssumedBounds(a, b, true);
+      if (cmp === undefined) return unorderedChainPair(a, b, true);
+      return cmp === false;
+    },
+  LessEqual:
+    (_ce: ComputeEngine, numericApproximation: boolean | undefined) =>
+    (
+      a: Expression,
+      b: Expression,
+      written: readonly [Expression, Expression]
+    ) => {
+      const k = kindCompare(
+        a,
+        b,
+        chainKindOptions(numericApproximation, written)
+      );
+      if (k !== undefined) return k !== 'incomparable' && k > 0;
+      const q = quantityCompare(a, b);
+      if (q !== undefined) return q > 0;
+      if (unorderedChainPair(a, b, false)) return true;
+      const o = exactLiteralOrder(a, b);
+      if (o !== undefined) return o > 0;
+      const cmp = a.isLessEqual(b) ?? compareFromAssumedBounds(a, b, false);
+      // A `true` can come from a zero difference of two values with no order
+      // (`Ln(-1) ≤ Ln(-1)`): see `trueOrderedRelation()`.
+      if (cmp === false) return true;
+      return unorderedChainPair(a, b, true);
+    },
 };
 
 /**
@@ -865,7 +980,7 @@ function chainedRelationHandlers(
           ce,
           rawOps,
           numericApproximation,
-          CHAIN_PAIR_IS_FALSE[op](ce)
+          CHAIN_PAIR_IS_FALSE[op](ce, numericApproximation)
         ),
         numericApproximation
       ),
@@ -890,7 +1005,7 @@ function chainedRelationHandlers(
           _contextStack,
           _precisionWindow,
         },
-        CHAIN_PAIR_IS_FALSE[op](ce)
+        CHAIN_PAIR_IS_FALSE[op](ce, numericApproximation)
       );
       // The verdict runs after the `await`s: it may evaluate (an exact
       // operand at a near tie, an assumption), and a synchronous evaluation
@@ -967,14 +1082,31 @@ function decideEqual(
   // `nonRealKind()`.
   if (vals.some((op) => nonRealKind(op) === 'pole')) return ce.False;
   let lhs: Expression | undefined = undefined;
-  for (const arg of ops) {
+  // The index of `lhs` in `ops`, for its operand as written.
+  let lhsIndex = 0;
+  for (const [i, arg] of ops.entries()) {
     if (!lhs) lhs = arg;
     else {
+      // A pair with a kind value is decided by the kinds (`kindEqual()`),
+      // before the name-based quantity rule.
+      const k = kindEqual(
+        lhs,
+        arg,
+        kindPairOptions(numericApproximation, rawOps, ops, lhsIndex, i)
+      );
+      if (k !== 'not-applicable') {
+        if (k === false) return ce.False;
+        if (k === undefined) return inertRelation(ce, 'Equal', rawOps, ops);
+        lhs = arg;
+        lhsIndex = i;
+        continue;
+      }
       // Try quantity comparison first
       const qcmp = quantityCompare(lhs, arg);
       if (qcmp !== undefined) {
         if (qcmp !== 0) return ce.False;
         lhs = arg;
+        lhsIndex = i;
         continue;
       }
 
@@ -1046,9 +1178,21 @@ function decideNotEqual(
   if (vals.some((op) => isSymbol(op, 'Missing'))) return ce.Missing;
   if (vals.some((op) => isNumber(op) && op.isNaN === true)) return ce.True;
   let lhs: Expression | undefined = undefined;
-  for (const arg of ops!) {
+  for (const [i, arg] of ops.entries()) {
     if (!lhs) lhs = arg;
     else {
+      // A pair with a kind value is decided by the kinds, as in `Equal`.
+      // `lhs` is always the first operand.
+      const k = kindEqual(
+        lhs,
+        arg,
+        kindPairOptions(numericApproximation, rawOps, ops, 0, i)
+      );
+      if (k !== 'not-applicable') {
+        if (k === true) return ce.False;
+        if (k === undefined) return inertRelation(ce, 'NotEqual', rawOps, ops);
+        continue;
+      }
       // Two quantities compare by their physical value, as in `Equal`.
       const qcmp = quantityCompare(lhs, arg);
       if (qcmp !== undefined) {
@@ -1114,6 +1258,15 @@ function decideLess(
   if (vals.some((op) => nonRealKind(op) !== undefined)) return ce.False;
   if (ops.length === 2) {
     const [lhs, rhs] = ops;
+    // A pair with a value of a kind that has `compare` is decided by the
+    // kinds (`kindCompare()`), before the name-based quantity rule.
+    const k = kindCompare(
+      lhs,
+      rhs,
+      kindPairOptions(numericApproximation, rawOps, ops, 0, 1)
+    );
+    if (k === 'incomparable') return inertRelation(ce, 'Less', rawOps, ops);
+    if (k !== undefined) return k < 0 ? ce.True : ce.False;
     // Try quantity comparison first
     const qcmp = quantityCompare(lhs, rhs);
     if (qcmp !== undefined) return qcmp < 0 ? ce.True : ce.False;
@@ -1129,10 +1282,17 @@ function decideLess(
   if (ops.length < 2) return ce.True;
   // Less can have multiple arguments, i.e. a < b < c < d
   let lhs: Expression | undefined = undefined;
-  for (const arg of ops!) {
+  for (const [i, arg] of ops.entries()) {
     if (!lhs) lhs = arg;
     else {
-      const qcmp = quantityCompare(lhs, arg);
+      // `lhs` is the operand before `arg`.
+      const k = kindCompare(
+        lhs,
+        arg,
+        kindPairOptions(numericApproximation, rawOps, ops, i - 1, i)
+      );
+      if (k === 'incomparable') return inertRelation(ce, 'Less', rawOps, ops);
+      const qcmp = k ?? quantityCompare(lhs, arg);
       if (qcmp !== undefined) {
         if (qcmp >= 0) return ce.False;
       } else {
@@ -1179,6 +1339,14 @@ function decideLessEqual(
   if (vals.some((op) => nonRealKind(op) !== undefined)) return ce.False;
   if (ops.length === 2) {
     const [lhs, rhs] = ops;
+    const k = kindCompare(
+      lhs,
+      rhs,
+      kindPairOptions(numericApproximation, rawOps, ops, 0, 1)
+    );
+    if (k === 'incomparable')
+      return inertRelation(ce, 'LessEqual', rawOps, ops);
+    if (k !== undefined) return k <= 0 ? ce.True : ce.False;
     const qcmp = quantityCompare(lhs, rhs);
     if (qcmp !== undefined) return qcmp <= 0 ? ce.True : ce.False;
     const order = exactLiteralOrder(lhs, rhs);
@@ -1193,10 +1361,18 @@ function decideLessEqual(
   if (ops.length < 2) return ce.True;
   // LessEqual can have multiple arguments, i.e. a <= b <= c <= d
   let lhs: Expression | undefined = undefined;
-  for (const arg of ops!) {
+  for (const [i, arg] of ops.entries()) {
     if (!lhs) lhs = arg;
     else {
-      const qcmp = quantityCompare(lhs, arg);
+      // `lhs` is the operand before `arg`.
+      const k = kindCompare(
+        lhs,
+        arg,
+        kindPairOptions(numericApproximation, rawOps, ops, i - 1, i)
+      );
+      if (k === 'incomparable')
+        return inertRelation(ce, 'LessEqual', rawOps, ops);
+      const qcmp = k ?? quantityCompare(lhs, arg);
       if (qcmp !== undefined) {
         if (qcmp > 0) return ce.False;
       } else {

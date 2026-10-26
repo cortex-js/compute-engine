@@ -47,14 +47,26 @@ import {
   stripMissingFromType,
   stripMissingFromElements,
   typeContainsMissing,
-  hasResidueArm,
-  withoutResidueArm,
+  hasKindArm,
+  withoutKindArms,
+  withoutKindArmsDeep,
+  type KindTypeNames,
   unfoldAliasOnDescent,
   type AliasDescent,
   signatureSlotType,
   staticCollectionDims,
   functionResult,
 } from '../../common/type/utils.js';
+import { kindTypeNames } from './value-kinds.js';
+import {
+  admitsThroughCarrier,
+  groupOneCallbackType,
+  isLibraryKindOperator,
+  carrierKindTypeNames,
+  groupOneHookOf,
+  kindTypeNamesWithHook,
+  type GroupOneHook,
+} from './kind-admission.js';
 import {
   diagnoseNoMatch,
   arityBounds,
@@ -98,6 +110,7 @@ import type {
   Expression,
   IComputeEngine as ComputeEngine,
   Scope,
+  BoxedOperatorDefinition,
   BoxedValueDefinition,
   TypeProvenanceEntry,
 } from '../global-types.js';
@@ -158,12 +171,13 @@ const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
  * by broadcast.
  */
 function excludedFromScalarInference(op: Expression): boolean {
-  // A residue class is admitted in a numeric position (`hasResidueArm`) but
-  // it is not a number: no numeric type is inferred onto it.
+  // A kind value (a residue class) is admitted in a numeric position
+  // (`hasKindArm`) but it is not a number: no numeric type is inferred onto
+  // it.
   return (
     op.isCollection ||
     typeCouldBeCollection(op.type.type) ||
-    hasResidueArm(op.type.type)
+    hasKindArm(op.type.type, kindTypeNames(op.engine))
   );
 }
 
@@ -178,13 +192,15 @@ function excludedFromScalarInference(op: Expression): boolean {
  */
 export function collectionCellsProvablyNonNumeric(
   t: Type,
-  admitsResidue = false
+  admittedKinds?: KindTypeNames
 ): boolean {
   let carrier = stripMissingFromType(t);
-  // For an operator with residue arithmetic a residue class is a cell like a
-  // number (`[c, d] + 1` is a list of classes): the `residue` arm of the
-  // cells does not make them non-numeric.
-  if (admitsResidue) carrier = withoutResidueCells(carrier);
+  // For an operator with the arithmetic of the value kinds (`admittedKinds`,
+  // the kind types of the engine) a kind value is a cell like a number
+  // (`[c, d] + 1` is a list of classes): the kind arm of the cells does not
+  // make them non-numeric.
+  if (admittedKinds !== undefined)
+    carrier = withoutKindCells(carrier, admittedKinds);
   if (
     typeof carrier !== 'string' &&
     'elements' in carrier &&
@@ -195,17 +211,35 @@ export function collectionCellsProvablyNonNumeric(
 }
 
 /**
- * Whether an operand of an operator with residue arithmetic is admitted as a
- * class: its type is `residue` (an absent arm aside), or a union of `residue`
- * with numeric arms only (`integer | residue`). A union with an arm that is
- * not a number (`string | residue`) is not: the operand may be a string, and
- * the operator refuses it as it refuses a string.
+ * Whether an operand of an operator with the arithmetic of the value kinds
+ * is admitted as a kind value: its type is a kind type of `kinds` (an absent
+ * arm aside), or a union of kind types with numeric arms only
+ * (`integer | residue`), or a collection or a tuple whose cells are such
+ * types (`list<residue>`, `list<integer | gf8>`, `tuple<residue, residue>`):
+ * a collection operand is broadcast, and each cell is an operand of the
+ * operation. A union with an arm that is not a number (`string | residue`)
+ * is not: the operand may be a string, and the operator refuses it as it
+ * refuses a string.
  */
-function admitsResidueClassOperand(t: Type): boolean {
+function admitsResidueClassOperand(t: Type, kinds: KindTypeNames): boolean {
   const carrier = stripMissingFromType(t);
-  if (!hasResidueArm(carrier)) return false;
-  const rest = withoutResidueArm(carrier);
-  return rest === 'never' || isSubtype(rest, 'number');
+  if (!hasKindArm(carrier, kinds)) return false;
+  return isNumericWithoutKinds(withoutKindArmsDeep(carrier, kinds), 0);
+}
+
+/** Whether `t`, a type whose kind arms were removed, holds numbers only:
+ * `never`, a number type, or a union, a collection or a tuple of such
+ * types, an absence arm aside. */
+function isNumericWithoutKinds(t: Type, depth: number): boolean {
+  const x = stripMissingFromType(t);
+  if (x === 'never' || isSubtype(x, 'number')) return true;
+  if (typeof x === 'string' || depth > 8) return false;
+  if (x.kind === 'union')
+    return x.types.every((arm) => isNumericWithoutKinds(arm, depth + 1));
+  if (x.kind === 'tuple')
+    return x.elements.every((e) => isNumericWithoutKinds(e.type, depth + 1));
+  const element = collectionElementType(x);
+  return element !== undefined && isNumericWithoutKinds(element, depth + 1);
 }
 
 /**
@@ -216,7 +250,7 @@ function admitsResidueClassOperand(t: Type): boolean {
  * `checkNumericArgs` that a type can decide:
  *
  * - `error`, `unknown`, `any` and a number type are admitted;
- * - with `admitsResidue`, a residue class (with numbers only beside it);
+ * - with `admittedKinds`, a kind value (with numbers only beside it);
  * - a collection whose cells are provably not numbers is refused
  *   (`list<string>`);
  * - a type with an absence arm is refused only when the rest of it is
@@ -233,13 +267,17 @@ function admitsResidueClassOperand(t: Type): boolean {
  */
 export function numericOperandTypeRefused(
   t: Type,
-  admitsResidue: boolean
+  admittedKinds: KindTypeNames | undefined
 ): boolean {
   if (t === 'error' || t === 'unknown' || t === 'any' || t === 'never')
     return false;
   if (isSubtype(t, 'number')) return false;
-  if (admitsResidue && admitsResidueClassOperand(t)) return false;
-  if (collectionCellsProvablyNonNumeric(t, admitsResidue)) return true;
+  if (
+    admittedKinds !== undefined &&
+    admitsResidueClassOperand(t, admittedKinds)
+  )
+    return false;
+  if (collectionCellsProvablyNonNumeric(t, admittedKinds)) return true;
   if (typeContainsMissing(t)) {
     const carrier = stripMissingFromType(t);
     return (
@@ -255,11 +293,11 @@ export function numericOperandTypeRefused(
 }
 
 /**
- * `t` with the `residue` arm removed from the cells of a collection type
- * (`list<integer | residue>` is `list<integer>`, `list<residue>` is
+ * `t` with the kind arms of `kinds` removed from the cells of a collection
+ * type (`list<integer | residue>` is `list<integer>`, `list<residue>` is
  * `list<never>`), at the first level of cells; any other type is itself.
  */
-function withoutResidueCells(t: Type): Type {
+function withoutKindCells(t: Type, kinds: KindTypeNames): Type {
   if (typeof t === 'string') return t;
   if (
     t.kind === 'list' ||
@@ -267,7 +305,7 @@ function withoutResidueCells(t: Type): Type {
     t.kind === 'collection' ||
     t.kind === 'indexed_collection'
   ) {
-    const elements = withoutResidueArm(t.elements);
+    const elements = withoutKindArms(t.elements, kinds);
     return elements === t.elements ? t : { ...t, elements };
   }
   return t;
@@ -987,18 +1025,50 @@ function devolveUnappliedOperator(
 export function checkNumericArgs(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  options?: number | { count?: number; flatten?: string; residue?: boolean }
+  options?:
+    | number
+    | {
+        count?: number;
+        flatten?: string;
+        kindHook?: GroupOneHook;
+        carrier?: boolean | GroupOneHook;
+      }
 ): ReadonlyArray<Expression> {
   let count = typeof options === 'number' ? options : options?.count;
   const flattenHead =
     typeof options === 'number' ? undefined : options?.flatten;
-  // `residue: true`: the operator has residue arithmetic (`Add`, `Subtract`,
-  // `Multiply`, `Divide`, `Negate`, `Power`, `Square`, `Sqrt`, `Root`), and
-  // a residue class is admitted as an operand. The other operators that
-  // check their operands here (`Exp`, `Ln`, `Log`, `Exp2`, `PlusMinus`)
-  // refuse a class, as their declared parameter types do.
-  const admitsResidue =
-    typeof options === 'object' && options?.residue === true;
+  // `kindHook`: the operator is one of the arithmetic operators of the value
+  // kinds (`Add`, `Subtract`, `Multiply`, `Divide`, `Negate`, `Power`,
+  // `Square`, `Sqrt`, `Root`), and a value of a kind whose head declares
+  // this hook is admitted as an operand (a residue class, a `GF8` element).
+  // `carrier`: the operator's parameters admit a real number (`Ln`, `Log`,
+  // `Exp`), so a value of a kind admitted as a number (`admittedAs: 'real'`
+  // or `'number'`) is admitted as an operand, as at `Sin`, and the
+  // evaluation gives it to the kind's `apply` hook (to its `power` hook for
+  // `Exp`, which is rewritten to `Power(e, x)`). A kind admitted as nothing
+  // (a residue class) is refused. The registry is read now, when the
+  // expression is boxed: an expression refused before the hook was
+  // registered is not checked again. The other operators that check their
+  // operands here (`Exp2`, `PlusMinus`) refuse a kind value.
+  // When `carrier` names a hook, a kind admitted as a number is admitted
+  // only when its heads also declare that hook. `Exp` uses `'power'`: it is
+  // rewritten to `Power(e, x)`, and `Power` refuses at evaluation a kind
+  // value whose kind has no `power` hook, so such a value is refused here,
+  // at boxing, as at `Sqrt` and `Square`.
+  const carrierOption =
+    typeof options === 'object' ? options?.carrier : undefined;
+  const admittedKinds: KindTypeNames | undefined =
+    typeof options === 'object' && options?.kindHook !== undefined
+      ? kindTypeNamesWithHook(ce, options.kindHook)
+      : carrierOption === true
+        ? carrierKindTypeNames(ce)
+        : typeof carrierOption === 'string'
+          ? {
+              has: (name: string) =>
+                carrierKindTypeNames(ce).has(name) &&
+                kindTypeNamesWithHook(ce, carrierOption).has(name),
+            }
+          : undefined;
 
   // Ellipsis fold barrier: when a direct `ContinuationPlaceholder` operand is
   // present (a notational sum/product like `2 · 4 · … · 2n`), do not lift
@@ -1100,11 +1170,14 @@ export function checkNumericArgs(
     } else if (op.type.isUnknown || op.type.type === 'any') {
       // Unknown or any type. Keep it that way, infer later
       xs.push(op);
-    } else if (admitsResidue && admitsResidueClassOperand(op.type.type)) {
+    } else if (
+      admittedKinds !== undefined &&
+      admitsResidueClassOperand(op.type.type, admittedKinds)
+    ) {
       // A residue class (`ResidueClass(2, 4)`, a symbol declared `residue`, a
       // call of a head whose signature returns `residue`), or a value that may
       // be one beside numbers (`integer | residue`). The operator has residue
-      // arithmetic (`admitsResidue`), so the class is admitted. It is not a
+      // arithmetic (`admittedKinds`), so the class is admitted. It is not a
       // number: it is admitted before the branches below, which read the
       // operand as a numeric collection, a tuple or a number, and it is not
       // given an inferred numeric type at the end of this function
@@ -1114,7 +1187,7 @@ export function checkNumericArgs(
       // that is not a number (`string | residue`) is not admitted here, and
       // the branches below refuse it as they refuse `string`.
       xs.push(op);
-    } else if (collectionCellsProvablyNonNumeric(op.type.type, admitsResidue)) {
+    } else if (collectionCellsProvablyNonNumeric(op.type.type, admittedKinds)) {
       // The static element type is concrete and provably non-numeric
       // (`list<string^2>`, `set<boolean>`, `list<string | missing>`). The
       // element type already disproves numericity, so reject WITHOUT
@@ -1346,7 +1419,8 @@ const NON_NUMERIC_EXEMPT_TYPE: Type = parseType(
 );
 export function nonNumericOperandError(
   ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>
+  ops: ReadonlyArray<Expression>,
+  operator?: string
 ): Expression | undefined {
   // A number literal, and any operand whose type is below `number`, share
   // values with `broadcastable<number>`: neither is disjoint, and the
@@ -1354,12 +1428,29 @@ export function nonNumericOperandError(
   // each a proof of its own) has to. The empty type `never` is below
   // `number` as well but shares no value with anything, so it keeps the
   // disjointness route and stays an error.
+  // A value of a VALUE KIND registered in the engine (a nominal kind type
+  // such as `gf8`) is exempt as a residue class is: the type string above
+  // can only name the kind primitives. With `operator`, only the kinds that
+  // the operator admits are exempt: at an arithmetic operator of group 1
+  // (`Add`, `Divide`, …), a kind type whose heads declare the matching
+  // hook; at any other operator, a kind type admitted through its carrier
+  // (`admittedAs: 'real'` or `'number'`). A value of another kind is
+  // an `incompatible-type` error, as a string is
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.2).
+  const hook = groupOneHookOf(operator);
+  const kinds =
+    operator === undefined
+      ? kindTypeNames(ce)
+      : hook !== undefined
+        ? kindTypeNamesWithHook(ce, hook)
+        : carrierKindTypeNames(ce);
   const bad = ops.find(
     (x) =>
       x.isValid &&
       !isNumber(x) &&
       (((x.type.type === 'never' || !x.type.facts.belowNumber) &&
-        x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE)) ||
+        x.type.isDisjointFrom(NON_NUMERIC_EXEMPT_TYPE) &&
+        !hasKindArm(x.type.type, kinds)) ||
         isNonNumericTupleType(x.type.type))
   );
   if (bad === undefined) return undefined;
@@ -2769,7 +2860,14 @@ function arrowSlotAdmission(
 ): Expression | 'admit' | undefined {
   const arms = paramArrowArms(param);
   if (arms === undefined) return undefined;
-  const opType = widenUnannotatedLiteralParams(op, op.type.type);
+  // An arithmetic operator of the value kinds passed as a callback admits a
+  // kind value as its operand check does (`groupOneCallbackType()`).
+  const opType = widenUnannotatedLiteralParams(
+    op,
+    isSymbol(op)
+      ? groupOneCallbackType(ce, op.symbol, op.type.type, op.operatorDefinition)
+      : op.type.type
+  );
   if (freeTypeVariables(opType).size > 0) return undefined;
   // Provably not a function value: the ordinary `incompatible-type` error
   // (minted by the caller) says the right thing — this gate has nothing to add.
@@ -3167,6 +3265,12 @@ export interface ValidateArgumentsInternals {
    * (Design E §12d). Absent where no name is known; the mint then declines
    * rather than word a sentence about an anonymous operator. */
   operatorName?: string;
+  /** The definition of the operator being applied, when it is an operator
+   * definition. The rules of the value kinds that an operator name selects
+   * (the admission of group 1 at `Add`, …, the `compare` rule of `Clamp`)
+   * apply only when it is the library definition of that name
+   * (`isLibraryKindOperator()`, `kind-admission.ts`). */
+  operatorDefinition?: BoxedOperatorDefinition;
   /** The solve `resolveOverload` already ran on this (single-arm, polytype)
    * signature with the identical context — reused instead of re-solving. */
   armSolution?: TypeInferenceResult;
@@ -3397,6 +3501,69 @@ function isScalarParameterTuple(t: Type, param: Type): boolean {
   });
 }
 
+/**
+ * Whether the operand `op`, which has an arm that is a kind type, is
+ * admitted at the parameter `param` (position `idx`) by the rules of the
+ * value kinds (`kind-admission.ts`, `docs/plans/2026-10-26-value-kinds.md`
+ * section 4.2), in addition to subtyping:
+ *
+ * - at an arithmetic operator of group 1 (`Add`, `Divide`, `Power`, …,
+ *   named by `internals.operatorName`), a value of a kind whose head
+ *   declares the matching hook, beside numbers only, the kind type itself
+ *   or in the cells of a collection, as `checkNumericArgs` admits it on the
+ *   canonical route of those operators;
+ * - at any other parameter, a value of a kind declared with
+ *   `admittedAs: 'real'` or `'number'` whose type, with each kind arm
+ *   replaced by the narrowest carrier the parameter admits, is admitted by
+ *   the parameter (the carrier rule, `admitsThroughCarrier()`).
+ *
+ * A user function (a function with a body) admits a kind value only by
+ * type (decision B): neither rule applies to it.
+ */
+function kindOperandAdmitted(
+  ce: ComputeEngine,
+  op: Expression,
+  param: Type,
+  idx: number,
+  threadable: Threadable | undefined,
+  stripMissing: ((index: number) => boolean) | undefined,
+  internals: ValidateArgumentsInternals | undefined
+): boolean {
+  if (internals?.userFunction) return false;
+  const t = op.type.type;
+  // The rules that the operator NAME selects belong to the library
+  // definitions of these names: a host operator declared `Add` in a nested
+  // scope is an ordinary operator (`isLibraryKindOperator()`).
+  const libraryRules = isLibraryKindOperator(
+    ce,
+    internals?.operatorName,
+    internals?.operatorDefinition
+  );
+  const hook = libraryRules
+    ? groupOneHookOf(internals?.operatorName)
+    : undefined;
+  if (hook !== undefined) {
+    const kinds = kindTypeNamesWithHook(ce, hook);
+    return hasKindArm(t, kinds) && !numericOperandTypeRefused(t, kinds);
+  }
+  // `Clamp` orders its operands, and admits a kind value whose kind type
+  // declares `compare` whatever its `admittedAs`, by the rule of the
+  // arithmetic operators (`docs/plans/2026-10-26-value-kinds.md`, section
+  // 4.4): `Clamp(x, lo, hi)` answers `x` or a bound as written.
+  if (libraryRules && internals?.operatorName === 'Clamp') {
+    const kinds = kindTypeNamesWithHook(ce, 'compare');
+    if (hasKindArm(t, kinds) && !numericOperandTypeRefused(t, kinds))
+      return true;
+  }
+  return admitsThroughCarrier(
+    ce,
+    t,
+    param,
+    isThreadableAt(threadable, idx),
+    stripMissing?.(idx) === true
+  );
+}
+
 export function validateArguments(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
@@ -3532,6 +3699,7 @@ export function validateArguments(
                   // trial would judge an inapplicable callback admissible and
                   // report the arm viable.
                   operatorName: internals?.operatorName,
+                  operatorDefinition: internals?.operatorDefinition,
                   // The collection verdict is the operator's too: a trial
                   // that admitted a `list<string>` at a numeric arm would
                   // rank that arm viable, and final validation would then
@@ -3856,6 +4024,24 @@ export function validateArguments(
       // An expression with an unknown or any type is assumed to be valid,
       // we'll infer the type later
       result.push(op);
+      continue;
+    }
+    // A kind value admitted by the rules of the value kinds — see
+    // `kindOperandAdmitted`. Deferred: the final inference pass must not
+    // read a kind value as a number.
+    if (
+      kindOperandAdmitted(
+        ce,
+        op,
+        param,
+        idx,
+        threadable,
+        stripMissing,
+        internals
+      )
+    ) {
+      result.push(op);
+      deferredIdx.add(result.length - 1);
       continue;
     }
     if (
@@ -4232,6 +4418,15 @@ export function validateArguments(
       i += 1;
       continue;
     }
+    // A kind value — see the required parameters above.
+    if (
+      kindOperandAdmitted(ce, op, param, i, threadable, stripMissing, internals)
+    ) {
+      result.push(op);
+      deferredIdx.add(result.length - 1);
+      i += 1;
+      continue;
+    }
     if (isThreadableAt(threadable, i) && couldBeUnkeyedCollectionOperand(op)) {
       const checked = checkThreadableOperand(
         ce,
@@ -4516,6 +4711,22 @@ export function validateArguments(
         // An expression with an unknown or any type is assumed to be valid,
         // we'll infer the type later
         result.push(op);
+        continue;
+      }
+      // A kind value — see the required parameters above.
+      if (
+        kindOperandAdmitted(
+          ce,
+          op,
+          varParam,
+          i - 1,
+          threadable,
+          stripMissing,
+          internals
+        )
+      ) {
+        result.push(op);
+        deferredIdx.add(result.length - 1);
         continue;
       }
       // The operand index is `i - 1` (already incremented at the loop top).

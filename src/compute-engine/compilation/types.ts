@@ -2724,6 +2724,11 @@ export type StoredEntryPlan = {
    * is here when its declared type is a collection type that compiled code
    * reads as an array and whose elements are not text. */
   strings?: [string | number, string][];
+  /** The bindings of a value kind type, checked by the `entry` of the
+   * kind's compile contract (`ArithmeticCompile`). That check is a function
+   * of the host, which stored data cannot carry, so a runtime refuses to
+   * load a plan that lists one. */
+  kinds?: (string | number)[];
 };
 
 /**
@@ -2990,6 +2995,18 @@ export type CompilationResult<
    * nothing to check.
    */
   entryPlan?: StoredEntryPlan;
+
+  /**
+   * JavaScript only. The value kind types (`gf8`, a type declared by the
+   * host with a compile contract, `ArithmeticCompile`) whose compiled
+   * representation the code reads or makes. The value of `run()` is then
+   * returned as the code makes it (a kind value is the representation of the
+   * kind, not a number). Code compiled with a kind contract cannot be stored:
+   * the runtime of `@cortex-js/compute-engine/runtime` refuses to load it,
+   * because the run-time checks of the kind are functions of the host that
+   * compiled it. Absent when no value kind is involved.
+   */
+  valueKinds?: string[];
 
   /**
    * JavaScript only. The significant digits `run()` reads the float exponent

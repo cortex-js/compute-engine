@@ -42,7 +42,7 @@ import {
   freshParameters,
 } from './diophantine.js';
 import { contextAssumptions, isFactTrue } from './constraint-subject.js';
-import { containsResidueClass } from './residue-class.js';
+import { holdsKindValue } from './residue-class.js';
 import { sameSyntactic } from './compare.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { halfTurnAngle } from './trigonometry.js';
@@ -599,7 +599,7 @@ function evaluateSolveOperands(
   // An equation that holds a residue class is not solved: the solver works
   // in the numbers, and its check of a root reads the zero class
   // `ResidueClass(0, n)` as not 0, so it would report no solution.
-  if (containsResidueClass(eq.canonical)) return undefined;
+  if (holdsKindValue(eq.canonical)) return undefined;
 
   // The held equation is non-canonical (`Solve` is lazy). Canonicalize it: an
   // `Equal`/predicate that still contains the free unknown stays symbolic (it

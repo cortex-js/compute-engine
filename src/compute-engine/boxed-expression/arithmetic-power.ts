@@ -52,7 +52,8 @@ import { realExponentValue } from './imaginary-part.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { complexPow } from '../numerics/numeric-complex.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
-import { containsResidueClass, residueArithmetic } from './residue-class.js';
+import { holdsKindValue } from './residue-class.js';
+import { kindArithmetic } from './kind-dispatch.js';
 import { reduceAlgebraicGeneratorPower } from './algebraic-generator.js';
 import {
   isProvablyScalar,
@@ -296,8 +297,8 @@ export function canonicalPower(a: Expression, b: Expression): Expression {
   // the evaluate handler know its ring. The rules below would merge
   // `(c^{2/3})^3` into `c^2` (a non-integer power of a class has no value)
   // and read `(c^{-1})^{-1}` as `c` when `c` has no inverse (see
-  // `containsResidueClass()`).
-  if (containsResidueClass(a) || containsResidueClass(b)) return unchanged();
+  // `holdsKindValue()`).
+  if (holdsKindValue(a) || holdsKindValue(b)) return unchanged();
 
   // A power of an `AlgebraicGenerator` at or above the degree of its defining
   // polynomial is reduced modulo that polynomial: for a root of t² - 2, α² is
@@ -772,10 +773,7 @@ export function canonicalRoot(
 ): Expression {
   const ce = a.engine;
   // A root of a residue class is kept as it is (see `canonicalPower()`).
-  if (
-    containsResidueClass(a) ||
-    (typeof b !== 'number' && containsResidueClass(b))
-  )
+  if (holdsKindValue(a) || (typeof b !== 'number' && holdsKindValue(b)))
     return b === 2
       ? ce._fn('Sqrt', [a])
       : ce._fn('Root', [a, typeof b === 'number' ? ce.number(b) : b]);
@@ -1324,10 +1322,10 @@ export function pow(
     return nanOperandAnswer(x.engine, ops);
   }
 
-  // A residue class in the power: only the residue rules apply
-  // (`residueArithmetic()`). It comes after the `Indeterminate` rule above,
-  // which applies to a class as to any base.
-  const residue = residueArithmetic(x.engine, 'Power', [x, x.engine.expr(exp)]);
+  // A kind value in the power (a residue class): only the hooks of the kinds
+  // apply (`kindArithmetic()`). It comes after the `Indeterminate` rule
+  // above, which applies to a class as to any base.
+  const residue = kindArithmetic(x.engine, 'Power', [x, x.engine.expr(exp)]);
   if (residue !== undefined) return residue;
 
   //
@@ -2029,8 +2027,9 @@ export function root(
   if (!(a.isCanonical || a.isStructural) || !(b.isCanonical || b.isStructural))
     return a.engine._fn('Root', [a, b], { canonical: false });
 
-  // A root of a residue class is kept as written (`residueArithmetic()`).
-  const residue = residueArithmetic(a.engine, 'Root', [a, b]);
+  // A root of a kind value: the `power` hook of its kind, with the exponent
+  // `1/n`, or the root as written (`kindArithmetic()`).
+  const residue = kindArithmetic(a.engine, 'Root', [a, b]);
   if (residue !== undefined) return residue;
 
   const special = rootAtExceptionalPoint(a, b);
