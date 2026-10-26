@@ -132,6 +132,40 @@ describe('a structural expression boxed from MathJSON', () => {
     ce.box(['Add', 'zz', 1], { form: 'structural' });
     expect(ce.lookupDefinition('zz')).toBeUndefined();
   });
+
+  // The structural form keeps the written name of a symbol whose canonical
+  // form is another expression (`i` is the complex literal `0 + 1i`, `e` the
+  // symbol `ExponentialE`). A host reads `M(i) = i^2` as a definition with the
+  // parameter `i`. Tycho row 448.
+  test.each([
+    [
+      ['Equal', ['M', 'i'], ['Power', 'i', 2]],
+      '["Equal",["M","i"],["Power","i",2]]',
+    ],
+    [['Add', ['Power', 'e', 'x'], 'e'], '["Add",["Power","e","x"],"e"]'],
+    [['Add', 'ImaginaryUnit', 'Half'], '["Add","ImaginaryUnit","Half"]'],
+    [{ sym: 'i' }, '"i"'],
+  ])('keeps the written constant name in %j', (expr, expected) => {
+    const ce = new ComputeEngine();
+    const boxed = ce.box(expr as never, { form: 'structural' });
+    expect(JSON.stringify(boxed.json)).toBe(expected);
+  });
+
+  test('a name that is not in NFC binds to the definition of its NFC form', () => {
+    // `\u212B` (ANGSTROM SIGN) normalizes to `\u00C5`: it is not a name that
+    // resolved to another expression.
+    const ce = new ComputeEngine();
+    ce.declare('\u00C5', 'integer');
+    const boxed = ce.box({ sym: '\u212B' }, { form: 'structural' });
+    expect(boxed.type.toString()).toBe('integer');
+  });
+
+  test('a kept constant name is still the constant once canonical', () => {
+    const ce = new ComputeEngine();
+    const boxed = ce.box(['Power', 'i', 2], { form: 'structural' });
+    expect(boxed.canonical.toString()).toBe('-1');
+    expect(boxed.evaluate().toString()).toBe('-1');
+  });
 });
 
 describe('an element-wise head over a union of a point and a vector', () => {

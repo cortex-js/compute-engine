@@ -5194,6 +5194,27 @@ function capturedValueMismatch(
   fnExpr: Expression & FunctionInterface,
   capturedScope: Scope
 ): Expression | undefined {
+  const mismatch = capturedValueMismatchEntry(fnExpr, capturedScope);
+  if (mismatch === undefined) return undefined;
+  return ce.typeError(
+    mismatch.expected.type,
+    mismatch.value.type,
+    mismatch.value
+  );
+}
+
+/**
+ * The first captured symbol of `fnExpr` whose value is not of the type the
+ * body was typed with: its name, that type, and the value it holds. This is
+ * the test of `capturedValueMismatch()`, with the evidence that a message
+ * can name. `undefined` when each captured value is of its type.
+ */
+function capturedValueMismatchEntry(
+  fnExpr: Expression & FunctionInterface,
+  capturedScope: Scope
+):
+  | { name: string; expected: Expression['type']; value: Expression }
+  | undefined {
   if (CALLER_CHECKED.has(fnExpr)) return undefined;
   const captured = capturedSymbols(fnExpr);
   if (captured.length === 0) return undefined;
@@ -5224,7 +5245,7 @@ function capturedValueMismatch(
       value.type.matches(stripNumericRanges(expected.type))
     )
       continue;
-    return ce.typeError(expected.type, value.type, value);
+    return { name, expected, value };
   }
   return undefined;
 }
@@ -5272,9 +5293,23 @@ export function withCallerCapturedCheck<T>(literal: Expression, f: () => T): T {
  * (`capturedValueMismatch()`), read in the scope the literal was defined in.
  */
 export function capturedValueMismatchNow(literal: Expression): boolean {
-  if (!isFunction(literal, 'Function')) return false;
+  return capturedValueMismatchNowEntry(literal) !== undefined;
+}
+
+/**
+ * The first captured symbol of the canonical function literal `literal`
+ * that holds now a value that is not of the type the body was typed with:
+ * its name, that type, and the value. This is the test of
+ * `capturedValueMismatchNow()`, with the evidence that a message can name.
+ */
+export function capturedValueMismatchNowEntry(
+  literal: Expression
+):
+  | { name: string; expected: Expression['type']; value: Expression }
+  | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
   const body = literal.ops[0];
-  if (!body.isScoped || body.localScope === undefined) return false;
+  if (!body.isScoped || body.localScope === undefined) return undefined;
   const ce = literal.engine;
   const capturedScope =
     definingScopeOf(ce, body.localScope) ?? ce.context.lexicalScope;
@@ -5284,12 +5319,12 @@ export function capturedValueMismatchNow(literal: Expression): boolean {
     const n = CALLER_CHECKED.get(fnExpr)!;
     CALLER_CHECKED.delete(fnExpr);
     try {
-      return capturedValueMismatch(ce, fnExpr, capturedScope) !== undefined;
+      return capturedValueMismatchEntry(fnExpr, capturedScope);
     } finally {
       CALLER_CHECKED.set(fnExpr, n);
     }
   }
-  return capturedValueMismatch(ce, fnExpr, capturedScope) !== undefined;
+  return capturedValueMismatchEntry(fnExpr, capturedScope);
 }
 
 function makeLambda(

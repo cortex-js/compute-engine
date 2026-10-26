@@ -812,7 +812,9 @@ function outerBindingOf(
  * type of the definition was inferred (`noteDefinitionCapturedTypes()`). */
 const DEFINITION_CAPTURED_TYPES = new WeakMap<
   object,
-  ReadonlyArray<readonly [BoxedValueDefinition, BoxedType]>
+  ReadonlyArray<
+    readonly [binding: BoxedValueDefinition, type: BoxedType, name: string]
+  >
 >();
 
 /**
@@ -831,14 +833,17 @@ export function noteDefinitionCapturedTypes(
   literal: Expression
 ): void {
   if (!isFunction(literal, 'Function')) return;
-  const bindings: Array<readonly [BoxedValueDefinition, BoxedType]> = [];
+  const bindings: Array<
+    readonly [binding: BoxedValueDefinition, type: BoxedType, name: string]
+  > = [];
   for (const entry of capturedSymbols(literal)) {
     const own = entry.occurrence.valueDefinition;
     const binding =
       own !== undefined && own.inferredType && own.value === undefined
         ? (outerBindingOf(literal, entry) ?? own)
         : own;
-    if (binding !== undefined) bindings.push([binding, binding.type] as const);
+    if (binding !== undefined)
+      bindings.push([binding, binding.type, entry.name] as const);
   }
   if (bindings.length === 0 && !DEFINITION_CAPTURED_TYPES.has(def)) return;
   journalCheckpointMemoEntry(
@@ -864,14 +869,27 @@ export function noteDefinitionCapturedTypes(
  * (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
  */
 export function capturedTypesWidened(def: object): boolean {
+  return capturedTypeWidening(def) !== undefined;
+}
+
+/**
+ * The first captured symbol of the literal of the definition `def` whose
+ * binding has a type now that is not a subtype of its type when the type of
+ * `def` was inferred: its name, that earlier type, and its type now. This
+ * is the test of `capturedTypesWidened()`, with the evidence that a message
+ * can name. `undefined` when there is no such symbol.
+ */
+export function capturedTypeWidening(
+  def: object
+): { name: string; before: BoxedType; now: BoxedType } | undefined {
   const snapshot = DEFINITION_CAPTURED_TYPES.get(def);
-  if (snapshot === undefined) return false;
-  for (const [binding, before] of snapshot) {
+  if (snapshot === undefined) return undefined;
+  for (const [binding, before, name] of snapshot) {
     const now = binding.type;
     if (now === before || now.isUnknown) continue;
-    if (!isSubtype(now.type, before.type)) return true;
+    if (!isSubtype(now.type, before.type)) return { name, before, now };
   }
-  return false;
+  return undefined;
 }
 
 /**

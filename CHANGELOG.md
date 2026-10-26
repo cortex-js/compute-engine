@@ -2,6 +2,23 @@
 
 ### Behavior Changes
 
+- **A finite range of integers and the list of its integers are the same
+  element of a collection.** `Set(Range(1, 3), [1, 2, 3])` has one element,
+  `[1, 2, 3]` is an element of `[Range(1, 3)]`, and `IndexOf`, `Unique`,
+  `Tally`, `Union` and `Contains` treat the two as one. `Range(1, 3)`,
+  `Range(1, 3, 1)` and `[1, 2, 3]` are the same for `isSame` and have the same
+  hash. The rule applies to a range whose bounds and step are integer literals
+  and that has at most 10,000 elements. `Equal` is unchanged.
+- **A range that is an element of a collection stays a range.** `[1..3, 4]`
+  evaluates to `[Range(1, 3), 4]` (it was `[[1,2,3], 4]`), and
+  `Tuple(Range(1, 3), 4)` to `(Range(1, 3), 4)`, so the value agrees with the
+  type `tuple<range, integer>`. A symbol declared
+  `list<range>` holds `[Range(1, 3)]` (it held `[[1, 2, 3]]`, which is not a
+  list of ranges). The same applies to a `Set` element, a cell of a broadcast
+  result (`g(s) = 1..s; g([2, 3])` is `[Range(1, 2), Range(1, 3)]`) and a
+  spread element. A range on its own is unchanged, and `Length`, `At`,
+  `Flatten`, `Sum` and `Map` give the same values. Other lazy elements, such as
+  a `Map` or a comprehension, are still listed.
 - **`LUDecomposition`, `QRDecomposition` and `CholeskyDecomposition` of a matrix
   of exact rational entries give exact factors under `evaluate()`.** The LU of
   `[[4, 3], [6, 3]]` is `([[0,1],[1,0]], [[1,0],[2/3,1]], [[6,3],[0,1]])` (the
@@ -53,6 +70,20 @@
 
 ### Resolved Issues
 
+- **The structural form keeps a constant name as written again.** In 0.168.0,
+  `ce.box(['Power', 'i', 2], { form: 'structural' })` gave
+  `Power(Complex(0, 1), 2)`, `e` became `ExponentialE`, and `Half` became
+  `1/2`, so `M(i) = i^2` read structurally had no parameter named `i`. A
+  symbol whose canonical form is another expression (`i`, `ImaginaryUnit`,
+  `e`, `Half`) now keeps its name and is unbound, typed `unknown`, as in
+  0.167.0. Every other symbol still binds to its definition: `["Add", "t",
+  "t"]` with `t: tuple<integer, integer>` is typed `tuple<integer, integer>`.
+  The canonical form and the value are unchanged: the canonical form of the
+  structural `i^2` is `-1`.
+- **A compile refused because a captured symbol changed type names that
+  symbol.** The message gives the symbol and both of its types, for example
+  "the symbol 'd' that its body reads has the type `real`, but the body of
+  'x_0' was typed when 'd' had the type `integer`".
 - **A partial application keeps its argument inside a held operand.** With
   `f(a, b) := If(b, a[1] + a[2], 42)`, `f((1, 2))` gave
   `(_) => If(_, At(a, 1) + At(a, 2), 42)`, and applying it to `True` gave

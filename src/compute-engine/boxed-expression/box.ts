@@ -457,6 +457,36 @@ function isStructuralBinder(
 }
 
 /**
+ * Box the symbol `name` for the structural form. The symbol binds to the
+ * definition its name resolves to, so that the type handler of the
+ * enclosing function reads its declared type (with `t: tuple<integer,
+ * integer>`, `["Add", "t", "t"]` is typed `tuple<integer, integer>`). The
+ * structural form keeps the written name: when the canonical form of the
+ * name is another expression (`i` and `ImaginaryUnit` box to the complex
+ * literal `0 + 1i`, `e` to the symbol `ExponentialE`, `Half` to `1/2`),
+ * the symbol is boxed unbound, as the raw form boxes it. A host that reads
+ * the structural form of `M(i) = i^2` as the definition of `M` with the
+ * parameter `i` then sees the name `i`. Nothing is declared: a name that
+ * resolves to no definition is boxed unbound too.
+ */
+function boxStructuralSymbol(
+  ce: ComputeEngine,
+  name: MathJsonSymbol,
+  metadata?: Metadata
+): Expression {
+  const bound = ce.symbol(name, {
+    canonical: true,
+    autoDeclare: false,
+    metadata,
+  });
+  // `ce.symbol()` normalizes the name to NFC: compare with that form, so that
+  // a name such as `Å` (which normalizes to `Å`) is not taken for a
+  // name that resolved to another expression.
+  if (isSymbol(bound, name.normalize())) return bound;
+  return ce.symbol(name, { canonical: false, metadata });
+}
+
+/**
  * Stride for the canonicalization walk's deadline check (see
  * `boxFunctionInternal`), the idiom `common/interruptible.ts` documents.
  *
@@ -1705,17 +1735,17 @@ function boxInternal(
       // A partial form resolves symbols but never DECLARES them: its output is
       // not fully canonical, so it follows the structural symbol contract and
       // leaves the caller's scope untouched (`autoDeclare: false`). The
-      // structural form follows the same contract: a symbol binds to the
-      // definition its name resolves to, so that the type handler of the
-      // enclosing function reads its declared type (with `t: tuple<integer,
-      // integer>`, `["Add", "t", "t"]` is typed `tuple<integer, integer>`,
-      // as on the `ce.function()` route). An unbound symbol is typed
-      // `unknown`. A symbol below a structural binder stays unbound
-      // (`BoxFunctionOptions.unboundSymbols`).
-      const canonicalSymbol =
-        canonical ||
-        (structural && options.unboundSymbols !== true) ||
-        options.canonical !== false;
+      // structural form binds a symbol to its definition but keeps the
+      // written name (`boxStructuralSymbol`). A symbol below a structural
+      // binder stays unbound (`BoxFunctionOptions.unboundSymbols`).
+      if (
+        structural &&
+        !canonical &&
+        options.canonical === false &&
+        options.unboundSymbols !== true
+      )
+        return boxStructuralSymbol(ce, sym);
+      const canonicalSymbol = canonical || options.canonical !== false;
       return ce.symbol(sym, {
         canonical: canonicalSymbol,
         autoDeclare: canonical,
@@ -1761,12 +1791,20 @@ function boxInternal(
       return canonicalForm(fn, options.canonical!, options.scope);
     }
     if ('str' in expr) return new BoxedString(ce, expr.str, metadata);
-    if ('sym' in expr)
+    if ('sym' in expr) {
+      if (
+        structural &&
+        !canonical &&
+        options.canonical === false &&
+        options.unboundSymbols !== true
+      )
+        return boxStructuralSymbol(ce, expr.sym, metadata);
       return ce.symbol(expr.sym, {
-        canonical: canonical || (structural && options.unboundSymbols !== true),
+        canonical,
         autoDeclare: canonical,
         metadata,
       });
+    }
     if ('num' in expr) return ce.number(expr, { canonical, metadata });
     if ('dict' in expr) {
       // A malformed entry yields a boxed error, not a raw throw — the same

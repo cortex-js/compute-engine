@@ -280,6 +280,18 @@ describe('CE-473 (c): THE COMPILED ROUTE WHATEVER THE TYPE OF THE DEFINITION', (
       /Could not compile the function 'g'/
     );
   });
+
+  test('the message names the symbol and both of its types', () => {
+    // A host that declares many names reads in the message which one
+    // changed. Tycho asked for this after a decline with no name in it.
+    const ce = new ComputeEngine();
+    ce.declare('g', 'function');
+    ce.assign('g', ce.parse('x \\mapsto x + y'));
+    ce.assign('y', ce.string('s'));
+    expect(() => compile(ce.box(['g', 1]), { fallback: false })).toThrow(
+      /the symbol 'y' that its body reads has the type `string`, but the body of 'g' was typed when 'y' had the type `[^`]+`/
+    );
+  });
 });
 
 describe('CE-473 (c): A CHECKPOINT RESTORES THE RECORDED CAPTURED TYPES', () => {

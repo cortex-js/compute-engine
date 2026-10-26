@@ -60,7 +60,7 @@ import {
   type BroadcastSlotPlan,
 } from '../boxed-expression/boxed-function.js';
 import {
-  capturedValueMismatchNow,
+  capturedValueMismatchNowEntry,
   lookupApplicable,
 } from '../function-utils.js';
 import {
@@ -192,7 +192,7 @@ import {
   isDestructuringParameter,
   isRestParameter,
   isScalarType,
-  capturedTypesWidened,
+  capturedTypeWidening,
 } from '../boxed-expression/function-literal.js';
 import { tuplePatternNames } from '../boxed-expression/tuple-pattern.js';
 import { listRecursionPlan } from '../boxed-expression/recursive-list-builder.js';
@@ -32354,14 +32354,26 @@ export class BaseCompiler {
     literal: Expression,
     def: object | undefined
   ): void {
-    if (
-      !(def !== undefined && capturedTypesWidened(def)) &&
-      !capturedValueMismatchNow(literal)
-    )
-      return;
+    // The message names the symbol and both types, so that a host can find
+    // the declaration or the assignment that changed it.
+    const widened = def !== undefined ? capturedTypeWidening(def) : undefined;
+    let reason: string;
+    if (widened !== undefined)
+      reason =
+        `the symbol '${widened.name}' that its body reads has the type ` +
+        `\`${widened.now.toString()}\`, but the body of '${id}' was ` +
+        `typed when '${widened.name}' had the type ` +
+        `\`${widened.before.toString()}\``;
+    else {
+      const mismatch = capturedValueMismatchNowEntry(literal);
+      if (mismatch === undefined) return;
+      reason =
+        `the symbol '${mismatch.name}' that its body reads holds a value of ` +
+        `type \`${mismatch.value.type.toString()}\`, but the body was typed ` +
+        `with '${mismatch.name}' of type \`${mismatch.expected.toString()}\``;
+    }
     throw new Error(
-      `Could not compile the function '${id}': a symbol that its body reads ` +
-        `has a value or a type other than the one its type was inferred with. ` +
+      `Could not compile the function '${id}': ${reason}. ` +
         `The interpreter evaluates it instead.`
     );
   }
