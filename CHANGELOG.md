@@ -1,3 +1,15 @@
+## Unreleased
+
+### Bug Fixes
+
+- **A rational factor in compiled code is a division from the published
+  `compile` entry too.** `n(n-1)(n-2)/6` compiled through `JavaScriptTarget`
+  from `@cortex-js/compute-engine/compile` was `0.16666666666666666 * n * …`
+  (`559.9999999999999` at `n = 16`), because the standalone bundle's own copy of
+  the number classes did not recognize a rational built by `compute-engine`. It
+  is now `(n * …) / 6`, as the source tree already compiled it (#479,
+  contributed by [enumeratio](https://github.com/enumeratio)).
+
 ## 0.169.0 _2026-10-25_
 
 ### Behavior Changes

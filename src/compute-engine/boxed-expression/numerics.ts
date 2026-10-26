@@ -17,6 +17,14 @@ import { exactIntegerValue } from '../numeric-value/exact-integer-value.js';
 import { MathJsonExpression } from '../types.js';
 import { isNumber } from './type-guards.js';
 
+function isExactNumericValue(num: NumericValue): num is ExactNumericValue {
+  return (
+    num instanceof ExactNumericValue ||
+    (typeof (num as ExactNumericValue).radical === 'number' &&
+      Array.isArray((num as ExactNumericValue).rational))
+  );
+}
+
 export function asRational(expr: Expression): Rational | undefined {
   if (!isNumber(expr)) return undefined;
   const num = expr.numericValue;
@@ -37,7 +45,10 @@ export function asRational(expr: Expression): Rational | undefined {
 
   if (num.isComplex) return undefined;
 
-  if (num instanceof ExactNumericValue) {
+  // Read by shape, not `instanceof`: a value built by another copy of this
+  // engine (the standalone `compile` bundle next to `compute-engine`) fails
+  // the class test, and `1/6` would then read as no rational at all.
+  if (isExactNumericValue(num)) {
     if (num.radical !== 1) return undefined;
     return num.rational;
   }
