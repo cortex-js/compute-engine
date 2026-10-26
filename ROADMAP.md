@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-507.
+Next free reference: CE-508.
 
 **Entry format.**
 
@@ -55,7 +55,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Sections
 
-- [Tycho ledger asks](#tycho-ledger-asks) (CE-1 to CE-2)
 - [Types and type inference](#types-and-type-inference) (CE-3 to CE-69)
 - [Collections, absence and broadcasting](#collections-absence-and-broadcasting)
   (CE-70 to CE-90)
@@ -71,63 +70,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 - [Performance](#performance) (CE-313 to CE-353)
 - [Tests, tools, documentation and release tasks](#tests-tools-documentation-and-release-tasks)
   (CE-354 to CE-359)
-
-## Tycho ledger asks
-
-### CE-1. A `window` option of the `grid` layout of `broadcast`
-
-**Status:** on demand; capability. Waits for a measurement by Tycho. Part (3) of
-Tycho row 416, which Tycho closed at 0.160.0 with this part not done.
-
-The `grid` layout already has shared inputs and several outputs per cell (parts
-1 and 2 of the row). Part 3 is a `window` option that names the neighbours of a
-shared input by offset. It would also let the worker pool chunk the grid by
-slabs with a one-cell halo. It waits until Tycho measures its two kernels on the
-stride layout and shows that the option gives more speed: the neighbours are
-index arithmetic on the shared array, and the halo chunking follows from the
-shared input.
-
-Tycho's kernels: a cell kernel of thirteen numbers (the case index 0 to 255 and
-twelve edge fractions `F_a / (F_a - F_b)`, NaN on an edge with no sign change)
-and a point kernel of three (the gradient by central differences of the shared
-array, one-sided on the boundary), in two passes over the grid. Eight to
-twenty-seven `_SYS.atNumeric` reads per cell are acceptable. A direct
-typed-array read for an index that is provably in range is a later optimization
-of the same kernels.
-
-### CE-2. Ask Tycho to read a user function whose result can be absent as scalar
-
-**Status:** open; task. Waits for Tycho. Request filed 2026-10-22 in
-`~/dev/tycho/docs/COMPUTE_ENGINE.md`, section "Standing Tycho-side follow-ups".
-Close CE-2 when Tycho reports there that the request is done (or that the
-problem does not occur on its installed release). Report:
-`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-09-report.md`
-(records in `ce-0.127.0.json` of that folder, CE 0.127.0).
-
-- **CE-2.1** A user function declared `-> unknown` types `broadcastable<number>`
-  through every broadcastable head (`\sin(u(t))` for `u: (unknown) -> unknown`,
-  with the body assigned in ANOTHER scope). This causes the audit's largest item
-  (465 `_SYS.bcast` sites, 42 `PointList` declines on GLSL). Tycho's importer
-  keeps the declared `-> unknown` result wide unless the body's type
-  `matches('number')`, and `missing | number` (a piecewise with no default)
-  fails that test. The CE typing is correct: a piecewise with no default keeps
-  its `missing | T` type (decision 2026-09-09). The fix is on Tycho's side: read
-  `missing | T`, with `T` numeric, as a scalar result. On CE main (2026-10-22),
-  with the body assigned in the scope that reads it, `u(t)` is
-  `missing | real<0..>` and `\sin(u(t))` is `number`; with only the declaration
-  visible, `\sin(u(t))` is still `broadcastable<number>`. The request asks Tycho
-  to measure again on 0.161.0 first.
-- Known difference that stays: `g(3) + 0` evaluates to `Missing` while
-  `g(3) + 1` evaluates to `NaN`, because the identity element is dropped at
-  canonicalization (`g(3) + 0` IS `g(3)`).
-- The piecewise decidedness guard `(v === v) ? … : NaN` stays, although Tycho's
-  item 276 asks to drop it. `Which(Equal(NaN, 5), 1, True, 0)` is `Missing` in
-  the interpreter, so the compiled piecewise must answer `NaN` when the compared
-  value is `NaN`; without the guard `NaN === 5` is `false` and the else arm
-  answers. `compile-equality-exact.test.ts` pins the interpreter's `Missing`.
-- Not CE's: the inline `At` lambda (Tycho's own override), the "Unknown
-  operator" declines (importer binding), and the 2× re-compile of every declined
-  row.
 
 ## Types and type inference
 
@@ -446,19 +388,6 @@ walk shares its confinement state with the enclosing literal.
 hold other fields), so the key may exist at run time. The check catches typos,
 but it refuses programs that are correct for a record with more fields.
 
-### CE-504. A point multiplied by an operand that may be a list is typed as one point
-
-**Status:** open; wrong value.
-
-`(x, y)·(2·Lu[1])` with `Lu: list<unknown>` is typed `tuple<number, number>`;
-with `Lu := [[1, 2]]` the value is `[(6, 8), (12, 16)]`, and with
-`Lu := [[[1], [2, 3]]]` it is a ragged list of points. A `broadcastable<number>`
-operand has the same defect: `(x, y)·b` and `(x, y)/b` are typed
-`tuple<number, number>`. `(x, y)/(2·Lu[1])` is typed
-`list<tuple<number, number>> | tuple<number, number>`, which still does not hold
-the ragged value. The point-arithmetic route (`library/arithmetic.ts`) must
-admit a list of points of any depth when the other operand may be a list.
-
 ## Collections, absence and broadcasting
 
 ### CE-505. A point argument of a recursive alias whose arms mix points and lists is refused
@@ -467,12 +396,12 @@ admit a list of points of any depth when the other operand may be a list.
 
 With `k` declared `(tuple<number, number>) -> number` and the alias
 `B = list<B> | tuple<number, number>`, a symbol `y: B` that holds the point
-`(1, 2)` gives `k(y)` the type `error` and an `incompatible-type` value,
-though `k((1, 2))` is `3`. A value of `B` can also be a list whose elements
-mix points and lists (`[(1, 2), [(3, 4)]]`), which the map over points refuses,
-so the walk (`recursivePointNesting()`, `collection-utils.ts`) refuses the
-whole alias. The call could instead be accepted, typed by the depth it reads
-from the value, and refuse only a value whose elements mix depths.
+`(1, 2)` gives `k(y)` the type `error` and an `incompatible-type` value, though
+`k((1, 2))` is `3`. A value of `B` can also be a list whose elements mix points
+and lists (`[(1, 2), [(3, 4)]]`), which the map over points refuses, so the walk
+(`recursivePointNesting()`, `collection-utils.ts`) refuses the whole alias. The
+call could instead be accepted, typed by the depth it reads from the value, and
+refuse only a value whose elements mix depths.
 
 ### CE-506. A call at a point parameter with an empty list is typed as one result
 
@@ -480,9 +409,8 @@ from the value, and refuse only a value whose elements mix depths.
 
 With `k` declared `(tuple<number, number>) -> number`, `k([])` is typed
 `number`, and its value is `[]`. A comment on `isPointListArgumentType()`
-(`collection-utils.ts`) says that `list<never>` is left out on purpose; the
-type of the call should still hold the value, for example
-`number | list<never>`.
+(`collection-utils.ts`) says that `list<never>` is left out on purpose; the type
+of the call should still hold the value, for example `number | list<never>`.
 
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 
@@ -1259,6 +1187,49 @@ the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
 ## Symbolic computation
+
+### CE-507. A head declared `-> residue` cannot supply its own `Add` and `Multiply`
+
+**Status:** decision needed; capability and documentation defect, medium.
+[#477](https://github.com/cortex-js/compute-engine/issues/477).
+
+With `MyMod` declared `(any, any) -> residue`, `x + MyMod(2, 4) + MyMod(1, 4)`
+stays as it is under `evaluate()` and `simplify()`, and so do
+`MyMod(2, 4)·MyMod(3, 4)` and `MyMod(2, 4) - MyMod(2, 4)` (which is
+`Add(Negate(MyMod(2, 4)), MyMod(2, 4))`). The same sums with `ResidueClass`
+fold. The type gives the head protection from the number rules, but no component
+lets the head define its arithmetic:
+
+- `residueFold()`, `ringOf()`, `classOf()` and `residueOf()`
+  (`boxed-expression/residue-class.ts`) and `exactOperands()`
+  (`library/arithmetic.ts`) read only calls named `ResidueClass`.
+- The residue step of `simplify()` (`boxed-expression/simplify.ts`) stops at an
+  arithmetic expression that holds a class and keeps only an evaluated result
+  that `isResidueClass()` accepts, so a simplification rule of the user is not
+  reached either.
+- `doc/06-guide-augmenting.md` ("Declaring an Operator Whose Values Are Residue
+  Classes") tells the reader to extend `Add` with an `evaluate` handler and
+  `{ extend: true }`. That replaces the library `Add` for the whole engine:
+  after the extension, `x + x + 1 + 2` evaluates and simplifies to `x + x + 3`,
+  not `2x + 3`. The `CHANGELOG.md` entry for the `residue` type says that such a
+  head "defines its own" arithmetic.
+
+Options:
+
+- (a) A field on the operator definition of the head, for example
+  `residueArithmetic: { add(a, b), multiply(a, b), negate(a), divide?(a, b), power?(a, n) }`,
+  each answering an expression or `undefined`. The residue fold groups the
+  operands by head and calls the field for the operands of that head and for the
+  exact literals; an operand it declines stays in the rest, as `ResidueClass`
+  classes of two moduli do. `ResidueClass` itself can be moved onto the field,
+  so one fold serves both. The `simplify()` step then accepts a result typed
+  `residue`, not only a `ResidueClass` call.
+- (b) No hook: correct the guide and the CHANGELOG to say that a sum of the
+  values of such a head stays unevaluated, and remove the advice to extend
+  `Add`.
+
+Option (b) is required in any case until (a) ships, because the current advice
+breaks `Add`.
 
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
@@ -4301,11 +4272,13 @@ than it saves).
 
 **Status:** open; capability. User decision 2026-10-20: the Epsil asynchronous
 route waits for Tycho's integration feedback. Tycho's feedback is written
-(2026-10-24, Tycho commit `74eea7228`, `~/dev/tycho/docs/COMPUTE_ENGINE.md`,
-entry CE-314: `FindFit.evaluateAsync()` on CE 0.164.0 and `broadcastAsync()` on
-CE 0.165.0). Its asks (a time limit and event-loop turns on the asynchronous
-routes, `inline: false`, `willUsePool()`, `shippable`, and the `route` of a
-batch or a fit) are done; CE-430 is what remains of them. Plan:
+(2026-10-24, Tycho commit `74eea7228`; moved 2026-10-26 to
+`~/dev/tycho/docs/COMPUTE_ENGINE_LOG.md`, section "Two standing Tycho-side
+follow-ups closed on 2026-10-24 and 2026-10-25": `FindFit.evaluateAsync()` on CE
+0.164.0 and `broadcastAsync()` on CE 0.165.0). Tycho has nothing pending on this
+entry. Its asks (a time limit and event-loop turns on the asynchronous routes,
+`inline: false`, `willUsePool()`, `shippable`, and the `route` of a batch or a
+fit) are done; CE-430 is what remains of them. Plan:
 `docs/plans/2026-10-20-worker-kernel-pool.md`,
 `docs/plans/2026-10-20-findfit-global-grid.md`.
 
@@ -4789,33 +4762,22 @@ body.
 
 ### CE-342. Fixed-width collection chains: compile optimizations that remain
 
-**Status:** open; performance. CE-342.1 waits for Tycho: request filed
-2026-10-22 in `~/dev/tycho/docs/COMPUTE_ENGINE.md`, section "Standing Tycho-side
-follow-ups" (measure the Desmos state `62urmx2dcm` again on 0.161.0).
+**Status:** open; performance.
 
-The by-reference Voronoi row costs about 2.7 µs a sample (the inlined row 1.2 µs
-on the same machine). What remains:
+Cross-definition CSE (the former CE-342.1) left this entry 2026-10-26: Tycho
+measured the by-reference Voronoi row of the Desmos state `62urmx2dcm` on CE
+0.169.2 at 0.51 µs a sample against 0.25 µs inlined (2.7 and 1.2 µs in September
+2026), and reported that the row is an implicit region drawn on the GPU, so the
+CPU field serves only a host without WebGL, and the 2× does not matter to it.
+Its record: `~/dev/tycho/docs/COMPUTE_ENGINE_LOG.md`, section "Two CE maintainer
+requests answered 2026-10-26"; probe
+`~/dev/tycho/scripts/repros/2026-10-26-ce342-voronoi-row-cost-probe.mts`. The
+design notes of that item (a CSE harvest spanning several emitted definitions,
+alpha-renaming of parameters across bodies, a memo of an array result; inlining
+small scalar callees measured and rejected because a bound on the authored body
+does not bound the emitted code) are in the git history of this file. What
+remains:
 
-- **CE-342.1** Cross-definition CSE. The last-call memo
-  (`memoizeSharedDefinitions`, `javascript-target.ts`) answers the row's second
-  call of `m(x, y)` from the record of the call inside `m2`. The remaining 2× is
-  the nine-point block, computed once inside `m2` (its own inlined `d(x, y)`)
-  and once inside `m`. To share it, emit the block once as a helper over
-  `(x, y)` that returns the nine distances, memoize it the same way, and read it
-  in both bodies. This needs three new things: a CSE harvest whose region spans
-  several emitted definitions (`cse.ts` regions are per root, and a candidate
-  found in two bodies must become a call that passes the bodies' parameters, not
-  a `const` at a region entry); an alignment of parameter names across the
-  bodies (`m(u, v)` would not match without alpha-renaming); and a memo of an
-  ARRAY result, which the current memo declines (an array compares by identity
-  and its consumer may mutate it). Inlining small scalar callees at call sites
-  was measured and rejected: a size bound on the AUTHORED body does not bound
-  the EMITTED code (`m` is 4 nodes authored, 2 456 characters emitted), and
-  making the inliner the primary route changes 374 `_fn_*` call shapes across 35
-  test files. Corpus count (tycho-perf, 2026-09-09, 71 documents): a
-  collection-valued helper reached from two or more definitions occurs in 2 of
-  30 core documents, and only this Voronoi row reaches such a helper through two
-  callers.
 - **CE-342.2** A fixed width known only from a TYPE
   (`P: list<tuple<number, number>^9>` as a symbol, `At(P, i)` reads) is not
   unrolled; the pass needs a literal `List`. Unrolling from the type would

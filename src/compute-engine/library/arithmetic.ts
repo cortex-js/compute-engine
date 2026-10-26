@@ -261,6 +261,7 @@ import {
   couldMatch,
   isEmptyType,
   isSubtype,
+  cannotHoldAList,
 } from '../../common/type/subtype.js';
 import {
   negativeSign,
@@ -3297,6 +3298,264 @@ function isDeclaredNumberListOperand(d: OperandDescriptor): boolean {
 }
 
 /**
+ * An operand whose every value is a number or a tensor of numbers, as the
+ * user stated it: a symbol declared `broadcastable<number>` or
+ * `number | broadcastable<real>` (the `'tensor'` shape of
+ * `pointPartnerShape`), or an application of a broadcasting head whose every
+ * operand is such an operand or a proven scalar number
+ * (`isProvenScalarNumberOperand`), such as `-b` or `2b`. A point has no sum
+ * with such a value (`(x, y) + b` is an `incompatible-type` error for a
+ * number `b`, a tensor of such errors for a tensor `b`, and the empty list
+ * for `b = []`), so the sum is typed `broadcastable<error>`. A symbol whose type was only inferred is
+ * not read, and neither is an application over one: a broadcasting head over
+ * such an operand may still hold a point (Tycho item 241).
+ */
+function isDeclaredNumberTensorOperand(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  if (pointPartnerShape(d)?.shape !== 'tensor') return false;
+  const s = d.structureOf?.();
+  if (s?.kind === 'symbol') return s.inferred !== true;
+  if (s?.kind !== 'application' || s.children === undefined) return false;
+  if (engine.lookupDefinition(s.head)?.operator?.broadcastable !== true)
+    return false;
+  return s.children.every(
+    (c) =>
+      isProvenScalarNumberOperand(c, engine) ||
+      isDeclaredNumberTensorOperand(c, engine)
+  );
+}
+
+/**
+ * How an operand beside a point gives the shape of a component-wise result
+ * (a product, a quotient or a sum with the point), when the type of the
+ * operand is not a scalar type and not a collection of numbers with a
+ * known shape. `cell` is the number type that one scalar of the operand
+ * contributes to the components of the point.
+ *
+ * - `'any-depth'`: the value may be a scalar or a list of any depth, and the
+ *   list may be ragged. This is an application typed `unknown` (an element
+ *   read `L[1]` of a `list<unknown>`, a call of an undeclared function), the
+ *   open form `R | tuple | list<R | tuple | list<any>>`
+ *   (`openDepthScalarArms`), and a `broadcastable<unknown>`.
+ * - `'list-any-depth'`: the value is a list, and each element may be a
+ *   scalar or a list of any depth: `list<unknown>`, `list<any>`, the bare
+ *   `list`, `list<integer | list<integer>>`.
+ * - `'tensor'`: the value is a scalar or a rectangular tensor of numbers: a
+ *   `broadcastable<E>` with number cells `E`, or a union of such types and
+ *   number types (`number | broadcastable<number>`).
+ * - `'nested'`: the value is a list of lists of numbers, `list<list<E>>`
+ *   (the inner lists can have different lengths). The result has the shape
+ *   of `type`, with each number cell replaced by a point.
+ *
+ * `undefined` for every other operand. An auto-declared symbol typed
+ * `unknown` is read as a scalar, as `isPossiblyCollectionTypedOperand`
+ * reads it.
+ */
+type PointPartner = {
+  shape: 'any-depth' | 'list-any-depth' | 'tensor' | 'nested';
+  cell: Type;
+  type: Type;
+};
+
+function pointPartnerShape(d: OperandDescriptor): PointPartner | undefined {
+  const resolved = resolveTypeAlias(d.type);
+  const isApplication = operandChildren(d) !== undefined;
+  const t =
+    (isApplication ? topTypeBesideAbsence(resolved) : undefined) ?? resolved;
+  const partner = (
+    shape: PointPartner['shape'],
+    cell: Type = 'number'
+  ): PointPartner => ({ shape, cell, type: t });
+  if (t === 'unknown') return isApplication ? partner('any-depth') : undefined;
+  if (t === 'list') return partner('list-any-depth');
+  if (typeof t === 'string') return undefined;
+  const open = openDepthScalarArms(t);
+  if (open !== undefined)
+    return partner(
+      'any-depth',
+      open !== 'never' && factsOf(open).belowNumber ? open : 'number'
+    );
+  // The types that `pointShapedResultType` gives, `Q | list<Q | list<any>>`
+  // and `list<Q | list<any>>` for a point type `Q`: a list whose elements
+  // are `list<any>` or types that cannot hold a list, alone or beside types
+  // that cannot hold a list. The open form above needs a scalar arm, and
+  // these types have none.
+  const isAnyDepthList = (x: Type): boolean => {
+    const a = resolveTypeAlias(x);
+    if (
+      typeof a === 'string' ||
+      a.kind !== 'list' ||
+      a.dimensions !== undefined
+    )
+      return false;
+    const e = resolveTypeAlias(a.elements);
+    if (typeof e === 'string' || e.kind !== 'union') return false;
+    const isListOfAny = (m: Type): boolean => {
+      const r = resolveTypeAlias(m);
+      return (
+        typeof r !== 'string' &&
+        r.kind === 'list' &&
+        r.dimensions === undefined &&
+        r.elements === 'any'
+      );
+    };
+    return (
+      e.types.some(isListOfAny) &&
+      e.types.every((m) => isListOfAny(m) || cannotHoldAList(m))
+    );
+  };
+  if (isAnyDepthList(t)) return partner('list-any-depth');
+  if (
+    t.kind === 'union' &&
+    t.types.some(isAnyDepthList) &&
+    t.types.every((m) => isAnyDepthList(m) || cannotHoldAList(m))
+  )
+    return partner('any-depth');
+  // A union of lists of numbers (`vector<integer^1> | vector<integer^2>`,
+  // the element type of `[[1], [2, 3]]`): the result has the shape of each
+  // arm, as for a list of lists below.
+  if (
+    t.kind === 'union' &&
+    t.types.every((arm) => {
+      const a = resolveTypeAlias(arm);
+      return (
+        typeof a !== 'string' &&
+        a.kind === 'list' &&
+        a.dimensions !== null &&
+        mapProductCells(a, (c) => c) !== undefined
+      );
+    })
+  )
+    return partner('nested');
+  // The cells of a `broadcastable<E>`: `'any-depth'` when `E` can hold a
+  // list, the number type `E`, or `undefined` for cells that are not
+  // numbers.
+  const broadcastCells = (b: Type): 'any-depth' | Type | undefined => {
+    const e = resolveTypeAlias(b);
+    if (!cannotHoldAList(e)) return 'any-depth';
+    return factsOf(e).belowNumber ? e : undefined;
+  };
+  if (t.kind === 'broadcastable') {
+    const cells = broadcastCells(t.elements);
+    if (cells === undefined) return undefined;
+    return cells === 'any-depth'
+      ? partner('any-depth')
+      : partner('tensor', cells);
+  }
+  if (t.kind === 'union') {
+    const arms = flatUnionArms(t);
+    if (
+      !arms.some((arm) => {
+        const a = resolveTypeAlias(arm);
+        return typeof a !== 'string' && a.kind === 'broadcastable';
+      })
+    )
+      return undefined;
+    const cells: Type[] = [];
+    for (const arm of arms) {
+      const a = resolveTypeAlias(arm);
+      if (typeof a !== 'string' && a.kind === 'broadcastable') {
+        const c = broadcastCells(a.elements);
+        if (c === undefined) return undefined;
+        if (c === 'any-depth') return partner('any-depth');
+        cells.push(c);
+      } else if (a !== 'never' && factsOf(a).belowNumber) cells.push(a);
+      else return undefined;
+    }
+    return partner('tensor', widenAll(cells) as Type);
+  }
+  if (t.kind === 'list' && t.dimensions === undefined) {
+    const e = resolveTypeAlias(t.elements);
+    if (e === 'unknown' || e === 'any') return partner('list-any-depth');
+    const isList = (x: Type): boolean => {
+      const r = resolveTypeAlias(x);
+      return typeof r !== 'string' && r.kind === 'list';
+    };
+    if (
+      isList(e) ||
+      (typeof e !== 'string' && e.kind === 'union' && e.types.every(isList))
+    )
+      return partner('nested');
+    // An element that may be a number or a list (`list<integer |
+    // list<integer>>`, the type of `[[1], 2]`): an element of the result is
+    // a point or a list of points, `[[(1, 2)], (2, 4)]` for `(1, 2)·[[1], 2]`.
+    if (!cannotHoldAList(e)) return partner('list-any-depth');
+  }
+  return undefined;
+}
+
+/**
+ * The type of a component-wise result whose cell is the point type `point`,
+ * over operands whose shapes are `shapes` (`pointPartnerShape`, every shape
+ * but `'nested'`). An operand of any depth makes the result a point or a
+ * list of points of any depth, `point | list<point | list<any>>`: with
+ * `L: list<unknown>`, `(x, y)·L[1]` is a point when `L[1]` is a number, the
+ * list `[(x, y), (2x, 2y)]` when it is `[1, 2]`, and a ragged list of points
+ * when it is `[[1], [2, 3]]`. A list operand whose elements may be lists
+ * makes it `list<point | list<any>>`. A `broadcastable<E>` operand with
+ * number cells makes it `broadcastable<point>`: a point, or a rectangular
+ * tensor of points.
+ */
+function pointShapedResultType(
+  point: Type,
+  shapes: ReadonlyArray<PointPartner['shape']>
+): Type {
+  const anyDepthElement = widen(point, { kind: 'list', elements: 'any' });
+  if (shapes.includes('any-depth'))
+    return widen(point, { kind: 'list', elements: anyDepthElement });
+  if (shapes.includes('list-any-depth'))
+    return { kind: 'list', elements: anyDepthElement };
+  return { kind: 'broadcastable', elements: point };
+}
+
+/**
+ * The type of a product or a quotient of the point type `point` with the
+ * operands `others`, when one or more of them is a partner of a point
+ * (`pointPartnerShape`) and every other one is a scalar number
+ * (`scalarFactorCellType`). `combine(point, cells)` gives the point that
+ * the cell types `cells` (one for each operand of `others`, in order) make
+ * from `point`. `undefined` when an operand is neither, and when a
+ * `'nested'` operand is beside another partner.
+ */
+function pointBesidePartnersType(
+  point: Type,
+  others: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  combine: (point: Type, cells: Type[]) => Type
+): Type | undefined {
+  const partners = others.map(pointPartnerShape);
+  const found = partners.filter((p) => p !== undefined);
+  if (found.length === 0) return undefined;
+  const scalars = others.map((x, i) =>
+    partners[i] === undefined ? scalarFactorCellType(x, engine) : undefined
+  );
+  if (others.some((_, i) => partners[i] === undefined && !scalars[i]))
+    return undefined;
+  const nested = partners.findIndex((p) => p?.shape === 'nested');
+  if (nested >= 0) {
+    if (found.length > 1) return undefined;
+    // Each number cell of the nested list makes one point, and the result
+    // keeps the shape of the list: `(1, 2)·L` for `L := [[1], [2, 3]]` is
+    // `[[(1, 2)], [(2, 4), (3, 6)]]`.
+    return mapProductCells(partners[nested]!.type, (c) =>
+      combine(
+        point,
+        others.map((_, i) => (i === nested ? c : scalars[i]!))
+      )
+    );
+  }
+  return pointShapedResultType(
+    combine(
+      point,
+      others.map((_, i) => partners[i]?.cell ?? scalars[i]!)
+    ),
+    found.map((p) => p.shape)
+  );
+}
+
+/**
  * Twin of `isPossiblyCollectionTyped`: an operand whose collection-ness is
  * not statically visible, so an element-wise result must stay lifted.
  *
@@ -3906,6 +4165,78 @@ function addTypeOnTypes(
 ): Type {
   if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
+  // A point beside a term whose value may be a list of any depth
+  // (`pointPartnerShape`): an element read `L[1]` of a `list<unknown>`, or
+  // the open form of an element-wise application over one. The term may
+  // be a point, which gives a point, or a list of points of any depth,
+  // which gives a list of points of the same shape: with
+  // `L := [[(1, 2), (3, 4)]]`, `(x, y) + L[1]` is
+  // `[(x + 1, y + 2), (x + 3, y + 4)]`. The components of such a term can
+  // be any number, so the components of the sum are `number`. The join
+  // below is neutral in `unknown`, and typed the sum as one point. (A
+  // number beside a point has no sum, and evaluates to an error.) A term
+  // typed `broadcastable<Q>` for a point type `Q` (the product of a point
+  // and a `broadcastable<number>`) is a point or a tensor of points, and the
+  // sum is a `broadcastable` of the sum of the points: the join below typed
+  // it as the union of the two types, `broadcastable<Q> | tuple<…>`, which
+  // claims a point where the value is a list of points. Before the branch
+  // for cells of unknown type, which types the sum with a
+  // `broadcastable<unknown>` (`-L[1]`) as a `broadcastable<number>`.
+  {
+    const isPoint = (x: Type): boolean => {
+      const r = resolveTypeAlias(x);
+      return r === 'tuple' || (typeof r === 'object' && r.kind === 'tuple');
+    };
+    const pointsOfTensor = (x: OperandDescriptor): Type | undefined => {
+      const r = resolveTypeAlias(x.type);
+      return typeof r === 'object' &&
+        r.kind === 'broadcastable' &&
+        isPoint(r.elements)
+        ? resolveTypeAlias(r.elements)
+        : undefined;
+    };
+    const points: Type[] = [];
+    const shapes: PointPartner['shape'][] = [];
+    let hasPoint = false;
+    let open = false;
+    for (const x of args) {
+      if (isPoint(x.type)) {
+        hasPoint = true;
+        points.push(resolveTypeAlias(x.type));
+        continue;
+      }
+      const cells = pointsOfTensor(x);
+      if (cells !== undefined) {
+        points.push(cells);
+        shapes.push('tensor');
+        continue;
+      }
+      const p = pointPartnerShape(x);
+      if (p?.shape !== 'any-depth' && p?.shape !== 'list-any-depth') {
+        shapes.length = 0;
+        break;
+      }
+      open = true;
+      shapes.push(p.shape);
+    }
+    if (hasPoint && shapes.length > 0) {
+      const sum =
+        points.length === 1
+          ? points[0]
+          : tupleComponentwiseAddType(points.map((t) => describeType(t)));
+      if (sum !== undefined) {
+        const widened = open
+          ? (mapProductCells(stripNumericRanges(sum), (c) =>
+              widen(c, 'number')
+            ) ?? sum)
+          : sum;
+        return withFloatRationalCellsAsReal(
+          args,
+          pointShapedResultType(closeImaginaryPointComponents(widened), shapes)
+        );
+      }
+    }
+  }
   // A term with cells of unknown type and an unknown shape (see
   // `hasUnknownBroadcastCells`): before the tuple, tensor and collection
   // branches, which would fold it into the cells of a list as a scalar.
@@ -3938,6 +4269,16 @@ function addTypeOnTypes(
       )
     )
       return 'error';
+    // A point beside an operand whose every value is a number or a tensor of
+    // numbers (`isDeclaredNumberTensorOperand`) is not rejected at boxing,
+    // and the evaluation maps over a tensor: `(x, y) + b` is one error for a
+    // number `b`, a tensor of errors for a tensor `b`, and `[]` for `b = []`.
+    // `broadcastable<error>` holds each of these values.
+    if (
+      args.some((x) => isNumericTupleCarrierType(x.type)) &&
+      args.some((x) => isDeclaredNumberTensorOperand(x, engine))
+    )
+      return { kind: 'broadcastable', elements: 'error' };
     // A point BROADCAST over a list of points: the sum is a list of points,
     // not the union `list<tuple<…>> | tuple<…>` the widen below reports. A
     // matrix of points (a list of points of rank 2 or more) gives a matrix
@@ -6766,6 +7107,33 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // every value of `U` makes it an error.
         if (ops.slice(1).some((x) => isPointCarrierType(x.type)))
           return BoxedType.forResult('error', context.engine._typeResolver);
+        // A point divided by a divisor whose type does not give the shape of
+        // its value (`pointPartnerShape`): an element read `L[1]` of a
+        // `list<unknown>`, a `broadcastable<number>`. The value of the
+        // divisor may be a scalar or a list (of any depth, and ragged for
+        // the first one), and the point is divided by each scalar of it. So
+        // the quotient is a point or a list of points of that shape
+        // (`pointBesidePartnersType`), as the product with the same factor is.
+        // The branch below read such a divisor as a scalar, or as a list of
+        // depth one, and typed the quotient `tuple<…>` or
+        // `list<tuple<…>> | tuple<…>`.
+        {
+          const point = resolveTypeAlias(num.type);
+          const floatNumerator = hasInexactRationalComponent(num);
+          const t =
+            point === 'tuple' ||
+            (typeof point === 'object' && point.kind === 'tuple')
+              ? pointBesidePartnersType(
+                  point,
+                  [den],
+                  context.engine,
+                  (p, [cell]) =>
+                    quotientShapeType(p, describeType(cell), floatNumerator)
+                )
+              : undefined;
+          if (t !== undefined)
+            return BoxedType.forResult(t, context.engine._typeResolver);
+        }
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
         // type, mirroring the `Multiply` handler. `canonicalDivide` scales
         // component-wise only when the numerator's components are ACCESSIBLE
@@ -9321,6 +9689,41 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const topFactor = unrefinedTopTypeOfOperands(ops);
         if (topFactor !== undefined)
           return BoxedType.forResult(topFactor, engine._typeResolver);
+        // A point beside a factor whose type does not give the shape of its
+        // value (`pointPartnerShape`): an element read `L[1]` of a
+        // `list<unknown>`, a `broadcastable<number>`, a `list<unknown>`, a
+        // `list<list<integer>>`. The value of the factor may be a scalar or
+        // a list (of any depth, and ragged for some of them), and the product
+        // scales the point at each scalar of it. So the product is a point or
+        // a list of points of that shape (`pointBesidePartnersType`). The
+        // branches below read such a factor as a scalar or as a list of
+        // depth one, and typed the product as one point or as a list of
+        // points: with `L := [[1, 2]]`, `(x, y)·(2·L[1])` is
+        // `[(2x, 2y), (4x, 4y)]`. Every other factor must be a scalar
+        // number. Before the branch for cells of unknown type, which types
+        // the product with a `broadcastable<unknown>` as a
+        // `broadcastable<number>`.
+        {
+          const points = ops.filter((x) => {
+            const r = resolveTypeAlias(x.type);
+            return (
+              r === 'tuple' || (typeof r === 'object' && r.kind === 'tuple')
+            );
+          });
+          if (points.length === 1) {
+            const t = pointBesidePartnersType(
+              points[0].type,
+              ops.filter((x) => x !== points[0]),
+              engine,
+              (point, cells) => scaleTupleComponents(point, cells)
+            );
+            if (t !== undefined)
+              return BoxedType.forResult(
+                withFloatRationalCellsAsReal(ops, t),
+                engine._typeResolver
+              );
+          }
+        }
         // A factor with cells of unknown type and an unknown shape (see
         // `hasUnknownBroadcastCells`): before the tensor and collection
         // branches, which would fold it into the cells of a list as a scalar.

@@ -1963,13 +1963,27 @@ describe('POINT/TUPLE ARITHMETIC — point LIST scaled or divided elementwise', 
     'number',
     'list<number>',
     'indexed_collection<number>',
-    'broadcastable<number>',
     'unknown',
   ])('list<tuple<number, number>> / %s keeps tuple elements', (den) => {
     const ce = pointListEngine(den);
     expect(ce.box(['Divide', 'p', 'q']).type.toString()).toBe(
       'list<tuple<number, number>>'
     );
+  });
+
+  test('list<tuple<number, number>> / broadcastable<number> has point-or-tensor elements', () => {
+    // A `broadcastable<number>` divisor may be a matrix. The quotient pairs
+    // each point with a row of the matrix and divides the point by each
+    // cell of the row, so an element of the quotient is a list of points:
+    // `[(1, 2), (3, 4)] / [[1, 2], [3, 4]]` is
+    // `[[(1, 2), (1/2, 1)], [(1, 4/3), (3/4, 1)]]` (ROADMAP CE-504).
+    const ce = pointListEngine('broadcastable<number>');
+    const quotient = ce.box(['Divide', 'p', 'q']);
+    const type = quotient.type;
+    expect(type.toString()).toBe('list<broadcastable<tuple<number, number>>>');
+    ce.assign('p', ce.box(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]));
+    ce.assign('q', ce.box(['List', ['List', 1, 2], ['List', 3, 4]]));
+    expect(quotient.evaluate().type.matches(type)).toBe(true);
   });
 
   test('list<tuple<number, number>> / any has `any` cells: the divisor may be a list', () => {

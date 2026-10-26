@@ -85,6 +85,7 @@ import {
   absentCellsPresentType,
   absorbOperandAbsence,
   broadcastLiftType,
+  holdsIntegerValuedFloat,
   movesAbsentCells,
   passesAbsentCellsThrough,
   threadedPresentType,
@@ -1103,6 +1104,10 @@ export function deriveApplicationType(
     return (
       broadcastLiftType({
         def,
+        operator,
+        integerValuedFloat: (i) =>
+          handlerOperandsSeen[i] !== undefined &&
+          holdsIntegerValuedFloat(handlerOperandsSeen[i]),
         views,
         sigResult: perElement,
         sigResultIsPerElement: fromSignature,

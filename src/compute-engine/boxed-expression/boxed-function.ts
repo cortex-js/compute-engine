@@ -115,6 +115,7 @@ import {
   withThreadedAbsence,
   abstractCollectionCell,
   broadcastLiftType,
+  holdsIntegerValuedFloat,
   isAbstractCollectionTypeOf,
   isKindOpenOperandType,
   skipBroadcastForVectorOpsOnViews,
@@ -12843,6 +12844,9 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       // viewed through the value-level predicates this route always read.
       const lifted = broadcastLiftType({
         def,
+        operator: expr.operator,
+        integerValuedFloat: (i) =>
+          holdsIntegerValuedFloat(describeOperand(expr.ops[i])),
         views: expr.ops.map(viewOfExpression),
         sigResult,
         sigResultIsPerElement: !typeHandlerAnswered,

@@ -18304,6 +18304,92 @@ export class BaseCompiler {
       }
     }
 
+    // A LIST OF POINTS times, or divided by, an array operand: the flat
+    // `_SYS.bcast` below pairs the i-th point with the i-th element of the
+    // other operand and, when that element is an array too, pairs the
+    // components of the point with the entries of that array. The
+    // interpreter applies the point whole to each entry instead: with
+    // `p = [(1, 2), (3, 4)]` and `q = [[1, 2], [3, 4]]`, `p·q` is
+    // `[[(1, 2), (2, 4)], [(9, 12), (12, 16)]]`, where the flat broadcast
+    // gave `[[1, 4], [9, 16]]`. So an array operand beside a list of points
+    // must be a flat list of scalars (a `list<number>`, a `vector<n>`;
+    // `isScalarElementSource`), which the flat broadcast pairs correctly.
+    // The run-time plan `pointListOverNumbers`, emitted below, takes exactly
+    // one shape: TWO operands, a list of points and an operand typed
+    // `broadcastable<E>`, `tensor<E>` or a nested list (`list<list<E>>`)
+    // whose leaves are numbers (`numberLeaves`; for a `Divide`, the list of
+    // points is the dividend). Each point is kept whole and applied to each
+    // number of its element. Every other operand beside a list of points
+    // that is not a flat list of scalars is refused on purpose, and the
+    // fail-closed guard of the caller refuses the form: an operand whose
+    // cells may be points or values of unknown kind (a `list<unknown>`, a
+    // call typed `unknown`, a `broadcastable<tuple<…>>`), a union of a
+    // number and a `broadcastable` (`number | broadcastable<real>`), and a
+    // product of three or more operands (`2·p·b`). A declared `matrix<…>`
+    // times a list of points is refused as well, by the matrix rule of the
+    // `Multiply` carve-out above; a list of points divided by a declared
+    // matrix takes the plan (each point divided by each number of its row).
+    // Each refused shape compiled to a wrong value before (ROADMAP CE-504).
+    let pointListOverNumbers: number | undefined;
+    if (
+      (h === 'Multiply' || h === 'Divide') &&
+      atomicTuple === undefined &&
+      args.some(isPointListShaped)
+    ) {
+      const flatScalars = (a: Expression): boolean => {
+        const t = compilationType(a);
+        if (typeof t !== 'string' && t.kind === 'broadcastable') return false;
+        return BaseCompiler.isScalarElementSource(a, target);
+      };
+      const deep = args.filter(
+        (a) =>
+          !isPointListShaped(a) &&
+          BaseCompiler.isArrayOperand(a, target) &&
+          !flatScalars(a)
+      );
+      if (deep.length > 0) {
+        const numberCells = (a: Expression): boolean => {
+          const t = compilationType(a);
+          const broadcastable =
+            typeof t !== 'string' && t.kind === 'broadcastable';
+          if (!broadcastable && isBoundPossiblyCollectionTyped(a, target))
+            return false;
+          // The leaves are read through the list, tensor and broadcastable
+          // constructors, and through unions. A tuple at any depth is
+          // refused: `broadcastCellType` reads a tuple as its components, so
+          // `broadcastable<tuple<integer, integer>>` would pass as numbers,
+          // and the product of two points has no value
+          // (`no-product-between-points`).
+          const numberLeaves = (x: Type, depth = 0): boolean => {
+            if (depth > 16) return false;
+            const r = resolveTypeAlias(x);
+            if (r === 'never') return false;
+            if (typeof r === 'string') return isSubtype(r, 'number');
+            if (r.kind === 'tuple') return false;
+            if (r.kind === 'list' || r.kind === 'broadcastable')
+              return numberLeaves(r.elements, depth + 1);
+            // A union at the top (`number | broadcastable<real>`) is not
+            // read; a union of cells below a constructor is.
+            if (r.kind === 'union')
+              return (
+                depth > 0 && r.types.every((m) => numberLeaves(m, depth + 1))
+              );
+            return isSubtype(r, 'number');
+          };
+          return numberLeaves(t);
+        };
+        const pointList = args.findIndex(isPointListShaped);
+        if (
+          args.length !== 2 ||
+          deep.length !== 1 ||
+          !numberCells(deep[0]) ||
+          (h === 'Divide' && pointList !== 0)
+        )
+          return null;
+        pointListOverNumbers = 1 - pointList;
+      }
+    }
+
     // A head with NO codegen at all has nothing to broadcast — decline (the
     // caller's fail-closed guard covers it). A *string*-mapped head (a scalar
     // helper such as `Sign` → `Math.sign`, `Arctan2` → `Math.atan2`, `Hypot` →
@@ -19047,6 +19133,42 @@ export class BaseCompiler {
     // recomputed for every element. Handing those operands to the outer
     // `_SYS.bcast` as arguments is not an option either — it would zip the
     // point's array against the list, the very shape this emission avoids.
+    // A list of points beside an operand that may be a scalar or a
+    // collection of numbers at any depth (`pointListOverNumbers`, set above),
+    // both evaluated once. A scalar is applied to every point. An array is
+    // paired with the list, element by element, and unequal lengths are the
+    // interpreter's `incompatible-dimensions` error, projected to NaN. An
+    // element that is an array is walked to its numbers, and the point is
+    // applied whole to each one: `f` keeps the point and descends into the
+    // element, where the flat `_SYS.bcast` would pair the components of the
+    // point with the entries of the element. A list operand that is not an
+    // array at run time is NaN, as in the other point-list plans.
+    if (
+      pointListOverNumbers !== undefined &&
+      !absentMode &&
+      scalarAbsent === undefined
+    ) {
+      const bound = args.map(() => BaseCompiler.tempVar(target));
+      const list = bound[1 - pointListOverNumbers];
+      const other = bound[pointListOverNumbers];
+      const f = BaseCompiler.tempVar(target);
+      const p = BaseCompiler.tempVar(target);
+      const x = BaseCompiler.tempVar(target);
+      const y = BaseCompiler.tempVar(target);
+      const k = BaseCompiler.tempVar(target);
+      const ordered = pointListOverNumbers === 1 ? `${p}, ${x}` : `${x}, ${p}`;
+      return (
+        `((${bound.join(', ')}) => { ` +
+        `const ${f} = (${p}, ${x}) => Array.isArray(${x}) ? ` +
+        `${x}.map((${y}) => ${f}(${p}, ${y})) : _SYS.bcast(${closure}, ${ordered}); ` +
+        `return !Array.isArray(${list}) ? NaN : ` +
+        `!Array.isArray(${other}) ? ${list}.map((${p}) => ${f}(${p}, ${other})) : ` +
+        `${list}.length !== ${other}.length ? NaN : ` +
+        `${list}.map((${p}, ${k}) => ${f}(${p}, ${other}[${k}])); })` +
+        `(${compiledArgs.join(', ')})`
+      );
+    }
+    if (pointListOverNumbers !== undefined) return null;
     if (atomicTuple !== undefined) {
       const bound = args.map(() => BaseCompiler.tempVar(target));
       if (atomicTupleOverPoints === 'runtime-list') {

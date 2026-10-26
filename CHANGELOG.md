@@ -39,6 +39,18 @@
 
 ### Behavior Changes
 
+- **A point beside an operand that may be a list is typed as a point or a list
+  of points** (CE-504). With `L: list<unknown>`, `(x, y)·(2·L[1])` was typed
+  `tuple<number, number>`, while `L := [[1, 2]]` gives `[(6, 8), (12, 16)]`; it
+  is now `tuple<number, number> | list<tuple<number, number> | list<any>>`. With
+  `b: broadcastable<number>`, `(x, y)·b` and `(x, y)/b` are
+  `broadcastable<tuple<number, number>>`, and `(x, y) + b` is
+  `broadcastable<error>`. A list of points beside a collection pairs each point
+  with an element: `p·t` with `t: tensor<integer>` is
+  `list<broadcastable<tuple<…>>>`; `p·v` with `v: vector<integer^2>` is
+  `list<tuple<…>>`. Compiled JavaScript gives the interpreter's value for a list
+  of points times or divided by a tensor of numbers (it gave wrong values for a
+  matrix), and refuses an operand whose cells may be points.
 - **A list of ranges of the same length is accepted as a matrix by the
   linear-algebra functions.** `Determinant([1..2, 3..4])` is `-2`, and
   `Inverse`, `MatrixMultiply`, `Dot`, `LinearSolve` and the other functions
