@@ -2118,16 +2118,20 @@ export interface CompilationOptions<Expr = unknown> {
    * - `'wgsl'` - Compile to WGSL (WebGPU Shading Language)
    * - `'interval-js'` - Compile to JavaScript with interval arithmetic
    *
-   * Custom targets can be registered using `ce._registerCompilationTarget()`.
+   * The full package entry provides every built-in target. A program that
+   * loads only `@cortex-js/compute-engine/core` has `javascript` and
+   * `interval-js`, and registers the others, or a custom target, with
+   * `ce.registerCompilationTarget()`.
    *
    * @example
    * ```typescript
    * // Compile to GLSL
    * const glslCode = expr.compile({ to: 'glsl' });
    *
-   * // Compile to custom target
-   * ce._registerCompilationTarget('python', new PythonTarget());
-   * const pythonCode = expr.compile({ to: 'python' });
+   * // On an engine of `@cortex-js/compute-engine/core`: register the target
+   * // first (`GLSLTarget` comes from `@cortex-js/compute-engine/compile`)
+   * ce.registerCompilationTarget('glsl', new GLSLTarget());
+   * const shader = expr.compile({ to: 'glsl' });
    * ```
    */
   to?: string;
@@ -2658,7 +2662,7 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * flows into real arithmetic and the call returns `NaN` rather than throwing.
  * And the guard is the `javascript` target's own — the shader targets compile
  * to source and expose no `run` at all, while a target registered through
- * `ce._registerCompilationTarget()` gets whatever guard its author writes.
+ * `ce.registerCompilationTarget()` gets whatever guard its author writes.
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? IntervalInput

@@ -1063,18 +1063,27 @@ instances directly to the standalone `compile()` function.
 ## Packaging and entry points
 
 The package ships several independently importable bundles (the `exports` map in
-`package.json`). Each is built by `scripts/build.mjs` (esbuild) as ESM + UMD,
-minified, with `.d.ts` types in `dist/types/`:
+`package.json`). Each is built by `scripts/build.mjs` (esbuild) as ESM only,
+minified, with `.d.ts` types in `dist/types/`. There is no UMD or CommonJS
+build (since 2026-10-26): Node loads an ESM entry through `require()` since
+Node 22.12, the floor in `engines.node`, and `exports` has no `require`
+condition. The entries that contain the engine (the full entry, `core`,
+`compile`, `epsil`, `integration-rules`, `identities`) are built in one
+code-splitting invocation, so the engine is emitted once into a shared chunk
+and a host that imports two of them loads one engine (duplicate class
+definitions would break `instanceof` across the two copies). `runtime` and
+`kernel-worker` are single self-contained files on purpose: compiled code runs
+on the runtime without the engine, and a host copies the worker script.
 
 | Import path | Source | Contents |
 |---|---|---|
-| `@cortex-js/compute-engine` | `src/compute-engine.ts` | Full: engine + LaTeX + compilation + free functions |
-| `…/core` | `src/core.ts` | Engine + free functions, **no** LaTeX/compilation |
+| `@cortex-js/compute-engine` | `src/compute-engine.ts` | Full: engine + LaTeX + all five compilation targets + free functions |
+| `…/core` | `src/core.ts` | Engine + free functions, **no** LaTeX; only the `javascript` and `interval-js` targets (`ce.registerCompilationTarget()` adds one from `…/compile`) |
 | `…/math-json` | `src/math-json.ts` | MathJSON types + utilities only |
 | `…/latex-syntax` | `src/latex-syntax.ts` | Standalone LaTeX parser/serializer |
 | `…/numerics` | `src/numerics.ts` | Numeric primitives (BigDecimal, rationals, special functions) |
 | `…/interval` | `src/interval.ts` | Interval arithmetic |
-| `…/compile` | `src/compile.ts` | Compilation targets |
+| `…/compile` | `src/compile.ts` | The `compile()` function and every target class (`GLSLTarget`, `WGSLTarget`, `PythonTarget`, …) |
 | `…/identities` | `src/identities.ts` | Fungrim identities loader (rules-as-data plugin) |
 | `…/integration-rules` | `src/integration-rules.ts` | Rubi rule-based integration plugin |
 

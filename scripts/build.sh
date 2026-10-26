@@ -198,6 +198,14 @@ if [ "$BUILD" = "production" ]; then
     node ./test/consumer/epsil-cli-smoke.mjs
     echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying Epsil CLI smoke$RESET"
 
+    # CommonJS smoke: `require()` of every built entry (the package is ESM
+    # only; Node >= 22.12 loads an ES module through `require()`), the shared
+    # engine chunk of `core` and `compile`, and a `./compile` target on a
+    # `./core` engine.
+    printf "$BASENAME$DOT Verifying CommonJS consumer smoke"
+    node ./test/consumer/require-smoke.cjs
+    echo -e $LINECLEAR$BASENAME$CHECK$DIM" Verifying CommonJS consumer smoke$RESET"
+
 
     # Run test suite
     # printf "$BASENAME$DOT Running test suite"

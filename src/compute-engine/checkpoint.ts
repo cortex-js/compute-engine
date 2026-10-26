@@ -436,10 +436,10 @@ function restoreConfig(ce: IComputeEngine, snapshot: ConfigSnapshot): void {
 
   const wanted = new Map(snapshot.compilationTargets);
   for (const name of ce._listCompilationTargets())
-    if (!wanted.has(name)) ce._unregisterCompilationTarget(name);
+    if (!wanted.has(name)) ce.unregisterCompilationTarget(name);
   for (const [name, target] of wanted)
     if (ce._getCompilationTarget(name) !== target)
-      ce._registerCompilationTarget(name, target as never);
+      ce.registerCompilationTarget(name, target as never);
 }
 
 // ─── The API (§3) ──────────────────────────────────────────────────────────

@@ -351,9 +351,11 @@ export {
 // Export BigDecimal for arbitrary-precision arithmetic
 export { BigDecimal } from '../big-decimal/index.js';
 
+// Only the two targets that every engine registers are exported from the
+// engine module. The GPU and Python targets are exported by the full entry
+// (`src/compute-engine.ts`) and by `src/compile.ts`, so that the `./core`
+// entry does not bundle them (`engine-compilation-targets.ts` says why).
 export { JavaScriptTarget } from './compilation/javascript-target.js';
-export { GLSLTarget } from './compilation/glsl-target.js';
-export { PythonTarget } from './compilation/python-target.js';
 export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compilation/base-compiler.js';
 
@@ -1778,17 +1780,45 @@ export class ComputeEngine implements IComputeEngine {
     return this._compilationTargets.list();
   }
 
-  /** @internal Register a compilation target. */
-  _registerCompilationTarget(
+  /**
+   * Register a compilation target under `name`, so that
+   * `compile(expr, { to: name })` resolves it. A later registration under the
+   * same name replaces the earlier target. The name must be a non-empty
+   * string and the target must implement `getOperators()`, `getFunctions()`,
+   * `createTarget()` and `compile()`; otherwise this throws.
+   *
+   * Every engine has `javascript` and `interval-js`. Every engine also has
+   * `glsl`, `wgsl` and `python` once the full package entry,
+   * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
+   * the program, whichever entry made the engine and in whichever order. A
+   * program that loads only `@cortex-js/compute-engine/core` has the two
+   * built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+   * from `@cortex-js/compute-engine/compile` and register it here.
+   */
+  registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
   ): void {
     this._compilationTargets.register(name, target);
   }
 
-  /** @internal Remove a registered compilation target. */
-  _unregisterCompilationTarget(name: string): void {
+  /** @internal The pre-2026-10-26 spelling of `registerCompilationTarget`. */
+  _registerCompilationTarget(
+    name: string,
+    target: LanguageTarget<Expression>
+  ): void {
+    this.registerCompilationTarget(name, target);
+  }
+
+  /** Remove the compilation target registered under `name`. A name that is
+   * not registered is ignored. */
+  unregisterCompilationTarget(name: string): void {
     this._compilationTargets.unregister(name);
+  }
+
+  /** @internal The pre-2026-10-26 spelling of `unregisterCompilationTarget`. */
+  _unregisterCompilationTarget(name: string): void {
+    this.unregisterCompilationTarget(name);
   }
 
   get precision(): number {

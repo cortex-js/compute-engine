@@ -1,5 +1,42 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- **The package is ESM only, and Node 22.12 or later is required.** The UMD
+  builds (`dist/umd-min/*.cjs`), the `require` conditions of the `exports` map
+  and the `ComputeEngine` script-tag global are gone. A CommonJS consumer
+  keeps calling `require('@cortex-js/compute-engine')`: Node loads the ESM
+  entry through `require()` since Node 22.12 (and 20.19), and no entry has a
+  top-level `await`. `engines.node` is `>=22.12.0` (it was `>=22.3.0`). A
+  CommonJS Jest setup that imports the package loads it through Jest's own
+  module loader, not Node's, and needs a transform exception for the package
+  or an ESM-capable runner. The published files drop from 61 MB to 24 MB.
+- **A program that loads only `@cortex-js/compute-engine/core` has the
+  `javascript` and `interval-js` compilation targets.** The GPU targets
+  (`glsl`, `wgsl`) and the source-only `python` target are no longer bundled
+  in that entry (together 408 KB minified). To use one there, import the
+  target class from `@cortex-js/compute-engine/compile` and register it:
+  `ce.registerCompilationTarget('glsl', new GLSLTarget())`. Once the full
+  entry, `…/epsil` or the `epsil` CLI is loaded anywhere in the program, every
+  engine has all five targets, an engine made earlier from `…/core` included.
+  An unregistered target name fails with a message that lists the registered
+  ones.
+
+### Packaging
+
+- **One copy of each class across the entries.** Every entry except `runtime`
+  and `kernel-worker` is now built in one code-splitting invocation, so the
+  engine and the modules it shares with `…/numerics`, `…/latex-syntax` and
+  `…/interval` are emitted once into shared chunks. A host that imported
+  `…/core` and `…/compile` loaded two copies of the engine (`compile.js` was
+  3.5 MB on its own), and a `NumericValue` made from `…/numerics` failed the
+  engine's `instanceof` checks. `runtime` and `kernel-worker` stay single
+  self-contained files.
+- **`ce.registerCompilationTarget(name, target)` and
+  `ce.unregisterCompilationTarget(name)` are public.** The compile guide
+  documented the first under that name, but only the internal
+  `_registerCompilationTarget` existed.
+
 ### Behavior Changes
 
 - **A list of ranges of the same length is accepted as a matrix by the

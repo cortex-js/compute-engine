@@ -1041,9 +1041,10 @@ export interface IComputeEngine {
    *
    * This is a field of the engine, and not a module-global hook such as
    * the debugger's, because the engine code that calls it and the Epsil
-   * code that sets it can be in two different bundles (the UMD builds are
-   * self-contained), and each bundle then has its own copy of a module
-   * variable. The engine object is the one value both bundles share.
+   * code that sets it can be in two different bundles (a host may load two
+   * copies of the engine, for example two package versions), and each bundle
+   * then has its own copy of a module variable. The engine object is the one
+   * value both bundles share.
    * @internal */
   _epsilStatementResultHook:
     ((statement: Expression, result: Expression) => void) | undefined;
@@ -1932,13 +1933,37 @@ export interface IComputeEngine {
   /** @internal Return the names of all registered compilation targets. */
   _listCompilationTargets(): string[];
 
-  /** @internal Register a compilation target. */
+  /**
+   * Register a compilation target under `name`, so that
+   * `compile(expr, { to: name })` resolves it. A later registration under the
+   * same name replaces the earlier target. Throws when `name` is empty or the
+   * target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
+   * and `compile()`.
+   *
+   * Every engine has `javascript` and `interval-js`. Every engine also has
+   * `glsl`, `wgsl` and `python` once the full package entry,
+   * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
+   * the program, whichever entry made the engine and in whichever order. A
+   * program that loads only `@cortex-js/compute-engine/core` has the two
+   * built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+   * from `@cortex-js/compute-engine/compile` and register it here.
+   */
+  registerCompilationTarget(
+    name: string,
+    target: LanguageTarget<Expression>
+  ): void;
+
+  /** @internal The pre-2026-10-26 spelling of `registerCompilationTarget`. */
   _registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
   ): void;
 
-  /** @internal Remove a registered compilation target. */
+  /** Remove the compilation target registered under `name`. A name that is
+   * not registered is ignored. */
+  unregisterCompilationTarget(name: string): void;
+
+  /** @internal The pre-2026-10-26 spelling of `unregisterCompilationTarget`. */
   _unregisterCompilationTarget(name: string): void;
 
   /** @internal Fu trigonometric simplification algorithm */
