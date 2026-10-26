@@ -16,6 +16,9 @@
 //    imported both loaded two engines.
 // 3. A GLSL target imported from `./compile` compiles an expression of an
 //    engine made from `./core`, once registered on that engine.
+// 4. A `JavaScriptTarget` imported from `./compile` recognizes an exact
+//    rational of an expression boxed by the full entry, so a division by an
+//    integer literal stays a division (issue 480).
 
 const { readFileSync, existsSync } = require('node:fs');
 const { join, resolve } = require('node:path');
@@ -125,5 +128,16 @@ if (!viaFreeFunction.success)
 const js = loaded['compute-engine'].compile(full.parse('x^2 + 1'));
 if (!js.success || js.run({ x: 3 }) !== 10)
   fail('the JavaScript target did not compile x^2 + 1 on a full-entry engine');
+
+// 4. The compiler reads `Rational(1, 6)` with an `instanceof` test on the
+// numeric value. When `compile.js` had its own copy of the engine, the test
+// failed for a value made by the full entry: `n(n-1)(n-2)/6` compiled to
+// `0.16666666666666666 * …`, which gives 559.9999999999999 at n = 16.
+full.declare('n', 'integer');
+const cubic = new loaded.compile.JavaScriptTarget().compile(
+  full.box(['Divide', ['Multiply', 'n', ['Subtract', 'n', 1], ['Subtract', 'n', 2]], 6])
+);
+if (!/\/ 6$/.test(cubic.code) || cubic.run({ n: 16 }) !== 560)
+  fail(`n(n-1)(n-2)/6 from the ./compile target is ${cubic.code}, ${cubic.run({ n: 16 })} at n = 16`);
 
 console.log('require-smoke: OK');

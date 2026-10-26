@@ -30,8 +30,19 @@
   `…/interval` are emitted once into shared chunks. A host that imported
   `…/core` and `…/compile` loaded two copies of the engine (`compile.js` was
   3.5 MB on its own), and a `NumericValue` made from `…/numerics` failed the
-  engine's `instanceof` checks. `runtime` and `kernel-worker` stay single
-  self-contained files.
+  engine's `instanceof` checks. One effect: a `JavaScriptTarget` imported from
+  `…/compile` compiled `n(n-1)(n-2)/6`, boxed by the main entry, to
+  `0.16666666666666666 * …` (`559.9999999999999` at `n = 16`); it is now
+  `(…) / 6`, which gives `560` (#480, reported by
+  [enumeratio](https://github.com/enumeratio)). `runtime` and `kernel-worker`
+  stay single self-contained files.
+
+  One result of the two copies: a `JavaScriptTarget` imported from
+  `…/compile` did not recognize the exact rational `1/6` in an expression
+  boxed by the full entry, so `n(n-1)(n-2)/6` compiled to
+  `0.16666666666666666 * n * …` and gave `559.9999999999999` at `n = 16`. It
+  now compiles to `(n * …) / 6` and gives `560` (#480, reported by
+  [enumeratio](https://github.com/enumeratio)).
 - **`ce.registerCompilationTarget(name, target)` and
   `ce.unregisterCompilationTarget(name)` are public.** The compile guide
   documented the first under that name, but only the internal
@@ -96,9 +107,85 @@
   `no-product-between-points` error at evaluation**, as it already was when
   boxed (CE-491). With `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` was a list of
   two errors.
+- **The terms of a sum or a product with a residue class that are not classes
+  are combined by `evaluate()`** (CE-507). `x + x + ResidueClass(1, 5)`
+  evaluates to `2x + ResidueClass(1, 5)` (it was returned as written; only
+  `simplify()` combined it), and `(√2 + π + ResidueClass(1, 5)).N()` is
+  `4.5558… + ResidueClass(1, 5)` (the two floats were left apart). The rules for
+  the classes themselves do not change.
+- **The signatures of the arithmetic operators no longer name `residue`.**
+  `Multiply` is `(number*) -> number` again (it was
+  `((number | residue)*) -> number`), and `Divide`, `Negate`, `Power`, `Root`,
+  `Sqrt`, `Square` and `Subtract` lost their `residue` arm in the same way. They
+  accept a residue class, and a value of any kind that has the matching hook, by
+  a rule that reads the declared kinds, not by their signature. A host that
+  reads these signature strings sees the change, and an `incompatible-type`
+  error of these operators no longer names `residue` as an expected type. An
+  engine built without the `ResidueClass` definition no longer accepts a
+  `residue` operand at these operators.
+- **Two values of a kind written next to each other are a product**, as two
+  residue classes are: with `GF8` a head of the kind type `gf8`,
+  `\operatorname{GF8}(3)\operatorname{GF8}(5)` parses to a `Multiply`, not to a
+  `Tuple`. A list of such values is typed `list<gf8^2>` (it was `list<gf8>`).
+- **`Sum`, `Product` and `Reduce` over residue classes are typed `residue`.**
+  `Sum([c1, c2])` was typed `number` and `Map(Negate, [c1, c2])` `vector<2>`;
+  they are `residue` and `list<residue^2>`.
 
 ### Features
 
+- **An operator can declare the arithmetic of the values it constructs: a value
+  kind** (ROADMAP CE-507,
+  [#477](https://github.com/cortex-js/compute-engine/issues/477)). With `MyMod`
+  declared `(integer, integer) -> residue`, `x + MyMod(2, 4) + MyMod(1, 4)` and
+  `MyMod(2, 4) - MyMod(2, 4)` stayed as they were: only `ResidueClass` values
+  were combined, and no definition could give the arithmetic of another head.
+  The new `arithmetic` field of an operator definition gives it:
+  - The field (`ArithmeticDefinition`) has the hooks `add` and `multiply` (they
+    answer folds, `KindFold`: the operands they combined and the value they
+    make), `negate`, `divide`, `power` (also called for `Sqrt`, `Root` and
+    `Square`), `compare` (one order for the comparisons, `Max`, `Min`, `Sort`,
+    `Clamp` and the methods `isEqual()`, `isLess()`, …), `apply` (called in
+    place of the handler of another operator that accepted the value as a
+    number), and the fields `admittedAs`, `resultType` and `compile`. The new
+    public types are `ArithmeticDefinition`, `KindOperands`, `KindOperand`,
+    `KindFold`, `ArithmeticContext` and `ArithmeticCompile`. With `MyMod`
+    declared with `add`, `multiply` and `negate`,
+    `x + MyMod(2, 4) + MyMod(1, 4)` is `x + MyMod(3, 4)`, and
+    `MyMod(2, 4) - MyMod(2, 4)` is `MyMod(0, 4)`, in `evaluate()` and
+    `simplify()`.
+  - The result type of an operator with an `arithmetic` field must be a **kind
+    type**: `residue`, or a nominal type defined as exactly `value` and declared
+    with `{ mint: false }`, such as
+    `ce.declareType('gf8', 'value', { mint: false })`. Such a nominal type is a
+    subtype of `value` and `expression`, and is disjoint from every other type,
+    as `residue` is: the engine keeps the number rules (`x - x = 0`, `x/x = 1`,
+    like terms) away from its values and from a symbol declared with it. Any
+    other result type (`integer`, `value`, `residue | integer`, a nominal type
+    with another definition) is refused when the operator is declared, with an
+    error that names the rule.
+  - The `mint` option of `ce.declareType()` is public. `{ mint: false }`
+    declares a type without a constructor of the same name; a kind uses it,
+    because its values are made by its own operator.
+  - `admittedAs: 'real'` or `'number'` lets every operator that accepts a `real`
+    (or a `number`) accept the values, and `apply` then computes the result: a
+    measurement kind can propagate its error through `Sin` and `Floor`.
+    `admittedAs: 'none'` (the default, and the rule of `residue`) admits the
+    values at the arithmetic operators only.
+  - `compile` gives a compiled representation to a kind type (`compile.type`)
+    and to the literals of a head (`compile.value`). Code compiled with it
+    reports the kind types in the new `CompilationResult.valueKinds`, and the
+    bindings of a kind type in `StoredEntryPlan.kinds`; it is returned without
+    the number conversion of `run()`, and `createJavaScriptRuntime().load()`
+    refuses it, because the run-time check of a kind is a function of the host.
+    Without `compile`, an expression with a value of a kind declines, as a
+    residue class does.
+
+  `ResidueClass` now declares its arithmetic with this field. The design, which
+  also covers `Quantity`, `Measurement` and an interval value
+  ([#416](https://github.com/cortex-js/compute-engine/issues/416)) in later
+  phases, is `docs/plans/2026-10-26-value-kinds.md`. The guide is
+  `doc/06-guide-augmenting.md`, "Declaring a Value Kind"; the type rules are in
+  `doc/08-guide-types.md`, "Kind Types".
 - **`factor()` accepts `variable` and `generator` options, and a new
   `factorDetailed()` returns a structured result.** `factor(p, { variable,
   generator })` factors over an explicit number field, as
@@ -122,6 +209,41 @@
 
 ### Resolved Issues
 
+- **Five shader fixes found by comparing WebGL2 and WebGPU on a GPU**
+  (CE-509 to CE-513, Tycho rows 454 to 458).
+  - On `wgsl`, `tanh` calls a helper that answers `sign(x)` when
+    `|x| > 10`. On WebGPU over Metal the built-in returned 0 at x = 44 and NaN
+    from x = 45, where the value is 1. `Coth` is `1.0 / tanh(x)` on both
+    targets: the quotient `cosh(x) / sinh(x)` was NaN above about 89 in f32.
+  - On `wgsl`, a constant above the f32 maximum (`\exp(100) + x`,
+    `10^{40} + x`) is written `_gpu_inf()`, and a constant that rounds to the
+    maximum is written as the maximum. WebGPU rejected the whole shader for
+    such a literal.
+  - On `glsl`, `Mod` stays in the range of the divisor. The built-in `mod`
+    gave `mod(1e8, 3.0) = -2` and `mod(-1e6, 1000.0) = 1000` on WebGL2 over
+    ANGLE Metal; they are now 1 and 0. On both targets `Mod(x, 1)` is
+    `fract(fract(x))`, so a tiny negative `x` gives 0 instead of 1.0.
+  - On both targets, `Mod` calls a `_gpu_fmod` helper, which receives each
+    operand once. On `wgsl` the inline formula wrote the dividend three times
+    and the divisor five times.
+  - On `wgsl`, a piecewise arm that calls a user function, or a special
+    function with a loop (`Zeta`, `HurwitzZeta`, `PolyLog`, `LerchPhi`,
+    `BesselJ`, `Mandelbrot`, …), becomes a branch of an `if` statement.
+    `select` computes both arms: with `g(x) = \sum_{i=1}^{300}\cos(ix)`,
+    `\{x<0 : g(x), 0\}` took 5.05 ms on WebGPU against 2.36 ms with an `if`.
+- **`sin`, `cos` and `tan` of a quotient `π·u / d` compile to the exact
+  half-turn forms** (`sinpi`, `cospi`, `tanpi`) on every target, as `π·u`
+  already did. `\sin(2\pi s / P)` at `s = 2`, `P = -2` is now exactly 0 in the
+  compiled code; it was `2.4e-16` in JavaScript, so a test `\sin(…) > 0` was
+  true in the compiled code and false in the interpreter. `e^{i\pi u/d}` and the hyperbolic functions of `i\pi u/d`
+  take the exact forms too.
+- **On `wgsl`, a piecewise branch that draws a random value no longer
+  compiles** (it is evaluated by the interpreter instead). WGSL `select`
+  computes every branch, so a draw in a branch that was not taken still
+  advanced the random stream and changed every later draw in the shader.
+  `glsl` is unchanged: its `?:` evaluates only the branch that is taken.
+- **On `glsl`, `Mod` of a scalar by a vector compiles** (`Mod(1, v)` broadcasts
+  the scalar); the built-in `mod` has no such overload, and it was refused.
 - **A part of a loop body printed or evaluated outside its operator keeps its
   index** (CE-498). `ReplaceAt([1,2,3], i, 9)` taken from
   `Loop(…, Element(i, Range(1, 3)))` printed an `incompatible-type` error, with
@@ -129,6 +251,17 @@
 - **An undeclared recursive pair that builds a list is typed `-> list<number>`
   in every install order** (CE-38). Assigning `G := (n, K) ↦ F(n, K)` before
   `F` gave `-> list<any>`.
+- **A symbol declared `list<residue>` is accepted by the arithmetic operators**
+  (CE-507). With `L: list<residue>`, `L + L`, `-L` and `L · 2` were
+  `incompatible-type` errors when boxed, while a list literal of classes was
+  accepted. They are typed `list<residue>` and are computed element by element.
+- **A boxed function literal mapped over residue classes keeps the rules of the
+  classes** (CE-507).
+  `ce.function('Map', [ce.box(x ↦ x/x), [ResidueClass(2, 4), ResidueClass(3, 4)]])`
+  gave `[1, 1]`: the body was simplified to `1` before the type of the elements
+  was known, and 2 has no inverse modulo 4. It now gives
+  `[ResidueClass(2, 4) / ResidueClass(2, 4), ResidueClass(1, 4)]`, as `ce.box()`
+  and `ce.parse()` of the same expression do.
 
 ## 0.169.2 _2026-10-26_
 
@@ -2115,8 +2248,10 @@
     whose inferred signature returns it (`g := k ↦ ResidueClass(k, 4)` is
     `(unknown) -> residue`), and a symbol declared `residue`, which is protected
     before it has a value (`r/r` stays `r/r`). A head with another name gets the
-    admission and the protection, not the arithmetic of `ResidueClass`: it
-    defines its own. A symbol typed `value` or left undeclared is still read as
+    admission and the protection, not the arithmetic of `ResidueClass`: a sum
+    or a product of its values stays unevaluated (a hook for the head to
+    supply that arithmetic is planned, ROADMAP CE-507). A symbol typed `value`
+    or left undeclared is still read as
     a possible number: `w/w` is `1` for it.
   - A juxtaposed class is a product: `\overline{3}_{7}x` parses to `Multiply`,
     not to a tuple. `compile()` declines an expression typed `residue` or one

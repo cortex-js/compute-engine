@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-508.
+Next free reference: CE-514.
 
 **Entry format.**
 
@@ -1166,48 +1166,117 @@ corpus uses it).
 
 ## Symbolic computation
 
-### CE-507. A head declared `-> residue` cannot supply its own `Add` and `Multiply`
+### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
-**Status:** decision needed; capability and documentation defect, medium.
-[#477](https://github.com/cortex-js/compute-engine/issues/477).
+**Status:** phase 1 done 2026-10-26, phases 2 and 3 open; capability, large.
+[#477](https://github.com/cortex-js/compute-engine/issues/477) (answered by
+phase 1), [#416](https://github.com/cortex-js/compute-engine/issues/416). Plan:
+`docs/plans/2026-10-26-value-kinds.md` (revision 7). User decisions of
+2026-10-26: one mechanism, the `arithmetic` field on the operator definition of
+the head, with recognition by the head's kind type; a kind type is a subtype of
+`value`, and the arithmetic operators admit a kind by rule (A); a function with
+a body admits a kind only when its parameter names it (B); a `compare` hook (C);
+`Measurement` is admitted as `number`, and a complex nominal is refused at
+evaluation (D); accidental behavior may change (section 6 of the plan).
 
-With `MyMod` declared `(any, any) -> residue`, `x + MyMod(2, 4) + MyMod(1, 4)`
-stays as it is under `evaluate()` and `simplify()`, and so do
-`MyMod(2, 4)·MyMod(3, 4)` and `MyMod(2, 4) - MyMod(2, 4)` (which is
-`Add(Negate(MyMod(2, 4)), MyMod(2, 4))`). The same sums with `ResidueClass`
-fold. The type gives the head protection from the number rules, but no component
-lets the head define its arithmetic:
+Phase 1 (done) added the `arithmetic` field of an operator definition
+(`ArithmeticDefinition`: `add`, `multiply`, `negate`, `divide`, `power`,
+`compare`, `apply`, `admittedAs`, `resultType`, `compile`), the kind types (the
+primitive `residue`, or a nominal type defined as exactly `value` and declared
+with `{ mint: false }`, now a public option of `ce.declareType()`), the kind
+registry, the admission, dispatch, typing and `simplify()` rules, the compile
+contract, and moved `ResidueClass` onto the field. A head declared `-> residue`
+(or `-> gf8`) now gives its own arithmetic: `x + MyMod(2, 4) + MyMod(1, 4)` is
+`x + MyMod(3, 4)`. The documentation is in `doc/06-guide-augmenting.md`
+("Declaring a Value Kind"), `doc/08-guide-types.md` ("Kind Types"),
+`docs/TYPE-SYSTEM.md` ("Value kinds and kind types") and
+`docs/COMPILATION-MODEL.md` ("Value kinds").
 
-- `residueFold()`, `ringOf()`, `classOf()` and `residueOf()`
-  (`boxed-expression/residue-class.ts`) and `exactOperands()`
-  (`library/arithmetic.ts`) read only calls named `ResidueClass`.
-- The residue step of `simplify()` (`boxed-expression/simplify.ts`) stops at an
-  arithmetic expression that holds a class and keeps only an evaluated result
-  that `isResidueClass()` accepts, so a simplification rule of the user is not
-  reached either.
-- `doc/06-guide-augmenting.md` ("Declaring an Operator Whose Values Are Residue
-  Classes") tells the reader to extend `Add` with an `evaluate` handler and
-  `{ extend: true }`. That replaces the library `Add` for the whole engine:
-  after the extension, `x + x + 1 + 2` evaluates and simplifies to `x + x + 3`,
-  not `2x + 3`. The `CHANGELOG.md` entry for the `residue` type says that such a
-  head "defines its own" arithmetic.
+What remains:
 
-Options:
+- **Phase 2: `Measurement` and `Quantity` on the field.** Prerequisite: the
+  inventory of section 8 of the plan (every operator that handles a measurement
+  or a quantity today, with its result and static type after the change),
+  reviewed as the acceptance table of the phase. Then the kind primitives
+  `measurement` and `quantity`, their admission (`'number'` and `'none'`),
+  `compare`, the `quantity` parameters of the operators of section 4.7 of the
+  plan, and the removal of the branches that test the names `Measurement` and
+  `Quantity` in the arithmetic, relational and statistics operators. Fixes
+  CE-508.1 to CE-508.4 and CE-508.6. The visible changes are listed in section 6
+  of the plan; measure them before landing. Until then, the kind dispatch runs
+  before the remaining name-based branches, and a sum or product that mixes a
+  library kind (`Measurement`, `Quantity`) and a user kind is not specified.
+- **Phase 3: an interval value** (#416), with a kind primitive,
+  `admittedAs: 'real'`, `compare` for the partial order of enclosures, and a
+  lowering on `interval-js`. It starts after the open question of section 9 of
+  the plan is decided (the name and LaTeX of the head, and whether
+  `CenteredInterval` is a second kind).
 
-- (a) A field on the operator definition of the head, for example
-  `residueArithmetic: { add(a, b), multiply(a, b), negate(a), divide?(a, b), power?(a, n) }`,
-  each answering an expression or `undefined`. The residue fold groups the
-  operands by head and calls the field for the operands of that head and for the
-  exact literals; an operand it declines stays in the rest, as `ResidueClass`
-  classes of two moduli do. `ResidueClass` itself can be moved onto the field,
-  so one fold serves both. The `simplify()` step then accepts a result typed
-  `residue`, not only a `ResidueClass` call.
-- (b) No hook: correct the guide and the CHANGELOG to say that a sum of the
-  values of such a head stays unevaluated, and remove the advice to extend
-  `Add`.
+- **CE-507.1** (decision needed) `compile.type.hostNames` has no way to reach a
+  worker. A kind's compile contract (`ArithmeticCompile`) can say
+  `shippable: true` and list in `hostNames` the helpers that the compiled code
+  calls, but the kernel pool sends code to a worker as text and has no way to
+  send a helper of the host with it. Today a non-empty `hostNames` makes the
+  result not shippable: with `shippable: true, hostNames: ['gf8Add']`,
+  `compile(G(1) + G(2)).shippable` is `false`, and the same contract without
+  `hostNames` gives `true`. So the field is public and has one effect: to turn
+  `shippable` off. Options: (a) remove `hostNames` from the public type until a
+  carrier exists, and document that a shippable contract writes its helpers
+  inline in the code it returns; (b) give the contract a carrier, for example
+  the helpers as source text that the pool sends with the code (as the
+  `functions` compile option copies a function by `toString()`), and make
+  `hostNames` name them; (c) keep the field as it is, documented as "makes the
+  result not shippable". If nothing is decided, (c) is what ships.
+- **CE-507.3** (defect, low) An overloaded signature with a kind arm does not
+  type the body of a declared function. `kindTypedFunctionLiteral()`
+  (`function-utils.ts`) annotates the untyped parameters of a `Function` body
+  from the declared signature so that `x/x` is not folded at declaration, but
+  only when the signature has ONE arm. With
+  `ce.declare('g', { signature: '((residue) -> residue) & ((integer) -> integer)', evaluate: ['Function', ['Divide', 'x', 'x'], 'x'] })`,
+  `g(ResidueClass(2, 5))` is expected to give `1` where `ResidueClass(1, 5)` is
+  wanted (not measured). Fix: annotate from the union of the arms' parameter
+  types, or refuse an overloaded signature with a kind arm and a body.
+- **CE-507.4** (to measure) A recursive lambda assigned to a symbol with a
+  declared function type goes through the re-box from JSON in `assignFn`
+  (`engine-declarations.ts`); whether the `Typed` marker that
+  `kindTypedFunctionLiteral()` adds survives that re-box is not measured. Also:
+  on the assignment route `ce.box('f').value.json` shows the marker
+  (`["Typed", "x", "'real | umeasurement'"]`) while the declaration route's
+  `_lambdaLiteral.json` does not; the cause is not known.
+- **CE-507.5** (defect, not reachable today) A kind registered inside an
+  inference rollback frame, or inside the Epsil static pre-pass, is not undone
+  when the frame or the pre-pass rolls back (`docs/CHECKPOINT-MODEL.md`, "State
+  coverage", says so). No route reaches it: Epsil cannot declare an `arithmetic`
+  field, and a host `ce.declare` with one runs outside a frame. Becomes
+  reachable when Epsil can declare hooks.
+- **CE-507.6** (to decide, low) A kind whose head declares no `power` hook is
+  refused at `Sqrt`, `Square` and `Power` even when `admittedAs` is `'number'`,
+  because the nine arithmetic operators admit a kind only through its hook
+  (group 1); so `Sin(U)^2` is an error for such a kind. The plan does not state
+  this. Keep (a kind that cannot be squared should say so), or let the carrier
+  rule admit it at the arithmetic operators and leave the call unevaluated.
 
-Option (b) is required in any case until (a) ships, because the current advice
-breaks `Add`.
+### CE-508. `Quantity` and `Measurement` arithmetic: wrong values, a wrong type and gaps
+
+**Status:** open; wrong value and defect, medium. Related: CE-507.
+
+- **CE-508.1** `Quantity(2, m) - Quantity(2, m)` simplifies to the number `0`,
+  so the unit is lost. `evaluate()` gives `Quantity(0, m)`. The generic rule
+  `x - x = 0` runs on quantities; residue classes have a barrier for this in
+  `simplify.ts`, quantities do not.
+- **CE-508.2** `Quantity(2, m) + Quantity(30, cm)` evaluates to
+  `Quantity(2.3, m)`, but `simplify()` returns the sum unchanged. The same
+  happens for `Quantity(2, m)·Quantity(3, s)`.
+- **CE-508.3** `x + Quantity(2, m) + Quantity(3, m)` does not fold:
+  `quantityAdd()` (`library/quantity-arithmetic.ts`) refuses the whole sum when
+  one operand is not a quantity. The residue fold keeps such operands beside the
+  folded value.
+- **CE-508.4** `Measurement(2, 0.1) - Measurement(2, 0.1)` evaluates to
+  `Measurement(0, 0.141…)` (independent errors) but simplifies to `0`. The two
+  routes must give one answer.
+- **CE-508.6** `ResidueClass(2, 5) + Quantity(3, m)` is typed
+  `list<list<any> | residue> | residue`. It must be typed as an unevaluated sum
+  of a class and a value, or refused.
 
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
@@ -3760,6 +3829,12 @@ the WGSL versions bitcast a `let`: a constant `bitcast<f32>` to NaN or infinity
 is a shader-creation error in Chrome ("value inf cannot be represented as
 'f32'").
 
+- **CE-287.1** GLSL on the same driver also loses NaN. Tycho measured a
+  `_gpu_nan()` branch multiplied by `0·cos(…)` (corpus state `zstlwmmpkp`): GLSL
+  returns finite values in 51 of 64 samples where float64 JavaScript and WGSL
+  give NaN. Probably the same cause as the infinity case above. Reported by
+  Tycho session tycho-90 on 2026-10-26, not filed as a Tycho row.
+
 ### CE-288. The f32 shader Hurwitz zeta answers NaN next to a zero of ζ(s, a)
 
 **Status:** open; capability, small.
@@ -5117,3 +5192,11 @@ one fails in a full run on a quiet box, investigate it as a real defect.
   `RUBI_NO_*` tests) in another. The integral stayed inert, which agrees with
   the 10-second rule-engine time limit running out under contention. Not run on
   an idle box.
+- **CE-359.7** `test/epsil/lazy-argument-capture.test.ts`, "a recursion of depth
+  200 that passes a list of 3000 strings": in one full run on 2026-10-26 (the
+  shader fixes CE-509 to CE-513 in a worktree, load average about 8.5) the value
+  was NaN with no diagnostic, where 3000 is expected. It passes alone, and the
+  program takes 30 to 70 ms, with or without a short `ce.timeLimit`. A NaN with
+  no diagnostic is not an expected answer for an overrun, so if it comes back,
+  record the value with `toString()` and the load average, and treat it as a
+  defect.
