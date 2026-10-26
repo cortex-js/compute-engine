@@ -482,7 +482,17 @@ function boxStructuralSymbol(
   // `ce.symbol()` normalizes the name to NFC: compare with that form, so that
   // a name such as `Å` (which normalizes to `Å`) is not taken for a
   // name that resolved to another expression.
-  if (isSymbol(bound, name.normalize())) return bound;
+  if (isSymbol(bound, name.normalize())) {
+    // Marked for the structural form, so that `subs()` boxes a replacement
+    // structurally (`BoxedSymbol._asStructural()`, which leaves a library
+    // symbol and a symbol with no definition unchanged). `ce.symbol()`
+    // returns a fresh instance for a user definition, so it is marked in
+    // place.
+    const symbol = bound as Expression & {
+      _asStructural?: (inPlace: boolean) => Expression;
+    };
+    return symbol._asStructural?.(true) ?? bound;
+  }
   return ce.symbol(name, { canonical: false, metadata });
 }
 
@@ -1642,6 +1652,12 @@ function boxInternal(
     // counted like the MathJSON one below (see `boxingDepth`).
     //
     const forms = options?.canonical ?? true;
+    // A boxed symbol requested in the structural form is marked for it, as a
+    // symbol boxed from MathJSON is (`boxStructuralSymbol()`), so that its
+    // `subs()` boxes a replacement structurally. The getter marks a copy, so
+    // the canonical symbol given here is not changed.
+    if (options?.structural === true && forms === false && isSymbol(expr))
+      return (rebound ?? expr).structural;
     boxingDepth += 1;
     const canonicalized =
       forms === true && options?.scope === undefined

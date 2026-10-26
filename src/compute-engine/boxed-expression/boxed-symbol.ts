@@ -237,6 +237,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    */
   private readonly _def: BoxedDefinition | undefined;
 
+  /**
+   * True when this symbol was boxed in the structural form and bound to its
+   * definition (`boxStructuralSymbol()`, `box.ts`). A bound symbol reports
+   * `isCanonical`, so without this flag `subs()` could not tell a structural
+   * symbol from a canonical one, and boxed its replacement canonically: with
+   * `x: real`, the structural `x` with `x` replaced by the structural `t + i`
+   * gave `t + (0 + 1i)`. Set only on an instance made for the structural
+   * form (`_asStructural()`), never on a shared (interned) symbol. Optional,
+   * so a plain symbol carries no own property for it.
+   * @internal
+   */
+  _structuralForm?: boolean;
+
+  /** The unmarked instance that `canonical` returns for a symbol marked
+   * `_structuralForm`, made on the first read. */
+  private _canonicalOfStructural: BoxedSymbol | undefined;
+
   /** Note: to indicate that the symbol should be canonical, pass a def. */
   constructor(
     ce: ComputeEngine,
@@ -283,7 +300,39 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       def: this._def,
     });
     result._parseScope = this._parseScope;
+    // A copy for diagnostics keeps the structural form of its source.
+    if (this._structuralForm) result._structuralForm = true;
     return result;
+  }
+
+  /**
+   * This symbol in the structural form: a symbol bound to a USER definition,
+   * marked `_structuralForm`, so that `subs()` boxes a replacement in the
+   * structural form. `inPlace` marks this instance (the boxing route, which
+   * holds a fresh instance); otherwise a copy is marked, so a canonical
+   * symbol that other expressions share is never changed.
+   *
+   * Returned unchanged: a symbol with no definition (`subs()` already boxes
+   * its replacement raw), and a symbol bound to its library definition (the
+   * binding of the system scope). The shared (interned) symbols (`Pi`,
+   * `True`, `Nothing`, `Missing`, …) are library names, and engine code
+   * compares them by identity (`=== ce.Nothing`).
+   * @internal
+   */
+  _asStructural(inPlace: boolean): BoxedSymbol {
+    const def = this._def;
+    if (def === undefined || this._structuralForm) return this;
+    const library = this.engine.contextStack[0]?.lexicalScope.bindings.get(
+      this._id
+    );
+    if (library === def) return this;
+    const result = inPlace ? this : this._unshared();
+    result._structuralForm = true;
+    return result;
+  }
+
+  override get structural(): Expression {
+    return this._asStructural(false);
   }
 
   get isPure(): boolean {
@@ -309,6 +358,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get canonical(): Expression {
+    // A symbol marked for the structural form gives an unmarked instance,
+    // with the same definition: its `subs()` boxes a replacement in the
+    // canonical form, as the caller asked.
+    if (this._structuralForm) {
+      if (this._canonicalOfStructural === undefined) {
+        const plain = this._unshared();
+        plain._structuralForm = undefined;
+        this._canonicalOfStructural = plain;
+      }
+      return this._canonicalOfStructural;
+    }
     // The symbol is canonical if it has a definition
     if (this._def) return this;
 
@@ -2301,6 +2361,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
+    // A structural symbol with no requested form keeps the structural form:
+    // its replacement is boxed structurally, which keeps the written names
+    // (`_structuralForm`).
+    if (options?.canonical === undefined && this._structuralForm) {
+      if (!Object.hasOwn(sub, this._id) || sub[this._id] === undefined)
+        return this;
+      return this.engine.expr(sub[this._id], { form: 'structural' });
+    }
     const canonical = options?.canonical ?? this.isCanonical;
     // `Object.hasOwn`, not a bare index: a symbol name is arbitrary user text,
     // so a symbol named `constructor` or `toString` would otherwise read the
