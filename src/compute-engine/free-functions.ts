@@ -16,6 +16,14 @@ import {
   expandAll as expandAllExpr,
 } from './boxed-expression/expand.js';
 import { factorPolynomial as factorExpr } from './boxed-expression/factor.js';
+import { factorNumberFieldExpressionDetailed } from './polynomial/boxed-number-field.js';
+import { factorRationalExpressionDetailed } from './polynomial/boxed-factor.js';
+import {
+  defaultUnknown,
+  reduceTransformerOperand,
+} from './boxed-expression/utils.js';
+import type { FactorOptions, FactorizationResult } from './factoring-types.js';
+import { isValidSymbol } from '../math-json/symbols.js';
 import {
   compile as compileExpr,
   type CompileExpressionOptions,
@@ -165,11 +173,95 @@ export function expandAll(
   return expandAllExpr(toExpression(expr, options));
 }
 
+/** Factor an expression, optionally in a variable and an explicit number field. */
 export function factor(
   expr: LatexString | ExpressionInput,
-  options?: FreeFunctionOptions
+  options?: FactorOptions
 ): Expression {
-  return factorExpr(toExpression(expr, options));
+  validateFactorOptions(options);
+  const target = toExpression(expr, options);
+  if (
+    options &&
+    Object.keys(options).some((k) => k.startsWith('max') || k === 'profile')
+  )
+    return factorDetailed(target, options).expression;
+  if (options?.variable !== undefined) {
+    const ce = target.engine;
+    const ops = [target, ce.symbol(options.variable)];
+    if (options.generator !== undefined)
+      ops.push(factorGenerator(target, options));
+    return ce.function('Factor', ops).evaluate();
+  }
+  return factorExpr(target);
+}
+
+/**
+ * Certified univariate factoring with explicit completion information.
+ * Structural/multivariate heuristics are not reported as complete factorizations.
+ * Uses the input expression's engine; cancellation and engine deadlines propagate.
+ */
+export function factorDetailed(
+  expr: LatexString | ExpressionInput,
+  options: FactorOptions = {}
+): FactorizationResult {
+  validateFactorOptions(options);
+  const input = toExpression(expr, options);
+  const variable =
+    options.variable ??
+    defaultUnknown(reduceTransformerOperand(input.canonical)) ??
+    'x';
+  const protect = new Set([variable]);
+  const target = reduceTransformerOperand(input.canonical, protect);
+  if (options.generator !== undefined) {
+    const generator = reduceTransformerOperand(
+      factorGenerator(input, options).canonical,
+      protect
+    );
+    return factorNumberFieldExpressionDetailed(
+      target,
+      variable,
+      generator,
+      options
+    );
+  }
+  return factorRationalExpressionDetailed(target, variable, options);
+}
+
+function factorGenerator(
+  input: Expression,
+  options: FactorOptions
+): Expression {
+  const ce = input.engine,
+    g = options.generator!;
+  return typeof g === 'string'
+    ? ce.parse(g, { strict: options.strict ?? false })
+    : ce.expr(isExpression(g) ? g.json : g);
+}
+
+function validateFactorOptions(options: FactorOptions = {}): void {
+  if (
+    options.variable !== undefined &&
+    (typeof options.variable !== 'string' || !isValidSymbol(options.variable))
+  )
+    throw new TypeError('Factoring variable must be a nonempty symbol name');
+  if (options.generator !== undefined && options.variable === undefined)
+    throw new TypeError('Explicit-field factoring requires a variable');
+  for (const key of [
+    'maxOperations',
+    'maxDegree',
+    'maxCoefficientBits',
+    'maxIntermediateCoefficientBits',
+    'maxNormDegree',
+    'maxNumberFieldPrimes',
+    'maxNumberFieldLifts',
+  ] as const) {
+    const n = options[key];
+    if (
+      n !== undefined &&
+      (!Number.isSafeInteger(n) || n < (key.includes('Bits') ? 1 : 0))
+    )
+      throw new RangeError(`Invalid factoring option: ${key}`);
+  }
 }
 
 // The signature mirrors `compileExpr`'s rather than deriving from it:

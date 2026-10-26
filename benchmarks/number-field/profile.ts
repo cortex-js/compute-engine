@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
-import { corpus } from './corpus.js';
+import { performance } from 'node:perf_hooks';
+import { corpus, type CorpusKind } from './corpus.js';
 import {
   RationalNumberField,
   factorNumberFieldPolynomial,
@@ -13,14 +14,12 @@ const { values } = parseArgs({
     corpus: { type: 'string', default: 'regular' },
   },
 });
-if (!['regular', 'challenge'].includes(values.corpus!))
+if (!['regular', 'challenge', 'extended'].includes(values.corpus!))
   throw new Error('Unknown corpus');
 const repeats = Number(values.repeats);
 if (!Number.isSafeInteger(repeats) || repeats < 1)
   throw new Error('Invalid repeat count');
-const c = corpus(values.corpus as 'regular' | 'challenge').find(
-  (c) => c.id === values.id
-);
+const c = corpus(values.corpus as CorpusKind).find((c) => c.id === values.id);
 if (!c) throw new Error('Unknown case');
 const K = RationalNumberField.create(
   c.modulus.map(([n, d]) => q(BigInt(n), BigInt(d)))

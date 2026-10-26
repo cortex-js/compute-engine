@@ -85,6 +85,29 @@
   boxed (CE-491). With `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` was a list of
   two errors.
 
+### Features
+
+- **`factor()` accepts `variable` and `generator` options, and a new
+  `factorDetailed()` returns a structured result.** `factor(p, { variable,
+  generator })` factors over an explicit number field, as
+  `Factor(p, x, generator)` does. `factorDetailed()` returns the exact factors
+  with their multiplicities, the scalar content, whether the factorization is
+  complete, and the reason and stage of a refusal; with `statistics: true` it
+  also returns the work counts of each step. Both are exported from the main
+  and the `core` entry points. No MathJSON operator is added.
+- **Number-field factoring lifts at unramified prime ideals of any residue
+  degree.** It used to need an inert prime, and ten inputs of the extended
+  number-field corpus were refused because none was found. The factors are
+  recovered with an exact lattice reduction and the recombination is
+  certified. A weighted scaling of the generator and the variable and tighter
+  bounds on the coefficients of a divisor reduce coefficient growth. When the
+  coefficients are rational, the norm fallback skips the unshifted norm,
+  which is always repeated. The statistics keep the reason the direct method
+  failed before a norm fallback.
+- **Number-field factoring reads `x^n` monomials directly** when it converts an
+  expanded polynomial of high degree, and no longer refuses such an input
+  because the conversion went over its budget.
+
 ### Resolved Issues
 
 - **A part of a loop body printed or evaluated outside its operator keeps its

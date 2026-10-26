@@ -15,6 +15,9 @@ import {
  * Equal columns of the retained indicator lattice cannot belong to different
  * number-field factors. Bounds apply to L times each power-basis coordinate
  * of F*g'/g, including integral coefficients outside the power order.
+ * At a proper prime ideal, columns of M B^-1 turn residue coordinates into
+ * congruences modulo M. Their weighted absolute sums transport the full
+ * power-basis coefficient bounds; no omitted coordinates are assumed zero.
  */
 export function numberFieldLatticePartition(
   defining: readonly bigint[],
@@ -25,7 +28,8 @@ export function numberFieldLatticePartition(
   bounds: readonly (readonly bigint[])[],
   work: PolynomialWork,
   accept: (groups: number[][]) => boolean,
-  observe?: (column: number, rank: number, operations: number) => void
+  observe?: (column: number, rank: number, operations: number) => void,
+  idealForms?: readonly (readonly bigint[])[]
 ): number[][] | null {
   function* constraints(probe: PolynomialWork): Iterable<IndicatorConstraint> {
     const R = new NumberFieldResidueRing(modulus, defining, probe);
@@ -42,13 +46,24 @@ export function numberFieldLatticePartition(
     });
     // Highest coefficients usually separate blocks with the least precision.
     for (let k = bounds.length - 2; k >= 0; k--)
-      for (let j = defining.length - 2; j >= 0; j--) {
+      for (
+        let j = (idealForms?.length ?? defining.length - 1) - 1;
+        j >= 0;
+        j--
+      ) {
         probe.tick(factors.length);
+        const form = idealForms?.[j];
         yield {
-          bound: bounds[k][j],
-          coefficients: logarithms.map(
-            (g) => ((g[k]?.[j] ?? 0n) * denominator) % modulus
-          ),
+          bound: form
+            ? form.reduce((s, c, i) => s + (c < 0n ? -c : c) * bounds[k][i], 0n)
+            : bounds[k][j],
+          coefficients: logarithms.map((g) => {
+            const value =
+              (form
+                ? form.reduce((s, c, i) => s + c * (g[k]?.[i] ?? 0n), 0n)
+                : (g[k]?.[j] ?? 0n)) * denominator;
+            return ((value % modulus) + modulus) % modulus;
+          }),
         };
       }
   }

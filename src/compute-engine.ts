@@ -167,11 +167,17 @@ export {
   expand,
   expandAll,
   factor,
+  factorDetailed,
   solve,
   compile,
   getDefaultEngine,
 } from './compute-engine/free-functions.js';
 export type { FreeFunctionOptions } from './compute-engine/free-functions.js';
+export type {
+  FactorOptions,
+  FactorizationResult,
+  FactorStatistics,
+} from './compute-engine/factoring-types.js';
 
 // ── Explanations (see `expr.explain()`) ─────────────────────────────
 export {

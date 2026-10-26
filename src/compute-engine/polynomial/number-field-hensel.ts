@@ -131,7 +131,7 @@ interface Node {
 export class NumberFieldHenselTree {
   private root: Node;
   modulus: bigint;
-  readonly defining: readonly bigint[];
+  defining: readonly bigint[];
   constructor(
     factors: readonly number[][][],
     readonly prime: number,
@@ -178,11 +178,21 @@ export class NumberFieldHenselTree {
         : [node.polynomial.map((c) => [...c])];
     return collect(this.root);
   }
-  lift(target: readonly (readonly bigint[])[]): void {
+  lift(
+    target: readonly (readonly bigint[])[],
+    defining: readonly bigint[] = this.defining
+  ): void {
     const m = this.modulus,
       next = m * m;
+    if (
+      defining.length !== this.defining.length ||
+      defining.some((c, i) => (c - this.defining[i]) % m !== 0n)
+    )
+      throw new PolynomialInvariantError(
+        'Incompatible lifted coefficient field'
+      );
     const R = new NumberFieldResidueRing(m, this.defining, this.work),
-      S = new NumberFieldResidueRing(next, this.defining, this.work);
+      S = new NumberFieldResidueRing(next, defining, this.work);
     const lift = (node: Node, f: ResiduePolynomial): Node => {
       if (
         f.length !== node.polynomial.length ||
@@ -237,5 +247,6 @@ export class NumberFieldHenselTree {
     const root = lift(this.root, S.normalize(target));
     this.root = root;
     this.modulus = next;
+    this.defining = Object.freeze([...defining]);
   }
 }

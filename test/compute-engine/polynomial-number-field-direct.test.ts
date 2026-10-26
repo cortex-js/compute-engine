@@ -143,7 +143,7 @@ describe('Certified direct number field factorization', () => {
       )
     ).toBe(true);
   });
-  test('fields without inert primes use an explicit general fallback', () => {
+  test('fields without inert primes factor directly at a proper residue extension', () => {
     const K = RationalNumberField.create(modulus([1, 0, -10, 0, 1]));
     const P = new FieldPolynomials(K);
     const f = P.mul([K.generator, K.one], [K.one, K.one]);
@@ -151,13 +151,13 @@ describe('Certified direct number field factorization', () => {
       numberFieldStrategy: 'hensel',
       maxNumberFieldPrimes: 8,
     });
-    expect(strict.status).toBe('incomplete');
-    expect(strict.reason).toBe('no-inert-good-prime');
-    expect(strict.factors).toEqual([]);
+    expect(strict.status).toBe('complete');
+    expect(strict.factors).toHaveLength(2);
+    expect(strict.statistics.direct[0].residueDegree).toBeLessThan(K.degree);
     const automatic = factor(K, f, { maxNumberFieldPrimes: 8 });
     expect(automatic.status).toBe('complete');
-    expect(automatic.statistics.direct[0].fallback).toBe('no-inert-good-prime');
-    expect(automatic.statistics.norms).toBeGreaterThan(0);
+    expect(automatic.statistics.direct[0].fallback).toBeUndefined();
+    expect(automatic.statistics.norms).toBe(0);
   });
   test('insufficient lifting precision cannot claim irreducibility', () => {
     const K = RationalNumberField.create(modulus([-5, 0, 1]));
