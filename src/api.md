@@ -77,18 +77,18 @@ Assignable value for `ce.assign()`.
 
 </MemberCard>
 
-### ~~ExpressionComputeEngine~~ {#expressioncomputeengine}
+### ComputeEngine {#computeengine}
 
-Compute engine surface used by expression types.
+Compute engine surface used by the expression and definition types.
 
-This interface is augmented by `types-engine.ts` with the concrete
-`IComputeEngine` members to avoid type-layer circular dependencies.
-
-#### Deprecated
-
-Use `ComputeEngine` (the type exported from the package entry
-points) or `IComputeEngine` instead — the three are interchangeable, and
-this alias will be removed in a future release.
+This interface is empty here and augmented by `types-engine.ts` with the
+members of `IComputeEngine`. The expression types cannot import
+`IComputeEngine` directly: `types-engine.ts` imports this file, and the
+repository allows no import cycle, not even between type-only modules.
+`types-definitions.ts` imports this interface from here for the same
+reason. The package entry points export their own `ComputeEngine` type
+(`IComputeEngine`), which takes precedence over this one; the two are
+structurally identical.
 
 #### Extends
 
@@ -96,7 +96,7 @@ this alias will be removed in a future release.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~latexSyntax~~ {#latexsyntax-1}
+##### ComputeEngine.latexSyntax {#latexsyntax-1}
 
 ```ts
 readonly latexSyntax: ILatexSyntax | undefined;
@@ -117,7 +117,7 @@ The LatexSyntax instance used for LaTeX parsing/serialization.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~latexOptions~~ {#latexoptions-1}
+##### ComputeEngine.latexOptions {#latexoptions-1}
 
 ```ts
 latexOptions: Partial<ParseLatexOptions & SerializeLatexOptions>;
@@ -131,7 +131,7 @@ Engine-wide LaTeX parse/serialize options (e.g. `decimalSeparator`).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~True~~ {#true-1}
+##### ComputeEngine.True {#true-1}
 
 ```ts
 readonly True: Expression;
@@ -141,7 +141,7 @@ readonly True: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~False~~ {#false-1}
+##### ComputeEngine.False {#false-1}
 
 ```ts
 readonly False: Expression;
@@ -151,7 +151,7 @@ readonly False: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Pi~~ {#pi-1}
+##### ComputeEngine.Pi {#pi-1}
 
 ```ts
 readonly Pi: Expression;
@@ -161,7 +161,7 @@ readonly Pi: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~E~~ {#e-1}
+##### ComputeEngine.E {#e-1}
 
 ```ts
 readonly E: Expression;
@@ -171,7 +171,7 @@ readonly E: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Nothing~~ {#nothing-1}
+##### ComputeEngine.Nothing {#nothing-1}
 
 ```ts
 readonly Nothing: Expression;
@@ -181,7 +181,7 @@ readonly Nothing: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Missing~~ {#missing-1}
+##### ComputeEngine.Missing {#missing-1}
 
 ```ts
 readonly Missing: Expression;
@@ -193,7 +193,7 @@ The `Missing` symbol: an absent value whose position is preserved.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Zero~~ {#zero-1}
+##### ComputeEngine.Zero {#zero-1}
 
 ```ts
 readonly Zero: Expression;
@@ -203,7 +203,7 @@ readonly Zero: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~One~~ {#one-1}
+##### ComputeEngine.One {#one-1}
 
 ```ts
 readonly One: Expression;
@@ -213,7 +213,7 @@ readonly One: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Half~~ {#half-1}
+##### ComputeEngine.Half {#half-1}
 
 ```ts
 readonly Half: Expression;
@@ -223,7 +223,7 @@ readonly Half: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~NegativeOne~~ {#negativeone-1}
+##### ComputeEngine.NegativeOne {#negativeone-1}
 
 ```ts
 readonly NegativeOne: Expression;
@@ -233,7 +233,7 @@ readonly NegativeOne: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Two~~ {#two-1}
+##### ComputeEngine.Two {#two-1}
 
 ```ts
 readonly Two: Expression;
@@ -243,7 +243,7 @@ readonly Two: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~I~~ {#i-1}
+##### ComputeEngine.I {#i-1}
 
 ```ts
 readonly I: Expression;
@@ -255,7 +255,7 @@ ImaginaryUnit
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~NaN~~ {#nan-2}
+##### ComputeEngine.NaN {#nan-2}
 
 ```ts
 readonly NaN: Expression;
@@ -265,7 +265,7 @@ readonly NaN: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~Indeterminate~~ {#indeterminate-1}
+##### ComputeEngine.Indeterminate {#indeterminate-1}
 
 ```ts
 readonly Indeterminate: Expression;
@@ -280,7 +280,7 @@ Its numeric approximation (`.N()`) is `NaN`.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~PositiveInfinity~~ {#positiveinfinity-2}
+##### ComputeEngine.PositiveInfinity {#positiveinfinity-2}
 
 ```ts
 readonly PositiveInfinity: Expression;
@@ -290,7 +290,7 @@ readonly PositiveInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~NegativeInfinity~~ {#negativeinfinity-2}
+##### ComputeEngine.NegativeInfinity {#negativeinfinity-2}
 
 ```ts
 readonly NegativeInfinity: Expression;
@@ -300,7 +300,7 @@ readonly NegativeInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~ComplexInfinity~~ {#complexinfinity-1}
+##### ComputeEngine.ComplexInfinity {#complexinfinity-1}
 
 ```ts
 readonly ComplexInfinity: Expression;
@@ -310,7 +310,7 @@ readonly ComplexInfinity: Expression;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~context~~ {#context-1}
+##### ComputeEngine.context {#context-1}
 
 ```ts
 readonly context: EvalContext;
@@ -320,7 +320,7 @@ readonly context: EvalContext;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~contextStack~~ {#contextstack-1}
+##### ComputeEngine.contextStack {#contextstack-1}
 
 ```ts
 contextStack: readonly EvalContext[];
@@ -330,7 +330,7 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~iterationLimit~~ {#iterationlimit-1}
+##### ComputeEngine.iterationLimit {#iterationlimit-1}
 
 ```ts
 iterationLimit: number;
@@ -340,7 +340,7 @@ iterationLimit: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~recursionLimit~~ {#recursionlimit-1}
+##### ComputeEngine.recursionLimit {#recursionlimit-1}
 
 ```ts
 recursionLimit: number;
@@ -350,7 +350,7 @@ recursionLimit: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~maxCollectionSize~~ {#maxcollectionsize-1}
+##### ComputeEngine.maxCollectionSize {#maxcollectionsize-1}
 
 ```ts
 maxCollectionSize: number;
@@ -360,7 +360,7 @@ maxCollectionSize: number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~bignum~~ {#bignum-2}
+##### ComputeEngine.bignum {#bignum-2}
 
 ```ts
 bignum: (a) => BigDecimal;
@@ -370,7 +370,7 @@ bignum: (a) => BigDecimal;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~complex~~ {#complex-2}
+##### ComputeEngine.complex {#complex-2}
 
 ```ts
 complex: (a, b?) => Complex;
@@ -380,7 +380,7 @@ complex: (a, b?) => Complex;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~angularUnit~~ {#angularunit-2}
+##### ComputeEngine.angularUnit {#angularunit-2}
 
 ```ts
 angularUnit: AngularUnit;
@@ -390,7 +390,7 @@ angularUnit: AngularUnit;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~roundingTies~~ {#roundingties-2}
+##### ComputeEngine.roundingTies {#roundingties-2}
 
 ```ts
 roundingTies: RoundingTies;
@@ -403,7 +403,7 @@ The rule that `Round` uses for a value halfway between two integers.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~costFunction~~ {#costfunction-2}
+##### ComputeEngine.costFunction {#costfunction-2}
 
 ```ts
 costFunction: (expr) => number;
@@ -413,7 +413,7 @@ costFunction: (expr) => number;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~simplificationRules~~ {#simplificationrules-1}
+##### ComputeEngine.simplificationRules {#simplificationrules-1}
 
 ```ts
 simplificationRules: Rule[];
@@ -427,7 +427,7 @@ The rules used by `.simplify()` when no explicit `rules` option is passed.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~solveRules~~ {#solverules-1}
+##### ComputeEngine.solveRules {#solverules-1}
 
 ```ts
 solveRules: Rule[];
@@ -446,7 +446,7 @@ The rules used by `solve()` to find roots of univariate expressions.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~harmonizationRules~~ {#harmonizationrules-1}
+##### ComputeEngine.harmonizationRules {#harmonizationrules-1}
 
 ```ts
 harmonizationRules: Rule[];
@@ -460,7 +460,7 @@ The rules used by `solve()` to transform an equation into equivalent,
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~strict~~ {#strict-1}
+##### ComputeEngine.strict {#strict-1}
 
 ```ts
 strict: boolean;
@@ -470,7 +470,7 @@ strict: boolean;
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~jit~~ {#jit-1}
+##### ComputeEngine.jit {#jit-1}
 
 ```ts
 jit: "auto" | "off";
@@ -486,7 +486,7 @@ compilation and latches to `'off'` engine-wide on the first CSP
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~workers~~ {#workers-1}
+##### ComputeEngine.workers {#workers-1}
 
 ```ts
 workers: KernelPool | undefined;
@@ -501,7 +501,7 @@ can serve several engines, and it is read at each call.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~trace~~ {#trace-1}
+##### ComputeEngine.trace {#trace-1}
 
 ```ts
 trace: readonly string[];
@@ -513,7 +513,7 @@ A list of the function calls to the current evaluation context
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~effects~~ {#effects-3}
+##### ComputeEngine.effects {#effects-3}
 
 ```ts
 get effects(): EffectHandlers
@@ -548,7 +548,7 @@ For a change that must last for one block of code only, use
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~precision~~ {#precision-1}
+##### ComputeEngine.precision {#precision-1}
 
 ```ts
 get precision(): number
@@ -559,7 +559,7 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~tolerance~~ {#tolerance-2}
+##### ComputeEngine.tolerance {#tolerance-2}
 
 ```ts
 get tolerance(): number
@@ -574,7 +574,7 @@ recomputed at each precision change.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~checkpoint()~~ {#checkpoint-1}
+##### ComputeEngine.checkpoint() {#checkpoint-1}
 
 ```ts
 checkpoint(label?): EngineCheckpoint
@@ -598,7 +598,7 @@ checkpoint was taken on.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~restore()~~ {#restore-1}
+##### ComputeEngine.restore() {#restore-1}
 
 ```ts
 restore(cp): void
@@ -618,7 +618,7 @@ artifacts, never as live boxed nodes.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~discard()~~ {#discard-1}
+##### ComputeEngine.discard() {#discard-1}
 
 ```ts
 discard(cp): void
@@ -636,7 +636,7 @@ OLDEST makes the state before the next-younger one unreachable.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareProtocol()~~ {#declareprotocol-1}
+##### ComputeEngine.declareProtocol() {#declareprotocol-1}
 
 ```ts
 declareProtocol(name, members): void
@@ -657,7 +657,7 @@ on re-declaration — the Epsil statement route replaces instead (P5).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareProtocolImplementation()~~ {#declareprotocolimplementation-1}
+##### ComputeEngine.declareProtocolImplementation() {#declareprotocolimplementation-1}
 
 ```ts
 declareProtocolImplementation(
@@ -707,7 +707,7 @@ throws.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~conformsTo()~~ {#conformsto-1}
+##### ComputeEngine.conformsTo() {#conformsto-1}
 
 ```ts
 conformsTo(type, protocol): boolean
@@ -752,7 +752,7 @@ parses one.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~withTimeLimit()~~ {#withtimelimit-1}
+##### ComputeEngine.withTimeLimit() {#withtimelimit-1}
 
 ```ts
 withTimeLimit<T>(limit, fn): T
@@ -792,7 +792,7 @@ cancellation that is not a time limit, use
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~withStepBudget()~~ {#withstepbudget-1}
+##### ComputeEngine.withStepBudget() {#withstepbudget-1}
 
 ```ts
 withStepBudget<T>(limit, fn): T
@@ -829,7 +829,7 @@ and the span's `label` as its `attribution`.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~withEffects()~~ {#witheffects-1}
+##### ComputeEngine.withEffects() {#witheffects-1}
 
 ```ts
 withEffects<T>(overrides, fn): T
@@ -874,7 +874,7 @@ calling `withEffects`, or use a separate engine.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~withEvaluationContext()~~ {#withevaluationcontext-1}
+##### ComputeEngine.withEvaluationContext() {#withevaluationcontext-1}
 
 ```ts
 withEvaluationContext<T>(options, fn): T
@@ -930,7 +930,7 @@ first `await`, runs in the context.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~chop()~~ {#chop-1}
+##### ComputeEngine.chop() {#chop-1}
 
 ###### chop(n)
 
@@ -966,7 +966,7 @@ chop(n): number | BigDecimal
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~expr()~~ {#expr-3}
+##### ComputeEngine.expr() {#expr-3}
 
 ```ts
 expr(expr, options?): Expression
@@ -991,7 +991,7 @@ expr(expr, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~box()~~ {#box-1}
+##### ComputeEngine.~~box()~~ {#box-1}
 
 ```ts
 box(expr, options?): Expression
@@ -1020,7 +1020,7 @@ Use `expr()` instead.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~rebind()~~ {#rebind-1}
+##### ComputeEngine.rebind() {#rebind-1}
 
 ```ts
 rebind(expr, options?): Expression
@@ -1073,7 +1073,7 @@ route boxes it.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~parse()~~ {#parse-2}
+##### ComputeEngine.parse() {#parse-2}
 
 ###### parse(latex, options)
 
@@ -1138,7 +1138,7 @@ parse(latex, options?): Expression | null
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~appliedNonFunctions()~~ {#appliednonfunctions-1}
+##### ComputeEngine.appliedNonFunctions() {#appliednonfunctions-1}
 
 ```ts
 appliedNonFunctions(latex): string[]
@@ -1164,7 +1164,7 @@ juxtaposition analysis.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~function()~~ {#function-1}
+##### ComputeEngine.function() {#function-1}
 
 ```ts
 function(name, ops, options?): Expression
@@ -1196,7 +1196,7 @@ readonly [`ExpressionInput`](#expressioninput)[]
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~\_getCompilationTarget()~~ {#_getcompilationtarget-1}
+##### ComputeEngine.\_getCompilationTarget() {#_getcompilationtarget-1}
 
 ###### \_getCompilationTarget(name)
 
@@ -1226,7 +1226,7 @@ _getCompilationTarget(name):
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~number()~~ {#number-2}
+##### ComputeEngine.number() {#number-2}
 
 ###### number(value, options)
 
@@ -1322,7 +1322,7 @@ number(value, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~symbol()~~ {#symbol-1}
+##### ComputeEngine.symbol() {#symbol-1}
 
 ```ts
 symbol(sym, options?): Expression
@@ -1350,7 +1350,7 @@ symbol(sym, options?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~string()~~ {#string-2}
+##### ComputeEngine.string() {#string-2}
 
 ```ts
 string(s, metadata?): Expression
@@ -1368,7 +1368,7 @@ string(s, metadata?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~character()~~ {#character-2}
+##### ComputeEngine.character() {#character-2}
 
 ```ts
 character(s, metadata?): Expression
@@ -1392,7 +1392,7 @@ it reports a diagnostic instead.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~error()~~ {#error-2}
+##### ComputeEngine.error() {#error-2}
 
 ```ts
 error(message, where?): Expression
@@ -1410,7 +1410,7 @@ error(message, where?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~typeError()~~ {#typeerror-1}
+##### ComputeEngine.typeError() {#typeerror-1}
 
 ```ts
 typeError(expectedType, actualType, where?): Expression
@@ -1434,7 +1434,7 @@ typeError(expectedType, actualType, where?): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~hold()~~ {#hold-1}
+##### ComputeEngine.hold() {#hold-1}
 
 ```ts
 hold(expr): Expression
@@ -1448,7 +1448,7 @@ hold(expr): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~tuple()~~ {#tuple-1}
+##### ComputeEngine.tuple() {#tuple-1}
 
 ###### tuple(elements)
 
@@ -1474,7 +1474,7 @@ tuple(...elements): Expression
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~list()~~ {#list-1}
+##### ComputeEngine.list() {#list-1}
 
 ```ts
 list(values): Expression
@@ -1503,7 +1503,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~type()~~ {#type-11}
+##### ComputeEngine.type() {#type-11}
 
 ```ts
 type(type): BoxedType
@@ -1535,7 +1535,7 @@ type(type): BoxedType
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~rules()~~ {#rules-2}
+##### ComputeEngine.rules() {#rules-2}
 
 ```ts
 rules(rules, options?): BoxedRuleSet
@@ -1562,7 +1562,7 @@ Default purpose applied to any rule in the set that doesn't carry
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getRuleSet()~~ {#getruleset-1}
+##### ComputeEngine.getRuleSet() {#getruleset-1}
 
 ```ts
 getRuleSet(id?): BoxedRuleSet | undefined
@@ -1576,7 +1576,7 @@ getRuleSet(id?): BoxedRuleSet | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~pushScope()~~ {#pushscope-1}
+##### ComputeEngine.pushScope() {#pushscope-1}
 
 ```ts
 pushScope(scope?, name?): void
@@ -1594,7 +1594,7 @@ pushScope(scope?, name?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~popScope()~~ {#popscope-1}
+##### ComputeEngine.popScope() {#popscope-1}
 
 ```ts
 popScope(): void
@@ -1604,7 +1604,7 @@ popScope(): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~createScope()~~ {#createscope-1}
+##### ComputeEngine.createScope() {#createscope-1}
 
 ```ts
 createScope(bindings?, parent?): InspectableScope
@@ -1642,7 +1642,7 @@ createScope(bindings?, parent?): InspectableScope
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~lookupDefinition()~~ {#lookupdefinition-2}
+##### ComputeEngine.lookupDefinition() {#lookupdefinition-2}
 
 ```ts
 lookupDefinition(id): BoxedDefinition | undefined
@@ -1656,7 +1656,7 @@ lookupDefinition(id): BoxedDefinition | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~assign()~~ {#assign-1}
+##### ComputeEngine.assign() {#assign-1}
 
 ###### assign(ids)
 
@@ -1700,7 +1700,7 @@ assign(arg1, arg2?): IComputeEngine
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareType()~~ {#declaretype-1}
+##### ComputeEngine.declareType() {#declaretype-1}
 
 ```ts
 declareType(name, type, options?): void
@@ -1754,7 +1754,7 @@ declareType(name, type, options?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declare()~~ {#declare-1}
+##### ComputeEngine.declare() {#declare-1}
 
 ###### declare(symbols)
 
@@ -2046,7 +2046,7 @@ declare(arg1, arg2?, arg3?): IComputeEngine
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~loadLibrary()~~ {#loadlibrary-1}
+##### ComputeEngine.loadLibrary() {#loadlibrary-1}
 
 ```ts
 loadLibrary(library): IComputeEngine
@@ -2065,7 +2065,7 @@ and its name is recorded (see `libraryOf()`). Each library in its
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~libraryOf()~~ {#libraryof-1}
+##### ComputeEngine.libraryOf() {#libraryof-1}
 
 ```ts
 libraryOf(name): string | undefined
@@ -2083,7 +2083,7 @@ that no library defines or that a declaration shadows.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~assume()~~ {#assume-1}
+##### ComputeEngine.assume() {#assume-1}
 
 ```ts
 assume(predicate): AssumeResult
@@ -2097,7 +2097,7 @@ assume(predicate): AssumeResult
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~declareSequence()~~ {#declaresequence-1}
+##### ComputeEngine.declareSequence() {#declaresequence-1}
 
 ```ts
 declareSequence(name, def): IComputeEngine
@@ -2128,7 +2128,7 @@ ce.parse('F_{10}').evaluate();  // → 55
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequenceStatus()~~ {#getsequencestatus-1}
+##### ComputeEngine.getSequenceStatus() {#getsequencestatus-1}
 
 ```ts
 getSequenceStatus(name): SequenceStatus
@@ -2152,7 +2152,7 @@ ce.getSequenceStatus('F');
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequence()~~ {#getsequence-1}
+##### ComputeEngine.getSequence() {#getsequence-1}
 
 ```ts
 getSequence(name): SequenceInfo | undefined
@@ -2169,7 +2169,7 @@ Returns `undefined` if the symbol is not a sequence.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~listSequences()~~ {#listsequences-1}
+##### ComputeEngine.listSequences() {#listsequences-1}
 
 ```ts
 listSequences(): string[]
@@ -2185,7 +2185,7 @@ sequence, as for `isSequence()`.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~isSequence()~~ {#issequence-1}
+##### ComputeEngine.isSequence() {#issequence-1}
 
 ```ts
 isSequence(name): boolean
@@ -2207,7 +2207,7 @@ declaration.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~clearSequenceCache()~~ {#clearsequencecache-1}
+##### ComputeEngine.clearSequenceCache() {#clearsequencecache-1}
 
 ```ts
 clearSequenceCache(name?): void
@@ -2224,7 +2224,7 @@ If no name is provided, clears caches for all sequences.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequenceCache()~~ {#getsequencecache-1}
+##### ComputeEngine.getSequenceCache() {#getsequencecache-1}
 
 ```ts
 getSequenceCache(name): 
@@ -2246,7 +2246,7 @@ For multi-index sequences, keys are comma-separated strings (e.g., '5,2').
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~getSequenceTerms()~~ {#getsequenceterms-1}
+##### ComputeEngine.getSequenceTerms() {#getsequenceterms-1}
 
 ```ts
 getSequenceTerms(
@@ -2294,7 +2294,7 @@ ce.getSequenceTerms('F', 0, 10);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~lookupOEIS()~~ {#lookupoeis-1}
+##### ComputeEngine.lookupOEIS() {#lookupoeis-1}
 
 ```ts
 lookupOEIS(terms, options?): Promise<OEISSequenceInfo[]>
@@ -2325,7 +2325,7 @@ const results = await ce.lookupOEIS([0, 1, 1, 2, 3, 5, 8, 13]);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~checkSequenceOEIS()~~ {#checksequenceoeis-1}
+##### ComputeEngine.checkSequenceOEIS() {#checksequenceoeis-1}
 
 ```ts
 checkSequenceOEIS(name, count?, options?): Promise<{
@@ -2366,7 +2366,7 @@ const result = await ce.checkSequenceOEIS('F', 10);
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~interpret()~~ {#interpret-1}
+##### ComputeEngine.interpret() {#interpret-1}
 
 ```ts
 interpret(expr, options?): Promise<InterpretResult>
@@ -2406,7 +2406,7 @@ const { expression, candidates } = await ce.interpret(
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~forget()~~ {#forget-1}
+##### ComputeEngine.forget() {#forget-1}
 
 ```ts
 forget(symbol?): void
@@ -2420,7 +2420,7 @@ forget(symbol?): void
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~undeclare()~~ {#undeclare-1}
+##### ComputeEngine.undeclare() {#undeclare-1}
 
 ```ts
 undeclare(names): void
@@ -2492,7 +2492,7 @@ ce.parse('f(2)').evaluate();   // f(2)
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~ask()~~ {#ask-1}
+##### ComputeEngine.ask() {#ask-1}
 
 ```ts
 ask(pattern): BoxedSubstitution[]
@@ -2506,7 +2506,7 @@ ask(pattern): BoxedSubstitution[]
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~verify()~~ {#verify-1}
+##### ComputeEngine.verify() {#verify-1}
 
 ```ts
 verify(query): boolean | undefined
@@ -2520,7 +2520,7 @@ verify(query): boolean | undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~operatorInfo()~~ {#operatorinfo-2}
+##### ComputeEngine.operatorInfo() {#operatorinfo-2}
 
 ```ts
 operatorInfo(head): OperatorInfo | undefined
@@ -2545,7 +2545,7 @@ maintaining a parallel list of "known" operators.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~normalizeIdentifier()~~ {#normalizeidentifier-1}
+##### ComputeEngine.normalizeIdentifier() {#normalizeidentifier-1}
 
 ```ts
 normalizeIdentifier(latex): string
@@ -2571,7 +2571,7 @@ name without the side-effect of auto-declaring the symbol.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~symbolInfo()~~ {#symbolinfo-2}
+##### ComputeEngine.symbolInfo() {#symbolinfo-2}
 
 ```ts
 symbolInfo(name): SymbolInfo | undefined
@@ -2597,7 +2597,7 @@ two methods are non-overlapping).
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~searchDefinitions()~~ {#searchdefinitions-1}
+##### ComputeEngine.searchDefinitions() {#searchdefinitions-1}
 
 ```ts
 searchDefinitions(query, options?): DefinitionSearchResult[]
@@ -2629,7 +2629,7 @@ call for full detail.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~suggestOperatorName()~~ {#suggestoperatorname-1}
+##### ComputeEngine.suggestOperatorName() {#suggestoperatorname-1}
 
 ```ts
 suggestOperatorName(name): string | undefined
@@ -2658,7 +2658,7 @@ ce.suggestOperatorName('foo');      // → undefined
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~functionProperties()~~ {#functionproperties-2}
+##### ComputeEngine.functionProperties() {#functionproperties-2}
 
 ```ts
 functionProperties(name): FunctionProperties | undefined
@@ -2684,7 +2684,7 @@ residues that depend on parameters) are available via `entries`.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~contourIntegrate()~~ {#contourintegrate-1}
+##### ComputeEngine.contourIntegrate() {#contourintegrate-1}
 
 ```ts
 contourIntegrate(integrand, variable, contour): ContourIntegralResult
@@ -2712,7 +2712,7 @@ status `pole-on-contour`. See [ContourInput](#contourinput) for contour forms.
 
 <MemberCard>
 
-##### ExpressionComputeEngine.~~toJSON()~~ {#tojson-3}
+##### ComputeEngine.toJSON() {#tojson-3}
 
 ```ts
 toJSON(): string
@@ -3330,7 +3330,6 @@ type ReplaceOptions = {
   useVariations: boolean;
   matchPermutations: boolean;
   iterationLimit: number;
-  canonical: CanonicalOptions;
   form: FormOption;
   direction: "left-right" | "right-left";
 };
@@ -3904,7 +3903,7 @@ Contains the compute engine and evaluation options
 
 ####### engine
 
-`ComputeEngine`
+[`ComputeEngine`](#computeengine)
 
 ####### numericApproximation?
 
@@ -4309,6 +4308,7 @@ type OperandStructure =
   system: boolean;
   inferred: boolean;
   local: boolean;
+  free: true;
  }
   | {
   kind: "string";
@@ -4362,6 +4362,7 @@ holding an expression.
   `system`: `boolean`;
   `inferred`: `boolean`;
   `local`: `boolean`;
+  `free`: `true`;
  \}
 
 #### OperandStructure.lookupByName?
@@ -4407,10 +4408,25 @@ local?: boolean;
 
 Present (`true`) when the symbol is a block-local binding a `Block`
 hoisted for a `let` or a block-introducing assignment, still waiting
-for the statement that gives it a value. The `List`-fold handler
-reads it to keep the generic-symbol fold (an unknown bare symbol is
-a number) for FREE symbols only: such a local is not a generic
-value, its type is simply not known yet.
+for the statement that gives it a value. Such a local is not a
+generic value, its type is simply not known yet: the handlers that
+ask whether an operand may hold a list read it.
+
+#### OperandStructure.free?
+
+```ts
+free?: true;
+```
+
+Present (`true`) when the symbol is free: it has no value, it is
+not a constant, not `Undefined` and not a pattern wildcard (a name
+that starts with `_`), and a scope of the current context other
+than the system scope binds it, but not as a parameter of a
+function literal, a local of a `Block` or the variable of a binder
+(a `Sum` index). The `List` type handler reads a symbol of type
+`unknown` as a number cell only when this is present: these are the
+symbols that the canonical form of a literal list infers as
+numbers.
 
 \{
   `kind`: `"string"`;
@@ -9004,7 +9020,7 @@ type ParseDiagnostic = {
 
 An opt-in parse-time diagnostic, collected when a LaTeX string is parsed
 with `ce.parse(latex, { diagnostics: true })` and exposed on the top-level
-result via `BoxedExpression.parseDiagnostics`.
+result via `Expression.parseDiagnostics`.
 
 Diagnostics flag *charitable* parse decisions that are usually errors in
 machine-generated LaTeX (LLM output, OCR): a name read as multiplication
@@ -11473,7 +11489,7 @@ restore). A dead checkpoint can never be restored again.
 
 #### Extended by
 
-- [`ExpressionComputeEngine`](#expressioncomputeengine)
+- [`ComputeEngine`](#computeengine)
 
 <MemberCard>
 
@@ -14611,7 +14627,7 @@ It is therefore **not an `isSame` key**, in both directions, and
 ##### Expression.engine {#engine-1}
 
 ```ts
-readonly engine: ExpressionComputeEngine;
+readonly engine: ComputeEngine;
 ```
 
 The Compute Engine instance associated with this expression provides
@@ -14630,7 +14646,7 @@ toMathJson(options?): MathJsonExpression
 
 Serialize to a MathJSON expression with specified options.
 
-Use `{ fractionalDigits: 'auto' }` to round arbitrary-precision
+Use `{ digits: 'auto' }` to round arbitrary-precision
 numbers to `ce.precision` significant digits. The default
 (`'max'`) emits all available digits with no rounding.
 
@@ -14666,7 +14682,7 @@ For arbitrary-precision numbers, the full raw `BigDecimal` value is
 emitted with no rounding (same as `toJSON()`). This preserves data
 fidelity for round-tripping but may include trailing digits beyond
 `ce.precision` that are not meaningful. Use
-`toMathJson({ fractionalDigits: 'auto' })` for rounded output.
+`toMathJson({ digits: 'auto' })` for rounded output.
 
 :::info[Note]
 Applicable to canonical and non-canonical expressions.
@@ -15721,7 +15737,7 @@ return the empty substitution, `{}`.
   are filtered out. `useVariations` and `matchMissingTerms` default to
   `true`. Unprefixed keys are accepted in `substitution`.
 - A **MathJSON array** (e.g., `['Add', '_a', '_b']`): boxed automatically.
-- A **BoxedExpression**: used directly.
+- An **Expression**: used directly.
 
 Read more about [**patterns and rules**](/compute-engine/guides/patterns-and-rules/).
 
@@ -16732,7 +16748,7 @@ Note that lazy collections are *not* eagerly evaluated.
 The output preserves the full raw `BigDecimal` value with no rounding,
 ensuring lossless round-tripping via `ce.expr(expr.json)`. Digits beyond
 `ce.precision` may be present but are not guaranteed to be accurate.
-Use `toMathJson({ fractionalDigits: 'auto' })` for precision-rounded
+Use `toMathJson({ digits: 'auto' })` for precision-rounded
 MathJSON output.
 
 </MemberCard>
@@ -17260,34 +17276,6 @@ never matches a key, because a key is a string, not a symbol. For
 
 </MemberCard>
 
-<MemberCard>
-
-### ~~BoxedExpression~~ {#boxedexpression}
-
-```ts
-type BoxedExpression = Expression;
-```
-
-#### Deprecated
-
-Use `Expression` instead.
-
-</MemberCard>
-
-<MemberCard>
-
-### ~~SemiBoxedExpression~~ {#semiboxedexpression}
-
-```ts
-type SemiBoxedExpression = ExpressionInput;
-```
-
-#### Deprecated
-
-Use `ExpressionInput` instead.
-
-</MemberCard>
-
 ## Serialization
 
 <MemberCard>
@@ -17323,7 +17311,6 @@ These options control how numbers are parsed and serialized.
 ```ts
 type NumberSerializationFormat = NumberFormat & {
   digits: DisplayDigits;
-  fractionalDigits: "auto" | "max" | number;
   notation: "auto" | "engineering" | "scientific" | "adaptiveScientific";
   avoidExponentsInRange:   | undefined
      | null
@@ -17340,25 +17327,12 @@ digits?: DisplayDigits;
 Controls how many digits a number is displayed with. See
 [DisplayDigits](#displaydigits).
 
-When serializing via `.toLatex({ digits })`, rounding is applied at the
-MathJSON (kernel) layer; the LaTeX layer only lays out the already-rounded
-digits.
-
-#### NumberSerializationFormat.~~fractionalDigits~~
-
-```ts
-fractionalDigits: "auto" | "max" | number;
-```
-
-The maximum number of significant digits in serialized numbers.
-- `"max"`: all availabe digits are serialized.
-- `"auto"`: use the same precision as the compute engine.
-
-Default: `"auto"`
-
-##### Deprecated
-
-Use digits instead.
+The LaTeX serializer rounds a float number literal with
+`{ fractional: n }` and `{ significant: n }`, and writes an exact number
+in full. `"auto"` needs the engine precision, so only `toLatex()` and the
+`.latex` getter apply it, when they serialize the expression to MathJSON;
+the LaTeX serializer writes every digit of the MathJSON number for
+`"auto"` and `"max"`.
 
 </MemberCard>
 
@@ -17413,7 +17387,6 @@ type JsonSerializationOptions = {
   metadata: ("all" | "wikidata" | "latex" | "sourceOffsets")[];
   repeatingDecimal: boolean;
   digits: DisplayDigits;
-  fractionalDigits: "auto" | "max" | number;
 };
 ```
 
