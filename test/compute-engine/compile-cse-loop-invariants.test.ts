@@ -270,8 +270,10 @@ describe('CSE keys on the application a Negate wraps', () => {
     const ce = new ComputeEngine();
     const code = glsl.compile(negatedAndBare(ce)).code;
     // `Mod(x, 1)` lowers either to `mod(x, 1.0)` or to the equivalent
-    // `fract(x)`; the sharing is what this pins, not the spelling.
-    expect(code).toMatch(/float _cse\d+ = (?:mod\(x, 1\.0\)|fract\(x\));/);
+    // `fract(fract(x))`; the sharing is what this pins, not the spelling.
+    expect(code).toMatch(
+      /float _cse\d+ = (?:mod\(x, 1\.0\)|fract\(fract\(x\)\));/
+    );
     expect(
       occurrences(code, 'mod(x, 1.0)') + occurrences(code, 'fract(x)')
     ).toBe(1);
@@ -303,6 +305,8 @@ describe('CSE keys on the application a Negate wraps', () => {
           '(3y - \\operatorname{mod}(x,1))^2'
       )
     ).code;
-    expect(code).toMatch(/float _cse\d+ = -(?:mod\(x, 1\.0\)|fract\(x\));/);
+    expect(code).toMatch(
+      /float _cse\d+ = -(?:mod\(x, 1\.0\)|fract\(fract\(x\)\));/
+    );
   });
 });

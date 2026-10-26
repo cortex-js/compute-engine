@@ -112,7 +112,7 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
       'step(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['Mod', V3, W3])).toBe(
-      'mod(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
+      '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['ElementMax', V3, W3])).toBe(
       'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
@@ -233,11 +233,11 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // WGSL §8.7 defines the mixed scalar/vector arithmetic operators, so this
     // is valid source and must not be "fixed".
     expect(w(['Mod', 1, V3])).toBe(
-      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) - (vec3f(1.0, 2.0, 3.0)) * (((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))) - abs((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))))) * 0.5)) % (vec3f(1.0, 2.0, 3.0)))'
+      '_gpu_fmod3(vec3f(1.0), vec3f(1.0, 2.0, 3.0))'
     );
     // A divisor of 2: a divisor of 1 is the `fract` peephole (CE-254).
     expect(w(['Mod', V3, 2])).toBe(
-      '((((vec3f(1.0, 2.0, 3.0)) % (2.0)) - (2.0) * (((sign((vec3f(1.0, 2.0, 3.0)) % (2.0)) * sign((2.0))) - abs((sign((vec3f(1.0, 2.0, 3.0)) % (2.0)) * sign((2.0))))) * 0.5)) % (2.0))'
+      '_gpu_fmod3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
     );
   });
 
@@ -354,7 +354,9 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     expect(g(['Smoothstep', 0, 1, V3])).toBe(
       'smoothstep(0.0, 1.0, vec3(1.0, 2.0, 3.0))'
     );
-    expect(g(['Mod', V3, 2])).toBe('mod(vec3(1.0, 2.0, 3.0), 2.0)');
+    expect(g(['Mod', V3, 2])).toBe(
+      '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+    );
     expect(g(['Step', 1, V3])).toBe('step(1.0, vec3(1.0, 2.0, 3.0))');
   });
 

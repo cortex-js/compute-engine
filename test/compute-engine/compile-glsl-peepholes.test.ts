@@ -203,20 +203,22 @@ describe('sum of squared components is a dot product', () => {
 
 describe('small emission peepholes', () => {
   it('a modulus of one is the fractional part', () => {
-    expect(glsl(['Mod', 'x', 1]).code).toBe('fract(x)');
-    expect(wgsl(['Mod', 'x', 1]).code).toBe('fract(x)');
+    expect(glsl(['Mod', 'x', 1]).code).toBe('fract(fract(x))');
+    expect(wgsl(['Mod', 'x', 1]).code).toBe('fract(fract(x))');
     // Any other divisor keeps the general lowering.
-    expect(glsl(['Mod', 'x', 2]).code).toBe('mod(x, 2.0)');
+    expect(glsl(['Mod', 'x', 2]).code).toBe(
+      '_gpu_fmod(x, 2.0)'
+    );
     expect(wgsl(['Mod', 'x', 2]).code).toBe(
-      '((((x) % (2.0)) - (2.0) * (((sign((x) % (2.0)) * sign((2.0))) - abs((sign((x) % (2.0)) * sign((2.0))))) * 0.5)) % (2.0))'
+      '_gpu_fmod(x, 2.0)'
     );
     // A `vecN` dividend takes the peephole too (CE-254): the lowering
     // declares that `fract` leaves the divisor out of the call, so the
     // operand-shape check judges `fract(v)` against the dividend alone.
     const cev = fresh();
     cev.declare('v', 'vector<2>');
-    expect(glsl(['Mod', 'v', 1], cev).code).toBe('fract(v)');
-    expect(wgsl(['Mod', 'v', 1], cev).code).toBe('fract(v)');
+    expect(glsl(['Mod', 'v', 1], cev).code).toBe('fract(fract(v))');
+    expect(wgsl(['Mod', 'v', 1], cev).code).toBe('fract(fract(v))');
     // A dividend with no `fract` overload (a matrix) still declines.
     cev.declare('M', 'matrix<real^(2x2)>');
     expect(() => glsl(['Mod', 'M', 1], cev)).toThrow(

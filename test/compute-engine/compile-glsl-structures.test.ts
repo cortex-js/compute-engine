@@ -322,7 +322,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 
       it('names the impure-temporary cause too, not just a loop', () => {
         // The same escape detector fires for a hoisted impure temporary —
-        // `Coth` splices its operand twice and so binds an impure one to a
+        // `Cot` splices its operand twice and so binds an impure one to a
         // `_tv` — so the message must not blame a loop-form Sum/Product
         // exclusively.
         expect(() =>
@@ -330,7 +330,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
             ce.box([
               'WithRandomSeed',
               7,
-              ['Which', ['Less', 'x', 1], ['Coth', ['Random']], 'True', 2],
+              ['Which', ['Less', 'x', 1], ['Cot', ['Random']], 'True', 2],
             ] as any)
           )
         ).toThrow(/or an impure operand bound to a hoisted temporary/);
@@ -822,7 +822,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `fract(((sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y))))`
+      `fract(fract(((sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y)))))`
     );
   });
 
@@ -834,7 +834,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `fract(100000.0 * sqrt(_gpu_pow2(ceil(x)) + 1.0))`
+      `fract(fract(100000.0 * sqrt(_gpu_pow2(ceil(x)) + 1.0)))`
     );
   });
 
@@ -846,7 +846,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `fract(((2.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y))) < 0.0) ? (x) : ((y))))`
+      `fract(fract(((2.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y))) < 0.0) ? (x) : ((y)))))`
     );
   });
 
@@ -886,32 +886,34 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
 
   it('compiles Mod over Imaginary/Real/Argument of a complex symbol', () => {
     expect(glsl.compile(e.box(['Mod', ['Imaginary', 'z'], 1])).code).toBe(
-      'fract((z).y)'
+      'fract(fract((z).y))'
     );
     expect(glsl.compile(e.box(['Mod', ['Real', 'z'], 1])).code).toBe(
-      'fract((z).x)'
+      'fract(fract((z).x))'
     );
     expect(glsl.compile(e.box(['Mod', ['Argument', 'z'], 1])).code).toBe(
-      'fract(atan(z.y, z.x))'
+      'fract(fract(atan(z.y, z.x)))'
     );
   });
 
   it('compiles Mod with a real-by-definition head in BOTH positions', () => {
     expect(
       glsl.compile(e.box(['Mod', ['Imaginary', 'z'], ['Imaginary', 'w']])).code
-    ).toBe('mod((z).y, (w).y)');
+    ).toBe(
+      '_gpu_fmod((z).y, (w).y)'
+    );
   });
 
   it('still compiles Mod over Abs (the head that already worked)', () => {
     expect(glsl.compile(e.box(['Mod', ['Abs', 'z'], 1])).code).toBe(
-      'fract(length(z))'
+      'fract(fract(length(z)))'
     );
   });
 
   it('survives enclosing arithmetic (the propagating-heads path)', () => {
     expect(
       glsl.compile(e.box(['Mod', ['Multiply', 2, ['Imaginary', 'z']], 1])).code
-    ).toBe('fract(2.0 * (z).y)');
+    ).toBe('fract(fract(2.0 * (z).y))');
   });
 
   it('still fails closed on a genuinely complex-shaped operand', () => {

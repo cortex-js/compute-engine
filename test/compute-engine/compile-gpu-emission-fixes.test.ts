@@ -142,7 +142,7 @@ describe('identity lowerings keep the grouping of their operand (CE-251.1)', () 
 // vector operand takes the peephole too.
 describe('the fract and exp2 peepholes apply to a vector operand (CE-254)', () => {
   test.each(TARGETS)('%s', (to) => {
-    expect(shader(['Mod', 'v', 1], to).code).toBe('fract(v)');
+    expect(shader(['Mod', 'v', 1], to).code).toBe('fract(fract(v))');
     expect(shader(['Power', 2, 'v'], to).code).toBe('exp2(v)');
     // A divisor other than 1 keeps the general lowering.
     expect(shader(['Mod', 'v', 2], to).code).not.toContain('fract');

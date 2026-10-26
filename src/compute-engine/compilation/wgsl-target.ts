@@ -8,6 +8,7 @@ import {
   gpuUniformVectorWidth,
   gpuOperandShape,
   gpuAbsorbedConstant,
+  gpuFloorModCall,
   markOperandConsuming,
   gpuAssertExpressionBody,
   type GPUShapeRules,
@@ -74,67 +75,43 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // A divisor of exactly one is the fractional part: WGSL defines `fract(x)`
       // as `x - floor(x)`, which is the floored convention the interpreter's
       // `Mod` uses, so the two agree for a negative dividend as well
-      // (`fract(-0.25)` is 0.75). It replaces the three splices of the divisor
-      // below with one instruction, and it needs no impurity guard: the
-      // dividend is emitted once.
+      // (`fract(-0.25)` is 0.75). It replaces the helper call below with a
+      // built-in instruction, and it needs no impurity guard: the dividend is
+      // emitted once.
+      //
+      // `fract` is applied twice. For a tiny negative dividend `x − floor(x)`
+      // is `1 − |x|`, which rounds to 1.0 in f32 (`fract(-1e-20)` is 1.0),
+      // outside the range [0, 1); the interpreter's `Mod` maps a result equal
+      // to the divisor to 0. The second `fract` maps 1.0 to 0 and leaves every
+      // other result unchanged. CE-511 (`CHANGELOG.md`).
       //
       // The divisor is left out of the emitted call, which the lowering
       // declares after this table (`markOperandConsuming`). So the
       // operand-shape check judges `fract(v)` against the dividend alone, and
       // a `vecN` dividend takes the peephole too.
-      if (tryGetConstant(b) === 1) return `fract(${compile(a)})`;
-      // WGSL `%` on floats is the *truncated* remainder (sign of the dividend);
-      // the interpreter's `Mod` is *floored* (sign of the divisor, D1). With
-      // `r = a % b`, the floored modulo is `r - b · floor(r / b)`: `|r / b|` is
-      // below 1, so `floor(r / b)` is `-1` when `r` is not zero and its sign
-      // differs from the sign of `b`, and `0` otherwise. The divisor is then
-      // added only when it is needed, as the interpreter does
-      // (`floorModDouble`). The formula `((a % b) + b) % b` always added it,
-      // and in `f32` that sum is rounded as soon as it is larger than 2^24:
-      // `Mod(2, 16777215)` ran to `1`. The trailing `% b` maps a sum that
-      // rounds to exactly `b` back to `0`. Every piece is componentwise, so a
-      // vector operand beside a scalar one still lowers.
+      if (tryGetConstant(b) === 1) return `fract(fract(${compile(a)}))`;
+      // The general case calls a `_gpu_fmod` helper, which turns WGSL's
+      // truncated `%` into the interpreter's floored `Mod` and receives each
+      // operand once (`gpuFloorModLibrary`, CE-512).
+      const helper = gpuFloorModCall(a, b, compile, target);
+      if (helper !== undefined) return helper;
+      // A shape with no helper (a matrix, an array) keeps the same formula
+      // inline, which splices each operand several times. An IMPURE operand
+      // (the Random family, directly or through a symbol's value) would then
+      // be drawn several times, and each `_gpu_rnd_draw` advances a runtime
+      // counter, which shifts every later draw in the shader: decline.
+      if (BaseCompiler.foldValueImpure(a) || BaseCompiler.foldValueImpure(b))
+        throw new Error(
+          'Could not compile `Mod`: an impure (Random) operand of this shape ' +
+            'would be drawn more than once — a repeated draw would shift ' +
+            'every later value in the shader.'
+        );
       // `compile()` emits sub-expressions without outer parentheses, and `%`
       // binds tighter than `+` — wrap before splicing next to `%`.
-      // An IMPURE operand (the Random family) must be evaluated exactly once:
-      // the divisor is spliced three times and `_gpu_rnd_draw` advances a
-      // runtime counter, so a repeated draw returns a different value AND
-      // shifts every later draw in the shader. Bind scalars to hoisted
-      // temporaries; where there is no statement sink (a conditional arm), or
-      // an operand is not a scalar, there is no safe reading — decline
-      // (see `Remainder` in the shared GPU target).
-      // The correction term `floor(r / b)` is written with signs instead:
-      // when `r` is tiny and has the sign opposite to `b`, `r / b`
-      // underflows to `-0` in `f32`, and `floor(-0)` is `-0`, not `-1`, so
-      // the divisor was never added and the result kept the wrong sign. With
-      // `p = sign(r) * sign(b)`, the term `(p - abs(p)) * 0.5` is `-1` for
-      // opposite signs and `0` otherwise (CE-246). It uses only componentwise
-      // operations that accept a scalar beside a vector.
-      const floored = (ca: string, cb: string) => {
-        const p = `(sign(${ca} % ${cb}) * sign(${cb}))`;
-        return `(((${ca} % ${cb}) - ${cb} * ((${p} - abs(${p})) * 0.5)) % ${cb})`;
-      };
-      if (a.isPure === false || b.isPure === false) {
-        if (
-          !BaseCompiler.canHoist(target) ||
-          gpuOperandShape(a) !== 'scalar' ||
-          gpuOperandShape(b) !== 'scalar'
-        )
-          throw new Error(
-            'Could not compile `Mod`: an impure (Random) operand cannot be bound to a ' +
-              'temporary at this position — a repeated draw would shift every ' +
-              'later value in the shader.'
-          );
-        const ta = BaseCompiler.tempVar(target);
-        const tb = BaseCompiler.tempVar(target);
-        BaseCompiler.hoistStatement(
-          target,
-          `var ${ta}: f32 = ${compile(a)};`,
-          `var ${tb}: f32 = ${compile(b)};`
-        );
-        return floored(ta, tb);
-      }
-      return floored(`(${compile(a)})`, `(${compile(b)})`);
+      const ca = `(${compile(a)})`;
+      const cb = `(${compile(b)})`;
+      const p = `(sign(${ca} % ${cb}) * sign(${cb}))`;
+      return `(((${ca} % ${cb}) - ${cb} * ((${p} - abs(${p})) * 0.5)) % ${cb})`;
     };
     // A trigonometric value amplified by a large constant (the "sine hash")
     // keeps the code above on WGSL, which has no exact form yet, and the
@@ -185,7 +162,8 @@ const WGSL_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 };
 
-// `Mod(a, 1)` emits `fract(a)` and leaves the divisor out of the emitted call;
+// `Mod(a, 1)` emits `fract(fract(a))` and leaves the divisor out of the
+// emitted call;
 // the operand-shape check reads that declaration (`markOperandConsuming`).
 markOperandConsuming(WGSL_FUNCTIONS.Mod, gpuAbsorbedConstant('fract', 1, 1));
 
@@ -238,7 +216,9 @@ function wgslAssignedParameter(
  * vecN<T>)` with no mixed form, so `max(vec3f, 2.0)` — valid GLSL — is not
  * valid WGSL. Only the two builtins whose scalar argument is part of the
  * signature survive: `mix(vecN<T>, vecN<T>, T)` and `refract(vecN<T>,
- * vecN<T>, T)`. (`Mod` is not affected: the WGSL target lowers it to the `%`
+ * vecN<T>, T)`. (`Mod` is not affected: the WGSL target calls the
+ * `_gpu_fmod` helpers, and broadcasts a scalar operand beside a vector with
+ * `vecNf(…)` itself; the inline formula for the other shapes uses the `%`
  * operator, which IS mixed-shape polymorphic.)
  *
  * In both of those the scalar is the THIRD argument and nowhere else, which is

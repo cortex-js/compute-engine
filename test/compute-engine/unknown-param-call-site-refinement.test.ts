@@ -385,7 +385,7 @@ describe('promotion in mode: complex (ruled 2026-08-15, now the default)', () =>
       ['Multiply', 1e5, ['Sqrt', ['Subtract', 'x', 1]]],
       1,
     ]);
-    const expected = 'fract(100000.0 * sqrt(x + -1.0))';
+    const expected = 'fract(fract(100000.0 * sqrt(x + -1.0)))';
 
     const plain = ce._getCompilationTarget('glsl')!.createTarget();
     expect(compile(expr, { target: plain }).code).toBe(expected);

@@ -752,7 +752,7 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
       '((x) - (2.0) * _gpu_round_up((x) / (2.0)))'
     );
     expect(g.compile(ce.box(['Coth', 'x']) as any).code).toBe(
-      '(cosh(x) / sinh(x))'
+      '(1.0 / tanh(x))'
     );
     expect(g.compile(ce.box(['Beta', 'x', 2]) as any).code).toBe(
       '(_gpu_gamma(x) * _gpu_gamma(2.0) / _gpu_gamma(x + 2.0))'

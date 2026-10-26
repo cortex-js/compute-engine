@@ -49,7 +49,7 @@ describe('WGSL COMPILATION', () => {
       const expr = ce.expr(['Mod', 'x', 'y']);
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(
-        `((((x) % (y)) - (y) * (((sign((x) % (y)) * sign((y))) - abs((sign((x) % (y)) * sign((y))))) * 0.5)) % (y))`
+        `_gpu_fmod(x, y)`
       );
     });
   });
@@ -147,7 +147,7 @@ describe('WGSL COMPILATION', () => {
         `cosh(x)`
       );
       expect(wgsl.compile(ce.parse('\\tanh(x)')).code).toMatchInlineSnapshot(
-        `tanh(x)`
+        `_gpu_tanh(x)`
       );
     });
 
@@ -171,7 +171,7 @@ describe('WGSL COMPILATION', () => {
 
     it('should compile reciprocal hyperbolic functions', () => {
       expect(wgsl.compile(ce.expr(['Coth', 'x'])).code).toMatchInlineSnapshot(
-        `(cosh(x) / sinh(x))`
+        `(1.0 / _gpu_tanh(x))`
       );
       expect(wgsl.compile(ce.expr(['Csch', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / sinh(x))`
@@ -983,11 +983,11 @@ describe('WGSL Mod with an impure operand draws once', () => {
     expect((code.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
   });
 
-  it('a pure Mod emission is unchanged', () => {
+  it('a pure Mod emission passes its operands to the helper once (CE-512)', () => {
     const target = ce._getCompilationTarget('wgsl')!;
     const code = target.compile(ce.box(['Mod', ['Add', 'x', 29], 900])).code;
     expect(code).toBe(
-      '((((x + 29.0) % (900.0)) - (900.0) * (((sign((x + 29.0) % (900.0)) * sign((900.0))) - abs((sign((x + 29.0) % (900.0)) * sign((900.0))))) * 0.5)) % (900.0))'
+      '_gpu_fmod(x + 29.0, 900.0)'
     );
   });
 });
@@ -1303,18 +1303,26 @@ describe('WGSL - SQUARE OF A VECTOR', () => {
 });
 
 describe('WGSL Mod keeps the sign of the divisor when the quotient underflows (CE-246)', () => {
-  // The WGSL source is valid JavaScript once `sign` and `abs` exist, and
-  // JavaScript `%` is the truncated remainder, as in WGSL. Doubles stand in for
-  // `f32`: the dividend and the divisor are chosen so that `r / b` underflows
-  // to `-0` in a double too.
+  // The WGSL source — the `_gpu_fmod` helper of the preamble and the call —
+  // is valid JavaScript once `sign` and `abs` exist and the typed helper
+  // signature `fn f(x: f32, y: f32) -> f32 {` is written `function f(x, y) {`,
+  // and JavaScript `%` is the truncated remainder, as in WGSL. Doubles stand
+  // in for `f32`: the dividend and the divisor are chosen so that `r / b`
+  // underflows to `-0` in a double too.
   const ce = new ComputeEngine();
-  const code = new WGSLTarget().compile(ce.expr(['Mod', 'x', 'y'])).code;
+  const { code, preamble } = new WGSLTarget().compile(
+    ce.expr(['Mod', 'x', 'y'])
+  );
+  const helpers = (preamble ?? '').replace(
+    /\bfn (\w+)\(x: f32, y: f32\) -> f32 \{/g,
+    'function $1(x, y) {'
+  );
   const mod = new Function(
     'x',
     'y',
     'sign',
     'abs',
-    `return ${code};`
+    `${helpers}\nreturn ${code};`
   ) as (x: number, y: number, s: unknown, a: unknown) => number;
   const at = (x: number, y: number) => mod(x, y, Math.sign, Math.abs);
 

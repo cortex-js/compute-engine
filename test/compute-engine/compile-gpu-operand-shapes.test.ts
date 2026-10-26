@@ -242,14 +242,18 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 
   it('GLSL `mod(genType, float)` takes its scalar LAST', () => {
     // A divisor of 2: a divisor of 1 is the `fract` peephole (CE-254).
-    expect(g(['Mod', V3, 2])).toBe('mod(vec3(1.0, 2.0, 3.0), 2.0)');
-    expect(() => g(['Mod', 1, V3])).toThrow(
-      /^Could not compile `Mod`: the shader builtin `mod` takes a scalar only in argument 2, but here the scalar stands in argument 1/
+    expect(g(['Mod', V3, 2])).toBe(
+      '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+    );
+    // A scalar dividend beside a vector divisor is broadcast by the
+    // `_gpu_fmod` helper, so it no longer reaches the built-in `mod`.
+    expect(g(['Mod', 1, V3])).toBe(
+      '_gpu_fmod3(vec3(1.0), vec3(1.0, 2.0, 3.0))'
     );
     // WGSL is unaffected: it lowers `Mod` to `%`, whose scalar/vector mixed
     // forms ARE defined, so there is no builtin overload to violate.
     expect(w(['Mod', 1, V3])).toBe(
-      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) - (vec3f(1.0, 2.0, 3.0)) * (((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))) - abs((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))))) * 0.5)) % (vec3f(1.0, 2.0, 3.0)))'
+      '_gpu_fmod3(vec3f(1.0), vec3f(1.0, 2.0, 3.0))'
     );
   });
 
@@ -321,10 +325,10 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     expect(() => gv(['ElementMax', 2, 'v'])).toThrow(
       /takes a scalar only in argument 2, but here the scalar stands in argument 1/
     );
-    expect(gv(['Mod', 'v', 2])).toBe('mod(v, 2.0)');
-    expect(() => gv(['Mod', 1, 'v'])).toThrow(
-      /takes a scalar only in argument 2/
+    expect(gv(['Mod', 'v', 2])).toBe(
+      '_gpu_fmod3(v, vec3(2.0))'
     );
+    expect(gv(['Mod', 1, 'v'])).toBe('_gpu_fmod3(vec3(1.0), v)');
   });
 
   it('a VARIADIC fold is judged on the emitted call tree', () => {
@@ -340,7 +344,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   });
 
   it('every positional decline names the head and ends with the D6 marker', () => {
-    expect(() => g(['Mod', 1, V3])).toThrow(/^Could not compile `Mod`: .*$/s);
+    expect(() => g(['Step', V3, 1])).toThrow(/^Could not compile `Step`: .*$/s);
     expect(() => w(['Mix', 0.5, V3, W3])).toThrow(
       /^Could not compile `Mix`: .*$/s
     );
@@ -348,7 +352,6 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 
   it('reports `success: false` (no source) through the fallback route', () => {
     for (const [target, expr] of [
-      [glsl, ['Mod', 1, V3]],
       [glsl, ['Step', V3, 1]],
       [glsl, ['Clamp', 0, V3, 1]],
       [wgsl, ['Mix', 0.5, V3, W3]],

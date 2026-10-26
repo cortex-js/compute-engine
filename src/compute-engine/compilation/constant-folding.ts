@@ -116,6 +116,9 @@ function shortestFloat32Decimal(n: number): string {
   return single.toString();
 }
 
+/** The largest finite single precision value, exactly. */
+const F32_MAX = 3.4028234663852886e38;
+
 /**
  * Format a number as a GPU float literal, ensuring a decimal point.
  *
@@ -130,6 +133,21 @@ function shortestFloat32Decimal(n: number): string {
  */
 export function formatFloat(n: number, language?: string): string {
   if (!Number.isFinite(n)) return gpuNonFiniteLiteral(n, language);
+  // A finite value that rounds to an infinity in single precision (its
+  // magnitude is above the f32 maximum, about 3.4e38). GLSL reads such a
+  // literal as an infinity, but WGSL rejects the whole shader ("value
+  // 2.6881171418161356e+43 cannot be represented as 'f32'"), so on WGSL it
+  // is spelled as the infinity it becomes. GLSL keeps the literal: on WebGL2
+  // over ANGLE Metal, arithmetic with the constant `_gpu_inf()` gives a wrong
+  // value (CE-287 in `ROADMAP.md`), and the literal does not. CE-510 (Tycho
+  // row 455).
+  if (language === 'wgsl' && !Number.isFinite(Math.fround(n)))
+    return gpuNonFiniteLiteral(n > 0 ? Infinity : -Infinity, language);
+  // A value just above the f32 maximum that still rounds to it (such as
+  // 3.4028235e38) is written as the maximum itself: its own decimal is above
+  // the f32 range, which WGSL can reject.
+  if (language === 'wgsl' && Math.abs(n) > F32_MAX)
+    return formatFloat(Math.sign(n) * F32_MAX, language);
   const str = shortestFloat32Decimal(n);
   if (!str.includes('.') && !str.includes('e') && !str.includes('E')) {
     return `${str}.0`;

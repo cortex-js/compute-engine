@@ -187,7 +187,7 @@ describe('GLSL COMPILATION', () => {
 
     it('should compile reciprocal hyperbolic functions', () => {
       expect(glsl.compile(ce.expr(['Coth', 'x'])).code).toMatchInlineSnapshot(
-        `(cosh(x) / sinh(x))`
+        `(1.0 / tanh(x))`
       );
       expect(glsl.compile(ce.expr(['Csch', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / sinh(x))`

@@ -259,7 +259,7 @@ describe('the emitted-code fold reaches a parenthesized numerator', () => {
     const ce = new ComputeEngine();
     withPeriod(ce);
     expect(js(ce, ce.parse('\\cos(\\frac{2\\pi u}{P})'))).toBe(
-      'Math.cos((6.283185307179586 * _.u) / 100)'
+      '_SYS.cospi((2 * _.u) / 100)'
     );
   });
 
@@ -268,7 +268,7 @@ describe('the emitted-code fold reaches a parenthesized numerator', () => {
     withPeriod(ce);
     ce.parse('X(s) := \\cos(\\frac{2\\pi s}{P})').evaluate();
     expect(js(ce, ce.parse('X(t)'))).toContain(
-      'Math.cos((6.283185307179586 * s) / 100)'
+      '_SYS.cospi((2 * s) / 100)'
     );
   });
 
