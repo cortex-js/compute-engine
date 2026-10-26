@@ -23,6 +23,10 @@ import {
   numberFieldDivisibilityFilter,
 } from './number-field-modular.js';
 import { numberFieldLatticePartition } from './number-field-lattice.js';
+import { factorFiniteField } from './finite-field.js';
+import { HenselTree } from './hensel.js';
+import { NumberFieldIdealRecovery } from './number-field-ideal.js';
+import { bigintMaximalPerfectPower } from '../numerics/bigint.js';
 
 const lcm = (a: bigint, b: bigint) => (a / integerGcd(a, b)) * b;
 const abs = (a: bigint) => (a < 0n ? -a : a);
@@ -46,6 +50,7 @@ function boundedPower(
 export interface DirectNumberFieldStatistics {
   primeAttempts: number;
   prime?: number;
+  residueDegree?: number;
   modularFactors: number;
   lifts: number;
   subsets: number;
@@ -72,6 +77,32 @@ interface IntegralModel {
   variableScale: bigint;
 }
 
+/** A sufficient scale for weighted denominators, without integer factorization. */
+function integralScale(
+  rows: readonly (readonly RationalCoefficient[])[],
+  work: NumberFieldWork
+): bigint {
+  let scale = 1n;
+  const n = rows.length - 1;
+  for (let i = n - 1; i >= 0; i--) {
+    const weight = n - i;
+    for (const c of rows[i]) {
+      const b = c.denominator;
+      if (b === 1n) continue;
+      if (boundedPower(scale, weight, work) % b === 0n) continue;
+      // Perfect-power reduction is optional and bounded; the denominator
+      // itself always supplies a valid scale when decomposition is expensive.
+      work.tick();
+      const power = weight > 1 ? bigintMaximalPerfectPower(b, 256) : undefined;
+      const contribution = power
+        ? boundedPower(power.base, Math.ceil(power.exponent / weight), work)
+        : b;
+      scale = work.rational.fromInteger(lcm(scale, contribution)).numerator;
+    }
+  }
+  return scale;
+}
+
 /** beta=D*alpha and y=T*x make both defining and input polynomials integral. */
 function integralModel(
   field: RationalNumberField,
@@ -80,9 +111,9 @@ function integralModel(
 ): IntegralModel {
   const d = field.degree,
     n = f.length - 1;
-  const D = field.definingPolynomial.reduce(
-    (s, c) => work.rational.fromInteger(lcm(s, c.denominator)).numerator,
-    1n
+  const D = integralScale(
+    field.definingPolynomial.map((c) => [c]),
+    work
   );
   const powers = Array.from({ length: Math.max(d, n) + 1 }, (_, i) =>
     boundedPower(D, i, work)
@@ -92,14 +123,12 @@ function integralModel(
       work.rational.fromInteger((c.numerator * powers[d - i]) / c.denominator)
         .numerator
   );
-  let T = 1n;
-  for (const c of f.slice(0, -1))
-    for (const [j, a] of c.coefficients.entries()) {
-      work.tick();
-      T = work.rational.fromInteger(
-        lcm(T, q(a.numerator, a.denominator * powers[j]).denominator)
-      ).numerator;
-    }
+  const T = integralScale(
+    f.map((c) =>
+      c.coefficients.map((a, j) => q(a.numerator, a.denominator * powers[j]))
+    ),
+    work
+  );
   const polynomial = f.map((c, i) =>
     c.coefficients.map((a, j) => {
       const value = work.rational.mul(
@@ -116,15 +145,8 @@ function integralModel(
   return { defining, polynomial, generatorScale: D, variableScale: T };
 }
 
-/**
- * Bounds all coefficients of every monic divisor, not only the input's factors.
- * Trace-dual coordinates give L*c_j integral even for nonmaximal power orders.
- */
-export function numberFieldReconstructionBound(
-  defining: readonly bigint[],
-  polynomial: readonly (readonly bigint[])[],
-  work: NumberFieldWork
-): { denominator: bigint; bound: bigint; logarithmBounds: bigint[][] } {
+/** Trace-dual coordinates give L*c_j integral even for nonmaximal power orders. */
+function traceCoordinates(defining: readonly bigint[], work: NumberFieldWork) {
   const Q = new FieldPolynomials(work.rational, work);
   const m = defining.map((c) => q(c)),
     d = m.length - 1;
@@ -139,6 +161,17 @@ export function numberFieldReconstructionBound(
       (s, c) => work.rational.fromInteger(lcm(s, c.denominator)).numerator,
       1n
     );
+  return { dual, denominator };
+}
+
+/** Bounds every monic divisor, independently of any proposed factorization. */
+export function numberFieldReconstructionBound(
+  defining: readonly bigint[],
+  polynomial: readonly (readonly bigint[])[],
+  work: NumberFieldWork
+): { denominator: bigint; bound: bigint; logarithmBounds: bigint[][] } {
+  const { dual, denominator } = traceCoordinates(defining, work);
+  const d = defining.length - 1;
   const R =
     1n + defining.slice(0, -1).reduce((s, c) => (abs(c) > s ? abs(c) : s), 0n);
   const norm = (cs: readonly bigint[]) => {
@@ -149,13 +182,6 @@ export function numberFieldReconstructionBound(
     }
     return value;
   };
-  const A = polynomial.slice(0, -1).reduce((s, c) => {
-    const a = norm(c);
-    return a > s ? a : s;
-  }, 0n);
-  // Every conjugate root has modulus <= 1+A; an elementary symmetric
-  // coefficient of any monic divisor is bounded by (1+(1+A))^n.
-  const conjugateBound = boundedPower(2n + A, polynomial.length - 1, work);
   const dualBounds = dual.map((row) =>
     norm(row.map((c) => c.numerator * (denominator / c.denominator)))
   );
@@ -165,6 +191,11 @@ export function numberFieldReconstructionBound(
     (s, c) => work.rational.fromInteger(s + norm(c)).numerator,
     0n
   );
+  // For each embedding, a monic divisor has Mahler measure <= that of F.
+  // Its coefficients are bounded by 2^n Mahler(F) <= 2^n ||F||_1.
+  const conjugateBound = work.rational.fromInteger(
+    boundedPower(2n, n, work) * inputNorm
+  ).numerator;
   let choose = 1n;
   // For every embedding, Mahler(F) <= ||F||_1. The kth coefficient of
   // F*g'/g is at most n*binomial(n-1,k)*Mahler(F). Applying the trace-dual
@@ -185,7 +216,7 @@ export function numberFieldReconstructionBound(
   };
 }
 
-/** Direct Zassenhaus over an inert good prime, with an explicit no-prime fallback. */
+/** Direct lifting at an unramified prime ideal, preferring full residue degree. */
 export function factorNumberFieldDirect(
   field: RationalNumberField,
   f: readonly NumberFieldElement[],
@@ -206,6 +237,15 @@ export function factorNumberFieldDirect(
         prime: number;
         factors: number[][][];
         field: NonNullable<ReturnType<typeof finiteExtension>>;
+        definingFactors?: bigint[][];
+      }
+    | undefined;
+  let split:
+    | {
+        prime: number;
+        field: NonNullable<ReturnType<typeof finiteExtension>>;
+        definingFactors: bigint[][];
+        reduced: number[][];
       }
     | undefined;
   work.scope('finite-factorization', () => {
@@ -222,7 +262,36 @@ export function factorNumberFieldDirect(
       if (D % BigInt(p) === 0n || T % BigInt(p) === 0n) continue;
       const S = new SmallPrimePolynomials(p, work);
       const K = finiteExtension(S.fromIntegers(defining), p, work);
-      if (!K) continue;
+      if (!K) {
+        if (
+          split ||
+          S.gcd(
+            S.fromIntegers(defining),
+            S.derivative(S.fromIntegers(defining))
+          ).length !== 1
+        )
+          continue;
+        const fs = factorFiniteField(defining, p, work).sort(
+          (a, b) => b.length - a.length
+        );
+        for (let index = 0; index < fs.length; index++) {
+          const h = fs[index].map(Number);
+          const F = finiteExtension(h, p, work)!;
+          const R = new FieldPolynomials(F, work);
+          const reduced = polynomial.map(
+            (c) => S.divrem(S.fromIntegers(c), h)[1]
+          );
+          if (R.gcd(reduced, R.derivative(reduced)).length !== 1) continue;
+          split = {
+            prime: p,
+            field: F,
+            reduced,
+            definingFactors: [fs[index], ...fs.filter((_, j) => j !== index)],
+          };
+          break;
+        }
+        continue;
+      }
       const R = new FieldPolynomials(K, work);
       const reduced = polynomial.map((c) => S.fromIntegers(c));
       if (R.gcd(reduced, R.derivative(reduced)).length !== 1) continue;
@@ -233,24 +302,51 @@ export function factorNumberFieldDirect(
       };
       break;
     }
+    if (!selected && split) {
+      selected = {
+        ...split,
+        factors: factorFiniteExtension(
+          split.reduced,
+          new FieldPolynomials(split.field, work),
+          split.prime,
+          split.definingFactors[0].length - 1
+        ),
+      };
+    }
   });
   if (!selected) {
-    stats.fallback = 'no-inert-good-prime';
+    stats.fallback = 'no-unramified-good-prime';
     return undefined;
   }
   const { prime, factors, field: residueField } = selected;
   stats.prime = prime;
+  stats.residueDegree = selected.definingFactors?.[0].length
+    ? selected.definingFactors[0].length - 1
+    : field.degree;
   stats.precisionBits = BigInt(prime).toString(2).length;
   stats.modularFactors = factors.length;
   if (factors.length === 1) {
     stats.certificate = 'modular-irreducibility';
     return [[...f]];
   }
+  const definitionTree = selected.definingFactors
+    ? new HenselTree(selected.definingFactors, prime, work)
+    : undefined;
+  const coordinateDenominator = definitionTree
+    ? traceCoordinates(defining, work).denominator
+    : 1n;
   const tree = work.scope(
     'hensel',
     () =>
-      new NumberFieldHenselTree(factors, prime, defining, residueField, work)
+      new NumberFieldHenselTree(
+        factors,
+        prime,
+        definitionTree?.factors()[0] ?? defining,
+        residueField,
+        work
+      )
   );
+  let ideal: NumberFieldIdealRecovery | undefined;
   const result: NumberFieldElement[][] = [];
   let remaining = [...f],
     active = factors.map((_, i) => i);
@@ -283,9 +379,11 @@ export function factorNumberFieldDirect(
           continue;
         }
         const row: RationalCoefficient[] = [];
-        for (const [j, residue] of g[i].entries()) {
+        const recovered = ideal?.recover(g[i], coordinateDenominator);
+        for (const [j, residue] of (recovered ?? g[i]).entries()) {
           let c: RationalCoefficient | undefined;
-          if (certified) {
+          if (recovered) c = q(residue, coordinateDenominator);
+          else if (certified) {
             let v = (residue * bounds!.denominator) % tree.modulus;
             if (v > tree.modulus / 2n) v -= tree.modulus;
             c = q(v, bounds!.denominator);
@@ -329,6 +427,17 @@ export function factorNumberFieldDirect(
   while (true) {
     stats.precisionBits = tree.modulus.toString(2).length;
     const lifted = tree.factors();
+    if (definitionTree)
+      ideal = work.scope(
+        'reconstruction',
+        () =>
+          new NumberFieldIdealRecovery(
+            field.degree,
+            tree.modulus,
+            tree.defining,
+            work
+          )
+      );
     const done = work.scope('recombination', () => {
       // A recovered single modular atom is irreducible without a size bound.
       for (const i of [...active]) take([i], decode(lifted[i], false));
@@ -348,12 +457,13 @@ export function factorNumberFieldDirect(
       if (
         recombination !== 'subsets' &&
         active.length <= 64 &&
-        bounds.logarithmBounds.some((row) =>
-          row.some((b) => tree.modulus / b >= 256n)
-        )
+        (ideal ||
+          bounds.logarithmBounds.some((row) =>
+            row.some((b) => tree.modulus / b >= 256n)
+          ))
       ) {
         stats.latticeProbes = (stats.latticeProbes ?? 0) + 1;
-        const R = new NumberFieldResidueRing(tree.modulus, defining, work);
+        const R = new NumberFieldResidueRing(tree.modulus, tree.defining, work);
         let recovered: NumberFieldElement[][] | undefined;
         const accept = (groups: number[][]): boolean => {
           // One inseparable block certifies the already exact remaining input.
@@ -382,7 +492,7 @@ export function factorNumberFieldDirect(
         };
         const groups = work.scope('lattice', () =>
           numberFieldLatticePartition(
-            defining,
+            tree.defining,
             polynomial,
             active.map((i) => lifted[i]),
             tree.modulus,
@@ -393,7 +503,8 @@ export function factorNumberFieldDirect(
             (_, rank) => {
               stats.latticeColumns = (stats.latticeColumns ?? 0) + 1;
               stats.latticeRank = rank;
-            }
+            },
+            ideal?.forms
           )
         );
         if (groups && (recovered || accept(groups))) {
@@ -403,8 +514,13 @@ export function factorNumberFieldDirect(
         }
       }
       if (recombination === 'lattice') return false;
-      if (tree.modulus <= 2n * bounds.bound) return false;
-      const R = new NumberFieldResidueRing(tree.modulus, defining, work);
+      if (
+        ideal
+          ? !ideal.certified(bounds.bound)
+          : tree.modulus <= 2n * bounds.bound
+      )
+        return false;
+      const R = new NumberFieldResidueRing(tree.modulus, tree.defining, work);
       while (active.length > 1) {
         let found = false;
         // Exhaustion below a proven coefficient bound is the certificate.
@@ -452,7 +568,10 @@ export function factorNumberFieldDirect(
     if (done) return result;
     if (stats.lifts >= maxLifts)
       throw new PolynomialBudgetExceeded('number-field-lift-limit');
-    work.scope('hensel', () => tree.lift(polynomial));
+    work.scope('hensel', () => {
+      definitionTree?.lift(defining);
+      tree.lift(polynomial, definitionTree?.factors()[0] ?? defining);
+    });
     reconstruct = numberFieldRationalReconstructor(tree.modulus);
     stats.lifts++;
   }

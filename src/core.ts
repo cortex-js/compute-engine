@@ -48,9 +48,15 @@ export {
   expand,
   expandAll,
   factor,
+  factorDetailed,
   solve,
   getDefaultEngine,
 } from './compute-engine/free-functions.js';
+export type {
+  FactorOptions,
+  FactorizationResult,
+  FactorStatistics,
+} from './compute-engine/factoring-types.js';
 
 export {
   isExpression,

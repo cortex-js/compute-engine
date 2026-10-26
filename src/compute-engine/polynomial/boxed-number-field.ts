@@ -20,6 +20,7 @@ import {
   type NumberFieldFactorOptions,
 } from './number-field.js';
 import { NumberFieldWork } from './number-field-work.js';
+import type { FactorizationResult } from '../factoring-types.js';
 
 function rational(e: Expression): RationalCoefficient | undefined {
   if (!isNumber(e) || !e.isExact || !e.isRational) return undefined;
@@ -165,8 +166,40 @@ export function factorNumberFieldExpression(
   generator: Expression,
   options: NumberFieldFactorOptions = {}
 ): Expression | undefined {
+  const r = factorNumberFieldExpressionDetailed(
+    expr,
+    variable,
+    generator,
+    options
+  );
+  return r.status === 'complete' || r.status === 'zero'
+    ? r.expression
+    : undefined;
+}
+
+/** The expression bridge and diagnostics share conversion, limits and certificates. */
+export function factorNumberFieldExpressionDetailed(
+  expr: Expression,
+  variable: string,
+  generator: Expression,
+  options: NumberFieldFactorOptions = {}
+): FactorizationResult {
   const ce = expr.engine;
   checkDeadline(ce._deadlineFrame);
+  const base = {
+    domain: 'NumberField' as const,
+    variable,
+    generator,
+    expression: ce.function('Factor', [expr, ce.symbol(variable), generator], {
+      form: 'raw',
+    }),
+  };
+  let stage: 'field-certification' | 'conversion' | 'factorization' =
+    'field-certification';
+  const refused = (
+    status: 'incomplete' | 'unsupported' | 'invalid',
+    reason: string
+  ): FactorizationResult => ({ ...base, status, reason, stage });
   // The first exception thrown by the deadline or by the caller's `check`.
   // The certification of the field can catch it and throw a different
   // budget exception, so the original is kept here and rethrown.
@@ -180,21 +213,21 @@ export function factorNumberFieldExpression(
       throw e;
     }
   };
-  // `Factor` has no option to raise the operation budget, and the engine
-  // has no time limit by default. The kernel default (5 million operations,
-  // about 0.15 s) stops moderate requests such as x^13 - 7 over a degree-8
-  // field, which need about 6 million. 20 million operations stop a request
-  // that cannot finish after about one second. The certification of the
-  // field and the factorization use the same budget.
+  // Public expression factoring uses a larger default than the kernel.
+  // Certification and factoring each receive this limit; it is not a shared
+  // end-to-end budget. Cached field certificates do not spend it again.
   const maxOperations = options.maxOperations ?? 20_000_000;
   try {
+    if (!expr.isValid || !generator.isValid)
+      return refused('invalid', 'invalid-expression');
     const modulus = definingPolynomial(generator);
-    if (!modulus) return undefined;
+    if (!modulus) return refused('unsupported', 'unsupported-generator');
     const field = certifiedField(modulus, {
       ...options,
       maxOperations,
       check,
     });
+    stage = 'conversion';
     const work = new NumberFieldWork(100_000, check, false, 16384);
     const K = field.withWork(work);
     const P = new FieldPolynomials(K, work);
@@ -206,7 +239,9 @@ export function factorNumberFieldExpression(
       depth = 0
     ): NumberFieldElement[] | undefined => {
       work.tick();
-      if (depth > 128 || !e.isValid) return undefined;
+      if (depth > 128)
+        throw new PolynomialBudgetExceeded('conversion-depth-limit');
+      if (!e.isValid) return undefined;
       if (e.isSame(generator)) return [field.generator];
       if (
         (e.operator === 'Sqrt' ||
@@ -261,10 +296,12 @@ export function factorNumberFieldExpression(
             e.operator === 'Multiply' &&
             result.length + a.length - 2 > maxDegree
           )
-            return undefined;
+            throw new PolynomialBudgetExceeded('degree-limit');
           result = e.operator === 'Add' ? P.add(result, a) : P.mul(result, a);
         }
-        return result.length - 1 <= maxDegree ? result : undefined;
+        if (result.length - 1 > maxDegree)
+          throw new PolynomialBudgetExceeded('degree-limit');
+        return result;
       }
       if (e.operator === 'Divide') {
         const a = read(e.op1, depth + 1),
@@ -273,16 +310,21 @@ export function factorNumberFieldExpression(
       }
       if (e.operator === 'Power') {
         const exponent = rational(e.op2);
-        if (
-          !exponent ||
-          exponent.denominator !== 1n ||
-          exponent.numerator < -128n ||
-          exponent.numerator > 128n
-        )
-          return undefined;
+        if (!exponent || exponent.denominator !== 1n) return undefined;
+        if (exponent.numerator < -128n || exponent.numerator > 128n)
+          throw new PolynomialBudgetExceeded('degree-limit');
         let n = Number(exponent.numerator);
+        // Expanded inputs contain many monomials. Read x^n directly instead
+        // of repeatedly convolving dense arrays containing mostly zeros.
+        if (sym(e.op1) === variable && n >= 0) {
+          if (n > maxDegree) throw new PolynomialBudgetExceeded('degree-limit');
+          work.tick(n + 1);
+          return [...Array<NumberFieldElement>(n).fill(K.zero), K.one];
+        }
         let a = read(e.op1, depth + 1);
-        if (!a || (a.length - 1) * Math.abs(n) > maxDegree) return undefined;
+        if (!a) return undefined;
+        if ((a.length - 1) * Math.abs(n) > maxDegree)
+          throw new PolynomialBudgetExceeded('degree-limit');
         if (n < 0) {
           if (a.length !== 1) return undefined;
           a = [K.inv(a[0])];
@@ -299,7 +341,12 @@ export function factorNumberFieldExpression(
       return undefined;
     };
     const input = read(expr);
-    if (!input) return undefined;
+    if (!input)
+      return refused(
+        expr.isValid ? 'unsupported' : 'invalid',
+        'unsupported-polynomial'
+      );
+    stage = 'factorization';
     const result = factorNumberFieldPolynomial(field, input, {
       ...options,
       maxOperations,
@@ -312,8 +359,29 @@ export function factorNumberFieldExpression(
       result.reason !== 'verification-failed',
       'Number field factorization failed an internal verification'
     );
-    if (result.status === 'incomplete') return undefined;
-    if (result.status === 'zero') return ce.Zero;
+    const statistics = {
+      operations: result.operations,
+      phases: result.statistics.phases,
+      direct: result.statistics.direct,
+      norms: result.statistics.norms,
+    };
+    if (result.status === 'incomplete')
+      return {
+        ...base,
+        status: 'incomplete',
+        reason: result.reason ?? 'uncertified',
+        stage,
+        statistics,
+      };
+    if (result.status === 'zero')
+      return {
+        ...base,
+        status: 'zero',
+        expression: ce.Zero,
+        coefficient: ce.Zero,
+        factors: [],
+        statistics,
+      };
     const power = (base: Expression, n: number): Expression =>
       n === 0
         ? ce.One
@@ -334,33 +402,42 @@ export function factorNumberFieldExpression(
               ]
         )
       );
-    return ce.function('Multiply', [
-      coefficient(result.coefficient),
-      ...result.factors.map((f) =>
-        power(
-          ce.function(
-            'Add',
-            f.coefficients.flatMap((c, i) =>
-              field.isZero(c)
-                ? []
-                : [
-                    ce.function('Multiply', [
-                      coefficient(c),
-                      power(ce.symbol(variable), i),
-                    ]),
-                  ]
-            )
-          ),
-          f.multiplicity
+    const factors = result.factors.map((f) => ({
+      factor: ce.function(
+        'Add',
+        f.coefficients.flatMap((c, i) =>
+          field.isZero(c)
+            ? []
+            : [
+                ce.function('Multiply', [
+                  coefficient(c),
+                  power(ce.symbol(variable), i),
+                ]),
+              ]
         )
       ),
-    ]);
+      multiplicity: f.multiplicity,
+    }));
+    const content = coefficient(result.coefficient);
+    return {
+      ...base,
+      status: 'complete',
+      coefficient: content,
+      factors,
+      statistics,
+      expression: ce.function('Multiply', [
+        content,
+        ...factors.map((f) => power(f.factor, f.multiplicity)),
+      ]),
+    };
   } catch (e) {
     if (interruption) throw interruption.error;
-    if (e instanceof PolynomialBudgetExceeded) return undefined;
+    if (e instanceof PolynomialBudgetExceeded)
+      return refused('incomplete', e.reason);
     // Malformed/reducible defining polynomials and division by zero are not
     // certificates. Leave the explicit-domain request intact for inspection.
-    if (e instanceof RangeError) return undefined;
+    if (e instanceof RangeError)
+      return refused('invalid', 'invalid-field-or-coefficient');
     throw e;
   }
 }

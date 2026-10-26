@@ -1,4 +1,5 @@
 import { createInterface } from 'node:readline';
+import { performance } from 'node:perf_hooks';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
@@ -8,6 +9,7 @@ import {
 } from '../../src/compute-engine/polynomial/number-field.js';
 import { rationalCoefficient as q } from '../../src/compute-engine/polynomial/exact-field.js';
 import type { Element, Rational } from './corpus.js';
+import { pariBasis } from './pari-basis.js';
 
 const backend = process.argv[2];
 let gp: ((s: string) => string) | undefined;
@@ -53,16 +55,17 @@ for await (const line of createInterface({ input: process.stdin })) {
       key = JSON.stringify(msg.modulus);
     const setupStart = performance.now();
     if (gp) {
+      const basis = pariBasis(msg.modulus);
       const name = `nf${[...pariFields].indexOf(key) < 0 ? pariFields.size : [...pariFields].indexOf(key)}`;
       if (!pariFields.has(key)) {
-        const response = gp(`${name}=nfinit(${gpPoly(msg.modulus, 'y')});1`);
+        const response = gp(`${name}=nfinit(${gpPoly(basis.modulus, 'y')});1`);
         if (!/1\s*$/.test(response))
           throw new Error(`PARI field setup: ${response}`);
         pariFields.add(key);
       }
       const setupMs = performance.now() - setupStart;
       const conversionStart = performance.now();
-      const input = `Polrev([${(msg.coefficients as Element[]).map((c) => gpPoly(c, 'y')).join(',')}],x)`;
+      const input = `Polrev([${(msg.coefficients as Element[]).map((c) => gpPoly(basis.toPari(c), 'y')).join(',')}],x)`;
       const conversionMs = performance.now() - conversionStart;
       const start = performance.now();
       // Coefficients are serialized in the supplied power basis, not nf.zk.
@@ -81,7 +84,7 @@ for await (const line of createInterface({ input: process.stdin })) {
           return [n, d];
         });
         while (out.length && out.at(-1)![0] === '0') out.pop();
-        return out;
+        return basis.fromPari(out);
       };
       console.log(
         JSON.stringify({

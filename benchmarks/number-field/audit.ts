@@ -2,12 +2,19 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import type { Case } from './corpus.js';
-import { verify } from './verify.js';
+import { verify, decodePublicFactor } from './verify.js';
 
 const directory = process.argv[2];
 const manifest = JSON.parse(
   readFileSync(join(directory, 'manifest.json'), 'utf8')
 );
+if (
+  manifest.publicBundleHash &&
+  createHash('sha256')
+    .update(readFileSync(join(directory, 'public-worker.mjs')))
+    .digest('hex') !== manifest.publicBundleHash
+)
+  throw new Error('Public worker bundle fingerprint mismatch');
 if (manifest.requiresCompletionMarker) {
   const completion = JSON.parse(
     readFileSync(join(directory, 'completion.json'), 'utf8')
@@ -73,6 +80,10 @@ for (const r of rows) {
     )
       throw new Error('Invalid completed result');
     verify(c, r.result);
+    if (r.backend.startsWith('public-'))
+      verify(c, decodePublicFactor(c.modulus, r.expression));
+    if (r.structuredExpression)
+      verify(c, decodePublicFactor(c.modulus, r.structuredExpression));
   }
   if (
     r.status === 'incomplete' &&

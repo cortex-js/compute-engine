@@ -1,3 +1,23 @@
+## Unreleased
+
+### Features
+
+- Number-field factoring supports unramified prime ideals with proper residue
+  extensions, using exact lattice coefficient recovery and certified
+  recombination. Weighted integral-model scaling and tighter divisor bounds
+  reduce unnecessary coefficient growth; rational-coefficient norm fallbacks
+  skip the provably repeated unshifted norm. Structured statistics retain the
+  direct-method reason preceding a norm fallback.
+
+- The JavaScript `factor()` helper accepts `variable` and `generator` options
+  for parity with explicit-field `Factor` expressions. New `factorDetailed()`
+  returns certified factors, multiplicities, scalar content, completion status,
+  refusal reason/stage, and optional kernel statistics. Both are exported from
+  the main and core entry points. No new MathJSON operator is introduced.
+- Number-field polynomial conversion reads `x^n` monomials directly, avoiding
+  unnecessary dense multiplication and conversion-budget refusals on expanded
+  high-degree inputs.
+
 ## 0.169.0 _2026-10-25_
 
 ### Behavior Changes

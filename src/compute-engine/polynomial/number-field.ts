@@ -41,13 +41,13 @@ const DIRECT_ONLY_LIMITS = new Set([
 
 /** Inherited lifting/recombination overrides configure the rational norm engine. */
 export interface NumberFieldFactorOptions extends RationalFactorOptions {
-  /** Direct inert-prime Hensel factoring with Trager fallback by default. */
+  /** Direct unramified prime-ideal lifting with Trager fallback by default. */
   numberFieldStrategy?: 'auto' | 'trager' | 'hensel';
   /** Direct recombination strategy; separate from rational norm recombination. */
   numberFieldRecombination?: 'auto' | 'subsets' | 'lattice';
   /** Disable the one-sided modular recovery filter for matched diagnostics. */
   numberFieldRecovery?: 'auto' | 'unfiltered';
-  /** Bounded search for an inert good prime; default 24. */
+  /** Bounded prime search, preferring an inert prime; default 24. */
   maxNumberFieldPrimes?: number;
   /** Maximum precision doublings in the direct path; default 12. */
   maxNumberFieldLifts?: number;
@@ -338,10 +338,21 @@ export function factorNumberFieldPolynomial(
         (options.maxNormDegree ?? 128)
       )
         throw new PolynomialBudgetExceeded('norm-degree-limit');
+      // For rational coefficients the unshifted norm is F^d, hence never
+      // square-free when d>1. Spend the shift budget on separating shifts.
+      const skipZero =
+        field.degree > 1 &&
+        part.polynomial.every((c) => c.coefficients.length <= 1);
       for (let index = 0; index < (options.maxShifts ?? 16); index++) {
         work.phase('norm');
         result.statistics.shifts++;
-        const s = index === 0 ? 0 : index % 2 ? (index + 1) / 2 : -index / 2;
+        const shiftIndex = index + (skipZero ? 1 : 0);
+        const s =
+          shiftIndex === 0
+            ? 0
+            : shiftIndex % 2
+              ? (shiftIndex + 1) / 2
+              : -shiftIndex / 2;
         const shift = K.mul(K.fromInteger(BigInt(s)), field.generator);
         const shifted = shiftPolynomial(part.polynomial, K.neg(shift), P);
         const norm = numberFieldPolynomialNorm(
