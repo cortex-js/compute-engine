@@ -623,8 +623,10 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
 
       // A tuple with a component that can be neither a number nor open (a
       // string, a boolean) is not a numeric tuple, whatever its open
-      // components hold. So the `any` typing above does not apply to it:
-      // the call keeps the signature result, as `f("s")` does.
+      // components hold. It is still bound whole, and the value holds the
+      // tuple: the call is typed `any`. It kept the signature result
+      // `tuple<number, number>`, which does not hold `("s", a)` (ROADMAP
+      // CE-47).
       // The body `-x` cannot consume such a tuple, so the value carries the
       // `incompatible-type` error that `f("s")` carries, with the expected
       // and the actual type. Before, `-x` stayed the inert `-("s", a)`.
@@ -638,12 +640,12 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
         const expected =
           '(Error(ErrorCode("incompatible-type", "number", "tuple<string, unknown>"), ("s", a)), ("s", a))';
         const parsed = ce.parse('f(("s", a))');
-        expect(parsed.type.toString()).toBe('tuple<number, number>');
+        expect(parsed.type.toString()).toBe('any');
         expect(parsed.evaluate().toString()).toBe(expected);
         const built = ce.function('f', [
           ce.function('Tuple', [ce.string('s'), ce.symbol('a')]),
         ]);
-        expect(built.type.toString()).toBe('tuple<number, number>');
+        expect(built.type.toString()).toBe('any');
         expect(built.evaluate().toString()).toBe(expected);
         const boolean = ce.function('f', [
           ce.function('Tuple', [ce.True, ce.number(1)]),
@@ -689,12 +691,13 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
               describeType(ce.type(t).type),
             ])
           ).toBe('any');
-        // A component that can be a string is not numeric, absent or not.
+        // A component that can be a string is not numeric, absent or not,
+        // but the tuple is bound whole too.
         expect(
           deriveApplicationType(ce as any, 'f', [
             describeType(ce.type('tuple<integer, string | missing>').type),
           ])
-        ).not.toBe('any');
+        ).toBe('any');
       });
 
       // An explicit tuple remains present even when every coordinate is

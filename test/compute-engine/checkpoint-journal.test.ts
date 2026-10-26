@@ -595,6 +595,11 @@ describe('snapshot completeness — the drift guard', () => {
     // The list hypothesis a recursive call reads while `_deriveSignature`
     // verifies it, set only during that pass.
     '_recursionResult',
+    // A memo of the effects of a stored `Function` literal, keyed on the
+    // identity of the literal and on the conformance-registry version. The
+    // version is a counter that only increases, so a restore that changes
+    // the stored value or the registry makes the memo miss.
+    '_literalRegistryEffects',
   ]);
 
   const OPERATOR_DEF_EXCLUSIONS = new Set([

@@ -19,6 +19,7 @@ import {
   checkNumericArgs,
   absentableCollectionOperandValue,
   absentScalarMarker,
+  absentArithmeticMarker,
   checkArity,
   hasAbsentScalarOperand,
   isAbsentableCollectionOperand,
@@ -16247,7 +16248,7 @@ function addEvaluatedOperands(
     )
       return engine!.Missing;
     if (hasAbsentScalarOperand(evaluated))
-      return absentScalarMarker(engine!, expression);
+      return absentArithmeticMarker(engine!, expression, ops, evaluated);
   }
   // A sum with a residue class is folded by the residue rules only.
   // The generic sum below does not know the ring of the class. A
@@ -16426,7 +16427,7 @@ function mulEvaluatedOperands(
     )
       return engine!.Missing;
     if (hasAbsentScalarOperand(evaluated))
-      return absentScalarMarker(engine!, expression);
+      return absentArithmeticMarker(engine!, expression, ops, evaluated);
   }
   // A product with a residue class: see the matching comment in `Add`.
   if (evaluated.some(containsResidueClass)) {

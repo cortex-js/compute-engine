@@ -3,7 +3,10 @@ import {
   installSignatureResultDerivation,
 } from './callee-type-derivation.js';
 import { deriveSignatureResultType } from './signature-result-type.js';
-import { callResultType } from './call-result-type.js';
+import {
+  callResultType,
+  componentwiseTupleCallType,
+} from './call-result-type.js';
 import type {
   BoxedDefinition,
   BoxedOperatorDefinition,
@@ -467,6 +470,24 @@ export function parameterReachesBody(
   return name === '' || literal.op1.has(name);
 }
 
+/**
+ * Whether an argument of type `t` is a tuple that is bound whole at a scalar
+ * or open parameter of a function literal: a numeric tuple, a tuple that
+ * may be one (`mayBeNumericTupleType`), or any other tuple (a tuple with a
+ * tuple or a list component, or a component that is not a number). An
+ * argument that may be absent as a whole (`missing | tuple<…>`) is not one:
+ * the derivation from the body types each arm first
+ * (`isNumericTupleArgumentType`).
+ *
+ * The signature result of the literal describes a scalar argument, so it
+ * does not describe the value for such an argument. With `h := x ↦ 2x`,
+ * `h(((1, 2), 3))` is `((2, 4), 6)`, and it was typed `number`.
+ */
+export function isTupleArgumentType(t: Type): boolean {
+  if (isNumericTupleType(t) || mayBeNumericTupleType(t)) return true;
+  return isTupleShapedType(resolveTypeAlias(t));
+}
+
 /** Whether parameter `i` of the signature `ft` is typed to take a tuple
  * (a tuple, a collection, or any type a tuple inhabits other than the open
  * `unknown`/`any`, which bind a tuple whole as a scalar parameter does). */
@@ -666,15 +687,23 @@ export function deriveApplicationType(
     // A tuple with an open component (`mayBeNumericTupleType`) is one such
     // tuple when the component holds a number, and so is such a tuple with a
     // whole-value `missing` arm (`isNumericTupleArgumentType`).
+    // Any other tuple binds whole too (`isTupleArgumentType`), and a body
+    // that computes a numeric tuple component by component gives a tuple of
+    // numbers (`componentwiseTupleCallType`).
     if (
       operands.some(
         (d, i) =>
-          isNumericTupleArgumentType(d.type) &&
+          (isNumericTupleArgumentType(d.type) || isTupleArgumentType(d.type)) &&
           !parameterAdmitsTuple(ft, i) &&
           parameterReachesBody(binding.value.value, i)
       )
     )
-      return 'any';
+      return (
+        componentwiseTupleCallType(
+          binding.value.value,
+          operands.map((d) => d.type)
+        ) ?? 'any'
+      );
     return (
       instantiatedResultTypeOverActuals(ft, operands.map(actualOfDescriptor), {
         threadable: true,
@@ -959,7 +988,7 @@ export function deriveApplicationType(
       isSubtype(functionResult(sig) ?? 'unknown', 'number')) &&
     operands.some(
       (d, i) =>
-        isNumericTupleArgumentType(d.type) &&
+        (isNumericTupleArgumentType(d.type) || isTupleArgumentType(d.type)) &&
         !parameterAdmitsTuple(sig, i) &&
         parameterReachesBody(
           (def as { _lambdaLiteral?: Expression })._lambdaLiteral,
@@ -967,7 +996,12 @@ export function deriveApplicationType(
         )
     )
   )
-    return 'any';
+    return (
+      componentwiseTupleCallType(
+        (def as { _lambdaLiteral?: Expression })._lambdaLiteral,
+        operands.map((d) => d.type)
+      ) ?? 'any'
+    );
   // An operand typed from its present type binds the type variables, and
   // takes part in the choice of an overload arm, with that type, as at the
   // call site.

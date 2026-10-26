@@ -1,3 +1,4 @@
+import { registerProvedAbsentDomain } from '../boxed-expression/proved-absent-domain.js';
 import { callableBindingInContext } from '../boxed-expression/binders.js';
 import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
@@ -208,6 +209,7 @@ import {
 import {
   broadcastAdmitsCollectionElement,
   broadcastCallbackResultType,
+  signatureParamsAreScalar,
 } from '../boxed-expression/callback-broadcast-admission.js';
 import { interval, intervalContains } from '../numerics/interval.js';
 import { MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
@@ -4797,6 +4799,19 @@ function declaredOrCallElementTypeD(
   derive: TypeHandlerContext['derive']
 ): Type | undefined {
   const declared = callbackResultTypeD(fn, engine);
+  // Whether an element of a source can be a collection whose depth the type
+  // does not state (the element of a `list<any>`).
+  const hasOpenElement = (): boolean =>
+    sources.some((s) => {
+      const element = s.facts.elementType ?? collectionElementType(s.type);
+      return element === undefined
+        ? s.type === 'any' || s.type === 'value'
+        : hasOpenContentDepth(element);
+    });
+  const withOpenElements = (t: Type): Type => ({
+    kind: 'union',
+    types: [t, { kind: 'indexed_collection', elements: 'any' }],
+  });
   if (declared !== undefined && declared !== 'unknown' && declared !== 'any') {
     // A signature with a parameter typed `unknown` was inferred from the
     // body with that parameter not known. Its result says nothing about an
@@ -4835,16 +4850,64 @@ function declaredOrCallElementTypeD(
           return applied;
       }
     }
-    if (!callbackHasUnresolvedParameterD(fn, engine))
-      return (
+    if (!callbackHasUnresolvedParameterD(fn, engine)) {
+      const called =
         libraryOperatorCallElementTypeD(
           fn,
           sources,
           declared,
           engine,
           derive
-        ) ?? declared
+        ) ?? declared;
+      // A user function with a declared signature whose parameters are all
+      // scalar maps over an argument that is a list. An element of a source
+      // whose depth the type does not state can be such a list, and the
+      // element of the result is then a list too: with `k: (real) -> real`
+      // holding `x ↦ 2x` and `L: list<any>` holding `[[1, 2]]`,
+      // `Map(k, L)` is `[[2, 4]]` (ROADMAP CE-485).
+      const scalarSignature = userFunctionScalarSignatureD(fn, engine);
+      if (scalarSignature === undefined) return called;
+      if (hasOpenElement()) return withOpenElements(called);
+      // An element typed `unknown` (the element of a `list<unknown>`), or a
+      // collection with `unknown` at some depth that
+      // `userCallbackOverRowsTypeD` did not type, is read as an element of
+      // a `list<any>`: it can be a ragged list or a list of non-numeric
+      // values, and the call maps over it to any depth. The element of the
+      // result is then `R | indexed_collection<any>`. With `k: (real) ->
+      // real` and `L: list<unknown>` holding `[[[1], [2, 3]]]`, `Map(k, L)`
+      // is `[[[2], [4, 6]]]`, which `broadcastable<real>` does not hold.
+      const elements = sources.map(
+        (s) => s.facts.elementType ?? collectionElementType(s.type)
       );
+      if (elements.some((e) => e !== undefined && hasOpenDepth(e)))
+        return withOpenElements(called);
+      // An element that is a union with a collection arm (the element of a
+      // ragged list, `integer | vector<integer^2>`) is typed arm by arm: the
+      // call maps over an arm that is a collection
+      // (`broadcastCallbackResultType`), and gives `R` for another arm. With
+      // `L := [[1, 2], 3]`, `Map(k, L)` is `[[2, 4], 6]`; it was typed
+      // `list<real>`.
+      if (sources.length === 1) {
+        const element = resolveTypeAlias(elements[0] ?? 'unknown');
+        if (typeof element !== 'string' && element.kind === 'union') {
+          const arms = element.types.filter((arm) => arm !== 'missing');
+          const mapsAt = (arm: Type): boolean =>
+            isSubtype(arm, INDEXED_COLLECTION_SHAPE_TYPE) &&
+            !isTupleShapedType(arm) &&
+            !isSubtype(arm, 'string');
+          if (arms.some(mapsAt))
+            return widen(
+              ...arms.map((arm) =>
+                mapsAt(arm)
+                  ? (broadcastCallbackResultType(scalarSignature, arm) ??
+                    withOpenElements(called))
+                  : called
+              )
+            );
+        }
+      }
+      return called;
+    }
     const called = callbackCallElementTypeD(fn, sources, engine, derive);
     if (called !== undefined) return called;
     // The call on the element has no known type. When an element can be a
@@ -4855,18 +4918,7 @@ function declaredOrCallElementTypeD(
     // `openDepthLiteralResult` gives for a function literal, which the
     // caller applies to a literal itself.
     if (fn.structureOf?.()?.kind === 'function-literal') return declared;
-    const openElement = sources.some((s) => {
-      const element = s.facts.elementType ?? collectionElementType(s.type);
-      return element === undefined
-        ? s.type === 'any' || s.type === 'value'
-        : hasOpenContentDepth(element);
-    });
-    return openElement
-      ? {
-          kind: 'union',
-          types: [declared, { kind: 'indexed_collection', elements: 'any' }],
-        }
-      : declared;
+    return hasOpenElement() ? withOpenElements(declared) : declared;
   }
   // The declared result of a generic operator reads `unknown` without its
   // arguments (`Conjugate` is declared `(T) -> T`), so the operator is
@@ -5097,6 +5149,37 @@ function userCallbackOverRowsTypeD(
   return signature === undefined
     ? undefined
     : broadcastCallbackResultType(signature, element);
+}
+
+/**
+ * The signature of the callback `fn` when `fn` is a symbol that names a user
+ * function (a value that holds a function literal, or an operator definition
+ * made from one) whose signature has only scalar parameters and no rest
+ * parameter (`signatureParamsAreScalar`), or `undefined` otherwise. A call
+ * of such a function maps over an argument that is a list, as
+ * `userCallbackOverRowsTypeD` reads it.
+ */
+function userFunctionScalarSignatureD(
+  fn: OperandDescriptor,
+  engine: PureEngineView
+): Type | undefined {
+  const s = fn.structureOf?.();
+  // A captured or synthetic symbol (`lookupByName === false`) is not the
+  // function that its name finds in the current scope.
+  if (s?.kind !== 'symbol' || s.lookupByName === false) return undefined;
+  const def = engine.lookupDefinition(s.name);
+  if (
+    !isUserFunctionName(engine, s.name) &&
+    def?.operator?.isUserFunctionDefinition !== true
+  )
+    return undefined;
+  const signature = def?.operator?.signature.type ?? def?.value?.type?.type;
+  return typeof signature === 'object' &&
+    signature.kind === 'signature' &&
+    signature.variadicArg === undefined &&
+    signatureParamsAreScalar(signature)
+    ? signature
+    : undefined;
 }
 
 /**
@@ -5512,16 +5595,14 @@ function provenLengthD(d: OperandDescriptor): number | undefined {
  * `missing | tuple<integer, integer>`, while `First(Filter(xs, p))` keeps the
  * member, because a filter can find nothing.
  *
- * A position proved NOT to exist is typed `nan` when the marker of the
- * element type is `nan` (the elements are numbers): `At([7, 8, 9], 99)` is
- * `NaN`, typed `nan`. For any other element type, such a position keeps
- * `T | marker(T)` on purpose, although the value is always the marker. A
- * chained read chooses its marker from the element type the inner access
- * states: with `M` a matrix of two rows, `M[7]` is typed
- * `missing | vector<…>`, so `M[7][1]` is typed `number | nan` and answers
- * `NaN`. Typed `missing` alone, the inner access no longer says that a row
- * holds numbers, and `M[7][1]` answered `Missing`. A number has no element
- * to read, so the type `nan` loses nothing that a chained read needs.
+ * A position proved NOT to exist is typed by the marker of the element type
+ * alone, because its value is always that marker: `At([7, 8, 9], 99)` is
+ * `NaN`, typed `nan`, and `At(["a", "b"], 9)` is `Missing`, typed `missing`.
+ * The type `missing` does not tell what a row would hold, so a chained read
+ * (`M[7][1]` over a matrix `M` of two rows) does not choose its marker from
+ * the type of the inner access: it reads the element type of the operand of
+ * that access (`provedAbsentDomainD()`), and `M[7][1]` is typed `nan` and
+ * is `NaN`.
  */
 function provenAccessType(
   element: Type,
@@ -5531,7 +5612,91 @@ function provenAccessType(
   if (element === 'unknown' || element === 'any') return undefined;
   const i = position < 0 ? length + position + 1 : position;
   if (i >= 1 && i <= length) return element;
-  return markerType(element) === 'nan' ? 'nan' : undefined;
+  return markerType(element);
+}
+
+/** The position that the accessors `First`, `Second`, `Third` and `Last`
+ * read (1-based, negative from the end). */
+const ACCESSOR_POSITION: Readonly<Record<string, number>> = {
+  First: 1,
+  Second: 2,
+  Third: 3,
+  Last: -1,
+};
+
+/**
+ * When `d` is an access that is PROVED to find nothing, the type of the
+ * value that it would read if the position existed: the element type of its
+ * operand. `undefined` otherwise.
+ *
+ * The access is `First`, `Second`, `Third`, `Last`, or `At` with one literal
+ * integer index, and it finds nothing when:
+ * - its operand is proved to hold fewer elements than the position needs
+ *   (`provenLengthD()`): `At(M, 7)` for a matrix `M` of two rows has the
+ *   domain of a row of `M`;
+ * - or its operand is itself such an access: `At(At(M, 7), 1)` has the
+ *   domain of an element of a row of `M`.
+ *
+ * The type of such an access is the marker alone (`provenAccessType()`), so
+ * an access whose operand is such an access reads its marker from this
+ * domain, not from the type of its operand.
+ */
+function provedAbsentDomainD(d: OperandDescriptor): Type | undefined {
+  const s = d.structureOf?.();
+  if (s?.kind !== 'application') return undefined;
+  let position: number | undefined;
+  if (s.children.length === 1) position = ACCESSOR_POSITION[s.head];
+  else if (s.head === 'At' && s.children.length === 2) {
+    const raw = descriptorLiteralValue(s.children[1]);
+    if (typeof raw === 'number' && Number.isInteger(raw)) position = raw;
+  }
+  if (position === undefined) return undefined;
+  const outer = provedAbsentDomainD(s.children[0]);
+  if (outer !== undefined) return elementTypeAtPosition(outer, position);
+  // An operand that can be absent as a whole is read by its present arm:
+  // when it is absent, the access is absent too.
+  const base = presentArmOf(s.children[0]);
+  const element = componentTypeD(base, position);
+  const length = provenLengthD(base);
+  if (length === undefined || element === 'unknown' || element === 'any')
+    return undefined;
+  const i = position < 0 ? length + position + 1 : position;
+  return i >= 1 && i <= length ? undefined : element;
+}
+
+// An operator that propagates absence reads the domain of such an access
+// to choose the marker of its codomain (`proved-absent-domain.ts`).
+registerProvedAbsentDomain(provedAbsentDomainD);
+
+/** The type of the element at `position` (1-based, negative from the end)
+ * of a value of type `t`: the type of that component for a tuple, the
+ * element type for another indexed collection. `undefined` when `t` is not
+ * an indexed collection, or when its element type is not known. */
+function elementTypeAtPosition(t: Type, position: number): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r !== 'string' && r.kind === 'tuple') {
+    const n = r.elements.length;
+    const i = position < 0 ? n + position + 1 : position;
+    return i >= 1 && i <= n
+      ? r.elements[i - 1].type
+      : (widenAll(r.elements.map((x) => x.type)) as Type);
+  }
+  if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return undefined;
+  const e = collectionElementType(r);
+  return e === undefined || e === 'unknown' || e === 'any' ? undefined : e;
+}
+
+/** The type of the access at `position` into the operand `xs`, when `xs` is
+ * an access proved to find nothing (`provedAbsentDomainD()`): the marker of
+ * the element that it would read. `undefined` otherwise. */
+function provedAbsentReadType(
+  xs: OperandDescriptor,
+  position: number
+): Type | undefined {
+  const domain = provedAbsentDomainD(xs);
+  if (domain === undefined) return undefined;
+  const e = elementTypeAtPosition(domain, position);
+  return e === undefined ? undefined : markerType(e);
 }
 
 /**
@@ -5575,6 +5740,8 @@ function componentResultTypeD(
  * may be absent.
  */
 function accessorResultTypeD(xs: OperandDescriptor, position: number): Type {
+  const absent = provedAbsentReadType(xs, position);
+  if (absent !== undefined) return absent;
   const present = presentArmOf(xs);
   return componentResultTypeD(present, position, present !== xs);
 }
@@ -15653,9 +15820,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           // A record's key set is fixed: a known-absent field is a static
           // defect, not an out-of-band access.
           if (name !== undefined) return rt.elements[name];
+          // A name known only at evaluation: a record type is open, so the
+          // name can select a field it does not list, of any type. A closed
+          // record (the type of a dictionary value) and an object layout
+          // list every field.
           return elementReadType(
             ops[0],
-            widen(...Object.values(rt.elements)) as Type
+            rt.kind === 'record' && rt.closed !== true
+              ? 'any'
+              : (widen(...Object.values(rt.elements)) as Type)
           );
         }
         if (rt.kind === 'tuple') {
@@ -16076,7 +16249,12 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
               : arm.kind === 'dictionary'
                 ? arm.values
                 : arm.kind === 'record'
-                  ? (widen(...Object.values(arm.elements)) as Type)
+                  ? // A record type is open: a key it does not list can
+                    // hold any value. Only a closed record (the type of a
+                    // dictionary value) lists every key.
+                    arm.closed === true
+                    ? (widen(...Object.values(arm.elements)) as Type)
+                    : 'any'
                   : indexElementType(arm)
           );
           if (arms.every((arm) => arm !== undefined)) {
@@ -16284,6 +16462,13 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           isSubtype(key.type, 'integer')
         ) {
           const raw = descriptorLiteralValue(key);
+          // The operand is an access proved to find nothing: the marker of
+          // the element that it would read (`provedAbsentReadType`).
+          const absent =
+            ops.length === 2 && typeof raw === 'number' && Number.isInteger(raw)
+              ? provedAbsentReadType(ops[0], raw)
+              : undefined;
+          if (absent !== undefined) return absent;
           const length = provenLengthD(ops[0]);
           if (
             length !== undefined &&

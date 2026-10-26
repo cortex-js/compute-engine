@@ -10,7 +10,7 @@ import { isFunction, isSymbol, sym } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterType } from '../boxed-expression/function-literal.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { withoutNothing } from '../../common/type/omission.js';
-import { typeToString } from '../../common/type/serialize.js';
+import { typeToIdentityKey } from '../../common/type/serialize.js';
 import {
   collectionElementType,
   resolveTypeForCompilation,
@@ -189,7 +189,7 @@ export function sourceElementTypeKey(expr: Expression): string {
   let key = '';
   for (const source of expr.ops.slice(1)) {
     const elt = sourceElementType(source);
-    key += (elt === undefined ? '?' : typeToString(elt)) + '|';
+    key += (elt === undefined ? '?' : typeToIdentityKey(elt)) + '|';
   }
   return key;
 }

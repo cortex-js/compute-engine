@@ -82,3 +82,45 @@ describe('a numeric application of an absent value is NaN', () => {
     expect(r.run!({ x: undefined })).toBeNaN();
   });
 });
+
+describe('an absent value that a symbol declared any holds is NaN in arithmetic', () => {
+  // `docs/ERROR-MODEL.md` (the reading of a host input as `NaN`, ROADMAP
+  // CE-395): every route gives `NaN`. Before, the `assign` route gave
+  // `Missing`, from the codomain marker of the type `any`.
+  test.each([
+    [['Add', 'p', 1]],
+    [['Multiply', 2, 'p']],
+    [['Add', 'p', 'q']],
+    [['Subtract', 'p', 1]],
+  ])('%j', (json) => {
+    const ce = new ComputeEngine();
+    ce.declare('p', 'any');
+    ce.declare('q', 'any');
+    const expr = ce.box(json as any);
+    // Compiled, with `p` absent.
+    const run = compile(expr).run!;
+    expect(run({ p: undefined, q: 2 })).toBeNaN();
+    // `subs`.
+    const substituted = expr
+      .subs({ p: ce.box('Missing'), q: ce.box(2) })
+      .evaluate();
+    expect(substituted.isNaN).toBe(true);
+    // `assign`.
+    ce.assign('p', ce.box('Missing'));
+    ce.assign('q', ce.box(2));
+    const assigned = expr.evaluate();
+    expect(assigned.isNaN).toBe(true);
+    expect(assigned.type.matches(expr.type)).toBe(true);
+  });
+
+  test('the coordinate read of an absent point stays absent', () => {
+    // A READ is not a symbol: `s · PointX(p)` keeps the codomain marker
+    // (ROADMAP CE-229).
+    const ce = setup();
+    const e = ce.box(['W', ['At', 'L', 5], 2]);
+    const v = e.evaluate();
+    expect(v.json).toEqual(['Tuple', 'Missing', 'Missing', 'Missing']);
+    expect(v.type.matches(e.type)).toBe(true);
+    expect(compile(e).run!({})).toEqual([undefined, undefined, undefined]);
+  });
+});

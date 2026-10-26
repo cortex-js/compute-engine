@@ -1,11 +1,17 @@
 import { makeNumericRangeType } from './numeric-range.js';
-import { typeToDedupKey, typeToString } from './serialize.js';
+import {
+  typeToDedupKey,
+  typeToIdentityKey,
+  typeToString,
+} from './serialize.js';
 import {
   asNumericRange,
   assertGroundType,
   isEmptyType,
   broadcastCollectionArm,
   isSubtype,
+  openSubtypePairs,
+  closeSubtypePairs,
   listElementType,
   listShapeKey,
   meetListTypes,
@@ -37,6 +43,7 @@ import { normalizeStatedEffectSet } from './effects.js';
 import { unfoldAliasOnDescent, type AliasDescent } from './utils.js';
 import { aliasDefinitionAt } from './instantiate.js';
 import { declarationOf } from './reference.js';
+import { TYPE_SIZE_LIMIT, typeSizeUpTo } from './size-cap.js';
 
 /**
  * Reduce the input type
@@ -55,6 +62,19 @@ export function reduceType(type: Type): Type {
     return type;
   }
 
+  // Inside a question that unfolds an alias, each node is reduced once (see
+  // `reducedInQuestion`).
+  if (reducedInQuestion !== undefined) {
+    const known = reducedInQuestion.get(type);
+    if (known !== undefined) return known;
+    const answer = reduceCompositeType(type);
+    reducedInQuestion?.set(type, answer);
+    return answer;
+  }
+  return reduceCompositeType(type);
+}
+
+function reduceCompositeType(type: Exclude<Type, string>): Type {
   switch (type.kind) {
     case 'union':
       return reduceUnionType(type);
@@ -207,12 +227,13 @@ function decorate(t: Type): Type {
 
 /**
  * True when `t` carries a STATED-pure arrow (`effects: []`) anywhere in its
- * structure — exactly the case where its serialization differs from its
+ * structure — exactly the case where its identity key (`typeToIdentityKey`,
+ * the serialization with closed records marked) differs from its
  * de-duplication key, since the key is what elides the ` pure` token.
  */
 function carriesStatedPure(t: Type): boolean {
   if (typeof t === 'string') return false;
-  return typeToString(t) !== typeToDedupKey(t);
+  return typeToIdentityKey(t) !== typeToDedupKey(t);
 }
 
 /**
@@ -254,7 +275,7 @@ function addDedupedMember(
   }
   if (
     typeof member !== 'string' &&
-    typeToString(member) !== key &&
+    typeToIdentityKey(member) !== key &&
     !carriesStatedPure(result[at])
   )
     result[at] = member;
@@ -427,6 +448,7 @@ function meet2(a: Type, b: Type): Type | undefined {
   // path never drops a value.
   const outer = meetMemo === undefined;
   const memo = (meetMemo ??= new Map());
+  enterAliasQuestion();
   try {
     const row = memo.get(a);
     if (row?.has(b)) return row.get(b);
@@ -435,9 +457,66 @@ function meet2(a: Type, b: Type): Type | undefined {
     else row.set(b, answer);
     return answer;
   } finally {
+    leaveAliasQuestion();
     if (outer) meetMemo = undefined;
   }
 }
+
+/** The number of `meet2()` and `typesOverlap()` calls on the stack now. */
+let aliasQuestionDepth = 0;
+
+/** Whether the outermost `meet2()` or `typesOverlap()` call on the stack
+ * opened the memo of `isSubtype` (`openSubtypePairs()`), which it then
+ * closes when it returns. */
+let aliasQuestionOwnsSubtypePairs = false;
+
+function enterAliasQuestion(): void {
+  aliasQuestionDepth += 1;
+}
+
+function leaveAliasQuestion(): void {
+  aliasQuestionDepth -= 1;
+  if (aliasQuestionDepth > 0) return;
+  reducedInQuestion = undefined;
+  if (aliasQuestionOwnsSubtypePairs) {
+    aliasQuestionOwnsSubtypePairs = false;
+    closeSubtypePairs(true);
+  }
+}
+
+/**
+ * Keep the answers of `isSubtype` for the rest of the current `meet2()` or
+ * `typesOverlap()` question, from the first unfold of an alias. Each level
+ * of a chain of aliases asks `isSubtype` about the aliases of all the
+ * levels below it, and each `isSubtype` call that is not inside another one
+ * starts with an empty memo, so the same pairs were compared again at each
+ * level (`A(n) = list<A(n-1)> | list<list<A(n-1)>>`: 10 s at depth 20).
+ * An answer that the memo keeps does not depend on where it was asked, and
+ * no type declaration changes during one question, so an answer stays
+ * correct for the rest of the question. A question that unfolds no alias
+ * does not open the memo, so it pays nothing for it.
+ */
+function keepSubtypeAnswersForQuestion(): void {
+  if (aliasQuestionDepth > 0 && !aliasQuestionOwnsSubtypePairs)
+    aliasQuestionOwnsSubtypePairs = openSubtypePairs();
+  if (aliasQuestionDepth > 0) reducedInQuestion ??= new Map();
+}
+
+/**
+ * The answers of `reduceType()` for the rest of the current `meet2()` or
+ * `typesOverlap()` question, by node, from the first unfold of an alias.
+ * `undefined` outside such a question.
+ *
+ * The meet of an alias with another type reduces the definition of the
+ * alias, and the reduction of a union makes a new node. The memo of
+ * `meet2()` is keyed by node, so without this memo the meets of the arms of
+ * that new node were not found in it, and each level of a chain of aliases
+ * met the arms of all the levels below it again
+ * (`A(n) = tuple<A(n-1), A(n-1)> | list<A(n-1)>`: 10 s at depth 16). A
+ * reduction does not depend on where it is asked in the question, for the
+ * same reason that a meet does not (see `meet2()`).
+ */
+let reducedInQuestion: Map<Type, Type> | undefined;
 
 function meet2Uncached(a: Type, b: Type): Type | undefined {
   // Dev tripwire (§4.2): the algebra helpers never see an OPEN type.
@@ -468,6 +547,20 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
     (x, y) => reduceType({ kind: 'intersection', types: [x, y] }),
     1
   );
+  // A meet through an alias that has more than `TYPE_SIZE_LIMIT` nodes,
+  // read as a tree, is kept as written. Along a chain of aliases, such a
+  // meet is a graph whose tree size grows exponentially with the depth
+  // (`tuple<X, X> | list<X>` met with `list<list<Y>> | tuple<Y, Y>`, where
+  // `X` and `Y` are the aliases of the level below), and the members of a
+  // union are compared and sorted by their serialization, which reads the
+  // whole tree. The intersection kept as written has the same values as the
+  // meet, so no value is added or dropped.
+  if (
+    throughAlias !== NO_ALIAS &&
+    throughAlias !== undefined &&
+    typeSizeUpTo(throughAlias, TYPE_SIZE_LIMIT) > TYPE_SIZE_LIMIT
+  )
+    return undefined;
   // A cut alias is kept as written unless the pair is provably disjoint, or
   // can share no finite value (a recursive alias).
   if (throughAlias !== NO_ALIAS)
@@ -629,7 +722,10 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
   if (nested !== undefined) return nested === 'keep' ? undefined : nested;
 
   // Tuples meet slot-wise and records meet by merging their keys.
-  const structural = meetTuples(a, b) ?? meetRecords(a, b);
+  const structural =
+    meetTuples(a, b) ??
+    meetRecords(a, b) ??
+    meetRecordDictionary(nodeA, nodeB);
   if (structural !== undefined) return structural;
 
   // No meet rule applies. Two signatures are the one remaining pair that must
@@ -747,6 +843,7 @@ function throughTransparentAlias<R>(
       ? [b, a, false]
       : [undefined, undefined, false];
   if (alias === undefined || other === undefined) return NO_ALIAS;
+  keepSubtypeAnswersForQuestion();
   const decl = declarationOf(alias);
   const count = aliasUnfolds.get(decl) ?? 0;
   if (count >= maxUnfolds) return undefined;
@@ -1254,6 +1351,16 @@ function meetRecords(a: Type, b: Type): Type | undefined {
   if (typeof a !== 'object' || typeof b !== 'object') return undefined;
   if (a.kind !== 'record' || b.kind !== 'record') return undefined;
 
+  // A closed record (the type of a dictionary value) has exactly its listed
+  // keys. A value of both types has every key of both, so a closed side that
+  // does not list a key of the other side shares no value with it.
+  const hasKeysOf = (x: RecordType, y: RecordType) =>
+    Object.keys(y.elements).every((k) =>
+      Object.prototype.hasOwnProperty.call(x.elements, k)
+    );
+  if (a.closed === true && !hasKeysOf(a, b)) return 'never';
+  if (b.closed === true && !hasKeysOf(b, a)) return 'never';
+
   const elements: Record<string, Type> = { ...a.elements };
   for (const [key, type] of Object.entries(b.elements)) {
     // Presence must be an own-property test. `Object.prototype` member names
@@ -1275,7 +1382,50 @@ function meetRecords(a: Type, b: Type): Type | undefined {
     elements[key] = meet;
   }
 
+  if (a.closed === true || b.closed === true)
+    return decorate({ kind: 'record', elements, closed: true });
   return decorate({ kind: 'record', elements });
+}
+
+/**
+ * The meet of a RECORD type and a DICTIONARY type, or `undefined` when `a`
+ * and `b` are not such a pair.
+ *
+ * A value of `dictionary<V>` holds a `V` under each of its keys. A value of
+ * the record type has every field of the record, and an open record also
+ * allows other fields of any type. So a value of both has the fields of the
+ * record, each field holds a value of the field type and of `V`, and every
+ * other field also holds a `V`. The meet is the CLOSED record whose fields
+ * are the record fields, each met with `V`: `record{a: integer} &
+ * dictionary<number>` is the closed `record{a: integer}`, the type of
+ * `{a: 1}`. The closed record does not describe the values with more fields
+ * (`{a: 1, b: 2}`): no type spells "these fields, and others of type `V`",
+ * and the closed record is the nearest type below both operands. The meet is
+ * `never` only when a field cannot hold a `V`, since a field must hold a
+ * value: `record{a: string} & dictionary<integer>` is `never`.
+ */
+function meetRecordDictionary(a: Type, b: Type): Type | undefined {
+  if (typeof a !== 'object' || typeof b !== 'object') return undefined;
+  let record: RecordType;
+  let dictionary: DictionaryType;
+  if (a.kind === 'record' && b.kind === 'dictionary') {
+    record = a;
+    dictionary = b;
+  } else if (a.kind === 'dictionary' && b.kind === 'record') {
+    record = b;
+    dictionary = a;
+  } else return undefined;
+
+  const elements: Record<string, Type> = {};
+  for (const [key, type] of Object.entries(record.elements)) {
+    const meet = reduceType({
+      kind: 'intersection',
+      types: [type, dictionary.values],
+    });
+    if (isEmptyType(meet)) return 'never';
+    elements[key] = meet;
+  }
+  return decorate({ kind: 'record', elements, closed: true });
 }
 
 /**
@@ -1469,6 +1619,7 @@ export function typesOverlap(a: Type, b: Type): boolean {
   // the number of distinct pairs, not with the number of paths.
   const outer = overlapMemo === undefined;
   const memo = (overlapMemo ??= new Map());
+  enterAliasQuestion();
   try {
     const known = memo.get(a)?.get(b);
     if (known !== undefined) return known;
@@ -1478,6 +1629,7 @@ export function typesOverlap(a: Type, b: Type): boolean {
     row.set(b, answer);
     return answer;
   } finally {
+    leaveAliasQuestion();
     if (outer) overlapMemo = undefined;
   }
 }
@@ -1804,12 +1956,21 @@ function reduceRecordType(type: RecordType): Type {
     return 'never';
 
   // If the type of any key is 'nothing', remove it from the record
+  const count = Object.keys(reducedElements).length;
   reducedElements = Object.fromEntries(
     Object.entries(reducedElements).filter(([_, value]) => value !== 'nothing')
   );
 
   // An empty record is `record`
   if (Object.keys(reducedElements).length === 0) return 'record';
+
+  // A closed record (the type of a dictionary value) lists every key of its
+  // values. When a key was removed above, the values still have that key, so
+  // the result is the open record.
+  if (type.closed === true && Object.keys(reducedElements).length !== count) {
+    const { closed: _closed, ...open } = type;
+    return decorate({ ...open, elements: reducedElements });
+  }
 
   return decorate({
     ...type,

@@ -1,3 +1,85 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **An open record type is no longer a dictionary of its listed field types**
+  (CE-4, CE-10). `record{a: integer}` was a subtype of `dictionary<integer>` and
+  is not now, because the record can hold other fields; the relation is now
+  transitive. A dictionary value such as `{a: 1}` still matches
+  `dictionary<integer>`. A read by a key known only at evaluation on an open
+  record is typed `any`.
+- **A declared type with `unknown` at a nested position refines from each
+  assignment** (CE-3.5): `t: tuple<unknown, integer> := ("x", 2)` was
+  `tuple<unknown, integer>` and is `tuple<string, integer>`.
+- **The static type of a block local no longer depends on statement order**
+  (CE-43): `mutate(v); v = [1.5, 2]` typed `v` as `list<real>`; it is
+  `vector<real^2>`, as in the other order. An assignment inside a `match` case
+  or a `while let` body widens the local:
+  `let xs = [1,2,3]; while let [h, ...] = xs { xs = Rest(xs) }; xs` was typed
+  `vector<integer^3>` for the value `[]`, and is `list<integer>`.
+- **A `let`-bound function literal's effects follow a later conformance**
+  (CE-62.2), and so do its callers.
+- **A numeric tuple at a scalar parameter is a tuple of numbers** (CE-47):
+  `h((1, 2))` with `h := x ↦ 2x` was `any` and is `tuple<number, number>`. A
+  tuple with a tuple or string component is `any`; `h(((1, 2), 3))` was typed
+  `number` for the value `((2, 4), 6)`.
+- **`Map` over elements whose depth the type does not state admits nested
+  lists**: `Map(k, L)` with `k: (real) -> real` and `L: list<unknown>`
+  (or `list<any>`, `list<list<unknown>>`) was typed `list<real>`, which did
+  not hold a ragged or nested element, and is `list<indexed_collection<any> |
+  real>`. An operand typed `any` at a declared scalar parameter types the same
+  on the box and derived routes (CE-485).
+- **A nominal list-of-points type is not read through its definition** (CE-488):
+  `k(x)` with `k: (tuple<number, number>) -> number` and `x` of a nominal
+  `list<tuple<…>>` type was typed `list<number>` and is `error`, as its value
+  is.
+- **An access proved to be out of range is typed by its marker alone**
+  (CE-42.3): `At(["a","b"], 9)` was `missing | string` and is `missing`;
+  `M[7][1]` over a matrix was `integer | nan` and is `nan`. Arithmetic over a
+  proved-absent row or point is `Missing`.
+- **A local declared `any` keeps its type** (CE-444), and an operand typed `any`
+  at a generic collection parameter no longer fixes the element type from the
+  other operands: `ReplaceAt(ys, 2, "z")` with `ys: any` was `list<string>` and
+  is `list<any>`.
+- **An absent value of a symbol declared `any` gives `NaN` in arithmetic** on
+  every route: with `p: any` assigned `Missing`, `p + 1` was `Missing` and is
+  `NaN`, as `subs` and compiled code already gave.
+
+### Resolved Issues
+
+- **The count of a comprehension matches its cells when a clause can fail.**
+  `[j for i in 1..3 if bad(i), j in []]`, where the guard gives an error, had
+  a count of 0 but yields 3 error cells; its count is now 3.
+- **Testing whether a comprehension is finite no longer runs user code.** The
+  test does not evaluate a guard or an impure domain, so
+  `let r = [i for i in 1..3, j in filter(1..i, keep)]` no longer calls `keep`.
+- **A `Map`, `Filter` or `Reduce` callback follows a reassignment of its
+  source.** With `L := [1, 2]` and `m = Map(x ↦ x + 1, L)`, a later
+  `L := [["a"]]` made `m.evaluate()` a list of `incompatible-type` errors; it
+  now gives the value that a fresh `Map` gives.
+- **`Range(n)` with `n < 1` counts down from 1 on every route.** A raw
+  `Range(0)` and the compiled JavaScript `Range(0)` were empty; they are now
+  `[1, 0]`, as the canonical form already was.
+- **A coefficient times an ellipsis product keeps the product whole.**
+  `3(2·4·…·2n)` evaluated, expanded and simplified to `3·2·4·…·2·n` or
+  `48·…·n`; it now stays `3·(2·4·…·2n)`.
+- **The type of `Negate`, `Sqrt` and the other element-wise functions of a
+  list of range rows holds its value.** `Negate([1..3, 4..6])` was typed
+  `list<range>` for a matrix of integers; it is now `list<list<integer>>`.
+  `Sum([1..2, 3..4])` is typed `integer | list<integer>` (it was `number`, for
+  the value `[4, 6]`).
+
+- **An undeclared recursive pair that builds a list is typed `-> list<number>`**
+  (CE-38), and a function literal boxed before the function it calls is typed
+  once that function is assigned: `g := (n, K) ↦ f(n, K)` boxed before
+  `f := (n, K) ↦ n + K` was `-> unknown` and is `-> number`.
+- **A polymorphic callback over rows** (CE-30): `Map(k, [[x ↦ x + 1]])` with
+  `k: ((integer) -> T) -> T` was `matrix<unknown^(1x1)>` and is
+  `matrix<number^(1x1)>`.
+- **The meet and overlap of chains of list, set and tuple aliases** (CE-449)
+  finish in under 0.25 s at depth 32; they took several seconds, or did not
+  finish.
+
 ## 0.169.1 _2026-10-25_
 
 ### Behavior Changes

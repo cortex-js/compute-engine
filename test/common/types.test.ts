@@ -392,14 +392,28 @@ describe('Collection Type Parser', () => {
     });
   });
 
-  // A `record` is a `dictionary` whose keys are statically known. Pin both the
-  // parameterized and bare directions. This is required for dictionary
-  // literals, which synthesize a
-  // `record{…}` and must still satisfy a `dictionary<T>` annotation.
+  // A record type is open: `record{a: integer}` also holds values with other
+  // fields of any type, so it is a `dictionary<T>` only when `T` holds every
+  // value. A dictionary literal synthesizes a CLOSED record (its value has
+  // exactly the listed fields), and that type is a `dictionary<T>` when every
+  // field type fits `T`. (CE-4, CE-10)
   it('makes a record a subtype of a dictionary', () => {
     expect(
       isSubtype(
         parseType('record{red: integer, green: integer, blue: integer}'),
+        parseType('dictionary<integer>')
+      )
+    ).toBe(false);
+    expect(
+      isSubtype(parseType('record{red: integer}'), parseType('dictionary<any>'))
+    ).toBe(true);
+    expect(
+      isSubtype(
+        {
+          kind: 'record',
+          elements: { red: 'integer', green: 'integer' },
+          closed: true,
+        },
         parseType('dictionary<integer>')
       )
     ).toBe(true);
@@ -2296,8 +2310,7 @@ describe('Type-system correctness (REVIEW.md F11–F17)', () => {
   // F14: `narrow` of two disjoint types is `never` (it must not *widen* to a
   // common supertype).
   it('a rank-1 tensor met with a plain list of lists never has list cells (CE-17)', () => {
-    const n = (x: string, y: string) =>
-      ts(narrow(parseType(x), parseType(y)));
+    const n = (x: string, y: string) => ts(narrow(parseType(x), parseType(y)));
     const r = (x: string, y: string) =>
       ts(reduceType(parseType(`${x} & ${y}`)));
     for (const f of [n, r]) {
@@ -2313,8 +2326,7 @@ describe('Type-system correctness (REVIEW.md F11–F17)', () => {
   });
 
   it('narrow of collections of different kinds that share values agrees with the reducer', () => {
-    const n = (x: string, y: string) =>
-      ts(narrow(parseType(x), parseType(y)));
+    const n = (x: string, y: string) => ts(narrow(parseType(x), parseType(y)));
     expect(n('matrix<number>', 'collection<vector<integer>>')).toBe(
       'matrix<integer>'
     );

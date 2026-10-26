@@ -144,7 +144,10 @@ describe('the index kind selects the arm', () => {
     ce.declare('ru', {
       type: 'record{a: integer} | indexed_collection<integer>',
     });
-    expect(ce.box(['At', 'ru', 1]).type.toString()).toBe('integer | nan');
+    // A record type is open: a value of the record arm can have fields
+    // other than `a`, of any type, so the read is not known to be an
+    // integer. It is still not the iteration pair. (CE-4)
+    expect(ce.box(['At', 'ru', 1]).type.toString()).toBe('unknown');
   });
 });
 

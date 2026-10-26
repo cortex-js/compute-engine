@@ -1,3 +1,4 @@
+import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
 import {
   describe as describeOperand,
   describeType,
@@ -119,7 +120,10 @@ import {
   isSubtypeOfBroadcastOrIndexed,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
-import { typeToString } from '../../common/type/serialize.js';
+import {
+  typeToIdentityKey,
+  typeToString,
+} from '../../common/type/serialize.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import {
   boundVariableNames,
@@ -11992,6 +11996,35 @@ export class BaseCompiler {
     );
   }
 
+  /**
+   * Refuse a broadcastable head with an operand that is a read PROVED to
+   * find no row or point (`provedAbsentDomainOf()`): `At(M, 7) + 1` for a
+   * matrix `M` of two rows. Such a read is typed `missing`, and the
+   * application is typed from the row it would read, so the interpreter
+   * answers the marker of an absent row, `Missing`, where the scalar
+   * lowering of the `missing` operand answers `NaN` (`undefined + 1`). The
+   * compiled code fails closed and the interpreter evaluates the
+   * expression (`docs/ERROR-MODEL.md` §6). A read whose domain is a number
+   * is typed `nan`, not `missing`, and compiles as before.
+   */
+  static assertNoProvedAbsentObjectOperand(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    const def = engine.lookupDefinition(h);
+    if (!isOperatorDef(def) || def.operator.broadcastable !== true) return;
+    for (const a of args) {
+      const domain = provedAbsentDomainOf(a);
+      if (domain === undefined || isSubtype(domain, 'number')) continue;
+      throw new Error(
+        `Could not compile \`${h}\`: an operand is a read that finds no ` +
+          `\`${typeToString(domain)}\`, which the interpreter answers as an ` +
+          `absent \`${typeToString(domain)}\`. The interpreter evaluates it instead.`
+      );
+    }
+  }
+
   /** Reject omission-sensitive collections until targets can preserve Nothing. */
   static assertCollectionOmissionSupported(
     h: string,
@@ -12199,6 +12232,7 @@ export class BaseCompiler {
     if (sub !== undefined) return sub;
 
     BaseCompiler.assertCollectionOmissionSupported(h, args, node, target);
+    BaseCompiler.assertNoProvedAbsentObjectOperand(engine, h, args);
 
     // A node whose TYPE is the value `true` or `false` — a comparison proven
     // by its operands' types (`Equal(a, a)` over a NaN-free `a`), a
@@ -18645,17 +18679,23 @@ export class BaseCompiler {
     const applicationType = (): Type =>
       (resultType ??=
         node?.type.type ?? engine.function(h, [...args]).type.type);
-    // An operand whose type states nothing (`any` or `unknown`: a coordinate
-    // read off an operand whose shape is not known, the result of a function
-    // declared `-> unknown`) can be absent, spelled `undefined`. The
-    // interpreter answers the marker of the application's codomain for an
-    // absent operand: `NaN` when the application is provably a number, and
-    // `Missing` otherwise (`absentScalarMarker`, the missing-value gate of
-    // `BoxedFunction`). So when the application is not provably a number,
-    // such an operand keeps `undefined` through the arithmetic:
-    // `s·PointX(p)` with `p` absent is absent, as in the interpreter (ROADMAP
-    // CE-229, user decision 2026-10-23), unless an operand is a collection at
-    // run time (`scalarAbsent` below).
+    // A READ whose type states nothing (`any` or `unknown`: a coordinate
+    // read off an operand whose shape is not known, `PointX(p)`, or the
+    // result of a function declared `-> unknown`) can be absent, spelled
+    // `undefined`. The interpreter answers the marker of the application's
+    // codomain for such an absent operand: `NaN` when the application is
+    // provably a number, and `Missing` otherwise (`absentScalarMarker`, the
+    // missing-value gate of `BoxedFunction`). So when the application is not
+    // provably a number, such a read keeps `undefined` through the
+    // arithmetic: `s·PointX(p)` with `p` absent is absent, as in the
+    // interpreter (ROADMAP CE-229, user decision 2026-10-23), unless an
+    // operand is a collection at run time (`scalarAbsent` below).
+    //
+    // A symbol DECLARED `any` is not such a read: an absent value that it
+    // holds is `NaN` in arithmetic on every route (`absentArithmeticMarker`,
+    // `validate.ts`; ROADMAP CE-395). It reaches this code only in the list
+    // branch of `declaredTopGuard`, where its value is an array; the scalar
+    // branch reads it as a number, and `undefined + 1` is `NaN`.
     const statesNothing = (t: Type): boolean => {
       const r = resolveTypeForCompilation(t);
       return r === 'any' || r === 'unknown';
@@ -29871,6 +29911,37 @@ export class BaseCompiler {
     return parts.length === 1 ? parts[0] : `(${parts.join(' || ')})`;
   }
 
+  /** Run `f` in the scope of the innermost expression being compiled that
+   * has a scope of its own (a `Block`, a function literal, a scoped loop),
+   * or in the current scope when there is none.
+   *
+   * The guards and bodies of a `Match` case are held raw, and they are
+   * canonicalized when they are emitted. Without the enclosing scope, a name
+   * in a case body does not resolve to the local of the block that holds the
+   * `Match`: `xs = Rest(xs)` in a case body of
+   * `let xs = [1, 2, 3]; while let [h, ...] = xs { …; xs = Rest(xs) }`
+   * created a second binding `xs` whose type came from that body alone, and
+   * the compiled code was gated on that type, not on the type of the local.
+   * The interpreter canonicalizes the case bodies in the scope of the
+   * running block (`buildCaseClosure`, `match-dispatch.ts`). */
+  private static inCompiledScope<T>(
+    engine: Expression['engine'],
+    f: () => T
+  ): T {
+    const parents = BaseCompiler._compileParents;
+    for (let i = parents.length - 1; i >= 0; i--) {
+      const scope = parents[i].localScope;
+      if (scope !== undefined) return engine._inScope(scope, f);
+    }
+    return f();
+  }
+
+  /** The canonical form of a raw `Match` case body or guard, made in the
+   * scope of the expression being compiled (`inCompiledScope`). */
+  private static canonicalInCompiledScope(expr: Expression): Expression {
+    return BaseCompiler.inCompiledScope(expr.engine, () => expr.canonical);
+  }
+
   /** Compile a case body, substituting each captured name with its target
    * accessor code. Bodies with no captures compile directly (the common
    * tier-0/1 case); bodies with captures compile the shadow-correct canonical
@@ -29884,11 +29955,12 @@ export class BaseCompiler {
     sequenceNames?: ReadonlySet<string>
   ): string {
     if (cc.captureNames.length === 0)
-      return BaseCompiler.compile(cc.body.canonical, target);
-    const bodyClosure = buildCaseClosure(
-      cc.body.engine,
-      cc.body,
-      cc.captureNames
+      return BaseCompiler.compile(
+        BaseCompiler.canonicalInCompiledScope(cc.body),
+        target
+      );
+    const bodyClosure = BaseCompiler.inCompiledScope(cc.body.engine, () =>
+      buildCaseClosure(cc.body.engine, cc.body, cc.captureNames)
     );
     if (bodyClosure === undefined || !isFunction(bodyClosure))
       throw new Error(
@@ -29910,11 +29982,13 @@ export class BaseCompiler {
   ): string | undefined {
     if (!cc.hasGuard || cc.guard === undefined) return undefined;
     if (cc.captureNames.length === 0)
-      return BaseCompiler.compile(cc.guard.canonical, target);
-    const guardClosure = buildCaseClosure(
-      cc.guard.engine,
-      cc.guard,
-      cc.captureNames
+      return BaseCompiler.compile(
+        BaseCompiler.canonicalInCompiledScope(cc.guard),
+        target
+      );
+    const guard = cc.guard;
+    const guardClosure = BaseCompiler.inCompiledScope(guard.engine, () =>
+      buildCaseClosure(guard.engine, guard, cc.captureNames)
     );
     if (guardClosure === undefined || !isFunction(guardClosure))
       throw new Error(
@@ -30281,11 +30355,12 @@ export class BaseCompiler {
     sequenceNames?: ReadonlySet<string>
   ): string {
     if (cc.captureNames.length === 0)
-      return BaseCompiler.compileLoopBody(cc.body.canonical, target);
-    const bodyClosure = buildCaseClosure(
-      cc.body.engine,
-      cc.body,
-      cc.captureNames
+      return BaseCompiler.compileLoopBody(
+        BaseCompiler.canonicalInCompiledScope(cc.body),
+        target
+      );
+    const bodyClosure = BaseCompiler.inCompiledScope(cc.body.engine, () =>
+      buildCaseClosure(cc.body.engine, cc.body, cc.captureNames)
     );
     if (bodyClosure === undefined || !isFunction(bodyClosure))
       throw new Error(
@@ -37815,7 +37890,10 @@ export class BaseCompiler {
     const proofKey = hasPointProof
       ? `#points:${pointWidths.map((w) => w ?? '').join(',')}`
       : '';
-    const key = `${h}#${types.map((t) => typeToString(t)).join(';')}${proofKey}`;
+    // The key tells a closed record (a dictionary literal) from the open
+    // record with the same fields: they print alike but are different
+    // types, and the specializations differ.
+    const key = `${h}#${types.map((t) => typeToIdentityKey(t)).join(';')}${proofKey}`;
     const cache = (registry.specializations ??= new Map());
     let specialized = cache.get(key);
     if (specialized === undefined) {
@@ -38066,7 +38144,7 @@ export class BaseCompiler {
     h: string,
     types: ReadonlyArray<Type | undefined>
   ): string {
-    return `${h}#${types.map((t) => (t === undefined ? '' : typeToString(t))).join(';')}`;
+    return `${h}#${types.map((t) => (t === undefined ? '' : typeToIdentityKey(t))).join(';')}`;
   }
 
   /** `literalWithParameterTypes`, kept in the specialization cache of the

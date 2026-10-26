@@ -26,11 +26,12 @@ import {
 } from '../../common/type/utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import type { ListType, Type } from '../../common/type/types.js';
-import { isTupleShapedType } from '../collection-utils.js';
+import { isTupleShapedType, mayCarryDimensions } from '../collection-utils.js';
 import { isScalarType } from './function-literal.js';
 import { substituteDeclaredBounds } from './generic-instantiation.js';
 import {
   freeTypeVariables,
+  inferTypeArguments,
   isPolymorphicType,
   substituteTypeVariables,
 } from '../../common/type/instantiate.js';
@@ -130,6 +131,16 @@ function broadcastLeafType(
   return { leaf, rank };
 }
 
+/** `t` without its `missing` arms: the one remaining arm, the union of the
+ * remaining arms, or `t` itself when it has no `missing` arm. */
+function withoutMissingArms(t: Type): Type {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return r;
+  const arms = r.types.filter((x) => x !== 'missing');
+  if (arms.length === r.types.length) return r;
+  return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+}
+
 /**
  * The element type of a union of indexed collections (the caller has
  * checked that `t` is a subtype of the indexed collections): the widening of
@@ -219,8 +230,23 @@ export function broadcastCallbackResultType(
   // hold collections, and the run-time broadcast descends into them: with
   // `rows: list<list<any>>` holding `[[[1, 2]]]`, `Map(f, rows)` gives
   // `[[[2, 4]]]`, one level deeper than the descent counted. Declined, so
-  // the existing derivation decides.
-  if (!isScalarType(leaf)) return undefined;
+  // the existing derivation decides. A function leaf is an atomic value too:
+  // the broadcast does not descend into it, and it reaches a parameter typed
+  // as a function (a callback of a higher-order function).
+  //
+  // `isScalarType` accepts the top types, so they are tested here. A leaf
+  // typed `unknown` is declined for the same reason as `any`: it can hold a
+  // ragged list or a list of non-numeric values, so no fixed depth of the
+  // result can be stated.
+  const presentLeaf = withoutMissingArms(leaf);
+  if (
+    presentLeaf === 'any' ||
+    presentLeaf === 'value' ||
+    presentLeaf === 'expression' ||
+    presentLeaf === 'unknown'
+  )
+    return undefined;
+  if (!isScalarType(leaf) && !isSubtype(leaf, 'function')) return undefined;
   let signature: Type = sigType;
   // A polymorphic signature (`(T) -> T where T`, `(T) -> T where T:
   // number`) is applied to each leaf of the element, so its type variables
@@ -232,22 +258,31 @@ export function broadcastCallbackResultType(
     const params = [...(sigType.args ?? []), ...(sigType.optArgs ?? [])];
     if (params.length !== 1 || sigType.variadicArg !== undefined)
       return undefined;
-    // The leaf is the value of a type variable only when the parameter is
-    // that variable itself (`(T) -> T`). A parameter that mentions it in
-    // another type (`((integer) -> T) -> T`) needs a solve: declined, and
-    // the existing call derivation decides. Another variable, unbound here,
-    // declines below when the result names it.
+    // The leaf is the value of a type variable when the parameter is that
+    // variable itself (`(T) -> T`). A parameter that mentions it in another
+    // type (`((integer) -> T) -> T`) is solved against the leaf
+    // (`inferTypeArguments`): with the leaf `(x) -> number`, `T` is
+    // `number`. Another variable, unbound here, declines below when the
+    // result names it.
     const parameter = params[0].type;
-    if (typeof parameter === 'string' || parameter.kind !== 'variable')
-      return undefined;
-    const bindings: Record<string, Type> = Object.create(null);
-    for (const p of sigType.typeParams ?? []) {
-      if (p.name !== parameter.name) continue;
-      // A leaf that breaks the declared bound (`where T: number` over
-      // strings) cannot be the variable's value: the call is not read
-      // here, and the existing call derivation decides.
-      if (p.bound !== undefined && !isSubtype(leaf, p.bound)) return undefined;
-      bindings[p.name] = leaf;
+    let bindings: Record<string, Type> = Object.create(null);
+    if (typeof parameter !== 'string' && parameter.kind === 'variable') {
+      for (const p of sigType.typeParams ?? []) {
+        if (p.name !== parameter.name) continue;
+        // A leaf that breaks the declared bound (`where T: number` over
+        // strings) cannot be the variable's value: the call is not read
+        // here, and the existing call derivation decides.
+        if (p.bound !== undefined && !isSubtype(leaf, p.bound))
+          return undefined;
+        bindings[p.name] = leaf;
+      }
+    } else {
+      // A leaf that the solve refuses (a callback of another parameter
+      // type, or a variable bound outside its declared bound) is declined,
+      // and the existing call derivation decides.
+      const solved = inferTypeArguments(sigType, [leaf]);
+      if (solved === null) return undefined;
+      bindings = { ...solved };
     }
     signature = {
       ...sigType,
@@ -268,6 +303,31 @@ export function broadcastCallbackResultType(
     signature.result === 'expression'
   )
     return undefined;
+  // An element that is a tensor with fixed lengths, with exactly the ranks
+  // that the broadcast descends (`vector<((x) -> number)^1>`, a row of a
+  // matrix of callbacks), gives a result with the same lengths, when the
+  // result can be a cell of a tensor (`mayCarryDimensions`). A union that is
+  // not a number type states no length, as for a list literal. Lifted with
+  // plain lists, the `Map` of each row of a 1 by 1 matrix of callbacks was
+  // typed `list<list<number>>` and not `matrix<number^(1x1)>`.
+  const shape = resolveTypeAlias(element);
+  const result = resolveTypeAlias(signature.result);
+  if (
+    typeof shape !== 'string' &&
+    shape.kind === 'list' &&
+    Array.isArray(shape.dimensions) &&
+    shape.dimensions.length === rank &&
+    shape.dimensions.every((n) => n >= 0) &&
+    mayCarryDimensions(signature.result) &&
+    (typeof result === 'string' ||
+      result.kind !== 'union' ||
+      isSubtype(result, 'number'))
+  )
+    return {
+      kind: 'list',
+      elements: signature.result,
+      dimensions: [...shape.dimensions],
+    };
   const lifted = liftCallbackResultType(signature, rank);
   return typeof lifted !== 'string' && lifted.kind === 'signature'
     ? lifted.result

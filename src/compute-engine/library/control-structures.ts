@@ -121,7 +121,11 @@ import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
 } from '../boxed-expression/collection-element-memo.js';
-import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
+import {
+  buildCaseClosure,
+  evaluateMatch,
+  getMatchPlan,
+} from '../boxed-expression/match-dispatch.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { isNearTiePair } from './relational-operator.js';
 import { isExactConstantExpression } from '../boxed-expression/compare.js';
@@ -140,6 +144,7 @@ import {
 import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   coarsenEvidenceType,
+  isInEvidenceSession,
   markDeclaredLocal,
   registerEvidenceSite,
   withEvidenceSession,
@@ -1355,10 +1360,30 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // Canonicalize the subject (op 0); keep each case's pattern/guard/body
         // raw (via the `MatchCase` canonical handler) so wildcards are not
         // mangled by canonicalization before matching.
-        return ce._fn('Match', [
+        const ops2 = [
           ops[0].canonical,
           ...ops.slice(1).map((c) => c.canonical),
-        ]);
+        ];
+        // An assignment in a case body to a local of the enclosing block is
+        // an assignment of that local, and the static type of the local
+        // must admit its value. The case bodies stay raw, so canonicalize
+        // each closure once now, in the scope of the block, only for the
+        // assignment evidence that its `Assign` records
+        // (`joinAssignmentEvidence`, `library/core.ts`). The closure is
+        // discarded: the evaluation builds its own (`buildCaseClosure`).
+        // Without this, `let xs = [1, 2, 3]; while let [h, ...] = xs
+        // { xs = Rest(xs) }; xs` was typed `vector<integer^3>` and
+        // evaluated to `[]`.
+        if (isInEvidenceSession(ce)) {
+          for (const cc of getMatchPlan(ce, ops2).segments.flatMap(
+            (seg) => seg.cases
+          )) {
+            for (const part of [cc.guard, cc.body])
+              if (part !== undefined && containsAssignment(part))
+                buildCaseClosure(ce, part, cc.captureNames);
+          }
+        }
+        return ce._fn('Match', ops2);
       },
       evaluate: (ops, options) => evaluateMatch(ops, options),
     },
@@ -4530,6 +4555,12 @@ function canonicalBlock(
  */
 function typedStatement(op: Expression): Expression {
   return isFunction(op, 'Typed') ? op.op1 : op;
+}
+
+/** Whether the raw expression `e` has an `Assign` at any depth. */
+function containsAssignment(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  return e.operator === 'Assign' || e.ops.some(containsAssignment);
 }
 
 /**

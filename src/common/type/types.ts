@@ -443,10 +443,27 @@ export type ValueType = {
  * every key required by the other type, and all their types must match (width
  * subtyping). It may contain additional keys.
  *
+ * A record type is OPEN: `record{a: integer}` holds every value that has a
+ * field `a` of type `integer`, and also other fields of any type. So it is a
+ * `dictionary<T>` only when `T` holds every value.
+ *
+ * The type of a dictionary VALUE is CLOSED (`closed: true`): the value has
+ * exactly the listed fields and no other. `{a: 1}` is typed
+ * `record{a: integer}` with `closed: true`, and that type is a subtype of
+ * `dictionary<integer>`. No type syntax spells a closed record: a closed
+ * record prints as the open record with the same fields, and the parser
+ * makes only open records. A closed record is a subtype of the open record
+ * with the same fields, and a record type is a subtype of a closed record
+ * only when it is closed and has the same set of keys.
+ *
  */
 export type RecordType = {
   kind: 'record';
   elements: Record<string, Type>;
+  /** The values of this type have exactly the keys of `elements`. Set only
+   * on the type of a dictionary value; absent on every type that the parser
+   * makes. */
+  closed?: true;
 };
 
 /** The stored-field layout of an **object** type — the engine's one mutable

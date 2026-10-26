@@ -5844,7 +5844,7 @@ export function isPointListArgumentType(
 ): boolean {
   if (!isPointParameterType(param)) return false;
   const stripped = stripMissingFromType(arg);
-  const a = resolveTypeReference(stripped) ?? stripped;
+  const a = resolveTypeAlias(stripped);
   if (typeof a === 'string') return false;
   if (a.kind === 'tuple') return false;
   // A union of lists of points (`list<P^1> | list<P^2>`, the type of an
@@ -5925,7 +5925,7 @@ export function isBroadcastablePointArgumentType(
 ): boolean {
   if (!isPointParameterType(param)) return false;
   const stripped = stripMissingFromType(arg);
-  const a = resolveTypeReference(stripped) ?? stripped;
+  const a = resolveTypeAlias(stripped);
   if (typeof a === 'string' || a.kind !== 'broadcastable') return false;
   const e = stripMissingFromType(a.elements);
   return e !== 'never' && isSubtype(e, param);
@@ -5939,7 +5939,7 @@ function pointTensorOf(
 ): boolean {
   // A deep nesting of lists is read up to a fixed depth only.
   if (depth > 8) return false;
-  const a = resolveTypeReference(t) ?? t;
+  const a = resolveTypeAlias(t);
   if (typeof a === 'string') return false;
   // An arm that is a reference is unfolded under the descent guard, as in
   // `isPointListArgumentType`: a self-referential declaration reaches itself
@@ -5966,7 +5966,7 @@ function pointTensorOf(
   const dims = a.dimensions;
   if (dims === null || (dims !== undefined && dims.length >= 2)) {
     const stripped = stripMissingFromType(a.elements);
-    const cell = resolveTypeReference(stripped) ?? stripped;
+    const cell = resolveTypeAlias(stripped);
     // All the cells are absent (`matrix<missing^(1x1)>`).
     if (cell === 'never') return a.elements === 'missing';
     return isSubtype(cell, param);
@@ -5980,7 +5980,7 @@ function pointTensorOf(
   const row = (x: Type) =>
     isPointListArgumentType(x, param) || pointTensorOf(x, param, depth + 1);
   if (row(a.elements)) return true;
-  const e = resolveTypeReference(a.elements) ?? a.elements;
+  const e = resolveTypeAlias(a.elements);
   if (typeof e === 'string' || e.kind !== 'union') return false;
   const arms = e.types.filter((x) => x !== 'missing');
   return arms.length > 0 && arms.every(row);
@@ -5996,7 +5996,7 @@ function pointTensorOf(
  * `incompatible-type` error.
  */
 function hasOnlyAbsentElements(arg: Type): boolean {
-  const r = resolveTypeReference(arg) ?? arg;
+  const r = resolveTypeAlias(arg);
   if (typeof r === 'string') return false;
   if (r.kind === 'union') {
     const arms = r.types.filter((x) => x !== 'missing');
@@ -6033,7 +6033,7 @@ export function isPointOrPointListArgumentType(
 ): boolean {
   if (!isPointParameterType(param)) return false;
   const stripped = stripMissingFromType(arg);
-  const a = resolveTypeReference(stripped) ?? stripped;
+  const a = resolveTypeAlias(stripped);
   if (typeof a === 'string') return false;
   if (a.kind === 'broadcastable') {
     const e = stripMissingFromType(a.elements);
@@ -6043,7 +6043,7 @@ export function isPointOrPointListArgumentType(
   let point = false;
   let list = false;
   for (const arm of a.types) {
-    const r = resolveTypeReference(arm) ?? arm;
+    const r = resolveTypeAlias(arm);
     if (typeof r !== 'string' && r.kind === 'tuple' && isSubtype(r, param))
       point = true;
     else if (isPointListArgumentType(r, param)) list = true;

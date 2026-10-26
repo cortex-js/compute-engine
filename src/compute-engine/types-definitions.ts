@@ -2049,6 +2049,13 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   _initializerAlias?: Expression | undefined;
 
+  /** True when an assignment to this binding recorded its value type at
+   * canonicalization time (`joinAssignmentEvidence`, `library/core.ts`).
+   * A use of a valueless binding with this flag does not narrow its type.
+   * See `_BoxedValueDefinition._assignmentEvidence`.
+   * @internal */
+  _assignmentEvidence?: boolean;
+
   /** Install an element refinement of the placeholder skeleton without
    * disturbing `_placeholderSkeleton` (the public `type` setter maintains
    * the skeleton on every explicit write and would clear it).

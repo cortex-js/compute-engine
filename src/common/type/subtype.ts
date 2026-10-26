@@ -614,6 +614,9 @@ function cycleNodeStructure(t: Exclude<Type, string>): string {
         : `value(${cycleDataKey(p)})`;
     }
     case 'record':
+      // A closed record (the type of a dictionary value) is another type
+      // than the open record with the same fields.
+      return `${t.kind}${t.closed === true ? '!' : ''}${fieldMap(t.elements)}`;
     case 'object':
       return `${t.kind}${fieldMap(t.elements)}`;
     case 'tuple':
@@ -2773,7 +2776,7 @@ export function isSubtype(
 
 /** Create `subtypePairs` when no question holds it, and return whether
  * this call created it (pass the result to {@link closeSubtypePairs}). */
-function openSubtypePairs(): boolean {
+export function openSubtypePairs(): boolean {
   if (subtypePairs !== undefined) return false;
   enterCycleKeys();
   subtypePairs = { answers: new Map(), active: new Map() };
@@ -2783,7 +2786,7 @@ function openSubtypePairs(): boolean {
 
 /** Drop `subtypePairs` when `owned`, the result of
  * {@link openSubtypePairs}, says this question created it. */
-function closeSubtypePairs(owned: boolean): void {
+export function closeSubtypePairs(owned: boolean): void {
   if (!owned) return;
   subtypePairs = undefined;
   subtypeLow = Infinity;
@@ -3116,6 +3119,20 @@ function isSubtypeRules(
   // covers on its own. (Before the finite-by-default flip it could — the
   // doubled tower made `finite_X | non_finite_number` cover `X` — and the
   // members had to be augmented first.)
+  //
+  // An intersection lhs is first tested arm by arm against the WHOLE rhs,
+  // as the intersection rule below does for an rhs that is not a union or
+  // a reference: `A & B <: A <: R`. The member-wise probe of a union rhs,
+  // and the unfold of an alias rhs into a union, otherwise compared the
+  // intersection with each member of that union alone, so that
+  // `Z & W <: Z` was false for `type alias Z = list<integer> | set<integer>`.
+  if (
+    typeof lhs !== 'string' &&
+    lhs.kind === 'intersection' &&
+    (rhs.kind === 'union' || rhs.kind === 'reference') &&
+    lhs.types.some((t) => isSubtype(t, rhs))
+  )
+    return true;
   if (rhs.kind === 'union') {
     const rhsMembers = rhs.types;
     // A broadcastable lhs is the union of `T` and its collection arm
@@ -3482,6 +3499,13 @@ function isSubtypeRules(
   // but there may be additional fields in the lhs (width subtyping)
   //
   if (lhs.kind === 'record' && rhs.kind === 'record') {
+    // A closed rhs (the type of a dictionary value) holds only values with
+    // exactly its keys: the lhs must be closed too, with the same keys.
+    if (rhs.closed === true) {
+      if (lhs.closed !== true) return false;
+      if (Object.keys(lhs.elements).length !== Object.keys(rhs.elements).length)
+        return false;
+    }
     for (const key of Object.keys(rhs.elements)) {
       // An own-property test, not `key in`: `Object.prototype` member names
       // are valid record keys (`record{toString: string}` parses and
@@ -3544,10 +3568,19 @@ function isSubtypeRules(
     return isSubtype(lhs.values, rhs.values);
   }
 
-  // A record is a dictionary whose keys are statically known: it is a subtype
-  // of `dictionary<T>` when every field type is a subtype of `T`.
-  if (lhs.kind === 'record' && rhs.kind === 'dictionary')
-    return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
+  // A record type is open: `record{a: integer}` also holds values with other
+  // fields, of any type (`{a: 1, b: "x"}`). So it is a subtype of
+  // `dictionary<T>` only when `T` holds every value. The type of a dictionary
+  // VALUE is a closed record (`closed: true`): the value has exactly the
+  // listed fields, so `{a: 1}` is a `dictionary<integer>`. With the old rule
+  // (every listed field type is a subtype of `T`) the relation was not
+  // transitive: `record{a: integer, b: string} <: record{a: integer} <:
+  // dictionary<integer>`, but the first is not a `dictionary<integer>`.
+  if (lhs.kind === 'record' && rhs.kind === 'dictionary') {
+    if (lhs.closed === true)
+      return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
+    return isSubtype('any', rhs.values);
+  }
 
   //
   // Handle collections
@@ -3590,14 +3623,21 @@ function isSubtypeRules(
         rhs.elements
       );
 
+    // A record type is open (see the dictionary case above), so an entry of
+    // a value can have any key and any value: `tuple<string, any>`. The
+    // entries of a closed record are its listed fields only.
     if (lhs.kind === 'record') {
+      if (lhs.closed === true)
+        return Object.values(lhs.elements).every((t) =>
+          isSubtype(
+            { kind: 'tuple', elements: [{ type: 'string' }, { type: t }] },
+            rhs.elements
+          )
+        );
       return isSubtype(
         {
           kind: 'tuple',
-          elements: [
-            { type: 'string' },
-            { type: widen(...Object.values(lhs.elements)) },
-          ],
+          elements: [{ type: 'string' }, { type: 'any' }],
         },
         rhs.elements
       );

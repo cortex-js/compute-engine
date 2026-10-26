@@ -1,3 +1,4 @@
+import { isDeclaredLocal } from './declared-local.js';
 import {
   broadcastCellTypeOf,
   couldBeUnkeyedCollectionOperand,
@@ -1519,6 +1520,57 @@ export function absentScalarMarker(
     : ce.Missing;
 }
 
+/** Whether `x` is a symbol whose DECLARED type is `any` (a declaration, or
+ * a block local declared `any`), or the literal `Missing` or `Undefined`.
+ * An inferred type is not a declaration: a block local that holds the read
+ * of a list element is typed `unknown`, and its absent value is the absent
+ * result of that read. */
+function isDeclaredAnySymbol(x: Expression): boolean {
+  if (!isSymbol(x)) return false;
+  if (isAbsentScalarSymbol(x)) return true;
+  const def = x.valueDefinition;
+  if (def === undefined || def.type.type !== 'any') return false;
+  return !def.inferredType || isDeclaredLocal(def);
+}
+
+/**
+ * The value that an arithmetic application answers for an absent operand,
+ * given its operands as written (`written`) and as evaluated (`evaluated`).
+ *
+ * It is {@link absentScalarMarker}, except for an absent value that a
+ * symbol DECLARED `any` holds (`isDeclaredAnySymbol`), beside operands
+ * that are numbers, in an application whose
+ * type states nothing (`any` or `unknown`): the answer is `NaN`. With `p`
+ * declared `any` and assigned `Missing`, `p + 1` is typed `any`, and the
+ * codomain marker of that type is `Missing`; but the same sum is `NaN`
+ * after `subs({p: Missing})` (the sum is then typed `integer | nan`) and in
+ * compiled code (`undefined + 1`), and a host input typed `any` is read as
+ * `NaN` at a numeric parameter (`docs/ERROR-MODEL.md`, "A Python caller
+ * passes `None` for an absent INPUT", ROADMAP CE-395). An absent value
+ * that an APPLICATION gives keeps the codomain marker: `s · PointX(p)` for
+ * an absent point `p` is `Missing` (ROADMAP CE-229), and so is an absent
+ * row or point beside a number, and the value of a symbol whose type is
+ * inferred (a block local that holds such a read, ROADMAP CE-360).
+ */
+export function absentArithmeticMarker(
+  ce: ComputeEngine,
+  expression: Expression | undefined,
+  written: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>
+): Expression {
+  if (expression !== undefined && written.length === evaluated.length) {
+    const t = stripMissingFromType(expression.type.type);
+    if (
+      (t === 'any' || t === 'unknown') &&
+      evaluated.every((x, i) =>
+        isAbsentScalarSymbol(x) ? isDeclaredAnySymbol(written[i]) : isNumber(x)
+      )
+    )
+      return ce.NaN;
+  }
+  return absentScalarMarker(ce, expression);
+}
+
 /**
  * The decision behind {@link absentScalarMarker}: whether the marker an
  * application answers for an absent operand is the numeric `NaN` (true) or
@@ -1724,6 +1776,40 @@ function isCollectionKindArm(a: Type): boolean {
   return typeof a === 'string'
     ? COLLECTION_PARAM_KINDS.has(a)
     : COLLECTION_PARAM_KINDS.has(a.kind);
+}
+
+/**
+ * Whether the overlap deferral (`overlapsForDeferredValidation`) admits the
+ * operand `op` at the parameter `param`.
+ *
+ * The deferral admits an open record type at a `dictionary<V>` parameter
+ * when each listed field can hold a `V`: `record{a: integer}` holds
+ * `{a: 1}`, a `dictionary<integer>`. But an open record also holds values
+ * with other fields of any type, and a dictionary parameter is exempt from
+ * the runtime conformance check (`runtimeCheckExemptParam`), so nothing
+ * checks the value later. A symbol that HOLDS a dictionary value is
+ * therefore judged by the type of that value, which lists every field:
+ * with `r: record{a: integer}` holding `{a: 1, b: "x"}`, `f(r)` for
+ * `f: (dictionary<integer>) -> integer` is refused, and with `r` holding
+ * `{a: 1}` it is admitted. A symbol with no value is admitted on the
+ * overlap of its type.
+ */
+function admittedByDeferredOverlap(op: Expression, param: Type): boolean {
+  if (!overlapsForDeferredValidation(op.type.type, param)) return false;
+  if (!isSymbol(op)) return true;
+  const isRecordArm = (a: Type) =>
+    a === 'record' || (typeof a !== 'string' && a.kind === 'record');
+  const isDictionaryArm = (a: Type) =>
+    a === 'dictionary' || (typeof a !== 'string' && a.kind === 'dictionary');
+  if (!paramArms(param).some(isDictionaryArm)) return true;
+  if (!paramArms(op.type.type).some(isRecordArm)) return true;
+  const held = op.valueDefinition?.value;
+  if (held === undefined || held === op) return true;
+  const heldType = held.type.type;
+  if (!paramArms(heldType).some(isRecordArm)) return true;
+  return (
+    isSubtype(heldType, param) || overlapsForDeferredValidation(heldType, param)
+  );
 }
 
 /**
@@ -2317,7 +2403,7 @@ export function checkType(
   if (admitsPlaceholderSignature(arg, type)) return arg;
 
   // Overlap-deferred validation (§D6.2) — see validateArguments.
-  if (overlapsForDeferredValidation(arg.type.type, type)) return arg;
+  if (admittedByDeferredOverlap(arg, type)) return arg;
 
   // R1 overlap admission — see `overlapAdmission`.
   if (overlapAdmission(arg, type)) return arg;
@@ -3992,7 +4078,7 @@ export function validateArguments(
       // operator's own evaluate-time gate (handler precedence — a
       // nonconforming or still-symbolic operand stays inert or gets the
       // handler's specific error, e.g. `expected-square-matrix`).
-      if (overlapsForDeferredValidation(op.type.type, param)) {
+      if (admittedByDeferredOverlap(op, param)) {
         result.push(op);
         deferredIdx.add(result.length - 1);
         continue;
@@ -4275,7 +4361,7 @@ export function validateArguments(
         }
       }
       // Overlap-deferred validation (§D6.2) — see the required-param gate.
-      if (overlapsForDeferredValidation(op.type.type, param)) {
+      if (admittedByDeferredOverlap(op, param)) {
         result.push(op);
         deferredIdx.add(result.length - 1);
         i += 1;
@@ -4509,7 +4595,7 @@ export function validateArguments(
           }
         }
         // Overlap-deferred validation (§D6.2) — see the required-param gate.
-        if (overlapsForDeferredValidation(op.type.type, varParam)) {
+        if (admittedByDeferredOverlap(op, varParam)) {
           result.push(op);
           deferredIdx.add(result.length - 1);
           continue;

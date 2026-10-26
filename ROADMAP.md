@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-501.
+Next free reference: CE-504.
 
 **Entry format.**
 
@@ -496,6 +496,29 @@ The `toString()` of a part of a loop body taken outside its `Loop` prints a loop
 index named `i` as an `incompatible-type` error (read as the imaginary unit),
 for example `ReplaceAt([1,2,3], i, 9)`. The value is correct; only the printed
 form of the detached part is wrong.
+
+### CE-502. A call over an operand of type `unknown` is typed `broadcastable<R>`, which does not hold a ragged element
+
+**Status:** open; wrong value.
+
+With `Lu: list<unknown>` and no value, `k(Lu[1])` (`k: (real) -> real`) is typed
+`broadcastable<real>` and `2·Lu[1]` is `broadcastable<number>`
+(`boxed-function.ts`, about line 11204, and `broadcast-lift-type.ts`). An
+element of `list<unknown>` can be a ragged list, which `broadcastable<R>`
+(`R | tensor<R>`) does not hold; the 2026-10-25 decision on CE-378 keeps
+`list<any>` for that reason. Once the symbol has a value the type comes from the
+value. A sound type is `R | list<any>`-like (the form `Map` uses since this
+round: `R | indexed_collection<any>`). It changes the arithmetic typing of
+`unknown` operands across the engine: measure first.
+
+### CE-503. `t·P/(P[1] − 1)` infers `-> never` for a function literal
+
+**Status:** open; wrong value.
+
+`c := (P, t) ↦ t·P/(P[1] − 1)` (the body is `Divide(Multiply(t, P), …)`) is
+typed `(P: unknown, t: unknown) -> never` (also at HEAD 8092e4cb0). `c([3, 2], 2)`
+evaluates to a list of `incompatible-type` errors, which `list<never>` does not
+hold. The form `t·(P/(P[1] − 1))` infers correctly.
 
 ## Collections, absence and broadcasting
 

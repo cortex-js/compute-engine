@@ -808,8 +808,19 @@ export function cycleMemberDefinitions(
     const callee = calleeLiteral(expr);
     if (callee !== undefined && !seen.has(callee)) {
       seen.add(callee);
-      if (members.has(callee) && expr.operatorDefinition !== undefined)
-        out.push(expr.operatorDefinition);
+      if (members.has(callee)) {
+        // A call boxed before its head had a value is bound to the value
+        // definition made then (a forward reference), which has no
+        // signature to refine: the definition that the head holds now is
+        // read instead, as in `calleeLiteral`.
+        const current = expr.engine.lookupDefinition(expr.operator);
+        const def =
+          expr.operatorDefinition ??
+          (current !== undefined && 'operator' in current
+            ? current.operator
+            : undefined);
+        if (def !== undefined) out.push(def);
+      }
       visit(callee);
     }
     for (const op of expr.ops) visit(op);

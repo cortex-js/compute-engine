@@ -507,3 +507,48 @@ describe('An inferred signature is not a contract', () => {
     }
   });
 });
+
+describe('A point of another arity that the body reads whole, beside a mapped argument', () => {
+  // `c(P, t) := t · P/(P[1] − 1)` is inferred `(tuple<number>, unknown) ->
+  // tuple<number>`. `c((3, 2), [1, 2])` maps over `t` and binds the pair
+  // whole: its value is a list of pairs, which a list of one-component
+  // tuples does not hold. The boxed call and the descriptor route agree.
+  const ce = new ComputeEngine();
+  ce.assign(
+    'c',
+    ce.box([
+      'Function',
+      ['Multiply', 't', ['Divide', 'P', ['Subtract', ['At', 'P', 1], 1]]],
+      'P',
+      't',
+    ] as any)
+  );
+
+  test('the signature is inferred with a one-component point', () => {
+    expect(ce.box('c').type.toString()).toBe(
+      '(P: tuple<number>, t: unknown) -> tuple<number>'
+    );
+  });
+
+  test('the boxed call holds its value', () => {
+    const call = ce.box(['c', ['Tuple', 3, 2], ['List', 1, 2]] as any);
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[(3/2, 1),(3, 2)]');
+    expect(valueFits(value, call.type.type)).toBe(true);
+  });
+
+  test('the descriptor route holds the value too', () => {
+    const t = deriveApplicationType(
+      ce,
+      'c',
+      ['tuple<integer, integer>', 'list<integer>'].map((x) =>
+        describeType(ce.type(x).type)
+      )
+    );
+    expect(t).toBeDefined();
+    const value = ce
+      .box(['c', ['Tuple', 3, 2], ['List', 1, 2]] as any)
+      .evaluate();
+    expect(valueFits(value, t!)).toBe(true);
+  });
+});

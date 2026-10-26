@@ -1,3 +1,4 @@
+import { isDeclaredLocal } from './declared-local.js';
 import { isScratchBinding } from '../scratch-scopes.js';
 import { noteResidueDeclaration } from './residue-class.js';
 import type {
@@ -731,6 +732,31 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // even if it is unknown (e.g. `ContinuationPlaceholder`)
       if (def.value.isConstant) return false;
 
+      // A valueless binding with assignment evidence (a block local that an
+      // `Assign` or a `let` initializer gave a value type when it was
+      // canonicalized) has the join of its assigned value types as its
+      // static type. A use does not narrow that type: the meet with a
+      // parameter type can exclude a value that an assignment gives, and it
+      // made the type depend on the order of the statements
+      // (`_assignmentEvidence`, `boxed-value-definition.ts`).
+      if (
+        inferenceMode === 'narrow' &&
+        def.value._assignmentEvidence &&
+        def.value.value === undefined
+      )
+        return false;
+
+      // A block local declared `any` keeps its declared type: a use does
+      // not narrow it (`isDeclaredLocal()`). Its assigned value can be any
+      // value, and a narrower type can contradict it: with `xs: any`
+      // assigned a string, `ReplaceAt(xs, i, "z")` narrowed `xs` to
+      // `indexed_collection<string>`, which a string is not.
+      if (
+        inferenceMode === 'narrow' &&
+        def.value.type.type === 'any' &&
+        isDeclaredLocal(def.value)
+      )
+        return false;
       if (def.value.inferredType || def.value.type.isUnknown) {
         const previousType = def.value.type;
         // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it

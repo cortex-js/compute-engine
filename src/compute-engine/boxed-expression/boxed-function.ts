@@ -1,3 +1,4 @@
+import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isCapturedValuelessSymbol } from './canonical-utils.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import {
@@ -36,8 +37,9 @@ import {
 } from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import {
-  bindsWholeAtInferredPoint,
+  bindsWholeAtInferredPointParameter,
   callResultType,
+  componentwiseTupleCallType,
   inferredPointSignature,
   partialApplicationType,
 } from './call-result-type.js';
@@ -94,6 +96,7 @@ import {
   installBroadcastLiftHooks,
   isNumericTupleArgumentType,
   isNumericTupleType,
+  isTupleArgumentType,
   mayBeNumericTupleType,
   parameterAdmitsTuple,
   parameterReachesBody,
@@ -392,6 +395,7 @@ import {
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   absentScalarMarker,
+  absentArithmeticMarker,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
@@ -1011,6 +1015,60 @@ export class BoxedFunction
       return undefined;
     }
     stamp.rechecked = { half, version, call: fresh };
+    return fresh;
+  }
+
+  /** The memo of `_reboxedForForwardCallee()`: the definition half the name
+   * held and its change counter when the call was boxed again, and the new
+   * call. */
+  private _forwardRebox:
+    | { half: { _writeVersion: number }; version: number; call: Expression }
+    | undefined = undefined;
+
+  /** This call boxed again against the definition that its name holds now,
+   * when the call was boxed before the name had a value (a forward
+   * reference, `isForwardCallReference`) and the name now has a definition.
+   * `undefined` otherwise.
+   *
+   * The evaluation of such a call reads the definition that the name holds
+   * when the call is evaluated (`callableBindingInContext`). Its type must
+   * do the same. Example: with `G := (n, K) ↦ F(n, K)` boxed before
+   * `F := (n, K) ↦ n + K`, the call `F(n, K)` in the body of `G` was typed
+   * `unknown`, from the empty definition that the boxing made for `F`, so
+   * `G` was typed `-> unknown`, and a mutually recursive pair that builds a
+   * list was typed `-> collection<number>` (ROADMAP CE-38).
+   * @internal */
+  _reboxedForForwardCallee(): Expression | undefined {
+    const own = this._def;
+    if (!own || !isValueDef(own) || !isForwardCallReference(own.value))
+      return undefined;
+    const current = callableBindingInContext(this.engine, this._operator, own);
+    if (current === undefined || current === own) return undefined;
+    if (isValueDef(current) && current.value === own.value) return undefined;
+    const half = calleeHalf(current);
+    if (half === undefined) return undefined;
+    const memo = this._forwardRebox;
+    if (
+      memo !== undefined &&
+      memo.half === half &&
+      memo.version === half._writeVersion
+    )
+      return memo.call;
+    const fresh = withCallableBinding(this, () =>
+      this.engine.function(this._operator, this._writtenOperands(this._ops))
+    );
+    // The new call must be bound to the current definition: a call that is
+    // still a forward reference gives no more information than this one.
+    if (
+      !(fresh instanceof BoxedFunction) ||
+      fresh === this ||
+      fresh._operator !== this._operator
+    )
+      return undefined;
+    const freshDef = fresh._def ?? undefined;
+    if (isValueDef(freshDef) && isForwardCallReference(freshDef.value))
+      return undefined;
+    this._forwardRebox = { half, version: half._writeVersion, call: fresh };
     return fresh;
   }
 
@@ -6821,7 +6879,12 @@ export class BoxedFunction
                 tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
               ).toString(),
             ]);
-          return absentScalarMarker(this.engine, this);
+          // An absent value that a symbol holds, in a broadcastable numeric
+          // operator over numbers (`p + 1`, `Sin(p)`, `-p`), is `NaN`
+          // (`absentArithmeticMarker`).
+          return def.broadcastable
+            ? absentArithmeticMarker(this.engine, this, this.ops, tail)
+            : absentScalarMarker(this.engine, this);
         }
         // The default for an operator with no absence behavior of its own
         // (`pass-through`): an absent operand at a position whose declared
@@ -8068,7 +8131,12 @@ export class BoxedFunction
                 tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
               ).toString(),
             ]);
-          return absentScalarMarker(this.engine, this);
+          // An absent value that a symbol holds, in a broadcastable numeric
+          // operator over numbers (`p + 1`, `Sin(p)`, `-p`), is `NaN`
+          // (`absentArithmeticMarker`).
+          return def.broadcastable
+            ? absentArithmeticMarker(this.engine, this, this.ops, tail)
+            : absentScalarMarker(this.engine, this);
         }
         // The default for an operator with no absence behavior of its own
         // (`pass-through`): an absent operand at a position whose declared
@@ -10554,8 +10622,17 @@ function lambdaCallOperandOfDescriptor(
   // collection), which is not the value that a later call reads. Such an
   // operand is typed by the envelope of `lambdaBroadcastType`
   // (`unknownCapture`), and it does not take part in the broadcast.
+  const structure = d.structureOf?.();
   const unknownCapture =
-    view.typeIsUnknown && isCapturedSymbolStructure(d.structureOf?.());
+    view.typeIsUnknown && isCapturedSymbolStructure(structure);
+  // A descriptor made from a type only (`describeType`) has no structure.
+  // When that type is `any` or `value`, the operand can be any value, also
+  // a list, which the call maps over. So the operand may be a collection,
+  // as a symbol declared `any` is on the expression route: the call
+  // `k(w)` with `k: (real) -> real` holding `x ↦ 2x` and `w: any` is typed
+  // `any`, and its value is `[2, 4]` for `w := [1, 2]` (ROADMAP CE-485).
+  const structurelessTop =
+    structure === undefined && (t === 'any' || t === 'value');
   return {
     type: d.type,
     participates:
@@ -10564,7 +10641,7 @@ function lambdaCallOperandOfDescriptor(
         isBroadcastCollectionTypeOf(d.type) ||
         (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions)),
     possiblyCollectionTyped:
-      isPossiblyCollectionTypedView(view) || unknownCapture,
+      isPossiblyCollectionTypedView(view) || unknownCapture || structurelessTop,
     holdsUnindexedCollection: false,
     unknownCapture,
   };
@@ -10747,16 +10824,27 @@ function lambdaBroadcastType(
       (slot.elements === undefined || !isPointParameterType(slot.elements))
     );
   };
+  // Any other tuple (a tuple with a tuple or a list component) binds whole
+  // too, and the signature result does not describe the value either:
+  // `h(((1, 2), 3))` is `((2, 4), 6)` (`isTupleArgumentType`). A body that
+  // computes the tuple component by component (`x ↦ 2x`, `x ↦ Sin(x)`)
+  // gives a tuple of numbers of the same length
+  // (`componentwiseTupleCallType`).
   if (
     ops.some(
       (_x, i) =>
-        (isNumericTupleType(typeAt(i)) || mayBeNumericTupleType(typeAt(i))) &&
+        isTupleArgumentType(typeAt(i)) &&
         bindsAtScalarSlot(i) &&
         parameterReachesBody(literal, i)
     ) &&
     (inferredResult || isSubtype(perElementResult, 'number'))
   )
-    return 'any';
+    return (
+      componentwiseTupleCallType(
+        literal,
+        ops.map((_x, i) => typeAt(i))
+      ) ?? 'any'
+    );
 
   const mappable = (i: number) => slots === undefined || slots.at(i).mappable;
   const participates = (i: number) =>
@@ -10809,13 +10897,16 @@ function lambdaBroadcastType(
       literal !== undefined &&
       indices.some(
         (i, k) =>
-          (isNumericTupleType(combo[k].type) ||
-            mayBeNumericTupleType(combo[k].type)) &&
-          parameterReachesBody(literal, i)
+          isTupleArgumentType(combo[k].type) && parameterReachesBody(literal, i)
       ) &&
       (inferredResult || isSubtype(armResult, 'number'))
     )
-      return 'any';
+      return (
+        componentwiseTupleCallType(
+          literal,
+          ops.map((_x, i) => types[i] ?? typeAt(i))
+        ) ?? 'any'
+      );
     if (generic) return armResult;
     // When the body gives no type for the arms, the signature result
     // stands, as it does for a call over operands of those types alone.
@@ -11616,7 +11707,11 @@ function lambdaCallTypeOverDescriptors(
         (h, a) => deriveApplicationType(engine, h, a)
       );
     const pointPlan = pointListParamSlots(def);
-    if (pointPlan !== undefined && def.inferredSignature) return undefined;
+    if (
+      pointPlan !== undefined &&
+      inferredPointCallBindsWhole(binding, pointPlan, operands)
+    )
+      return undefined;
     // The signature result, as `declaredResultType()` in `type()` gives it
     // for a ground signature, and the result of a generic signature solved
     // against the operands.
@@ -11690,7 +11785,10 @@ function lambdaCallTypeOverDescriptors(
       deriveApplicationType(engine, h, a)
     );
   const pointPlan = pointListParamSlots(sig);
-  if (pointPlan !== undefined && inferredPointSignature(binding) !== undefined)
+  if (
+    pointPlan !== undefined &&
+    inferredPointCallBindsWhole(binding, pointPlan, operands)
+  )
     return undefined;
   const valueSlots = broadcastableParamSlots(sig);
   const threadable = paramsAreScalar(sig) || valueSlots !== undefined;
@@ -12044,6 +12142,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
   // changed after the call was boxed (`_reboxedForCallee()`).
   const reboxed = expr._reboxedForCallee();
   if (reboxed !== undefined) return reboxed.type;
+  // A call boxed before its name had a value has the type of the same call
+  // boxed against the definition that the name holds now, as its value has
+  // (`_reboxedForForwardCallee()`).
+  const forward = expr._reboxedForForwardCallee();
+  if (forward !== undefined) return forward.type;
 
   // Is this a 'Function' expression?
   // The arrow — parameters, result AND effect specifier — is built by the
@@ -12170,12 +12273,23 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     // inserted value of `Insert`) the operand goes into the result whole,
     // its `missing` arm included, and the absorption that adds the whole
     // absence back runs for a `propagate` operator only.
+    // An operand that is an access proved to find nothing is typed by its
+    // marker alone (`missing`); it is typed here from the value it would
+    // read, its whole absence kept for the absorption, so that the marker
+    // of the result is the marker of its codomain: `At(M, 7) + 1`, for a
+    // matrix `M` of two rows, is an absent row, `Missing`, not `NaN`
+    // (`provedAbsentDomainOf()`).
     const cellsPresent =
-      def.resolvedMissingBehavior === 'propagate' &&
-      movesAbsentCells(expr.operator)
-        ? expr.ops.map((x, i) =>
-            def.stripsMissingAt(i) && x.type.facts.containsMissing
-              ? absentCellsPresentType(expr.operator, x.type.type)
+      def.resolvedMissingBehavior === 'propagate'
+        ? withProvedAbsentDomains(
+            expr.ops,
+            (i) => def.stripsMissingAt(i),
+            movesAbsentCells(expr.operator)
+              ? expr.ops.map((x, i) =>
+                  def.stripsMissingAt(i) && x.type.facts.containsMissing
+                    ? absentCellsPresentType(expr.operator, x.type.type)
+                    : undefined
+                )
               : undefined
           )
         : undefined;
@@ -15002,6 +15116,48 @@ function pointListOperandOfDescriptor(d: OperandDescriptor): PointListOperand {
 }
 
 /**
+ * Whether the descriptor route must decline the call of a function with a
+ * point parameter (`pointListParamSlots`) over `operands`, so that
+ * `callResultType` types it from the body. That is the case when the
+ * engine inferred the signature (`inferredPointSignature`) and an operand
+ * at a point parameter is not a point or a list of points and is bound
+ * whole (`bindsWholeAtInferredPointParameter`, which includes a point of
+ * another arity that the body reads whole): the expression route types
+ * such a call from the body (`wholeBoundPointArgumentResult`), with the
+ * same test. Any other call of
+ * such a function is typed by the point-list map, on both routes: with
+ * `h := p ↦ p[1] + p[2]`, `h` over a `list<tuple<number, number>>` is a
+ * `list<number>` (ROADMAP CE-488).
+ */
+function inferredPointCallBindsWhole(
+  binding: BoxedDefinition,
+  plan: BroadcastSlotPlan,
+  operands: ReadonlyArray<OperandDescriptor>
+): boolean {
+  if (inferredPointSignature(binding) === undefined) return false;
+  return operands.some((d, i) => {
+    const slot = plan.at(i);
+    if (
+      !slot.mappable ||
+      slot.elements === undefined ||
+      !isPointParameterType(slot.elements)
+    )
+      return false;
+    const x = pointListOperandOfDescriptor(d);
+    return (
+      !mapsAsPointOrPointList(plan, i, x) &&
+      !mapsAsPointListByType(plan, i, x) &&
+      bindsWholeAtInferredPointParameter(
+        binding,
+        i,
+        stripMissingFromType(x.type),
+        slot.elements
+      )
+    );
+  });
+}
+
+/**
  * `mapsAsPointList` without `finite`, read from the type of the operand
  * alone: the slot `i` of `plan` maps, `x` is not a tuple, and its type says
  * that the map enters it. At a scalar slot, that is a type that is surely a
@@ -15053,10 +15209,13 @@ function mapsAsPointListByType(
  * which calls `callResultType`): a list mapped at a scalar parameter is
  * read as one of its cells, an argument that maps at a point parameter as
  * one point of the parameter type, and an argument bound whole as itself.
- * Which argument is bound whole is decided by `bindsWholeAtInferredPoint`
- * (`call-result-type.ts`): a list of numbers (`h([1, 2], [10, 20])`) is
- * read by index as a point, and keeps the signature result; a matrix, a
- * number, a string are bound whole. When the body gives no type, the
+ * Which argument is bound whole is decided by
+ * `bindsWholeAtInferredPointParameter` (`call-result-type.ts`): a list of
+ * numbers (`h([1, 2], [10, 20])`) is read by index as a point, and keeps
+ * the signature result; a matrix, a number, a string are bound whole, and
+ * so is a point of another arity that the body reads whole (with
+ * `c(P, t) := t · P/(P[1] − 1)`, inferred `(tuple<number>, unknown) ->
+ * tuple<number>`, `c((3, 2), [1, 2])` is `[(3/2, 1), (3, 2)]`). When the body gives no type, the
  * result is `any`. `binding` is the definition of the function: a
  * signature that the author declared is a contract, and this function
  * gives `undefined` for it.
@@ -15084,7 +15243,9 @@ function wholeBoundPointArgumentResult(
       )
         operandTypes[i] = slot.elements;
       else if (
-        bindsWholeAtInferredPoint(
+        bindsWholeAtInferredPointParameter(
+          binding,
+          i,
           stripMissingFromType(x.type.type),
           slot.elements
         )
@@ -19289,5 +19450,27 @@ function asyncScopeActivation(ce: ComputeEngine, scope: Scope): Scope {
     } else result.bindings.set(name, binding);
   }
   registerScopeActivation(result, scope);
+  return result;
+}
+
+/**
+ * `present`, with the present type of each operand at a position that
+ * strips `missing` (`strips`) that is an access proved to find nothing
+ * (`provedAbsentDomainOf()`) and has no present type in `present` yet.
+ * `undefined` when no operand has a present type.
+ */
+function withProvedAbsentDomains(
+  ops: ReadonlyArray<Expression>,
+  strips: (i: number) => boolean,
+  present: Array<Type | undefined> | undefined
+): Array<Type | undefined> | undefined {
+  let result = present;
+  ops.forEach((x, i) => {
+    if (result?.[i] !== undefined || !strips(i)) return;
+    const domain = provedAbsentDomainOf(x);
+    if (domain === undefined) return;
+    result ??= ops.map(() => undefined);
+    result[i] = domain;
+  });
   return result;
 }

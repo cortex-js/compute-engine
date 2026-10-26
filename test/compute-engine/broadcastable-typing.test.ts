@@ -367,16 +367,19 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     expect(ce.box(['g', arg]).type.toString()).toBe('broadcastable<number>');
   });
 
-  test('numeric-tuple argument of an inferred-signature lambda types `any`', () => {
+  test('numeric-tuple argument of an inferred-signature lambda types a tuple', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto 2x'));
     const app = ce.box(['g', ['Tuple', 1, 2]]);
     // The tuple binds WHOLE to the scalar parameter (atomic, never mapped), then
     // the body's arithmetic broadcasts it: `2·(1,2) = (2,4)` — a tuple, not the
-    // scalar `number` the inferred signature would report. Since the body
-    // shape isn't statically knowable, the honest type is `any`.
-    expect(app.type.toString()).toBe('any');
+    // scalar `number` the inferred signature would report. The body scales the
+    // tuple component by component, so the call is a tuple of numbers of the
+    // same length (ROADMAP CE-47); another body is typed `any`.
+    expect(app.type.toString()).toBe('tuple<number, number>');
     expect(app.evaluate().toString()).toBe('(2, 4)');
+    ce.assign('n', ce.parse('x \\mapsto |x|'));
+    expect(ce.box(['n', ['Tuple', 3, 4]]).type.toString()).toBe('any');
   });
 
   test('declared collection-typed parameter binds whole: NO list-wrap', () => {

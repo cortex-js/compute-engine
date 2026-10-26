@@ -3037,10 +3037,18 @@ describe('ERROR-MODEL §5 — the absence marker of a numeric slot types `nan`',
     ).toBe(true);
   });
 
-  test('a non-numeric element type keeps the `| missing` arm', () => {
+  test('a non-numeric element type has the marker `missing`', () => {
+    // A position proved not to exist is typed by the marker alone (CE-42.3).
     expect(
       ce
         .box(['At', ['List', ce.string('a'), ce.string('b')], 9])
+        .type.toString()
+    ).toBe('missing');
+    // A position that may not exist keeps the `| missing` arm.
+    ce.declare('k9', 'integer');
+    expect(
+      ce
+        .box(['At', ['List', ce.string('a'), ce.string('b')], 'k9'])
         .type.toString()
     ).toBe('missing | string');
   });

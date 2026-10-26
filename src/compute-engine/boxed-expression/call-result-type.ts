@@ -48,7 +48,7 @@ import {
 } from '../collection-utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { provisionalRecursionResult } from './declared-parameter-result.js';
 
 const cache = new WeakMap<
@@ -496,6 +496,76 @@ export function bindsWholeAtInferredPoint(t: Type, point: Type): boolean {
 }
 
 /**
+ * True when the argument of type `t` at the point parameter `point` of an
+ * inferred signature is not of the parameter type, mapping does not apply
+ * to it, and the body of `literal` reads parameter `i` whole, not only by
+ * index. The parameter type was inferred from the index reads
+ * (`P[1]` gives `tuple<number>`), so it states only the components that the
+ * body reads. A body that reads the parameter whole computes with the
+ * argument as it is, and its value has the shape of the argument: with
+ * `c := P ↦ P/(P[1] − 1)` (inferred `(tuple<number>) -> tuple<number>`),
+ * `c((3, 2))` is `(3/2, 1)` and `c([3, 2])` is `[3/2, 1]`, which
+ * `tuple<number>` does not hold. Such a call is typed from the body
+ * (`inferredPointCallType`).
+ */
+function readsOtherPointWhole(
+  literal: (Expression & FunctionInterface) | undefined,
+  i: number,
+  t: Type,
+  point: Type
+): boolean {
+  if (literal === undefined) return false;
+  if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
+    return false;
+  if (isSubtype(t, point)) return false;
+  if (inferredArgumentMaps(point, t) === true) return false;
+  const param = literal.ops[i + 1];
+  if (param === undefined) return false;
+  const name = functionLiteralParameterName(param);
+  if (!name) return false;
+  // A read of the parameter that is not the collection of an index read
+  // `At(P, k)`. A nested function literal that binds the same name hides
+  // the parameter.
+  const visit = (e: Expression): boolean => {
+    if (isSymbol(e)) return e.symbol === name;
+    if (!isFunction(e)) return false;
+    if (
+      e.operator === 'Function' &&
+      e.ops
+        .slice(1)
+        .some((p) => functionLiteralParameterNames(p).includes(name))
+    )
+      return false;
+    if (e.operator === 'At' && isSymbol(e.op1) && e.op1.symbol === name)
+      return e.ops.slice(1).some(visit);
+    return e.ops.some(visit);
+  };
+  return visit(literal.op1);
+}
+
+/**
+ * True when the argument of type `t` at parameter `i`, whose type `point`
+ * was inferred as a point, is bound whole by the call of the function that
+ * `binding` holds, and the signature result does not describe the call:
+ * the argument is not a point and the call does not map over it
+ * (`bindsWholeAtInferredPoint`), or it is of another point type and the
+ * body reads the parameter whole (`readsOtherPointWhole`). Both routes
+ * that type a call (the boxed call and the descriptor route) ask this
+ * question, so that they agree.
+ */
+export function bindsWholeAtInferredPointParameter(
+  binding: BoxedDefinition | undefined,
+  i: number,
+  t: Type,
+  point: Type
+): boolean {
+  return (
+    bindsWholeAtInferredPoint(t, point) ||
+    readsOtherPointWhole(userFunctionLiteral(binding), i, t, point)
+  );
+}
+
+/**
  * The element type of `t` when it is a collection that the body can read
  * by index (a list, a tuple, not a string, not a set). `undefined`
  * otherwise.
@@ -580,7 +650,7 @@ function inferredPointCallType(
   const whole = args.map(
     (_, i) =>
       isPointParameterType(slots[i]) &&
-      bindsWholeAtInferredPoint(types[i], slots[i])
+      bindsWholeAtInferredPointParameter(binding, i, types[i], slots[i])
   );
   const maps = mapping.some((x) => x === true);
   const bindsWhole = whole.some((x) => x);
@@ -1394,4 +1464,141 @@ function literalBodyResultType(
   } finally {
     running.delete(literal);
   }
+}
+
+/** The unary functions that, applied to a numeric tuple, give the tuple of
+ * their values at each component: `Sin((1, 2))` is `(Sin(1), Sin(2))`.
+ * `Abs` is not one of them: `Abs((3, 4))` is the norm, `5`. Each was
+ * checked by evaluation (`Floor((1.5, -2))` is `(1, -2)`). */
+const COMPONENTWISE_UNARY = new Set([
+  'Negate',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Sec',
+  'Csc',
+  'Cot',
+  'Arctan',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Exp',
+  'Ln',
+  'Sqrt',
+  'Square',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Truncate',
+  'Sign',
+]);
+
+/**
+ * The type of a call of the function literal `literal` when exactly one
+ * argument is a numeric tuple with `n` number components, the other
+ * arguments are numbers, and the body computes the tuple component by
+ * component: `tuple<number, …>` with `n` components. `undefined` when the
+ * body has another form, and the caller keeps its answer (`any`).
+ *
+ * The body must be built from these forms only, where `P` is a form that
+ * gives a tuple of `n` numbers and `S` is a number that does not read the
+ * tuple parameter:
+ *
+ * - the tuple parameter;
+ * - `Negate(P)` and a function of `COMPONENTWISE_UNARY` applied to `P`;
+ * - `Multiply(S, …, P, …, S)`, with one `P` operand;
+ * - `Add(P, …, P)` and `Subtract(P, P)`: every operand reads the same
+ *   tuple, so the lengths agree;
+ * - `Divide(P, S)`;
+ * - `Power(P, k)` with a number literal `k ≥ 0`, and `Power(S, P)`.
+ *
+ * The other forms can fail or give a value of another shape: `x + 1` is an
+ * `incompatible-type` error, `x·x` is the error `no-product-between-points`,
+ * `2/x` and `x^(-1)` are the error `no-division-by-point`, and `|x|` is the
+ * norm of the tuple.
+ *
+ * With `h := x ↦ 2x`, `h((1, 2))` is `(2, 4)`: the call is typed
+ * `tuple<number, number>`, and it was typed `any` (ROADMAP CE-47). A
+ * component of the value can be a complex number (`Sqrt((1, -2))`), an
+ * infinity (`(1, 2)/0`) or `NaN`, which the type `number` holds.
+ */
+export function componentwiseTupleCallType(
+  literal: Expression | undefined,
+  argTypes: ReadonlyArray<Type>
+): Type | undefined {
+  if (literal === undefined || !isFunction(literal, 'Function'))
+    return undefined;
+  const params = literal.ops.slice(1);
+  if (params.length !== argTypes.length) return undefined;
+  const names: string[] = [];
+  for (const p of params) {
+    if (isRestParameter(p) || isDestructuringParameter(p)) return undefined;
+    const name = functionLiteralParameterName(p);
+    if (!name) return undefined;
+    names.push(name);
+  }
+  let tupleName: string | undefined;
+  let arity = 0;
+  for (let i = 0; i < argTypes.length; i++) {
+    const t = resolveTypeAlias(argTypes[i]);
+    if (isSubtype(t, 'number')) continue;
+    if (
+      tupleName !== undefined ||
+      typeof t !== 'object' ||
+      t.kind !== 'tuple' ||
+      t.elements.length === 0 ||
+      !t.elements.every((e) => isSubtype(e.type, 'number'))
+    )
+      return undefined;
+    tupleName = names[i];
+    arity = t.elements.length;
+  }
+  if (tupleName === undefined) return undefined;
+  const scalarNames = new Set(names.filter((n) => n !== tupleName));
+  const tuple = tupleName;
+  // The form of `e`: 'point' for a tuple of `arity` numbers, 'scalar' for a
+  // number that does not read the tuple parameter, `undefined` otherwise.
+  const formOf = (e: Expression): 'point' | 'scalar' | undefined => {
+    if (isSymbol(e)) {
+      const s = e.symbol;
+      if (s === tuple) return 'point';
+      if (scalarNames.has(s)) return 'scalar';
+      return isSubtype(e.type.type, 'number') ? 'scalar' : undefined;
+    }
+    if (!isFunction(e)) {
+      return isSubtype(e.type.type, 'number') ? 'scalar' : undefined;
+    }
+    if (!e.has(tuple)) {
+      // A number computed from the other parameters, which hold numbers.
+      return isSubtype(e.type.type, 'number') ? 'scalar' : undefined;
+    }
+    const op = e.operator;
+    const forms = e.ops.map(formOf);
+    if (forms.some((f) => f === undefined)) return undefined;
+    if (op === 'Block') return e.nops === 1 ? forms[0] : undefined;
+    if (COMPONENTWISE_UNARY.has(op))
+      return e.nops === 1 && forms[0] === 'point' ? 'point' : undefined;
+    if (op === 'Multiply')
+      return forms.filter((f) => f === 'point').length === 1
+        ? 'point'
+        : undefined;
+    if (op === 'Add' || op === 'Subtract')
+      return forms.every((f) => f === 'point') ? 'point' : undefined;
+    if (op === 'Divide')
+      return e.nops === 2 && forms[0] === 'point' && forms[1] === 'scalar'
+        ? 'point'
+        : undefined;
+    if (op === 'Power' && e.nops === 2) {
+      if (forms[0] === 'scalar' && forms[1] === 'point') return 'point';
+      const k = e.ops[1];
+      if (forms[0] === 'point' && isNumber(k) && k.isNonNegative === true)
+        return 'point';
+    }
+    return undefined;
+  };
+  if (formOf(literal.ops[0]) !== 'point') return undefined;
+  return {
+    kind: 'tuple',
+    elements: Array.from({ length: arity }, () => ({ type: 'number' })),
+  };
 }

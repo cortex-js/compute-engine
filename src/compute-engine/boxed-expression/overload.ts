@@ -4,7 +4,7 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
-import { typeToString } from '../../common/type/serialize.js';
+import { typeToIdentityKey } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
@@ -1696,7 +1696,7 @@ function displayJoin(a: Type, b: Type): Type {
   const push = (t: Type): void => {
     const arms = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
     for (const arm of arms) {
-      const key = typeToString(arm);
+      const key = typeToIdentityKey(arm);
       if (seen.has(key)) continue;
       seen.add(key);
       members.push(arm);
