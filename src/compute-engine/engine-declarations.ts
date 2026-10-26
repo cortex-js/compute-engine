@@ -929,10 +929,7 @@ function normalizeDeclaredTypeParams(
  * of aliases terminates.
  */
 function reachesItselfNegated(target: TypeReference, def: Type): boolean {
-  const seen: [Set<TypeReference>, Set<TypeReference>] = [
-    new Set(),
-    new Set(),
-  ];
+  const seen: [Set<TypeReference>, Set<TypeReference>] = [new Set(), new Set()];
   const walk = (t: Type, odd: boolean): boolean => {
     if (typeof t !== 'object') return false;
     if (t.kind === 'negation') return walk(t.type, !odd);

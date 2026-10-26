@@ -3061,11 +3061,7 @@ function joinEvidenceOnBinding(
       : joinEvidenceTypes(recorded.type, widened);
   if (joined === undefined) return false;
   const next = coarse ? coarsenEvidenceType(joined) : joined;
-  if (
-    !fromUsesOnly &&
-    !recorded.isUnknown &&
-    isSubtype(next, recorded.type)
-  )
+  if (!fromUsesOnly && !recorded.isUnknown && isSubtype(next, recorded.type))
     return false;
   writeEvidenceType(ce, target, next);
   return true;

@@ -723,9 +723,7 @@ function meet2Uncached(a: Type, b: Type): Type | undefined {
 
   // Tuples meet slot-wise and records meet by merging their keys.
   const structural =
-    meetTuples(a, b) ??
-    meetRecords(a, b) ??
-    meetRecordDictionary(nodeA, nodeB);
+    meetTuples(a, b) ?? meetRecords(a, b) ?? meetRecordDictionary(nodeA, nodeB);
   if (structural !== undefined) return structural;
 
   // No meet rule applies. Two signatures are the one remaining pair that must

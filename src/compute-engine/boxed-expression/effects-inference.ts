@@ -3448,10 +3448,7 @@ function valueSignatureOf(
   // already had an effect (`random`) read the effects of the arrow as a
   // contract and did not see a `scope` effect that a later conformance of
   // `speak` gave to `g`.
-  if (
-    def.value.inferredType &&
-    storedFunctionLiteral(ce, name) !== undefined
-  )
+  if (def.value.inferredType && storedFunctionLiteral(ce, name) !== undefined)
     return undefined;
   const t = def.value.type?.type;
   return signatureEffects(t as Type | undefined);

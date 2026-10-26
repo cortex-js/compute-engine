@@ -15566,11 +15566,7 @@ function combineMapShapes(a: MapShape, b: MapShape): MapShape {
  * ignores it. The elements start a new descent: the depth limit already
  * stops the walk through the list elements.
  */
-function operandMapShape(
-  t: Type,
-  depth = 0,
-  seen?: AliasDescent
-): MapShape {
+function operandMapShape(t: Type, depth = 0, seen?: AliasDescent): MapShape {
   const r = resolveTypeReference(t) ?? t;
   if (typeof r !== 'string' && r.kind === 'union') {
     const shapes: MapShape[] = [];

@@ -15180,10 +15180,13 @@ readonly referencedFunctions: readonly string[];
 
 The user functions **applied** in this expression: the operator head of
 a function application when that head is a user-definable symbol — `f` in
-`f(x)`, `g` in `g(x) := f(x) + 1`. Built-in operators (`Add`, `Sin`, …),
-constants, and names bound to a value or by an enclosing scope (function
-parameters, summation indices, `Block` locals) are excluded — the same
-predicate [freeVariables](#freevariables) applies to ordinary symbols.
+`f(x)`, `g` in `g(x) := f(x) + 1`. A user function is listed whether it
+is undefined, declared, or already defined (`f(x) := …`,
+`ce.assign("f", …)`). The operators of a library (`Add`, `Sin`, …: the
+standard library, a library given to the constructor, or one loaded with
+`ce.loadLibrary()`), constants, and names bound by an enclosing scope of
+the expression (function parameters, summation indices, `Block` locals) are
+excluded.
 
 Operator heads are not symbols of the expression, so they appear in
 neither [symbols](#symbols) nor [freeVariables](#freevariables). This accessor recovers
@@ -15204,9 +15207,15 @@ readonly references: readonly string[];
 ```
 
 The symbols this expression **references** but does not itself define:
-the union of [freeVariables](#freevariables) (referenced values) and
-[referencedFunctions](#referencedfunctions) (applied user functions), minus
-[defines](#defines).
+every user name it reads, as a value or as an applied function
+([referencedFunctions](#referencedfunctions)), minus [defines](#defines). A name is listed
+whether or not it already has a value or a definition: after
+`a := 5`, `g(x) := x + a` still references `a`. This is the difference
+with [freeVariables](#freevariables), which lists only the symbols that have no
+value. The names of a library (`Pi`, `Sin`, …: the standard library, a
+library given to the constructor, or one loaded with
+`ce.loadLibrary()`), constants, and names bound by the expression itself (parameters, indices, `Block`
+locals) are excluded.
 
 This is the complete in-edge set for a dependency graph keyed on cells
 (e.g. a notebook): pair it with [defines](#defines) for the out-edges.

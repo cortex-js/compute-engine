@@ -21,8 +21,7 @@ import { isFunction } from './type-guards.js';
  * place of the marker, and keeps the whole absence for the absorption.
  */
 let provedAbsentDomainHook:
-  | ((d: OperandDescriptor) => Type | undefined)
-  | undefined;
+  ((d: OperandDescriptor) => Type | undefined) | undefined;
 
 /** Register the function that reads the domain of an access proved to
  * find nothing. Called once by the collection library. */

@@ -2688,8 +2688,7 @@ function walkPattern(
       pattern.kind === 'indexed_collection')
   ) {
     for (const name of freeTypeVariables(pattern))
-      if (!s.valueParams.has(name))
-        addBound(s.lower, name, 'any', index, true);
+      if (!s.valueParams.has(name)) addBound(s.lower, name, 'any', index, true);
     return true;
   }
 
