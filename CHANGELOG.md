@@ -1,24 +1,60 @@
+## [Unreleased]
+
+### Behavior Changes
+
+- **`references` and `referencedFunctions` list a name that already has a value
+  or a definition.** They give the dependencies of an expression, for example
+  the edges between the cells of a notebook, and they lost an edge as soon as
+  the cell it points to was evaluated. After `ce.assign('a', 5)`,
+  `g(x) := x + a` references `a` (it gave `[]`). Once `f` is defined by
+  `f(x) := …`, by `ce.assign('f', …)` or declared with `{ signature: … }`,
+  `g(x) := f(x) + a` references `a` and `f` (it gave `["a"]`), and
+  `referencedFunctions` is `["f"]`. A user function passed as an operand is
+  referenced too: `Map(L, f)` references `L` and `f`. The names of a library
+  (`Add`, `Sin`, `Pi`, …: the standard library, a library given to the
+  constructor, or one loaded with `ce.loadLibrary()`) and constants are still
+  left out. `unknowns` and `freeVariables` are unchanged: they list only the
+  symbols with no value.
+
+### Resolved Issues
+
+- **`subs()` on a structural expression keeps a constant name in the
+  replacement.** With `x` declared `real`, the structural `x + 1` with `x`
+  replaced by the structural `X + i` gave `X + (0 + 1i) + 1` in 0.168.0 and
+  0.169.0: a declared symbol of a structural expression is bound, and its
+  replacement was boxed canonically. It gives `X + i + 1` again, in the
+  structural form. An undeclared `x` was not affected.
+- **A function that reads a function declared with an `unknown` result
+  compiles.** With `f` declared `(real | signed_infinity | nan) -> unknown` and
+  assigned `x ↦ x + A cos(x) + d`, the compile of a function whose body reads
+  `f` as a value (`g(t) := f'(t) + 1`) was refused: "the symbol 'f' that its
+  body reads holds a value of type `(ceArg_0: unknown) -> number`". The check
+  now reads the signature that the definition derives with the declared
+  parameter types, `-> nan | real | signed_infinity`, which is the type
+  `ce.assign()` accepted. A later change of the type of a symbol that `f` reads
+  (`A` assigned `2i`) is still refused.
+
 ## 0.169.0 _2026-10-25_
 
 ### Behavior Changes
 
-- **A finite range of integers and the list of its integers are the same
-  element of a collection.** `Set(Range(1, 3), [1, 2, 3])` has one element,
-  `[1, 2, 3]` is an element of `[Range(1, 3)]`, and `IndexOf`, `Unique`,
-  `Tally`, `Union` and `Contains` treat the two as one. `Range(1, 3)`,
-  `Range(1, 3, 1)` and `[1, 2, 3]` are the same for `isSame` and have the same
-  hash. The rule applies to a range whose bounds and step are integer literals
-  and that has at most 10,000 elements. `Equal` is unchanged.
+- **A finite range of integers and the list of its integers are the same element
+  of a collection.** `Set(Range(1, 3), [1, 2, 3])` has one element, `[1, 2, 3]`
+  is an element of `[Range(1, 3)]`, and `IndexOf`, `Unique`, `Tally`, `Union`
+  and `Contains` treat the two as one. `Range(1, 3)`, `Range(1, 3, 1)` and
+  `[1, 2, 3]` are the same for `isSame` and have the same hash. The rule applies
+  to a range whose bounds and step are integer literals and that has at most
+  10,000 elements. `Equal` is unchanged.
 - **A range that is an element of a collection stays a range.** `[1..3, 4]`
   evaluates to `[Range(1, 3), 4]` (it was `[[1,2,3], 4]`), and
   `Tuple(Range(1, 3), 4)` to `(Range(1, 3), 4)`, so the value agrees with the
-  type `tuple<range, integer>`. A symbol declared
-  `list<range>` holds `[Range(1, 3)]` (it held `[[1, 2, 3]]`, which is not a
-  list of ranges). The same applies to a `Set` element, a cell of a broadcast
-  result (`g(s) = 1..s; g([2, 3])` is `[Range(1, 2), Range(1, 3)]`) and a
-  spread element. A range on its own is unchanged, and `Length`, `At`,
-  `Flatten`, `Sum` and `Map` give the same values. Other lazy elements, such as
-  a `Map` or a comprehension, are still listed.
+  type `tuple<range, integer>`. A symbol declared `list<range>` holds
+  `[Range(1, 3)]` (it held `[[1, 2, 3]]`, which is not a list of ranges). The
+  same applies to a `Set` element, a cell of a broadcast result
+  (`g(s) = 1..s; g([2, 3])` is `[Range(1, 2), Range(1, 3)]`) and a spread
+  element. A range on its own is unchanged, and `Length`, `At`, `Flatten`, `Sum`
+  and `Map` give the same values. Other lazy elements, such as a `Map` or a
+  comprehension, are still listed.
 - **`LUDecomposition`, `QRDecomposition` and `CholeskyDecomposition` of a matrix
   of exact rational entries give exact factors under `evaluate()`.** The LU of
   `[[4, 3], [6, 3]]` is `([[0,1],[1,0]], [[1,0],[2/3,1]], [[6,3],[0,1]])` (the
@@ -72,18 +108,18 @@
 
 - **The structural form keeps a constant name as written again.** In 0.168.0,
   `ce.box(['Power', 'i', 2], { form: 'structural' })` gave
-  `Power(Complex(0, 1), 2)`, `e` became `ExponentialE`, and `Half` became
-  `1/2`, so `M(i) = i^2` read structurally had no parameter named `i`. A
-  symbol whose canonical form is another expression (`i`, `ImaginaryUnit`,
-  `e`, `Half`) now keeps its name and is unbound, typed `unknown`, as in
-  0.167.0. Every other symbol still binds to its definition: `["Add", "t",
-  "t"]` with `t: tuple<integer, integer>` is typed `tuple<integer, integer>`.
-  The canonical form and the value are unchanged: the canonical form of the
-  structural `i^2` is `-1`.
+  `Power(Complex(0, 1), 2)`, `e` became `ExponentialE`, and `Half` became `1/2`,
+  so `M(i) = i^2` read structurally had no parameter named `i`. A symbol whose
+  canonical form is another expression (`i`, `ImaginaryUnit`, `e`, `Half`) now
+  keeps its name and is unbound, typed `unknown`, as in 0.167.0. Every other
+  symbol still binds to its definition: `["Add", "t", "t"]` with
+  `t: tuple<integer, integer>` is typed `tuple<integer, integer>`. The canonical
+  form and the value are unchanged: the canonical form of the structural `i^2`
+  is `-1`.
 - **A compile refused because a captured symbol changed type names that
-  symbol.** The message gives the symbol and both of its types, for example
-  "the symbol 'd' that its body reads has the type `real`, but the body of
-  'x_0' was typed when 'd' had the type `integer`".
+  symbol.** The message gives the symbol and both of its types, for example "the
+  symbol 'd' that its body reads has the type `real`, but the body of 'x_0' was
+  typed when 'd' had the type `integer`".
 - **A partial application keeps its argument inside a held operand.** With
   `f(a, b) := If(b, a[1] + a[2], 42)`, `f((1, 2))` gave
   `(_) => If(_, At(a, 1) + At(a, 2), 42)`, and applying it to `True` gave

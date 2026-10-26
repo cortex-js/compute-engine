@@ -460,7 +460,7 @@ The rules used by `solve()` to transform an equation into equivalent,
 
 <MemberCard>
 
-##### ComputeEngine.strict {#strict-1}
+##### ComputeEngine.strict {#strict-2}
 
 ```ts
 strict: boolean;
@@ -4309,6 +4309,7 @@ type OperandStructure =
   inferred: boolean;
   local: boolean;
   free: true;
+  captured: true;
  }
   | {
   kind: "string";
@@ -4363,6 +4364,7 @@ holding an expression.
   `inferred`: `boolean`;
   `local`: `boolean`;
   `free`: `true`;
+  `captured`: `true`;
  \}
 
 #### OperandStructure.lookupByName?
@@ -4427,6 +4429,19 @@ function literal, a local of a `Block` or the variable of a binder
 `unknown` as a number cell only when this is present: these are the
 symbols that the canonical form of a literal list infers as
 numbers.
+
+#### OperandStructure.captured?
+
+```ts
+captured?: true;
+```
+
+Present (`true`) when the body of a function literal reads the
+symbol, and the symbol has no value and is not a parameter of the
+literal or a `let` local of the body (`isCapturedValuelessSymbol`).
+When the body is evaluated, the symbol reads the value that an outer
+scope holds at that time. A call of a function literal reads such a
+symbol of type `unknown` as an operand that may hold a list.
 
 \{
   `kind`: `"string"`;
@@ -4625,6 +4640,21 @@ readonly tolerance: number;
 The engine's numeric tolerance, a read-only configuration value a
 membership handler consults (`Element` declines rather than refute a
 near-match inside it).
+
+</MemberCard>
+
+<MemberCard>
+
+##### PureEngineView.strict {#strict}
+
+```ts
+readonly strict: boolean;
+```
+
+True when the engine checks the types of operands when it boxes an
+expression (`ComputeEngine.strict`). A handler that answers `error` for
+an operand that the boxing check refuses reads it, so that a non-strict
+engine keeps the unevaluated application.
 
 </MemberCard>
 
@@ -11857,7 +11887,7 @@ The rules used by `solve()` to transform an equation into equivalent,
 
 <MemberCard>
 
-##### IComputeEngine.strict {#strict}
+##### IComputeEngine.strict {#strict-1}
 
 ```ts
 strict: boolean;
@@ -14577,6 +14607,12 @@ The contract:
   `Sum(j, j in 1..n)` hash differently, just as they are not `isSame()`.
   This clause co-evolves with `isSame()` semantics.
 
+- **Ranges and lists**: a finite `Range` whose bounds and step are
+  integer literals and that has at most 10,000 elements is `isSame()` to
+  the `List` of its integers, so it has the hash of that list:
+  `Range(1, 3)` and `[1, 2, 3]` have the same hash. A character and a
+  one-cluster string with the same content also have the same hash.
+
 </MemberCard>
 
 <MemberCard>
@@ -16819,6 +16855,15 @@ elements in a different order are the same:
 `ce.box(['Set', 2, 1]).isSame(ce.box(['Set', 1, 2]))` is `true`. A
 set-builder (`Set(body, Element(k, S))`) compares its two operands by
 position.
+
+A finite `Range` whose bounds and step are integer literals and that has
+at most 10,000 elements is the same as the `List` of its integers, and
+has the same `hash`: `ce.box(['Range', 1, 3]).isSame(ce.box(['List', 1,
+2, 3]))` is `true`. A larger range is compared by its operands only.
+
+A character and a one-cluster string with the same content are the same,
+although their types are different: `ce.string('a')` is the same as
+`ce.character('a')`.
 
 Accepts JavaScript primitives: `number`, `bigint`, `boolean`, `string`.
 

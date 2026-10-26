@@ -600,6 +600,77 @@ describe('REFERENCED_FUNCTIONS / REFERENCES', () => {
     expect(cell.referencedFunctions).toEqual(['f']);
     expect(cell.references).toEqual(['f']);
   });
+
+  // A name is referenced whether or not it already has a value or a
+  // definition: a notebook whose cells have been evaluated keeps its edges.
+  // `freeVariables` still lists only the symbols with no value. (CE-499.)
+  it.each([
+    [
+      'defined with :=',
+      (ce: ComputeEngine) => ce.parse('f(x):=x^2').evaluate(),
+    ],
+    [
+      'assigned a function',
+      (ce: ComputeEngine) => ce.assign('f', ce.parse('x \\mapsto x^2')),
+    ],
+    [
+      'declared with a signature',
+      (ce: ComputeEngine) =>
+        ce.declare('f', { signature: '(number) -> number' }),
+    ],
+  ])('references a function %s', (_label, setup) => {
+    const ce = new ComputeEngine();
+    setup(ce);
+    const cell = ce.parse('g(x) := f(x) + a', { form: 'raw', strict: false });
+    expect(cell.referencedFunctions).toEqual(['f']);
+    expect(cell.references).toEqual(['a', 'f']);
+  });
+
+  it('references a symbol that has a value', () => {
+    const ce = new ComputeEngine();
+    ce.assign('a', 5);
+    const cell = ce.parse('g(x) := x + a', { form: 'raw', strict: false });
+    expect(cell.references).toEqual(['a']);
+    expect(ce.parse('a + y').freeVariables).toEqual(['y']);
+  });
+
+  it('does not reference a user constant, bound or not', () => {
+    const ce = new ComputeEngine();
+    ce.declare('c', { value: 5, isConstant: true });
+    expect(ce.box(['Add', 'c', 'x'], { form: 'raw' }).references).toEqual([
+      'x',
+    ]);
+    expect(ce.box(['Add', 'c', 'x']).references).toEqual(['x']);
+  });
+
+  it('classifies a call by the definition it calls', () => {
+    // The number `N` is not callable: `N(x)` calls the library `N`.
+    const ce = new ComputeEngine();
+    ce.assign('N', 85);
+    const call = ce.box(['N', 'x'], { form: 'structural' });
+    expect(call.referencedFunctions).toEqual([]);
+    expect(call.references).toEqual(['x']);
+  });
+
+  it('does not reference an operator of a loaded or extended library', () => {
+    const ce = new ComputeEngine();
+    ce.loadLibrary({
+      name: 'ticks',
+      definitions: {
+        Tick: { signature: '(number) -> number', evaluate: ([x]) => x },
+      },
+    });
+    expect(ce.box(['Add', ['Tick', 'x'], 'a']).references).toEqual(['a', 'x']);
+    ce.declare('Sin', { description: 'patched' }, { extend: true });
+    expect(ce.parse('\\sin(x)').references).toEqual(['x']);
+  });
+
+  it('references a user function passed as an operand, not a library one', () => {
+    const ce = new ComputeEngine();
+    ce.parse('f(x):=x^2').evaluate();
+    expect(ce.box(['Map', 'L', 'f']).references).toEqual(['L', 'f']);
+    expect(ce.box(['Reduce', 'L', 'Add']).references).toEqual(['L']);
+  });
 });
 
 describe('APPLIED_NON_FUNCTIONS', () => {

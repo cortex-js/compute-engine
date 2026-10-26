@@ -5204,6 +5204,55 @@ function capturedValueMismatch(
 }
 
 /**
+ * True when `def` holds the function literal `value` under a declared
+ * signature with a placeholder (`_signatureSkeleton`, a declared
+ * `-> unknown` result), and the signature that `def` derives from `value`
+ * is of the type `expected`.
+ *
+ * A function literal is stored without the declared types of its scalar
+ * parameters, so its own type reads each such parameter as `unknown` and
+ * can have a wider result: with `f` declared
+ * `(real | signed_infinity | nan) -> unknown`, `f := x ↦ x + A cos(x) + d`
+ * is stored with the type `(x: unknown) -> number`. The definition reports
+ * the result under the declared parameters, `nan | real | signed_infinity`,
+ * which is the type that `ce.assign()` accepted, and a body that reads `f`
+ * is typed with it. The definition derives that signature again from the
+ * stored literal when a symbol the literal reads changes type (`A` assigned
+ * a complex value gives `-> number`), so such a change is still a mismatch.
+ * The derivation is memoized on the definition, so this check does not box
+ * the literal again on each call.
+ * (`_deriveSignature()`, `boxed-expression/boxed-value-definition.ts`.)
+ *
+ * The check is relaxed only when `def.type` is that derivation: the
+ * declared result is the placeholder `unknown` (a skeleton whose only
+ * placeholder is a parameter keeps its declared result, which says nothing
+ * about the value), the type is declared and not inferred (an inferred type
+ * is the recorded type, not derived from the literal), and `value` is the
+ * stored value that the derivation reads (not an assumed value).
+ */
+function derivedSignatureMatches(
+  def: BoxedValueDefinition,
+  value: Expression,
+  expected: Expression['type']
+): boolean {
+  if (!isFunction(value, 'Function')) return false;
+  const skeleton = def._signatureSkeleton;
+  if (
+    typeof skeleton !== 'object' ||
+    skeleton.kind !== 'signature' ||
+    skeleton.result !== 'unknown' ||
+    def.inferredType ||
+    def.storedValue !== value
+  )
+    return false;
+  const derived = def.type;
+  return (
+    derived.matches(expected) ||
+    derived.matches(stripNumericRanges(expected.type))
+  );
+}
+
+/**
  * The first captured symbol of `fnExpr` whose value is not of the type the
  * body was typed with: its name, that type, and the value it holds. This is
  * the test of `capturedValueMismatch()`, with the evidence that a message
@@ -5245,6 +5294,7 @@ function capturedValueMismatchEntry(
       value.type.matches(stripNumericRanges(expected.type))
     )
       continue;
+    if (derivedSignatureMatches(def, value, expected)) continue;
     return { name, expected, value };
   }
   return undefined;

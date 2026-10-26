@@ -78,6 +78,7 @@ import { latexSerializeOptions } from './latex-serialize-options.js';
 import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
+import { shadowsLibraryName } from '../library-shadowing.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -1208,7 +1209,7 @@ export abstract class _BoxedExpression implements Expression {
     const defined = new Set<string>();
     getDefines(this, defined);
     const set = new Set<string>();
-    getReferences(this, set, set);
+    getReferences(this, set, set, new Map(), 'references');
     const result: string[] = [];
     for (const s of set) if (!defined.has(s)) result.push(s);
     return result.sort();
@@ -1818,6 +1819,69 @@ export type ReferencesMemo = {
 };
 
 /**
+ * Which names the walk of `getReferences` collects. A memo holds the result
+ * of one mode only, so a memo is never shared between the two.
+ *
+ * - `'unknowns'`: the symbols that have no value (`unknowns`,
+ *   `freeVariables`). A symbol with a value, or bound to a function
+ *   definition, is resolved and not listed. The applied functions are not
+ *   collected.
+ * - `'references'`: every user name that the expression reads, whether it
+ *   has a value or a definition (`references`, `referencedFunctions`): the
+ *   in-edges of a dependency graph keyed on cells. A name defined by a
+ *   library (`isLibraryDefinition()`), a constant, and a name bound
+ *   by the expression itself (a parameter, an index, a `Block` local) are not
+ *   listed. (User decision 2026-10-25, option (a) of CE-499 in
+ *   `ROADMAP.md`.)
+ */
+type ReferenceMode = 'unknowns' | 'references';
+
+/**
+ * True when `def`, the definition that the name `name` resolves to, was
+ * installed by a library and not by the user. A library is the standard
+ * library, a library given to the constructor (`libraries`), or a library
+ * loaded with `ce.loadLibrary()`: a dependency graph keyed on the user's
+ * cells has no cell for these names. The test reads:
+ *
+ * - the binding of the outermost (system) scope, where the standard library
+ *   and the constructor's libraries are installed;
+ * - `_libraryProvenance`, which records the binding each library installed,
+ *   in the global scope for `ce.loadLibrary()`;
+ * - for a library name that the current scope resolves to another binding,
+ *   `shadowsLibraryName()` (`library-shadowing.ts`): an extension made with
+ *   `ce.declare(name, patch, { extend: true })` that keeps the library's
+ *   handlers is still the library operator.
+ *
+ * A user definition (`f(x) := …`, `ce.assign()`, `ce.declare()`) is none of
+ * these. `def` is the binding (`{ value }` or `{ operator }`) or the
+ * definition it holds.
+ */
+function isLibraryDefinition(
+  engine: ComputeEngine,
+  name: string,
+  def: object | undefined
+): boolean {
+  if (def === undefined) return false;
+  const holds = (binding: unknown): boolean => {
+    if (binding === undefined || binding === null) return false;
+    const b = binding as { value?: object; operator?: object };
+    return (
+      b === def ||
+      (b.value !== undefined && b.value === def) ||
+      (b.operator !== undefined && b.operator === def)
+    );
+  };
+  const system = engine.contextStack[0]?.lexicalScope.bindings.get(name);
+  if (holds(system)) return true;
+  if (holds(engine._libraryProvenance.get(name)?.binding)) return true;
+  return (
+    system !== undefined &&
+    holds(engine.lookupDefinition(name)) &&
+    !shadowsLibraryName(engine, name)
+  );
+}
+
+/**
  * Whether `expr` has unknowns (the same answer as `expr.unknowns.length >
  * 0`), with a memo that the caller keeps between calls. The memo holds the
  * answer of each function node already walked, so a caller that asks the
@@ -1844,39 +1908,35 @@ export function hasUnknownsWithMemo(
  * {@link getReferences} for the shared traversal and scoping rules.
  */
 function getReferencedFunctions(expr: Expression, result: Set<string>): void {
-  getReferences(expr, new Set<string>(), result);
+  getReferences(expr, new Set<string>(), result, new Map(), 'references');
 }
 
 /**
- * Is `head` (the operator of a function application) a *user-definable*
- * function reference, as opposed to a built-in operator, a constant, or a
- * name already bound to a value?
+ * Is the operator of the function application `expr` a user function that
+ * the expression references, as opposed to an operator of a library or a
+ * constant? A user function is listed whether it is undefined, declared, or
+ * defined (`f(x) := …`, `ce.assign()`), and whether its binding holds a value
+ * or not.
  *
- * Mirrors the free-variable predicate used for ordinary symbols in
- * {@link getReferences}, but for the operator head (which is a bare string,
- * not a boxed symbol). The def-kind checks are inlined rather than using the
- * `isValueDef`/`isOperatorDef` guards from `./utils` to avoid an import cycle
- * (`utils` imports this module).
+ * The head is classified by the definition the application is bound to,
+ * when it is bound: a name can have a binding that the call does not use
+ * (with `N := 85`, the application `N(x)` still calls the library `N`,
+ * because the number is not callable). An unbound application (a raw form)
+ * is classified by the definition its name resolves to. The def-kind checks
+ * are inlined rather than using the `isValueDef`/`isOperatorDef` guards from
+ * `./utils` to avoid an import cycle (`utils` imports this module).
  */
-function isReferencedFunctionHead(
-  engine: ComputeEngine,
-  head: string
-): boolean {
+function isReferencedFunctionHead(expr: Expression): boolean {
+  const head = expr.operator;
   if (head === 'Unknown' || head === 'Undefined' || head === 'Nothing')
     return false;
 
-  const def = engine.lookupDefinition(head);
-  if (def !== undefined) {
-    // A built-in or explicitly-declared operator (`Add`, `Sin`, …).
-    if ('operator' in def) return false;
-    // A constant value (`Pi`, `ExponentialE`, …).
-    if ('value' in def && def.value.isConstant) return false;
-  }
-
-  // A name already bound to a value is resolved, not a free reference.
-  if (engine._getSymbolValue(head) !== undefined) return false;
-
-  return true;
+  const engine = expr.engine;
+  const def = expr.operatorDefinition ?? engine.lookupDefinition(head);
+  if (def === undefined) return true;
+  // A constant value (`Pi`, `ExponentialE`, …).
+  if ('value' in def && def.value.isConstant) return false;
+  return !isLibraryDefinition(engine, head, def);
 }
 
 /**
@@ -1919,18 +1979,24 @@ function bindingSiteNames(
 }
 
 /**
- * Shared traversal that collects, in a single pass, both the free variables
- * (operand symbols not bound to a value or by an enclosing scope) into
- * `freeVars` and the applied user functions (operator heads) into `refFns`.
+ * Shared traversal of the names an expression reads. What it collects
+ * depends on `mode` (`ReferenceMode`):
  *
- * The two are kept in separate sets so {@link getUnknowns} /
- * `freeVariables` stay unchanged while {@link getReferencedFunctions} can
- * recover the operator-head edges. Both sets are subject to the same scoping
- * rules (`Function` parameters, `Sum`/`Product`/`Integrate` index variables,
- * `Block` locals). Passing the same set for both arguments yields their union
- * (used by the `references` accessor).
+ * - `'unknowns'`: into `freeVars`, the operand symbols that have no value and
+ *   no function definition (`unknowns`, `freeVariables`). `refFns` is not
+ *   filled.
+ * - `'references'`: into `freeVars`, every operand symbol that is a user
+ *   name, with a value or not; into `refFns`, every applied head that is a
+ *   user function (`isReferencedFunctionHead`). A name of a library and a
+ *   constant are left out. Passing the same set for both arguments yields
+ *   their union (the `references` accessor).
  *
- * `memo` records, per function node, the two sets the node contributes. What a
+ * In both modes, a name bound by the expression itself is left out: the
+ * parameters of a `Function`, the index variables of `Sum`, `Product` or
+ * `Integrate`, the locals of a `Block`.
+ *
+ * `memo` records, per function node, the two sets the node contributes, for
+ * one mode: a memo is never used with the other mode. What a
  * node contributes depends only on the node (its own binders filter its
  * operands' references before they reach the caller), so a subtree reached
  * through several operands is walked once per call, not once per path: a
@@ -1945,7 +2011,8 @@ function getReferences(
   expr: Expression,
   freeVars: Set<string>,
   refFns: Set<string>,
-  memo: ReferencesMemo = new Map()
+  memo: ReferencesMemo = new Map(),
+  mode: ReferenceMode = 'unknowns'
 ): void {
   // A dictionary is memoized as a function node is: the same dictionary can
   // be the value of several keys, or of several dictionaries.
@@ -1967,13 +2034,13 @@ function getReferences(
       return;
     }
     const own: readonly [Set<string>, Set<string>] = [new Set(), new Set()];
-    collectReferences(expr, own[0], own[1], memo);
+    collectReferences(expr, own[0], own[1], memo, mode);
     memo.set(expr, own);
     for (const s of own[0]) freeVars.add(s);
     for (const s of own[1]) refFns.add(s);
     return;
   }
-  collectReferences(expr, freeVars, refFns, memo);
+  collectReferences(expr, freeVars, refFns, memo, mode);
 }
 
 /** The body of {@link getReferences}: one node's own contribution. */
@@ -1981,13 +2048,31 @@ function collectReferences(
   expr: Expression,
   freeVars: Set<string>,
   refFns: Set<string>,
-  memo: ReferencesMemo
+  memo: ReferencesMemo,
+  mode: ReferenceMode
 ): void {
   if (isSymbol(expr)) {
     const s = expr.symbol;
     if (s === 'Unknown' || s === 'Undefined' || s === 'Nothing') return;
 
     if (expr.valueDefinition?.isConstant) return;
+
+    // Every user name read is a reference, with a value or not, a function
+    // or not (`ReferenceMode`). Only a name of the standard library is left
+    // out: the `Add` of `Reduce(L, Add)`.
+    if (mode === 'references') {
+      const bound = expr.valueDefinition ?? expr.operatorDefinition;
+      // An unbound occurrence (a raw form) has no definition of its own: the
+      // binding its name resolves to says whether it is a constant (a bound
+      // constant was left out above).
+      const looked =
+        bound === undefined ? expr.engine.lookupDefinition(s) : undefined;
+      if (looked !== undefined && 'value' in looked && looked.value.isConstant)
+        return;
+      if (!isLibraryDefinition(expr.engine, s, bound ?? looked))
+        freeVars.add(s);
+      return;
+    }
 
     if (expr.operatorDefinition) return;
 
@@ -2039,7 +2124,7 @@ function collectReferences(
   // keys are strings, not symbols.
   if (isDictionary(expr)) {
     for (const value of expr.values)
-      getReferences(value, freeVars, refFns, memo);
+      getReferences(value, freeVars, refFns, memo, mode);
     return;
   }
 
@@ -2049,7 +2134,7 @@ function collectReferences(
   // predicate a free variable would. It is referenced at *this* level, so it
   // is added directly (an enclosing binder filters it via the inner-set
   // threading below, exactly like a free variable).
-  if (isReferencedFunctionHead(expr.engine, expr.operator))
+  if (mode === 'references' && isReferencedFunctionHead(expr))
     refFns.add(expr.operator);
 
   // A `Function` literal `["Function", body, ...params]` binds its trailing
@@ -2073,7 +2158,7 @@ function collectReferences(
         params.add(name);
     const innerFree = new Set<string>();
     const innerRef = new Set<string>();
-    if (ops.length > 0) getReferences(ops[0], innerFree, innerRef, memo);
+    if (ops.length > 0) getReferences(ops[0], innerFree, innerRef, memo, mode);
     for (const s of innerFree) if (!params.has(s)) freeVars.add(s);
     for (const s of innerRef) if (!params.has(s)) refFns.add(s);
     return;
@@ -2134,7 +2219,7 @@ function collectReferences(
       op.ops.forEach((child, j) => {
         const childFree = new Set<string>();
         const childRef = new Set<string>();
-        getReferences(child, childFree, childRef, memo);
+        getReferences(child, childFree, childRef, memo, mode);
         const bound = (s: string): boolean =>
           (indexVars.has(s) &&
             boundIn(s, i) &&
@@ -2159,8 +2244,8 @@ function collectReferences(
       op.operator === 'Function' &&
       op.ops.length > 0
     )
-      getReferences(op.ops[0], innerFree, innerRef, memo);
-    else getReferences(op, innerFree, innerRef, memo);
+      getReferences(op.ops[0], innerFree, innerRef, memo, mode);
+    else getReferences(op, innerFree, innerRef, memo, mode);
     if (indexVars.size === 0 && localVars.size === 0) {
       for (const s of innerFree) freeVars.add(s);
       for (const s of innerRef) refFns.add(s);
