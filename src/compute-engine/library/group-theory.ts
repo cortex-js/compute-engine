@@ -1,0 +1,774 @@
+import { PermutationQuerySession } from '../group-theory/permutation/query-session.js';
+import { exactGroupDefinitions } from './finite-group-theory.js';
+import type {
+  Expression,
+  IComputeEngine,
+  OperatorDefinition,
+} from '../global-types.js';
+import {
+  isFunction,
+  isNumber,
+  isSymbol,
+} from '../boxed-expression/type-guards.js';
+import { checkDeadline } from '../../common/interruptible.js';
+import {
+  PermutationValue,
+  PermutationAction,
+  PermutationInputError,
+  degreeLimit,
+  composePermutations,
+  inversePermutation,
+  applyPermutation,
+  assertPermutationFits,
+} from '../group-theory/permutation/values.js';
+
+import {
+  PermutationGroupValue,
+  permutationGroupLimits,
+  enumeratePermutationGroup,
+  permutationClosureLimits,
+  PermutationClosureLimitError,
+  type PermutationGroupWork,
+} from '../group-theory/permutation/groups.js';
+
+import {
+  PermutationOrbitTree,
+  PermutationOrbitLimitError,
+  permutationOrbitLimits,
+  permutationOrbits,
+  permutationTransversalLimits,
+} from '../group-theory/permutation/orbits.js';
+
+import { toBigint } from '../boxed-expression/numerics.js';
+import {
+  permutationCycles,
+  permutationElementOrder,
+  permutationPower,
+  conjugatePermutation,
+  permutationCommutator,
+} from '../group-theory/permutation/element-operations.js';
+import {
+  PermutationChainLimitError,
+  permutationChainLimits,
+  permutationPointStabilizer,
+  permutationGroupRelation,
+  permutationGroupIsAbelian,
+} from '../group-theory/permutation/stabilizer-chain.js';
+
+const NAMES = [
+  'Permutation',
+  'PermutationAction',
+  'PermutationCompose',
+  'PermutationInverse',
+  'PermutationApply',
+  'PermutationInAction',
+  'PermutationGroup',
+  'PermutationGroupElements',
+  'PermutationOrbit',
+  'PermutationOrbits',
+  'PermutationTransversal',
+  'PermutationCycles',
+  'PermutationOrder',
+  'PermutationPower',
+  'PermutationConjugate',
+  'PermutationCommutator',
+  'PermutationGroupGenerators',
+  'PermutationGroupIdentity',
+  'PermutationGroupOrder',
+  'PermutationGroupContains',
+  'PermutationPointStabilizer',
+  'PermutationIsSubgroup',
+  'PermutationSubgroupIndex',
+  'PermutationGroupEqual',
+  'PermutationIsNormal',
+  'PermutationGroupIsAbelian',
+];
+
+/**
+ * Opt-in foundation experiment. The nominal types have checked constructors;
+ * every operation also decodes its operands, including forged MathJSON heads.
+ * This installer is intentionally not part of the default library bundle.
+ */
+export function installPermutationFoundation(
+  ce: IComputeEngine,
+  options: {
+    maxDegree?: number;
+    maxGenerators?: number;
+    maxGeneratorImages?: number;
+    maxClosureImageWork?: number;
+    maxClosureStoredImages?: number;
+    maxTransversalImageWork?: number;
+    maxTransversalStoredImages?: number;
+    maxChainLevels?: number;
+    maxChainOrbitPoints?: number;
+    maxChainStoredImages?: number;
+  } = {}
+): void {
+  const maxDegree = degreeLimit(options);
+  const groupLimits = permutationGroupLimits(options);
+  const closureLimits = permutationClosureLimits({
+    maxElements: 1,
+    maxProducts: 0,
+    maxImageWork: options.maxClosureImageWork,
+    maxStoredImages: options.maxClosureStoredImages,
+  });
+  const transversalLimits = permutationTransversalLimits({
+    maxProducts: 0,
+    maxImageWork: options.maxTransversalImageWork,
+    maxStoredImages: options.maxTransversalStoredImages,
+  });
+  const chainLimits = permutationChainLimits({
+    maxWork: 0,
+    maxLevels: options.maxChainLevels,
+    maxOrbitPoints: options.maxChainOrbitPoints,
+    maxStoredImages: options.maxChainStoredImages,
+  });
+  for (const name of NAMES) {
+    if (ce.lookupDefinition(name)) throw new Error(`Already defined: ${name}`);
+  }
+  const work: PermutationGroupWork = {
+    maxDegree,
+    ...groupLimits,
+    check: () => checkDeadline(ce._deadlineFrame),
+  };
+  const queries = new PermutationQuerySession();
+  const queryPermutation = (
+    value: PermutationGroupValue,
+    kind: 'order' | 'contains' | 'abelian',
+    maxWork: number,
+    element?: PermutationValue
+  ): bigint | boolean => {
+    const requested = permutationChainLimits({ ...chainLimits, maxWork });
+    if (kind === 'order') return queries.order(value, requested, work);
+    if (kind === 'contains')
+      return queries.contains(value, element!, requested, work);
+    return permutationGroupIsAbelian(value, requested, work);
+  };
+  const fail = (code: string): never => {
+    throw new PermutationInputError(code);
+  };
+  const adapt = (
+    body: () => Expression | undefined
+  ): Expression | undefined => {
+    try {
+      return body();
+    } catch (error) {
+      if (
+        error instanceof PermutationInputError ||
+        error instanceof PermutationClosureLimitError ||
+        error instanceof PermutationOrbitLimitError ||
+        error instanceof PermutationChainLimitError
+      )
+        return ce.error(error.code);
+      throw error;
+    }
+  };
+  const arity = (ops: readonly Expression[], count: number): void => {
+    if (ops.length !== count) fail('invalid-permutation-arity');
+  };
+  const integer = (value: Expression, defer = false): number | undefined => {
+    if (isNumber(value)) {
+      if (value.isInteger !== true || !Number.isSafeInteger(value.re))
+        fail('invalid-permutation-integer');
+      return value.re;
+    }
+    if (isSymbol(value))
+      return defer || !value.isConstant
+        ? undefined
+        : fail('invalid-permutation-integer');
+    if (isFunction(value) && (defer || !value.isConstant)) return undefined;
+    return fail('invalid-permutation-integer');
+  };
+  const readImages = (
+    value: Expression,
+    defer = false
+  ): number[] | undefined => {
+    if (isSymbol(value))
+      return defer || !value.isConstant
+        ? undefined
+        : fail('expected-explicit-permutation-images');
+    // Boxing never executes a producer such as ListFrom; evaluation checks its result.
+    if (defer && isFunction(value) && value.operator !== 'List')
+      return undefined;
+    if (!isFunction(value, 'List'))
+      return fail('expected-explicit-permutation-images');
+    if (value.ops.length > maxDegree) return fail('permutation-degree-limit');
+    const result: number[] = [];
+    let unresolved = false;
+    for (let i = 0; i < value.ops.length; i++) {
+      if ((i & 1023) === 0) work.check?.();
+      const point = integer(value.ops[i], defer);
+      if (point === undefined) unresolved = true;
+      else result.push(point);
+    }
+    return unresolved ? undefined : result;
+  };
+  const readPermutation = (
+    value: Expression,
+    defer = false
+  ): PermutationValue | undefined => {
+    if (isSymbol(value))
+      return !value.isConstant
+        ? undefined
+        : fail('incompatible-permutation-domain');
+    if (defer && isFunction(value) && value.operator !== 'Permutation')
+      return undefined;
+    if (!isFunction(value, 'Permutation'))
+      return fail('incompatible-permutation-domain');
+    arity(value.ops, 1);
+    const images = readImages(value.op1, defer);
+    return images === undefined
+      ? undefined
+      : new PermutationValue(images, work);
+  };
+  const readAction = (
+    value: Expression,
+    defer = false
+  ): PermutationAction | undefined => {
+    if (isSymbol(value))
+      return !value.isConstant
+        ? undefined
+        : fail('incompatible-permutation-domain');
+    if (defer && isFunction(value) && value.operator !== 'PermutationAction')
+      return undefined;
+    if (!isFunction(value, 'PermutationAction'))
+      return fail('incompatible-permutation-domain');
+    arity(value.ops, 1);
+    const n = integer(value.op1, defer);
+    return n === undefined ? undefined : new PermutationAction(n, work);
+  };
+  const encode = (value: PermutationValue): Expression =>
+    ce._fn('Permutation', [
+      ce.function(
+        'List',
+        value.images.map((x, i) => {
+          if ((i & 1023) === 0) work.check?.();
+          return ce.number(x);
+        })
+      ),
+    ]);
+
+  const permutation = (
+    ops: readonly Expression[],
+    defer = false
+  ): Expression | undefined =>
+    adapt(() => {
+      arity(ops, 1);
+      const images = readImages(ops[0], defer);
+      return images === undefined
+        ? undefined
+        : encode(new PermutationValue(images, work));
+    });
+  const action = (
+    ops: readonly Expression[],
+    defer = false
+  ): Expression | undefined =>
+    adapt(() => {
+      arity(ops, 1);
+      const n = integer(ops[0], defer);
+      if (n === undefined) return undefined;
+      const value = new PermutationAction(n, work);
+      return ce._fn('PermutationAction', [ce.number(value.degree)]);
+    });
+  const groupFromOperands = (
+    ops: readonly Expression[],
+    defer = false
+  ): PermutationGroupValue | undefined => {
+    arity(ops, 2);
+    const action = readAction(ops[1], defer);
+    const input = ops[0];
+    if (isSymbol(input) && (defer || !input.isConstant)) return undefined;
+    if (defer && isFunction(input) && input.operator !== 'List')
+      return undefined;
+    if (!isFunction(input, 'List'))
+      return fail('expected-explicit-permutation-generators');
+    if (input.ops.length > groupLimits.maxGenerators)
+      return fail('permutation-generator-limit');
+    const generators: PermutationValue[] = [];
+    let unresolved = action === undefined,
+      images = 0;
+    for (const item of input.ops) {
+      work.check?.();
+      const generator = readPermutation(item, defer);
+      if (!generator) {
+        unresolved = true;
+        continue;
+      }
+      images += generator.supportDegree;
+      if (images > groupLimits.maxGeneratorImages)
+        return fail('permutation-generator-image-limit');
+      if (action) assertPermutationFits(generator, action, work);
+      generators.push(generator);
+    }
+    return unresolved || !action
+      ? undefined
+      : new PermutationGroupValue(generators, action, work);
+  };
+  const encodeGroup = (value: PermutationGroupValue): Expression =>
+    ce._fn('PermutationGroup', [
+      ce.function(
+        'List',
+        value.generators.map((generator) => {
+          work.check?.();
+          return encode(generator);
+        })
+      ),
+      ce._fn('PermutationAction', [ce.number(value.action.degree)]),
+    ]);
+  const group = (
+    ops: readonly Expression[],
+    defer = false
+  ): Expression | undefined =>
+    adapt(() => {
+      const value = groupFromOperands(ops, defer);
+      return value ? encodeGroup(value) : undefined;
+    });
+  const readGroup = (value: Expression): PermutationGroupValue | undefined => {
+    if (isSymbol(value) && !value.isConstant) return undefined;
+    if (!isFunction(value, 'PermutationGroup'))
+      return fail('invalid-permutation-group');
+    return groupFromOperands(value.ops);
+  };
+  const encodePoints = (points: readonly number[]): Expression =>
+    ce.function(
+      'List',
+      points.map((point) => {
+        work.check?.();
+        return ce.number(point);
+      })
+    );
+  const orbitQuery = (
+    ops: readonly Expression[],
+    kind: 'orbit' | 'orbits' | 'transversal'
+  ): Expression | undefined =>
+    adapt(() => {
+      arity(ops, kind === 'orbits' ? 3 : kind === 'orbit' ? 4 : 5);
+      const offset = kind === 'orbits' ? 1 : 2;
+      const maxPoints = integer(ops[offset]),
+        maxEdges = integer(ops[offset + 1]);
+      if (maxPoints === undefined || maxEdges === undefined) return undefined;
+      const requested = permutationOrbitLimits({ maxPoints, maxEdges });
+      const value = readGroup(ops[0]);
+      if (!value) return undefined;
+      if (kind === 'orbits') {
+        return ce.function(
+          'List',
+          permutationOrbits(value, requested, work).map(encodePoints)
+        );
+      }
+      const point = integer(ops[1]);
+      if (point === undefined) return undefined;
+      // Validate every requested bound before starting the orbit search.
+      const maxProducts = kind === 'transversal' ? integer(ops[4]) : 0;
+      if (maxProducts === undefined) return undefined;
+      const products = permutationTransversalLimits({
+        ...transversalLimits,
+        maxProducts,
+      });
+      const orbit = PermutationOrbitTree.compute(value, point, requested, work);
+      if (kind === 'orbit') return encodePoints(orbit.points);
+      return ce.function(
+        'List',
+        orbit.transversal(products, work).map(([target, representative]) => {
+          work.check?.();
+          return ce.function('Tuple', [
+            ce.number(target),
+            encode(representative),
+          ]);
+        })
+      );
+    });
+  const chainQuery = (
+    ops: readonly Expression[],
+    kind:
+      | 'order'
+      | 'contains'
+      | 'stabilizer'
+      | 'subgroup'
+      | 'index'
+      | 'equal'
+      | 'normal'
+      | 'abelian'
+  ): Expression | undefined =>
+    adapt(() => {
+      arity(ops, kind === 'order' || kind === 'abelian' ? 2 : 3);
+      const maxWork = integer(ops[ops.length - 1]);
+      if (maxWork === undefined) return undefined;
+      const requested = permutationChainLimits({ ...chainLimits, maxWork });
+      const value = readGroup(ops[0]);
+      if (!value) return undefined;
+      if (kind === 'order')
+        return ce.number(queries.order(value, requested, work));
+      if (kind === 'abelian')
+        return permutationGroupIsAbelian(value, requested, work)
+          ? ce.True
+          : ce.False;
+      if (kind === 'contains') {
+        const element = readPermutation(ops[1]);
+        if (!element) return undefined;
+        return queries.contains(value, element, requested, work)
+          ? ce.True
+          : ce.False;
+      }
+      if (kind === 'stabilizer') {
+        const point = integer(ops[1]);
+        return point === undefined
+          ? undefined
+          : encodeGroup(
+              permutationPointStabilizer(value, point, requested, work)
+            );
+      }
+      const other = readGroup(ops[1]);
+      if (!other) return undefined;
+      const result = permutationGroupRelation(
+        value,
+        other,
+        kind,
+        requested,
+        work
+      );
+      return typeof result === 'bigint'
+        ? ce.number(result)
+        : result
+          ? ce.True
+          : ce.False;
+    });
+  const elementQuery = (
+    ops: readonly Expression[],
+    kind: 'cycles' | 'order' | 'power' | 'conjugate' | 'commutator'
+  ): Expression | undefined =>
+    adapt(() => {
+      arity(ops, kind === 'cycles' || kind === 'order' ? 1 : 2);
+      const value = readPermutation(ops[0]);
+      if (!value) return undefined;
+      if (kind === 'cycles')
+        return ce.function(
+          'List',
+          permutationCycles(value, work).map(encodePoints)
+        );
+      if (kind === 'order')
+        return ce.number(permutationElementOrder(value, work));
+      if (kind === 'power') {
+        if (isNumber(ops[1]) && ops[1].isInteger !== true)
+          return fail('invalid-permutation-exponent');
+        const exponent = toBigint(ops[1]);
+        if (exponent === null) {
+          if (!ops[1].isConstant) return undefined;
+          return fail('invalid-permutation-exponent');
+        }
+        return encode(permutationPower(value, exponent, work));
+      }
+      const other = readPermutation(ops[1]);
+      if (!other) return undefined;
+      return encode(
+        kind === 'conjugate'
+          ? conjugatePermutation(value, other, work)
+          : permutationCommutator(value, other, work)
+      );
+    });
+  const definitions: Record<string, OperatorDefinition> = {
+    PermutationCycles: {
+      signature: '(Permutation) -> list<list<integer>>',
+      pure: true,
+      evaluate: (ops) => elementQuery(ops, 'cycles'),
+    },
+    PermutationOrder: {
+      signature: '(Permutation) -> integer',
+      pure: true,
+      evaluate: (ops) => elementQuery(ops, 'order'),
+    },
+    PermutationPower: {
+      signature: '(Permutation, integer) -> Permutation',
+      pure: true,
+      evaluate: (ops) => elementQuery(ops, 'power'),
+    },
+    PermutationConjugate: {
+      signature: '(Permutation, Permutation) -> Permutation',
+      pure: true,
+      evaluate: (ops) => elementQuery(ops, 'conjugate'),
+    },
+    PermutationCommutator: {
+      signature: '(Permutation, Permutation) -> Permutation',
+      pure: true,
+      evaluate: (ops) => elementQuery(ops, 'commutator'),
+    },
+    PermutationGroupGenerators: {
+      signature: '(PermutationGroup) -> list<Permutation>',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          arity(ops, 1);
+          const value = readGroup(ops[0]);
+          return value
+            ? ce.function(
+                'List',
+                value.generators.map((g) => {
+                  work.check?.();
+                  return encode(g);
+                })
+              )
+            : undefined;
+        }),
+    },
+    PermutationGroupIdentity: {
+      signature: '(PermutationGroup) -> Permutation',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          arity(ops, 1);
+          return readGroup(ops[0])
+            ? encode(new PermutationValue([], work))
+            : undefined;
+        }),
+    },
+    PermutationGroupOrder: {
+      signature: '(PermutationGroup, integer) -> integer',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'order'),
+    },
+    PermutationGroupContains: {
+      signature: '(PermutationGroup, Permutation, integer) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'contains'),
+    },
+    PermutationPointStabilizer: {
+      signature: '(PermutationGroup, integer, integer) -> PermutationGroup',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'stabilizer'),
+    },
+    PermutationIsSubgroup: {
+      signature: '(PermutationGroup, PermutationGroup, integer) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'subgroup'),
+    },
+    PermutationSubgroupIndex: {
+      signature: '(PermutationGroup, PermutationGroup, integer) -> integer',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'index'),
+    },
+    PermutationGroupEqual: {
+      signature: '(PermutationGroup, PermutationGroup, integer) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'equal'),
+    },
+    PermutationIsNormal: {
+      signature: '(PermutationGroup, PermutationGroup, integer) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'normal'),
+    },
+    PermutationGroupIsAbelian: {
+      signature: '(PermutationGroup, integer) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'abelian'),
+    },
+    PermutationOrbit: {
+      signature:
+        '(PermutationGroup, integer, integer, integer) -> list<integer>',
+      pure: true,
+      evaluate: (ops) => orbitQuery(ops, 'orbit'),
+    },
+    PermutationOrbits: {
+      signature: '(PermutationGroup, integer, integer) -> list<list<integer>>',
+      pure: true,
+      evaluate: (ops) => orbitQuery(ops, 'orbits'),
+    },
+    PermutationTransversal: {
+      signature:
+        '(PermutationGroup, integer, integer, integer, integer) -> list<tuple<integer, Permutation>>',
+      pure: true,
+      evaluate: (ops) => orbitQuery(ops, 'transversal'),
+    },
+    PermutationGroup: {
+      signature: '(any, PermutationAction) -> PermutationGroup',
+      pure: true,
+      invokes: false,
+      canonical: (ops) => group(ops, true) ?? ce._fn('PermutationGroup', ops),
+      evaluate: (ops) => group(ops),
+      // No injective-constructor equality: distinct generators may generate
+      // the same subgroup, and deciding that is an explicit future query.
+    },
+    PermutationGroupElements: {
+      signature: '(PermutationGroup, integer, integer) -> list<Permutation>',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          arity(ops, 3);
+          const maxElements = integer(ops[1]),
+            maxProducts = integer(ops[2]);
+          if (maxElements === undefined || maxProducts === undefined)
+            return undefined;
+          const requested = permutationClosureLimits({
+            ...closureLimits,
+            maxElements,
+            maxProducts,
+          });
+          const value = readGroup(ops[0]);
+          if (!value) return undefined;
+          const elements = enumeratePermutationGroup(value, requested, work);
+          return ce.function(
+            'List',
+            elements.map((element) => {
+              work.check?.();
+              return encode(element);
+            })
+          );
+        }),
+    },
+    Permutation: {
+      signature: '(any) -> Permutation',
+      pure: true,
+      invokes: false,
+      canonical: (ops) => permutation(ops, true) ?? ce._fn('Permutation', ops),
+      evaluate: (ops) => permutation(ops),
+      eq: (a, b) => {
+        if (!isFunction(a, 'Permutation') || !isFunction(b, 'Permutation'))
+          return undefined;
+        try {
+          const left = readPermutation(a),
+            right = readPermutation(b);
+          if (!left || !right) return undefined;
+          return (
+            left.supportDegree === right.supportDegree &&
+            left.images.every((x, i) => x === right.images[i])
+          );
+        } catch (error) {
+          if (error instanceof PermutationInputError) return undefined;
+          throw error;
+        }
+      },
+    },
+    PermutationAction: {
+      signature: '(integer) -> PermutationAction',
+      pure: true,
+      invokes: false,
+      canonical: (ops) => action(ops, true) ?? ce._fn('PermutationAction', ops),
+      evaluate: (ops) => action(ops),
+      eq: (a, b) => {
+        if (
+          !isFunction(a, 'PermutationAction') ||
+          !isFunction(b, 'PermutationAction')
+        )
+          return undefined;
+        try {
+          const left = readAction(a),
+            right = readAction(b);
+          return left && right ? left.degree === right.degree : undefined;
+        } catch (error) {
+          if (error instanceof PermutationInputError) return undefined;
+          throw error;
+        }
+      },
+    },
+    PermutationCompose: {
+      signature: '(Permutation, Permutation) -> Permutation',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          arity(ops, 2);
+          const left = readPermutation(ops[0]),
+            right = readPermutation(ops[1]);
+          return left && right
+            ? encode(composePermutations(left, right, work))
+            : undefined;
+        }),
+    },
+    PermutationInverse: {
+      signature: '(Permutation) -> Permutation',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          arity(ops, 1);
+          const value = readPermutation(ops[0]);
+          return value ? encode(inversePermutation(value, work)) : undefined;
+        }),
+    },
+    PermutationInAction: {
+      signature: '(Permutation, PermutationAction) -> Permutation',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          arity(ops, 2);
+          const value = readPermutation(ops[0]),
+            domain = readAction(ops[1]);
+          if (!value || !domain) return undefined;
+          assertPermutationFits(value, domain, work);
+          return encode(value);
+        }),
+    },
+    PermutationApply: {
+      signature: '(Permutation, integer, PermutationAction) -> integer',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          arity(ops, 3);
+          const value = readPermutation(ops[0]),
+            point = integer(ops[1]),
+            domain = readAction(ops[2]);
+          if (!value || point === undefined || !domain) return undefined;
+          return ce.number(applyPermutation(value, point, domain, work));
+        }),
+    },
+  };
+  Object.assign(
+    definitions,
+    exactGroupDefinitions(ce, {
+      readPermutation,
+      readGroup,
+      encodePermutation: encode,
+      encodeGroup,
+      queryPermutation,
+      queryPermutationRelation: (g, h, query, maxWork) =>
+        permutationGroupRelation(
+          g,
+          h,
+          query,
+          permutationChainLimits({ ...chainLimits, maxWork }),
+          work
+        ),
+    })
+  );
+  for (const name of Object.keys(definitions)) {
+    if (ce.lookupDefinition(name)) throw new Error(`Already defined: ${name}`);
+  }
+  // Roll back both types and operators if any registration fails. Checkpoints
+  // also own the installed definitions; no module-global registry is needed.
+  const checkpoint = ce.checkpoint();
+  try {
+    ce.declareType(
+      'GroupMatrix',
+      'tuple<characteristic: integer, rows: list<list<rational>>>',
+      { mint: false }
+    );
+    ce.declareType(
+      'MatrixGroup',
+      'tuple<dimension: integer, characteristic: integer, generators: list<GroupMatrix>>',
+      { mint: false }
+    );
+    ce.declareType(
+      'GroupPcSequence',
+      'tuple<group: any, sequence: list<any>, maxElements: integer, maxWork: integer>',
+      { mint: false }
+    );
+    ce.declareType('Permutation', 'tuple<images: list<integer>>', {
+      mint: false,
+    });
+    ce.declareType('PermutationAction', 'tuple<degree: integer>', {
+      mint: false,
+    });
+    ce.declareType(
+      'PermutationGroup',
+      'tuple<generators: list<Permutation>, action: PermutationAction>',
+      { mint: false }
+    );
+    for (const [name, definition] of Object.entries(definitions))
+      ce.declare(name, definition);
+  } catch (error) {
+    ce.restore(checkpoint);
+    throw error;
+  } finally {
+    ce.discard(checkpoint);
+  }
+}
+
+/** Opt-in Epsil group library, including permutation, finite, matrix and pcgs operations. */
+export const installGroupTheory = installPermutationFoundation;

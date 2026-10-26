@@ -1064,7 +1064,7 @@ export class ComputeEngine implements IComputeEngine {
    * same name in the same scope (nominal-types design §4.1): `point(1, 2)` is
    * how a nominal type is inhabited. Minting is unconditional per the design;
    * `mint: false` is an internal escape hatch for a declaration that must not
-   * claim the value name (no caller uses it today).
+   * claim the value name, allowing a separately defined checked constructor.
    */
   declareType(
     name: string,

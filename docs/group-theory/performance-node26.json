@@ -1,0 +1,793 @@
+{
+  "date": "2026-10-26",
+  "timezone": "America/Chicago",
+  "baselineBundleSha256": "80325d56170bd56eeb24b60a3439166796d0cc4ad8cf02cae29011a2016d620d",
+  "runs": {
+    "baselineFirst": [
+      {
+        "node": "v26.12.1",
+        "cpu": "Intel(R) Core(TM) Ultra 7 165U",
+        "method": "5 warm-ups + 15 measured runs; preconstructed descriptors; no deadline callback; kernel timings, not Epsil latency"
+      },
+      {
+        "name": "S4 verified chain construction",
+        "median_ms": 0.114,
+        "min_ms": 0.081,
+        "max_ms": 0.827,
+        "runs": 15,
+        "result": {
+          "order": "24",
+          "work": 1477
+        }
+      },
+      {
+        "name": "S4 complete finite model",
+        "median_ms": 0.467,
+        "min_ms": 0.37,
+        "max_ms": 2.154,
+        "runs": 15,
+        "result": {
+          "order": 24,
+          "work": 19812
+        }
+      },
+      {
+        "name": "S5 verified chain construction",
+        "median_ms": 0.197,
+        "min_ms": 0.118,
+        "max_ms": 2.903,
+        "runs": 15,
+        "result": {
+          "order": "120",
+          "work": 3177
+        }
+      },
+      {
+        "name": "S5 complete finite model",
+        "median_ms": 12.822,
+        "min_ms": 11.699,
+        "max_ms": 15.969,
+        "runs": 15,
+        "result": {
+          "order": 120,
+          "work": 1887108
+        }
+      },
+      {
+        "name": "S10 verified chain construction",
+        "median_ms": 1.142,
+        "min_ms": 0.91,
+        "max_ms": 2.234,
+        "runs": 15,
+        "result": {
+          "order": "3628800",
+          "work": 43997
+        }
+      },
+      {
+        "name": "S20 verified chain construction",
+        "median_ms": 11.619,
+        "min_ms": 10.304,
+        "max_ms": 19.067,
+        "runs": 15,
+        "result": {
+          "order": "2432902008176640000",
+          "work": 532521
+        }
+      },
+      {
+        "name": "S4 subgroup lattice, table already built",
+        "median_ms": 2.085,
+        "min_ms": 1.945,
+        "max_ms": 2.913,
+        "runs": 15,
+        "result": {
+          "subgroups": 30,
+          "work": 56037
+        }
+      },
+      {
+        "name": "S4 automatic pcgs, table already built",
+        "median_ms": 2.512,
+        "min_ms": 2.293,
+        "max_ms": 5.129,
+        "runs": 15,
+        "result": {
+          "relativeOrders": [
+            2,
+            3,
+            2,
+            2
+          ],
+          "work": 70287
+        }
+      },
+      {
+        "name": "C256 exhaustive table validation only",
+        "median_ms": 62.525,
+        "min_ms": 55.04,
+        "max_ms": 176.882,
+        "runs": 15,
+        "result": {
+          "order": 256,
+          "work": 16908289
+        }
+      },
+      {
+        "name": "S20 100 membership sifts with existing chain",
+        "median_ms": 0.519,
+        "min_ms": 0.483,
+        "max_ms": 0.942,
+        "runs": 15,
+        "result": {
+          "queries": 100
+        }
+      },
+      {
+        "name": "GL(3,2) vector action plus verified chain",
+        "median_ms": 1.066,
+        "min_ms": 0.727,
+        "max_ms": 2.03,
+        "runs": 15,
+        "result": {
+          "order": "168",
+          "work": 13594
+        }
+      },
+      {
+        "name": "GL(4,2) vector action plus verified chain",
+        "median_ms": 5.227,
+        "min_ms": 4.683,
+        "max_ms": 6.102,
+        "runs": 15,
+        "result": {
+          "order": "20160",
+          "work": 232789
+        }
+      },
+      {
+        "name": "C2^5 subgroup lattice, one attempt",
+        "elapsed_ms": 30.742299999999886,
+        "subgroups": 374,
+        "work": 1069877
+      },
+      {
+        "name": "C2^6 lattice, one attempt",
+        "elapsed_ms": 1103.5843,
+        "subgroups": 2825,
+        "work": 35808437
+      },
+      {
+        "name": "C2^7 lattice, one attempt",
+        "elapsed_ms": 49.96969999999965,
+        "error": "Error: subgroup-count-limit",
+        "work": 993131
+      },
+      {
+        "name": "Epsil S5 generic order",
+        "median_ms": 16.354100000000017,
+        "min_ms": 15.60109999999986,
+        "max_ms": 28.504100000000108,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S5 specialized order",
+        "median_ms": 2.1525000000001455,
+        "min_ms": 1.9990000000007058,
+        "max_ms": 3.5239000000001397,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S20 specialized order",
+        "median_ms": 16.157200000000557,
+        "min_ms": 14.584600000000137,
+        "max_ms": 22.758600000000115,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "C2^7 automatic pcgs, table already built",
+        "error": "Error: subgroup-count-limit"
+      }
+    ],
+    "optimizedIntermediate": [
+      {
+        "node": "v26.12.1",
+        "v8": "14.6.202.34-node.40",
+        "mode": "bench"
+      },
+      {
+        "node": "v26.12.1",
+        "v8": "14.6.202.34-node.40",
+        "platform": "win32",
+        "arch": "x64",
+        "cpu": "Intel(R) Core(TM) Ultra 7 165U",
+        "build": "minified ES2022 ESM, production, no TypeScript loader",
+        "method": "5 warm-ups + 15 measured runs; preconstructed descriptors; no deadline callback; kernel timings, not Epsil latency"
+      },
+      {
+        "name": "S4 verified chain construction",
+        "median_ms": 0.119,
+        "min_ms": 0.084,
+        "max_ms": 0.88,
+        "runs": 15,
+        "result": {
+          "order": "24",
+          "work": 1547
+        }
+      },
+      {
+        "name": "S4 complete finite model",
+        "median_ms": 0.387,
+        "min_ms": 0.316,
+        "max_ms": 1.572,
+        "runs": 15,
+        "result": {
+          "order": 24,
+          "work": 5988
+        }
+      },
+      {
+        "name": "S5 verified chain construction",
+        "median_ms": 0.301,
+        "min_ms": 0.177,
+        "max_ms": 0.416,
+        "runs": 15,
+        "result": {
+          "order": "120",
+          "work": 3299
+        }
+      },
+      {
+        "name": "S5 complete finite model",
+        "median_ms": 6.966,
+        "min_ms": 6.187,
+        "max_ms": 8.986,
+        "runs": 15,
+        "result": {
+          "order": 120,
+          "work": 159108
+        }
+      },
+      {
+        "name": "S10 verified chain construction",
+        "median_ms": 1.346,
+        "min_ms": 1.094,
+        "max_ms": 2.231,
+        "runs": 15,
+        "result": {
+          "order": "3628800",
+          "work": 44719
+        }
+      },
+      {
+        "name": "S20 verified chain construction",
+        "median_ms": 14.217,
+        "min_ms": 13.213,
+        "max_ms": 17.64,
+        "runs": 15,
+        "result": {
+          "order": "2432902008176640000",
+          "work": 537335
+        }
+      },
+      {
+        "name": "S4 subgroup lattice, table already built",
+        "median_ms": 0.671,
+        "min_ms": 0.597,
+        "max_ms": 1.114,
+        "runs": 15,
+        "result": {
+          "subgroups": 30,
+          "work": 9381
+        }
+      },
+      {
+        "name": "S4 automatic pcgs, table already built",
+        "median_ms": 0.135,
+        "min_ms": 0.122,
+        "max_ms": 0.184,
+        "runs": 15,
+        "result": {
+          "relativeOrders": [
+            2,
+            3,
+            2,
+            2
+          ],
+          "work": 4467
+        }
+      },
+      {
+        "name": "C256 exhaustive table validation only",
+        "median_ms": 85.762,
+        "min_ms": 82.106,
+        "max_ms": 105.804,
+        "runs": 15,
+        "result": {
+          "order": 256,
+          "work": 16908289
+        }
+      },
+      {
+        "name": "S20 100 membership sifts with existing chain",
+        "median_ms": 0.438,
+        "min_ms": 0.418,
+        "max_ms": 1.373,
+        "runs": 15,
+        "result": {
+          "queries": 100
+        }
+      },
+      {
+        "name": "GL(3,2) vector action plus verified chain",
+        "median_ms": 1.291,
+        "min_ms": 0.987,
+        "max_ms": 5.539,
+        "runs": 15,
+        "result": {
+          "order": "168",
+          "work": 13879
+        }
+      },
+      {
+        "name": "GL(4,2) vector action plus verified chain",
+        "median_ms": 7.705,
+        "min_ms": 6.594,
+        "max_ms": 11.424,
+        "runs": 15,
+        "result": {
+          "order": "20160",
+          "work": 234010
+        }
+      },
+      {
+        "name": "C2^5 subgroup lattice, one attempt",
+        "elapsed_ms": 13.832500000000437,
+        "subgroups": 374,
+        "work": 129440
+      },
+      {
+        "name": "C2^6 lattice, one attempt",
+        "elapsed_ms": 89.32139999999981,
+        "subgroups": 2825,
+        "work": 2353874
+      },
+      {
+        "name": "C2^7 lattice, one attempt",
+        "elapsed_ms": 40.392799999999625,
+        "error": "Error: subgroup-count-limit",
+        "work": 334919
+      },
+      {
+        "name": "Epsil S5 generic order",
+        "median_ms": 4.922199999999975,
+        "min_ms": 4.3629000000000815,
+        "max_ms": 7.1851000000006024,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S5 specialized order",
+        "median_ms": 3.337999999999738,
+        "min_ms": 3.181800000000294,
+        "max_ms": 5.825600000000122,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S20 specialized order",
+        "median_ms": 26.078099999999722,
+        "min_ms": 23.940200000000004,
+        "max_ms": 32.29500000000007,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "C2^7 automatic pcgs, table already built",
+        "median_ms": 0.688,
+        "min_ms": 0.55,
+        "max_ms": 0.96,
+        "runs": 3,
+        "result": {
+          "work": 10074
+        }
+      }
+    ],
+    "optimizedFinal": [
+      {
+        "node": "v26.12.1",
+        "v8": "14.6.202.34-node.40",
+        "mode": "bench"
+      },
+      {
+        "node": "v26.12.1",
+        "v8": "14.6.202.34-node.40",
+        "platform": "win32",
+        "arch": "x64",
+        "cpu": "Intel(R) Core(TM) Ultra 7 165U",
+        "build": "minified ES2022 ESM, production, no TypeScript loader",
+        "method": "5 warm-ups + 15 measured runs; preconstructed descriptors; no deadline callback; kernel timings, not Epsil latency"
+      },
+      {
+        "name": "S4 verified chain construction",
+        "median_ms": 0.1,
+        "min_ms": 0.079,
+        "max_ms": 1.024,
+        "runs": 15,
+        "result": {
+          "order": "24",
+          "work": 1477
+        }
+      },
+      {
+        "name": "S4 complete finite model",
+        "median_ms": 0.388,
+        "min_ms": 0.345,
+        "max_ms": 1.397,
+        "runs": 15,
+        "result": {
+          "order": 24,
+          "work": 5988
+        }
+      },
+      {
+        "name": "S5 verified chain construction",
+        "median_ms": 0.132,
+        "min_ms": 0.119,
+        "max_ms": 0.147,
+        "runs": 15,
+        "result": {
+          "order": "120",
+          "work": 3177
+        }
+      },
+      {
+        "name": "S5 complete finite model",
+        "median_ms": 6.87,
+        "min_ms": 5.608,
+        "max_ms": 9.43,
+        "runs": 15,
+        "result": {
+          "order": 120,
+          "work": 159108
+        }
+      },
+      {
+        "name": "S10 verified chain construction",
+        "median_ms": 1.034,
+        "min_ms": 0.911,
+        "max_ms": 2.748,
+        "runs": 15,
+        "result": {
+          "order": "3628800",
+          "work": 43997
+        }
+      },
+      {
+        "name": "S20 verified chain construction",
+        "median_ms": 12.909,
+        "min_ms": 10.281,
+        "max_ms": 16.958,
+        "runs": 15,
+        "result": {
+          "order": "2432902008176640000",
+          "work": 532521
+        }
+      },
+      {
+        "name": "S4 subgroup lattice, table already built",
+        "median_ms": 0.505,
+        "min_ms": 0.404,
+        "max_ms": 2.092,
+        "runs": 15,
+        "result": {
+          "subgroups": 30,
+          "work": 9381
+        }
+      },
+      {
+        "name": "S4 automatic pcgs, table already built",
+        "median_ms": 0.11,
+        "min_ms": 0.101,
+        "max_ms": 0.147,
+        "runs": 15,
+        "result": {
+          "relativeOrders": [
+            2,
+            3,
+            2,
+            2
+          ],
+          "work": 4467
+        }
+      },
+      {
+        "name": "C256 exhaustive table validation only",
+        "median_ms": 85.531,
+        "min_ms": 58.851,
+        "max_ms": 345.477,
+        "runs": 15,
+        "result": {
+          "order": 256,
+          "work": 16908289
+        }
+      },
+      {
+        "name": "S20 100 membership sifts with existing chain",
+        "median_ms": 0.479,
+        "min_ms": 0.453,
+        "max_ms": 1.124,
+        "runs": 15,
+        "result": {
+          "queries": 100
+        }
+      },
+      {
+        "name": "GL(3,2) vector action plus verified chain",
+        "median_ms": 1.204,
+        "min_ms": 0.781,
+        "max_ms": 4.352,
+        "runs": 15,
+        "result": {
+          "order": "168",
+          "work": 13594
+        }
+      },
+      {
+        "name": "GL(4,2) vector action plus verified chain",
+        "median_ms": 7.937,
+        "min_ms": 6.766,
+        "max_ms": 10.151,
+        "runs": 15,
+        "result": {
+          "order": "20160",
+          "work": 232789
+        }
+      },
+      {
+        "name": "C2^5 subgroup lattice, one attempt",
+        "elapsed_ms": 11.593500000000859,
+        "subgroups": 374,
+        "work": 129440
+      },
+      {
+        "name": "C2^6 lattice, one attempt",
+        "elapsed_ms": 96.8744000000006,
+        "subgroups": 2825,
+        "work": 2353874
+      },
+      {
+        "name": "C2^7 lattice, one attempt",
+        "elapsed_ms": 43.37129999999979,
+        "error": "Error: subgroup-count-limit",
+        "work": 334919
+      },
+      {
+        "name": "Epsil S5 generic order",
+        "median_ms": 6.164099999999962,
+        "min_ms": 3.7385999999996784,
+        "max_ms": 8.087800000000243,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S5 specialized order",
+        "median_ms": 3.5648000000001048,
+        "min_ms": 2.911399999999958,
+        "max_ms": 6.942200000000412,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S20 specialized order",
+        "median_ms": 24.967099999999846,
+        "min_ms": 23.519800000000032,
+        "max_ms": 27.10609999999997,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "C2^7 automatic pcgs, table already built",
+        "median_ms": 0.62,
+        "min_ms": 0.539,
+        "max_ms": 0.621,
+        "runs": 3,
+        "result": {
+          "work": 10074
+        }
+      }
+    ],
+    "baselineLast": [
+      {
+        "node": "v26.12.1",
+        "cpu": "Intel(R) Core(TM) Ultra 7 165U",
+        "method": "5 warm-ups + 15 measured runs; preconstructed descriptors; no deadline callback; kernel timings, not Epsil latency"
+      },
+      {
+        "name": "S4 verified chain construction",
+        "median_ms": 0.186,
+        "min_ms": 0.138,
+        "max_ms": 1.088,
+        "runs": 15,
+        "result": {
+          "order": "24",
+          "work": 1477
+        }
+      },
+      {
+        "name": "S4 complete finite model",
+        "median_ms": 0.785,
+        "min_ms": 0.541,
+        "max_ms": 10.731,
+        "runs": 15,
+        "result": {
+          "order": 24,
+          "work": 19812
+        }
+      },
+      {
+        "name": "S5 verified chain construction",
+        "median_ms": 0.227,
+        "min_ms": 0.213,
+        "max_ms": 0.741,
+        "runs": 15,
+        "result": {
+          "order": "120",
+          "work": 3177
+        }
+      },
+      {
+        "name": "S5 complete finite model",
+        "median_ms": 22.424,
+        "min_ms": 20.77,
+        "max_ms": 23.894,
+        "runs": 15,
+        "result": {
+          "order": 120,
+          "work": 1887108
+        }
+      },
+      {
+        "name": "S10 verified chain construction",
+        "median_ms": 1.975,
+        "min_ms": 1.587,
+        "max_ms": 2.755,
+        "runs": 15,
+        "result": {
+          "order": "3628800",
+          "work": 43997
+        }
+      },
+      {
+        "name": "S20 verified chain construction",
+        "median_ms": 22.94,
+        "min_ms": 19.435,
+        "max_ms": 53.136,
+        "runs": 15,
+        "result": {
+          "order": "2432902008176640000",
+          "work": 532521
+        }
+      },
+      {
+        "name": "S4 subgroup lattice, table already built",
+        "median_ms": 3.86,
+        "min_ms": 3.68,
+        "max_ms": 5.117,
+        "runs": 15,
+        "result": {
+          "subgroups": 30,
+          "work": 56037
+        }
+      },
+      {
+        "name": "S4 automatic pcgs, table already built",
+        "median_ms": 4.991,
+        "min_ms": 4.427,
+        "max_ms": 5.718,
+        "runs": 15,
+        "result": {
+          "relativeOrders": [
+            2,
+            3,
+            2,
+            2
+          ],
+          "work": 70287
+        }
+      },
+      {
+        "name": "C256 exhaustive table validation only",
+        "median_ms": 104.999,
+        "min_ms": 94.399,
+        "max_ms": 133.679,
+        "runs": 15,
+        "result": {
+          "order": 256,
+          "work": 16908289
+        }
+      },
+      {
+        "name": "S20 100 membership sifts with existing chain",
+        "median_ms": 0.966,
+        "min_ms": 0.716,
+        "max_ms": 2.537,
+        "runs": 15,
+        "result": {
+          "queries": 100
+        }
+      },
+      {
+        "name": "GL(3,2) vector action plus verified chain",
+        "median_ms": 2.504,
+        "min_ms": 0.916,
+        "max_ms": 10.215,
+        "runs": 15,
+        "result": {
+          "order": "168",
+          "work": 13594
+        }
+      },
+      {
+        "name": "GL(4,2) vector action plus verified chain",
+        "median_ms": 8.151,
+        "min_ms": 7.484,
+        "max_ms": 10.637,
+        "runs": 15,
+        "result": {
+          "order": "20160",
+          "work": 232789
+        }
+      },
+      {
+        "name": "C2^5 subgroup lattice, one attempt",
+        "elapsed_ms": 49.45739999999978,
+        "subgroups": 374,
+        "work": 1069877
+      },
+      {
+        "name": "C2^6 lattice, one attempt",
+        "elapsed_ms": 1862.0838999999996,
+        "subgroups": 2825,
+        "work": 35808437
+      },
+      {
+        "name": "C2^7 lattice, one attempt",
+        "elapsed_ms": 63.4385999999995,
+        "error": "Error: subgroup-count-limit",
+        "work": 993131
+      },
+      {
+        "name": "Epsil S5 generic order",
+        "median_ms": 31.462499999999636,
+        "min_ms": 25.95550000000003,
+        "max_ms": 37.48110000000088,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S5 specialized order",
+        "median_ms": 3.976699999999255,
+        "min_ms": 3.3704999999999927,
+        "max_ms": 7.717100000000755,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "Epsil S20 specialized order",
+        "median_ms": 24.90360000000055,
+        "min_ms": 22.053899999999885,
+        "max_ms": 27.69959999999992,
+        "runs": 7,
+        "scope": "fresh engine per trial; engine creation and library install excluded; parsing and evaluation included"
+      },
+      {
+        "name": "C2^7 automatic pcgs, table already built",
+        "error": "Error: subgroup-count-limit"
+      }
+    ]
+  }
+}

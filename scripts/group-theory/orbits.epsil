@@ -1,0 +1,15 @@
+// Run with the opt-in installer in orbit-probe.ts.
+function pointOrbit(g: PermutationGroup, point: integer) -> list<integer> {
+  PermutationOrbit(g, point, 5, 10)
+}
+
+function pointTransversal(g: PermutationGroup, point: integer) -> list<tuple<integer, Permutation>> {
+  PermutationTransversal(g, point, 5, 10, 4)
+}
+
+let G = PermutationGroup([Permutation([2, 1]), Permutation([1, 3, 2])], PermutationAction(5))
+let orbit = pointOrbit(G, 1)
+let partition = PermutationOrbits(G, 5, 10)
+let representatives = pointTransversal(G, 1)
+
+(orbit, partition, representatives)

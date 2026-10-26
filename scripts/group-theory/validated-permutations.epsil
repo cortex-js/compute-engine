@@ -1,0 +1,17 @@
+// Run with the opt-in installer in validated-probe.ts.
+function permutationSquare(x: Permutation) -> Permutation {
+  PermutationCompose(x, x)
+}
+
+let p = Permutation([2, 1, 3])
+let q = Permutation([1, 3, 2])
+let action = PermutationAction(3)
+
+(
+  PermutationCompose(p, q),
+  PermutationCompose(q, p),
+  PermutationInverse(PermutationCompose(p, q)),
+  permutationSquare(p),
+  PermutationApply(p, 3, action),
+  PermutationInAction(p, action)
+)
