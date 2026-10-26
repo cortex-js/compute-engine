@@ -18,7 +18,8 @@ The recommended first release supports exact finite permutation groups through a
 
 ## Baselines and evidence
 
-- Repository baseline: `origin/main`, commit `41240b5e90aee75fcf0a81360b66f464e2c16845`, package version `0.161.0`.
+- Draft integration base: current upstream main at commit c1fee0aaa (package 0.169.1), rebased before publication. Node 26 validation is rerun against this base.
+- Original research baseline: `origin/main`, commit `41240b5e90aee75fcf0a81360b66f464e2c16845`, package version `0.161.0`.
 - Isolated worktree: `gap-group-theory-plan/compute-engine`; branch `codex/gap-group-theory-plan`. The existing integration work is a different checkout and was not used as this plan's baseline.
 - Pinned GAP reference baseline: [GAP 4.16.1](https://github.com/gap-system/gap/releases/tag/v4.16.1), identified by the [GAP website](https://www.gap-system.org/) as the current release during this research.
 - Research date: October 25, 2026, America/Chicago. The online [reference manual](https://gap-system.github.io/gap/doc/ref/chap0.html) identifies itself as **4.17dev**. It is used here to map the landscape, not as proof of 4.16.1 behavior. Phase 0 must reconcile the inventory against the pinned release's own manuals and executable.

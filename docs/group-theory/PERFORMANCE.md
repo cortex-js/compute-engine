@@ -85,8 +85,7 @@ or GAP differential run was performed. Dependencies are the existing shared tree
 ## Local measurements
 
 [Raw measurements](performance-node26.json) retain runtime/CPU metadata, all
-cases, variability and the preserved baseline bundle's SHA-256. The baseline
-was bundled before source edits. Both versions ran on Node 26.12.1 / V8 14.6,
+cases, variability and the preserved baseline bundle's SHA-256. The performance baseline was bundled before source edits. Both recorded versions use the original 0.161.0 research checkout; these historical timings predate the draft PR rebase onto 0.169.1. The benchmark runner measures the current checked-out version. Both versions ran on Node 26.12.1 / V8 14.6,
 Windows x64, Intel Core Ultra 7 165U. Node 22 measurements are historical only.
 
 Kernel medians use five warm-ups and fifteen measured runs; the C2^7 pcgs case
