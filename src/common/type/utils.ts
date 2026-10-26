@@ -2320,6 +2320,10 @@ export function staticCollectionDims(
   if (t.dimensions !== undefined) return [...t.dimensions];
   const element = unfoldAliasOnDescent(t.elements, unfolded.seen);
   if (element === undefined) return null;
+  // A `range` element is a list of integers, so `[1..3, 4..6]`, typed
+  // `list<range>`, is not of rank 1: its rank is 2 when the ranges have
+  // the same length, and it has no rank when they do not.
+  if (element.type === 'range') return null;
   return elementCanBeList(element.type) ? null : [-1];
 }
 

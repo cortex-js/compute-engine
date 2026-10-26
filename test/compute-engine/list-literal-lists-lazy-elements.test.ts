@@ -4,9 +4,11 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // A list literal is a value. When it is evaluated, each element that
-// evaluates to a FINITE lazy collection (a range, a `Map`, a comprehension,
-// a `Take`) is replaced by the list of its elements, or by the set of its
-// elements when the element is typed as a set. Before, such an element
+// evaluates to a FINITE lazy collection (a `Map`, a comprehension, a
+// `Take`) is replaced by the list of its elements, or by the set of its
+// elements when the element is typed as a set. A `Range` element is the
+// exception: it stays a range, because a range is a value that reads no
+// variable again, and its static type is `range`. Before, such an element
 // stayed a live view inside the literal: with `xs = [1, 2]`,
 // `[map(x => x + 1, xs)]` printed as `[Map((x) => x + 1, "xs")]` and read
 // `xs` again at each later read. A spread of the same element
@@ -41,14 +43,16 @@ describe('a list literal lists each finite lazy element', () => {
     expect(value.json).toEqual(['List', ['List', 2, 3]]);
   });
 
-  test('a range element is listed', () => {
-    expect(run('[1..3, 4]')).toBe('[[1,2,3],4]');
+  test('a range element stays a range', () => {
+    expect(run('[1..3, 4]')).toBe('[Range(1, 3),4]');
     const ce = new ComputeEngine();
     expect(ce.parse('[1..3, 4]').evaluate().json).toEqual([
       'List',
-      ['List', 1, 2, 3],
+      ['Range', 1, 3],
       4,
     ]);
+    // A `take` of a range is a view, not a range: it is listed.
+    expect(run('[take(1..10, 3), 4]')).toBe('[[1,2,3],4]');
   });
 
   test('a comprehension element is listed', () => {
@@ -66,9 +70,18 @@ describe('a list literal lists each finite lazy element', () => {
     ce.assign('xs', ce.box(['List', 1, 2]));
     expect(
       ce
-        .box(['List', ['Map', ['Function', ['Range', 1, 'x'], 'x'], 'xs']])
+        .box([
+          'List',
+          ['Map', ['Function', ['Take', ['Range', 1, 10], 'x'], 'x'], 'xs'],
+        ])
         .evaluate().json
     ).toEqual(['List', ['List', ['List', 1], ['List', 1, 2]]]);
+    // The outer `Map` is listed, but an inner range stays a range.
+    expect(
+      ce
+        .box(['List', ['Map', ['Function', ['Range', 1, 'x'], 'x'], 'xs']])
+        .evaluate().json
+    ).toEqual(['List', ['List', ['Range', 1, 1], ['Range', 1, 2]]]);
   });
 
   test('a spread and an element of a one-element literal print the same', () => {
@@ -114,21 +127,33 @@ describe('a list literal lists each finite lazy element', () => {
   test('the listing is bounded by `ce.maxCollectionSize`', () => {
     const ce = new ComputeEngine();
     ce.maxCollectionSize = 5;
-    // Above the budget by itself: the range stays lazy.
+    const take = (n: number): MathJsonExpression => [
+      'Take',
+      ['Range', 1, 10],
+      n,
+    ];
+    // Above the budget by itself: the element stays lazy.
     expect(
       ce
-        .box(['List', ['Range', 1, 6], 4])
+        .box(['List', take(6), 4])
         .evaluate()
         .toString()
-    ).toBe('[Range(1, 6),4]');
-    // The budget is shared by the elements of the literal: the first range
+    ).toBe('[Take(Range(1, 10), 6),4]');
+    // The budget is shared by the elements of the literal: the first element
     // uses 3 of 5, and the second one, 3 more, stays lazy.
     expect(
       ce
-        .box(['List', ['Range', 1, 3], ['Range', 1, 3]])
+        .box(['List', take(3), take(3)])
         .evaluate()
         .toString()
-    ).toBe('[[1,2,3],Range(1, 3)]');
+    ).toBe('[[1,2,3],Take(Range(1, 10), 3)]');
+    // A range element is not listed, so it uses none of the budget.
+    expect(
+      ce
+        .box(['List', ['Range', 1, 3], take(3)])
+        .evaluate()
+        .toString()
+    ).toBe('[Range(1, 3),[1,2,3]]');
   });
 
   test('an element whose count is not cheap is bounded during the walk', () => {
@@ -160,7 +185,7 @@ describe('a list literal lists each finite lazy element', () => {
     const literal = ce.box([
       'List',
       ['Map', ['Function', ['Add', 'x', 1], 'x'], 'xs'],
-      ['Range', 1, 3],
+      ['Take', ['Range', 1, 10], 3],
     ]);
     expect(literal.evaluate({ materialization: true }).json).toEqual(
       literal.evaluate().json
@@ -176,16 +201,29 @@ describe('the asynchronous route lists each finite lazy element', () => {
       .box([
         'List',
         ['Map', ['Function', ['Add', 'x', 1], 'x'], 'xs'],
+        ['Take', ['Range', 1, 10], 3],
         ['Range', 1, 3],
       ])
       .evaluateAsync();
-    expect(value.json).toEqual(['List', ['List', 2, 3], ['List', 1, 2, 3]]);
+    expect(value.json).toEqual([
+      'List',
+      ['List', 2, 3],
+      ['List', 1, 2, 3],
+      ['Range', 1, 3],
+    ]);
   });
 
   test('`evaluateAsync` of a tuple literal', async () => {
     const ce = new ComputeEngine();
-    const value = await ce.box(['Tuple', ['Range', 1, 3], 4]).evaluateAsync();
-    expect(value.json).toEqual(['Tuple', ['List', 1, 2, 3], 4]);
+    const value = await ce
+      .box(['Tuple', ['Take', ['Range', 1, 10], 3], ['Range', 1, 3], 4])
+      .evaluateAsync();
+    expect(value.json).toEqual([
+      'Tuple',
+      ['List', 1, 2, 3],
+      ['Range', 1, 3],
+      4,
+    ]);
   });
 
   test('an element that holds an asynchronous-only operator stays lazy', async () => {
@@ -311,11 +349,15 @@ describe('the asynchronous listing uses the context of its evaluation', () => {
     );
   });
 
-  // `r(x) = x..x+1` maps over the list `[k, 2k]`: each cell is a range,
-  // listed after the `await` of the broadcast.
+  // `r(x) = take(x..x+10, 2)` maps over the list `[k, 2k]`: each cell is a
+  // `Take` view, listed after the `await` of the broadcast. (A range cell is
+  // not listed, so the cell is a `Take`, not a range.)
   test('a broadcast in the term of a sum', async () => {
     const ce = withDelay();
-    ce.assign('r', ce.box(['Function', ['Range', 'x', ['Add', 'x', 1]], 'x']));
+    ce.assign(
+      'r',
+      ce.box(['Function', ['Take', ['Range', 'x', ['Add', 'x', 10]], 2], 'x'])
+    );
     const sum = (last: MathJsonExpression): MathJsonExpression => [
       'Sum',
       ['List', ['r', ['List', 'k', ['Multiply', 2, 'k']]], last],
@@ -334,14 +376,18 @@ describe('the asynchronous listing uses the context of its evaluation', () => {
 });
 
 describe('a tuple literal lists each finite lazy element', () => {
-  test('a range element of a tuple is listed', () => {
-    expect(run('(1..3, 4)')).toBe('([1,2,3], 4)');
+  test('a range element of a tuple stays a range', () => {
+    expect(run('(1..3, 4)')).toBe('(Range(1, 3), 4)');
     const ce = new ComputeEngine();
     expect(ce.box(['Tuple', ['Range', 1, 3], 4]).evaluate().json).toEqual([
       'Tuple',
-      ['List', 1, 2, 3],
+      ['Range', 1, 3],
       4,
     ]);
+    // A `Take` element of a tuple is listed.
+    expect(
+      ce.box(['Tuple', ['Take', ['Range', 1, 10], 3], 4]).evaluate().json
+    ).toEqual(['Tuple', ['List', 1, 2, 3], 4]);
   });
 
   test('an infinite element of a tuple stays lazy', () => {
@@ -360,7 +406,16 @@ describe('a tuple literal lists each finite lazy element', () => {
 // `src/compute-engine/boxed-expression/listed-element.ts`).
 //
 describe('a broadcast lists each finite lazy cell', () => {
-  /** `k(x) = Range(1, x)`, a function that answers a lazy collection. */
+  /** `k(x) = Take(Range(1, 10), x)`, a function that answers a lazy
+   * collection that is listed. */
+  function withTakeFunction(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.assign('k', ce.box(['Function', ['Take', ['Range', 1, 10], 'x'], 'x']));
+    return ce;
+  }
+
+  /** `k(x) = Range(1, x)`, a function that answers a range. A range cell is
+   * not listed. */
   function withRangeFunction(): ComputeEngine {
     const ce = new ComputeEngine();
     ce.assign('k', ce.box(['Function', ['Range', 1, 'x'], 'x']));
@@ -373,9 +428,19 @@ describe('a broadcast lists each finite lazy cell', () => {
     );
   });
 
-  test('a user function that answers a range', () => {
-    expect(run('g(s) = 1..s\ng([2, 3])')).toBe('[[1,2],[1,2,3]]');
+  test('a user function that answers a range: each cell stays a range', () => {
+    expect(run('g(s) = 1..s\ng([2, 3])')).toBe('[Range(1, 2),Range(1, 3)]');
     const ce = withRangeFunction();
+    expect(ce.box(['k', ['List', 2, 3]]).evaluate().json).toEqual([
+      'List',
+      ['Range', 1, 2],
+      ['Range', 1, 3],
+    ]);
+  });
+
+  test('a user function that answers a `take`: each cell is listed', () => {
+    expect(run('g(s) = take(1..10, s)\ng([2, 3])')).toBe('[[1,2],[1,2,3]]');
+    const ce = withTakeFunction();
     expect(ce.box(['k', ['List', 2, 3]]).evaluate().json).toEqual([
       'List',
       ['List', 1, 2],
@@ -387,9 +452,19 @@ describe('a broadcast lists each finite lazy cell', () => {
     const ce = new ComputeEngine();
     expect(
       ce
-        .box(['Apply', ['Function', ['Range', 1, 'x'], 'x'], ['List', 2, 3]])
+        .box([
+          'Apply',
+          ['Function', ['Take', ['Range', 1, 10], 'x'], 'x'],
+          ['List', 2, 3],
+        ])
         .evaluate().json
     ).toEqual(['List', ['List', 1, 2], ['List', 1, 2, 3]]);
+    // A range cell stays a range.
+    expect(
+      ce
+        .box(['Apply', ['Function', ['Range', 1, 'x'], 'x'], ['List', 2, 3]])
+        .evaluate().json
+    ).toEqual(['List', ['Range', 1, 2], ['Range', 1, 3]]);
   });
 
   test('a numeric approximation approximates the listed cells', () => {
@@ -410,44 +485,64 @@ describe('a broadcast lists each finite lazy cell', () => {
   });
 
   test('`evaluateAsync` of a broadcast', async () => {
-    const ce = withRangeFunction();
+    const ce = withTakeFunction();
     const value = await ce.box(['k', ['List', 2, 3]]).evaluateAsync();
     expect(value.json).toEqual(['List', ['List', 1, 2], ['List', 1, 2, 3]]);
+    // A range cell stays a range on the asynchronous route too.
+    const ranges = await withRangeFunction()
+      .box(['k', ['List', 2, 3]])
+      .evaluateAsync();
+    expect(ranges.json).toEqual(['List', ['Range', 1, 2], ['Range', 1, 3]]);
   });
 
   test('a cell above the budget stays lazy', () => {
-    const ce = withRangeFunction();
+    const ce = withTakeFunction();
     ce.maxCollectionSize = 3;
     // The first cell uses 2 of 3 elements; the second one, 3 more, stays a
-    // range.
+    // `Take` view.
     expect(
       ce
         .box(['k', ['List', 2, 3]])
         .evaluate()
         .toString()
-    ).toBe('[[1,2],Range(1, 3)]');
+    ).toBe('[[1,2],Take(Range(1, 10), 3)]');
   });
 });
 
 //
 // A function with a parameter declared as a scalar maps over the components
 // of a tuple argument, and the result is a tuple of cells. A tuple literal
-// lists its finite lazy elements, so the tuple of cells does too.
+// lists its finite lazy elements, so the tuple of cells does too. A range
+// cell is not listed: it stays a range.
 //
 describe('a map over the components of a tuple lists each finite lazy cell', () => {
-  /** `g(u: integer) = 1..u`, defined through Epsil. */
-  function withTupleMappedFunction(): ComputeEngine {
+  /** Define `g` through Epsil, with `source` as the definition. */
+  function withTupleMappedFunction(source: string): ComputeEngine {
     const ce = new ComputeEngine();
     const parseLatex = (latex: string): MathJsonExpression =>
       ce.parse(latex).json;
-    const result = executeEpsil(ce, 'g(u: integer) = 1..u', { parseLatex });
+    const result = executeEpsil(ce, source, { parseLatex });
     expect(result.diagnostics).toEqual([]);
     return ce;
   }
 
-  test('a function that answers a range, over a tuple', () => {
-    expect(run('g(u: integer) = 1..u\ng((2, 3))')).toBe('([1,2], [1,2,3])');
-    const ce = withTupleMappedFunction();
+  test('a function that answers a range, over a tuple: each cell stays a range', () => {
+    expect(run('g(u: integer) = 1..u\ng((2, 3))')).toBe(
+      '(Range(1, 2), Range(1, 3))'
+    );
+    const ce = withTupleMappedFunction('g(u: integer) = 1..u');
+    expect(ce.box(['g', ['Tuple', 2, 3]]).evaluate().json).toEqual([
+      'Tuple',
+      ['Range', 1, 2],
+      ['Range', 1, 3],
+    ]);
+  });
+
+  test('a function that answers a `take`, over a tuple: each cell is listed', () => {
+    expect(run('g(u: integer) = take(1..10, u)\ng((2, 3))')).toBe(
+      '([1,2], [1,2,3])'
+    );
+    const ce = withTupleMappedFunction('g(u: integer) = take(1..10, u)');
     expect(ce.box(['g', ['Tuple', 2, 3]]).evaluate().json).toEqual([
       'Tuple',
       ['List', 1, 2],
@@ -455,10 +550,15 @@ describe('a map over the components of a tuple lists each finite lazy cell', () 
     ]);
   });
 
-  test('`evaluateAsync` of a function that answers a range, over a tuple', async () => {
-    const ce = withTupleMappedFunction();
+  test('`evaluateAsync` of a function that answers a `take`, over a tuple', async () => {
+    const ce = withTupleMappedFunction('g(u: integer) = take(1..10, u)');
     const value = await ce.box(['g', ['Tuple', 2, 3]]).evaluateAsync();
     expect(value.json).toEqual(['Tuple', ['List', 1, 2], ['List', 1, 2, 3]]);
+    // A range cell stays a range on the asynchronous route too.
+    const ranges = await withTupleMappedFunction('g(u: integer) = 1..u')
+      .box(['g', ['Tuple', 2, 3]])
+      .evaluateAsync();
+    expect(ranges.json).toEqual(['Tuple', ['Range', 1, 2], ['Range', 1, 3]]);
   });
 });
 

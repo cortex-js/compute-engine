@@ -158,31 +158,48 @@ describe('a list literal snapshots a spread lazy collection', () => {
   });
 
   test('an element that is not spread is one element, listed', () => {
-    // `[...xs, 1..3]` is `ListJoin(xs, [Range(1, 3)])`. The range is an
-    // element of the literal, not a spread, so it stays one element. A
-    // literal lists each finite lazy element, so that element is the list
-    // `[1, 2, 3]`, as it is in `[1..3]`, also when another operand is
-    // spread.
-    const { value } = run('let xs = [1, 2]\n[...xs, 1..3]');
+    // `[...xs, take(1..10, 3)]` is `ListJoin(xs, [Take(Range(1, 10), 3)])`.
+    // The `take` is an element of the literal, not a spread, so it stays one
+    // element. A literal lists each finite lazy element, so that element is
+    // the list `[1, 2, 3]`, as it is in `[take(1..10, 3)]`, also when another
+    // operand is spread.
+    const { value } = run('let xs = [1, 2]\n[...xs, take(1..10, 3)]');
     expect(value.operator).toBe('List');
     expect(value.nops).toBe(3);
     expect(value.ops![2].json).toEqual(['List', 1, 2, 3]);
-    expect(value.ops![2].json).toEqual(run('[1..3]').value.ops![0].json);
+    expect(value.ops![2].json).toEqual(
+      run('[take(1..10, 3)]').value.ops![0].json
+    );
+    // A range element that is not spread is one element too, and it stays a
+    // range, as it does in `[1..3]`.
+    const ranged = run('let xs = [1, 2]\n[...xs, 1..3]').value;
+    expect(ranged.nops).toBe(3);
+    expect(ranged.ops![2].json).toEqual(['Range', 1, 3]);
+    expect(ranged.ops![2].json).toEqual(run('[1..3]').value.ops![0].json);
   });
 
   test('nested lazy elements share one bound on the number of elements', () => {
     // 10,000 rows of 10,000 elements would be 10^8 elements. The rows use
-    // the rest of the bound of the whole literal, so they stay lazy ranges.
-    const { value, diagnostics } = run('[...map(i => 1..10000, 1..10000)]');
+    // the rest of the bound of the whole literal, so they stay lazy `take`
+    // views. (A range row is never listed, so the rows are `take` views.)
+    const { value, diagnostics } = run(
+      '[...map(i => take(1..10000, 10000), 1..10000)]'
+    );
     expect(diagnostics).toEqual([]);
     expect(value.nops).toBe(10000);
-    expect(value.ops![0].operator).toBe('Range');
-    expect(value.ops![9999].operator).toBe('Range');
+    expect(value.ops![0].operator).toBe('Take');
+    expect(value.ops![9999].operator).toBe('Take');
   }, 60_000);
 
   test('small nested lazy elements are listed', () => {
-    const { value } = run('[...map(i => 1..3, 1..2)]');
+    const { value } = run('[...map(i => take(1..10, 3), 1..2)]');
     expect(value.json).toEqual(['List', ['List', 1, 2, 3], ['List', 1, 2, 3]]);
+    // A nested range element stays a range.
+    expect(run('[...map(i => 1..3, 1..2)]').value.json).toEqual([
+      'List',
+      ['Range', 1, 3],
+      ['Range', 1, 3],
+    ]);
   });
 });
 

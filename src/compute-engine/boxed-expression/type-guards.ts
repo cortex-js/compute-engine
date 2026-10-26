@@ -271,6 +271,65 @@ export function isUnorderedSet(
   );
 }
 
+/**
+ * The largest element count of a `Range` that `isSame` and `hash` compare by
+ * its elements (see `integerRangeElements`). It is a constant, not an engine
+ * setting: a hash is cached on the expression, and a limit that changes later
+ * would make a cached hash disagree with `isSame`.
+ */
+export const MAX_RANGE_IDENTITY_COUNT = 10_000;
+
+/**
+ * If `expr` is a finite `Range` of integers, return its first element, its
+ * step and its element count. Otherwise return `undefined`.
+ *
+ * The range must have two or three operands (the canonical form: `Range(n)`
+ * is canonicalized to `Range(1, n)`), each a number literal with a safe
+ * integer value, a step that is not zero, and at most
+ * `MAX_RANGE_IDENTITY_COUNT` elements. With two operands, the step is `1`
+ * when the upper bound is not less than the lower bound and `-1` otherwise,
+ * as for the `Range` operator.
+ *
+ * Such a range and the `List` literal of its integers are the same element
+ * for `isSame` and have the same `hash`: `Range(1, 3)`, `Range(1, 3, 1)` and
+ * `[1, 2, 3]` are the same, so a set does not hold two of them, and
+ * `[1, 2, 3]` is an element of `[Range(1, 3)]`. An empty range, such as
+ * `Range(5, 1, 1)`, is the same as `[]`. The same rule applies to a
+ * character and a one-cluster string with the same content. The limit on the
+ * count keeps `isSame` and `hash` from reading the elements of a very large
+ * range: a larger range is compared by its operands only.
+ * (User decision 2026-10-25, option A, which follows the decision that a
+ * `Range` element of a collection literal stays a `Range`, ROADMAP CE-39.3.)
+ */
+export function integerRangeElements(
+  expr: Expression
+): { start: number; step: number; count: number } | undefined {
+  if (!isFunction(expr, 'Range')) return undefined;
+  const nops = expr.nops;
+  if (nops !== 2 && nops !== 3) return undefined;
+  const read = (op: Expression): number | undefined => {
+    if (!isNumber(op) || op.im !== 0 || !op.isInteger) return undefined;
+    const v = op.re;
+    return Number.isSafeInteger(v) ? v : undefined;
+  };
+  const start = read(expr.op1);
+  const end = read(expr.op2);
+  if (start === undefined || end === undefined) return undefined;
+  const step = nops === 3 ? read(expr.op3) : end >= start ? 1 : -1;
+  if (step === undefined || step === 0) return undefined;
+  // The span and the quotient are computed with `bigint`: the difference of
+  // two safe integers is not always a safe integer, and a rounded span can
+  // give one element too many. Each element `start + k * step` with
+  // `k < count` is between `start` and `end`, so it is a safe integer, and a
+  // reader that adds `step` to the previous element gets its exact value.
+  const span =
+    step > 0 ? BigInt(end) - BigInt(start) : BigInt(start) - BigInt(end);
+  if (span < 0n) return { start, step, count: 0 };
+  const count = span / BigInt(Math.abs(step)) + 1n;
+  if (count > BigInt(MAX_RANGE_IDENTITY_COUNT)) return undefined;
+  return { start, step, count: Number(count) };
+}
+
 export function isString(
   expr: Expression | null | undefined
 ): expr is Expression & StringInterface {

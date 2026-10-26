@@ -211,6 +211,17 @@ function shapeOfOperand(
   if (shape.length === 0 && isFunction(xs, 'List')) {
     const empty = emptyAxisListShape(xs);
     if (empty !== undefined) return empty;
+    // An eager `List` with a `Range` row (`[1..3, 4..6]`, typed
+    // `list<range>`) has no dimensions in its type. Its shape is the shape
+    // of the `List` with each such row listed. When a row cannot be listed,
+    // the shape is not known. When all the rows have the same shape, the
+    // shape is found from the counts of the lazy rows, and no row is listed
+    // (`lazyRowsShape`).
+    const derived = lazyRowsShape(xs);
+    if (derived !== null) return derived;
+    const listed = listedLazyRows(ce, xs);
+    if (listed === undefined) return undefined;
+    if (listed !== xs) return shapeOfOperand(ce, listed, next);
   }
   if (
     shape.length > 0 ||
@@ -286,6 +297,126 @@ function emptyAxisListShape(xs: Expression): number[] | undefined {
     if (n === 0) return dims;
     level = lists.flatMap((x) => x.ops);
   }
+}
+
+/**
+ * The shape of an eager `List` value `xs` that has lazy rows (`[1..3, 4..6]`,
+ * at any depth), found from the counts of the lazy rows. No row is listed,
+ * so `Shape` of 10,000 rows of `Range(1, 10000)` is `(10000, 10000)`, found
+ * at once.
+ *
+ * A lazy row whose elements are numbers has the shape `[count]`. A number
+ * has the shape `[]`. An eager `List` row has the shape of its type, or the
+ * shape that this function finds for it. When all the rows have the same
+ * shape `s`, the result is `[n, ...s]`, where `n` is the number of rows.
+ *
+ * The result is `undefined` when a lazy row is infinite, has a count that is
+ * not known, or has elements that cannot be computed: the shape is then not
+ * known. The result is `null` when `xs` has no lazy row, when a row is a
+ * different kind of value, or when the rows do not all have the same shape.
+ * The caller then lists the lazy rows and reads the shape of the result.
+ */
+function lazyRowsShape(xs: Expression): number[] | undefined | null {
+  if (!isFunction(xs, 'List') || xs.ops.length === 0) return null;
+  let hasLazyRow = false;
+  const shapes: number[][] = [];
+  for (const op of xs.ops) {
+    if (isFunction(op, 'List')) {
+      if (op.shape.length > 0) {
+        shapes.push([...op.shape]);
+        continue;
+      }
+      const empty = emptyAxisListShape(op);
+      if (empty !== undefined) {
+        shapes.push(empty);
+        continue;
+      }
+      const inner = lazyRowsShape(op);
+      if (inner === undefined || inner === null) return inner;
+      hasLazyRow = true;
+      shapes.push(inner);
+    } else if (op.isLazyCollection && op.isIndexedCollection === true) {
+      const count = smallCount(op);
+      if (
+        count === undefined ||
+        !Number.isFinite(count) ||
+        !isFiniteIndexedCollection(op)
+      )
+        return undefined;
+      const elementType = collectionElementType(op.type.type);
+      if (elementType === undefined || !isSubtype(elementType, 'number'))
+        return null;
+      hasLazyRow = true;
+      shapes.push([count]);
+    } else if (op.isCollection !== true && isSubtype(op.type.type, 'number'))
+      shapes.push([]);
+    else return null;
+  }
+  if (!hasLazyRow) return null;
+  const first = shapes[0];
+  if (
+    shapes.some(
+      (s) => s.length !== first.length || s.some((n, i) => n !== first[i])
+    )
+  )
+    return null;
+  return [shapes.length, ...first];
+}
+
+/**
+ * The eager `List` `xs` with each element that is a lazy indexed collection
+ * (a `Range` row) replaced by the eager `List` of its elements, at every
+ * depth: `[1..3, 4..6]` gives `[[1, 2, 3], [4, 5, 6]]`.
+ *
+ * A `Range` element of a `List` stays a `Range` when the list is evaluated,
+ * and the tensor kernels read only eager `List` rows. Without this step,
+ * they read `[1..3, 4..6]` as a vector of two cells. The linear-algebra
+ * handlers call this function first, so that they read the value as the
+ * matrix that it is.
+ *
+ * The result is `xs` itself when `xs` is not a `List`, when its type has
+ * dimensions (no element is then a lazy collection), or when no element is
+ * a lazy indexed collection. The result is `undefined` when such an element
+ * cannot be listed: it is infinite, or its count is not known. The result is
+ * also `undefined` when the lazy elements, at all depths together, have more
+ * than `MAX_LAZY_SHAPE_ELEMENTS` elements: `budget` holds the number of
+ * elements that can still be listed, and each listed element decreases it.
+ * One budget is used for all the sibling and nested calls, so 10,000 rows of
+ * 10,000 elements are not listed. A collection that is not indexed (a set)
+ * has no positions, and stays as it is.
+ */
+function listedLazyRows(
+  ce: ComputeEngine,
+  xs: Expression,
+  budget: { remaining: number } = { remaining: MAX_LAZY_SHAPE_ELEMENTS }
+): Expression | undefined {
+  if (!isFunction(xs, 'List') || xs.shape.length > 0) return xs;
+  let changed = false;
+  const ops: Expression[] = [];
+  for (const op of xs.ops) {
+    let row: Expression | undefined = op;
+    if (
+      !isFunction(op, 'List') &&
+      op.isLazyCollection &&
+      op.isIndexedCollection === true
+    ) {
+      const count = smallCount(op);
+      if (
+        count === undefined ||
+        !Number.isFinite(count) ||
+        count > budget.remaining ||
+        !isFiniteIndexedCollection(op)
+      )
+        return undefined;
+      budget.remaining -= count;
+      row = ce.function('List', [...op.each()]);
+    }
+    if (isFunction(row, 'List')) row = listedLazyRows(ce, row, budget);
+    if (row === undefined) return undefined;
+    if (row !== op) changed = true;
+    ops.push(row);
+  }
+  return changed ? ce.function('List', ops) : xs;
 }
 
 /** The sum of `terms`, in groups: one `add(...terms)` of more than about a
@@ -1317,7 +1448,21 @@ function transposedShape(t: Type, ops: ReadonlyArray<OperandDescriptor>): Type {
   // of its elements; the transpose keeps the element type and makes no
   // shape claim.
   if (dims === null) return t;
-  if (!dims) return { kind: 'list', elements: t.elements };
+  // A `Range` element at any depth is listed before the transpose
+  // (`listedLazyRows`), so the transpose of a list with a `Range` element
+  // holds lists of numbers, not ranges (`listedRangeCells`). The transpose
+  // has the same rank as the listed value, so its type is the type of the
+  // listed value, with no shape claim.
+  if (!dims) {
+    if (!hasRangeElement(t.elements))
+      return { kind: 'list', elements: t.elements };
+    const listed = listedRangeCells(t.elements);
+    if (listed === null) return 'value';
+    let result: Type = listed.cells;
+    for (let i = 0; i <= listed.depth; i++)
+      result = { kind: 'list', elements: result };
+    return result;
+  }
   // Scalar-ish or vector (rank ≤ 1): identity.
   if (dims.length <= 1) return t;
   let axis1 = dims.length - 1;
@@ -1345,6 +1490,87 @@ function transposedShape(t: Type, ops: ReadonlyArray<OperandDescriptor>): Type {
     swapped[axis1 - 1],
   ];
   return { kind: 'list', elements: t.elements, dimensions: swapped };
+}
+
+/**
+ * True when the element type `e` of a plain list has a `range` arm, either
+ * directly or in the element type of a plain list arm, at any depth
+ * (`list<list<range>>`). These are the ranges that `listedLazyRows()` lists.
+ */
+function hasRangeElement(e: Type): boolean {
+  if (e === 'range') return true;
+  if (typeof e === 'string') return false;
+  if (e.kind === 'union') return e.types.some((u) => hasRangeElement(u));
+  return (
+    e.kind === 'list' &&
+    e.dimensions === undefined &&
+    hasRangeElement(e.elements)
+  );
+}
+
+/**
+ * The type of the value of an element of type `e` of a plain list after its
+ * `range` elements are listed at every depth (`listedLazyRows()`), as a cell
+ * type and a depth: the listed value is `depth` nested lists of `cells`.
+ *
+ * - A `range` is a list of integers: depth 1, cells `integer`.
+ * - A number has depth 0, and its type is the cell type.
+ * - A `vector`, `matrix` or `tensor` of numbers with known dimensions has
+ *   the depth of its rank, and its cells.
+ * - A plain list has the depth of its element type plus 1.
+ * - The arms of a union must have the same depth. The cells are the union
+ *   of the cells of the arms.
+ *
+ * `[[1, 2, 3], 1..3]` is typed `list<range | vector<integer^3>>`: each
+ * element has depth 1 and cells `integer`. `[[1..2, 3..4], [5..6, 7..8]]` is
+ * typed `list<list<range>>`: each element has depth 2 and cells `integer`.
+ *
+ * The result is `null` when an arm is a different kind of value (a string, a
+ * tensor of unknown rank, cells that are not numbers), or when the arms do
+ * not have the same depth (`range | integer`). The type of the listed value
+ * is then not known to be nested lists of numbers.
+ */
+function listedRangeCells(e: Type): { cells: Type; depth: number } | null {
+  const arms = typeof e !== 'string' && e.kind === 'union' ? e.types : [e];
+  const cells: Type[] = [];
+  let depth: number | undefined = undefined;
+  for (const arm of arms) {
+    let armCells: Type;
+    let armDepth: number;
+    if (arm === 'range') {
+      armCells = 'integer';
+      armDepth = 1;
+    } else if (isSubtype(arm, 'number')) {
+      armCells = arm;
+      armDepth = 0;
+    } else if (typeof arm !== 'string' && arm.kind === 'list') {
+      if (arm.dimensions === null) return null;
+      if (arm.dimensions !== undefined) {
+        if (!isSubtype(arm.elements, 'number')) return null;
+        armCells = arm.elements;
+        armDepth = arm.dimensions.length;
+      } else {
+        const inner = listedRangeCells(arm.elements);
+        if (inner === null) return null;
+        armCells = inner.cells;
+        armDepth = inner.depth + 1;
+      }
+    } else return null;
+    if (depth !== undefined && depth !== armDepth) return null;
+    depth = armDepth;
+    const armArms =
+      typeof armCells !== 'string' && armCells.kind === 'union'
+        ? armCells.types
+        : [armCells];
+    for (const cell of armArms)
+      if (!cells.some((c) => isSubtype(cell, c) && isSubtype(c, cell)))
+        cells.push(cell);
+  }
+  if (depth === undefined) return null;
+  return {
+    cells: cells.length === 1 ? cells[0] : { kind: 'union', types: cells },
+    depth,
+  };
 }
 
 const transposedType: OperatorTypeHandlerOnTypes = (ops, context) => {
@@ -2556,6 +2782,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       },
       evaluate: (ops, { engine: ce }): Expression | undefined => {
         let op1 = ops[0];
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const listed = listedLazyRows(ce, op1);
+        if (listed === undefined) return undefined;
+        op1 = listed;
         // Each extent must be a non-negative integer literal after
         // evaluation. Otherwise the call stays unevaluated: a symbol with no
         // value (`m` declared `integer`) has a `re` of NaN, which built an
@@ -2749,6 +2979,11 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         if (!isTensorValue(op1) && isFiniteIndexedCollection(op1))
           op1 = ce.function('List', [...op1.each()]);
 
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const listed = listedLazyRows(ce, op1);
+        if (listed === undefined) return undefined;
+        op1 = listed;
+
         {
           // Structure-only operation: accepts any STRUCTURALLY regular list
           // (packStructural), including cells that block the type-level shape
@@ -2791,10 +3026,15 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value, axis1: integer?, axis2: integer?) -> value',
       type: transposedType,
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
+        let op1 = ops[0];
 
         // Conjugate transpose of scalar is its conjugate
         if (op1.isNumber) return ce.expr(['Conjugate', op1]).evaluate();
+
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const listed = listedLazyRows(ce, op1);
+        if (listed === undefined) return undefined;
+        op1 = listed;
 
         // The conjugate transpose of a vector is its element-wise conjugate,
         // whatever form the vector arrives in. A collection of more than
@@ -3253,7 +3493,10 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         // An absent cell of a matrix of numbers is `NaN` (`absentCellsAsNaN`):
         // the determinant of `[[2, Missing], [3, 4]]` is `NaN`, and its trace,
         // which reads the diagonal only, is 6.
-        const op1 = absentCellsAsNaN(ce, ops[0]);
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const listed = listedLazyRows(ce, ops[0]);
+        if (listed === undefined) return undefined;
+        const op1 = absentCellsAsNaN(ce, listed);
 
         // Trace of scalar is the scalar itself
         if (op1.isNumber) return op1;
@@ -3350,7 +3593,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: ([map], { engine: ce }) => {
-        const op = map;
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const op = listedLazyRows(ce, map);
+        if (op === undefined) return undefined;
 
         // Kernel of scalar map x -> a*x over R
         if (op.isNumber) {
@@ -3419,7 +3664,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> integer',
       sgn: (): Sign => 'non-negative',
       evaluate: ([object], { engine: ce }) => {
-        const op = object;
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const op = listedLazyRows(ce, object);
+        if (op === undefined) return undefined;
 
         // Structural check on the *unevaluated* expression: we pattern-match
         // on the literal Kernel(...) / Hom(...) form so that
@@ -4094,7 +4341,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       signature: '(value) -> integer',
       sgn: (): Sign => 'non-negative',
       evaluate: ([map], { engine: ce }) => {
-        const op = map;
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const op = listedLazyRows(ce, map);
+        if (op === undefined) return undefined;
 
         // Rank of a scalar map x ↦ a·x: 1 if non-zero, 0 if zero.
         if (op.isNumber) return ce.number(op.isSame(0) ? 0 : 1);
@@ -4170,7 +4419,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
-        const op = m;
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const op = listedLazyRows(ce, m);
+        if (op === undefined) return undefined;
         // Structural predicate (no numeric kernel): packStructural admits
         // any shape-regular list — a square color matrix IS square.
         const opTensor = packStructural(ce, op);
@@ -4185,7 +4436,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
-        const op = m;
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const op = listedLazyRows(ce, m);
+        if (op === undefined) return undefined;
         // Structural predicate (no numeric kernel): packStructural admits
         // any shape-regular list — a square color matrix IS square.
         const opTensor = packStructural(ce, op);
@@ -4201,7 +4454,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
       complexity: 8200,
       signature: '(value) -> boolean',
       evaluate: ([m], { engine: ce }) => {
-        const op = m;
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const op = listedLazyRows(ce, m);
+        if (op === undefined) return undefined;
         // Structural predicate (no numeric kernel): packStructural admits
         // any shape-regular list — a square color matrix IS square.
         const opTensor = packStructural(ce, op);
@@ -4731,7 +4986,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         );
       },
       evaluate: (ops, { engine: ce }) => {
-        const op1 = ops[0];
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const op1 = listedLazyRows(ce, ops[0]);
+        if (op1 === undefined) return undefined;
 
         // Scalar → return as-is
         if (op1.isNumber) return op1;
@@ -5048,7 +5305,9 @@ export const LINEAR_ALGEBRA_LIBRARY: SymbolDefinitions[] = [
         ops,
         { engine: ce, numericApproximation, expression }
       ): Expression | undefined => {
-        const x = ops[0];
+        // A `Range` row is a row of its integers (`listedLazyRows`).
+        const x = listedLazyRows(ce, ops[0]);
+        if (x === undefined) return undefined;
         const normTypeExpr = ops.length > 1 ? ops[1] : undefined;
 
         // Determine norm type. This runs BEFORE the scalar and empty-vector

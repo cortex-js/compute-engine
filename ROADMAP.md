@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-490.
+Next free reference: CE-498.
 
 **Entry format.**
 
@@ -131,19 +131,6 @@ problem does not occur on its installed release). Report:
 
 ## Types and type inference
 
-### CE-488. A call at a point parameter has a list type for an argument of a nominal list-of-points type, but its value is an error
-
-**Status:** open; defect.
-
-With `k` declared `(tuple<number, number>) -> number`, the nominal type
-`B = list<tuple<number, number>>` and `x` declared `B` with no value, `k(x)` is
-typed `list<number>`, and its value is
-`Error(ErrorCode("incompatible-type", "tuple<number, number>", "B"), x)`. The
-typing reads through the nominal type to its list of points and maps; the
-evaluation does not map over a nominal value. One of the two must change so that
-the type holds the value: either the evaluation maps over a nominal list of
-points, or the typing does not read through a nominal type at a point parameter.
-
 ### CE-489. A point parameter refuses a recursive alias whose self-reference is inside a constructor
 
 **Status:** design needed; capability.
@@ -157,64 +144,6 @@ that finds the rank of a point argument (`pointTensorOf()`,
 answers `false` at its depth limit. Accepting such a type needs a rule for the
 rank of a recursive collection type. An alias whose self-reference is not inside
 a constructor (`A = A | list<tuple<number, number>>`) maps.
-
-### CE-485. An `any` operand at a declared scalar parameter types differently on the box and derived routes
-
-**Status:** open; defect.
-
-At a parameter of a declared signature with a scalar type, an operand typed
-`any` gives the result type `any` on the box route and the declared scalar
-result on the derived route. The fix belongs in
-`lambdaCallOperandOfDescriptor()` (`boxed-function.ts`).
-
-### CE-3. `unknown` as an inference marker: what the migration left open
-
-**Status:** open; defect, small. Plan:
-docs/plans/2026-10-21-unknown-inference-marker.md. User decision 2026-10-23:
-decision D6 is not applied (the library keeps `-> unknown`), so CE-3.4 is
-closed.
-
-The plan (decisions D1 to D6) makes `unknown` an inference marker. A declared
-`unknown` is an inference seed that each use narrows (user decision 2026-10-20).
-The declaration for a list of unknown content is `list<value>`, not `any` or
-`list<any>` (user decision 2026-10-21).
-
-- **CE-3.5** A nested `unknown` position (`tuple<unknown, integer>`,
-  `list<list<unknown>>`, `record{a: unknown}`) is unrestricted and does not
-  refine from an assignment yet (scope of decision D2).
-
-### CE-4. `record{a: integer}` against `dictionary<integer>` constrains only the listed fields
-
-**Status:** open; defect.
-
-The open-record relation constrains only the listed fields when it compares
-`record{a: integer}` with `dictionary<integer>`. But width subtyping permits
-more fields with other value types. Enumeration also reports only the types of
-the listed fields. Correct this together with the exact validation of a
-dictionary literal: a change of the relation alone rejects valid dictionary
-literals and assignments. Measured 2026-10-24 together with CE-10: the sound
-rule (a record fits `dictionary<T>` only when `T` admits `any`) makes 61 tests
-fail in 10 suites, most of them real regressions (a synthesized record against a
-dictionary annotation, `Filter`/`Dedup` over a dictionary, Epsil JSON aliases,
-named-argument calls through a constant receiver).
-
-### CE-10. A record with an extra `any` field breaks subtype transitivity
-
-**Status:** open; defect, small. Plan:
-`docs/plans/2026-10-20-bare-tuple-record-any.md`.
-
-- **CE-10.1** Five transitivity violations through a record with an extra field
-  of type `any`:
-  `record{a: integer, b: any} <: record{a: integer} <: dictionary`, but the
-  first is not `<: dictionary`. Record-to-record allows extra fields;
-  record-to-dictionary checks every field. Decision Q6 of the plan keeps open
-  records with width subtyping, so a record is not a dictionary of its known
-  field types. That rule for explicit value types (`record{a: integer}` no
-  longer `<: dictionary<integer>`) makes 44 tests fail in 4 suites (`types`,
-  `collections`, `compile-extremum-collection-operand`,
-  `named-arguments-record-field`), and the bare-name cases also involve
-  `unknown`. Do this with the plan's implementation. Measured again 2026-10-24:
-  see CE-4 (61 failing tests in 10 suites, mostly real regressions).
 
 ### CE-27. An access over `any` or `unknown` elements has no `missing` arm
 
@@ -230,18 +159,6 @@ use-driven inference, so Epsil reports `sol[1][1]` as a static error
 (`programs.test.ts`). Question: how should a `missing` arm on an access result
 flow through inference?
 
-### CE-30. A polymorphic callback over rows is typed `unknown` cells
-
-**Status:** open; defect, small.
-
-`Map(k, fs)` with `k: ((integer) -> T) -> T where T` and `fs := [[x ↦ x + 1]]`
-is typed `matrix<unknown^(1x1)>` for the value `[[2]]`; expected
-`matrix<number^(1x1)>` (the flat `fs1 := [x ↦ x + 1]` gives `vector<1>`).
-`broadcastCallbackResultType` (`callback-broadcast-admission.ts`) declines
-because `signatureParamsAreScalar` is false for an arrow parameter, but the
-evaluation maps over the rows. A fix must find which mapping the run time does
-and solve `T` with `inferTypeArguments`.
-
 ### CE-36. A signature derivation inside a cached type read can miss a widening in its own scope
 
 **Status:** open; defect, small.
@@ -255,49 +172,17 @@ be. No reachable witness was found. Closing it needs an immediate advance for a
 widening inside the derivation's scope, which the deferred design avoids on
 purpose.
 
-### CE-38. A mutually recursive pair that builds a list is typed `collection` when it is not declared
+### CE-38. An undeclared recursive pair installed callee-first is typed `list<any>`
 
 **Status:** open; defect, small.
 
-The list hypothesis of `_deriveSignature` runs only for a body that names its
-own function. With `F: (unknown, unknown) -> unknown` assigned
-`(n, K) ↦ { n = K - 1: [n], otherwise: join([n], G(n + 1, K)) }` and `G`
-assigned `(n, K) ↦ F(n, K)`, both derive `-> collection<number>` (pinned in
-`recursive-function-result-type.test.ts`).
-
-A pair that is also self-recursive (`F` names `F` and `G`) does not improve
-either: `G`'s signature is derived while `F`'s is, reads the re-entrancy guard's
-`unknown` for `F`, and is memoized as `-> unknown` (measured 2026-09-29: `F` is
-`-> collection<number>` and `G` stays `-> unknown` on later reads). So the
-hypothesis pass reads `unknown` from `G` and is refuted.
-
-A declared pair is now typed `-> list<number>` (the hypothesis follows the
-callees, and a derivation that reads a provisional signature stores no memo).
-What remains is an UNDECLARED pair, which is typed at install, in order:
-assigning `F` then `G` gives `collection<number>` for both; `G` then `F` gives
-`list<any>`.
-
-### CE-39. Static types that do not contain the value of the expression
-
-**Status:** in progress; defect. CE-39.3 has a user decision (2026-10-25, see
-the item). CE-39.2 and the sign-range part of CE-39.3 were closed by user
-decision 2026-10-25: keep the current ranges (`docs/TYPE-SYSTEM.md`, "Number
-literal types").
-
-The probes check `isSubtype(value type, static type)`. These defects are in code
-that existed before the result type handlers of `FindRoot`, `FindFit`, the
-linear-algebra operators, the trigonometric rewrites and `TupleFrom`.
-
-- **CE-39.3** User decision 2026-10-25: a range that is an element of a
-  collection stays a range, so the value of `Tuple(Range(1, 3))` is
-  `(Range(1, 3))`; report the number of changed tests before landing.
-  `Tuple(Range(1, 3))` is typed `tuple<range>`, and its value
-  `tuple<vector<integer^3>>`. Typing the component `list<integer>` made a
-  variable declared `list<range>` refuse `[Range(1, 3)]`, and admitting the
-  literal stored `[[1, 2, 3]]`, which is not in `list<range>`: a fix must decide
-  what a `list<range>` declaration holds (the range kept as a range, or a list
-  of integers). The sign-range part of this item was closed by user decision
-  2026-10-25 (option (c), keep the gap).
+When `G := (n, K) ↦ F(n, K)` is assigned before `F` (which builds a list with
+`join([n], G(n + 1, K))`) is boxed, both are typed `-> list<any>`: sound, but
+not `list<number>`, which the other three install orders give. The body of `F`
+reads `G` as `-> unknown`, an `unknown` operand of `Join` gives `any` elements,
+and the list hypothesis `list<any>` is accepted at once. A fix needs a pass that
+can start below `list<any>` without storing a `list<unknown>` result (`unknown`
+is neutral in a join, so `Join(F(…), ["a"])` would be typed `list<string>`).
 
 ### CE-40. The type of a held operand of a lazy operator is read without its binding
 
@@ -337,22 +222,6 @@ the length from a list type with a length, a list literal, a string literal, a
   a matrix) chooses `NaN` or `Missing` from the element type that the inner
   access states, so the row type must stay.
 
-### CE-43. The static type of a block local narrowed by a use depends on statement order
-
-**Status:** open; defect, small.
-
-The re-read of `let`/`Assign` value types (`library/assignment-evidence.ts`)
-excludes locals with a declared type. A local that a USE narrows after its first
-recorded assignment type keeps the order-dependent result: a `mutate(v)` call
-placed before or after the assignment gives a different static type. To make the
-narrowing order-independent, treat use evidence and assignment evidence as two
-sets joined at the end of the block, not as writes in statement order. The
-runtime value is correct; only the static type is imprecise. Tried 2026-10-24:
-letting the first assignment replace a type that came from uses only removes the
-order dependence, but `while let [h, ...] = xs { …; xs = Rest(xs) }` stops
-compiling (a `string` arm passes through `Rest`), and a meet with the uses is
-unsound (`[1.5]` typed `vector<integer^1>`).
-
 ### CE-46. Extended-real declarations widen to `number` through a call of a function declared `function`
 
 **Status:** open; defect, low priority. User decision 2026-09-26: the host that
@@ -372,19 +241,6 @@ compiled call lost its `_SYS.cplx` wrapper). Under the decision above, the
 host's declaration is the intended fix.
 
 Probe: Tycho's `scripts/repros/2026-09-24-declared-type-precision-probe.mts`.
-
-### CE-47. A tuple argument at a scalar parameter is typed `any`
-
-**Status:** open; defect, small.
-
-The call `h((1, 2))` with `h := x ↦ 2x` (declared `(real) -> real` or not)
-evaluates to `(2, 4)` and is typed `any`, because the body decides the shape
-(`x ↦ |x|` gives a scalar). The same holds for `Apply(x ↦ 2x, (1, 2))`.
-
-Typing the body with the parameter typed as the tuple was tried and removed: the
-descriptor-based derivation (`callResultType`) gave wrong narrow types for a
-nested user call inside a list (`P ↦ [q(P), q(P)]`), for `P ↦ P·Norm(P)`, and
-for `P ↦ P/(P[1] − 1)`. A precise type needs a tuple-aware derivation.
 
 ### CE-51. Make built-in collections conform to `Iterable` and `Indexable` protocols
 
@@ -537,22 +393,6 @@ real signature. One case is checked only when it evaluates:
   function are checked statically. Do it only when other work needs a shared
   installation step for canonicalization and evaluation.
 
-### CE-62. The declared effects of a value-bound function literal are not kept current
-
-**Status:** open; defect.
-
-- **CE-62.2** The arrow of a value-bound function literal is fixed in the effect
-  stamps of its callers. The re-derivation (`consultsRegistry`,
-  `effects-inference.ts`) keeps a definition current when its body reaches a
-  protocol dispatcher directly or through OPERATOR-definition callees. A body
-  that reaches one only through a VALUE-bound literal (`g := (x) => speak(x)`
-  stored as a value binding, then `f` calling `g`) keeps `g`'s arrow as read
-  when `f` was installed: the walk cannot see that the value's own arrow depends
-  on the registry. This agrees with the construction-time snapshot semantics,
-  but it reduces the transitive reach of the widening guard. Fix: a
-  registry-dependence bit on the arrow (or type) of the LITERAL, not only on
-  operator definitions.
-
 ### CE-63. Contextual callback typing (`callback<S>`): deferred items and known limits
 
 **Status:** on demand; capability.
@@ -619,6 +459,16 @@ against the `at` handler is disabled. It needs generic type arguments in
 signatures: `Map` and `Filter` return an indexed collection if and only if the
 input is indexed.
 
+Measured 2026-10-25: the per-arm form of the `at`-handler check is already on
+(`couldReturnIndexedCollection`). The `Map` signature says
+`-> indexed_collection`, while `Map` over a set returns a set; only the type
+handlers give the right result types. A conditional result written as an
+intersection of two arms breaks callback parameter stamping
+(`(p: tuple<number, number>)` became `(p: unknown)`) and gives `unknown` for an
+undeclared source: 65 tests fail in the collection suites. It needs overload
+resolution that stamps callbacks across intersection arms, or a conditional
+result form in the signature language.
+
 ### CE-443. A pure function literal with nine or more nested literals is typed with effects `any`
 
 **Status:** design needed; types. Found 2026-10-24 while fixing CE-347.
@@ -656,7 +506,89 @@ fast. The fixes that stopped this growth for lists with lengths do not reach
 plain lists or a mix of tuples and lists. The four timing tests of
 `broadcastable-list-meaning.test.ts` now use tuple chains.
 
+### CE-490. A string argument at an inferred scalar parameter keeps the numeric signature result
+
+**Status:** open; wrong value, small.
+
+With `f := x ↦ (-x, x)`, `f("s")` is typed `tuple<number, number>`, and its
+value `(Error(incompatible-type), "s")` holds a string. Pinned in
+`tycho-373-passthrough-broadcast-typing.test.ts`.
+
+### CE-491. A list of points mapped over a failing body is typed `error`
+
+**Status:** open; defect, small.
+
+With `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` is typed `error`; its value is a
+list of two `no-product-between-points` errors. The static type should be a
+list, as a positional operator keeps a failed cell (`docs/ERROR-MODEL.md` §3).
+
+### CE-492. `Field` reports a static error for a key an open record type does not list
+
+**Status:** open; design.
+
+`Field(r, "b")` with `r: record{a: integer}` reports a static defect. Since
+2026-10-25 an open record type is not a dictionary of its listed fields (it can
+hold other fields), so the key may exist at run time. The check catches typos,
+but it refuses programs that are correct for a record with more fields.
+
 ## Collections, absence and broadcasting
+
+### CE-493. The count of a comprehension is 0 when an earlier clause can fail and a later clause is empty
+
+**Status:** open; wrong value.
+
+`[j for i in 1..3 if bad(i), j in []]`, where the guard `bad` gives an error,
+has `.count` 0, but its walk yields 3 error cells: a failed guard yields an
+error cell at that prefix, without visiting the later clauses. The shortcut
+"an empty clause gives 0" in `comprehensionCount`
+(`library/control-structures.ts`) does not hold when an earlier clause has a
+guard or a destructuring pattern that can fail. The listing bound
+(`listingCountUpperBound()`, `boxed-expression/listed-element.ts`) already
+counts these cells.
+
+### CE-494. The finiteness test of a comprehension runs the callbacks of its domains
+
+**Status:** open; defect.
+
+`comprehensionIsFinite` calls `comprehensionEnumeratedCount(expr, true)`,
+which walks the domains, so a domain such as `filter(1..i, keep)` runs `keep`
+for each caller of `isWalkableFiniteCollection`. The listing of an Epsil
+result avoids this for an impure view, but other callers do not. The
+statement `let r = [i for i in 1..3, j in filter(1..i, keep)]` also calls
+`keep` 6 times, though the value stays a view; the cause is not yet found.
+
+### CE-495. A list of range rows is refused at a `matrix` parameter
+
+**Status:** design needed; capability.
+
+Since a range in a collection stays a range, `[1..2, 3..4]` is typed
+`list<range>`. `Determinant`, `Inverse`, `MatrixMultiply`, `Dot` and every
+other operator whose parameter is typed `matrix` refuse it with
+`incompatible-type`, while `[[1, 2], [3, 4]]` works. The operators whose
+parameter accepts any value read a range row as a row (`listedLazyRows()`,
+`library/linear-algebra.ts`). Accepting such a list at a `matrix` parameter
+needs a rule: is a list of finite ranges of equal length a matrix type? The
+test in `ce-39-3-range-element-stays-range.test.ts` is marked
+`test.failing`.
+
+### CE-496. `Negate` and `Sum` over a list of range rows have types that do not hold their values
+
+**Status:** open; defect.
+
+`Negate([1..3, 4..6])` is typed `list<range>`, and its value is a
+`matrix<integer^(2x3)>`. `Sum([1..2, 3..4])` is typed `number`, and its value
+is `[4, 6]`. `Add` and `Multiply` over the same operands are typed correctly
+(`list<list<integer>>`).
+
+### CE-497. `Range(0)` is read in two ways
+
+**Status:** open; defect, small.
+
+The canonical form of `Range(0)` is `Range(1, 0)`, which counts down and
+evaluates to `[1, 0]`, but the `range()` helper of `library/collections.ts`
+reads a raw `Range(0)` as empty. A one-operand `Range(n)` is therefore left
+out of the rule that a finite range and the list of its integers are the same
+element (`integerRangeElements()`, `boxed-expression/type-guards.ts`).
 
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 

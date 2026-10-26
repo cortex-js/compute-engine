@@ -26,6 +26,7 @@ import {
   isDictionary,
   isObject,
   isUnorderedSet,
+  integerRangeElements,
 } from './type-guards.js';
 import { isShadowedSymbol } from '../library-shadowing.js';
 import { boundVariableBindings, sameBindingDef } from './binders.js';
@@ -413,6 +414,17 @@ export function same(
   // being a symbol falls through to the type-mismatch branches below and is
   // `false`.
 
+  // A finite `Range` of integers and the `List` literal of its integers are
+  // the same element: `Range(1, 3)`, `Range(1, 3, 1)` and `[1, 2, 3]` are all
+  // the same (`integerRangeElements`). `BoxedFunction.hash` gives such a
+  // range the hash of that list.
+  if (a.operator === 'Range' || b.operator === 'Range') {
+    const ra = integerRangeElements(a);
+    const rb = integerRangeElements(b);
+    if (ra !== undefined || rb !== undefined)
+      return sameIntegerSequence(a, ra, b, rb);
+  }
+
   //
   // BoxedFunction
   // Operator and operands must match
@@ -539,6 +551,37 @@ export function same(
   }
 
   return false;
+}
+
+/**
+ * Are `a` and `b` the same sequence of integers, when at least one of them
+ * is a finite `Range` of integers (`ra` or `rb`, from
+ * `integerRangeElements`)? The other one is the same when it is a range with
+ * the same elements, or a `List` literal whose elements are exactly the
+ * integers of the range, in the same order.
+ */
+function sameIntegerSequence(
+  a: Expression,
+  ra: { start: number; step: number; count: number } | undefined,
+  b: Expression,
+  rb: { start: number; step: number; count: number } | undefined
+): boolean {
+  if (ra !== undefined && rb !== undefined) {
+    if (ra.count !== rb.count) return false;
+    if (ra.count === 0) return true;
+    if (ra.start !== rb.start) return false;
+    return ra.count === 1 || ra.step === rb.step;
+  }
+  const r = (ra ?? rb)!;
+  const list = ra === undefined ? a : b;
+  if (!isFunction(list, 'List') || list.nops !== r.count) return false;
+  let k = r.start;
+  for (const op of list.ops) {
+    if (!isNumber(op) || op.im !== 0 || !op.isInteger || op.re !== k)
+      return false;
+    k += r.step;
+  }
+  return true;
 }
 
 /**

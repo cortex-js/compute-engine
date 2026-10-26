@@ -310,6 +310,14 @@ export function listedElement(
   if (!x.isValid || !x.isLazyCollection) return x;
   if (isFunction(x, 'When') || isFunction(x, 'Which') || isFunction(x, 'If'))
     return x;
+  // A `Range` element stays a range. Its static type is `range` (or
+  // `list<integer>`, `list<real>`), and a range is a value: it reads no
+  // variable again at a later read, as a `Map` view can. If it were listed,
+  // the value of `Tuple(Range(1, 3))` would be `([1, 2, 3])`, typed
+  // `tuple<vector<integer^3>>`, which is not in the static type
+  // `tuple<range>`, and a variable declared `list<range>` would hold
+  // `[[1, 2, 3]]` (user decision 2026-10-25, ROADMAP CE-39.3).
+  if (isFunction(x, 'Range')) return x;
   // A view whose callback applies an operator that has only an
   // `evaluateAsync` handler stays lazy: the walk below is synchronous and
   // would store the applications unevaluated (`holdsAsyncOnlyOperator`).
@@ -388,9 +396,9 @@ export function listedElement(
  * A literal is a value. Without this, an element that evaluates to a lazy
  * collection stays a live view inside the literal: with `xs = [1, 2]`,
  * `[map(x => x + 1, xs)]` held the `Map`, printed as its recipe, and read
- * `xs` again at each later read; `[1..3, 4]` printed as `[1..3, 4]`. With
- * this, they are `[[2, 3]]` and `[[1, 2, 3], 4]`, as a spread of the same
- * element (`snapshotListJoin`) already gives.
+ * `xs` again at each later read. With this, it is `[[2, 3]]`, as a spread
+ * of the same element (`snapshotListJoin`) already gives. A `Range` element
+ * is not listed: `[1..3, 4]` stays `[1..3, 4]` (see `listedElement`).
  *
  * Each element is listed with `listedElement`, so the rules are those of a
  * spread: an element is kept as it is when it is not known to be finite

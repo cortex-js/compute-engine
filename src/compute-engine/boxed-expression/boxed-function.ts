@@ -209,6 +209,7 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
   isUnorderedSet,
+  integerRangeElements,
 } from './type-guards.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
@@ -1351,6 +1352,22 @@ export class BoxedFunction
   // consumer (e.g. `match.ts` anchor bucketing) silently breaks.
   get hash(): number {
     if (this._hash !== undefined) return this._hash;
+
+    // A finite `Range` of integers is `isSame` to the `List` literal of its
+    // integers (`integerRangeElements`), so its hash is the hash of that
+    // list: the fold of the hash of each element, then the hash of `List`.
+    // The hash of the number literal `k` is `hashCode(`${k}:0`)` (see
+    // `BoxedNumber.hash`), so the list is not built.
+    if (this._operator === 'Range') {
+      const r = integerRangeElements(this);
+      if (r !== undefined) {
+        let hr = 0;
+        for (let i = 0, k = r.start; i < r.count; i++, k += r.step)
+          hr = mixOperandHash(hr, hashCode(`${k}:0`));
+        this._hash = (hr ^ hashCode('List')) | 0;
+        return this._hash;
+      }
+    }
 
     let h = 0;
     const store = this._numericStore;

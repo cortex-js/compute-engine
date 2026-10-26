@@ -6,8 +6,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 // calls `Tick` twice, at evaluation and never at boxing or parsing. The
 // canonical `Set` then merges the elements that are equal, so
 // `{Map(Tick, [1, 2]), [11, 12]}` has one element. An element that is
-// infinite, or larger than `ce.maxCollectionSize`, stays lazy
-// (`listedLiteralElements`, `boxed-expression/listed-element.ts`).
+// infinite, or larger than `ce.maxCollectionSize`, stays lazy, and a `Range`
+// element stays a range (`listedLiteralElements`,
+// `boxed-expression/listed-element.ts`).
 
 function engine(): { ce: ComputeEngine; calls: () => number } {
   const ce = new ComputeEngine();
@@ -71,10 +72,17 @@ describe('a Set literal lists its finite lazy elements', () => {
     ).toBe('Set(Set(11, 12))');
     expect(
       ce
-        .box(['Set', ['Range', 1, 3]])
+        .box(['Set', ['Take', ['Range', 1, 10], 3]])
         .evaluate()
         .toString()
     ).toBe('Set([1,2,3])');
+    // A range element is not listed: it stays a range.
+    expect(
+      ce
+        .box(['Set', ['Range', 1, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('Set(Range(1, 3))');
     // A nested list literal lists its own lazy element.
     expect(
       ce
@@ -92,8 +100,12 @@ describe('a Set literal lists its finite lazy elements', () => {
         .evaluate()
         .toString()
     ).toBe('Set(Range(1, +oo))');
-    const big = ce.box(['Set', ['Range', 1, 100000]]).evaluate();
-    expect(big.ops![0].operator).toBe('Range');
+    // A range element is never listed, so the oversized element is a `Take`
+    // view, which would be listed if it were small.
+    const big = ce
+      .box(['Set', ['Take', ['Range', 1, 1000000], 100000]])
+      .evaluate();
+    expect(big.ops![0].operator).toBe('Take');
   });
 
   test('under .N() the listed element is approximated', () => {

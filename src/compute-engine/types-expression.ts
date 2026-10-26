@@ -1110,6 +1110,12 @@ export interface Expression {
    *   not alpha-equivalence), matching `isSame()`: `Sum(i, i in 1..n)` and
    *   `Sum(j, j in 1..n)` hash differently, just as they are not `isSame()`.
    *   This clause co-evolves with `isSame()` semantics.
+   *
+   * - **Ranges and lists**: a finite `Range` whose bounds and step are
+   *   integer literals and that has at most 10,000 elements is `isSame()` to
+   *   the `List` of its integers, so it has the hash of that list:
+   *   `Range(1, 3)` and `[1, 2, 3]` have the same hash. A character and a
+   *   one-cluster string with the same content also have the same hash.
    */
   readonly hash: number;
 
@@ -2066,6 +2072,15 @@ export interface Expression {
    * `ce.box(['Set', 2, 1]).isSame(ce.box(['Set', 1, 2]))` is `true`. A
    * set-builder (`Set(body, Element(k, S))`) compares its two operands by
    * position.
+   *
+   * A finite `Range` whose bounds and step are integer literals and that has
+   * at most 10,000 elements is the same as the `List` of its integers, and
+   * has the same `hash`: `ce.box(['Range', 1, 3]).isSame(ce.box(['List', 1,
+   * 2, 3]))` is `true`. A larger range is compared by its operands only.
+   *
+   * A character and a one-cluster string with the same content are the same,
+   * although their types are different: `ce.string('a')` is the same as
+   * `ce.character('a')`.
    *
    * Accepts JavaScript primitives: `number`, `bigint`, `boolean`, `string`.
    *
