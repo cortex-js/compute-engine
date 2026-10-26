@@ -390,28 +390,6 @@ but it refuses programs that are correct for a record with more fields.
 
 ## Collections, absence and broadcasting
 
-### CE-505. A point argument of a recursive alias whose arms mix points and lists is refused
-
-**Status:** open; defect.
-
-With `k` declared `(tuple<number, number>) -> number` and the alias
-`B = list<B> | tuple<number, number>`, a symbol `y: B` that holds the point
-`(1, 2)` gives `k(y)` the type `error` and an `incompatible-type` value, though
-`k((1, 2))` is `3`. A value of `B` can also be a list whose elements mix points
-and lists (`[(1, 2), [(3, 4)]]`), which the map over points refuses, so the walk
-(`recursivePointNesting()`, `collection-utils.ts`) refuses the whole alias. The
-call could instead be accepted, typed by the depth it reads from the value, and
-refuse only a value whose elements mix depths.
-
-### CE-506. A call at a point parameter with an empty list is typed as one result
-
-**Status:** open; defect.
-
-With `k` declared `(tuple<number, number>) -> number`, `k([])` is typed
-`number`, and its value is `[]`. A comment on `isPointListArgumentType()`
-(`collection-utils.ts`) says that `list<never>` is left out on purpose; the type
-of the call should still hold the value, for example `number | list<never>`.
-
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 
 **Status:** open; task (precision; the type is sound).

@@ -5,6 +5,9 @@ import {
   isFiniteIndexedCollection,
   isPointListArgumentType,
   isPointTensorArgumentType,
+  isEmptyListArgumentType,
+  listMixesPointsAndLists,
+  pointArgumentMayMixDepths,
   isPointParameterType,
   isTupleWithListCoordinate,
   typeCouldBeCollection,
@@ -3876,10 +3879,15 @@ export function validateArguments(
     if (
       internals?.mapsPointLists &&
       (isPointListArgumentType(op.type.type, param) ||
-        isPointTensorArgumentType(op.type.type, param) ||
+        (isPointTensorArgumentType(op.type.type, param) &&
+          !(
+            pointArgumentMayMixDepths(op.type.type, param) &&
+            listMixesPointsAndLists(op)
+          )) ||
         (isPointParameterType(param) &&
           isFunction(op, 'List') &&
           op.nops === 0) ||
+        isEmptyListArgumentType(op.type.type, param) ||
         isScalarParameterTuple(op.type.type, param))
     ) {
       result.push(op);
@@ -4242,10 +4250,15 @@ export function validateArguments(
     if (
       internals?.mapsPointLists &&
       (isPointListArgumentType(op.type.type, param) ||
-        isPointTensorArgumentType(op.type.type, param) ||
+        (isPointTensorArgumentType(op.type.type, param) &&
+          !(
+            pointArgumentMayMixDepths(op.type.type, param) &&
+            listMixesPointsAndLists(op)
+          )) ||
         (isPointParameterType(param) &&
           isFunction(op, 'List') &&
           op.nops === 0) ||
+        isEmptyListArgumentType(op.type.type, param) ||
         isScalarParameterTuple(op.type.type, param))
     ) {
       result.push(op);

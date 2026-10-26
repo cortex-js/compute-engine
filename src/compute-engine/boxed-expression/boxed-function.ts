@@ -150,6 +150,9 @@ import {
   isPointOrPointListArgumentType,
   isPointTensorArgumentType,
   isBroadcastablePointArgumentType,
+  pointArgumentMayMixDepths,
+  isEmptyListArgumentType,
+  listMixesPointsAndLists,
   isPointParameterType,
   isFixedShapeCollection,
   isKnownFinitenessBroadcast,
@@ -15141,10 +15144,17 @@ function mapsAsPointList(
     return !isSubtype(x.type.type, 'string');
   // A tensor of points of rank 2 or more maps too, to the points at every
   // depth (`isPointTensorArgumentType`): each row is a list of points that
-  // the map enters again (`mapsToCells`).
+  // the map enters again (`mapsToCells`). A value where one list holds both
+  // a point and a list is not mapped, and the argument check refuses it
+  // with an `incompatible-type` error, as for a literal of that shape
+  // (`listMixesPointsAndLists`, ROADMAP CE-505).
   return (
     isPointListArgumentType(x.type.type, slot.elements) ||
-    isPointTensorArgumentType(x.type.type, slot.elements)
+    (isPointTensorArgumentType(x.type.type, slot.elements) &&
+      !(
+        pointArgumentMayMixDepths(x.type.type, slot.elements) &&
+        listMixesPointsAndLists(x)
+      ))
   );
 }
 
@@ -15374,6 +15384,7 @@ function pointListApplicationType(
   let shape: MapShape = 'cell';
   let deepWhole = false;
   let deepCell = false;
+  let mixedDepths = false;
   const deepDepths = new Set<number>();
   ops.forEach((x, i) => {
     const slot = plan.at(i);
@@ -15408,6 +15419,11 @@ function pointListApplicationType(
           if (presentDef !== def) present = presentDef;
         }
         if (present !== t) deepWhole = true;
+        // A recursive alias whose lists can hold both points and lists
+        // (`type B = list<B> | P`): the evaluation refuses a value whose
+        // elements mix the two with an `incompatible-type` error, so the
+        // type of the call holds `error` too (ROADMAP CE-505).
+        if (pointArgumentMayMixDepths(t, slot.elements)) mixedDepths = true;
         // Each absent element is `Missing` at its own depth in the result:
         // with `S: list<list<P> | missing>`, an absent row is an element of
         // the top list, so `g(S)` is `list<list<R> | missing>`, not
@@ -15428,7 +15444,10 @@ function pointListApplicationType(
           shape,
           mapShapeUnion(['cell', { list: 'cell' }])
         );
-      else if (mapsAsPointListByType(plan, i, x))
+      else if (
+        mapsAsPointListByType(plan, i, x) ||
+        (!x.tuple && isEmptyListArgumentType(x.type, slot.elements))
+      )
         shape = combineMapShapes(shape, { list: 'cell' });
       return;
     }
@@ -15502,7 +15521,9 @@ function pointListApplicationType(
       slot.elements !== undefined &&
       isPointParameterType(slot.elements) &&
       !isDeepPointOperand(plan, i, x) &&
-      (mapsAsPointOrPointList(plan, i, x) || mapsAsPointListByType(plan, i, x))
+      (mapsAsPointOrPointList(plan, i, x) ||
+        mapsAsPointListByType(plan, i, x) ||
+        (!x.tuple && isEmptyListArgumentType(x.type, slot.elements)))
     );
   });
   const cellResult: Type = deepCell
@@ -15515,6 +15536,7 @@ function pointListApplicationType(
   );
   if (deepDepths.size > 0) mapType = withMissingAtDepths(mapType, deepDepths);
   if (deepWhole) mapType = { kind: 'union', types: [mapType, 'missing'] };
+  if (mixedDepths) mapType = { kind: 'union', types: [mapType, 'error'] };
   return absence === undefined
     ? mapType
     : withMissingAtDepths(mapType, absence.depths, 0, absence.whole);
@@ -15648,10 +15670,7 @@ function operandMapShapeOrCut(
     const next = recordUnfoldOnDescent(declarationOf(t), seen);
     if (next === undefined) {
       if (isBareCutOnDescent(t, seen)) return null;
-      const d = resolveTypeReference(t) ?? t;
-      return isSubtype(d, INDEXED_COLLECTION_SHAPE_TYPE) &&
-        !isTupleShapedType(d) &&
-        !isSubtype(d, 'string')
+      return isSurelyListType(resolveTypeReference(t) ?? t, seen)
         ? 'list'
         : mapShapeUnion(['cell', 'list']);
     }
@@ -15698,6 +15717,32 @@ function operandMapShapeOrCut(
       skipMissing
     ),
   };
+}
+
+/**
+ * Whether every value of `t` is a list (not a tuple, not a string), read
+ * arm by arm. A union is surely a list only when each of its arms is: the
+ * declaration `type B = list<B> | tuple<number, number>` is a subtype of
+ * `indexed_collection`, but its point arm is one cell of the map. An arm
+ * that is a reference is unfolded under the descent guard `seen`, so that
+ * an alias of a union of tuples (`type C = tuple<integer, real> |
+ * tuple<real, integer>`, in `type B = list<B> | C`) is read too. An arm
+ * that has spent its unfolds reaches itself as a bare arm: it adds no value
+ * that the other arms do not hold, and it is ignored.
+ */
+function isSurelyListType(t: Type, seen: AliasDescent): boolean {
+  if (typeof t === 'object' && t.kind === 'reference') {
+    const next = recordUnfoldOnDescent(declarationOf(t), seen);
+    if (next === undefined) return true;
+    return isSurelyListType(resolveTypeReference(t) ?? t, next);
+  }
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.every((x) => isSurelyListType(x, seen));
+  return (
+    isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isTupleShapedType(t) &&
+    !isSubtype(t, 'string')
+  );
 }
 
 /** The shape `s` cut after its first list level: the shape of a map that
@@ -15899,7 +15944,8 @@ function pointListAbsence(
         !isTuple(c) &&
         (isPointListArgumentType(c.type.type, slot.elements) ||
           isPointTensorArgumentType(c.type.type, slot.elements) ||
-          isPointOrPointListArgumentType(c.type.type, slot.elements))
+          isPointOrPointListArgumentType(c.type.type, slot.elements) ||
+          isEmptyListAtPointSlot(plan, i, c))
       )
         whole = true;
       return;
@@ -15980,7 +16026,30 @@ function holdsForValuelessPointList(
     (x, i) =>
       isValuelessCollectionSymbol(x) &&
       (mapsAsPointList(plan, i, x, false) ||
-        isDeepPointOperand(plan, i, pointListOperandOf(x)))
+        isDeepPointOperand(plan, i, pointListOperandOf(x)) ||
+        isEmptyListAtPointSlot(plan, i, x))
+  );
+}
+
+/**
+ * Whether operand `x`, at slot `i` of the point-list plan `plan`, is typed
+ * as the empty list (`isEmptyListArgumentType`) at a point slot. The call
+ * maps such an operand to `[]` once it has a value, so a symbol with no
+ * value yet holds the call (`holdsForValuelessPointList`), and an absent
+ * value makes the call `Missing` (`pointListAbsence`), as for a symbol
+ * declared as a list of points (ROADMAP CE-506).
+ */
+function isEmptyListAtPointSlot(
+  plan: BroadcastSlotPlan,
+  i: number,
+  x: Expression
+): boolean {
+  const slot = plan.at(i);
+  return (
+    slot.mappable &&
+    slot.elements !== undefined &&
+    !isTuple(x) &&
+    isEmptyListArgumentType(x.type.type, slot.elements)
   );
 }
 

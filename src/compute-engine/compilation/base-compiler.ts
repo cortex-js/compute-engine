@@ -84,6 +84,8 @@ import {
   isBroadcastablePointArgumentType,
   isPointOrPointListArgumentType,
   isPointParameterType,
+  pointArgumentMayMixDepths,
+  isEmptyListArgumentType,
   leafwardElementType,
   pointCollectionElementType,
   isTopTypedBlockLocal,
@@ -34108,7 +34110,10 @@ export class BaseCompiler {
         !maybe[i] &&
         !isTuple(a) &&
         (isPointListArgumentType(a.type.type, pt) ||
-          isPointTensorArgumentType(a.type.type, pt))
+          isPointTensorArgumentType(a.type.type, pt) ||
+          // The empty list (`list<never>`): the interpreter maps it to `[]`
+          // without a call of the function, as the compiled map does.
+          isEmptyListArgumentType(a.type.type, pt))
       );
     });
     let at = mapped.indexOf(true);
@@ -34487,11 +34492,32 @@ export class BaseCompiler {
       const pointArgs = onePointArgs.map((c, i) =>
         i === at ? BaseCompiler.presentCheckedCode(p, checks[at]) : c
       );
-      return (
-        `(${head}(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
+      const walk =
+        `(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
         `${p}.map((${point}) => ${pointGuard}${go}(${point})) : ` +
-        `${name}(${pointArgs.join(', ')}); })(${v}))(${codes.join(', ')})`
-      );
+        `${name}(${pointArgs.join(', ')}); })(${v})`;
+      // A recursive alias whose lists can hold both points and lists
+      // (`type B = list<B> | P`): the interpreter refuses a value where one
+      // list holds a point and a list with an `incompatible-type` error.
+      // The compiled call gives `NaN` for such a value, as the compiled
+      // broadcast does for an error of the interpreter (ROADMAP CE-505).
+      if (pointArgumentMayMixDepths(args[at].type.type, params[at]!)) {
+        const ok = BaseCompiler.tempVar(target);
+        const q = BaseCompiler.tempVar(target);
+        const kind = BaseCompiler.tempVar(target);
+        const el = BaseCompiler.tempVar(target);
+        const l = BaseCompiler.tempVar(target);
+        const uniform =
+          `(function ${ok}(${q}) { if (!(${isListOf(q)})) return true; ` +
+          `let ${kind}; for (const ${el} of ${q}) { ` +
+          `if (${el} === undefined) continue; ` +
+          `const ${l} = ${isListOf(el)}; ` +
+          `if (${kind} === undefined) ${kind} = ${l}; ` +
+          `else if (${kind} !== ${l}) return false; ` +
+          `if (${l} && !${ok}(${el})) return false; } return true; })(${v})`;
+        return `(${head}(${uniform} ? ${walk} : NaN))(${codes.join(', ')})`;
+      }
+      return `(${head}${walk})(${codes.join(', ')})`;
     }
     return (
       `(${head}(${isList}) ? ${map} : ` +

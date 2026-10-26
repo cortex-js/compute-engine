@@ -39,6 +39,18 @@
 
 ### Behavior Changes
 
+- **A point parameter accepts a list that can hold both points and lists.**
+  With `k: (tuple<number, number>) -> number` and `y` declared
+  `list<P | list<P>>`, `type A = list<A | P>` or `type B = list<B> | P` (`P` is
+  `tuple<number, number>`), `k(y)` maps by the depth of the value: a point
+  gives a number, `[(1, 2), (3, 4)]` gives `[3, 7]` and `[[(1, 2)]]` gives
+  `[[3]]`. These calls were refused for every value. A value in which one list
+  holds both a point and a list, such as `[(1, 2), [(3, 4)]]`, still gives an
+  `incompatible-type` error (the compiled call gives `NaN`), and the type of the
+  call includes `error` for it.
+- **A point parameter accepts an empty list.** `k([])` is typed
+  `list<number>` (it was `number`, for the value `[]`), and a symbol declared
+  `list<never>` that holds `[]` gives `[]` (it was refused).
 - **A point beside an operand that may be a list is typed as a point or a list
   of points** (CE-504). With `L: list<unknown>`, `(x, y)·(2·L[1])` was typed
   `tuple<number, number>`, while `L := [[1, 2]]` gives `[(6, 8), (12, 16)]`; it
