@@ -142,7 +142,6 @@ import {
   asyncEvaluationOf,
   topLevelEvaluationEpoch,
 } from '../boxed-expression/evaluation-epoch.js';
-import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   coarsenEvidenceType,
   isInEvidenceSession,
@@ -6178,8 +6177,16 @@ function scanIndependentClauses(expr: Expression):
       if (!coll?.isCollection) return undefined;
       // A count that is not a safe integer (a `bigint`) is read as unknown:
       // `Number.isFinite()` below would read it as infinite.
-      const c = smallCount(coll);
-      if (coll.isEmptyCollection === true || c === 0) {
+      // The emptiness is read only when the count is not known: each read
+      // can walk the domain, and a walk of `filter(1..3, keep)` calls `keep`
+      // again when the memo of the domain has expired (`keep` changes a
+      // symbol). A known count (a `bigint` included) gives the emptiness; a
+      // count that is `NaN` is read as not known.
+      const n = coll.count;
+      const c = typeof n === 'bigint' ? undefined : n;
+      const countKnown =
+        typeof n === 'bigint' || (typeof n === 'number' && !Number.isNaN(n));
+      if (n === 0 || (!countKnown && coll.isEmptyCollection === true)) {
         if (!empty) failsBeforeEmpty = fails;
         empty = true;
       } else if (c === undefined) unknown = true;
@@ -6362,9 +6369,16 @@ function comprehensionIsFinite(expr: Expression): boolean | undefined {
         finite = coll.isFiniteCollection;
         valuesFinite = finite === true && collectionHoldsFiniteReals(coll);
         if (isTransitivelyPure(domain) && isTransitivelyPure(coll)) {
-          const c = smallCount(coll);
-          empty = coll.isEmptyCollection === true || c === 0;
-          nonEmpty = !empty && c !== undefined;
+          // The emptiness is read only when the count is not known (a count
+          // that is `NaN` is not known), so the domain is walked at most once
+          // here. The domain is pure, so a second walk could not be seen from
+          // outside: this only saves work.
+          const n = coll.count;
+          const countKnown =
+            typeof n === 'bigint' ||
+            (typeof n === 'number' && !Number.isNaN(n));
+          empty = n === 0 || (!countKnown && coll.isEmptyCollection === true);
+          nonEmpty = !empty && typeof n === 'number' && !Number.isNaN(n);
         } else pure = false;
       }
       if (empty && (!fails || finiteSoFar)) return true;

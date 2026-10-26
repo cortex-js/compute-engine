@@ -1,5 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
+import type { MathJsonExpression } from '../../src/math-json/types';
+import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 //
 // The count, the emptiness and the finiteness of a `Comprehension` agree with
@@ -146,6 +148,31 @@ describe('COMPREHENSION FINITENESS — no callback runs', () => {
     ]);
     expect(c.isFiniteCollection).toBe(true);
     expect(calls).toBe(0);
+  });
+
+  test('the count walks an independent filter domain once', () => {
+    // `keep` changes the symbol `calls`, so the memo of the domain expires
+    // after each walk. The count reads the emptiness of the domain from its
+    // count: a second read would walk the domain again (CE-494.2).
+    for (const [cond, count] of [
+      ['j > 0', 3],
+      ['j > 5', 0],
+    ] as const) {
+      const ce = new ComputeEngine();
+      const parseLatex = (latex: string): MathJsonExpression =>
+        ce.parse(latex).json;
+      const run = (source: string) =>
+        executeEpsil(ce, source, { parseLatex }).value;
+      run('let calls = 0');
+      run(`function keep(j) scope { calls = calls + 1; ${cond} }`);
+      const c = ce.box([
+        'Comprehension',
+        'i',
+        ['Element', 'i', ['Filter', ['Range', 1, 3], 'keep']],
+      ]);
+      expect(c.count).toBe(count);
+      expect(run('calls').json).toBe(3);
+    }
   });
 
   test('a dependent range is finite from its form', () => {

@@ -475,18 +475,6 @@ admit a list of points of any depth when the other operand may be a list.
 
 ## Collections, absence and broadcasting
 
-### CE-494. The count of a comprehension over a `filter` domain walks the filter twice
-
-**Status:** open; defect, small.
-
-Since 2026-10-25 the finiteness test of a comprehension does not evaluate a
-guard or an impure domain, and it reads a dependent domain from its form
-(`comprehensionIsFinite()`, `library/control-structures.ts`). One case is left:
-
-- **CE-494.2** The count of `[i for i in filter(1..3, keep)]` calls `keep` 4
-  times, not 3: `scanIndependentClauses` reads both `smallCount(coll)` and
-  `coll.isEmptyCollection`, and each one walks the filter. The value is right.
-
 ### CE-495. A list of range rows is refused at a `matrix` parameter
 
 **Status:** design needed; capability.
