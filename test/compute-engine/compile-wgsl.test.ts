@@ -118,7 +118,7 @@ describe('WGSL COMPILATION', () => {
     it('should compile min/max', () => {
       const expr = ce.parse('\\max(x, y)');
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`max(x, y)`);
+      expect(code).toMatchInlineSnapshot(`_gpu_max(x, y)`);
     });
 
     it('should compile cot', () => {
@@ -676,14 +676,14 @@ describe('WGSL COMPILATION', () => {
 
   // CO-P1-2: `min`/`max` are 2-argument builtins in WGSL.
   describe('CO-P1-2 min/max variadic folding', () => {
-    it('folds 3-arg Max into nested max()', () => {
+    it('folds 3-arg Max into nested _gpu_max()', () => {
       const code = wgsl.compile(ce.box(['Max', 'a', 'b', 'c'])).code;
-      expect(code).toBe('max(max(a, b), c)');
+      expect(code).toBe('_gpu_max(_gpu_max(a, b), c)');
     });
 
-    it('folds 4-arg Min into nested min()', () => {
+    it('folds 4-arg Min into nested _gpu_min()', () => {
       const code = wgsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd'])).code;
-      expect(code).toBe('min(min(min(a, b), c), d)');
+      expect(code).toBe('_gpu_min(_gpu_min(_gpu_min(a, b), c), d)');
     });
   });
 
@@ -1094,7 +1094,7 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('writes out a Map of static width under a reduction', () => {
     expect(wgsl.compile(ce.box(['Min', ['Map', SQUARE, SOURCE]])).code).toBe(
-      'min(min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
+      '_gpu_min(_gpu_min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
     );
   });
 

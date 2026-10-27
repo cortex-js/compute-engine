@@ -149,7 +149,7 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
       'dot(v, w)'
     );
     expect(glsl.compile(ce.box(['Max', 'v']), NO_FOLD).code).toBe(
-      '(max(max(v.x, v.y), v.z))'
+      '(_gpu_max(_gpu_max(v.x, v.y), v.z))'
     );
   });
 

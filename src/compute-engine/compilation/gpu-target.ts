@@ -1204,6 +1204,165 @@ function gpuRealTanh(
 }
 
 /**
+ * `Max`, `Min`, `Clamp`, `ElementMax` and `ElementMin` as shader helpers that
+ * give NaN when an operand is NaN, as the interpreter and the `javascript`
+ * target do: `_gpu_max(a, b)`, `_gpu_min(a, b)` and `_gpu_clamp(x, lo, hi)`
+ * for scalars, and `_gpu_max2`–`_gpu_max4`, `_gpu_min2`–`_gpu_min4` and
+ * `_gpu_clamp2`–`_gpu_clamp4` for vectors, whose operands all have the same
+ * width.
+ *
+ * GLSL ES 3.0 and WGSL leave the built-ins `max`, `min` and `clamp`
+ * undefined for a NaN operand. On Apple GPUs (WebGL2 over ANGLE Metal and
+ * WebGPU over Metal, Apple M5 Max, 2026-10-26) they return the operand that
+ * is a number, so `max(0, sqrt(1 - x²))` at x = 2 was 0, not NaN.
+ *
+ * The NaN test (`_gpu_isnan`, `_gpu_isnan2`–`_gpu_isnan4`) reads the bit
+ * pattern: a value is NaN when its bits without the sign are larger than
+ * those of +∞ (0x7F800000). On WebGPU over Metal the test `a != a` was false
+ * for the NaN of `sqrt(-2.0)`, because a compiler may assume that no NaN
+ * occurs, and the bit test gave the correct answer on both targets. For the
+ * same reason a NaN operand is returned as it is, by a selection, and not
+ * through arithmetic: WGSL lets a compiler give any value for an operation
+ * whose result is NaN. `Clamp` is computed as `min(max(x, lo), hi)`, the
+ * definition of the interpreter, which is `hi` when `lo > hi`; the GLSL
+ * built-in `clamp` leaves that case undefined.
+ *
+ * A helper receives each operand once, as an argument, so a compound operand
+ * is not computed twice (see `gpuFloorModLibrary`). CE-519 (Tycho row 465).
+ */
+function gpuNaNSafeExtremumLibrary(isWGSL: boolean): string {
+  const mask = '0x7FFFFFFFu';
+  const inf = '0x7F800000u';
+  const widths: number[] = [1, ...GPU_HELPER_WIDTHS];
+  const suffix = (n: number): string => (n === 1 ? '' : `${n}`);
+  const isnan = (n: number, v: string): string =>
+    `_gpu_isnan${suffix(n)}(${v})`;
+  // The value `t` where the condition `c` is true, else `f`, with no
+  // arithmetic on either value. GLSL `mix` with a boolean vector selects
+  // each component.
+  const select = (n: number, f: string, t: string, c: string): string =>
+    isWGSL
+      ? `select(${f}, ${t}, ${c})`
+      : n === 1
+        ? `(${c} ? ${t} : ${f})`
+        : `mix(${f}, ${t}, ${c})`;
+  const defs: string[] = [];
+  for (const n of widths) {
+    const t = isWGSL
+      ? n === 1
+        ? 'f32'
+        : `vec${n}f`
+      : n === 1
+        ? 'float'
+        : `vec${n}`;
+    const name = `_gpu_isnan${suffix(n)}`;
+    if (isWGSL) {
+      const u = n === 1 ? 'u32' : `vec${n}u`;
+      const b = n === 1 ? 'bool' : `vec${n}<bool>`;
+      const k = (c: string): string => (n === 1 ? c : `${u}(${c})`);
+      defs.push(`fn ${name}(x: ${t}) -> ${b} {
+  return (bitcast<${u}>(x) & ${k(mask)}) > ${k(inf)};
+}`);
+    } else if (n === 1) {
+      defs.push(`bool ${name}(float x) {
+  return (floatBitsToUint(x) & ${mask}) > ${inf};
+}`);
+    } else {
+      defs.push(`bvec${n} ${name}(vec${n} x) {
+  return greaterThan(floatBitsToUint(x) & ${mask}, uvec${n}(${inf}));
+}`);
+    }
+  }
+  const fn = (
+    name: string,
+    params: string[],
+    t: string,
+    body: string
+  ): string =>
+    isWGSL
+      ? `fn ${name}(${params.map((p) => `${p}: ${t}`).join(', ')}) -> ${t} {
+  return ${body};
+}`
+      : `${t} ${name}(${params.map((p) => `${t} ${p}`).join(', ')}) {
+  return ${body};
+}`;
+  for (const n of widths) {
+    const t = isWGSL
+      ? n === 1
+        ? 'f32'
+        : `vec${n}f`
+      : n === 1
+        ? 'float'
+        : `vec${n}`;
+    const s = suffix(n);
+    for (const op of ['max', 'min'])
+      defs.push(
+        fn(
+          `_gpu_${op}${s}`,
+          ['a', 'b'],
+          t,
+          select(
+            n,
+            select(n, `${op}(a, b)`, 'b', isnan(n, 'b')),
+            'a',
+            isnan(n, 'a')
+          )
+        )
+      );
+    defs.push(
+      fn(
+        `_gpu_clamp${s}`,
+        ['x', 'lo', 'hi'],
+        t,
+        select(
+          n,
+          select(
+            n,
+            select(n, 'min(max(x, lo), hi)', 'hi', isnan(n, 'hi')),
+            'lo',
+            isnan(n, 'lo')
+          ),
+          'x',
+          isnan(n, 'x')
+        )
+      )
+    );
+  }
+  return defs.join('\n');
+}
+
+export const GPU_EXTREMUM_PREAMBLE_GLSL = `\n${gpuNaNSafeExtremumLibrary(false)}\n`;
+export const GPU_EXTREMUM_PREAMBLE_WGSL = `\n${gpuNaNSafeExtremumLibrary(true)}\n`;
+
+/**
+ * `Clamp(x, lo, hi)` as a call of a `_gpu_clamp` helper
+ * (`gpuNaNSafeExtremumLibrary`), or `undefined` when the operand shapes have
+ * no helper: a complex operand, a matrix, an array, a vector bound beside a
+ * scalar `x`, or vectors of different widths. A scalar bound beside a vector
+ * `x` is broadcast with the vector constructor.
+ */
+function gpuClampCall(
+  args: ReadonlyArray<Expression>,
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (args.length !== 3 || args.some((a) => a === null || a === undefined))
+    return undefined;
+  if (args.some((a) => BaseCompiler.isComplexValued(a))) return undefined;
+  const shapes = args.map(gpuOperandShape);
+  if (shapes.every((s) => s === 'scalar'))
+    return `_gpu_clamp(${args.map((a) => compile(a)).join(', ')})`;
+  const width = shapes[0];
+  if (typeof width !== 'number') return undefined;
+  if (!shapes.every((s) => s === 'scalar' || s === width)) return undefined;
+  const ctor = gpuVecType(width, target.language === 'wgsl');
+  const codes = args.map((a, i) =>
+    shapes[i] === 'scalar' ? `${ctor}(${compile(a)})` : compile(a)
+  );
+  return `_gpu_clamp${width}(${codes.join(', ')})`;
+}
+
+/**
  * Compile an operand whose code IS the whole lowering of its parent head — an
  * IDENTITY passthrough, such as `Floor` of an integer-valued operand, `Abs` of
  * a non-negative one, or `Real` of a real one.
@@ -2724,7 +2883,15 @@ function compileGPUBroadcastUnary(
       tanh,
       `_gpu_tanh${gpuComponentCount(operand)}(${vector})`
     );
-  const unsafe = gpuIsComponentwise(code, vector);
+  // The check reads only the text that the element lowering adds around the
+  // operand. The operand's own source is already valid vector code, and it
+  // can call scalar helpers on its elements (`vec3(_gpu_max(x, 0.0), …)`,
+  // `vec3(_gpu_fmod(x, 2.0), …)`), so each copy of it is replaced by a name
+  // that the check accepts. The original code is emitted.
+  const unsafe = gpuIsComponentwise(
+    code.split(vector).join('_operand'),
+    '_operand'
+  );
   if (unsafe !== undefined)
     decline(
       `the scalar shader lowering \`${code}\` is not componentwise — ` +
@@ -3739,11 +3906,11 @@ function gpuConstructedVectorWidth(
  *
  * The counterpart of the one-for-one positional check in
  * `gpuCheckOperandShapes`, for a lowering that does NOT pass its operands
- * through: `ElementMax([1,2,3], [4,5,6], 2)` folds to
- * `max(max(vec3(…), vec3(…)), 2.0)` — valid GLSL — while
- * `ElementMax(2, [1,2,3], [4,5,6])` folds to `max(max(2.0, vec3(…)), vec3(…))`,
- * whose INNER call puts the scalar first, where GLSL's `max(genType, float)`
- * has no overload.
+ * through: a fold `max(max(vec3(…), vec3(…)), 2.0)` is valid GLSL, while
+ * `max(max(2.0, vec3(…)), vec3(…))` puts the scalar first in its INNER call,
+ * where GLSL's `max(genType, float)` has no overload. `foldNaryBuiltin` emits
+ * such folds; `ElementMax`/`ElementMin` reach it only for operand shapes that
+ * have no NaN-safe helper (`compileGPUElementExtremum`).
  */
 function gpuMisplacedScalarArgument(
   code: string,
@@ -4291,6 +4458,49 @@ function foldNaryBuiltin(
 }
 
 /**
+ * Compile `ElementMax`/`ElementMin` as a left fold of the NaN-safe helpers
+ * (`gpuNaNSafeExtremumLibrary`): `_gpu_max(a, b)` when every operand is a
+ * scalar, and `_gpu_maxN(a, b)` when the operands are `vecN` values of one
+ * width and scalars, each scalar broadcast with the vector constructor, as
+ * the interpreter broadcasts it (`ElementMax(2, [1, 3, 5])` is `[2, 3, 5]`).
+ * Each operand is compiled once.
+ *
+ * Other operand shapes (a matrix, an array, a complex operand, vectors of
+ * different widths) keep the built-in fold of `foldNaryBuiltin`, so that the
+ * operand-shape gate gives its reason for the decline. So does a single
+ * operand, which `foldNaryBuiltin` passes through unchanged.
+ */
+function compileGPUElementExtremum(
+  name: 'max' | 'min',
+  head: string,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const builtin = (): string =>
+    foldNaryBuiltin(name, head, args, compile, gpuShapeRules(target), target);
+  if (args.length < 2) return builtin();
+  if (args.some((a) => BaseCompiler.isComplexValued(a))) return builtin();
+  const shapes = args.map(gpuOperandShape);
+  if (!shapes.every((s) => s === 'scalar' || typeof s === 'number'))
+    return builtin();
+  const widths = new Set(shapes.filter((s) => typeof s === 'number'));
+  if (widths.size > 1) return builtin();
+  const width = widths.size === 1 ? ([...widths][0] as number) : undefined;
+  const ctor =
+    width === undefined ? '' : gpuVecType(width, target.language === 'wgsl');
+  const codes = args.map((a, i) =>
+    width !== undefined && shapes[i] === 'scalar'
+      ? `${ctor}(${compile(a)})`
+      : compile(a)
+  );
+  const helper = `_gpu_${name}${width ?? ''}`;
+  let acc = codes[0];
+  for (let i = 1; i < codes.length; i++) acc = `${helper}(${acc}, ${codes[i]})`;
+  return acc;
+}
+
+/**
  * The SCALAR component sources of a NON-SCALAR operand, or `undefined` when it
  * has none — what a shader reduction needs in order to consume a collection.
  *
@@ -4379,13 +4589,17 @@ function compileGPUExtremum(
     const call = gpuTopLevelCall(c);
     return call !== undefined && GPU_AGGREGATE_CONSTRUCTOR.test(call.callee);
   });
+  // The fold calls the `_gpu_max`/`_gpu_min` helpers, which give NaN for a
+  // NaN operand (`gpuNaNSafeExtremumLibrary`). Every part is a scalar here: a
+  // collection operand contributes its scalar components.
   const fold = (parts: ReadonlyArray<string>): string => {
     let acc = parts[0];
-    for (let i = 1; i < parts.length; i++) acc = `${name}(${acc}, ${parts[i]})`;
+    for (let i = 1; i < parts.length; i++)
+      acc = `_gpu_${name}(${acc}, ${parts[i]})`;
     return acc;
   };
-  // Every operand a scalar: the componentwise variadic fold, byte-identical to
-  // what `foldNaryBuiltin` emitted. With ONE operand the fold emits no call at
+  // Every operand a scalar: a left fold of the `_gpu_max`/`_gpu_min` helpers
+  // over the operands, with no reduction over components. With ONE operand the fold emits no call at
   // all — the lowering is the operand's own code — so it is parenthesized on
   // the identity-passthrough rule (see `gpuParenthesizeIdentity`): `2·max(x +
   // 1)` emitted `2.0 * x + 1.0`, which is `2x + 1`.
@@ -7447,14 +7661,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return gpuIdentityPassthrough(args[0], compile, target);
     return `ceil(${compile(args[0])})`;
   },
-  // The native `clamp` keeps the operand-shape rules the shape gate knows
-  // (`clamp(genType, float, float)`). CE defines `Clamp(x, lo, hi)` as
-  // `min(max(x, lo), hi)`, which is `hi` when `lo > hi`, and its type handler
-  // claims that range (`extremumRangeType`). WGSL defines `clamp` as that
-  // same `min(max())`; GLSL leaves the result undefined when `lo > hi`
-  // (common drivers compute `min(max())`), so for such bounds a GLSL result
-  // may disagree with the claimed type.
-  Clamp: 'clamp',
+  // A scalar or `vecN` operand calls a `_gpu_clamp` helper, which gives NaN
+  // for a NaN operand and computes CE's `min(max(x, lo), hi)` (see
+  // `gpuNaNSafeExtremumLibrary`). Other shapes keep the built-in `clamp`, so
+  // that the shape gate gives its reason for a decline.
+  Clamp: (args, compile, target) =>
+    gpuClampCall(args, compile, target) ??
+    `clamp(${args.map((a) => compile(a)).join(', ')})`,
   Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ccos(${compile(args[0])})`;
@@ -7536,7 +7749,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Log2: 'log2',
   // GLSL/WGSL `min`/`max` are strictly 2-argument builtins; a variadic
   // `max(a, b, c)` is invalid shader source. Fold 3+ arguments into a nest of
-  // 2-argument calls: `max(max(a, b), c)`. A COLLECTION operand makes these a
+  // 2-argument calls of the NaN-safe helpers, `_gpu_max(_gpu_max(a, b), c)`
+  // (`gpuNaNSafeExtremumLibrary`). A COLLECTION operand makes these a
   // reduction rather than a componentwise fold — see `compileGPUExtremum`.
   // `markAggregateConsuming`: the reduction DESTRUCTURES its collection
   // operands, so the generic shape gate must not judge the emission against
@@ -7548,28 +7762,15 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     compileGPUExtremum('min', 'Min', args, compile, target)
   ),
   // Element-wise max/min — genuinely COMPONENTWISE, unlike `Max`/`Min` above,
-  // so the native fold is the right lowering for a `vecN` operand too. Both
-  // require at least two operands (a lone collection is a `Max`/`Min`, and CE
-  // rejects `ElementMax([1,2,3])` as missing an argument), so the reduction
-  // case does not arise. (`Clamp` is mapped to the native `clamp` above.)
+  // so a `vecN` operand stays a vector. Both require at least two operands (a
+  // lone collection is a `Max`/`Min`, and CE rejects `ElementMax([1,2,3])` as
+  // missing an argument), so the reduction case does not arise. They call the
+  // NaN-safe helpers, as `Max`, `Min` and `Clamp` do
+  // (`compileGPUElementExtremum`).
   ElementMax: (args, compile, target) =>
-    foldNaryBuiltin(
-      'max',
-      'ElementMax',
-      args,
-      compile,
-      gpuShapeRules(target),
-      target
-    ),
+    compileGPUElementExtremum('max', 'ElementMax', args, compile, target),
   ElementMin: (args, compile, target) =>
-    foldNaryBuiltin(
-      'min',
-      'ElementMin',
-      args,
-      compile,
-      gpuShapeRules(target),
-      target
-    ),
+    compileGPUElementExtremum('min', 'ElementMin', args, compile, target),
   Mix: 'mix',
   // Control-flow forms — the base compiler's default emits a JS ternary and a
   // bare `NaN`, neither of which is valid GPU code (WGSL has no `?:`, and no
@@ -7649,8 +7850,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (
       gpuNeedsStatements(args[0]) ||
       (gpuCanPlaceStatement(target) &&
-        (gpuArmSharesWork(args[0]) ||
-          gpuArmIsCostlyForSelect(args[0], target)))
+        (gpuArmSharesWork(args[0]) || gpuArmIsCostlyForSelect(args[0], target)))
     ) {
       const statement = compileGPUStatementSelection(
         [args[1], args[0]],
@@ -18760,6 +18960,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       isWGSL ? GPU_FLOOR_MOD_PREAMBLE_WGSL : GPU_FLOOR_MOD_PREAMBLE_GLSL
     );
     if (isWGSL) preamble += gpuLibrarySubset(code, GPU_TANH_PREAMBLE_WGSL);
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_EXTREMUM_PREAMBLE_WGSL : GPU_EXTREMUM_PREAMBLE_GLSL
+    );
     // Every library goes through `gpuLibrarySubset`, which keeps only the
     // definitions this compilation names and the ones those call. A shader
     // preamble is compiled by the driver once per program, so an unused

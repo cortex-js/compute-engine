@@ -132,7 +132,7 @@ describe('GLSL COMPILATION', () => {
     it('should compile min/max', () => {
       const expr = ce.parse('\\max(x, y)');
       const code = glsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`max(x, y)`);
+      expect(code).toMatchInlineSnapshot(`_gpu_max(x, y)`);
     });
 
     it('should compile cot', () => {
@@ -829,7 +829,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
   /** The value of an emitted expression in `x`, read as JavaScript. */
   const run = (code: string, x: number): number =>
     // eslint-disable-next-line no-new-func
-    new Function('x', 'min', 'max', 'cos', '_gpu_pow2', `return ${code};`)(
+    new Function('x', '_gpu_min', '_gpu_max', 'cos', '_gpu_pow2', `return ${code};`)(
       x,
       Math.min,
       Math.max,
@@ -897,7 +897,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
   it('writes out a Map of static width under a reduction', () => {
     const code = glsl.compile(ce.box(['Min', ['Map', SQUARE, SOURCE]])).code!;
     expect(code).toBe(
-      'min(min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
+      '_gpu_min(_gpu_min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
     );
     for (const x of [-5, -1.5, 0, 2])
       expect(run(code, x)).toBeCloseTo(
@@ -905,7 +905,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
         12
       );
     expect(glsl.compile(ce.box(['Max', ['Map', SQUARE, SOURCE]])).code).toBe(
-      'max(max((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
+      '_gpu_max(_gpu_max((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
     );
     expect(glsl.compile(ce.box(['Sum', ['Map', SQUARE, SOURCE]])).code).toBe(
       '(x * x) + _gpu_pow2(x + 4.0) + _gpu_pow2(x + 2.0)'

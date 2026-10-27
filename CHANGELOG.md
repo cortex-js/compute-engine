@@ -465,14 +465,18 @@
   `glsl` is unchanged: its `?:` evaluates only the branch that is taken.
 - **On `glsl`, `Mod` of a scalar by a vector compiles** (`Mod(1, v)` broadcasts
   the scalar); the built-in `mod` has no such overload, and it was refused.
-- **On `glsl` and `wgsl`, `Max`, `Min` and `Clamp` give NaN when an operand is
-  NaN** (CE-519, Tycho row 465), as the interpreter and the `javascript`
-  target do. The shader built-ins return the other operand on Apple GPUs, so
-  `\max(0, \sqrt{1 - x^2})` at `x = 2` was 0. The targets now call helpers
-  that test the bit pattern of each operand: a test `a != a` was removed by
-  the compiler on WebGPU over Metal. `Clamp(x, lo, hi)` with `lo > hi` now
+- **On `glsl` and `wgsl`, `Max`, `Min`, `Clamp`, `ElementMax` and
+  `ElementMin` give NaN when an operand is NaN** (CE-519, Tycho row 465), as
+  the interpreter and the `javascript` target do. The shader built-ins return
+  the other operand on Apple GPUs, so `\max(0, \sqrt{1 - x^2})` at `x = 2`
+  was 0. The targets now call helpers that test the bit pattern of each
+  operand (a test `a != a` was removed by the compiler on WebGPU over Metal)
+  and return the NaN operand itself. `Clamp(x, lo, hi)` with `lo > hi` now
   gives `hi` on `glsl` as on the other targets (the built-in `clamp` left it
-  undefined), and on `wgsl` a vector `Clamp` with scalar bounds compiles.
+  undefined). A vector `Clamp` with scalar bounds, and an `ElementMax` or
+  `ElementMin` of a vector and a scalar in any position, now compile on both
+  targets: the scalar is broadcast, as in the interpreter. They were refused
+  on `wgsl`, and on `glsl` when the scalar came first.
 - **A part of a loop body printed or evaluated outside its operator keeps its
   index** (CE-498). `ReplaceAt([1,2,3], i, 9)` taken from
   `Loop(…, Element(i, Range(1, 3)))` printed an `incompatible-type` error, with

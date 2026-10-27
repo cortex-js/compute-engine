@@ -140,7 +140,7 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     // `ElementMax` — not `Max`, which is a REDUCTION on the GPU too (it
     // destructures its collection operands; see `compileGPUExtremum`).
     expect(g(['ElementMax', V3, W3])).toBe(
-      'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
+      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['Dot', V3, W3])).toBe(
       'dot(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
@@ -297,11 +297,17 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   });
 
   it('GLSL `clamp(genType, float, float)` takes its scalars in the BOUNDS', () => {
-    expect(g(['Clamp', V3, 0, 1])).toBe('clamp(vec3(1.0, 2.0, 3.0), 0.0, 1.0)');
+    expect(g(['Clamp', V3, 0, 1])).toBe(
+      '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(0.0), vec3(1.0))'
+    );
     expect(() => g(['Clamp', 0, V3, 1])).toThrow(
       /^Could not compile `Clamp`: the shader builtin `clamp` takes a scalar only in arguments 2 and 3, but here the scalar stands in argument 1/
     );
-    expect(() => w(['Clamp', V3, 0, 1])).toThrow(/MATCHING genType/);
+    // WGSL has no `clamp(genType, float, float)` overload. The `_gpu_clamp3`
+    // helper takes three vectors, so the scalar bounds are broadcast.
+    expect(w(['Clamp', V3, 0, 1])).toBe(
+      '_gpu_clamp3(vec3f(1.0, 2.0, 3.0), vec3f(0.0), vec3f(1.0))'
+    );
   });
 
   it('GLSL `smoothstep(float, float, genType)` takes its scalars in the EDGES', () => {
@@ -321,25 +327,23 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     const cev = new ComputeEngine();
     cev.declare('v', 'vector<3>');
     const gv = (expr: any): string => glsl.compile(cev.box(expr)).code!;
-    expect(gv(['ElementMax', 'v', 2])).toBe('max(v, 2.0)');
-    expect(() => gv(['ElementMax', 2, 'v'])).toThrow(
-      /takes a scalar only in argument 2, but here the scalar stands in argument 1/
+    expect(gv(['Step', 2, 'v'])).toBe('step(2.0, v)');
+    expect(() => gv(['Step', 'v', 2])).toThrow(
+      /takes a scalar only in argument 1, but here the scalar stands in argument 2/
     );
-    expect(gv(['Mod', 'v', 2])).toBe(
-      '_gpu_fmod3(v, vec3(2.0))'
-    );
+    expect(gv(['Mod', 'v', 2])).toBe('_gpu_fmod3(v, vec3(2.0))');
     expect(gv(['Mod', 1, 'v'])).toBe('_gpu_fmod3(vec3(1.0), v)');
   });
 
-  it('a VARIADIC fold is judged on the emitted call tree', () => {
-    // `ElementMax(a, b, c)` folds to `max(max(a, b), c)`: the CE operand
-    // positions no longer line up with the emitted ones, so each nested call
-    // is judged on its own arguments.
+  it('a VARIADIC element-wise fold broadcasts a scalar in any position', () => {
+    // `ElementMax` calls the vector helper `_gpu_max3`, which takes two
+    // vectors, so a scalar operand is broadcast wherever it stands, as the
+    // interpreter broadcasts it.
     expect(g(['ElementMax', V3, W3, 2])).toBe(
-      'max(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), 2.0)'
+      '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
     );
-    expect(() => g(['ElementMax', 2, V3, W3])).toThrow(
-      /the emitted call `max\(2\.0, vec3\(1\.0, 2\.0, 3\.0\)\)` has a scalar in argument 1/
+    expect(g(['ElementMax', 2, V3, W3])).toBe(
+      '_gpu_max3(_gpu_max3(vec3(2.0), vec3(1.0, 2.0, 3.0)), vec3(4.0, 5.0, 6.0))'
     );
   });
 
@@ -370,9 +374,15 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 });
 
 describe('GPU OPERAND SHAPE GATE — the two languages differ', () => {
-  it('GLSL promotes a scalar in `max(genType, float)`; WGSL does not', () => {
-    expect(g(['ElementMax', V3, 2])).toBe('max(vec3(1.0, 2.0, 3.0), 2.0)');
-    expect(() => w(['ElementMax', V3, 2])).toThrow(/MATCHING genType/);
+  it('an element-wise max broadcasts a scalar in both languages', () => {
+    // The built-in `max` has a `max(genType, float)` overload in GLSL only;
+    // the `_gpu_max3` helper takes two vectors on both targets.
+    expect(g(['ElementMax', V3, 2])).toBe(
+      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+    );
+    expect(w(['ElementMax', V3, 2])).toBe(
+      '_gpu_max3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
+    );
   });
 
   it('a matrix and a vector combine only under `*`, in both languages', () => {

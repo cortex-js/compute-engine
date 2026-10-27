@@ -156,19 +156,19 @@ describe('GLSL COMPILATION — structures and control flow', () => {
   // CO-P1-2: GLSL/WGSL `min`/`max` are 2-argument builtins; 3+ args must fold
   // into a nest of 2-argument calls (a variadic `max(a, b, c)` is invalid).
   describe('CO-P1-2 min/max variadic folding', () => {
-    it('folds 3-arg Max into nested max()', () => {
+    it('folds 3-arg Max into nested _gpu_max()', () => {
       const code = glsl.compile(ce.box(['Max', 'a', 'b', 'c'])).code;
-      expect(code).toBe('max(max(a, b), c)');
+      expect(code).toBe('_gpu_max(_gpu_max(a, b), c)');
     });
 
-    it('folds 4-arg Min into nested min()', () => {
+    it('folds 4-arg Min into nested _gpu_min()', () => {
       const code = glsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd'])).code;
-      expect(code).toBe('min(min(min(a, b), c), d)');
+      expect(code).toBe('_gpu_min(_gpu_min(_gpu_min(a, b), c), d)');
     });
 
     it('leaves 2-arg Max unchanged', () => {
       const code = glsl.compile(ce.box(['Max', 'a', 'b'])).code;
-      expect(code).toBe('max(a, b)');
+      expect(code).toBe('_gpu_max(a, b)');
     });
   });
 
