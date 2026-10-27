@@ -197,10 +197,26 @@ describe('A Range row is a row of its integers', () => {
   test('Shape and Rank of many long range rows do not list the rows', () => {
     const rows: unknown[] = ['List'];
     for (let i = 0; i < 10_000; i++) rows.push(['Range', 1, 10_000]);
-    const start = performance.now();
-    expect(value(['Shape', rows]).json).toEqual(['Tuple', 10_000, 10_000]);
-    expect(value(['Rank', rows]).json).toBe(2);
-    expect(performance.now() - start).toBeLessThan(1000);
+    // Count-based shape queries must never enumerate the 100 million cells.
+    // Instrument the element access paths instead of asserting wall-clock speed.
+    const collection = ce.lookupDefinition('Range')!.operator!.collection!;
+    const iterator = jest
+      .spyOn(collection, 'iterator')
+      .mockImplementation(() => {
+        throw new Error('Shape/Rank must not enumerate range rows');
+      });
+    const at = jest.spyOn(collection, 'at').mockImplementation(() => {
+      throw new Error('Shape/Rank must not read range elements');
+    });
+    try {
+      expect(value(['Shape', rows]).json).toEqual(['Tuple', 10_000, 10_000]);
+      expect(value(['Rank', rows]).json).toBe(2);
+      expect(iterator).not.toHaveBeenCalled();
+      expect(at).not.toHaveBeenCalled();
+    } finally {
+      iterator.mockRestore();
+      at.mockRestore();
+    }
   });
 
   test('range rows with too many elements in total are not listed', () => {

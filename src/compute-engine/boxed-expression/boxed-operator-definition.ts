@@ -23,7 +23,7 @@ import {
 } from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { noteArithmeticDefinition } from './arithmetic-order-override.js';
-import { assertValidCompileHelpers } from '../compilation/engine-compile-handlers.js';
+import { assertValidCompileHelpers } from '../../common/compile-helpers.js';
 import {
   hasDeclaredEffectLabel,
   isEffectSubset,
