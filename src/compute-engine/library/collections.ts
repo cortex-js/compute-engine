@@ -23,6 +23,7 @@ import {
 import type { MemoDeps } from '../boxed-expression/collection-element-memo.js';
 import { evaluateEagerSource } from '../boxed-expression/eager-source-values.js';
 import { isErrorTypedOperand } from '../boxed-expression/error-typed-operand.js';
+import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import {
   checkArity,
   checkType,
@@ -11860,8 +11861,14 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // routing here and the run-time role in `compileJSPointList`, so a
       // union arm or an alias cannot be routed by one and missed by the
       // other.
-      const undecided = args.findIndex((a) =>
-        containsBroadcastableType(typeOf?.(a) ?? a.type.type)
+      // A coordinate accessor whose operand may be a list of points
+      // (`isAccessorOfPossibleList`) is decided at run time too, on
+      // `javascript` only: on the other languages a point has scalar
+      // components, and such an accessor keeps the scalar reading below.
+      const undecided = args.findIndex(
+        (a) =>
+          containsBroadcastableType(typeOf?.(a) ?? a.type.type) ||
+          (language === 'javascript' && isAccessorOfPossibleList(a))
       );
       if (nonScalar < 0 && undecided >= 0) {
         if (language === 'javascript') return undefined;

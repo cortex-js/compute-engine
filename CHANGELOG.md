@@ -136,6 +136,136 @@
 - **`Sum`, `Product` and `Reduce` over residue classes are typed `residue`.**
   `Sum([c1, c2])` was typed `number` and `Map(Negate, [c1, c2])` `vector<2>`;
   they are `residue` and `list<residue^2>`.
+- **A measurement is typed `measurement`, and a quantity is typed `quantity`**
+  (CE-507). `Measurement(2.5, 0.1)` was typed with the type of its nominal
+  (`real`; `integer`, `rational` or `complex` for other nominals), and
+  `Quantity(2, m)` was typed `value`. `measurement` and `quantity` are new
+  primitive types of the type language. They are kind types: each one is a
+  subtype of `value` and is disjoint from the number types, so
+  `ce.type('measurement').matches('real')` is `false`. A host that compares type
+  strings sees the change, and a host that declared a type named `measurement`
+  or `quantity` must rename it. The result type of an operator with a
+  measurement operand changes in the same way: `Floor(2.5 ± 0.1)` was typed
+  `integer` and is `measurement | number` (a propagated uncertainty of 0 gives a
+  plain number), `2 + (2.5 ± 0.1)` is `measurement`, and `Max(2 ± 0.1, 2)` is
+  `integer<2..2> | measurement`.
+- **A symbol or a function with a body that is declared over a number type
+  refuses a measurement.** With `s: real` (or `number`, `integer`),
+  `ce.assign('s', Measurement(2, 0.1))` throws; it assigned the measurement.
+  With `f: (real) -> real` and `f := x ↦ x^2`, `f(2 ± 0.1)` is an
+  `incompatible-type` error; it was `4 ± 0.4`, from a body that the canonical
+  form could have changed (`x/x` is `1` for a `real` parameter). Declare the
+  parameter `real | measurement` to accept one. An operator of your own declared
+  over `real` with an `evaluate` handler (`h`) now leaves `h(5 ± 0.1)`
+  unevaluated: the measurement does not know the derivative of `h`, so it does
+  not call the handler (it gave `2 · (5 ± 0.1)` for
+  `evaluate: ([x]) => x.mul(2)`). An operator that handles a measurement itself
+  names `measurement` in its parameter type, and its handler runs.
+- **A quantity is refused at every operator that does not accept it by type.**
+  The arithmetic operators, the comparisons, `Max`, `Min`, `Clamp`, `Sort`, the
+  operators with a `value` parameter (`UnitConvert`, `List`), the 24
+  trigonometric functions and `Abs` accept a quantity. Every other operator
+  gives an `incompatible-type` error at boxing: `Round(2.7 m)`, `Floor(2 m)`,
+  `Sign(2 m)`, `Exp(2 m)`, `Hypot(2 m, 3)` and `InverseHaversine(2 m)` stayed
+  unevaluated or gave a wrong value, and `Mean([2 m, 4 m])` stayed unevaluated.
+- **The trigonometric functions and `Abs` name `quantity` in their signatures.**
+  The 24 trigonometric, hyperbolic and inverse functions (`Sin` to `Arcsch`) are
+  `(complex | quantity) -> number` (a function that accepted `infinity` or
+  `signed_infinity` keeps that arm), and `Abs` is
+  `(complex | infinity | quantity) -> number`. So `Arctan(2 deg)` folds the
+  angle to `Arctan(π/90)` as the other functions do (it stayed `Arctan(2 deg)`),
+  `Abs(-2 m)` is `2 m`, typed `quantity` (it stayed unevaluated, typed `value`),
+  and `Sin(2 m)` is typed `number` (it was `value`) and stays unevaluated. The
+  `incompatible-type` error of these functions names the `quantity` arm as an
+  expected type (`Sin("a")` expects `complex | quantity`), and so does the type
+  of `Derivative(Sin)`.
+- **A measurement propagates its uncertainty through every operator with a known
+  derivative, and stays unevaluated where the rule has no answer.** The rule is
+  `f(a) ± |f′(a)|·σ`, and the quadrature `√(Σ |∂f/∂xᵢ|²·σᵢ²)` for several
+  uncertain operands, with the modulus of each partial derivative. A propagated
+  uncertainty of 0 gives the bare value (`Cos(0 ± 0.1)` is `1`, as before). The
+  rules by operator:
+  - A step function (`Floor`, `Ceil`, `Round`, `Truncate`, `Sign`, `Heaviside`,
+    `PrimePi`) of a real measurement gives the bare value of the function at the
+    nominal: `Floor(2.5 ± 0.1)` is `2`. When a jump of the function lies within
+    one σ of the nominal, the call stays unevaluated: `Floor(2.95 ± 0.1)` was
+    `2`. A complex nominal at `Sign` stays unevaluated.
+  - `Mod` and `Fract` propagate with the slope between their jumps:
+    `Mod(5 ± 0.1, 3)` is `2 ± 0.1` (it was `2`), and `Mod(7, 3 ± 0.1)` is
+    `1 ± 0.2`. A jump within one σ leaves the call unevaluated.
+  - An infinite value or an infinite derivative at the nominal leaves the call
+    unevaluated: `Sqrt(0 ± 0.1)` was `0`, `Arcsin(1 ± 0.1)` was `π/2`;
+    `Ln(0 ± 0.1)`, `Gamma(0 ± 0.1)` and `Tan(π/2 ± 0.1)` are unevaluated too. A
+    float nominal near a pole (`Tan(1.5707963 ± 0.1)`) gives the large finite
+    value with its large uncertainty.
+  - A real nominal whose value is not real keeps an uncertainty:
+    `Arccos(2.5 ± 0.1)` is `1.5668i ± 0.0436` (it was the bare `1.5668i`), and
+    `Ln(-1 ± 0.1)` is `πi ± 0.1`.
+  - `Hypot`, `Degrees`, `Haversine`, `InverseHaversine`, `Factorial`, `Log` with
+    an uncertain base, `Arctan2`, `Root` with an uncertain index, `Norm` with an
+    uncertain order, `Round` with an uncertain step, `PreIncrement`,
+    `PreDecrement`, and the multilinear operators `Dot`, `Cross`,
+    `MatrixMultiply`, `HadamardProduct` and `Trace` propagate every uncertain
+    operand. `Dot([2.5 ± 0.1, 2, 3], [1, 2, 3])` is `15.5 ± 0.1`.
+  - `Binomial`, `Choose`, `Pochhammer`, `Determinant`, `Inverse`, `Eigenvalues`,
+    `ContinuedFraction`, `ComplexRoots`, `Arg`, `Argument` and `BaseForm` stay
+    unevaluated with a measurement operand, and so does an operator whose
+    derivative the engine does not know (`Zeta`, `Beta`, the order of
+    `BesselJ`). `Binomial(5 ± 0.1, 2)` was `(5 ± 0.1)·((5 ± 0.1) − 1)/2` and
+    `Determinant([[1 ± 0.1, 2], [3, 4]])` was `-2 ± 0.4`: these formulas use the
+    same measurement more than once, and the arithmetic of measurements counts
+    each occurrence as an independent error.
+  - `Mean`, `Median`, `Variance`, `PopulationVariance`, `StandardDeviation` and
+    `PopulationStandardDeviation` of a list that holds measurements give the
+    statistic of the nominals with the propagated uncertainty of the independent
+    data. The other statistics (`Skewness`, `Kurtosis`, …) stay unevaluated.
+  - `Real`, `Imaginary`, `Conjugate` and `Abs` keep the uncertainty of the
+    operand: `Abs(0 ± 0.1)` is `0 ± 0.1`.
+- **A comparison of measurements uses the nominals.** The uncertainties take no
+  part: `1 ± 0.1 = 1 ± 0.5` is `True`, as before.
+  - `Max` and `Min` decide by nominal and keep the first operand of a tie:
+    `Max(1 ± 0.1, 1 ± 0.5)` is `1 ± 0.1` (it stayed unevaluated), and
+    `Max(2 ± 0.1, 2)` is `2 ± 0.1` (it was `2`).
+  - `Clamp(x, lo, hi)` returns `x` when `x` equals a bound:
+    `Clamp(3 ± 0.1, 0, 3)` is `3 ± 0.1` (it was `3`).
+  - `ElementMax` and `ElementMin` compare as `Max` and `Min` do.
+  - A measurement with a complex nominal has no order: `(2 + 3i) ± 0.1 < 3` is
+    `False`, as `2 + 3i < 3` is, and `Max` of it stays unevaluated. Its equality
+    is the equality of the nominal: `Equal((2 + 3i) ± 0.1, 2 + 3i)` is `True`.
+  - A measurement is not exact: `Max(3/2 ± 1/10, Indeterminate)` is `NaN`, not
+    `Indeterminate`.
+- **A comparison of quantities converts to the finer unit and uses the engine
+  tolerance there**, also in `Max`, `Min`, `Clamp`, `ElementMax`, `ElementMin`
+  and `Sort`. `Max(1 m, 1.000000000001 m)` is `1 m`: the extrema compared with a
+  tolerance of zero. The tolerance applies in the finer of the two units, so
+  `Equal(1 m, 100.0000000001 cm)` stays `False`. A quantity with a magnitude
+  that is a float is not exact: `Max(1.5 m, Indeterminate)` is `NaN`.
+- **The methods `.add()`, `.mul()`, `.div()`, `.pow()`, `.sub()` and `.sqrt()`
+  combine measurements and quantities** as the evaluation does. `M.add(M2)` for
+  `M = 3 ± 0.1` and `M2 = 2 ± 0.1` is `5 ± 0.141` (it was the sum
+  `(3 ± 0.1) + (2 ± 0.1)`), and `(2 m).add(30 cm)` is `2.3 m` (it was
+  `30 cm + 2 m`). `.neg()` does not call the `negate` hook of a kind: `c.neg()`
+  is `Negate(c)`, and `Negate(c).evaluate()` negates the value.
+- **`.re` and `.im` of a measurement are the parts of its nominal**, as before:
+  `Measurement(2.5, 0.1).re` is `2.5`. The numeric facts of a measurement
+  (`isPositive`, `sgn`, `isInteger`) are `undefined`; they were the facts of the
+  nominal (`Measurement(4, 0.1).isInteger` was `true`). So the canonical forms
+  of the numbers do not apply to a measurement.
+- **The uncertainties of several occurrences of one measurement are
+  independent.** The engine does not know that two occurrences of `M` are the
+  same measurement: with `M = 1 ± 0.1`, `Sin(M)^2 + Cos(M)^2` simplifies to
+  `1 ± 0.13` (it simplified to `1`), and `M − M` is `0 ± 0.141`. The operators
+  that use an operand more than once in their own formula (`Binomial`,
+  `Determinant`, …) stay unevaluated for this reason.
+- **A physical constant opens the quantity rules only when it is read.** The
+  value of `SpeedOfLight` and of the other physical constants is a quantity. An
+  engine that never makes a quantity does not pay the cost of the quantity
+  rules: the constants made while the libraries load do not count, and each
+  constant makes its value again when it is first read.
+- **Compiling an expression with a measurement or a quantity fails with a
+  message that names the kind type** ("holds a value of the kind type
+  'measurement'"). It failed before with "Could not compile `Measurement`".
+  Neither kind has a compiled representation.
 
 ### Features
 
@@ -223,6 +353,51 @@
   phases, is `docs/plans/2026-10-26-value-kinds.md`. The guide is
   `doc/06-guide-augmenting.md`, "Declaring a Value Kind"; the type rules are in
   `doc/08-guide-types.md`, "Kind Types".
+- **`Measurement` and `Quantity` are value kinds** (ROADMAP CE-507 phase 2,
+  CE-508, [#477](https://github.com/cortex-js/compute-engine/issues/477)). Their
+  arithmetic, their order and their propagation of an uncertainty are now the
+  hooks of their `arithmetic` field, and the operators no longer test the names
+  `Measurement` and `Quantity`. The visible changes are listed under Behavior
+  Changes and Resolved Issues.
+  - `Measurement` has the kind type `measurement` and is accepted where a number
+    is accepted (`admittedAs: 'number'`). An operator that accepted the
+    measurement as a number calls the `apply` hook of the kind, which computes
+    the value at the nominal and propagates the uncertainty.
+  - `Quantity` has the kind type `quantity` and is accepted only by the
+    arithmetic operators, the comparisons, the operators that name `quantity`
+    and the operators with a `value` parameter (`admittedAs: 'none'`). Its `add`
+    hook makes one sum for each physical dimension, in the unit with the largest
+    scale, and reads how each term was written to add temperatures with an
+    offset: `20 degC − 5 degC` is `15 K`, and `20 degC + 5 degC` is `571.3 K`,
+    as before.
+  - `ArithmeticDefinition.compare` can answer `'unordered'`: the two values are
+    known and have no order (a measurement with a complex nominal). The order
+    operators then answer `False`, `Equal` and `NotEqual` ask the `eq` handlers,
+    and `Max`, `Min` and `Sort` stay unevaluated.
+  - `ArithmeticDefinition.isExact(value)` says whether a value of the kind is
+    exact, for the rule that an inexact operand turns `Indeterminate` into
+    `NaN`. Absent: the values are exact.
+  - `ArithmeticDefinition.isNaN(value)` says whether a value of the kind stands
+    for no value, as the number `NaN` does (a measurement with a `NaN` nominal,
+    a quantity with a `NaN` magnitude). Such a value follows the rule of `NaN`:
+    `Max`, `Min`, `ElementMax`, `ElementMin` and `Clamp` give `NaN`, the order
+    operators give `False`, and `Equal` gives `False`, also for the value and
+    itself. Absent: no value of the kind is `NaN`.
+  - `KindOperands.written` holds the operands as they were written on every
+    route: under `simplify()`, the operands before their simplification. So a
+    kind whose `negate` gives a value and whose `add` reads `Negate(b)` in
+    `written` gives the same difference under `evaluate()`, `.N()` and
+    `simplify()`.
+  - `ArithmeticDefinition.numericValue(value)` gives the number that a value of
+    the kind stands for. `re`, `im`, `bignumRe`, `bignumIm` and `valueOf()` of
+    the value read it. The fact queries (`isPositive`, `sgn`, …) do not.
+  - `ArithmeticContext.tolerance` gives the `compare` hook the tolerance of
+    `.is()`: the `tolerance` argument of the call, or `engine.tolerance`. So
+    `M.is(2.6, 0.2)` for `M = 2.5 ± 0.1` uses the tolerance `0.2`. It is
+    `undefined` for the other comparisons.
+
+  The rules are in `doc/06-guide-augmenting.md`, "Measurements and Quantities";
+  the decisions are in section 13 of `docs/plans/2026-10-26-value-kinds.md`.
 - **`factor()` accepts `variable` and `generator` options, and a new
   `factorDetailed()` returns a structured result.** `factor(p, { variable,
   generator })` factors over an explicit number field, as
@@ -246,6 +421,15 @@
 
 ### Resolved Issues
 
+- **A coordinate of a list of points inside `PointList` compiles to a list**
+  (CE-514, Tycho row 447). On the `javascript` target,
+  `(v ↦ PointList(PointY(v), PointX(v)))([(1, 2, 3), (4, 5, 6)])` compiled to
+  `[NaN, NaN]`; it now gives `[[2, 1], [5, 4]]`, as `evaluate()` does. The
+  same holds for a named function called with a list of points. A
+  `PointX`/`PointY`/`PointZ` component whose operand is not provably one
+  point is a zip source when its value is an array and one slot otherwise,
+  decided at run time. The type of such a call is still one point
+  (`tuple<unknown, unknown>`); see CE-514 in the ROADMAP.
 - **Five shader fixes found by comparing WebGL2 and WebGPU on a GPU**
   (CE-509 to CE-513, Tycho rows 454 to 458).
   - On `wgsl`, `tanh` calls a helper that answers `sign(x)` when
@@ -281,6 +465,14 @@
   `glsl` is unchanged: its `?:` evaluates only the branch that is taken.
 - **On `glsl`, `Mod` of a scalar by a vector compiles** (`Mod(1, v)` broadcasts
   the scalar); the built-in `mod` has no such overload, and it was refused.
+- **On `glsl` and `wgsl`, `Max`, `Min` and `Clamp` give NaN when an operand is
+  NaN** (CE-519, Tycho row 465), as the interpreter and the `javascript`
+  target do. The shader built-ins return the other operand on Apple GPUs, so
+  `\max(0, \sqrt{1 - x^2})` at `x = 2` was 0. The targets now call helpers
+  that test the bit pattern of each operand: a test `a != a` was removed by
+  the compiler on WebGPU over Metal. `Clamp(x, lo, hi)` with `lo > hi` now
+  gives `hi` on `glsl` as on the other targets (the built-in `clamp` left it
+  undefined), and on `wgsl` a vector `Clamp` with scalar bounds compiles.
 - **A part of a loop body printed or evaluated outside its operator keeps its
   index** (CE-498). `ReplaceAt([1,2,3], i, 9)` taken from
   `Loop(…, Element(i, Range(1, 3)))` printed an `incompatible-type` error, with
@@ -299,6 +491,45 @@
   was known, and 2 has no inverse modulo 4. It now gives
   `[ResidueClass(2, 4) / ResidueClass(2, 4), ResidueClass(1, 4)]`, as `ce.box()`
   and `ce.parse()` of the same expression do.
+- **Measurements and quantities: wrong values and wrong types** (CE-508, fixed
+  by making `Measurement` and `Quantity` value kinds, CE-507).
+  - `Quantity(2, m) − Quantity(2, m)` simplifies to `0 m`. It simplified to the
+    number `0`, without the unit.
+  - `Quantity(2, m) + Quantity(30, cm)` simplifies to `2.3 m`, and
+    `Quantity(2, m) · Quantity(3, s)` to `6 m·s`. `simplify()` returned them
+    unchanged.
+  - `x + Quantity(2, m) + Quantity(3, m)` evaluates to `x + 5 m`. It stayed
+    unchanged, because one operand was not a quantity.
+  - `Measurement(2, 0.1) − Measurement(2, 0.1)` simplifies to
+    `Measurement(0, 0.141…)`, as it evaluates. It simplified to `0`.
+  - `ResidueClass(2, 5) + Quantity(3, m)` is typed `quantity | residue`. It was
+    typed `list<list<any> | residue> | residue`.
+  - A comparison that is not decided keeps the measurement:
+    `Less(Measurement(2, 0.1), x)` evaluates to itself. It evaluated to
+    `Less(2, x)`, without the uncertainty, and `Equal` did the same.
+  - A measurement with a complex nominal at an operator whose parameter is real
+    is an `incompatible-type` error at evaluation:
+    `ContinuedFraction((2 + 3i) ± 0.1)` was `[2]`, and `Floor`, `Mod`, `Hypot`,
+    `Degrees` and the other operators with a real parameter read the real part.
+  - A unit is no longer read as a free symbol:
+    `InverseHaversine(Quantity(2, m))` evaluated to `2·arcsin(√2·√m)`. A
+    quantity at an operator that does not accept it is now an
+    `incompatible-type` error at boxing.
+  - `Measurement(2, 0.1).isLess(3)` is `true` and `.isEqual(2)` is `true`. The
+    methods answered `undefined`, while `Less` and `Equal` answered `True`.
+  - A complex nominal keeps its uncertainty through every operator with a
+    derivative: `Arctan((2 + 3i) ± 0.1)` is `(1.4099 + 0.2291i) ± 0.0079`. The
+    uncertainty was dropped for some operators and kept for others, depending on
+    how the derivative was printed.
+  - `Log2(Measurement(2 + 3i, 0.1))` is `(1.8502 + 1.4179i) ± 0.0400`. It was
+    `1`, a wrong value: the logarithms read only the real part of a complex
+    nominal.
+  - Two uncertain complex operands add the moduli of their contributions:
+    `Measurement(1, 0.1) · Measurement(i, 0.1)` is `i ± 0.1414`. The two
+    contributions cancelled, and the result was the bare `i`.
+  - `Power(-2, Measurement(2, 0.1))` is `4 ± 1.3`, propagated with the principal
+    logarithm of the base. It was the exact `4`, without an uncertainty. An
+    uncertain exponent of the base `0` leaves the power unevaluated.
 
 ## 0.169.2 _2026-10-26_
 

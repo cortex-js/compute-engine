@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-519.
+Next free reference: CE-520.
 
 **Entry format.**
 
@@ -1182,7 +1182,7 @@ corpus uses it).
 
 ### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
-**Status:** phase 1 done 2026-10-26, phases 2 and 3 open; capability, large.
+**Status:** phases 1 and 2 done 2026-10-26, phase 3 open; capability, large.
 [#477](https://github.com/cortex-js/compute-engine/issues/477) (answered by
 phase 1), [#416](https://github.com/cortex-js/compute-engine/issues/416). Plan:
 `docs/plans/2026-10-26-value-kinds.md` (revision 7). User decisions of
@@ -1206,25 +1206,23 @@ contract, and moved `ResidueClass` onto the field. A head declared `-> residue`
 `docs/TYPE-SYSTEM.md` ("Value kinds and kind types") and
 `docs/COMPILATION-MODEL.md` ("Value kinds").
 
-Phase 2 decided 2026-10-26: the 16 decisions of the inventory
-(`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`) were all taken as
-recommended; they are plan section 13. Phase 2 is in progress (session
-compute-engine-df).
+Phase 2 (done) moved `Measurement` and `Quantity` onto the field, with the 16
+decisions of the inventory
+(`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`) and the amendments
+A1 to A16 (plan section 13; decision 14 reversed in 13.2: `.re` and `.im` of a
+measurement keep the nominal). The kind primitives `measurement`
+(`admittedAs: 'number'`, `apply` propagates to first order) and `quantity`
+(`'none'`; the 24 trigonometric functions and `Abs` name it), the answer
+`'unordered'` of `compare`, the fields `isExact` and `numericValue`, and
+`ArithmeticContext.tolerance` are new. The name-based branches of the
+arithmetic, relational and statistics operators are gone. It fixed CE-508. The
+visible changes are in `CHANGELOG.md` and in section 6 of the plan; the
+documentation is in `doc/06-guide-augmenting.md` ("Measurements and
+Quantities"), `doc/08-guide-types.md` ("Kind Types") and `docs/TYPE-SYSTEM.md`
+("Measurements and quantities").
 
 What remains:
 
-- **Phase 2: `Measurement` and `Quantity` on the field.** Prerequisite: the
-  inventory of section 8 of the plan (every operator that handles a measurement
-  or a quantity today, with its result and static type after the change),
-  reviewed as the acceptance table of the phase. Then the kind primitives
-  `measurement` and `quantity`, their admission (`'number'` and `'none'`),
-  `compare`, the `quantity` parameters of the operators of section 4.7 of the
-  plan, and the removal of the branches that test the names `Measurement` and
-  `Quantity` in the arithmetic, relational and statistics operators. Fixes
-  CE-508.1 to CE-508.4 and CE-508.6. The visible changes are listed in section 6
-  of the plan; measure them before landing. Until then, the kind dispatch runs
-  before the remaining name-based branches, and a sum or product that mixes a
-  library kind (`Measurement`, `Quantity`) and a user kind is not specified.
 - **Phase 3: an interval value** (#416), with a kind primitive,
   `admittedAs: 'real'`, `compare` for the partial order of enclosures, and a
   lowering on `interval-js`. It starts after the open question of section 9 of
@@ -1259,11 +1257,12 @@ What remains:
   (group 1); so `Sin(U)^2` is an error for such a kind. The plan does not state
   this. Keep (a kind that cannot be squared should say so), or let the carrier
   rule admit it at the arithmetic operators and leave the call unevaluated.
-- **CE-507.7** (design needed; first consumer: PR #482, group theory) A
-  non-commutative product for a value kind. Plan section 4.3 says `multiply`
-  must commute, because the canonical form sorts a product, and names matrices
-  over a finite field as out of scope. PR #482 (`installGroupTheory`, 132
-  operators) meets exactly this: it ships `PermutationCompose` and
+- **CE-507.7** (PINNED by the user 2026-10-26: to discuss after phase 3; a
+  contributor PR implementing group theory operations based on GAP, PR #482,
+  asks for it) A non-commutative product for a value kind. Plan section 4.3 says
+  `multiply` must commute, because the canonical form sorts a product, and names
+  matrices over a finite field as out of scope. PR #482 (`installGroupTheory`,
+  132 operators) meets exactly this: it ships `PermutationCompose` and
   `GroupMatrixMultiply` as named operators, and
   `Permutation(…) * Permutation(…)` is refused with `incompatible-type` (its
   design note `docs/group-theory/FOUNDATIONS.md`, decision D3, says why).
@@ -1273,7 +1272,16 @@ What remains:
   product; `Divide` is the right multiplication by the inverse; the serializer
   prints `\cdot` or juxtaposition in the given order. Permutations, matrices
   over F_p, quaternions and matrix groups would use it. First step: measure how
-  much of the `Multiply` canonical form assumes sorting.
+  much of the `Multiply` canonical form assumes sorting. Alternative recorded
+  2026-10-26: a separate associative, non-commutative operator (`Compose`, LaTeX
+  `\circ`) with a kind hook `compose`; the juxtaposition rule
+  (`invisible-operator.ts`) boxes two values of such a kind to `Compose(a, b)`
+  instead of `Multiply`, and `Power(a, n)` with an integer `n` is the repeated
+  compose; this touches none of the rules of `Multiply` (the canonical sort and
+  flatten, `Divide`, the collection of like factors, `Expand`, the serializer,
+  the compile targets), which a flag on `Multiply` would have to gate one by
+  one. The engine's own precedent is the named operator (`MatrixMultiply`;
+  `\cdot` over lists is element-wise).
 - **CE-507.8** (design needed; shared with PR #482) A decoded-payload cache on a
   boxed call. A kind value stays a call of its head (opaque only at the compile
   boundary, plan 4.8), so every hook decodes the operands
@@ -1291,79 +1299,23 @@ What remains:
   `doc/08-guide-types.md` says so. PR #482 also edits the "no caller uses it
   today" comment on `mint` in `src/compute-engine/index.ts` that phase 1
   rewrote: a trivial merge conflict to expect.
-
-### CE-508. `Quantity` and `Measurement` arithmetic: wrong values, a wrong type and gaps
-
-**Status:** open; wrong value and defect, medium. Related: CE-507.
-
-- **CE-508.1** `Quantity(2, m) - Quantity(2, m)` simplifies to the number `0`,
-  so the unit is lost. `evaluate()` gives `Quantity(0, m)`. The generic rule
-  `x - x = 0` runs on quantities; residue classes have a barrier for this in
-  `simplify.ts`, quantities do not.
-- **CE-508.2** `Quantity(2, m) + Quantity(30, cm)` evaluates to
-  `Quantity(2.3, m)`, but `simplify()` returns the sum unchanged. The same
-  happens for `Quantity(2, m)·Quantity(3, s)`.
-- **CE-508.3** `x + Quantity(2, m) + Quantity(3, m)` does not fold:
-  `quantityAdd()` (`library/quantity-arithmetic.ts`) refuses the whole sum when
-  one operand is not a quantity. The residue fold keeps such operands beside the
-  folded value.
-- **CE-508.4** `Measurement(2, 0.1) - Measurement(2, 0.1)` evaluates to
-  `Measurement(0, 0.141…)` (independent errors) but simplifies to `0`. The two
-  routes must give one answer.
-- **CE-508.6** `ResidueClass(2, 5) + Quantity(3, m)` is typed
-  `list<list<any> | residue> | residue`. It must be typed as an unevaluated sum
-  of a class and a value, or refused.
-
-The phase-2 inventory
-(`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`, produced by
-`scripts/probe-value-kinds-inventory.ts` at `0be912cef`) found six more wrong
-values, each fixed by phase 2 of CE-507 as planned:
-
-- **CE-508.7** An undecided comparison drops the uncertainty:
-  `Less(Measurement(2, 0.1), x)` evaluates to `Less(2, x)`, and `Equal` the same
-  (`evaluateChainOperands()` in `library/relational-operator.ts` replaces a
-  measurement by its nominal before it decides). The comparison dispatch of the
-  plan (4.4) keeps the operands.
-- **CE-508.8** A complex measurement reaches a real-only kernel:
-  `ContinuedFraction(Measurement(Complex(2, 3), 0.1))` is `[2]`; 18 operators
-  with a `real` parameter admit a complex measurement at boxing because the
-  nominal types the call `complex` and a non-literal is not refused, and the
-  kernel reads `.re`. Under decision D the call is an `incompatible-type` error
-  at evaluation.
-- **CE-508.9** A unit leaks out as a free symbol:
-  `InverseHaversine(Quantity(2, m))` evaluates to `2arcsin(sqrt(2) sqrt(m))`.
-  After phase 2 a quantity is refused at boxing at every operator that does not
-  name `quantity`.
-- **CE-508.10** (NOT a defect, recorded so that the number is not reused.)
-  `Equal(Quantity(1, m), Quantity(100.0000000001, cm))` is `False` while
-  `Equal(Quantity(1, m), Quantity(1.000000000001, m))` is `True` because
-  `quantity-compare.ts` measures the tolerance in the FINER unit, a documented
-  policy pinned by `quantity-equality-methods.test.ts`; the quantity `compare`
-  of phase 2 keeps it.
-- **CE-508.11** The comparison methods do not decide a measurement:
-  `Measurement(2, 0.1).isLess(3)` and `.isEqual(2)` answer `undefined` while
-  `Less` and `Equal` are `True`. One dispatch for the operators and the methods
-  (4.4) fixes it.
-- **CE-508.12** The uncertainty of a complex nominal depends on how the
-  derivative prints: `Cos(Measurement(Complex(2, 3), 0.1))` keeps an
-  uncertainty, `Arctan` of the same drops it (`measurementUnaryByHead()` drops
-  it when the derivative evaluates to a complex literal). The rule
-  `f(a) ± |f′(a)|·σ` for every operator with a derivative (inventory decision 6)
-  fixes it.
-
-- **CE-508.13** `Log2(Measurement(Complex(2, 3), 0.1))` evaluates to `1`: a
-  wrong nominal (the value is about `1.85022 + 1.41787i`); the logarithm aliases
-  drop both the uncertainty and the value for a complex nominal
-  (`measurementLog()`). Phase 2 gives every logarithm alias an explicit answer,
-  `f(a) ± |f′(a)|·σ` (plan section 13, A5).
-- **CE-508.14** The complex arithmetic of measurements squares complex partial
-  derivatives instead of their moduli, so independent contributions cancel:
-  `Multiply(Measurement(1, 0.1), Measurement(i, 0.1))` is the bare `i` (σ should
-  be about 0.1414). Phase 2 propagates by the quadrature of `|∂f/∂xᵢ|²σᵢ²` (A3).
-- **CE-508.15** `Power(-2, Measurement(2, 0.1))` is the exact `4`:
-  `measurementPower()` returns the bare nominal when the exponent is uncertain
-  and the base is not provably positive. Phase 2 never returns the bare nominal:
-  a defined propagation or an unevaluated call (A4).
+- **CE-507.9** (decision needed, low) `Degrees` of a complex number folds
+  although its signature is `(real) -> real`: `Degrees(2 + 3i)` evaluates to
+  `(1/90 + i/60)·π`, while `Degrees((2 + 3i) ± 0.1)` is an `incompatible-type`
+  error, because a measurement follows the signature (a complex nominal at a
+  parameter that is real is refused at evaluation). The two answers disagree.
+  Options: (a) make `Degrees` refuse a complex number, as its signature says;
+  (b) widen the signature to `(complex) -> complex`, so that a complex
+  measurement propagates too; (c) keep both answers. If nothing is decided, (c)
+  is what ships.
+- **CE-507.10** (decision needed, low) `Mean([2 m, 4 m])` is an
+  `incompatible-type` error at boxing: `quantity` is a `'none'` kind, and the
+  statistics do not name `quantity` in their parameter type. Before phase 2 it
+  stayed unevaluated, typed `number`. To compute `3 m`, the statistics (`Mean`,
+  `Median`, `Variance`, the standard deviations, `Quantile`, …) would name
+  `quantity` and convert to one unit; that is a feature, not a fix. Options: (a)
+  keep the refusal; (b) add that feature. If nothing is decided, (a) is what
+  ships.
 
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
@@ -2035,21 +1987,6 @@ enumerate it, the multi-set walk must resolve dependent bounds again at each
 iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
-
-### CE-517. `N()` of a definite integral of a list integrand that has no closed form integrates the last element only
-
-**Status:** open; wrong value. Tycho row 459 (filed 2026-10-26, on 0.169.2).
-
-With `E = [0.1, 0.5]`, `\int_0^1 \frac{y}{\max(E, y)}dy` under `N()` gives
-`Measurement(0.75, …)`, and
-`\int_0^1 y \int_{-1}^{1}\frac{1}{\max(E,|x|)}dx\,dy` gives `1.6931…`. These are
-the values for the last element only. The correct results are `[0.95, 0.75]` and
-`[3.3026, 1.6931]`. When `evaluate()` finds a closed form (`\int_0^1 y E\,dy`),
-the list is correct. Expected: one numeric integral per element, and a list
-result. Tycho reports a second problem in the same body: with one ε (0.01) the
-nested integral takes about 7 s and gives a relative uncertainty of 3e-4.
-Tycho's instrument:
-`~/dev/tycho/scripts/repros/2026-10-26-ce459-numeric-integral-list-integrand-repro.mts`.
 
 ### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
 
@@ -2746,19 +2683,49 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-514. The `javascript` target compiles a point accessor of a lambda parameter to NaN when the lambda is applied to a list of points inside a `PointList`
+### CE-514. A call of a function literal is typed as one point when its value is a list of points
 
-**Status:** open; wrong value. Tycho row 447 (filed 2026-10-25, on 0.167.0;
-still present on 0.169.2).
+**Status:** decision needed; defect (a type that its value does not have).
+Tycho row 447. The compiled value was fixed on 2026-10-26: the `javascript`
+target decides at run time whether a coordinate accessor whose operand may be
+a list of points (`isAccessorOfPossibleList()`,
+`boxed-expression/point-accessor-operand.ts`) is a zip source or one slot of
+`PointList`, so `(v ↦ PointList(PointY(v), PointX(v)))([(1,2,3), (4,5,6)])`
+compiles to `[[2, 1], [5, 4]]`, as it evaluates. The type is still wrong.
 
-`(v ↦ PointList(PointY(v), PointX(v)))([(1,2,3), (4,5,6)])` evaluates to
-`[(2, 1), (5, 4)]` and compiles to `[NaN, NaN]`. Its type is
-`tuple<unknown, unknown>`: the parameter is typed `unknown` at the application,
-so the `PointList` is compiled as one point of two scalars. The control
-`(v ↦ PointX(v))(L)` compiles to `[1, 4]`, and `a − PointY(v)` compiles
-correctly. Expected: the compiled value equals the evaluated value. Tycho's
-instrument:
-`~/dev/tycho/scripts/repros/2026-10-25-ce447-pointlist-accessor-applied-lambda-repro.mts`.
+The literal's parameter is typed from its uses before any argument is known
+(`collection<any> | tuple`, the parameter type of the accessors), so
+`PointY(v)` is `unknown`, and `PointList` reads an `unknown` component as a
+scalar: the inferred result is `tuple<unknown, unknown>`. The application, and
+a call `f(L)` of a named function `f` assigned that literal, keep that type,
+while the value is a list of points. `appliedLiteralResultType()` and
+`callResultType()` (`boxed-expression/call-result-type.ts`) derive the type of
+the call from the body with each parameter typed as its argument, and get
+`list<tuple<integer, integer>>`; they then drop it because it is not a
+subtype of the inferred result. Options:
+
+- (a) When the signature was inferred and the literal writes no result type,
+  use the type derived without that bound (unless it says nothing:
+  `unknown`, `any` or `error`). Measured 2026-10-26: this gives the right type
+  for the case above and changes 31 tests in 10 files that encode the current
+  behavior (`ce-473-captured-free-symbol`, `tycho-row-426-apply-lambda-type`,
+  `tycho-373-passthrough-broadcast-typing`, `tycho-323-call-site-specialization`,
+  `inferred-point-parameter-call-type`, `ce-30-38-47-call-result-types`,
+  `function-literal-unknown-param-signature`, `generic-function-literals`,
+  `valueless-collection-typed-operand`, `compile-scalar-point-dot`). Each of
+  them needs a review: some test that an inferred signature result is kept on
+  purpose.
+- (b) Type `PointX`/`PointY`/`PointZ` of an operand that may be a point or a
+  list of points as a scalar or a list (`broadcastable`), not `unknown`. Then
+  `PointList` types the possible list (as it already does for a
+  `broadcastable<T>` component), and the inferred signature is right from the
+  start. `pointComponentTypeD()` (`library/collections.ts`) answers `unknown`
+  for such an operand on purpose today; the effect on other tests is not
+  measured.
+- (c) Keep the type. The value is right on every route; only a consumer that
+  reads the type (a broadcast stride, a static check) sees one point.
+
+If nothing is decided, (c) is what ships.
 
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 

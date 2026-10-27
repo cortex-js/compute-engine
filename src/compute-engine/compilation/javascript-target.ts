@@ -559,6 +559,7 @@ import {
   type BroadcastAsyncSpec,
 } from '../kernel-pool.js';
 import { literalParamsMap } from '../library/core.js';
+import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
 import type {
@@ -3640,6 +3641,35 @@ function compileJSPointList(
     // makes the whole point list absent, as in the interpreter.
     const absentableSource =
       !constructedScalarSlot && isAbsentablePointListSource(a);
+    // A coordinate accessor whose operand may be a list of points: a list of
+    // coordinates (a zip source) or one coordinate (a slot), decided at run
+    // time (`isAccessorOfPossibleList`). The OPERAND decides: a list whose
+    // elements are all arrays is a list of points. The accessor's value
+    // cannot decide it, since the coordinate of a flat list can be a tuple,
+    // an array too; such a slot is guarded as an opaque one (`NaN`). The
+    // value of `name` is then an array only for a source, so it joins the
+    // `broadcastable<T>` components below. Decided before the source test,
+    // which reads the `unknown` type of the accessor as a source and throws
+    // on a scalar value.
+    if (
+      !constructedScalarSlot &&
+      !absentableSource &&
+      isAccessorOfPossibleList(a)
+    ) {
+      const raw = BaseCompiler.tempVar(target);
+      const operand = BaseCompiler.tempVar(target);
+      const name = BaseCompiler.tempVar(target);
+      bindings.push(`const ${raw} = ${compile(a)};`);
+      bindings.push(`const ${operand} = ${compile(a.op1)};`);
+      bindings.push(
+        `const ${name} = Array.isArray(${operand}) && ` +
+          `${operand}.every(Array.isArray) ? ${raw} : ` +
+          `Array.isArray(${raw}) ? NaN : ${raw};`
+      );
+      maybeSources.push(name);
+      parts.push(`(Array.isArray(${name}) ? ${name}[${idx}] : ${name})`);
+      continue;
+    }
     if (absentableSource) {
       const name = BaseCompiler.tempVar(target);
       bindings.push(`const ${name} = ${compile(a)};`);
