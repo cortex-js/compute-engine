@@ -4058,6 +4058,7 @@ function compileIntervalSumProduct(
 
   const { index, lowerExpr, upperExpr, lowerNum, upperNum } =
     extractIntervalLimits(args[1]);
+  BaseCompiler.assertSafeBigOpBounds(kind, [lowerExpr, upperExpr], target);
 
   // Before ANY lowering decision — the unroll path included, which a
   // non-finite bound would otherwise skip on its way to the loop arm.
@@ -4166,8 +4167,11 @@ function compileIntervalSumProduct(
   // `entire` is the interval target's "cannot bound this" answer. Constant
   // bounds are statically finite by `assertFiniteIntervalBound` above, so they
   // take the unguarded template and their code is unchanged.
+  // The test is `Number.isSafeInteger`, not `Number.isFinite`: above
+  // 2^53 − 1 a floored bound is finite, but `k++` does not change `k` there
+  // and the loop would never end. The interpreter answers `out-of-range`.
   if (lowerNum === undefined || upperNum === undefined) {
-    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isFinite(_upper) || !Number.isFinite(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${index} = _lower; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
+    return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; const _lower = ${lowerCode}; if (!Number.isSafeInteger(_upper) || !Number.isSafeInteger(_lower)) return { kind: 'entire' }; ${prelude('_lower')}for (let ${index} = _lower; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;
   }
 
   return `(() => { let ${acc} = ${identity}; const _upper = ${upperCode}; ${prelude(undefined)}for (let ${index} = ${lowerCode}; ${index} <= _upper; ${index}++) { ${acc} = ${iaOp}(${acc}, ${bodyCode}); } return ${acc}; })()`;

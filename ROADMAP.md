@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-542.
+Next free reference: CE-547.
 
 **Entry format.**
 
@@ -72,6 +72,53 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-544. A function declared `function` and then assigned skips the recursion check
+
+**Status:** open; defect. Found 2026-10-27 while fixing Tycho row 468.
+
+With `R` declared `function` and then assigned
+`R(i) = Which(i = 0, 0, True, R(i − 1) + 1)`, the call `R(3)` is typed with the
+wide form `list<list<any> | number | tuple> | number | tuple`. Not declared,
+the same literal is typed `(i: unknown) -> number` and `R(3)` is `number`,
+because the operator definition runs the recursion check
+(`verifiedListHypothesis`). The value-definition route reads the raw type of
+the literal (`namedLiteralSignatureType`, `boxed-function.ts`) and does not run
+that check, and the recursive call in the stored literal reads the type of
+the literal boxed before the assignment, so the result also depends on the
+order of the definitions (`boxed-value-definition.ts`).
+
+### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
+
+**Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row
+468.
+
+A call over an operand typed `unknown` is typed with the wide form
+`number | tuple | list<number | tuple | list<any>>` (`S(1, g(2))`). A call over
+an operand typed with that wide form, which is narrower than `unknown`, is
+typed `any` when the body is not component-wise (`T(y)` with `T := a ↦ a + 1`):
+the tuple arm answers `any` (`componentwiseTupleCallType`,
+`call-result-type.ts`). Tests lock the `any` answer
+(`broadcastable-typing.test.ts`, `tycho-373-passthrough-broadcast-typing.test.ts`).
+Either the `unknown` rule is too narrow for a body that is not component-wise,
+or the wide-form rule is too wide. Since 2026-10-27 a `Max`/`Min` body over
+numbers and tuples is typed `number` on both (Tycho row 468). That rule
+reads a bare `tuple` argument as a point, a tuple of numbers
+(`extremumReadsANumber`, `call-result-type.ts`); a tuple whose coordinate types
+are known must hold numbers or collections of numbers. Decide whether the
+bare `tuple` arm of the wide form keeps that reading.
+
+### CE-546. A call over a `number | tuple` operand is not split by arm
+
+**Status:** open; defect (possibly unsound type). Found 2026-10-27 while fixing
+Tycho row 468.
+
+With `y: number | tuple`, `T(y)` with `T := a ↦ a + 1` is typed `number`. The
+call is split by arm only when the operand has an arm that maps
+(`operandArms`, `boxed-function.ts`), and this type has none, so the tuple arm
+is never checked. With `y: tuple` the same call is typed `any`. For a
+component-wise body (`x ↦ 2x`) the value over a tuple is a tuple, so `number`
+may be an unsound type; measure the value first.
 
 ### CE-524. A call of an inferred-signature function with a set, a character, a collection that holds a tuple, or a bare list of strings has a type that does not hold its value
 
@@ -717,13 +764,24 @@ and `Chunk` have it (pins in
   the walk reports for the canonical form.
 - In `Exists(y < x, x)`, with a bare symbol as the quantified variable, the
   walk reports `x` as free, where `Exists(y < x, Element(x, S))` binds it.
+- A set-builder with the membership in its condition, `{x² | x ∈ ℤ}`
+  (`Set(x², Condition(Element(x, Integers)))`), reports `x` as free, and
+  `subs({x: 3})` replaces it. Which name a set-builder binds is decided by the
+  parser (`setBuilder()`, `latex-syntax/dictionary/definitions-sets.ts`); the
+  walk would need the same rule.
+- The target of an `Assign` outside a `Block` is a write to an outer symbol.
+  The walk reports it as free, so `If(z > 0, Assign(z, 5), 0).subs({z: 7})`
+  replaces the target and gives an `Error` node. Decide whether a write target
+  is kept by `subs()`.
 
-### CE-538. What `subs()` should give for the variable of `D` and `Series`
+### CE-538. What `subs()` should give for the variable of `D`, `Series` and an indefinite `Integrate`
 
 **Status:** decision needed; design. Found 2026-10-27 (Tycho row 464).
 
 The free-variable walk reports the variable of `D(x^2, x)` and of
 `Series(sin x, x, 0, 3)` as free, because the result is a function of it.
+Since 2026-10-27 the variable of an indefinite `Integrate(a·x, x)` is read the
+same way: `∫ a·x dx` is `a·x²/2`, a function of `x`.
 `subs()` replaces exactly the free occurrences, so `D(x^2, x).subs({x: 3})`
 gives an invalid `D(…, Error('expected-a-symbol'))`, as it did before
 2026-10-27, and `Series(sin x, x, 0, 3).subs({x: 3})` gives
@@ -3987,56 +4045,6 @@ kernels.
   kernels (error bounds per function) are a separate project; the
   `Enclosure` documentation states the limit.
 
-### CE-526. On WebGPU, the NaN guard of `sin` and `cos` changes the value of a finite argument
-
-**Status:** open; precision, not measured in isolation (Tycho session
-tycho-90, 2026-10-26).
-
-After CE-520 (commit 32b663a5581c2dbad786afb92258c234777f1c00), the row
-`{F<0.0008: 0, B>1.3: 0, 0.12+0.8H}` of Tycho's `voronoi-diagram` has 18
-samples on WebGPU over Metal (Apple M5 Max) that differ from the `javascript`
-target, where it had 12 before. Replacing every `_gpu_sin(`/`_gpu_cos(` call of
-the emitted shader with the built-in gives exactly the earlier 12. The calls
-concerned have finite arguments, the time-dependent terms `cos(T + 1.9k)` and
-`sin(2T + 2.7k)`, so the guard does not select its NaN; the value of `sin`
-itself changes. A likely cause is that the Metal compiler uses a different
-code path for `sin` when its result goes through the bit test and `select`.
-The row is a threshold test near cell borders, so a change in the last bits
-of a term changes the branch. The guards also cost 10% of the frame time of
-this document on WebGPU (2 to 8% on `kelvin-wake` and `underwater-caustics`).
-First measure `sin` with and without the guard on a set of finite inputs, on
-WebGPU, against the f64 value.
-
-### CE-521. On Apple GPUs, the complex shader helpers can give a finite value for a NaN part
-
-**Status:** open; wrong value (found by the review of CE-520, 2026-10-26; not
-measured on a GPU yet).
-
-On Apple GPUs (WebGL2 over ANGLE Metal and WebGPU over Metal) the built-ins
-`sin` and `cos` of a NaN give 0 (CE-520). The complex helpers in
-`compilation/gpu-target.ts` call these built-ins directly on a part of their
-operand: `_gpu_cexp(z)` is `vec2(e·cos(z.y), e·sin(z.y))`, so a finite `z.x`
-and a NaN `z.y` give `(0, 0)` and not NaN; `_gpu_csin`, `_gpu_ccos`,
-`_gpu_csinh` and `_gpu_ccosh` have the same form, and so do the LCH to Lab
-colour conversions. These helpers lower `Exp`, `Sin` and `Cos` of a complex
-value and the colour heads. The fix would test the angle part with
-`_gpu_isnan` (`gpuNaNSafeLibrary`), as the real `Sin` and `Cos` do. First
-measure each helper with a NaN part on the GPU.
-
-### CE-523. `Smoothstep` has a shader lowering but no definition in the engine
-
-**Status:** open; capability (reported by Tycho session tycho-90, 2026-10-26).
-
-The `glsl` and `wgsl` targets lower `Smoothstep(e0, e1, x)` to `smoothstep`
-(the NaN-safe `_gpu_smoothstep`, CE-520), but the library has no `Smoothstep`
-operator: `ce.parse('\\operatorname{Smoothstep}(0,1,0.5)').evaluate()` stays
-unevaluated, and the `javascript` target fails to compile it (an unknown
-operator). A plot that uses it has no CPU value, so Tycho cannot compare the
-GPU result with a reference. The definition would be
-`t = Clamp((x - e0) / (e1 - e0), 0, 1)`, `t² (3 − 2t)`, the GLSL and WGSL
-formula; their result is undefined when `e0 ≥ e1`, so the interpreter would
-need its own rule there.
-
 ### CE-288. The f32 shader Hurwitz zeta answers NaN next to a zero of ζ(s, a)
 
 **Status:** open; capability, small.
@@ -4510,43 +4518,6 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
-### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
-
-**Status:** open; performance. Found by the Tycho document-open measurement,
-2026-10-27. Same cause as CE-531; fix the two together.
-
-When Tycho opens the document `art/2ki2hjsouf`, it makes 1 994 canonical
-`ce.rebind` calls on 877 distinct trees: 893 to 1 300 ms in Tycho, 1 133 to
-1 445 ms in the replay. A single call is expensive: the 425-byte tree
-`R_3(At(PointList(PointX(S_orry(u)) + … D(PointY(S_orry(u)), u) …)))` takes 14
-to 20 ms. About 85 % of it is the typing of `S_orry(u)`:
-`callResultTypeOfBinding` and `literalBodyResultType`
-(`boxed-expression/call-result-type.ts`) walk the 8.7 KB body of the function.
-That walk has a memo keyed on `_cacheGeneration()`, but each `D` goes through
-`canonicalizeBinder` (`box.ts`). It declares the bound variable in a scope that
-`box.ts` has just created and then pops that scope. The `declare` event
-(`callable: true`) and the pop advance the `any` axis (`axisMaskOf`,
-`engine-configuration-lifecycle.ts`), so the generation goes up by 8 per call
-and the memo misses 10 times per call.
-
-Proposed fix: a declaration of a binder variable into a scope that this
-canonicalization created gets the same exemption as a `parameter` declaration.
-No read can have resolved through a scope that did not exist before, and the
-pop then is `clean`. The exemption must not apply to a scope the caller passed
-in. Tested on a patched copy of the bundle (not in engine source, no test
-suite run): the repeated rebind of the tree above went from 14.0 to 1.2 ms, and
-a cold replay from 1 159 to 868 ms (median of 5, −25 %); the outputs were the
-same.
-
-A cache of `rebind` keyed on the tree would not help: Tycho passes a new,
-usually empty, scope to each call, and the engine version is unchanged since
-the previous rebind of the same tree for only 250 of the 1 117 repeated trees
-(122 ms). Tycho's side: it classifies each row twice, which doubles the rebind
-work (Tycho row ID).
-
-Reproduction: `npx tsx benchmarks/tycho-document-open/rebind.ts`
-(`COLD=1 RUNS=1` for the first run only).
-
 ### CE-536. `evaluate()` of a large surface body evaluates each copy of a subtree again and types every new node again
 
 **Status:** open; performance. Found by the Tycho document-open measurement,
@@ -4596,10 +4567,21 @@ engine's `any` version. Every cache keyed on that version
 (`_cacheGeneration()`: the evaluated form of `At(A, I)`, the memo of a lazy
 collection value, the `_type` and `_sgn` caches) then misses after each call.
 Measured on the chain of Tycho row 453 at depth 3: the version went from 17 to
-7 129 during one read. The question: can a declaration into a scope created
-for the call, which no expression has read through yet, be exempt, as the
-declaration of a parameter in a body scope already is? The risk: the cached
-type of a body node when the type of the parameter changes between calls.
+7 129 during one read.
+
+The exemption that the binder declarations of `D`, `Sum` and the other binders
+got on 2026-10-27 (a declaration into a scope that no lookup has walked
+through yet does not advance the version; `unread-scopes.ts`) is NOT sound for
+a call scope. The cached `_type` of a body node is safe, because
+`BoxedSymbol.type` reads the body's own binding. But `BoxedSymbol.sgn` reads the
+parameter's VALUE by name through the call scope, and `_sgn` is keyed on the
+version only: with the exemption, a lazy operator whose operand is the body
+node `x + 1` answered `positive` for `f(-5)` right after `f(3)`. Exempting the
+entry and advancing at the exit saves nothing (still one advance per call).
+What a fix needs: a key for the value-dependent caches of a body node that
+includes the values of the call's parameters (or a per-activation cache), so
+that a call does not have to advance the engine-wide version. This is a
+design question.
 
 ### CE-532. A public API that binds values to symbols for the duration of a callback
 
@@ -5064,32 +5046,6 @@ if interpreted loops of many thousands of turns become important:
   without ownership analysis, because every holder of an older value keeps its
   own prefix), together with an incremental type for the new node;
 - a per-node descriptor cache on the invalidation axis of the type cache.
-
-### CE-525. On WebGPU, a call that several shader functions repeat is computed again in each
-
-**Status:** open; performance, design (Tycho row 467, requested by the owner
-2026-10-26).
-
-A document function compiles to its own shader function, and the
-common-subexpression pass works inside one body. In Tycho's `voronoi-diagram`,
-the row `{F<0.0008: 0, B>1.3: 0, 0.12+0.8H}` has `B`, `H` and the functions
-they call (`u`, `v`, `Z`) each call `F(x, y)`, `Z(x, y)` and
-`n_inv4(x, y, k, −F)` again with the same arguments. WebGL2 over ANGLE Metal
-merges that repeated work; WebGPU over Metal merges identical calls only inside
-one body. On an Apple M5 Max, `F + B + H` without branches draws in 0.47 ms on
-WebGL2 and 1.13 ms on WebGPU, while `F`, `B` and `H` alone take the same time on
-both (Dawn robustness and `select` are not the cause). Two possible designs:
-inline the document functions into one body before the CSE pass (a limit on
-the size is needed), or compute the calls that several functions share once in
-the main body and pass the values in. Tycho's instrument
-(`scripts/repros/2026-10-26-ce467-wgsl-shared-calls-repro.mts` in the Tycho
-repo) times the row and reads READY at a WebGPU/WebGL ratio of 1.2 or less; it
-read 2.17 on 0.169.2.
-
-Related, not filed in CE yet: many `voronoi-diagram` terms depend only on the
-time `T` (16 site positions, 32 terms `cos(T + 1.9k)`); computing them once per
-frame on the CPU and passing them as uniforms would need CE to emit the
-per-frame part separately (Tycho ROADMAP row IB).
 
 ### CE-458. Compiling a body that several binders share is exponential in the depth of the sharing
 

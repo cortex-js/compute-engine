@@ -486,3 +486,58 @@ describe('A SUBSTITUTION RULE DOES NOT READ A STEP FUNCTION AS CONSTANT', () => 
     expect(r.evaluate().operator).not.toBe('Integrate');
   });
 });
+
+// A branch that is `Nothing` has no value. Before the fix, the antiderivative
+// read `Nothing` as a constant and the product `Nothing·x` erased it, so
+// `∫₀¹ Nothing dx` was 1 and `∫₀¹ Which(x < 1/2, x, True, Nothing) dx` was
+// 0.625 (1/8 on [0, 1/2] plus 1/2 on [1/2, 1]), while `.N()` gives `NaN`. The
+// integral now stays unevaluated, as for a `Which` with no default branch.
+describe('A PIECEWISE INTEGRAND WITH A NOTHING BRANCH', () => {
+  const ce = new ComputeEngine();
+  const integral = (body: ExpressionInput) =>
+    ce.box(['Integrate', ['Function', body, 'x'], ['Limits', 'x', 0, 1]]);
+
+  test.each([
+    [
+      'Which(x < 0.5, x, True, Nothing)',
+      ['Which', ['Less', 'x', 0.5], 'x', 'True', 'Nothing'],
+    ],
+    [
+      'Which(x < 1/2, x, True, Nothing)',
+      ['Which', ['Less', 'x', ['Rational', 1, 2]], 'x', 'True', 'Nothing'],
+    ],
+    [
+      'If(x < 1/2, x, Nothing)',
+      ['If', ['Less', 'x', ['Rational', 1, 2]], 'x', 'Nothing'],
+    ],
+    ['When(x, x < 0.5)', ['When', 'x', ['Less', 'x', 0.5]]],
+    ['Which(x < 0.5, x)', ['Which', ['Less', 'x', 0.5], 'x']],
+  ] as [string, ExpressionInput][])(
+    '%s has no value on part of [0, 1]',
+    (_label, body) => {
+      const e = integral(body);
+      expect(e.evaluate().operator).toBe('Integrate');
+      expect(e.N().isNaN).toBe(true);
+    }
+  );
+
+  test('the Nothing branch is never selected on the range', () => {
+    const e = integral(['Which', ['Less', 'x', 2], 'x', 'True', 'Nothing']);
+    expect(e.evaluate().toString()).toBe('1/2');
+  });
+
+  test('an integrand that is Nothing', () => {
+    expect(integral('Nothing').evaluate().operator).toBe('Integrate');
+    // Under N(), `Nothing` is a sample with no value, as `Missing` is.
+    expect(integral('Nothing').N().isNaN).toBe(true);
+    expect(ce.box(['Integrate', 'Nothing', 'x']).evaluate().operator).toBe(
+      'Integrate'
+    );
+  });
+
+  test('Nothing in a sum or a product is erased, as at each point', () => {
+    const w = ['Which', ['Less', 'x', 0.5], 'x', 'True', 'Nothing'];
+    expect(integral(['Add', w, 1]).evaluate().re).toBeCloseTo(1.125, 12);
+    expect(integral(['Multiply', w, 2]).evaluate().re).toBeCloseTo(1.25, 12);
+  });
+});

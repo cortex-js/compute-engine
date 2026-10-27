@@ -256,6 +256,10 @@ function antiderivativeSimple(
   if (sym(fn) === index)
     return ce.expr(['Divide', ['Power', fn, 2], 2]).simplify();
 
+  // `Nothing` has no value, so it is not a constant (see the same case in
+  // `establishedAntiderivativeInRadians()`).
+  if (sym(fn) === 'Nothing') return null;
+
   // Is it a constant?
   if (!fn.has(index))
     return ce.expr(['Multiply', fn, ce.symbol(index)]).simplify();
@@ -3443,6 +3447,15 @@ function establishedAntiderivativeInRadians(
 
   // Is it the index?
   if (sym(fn) === index) return ce.expr(['Divide', ['Power', fn, 2], 2]);
+
+  // `Nothing` is not a constant: an integrand that is `Nothing` has no value,
+  // so its integral has none and stays unevaluated, as under `.N()`. The
+  // product below would erase it (`Nothing·x` is `x`), and `∫₀¹ Nothing dx`
+  // was 1. A piecewise integrand reaches this case on each cell where its
+  // selected branch is `Nothing` (`Which(x < 1/2, x, True, Nothing)` on
+  // [1/2, 1]): the cell integral stays unevaluated, so the whole integral
+  // does (`integratePiecewise()`, `symbolic/piecewise-integrate.ts`).
+  if (sym(fn) === 'Nothing') return integrate(fn, index);
 
   // Is it a constant?
   if (!fn.has(index)) return ce.expr(['Multiply', fn, ce.symbol(index)]);

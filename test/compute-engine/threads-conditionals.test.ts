@@ -73,7 +73,8 @@ describe('Distance of a restricted point or list of points', () => {
     [
       'a piecewise point',
       ['Distance', ['Which', c, ['Tuple', 3, 4]], O],
-      'Which(0 < t, 5)',
+      // No default clause: `Distance(Missing, O)` is the last branch.
+      'Which(0 < t, 5, "True", NaN)',
       '5',
       'NaN',
     ],

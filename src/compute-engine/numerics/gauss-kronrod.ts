@@ -76,7 +76,142 @@ interface Panel {
    * (`nanSetBorderIsLarge`). The panel and its children are then not
    * examined again. Set by the adaptive loop. */
   nanUndecided?: boolean;
+  /** The sample at the center of the panel. Set by `gk15`. The center of a
+   * panel is the common endpoint of its two children, so the adaptive loop
+   * gives it to them as an edge sample (`edgeA`, `edgeB`). */
+  centerSample?: number;
+  /** The samples at the four nodes nearest to `a` and to `b`, nearest
+   * first. Set by `gk15`, read by `hiddenEdgeError`. */
+  nodesNearA?: [number, number, number, number];
+  nodesNearB?: [number, number, number, number];
+  /** The sample of the integrand AT `a` and AT `b`, when the adaptive loop
+   * has it (see `hiddenEdgeError`). */
+  edgeA?: number;
+  edgeB?: number;
 }
+
+/**
+ * The value at `x` of the parabola through the points `(xs[i], vs[i])`.
+ */
+function parabolaAt(
+  xs: readonly [number, number, number],
+  vs: readonly [number, number, number],
+  x: number
+): number {
+  const [x0, x1, x2] = xs;
+  return (
+    (vs[0] * (x - x1) * (x - x2)) / ((x0 - x1) * (x0 - x2)) +
+    (vs[1] * (x - x0) * (x - x2)) / ((x1 - x0) * (x1 - x2)) +
+    (vs[2] * (x - x0) * (x - x1)) / ((x2 - x0) * (x2 - x1))
+  );
+}
+
+/** The distances from an endpoint of a panel to the four GK15 nodes nearest
+ * to it, in half-widths of the panel, nearest first. */
+const EDGE_NODE_DISTANCES = [1 - XGK[0], 1 - XGK[1], 1 - XGK[2], 1 - XGK[3]];
+
+/**
+ * An error to add to the GK15 error of a panel, for a jump or a kink of the
+ * integrand between an endpoint of the panel and the node nearest to it.
+ *
+ * No node of GK15 is at an endpoint of the panel: the nearest node is at
+ * `0.0043·(b − a)` from it. When the integrand jumps inside this gap, all 15
+ * samples are on one side of the jump. The Gauss and the Kronrod sums then
+ * agree, the error estimate of the panel is about 0 (exactly 0 for a constant
+ * piece), and the area between the jump and the endpoint is lost. A kink in
+ * the gap loses the area between the two pieces in the same way. For
+ * `1/max(ε, √(x² + y²) − 1)` cut to 0 at `x = −√(1 − y²)` with `ε = 0.01`,
+ * the quadrature on `[−10, 10]` reported `converged` with an error of about
+ * `6e-10` when its true error was `5e-6` (`y = 0.1`, a jump), `2e-5`
+ * (`y = 0.640025`, a kink) and `0.2` (one `y` near `0.78`). An outer integral
+ * over `y` of this inner integral had an error of `4e-4`.
+ *
+ * The test uses the sample AT the endpoint, when the adaptive loop has it:
+ * the center of the parent panel, or a common endpoint of two starting
+ * panels. The parabola through the three nodes nearest to the endpoint
+ * predicts the sample at the endpoint, and the parabola through the next
+ * three nodes predicts the sample at the nearest node. On a smooth piece the
+ * first prediction is the better one: its distance is much shorter (its
+ * error is about 20 times smaller for a smooth integrand). When the first
+ * prediction misses by more than the second one, the gap may hide a jump or
+ * a kink, and the area lost is at most the miss times the gap.
+ *
+ * The jump can also be AT the endpoint (`Floor` at an integer, `Sign` at 0,
+ * a value at one point only): then no area is lost, but the sample at the
+ * endpoint still misses, in each panel that ends there, after each
+ * bisection. To tell the two cases apart, the integrand is sampled once
+ * more, at `HIDDEN_EDGE_PROBE` times the gap from the endpoint. When this
+ * sample agrees with the parabola of the nodes as well as the nearest node
+ * does, the jump or the kink is between the probe and the endpoint, and the
+ * bound is the miss times this much shorter distance. Otherwise the bound is
+ * the miss times the gap, and the panel is bisected until the bound meets
+ * the tolerance (each bisection halves the gap). A smooth integrand that
+ * varies faster than the nodes can follow can also fail the test, and is
+ * bisected, as it must be. A sample that is not finite (a singularity at the
+ * endpoint, a removable singularity at a node) gives no test.
+ */
+function hiddenEdgeError(p: Panel, f: (x: number) => number): number {
+  const halfWidth = 0.5 * Math.abs(p.b - p.a);
+  const [d0, d1, d2, d3] = EDGE_NODE_DISTANCES;
+  const gap = d0 * halfWidth;
+  const atEdge = (
+    endpoint: number,
+    direction: 1 | -1,
+    edge: number | undefined,
+    nodes: [number, number, number, number] | undefined
+  ): number => {
+    if (edge === undefined || nodes === undefined) return 0;
+    if (!Number.isFinite(edge) || !nodes.every((v) => Number.isFinite(v)))
+      return 0;
+    const [v0, v1, v2, v3] = nodes;
+    const miss = Math.abs(edge - parabolaAt([d0, d1, d2], [v0, v1, v2], 0));
+    const inward = Math.abs(v0 - parabolaAt([d1, d2, d3], [v1, v2, v3], d0));
+    const rounding =
+      64 *
+      Number.EPSILON *
+      Math.max(
+        Math.abs(edge),
+        Math.abs(v0),
+        Math.abs(v1),
+        Math.abs(v2),
+        Math.abs(v3)
+      );
+    if (miss <= inward + rounding) return 0;
+    // The probe is inside the gap, near the endpoint, and at least some
+    // units in the last place from it (`direction` points into the panel).
+    const probe =
+      endpoint +
+      direction *
+        Math.max(
+          gap * HIDDEN_EDGE_PROBE,
+          4 * Number.EPSILON * Math.abs(endpoint)
+        );
+    const distance = Math.abs(probe - endpoint);
+    if (distance > 0 && distance < gap) {
+      const sample = f(probe);
+      const predicted = parabolaAt(
+        [d0, d1, d2],
+        [v0, v1, v2],
+        distance / halfWidth
+      );
+      if (
+        Number.isFinite(sample) &&
+        Math.abs(sample - predicted) <= inward + rounding
+      )
+        return miss * distance;
+    }
+    return miss * gap;
+  };
+  return (
+    atEdge(p.a, 1, p.edgeA, p.nodesNearA) +
+    atEdge(p.b, -1, p.edgeB, p.nodesNearB)
+  );
+}
+
+/** The distance from an endpoint of a panel to the probe of
+ * `hiddenEdgeError`, as a fraction of the distance from the endpoint to the
+ * nearest node. */
+const HIDDEN_EDGE_PROBE = 2 ** -40;
 
 /**
  * Apply the GK15 rule to a single finite panel `[a, b]`.
@@ -167,6 +302,9 @@ export function gk15(f: (x: number) => number, a: number, b: number): Panel {
     nanSamples,
     nonFiniteSamples,
     largestFinite,
+    centerSample: fc,
+    nodesNearA: [fv1[0], fv1[1], fv1[2], fv1[3]],
+    nodesNearB: [fv2[0], fv2[1], fv2[2], fv2[3]],
   };
   if (nanSamples > 0) panel.nanNodes = [nanFirst, nanLast];
   return panel;
@@ -898,6 +1036,12 @@ function adaptiveFinite(
   // (see the test after each bisection below).
   let nanBorderTests = 0;
 
+  // Add to the error of a panel the bound of the area that a jump next to
+  // one of its endpoints can hide from the nodes (`hiddenEdgeError`).
+  const addHiddenEdgeError = (p: Panel) => {
+    if (Number.isFinite(p.error)) p.error += hiddenEdgeError(p, f);
+  };
+
   // Fold a panel into the running totals, skipping non-finite contributions.
   const addPanel = (p: Panel) => {
     if (Number.isFinite(p.value)) {
@@ -926,6 +1070,10 @@ function adaptiveFinite(
     1,
     Math.min(Math.floor(initialPanels), Math.floor(maxIntervals))
   );
+  // The samples at the common endpoints of the starting panels, for the
+  // test of a jump next to an endpoint of a panel (`hiddenEdgeError`). The
+  // integrand is not sampled at `a` and `b`, where it can be singular.
+  const boundarySamples: number[] = [];
   for (let i = 0; i < n; i++) {
     // Deadline check per panel: a panel is at least 15 integrand
     // evaluations, and for an ITERATED integral each evaluation is itself a
@@ -941,10 +1089,19 @@ function adaptiveFinite(
       panels.length = 0;
       break;
     }
-    panels.push(gk15(f, lo, hi));
+    const p = gk15(f, lo, hi);
+    if (i > 0) p.edgeA = boundarySamples[i - 1];
+    if (i < n - 1) {
+      boundarySamples.push(f(hi));
+      p.edgeB = boundarySamples[i];
+    }
+    panels.push(p);
   }
   if (panels.length === 0) panels.push(gk15(f, a, b));
-  panels.forEach(addPanel);
+  panels.forEach((p) => {
+    addHiddenEdgeError(p);
+    addPanel(p);
+  });
 
   // Endpoint-divergence bookkeeping: follow the panel that touches each end of
   // the interval. Bisecting it sheds one dyadic shell (the child NOT touching
@@ -1052,6 +1209,12 @@ function adaptiveFinite(
     const left = gk15(f, iv.a, mid);
     const right = gk15(f, mid, iv.b);
     left.depth = right.depth = (iv.depth ?? 0) + 1;
+    // The center of the parent is the common endpoint of the children.
+    left.edgeA = iv.edgeA;
+    left.edgeB = right.edgeA = iv.centerSample;
+    right.edgeB = iv.edgeB;
+    addHiddenEdgeError(left);
+    addHiddenEdgeError(right);
     if (
       panelIsBad(left) &&
       panelIsBad(right) &&
@@ -1331,6 +1494,173 @@ export function insideQuadrature(): boolean {
   return activeQuadratures > 0;
 }
 
+/**
+ * The errors of the integrals computed inside the integrand of a quadrature
+ * called with `nestedErrors` (see `adaptiveQuadrature`).
+ */
+type NestedErrors = {
+  /** The sums of the errors, and of the tolerances, of the inner results
+   * reported during the current evaluation of the integrand. */
+  errors: number;
+  tolerances: number;
+  /** The same sums, each term divided by the magnitude of the estimate,
+   * for the inner results with an estimate that is not 0. */
+  relativeErrors: number;
+  relativeTolerances: number;
+  /** Whether an inner result was reported during the current evaluation. */
+  reported: boolean;
+  /** The number of evaluations of the integrand with a finite value and an
+   * inner result. */
+  count: number;
+  /** The sums of the errors, and of the tolerances, of these values (see
+   * `withNestedErrors`). */
+  errorSum: number;
+  toleranceSum: number;
+  /** The sum of the magnitudes of these values. */
+  magnitudeSum: number;
+  positive: boolean;
+  negative: boolean;
+};
+
+/** The collector of the quadrature whose integrand is being evaluated now,
+ * or `undefined` when no such quadrature asked for one (`nestedErrors`). */
+let nestedErrorSink: NestedErrors | undefined;
+/** The value of `activeQuadratures` while that integrand is evaluated. An
+ * inner quadrature that starts at this count is an integral of the
+ * integrand, and reports its result to the sink. A quadrature that starts
+ * deeper is computed inside the integrand of an inner one, and is counted in
+ * the result of that inner one. */
+let nestedErrorDepth = -1;
+
+/** Report the result of an inner quadrature that started when
+ * `activeQuadratures` was `depth` (see `nestedErrorDepth`), with the
+ * tolerance that it was asked to meet. */
+function reportNestedResult(
+  depth: number,
+  r: { estimate: number; error: number },
+  tolerance: number
+): void {
+  const sink = nestedErrorSink;
+  if (sink === undefined || depth !== nestedErrorDepth) return;
+  if (!Number.isFinite(r.estimate) || !Number.isFinite(r.error)) return;
+  sink.reported = true;
+  sink.errors += r.error;
+  sink.tolerances += tolerance;
+  if (r.estimate !== 0) {
+    sink.relativeErrors += r.error / Math.abs(r.estimate);
+    sink.relativeTolerances += tolerance / Math.abs(r.estimate);
+  }
+}
+
+/**
+ * Run the quadrature `run` of `f` over `[a, b]`, and add to its error the
+ * errors of the integrals computed inside `f` (see `nestedErrors` in
+ * `adaptiveQuadrature`).
+ *
+ * The quadrature sees the error of an inner integral only as noise of its
+ * integrand. An inner error that changes little from one node to the next
+ * (the inner tolerance is relative, and its error has the same sign at
+ * neighboring nodes) looks smooth, and the error of the outer quadrature
+ * does not contain it. The added term estimates the integral of the error of
+ * the integrand, as `nIntegrateMultiple` (`library/calculus.ts`) does for
+ * each level of an iterated integral.
+ *
+ * The error of a value `v` of the integrand is not known from the errors
+ * `e` of its inner integrals `I`: it depends on how `v` changes with `I`. It
+ * is taken as the larger of `Σ e` (`v = c ± I`, a change of 1 per unit of
+ * `I`) and `|v|·Σ e/|I|` (`v = c·I`, a value proportional to `I`). An
+ * integrand that changes faster than these with its inner integrals
+ * (`(∫…)²` with `|∫…| > 1/2`) has a larger error.
+ *
+ * The added term estimates the integral of this error. When the values keep
+ * one sign, it is the ratio of the summed errors to the summed magnitudes of
+ * the values, times the magnitude of the outer estimate: this ratio does not
+ * depend on where the nodes are when the relative error of the values is the
+ * same everywhere. The ratio is of the VALUES, not of the inner integrals:
+ * for `c − ∫…` with values near 0, the outer estimate is near 0 but the
+ * ratio is large. Otherwise it is the mean error of the values times the
+ * length of the interval, or nothing when the interval is infinite.
+ *
+ * The result is `converged` only when it converged, and the added term is
+ * not larger than the same term computed from the tolerances that the inner
+ * integrals were asked to meet plus the part of `max(atol, rtol·|estimate|)`
+ * that the outer error leaves. So an inner result with an error larger than
+ * its tolerance (one that did not converge) makes the outer result not
+ * converged. An inner tolerance at the scale of the outer one does not: the
+ * outer result cannot be more accurate than its integrand, and requiring
+ * this would make every integral of an integral not converged.
+ */
+function withNestedErrors(
+  f: (x: number) => number,
+  a: number,
+  b: number,
+  rtol: number,
+  atol: number,
+  run: (g: (x: number) => number) => AdaptiveQuadratureResult
+): AdaptiveQuadratureResult {
+  const sink: NestedErrors = {
+    errors: 0,
+    tolerances: 0,
+    relativeErrors: 0,
+    relativeTolerances: 0,
+    reported: false,
+    count: 0,
+    errorSum: 0,
+    toleranceSum: 0,
+    magnitudeSum: 0,
+    positive: false,
+    negative: false,
+  };
+  const g = (x: number): number => {
+    const previousSink = nestedErrorSink;
+    const previousDepth = nestedErrorDepth;
+    nestedErrorSink = sink;
+    nestedErrorDepth = activeQuadratures;
+    sink.errors = sink.tolerances = 0;
+    sink.relativeErrors = sink.relativeTolerances = 0;
+    sink.reported = false;
+    let v: number;
+    try {
+      v = f(x);
+    } finally {
+      nestedErrorSink = previousSink;
+      nestedErrorDepth = previousDepth;
+    }
+    if (sink.reported && Number.isFinite(v)) {
+      sink.count += 1;
+      sink.errorSum += Math.max(sink.errors, Math.abs(v) * sink.relativeErrors);
+      sink.toleranceSum += Math.max(
+        sink.tolerances,
+        Math.abs(v) * sink.relativeTolerances
+      );
+      sink.magnitudeSum += Math.abs(v);
+      if (v > 0) sink.positive = true;
+      if (v < 0) sink.negative = true;
+    }
+    return v;
+  };
+  const r = run(g);
+  if (sink.count === 0 || !Number.isFinite(r.estimate)) return r;
+  // The integral of the error of the integrand, from the sum `sum` of the
+  // errors of its values.
+  const integral = (sum: number): number => {
+    if (!(sink.positive && sink.negative) && sink.magnitudeSum > 0)
+      return (sum / sink.magnitudeSum) * Math.abs(r.estimate);
+    const span = Math.abs(b - a);
+    return Number.isFinite(span) ? (sum / sink.count) * span : 0;
+  };
+  const extra = integral(sink.errorSum);
+  if (!(extra > 0)) return r;
+  const tolerance = Math.max(atol, rtol * Math.abs(r.estimate));
+  return {
+    ...r,
+    error: r.error + extra,
+    converged:
+      r.converged &&
+      extra <= integral(sink.toleranceSum) + Math.max(0, tolerance - r.error),
+  };
+}
+
 /** The result of `adaptiveQuadrature`. */
 type AdaptiveQuadratureResult = {
   estimate: number;
@@ -1536,7 +1866,49 @@ export function adaptiveQuadrature(
      * see `INTERIOR_SITE_DEPTH`). The recursive calls on the two halves
      * pass one less. */
     interiorSplits?: number;
+    /** When `true`, the integrand computes integrals of its own (with this
+     * function), and the reported error includes an estimate of the
+     * integral of their errors (see `withNestedErrors`). Without it, an
+     * error of the inner integrals that varies slowly with the variable is
+     * not in the reported error. The default is `false`. */
+    nestedErrors?: boolean;
   }
+): AdaptiveQuadratureResult {
+  // An integral computed inside the integrand of a quadrature that collects
+  // the errors of its inner integrals reports its result (see
+  // `nestedErrorDepth`). It reports once, here: after the parts of a split
+  // interval are combined, after the negation of reversed bounds, and after
+  // the errors of its own inner integrals are added.
+  const entryDepth = activeQuadratures;
+  const result =
+    options?.nestedErrors === true
+      ? withNestedErrors(
+          f,
+          a,
+          b,
+          options.rtol ?? 1e-10,
+          options.atol ?? 1e-12,
+          (g) => quadrature(g, a, b, options)
+        )
+      : quadrature(f, a, b, options);
+  reportNestedResult(
+    entryDepth,
+    result,
+    Math.max(
+      options?.atol ?? 1e-12,
+      (options?.rtol ?? 1e-10) * Math.abs(result.estimate)
+    )
+  );
+  return result;
+}
+
+/** The quadrature of `adaptiveQuadrature`, without the errors of the inner
+ * integrals (`nestedErrors`). */
+function quadrature(
+  f: (x: number) => number,
+  a: number,
+  b: number,
+  options: Parameters<typeof adaptiveQuadrature>[3]
 ): AdaptiveQuadratureResult {
   const rtol = options?.rtol ?? 1e-10;
   const atol = options?.atol ?? 1e-12;
@@ -1556,7 +1928,7 @@ export function adaptiveQuadrature(
     return { estimate: 0, error: 0, converged: true, divergent: false };
 
   if (a > b) {
-    const r = adaptiveQuadrature(f, b, a, { ...options, deadline });
+    const r = quadrature(f, b, a, { ...options, deadline });
     return { ...r, estimate: -r.estimate };
   }
 
@@ -1584,11 +1956,11 @@ export function adaptiveQuadrature(
       deadline,
       singularEndpoints: options?.singularEndpoints,
     };
-    const left = adaptiveQuadrature(f, a, 0, halfOptions);
+    const left = quadrature(f, a, 0, halfOptions);
     // A half where the integrand is `NaN` on a set that is not some isolated
     // points makes the whole integral have no value.
     if (left.nanRegion === true) return left;
-    const right = adaptiveQuadrature(f, 0, b, halfOptions);
+    const right = quadrature(f, 0, b, halfOptions);
     if (right.nanRegion === true) return right;
     return combineHalves(left, right, rtol, atol);
   } else if (bInf) {
@@ -1714,9 +2086,9 @@ export function adaptiveQuadrature(
           singularEndpoints: true,
           interiorSplits: splits - 1,
         };
-        const left = adaptiveQuadrature(g, lo, s, halfOptions);
+        const left = quadrature(g, lo, s, halfOptions);
         if (left.nanRegion === true) return left;
-        const right = adaptiveQuadrature(g, s, hi, halfOptions);
+        const right = quadrature(g, s, hi, halfOptions);
         if (right.nanRegion === true) return right;
         const split = combineHalves(left, right, rtol, atol);
         if (

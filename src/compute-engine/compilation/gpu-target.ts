@@ -101,6 +101,7 @@ import { literalParamsMap } from '../library/core.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
+import { inlineSharedUserFunctionCalls } from './gpu-shared-calls.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
   overriddenCompilationHeads,
@@ -7649,6 +7650,11 @@ function compileGPUSumProduct(
   // `F(i) = Σ_{m=1..i} m` to `float _fn_F(float i) { return 0.0; }`.
   const lowerNum = gpuBoundConstant(limitsOps[1], target);
   const upperNum = gpuBoundConstant(limitsOps[2], target);
+  BaseCompiler.assertSafeBigOpBounds(
+    kind,
+    [limitsOps[1], limitsOps[2]],
+    target
+  );
 
   const isSum = kind === 'Sum';
   const op = isSum ? '+' : '*';
@@ -19391,8 +19397,27 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // This pass also writes the norm of a point with a list component as its
     // explicit form (`explicitBroadcastPointNorm`), before the common
     // subexpressions are read, so the two share them.
+    //
+    // A pure user-function call that several shader functions would repeat
+    // with the same arguments (`B` and `H` both calling `F(x, y)`) is
+    // substituted here as well, with the bodies it reaches, so the common
+    // subexpressions below compute it once per invocation instead of once in
+    // each function (`gpu-shared-calls.ts`, ROADMAP CE-525).
     expr = unrollFixedWidthCollections(
-      BaseCompiler.inlineCollectionValuedCallsAtRoot(expr, target, 'list<any>'),
+      inlineSharedUserFunctionCalls(
+        BaseCompiler.inlineCollectionValuedCallsAtRoot(
+          expr,
+          target,
+          'list<any>'
+        ),
+        target,
+        {
+          isOverridden: (name) =>
+            (userFunctions !== undefined &&
+              Object.hasOwn(userFunctions, name)) ||
+            (vars !== undefined && Object.hasOwn(vars, name)),
+        }
+      ),
       {
         skipHeads: unrollSkipHeads,
         iterationBudget: options.iterationBudget,

@@ -85,9 +85,17 @@ describe('TYCHO ROW 422: AN INTEGRAND THAT IS NaN ON A PART OF THE INTERVAL', ()
   // exponent (`y^{-1/2}`, user decision 2026-10-23, ROADMAP CE-213), so the
   // integrand has its principal complex value for `y < 0`, and the integral
   // is the complex value of the integral written with the number `-1/2`.
+  // For `y = −t < 0`, `y^(−1/2) = −i·t^(−1/2)`, so the part on `[x, 0]` is
+  // imaginary: the real part is the integral over `[0, ∞)`, exactly 1, and
+  // the imaginary part is `−(2π)^(−1/2)·∫₀^|x| t^(−1/2)·e^(t/2) dt`, from
+  // the series `Σ (1/2)ⁿ/n! · |x|^(n+1/2)/(n + 1/2)`. (The values pinned
+  // before were the quadrature's own, wrong by about 1.6e-8: the integrand
+  // jumps at `y = 0`, and a jump between the endpoint of a panel and its
+  // nearest node was not seen; see `hiddenEdgeError`,
+  // `numerics/gauss-kronrod.ts`.)
   test.each([
-    [-0.2, 1.0000000161683475, -0.36908448183721915],
-    [-1, 1.0000000000000169, -0.9534382569845405],
+    [-0.2, 1, -0.3690844725957565],
+    [-1, 1, -0.9534382692512609],
   ])('x = %p is complex, interpreted', (x, re, im) => {
     // No time limit: this integral has a value, and the quadrature of its
     // integrable singularity at 0 takes the usual time.

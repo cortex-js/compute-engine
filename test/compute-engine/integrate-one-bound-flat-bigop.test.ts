@@ -237,7 +237,9 @@ describe('A CLAUSE AFTER A BARE INDEX IS NOT A BOUND', () => {
       ['Limits', 'x', 'Nothing', 'Nothing'],
       ['Limits', 'y', 0, 1],
     ]);
-    expect(expr.unknowns).toEqual([]);
+    // The integral over `x` is indefinite, so its value is a function of
+    // `x` (`x²/4`) and `x` is free; `y` is bound by its definite clause.
+    expect(expr.unknowns).toEqual(['x']);
   });
 
   test('a clause in the upper-bound position is not the upper bound', () => {

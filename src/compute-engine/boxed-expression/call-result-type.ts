@@ -1822,6 +1822,34 @@ const COMPONENTWISE_UNARY = new Set([
   'Sign',
 ]);
 
+/** The operators whose value is a number for operands that are numbers,
+ * tuples or lists: each reads the elements of a tuple or a list operand as
+ * operands, at any depth. Checked by evaluation: `Max(1, (2, (5, 9)))` is
+ * `9`, `Min(1, (2, 3))` is `1`, and `Max(1, (q, 3))` is the symbolic
+ * `max(3, q)`, typed `number` (`componentwiseTupleCallType`). */
+const TUPLE_FLATTENING_EXTREMA = new Set(['Max', 'Min']);
+
+/**
+ * Whether `Max`/`Min` read a number from an operand of type `t`: a number, a
+ * collection of numbers, or a tuple whose coordinates are of these kinds. A
+ * tuple whose coordinate types are known but can hold something else (a
+ * `Measurement`, a dictionary, a string) is refused: `Max` over it gives that
+ * value, an error or a symbolic `max(…)` that holds a string. A bare `tuple`
+ * is accepted: it is the `tuple` arm of the open form
+ * `number | tuple | list<…>` (ROADMAP CE-502), which stands for a point, a
+ * tuple of numbers (ROADMAP CE-545 asks whether that reading is kept).
+ */
+function extremumReadsANumber(t: Readonly<Type>): boolean {
+  if (t === 'tuple') return true;
+  if (isSubtype(t, 'number') || isSubtype(t, 'collection<number>'))
+    return true;
+  if (typeof t === 'object' && t.kind === 'tuple')
+    return t.elements.every((e) =>
+      extremumReadsANumber(resolveTypeAlias(e.type))
+    );
+  return false;
+}
+
 /**
  * The type of a call of the function literal `literal` when exactly one
  * argument is a numeric tuple with `n` number components, the other
@@ -1850,6 +1878,19 @@ const COMPONENTWISE_UNARY = new Set([
  * `tuple<number, number>`, and it was typed `any` (ROADMAP CE-47). A
  * component of the value can be a complex number (`Sqrt((1, -2))`), an
  * infinity (`(1, 2)/0`) or `NaN`, which the type `number` holds.
+ *
+ * A body that is a call of `Max` or `Min` (`TUPLE_FLATTENING_EXTREMA`),
+ * typed as a number, gives a number when each of its operands is a
+ * parameter, or reads no parameter and is a number, and each argument is a
+ * number, a collection of numbers or a tuple of these
+ * (`extremumReadsANumber`): these operators read the elements of a tuple or
+ * a list operand as operands, at any depth. An operand that computes on a
+ * parameter (`Max(a, b + 1)`) is refused, because the arithmetic over a tuple
+ * argument gives an error. With `S := (a, b) ↦ Max(a, b)`, `S(1, (2, 3))` is `3`, and the
+ * call is typed `number`. A recursive call typed with the open form
+ * `number | tuple | list<…>` (ROADMAP CE-502) is an argument of this kind
+ * on its `tuple` arm, so `S(1, R(i − 1))` is not typed `any` (ROADMAP
+ * CE-543). An argument that may be absent is not read here.
  */
 export function componentwiseTupleCallType(
   literal: Expression | undefined,
@@ -1866,6 +1907,20 @@ export function componentwiseTupleCallType(
     if (!name) return undefined;
     names.push(name);
   }
+  let root = literal.ops[0];
+  while (isFunction(root, 'Block') && root.nops === 1) root = root.ops[0];
+  if (
+    isFunction(root) &&
+    TUPLE_FLATTENING_EXTREMA.has(root.operator) &&
+    isSubtype(root.type.type, 'number') &&
+    root.ops.every(
+      (op) =>
+        (isSymbol(op) && names.includes(op.symbol)) ||
+        (names.every((n) => !op.has(n)) && isSubtype(op.type.type, 'number'))
+    ) &&
+    argTypes.every((t) => extremumReadsANumber(resolveTypeAlias(t)))
+  )
+    return 'number';
   let tupleName: string | undefined;
   let arity = 0;
   for (let i = 0; i < argTypes.length; i++) {

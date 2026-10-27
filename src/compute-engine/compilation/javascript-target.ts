@@ -15557,6 +15557,8 @@ function unrolledBigOpLane(expr: Expression): boolean | undefined {
   if (
     lowerNum === undefined ||
     upperNum === undefined ||
+    !Number.isSafeInteger(lowerNum) ||
+    !Number.isSafeInteger(upperNum) ||
     // The same size limit as the emitter applies below (`emitSumProduct`).
     !unrollFits(
       upperNum - lowerNum + 1,
@@ -15621,6 +15623,7 @@ function emitSumProduct(
   const { index, lowerExpr, upperExpr } = extractLimits(clauses[0]);
   const lowerNum = BaseCompiler.bigOpBoundConstant(lowerExpr, target);
   const upperNum = BaseCompiler.bigOpBoundConstant(upperExpr, target);
+  BaseCompiler.assertSafeBigOpBounds(kind, [lowerExpr, upperExpr], target);
 
   // Before ANY lowering decision: a statically non-finite bound fails closed.
   // This precedes the unroll path too — `lowerNum`/`upperNum` are `undefined`
@@ -15939,13 +15942,26 @@ function emitSumProduct(
   // imposes no trip-count policy. Constant bounds are statically finite by
   // `assertFiniteBound` above and emit no guard at all: their code is
   // unchanged.
+  //
+  // The guard tests `Number.isSafeInteger`, not `Number.isFinite`: a floored
+  // bound above 2^53 − 1 is finite, but there `k++` does not change `k`, so
+  // the loop would never end. The interpreter answers `out-of-range` for such
+  // a bound, and the loop answers NaN. The budget guard alone does not catch
+  // it (`_upper - k` is small when both bounds are near 2^53), so a symbolic
+  // bound gets a test under a budget too. That test rejects only a FINITE
+  // bound that is not a safe integer: the budget already decides the
+  // infinite bounds (an upper bound of `-∞` is an empty range, which answers
+  // the identity).
   const guardNaN = (nan: string, exit: (value: string) => string): string => {
-    if (budget !== undefined)
-      return `if (!(_upper - ${index} < ${budget})) ${exit(nan)} `;
+    const unsafe = (b: string): string =>
+      budget === undefined
+        ? `!Number.isSafeInteger(${b})`
+        : `(Number.isFinite(${b}) && !Number.isSafeInteger(${b}))`;
     const checks = [
-      ...(upperNum === undefined ? ['!Number.isFinite(_upper)'] : []),
-      ...(lowerNum === undefined ? [`!Number.isFinite(${index})`] : []),
+      ...(upperNum === undefined ? [unsafe('_upper')] : []),
+      ...(lowerNum === undefined ? [unsafe(index)] : []),
     ];
+    if (budget !== undefined) checks.push(`!(_upper - ${index} < ${budget})`);
     return checks.length > 0 ? `if (${checks.join(' || ')}) ${exit(nan)} ` : '';
   };
 

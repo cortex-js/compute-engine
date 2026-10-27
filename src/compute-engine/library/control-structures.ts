@@ -3289,9 +3289,72 @@ function evaluateIf(
   // had assigned (see `evaluateBigOpTerm`, `library/utils.ts`). The
   // `isSame` guard keeps this a fixpoint: an unchanged condition returns
   // `undefined` as before, so the rebuilt node evaluates to itself.
+  // With two arms that are lists of one length, the held `If` is a list of
+  // `If`s, one for each position (see `distributeOverListArms`).
+  if (
+    ifTrue !== undefined &&
+    ifFalse !== undefined &&
+    isScalarGuard(evaluated)
+  ) {
+    const list = distributeOverListArms(engine, [ifTrue, ifFalse], (arms) =>
+      engine._fn('If', [evaluated, ...arms])
+    );
+    if (list !== undefined) return list;
+  }
   return evaluated.isSame(cond)
     ? undefined
     : engine._fn('If', [evaluated, ...ops.slice(1)]);
+}
+
+/**
+ * True if the type of the guard `g` is `boolean`, so that `g` cannot be a
+ * list of booleans (a mask, which selects element-wise) when its value is
+ * known. The value of `g` is not enough: a symbol of type `list<boolean>`
+ * that has no value yet is not a collection, and a symbol of type `unknown`
+ * can later be assigned a mask, so both are refused.
+ */
+function isScalarGuard(g: Expression): boolean {
+  return isSubtype(g.type.type, 'boolean');
+}
+
+/**
+ * The list of selections, one for each position, of a selection whose arms
+ * are all lists of one length: with an undecided condition `c`,
+ * `Which(c, [1, 2], True, [3, 4])` is `[Which(c, 1, True, 3), Which(c, 2,
+ * True, 4)]`. The two forms have the same value for every value of `c`, but
+ * the second one is a `List`, so that a caller that reads the elements of the
+ * value finds them. This is the form that a list combined with a selection
+ * gets: `[1, 2] + Which(c, 0, True, 1)` distributes the `Add` into the arms
+ * (`threadConditional`, `boxed-function.ts`), which gives a selection of
+ * lists, and this makes it a list of selections.
+ *
+ * `build` makes the selection at one position from the arms at that
+ * position. An arm at a position that is itself a list of the same length
+ * as the other arms at that position is distributed again, so a selection of
+ * matrices is a matrix of selections. Returns `undefined` when an arm is not
+ * a `List`, or when two arms have different lengths: the selection stays as
+ * it is.
+ *
+ * The arms are not evaluated here: an arm of a selection is evaluated only
+ * when its condition selects it, and the selection at each position keeps
+ * that rule.
+ */
+function distributeOverListArms(
+  ce: ComputeEngine,
+  arms: ReadonlyArray<Expression>,
+  build: (arms: ReadonlyArray<Expression>) => Expression
+): Expression | undefined {
+  const first = arms[0];
+  if (!isFunction(first, 'List')) return undefined;
+  const n = first.nops;
+  const lists = arms.filter((x) => isFunction(x, 'List') && x.nops === n);
+  if (lists.length !== arms.length) return undefined;
+  const cells: Expression[] = [];
+  for (let k = 0; k < n; k++) {
+    const at = lists.map((x) => (isFunction(x) ? x.ops[k] : x));
+    cells.push(distributeOverListArms(ce, at, build) ?? build(at));
+  }
+  return ce._fn('List', cells);
 }
 
 /**
@@ -3486,6 +3549,46 @@ function evaluateWhich(
       // `False`/`Undefined`) are carried over AS WRITTEN: the held node stays
       // a faithful copy of the original conditional, so nothing is lost if the
       // undecided condition later resolves. Fixpoint-guarded with `isSame`.
+      //
+      // When the `Which` has a default clause (a literal `True` condition)
+      // and every arm up to and including it is a list of one length, the
+      // held `Which` is a list of `Which`s, one for each position
+      // (`distributeOverListArms`). The clauses after the default clause
+      // are never read, so they are dropped. Without a default clause the
+      // `Which` is held whole: when no condition holds its value is
+      // `Missing`, and a list of `Missing` cells is not that value.
+      if (isScalarGuard(evaluated)) {
+        let dflt = -1;
+        for (let k = i + 2; k < args.length - 1; k += 2)
+          if (sym(args[k]) === 'True') {
+            dflt = k;
+            break;
+          }
+        // A later guard that is a list of booleans (a mask) selects
+        // element-wise once the guards before it are `False`, and the
+        // distributed form would then select a whole list arm at each
+        // position: every reachable guard must be a scalar boolean.
+        if (
+          dflt >= 0 &&
+          args
+            .slice(i + 2, dflt)
+            .every((g, k) => k % 2 === 1 || isScalarGuard(g.canonical))
+        ) {
+          const clauses = [
+            ...args.slice(0, i),
+            evaluated,
+            ...args.slice(i + 1, dflt + 2),
+          ];
+          const armAt = clauses.filter((_, k) => k % 2 === 1);
+          const list = distributeOverListArms(options.engine, armAt, (arms) =>
+            options.engine._fn(
+              'Which',
+              clauses.map((x, k) => (k % 2 === 1 ? arms[(k - 1) / 2] : x))
+            )
+          );
+          if (list !== undefined) return list;
+        }
+      }
       return evaluated.isSame(args[i])
         ? undefined
         : options.engine._fn('Which', [

@@ -16,11 +16,12 @@
  * flush it to zero).
  *
  * The subset: function definitions (GLSL `float f(float x) {...}` and WGSL
- * `fn f(x: f32) -> f32 {...}`), `float`/`vec2`/`let`/`var` declarations,
- * assignments, `if`, `return`, the operators `?:` (GLSL only), `||`, `&&`,
+ * `fn f(x: f32) -> f32 {...}`), `float`/`vec2`/`let`/`var` declarations
+ * (with or without a WGSL type, and a `var`/GLSL declaration with no value),
+ * assignments, `if` with an optional `else`, `return`, the operators `?:` (GLSL only), `||`, `&&`,
  * `==`, `!=`, `<`, `<=`, `>`, `>=`, `+`, `-`, `*`, `/`, unary `-`, the members
  * `.x` and `.y`, and calls of the helpers and of `abs`, `max`, `min`,
- * `sqrt`, `log`, `exp`, `pow`, `floor`, `sin`, `cos`, `length`, GLSL
+ * `sqrt`, `log`, `exp`, `pow`, `floor`, `fract`, `sin`, `cos`, `length`, GLSL
  * `atan` (one or two arguments) and `vec2`, and WGSL `atan` (one
  * argument), `atan2`, `select` and `vec2f`. The NaN and infinity helpers
  * `_gpu_nan` and `_gpu_inf`, which build their value from a bit pattern,
@@ -61,7 +62,7 @@ type Node =
 type Stmt =
   | { k: 'decl'; name: string; e: Node }
   | { k: 'assign'; name: string; e: Node }
-  | { k: 'if'; c: Node; body: Stmt[] }
+  | { k: 'if'; c: Node; body: Stmt[]; orElse?: Stmt[] }
   | { k: 'return'; e: Node };
 
 interface Fn {
@@ -102,6 +103,7 @@ const COMMON_BUILTINS = new Set([
   'exp',
   'pow',
   'floor',
+  'fract',
   'sin',
   'cos',
   'atan',
@@ -196,7 +198,12 @@ class Parser {
       if (this.lang === 'wgsl' && this.peek() !== '{')
         this.fail('the body of an `if` must be a block');
       const body = this.peek() === '{' ? this.block() : [this.statement()];
-      return { k: 'if', c, body };
+      if (this.peek() !== 'else') return { k: 'if', c, body };
+      this.next();
+      if (this.lang === 'wgsl' && this.peek() !== '{' && this.peek() !== 'if')
+        this.fail('the body of an `else` must be a block');
+      const orElse = this.peek() === '{' ? this.block() : [this.statement()];
+      return { k: 'if', c, body, orElse };
     }
     if (s === 'return') {
       this.next();
@@ -210,6 +217,18 @@ class Parser {
       this.next();
       const name = this.next();
       this.mutable.set(name, s !== 'let');
+      // A WGSL declaration may name its type (`let a: f32 = …;`).
+      if (this.peek() === ':') {
+        this.next();
+        this.next();
+      }
+      // A variable declared with no value (`var a: f32;`, `float a;`) is
+      // assigned before it is read; it starts as NaN here.
+      if (this.peek() === ';') {
+        if (s === 'let') this.fail('a `let` must have a value');
+        this.next();
+        return { k: 'decl', name, e: { k: 'num', v: NaN } };
+      }
       this.expect('=');
       const e = this.expr();
       this.expect(';');
@@ -326,6 +345,7 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   exp: (x) => fr(Math.exp(num(x))),
   pow: (x, y) => fr(Math.pow(num(x), num(y))),
   floor: (x) => Math.floor(num(x)),
+  fract: (x) => fr(num(x) - Math.floor(num(x))),
   sin: (x) => fr(Math.sin(num(x))),
   cos: (x) => fr(Math.cos(num(x))),
   atan: (y, x) =>
@@ -366,7 +386,7 @@ export function shaderFunctions(
   // The NaN test on the bit pattern of a name is read as a call of
   // `_gpu_bits_isnan`, since the interpreter has no integer arithmetic.
   src = src.replace(
-    /\((?:floatBitsToUint|bitcast<u32>)\(([A-Za-z_]\w*)\) & 0x7FFFFFFFu\) (>=?) 0x7F800000u/g,
+    /\((?:floatBitsToUint|bitcast<u32>)\(([A-Za-z_]\w*(?:\.[xyz])?)\) & 0x7FFFFFFFu\) (>=?) 0x7F800000u/g,
     (_m, name: string, op: string) =>
       `${op === '>' ? '_gpu_bits_isnan' : '_gpu_bits_nonfinite'}(${name})`
   );
@@ -450,6 +470,9 @@ export function shaderFunctions(
       else if (s.k === 'return') return evaluate(s.e, env) as Value;
       else if (evaluate(s.c, env)) {
         const r = run(s.body, env);
+        if (r !== undefined) return r;
+      } else if (s.orElse !== undefined) {
+        const r = run(s.orElse, env);
         if (r !== undefined) return r;
       }
     }

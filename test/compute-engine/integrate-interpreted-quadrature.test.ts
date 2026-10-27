@@ -101,11 +101,17 @@ describe('Integrate(...).N() of an integrand that does not compile', () => {
 
   test('the quadrature of an interpreted integrand has a bounded cost', () => {
     // `sin(1/x)` does not converge: the panel budget stops the quadrature
-    // after 240 + 314 × 30 = 9 660 evaluations. Its error bound still beats
-    // the 1e4-sample Monte-Carlo estimate, so the quadrature result is kept.
+    // after 240 + 15 + 314 × 30 = 9 675 evaluations (the 15 are the common
+    // endpoints of the 16 starting panels, read by the test of a jump next to
+    // a panel endpoint), plus at most one sample near each end of a panel
+    // where the endpoint sample misses the parabola of the nodes
+    // (`hiddenEdgeError`): 30 ends of the starting panels and 2 × 628 ends of
+    // the new panels, 10 961 at most (9 792 measured). Its error bound still
+    // beats the 1e4-sample Monte-Carlo estimate, so the quadrature result is
+    // kept.
     // The value of ∫₀¹ sin(1/x) dx is 0.50406706190692837...
     const r = value(integrate(['SinInv', 'x'], 0, 1));
-    expect(calls).toBeLessThanOrEqual(9660);
+    expect(calls).toBeLessThanOrEqual(10961);
     expect(Math.abs(r.re - 0.5040670619069283)).toBeLessThanOrEqual(
       Math.max(r.error, 1e-4)
     );

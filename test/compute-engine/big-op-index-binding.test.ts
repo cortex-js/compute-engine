@@ -301,7 +301,7 @@ describe('rewriting a nested binder keeps its index bound', () => {
  * The three guards the dual review added to the binder-scope round.
  */
 describe('binder rewriting: the boundary cases', () => {
-  test('renaming the index does not touch the ORIGINAL scope', () => {
+  test('a substitution of the index does not touch the ORIGINAL scope', () => {
     const ce = new ComputeEngine();
     const original = ce.box([
       'Sum',
@@ -310,13 +310,18 @@ describe('binder rewriting: the boundary cases', () => {
     ]);
     // Reusing the receiver's scope is what preserves a nested chain, but it is
     // only safe while the rebuild declares nothing new into it. `.subs()`
-    // rewrites the binding site like any other operand, so this IS a rename —
-    // and it must not leave a stray `k` in the scope of an expression the
-    // caller still holds.
-    const renamed = original.subs({ i: ce.symbol('k') });
+    // replaces only the free occurrences of a name, and the index `i` is
+    // bound by the `Sum`, so the substitution is not a rename: the binding
+    // site and the body keep `i`, and no stray `k` is declared in the scope of
+    // an expression the caller still holds.
+    const result = original.subs({ i: ce.symbol('k') });
+    expect(result.json).toEqual([
+      'Sum',
+      ['Multiply', 2, 'i'],
+      ['Limits', 'i', 1, 3],
+    ]);
     expect([...(original.localScope?.bindings.keys() ?? [])]).toEqual(['i']);
-    expect(renamed.localScope).not.toBe(original.localScope);
-    expect(renamed.evaluate().re).toEqual(12);
+    expect(result.evaluate().re).toEqual(12);
     expect(original.evaluate().re).toEqual(12);
   });
 

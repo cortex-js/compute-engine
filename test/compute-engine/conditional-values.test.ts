@@ -96,10 +96,57 @@ describe('CONDITIONAL VALUES — logic operators are excluded', () => {
 
 describe('CONDITIONAL VALUES — Which distribution (T6/T7)', () => {
   it('T6: distributes a scalar over Which branches, conditions untouched', () => {
-    // Which(x>0, 1, x<0, -1) + 2 → Which(x>0, 3, x<0, 1)
+    // Which(x>0, 1, x<0, -1) + 2 → Which(x>0, 3, x<0, 1, True, NaN): the
+    // `Which` has no default clause, so `Missing + 2` (`NaN`) is the last
+    // branch.
     expect(ce.box(['Add', whichX, 2]).evaluate().toString()).toBe(
-      'Which(0 < x, 3, x < 0, 1)'
+      'Which(0 < x, 3, x < 0, 1, "True", NaN)'
     );
+  });
+
+  // With no condition true, the threaded form has the value of the
+  // application evaluated after the conditions are decided: an absent
+  // operand gives `NaN` (`docs/ERROR-MODEL.md`), not `Missing`.
+  it('a Which with no default clause: both orders agree', () => {
+    const noDefault = ['Which', ['Greater', 'x', 1], 0];
+    for (const json of [
+      ['Add', 3, noDefault],
+      ['Add', ['List', 1, 2], noDefault],
+      ['Add', 3, ['Which', ['Greater', 'x', 1], 0, 'True', 1]],
+    ]) {
+      const e = ce.box(json as never);
+      const threaded = e.evaluate();
+      for (const x of [0, 2])
+        expect(threaded.subs({ x }).evaluate().toString()).toBe(
+          e.subs({ x }).evaluate().toString()
+        );
+    }
+    expect(ce.box(['Add', 3, noDefault]).evaluate().toString()).toBe(
+      'Which(1 < x, 3, "True", NaN)'
+    );
+    expect(
+      ce
+        .box(['Add', ['List', 1, 2], noDefault])
+        .evaluate()
+        .toString()
+    ).toBe('[Which(1 < x, 1, "True", NaN),Which(1 < x, 2, "True", NaN)]');
+    // A default clause: no extra branch.
+    expect(
+      ce
+        .box(['Add', 3, ['Which', ['Greater', 'x', 1], 0, 'True', 1]])
+        .evaluate()
+        .toString()
+    ).toBe('Which(1 < x, 3, "True", 4)');
+  });
+
+  it('a True conjunct, a repeated conjunct and a repeated branch are dropped', () => {
+    const pw = ['Which', ['Greater', 'x', 1], 0, 'True', 1];
+    expect(
+      ce
+        .box(['Sum', ['Multiply', 'k', pw], ['Limits', 'k', 1, 3]])
+        .evaluate()
+        .toString()
+    ).toBe('Which(1 < x, 0, "True", 6)');
   });
 
   it('T7: threads a small two-Which cross-product (lexicographic)', () => {
@@ -144,6 +191,224 @@ describe('CONDITIONAL VALUES — Which distribution (T6/T7)', () => {
     ];
     const r = ce.box(['Add', big1, big2]).evaluate();
     expect(r.operator).toBe('Add');
+  });
+
+  it('T7 cost gate: the generated default branches are limited too', () => {
+    // Twelve `Which` of one clause and no default: the written count is 1,
+    // but each operand also has the generated `(True, Missing)` branch, so
+    // distributing would generate 2^12 = 4096 combinations. It stays inert.
+    const terms = Array.from({ length: 12 }, (_, k) => [
+      'Which',
+      ['Greater', `x_${k}`, 0],
+      k + 1,
+    ]);
+    const r = ce.box(['Add', ...terms]).evaluate();
+    expect(r.operator).toBe('Add');
+    expect(r.nops).toBe(12);
+  });
+
+  it('T7 cost gate: four Which of two clauses and no default distribute', () => {
+    // Written count 2^4 = 16; 3^4 = 81 combinations with the generated
+    // default branches, at the limit.
+    const terms = Array.from({ length: 4 }, (_, k) => [
+      'Which',
+      ['Greater', `y_${k}`, 1],
+      1,
+      ['Greater', `y_${k}`, 0],
+      2,
+    ]);
+    const r = ce.box(['Add', ...terms]).evaluate();
+    expect(r.operator).toBe('Which');
+  });
+});
+
+// ROADMAP CE-515 (Tycho row 452): a selection whose arms are lists of one
+// length evaluates to a list of selections, one for each position, so that a
+// list combined with a piecewise is a `List`.
+describe('CONDITIONAL VALUES — a selection of lists is a list of selections', () => {
+  const pw = ['Which', ['Greater', 'x', 1], 0, 'True', 1];
+  const at = (e: ReturnType<typeof ce.box>, x: number) =>
+    e.subs({ x: ce.number(x) }).N().re;
+  // The value is a `List`, equal element by element to `body(k)` for each
+  // element `k` of the list, at one point in each branch of the piecewise.
+  const expectListOfPieces = (
+    value: ReturnType<typeof ce.box>,
+    body: (l: unknown) => unknown,
+    elements: number[]
+  ) => {
+    expect(value.operator).toBe('List');
+    for (const x of [0.5, 2])
+      expect(value.ops!.map((op) => at(op, x))).toEqual(
+        elements.map((k) => at(ce.box(body(k) as never), x))
+      );
+  };
+
+  it('a list plus a piecewise (box route)', () => {
+    const body = (l: unknown) => ['Add', l, pw];
+    const value = ce.box(body(['List', 1, 2]) as never).evaluate();
+    expect(value.toString()).toBe(
+      '[Which(1 < x, 1, "True", 2),Which(1 < x, 2, "True", 3)]'
+    );
+    expectListOfPieces(value, body, [1, 2]);
+  });
+
+  it('a range times a piecewise (parse route)', () => {
+    const value = ce
+      .parse(
+        '[0...3] \\cdot \\begin{cases}0 & x>1\\\\ 1 & \\text{otherwise}\\end{cases}'
+      )
+      .evaluate();
+    expectListOfPieces(value, (l) => ['Multiply', l, pw], [0, 1, 2, 3]);
+  });
+
+  it('Abs, a bounded Sum and .N() give a list too', () => {
+    const abs = (l: unknown) => ['Abs', ['Subtract', l, ['Multiply', 5, pw]]];
+    expectListOfPieces(
+      ce.box(abs(['List', 2, 3]) as never).evaluate(),
+      abs,
+      [2, 3]
+    );
+    const sum = (l: unknown) => [
+      'Sum',
+      ['Multiply', 'k', l, pw],
+      ['Limits', 'k', 1, 3],
+    ];
+    expectListOfPieces(
+      ce.box(sum(['List', 2, 3]) as never).evaluate(),
+      sum,
+      [2, 3]
+    );
+    const mul = (l: unknown) => ['Multiply', l, pw];
+    expectListOfPieces(
+      ce.box(mul(['Range', 0, 19]) as never).N(),
+      mul,
+      Array.from({ length: 20 }, (_, k) => k)
+    );
+  });
+
+  it('a Which or an If with list arms of one length', () => {
+    expect(
+      ce
+        .box([
+          'Which',
+          ['Greater', 'x', 1],
+          ['List', 1, 2],
+          'True',
+          ['List', 3, 4],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe('[Which(1 < x, 1, "True", 3),Which(1 < x, 2, "True", 4)]');
+    expect(
+      ce
+        .box(['If', ['Greater', 'x', 1], ['List', 1, 2], ['List', 3, 4]])
+        .evaluate()
+        .toString()
+    ).toBe('[If(1 < x, 1, 3),If(1 < x, 2, 4)]');
+    // Matrix arms give a matrix of selections.
+    expect(
+      ce
+        .box([
+          'Which',
+          ['Greater', 'x', 1],
+          ['List', ['List', 1, 2], ['List', 3, 4]],
+          'True',
+          ['List', ['List', 5, 6], ['List', 7, 8]],
+        ])
+        .evaluate()
+        .toString()
+    ).toBe(
+      '[[Which(1 < x, 1, "True", 5),Which(1 < x, 2, "True", 6)],[Which(1 < x, 3, "True", 7),Which(1 < x, 4, "True", 8)]]'
+    );
+  });
+
+  it('arms of different lengths, or no default clause, stay a selection', () => {
+    expect(
+      ce
+        .box([
+          'Which',
+          ['Greater', 'x', 1],
+          ['List', 1, 2],
+          'True',
+          ['List', 3, 4, 5],
+        ])
+        .evaluate().operator
+    ).toBe('Which');
+    // With no default clause the value is `Missing` when no condition holds,
+    // which a list of `Missing` cells is not.
+    expect(
+      ce.box(['Which', ['Greater', 'x', 1], ['List', 1, 2]]).evaluate().operator
+    ).toBe('Which');
+    // A piecewise of scalars is unchanged.
+    expect(ce.box(['Add', pw, 2]).evaluate().toString()).toBe(
+      'Which(1 < x, 2, "True", 3)'
+    );
+  });
+
+  // A guard that can be a list of booleans (a mask) selects element-wise,
+  // which the list of selections does not do: the selection stays whole.
+  it('a guard that can be a mask stays a selection', () => {
+    const ce = new ComputeEngine();
+    ce.declare('C', 'boolean');
+    ce.declare('M', 'list<boolean>');
+    // A boolean guard distributes.
+    expect(
+      ce
+        .box(['Which', 'C', ['List', 1, 2], 'True', ['List', 5, 6]])
+        .evaluate()
+        .toString()
+    ).toBe('[Which(C, 1, "True", 5),Which(C, 2, "True", 6)]');
+    // A later guard is a mask: with `C = False` the value is `[3, 6]`.
+    const later = ce.box([
+      'Which',
+      'C',
+      ['List', 1, 2],
+      ['List', 'True', 'False'],
+      ['List', 3, 4],
+      'True',
+      ['List', 5, 6],
+    ]);
+    const held = later.evaluate();
+    expect(held.operator).toBe('Which');
+    // A collection-typed guard with no value, and a guard of unknown type.
+    for (const g of ['M', 'U'])
+      expect(
+        ce.box(['If', g, ['List', 1, 2], ['List', 3, 4]]).evaluate().operator
+      ).toBe('If');
+    ce.assign('C', false);
+    expect(held.evaluate().toString()).toBe('[3,6]');
+    expect(later.evaluate().toString()).toBe('[3,6]');
+  });
+});
+
+describe('CONDITIONAL VALUES — the cost limit of the Which distribution', () => {
+  // Two `Which`s of 4 clauses with no default clause have 16 combinations
+  // of written branches, which the limit admits. The `(True, Missing)`
+  // branch added for the missing default clause is not counted.
+  it('two Whiches of 4 clauses with no default clause distribute', () => {
+    const w = (s: string) => [
+      'Which',
+      ['Greater', s, 1],
+      1,
+      ['Greater', s, 2],
+      2,
+      ['Greater', s, 3],
+      3,
+      ['Greater', s, 4],
+      4,
+    ];
+    const e = ce.box(['Add', w('x'), w('y')]);
+    const threaded = e.evaluate();
+    expect(threaded.operator).toBe('Which');
+    for (const [x, y] of [
+      [0, 0],
+      [2.5, 0],
+      [1.5, 3.5],
+      [5, 5],
+    ])
+      expect(threaded.subs({ x, y }).evaluate().toString()).toBe(
+        e.subs({ x, y }).evaluate().toString()
+      );
   });
 });
 

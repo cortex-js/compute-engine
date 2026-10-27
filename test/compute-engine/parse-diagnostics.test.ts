@@ -561,12 +561,14 @@ describe('bound-variable post-filter + assert (follow-up item 2)', () => {
     expect(undeclared).not.toContain('x');
   });
 
-  test('the post-check is DETECT-ONLY: a bound-only source reference is retained, and console.assert still fires', () => {
-    // `x, y \in \mathbb{R}_{>0}`: the restricted-set-builder canonicalizes to a
-    // set-builder that reuses the name `y`, so `y` appears only bound in the
-    // canonical result even though it is a genuinely-free *source* reference.
-    // The post-check must NOT drop it (dropping would hide exactly what the
-    // consumer needs — C-1) but must still `console.assert` to flag the case.
+  test('a free source reference inside a membership tuple is reported free, with no bound-only assert', () => {
+    // `x, y \in \mathbb{R}_{>0}`: the free-variable walk read the `y` of the
+    // tuple `(x, y) ∈ S` as bound, because an `Element` operand bound its
+    // symbol in every node. Since 2026-10-27 only a node that binds (a
+    // quantifier, a set-builder, an operator with binding sites) binds the
+    // symbol of an `Element` operand (`bindsClauseSymbols()`,
+    // `binding-sites.ts`), so `y` is free in the canonical result too, and the
+    // post-check has no bound-only reference to flag.
     const realAssert = console.assert;
     const asserts: string[] = [];
     console.assert = ((cond: unknown, ...args: unknown[]): void => {
@@ -584,8 +586,8 @@ describe('bound-variable post-filter + assert (follow-up item 2)', () => {
       'undeclared-symbol'
     ).map((d) => d.detail?.name);
     expect(undeclared).toContain('x'); // free → kept
-    expect(undeclared).toContain('y'); // bound-only → RETAINED (detect-only)
-    expect(asserts.some((m) => m.includes('bound-only "y"'))).toBe(true);
+    expect(undeclared).toContain('y'); // free → kept
+    expect(asserts.some((m) => m.includes('bound-only "y"'))).toBe(false);
   });
 
   test('wired binders never trip the post-filter assert', () => {

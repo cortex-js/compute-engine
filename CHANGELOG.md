@@ -61,6 +61,27 @@
   - `fract([-1e-20, -1e-20])` was `[1, 1]`, while the true fractional part is
     below 1. The subtraction `x − floor(x)` is now rounded outward; an exact
     case stays exact.
+  - The other kernels with a pole now also give the half-line for a pole at
+    an endpoint: `coth([0, 1])` is `[coth(1), +∞]` (was `singular` with no
+    value), and the same for `csch`, `acoth`, `acsch` and `asech` at 0 and
+    for `gammaln` at a non-positive integer (`gammaln([0, 1])` is
+    `[0, +∞]`). A pole inside the interval, or a point at the pole, is still
+    `singular`. `asech([-1, 0])` is `empty`.
+  - `mod` with a divisor interval: when the quotient has one integer part
+    over the whole box, the answer takes no extra outward step:
+    `mod([1, 1], [2, 4])` is `[1, 1]` (was one ulp wider on each side).
+  - `Root(x, n)` with a symbolic degree `n`, compiled to `interval-js`,
+    reads the degree at run time: an integer degree keeps its exact value.
+    With `n = 6`, `x = [−64, −1]` gives `empty` (was `[−2, 2]`); with
+    `n = 3`, `[−4, −1]` (was `[−4, 4]`); a negative integer degree is the
+    reciprocal root (`n = −3`, `x = −8` gives `−1/2`). Another degree takes
+    the power `x^(1/n)` as before.
+- **`Degrees` refuses a complex number.** An angle is real, and the
+  signature of `Degrees` is `(real) -> real`. `Degrees(2 + 3i)` was
+  `(1/90 + i/60)·π`; it is now an `incompatible-type` error, as
+  `Degrees((2 + 3i) ± 0.1)` already was. A symbol declared `complex` that
+  holds a real number still converts. `NaN` and the infinities are not
+  changed.
 - **The `interval-js` runner checks the value of an input whose type can hold
   an enclosure.** Before, this target declined every expression with a value
   kind. Now, for a free symbol whose type is `enclosure` or a union with an
@@ -81,6 +102,18 @@
   fallback.
 
 ### Features
+
+- **`Smoothstep(e0, e1, x)` is defined in the engine.** The shader targets
+  already lowered it to the GLSL and WGSL built-in `smoothstep`, but the
+  library had no definition: it stayed unevaluated, and the `javascript`
+  target did not compile it. It now evaluates to `t² (3 − 2t)` with
+  `t = Clamp((x − e0) / (e1 − e0), 0, 1)`, exactly for exact operands
+  (`Smoothstep(0, 1, 1/3)` is `7/27`), and broadcasts over lists. The
+  `javascript` and `python` targets compile it. When `e0 = e1` the result is
+  the step function (0 when `x < e0`, else 1), and when `e0 > e1` the formula
+  applies as written. The shader targets now write the formula out instead
+  of calling the built-in `smoothstep`, which has no defined result when
+  `e0 ≥ e1`, so every target gives the same value.
 
 - **`Enclosure`, an interval value with interval arithmetic** (ROADMAP CE-507
   phase 3, [#416](https://github.com/cortex-js/compute-engine/issues/416)).
@@ -162,15 +195,82 @@
 
 ### Performance
 
+- **The shader targets call the built-in `sin`, `cos`, `sign`, `max` and
+  `min`, and write `clamp` as `min(max(x, lo), hi)`, for an operand that is
+  finite for certain.** The NaN-safe helpers that replaced them (`_gpu_sin`
+  and the others) cost a bit test and a selection per call, about 10% of the
+  frame time of a Tycho document on WebGPU, and on a finite operand they give
+  the same bits as the built-in (measured on an Apple M5 Max over WebGPU,
+  39,200 inputs). An operand is finite for certain when its static type is a
+  finite real, each symbol it reads has a declared type (a symbol declared
+  `real` holds a finite value), it reads no name that the caller maps with
+  `vars`, `functions` or `operators`, and it cannot overflow in f32: it uses
+  only heads whose result does not grow past their operands (`+`, `−`, a
+  product or quotient by a literal, `sin`, `floor`, `abs`, …). `sin(x)` and
+  `cos(T + 1.9k)` with declared real symbols are now the built-ins;
+  `sin(u)` with `u: number`, `sin(x/y)`, `sin(√x)`, `sin(e^x)`, `sin(xy)`
+  and the parameter of a function whose type is inferred keep the helper.
+
 - **The unit of a quantity is decoded once for each boxed value.** The
   arithmetic and the comparisons of quantities read the unit expression, its
   dimension and its scale from a cache on the boxed unit, and do not walk the
   unit again at each operation. The cache is public as `decodedPayload()`: the
   hooks of a value kind that you declare can decode the operands of a kind value
   once for each boxed expression in the same way.
+- **The canonicalization of a binder keeps the cached types** (ROADMAP CE-535).
+  `D`, `Sum`, `Integrate` and the other binders declare their bound variable
+  in a scope created for them. That declaration no longer invalidates the
+  cached types and signs of every expression, because no name was read through
+  the new scope before. A row of a Tycho document with `D(PointY(S(u)), u)`,
+  where `S` is a user function with a large body, typed `S(u)` again after
+  each `D`; the replay of the canonical rebinds of the document
+  `2ki2hjsouf` went from 848 ms to 664 ms (median of 5).
 
 ### Resolved Issues
 
+- **A sign cached during a call of a function literal is not kept after the
+  call.** With `f := x ↦ …(x + 1)…`, a sign of the body node `x + 1` computed
+  during `f(3)` (positive) was still served after the call returned, where `x`
+  has no value. The removal of the call scope that holds the parameter values
+  now invalidates the cached types, signs and values that are keyed on the
+  engine's cache version.
+- **A `Block` that declares a name and calls a function that reads the same
+  name no longer prints "error canonicalizing `Block`: Cannot read
+  properties of undefined (reading 'parent')"**, and the function's derived
+  signature is correct (ROADMAP CE-542). Example: `b` is declared `real`,
+  `f` is declared `(real) -> unknown` and assigned `p ↦ sin(b·p)`, and
+  `Block(Declare(b), Assign(b, 1), f(0.5))` is boxed. The call reads the
+  signature of `f`, which is derived by boxing `f`'s body again in the scope
+  where `f` is defined. That boxing read the names of the block being
+  canonicalized, so the free `b` of `f` was taken for the block's local: the
+  signature of `f` became `(real) -> number` instead of `(real) -> real`, and
+  when the block was boxed in a scope from `ce.createScope()` the name
+  resolution walked past the root scope and threw. The value was not
+  affected: `f` reads the `b` of its own scope. A signature is now derived
+  with none of the names of the construct being canonicalized, and those
+  names shadow only inside the scopes of that construct. Found on the Tycho
+  document `g(x) with b = 1`, where `g` calls `f(x) = sin(b·x)`.
+
+- **On Apple GPUs, the complex shader helpers gave a finite value for a NaN
+  part.** The built-ins `sin` and `cos` of a NaN give 0 on WebGL2 over ANGLE
+  Metal and on WebGPU over Metal, so `exp(1 + NaN·i)` was `(0, 0)` on both
+  shader targets, and so were `sin`, `cos`, `sinh` and `cosh` of a complex
+  value with a NaN part (measured on an Apple M5 Max). The helpers
+  (`_gpu_cexp`, `_gpu_csin`, `_gpu_ccos`, `_gpu_csinh`, `_gpu_ccosh`, and also
+  `_gpu_csqrt` and `_gpu_cln`) now test each part first and give NaN, as the
+  interpreter and the `javascript` target do.
+
+- **A function body over a value kind keeps `x/x` in two more cases**
+  (ROADMAP CE-507.3 and CE-507.4). A parameter that the declared signature
+  types with a value kind is typed so in the body, so that `x/x` is not
+  folded to `1` before a kind value arrives. This did not happen with an
+  overloaded signature: with
+  `g: ((residue) -> residue) & ((integer) -> integer)` and the body
+  `x ↦ x/x`, `g(ResidueClass(2, 5))` was `1` and is now
+  `ResidueClass(1, 5)` (the parameter is typed with the union of its types
+  in the arms). It also did not happen for a recursive function literal
+  assigned to a symbol declared with a function type: the literal was boxed
+  again to bind its call to itself, and that step dropped the type.
 - **`N()` of an integral whose integrand restricts a list gives one integral
   per element** (Tycho row 459). With `E = [0.1, 0.5]`,
   `∫_0^1 y·When(∫_{−1}^{1} 1/ElementMax(E, |x|) dx, 0 ≤ y ≤ 5) dy` gave `NaN`,
@@ -179,6 +279,78 @@
   `Which` with list values, alone or in a product, is distributed over the
   elements of the list before the integration. A condition that is a list of
   booleans is a mask, as before.
+
+- **A nested numeric integral of piecewise functions converges.** The body
+  `∫_0^1 y·∫_{−10}^{10} n(x, y, ε) dx dy` of Tycho's document
+  `neyret/2agcgxq87y`, where `n` has a jump and kinks, took about 25 s under
+  `N()` and stopped at a relative uncertainty of 3e-4, which did not always
+  contain the true error. It now takes about 0.3 s and is correct to 1e-9,
+  for six values of ε. Two causes: a Gauss–Kronrod panel did not see a jump or
+  a kink between its last node and its end, and reported an error near zero;
+  and the error of an inner integral was not added to the error of the outer
+  one. A single integral now makes 15 more evaluations of its integrand.
+
+- **The exact integral of a piecewise with a `Nothing` branch is no longer
+  wrong.** `∫_0^1 Which(y < 1/2, y, True, Nothing) dy` gave `5/8`, because the
+  antiderivative of `Nothing` was taken as that of a constant. It now stays
+  unevaluated, and `N()` gives `NaN`, as for a `Which` with no default
+  clause. `N()` of `∫_0^1 Nothing dx` is `NaN`, as for `Missing`.
+
+- **A list combined with a piecewise evaluates to a list** (Tycho row 452).
+  `[0, 1, 2, 3]·Which(x > 1, 0, True, 1)` with `x` free evaluated to
+  `Which(1 < x, [0, 0, 0, 0], True, [0, 1, 2, 3])`, which is not a `List`. It
+  now evaluates to `[Which(1 < x, 0, True, 0), Which(1 < x, 0, True, 1), …]`,
+  the same values at each `x`. The same applies under `Add`, `Abs` and a
+  bounded `Sum`, and to a `Which` or an `If` whose values are lists of one
+  length, when the condition is undecided. A `Which` with no default clause is
+  not changed. When such a `Which` is combined with an operand, the result
+  now has a last branch for "no condition holds": `3 + Which(x > 1, 0)` is
+  `Which(1 < x, 3, True, NaN)`, the value that substituting `x` first gives.
+
+- **`subs()` replaces only the free occurrences of a name** (Tycho row 464).
+  `Comprehension(j + 1, Element(j, Range(0, 2))).subs({j: [4, 4, 5]})`
+  replaced the index and its binding site, and the index of a `Sum`, the
+  parameter of a `Function` and a `Block` local became `Error` nodes. A
+  binder now keeps its bound variables: `j + Sum(j, Limits(j, 1, 3))` with
+  `{j: 10}` gives `10 + Sum(j, Limits(j, 1, 3))`. The occurrences replaced are
+  exactly those that `freeVariables` reports, so the bounds of a `Limits`
+  clause, which read the enclosing binding, are still replaced. A
+  substitution can still capture a name: `Sum(j + k, Limits(k, 1, 3))` with
+  `{j: k}` gives `Sum(2k, …)`; rename the index first to avoid this.
+
+- **On `wgsl` and `glsl`, a call that several user functions repeat with the
+  same arguments is computed once per pixel** (Tycho row 467). Each user
+  function was emitted as its own shader function, and the
+  common-subexpression pass worked inside one function only. The Metal
+  compiler under WebGPU does not merge identical calls across functions, so
+  Tycho's `voronoi-diagram` drew about 2.2 times slower on WebGPU than on
+  WebGL. The pure, non-recursive user functions of a shader are now
+  substituted at the root, and a sum with literal bounds that calls one is
+  written out, so the existing pass computes each shared call once. On that
+  row, `sqrt` is computed 16 times per pixel (was 560) and `sin` 32 times (was
+  544). The shader text is about 50% larger. An expression that draws a random
+  number, or a sum that stays a loop, is compiled as before.
+
+- **A recursive function whose step passes its own call to `Max` or `Min` is
+  no longer typed `any`** (Tycho row 468, a regression in 0.170.0). With
+  `S(a, b) = Max(a, b)` and `R(i) = Which(i = 0, 0, True, R(i − 1) + S(1,
+  R(i − 1)))`, `R(3)` was typed `any`. The type of a call whose body is `Max`
+  or `Min` over numbers and tuples is now `number` on its tuple arm, since
+  `Max` and `Min` read the coordinates of a tuple (`Max(1, (2, 3))` is 3), so
+  `R(3)` gets the same type as `R` without the call to `S`.
+
+- **Compiling a `Sum` or a `Product` whose bounds are above 2^53 no longer
+  hangs.** `compile(\sum_{k=2^{53}}^{2^{53}+2} \sin(x+k))` never returned on
+  `javascript`, `glsl`, `wgsl` and `interval-js`, because at 2^53 the index
+  `k + 1` is `k` again. The compile now declines with `out-of-range`, the
+  answer the interpreter gives for the same bounds.
+
+- **Reading a chain of lazy `Map`/`Zip` collections through index lists is
+  linear in the depth of the chain** (Tycho row 453). A read such as `C[1]` of
+  `Map(W ↦ max(W[1], W[2]), Zip(A[I], Map(…)))`, nested 4 deep over 20
+  elements, computed 282 560 inner elements (about 17 s). It now computes
+  160. A pure lazy collection keeps each element that a read by index
+  computes, until a symbol it depends on is assigned again.
 
 - **On `interval-js`, `run()` throws a `ReferenceError` instead of answering
   `entire`.** A `ReferenceError` means that the compiled code names

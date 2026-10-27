@@ -1314,6 +1314,9 @@ function compilePythonSumProductClauses(
       throw new Error(
         `Could not compile \`${kind}\`: an unbounded range is not supported`
       );
+    // The interpreter answers `out-of-range` for a bound above 2^53 − 1, so
+    // the compile declines too, although a Python `range` could count there.
+    BaseCompiler.assertSafeBigOpBounds(kind, [lowerExpr, upperExpr], idxTarget);
 
     const lowerCode = compilePythonBound(lowerExpr, idxTarget, true);
     const upperCode = compilePythonUpperBound(upperExpr, idxTarget);

@@ -275,13 +275,13 @@ describe('finite Sum/Product still compiles and runs', () => {
         '_tv1 += (10); return _tv1; })()'
     );
     expect(result.code).not.toMatch(/while/);
-    expect(result.code).not.toMatch(/Number\.isFinite/);
+    expect(result.code).not.toMatch(/Number\.isSafeInteger/);
   });
 
   it('a large constant-bounds sum loops with NO added guard', () => {
     const result = compile(ce.parse('\\sum_{i=1}^{200} i'));
     expect(result.success).toBe(true);
-    expect(result.code).not.toMatch(/Number\.isFinite/);
+    expect(result.code).not.toMatch(/Number\.isSafeInteger/);
     expect(result.run!({})).toBe(20100);
   });
 
@@ -314,7 +314,7 @@ describe('a SYMBOLIC bound is guarded at run time, not at compile time', () => {
 
   it('emits the entry guard for a symbolic bound', () => {
     expect(symbolicUpper().code).toMatch(
-      /if \(!Number\.isFinite\(_upper\)\) return NaN;/
+      /if \(!Number\.isSafeInteger\(_upper\)\) return NaN;/
     );
   });
 

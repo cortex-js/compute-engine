@@ -340,9 +340,38 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
   });
 
   test.each(['glsl', 'wgsl'] as const)(
+    'the %s target substitutes the functions of a sum with literal bounds',
+    (to) => {
+      // On a shader target, the pure user functions of `B` are substituted
+      // at the root and its 40 terms are written out
+      // (`compilation/gpu-shared-calls.ts`), so the shared `m(t)` is one
+      // temporary of the root body: one `sqrt`, and no shader function.
+      const r = compile(ce.box(['B', 'x', 'k']), { to, fallback: false });
+      expect(r.success).toBe(true);
+      const source = (r.preamble ?? '') + r.code;
+      expect(source).not.toMatch(/_fn_\w+\(/);
+      expect(source.match(/sqrt\(/g)).toHaveLength(1);
+      expect(source.match(/acos\(/g)).toHaveLength(40);
+    }
+  );
+
+  test.each(['glsl', 'wgsl'] as const)(
     'the %s target takes the prefix as an extra typed parameter',
     (to) => {
-      const r = compile(ce.box(['B', 'x', 'k']), { to, fallback: false });
+      // A sum whose upper bound is a symbol stays a loop. The shader target
+      // then keeps the user functions, and the loop calls the variant of `S`
+      // that takes the hoisted `m(t)` as a parameter.
+      if (!ce.lookupDefinition('Bn')) ce.declare('Bn', 'function');
+      ce.assign(
+        'Bn',
+        ce.expr([
+          'Function',
+          ['Sum', TERM, ['Limits', 'i', 1, 'n']],
+          ['Typed', 't', 'real'],
+          ['Typed', 'k', 'real'],
+        ] as any)
+      );
+      const r = compile(ce.box(['Bn', 'x', 'k']), { to, fallback: false });
       expect(r.success).toBe(true);
       const source = (r.preamble ?? '') + r.code;
       const lines = source.split('\n');
@@ -357,12 +386,12 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
           ? /^float _fn_S_inv0\(float r, float t, float \w+\) \{/
           : /^fn _fn_S_inv0\(r: f32, t: f32, \w+: f32\) -> f32 \{/
       );
-      // `_fn_B` binds m(t) once and calls the variant forty times; the
+      // `_fn_Bn` binds m(t) once and calls the variant in its loop; the
       // ordinary `_fn_S`, which nothing references, is not emitted.
-      const bStart = lines.findIndex((l) => /^(float|fn) _fn_B\(/.test(l));
+      const bStart = lines.findIndex((l) => /^(float|fn) _fn_Bn\(/.test(l));
       const bBody = lines.slice(bStart).join('\n');
       expect(bBody.match(/_fn_m\(/g)).toHaveLength(1);
-      expect(bBody.match(/_fn_S_inv0\(/g)).toHaveLength(40);
+      expect(bBody.match(/_fn_S_inv0\(/g)).toHaveLength(1);
       expect(source).not.toMatch(/^(float|fn) _fn_S\(/m);
       // The statement structure the shader validity audit checks.
       expect(source).not.toContain(';;');

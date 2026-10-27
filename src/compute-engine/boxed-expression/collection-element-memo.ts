@@ -150,6 +150,14 @@ interface ElementMemoCache {
    * by a recording walk that was abandoned or overflowed the cap. */
   complete: boolean;
   elements: Expression[];
+  /** Elements computed one at a time by `at()` reads of a PURE instance,
+   * keyed by their 1-based position, for the positions that `elements`
+   * does not cover (`elementMemoComputeCell`). A view that reads its source
+   * by position (`At(xs, I)`, `Zip(xs, …)`) reads each element of the
+   * source through `at()`, and a chain of such views over one another read
+   * each inner element again for every outer element: the cost grew by a
+   * factor of about 40 for each level of the chain (CE-516). */
+  cells?: Map<number, Expression>;
   /** The mutable objects whose FIELDS the walk read, with their versions at
    * read time (`object-deps.ts`). A store bumps no engine version and moves no
    * symbol dependency, so an element computed from `p.age` would otherwise be
@@ -939,6 +947,20 @@ function memoDepsStillValidUnderChain(
 export function validElementMemo(
   expr: Expression
 ): { elements: ReadonlyArray<Expression>; complete: boolean } | undefined {
+  const entry = validEntryOf(expr);
+  if (entry === undefined) return undefined;
+  // Serving the entry performs no field reads, so an enclosing cache-backed
+  // computation would commit dependency-free and go on serving these elements
+  // after a store. Hand the (just validated) stamps outward.
+  mergeObjectDeps(entry.objectDeps);
+  return entry;
+}
+
+/** The still-valid cache entry for this instance, or `undefined`. Unlike
+ * `validElementMemo`, this does not hand the entry's object dependencies to
+ * the enclosing collectors: the caller does that only when it serves an
+ * element of the entry. */
+function validEntryOf(expr: Expression): ElementMemoCache | undefined {
   const ce = expr.engine;
   // Inside a transient precision window (`_withTransientPrecision`, the
   // window of a `N(x, p)` call), the elements that a read would compute have
@@ -971,10 +993,6 @@ export function validElementMemo(
     if (CACHE_STATS) recordCache('elementMemo', 'missDependency');
     return undefined;
   }
-  // Serving the entry performs no field reads, so an enclosing cache-backed
-  // computation would commit dependency-free and go on serving these elements
-  // after a store. Hand the (just validated) stamps outward.
-  mergeObjectDeps(entry.objectDeps);
   if (CACHE_STATS) recordCache('elementMemo', 'hit');
   return entry;
 }
@@ -1329,8 +1347,94 @@ export function elementMemoAt(
   index: number
 ): Expression | undefined {
   if (!Number.isInteger(index) || index < 1) return undefined;
-  const cached = validElementMemo(expr);
+  const cached = validEntryOf(expr);
   if (!cached) return undefined;
-  if (cached.elements.length >= index) return cached.elements[index - 1];
-  return undefined;
+  const value =
+    cached.elements.length >= index
+      ? cached.elements[index - 1]
+      : cached.cells?.get(index);
+  if (value === undefined) return undefined;
+  mergeObjectDeps(cached.objectDeps);
+  return value;
+}
+
+/**
+ * Compute `at(index)` of an instance with `compute`, and keep the element
+ * in the instance's memo so that the next `at(index)` is served by
+ * `elementMemoAt` until a dependency of the instance changes. The memo is
+ * validated by the same dependencies as a recorded walk (the free symbols
+ * of the instance and, through their values, what those depend on), so a
+ * write to a symbol that the element depends on (`ce.assign`) makes the
+ * next read compute the element again. The declarations of the parameters
+ * of a call do not change these dependencies, so a read made while a
+ * callback runs can be served too.
+ *
+ * Only ONE element is computed: a first `at(n)` is not made into a fill of
+ * the first `n` elements.
+ *
+ * The element is not kept when:
+ * - the instance is impure: a cell of an impure instance would be replaced
+ *   by a later complete walk that draws again, and two reads of the same
+ *   position would then differ (the rule for partial prefixes in
+ *   `commitRecordedWalk`);
+ * - the read is in a transient precision window (`validElementMemo`);
+ * - the element is, or holds, a mutable object (the rule of
+ *   `commitRecordedWalk`);
+ * - a read of a sequence term was stopped, or a walk missed elements, while
+ *   the element was computed;
+ * - the instance already holds `ELEMENT_MEMO_CAP` cells, so that the cells
+ *   of an infinite collection read at many positions stay bounded.
+ */
+export function elementMemoComputeCell(
+  expr: Expression,
+  index: number,
+  compute: () => Expression | undefined
+): Expression | undefined {
+  const ce = expr.engine;
+  if (!Number.isInteger(index) || index < 1) return compute();
+  if (ce._atTransientConfiguration || !expr.isPure) return compute();
+  const sequenceStopsBefore = sequenceReadStopCount();
+  const incompleteWalksBefore = incompleteWalkCount();
+  let value: Expression | undefined;
+  let objectDeps: ObjectDeps | undefined;
+  beginObjectDeps();
+  try {
+    value = compute();
+  } finally {
+    objectDeps = endObjectDeps();
+  }
+  if (
+    value === undefined ||
+    containsObject(value) ||
+    sequenceReadStopCount() !== sequenceStopsBefore ||
+    incompleteWalkCount() !== incompleteWalksBefore ||
+    ce._atTransientConfiguration
+  )
+    return value;
+  // The entry is validated AFTER the computation, so a dependency that the
+  // computation itself wrote, or a change of the world version that it
+  // caused, replaces the entry instead of adding a cell to it.
+  const entry = validEntryOf(expr);
+  if (entry !== undefined) {
+    // A computation that filled a prefix itself (`Comprehension` reads its
+    // elements through `elementMemoFillTo`) needs no cell.
+    if (entry.elements.length >= index) return value;
+    if ((entry.cells?.size ?? 0) >= ELEMENT_MEMO_CAP) return value;
+    entry.cells ??= new Map();
+    entry.cells.set(index, value);
+    entry.objectDeps = accumulateObjectDeps(entry.objectDeps, objectDeps);
+    return value;
+  }
+  const deps = snapshotDeps(expr, true);
+  if (deps === undefined) return value;
+  elementMemoCaches.set(expr, {
+    worldVersion: ce._worldVersion,
+    factsHidden: ce._factsHidden(),
+    deps,
+    complete: false,
+    elements: [],
+    cells: new Map([[index, value]]),
+    objectDeps,
+  });
+  return value;
 }

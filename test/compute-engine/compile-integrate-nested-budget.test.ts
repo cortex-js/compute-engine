@@ -126,8 +126,8 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
   test('the budget is read at run time, not written into the compiled code', () => {
     // The function is compiled before each budget change, so each result
     // below shows the budget in force when the function RUNS. The two-level
-    // nest needs 3600 nested evaluations (60 outer evaluations, each a full
-    // inner quadrature of 60): a budget of 1000 refuses part of them, and
+    // nest needs 3969 nested evaluations (63 outer evaluations, each a full
+    // inner quadrature of 63): a budget of 1000 refuses part of them, and
     // `TEST_BUDGET` and the default do not.
     const latex = '\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx';
     const r = compileReal(latex);
@@ -144,19 +144,21 @@ describe('COMPILE Integrate — nested-quadrature evaluation budget', () => {
   });
 
   test('a budget used up to exactly zero still gives NaN', () => {
-    // Each inner quadrature of this nest uses 60 evaluations, so a budget of
-    // 3000 is used to exactly zero by the 50th inner integral. The inner
+    // Each inner quadrature of this nest uses 63 evaluations (4 starting
+    // panels of 15 nodes, and the 3 common endpoints of the starting panels,
+    // which the test of a jump next to a panel endpoint reads), so a budget
+    // of 3150 is used to exactly zero by the 50th inner integral. The inner
     // integrals after it are refused and answer `NaN`. The outer integral
     // must then answer `NaN` too, not an estimate made from the values that
     // were not refused (0.6686 here, against the true 0.8615).
     const r = compileReal('\\int_0^1\\int_0^1 e^{-x y^2}\\,dy\\,dx');
-    // The count of 60 per inner integral is what makes 3000 an exact
-    // boundary: 60 outer evaluations plus 60 × 60 inner ones. If the panel
+    // The count of 63 per inner integral is what makes 3150 an exact
+    // boundary: 63 outer evaluations plus 63 × 63 inner ones. If the panel
     // sizing changes, this count changes, and the budget below must change
     // with it.
-    expect(countQuadratureEvals(() => r.run())).toBe(60 + 60 * 60);
+    expect(countQuadratureEvals(() => r.run())).toBe(63 + 63 * 63);
 
-    JavaScriptTarget.setNestedQuadratureBudgetForTesting(3000);
+    JavaScriptTarget.setNestedQuadratureBudgetForTesting(3150);
     expect(Number.isNaN(r.run())).toBe(true);
   });
 

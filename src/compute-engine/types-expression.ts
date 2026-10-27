@@ -1961,11 +1961,34 @@ export interface Expression {
   get localScope(): Scope | undefined;
 
   /**
-   * Replace all the symbols in the expression as indicated.
+   * Replace all the FREE occurrences of the symbols in the expression as
+   * indicated.
    *
-   * Note the same effect can be achieved with `this.replace()`, but
+   * The occurrences replaced are exactly those that `freeVariables` reports
+   * as free. A name bound by a binder is not replaced where the binder binds
+   * it: the index of a `Sum`, `Product` or `Comprehension`, the parameter of
+   * a `Function` literal, the variable of a definite or indefinite
+   * `Integrate`, a local of a `Block`. The variable of `D` or `Series` is
+   * free (it stays in the value), so it is replaced. So `["Sum", "j", ["Limits", "j", 1, 3]]` is unchanged by
+   * `subs({j: 5})`, and in `["Add", "j", ["Sum", "j", ["Limits", "j", 1, 3]]]`
+   * only the first `j` is replaced. The bounds of a `Limits` clause of a
+   * `Sum`, `Product` or `Integrate` read the enclosing binding, so they are
+   * replaced: `["Sum", "j", ["Limits", "j", 1, "j"]]` with `j` replaced by
+   * `4` is `["Sum", "j", ["Limits", "j", 1, 4]]`.
+   *
+   * The substitution does not avoid variable capture: a replacement that
+   * contains a name that a binder binds is inserted as it is, and the
+   * binder is not renamed. `["Sum", ["Add", "j", "k"], ["Limits", "k", 1, 3]]`
+   * with `j` replaced by `k` is `["Sum", ["Add", "k", "k"], ["Limits", "k",
+   * 1, 3]]`, which evaluates to `12`. When the replacement can contain the
+   * index, rename the index first with a recursive `replace()` of the rule
+   * `k -> m`: the result is `["Sum", ["Add", "k", "m"], ["Limits", "m", 1,
+   * 3]]`, which evaluates to `3k + 6`.
+   *
+   * Note a similar effect can be achieved with `this.replace()`, but
    * using `this.subs()` is more efficient and simpler, but limited
-   * to replacing symbols.
+   * to replacing symbols. A recursive `replace()` does not skip bound
+   * variables.
    *
    * The free symbols of the result are bound in the CURRENT scope, not in the
    * scope the receiver was built in. A node that owns a local scope keeps

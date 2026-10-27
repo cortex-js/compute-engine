@@ -60,7 +60,10 @@ import { functionLiteralParameterNames } from './function-literal.js';
 import { bindingInContext } from './binders.js';
 import {
   binderBoundAt,
+  bindsClauseSymbols,
+  bindsStatementTargets,
   declaredBinders,
+  indefiniteIntegralVariables,
   ownIndexClauseAt,
   scopeForRebuild,
   type DeclaredBinders,
@@ -2155,24 +2158,34 @@ function collectReferences(
   //     or structural one (they read the raw operand spellings: a bare symbol,
   //     `Tuple`, `Element`, `Limits`, held or not). Only when the node
   //     declares no indexing-set site (no definition, or a non-index binder)
-  //     do we fall back to recognizing an inner `Limits`/`Element` here.
+  //     do we fall back to recognizing an inner `Limits`/`Element` here, and
+  //     only for an operator whose definition, found by name, declares
+  //     binding sites (`bindsClauseSymbols`): `x ∈ ℤ ∧ x > 0` binds nothing.
   //   - local variables — Block: inner `Assign`/`Declare` introduce locals.
   //     `Block` is `scoped: true` with no binding sites, so this stays a
-  //     structural recognition.
+  //     structural recognition, and it applies to a `Block` only
+  //     (`bindsStatementTargets`): the `z` of `If(z > 0, Assign(z, 5), 0)` is
+  //     free.
+  // The variable of an INDEFINITE integral is not bound: the value of the
+  // integral is a function of it (`indefiniteIntegralVariables`).
   const sites = bindingSiteNames(expr);
   const siteVars = sites?.clauseLocal;
   const indexVars = new Set<string>(siteVars);
+  const indefinite = indefiniteIntegralVariables(expr);
   // Is the index `name` in scope in operand `i`? Always, for a structurally
   // recognized index; for a clause site, from its own clause onward and in
   // the body (every operand before the first clause) — the clause ordering
   // `bindBindingSites` canonicalized against (`binderBoundAt`).
   const boundIn = (name: string, i: number): boolean =>
-    sites === undefined || binderBoundAt(sites, name, i);
+    !indefinite?.has(name) &&
+    (sites === undefined || binderBoundAt(sites, name, i));
+  const clauseSymbols = siteVars === undefined && bindsClauseSymbols(expr);
+  const statementTargets = bindsStatementTargets(expr);
   const localVars = new Set<string>();
   for (const op of expr.ops) {
     if (!isFunction(op)) continue;
     if (
-      siteVars === undefined &&
+      clauseSymbols &&
       (op.operator === 'Limits' || op.operator === 'Element') &&
       isSymbol(op.op1)
     )
@@ -2182,6 +2195,7 @@ function collectReferences(
     // the enclosing scope, so a program that defines `f` and then applies
     // it has no free `f`.
     if (
+      statementTargets &&
       (op.operator === 'Assign' ||
         op.operator === 'Declare' ||
         op.operator === 'DefineFunction') &&

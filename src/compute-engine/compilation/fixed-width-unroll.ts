@@ -60,7 +60,12 @@ export function unrollFixedWidthCollections(
   expr: Expression,
   options?: UnrollOptions
 ): Expression {
-  return rewrite(expr, new WeakSet<Expression>(), options ?? {});
+  return rewrite(
+    expr,
+    new WeakSet<Expression>(),
+    options ?? {},
+    new WeakMap<Expression, Expression>()
+  );
 }
 
 /** See {@link unrollFixedWidthCollections}. */
@@ -281,14 +286,25 @@ export const MIN_UNROLLED_WIDTH = 5;
  * appears — so re-visiting a settled node can only repeat work. Without the
  * set, each re-visit of a rewritten node would walk its whole subtree again,
  * and a chain of rewrites would cost exponentially more than the tree.
+ *
+ * `results` maps each node this pass has rewritten to its result, for the
+ * same reason. A node object that the tree reaches through several parents
+ * (a DAG, such as the bodies that the shader targets inline at each call of
+ * a user function, `gpu-shared-calls.ts`) is then rewritten once, and every
+ * parent receives the same result object. Without it, each path re-ran the
+ * rewrite of the shared node, and a comprehension it held was unrolled again
+ * on each path, with a new node for each copy.
  */
 function rewrite(
   expr: Expression,
   settled: WeakSet<Expression>,
-  options: UnrollOptions
+  options: UnrollOptions,
+  results: WeakMap<Expression, Expression>
 ): Expression {
   if (!isFunction(expr)) return expr;
   if (settled.has(expr)) return expr;
+  const known = results.get(expr);
+  if (known !== undefined) return known;
 
   // A head the caller overrode, and everything under it, is left exactly as
   // written — see {@link UnrollOptions.skipHeads}.
@@ -308,7 +324,7 @@ function rewrite(
     return expr;
   }
 
-  const ops = expr.ops.map((op) => rewrite(op, settled, options));
+  const ops = expr.ops.map((op) => rewrite(op, settled, options, results));
   let node: Expression = ops.every((op, i) => op === expr.ops[i])
     ? expr
     : rebuild(expr, ops);
@@ -325,9 +341,10 @@ function rewrite(
       distributeSelection(node, options) ??
       explicitPointNorm(node, options);
     if (next === undefined) break;
-    node = rewrite(next, settled, options);
+    node = rewrite(next, settled, options, results);
   }
   settled.add(node);
+  results.set(expr, node);
   return node;
 }
 

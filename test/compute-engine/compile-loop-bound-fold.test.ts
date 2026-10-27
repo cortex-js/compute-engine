@@ -31,7 +31,7 @@ test.each(['Sum', 'Product'])(
     expect(r.code).toContain('const _upper = 153;');
     expect(r.code).toContain('while');
     expect(r.code).not.toContain('Math.floor');
-    expect(r.code).not.toContain('Number.isFinite');
+    expect(r.code).not.toContain('Number.isSafeInteger');
     expect(r.run!({ x: 2 })).toBe(op === 'Sum' ? 306 : 2 ** 153);
   }
 );
@@ -82,7 +82,7 @@ test('folded fractional bounds retain floor semantics, including negative values
       ['Limits', 'k', lower, upper],
     ]);
     expect(r.code).not.toContain('Math.floor');
-    expect(r.code).not.toContain('Number.isFinite');
+    expect(r.code).not.toContain('Number.isSafeInteger');
     expect(r.run!({ x: 2 })).toBe(expected);
   }
 });
@@ -97,11 +97,11 @@ test.each(['Sum', 'Product'])('%s recognizes an empty folded range', (op) => {
 test('a mixed range checks only its dynamic bound', () => {
   const { js } = fixture();
   const upper = js(['Sum', 'x', ['Limits', 'k', ['Length', ['List', 1]], 'n']]);
-  expect(upper.code).toContain('Number.isFinite(_upper)');
-  expect(upper.code).not.toContain('Number.isFinite(k)');
+  expect(upper.code).toContain('Number.isSafeInteger(_upper)');
+  expect(upper.code).not.toContain('Number.isSafeInteger(k)');
   const lower = js(['Sum', 'x', ['Limits', 'k', 'n', length]]);
-  expect(lower.code).not.toContain('Number.isFinite(_upper)');
-  expect(lower.code).toContain('Number.isFinite(k)');
+  expect(lower.code).not.toContain('Number.isSafeInteger(_upper)');
+  expect(lower.code).toContain('Number.isSafeInteger(k)');
   expect(upper.run!({ x: 2, n: 3 })).toBe(6);
   expect(lower.run!({ x: 2, n: 152 })).toBe(4);
   for (const n of [NaN, Infinity, -Infinity]) {
@@ -116,7 +116,7 @@ test('folding can be disabled', () => {
     constantFold: false,
   });
   expect(r.code).toContain('Math.floor');
-  expect(r.code).toContain('Number.isFinite(_upper)');
+  expect(r.code).toContain('Number.isSafeInteger(_upper)');
   expect(r.run!({ x: 2 })).toBe(306);
 });
 
@@ -165,7 +165,7 @@ test('dependency capture does not bake a folded bound', () => {
     target
   );
   expect(code).toContain('Math.floor');
-  expect(code).toContain('Number.isFinite(_upper)');
+  expect(code).toContain('Number.isSafeInteger(_upper)');
 });
 
 test('an iteration budget still guards folded bounds', () => {

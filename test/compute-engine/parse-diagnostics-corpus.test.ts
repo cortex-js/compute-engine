@@ -32,24 +32,12 @@ import { ComputeEngine } from '../../src/compute-engine';
 // artifact. They are ledgered only to exempt them from the "no bound-only
 // survivor" and assert-signal checks. Each corresponds to a REAL observed case
 // (run the gate to reproduce). Do not pre-populate.
-const SKIP_LEDGER: { input: string; reason: string }[] = [
-  {
-    input: 'm, n \\in \\mathbb{N}_{>1}',
-    reason:
-      'Restricted-set notation `\\mathbb{N}_{>1}` canonicalizes to a set-builder ' +
-      '`{n ∈ ℕ | n>1}` that reuses the membership variable name `n`. In the ' +
-      'canonical result `n` appears only bound, but the source `n` is a free ' +
-      'reference and is correctly reported (detect-only). Not a parse-time ' +
-      'binder, so no _pruneUndeclared wiring applies.',
-  },
-  {
-    input: 'x, y \\in \\mathbb{R}_{>0}',
-    reason:
-      'Same `\\mathbb{R}_{>0}` restricted-set-builder artifact: `y` appears only ' +
-      'bound in the canonical form yet is a free source reference, correctly ' +
-      'retained (detect-only). Not a wiring gap.',
-  },
-];
+//
+// The ledger is empty. Its two entries, `m, n \in \mathbb{N}_{>1}` and
+// `x, y \in \mathbb{R}_{>0}`, came from the free-variable walk reading the
+// `n` of the tuple `(m, n ∈ S)` as bound by the tuple; a `Tuple` is not a
+// binder, and the walk now reports that `n` free.
+const SKIP_LEDGER: { input: string; reason: string }[] = [];
 
 type Hit = { input: string; name: string };
 

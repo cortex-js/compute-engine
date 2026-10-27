@@ -423,3 +423,278 @@ describe('A scalar integrand', () => {
     );
   });
 });
+
+// Tycho row 459 (the values A_in… of document `neyret/2agcgxq87y`): an
+// integrand that restricts a list, `y·When(c(y), 0 ≤ y ≤ 5)` with `c(y)` an
+// inner integral that reads the list `E`, gave NaN under N(). The type of a
+// `When` has a `missing` arm, and its value is not a `List` until it is
+// distributed over the elements. Closed forms, with E = [0.1, 0.5]:
+// ∫_0^1 y ∫_{-1}^{1} 1/max(ε, |x|) dx dy = 1 + ln(1/ε), and, with
+// E = [1.5, 0.5], ∫_0^1 1/max(ε, y + 1) dy = 1/3 + ln(4/3) for 1.5 and ln 2
+// for 0.5.
+describe('A restricted list integrand', () => {
+  test('a nested integral inside When, under N()', () => {
+    const ce = new ComputeEngine();
+    ce.declare('E', 'list<real>');
+    ce.assign('E', ce.box(['List', 0.1, 0.5]));
+    const inner = [
+      'Integrate',
+      ['Function', ['Divide', 1, ['ElementMax', 'E', ['Abs', 'x']]], 'x'],
+      ['Limits', 'x', -1, 1],
+    ];
+    const n = ce
+      .box([
+        'Integrate',
+        [
+          'Function',
+          ['Multiply', 'y', ['When', inner, ['LessEqual', 0, 'y', 5]]],
+          'y',
+        ],
+        ['Limits', 'y', 0, 1],
+      ] as any)
+      .N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), [1 + Math.log(10), 1 + Math.log(2)]);
+  });
+
+  const expected = [1 / 3 + Math.log(4 / 3), Math.log(2)];
+  const body = ['Divide', 1, ['ElementMax', 'E', ['Add', 'y', 1]]];
+
+  for (const [label, integrand] of [
+    ['When', ['When', body, ['LessEqual', 0, 'y', 5]]],
+    [
+      'Which with a default',
+      ['Which', ['LessEqual', 0, 'y', 5], body, 'True', 'Nothing'],
+    ],
+    ['Which with no default', ['Which', ['LessEqual', 0, 'y', 5], body]],
+  ] as const) {
+    test(`${label}: one integral per element`, () => {
+      const ce = new ComputeEngine();
+      ce.declare('E', 'list<real>');
+      ce.assign('E', ce.box(['List', 1.5, 0.5]));
+      const n = ce
+        .box([
+          'Integrate',
+          ['Function', integrand, 'y'],
+          ['Limits', 'y', 0, 1],
+        ] as any)
+        .N();
+      expect(n.operator).toBe('List');
+      expectClose(values(n), expected);
+    });
+  }
+
+  test('parse route', () => {
+    const ce = new ComputeEngine();
+    ce.declare('E', 'list<real>');
+    ce.assign('E', ce.box(['List', 1.5, 0.5]));
+    const n = ce
+      .parse(
+        '\\int_0^1 \\left\\{0\\le y\\le 5: \\frac{1}{\\operatorname{ElementMax}(E, y+1)}\\right\\}\\,dy'
+      )
+      .N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), expected);
+  });
+
+  test('a masked part of the range gives NaN for each element, as for a scalar', () => {
+    const ce = new ComputeEngine();
+    const scalar = ce
+      .box([
+        'Integrate',
+        ['Function', ['When', 'y', ['LessEqual', 'y', 1]], 'y'],
+        ['Limits', 'y', 0, 2],
+      ])
+      .N();
+    expect(scalar.isNaN).toBe(true);
+    const list = ce
+      .box([
+        'Integrate',
+        [
+          'Function',
+          ['When', ['List', 'y', ['Multiply', 2, 'y']], ['LessEqual', 'y', 1]],
+          'y',
+        ],
+        ['Limits', 'y', 0, 2],
+      ])
+      .N();
+    expect(list.operator).toBe('List');
+    expect(list.ops!.every((x) => x.isNaN)).toBe(true);
+  });
+
+  test('a restriction by a list of booleans is not distributed', () => {
+    const ce = new ComputeEngine();
+    const n = ce
+      .box([
+        'Integrate',
+        [
+          'Function',
+          [
+            'When',
+            ['List', 'y', ['Multiply', 2, 'y']],
+            ['List', 'True', 'True'],
+          ],
+          'y',
+        ],
+        ['Limits', 'y', 0, 1],
+      ])
+      .N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), [0.5, 1]);
+  });
+});
+
+// Closed forms: ∫_0^1 Which(y < 1/2, [y, 2y], True, 0) dy = [1/8, 1/4]. With
+// E = [1.5, 0.5], ∫_0^1 Which(y < 1/2, E·y, True, 0) dy = [3/16, 1/16]. The
+// nested piecewise Which(y < 1/2, [y, 2y], True, Which(y < 3/4, [3y, 4y],
+// True, [5y, 6y])) gives 1/8 + 3·5/32 + 5·7/32 = 27/16 and
+// 1/4 + 4·5/32 + 6·7/32 = 35/16.
+describe('A piecewise list integrand', () => {
+  const which = [
+    'Which',
+    ['Less', 'y', 0.5],
+    ['List', 'y', ['Multiply', 2, 'y']],
+    'True',
+    0,
+  ];
+  const integral = (ce: ComputeEngine, body: unknown) =>
+    ce.box([
+      'Integrate',
+      ['Function', body, 'y'],
+      ['Limits', 'y', 0, 1],
+    ] as any);
+
+  test('a Which with a scalar default, under N() and evaluate()', () => {
+    const ce = new ComputeEngine();
+    const n = integral(ce, which).N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), [0.125, 0.25]);
+    const e = integral(ce, which).evaluate();
+    expect(e.operator).toBe('List');
+    expectClose(values(e.N()), [0.125, 0.25]);
+  });
+
+  test('a Which with a scalar default: the integral is typed as a list or a number', () => {
+    const ce = new ComputeEngine();
+    expect(integral(ce, which).type.toString()).toBe('number | vector<2>');
+  });
+
+  test('a Which whose value is a product with a list symbol', () => {
+    const ce = new ComputeEngine();
+    ce.declare('E', 'list<real>');
+    ce.assign('E', ce.box(['List', 1.5, 0.5]));
+    const n = integral(ce, [
+      'Which',
+      ['Less', 'y', 0.5],
+      ['Multiply', 'E', 'y'],
+      'True',
+      0,
+    ]).N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), [3 / 16, 1 / 16]);
+  });
+
+  test('a Which with a scalar default, parse route', () => {
+    const ce = new ComputeEngine();
+    const n = ce
+      .parse(
+        '\\int_0^1 \\begin{cases}[y,2y] & y<0.5\\\\ 0 & \\text{otherwise}\\end{cases}\\,dy'
+      )
+      .N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), [0.125, 0.25]);
+  });
+
+  test('a nested Which with an undecided condition is distributed', () => {
+    const ce = new ComputeEngine();
+    const nested = [
+      'Which',
+      ['Less', 'y', ['Rational', 1, 2]],
+      ['List', 'y', ['Multiply', 2, 'y']],
+      'True',
+      [
+        'Which',
+        ['Less', 'y', ['Rational', 3, 4]],
+        ['List', ['Multiply', 3, 'y'], ['Multiply', 4, 'y']],
+        'True',
+        ['List', ['Multiply', 5, 'y'], ['Multiply', 6, 'y']],
+      ],
+    ];
+    const n = integral(ce, nested).N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), [27 / 16, 35 / 16]);
+    const e = integral(ce, nested).evaluate();
+    expect(e.toString()).toBe('[27/16,35/16]');
+  });
+
+  test('a condition typed as a list of booleans is not distributed', () => {
+    const ce = new ComputeEngine();
+    ce.declare('B', 'list<boolean>');
+    const n = integral(ce, [
+      'When',
+      ['List', 'y', ['Multiply', 2, 'y']],
+      'B',
+    ]).N();
+    // The mask `B` has no value: the integral stays held, and is not a list
+    // of integrals of `When(y, B)` and `When(2y, B)`.
+    expect(n.operator).toBe('Integrate');
+    const w = integral(ce, [
+      'Which',
+      'B',
+      ['List', 'y', ['Multiply', 2, 'y']],
+      'True',
+      0,
+    ]).N();
+    expect(w.operator).not.toBe('List');
+  });
+
+  test('a restricted list integrand is typed as a list', () => {
+    const ce = new ComputeEngine();
+    const i = integral(ce, [
+      'When',
+      ['List', 'y', ['Multiply', 2, 'y']],
+      ['Less', 'y', 2],
+    ]);
+    expect(i.type.toString()).toBe('vector<2>');
+    // An enclosing integral sees a list integrand: ∫_0^1 ∫_0^1 [xy, 2xy]
+    // dy dx = [1/4, 1/2].
+    const outer = ce.box([
+      'Integrate',
+      [
+        'Function',
+        [
+          'Integrate',
+          [
+            'Function',
+            [
+              'When',
+              ['List', ['Multiply', 'x', 'y'], ['Multiply', 2, 'x', 'y']],
+              ['Less', 'y', 2],
+            ],
+            'y',
+          ],
+          ['Limits', 'y', 0, 1],
+        ],
+        'x',
+      ],
+      ['Limits', 'x', 0, 1],
+    ] as any);
+    expect(outer.type.toString()).toBe('vector<2>');
+    const n = outer.N();
+    expect(n.operator).toBe('List');
+    expectClose(values(n), [0.25, 0.5]);
+  });
+
+  test('a restricted tuple is integrated coordinate by coordinate', () => {
+    const ce = new ComputeEngine();
+    const i = integral(ce, [
+      'When',
+      ['Tuple', 'y', ['Multiply', 2, 'y']],
+      ['Less', 'y', 2],
+    ]);
+    expect(i.type.toString()).toBe('tuple<number, number>');
+    const n = i.N();
+    expect(n.operator).toBe('Tuple');
+    expectClose(values(n), [0.5, 1]);
+  });
+});

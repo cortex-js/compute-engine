@@ -197,6 +197,7 @@ import {
   validElementMemo,
   elementMemoRecordingStream,
   elementMemoAt,
+  elementMemoComputeCell,
   elementMemoParanoid,
   enterParanoidCheck,
   exitParanoidCheck,
@@ -223,7 +224,17 @@ import {
 } from './type-guards.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
-import { scopeForRebuild } from './binding-sites.js';
+import {
+  scopeForRebuild,
+  declaredBinders,
+  ownIndexClauseAt,
+  mapOwnIndexClause,
+  binderBoundAt,
+  bindsClauseSymbols,
+  bindsStatementTargets,
+  indefiniteIntegralVariables,
+  type DeclaredBinders,
+} from './binding-sites.js';
 import {
   armHasValueParam,
   exceedsSurplusArity,
@@ -2561,20 +2572,101 @@ export class BoxedFunction
     // which keeps the written names. An unbound symbol operand (an
     // undeclared name, or a name below a binder) keeps its own `subs()`,
     // which boxes the replacement raw.
-    const structuralReplacement = (x: Expression): Expression | undefined => {
+    const structuralReplacement = (
+      x: Expression,
+      s: Substitution
+    ): Expression | undefined => {
       if (!structuralForm || !isSymbol(x) || !x.isCanonical) return undefined;
       const name = x.symbol;
-      if (!Object.hasOwn(sub, name) || sub[name] === undefined)
-        return undefined;
-      return this.engine.expr(sub[name], { form: 'structural' });
+      if (!Object.hasOwn(s, name) || s[name] === undefined) return undefined;
+      return this.engine.expr(s[name], { form: 'structural' });
     };
-    const ops = this._ops.map(
-      (x) =>
-        structuralReplacement(x) ??
-        (options!.canonical === true && !x.isCanonical
-          ? x.subs(sub, { canonical: false })
-          : x.subs(sub, opOptions))
-    );
+    const subsOperand = (x: Expression, s: Substitution): Expression =>
+      structuralReplacement(x, s) ??
+      (options!.canonical === true && !x.isCanonical
+        ? x.subs(s, { canonical: false })
+        : x.subs(s, opOptions));
+
+    // Only the FREE occurrences of a name are replaced. A name that this node
+    // binds (the index of a `Sum` or of a `Comprehension`, the parameter of a
+    // `Function` literal, a local of a `Block`) denotes the binder's own
+    // binding in each operand where it is in scope, so the substitution is
+    // not applied to it there: `Sum(j, Limits(j, 1, 3)).subs({j: 5})` is
+    // unchanged, and `j + Sum(j, Limits(j, 1, 3))` replaces only the first
+    // `j`. The occurrences replaced are exactly those that the free-variable
+    // walk (`getReferences()`, `abstract-boxed-expression.ts`) reports as
+    // free, so the variable of `D` or `Series` is replaced
+    // (`subsBinderView()`). The names in scope in each operand follow the
+    // binding-site selectors: an iterator clause's index is not in
+    // scope in an earlier clause, and the bounds of a `Limits` clause (the
+    // collection of an `Element` clause) of a `Sum`, `Product` or
+    // `Integrate` read the enclosing binding of the index
+    // (`ownIndexClauseAt`, `binding-sites.ts`).
+    //
+    // Variable capture is NOT avoided: a replacement that contains a free
+    // name the binder binds (`Sum(j + k, Limits(k, 1, 3)).subs({j: 'k'})`)
+    // is inserted as it is, and the binder index is not renamed.
+    const binderView = subsBinderView(this);
+    // A `Function` literal operand of a node with index variables (the
+    // integrand of an `Integrate`) is read by its body, as the free-variable
+    // walk reads it: its own parameters are not bound names here, the index
+    // variables of this node are (`subsBinderView()`). The literal keeps its
+    // parameter list and its own scope.
+    const subsAt = (x: Expression, s: Substitution): Expression => {
+      if (
+        binderView?.readsFunctionBody !== true ||
+        !(x instanceof BoxedFunction) ||
+        x._operator !== 'Function' ||
+        x._ops.length === 0
+      )
+        return subsOperand(x, s);
+      const body = subsOperand(x._ops[0], s);
+      if (body === x._ops[0]) return x;
+      const fnOps = [body, ...x._ops.slice(1)];
+      const fnForm =
+        structuralForm || options!.canonical === undefined
+          ? x.isCanonical
+            ? 'canonical'
+            : x.isStructural
+              ? 'structural'
+              : 'raw'
+          : options!.canonical === true
+            ? x.isCanonical
+              ? 'canonical'
+              : 'raw'
+            : options!.canonical === false
+              ? 'raw'
+              : options!.canonical;
+      return this.engine.function('Function', fnOps, {
+        form: fnForm,
+        scope: scopeForRebuild(
+          x._localScope,
+          this.engine,
+          'Function',
+          fnOps
+        ),
+      });
+    };
+    const ops =
+      binderView === undefined ||
+      !binderView.names.some((n) => Object.hasOwn(sub, n))
+        ? this._ops.map((x) => subsAt(x, sub))
+        : this._ops.map((x, i) => {
+            const here = binderView.namesIn(i);
+            const own = ownIndexClauseAt(this, i, binderView.binders);
+            if (own === undefined) return subsAt(x, withoutNames(sub, here));
+            // The clause's index stays bound in the clause, except in the
+            // operands of the clause that are outside the index's scope. The
+            // clause is rebuilt raw when the caller asks for a raw result.
+            return mapOwnIndexClause(
+              x,
+              own,
+              undefined,
+              new Set(here),
+              (o, shadowed) => subsOperand(o, withoutNames(sub, shadowed)),
+              !structuralForm && options!.canonical === false
+            );
+          });
 
     const form = structuralForm
       ? 'structural'
@@ -5439,15 +5531,23 @@ export class BoxedFunction
       if (idx < 1) return undefined;
     }
 
-    // Element memo: serve from a covering cached prefix — AFTER negative
-    // normalization, so `at(-1)` on a walked impure instance returns the
-    // memoized last element rather than re-deriving (a fresh draw would
-    // break one-instance-one-draw-set coherence). On a miss (or an
-    // uncovered index) fall through to the handler's own random-access path
-    // unchanged — a first `at(n)` is never converted into an O(n) fill.
+    // Element memo: serve from a covering cached prefix, or from an element
+    // that an earlier `at()` computed — AFTER negative normalization, so
+    // `at(-1)` on a walked impure instance returns the memoized last element
+    // rather than re-deriving (a fresh draw would break
+    // one-instance-one-draw-set coherence). On a miss (or an uncovered
+    // index) the handler's own random-access path computes the ONE element
+    // — a first `at(n)` is never converted into an O(n) fill — and
+    // `elementMemoComputeCell` keeps it for a pure instance. Without that, a
+    // chain of views that read each other by position (`At(xs, I)` over a
+    // `Map`) computed each inner element again for each outer element, a
+    // cost exponential in the depth of the chain (CE-516).
     if (idx >= 1 && this.operatorDefinition?.collection?.elementMemo === true) {
       const cached = elementMemoAt(this, idx);
       if (cached !== undefined) return cached;
+      return elementMemoComputeCell(this, idx, () =>
+        unlessWalkMissedElements(() => handler(this, idx))
+      );
     }
 
     // A handler that walks a collection to find the element at `idx` (the
@@ -10565,21 +10665,49 @@ function* threadConditional(
   if (tail.some((x, i) => isThreaded(x, i, 'Which'))) {
     // Each operand contributes a list of (condition, value) branches; a
     // non-`Which` operand is a single unconditional branch (condition = null).
+    const addedDefault = new Set<ReadonlyArray<unknown>>();
     const branchSets = tail.map((x, i) => {
       if (isThreaded(x, i, 'Which') && isFunction(x)) {
         const branches: { cond: Expression | null; value: Expression }[] = [];
         const ops = x.ops;
         for (let k = 0; k + 1 < ops.length; k += 2)
           branches.push({ cond: ops[k], value: ops[k + 1] });
+        // A `Which` with no default clause (no literal `True` condition) is
+        // `Missing` when no condition holds. The operator applied to that
+        // absent operand is one more branch, taken last, so that the
+        // distributed form has the value of the application evaluated after
+        // the conditions are decided: with `x = 0`, `3 + Which(x > 1, 0)` is
+        // `3 + Missing`, which is `NaN`, and `[1, 2] + Which(x > 1, 0)` is
+        // `[NaN, NaN]`. Without this branch the distributed `Which` answered
+        // `Missing` in both cases.
+        if (!branches.some((b) => isSymbol(b.cond, 'True'))) {
+          branches.push({ cond: ce.True, value: ce.Missing });
+          addedDefault.add(branches);
+        }
         return branches;
       }
       return [{ cond: null as Expression | null, value: x }];
     });
 
-    // Cost gate (decision 10): product of branch counts.
+    // Cost gate (decision 10): product of branch counts. The `(True,
+    // Missing)` branch added above for a `Which` with no default clause is
+    // not counted: the limit is on the branches as written, so that the
+    // operands it admitted before that branch was added are still admitted.
+    //
+    // A second limit is on the number of combinations that are generated,
+    // the added branches included. Without it, an `Add` of N `Which`
+    // operands of one clause each (no default) has a written count of 1 but
+    // generates 2^N combinations. The limit is 81 = 3^4: the largest number
+    // of combinations of operands whose written count is at most 16 when
+    // each `Which` has two clauses or more (four `Which` of two clauses with
+    // no default), so all those operands are still distributed.
     let count = 1;
-    for (const bs of branchSets) count *= bs.length;
-    if (count > 16) return undefined;
+    let generated = 1;
+    for (const bs of branchSets) {
+      count *= bs.length - (addedDefault.has(bs) ? 1 : 0);
+      generated *= bs.length;
+    }
+    if (count > 16 || generated > 81) return undefined;
 
     // Lexicographic cross-product: the first operand varies slowest, so every
     // lexicographically earlier branch has a false conjunct at the selected
@@ -10592,7 +10720,15 @@ function* threadConditional(
       for (const combo of combos)
         for (const b of bs)
           next.push({
-            conds: b.cond ? [...combo.conds, b.cond] : combo.conds,
+            // A literal `True` conjunct, or one that the conjunction already
+            // holds, does not change the conjunction, so it is not added:
+            // the condition stays `x > 1`, not `x > 1 ∧ True ∧ x > 1`.
+            conds:
+              b.cond === null ||
+              isSymbol(b.cond, 'True') ||
+              combo.conds.some((c) => c.isSame(b.cond!))
+                ? combo.conds
+                : [...combo.conds, b.cond],
             value: [...combo.value, b.value],
           });
       combos = next;
@@ -10606,7 +10742,13 @@ function* threadConditional(
           : combo.conds.length === 1
             ? combo.conds[0]
             : ce._fn('And', combo.conds);
+      // A branch whose condition an earlier branch already has is never
+      // selected (the earlier branch is selected first), and no branch after
+      // a `True` condition is ever read: they are not added, and the
+      // operator is not applied to their values.
+      if (resultOps.some((x, k) => k % 2 === 0 && x.isSame(cond))) continue;
       resultOps.push(cond, yield ce._fn(op, combo.value));
+      if (combo.conds.length === 0) break;
     }
     return ce._fn('Which', resultOps).evaluate(options);
   }
@@ -19832,4 +19974,143 @@ function withProvedAbsentDomains(
     result[i] = domain;
   });
   return result;
+}
+
+/**
+ * The names a node binds, as `subs()` reads them: every name the node binds
+ * (`names`), the names in scope in its operand `i` (`namesIn(i)`), the
+ * clause ordering (`binders`) that `ownIndexClauseAt()` reads, and whether a
+ * `Function` literal operand is read by its body (`readsFunctionBody`, see
+ * below). `undefined` when the node binds nothing, which is the case for
+ * most nodes.
+ *
+ * `subs()` replaces exactly the occurrences that the free-variable walk
+ * (`getReferences()`, `abstract-boxed-expression.ts`) reports as free, so this
+ * function reads the bound names as that walk does:
+ *
+ * - a `Function` literal binds its parameters in every operand;
+ * - a node bound to an operator definition with iterator-clause sites (the
+ *   `clauseLocal` sites of `declaredBinders(expr, 'post')`, `binding-sites.ts`:
+ *   the index of a `Sum`, `Product`, `Comprehension` or `Loop`, the variable of
+ *   a definite `Integrate`) binds each index from its own clause onward and
+ *   in the body;
+ * - any other node of an operator whose definition, found by name, declares
+ *   binding sites (`bindsClauseSymbols()`, `binding-sites.ts`: a raw `Sum`,
+ *   or a quantifier `ForAll(p, Element(x, S))`) binds the symbol of each
+ *   `Limits` or `Element` operand, in every operand. The `x` of
+ *   `x ∈ ℤ ∧ x > 0`, of `If(x ∈ ℤ, x + 1, 0)` or of `Boole(x ∈ ℤ)` is free;
+ * - a `Block` binds the target of each `Assign`, `Declare` and
+ *   `DefineFunction` operand, in every operand (`bindsStatementTargets()`).
+ *   The `z` of `If(z > 0, Assign(z, 5), 0)` is free.
+ *
+ * The variable of an INDEFINITE integral (`Integrate(a·x, x)`) is not bound
+ * (`indefiniteIntegralVariables()`): the value of the integral is a function
+ * of it, `a·x²/2`, as for `D` below.
+ *
+ * When the node has index variables, a `Function` literal operand (the
+ * integrand of an `Integrate`) is read by its BODY, with the index variables
+ * of the node as the bound names: the parameter list of such an integrand is
+ * not reliable, so `Integrate(Function(a·x, x, a), Limits(x, 0, 1))` has the
+ * free variable `a`, and `subs({a: 2})` replaces it.
+ *
+ * A binder whose variable is a plain operand (`D`, `Series`) keeps the
+ * variable in its value, so the walk reports it free and `subs()` replaces
+ * it: `D(x^2, x).subs({x: 3})` is NOT left as `D(x^2, x)`, which evaluates to
+ * `2x`, the value of another expression. (The replaced form is invalid, as it
+ * was before this function existed.)
+ *
+ * A wildcard name (`_k`, `__k`, `_`) is never treated as bound: a binder in a
+ * rule pattern or a rule replacement (`Sum(_f, Limits(_k, _a, _b))`) is
+ * instantiated with `subs()`, and its binding site must be replaced like the
+ * other wildcards.
+ */
+function subsBinderView(expr: Expression):
+  | {
+      names: readonly string[];
+      binders: DeclaredBinders | undefined;
+      namesIn: (i: number) => readonly string[];
+      readsFunctionBody: boolean;
+    }
+  | undefined {
+  if (!isFunction(expr)) return undefined;
+  const notWildcard = (n: string): boolean => !n.startsWith('_');
+
+  if (expr.operator === 'Function') {
+    const names: string[] = [];
+    for (let i = 1; i < expr.nops; i++)
+      for (const n of functionLiteralParameterNames(expr.ops[i]))
+        if (notWildcard(n) && !names.includes(n)) names.push(n);
+    return names.length === 0
+      ? undefined
+      : {
+          names,
+          binders: undefined,
+          namesIn: () => names,
+          readsFunctionBody: false,
+        };
+  }
+
+  const declared =
+    expr.operatorDefinition === undefined
+      ? undefined
+      : declaredBinders(expr, 'post');
+  const sites =
+    declared !== undefined && declared.clauseLocal.size > 0
+      ? declared
+      : undefined;
+  const indexVars = new Set<string>(sites?.clauseLocal);
+  const localVars = new Set<string>();
+  const clauseSymbols = sites === undefined && bindsClauseSymbols(expr);
+  const statementTargets = bindsStatementTargets(expr);
+  for (const op of expr.ops) {
+    if (!isFunction(op) || !isSymbol(op.op1)) continue;
+    if (
+      clauseSymbols &&
+      (op.operator === 'Limits' || op.operator === 'Element')
+    )
+      indexVars.add(op.op1.symbol);
+    if (
+      statementTargets &&
+      (op.operator === 'Assign' ||
+        op.operator === 'Declare' ||
+        op.operator === 'DefineFunction')
+    )
+      localVars.add(op.op1.symbol);
+  }
+  const indefinite = indefiniteIntegralVariables(expr);
+  const readsFunctionBody = indexVars.size > 0;
+  const names = [...new Set([...indexVars, ...localVars])].filter(
+    (n) => notWildcard(n) && (localVars.has(n) || !indefinite?.has(n))
+  );
+  if (names.length === 0 && !readsFunctionBody) return undefined;
+  return {
+    names,
+    binders: sites,
+    namesIn: (i) =>
+      names.filter(
+        (n) =>
+          localVars.has(n) ||
+          (indexVars.has(n) &&
+            (sites === undefined || binderBoundAt(sites, n, i)))
+      ),
+    readsFunctionBody,
+  };
+}
+
+/**
+ * `sub` without the entries for `names`. Returns `sub` itself when it has no
+ * entry for any of them.
+ */
+function withoutNames(
+  sub: Substitution,
+  names: Iterable<string> | undefined
+): Substitution {
+  if (names === undefined) return sub;
+  let result: Substitution | undefined;
+  for (const n of names) {
+    if (!Object.hasOwn(sub, n)) continue;
+    result ??= { ...sub };
+    delete result[n];
+  }
+  return result ?? sub;
 }

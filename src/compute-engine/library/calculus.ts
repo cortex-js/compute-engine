@@ -14,8 +14,12 @@ import type {
 
 import type { Type } from '../../common/type/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
-import { functionResult, isPointElementType } from '../../common/type/utils.js';
-import { isSubtype } from '../../common/type/subtype.js';
+import {
+  functionResult,
+  isPointElementType,
+  stripMissingFromType,
+} from '../../common/type/utils.js';
+import { isSubtype, widen } from '../../common/type/subtype.js';
 import { checkType, checkOperandType } from '../boxed-expression/validate.js';
 import {
   rebindEscaping,
@@ -110,6 +114,7 @@ import {
   memoizedPartialDerivative,
 } from '../symbolic/derivative.js';
 import {
+  typeCouldBeCollection,
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
   isTupleShapedType,
@@ -952,8 +957,10 @@ type IntegrandParts = {
  * integral whose integrand did not compile. One interpreted evaluation costs
  * microseconds, not nanoseconds, so the default budget (1500 panels, up to
  * about 45 000 evaluations) is too large. The 16 starting panels cost 240
- * evaluations and each bisection costs 30 more, so 330 panels cost at most
- * 240 + 314 × 30 = 9 660 evaluations: no more than the 1e4 samples of the
+ * evaluations, the 15 common endpoints of the starting panels 15 more (see
+ * `hiddenEdgeError`, `numerics/gauss-kronrod.ts`), and each bisection costs
+ * 30 more, so 330 panels cost at most 240 + 15 + 314 × 30 = 9 675
+ * evaluations: no more than the 1e4 samples of the
  * Monte-Carlo fallback for an interpreted integrand. A smooth integrand
  * converges far inside this budget. When the quadrature neither converges nor
  * beats Monte Carlo, the 1e4 samples are drawn AFTER it, so the worst case is
@@ -991,10 +998,13 @@ function numericIntegrandParts(
       }
       const imN = typeof im === 'number' ? im : 0;
       if (!Number.isNaN(re)) numeric = true;
+      // `Nothing` (an integrand that is a `Nothing` branch at this point)
+      // has no value, as `Missing` has none: it is not a symbolic sample.
       else if (
         isExpression(v) &&
         !(isNumber(v) && v.isNaN === true) &&
-        !isAbsentArithmeticOperand(v)
+        !isAbsentArithmeticOperand(v) &&
+        sym(v) !== 'Nothing'
       )
         symbolic = true;
       else undefinedValue = true;
@@ -1956,6 +1966,10 @@ function integrateRealPart(
   const gk = adaptiveQuadrature(jsf, lower, upper, {
     deadline: ce._deadlineFrame,
     singularEndpoints: true,
+    // An integrand that holds an integral: the reported error includes the
+    // errors of the inner integrals (see `withNestedErrors`,
+    // `numerics/gauss-kronrod.ts`).
+    nestedErrors: options.nested === true,
     ...(options.compiled
       ? {}
       : { maxIntervals: INTERPRETED_QUADRATURE_PANELS }),
@@ -2088,6 +2102,43 @@ function integralTypeOf(t: Readonly<Type> | undefined): Type {
 }
 
 /**
+ * Is a value of type `t` possibly a list or a tuple that an integral
+ * integrates element by element? Return the list and tuple arms of `t`,
+ * and whether `t` also has a scalar arm, or `undefined` when `t` has no
+ * list or tuple arm, or has an arm that is neither a list, a tuple, a
+ * number nor an absence marker.
+ *
+ * A `missing` arm is removed first: the restriction `When(e, c)` of a list
+ * `e` is typed `missing | vector<2>`. The arms of a union are read one by
+ * one: the piecewise `Which(y < 1/2, [y, 2y], True, 0)` is typed
+ * `integer | vector<2>`, and its value is a list in which each element is a
+ * piecewise expression (`distributeRestriction()`).
+ */
+function listIntegrandShape(
+  t: Readonly<Type> | undefined
+): { lists: Type[]; scalar: boolean } | undefined {
+  if (t === undefined || t === 'unknown') return undefined;
+  const isList = (x: Type) =>
+    x !== 'unknown' &&
+    x !== 'never' &&
+    x !== 'nothing' &&
+    (isSubtype(x, 'list<any>') || isTupleShapedType(x));
+  const stripped = stripMissingFromType(t);
+  if (isList(stripped)) return { lists: [stripped], scalar: false };
+  if (typeof stripped !== 'object' || stripped.kind !== 'union')
+    return undefined;
+  const lists: Type[] = [];
+  let scalar = false;
+  for (const arm of stripped.types) {
+    if (arm === 'nothing' || arm === 'never') continue;
+    if (isList(arm)) lists.push(arm);
+    else if (isSubtype(arm, 'number')) scalar = true;
+    else return undefined;
+  }
+  return lists.length > 0 ? { lists, scalar } : undefined;
+}
+
+/**
  * An integral whose integrand is a LIST (`∫_0^1 [x, 2x] dx`, or the outer
  * integral of `∫_0^1 ∫_0^{G} x·y dx dy` with `G = [1, 2, 3]`, whose integrand
  * is an integral with a list bound) is one integral per element of the list:
@@ -2118,17 +2169,18 @@ function integrateListIntegrand(
 ): Expression | undefined {
   // The integrand is a `List` value, or, for a function literal, its body
   // is typed as a list. Checking the type first means that an integrand that
-  // is not a list is not evaluated here.
+  // is not a list is not evaluated here. The result type can also be a union
+  // of a list and scalars or absence markers (`listIntegrandShape()`): a
+  // restriction `When(e, c)` of a list `e` is typed `list<number> | missing`,
+  // and `Which(c, [y, 2y], True, 0)` is typed `integer | vector<2>`. Both
+  // are integrated element by element (see `distributeRestriction()`
+  // below). The evaluated value decides: when it is not a list, the caller
+  // integrates it as usual.
   let value: Expression | undefined;
   if (isFunction(integrand, 'List') || isFunction(integrand, 'Tuple'))
     value = integrand;
   else if (isFunction(integrand, 'Function')) {
-    const result = functionResult(integrand.type.type);
-    if (
-      result === undefined ||
-      result === 'unknown' ||
-      !(isSubtype(result, 'list<any>') || isTupleShapedType(result))
-    )
+    if (listIntegrandShape(functionResult(integrand.type.type)) === undefined)
       return undefined;
   } else return undefined;
 
@@ -2152,6 +2204,7 @@ function integrateListIntegrand(
     // with a free outer integration variable has no numeric value, but its
     // exact value can be a list of expressions in that variable.
     value ??= liftIntegrand(integrand).evaluate();
+    value = distributeRestriction(ce, value);
     if (isFunction(value, 'Tuple'))
       return integrateTupleIntegrand(ce, value, limits, numericApproximation);
     if (!isFunction(value, 'List')) return undefined;
@@ -2187,6 +2240,136 @@ function integrateListIntegrand(
     });
     return ce.function('List', results);
   });
+}
+
+/**
+ * An evaluated integrand that is a restriction of a list by a condition on
+ * the integration variable, `When([e1, e2], c)`, is the list
+ * `[When(e1, c), When(e2, c)]`: at each point the two forms have the same
+ * elements, and the list form lets `integrateListIntegrand` integrate one
+ * element at a time. A piecewise `Which(c1, v1, c2, v2, …)` whose values
+ * include a list is distributed the same way: element k is
+ * `Which(c1, v1[k], c2, v2[k], …)`, where a value that is not a list is the
+ * same for every k. A product `Multiply(a, When(L, c))` (or of a `Which`)
+ * whose other factors are not lists is distributed too, as
+ * `[a·When(L1, c), a·When(L2, c)]`. A value of a `Which` that is itself a
+ * held `When`, `Which` or product of them (a nested piecewise with an
+ * undecided condition) is distributed the same way, and its element k is
+ * used in element k of the outer `Which`.
+ *
+ * A tuple is distributed as a list is, and the result is a `Tuple`:
+ * `When((e1, e2), c)` is `(When(e1, c), When(e2, c))`. The values of a
+ * `Which` that are distributed must all be lists or all be tuples.
+ *
+ * Nothing is distributed when the type of a condition can hold a
+ * collection (a list of booleans is a mask, which `When` and `Which`
+ * already apply element by element, and a symbol declared `list<boolean>`
+ * with no value can become one), when two distributed values have
+ * different lengths, or when a value or another factor whose type can hold
+ * a collection cannot be distributed (it would otherwise be copied whole
+ * into each element). Any other value is returned unchanged.
+ */
+function distributeRestriction(
+  ce: ComputeEngine,
+  value: Expression
+): Expression {
+  const result = distributedElements(ce, value);
+  return result ? ce.function(result.head, result.elements) : value;
+}
+
+/**
+ * The elements of the distributed form of `x` (see
+ * `distributeRestriction()`), and the head, `List` or `Tuple`, of that
+ * form. Return `undefined` when `x` is not distributed.
+ */
+function distributedElements(
+  ce: ComputeEngine,
+  x: Expression
+): { head: 'List' | 'Tuple'; elements: ReadonlyArray<Expression> } | undefined {
+  const mayBeCollection = (e: Expression) => typeCouldBeCollection(e.type.type);
+  const indexed = (e: Expression) =>
+    isFunction(e, 'List') || isFunction(e, 'Tuple')
+      ? { head: e.operator as 'List' | 'Tuple', elements: e.ops }
+      : undefined;
+
+  if (isFunction(x, 'When') && x.nops === 2) {
+    const [body, cond] = x.ops;
+    const parts = indexed(body);
+    if (parts === undefined || mayBeCollection(cond)) return undefined;
+    return {
+      head: parts.head,
+      elements: parts.elements.map((e) => ce.function('When', [e, cond])),
+    };
+  }
+
+  if (isFunction(x, 'Which') && x.nops >= 2 && x.nops % 2 === 0) {
+    for (let i = 0; i < x.nops; i += 2)
+      if (mayBeCollection(x.ops[i])) return undefined;
+    // `Which` holds its values while a condition is undecided, so a value
+    // such as `1/ElementMax(E, y)` is not a `List` yet. A value that is
+    // transitively pure and typed as a list is evaluated here; an impure one
+    // (a `Random()` draw) is left held, so that nothing is drawn for a
+    // branch that is not taken.
+    const values: Array<ReadonlyArray<Expression> | Expression> = [];
+    let head: 'List' | 'Tuple' | undefined;
+    let count = 0;
+    for (let i = 1; i < x.nops; i += 2) {
+      let v = x.ops[i];
+      if (
+        indexed(v) === undefined &&
+        isTransitivelyPure(v) &&
+        listIntegrandShape(v.type.type) !== undefined
+      )
+        v = v.evaluate();
+      const parts = indexed(v) ?? distributedElements(ce, v);
+      if (parts === undefined) {
+        if (mayBeCollection(v)) return undefined;
+        values.push(v);
+        continue;
+      }
+      if (head === undefined) {
+        head = parts.head;
+        count = parts.elements.length;
+      } else if (head !== parts.head || count !== parts.elements.length)
+        return undefined;
+      values.push(parts.elements);
+    }
+    if (head === undefined) return undefined;
+    const elementOf = (v: ReadonlyArray<Expression> | Expression, k: number) =>
+      Array.isArray(v) ? v[k] : (v as Expression);
+    return {
+      head,
+      elements: Array.from({ length: count }, (_, k) =>
+        ce.function(
+          'Which',
+          x.ops.map((op, i) =>
+            i % 2 === 0 ? op : elementOf(values[(i - 1) / 2], k)
+          )
+        )
+      ),
+    };
+  }
+
+  if (!isFunction(x, 'Multiply')) return undefined;
+  let index = -1;
+  let parts:
+    { head: 'List' | 'Tuple'; elements: ReadonlyArray<Expression> } | undefined;
+  for (let i = 0; i < x.nops && parts === undefined; i++) {
+    parts = distributedElements(ce, x.ops[i]);
+    index = i;
+  }
+  if (parts === undefined) return undefined;
+  if (x.ops.some((op, i) => i !== index && mayBeCollection(op)))
+    return undefined;
+  return {
+    head: parts.head,
+    elements: parts.elements.map((e) =>
+      ce.function(
+        'Multiply',
+        x.ops.map((op, i) => (i === index ? e : op))
+      )
+    ),
+  };
 }
 
 /**
@@ -2802,7 +2985,7 @@ function nIntegrateMultiple(
  * `seen` (shared across the whole walk, keyed on the definition) terminates
  * recursive definitions and self-referential bindings.
  *
- * The absence symbols `Missing` and `Undefined` are not reported: `unknowns`
+ * The absence symbols `Missing`, `Undefined` and `Nothing` are not reported: `unknowns`
  * lists them, as they have no value, but they are values here, not free
  * variables waiting for one. Arithmetic with them is `NaN`, so `∫₀¹ t·Missing
  * dt` is `NaN` under `.N()`, as an integrand with no value is
@@ -2816,7 +2999,13 @@ function transitiveUnknowns(
   const seen = new Set<object>();
   const collect = (root: Expression, names: ReadonlySet<string>): void => {
     for (const s of root.unknowns)
-      if (!names.has(s) && s !== 'Missing' && s !== 'Undefined') out.add(s);
+      if (
+        !names.has(s) &&
+        s !== 'Missing' &&
+        s !== 'Undefined' &&
+        s !== 'Nothing'
+      )
+        out.add(s);
     const visit = (node: Expression): void => {
       // An ASSIGNED value can itself hold a free symbol (`c` in `b = c + 1`):
       // `b` is known, so neither `unknowns` nor the compiler's fold reports
@@ -5057,13 +5246,14 @@ volumes
             const rename = Object.fromEntries(
               paramDefault.map((p, i) => [p, ce.symbol(names[i])])
             );
-            // `subs` is NOT binder-aware: it rewrites through inner
-            // `Sum`/`Function`/… binders blindly. Renaming a parameter that an
-            // inner binder rebinds — or renaming to a target name that an inner
-            // binder already binds (e.g. `x ↦ Sum(x·k, k, 1, 3)` with vars `[k]`,
-            // where the substituted `k` would be captured by the `Sum`) — yields
-            // a wrong derivative. Decline in that case (leave `JacobianMatrix`
-            // symbolic), value-safe and strictly better than corrupting.
+            // `subs` replaces only the free occurrences of a parameter, but it
+            // is not capture-avoiding: renaming to a target name that an inner
+            // `Sum`/`Function`/… binder already binds (e.g.
+            // `x ↦ Sum(x·k, k, 1, 3)` with vars `[k]`, where the substituted
+            // `k` would be captured by the `Sum`) yields a wrong derivative.
+            // A parameter that an inner binder rebinds is refused as well.
+            // Decline in those cases (leave `JacobianMatrix` symbolic),
+            // value-safe and strictly better than corrupting.
             for (const f of fs) {
               const binders = collectBinderNames(f);
               if (binders.size === 0) continue;
@@ -5286,7 +5476,20 @@ volumes
                 context.derive
               )
             : undefined;
-        const listType = integralTypeOf(derived ?? declared);
+        // A result type that is a union of a list and scalars or absence
+        // markers (`missing | vector<2>` for `When([y, 2y], c)`,
+        // `integer | vector<2>` for `Which(c, [y, 2y], True, 0)`) is read arm
+        // by arm, as `integrateListIntegrand` reads it: each list arm gives a
+        // list of integrals, a scalar arm gives a number, and an absence arm
+        // gives nothing.
+        const integrandType = derived ?? declared;
+        const shape = listIntegrandShape(integrandType);
+        const listTypes: Type[] = shape
+          ? [
+              ...shape.lists.map((t) => integralTypeOf(t)),
+              ...(shape.scalar ? ['number' as Type] : []),
+            ]
+          : [integralTypeOf(integrandType)];
         const hasListBound = ops.slice(1).some((op) => {
           const limit = op.structureOf?.();
           return (
@@ -5300,15 +5503,16 @@ volumes
         // A tuple integrand with a list bound is one tuple per element of
         // the bound (`integrateTupleIntegrand`). A list integrand pairs its
         // elements with the elements of the bound and keeps its own type.
-        if (typeof listType === 'object' && listType.kind === 'tuple')
-          return BoxedType.forResult(
-            hasListBound ? { kind: 'list', elements: listType } : listType,
-            engine._typeResolver
-          );
-        if (listType !== 'number')
-          return BoxedType.forResult(listType, engine._typeResolver);
+        const results = listTypes.map((listType): Type => {
+          if (typeof listType === 'object' && listType.kind === 'tuple')
+            return hasListBound
+              ? { kind: 'list', elements: listType }
+              : listType;
+          if (listType !== 'number') return listType;
+          return hasListBound ? { kind: 'list', elements: 'number' } : 'number';
+        });
         return BoxedType.forResult(
-          hasListBound ? 'list<number>' : 'number',
+          results.length === 1 ? results[0] : widen(...results),
           engine._typeResolver
         );
       },

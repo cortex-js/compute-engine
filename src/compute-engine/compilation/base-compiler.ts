@@ -614,7 +614,7 @@ const CONSTANT_FOLD_MAX_INLINE_ELEMENTS = 49;
  * substituted. Empty when the definition's parameters are not all scalar,
  * which falls back to the static argument test alone.
  */
-type EnclosingDefinition = {
+export type EnclosingDefinition = {
   scalarNames: ReadonlySet<string>;
   localNames: ReadonlySet<string>;
 };
@@ -11167,6 +11167,66 @@ export class BaseCompiler {
 
   /** See `emitFoldedValue`: folding is off while a folded value is emitted. */
   private static _emittingFoldedValue = false;
+
+  /**
+   * Refuse a `Sum`/`Product` whose bounds have a compile-time value that does
+   * not floor to a safe integer (magnitude above 2^53 − 1). At such a value
+   * `k++` does not change `k`, so an unrolled clause would add terms forever
+   * at compile time, and a loop would never end at run time. The interpreter
+   * answers `out-of-range` for the same bounds, so the compile declines with
+   * the same code.
+   *
+   * The bounds are read with `bigOpBoundValue`, not `bigOpBoundConstant`: the
+   * second answers `undefined` for a folded value that is not a safe integer
+   * (`2^{53}`, `10^{20}`), which a caller then reads as "not a constant" and
+   * emits as a loop.
+   */
+  static assertSafeBigOpBounds(
+    kind: string,
+    bounds: ReadonlyArray<Expression | undefined>,
+    target?: CompileTarget<Expression>
+  ): void {
+    for (const expr of bounds) {
+      const value = BaseCompiler.bigOpBoundValue(expr, target);
+      if (value !== undefined && !Number.isSafeInteger(Math.floor(value)))
+        throw new Error(
+          `Could not compile \`${kind}\`: out-of-range, a bound with magnitude at most ${Number.MAX_SAFE_INTEGER} (got ${value})`
+        );
+    }
+  }
+
+  /**
+   * The finite compile-time real value of a `Sum`/`Product` bound, before the
+   * floor and with no safe-integer test, or `undefined` when the bound has no
+   * compile-time value (it mentions a compile-bound name or an excluded name,
+   * it is not real, it is not finite, or it does not fold). With a target,
+   * a bound that is not a number literal is folded with `foldedRealNumber`.
+   * The folded value is only read, never emitted, so the fold runs even on a
+   * target that sets `constantFold: false` (the interval target does): there
+   * a bound `2^{53}` would otherwise be found only by the run-time guard.
+   */
+  static bigOpBoundValue(
+    expr: Expression | undefined,
+    target?: CompileTarget<Expression>
+  ): number | undefined {
+    if (expr === undefined) return undefined;
+    if (BaseCompiler.mentionsCompileBoundName(expr)) return undefined;
+    if (
+      target?.boundVars !== undefined &&
+      BaseCompiler.mentionsExcludedName(expr, target.boundVars, undefined)
+    )
+      return undefined;
+    const im = expr.im;
+    if (!isNaN(im) && im !== 0) return undefined;
+    let re = expr.re;
+    if (isNaN(re) && target !== undefined)
+      re =
+        BaseCompiler.foldedRealNumber(expr, {
+          ...target,
+          constantFold: undefined,
+        }) ?? NaN;
+    return Number.isFinite(re) ? re : undefined;
+  }
 
   /**
    * The compile-time integer value of a `Sum`/`Product` bound, or `undefined`
@@ -25875,9 +25935,11 @@ export class BaseCompiler {
     }
     const names = new Set(Object.keys(values));
     let result: Expression | undefined;
-    // `.subs()` is not capture-avoiding, so a node that re-binds one of the
-    // index names would have the INNER binder's own occurrences rewritten
-    // with the outer term's value. Such a node is left undecided.
+    // `.subs()` replaces only the free occurrences of a name, but it is not
+    // capture-avoiding: a value that reads a name an inner binder binds
+    // would be captured by that binder, and the binder's index is not
+    // renamed. A node that re-binds one of the index names is left
+    // undecided.
     if (
       BaseCompiler.mentionsAnyName(expr, names) &&
       !BaseCompiler.rebindsAnyName(expr, names)
@@ -37176,10 +37238,12 @@ export class BaseCompiler {
    *    ONCE, while substitution repeats it at every occurrence of its
    *    parameter — `(Random(), y)` into a body reading `P.x` twice would
    *    draw twice;
-   *  - no binder in the body captures the substitution: `subs` is not
-   *    binder-aware, so a parameter REBOUND by an inner `Sum`/`Function`/
-   *    `Block`, or an argument symbol such a binder would CAPTURE, would be
-   *    rewritten blindly. This is the condition `betaReduceLambda`
+   *  - no binder in the body captures the substitution: `subs` replaces
+   *    only the free occurrences of a parameter, but it is not
+   *    capture-avoiding, so an argument symbol that an inner `Sum`/
+   *    `Function`/`Block` binds would be CAPTURED by that binder. A
+   *    parameter REBOUND by such a binder is refused as well. This is the
+   *    condition `betaReduceLambda`
    *    (`boxed-expression/utils.ts`) applies to a lambda application, and only
    *    that condition: a body that merely CONTAINS a binder colliding with
    *    nothing — `Map(p ↦ …, list)` as the whole body — inlines.
@@ -37326,9 +37390,10 @@ export class BaseCompiler {
    * public `compile()` entries apply to the tree they are handed.
    *
    * Nothing is compiled here, and the result is not rewritten: the caller
-   * decides what to do with the substituted body.
+   * decides what to do with the substituted body. Also read by the shader
+   * targets' root inlining of repeated calls (`gpu-shared-calls.ts`).
    */
-  private static substitutedUserFunctionBody(
+  static substitutedUserFunctionBody(
     engine: ComputeEngine,
     h: string,
     args: ReadonlyArray<Expression>,
@@ -37417,10 +37482,13 @@ export class BaseCompiler {
         if (!substitutedNames.has(sym) && enclosing.localNames.has(sym))
           return undefined;
     }
-    // `subs` is not capture-avoiding: it rewrites through an inner
-    // `Function`/`Block`/`Sum` binder blindly. The substitution is sound
-    // exactly when no parameter name being substituted is REBOUND by a binder
-    // in the body, and no free symbol of an argument would be CAPTURED by one.
+    // `subs` replaces only the free occurrences of a parameter, but it is
+    // not capture-avoiding: a free symbol of an argument that an inner
+    // `Function`/`Block`/`Sum` binder binds is CAPTURED by that binder, and
+    // the binder's index is not renamed. The substitution is refused when no
+    // such capture can be ruled out: when a parameter name being substituted
+    // is REBOUND by a binder in the body, or a free symbol of an argument is
+    // bound by one.
     // This is the same condition `betaReduceLambda`
     // (`boxed-expression/utils.ts`) applies to a lambda application. Declining
     // on the mere PRESENCE of a binder is coarser and refuses bodies that are

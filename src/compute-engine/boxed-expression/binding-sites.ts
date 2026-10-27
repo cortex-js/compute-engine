@@ -761,6 +761,75 @@ export function binderBoundAt(
 }
 
 /**
+ * Whether the symbol of a `Limits` or `Element` operand of `expr` is bound by
+ * `expr` when the clause ordering of its binding sites is not available (a
+ * raw node, which has no operator definition, or a node whose sites select
+ * no clause). This is the case only when the operator definition found by
+ * the NAME of the operator declares binding sites: `Sum`, `Product`,
+ * `Integrate`, the quantifiers. A set-builder `Set(Element(n, S),
+ * Condition(n > 1))`, `{n ∈ S | n > 1}`, binds the symbol of its `Element`
+ * operand too. A node of any other operator does not bind the symbol of
+ * such an operand: in `x ∈ ℤ ∧ x > 0`, `If(x ∈ ℤ, x + 1, 0)`,
+ * `Boole(x ∈ ℤ)` or the tuple `(m, n ∈ S)`, the `x` (`n`) is the name of
+ * the enclosing scope.
+ *
+ * The free-variable walk (`getReferences()`, `abstract-boxed-expression.ts`)
+ * and `subs()` (`subsBinderView()`, `boxed-function.ts`) both read the bound
+ * names with this function, so that `subs()` replaces exactly the
+ * occurrences the walk reports as free.
+ */
+export function bindsClauseSymbols(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  if (expr.operator === 'Set')
+    return expr.ops.some((op) => isFunction(op, 'Condition'));
+  return bindingSiteSelectorOf(expr) !== undefined;
+}
+
+/**
+ * Whether the target of an `Assign`, `Declare` or `DefineFunction` operand of
+ * `expr` is a local of `expr`. Only a `Block` has locals: in
+ * `If(z > 0, Assign(z, 5), Assign(z, 6))` the `z` of the condition is the
+ * `z` of the enclosing scope, and the assignments write to it.
+ */
+export function bindsStatementTargets(expr: Expression): boolean {
+  return isFunction(expr) && expr.operator === 'Block';
+}
+
+/**
+ * The variables of an INDEFINITE integral among the clauses of `expr`: the
+ * symbol of a `Limits` operand of an `Integrate` whose two bounds are absent
+ * or `Nothing` (`Limits(x, Nothing, Nothing)`), and a symbol operand after
+ * the integrand (`Integrate(f, x)`). `undefined` when there is none.
+ *
+ * Such a variable is NOT bound by the integral, although the integral
+ * declares it in its own scope: the value of an indefinite integral is a
+ * function of it (`∫ a·x dx = a·x²/2`), as the value of `D(f, x)` is. So the
+ * free-variable walk reports it free and `subs()` replaces it.
+ */
+export function indefiniteIntegralVariables(
+  expr: Expression
+): ReadonlySet<string> | undefined {
+  if (!isFunction(expr) || expr.operator !== 'Integrate') return undefined;
+  const absent = (x: Expression | undefined): boolean =>
+    x === undefined || isSymbol(x, 'Nothing');
+  let result: Set<string> | undefined;
+  expr.ops.forEach((op, i) => {
+    if (i === 0) return;
+    let name: string | undefined;
+    if (isSymbol(op)) name = op.symbol;
+    else if (
+      isFunction(op, 'Limits') &&
+      isSymbol(op.op1) &&
+      absent(op.ops[1]) &&
+      absent(op.ops[2])
+    )
+      name = op.op1.symbol;
+    if (name !== undefined) (result ??= new Set()).add(name);
+  });
+  return result;
+}
+
+/**
  * The binders whose indexing clause is read outside the scope of its own
  * index: the bounds of a `Limits` clause and the collection of an `Element`
  * clause. In `∫₀ᵏ k dk`, `∏_{k=1}^{k} k` and `∑_{k ∈ 1..k} k`, the `k` of
@@ -873,14 +942,16 @@ export function clauseOperandShadow(
 /**
  * `clause` with each operand `j` replaced by `f(operand, shadowed)`, where
  * `shadowed` is the set of `clauseOperandShadow()`. The clause itself when
- * no operand changed, else a clause of the same form.
+ * no operand changed, else a clause of the same form, or a raw clause when
+ * `raw` is `true` (a `subs()` that asks for a raw result).
  */
 export function mapOwnIndexClause(
   clause: Expression,
   own: OwnIndexClause,
   outer: ReadonlySet<string> | undefined,
   inner: ReadonlySet<string> | undefined,
-  f: (op: Expression, shadowed: ReadonlySet<string> | undefined) => Expression
+  f: (op: Expression, shadowed: ReadonlySet<string> | undefined) => Expression,
+  raw = false
 ): Expression {
   if (!isFunction(clause)) return clause;
   const ops = clause.ops;
@@ -889,6 +960,7 @@ export function mapOwnIndexClause(
   );
   if (next.every((op, j) => op === ops[j])) return clause;
   const ce = clause.engine;
+  if (raw) return ce.function(clause.operator, next, { form: 'raw' });
   return clause.isCanonical
     ? ce._fn(clause.operator, next)
     : ce.function(clause.operator, next, {
@@ -991,8 +1063,11 @@ export function declaredBinderNamesOf(
  * The exception is a rewrite that RENAMES the binding site itself. Reuse is
  * safe only because the scope already binds every name the rebuilt node
  * declares, so canonicalization adds nothing to it; a rename breaks that.
- * `.subs()`, `.map()` and `.replace()` are general-purpose and rewrite the
- * binding site like any other operand (`sum.subs({ i: 'k' })` is a rename), and
+ * `.map()` and `.replace()` are general-purpose and rewrite the binding site
+ * like any other operand (a rule `i -> k` applied recursively to a `Sum` over
+ * `i` is a rename). `.subs()` replaces only the free occurrences of a name, so
+ * on a scoped node it renames a binding site only when the index is a
+ * wildcard (`_k`, in a rule pattern). And
  * `canonicalizeBinder` declares an unknown site name INTO the scope it is
  * handed — which would be the original expression's own scope, still live and
  * still reachable by its holder. So a rename gets a fresh scope: the rebuilt
