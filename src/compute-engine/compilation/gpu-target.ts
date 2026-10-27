@@ -1869,6 +1869,32 @@ function gpuWritesOutside(
 }
 
 /**
+ * Does `node` draw a random value anywhere outside the nodes in `inside`
+ * (and their subtrees)? A draw is a node that is impure by itself
+ * (`BaseCompiler.foldValueImpure`) while none of its operands is, such as
+ * `Random()`, or a symbol whose inlined value is impure.
+ */
+function gpuDrawsOutside(
+  node: Expression,
+  inside: ReadonlySet<Expression>
+): boolean {
+  // Every node is visited: a node that frames its draws (`WithRandomSeed`) is
+  // pure from the outside, but the draws inside it still advance the stream.
+  const walk = (n: Expression): boolean => {
+    if (inside.has(n)) return false;
+    if (isSymbol(n)) return BaseCompiler.foldValueImpure(n);
+    if (!isFunction(n)) return false;
+    if (
+      BaseCompiler.foldValueImpure(n) &&
+      !n.ops.some((op) => BaseCompiler.foldValueImpure(op))
+    )
+      return true;
+    return n.ops.some(walk);
+  };
+  return walk(node);
+}
+
+/**
  * A `Which` (clauses in `Which` shape) as a STATEMENT — `if … else if … else`
  * storing the selected value in a temporary declared ahead of it — for a
  * selection whose arm, or condition past the first, needs statements a
@@ -1928,7 +1954,15 @@ function compileGPUStatementSelection(
       ? BaseCompiler.declareValueOperand(unit.ops)
       : unit;
   if (evaluated === undefined) return undefined;
-  if (args.some(BaseCompiler.hasObservableEffect)) return undefined;
+  // The one effect a clause may have is a random draw, and only when nothing
+  // else in the statement draws: the hoisted selection then makes its draws
+  // in the same order as the interpreter, since no draw of a sibling can
+  // come between. A clause that writes a binding, or a symbol whose value
+  // draws (read as a possible write by `gpuWritesOutside`), is refused.
+  if (args.some(BaseCompiler.hasObservableEffect)) {
+    if (args.some((a) => gpuWritesOutside(a, new Set()))) return undefined;
+    if (gpuDrawsOutside(evaluated, new Set(args))) return undefined;
+  }
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
   const isWGSL = target.language === 'wgsl';
   const arms = args.filter((_, i) => i % 2 === 1);
@@ -2191,6 +2225,11 @@ const GPU_COSTLY_HELPER_HEADS = new Set([
  * the conditional (`compileGPUStatementSelection`), as an arm that needs
  * statements already does. GLSL keeps the ternary. CE-513 (Tycho row 458).
  *
+ * An arm that draws a random value takes the statement form too: `select`
+ * would draw in the arm that is not taken, which shifts every later draw
+ * (`gpuAssertNoEagerDraw`). Where the statement form is refused, that check
+ * declines the selection (Tycho row 466).
+ *
  * A symbol with a value is read through its value, as the shader targets
  * inline it (see `gpuNeedsStatements`).
  */
@@ -2215,6 +2254,12 @@ function gpuArmIsCostlyForSelect(
     if (!isFunction(x) || seen.has(x)) return false;
     seen.add(x);
     if (GPU_COSTLY_HELPER_HEADS.has(x.operator)) return true;
+    // A draw: the head itself is impure (its operands are not the cause).
+    if (
+      BaseCompiler.foldValueImpure(x) &&
+      !x.ops.some((op) => BaseCompiler.foldValueImpure(op))
+    )
+      return true;
     // A call of a user function (`g := x ↦ …`, or a symbol whose value is a
     // function), which the shader targets emit as a separate `_fn_…`
     // function.

@@ -231,6 +231,32 @@ plus P3b's section-6 edits; take the worktree's.
   Recorded in ROADMAP CE-507: the kind gates open after `.N()` of an
   integral, measured as no significant cost.
 
+- Phase 2 COMMITTED by the user 2026-10-26 (`f29912a45`). Phase 3 decided
+  2026-10-26 (plan 4.9.1, all recommendations; the design is 4.9.2:
+  `Enclosure(lo, hi)`, kind primitive `enclosure`, `admittedAs: 'real'`, the
+  hull across a pole, `NaN` for an empty image, exact endpoints under
+  `evaluate()`, `interval-js` through a `native` compile field).
+
+- CE-507.8 (decoded-payload cache) DONE in the worktree
+  `/Users/arno/dev/wt-compute-engine-df3` (base `f29912a45`):
+  `boxed-expression/decoded-payload.ts` (`decodedPayload(expr, decode)`,
+  exported from the package entry `src/compute-engine.ts`), `units.ts`
+  (`boxedToUnitExpression` cached at its top level; `decodedUnit(boxedUnit)`
+  gives `{ unit, key, dimension, dimensionKey, scale }`), used by the quantity
+  compare/add/divide hooks; `test/compute-engine/decoded-payload.test.ts`.
+  Benchmark: no measurable change for quantities (a unit decode is 0.15 µs
+  against 20–75 µs per evaluation); the cache is for costly payloads (PR
+  #482's permutations, the enclosure endpoints). Phase 3 is built in the same
+  worktree on top of it: one dual review, one staging. LANDING NOTE: add to
+  `doc/06-guide-augmenting.md` (gitignored, main tree only) in the value-kinds
+  section: "The hooks of a kind receive the kind value as a call of its head,
+  so a hook that reads a costly payload reads it again at each operation.
+  `decodedPayload(expr, decode)` runs `decode` once for each boxed expression
+  and returns the stored result after that; boxed expressions are immutable,
+  so the result never needs to be refreshed. Define `decode` once (at the top
+  level of a module), not as a closure in the call:
+  `const { lo, hi } = decodedPayload(x, decodeEnclosure)`."
+
 ## Rules for every agent
 
 - NEVER run `git stash`, `git checkout`, `git restore`, `git reset`, or any

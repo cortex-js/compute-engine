@@ -1181,6 +1181,779 @@ disconnected union, the complex-capable ball `CenteredInterval` as a second
 kind or not), the head's name and LaTeX, and the lowering contract of 4.8.
 The kind is the third phase and is not needed for #477.
 
+#### 4.9.1 Decisions for phase 3 (put to the user 2026-10-26)
+
+What exists today: the set `Interval(a, b)` (typed `set<real>`, `Abs` is its
+cardinality, kept by the answer on #416); the compile target `interval-js`
+with the representation `{ lo, hi }` and the lifted functions `_IA.add`,
+`_IA.sin`, … (one interval per quantity; across a pole it answers
+`singular` or the entire line); and `Measurement`, which is the
+error-propagation value (Mathematica's `Around`) and is not an enclosure.
+The reporter of #416 maps Mathematica's `Interval` to the new head first and
+offers their implementation (outward-rounded endpoints, exact where exact,
+the image of a function from its endpoints and interior critical points).
+
+- **Q1, the head's name.** The set keeps `Interval`, so the value needs
+  another name. Options: (a) `Enclosure(lo, hi)`, which names what the value
+  is (a rigorous enclosure of a real); (b) `IntervalValue(lo, hi)`; (c)
+  `RealInterval(lo, hi)`. The kind primitive is the lower-case name
+  (`enclosure`, …). LaTeX: `\mathrm{Enclosure}(a, b)` round trip, as the set
+  serializes `\mathrm{Interval}(x, y)`; `[a, b]` stays a list. Recommended:
+  (a). If nothing is decided: (a).
+- **Q2, the empty value.** `Ln(Enclosure(-2, -1))` has no real value.
+  Options: (a) the answer is `NaN` (`Indeterminate` for exact endpoints, by
+  the exact-twin rule of `NaN`), no empty enclosure exists, and a value that
+  is PARTLY outside the domain is clipped (`Sqrt(Enclosure(-1, 4))` is
+  `Enclosure(0, 2)`, as the `interval-js` library does); (b) an empty
+  enclosure value `Enclosure()` that propagates. Recommended: (a): one
+  absence model (`docs/ERROR-MODEL.md`), nothing new to teach the consumers.
+  If nothing is decided: (a).
+- **Q3, a function across a pole.** `Tan(Enclosure(0, π))`. Options: (a)
+  one connected enclosure, the hull: `Enclosure(-∞, +∞)`, the contract of
+  the `interval-js` lowering (4.8) and of the compiled result; (b)
+  Mathematica's disconnected union of enclosures, which needs a
+  multi-interval value model (`Enclosure(a, b, c, d)` or a `Union` value)
+  in every hook. Recommended: (a) for phase 3; (b) can be added later as
+  the value model of the same head without a change to the hooks' contract.
+  If nothing is decided: (a).
+- **Q4, `CenteredInterval`** (the complex ball `c ± r`, an enclosure of a
+  disk). Options: (a) not in phase 3: the real enclosure only; (b) a second
+  kind in phase 3. Recommended: (a); the reporter maps `Interval` first, and
+  a ball needs its own hooks (sums add radii, a product scales by `|c|`).
+  If nothing is decided: (a).
+- **Q5, exact endpoints.** `Sin(Enclosure(0, 1))` under `evaluate()`.
+  Options: (a) exact where the endpoints are exact: `Enclosure(0, Sin(1))`,
+  and `.N()` gives outward-rounded floats (`Enclosure(0, 0.8414709848078966)`
+  with the upper endpoint rounded up by one ulp, the rounding of the
+  `interval` library); (b) floats always. Recommended: (a), the contract of
+  `evaluate()` for every kind. If nothing is decided: (a).
+- **Q6, the carrier and the comparisons.** `admittedAs: 'real'` (a complex
+  operand is refused: `Enclosure(i, 2)` is `incompatible-type` at boxing),
+  the hooks `add`, `multiply`, `negate`, `divide`, `power`, `apply` (the
+  image of the numeric functions through the `interval` library's lifted
+  functions, with the exact endpoints of Q5), `compare` for the partial
+  order of enclosures: `-1` when `x.hi < y.lo`, `1` when `x.lo > y.hi`, `0`
+  when both are one point and equal, else `undefined` (the comparison stays
+  unevaluated, as Mathematica's does when two intervals overlap; not
+  `'unordered'`, because an order may exist). `Equal` by `eq`: the same
+  endpoints. No decision needed; stated for the record. The dependency
+  problem is not modeled: `x − x` for an enclosure `x` is `Enclosure(-1, 1)`
+  for `Enclosure(1, 2)`, as in Mathematica.
+- **Q7, compilation.** Options: (a) the `type` contract for `interval-js`
+  only (`lowered` `{ lo, hi }`, `entry` checks the record, `add`/`multiply`/
+  `apply` through `_IA`), `value` from a literal; every other target
+  declines with the kind message; (b) also `javascript`, with the interval
+  library as host helpers. Recommended: (a); (b) is a later step. If nothing
+  is decided: (a).
+- **Q8, from the set.** The constructor accepts the set as its one operand:
+  `Enclosure(Interval(0, 1))` is `Enclosure(0, 1)`; open or half-open bounds
+  are taken as closed (an enclosure is closed by definition). No decision
+  needed; stated for the record.
+
+#### 4.9.2 The `Enclosure` kind (decided 2026-10-26: all recommendations of 4.9.1; revised after the spec review of the same day, 38 findings)
+
+**The value.** `Enclosure(lo, hi)` is a closed, connected enclosure of a
+real: every real in `[lo, hi]`. The signature is
+`(real | signed_infinity | nan | set<real>, (real | signed_infinity | nan)?)
+-> enclosure | nan` (`real` holds finite values only in this engine; `-oo`
+and `+oo` are `signed_infinity`; `nan` is admitted so that a `NaN` endpoint
+reaches the handler, which answers the indeterminate value; `~oo`, the
+complex infinity, is refused at boxing). An
+endpoint belongs to one of three classes, which every hook reads the same
+way: (1) a number literal; (2) an exact closed constant: `isExactConstantExpression()` (no free
+variable, no float, pure) AND typed `real` (`x.type.matches('real')`: not a
+kind value, not a set, not a complex constant such as `Sqrt(-2)`) AND
+WHOSE NUMERIC VALUE IS AVAILABLE (`.N()` gives a number: `Pi`, `Sqrt(2)`,
+`Sin(1)`, `e`, `Gamma(1/3)`; a call of a declared function with no handler
+and no body, `f(1)`, fails the exactness test (it is not pure) and has no
+numeric value, so it is class 3); (3) a symbolic endpoint, which has a free variable or no
+numeric value (`Enclosure(a, 2)`, `Enclosure(f(1), 2)`). The hooks compute on classes 1 and 2 and stay
+unevaluated on class 3 (the hook returns `undefined`, as every kind does for
+an operand it cannot read). The canonical form orders the endpoints when
+both are class 1, or class 2 and decidable by the engine's exact comparison
+(`Enclosure(2, 1)` is `Enclosure(1, 2)`); a mixed pair (a float literal and a
+class 2 constant, `Enclosure(Pi, 3.0)`) is ordered numerically, the float
+against an outward enclosure of the constant; a pair that cannot be
+ordered (`Enclosure(Sin(10^600), 0)`) stays as written, and every hook
+reads such a value as `[min, max]` of its endpoints through the float
+fallback below (so no hook formula sees `a > b`). The evaluate handler of
+the head orders them again after it substitutes the operands
+(`Enclosure(a, 2)` with `a := 3` evaluates to `Enclosure(2, 3)`), and
+re-checks the invariants after evaluation: an endpoint that evaluates to a
+kind value or a non-real (`Enclosure(v, 2)` with `v: value` assigned a
+measurement) is `incompatible-type` at evaluation. One operand is a point
+(`Enclosure(x)` is `Enclosure(x, x)`); the set `Interval` with bounds of type
+`real | signed_infinity` is accepted as the one operand
+(`Enclosure(Interval(0, 1))` is `Enclosure(0, 1)`,
+`Enclosure(Interval(0, +oo))` is `Enclosure(0, +oo)`, open bounds taken as
+closed). An EMPTY set gives the indeterminate value: `lo > hi`
+(`Interval(2, 1)` is a valid, empty set: `IsEmpty` is `True`), or
+`lo = hi` with an open side (`Interval(Open(1), Open(1))`). The conversion
+happens at canonicalization only when both bounds are class 1 or 2 and
+their order is decided; otherwise the set operand is kept until evaluation
+and the same rule applies then (`Enclosure(Interval(a, 2))` with `a := 3`
+is indeterminate, never `Enclosure(2, 3)`). Any other set, or a set beside
+a second operand, is `incompatible-type` at boxing. An endpoint that is not an extended real (`i`, a string, a list)
+is `incompatible-type` at boxing, and so is an endpoint that is a kind
+value (a measurement, a quantity, an enclosure): the canonical handler of
+`Enclosure` checks it, because admission (4.2) is not subtyping and would
+admit them. A `NaN` endpoint, and two endpoints that are the same infinity
+(`Enclosure(+oo, +oo)`, which contains no real), give the INDETERMINATE
+value: `Indeterminate` under `evaluate()` with exact operands and `NaN`
+otherwise (the exact-twin rule of `NaN`, `indeterminateFormAnswer()`); every
+row below that says "indeterminate" is checked with `isNaN`, never with
+`isSame(ce.NaN)`. `x / Enclosure(0, 0)` is indeterminate and not `~oo`,
+because an enclosure is a set of reals and the image of `1/x` over `{0}` is
+empty. The kind primitive `enclosure` joins `VALUE_TYPES` beside
+`measurement` and `quantity`: a subtype of `value`, disjoint from every
+other type.
+
+**The head's definition** (`library/enclosure.ts`, new; the hooks in
+`library/enclosure-arithmetic.ts`): `arithmetic: { admittedAs: 'real', add,
+multiply, negate, divide, power, compare, apply, resultType, isExact, isNaN,
+numericValue, compile }` and `eq` on the operator definition (where
+`Measurement` and `Quantity` put it; `ArithmeticDefinition` has no `eq`).
+`isExact` is true when both endpoints are class 1 exact or class 2;
+`isNaN` is never true (an indeterminate value never becomes an enclosure);
+`numericValue` is `undefined` (an enclosure is not a number: `.re` of an
+enclosure is `NaN`, `.N()` keeps the enclosure). The decoded payload
+`{ lo, hi }` (two boxed endpoints) goes through `decodedPayload()`
+(CE-507.8).
+
+**Exactness and rounding.** An operand that is a class 1 exact literal or a
+class 2 constant keeps the result exact: `Enclosure(0, 1) + Enclosure(1/3,
+2)` is `Enclosure(1/3, 3)` and `Sin(Enclosure(0, 1))` is
+`Enclosure(0, Sin(1))`, whose endpoints are class 2, so a further operation
+folds (`Sin(Enclosure(0, 1)) + 1` is `Enclosure(1, 1 + Sin(1))`). When a
+hook must order or compare exact endpoints (the sort of the canonical form,
+the min/max of `multiply`, a critical-point test) it asks the engine's exact
+comparison, `exactConstantOrder()` (`boxed-expression/compare.ts`, with
+`isExactConstantExpression()` as the test of class 2), which decides
+numerically with no tolerance as `Less` does; when that comparison is
+UNDECIDED (`undefined`, as for `Sin(10^600)` against `0`), or answers `0` for
+two operands that are not `isSame` (two values closer than the working
+precision), the hook gives the result with outward-rounded float endpoints,
+`isExact` false, and a critical-point test that is undecided includes the
+critical value in the image (sound either way). The hooks receive
+EVALUATED operands, so `Arcsin(1)` is `Pi/2` before a hook reads it. Under `.N()`, and before any hook calls the library, an
+endpoint that is not exactly a double (a class 2 constant such as `Pi`, a
+rational such as `1/3`, a decimal literal such as `0.1`, a bignum) is
+converted to a double with OUTWARD rounding (`lo` down, `hi` up; the same
+conversion the compile `value` uses), the largest double `<= lo` and the smallest double `>= hi`, DIRECTED
+rounding, not a widening by one ulp of the nearest double: so
+`Enclosure(0, Pi).N()` is `Enclosure(0, 3.1415926535897936)` (the smallest
+double above π) and `Enclosure(0.1, 0.2).N()` is
+`{ lo: 0.09999999999999999, hi: 0.2 }` (the nearest double of `0.2` is
+already above it); "the same doubles" in the
+acceptance rows means the doubles after this conversion. A float operand,
+or `.N()`, then gives float endpoints by the rounding rule of the
+`interval` library (`interval/rounding.ts`): outward UNLESS the library
+certifies the endpoint exact (so `(Enclosure(0, 1) + 2).N()` is `Enclosure(2, 3)` and
+`Sin(Enclosure(0, 1)).N()` is `Enclosure(0, 0.8414709848078966)`, the
+library's own answer), Known limit, recorded as CE-522.5: for the
+transcendental kernels the library's outward step is a minimum move, not a
+proof of containment (`interval/rounding.ts` says so; `tanh` of a point can
+miss the true value by a unit in the last place), so an enclosure's float
+endpoints are rigorous for the rational operations (`add`, `multiply`,
+`divide`, integer powers once CE-522.7 is fixed: the shipped `pow` rounds an
+intermediate before the reciprocal, `abs`, the step functions) and
+best-effort for the transcendental ones; certified kernels are a separate
+project. Evaluation
+under `.N()` and the `interval-js` lowering give the SAME endpoints: the
+acceptance tests under `.N()` compare the engine's answer with the answer of
+`IntervalArithmetic` called directly on the same doubles, and check
+containment of the exact value for the rational operations. The float endpoints are machine doubles whatever
+`ce.precision` is (the library works on doubles; a higher precision is not
+honored by an enclosure, documented in `doc/08-guide-types.md`).
+
+**Mapping the library's results** (`IntervalResult`, `interval/types.ts`),
+used by every hook that calls a lifted function: `interval` → its value;
+`partial` (the domain was clipped) → its value, so `Sqrt(Enclosure(-1, 4))`
+is `Enclosure(0, 2)` and `Ln(Enclosure(0, 1))` is `Enclosure(-oo, 0)`;
+`singular` WITH a `value` (a finite jump inside: `Floor`, `Sign`,
+`Heaviside`, `Mod`, `Round`, `Fract`) → that value; `singular` WITHOUT a
+value (a pole inside) → the hull `Enclosure(-oo, +oo)` (Q3); `entire` → the
+hull; `empty` → the indeterminate value (Q2). A pole or a domain boundary AT
+an endpoint gives a half-infinite endpoint, not the hull:
+`Tan(Enclosure(0, Pi/2))` is `Enclosure(0, +oo)`, `1 / Enclosure(0, 1)` is
+`Enclosure(1, +oo)` (the library's `partial`), and only `0` INSIDE
+`[c, d]` gives the hull. Today every kernel that reports a pole (`tan`, `cot`, `sec`, `csc`,
+`gamma`, and the early pole branches of `powRational`, `powRealBranch` and
+`pow` with a negative exponent) reports a pole AT an endpoint as `singular`
+with no value, like an interior pole (`gamma([0, 1])`,
+`powRational([-1, 0], -2, 3)`), a pole SINGLETON (`gamma([0, 0])`,
+`pow([0, 0], -1)`) the same way, and `pow` with a negative integer exponent
+over a base with a zero endpoint answers the whole line: phase 3 FIXES
+these kernels (CE-522.3, CE-522.4) so that a pole at an endpoint gives the
+half-line with the sign of the function beside it (`gamma([0, 1])` is
+`[1, +oo]`, `powRational([-1, 0], -2, 3)` is `[1, +oo]`), a pole singleton
+gives `empty` (the indeterminate value), and `[0, 1]^-1` gives `[1, +oo]`. The exact
+(`evaluate()`) rules below reproduce the same shapes, with one known
+difference: an endpoint pole at an exact constant (`Tan(Enclosure(0,
+Pi/2))`) is INSIDE the interval once the endpoint is converted outward to
+a double (`1.5707963267948968` is above the double of the pole), so
+`.N()` and the compiled code give the whole line where `evaluate()` gives
+the half-line; both are sound.
+
+**The hooks.** A number beside an enclosure is a point when it is a FINITE
+real of class 1 or 2; a complex number, a class 3 operand, or a
+value of ANOTHER kind (`Enclosure(0, 1) + Measurement(1, 1/10)`, a quantity,
+a residue class) leaves the call unevaluated, typed as the union of the
+kinds as 4.4 types a mixed-kind sum (no kind folds another kind's value); a
+set operand (`Enclosure(0, 1) + Interval(0, 1)`) is `incompatible-type` at
+evaluation, as it is beside any kind value today (the `Add` handler
+reports it before the hooks run); an infinite number (`+oo`, `-oo`) as an operand gives the
+indeterminate value (`Enclosure(0, 1) + +oo` would be the infinite singleton
+that the constructor refuses), so every arithmetic hook can answer the
+indeterminate value, and the `resultType` of an arithmetic operator is
+`enclosure | nan` when an operand's type admits an infinity
+(`signed_infinity`, `number`) and `enclosure` when every operand is an
+enclosure or a finite number type (`x + 1` with `x: enclosure` is
+`enclosure`); `Divide`, `Power` and the domain-restricted functions are
+always `enclosure | nan`.
+
+- `add`: `[a + c, b + d]`, one fold over every enclosure and point operand;
+  `+oo + (-oo)` in an endpoint cannot occur (infinite scalars are refused
+  above, and two enclosures with opposite infinite endpoints at the same
+  side cannot both be values).
+- `negate`: `[-b, -a]`.
+- `multiply`: `[min, max]` of the four endpoint products, folded pairwise;
+  a product of an infinite endpoint and a zero endpoint is `0` inside the
+  fold (the library's convention: `Enclosure(0, +oo) * Enclosure(0, 1)` is
+  `Enclosure(0, +oo)`).
+- `divide`: `x / [c, d]` is `x * [1/d, 1/c]` when `0 ∉ [c, d]`; `[0, d]`
+  with `d > 0` gives `x * [1/d, +oo]` and `[c, 0]` with `c < 0` gives
+  `x * [-oo, 1/c]` (a zero ENDPOINT: the half-line, as the library); `0`
+  inside gives the hull; `x / Enclosure(0, 0)` is indeterminate. A point
+  divided by an enclosure follows the same rule.
+- `power`, which `Sqrt`, `Root`, `Square` and `Exp` reach (they are
+  arithmetic operators of group 1, never apply sites: `Sqrt(x)` is
+  `power(x, 1/2)`, `Root(x, n)` is `power(x, 1/n)`, `Square(x)` is
+  `power(x, 2)`, `Exp(x)` canonicalizes to `Power(e, x)`). A POINT exponent
+  is read first, as the library's `pow` does: an integer `n`: `n = 0` gives
+  `Enclosure(1, 1)`; `n > 0` even gives `[min(|a|, |b|)^n, max(|a|, |b|)^n]`
+  when `0 ∉ [a, b]` and `[0, max(|a|, |b|)^n]` otherwise; `n > 0` odd gives
+  `[a^n, b^n]`; `n < 0` is `1 / x^|n|` by the `divide` rule (so
+  `Enclosure(0, 1)^-1` is `Enclosure(1, +oo)`). A rational exponent `p/q` in
+  lowest terms with `q` odd uses the real branch: the `q`-th root of the
+  base by the real branch (`nthRoot`, the library's `powRationalRaw`), then
+  the integer power `p` by the integer rule above (`Root(Enclosure(-8, 8),
+  3)` is `Enclosure(-2, 2)`, as `Root(-8, 3)` is `-2` for a number;
+  `Enclosure(-8, 8)^(2/3)` is `Enclosure(0, 4)`). A FLOAT exponent is read
+  as the interpreter reads it for a number: the rational `p/q` with an odd
+  `q` when that read succeeds (`(-32)^0.2` is `-2`, so
+  `Enclosure(-32, 32)^0.2` is `Enclosure(-2, 2)`; under `.N()` the
+  library's `powRational`/`powRealBranch`), else as below. With `q` even,
+  or a real exponent that is not read as such a rational, the base is
+  clipped to `[0, +oo)` (`Enclosure(-1, 4)^(1/2)` is `Enclosure(0, 2)`) and
+  a base entirely negative is indeterminate; the image is `[a^r, b^r]` for
+  `r > 0` and `[b^r, a^r]` for `r < 0` on the clipped base, with the
+  `divide` rule at a zero endpoint. A zero base:
+  `Enclosure(0, 0)^r` is `Enclosure(0, 0)` for `r > 0`, `Enclosure(1, 1)`
+  for `r = 0`, indeterminate for `r < 0`. An ENCLOSURE exponent `x^[c, d]`: a
+  point enclosure `y` is read as its point first (`(-2)^Enclosure(2, 2)` is
+  `Enclosure(4, 4)`); otherwise, for a point base `x > 0`, the result is
+  `[x^c, x^d]` when `x > 1`, `[x^d, x^c]` when `0 < x < 1`, `[1, 1]` when
+  `x = 1` (`2^Enclosure(1, 3)` is `Enclosure(2, 8)`; each endpoint is an
+  exact `Power` that `evaluate()` folds); for an enclosure base with
+  `lo > 0`, the min and max of the four corner powers (the library's
+  `powIntervalRaw`); under `.N()` the library's `powInterval`, the function
+  the lowering uses; a base that is `ExponentialE` (what `Exp(x)`
+  canonicalizes to) uses `exp` on both routes (`Exp(Enclosure(0, 1))` is
+  `Enclosure(1, e)`; under `.N()` and when compiled `_IA.exp`), as the
+  target emits `_IA.exp` for a numeric `Power(e, x)`. ONE KERNEL PER
+  EXPONENT FORM, used by the `.N()` route and the compiled hook alike (the
+  kernels give different doubles, so the "same endpoints" promise needs
+  one choice): a point exponent `2` → `square`; `1/2` (`Sqrt`, `Root(x,
+  2)`, `x^(1/2)`, `x^0.5`) → `sqrt`; another integer `n` → `pow(x, n)`; a
+  rational `p/q` with `q` odd, or a float read as one → `powRational(x,
+  p, q)`; a float not read as a rational → `powRealBranch`; any other real
+  exponent → `pow`; a base `e` → `exp`; a non-point exponent →
+  `powInterval`. A point exponent whose integer, numerator, denominator or
+  root index is not a SAFE integer (`|n| > 2^53`: the kernel ABI takes a
+  double and loses the parity of `9007199254740993`) is handled by the
+  exact rule under `evaluate()` (the parity is known symbolically), and
+  under `.N()` or compiled the hook leaves the call unevaluated / declines. With a base that is not provably positive (`lo <= 0`,
+  or a point `<= 0` with a non-point exponent) the call stays unevaluated,
+  under `.N()` too (the hook does not call the library for it), so the
+  `interval-js` lowering of such a power declines, the routes agreeing by
+  refusal. The library's `powInterval` answers `empty` for `(-2)^[1, 2]`,
+  which is unsound (`(-2)^2` exists) for every `interval-js` user; that
+  kernel is fixed in phase 3 regardless (CE-522.6: for a negative point
+  base `b` and an exponent `[c, d]`, the symmetric hull `[-M, M]` with
+  `M = max(|b|^c, |b|^d)`, which covers every defined real-branch value,
+  the odd-denominator rationals included: `(-2)^[1, 2]` gives `[-4, 4]`,
+  since `(-2)^(5/3) ≈ -3.17` lies outside the hull `[-2, 4]` of the integer
+  points).
+- `compare`, in this order: (1) when both are points, `0` if they are
+  equal (exact points by `isSame`/exact comparison; with a float on either
+  side, within `context.tolerance` when `.is()` sets it, else the engine
+  tolerance), so `Enclosure(1, 1).is(1.05, 0.1)` is `true` and
+  `Enclosure(1, 1).is(1.05)` is `false`; (2) `-1` when `b < c`, `1` when
+  `a > d`; (3) under 4.9.3 part 2 (b): `'<='` when `b = c` and `'>='` when
+  `a = d`, decided EXACTLY (no tolerance; a float endpoint equal as a
+  double counts), which covers a point against an enclosure that starts
+  at it (`Enclosure(1, 1)` against `Enclosure(1, 2)` is `'<='`); (4) else
+  `undefined`: the comparison stays unevaluated, because an order may
+  exist (Mathematica does the same). An infinite NUMBER operand is read by
+  `compare` and `eq` as the point `[±oo, ±oo]` with the same steps
+  (`Enclosure(0, 1) < +oo` is `True`, `Enclosure(0, +oo) <= +oo` is
+  `True`); only the arithmetic hooks turn it into the indeterminate value.
+  The truth table of `'<='`/`'>='` is in 4.9.3. `Max`, `Min`, `Sort`
+  and `Clamp` read `compare` (4.3: never apply sites), so `Max` of two
+  overlapping enclosures has no answer from `compare`, while the compiled
+  `_IA.max` and Mathematica give the hull of the extrema: the other part
+  of 4.9.3.
+- `eq` (on the operator definition; 4.4 asks it when `compare` answers
+  `undefined`): `true` when both are the same point, `false` when the
+  enclosures are disjoint, else `undefined` (`Enclosure(0, 2) =
+  Enclosure(1, 3)` stays unevaluated: the two enclosed reals may be equal;
+  `Enclosure(0, 1) = Enclosure(0, 1)` is `True` only because the two
+  operands are the same expression, `isSame` first). `Enclosure(1, 1) = 1`
+  is `True`.
+- `apply` (the image of a numeric function at an apply site of 4.2; an
+  operator that is not in this table leaves the call unevaluated with the
+  enclosure, as `Measurement` does for an operator with no rule). The
+  second parameter of a two-parameter operator (the base of `Log`, the
+  step of `Round`, the divisor of `Mod`, the second operand of `Arctan2`
+  and `Hypot`) must be a point (class 1 or 2) unless the row says
+  otherwise; an enclosure there leaves the call unevaluated. The
+  critical-point handling of every operator in this table is part of
+  phase 3 (not a follow-up): the table is exactly what the library's lifted
+  functions implement, and the exact route mirrors them.
+  - monotone, the image from the endpoints: `Ln`, `Log` with one operand
+    (base 10) or two (a real base `> 0`, `≠ 1`; a base in `(0, 1)` reverses
+    the image; a non-real, zero or unit base leaves the call unevaluated;
+    `Lb`, `Lg`, `Log2`, `Log10` canonicalize to `Log` and reach the hook as
+    it), all clipped to `(0, +oo)` (a domain boundary at an endpoint gives
+    `-oo`, entirely outside is indeterminate), `Sinh`, `Tanh`, `Arsinh`,
+    `Arctan`, `Artanh` (clipped to `[-1, 1]`, `±oo` at the boundary: the
+    kernel `atanhRaw` clips the boundary to a finite value today and is
+    fixed in phase 3, CE-522.2), `Arcosh` (clipped to `[1, +oo)`), `Arcsin`/`Arccos` (clipped to
+    `[-1, 1]`), `Erf`, `Erfc`, `Floor`/`Ceil`/`Round`/`Truncate` (the image
+    of the endpoints; each takes the optional step of its signature as a
+    point: `|step|` is used, a fractional step gives non-integer endpoints
+    (`Round(Enclosure(0.1, 0.9), 0.25)` is `Enclosure(0, 1)`), a zero step
+    is indeterminate (`roundingStepDefined()`), an infinite step is refused
+    at boxing by the signature (`step: real?`), an enclosure step leaves
+    the call unevaluated; `Round`
+    breaks a tie as the engine's `Round` does for a number), `Fract` (the library's rule: `[0, 1)` across an integer; the kernel
+    `fractRaw` computes `x - floor(x)` with no outward rounding and
+    excludes the true value for a tiny negative point, fixed in phase 3,
+    CE-522.9);
+  - with known critical points, the image from the endpoints and the
+    interior critical points: `Sin`, `Cos` (period by period; the hull is
+    `[-1, 1]` when the width is at least `2π`; the trigonometric heads
+    honor `ce.angularUnit` as they do for a number: the hook converts the
+    enclosure to radians first with the exact factor of the unit (as
+    `angularQuantityToRadians()` does for a quantity), so in degree mode
+    `Sin(Enclosure(0, 90))` is `Enclosure(0, 1)`, and the inverse heads
+    `Arcsin`, `Arccos`, `Arctan`, `Arctan2` convert their result back to
+    the unit; on `interval-js` the target applies `rewriteAngularUnit()` before any
+    hook runs, so the hooks see radians, but that rewrite uses FLOAT
+    factors (`Math.PI / 180`, `symbolic/angular-unit.ts`), whose nearest
+    double is below the true factor, so a compiled `Cos` at a quarter turn
+    in `turn` mode excludes `0`: phase 3 makes the rewrite on
+    `interval-js` use the directed enclosure of each factor (`{ lo:
+    down(π/180), hi: up(π/180) }`, and of `180/π` for the inverse heads)
+    for EVERY operand, a correctness fix for all `interval-js` users
+    (CE-522.8), so containment holds on both routes; the endpoints under
+    `.N()` (exact product, then one conversion) and compiled (directed
+    product) may then differ in a non-radian mode by the rounding of the
+    factor, a third accepted difference listed in
+    `docs/COMPILATION-MODEL.md`), `Tan`, `Cot`, `Sec`, `Csc`
+    (a pole inside gives the hull; a pole at an endpoint the half-line),
+    `Cosh` (minimum at 0), `Abs` (`[0, max(|a|, |b|)]` when `0 ∈ [a, b]`,
+    else the monotone image), `Gamma` with one operand (the library's extremum tables on
+    `(0, +oo)` and on each negative strip `(-n-1, -n)`; a pole inside gives
+    the hull; the two-operand incomplete gamma `Gamma(s, x)` leaves the
+    call unevaluated and its lowering declines), `Sign` (the enclosure of the signs taken: `[-1, 1]` when
+    `0` is strictly inside, `[0, 1]` for `[0, b]` with `b > 0`, `[-1, 0]`
+    for `[a, 0]` with `a < 0`, `[0, 0]` for the point zero, `[1, 1]` or
+    `[-1, -1]` otherwise), `Heaviside` (the same shape with the engine's
+    value at zero), `Mod` (a point divisor `≠ 0`; the library's jump rule; an
+    enclosure divisor leaves the call unevaluated, so the `interval-js`
+    lowering of `Mod` with a non-point divisor declines, the routes
+    agreeing by refusal; the kernel `modRaw`, which answers an unsound
+    `[1, 1]` for `Mod(5, [2, 4])` for every `interval-js` user, is fixed in
+    phase 3 regardless, CE-522.1).
+    A critical VALUE that has no closed form (the minimum of `Gamma` at
+    `1.4616…`) makes that endpoint a float under `evaluate()` too, rounded
+    outward, with `isExact` false: `Gamma(Enclosure(1, 2))` is
+    `Enclosure(0.8856031944108885, 1)` under `evaluate()` (the lower
+    endpoint is the library's) and the library's answer under `.N()`.
+  - two operands: `Hypot(x, y)` (both may be enclosures: the monotone image
+    on `[0, +oo)` of each `|·|`), `Arctan2(y, x)` (both may be enclosures;
+    the library's quadrant rule; the branch cut inside gives
+    `Enclosure(-Pi, Pi)`, the library's `singular` WITH that value),
+    `Mod` and `Log` as above.
+  - collections: `Mean` of a list of enclosures and points is the sum
+    through `add` divided by the count (an apply site with a collection
+    parameter, as 4.3 routes it). `Median`, `Variance`,
+    `StandardDeviation`, `Mode` and the other statistics stay unevaluated.
+    `Sum` and `Product` fold through `add` and `multiply` (4.3). An empty
+    list follows the operator's own rule (`Sum([])` is `0`, not an
+    enclosure).
+  - Under `evaluate()` with exact endpoints the images are exact
+    (`Sin(Enclosure(0, Pi))` is `Enclosure(0, 1)`; the critical-point test
+    `Pi/2 ≤ Pi` is decided exactly), under `.N()` or with a float endpoint
+    the library's lifted function gives the answer, mapped as above.
+- An infinite point (`+oo`, `-oo`) as the second operand of `Hypot`,
+  `Arctan2`, `Log`, or as an element of the list of `Mean`, gives the
+  indeterminate value, as it does beside an arithmetic hook (the step of
+  `Round`/`Floor`/`Ceil`/`Truncate` and the divisor of `Mod` are typed
+  `real` by their signatures, so an infinite one is refused at boxing).
+- `resultType`: `enclosure` for `Abs`, `Sin`, `Cos`, `Sinh`, `Cosh`,
+  `Tanh`, `Arctan`, `Arsinh`, `Erf`, `Erfc`, `Fract`, `Sign`, `Heaviside`;
+  `enclosure | nan` for `Floor`, `Ceil`, `Round`, `Truncate` (a zero
+  step), `Hypot`, `Arctan2`, `Mean` (an infinite point) and for
+  the head `Enclosure` itself;
+  `enclosure | nan` for the arithmetic operators (`Add`, `Negate`,
+  `Subtract`, `Multiply`, `Divide`, `Power`, `Sqrt`, `Root`, `Square`,
+  `Sum`, `Product`; `Exp` canonicalizes to `Power`) and the
+  domain-restricted functions (`Ln`, `Log`, `Arcsin`, `Arccos`, `Artanh`,
+  `Arcosh`, `Tan`, `Cot`, `Sec`, `Csc`, `Gamma`, `Mod`), because their hook
+  can answer the indeterminate value; `boolean` for the comparisons (the
+  generic rule).
+
+**Collections.** A literal list of enclosures is typed `list<enclosure^n>`
+and broadcasts: `Sin([Enclosure(0, 1), 2])` is `[Enclosure(0, Sin(1)),
+Sin(2)]`, typed `list<enclosure | real^2>` after `evaluate()` (4.5: the cell
+of `Sin(2)` is `real`; the printed spelling of the shipped kinds). `Measurement` and `Quantity` are declared `(value, value)`, so
+their signatures admit an enclosure; phase 3 adds to their canonical
+handlers a check that refuses an enclosure operand with `incompatible-type`
+at boxing (`Measurement(Enclosure(0, 1), 0.1)`, `Quantity(Enclosure(0, 1),
+m)`), and the same check in their evaluate handlers after the operands are
+evaluated (`Measurement(v, 0.1)` with `v: value` later assigned an
+enclosure is `incompatible-type` at evaluation, on the async route too);
+the `Enclosure` handler refuses a kind-value endpoint the same way (above). A
+set operand of `Measurement` (`Measurement(Interval(0, 1), 0.1)`) is not
+changed by this plan.
+
+**LaTeX.** `\mathrm{Enclosure}(a, b)` round trip; `\operatorname{Enclosure}`
+parses too. No bracket syntax: `[a, b]` is a list.
+
+**Compilation** (Q7). The enclosure declares the ordinary contract of
+4.8 for the target `interval-js`, and nothing for any other target (which
+declines with the kind message, as `Measurement` and `Quantity` do). The
+first revision of this section delegated to the target's own lowering
+through a `native` flag; the review showed that this cannot be made to
+agree with the interpreter (the target cannot decline one operation, it
+composes the library's `partial`/`singular` metadata that the interpreter
+maps away, and it keeps its own comparison rules), so there is NO `native`
+field. The hooks emit the same `_IA` calls the target uses, operation by
+operation, and decline (`undefined`) exactly where the interpreter leaves
+a call unevaluated, so the two routes agree by construction. One amendment
+of 4.8 for this target: on `interval-js` an operand that only MAY hold an
+enclosure (`number | enclosure`, the value of `If(t > 0, x, 0)` with
+`x: enclosure`) is dispatched to the hooks like a certain one
+(`compileKindOperation()` reads `kindArmNames()` instead of
+`certainKindTypesOf()` when the target is `interval-js` and the kind is
+the enclosure, and `BaseCompiler.compile()` sets up the kind lowering on
+that target when a free symbol's type has an `enclosure` ARM, not only
+when the expression holds an enclosure for certain, so `y: real |
+enclosure` carries its entry check and reaches the hooks), because on this target a number is a point interval and
+the hook's `_IA` code is valid for it; so `Factorial(If(t > 0, x, 0))`
+declines, as the interpreter leaves `Factorial(x)` unevaluated, and
+`Sqrt(If(t > 0, x, 0)) < 3` goes through `_IA.enclose`. On every other
+target the 4.8 rule stands (a certain kind declines, a possible kind
+compiles as a number):
+
+- `lowered()` answers `'interval'`.
+- `value` lowers a literal `Enclosure(a, b)` with class 1 or class 2
+  endpoints to the record literal `{ lo: <double>, hi: <double> }` with the
+  outward conversion above, as `{ lo: min(down(a), down(b)), hi:
+  max(up(a), up(b)) }` when the canonical order of the endpoints was
+  undecided (`Enclosure(Sin(10^600), 0)`), so the record is never
+  reversed; a class 3 endpoint declines.
+- `add`/`multiply` emit `_IA.add`/`_IA.mul` folds over the operands; a
+  number operand is a point: `_IA.point(c)` only when `c` is exactly a
+  double, else the record `{ lo, hi }` of its outward conversion (a decimal
+  literal `0.1`, a rational, a class 2 constant), the same conversion as
+  `value` and as the interpreter under `.N()`, and the same for a point
+  second operand of an `apply` operator (`Log` base, `Round` step, `Mod`
+  divisor, `Hypot`/`Arctan2`); an infinite or complex number LITERAL
+  declines, and a symbol whose type admits an infinity (`y: number`) is
+  allowed: the folds are wrapped in `_IA.enclose` too, and `_IA.enclose`
+  maps an interval with a `NaN` endpoint or an infinite SINGLETON to
+  `empty`, so `x + y` run with `y: Infinity` answers `empty` where the
+  interpreter answers the indeterminate value, and
+  `x + Max(x, +oo)` (an infinite singleton from the extremum, 4.9.3)
+  answers `empty` too while `Max(x, +oo)` alone keeps the runner's
+  `[+oo, +oo]` as its result.
+- `apply(operator, args, compile, context)` emits, for exactly the
+  operators of the `apply` table except `Mean`, the arithmetic operators of
+  the hooks (`Negate`, `Subtract`, `Divide`, `Power`, `Sqrt`, `Root`,
+  `Square`), the six comparisons, and, under 4.9.3 part 1 (b), the five
+  extrema heads (`Max`, `Min`, `Clamp`, `ElementMax`, `ElementMin` through
+  `_IA.max`, `_IA.min`, `_IA.clamp`), the `_IA` call of that operator
+  wrapped in a new runtime helper `_IA.enclose(result)`, which
+  applies the mapping table above at RUN time (`interval` and `partial` →
+  the value with no metadata, `singular` with a value → that value,
+  `singular` without a value and `entire` → the whole line, `empty` →
+  `empty`), so a later operation never sees the clipping metadata
+  (`Sqrt(x) < 3` with `x` an enclosure `[-1, 4]` is `true`, as the
+  interpreter's `Enclosure(0, 2) < 3` is). `Power` emits the scalar
+  rational and real-branch paths (`_IA.powRational`, `_IA.powRealBranch`,
+  `_IA.pow`) for a point exponent, which a point ENCLOSURE exponent is read
+  as (`x^Enclosure(1/3, 1/3)` with `x` the point `-8` gives `-2`), and
+  `_IA.powInterval` for a non-point exponent only when the base is provably
+  positive from its type or its literal; otherwise it declines. Every
+  operator that the interpreter leaves unevaluated (an operator outside
+  the table, such as `Factorial`; `Log` with an enclosure base; `Round`
+  with an enclosure step; `Mod` with a non-point divisor; a power with a
+  base that is not provably positive and a non-point exponent) DECLINES
+  with the kind message (fail-closed, `docs/COMPILATION-MODEL.md`), even
+  though the target lowers the same head for numbers; so do `Mean`, `Sum`
+  and `Product` (the library has no `mean`/`sum`/`product`, and the hook
+  cannot emit the target's loop; their list forms decline by the
+  collection limit anyway). On `interval-js`, a kind decline of an
+  expression with an input typed by a kind is NOT turned into the
+  interpreter fallback of `compile(…, { fallback: true })`: it throws with
+  the kind message even with `fallback: true`, because that target's
+  fallback collapses each `{ lo, hi }` input to its midpoint
+  (`collapseIntervalInput()`, `interval-javascript-target.ts`) and would
+  hand a NUMBER to a symbol typed `enclosure`. The `javascript` target and
+  a kind result with no kind-typed input keep today's behavior (a decline
+  with `fallback: true` runs the interpreter).
+- The comparisons emit `_IA.less`, `_IA.lessEqual`, …, `_IA.equal`,
+  `_IA.notEqual` through `_IA.enclose` on their operands; the compiled
+  answer is the target's three-valued one (`'maybe'` where the interpreter
+  stays unevaluated; `'true'` for the touching `LessEqual`, which 4.9.3
+  part 2 makes `True` in the interpreter too). Two accepted differences,
+  stated in `docs/COMPILATION-MODEL.md`: the interpreter's identity
+  shortcut for IDENTICAL operands in all six comparisons (`c = c` and
+  `c <= c` are `True`, `c < c` and `c != c` are `False` by `isSame` before
+  any hook, while the compiled `_IA.equal(c, c)` and `_IA.lessEqual(c, c)`
+  are `'maybe'` for a non-point `c`: the compiled code has no identity
+  information), and the engine tolerance of float points (the compiled
+  comparisons compare doubles exactly, as the `javascript` target does for
+  numbers).
+- `entry(value)` checks the record `{ lo, hi }` of two numbers with
+  `lo <= hi`, `±Infinity` allowed but not the same infinity twice, `NaN`
+  refused, or a finite number (a point). The interval runner has no kind
+  entry check today (that is why `kindLoweringOf()` refuses every interval
+  target): phase 3 adds one. The compiled result carries the names of its
+  free symbols typed by a kind, with their `entry` callbacks (as the
+  `javascript` runner carries them, `checkEntry()`); the interval runner's
+  `run()` applies each callback to its named input BEFORE `processInput()`
+  and OUTSIDE the `try` whose `catch` answers `entire`, so a malformed,
+  reversed, `NaN` or infinite-singleton value throws at entry. Every other
+  input keeps today's pass-through, including the `NaN` absence marker of
+  a `real | missing` variable. The two phase-1 limits of 4.8 STAY for the
+  enclosure: `store()` declines a result that carries a kind entry callback
+  (a stored artifact cannot carry it), so `shippable` is `false` and the
+  kernel pool is not used; and a `list<enclosure>` input declines
+  (`entry` and `lowered` are defined for a scalar). The `interval-js`
+  `broadcast()` and `broadcastAsync()` DO pass `{ lo, hi }` cells (an input
+  array read with stride 2, `broadcastIntervals()` in
+  `compilation/broadcast.ts`) and go around the `run()` proxy through
+  `rawCall`: phase 3 makes `broadcast()`/`broadcastAsync()` apply the entry callback
+  of a kind-typed input to every cell BEFORE the loop (outside the per-cell
+  `try` of `broadcastIntervalsRange()`, whose `catch` would turn a throw
+  into an error cell), so a reversed, `NaN` or infinite-singleton cell
+  rejects the whole call (a throw, or a rejected promise). Lifting the two
+  limits is a later step (a serializable entry check), recorded in CE-507.
+- `freeSymbolTypes.x` for `x: enclosure` reports
+  `{ type: 'enclosure', lowered: 'interval' }`.
+- Public type changes of the defaults of 4.9.3: `ArithmeticDefinition`
+  gains the optional `extremum` hook, and the answer type of `compare`
+  gains `'<='` and `'>='` (for section 6).
+
+Acceptance: `compile(ce.parse('\\sin(x) + c'), { to: 'interval-js' })` with
+`c := Enclosure(0, 1)` assigned (`e` is Euler's number and cannot be
+assigned), `.run({ x: { lo: 0, hi: 1 } })` gives `{ kind: 'interval',
+value }` where `value` equals the value of
+`IntervalArithmetic.add(IntervalArithmetic.sin({ lo: 0, hi: 1 }).value,
+{ lo: 0, hi: 1 })`, measured by running the compiled code in the test
+(the direct library call gives `{ lo: 0, hi: 1.841470984807897 }`).
+
+**Public changes (for section 6).** The head `Enclosure`, the kind primitive
+`enclosure`, the LaTeX `\mathrm{Enclosure}`, the kind entry check of the
+`interval-js` runner (only for inputs typed by a kind; other inputs are
+unchanged), the runtime helper `_IA.enclose` (a new runtime version), the
+kernel fixes of CE-522 (visible to every `interval-js` user: `mod` with an
+interval divisor, `atanh` at the boundary, endpoint poles, negative powers
+over a zero endpoint and their rounding, `powInterval` with a negative
+base), the `incompatible-type` refusals of an enclosure inside
+`Measurement`/`Quantity`. New files (for sections 7 and 11):
+`library/enclosure.ts`, `library/enclosure-arithmetic.ts`,
+`test/compute-engine/enclosure-kind.test.ts`,
+`test/compute-engine/enclosure-apply.test.ts`,
+`test/compute-engine/enclosure-compile.test.ts`.
+
+**Documentation and records.** `doc/06-guide-augmenting.md` (the enclosure
+as the third library kind, with its `interval-js` contract as the example
+of a kind that compiles), `doc/08-guide-types.md` (`enclosure`,
+the doubles-only limit under `.N()`), `docs/TYPE-SYSTEM.md`,
+`docs/COMPILATION-MODEL.md` (the interval runner's kind entry check, the
+two accepted comparison differences, `_IA.enclose`), `CHANGELOG.md` (Features), `src/epsil/docs` regenerated, ROADMAP
+CE-507 (phase 3 done; the later step that lifts the `store()` and
+`list<enclosure>` limits for the enclosure). The user's
+decision of 2026-10-26: #477 is closed when phase 3 lands, with a comment
+that names the three phases (this supersedes the sentence of 4.9 that
+phase 3 is not needed for #477: it is not needed for the mechanism, and
+the issue stays open until all three phases are delivered). #416 gets a
+comment that names `Enclosure` and invites the reporter to compare their
+critical-point tables with the shipped ones; optional extras only (the
+phase-3 tables are complete for the operators of the `apply` table).
+
+**Acceptance rows** (every row on the three routes `ce.function`, `ce.box`,
+`ce.parse`; under `evaluate()` as written, and under `.N()` the library's
+answer for the same doubles after the outward conversion, which must
+contain the exact value for the rational operations, unless the row says
+one route):
+
+| Expression | Value |
+| --- | --- |
+| `Enclosure(2, 1)` | `Enclosure(1, 2)` |
+| `Enclosure(3)` | `Enclosure(3, 3)` |
+| `Enclosure(-oo, 0)` | valid, `Enclosure(-oo, 0)` |
+| `Enclosure(Interval(0, 1))`, `Enclosure(Interval(0, +oo))` | `Enclosure(0, 1)`, `Enclosure(0, +oo)` |
+| `Enclosure(Interval(2, 1))`; `Enclosure(Interval(a, 2))` with `a := 3` | indeterminate (an empty set), both |
+| `Enclosure(Interval(0, 1), 2)` | `incompatible-type` at boxing |
+| `Enclosure(i, 2)`, `Enclosure(~oo, 2)`, `Enclosure(Measurement(1, 0.1), 2)`, `Enclosure(Enclosure(0, 1), 2)` | `incompatible-type` at boxing |
+| `Enclosure(NaN, 2)`, `Enclosure(+oo, +oo)` | indeterminate (`isNaN`) |
+| `Enclosure(a, 2)` with `a := 3` | `Enclosure(2, 3)` after `evaluate()`; before the assignment `Enclosure(a, 2) + 1` stays `Add(Enclosure(a, 2), 1)` |
+| `Enclosure(0, 1) + Enclosure(1/3, 2)` | `Enclosure(1/3, 3)` |
+| `Enclosure(0, 1) + 2` | `Enclosure(2, 3)`, and `.N()` is `Enclosure(2, 3)` |
+| `Enclosure(0, Pi).N()` | the upper endpoint is the double above π |
+| `Enclosure(0.1, 0.2).N()` | `{ lo: 0.09999999999999999, hi: 0.2 }` |
+| `Enclosure(Sin(10^600), 0)` | kept as written; `Enclosure(Sin(10^600), 0) + 1` is an enclosure with float endpoints ordered `[min, max]`, `isExact` false; compiled `value` emits the ordered record |
+| `Enclosure(0, 1) + i` | unevaluated |
+| `Enclosure(0, 1) + Measurement(1, 1/10)` | unevaluated |
+| `Enclosure(0, 1) + Interval(0, 1)` | `incompatible-type` at evaluation (a set operand, as beside any kind) |
+| `Enclosure(0, 1) + +oo`, `Enclosure(-oo, 0) + +oo` | indeterminate |
+| `Sin(Enclosure(0, 1)) + 1` | `Enclosure(1, 1 + Sin(1))` |
+| `-Enclosure(1, 2)` | `Enclosure(-2, -1)` |
+| `Enclosure(1, 2) - Enclosure(1, 2)` | `Enclosure(-1, 1)` (no dependency tracking) |
+| `Enclosure(-1, 2) * Enclosure(3, 4)` | `Enclosure(-4, 8)` |
+| `Enclosure(0, +oo) * Enclosure(0, 1)` | `Enclosure(0, +oo)` |
+| `Enclosure(1, 2) / Enclosure(4, 8)` | `Enclosure(1/8, 1/2)` |
+| `1 / Enclosure(0, 1)` | `Enclosure(1, +oo)` |
+| `1 / Enclosure(-1, 1)` | `Enclosure(-oo, +oo)` |
+| `1 / Enclosure(0, 0)` | indeterminate |
+| `Enclosure(-2, 3)^2` | `Enclosure(0, 9)` (`.N()`: `square`) |
+| `Enclosure(-1, 1)^9007199254740993` | `Enclosure(-1, 1)` under `evaluate()` (odd); unevaluated under `.N()`, the lowering declines |
+| `Enclosure(-2, 3)^3` | `Enclosure(-8, 27)` |
+| `Enclosure(0, 1)^-1` | `Enclosure(1, +oo)` |
+| `Enclosure(-1, 4)^(1/2)`, `Sqrt(Enclosure(-1, 4))` | `Enclosure(0, 2)` |
+| `Enclosure(-4, -1)^(1/2)` | indeterminate |
+| `Root(Enclosure(-8, 8), 3)`, `Enclosure(-8, 8)^(1/3)` | `Enclosure(-2, 2)` |
+| `Enclosure(-8, 8)^(2/3)` | `Enclosure(0, 4)` |
+| `Enclosure(-32, 32)^0.2` | `Enclosure(-2, 2)` |
+| `2^Enclosure(1, 3)` | `Enclosure(2, 8)` |
+| `(-2)^Enclosure(2, 2)` | `Enclosure(4, 4)` (a point exponent is read first) |
+| `(-2)^Enclosure(1, 2)` | unevaluated, under `.N()` too; the `interval-js` lowering declines |
+| `Exp(Enclosure(0, 1))` | `Enclosure(1, e)`; `.N()`: the library's `exp` of `[0, 1]`, as the compiled `_IA.exp` |
+| `Sin(Enclosure(0, 1))` | `Enclosure(0, Sin(1))`; `.N()`: `Enclosure(0, 0.8414709848078966)` (the library's answer) |
+| `Sin(Enclosure(0, Pi))` | `Enclosure(0, 1)` |
+| `Sin(Enclosure(0, Arcsin(1)))` | `Enclosure(0, 1)` (`Arcsin(1)` evaluates to `Pi/2` before the hook) |
+| `Sin(Enclosure(0, Sin(10^600)))` | an enclosure with outward-rounded float endpoints, `isExact` false (the order of `Sin(10^600)` against the critical points is undecided) |
+| `Cos(Enclosure(0, 7))` | `Enclosure(-1, 1)` |
+| `Sin(Enclosure(0, 90))` with `ce.angularUnit = 'deg'` | `Enclosure(0, 1)`; `Arcsin(Enclosure(0, 1))` is `Enclosure(0, 90)`; compiled on `interval-js` in `turn` mode, `Cos(x)` run with `x: { lo: 0.25, hi: 0.25 }` contains `0` (after CE-522.8) |
+| `Enclosure(f(1), 2) + 1` with `f: (real) -> real` declared, no body | stays `Add(…)` (class 3: no numeric value) |
+| `Tan(Enclosure(0, Pi))` | `Enclosure(-oo, +oo)` |
+| `Tan(Enclosure(0, Pi/2))` | `Enclosure(0, +oo)`; `.N()` and compiled: `Enclosure(-oo, +oo)` (the converted endpoint is above the pole) |
+| `Gamma(Enclosure(1, 2), 3)` | unevaluated |
+| `Abs(Enclosure(-1, 2))` | `Enclosure(0, 2)` |
+| `Abs(Interval(-1, 2))` | `+oo` (the set's cardinality, unchanged) |
+| `Ln(Enclosure(-2, -1))` | indeterminate |
+| `Ln(Enclosure(0, 1))` | `Enclosure(-oo, 0)` |
+| `Log(Enclosure(1, 4), 2)` | `Enclosure(0, 2)`; `Log(Enclosure(1, 4), Enclosure(2, 3))` unevaluated; `Lb(Enclosure(1, 4))` reaches the hook as `Log(…, 2)` |
+| `Artanh(Enclosure(0, 1))` | `Enclosure(0, +oo)` (after CE-522.2) |
+| `Arctan2(Enclosure(-1, 1), -1)` | `Enclosure(-Pi, Pi)` |
+| `Mod(Enclosure(5, 7), 3)` | `Enclosure(0, 3)` (the library's jump rule); `Mod(5, Enclosure(2, 4))` unevaluated, and its `interval-js` lowering declines |
+| `Hypot(Enclosure(0, 1), +oo)`, `Mean([Enclosure(0, 1), +oo])` | indeterminate |
+| `Floor(Enclosure(0.5, 2.5))` | `Enclosure(0, 2)` |
+| `Round(Enclosure(0.1, 0.9), 0.25)`, `Round(Enclosure(0, 1), 0)` | `Enclosure(0, 1)`; indeterminate |
+| `Round(Enclosure(0, 1), +oo)` | `incompatible-type` at boxing (the signature) |
+| `Sign(Enclosure(-1, 2))` | `Enclosure(-1, 1)`; `Sign(Enclosure(0, 2))` is `Enclosure(0, 1)` |
+| `Gamma(Enclosure(1, 2))` | `Enclosure(0.8856031944108885, 1)`, `isExact` false |
+| `Gamma(Enclosure(-0.9, -0.1))` | the library's answer (`Enclosure(-10.686287021193804, -3.544643611154795)`) |
+| `Hypot(Enclosure(-3, 3), 4)` | `Enclosure(4, 5)` |
+| `Enclosure(0, 1) < Enclosure(2, 3)` | `True` |
+| `Enclosure(0, 1) < +oo`, `Enclosure(0, +oo) <= +oo` | `True`, `True` |
+| `Enclosure(0, 2) < Enclosure(1, 3)` | unevaluated |
+| `Enclosure(0, 1) <= Enclosure(1, 2)` | `True`; `Enclosure(0, 1) > Enclosure(1, 2)` is `False`; `Enclosure(0, 1) < Enclosure(1, 2)` unevaluated; `Enclosure(1, 1) <= Enclosure(1, 2)` is `True` (4.9.3 part 2, default (b)) |
+| `Enclosure(1, 1) = 1` | `True`; `Enclosure(1, 1).is(1.05, 0.1)` is `true`; `Enclosure(1, 1).is(1.05)` is `false` |
+| `Enclosure(0, 2) = Enclosure(1, 3)` | unevaluated; `Enclosure(0, 1) = Enclosure(2, 3)` is `False`; with `c := Enclosure(0, 1)`, `c <= c` is `True` and `c < c` is `False` (identity) |
+| `Max(Enclosure(0, 1), Enclosure(2, 3))` | `Enclosure(2, 3)` |
+| `Max(Enclosure(0, 2), Enclosure(1, 3))` | `Enclosure(1, 3)`; `ElementMax` the same (4.9.3 part 1, default (b)) |
+| `Max(Enclosure(0, 1), +oo)`, `Min(Enclosure(0, 1), +oo)`, `Clamp(Enclosure(0, 1), -oo, +oo)` | `+oo`; `Enclosure(0, 1)`; `Enclosure(0, 1)` |
+| `x + Max(x, +oo)` with `x: enclosure` | indeterminate; compiled on `interval-js`: `empty` |
+| `Fract(Enclosure(-1e-20, -1e-20)).N()` | contains the true value (after CE-522.9) |
+| `Sum([Enclosure(0, 1), Enclosure(1, 2), 3])` | `Enclosure(4, 6)` |
+| `Mean([Enclosure(0, 1), Enclosure(1, 2), 3])` | `Enclosure(4/3, 2)`; `Median` of the same list unevaluated |
+| `Sin([Enclosure(0, 1), 2])` | `[Enclosure(0, Sin(1)), Sin(2)]`, typed `list<enclosure \| real^2>` after `evaluate()` |
+| `Measurement(Enclosure(0, 1), 0.1)`, `Quantity(Enclosure(0, 1), m)` | `incompatible-type` at boxing; with `v: value` and `Measurement(v, 0.1)` boxed first, `v := Enclosure(0, 1)` makes it `incompatible-type` at evaluation |
+| `x + 1` with `x: enclosure` declared | typed `enclosure` (`x + y` with `y: number` is `enclosure \| nan`); `compile(…, { to: 'javascript' })` declines with the kind message; `{ to: 'interval-js' }` compiles, `freeSymbolTypes.x` is `{ type: 'enclosure', lowered: 'interval' }`, `.run({ x: { lo: 0, hi: 1 } })` gives `{ kind: 'interval', value: { lo: 1, hi: 2 } }`; `.run({ x: { lo: 1, hi: 0 } })`, `.run({ x: { lo: NaN, hi: 1 } })` and `.run({ x: { lo: Infinity, hi: Infinity } })` throw at entry; `store()` declines (the kind entry callback) and `shippable` is `false`; `compile(…, { fallback: true })` of `Factorial(x)` throws with the kind message; `.broadcast({ x: [1, 0] })` (one reversed cell) throws before the loop, and `.broadcastAsync({ x: [1, 0] })` rejects |
+| `x + y` with `x: enclosure`, `y: real` compiled on `interval-js` | `.run({ x: { lo: 0, hi: 1 }, y: NaN })` keeps the absence reading of `y` (an `empty`) |
+| `x + y` with `x: enclosure`, `y: number` compiled on `interval-js` | `.run({ x: { lo: 0, hi: 1 }, y: Infinity })` is `empty` |
+| `Factorial(y)` with `y: real \| enclosure` compiled on `interval-js` | declines (the lowering is set up for an enclosure arm) |
+| `x + 0.1` compiled on `interval-js`, run with `x: { lo: 0, hi: 0 }` | `{ lo: 0.09999999999999999, hi: 0.1 }` (the outward conversion of the promoted scalar), the same as `(Enclosure(0, 0) + 0.1).N()` |
+| `Max(x, c)` with `c := Enclosure(1, 3)` compiled on `interval-js`, run with `x: { lo: 0, hi: 2 }` | `{ lo: 1, hi: 3 }` (4.9.3 part 1 (b)) |
+| `Sqrt(x) < 3` compiled on `interval-js`, run with `x: { lo: -1, hi: 4 }` | `'true'` (the clipping metadata is removed by `_IA.enclose`) |
+| `Factorial(x)`, `Factorial(If(t > 0, x, 0))`, `Log(x, c)` with `c: enclosure`, `Mod(5, c)`, `Mean([x, 1])` compiled on `interval-js` | decline with the kind message |
+| `Gamma(Enclosure(0, 1))`, `Gamma(Enclosure(0, 0))` | `Enclosure(1, +oo)`; indeterminate (after CE-522.3) |
+| `Enclosure(-1, 0)^(-2/3)` | `Enclosure(1, +oo)` (after CE-522.3) |
+| `L + 1` with `L: list<enclosure>` declared | declines on `interval-js` (the phase-1 limit stays) |
+| `simplify()` of `Enclosure(0, 1) + Enclosure(1, 2)` | `Enclosure(1, 3)` (the kind fold runs under `simplify()`, as for the other kinds) |
+
+#### 4.9.3 Two parts of one decision for the user (2026-10-26)
+
+Both are cases where the one-answer `compare` hook leaves a comparison or
+an extremum unevaluated while the compiled `interval-js` result (and
+Mathematica) answer. Under the repo's rules a reachable disagreement
+between the interpreter and a compiled result is a defect, so the default
+is to CLOSE the gap in phase 3, not to record it.
+
+1. **`Max`/`Min`/`Clamp`/`ElementMax`/`ElementMin` over overlapping
+   enclosures.** `Max(Enclosure(0, 2), Enclosure(1, 3))`: the compiled
+   `_IA.max` and Mathematica give the hull of the extrema,
+   `Enclosure(1, 3)`. Options: (a) leave it unevaluated and make the
+   enclosure's compiled `apply` decline these heads, so the two routes
+   agree by refusal; (b) add an optional hook
+   `extremum(which: 'max' | 'min', operands: KindOperands, context):
+   Expression | undefined` to `ArithmeticDefinition`, asked BEFORE `compare` by ONE
+   shared dispatch that both extremum paths of `library/arithmetic.ts`
+   reach: `evaluateMinMax()`/`foldExtremumValue()` (which `Max` and `Min`
+   use, scalar, variadic and collection forms, through `extremumOrder()`)
+   and `foldExtremum()`/`scalarExtremum()` (which `ElementMax`,
+   `ElementMin` and `Clamp` and their collection broadcasts use), for the kind of the first kind
+   operand (mixed kinds: the first kind's answer wins, as in 4.4); the
+   enclosure answers the hull `[max(a, c), max(b, d)]` (`min` likewise),
+   with a finite number operand as a point and an INFINITE number operand
+   selected or discarded as a scalar (`Max(Enclosure(0, 1), +oo)` is `+oo`,
+   a number; `Min(Enclosure(0, 1), +oo)` is `Enclosure(0, 1)`;
+   `Clamp(x, -oo, +oo)` is `x`), so the `resultType` of the five heads is
+   `enclosure | signed_infinity`; on `interval-js` a number `+oo` is already
+   the point interval `[+oo, +oo]`, so the compiled `_IA.max` agrees. A
+   measurement does not declare the hook (its extrema stay by nominal
+   through `compare`). Recommended: (b). If nothing is decided: (b).
+2. **The touching `LessEqual`/`GreaterEqual`.** `Enclosure(0, 1) <=
+   Enclosure(1, 2)` is provable (`b = c`), the compiled `_IA.lessEqual`
+   answers `true`, but `compare` can only say `-1` (which would also make
+   `Less` `True`, wrong). Options: (a) leave it unevaluated and make the
+   enclosure's compiled `apply` decline the non-strict comparisons; (b)
+   let `compare` answer `'<='` and `'>='` beside
+   `-1 | 0 | 1 | 'unordered' | undefined`, with this truth table for a
+   `'<='` answer (mirror it for `'>='`): `LessEqual` → `True`; `Greater` →
+   `False`; `Less` → undecided (unevaluated); `GreaterEqual` → undecided;
+   `Equal`/`NotEqual` → `eq` (as for `undefined`); the methods
+   `isLessEqual`/`isGreater` and `isLess`/`isGreaterEqual` the same; a
+   CHAINED comparison applies `orderAnswer()` to each adjacent pair and
+   combines the verdicts by the existing chain rules
+   (`LessEqual(Enclosure(0, 1), Enclosure(1, 2), Enclosure(2, 3))` is
+   `True`, as the compiled conjunction of `_IA.lessEqual` is); only a
+   reader that needs a TOTAL order (`Sort`, the extremum fold without an
+   `extremum` hook) treats it as `undefined`. The
+   mapping lives in ONE function, `orderAnswer(answer, relation)` in
+   `kind-compare.ts`, which every reader of `kindCompare()` (about 25
+   sites in `relational-operator.ts`, `compare.ts`, `kind-compare.ts`,
+   `arithmetic.ts`) goes through, so no site reads the new answers as a
+   number. Recommended: (b). If nothing is decided: (b).
+
 ### 4.10 A library user can do what the library does
 
 The user's rule (2026-10-26): an extension point that only the engine or the
@@ -1238,7 +2011,7 @@ exists. This plan meets it as follows:
    `compare`, the removal of the name-based branches, the `quantity`
    parameters of the operators of 4.7. Fixes CE-508.1 to CE-508.4 and
    CE-508.6. Visible changes (section 6), measured before landing.
-3. **The interval value kind.** After the open questions of 4.9 are decided,
+3. **The interval value kind** (`Enclosure`, 4.9.2; the questions of 4.9.1 were decided 2026-10-26, all recommendations). Starts after CE-507.8,
    with the `interval-js` lowering. Prerequisite (2026-10-26): CE-507.8, a
    decoded-payload cache on a boxed call (a `WeakMap` from the boxed value to
    its decoded payload, filled on the first decode, never invalidated

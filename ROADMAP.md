@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-525.
+Next free reference: CE-527.
 
 **Entry format.**
 
@@ -3919,11 +3919,15 @@ fixed in phase 3 (`src/compute-engine/interval/`); .5 is a known limit.
 - **CE-522.2** `atanhRaw` (`interval/trigonometric.ts`) clips a boundary
   argument to `±(1 − ε)`: `atanh([0, 1])` is `partial [0, 18.3684…]` where the
   image is `[0, +∞)`. Fix: `±∞` at the boundary.
-- **CE-522.3** `tan`, `cot`, `sec`, `csc` report a pole AT an endpoint as
+- **CE-522.3** Every kernel that reports a pole (`tan`, `cot`, `sec`,
+  `csc`, `gamma`, the early pole branches of `powRational`, `powRealBranch`
+  and `pow` with a negative exponent) reports a pole AT an endpoint as
   `singular` with no value, like an interior pole (`tan([0, π/2])`,
-  `cot([0, 1])`), so the result is the whole line where the half-line
-  `[0, +∞)` is the image. Fix: classify an endpoint pole and answer the
-  half-line with the sign of the function beside it.
+  `cot([0, 1])`, `gamma([0, 1])`, `powRational([-1, 0], -2, 3)`), and a pole
+  SINGLETON (`gamma([0, 0])`) the same way, so the result is the whole line
+  where the half-line `[1, +∞)` (or `empty` for the singleton) is the image.
+  Fix: classify an endpoint pole and answer the half-line with the sign of
+  the function beside it; a pole singleton answers `empty`.
 - **CE-522.4** `powRaw` with a negative integer exponent over a base with a
   zero endpoint answers the whole line: `pow([0, 1], -1)` is
   `partial [−∞, +∞]` where the image is `[1, +∞)`; `pow([0, 0], -1)` must be
@@ -3937,9 +3941,11 @@ fixed in phase 3 (`src/compute-engine/interval/`); .5 is a known limit.
   `Enclosure` documentation states the limit.
 - **CE-522.6** `powInterval` with a negative point base over a non-point
   exponent answers `empty`: `powInterval([−2, −2], [1, 2])` is `empty` where
-  `(−2)^1` and `(−2)^2` exist. Fix: the hull of the integer points of the
-  exponent interval (the real values of the power), `empty` when it holds
-  none.
+  `(−2)^1` and `(−2)^2` exist. Fix: the symmetric hull `[−M, M]` with
+  `M = max(|b|^c, |b|^d)` for a negative point base `b` and an exponent
+  `[c, d]`, which covers every defined real-branch value (the
+  odd-denominator rationals included: `(−2)^(5/3) ≈ −3.17`); `(−2)^[1, 2]`
+  gives `[−4, 4]`.
 - **CE-522.7** `pow` with a negative integer exponent rounds an
   intermediate before the reciprocal, so the result can exclude the true
   value: for the double `x = 1.9678349534779586e-103`,
@@ -3947,6 +3953,38 @@ fixed in phase 3 (`src/compute-engine/interval/`); .5 is a known limit.
   while `x^-3` rounds to `1.3123025984121742e308`, below the lower bound. Fix:
   the exact power first, outward steps around the reciprocal (and the
   overflow/underflow of each step). Fixed in phase 3.
+- **CE-522.8** `rewriteAngularUnit()` (`symbolic/angular-unit.ts`), which the
+  `interval-js` target applies before lowering, substitutes FLOAT factors
+  (`Math.PI / 180`, `6.283185307179586` for `2π`), whose nearest double is
+  below the true factor, so a compiled `Cos` in `turn` mode at a quarter turn
+  gives strictly positive bounds that exclude the true value `0`. Fix: on
+  `interval-js` the rewrite uses the directed enclosure of each factor
+  (`{ lo: down(f), hi: up(f) }`), for the direct and the inverse heads.
+  Fixed in phase 3.
+- **CE-522.9** `fractRaw` (`interval/elementary.ts`) computes `x − floor(x)`
+  with no outward rounding: `fract([−1e−20, −1e−20])` is `[1, 1]` where the
+  exact fractional part is strictly below 1. Fix: outward steps around the
+  subtraction, exact cases preserved. Fixed in phase 3.
+
+### CE-526. On WebGPU, the NaN guard of `sin` and `cos` changes the value of a finite argument
+
+**Status:** open; precision, not measured in isolation (Tycho session
+tycho-90, 2026-10-26).
+
+After CE-520 (commit 32b663a5581c2dbad786afb92258c234777f1c00), the row
+`{F<0.0008: 0, B>1.3: 0, 0.12+0.8H}` of Tycho's `voronoi-diagram` has 18
+samples on WebGPU over Metal (Apple M5 Max) that differ from the `javascript`
+target, where it had 12 before. Replacing every `_gpu_sin(`/`_gpu_cos(` call of
+the emitted shader with the built-in gives exactly the earlier 12. The calls
+concerned have finite arguments, the time-dependent terms `cos(T + 1.9k)` and
+`sin(2T + 2.7k)`, so the guard does not select its NaN; the value of `sin`
+itself changes. A likely cause is that the Metal compiler uses a different
+code path for `sin` when its result goes through the bit test and `select`.
+The row is a threshold test near cell borders, so a change in the last bits
+of a term changes the branch. The guards also cost 10% of the frame time of
+this document on WebGPU (2 to 8% on `kelvin-wake` and `underwater-caustics`).
+First measure `sin` with and without the guard on a set of finite inputs, on
+WebGPU, against the f64 value.
 
 ### CE-521. On Apple GPUs, the complex shader helpers can give a finite value for a NaN part
 
@@ -4915,6 +4953,32 @@ if interpreted loops of many thousands of turns become important:
   without ownership analysis, because every holder of an older value keeps its
   own prefix), together with an incremental type for the new node;
 - a per-node descriptor cache on the invalidation axis of the type cache.
+
+### CE-525. On WebGPU, a call that several shader functions repeat is computed again in each
+
+**Status:** open; performance, design (Tycho row 467, requested by the owner
+2026-10-26).
+
+A document function compiles to its own shader function, and the
+common-subexpression pass works inside one body. In Tycho's `voronoi-diagram`,
+the row `{F<0.0008: 0, B>1.3: 0, 0.12+0.8H}` has `B`, `H` and the functions
+they call (`u`, `v`, `Z`) each call `F(x, y)`, `Z(x, y)` and
+`n_inv4(x, y, k, −F)` again with the same arguments. WebGL2 over ANGLE Metal
+merges that repeated work; WebGPU over Metal merges identical calls only inside
+one body. On an Apple M5 Max, `F + B + H` without branches draws in 0.47 ms on
+WebGL2 and 1.13 ms on WebGPU, while `F`, `B` and `H` alone take the same time on
+both (Dawn robustness and `select` are not the cause). Two possible designs:
+inline the document functions into one body before the CSE pass (a limit on
+the size is needed), or compute the calls that several functions share once in
+the main body and pass the values in. Tycho's instrument
+(`scripts/repros/2026-10-26-ce467-wgsl-shared-calls-repro.mts` in the Tycho
+repo) times the row and reads READY at a WebGPU/WebGL ratio of 1.2 or less; it
+read 2.17 on 0.169.2.
+
+Related, not filed in CE yet: many `voronoi-diagram` terms depend only on the
+time `T` (16 site positions, 32 terms `cos(T + 1.9k)`); computing them once per
+frame on the CPU and passing them as uniforms would need CE to emit the
+per-frame part separately (Tycho ROADMAP row IB).
 
 ### CE-458. Compiling a body that several binders share is exponential in the depth of the sharing
 
