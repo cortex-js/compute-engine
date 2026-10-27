@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 709 functions and constants of the standard library, by category.
+The 710 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -29,7 +29,7 @@ To search the library by concept rather than by name, use
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
-- [Arithmetic](#arithmetic) — 102 definitions · [full reference](/epsil/reference/arithmetic/)
+- [Arithmetic](#arithmetic) — 103 definitions · [full reference](/epsil/reference/arithmetic/)
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
@@ -524,6 +524,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `root` | `Root` | `(complex \| infinity, complex \| infinity) -> number` | n-th root of a value. |
 | `round` | `Round` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number to the nearest integer, or with a step to the nearest multiple of the step. |
 | `sign` | `Sign` | `(complex \| signed_infinity \| ~oo) -> complex` | Sign of a number: -1, 0, or 1 for a real; `z/\|z\|`, the point of the unit circle in its direction, for a complex `z`. |
+| `smoothstep` | `Smoothstep` | `(real \| signed_infinity, real \| signed_infinity, real \| signed_infinity) -> nan \| real` | Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0, 1). |
 | `sqrt` | `Sqrt` | `(complex \| infinity) -> complex \| infinity` | Square Root |
 | — | `Square` | `(number) -> number` | Square of a number: x^2. |
 | — | `Subtract` | `(number+) -> number` | Difference between two or more values. |

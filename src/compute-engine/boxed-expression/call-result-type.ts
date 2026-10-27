@@ -1841,8 +1841,7 @@ const TUPLE_FLATTENING_EXTREMA = new Set(['Max', 'Min']);
  */
 function extremumReadsANumber(t: Readonly<Type>): boolean {
   if (t === 'tuple') return true;
-  if (isSubtype(t, 'number') || isSubtype(t, 'collection<number>'))
-    return true;
+  if (isSubtype(t, 'number') || isSubtype(t, 'collection<number>')) return true;
   if (typeof t === 'object' && t.kind === 'tuple')
     return t.elements.every((e) =>
       extremumReadsANumber(resolveTypeAlias(e.type))

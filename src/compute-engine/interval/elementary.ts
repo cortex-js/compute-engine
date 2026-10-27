@@ -2420,9 +2420,7 @@ function nthRootIntervalRaw(
 ): IntervalResult {
   const d = unwrap(n);
   if (d !== undefined && d.lo === d.hi && Number.isInteger(d.lo) && d.lo !== 0)
-    return d.lo > 0
-      ? nthRoot(base, d.lo)
-      : div(point(1), nthRoot(base, -d.lo));
+    return d.lo > 0 ? nthRoot(base, d.lo) : div(point(1), nthRoot(base, -d.lo));
   return powInterval(base, div(point(1), n));
 }
 // `liftJump` carries the marks of the degree operand (a `partial` or a jump

@@ -5886,7 +5886,7 @@ with the exponent `1/2`, `Root(x, n)` with `1/n`, `Square(x)` with `2`.
 ##### ArithmeticDefinition.compare()? {#compare}
 
 ```ts
-compare(a, b, context): 0 | 1 | -1 | "unordered" | undefined
+compare(a, b, context): 0 | 1 | -1 | "<=" | ">=" | "unordered" | undefined
 ```
 
 The order of two values of which at least one is of this kind, for the
@@ -5899,6 +5899,13 @@ comparison operators, `Max`, `Min`, `ElementMax`, `ElementMin`, `Sort`,
   `LessEqual`, `Greater`, `GreaterEqual`) answer `False`, as they do for
   a complex number; `Equal` and `NotEqual` ask the `eq` handler of the
   head definitions; `Max`, `Min` and `Sort` leave the call unevaluated;
+- `'<='`: `a` is less than or equal to `b`, and the hook cannot say
+  which (two enclosures that touch: `Enclosure(0, 1)` and
+  `Enclosure(1, 2)`). `LessEqual` answers `True` and `Greater` answers
+  `False`; `Less` and `GreaterEqual` stay unevaluated; `Equal` and
+  `NotEqual` ask the `eq` handlers. `'>='` is the mirror answer. A
+  reader that needs a total order (`Sort`, `Max` and `Min` without an
+  `extremum` hook) reads them as `undefined`;
 - `undefined`: the two values are not comparable (a value of another
   kind, a symbol with no value). An order comparison stays unevaluated,
   `Equal` and `NotEqual` ask the `eq` handlers.
@@ -5912,6 +5919,38 @@ A kind without `compare` has no order.
 ####### b
 
 [`KindOperand`](#kindoperand)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.extremum()? {#extremum}
+
+```ts
+extremum(which, ops, context): Expression | undefined
+```
+
+The maximum (`which` is `'max'`) or the minimum of the operands, of
+which at least one is a value of this kind, for `Max`, `Min`,
+`ElementMax`, `ElementMin` and `Clamp`. The engine asks this hook
+before it orders the operands with `compare`, so a kind whose values
+can overlap gives a value that is not one of the operands: the maximum
+of two enclosures is the enclosure of the larger ends
+(`Max(Enclosure(0, 2), Enclosure(1, 3))` is `Enclosure(1, 3)`).
+`undefined` declines, and the engine orders the operands with
+`compare`. Absent: the engine orders the operands with `compare`.
+
+####### which
+
+`"max"` \| `"min"`
+
+####### ops
+
+[`KindOperands`](#kindoperands)
 
 ####### context
 
@@ -11689,6 +11728,17 @@ a compiled function cannot shadow, for example `myLibFloorIndex`.
 Two definitions may give a helper of the same name only with the same
 source.
 
+On the `interval-javascript` target, a compiled operand comes in one
+of two forms, and a helper must accept both: a bare enclosure
+`{ lo, hi }` (an input such as `_.x`), or the result of an interval
+function, `{ kind: 'interval', value: { lo, hi } }` (for example
+`_IA.sqrt(_.x)`, or any operand in a branch of an `If` whose
+condition narrows it). A result can also be `{ kind: 'partial',
+value: { lo, hi }, … }`, `{ kind: 'empty' }`, `{ kind: 'entire' }`
+or `{ kind: 'singular', … }`. A helper that reads only `x.lo` reads
+`undefined` from the second form, with no error. A helper can return
+either form.
+
 ```ts
 ce.declare('Wrap', {
   signature: '(number, number) -> number',
@@ -16452,11 +16502,62 @@ If this expression has a local scope, return it.
 subs(sub, options?): Expression
 ```
 
-Replace all the symbols in the expression as indicated.
+Replace all the FREE occurrences of the symbols in the expression as
+indicated.
 
-Note the same effect can be achieved with `this.replace()`, but
+The occurrences replaced are exactly those that `freeVariables` reports
+as free. A name bound by a binder is not replaced where the binder binds
+it: the index of a `Sum`, `Product` or `Comprehension`, the parameter of
+a `Function` literal, the variable of a definite `Integrate`, a local of
+a `Block`. So `["Sum", "j", ["Limits", "j", 1, 3]]` is unchanged by
+`subs({j: 5})`, and in `["Add", "j", ["Sum", "j", ["Limits", "j", 1, 3]]]`
+only the first `j` is replaced. The bounds of a `Limits` clause of a
+`Sum`, `Product` or `Integrate` read the enclosing binding, so they are
+replaced: `["Sum", "j", ["Limits", "j", 1, "j"]]` with `j` replaced by
+`4` is `["Sum", "j", ["Limits", "j", 1, 4]]`.
+
+The variable of `D`, the expansion variable of `Series` and the variable
+of an indefinite `Integrate` are free: the value of the expression is a
+function of them. When such a variable is replaced, the expression keeps
+its variable, and the result is the value of the expression at the
+point: `["D", ["Power", "x", 2], "x"]` with `x` replaced by `3` is
+`["EvaluateAt", ["Function", ["D", ["Power", "x", 2], "x"], "x"], 3]`,
+written `\left.\left(\frac{\mathrm{d}x^2}{\mathrm{d}x}\right)\right|_{x=3}`,
+which evaluates to `6`. Only the variable itself is applied at a
+point. The replacement of another name is put in the derivative, the
+series or the integral before it is computed: `["D", ["Multiply", "y",
+["Power", "x", 2]], "x"]` with `y` replaced by `3` is `["D",
+["Multiply", 3, ["Power", "x", 2]], "x"]`, and `["D", ["Multiply", "x",
+"y"], "x"]` with `y` replaced by `x` is `["D", ["Multiply", "x", "x"],
+"x"]`, which evaluates to `2x`. When more than one such variable is
+replaced, the `Function` literal has one parameter per variable, the
+point is a `Tuple`, and all the variables are replaced at the same time:
+`\left.\left(…\right)\right|_{x=3, y=5}`. A replacement can contain the
+variable: with `x` replaced by `x + 1`, the `D` above evaluates to
+`2(x + 1)`, where the `x` of `x + 1` is the `x` of the enclosing scope.
+When the value has no
+closed form (`Series(e^{1/x}, x, 0, 3)`), the `EvaluateAt` stays
+unevaluated. The value of a `Series` at a point keeps its remainder:
+`Series(sin x, x, 0, 3)` with `x` replaced by `1/2` evaluates to
+`23/48 + BigO(1/32)`, and with `x` replaced by `0` to `BigO(0)`. A
+value that keeps a `BigO` term is `NaN` under `.N()` (the remainder has
+no numeric value): wrap the series in `Normal` to drop the remainder,
+before or after the substitution. `Normal(Series(sin x, x, 0, 3))` with
+`x` replaced by `0.5` evaluates to `0.479…` under `.N()`.
+
+The substitution does not avoid variable capture: a replacement that
+contains a name that a binder binds is inserted as it is, and the
+binder is not renamed. `["Sum", ["Add", "j", "k"], ["Limits", "k", 1, 3]]`
+with `j` replaced by `k` is `["Sum", ["Add", "k", "k"], ["Limits", "k",
+1, 3]]`, which evaluates to `12`. When the replacement can contain the
+index, rename the index first with a recursive `replace()` of the rule
+`k -> m`: the result is `["Sum", ["Add", "k", "m"], ["Limits", "m", 1,
+3]]`, which evaluates to `3k + 6`.
+
+Note a similar effect can be achieved with `this.replace()`, but
 using `this.subs()` is more efficient and simpler, but limited
-to replacing symbols.
+to replacing symbols. A recursive `replace()` does not skip bound
+variables.
 
 The free symbols of the result are bound in the CURRENT scope, not in the
 scope the receiver was built in. A node that owns a local scope keeps
@@ -20308,6 +20409,7 @@ type PrimitiveType =
   | "residue"
   | "measurement"
   | "quantity"
+  | "enclosure"
   | "type"
   | "expression"
   | "unknown"

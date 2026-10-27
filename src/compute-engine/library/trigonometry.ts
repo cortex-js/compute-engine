@@ -2053,10 +2053,7 @@ function quantityTrigValue(
  */
 function isNonRealFinite(v: Expression): boolean {
   return (
-    isNumber(v) &&
-    v.im !== 0 &&
-    Number.isFinite(v.re) &&
-    Number.isFinite(v.im)
+    isNumber(v) && v.im !== 0 && Number.isFinite(v.re) && Number.isFinite(v.im)
   );
 }
 

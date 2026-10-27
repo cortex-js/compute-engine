@@ -2714,12 +2714,7 @@ export class BoxedFunction
               : options!.canonical;
       return this.engine.function('Function', fnOps, {
         form: fnForm,
-        scope: scopeForRebuild(
-          x._localScope,
-          this.engine,
-          'Function',
-          fnOps
-        ),
+        scope: scopeForRebuild(x._localScope, this.engine, 'Function', fnOps),
       });
     };
     const ops =
