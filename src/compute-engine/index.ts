@@ -3290,19 +3290,57 @@ export class ComputeEngine implements IComputeEngine {
     });
   }
 
+  /** The innermost frame that shadows `name` in the current lexical scope.
+   *
+   * A frame applies only where its boundary is on the current scope chain:
+   * every scope of the construct that pushed it (the function literal, the
+   * `Block`) is a descendant of the boundary. A boxing that runs in an
+   * unrelated scope while the construct is canonicalized, such as the typed
+   * copy of a callee that a signature read boxes under the callee's home
+   * scope (`resultUnderDeclaredParameters()`), is outside the construct, and
+   * the frame's names do not shadow there. Reading the frame there made a
+   * `Block` local `b` claim the free `b` of the callee's body, and the
+   * resolution then walked from a scope that the boundary does not enclose
+   * up past the root scope.
+   */
+  private _shadowFrame(
+    name: string
+  ): (typeof this._shadowedParameterStack)[number] | undefined {
+    const stack = this._shadowedParameterStack;
+    for (let i = stack.length - 1; i >= 0; i--) {
+      const frame = stack[i];
+      if (!frame.names.has(name)) continue;
+      for (
+        let s: Scope | null | undefined = this.context?.lexicalScope;
+        s;
+        s = s.parent
+      )
+        if (s === frame.boundary) return frame;
+    }
+    return undefined;
+  }
+
   /** The INFERRED type a caller supplied for an active bare shadowed
    * parameter (`_pushShadowedParameters`' third argument), if any.
    * @internal */
   _shadowedParameterInferredType(name: string): Type | undefined {
-    const stack = this._shadowedParameterStack;
-    for (let i = stack.length - 1; i >= 0; i--)
-      if (stack[i].names.has(name)) return stack[i].inferredTypes?.get(name);
-    return undefined;
+    return this._shadowFrame(name)?.inferredTypes?.get(name);
   }
 
   /** @internal */
   _popShadowedParameters(): void {
     this._shadowedParameterStack.pop();
+  }
+
+  /** See `IComputeEngine._withoutShadowedParameters`. @internal */
+  _withoutShadowedParameters<T>(f: () => T): T {
+    const saved = this._shadowedParameterStack;
+    this._shadowedParameterStack = [];
+    try {
+      return f();
+    } finally {
+      this._shadowedParameterStack = saved;
+    }
   }
 
   /** See `IComputeEngine._canonicalFunctionLiteralOperands`. @internal */
@@ -3315,10 +3353,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /** @internal */
   _isShadowedParameter(name: string): boolean {
-    const stack = this._shadowedParameterStack;
-    for (let i = stack.length - 1; i >= 0; i--)
-      if (stack[i].names.has(name)) return true;
-    return false;
+    return this._shadowFrame(name) !== undefined;
   }
 
   /** See `IComputeEngine._hasShadowedParameterFrame`. @internal */
@@ -3328,10 +3363,7 @@ export class ComputeEngine implements IComputeEngine {
 
   /** The declared type of an active shadowed parameter, if any. @internal */
   _shadowedParameterType(name: string): Type | undefined {
-    const stack = this._shadowedParameterStack;
-    for (let i = stack.length - 1; i >= 0; i--)
-      if (stack[i].names.has(name)) return stack[i].types?.get(name);
-    return undefined;
+    return this._shadowFrame(name)?.types?.get(name);
   }
 
   /** The scope enclosing the construct that shadows `name` — the scope a
@@ -3341,10 +3373,7 @@ export class ComputeEngine implements IComputeEngine {
    * context's binding, which the parameter (or block local) shadows.
    * `undefined` when `name` is not an active shadowed parameter. @internal */
   _shadowedParameterBoundary(name: string): Scope | undefined {
-    const stack = this._shadowedParameterStack;
-    for (let i = stack.length - 1; i >= 0; i--)
-      if (stack[i].names.has(name)) return stack[i].boundary;
-    return undefined;
+    return this._shadowFrame(name)?.boundary;
   }
 
   /** See `IComputeEngine._functionLiteralDefiningScope`. @internal */
@@ -3376,26 +3405,19 @@ export class ComputeEngine implements IComputeEngine {
   /** The binding already auto-declared for an active shadowed parameter during
    * this body's canonicalization, if any. @internal */
   _shadowedParameterDef(name: string): BoxedDefinition | undefined {
-    const stack = this._shadowedParameterStack;
-    for (let i = stack.length - 1; i >= 0; i--)
-      if (stack[i].names.has(name)) return stack[i].defs.get(name);
-    return undefined;
+    return this._shadowFrame(name)?.defs.get(name);
   }
 
   /** Cache the binding auto-declared for an active shadowed parameter, so later
    * references reuse it. @internal */
   _setShadowedParameterDef(name: string, def: BoxedDefinition): void {
-    const stack = this._shadowedParameterStack;
-    for (let i = stack.length - 1; i >= 0; i--)
-      if (stack[i].names.has(name)) {
-        stack[i].defs.set(name, def);
-        // Marked now, not only when the literal is complete: a nested
-        // literal in the body can compute its type before that, and the
-        // type is then cached.
-        if (stack[i].functionLiteral && 'value' in def)
-          markFunctionLiteralParameter(this, def.value);
-        return;
-      }
+    const frame = this._shadowFrame(name);
+    if (frame === undefined) return;
+    frame.defs.set(name, def);
+    // Marked now, not only when the literal is complete: a nested literal in
+    // the body can compute its type before that, and the type is then cached.
+    if (frame.functionLiteral && 'value' in def)
+      markFunctionLiteralParameter(this, def.value);
   }
 
   /** The bindings cached on the TOP shadowed-parameter frame — read by

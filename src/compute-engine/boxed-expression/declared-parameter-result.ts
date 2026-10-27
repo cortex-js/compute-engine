@@ -154,10 +154,21 @@ export function resultUnderDeclaredParameters(
     // both, typing nested calls of functions declared `-> unknown` whose
     // bodies apply undeclared names took exponential time in the nesting
     // depth (Tycho item 336).
+    //
+    // The boxing runs with no shadowed-parameter frame
+    // (`_withoutShadowedParameters`). A signature can be read while a `Block`
+    // or a function literal is canonicalized, and the frame of that construct
+    // lists the names it declares. The typed copy is not inside the
+    // construct, and its result is memoized by the caller: a `Block` that
+    // declares `b` and calls `f` otherwise made the free `b` of `f`'s body a
+    // new local, and `f` of a real was typed `number` instead of `real`
+    // (CE-542).
     const scratch: Scope = { parent: home, bindings: new Map() };
     const typed = withScratchScope(ce, scratch, () =>
       ce._inScope(scratch, () =>
-        ce.box(['Function', literal.ops[0].json, ...stamped])
+        ce._withoutShadowedParameters(() =>
+          ce.box(['Function', literal.ops[0].json, ...stamped])
+        )
       )
     );
     result = functionResult(typed.type.type);

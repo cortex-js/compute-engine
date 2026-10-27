@@ -2298,6 +2298,13 @@ export interface IComputeEngine {
    * is being canonicalized. False at the top level of a canonicalization.
    * @internal */
   _hasShadowedParameterFrame(): boolean;
+  /** Run `f` with no shadowed-parameter frame, and restore the frames after.
+   * For a computation whose result must not depend on the canonicalization
+   * in progress, such as the derivation of a stored function's signature:
+   * it boxes the function's body again in the function's own scope, where
+   * the names of the construct being canonicalized do not shadow anything.
+   * @internal */
+  _withoutShadowedParameters<T>(f: () => T): T;
   /**
    * The `resolveSymbol` handler of the `ce.parse()` call in progress — the
    * caller's per-call handler, else the engine-wide one — or `undefined`

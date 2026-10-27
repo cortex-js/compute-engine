@@ -688,7 +688,8 @@ function isShadowedParameterDeclaration(
 ): boolean {
   const boundary = ce._shadowedParameterBoundary(name);
   if (boundary === undefined || scope === boundary) return false;
-  for (let s: Scope | null = scope.parent; s !== null; s = s.parent)
+  // Truthiness, not `!== null`: the root scope's parent is `undefined`.
+  for (let s: Scope | null | undefined = scope.parent; s; s = s.parent)
     if (s === boundary) return true;
   return false;
 }

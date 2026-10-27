@@ -5696,7 +5696,9 @@ volumes
             // integral: the binding of an enclosing binder (the index of a
             // `Sum`, the parameter of a function), or a global.
             const enclosing = (name: string): Expression => {
-              for (let s = scope.parent; s !== null; s = s.parent) {
+              // Truthiness, not `!== null`: the root scope's parent is
+              // `undefined`, and a name bound nowhere reaches it.
+              for (let s = scope.parent; s; s = s.parent) {
                 if (!s.bindings.has(name)) continue;
                 const symbol = ce._bindingSymbol(name, s);
                 if (symbol !== undefined) return symbol;

@@ -224,10 +224,12 @@ export function createSymbolExpression(
     // start: `autoScope` was moved up past `noAutoDeclare` scopes and can sit
     // at or above the boundary, and from there an unbounded walk would reach
     // a same-named outer or global binding. In that case only the exact
-    // scope is searched, as before.
+    // scope is searched, as before. The walk tests truthiness: the system
+    // scope at the root of the chain has the parent `undefined`, not `null`
+    // (`pushScope`, `engine-scope.ts`).
     type Scope = import('./global-types.js').Scope;
     let boundaryReachable = false;
-    for (let s: Scope | null = autoScope; s !== null; s = s.parent)
+    for (let s: Scope | null | undefined = autoScope; s; s = s.parent)
       if (s === boundary) {
         boundaryReachable = true;
         break;
