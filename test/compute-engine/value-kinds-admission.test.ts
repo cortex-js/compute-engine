@@ -17,6 +17,7 @@ import {
 } from '../../src/compute-engine/boxed-expression/value-kinds';
 import { deriveApplicationType } from '../../src/compute-engine/boxed-expression/derive-application-type';
 import { describeType } from '../../src/compute-engine/boxed-expression/operand-descriptor';
+import { declareUserMeasurement } from './value-kinds-helpers';
 import {
   isFunction,
   isSymbol,
@@ -503,5 +504,51 @@ describe('VALUE KINDS ADMISSION: the per-engine shortcut', () => {
     expect(someKindAdmittedByCarrier(ce)).toBe(true);
     expect(someKindHasResultType(ce)).toBe(true);
     expect(isApplySiteCall(ce.box(['Sin', ['NK', 2]]))).toBe(true);
+  });
+});
+
+describe('VALUE KINDS ADMISSION: a body typed from the declaration', () => {
+  // `x/x` folds to `1` when the parameter is untyped; a parameter typed with
+  // a kind arm keeps it, so the kind's own `divide` hook answers.
+  const xOverX: Json = ['Function', ['Divide', 'x', 'x'], 'x'];
+  const M: Json = ['UserMeasurement', 2, 0.1];
+
+  test('an overloaded signature with a kind arm types the body (CE-507.3)', () => {
+    const ce = new ComputeEngine();
+    ce.declare('g', {
+      signature: '((residue) -> residue) & ((integer) -> integer)',
+      evaluate: functionBody(xOverX),
+    });
+    expect(ce.box(['g', ['ResidueClass', 2, 5]]).evaluate().toString()).toBe(
+      'ResidueClass(1, 5)'
+    );
+    expect(ce.box(['g', 3]).evaluate().toString()).toBe('1');
+  });
+
+  test('a recursive literal assigned to a declared symbol keeps the type (CE-507.4)', () => {
+    const ce = new ComputeEngine();
+    declareUserMeasurement(ce);
+    const body = (id: string): Json => [
+      'Function',
+      [
+        'If',
+        ['Less', 'n', 1],
+        ['Divide', 'x', 'x'],
+        [id, 'x', ['Subtract', 'n', 1]],
+      ],
+      'x',
+      'n',
+    ];
+    const signature = '(real | umeasurement, integer) -> real | umeasurement';
+    // The MathJSON route and the pre-boxed route.
+    ce.declare('fJson', signature);
+    ce.assign('fJson', body('fJson'));
+    ce.declare('fBoxed', signature);
+    ce.assign('fBoxed', ce.box(body('fBoxed')));
+    for (const f of ['fJson', 'fBoxed']) {
+      const r = ce.box([f, M, 2]).evaluate();
+      expect(isFunction(r, 'UserMeasurement')).toBe(true);
+      expect(ce.box([f, 3, 2]).evaluate().toString()).toBe('1');
+    }
   });
 });

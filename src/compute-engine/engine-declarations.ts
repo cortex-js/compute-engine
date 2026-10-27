@@ -3154,7 +3154,15 @@ export function assignFn(
         // through. NOT `toMathJson()` — that is the display serializer, and
         // its function shorthand collapses the literal (dropping the
         // parameter list).
-        if (boxedFn)
+        //
+        // Only a canonical literal is boxed again. A literal that is not
+        // canonical yet (the literal that `kindTypedFunctionLiteral()`
+        // annotated above, or one boxed with `form: 'raw'`) is canonicalized
+        // later, when the self-reference is already declared. A re-box from
+        // the MathJSON would also drop the annotations that are marked as
+        // inferred, and so fold `x/x` to `1` in a recursive literal over a
+        // value kind.
+        if (boxedFn?.isCanonical)
           arg2 = ce.box(jsonWithSourceOffsets(boxedFn)) as AssignValue;
       }
     }

@@ -798,30 +798,48 @@ function asecRaw(x: Interval | IntervalResult): IntervalResult {
 }
 
 /**
+ * True when the pole at 0 of `coth`, `csch`, `acoth`, `acsch` or `asech` is
+ * inside `x` or `x` is the point 0: the kernel then answers `singular`.
+ * When 0 is only an endpoint, the function is continuous on the rest of `x`
+ * and the kernel answers the half-line beside the pole.
+ */
+function poleAtZeroInside(x: Interval): boolean {
+  return (x.lo < 0 && x.hi > 0) || (x.lo === 0 && x.hi === 0);
+}
+
+/**
  * Hyperbolic cotangent: coth(x) = cosh(x)/sinh(x).
  *
- * Has a singularity at x = 0.
+ * Has a singularity at x = 0. `coth` decreases on each side of 0 and tends
+ * to `+∞` at `0⁺` and to `−∞` at `0⁻`, so an interval with 0 at one
+ * endpoint gives the half-line from the value at the other endpoint:
+ * `coth([0, 1])` is `[coth(1), +∞]`.
  */
 function cothRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (containsZero(xVal)) {
+  if (poleAtZeroInside(xVal)) {
     return { kind: 'singular', at: 0 };
   }
+  // `Math.tanh` and the division each round, and the export takes one
+  // outward step: one more step here covers the second rounding.
+  if (xVal.lo === 0) return halfLine(nextDown(1 / Math.tanh(xVal.hi)), 1);
+  if (xVal.hi === 0) return halfLine(nextUp(1 / Math.tanh(xVal.lo)), -1);
   return divUnrounded(coshRaw(xVal), sinhRaw(xVal));
 }
 
 /**
  * Hyperbolic cosecant: csch(x) = 1/sinh(x).
  *
- * Has a singularity at x = 0.
+ * Has a singularity at x = 0. With 0 at one endpoint of `x`, the division
+ * gives the half-line beside the pole: `csch([0, 1])` is `[csch(1), +∞]`.
  */
 function cschRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (containsZero(xVal)) {
+  if (poleAtZeroInside(xVal)) {
     return { kind: 'singular', at: 0 };
   }
   return divUnrounded(ok({ lo: 1, hi: 1 }), sinhRaw(xVal));
@@ -839,45 +857,85 @@ function sechRaw(x: Interval | IntervalResult): IntervalResult {
 /**
  * Inverse hyperbolic cotangent: acoth(x) = atanh(1/x).
  *
- * Domain: |x| > 1. Has a singularity at x = 0.
+ * Domain: |x| > 1. Has a singularity at x = 0. With 0 at one endpoint of
+ * `x`, `1/x` is a half-line and the answer is `atanh` of that half-line:
+ * `acoth([0, 2])` is `[acoth(2), +∞]`. When `1/x` overflows to `+∞` (an
+ * endpoint below `1/Number.MAX_VALUE`), `atanh` answers `empty`, which is
+ * right: such an `x` holds no point with `|x| > 1`.
  */
 function acothRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (containsZero(xVal)) {
+  if (poleAtZeroInside(xVal)) {
     return { kind: 'singular', at: 0 };
   }
   return atanhRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 
 /**
+ * A lower bound of `f(1/e)`, with `f` `Math.asinh` or `Math.acosh` and
+ * `e > 0`, that does not form `1/e`: for `e` below `1/Number.MAX_VALUE`
+ * the division overflows to `+∞`, and `f(+∞)` is `+∞`, where the true
+ * value is about 714. For `y = 1/e ≥ 2^26`, `asinh(y)` and `acosh(y)` are
+ * `ln(2y) = ln 2 − ln e` within `1/(4y²)`, far below one unit in the last
+ * place of the value; two steps down cover that term and the roundings of
+ * the logarithm and the subtraction. On the other branch, one step down
+ * covers the rounding of the division, and the export takes another.
+ */
+function inverseHyperbolicOfReciprocal(
+  e: number,
+  f: (y: number) => number
+): number {
+  if (e > 2 ** -26) return nextDown(f(1 / e));
+  return nextDown(nextDown(Math.LN2 - Math.log(e)));
+}
+
+/**
  * Inverse hyperbolic cosecant: acsch(x) = asinh(1/x).
  *
- * Domain: x != 0.
+ * Domain: x != 0. With 0 at one endpoint of `x`, the answer is the
+ * half-line beside the pole: `acsch([0, 1])` is `[asinh(1), +∞]`, and
+ * `acsch` is odd. The finite end is computed without forming `1/x`
+ * (`inverseHyperbolicOfReciprocal()`).
  */
 function acschRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (containsZero(xVal)) {
+  if (poleAtZeroInside(xVal)) {
     return { kind: 'singular', at: 0 };
   }
+  if (xVal.lo === 0)
+    return halfLine(inverseHyperbolicOfReciprocal(xVal.hi, Math.asinh), 1);
+  if (xVal.hi === 0)
+    return halfLine(-inverseHyperbolicOfReciprocal(-xVal.lo, Math.asinh), -1);
   return asinhRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 
 /**
  * Inverse hyperbolic secant: asech(x) = acosh(1/x).
  *
- * Domain: (0, 1]. Has a singularity at x = 0.
+ * Domain: (0, 1]. Has a singularity at x = 0. With 0 as the lower endpoint
+ * of `x`, the answer is the half-line beside the pole: `asech` decreases
+ * from `+∞` at `0⁺` to 0 at 1, so `asech([0, b])` is `[asech(b), +∞]` for
+ * `b < 1` and `[0, +∞]` for `b ≥ 1`. The finite end is computed without
+ * forming `1/x` (`inverseHyperbolicOfReciprocal()`). With 0 as the upper
+ * endpoint, `x` holds no point of the domain: `empty`.
  */
 function asechRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [xVal] = unwrapped;
-  if (containsZero(xVal)) {
+  if (poleAtZeroInside(xVal)) {
     return { kind: 'singular', at: 0 };
   }
+  if (xVal.hi === 0) return { kind: 'empty' };
+  if (xVal.lo === 0)
+    return halfLine(
+      xVal.hi >= 1 ? 0 : inverseHyperbolicOfReciprocal(xVal.hi, Math.acosh),
+      1
+    );
   return acoshRaw(divUnrounded(ok({ lo: 1, hi: 1 }), ok(xVal)));
 }
 

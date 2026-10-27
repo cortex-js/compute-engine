@@ -231,10 +231,28 @@ describe('TYPE AUDIT: Haversine / InverseHaversine / Hypot / Degrees', () => {
     expect(typeOf(['Hypot', 2, 'ImaginaryUnit'])).toBe('error');
   });
 
-  it('Degrees of a non-real argument does not claim real', () => {
-    const e = ce.box(['Degrees', 'ImaginaryUnit']);
-    expect(e.type.matches('real')).toBe(false);
-    expectSound(['Degrees', 'ImaginaryUnit']);
+  it('Degrees of a finite complex argument is refused', () => {
+    // An angle is real (user decision 2026-10-27, ROADMAP CE-507.9): the
+    // linear conversion used to give `Degrees(i)` = `iπ/180`.
+    expect(ce.box(['Degrees', 'ImaginaryUnit']).isValid).toBe(false);
+    expect(ce.box(['Degrees', ['Complex', 2, 3]]).isValid).toBe(false);
+    expect(
+      ce.box(['Degrees', ['Measurement', ['Complex', 2, 3], 0.1]]).evaluate()
+        .isValid
+    ).toBe(false);
+    // A non-finite argument still flows through.
+    expect(ce.box(['Degrees', 'NaN']).evaluate().isNaN).toBe(true);
+    // The test reads the value, not the type: a symbol declared `complex`
+    // that holds a real number converts.
+    const own = new ComputeEngine();
+    own.declare('zc', 'complex');
+    own.assign('zc', 2);
+    expect(own.box(['Degrees', 'zc']).evaluate().toString()).toBe(
+      '1/90 * pi'
+    );
+    own.assign('zc', own.box(['Complex', 1, 1]));
+    expect(own.box(['Degrees', 'zc']).evaluate().isValid).toBe(false);
+    expectSound(['Degrees', 'ComplexInfinity']);
   });
 });
 

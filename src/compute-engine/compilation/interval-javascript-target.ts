@@ -3014,9 +3014,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // Non-integer degree: nth root = x^(1/n).
       return `_IA.pow(${compile(arg)}, ${1 / exp.re})`;
     }
-    return `_IA.powInterval(${compile(arg)}, _IA.div(_IA.point(1), ${compile(
-      exp
-    )}))`;
+    // A degree known only at run time: `nthRootInterval` keeps an integer
+    // degree exact (an even degree over a negative base has no real value,
+    // an odd degree gives the real root), and takes `x^(1/n)` otherwise.
+    return `_IA.nthRootInterval(${compile(arg)}, ${compile(exp)})`;
   },
   Round: (args, compile) => {
     // A value halfway between two integers is rounded with the rule of
@@ -4489,6 +4490,7 @@ const FOLDABLE_INTERVAL_ROUTINES: ReadonlySet<string> = new Set([
   'powRational',
   'powRealBranch',
   'nthRoot',
+  'nthRootInterval',
   'exp',
   'ln',
   'log10',

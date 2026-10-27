@@ -147,7 +147,7 @@ import {
   withoutFailedElementCheck,
 } from './boxed-expression/type-compatibility-error.js';
 import { substituteDeclaredBounds } from './boxed-expression/generic-instantiation.js';
-import { isSubtype } from '../common/type/subtype.js';
+import { isSubtype, widen } from '../common/type/subtype.js';
 import { typeToString } from '../common/type/serialize.js';
 import {
   hasKindArm,
@@ -577,7 +577,8 @@ export function annotateFunctionLiteralParams(
  * Only the parameters whose declared type has a kind arm are annotated: the
  * other parameters keep the reading of an untyped parameter. The annotation
  * is marked as inferred, so the literal prints as written. `undefined` when
- * no parameter is annotated: `declared` is not one signature, or no
+ * no parameter is annotated: `declared` is not a signature or an
+ * intersection of signatures, or no
  * parameter type has a kind arm, or the literal has no parameter list or
  * annotates its parameters itself.
  */
@@ -596,13 +597,23 @@ export function kindTypedFunctionLiteral(
     input = written;
   } else return undefined;
   const arms = signatureArms(declared);
-  if (arms === undefined || arms.length !== 1) return undefined;
-  const params = arms[0].args ?? [];
-  if (params.length === 0) return undefined;
+  if (arms === undefined) return undefined;
+  // An overloaded signature (`((residue) -> residue) & ((integer) ->
+  // integer)`) has one body for every arm, so a parameter is typed with the
+  // union of its types in the arms that have it (`integer | residue`): the
+  // body must keep `x/x` for the kind arm and still accept the others.
+  const arity = Math.max(...arms.map((arm) => arm.args?.length ?? 0));
+  if (arity === 0) return undefined;
   const kinds = kindTypeNames(ce);
-  const types = params.map((p) =>
-    hasKindArm(p.type, kinds) ? p.type : undefined
-  );
+  const types: (Type | undefined)[] = [];
+  for (let i = 0; i < arity; i++) {
+    const atI = arms.flatMap((arm) =>
+      arm.args?.[i] === undefined ? [] : [arm.args[i].type]
+    );
+    types.push(
+      atI.some((t) => hasKindArm(t, kinds)) ? widen(...atI) : undefined
+    );
+  }
   if (types.every((t) => t === undefined)) return undefined;
   return annotateFunctionLiteralParams(ce, input, types);
 }

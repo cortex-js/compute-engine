@@ -544,3 +544,137 @@ describe('The run-time helpers of the enclosure kind', () => {
 function getValueOf(r: IntervalResult): Interval | undefined {
   return 'value' in r ? r.value : undefined;
 }
+
+describe('CE-522.10 the other poles at an endpoint give a half-line', () => {
+  // Before: each of these was `singular` with no value (the whole line).
+  test('coth and csch at 0', () => {
+    const coth = IA.coth(p(0, 1));
+    expect(coth.kind).toBe('partial');
+    expect(valueOf(coth).hi).toBe(Infinity);
+    // coth(1) = 1.3130352854993313…
+    expect(valueOf(coth).lo).toBeLessThanOrEqual(1.3130352854993313);
+    expect(valueOf(coth).lo).toBeGreaterThan(1.313);
+    expect(valueOf(IA.coth(p(-1, 0)))).toMatchObject({ lo: -Infinity });
+    expect(valueOf(IA.coth(p(-1, 0))).hi).toBeGreaterThanOrEqual(
+      -1.3130352854993313
+    );
+    const csch = valueOf(IA.csch(p(0, 1)));
+    // csch(1) = 0.8509181282393215…
+    expect(csch.lo).toBeLessThanOrEqual(0.8509181282393215);
+    expect(csch.lo).toBeGreaterThan(0.85);
+    expect(csch.hi).toBe(Infinity);
+  });
+
+  test('acoth, acsch and asech at 0', () => {
+    // acoth is real for |x| > 1 only: acoth([0, 2]) is [acoth(2), +∞].
+    const acoth = valueOf(IA.acoth(p(0, 2)));
+    expect(acoth.lo).toBeLessThanOrEqual(0.5493061443340549);
+    expect(acoth.lo).toBeGreaterThan(0.549);
+    expect(acoth.hi).toBe(Infinity);
+    const acsch = valueOf(IA.acsch(p(-1, 0)));
+    expect(acsch.lo).toBe(-Infinity);
+    expect(acsch.hi).toBeGreaterThanOrEqual(-0.881373587019543);
+    // asech is real on (0, 1] only.
+    const asech = valueOf(IA.asech(p(0, 0.5)));
+    expect(asech.lo).toBeLessThanOrEqual(1.3169578969248166);
+    expect(asech.hi).toBe(Infinity);
+    expect(IA.asech(p(-1, 0)).kind).toBe('empty');
+  });
+
+  test('gammaln at a non-positive integer', () => {
+    // ln Γ(1) = 0, and ln Γ tends to +∞ at 0.
+    const r = valueOf(IA.gammaln(p(0, 1)));
+    expect(r.lo).toBeLessThanOrEqual(0);
+    expect(r.lo).toBeGreaterThan(-1e-10);
+    expect(r.hi).toBe(Infinity);
+    // The strip (−2, −1) holds the extremum −1.5734…, where |Γ| = 2.3024….
+    const s = valueOf(IA.gammaln(p(-2, -1.5)));
+    expect(s.lo).toBeLessThanOrEqual(Math.log(2.302407258339680));
+    expect(s.lo).toBeGreaterThan(0.83);
+    expect(s.hi).toBe(Infinity);
+  });
+
+  test('a pole inside, or a point at the pole, is still singular', () => {
+    expect(IA.coth(p(-1, 1))).toEqual({ kind: 'singular', at: 0 });
+    expect(IA.coth(p(0))).toEqual({ kind: 'singular', at: 0 });
+    expect(IA.acsch(p(0))).toEqual({ kind: 'singular', at: 0 });
+    expect(IA.gammaln(p(-2))).toMatchObject({ kind: 'singular' });
+    expect(IA.gammaln(p(-3, -1))).toMatchObject({ kind: 'singular' });
+  });
+});
+
+describe('CE-522.11 mod with a divisor interval keeps a certified endpoint', () => {
+  test('the continuous case takes no extra outward step', () => {
+    // Before: [1 − 1 ulp, 1 + 1 ulp].
+    expect(IA.mod(p(1), p(2, 4))).toEqual({
+      kind: 'interval',
+      value: { lo: 1, hi: 1 },
+    });
+    // floor(−1 / y) is −1 for every y in [2, 4]: mod is y − 1, in [1, 3].
+    expect(IA.mod(p(-1), p(2, 4))).toEqual({
+      kind: 'interval',
+      value: { lo: 1, hi: 3 },
+    });
+    expect(IA.mod(p(1), p(-4, -2))).toEqual({
+      kind: 'interval',
+      value: { lo: -3, hi: -1 },
+    });
+  });
+});
+
+describe('CE-522.12 Root with a symbolic degree on interval-js', () => {
+  const ce = new ComputeEngine();
+  const ijs = ce._getCompilationTarget('interval-js')!;
+  const root = ijs.compile(ce.box(['Root', 'x', 'n']));
+  const run = (x: Interval, n: number): IntervalResult =>
+    root.run!({ x, n: p(n) }) as IntervalResult;
+
+  test('an even degree over a negative base has no real value', () => {
+    // Before: [−2.0000000000000004, 2.0000000000000004].
+    expect(run(p(-64, -1), 6).kind).toBe('empty');
+  });
+
+  test('an odd degree gives the real root', () => {
+    // Before: [−4.000000000000002, 4.000000000000002].
+    expect(valueOf(run(p(-64, -1), 3))).toEqual({ lo: -4, hi: -1 });
+    const inv = valueOf(run(p(-8), -3));
+    expect(inv.lo).toBeLessThanOrEqual(-0.5);
+    expect(inv.hi).toBeGreaterThanOrEqual(-0.5);
+    expect(inv.hi - inv.lo).toBeLessThan(1e-15);
+  });
+
+  test('a degree that is not an integer point takes the power', () => {
+    const r = valueOf(run(p(16), 0.5));
+    expect(r.lo).toBeLessThanOrEqual(256);
+    expect(r.hi).toBeGreaterThanOrEqual(256);
+  });
+});
+
+describe('CE-522.10 and .12, review follow-ups', () => {
+  test('acsch and asech at a tiny endpoint do not overflow', () => {
+    // `1/1e-310` overflows to +∞; the true finite end is about 714.49.
+    for (const r of [IA.acsch(p(0, 1e-310)), IA.asech(p(0, 1e-310))]) {
+      expect(r.kind).toBe('partial');
+      expect(valueOf(r).lo).toBeLessThanOrEqual(714.494526008714);
+      expect(valueOf(r).lo).toBeGreaterThan(714.49);
+    }
+    expect(valueOf(IA.acsch(p(-1e-310, 0))).hi).toBeGreaterThanOrEqual(
+      -714.494526008714
+    );
+  });
+
+  test('a half-line beside a pole is a partial result', () => {
+    expect(IA.acsch(p(0, 1)).kind).toBe('partial');
+    expect(IA.asech(p(0, 0.5)).kind).toBe('partial');
+    expect(valueOf(IA.asech(p(0, 2))).lo).toBeLessThanOrEqual(0);
+  });
+
+  test('nthRootInterval keeps the domain mark of its degree', () => {
+    const r = IA.nthRootInterval(p(8), {
+      kind: 'partial',
+      value: p(3),
+      domainClipped: 'lo',
+    });
+    expect(r.kind).toBe('partial');
+  });
+});

@@ -9,6 +9,7 @@ import {
   ok,
   point,
   getValue,
+  unwrap,
   containsZero,
   isNegative,
   unwrapOrPropagate,
@@ -38,6 +39,7 @@ import {
   exactAtOrigin,
   exactAtZeroBound,
   exactLog,
+  type ExactnessProver,
   directedSum,
   directedProduct,
   directedReciprocal,
@@ -1163,29 +1165,66 @@ function modByInterval(a: Interval, b: Interval): IntervalResult {
   const negative = b.hi < 0;
   const period = Math.max(Math.abs(b.lo), Math.abs(b.hi));
   const hull = negative ? { lo: -period, hi: 0 } : { lo: 0, hi: period };
-  let k: number | undefined;
-  for (const x of [a.lo, a.hi]) {
-    for (const y of [b.lo, b.hi]) {
-      const f = floorOfQuotient(x, y);
-      if (f === undefined || (k !== undefined && f !== k))
-        return jump(undefined, undefined, hull);
-      k = f;
-    }
-  }
-  // `k` is set: the loops above ran four times.
+  const k = constantModQuotient(a, b);
+  if (k === undefined) return jump(undefined, undefined, hull);
+  // The prover `exactModByIntervalContinuous` certifies the endpoints below,
+  // which are rounded outward here: a change to this rule must be mirrored
+  // there.
   const kyLo = Math.min(
-    directedProduct(k!, b.lo, -1),
-    directedProduct(k!, b.hi, -1)
+    directedProduct(k, b.lo, -1),
+    directedProduct(k, b.hi, -1)
   );
   const kyHi = Math.max(
-    directedProduct(k!, b.lo, 1),
-    directedProduct(k!, b.hi, 1)
+    directedProduct(k, b.lo, 1),
+    directedProduct(k, b.hi, 1)
   );
   return ok({
     lo: Math.max(directedSum(a.lo, -kyHi, -1), hull.lo),
     hi: Math.min(directedSum(a.hi, -kyLo, 1), hull.hi),
   });
 }
+
+/**
+ * The floored quotient `k` that is the same over the whole box of a dividend
+ * interval `a` and a divisor interval `b` that is not a point and does not
+ * contain 0, or `undefined` when the quotient crosses an integer over the
+ * box (or a corner does not decide its floor). The quotient is monotone in
+ * `x` and in `y` over the box (the divisor has one sign), so its floor is
+ * constant exactly when it is the same at the four corners.
+ */
+function constantModQuotient(a: Interval, b: Interval): number | undefined {
+  let k: number | undefined;
+  for (const x of [a.lo, a.hi]) {
+    for (const y of [b.lo, b.hi]) {
+      const f = floorOfQuotient(x, y);
+      if (f === undefined || (k !== undefined && f !== k)) return undefined;
+      k = f;
+    }
+  }
+  return k;
+}
+
+/**
+ * The prover of `mod` for the continuous case of `modByInterval`: a divisor
+ * interval that is not a point and does not contain 0, and a floored
+ * quotient that is the same over the box. That case rounds each endpoint in
+ * the outward direction itself (`directedSum`, `directedProduct`) and clamps
+ * it to the hull `[0, d]` or `[−d, 0]`, whose ends are true bounds, so both
+ * endpoints are already bounds and need no more outward step:
+ * `mod([1, 1], [2, 4])` is `[1, 1]`, not one ulp wider on each side.
+ */
+const exactModByIntervalContinuous: ExactnessProver = (args) => {
+  if (args.some((x) => typeof x !== 'object' || x === null))
+    return { lo: false, hi: false };
+  const a = unwrap(args[0] as Interval | IntervalResult);
+  const b = unwrap(args[1] as Interval | IntervalResult);
+  if (a === undefined || b === undefined) return { lo: false, hi: false };
+  if (isNaNInterval(a) || isNaNInterval(b)) return { lo: false, hi: false };
+  if (b.lo === b.hi || containsZero(b)) return { lo: false, hi: false };
+  return constantModQuotient(a, b) === undefined
+    ? { lo: false, hi: false }
+    : { lo: true, hi: true };
+};
 
 /**
  * Modulo (remainder) operation.
@@ -1677,7 +1716,56 @@ function gammalnRaw(x: Interval | IntervalResult): IntervalResult {
   return _gammaln(xVal);
 }
 
+/**
+ * `ln|Γ|` over an interval `x` with a pole (a non-positive integer) at one
+ * or both of its endpoints and none inside, or `undefined` when `x` is not
+ * such an interval, or is a point.
+ *
+ * `ln|Γ|` tends to `+∞` at every pole, so the answer is the half-line from
+ * its smallest value on `x` to `+∞`, as a `partial` result. The smallest
+ * value is at the endpoint that is not a pole, or at the extremum of the
+ * strip when `x` holds it: `gammaln([0, 1])` is `[0, +∞]`. A point at a pole
+ * stays `singular` (the interpreter answers `+∞` there).
+ */
+function gammalnAtEndpointPole(x: Interval): IntervalResult | undefined {
+  const isPole = (v: number): boolean => v <= 0 && Number.isInteger(v);
+  const loPole = isPole(x.lo);
+  const hiPole = isPole(x.hi);
+  if ((!loPole && !hiPole) || x.lo === x.hi) return undefined;
+  // A pole strictly inside: the next integer above `x.lo` is below `x.hi`
+  // and is a pole (it is at most 0).
+  const next = Math.floor(x.lo) + 1;
+  if (next < x.hi && next <= 0) return undefined;
+  const halfLine = (lo: number): IntervalResult => ({
+    kind: 'partial',
+    value: { lo, hi: Infinity },
+    domainClipped: 'hi',
+  });
+  if (x.lo === 0) {
+    // ln Γ decreases from `+∞` at 0 to its minimum at `GAMMA_MIN_X`.
+    return halfLine(
+      x.hi <= GAMMA_MIN_X
+        ? gammalnPointEnclosure(x.hi).lo
+        : nextDown(nextDown(Math.log(nextDown(GAMMA_MIN_Y))))
+    );
+  }
+  // The strip `(n, n + 1)` that holds the interior of `x`, with `n < 0`.
+  let lo = Infinity;
+  if (!loPole) lo = Math.min(lo, gammalnPointEnclosure(x.lo).lo);
+  if (!hiPole) lo = Math.min(lo, gammalnPointEnclosure(x.hi).lo);
+  const xStar = gammaNegStripExtremum(Math.floor(x.lo) + 0.5);
+  // Past the table, this kernel has no lower bound for ln|Γ| on the strip
+  // (|Γ| at the extremum tends to 0): the caller answers `singular`.
+  if (xStar === null) return undefined;
+  if (xStar >= x.lo && xStar <= x.hi)
+    lo = Math.min(lo, gammalnPointEnclosure(xStar).lo);
+  return halfLine(lo);
+}
+
 function _gammaln(x: Interval): IntervalResult {
+  // A pole at an endpoint (and none inside).
+  const atEndpoint = gammalnAtEndpointPole(x);
+  if (atEndpoint !== undefined) return atEndpoint;
   // Check for poles: gammaln has poles at every non-positive integer.
   if (x.hi >= 0 && x.lo <= 0) {
     // The interval crosses or touches zero. `at` names the first pole: the
@@ -2310,6 +2398,37 @@ export const powInterval = liftJump(
 export const powRational = liftJump(powRationalRaw);
 export const powRealBranch = liftJump(powRealBranchRaw);
 export const nthRoot = liftJump(nthRootRaw);
+
+/**
+ * `Root(x, n)` with a degree `n` that is known only at run time (an
+ * interval), as the `interval-js` target compiles `Root(x, n)` for a
+ * symbolic `n`.
+ *
+ * A degree that is a point at a nonzero integer keeps its exact value: a
+ * positive degree is the validated `nthRoot` (an even degree over a negative
+ * base has no real value, an odd degree gives the real root, as the
+ * interpreter does: `Root(-64, 3)` is `-4`), and a negative degree is
+ * `1 / nthRoot(x, −n)` (`Root(-8, -3)` is `-1/2`). Any other degree is the
+ * power `x^(1/n)` with an interval exponent. Before this kernel, every
+ * degree took that power, and over a negative base it answered the
+ * symmetric hull `[−M, M]`: `[−2, 2]` for `Root([−64, −1], 6)`, where the
+ * answer is `empty`.
+ */
+function nthRootIntervalRaw(
+  base: Interval | IntervalResult,
+  n: Interval | IntervalResult
+): IntervalResult {
+  const d = unwrap(n);
+  if (d !== undefined && d.lo === d.hi && Number.isInteger(d.lo) && d.lo !== 0)
+    return d.lo > 0
+      ? nthRoot(base, d.lo)
+      : div(point(1), nthRoot(base, -d.lo));
+  return powInterval(base, div(point(1), n));
+}
+// `liftJump` carries the marks of the degree operand (a `partial` or a jump
+// degree) into the result, which the integer branch above, reading only the
+// value of the degree, would drop.
+export const nthRootInterval = liftJump(nthRootIntervalRaw);
 export const exp = liftJump(
   outwardUnlessExact(expRaw, exactInRange(0, Infinity))
 );
@@ -2332,7 +2451,10 @@ export const max = liftJump(maxRaw);
 export const mod = liftJump(
   outwardUnlessExact(
     modRaw,
-    eitherExact(exactIntegerGridPoint, exactAtZeroBound)
+    eitherExact(
+      exactIntegerGridPoint,
+      eitherExact(exactAtZeroBound, exactModByIntervalContinuous)
+    )
   )
 );
 // `remainder` composes a division, a rounding, a multiplication and a

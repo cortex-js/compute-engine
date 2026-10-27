@@ -332,8 +332,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       /* = Pi / 180 */
       signature: '(real) -> real',
       broadcastable: true,
-      // A non-real or non-finite argument flows through the linear conversion
-      // (`Degrees(i) = iπ/180`), so the claim must follow the operand.
+      // A non-finite argument flows through the linear conversion
+      // (`Degrees(NaN)` is `NaN`), so the claim must follow the operand.
       type: (ops, context) =>
         BoxedType.forResult(
           numericTypeHandlerOnTypes(ops),
@@ -341,6 +341,14 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         ),
       canonical: (ops, { engine }) => {
         const ce = engine;
+        // An angle is real: a finite complex operand (`Degrees(2 + 3i)`,
+        // `Degrees(i)`) is an `incompatible-type` error, as the signature
+        // says, and as for a complex measurement. The linear conversion
+        // used to accept it (`Degrees(2 + 3i)` was `(1/90 + i/60)·π`),
+        // which disagreed with the error of `Degrees((2 + 3i) ± 0.1)`.
+        // (User decision 2026-10-27, ROADMAP CE-507.9.)
+        if (ops.length === 1 && ops[0].isValid && isNonRealFinite(ops[0]))
+          return ce._fn('Degrees', [ce.typeError('real', ops[0].type, ops[0])]);
         if (ce.angularUnit === 'deg') return ops[0];
         if (ops.length !== 1) return ce._fn('Degrees', ops);
         const arg = ops[0];
@@ -361,9 +369,7 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // `30°` is the angle π/6 whatever the user calls `Pi`, and
         // `Degrees(90)` must stay a right angle. `.N()` of the call is the
         // angle in radians, from the library value of π. This is only for a
-        // real argument: the signature of `Degrees` is `(real) -> real`, so
-        // `Degrees(i)` kept as a call is an `incompatible-type` error when it
-        // is evaluated.
+        // real argument: a finite complex argument is refused above.
         if (
           arg.isExact &&
           arg.im === 0 &&
@@ -376,10 +382,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
 
         if (Number.isNaN(fArg)) return arg.mul(ce.Pi).div(180);
 
-        // A non-real argument flows through the linear conversion intact
-        // (`Degrees(i) = iπ/180`, per the type handler above): the `.re`-based
-        // paths below would silently drop the imaginary part and turn
-        // `Degrees(i)` into 0.
+        // A non-finite argument with an imaginary part (a finite complex one
+        // is refused above) flows through the linear conversion intact: the
+        // `.re`-based paths below would silently drop the imaginary part.
         if (arg.im) return arg.mul(ce.Pi).div(180);
 
         // `Degrees(d)` is the faithful linear conversion `d·π/180` — it does
@@ -422,6 +427,10 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         // type mistake, not a reported one.
         const nonNumeric = nonNumericOperandError(options.engine, ops);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A symbol whose value is a finite complex number is refused as a
+        // complex literal is in the canonical handler (CE-507.9).
+        if (isNonRealFinite(ops[0]))
+          return options.engine.typeError('real', ops[0].type, ops[0]);
         if (options.engine.angularUnit === 'deg') return ops[0];
         // Faithful linear conversion to the engine's `angularUnit` (`d·π/180`
         // in radians), matching the canonical handler (no mod-360 reduction —
@@ -2036,6 +2045,21 @@ function quantityTrigValue(
  *
  * An absent optional component is foldable: the fold defaults it to 0.
  */
+/**
+ * True when `v` is a number literal with a nonzero imaginary part and finite
+ * parts (`2 + 3i`). The test reads the VALUE, not the type: a symbol
+ * declared `complex` can hold a real number, and `NaN` and the infinities
+ * are not finite.
+ */
+function isNonRealFinite(v: Expression): boolean {
+  return (
+    isNumber(v) &&
+    v.im !== 0 &&
+    Number.isFinite(v.re) &&
+    Number.isFinite(v.im)
+  );
+}
+
 function foldableDMSComponents(ops: ReadonlyArray<Expression>): boolean {
   return ops.every((op) => op === undefined || (isNumber(op) && !op.isComplex));
 }
