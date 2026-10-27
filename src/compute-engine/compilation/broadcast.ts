@@ -1131,6 +1131,34 @@ export function broadcastIntervals(
   return out;
 }
 
+/**
+ * Call `visit` with the bounds `lo, hi` of every cell of every input of an
+ * `interval-js` batch, before the batch runs: the cells of an input array
+ * (read with stride 2), or the one value of a scalar input. An index axis
+ * of the `grid` layout is not visited: its values are the positions of the
+ * cells. Returns the names of the inputs. The `interval-js` result checks
+ * the host value of an input of a value kind with it (the entry check of
+ * `run()`), so that a cell that the check refuses rejects the whole call
+ * instead of being an error cell of the loop.
+ */
+export function visitIntervalInputCells(
+  inputs: BroadcastInputs,
+  options: BroadcastOptions | undefined,
+  visit: (name: string, lo: number, hi: number) => void
+): ReadonlyArray<string> {
+  const shape = readShape(inputs, options, 2);
+  shape.names.forEach((name, k) => {
+    if (shape.indexes[k]) return;
+    const a = shape.arrays[k];
+    if (a === null) {
+      visit(name, shape.scalars[k], shape.scalars[k]);
+      return;
+    }
+    for (let j = 0; j + 1 < a.length; j += 2) visit(name, a[j], a[j + 1]);
+  });
+  return shape.names;
+}
+
 /** The slice form of `broadcastIntervals`; see `broadcastNumbersSlice`. The
  * slice's cells are written at the start of `out`, three values each. */
 export function broadcastIntervalsSlice(

@@ -16,7 +16,7 @@ import {
   isExactConstantExpression,
 } from '../boxed-expression/compare.js';
 import { isMeasurement } from './measurement-arithmetic.js';
-import { boxedToUnitExpression } from './units.js';
+import { type DecodedUnit, decodedUnit, describeUnit } from './units.js';
 import {
   type DimensionVector,
   type UnitExpression,
@@ -25,8 +25,6 @@ import {
   dimensionsEqual,
   isDimensionless,
   exactUnitConversion,
-  getExpressionDimension,
-  getExpressionScale,
 } from './unit-data.js';
 
 /** How `compareQuantities()` compares two quantities. */
@@ -102,17 +100,19 @@ export function compareQuantities(
 ): -1 | 0 | 1 | undefined {
   const operands = quantityOperands(a, b);
   if (operands === undefined) return undefined;
-  const [aMagnitude, aUE, bMagnitude, bUE] = operands;
+  const [aMagnitude, aUnit, bMagnitude, bUnit] = operands;
+  const aUE = aUnit.unit!;
+  const bUE = bUnit.unit!;
 
-  const aDim = getExpressionDimension(aUE);
-  const bDim = getExpressionDimension(bUE);
+  const aDim = aUnit.dimension;
+  const bDim = bUnit.dimension;
   if (!aDim || !bDim || !dimensionsEqual(aDim, bDim)) return undefined;
 
   // The scale of a logarithmic unit (`dB`, `Np`) in the unit table is
   // nominal: `1 Np` is not `1 dB`. Two quantities with different units of
   // which one is logarithmic have no known order.
   if (
-    JSON.stringify(aUE) !== JSON.stringify(bUE) &&
+    aUnit.key !== bUnit.key &&
     (hasLogarithmicUnit(aUE) || hasLogarithmicUnit(bUE))
   )
     return undefined;
@@ -144,8 +144,8 @@ export function compareQuantities(
     return sa === sb ? 0 : sa < sb ? -1 : 1;
   }
 
-  const aScale = getExpressionScale(aUE);
-  const bScale = getExpressionScale(bUE);
+  const aScale = aUnit.scale;
+  const bScale = bUnit.scale;
   if (aScale === null || bScale === null) return undefined;
   // Convert to the finer unit: the unit of `a` when it is the finer one.
   const toUnitOfA = aScale < bScale;
@@ -265,7 +265,7 @@ export function quantityDimensionsDiffer(
  * the number `0.06` is `6 percent` compared with `0.06 rad`, and
  * `180 deg` compared with `π` is `180 deg` compared with `π rad`.
  */
-const SCALE_ONE_UNIT: UnitExpression = 'rad';
+const SCALE_ONE_UNIT: DecodedUnit = describeUnit('rad');
 
 /** The units of the unit table whose scale is nominal: a quantity with
  * such a unit is not compared with a number, nor with a quantity that has
@@ -285,9 +285,10 @@ export function hasLogarithmicUnit(unit: UnitExpression): boolean {
 }
 
 /**
- * The magnitudes and the unit expressions of the two operands of
+ * The magnitudes and the decoded units of the two operands of
  * `compareQuantities()`: `[aMagnitude, aUnit, bMagnitude, bUnit]`, or
- * `undefined` when the two operands are not comparable as quantities.
+ * `undefined` when the two operands are not comparable as quantities. The
+ * `unit` field of each decoded unit is not `null`.
  *
  * - Two quantities give their magnitudes and their units.
  * - A quantity whose unit is dimensionless and not logarithmic (`percent`,
@@ -301,14 +302,14 @@ export function hasLogarithmicUnit(unit: UnitExpression): boolean {
 function quantityOperands(
   a: Expression,
   b: Expression
-): [Expression, UnitExpression, Expression, UnitExpression] | undefined {
+): [Expression, DecodedUnit, Expression, DecodedUnit] | undefined {
   const aQuantity = isQuantity(a);
   const bQuantity = isQuantity(b);
   if (aQuantity && bQuantity) {
-    const aUE = boxedToUnitExpression(a.op2);
-    const bUE = boxedToUnitExpression(b.op2);
-    if (!aUE || !bUE) return undefined;
-    return [a.op1, aUE, b.op1, bUE];
+    const aUnit = decodedUnit(a.op2);
+    const bUnit = decodedUnit(b.op2);
+    if (!aUnit.unit || !bUnit.unit) return undefined;
+    return [a.op1, aUnit, b.op1, bUnit];
   }
   if (aQuantity === bQuantity) return undefined;
   const [q, other] = aQuantity ? [a, b] : [b, a];
@@ -318,9 +319,9 @@ function quantityOperands(
     !(isExactConstantExpression(other) && other.type.matches('number'))
   )
     return undefined;
-  const unit = boxedToUnitExpression(q.op2);
-  if (!unit || hasLogarithmicUnit(unit)) return undefined;
-  const dim = getExpressionDimension(unit);
+  const unit = decodedUnit(q.op2);
+  if (!unit.unit || hasLogarithmicUnit(unit.unit)) return undefined;
+  const dim = unit.dimension;
   if (!dim || !isDimensionless(dim)) return undefined;
   return aQuantity
     ? [q.op1, unit, other, SCALE_ONE_UNIT]
@@ -339,8 +340,7 @@ function isQuantity(
  * `isAbsentSymbol()`). */
 function quantityDimension(q: Expression): DimensionVector | null {
   if (!isQuantity(q) || isAbsentSymbol(q.op1)) return null;
-  const unit = boxedToUnitExpression(q.op2);
-  return unit ? getExpressionDimension(unit) : null;
+  return decodedUnit(q.op2).dimension;
 }
 
 /** True when `x` is an exact number literal or an exact constant

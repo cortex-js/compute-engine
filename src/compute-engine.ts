@@ -198,6 +198,11 @@ export {
   lambdaParamSites,
 } from './compute-engine/boxed-expression/binding-sites.js';
 
+// ── Value kinds (the `arithmetic` field of an operator definition) ──
+// A cache for the hooks of a value kind: the payload of a kind value (a call
+// of its head) is decoded once for each boxed expression.
+export { decodedPayload } from './compute-engine/boxed-expression/decoded-payload.js';
+
 // ── Type guards ─────────────────────────────────────────────────────
 import {
   isExpression,

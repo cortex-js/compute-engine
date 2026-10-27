@@ -59,6 +59,7 @@ export const KIND_PRIMITIVES: ReadonlyArray<string> = [
   'residue',
   'measurement',
   'quantity',
+  'enclosure',
 ];
 
 /** The marker arms that may be added to the kind arms of a result type. */

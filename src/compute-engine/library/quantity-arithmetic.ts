@@ -24,6 +24,7 @@ import {
   boxedToUnitExpression,
   canonicalUnit,
   canonicalUnitFromFactorMap,
+  decodedUnit,
   isExactConversion,
   unitExactlyCancels,
   isSymbolicValue,
@@ -209,15 +210,17 @@ export function quantityAdd(
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
-  // Collect all Quantity operands and cache their UnitExpressions
+  // Collect all Quantity operands with their UnitExpressions and scales
   const quantities: QuantityExpr[] = [];
   const unitExprs: ReturnType<typeof boxedToUnitExpression>[] = [];
+  const scales: (number | null)[] = [];
   for (const op of ops) {
     if (!isQuantity(op)) return undefined; // non-Quantity mixed in
-    const ue = boxedToUnitExpression(op.op2);
-    if (!ue) return undefined;
+    const unit = decodedUnit(op.op2);
+    if (!unit.unit) return undefined;
     quantities.push(op);
-    unitExprs.push(ue);
+    unitExprs.push(unit.unit);
+    scales.push(unit.scale);
   }
   if (quantities.length === 0) return undefined;
 
@@ -232,7 +235,7 @@ export function quantityAdd(
   let bestIdx = 0;
   let bestScale = 0;
   for (let i = 0; i < quantities.length; i++) {
-    const s = getExpressionScale(unitExprs[i]!);
+    const s = scales[i];
     if (s === null) return undefined;
     if (s > bestScale) {
       bestScale = s;
@@ -554,15 +557,15 @@ export function quantityDivide(
     const resultMag = numMag / denMag;
 
     // Check if units cancel (same dimension → dimensionless scalar)
-    const numUE = boxedToUnitExpression(numQ.op2);
-    const denUE = boxedToUnitExpression(denQ.op2);
-    if (numUE && denUE) {
-      const numDim = getExpressionDimension(numUE);
-      const denDim = getExpressionDimension(denUE);
+    const numUnit = decodedUnit(numQ.op2);
+    const denUnit = decodedUnit(denQ.op2);
+    if (numUnit.unit && denUnit.unit) {
+      const numDim = numUnit.dimension;
+      const denDim = denUnit.dimension;
       if (numDim && denDim && dimensionsEqual(numDim, denDim)) {
         // Same dimension — convert to common scale and return scalar
-        const numScale = getExpressionScale(numUE);
-        const denScale = getExpressionScale(denUE);
+        const numScale = numUnit.scale;
+        const denScale = denUnit.scale;
         if (numScale !== null && denScale !== null)
           return asFloat(ce.number((numMag * numScale) / (denMag * denScale)));
       }
@@ -616,14 +619,14 @@ function quantityDivideMeasurement(
     const denMag = denQ.op1;
 
     // Check if units cancel (same dimension → dimensionless measurement)
-    const numUE = boxedToUnitExpression(numQ.op2);
-    const denUE = boxedToUnitExpression(denQ.op2);
-    if (numUE && denUE) {
-      const numDim = getExpressionDimension(numUE);
-      const denDim = getExpressionDimension(denUE);
+    const numUnit = decodedUnit(numQ.op2);
+    const denUnit = decodedUnit(denQ.op2);
+    if (numUnit.unit && denUnit.unit) {
+      const numDim = numUnit.dimension;
+      const denDim = denUnit.dimension;
       if (numDim && denDim && dimensionsEqual(numDim, denDim)) {
-        const numScale = getExpressionScale(numUE);
-        const denScale = getExpressionScale(denUE);
+        const numScale = numUnit.scale;
+        const denScale = denUnit.scale;
         if (numScale !== null && denScale !== null && denScale !== 0) {
           const ratio = divideMagnitudes(ce, numMag, denMag);
           if (ratio === undefined) return undefined;

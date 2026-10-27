@@ -2113,6 +2113,13 @@ export interface ArithmeticDefinition {
    *   `LessEqual`, `Greater`, `GreaterEqual`) answer `False`, as they do for
    *   a complex number; `Equal` and `NotEqual` ask the `eq` handler of the
    *   head definitions; `Max`, `Min` and `Sort` leave the call unevaluated;
+   * - `'<='`: `a` is less than or equal to `b`, and the hook cannot say
+   *   which (two enclosures that touch: `Enclosure(0, 1)` and
+   *   `Enclosure(1, 2)`). `LessEqual` answers `True` and `Greater` answers
+   *   `False`; `Less` and `GreaterEqual` stay unevaluated; `Equal` and
+   *   `NotEqual` ask the `eq` handlers. `'>='` is the mirror answer. A
+   *   reader that needs a total order (`Sort`, `Max` and `Min` without an
+   *   `extremum` hook) reads them as `undefined`;
    * - `undefined`: the two values are not comparable (a value of another
    *   kind, a symbol with no value). An order comparison stays unevaluated,
    *   `Equal` and `NotEqual` ask the `eq` handlers.
@@ -2123,7 +2130,24 @@ export interface ArithmeticDefinition {
     a: KindOperand,
     b: KindOperand,
     context: ArithmeticContext
-  ): -1 | 0 | 1 | 'unordered' | undefined;
+  ): -1 | 0 | 1 | '<=' | '>=' | 'unordered' | undefined;
+
+  /**
+   * The maximum (`which` is `'max'`) or the minimum of the operands, of
+   * which at least one is a value of this kind, for `Max`, `Min`,
+   * `ElementMax`, `ElementMin` and `Clamp`. The engine asks this hook
+   * before it orders the operands with `compare`, so a kind whose values
+   * can overlap gives a value that is not one of the operands: the maximum
+   * of two enclosures is the enclosure of the larger ends
+   * (`Max(Enclosure(0, 2), Enclosure(1, 3))` is `Enclosure(1, 3)`).
+   * `undefined` declines, and the engine orders the operands with
+   * `compare`. Absent: the engine orders the operands with `compare`.
+   */
+  extremum?(
+    which: 'max' | 'min',
+    ops: KindOperands,
+    context: ArithmeticContext
+  ): Expression | undefined;
 
   /**
    * Whether the value `value` of this kind is exact, for the rule that an

@@ -117,6 +117,12 @@ export type PrimitiveType =
   // operators and the operators that name it
   // (`docs/plans/2026-10-26-value-kinds.md`, section 4.7).
   | 'quantity'
+  // An enclosure, a closed interval `[lo, hi]` that holds one real number:
+  // the value of `Enclosure(lo, hi)`. An OPAQUE value like `residue`:
+  // disjoint from every numeric type and from `set<real>` (the type of the
+  // set `Interval`). It is a VALUE KIND admitted where a real is
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.9.2).
+  | 'enclosure'
   // A type value: a type expression reified as a first-class runtime value
   // (`TypeFrom("list<integer>")`). An OPAQUE value like `regexp` and `color`:
   // not a `scalar`, not a `collection`, no hidden element type. In TYPE-STRING

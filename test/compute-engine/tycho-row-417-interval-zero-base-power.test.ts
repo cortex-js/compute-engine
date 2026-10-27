@@ -32,9 +32,21 @@ function shape(r: unknown): [string, number, number] | [string] {
 
 describe('Tycho 417 — the point base 0 under an interval exponent', () => {
   test('a positive exponent interval gives the value 0', () => {
-    expect(shape(powInterval(I(0, 0), I(0.2, 0.4)))).toEqual(['interval', 0, 0]);
-    expect(shape(powInterval(I(0, 0), I(0.5, 0.5)))).toEqual(['interval', 0, 0]);
-    expect(shape(powInterval(I(0, 0), I(1.5, 100)))).toEqual(['interval', 0, 0]);
+    expect(shape(powInterval(I(0, 0), I(0.2, 0.4)))).toEqual([
+      'interval',
+      0,
+      0,
+    ]);
+    expect(shape(powInterval(I(0, 0), I(0.5, 0.5)))).toEqual([
+      'interval',
+      0,
+      0,
+    ]);
+    expect(shape(powInterval(I(0, 0), I(1.5, 100)))).toEqual([
+      'interval',
+      0,
+      0,
+    ]);
   });
 
   test('an exponent interval reaching 0 from above contains the value 1', () => {
@@ -57,16 +69,44 @@ describe('Tycho 417 — the point base 0 under an interval exponent', () => {
   });
 
   test('a base reaching 0 from below is clipped to its one defined point', () => {
-    expect(shape(powInterval(I(-1, 0), I(0.2, 0.4)))).toEqual([
+    // At a non-integer POINT exponent the negative part of the base has no
+    // real value, and the box is clipped to the point 0.
+    expect(shape(powInterval(I(-1, 0), I(0.3, 0.3)))).toEqual([
       'partial',
       0,
       0,
     ]);
-    expect(shape(powInterval(I(-1, 0), I(-1.5, -0.5)))).toEqual(['empty']);
+    expect(shape(powInterval(I(-1, 0), I(-0.5, -0.5)))).toEqual(['empty']);
+    // Over an exponent INTERVAL the negative part has real values at every
+    // exponent that is a rational with an odd denominator (CE-522.6). The
+    // old answers excluded them: `partial [0, 0]` left out `(−1)^(1/3) = −1`,
+    // and `empty` left out `(−1)^−1 = −1`. The answer is the hull `[−M, M]`
+    // of the negative part joined with the image of the point 0.
+    expect(shape(powInterval(I(-1, 0), I(0.2, 0.4)))).toEqual([
+      'interval',
+      -1.0000000000000002,
+      1.0000000000000002,
+    ]);
+    expect(shape(powInterval(I(-1, 0), I(-1.5, -0.5)))).toEqual([
+      'interval',
+      -Infinity,
+      Infinity,
+    ]);
   });
 
   test('the neighbouring cases are unchanged', () => {
-    expect(shape(powInterval(I(-2, -1), I(1.5, 2.5)))).toEqual(['empty']);
+    // CE-522.6: `[−2, −1]^[1.5, 2.5]` was `empty`, which excluded
+    // `(−1.5)^2 = 2.25`, a real value on the box (the exponent interval
+    // holds 2). The answer is `[−M, M]` with `M = 2^2.5`, rounded outward.
+    const [hullKind, hullLo, hullHi] = shape(
+      powInterval(I(-2, -1), I(1.5, 2.5))
+    ) as [string, number, number];
+    expect(hullKind).toBe('interval');
+    expect(hullLo).toBeLessThanOrEqual(-(2 ** 2.5));
+    expect(hullHi).toBeGreaterThanOrEqual(2 ** 2.5);
+    expect(hullHi).toBeLessThan(5.6569);
+    // A non-integer point exponent over a negative base has no real value.
+    expect(shape(powInterval(I(-2, -1), I(1.5, 1.5)))).toEqual(['empty']);
     expect(shape(powInterval(I(-1, -1), I(1.5, 2.5)))).toEqual([
       'interval',
       -1,

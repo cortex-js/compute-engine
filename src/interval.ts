@@ -31,6 +31,9 @@ export {
   getValue,
   unwrap,
   unwrapOrPropagate,
+  enclose,
+  stripEnclosure,
+  finiteOperand,
 } from './compute-engine/interval/util.js';
 
 // Arithmetic operations

@@ -234,6 +234,7 @@ describe('VALUE KINDS ACCEPTANCE: the per-kind engine shortcut', () => {
     expect([...kindTypesOf(ce)]).toEqual([
       'residue',
       'measurement',
+      'enclosure',
       'quantity',
     ]);
     ce.box(RC(1, 5));

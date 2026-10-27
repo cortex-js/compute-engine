@@ -2,10 +2,13 @@ import type { Expression } from '../global-types.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 
-/** Resolve a derivative without changing the caller's declarations. */
+/** Resolve a derivative without changing the caller's declarations.
+ * `options` is passed to the angular-unit rewrite of the result
+ * (`rewriteAngularUnit()`): the interval target asks for exact factors. */
 export function derivativeClosedForm(
   operator: 'D' | 'Derivative' | 'ND',
-  args: ReadonlyArray<Expression>
+  args: ReadonlyArray<Expression>,
+  options?: { exactFactors?: boolean }
 ): Expression | undefined {
   const ce = args[0]?.engine;
   if (ce === undefined) return undefined;
@@ -21,7 +24,7 @@ export function derivativeClosedForm(
       return undefined;
     // Differentiation uses the engine's angular convention; emitted kernels
     // use radians, including for the new trigonometric nodes in this result.
-    return rewriteAngularUnit(value);
+    return rewriteAngularUnit(value, options);
   } catch (e) {
     // A caller's timeout, an abort or an iteration limit propagates; only an
     // ordinary evaluation error means "no closed form".

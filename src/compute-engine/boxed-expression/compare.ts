@@ -37,6 +37,7 @@ import {
   isKindValuePair,
   kindCompare,
   kindEqual,
+  orderAnswer,
 } from './kind-compare.js';
 import { engineHasKindValues } from './value-kinds.js';
 
@@ -1036,14 +1037,9 @@ export function cmp(
         ? [a.evaluate(), boxedB.evaluate()]
         : [a, boxedB];
     const kindOrder = kindCompare(kindPair[0], kindPair[1]);
-    if (kindOrder !== undefined)
-      return kindOrder === 'incomparable' || kindOrder === 'unordered'
-        ? undefined
-        : kindOrder < 0
-          ? '<'
-          : kindOrder > 0
-            ? '>'
-            : '=';
+    // `'<='` and `'>='` (two enclosures that touch) are kept: `isLessEqual()`
+    // is then `true` and `isLess()` is `undefined` (`orderAnswer()`).
+    if (kindOrder !== undefined) return orderAnswer(kindOrder, 'order');
   }
 
   // Two exact values, one of them an exact constant expression that is not
@@ -1592,13 +1588,12 @@ export function exactOrder(
   // A measurement is ordered by its nominal (`MEASUREMENT_ARITHMETIC`,
   // `library/measurement-arithmetic.ts`): `min(0.1, ∫₀¹ e^(−x²) dx)` under
   // `.N()` is `0.1`, the quadrature being a measurement.
+  // `'<='` and `'>='` (two enclosures that touch) are not a total order:
+  // the pair is not ordered here (`orderAnswer()`).
   const kindOrder = engineHasKindValues(a.engine)
     ? kindCompare(a, b)
     : undefined;
-  if (kindOrder !== undefined)
-    return kindOrder === 'incomparable' || kindOrder === 'unordered'
-      ? undefined
-      : kindOrder;
+  if (kindOrder !== undefined) return orderAnswer(kindOrder, 'total');
   const order = orderAtWorkingPrecision(a, b);
   if (order !== undefined) return order;
   const ce = a.engine;

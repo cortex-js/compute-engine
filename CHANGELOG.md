@@ -1,5 +1,174 @@
 ## [Unreleased]
 
+### Behavior Changes
+
+- **The interval library gives sound and tighter answers at poles, at domain
+  boundaries and for powers** (ROADMAP CE-522). These kernels are the ones
+  that the code compiled with `compile(…, { to: 'interval-js' })` calls, so
+  every user of that target sees the change. The design review of the
+  `Enclosure` value kind (see Features) found them: some answers excluded a
+  true value, others were wider than necessary.
+  - `mod` with a divisor interval that is not a point: `mod([5, 5], [2, 4])`
+    was `[1, 1]`, which excludes `Mod(5, 3) = 2` and `Mod(5, 2.5) = 0`. It is
+    now the hull `[0, 4]` (a `singular` result with that value). When the
+    quotient has one integer part over the whole box, the answer is the
+    continuous range: `mod([5, 5], [2.6, 4])` is `[1, 2.4]`, rounded outward.
+  - `atanh` at the boundary of its domain: `atanh([0, 1])` was
+    `partial [0, 18.3684…]`, a clip of the argument to `1 − ε`. It is now
+    `partial [0, +∞]`, and `atanh([1, 1])` is `empty`.
+  - A pole at an ENDPOINT gives a half-line. `tan([0, Math.PI / 2])`,
+    `cot([0, 1])`, `sec([0, Math.PI / 2])`, `csc([-1, 0])`, `gamma([0, 1])`,
+    `powRational([-1, 0], -2, 3)` and `powRealBranch` with a negative exponent
+    were `singular` with no value (the whole line). They are now `partial`
+    with the half-line beside the pole: `gamma([0, 1])` is `[1, +∞]` and
+    `powRational([-1, 0], -2, 3)` is `[1, +∞]`. A pole inside the interval
+    still gives `singular`. A point at a pole has no value:
+    `gamma([0, 0])` and `powRational([0, 0], -1, 3)` are `empty`; `tan`,
+    `cot`, `sec` and `csc` at a point that is their pole stay `singular`,
+    because the interpreter answers `~oo` there.
+  - `pow` with a negative integer exponent over a base with a zero endpoint:
+    `pow([0, 1], -1)` was `partial [−∞, +∞]` and is now `partial [1, +∞]`;
+    `pow([-1, 0], -1)` is `[−∞, −1]`, and `pow([0, 0], -1)` is `empty`.
+  - `powInterval` with a negative base over an exponent interval:
+    `powInterval([-2, -2], [1, 2])` was `empty`, although `(−2)^1` and
+    `(−2)^2` exist. It is now `[−4, 4]`, the symmetric hull `[−M, M]` with
+    `M = max(|b|^c, |b|^d)`, which contains every real value of the power,
+    also at an exponent that is a fraction with an odd denominator
+    (`(−2)^(5/3) ≈ −3.17`). A base that crosses 0 takes the hull of its two
+    parts: `[-1, 1]^[1, 2]` was `partial [0, 1]` and is `[−1, 1]`. At an
+    exponent that is a POINT and not an integer, a negative base still has
+    no value (`powInterval([-2, -2], [1.5, 1.5])` is `empty`). Visible to
+    Tycho's adaptive sampler (its rows 260 and 417): a box with `x < 0` and
+    an exponent interval that holds an integer is now an undecided hull that
+    the sampler subdivides, instead of a blank region; at a non-integer
+    point exponent the region stays blank.
+  - `pow` with a negative integer exponent rounds outward at each step. For
+    the double `x = 1.9678349534779586e-103`, `pow([x, x], -3)` was
+    `[1.3123025984121744e308, 1.3123025984121748e308]`, which excludes the
+    true value (its nearest double is `1.3123025984121742e308`). It now
+    contains it. An exact power stays exact: `pow([2, 2], -1)` is
+    `[0.5, 0.5]`.
+  - An angle in degrees, gradians or turns: the `interval-js` target
+    multiplied the angle by the double nearest to the factor
+    (`Math.PI / 180`, `2 * Math.PI`), which can be below the true factor. In
+    `turn` mode, the compiled `cos(x)` at the point `0.25` had two positive
+    bounds and excluded the true value `0`. The target now uses the exact
+    factor (`π/180`, `π/200`, `2π`, and its reciprocal for the inverse
+    functions), enclosed outward as any other exact constant, also in the
+    derivatives that the target compiles. The compiled `cos` and `arcsin` now
+    contain the true value at a quarter turn in `deg`, `grad` and `turn`
+    mode. The other targets keep the float factors.
+  - `fract([-1e-20, -1e-20])` was `[1, 1]`, while the true fractional part is
+    below 1. The subtraction `x − floor(x)` is now rounded outward; an exact
+    case stays exact.
+- **The `interval-js` runner checks the value of an input whose type can hold
+  an enclosure.** Before, this target declined every expression with a value
+  kind. Now, for a free symbol whose type is `enclosure` or a union with an
+  `enclosure` arm, `run()` checks the value BEFORE it converts the inputs:
+  a record `{ lo, hi }` must have `lo <= hi`, no `NaN` and not the same
+  infinity twice, and a number is a point. A union input is checked by arm:
+  with `y: number | enclosure`, `y: Infinity` is accepted by the numeric
+  arm. A refused value throws (it is not turned into an `entire` result).
+  `broadcast()` and `broadcastAsync()` check every cell before the loop, so
+  one refused cell rejects the whole call. The inputs of every other type
+  are not changed, including the `NaN` that marks an absent value of a
+  `real | missing` input.
+- **On `interval-js`, a decline of an expression with an enclosure is not
+  replaced by the interpreter**, also with `fallback: true`: it throws with
+  the message of the kind. The fallback of this target gives each input as
+  the midpoint of its interval, and would give a number to a symbol typed
+  `enclosure`. The other value kinds (`Measurement`, `Quantity`) keep the
+  fallback.
+
+### Features
+
+- **`Enclosure`, an interval value with interval arithmetic** (ROADMAP CE-507
+  phase 3, [#416](https://github.com/cortex-js/compute-engine/issues/416)).
+  `Enclosure(lo, hi)` is a closed interval that holds ONE real number, whose
+  value is somewhere in `[lo, hi]`. It is not the set `Interval(lo, hi)`:
+  `Abs(Enclosure(-1, 2))` is `Enclosure(0, 2)`, while `Abs` of the set is its
+  cardinality. It is a library value kind, beside `ResidueClass`,
+  `Measurement` and `Quantity`, with the kind type `enclosure`, and it is accepted wherever a real is accepted
+  (`admittedAs: 'real'`). Its LaTeX is `\mathrm{Enclosure}(a, b)`.
+  - The canonical form orders the endpoints (`Enclosure(2, 1)` is
+    `Enclosure(1, 2)`), reads one operand as a point (`Enclosure(3)` is
+    `Enclosure(3, 3)`), and converts a set `Interval` (`Enclosure(Interval(0,
+    1))` is `Enclosure(0, 1)`). An endpoint that is not an extended real, or
+    is a value of a kind, is an `incompatible-type` error. A `NaN` endpoint,
+    the same infinity twice and an empty set give the indeterminate value.
+  - The arithmetic hooks compute with the endpoints, and keep them exact
+    under `evaluate()`: `Enclosure(0, 1) + Enclosure(1/3, 2)` is
+    `Enclosure(1/3, 3)`, `Enclosure(-1, 2) · Enclosure(3, 4)` is
+    `Enclosure(-4, 8)`, and `Enclosure(1, 2) − Enclosure(1, 2)` is
+    `Enclosure(-1, 1)` (the two operands are independent). A division by an
+    enclosure with a zero endpoint gives a half-line
+    (`1 / Enclosure(0, 1)` is `Enclosure(1, +oo)`), and with `0` inside the
+    whole line.
+  - A numeric function gives its image (the `apply` hook), with the critical
+    points of the function: `Sin(Enclosure(0, Pi))` is `Enclosure(0, 1)`,
+    `Sin(Enclosure(0, 1))` is `Enclosure(0, Sin(1))`, `Sqrt(Enclosure(-1, 4))`
+    is `Enclosure(0, 2)` (the domain is clipped), `Tan(Enclosure(0, Pi/2))`
+    is `Enclosure(0, +oo)`, and `Ln(Enclosure(-2, -1))` is indeterminate.
+    Under `evaluate()` with exact endpoints the endpoints are exact. Under
+    `.N()`, the endpoints are converted to doubles OUTWARD (the largest
+    double below `lo`, the smallest above `hi`) and the interval library
+    computes the image: `Enclosure(0, Pi).N()` is
+    `Enclosure(0, 3.1415926535897936)`, and `Sin(Enclosure(0, 1)).N()` is
+    `Enclosure(0, 0.8414709848078966)`. The endpoints under `.N()` are
+    machine doubles at every `ce.precision`. They are rigorous for the
+    rational operations and best effort for the transcendental functions
+    (ROADMAP CE-522.5).
+  - The comparisons use the partial order of intervals:
+    `Enclosure(0, 1) < Enclosure(2, 3)` is `True`, and
+    `Enclosure(0, 2) < Enclosure(1, 3)` stays unevaluated. Two enclosures
+    that touch decide only the non-strict comparison:
+    `Enclosure(0, 1) <= Enclosure(1, 2)` is `True` and `>` is `False`, while
+    `<` stays unevaluated. `Enclosure(1, 1) = 1` is `True`; two enclosures
+    that overlap may hold the same real, so `Equal` stays unevaluated.
+  - `Max`, `Min`, `Clamp`, `ElementMax` and `ElementMin` give the hull of
+    the extrema: `Max(Enclosure(0, 2), Enclosure(1, 3))` is
+    `Enclosure(1, 3)`, and `Max(Enclosure(0, 1), +oo)` is `+oo`.
+  - `Sum`, `Product` and `Mean` of a list of enclosures and numbers fold
+    through the hooks: `Mean([Enclosure(0, 1), Enclosure(1, 2), 3])` is
+    `Enclosure(4/3, 2)`. The other statistics stay unevaluated.
+  - The code compiled for the `interval-js` target computes with an
+    enclosure: an input typed `enclosure` is a `{ lo, hi }` record, and the
+    compiled code calls the same kernel of the interval library as `.N()`
+    for each form, so the two give the same doubles. With `x` declared
+    `enclosure`, `compile(ce.parse('x + 1'), { to: 'interval-js' })` gives
+    `{ kind: 'interval', value: { lo: 1, hi: 2 } }` for
+    `run({ x: { lo: 0, hi: 1 } })`. The other targets decline an enclosure
+    with the message of the kind.
+  - `Measurement(Enclosure(0, 1), 0.1)` and `Quantity(Enclosure(0, 1), m)`
+    are `incompatible-type` errors.
+
+  The rules are in `doc/06-guide-augmenting.md`, "Enclosures"; the design is
+  section 4.9.2 of `docs/plans/2026-10-26-value-kinds.md`.
+- **Two extensions of `ArithmeticDefinition` for a value kind that you
+  declare.**
+  - The optional `extremum(which, ops, context)` hook gives the maximum
+    (`which` is `'max'`) or the minimum of operands of which one at least is
+    a value of the kind, for `Max`, `Min`, `Clamp`, `ElementMax` and
+    `ElementMin`. The engine asks it before it orders the operands with
+    `compare`, so a kind whose values can overlap can answer a value that is
+    not one of the operands. `undefined` declines, and the engine orders the
+    operands with `compare` as before.
+  - `compare` can answer `'<='` or `'>='`: the first value is less than (or
+    greater than) or equal to the second, and the hook cannot say which. On
+    a `'<='` answer, `LessEqual` is `True` and `Greater` is `False`, `Less`
+    and `GreaterEqual` stay unevaluated, and `Equal` asks the `eq` handlers.
+    A reader that needs a total order (`Sort`, and `Max`/`Min` without an
+    `extremum` hook) reads it as no answer.
+
+### Performance
+
+- **The unit of a quantity is decoded once for each boxed value.** The
+  arithmetic and the comparisons of quantities read the unit expression, its
+  dimension and its scale from a cache on the boxed unit, and do not walk the
+  unit again at each operation. The cache is public as `decodedPayload()`: the
+  hooks of a value kind that you declare can decode the operands of a kind value
+  once for each boxed expression in the same way.
+
 ### Resolved Issues
 
 - **On `wgsl`, a piecewise branch that draws a random value compiles to an
@@ -26,6 +195,13 @@
   evaluates it; a statement whose draws are bound in their written order
   (`\operatorname{Variance}` of a list of draws, a `Sum` that is written
   first) still compiles.
+
+- **An interval value for interval arithmetic**
+  ([#416](https://github.com/cortex-js/compute-engine/issues/416)): the
+  `Enclosure` value kind (see Features). With this third phase, the value
+  kinds of [#477](https://github.com/cortex-js/compute-engine/issues/477) are
+  complete: the mechanism and `ResidueClass` (phase 1), `Measurement` and
+  `Quantity` (phase 2), and `Enclosure` (phase 3).
 
 ## 0.170.0 _2026-10-26_
 

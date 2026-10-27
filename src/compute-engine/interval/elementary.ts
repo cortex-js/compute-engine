@@ -38,6 +38,9 @@ import {
   exactAtOrigin,
   exactAtZeroBound,
   exactLog,
+  directedSum,
+  directedProduct,
+  directedReciprocal,
 } from './rounding.js';
 import { prodExact } from '../numerics/interval-arithmetic.js';
 import {
@@ -161,6 +164,86 @@ function intPow(base: Interval, n: number): Interval {
 }
 
 /**
+ * A lower bound (`dir` is `-1`) or an upper bound (`dir` is `1`) of `m^(−n)`
+ * for a positive `m` and a positive integer `n`.
+ *
+ * Every operation is rounded in the direction of the bound: the power by
+ * `powChainDown`/`powChainUp` (one ulp per uncertified product) and the
+ * reciprocal by `directedReciprocal`. The order of the two operations keeps
+ * every intermediate a normal double where it can: for `m ≥ 1` the power
+ * comes first (`m^n ≥ 1`), and for `m < 1` the reciprocal comes first
+ * (`1/m > 1`), because `m^n` can then be SUBNORMAL, whose relative precision
+ * is lower and is passed on whole to its reciprocal. A power that overflows
+ * is bounded by the chain (`Number.MAX_VALUE` below, `+∞` above), and so is
+ * a reciprocal.
+ */
+function inversePower(m: number, n: number, dir: -1 | 1): number {
+  // `∞^(−n)` is exactly 0.
+  if (m === Infinity) return 0;
+  if (m < 1) {
+    const r = directedReciprocal(m, dir);
+    if (r === Infinity) return Infinity;
+    return dir < 0 ? powChainDown(r, n) : powChainUp(r, n);
+  }
+  return directedReciprocal(
+    dir < 0 ? powChainUp(m, n) : powChainDown(m, n),
+    dir
+  );
+}
+
+/**
+ * `x^(−n)` for a positive integer `n`, over the interval `x`.
+ *
+ * Each endpoint is a directed bound of the reciprocal of a power of the
+ * magnitude of a base endpoint (`inversePower`). The previous form rounded
+ * the power to nearest and took one ulp at the export, after the
+ * reciprocal: the reciprocal keeps the RELATIVE error of the power, and a
+ * power with a subnormal result has a relative error far above one ulp, so
+ * for the double `x = 1.9678349534779586e-103`, `[x, x]^−3` answered
+ * `[1.3123025984121744e308, …]`, above the true value
+ * (`1.3123025984121742e308` once rounded). The endpoints are certified by the
+ * prover (`exactPow`, `rounding.ts`), so the export does not step them again.
+ *
+ * The base and 0:
+ * - `0` strictly inside the base: the power has a pole inside, `singular`
+ *   with no value;
+ * - the point `[0, 0]`: the pole is the whole base, there is no value
+ *   (`empty`);
+ * - `0` at ONE endpoint: the pole is at the edge, and the power is the
+ *   half-line beside it, a `partial` result: `[0, 1]^−1` is `[1, +∞]`,
+ *   `[−1, 0]^−1` is `[−∞, −1]` (an odd power keeps the sign of the base) and
+ *   `[−1, 0]^−2` is `[1, +∞]`.
+ */
+function negativeIntegerPower(x: Interval, n: number): IntervalResult {
+  const odd = n % 2 === 1;
+  if (x.lo === 0 && x.hi === 0) return { kind: 'empty' };
+  if (x.lo < 0 && x.hi > 0) return { kind: 'singular' };
+  // The magnitude `|x|^(−n)` is decreasing in `|x|`: its lower end is at the
+  // largest magnitude `far`, its upper end at the smallest `near`.
+  const negative = x.hi <= 0;
+  const far = negative ? x.lo : x.hi;
+  const near = negative ? x.hi : x.lo;
+  const magLo = inversePower(Math.abs(far), n, -1);
+  if (near === 0) {
+    // A pole at the endpoint `near`: the magnitude is unbounded there.
+    if (negative && odd)
+      return {
+        kind: 'partial',
+        value: { lo: -Infinity, hi: -magLo },
+        domainClipped: 'lo',
+      };
+    return {
+      kind: 'partial',
+      value: { lo: magLo, hi: Infinity },
+      domainClipped: 'hi',
+    };
+  }
+  const magHi = inversePower(Math.abs(near), n, 1);
+  if (negative && odd) return ok({ lo: -magHi, hi: -magLo });
+  return ok({ lo: magLo, hi: magHi });
+}
+
+/**
  * Power function for intervals.
  *
  * Handles integer and fractional exponents differently:
@@ -181,13 +264,7 @@ function powRaw(base: Interval | IntervalResult, exp: number): IntervalResult {
     if (exp >= 0) {
       return ok(intPow(baseVal, exp));
     } else {
-      // Negative integer: x^(-n) = 1/x^n - singularity if base contains 0
-      if (containsZero(baseVal)) {
-        return { kind: 'singular' };
-      }
-      const denom = intPow(baseVal, -exp);
-      // 1 / [a, b] = [1/b, 1/a] when a, b have same sign
-      return ok({ lo: 1 / denom.hi, hi: 1 / denom.lo });
+      return negativeIntegerPower(baseVal, -exp);
     }
   } else {
     // Fractional exponent - requires non-negative base for real result
@@ -279,17 +356,46 @@ function powIntervalRaw(
   // positive exponent, so the point base `[0, 0]` (the literal `0^{x}`, or
   // a slider at 0 in `T^{x}`) is not a negative base. With `hi <= 0` it was,
   // and the whole box answered `empty` (Tycho ledger row 417).
+  // A base with a NEGATIVE part over an exponent `[c, d]` that is not a
+  // point. At a negative `x` the power has a real value at every exponent
+  // that is a rational with an ODD denominator (`(−2)^(5/3) ≈ −3.17`, the
+  // real-root convention of the interpreter), integers included, and those
+  // exponents are dense in `[c, d]`: so the negative part of the base has
+  // real values for every such exponent interval. `empty` (and a `partial`
+  // over the non-negative part alone) excluded them: `[−3, −2]^[1, 2]` holds
+  // `−2`, `−9`, `4` and `9`, and `[−1, 1]^[1, 2]` holds `−1`. Their magnitude
+  // `|x|^e` is monotone in `|x|` and in `e`, so it is at most `M`, the
+  // largest power at the four corners `|x| ∈ {|a|, |min(b, 0)|}`,
+  // `e ∈ {c, d}`, and their sign can be either: the symmetric hull
+  // `[−M, M]` encloses them all (`M` is `+∞` when the negative part reaches
+  // 0 and the exponent can be negative). The non-negative part `[0, b]`, if
+  // any, gives its ordinary image below, and the answer is the hull of the
+  // two parts.
+  //
+  // What a plot sees: a box with `x < 0` in `x^y` is no longer "no value"
+  // when `y` varies over the box; it is the hull `[−M, M]`, which a sign
+  // test reads as undecided, so the plot subdivides there instead of
+  // leaving the region blank. A POINT exponent that is not an integer keeps
+  // the principal-value reading below (no value over the negative part).
+  if (baseVal.lo < 0 && expVal.lo < expVal.hi) {
+    const near = Math.max(0, -baseVal.hi);
+    const far = -baseVal.lo;
+    const M = Math.max(
+      Math.pow(near, expVal.lo),
+      Math.pow(near, expVal.hi),
+      Math.pow(far, expVal.lo),
+      Math.pow(far, expVal.hi)
+    );
+    const negativePart = ok({ lo: -M, hi: M });
+    if (baseVal.hi < 0) return negativePart;
+    return unionResults(
+      negativePart,
+      powIntervalRaw({ lo: 0, hi: baseVal.hi }, expVal)
+    );
+  }
   if (baseVal.hi < 0) {
-    // Special case: base is exactly -1 and exponent spans at least two
-    // consecutive integers. (-1)^n alternates between -1 and 1, so the
-    // tightest enclosure is [-1, 1].
-    if (
-      baseVal.lo === -1 &&
-      baseVal.hi === -1 &&
-      Math.floor(expVal.hi) > Math.floor(expVal.lo)
-    ) {
-      return ok({ lo: -1, hi: 1 });
-    }
+    // A non-integer point exponent: no real value under the principal-value
+    // reading.
     return { kind: 'empty' };
   }
   if (baseVal.hi === 0) {
@@ -430,11 +536,15 @@ function powRationalRaw(
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [b] = unwrapped;
 
-  // A negative exponent over a base that reaches BELOW 0 with an odd
-  // denominator has a pole at the origin. The location is reported here
-  // because the reciprocal below only sees a divisor that straddles 0, which
-  // does not say where the pole is.
-  if (q % 2 !== 0 && p < 0 && b.lo < 0 && b.hi >= 0)
+  // A negative exponent over a base that reaches from BELOW 0 to ABOVE 0
+  // with an odd denominator has a pole at the origin, inside the base. The
+  // location is reported here because the reciprocal below only sees a
+  // divisor that straddles 0, which does not say where the pole is. A base
+  // whose upper end IS 0 has the pole at its edge, and goes on to the
+  // reciprocal: the root of `[b.lo, 0]` ends at 0, and the division by a
+  // divisor that touches 0 answers the half-line beside the pole
+  // (`[−1, 0]^(−2/3)` is `[1, +∞]`).
+  if (q % 2 !== 0 && p < 0 && b.lo < 0 && b.hi > 0)
     return { kind: 'singular', at: 0 };
 
   const root = nthRoot(ok(b), q);
@@ -464,8 +574,11 @@ function powRationalRaw(
  * rounded `pow` over the magnitude `|x|`; the negation and the hull compute
  * no new real number, so this routine takes no step of its own, as
  * `powRationalRaw` takes none. A negative exponent over a base that reaches
- * below 0 and up to 0 or above has a pole at the origin, which is reported
- * as for `powRationalRaw`.
+ * from below 0 to above 0 has a pole at the origin, which is reported as for
+ * `powRationalRaw`. When the upper end of the base IS 0, the pole is at the
+ * edge, and the answer is the half-line beside it, as a `partial` result:
+ * `[−1, 0]^(−1/3)` is `[−∞, −1]` for an odd numerator, `[1, +∞]` for an even
+ * one.
  */
 function powRealBranchRaw(
   base: Interval | IntervalResult,
@@ -476,13 +589,29 @@ function powRealBranchRaw(
   if (!Array.isArray(unwrapped)) return unwrapped;
   const [b] = unwrapped;
   if (b.lo >= 0) return pow(ok(b), e);
-  if (e < 0 && b.hi >= 0) return { kind: 'singular', at: 0 };
+  if (e < 0 && b.hi > 0) return { kind: 'singular', at: 0 };
   // The magnitude over the negative part of the base, `|x|` for `x` in
   // `[b.lo, min(b.hi, 0)]`.
   const magnitude = pow(ok({ lo: Math.max(0, -b.hi), hi: -b.lo }), e);
   const m = getValue(magnitude);
   if (m === undefined) return magnitude;
-  const negativeSide = oddNumerator ? ok({ lo: -m.hi, hi: -m.lo }) : magnitude;
+  // The negation of a `partial` magnitude (the half-line beside a pole at
+  // the upper end 0 of the base) stays `partial`, with the clipped side
+  // mirrored.
+  const negativeSide: IntervalResult = !oddNumerator
+    ? magnitude
+    : magnitude.kind === 'partial'
+      ? {
+          kind: 'partial',
+          value: { lo: -m.hi, hi: -m.lo },
+          domainClipped:
+            magnitude.domainClipped === 'lo'
+              ? 'hi'
+              : magnitude.domainClipped === 'hi'
+                ? 'lo'
+                : 'both',
+        }
+      : ok({ lo: -m.hi, hi: -m.lo });
   if (b.hi <= 0) return negativeSide;
   return unionResults(negativeSide, pow(ok({ lo: 0, hi: b.hi }), e));
 }
@@ -899,8 +1028,16 @@ function fractRaw(x: Interval | IntervalResult): IntervalResult {
   const flo = Math.floor(xVal.lo);
   const fhi = Math.floor(xVal.hi);
   if (flo === fhi) {
-    // No integer crossing — fract is continuous (linear)
-    return ok({ lo: xVal.lo - flo, hi: xVal.hi - flo });
+    // No integer crossing — fract is continuous (linear). The subtraction is
+    // exact for `x ≥ 0` (the result is the fraction bits of `x`), but not
+    // for a negative `x`: `−10⁻²⁰ − (−1)` rounds to exactly 1, which is not
+    // a fractional part, and the true value `1 − 10⁻²⁰` is below it. Each
+    // endpoint is therefore rounded in its own outward direction, and an
+    // exact difference is kept as it is.
+    return ok({
+      lo: directedSum(xVal.lo, -flo, -1),
+      hi: directedSum(xVal.hi, -flo, 1),
+    });
   }
   // Interval spans an integer — a sawtooth jump. fract is right-continuous
   // (inherits from floor). Across a jump the sawtooth takes every value in
@@ -977,15 +1114,87 @@ function maxRaw(
 }
 
 /**
+ * `floor(x / y)` of the TRUE quotient, or `undefined` when the double
+ * quotient does not decide it.
+ *
+ * The quotient is rounded to nearest. When the rounded quotient is not an
+ * integer, the true quotient has the same floor: an integer between the two
+ * would be a double nearer to the true quotient than the rounded one. When
+ * the rounded quotient IS an integer, the true quotient can be just below it,
+ * so the floor is decided only when the division is exact (`q · y`
+ * reproduces `x` with no rounding). A quotient that is not finite decides
+ * nothing.
+ */
+function floorOfQuotient(x: number, y: number): number | undefined {
+  const q = x / y;
+  if (!Number.isFinite(q)) return undefined;
+  const f = Math.floor(q);
+  if (f !== q) return f;
+  const p = q * y;
+  return p === x && prodExact(q, y, p) ? f : undefined;
+}
+
+/**
+ * The floored modulo `mod(x, y) = x − y·floor(x / y)` over a dividend
+ * interval `a` and a divisor interval `b` that is NOT a point and does not
+ * contain 0.
+ *
+ * The value at one point is in `[0, y)` for a positive divisor and in
+ * `(y, 0]` for a negative one, so every value over the box is in `[0, d]`
+ * (`[c, 0]` for a negative divisor), with `d` the largest magnitude of the
+ * divisor: that is the HULL, the enclosure when the quotient `x / y` takes
+ * values on both sides of an integer, where the modulo jumps. The previous
+ * rule read the divisor as the single period `d` and answered
+ * `mod([5, 5], [2, 4]) = [1, 1]`, while `mod(5, 3)` is 2 and `mod(5, 2.5)`
+ * is 0.
+ *
+ * When the floored quotient is the same integer `k` over the whole box, the
+ * modulo is `x − k·y` there, which is continuous and has the range
+ * `[a.lo − max(k·y), a.hi − min(k·y)]`, rounded outward and kept inside the
+ * hull. The quotient is monotone in `x` and in `y` over the box (the divisor
+ * has one sign), so its floor is constant exactly when it is the same at the
+ * four corners.
+ *
+ * Across a jump the result is a `singular` result that carries the hull and
+ * no location: the jump is at a different dividend for each divisor of the
+ * box, so no single coordinate locates it.
+ */
+function modByInterval(a: Interval, b: Interval): IntervalResult {
+  const negative = b.hi < 0;
+  const period = Math.max(Math.abs(b.lo), Math.abs(b.hi));
+  const hull = negative ? { lo: -period, hi: 0 } : { lo: 0, hi: period };
+  let k: number | undefined;
+  for (const x of [a.lo, a.hi]) {
+    for (const y of [b.lo, b.hi]) {
+      const f = floorOfQuotient(x, y);
+      if (f === undefined || (k !== undefined && f !== k))
+        return jump(undefined, undefined, hull);
+      k = f;
+    }
+  }
+  // `k` is set: the loops above ran four times.
+  const kyLo = Math.min(
+    directedProduct(k!, b.lo, -1),
+    directedProduct(k!, b.hi, -1)
+  );
+  const kyHi = Math.max(
+    directedProduct(k!, b.lo, 1),
+    directedProduct(k!, b.hi, 1)
+  );
+  return ok({
+    lo: Math.max(directedSum(a.lo, -kyHi, -1), hull.lo),
+    hi: Math.min(directedSum(a.hi, -kyLo, 1), hull.hi),
+  });
+}
+
+/**
  * Modulo (remainder) operation.
  *
  * Has sawtooth discontinuities at multiples of the modulus.
  * Uses Euclidean (mathematical) convention: result is non-negative for
  * positive modulus, even with negative dividends.
  *
- * Note: For non-point modulus intervals, uses `max(|lo|, |hi|)` as
- * a conservative approximation of the period. This may produce bounds
- * that are too narrow for wide modulus intervals.
+ * A divisor that is not a point is handled by `modByInterval`.
  */
 function modRaw(
   a: Interval | IntervalResult,
@@ -1035,11 +1244,9 @@ function modRaw(
       : ok({ lo: s, hi: nextUp(s) });
   }
 
-  const period = Math.abs(
-    bVal.lo === bVal.hi
-      ? bVal.lo
-      : Math.max(Math.abs(bVal.lo), Math.abs(bVal.hi))
-  );
+  if (bVal.lo !== bVal.hi) return modByInterval(aVal, bVal);
+
+  const period = Math.abs(bVal.lo);
 
   // The compiled scalar `Mod` (`((a % b) + b) % b`) uses the floored
   // (sign-of-divisor) convention: the result is in `[0, b)` for `b > 0` and
@@ -1324,7 +1531,70 @@ function gammaNegStripExtremum(lo: number): number | null {
     : null;
 }
 
+/**
+ * Γ over an interval `x` with a pole (a non-positive integer) at one or both
+ * of its endpoints and none inside, or `undefined` when `x` is not such an
+ * interval.
+ *
+ * The answer is the half-line beside the pole, as a `partial` result: Γ
+ * tends to `+∞` or `−∞` at the pole with the sign Γ has on the strip between
+ * two poles (positive on `(0, ∞)` and on the strips `(n, n + 1)` with `n`
+ * even, negative on the others), and its finite end is the value of Γ at the
+ * endpoint that is not a pole, or at the extremum of the strip when the
+ * interval holds it. `Γ([0, 1])` is `[1, +∞]` and `Γ([−0.5, 0])` is
+ * `[−∞, Γ(−0.504…)]`. A point at a pole has no value: `Γ([0, 0])` is `empty`.
+ */
+function gammaAtEndpointPole(x: Interval): IntervalResult | undefined {
+  const isPole = (v: number): boolean => v <= 0 && Number.isInteger(v);
+  const loPole = isPole(x.lo);
+  const hiPole = isPole(x.hi);
+  if (!loPole && !hiPole) return undefined;
+  if (x.lo === x.hi) return { kind: 'empty' };
+  // A pole strictly inside: the next integer above `x.lo` is below `x.hi`
+  // and is a pole (it is at most 0).
+  const next = Math.floor(x.lo) + 1;
+  if (next < x.hi && next <= 0) return undefined;
+  if (x.lo === 0) {
+    // The positive half-line: Γ decreases from `+∞` at 0 to its minimum at
+    // `GAMMA_MIN_X`, and increases after it.
+    const lo =
+      x.hi <= GAMMA_MIN_X
+        ? gammaPointEnclosure(x.hi).lo
+        : nextDown(GAMMA_MIN_Y);
+    return {
+      kind: 'partial',
+      value: { lo, hi: Infinity },
+      domainClipped: 'hi',
+    };
+  }
+  // The strip `(n, n + 1)` that holds the interior of `x`, with `n < 0`.
+  const n = Math.floor(x.lo);
+  const positive = n % 2 === 0;
+  let lo = Infinity;
+  let hi = -Infinity;
+  const include = (v: Interval): void => {
+    lo = Math.min(lo, v.lo);
+    hi = Math.max(hi, v.hi);
+  };
+  if (!loPole) include(gammaPointEnclosure(x.lo));
+  if (!hiPole) include(gammaPointEnclosure(x.hi));
+  const xStar = gammaNegStripExtremum(n + 0.5);
+  if (xStar !== null) {
+    if (xStar >= x.lo && xStar <= x.hi) include(gammaPointEnclosure(xStar));
+  } else {
+    // Past the table: the extremum is between 0 and the values at the
+    // endpoints, and its magnitude is below `1e-3`, so 0 bounds it.
+    include({ lo: 0, hi: 0 });
+  }
+  return positive
+    ? { kind: 'partial', value: { lo, hi: Infinity }, domainClipped: 'hi' }
+    : { kind: 'partial', value: { lo: -Infinity, hi }, domainClipped: 'lo' };
+}
+
 function _gamma(x: Interval): IntervalResult {
+  // A pole at an endpoint (and none inside), or a point at a pole.
+  const atEndpoint = gammaAtEndpointPole(x);
+  if (atEndpoint !== undefined) return atEndpoint;
   // Check for poles: gamma has poles at every non-positive integer.
   // If the interval contains any non-positive integer, report singular.
   if (x.hi >= 0 && x.lo <= 0) {
@@ -1460,8 +1730,10 @@ function _gammaln(x: Interval): IntervalResult {
  *
  * `Γ` has a pole at every non-positive integer, so `x!` has one at every
  * negative integer. The `Γ` enclosure (`gammaRaw()`) reports an interval that
- * contains a pole as `singular`; its `at` is moved back by 1 to name the
- * pole's location in `x`.
+ * contains a pole inside as `singular`; its `at` is moved back by 1 to name
+ * the pole's location in `x`. A pole at an end of the interval gives the
+ * half-line beside it (`[−1, 0]!` is `[1, +∞]`), and a point at a pole has no
+ * value (`(−1)!` is `empty`), as for `Γ`.
  */
 function factorialRaw(x: Interval | IntervalResult): IntervalResult {
   const unwrapped = unwrapOrPropagate(x);
@@ -1658,14 +1930,19 @@ function reciprocalGammaEnclosure(x: Interval): Interval | undefined {
  */
 function binomialGammaProduct(nVal: Interval, kVal: Interval): IntervalResult {
   const nPlus1 = addOutward(nVal, point(1));
-  const numerator = gammaRaw(nPlus1);
-  if (numerator.kind === 'singular') {
+  // A pole of `Γ(n+1)` in the box: a non-positive integer in `n + 1`, inside
+  // it or at one of its ends. It is read here from the interval, not from
+  // the kind of the `Γ` enclosure: that enclosure answers a half-line for a
+  // pole at an end of its argument and `empty` for a point at a pole, and
+  // `C(n, k)` has a pole in both cases.
+  const shifted = getValue(nPlus1)!;
+  const firstPole = Math.ceil(shifted.lo);
+  if (firstPole <= 0 && firstPole <= shifted.hi) {
     if (kVal.lo === kVal.hi && Number.isInteger(kVal.lo))
       return { kind: 'entire' };
-    return numerator.at === undefined
-      ? { kind: 'singular' }
-      : { kind: 'singular', at: numerator.at - 1 };
+    return { kind: 'singular', at: firstPole - 1 };
   }
+  const numerator = gammaRaw(nPlus1);
   const g = getValue(numerator);
   if (!g || !Number.isFinite(g.lo) || !Number.isFinite(g.hi))
     return { kind: 'entire' };
@@ -2005,9 +2282,10 @@ function hypotRaw(
 // and the powers carry a prover, so an exact result (`√4`, `2²`, `(−1)^k`)
 // stays the point it is. The routines that only select, negate or truncate
 // endpoints compute no new real number and are exported unwrapped: `abs`,
-// `floor`, `ceil`, `round`, `trunc`, `fract` (`x − floor(x)` has fewer
-// significant bits than `x`, so a double holds it), `min`, `max`, `sign`,
-// `heaviside` and `chop`.
+// `floor`, `ceil`, `round`, `trunc`, `min`, `max`, `sign`, `heaviside` and
+// `chop`. `fract` is exported unwrapped too: its subtraction can round (for a
+// negative `x`), and it rounds each endpoint in the outward direction itself,
+// so that an exact difference keeps no step.
 export const sqrt = liftJump(outwardUnlessExact(sqrtRaw, exactSqrt));
 export const square = liftJump(outwardUnlessExact(squareRaw, exactSquare));
 export const pow = liftJump(outwardUnlessExact(powRaw, exactPow));

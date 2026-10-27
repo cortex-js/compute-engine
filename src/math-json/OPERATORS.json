@@ -2682,6 +2682,23 @@
       "wikidata": "Q109753363"
     },
     {
+      "name": "Enclosure",
+      "category": "Arithmetic",
+      "arity": "optional",
+      "signature": "(real | signed_infinity | nan | set<real>, (real | signed_infinity | nan)?) -> enclosure | nan",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "A closed interval [lo, hi] that encloses one real number, with interval arithmetic.",
+      "examples": [
+        "Enclosure(0, 1) + Enclosure(1/3, 2)",
+        "Sin(Enclosure(0, Pi))",
+        "N(Enclosure(0, Pi))"
+      ]
+    },
+    {
       "name": "EndsWith",
       "category": "Collections",
       "arity": "2",

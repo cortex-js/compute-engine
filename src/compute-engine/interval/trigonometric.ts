@@ -15,6 +15,7 @@ import {
   jump,
 } from './util.js';
 import { divUnrounded } from './arithmetic.js';
+import { productError } from '../numerics/interval-arithmetic.js';
 import {
   outward,
   outwardUnlessExact,
@@ -150,6 +151,128 @@ function machinePole(
 }
 
 /**
+ * The double nearest to `π − Math.PI`. `Math.PI` is below π, and
+ * `Math.PI + PI_LO` represents π with an error below `1.3·10⁻³²`.
+ */
+const PI_LO = 1.2246467991473532e-16;
+
+/**
+ * The sign of `x − m·π` for the REAL number π, where `m` is an integer or
+ * an integer plus one half (the poles of `tan` and `sec` are at
+ * `(n + ½)·π`, those of `cot` and `csc` at `n·π`), or `undefined` when the
+ * computation below cannot decide it.
+ *
+ * No pole other than 0 is a double, so an endpoint is never exactly at one,
+ * but it can be within an ulp of one on either side: `Math.PI / 2` is BELOW
+ * `π/2`, so `tan` is finite (about `1.6·10¹⁶`) at that endpoint, while the
+ * next double up is above `π/2`. Which side the endpoint is on decides the
+ * answer of the kernel, so it is decided with `m·π` in double-double
+ * arithmetic: `m·Math.PI = h + l` exactly (TwoProduct), and
+ * `m·(π − Math.PI) ≈ m·PI_LO`. Near the pole `x − h` is exact (the two are
+ * within a factor of 2), and the two remaining subtractions and the error of
+ * `PI_LO` are bounded; the sign is answered only when the difference is
+ * larger than that bound.
+ */
+function compareWithPiMultiple(x: number, m: number): -1 | 0 | 1 | undefined {
+  if (!Number.isFinite(x)) return x > 0 ? 1 : x < 0 ? -1 : undefined;
+  if (m === 0) return x > 0 ? 1 : x < 0 ? -1 : 0;
+  const h = m * Math.PI;
+  const l = productError(m, Math.PI, h);
+  const t = m * PI_LO;
+  const d1 = x - h;
+  // Far from the pole the rounded difference decides.
+  if (Math.abs(d1) > 4 * (Math.abs(l) + Math.abs(t))) return d1 > 0 ? 1 : -1;
+  const d = d1 - l - t;
+  const bound =
+    Math.abs(m) * 4e-32 + 4.5e-16 * (Math.abs(d1) + Math.abs(l) + Math.abs(t));
+  if (Math.abs(d) <= bound) return undefined;
+  return d > 0 ? 1 : -1;
+}
+
+/**
+ * Where the pole found by the pole search lies relative to the interval
+ * `x`: `'lo'` when it is at or below the lower endpoint (and the next pole
+ * is above the upper one), `'hi'` when it is at or above the upper endpoint
+ * (and the previous pole is below the lower one), and `undefined` when the
+ * pole is inside `x` or the side cannot be decided.
+ *
+ * `at` is the location the search answered, a double near the pole, and
+ * `extremum` is the first pole of the family (`π/2` for `tan` and `sec`, 0
+ * for `cot` and `csc`); the poles are `π` apart.
+ *
+ * A POINT interval answers `undefined`, so the kernel answers `singular`:
+ * a point near a pole is a pole by the machine rule that the interpreter
+ * and compiled JavaScript apply (`machinePole`), and the point at the exact
+ * pole 0 (`cot(0)`, `csc(0)`) is the pole `~oo` of the interpreter. The
+ * compiled `interval-js` code answers `singular` wherever the interpreter
+ * answers that pole (`test/compute-engine/compile-trig-poles.test.ts`).
+ */
+function poleSide(
+  x: Interval,
+  at: number,
+  extremum: number
+): 'lo' | 'hi' | undefined {
+  if (x.lo === x.hi) return undefined;
+  const m = Math.round((at - extremum) / PI) + (extremum === 0 ? 0 : 0.5);
+  const sLo = compareWithPiMultiple(x.lo, m);
+  const sHi = compareWithPiMultiple(x.hi, m);
+  if (sLo === undefined || sHi === undefined) return undefined;
+  if (sLo >= 0)
+    return compareWithPiMultiple(x.hi, m + 1) === -1 ? 'lo' : undefined;
+  if (sHi <= 0)
+    return compareWithPiMultiple(x.lo, m - 1) === 1 ? 'hi' : undefined;
+  return undefined;
+}
+
+/**
+ * The half-line beside a pole at an endpoint, as a `partial` result: from
+ * the finite value `v` to `+∞` when the function tends to `+∞` at the pole
+ * (`toward` is `1`), from `−∞` to `v` otherwise.
+ */
+function halfLine(v: number, toward: -1 | 1): IntervalResult {
+  return toward > 0
+    ? { kind: 'partial', value: { lo: v, hi: Infinity }, domainClipped: 'hi' }
+    : {
+        kind: 'partial',
+        value: { lo: -Infinity, hi: v },
+        domainClipped: 'lo',
+      };
+}
+
+/**
+ * The answer of `tan`, `cot`, `sec` or `csc` over an interval `x` whose
+ * pole search found a pole at `at`.
+ *
+ * - A pole inside `x`, one whose side is not decided, or a point interval
+ *   (see `poleSide`): `singular` with no value, located at `at`.
+ * - A pole at an endpoint: the function is continuous on the rest of `x`
+ *   and unbounded beside the pole, so the answer is the half-line from the
+ *   value at the other endpoint (`edge`, which also folds in the extremum of
+ *   the branch that `x` holds, for `sec` and `csc`) to the infinity the
+ *   function tends to at the pole (`toward`). When the other endpoint is
+ *   itself a pole by the machine rule, the answer stays `singular`.
+ *
+ * `edge(e, side)` gives the finite end of the half-line from the value at
+ * the endpoint `e` that is not the pole, and the direction of the infinity.
+ */
+function poleAnswer(
+  x: Interval,
+  at: number,
+  extremum: number,
+  edge: (
+    e: number,
+    side: 'lo' | 'hi'
+  ) => { v: number; toward: -1 | 1 } | undefined
+): IntervalResult {
+  const side = poleSide(x, at, extremum);
+  if (side !== undefined) {
+    const r = edge(side === 'hi' ? x.lo : x.hi, side);
+    if (r !== undefined) return halfLine(r.v, r.toward);
+  }
+  return { kind: 'singular', at };
+}
+
+/**
  * Tangent of an interval.
  *
  * Has singularities at pi/2 + n*pi. Within a single branch,
@@ -169,7 +292,14 @@ function tanRaw(x: Interval | IntervalResult): IntervalResult {
   const poleAt = poleSearchApplies(xVal)
     ? extremumWithin(xVal, HALF_PI, PI)
     : undefined;
-  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
+  // `tan` increases on a branch: it tends to `+∞` at a pole above the
+  // interval and to `−∞` at a pole below it.
+  if (poleAt !== undefined)
+    return poleAnswer(xVal, poleAt, HALF_PI, (e, side) => {
+      const v = Math.tan(e);
+      if (isMachineTrigPole(v, e)) return undefined;
+      return { v, toward: side === 'hi' ? 1 : -1 };
+    });
 
   // Case 3: Safe interval - tan is monotonic on this branch
   const tanLo = Math.tan(xVal.lo);
@@ -203,7 +333,14 @@ function cotRaw(x: Interval | IntervalResult): IntervalResult {
   const poleAt = poleSearchApplies(xVal)
     ? extremumWithin(xVal, 0, PI)
     : undefined;
-  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
+  // `cot` decreases on a branch: it tends to `+∞` at a pole below the
+  // interval and to `−∞` at a pole above it.
+  if (poleAt !== undefined)
+    return poleAnswer(xVal, poleAt, 0, (e, side) => {
+      const v = 1 / Math.tan(e);
+      if (isMachineTrigPole(v, e)) return undefined;
+      return { v, toward: side === 'lo' ? 1 : -1 };
+    });
 
   // Safe interval - cot is monotonically decreasing within a branch
   const cotLo = 1 / Math.tan(xVal.lo);
@@ -233,7 +370,24 @@ function secRaw(x: Interval | IntervalResult): IntervalResult {
   const poleAt = poleSearchApplies(xVal)
     ? extremumWithin(xVal, HALF_PI, PI)
     : undefined;
-  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
+  // `sec` has one sign between two poles, the sign of its value at the
+  // other endpoint, and tends to the infinity of that sign at the pole. Its
+  // value nearest 0 on the branch is `±1`, at the extremum `n·π` when the
+  // interval holds it.
+  if (poleAt !== undefined)
+    return poleAnswer(xVal, poleAt, HALF_PI, (e) => {
+      const v = 1 / Math.cos(e);
+      if (isMachineTrigPole(v, e)) return undefined;
+      if (v > 0)
+        return {
+          v: containsExtremum(xVal, 0, TWO_PI) ? Math.min(v, 1) : v,
+          toward: 1,
+        };
+      return {
+        v: containsExtremum(xVal, PI, TWO_PI) ? Math.max(v, -1) : v,
+        toward: -1,
+      };
+    });
 
   const secLo = 1 / Math.cos(xVal.lo);
   const secHi = 1 / Math.cos(xVal.hi);
@@ -272,7 +426,22 @@ function cscRaw(x: Interval | IntervalResult): IntervalResult {
   const poleAt = poleSearchApplies(xVal)
     ? extremumWithin(xVal, 0, PI)
     : undefined;
-  if (poleAt !== undefined) return { kind: 'singular', at: poleAt };
+  // `csc` has one sign between two poles, as `sec` does (see `secRaw`); its
+  // value nearest 0 on the branch is `±1`, at the extremum `π/2 + n·π`.
+  if (poleAt !== undefined)
+    return poleAnswer(xVal, poleAt, 0, (e) => {
+      const v = 1 / Math.sin(e);
+      if (isMachineTrigPole(v, e)) return undefined;
+      if (v > 0)
+        return {
+          v: containsExtremum(xVal, HALF_PI, TWO_PI) ? Math.min(v, 1) : v,
+          toward: 1,
+        };
+      return {
+        v: containsExtremum(xVal, THREE_HALF_PI, TWO_PI) ? Math.max(v, -1) : v,
+        toward: -1,
+      };
+    });
 
   const cscLo = 1 / Math.sin(xVal.lo);
   const cscHi = 1 / Math.sin(xVal.hi);
@@ -559,11 +728,18 @@ function atanhRaw(x: Interval | IntervalResult): IntervalResult {
   }
 
   if (xVal.lo <= -1 || xVal.hi >= 1) {
-    const clippedLo = Math.max(xVal.lo, -1 + Number.EPSILON);
-    const clippedHi = Math.min(xVal.hi, 1 - Number.EPSILON);
+    // `atanh` tends to `±∞` at `±1`, so a domain boundary inside the
+    // interval or at an endpoint gives an infinite bound on that side. The
+    // previous form clipped the argument to `±(1 − ε)` and answered the
+    // finite bound `±18.37`, which excludes the values of `atanh` between
+    // `1 − ε` and 1. The point `[1, 1]` answered `empty` above: an infinite
+    // singleton encloses no real number.
     return {
       kind: 'partial',
-      value: { lo: Math.atanh(clippedLo), hi: Math.atanh(clippedHi) },
+      value: {
+        lo: xVal.lo <= -1 ? -Infinity : Math.atanh(xVal.lo),
+        hi: xVal.hi >= 1 ? Infinity : Math.atanh(xVal.hi),
+      },
       domainClipped:
         xVal.lo <= -1 && xVal.hi >= 1 ? 'both' : xVal.lo <= -1 ? 'lo' : 'hi',
     };

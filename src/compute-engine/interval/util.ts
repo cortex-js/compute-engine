@@ -600,3 +600,122 @@ export function checkedCall(
   const result = f(...passed);
   return partly ? partialResult(result) : result;
 }
+
+// ---------------------------------------------------------------------------
+// The value of a result as the `Enclosure` value kind reads it.
+//
+// An `Enclosure(lo, hi)` is a value: the closed set of reals that contains an
+// unknown real number. It has no `partial` or `singular` metadata, so the
+// compiled code of an expression with an enclosure maps each `IntervalResult`
+// of the library to an enclosure, as the interpreter does (plan
+// `docs/plans/2026-10-26-value-kinds.md`, section 4.9.2, "Mapping the
+// library's results").
+// ---------------------------------------------------------------------------
+
+/** The whole real line, the enclosure of a result that has no finite bound.
+ *  Each call allocates, because a caller can keep and change the result. */
+function wholeLine(): IntervalResult {
+  return { kind: 'interval', value: { lo: -Infinity, hi: Infinity } };
+}
+
+/**
+ * The metadata part of the enclosure mapping: the enclosure carried by `r`,
+ * as a plain `interval` result, or `undefined` for `empty`.
+ *
+ * `partial` keeps its value: the domain was clipped, and the value encloses
+ * the function where it is defined. A `singular` result with a value (a
+ * finite jump) keeps that value, which encloses every value of the function
+ * on the input. A pole inside the input (`singular` with no value) and
+ * `entire` have no finite bound, so their enclosure is the whole line. A bare
+ * `{ lo, hi }` (what `point` returns) is an enclosure already.
+ */
+function enclosureOf(r: IntervalResult | Interval): IntervalResult | undefined {
+  if (!('kind' in r)) return ok(r);
+  switch (r.kind) {
+    case 'empty':
+      return undefined;
+    case 'entire':
+      return wholeLine();
+    case 'singular':
+      return r.value === undefined ? wholeLine() : ok(r.value);
+    case 'interval':
+      return r;
+    case 'partial':
+      return ok(r.value);
+  }
+}
+
+/**
+ * The value of an ARITHMETIC result as an enclosure: the compiled code of
+ * every operation over an enclosure (the sums, products, quotients and
+ * powers, and the functions applied to one) wraps its result in this.
+ *
+ * The metadata is removed (`enclosureOf`): a later operation must not see a
+ * `partial` or `singular` result, because the interpreter's enclosure has no
+ * such marker. `Sqrt(x) < 3` with `x` the enclosure `[-1, 4]` is `true` in
+ * the interpreter, which computes `Enclosure(0, 2) < 3`, and the compiled
+ * comparison must read the same value.
+ *
+ * Three results have no value, and answer `empty` (the indeterminate value of
+ * the interpreter):
+ * - `empty` itself, without the `missing` flag: an operation over an absent
+ *   value is a numeric undefined value, as `Missing + 1` is `NaN`;
+ * - an interval with a `NaN` endpoint, which the arithmetic of an absent
+ *   operand produces;
+ * - an INFINITE SINGLETON (`lo === hi`, both `+∞` or both `-∞`). It encloses
+ *   no real number, so it is not an enclosure: the library answers it for
+ *   `[0, 1] + [+∞, +∞]` and for an overflow, where the interpreter answers
+ *   the indeterminate value. An unbounded enclosure such as `[0, +∞]` is not
+ *   a singleton and is kept.
+ */
+export function enclose(result: IntervalResult | Interval): IntervalResult {
+  const r = enclosureOf(result);
+  if (r === undefined || r.kind !== 'interval') return { kind: 'empty' };
+  const { lo, hi } = r.value;
+  if (Number.isNaN(lo) || Number.isNaN(hi)) return { kind: 'empty' };
+  if (lo === hi && !Number.isFinite(lo)) return { kind: 'empty' };
+  return r;
+}
+
+/**
+ * The metadata part of `enclose` only: the compiled comparisons over an
+ * enclosure read their operands through this, and the extrema (`Max`, `Min`,
+ * `Clamp`) wrap their result in it.
+ *
+ * Unlike `enclose`, it KEEPS two results. An infinite singleton stays: a
+ * comparison of an enclosure with a number that is `+∞` (`x < y` run with
+ * `y: Infinity`) is decided by that value, and `Max(x, y)` with `y: Infinity`
+ * is `+∞`, as the interpreter answers. `empty` stays with its `missing`
+ * flag: a comparison with an ABSENT value is `'maybe'`, where a comparison
+ * with a value that is undefined is `'false'`, and only the flag tells the
+ * two apart. An interval with a `NaN` endpoint (the numeric absence marker)
+ * is also returned as it is.
+ */
+export function stripEnclosure(
+  result: IntervalResult | Interval
+): IntervalResult {
+  const r = enclosureOf(result);
+  return r ?? (result as IntervalResult);
+}
+
+/**
+ * An operand of an arithmetic operation over an enclosure, with an infinite
+ * singleton replaced by `empty`. Every other value is returned unchanged.
+ *
+ * A number operand that is `+∞` or `-∞` (an infinite literal, or a symbol
+ * typed `number` that holds an infinity at run time) is a point interval
+ * `[∞, ∞]`. The kernels give it a value that the interpreter does not: they
+ * answer `[0, +∞]` for `[0, 1] · [+∞, +∞]` and `[0, 0]` for
+ * `[1, 2] / [+∞, +∞]`, where an enclosure with an infinite operand is the
+ * indeterminate value. This check runs BEFORE the kernel, so the kernel never
+ * sees such an operand. An unbounded enclosure (`[0, +∞]`) is not a
+ * singleton and passes.
+ */
+export function finiteOperand<T extends IntervalResult | Interval>(
+  v: T
+): T | IntervalResult {
+  const x = unwrap(v);
+  if (x !== undefined && x.lo === x.hi && !Number.isFinite(x.lo))
+    return { kind: 'empty' };
+  return v;
+}

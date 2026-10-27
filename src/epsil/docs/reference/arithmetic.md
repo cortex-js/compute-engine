@@ -648,6 +648,27 @@ elementMin([1, 5, 3], [4, 2, 6])
 // ➔ [1,2,3]
 ```
 
+### enclosure
+
+MathJSON `Enclosure` · `(nan | real | set<real> | signed_infinity, (nan | real | signed_infinity)?) -> enclosure | nan`
+
+A closed interval [lo, hi] that encloses one real number, with interval arithmetic.
+
+```epsil
+enclosure(0, 1) + enclosure(1/3, 2)
+// ➔ Enclosure(1/3, 3)
+```
+
+```epsil
+sin(enclosure(0, pi))
+// ➔ Enclosure(0, 1)
+```
+
+```epsil
+N(enclosure(0, pi))
+// ➔ Enclosure(0, 3.1415926535897936)
+```
+
 ### eulerGamma
 
 MathJSON `EulerGamma` · constant `real<0.5772156649015328..0.5772156649015329>` = `0.577215664901532860607`

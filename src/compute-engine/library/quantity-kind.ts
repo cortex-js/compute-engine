@@ -57,8 +57,10 @@ import {
   boxedToUnitExpression,
   cancelledUnitValue,
   canonicalUnit,
+  decodedUnit,
 } from './units.js';
 import { isMeasurement } from './measurement-arithmetic.js';
+import { refusedEnclosureOperands } from './arithmetic.js';
 import {
   isOffsetTemperatureUnit,
   isQuantity,
@@ -236,10 +238,7 @@ function negatedValue(ce: ComputeEngine, v: Expression): Expression {
  */
 function dimensionKey(q: Expression): string | undefined {
   if (!isQuantity(q)) return undefined;
-  const ue = boxedToUnitExpression(q.op2);
-  if (!ue) return undefined;
-  const dimension = getExpressionDimension(ue);
-  return dimension ? JSON.stringify(dimension) : undefined;
+  return decodedUnit(q.op2).dimensionKey ?? undefined;
 }
 
 /**
@@ -650,6 +649,11 @@ export const QUANTITY_LIBRARY: SymbolDefinitions = {
       // Canonicalize the magnitude (first arg) but leave the unit as-is
       const mag = args[0].canonical;
 
+      // An enclosure is not a magnitude: it is refused
+      // (`refusedEnclosureOperands()`, `arithmetic.ts`).
+      const refused = refusedEnclosureOperands(ce, 'Quantity', [mag, args[1]]);
+      if (refused !== undefined) return refused;
+
       // A unit name (`m`, `km`, `K`) is not a variable. The unit is boxed
       // resolve-only: a name binds to an existing definition, but a name
       // with no definition stays unbound and is not declared in the current
@@ -692,7 +696,11 @@ export const QUANTITY_LIBRARY: SymbolDefinitions = {
     },
     evaluate: (ops, { numericApproximation, engine: ce }) => {
       const mag = numericApproximation ? ops[0].N() : ops[0].evaluate();
-      return ce._fn('Quantity', [mag, ops[1]]);
+      // A magnitude whose value is an enclosure is refused, as at boxing.
+      return (
+        refusedEnclosureOperands(ce, 'Quantity', [mag, ops[1]]) ??
+        ce._fn('Quantity', [mag, ops[1]])
+      );
     },
     // Only the magnitude is evaluated, not the unit.
     evaluateAsync: async (ops, options) => {
@@ -709,7 +717,10 @@ export const QUANTITY_LIBRARY: SymbolDefinitions = {
               options._precisionWindow
             )
           : await ops[0].evaluateAsync(awaitedOperandOptions(options));
-      return ce._fn('Quantity', [mag, ops[1]]);
+      return (
+        refusedEnclosureOperands(ce, 'Quantity', [mag, ops[1]]) ??
+        ce._fn('Quantity', [mag, ops[1]])
+      );
     },
   },
 };

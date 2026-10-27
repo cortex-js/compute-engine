@@ -231,6 +231,12 @@ export const VALUE_TYPES: PrimitiveType[] = [
   // admitted only by the arithmetic operators and the operators that name it
   // (`admittedAs: 'none'`, `library/quantity-arithmetic.ts`).
   'quantity',
+  // `enclosure` (the value of `Enclosure(lo, hi)`, a closed interval that
+  // encloses one real) sits here for the same reasons: an opaque value,
+  // disjoint from every numeric type and from the set type of `Interval`. The
+  // kind registry admits it where a real is admitted (`admittedAs: 'real'`,
+  // `library/enclosure-arithmetic.ts`).
+  'enclosure',
   // `type` (a reified type expression, the value `TypeFrom(...)` constructs)
   // sits beside `regexp` for the same reasons: an opaque value with no
   // numeric/boolean reading and no hidden element type, clear of the

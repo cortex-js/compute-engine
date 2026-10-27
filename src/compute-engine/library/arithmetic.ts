@@ -262,9 +262,10 @@ import {
 } from '../../common/type/utils.js';
 import {
   kindTypeHasHook,
+  kindTypeInfo,
   kindTypeNames,
 } from '../boxed-expression/value-kinds.js';
-import { isKindValue } from '../boxed-expression/kind-compare.js';
+import { isKindValue, kindExtremum } from '../boxed-expression/kind-compare.js';
 import {
   couldMatch,
   isEmptyType,
@@ -10912,6 +10913,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (args.length !== 2) return ce.error('incompatible-type');
         const value = args[0].canonical;
         const error = args[1].canonical;
+        // An enclosure is neither a nominal value nor an uncertainty: it is
+        // refused (`refusedEnclosureOperands()`).
+        const refused = refusedEnclosureOperands(ce, 'Measurement', [
+          value,
+          error,
+        ]);
+        if (refused !== undefined) return refused;
         // A zero (or absent) error collapses to the exact value (decided
         // 2026-07-07: zero error is an exact value).
         if (error.isSame(0)) return value;
@@ -10954,6 +10962,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: (ops, { numericApproximation, engine: ce }) => {
         const value = numericApproximation ? ops[0].N() : ops[0].evaluate();
         const error = numericApproximation ? ops[1].N() : ops[1].evaluate();
+        // An operand whose value is an enclosure (a symbol `v: value`
+        // assigned one after the measurement was boxed) is refused, as at
+        // boxing.
+        const refused = refusedEnclosureOperands(ce, 'Measurement', [
+          value,
+          error,
+        ]);
+        if (refused !== undefined) return refused;
         if (error.isSame(0)) return value;
         return ce._fn('Measurement', [value, error.abs()]);
       },
@@ -13242,8 +13258,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // A residue class has no order: the call is an error
           // (`residueExtremumError`).
           residueExtremumError(ops, context.engine) ??
-            kindExtremumType(ops, context.engine, (o) =>
-              extremumTypeOnTypes(o, 'max')
+            kindExtremumType(
+              ops,
+              context.engine,
+              (o) => extremumTypeOnTypes(o, 'max'),
+              'Max'
             ) ??
             extremumTypeOnTypes(ops, 'max'),
           context.engine._typeResolver
@@ -13284,8 +13303,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops, context) =>
         BoxedType.forResult(
           residueExtremumError(ops, context.engine) ??
-            kindExtremumType(ops, context.engine, (o) =>
-              extremumTypeOnTypes(o, 'min')
+            kindExtremumType(
+              ops,
+              context.engine,
+              (o) => extremumTypeOnTypes(o, 'min'),
+              'Min'
             ) ??
             extremumTypeOnTypes(ops, 'min'),
           context.engine._typeResolver
@@ -13349,7 +13371,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           kindExtremumType(
             ops,
             context.engine,
-            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number',
+            'ElementMax'
           ) ??
             extremumRangeTypeOnTypes('max', ops) ??
             elementExtremumTypeOnTypes(ops),
@@ -13378,7 +13401,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           kindExtremumType(
             ops,
             context.engine,
-            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number',
+            'ElementMin'
           ) ??
             extremumRangeTypeOnTypes('min', ops) ??
             elementExtremumTypeOnTypes(ops),
@@ -13407,7 +13431,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           kindExtremumType(
             ops,
             context.engine,
-            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number',
+            'Clamp'
           ) ??
             extremumRangeTypeOnTypes('clamp', ops) ??
             elementExtremumTypeOnTypes(ops),
@@ -15514,6 +15539,30 @@ function evaluateAbs(
 }
 
 /**
+ * The call `operator(...ops)` with each operand that is an enclosure
+ * (`Enclosure(lo, hi)`, a value of the kind `enclosure`) replaced by an
+ * `incompatible-type` error, or `undefined` when no operand is one. The
+ * heads `Measurement` and `Quantity` are declared over `value`, so their
+ * signatures admit an enclosure; their canonical and evaluate handlers
+ * refuse it here: an enclosure is not the nominal value of a measurement,
+ * nor the magnitude of a quantity (`docs/plans/2026-10-26-value-kinds.md`,
+ * section 4.9.2, "Collections").
+ */
+export function refusedEnclosureOperands(
+  ce: ComputeEngine,
+  operator: string,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (!ops.some((x) => isFunction(x, 'Enclosure'))) return undefined;
+  return ce._fn(
+    operator,
+    ops.map((x) =>
+      isFunction(x, 'Enclosure') ? ce.typeError('number', x.type, x) : x
+    )
+  );
+}
+
+/**
  * What the walk of `Max`/`Min` saw that decides between `Indeterminate` and
  * `NaN`: an `Indeterminate` operand gives `Indeterminate` only when no operand
  * is inexact (`isInexactOperand()`). `inexact` records an inexact value met
@@ -15992,6 +16041,13 @@ function scalarExtremum(
   if (a.isNaN === true || b.isNaN === true) return nanOperandAnswer(ce, [a, b]);
   if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
     return undefined;
+  // A kind that declares an `extremum` hook gives the extremum of the pair
+  // itself, before any order is read: the maximum of two enclosures that
+  // overlap is the enclosure of their larger ends, which is neither operand
+  // (`kindExtremum()`, `kind-compare.ts`).
+  const extremum = kindExtremum(upper ? 'max' : 'min', a, b);
+  if (extremum !== undefined)
+    return numericApproximation ? extremum.N() : extremum;
   // `undefined` when the comparison is not decidable (a free symbol); ties
   // keep `a`, unless `b` is a number literal and `a` is not (see
   // `extremumOrder`).
@@ -16059,6 +16115,11 @@ function foldExtremumValue(
     return current;
   }
   if (current === undefined) return val;
+  // A kind that declares an `extremum` hook gives the extremum of the pair
+  // itself, before any order is read (`kindExtremum()`, `kind-compare.ts`):
+  // `Max(Enclosure(0, 2), Enclosure(1, 3))` is `Enclosure(1, 3)`.
+  const extremum = kindExtremum(upper ? 'max' : 'min', current, val);
+  if (extremum !== undefined) return extremum;
   const replaces = extremumOrder(val, current, upper, true);
   if (replaces === undefined) rest.push(val);
   if (replaces !== true) return current;
@@ -16200,11 +16261,19 @@ function kindTypesHaveCompare(engine: PureEngineView, t: Type): boolean {
  * that holds kind values only (`umeasurement`, `list<umeasurement>`) takes
  * no part in `ordinary`. `undefined` when no operand has such a kind arm:
  * the ordinary rules apply.
+ *
+ * A kind type that declares an `extremum` hook gives a value that is not
+ * one of the operands (the maximum of two enclosures that overlap is the
+ * enclosure of their larger ends, and a number beside an enclosure is a
+ * point of the result), so when every kind arm declares the hook and its
+ * `resultType` answers for `operator`, the type is the union of those
+ * answers: `Max(x, 3)` with `x: enclosure` is `enclosure`.
  */
 function kindExtremumType(
   ops: ReadonlyArray<OperandDescriptor>,
   engine: PureEngineView,
-  ordinary: (ops: ReadonlyArray<OperandDescriptor>) => Type
+  ordinary: (ops: ReadonlyArray<OperandDescriptor>) => Type,
+  operator?: string
 ): Type | undefined {
   const kinds = kindTypeNames(engine);
   const arms: string[] = [];
@@ -16216,6 +16285,25 @@ function kindExtremumType(
       )
         arms.push(name);
   if (arms.length === 0) return undefined;
+  if (operator !== undefined) {
+    const operandTypes = ops.map((d) => typeWithoutShape(d.type));
+    const answers: Type[] = [];
+    for (const name of arms) {
+      if (!kindTypeHasHook(engine as ComputeEngine, name, 'extremum')) break;
+      const answer = kindTypeInfo(engine as ComputeEngine, name)?.resultType?.(
+        operator,
+        operandTypes
+      );
+      if (answer === undefined) break;
+      answers.push(
+        typeof answer === 'string' ? engine.type(answer).type : answer
+      );
+    }
+    if (answers.length === arms.length)
+      return answers.length === 1
+        ? answers[0]
+        : reduceType({ kind: 'union', types: answers });
+  }
   const free = ops
     .filter(
       (d) => !isUninhabitedWithoutKinds(stripMissingFromType(d.type), kinds)

@@ -115,6 +115,7 @@ import {
   unfoldAliasOnDescent,
   widen,
   kindArmNames,
+  withoutKindArms,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
@@ -139,6 +140,7 @@ import {
   type KindLowering,
   type KindTypeContract,
 } from './kind-lowering.js';
+import { hasEnclosureArm } from '../library/enclosure-compile.js';
 import {
   cannotHoldAList as typeCannotHoldAList,
   couldMatch,
@@ -950,6 +952,28 @@ export interface ElementBinder {
   leaves: Array<
     [leaf: Expression & { symbol: string }, type: Type | undefined]
   >;
+}
+
+/**
+ * True when a symbol of `expr`, at any depth, has a type with an
+ * `enclosure` arm at any level (`enclosure`, `real | enclosure`,
+ * `list<enclosure>`). On `interval-js` such an expression is compiled with
+ * the kind lowering of the enclosure, which checks the host value of the
+ * symbol and declines a collection of enclosures. The `interval-js` target
+ * also reads it to refuse the interpreter fallback for an enclosure input
+ * (`holdsEnclosureInputOrResult()`, `interval-javascript-target.ts`).
+ */
+export function hasEnclosureSymbol(expr: Expression): boolean {
+  const kinds = kindTypeNames(expr.engine);
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): boolean => {
+    if (seen.has(e)) return false;
+    seen.add(e);
+    if (isSymbol(e))
+      return kindArmNames(e.type.type, kinds).includes('enclosure');
+    return isFunction(e) && e.ops.some(visit);
+  };
+  return visit(expr);
 }
 
 export function compilationType(expr: Expression): Type {
@@ -3859,21 +3883,25 @@ export class BaseCompiler {
   /**
    * The kind lowering of `expr`, which holds a kind value for certain, on
    * `target`: every kind type that `expr` holds, or that its result type
-   * names, has a contract whose `lowered()` answers for the target. Throws
-   * for an expression that holds a collection of kind values, for the
-   * `interval-js` target, and for a representation that the runner would
-   * read as a number, a complex or a list. `undefined` when a kind type has
-   * no representation on the target (the caller declines with the general
-   * message).
+   * names, has a contract whose `lowered()` answers for the target. With
+   * `possibleEnclosure`, the kind type `enclosure` is one of them too (a
+   * free symbol of `expr` may hold an enclosure, on `interval-js`). Throws
+   * for an expression that holds a collection of kind values, for an
+   * interval target with a kind other than the enclosure, and for a
+   * representation that the runner would read as a number, a complex or a
+   * list. `undefined` when a kind type has no representation on the target
+   * (the caller declines with the general message).
    */
   private static kindLoweringOf(
     expr: Expression,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    possibleEnclosure = false
   ): KindLowering | undefined {
     const ce = expr.engine;
     const kinds = new Set([
       ...kindTypesHeldBy(expr),
       ...kindArmNames(expr.type.type, kindTypeNames(ce)),
+      ...(possibleEnclosure ? ['enclosure'] : []),
     ]);
     if (kinds.size === 0) return undefined;
     const language = target.language ?? 'javascript';
@@ -3884,7 +3912,16 @@ export class BaseCompiler {
     for (const k of kinds)
       if (kindContractOf(lowering, k) === undefined) return undefined;
     const names = [...kinds].map((t) => `'${t}'`).join(', ');
-    if (language.startsWith('interval'))
+    // The runner of `interval-js` checks a host value of the kind type
+    // `enclosure` (`intervalKindEntries()`, `interval-javascript-target.ts`),
+    // and of no other kind type.
+    if (
+      language.startsWith('interval') &&
+      !(
+        language === 'interval-javascript' &&
+        [...kinds].every((k) => k === 'enclosure')
+      )
+    )
       throw new Error(
         `Could not compile an expression that holds a value of the kind ` +
           `type ${names} to target '${language}': the run-time check of a ` +
@@ -3983,10 +4020,22 @@ export class BaseCompiler {
       return undefined;
 
     // The kind types of the operands, in the order of their first operand.
+    // On `interval-js` an operand that MAY be an enclosure (`number |
+    // enclosure`) is lowered by the contract of the enclosure too: a number
+    // is a point interval on that target, and the code of the contract is
+    // valid for it.
     const kinds: string[] = [];
-    for (const x of args)
+    const possible = language === 'interval-javascript';
+    for (const x of args) {
       for (const k of certainKindTypesOf(x))
         if (!kinds.includes(k)) kinds.push(k);
+      if (
+        possible &&
+        !kinds.includes('enclosure') &&
+        hasEnclosureArm(x.type.type)
+      )
+        kinds.push('enclosure');
+    }
     if (kinds.length === 0) return undefined;
     for (const k of kinds)
       if (kindContractOf(lowering, k) === undefined)
@@ -4102,18 +4151,31 @@ export class BaseCompiler {
     // with an operand of the kind through the contract. Two limits of phase 1
     // of the design (`docs/plans/2026-10-26-value-kinds.md`, section 4.8)
     // decline anyway: a COLLECTION of kind values (`entry` and `lowered()`
-    // describe one value), and the `interval-js` target (its runner has no
-    // entry check of a kind binding).
+    // describe one value), and an interval target with a kind other than
+    // the enclosure (its runner checks the host value of an enclosure only).
+    //
+    // On `interval-js` the lowering of the enclosure is set up also when a
+    // free symbol MAY hold an enclosure (`y: real | enclosure`), so that the
+    // runner checks its host value and its operations reach the contract.
     if (BaseCompiler._compileDepth === 0) {
       BaseCompiler._kindLowering = undefined;
       BaseCompiler._lastKindLowering = undefined;
     }
+    const possibleEnclosure =
+      BaseCompiler._compileDepth === 0 &&
+      target.language === 'interval-javascript' &&
+      hasEnclosureSymbol(expr);
     if (
       BaseCompiler._compileDepth === 0 &&
-      (typeIsKindForCertain(expr.type.type, expr.engine) ||
+      (possibleEnclosure ||
+        typeIsKindForCertain(expr.type.type, expr.engine) ||
         holdsKindValueForCertain(expr))
     ) {
-      const lowering = BaseCompiler.kindLoweringOf(expr, target);
+      const lowering = BaseCompiler.kindLoweringOf(
+        expr,
+        target,
+        possibleEnclosure
+      );
       if (lowering !== undefined) {
         BaseCompiler._kindLowering = lowering;
         BaseCompiler._lastKindLowering = lowering;
@@ -4197,7 +4259,18 @@ export class BaseCompiler {
     if (target.absence !== undefined && target.absence.object === undefined) {
       const t = compilationType(expr);
       if (typeContainsMissing(t)) {
-        const stripped = resolveTypeForCompilation(stripMissingFromType(t));
+        // On `interval-js` an enclosure is an interval of the value model,
+        // whose absence is the `NaN` interval of a number: its arm is read
+        // as a number (`x + y` with `x: enclosure` and `y: real | missing`
+        // is typed `enclosure | missing`).
+        const withoutMissing = resolveTypeForCompilation(
+          stripMissingFromType(t)
+        );
+        const stripped =
+          target.language === 'interval-javascript' &&
+          hasEnclosureArm(withoutMissing)
+            ? withoutKindArms(withoutMissing, kindTypeNames(expr.engine))
+            : withoutMissing;
         // A NUMERIC-SHAPED type — a tuple of 2 to 4 numeric components — is
         // exempt like a scalar number is: absence fills every lane with NaN
         // (`vec2(_gpu_nan())`), which is exactly what the `When`/`Which`
@@ -37300,7 +37373,12 @@ export class BaseCompiler {
     // were already rewritten as part of the enclosing tree, so rewriting the
     // body first and substituting them in afterwards scales each trig
     // argument exactly once.
-    return rewriteAngularUnit(statement).subs(substitution);
+    // On `interval-js` the factors of the angular unit are exact, as at the
+    // compile entry of that target, so the scaled angle is an enclosure of
+    // the true angle.
+    return rewriteAngularUnit(statement, {
+      exactFactors: target.language === 'interval-javascript',
+    }).subs(substitution);
   }
 
   /**
@@ -39350,13 +39428,17 @@ export class BaseCompiler {
    * a high order (`appliedDerivativeTooLarge`) is not resolved, because its
    * closed form grows past a useful size. The interval target and the shader
    * targets read the literal: they have no other lowering for a derivative.
+   * `options.exactFactors` is the option of the angular-unit rewrite of the
+   * closed form (`rewriteAngularUnit()`): the interval target asks for exact
+   * factors.
    */
   static appliedDerivativeLiteral(
-    args: ReadonlyArray<Expression>
+    args: ReadonlyArray<Expression>,
+    options?: { exactFactors?: boolean }
   ): Expression | undefined {
     if (!isFunction(args[0], 'Derivative')) return undefined;
     if (BaseCompiler.appliedDerivativeTooLarge(args)) return undefined;
-    return derivativeClosedForm('Derivative', args[0].ops);
+    return derivativeClosedForm('Derivative', args[0].ops, options);
   }
 
   /**
@@ -40797,7 +40879,11 @@ export class BaseCompiler {
   ): Expression {
     return unrollFixedWidthCollections(
       BaseCompiler.inlineCollectionValuedCallsInDefinitionBody(
-        rewriteAngularUnit(literal.ops[0].canonical),
+        // Exact factors on `interval-js`, as at the compile entry of that
+        // target.
+        rewriteAngularUnit(literal.ops[0].canonical, {
+          exactFactors: target.language === 'interval-javascript',
+        }),
         target,
         registry,
         BaseCompiler.enclosingDefinitionOf(
@@ -42719,7 +42805,9 @@ export class BaseCompiler {
         target.appliesFunctionLiteralsOnly === true &&
         !isFunction(ops[0], 'Function')
       ) {
-        const literal = BaseCompiler.appliedDerivativeLiteral(ops);
+        const literal = BaseCompiler.appliedDerivativeLiteral(ops, {
+          exactFactors: target.language === 'interval-javascript',
+        });
         if (isFunction(literal, 'Function') && literal.nops === ops.length) {
           visitLiteralBody(literal, bound);
           for (const op of ops.slice(1)) visit(op, bound);

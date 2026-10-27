@@ -667,8 +667,8 @@ A kind type is one of:
 - a **kind primitive**: a name of the type language with an entry in the
   subtype table of `common/type/subtype.ts` that lists no subtype and no
   supertype but `value`, and that is in `KIND_PRIMITIVES`
-  (`boxed-expression/value-kinds.ts`): `residue`, `measurement` and
-  `quantity`. Only the library adds one, because a library signature is
+  (`boxed-expression/value-kinds.ts`): `residue`, `measurement`, `quantity`
+  and `enclosure`. Only the library adds one, because a library signature is
   parsed before any engine exists and must be able to name it;
 - a **nominal type whose definition is exactly `value`**, declared with
   `ce.declareType(name, 'value', { mint: false })`. This is the form a host
@@ -1071,6 +1071,56 @@ phase 2, a measurement was typed with the type of its nominal and a quantity
   through the carrier (`shapedListTypeD()`, `collections.ts`).
 - **The physical constants** are declared `value` (`library/library.ts`),
   and their value is a quantity, typed `quantity`.
+
+### Enclosures
+
+`enclosure` is the kind primitive of `Enclosure(lo, hi)`
+(`library/enclosure.ts`; the hooks are `ENCLOSURE_ARITHMETIC` in
+`library/enclosure-arithmetic.ts`), a closed interval that holds one real
+number. It is in `KIND_PRIMITIVES` and has an entry in the subtype table of
+`common/type/subtype.ts` with no subtype: like the other kind types it is a
+subtype of `value` (so of `expression` and `any`) and disjoint from every
+other type. So `enclosure` is not a subtype of `real`, and a symbol declared
+`real` refuses an enclosure. The design is section 4.9.2 of
+`plans/2026-10-26-value-kinds.md` (ROADMAP CE-507).
+
+- **The signature of the head** is
+  `(real | signed_infinity | nan | set<real>, (real | signed_infinity | nan)?) -> enclosure | nan`.
+  The `type` handler of the head answers `enclosure` when there are two
+  endpoints whose types exclude `NaN` and at least one type excludes the
+  infinities (`Enclosure(0, +oo)` is `enclosure`), and
+  `enclosure | nan` otherwise: a `NaN` endpoint, the same infinity twice and
+  an empty set give the indeterminate value. The canonical handler refuses,
+  with `incompatible-type`, an endpoint that is a value of a kind (a
+  measurement, a quantity, an enclosure), because admission is not
+  subtyping and would admit it; the evaluate handler checks the endpoints
+  again after it evaluates them.
+- **`enclosure` is a `'real'` kind.** An enclosure is admitted through the
+  carrier at every parameter that admits `real` (`real`, `number`,
+  `complex`), and refused at `integer` and at a ranged parameter. Every
+  library operator that admits it this way is an apply site. `Measurement`
+  and `Quantity`, whose parameters are `value`, refuse an enclosure in
+  their canonical and evaluate handlers.
+- **`resultType`** answers `enclosure` for `Abs`, `Sin`, `Cos`, `Sinh`,
+  `Cosh`, `Tanh`, `Arctan`, `Arsinh`, `Erf`, `Erfc`, `Fract`, `Sign` and
+  `Heaviside`, whose image is never empty. For `Add`, `Negate`, `Subtract`,
+  `Multiply`, `Sum` and `Product` it answers `enclosure` when no operand
+  type admits an infinity or `NaN`, and `enclosure | nan` otherwise
+  (`x + 1` with `x: enclosure` is `enclosure`; `x + y` with `y: number` is
+  `enclosure | nan`, since `x + +oo` is indeterminate). For `Max`, `Min`,
+  `Clamp`, `ElementMax` and `ElementMin` it answers `enclosure`, or
+  `enclosure | signed_infinity | nan` when an operand type admits an
+  infinity or `NaN` (`Max(x, +oo)` is the number `+oo`). Every other
+  operator (`Divide`, `Power`, `Sqrt`, `Ln`, `Tan`, `Floor`, `Mean`, …) is
+  `enclosure | nan`, because its image can be empty.
+- **The endpoints under `.N()` are machine doubles**, converted outward
+  (`lo` down, `hi` up), at every `ce.precision`: the interval library
+  computes with doubles. The type does not record this; it is a property of
+  the value. Under `evaluate()` with exact endpoints the endpoints stay
+  exact.
+- **A list of enclosures** is read by its cells: `[Enclosure(0, 1), 2]` is
+  a `list<enclosure | integer^2>`, and `Sin` of it evaluates to a
+  `list<enclosure | real^2>`. Such a list is never a `vector`.
 
 ## Protocols, sums, and objects
 

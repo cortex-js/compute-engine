@@ -12,7 +12,11 @@ import type {
 import { BaseCompiler } from './base-compiler.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { resolveStorageHints } from './storage-hints.js';
-import { compileDiagnosticOf, isLaneMismatchError } from './diagnostics.js';
+import {
+  compileDiagnosticOf,
+  isKindDeclineError,
+  isLaneMismatchError,
+} from './diagnostics.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
   overriddenCompilationHeads,
@@ -373,6 +377,11 @@ export function compile<
     // to the caller: it is thrown again, not changed into a fallback
     // (docs/TIMEOUT-MODEL.md §2).
     throwIfCallerCancellation(e, expr.engine._deadlineFrame);
+    // A kind decline (an `enclosure` input or result on interval-js) has no
+    // interpreter fallback: the target throws it even with `fallback: true`.
+    // It is thrown again here, with no fallback warning and no second
+    // compilation, which would throw the same decline again.
+    if (isKindDeclineError(e)) throw e;
     if (options?.fallback ?? true) {
       const error = (e as Error).message;
       console.warn(

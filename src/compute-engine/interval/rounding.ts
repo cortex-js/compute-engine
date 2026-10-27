@@ -252,6 +252,31 @@ function decorate<F extends (...args: never[]) => unknown>(
   return rounded as unknown as F;
 }
 
+// ---------------------------------------------------------------------------
+// Directed operations on one endpoint.
+//
+// A routine whose endpoint is a CHAIN of rounded operations cannot be made
+// sound by a fixed step at its export when one of the operations amplifies
+// the error of the one before it (a reciprocal of a rounded power, a
+// subtraction that cancels). Such a routine rounds each operation in the
+// direction of the endpoint it computes instead, with these helpers, and its
+// prover then certifies the endpoint, so that the export does not step it a
+// second time.
+// ---------------------------------------------------------------------------
+
+// `directedSum`, `directedProduct` and `directedReciprocal` round `a + b`,
+// `a · b` and `1 / x` toward `-∞` (`dir` is `-1`) or toward `+∞` (`dir` is
+// `1`). An exact result is returned as it is, any other result is moved one
+// ulp in the direction `dir`, and a finite operation that overflows is
+// bounded by `±Number.MAX_VALUE` toward the inside. They are the directed
+// endpoint operations of the scalar interval arithmetic, re-exported here
+// under the names that the interval kernels use.
+export {
+  dirSum as directedSum,
+  dirProd as directedProduct,
+  dirRecip as directedReciprocal,
+} from '../numerics/interval-arithmetic.js';
+
 /** Wrap a routine so every finite endpoint of its answer moves `steps` ulps
  *  outward — one step per correctly rounded operation the routine performs on
  *  an endpoint. */
@@ -549,6 +574,13 @@ function exactIntegerPower(v: number, n: number): number {
  * infinite intermediate, where zero does not bound the values below the axis.
  */
 function powExactness(x: Interval, n: number, value: Interval): Exactness {
+  // A NEGATIVE integer exponent: the routine computes the positive power and
+  // then its reciprocal with a directed rounding at each operation
+  // (`powRaw`, `elementary.ts`), because a step at the export cannot cover
+  // the error of the power once the reciprocal has amplified it. Both
+  // endpoints are then bounds already, and a second step would only widen
+  // them.
+  if (Number.isInteger(n) && n < 0) return EXACT;
   // `exactIntegerPower` decides nothing outside a non-negative integer
   // exponent within its walk bound, so an exponent outside it makes the walk
   // below pure cost — every candidate would answer `NaN`. Only the zero lower
@@ -581,11 +613,12 @@ function powExactness(x: Interval, n: number, value: Interval): Exactness {
 
 /**
  * A NON-NEGATIVE INTEGER exponent only: the endpoint is then a product chain
- * that either reproduces exactly or does not. A negative exponent goes through
- * a reciprocal and a fractional one through `Math.pow`, and neither is decided
- * here, with one exception: a fractional exponent over a base whose upper end
- * is exactly 0, where the routine writes the literal `[0, 0]` and computes no
- * power.
+ * that either reproduces exactly or does not. A negative INTEGER exponent is
+ * rounded in the direction of each endpoint by the routine itself, so both
+ * endpoints are certified (`powExactness`). A fractional exponent goes through
+ * `Math.pow` and is not decided here, with one exception: a fractional
+ * exponent over a base whose upper end is exactly 0, where the routine writes
+ * the literal `[0, 0]` and computes no power.
  */
 export function exactPow(args: readonly unknown[], value: Interval): Exactness {
   const x = operandInterval(args[0]);
@@ -621,6 +654,31 @@ export function exactPowInterval(
     // number.
     if (x.lo === -1 && x.hi === -1)
       return exactness(value.lo === -1, value.hi === 1);
+    // Any other base with a negative part, over an exponent `[c, d]` that is
+    // not a point: the routine answers the hull of `[−M, M]` (the negative
+    // part, `M` the largest corner power of its magnitude) and of the image
+    // of the non-negative part `[0, b]` (its corner powers `b^c`, `b^d`, and
+    // the literals 0 and 1 at the base 0), so its lower end is `−M`. An
+    // endpoint is the true value when every corner power that reaches it is
+    // an exact integer power (`(−2)^[1, 2]` is `[−4, 4]`); a power at a
+    // fractional exponent goes through `Math.pow` and is not decided, and an
+    // endpoint that no listed corner reaches (a literal) is not certified.
+    if (x.lo < 0 && e.lo !== e.hi) {
+      const corners = [Math.max(0, -x.hi), -x.lo];
+      if (x.hi > 0) corners.push(x.hi);
+      let reached = false;
+      let exact = true;
+      for (const m of corners) {
+        for (const k of [e.lo, e.hi]) {
+          const p = Math.pow(m, k);
+          if (p !== value.hi) continue;
+          reached = true;
+          if (exactIntegerPower(m, k) !== p) exact = false;
+        }
+      }
+      const hi = reached && exact;
+      return exactness(hi && value.lo === -value.hi, hi);
+    }
     // A base whose upper end is exactly 0: the only point of the base in the
     // domain is 0, where the power is 0 for a positive exponent and 1 for
     // the exponent 0, and the routine writes those literals down

@@ -90,12 +90,7 @@ describe('Tycho 260 — a base touching zero is not automatically clipped', () =
     expectShape(powInterval(I(0, 2), I(1.9, 2.1)), 'interval', 0, 2 ** 2.1);
     expectShape(powInterval(I(0, 2), I(0.5, 0.5)), 'interval', 0, Math.SQRT2);
     // A base below 1, where the supremum is at the LOWER exponent.
-    expectShape(
-      powInterval(I(0, 0.5), I(1.9, 2.1)),
-      'interval',
-      0,
-      0.5 ** 1.9
-    );
+    expectShape(powInterval(I(0, 0.5), I(1.9, 2.1)), 'interval', 0, 0.5 ** 1.9);
   });
 
   // A pole needs a NEGATIVE exponent. An exponent of exactly 0 gives `x^0 = 1`
@@ -110,18 +105,51 @@ describe('Tycho 260 — a base touching zero is not automatically clipped', () =
     expect(containsTrueRange(I(0, 2), I(0, 3))).toBe(true);
   });
 
-  test('a straddling base is still partial', () => {
-    const [kind, lo] = shape(powInterval(I(-1, 2), I(1.9, 2.1)));
+  test('a straddling base is still partial at a non-integer point exponent', () => {
+    // At a non-integer POINT exponent the negative part of the base has no
+    // real value: the box is clipped to its non-negative part.
+    const [kind, lo] = shape(powInterval(I(-1, 2), I(2.1, 2.1)));
     expect(kind).toBe('partial');
     expect(lo).toBe(0);
+  });
+
+  test('a straddling base over an exponent interval is the hull of its parts', () => {
+    // CE-522.6: `[−1, 2]^[1.9, 2.1]` was `partial` with the lower end 0,
+    // which excluded the negative real values of the negative part of the
+    // base: `21/11 ≈ 1.909` is in the exponent interval and has an odd
+    // denominator, so `(−1)^(21/11) = −1` is a real value on the box. The
+    // answer is the hull of `[−1, 1]` (the negative part) and `[0, 2^2.1]`.
+    const [kind, lo, hi] = shape(powInterval(I(-1, 2), I(1.9, 2.1))) as [
+      string,
+      number,
+      number,
+    ];
+    expect(kind).toBe('interval');
+    expect(lo).toBeLessThanOrEqual(-1);
+    expect(lo).toBeGreaterThan(-1.0001);
+    expect(hi).toBeGreaterThanOrEqual(2 ** 2.1);
   });
 
   test('an integer point exponent is unchanged', () => {
     expect(shape(powInterval(I(0, 2), I(2, 2)))).toEqual(['interval', 0, 4]);
   });
 
-  test('an entirely negative base has no real value', () => {
-    expect(shape(powInterval(I(-2, -1), I(1.5, 2.5)))).toEqual(['empty']);
+  test('an entirely negative base has no real value at a non-integer point exponent', () => {
+    expect(shape(powInterval(I(-2, -1), I(1.5, 1.5)))).toEqual(['empty']);
+  });
+
+  test('an entirely negative base over an exponent interval is a symmetric hull', () => {
+    // CE-522.6: this was `empty`, which excluded `(−1.5)^2 = 2.25`, a real
+    // value on the box (the exponent interval holds 2). The answer is
+    // `[−M, M]` with `M = 2^2.5`, rounded outward.
+    const [kind, lo, hi] = shape(powInterval(I(-2, -1), I(1.5, 2.5))) as [
+      string,
+      number,
+      number,
+    ];
+    expect(kind).toBe('interval');
+    expect(lo).toBeLessThanOrEqual(-(2 ** 2.5));
+    expect(hi).toBeGreaterThanOrEqual(2 ** 2.5);
   });
 
   test('a wholly positive base is unchanged', () => {
@@ -168,12 +196,8 @@ describe('Tycho 260 — a base touching zero is not automatically clipped', () =
       [-1, 2, 1.9, 2.1],
     ];
     for (const [bl, bh, el, eh] of cases)
-      expect([bl, bh, el, eh, containsTrueRange(I(bl, bh), I(el, eh))]).toEqual([
-        bl,
-        bh,
-        el,
-        eh,
-        true,
-      ]);
+      expect([bl, bh, el, eh, containsTrueRange(I(bl, bh), I(el, eh))]).toEqual(
+        [bl, bh, el, eh, true]
+      );
   });
 });

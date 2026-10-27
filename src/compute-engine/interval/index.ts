@@ -28,6 +28,9 @@ import {
   unwrap as _unwrap,
   unwrapOrPropagate as _unwrapOrPropagate,
   checkedCall as _checkedCall,
+  enclose as _enclose,
+  stripEnclosure as _stripEnclosure,
+  finiteOperand as _finiteOperand,
 } from './util.js';
 import {
   integrate as _integrate,
@@ -167,6 +170,9 @@ export {
   unwrap,
   unwrapOrPropagate,
   checkedCall,
+  enclose,
+  stripEnclosure,
+  finiteOperand,
 } from './util.js';
 
 // Arithmetic operations
@@ -331,6 +337,13 @@ export const IntervalArithmetic = {
   // The call of a user function whose declared parameter types are tested
   // at run time (`checkedCall`, `util.ts`).
   checkedCall: _checkedCall,
+  // The value of a result as the `Enclosure` value kind reads it: the
+  // compiled code of an expression with an enclosure maps each result of the
+  // library through these (`enclose`, `stripEnclosure`, `finiteOperand`,
+  // `util.ts`).
+  enclose: _enclose,
+  stripEnclosure: _stripEnclosure,
+  finiteOperand: _finiteOperand,
 
   // Arithmetic
   add: _add,

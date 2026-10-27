@@ -38,7 +38,6 @@ import type {
 } from '../global-types.js';
 import { entrySource } from './function-purity.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
-import { asRational } from '../boxed-expression/numerics.js';
 import {
   isSymbol,
   isNumber,
@@ -47,8 +46,17 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   collectionElementType,
+  kindArmNames,
   stripMissingFromType,
+  withoutKindArms,
 } from '../../common/type/utils.js';
+import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
+import { kindTypeNames } from '../boxed-expression/value-kinds.js';
+import {
+  hasEnclosureArm,
+  isEnclosureEntry,
+} from '../library/enclosure-compile.js';
+import { kindEntryError } from './javascript-runtime.js';
 import type { Type } from '../../common/type/types.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 
@@ -68,6 +76,7 @@ import {
   isNestedPointCollectionType,
   everyPointCoordinateIsNumeric,
   mayHoldNumericArrayOfRank,
+  hasEnclosureSymbol,
 } from './base-compiler.js';
 import { isOperatorDef } from '../boxed-expression/utils.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
@@ -112,7 +121,7 @@ import type {
   IntervalValue,
   OperandCompiler,
 } from './types.js';
-import { compileDiagnosticOf } from './diagnostics.js';
+import { compileDiagnosticOf, KindDeclineError } from './diagnostics.js';
 import { resolveStorageHints } from './storage-hints.js';
 import {
   IntervalArithmetic,
@@ -128,6 +137,7 @@ import {
 import {
   broadcastIntervals,
   broadcastIntervalsSlice,
+  visitIntervalInputCells,
   type BroadcastInputs,
   type BroadcastOptions,
 } from './broadcast.js';
@@ -142,11 +152,16 @@ import { rangeCount } from '../numerics/range-count.js';
 import { interval } from '../numerics/interval.js';
 import { foldSeed, MAX_RANDOM_ELEMENT_COUNT } from '../numerics/random.js';
 import { randomCount } from '../library/random-utils.js';
+import { intervalRoundToStep } from '../library/interval-round-to-step.js';
 import {
   INTERVAL_QUADRATURE_BUDGET,
   INTERVAL_QUADRATURE_SUBDIVISIONS,
 } from '../interval/integrate.js';
-import { couldMatch, isSubtype } from '../../common/type/subtype.js';
+import {
+  couldMatch,
+  isSubtype,
+  provablyDisjoint,
+} from '../../common/type/subtype.js';
 import {
   callerSpliceSources,
   preservesMappedSplices,
@@ -185,47 +200,6 @@ const INTERVAL_JAVASCRIPT_OPERATORS: CompiledOperators = {
   Or: ['_IA.or', 20],
   Not: ['_IA.not', 20],
 };
-
-/**
- * The interval code of `Floor`, `Ceil`, `Truncate` or `Round` (`round` is
- * the `_IA` function, and `extra` its further arguments: the tie rule of
- * `Round`), with or without a step. The step form `Floor(x, step)` is
- * `round(x / k) · k` with `k = |step|`: the division and the product are
- * the outward-rounded interval operations, so an enclosure that the
- * division widens across a jump answers `singular`, as the one-argument
- * form does. The step is spliced twice, so an impure step (a draw from the
- * `Random` family) fails closed.
- */
-function intervalRoundToStep(
-  round: 'floor' | 'ceil' | 'trunc' | 'round',
-  args: ReadonlyArray<Expression | null>,
-  compile: (expr: Expression) => string,
-  extra = ''
-): string {
-  const [x, step] = args;
-  if (x === null || x === undefined)
-    throw new Error(`Could not compile \`${round}\`: no argument`);
-  if (step === null || step === undefined)
-    return `_IA.${round}(${compile(x)}${extra})`;
-  if (step.isPure === false)
-    throw new Error(
-      `Could not compile \`${round}\`: the interval target requires a pure step`
-    );
-  // An exact step `1/m` or `m`, with `m` a safe integer (`10^-2` is
-  // `1/100`), scales through the exact point `m`: `1/100` has no double, and
-  // dividing by an enclosure of it would widen a tie (`Round(0.125, 1/100)`)
-  // across its jump, while `0.125·100` is the exact point `12.5`.
-  const r = asRational(step);
-  if (r !== undefined) {
-    const [p, q] = [Math.abs(Number(r[0])), Number(r[1])];
-    if (p === 1 && Number.isSafeInteger(q) && q > 0)
-      return `_IA.div(_IA.${round}(_IA.mul(${compile(x)}, _IA.point(${q}))${extra}), _IA.point(${q}))`;
-    if (q === 1 && Number.isSafeInteger(p) && p > 0)
-      return `_IA.mul(_IA.${round}(_IA.div(${compile(x)}, _IA.point(${p}))${extra}), _IA.point(${p}))`;
-  }
-  const k = `_IA.abs(${compile(step)})`;
-  return `_IA.mul(_IA.${round}(_IA.div(${compile(x)}, ${k})${extra}), ${k})`;
-}
 
 /**
  * Emit the Euclidean (L2) norm of a fixed-arity point from its compiled
@@ -1690,7 +1664,9 @@ function guardedIntervalFunction(
  * NUMBER LITERAL operand is handed to the handler as itself, not as a
  * parameter: the handler reads a literal to pick a specialized kernel — the
  * exponent `2/3` selects `powRational`, which encloses a negative base, where
- * a symbolic exponent selects `powInterval`, which answers `empty` there; a
+ * a symbolic exponent selects `powInterval`, which over a negative base
+ * answers `empty` for a point exponent that is not an integer and the
+ * symmetric hull `[−M, M]` for an exponent interval that is not a point; a
  * literal `Round` precision is required outright — and a literal has no
  * run-time cost to repeat inside the closure. Every other operand is
  * compiled ONCE, outside the closure, as an argument of the broadcast: a
@@ -3314,8 +3290,10 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     // the missing parameters to `undefined`. A non-literal callee (a
     // valueless function symbol) has no parameter list to check against.
     // Fail closed on all of those.
+    // The closed form is rewritten with the exact factors of the angular
+    // unit, as at the compile entry of this target.
     const fn = isFunction(args[0], 'Derivative')
-      ? BaseCompiler.appliedDerivativeLiteral(args)
+      ? BaseCompiler.appliedDerivativeLiteral(args, { exactFactors: true })
       : args[0];
     if (!isFunction(fn, 'Function'))
       throw new Error(
@@ -5331,6 +5309,127 @@ function hoistIntervalConstants(
 }
 
 /**
+ * True when `expr` has a symbol whose type has an `enclosure` arm (an input
+ * typed by the value kind, `list<enclosure>` included), or a result type
+ * with an `enclosure` arm. A compilation of such an expression that
+ * declines throws even with `fallback: true`: the interpreter fallback of
+ * this target collapses each `{ lo, hi }` input to its midpoint
+ * (`collapseIntervalInput()`), which would give a NUMBER to a symbol typed
+ * `enclosure`, and reads a scalar result through `.N().re`, which is `NaN`
+ * for an enclosure (`docs/plans/2026-10-26-value-kinds.md`, section 4.9.2,
+ * "Compilation"). The other value kinds keep the fallback.
+ */
+function holdsEnclosureInputOrResult(expr: Expression): boolean {
+  if (
+    kindArmNames(expr.type.type, kindTypeNames(expr.engine)).includes(
+      'enclosure'
+    )
+  )
+    return true;
+  return hasEnclosureSymbol(expr);
+}
+
+/**
+ * The run-time check of the host value of one free symbol of a value kind,
+ * on `interval-js` (where the only kind with a compiled form is the
+ * enclosure). `value` checks a value given to `run()`; `cell` checks the
+ * bounds of a cell of `broadcast()`.
+ */
+interface IntervalKindEntry {
+  readonly name: string;
+  /** The symbol and its type, as the message of a refused value names them. */
+  readonly label: string;
+  readonly value: (v: unknown) => boolean;
+  readonly cell: (lo: number, hi: number) => boolean;
+}
+
+/**
+ * The run-time checks of the free symbols of `expr` whose type has an
+ * `enclosure` arm (`docs/plans/2026-10-26-value-kinds.md`, section 4.9.2,
+ * "Compilation"). A symbol typed `enclosure` admits what the `entry` of the
+ * kind admits: a record `{ lo, hi }` with `lo <= hi`, not the same infinity
+ * twice and no `NaN`, or a finite number. A UNION (`number | enclosure`,
+ * `enclosure | nan`) is checked by arm: a record by the `entry` of the kind,
+ * a number by the numeric arms, as the JavaScript runner reads a number
+ * (`NaN` admitted when an arm admits `nan` or `missing`, `±Infinity` when an
+ * arm admits an infinity). A cell of `broadcast()` whose two bounds are the
+ * same value (`NaN` and `±Infinity` included) is read as that number when
+ * the type has a numeric arm.
+ */
+function intervalKindEntries(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): IntervalKindEntry[] {
+  const ce = expr.engine;
+  const occurrences = new Map<string, Expression>();
+  const refs = BaseCompiler.analyzeReferences(
+    expr,
+    target,
+    target.varsKeys,
+    occurrences
+  );
+  const entries: IntervalKindEntry[] = [];
+  for (const name of refs.freeSymbols) {
+    const t = (occurrences.get(name) ?? ce.symbol(name)).type.type;
+    if (!hasEnclosureArm(t)) continue;
+    const rest = withoutKindArms(t, kindTypeNames(ce));
+    const numeric = rest !== 'never';
+    const admitsNaN =
+      numeric &&
+      (!provablyDisjoint(rest, 'nan') || !provablyDisjoint(rest, 'missing'));
+    const admitsInfinity =
+      numeric && !provablyDisjoint(rest, SIGNED_INFINITY_TYPE);
+    const asNumber = (v: number): boolean =>
+      Number.isFinite(v) || (Number.isNaN(v) ? admitsNaN : admitsInfinity);
+    const value = (v: unknown): boolean =>
+      typeof v === 'number' ? asNumber(v) : isEnclosureEntry(v);
+    entries.push({
+      name,
+      label: `"${name}" (type \`${BaseCompiler.declaredTypeText(t)}\`)`,
+      value,
+      cell: (lo, hi) =>
+        numeric && (lo === hi || (Number.isNaN(lo) && Number.isNaN(hi)))
+          ? asNumber(lo)
+          : isEnclosureEntry({ lo, hi }),
+    });
+  }
+  return entries;
+}
+
+/** Throw when a value of the vars object `vars` is refused by its check. */
+function checkIntervalKindInputs(
+  entries: ReadonlyArray<IntervalKindEntry>,
+  vars: unknown
+): void {
+  for (const entry of entries) {
+    const v =
+      vars !== null &&
+      typeof vars === 'object' &&
+      Object.prototype.hasOwnProperty.call(vars, entry.name)
+        ? (vars as Record<string, unknown>)[entry.name]
+        : undefined;
+    if (!entry.value(v)) throw kindEntryError(entry.label);
+  }
+}
+
+/** Throw when a cell of the inputs of a batch is refused by its check, or
+ * when an input that has a check is not given. Called before the loop. */
+function checkIntervalKindCells(
+  entries: ReadonlyArray<IntervalKindEntry>,
+  inputs: BroadcastInputs,
+  options: BroadcastOptions | undefined
+): void {
+  const byName = new Map(entries.map((e) => [e.name, e]));
+  const names = visitIntervalInputCells(inputs, options, (name, lo, hi) => {
+    const entry = byName.get(name);
+    if (entry !== undefined && !entry.cell(lo, hi))
+      throw kindEntryError(entry.label);
+  });
+  for (const entry of entries)
+    if (!names.includes(entry.name)) throw kindEntryError(entry.label);
+}
+
+/**
  * JavaScript function that wraps compiled interval arithmetic code.
  *
  * Injects the _IA library and provides input conversion from various formats.
@@ -5357,7 +5456,18 @@ export class ComputeEngineIntervalFunction extends Function {
    */
   rawCall!: (vars: unknown) => unknown;
 
-  constructor(body: string, preamble = '', constants = '') {
+  /**
+   * `kindEntries` are the run-time checks of the host values of the free
+   * symbols of a value kind (`intervalKindEntries()`). A call applies them
+   * to the vars object BEFORE it converts the inputs and OUTSIDE the `try`
+   * whose `catch` answers `entire`, so a value that a check refuses throws.
+   */
+  constructor(
+    body: string,
+    preamble = '',
+    constants = '',
+    kindEntries: ReadonlyArray<IntervalKindEntry> = []
+  ) {
     const perCallCode = preamble
       ? `${preamble};return ${body}`
       : `return ${body}`;
@@ -5379,6 +5489,8 @@ export class ComputeEngineIntervalFunction extends Function {
         : Function.prototype.call.call(this, undefined, this.IA, vars);
     return new Proxy(this, {
       apply: (target, thisArg, argumentsList) => {
+        if (kindEntries.length > 0)
+          checkIntervalKindInputs(kindEntries, argumentsList[0]);
         try {
           // Process input arguments - convert to interval format
           const processedArgs = argumentsList.map(processInput);
@@ -5709,6 +5821,8 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // (docs/TIMEOUT-MODEL.md §2).
       throwIfCallerCancellation(e, expr.engine._deadlineFrame);
       if (options.fallback !== true) throw e;
+      if (holdsEnclosureInputOrResult(expr))
+        throw new KindDeclineError(compileDiagnosticOf(e));
       return this.buildIntervalFallback(expr, (e as Error).message, options);
     }
     // The primary failure class never throws: `compileToIntervalTarget`
@@ -5721,6 +5835,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       const error =
         result.error ??
         `Could not compile \`${expr.operator}\` to the interval-js target`;
+      if (holdsEnclosureInputOrResult(expr))
+        throw new KindDeclineError(
+          result.diagnostic ?? compileDiagnosticOf(undefined, error)
+        );
       return this.buildIntervalFallback(
         expr,
         error,
@@ -5793,8 +5911,10 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): CompilationResult<'interval-js', IntervalValue> {
-    // Reproduce the engine's `angularUnit` semantics in radian-based code.
-    expr = rewriteAngularUnit(expr);
+    // Reproduce the engine's `angularUnit` semantics in radian-based code,
+    // with exact factors: this target lowers them to enclosures, so the
+    // scaled angle contains the true angle (a float factor can exclude it).
+    expr = rewriteAngularUnit(expr, { exactFactors: true });
     // Turn a collection whose WIDTH is known at compile time into straight-line
     // scalar code, so this target sees the shape the interpreter computes
     // rather than a runtime array (`fixed-width-unroll.ts`). A head the caller
@@ -6170,7 +6290,27 @@ function compileToIntervalTarget(
   // hosts that pass their own object.
   const localVars = BaseCompiler.localVarsObjectStatement(target);
   const body = localVars ? `(${localVars}, ${hoistedJs})` : hoistedJs;
-  const fn = new ComputeEngineIntervalFunction(body, perCall, declarations);
+  // The value kinds whose compile contracts the code reads or makes (the
+  // enclosure), and the run-time checks of the host values of the free
+  // symbols of a kind. The checks are functions of this host: the result is
+  // not shippable, a stored copy of it cannot be loaded (`valueKinds`), and
+  // `broadcast()` applies them to every cell before its loop.
+  const kinds = BaseCompiler.kindLoweringReport();
+  const kindEntries =
+    kinds !== undefined ? intervalKindEntries(expr, target) : [];
+  const fn = new ComputeEngineIntervalFunction(
+    body,
+    perCall,
+    declarations,
+    kindEntries
+  );
+  const checkCells = (
+    inputs: BroadcastInputs,
+    options: BroadcastOptions | undefined
+  ): void => {
+    if (kindEntries.length > 0)
+      checkIntervalKindCells(kindEntries, inputs, options);
+  };
   const result: CompilationResult<'interval-js', IntervalValue> = {
     target: 'interval-js',
     success: true,
@@ -6188,9 +6328,12 @@ function compileToIntervalTarget(
     ...(declarations ? { preambleOnce: declarations } : {}),
     ...(declarations && perCall ? { preamblePerCall: perCall } : {}),
     calling: 'expression',
+    ...(kinds !== undefined ? { valueKinds: [...kinds.kinds] } : {}),
     run: fn as unknown as CompiledRunner<IntervalValue, IntervalInput>,
-    broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) =>
-      broadcastIntervals(fn.rawCall, inputs, options),
+    broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {
+      checkCells(inputs, options);
+      return broadcastIntervals(fn.rawCall, inputs, options);
+    },
   };
   // `broadcastAsync` ships the result itself (its `code`, preambles and
   // version) to the engine's worker pool, and runs slices here when there is
@@ -6202,14 +6345,26 @@ function compileToIntervalTarget(
     // A worker has no engine: code that names a host identifier or draws
     // from the engine's random stream stays on this thread.
     shippable:
-      target.hostNames !== true && isShippableCode(`${preamble}\n${body}`),
+      kinds === undefined &&
+      target.hostNames !== true &&
+      isShippableCode(`${preamble}\n${body}`),
     iterationLimit: () => engine.iterationLimit,
     slice: (inputs, options, out, slice) =>
       broadcastIntervalsSlice(fn.rawCall, inputs, options, out, slice),
     workers: () => engine.workers,
   };
-  result.broadcastAsync = makeBroadcastAsync(asyncSpec);
+  const broadcastAsync = makeBroadcastAsync(asyncSpec);
+  // A cell that a kind check refuses rejects the promise before any slice
+  // runs.
+  result.broadcastAsync =
+    kindEntries.length > 0
+      ? async (inputs, options) => {
+          checkCells(inputs, options);
+          return broadcastAsync(inputs, options);
+        }
+      : broadcastAsync;
   result.shippable = asyncSpec.shippable;
-  result.willUsePool = makeWillUsePool(asyncSpec);
+  result.willUsePool =
+    kinds !== undefined ? () => false : makeWillUsePool(asyncSpec);
   return result;
 }

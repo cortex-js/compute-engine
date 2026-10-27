@@ -22,6 +22,7 @@ import type {
   KindOperands,
 } from '../global-types.js';
 import {
+  isExpression,
   isFunction,
   isNumber,
   isString,
@@ -181,8 +182,9 @@ export function isComparableKindValue(expr: Expression): boolean {
  * - two identical values (`isSame`) are a tie, `0`, for every kind; under
  *   `.N()`, only when their exact values are identical too;
  * - the kinds of `a` and `b` that declare `compare` are asked in order of
- *   first occurrence, and the first answer (`-1`, `0`, `1`, `'unordered'`)
- *   decides. `'unordered'` says that the two values are known and have no
+ *   first occurrence, and the first answer (`-1`, `0`, `1`, `'<='`, `'>='`,
+ *   `'unordered'`) decides. A reader maps the answer to its verdict with
+ *   `orderAnswer()`. `'unordered'` says that the two values are known and have no
  *   order (a measurement with a complex nominal): the four order operators
  *   answer `False`, `Equal` and `NotEqual` ask the `eq` handlers
  *   (`kindEqual()`), and `Max`, `Min`, `Sort` stay unevaluated;
@@ -194,8 +196,9 @@ export function isComparableKindValue(expr: Expression): boolean {
  * `.N()` (`numericApproximation`). `tolerance` is the tolerance of a caller
  * that compares within one (`.is()`), given to the hooks in
  * `ArithmeticContext.tolerance`. A hook that throws propagates its error;
- * a hook that answers a value other than `-1`, `0`, `1`, `'unordered'` or
- * `undefined` throws an error that names the head of the kind.
+ * a hook that answers a value other than `-1`, `0`, `1`, `'<='`, `'>='`,
+ * `'unordered'` or `undefined` throws an error that names the head of the
+ * kind.
  */
 export function kindCompare(
   a: Expression,
@@ -205,7 +208,7 @@ export function kindCompare(
     numericApproximation?: boolean;
     tolerance?: number;
   }
-): -1 | 0 | 1 | 'unordered' | 'incomparable' | undefined {
+): KindCompareAnswer {
   if (!isComparableKindValue(a) && !isComparableKindValue(b)) return undefined;
   // A value that stands for no value (`ArithmeticDefinition.isNaN`: a
   // measurement with a `NaN` nominal, a quantity with a `NaN` magnitude) has
@@ -238,13 +241,148 @@ export function kindCompare(
     if (fn === undefined) continue;
     const order = fn.call(kind.arithmetic, x, y, context);
     if (order === undefined) continue;
-    if (order !== -1 && order !== 0 && order !== 1 && order !== 'unordered')
+    if (
+      order !== -1 &&
+      order !== 0 &&
+      order !== 1 &&
+      order !== '<=' &&
+      order !== '>=' &&
+      order !== 'unordered'
+    )
       throw new Error(
-        `Value kind of "${kind.name}": the \`compare\` hook returned ${String(order)}, which is not -1, 0, 1, 'unordered' or undefined`
+        `Value kind of "${kind.name}": the \`compare\` hook returned ${String(order)}, which is not -1, 0, 1, '<=', '>=', 'unordered' or undefined`
       );
     return order;
   }
   return 'incomparable';
+}
+
+/**
+ * The answer of `kindCompare()`: `undefined` when the dispatch of the kinds
+ * does not apply to the pair, else the answer of a `compare` hook (`-1`,
+ * `0`, `1`, `'<='`, `'>='`, `'unordered'`), or `'incomparable'` when no hook
+ * answered.
+ */
+export type KindCompareAnswer =
+  -1 | 0 | 1 | '<=' | '>=' | 'unordered' | 'incomparable' | undefined;
+
+/**
+ * The verdict of the relation `relation` for a pair whose order is the
+ * answer `answer` of `kindCompare()`. Every reader of `kindCompare()` maps
+ * the answer through this function, so that no reader reads `'<='` or
+ * `'>='` as a number.
+ *
+ * - `'Less'`, `'LessEqual'`, `'Greater'`, `'GreaterEqual'`: `true` or
+ *   `false` when the relation is decided, `undefined` when it is not (the
+ *   comparison stays unevaluated, and a comparison method answers
+ *   `undefined`). An answer `'<='` makes `LessEqual` true and `Greater`
+ *   false, and leaves `Less` and `GreaterEqual` undecided; `'>='` is the
+ *   mirror. `'unordered'` makes the four relations false, as for a complex
+ *   number. `'incomparable'` and `undefined` decide nothing.
+ * - `'order'`: the relation as one of `'<'`, `'<='`, `'='`, `'>='`, `'>'`,
+ *   the form of `cmp()` (`boxed-expression/compare.ts`), or `undefined`.
+ * - `'total'`: the order as `-1`, `0` or `1`, for a reader that needs a
+ *   TOTAL order (`Sort`, `Max` and `Min` without an `extremum` hook,
+ *   `exactOrder()`); `'<='`, `'>='`, `'unordered'` and `'incomparable'`
+ *   give `undefined`.
+ *
+ * The truth table of `'<='` and `'>='` is the decision of
+ * `docs/plans/2026-10-26-value-kinds.md`, section 4.9.3, part 2.
+ */
+export function orderAnswer(
+  answer: KindCompareAnswer,
+  relation: 'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual'
+): boolean | undefined;
+export function orderAnswer(
+  answer: KindCompareAnswer,
+  relation: 'order'
+): '<' | '<=' | '=' | '>=' | '>' | undefined;
+export function orderAnswer(
+  answer: KindCompareAnswer,
+  relation: 'total'
+): -1 | 0 | 1 | undefined;
+export function orderAnswer(
+  answer: KindCompareAnswer,
+  relation:
+    'Less' | 'LessEqual' | 'Greater' | 'GreaterEqual' | 'order' | 'total'
+): boolean | -1 | 0 | 1 | '<' | '<=' | '=' | '>=' | '>' | undefined {
+  if (answer === undefined || answer === 'incomparable') return undefined;
+  if (relation === 'total')
+    return answer === -1 || answer === 0 || answer === 1 ? answer : undefined;
+  if (relation === 'order') {
+    if (answer === 'unordered') return undefined;
+    if (answer === '<=' || answer === '>=') return answer;
+    return answer < 0 ? '<' : answer > 0 ? '>' : '=';
+  }
+  if (answer === 'unordered') return false;
+  switch (relation) {
+    case 'Less':
+      if (answer === '<=') return undefined;
+      if (answer === '>=') return false;
+      return answer < 0;
+    case 'LessEqual':
+      if (answer === '<=') return true;
+      if (answer === '>=') return undefined;
+      return answer <= 0;
+    case 'Greater':
+      if (answer === '<=') return false;
+      if (answer === '>=') return undefined;
+      return answer > 0;
+    case 'GreaterEqual':
+      if (answer === '<=') return undefined;
+      if (answer === '>=') return true;
+      return answer >= 0;
+  }
+}
+
+/**
+ * The maximum (`which` is `'max'`) or the minimum of the pair `a`, `b`
+ * given by the `extremum` hook of a kind among them
+ * (`ArithmeticDefinition.extremum`), for `Max`, `Min`, `ElementMax`,
+ * `ElementMin` and `Clamp`. The kinds of the two values are asked in order
+ * of first occurrence, and the first answer wins. `undefined` when no kind
+ * among them declares the hook, or every hook declines: the caller orders
+ * the pair with `compare` (`exactOrder()`).
+ *
+ * The callers fold their operands pairwise through this function, so a
+ * hook receives two operands. A hook that answers a value that is not an
+ * expression throws an error that names the head of the kind.
+ */
+export function kindExtremum(
+  which: 'max' | 'min',
+  a: Expression,
+  b: Expression,
+  numericApproximation = false
+): Expression | undefined {
+  if (!engineHasKindValues(a.engine)) return undefined;
+  const kinds = kindsAmong([a, b]);
+  // No kind among the operands declares an extremum: answer before the
+  // operand view is made.
+  if (!kinds.some((kind) => kind.arithmetic.extremum !== undefined))
+    return undefined;
+  const ops = kindOperands(
+    kinds[0].name,
+    [a, b],
+    [a, b],
+    [undefined, undefined],
+    false
+  );
+  const context: ArithmeticContext = {
+    engine: a.engine,
+    numericApproximation,
+  };
+  for (const kind of kinds) {
+    const fn = kind.arithmetic.extremum;
+    if (fn === undefined) continue;
+    const result = fn.call(kind.arithmetic, which, ops, context);
+    if (result === undefined) continue;
+    if (!isExpression(result))
+      throw new Error(
+        `Value kind of "${kind.name}": the \`extremum\` hook returned a value that is not an expression`
+      );
+    return result;
+  }
+  return undefined;
 }
 
 /**

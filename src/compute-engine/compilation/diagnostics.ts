@@ -68,6 +68,26 @@ export class LaneMismatchError extends CompileDeclineError {
   }
 }
 
+/**
+ * The decline of an expression that holds a value of a kind type which has
+ * no interpreter fallback: on `interval-js`, an expression with an input or
+ * a result typed `enclosure` (`holdsEnclosureInputOrResult()` in
+ * `interval-javascript-target.ts`). The interpreter fallback reads an
+ * interval input as its midpoint, which would return a point where the
+ * caller asked for an enclosure, so the decline is thrown even with
+ * `fallback: true`. The engine-level `compile()` throws it again as it is,
+ * with no "Compilation fallback" warning and no second compilation.
+ *
+ * The diagnostic is the one of the decline it replaces (`compileDiagnosticOf`
+ * of the caught error), so the `code` of the diagnostic does not change.
+ */
+export class KindDeclineError extends CompileDeclineError {
+  constructor(diagnostic: CompileDiagnostic) {
+    super(diagnostic);
+    this.name = 'KindDeclineError';
+  }
+}
+
 /** Whether `e` is a `CompileDeclineError` (name-keyed, bundle-safe). */
 export function isCompileDeclineError(e: unknown): e is CompileDeclineError {
   return (
@@ -75,9 +95,15 @@ export function isCompileDeclineError(e: unknown): e is CompileDeclineError {
     e !== null &&
     (e as { name?: unknown }).name !== undefined &&
     ((e as { name: string }).name === 'CompileDeclineError' ||
-      (e as { name: string }).name === 'LaneMismatchError') &&
+      (e as { name: string }).name === 'LaneMismatchError' ||
+      (e as { name: string }).name === 'KindDeclineError') &&
     typeof (e as { diagnostic?: unknown }).diagnostic === 'object'
   );
+}
+
+/** Whether `e` is a `KindDeclineError` (name-keyed, bundle-safe). */
+export function isKindDeclineError(e: unknown): e is KindDeclineError {
+  return isCompileDeclineError(e) && e.name === 'KindDeclineError';
 }
 
 /** Whether `e` is a `LaneMismatchError` (name-keyed, bundle-safe). */

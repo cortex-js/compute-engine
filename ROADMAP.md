@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-528.
+Next free reference: CE-529.
 
 **Entry format.**
 
@@ -1208,9 +1208,12 @@ corpus uses it).
 
 ### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
-**Status:** phases 1 and 2 done 2026-10-26, phase 3 open; capability, large.
-[#477](https://github.com/cortex-js/compute-engine/issues/477) (answered by
-phase 1), [#416](https://github.com/cortex-js/compute-engine/issues/416). Plan:
+**Status:** phases 1, 2 and 3 done 2026-10-26; the sub-items below are open;
+capability, large.
+[#477](https://github.com/cortex-js/compute-engine/issues/477) (closed by the
+three phases, user decision 2026-10-26),
+[#416](https://github.com/cortex-js/compute-engine/issues/416) (answered by
+phase 3). Plan:
 `docs/plans/2026-10-26-value-kinds.md` (revision 7). User decisions of
 2026-10-26: one mechanism, the `arithmetic` field on the operator definition of
 the head, with recognition by the head's kind type; a kind type is a subtype of
@@ -1247,13 +1250,50 @@ documentation is in `doc/06-guide-augmenting.md` ("Measurements and
 Quantities"), `doc/08-guide-types.md` ("Kind Types") and `docs/TYPE-SYSTEM.md`
 ("Measurements and quantities").
 
-What remains:
+Phase 3 (done) added the `Enclosure` value kind, an interval that holds one
+real (plan sections 4.9.2 and 4.9.3; the user's decisions of 2026-10-26 took
+every recommendation of 4.9.1 and the defaults (b) of 4.9.3). The head is in
+`library/enclosure.ts`, the hooks in `library/enclosure-arithmetic.ts` and
+the `interval-js` contract in `library/enclosure-compile.ts`. The kind
+primitive `enclosure` (`admittedAs: 'real'`) is new. Under `evaluate()` the
+hooks keep exact endpoints; under `.N()` the endpoints are converted to
+doubles outward and the interval library computes the image, one kernel for
+each form; the compiled code calls the same kernels, so the two give the same
+doubles. Two fields of `ArithmeticDefinition` are new for every kind: the
+`extremum` hook (asked by `Max`, `Min`, `Clamp`, `ElementMax`, `ElementMin`
+before `compare`; `kindExtremum()`, `kind-compare.ts`) and the answers `'<='`
+and `'>='` of `compare`, which every reader maps through `orderAnswer()`
+(`kind-compare.ts`). The interval runner checks the host value of an input
+typed by the kind (`run()`, `broadcast()`, `broadcastAsync()`; a union input
+by arm), and the kernel fixes of CE-522 landed with it. Four differences
+between the interpreter and the compiled code are accepted and stated in
+`docs/COMPILATION-MODEL.md` ("Value kinds"): the identity shortcut of the six
+comparisons (`c = c` is `True` in the interpreter and `'maybe'` when
+compiled); the compiled comparisons compare doubles exactly, without the
+engine tolerance; in an angular mode other than radians the endpoints may
+differ by the rounding of the factor; and a non-integer point exponent with a
+negative base at run time is `empty` when compiled, where the interpreter
+uses the real branch. The implementation is tighter than one row of the plan:
+`Enclosure(-1, 1)^-2` is `Enclosure(1, +oo)` under `.N()` and compiled too
+(the composition `1 / x^2`), not the whole line. Tests:
+`test/compute-engine/enclosure-kind.test.ts`, `enclosure-apply.test.ts`,
+`enclosure-compile.test.ts` and `interval-kernels-ce522.test.ts`. The
+documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
+`doc/08-guide-types.md` ("Kind Types"), `docs/TYPE-SYSTEM.md` and
+`docs/COMPILATION-MODEL.md`.
 
-- **Phase 3: an interval value** (#416), with a kind primitive,
-  `admittedAs: 'real'`, `compare` for the partial order of enclosures, and a
-  lowering on `interval-js`. It starts after the open question of section 9 of
-  the plan is decided (the name and LaTeX of the head, and whether
-  `CenteredInterval` is a second kind).
+- **CE-507.12** (later step) A serializable kind entry check. Two limits of
+  the compile contract of phase 1 stay for the enclosure. (1) Code compiled
+  with a kind input cannot be loaded again from its stored form: the loaders of
+  `createIntervalRuntime()` (`load()`, `loadBroadcast()`,
+  `loadBroadcastSlice()`) refuse it, because the `entry` check is a function
+  of the host and stored code cannot carry it; so `shippable` is `false` and
+  the kernel pool is not used. (2) An input typed `list<enclosure>` declines,
+  because `entry` and `lowered()` describe one value. On `interval-js` the
+  check of an enclosure is fixed (a record `{ lo, hi }` with `lo <= hi`, no
+  `NaN`, not the same infinity twice, or a number), so it could be written as
+  data in the stored code and applied to each element of a list. To do when a
+  host asks for stored or pooled enclosure code.
 
 - **CE-507.3** (defect, low) An overloaded signature with a kind arm does not
   type the body of a declared function. `kindTypedFunctionLiteral()`
@@ -1308,15 +1348,6 @@ What remains:
   the compile targets), which a flag on `Multiply` would have to gate one by
   one. The engine's own precedent is the named operator (`MatrixMultiply`;
   `\cdot` over lists is element-wise).
-- **CE-507.8** (design needed; shared with PR #482) A decoded-payload cache on a
-  boxed call. A kind value stays a call of its head (opaque only at the compile
-  boundary, plan 4.8), so every hook decodes the operands
-  (`Measurement(2.5, 0.1)` reads two numbers; `Permutation([2, 3, 1])` in PR
-  #482 decodes a list of boxed numbers into a kernel `PermutationValue`,
-  validates it in O(n) and re-encodes, for a degree up to 100,000). A cached
-  decoded payload on the boxed call, as `BoxedNumber` holds its numeric value,
-  would serve both; the invalidation rule is simple because boxed expressions
-  are immutable. To do before phase 3 adds many `apply` sites.
 - Note (2026-10-26, phase-2 code review): `.N()` of a definite integral
   returns a `Measurement` (the quadrature result), so the first such call opens
   the kind gates of an engine (`engineHasKindValues`, `someKindAdmittedByCarrier`,
@@ -3903,35 +3934,36 @@ the WGSL versions bitcast a `let`: a constant `bitcast<f32>` to NaN or infinity
 is a shader-creation error in Chrome ("value inf cannot be represented as
 'f32'").
 
-### CE-522. Interval library kernels: unsound or inconsistent answers found by the `Enclosure` design review
+### CE-528. `interval-js`: `run()` does not expose an operator's `compileHelpers` to the compiled code
 
-**Status:** open; wrong value, medium. Found 2026-10-26 by the spec review of
-plan `docs/plans/2026-10-26-value-kinds.md` section 4.9.2 (phase 3, the
-`Enclosure` value kind), which relies on these kernels; all are reachable
-today through `compile(…, { to: 'interval-js' })`. Items .1 to .4 and .6 are
-fixed in phase 3 (`src/compute-engine/interval/`); .5 is a known limit.
+**Status:** open; defect, medium. Found 2026-10-26 by the phase-3 review of
+the value kinds (a probe written for the chained-comparison fix). An
+operator declared with `compileHelpers: { ivHelp }` and a `compile`
+handler that returns `ivHelp(_.x)` compiles to `interval-js` with
+`success: true`, but `.run({ x: 2 })` answers `{ kind: 'entire' }` and
+the helper never runs: the runner's `catch` in
+`compilation/interval-javascript-target.ts` (around line 5507) turns the
+`ReferenceError` into `entire`. The same with `compileShippable` true or
+false. `test/compute-engine/ce-518-compile-handler-shipping.test.ts`
+covers the helpers on `interval-js` only through `broadcastAsync`, so
+`run()` is not covered. Fix: bind the helpers of CE-518 in the `run()`
+proxy of the interval target as the `javascript` runner binds them, and add
+the `run()` case to the CE-518 test; the swallowed `ReferenceError` should
+also surface as a diagnostic rather than `entire`.
 
-- **CE-522.1** `modRaw` (`interval/elementary.ts`) with a non-point divisor
-  answers an unsound enclosure: `IntervalArithmetic.mod([5, 5], [2, 4])` is
-  `[1, 1]`, while `Mod(5, 3)` is `2` and `Mod(5, 2.5)` is `0`. Fix: a sound
-  hull (for a divisor interval that spans a jump of the quotient, `[0, d)`
-  for a positive dividend, mirrored for the other signs).
-- **CE-522.2** `atanhRaw` (`interval/trigonometric.ts`) clips a boundary
-  argument to `±(1 − ε)`: `atanh([0, 1])` is `partial [0, 18.3684…]` where the
-  image is `[0, +∞)`. Fix: `±∞` at the boundary.
-- **CE-522.3** Every kernel that reports a pole (`tan`, `cot`, `sec`,
-  `csc`, `gamma`, the early pole branches of `powRational`, `powRealBranch`
-  and `pow` with a negative exponent) reports a pole AT an endpoint as
-  `singular` with no value, like an interior pole (`tan([0, π/2])`,
-  `cot([0, 1])`, `gamma([0, 1])`, `powRational([-1, 0], -2, 3)`), and a pole
-  SINGLETON (`gamma([0, 0])`) the same way, so the result is the whole line
-  where the half-line `[1, +∞)` (or `empty` for the singleton) is the image.
-  Fix: classify an endpoint pole and answer the half-line with the sign of
-  the function beside it; a pole singleton answers `empty`.
-- **CE-522.4** `powRaw` with a negative integer exponent over a base with a
-  zero endpoint answers the whole line: `pow([0, 1], -1)` is
-  `partial [−∞, +∞]` where the image is `[1, +∞)`; `pow([0, 0], -1)` must be
-  `empty`. Fix: the reciprocal rule with the half-line at a zero endpoint.
+### CE-522. Interval library kernels: a known limit of the outward rounding, and answers looser than necessary
+
+**Status:** open; one known limit and three improvements, low. Found
+2026-10-26 by the spec review of plan `docs/plans/2026-10-26-value-kinds.md`
+section 4.9.2 (phase 3, the `Enclosure` value kind), which relies on these
+kernels (`src/compute-engine/interval/`); all are reachable through
+`compile(…, { to: 'interval-js' })` and through `.N()` of an enclosure. The
+unsound and too-wide answers that the review found are fixed in phase 3
+(`CHANGELOG.md`, "The interval library gives sound and tighter answers";
+tests `test/compute-engine/interval-kernels-ce522.test.ts`). What remains is
+sound: .5 is a known limit of the transcendental kernels, and .10, .11 and
+.12 are answers that contain the true value but are wider than necessary.
+
 - **CE-522.5** (known limit, not fixed in phase 3) The outward rounding of
   the transcendental kernels is a minimum move, not a proof of containment
   (`interval/rounding.ts` says so): `tanh` of a point can miss the true value
@@ -3939,32 +3971,43 @@ fixed in phase 3 (`src/compute-engine/interval/`); .5 is a known limit.
   `div`, integer powers, `abs`, the step functions) are rigorous. Certified
   kernels (error bounds per function) are a separate project; the
   `Enclosure` documentation states the limit.
-- **CE-522.6** `powInterval` with a negative point base over a non-point
-  exponent answers `empty`: `powInterval([−2, −2], [1, 2])` is `empty` where
-  `(−2)^1` and `(−2)^2` exist. Fix: the symmetric hull `[−M, M]` with
-  `M = max(|b|^c, |b|^d)` for a negative point base `b` and an exponent
-  `[c, d]`, which covers every defined real-branch value (the
-  odd-denominator rationals included: `(−2)^(5/3) ≈ −3.17`); `(−2)^[1, 2]`
-  gives `[−4, 4]`.
-- **CE-522.7** `pow` with a negative integer exponent rounds an
-  intermediate before the reciprocal, so the result can exclude the true
-  value: for the double `x = 1.9678349534779586e-103`,
-  `pow([x, x], -3)` is `[1.3123025984121744e308, 1.3123025984121748e308]`
-  while `x^-3` rounds to `1.3123025984121742e308`, below the lower bound. Fix:
-  the exact power first, outward steps around the reciprocal (and the
-  overflow/underflow of each step). Fixed in phase 3.
-- **CE-522.8** `rewriteAngularUnit()` (`symbolic/angular-unit.ts`), which the
-  `interval-js` target applies before lowering, substitutes FLOAT factors
-  (`Math.PI / 180`, `6.283185307179586` for `2π`), whose nearest double is
-  below the true factor, so a compiled `Cos` in `turn` mode at a quarter turn
-  gives strictly positive bounds that exclude the true value `0`. Fix: on
-  `interval-js` the rewrite uses the directed enclosure of each factor
-  (`{ lo: down(f), hi: up(f) }`), for the direct and the inverse heads.
-  Fixed in phase 3.
-- **CE-522.9** `fractRaw` (`interval/elementary.ts`) computes `x − floor(x)`
-  with no outward rounding: `fract([−1e−20, −1e−20])` is `[1, 1]` where the
-  exact fractional part is strictly below 1. Fix: outward steps around the
-  subtraction, exact cases preserved. Fixed in phase 3.
+- **CE-522.10** (looser, not wrong) The other kernels with a pole still
+  report a pole AT an endpoint of the interval as `singular` with no value
+  (the whole line), as `tan`, `cot`, `sec`, `csc`, `gamma` and the powers
+  did before phase 3 of CE-507: `coth` and `csch` at 0 (`coth([0, 1])` is `singular`
+  where the image is `[coth(1), +∞)`), `acoth` and `acsch` at 0, `asech` at
+  0, and `gammaln` at the non-positive integers (`interval/trigonometric.ts`,
+  `interval/elementary.ts`). The answer is sound but looser than the
+  half-line. Fix: the rule that phase 3 gave to `tan`, `gamma` and the
+  powers (the half-line beside the pole with the sign of the function there; `empty` for a point at the
+  pole, or `singular` where the compiled code must match the interpreter's
+  `~oo`).
+- **CE-522.11** (looser, not wrong) `mod` with a divisor interval that is
+  not a point (`modByInterval`, `interval/elementary.ts`, added in phase 3 of
+  CE-507 because the earlier kernel answered an unsound `[1, 1]` for
+  `mod([5, 5], [2, 4])`) rounds
+  each endpoint of its continuous case in the outward direction itself, and
+  the export (`outwardUnlessExact`) then steps an endpoint that its prover
+  does not certify by one more ulp: `mod([1, 1], [2, 4])` is
+  `[1 − 1 ulp, 1 + 1 ulp]` where the exact `[1, 1]` is already a bound.
+  Fix: a prover that certifies the endpoints of that branch (the endpoints
+  of the hull `0` and `±d` are already certified).
+- **CE-522.12** (looser, not wrong) The `interval-js` target compiles
+  `Root(x, n)` with a symbolic degree `n` as
+  `_IA.powInterval(x, _IA.div(_IA.point(1), n))`
+  (`compilation/interval-javascript-target.ts`). The exponent `1/n` is then
+  an interval that is not a point, and over a negative base `powIntervalRaw`
+  (`interval/elementary.ts`) answers the symmetric hull `[−M, M]` (it
+  encloses the real values at the exponents with an odd denominator). The
+  exact degree is lost: for `n = 6` and `x = [−64, −1]` the answer is
+  `[−2.0000000000000004, 2.0000000000000004]` where an even root has no
+  real value (`empty`), and for `n = 3` it is
+  `[−4.000000000000002, 4.000000000000002]` where the real cube root gives
+  `[−4, −1]` (measured 2026-10-26). Before phase 3 of CE-507 the even case
+  answered `empty`. Fix: carry the degree to run time (a root kernel that
+  reads the integer `n`, as `powRational` reads a literal degree), so that
+  an even degree answers `empty` over a negative base and an odd degree the
+  real root.
 
 ### CE-527. On the shader targets, bind every draw of a statement in order instead of declining
 

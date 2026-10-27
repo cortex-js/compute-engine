@@ -9,6 +9,7 @@ import {
   bignumPreferred,
 } from '../boxed-expression/utils.js';
 import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
+import { decodedPayload } from '../boxed-expression/decoded-payload.js';
 import {
   isSymbol,
   isFunction,
@@ -23,6 +24,7 @@ import {
   getExpressionScale,
   findNamedUnit,
   getUnitDimension,
+  type DimensionVector,
   type UnitExpression,
 } from './unit-data.js';
 import { isMeasurement, measurementAffine } from './measurement-arithmetic.js';
@@ -34,8 +36,63 @@ import { gcd as bigGcd } from '../numerics/numeric-bigint.js';
  * Convert a boxed expression representing a unit into a plain
  * `UnitExpression` (string or JSON array) that `unit-data.ts` functions
  * can work with.
+ *
+ * The result is decoded once for each boxed expression and then read from a
+ * cache (`decodedPayload()`), since the quantity hooks read the unit of an
+ * operand at each operation. The caller must not modify the result.
  */
 export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
+  if (!expr) return null;
+  return decodedPayload(expr, decodeUnitExpression);
+}
+
+/**
+ * A unit decoded for the quantity hooks: the unit expression, a string key
+ * of it (two equal unit expressions have the same key), its dimension
+ * vector, a string key of that vector (two units of the same dimension have
+ * the same key), and its scale relative to coherent SI. A field is `null`
+ * when it is not known: every field when the boxed unit is not a unit
+ * expression (`boxedToUnitExpression()` gives `null`), the dimension and the
+ * scale when a unit is not in the unit table.
+ */
+export type DecodedUnit = {
+  readonly unit: UnitExpression | null;
+  readonly key: string | null;
+  readonly dimension: DimensionVector | null;
+  readonly dimensionKey: string | null;
+  readonly scale: number | null;
+};
+
+/** The `DecodedUnit` of the unit expression `unit`, with no cache. */
+export function describeUnit(unit: UnitExpression | null): DecodedUnit {
+  const dimension = unit ? getExpressionDimension(unit) : null;
+  return {
+    unit,
+    key: unit ? JSON.stringify(unit) : null,
+    dimension,
+    dimensionKey: dimension ? JSON.stringify(dimension) : null,
+    scale: unit ? getExpressionScale(unit) : null,
+  };
+}
+
+function decodeUnit(expr: Expression): DecodedUnit {
+  return describeUnit(boxedToUnitExpression(expr));
+}
+
+/**
+ * The decoded unit of the boxed unit `expr` (the second operand of a
+ * `Quantity`), computed once for each boxed expression and then read from a
+ * cache (`decodedPayload()`). The caller must not modify the result.
+ */
+export function decodedUnit(expr: Expression): DecodedUnit {
+  return decodedPayload(expr, decodeUnit);
+}
+
+/**
+ * The decode of `boxedToUnitExpression()`, without the cache. The recursion
+ * on the operands is direct: only the unit expression as a whole is cached.
+ */
+function decodeUnitExpression(expr: Expression): UnitExpression | null {
   if (!expr) return null;
 
   // Simple symbol unit
@@ -47,7 +104,7 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   if (op === 'Multiply') {
     const parts: UnitExpression[] = [];
     for (const child of expr.ops) {
-      const c = boxedToUnitExpression(child);
+      const c = decodeUnitExpression(child);
       if (!c) return null;
       parts.push(c);
     }
@@ -58,17 +115,17 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
     // A reciprocal unit such as `s^-1` is boxed as `Divide(1, s)`. The `1`
     // is not a unit, so read it as the unit with exponent -1.
     if (expr.op1.isSame(1)) {
-      const b = boxedToUnitExpression(expr.op2);
+      const b = decodeUnitExpression(expr.op2);
       return b ? ['Power', b, -1] : null;
     }
-    const a = boxedToUnitExpression(expr.op1);
-    const b = boxedToUnitExpression(expr.op2);
+    const a = decodeUnitExpression(expr.op1);
+    const b = decodeUnitExpression(expr.op2);
     if (!a || !b) return null;
     return ['Divide', a, b];
   }
 
   if (op === 'Power') {
-    const base = boxedToUnitExpression(expr.op1);
+    const base = decodeUnitExpression(expr.op1);
     const exp = expr.op2?.re;
     // A symbolic exponent (`m^n`) has no numeric value: `.re` is `NaN`.
     if (!base || exp === undefined || Number.isNaN(exp)) return null;
@@ -78,12 +135,12 @@ export function boxedToUnitExpression(expr: Expression): UnitExpression | null {
   // A canonical unit with a fraction exponent can be a root: the canonical
   // form of `m^(1/2)` is `Sqrt(m)`, and of `m^(1/3)` is `Root(m, 3)`.
   if (op === 'Sqrt') {
-    const base = boxedToUnitExpression(expr.op1);
+    const base = decodeUnitExpression(expr.op1);
     return base ? ['Power', base, 0.5] : null;
   }
 
   if (op === 'Root') {
-    const base = boxedToUnitExpression(expr.op1);
+    const base = decodeUnitExpression(expr.op1);
     const n = expr.op2?.re;
     if (!base || n === undefined || !Number.isInteger(n) || n === 0)
       return null;

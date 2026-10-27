@@ -257,6 +257,79 @@ plus P3b's section-6 edits; take the worktree's.
   level of a module), not as a closure in the call:
   `const { lo, hi } = decodedPayload(x, decodeEnclosure)`."
 
+- Phase 3 IMPLEMENTATION STEPS (2026-10-26, after the spec review closed at
+  round 15; the design is plan 4.9.2/4.9.3, 4.9.3 defaults (b)):
+  - **P3-A** (worktree `wt-compute-engine-df4`, base 0.170.0 + CE-507.8): the
+    interpreter side. The kind primitive `enclosure` (`common/type/primitive.ts`,
+    `VALUE_TYPES`, `subtype.ts`, the serializer), `library/enclosure.ts` (the
+    head, signature, canonical/evaluate handlers, the set conversion, the
+    endpoint classes, LaTeX) and `library/enclosure-arithmetic.ts` (the hooks:
+    `add`, `multiply`, `negate`, `divide`, `power`, `compare` with `'<='`/`'>='`,
+    `eq`, `apply` with the critical-point tables and the angular unit,
+    `resultType`, `isExact`, `isNaN`, `numericValue`, `extremum`), the
+    `extremum` hook on `ArithmeticDefinition` and the `'<='`/`'>='` answers
+    of `compare` through one reader `orderAnswer()` (`kind-compare.ts`), the
+    `Measurement`/`Quantity` constructor checks, `.N()` outward conversion,
+    the `IntervalResult` mapping used by the `.N()` route. Tests:
+    `enclosure-kind.test.ts`, `enclosure-apply.test.ts` (every acceptance row
+    on the three routes; `.N()` rows by containment and by equality with the
+    library called directly). No compile work.
+  - **P3-B** (worktree `wt-compute-engine-df5`, base 0.170.0): the interval
+    library. The kernel fixes CE-522.1, .2, .3, .4, .6, .7, .8, .9 in
+    `src/compute-engine/interval/` and `symbolic/angular-unit.ts` (interval-js
+    only), the three runtime helpers `enclose`, `stripEnclosure`,
+    `finiteOperand` on `IntervalArithmetic` (runtime version bump), tests in
+    `test/compute-engine/interval-*.test.ts`. Independent of P3-A; its diff is
+    applied into `wt-compute-engine-df4` before P3-C.
+  - **P3-C** (in `wt-compute-engine-df4`, after A and B): the compile
+    contract of the enclosure on `interval-js` (`compile` on the definition),
+    the kind entry checks of the interval runner (`run()`, `broadcast()`,
+    `broadcastAsync()`, by arm for a union input), `kindLoweringOf()` for
+    interval targets, the possible-enclosure amendment, the fallback rule,
+    the declines, `freeSymbolTypes`. Tests: `enclosure-compile.test.ts`.
+  - **P3-D** (in `wt-compute-engine-df4`, after C): docs (`doc/` guides on the
+    main tree only, `docs/TYPE-SYSTEM.md`, `docs/COMPILATION-MODEL.md` with the
+    four accepted differences, `CHANGELOG.md`, ROADMAP CE-507/CE-522, the
+    Epsil docs regenerated), then the full suite, the dual code review,
+    staging; the #416 and #477 comments drafted for the user.
+
+- P3-A DONE and P3-B DONE (2026-10-26), both merged in `wt-compute-engine-df4`
+  (typecheck clean, no cycle, 12 suites / 1115 tests green). P3-A:
+  `library/enclosure.ts`, `library/enclosure-arithmetic.ts`, the primitive
+  `enclosure`, `orderAnswer()` and `kindExtremum()` in `kind-compare.ts`,
+  the `extremum` hook and the `'<='`/`'>='` answers, the `Measurement`/
+  `Quantity` refusals, `enclosure-kind.test.ts` (228) and
+  `enclosure-apply.test.ts` (342). Deviations recorded by the implementer:
+  a negative integer power is computed as `1 / x^|n|` by the divide rule on
+  the `.N()` route (tighter than `pow`; P3-C must emit the same composition);
+  the library route boxes its endpoints as machine doubles (a float literal
+  such as `0.1` is still the decimal `1/10`); `Gamma` is exact on
+  `[0, +oo)` only; `x + Max(x, +oo)` is indeterminate once `x` has a value.
+  P3-B: CE-522.1–.4, .6–.9 fixed in `interval/`, the `exactFactors` option
+  of `rewriteAngularUnit()` (switched in `compileOrThrow` of the interval
+  target; the other call sites in `base-compiler.ts` and
+  `derivative-closed-form.ts` are P3-C's), the helpers `enclose`,
+  `stripEnclosure`, `finiteOperand` on `IntervalArithmetic`,
+  `interval-kernels-ce522.test.ts` (25); trig poles at a point keep
+  `singular` (parity with `~oo`); the two Tycho test files (rows 260/417)
+  updated to the hull answers of CE-522.6 (the ROADMAP entry tells Tycho);
+  CE-522.10/.11 filed (looser kernels, not fixed).
+
+- P3-C DONE, P3-D DONE, residues fixed, LANDED on main 2026-10-26 (all 54
+  files), full suite green in the worktree (1590 suites, 70258 tests; the 2
+  failures are the peer's in-flight GPU tests, confirmed failing at the base
+  commit too). Dual code review (Claude Opus + Codex): 7 findings applied,
+  2 refuted — the periodic walk of `Sin`/`Cos` hung for `10^20` (safe-integer
+  guard), the decode cache ignored `ce.angularUnit`/precision
+  (`settingsPayload()`, keyed on both), a chained comparison ran its middle
+  operand twice (bound once), the directed-rounding helpers de-duplicated
+  (`numerics/interval-arithmetic.ts` exports), the even-root looseness of a
+  symbolic degree recorded (CE-522.12), `kindExtremum()` early return, one
+  `hasEnclosureSymbol()`. Filed CE-528 (`interval-js` `run()` does not
+  expose `compileHelpers`). Next: staging (the queue waits for the peer's
+  GPU set), then the #416/#477 comments for the user; CE-507.7 (the
+  non-commutative product, PR #482) is the next discussion.
+
 ## Rules for every agent
 
 - NEVER run `git stash`, `git checkout`, `git restore`, `git reset`, or any

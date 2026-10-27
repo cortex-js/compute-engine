@@ -11,7 +11,7 @@ date: Last Modified
 ---
 # Epsil Standard Library
 
-The 708 functions and constants of the standard library, by category.
+The 709 functions and constants of the standard library, by category.
 Each row gives a name, its signature (for a function) or its kind and type
 (for a constant or variable), and the first sentence of its description —
 the same description `epsil doc <name>` prints in full and the editor
@@ -29,7 +29,7 @@ To search the library by concept rather than by name, use
 - [Colors](#colors) — 20 definitions · [full reference](/epsil/reference/colors/)
 - [Regular expressions](#regular-expressions) — 4 definitions · [full reference](/epsil/reference/regexp/)
 - [Relations](#relations) — 30 definitions · [full reference](/epsil/reference/relop/)
-- [Arithmetic](#arithmetic) — 101 definitions · [full reference](/epsil/reference/arithmetic/)
+- [Arithmetic](#arithmetic) — 102 definitions · [full reference](/epsil/reference/arithmetic/)
 - [Fractals](#fractals) — 2 definitions · [full reference](/epsil/reference/fractals/)
 - [Trigonometry](#trigonometry) — 42 definitions · [full reference](/epsil/reference/trigonometry/)
 - [Calculus](#calculus) — 24 definitions · [full reference](/epsil/reference/calculus/)
@@ -463,6 +463,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | — | `Divide` | `(complex \| infinity, (complex \| infinity)+) -> number` | Quotient of a numerator and one or more denominators. |
 | `elementMax` | `ElementMax` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
 | `elementMin` | `ElementMin` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
+| `enclosure` | `Enclosure` | `(nan \| real \| set<real> \| signed_infinity, (nan \| real \| signed_infinity)?) -> enclosure \| nan` | A closed interval [lo, hi] that encloses one real number, with interval arithmetic. |
 | `eulerGamma` | `EulerGamma` | constant `real<0.5772156649015328..0.5772156649015329>` = `0.577215664901532860607` | The Euler–Mascheroni constant γ ≈ 0.5772. |
 | `exp` | `Exp` | `(number) -> number` | Natural exponential function: e^x. |
 | `exp2` | `Exp2` | `(number) -> number` | Base-2 exponential: 2^x |

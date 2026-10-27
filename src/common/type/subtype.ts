@@ -173,6 +173,10 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // listed by no entry but `value`, and so disjoint from every numeric type,
   // as `residue` is.
   quantity: [],
+  // An enclosure (a closed interval that holds one real): an atom with no
+  // subtypes, listed by no entry but `value`, and so disjoint from every
+  // numeric type and from every set type, as `residue` is.
+  enclosure: [],
   // A type value: an atom with no subtypes, like `regexp` — a reified type
   // expression is not text, not a number, and not a collection of anything.
   type: [],

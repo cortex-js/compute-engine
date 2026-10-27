@@ -40,6 +40,9 @@ export interface StoredIntervalJavaScript {
   preamble?: string;
   preambleOnce?: string;
   preamblePerCall?: string;
+  /** The value kind types whose compile contracts the code reads or makes
+   * (`CompilationResult.valueKinds`). Code with one cannot be loaded. */
+  valueKinds?: string[];
 }
 
 export interface IntervalRuntime {
@@ -83,6 +86,14 @@ export interface IntervalRuntime {
 function rawCallOf(
   stored: StoredIntervalJavaScript
 ): (vars: unknown) => unknown {
+  // The run-time checks of the host values of the inputs of a value kind
+  // (the enclosure) are functions of the host that compiled the code, and
+  // stored code does not carry them: it would run with no check.
+  const kinds = stored.valueKinds;
+  if (kinds !== undefined && kinds.length > 0)
+    throw new Error(
+      `The stored code was compiled with the compile contract of the value kind type ${kinds.map((k) => `'${k}'`).join(', ')}, whose run-time checks are functions of the host that compiled it: it cannot be loaded. Run it with the \`run()\` of the compilation result.`
+    );
   if (stored.runtimeVersion === undefined)
     throw new Error(
       'The stored interval code has no runtimeVersion: it cannot be matched to this runtime'

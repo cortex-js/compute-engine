@@ -218,9 +218,10 @@ describe('VALUE KINDS: the declaration check', () => {
       signature: '(integer) -> gf8',
       arithmetic: gf8Arithmetic(),
     });
-    // `measurement`, `quantity` and `residue` are the kind types of the
-    // library.
+    // `enclosure`, `measurement`, `quantity` and `residue` are the kind
+    // types of the library.
     expect([...kindTypesOf(ce)].sort()).toEqual([
+      'enclosure',
       'gf8',
       'measurement',
       'quantity',
@@ -457,12 +458,13 @@ describe('VALUE KINDS: the generation counter and the checkpoint model', () => {
     const before = kindGeneration(ce);
 
     ce.restore(cp);
-    // `residue`, `measurement` and `quantity` were registered by the library
-    // heads `ResidueClass`, `Measurement` and `Quantity` before the
-    // checkpoint.
+    // `residue`, `measurement`, `enclosure` and `quantity` were registered
+    // by the library heads `ResidueClass`, `Measurement`, `Enclosure` and
+    // `Quantity` before the checkpoint.
     expect([...kindTypesOf(ce)]).toEqual([
       'residue',
       'measurement',
+      'enclosure',
       'quantity',
     ]);
     expect(kindTypeInfo(ce, 'gf8')).toBeUndefined();

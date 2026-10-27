@@ -340,7 +340,7 @@ function readIntervalOfType(t: Type, seen?: Set<object>): Interval | undefined {
 
 /** Directed sum: `dir < 0` returns a value ≤ the exact `a + b`, `dir > 0`
  * a value ≥ it (over the extended reals; NaN for `∞ + (−∞)`). */
-function dirSum(a: number, b: number, dir: -1 | 1): number {
+export function dirSum(a: number, b: number, dir: -1 | 1): number {
   const s = a + b;
   if (Number.isNaN(s)) return NaN;
   if (s === Infinity)
@@ -365,7 +365,7 @@ function dirSum(a: number, b: number, dir: -1 | 1): number {
  * caller uses an unconditional ulp-step, which is always sound. */
 const SPLITTER = 134217729; // 2^27 + 1
 
-function productError(a: number, b: number, p: number): number {
+export function productError(a: number, b: number, p: number): number {
   const aS = SPLITTER * a;
   const aHi = aS - (aS - a);
   const aLo = a - aHi;
@@ -377,7 +377,7 @@ function productError(a: number, b: number, p: number): number {
 
 /** Directed product: `dir < 0` returns a value ≤ the exact `a · b`,
  * `dir > 0` a value ≥ it (extended reals; NaN for `0 · ∞`). */
-function dirProd(a: number, b: number, dir: -1 | 1): number {
+export function dirProd(a: number, b: number, dir: -1 | 1): number {
   const p = a * b;
   if (Number.isNaN(p)) return NaN;
   if (p === Infinity)
@@ -442,7 +442,7 @@ function isPowerOfTwo(x: number): boolean {
  * when `|x| < 2⁻¹⁰²³` (measured), which reaches into the bottom normal
  * binade — hence the result gate. An exact reciprocal (power-of-two `x`)
  * is returned as is; otherwise one ulp outward. */
-function dirRecip(x: number, dir: -1 | 1): number {
+export function dirRecip(x: number, dir: -1 | 1): number {
   if (x === Infinity || x === -Infinity) return 0;
   const q = 1 / x;
   if (q === Infinity) return dir < 0 ? Number.MAX_VALUE : Infinity;

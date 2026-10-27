@@ -1033,7 +1033,10 @@ that only MAY hold a kind value (a parameter typed `number | residue`, a
 symbol of a signature that admits a kind) compiles as a number, as before.
 
 The library kinds `measurement` and `quantity` have no `compile` contract,
-so an expression with a `Measurement` or a `Quantity` value declines with
+and the library kind `enclosure` has one for the `interval-js` target only
+(see "The enclosure on `interval-js`" below). So an expression with a
+`Measurement` or a `Quantity` value, or with an `Enclosure` value on any
+other target, declines with
 the kind message ("holds a value of the kind type 'measurement'"). A
 physical constant symbol (`SpeedOfLight`) is declared `value`, so the strict
 recognition does not see its quantity: `x · SpeedOfLight` declines at the
@@ -1094,13 +1097,157 @@ loaded again (see "Running stored JavaScript").
 - An expression that holds a COLLECTION of kind values (`L + L` with
   `L: list<gf8>`, a list literal of kind values) declines on every target:
   `entry` and `lowered()` describe one value.
-- The `interval-js` target declines a kind lowering: its runner has no entry
-  check for a kind.
-- No library kind declares a contract: a residue class declines on every
-  target.
+- On `interval-js`, the only kind with a contract is the enclosure; the
+  runner checks the inputs of that kind (below). A residue class, a
+  measurement and a quantity decline on every target.
 - A kind is never compiled through the number rules.
 
 The design is `docs/plans/2026-10-26-value-kinds.md`, section 4.8.
+
+### The enclosure on `interval-js`
+
+`Enclosure(lo, hi)`, an interval that holds one real (`TYPE-SYSTEM.md`,
+"Enclosures"), is the one library kind with a compile contract
+(`ENCLOSURE_COMPILE`, `library/enclosure-compile.ts`). The contract answers
+for the target `interval-js` only; every other target declines with the
+kind message. The design is section 4.9.2 of
+`docs/plans/2026-10-26-value-kinds.md`, "Compilation".
+
+**The representation.** An enclosure is the `{ lo, hi }` interval of the
+`_IA` runtime, and `lowered()` answers `'interval'`
+(`freeSymbolTypes.x` is `{ type: 'enclosure', lowered: 'interval',
+provenance: 'declared' }`). A literal `Enclosure(a, b)` with endpoints that
+are number literals or exact constants lowers to a record whose endpoints
+are converted to doubles OUTWARD (`lo` down, `hi` up), the conversion of
+the interpreter under `.N()`; when the canonical order of the endpoints was
+not decided (`Enclosure(Sin(10^600), 0)`) the record is
+`{ lo: min, hi: max }` of the converted endpoints, never reversed. A number
+operand beside an enclosure is a point: `_IA.point(c)` when `c` is a
+double, else the record of its outward conversion (`0.1` is
+`{ lo: 0.09999999999999999, hi: 0.1 }`). A complex literal and an endpoint
+with a free variable decline.
+
+**One kernel for each form.** The hooks emit, operation by operation, the
+`_IA` call that the `.N()` route of the interpreter makes for the same form
+(`enclosure-arithmetic.ts`), so the compiled code and `.N()` give the same
+doubles: `add`/`mul` folds, `div`, `sub`, `negate`; for a power, one kernel
+for each exponent form (`square` for `2`, `sqrt` for `1/2`, `pow` for
+another integer, `powRational` for a rational with an odd denominator,
+`powRealBranch` or `pow` for a float exponent by the target's selection
+rule, `exp` for the base `e`, `powInterval` for an exponent that is not a
+point, only when the base is provably positive); a negative integer power
+as `1 / x^|n|`; the step of `Round`/`Floor`/`Ceil`/`Truncate` through
+`intervalRoundToStep()`; `Log(x)` with `log10`, `Log(x, 2)` with `log2`,
+another base with `div(ln x, ln b)`; `mod`, `hypot`, `atan2`; the unary
+functions of the `apply` table through `ENCLOSURE_UNARY_KERNELS`. Three
+run-time helpers of `IntervalArithmetic` (`interval/util.ts`) connect the
+library's results to the interpreter's rules:
+
+- `_IA.enclose(r)` wraps every ARITHMETIC result. It removes the metadata
+  (`partial`, and `singular` with a value, give the value; `singular` with
+  no value and `entire` give the whole line), because the interpreter's
+  enclosure has no such marker: `Sqrt(x) < 3` run with `x: [-1, 4]` is
+  `'true'`, as the interpreter's `Enclosure(0, 2) < 3` is. It answers
+  `empty` (the indeterminate value) for `empty`, for a `NaN` endpoint and
+  for an infinite singleton (`[+∞, +∞]` holds no real).
+- `_IA.stripEnclosure(r)` is the metadata part only. The comparisons read
+  their operands through it, and the extrema (`Max`, `Min`, `Clamp`,
+  `ElementMax`, `ElementMin`, through `_IA.max`, `_IA.min`, `_IA.clamp`)
+  wrap their result in it. It keeps an infinite singleton (`x < y` run with
+  `y: Infinity` is `'true'`, and `Max(x, y)` is `[+∞, +∞]`) and the
+  absence marker (`empty` with `missing: true`).
+- `_IA.finiteOperand(v)` takes each operand of an arithmetic operation
+  BEFORE the kernel, and answers `empty` for an infinite singleton: the
+  kernels would answer `[0, +∞]` for `[0, 1] · [+∞, +∞]` and `[0, 0]` for
+  `[1, 2] / [+∞, +∞]`, where the interpreter answers the indeterminate
+  value. So `x + y`, `x · y` and `x / y` run with `y: Infinity` give `empty`.
+
+**A possible enclosure.** On this target only, an operand whose type has
+an `enclosure` arm (`real | enclosure`, the value of `If(t > 0, x, 0)` with
+`x: enclosure`) is dispatched to the hooks as a certain one, and a free
+symbol with such a type sets up the kind lowering and its entry check. A
+number is a point interval on this target, so the code of a hook is valid
+for it. So `Factorial(y)` with `y: real | enclosure` declines, as the
+interpreter leaves `Factorial` of an enclosure unevaluated.
+
+**The entry check of the interval runner.** For each free symbol whose type
+has an `enclosure` arm (`intervalKindEntries()`,
+`interval-javascript-target.ts`), `run()` checks the host value BEFORE it
+converts the inputs, and OUTSIDE the `try` whose `catch` answers `entire`,
+so a refused value throws. The kind's `entry` admits a record `{ lo, hi }`
+of two numbers with `lo <= hi`, `±Infinity` allowed but not the same
+infinity twice, no `NaN`; or a finite number. A UNION input is checked by
+arm: a record by the kind's `entry`, a number by the numeric arms
+(`NaN` admitted when an arm admits `nan` or `missing`, `±Infinity` when an
+arm admits an infinity), so `y: number | enclosure` admits `Infinity` and
+`y: enclosure | nan` admits `NaN`. `broadcast()` and `broadcastAsync()`,
+which call the compiled body without the `run()` wrapper, check every cell
+BEFORE the loop (outside the per-cell `try`): a cell whose two bounds are
+the same value is read as that number when the type has a numeric arm, any
+other cell by the kind's `entry`. One refused cell throws, or rejects the
+promise, for the whole call. Every other input keeps the pass-through of
+the runner, including the `NaN` that marks the absent value of a
+`real | missing` input.
+
+**No interpreter fallback.** A decline of an expression with an input
+whose type has an `enclosure` arm, or whose result type has one, THROWS on
+`interval-js`, also with `compile(…, { fallback: true })`. The fallback of
+this target collapses each `{ lo, hi }` input to its midpoint
+(`collapseIntervalInput()`), which would give a number to a symbol typed
+`enclosure`, and reads a scalar result through `.N().re`, which is `NaN`
+for an enclosure. `Measurement`, `Quantity` and the `javascript` target keep
+the fallback.
+
+**The declines.** A hook answers `undefined`, and the compilation declines
+with the kind message, exactly where the interpreter leaves the call
+unevaluated: an operator that is not in the `apply` table (`Factorial`),
+`Gamma(s, x)` with two operands, `Log` with an enclosure base, `Round`
+with an enclosure step, `Mod` with a divisor that is not a point, a power
+with a base that is not provably positive and an exponent that is not a
+point (`(-2)^Enclosure(1, 2)`), and an integer exponent that is not a safe
+integer. `Mean`, `Sum` and `Product` decline too: the library has no kernel
+for them, and their list forms decline by the collection limit.
+
+**Accepted differences between the interpreter and the compiled code.**
+
+1. **The identity shortcut of the six comparisons.** The interpreter
+   decides a comparison of two identical operands before any hook:
+   `c = c` and `c <= c` are `True`, `c < c` and `c != c` are `False`. The
+   compiled code has no identity information, so `_IA.equal(c, c)` and
+   `_IA.lessEqual(c, c)` are `'maybe'` for an enclosure that is not a
+   point.
+2. **No engine tolerance.** The interpreter compares two float points
+   within the engine tolerance; the compiled comparisons compare doubles
+   exactly, as the `javascript` target does for numbers. Elsewhere the
+   compiled answer is the target's three-valued one: `'maybe'` where the
+   interpreter stays unevaluated, `'true'` for the touching `LessEqual`
+   that the interpreter answers `True` too.
+3. **An angular mode other than radians.** The target scales an angle by
+   the exact factor (`rewriteAngularUnit(expr, { exactFactors: true })`),
+   enclosed outward, so the result contains the true value. The `.N()` route
+   computes the exact product and converts it once. The endpoints of the
+   two routes may differ by the rounding of the factor.
+4. **A non-integer point exponent with a negative base at run time.** An
+   exponent that is a free symbol of a number type (`x^n` with
+   `n: integer`) lowers to `_IA.powInterval`, whose run-time point shortcut
+   covers an integer and, for a negative point base, answers the symmetric
+   hull over an exponent interval. At a non-integer point exponent with a
+   negative base (`n: 0.5`, `x: [-8, -8]`) it answers `empty`, where the
+   interpreter, which sees the value, uses the real branch.
+
+**The limits kept from phase 1.**
+
+- Code with an enclosure input cannot be loaded again from its stored form:
+  the loaders of `createIntervalRuntime()` (`load()`, `loadBroadcast()`,
+  `loadBroadcastSlice()`) refuse code that names a kind type, because the
+  `entry` check is a function of the host. `shippable` is `false`
+  (`ENCLOSURE_COMPILE` says so), so the kernel pool is not used and
+  `willUsePool()` answers `false`.
+- An input typed `list<enclosure>` declines (`entry` and `lowered()`
+  describe one value).
+
+Lifting these two limits needs a serializable entry check (ROADMAP
+CE-507.12).
 
 ## CSE and naming
 

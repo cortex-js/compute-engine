@@ -67,6 +67,7 @@ import {
   isKindValue,
   kindCompare,
   kindEqual,
+  orderAnswer,
 } from '../boxed-expression/kind-compare.js';
 import {
   nonNumericOperandError,
@@ -548,9 +549,9 @@ const CHAIN_PAIR_IS_FALSE = {
         b,
         chainKindOptions(numericApproximation, written)
       );
-      // `'unordered'` (no order, a complex nominal) makes the pair `False`.
-      if (k !== undefined)
-        return k !== 'incomparable' && (k === 'unordered' || k >= 0);
+      // `'unordered'` (no order, a complex nominal) makes the pair `False`
+      // (`orderAnswer()`).
+      if (k !== undefined) return orderAnswer(k, 'Less') === false;
       if (unorderedChainPair(a, b, false)) return true;
       const o = exactLiteralOrder(a, b);
       if (o !== undefined) return o >= 0;
@@ -570,8 +571,7 @@ const CHAIN_PAIR_IS_FALSE = {
         b,
         chainKindOptions(numericApproximation, written)
       );
-      if (k !== undefined)
-        return k !== 'incomparable' && (k === 'unordered' || k > 0);
+      if (k !== undefined) return orderAnswer(k, 'LessEqual') === false;
       if (unorderedChainPair(a, b, false)) return true;
       const o = exactLiteralOrder(a, b);
       if (o !== undefined) return o > 0;
@@ -1104,11 +1104,15 @@ function decideLess(
       rhs,
       kindPairOptions(numericApproximation, rawOps, ops, 0, 1)
     );
-    if (k === 'incomparable') return inertRelation(ce, 'Less', rawOps, ops);
     // Two values with no order (a measurement with a complex nominal): no
-    // order relation holds, as for a complex number.
-    if (k === 'unordered') return ce.False;
-    if (k !== undefined) return k < 0 ? ce.True : ce.False;
+    // order relation holds, as for a complex number. A pair that the kinds
+    // do not order, or that is only known to be `'<='` (two enclosures that
+    // touch), stays unevaluated (`orderAnswer()`).
+    if (k !== undefined) {
+      const verdict = orderAnswer(k, 'Less');
+      if (verdict === undefined) return inertRelation(ce, 'Less', rawOps, ops);
+      return verdict ? ce.True : ce.False;
+    }
     const order = exactLiteralOrder(lhs, rhs);
     const cmp =
       order !== undefined
@@ -1130,10 +1134,11 @@ function decideLess(
         arg,
         kindPairOptions(numericApproximation, rawOps, ops, i - 1, i)
       );
-      if (k === 'incomparable') return inertRelation(ce, 'Less', rawOps, ops);
-      if (k === 'unordered') return ce.False;
       if (k !== undefined) {
-        if (k >= 0) return ce.False;
+        const verdict = orderAnswer(k, 'Less');
+        if (verdict === undefined)
+          return inertRelation(ce, 'Less', rawOps, ops);
+        if (!verdict) return ce.False;
       } else {
         const order = exactLiteralOrder(lhs, arg);
         const cmp =
@@ -1183,10 +1188,12 @@ function decideLessEqual(
       rhs,
       kindPairOptions(numericApproximation, rawOps, ops, 0, 1)
     );
-    if (k === 'incomparable')
-      return inertRelation(ce, 'LessEqual', rawOps, ops);
-    if (k === 'unordered') return ce.False;
-    if (k !== undefined) return k <= 0 ? ce.True : ce.False;
+    if (k !== undefined) {
+      const verdict = orderAnswer(k, 'LessEqual');
+      if (verdict === undefined)
+        return inertRelation(ce, 'LessEqual', rawOps, ops);
+      return verdict ? ce.True : ce.False;
+    }
     const order = exactLiteralOrder(lhs, rhs);
     const cmp =
       order !== undefined
@@ -1208,11 +1215,11 @@ function decideLessEqual(
         arg,
         kindPairOptions(numericApproximation, rawOps, ops, i - 1, i)
       );
-      if (k === 'incomparable')
-        return inertRelation(ce, 'LessEqual', rawOps, ops);
-      if (k === 'unordered') return ce.False;
       if (k !== undefined) {
-        if (k > 0) return ce.False;
+        const verdict = orderAnswer(k, 'LessEqual');
+        if (verdict === undefined)
+          return inertRelation(ce, 'LessEqual', rawOps, ops);
+        if (!verdict) return ce.False;
       } else {
         const order = exactLiteralOrder(lhs, arg);
         const cmp =

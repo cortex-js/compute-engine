@@ -145,8 +145,16 @@ describe('compiled interval-js answers `singular` where the interpreter answers 
       kind: 'singular',
       at: Math.PI / 2,
     });
-    // A pole within the tolerance below the lower bound counts as inside.
-    expect(at('Cot', piPlusUlp, Math.PI + 1).kind).toBe('singular');
+    // A pole within the tolerance below the lower bound is found. It is
+    // BELOW the real lower bound (`π < π + 1 ulp`), so `cot` is continuous
+    // on the interval and tends to `+∞` toward the pole: the half-line from
+    // `cot(π + 1)` (CE-522.3, a pole at an endpoint).
+    const nearPole = at('Cot', piPlusUlp, Math.PI + 1);
+    expect(nearPole.kind).toBe('partial');
+    expect(nearPole.value!.hi).toBe(Infinity);
+    expect(nearPole.value!.lo).toBeLessThanOrEqual(
+      1 / Math.tan(Math.PI + 1)
+    );
     // Away from every pole, an ordinary enclosure.
     expect(at('Tan', 0.1, 1.4).kind).toBe('interval');
     expect(at('Cot', 0.1, 3).kind).toBe('interval');

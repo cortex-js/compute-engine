@@ -126,15 +126,30 @@ export function angularChainFactor(ce: Expression['engine']): Expression {
  * rewritten tree is only ever fed to codegen, which numericizes anyway, and
  * float factors keep the emitted GLSL/WGSL/JS free of symbolic constants.
  *
+ * With `options.exactFactors`, the factors are EXACT expressions instead:
+ * `π/180` (`angularChainFactor`), its reciprocal for the inverse heads, and
+ * the rationals `10/9` and `1/360` for `Degrees`. A target that computes
+ * with enclosures (`interval-js`) needs them: it lowers `Pi` and a rational
+ * that no double holds to an enclosure of the exact value, and the product
+ * by the factor to an interval product, so the scaled angle contains the
+ * true angle. A float factor is the double NEAREST to the factor, which can
+ * be on either side of it: `2 * Math.PI` is below 2π, so in `turn` mode the
+ * compiled `Cos` of the point `0.25` was strictly positive and excluded the
+ * true value 0.
+ *
  * Lives in `symbolic/` rather than `compilation/` only so the derivative
  * lowering (`library/calculus.ts`) can reach it: `library/` must not import
  * from `compilation/`. `compilation/angular-unit.ts` re-exports it for the
  * targets.
  */
-export function rewriteAngularUnit(expr: Expression): Expression {
+export function rewriteAngularUnit(
+  expr: Expression,
+  options?: { exactFactors?: boolean }
+): Expression {
   const ce = expr.engine;
   const unit = ce.angularUnit;
   if (unit === 'rad') return expr;
+  const exact = options?.exactFactors === true;
 
   const toRad =
     unit === 'deg'
@@ -142,6 +157,11 @@ export function rewriteAngularUnit(expr: Expression): Expression {
       : unit === 'grad'
         ? Math.PI / 200
         : 2 * Math.PI; // 'turn'
+  // The unit-to-radian factor `k` and the radian-to-unit factor `1/k`.
+  const toRadFactor = exact ? angularChainFactor(ce) : ce.number(toRad);
+  const fromRadFactor = exact
+    ? ce.function('Divide', [ce.One, toRadFactor])
+    : ce.number(1 / toRad);
 
   const walk = (e: Expression): Expression => {
     if (!isFunction(e)) return e;
@@ -166,19 +186,20 @@ export function rewriteAngularUnit(expr: Expression): Expression {
     // call then scales it to radians like any other angle.
     if (h === 'Degrees' && ops.length === 1) {
       if (unit === 'deg') return ops[0];
+      const ratio = unit === 'grad' ? ([10, 9] as const) : ([1, 360] as const);
       return ce.function('Multiply', [
-        ce.number(unit === 'grad' ? 10 / 9 : 1 / 360),
+        exact
+          ? ce.number([ratio[0], ratio[1]])
+          : ce.number(ratio[0] / ratio[1]),
         ops[0],
       ]);
     }
     if (DIRECT_TRIG_OPERATORS.has(h) && ops.length === 1) {
-      return ce.function(h, [
-        ce.function('Multiply', [ce.number(toRad), ops[0]]),
-      ]);
+      return ce.function(h, [ce.function('Multiply', [toRadFactor, ops[0]])]);
     }
     if (INVERSE_TRIG_OPERATORS.has(h) && ops.length >= 1) {
       const call = changed ? ce.function(h, ops) : e;
-      return ce.function('Multiply', [ce.number(1 / toRad), call]);
+      return ce.function('Multiply', [fromRadFactor, call]);
     }
     return changed ? ce.function(h, ops) : e;
   };

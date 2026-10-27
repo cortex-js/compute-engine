@@ -7413,7 +7413,7 @@ export type KindEntry = {
   check: (value: unknown) => boolean;
 };
 
-function kindEntryError(label: string): TypeError {
+export function kindEntryError(label: string): TypeError {
   return new TypeError(
     `${label} is compiled as a value of its kind type, and the value given for it is not one: the entry check of the kind refused it.`
   );

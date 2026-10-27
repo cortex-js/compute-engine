@@ -1358,11 +1358,22 @@ endpoints are rigorous for the rational operations (`add`, `multiply`,
 `divide`, integer powers once CE-522.7 is fixed: the shipped `pow` rounds an
 intermediate before the reciprocal, `abs`, the step functions) and
 best-effort for the transcendental ones; certified kernels are a separate
-project. Evaluation
-under `.N()` and the `interval-js` lowering give the SAME endpoints: the
-acceptance tests under `.N()` compare the engine's answer with the answer of
-`IntervalArithmetic` called directly on the same doubles, and check
-containment of the exact value for the rational operations. The float endpoints are machine doubles whatever
+project. THE CONTRACT OF THE THREE ROUTES: the `.N()` route and the `interval-js`
+lowering run the SAME hook code over the same kernels (one kernel per
+form, the tables below), so they give the same endpoints by construction,
+and the acceptance tests under `.N()` compare the engine's answer with the
+answer of `IntervalArithmetic` called directly on the same doubles. The
+exact route (`evaluate()`) computes the tightest image from the rules
+below and may be TIGHTER than the kernels (a half-line where a kernel
+answers the whole line, an exact endpoint where a kernel rounds); the two
+need not have the same shape, and every acceptance row that gives an
+exact value is checked under `.N()` by CONTAINMENT: the numeric answer
+contains the exact answer converted outward (for the rational operations
+this is a guarantee; for the transcendental kernels it is the best-effort
+limit of CE-522.5). A kernel that is LOOSER than the exact rule is not a
+defect of phase 3 (the CE-522 items that tighten a kernel are improvements
+for every `interval-js` user, fixed in phase 3 where the entry says so); a
+kernel that EXCLUDES a true value is. The float endpoints are machine doubles whatever
 `ce.precision` is (the library works on doubles; a higher precision is not
 honored by an enclosure, documented in `doc/08-guide-types.md`).
 
@@ -1388,12 +1399,17 @@ these kernels (CE-522.3, CE-522.4) so that a pole at an endpoint gives the
 half-line with the sign of the function beside it (`gamma([0, 1])` is
 `[1, +oo]`, `powRational([-1, 0], -2, 3)` is `[1, +oo]`), a pole singleton
 gives `empty` (the indeterminate value), and `[0, 1]^-1` gives `[1, +oo]`. The exact
-(`evaluate()`) rules below reproduce the same shapes, with one known
-difference: an endpoint pole at an exact constant (`Tan(Enclosure(0,
-Pi/2))`) is INSIDE the interval once the endpoint is converted outward to
-a double (`1.5707963267948968` is above the double of the pole), so
-`.N()` and the compiled code give the whole line where `evaluate()` gives
-the half-line; both are sound.
+(`evaluate()`) rules below give these shapes or tighter ones; the kernels
+may stay looser (the containment contract above): an endpoint pole at an
+exact constant (`Tan(Enclosure(0, Pi/2))`) is INSIDE the interval once the
+endpoint is converted outward to a double, so `.N()` and the compiled code
+give the whole line where `evaluate()` gives the half-line; the step
+functions over a half-infinite input (`Floor(Enclosure(1, +oo))`) are
+`Enclosure(1, +oo)` exactly, while the kernels' `jump()` drops the payload
+when a bound is infinite and answer the whole line; a negative even power
+over a base with `0` inside (`Enclosure(-1, 1)^-2`) is `Enclosure(1, +oo)`
+exactly, while `pow` answers `singular` with no value (the whole line).
+All sound.
 
 **The hooks.** A number beside an enclosure is a point when it is a FINITE
 real of class 1 or 2; a complex number, a class 3 operand, or a
@@ -1472,11 +1488,20 @@ always `enclosure | nan`.
   ln b)`; `Mod` uses `mod`; `Hypot` uses `hypot`; `Arctan2` uses `atan2`.
   And ONE KERNEL PER EXPONENT FORM (the
   kernels give different doubles, so the "same endpoints" promise needs
-  one choice): a point exponent `2` → `square`; `1/2` (`Sqrt`, `Root(x,
-  2)`, `x^(1/2)`, `x^0.5`) → `sqrt`; another integer `n` → `pow(x, n)`; a
-  rational `p/q` with `q` odd, or a float read as one → `powRational(x,
-  p, q)`; a float not read as a rational → `powRealBranch`; any other real
-  exponent → `pow`; a base `e` → `exp`; a non-point exponent →
+  one choice): the table reads the VALUE of the exponent, so an
+  integer-valued float takes the integer lines as the shipped target does
+  (`2.0` → `square`): a point exponent `2` → `square`; `1/2` (`Sqrt`,
+  `Root(x, 2)`, `x^(1/2)`, `x^0.5`) → `sqrt`; another integer `n` →
+  `pow(x, n)`; an
+  exact rational `p/q` with `q` odd → `powRational(x, p, q)`; a FLOAT
+  exponent follows the target's shipped selection rule
+  (`interval-javascript-target.ts`): when the float is exactly the nearest
+  double of a recognized `p/q` with `q` odd, `powRational(x, p, q)`;
+  when it is recognized as near such a rational but not equal to its
+  double (`0.6000000000000001`), `powRealBranch` with the ORIGINAL float
+  and the parity of `p`, which keeps the float's magnitude
+  (`Enclosure(-32, -32)^0.6000000000000001` is below `-8`); an
+  unrecognized float → `pow`; a base `e` → `exp`; a non-point exponent →
   `powInterval`. A point exponent whose integer, numerator, denominator or
   root index is not a SAFE integer (`|n| > 2^53`: the kernel ABI takes a
   double and loses the parity of `9007199254740993`) is handled by the
@@ -1676,8 +1701,10 @@ enclosure` carries its entry check and reaches the hooks; the entry check
 of a UNION input validates by arm: a record `{ lo, hi }` through the
 kind's `entry`, a number through the numeric arms as `checkEntry()` reads
 them today, so `y: number | enclosure` admits `Infinity` and
-`y: enclosure | nan` admits `NaN`, and `run()` and `broadcast()` apply the
-same rule), because on this target a number is a point interval and
+`y: enclosure | nan` admits `NaN`; in `broadcast()` every cell is a
+stride-2 pair, so a cell with `lo === hi` (`±Infinity` and `NaN`
+included) is read as a NUMBER and checked by the numeric arms when the
+type has one, and any other cell by the enclosure `entry`), because on this target a number is a point interval and
 the hook's `_IA` code is valid for it; so `Factorial(If(t > 0, x, 0))`
 declines, as the interpreter leaves `Factorial(x)` unevaluated, and
 `Sqrt(If(t > 0, x, 0)) < 3` goes through `_IA.enclose`. On every other
@@ -1697,12 +1724,19 @@ compiles as a number):
   literal `0.1`, a rational, a class 2 constant), the same conversion as
   `value` and as the interpreter under `.N()`, and the same for a point
   second operand of an `apply` operator (`Log` base, `Round` step, `Mod`
-  divisor, `Hypot`/`Arctan2`); an infinite or complex number LITERAL
-  declines, and a symbol whose type admits an infinity (`y: number`) is
-  allowed: the folds are wrapped in `_IA.enclose` too (which maps a `NaN`
-  endpoint or an infinite singleton to `empty`), so `x + y` run with
-  `y: Infinity` answers `empty` where the interpreter answers the
-  indeterminate value.
+  divisor, `Hypot`/`Arctan2`); a complex number LITERAL declines; an
+  infinite literal is emitted as `_IA.point(±Infinity)` and a symbol whose
+  type admits an infinity (`y: number`) is allowed, both handled at run
+  time as follows: every arithmetic hook (`add`, `multiply`, `divide`, `power`, the `apply`
+  functions) passes such an operand through `_IA.finiteOperand(v)`, a
+  helper that answers `empty` for an infinite singleton (a scalar `±oo`
+  as a point) BEFORE the kernel runs (the kernels would otherwise answer
+  `[0, +oo]` for `[0, 1] * +oo` and `[0, 0]` for `[1, 2] / +oo`), and the
+  folds are wrapped in `_IA.enclose` (which maps a `NaN` endpoint or an
+  infinite singleton in a RESULT to `empty`), so `x + y`, `x * y` and
+  `x / y` run with `y: Infinity`, and `x + Max(x, y)`, answer `empty`
+  where the interpreter answers the indeterminate value; an unbounded
+  enclosure operand (`[0, +oo]`) is not a singleton and passes.
 - `apply(operator, args, compile, context)` emits, for exactly the
   operators of the `apply` table except `Mean`, the arithmetic operators of
   the hooks (`Negate`, `Subtract`, `Divide`, `Power`, `Sqrt`, `Root`,
@@ -1733,7 +1767,17 @@ compiles as a number):
   `_IA.pow`) for a point exponent, which a point ENCLOSURE exponent is read
   as (`x^Enclosure(1/3, 1/3)` with `x` the point `-8` gives `-2`), and
   `_IA.powInterval` for a non-point exponent only when the base is provably
-  positive from its type or its literal; otherwise it declines. Every
+  positive from its type or its literal; otherwise it declines. A SECOND operand (or an exponent) that is a free symbol typed by a
+  number type (`Mod(x, m)` with `m: real`, `Log(x, b)`, `Round(x, s)`,
+  `Hypot(x, y)`, `x^n` with `n: integer`) is compiled as the target
+  compiles a number, a run-time interval, through the same kernels with
+  the run-time guards (`_IA.finiteOperand`, the zero-divisor guard of
+  `Mod`); a symbol exponent lowers to `_IA.powInterval`, whose run-time
+  point shortcut covers an integer point (and, after CE-522.6, a negative
+  base by the symmetric hull), while a non-integer point exponent with a
+  negative base at run time answers `empty` on the compiled route where
+  the interpreter, which sees the value, uses the real branch: a fourth
+  accepted difference listed in `docs/COMPILATION-MODEL.md`. Every
   operator that the interpreter leaves unevaluated (an operator outside
   the table, such as `Factorial`; `Log` with an enclosure base; `Round`
   with an enclosure step; `Mod` with a non-point divisor; a power with a
@@ -1795,7 +1839,8 @@ compiles as a number):
   rejects the whole call (a throw, or a rejected promise). Lifting the two
   limits is a later step (a serializable entry check), recorded in CE-507.
 - `freeSymbolTypes.x` for `x: enclosure` reports
-  `{ type: 'enclosure', lowered: 'interval' }`.
+  `{ type: 'enclosure', lowered: 'interval', provenance: 'declared' }`
+  (the rows are checked with `toMatchObject`).
 - Public type changes of the defaults of 4.9.3: `ArithmeticDefinition`
   gains the optional `extremum` hook, and the answer type of `compare`
   gains `'<='` and `'>='` (for section 6).
@@ -1882,6 +1927,8 @@ one route):
 | `Root(Enclosure(-8, 8), 3)`, `Enclosure(-8, 8)^(1/3)` | `Enclosure(-2, 2)` |
 | `Enclosure(-8, 8)^(2/3)` | `Enclosure(0, 4)` |
 | `Enclosure(-32, 32)^0.2` | `Enclosure(-2, 2)` |
+| `Enclosure(-32, -32)^0.6000000000000001` | below `-8` on every route (`powRealBranch` keeps the float's magnitude) |
+| `Enclosure(-1, 1)^-2`, `Floor(Enclosure(1, +oo))` | `Enclosure(1, +oo)` exactly; `.N()` and compiled: the whole line (looser kernels; containment holds) |
 | `2^Enclosure(1, 3)` | `Enclosure(2, 8)` |
 | `(-2)^Enclosure(2, 2)` | `Enclosure(4, 4)` (a point exponent is read first) |
 | `(-2)^Enclosure(1, 2)` | unevaluated, under `.N()` too; the `interval-js` lowering declines |
@@ -1933,8 +1980,10 @@ one route):
 | `x + y` with `x: enclosure`, `y: real \| missing` compiled on `interval-js` | `.run({ x: { lo: 0, hi: 1 }, y: NaN })` keeps the absence reading of `y` (an `empty` with `missing: true`) |
 | `x < y`, `Max(x, y)` with `x: enclosure`, `y: number` compiled on `interval-js`, run with `y: Infinity` | `'true'`; `{ lo: Infinity, hi: Infinity }` |
 | `Mean([Enclosure(0, 1), 1])` compiled on `interval-js` with `fallback: true` | throws with the kind message (no fallback for an enclosure result) |
-| `y: number \| enclosure`, `y + 1` compiled on `interval-js`, run with `y: Infinity` | admitted at entry (the numeric arm); the result is `empty` (the sum rule) |
-| `x + y` with `x: enclosure`, `y: number` compiled on `interval-js` | `.run({ x: { lo: 0, hi: 1 }, y: Infinity })` is `empty` |
+| `y: number \| enclosure`, `y + 1` compiled on `interval-js`, run with `y: Infinity` | admitted at entry (the numeric arm); the result is `empty` (the sum rule); `.broadcast({ y: [Infinity, Infinity] })` the same |
+| `x + +oo` with `x: enclosure` compiled on `interval-js` | `empty` (the literal compiles as a point) |
+| `Mod(x, m)` with `m: real`, `x^n` with `n: integer` compiled on `interval-js` | compile; run with `m: 3` / `n: 2` they give the kernels' answers; `n: 0.5` with `x: { lo: -8, hi: -8 }` is `empty` (the fourth accepted difference) |
+| `x + y`, `x * y`, `x / y` with `x: enclosure`, `y: number` compiled on `interval-js` | `.run({ x: { lo: 0, hi: 1 }, y: Infinity })` is `empty` for each |
 | `Factorial(y)` with `y: real \| enclosure` compiled on `interval-js` | declines (the lowering is set up for an enclosure arm) |
 | `x + 0.1` compiled on `interval-js`, run with `x: { lo: 0, hi: 0 }` | `{ lo: 0.09999999999999999, hi: 0.1 }` (the outward conversion of the promoted scalar), the same as `(Enclosure(0, 0) + 0.1).N()` |
 | `Max(x, c)` with `c := Enclosure(1, 3)` compiled on `interval-js`, run with `x: { lo: 0, hi: 2 }` | `{ lo: 1, hi: 3 }` (4.9.3 part 1 (b)) |

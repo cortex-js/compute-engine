@@ -19,6 +19,7 @@ import { DISTRIBUTIONS_LIBRARY } from './distributions.js';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry.js';
 import { UNITS_LIBRARY, canonicalUnit } from './units.js';
 import { QUANTITY_LIBRARY } from './quantity-kind.js';
+import { ENCLOSURE_LIBRARY } from './enclosure.js';
 import { FRACTALS_LIBRARY } from './fractals.js';
 
 import type { LibraryCategory } from '../latex-syntax/types.js';
@@ -117,7 +118,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
   {
     name: 'arithmetic',
     requires: ['core'],
-    definitions: [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY],
+    definitions: [...ARITHMETIC_LIBRARY, ...COMPLEX_LIBRARY, ENCLOSURE_LIBRARY],
   },
   {
     name: 'fractals',
