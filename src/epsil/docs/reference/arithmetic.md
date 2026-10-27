@@ -1354,6 +1354,17 @@ Sign of a number: -1, 0, or 1 for a real; `z/|z|`, the point of the unit circle 
 // ➔ [-1,0,(3/5 + 4/5i)]
 ```
 
+### smoothstep
+
+MathJSON `Smoothstep` · `(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> nan | real`
+
+Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0, 1). Broadcasts over collection arguments.
+
+```epsil
+[smoothstep(0, 1, -1), smoothstep(0, 1, 1/2), smoothstep(0, 1, 2)]
+// ➔ [0,1/2,1]
+```
+
 ### sqrt
 
 MathJSON `Sqrt` · `(complex | infinity) -> complex | infinity`

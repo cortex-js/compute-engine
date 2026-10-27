@@ -519,7 +519,7 @@ the types of mathematical expressions. It models:
   `boxed-expression/broadcast-lift-type.ts`, called from
   `boxed-function.ts`); the trigger is
   applications-only (a bare symbol's `unknown` is inference-pending and
-  stays scalar). See the Broadcastable section of `doc/08-guide-types.md`.
+  stays scalar). See the Broadcastable section of `cortexjs.io/docs/compute-engine/08-guide-types.md`.
 - **Function signatures**: `(x: number, number?) -> number`, including named,
   optional, and variadic arguments.
 - **Algebraic types**: union (`|`), intersection (`&`), negation (`!`), plus the

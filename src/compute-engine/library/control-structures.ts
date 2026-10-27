@@ -281,7 +281,8 @@ export const BLOCK_DEFINITION: OperatorDefinition = {
     'Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must ' +
     'rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp ' +
     'first, then assign the temps to the LHS symbols. See ' +
-    '`doc/84-reference-control-structures.md` for the canonical recipe.',
+    'https://cortexjs.io/compute-engine/reference/control-structures/ for the ' +
+    'canonical recipe.',
   lazy: true,
   scoped: true,
   signature: '(unknown*) -> unknown',

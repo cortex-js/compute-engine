@@ -1617,7 +1617,7 @@ function solveSingleSqrtEquation(
  * The roots of a polynomial that squaring gave, without the roots that are
  * decided not real. A polynomial equation gives all its roots, the complex
  * ones included; every other equation gives its real solutions only (see
- * `doc/85-reference-core.md`, `Solve`). `x·√(x² + 1) = 1` is squared into
+ * `cortexjs.io/docs/compute-engine/85-reference-core.md`, `Solve`). `x·√(x² + 1) = 1` is squared into
  * `x⁴ + x² − 1 = 0`, whose root `−√((−1 − √5)/2)` is a root of the original
  * equation over the complex numbers (`−1.27i·0.79i = 1`), but not a real
  * solution: the check against the original equation keeps it, thus it is

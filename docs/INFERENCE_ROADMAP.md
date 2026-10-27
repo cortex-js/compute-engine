@@ -104,7 +104,7 @@ differs.
 
 **Why it is this way:** the CAS persona. For a pure mathematical unknown
 (never assigned), use-narrowing is CORRECT — `k(n)` *declares* `n: integer`;
-that is the documented behavior (`doc/08-guide-types.md` §Type Inference)
+that is the documented behavior (`cortexjs.io/docs/compute-engine/08-guide-types.md` §Type Inference)
 and must be preserved. The model is only unsound for the program-variable
 persona, where assignment evidence exists. One cell serves both; the seam is
 programs like the one above.
@@ -286,7 +286,7 @@ spelling by definition.
 - **R3 — What does `typeof` report?** Refinement makes the declared
   symbol's static type visibly move, reversing the documented
   "annotating loosely gives a wider static type than not annotating"
-  behavior (`doc/08-guide-types.md`, "Declared vs Inferred" — that section
+  behavior (`cortexjs.io/docs/compute-engine/08-guide-types.md`, "Declared vs Inferred" — that section
   must be updated in the same change). _Recommendation: show the
   refinement._ That is the point of the feature; the doc section's framing
   shifts from "contract vs evidence" to "the contract is the constructor,

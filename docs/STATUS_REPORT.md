@@ -15,7 +15,7 @@ current system.
 - The normative behavior of the type, effect, inference, string, randomness,
   and broadcast systems is maintained in the focused documents indexed by
   [`docs/README.md`](./README.md).
-- Public behavior belongs in [`doc/`](../doc/). Internal documents should not
+- Public behavior belongs in [`docs/compute-engine/` in the cortexjs.io repo](https://github.com/cortex-js/cortexjs.io/tree/master/docs/compute-engine). Internal documents should not
   duplicate public guides.
 - [`docs/plans/`](./plans/) contains only active work. Completed execution
   plans are summarized here and retained in Git history; source comments must
@@ -46,7 +46,7 @@ The early 2026 implementation rounds introduced the native `BigDecimal`
 implementation, precision-scaled special functions, package subpath
 modularization, compilation constant folding, colors, and parser cleanup. The
 current public contracts live in the numeric, compilation, color, and LaTeX
-guides under [`doc/`](../doc/). Release-facing behavior remains in the already
+guides under [`docs/compute-engine/` in the cortexjs.io repo](https://github.com/cortex-js/cortexjs.io/tree/master/docs/compute-engine). Release-facing behavior remains in the already
 published changelog entries; architectural details are represented by the
 current code and architecture guide.
 
@@ -136,7 +136,7 @@ here at initiative granularity or in Git history.
 
 Strings are indexed collections of characters, with current preservation,
 search, joining, and regular-expression behavior documented publicly under
-[`doc/97-reference-strings.md`](../doc/97-reference-strings.md). The internal
+[`97-reference-strings.md` in the cortexjs.io repo](https://github.com/cortex-js/cortexjs.io/blob/master/docs/compute-engine/97-reference-strings.md). The internal
 [`STRING_ROADMAP.md`](./STRING_ROADMAP.md) remains the design authority for
 cross-subsystem invariants and explicitly deferred work.
 

@@ -430,7 +430,7 @@ MathJSON `BaseForm` · `(T, (number | string)?) -> T where T: number`
 
 Evaluate a sequence of expressions in a local scope, **sequentially**. Each operand is evaluated in order; later operands observe side effects (`Assign`, `Declare`) of earlier operands. The block's value is the value of the last expression. Short-circuiting heads (`Return`, `Break`, `Continue`) terminate the sequence early.
 
-IMPORTANT — consumers translating *simultaneous* action tuples (e.g. Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp first, then assign the temps to the LHS symbols. See `doc/84-reference-control-structures.md` for the canonical recipe.
+IMPORTANT — consumers translating *simultaneous* action tuples (e.g. Desmos `(a → 1, b → a + 1)` where `b` reads the *pre-action* `a`) must rewrite to a snapshot-then-commit Block: bind each RHS to a fresh temp first, then assign the temps to the LHS symbols. See https://cortexjs.io/compute-engine/reference/control-structures/ for the canonical recipe.
 
 ### BuiltinFunction
 

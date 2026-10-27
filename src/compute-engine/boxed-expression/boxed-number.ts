@@ -389,7 +389,7 @@ export class BoxedNumber
 
   get json(): MathJsonExpression {
     // `.json` is the lossless data-interchange serialization (see
-    // doc/12-guide-numerical-evaluations.md). It emits the value exactly, with no
+    // cortexjs.io/docs/compute-engine/12-guide-numerical-evaluations.md). It emits the value exactly, with no
     // rounding to the working precision:
     //  - exact values (integers, rationals, radicals, complex) serialize to
     //    their exact MathJSON form (e.g. `(1/2)·√3` → the Multiply/Rational

@@ -2,7 +2,7 @@
 
 This directory contains internal specifications, active design work, corpus
 tooling, and historical migration guides. User-facing documentation is under
-[`doc/`](../doc/) and published at
+[`docs/compute-engine/` in the cortexjs.io repo](https://github.com/cortex-js/cortexjs.io/tree/master/docs/compute-engine) and published at
 [cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/).
 
 ## Start Here

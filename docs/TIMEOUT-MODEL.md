@@ -2,7 +2,7 @@
 
 This document records the internal deadline and cancellation contracts. Public
 API guidance is in
-[`doc/_99-guide-execution-constraints.md`](../doc/_99-guide-execution-constraints.md).
+[`99-guide-execution-constraints.md` in the cortexjs.io repo](https://github.com/cortex-js/cortexjs.io/blob/master/docs/compute-engine/99-guide-execution-constraints.md).
 
 ## 1. Current contract
 

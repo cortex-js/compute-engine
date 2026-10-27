@@ -3,7 +3,7 @@
 These guides describe transitions between specific historical releases. They
 are retained for consumers upgrading old installations, but they are not a
 current API reference. For current usage, see [`README.md`](../README.md) and
-the public guides under [`doc/`](../doc/).
+the public guides under [`docs/compute-engine/` in the cortexjs.io repo](https://github.com/cortex-js/cortexjs.io/tree/master/docs/compute-engine).
 
 - [`0.50.0`](./migration-guides/MIGRATION_GUIDE_0.50.0.md)
 - [`0.54.x to 0.55.0`](./migration-guides/MIGRATION_GUIDE_0.55.0.md)

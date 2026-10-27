@@ -3,7 +3,7 @@
 This document records internal simplification contracts that are easy to break
 when changing canonicalization, evaluation, or rewrite rules. User-facing
 examples and API guidance belong in
-[`doc/11-guide-simplify.md`](../doc/11-guide-simplify.md); unfinished feature
+[`11-guide-simplify.md` in the cortexjs.io repo](https://github.com/cortex-js/cortexjs.io/blob/master/docs/compute-engine/11-guide-simplify.md); unfinished feature
 work belongs in [`ROADMAP.md`](../ROADMAP.md).
 
 ## Canonicalization is not simplification

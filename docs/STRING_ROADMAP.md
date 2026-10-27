@@ -1079,7 +1079,7 @@ count is bounded by the subject length).
    (constraint 10: JS explicit exclusion + grapheme lowerings, Python
    type-gate, GLSL rejection test); CHANGELOG entry + release-note
    guidance for the user-code impact; update
-   `doc/97-reference-strings.md` (it currently states "Strings are not
+   `cortexjs.io/docs/compute-engine/97-reference-strings.md` (it currently states "Strings are not
    handled as collections" and documents `Characters` as `list<string>` —
    both false after this phase). Ships as one unit (constraint 8).
 
@@ -1141,7 +1141,7 @@ count is bounded by the subject length).
    optional collation argument, see "Future: locale-aware collation"),
    `NumberFrom`. All comparison-flavored operators follow the collation
    shape rules (subjects first, tail free; order slots typed to admit a
-   future `collation` value). Update `doc/97-reference-strings.md` again
+   future `collation` value). Update `cortexjs.io/docs/compute-engine/97-reference-strings.md` again
    with the new operators.
 
    **Shipped 2026-08-16.** Deviations and resolutions, all user-ruled the same
@@ -1201,7 +1201,7 @@ count is bounded by the subject length).
    replacement. Dialect = the host's in full, by user ruling: no feature
    subset and no caps, so backreferences and lookbehind work and catastrophic
    backtracking is a DOCUMENTED property the engine cannot interrupt (stated
-   in `doc/97-reference-strings.md`). Match positions are grapheme-cluster
+   in `cortexjs.io/docs/compute-engine/97-reference-strings.md`). Match positions are grapheme-cluster
    `range`s, so `Slice(s, m.range)` composes — and the field is absent rather
    than wrong when a match does not span whole clusters. The raw string
    literal the spec sketched needed no work: `#"..."#` already existed in the

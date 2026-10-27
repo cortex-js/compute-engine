@@ -3,7 +3,7 @@
 **Status:** normative internal reference for the implemented type system.
 
 This document records the type-system invariants that implementation code may
-rely on. Public syntax and API behavior belong in `doc/08-guide-types.md`; open
+rely on. Public syntax and API behavior belong in `cortexjs.io/docs/compute-engine/08-guide-types.md`; open
 work belongs in `TYPE_SYSTEM_ROADMAP.md` or an active file under `plans/`.
 
 ## Type algebra and compatibility
@@ -642,8 +642,8 @@ field, a measurement. A kind is declared on the operator definition of the
 head that constructs its values, with the `arithmetic` field
 (`ArithmeticDefinition`, `types-definitions.ts`). The result type of that
 head is the **kind type**. The public description is in
-`doc/06-guide-augmenting.md` ("Declaring a Value Kind") and
-`doc/08-guide-types.md` ("Kind Types"); the design and the decisions are in
+`cortexjs.io/docs/compute-engine/06-guide-augmenting.md` ("Declaring a Value Kind") and
+`cortexjs.io/docs/compute-engine/08-guide-types.md` ("Kind Types"); the design and the decisions are in
 `plans/2026-10-26-value-kinds.md` (ROADMAP CE-507). This section states the
 type rules.
 
@@ -1155,7 +1155,7 @@ in `EFFECTS-MODEL.md`.
 
 ## Sources of truth
 
-- Public language and API: `doc/08-guide-types.md`
+- Public language and API: `cortexjs.io/docs/compute-engine/08-guide-types.md`
 - Effects: `EFFECTS-MODEL.md`
 - Collection inference: `INFERENCE_ROADMAP.md`
 - Open type-system work: `TYPE_SYSTEM_ROADMAP.md` and active plans
