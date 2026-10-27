@@ -14,6 +14,7 @@ import {
   isValueDef,
 } from './boxed-expression/definition-guards.js';
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
+import { recordEngineCompileHandler } from './compilation/engine-compile-handlers.js';
 
 import {
   STANDARD_LIBRARIES,
@@ -75,6 +76,13 @@ export function loadLibraryDefinitions(
       if (custom)
         for (const name of Object.keys(table))
           engine._customLibraryOperators.add(name.normalize());
+      // The `compile` handlers of a standard library write the engine's own
+      // code, which may run on a worker of the kernel pool. Every other
+      // handler is caller code (see `engine-compile-handlers.ts`).
+      else
+        for (const def of Object.values(table))
+          if (typeof def === 'object' && def !== null && 'compile' in def)
+            recordEngineCompileHandler(def.compile);
       // A definition that fails is reported by `setSymbolDefinitions` and
       // skipped, and a name that an earlier library already defines keeps
       // that library's binding. So the provenance of a name is recorded

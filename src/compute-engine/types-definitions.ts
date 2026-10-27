@@ -1165,8 +1165,65 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * Return `undefined` (or an empty string) to fall back to the
      * default compilation (a `null` returned from untyped JavaScript is
      * tolerated and treated the same). See {@link OperatorCompileHandler}.
+     *
+     * The code a caller handler writes runs only on the thread that compiled
+     * it: the result is not shippable, so `broadcastAsync()` does not send
+     * it to the kernel pool (`reason: 'not-shippable'`). This holds also
+     * for a handler attached in place to a built-in definition. Set
+     * {@link compileShippable} when the code can run on a worker.
      */
     compile?: OperatorCompileHandler;
+
+    /**
+     * Whether the code that the {@link compile} handler writes can run on
+     * a worker of the kernel pool. Default: `false`.
+     *
+     * A worker receives the compiled code as text and has none of the
+     * functions or global variables of the thread that compiled it. Set
+     * `true` only when the code calls nothing but the helpers of the
+     * compiled-code runtime, the operands that the handler compiled, and the
+     * functions given in {@link compileHelpers}. When the code calls a
+     * function of the compiling thread (`globalThis.myFn(…)`) and this flag
+     * is `true`, every cell that a worker evaluates throws, and its value is
+     * `NaN` (`BroadcastAsyncResult.failed` counts these cells).
+     *
+     * A compiled result is shippable only when every caller handler that
+     * wrote part of its code has this flag.
+     */
+    compileShippable?: boolean;
+
+    /**
+     * Functions that the code of the {@link compile} handler calls by name.
+     * The engine copies the source of each function (`fn.toString()`) into
+     * the code it compiles, as `const <name> = (<source>);`, so the code
+     * carries its helpers to a worker of the kernel pool and to a stored
+     * result. A helper is defined only when the handler wrote code for the
+     * `javascript` or `interval-javascript` target.
+     *
+     * Because only the source is copied, a helper must not read a variable
+     * from outside its own body (a closure variable or an import). Such a
+     * read throws when the compiled code runs, on every thread. A name must
+     * be a JavaScript identifier that does not start with `_` (the engine
+     * uses that prefix for its own names). Choose a name that a parameter of
+     * a compiled function cannot shadow, for example `myLibFloorIndex`.
+     * Two definitions may give a helper of the same name only with the same
+     * source.
+     *
+     * ```ts
+     * ce.declare('Wrap', {
+     *   signature: '(number, number) -> number',
+     *   compileShippable: true,
+     *   compileHelpers: {
+     *     wrapIndex: (i: number, n: number) => ((i % n) + n) % n,
+     *   },
+     *   compile: (args, compile, { language }) =>
+     *     language === 'javascript'
+     *       ? `wrapIndex(${compile(args[0])}, ${compile(args[1])})`
+     *       : undefined,
+     * });
+     * ```
+     */
+    compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
 
     /**
      * Custom equality handler.
@@ -1946,9 +2003,19 @@ export interface ArithmeticCompile {
      * input of the code is a value of a kind (its `entry` check is a
      * function of the host, which a worker does not have). */
     shippable?: boolean;
-    /** The helpers of the host that the code of this lowering calls. A worker
-     * has no way to receive them, so a non-empty list makes the result not
-     * shippable, whatever `shippable` says. */
+    /** Functions that the code of this lowering calls by name. The engine
+     * copies the source of each one into the compiled code, as
+     * `const <name> = (<source>);`, so the code carries them to a worker
+     * and to a stored result. The rules are those of
+     * `OperatorDefinition.compileHelpers`: a helper must not read a
+     * variable from outside its own body, and its name is an identifier
+     * that does not start with `_`. Put a helper here, not in `hostNames`,
+     * when the code can carry it. */
+    helpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
+    /** The functions of the host that the code of this lowering calls and
+     * that it does not carry (they are not in `helpers`). A worker does not
+     * have them, so a non-empty list makes the result not shippable,
+     * whatever `shippable` says. */
     hostNames?: ReadonlyArray<string>;
   };
   /** The source of a literal value of THIS operator, in the representation of
@@ -3460,6 +3527,12 @@ export interface BoxedOperatorDefinition
   derivative?: OperatorDerivative;
 
   compile?: OperatorCompileHandler;
+
+  /** See `OperatorDefinition.compileShippable`. */
+  compileShippable?: boolean;
+
+  /** See `OperatorDefinition.compileHelpers`. */
+  compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
 
   /** The arithmetic of the value kind this operator constructs, as given by
    * the `arithmetic` field of its definition. See

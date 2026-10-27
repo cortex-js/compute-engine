@@ -50,6 +50,19 @@
 
 ### Behavior Changes
 
+- **The code that a caller's operator `compile` handler writes no longer goes
+  to the worker pool** (ROADMAP CE-518, Tycho row 460). Such code can call a
+  function that exists only on the thread that compiled it, for example
+  `globalThis.myFloorIndex(…)`. The result had `shippable: true`, so
+  `broadcastAsync()` sent it to the workers, where every cell threw: each
+  value was `NaN`, and the batch still reported every cell as done. Now a
+  result with code from a caller handler has `shippable: false` and runs on
+  the calling thread (`reason: 'not-shippable'`). This also holds for a
+  handler attached in place to a built-in definition
+  (`ce.lookupDefinition('At').operator.compile = …`). The handlers of the
+  standard library are not affected. To send such code to the pool again, set
+  `compileShippable: true` on the definition, and give the functions that the
+  code calls in `compileHelpers` (see Features).
 - **A point parameter accepts a list that can hold both points and lists.**
   With `k: (tuple<number, number>) -> number` and `y` declared
   `list<P | list<P>>`, `type A = list<A | P>` or `type B = list<B> | P` (`P` is
@@ -133,6 +146,37 @@
 
 ### Features
 
+- **An operator `compile` handler can give the functions its code calls**
+  (ROADMAP CE-518). The new `compileHelpers` field of an operator definition
+  maps a name to a function. The engine copies the source of each function
+  into the compiled code, as `const <name> = (<source>);`, so the code
+  carries its helpers to a worker of the pool and to a stored result. With
+  `compileShippable: true`, the result can then run on the pool:
+
+  ```ts
+  ce.declare('Wrap', {
+    signature: '(number, number) -> number',
+    compileShippable: true,
+    compileHelpers: { wrapIndex: (i, n) => ((i % n) + n) % n },
+    compile: (args, compile, { language }) =>
+      language === 'javascript'
+        ? `wrapIndex(${compile(args[0])}, ${compile(args[1])})`
+        : undefined,
+  });
+  ```
+
+  A helper must not read a variable from outside its own body, and its name
+  is an identifier that does not start with `_`. A built-in function, a bound
+  function or a method has no source that can be copied, and the declaration
+  refuses it. The compile contract of a value kind has the same field,
+  `arithmetic.compile.type.helpers` (ROADMAP CE-507.1); `hostNames` there now
+  names only the functions of the host that the code does not carry.
+- **`broadcastAsync()` reports the cells that threw.** The new `failed` field
+  of `BroadcastAsyncResult` counts the cells, among the first `done`, whose
+  evaluation threw, on the calling thread and on the workers. The value of
+  such a cell is `NaN`, as for a cell whose value is not a number, so this
+  count is the only way to tell the two apart. `done` keeps its meaning: a
+  cell that threw was evaluated.
 - **An operator can declare the arithmetic of the values it constructs: a value
   kind** (ROADMAP CE-507,
   [#477](https://github.com/cortex-js/compute-engine/issues/477)). With `MyMod`

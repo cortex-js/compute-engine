@@ -125,6 +125,9 @@ export type StoredResult = Omit<StoredKernel, 'kind'> & object;
 interface SliceResult {
   out: Float64Array;
   done: number;
+  /** The cells of the `done` prefix whose evaluation threw. Absent for a
+   * fit slice, and for a slice that ran no cell. */
+  failed?: number;
 }
 
 /** A task queued for a worker: one slice of one batch. */
@@ -512,7 +515,11 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
           // A late result of a task the main thread settled on abort is
           // dropped; the worker is free again either way.
           if (!running.settled)
-            running.task.resolve({ out: m.out, done: m.done });
+            running.task.resolve({
+              out: m.out,
+              done: m.done,
+              ...(m.type === 'result' ? { failed: m.failed } : {}),
+            });
           void this.pump(slot);
           return;
         }
@@ -1250,6 +1257,9 @@ export function makeBroadcastAsync(
         };
     const pastDeadline = (): boolean =>
       deadline !== undefined && Date.now() > deadline;
+    // The cells whose evaluation threw, inline and on the workers
+    // (`BroadcastAsyncResult.failed`).
+    const failures = { count: 0 };
 
     // The inputs of the inline slices: the ordinary compiled body reads
     // plain arrays only, so a `Float64Array` shared input is copied into one
@@ -1293,7 +1303,7 @@ export function makeBroadcastAsync(
           plainInputs(),
           layoutOptions,
           out.subarray(perCellOut * from, perCellOut * to),
-          { from, to, deadline }
+          { from, to, deadline, failures }
         );
         sliceMs += Date.now() - t0;
         done += n;
@@ -1309,6 +1319,7 @@ export function makeBroadcastAsync(
       return {
         out,
         done: allowInline ? await inline(0) : 0,
+        failed: failures.count,
         route: 'calling-thread',
         reason,
       };
@@ -1358,16 +1369,29 @@ export function makeBroadcastAsync(
         perCellOut * slice.from
       );
       done += r.value.done;
+      failures.count += r.value.failed ?? 0;
       if (r.value.done < slice.to - slice.from) break;
     }
-    if (!failed) return { out, done, route: 'pool' };
+    if (!failed) return { out, done, failed: failures.count, route: 'pool' };
     // A worker could not take a slice (a refused kernel, a failed worker):
     // the rest of the batch runs inline, with its yields, from the end of
     // the valid prefix, unless `inline: false` refused the calling thread.
     if (allowInline && done < count && !signal?.aborted && !pastDeadline()) {
       done += await inline(done);
-      return { out, done, route: 'calling-thread', reason: 'pool-declined' };
+      return {
+        out,
+        done,
+        failed: failures.count,
+        route: 'calling-thread',
+        reason: 'pool-declined',
+      };
     }
-    return { out, done, route: 'pool', reason: 'pool-declined' };
+    return {
+      out,
+      done,
+      failed: failures.count,
+      route: 'pool',
+      reason: 'pool-declined',
+    };
   };
 }

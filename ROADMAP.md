@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-514.
+Next free reference: CE-519.
 
 **Entry format.**
 
@@ -389,6 +389,20 @@ hold other fields), so the key may exist at run time. The check catches typos,
 but it refuses programs that are correct for a record with more fields.
 
 ## Collections, absence and broadcasting
+
+### CE-515. `evaluate()` of a list combined with a piecewise gives a piecewise of lists, not a list
+
+**Status:** open; defect. Tycho row 452 (filed 2026-10-26, on 0.169.2).
+
+`[0...19] · {x > 1 : 0, 1}` with `x` free evaluates to
+`Which(1 < x, [0,…,0], True, [0,1,…,19])`, not to the list
+`[{x>1: 0, 0}, {x>1: 0, 1}, …]`. The two forms have the same value at each `x`,
+but the result is not a `List`, so a caller that reads the elements of the
+result finds none. `Add`, `Abs` and a bounded `Sum` do the same. `[2,3]·x` with
+no piecewise evaluates to a list. Expected: when a piecewise is combined with a
+list, or has list branches of one length, `evaluate()` gives a `List` whose
+element k is the piecewise for element k. Tycho's instrument:
+`~/dev/tycho/scripts/repros/2026-10-26-ce452-list-times-piecewise-repro.mts`.
 
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 
@@ -1192,6 +1206,11 @@ contract, and moved `ResidueClass` onto the field. A head declared `-> residue`
 `docs/TYPE-SYSTEM.md` ("Value kinds and kind types") and
 `docs/COMPILATION-MODEL.md` ("Value kinds").
 
+Phase 2 decided 2026-10-26: the 16 decisions of the inventory
+(`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`) were all taken as
+recommended; they are plan section 13. Phase 2 is in progress (session
+compute-engine-df).
+
 What remains:
 
 - **Phase 2: `Measurement` and `Quantity` on the field.** Prerequisite: the
@@ -1212,21 +1231,6 @@ What remains:
   the plan is decided (the name and LaTeX of the head, and whether
   `CenteredInterval` is a second kind).
 
-- **CE-507.1** (decision needed) `compile.type.hostNames` has no way to reach a
-  worker. A kind's compile contract (`ArithmeticCompile`) can say
-  `shippable: true` and list in `hostNames` the helpers that the compiled code
-  calls, but the kernel pool sends code to a worker as text and has no way to
-  send a helper of the host with it. Today a non-empty `hostNames` makes the
-  result not shippable: with `shippable: true, hostNames: ['gf8Add']`,
-  `compile(G(1) + G(2)).shippable` is `false`, and the same contract without
-  `hostNames` gives `true`. So the field is public and has one effect: to turn
-  `shippable` off. Options: (a) remove `hostNames` from the public type until a
-  carrier exists, and document that a shippable contract writes its helpers
-  inline in the code it returns; (b) give the contract a carrier, for example
-  the helpers as source text that the pool sends with the code (as the
-  `functions` compile option copies a function by `toString()`), and make
-  `hostNames` name them; (c) keep the field as it is, documented as "makes the
-  result not shippable". If nothing is decided, (c) is what ships.
 - **CE-507.3** (defect, low) An overloaded signature with a kind arm does not
   type the body of a declared function. `kindTypedFunctionLiteral()`
   (`function-utils.ts`) annotates the untyped parameters of a `Function` body
@@ -1255,6 +1259,38 @@ What remains:
   (group 1); so `Sin(U)^2` is an error for such a kind. The plan does not state
   this. Keep (a kind that cannot be squared should say so), or let the carrier
   rule admit it at the arithmetic operators and leave the call unevaluated.
+- **CE-507.7** (design needed; first consumer: PR #482, group theory) A
+  non-commutative product for a value kind. Plan section 4.3 says `multiply`
+  must commute, because the canonical form sorts a product, and names matrices
+  over a finite field as out of scope. PR #482 (`installGroupTheory`, 132
+  operators) meets exactly this: it ships `PermutationCompose` and
+  `GroupMatrixMultiply` as named operators, and
+  `Permutation(…) * Permutation(…)` is refused with `incompatible-type` (its
+  design note `docs/group-theory/FOUNDATIONS.md`, decision D3, says why).
+  Proposal: a kind declares `multiply: { commutes: false, … }` (or a separate
+  `compose` hook); the canonical form of `Multiply` keeps the operand order when
+  an operand is of such a kind; `Power` with an integer exponent is the repeated
+  product; `Divide` is the right multiplication by the inverse; the serializer
+  prints `\cdot` or juxtaposition in the given order. Permutations, matrices
+  over F_p, quaternions and matrix groups would use it. First step: measure how
+  much of the `Multiply` canonical form assumes sorting.
+- **CE-507.8** (design needed; shared with PR #482) A decoded-payload cache on a
+  boxed call. A kind value stays a call of its head (opaque only at the compile
+  boundary, plan 4.8), so every hook decodes the operands
+  (`Measurement(2.5, 0.1)` reads two numbers; `Permutation([2, 3, 1])` in PR
+  #482 decodes a list of boxed numbers into a kernel `PermutationValue`,
+  validates it in O(n) and re-encodes, for a degree up to 100,000). A cached
+  decoded payload on the boxed call, as `BoxedNumber` holds its numeric value,
+  would serve both; the invalidation rule is simple because boxed expressions
+  are immutable. To do before phase 3 adds many `apply` sites.
+- Note (2026-10-26, from the review of PR #482): `mint: false` has two uses that
+  are compatible: a kind type (a nominal type defined as exactly `value`, plan
+  4.1.1) and a nominal type over another definition (PR #482 declares
+  `Permutation = tuple<images: list<integer>>` with a checked constructor
+  operator of the same name). Only the first can take an `arithmetic` field;
+  `doc/08-guide-types.md` says so. PR #482 also edits the "no caller uses it
+  today" comment on `mint` in `src/compute-engine/index.ts` that phase 1
+  rewrote: a trivial merge conflict to expect.
 
 ### CE-508. `Quantity` and `Measurement` arithmetic: wrong values, a wrong type and gaps
 
@@ -1277,6 +1313,57 @@ What remains:
 - **CE-508.6** `ResidueClass(2, 5) + Quantity(3, m)` is typed
   `list<list<any> | residue> | residue`. It must be typed as an unevaluated sum
   of a class and a value, or refused.
+
+The phase-2 inventory
+(`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`, produced by
+`scripts/probe-value-kinds-inventory.ts` at `0be912cef`) found six more wrong
+values, each fixed by phase 2 of CE-507 as planned:
+
+- **CE-508.7** An undecided comparison drops the uncertainty:
+  `Less(Measurement(2, 0.1), x)` evaluates to `Less(2, x)`, and `Equal` the same
+  (`evaluateChainOperands()` in `library/relational-operator.ts` replaces a
+  measurement by its nominal before it decides). The comparison dispatch of the
+  plan (4.4) keeps the operands.
+- **CE-508.8** A complex measurement reaches a real-only kernel:
+  `ContinuedFraction(Measurement(Complex(2, 3), 0.1))` is `[2]`; 18 operators
+  with a `real` parameter admit a complex measurement at boxing because the
+  nominal types the call `complex` and a non-literal is not refused, and the
+  kernel reads `.re`. Under decision D the call is an `incompatible-type` error
+  at evaluation.
+- **CE-508.9** A unit leaks out as a free symbol:
+  `InverseHaversine(Quantity(2, m))` evaluates to `2arcsin(sqrt(2) sqrt(m))`.
+  After phase 2 a quantity is refused at boxing at every operator that does not
+  name `quantity`.
+- **CE-508.10** (NOT a defect, recorded so that the number is not reused.)
+  `Equal(Quantity(1, m), Quantity(100.0000000001, cm))` is `False` while
+  `Equal(Quantity(1, m), Quantity(1.000000000001, m))` is `True` because
+  `quantity-compare.ts` measures the tolerance in the FINER unit, a documented
+  policy pinned by `quantity-equality-methods.test.ts`; the quantity `compare`
+  of phase 2 keeps it.
+- **CE-508.11** The comparison methods do not decide a measurement:
+  `Measurement(2, 0.1).isLess(3)` and `.isEqual(2)` answer `undefined` while
+  `Less` and `Equal` are `True`. One dispatch for the operators and the methods
+  (4.4) fixes it.
+- **CE-508.12** The uncertainty of a complex nominal depends on how the
+  derivative prints: `Cos(Measurement(Complex(2, 3), 0.1))` keeps an
+  uncertainty, `Arctan` of the same drops it (`measurementUnaryByHead()` drops
+  it when the derivative evaluates to a complex literal). The rule
+  `f(a) ± |f′(a)|·σ` for every operator with a derivative (inventory decision 6)
+  fixes it.
+
+- **CE-508.13** `Log2(Measurement(Complex(2, 3), 0.1))` evaluates to `1`: a
+  wrong nominal (the value is about `1.85022 + 1.41787i`); the logarithm aliases
+  drop both the uncertainty and the value for a complex nominal
+  (`measurementLog()`). Phase 2 gives every logarithm alias an explicit answer,
+  `f(a) ± |f′(a)|·σ` (plan section 13, A5).
+- **CE-508.14** The complex arithmetic of measurements squares complex partial
+  derivatives instead of their moduli, so independent contributions cancel:
+  `Multiply(Measurement(1, 0.1), Measurement(i, 0.1))` is the bare `i` (σ should
+  be about 0.1414). Phase 2 propagates by the quadrature of `|∂f/∂xᵢ|²σᵢ²` (A3).
+- **CE-508.15** `Power(-2, Measurement(2, 0.1))` is the exact `4`:
+  `measurementPower()` returns the bare nominal when the exponent is uncertain
+  and the base is not provably positive. Phase 2 never returns the bare nominal:
+  a defined propagation or an unevaluated call (A4).
 
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
@@ -1948,6 +2035,21 @@ enumerate it, the multi-set walk must resolve dependent bounds again at each
 iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
+
+### CE-517. `N()` of a definite integral of a list integrand that has no closed form integrates the last element only
+
+**Status:** open; wrong value. Tycho row 459 (filed 2026-10-26, on 0.169.2).
+
+With `E = [0.1, 0.5]`, `\int_0^1 \frac{y}{\max(E, y)}dy` under `N()` gives
+`Measurement(0.75, …)`, and
+`\int_0^1 y \int_{-1}^{1}\frac{1}{\max(E,|x|)}dx\,dy` gives `1.6931…`. These are
+the values for the last element only. The correct results are `[0.95, 0.75]` and
+`[3.3026, 1.6931]`. When `evaluate()` finds a closed form (`\int_0^1 y E\,dy`),
+the list is correct. Expected: one numeric integral per element, and a list
+result. Tycho reports a second problem in the same body: with one ε (0.01) the
+nested integral takes about 7 s and gives a relative uncertainty of 3e-4.
+Tycho's instrument:
+`~/dev/tycho/scripts/repros/2026-10-26-ce459-numeric-integral-list-integrand-repro.mts`.
 
 ### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
 
@@ -2643,6 +2745,20 @@ References: do not take references for `Re(a)` far below 0 from mpmath's
 the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
+
+### CE-514. The `javascript` target compiles a point accessor of a lambda parameter to NaN when the lambda is applied to a list of points inside a `PointList`
+
+**Status:** open; wrong value. Tycho row 447 (filed 2026-10-25, on 0.167.0;
+still present on 0.169.2).
+
+`(v ↦ PointList(PointY(v), PointX(v)))([(1,2,3), (4,5,6)])` evaluates to
+`[(2, 1), (5, 4)]` and compiles to `[NaN, NaN]`. Its type is
+`tuple<unknown, unknown>`: the parameter is typed `unknown` at the application,
+so the `PointList` is compiled as one point of two scalars. The control
+`(v ↦ PointX(v))(L)` compiles to `[1, 4]`, and `a − PointY(v)` compiles
+correctly. Expected: the compiled value equals the evaluated value. Tycho's
+instrument:
+`~/dev/tycho/scripts/repros/2026-10-25-ce447-pointlist-accessor-applied-lambda-repro.mts`.
 
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 
@@ -4307,6 +4423,24 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
+
+### CE-516. Interpreted evaluation of chained lazy `Map`/`Zip` collections read through index lists is exponential in the depth of the chain
+
+**Status:** open; performance. Tycho row 453 (filed 2026-10-26, on 0.169.2).
+
+A chain such as
+`Map(W ↦ max(W[1], W[2]), Zip(A[I], Map(Z ↦ max(Z[1], Z[2]), Zip(A, A[L_1]))))`,
+each level over the previous one, read once at index 1 over 20 elements, reads
+160, 6 880 and 282 560 lazy `Map` elements (70 ms, 0.56 s, 16.8 s) at depths 2,
+3 and 4: about 41 times more per level. Later reads are free because the value
+is kept. Expected: in one evaluation, materialize each inner lazy collection
+once, so the cost is linear in depth × length. Tycho also asks for a public API
+that binds a value to a symbol for the duration of a callback and restores the
+value and the type slots exactly; today Tycho reads the internal fields
+`storedValue`, `_placeholderSkeleton` and `_signatureSkeleton` to do this.
+Tycho's instrument:
+`~/dev/tycho/scripts/repros/2026-10-26-ce453-lazy-collection-index-reread-repro.mts`
+(about 18 s).
 
 ### CE-313. Evaluating a symbolic closed form again after a state change rebuilds its nodes
 

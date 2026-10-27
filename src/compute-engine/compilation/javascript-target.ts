@@ -11453,6 +11453,7 @@ function compileToTarget(
     // The value kinds whose compile contracts the code reads or makes: the
     // value of a call is then returned raw (`valueKindFields`).
     const kinds = BaseCompiler.kindLoweringReport();
+    addKindHelpers(kinds, target);
     // A lambda body may call user-defined functions (`t ↦ f(t)`); emit their
     // definitions as a preamble inside the lambda's own body. A pure
     // definition the artifact calls from two or more places is wrapped in a
@@ -11565,6 +11566,7 @@ function compileToTarget(
   // value of a call is then returned raw, the code cannot be stored, and it
   // is shippable only when every contract says so (below).
   const kinds = BaseCompiler.kindLoweringReport();
+  addKindHelpers(kinds, target);
   // Collect any user-defined function definitions accumulated while compiling
   // `expr` (a symbol with a `Function`-literal definition used as an operator)
   // and prepend them to the preamble so their named local functions are in
@@ -11743,6 +11745,22 @@ function compileToTarget(
   result.willUsePool =
     kinds !== undefined ? () => false : makeWillUsePool(asyncSpec);
   return result;
+}
+
+/**
+ * Define in the preamble the `helpers` of each kind compile contract that the
+ * compilation used (`kinds`, from `BaseCompiler.kindLoweringReport()`), so
+ * that the code carries them to a worker and to a stored result. Called
+ * after the body is compiled and before the preamble is assembled.
+ */
+function addKindHelpers(
+  kinds: ReturnType<typeof BaseCompiler.kindLoweringReport>,
+  target: CompileTarget<Expression>
+): void {
+  kinds?.contracts.forEach((contract, i) => {
+    if (contract.helpers !== undefined)
+      BaseCompiler.addCompileHelpers(kinds.kinds[i], contract.helpers, target);
+  });
 }
 
 /**

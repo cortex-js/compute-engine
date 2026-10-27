@@ -23,6 +23,7 @@ import {
 } from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { noteArithmeticDefinition } from './arithmetic-order-override.js';
+import { assertValidCompileHelpers } from '../compilation/engine-compile-handlers.js';
 import {
   hasDeclaredEffectLabel,
   isEffectSubset,
@@ -167,6 +168,8 @@ const OPERATOR_DEF_KEYS = new Set([
   'evaluateAsync',
   'evalDimension',
   'compile',
+  'compileShippable',
+  'compileHelpers',
   'derivative',
 
   'eq',
@@ -750,6 +753,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   ) => Expression;
 
   compile?: OperatorCompileHandler;
+
+  /** See `OperatorDefinition.compileShippable`. */
+  compileShippable?: boolean;
+
+  /** See `OperatorDefinition.compileHelpers`. */
+  compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
 
   /** The partial derivatives of the operator, as given by the `derivative`
    * key of its definition: an array of function literals, one for each
@@ -1878,6 +1887,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       evaluateAsync: this.evaluateAsync,
       evalDimension: this.evalDimension,
       compile: this.compile,
+      compileShippable: this.compileShippable,
+      compileHelpers: this.compileHelpers,
       derivative: this.derivative,
       collection: this.collection,
       arithmetic: this.arithmetic,
@@ -1956,6 +1967,8 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evaluateAsync = s.evaluateAsync;
     this.evalDimension = s.evalDimension;
     this.compile = s.compile;
+    this.compileShippable = s.compileShippable;
+    this.compileHelpers = s.compileHelpers;
     this.derivative = s.derivative;
     this.collection = s.collection;
     this.arithmetic = s.arithmetic;
@@ -2073,6 +2086,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // An in-place update that does not mention `arithmetic` keeps it. A
     // redeclaration builds a new definition, so it carries `arithmetic` only
     // when the new definition gives it.
+    if (def.arithmetic?.compile?.type?.helpers !== undefined)
+      assertValidCompileHelpers(
+        `Operator Definition "${this.name}"`,
+        def.arithmetic.compile.type.helpers,
+        'arithmetic.compile.type.helpers'
+      );
     this.arithmetic = def.arithmetic ?? this.arithmetic;
     this.url = def.url ?? this.url;
     this.wikidata = def.wikidata ?? this.wikidata;
@@ -2300,7 +2319,23 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evalDimension = def.evalDimension ?? this.evalDimension;
     this.sgn = def.sgn ?? this.sgn;
     this.even = def.even ?? this.even;
-    this.compile = def.compile ?? this.compile;
+    // `compileShippable` and `compileHelpers` describe the code of one
+    // handler: an update that gives a new handler takes them from the same
+    // update (absent means not shippable and no helpers), and an update with
+    // no handler keeps them.
+    if (def.compile !== undefined) {
+      this.compile = def.compile;
+      this.compileShippable = def.compileShippable;
+      this.compileHelpers = def.compileHelpers;
+    } else {
+      this.compileShippable = def.compileShippable ?? this.compileShippable;
+      this.compileHelpers = def.compileHelpers ?? this.compileHelpers;
+    }
+    if (def.compileHelpers !== undefined)
+      assertValidCompileHelpers(
+        `Operator Definition "${this.name}"`,
+        def.compileHelpers
+      );
     if (def.derivative !== undefined)
       assertValidDerivativeKey(this.name, def.derivative);
     this.derivative = def.derivative ?? this.derivative;

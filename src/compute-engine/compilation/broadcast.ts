@@ -493,6 +493,11 @@ export interface BroadcastSlice {
   /** Returns true when the loop must stop: a kernel worker reads the cancel
    * flag of its task here. Checked every 64 cells, the first one included. */
   stop?: () => boolean;
+  /** When given, the loop adds 1 to `count` for each cell whose evaluation
+   * threw. The values of such a cell are `NaN` (an `interval-js` cell is
+   * an error enclosure), as for a cell whose value is not a number, so this
+   * count is the only way to tell the two apart. */
+  failures?: { count: number };
 }
 
 /** Cells between two deadline checks. A multiple of `STOP_CHECK_EVERY`
@@ -551,7 +556,8 @@ export function broadcastNumbersSlice(
     broadcastStride(options, defaultOutputs),
     slice.deadline,
     slice.stop,
-    batch
+    batch,
+    slice.failures
   );
 }
 
@@ -605,7 +611,8 @@ function unaliasedInputs(
  * the output, the cells `[from, to)`, the deadline, the stop function and
  * the grid strides (`BroadcastShape.grid`). For a batch body, the vars
  * object is unused, and `args` holds the argument of each parameter that does
- * not change from cell to cell (see `batchArguments`).
+ * not change from cell to cell (see `batchArguments`). `failures` counts
+ * the cells whose evaluation threw (`BroadcastSlice.failures`).
  * Returns the number of cells written.
  */
 type CellLoop = (
@@ -618,7 +625,8 @@ type CellLoop = (
   deadline: number | undefined,
   stop: (() => boolean) | undefined,
   grid: BroadcastShape['grid'],
-  args?: unknown[]
+  args: unknown[] | undefined,
+  failures: { count: number } | undefined
 ) => number;
 
 /** The cell loops made so far, by compiled body, then by the key that
@@ -772,7 +780,7 @@ function cellLoopFor(
   }
   const source = `"use strict";
 // broadcast cell loop ${cellLoopSerial++}
-return function (vars, arrays, slots, out, from, to, deadline, stop, grid, args) {
+return function (vars, arrays, slots, out, from, to, deadline, stop, grid, args, failures) {
   ${setup.join('\n  ')}
   for (let start = from; start < to; start += ${STOP_CHECK_EVERY}) {
     if (deadline !== undefined && (start - from) % ${DEADLINE_CHECK_EVERY} === 0 && Date.now() > deadline) return start - from;
@@ -786,6 +794,7 @@ return function (vars, arrays, slots, out, from, to, deadline, stop, grid, args)
         ${write}
       } catch {
         ${nanSlots}
+        if (failures !== undefined) failures.count++;
       }
     }
   }
@@ -884,7 +893,8 @@ function broadcastNumbersRange(
   stride: number,
   deadline?: number,
   stop?: () => boolean,
-  batch?: BroadcastBatchBody
+  batch?: BroadcastBatchBody,
+  failures?: { count: number }
 ): number {
   if (out.length < stride * (to - from))
     throw new TypeError(
@@ -926,7 +936,8 @@ function broadcastNumbersRange(
         deadline,
         stop,
         shape.grid,
-        args
+        args,
+        failures
       );
   }
   // The vars object has no prototype, so that a free variable that `inputs`
@@ -954,7 +965,9 @@ function broadcastNumbersRange(
       to,
       deadline,
       stop,
-      shape.grid
+      shape.grid,
+      undefined,
+      failures
     );
   for (let i = from; i < to; i++) {
     // Checked at the first cell too, so that a slice that starts after the
@@ -980,6 +993,7 @@ function broadcastNumbersRange(
         out[i - from] = numberOf(call(vars));
       } catch {
         out[i - from] = NaN;
+        if (failures !== undefined) failures.count++;
       }
       continue;
     }
@@ -989,6 +1003,7 @@ function broadcastNumbersRange(
       r = call(vars);
     } catch {
       r = undefined;
+      if (failures !== undefined) failures.count++;
     }
     if (Array.isArray(r)) {
       for (let k = 0; k < stride; k++)
@@ -1133,7 +1148,8 @@ export function broadcastIntervalsSlice(
     slice.from,
     slice.to,
     slice.deadline,
-    slice.stop
+    slice.stop,
+    slice.failures
   );
 }
 
@@ -1144,7 +1160,8 @@ function broadcastIntervalsRange(
   from: number,
   to: number,
   deadline?: number,
-  stop?: () => boolean
+  stop?: () => boolean,
+  failures?: { count: number }
 ): number {
   if (out.length < 3 * (to - from))
     throw new TypeError(
@@ -1189,6 +1206,7 @@ function broadcastIntervalsRange(
       out[o] = NaN;
       out[o + 1] = NaN;
       out[o + 2] = INTERVAL_KIND.error;
+      if (failures !== undefined) failures.count++;
     }
   }
   return to - from;

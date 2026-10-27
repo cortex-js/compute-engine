@@ -2859,6 +2859,15 @@ export interface BroadcastAsyncResult {
    */
   done: number;
   /**
+   * The number of cells among the first `done` whose evaluation threw. The
+   * values of such a cell are `NaN` (an `interval-js` cell is an error
+   * enclosure), as for a cell whose value is not a number; this count tells
+   * the two apart. A cell throws, for example, when the compiled code calls
+   * a function that does not exist on the thread that runs it. The cell
+   * counts in `done`: it was evaluated.
+   */
+  failed: number;
+  /**
    * Where the batch was evaluated. `'calling-thread'` with `inline: false`
    * means that no cell was evaluated on the calling thread: the batch was
    * refused (`done` is 0).

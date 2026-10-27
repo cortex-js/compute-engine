@@ -340,6 +340,10 @@ import {
   isEffectSubset,
 } from '../../common/type/effects.js';
 import { effectsOf } from '../boxed-expression/effects-of.js';
+import {
+  assertValidCompileHelpers,
+  isEngineCompileHandler,
+} from './engine-compile-handlers.js';
 
 import {
   COMPLEX_CONTINUATION_HEADS,
@@ -12692,8 +12696,10 @@ export class BaseCompiler {
             typeOf: (x) => BaseCompiler.operandTypeInContext(x, target),
           }
         );
-        if (custom !== undefined && custom !== null && custom !== '')
+        if (custom !== undefined && custom !== null && custom !== '') {
+          BaseCompiler.recordCallerHandlerCode(h, customDef.operator, target);
           return custom;
+        }
         declinedByCustomHandler = true;
       }
     }
@@ -41595,6 +41601,91 @@ export class BaseCompiler {
         return BaseCompiler.compileCollectionValueBlock(bodyExpr, bodyTarget);
     }
     return BaseCompiler.compile(bodyExpr, bodyTarget);
+  }
+
+  /**
+   * Record that the `compile` handler of `def`, the definition of the
+   * operator `name`, wrote part of the code of the compilation in progress.
+   *
+   * A handler of a standard library writes the engine's own code, and
+   * nothing is recorded (`isEngineCompileHandler()`). Any other handler is
+   * caller code that may call a function of this thread: unless its
+   * definition sets `compileShippable`, the root target is marked
+   * `hostNames`, so the result is not shippable and `broadcastAsync()` keeps
+   * it on this thread. The root target, not `target`: a nested target is a
+   * copy, and the result reads the flag on the root. The flag is not reset
+   * when a compilation that ran the handler is abandoned and its
+   * definitions are removed (`removeDefinitionsAddedSince()`): the result
+   * can then be marked not shippable with no caller code left in it. That
+   * only keeps the result on this thread, which is always correct.
+   *
+   * Each helper of the definition (`compileHelpers`) becomes a definition
+   * of the preamble (`addCompileHelpers()`), so that the code carries it to
+   * a worker and to a stored result.
+   */
+  static recordCallerHandlerCode(
+    name: string,
+    def: {
+      compile?: unknown;
+      compileShippable?: boolean;
+      compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
+    },
+    target: CompileTarget<Expression>
+  ): void {
+    if (isEngineCompileHandler(def.compile)) return;
+    const root = target.userFunctions?.root ?? target;
+    if (def.compileShippable !== true) root.hostNames = true;
+    if (def.compileHelpers !== undefined)
+      BaseCompiler.addCompileHelpers(name, def.compileHelpers, target);
+  }
+
+  /**
+   * Define each helper of `helpers` in the preamble of the compilation in
+   * progress, as `const <name> = (<source>);`, on the two JavaScript
+   * targets (a helper is JavaScript; another target ignores it). `owner`
+   * names the operator or the kind type whose code calls the helpers, for
+   * the error messages. A helper reads nothing outside its body, so it is
+   * evaluated once per compiled artifact (`hoistable`). Used for the
+   * `compileHelpers` of an operator definition and the `helpers` of a kind
+   * compile contract.
+   *
+   * A new helper goes FIRST in the definitions, which are emitted in their
+   * order: a definition emitted earlier can call it, and a hoisted constant
+   * (`const _val_a = …`) calls it while the preamble is evaluated, which
+   * throws a `ReferenceError` when the `const` of the helper comes later.
+   * The kind helpers are added after the whole body is compiled, so this
+   * order matters for them.
+   */
+  static addCompileHelpers(
+    owner: string,
+    helpers: Readonly<Record<string, (...args: never[]) => unknown>>,
+    target: CompileTarget<Expression>
+  ): void {
+    const language = target.language ?? 'javascript';
+    if (language !== 'javascript' && language !== 'interval-javascript')
+      return;
+    const registry = target.userFunctions;
+    if (registry === undefined)
+      throw new Error(
+        `Could not compile \`${owner}\`: its code calls helper functions, and this compilation has no preamble to define them in`
+      );
+    // A field assigned in place on a definition was not checked when the
+    // definition was declared.
+    assertValidCompileHelpers(`Could not compile \`${owner}\``, helpers);
+    for (const [helper, fn] of Object.entries(helpers)) {
+      const code = `const ${helper} = (${fn.toString()});`;
+      const existing = registry.defs.get(helper);
+      if (existing === undefined) {
+        const later = [...registry.defs];
+        registry.defs.clear();
+        registry.defs.set(helper, code);
+        for (const [name, text] of later) registry.defs.set(name, text);
+        (registry.hoistable ??= new Set()).add(helper);
+      } else if (existing !== code)
+        throw new Error(
+          `Could not compile \`${owner}\`: two definitions give the compile helper \`${helper}\` with different source, or the name is already used by the compiled code`
+        );
+    }
   }
 
   static userFunctionsPreamble(target: CompileTarget<Expression>): string {

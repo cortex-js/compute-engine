@@ -29,6 +29,7 @@ import { functionLiteralParameters } from './boxed-expression/function-literal.j
 import { apply } from './function-utils.js';
 import { sumVariantInfo } from './sum-representation.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
+import { recordEngineCompileHandler } from './compilation/engine-compile-handlers.js';
 import { journalDefinitionRecord } from './boxed-expression/boxed-value-definition.js';
 
 /**
@@ -550,6 +551,10 @@ export function mintTypeConstructor(
     if (!nAry) return args.length === 1 ? compile(args[0]) : undefined;
     return compile(args[0].engine.function('Tuple', args as Expression[]));
   };
+  // The handler writes only engine code (the operand, a tuple or a tagged
+  // object), so the code can run on a worker of the kernel pool. It is made
+  // for each type, so the standard library tables do not hold it.
+  recordEngineCompileHandler(def.compile);
 
   ce.declare(name, def);
 
@@ -1059,6 +1064,11 @@ export function installConstructorFunction(
       return undefined;
     },
   };
+  // The handler writes only engine code (the payload, or a call of the
+  // user's function literal, which the compiler emits itself), so the code
+  // can run on a worker of the kernel pool. It is made for each constructor,
+  // so the standard library tables do not hold it.
+  recordEngineCompileHandler(def.compile);
 
   // Install: update the existing binding IN PLACE when this scope has one
   // (the auto-minted constructor being overridden, or the shell the

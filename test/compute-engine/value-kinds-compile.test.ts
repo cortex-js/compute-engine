@@ -355,6 +355,65 @@ describe('VALUE KINDS: COMPILE CONTRACT', () => {
     ).toBe(false);
   });
 
+  // ROADMAP CE-507.1, decided with CE-518 (2026-10-26): the `helpers` of a
+  // contract are copied into the code, so the code stays shippable.
+  test('the `helpers` of a contract travel with the code', () => {
+    const ce = engineWithG({
+      type: gf8Contract({
+        shippable: true,
+        helpers: { gf8Xor: (a: number, b: number) => a ^ b },
+        add: (args, compile, { language }) =>
+          language === 'javascript'
+            ? `({ gf8: ${args
+                .map((x) => rep(compile(x)))
+                .reduce((a, b) => `gf8Xor(${a}, ${b})`)} })`
+            : undefined,
+      }),
+      value: gValue,
+    });
+    const r = compile(ce.box(['Add', ['G', 1], ['G', 2]]), {
+      fallback: false,
+    });
+    expect(r.preamble).toContain('const gf8Xor = (');
+    expect(r.run()).toEqual({ gf8: 3 });
+    expect(r.shippable).toBe(true);
+  });
+
+  test('a contract helper comes before a hoisted value that calls it', () => {
+    const ce = engineWithG({
+      type: gf8Contract({
+        shippable: true,
+        helpers: { gf8Of: (k: number) => ({ gf8: k & 7 }) },
+      }),
+      value: (value) => {
+        const k = (value as Expression & { op1: Expression }).op1.re;
+        return Number.isInteger(k) ? `gf8Of(${k})` : undefined;
+      },
+    });
+    ce.declare('a', 'gf8');
+    ce.assign('a', ce.box(['G', 3]));
+    const r = compile(ce.box(['Add', 'a', ['G', 1]]), { fallback: false });
+    const preamble = r.preamble!;
+    expect(preamble.indexOf('const gf8Of')).toBeGreaterThanOrEqual(0);
+    expect(preamble.indexOf('const gf8Of')).toBeLessThan(
+      preamble.indexOf('const _val_a')
+    );
+    expect(r.run()).toEqual({ gf8: 2 });
+  });
+
+  test('a contract helper with no source is refused at declaration', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('gf8', 'value', { mint: false });
+    expect(() =>
+      ce.declare('G', {
+        signature: '(integer) -> gf8',
+        arithmetic: gArithmetic({
+          type: gf8Contract({ helpers: { gf8Xor: Math.max } }),
+        }),
+      })
+    ).toThrow('arithmetic.compile.type.helpers');
+  });
+
   test('a residue class declines, with the message that names `residue`', () => {
     const ce = new ComputeEngine();
     declareMyMod(ce);
