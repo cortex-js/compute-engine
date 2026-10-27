@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-531.
+Next free reference: CE-542.
 
 **Entry format.**
 
@@ -416,20 +416,6 @@ but it refuses programs that are correct for a record with more fields.
 
 ## Collections, absence and broadcasting
 
-### CE-515. `evaluate()` of a list combined with a piecewise gives a piecewise of lists, not a list
-
-**Status:** open; defect. Tycho row 452 (filed 2026-10-26, on 0.169.2).
-
-`[0...19] · {x > 1 : 0, 1}` with `x` free evaluates to
-`Which(1 < x, [0,…,0], True, [0,1,…,19])`, not to the list
-`[{x>1: 0, 0}, {x>1: 0, 1}, …]`. The two forms have the same value at each `x`,
-but the result is not a `List`, so a caller that reads the elements of the
-result finds none. `Add`, `Abs` and a bounded `Sum` do the same. `[2,3]·x` with
-no piecewise evaluates to a list. Expected: when a piecewise is combined with a
-list, or has list branches of one length, `evaluate()` gives a `List` whose
-element k is the piecewise for element k. Tycho's instrument:
-`~/dev/tycho/scripts/repros/2026-10-26-ce452-list-times-piecewise-repro.mts`.
-
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 
 **Status:** open; task (precision; the type is sound).
@@ -720,19 +706,56 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
-### CE-530. `subs()` replaces a bound variable, the binder included
+### CE-537. The free-variable walk misreads two binders
 
-**Status:** open; defect. Tycho row 464 (filed 2026-10-26, on 0.169.2).
+**Status:** open; defect. Found 2026-10-27 while fixing `subs()` for Tycho row
+464; `subs()` now follows this walk, so it inherits both readings.
 
-The documentation of `subs` says that a binder's bound variables go on
-denoting the binder's own bindings, but
-`Comprehension(j+1, Element(j, Range(0,2))).subs({j: [4,4,5]})` gives
-`Comprehension(1+[4,4,5], Element([4,4,5], Range(0,2)))`. The index of a `Sum`,
-the parameter of a `Function` and a `Block` local become `Error` nodes in the
-same way, and in `j + Sum(j, Limits(j,1,3))` the bound `j` is replaced
-together with the free one. Expected: `subs` replaces only the free
-occurrences of a name. Tycho's instrument:
-`~/dev/tycho/scripts/repros/2026-10-26-ce464-subs-replaces-bound-variable-repro.mts`.
+- In a RAW `Sum(j·k, Limits(k, 1, k))` (no operator definition), the walk
+  treats the index as bound in the whole `Limits` clause, so it reports only
+  `j` as free. The upper bound `k` reads the enclosing binding and is free, as
+  the walk reports for the canonical form.
+- In `Exists(y < x, x)`, with a bare symbol as the quantified variable, the
+  walk reports `x` as free, where `Exists(y < x, Element(x, S))` binds it.
+
+### CE-538. What `subs()` should give for the variable of `D` and `Series`
+
+**Status:** decision needed; design. Found 2026-10-27 (Tycho row 464).
+
+The free-variable walk reports the variable of `D(x^2, x)` and of
+`Series(sin x, x, 0, 3)` as free, because the result is a function of it.
+`subs()` replaces exactly the free occurrences, so `D(x^2, x).subs({x: 3})`
+gives an invalid `D(…, Error('expected-a-symbol'))`, as it did before
+2026-10-27, and `Series(sin x, x, 0, 3).subs({x: 3})` gives
+`Series(Sin(3), 3, 0, 3)`. Treating the variable as bound would keep
+`D(x^2, x)`, which evaluates to `2x` with no sign that the substitution was
+dropped. The value a reader expects is the derivative at 3, `6`. Options: (a)
+keep the current invalid form; (b) rewrite to a substitution at a point after
+the derivative; (c) evaluate the `D` first.
+
+### CE-539. Compiling to a shader infers the root's free symbols as `number`
+
+**Status:** open; defect. Found 2026-10-27 while working on CE-525.
+
+The GPU root inliners (`inlineCollectionValuedCallsAtRoot`, and
+`inlineSharedUserFunctionCalls` in `compilation/gpu-shared-calls.ts`)
+substitute user-function bodies with `subs()`. As a side effect the engine
+infers the free `x` and `y` of the compiled expression as `number`: their
+type goes from `unknown` to `number` for the life of the engine. A compile
+should not change the declarations of the symbols it reads.
+
+### CE-534. A recursive `replace()` replaces a bound variable, the binder included
+
+**Status:** design needed; defect. Found 2026-10-27 while fixing `subs()` for
+Tycho row 464 (CE-530).
+
+`j + Sum(j, Limits(j, 1, 3))` with
+`replace({match: 'j', replace: 10}, {recursive: true})` gives
+`10 + Sum(10, Limits(Error…, 1, 3))`: the rule rewrites the index of the
+`Sum` and its bound occurrences, as `subs()` did before CE-530. The recursion
+is in `applyRule` (`rules.ts`). A fix must decide how a rule that matches a
+literal symbol treats a bound occurrence, while the simplification rules must
+still rewrite inside the body of a binder (`Sum(2k, …)` to `2·Sum(k, …)`).
 
 ### CE-91. Define value capture on assignment, mutable-object boundaries and view reads
 
@@ -1309,34 +1332,12 @@ documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
   data in the stored code and applied to each element of a list. To do when a
   host asks for stored or pooled enclosure code.
 
-- **CE-507.3** (defect, low) An overloaded signature with a kind arm does not
-  type the body of a declared function. `kindTypedFunctionLiteral()`
-  (`function-utils.ts`) annotates the untyped parameters of a `Function` body
-  from the declared signature so that `x/x` is not folded at declaration, but
-  only when the signature has ONE arm. With
-  `ce.declare('g', { signature: '((residue) -> residue) & ((integer) -> integer)', evaluate: ['Function', ['Divide', 'x', 'x'], 'x'] })`,
-  `g(ResidueClass(2, 5))` is expected to give `1` where `ResidueClass(1, 5)` is
-  wanted (not measured). Fix: annotate from the union of the arms' parameter
-  types, or refuse an overloaded signature with a kind arm and a body.
-- **CE-507.4** (to measure) A recursive lambda assigned to a symbol with a
-  declared function type goes through the re-box from JSON in `assignFn`
-  (`engine-declarations.ts`); whether the `Typed` marker that
-  `kindTypedFunctionLiteral()` adds survives that re-box is not measured. Also:
-  on the assignment route `ce.box('f').value.json` shows the marker
-  (`["Typed", "x", "'real | umeasurement'"]`) while the declaration route's
-  `_lambdaLiteral.json` does not; the cause is not known.
 - **CE-507.5** (defect, not reachable today) A kind registered inside an
   inference rollback frame, or inside the Epsil static pre-pass, is not undone
   when the frame or the pre-pass rolls back (`docs/CHECKPOINT-MODEL.md`, "State
   coverage", says so). No route reaches it: Epsil cannot declare an `arithmetic`
   field, and a host `ce.declare` with one runs outside a frame. Becomes
   reachable when Epsil can declare hooks.
-- **CE-507.6** (to decide, low) A kind whose head declares no `power` hook is
-  refused at `Sqrt`, `Square` and `Power` even when `admittedAs` is `'number'`,
-  because the nine arithmetic operators admit a kind only through its hook
-  (group 1); so `Sin(U)^2` is an error for such a kind. The plan does not state
-  this. Keep (a kind that cannot be squared should say so), or let the carrier
-  rule admit it at the arithmetic operators and leave the call unevaluated.
 - **CE-507.7** (on demand; user decision 2026-10-27: nothing now, review when
   a consumer asks for the syntax; the design to build then is the `Compose`
   alternative below, never the flag on `Multiply`) A non-commutative product
@@ -1382,23 +1383,6 @@ documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
   `doc/08-guide-types.md` says so. PR #482 also edits the "no caller uses it
   today" comment on `mint` in `src/compute-engine/index.ts` that phase 1
   rewrote: a trivial merge conflict to expect.
-- **CE-507.9** (decision needed, low) `Degrees` of a complex number folds
-  although its signature is `(real) -> real`: `Degrees(2 + 3i)` evaluates to
-  `(1/90 + i/60)·π`, while `Degrees((2 + 3i) ± 0.1)` is an `incompatible-type`
-  error, because a measurement follows the signature (a complex nominal at a
-  parameter that is real is refused at evaluation). The two answers disagree.
-  Options: (a) make `Degrees` refuse a complex number, as its signature says;
-  (b) widen the signature to `(complex) -> complex`, so that a complex
-  measurement propagates too; (c) keep both answers. If nothing is decided, (c)
-  is what ships.
-- **CE-507.10** (decision needed, low) `Mean([2 m, 4 m])` is an
-  `incompatible-type` error at boxing: `quantity` is a `'none'` kind, and the
-  statistics do not name `quantity` in their parameter type. Before phase 2 it
-  stayed unevaluated, typed `number`. To compute `3 m`, the statistics (`Mean`,
-  `Median`, `Variance`, the standard deviations, `Quantile`, …) would name
-  `quantity` and convert to one unit; that is a feature, not a fix. Options: (a)
-  keep the refusal; (b) add that feature. If nothing is decided, (a) is what
-  ships.
 
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
@@ -2071,22 +2055,35 @@ iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
 
-### CE-529. A nested integral of piecewise functions is slow and stops at a relative uncertainty of 3e-4
+### CE-541. A compiled nested integral does not add the errors of its inner integrals
 
-**Status:** open; defect. Found 2026-10-27 from Tycho row 459 (document
-`neyret/2agcgxq87y`).
+**Status:** open; defect. Found 2026-10-27 while fixing the error of nested
+integrals (CE-529).
 
-With `d(x, r) = max(0, √(x²+r²) − 1)` and
-`n(x, r, ε) = 1/max(ε, d(x, r)) · {r ≤ 1: {x < −√(1−r²): 1, 0}, 1}` defined as
-functions, `∫_0^1 y·When(∫_{−10}^{10} n(x, y, 0.01) dx, 0 ≤ y ≤ 5) dy` takes
-12 s under `N()` and gives `Measurement(5.286578, 0.00167)`. An independent
-quadrature (no CE) gives 5.2869394. The value is inside its uncertainty, but a
-relative uncertainty of 3e-4 is far from the default target, and Tycho's
-convergence check refuses it. The inner integral alone at one `y` takes 17 ms
-with an uncertainty of 2e-10, so the cost is in the outer integral. With the
-list of six ε of the document, the outer integral takes 35 s. Tycho's probes:
-`~/dev/tycho/scripts/repros/2026-10-26-hy-nan-probe.mts` (`SLOW=1`) and
-`2026-10-26-hy-reference-values.mts`.
+Since 2026-10-27 the interpreted route adds the error of each inner integral to
+the error of the outer one (`nestedErrors`, `withNestedErrors()` in
+`numerics/gauss-kronrod.ts`, set by `integrateRealPart` in
+`library/calculus.ts`). The compiled route (`_SYS.integrate`) never sets
+`nestedErrors`. So a compiled middle integral reports its result to the outer
+level but does not add the errors of its own inner integrals, and the
+uncertainty of a compiled three-level integral can be smaller than its true
+error.
+
+### CE-533. The GK15 error estimate can miss a kink inside a panel
+
+**Status:** decision needed; numerics. Found 2026-10-27 while fixing the
+nested integral of Tycho's document `neyret/2agcgxq87y`.
+
+A Gauss–Kronrod panel estimates its error from one difference: the Kronrod
+sum minus the Gauss sum (`gk15`, `numerics/gauss-kronrod.ts`). When the
+integrand has a kink inside the panel, the two sums can agree by chance. With
+the inner integrand of that document at y = 0.758125 and ε = 0.01, a kink at
+0.31 of the half-width gives a difference of 1.2e-10: the panel reports an
+error of 4e-11, and the true error is 1.6e-5. The jump or kink next to a panel
+END is detected since 2026-10-27 (`hiddenEdgeError`). A fix for a kink inside
+the panel needs a different error estimator (for example several null rules).
+That changes the error reported for every integral, so it needs a decision.
+On this document the effect is below 7e-10.
 
 ### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
 
@@ -3968,18 +3965,19 @@ the WGSL versions bitcast a `let`: a constant `bitcast<f32>` to NaN or infinity
 is a shader-creation error in Chrome ("value inf cannot be represented as
 'f32'").
 
-### CE-522. Interval library kernels: a known limit of the outward rounding, and answers looser than necessary
+### CE-522. Interval library kernels: a known limit of the outward rounding
 
-**Status:** open; one known limit and three improvements, low. Found
+**Status:** open; one known limit, low. Found
 2026-10-26 by the spec review of plan `docs/plans/2026-10-26-value-kinds.md`
 section 4.9.2 (phase 3, the `Enclosure` value kind), which relies on these
 kernels (`src/compute-engine/interval/`); all are reachable through
 `compile(…, { to: 'interval-js' })` and through `.N()` of an enclosure. The
 unsound and too-wide answers that the review found are fixed in phase 3
 (`CHANGELOG.md`, "The interval library gives sound and tighter answers";
-tests `test/compute-engine/interval-kernels-ce522.test.ts`). What remains is
-sound: .5 is a known limit of the transcendental kernels, and .10, .11 and
-.12 are answers that contain the true value but are wider than necessary.
+tests `test/compute-engine/interval-kernels-ce522.test.ts`). The answers
+that were sound but wider than necessary (.10 to .12) were made tighter on
+2026-10-27. What remains is .5, a known limit of the transcendental
+kernels.
 
 - **CE-522.5** (known limit, not fixed in phase 3) The outward rounding of
   the transcendental kernels is a minimum move, not a proof of containment
@@ -3988,70 +3986,6 @@ sound: .5 is a known limit of the transcendental kernels, and .10, .11 and
   `div`, integer powers, `abs`, the step functions) are rigorous. Certified
   kernels (error bounds per function) are a separate project; the
   `Enclosure` documentation states the limit.
-- **CE-522.10** (looser, not wrong) The other kernels with a pole still
-  report a pole AT an endpoint of the interval as `singular` with no value
-  (the whole line), as `tan`, `cot`, `sec`, `csc`, `gamma` and the powers
-  did before phase 3 of CE-507: `coth` and `csch` at 0 (`coth([0, 1])` is `singular`
-  where the image is `[coth(1), +∞)`), `acoth` and `acsch` at 0, `asech` at
-  0, and `gammaln` at the non-positive integers (`interval/trigonometric.ts`,
-  `interval/elementary.ts`). The answer is sound but looser than the
-  half-line. Fix: the rule that phase 3 gave to `tan`, `gamma` and the
-  powers (the half-line beside the pole with the sign of the function there; `empty` for a point at the
-  pole, or `singular` where the compiled code must match the interpreter's
-  `~oo`).
-- **CE-522.11** (looser, not wrong) `mod` with a divisor interval that is
-  not a point (`modByInterval`, `interval/elementary.ts`, added in phase 3 of
-  CE-507 because the earlier kernel answered an unsound `[1, 1]` for
-  `mod([5, 5], [2, 4])`) rounds
-  each endpoint of its continuous case in the outward direction itself, and
-  the export (`outwardUnlessExact`) then steps an endpoint that its prover
-  does not certify by one more ulp: `mod([1, 1], [2, 4])` is
-  `[1 − 1 ulp, 1 + 1 ulp]` where the exact `[1, 1]` is already a bound.
-  Fix: a prover that certifies the endpoints of that branch (the endpoints
-  of the hull `0` and `±d` are already certified).
-- **CE-522.12** (looser, not wrong) The `interval-js` target compiles
-  `Root(x, n)` with a symbolic degree `n` as
-  `_IA.powInterval(x, _IA.div(_IA.point(1), n))`
-  (`compilation/interval-javascript-target.ts`). The exponent `1/n` is then
-  an interval that is not a point, and over a negative base `powIntervalRaw`
-  (`interval/elementary.ts`) answers the symmetric hull `[−M, M]` (it
-  encloses the real values at the exponents with an odd denominator). The
-  exact degree is lost: for `n = 6` and `x = [−64, −1]` the answer is
-  `[−2.0000000000000004, 2.0000000000000004]` where an even root has no
-  real value (`empty`), and for `n = 3` it is
-  `[−4.000000000000002, 4.000000000000002]` where the real cube root gives
-  `[−4, −1]` (measured 2026-10-26). Before phase 3 of CE-507 the even case
-  answered `empty`. Fix: carry the degree to run time (a root kernel that
-  reads the integer `n`, as `powRational` reads a literal degree), so that
-  an even degree answers `empty` over a negative base and an odd degree the
-  real root.
-
-### CE-527. On the shader targets, bind every draw of a statement in order instead of declining
-
-**Status:** open; capability (user request, 2026-10-26; next after the
-draw-order guard).
-
-A lowering that uses an impure operand twice binds it to a hoisted
-temporary (`gpuOperandOnce`, `Cot`, `Remainder`, the components of a
-vector in `Max`, a `Block` used as a value, the loop or terms of a `Sum`).
-The temporary runs before the rest of its statement, so since the guard
-`gpuAssertBindingKeepsDrawOrder` (`compilation/gpu-target.ts`) the lowering
-declines when a draw that is not bound comes before the bound operand in the
-interpreter's order: `(Random(), \cot(\operatorname{Random}()))`. Before the
-guard both shader targets drew the operand of `cot` first. Shapes whose
-bound draws already come first (`\cot(\operatorname{Random}()) +
-\operatorname{Random}()`, `Variance` of a list of draws) compile. For the
-others the interpreter evaluates the expression, which is correct but loses
-the GPU lane for it. The statement form of a selection on `wgsl` has a
-stricter rule of its own (`compileGPUStatementSelection`: nothing else in the
-statement may draw). The fix: bind every draw of
-the statement that is evaluated unconditionally to its own temporary, in the
-order of the interpreter (operands from first to last, depth first), before
-the statement, and compile the statement with those temporaries, as the
-relational-chain lowering already does for its own operands
-(`base-compiler.ts`). A draw in a lazily evaluated position (a branch, a
-loop body, the body of a user function) cannot be bound ahead; beside such a
-draw the guard still declines.
 
 ### CE-526. On WebGPU, the NaN guard of `sin` and `cos` changes the value of a finite argument
 
@@ -4576,23 +4510,113 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
-### CE-516. Interpreted evaluation of chained lazy `Map`/`Zip` collections read through index lists is exponential in the depth of the chain
+### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 
-**Status:** open; performance. Tycho row 453 (filed 2026-10-26, on 0.169.2).
+**Status:** open; performance. Found by the Tycho document-open measurement,
+2026-10-27. Same cause as CE-531; fix the two together.
 
-A chain such as
-`Map(W ↦ max(W[1], W[2]), Zip(A[I], Map(Z ↦ max(Z[1], Z[2]), Zip(A, A[L_1]))))`,
-each level over the previous one, read once at index 1 over 20 elements, reads
-160, 6 880 and 282 560 lazy `Map` elements (70 ms, 0.56 s, 16.8 s) at depths 2,
-3 and 4: about 41 times more per level. Later reads are free because the value
-is kept. Expected: in one evaluation, materialize each inner lazy collection
-once, so the cost is linear in depth × length. Tycho also asks for a public API
-that binds a value to a symbol for the duration of a callback and restores the
-value and the type slots exactly; today Tycho reads the internal fields
-`storedValue`, `_placeholderSkeleton` and `_signatureSkeleton` to do this.
-Tycho's instrument:
-`~/dev/tycho/scripts/repros/2026-10-26-ce453-lazy-collection-index-reread-repro.mts`
-(about 18 s).
+When Tycho opens the document `art/2ki2hjsouf`, it makes 1 994 canonical
+`ce.rebind` calls on 877 distinct trees: 893 to 1 300 ms in Tycho, 1 133 to
+1 445 ms in the replay. A single call is expensive: the 425-byte tree
+`R_3(At(PointList(PointX(S_orry(u)) + … D(PointY(S_orry(u)), u) …)))` takes 14
+to 20 ms. About 85 % of it is the typing of `S_orry(u)`:
+`callResultTypeOfBinding` and `literalBodyResultType`
+(`boxed-expression/call-result-type.ts`) walk the 8.7 KB body of the function.
+That walk has a memo keyed on `_cacheGeneration()`, but each `D` goes through
+`canonicalizeBinder` (`box.ts`). It declares the bound variable in a scope that
+`box.ts` has just created and then pops that scope. The `declare` event
+(`callable: true`) and the pop advance the `any` axis (`axisMaskOf`,
+`engine-configuration-lifecycle.ts`), so the generation goes up by 8 per call
+and the memo misses 10 times per call.
+
+Proposed fix: a declaration of a binder variable into a scope that this
+canonicalization created gets the same exemption as a `parameter` declaration.
+No read can have resolved through a scope that did not exist before, and the
+pop then is `clean`. The exemption must not apply to a scope the caller passed
+in. Tested on a patched copy of the bundle (not in engine source, no test
+suite run): the repeated rebind of the tree above went from 14.0 to 1.2 ms, and
+a cold replay from 1 159 to 868 ms (median of 5, −25 %); the outputs were the
+same.
+
+A cache of `rebind` keyed on the tree would not help: Tycho passes a new,
+usually empty, scope to each call, and the engine version is unchanged since
+the previous rebind of the same tree for only 250 of the 1 117 repeated trees
+(122 ms). Tycho's side: it classifies each row twice, which doubles the rebind
+work (Tycho row ID).
+
+Reproduction: `npx tsx benchmarks/tycho-document-open/rebind.ts`
+(`COLD=1 RUNS=1` for the first run only).
+
+### CE-536. `evaluate()` of a large surface body evaluates each copy of a subtree again and types every new node again
+
+**Status:** open; performance. Found by the Tycho document-open measurement,
+2026-10-27.
+
+When Tycho opens the document `art/2ki2hjsouf`, it calls `evaluate()` on 15
+surface bodies in `u` and `v` (2 to 67 KB of MathJSON each): 1 684 ms in
+Tycho, 1 623 ms in the replay with a production-like bundle (median of 5), 460
+ms for the largest input. Three causes:
+
+- **Copies of a subtree.** Input 0 has 8 100 nodes but 244 distinct subtrees:
+  one 3.6 KB `ListJoin` subtree occurs 18 times, because Tycho puts the body of
+  `G_APS(u,v)` at each read of `R_3`. Evaluating the copies costs 46 % of input
+  0 and 44 % of input 2.
+- **Type derivation on each new node.** `boundCallType` (`boxed-function.ts`)
+  is about 37 % of `evaluate`: 27 000 calls on input 0 with 184 distinct
+  (operator, operand types) keys, and 425 000 `isSubtype` calls
+  (`common/type/subtype.ts`) on 1 096 distinct pairs (`real <: number` alone
+  131 000 times).
+- **Cache invalidation.** In inputs 2 to 7, each write of a `Comprehension`
+  index and each scope pop advances the `any` axis 104 to 112 times per call,
+  and each advance retires the cached `_type` of every expression.
+
+Proposed fixes: (a) inside one `evaluate()` call, a memo keyed on the
+structural hash for a subtree with no effect (no `Assign`, no unseeded random
+draw), cleared by any state event on the `semantic` axis; (b) a memo of
+`boundCallType` keyed on the operator definition, the operand type objects and
+`_cacheGeneration()`, after an audit of what else the function reads
+(`absentTerm`, `applySiteResultType`, reboxed callees); (c) a fast path in
+`isSubtype` for two primitive types. Tycho's side: evaluate an inlined
+function call once instead of copying its body at each read.
+
+Reproduction: `npx tsx benchmarks/tycho-document-open/evaluate.ts` (`RUNS=`,
+`ONLY=0,2`; `CE_CACHE_STATS=1` prints the `isSubtype` counts). Under `tsx` the
+`console.assert` calls are live and add about 1 s; the production build strips
+them.
+
+### CE-531. A call of a function literal invalidates the caches on the `any` axis
+
+**Status:** open; performance. Found 2026-10-27 while fixing the lazy
+collection chain of Tycho row 453.
+
+Each call of a function literal declares its parameters in a new call scope
+(`declareParameterActivation`, `function-utils.ts`). That declaration sends a
+`declare` event that is neither `scratch` nor `parameter`, so it advances the
+engine's `any` version. Every cache keyed on that version
+(`_cacheGeneration()`: the evaluated form of `At(A, I)`, the memo of a lazy
+collection value, the `_type` and `_sgn` caches) then misses after each call.
+Measured on the chain of Tycho row 453 at depth 3: the version went from 17 to
+7 129 during one read. The question: can a declaration into a scope created
+for the call, which no expression has read through yet, be exempt, as the
+declaration of a parameter in a body scope already is? The risk: the cached
+type of a body node when the type of the parameter changes between calls.
+
+### CE-532. A public API that binds values to symbols for the duration of a callback
+
+**Status:** open; design. Tycho row 453 (second ask).
+
+Tycho's `withValuelessVariablesBound()`
+(`~/dev/tycho/src/plot-core/list-materialize.ts`) assigns values to document
+symbols while it reads point coordinates, and then restores them. It reads the
+internal fields `storedValue`, `_placeholderSkeleton` and `_signatureSkeleton`
+to do so, and cannot restore a type that `assign` changed. The public
+`ce.checkpoint()`/`ce.restore()` snapshot the whole engine and throw during an
+evaluation. Proposal: `ce.withValues(values, fn)`. It pushes a scope, declares
+in it each name with the given value and with the declared type of the visible
+binding (as the internal `withValueShield()` does for valueless names), runs
+`fn`, and pops the scope in a `finally`. The outer definition is never
+written, so there is nothing to restore. An expression created inside `fn`
+must not be kept after `fn` returns.
 
 ### CE-313. Evaluating a symbolic closed form again after a state change rebuilds its nodes
 
@@ -5449,6 +5473,32 @@ Profile it first, then find whether the integral could use the antiderivative of
 the second derivative (the first derivative) directly.
 
 ## Tests, tools, documentation and release tasks
+
+### CE-540. The CI test job fails on `main` in four test files
+
+**Status:** open; defect, small. Seen 2026-10-27 in the `main` run of commit
+`a23be5735` and in the run of pull request #482.
+
+The `test` job of CI fails on Node 22 and Node 26. The failing tests:
+
+- `test/compute-engine/ce-39-3-range-element-stays-range.test.ts`, "Shape and
+  Rank of many long range rows do not list the rows": the test requires the
+  two queries over 10,000 rows of `Range(1, 10000)` to finish in less than one
+  second, and the CI machine is slower. Do not replace the timing check with
+  spies on the `iterator` and `at` handlers of `Range` only: hashing and
+  `isSame` read the elements of a range through `integerRangeElements()`
+  (`boxed-expression/type-guards.ts`), not through those handlers, so a
+  regression that hashes every row would pass. Count the work (for example,
+  spy on the hash as well), or keep a timing check with a limit that CI
+  meets.
+- `test/compute-engine/compile-gpu-statement-selection.test.ts`, "a selection
+  with an effect keeps the ternary form and declines", and
+  `test/compute-engine/ce-509-513-shader-fixes.test.ts`, "declines a plain draw
+  in a branch too": the WGSL compilation of a branch that draws a random value
+  does not throw. Check again after commit `f5d991902` (the order of random
+  draws in GPU statements), which is after `a23be5735`.
+- `test/compute-engine/ce-430-findfit-async-data.test.ts`, the three "a timer
+  runs during …" tests, on Node 22 only.
 
 ### CE-355. Post the next release version to Tycho for rows 418 to 425
 

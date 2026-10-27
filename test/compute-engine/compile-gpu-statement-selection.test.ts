@@ -201,42 +201,74 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
 
   test('a selection with an effect keeps the ternary form and declines', () => {
     // Hoisted as a statement, an effect inside the selection — a write to an
-    // enclosing binding, directly or in a called function, or more than one
-    // draw in a branch, or a draw beside another draw in the statement —
-    // could run in another order than the interpreter's. Such a selection
-    // keeps the ternary form, which declines a hoisting arm as before.
-    ce.declare('f', 'function');
-    ce.assign('f', ce.parse(String.raw`n \mapsto n + \operatorname{Random}()`));
-    const declines = [
-      [
+    // enclosing binding, directly or in a called function — could run in
+    // another order than the interpreter's. Such a selection keeps the
+    // ternary form, which declines a hoisting arm as before.
+    ce.declare('w', 'real');
+    expect(() =>
+      compile(
+        ce.box([
+          'If',
+          ['Greater', 'x', 0],
+          [
+            'Block',
+            ['Declare', 'q', 'real', ['Random']],
+            ['Assign', 'w', 1],
+            'q',
+          ],
+          0,
+        ]),
+        { to: 'glsl', fallback: false, constantFold: false }
+      )
+    ).toThrow(/conditionally-evaluated branch|multi-statement construct/);
+  });
+
+  test('a branch with several draws binds each one in order', () => {
+    // More than one draw in a branch: the statement is compiled again with
+    // every draw bound to a temporary where it is compiled, so the statement
+    // form keeps the order of the draws (`gpuRecompileWithBoundDraws`).
+    const draws = (code: string): string[] =>
+      code
+        .split('\n')
+        .filter((line) => line.includes('_gpu_rnd_draw('))
+        .map((line) => line.replace(/\d* = _gpu_rnd_draw\(.*$/, ''));
+    const sum = compile(
+      ce.box([
         'If',
         ['Greater', 'x', 0],
         ['Tuple', ['Random'], ['Sum', ['Random'], ['Limits', 'n', 1, 1000]]],
         ['Tuple', 0, 0],
-      ],
-      [
-        'If',
-        ['Greater', 'x', 0],
-        ['Block', ['Declare', 'q', 'real', ['Random']], 'q'],
-        0,
-      ],
-      [
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    ).code;
+    // The first draw of the branch, then the draw inside the loop.
+    expect(draws(sum)).toEqual(['  float _tv', '    float _tv']);
+    const cot = compile(
+      ce.box([
         'If',
         ['Greater', 'x', 0],
         ['Tuple', ['Random'], ['Cot', ['Random']]],
         ['Tuple', ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]], 0],
-      ],
-    ];
-    for (const expr of declines)
-      expect(() =>
-        compile(ce.box(expr), {
-          to: 'glsl',
-          fallback: false,
-          constantFold: false,
-        })
-      ).toThrow(
-        /conditionally-evaluated branch|multi-statement construct|a draw written before it/
-      );
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    ).code;
+    expect(draws(cot)).toEqual(['  float _tv', '  float _tv']);
+    expect(cot).toContain(
+      '_tv1 = vec2(_tv2, (_gpu_cos(_tv3) / _gpu_sin(_tv3)));'
+    );
+    // A `Block` branch whose local is set by a draw writes nothing outside
+    // the block: it takes the statement form.
+    const block = compile(
+      ce.box([
+        'If',
+        ['Greater', 'x', 0],
+        ['Block', ['Declare', 'q', 'real', ['Random']], 'q'],
+        0,
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    ).code;
+    expect(block).toMatch(/^float _tv\d+;\nif \(0\.0 < x\) \{\n/);
+    expect(block.split('_gpu_rnd_draw(').length - 1).toBe(1);
   });
 
   test('a selection reading a name the unit assigns keeps the ternary form', () => {
@@ -399,24 +431,28 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
 
   test('a draw behind an assigned symbol in an arm is an effect', () => {
     // The engine calls a symbol with a value pure; the shader inlines the
-    // value, so an arm reading `r := Random()` draws when taken.
+    // value, so an arm reading `r := Random()` draws when taken. With the
+    // draw of the tuple before it, the statement is compiled with every draw
+    // bound in order: the tuple's draw first, then the `if`, whose `else`
+    // branch draws.
     ce.declare('r_d', 'real');
     ce.assign('r_d', ce.box(['Random']));
-    expect(() =>
-      compile(
-        ce.box([
-          'Tuple',
-          ['Random'],
-          [
-            'If',
-            ['Greater', 'x', 0],
-            ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
-            'r_d',
-          ],
-        ]),
-        { to: 'glsl', fallback: false, constantFold: false }
-      )
-    ).toThrow(/conditionally-evaluated branch/);
+    const code = compile(
+      ce.box([
+        'Tuple',
+        ['Random'],
+        [
+          'If',
+          ['Greater', 'x', 0],
+          ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
+          'r_d',
+        ],
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    ).code;
+    expect(code).toMatch(
+      /^float _tv1 = _gpu_rnd_draw\(.*\nfloat _tv2;\nif \(0\.0 < x\) \{\n[^]*\} else \{\n  float _tv4 = _gpu_rnd_draw\(.*\n  _tv2 = _tv4;\n\}\nreturn vec2\(_tv1, _tv2\);$/
+    );
   });
 
   test('a draw behind an assigned symbol inside a called function is an effect', () => {
@@ -438,7 +474,9 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         ]),
         { to: 'glsl', fallback: false, constantFold: false }
       )
-    ).toThrow(/conditionally-evaluated branch|a draw written before it/);
+    ).toThrow(
+      /conditionally-evaluated branch|a draw written before it|a clause needs statements and draws/
+    );
   });
 
   test('the statement-needs scan is linear in the distinct nodes of a shared arm', () => {

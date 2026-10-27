@@ -3495,14 +3495,87 @@ export class BaseCompiler {
     // position whose value lands on the right of an assignment (a
     // `compileShader()` body statement) leaves `root` unset, so a `Block`
     // there also takes the operand lowering.
-    const sink: NonNullable<CompileTarget<Expression>['hoist']> = {
-      stmts: [],
-      boundVars: target.boundVars,
+    const run = (): { stmts: string[]; code: string } => {
+      const sink: NonNullable<CompileTarget<Expression>['hoist']> = {
+        stmts: [],
+        boundVars: target.boundVars,
+      };
+      if (root && expr !== undefined) sink.root = expr;
+      sink.unit = expr;
+      const code = BaseCompiler.compile(expr, { ...target, hoist: sink }, prec);
+      return { stmts: sink.stmts, code };
     };
-    if (root && expr !== undefined) sink.root = expr;
-    sink.unit = expr;
-    const code = BaseCompiler.compile(expr, { ...target, hoist: sink }, prec);
-    return { stmts: sink.stmts, code };
+    return BaseCompiler.withStatementRecompile(target, expr, run);
+  }
+
+  /**
+   * Run `run`, the compilation of one statement. When it throws, the target
+   * may compile the statement again (`CompileTarget.recompileStatement`).
+   * `run` installs a fresh hoist sink each time, so nothing the first
+   * attempt hoisted is kept, and the state of the enclosing CSE instances
+   * is put back as it was before the first attempt: a temporary the first
+   * attempt bound had its declaration in the discarded sink, so a second
+   * attempt that read it as bound would name an undeclared temporary.
+   */
+  private static withStatementRecompile<R>(
+    target: CompileTarget<Expression>,
+    unit: Expression | undefined,
+    run: () => R
+  ): R {
+    if (target.recompileStatement === undefined) return run();
+    const restoreCse = BaseCompiler.snapshotCseInstances(target);
+    try {
+      return run();
+    } catch (error) {
+      const again = target.recompileStatement(
+        error,
+        () => {
+          restoreCse();
+          return run();
+        },
+        unit
+      );
+      if (again === undefined) throw error;
+      return again;
+    }
+  }
+
+  /**
+   * Save the state of the CSE instances open on `target` (which candidates
+   * are bound, their names, the bindings, the cached constant code), and
+   * return a function that puts it back. The instances a compilation pushes
+   * are popped when it ends, also when it throws, so only these can keep
+   * state from a discarded compilation.
+   */
+  private static snapshotCseInstances(
+    target: CompileTarget<Expression>
+  ): () => void {
+    const instances = target.cse?.instances ?? [];
+    const saved = instances.map((instance) => ({
+      instance,
+      state: new Map(instance.state),
+      names: new Map(instance.names),
+      bindings: instance.bindings.length,
+      inline: new Map(BaseCompiler._cseInlineCode.get(instance) ?? []),
+    }));
+    return () => {
+      for (const { instance, state, names, bindings, inline } of saved) {
+        instance.state.clear();
+        for (const [k, v] of state) instance.state.set(k, v);
+        instance.names.clear();
+        for (const [k, v] of names) instance.names.set(k, v);
+        instance.bindings.length = bindings;
+        BaseCompiler._cseInlineCode.set(instance, inline);
+      }
+    };
+  }
+
+  /**
+   * The function nodes being compiled now, the outermost first and the
+   * node being compiled last (`_compileParents`). Read-only.
+   */
+  static compileParents(): ReadonlyArray<Expression> {
+    return BaseCompiler._compileParents;
   }
 
   /**
@@ -3565,10 +3638,12 @@ export class BaseCompiler {
     compileWith: (t: CompileTarget<Expression>) => string[]
   ): string[] {
     if (!target.bareStatementBlocks) return compileWith(target);
-    const sink = { stmts: [] as string[], boundVars: target.boundVars, unit };
-    const lines = compileWith({ ...target, hoist: sink });
-    if (sink.stmts.length === 0) return lines;
-    return [...sink.stmts.map((s) => s.replace(/;\s*$/, '')), ...lines];
+    return BaseCompiler.withStatementRecompile(target, unit, () => {
+      const sink = { stmts: [] as string[], boundVars: target.boundVars, unit };
+      const lines = compileWith({ ...target, hoist: sink });
+      if (sink.stmts.length === 0) return lines;
+      return [...sink.stmts.map((s) => s.replace(/;\s*$/, '')), ...lines];
+    });
   }
 
   /**

@@ -25,9 +25,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = glsl.compile(expr, NO_FOLD).code;
-      expect(code).toBe(
-        '((sin(1.0)) + (sin(2.0)) + (sin(3.0)))'
-      );
+      expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
     });
 
     it('should unroll Product with small constant bounds', () => {
@@ -326,16 +324,38 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         // The same escape detector fires for a hoisted impure temporary —
         // `Cot` splices its operand twice and so binds an impure one to a
         // `_tv` — so the message must not blame a loop-form Sum/Product
-        // exclusively.
+        // exclusively. The branches have no one shader type (a number and a
+        // boolean), so the selection cannot take its statement form.
         expect(() =>
           glsl.compile(
             ce.box([
               'WithRandomSeed',
               7,
-              ['Which', ['Less', 'x', 1], ['Cot', ['Random']], 'True', 2],
+              [
+                'Which',
+                ['Less', 'x', 1],
+                ['Cot', ['Random']],
+                'True',
+                ['Equal', 'x', 1],
+              ],
             ] as any)
           )
         ).toThrow(/or an impure operand bound to a hoisted temporary/);
+      });
+
+      it('binds the impure temporary in its branch when it can', () => {
+        // With branches of one type, the selection is compiled again in its
+        // statement form, and the branch binds its own draw (`gpuRecompileWithBoundDraws`).
+        const code = glsl.compile(
+          ce.box([
+            'WithRandomSeed',
+            7,
+            ['Which', ['Less', 'x', 1], ['Cot', ['Random']], 'True', 2],
+          ] as any)
+        ).code;
+        expect(code).toMatch(
+          /^float _tv\d+;\nif \(x < 1\.0\) \{\n  float _tv\d+ = _gpu_rnd_draw\(/
+        );
       });
     });
 

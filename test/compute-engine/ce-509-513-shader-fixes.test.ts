@@ -223,19 +223,24 @@ describe('CE-512 (Tycho row 457): WGSL Mod computes its operands once', () => {
   });
 });
 
-describe('a WGSL branch that draws a random value fails closed', () => {
+describe('a WGSL branch that draws a random value', () => {
   // `select` computes every branch, so a draw in a branch that is not taken
-  // would advance the random stream and shift every later draw.
+  // would advance the random stream and shift every later draw. The branch
+  // takes the `if` form instead.
   const json = [
     'WithRandomSeed',
     'x',
     ['Tuple', ['If', ['Less', 'x', 0], ['Mod', ['Random'], 2], 0], ['Random']],
   ];
 
-  it('declines on WGSL', () => {
-    expect(() =>
-      compile(ce.box(json as never), { to: 'wgsl', fallback: false } as never)
-    ).toThrow(/a branch draws a random value/);
+  it('takes the `if` form on WGSL, with every draw bound in order', () => {
+    // A draw beside the selection: the statement is compiled with each draw
+    // bound to a temporary where it is compiled (`gpuRecompileWithBoundDraws`).
+    const { code } = shader(json, 'wgsl');
+    expect(code).not.toContain('select(');
+    expect(code).toMatch(
+      /^var _tv1: f32;\nif \(x < 0\.0\) \{\n  let _tv2: f32 = _gpu_rnd_draw\(.*\n  _tv1 = _gpu_fmod\(_tv2, 2\.0\);\n\} else \{\n  _tv1 = 0\.0;\n\}\nlet _tv3: f32 = _gpu_rnd_draw\(.*\nreturn vec2f\(_tv1, _tv3\);$/
+    );
   });
 
   it('compiles on GLSL, whose ternary evaluates only the taken branch', () => {

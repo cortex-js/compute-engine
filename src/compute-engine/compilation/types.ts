@@ -849,6 +849,25 @@ export interface CompileTarget<Expr = unknown> {
    * this is a cost, not a semantic, difference) — and the alternative was
    * failing closed to the interpreter, which is slower still.
    */
+  /**
+   * Compile a statement again after its first compilation failed with
+   * `error`. `again` compiles the statement once more, with a fresh hoist
+   * sink, and returns its result; `unit` is the statement, when the
+   * statement position records it. Return that result, or `undefined` to
+   * let `error` propagate.
+   *
+   * Called by the statement positions of a `bareStatementBlocks` target
+   * (`BaseCompiler.compileStatementBody`, the statements of a block). The
+   * shader targets use it when the order of the random draws of a statement
+   * would change: they compile the statement again with every draw bound to
+   * a temporary of its own, in the order of the interpreter.
+   */
+  recompileStatement?: <R>(
+    error: unknown,
+    again: () => R,
+    unit: Expr | undefined
+  ) => R | undefined;
+
   hoist?: {
     stmts: string[];
     boundVars: ReadonlySet<string> | undefined;

@@ -1070,6 +1070,163 @@ function gpuEvaluatedUnit(
 }
 
 /**
+ * The state of the compilation of a statement with every draw bound to a
+ * temporary of its own (`gpuRecompileWithBoundDraws`), `undefined` outside
+ * one. `inline`: a draw stayed in its expression (a conditional arm).
+ * `reordered`: a draw was compiled after such a draw, so it may run before
+ * it, or
+ * a draw was compiled before a draw that comes earlier in the order of the
+ * interpreter (`gpuDrawComesAfter`). `last`: the nodes that were being
+ * compiled when the last draw was bound (`BaseCompiler.compileParents`).
+ */
+let gpuBindEveryDraw:
+  | {
+      inline: boolean;
+      reordered: boolean;
+      last?: ReadonlyArray<Expression>;
+    }
+  | undefined;
+
+/**
+ * Does a draw compiled while the nodes `next` are being compiled come after
+ * a draw compiled while the nodes `previous` were, in the order of the
+ * interpreter (the operands of a node from first to last, depth first, the
+ * draw of a node after its operands)? Each list starts at the root of the
+ * statement and ends with the node that draws. A lowering can compile its
+ * operands in another order than they are written (`Root` compiles its
+ * degree first), so the order of compilation is checked, not assumed.
+ *
+ * Under the deepest node that both lists share, the operand that leads to
+ * `next` must come after the one that leads to `previous`. When `next` is
+ * that node, its draw comes after the draws of its operands; when it is the
+ * same node as `previous`, the node is compiled again (a term of an
+ * unrolled `Sum`) or draws twice. When `previous` is that node, it drew
+ * before one of its operands: no. A node that is not an operand of the
+ * node above it (built by a lowering) has no position to compare: no. A
+ * symbol stands for its value, which the shader inlines. A node at several
+ * operand positions takes the earliest for `previous` and the latest for
+ * `next`.
+ */
+function gpuDrawComesAfter(
+  previous: ReadonlyArray<Expression>,
+  next: ReadonlyArray<Expression>
+): boolean {
+  let k = 0;
+  while (k < previous.length && k < next.length && previous[k] === next[k])
+    k += 1;
+  if (k === next.length) return true;
+  if (k === previous.length || k === 0) return false;
+  const parent = previous[k - 1];
+  if (!isFunction(parent)) return false;
+  const holds = (op: Expression, node: Expression): boolean =>
+    op === node ||
+    (isSymbol(op) && op.engine._getSymbolValue(op.symbol) === node);
+  const ops = parent.ops;
+  const from = ops.findIndex((op) => holds(op, previous[k]));
+  let to = -1;
+  for (let i = ops.length - 1; i >= 0 && to < 0; i--)
+    if (holds(ops[i], next[k])) to = i;
+  return from >= 0 && to >= 0 && from < to;
+}
+
+/** The marker of a decline that compiling the statement with every draw
+ * bound in order can lift (`gpuRecompileWithBoundDraws`). */
+const GPU_DRAW_ORDER = Symbol('gpuDrawOrder');
+
+function gpuDrawOrderError(message: string): Error {
+  const error = new Error(message);
+  (error as unknown as Record<symbol, boolean>)[GPU_DRAW_ORDER] = true;
+  return error;
+}
+
+/**
+ * Does evaluating `unit` call a function whose body may draw? A node that
+ * draws by itself (`gpuNodeDrawsItself`) and is not an operator of the
+ * Random family: a call of a user function or of a function-valued
+ * symbol. The value of a symbol is read as the shader inlines it. A node
+ * reached by several parents is visited once.
+ */
+function gpuCallsAFunctionThatDraws(unit: Expression): boolean {
+  const seen = new Set<Expression>();
+  const walk = (x: Expression): boolean => {
+    if (seen.has(x)) return false;
+    seen.add(x);
+    if (isSymbol(x)) {
+      if (!BaseCompiler.foldValueImpure(x)) return false;
+      const value = x.engine._getSymbolValue(x.symbol);
+      return value !== undefined && walk(value);
+    }
+    if (!isFunction(x)) return false;
+    if (gpuNodeDrawsItself(x)) {
+      const def = x.engine.lookupDefinition(x.operator);
+      if (
+        !isOperatorDef(def) ||
+        def.operator.isUserFunctionDefinition ||
+        def.operator.drawsRandom !== true
+      )
+        return true;
+    }
+    return x.ops.some(walk);
+  };
+  return walk(unit);
+}
+
+/**
+ * Does the arm `e` of a selection draw while every draw of the statement is
+ * bound in order (`gpuBindEveryDraw`)? A draw in a ternary arm cannot be
+ * bound and runs after the bound draws, so such an arm takes the statement
+ * form of the selection, whose branches bind their own draws.
+ */
+function gpuArmDrawsWhileBinding(e: Expression): boolean {
+  return gpuBindEveryDraw !== undefined && BaseCompiler.foldValueImpure(e);
+}
+
+/**
+ * The `recompileStatement` hook of the shader targets. A statement that
+ * declined because the order of its random draws would change (a draw
+ * bound to a temporary ahead of the statement while a draw written before
+ * it stays in the statement, or a WGSL selection with a branch that draws)
+ * is compiled again with every draw bound to a temporary at the point it is
+ * compiled (`gpuRandomDraw`). The operands of a node are compiled from the
+ * first to the last, depth first, and the draw of a node after its
+ * operands, which is the order of the interpreter, so the hoisted draws run
+ * in that order. A draw that cannot be bound (in a conditionally evaluated
+ * arm) stays in its expression and runs after the bound draws: when any
+ * draw is compiled after such a draw, or a lowering compiles a draw before
+ * one that comes earlier in the expression (`gpuDrawComesAfter`), the
+ * statement declines with the first error.
+ * A decline of another kind in the second compilation propagates.
+ *
+ * A call of a function whose body draws is not compiled again: the body is
+ * a shader function of its own, whose draws run where the call stands, and
+ * this check does not see them (`gpuCallsAFunctionThatDraws`).
+ */
+function gpuRecompileWithBoundDraws<R>(
+  error: unknown,
+  again: () => R,
+  unit: Expression | undefined
+): R | undefined {
+  if (
+    gpuBindEveryDraw !== undefined ||
+    !(error instanceof Error) ||
+    (error as unknown as Record<symbol, boolean>)[GPU_DRAW_ORDER] !== true ||
+    unit === undefined ||
+    gpuCallsAFunctionThatDraws(unit)
+  )
+    return undefined;
+  const mode = { inline: false, reordered: false };
+  gpuBindEveryDraw = mode;
+  let result: R;
+  try {
+    result = again();
+  } finally {
+    gpuBindEveryDraw = undefined;
+  }
+  if (mode.reordered) throw error;
+  return result;
+}
+
+/**
  * The operands bound to hoisted temporaries so far, for each statement sink:
  * their draws run ahead of the statement, in the order they were bound
  * (`gpuAssertBindingKeepsDrawOrder`).
@@ -1085,8 +1242,9 @@ const gpuBoundDrawOperands = new WeakMap<object, Set<Expression>>();
  * statement: a later draw comes after either way, and an earlier draw that
  * was bound before (the elements of `Variance`, bound one by one) runs in
  * order. `(Random(), Cot(Random()))` bound the operand of `Cot` and drew it
- * before the first value of the tuple; it declines, and the interpreter
- * evaluates the expression.
+ * before the first value of the tuple; it declines, and the statement is
+ * then compiled again with every draw bound to a temporary of its own, in
+ * order (`gpuRecompileWithBoundDraws`), during which this check is skipped.
  *
  * The order is the interpreter's: the operands of a node from first to last,
  * depth first, and the draw of a node itself (`Random(…)`) after its
@@ -1105,8 +1263,11 @@ function gpuAssertBindingKeepsDrawOrder(
   operands: ReadonlyArray<Expression>,
   target: CompileTarget<Expression>
 ): void {
+  // Every draw of the statement is bound in order: the check is made by
+  // `gpuRecompileWithBoundDraws` at the end of the statement instead.
+  if (gpuBindEveryDraw !== undefined) return;
   const decline = (): never => {
-    throw new Error(
+    throw gpuDrawOrderError(
       `Could not compile \`${head}\`: an operand that draws a random value would be ` +
         'bound to a temporary ahead of the rest of its statement, and a draw ' +
         'written before it would then come after it.'
@@ -1981,32 +2142,83 @@ function gpuSignatureWrites(node: Expression, name: string): boolean {
 }
 
 /**
+ * Does the `Block` `node` write a binding it does not declare? Read as
+ * `BaseCompiler.hasObservableEffect` reads a block: an `Assign` to a name
+ * the block declared earlier is not a write and only its value is read; the
+ * initializer of a `Declare` is read; any other statement is read whole.
+ * Each value is read by `gpuWritesOutside`.
+ */
+function gpuBlockWritesOutside(
+  node: Expression,
+  inside: ReadonlySet<Expression>,
+  reading: Set<string>
+): boolean {
+  if (!isFunction(node)) return false;
+  const own = new Set<string>();
+  return node.ops.some((stmt) => {
+    if (isFunction(stmt, 'Declare')) {
+      const declared = stmt.ops[0];
+      if (isSymbol(declared)) own.add(declared.symbol);
+      else if (
+        isFunction(declared, 'Tuple') ||
+        isFunction(declared, 'List') ||
+        isFunction(declared, 'Delimiter') ||
+        isFunction(declared, 'Sequence')
+      )
+        for (const leaf of declared.ops)
+          if (isSymbol(leaf)) own.add(leaf.symbol);
+      const init = BaseCompiler.declareValueOperand(stmt.ops);
+      return init !== undefined && gpuWritesOutside(init, inside, reading);
+    }
+    if (isFunction(stmt, 'Assign')) {
+      const name = stmt.ops[0];
+      if (!isSymbol(name) || !own.has(name.symbol)) return true;
+      return gpuWritesOutside(stmt.ops[1], inside, reading);
+    }
+    return gpuWritesOutside(stmt, inside, reading);
+  });
+}
+
+/**
  * Does `node` write a binding anywhere outside the nodes in `inside` (and
  * their subtrees)? A write is an `Assign`, a `Declare` or an `Assume` at any
  * depth, or a call of a function whose signature declares a write effect
  * (`gpuSignatureWrites`, the head of an application or a function-valued
- * symbol operand), or a symbol whose inlined value is impure. A node pure
- * through every inlined value (`foldValueImpure`) writes nothing; a `Block`
- * is read by `BaseCompiler.hasObservableEffect`, so its writes to its own
- * locals do not count.
+ * symbol operand), or a write in the value of a symbol, which the shader
+ * inlines. A node pure through every inlined value (`foldValueImpure`)
+ * writes nothing. A `Block` is read statement by statement
+ * (`gpuBlockWritesOutside`), so its writes to its own locals do not count.
+ * A random draw is not a write: the callers count the draws separately.
  */
 function gpuWritesOutside(
   node: Expression,
-  inside: ReadonlySet<Expression>
+  inside: ReadonlySet<Expression>,
+  /** The symbols whose values are being read: a value that names its own
+   * symbol is read once. */
+  reading: Set<string> = new Set()
 ): boolean {
   if (inside.has(node)) return false;
   // A symbol's inlined value may hold anything; an impure one is refused
   // as a possible write (`foldValueImpure` looks through the value).
-  if (isSymbol(node))
-    return (
-      gpuSignatureWrites(node, node.symbol) ||
-      BaseCompiler.foldValueImpure(node)
-    );
+  if (isSymbol(node)) {
+    if (gpuSignatureWrites(node, node.symbol)) return true;
+    if (!BaseCompiler.foldValueImpure(node)) return false;
+    if (reading.has(node.symbol)) return false;
+    const value = node.engine._getSymbolValue(node.symbol);
+    if (value === undefined) return true;
+    reading.add(node.symbol);
+    try {
+      return gpuWritesOutside(value, inside, reading);
+    } finally {
+      reading.delete(node.symbol);
+    }
+  }
   if (!isFunction(node) || !BaseCompiler.foldValueImpure(node)) return false;
-  if (node.operator === 'Block') return BaseCompiler.hasObservableEffect(node);
+  if (node.operator === 'Block')
+    return gpuBlockWritesOutside(node, inside, reading);
   const op = node.operator;
   if (op === 'Assign' || op === 'Declare' || op === 'Assume') return true;
-  if (node.ops.some((x) => gpuWritesOutside(x, inside))) return true;
+  if (node.ops.some((x) => gpuWritesOutside(x, inside, reading))) return true;
   return gpuSignatureWrites(node, op);
 }
 
@@ -2121,24 +2333,42 @@ function compileGPUStatementSelection(
   // statements run before the rest of the clause (and those of the first
   // condition before the `if`), so a second draw could change places with
   // the first (`Tuple(Random(), Cot(Random()))` binds the operand of `Cot`
-  // first). A clause that writes a binding, or a symbol whose value draws
-  // (read as a possible write by `gpuWritesOutside`), is refused, and so is
-  // a `Block` clause whose local is initialized by a draw, which
-  // `hasObservableEffect` reads as an effect. The rule is stricter than the
-  // order needs, by design: a draw written after the selection
-  // (`W + Random()`), a draw already bound ahead of it, and a selection
-  // nested in a clause of another (which reads the outer clause's draw as
-  // outside its own) also decline. Binding the draws of a statement in order
-  // (CE-527) would lift these limits.
+  // first). A clause that writes a binding (`gpuWritesOutside`) is refused.
+  // The rule is stricter than the order needs: a draw written after the
+  // selection (`W + Random()`), a draw already bound ahead of it, and a
+  // selection nested in a clause of another (which reads the outer clause's
+  // draw as outside its own) are refused too. Such a statement is compiled
+  // again with every draw bound to a temporary in the order of the
+  // interpreter (`gpuRecompileWithBoundDraws`), and this rule is then
+  // skipped.
   if (args.some(BaseCompiler.hasObservableEffect)) {
     if (args.some((a) => gpuWritesOutside(a, new Set()))) return undefined;
-    // A draw outside the selection is found by counting, not by identity:
-    // the same node object can stand in a clause and in a sibling.
-    const memo = new Map<Expression, number>();
-    const own = args.map((a) => gpuDrawCount(a, memo));
-    const inClauses = own.reduce((n, c) => n + c, 0);
-    if (gpuDrawCount(evaluated, memo) !== inClauses) return undefined;
-    if (own.some((c) => c > 1)) return undefined;
+    // When every draw of the statement is bound to a temporary at the point
+    // it is compiled (`gpuBindEveryDraw`), the draws of the siblings and of
+    // the clauses run in the order they are compiled, which is the order of
+    // the interpreter, so the counts below are not needed.
+    if (gpuBindEveryDraw === undefined) {
+      // A draw outside the selection is found by counting, not by identity:
+      // the same node object can stand in a clause and in a sibling.
+      const memo = new Map<Expression, number>();
+      const own = args.map((a) => gpuDrawCount(a, memo));
+      const inClauses = own.reduce((n, c) => n + c, 0);
+      if (
+        gpuDrawCount(evaluated, memo) !== inClauses ||
+        own.some((c) => c > 1)
+      ) {
+        // The ternary form cannot hold a clause that needs statements, so
+        // the statement is compiled again with every draw bound in order
+        // (`gpuRecompileWithBoundDraws`), where this rule does not apply.
+        if (args.some(gpuNeedsStatements))
+          throw gpuDrawOrderError(
+            'Could not compile the selection: a clause needs statements and ' +
+              'draws a random value, and a draw of the rest of the statement ' +
+              'could then change places with its draws.'
+          );
+        return undefined;
+      }
+    }
   }
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
   const isWGSL = target.language === 'wgsl';
@@ -2497,7 +2727,11 @@ function compileGPUConditionalArm(
     // `compile()` catches it to build the interpreter fallback) and a caller
     // reusing the target must not inherit orphaned code.
     sink.stmts.length = before;
-    throw new Error(
+    // Marked for the second compilation (`gpuRecompileWithBoundDraws`): when
+    // the statement is the binding of a draw, the selection then takes its
+    // statement form (`gpuArmDrawsWhileBinding`), where the branch can hold
+    // it.
+    throw gpuDrawOrderError(
       `Could not compile \`${head}\`: a conditionally-evaluated branch contains a multi-statement ` +
         `construct (a loop-form Sum/Product, or an impure operand bound to a ` +
         `hoisted temporary). Hoisting it out of the branch would run it ` +
@@ -2639,7 +2873,7 @@ function gpuAssertNoEagerDraw(
     (e.operator === 'Return' || e.ops.some(containsReturn));
   if (lazyOperands.some(containsReturn)) return;
   if (lazyOperands.some((e) => BaseCompiler.foldValueImpure(e)))
-    throw new Error(
+    throw gpuDrawOrderError(
       `Could not compile \`${head}\`: a branch draws a random value, and the ` +
         `WGSL selection \`select(…)\` computes every branch, so a branch ` +
         `that is not taken would still advance the random stream and shift ` +
@@ -8175,7 +8409,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         (gpuArmSharesWork(args[1]) ||
           gpuArmSharesWork(args[2]) ||
           gpuArmIsCostlyForSelect(args[1], target) ||
-          gpuArmIsCostlyForSelect(args[2], target)))
+          gpuArmIsCostlyForSelect(args[2], target) ||
+          gpuArmDrawsWhileBinding(args[1]) ||
+          gpuArmDrawsWhileBinding(args[2])))
     ) {
       const statement = compileGPUStatementSelection(
         [args[0], args[1], args[0].engine.True, args[2]],
@@ -8224,7 +8460,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     if (
       gpuNeedsStatements(args[0]) ||
       (gpuCanPlaceStatement(target) &&
-        (gpuArmSharesWork(args[0]) || gpuArmIsCostlyForSelect(args[0], target)))
+        (gpuArmSharesWork(args[0]) ||
+          gpuArmIsCostlyForSelect(args[0], target) ||
+          gpuArmDrawsWhileBinding(args[0])))
     ) {
       const statement = compileGPUStatementSelection(
         [args[1], args[0]],
@@ -8266,7 +8504,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           i > 0 &&
           (gpuNeedsStatements(a) ||
             (canPlace &&
-              (gpuArmSharesWork(a) || gpuArmIsCostlyForSelect(a, target))))
+              (gpuArmSharesWork(a) ||
+                gpuArmIsCostlyForSelect(a, target) ||
+                gpuArmDrawsWhileBinding(a))))
       )
     ) {
       const statement = compileGPUStatementSelection(
@@ -10684,6 +10924,37 @@ function gpuSeedWords(
  * decorrelate instead of returning one value. Every other unframed case throws.
  */
 function gpuRandomDraw(target: CompileTarget<Expression>): string {
+  const code = gpuRandomDrawCode(target);
+  const mode = gpuBindEveryDraw;
+  if (mode === undefined) return code;
+  // A draw in a conditionally evaluated position, or where no statement can
+  // be placed, stays in its expression. Every later draw could then run
+  // before it: a bound draw runs ahead of the statement, and a draw that
+  // stays in a statement hoisted later (the body of a loop) runs where that
+  // statement is placed, also ahead of it. So any draw after such a draw
+  // refuses the statement, which refuses more than needed but keeps the
+  // order.
+  if (mode.inline) mode.reordered = true;
+  const path = [...BaseCompiler.compileParents()];
+  if (mode.last !== undefined && !gpuDrawComesAfter(mode.last, path))
+    mode.reordered = true;
+  mode.last = path;
+  if (!gpuCanPlaceStatement(target)) {
+    mode.inline = true;
+    return code;
+  }
+  const t = BaseCompiler.tempVar(target);
+  BaseCompiler.hoistStatement(
+    target,
+    target.language === 'wgsl'
+      ? `let ${t}: f32 = ${code};`
+      : `float ${t} = ${code};`
+  );
+  return t;
+}
+
+/** The code of one draw, `gpuRandomDraw` without the binding. */
+function gpuRandomDrawCode(target: CompileTarget<Expression>): string {
   const state = gpuRandomState(target);
   const language = target.language;
 
@@ -18112,6 +18383,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // languages by language id.
       bareStatementBlocks:
         this.languageId === 'glsl' || this.languageId === 'wgsl',
+      recompileStatement: gpuRecompileWithBoundDraws,
       // A multi-statement `Block` used as a VALUE — a `with` clause as the
       // term of a `Sum`, or as an operand of an addition — becomes one
       // compound statement in the enclosing sink: the block's locals are
