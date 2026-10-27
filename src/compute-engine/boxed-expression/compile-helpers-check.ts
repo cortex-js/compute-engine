@@ -1,4 +1,12 @@
 /**
+ * The check of the `compileHelpers` field of an operator definition. It is
+ * here, not with the compiler, because a definition is checked when it is
+ * declared (`boxed-operator-definition.ts`), and `boxed-expression/` must not
+ * import from `compilation/`. The compiler imports it from here. This module
+ * imports nothing.
+ */
+
+/**
  * Throw when `value` is not a map from a name to a function whose source the
  * engine can copy into compiled code, as `const <name> = (<source>);` (see
  * `OperatorDefinition.compileHelpers`). `owner` begins each message (for

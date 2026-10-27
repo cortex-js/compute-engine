@@ -238,7 +238,7 @@ plus P3b's section-6 edits; take the worktree's.
   `evaluate()`, `interval-js` through a `native` compile field).
 
 - CE-507.8 (decoded-payload cache) DONE in the worktree
-  `/Users/arno/dev/wt-compute-engine-df3` (base `f29912a45`):
+  `/Users/arno/dev/wt-compute-engine-df4` (moved onto 0.170.0, `c60d9c80d`, after the release) (base `f29912a45`):
   `boxed-expression/decoded-payload.ts` (`decodedPayload(expr, decode)`,
   exported from the package entry `src/compute-engine.ts`), `units.ts`
   (`boxedToUnitExpression` cached at its top level; `decodedUnit(boxedUnit)`

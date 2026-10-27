@@ -14,8 +14,8 @@
  * engine is the same function object in every engine.
  *
  * Filled by `loadLibraryDefinitions()` (`engine-library-bootstrap.ts`) for
- * each standard library. The registry depends on no engine layer, so the bootstrap and compiler
- * can share it without a dependency cycle.
+ * each standard library. This module imports nothing, so that both the
+ * bootstrap and the compiler can read it without a dependency cycle.
  */
 const ENGINE_COMPILE_HANDLERS = new WeakSet<object>();
 
@@ -23,8 +23,6 @@ const ENGINE_COMPILE_HANDLERS = new WeakSet<object>();
 export function recordEngineCompileHandler(handler: unknown): void {
   if (typeof handler === 'function') ENGINE_COMPILE_HANDLERS.add(handler);
 }
-
-export { assertValidCompileHelpers } from '../../common/compile-helpers.js';
 
 /** Whether `handler` is a `compile` handler of a standard library. */
 export function isEngineCompileHandler(handler: unknown): boolean {
