@@ -10,7 +10,6 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { installGroupTheory } from '../../src/compute-engine/library/group-theory';
 import type { MathJsonExpression as MJ } from '../../src/math-json/types';
 
-assert.equal(process.versions.node.split('.')[0], '26');
 if (!isMainThread) {
   const ce = new ComputeEngine();
   installGroupTheory(ce);

@@ -1,9 +1,11 @@
 # Group algorithm performance and Node 26 validation
 
-This worktree uses Node 26 for group-theory validation. The runtime pin is in
-[.node-version](../../.node-version); the [runner](../../scripts/group-theory/run.mjs)
-rejects other major versions and propagates its executable directory to child tools.
-The package's consumer minimum version is unchanged.
+The recorded validation and benchmarks use Node 26.12.1. This is a measurement
+baseline, not a contributor requirement: there is no repository runtime pin or
+Node 26-only check. The [runner](../../scripts/group-theory/run.mjs) uses the
+selected Node executable, records its version, and propagates its directory to
+child tools. The package's supported Node range and existing CI matrix are
+unchanged. Use the same Node version when comparing the saved timings.
 
 ## Research and algorithm choices
 

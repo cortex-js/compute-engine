@@ -5,11 +5,6 @@ import { dirname, delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
-if (process.versions.node.split('.')[0] !== '26')
-  throw new Error(
-    'Group-theory validation requires Node 26; current runtime: ' +
-      process.version
-  );
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const env = {
   ...process.env,
@@ -47,7 +42,7 @@ if (mode === 'test') {
     ['scripts/typecheck.sh']
   );
 } else if (mode === 'bench' || mode === 'smoke') {
-  const directory = mkdtempSync(join(tmpdir(), 'epsil-group-node26-'));
+  const directory = mkdtempSync(join(tmpdir(), 'epsil-group-'));
   const output = join(directory, mode + '.mjs');
   await build({
     absWorkingDir: root,

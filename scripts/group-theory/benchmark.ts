@@ -60,7 +60,6 @@ function bench(name: string, f: () => unknown, count = 15) {
     console.log(JSON.stringify({ name, error: String(e) }));
   }
 }
-assert.equal(process.versions.node.split('.')[0], '26');
 console.log(
   JSON.stringify({
     node: process.version,
