@@ -63,8 +63,6 @@ export function permutationTransversalLimits(
 }
 
 function receive(group: PermutationGroupValue, work: PermutationGroupWork) {
-  if (!PermutationGroupValue.is(group))
-    throw new PermutationInputError('invalid-permutation-group');
   return new PermutationGroupValue(group.generators, group.action, work);
 }
 
@@ -81,6 +79,7 @@ function pointInAction(
     throw new PermutationInputError('point-outside-permutation-action');
 }
 
+/** A partition shares these counters across its fixed and moved orbits. */
 class OrbitBudget {
   private points = 0;
   private edges = 0;
@@ -106,6 +105,7 @@ interface OrbitData {
 }
 
 /** Parent indices precede their children; labels index forward generators. */
+/** Breadth-first search costs O(points * generators). Parent indices precede children. Positive words suffice: each finite-order generator has its inverse among its powers. */
 function explore(
   group: PermutationGroupValue,
   root: number,
@@ -138,12 +138,13 @@ function explore(
   }
   // Only a completely explored frontier establishes an orbit.
   return {
-    points: Object.freeze(points),
-    parents: Object.freeze(parents),
-    labels: Object.freeze(labels),
+    points: points,
+    parents: parents,
+    labels: labels,
   };
 }
 
+/** Explicit transversals have separate product, image-work and live-output bounds. */
 class TransversalBudget {
   private products = 0;
   private imageWork = 0;
@@ -175,7 +176,7 @@ class TransversalBudget {
   }
 }
 
-/** A completed orbit with a compact, immutable forward Schreier tree. */
+/** A completed orbit with a compact, readonly forward Schreier tree. */
 export class PermutationOrbitTree {
   readonly #group: PermutationGroupValue;
   readonly #data: OrbitData;
@@ -189,7 +190,6 @@ export class PermutationOrbitTree {
     this.#group = receive(group, work);
     pointInAction(this.#group, root);
     this.#data = explore(this.#group, root, new OrbitBudget(limits), work);
-    Object.freeze(this);
   }
   static compute(
     group: PermutationGroupValue,
@@ -198,9 +198,6 @@ export class PermutationOrbitTree {
     work: PermutationGroupWork = {}
   ): PermutationOrbitTree {
     return new PermutationOrbitTree(group, root, requested, work);
-  }
-  static is(value: unknown): value is PermutationOrbitTree {
-    return typeof value === 'object' && value !== null && #data in value;
   }
   get points(): readonly number[] {
     return this.#data.points;
@@ -267,7 +264,7 @@ export class PermutationOrbitTree {
       path.push(labels[index]);
       index = parents[index];
     }
-    let result = new PermutationValue([], work);
+    let result = PermutationValue.fromImages([], work);
     for (let i = path.length - 1; i >= 0; i--) {
       work.check?.();
       const generator = group.generators[path[i]];
@@ -292,9 +289,9 @@ export class PermutationOrbitTree {
     );
     const group = receive(this.#group, work);
     const { points, parents, labels } = this.#data;
-    const representatives = [new PermutationValue([], work)];
+    const representatives = [PermutationValue.fromImages([], work)];
     const result: (readonly [number, PermutationValue])[] = [
-      Object.freeze([points[0], representatives[0]] as const),
+      [points[0], representatives[0]] as const,
     ];
     for (let i = 1; i < points.length; i++) {
       work.check?.();
@@ -304,9 +301,9 @@ export class PermutationOrbitTree {
       const value = composePermutations(parent, generator, work);
       budget.retain(value.supportDegree);
       representatives.push(value);
-      result.push(Object.freeze([points[i], value] as const));
+      result.push([points[i], value] as const);
     }
-    return Object.freeze(result);
+    return result;
   }
 }
 
@@ -330,5 +327,5 @@ export function permutationOrbits(
     }
     result.push(orbit);
   }
-  return Object.freeze(result);
+  return result;
 }

@@ -1,3 +1,7 @@
+// Products and inverses of valid bijections are bijections; only this module can
+// construct them without revalidating each image.
+let fromValidatedImages: (images: number[]) => PermutationValue;
+
 /** Bounds for explicit image arrays; this is not a group-order limit. */
 export const DEFAULT_PERMUTATION_DEGREE_LIMIT = 100_000;
 
@@ -14,11 +18,7 @@ export class PermutationInputError extends Error {
   }
 }
 
-export const PERMUTATION_DOMAIN = Object.freeze({
-  kind: 'positive-integer-permutations' as const,
-  version: 1 as const,
-});
-
+/** Bound allocation before reading external images; a degree bound is not an order bound. */
 export function degreeLimit(work: PermutationWork = {}): number {
   const limit = work.maxDegree ?? DEFAULT_PERMUTATION_DEGREE_LIMIT;
   if (
@@ -30,41 +30,29 @@ export function degreeLimit(work: PermutationWork = {}): number {
   return limit;
 }
 
+/** Poll long image walks at bounded intervals without a callback on every point. */
 function tick(i: number, work: PermutationWork): void {
   if ((i & 1023) === 0) work.check?.();
 }
 
-function record(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value))
-    throw new PermutationInputError('invalid-permutation-descriptor');
-  return value as Record<string, unknown>;
-}
-
-function readDescriptor(
-  value: unknown,
-  kind: string,
-  payload: string
-): Record<string, unknown> {
-  const data = record(value);
-  const domain = record(data.domain);
-  if (
-    data.kind !== kind ||
-    data.version !== 1 ||
-    domain.kind !== PERMUTATION_DOMAIN.kind ||
-    domain.version !== 1 ||
-    Object.keys(domain).some((k) => k !== 'kind' && k !== 'version') ||
-    Object.keys(data).some(
-      (k) => !['kind', 'version', 'domain', payload].includes(k)
-    )
-  )
-    throw new PermutationInputError('incompatible-permutation-domain');
-  return data;
-}
-/** An immutable bijection with finite support on the positive integers. */
+/** An readonly bijection with finite support on the positive integers. */
 export class PermutationValue {
-  readonly #images: readonly number[];
+  readonly images: readonly number[];
 
-  constructor(images: unknown, work: PermutationWork = {}) {
+  private constructor(images: number[]) {
+    while (images.length && images[images.length - 1] === images.length)
+      images.pop();
+    this.images = images;
+  }
+  static {
+    fromValidatedImages = (images) => new PermutationValue(images);
+  }
+
+  /** Validate external images once in O(n), copying them before normalization. */
+  static fromImages(
+    images: unknown,
+    work: PermutationWork = {}
+  ): PermutationValue {
     const limit = degreeLimit(work);
     work.check?.();
     if (!Array.isArray(images))
@@ -93,45 +81,17 @@ export class PermutationValue {
       tick(copy.length, work);
       copy.pop();
     }
-    this.#images = Object.freeze(copy);
-    Object.freeze(this);
+    return new PermutationValue(copy);
   }
 
-  static is(value: unknown): value is PermutationValue {
-    return typeof value === 'object' && value !== null && #images in value;
-  }
-
-  get images(): readonly number[] {
-    return this.#images;
-  }
-  get domain(): typeof PERMUTATION_DOMAIN {
-    return PERMUTATION_DOMAIN;
-  }
   get supportDegree(): number {
-    return this.#images.length;
-  }
-
-  toJSON() {
-    return {
-      kind: 'permutation',
-      version: 1,
-      domain: PERMUTATION_DOMAIN,
-      images: this.#images,
-    };
-  }
-
-  static fromJSON(
-    value: unknown,
-    work: PermutationWork = {}
-  ): PermutationValue {
-    const data = readDescriptor(value, 'permutation', 'images');
-    return new PermutationValue(data.images, work);
+    return this.images.length;
   }
 }
 
 /** The finite action retains fixed points removed from element storage. */
 export class PermutationAction {
-  readonly #degree: number;
+  readonly degree: number;
   constructor(degree: unknown, work: PermutationWork = {}) {
     const limit = degreeLimit(work);
     work.check?.();
@@ -143,54 +103,27 @@ export class PermutationAction {
       throw new PermutationInputError('invalid-permutation-action-degree');
     if (degree > limit)
       throw new PermutationInputError('permutation-degree-limit');
-    this.#degree = degree;
-    Object.freeze(this);
-  }
-  static is(value: unknown): value is PermutationAction {
-    return typeof value === 'object' && value !== null && #degree in value;
-  }
-  toJSON() {
-    return {
-      kind: 'permutation-action',
-      version: 1,
-      domain: PERMUTATION_DOMAIN,
-      degree: this.#degree,
-    };
-  }
-  static fromJSON(
-    value: unknown,
-    work: PermutationWork = {}
-  ): PermutationAction {
-    const data = readDescriptor(value, 'permutation-action', 'degree');
-    return new PermutationAction(data.degree, work);
-  }
-  get degree(): number {
-    return this.#degree;
-  }
-  get domain(): typeof PERMUTATION_DOMAIN {
-    return PERMUTATION_DOMAIN;
+    this.degree = degree;
   }
 }
 
+/** Apply receiving degree policy without rechecking an internal bijection. */
 function requirePermutation(
-  value: unknown,
+  value: PermutationValue,
   work: PermutationWork
-): asserts value is PermutationValue {
-  if (!PermutationValue.is(value))
-    throw new PermutationInputError('incompatible-permutation-domain');
+): void {
   if (value.supportDegree > degreeLimit(work))
     throw new PermutationInputError('permutation-degree-limit');
   work.check?.();
 }
 
+/** The action must include every moved point; trailing fixed points are implicit. */
 export function assertPermutationFits(
   value: PermutationValue,
   action: PermutationAction,
   work: PermutationWork = {}
 ): void {
   requirePermutation(value, work);
-  if (!PermutationAction.is(action))
-    throw new PermutationInputError('incompatible-permutation-domain');
   if (action.degree > degreeLimit(work))
     throw new PermutationInputError('permutation-degree-limit');
   if (value.supportDegree > action.degree)
@@ -203,8 +136,7 @@ export function composePermutations(
   right: PermutationValue,
   work: PermutationWork = {}
 ): PermutationValue {
-  requirePermutation(left, work);
-  requirePermutation(right, work);
+  work.check?.();
   const n = Math.max(left.supportDegree, right.supportDegree);
   const images: number[] = [];
   for (let i = 1; i <= n; i++) {
@@ -212,22 +144,24 @@ export function composePermutations(
     const middle = left.images[i - 1] ?? i;
     images.push(right.images[middle - 1] ?? middle);
   }
-  return new PermutationValue(images, work);
+  return fromValidatedImages(images);
 }
 
+/** Reverse the image map in O(n); bijectivity assigns each inverse slot exactly once. */
 export function inversePermutation(
   value: PermutationValue,
   work: PermutationWork = {}
 ): PermutationValue {
-  requirePermutation(value, work);
+  work.check?.();
   const images = new Array<number>(value.supportDegree);
   for (let i = 0; i < value.supportDegree; i++) {
     tick(i, work);
     images[value.images[i] - 1] = i + 1;
   }
-  return new PermutationValue(images, work);
+  return fromValidatedImages(images);
 }
 
+/** Apply a valid permutation to a point in the explicit action, in constant time. */
 export function applyPermutation(
   value: PermutationValue,
   point: unknown,

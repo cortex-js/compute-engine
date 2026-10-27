@@ -61,6 +61,7 @@ const SPLIT_ENTRIES = [
   'compile',
   'epsil',
   'integration-rules',
+  'group-theory',
   'identities',
   'math-json',
   'latex-syntax',

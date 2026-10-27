@@ -1,12 +1,11 @@
 import {
-  PermutationValue as P,
-  PermutationAction as A,
-  composePermutations as mul,
-  inversePermutation as inverse,
+  PermutationValue,
+  PermutationAction,
+  inversePermutation,
 } from '../../src/compute-engine/group-theory/permutation/values';
-import { PermutationGroupValue as G } from '../../src/compute-engine/group-theory/permutation/groups';
+import { PermutationGroupValue } from '../../src/compute-engine/group-theory/permutation/groups';
 import {
-  PermutationStabilizerChain as Chain,
+  PermutationStabilizerChain,
   verifyPermutationChain,
   type PermutationChainCertificate,
 } from '../../src/compute-engine/group-theory/permutation/stabilizer-chain';
@@ -18,27 +17,27 @@ const cycle = (n: number, points: number[]) => {
   points.forEach((p, i) => {
     images[p - 1] = points[(i + 1) % points.length];
   });
-  return new P(images);
+  return PermutationValue.fromImages(images);
 };
 
 // ATLAS M24G1-p24B0: numerical permutation data, not algorithm source.
 // https://brauer.maths.qmul.ac.uk/Atlas/spor/M24/
-const m24 = new G(
+const m24 = new PermutationGroupValue(
   [
-    new P([
+    PermutationValue.fromImages([
       4, 7, 17, 1, 13, 9, 2, 15, 6, 19, 18, 21, 5, 16, 8, 14, 3, 11, 10, 24, 12,
       23, 22, 20,
     ]),
-    new P([
+    PermutationValue.fromImages([
       4, 21, 9, 6, 18, 1, 7, 8, 15, 5, 11, 12, 17, 2, 3, 13, 16, 10, 24, 20, 14,
       22, 19, 23,
     ]),
   ],
-  new A(24)
+  new PermutationAction(24)
 );
 
 function cubeGroup() {
-  // A facelet is its cubie position together with its outward normal.
+  // PermutationAction facelet is its cubie position together with its outward normal.
   const facelets: { p: number[]; normal: number[] }[] = [];
   for (let axis = 0; axis < 3; axis++)
     for (const sign of [-1, 1])
@@ -54,7 +53,7 @@ function cubeGroup() {
         }
   const key = (p: number[], n: number[]) => p.join(',') + ':' + n.join(',');
   const indices = new Map(facelets.map((f, i) => [key(f.p, f.normal), i + 1]));
-  const generators: P[] = [];
+  const generators: PermutationValue[] = [];
   for (let axis = 0; axis < 3; axis++)
     for (const sign of [-1, 1]) {
       const rotate = (v: number[]) => {
@@ -66,7 +65,7 @@ function cubeGroup() {
         return r;
       };
       generators.push(
-        new P(
+        PermutationValue.fromImages(
           facelets.map((f, i) =>
             f.p[axis] !== sign
               ? i + 1
@@ -75,16 +74,16 @@ function cubeGroup() {
         )
       );
     }
-  return new G(generators, new A(48));
+  return new PermutationGroupValue(generators, new PermutationAction(48));
 }
 
 describe('reduced stabilizer certificates', () => {
   test.each([
     [
       'A16 from 3-cycles',
-      new G(
+      new PermutationGroupValue(
         Array.from({ length: 14 }, (_, i) => cycle(16, [1, 2, i + 3])),
-        new A(16)
+        new PermutationAction(16)
       ),
       10461394944000n,
     ],
@@ -93,7 +92,7 @@ describe('reduced stabilizer certificates', () => {
   ])(
     '%s has exact order under the default limits without closure enumeration',
     (_name, g, order) => {
-      const chain = Chain.compute(g, bounds);
+      const chain = PermutationStabilizerChain.compute(g, bounds);
       expect(chain.order).toBe(order);
       expect(verifyPermutationChain(g, chain.certificate, bounds)).toBe(true);
       for (const generator of g.generators)
@@ -103,8 +102,8 @@ describe('reduced stabilizer certificates', () => {
 
   test('a different generating set is accepted when provenance and stabilizer closure prove it', () => {
     const p = cycle(3, [1, 2, 3]),
-      q = inverse(p),
-      g = new G([p], new A(3));
+      q = inversePermutation(p),
+      g = new PermutationGroupValue([p], new PermutationAction(3));
     const certificate: PermutationChainCertificate = {
       version: 1,
       proof: [
@@ -119,7 +118,6 @@ describe('reduced stabilizer certificates', () => {
           orbit: [1, 3, 2],
           parents: [-1, 0, 1],
           labels: [-1, 0, 0],
-          representatives: [new P([]), q, mul(q, q)],
         },
       ],
     };
@@ -166,14 +164,20 @@ describe('reduced stabilizer certificates', () => {
   });
 
   test('sifting alone cannot certify an unrelated supergroup', () => {
-    const a3 = new G([cycle(3, [1, 2, 3])], new A(3));
-    const s3 = new G([...a3.generators, cycle(3, [1, 2])], new A(3));
-    const forged = Chain.compute(s3, bounds).certificate;
+    const a3 = new PermutationGroupValue(
+      [cycle(3, [1, 2, 3])],
+      new PermutationAction(3)
+    );
+    const s3 = new PermutationGroupValue(
+      [...a3.generators, cycle(3, [1, 2])],
+      new PermutationAction(3)
+    );
+    const forged = PermutationStabilizerChain.compute(s3, bounds).certificate;
     expect(verifyPermutationChain(a3, forged, bounds)).toBe(false);
   });
 
   test('proof limits and interruption apply to verification', () => {
-    const chain = Chain.compute(m24, bounds);
+    const chain = PermutationStabilizerChain.compute(m24, bounds);
     expect(() =>
       verifyPermutationChain(m24, chain.certificate, {
         ...bounds,
@@ -188,12 +192,13 @@ describe('reduced stabilizer certificates', () => {
         },
       })
     ).toThrow(abort);
-    expect(Object.isFrozen(chain.certificate.proof)).toBe(true);
-    expect(Object.isFrozen(chain.certificate.proof[0])).toBe(true);
   });
 
   test('session hits retain cancellation and stricter budget semantics', () => {
-    const g = new G([cycle(3, [1, 2]), cycle(3, [1, 2, 3])], new A(3));
+    const g = new PermutationGroupValue(
+      [cycle(3, [1, 2]), cycle(3, [1, 2, 3])],
+      new PermutationAction(3)
+    );
     const session = new PermutationQuerySession(),
       chain = session.chain(g, bounds);
     expect(session.chain(g, bounds)).toBe(chain);
@@ -213,4 +218,63 @@ describe('reduced stabilizer certificates', () => {
     ).toThrow(stop);
     expect(session.order(g, bounds)).toBe(6n);
   });
+});
+
+test('S100 from a transposition and cycle fits the default work and live storage bounds', () => {
+  const group = new PermutationGroupValue(
+    [
+      cycle(100, [1, 2]),
+      cycle(
+        100,
+        Array.from({ length: 100 }, (_, i) => i + 1)
+      ),
+    ],
+    new PermutationAction(100)
+  );
+  const chain = PermutationStabilizerChain.compute(group, bounds);
+  let factorial = 1n;
+  for (let i = 2n; i <= 100n; i++) factorial *= i;
+  expect(chain.order).toBe(factorial);
+  expect(chain.workUsed).toBeLessThan(50_000_000);
+  expect(chain.storedImagesCharged).toBeLessThan(1_000_000);
+  expect(chain.levels.every((level) => !('representatives' in level))).toBe(
+    true
+  );
+  expect(chain.sift(cycle(100, [1, 37, 100]), bounds).member).toBe(true);
+  expect(() =>
+    PermutationStabilizerChain.compute(group, {
+      ...bounds,
+      maxStoredImages: 10,
+    })
+  ).toThrow('permutation-chain-storage-limit');
+});
+
+test('relations and point stabilizers reuse chains without bypassing limits', () => {
+  const group = new PermutationGroupValue(
+    [cycle(4, [1, 2]), cycle(4, [1, 2, 3, 4])],
+    new PermutationAction(4)
+  );
+  const subgroup = new PermutationGroupValue([cycle(4, [1, 2])], group.action);
+  const session = new PermutationQuerySession();
+  const compute = jest.spyOn(PermutationStabilizerChain, 'compute');
+  try {
+    for (const query of ['subgroup', 'index', 'equal', 'normal'] as const) {
+      const answer = session.relation(group, subgroup, query, bounds);
+      compute.mockClear();
+      expect(session.relation(group, subgroup, query, bounds)).toBe(answer);
+      expect(compute).not.toHaveBeenCalled();
+    }
+    session.stabilizer(group, 1, bounds);
+    compute.mockClear();
+    session.stabilizer(group, 1, bounds);
+    expect(compute).not.toHaveBeenCalled();
+    expect(() =>
+      session.stabilizer(group, 1, { ...bounds, maxStoredImages: 0 })
+    ).toThrow('permutation-chain-storage-limit');
+    expect(() => session.order(group, { ...bounds, maxOrbitEdges: 0 })).toThrow(
+      'permutation-chain-orbit-edge-limit'
+    );
+  } finally {
+    compute.mockRestore();
+  }
 });

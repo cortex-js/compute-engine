@@ -8,10 +8,9 @@ import {
   type PermutationWork,
 } from './values.js';
 
+/** Check receiving degree policy; values are already validated by construction. */
 function receive(value: PermutationValue, work: PermutationWork) {
   work.check?.();
-  if (!PermutationValue.is(value))
-    throw new PermutationInputError('incompatible-permutation-domain');
   if (value.supportDegree > degreeLimit(work))
     throw new PermutationInputError('permutation-degree-limit');
 }
@@ -35,11 +34,12 @@ export function permutationCycles(
       cycle.push(point);
       point = value.images[point - 1];
     } while (point !== root);
-    if (cycle.length > 1) result.push(Object.freeze(cycle));
+    if (cycle.length > 1) result.push(cycle);
   }
-  return Object.freeze(result);
+  return result;
 }
 
+/** The order is the exact least common multiple of disjoint-cycle lengths. */
 export function permutationElementOrder(
   value: PermutationValue,
   work: PermutationWork = {}
@@ -76,9 +76,10 @@ export function permutationPower(
       images[cycle[i] - 1] = cycle[(i + shift) % n];
     }
   }
-  return new PermutationValue(images, work);
+  return PermutationValue.fromImages(images, work);
 }
 
+/** Right-action conjugation: by⁻¹ * value * by, using three linear image walks. */
 export function conjugatePermutation(
   value: PermutationValue,
   by: PermutationValue,
@@ -90,6 +91,7 @@ export function conjugatePermutation(
     work
   );
 }
+/** The commutator is left⁻¹ * right⁻¹ * left * right, in that order. */
 export function permutationCommutator(
   left: PermutationValue,
   right: PermutationValue,

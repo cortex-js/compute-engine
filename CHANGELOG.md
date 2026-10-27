@@ -1,3 +1,13 @@
+## Unreleased
+
+### Behavior Changes
+
+- Add the optional `@cortex-js/compute-engine/group-theory` entry.
+  `loadGroupTheory(ce)` registers exact permutation arithmetic, generator-based
+  groups, orbits, transversals, orders, membership, point stabilizers and subgroup
+  relationships. These operators remain absent from an engine until loaded.
+  Resource limits report errors rather than partial lists or false predicates.
+
 ## 0.170.0 _2026-10-26_
 
 ### Breaking Changes

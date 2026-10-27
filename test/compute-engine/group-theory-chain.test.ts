@@ -1,15 +1,15 @@
 import {
-  PermutationValue as P,
-  PermutationAction as A,
-  composePermutations as mul,
+  PermutationValue,
+  PermutationAction,
+  composePermutations,
   applyPermutation,
 } from '../../src/compute-engine/group-theory/permutation/values';
 import {
-  PermutationGroupValue as G,
+  PermutationGroupValue,
   enumeratePermutationGroup,
 } from '../../src/compute-engine/group-theory/permutation/groups';
 import {
-  PermutationStabilizerChain as Chain,
+  PermutationStabilizerChain,
   verifyPermutationChain,
   permutationGroupContains,
   permutationPointStabilizer,
@@ -26,14 +26,14 @@ import {
   conjugatePermutation,
 } from '../../src/compute-engine/group-theory/permutation/element-operations';
 const group = (images: number[][], degree: number) =>
-  new G(
-    images.map((x) => new P(x)),
-    new A(degree)
+  new PermutationGroupValue(
+    images.map((x) => PermutationValue.fromImages(x)),
+    new PermutationAction(degree)
   );
 const bounds = { maxWork: 5_000_000 };
-const keys = (values: readonly P[]) =>
+const keys = (values: readonly PermutationValue[]) =>
   new Set(values.map((p) => p.images.join(',')));
-const elements = (g: G) =>
+const elements = (g: PermutationGroupValue) =>
   enumeratePermutationGroup(g, { maxElements: 120, maxProducts: 1000 });
 const s3 = group(
   [
@@ -100,34 +100,28 @@ describe('verified bounded Schreier chains and group baseline', () => {
   ] as const)(
     '%s has independently known order and verified levels',
     (_, g, order) => {
-      const chain = Chain.compute(g, bounds);
+      const chain = PermutationStabilizerChain.compute(g, bounds);
       expect(chain.order).toBe(order);
       expect(verifyPermutationChain(g, chain.certificate, bounds)).toBe(true);
       expect(BigInt(elements(g).length)).toBe(order);
-      expect(Chain.is(chain)).toBe(true);
-      expect(Chain.is(Object.create(Chain.prototype))).toBe(false);
-      expect(Object.isFrozen(chain)).toBe(true);
-      expect(Object.isFrozen(chain.levels)).toBe(true);
-      for (const level of chain.levels) {
-        expect(Object.isFrozen(level)).toBe(true);
-        expect(Object.isFrozen(level.representatives)).toBe(true);
-      }
     }
   );
 
   test('all generating pairs on three points agree with exhaustive closure and constructive sifting', () => {
-    const ps = permutations([1, 2, 3]).map((x) => new P(x));
+    const ps = permutations([1, 2, 3]).map((x) =>
+      PermutationValue.fromImages(x)
+    );
     for (const p of ps)
       for (const q of ps) {
-        const g = new G([p, q], new A(3)),
+        const g = new PermutationGroupValue([p, q], new PermutationAction(3)),
           reference = keys(elements(g));
-        const chain = Chain.compute(g, bounds);
+        const chain = PermutationStabilizerChain.compute(g, bounds);
         expect(chain.order).toBe(BigInt(reference.size));
         for (const x of ps) {
           const sift = chain.sift(x, bounds);
           expect(sift.member).toBe(reference.has(x.images.join(',')));
           const reconstructed = sift.factors.reduce(
-            (r, f) => mul(r, f),
+            (r, f) => composePermutations(r, f),
             sift.residue
           );
           expect(reconstructed.images).toEqual(x.images);
@@ -143,28 +137,30 @@ describe('verified bounded Schreier chains and group baseline', () => {
         ],
         5
       ),
-      chain = Chain.compute(g, bounds),
+      chain = PermutationStabilizerChain.compute(g, bounds),
       reference = keys(elements(g));
     let rejected = 0;
     for (const images of permutations([1, 2, 3, 4, 5])) {
-      const p = new P(images),
+      const p = PermutationValue.fromImages(images),
         r = chain.sift(p, bounds);
       expect(r.member).toBe(reference.has(p.images.join(',')));
       if (!r.member) rejected++;
-      expect(r.factors.reduce((x, f) => mul(x, f), r.residue).images).toEqual(
-        p.images
-      );
+      expect(
+        r.factors.reduce((x, f) => composePermutations(x, f), r.residue).images
+      ).toEqual(p.images);
     }
     expect(rejected).toBe(96);
   });
 
   test('S20 order is exact above Number.MAX_SAFE_INTEGER without group enumeration', () => {
-    const chain = Chain.compute(symmetric(20), bounds);
+    const chain = PermutationStabilizerChain.compute(symmetric(20), bounds);
     expect(chain.order).toBe(2432902008176640000n);
     expect(chain.levels.map((l) => l.orbit.length)).toEqual(
       Array.from({ length: 19 }, (_, i) => 20 - i)
     );
-    expect(chain.sift(new P([2, 1]), bounds).member).toBe(true);
+    expect(chain.sift(PermutationValue.fromImages([2, 1]), bounds).member).toBe(
+      true
+    );
   });
 
   test('point stabilizers equal exhaustive fixed-point subgroups for every S4 base and a fixed fifth point', () => {
@@ -226,24 +222,34 @@ describe('verified bounded Schreier chains and group baseline', () => {
   });
 
   test('membership validates both group and action; identity belongs to a trivial group', () => {
-    expect(permutationGroupContains(a3, new P([2, 3, 1]), bounds)).toBe(true);
-    expect(permutationGroupContains(a3, new P([2, 1]), bounds)).toBe(false);
-    expect(permutationGroupContains(group([], 0), new P([]), bounds)).toBe(
-      true
-    );
+    expect(
+      permutationGroupContains(
+        a3,
+        PermutationValue.fromImages([2, 3, 1]),
+        bounds
+      )
+    ).toBe(true);
+    expect(
+      permutationGroupContains(a3, PermutationValue.fromImages([2, 1]), bounds)
+    ).toBe(false);
+    expect(
+      permutationGroupContains(
+        group([], 0),
+        PermutationValue.fromImages([]),
+        bounds
+      )
+    ).toBe(true);
     expect(() =>
-      permutationGroupContains(s3, new P([2, 3, 4, 1]), bounds)
+      permutationGroupContains(
+        s3,
+        PermutationValue.fromImages([2, 3, 4, 1]),
+        bounds
+      )
     ).toThrow('permutation-outside-action');
-    expect(() =>
-      permutationGroupContains(Object.create(G.prototype), new P([]), bounds)
-    ).toThrow('invalid-permutation-group');
-    expect(() => Chain.compute(Object.create(G.prototype), bounds)).toThrow(
-      'invalid-permutation-group'
-    );
   });
 
   test('verification rejects incomplete, forged, and unrelated certificates', () => {
-    const chain = Chain.compute(symmetric(4), bounds),
+    const chain = PermutationStabilizerChain.compute(symmetric(4), bounds),
       levels = chain.levels;
     const replace = (i: number, change: Partial<PermutationChainLevel>) => ({
       ...chain.certificate,
@@ -288,7 +294,7 @@ describe('verified bounded Schreier chains and group baseline', () => {
       verifyPermutationChain(
         symmetric(4),
         replace(0, {
-          representatives: levels[0].representatives.map(() => new P([])),
+          parents: levels[0].parents.map(() => -1),
         }),
         bounds
       )
@@ -296,7 +302,7 @@ describe('verified bounded Schreier chains and group baseline', () => {
     expect(
       verifyPermutationChain(
         symmetric(4),
-        replace(1, { generators: [new P([2, 1])] }),
+        replace(1, { generators: [PermutationValue.fromImages([2, 1])] }),
         bounds
       )
     ).toBe(false);
@@ -308,46 +314,56 @@ describe('verified bounded Schreier chains and group baseline', () => {
       )
     ).toBe(false);
     expect(
-      verifyPermutationChain(a3, Chain.compute(c2, bounds).certificate, bounds)
+      verifyPermutationChain(
+        a3,
+        PermutationStabilizerChain.compute(c2, bounds).certificate,
+        bounds
+      )
     ).toBe(false);
     expect(() =>
       verifyPermutationChain(s3, [null] as never, bounds)
     ).not.toThrow();
   });
 
-  test('work includes verification, succeeds at the exact boundary, and failures do not cache a result', () => {
-    const chain = Chain.compute(s3, bounds),
+  test('construction succeeds at the exact work boundary and failures do not cache a result', () => {
+    const chain = PermutationStabilizerChain.compute(s3, bounds),
       used = chain.workUsed;
-    expect(() => Chain.compute(s3, { maxWork: used - 1 })).toThrow(
-      'permutation-chain-work-limit'
-    );
-    expect(Chain.compute(s3, { maxWork: used }).order).toBe(6n);
     expect(() =>
-      permutationGroupContains(s3, new P([2, 1]), { maxWork: used })
+      PermutationStabilizerChain.compute(s3, { maxWork: used - 1 })
     ).toThrow('permutation-chain-work-limit');
-    expect(Chain.compute(s3, bounds).order).toBe(6n);
+    expect(
+      PermutationStabilizerChain.compute(s3, { maxWork: used }).order
+    ).toBe(6n);
+    expect(() =>
+      permutationGroupContains(s3, PermutationValue.fromImages([2, 1]), {
+        maxWork: used,
+      })
+    ).toThrow('permutation-chain-work-limit');
+    expect(PermutationStabilizerChain.compute(s3, bounds).order).toBe(6n);
   });
 
   test('storage, levels, orbit points and generator growth are bounded', () => {
-    expect(() => Chain.compute(s3, { ...bounds, maxLevels: 0 })).toThrow(
-      'permutation-chain-level-limit'
-    );
-    expect(() => Chain.compute(s3, { ...bounds, maxOrbitPoints: 2 })).toThrow(
-      'permutation-orbit-point-limit'
-    );
-    expect(() => Chain.compute(s3, { ...bounds, maxStoredImages: 0 })).toThrow(
-      'permutation-chain-storage-limit'
-    );
     expect(() =>
-      Chain.compute(symmetric(4), bounds, { maxGenerators: 2 })
+      PermutationStabilizerChain.compute(s3, { ...bounds, maxLevels: 0 })
+    ).toThrow('permutation-chain-level-limit');
+    expect(() =>
+      PermutationStabilizerChain.compute(s3, { ...bounds, maxOrbitPoints: 2 })
+    ).toThrow('permutation-chain-orbit-point-limit');
+    expect(() =>
+      PermutationStabilizerChain.compute(s3, { ...bounds, maxStoredImages: 0 })
+    ).toThrow('permutation-chain-storage-limit');
+    expect(() =>
+      PermutationStabilizerChain.compute(symmetric(4), bounds, {
+        maxGenerators: 2,
+      })
     ).toThrow('permutation-chain-generator-limit');
-    expect(() => Chain.compute(s3, bounds, { maxDegree: 2 })).toThrow(
-      'permutation-degree-limit'
-    );
-    const chain = Chain.compute(s3, bounds);
-    expect(() => chain.sift(new P([]), bounds, { maxDegree: 2 })).toThrow(
-      'permutation-degree-limit'
-    );
+    expect(() =>
+      PermutationStabilizerChain.compute(s3, bounds, { maxDegree: 2 })
+    ).toThrow('permutation-degree-limit');
+    const chain = PermutationStabilizerChain.compute(s3, bounds);
+    expect(() =>
+      chain.sift(PermutationValue.fromImages([]), bounds, { maxDegree: 2 })
+    ).toThrow('permutation-degree-limit');
     expect(() =>
       verifyPermutationChain(s3, chain.certificate, {
         ...bounds,
@@ -366,9 +382,9 @@ describe('verified bounded Schreier chains and group baseline', () => {
     for (const limits of [
       { ...bounds, maxLevels: 257 },
       { ...bounds, maxOrbitPoints: -1 },
-      { ...bounds, maxStoredImages: 1_000_001 },
+      { ...bounds, maxStoredImages: 100_000_001 },
     ])
-      expect(() => Chain.compute(s3, limits)).toThrow();
+      expect(() => PermutationStabilizerChain.compute(s3, limits)).toThrow();
   });
   test('cancellation propagates during building, verification, and sifting', () => {
     const sentinel = new Error('cancel');
@@ -381,21 +397,27 @@ describe('verified bounded Schreier chains and group baseline', () => {
       };
     };
     const g = symmetric(9);
-    expect(() => Chain.compute(g, bounds, work(100))).toThrow(sentinel);
-    const chain = Chain.compute(g, bounds);
+    expect(() =>
+      PermutationStabilizerChain.compute(g, bounds, work(100))
+    ).toThrow(sentinel);
+    const chain = PermutationStabilizerChain.compute(g, bounds);
     expect(() =>
       verifyPermutationChain(g, chain.certificate, bounds, work(100))
     ).toThrow(sentinel);
     expect(() =>
-      chain.sift(new P([2, 3, 4, 5, 6, 7, 8, 9, 1]), bounds, work(20))
+      chain.sift(
+        PermutationValue.fromImages([2, 3, 4, 5, 6, 7, 8, 9, 1]),
+        bounds,
+        work(20)
+      )
     ).toThrow(sentinel);
-    expect(Chain.compute(g, bounds).order).toBe(362880n);
+    expect(PermutationStabilizerChain.compute(g, bounds).order).toBe(362880n);
   });
 });
 
 describe('exact elementary permutation operations', () => {
   test('cycles, exact order, and arbitrary signed powers use the finite permutation domain', () => {
-    const p = new P([2, 3, 1, 5, 4]);
+    const p = PermutationValue.fromImages([2, 3, 1, 5, 4]);
     expect(permutationCycles(p)).toEqual([
       [1, 2, 3],
       [4, 5],
@@ -407,46 +429,96 @@ describe('exact elementary permutation operations', () => {
     expect(permutationPower(p, big).images).toEqual(
       permutationPower(p, big % 6n).images
     );
-    expect(permutationElementOrder(new P([]))).toBe(1n);
-    expect(permutationCycles(new P([1, 2, 3]))).toEqual([]);
+    expect(permutationElementOrder(PermutationValue.fromImages([]))).toBe(1n);
+    expect(permutationCycles(PermutationValue.fromImages([1, 2, 3]))).toEqual(
+      []
+    );
   });
   test('powers and conjugation agree with repeated ordered products through S4', () => {
     for (const images of permutations([1, 2, 3, 4])) {
-      const p = new P(images);
-      let repeated = new P([]);
+      const p = PermutationValue.fromImages(images);
+      let repeated = PermutationValue.fromImages([]);
       for (let k = 0; k <= 12; k++) {
         expect(permutationPower(p, BigInt(k)).images).toEqual(repeated.images);
-        repeated = mul(repeated, p);
+        repeated = composePermutations(repeated, p);
       }
       expect(permutationPower(p, permutationElementOrder(p)).images).toEqual(
         []
       );
     }
-    const p = new P([2, 1]),
-      q = new P([1, 3, 2]);
+    const p = PermutationValue.fromImages([2, 1]),
+      q = PermutationValue.fromImages([1, 3, 2]);
     expect(conjugatePermutation(p, q).images).toEqual([3, 2, 1]);
     expect(permutationCommutator(p, q).images).toEqual([2, 3, 1]);
   });
   test('element operations enforce brands, exact exponents, limits, and cancellation', () => {
-    expect(() => permutationPower(new P([2, 1]), 1 as never)).toThrow(
-      'invalid-permutation-exponent'
-    );
-    expect(() => permutationPower(new P([2, 1]), 1n << 16384n)).toThrow(
-      'permutation-exponent-limit'
-    );
-    expect(() => permutationElementOrder(Object.create(P.prototype))).toThrow(
-      'incompatible-permutation-domain'
-    );
-    expect(() => permutationCycles(new P([2, 1]), { maxDegree: 1 })).toThrow(
-      'permutation-degree-limit'
-    );
+    expect(() =>
+      permutationPower(PermutationValue.fromImages([2, 1]), 1 as never)
+    ).toThrow('invalid-permutation-exponent');
+    expect(() =>
+      permutationPower(PermutationValue.fromImages([2, 1]), 1n << 16384n)
+    ).toThrow('permutation-exponent-limit');
+    expect(() =>
+      permutationCycles(PermutationValue.fromImages([2, 1]), { maxDegree: 1 })
+    ).toThrow('permutation-degree-limit');
     const sentinel = new Error('cancel');
     expect(() =>
-      permutationPower(new P([2, 1]), 3n, {
+      permutationPower(PermutationValue.fromImages([2, 1]), 3n, {
         check: () => {
           throw sentinel;
         },
       })
     ).toThrow(sentinel);
   });
+});
+
+test('incremental chains agree with complete closure on reproducible random groups', () => {
+  let state = 0x654321;
+  const next = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state;
+  };
+  const shuffled = (degree: number) => {
+    const images = Array.from({ length: degree }, (_, i) => i + 1);
+    for (let i = degree - 1; i > 0; i--) {
+      const j = next() % (i + 1);
+      [images[i], images[j]] = [images[j], images[i]];
+    }
+    return PermutationValue.fromImages(images);
+  };
+  for (let sample = 0; sample < 40; sample++) {
+    const degree = 2 + (sample % 5);
+    const value = new PermutationGroupValue(
+      Array.from({ length: 1 + (sample % 3) }, () => shuffled(degree)),
+      new PermutationAction(degree)
+    );
+    const closure = enumeratePermutationGroup(value, {
+      maxElements: 1000,
+      maxProducts: 4000,
+    });
+    const members = new Set(closure.map((element) => element.images.join(',')));
+    const chain = PermutationStabilizerChain.compute(value, bounds);
+    expect(chain.order).toBe(BigInt(closure.length));
+    expect(verifyPermutationChain(value, chain.certificate, bounds)).toBe(true);
+    for (let i = 0; i < 8; i++) {
+      const candidate = shuffled(degree);
+      expect(chain.sift(candidate, bounds).member).toBe(
+        members.has(candidate.images.join(','))
+      );
+    }
+    const point = 1 + (sample % degree);
+    const stabilizer = permutationPointStabilizer(value, point, bounds);
+    const fixed = closure.filter(
+      (element) => (element.images[point - 1] ?? point) === point
+    );
+    expect(PermutationStabilizerChain.compute(stabilizer, bounds).order).toBe(
+      BigInt(fixed.length)
+    );
+  }
+});
+test('ordinary chain queries do not allocate diagnostic proof steps', () => {
+  expect(
+    PermutationStabilizerChain.compute(s3, { ...bounds, maxProofSteps: 0 })
+      .order
+  ).toBe(6n);
 });

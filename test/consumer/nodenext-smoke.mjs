@@ -89,6 +89,7 @@ import * as compile from '${PKG_NAME}/compile';
 import * as runtime from '${PKG_NAME}/runtime';
 import * as identities from '${PKG_NAME}/identities';
 import * as integrationRules from '${PKG_NAME}/integration-rules';
+import * as groupTheory from '${PKG_NAME}/group-theory';
 import * as epsil from '${PKG_NAME}/epsil';
 
 // Touch a real symbol from each entry so tsc actually resolves the types
@@ -107,6 +108,7 @@ const touched: unknown[] = [
   runtime.createJavaScriptRuntime,
   runtime.runtimeVersion,
   identities.loadIdentities,
+  groupTheory.loadGroupTheory,
   integrationRules.loadIntegrationRules,
   epsil.parseEpsil,
   epsil.serializeEpsil,
@@ -120,6 +122,12 @@ void touched;
 // error below is expected. If they collapse to \`any\`, the error disappears
 // and tsc flags the unused directive instead.
 const ce = new ComputeEngine();
+const groupOptions: groupTheory.GroupTheoryLoadOptions = {maxChainWork: 100000};
+const groupReport: groupTheory.GroupTheoryLoadReport = groupTheory.loadGroupTheory(ce, groupOptions);
+const groupCount: number = groupReport.operatorCount;
+void groupCount;
+// @ts-expect-error — resource limits must be numbers, not strings
+groupTheory.loadGroupTheory(ce, {maxChainWork: 'unlimited'});
 // @ts-expect-error — parse() returns BoxedExpression, not number
 const n: number = ce.parse('1');
 void n;
@@ -138,7 +146,12 @@ void root;
   // Symlink the repo as an installed dependency.
   const scopeDir = join(tmpDir, 'node_modules', '@cortex-js');
   mkdirSync(scopeDir, { recursive: true });
-  symlinkSync(REPO_ROOT, join(scopeDir, 'compute-engine'), 'dir');
+  // Directory junctions preserve package resolution without Windows symlink privileges.
+  symlinkSync(
+    REPO_ROOT,
+    join(scopeDir, 'compute-engine'),
+    process.platform === 'win32' ? 'junction' : 'dir'
+  );
 
   const result = spawnSync(process.execPath, [tsc, '-p', tmpDir], {
     encoding: 'utf8',

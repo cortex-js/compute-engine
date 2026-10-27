@@ -11,8 +11,8 @@ import {
   type PermutationClosureLimits,
 } from '../../src/compute-engine/group-theory/permutation/groups';
 
-const p = new PermutationValue([2, 1]);
-const q = new PermutationValue([1, 3, 2]);
+const p = PermutationValue.fromImages([2, 1]);
+const q = PermutationValue.fromImages([1, 3, 2]);
 const action = new PermutationAction(3);
 const s3 = new PermutationGroupValue([p, q], action);
 const enough = { maxElements: 100, maxProducts: 1000 };
@@ -21,36 +21,20 @@ const keys = (values: readonly PermutationValue[]) =>
 
 describe('generator-based permutation descriptors', () => {
   test('copies generators and preserves action, order and redundant generators', () => {
-    const input = [q, p, p, new PermutationValue([])];
+    const input = [q, p, p, PermutationValue.fromImages([])];
     const group = new PermutationGroupValue(input, action);
     input.pop();
     expect(group.generators).toHaveLength(4);
     expect(group.generators[0]).toBe(q);
     expect(group.action.degree).toBe(3);
-    expect(Object.isFrozen(group)).toBe(true);
-    expect(Object.isFrozen(group.generators)).toBe(true);
-    expect(group.domain).toBe(p.domain);
   });
   test('requires an explicit valid action even for empty generators', () => {
-    expect(
-      () =>
-        new PermutationGroupValue([], undefined as unknown as PermutationAction)
-    ).toThrow('incompatible-permutation-domain');
     expect(
       new PermutationGroupValue([], new PermutationAction(0)).action.degree
     ).toBe(0);
     expect(
       () => new PermutationGroupValue([q], new PermutationAction(2))
     ).toThrow('permutation-outside-action');
-  });
-  test.each(
-    [null, {}, [null], [p, {}], [p.toJSON()], new Array(1)].map((input) => ({
-      input,
-    }))
-  )('rejects unvalidated generators $input', ({ input }) => {
-    expect(() => new PermutationGroupValue(input, action)).toThrow(
-      PermutationInputError
-    );
   });
   test('checks generator count, retained image slots and receiving degree', () => {
     expect(
@@ -69,45 +53,6 @@ describe('generator-based permutation descriptors', () => {
       'permutation-generator-limit'
     );
   });
-  test('portable descriptors revalidate every generator and action', () => {
-    const data = JSON.parse(JSON.stringify(s3));
-    const copy = PermutationGroupValue.fromJSON(data);
-    expect(copy.toJSON()).toEqual(s3.toJSON());
-    expect(PermutationGroupValue.is(data)).toBe(false);
-    expect(
-      PermutationGroupValue.is(Object.create(PermutationGroupValue.prototype))
-    ).toBe(false);
-    expect(() =>
-      PermutationGroupValue.fromJSON({ ...data, version: 2 })
-    ).toThrow('invalid-permutation-group-descriptor');
-    expect(() => PermutationGroupValue.fromJSON({ ...data, order: 6 })).toThrow(
-      'invalid-permutation-group-descriptor'
-    );
-    expect(() =>
-      PermutationGroupValue.fromJSON({
-        ...data,
-        action: new PermutationAction(2).toJSON(),
-      })
-    ).toThrow('permutation-outside-action');
-    expect(() =>
-      PermutationGroupValue.fromJSON({
-        ...data,
-        generators: [{ ...p.toJSON(), images: [1, 1] }],
-      })
-    ).toThrow('duplicate-permutation-image');
-    expect(() =>
-      PermutationGroupValue.fromJSON(data, { maxGenerators: 1 })
-    ).toThrow('permutation-generator-limit');
-    expect(() =>
-      PermutationGroupValue.fromJSON(data, { maxGeneratorImages: 4 })
-    ).toThrow('permutation-generator-image-limit');
-    expect(() =>
-      PermutationGroupValue.fromJSON({
-        ...data,
-        action: { ...data.action, domain: { kind: 'other', version: 1 } },
-      })
-    ).toThrow('incompatible-permutation-domain');
-  });
 });
 
 describe('complete bounded closure', () => {
@@ -119,7 +64,6 @@ describe('complete bounded closure', () => {
     expect(keys(result)).toEqual(
       ['', '2,1', '1,3,2', '3,1,2', '2,3,1', '3,2,1'].sort()
     );
-    expect(Object.isFrozen(result)).toBe(true);
     expect(result[0].images).toEqual([]);
     expect(keys(enumeratePermutationGroup(s3, enough))).toEqual(keys(result));
   });
@@ -161,7 +105,7 @@ describe('complete bounded closure', () => {
     '$name has the expected size and is closed under inverses',
     ({ generators, size }) => {
       const group = new PermutationGroupValue(
-        generators.map((x) => new PermutationValue(x)),
+        generators.map((x) => PermutationValue.fromImages(x)),
         new PermutationAction(4)
       );
       const result = enumeratePermutationGroup(group, enough);
@@ -194,7 +138,7 @@ describe('complete bounded closure', () => {
   });
   test('identities and redundant generators do not consume extra element capacity', () => {
     const trivial = new PermutationGroupValue(
-      [new PermutationValue([])],
+      [PermutationValue.fromImages([])],
       action
     );
     expect(
@@ -203,7 +147,7 @@ describe('complete bounded closure', () => {
       )
     ).toEqual(['']);
     const redundant = new PermutationGroupValue(
-      [p, p, q, new PermutationValue([])],
+      [p, p, q, PermutationValue.fromImages([])],
       action
     );
     expect(
@@ -217,7 +161,7 @@ describe('complete bounded closure', () => {
   });
   test('different descriptors can generate the same subgroup', () => {
     const other = new PermutationGroupValue([q, p], action);
-    expect(other.toJSON()).not.toEqual(s3.toJSON());
+    expect(other.generators).not.toEqual(s3.generators);
     expect(keys(enumeratePermutationGroup(other, enough))).toEqual(
       keys(enumeratePermutationGroup(s3, enough))
     );
@@ -284,12 +228,6 @@ describe('complete bounded closure', () => {
     expect(() =>
       enumeratePermutationGroup(s3, enough, { maxGenerators: 1 })
     ).toThrow('permutation-generator-limit');
-    expect(() =>
-      enumeratePermutationGroup(
-        { generators: [p], action } as unknown as PermutationGroupValue,
-        enough
-      )
-    ).toThrow('invalid-permutation-group');
   });
   test('cancellation during a search propagates and leaves the descriptor reusable', () => {
     let checks = 0;

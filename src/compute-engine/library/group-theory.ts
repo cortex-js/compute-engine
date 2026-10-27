@@ -47,8 +47,6 @@ import {
 } from '../group-theory/permutation/element-operations.js';
 import {
   permutationChainLimits,
-  permutationPointStabilizer,
-  permutationGroupRelation,
   permutationGroupIsAbelian,
 } from '../group-theory/permutation/stabilizer-chain.js';
 
@@ -74,62 +72,47 @@ export function isPermutationError(
   );
 }
 
-const NAMES = [
-  'Permutation',
-  'PermutationAction',
-  'PermutationCompose',
-  'PermutationInverse',
-  'PermutationApply',
-  'PermutationInAction',
-  'PermutationGroup',
-  'PermutationGroupElements',
-  'PermutationOrbit',
-  'PermutationOrbits',
-  'PermutationTransversal',
-  'PermutationCycles',
-  'PermutationOrder',
-  'PermutationPower',
-  'PermutationConjugate',
-  'PermutationCommutator',
-  'PermutationGroupGenerators',
-  'PermutationGroupIdentity',
-  'PermutationGroupOrder',
-  'PermutationGroupContains',
-  'PermutationPointStabilizer',
-  'PermutationIsSubgroup',
-  'PermutationSubgroupIndex',
-  'PermutationGroupEqual',
-  'PermutationIsNormal',
-  'PermutationGroupIsAbelian',
-];
+/** Resource ceilings for all queries loaded into one engine. Per-call options may lower them. */
+export interface GroupTheoryLoadOptions {
+  maxDegree?: number;
+  maxClosureElements?: number;
+  maxClosureProducts?: number;
+  maxOrbitPoints?: number;
+  maxOrbitEdges?: number;
+  maxTransversalProducts?: number;
+  maxChainWork?: number;
+  maxGenerators?: number;
+  maxGeneratorImages?: number;
+  maxClosureImageWork?: number;
+  maxClosureStoredImages?: number;
+  maxTransversalImageWork?: number;
+  maxTransversalStoredImages?: number;
+  maxChainLevels?: number;
+  maxChainOrbitPoints?: number;
+  maxChainStoredImages?: number;
+}
+export interface GroupTheoryLoadReport {
+  /** Number of registered permutation operators. */
+  operatorCount: number;
+}
+const loaded = new WeakMap<
+  IComputeEngine,
+  {
+    settings: string;
+    report: GroupTheoryLoadReport;
+    definitions: readonly { name: string; value: unknown }[];
+  }
+>();
 
 /**
- * Opt-in foundation experiment. The nominal types have checked constructors;
- * every operation also decodes its operands, including forged MathJSON heads.
- * This installer is intentionally not part of the default library bundle.
+ * Register the optional permutation library. Equal effective options are
+ * idempotent; changing ceilings on an already-loaded engine is an error.
+ * Definitions are installed atomically so a failed load leaves no partial types.
  */
-export function installPermutationFoundation(
+export function loadGroupTheory(
   ce: IComputeEngine,
-  options: {
-    maxDegree?: number;
-    maxClosureElements?: number;
-    maxClosureProducts?: number;
-    maxOrbitPoints?: number;
-    maxOrbitEdges?: number;
-    maxTransversalProducts?: number;
-    maxChainWork?: number;
-    maxChainProofSteps?: number;
-    maxGenerators?: number;
-    maxGeneratorImages?: number;
-    maxClosureImageWork?: number;
-    maxClosureStoredImages?: number;
-    maxTransversalImageWork?: number;
-    maxTransversalStoredImages?: number;
-    maxChainLevels?: number;
-    maxChainOrbitPoints?: number;
-    maxChainStoredImages?: number;
-  } = {}
-): void {
+  options: GroupTheoryLoadOptions = {}
+): GroupTheoryLoadReport {
   const maxDegree = degreeLimit(options);
   const groupLimits = permutationGroupLimits(options);
   const closureLimits = permutationClosureLimits({
@@ -143,19 +126,40 @@ export function installPermutationFoundation(
     maxImageWork: options.maxTransversalImageWork,
     maxStoredImages: options.maxTransversalStoredImages,
   });
-  const chainLimits = permutationChainLimits({
-    maxWork: options.maxChainWork ?? 50_000_000,
-    maxProofSteps: options.maxChainProofSteps,
-    maxLevels: options.maxChainLevels,
-    maxOrbitPoints: options.maxChainOrbitPoints,
-    maxStoredImages: options.maxChainStoredImages,
-  });
+  const { maxProofSteps: _diagnosticProofLimit, ...chainLimits } =
+    permutationChainLimits({
+      maxWork: options.maxChainWork ?? 50_000_000,
+      maxLevels: options.maxChainLevels,
+      maxOrbitPoints: options.maxChainOrbitPoints,
+      maxOrbitEdges: options.maxOrbitEdges,
+      maxStoredImages: options.maxChainStoredImages,
+    });
   const orbitLimits = permutationOrbitLimits({
     maxPoints: options.maxOrbitPoints ?? 100_000,
     maxEdges: options.maxOrbitEdges ?? 1_000_000,
   });
-  for (const name of NAMES) {
-    if (ce.lookupDefinition(name)) throw new Error(`Already defined: ${name}`);
+  const settings = JSON.stringify({
+    maxDegree,
+    groupLimits,
+    closureLimits,
+    transversalLimits,
+    chainLimits,
+    orbitLimits,
+  });
+  const previous = loaded.get(ce);
+  // Checkpoint restoration can remove a library after loading. Check definitions
+  // as well as the weak cache before claiming the engine is still configured.
+  if (
+    previous &&
+    previous.definitions.every(
+      ({ name, value }) => value === ce.lookupDefinition(name)
+    )
+  ) {
+    if (previous.settings !== settings)
+      throw new Error(
+        'loadGroupTheory: this engine is already loaded with different options'
+      );
+    return { ...previous.report };
   }
   const work: PermutationGroupWork = {
     maxDegree,
@@ -172,39 +176,43 @@ export function installPermutationFoundation(
     try {
       return body();
     } catch (error) {
+      if (
+        error &&
+        typeof error === 'object' &&
+        isFunction(error as Expression, 'Error')
+      )
+        return error as Expression;
       if (isPermutationError(error)) return ce.error(error.code);
       throw error;
     }
   };
-  const arity = (ops: readonly Expression[], count: number): void => {
-    if (ops.length !== count) fail('invalid-permutation-arity');
+  // Custom canonical constructors also run on raw calls, before the usual
+  // signature checks. Use the engine's shared arity codes at that entry point.
+  const constructorArity = (ops: readonly Expression[], count: number) => {
+    if (ops.length !== count)
+      fail(ops.length < count ? 'missing' : 'unexpected-argument');
   };
   const integer = (value: Expression, defer = false): number | undefined => {
     if (isNumber(value)) {
       if (value.isInteger !== true || !Number.isSafeInteger(value.re))
-        fail('invalid-permutation-integer');
+        fail('incompatible-type');
       return value.re;
     }
     if (isSymbol(value))
-      return defer || !value.isConstant
-        ? undefined
-        : fail('invalid-permutation-integer');
+      return defer || !value.isConstant ? undefined : fail('incompatible-type');
     if (isFunction(value) && (defer || !value.isConstant)) return undefined;
-    return fail('invalid-permutation-integer');
+    return fail('incompatible-type');
   };
   const readImages = (
     value: Expression,
     defer = false
   ): number[] | undefined => {
     if (isSymbol(value))
-      return defer || !value.isConstant
-        ? undefined
-        : fail('expected-explicit-permutation-images');
+      return defer || !value.isConstant ? undefined : fail('incompatible-type');
     // Boxing never executes a producer such as ListFrom; evaluation checks its result.
     if (defer && isFunction(value) && value.operator !== 'List')
       return undefined;
-    if (!isFunction(value, 'List'))
-      return fail('expected-explicit-permutation-images');
+    if (!isFunction(value, 'List')) return fail('incompatible-type');
     if (value.ops.length > maxDegree) return fail('permutation-degree-limit');
     const result: number[] = [];
     let unresolved = false;
@@ -220,24 +228,24 @@ export function installPermutationFoundation(
     value: Expression,
     defer = false
   ): PermutationValue | undefined => {
+    if (isFunction(value, 'Error')) throw value;
     if (isSymbol(value))
-      return !value.isConstant
-        ? undefined
-        : fail('incompatible-permutation-domain');
+      return !value.isConstant ? undefined : fail('incompatible-type');
     if (defer && isFunction(value) && value.operator !== 'Permutation')
       return undefined;
-    if (!isFunction(value, 'Permutation'))
-      return fail('incompatible-permutation-domain');
-    arity(value.ops, 1);
+    if (!isFunction(value, 'Permutation')) return fail('incompatible-type');
+    constructorArity(value.ops, 1);
+
     const images = readImages(value.op1, defer);
     return images === undefined
       ? undefined
-      : new PermutationValue(images, work);
+      : PermutationValue.fromImages(images, work);
   };
   const readAction = (
     value: Expression,
     defer = false
   ): PermutationAction | undefined => {
+    if (isFunction(value, 'Error')) throw value;
     if (isSymbol(value))
       return !value.isConstant
         ? undefined
@@ -246,7 +254,7 @@ export function installPermutationFoundation(
       return undefined;
     if (!isFunction(value, 'PermutationAction'))
       return fail('incompatible-permutation-domain');
-    arity(value.ops, 1);
+
     const n = integer(value.op1, defer);
     return n === undefined ? undefined : new PermutationAction(n, work);
   };
@@ -266,18 +274,18 @@ export function installPermutationFoundation(
     defer = false
   ): Expression | undefined =>
     adapt(() => {
-      arity(ops, 1);
+      constructorArity(ops, 1);
       const images = readImages(ops[0], defer);
       return images === undefined
         ? undefined
-        : encode(new PermutationValue(images, work));
+        : encode(PermutationValue.fromImages(images, work));
     });
   const action = (
     ops: readonly Expression[],
     defer = false
   ): Expression | undefined =>
     adapt(() => {
-      arity(ops, 1);
+      constructorArity(ops, 1);
       const n = integer(ops[0], defer);
       if (n === undefined) return undefined;
       const value = new PermutationAction(n, work);
@@ -287,14 +295,13 @@ export function installPermutationFoundation(
     ops: readonly Expression[],
     defer = false
   ): PermutationGroupValue | undefined => {
-    arity(ops, 2);
+    constructorArity(ops, 2);
     const action = readAction(ops[1], defer);
     const input = ops[0];
     if (isSymbol(input) && (defer || !input.isConstant)) return undefined;
     if (defer && isFunction(input) && input.operator !== 'List')
       return undefined;
-    if (!isFunction(input, 'List'))
-      return fail('expected-explicit-permutation-generators');
+    if (!isFunction(input, 'List')) return fail('incompatible-type');
     if (input.ops.length > groupLimits.maxGenerators)
       return fail('permutation-generator-limit');
     const generators: PermutationValue[] = [];
@@ -337,9 +344,10 @@ export function installPermutationFoundation(
       return value ? encodeGroup(value) : undefined;
     });
   const readGroup = (value: Expression): PermutationGroupValue | undefined => {
+    if (isFunction(value, 'Error')) throw value;
     if (isSymbol(value) && !value.isConstant) return undefined;
     if (!isFunction(value, 'PermutationGroup'))
-      return fail('invalid-permutation-group');
+      return fail('incompatible-type');
     return groupFromOperands(value.ops);
   };
   const encodePoints = (points: readonly number[]): Expression =>
@@ -357,7 +365,7 @@ export function installPermutationFoundation(
     defaults: T
   ): T | undefined => {
     if (ops.length < count || ops.length > count + 1)
-      fail('invalid-permutation-arity');
+      fail(ops.length < count ? 'missing' : 'unexpected-argument');
     const input = ops[count];
     if (!input || isSymbol(input, 'Nothing')) return defaults;
     if (isSymbol(input) && !input.isConstant) return undefined;
@@ -455,19 +463,11 @@ export function installPermutationFoundation(
         const point = integer(ops[1]);
         return point === undefined
           ? undefined
-          : encodeGroup(
-              permutationPointStabilizer(value, point, requested, work)
-            );
+          : encodeGroup(queries.stabilizer(value, point, requested, work));
       }
       const other = readGroup(ops[1]);
       if (!other) return undefined;
-      const result = permutationGroupRelation(
-        value,
-        other,
-        kind,
-        requested,
-        work
-      );
+      const result = queries.relation(value, other, kind, requested, work);
       return typeof result === 'bigint'
         ? ce.number(result)
         : result
@@ -479,7 +479,6 @@ export function installPermutationFoundation(
     kind: 'cycles' | 'order' | 'power' | 'conjugate' | 'commutator'
   ): Expression | undefined =>
     adapt(() => {
-      arity(ops, kind === 'cycles' || kind === 'order' ? 1 : 2);
       const value = readPermutation(ops[0]);
       if (!value) return undefined;
       if (kind === 'cycles')
@@ -538,7 +537,6 @@ export function installPermutationFoundation(
       pure: true,
       evaluate: (ops) =>
         adapt(() => {
-          arity(ops, 1);
           const value = readGroup(ops[0]);
           return value
             ? ce.function(
@@ -556,9 +554,8 @@ export function installPermutationFoundation(
       pure: true,
       evaluate: (ops) =>
         adapt(() => {
-          arity(ops, 1);
           return readGroup(ops[0])
-            ? encode(new PermutationValue([], work))
+            ? encode(PermutationValue.fromImages([], work))
             : undefined;
         }),
     },
@@ -716,7 +713,6 @@ export function installPermutationFoundation(
       pure: true,
       evaluate: (ops) =>
         adapt(() => {
-          arity(ops, 2);
           const left = readPermutation(ops[0]),
             right = readPermutation(ops[1]);
           return left && right
@@ -729,7 +725,6 @@ export function installPermutationFoundation(
       pure: true,
       evaluate: (ops) =>
         adapt(() => {
-          arity(ops, 1);
           const value = readPermutation(ops[0]);
           return value ? encode(inversePermutation(value, work)) : undefined;
         }),
@@ -739,7 +734,6 @@ export function installPermutationFoundation(
       pure: true,
       evaluate: (ops) =>
         adapt(() => {
-          arity(ops, 2);
           const value = readPermutation(ops[0]),
             domain = readAction(ops[1]);
           if (!value || !domain) return undefined;
@@ -752,7 +746,6 @@ export function installPermutationFoundation(
       pure: true,
       evaluate: (ops) =>
         adapt(() => {
-          arity(ops, 3);
           const value = readPermutation(ops[0]),
             point = integer(ops[1]),
             domain = readAction(ops[2]);
@@ -787,7 +780,14 @@ export function installPermutationFoundation(
   } finally {
     ce.discard(checkpoint);
   }
+  const report = { operatorCount: Object.keys(definitions).length };
+  loaded.set(ce, {
+    settings,
+    report,
+    definitions: Object.keys(definitions).map((name) => ({
+      name,
+      value: ce.lookupDefinition(name),
+    })),
+  });
+  return { ...report };
 }
-
-/** Opt-in Epsil permutation group library. */
-export const installGroupTheory = installPermutationFoundation;

@@ -1,14 +1,12 @@
 import { ComputeEngine, isFunction } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { installPermutationFoundation } from '../../src/compute-engine/library/group-theory';
+import { loadGroupTheory } from '../../src/compute-engine/library/group-theory';
 import { CancellationError } from '../../src/common/interruptible';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
-function engine(
-  options: Parameters<typeof installPermutationFoundation>[1] = {}
-) {
+function engine(options: Parameters<typeof loadGroupTheory>[1] = {}) {
   const ce = new ComputeEngine();
-  installPermutationFoundation(ce, options);
+  loadGroupTheory(ce, options);
   return ce;
 }
 function run(ce: ComputeEngine, source: string) {
@@ -211,15 +209,15 @@ describe('CE generator descriptors and bounded closure', () => {
   test('registration of the third nominal type is atomic and restores away', () => {
     const failed = new ComputeEngine();
     failed.declareType('PermutationGroup', 'integer', { mint: false });
-    expect(() => installPermutationFoundation(failed)).toThrow();
+    expect(() => loadGroupTheory(failed)).toThrow();
     expect(failed.lookupDefinition('Permutation')).toBeUndefined();
     expect(failed.lookupDefinition('PermutationGroupElements')).toBeUndefined();
     const fresh = new ComputeEngine(),
       cp = fresh.checkpoint();
-    installPermutationFoundation(fresh);
+    loadGroupTheory(fresh);
     fresh.restore(cp);
     expect(fresh.lookupDefinition('PermutationGroup')).toBeUndefined();
-    installPermutationFoundation(fresh);
+    loadGroupTheory(fresh);
     expect(close(fresh).operator).toBe('List');
     fresh.discard(cp);
   });

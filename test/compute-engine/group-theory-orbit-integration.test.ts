@@ -1,6 +1,6 @@
 import { ComputeEngine, isFunction } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { installPermutationFoundation } from '../../src/compute-engine/library/group-theory';
+import { loadGroupTheory } from '../../src/compute-engine/library/group-theory';
 import { CancellationError } from '../../src/common/interruptible';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
@@ -45,11 +45,9 @@ const expected: MathJsonExpression = [
   ['Tuple', 2, ['Permutation', ['List', 2, 1]]],
   ['Tuple', 3, ['Permutation', ['List', 3, 1, 2]]],
 ];
-function engine(
-  options: Parameters<typeof installPermutationFoundation>[1] = {}
-) {
+function engine(options: Parameters<typeof loadGroupTheory>[1] = {}) {
   const ce = new ComputeEngine();
-  installPermutationFoundation(ce, options);
+  loadGroupTheory(ce, options);
   return ce;
 }
 function run(ce: ComputeEngine, source: string) {
@@ -381,7 +379,7 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
       );
     const fresh = new ComputeEngine();
     expect(() =>
-      installPermutationFoundation(fresh, { maxTransversalImageWork: -1 })
+      loadGroupTheory(fresh, { maxTransversalImageWork: -1 })
     ).toThrow();
     expect(fresh.lookupDefinition('Permutation')).toBeUndefined();
   });
@@ -408,7 +406,7 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
   test('installation and results obey checkpoint lifetimes', () => {
     const fresh = new ComputeEngine();
     const before = fresh.checkpoint();
-    installPermutationFoundation(fresh);
+    loadGroupTheory(fresh);
     fresh.assign('saved_transversal', fresh.box(transversal).evaluate());
     const after = fresh.checkpoint();
     fresh.assign('saved_transversal', ['List']);
@@ -422,7 +420,7 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
       'PermutationTransversal',
     ])
       expect(fresh.lookupDefinition(name)).toBeUndefined();
-    installPermutationFoundation(fresh);
+    loadGroupTheory(fresh);
     expect(fresh.box(orbit).evaluate().json).toEqual(['List', 1, 2, 3]);
     fresh.discard(before);
   });
@@ -430,9 +428,7 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
   test('a new operation name conflict leaves the installer atomic', () => {
     const fresh = new ComputeEngine();
     fresh.declare('PermutationOrbit', 'integer');
-    expect(() => installPermutationFoundation(fresh)).toThrow(
-      'Already defined'
-    );
+    expect(() => loadGroupTheory(fresh)).toThrow('Already defined');
     expect(fresh.lookupDefinition('Permutation')).toBeUndefined();
     expect(fresh.lookupDefinition('PermutationTransversal')).toBeUndefined();
   });

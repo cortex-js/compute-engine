@@ -1,7 +1,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { toBigint } from '../../src/compute-engine/boxed-expression/numerics';
-import { installPermutationFoundation } from '../../src/compute-engine/library/group-theory';
+import { loadGroupTheory } from '../../src/compute-engine/library/group-theory';
 import { CancellationError } from '../../src/common/interruptible';
 import type { MathJsonExpression as MJ } from '../../src/math-json/types';
 const p: MJ = ['Permutation', ['List', 2, 1]],
@@ -11,11 +11,9 @@ const G: MJ = ['PermutationGroup', ['List', p, q], ['PermutationAction', 3]],
   H: MJ = ['PermutationGroup', ['List', c], ['PermutationAction', 3]],
   K: MJ = ['PermutationGroup', ['List', p], ['PermutationAction', 3]];
 const budget = 5_000_000;
-function engine(
-  options: Parameters<typeof installPermutationFoundation>[1] = {}
-) {
+function engine(options: Parameters<typeof loadGroupTheory>[1] = {}) {
   const ce = new ComputeEngine();
-  installPermutationFoundation(ce, options);
+  loadGroupTheory(ce, options);
   return ce;
 }
 function run(ce: ComputeEngine, source: string) {
@@ -408,9 +406,7 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
           .evaluate().operator
       ).toBe('Error');
     const fresh = new ComputeEngine();
-    expect(() =>
-      installPermutationFoundation(fresh, { maxChainLevels: -1 })
-    ).toThrow();
+    expect(() => loadGroupTheory(fresh, { maxChainLevels: -1 })).toThrow();
     expect(fresh.lookupDefinition('Permutation')).toBeUndefined();
   });
   test('symbolic arguments defer and evaluate after assignment', () => {
@@ -469,15 +465,13 @@ let S=PermutationPointStabilizer(G,1, options: {maxWork -> 5000000})
   test('new operations are removed on restore and name conflicts leave installation atomic', () => {
     const fresh = new ComputeEngine(),
       cp = fresh.checkpoint();
-    installPermutationFoundation(fresh);
+    loadGroupTheory(fresh);
     fresh.restore(cp);
     expect(fresh.lookupDefinition('PermutationGroupOrder')).toBeUndefined();
     expect(fresh.lookupDefinition('PermutationPower')).toBeUndefined();
     fresh.discard(cp);
     fresh.declare('PermutationGroupEqual', 'integer');
-    expect(() => installPermutationFoundation(fresh)).toThrow(
-      'Already defined'
-    );
+    expect(() => loadGroupTheory(fresh)).toThrow('Already defined');
     expect(fresh.lookupDefinition('Permutation')).toBeUndefined();
   });
   test('cancellation remains separate from bounded failure', () => {

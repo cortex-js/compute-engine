@@ -1,12 +1,12 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { CancellationError } from '../../src/common/interruptible';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { installPermutationFoundation } from '../../src/compute-engine/library/group-theory';
+import { loadGroupTheory } from '../../src/compute-engine/library/group-theory';
 import type { MathJsonExpression } from '../../src/math-json/types';
 
 function engine(maxDegree?: number) {
   const ce = new ComputeEngine();
-  installPermutationFoundation(ce, { maxDegree });
+  loadGroupTheory(ce, { maxDegree });
   return ce;
 }
 function run(ce: ComputeEngine, source: string) {
@@ -172,18 +172,18 @@ describe('installation, limits, and checkpoints', () => {
     const ce = new ComputeEngine();
     expect(ce.lookupDefinition('Permutation')).toBeUndefined();
     const cp = ce.checkpoint();
-    installPermutationFoundation(ce);
+    loadGroupTheory(ce);
     expect(ce.box(swap).type.toString()).toBe('Permutation');
     ce.restore(cp);
     expect(ce.lookupDefinition('Permutation')).toBeUndefined();
-    installPermutationFoundation(ce);
+    loadGroupTheory(ce);
     expect(ce.box(swap).evaluate().json).toEqual(swap);
     ce.discard(cp);
   });
   test('failed installation does not leave a partial library', () => {
     const ce = new ComputeEngine();
     ce.declareType('PermutationAction', 'integer', { mint: false });
-    expect(() => installPermutationFoundation(ce)).toThrow();
+    expect(() => loadGroupTheory(ce)).toThrow();
     expect(ce.lookupDefinition('Permutation')).toBeUndefined();
     expect(ce.lookupDefinition('PermutationCompose')).toBeUndefined();
     ce.declareType('Permutation', 'integer', { mint: false });

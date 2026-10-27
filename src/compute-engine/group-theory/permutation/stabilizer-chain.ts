@@ -2,6 +2,7 @@ import {
   PermutationValue,
   PermutationInputError,
   assertPermutationFits,
+  degreeLimit,
   composePermutations,
   inversePermutation,
 } from './values.js';
@@ -10,14 +11,15 @@ import {
   permutationGroupLimits,
   type PermutationGroupWork,
 } from './groups.js';
-import { PermutationOrbitTree } from './orbits.js';
 
 export interface PermutationChainLimits {
   readonly maxWork: number;
   readonly maxLevels?: number;
+  /** Diagnostic verifier only; production queries record no proofs. */
   readonly maxProofSteps?: number;
+  readonly maxOrbitEdges?: number;
   readonly maxOrbitPoints?: number;
-  /** Cumulative retained generator and representative image entries. */
+  /** Live generator images, orbit-tree slots and cached transversal images. */
   readonly maxStoredImages?: number;
 }
 export class PermutationChainLimitError extends Error {
@@ -33,12 +35,18 @@ function bound(value: number, cap: number, name: string): number {
     throw new PermutationInputError(`invalid-permutation-chain-${name}-limit`);
   return value;
 }
+/** Normalize resource policy before allocating trees or starting group work. */
 export function permutationChainLimits(requested: PermutationChainLimits) {
   if (!requested)
     throw new PermutationInputError('invalid-permutation-chain-limits');
   return {
     maxWork: bound(requested.maxWork, 50_000_000, 'work'),
     maxLevels: bound(requested.maxLevels ?? 256, 256, 'level'),
+    maxOrbitEdges: bound(
+      requested.maxOrbitEdges ?? 1_000_000,
+      50_000_000,
+      'orbit-edge'
+    ),
     maxProofSteps: bound(requested.maxProofSteps ?? 100_000, 100_000, 'proof'),
     maxOrbitPoints: bound(
       requested.maxOrbitPoints ?? 100_000,
@@ -47,30 +55,39 @@ export function permutationChainLimits(requested: PermutationChainLimits) {
     ),
     maxStoredImages: bound(
       requested.maxStoredImages ?? 1_000_000,
-      1_000_000,
+      100_000_000,
       'storage'
     ),
   };
 }
 
-/** One ledger is shared by construction and verification, including nested kernels. */
+/**
+ * Work is cumulative; storage counts live arrays. Scratch transversal entries
+ * are evicted before permanent reservations. Every charged operation also checks
+ * cancellation, including a lookup satisfied by the cache.
+ */
 class ChainWork {
   used = 0;
   stored = 0;
   points = 0;
+  edges = 0;
   readonly limits: ReturnType<typeof permutationChainLimits>;
   readonly values: PermutationGroupWork;
   readonly caller: PermutationGroupWork;
+  private readonly retained = new Set<PermutationValue>();
+  private readonly transversals = new Map<
+    PermutationChainLevel,
+    Map<number, PermutationValue>
+  >();
+  private readonly cacheOrder: {
+    level: PermutationChainLevel;
+    key: number;
+    value: PermutationValue;
+  }[] = [];
   constructor(requested: PermutationChainLimits, work: PermutationGroupWork) {
     this.limits = permutationChainLimits(requested);
     this.caller = work;
-    this.values = {
-      ...work,
-      check: () => {
-        this.tick();
-        work.check?.();
-      },
-    };
+    this.values = work;
   }
   remaining(): PermutationChainLimits {
     return {
@@ -78,46 +95,129 @@ class ChainWork {
       maxWork: this.limits.maxWork - this.used,
       maxStoredImages: this.limits.maxStoredImages - this.stored,
       maxOrbitPoints: this.limits.maxOrbitPoints - this.points,
+      maxOrbitEdges: this.limits.maxOrbitEdges - this.edges,
     };
   }
   tick(count = 1) {
+    this.caller.check?.();
     if (this.used + count > this.limits.maxWork)
       throw new PermutationChainLimitError('permutation-chain-work-limit');
     this.used += count;
   }
-  retain(p: PermutationValue) {
-    if (this.stored + p.supportDegree > this.limits.maxStoredImages)
+  /** Reserve permanent entries, evicting scratch products first. */
+  reserve(count: number) {
+    while (
+      this.cacheOrder.length &&
+      this.stored + count > this.limits.maxStoredImages
+    )
+      this.evict();
+    if (this.stored + count > this.limits.maxStoredImages)
       throw new PermutationChainLimitError('permutation-chain-storage-limit');
-    this.stored += p.supportDegree;
+    this.stored += count;
   }
-  key(p: PermutationValue) {
-    this.tick(1 + p.supportDegree);
-    return p.images.join(',');
+  retain(value: PermutationValue) {
+    if (this.retained.has(value)) return;
+    // Transfer cached storage into output ownership instead of charging it twice.
+    for (let i = this.cacheOrder.length - 1; i >= 0; i--) {
+      const entry = this.cacheOrder[i];
+      if (entry.value !== value) continue;
+      this.cacheOrder.splice(i, 1);
+      this.transversals.get(entry.level)!.delete(entry.key);
+      this.stored -= value.supportDegree;
+    }
+    this.reserve(value.supportDegree);
+    this.retained.add(value);
   }
-  product(a: PermutationValue, b: PermutationValue) {
-    this.tick(1 + Math.max(a.supportDegree, b.supportDegree));
-    return composePermutations(a, b, this.values);
+  private evict() {
+    const entry = this.cacheOrder.shift()!;
+    this.transversals.get(entry.level)!.delete(entry.key);
+    this.stored -= entry.value.supportDegree;
   }
-  inverse(p: PermutationValue) {
-    this.tick(1 + p.supportDegree);
-    return inversePermutation(p, this.values);
+  clearTransversals() {
+    while (this.cacheOrder.length) this.evict();
   }
+  key(value: PermutationValue) {
+    this.tick(1 + value.supportDegree);
+    return value.images.join(',');
+  }
+  product(left: PermutationValue, right: PermutationValue) {
+    this.tick(1 + Math.max(left.supportDegree, right.supportDegree));
+    return composePermutations(left, right, this.values);
+  }
+  inverse(value: PermutationValue) {
+    this.tick(1 + value.supportDegree);
+    return inversePermutation(value, this.values);
+  }
+  /** Check receiving resource policy without revalidating mathematical values. */
   receive(group: PermutationGroupValue) {
-    if (!PermutationGroupValue.is(group))
-      throw new PermutationInputError('invalid-permutation-group');
-    return new PermutationGroupValue(
-      group.generators,
-      group.action,
-      this.values
-    );
+    this.tick();
+    if (group.action.degree > degreeLimit(this.values))
+      throw new PermutationInputError('permutation-degree-limit');
+    const caps = permutationGroupLimits(this.values);
+    if (group.generators.length > caps.maxGenerators)
+      throw new PermutationInputError('permutation-generator-limit');
+    if (
+      group.generators.reduce((n, g) => n + g.supportDegree, 0) >
+      caps.maxGeneratorImages
+    )
+      throw new PermutationInputError('permutation-generator-image-limit');
+    return group;
+  }
+  /**
+   * Recover a transversal from stable parent edges. An uncached lookup costs
+   * O(degree * path length). At most 16384 products are cached across all levels;
+   * negative keys distinguish inverse representatives from forward ones.
+   */
+  representative(
+    level: PermutationChainLevel,
+    index: number,
+    inverse = false
+  ): PermutationValue {
+    this.tick();
+    if (index === 0) return IDENTITY;
+    let cache = this.transversals.get(level);
+    if (!cache) {
+      cache = new Map();
+      this.transversals.set(level, cache);
+    }
+    const key = inverse ? -index : index;
+    const known = cache.get(key);
+    if (known) return known;
+    let value: PermutationValue;
+    if (inverse) value = this.inverse(this.representative(level, index));
+    else {
+      const path: number[] = [];
+      let cursor = index;
+      while (cursor !== 0 && !cache.has(cursor)) {
+        this.tick();
+        path.push(cursor);
+        cursor = level.parents[cursor];
+      }
+      value = cache.get(cursor) ?? IDENTITY;
+      for (let i = path.length - 1; i >= 0; i--)
+        value = this.product(value, level.generators[level.labels[path[i]]]);
+    }
+    while (
+      this.cacheOrder.length &&
+      (this.cacheOrder.length >= 16384 ||
+        this.stored + value.supportDegree > this.limits.maxStoredImages)
+    )
+      this.evict();
+    // Caching must not turn an otherwise feasible computation into a limit error.
+    if (this.stored + value.supportDegree <= this.limits.maxStoredImages) {
+      cache.set(key, value);
+      this.cacheOrder.push({ level, key, value });
+      this.stored += value.supportDegree;
+    }
+    return value;
   }
 }
-
+const IDENTITY = PermutationValue.fromImages([]);
 interface ChainSiftData {
   indices: ReadonlyMap<number, number>;
-  inverses: readonly PermutationValue[];
 }
 
+/** Level i generators fix bases 0..i-1. Parent indices always decrease. */
 export interface PermutationChainLevel {
   readonly base: number;
   readonly generators: readonly PermutationValue[];
@@ -125,74 +225,47 @@ export interface PermutationChainLevel {
   readonly orbit: readonly number[];
   readonly parents: readonly number[];
   readonly labels: readonly number[];
-  readonly representatives: readonly PermutationValue[];
 }
 
-function makeLevel(
-  group: PermutationGroupValue,
-  base: number,
-  work: ChainWork
-): PermutationChainLevel {
-  const tree = PermutationOrbitTree.compute(
-    group,
-    base,
-    {
-      maxPoints: work.limits.maxOrbitPoints - work.points,
-      maxEdges: 1_000_000,
-    },
-    work.values
-  );
-  work.points += tree.points.length;
-  const representatives = [new PermutationValue([], work.values)];
-  for (let i = 1; i < tree.points.length; i++) {
-    work.values.check?.();
-    const p = work.product(
-      representatives[tree.parentIndices[i]],
-      group.generators[tree.generatorIndices[i]]
-    );
-    work.retain(p);
-    representatives.push(p);
-  }
-  return Object.freeze({
-    base,
-    generators: group.generators,
-    generatorProofs: [],
-    orbit: tree.points,
-    parents: tree.parentIndices,
-    labels: tree.generatorIndices,
-    representatives: Object.freeze(representatives),
-  });
+/** Mutable only during construction. scanned records completed Schreier edges. */
+interface GrowingLevel extends PermutationChainLevel {
+  generators: PermutationValue[];
+  generatorProofs: number[];
+  orbit: number[];
+  parents: number[];
+  labels: number[];
+  indices: Map<number, number>;
+  scanned: number[];
+  scanPoint: number;
+  active: number[];
 }
-
-/** A straight-line proof in the original, ordered input generators. */
 export type PermutationProofStep =
   | { readonly kind: 'input'; readonly index: number }
   | { readonly kind: 'inverse'; readonly operand: number }
   | { readonly kind: 'product'; readonly left: number; readonly right: number };
-
 export interface PermutationChainCertificate {
   readonly version: 1;
   readonly proof: readonly PermutationProofStep[];
   readonly levels: readonly PermutationChainLevel[];
 }
 
+/** O(orbit size) lookup construction; no explicit transversals are retained. */
 function siftData(
   level: PermutationChainLevel,
   work: ChainWork
 ): ChainSiftData {
   const indices = new Map<number, number>();
   for (let i = 0; i < level.orbit.length; i++) {
-    work.values.check?.();
+    work.tick();
     indices.set(level.orbit[i], i);
   }
-  const inverses = level.representatives.map((p) => {
-    const inverse = work.inverse(p);
-    work.retain(inverse);
-    return inverse;
-  });
-  return { indices, inverses: Object.freeze(inverses) };
+  return { indices };
 }
-
+/**
+ * Cancel each base image on the right. After level i the residue fixes bases
+ * 0..i. A missing orbit image identifies where the strong set must grow.
+ * Cost includes reconstruction of each needed transversal.
+ */
 function reduce(
   value: PermutationValue,
   levels: readonly PermutationChainLevel[],
@@ -204,49 +277,57 @@ function reduce(
   const factors: { depth: number; index: number }[] = [];
   let depth = start;
   for (; depth < levels.length && residue.supportDegree; depth++) {
-    work.values.check?.();
+    work.tick();
     const level = levels[depth];
-    const point = residue.images[level.base - 1] ?? level.base;
-    const index = data[depth].indices.get(point);
+    const index = data[depth].indices.get(
+      residue.images[level.base - 1] ?? level.base
+    );
     if (index === undefined) break;
     if (index !== 0) {
-      residue = work.product(residue, data[depth].inverses[index]);
+      residue = work.product(residue, work.representative(level, index, true));
       factors.push({ depth, index });
     }
   }
   return { residue, depth, factors };
 }
-
 /**
- * Incremental deterministic Schreier-Sims. Only nontrivial sift residues enlarge
- * the strong generating set. Proof expressions are recorded lazily for those
- * additions, not for the much larger set of discarded Schreier generators.
+ * Incremental deterministic Schreier–Sims. A nonidentity sift residue enlarges
+ * the failed level and all its ancestors. Its membership follows from the input
+ * word and the cancelled transversals. Schreier's lemma gives completeness when
+ * every orbit edge's Schreier generator sifts to identity through the suffix.
+ *
+ * Parent paths survive insertions. Previously processed Schreier generators
+ * remain members of the enlarged suffix, so completed edges need no rescan.
+ * Each insertion increases an orbit or adds a base. Permanent storage is
+ * O(total orbit points + strong generator images + generator references).
+ * Provenance is recorded only for the diagnostic certificate test oracle.
  */
 function buildCertificate(
   group: PermutationGroupValue,
   work: ChainWork,
-  firstBase?: number
+  firstBase?: number,
+  recordProof = false
 ): PermutationChainCertificate {
-  const levels: PermutationChainLevel[] = [];
-  const data: ChainSiftData[] = [];
+  const levels: GrowingLevel[] = [],
+    data: ChainSiftData[] = [];
   const proof: PermutationProofStep[] = [];
   const proofOf = new Map<PermutationValue, number>();
-  const representativeProofs = new WeakMap<
+  const representativeProofs = new Map<
     PermutationChainLevel,
     Map<number, number>
   >();
   const append = (step: PermutationProofStep): number => {
-    work.values.check?.();
+    work.tick();
     if (proof.length >= work.limits.maxProofSteps)
       throw new PermutationChainLimitError('permutation-chain-proof-limit');
-    proof.push(Object.freeze(step));
+    proof.push(step);
     return proof.length - 1;
   };
   const productProof = (left: number, right: number) =>
     append({ kind: 'product', left, right });
   const inverseProof = (operand: number) =>
     append({ kind: 'inverse', operand });
-  // The identity representative is omitted from products, so it needs no proof node.
+  // Provenance follows the same stable path as a reconstructed transversal.
   const representativeProof = (
     level: PermutationChainLevel,
     index: number
@@ -257,35 +338,112 @@ function buildCertificate(
       representativeProofs.set(level, cached);
     }
     const path: number[] = [];
-    let current = index;
-    while (current !== 0 && !cached.has(current)) {
-      work.values.check?.();
-      path.push(current);
-      current = level.parents[current];
+    let cursor = index;
+    while (cursor !== 0 && !cached.has(cursor)) {
+      work.tick();
+      path.push(cursor);
+      cursor = level.parents[cursor];
     }
-    let result = current === 0 ? undefined : cached.get(current);
+    let result = cursor === 0 ? undefined : cached.get(cursor);
     for (let i = path.length - 1; i >= 0; i--) {
-      const node = path[i];
-      const generator = proofOf.get(level.generators[level.labels[node]])!;
+      const node = path[i],
+        generator = proofOf.get(level.generators[level.labels[node]])!;
       result =
         result === undefined ? generator : productProof(result, generator);
       cached.set(node, result);
     }
     return result!;
   };
-  const rebuild = (depth: number, generators: readonly PermutationValue[]) => {
-    const base = levels[depth].base;
-    const level = makeLevel(
-      new PermutationGroupValue(generators, group.action, work.values),
-      base,
-      work
-    );
-    levels[depth] = Object.freeze({
-      ...level,
-      generatorProofs: Object.freeze(generators.map((g) => proofOf.get(g)!)),
-    });
-    data[depth] = siftData(levels[depth], work);
+  // Orbit, parent, label, lookup and scan entries account for five slots per point.
+  const addPoint = (
+    level: GrowingLevel,
+    point: number,
+    parent: number,
+    label: number
+  ) => {
+    if (work.points >= work.limits.maxOrbitPoints)
+      throw new PermutationChainLimitError(
+        'permutation-chain-orbit-point-limit'
+      );
+    work.reserve(5);
+    work.points++;
+    level.indices.set(point, level.orbit.length);
+    level.orbit.push(point);
+    level.parents.push(parent);
+    level.labels.push(label);
+    level.scanned.push(0);
   };
+  const newLevel = (base: number) => {
+    if (levels.length >= work.limits.maxLevels)
+      throw new PermutationChainLimitError('permutation-chain-level-limit');
+    const level: GrowingLevel = {
+      base,
+      generators: [],
+      generatorProofs: [],
+      orbit: [],
+      parents: [],
+      labels: [],
+      indices: new Map(),
+      scanned: [],
+      scanPoint: 0,
+      active: [],
+    };
+    addPoint(level, base, -1, -1);
+    levels.push(level);
+    data.push({ indices: level.indices });
+  };
+  /**
+   * Old points need only the added generator; new points need all generators.
+   * Every new edge is charged once. Existing parent paths are never replaced.
+   */
+  const extend = (
+    level: GrowingLevel,
+    generator: PermutationValue,
+    node: number,
+    active: boolean
+  ) => {
+    const oldSize = level.orbit.length,
+      label = level.generators.length;
+    const caps = permutationGroupLimits(work.values);
+    if (label >= caps.maxGenerators)
+      throw new PermutationChainLimitError('permutation-chain-generator-limit');
+    if (
+      level.generators.reduce(
+        (sum, value) => sum + value.supportDegree,
+        generator.supportDegree
+      ) > caps.maxGeneratorImages
+    )
+      throw new PermutationChainLimitError(
+        'permutation-chain-generator-image-limit'
+      );
+    work.reserve(2);
+    level.generators.push(generator);
+    level.generatorProofs.push(node);
+    // At ancestors above the generating Schreier edge, this residue is already
+    // a word in their generators. Retain the strong-set reference but do not
+    // reprocess an orbit that is already closed under that word.
+    if (!active) return;
+    work.reserve(1);
+    level.active.push(label);
+    level.scanPoint = 0;
+    for (let i = 0; i < level.orbit.length; i++)
+      for (
+        let k = i < oldSize ? level.active.length - 1 : 0;
+        k < level.active.length;
+        k++
+      ) {
+        const j = level.active[k];
+        work.tick();
+        if (++work.edges > work.limits.maxOrbitEdges)
+          throw new PermutationChainLimitError(
+            'permutation-chain-orbit-edge-limit'
+          );
+        const point = level.orbit[i],
+          target = level.generators[j].images[point - 1] ?? point;
+        if (!level.indices.has(target)) addPoint(level, target, i, j);
+      }
+  };
+  // A sift either proves membership or yields one strong generator.
   const add = (
     value: PermutationValue,
     provenance: () => number,
@@ -293,110 +451,112 @@ function buildCertificate(
   ): boolean => {
     const result = reduce(value, levels, data, start, work);
     if (!result.residue.supportDegree) return false;
-    let node = provenance();
-    for (const factor of result.factors)
-      node = productProof(
-        node,
-        inverseProof(representativeProof(levels[factor.depth], factor.index))
-      );
-    proofOf.set(result.residue, node);
-    work.retain(result.residue);
+    let node = -1;
+    if (recordProof) {
+      node = provenance();
+      for (const factor of result.factors)
+        node = productProof(
+          node,
+          inverseProof(representativeProof(levels[factor.depth], factor.index))
+        );
+      proofOf.set(result.residue, node);
+    }
+    work.retain(result.residue); // Ancestor levels share these images.
     if (result.depth === levels.length) {
-      if (levels.length >= work.limits.maxLevels)
-        throw new PermutationChainLimitError('permutation-chain-level-limit');
-      let base = 1;
-      while ((result.residue.images[base - 1] ?? base) === base) {
-        work.values.check?.();
-        base++;
-      }
-      levels.push({
-        base,
-        generators: [],
-        generatorProofs: [],
-        orbit: [],
-        parents: [],
-        labels: [],
-        representatives: [],
-      });
+      // Normalized support ends at a moved point. Choosing it avoids a scan
+      // through a potentially long fixed prefix and keeps bases deterministic.
+      newLevel(result.residue.supportDegree);
     }
-    // Every earlier subgroup must contain this new strong generator.
-    for (let i = 0; i <= result.depth; i++) {
-      const generators = [...levels[i].generators, result.residue];
-      const cap = permutationGroupLimits(work.values);
-      if (generators.length > cap.maxGenerators)
-        throw new PermutationChainLimitError(
-          'permutation-chain-generator-limit'
-        );
-      if (
-        generators.reduce((n, g) => n + g.supportDegree, 0) >
-        cap.maxGeneratorImages
-      )
-        throw new PermutationChainLimitError(
-          'permutation-chain-generator-image-limit'
-        );
-      rebuild(i, generators);
-    }
+    for (let i = 0; i <= result.depth; i++)
+      extend(levels[i], result.residue, node, i >= start);
     return true;
   };
-  if (
-    firstBase !== undefined &&
-    group.generators.some((g) => g.supportDegree)
-  ) {
-    if (work.limits.maxLevels === 0)
-      throw new PermutationChainLimitError('permutation-chain-level-limit');
-    levels.push({
-      base: firstBase,
-      generators: [],
-      generatorProofs: [],
-      orbit: [],
-      parents: [],
-      labels: [],
-      representatives: [],
-    });
-    rebuild(0, []);
-  }
+  if (firstBase !== undefined && group.generators.some((g) => g.supportDegree))
+    newLevel(firstBase);
   for (let i = 0; i < group.generators.length; i++)
     add(group.generators[i], () => append({ kind: 'input', index: i }), 0);
-
-  let changed = true;
-  while (changed) {
-    changed = false;
-    scan: for (let depth = levels.length - 1; depth >= 0; depth--) {
-      const level = levels[depth];
-      for (let i = 0; i < level.orbit.length; i++) {
-        for (const generator of level.generators) {
-          work.values.check?.();
-          const point = level.orbit[i];
-          const target = generator.images[point - 1] ?? point;
-          const j = data[depth].indices.get(target)!;
-          const candidate = work.product(
-            work.product(level.representatives[i], generator),
-            data[depth].inverses[j]
-          );
-          const provenance = () => {
-            let node = proofOf.get(generator)!;
-            if (i !== 0)
-              node = productProof(representativeProof(level, i), node);
-            if (j !== 0)
-              node = productProof(
-                node,
-                inverseProof(representativeProof(level, j))
-              );
-            return node;
-          };
-          if (add(candidate, provenance, depth + 1)) {
-            changed = true;
-            break scan;
-          }
-        }
-      }
+  // A faithful action on n points has order at most n!. Each nested orbit
+  // contributes a factor to a proven lower bound, even before completion.
+  // Equality proves that every stabilizer is complete, without more sifts.
+  let upperBound: bigint | undefined;
+  if (group.action.degree <= 256) {
+    upperBound = 1n;
+    for (let i = 2; i <= group.action.degree; i++) {
+      work.tick();
+      upperBound *= BigInt(i);
     }
   }
-  return Object.freeze({
+  const complete = () =>
+    upperBound !== undefined &&
+    levels.reduce((order, level) => order * BigInt(level.orbit.length), 1n) ===
+      upperBound;
+  let nextDepth = 0;
+  // Resume pending edges fairly across levels. Finishing a deep suffix before
+  // processing higher levels can waste sifts against an incomplete strong set. Tree edges give the
+  // identity Schreier generator directly and do not require a permutation product.
+  for (;;) {
+    if (complete()) break;
+    let pending = false;
+    for (let offset = 0; offset < levels.length; offset++) {
+      const depth = (nextDepth + offset) % levels.length;
+      const level = levels[depth];
+      while (
+        level.scanPoint < level.orbit.length &&
+        level.scanned[level.scanPoint] === level.active.length
+      )
+        level.scanPoint++;
+      if (level.scanPoint === level.orbit.length) continue;
+      pending = true;
+      nextDepth = (depth + 1) % levels.length;
+      const i = level.scanPoint,
+        label = level.active[level.scanned[i]++],
+        generator = level.generators[label];
+      const point = level.orbit[i],
+        j = level.indices.get(generator.images[point - 1] ?? point)!;
+      work.tick();
+      if (level.parents[j] === i && level.labels[j] === label) break;
+      const candidate = work.product(
+        work.product(work.representative(level, i), generator),
+        work.representative(level, j, true)
+      );
+      add(
+        candidate,
+        () => {
+          let node = proofOf.get(generator)!;
+          if (i !== 0) node = productProof(representativeProof(level, i), node);
+          if (j !== 0)
+            node = productProof(
+              node,
+              inverseProof(representativeProof(level, j))
+            );
+          return node;
+        },
+        depth + 1
+      );
+      break;
+    }
+    if (!pending) break;
+  }
+  work.clearTransversals();
+  // Construction-only scan cursors and active-generator lists are released.
+  work.stored -= levels.reduce(
+    (sum, level) => sum + level.orbit.length + level.active.length,
+    0
+  );
+  return {
     version: 1,
-    proof: Object.freeze(proof),
-    levels: Object.freeze(levels),
-  });
+    proof,
+    levels: levels.map(
+      ({ base, generators, generatorProofs, orbit, parents, labels }) => ({
+        base,
+        generators,
+        generatorProofs,
+        orbit,
+        parents,
+        labels,
+      })
+    ),
+  };
 }
 
 /**
@@ -459,8 +619,7 @@ function verify(
       !Array.isArray(level.generatorProofs) ||
       !Array.isArray(level.orbit) ||
       !Array.isArray(level.parents) ||
-      !Array.isArray(level.labels) ||
-      !Array.isArray(level.representatives)
+      !Array.isArray(level.labels)
     )
       return false;
     if (
@@ -481,7 +640,6 @@ function verify(
       level.orbit[0] !== level.base ||
       level.parents.length !== n ||
       level.labels.length !== n ||
-      level.representatives.length !== n ||
       level.generatorProofs.length !== level.generators.length ||
       !level.generators.length
     )
@@ -494,7 +652,7 @@ function verify(
     for (let i = 0; i < level.generators.length; i++) {
       const g = level.generators[i],
         node = level.generatorProofs[i];
-      if (!PermutationValue.is(g)) return false;
+      if (!g || !Array.isArray(g.images)) return false;
       assertPermutationFits(g, group.action, work.values);
       images += g.supportDegree;
       if (images > cap.maxGeneratorImages)
@@ -519,26 +677,16 @@ function verify(
     const seen = new Set<number>();
     for (let i = 0; i < n; i++) {
       work.values.check?.();
-      const point = level.orbit[i],
-        t = level.representatives[i];
+      const point = level.orbit[i];
       if (
         !Number.isSafeInteger(point) ||
         point < 1 ||
         point > group.action.degree ||
-        seen.has(point) ||
-        !PermutationValue.is(t)
+        seen.has(point)
       )
         return false;
-      assertPermutationFits(t, group.action, work.values);
-      work.retain(t);
-      if ((t.images[level.base - 1] ?? level.base) !== point) return false;
       if (i === 0) {
-        if (
-          t.supportDegree ||
-          level.parents[i] !== -1 ||
-          level.labels[i] !== -1
-        )
-          return false;
+        if (level.parents[i] !== -1 || level.labels[i] !== -1) return false;
       } else {
         const parent = level.parents[i],
           label = level.labels[i];
@@ -552,9 +700,8 @@ function verify(
         )
           return false;
         if (
-          work.key(
-            work.product(level.representatives[parent], level.generators[label])
-          ) !== work.key(t)
+          (level.generators[label].images[level.orbit[parent] - 1] ??
+            level.orbit[parent]) !== point
         )
           return false;
       }
@@ -575,8 +722,8 @@ function verify(
         const j = data[depth].indices.get(target);
         if (j === undefined) return false;
         const schreier = work.product(
-          work.product(level.representatives[i], generator),
-          data[depth].inverses[j]
+          work.product(work.representative(level, i), generator),
+          work.representative(level, j, true)
         );
         if (
           reduce(schreier, levels, data, depth + 1, work).residue.supportDegree
@@ -590,6 +737,7 @@ function verify(
   );
 }
 
+/** Diagnostic test oracle: validate provenance and Schreier closure independently of the builder. */
 export function verifyPermutationChain(
   group: PermutationGroupValue,
   certificate: PermutationChainCertificate,
@@ -609,35 +757,33 @@ export interface PermutationSiftResult {
   readonly storedImagesCharged: number;
 }
 
-/** Only computation followed by verification can construct this value. */
+/** Completed strong generating set built by incremental Schreier–Sims. */
 export class PermutationStabilizerChain {
   readonly #group: PermutationGroupValue;
-  readonly #certificate: PermutationChainCertificate;
+  readonly #requested: PermutationChainLimits;
+  readonly #work: PermutationGroupWork;
+  readonly #firstBase: number | undefined;
   readonly #levels: readonly PermutationChainLevel[];
   readonly #order: bigint;
   readonly #siftData: readonly ChainSiftData[];
   readonly #workUsed: number;
   readonly #storedImagesCharged: number;
   readonly #orbitPoints: number;
+  readonly #orbitEdges: number;
   private constructor(
     group: PermutationGroupValue,
     requested: PermutationChainLimits,
     work: PermutationGroupWork,
     firstBase?: number
   ) {
-    if (!PermutationGroupValue.is(group))
-      throw new PermutationInputError('invalid-permutation-group');
     const ledger = new ChainWork(requested, work);
     this.#group = ledger.receive(group);
-    this.#certificate = buildCertificate(this.#group, ledger, firstBase);
-    this.#levels = this.#certificate.levels;
-    if (!verify(this.#group, this.#certificate, ledger))
-      throw new PermutationChainInvariantError(
-        'Constructed chain failed verification'
-      );
-    this.#siftData = Object.freeze(
-      this.#levels.map((level) => siftData(level, ledger))
-    );
+    for (const generator of group.generators) ledger.retain(generator);
+    this.#requested = requested;
+    this.#work = work;
+    this.#firstBase = firstBase;
+    this.#levels = buildCertificate(this.#group, ledger, firstBase).levels;
+    this.#siftData = this.#levels.map((level) => siftData(level, ledger));
     let order = 1n;
     for (const level of this.#levels) {
       ledger.values.check?.();
@@ -647,7 +793,7 @@ export class PermutationStabilizerChain {
     this.#workUsed = ledger.used;
     this.#storedImagesCharged = ledger.stored;
     this.#orbitPoints = ledger.points;
-    Object.freeze(this);
+    this.#orbitEdges = ledger.edges;
   }
   static compute(
     group: PermutationGroupValue,
@@ -655,8 +801,6 @@ export class PermutationStabilizerChain {
     work: PermutationGroupWork = {},
     firstBase?: number
   ) {
-    if (!PermutationGroupValue.is(group))
-      throw new PermutationInputError('invalid-permutation-group');
     if (
       firstBase !== undefined &&
       (!Number.isSafeInteger(firstBase) ||
@@ -666,14 +810,17 @@ export class PermutationStabilizerChain {
       throw new PermutationInputError('point-outside-permutation-action');
     return new PermutationStabilizerChain(group, requested, work, firstBase);
   }
-  static is(value: unknown): value is PermutationStabilizerChain {
-    return typeof value === 'object' && value !== null && #levels in value;
-  }
   get group() {
     return this.#group;
   }
+  /** Diagnostic only: reconstruct provenance for the independent test oracle. */
   get certificate() {
-    return this.#certificate;
+    return buildCertificate(
+      this.#group,
+      new ChainWork(this.#requested, this.#work),
+      this.#firstBase,
+      true
+    );
   }
   get levels() {
     return this.#levels;
@@ -686,6 +833,9 @@ export class PermutationStabilizerChain {
   }
   get storedImagesCharged() {
     return this.#storedImagesCharged;
+  }
+  get orbitEdges() {
+    return this.#orbitEdges;
   }
   get orbitPoints() {
     return this.#orbitPoints;
@@ -707,32 +857,48 @@ export class PermutationStabilizerChain {
       const point = residue.images[level.base - 1] ?? level.base;
       const index = data.indices.get(point);
       if (index === undefined) break;
-      const t = level.representatives[index];
-      residue = ledger.product(residue, data.inverses[index]);
+      const t = ledger.representative(level, index);
+      residue = ledger.product(
+        residue,
+        ledger.representative(level, index, true)
+      );
+      ledger.retain(t);
       factors.push(t);
     }
+    ledger.clearTransversals();
     ledger.retain(residue);
-    return Object.freeze({
+    return {
       member: residue.supportDegree === 0,
       residue,
-      factors: Object.freeze(factors.reverse()),
+      factors: factors.reverse(),
       workUsed: ledger.used,
       storedImagesCharged: ledger.stored,
-    });
+    };
   }
 }
 
-function chainInSession(group: PermutationGroupValue, ledger: ChainWork) {
-  const chain = PermutationStabilizerChain.compute(
-    group,
-    ledger.remaining(),
-    ledger.caller
-  );
+/** Optional owner-provided cache; the pure kernel has no engine or session import. */
+export type PermutationChainProvider = (
+  group: PermutationGroupValue,
+  limits: PermutationChainLimits,
+  work: PermutationGroupWork,
+  firstBase?: number
+) => PermutationStabilizerChain;
+
+function chainInSession(
+  group: PermutationGroupValue,
+  ledger: ChainWork,
+  provider: PermutationChainProvider = PermutationStabilizerChain.compute,
+  firstBase?: number
+) {
+  const chain = provider(group, ledger.remaining(), ledger.caller, firstBase);
   ledger.tick(chain.workUsed);
-  ledger.stored += chain.storedImagesCharged;
+  ledger.reserve(chain.storedImagesCharged);
   ledger.points += chain.orbitPoints;
+  ledger.edges += chain.orbitEdges;
   return chain;
 }
+/** Charge nested work once; release temporary sift output between membership tests. */
 function containsInSession(
   chain: PermutationStabilizerChain,
   value: PermutationValue,
@@ -740,9 +906,10 @@ function containsInSession(
 ) {
   const result = chain.sift(value, ledger.remaining(), ledger.caller);
   ledger.tick(result.workUsed);
-  ledger.stored += result.storedImagesCharged;
+  // Sift residues and factors are temporary; they are released before the next query.
   return result.member;
 }
+/** Membership is equivalent to an identity residue in a completed stabilizer chain. */
 export function permutationGroupContains(
   group: PermutationGroupValue,
   value: PermutationValue,
@@ -761,14 +928,15 @@ export function permutationGroupRelation(
   candidate: PermutationGroupValue,
   query: 'subgroup' | 'index' | 'equal' | 'normal',
   requested: PermutationChainLimits,
-  work: PermutationGroupWork = {}
+  work: PermutationGroupWork = {},
+  provider?: PermutationChainProvider
 ): boolean | bigint {
   const ledger = new ChainWork(requested, work);
   const G = ledger.receive(parent),
     H = ledger.receive(candidate);
   if (G.action.degree !== H.action.degree)
     throw new PermutationInputError('incompatible-permutation-actions');
-  const gChain = chainInSession(G, ledger);
+  const gChain = chainInSession(G, ledger, provider);
   for (const h of H.generators) {
     ledger.values.check?.();
     if (!containsInSession(gChain, h, ledger)) {
@@ -778,7 +946,7 @@ export function permutationGroupRelation(
     }
   }
   if (query === 'subgroup') return true;
-  const hChain = chainInSession(H, ledger);
+  const hChain = chainInSession(H, ledger, provider);
   if (query === 'index') return gChain.order / hChain.order;
   if (query === 'equal') return gChain.order === hChain.order;
   for (const g of G.generators) {
@@ -792,6 +960,7 @@ export function permutationGroupRelation(
   return true;
 }
 
+/** Pairwise generator commutation implies commutation of all their words; O(k² n) image work. */
 export function permutationGroupIsAbelian(
   group: PermutationGroupValue,
   requested: PermutationChainLimits,
@@ -812,21 +981,17 @@ export function permutationGroupIsAbelian(
   return true;
 }
 
+/** Put the requested point first in the base; the next level generates its full stabilizer. */
 export function permutationPointStabilizer(
   group: PermutationGroupValue,
   point: number,
   requested: PermutationChainLimits,
-  work: PermutationGroupWork = {}
+  work: PermutationGroupWork = {},
+  provider?: PermutationChainProvider
 ): PermutationGroupValue {
   const ledger = new ChainWork(requested, work);
   const received = ledger.receive(group);
-  const chain = PermutationStabilizerChain.compute(
-    received,
-    ledger.remaining(),
-    work,
-    point
-  );
-  ledger.tick(chain.workUsed);
+  const chain = chainInSession(received, ledger, provider, point);
   return new PermutationGroupValue(
     chain.levels[1]?.generators ?? [],
     received.action,

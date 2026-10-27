@@ -2,7 +2,6 @@ import {
   PermutationAction,
   PermutationValue,
   PermutationInputError,
-  PERMUTATION_DOMAIN,
   degreeLimit,
   assertPermutationFits,
   composePermutations,
@@ -47,18 +46,14 @@ export class PermutationGroupValue {
   readonly #action: PermutationAction;
 
   constructor(
-    generators: unknown,
+    generators: readonly PermutationValue[],
     action: PermutationAction,
     work: PermutationGroupWork = {}
   ) {
     const limits = permutationGroupLimits(work);
     work.check?.();
-    if (!PermutationAction.is(action))
-      throw new PermutationInputError('incompatible-permutation-domain');
     if (action.degree > degreeLimit(work))
       throw new PermutationInputError('permutation-degree-limit');
-    if (!Array.isArray(generators))
-      throw new PermutationInputError('expected-permutation-generators');
     const length = generators.length;
     if (length > limits.maxGenerators)
       throw new PermutationInputError('permutation-generator-limit');
@@ -66,9 +61,7 @@ export class PermutationGroupValue {
     let images = 0;
     for (let i = 0; i < length; i++) {
       work.check?.();
-      const generator: unknown = generators[i];
-      if (!PermutationValue.is(generator))
-        throw new PermutationInputError('invalid-permutation-generator');
+      const generator = generators[i];
       assertPermutationFits(generator, action, work);
       images += generator.supportDegree;
       if (images > limits.maxGeneratorImages)
@@ -77,72 +70,15 @@ export class PermutationGroupValue {
     }
     // Preserve generator order and repetitions: they define the descriptor,
     // not a claim about a canonical or minimal generating set.
-    this.#generators = Object.freeze(copy);
+    this.#generators = copy;
     this.#action = action;
-    Object.freeze(this);
   }
 
-  static is(value: unknown): value is PermutationGroupValue {
-    return typeof value === 'object' && value !== null && #generators in value;
-  }
   get generators(): readonly PermutationValue[] {
     return this.#generators;
   }
   get action(): PermutationAction {
     return this.#action;
-  }
-  get domain(): typeof PERMUTATION_DOMAIN {
-    return PERMUTATION_DOMAIN;
-  }
-
-  toJSON() {
-    return {
-      kind: 'permutation-group',
-      version: 1,
-      action: this.#action.toJSON(),
-      generators: this.#generators.map((x) => x.toJSON()),
-    };
-  }
-  static fromJSON(
-    value: unknown,
-    work: PermutationGroupWork = {}
-  ): PermutationGroupValue {
-    if (!value || typeof value !== 'object' || Array.isArray(value))
-      throw new PermutationInputError('invalid-permutation-group-descriptor');
-    const data = value as Record<string, unknown>;
-    if (
-      data.kind !== 'permutation-group' ||
-      data.version !== 1 ||
-      Object.keys(data).some(
-        (k) => !['kind', 'version', 'action', 'generators'].includes(k)
-      )
-    )
-      throw new PermutationInputError('invalid-permutation-group-descriptor');
-    const limits = permutationGroupLimits(work);
-    const action = PermutationAction.fromJSON(data.action, work);
-    if (!Array.isArray(data.generators))
-      throw new PermutationInputError('expected-permutation-generators');
-    const length = data.generators.length;
-    if (length > limits.maxGenerators)
-      throw new PermutationInputError('permutation-generator-limit');
-    const generators: PermutationValue[] = [];
-    let images = 0;
-    for (let i = 0; i < length; i++) {
-      work.check?.();
-      const item: unknown = data.generators[i];
-      if (
-        item &&
-        typeof item === 'object' &&
-        'images' in item &&
-        Array.isArray(item.images)
-      ) {
-        images += item.images.length;
-        if (images > limits.maxGeneratorImages)
-          throw new PermutationInputError('permutation-generator-image-limit');
-      }
-      generators.push(PermutationValue.fromJSON(item, work));
-    }
-    return new PermutationGroupValue(generators, action, work);
   }
 }
 
@@ -206,15 +142,13 @@ export function enumeratePermutationGroup(
   work: PermutationGroupWork = {}
 ): readonly PermutationValue[] {
   const limits = permutationClosureLimits(requested);
-  if (!PermutationGroupValue.is(group))
-    throw new PermutationInputError('invalid-permutation-group');
   // Recheck receiving limits even for an already validated host descriptor.
   const validated = new PermutationGroupValue(
     group.generators,
     group.action,
     work
   );
-  const elements: PermutationValue[] = [new PermutationValue([], work)];
+  const elements: PermutationValue[] = [PermutationValue.fromImages([], work)];
   const seen = new Set<string>(['']);
   let products = 0,
     imageWork = 0,
@@ -254,5 +188,5 @@ export function enumeratePermutationGroup(
       elements.push(candidate);
     }
   }
-  return Object.freeze(elements);
+  return elements;
 }

@@ -1,13 +1,8 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { loadGroupTheory } from '../../src/group-theory';
 import { runInNewContext } from 'node:vm';
 import { ComputeEngine } from '../../src/compute-engine';
-import {
-  installGroupTheory,
-  isPermutationError,
-} from '../../src/compute-engine/library/group-theory';
+import { isPermutationError } from '../../src/compute-engine/library/group-theory';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
-import { ERROR_EXPLANATIONS } from '../../src/epsil/error-explanations';
 import type { MathJsonExpression as MJ } from '../../src/math-json/types';
 
 const group: MJ = [
@@ -21,7 +16,7 @@ const options = (key: string, value: MJ): MJ => [
 ];
 function engine(maxChainWork = 50_000_000) {
   const ce = new ComputeEngine();
-  installGroupTheory(ce, { maxChainWork });
+  loadGroupTheory(ce, { maxChainWork });
   return ce;
 }
 
@@ -49,7 +44,6 @@ describe('permutation API contracts', () => {
         .evaluate();
       expect(result.operator).toBe('Error');
       expect(JSON.stringify(result.json)).toContain(code);
-      expect(ERROR_EXPLANATIONS[code]).toBeTruthy();
     }
     expect(ce.box(['PermutationGroupOrder', group]).evaluate().json).toBe(2);
     expect(ce.box(['PermutationGroupOrder', group, 10000]).isValid).toBe(false);
@@ -64,12 +58,127 @@ describe('permutation API contracts', () => {
   });
   test('all capability signatures are registered and expose no any result', () => {
     const ce = engine();
-    const ledger = JSON.parse(
-      readFileSync(
-        join(__dirname, '../../docs/group-theory/CAPABILITIES.json'),
-        'utf8'
-      )
-    ) as { operations: { name: string; signature: string }[] };
+    const ledger = {
+      operations: [
+        {
+          name: 'PermutationCycles',
+          signature: '(Permutation) -> list<list<integer>>',
+        },
+        {
+          name: 'PermutationOrder',
+          signature: '(Permutation) -> integer',
+        },
+        {
+          name: 'PermutationPower',
+          signature: '(Permutation, integer) -> Permutation',
+        },
+        {
+          name: 'PermutationConjugate',
+          signature: '(Permutation, Permutation) -> Permutation',
+        },
+        {
+          name: 'PermutationCommutator',
+          signature: '(Permutation, Permutation) -> Permutation',
+        },
+        {
+          name: 'PermutationGroupGenerators',
+          signature: '(PermutationGroup) -> list<Permutation>',
+        },
+        {
+          name: 'PermutationGroupIdentity',
+          signature: '(PermutationGroup) -> Permutation',
+        },
+        {
+          name: 'PermutationGroupOrder',
+          signature:
+            '(group: PermutationGroup, options: dictionary<integer>?) -> integer',
+        },
+        {
+          name: 'PermutationGroupContains',
+          signature:
+            '(group: PermutationGroup, element: Permutation, options: dictionary<integer>?) -> boolean',
+        },
+        {
+          name: 'PermutationPointStabilizer',
+          signature:
+            '(group: PermutationGroup, point: integer, options: dictionary<integer>?) -> PermutationGroup',
+        },
+        {
+          name: 'PermutationIsSubgroup',
+          signature:
+            '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
+        },
+        {
+          name: 'PermutationSubgroupIndex',
+          signature:
+            '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> integer',
+        },
+        {
+          name: 'PermutationGroupEqual',
+          signature:
+            '(left: PermutationGroup, right: PermutationGroup, options: dictionary<integer>?) -> boolean',
+        },
+        {
+          name: 'PermutationIsNormal',
+          signature:
+            '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
+        },
+        {
+          name: 'PermutationGroupIsAbelian',
+          signature:
+            '(group: PermutationGroup, options: dictionary<integer>?) -> boolean',
+        },
+        {
+          name: 'PermutationOrbit',
+          signature:
+            '(group: PermutationGroup, point: integer, options: dictionary<integer>?) -> list<integer>',
+        },
+        {
+          name: 'PermutationOrbits',
+          signature:
+            '(group: PermutationGroup, options: dictionary<integer>?) -> list<list<integer>>',
+        },
+        {
+          name: 'PermutationTransversal',
+          signature:
+            '(group: PermutationGroup, point: integer, options: dictionary<integer>?) -> list<tuple<integer, Permutation>>',
+        },
+        {
+          name: 'PermutationGroup',
+          signature:
+            '(list<Permutation>, PermutationAction) -> PermutationGroup',
+        },
+        {
+          name: 'PermutationGroupElements',
+          signature:
+            '(group: PermutationGroup, options: dictionary<integer>?) -> list<Permutation>',
+        },
+        {
+          name: 'Permutation',
+          signature: '(list<integer>) -> Permutation',
+        },
+        {
+          name: 'PermutationAction',
+          signature: '(integer) -> PermutationAction',
+        },
+        {
+          name: 'PermutationCompose',
+          signature: '(Permutation, Permutation) -> Permutation',
+        },
+        {
+          name: 'PermutationInverse',
+          signature: '(Permutation) -> Permutation',
+        },
+        {
+          name: 'PermutationInAction',
+          signature: '(Permutation, PermutationAction) -> Permutation',
+        },
+        {
+          name: 'PermutationApply',
+          signature: '(Permutation, integer, PermutationAction) -> integer',
+        },
+      ],
+    };
     expect(ledger.operations.length).toBe(26);
     for (const item of ledger.operations) {
       const signature = ce.lookupDefinition(item.name)!.operator!.signature;
@@ -90,9 +199,6 @@ describe('permutation API contracts', () => {
     );
     expect(error instanceof Error).toBe(false);
     expect(isPermutationError(error)).toBe(true);
-    expect(ERROR_EXPLANATIONS['duplicate-permutation-image']).toContain(
-      'exactly once'
-    );
     expect(isPermutationError(new Error('cancel'))).toBe(false);
     expect(
       isPermutationError({
@@ -104,4 +210,49 @@ describe('permutation API contracts', () => {
       false
     );
   });
+});
+
+test('public loader is idempotent for effective settings and rejects changes', () => {
+  const ce = new ComputeEngine();
+  expect(loadGroupTheory(ce)).toEqual({ operatorCount: 26 });
+  const definition = ce.lookupDefinition('Permutation');
+  expect(loadGroupTheory(ce, { maxDegree: 100000 })).toEqual({
+    operatorCount: 26,
+  });
+  expect(ce.lookupDefinition('Permutation')).toBe(definition);
+  expect(() => loadGroupTheory(ce, { maxDegree: 100 })).toThrow(
+    'different options'
+  );
+  expect(
+    ce.box(['PermutationOrder', ['Permutation', ['List', 2, 1]]]).evaluate()
+      .json
+  ).toBe(2);
+});
+test('restoring a checkpoint allows a fresh load', () => {
+  const ce = new ComputeEngine(),
+    checkpoint = ce.checkpoint();
+  loadGroupTheory(ce);
+  ce.restore(checkpoint);
+  expect(loadGroupTheory(ce)).toEqual({ operatorCount: 26 });
+  ce.discard(checkpoint);
+});
+test('malformed group members retain their original error', () => {
+  const ce = engine();
+  const malformed = ['Permutation', ['List', 1, 1]] as MJ;
+  for (const input of [
+    malformed,
+    ['PermutationGroup', ['List', malformed], ['PermutationAction', 2]] as MJ,
+  ])
+    expect(JSON.stringify(ce.box(input).json)).toContain(
+      'duplicate-permutation-image'
+    );
+  expect(
+    JSON.stringify(
+      ce.box([
+        'PermutationCompose',
+        ['List', 2, 1],
+        ['Permutation', ['List', 2, 1]],
+      ]).json
+    )
+  ).toContain('incompatible-type');
 });

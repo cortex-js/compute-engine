@@ -28,6 +28,10 @@ echo "Running TypeScript type check..."
   --skipLibCheck -d --allowImportingTsExtensions true --emitDeclarationOnly \
   --ignoreConfig --outDir /tmp/typecheck ./src/compute-engine.ts
 
+echo "Checking optional group-theory entry..."
+"$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node \
+  --skipLibCheck --noEmit --ignoreConfig ./src/group-theory.ts
+
 echo "Checking Epsil CLI..."
 "$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node \
   --skipLibCheck --allowImportingTsExtensions true --noEmit \
