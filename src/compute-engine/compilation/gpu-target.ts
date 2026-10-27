@@ -1026,7 +1026,9 @@ function gpuOperandOnce(
   target: CompileTarget<Expression>,
   complex = false
 ): string {
-  if (x.isPure !== false) return compile(x);
+  // Read through the value of a symbol, as the shader inlines it: a symbol
+  // whose value draws (`r := Random()`) is pure to the engine.
+  if (!BaseCompiler.foldValueImpure(x)) return compile(x);
   if (
     !BaseCompiler.canHoist(target) ||
     (!complex && gpuOperandShape(x) !== 'scalar')
@@ -1036,6 +1038,7 @@ function gpuOperandOnce(
         'at this position — a repeated draw would shift every later value ' +
         'in the shader.'
     );
+  gpuAssertBindingKeepsDrawOrder(head, [x], target);
   const t = BaseCompiler.tempVar(target);
   const type = complex
     ? gpuVec2(target)
@@ -1045,7 +1048,144 @@ function gpuOperandOnce(
   const decl =
     target.language === 'wgsl' ? `var ${t}: ${type}` : `${type} ${t}`;
   BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
+  gpuRecordBoundDraws([x], target);
   return t;
+}
+
+/**
+ * The part of the current statement that is evaluated: the statement itself,
+ * or the right side of a statement that stores it (`q := …`,
+ * `Declare(q, real, …)`), which is evaluated before the store. `undefined`
+ * when no statement position was recorded for the sink.
+ */
+function gpuEvaluatedUnit(
+  target: CompileTarget<Expression>
+): Expression | undefined {
+  const unit = target.hoist?.unit;
+  if (unit === undefined) return undefined;
+  if (isFunction(unit, 'Assign')) return unit.ops[1];
+  if (isFunction(unit, 'Declare'))
+    return BaseCompiler.declareValueOperand(unit.ops);
+  return unit;
+}
+
+/**
+ * The operands bound to hoisted temporaries so far, for each statement sink:
+ * their draws run ahead of the statement, in the order they were bound
+ * (`gpuAssertBindingKeepsDrawOrder`).
+ */
+const gpuBoundDrawOperands = new WeakMap<object, Set<Expression>>();
+
+/**
+ * Fail closed when binding `operands` to hoisted temporaries would change
+ * the order of the random draws of the statement. A hoisted statement runs
+ * before the rest of its statement, so the draws of the bound operands come
+ * before every draw that stays in the statement. That is the interpreter's
+ * order when no draw evaluated BEFORE the first bound operand stays in the
+ * statement: a later draw comes after either way, and an earlier draw that
+ * was bound before (the elements of `Variance`, bound one by one) runs in
+ * order. `(Random(), Cot(Random()))` bound the operand of `Cot` and drew it
+ * before the first value of the tuple; it declines, and the interpreter
+ * evaluates the expression.
+ *
+ * The order is the interpreter's: the operands of a node from first to last,
+ * depth first, and the draw of a node itself (`Random(…)`) after its
+ * operands. A draw in a lazily evaluated position (a branch, a loop body) is
+ * counted where it stands, which can only refuse more. When the operand is
+ * not found in the statement, or stands at more than one place, or no
+ * statement position was recorded, the binding is accepted only if the
+ * operands hold every draw of the statement. A binding made in a clause of
+ * the statement form of a selection (`compileGPUStatementSelection`) is
+ * checked against the whole statement, although the clause's statements run
+ * at the head of its branch: a draw in the first condition then makes it
+ * decline, where the `if` would keep the order (a limit, not a reorder).
+ */
+function gpuAssertBindingKeepsDrawOrder(
+  head: string,
+  operands: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): void {
+  const decline = (): never => {
+    throw new Error(
+      `Could not compile \`${head}\`: an operand that draws a random value would be ` +
+        'bound to a temporary ahead of the rest of its statement, and a draw ' +
+        'written before it would then come after it.'
+    );
+  };
+  const sink = target.hoist;
+  const evaluated = gpuEvaluatedUnit(target);
+  const bound = sink === undefined ? undefined : gpuBoundDrawOperands.get(sink);
+  // The walk stops at the first operand that draws: a pure operand ahead of
+  // it has no draw to order.
+  const first =
+    operands.find((o) => BaseCompiler.foldValueImpure(o)) ?? operands[0];
+  const FOUND = 1;
+  const DRAW = 2;
+  // The result of a node depends only on the node here, so it is computed
+  // once: a tree with shared nodes is walked in linear time.
+  const seen = new Map<Expression, number>();
+  const walk = (n: Expression): number => {
+    const known = seen.get(n);
+    if (known !== undefined) return known;
+    let r = 0;
+    if (n === first) r = FOUND;
+    else if (bound?.has(n)) r = 0;
+    else if (isSymbol(n)) r = BaseCompiler.foldValueImpure(n) ? DRAW : 0;
+    else if (isFunction(n)) {
+      for (const op of n.ops) {
+        r = walk(op);
+        if (r !== 0) break;
+      }
+      if (r === 0 && gpuNodeDrawsItself(n)) r = DRAW;
+    }
+    seen.set(n, r);
+    return r;
+  };
+  // The operands hold every draw of the statement: no order can change.
+  const holdsEveryDraw = (): boolean => {
+    if (evaluated === undefined) return false;
+    const memo = new Map<Expression, number>();
+    const own = operands.reduce((n, o) => n + gpuDrawCount(o, memo), 0);
+    return gpuDrawCount(evaluated, memo) === own;
+  };
+  // The walk finds the operand by identity, so an operand object that stands
+  // at more than one place may be found at the wrong one.
+  const occurrences = (
+    n: Expression,
+    memo: Map<Expression, number>
+  ): number => {
+    const known = memo.get(n);
+    if (known !== undefined) return known;
+    let c = n === first ? 1 : 0;
+    if (isFunction(n)) for (const op of n.ops) c += occurrences(op, memo);
+    memo.set(n, c);
+    return c;
+  };
+  const result = evaluated === undefined ? 0 : walk(evaluated);
+  if (result === DRAW) decline();
+  const ambiguous =
+    evaluated !== undefined && occurrences(evaluated, new Map()) > 1;
+  if ((result === 0 || ambiguous) && !holdsEveryDraw()) decline();
+}
+
+/**
+ * Record `operands` as bound to hoisted temporaries of the current
+ * statement, once their bindings are emitted: their draws then run ahead of
+ * the statement, in order, and a later check
+ * (`gpuAssertBindingKeepsDrawOrder`) does not read them as draws that stay
+ * in the statement. Recorded after the binding, not when it is checked: an
+ * operand is compiled between the two, and a binding inside it (`Cot` of
+ * `Cot(Random())`) must still see its own draws.
+ */
+function gpuRecordBoundDraws(
+  operands: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): void {
+  const sink = target.hoist;
+  if (sink === undefined) return;
+  const set = gpuBoundDrawOperands.get(sink) ?? new Set<Expression>();
+  for (const o of operands) set.add(o);
+  gpuBoundDrawOperands.set(sink, set);
 }
 
 /**
@@ -1801,9 +1941,11 @@ export function gpuNeedsStatements(e: Expression): boolean {
     // Every `Sum`/`Product` is read as needing statements: a loop form
     // certainly does, and an unrolled one may still hoist a loop-invariant
     // declaration for a term that does not depend on the index. An impure
-    // operand a lowering binds to a temporary is not read here: a selection
-    // with an effect never takes the statement form (see
-    // `compileGPUStatementSelection`).
+    // operand that a lowering binds to a temporary (the operand of `Cot`) is
+    // not read here. A selection whose clauses draw takes the statement form
+    // only on WGSL (`gpuArmIsCostlyForSelect`); on GLSL such an arm keeps
+    // the ternary, which declines the hoisted temporary in a conditional
+    // arm.
     if (h === 'Sum' || h === 'Product' || h === 'Block' || h === 'Loop')
       return true;
     return x.ops.some(walk);
@@ -1869,29 +2011,53 @@ function gpuWritesOutside(
 }
 
 /**
- * Does `node` draw a random value anywhere outside the nodes in `inside`
- * (and their subtrees)? A draw is a node that is impure by itself
- * (`BaseCompiler.foldValueImpure`) while none of its operands is, such as
- * `Random()`, or a symbol whose inlined value is impure.
+ * Does `node` make a random draw of its own, beside the draws of its
+ * operands? An operator that draws (`Random`, also with an operand that
+ * draws), a node that is impure by itself while none of its operands is, and,
+ * to be safe, a call of a user function with an impure operand, whose body
+ * may draw too (reading the body is not attempted, so this may say yes for a
+ * body that does not draw, which only refuses more). `WithRandomSeed` frames
+ * the draws of its body and makes none of its own.
  */
-function gpuDrawsOutside(
+function gpuNodeDrawsItself(node: Expression): boolean {
+  if (!isFunction(node) || node.operator === 'WithRandomSeed') return false;
+  if (!BaseCompiler.foldValueImpure(node)) return false;
+  if (!node.ops.some((op) => BaseCompiler.foldValueImpure(op))) return true;
+  const def = node.engine.lookupDefinition(node.operator);
+  if (isOperatorDef(def))
+    return def.operator.drawsRandom || def.operator.isUserFunctionDefinition;
+  return isValueDef(def);
+}
+
+/**
+ * The number of draw sites that evaluating `node` reaches, counting each
+ * occurrence: an operator that draws (`Random`, with or without an operand
+ * that draws too), a call or another node that is impure by itself while
+ * none of its operands is, and a symbol whose inlined value is impure. A
+ * call of a function counts once, however often its body draws: those
+ * draws run in order inside the called function, so they cannot change
+ * places with each other. `WithRandomSeed` is pure from the outside, but
+ * the walk enters it: the unit may be the body of the frame the selection
+ * draws from. A draw in another nested frame, which has its own counter,
+ * is counted too, which only refuses more. A node object can stand at
+ * several places of a tree, so each occurrence counts, and the count of a
+ * node is computed once (`memo`), which keeps a tree with shared nodes
+ * linear in its number of distinct nodes. Exported for tests.
+ */
+export function gpuDrawCount(
   node: Expression,
-  inside: ReadonlySet<Expression>
-): boolean {
-  // Every node is visited: a node that frames its draws (`WithRandomSeed`) is
-  // pure from the outside, but the draws inside it still advance the stream.
-  const walk = (n: Expression): boolean => {
-    if (inside.has(n)) return false;
-    if (isSymbol(n)) return BaseCompiler.foldValueImpure(n);
-    if (!isFunction(n)) return false;
-    if (
-      BaseCompiler.foldValueImpure(n) &&
-      !n.ops.some((op) => BaseCompiler.foldValueImpure(op))
-    )
-      return true;
-    return n.ops.some(walk);
-  };
-  return walk(node);
+  memo: Map<Expression, number> = new Map()
+): number {
+  const known = memo.get(node);
+  if (known !== undefined) return known;
+  let count = 0;
+  if (isSymbol(node)) count = BaseCompiler.foldValueImpure(node) ? 1 : 0;
+  else if (isFunction(node)) {
+    for (const op of node.ops) count += gpuDrawCount(op, memo);
+    if (gpuNodeDrawsItself(node)) count += 1;
+  }
+  memo.set(node, count);
+  return count;
 }
 
 /**
@@ -1928,8 +2094,8 @@ function compileGPUStatementSelection(
   // expression at its statement position (`hoist.unit`), so a sibling
   // written BEFORE the selection runs after it. Two things could observe
   // that order, and the gate refuses both: an effect inside the selection
-  // — a draw would shift the random stream past a sibling's draw — and a
-  // sibling that WRITES a binding, since the selection could read that
+  // that could change places with a sibling's (see the draw rule below) —
+  // and a sibling that WRITES a binding, since the selection could read that
   // binding before the write, directly, through a symbol whose value is
   // inlined, or inside a function it calls. Where a read hides is not
   // examined; the writes are: an assignment anywhere in the unit outside
@@ -1943,25 +2109,36 @@ function compileGPUStatementSelection(
   // ahead of an operand written before it"). `hasObservableEffect` reads a
   // block by the values it assigns to its own locals, so a block arm that
   // declares and assigns its own locals is not an effect.
-  const unit = target.hoist!.unit;
-  if (unit === undefined) return undefined;
   // A statement that is itself the store of its right side — `q := If(…)`,
   // `Declare(q, real, If(…))` — stores after that side is evaluated, so
-  // only the evaluated side is examined for writes.
-  const evaluated = isFunction(unit, 'Assign')
-    ? unit.ops[1]
-    : isFunction(unit, 'Declare')
-      ? BaseCompiler.declareValueOperand(unit.ops)
-      : unit;
+  // only the evaluated side is examined for writes (`gpuEvaluatedUnit`).
+  const evaluated = gpuEvaluatedUnit(target);
   if (evaluated === undefined) return undefined;
   // The one effect a clause may have is a random draw, and only when nothing
   // else in the statement draws: the hoisted selection then makes its draws
   // in the same order as the interpreter, since no draw of a sibling can
-  // come between. A clause that writes a binding, or a symbol whose value
-  // draws (read as a possible write by `gpuWritesOutside`), is refused.
+  // come between. Each clause may draw once only: a clause's own hoisted
+  // statements run before the rest of the clause (and those of the first
+  // condition before the `if`), so a second draw could change places with
+  // the first (`Tuple(Random(), Cot(Random()))` binds the operand of `Cot`
+  // first). A clause that writes a binding, or a symbol whose value draws
+  // (read as a possible write by `gpuWritesOutside`), is refused, and so is
+  // a `Block` clause whose local is initialized by a draw, which
+  // `hasObservableEffect` reads as an effect. The rule is stricter than the
+  // order needs, by design: a draw written after the selection
+  // (`W + Random()`), a draw already bound ahead of it, and a selection
+  // nested in a clause of another (which reads the outer clause's draw as
+  // outside its own) also decline. Binding the draws of a statement in order
+  // (CE-527) would lift these limits.
   if (args.some(BaseCompiler.hasObservableEffect)) {
     if (args.some((a) => gpuWritesOutside(a, new Set()))) return undefined;
-    if (gpuDrawsOutside(evaluated, new Set(args))) return undefined;
+    // A draw outside the selection is found by counting, not by identity:
+    // the same node object can stand in a clause and in a sibling.
+    const memo = new Map<Expression, number>();
+    const own = args.map((a) => gpuDrawCount(a, memo));
+    const inClauses = own.reduce((n, c) => n + c, 0);
+    if (gpuDrawCount(evaluated, memo) !== inClauses) return undefined;
+    if (own.some((c) => c > 1)) return undefined;
   }
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
   const isWGSL = target.language === 'wgsl';
@@ -2067,11 +2244,12 @@ function compileGPUStatementSelection(
  * are given to the statement form as `Which` clauses: the case test is the
  * condition and the case body the value, and an irrefutable last case is the
  * `True` clause. The statement form reads the clause EXPRESSIONS for its
- * requirements (no effect in a clause, no write outside the clauses, one
- * static type for every value); the expression for a case test is its guard,
- * or `False` for a case with no guard, because a pattern is a constant with
- * no effect. The clause CODE comes from the functions of the case, so the
- * comparisons with the subject are those of the ternary form.
+ * requirements (no effect in a clause other than the draws the gate allows,
+ * no write outside the clauses, one static type for every value); the
+ * expression for a case test is its guard, or `False` for a case with no
+ * guard, because a pattern is a constant with no effect. The clause CODE
+ * comes from the functions of the case, so the comparisons with the subject
+ * are those of the ternary form.
  *
  * `undefined`, and the ternary form, when no case needs statements, when the
  * subject has an effect (its evaluation would move ahead of the siblings of
@@ -4711,11 +4889,14 @@ function gpuScalarComponents(
   const comps = ['x', 'y', 'z', 'w'].slice(0, width);
   if (/^[A-Za-z_]\w*$/.test(code)) return comps.map((c) => `${code}.${c}`);
   if (!BaseCompiler.canHoist(target)) return undefined;
+  const draws = BaseCompiler.foldValueImpure(expr);
+  if (draws) gpuAssertBindingKeepsDrawOrder(expr.operator, [expr], target);
   const tv = BaseCompiler.tempVar(target);
   const type = target.language === 'wgsl' ? `vec${width}f` : `vec${width}`;
   const decl =
     target.language === 'wgsl' ? `var ${tv}: ${type}` : `${type} ${tv}`;
   BaseCompiler.hoistStatement(target, `${decl} = ${code};`);
+  if (draws) gpuRecordBoundDraws([expr], target);
   return comps.map((c) => `${tv}.${c}`);
 }
 
@@ -6367,8 +6548,13 @@ function compileGPUAt(
   ) {
     let code = compile(base);
     if (target.language === 'wgsl' && n > 4) {
+      // The base runs ahead of the statement once it is bound, so a draw in
+      // it must not come before a draw written before the `At`.
+      const draws = BaseCompiler.foldValueImpure(base);
+      if (draws) gpuAssertBindingKeepsDrawOrder('At', [base], target);
       const name = BaseCompiler.tempVar(target);
       BaseCompiler.hoistStatement(target, `var ${name} = ${code};`);
+      if (draws) gpuRecordBoundDraws([base], target);
       code = name;
     }
     return `${gpuIsAtomicEmission(code) ? code : `(${code})`}[${fact.code} - 1]`;
@@ -7323,8 +7509,15 @@ function compileGPUSumProduct(
         // A term whose value is already a bare name — a block term stores its
         // value in a temporary the hoisted statements declare (`valueBlock`)
         // — is read through that name; binding it again would only copy it.
+        // The term's statements run ahead of the enclosing statement, so a
+        // draw among them must not come before a draw written before the
+        // `Sum`.
+        if (BaseCompiler.foldValueImpure(args[0]))
+          gpuAssertBindingKeepsDrawOrder(kind, [args[0]], target);
         if (/^[A-Za-z_$][\w$]*$/.test(code)) {
           BaseCompiler.hoistStatement(target, ...termSink.stmts);
+          if (BaseCompiler.foldValueImpure(args[0]))
+            gpuRecordBoundDraws([args[0]], target);
           terms.push(`(${code})`);
           continue;
         }
@@ -7335,6 +7528,8 @@ function compileGPUSumProduct(
           ...termSink.stmts,
           `${decl} = ${code};`
         );
+        if (BaseCompiler.foldValueImpure(args[0]))
+          gpuRecordBoundDraws([args[0]], target);
         terms.push(`(${tv})`);
       }
       const result = `(${terms.reduce((a, b) => combine(a, b))})`;
@@ -7554,7 +7749,13 @@ function compileGPUSumProduct(
   ];
 
   if (BaseCompiler.canHoist(target)) {
+    // The loop runs ahead of the enclosing statement, so a draw in its body
+    // must not come before a draw written before the `Sum`.
+    if (BaseCompiler.foldValueImpure(args[0]))
+      gpuAssertBindingKeepsDrawOrder(kind, [args[0]], target);
     BaseCompiler.hoistStatement(target, loop.join('\n'));
+    if (BaseCompiler.foldValueImpure(args[0]))
+      gpuRecordBoundDraws([args[0]], target);
     return acc;
   }
   return [...loop, `return ${acc};`].join('\n');
@@ -8567,7 +8768,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // later draw in the shader. Bind scalars to hoisted temporaries; where
     // there is no statement sink (a conditional arm), or the operand is not
     // a scalar, there is no safe reading — decline.
-    if (a.isPure === false || b.isPure === false) {
+    // Read through the value of a symbol, as the shader inlines it.
+    if (BaseCompiler.foldValueImpure(a) || BaseCompiler.foldValueImpure(b)) {
       if (
         !BaseCompiler.canHoist(target) ||
         gpuOperandShape(a) !== 'scalar' ||
@@ -8578,6 +8780,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
             'temporary at this position — a repeated draw would shift every ' +
             'later value in the shader.'
         );
+      gpuAssertBindingKeepsDrawOrder('Remainder', [a, b], target);
       const ta = BaseCompiler.tempVar(target);
       const tb = BaseCompiler.tempVar(target);
       const decl = (n: string) =>
@@ -8587,6 +8790,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         `${decl(ta)} = ${compile(a)};`,
         `${decl(tb)} = ${compile(b)};`
       );
+      gpuRecordBoundDraws([a, b], target);
       return `(${ta} - ${tb} * ${remainderQuotient(`${ta} / ${tb}`)})`;
     }
     // `compile()` emits sub-expressions without outer parentheses, and
@@ -8604,19 +8808,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // bound to a hoisted temporary — compiling it once is not enough, since
       // `_gpu_rnd_draw` advances its counter on every evaluation of the
       // spliced text (see the real branch and `Remainder`).
-      if (x.isPure === false) {
+      if (BaseCompiler.foldValueImpure(x)) {
         if (!BaseCompiler.canHoist(target))
           throw new Error(
             'Could not compile `Cot`: an impure (Random) complex operand cannot be bound to a ' +
               'temporary at this position — a repeated draw would shift ' +
               'every later value in the shader.'
           );
+        gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
         const t = BaseCompiler.tempVar(target);
         const decl =
           target.language === 'wgsl'
             ? `var ${t}: ${gpuVec2(target)}`
             : `${gpuVec2(target)} ${t}`;
         BaseCompiler.hoistStatement(target, `${decl} = ${compile(x)};`);
+        gpuRecordBoundDraws([x], target);
         return `_gpu_cdiv(_gpu_ccos(${t}), _gpu_csin(${t}))`;
       }
       // Compile the operand ONCE: two `compile()` calls would allocate two
@@ -8627,19 +8833,21 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // An IMPURE operand (Random) is spliced twice below, and `_gpu_rnd_draw`
     // advances a runtime counter — bind it to a hoisted temporary, or decline
     // where there is no statement sink (see `Remainder`).
-    if (x.isPure === false) {
+    if (BaseCompiler.foldValueImpure(x)) {
       if (!BaseCompiler.canHoist(target) || gpuOperandShape(x) !== 'scalar')
         throw new Error(
           'Could not compile `Cot`: an impure (Random) operand cannot be bound to a temporary ' +
             'at this position — a repeated draw would shift every later ' +
             'value in the shader.'
         );
+      gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
       const t = BaseCompiler.tempVar(target);
       const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
       BaseCompiler.hoistStatement(
         target,
         `${decl} = ${compile(gpuReduceTrigOffset(x, 1, true, target))};`
       );
+      gpuRecordBoundDraws([x], target);
       return `(_gpu_cos(${t}) / _gpu_sin(${t}))`;
     }
     // The NaN-safe `_gpu_cos`/`_gpu_sin` (CE-520).
@@ -17921,12 +18129,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // unconditionally, ahead of the operand that decides whether it runs.
       lazyOperand: (head, compiled, current) =>
         compileGPUConditionalArm(head, compiled, current),
-      valueBlock: (valueNode, stmts, valueCode, current) => {
+      valueBlock: (valueNode, stmts, valueCode, current, block) => {
         if (
           !BaseCompiler.canHoist(current) ||
           conditionalGPUSinks.has(current.hoist!)
         )
           return undefined;
+        // The block runs ahead of the statement as one compound statement,
+        // so a draw in it must not come before a draw written before it.
+        const draws =
+          block !== undefined && BaseCompiler.foldValueImpure(block);
+        if (draws) gpuAssertBindingKeepsDrawOrder('Block', [block], current);
         const isWGSL = current.language === 'wgsl';
         const type = gpuTypeOfValue(valueNode, isWGSL);
         if (type === undefined) return undefined;
@@ -17943,6 +18156,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           isWGSL ? `var ${tv}: ${type};` : `${type} ${tv};`,
           `{\n${body}\n}`
         );
+        if (draws) gpuRecordBoundDraws([block], current);
         return tv;
       },
       // A free symbol emitted as a bare identifier must not be a reserved word

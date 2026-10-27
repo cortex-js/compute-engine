@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-527.
+Next free reference: CE-528.
 
 **Entry format.**
 
@@ -3965,6 +3965,33 @@ fixed in phase 3 (`src/compute-engine/interval/`); .5 is a known limit.
   with no outward rounding: `fract([−1e−20, −1e−20])` is `[1, 1]` where the
   exact fractional part is strictly below 1. Fix: outward steps around the
   subtraction, exact cases preserved. Fixed in phase 3.
+
+### CE-527. On the shader targets, bind every draw of a statement in order instead of declining
+
+**Status:** open; capability (user request, 2026-10-26; next after the
+draw-order guard).
+
+A lowering that uses an impure operand twice binds it to a hoisted
+temporary (`gpuOperandOnce`, `Cot`, `Remainder`, the components of a
+vector in `Max`, a `Block` used as a value, the loop or terms of a `Sum`).
+The temporary runs before the rest of its statement, so since the guard
+`gpuAssertBindingKeepsDrawOrder` (`compilation/gpu-target.ts`) the lowering
+declines when a draw that is not bound comes before the bound operand in the
+interpreter's order: `(Random(), \cot(\operatorname{Random}()))`. Before the
+guard both shader targets drew the operand of `cot` first. Shapes whose
+bound draws already come first (`\cot(\operatorname{Random}()) +
+\operatorname{Random}()`, `Variance` of a list of draws) compile. For the
+others the interpreter evaluates the expression, which is correct but loses
+the GPU lane for it. The statement form of a selection on `wgsl` has a
+stricter rule of its own (`compileGPUStatementSelection`: nothing else in the
+statement may draw). The fix: bind every draw of
+the statement that is evaluated unconditionally to its own temporary, in the
+order of the interpreter (operands from first to last, depth first), before
+the statement, and compile the statement with those temporaries, as the
+relational-chain lowering already does for its own operands
+(`base-compiler.ts`). A draw in a lazily evaluated position (a branch, a
+loop body, the body of a user function) cannot be bound ahead; beside such a
+draw the guard still declines.
 
 ### CE-526. On WebGPU, the NaN guard of `sin` and `cos` changes the value of a finite argument
 

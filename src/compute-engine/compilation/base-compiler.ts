@@ -23446,12 +23446,19 @@ export class BaseCompiler {
         ) {
           const hoisted =
             assignedName !== undefined
-              ? target.valueBlock(assignedValue!, result, assignedName, target)
+              ? target.valueBlock(
+                  assignedValue!,
+                  result,
+                  assignedName,
+                  target,
+                  node
+                )
               : target.valueBlock(
                   last,
                   result.slice(0, -1),
                   result[result.length - 1],
-                  target
+                  target,
+                  node
                 );
           if (hoisted !== undefined) return hoisted;
         }

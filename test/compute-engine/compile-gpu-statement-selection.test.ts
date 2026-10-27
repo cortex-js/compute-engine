@@ -164,10 +164,46 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
     expect(unrolled.code).toContain('if (');
   });
 
+  test('a branch that draws once, with nothing else drawing, takes the statement form', () => {
+    // The selection is the whole statement, so the hoisted `if` makes the
+    // one draw of the branch that is taken, as the interpreter does (Tycho
+    // row 466).
+    const r = compile(
+      ce.box([
+        'If',
+        ['Greater', 'x', 0],
+        ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
+        ['Random'],
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    );
+    expect(r.success).toBe(true);
+    expect(r.code).toMatch(/\} else \{\n  _tv\d+ = _gpu_rnd_draw\(/);
+    expect(r.code!.split('_gpu_rnd_draw(').length - 1).toBe(1);
+    // A loop whose step calls a function that draws: the draws run in the
+    // taken branch, one per step in order, as in the interpreter.
+    ce.declare('g', 'function');
+    ce.assign('g', ce.parse(String.raw`n \mapsto n + \operatorname{Random}()`));
+    const loop = compile(
+      ce.box([
+        'If',
+        ['Greater', 'x', 0],
+        ['Sum', ['g', 'n'], ['Limits', 'n', 1, ['Floor', 't']]],
+        0,
+      ]),
+      { to: 'glsl', fallback: false, constantFold: false }
+    );
+    expect(loop.success).toBe(true);
+    expect(loop.code).toMatch(
+      /if \(0\.0 < x\) \{\n  float _tv\d+ = 0\.0;\n  for \(/
+    );
+  });
+
   test('a selection with an effect keeps the ternary form and declines', () => {
-    // Hoisted as a statement, an effect inside the selection — a draw, a
-    // write to an enclosing binding, directly or in a called function —
-    // would run ahead of an operand written before it. Such a selection
+    // Hoisted as a statement, an effect inside the selection — a write to an
+    // enclosing binding, directly or in a called function, or more than one
+    // draw in a branch, or a draw beside another draw in the statement —
+    // could run in another order than the interpreter's. Such a selection
     // keeps the ternary form, which declines a hoisting arm as before.
     ce.declare('f', 'function');
     ce.assign('f', ce.parse(String.raw`n \mapsto n + \operatorname{Random}()`));
@@ -177,18 +213,6 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         ['Greater', 'x', 0],
         ['Tuple', ['Random'], ['Sum', ['Random'], ['Limits', 'n', 1, 1000]]],
         ['Tuple', 0, 0],
-      ],
-      [
-        'If',
-        ['Greater', 'x', 0],
-        ['Sum', 'n', ['Limits', 'n', 1, ['Floor', 't']]],
-        ['Random'],
-      ],
-      [
-        'If',
-        ['Greater', 'x', 0],
-        ['Sum', ['f', 'n'], ['Limits', 'n', 1, ['Floor', 't']]],
-        0,
       ],
       [
         'If',
@@ -210,7 +234,9 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
           fallback: false,
           constantFold: false,
         })
-      ).toThrow(/conditionally-evaluated branch|multi-statement construct/);
+      ).toThrow(
+        /conditionally-evaluated branch|multi-statement construct|a draw written before it/
+      );
   });
 
   test('a selection reading a name the unit assigns keeps the ternary form', () => {
@@ -412,7 +438,7 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         ]),
         { to: 'glsl', fallback: false, constantFold: false }
       )
-    ).toThrow(/conditionally-evaluated branch/);
+    ).toThrow(/conditionally-evaluated branch|a draw written before it/);
   });
 
   test('the statement-needs scan is linear in the distinct nodes of a shared arm', () => {

@@ -896,7 +896,10 @@ export interface CompileTarget<Expr = unknown> {
     valueNode: Expr,
     stmts: ReadonlyArray<string>,
     valueCode: string,
-    target: CompileTarget<Expr>
+    target: CompileTarget<Expr>,
+    /** The `Block` node itself, when the caller has it: the shader targets
+     * read it for the order of the random draws it makes. */
+    block?: Expr
   ) => string | undefined;
 
   /**

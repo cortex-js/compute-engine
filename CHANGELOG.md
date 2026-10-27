@@ -1,3 +1,32 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **On `wgsl`, a piecewise branch that draws a random value compiles to an
+  `if` statement** when the branch draws once and nothing else in the same
+  statement draws (Tycho row 466), so only the branch that is taken draws, as
+  in the interpreter and on `glsl`. `\operatorname{WithRandomSeed}(s,
+  \{x<0: \operatorname{Random}(), 0\})` compiles, and so does `1 +` it.
+  Other shapes still decline, because a hoisted `if` runs ahead of the rest
+  of its statement and could change the order of the draws. 0.170.0 already
+  used the `if` form, but also for a branch that draws twice, such as
+  `(\operatorname{Random}(), \cot(\operatorname{Random}()))`, where it
+  drew the second value first; that shape declines again. (The 0.170.0 note
+  that such a branch no longer compiles on `wgsl` describes the release
+  before.)
+- **On `glsl` and `wgsl`, a random draw bound to a temporary no longer comes
+  before a draw written before it.** A lowering that uses an operand twice
+  (`\cot`, `\operatorname{Remainder}`, the components of a vector in
+  `\max`) binds an operand that draws to a temporary ahead of its statement,
+  and a `Sum` or `Product` hoists its loop or its terms the same way. So
+  `(\operatorname{Random}(), \cot(\operatorname{Random}()))` drew the
+  operand of `\cot` first, and `(\operatorname{Random}(), \sum_{k=1}^{n}
+  \operatorname{Random}())` drew the loop first, unlike the interpreter and
+  the `javascript` target. Such a shape now declines, and the interpreter
+  evaluates it; a statement whose draws are bound in their written order
+  (`\operatorname{Variance}` of a list of draws, a `Sum` that is written
+  first) still compiles.
+
 ## 0.170.0 _2026-10-26_
 
 ### Breaking Changes

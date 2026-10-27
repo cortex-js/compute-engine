@@ -242,17 +242,18 @@ describe('a WGSL branch that draws a random value fails closed', () => {
     expect(shader(json, 'glsl').code).toContain('?');
   });
 
-  it('declines a plain draw in a branch too', () => {
-    expect(() =>
-      compile(
-        ce.box([
-          'WithRandomSeed',
-          'x',
-          ['If', ['Less', 'x', 0], ['Random'], 0],
-        ] as never),
-        { to: 'wgsl', fallback: false } as never
-      )
-    ).toThrow(/a branch draws a random value/);
+  it('writes a branch that draws once, alone in its statement, as an `if`', () => {
+    // The hoisted `if` makes the draw only in the branch that is taken, and
+    // no other draw of the statement can come between (Tycho row 466).
+    const { code } = shader(
+      ['WithRandomSeed', 'x', ['If', ['Less', 'x', 0], ['Random'], 0]],
+      'wgsl'
+    );
+    expect(code).toMatch(
+      /^var _tv\d+: f32;\nif \(x < 0\.0\) \{\n  _tv\d+ = _gpu_rnd_draw\(/
+    );
+    expect(code).not.toContain('select(');
+    expect(code.split('_gpu_rnd_draw(').length - 1).toBe(1);
   });
 
   it('still agrees with the floored modulo', () => {
