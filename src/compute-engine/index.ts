@@ -162,14 +162,6 @@ import { BoxedFunction } from './boxed-expression/boxed-function.js';
 import { makeObject } from './boxed-expression/boxed-object.js';
 import { _BoxedExpression } from './boxed-expression/abstract-boxed-expression.js';
 import './boxed-expression/init-lazy-refs.js';
-import {
-  _setQuantityDimensionsDiffer,
-  _setQuantityOrder,
-} from './boxed-expression/compare.js';
-import {
-  compareQuantities,
-  quantityDimensionsDiffer,
-} from './library/quantity-compare.js';
 import { _BoxedOperatorDefinition } from './boxed-expression/boxed-operator-definition.js';
 import {
   HARMONIZATION_RULES,
@@ -223,6 +215,11 @@ import {
   assignFn as assignFnImpl,
   undeclare as undeclareImpl,
 } from './engine-declarations.js';
+import type { KindRegistryState } from './types-definitions.js';
+import {
+  createKindRegistry,
+  kindRegistryRollbackPoint,
+} from './boxed-expression/value-kinds.js';
 import { canonicalFunctionLiteralOperands } from './function-utils.js';
 import { markFunctionLiteralParameter } from './boxed-expression/function-literal.js';
 import {
@@ -351,9 +348,11 @@ export {
 // Export BigDecimal for arbitrary-precision arithmetic
 export { BigDecimal } from '../big-decimal/index.js';
 
+// Only the two targets that every engine registers are exported from the
+// engine module. The GPU and Python targets are exported by the full entry
+// (`src/compute-engine.ts`) and by `src/compile.ts`, so that the `./core`
+// entry does not bundle them (`engine-compilation-targets.ts` says why).
 export { JavaScriptTarget } from './compilation/javascript-target.js';
-export { GLSLTarget } from './compilation/glsl-target.js';
-export { PythonTarget } from './compilation/python-target.js';
 export { IntervalJavaScriptTarget } from './compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compilation/base-compiler.js';
 
@@ -641,6 +640,17 @@ export class ComputeEngine implements IComputeEngine {
   readonly _protocolRegistry: Record<string, ProtocolRecord> =
     Object.create(null);
 
+  /** The engine-level KIND registry: the value kinds declared by the
+   * `arithmetic` field of operator definitions. Read and written through
+   * `boxed-expression/value-kinds.ts` only.
+   * @internal */
+  readonly _kindRegistry: KindRegistryState = createKindRegistry();
+
+  /** See `IComputeEngine._kindRegistryRollbackPoint`. @internal */
+  _kindRegistryRollbackPoint(): () => void {
+    return kindRegistryRollbackPoint(this);
+  }
+
   /** Backing store for {@link _conformanceVersion}. */
   private _conformanceVersionCounter = 0;
 
@@ -716,6 +726,10 @@ export class ComputeEngine implements IComputeEngine {
         // `type-redefinition`. See
         // `docs/TYPE-SYSTEM.md`.
         declOrigin: r._declOrigin,
+        // Whether the declaration minted a constructor: read by the kind
+        // registration (`boxed-expression/value-kinds.ts`), so a rolled-back
+        // declaration must not leave it behind.
+        minted: r._minted,
       };
     });
     return () => {
@@ -785,6 +799,9 @@ export class ComputeEngine implements IComputeEngine {
         // the same reason.)
         if (s.declOrigin === undefined) delete r._declOrigin;
         else r._declOrigin = s.declOrigin;
+        if (r._minted !== s.minted) changed = true;
+        if (s.minted === undefined) delete r._minted;
+        else r._minted = s.minted;
         // A record that vanished from the table but is still captured by a
         // pre-pass-built type keeps its restored fields — same contract as a
         // statement replacement rollback.
@@ -1064,7 +1081,7 @@ export class ComputeEngine implements IComputeEngine {
    * same name in the same scope (nominal-types design §4.1): `point(1, 2)` is
    * how a nominal type is inhabited. Minting is unconditional per the design;
    * `mint: false` is an internal escape hatch for a declaration that must not
-   * claim the value name, allowing a separately defined checked constructor.
+   * claim the value name (no caller uses it today).
    */
   declareType(
     name: string,
@@ -1072,6 +1089,13 @@ export class ComputeEngine implements IComputeEngine {
     options?: {
       alias?: boolean;
       fromStatement?: boolean;
+      /** Whether the declaration also declares a value-level constructor
+       * of the same name (`point(1, 2)` for `type point = tuple<…>`). Default
+       * `true`. A VALUE KIND uses `false`: its type is a nominal type defined
+       * as exactly `value` (`ce.declareType('gf8', 'value', { mint: false })`),
+       * and its values are made by the head that declares its arithmetic
+       * (`GF8(3)`), so a second constructor with no arithmetic must not
+       * exist. See the `arithmetic` field of `OperatorDefinition`. */
       mint?: boolean;
       /** A generic type ALIAS's parameter clause
        * (`{ alias: true, typeParams: ['T'] }`): the body is then parsed with
@@ -1778,17 +1802,45 @@ export class ComputeEngine implements IComputeEngine {
     return this._compilationTargets.list();
   }
 
-  /** @internal Register a compilation target. */
-  _registerCompilationTarget(
+  /**
+   * Register a compilation target under `name`, so that
+   * `compile(expr, { to: name })` resolves it. A later registration under the
+   * same name replaces the earlier target. The name must be a non-empty
+   * string and the target must implement `getOperators()`, `getFunctions()`,
+   * `createTarget()` and `compile()`; otherwise this throws.
+   *
+   * Every engine has `javascript` and `interval-js`. Every engine also has
+   * `glsl`, `wgsl` and `python` once the full package entry,
+   * `@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
+   * the program, whichever entry made the engine and in whichever order. A
+   * program that loads only `@cortex-js/compute-engine/core` has the two
+   * built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+   * from `@cortex-js/compute-engine/compile` and register it here.
+   */
+  registerCompilationTarget(
     name: string,
     target: LanguageTarget<Expression>
   ): void {
     this._compilationTargets.register(name, target);
   }
 
-  /** @internal Remove a registered compilation target. */
-  _unregisterCompilationTarget(name: string): void {
+  /** @internal The pre-2026-10-26 spelling of `registerCompilationTarget`. */
+  _registerCompilationTarget(
+    name: string,
+    target: LanguageTarget<Expression>
+  ): void {
+    this.registerCompilationTarget(name, target);
+  }
+
+  /** Remove the compilation target registered under `name`. A name that is
+   * not registered is ignored. */
+  unregisterCompilationTarget(name: string): void {
     this._compilationTargets.unregister(name);
+  }
+
+  /** @internal The pre-2026-10-26 spelling of `unregisterCompilationTarget`. */
+  _unregisterCompilationTarget(name: string): void {
+    this.unregisterCompilationTarget(name);
   }
 
   get precision(): number {
@@ -4823,13 +4875,3 @@ export class ComputeEngine implements IComputeEngine {
 // Note: this factory does NOT inject LatexSyntax. The full entry point
 // (compute-engine.ts) registers a factory that includes LatexSyntax.
 _setDefaultEngineFactory(() => new ComputeEngine());
-
-// Register the comparison of two quantities with `boxed-expression/compare.ts`,
-// which may not import `library/`: `isEqual()`, `isLess()`, `is()` and
-// `exactOrder()` (`Max`, `Min`, `Sort`) compare two `Quantity` values by
-// their physical value with it (`1000 m` is `1 km`). Every engine is an
-// instance of the class of this file, so this runs before any engine exists.
-// `isEqual()` also reads `quantityDimensionsDiffer()`: two values with
-// different physical dimensions (`6 W` and `6 m`) are not equal.
-_setQuantityOrder(compareQuantities);
-_setQuantityDimensionsDiffer(quantityDimensionsDiffer);
