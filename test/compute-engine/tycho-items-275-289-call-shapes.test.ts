@@ -115,7 +115,7 @@ test('untyped plot inputs carry scalar shader facts through a local', () => {
   });
   expect(result.success).toBe(true);
   expect(result.code).toContain('theta = _fn_theta_0(x, y)');
-  expect(result.code).toContain('vec2(cos(theta), sin(theta))');
+  expect(result.code).toContain('vec2(_gpu_cos(theta), _gpu_sin(theta))');
 });
 
 test('call type inference does not mutate parameters or survive redefinition', () => {

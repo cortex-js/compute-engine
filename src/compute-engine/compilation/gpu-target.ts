@@ -1204,17 +1204,20 @@ function gpuRealTanh(
 }
 
 /**
- * `Max`, `Min`, `Clamp`, `ElementMax` and `ElementMin` as shader helpers that
- * give NaN when an operand is NaN, as the interpreter and the `javascript`
- * target do: `_gpu_max(a, b)`, `_gpu_min(a, b)` and `_gpu_clamp(x, lo, hi)`
- * for scalars, and `_gpu_max2`–`_gpu_max4`, `_gpu_min2`–`_gpu_min4` and
- * `_gpu_clamp2`–`_gpu_clamp4` for vectors, whose operands all have the same
- * width.
+ * Shader helpers that give NaN when an operand is NaN, as the interpreter and
+ * the `javascript` target do, for the built-ins that do not on Apple GPUs:
+ * `_gpu_max(a, b)`, `_gpu_min(a, b)`, `_gpu_clamp(x, lo, hi)`, `_gpu_sin(x)`,
+ * `_gpu_cos(x)`, `_gpu_sign(x)` and `_gpu_smoothstep(e0, e1, x)` for scalars,
+ * and the same names with the suffix 2, 3 or 4 for vectors, whose operands
+ * all have that width. They lower `Max`, `Min`, `Clamp`, `ElementMax`,
+ * `ElementMin` (CE-519, Tycho row 465), and `Sin`, `Cos`, their reciprocals,
+ * `Sign` and `Smoothstep` (CE-520).
  *
- * GLSL ES 3.0 and WGSL leave the built-ins `max`, `min` and `clamp`
- * undefined for a NaN operand. On Apple GPUs (WebGL2 over ANGLE Metal and
- * WebGPU over Metal, Apple M5 Max, 2026-10-26) they return the operand that
- * is a number, so `max(0, sqrt(1 - x²))` at x = 2 was 0, not NaN.
+ * GLSL ES 3.0 and WGSL leave `max`, `min` and `clamp` undefined for a NaN
+ * operand. On Apple GPUs (WebGL2 over ANGLE Metal and WebGPU over Metal,
+ * Apple M5 Max, 2026-10-26) they return the operand that is a number, so
+ * `max(0, sqrt(1 - x²))` at x = 2 was 0, not NaN; and `sin`, `cos`, `sign`
+ * and `smoothstep` of a NaN gave 0 on both targets.
  *
  * The NaN test (`_gpu_isnan`, `_gpu_isnan2`–`_gpu_isnan4`) reads the bit
  * pattern: a value is NaN when its bits without the sign are larger than
@@ -1228,9 +1231,9 @@ function gpuRealTanh(
  * built-in `clamp` leaves that case undefined.
  *
  * A helper receives each operand once, as an argument, so a compound operand
- * is not computed twice (see `gpuFloorModLibrary`). CE-519 (Tycho row 465).
+ * is not computed twice (see `gpuFloorModLibrary`).
  */
-function gpuNaNSafeExtremumLibrary(isWGSL: boolean): string {
+function gpuNaNSafeLibrary(isWGSL: boolean): string {
   const mask = '0x7FFFFFFFu';
   const inf = '0x7F800000u';
   const widths: number[] = [1, ...GPU_HELPER_WIDTHS];
@@ -1255,22 +1258,29 @@ function gpuNaNSafeExtremumLibrary(isWGSL: boolean): string {
       : n === 1
         ? 'float'
         : `vec${n}`;
-    const name = `_gpu_isnan${suffix(n)}`;
-    if (isWGSL) {
-      const u = n === 1 ? 'u32' : `vec${n}u`;
-      const b = n === 1 ? 'bool' : `vec${n}<bool>`;
-      const k = (c: string): string => (n === 1 ? c : `${u}(${c})`);
-      defs.push(`fn ${name}(x: ${t}) -> ${b} {
-  return (bitcast<${u}>(x) & ${k(mask)}) > ${k(inf)};
+    // `_gpu_isnan` tests for a NaN; `_gpu_isnonfinite` for a NaN or an
+    // infinity (the bits without the sign are those of +∞ or larger).
+    for (const [base, gt, glslCmp] of [
+      ['_gpu_isnan', '>', 'greaterThan'],
+      ['_gpu_isnonfinite', '>=', 'greaterThanEqual'],
+    ] as const) {
+      const name = `${base}${suffix(n)}`;
+      if (isWGSL) {
+        const u = n === 1 ? 'u32' : `vec${n}u`;
+        const b = n === 1 ? 'bool' : `vec${n}<bool>`;
+        const k = (c: string): string => (n === 1 ? c : `${u}(${c})`);
+        defs.push(`fn ${name}(x: ${t}) -> ${b} {
+  return (bitcast<${u}>(x) & ${k(mask)}) ${gt} ${k(inf)};
 }`);
-    } else if (n === 1) {
-      defs.push(`bool ${name}(float x) {
-  return (floatBitsToUint(x) & ${mask}) > ${inf};
+      } else if (n === 1) {
+        defs.push(`bool ${name}(float x) {
+  return (floatBitsToUint(x) & ${mask}) ${gt} ${inf};
 }`);
-    } else {
-      defs.push(`bvec${n} ${name}(vec${n} x) {
-  return greaterThan(floatBitsToUint(x) & ${mask}, uvec${n}(${inf}));
+      } else {
+        defs.push(`bvec${n} ${name}(vec${n} x) {
+  return ${glslCmp}(floatBitsToUint(x) & ${mask}, uvec${n}(${inf}));
 }`);
+      }
     }
   }
   const fn = (
@@ -1327,21 +1337,104 @@ function gpuNaNSafeExtremumLibrary(isWGSL: boolean): string {
         )
       )
     );
+    defs.push(
+      fn(`_gpu_sign${s}`, ['x'], t, select(n, 'sign(x)', 'x', isnan(n, 'x')))
+    );
+    // `sin` and `cos` of an infinity gave 0 too, where the interpreter gives
+    // NaN, so their test is `_gpu_isnonfinite`, and they return a NaN built
+    // from its bit pattern, as `_gpu_nan()` does: `x - x` is folded to 0 by
+    // the WebGL2 compiler. WGSL rejects a constant `bitcast` to NaN, so it
+    // converts a `let`.
+    for (const op of ['sin', 'cos']) {
+      const nonfinite = `_gpu_isnonfinite${s}(x)`;
+      if (isWGSL) {
+        const nan = n === 1 ? 'bitcast<f32>(bits)' : `${t}(bitcast<f32>(bits))`;
+        defs.push(`fn _gpu_${op}${s}(x: ${t}) -> ${t} {
+  let bits = 0x7fc00000u;
+  return select(${op}(x), ${nan}, ${nonfinite});
+}`);
+      } else {
+        const nan =
+          n === 1
+            ? 'intBitsToFloat(0x7FC00000)'
+            : `${t}(intBitsToFloat(0x7FC00000))`;
+        defs.push(
+          fn(`_gpu_${op}${s}`, ['x'], t, select(n, `${op}(x)`, nan, nonfinite))
+        );
+      }
+    }
+    defs.push(
+      fn(
+        `_gpu_smoothstep${s}`,
+        ['e0', 'e1', 'x'],
+        t,
+        select(
+          n,
+          select(
+            n,
+            select(n, 'smoothstep(e0, e1, x)', 'x', isnan(n, 'x')),
+            'e1',
+            isnan(n, 'e1')
+          ),
+          'e0',
+          isnan(n, 'e0')
+        )
+      )
+    );
   }
   return defs.join('\n');
 }
 
-export const GPU_EXTREMUM_PREAMBLE_GLSL = `\n${gpuNaNSafeExtremumLibrary(false)}\n`;
-export const GPU_EXTREMUM_PREAMBLE_WGSL = `\n${gpuNaNSafeExtremumLibrary(true)}\n`;
+/**
+ * A call of the NaN-safe helper `_gpu_<name>` (`gpuNaNSafeLibrary`) on one
+ * operand: the scalar helper for a scalar operand, the helper of width N for
+ * a `vecN` operand, and the built-in `<name>` for a matrix or an array, so
+ * that the operand-shape gate gives its reason for a decline. A complex
+ * operand never reaches it: `Sin` and `Cos` lower a complex operand through
+ * `_gpu_csin`/`_gpu_ccos` first, and `Sign` is a real-only lowering
+ * (`GPU_REAL_ONLY_LOWERINGS`), whose complex operand the base compiler
+ * declines.
+ */
+function gpuNaNSafeUnary(
+  name: 'sin' | 'cos' | 'sign',
+  x: Expression,
+  code: string
+): string {
+  // A finite number literal cannot be NaN or infinite, and the driver folds
+  // the built-in call of a literal at compile time: the helper call
+  // `_gpu_cos(2.4)` was not folded, and the small difference changed a
+  // threshold test in Tycho's `voronoi-diagram` on WebGPU.
+  if (GPU_FINITE_LITERAL.test(code)) return `${name}(${code})`;
+  const shape = gpuOperandShape(x);
+  if (shape === 'scalar') return `_gpu_${name}(${code})`;
+  if (typeof shape === 'number') return `_gpu_${name}${shape}(${code})`;
+  return `${name}(${code})`;
+}
+
+/** A shader float literal (`2.4`, `-0.5`, `1e-3`): the operand of a
+ * NaN-safe helper that needs no guard (`gpuNaNSafeUnary`). */
+const GPU_FINITE_LITERAL = /^\(?-?\d+(?:\.\d*)?(?:e[-+]?\d+)?\)?$/;
+
+/** The helpers of `gpuNaNSafeLibrary` that take one operand and have a
+ * vector form of each width: a broadcast over a `vecN` calls the vector
+ * form (`compileGPUBroadcastUnary`). */
+const GPU_NAN_SAFE_UNARY = ['sin', 'cos', 'sign'] as const;
+
+export const GPU_NAN_SAFE_PREAMBLE_GLSL = `\n${gpuNaNSafeLibrary(false)}\n`;
+export const GPU_NAN_SAFE_PREAMBLE_WGSL = `\n${gpuNaNSafeLibrary(true)}\n`;
 
 /**
- * `Clamp(x, lo, hi)` as a call of a `_gpu_clamp` helper
- * (`gpuNaNSafeExtremumLibrary`), or `undefined` when the operand shapes have
- * no helper: a complex operand, a matrix, an array, a vector bound beside a
- * scalar `x`, or vectors of different widths. A scalar bound beside a vector
- * `x` is broadcast with the vector constructor.
+ * `Clamp(x, lo, hi)` or `Smoothstep(e0, e1, x)` as a call of the
+ * `_gpu_clamp` or `_gpu_smoothstep` helper (`gpuNaNSafeLibrary`), or
+ * `undefined` when the operand shapes have no helper: a complex operand, a
+ * matrix, an array, a vector bound beside a scalar `x`, or vectors of
+ * different widths. `main` is the position of `x`, whose shape sets the
+ * width. A scalar bound beside a vector `x` is broadcast with the vector
+ * constructor.
  */
-function gpuClampCall(
+function gpuNaNSafeTernaryCall(
+  name: 'clamp' | 'smoothstep',
+  main: number,
   args: ReadonlyArray<Expression>,
   compile: (expr: Expression) => string,
   target: CompileTarget<Expression>
@@ -1351,15 +1444,15 @@ function gpuClampCall(
   if (args.some((a) => BaseCompiler.isComplexValued(a))) return undefined;
   const shapes = args.map(gpuOperandShape);
   if (shapes.every((s) => s === 'scalar'))
-    return `_gpu_clamp(${args.map((a) => compile(a)).join(', ')})`;
-  const width = shapes[0];
+    return `_gpu_${name}(${args.map((a) => compile(a)).join(', ')})`;
+  const width = shapes[main];
   if (typeof width !== 'number') return undefined;
   if (!shapes.every((s) => s === 'scalar' || s === width)) return undefined;
   const ctor = gpuVecType(width, target.language === 'wgsl');
   const codes = args.map((a, i) =>
     shapes[i] === 'scalar' ? `${ctor}(${compile(a)})` : compile(a)
   );
-  return `_gpu_clamp${width}(${codes.join(', ')})`;
+  return `_gpu_${name}${width}(${codes.join(', ')})`;
 }
 
 /**
@@ -2861,6 +2954,14 @@ function compileGPUBroadcastUnary(
         `not a shader vector and the componentwise builtins do not apply to it.`
     );
   const vector = lowering.collection();
+  // An impure operand (one that draws a random value with `_gpu_rnd_draw`)
+  // must be computed once. An element lowering can use its operand twice
+  // (`Cot` is `cos(u) / sin(u)`), and on this route it receives a pure
+  // placeholder, so its own guard does not apply. Such a lowering declines
+  // below. The vector is not bound to a temporary: a hoisted statement runs
+  // before the rest of the expression, so its draw would come before the
+  // draws written before it, and the random stream would change.
+  const impure = operand.isPure === false && !/^[A-Za-z_]\w*$/.test(vector);
   // The scalar lowering of `Square` reads the shape of its operand to choose
   // between `_gpu_pow2` and the `vecN` overload `_gpu_pow2_vN`. Here its
   // operand is a placeholder for the vector code, which has no shape, so the
@@ -2883,13 +2984,31 @@ function compileGPUBroadcastUnary(
       tanh,
       `_gpu_tanh${gpuComponentCount(operand)}(${vector})`
     );
+  // The NaN-safe helpers of one operand (`_gpu_sin`, `_gpu_cos`, `_gpu_sign`,
+  // `gpuNaNSafeLibrary`) have the same problem, and also a `vecN` form of
+  // each width. Each call on the vector code takes the form of its width,
+  // which is componentwise, so the check below reads it as the operand.
+  const width = gpuComponentCount(operand);
+  let emitted = code;
+  let judged = code;
+  for (const name of GPU_NAN_SAFE_UNARY) {
+    const scalarCall = `_gpu_${name}(${vector})`;
+    emitted = emitted.split(scalarCall).join(`_gpu_${name}${width}(${vector})`);
+    judged = judged.split(scalarCall).join(vector);
+  }
   // The check reads only the text that the element lowering adds around the
   // operand. The operand's own source is already valid vector code, and it
   // can call scalar helpers on its elements (`vec3(_gpu_max(x, 0.0), …)`,
   // `vec3(_gpu_fmod(x, 2.0), …)`), so each copy of it is replaced by a name
   // that the check accepts. The original code is emitted.
+  if (impure && emitted.split(vector).length > 2)
+    decline(
+      `the operand \`${operand.toString()}\` draws a random value, and the ` +
+        `lowering \`${code}\` uses it more than once, so each use would draw ` +
+        `again.`
+    );
   const unsafe = gpuIsComponentwise(
-    code.split(vector).join('_operand'),
+    judged.split(vector).join('_operand'),
     '_operand'
   );
   if (unsafe !== undefined)
@@ -2898,7 +3017,7 @@ function compileGPUBroadcastUnary(
         `${unsafe} A shader has no element loop, so a non-componentwise ` +
         `lowering cannot be broadcast over a \`vecN\` at all.`
     );
-  return code;
+  return emitted;
 }
 
 /**
@@ -3988,6 +4107,10 @@ const GPU_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'HurwitzZeta',
   'LerchPhi',
   'PolyLog',
+  // `Sign` of a complex `z` is `z / |z|`; the built-in `sign` of a `vec2`
+  // takes the sign of each part. `Smoothstep` has no complex form.
+  'Sign',
+  'Smoothstep',
 ]);
 
 /** `CompileTarget.isRealOnlyLowering` of the shader targets. The base
@@ -4459,7 +4582,7 @@ function foldNaryBuiltin(
 
 /**
  * Compile `ElementMax`/`ElementMin` as a left fold of the NaN-safe helpers
- * (`gpuNaNSafeExtremumLibrary`): `_gpu_max(a, b)` when every operand is a
+ * (`gpuNaNSafeLibrary`): `_gpu_max(a, b)` when every operand is a
  * scalar, and `_gpu_maxN(a, b)` when the operands are `vecN` values of one
  * width and scalars, each scalar broadcast with the vector constructor, as
  * the interpreter broadcasts it (`ElementMax(2, [1, 3, 5])` is `[2, 3, 5]`).
@@ -4590,7 +4713,7 @@ function compileGPUExtremum(
     return call !== undefined && GPU_AGGREGATE_CONSTRUCTOR.test(call.callee);
   });
   // The fold calls the `_gpu_max`/`_gpu_min` helpers, which give NaN for a
-  // NaN operand (`gpuNaNSafeExtremumLibrary`). Every part is a scalar here: a
+  // NaN operand (`gpuNaNSafeLibrary`). Every part is a scalar here: a
   // collection operand contributes its scalar components.
   const fold = (parts: ReadonlyArray<string>): string => {
     let acc = parts[0];
@@ -7663,17 +7786,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // A scalar or `vecN` operand calls a `_gpu_clamp` helper, which gives NaN
   // for a NaN operand and computes CE's `min(max(x, lo), hi)` (see
-  // `gpuNaNSafeExtremumLibrary`). Other shapes keep the built-in `clamp`, so
+  // `gpuNaNSafeLibrary`). Other shapes keep the built-in `clamp`, so
   // that the shape gate gives its reason for a decline.
   Clamp: (args, compile, target) =>
-    gpuClampCall(args, compile, target) ??
+    gpuNaNSafeTernaryCall('clamp', 0, args, compile, target) ??
     `clamp(${args.map((a) => compile(a)).join(', ')})`,
   Cos: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_ccos(${compile(args[0])})`;
     const u = gpuPiMultiple(args[0], 2);
     if (u !== undefined) return `_gpu_cospi(${compile(u)})`;
-    return `cos(${compile(gpuReduceTrigOffset(args[0], 2, true, target))})`;
+    // NaN-safe: the built-in `cos` of a NaN is 0 on Apple GPUs (CE-520).
+    return gpuNaNSafeUnary(
+      'cos',
+      args[0],
+      compile(gpuReduceTrigOffset(args[0], 2, true, target))
+    );
   },
   // In radian mode CE's `Degrees` converts degrees→radians (Degrees(180) =
   // π), which is GLSL's `radians()`. GLSL's `degrees()` is the inverse
@@ -7750,7 +7878,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // GLSL/WGSL `min`/`max` are strictly 2-argument builtins; a variadic
   // `max(a, b, c)` is invalid shader source. Fold 3+ arguments into a nest of
   // 2-argument calls of the NaN-safe helpers, `_gpu_max(_gpu_max(a, b), c)`
-  // (`gpuNaNSafeExtremumLibrary`). A COLLECTION operand makes these a
+  // (`gpuNaNSafeLibrary`). A COLLECTION operand makes these a
   // reduction rather than a componentwise fold — see `compileGPUExtremum`.
   // `markAggregateConsuming`: the reduction DESTRUCTURES its collection
   // operands, so the generic shape gate must not judge the emission against
@@ -8249,15 +8377,27 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       0.5
     );
   },
-  Sign: 'sign',
+  // NaN-safe: the built-in `sign` of a NaN is 0 on Apple GPUs (CE-520).
+  Sign: (args, compile) => gpuNaNSafeUnary('sign', args[0], compile(args[0])),
   Sin: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_csin(${compile(args[0])})`;
     const u = gpuPiMultiple(args[0], 2);
     if (u !== undefined) return `_gpu_sinpi(${compile(u)})`;
-    return `sin(${compile(gpuReduceTrigOffset(args[0], 2, true, target))})`;
+    // NaN-safe: the built-in `sin` of a NaN is 0 on Apple GPUs (CE-520).
+    return gpuNaNSafeUnary(
+      'sin',
+      args[0],
+      compile(gpuReduceTrigOffset(args[0], 2, true, target))
+    );
   },
-  Smoothstep: 'smoothstep',
+  // A scalar or `vecN` `x` calls a `_gpu_smoothstep` helper, which gives NaN
+  // for a NaN operand; the built-in gives 0 on Apple GPUs (CE-520). Other
+  // shapes keep the built-in, so that the shape gate gives its reason for a
+  // decline.
+  Smoothstep: (args, compile, target) =>
+    gpuNaNSafeTernaryCall('smoothstep', 2, args, compile, target) ??
+    `smoothstep(${args.map((a) => compile(a)).join(', ')})`,
   Sqrt: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))
       return `_gpu_csqrt(${compile(args[0])})`;
@@ -8293,6 +8433,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_gpu_ctan(${compile(args[0])})`;
     const u = gpuPiMultiple(args[0], 1);
     if (u !== undefined) return `_gpu_tanpi(${compile(u)})`;
+    // The built-in `tan` of a NaN is NaN on WebGL2 over ANGLE Metal and on
+    // WebGPU over Metal (Apple M5 Max, 2026-10-26), unlike `sin` and `cos`,
+    // so it needs no NaN-safe helper (CE-520).
     return `tan(${compile(gpuReduceTrigOffset(args[0], 1, true, target))})`;
   },
   Truncate: (args, compile, target) => {
@@ -8452,10 +8595,11 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target,
         `${decl} = ${compile(gpuReduceTrigOffset(x, 1, true, target))};`
       );
-      return `(cos(${t}) / sin(${t}))`;
+      return `(_gpu_cos(${t}) / _gpu_sin(${t}))`;
     }
+    // The NaN-safe `_gpu_cos`/`_gpu_sin` (CE-520).
     const arg = compile(gpuReduceTrigOffset(x, 1, true, target));
-    return `(cos(${arg}) / sin(${arg}))`;
+    return `(${gpuNaNSafeUnary('cos', x, arg)} / ${gpuNaNSafeUnary('sin', x, arg)})`;
   },
   Csc: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Csc`: no argument');
@@ -8463,7 +8607,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_csin(${compile(x)}))`;
     }
-    return `(1.0 / sin(${compile(gpuReduceTrigOffset(x, 2, true, target))}))`;
+    // The NaN-safe `_gpu_sin`: `1 / sin(NaN)` was +∞ on Apple GPUs (CE-520).
+    return `(1.0 / ${gpuNaNSafeUnary('sin', x, compile(gpuReduceTrigOffset(x, 2, true, target)))})`;
   },
   Sec: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Sec`: no argument');
@@ -8471,7 +8616,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       const v2 = gpuVec2(target);
       return `_gpu_cdiv(${v2}(1.0, 0.0), _gpu_ccos(${compile(x)}))`;
     }
-    return `(1.0 / cos(${compile(gpuReduceTrigOffset(x, 2, true, target))}))`;
+    // The NaN-safe `_gpu_cos`: `1 / cos(NaN)` was +∞ on Apple GPUs (CE-520).
+    return `(1.0 / ${gpuNaNSafeUnary('cos', x, compile(gpuReduceTrigOffset(x, 2, true, target)))})`;
   },
 
   // Inverse trigonometric (reciprocal)
@@ -8623,7 +8769,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   Haversine: ([x], compile) => {
     if (x === null)
       throw new Error('Could not compile `Haversine`: no argument');
-    return `((1.0 - cos(${compile(x)})) * 0.5)`;
+    // The NaN-safe `_gpu_cos`: `1 - cos(NaN)` was 1 on Apple GPUs (CE-520).
+    return `((1.0 - ${gpuNaNSafeUnary('cos', x, compile(x))}) * 0.5)`;
   },
   InverseHaversine: ([x], compile) => {
     if (x === null)
@@ -10705,6 +10852,8 @@ float _gpu_gamma(float z) {
   // -Infinity out of the guard: it satisfies z == floor(z) but is not a
   // pole, and Gamma(-Infinity) is NaN in the interpreter's numeric lane.
   if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) return _gpu_inf();
+  // Gamma(+Infinity) is +Infinity; the Lanczos sum below gives NaN for it.
+  if (z > 3.4028234663852886e38) return z;
   float w = z;
   if (z < 0.5) w = 1.0 - z;
   w -= 1.0;
@@ -10765,6 +10914,8 @@ fn _gpu_gamma(z: f32) -> f32 {
   // backticks in this comment: it lives inside a TypeScript template
   // literal, which one would terminate.)
   if (z <= 0.0 && z == floor(z) && z >= -3.4028234663852886e38) { return _gpu_inf(); }
+  // Gamma(+Infinity) is +Infinity; the Lanczos sum below gives NaN for it.
+  if (z > 3.4028234663852886e38) { return z; }
   var w = z;
   if (z < 0.5) { w = 1.0 - z; }
   w = w - 1.0;
@@ -13795,22 +13946,20 @@ fn _gpu_erfinv(x: f32) -> f32 {
  * GPU Heaviside step function preamble (GLSL syntax).
  * Returns 0 for x<0, 0.5 at x=0, 1 for x>0.
  *
- * A NaN argument falls through both comparisons (they are false for NaN), so
- * the final arm adds `0.0 * x`: for the values that reach it — `0`, `-0.0`
- * and NaN — the product is `0` or NaN, so the arm answers `0.5` exactly for
- * a zero and propagates NaN for NaN (Contract B `propagate`, ratified
- * 2026-08-27). The infinities never reach the arm (the comparisons catch
- * them), so the `0·∞` indeterminate case cannot arise here. `isnan` is
- * deliberately not used — it is unreliable under fast-math (see the absence
- * capability note on the target) — and the same fast-math caveat applies to
- * this arithmetic carrier: a driver that folds `0.0 * x` to `0.0` degrades
- * NaN back to `0.5`, which is best-effort by design on shader targets.
+ * A NaN argument is returned as it is (Contract B `propagate`, ratified
+ * 2026-08-27). The first line tests its bit pattern: a value is NaN when its
+ * bits without the sign are larger than those of +∞ (0x7F800000). `isnan`
+ * and `x != x` are not used, because a compiler may assume that no NaN
+ * occurs and remove them; carrying the NaN through `0.5 + 0.0 * x` gave 0.5
+ * on WebGL2 over ANGLE Metal (Apple M5 Max, 2026-10-26; CE-520). Only `0` and
+ * `-0.0` reach the last line.
  */
 export const GPU_HEAVISIDE_PREAMBLE_GLSL = `
 float _gpu_heaviside(float x) {
+  if ((floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u) return x;
   if (x < 0.0) return 0.0;
   if (x > 0.0) return 1.0;
-  return 0.5 + 0.0 * x;
+  return 0.5;
 }
 `;
 
@@ -13820,9 +13969,10 @@ float _gpu_heaviside(float x) {
  */
 export const GPU_HEAVISIDE_PREAMBLE_WGSL = `
 fn _gpu_heaviside(x: f32) -> f32 {
+  if ((bitcast<u32>(x) & 0x7FFFFFFFu) > 0x7F800000u) { return x; }
   if (x < 0.0) { return 0.0; }
   if (x > 0.0) { return 1.0; }
-  return 0.5 + 0.0 * x;
+  return 0.5;
 }
 `;
 
@@ -16436,7 +16586,17 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
  * integer or a half-integer `u` has an exact zero part. `sin(πx)` at `x = 2`
  * is `0`, where `sin(3.14159274 * 2.0)` is not. A zero part is `+0.0`
  * (`1/sin(πx)` at `x = 1` is `+∞`). `_gpu_cossinpi(u)` is also `e^{iπu}` as
- * a `vec2`. See `BaseCompiler.piMultiple`.
+ * a `vec2`. See `BaseCompiler.piMultiple`. `_gpu_tanpi(u)` at a pole (a
+ * half-integer `u`) is `+∞`, the compiled spelling of the interpreter's
+ * `~oo`; the quotient `sin/cos` gave `+∞` or `−∞` from the sign of the zero
+ * cosine, and the sign was not the same on WebGL2 and WebGPU (CE-520).
+ *
+ * A NaN or infinite `u` gives a NaN in each part, from a test of its bit
+ * pattern on the first line (a test `u != u` can be removed by the
+ * compiler). The NaN is built from its bit pattern, as `_gpu_nan()` builds
+ * it: the WebGL2 compiler on ANGLE Metal folded `u - u` to 0. Without the
+ * test, the reduced angle of such a `u` is NaN, and `cos` and `sin` of it
+ * gave 0 on Apple GPUs (CE-520).
  *
  * `_gpu_ipi_sinh(u)` … `_gpu_ipi_coth(u)` are `sinh`, `cosh`, `tanh`,
  * `csch`, `sech` and `coth` of `iπu` as a `vec2`: `sinh(iθ) = i·sin θ`,
@@ -16448,6 +16608,7 @@ fn _gpu_powi(x: f32, n: f32) -> f32 {
  */
 const GPU_PI_TRIG_PREAMBLE_GLSL = `
 vec2 _gpu_cossinpi(float u) {
+  if ((floatBitsToUint(u) & 0x7FFFFFFFu) >= 0x7F800000u) return vec2(intBitsToFloat(0x7FC00000));
   float r = u - 2.0 * floor(u / 2.0 + 0.5);
   float q = floor(2.0 * r + 0.5);
   float t = r - q / 2.0;
@@ -16468,6 +16629,7 @@ float _gpu_cospi(float u) {
 }
 float _gpu_tanpi(float u) {
   vec2 cs = _gpu_cossinpi(u);
+  if (cs.x == 0.0) return _gpu_inf();
   return cs.y == 0.0 ? 0.0 : cs.y / cs.x;
 }
 vec2 _gpu_ipi_sinh(float u) {
@@ -16501,6 +16663,8 @@ vec2 _gpu_ipi_coth(float u) {
 /** `cos(πu)` and `sin(πu)` (WGSL syntax). See `GPU_PI_TRIG_PREAMBLE_GLSL`. */
 const GPU_PI_TRIG_PREAMBLE_WGSL = `
 fn _gpu_cossinpi(u: f32) -> vec2f {
+  let bits = 0x7fc00000u;
+  if ((bitcast<u32>(u) & 0x7FFFFFFFu) >= 0x7F800000u) { return vec2f(bitcast<f32>(bits)); }
   let r = u - 2.0 * floor(u / 2.0 + 0.5);
   let q = floor(2.0 * r + 0.5);
   let t = r - q / 2.0;
@@ -16521,6 +16685,7 @@ fn _gpu_cospi(u: f32) -> f32 {
 }
 fn _gpu_tanpi(u: f32) -> f32 {
   let cs = _gpu_cossinpi(u);
+  if (cs.x == 0.0) { return _gpu_inf(); }
   return select(cs.y / cs.x, 0.0, cs.y == 0.0);
 }
 fn _gpu_ipi_sinh(u: f32) -> vec2f {
@@ -18920,13 +19085,14 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // code and never a helper body. The zeta helpers call `_gpu_inf()` at
     // their own pole the same way, and `_gpu_lerch_phi` at its own pole (a
     // non-positive integer a with s > 0). So do the hyperbolic functions of
-    // `iπu` (`_gpu_ipi_csch` and the others) at a pole.
+    // `iπu` (`_gpu_ipi_csch` and the others) and `_gpu_tanpi` at a pole.
     if (
       !isWGSL &&
       !complexUsesInf &&
       (code.includes('_gpu_inf') ||
         code.includes('_gpu_gamma') ||
         /_gpu_ipi_\w+\(/.test(code) ||
+        code.includes('_gpu_tanpi') ||
         usesZeta ||
         usesLerch ||
         usesPolygamma)
@@ -18962,7 +19128,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     if (isWGSL) preamble += gpuLibrarySubset(code, GPU_TANH_PREAMBLE_WGSL);
     preamble += gpuLibrarySubset(
       code,
-      isWGSL ? GPU_EXTREMUM_PREAMBLE_WGSL : GPU_EXTREMUM_PREAMBLE_GLSL
+      isWGSL ? GPU_NAN_SAFE_PREAMBLE_WGSL : GPU_NAN_SAFE_PREAMBLE_GLSL
     );
     // Every library goes through `gpuLibrarySubset`, which keeps only the
     // definitions this compilation names and the ones those call. A shader

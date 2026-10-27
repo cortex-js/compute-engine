@@ -206,12 +206,8 @@ describe('small emission peepholes', () => {
     expect(glsl(['Mod', 'x', 1]).code).toBe('fract(fract(x))');
     expect(wgsl(['Mod', 'x', 1]).code).toBe('fract(fract(x))');
     // Any other divisor keeps the general lowering.
-    expect(glsl(['Mod', 'x', 2]).code).toBe(
-      '_gpu_fmod(x, 2.0)'
-    );
-    expect(wgsl(['Mod', 'x', 2]).code).toBe(
-      '_gpu_fmod(x, 2.0)'
-    );
+    expect(glsl(['Mod', 'x', 2]).code).toBe('_gpu_fmod(x, 2.0)');
+    expect(wgsl(['Mod', 'x', 2]).code).toBe('_gpu_fmod(x, 2.0)');
     // A `vecN` dividend takes the peephole too (CE-254): the lowering
     // declares that `fract` leaves the divisor out of the call, so the
     // operand-shape check judges `fract(v)` against the dividend alone.
@@ -265,7 +261,7 @@ describe('small emission peepholes', () => {
     // Neither target folds it away: the interpreter does not canonicalize
     // `0·x` to zero, and `0 * ∞` is NaN on the hardware, so folding would
     // answer 0 where the interpreter answers NaN.
-    expect(glsl(['Multiply', 0, ['Cos', 'x']]).code).toBe('0.0 * cos(x)');
+    expect(glsl(['Multiply', 0, ['Cos', 'x']]).code).toBe('0.0 * _gpu_cos(x)');
   });
 });
 

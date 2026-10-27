@@ -167,14 +167,14 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
     ] as const) {
       const operand = head === 'Clamp' ? ['Clamp', 'x', 0, 1] : ['Max', 'x', 0];
       expect(shader(['Sin', ['List', operand, 0, 1]], 'glsl').code).toBe(
-        `sin(vec3(${code}, 0.0, 1.0))`
+        `_gpu_sin3(vec3(${code}, 0.0, 1.0))`
       );
       expect(shader(['Sin', ['List', operand, 0, 1]], 'wgsl').code).toBe(
-        `sin(vec3f(${code}, 0.0, 1.0))`
+        `_gpu_sin3(vec3f(${code}, 0.0, 1.0))`
       );
     }
     expect(shader(['Sin', ['List', ['Mod', 'x', 2], 0, 1]], 'glsl').code).toBe(
-      'sin(vec3(_gpu_fmod(x, 2.0), 0.0, 1.0))'
+      '_gpu_sin3(vec3(_gpu_fmod(x, 2.0), 0.0, 1.0))'
     );
     // A helper that the lowering itself calls on the vector still declines.
     expect(() =>

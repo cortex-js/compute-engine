@@ -93,7 +93,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       ce.assign('a', 1.5);
       const expr = ce.parse('\\sin(a x) - y');
       expect(ce._getCompilationTarget('glsl')!.compile(expr).code).toBe(
-        '-y + sin(1.5 * x)'
+        '-y + _gpu_sin(1.5 * x)'
       );
     });
 
@@ -110,7 +110,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const expr = ce.parse('\\sin(a x) - y');
       expect(expr.unknowns).toEqual(['a', 'x', 'y']);
       expect(ce._getCompilationTarget('glsl')!.compile(expr).code).toBe(
-        '-y + sin(a * x)'
+        '-y + _gpu_sin(a * x)'
       );
     });
 
@@ -121,7 +121,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const code = ce
         ._getCompilationTarget('glsl')!
         .compile(expr, { vars: { a: 'u_var_a' } }).code;
-      expect(code).toBe('-y + sin(u_var_a * x)');
+      expect(code).toBe('-y + _gpu_sin(u_var_a * x)');
     });
   });
 
@@ -241,7 +241,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const expr = ce.parse('\\sin(a x)');
       const glslRaw = ce._getCompilationTarget('glsl')!.createTarget();
       const jsRaw = ce._getCompilationTarget('javascript')!.createTarget();
-      expect(compile(expr, { target: glslRaw }).code).toBe('sin(1.5 * x)');
+      expect(compile(expr, { target: glslRaw }).code).toBe('_gpu_sin(1.5 * x)');
       expect(compile(expr, { target: jsRaw }).code).toBe('Math.sin(1.5 * x)');
     });
 
@@ -249,7 +249,7 @@ describe('COMPILE: assigned-symbol folding', () => {
       const ce = new ComputeEngine();
       const expr = ce.parse('\\sin(a x)');
       const glslRaw = ce._getCompilationTarget('glsl')!.createTarget();
-      expect(compile(expr, { target: glslRaw }).code).toBe('sin(a * x)');
+      expect(compile(expr, { target: glslRaw }).code).toBe('_gpu_sin(a * x)');
     });
   });
 });
@@ -426,8 +426,8 @@ describe('COMPILE: a mapped input reached through an assigned value (item 328)',
     const r = ce
       ._getCompilationTarget('glsl')!
       .compile(ce.parse('\\cos(a) + u(y_0)'), { vars: { y_0: 'u_y0' } });
-    expect(r.code).toBe('cos(sin(u_y0)) + _fn_u(u_y0)');
-    expect(r.preamble).toContain('return 2.0 * L + -sin(u_y0);');
+    expect(r.code).toBe('_gpu_cos(_gpu_sin(u_y0)) + _fn_u(u_y0)');
+    expect(r.preamble).toContain('return 2.0 * L + -_gpu_sin(u_y0);');
   });
 
   it('interval-js: unchanged — it never folded through the value', () => {
@@ -475,7 +475,7 @@ describe('COMPILE: a mapped input reached through an assigned value (item 328)',
     const glsl = ce
       ._getCompilationTarget('glsl')!
       .compile(expr, { vars: { a: 'u_a' } });
-    expect(glsl.code).toBe('cos(u_a) + _fn_u(y_0)');
+    expect(glsl.code).toBe('_gpu_cos(u_a) + _fn_u(y_0)');
     expect(glsl.preamble).toContain('return 2.0 * L + -u_a;');
     const ia = ce
       ._getCompilationTarget('interval-js')!

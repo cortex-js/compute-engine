@@ -113,6 +113,13 @@ const GLSL_BUILTINS = {
   sqrt: Math.sqrt,
   floor: Math.floor,
   sign: Math.sign,
+  /** The bits of the f32 rounding of `v`, for the NaN test of the
+   * NaN-safe helpers (`gpuNaNSafeLibrary`). */
+  floatBitsToUint: (v: number) => {
+    const d = new DataView(new ArrayBuffer(4));
+    d.setFloat32(0, v);
+    return d.getUint32(0);
+  },
   atan: (y: number, x?: number) =>
     x === undefined ? Math.atan(y) : Math.atan2(y, x),
   max: (a: number, b: number) => Math.max(a, b),
@@ -177,6 +184,9 @@ function glslToJS(src: string): string {
       // The `.yz` swizzle is the only multi-component one the preamble uses,
       // and it is always taken of a plain identifier.
       .replace(/\b(\w+)\.yz\b/g, '__yz($1)')
+      // An unsigned literal (`0x7F800000u`, in the NaN test of the NaN-safe
+      // helpers) loses its `u` suffix.
+      .replace(/\b(0x[0-9A-F]+)u\b/g, '$1')
   );
 }
 

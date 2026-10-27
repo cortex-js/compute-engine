@@ -171,8 +171,8 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   });
 
   it('the unary fan-out lowerings are unaffected', () => {
-    expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
-    expect(w(['Sin', V4])).toBe('sin(vec4f(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Sin', V4])).toBe('_gpu_sin4(vec4(1.0, 2.0, 3.0, 4.0))');
+    expect(w(['Sin', V4])).toBe('_gpu_sin4(vec4f(1.0, 2.0, 3.0, 4.0))');
     expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
     expect(w(['Negate', V4])).toBe('(-(vec4f(1.0, 2.0, 3.0, 4.0)))');
   });
@@ -312,7 +312,7 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 
   it('GLSL `smoothstep(float, float, genType)` takes its scalars in the EDGES', () => {
     expect(g(['Smoothstep', 0, 1, V3])).toBe(
-      'smoothstep(0.0, 1.0, vec3(1.0, 2.0, 3.0))'
+      '_gpu_smoothstep3(vec3(0.0), vec3(1.0), vec3(1.0, 2.0, 3.0))'
     );
     // Slot 2 is a legal home for a scalar, slot 3 is not — the first
     // MISPLACED scalar is the one named.

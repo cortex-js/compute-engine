@@ -1,6 +1,12 @@
 import { engine as ce } from '../utils';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
-import type { LanguageTarget, CompileTarget, CompiledOperators, CompiledFunctions, CompilationResult } from '../../src/compute-engine/compilation/types';
+import type {
+  LanguageTarget,
+  CompileTarget,
+  CompiledOperators,
+  CompiledFunctions,
+  CompilationResult,
+} from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 
 /**
@@ -46,11 +52,10 @@ class PythonTarget implements LanguageTarget {
     };
   }
 
-  compile(
-    expr: Expression,
-    options: any = {}
-  ): CompilationResult {
-    const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
+  compile(expr: Expression, options: any = {}): CompilationResult {
+    const {
+      BaseCompiler,
+    } = require('../../src/compute-engine/compilation/base-compiler');
     const target = this.createTarget();
     const pythonCode = BaseCompiler.compile(expr, target);
 
@@ -74,10 +79,13 @@ class RPNTarget implements LanguageTarget {
   getFunctions(): CompiledFunctions {
     return {
       Add: (args, compile) => args.map(compile).join(' ') + ' +',
-      Subtract: (args, compile) => compile(args[0]) + ' ' + compile(args[1]) + ' -',
+      Subtract: (args, compile) =>
+        compile(args[0]) + ' ' + compile(args[1]) + ' -',
       Multiply: (args, compile) => args.map(compile).join(' ') + ' *',
-      Divide: (args, compile) => compile(args[0]) + ' ' + compile(args[1]) + ' /',
-      Power: (args, compile) => compile(args[0]) + ' ' + compile(args[1]) + ' **',
+      Divide: (args, compile) =>
+        compile(args[0]) + ' ' + compile(args[1]) + ' /',
+      Power: (args, compile) =>
+        compile(args[0]) + ' ' + compile(args[1]) + ' **',
       Sin: (args, compile) => compile(args[0]) + ' sin',
       Cos: (args, compile) => compile(args[0]) + ' cos',
       Sqrt: (args, compile) => compile(args[0]) + ' sqrt',
@@ -102,7 +110,9 @@ class RPNTarget implements LanguageTarget {
   }
 
   compile(expr: Expression, options: any = {}): CompilationResult {
-    const { BaseCompiler } = require('../../src/compute-engine/compilation/base-compiler');
+    const {
+      BaseCompiler,
+    } = require('../../src/compute-engine/compilation/base-compiler');
     const target = this.createTarget();
     const rpnCode = BaseCompiler.compile(expr, target);
 
@@ -128,7 +138,6 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
       // Interval targets should be registered
       const intervalJSTarget = ce._getCompilationTarget('interval-js');
       expect(intervalJSTarget).toBeDefined();
-
     });
 
     it('should list all default targets', () => {
@@ -157,7 +166,9 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
       expect(registered).toBe(customJSTarget);
 
       // Restore default
-      const { JavaScriptTarget } = require('../../src/compute-engine/compilation/javascript-target');
+      const {
+        JavaScriptTarget,
+      } = require('../../src/compute-engine/compilation/javascript-target');
       ce._registerCompilationTarget('javascript', new JavaScriptTarget());
     });
 
@@ -244,7 +255,7 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
 
       const customTarget: CompileTarget = {
         language: 'custom',
-        operators: (op) => op === 'Add' ? ['⊕', 10] : undefined,
+        operators: (op) => (op === 'Add' ? ['⊕', 10] : undefined),
         functions: () => undefined,
         var: (id) => `VAR_${id}`,
         string: (str) => `"${str}"`,
@@ -293,7 +304,7 @@ describe('COMPILATION PLUGIN ARCHITECTURE', () => {
     it('should compile GLSL functions', () => {
       const expr = ce.parse('\\sin(x)');
       const compiled = compile(expr, { to: 'glsl' });
-      expect(compiled.code).toMatchInlineSnapshot(`sin(x)`);
+      expect(compiled.code).toMatchInlineSnapshot(`_gpu_sin(x)`);
     });
 
     it('should compile GLSL vectors', () => {

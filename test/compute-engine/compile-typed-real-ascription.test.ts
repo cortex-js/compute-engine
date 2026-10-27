@@ -339,7 +339,7 @@ describe('Targets that never promote are unchanged', () => {
       expect(r.success).toBe(true);
       expect(r.promoted).toBe(false);
       expect(r.preamble).toContain(
-        'return sin(2.4 * k) * sqrt(0.0625 * (k + -0.5));'
+        'return _gpu_sin(2.4 * k) * sqrt(0.0625 * (k + -0.5));'
       );
     });
 });

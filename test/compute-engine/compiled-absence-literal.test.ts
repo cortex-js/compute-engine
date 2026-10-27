@@ -164,7 +164,10 @@ describe('an absent cell reaches the statistics reducers as absent', () => {
       expect(q).toHaveLength(3);
       expect(q.every((x) => Number.isNaN(x))).toBe(true);
       expect(
-        ce.box(['Quartiles', ['List', 1, 'NaN', 3]]).evaluate().toString()
+        ce
+          .box(['Quartiles', ['List', 1, 'NaN', 3]])
+          .evaluate()
+          .toString()
       ).toBe('(NaN, NaN, NaN)');
     });
 
@@ -230,7 +233,7 @@ describe('the targets with no object absence axis', () => {
       fallback: false,
     } as any);
     expect(r.success).toBe(true);
-    expect(r.code).toBe('cos(_gpu_nan())');
+    expect(r.code).toBe('_gpu_cos(_gpu_nan())');
     expect(r.freeSymbols).toEqual([]);
     // The preamble scan reads the EMITTED code, so the helper the marker calls
     // is declared with it — a shader that calls an undeclared function does

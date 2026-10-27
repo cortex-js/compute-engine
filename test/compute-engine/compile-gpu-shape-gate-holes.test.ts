@@ -103,7 +103,7 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
       'mix(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0), vec3f(7.0, 8.0, 9.0))'
     );
     expect(g(['Smoothstep', V3, W3, U3])).toBe(
-      'smoothstep(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
+      '_gpu_smoothstep3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
     );
     expect(g(['Clamp', V3, W3, U3])).toBe(
       '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
@@ -337,7 +337,7 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
       'vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)'
     );
     expect(g(['Multiply', V3, 2])).toBe('2.0 * vec3(1.0, 2.0, 3.0)');
-    expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Sin', V4])).toBe('_gpu_sin4(vec4(1.0, 2.0, 3.0, 4.0))');
     expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
     expect(g(['Mix', V3, W3, 0.5])).toBe(
       'mix(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), 0.5)'
@@ -346,7 +346,7 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
       '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(0.0), vec3(1.0))'
     );
     expect(g(['Smoothstep', 0, 1, V3])).toBe(
-      'smoothstep(0.0, 1.0, vec3(1.0, 2.0, 3.0))'
+      '_gpu_smoothstep3(vec3(0.0), vec3(1.0), vec3(1.0, 2.0, 3.0))'
     );
     expect(g(['Mod', V3, 2])).toBe(
       '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
@@ -439,16 +439,16 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
   it('a static component count of 2–4 still compiles to the `vecN` call', () => {
     for (const type of ['vector<real^3>', 'list<real^3>']) {
       const e = withL(type);
-      expect(g(['Sin', 'L'], e)).toBe('sin(L)');
-      expect(w(['Sin', 'L'], e)).toBe('sin(L)');
+      expect(g(['Sin', 'L'], e)).toBe('_gpu_sin3(L)');
+      expect(w(['Sin', 'L'], e)).toBe('_gpu_sin3(L)');
     }
-    expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('sin(L)');
+    expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('_gpu_sin2(L)');
   });
 
   it('an `unknown`-typed symbol stays a scalar — the free-variable admission is untouched', () => {
     const e = withL('unknown');
-    expect(g(['Sin', 'L'], e)).toBe('sin(L)');
-    expect(w(['Sin', 'L'], e)).toBe('sin(L)');
+    expect(g(['Sin', 'L'], e)).toBe('_gpu_sin(L)');
+    expect(w(['Sin', 'L'], e)).toBe('_gpu_sin(L)');
   });
 
   it('a STRING operand keeps its own diagnostic rather than being reported as an array', () => {

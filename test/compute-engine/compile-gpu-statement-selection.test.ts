@@ -68,7 +68,7 @@ describe('A conditional arm with a loop-form Sum takes the statement form', () =
         'if (1.0 <= t) {',
         '  float _tv2 = 0.0;',
         '  for (int n = 1; n <= int(floor(floor(t))); n++) {',
-        '    _tv2 += cos(float(n) * t);',
+        '    _tv2 += _gpu_cos(float(n) * t);',
         '  }',
         '  _tv1 = _tv2;',
         '} else {',

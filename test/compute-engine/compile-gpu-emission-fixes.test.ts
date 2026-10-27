@@ -133,7 +133,7 @@ describe('identity lowerings keep the grouping of their operand (CE-251.1)', () 
     const e = new ComputeEngine();
     e.parse('h(x) \\coloneq x^3 + \\sin x').evaluate();
     const r = compile(e.parse("3h'(x)"), { to, fallback: false } as never);
-    expect(r.code).toBe('3.0 * (3.0 * (x * x) + cos(x))');
+    expect(r.code).toBe('3.0 * (3.0 * (x * x) + _gpu_cos(x))');
   });
 });
 
@@ -181,7 +181,7 @@ describe('a loop-invariant binding with no reader is not declared (CE-258)', () 
       to: 'glsl',
       fallback: false,
     });
-    expect(r.code).toMatch(/float _tv\d+ = _gpu_pow2\(sin\(u\)\);/);
+    expect(r.code).toMatch(/float _tv\d+ = _gpu_pow2\(_gpu_sin\(u\)\);/);
   });
 });
 

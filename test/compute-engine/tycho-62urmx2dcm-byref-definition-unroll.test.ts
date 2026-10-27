@@ -732,7 +732,7 @@ describe('BY-REFERENCE DEFINITION UNROLL — the angular unit', () => {
     const rad = withUnit('rad');
     expect(rad.helper).not.toContain('0.017453292');
     expect(rad.helper).toContain('sin(P.x) + P.y');
-    expect(rad.written).toBe('y + sin(x)');
+    expect(rad.written).toBe('y + _gpu_sin(x)');
   });
 });
 

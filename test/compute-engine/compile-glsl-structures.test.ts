@@ -25,7 +25,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = glsl.compile(expr, NO_FOLD).code;
-      expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
+      expect(code).toBe(
+        '((sin(1.0)) + (sin(2.0)) + (sin(3.0)))'
+      );
     });
 
     it('should unroll Product with small constant bounds', () => {
@@ -53,7 +55,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       });
       expect(fn).toContain('float sumSin()');
       expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
-      expect(fn).toContain('+= sin(float(i))');
+      expect(fn).toContain('+= _gpu_sin(float(i))');
       expect(fn).toContain('return ');
       expect(fn).not.toContain('let ');
       expect(fn).not.toContain('while');
@@ -444,7 +446,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         glsl.compile(ce.box(['Add', 'x', ['Sin', 'in']]), {
           vars: { in: 'u_in' },
         }).code
-      ).toBe('x + sin(u_in)');
+      ).toBe('x + _gpu_sin(u_in)');
       expect(
         glsl.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'u.in' } }).code
       ).toBe('u.in + x');
@@ -516,7 +518,7 @@ describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', (
         ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]],
       ])
     ).code;
-    expect(code).toContain('vec2(cos(t), sin(t))');
+    expect(code).toContain('vec2(_gpu_cos(t), _gpu_sin(t))');
     expect(code).toContain('vec2(_gpu_nan())');
     expect(code).not.toMatch(/: \(_gpu_nan\(\)\)/);
   });
@@ -661,7 +663,7 @@ describe('GLSL vecN constructor arity (no vector-valued components)', () => {
 
   it('an all-scalar tuple still lowers to vec2', () => {
     const expr = ce.box(['Tuple', ['Cos', 't'], ['Sin', 't']]);
-    expect(glsl.compile(expr).code).toBe('vec2(cos(t), sin(t))');
+    expect(glsl.compile(expr).code).toBe('vec2(_gpu_cos(t), _gpu_sin(t))');
   });
 
   // Defect B: the guard asked "does this element have a vecN lowering?", so an
@@ -733,7 +735,7 @@ describe('GLSL block local with disagreeing binding shapes fails closed', () => 
     ]);
     const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
     expect(code).toContain('vec2 p;');
-    expect(code).toContain('p = vec2(cos(t), sin(t));');
+    expect(code).toContain('p = vec2(_gpu_cos(t), _gpu_sin(t));');
   });
 });
 
@@ -822,7 +824,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `fract(fract(((sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y)))))`
+      `fract(fract(((_gpu_sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y)))))`
     );
   });
 
@@ -899,9 +901,7 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
   it('compiles Mod with a real-by-definition head in BOTH positions', () => {
     expect(
       glsl.compile(e.box(['Mod', ['Imaginary', 'z'], ['Imaginary', 'w']])).code
-    ).toBe(
-      '_gpu_fmod((z).y, (w).y)'
-    );
+    ).toBe('_gpu_fmod((z).y, (w).y)');
   });
 
   it('still compiles Mod over Abs (the head that already worked)', () => {

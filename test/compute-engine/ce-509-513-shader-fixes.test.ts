@@ -91,7 +91,7 @@ describe('CE-509 (Tycho row 454): WGSL tanh of a large argument', () => {
 
   it('passes a compound operand once, and a vector to its own width', () => {
     expect(shader('\\tanh(\\sin(x)+y)', 'wgsl').code).toBe(
-      '_gpu_tanh(y + sin(x))'
+      '_gpu_tanh(y + _gpu_sin(x))'
     );
     const r = shader(['Tanh', 'v'], 'wgsl');
     expect(r.code).toBe('_gpu_tanh3(v)');
@@ -215,8 +215,10 @@ describe('CE-512 (Tycho row 457): WGSL Mod computes its operands once', () => {
   });
 
   it('draws a random operand once', () => {
-    const code = shader(['WithRandomSeed', 'x', ['Mod', ['Random'], 'y']], 'wgsl')
-      .code;
+    const code = shader(
+      ['WithRandomSeed', 'x', ['Mod', ['Random'], 'y']],
+      'wgsl'
+    ).code;
     expect((code.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
   });
 });
@@ -289,7 +291,7 @@ describe('CE-513 (Tycho row 458): a WGSL arm that calls a function is an if', ()
         '\\begin{cases} \\sin(x) & x<0 \\\\ 0 & \\text{otherwise}\\end{cases}',
         'wgsl'
       ).code
-    ).toBe('select((0.0), sin(x), x < 0.0)');
+    ).toBe('select((0.0), _gpu_sin(x), x < 0.0)');
   });
 
   it('takes the if form for an arm with a costly helper', () => {
@@ -297,8 +299,8 @@ describe('CE-513 (Tycho row 458): a WGSL arm that calls a function is an if', ()
       ['Zeta', 'x'],
       ['HurwitzZeta', 'x', 0.5],
     ])
-      expect(
-        shader(['If', ['Less', 'x', 2], arm, 0], 'wgsl').code
-      ).toMatch(/^var _tv\d+: f32;\nif \(x < 2\.0\) \{/);
+      expect(shader(['If', ['Less', 'x', 2], arm, 0], 'wgsl').code).toMatch(
+        /^var _tv\d+: f32;\nif \(x < 2\.0\) \{/
+      );
   });
 });

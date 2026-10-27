@@ -58,8 +58,16 @@ describe('GPU USER FUNCTIONS — one definition, called by name', () => {
     // Exactly ONE definition, delivered on the same channel as the `_gpu_*`
     // helpers (`CompilationResult.preamble`).
     expect(r.preamble).toMatchInlineSnapshot(`
+
+      bool _gpu_isnonfinite(float x) {
+        return (floatBitsToUint(x) & 0x7FFFFFFFu) >= 0x7F800000u;
+      }
+      float _gpu_sin(float x) {
+        return (_gpu_isnonfinite(x) ? intBitsToFloat(0x7FC00000) : sin(x));
+      }
+
       float _fn_f(float x) {
-        return (x * x) + sin(x);
+        return (x * x) + _gpu_sin(x);
       }
 
     `);
@@ -73,8 +81,17 @@ describe('GPU USER FUNCTIONS — one definition, called by name', () => {
     expect(r.code).toMatchInlineSnapshot(`_fn_f(u) + _fn_f(2.0 * u)`);
     expect(r.code).not.toContain('sin(');
     expect(r.preamble).toMatchInlineSnapshot(`
+
+      fn _gpu_isnonfinite(x: f32) -> bool {
+        return (bitcast<u32>(x) & 0x7FFFFFFFu) >= 0x7F800000u;
+      }
+      fn _gpu_sin(x: f32) -> f32 {
+        let bits = 0x7fc00000u;
+        return select(sin(x), bitcast<f32>(bits), _gpu_isnonfinite(x));
+      }
+
       fn _fn_f(x: f32) -> f32 {
-        return (x * x) + sin(x);
+        return (x * x) + _gpu_sin(x);
       }
 
     `);
@@ -112,14 +129,38 @@ describe('GPU USER FUNCTIONS — synthesized signatures', () => {
     ce.assign('p', ce.parse('t \\mapsto (\\cos t, \\sin t)'));
 
     expect(glsl.compile(ce.parse('p(u)')).preamble).toMatchInlineSnapshot(`
+
+      bool _gpu_isnonfinite(float x) {
+        return (floatBitsToUint(x) & 0x7FFFFFFFu) >= 0x7F800000u;
+      }
+      float _gpu_sin(float x) {
+        return (_gpu_isnonfinite(x) ? intBitsToFloat(0x7FC00000) : sin(x));
+      }
+      float _gpu_cos(float x) {
+        return (_gpu_isnonfinite(x) ? intBitsToFloat(0x7FC00000) : cos(x));
+      }
+
       vec2 _fn_p(float t) {
-        return vec2(cos(t), sin(t));
+        return vec2(_gpu_cos(t), _gpu_sin(t));
       }
 
     `);
     expect(wgsl.compile(ce.parse('p(u)')).preamble).toMatchInlineSnapshot(`
+
+      fn _gpu_isnonfinite(x: f32) -> bool {
+        return (bitcast<u32>(x) & 0x7FFFFFFFu) >= 0x7F800000u;
+      }
+      fn _gpu_sin(x: f32) -> f32 {
+        let bits = 0x7fc00000u;
+        return select(sin(x), bitcast<f32>(bits), _gpu_isnonfinite(x));
+      }
+      fn _gpu_cos(x: f32) -> f32 {
+        let bits = 0x7fc00000u;
+        return select(cos(x), bitcast<f32>(bits), _gpu_isnonfinite(x));
+      }
+
       fn _fn_p(t: f32) -> vec2f {
-        return vec2f(cos(t), sin(t));
+        return vec2f(_gpu_cos(t), _gpu_sin(t));
       }
 
     `);
@@ -194,7 +235,7 @@ describe('GPU USER FUNCTIONS — a REAL argument to a COMPLEX parameter is lifte
 
   const cases: [string, string, string][] = [
     ['a real symbol', 'f(x)', '_fn_f(V(x, 0.0))'],
-    ['a real expression', 'f(\\sin(x))', '_fn_f(V(sin(x), 0.0))'],
+    ['a real expression', 'f(\\sin(x))', '_fn_f(V(_gpu_sin(x), 0.0))'],
     [
       'a real sum beside the call',
       'f(x) + 1',
@@ -327,8 +368,16 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
       [['u', 'float']]
     );
     expect(src).toMatchInlineSnapshot(`
+
+      bool _gpu_isnonfinite(float x) {
+        return (floatBitsToUint(x) & 0x7FFFFFFFu) >= 0x7F800000u;
+      }
+      float _gpu_sin(float x) {
+        return (_gpu_isnonfinite(x) ? intBitsToFloat(0x7FC00000) : sin(x));
+      }
+
       float _fn_f(float x) {
-        return (x * x) + sin(x);
+        return (x * x) + _gpu_sin(x);
       }
 
       float myFn(float u) {
@@ -533,7 +582,7 @@ describe('GPU USER FUNCTIONS — fail closed', () => {
     });
     expect(r.code).toMatch(/^_fn_f_.*\(vec2\(1\.0, 2\.0\)\)$/);
     expect(r.preamble).toMatch(/vec2 _fn_f_/);
-    expect(r.preamble).toContain('(x * x) + sin(x)');
+    expect(r.preamble).toContain('(x * x) + _gpu_sin2(x)');
     expect(
       ce
         .box(['f', ['Tuple', 1, 2]] as any)

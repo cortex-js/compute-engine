@@ -53,9 +53,7 @@ describe('list-valued function applications keep their signature under numeric u
     // binder rewrite used to re-validate the body and corrupt `a`.
     const ce = new ComputeEngine();
     ce.parse('a(t)\\coloneq\\left[\\cos t,\\sin t\\right]').evaluate();
-    ce.parse(
-      'h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)'
-    ).evaluate();
+    ce.parse('h(i)\\coloneq\\operatorname{mod}(10^4\\sin(10^4i),1)').evaluate();
     ce.parse(
       'A(t)\\coloneq\\sum_{i=0}^{6}h(i)\\frac{1}{1.4^i}a(2^it+2\\pi h(i+.5))'
     ).evaluate();
@@ -156,7 +154,9 @@ describe('big-op bodies that cannot accumulate numerically (item 121 residue)', 
     // The literal-list body now agrees with the list-valued CALL spelling,
     // which took the index loop all along.
     const ce2 = new ComputeEngine();
-    ce2.parse('a(t)\\coloneq\\lbrack t,2t\\rbrack', { strict: false }).evaluate();
+    ce2
+      .parse('a(t)\\coloneq\\lbrack t,2t\\rbrack', { strict: false })
+      .evaluate();
     expect(
       ce2.parse('\\sum_{k=0}^{2}a(k)', { strict: false }).evaluate().toString()
     ).toEqual('[3,6]');
@@ -215,31 +215,37 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
   test.each([
     ['identity', 'i'],
     ['affine', ['Add', 'i', 1]],
-    ['mod(sin)', ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, 'i']]], 1]],
-  ])('`Sum a(h(i))` with h = %s agrees with the interpreter', (_label, hBody) => {
-    const ce = setup(hBody);
-    // The body is the lift-wrapped shape that used to slip the gate. Since
-    // placeholder-signature refinement (2026-08-15) the declared `unknown`
-    // results refine to the bodies' inferred types, so the shape is now
-    // CONCRETELY vector-valued rather than `broadcastable<unknown>` — the
-    // element-wise agreement below is what this test pins either way.
-    const sumBody = (ce.box('A').value as any).ops[0].ops[0].ops[0];
-    expectTypeBetween(sumBody, {atMost: 'list<number^2>'});
+    [
+      'mod(sin)',
+      ['Mod', ['Multiply', 10000, ['Sin', ['Multiply', 10000, 'i']]], 1],
+    ],
+  ])(
+    '`Sum a(h(i))` with h = %s agrees with the interpreter',
+    (_label, hBody) => {
+      const ce = setup(hBody);
+      // The body is the lift-wrapped shape that used to slip the gate. Since
+      // placeholder-signature refinement (2026-08-15) the declared `unknown`
+      // results refine to the bodies' inferred types, so the shape is now
+      // CONCRETELY vector-valued rather than `broadcastable<unknown>` — the
+      // element-wise agreement below is what this test pins either way.
+      const sumBody = (ce.box('A').value as any).ops[0].ops[0].ops[0];
+      expectTypeBetween(sumBody, { atMost: 'list<number^2>' });
 
-    const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
-    {
-      const r = compile(ce.parse('A(t)', { strict: false }), {
-        fallback: true,
-      });
-      expect(r?.success).toBe(true);
-      const v = (r as any).run({ t: 0.3 });
-      // Was a JS string: `+` over the arrays `a` really returns.
-      expect(typeof v).not.toEqual('string');
-      expect(Array.isArray(v)).toBe(true);
-      expect(v[0]).toBeCloseTo(x!, 10);
-      expect(v[1]).toBeCloseTo(y!, 10);
+      const [x, y] = [...ce.parse('A(0.3)').N().each()].map((e) => e.re);
+      {
+        const r = compile(ce.parse('A(t)', { strict: false }), {
+          fallback: true,
+        });
+        expect(r?.success).toBe(true);
+        const v = (r as any).run({ t: 0.3 });
+        // Was a JS string: `+` over the arrays `a` really returns.
+        expect(typeof v).not.toEqual('string');
+        expect(Array.isArray(v)).toBe(true);
+        expect(v[0]).toBeCloseTo(x!, 10);
+        expect(v[1]).toBeCloseTo(y!, 10);
+      }
     }
-  });
+  );
 
   test('the un-nested spellings are unchanged', () => {
     // `Σ a(t+i)` and `Σ a(i)` never had the lift wrapper and already compiled
@@ -254,7 +260,9 @@ describe('a list-valued call inside a big-op body is element-wise, not scalar (i
           't',
         ])
       );
-      const r = compile(ce.parse('A(t)', { strict: false }), { fallback: true });
+      const r = compile(ce.parse('A(t)', { strict: false }), {
+        fallback: true,
+      });
       expect(r?.success).toBe(true);
       const v = (r as any).run({ t: 0.3 });
       expect(Array.isArray(v)).toBe(true);
@@ -346,13 +354,18 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
   // JavaScript, the element-wise `_SYS.bcast` emission) under test.
   test.each(NON_JS)('%s declines `Sum a(h(i))` (direct form)', (to) => {
     const ce = setup();
-    const r = compile(ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]), {
-      to,
-      fallback: true,
-      constantFold: false,
-    } as any);
+    const r = compile(
+      ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]),
+      {
+        to,
+        fallback: true,
+        constantFold: false,
+      } as any
+    );
     expect(r?.success ?? false).toBe(false);
-    expect((r as any).error).toMatch(/collection-valued body has no compiled form/);
+    expect((r as any).error).toMatch(
+      /collection-valued body has no compiled form/
+    );
   });
 
   test.each(NON_JS)('%s declines the `A(t)` wrapper form', (to) => {
@@ -376,10 +389,13 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 
   test('JavaScript is unaffected — it still takes the element-wise fold', () => {
     const ce = setup();
-    const r = compile(ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]), {
-      fallback: true,
-      constantFold: false,
-    });
+    const r = compile(
+      ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]),
+      {
+        fallback: true,
+        constantFold: false,
+      }
+    );
     expect(r?.success).toBe(true);
     expect((r as any).code).toContain('_SYS.bcast');
     expect(Array.isArray((r as any).run({}))).toBe(true);
@@ -457,7 +473,8 @@ describe('list-valued big-op bodies decline on the non-JS targets (item 171 resi
 // disjoint from every one of them.
 describe('a declaration contradicted by its body declines everywhere (2026-08-12 ruling)', () => {
   const ALL = ['javascript', 'glsl', 'wgsl', 'python', 'interval-js'] as const;
-  const CONTRADICTED = /says it returns a scalar .* but its body constructs a collection/;
+  const CONTRADICTED =
+    /says it returns a scalar .* but its body constructs a collection/;
 
   /** `a` DECLARED scalar, ASSIGNED a list-constructing body. */
   const lying = () => {
@@ -511,7 +528,8 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
   // with the contradicted-declaration message.
   test('the `-> unknown` shape is unchanged — JS still folds element-wise', () => {
     const ce = new ComputeEngine();
-    for (const id of ['h', 'a']) ce.declare(id, { signature: '(unknown) -> unknown' });
+    for (const id of ['h', 'a'])
+      ce.declare(id, { signature: '(unknown) -> unknown' });
     ce.assign('h', ce.box(['Function', ['Block', 'i'], 'i']));
     ce.assign(
       'a',
@@ -536,7 +554,11 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
       ce.assign('h', ce.box(['Function', ['Block', 'i'], 'i']));
       ce.assign(
         'a',
-        ce.box(['Function', ['Block', ['List', ['Cos', 't'], ['Sin', 't']]], 't'])
+        ce.box([
+          'Function',
+          ['Block', ['List', ['Cos', 't'], ['Sin', 't']]],
+          't',
+        ])
       );
       const r = compile(
         ce.box(['Sum', ['a', ['h', 'i']], ['Limits', 'i', 0, 2]]),
@@ -551,7 +573,9 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
       // not regress is the untangling: the decline is never the
       // contradicted-declaration message, which blames the author for a lie
       // they did not write.
-      expect((r as any).error).toMatch(/collection-valued body has no compiled form/);
+      expect((r as any).error).toMatch(
+        /collection-valued body has no compiled form/
+      );
       expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );
@@ -595,7 +619,7 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
   test('a truthful `-> list<number>` declaration still folds element-wise on JS', () => {
     const ce = truthfulList();
     const expr = ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]);
-    expectTypeBetween((expr as any).ops[0], {atMost: 'list<number>'});
+    expectTypeBetween((expr as any).ops[0], { atMost: 'list<number>' });
     const r = compile(expr, { fallback: true, constantFold: false });
     expect(r?.success).toBe(true);
     expect((r as any).code).toContain('_SYS.bcast');
@@ -613,7 +637,9 @@ describe('a declaration contradicted by its body declines everywhere (2026-08-12
         { to, fallback: true, constantFold: false } as any
       );
       expect(r?.success ?? false).toBe(false);
-      expect((r as any).error).toMatch(/collection-valued body has no compiled form/);
+      expect((r as any).error).toMatch(
+        /collection-valued body has no compiled form/
+      );
       expect((r as any).error).not.toMatch(CONTRADICTED);
     }
   );
@@ -864,7 +890,9 @@ describe('a contradicted scalar declaration declines at DEFINITION emission (202
       const r = compile(ce.box(['a', 'u']), { to, fallback: true } as any);
       expect(r?.success).toBe(true);
       expect((r as any).code).toBe(
-        to === 'glsl' ? 'vec2(cos(u), sin(u))' : 'vec2f(cos(u), sin(u))'
+        to === 'glsl'
+          ? 'vec2(_gpu_cos(u), _gpu_sin(u))'
+          : 'vec2f(_gpu_cos(u), _gpu_sin(u))'
       );
       expect((r as any).preamble ?? '').not.toContain('_fn_a');
     }
@@ -1004,54 +1032,51 @@ describe('a contradicted scalar declaration declines for a MULTI-CLAUSE function
     ['a(u) < 1', ['Less', ['a', 'u'], 1]],
   ];
 
-  describe.each(['lying', 'mixed'] as const)(
-    'a %s clause set',
-    (kind) => {
-      // MIXED is the design call: only the `real` clause contradicts, so the
-      // declaration holds on the integer branch. Declining anyway is the
-      // conservative, fail-closed direction AND what the measurement forces —
-      // the consuming position compiles ONCE, statically, for every branch.
-      // Measured before the gate, mixed `a(u) + 1` ran to `8` at `u = 3` and to
-      // the string `"0.29552…,0.955336…1"` at `u = 0.3`: there is no per-branch
-      // code to keep, so the branch that is wrong decides.
-      test.each(SCALAR_POSITIONS)(
-        'declines `%s` on JavaScript',
-        (_label, expr) => {
-          const ce = withClauses('(number) -> number', kind);
-          const r = compile(ce.box(expr), { fallback: true });
-          expect(r?.success ?? false).toBe(false);
-          expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
-          expect((r as any).error).toMatch(/'a'/);
-        }
+  describe.each(['lying', 'mixed'] as const)('a %s clause set', (kind) => {
+    // MIXED is the design call: only the `real` clause contradicts, so the
+    // declaration holds on the integer branch. Declining anyway is the
+    // conservative, fail-closed direction AND what the measurement forces —
+    // the consuming position compiles ONCE, statically, for every branch.
+    // Measured before the gate, mixed `a(u) + 1` ran to `8` at `u = 3` and to
+    // the string `"0.29552…,0.955336…1"` at `u = 0.3`: there is no per-branch
+    // code to keep, so the branch that is wrong decides.
+    test.each(SCALAR_POSITIONS)(
+      'declines `%s` on JavaScript',
+      (_label, expr) => {
+        const ce = withClauses('(number) -> number', kind);
+        const r = compile(ce.box(expr), { fallback: true });
+        expect(r?.success ?? false).toBe(false);
+        expect((r as any).error).toMatch(CONTRADICTED_SCALAR_POSITION);
+        expect((r as any).error).toMatch(/'a'/);
+      }
+    );
+
+    test('declines the big-op body `Σ a(i)` on JavaScript (wave-1 message)', () => {
+      const ce = withClauses('(number) -> number', kind);
+      // `constantFold: false`: the sum has no free variables, so
+      // compile-time constant folding would answer it from the interpreter
+      // and report success, bypassing the static decline under test.
+      const r = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
+        fallback: true,
+        constantFold: false,
+      });
+      expect(r?.success ?? false).toBe(false);
+      expect((r as any).error).toMatch(
+        /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
       );
+    });
 
-      test('declines the big-op body `Σ a(i)` on JavaScript (wave-1 message)', () => {
-        const ce = withClauses('(number) -> number', kind);
-        // `constantFold: false`: the sum has no free variables, so
-        // compile-time constant folding would answer it from the interpreter
-        // and report success, bypassing the static decline under test.
-        const r = compile(ce.box(['Sum', ['a', 'i'], ['Limits', 'i', 0, 2]]), {
-          fallback: true,
-          constantFold: false,
-        });
-        expect(r?.success ?? false).toBe(false);
-        expect((r as any).error).toMatch(
-          /says it returns a scalar .* but its body constructs a collection.*the numeric accumulation would produce a wrong value/s
-        );
-      });
-
-      test.each(['glsl', 'wgsl'] as const)('stays closed on %s', (to) => {
-        const ce = withClauses('(number) -> number', kind);
-        const r = compile(ce.box(['Add', ['a', 'u'], 1]), {
-          to,
-          fallback: true,
-        } as any);
-        expect(r?.success ?? false).toBe(false);
-        // No preamble ships behind the decline, whichever gate spoke.
-        expect((r as any).preamble ?? '').not.toContain('_fn_a');
-      });
-    }
-  );
+    test.each(['glsl', 'wgsl'] as const)('stays closed on %s', (to) => {
+      const ce = withClauses('(number) -> number', kind);
+      const r = compile(ce.box(['Add', ['a', 'u'], 1]), {
+        to,
+        fallback: true,
+      } as any);
+      expect(r?.success ?? false).toBe(false);
+      // No preamble ships behind the decline, whichever gate spoke.
+      expect((r as any).preamble ?? '').not.toContain('_fn_a');
+    });
+  });
 
   // INVARIANT (the wave-3 carve-out, unchanged here): the BARE application has
   // no consuming head, the JS result coercion hands the array back, and it runs
@@ -1527,7 +1552,11 @@ describe('a contradicted BOOLEAN declaration declines in every scalar position (
       const ce = new ComputeEngine();
       ce.declare('x', 'list<number>');
       const r = compile(
-        ce.box(['Sum', ['Greater', ['At', 'x', 'i'], 0], ['Limits', 'i', 1, 3]]),
+        ce.box([
+          'Sum',
+          ['Greater', ['At', 'x', 'i'], 0],
+          ['Limits', 'i', 1, 3],
+        ]),
         { fallback: true }
       );
       expect(r?.success).toBe(true);

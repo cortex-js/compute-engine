@@ -271,12 +271,12 @@ describe('At — composability of the SCALAR form (D1)', () => {
   });
 
   test('a builtin over a scalar access compiles', () => {
-    expect(g(['Sin', ['At', 'v', 'k']])).toBe('sin(_gpu_at3(v, k))');
-    expect(w(['Sin', ['At', 'v', 'k']])).toBe('sin(_gpu_at3(v, k))');
+    expect(g(['Sin', ['At', 'v', 'k']])).toBe('_gpu_sin(_gpu_at3(v, k))');
+    expect(w(['Sin', ['At', 'v', 'k']])).toBe('_gpu_sin(_gpu_at3(v, k))');
   });
 
   test('a static fold composes as the scalar it is', () => {
-    expect(g(['Sin', ['At', 'v', 2]])).toBe('sin(v.y)');
+    expect(g(['Sin', ['At', 'v', 2]])).toBe('_gpu_sin(v.y)');
   });
 });
 
