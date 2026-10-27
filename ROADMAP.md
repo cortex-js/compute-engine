@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-529.
+Next free reference: CE-531.
 
 **Entry format.**
 
@@ -720,6 +720,20 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
+### CE-530. `subs()` replaces a bound variable, the binder included
+
+**Status:** open; defect. Tycho row 464 (filed 2026-10-26, on 0.169.2).
+
+The documentation of `subs` says that a binder's bound variables go on
+denoting the binder's own bindings, but
+`Comprehension(j+1, Element(j, Range(0,2))).subs({j: [4,4,5]})` gives
+`Comprehension(1+[4,4,5], Element([4,4,5], Range(0,2)))`. The index of a `Sum`,
+the parameter of a `Function` and a `Block` local become `Error` nodes in the
+same way, and in `j + Sum(j, Limits(j,1,3))` the bound `j` is replaced
+together with the free one. Expected: `subs` replaces only the free
+occurrences of a name. Tycho's instrument:
+`~/dev/tycho/scripts/repros/2026-10-26-ce464-subs-replaces-bound-variable-repro.mts`.
+
 ### CE-91. Define value capture on assignment, mutable-object boundaries and view reads
 
 **Status:** design needed; design.
@@ -1323,9 +1337,12 @@ documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
   (group 1); so `Sin(U)^2` is an error for such a kind. The plan does not state
   this. Keep (a kind that cannot be squared should say so), or let the carrier
   rule admit it at the arithmetic operators and leave the call unevaluated.
-- **CE-507.7** (PINNED by the user 2026-10-26: to discuss after phase 3; a
-  contributor PR implementing group theory operations based on GAP, PR #482,
-  asks for it) A non-commutative product for a value kind. Plan section 4.3 says
+- **CE-507.7** (on demand; user decision 2026-10-27: nothing now, review when
+  a consumer asks for the syntax; the design to build then is the `Compose`
+  alternative below, never the flag on `Multiply`) A non-commutative product
+  for a value kind. PR #482 (group theory based on GAP) does not block on it:
+  it ships named operators and refuses `Permutation(…) * Permutation(…)` by
+  its own design note. Plan section 4.3 says
   `multiply` must commute, because the canonical form sorts a product, and names
   matrices over a finite field as out of scope. PR #482 (`installGroupTheory`,
   132 operators) meets exactly this: it ships `PermutationCompose` and
@@ -2053,6 +2070,23 @@ enumerate it, the multi-set walk must resolve dependent bounds again at each
 iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
+
+### CE-529. A nested integral of piecewise functions is slow and stops at a relative uncertainty of 3e-4
+
+**Status:** open; defect. Found 2026-10-27 from Tycho row 459 (document
+`neyret/2agcgxq87y`).
+
+With `d(x, r) = max(0, √(x²+r²) − 1)` and
+`n(x, r, ε) = 1/max(ε, d(x, r)) · {r ≤ 1: {x < −√(1−r²): 1, 0}, 1}` defined as
+functions, `∫_0^1 y·When(∫_{−10}^{10} n(x, y, 0.01) dx, 0 ≤ y ≤ 5) dy` takes
+12 s under `N()` and gives `Measurement(5.286578, 0.00167)`. An independent
+quadrature (no CE) gives 5.2869394. The value is inside its uncertainty, but a
+relative uncertainty of 3e-4 is far from the default target, and Tycho's
+convergence check refuses it. The inner integral alone at one `y` takes 17 ms
+with an uncertainty of 2e-10, so the cost is in the outer integral. With the
+list of six ε of the document, the outer integral takes 35 s. Tycho's probes:
+`~/dev/tycho/scripts/repros/2026-10-26-hy-nan-probe.mts` (`SLOW=1`) and
+`2026-10-26-hy-reference-values.mts`.
 
 ### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
 
@@ -3933,23 +3967,6 @@ Both targets spell non-finite constants through `_gpu_nan()`/`_gpu_inf()`, and
 the WGSL versions bitcast a `let`: a constant `bitcast<f32>` to NaN or infinity
 is a shader-creation error in Chrome ("value inf cannot be represented as
 'f32'").
-
-### CE-528. `interval-js`: `run()` does not expose an operator's `compileHelpers` to the compiled code
-
-**Status:** open; defect, medium. Found 2026-10-26 by the phase-3 review of
-the value kinds (a probe written for the chained-comparison fix). An
-operator declared with `compileHelpers: { ivHelp }` and a `compile`
-handler that returns `ivHelp(_.x)` compiles to `interval-js` with
-`success: true`, but `.run({ x: 2 })` answers `{ kind: 'entire' }` and
-the helper never runs: the runner's `catch` in
-`compilation/interval-javascript-target.ts` (around line 5507) turns the
-`ReferenceError` into `entire`. The same with `compileShippable` true or
-false. `test/compute-engine/ce-518-compile-handler-shipping.test.ts`
-covers the helpers on `interval-js` only through `broadcastAsync`, so
-`run()` is not covered. Fix: bind the helpers of CE-518 in the `run()`
-proxy of the interval target as the `javascript` runner binds them, and add
-the `run()` case to the CE-518 test; the swallowed `ReferenceError` should
-also surface as a diagnostic rather than `entire`.
 
 ### CE-522. Interval library kernels: a known limit of the outward rounding, and answers looser than necessary
 

@@ -123,9 +123,14 @@ export function createIntervalRuntime(): IntervalRuntime {
       return (vars: unknown): IntervalValue => {
         try {
           return freshIntervalValue(raw(processInput(vars))) as IntervalValue;
-        } catch {
-          // The runner of the engine answers the same: "cannot bound this"
+        } catch (e) {
+          // The same rule as the runner of the engine
+          // (`ComputeEngineIntervalFunction`): a `ReferenceError` (the code
+          // names something that is not defined, for example a helper that
+          // reads a variable from outside its own body) is a defect of the
+          // code and is thrown; any other error answers "cannot bound this"
           // rather than an exception.
+          if (e instanceof ReferenceError) throw e;
           return { kind: 'entire' };
         }
       };

@@ -5460,7 +5460,8 @@ export class ComputeEngineIntervalFunction extends Function {
    * `kindEntries` are the run-time checks of the host values of the free
    * symbols of a value kind (`intervalKindEntries()`). A call applies them
    * to the vars object BEFORE it converts the inputs and OUTSIDE the `try`
-   * whose `catch` answers `entire`, so a value that a check refuses throws.
+   * whose `catch` answers `entire` (for any error but a `ReferenceError`),
+   * so a value that a check refuses throws.
    */
   constructor(
     body: string,
@@ -5502,9 +5503,16 @@ export class ComputeEngineIntervalFunction extends Function {
               super.apply(thisArg, [this.IA, ...processedArgs])
             );
           return freshIntervalValue(inner(...processedArgs));
-        } catch {
-          // Runtime error (e.g., missing _IA method) — return "entire"
-          // to signal "cannot bound this" rather than crashing.
+        } catch (e) {
+          // A `ReferenceError` means that the code names something that is
+          // not defined, or reads a `const` before its definition: for
+          // example a helper of an operator's `compileHelpers` that reads a
+          // variable from outside its own body. That is a defect of the
+          // code, not an answer about the inputs, so it is thrown, as the
+          // runner of the `javascript` target throws it. Any other run-time
+          // error (e.g., a missing `_IA` method) returns "entire" to signal
+          // "cannot bound this" rather than crashing.
+          if (e instanceof ReferenceError) throw e;
           return { kind: 'entire' };
         }
       },

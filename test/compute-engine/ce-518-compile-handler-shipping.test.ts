@@ -7,6 +7,7 @@ import {
   createKernelPool,
   type KernelPool,
 } from '../../src/compute-engine';
+import { createIntervalRuntime } from '../../src/interval';
 
 // ROADMAP CE-518 (Tycho row 460), user decision 2026-10-26:
 // - the code that a caller's operator `compile` handler writes is not
@@ -196,6 +197,85 @@ describe('compile helpers', () => {
         compileHelpers: helpers as never,
       })
     ).toThrow(message);
+  });
+
+  // ROADMAP CE-528: `run()` of the `interval-js` target calls the helpers,
+  // and a helper that reads a variable from outside its own body throws
+  // there, as on the `javascript` target, instead of answering `entire`.
+  function declareIvDouble(
+    ce: ComputeEngine,
+    shippable: boolean,
+    helper: (x: { lo: number; hi: number }) => unknown
+  ): void {
+    ce.declare('IvDouble', {
+      signature: '(number) -> number',
+      evaluate: ([x]) => x,
+      compileShippable: shippable,
+      compileHelpers: { ce528IvDouble: helper },
+      compile: (args, compile, { language }) =>
+        language === 'interval-javascript'
+          ? `ce528IvDouble(${compile(args[0])})`
+          : undefined,
+    });
+  }
+
+  test.each([true, false])(
+    '`run()` on the `interval-js` target calls a helper (shippable: %s)',
+    (shippable) => {
+      const ce = new ComputeEngine();
+      declareIvDouble(ce, shippable, (x) => ({ lo: 2 * x.lo, hi: 2 * x.hi }));
+      // Without a constant table, then with one (the `1`).
+      const r1 = compile(ce.box(['IvDouble', 'x']), { to: 'interval-js' });
+      expect(r1.success).toBe(true);
+      expect(r1.preamble).toContain('const ce528IvDouble = (');
+      expect(r1.run!({ x: 2 })).toEqual({
+        kind: 'interval',
+        value: { lo: 4, hi: 4 },
+      });
+      const r2 = compile(ce.box(['Add', ['IvDouble', 'x'], 1]), {
+        to: 'interval-js',
+      });
+      expect(r2.run!({ x: 2 })).toEqual({
+        kind: 'interval',
+        value: { lo: 5, hi: 5 },
+      });
+    }
+  );
+
+  test('a helper that reads an outside variable throws from `run()` on `interval-js`', () => {
+    const ce = new ComputeEngine();
+    const factor = 2;
+    declareIvDouble(ce, true, (x) => ({
+      lo: factor * x.lo,
+      hi: factor * x.hi,
+    }));
+    const r = compile(ce.box(['Add', ['IvDouble', 'x'], 1]), {
+      to: 'interval-js',
+    });
+    expect(r.success).toBe(true);
+    expect(() => r.run!({ x: 2 })).toThrow(ReferenceError);
+    // The runtime that loads a stored result applies the same rule.
+    const stored = JSON.parse(
+      JSON.stringify({
+        runtimeVersion: r.runtimeVersion,
+        code: r.code,
+        preamble: r.preamble,
+        preambleOnce: r.preambleOnce,
+        preamblePerCall: r.preamblePerCall,
+      })
+    );
+    const f = createIntervalRuntime().load(stored);
+    expect(() => f({ x: { lo: 2, hi: 2 } })).toThrow(ReferenceError);
+  });
+
+  test('a helper that throws another error answers `entire` from `run()` on `interval-js`', () => {
+    const ce = new ComputeEngine();
+    declareIvDouble(ce, true, (x) => {
+      if (x.lo < 0) throw new Error('negative');
+      return x;
+    });
+    const r = compile(ce.box(['IvDouble', 'x']), { to: 'interval-js' });
+    expect(r.run!({ x: -2 })).toEqual({ kind: 'entire' });
   });
 });
 

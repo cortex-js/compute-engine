@@ -171,6 +171,26 @@
 
 ### Resolved Issues
 
+- **`N()` of an integral whose integrand restricts a list gives one integral
+  per element** (Tycho row 459). With `E = [0.1, 0.5]`,
+  `∫_0^1 y·When(∫_{−1}^{1} 1/ElementMax(E, |x|) dx, 0 ≤ y ≤ 5) dy` gave `NaN`,
+  and `∫_0^1 \{0 ≤ y ≤ 5: 1/ElementMax(E, y+1)\} dy` stayed unevaluated. Both
+  now give a list, here `[1 + ln 10, 1 + ln 2]`. A `When(L, c)` or a
+  `Which` with list values, alone or in a product, is distributed over the
+  elements of the list before the integration. A condition that is a list of
+  booleans is a mask, as before.
+
+- **On `interval-js`, `run()` throws a `ReferenceError` instead of answering
+  `entire`.** A `ReferenceError` means that the compiled code names
+  something that is not defined, for example a helper of an operator's
+  `compileHelpers` that reads a variable from outside its own body. The
+  `compileHelpers` documentation says that such a read throws on every
+  thread, and the `javascript` target already threw. The function that
+  `createIntervalRuntime().load()` returns for a stored result does the
+  same. Other run-time errors still answer `entire` ("cannot bound"). A
+  helper of `compileHelpers` is defined for `run()` on `interval-js`, which
+  is now tested.
+
 - **On `wgsl`, a piecewise branch that draws a random value compiles to an
   `if` statement** when the branch draws once and nothing else in the same
   statement draws (Tycho row 466), so only the branch that is taken draws, as
