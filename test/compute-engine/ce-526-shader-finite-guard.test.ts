@@ -76,6 +76,33 @@ describe.each(['glsl', 'wgsl'] as const)('on %s', (to) => {
     expect(code('p(x)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
   });
 
+  it('a uniform that vars maps to its own name keeps the built-in', () => {
+    // Tycho passes a document value as a uniform with `vars: { T: 'T' }`
+    // and `hideValues`: the shader reads the host's input, of its declared
+    // type.
+    const ct = new ComputeEngine();
+    ct.declare('T', 'real');
+    ct.assign('T', 2);
+    ct.declare('u', 'number');
+    const c = (latex: string, options: object) =>
+      compile(ct.parse(latex), {
+        to,
+        fallback: false,
+        ...options,
+      } as never).code;
+    expect(c('\\cos(T+1.9)', { vars: { T: 'T' }, hideValues: ['T'] })).toBe(
+      'cos(T + 1.9)'
+    );
+    // A mapping to other source, a `number`, a library constant: the guard.
+    expect(c('\\cos(T+1.9)', { vars: { T: 'uT' }, hideValues: ['T'] })).toBe(
+      '_gpu_cos(uT + 1.9)'
+    );
+    expect(c('\\sin(u)', { vars: { u: 'u' } })).toBe('_gpu_sin(u)');
+    expect(
+      c('\\sin(T+e^{10})', { vars: { ExponentialE: 'ExponentialE' } })
+    ).toMatch(/^_gpu_sin\(/);
+  });
+
   it('a name the caller maps to its own source keeps the guard', () => {
     expect(
       code(['Sin', ['Add', 'x', ['Gamma', 20]]], to, {

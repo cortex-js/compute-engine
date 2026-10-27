@@ -204,12 +204,19 @@
   39,200 inputs). An operand is finite for certain when its static type is a
   finite real, each symbol it reads has a declared type (a symbol declared
   `real` holds a finite value), it reads no name that the caller maps with
-  `vars`, `functions` or `operators`, and it cannot overflow in f32: it uses
-  only heads whose result does not grow past their operands (`+`, `−`, a
-  product or quotient by a literal, `sin`, `floor`, `abs`, …). `sin(x)` and
-  `cos(T + 1.9k)` with declared real symbols are now the built-ins;
-  `sin(u)` with `u: number`, `sin(x/y)`, `sin(√x)`, `sin(e^x)`, `sin(xy)`
-  and the parameter of a function whose type is inferred keep the helper.
+  `functions` or `operators` and no name that `vars` maps to other source,
+  and it cannot overflow in f32: it uses only heads whose result does not
+  grow past their operands (`+`, `−`, a product or quotient by a literal,
+  `sin`, `floor`, `abs`, …). A name that `vars` maps to its own identifier
+  (`vars: { T: 'T' }`, the way a host passes a uniform), with a declared type
+  and not a constant, counts as a declared symbol. `sin(x)` and
+  `cos(T + 1.9k)` with declared real symbols are now the built-ins, also with
+  `vars: { T: 'T' }`; `sin(u)` with `u: number`, `sin(x/y)`, `sin(√x)`,
+  `sin(e^x)`, `sin(xy)`, `vars: { T: 'uT' }`, a mapped constant and the
+  parameter of a function whose type is inferred keep the helper. One limit:
+  a sum or a product by a literal of values within that factor of the
+  largest f32 (3.4·10³⁸) overflows, and the built-in then gives 0 on Apple
+  GPUs where the helper gave NaN.
 
 - **The unit of a quantity is decoded once for each boxed value.** The
   arithmetic and the comparisons of quantities read the unit expression, its

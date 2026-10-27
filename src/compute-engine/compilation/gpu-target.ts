@@ -1781,13 +1781,21 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   symbol with a value is read through its value, which the shader inlines;
  * - it reads no name that the caller maps to its own source: `vars` can map
  *   `ExponentialE` to a run-time input, `functions` can map `Gamma` to code
- *   of the caller's, and the static type does not describe either;
+ *   of the caller's, and the static type does not describe either. A name
+ *   that `vars` maps to its own identifier (`{ T: 'T' }`, the way Tycho
+ *   passes a uniform) is the exception: it is the host's input, of its
+ *   declared type;
  * - it cannot overflow in f32: each head is in `GPU_F32_BOUNDED_HEADS`, a
  *   product has at most one factor that is not a number literal, a
  *   quotient has a non-zero literal divisor, and a subtree with no unknowns
  *   has a value that is finite in f32. A finite operand that
  *   overflows becomes `±∞` in the shader, and the guard turns `sin(∞)` into
- *   NaN, where the built-in gives 0 on Apple GPUs.
+ *   NaN, where the built-in gives 0 on Apple GPUs. One limit is accepted:
+ *   a sum, or a product by a literal, of finite values overflows when they
+ *   are within that factor of the largest f32 (3.4·10³⁸): `cos(2T)` at
+ *   `T = 2·10³⁸` gives 0 there on Apple, where the guard gave NaN. A proof
+ *   that excluded it would need a range for every symbol, and would keep
+ *   the guard on every declared `real` that has none.
  *
  * The guard costs a bit test and a selection per call: about 10% of the
  * frame time of Tycho's `voronoi-diagram` on WebGPU. On a finite argument it
@@ -1814,10 +1822,21 @@ function gpuProvablyFinite(
     if (isNumber(e)) result = e.type.matches('finite_real');
     else if (isSymbol(e)) {
       const value = e.engine._getSymbolValue(e.symbol);
+      // A name that `vars` maps to its own bare identifier (`{ T: 'T' }`,
+      // how a host passes a uniform) reads the host's input of its
+      // declared type, as an unmapped symbol does. A mapping to other
+      // source, or a mapping of a library constant, replaces a value whose
+      // type the engine knows with one it does not.
+      const mapped =
+        target.varsKeys?.has(e.symbol) === true ||
+        caller.isVarsKey?.(e.symbol) === true;
+      const selfMapped =
+        mapped &&
+        e.valueDefinition?.isConstant !== true &&
+        target.var(e.symbol) === e.symbol;
       result =
         e.valueDefinition?.inferredType !== true &&
-        target.varsKeys?.has(e.symbol) !== true &&
-        caller.isVarsKey?.(e.symbol) !== true &&
+        (!mapped || selfMapped) &&
         (value === undefined ||
           (!reading.has(e.symbol) && (reading.add(e.symbol), finite(value))));
       reading.delete(e.symbol);
