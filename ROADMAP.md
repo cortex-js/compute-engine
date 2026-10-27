@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-520.
+Next free reference: CE-525.
 
 **Entry format.**
 
@@ -72,6 +72,32 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-524. A call of an inferred-signature function with a set, a character, a collection that holds a tuple, or a bare list of strings has a type that does not hold its value
+
+**Status:** open; wrong type, medium. Found 2026-10-26 by the review of the
+CE-514 type change; the same types are given at commit
+61cb3c14bc47d7b95fcbcf414eb8f43cf1dfa959, before that change.
+
+Each call below is typed with the inferred result of the function, or with a
+broadcast over the argument, and the value does not fit that type:
+
+- `f := x ↦ x + 1`, `f(Set(1, 2))` is typed `number`; the value is
+  `Error(incompatible-type, number, set<integer>)`. A call does not map over a
+  set.
+- `f := x ↦ 2x`, `a: collection<integer>` with `a := (1, 2)`: `f(a)` is typed
+  `broadcastable<number>`; the value is the tuple `(2, 4)`.
+- `f := x ↦ (-x, x)`, `f` of the character `'a'` is typed
+  `tuple<number, number>`; the value is
+  `(Error(incompatible-type, number, character), "a")`. `isNonNumericDatum`
+  (`call-result-type.ts`) reads strings and booleans only, and `character` is
+  a type separate from `string`.
+- The same `f`, `B: list` with `B := ["s"]`: `f(B)` is typed `list<error>`;
+  the value is `[(Error(…), "s")]`, a list of tuples.
+
+The fix is probably to type such a call from the body, as `dataArgumentCallType`
+does for a string or a boolean argument, or to answer `any`. Measure the
+number of tests that change before landing it.
 
 ### CE-27. An access over `any` or `unknown` elements has no `missing` arm
 
@@ -2692,50 +2718,6 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-514. A call of a function literal is typed as one point when its value is a list of points
-
-**Status:** decision needed; defect (a type that its value does not have).
-Tycho row 447. The compiled value was fixed on 2026-10-26: the `javascript`
-target decides at run time whether a coordinate accessor whose operand may be
-a list of points (`isAccessorOfPossibleList()`,
-`boxed-expression/point-accessor-operand.ts`) is a zip source or one slot of
-`PointList`, so `(v ↦ PointList(PointY(v), PointX(v)))([(1,2,3), (4,5,6)])`
-compiles to `[[2, 1], [5, 4]]`, as it evaluates. The type is still wrong.
-
-The literal's parameter is typed from its uses before any argument is known
-(`collection<any> | tuple`, the parameter type of the accessors), so
-`PointY(v)` is `unknown`, and `PointList` reads an `unknown` component as a
-scalar: the inferred result is `tuple<unknown, unknown>`. The application, and
-a call `f(L)` of a named function `f` assigned that literal, keep that type,
-while the value is a list of points. `appliedLiteralResultType()` and
-`callResultType()` (`boxed-expression/call-result-type.ts`) derive the type of
-the call from the body with each parameter typed as its argument, and get
-`list<tuple<integer, integer>>`; they then drop it because it is not a
-subtype of the inferred result. Options:
-
-- (a) When the signature was inferred and the literal writes no result type,
-  use the type derived without that bound (unless it says nothing:
-  `unknown`, `any` or `error`). Measured 2026-10-26: this gives the right type
-  for the case above and changes 31 tests in 10 files that encode the current
-  behavior (`ce-473-captured-free-symbol`, `tycho-row-426-apply-lambda-type`,
-  `tycho-373-passthrough-broadcast-typing`, `tycho-323-call-site-specialization`,
-  `inferred-point-parameter-call-type`, `ce-30-38-47-call-result-types`,
-  `function-literal-unknown-param-signature`, `generic-function-literals`,
-  `valueless-collection-typed-operand`, `compile-scalar-point-dot`). Each of
-  them needs a review: some test that an inferred signature result is kept on
-  purpose.
-- (b) Type `PointX`/`PointY`/`PointZ` of an operand that may be a point or a
-  list of points as a scalar or a list (`broadcastable`), not `unknown`. Then
-  `PointList` types the possible list (as it already does for a
-  `broadcastable<T>` component), and the inferred signature is right from the
-  start. `pointComponentTypeD()` (`library/collections.ts`) answers `unknown`
-  for such an operand on purpose today; the effect on other tests is not
-  measured.
-- (c) Keep the type. The value is right on every route; only a consumer that
-  reads the type (a broadcast stride, a static check) sees one point.
-
-If nothing is decided, (c) is what ships.
-
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 
 **Status:** open; capability, small.
@@ -3920,6 +3902,81 @@ Both targets spell non-finite constants through `_gpu_nan()`/`_gpu_inf()`, and
 the WGSL versions bitcast a `let`: a constant `bitcast<f32>` to NaN or infinity
 is a shader-creation error in Chrome ("value inf cannot be represented as
 'f32'").
+
+### CE-522. Interval library kernels: unsound or inconsistent answers found by the `Enclosure` design review
+
+**Status:** open; wrong value, medium. Found 2026-10-26 by the spec review of
+plan `docs/plans/2026-10-26-value-kinds.md` section 4.9.2 (phase 3, the
+`Enclosure` value kind), which relies on these kernels; all are reachable
+today through `compile(…, { to: 'interval-js' })`. Items .1 to .4 and .6 are
+fixed in phase 3 (`src/compute-engine/interval/`); .5 is a known limit.
+
+- **CE-522.1** `modRaw` (`interval/elementary.ts`) with a non-point divisor
+  answers an unsound enclosure: `IntervalArithmetic.mod([5, 5], [2, 4])` is
+  `[1, 1]`, while `Mod(5, 3)` is `2` and `Mod(5, 2.5)` is `0`. Fix: a sound
+  hull (for a divisor interval that spans a jump of the quotient, `[0, d)`
+  for a positive dividend, mirrored for the other signs).
+- **CE-522.2** `atanhRaw` (`interval/trigonometric.ts`) clips a boundary
+  argument to `±(1 − ε)`: `atanh([0, 1])` is `partial [0, 18.3684…]` where the
+  image is `[0, +∞)`. Fix: `±∞` at the boundary.
+- **CE-522.3** `tan`, `cot`, `sec`, `csc` report a pole AT an endpoint as
+  `singular` with no value, like an interior pole (`tan([0, π/2])`,
+  `cot([0, 1])`), so the result is the whole line where the half-line
+  `[0, +∞)` is the image. Fix: classify an endpoint pole and answer the
+  half-line with the sign of the function beside it.
+- **CE-522.4** `powRaw` with a negative integer exponent over a base with a
+  zero endpoint answers the whole line: `pow([0, 1], -1)` is
+  `partial [−∞, +∞]` where the image is `[1, +∞)`; `pow([0, 0], -1)` must be
+  `empty`. Fix: the reciprocal rule with the half-line at a zero endpoint.
+- **CE-522.5** (known limit, not fixed in phase 3) The outward rounding of
+  the transcendental kernels is a minimum move, not a proof of containment
+  (`interval/rounding.ts` says so): `tanh` of a point can miss the true value
+  by one unit in the last place. The rational operations (`add`, `mul`,
+  `div`, integer powers, `abs`, the step functions) are rigorous. Certified
+  kernels (error bounds per function) are a separate project; the
+  `Enclosure` documentation states the limit.
+- **CE-522.6** `powInterval` with a negative point base over a non-point
+  exponent answers `empty`: `powInterval([−2, −2], [1, 2])` is `empty` where
+  `(−2)^1` and `(−2)^2` exist. Fix: the hull of the integer points of the
+  exponent interval (the real values of the power), `empty` when it holds
+  none.
+- **CE-522.7** `pow` with a negative integer exponent rounds an
+  intermediate before the reciprocal, so the result can exclude the true
+  value: for the double `x = 1.9678349534779586e-103`,
+  `pow([x, x], -3)` is `[1.3123025984121744e308, 1.3123025984121748e308]`
+  while `x^-3` rounds to `1.3123025984121742e308`, below the lower bound. Fix:
+  the exact power first, outward steps around the reciprocal (and the
+  overflow/underflow of each step). Fixed in phase 3.
+
+### CE-521. On Apple GPUs, the complex shader helpers can give a finite value for a NaN part
+
+**Status:** open; wrong value (found by the review of CE-520, 2026-10-26; not
+measured on a GPU yet).
+
+On Apple GPUs (WebGL2 over ANGLE Metal and WebGPU over Metal) the built-ins
+`sin` and `cos` of a NaN give 0 (CE-520). The complex helpers in
+`compilation/gpu-target.ts` call these built-ins directly on a part of their
+operand: `_gpu_cexp(z)` is `vec2(e·cos(z.y), e·sin(z.y))`, so a finite `z.x`
+and a NaN `z.y` give `(0, 0)` and not NaN; `_gpu_csin`, `_gpu_ccos`,
+`_gpu_csinh` and `_gpu_ccosh` have the same form, and so do the LCH to Lab
+colour conversions. These helpers lower `Exp`, `Sin` and `Cos` of a complex
+value and the colour heads. The fix would test the angle part with
+`_gpu_isnan` (`gpuNaNSafeLibrary`), as the real `Sin` and `Cos` do. First
+measure each helper with a NaN part on the GPU.
+
+### CE-523. `Smoothstep` has a shader lowering but no definition in the engine
+
+**Status:** open; capability (reported by Tycho session tycho-90, 2026-10-26).
+
+The `glsl` and `wgsl` targets lower `Smoothstep(e0, e1, x)` to `smoothstep`
+(the NaN-safe `_gpu_smoothstep`, CE-520), but the library has no `Smoothstep`
+operator: `ce.parse('\\operatorname{Smoothstep}(0,1,0.5)').evaluate()` stays
+unevaluated, and the `javascript` target fails to compile it (an unknown
+operator). A plot that uses it has no CPU value, so Tycho cannot compare the
+GPU result with a reference. The definition would be
+`t = Clamp((x - e0) / (e1 - e0), 0, 1)`, `t² (3 − 2t)`, the GLSL and WGSL
+formula; their result is undefined when `e0 ≥ e1`, so the interpreter would
+need its own rule there.
 
 ### CE-288. The f32 shader Hurwitz zeta answers NaN next to a zero of ζ(s, a)
 

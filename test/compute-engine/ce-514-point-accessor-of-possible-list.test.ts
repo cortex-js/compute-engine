@@ -147,3 +147,105 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
     expect(r.code).not.toContain('Array.isArray');
   });
 });
+
+// The type of the call. The signature of `v ↦ PointList(PointY(v),
+// PointX(v))` is inferred before any argument is known, and its result,
+// `tuple<unknown, unknown>`, is one point. That result is not a contract:
+// the call is typed from the body with the parameter typed as the argument,
+// so that a list of points gives a list of points.
+describe('the type of a call with a list of points (CE-514)', () => {
+  test('a literal list of points', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.box(['Function', BODY, 'v']));
+    const call = ce.box(['f', POINTS]);
+    expect(call.type.toString()).toBe('list<tuple<integer, integer>^2>');
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[(2, 1),(5, 4)]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+
+  test('a declared list of points, a named function and an applied literal', () => {
+    const ce = new ComputeEngine();
+    ce.declare('P', 'list<tuple<integer, integer, integer>>');
+    ce.declare('f', 'function');
+    ce.assign('f', ce.box(['Function', BODY, 'v']));
+    expect(ce.box(['f', 'P']).type.toString()).toBe(
+      'list<tuple<integer, integer>>'
+    );
+    expect(
+      ce.box(['Apply', ['Function', BODY, 'v'], 'P']).type.toString()
+    ).toBe('list<tuple<integer, integer>>');
+  });
+
+  test('one point stays one point', () => {
+    const ce = new ComputeEngine();
+    ce.declare('f', 'function');
+    ce.assign('f', ce.box(['Function', BODY, 'v']));
+    const call = ce.box(['f', ['Tuple', 1, 2]]);
+    expect(call.evaluate().toString()).toBe('(2, 1)');
+    expect(call.evaluate().type.matches(call.type)).toBe(true);
+  });
+
+  test('a function that reads a symbol from outside keeps its inferred result', () => {
+    // The inferred result records the type that `y` had; a call after `y`
+    // changed type is refused against it (ROADMAP CE-473), so it is not
+    // typed from the current value.
+    const ce = new ComputeEngine();
+    ce.assign('y', 5);
+    ce.assign('g', ce.parse('x \\mapsto [-x, y]'));
+    ce.assign('y', ce.string('abc'));
+    expect(ce.box(['g', 3]).type.toString()).toBe('vector<2>');
+  });
+});
+
+// When the arguments fit the inferred signature and its result is a scalar,
+// the inferred result stays the type of the call: the walk of the body can be
+// narrower than the value (`Mod(x, y)` is typed `real`, and is NaN or
+// `Indeterminate` for `y = 0`).
+describe('an inferred scalar result is kept when the arguments fit it', () => {
+  test('Mod with a zero divisor', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.parse('(x, y) \\mapsto \\operatorname{Mod}(x, y)'));
+    for (const args of [
+      [3, 0],
+      [3.5, 0],
+    ]) {
+      const call = ce.box(['f', ...args]);
+      expect(call.type.toString()).toBe('nan | real');
+      expect(call.evaluate().type.matches(call.type)).toBe(true);
+    }
+  });
+
+  test('Sign of NaN', () => {
+    const ce = new ComputeEngine();
+    ce.assign('f', ce.box(['Function', ['Sign', 'x'], 'x']));
+    const call = ce.box(['f', 'NaN']);
+    expect(call.type.toString()).toBe('complex | nan');
+    expect(call.evaluate().type.matches(call.type)).toBe(true);
+  });
+
+  test('a function defined in a body maps over a list argument', () => {
+    const ce = new ComputeEngine();
+    ce.assign(
+      'outer',
+      ce.box([
+        'Function',
+        [
+          'Block',
+          [
+            'Assign',
+            'h',
+            ['Function', ['Tuple', ['Negate', 'x'], 'x'], 'x'],
+          ],
+          ['h', 'L'],
+        ],
+        'L',
+      ])
+    );
+    const call = ce.box(['outer', ['List', 1, 2]]);
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[(-1, 1),(-2, 2)]');
+    expect(value.type.matches(call.type)).toBe(true);
+  });
+});

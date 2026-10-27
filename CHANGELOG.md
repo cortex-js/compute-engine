@@ -428,8 +428,21 @@
   same holds for a named function called with a list of points. A
   `PointX`/`PointY`/`PointZ` component whose operand is not provably one
   point is a zip source when its value is an array and one slot otherwise,
-  decided at run time. The type of such a call is still one point
-  (`tuple<unknown, unknown>`); see CE-514 in the ROADMAP.
+  decided at run time. The type of the call is now a list of points too:
+  `f(L)` for a list `L` of two points with integer coordinates is a
+  `list<tuple<integer, integer>^2>`, where it was `tuple<unknown, unknown>`.
+- **A call of a function whose signature was inferred is typed from its
+  body** with each parameter typed as its argument, when the type inferred
+  for the result does not describe the call (CE-514). The result inferred for
+  `v ↦ PointList(PointY(v), PointX(v))` is one point, and a call with a list
+  of points evaluates to a list of points. The call was typed one point; it
+  is now typed from the body. This applies only when the inferred result is
+  not a scalar and the walk of the body bounded by it gives no type, and
+  only for arguments that are numbers or lists of numbers or points. A result
+  type that the host declares, or that the literal writes, stays the bound,
+  and a function that reads a symbol from outside its parameters keeps its
+  inferred result, so a call after that symbol changes type is still refused
+  (CE-473).
 - **Five shader fixes found by comparing WebGL2 and WebGPU on a GPU**
   (CE-509 to CE-513, Tycho rows 454 to 458).
   - On `wgsl`, `tanh` calls a helper that answers `sign(x)` when
@@ -465,6 +478,15 @@
   `glsl` is unchanged: its `?:` evaluates only the branch that is taken.
 - **On `glsl`, `Mod` of a scalar by a vector compiles** (`Mod(1, v)` broadcasts
   the scalar); the built-in `mod` has no such overload, and it was refused.
+- **On `glsl` and `wgsl`, `Sin`, `Cos`, `Sec`, `Csc`, `Cot`, `Sign`,
+  `Smoothstep` and `Heaviside` give NaN when the operand is NaN** (CE-520), as
+  the `javascript` target does. On Apple GPUs the built-ins `sin`, `cos`,
+  `sign` and `smoothstep` of a NaN gave 0 (so `\sec x` gave +∞), and the GLSL
+  `Heaviside` gave 0.5. They now call helpers that test the bit pattern of the
+  operand, as `Max` and `Min` do (CE-519). `\tan(\pi x)` on the shader
+  targets is now +∞ at every pole, as on the other compiled targets; it was
+  +∞ or −∞ depending on the sign of the zero cosine, and not the same on
+  WebGL2 and WebGPU.
 - **On `glsl` and `wgsl`, `Max`, `Min`, `Clamp`, `ElementMax` and
   `ElementMin` give NaN when an operand is NaN** (CE-519, Tycho row 465), as
   the interpreter and the `javascript` target do. The shader built-ins return

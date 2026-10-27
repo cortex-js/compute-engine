@@ -36,6 +36,8 @@ import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
   functionLiteralParameterType,
+  functionLiteralReturnType,
+  capturedSymbols,
   isRestParameter,
   isDestructuringParameter,
   isScalarType,
@@ -265,14 +267,36 @@ export function callResultType(
   // below keep the result of the signature (`undefined`), the call is
   // typed from the body (`dataArgumentCallType`).
   const dataArgument = inferred && args.some((x) => isNonNumericDatum(x.type));
-  const t = callResultTypeOfBinding(
+  const declined = { walk: false };
+  let t = callResultTypeOfBinding(
     engine,
     args,
     declared,
     derive,
     binding,
-    dataArgument
+    dataArgument,
+    declined
   );
+  // An inferred result is not a contract: see `mayDeriveUnbounded`. A
+  // result type that the host declared for the function stays the bound.
+  // Only when the walk bounded by the inferred result ran and gave no type:
+  // when the result is a scalar and the arguments fit the signature, or
+  // when the call maps over an argument, no walk runs and the rules that
+  // decided so stand (the walk of a body can be narrower than the value:
+  // `Mod(x, y)` is typed `real`, and is `NaN` for `y = 0`).
+  if (
+    declined.walk &&
+    t === undefined &&
+    inferred &&
+    !dataArgument &&
+    mayDeriveUnbounded(literal, args)
+  )
+    t = unboundedLiteralResultType(
+      literal,
+      args,
+      derive,
+      declaredParameterTypes(binding)
+    );
   if (t !== undefined || !dataArgument) return t;
   return dataArgumentCallType(
     literalBodyResultType(
@@ -299,7 +323,8 @@ function callResultTypeOfBinding(
     args: readonly OperandDescriptor[]
   ) => Type | undefined,
   binding: BoxedDefinition | undefined,
-  skipProvisional: boolean
+  skipProvisional: boolean,
+  declined?: { walk: boolean }
 ): Type | undefined {
   // A call of a function of a cycle of calls whose result is verified is
   // typed by the candidate result of that function
@@ -347,6 +372,10 @@ function callResultTypeOfBinding(
     derive,
     declaredParameterTypes(binding)
   );
+  // The walk of the body, bounded by a result that is not a scalar, ran and
+  // gave no type (`mayDeriveUnbounded`).
+  if (declined !== undefined && t === undefined && scalar === undefined)
+    declined.walk = true;
   return scalar === undefined ? t : outsideScalarResult(t, scalar);
 }
 
@@ -1048,13 +1077,19 @@ export function appliedLiteralResultType(
   appliedLiteralDepth += 1;
   try {
     if (derives) {
-      const t = literalBodyResultType(
+      let t = literalBodyResultType(
         literal.engine,
         literal,
         args,
         scalar === undefined ? declared : 'any',
         derive
       );
+      if (
+        t === undefined &&
+        scalar === undefined &&
+        mayDeriveUnbounded(literal, args)
+      )
+        t = unboundedLiteralResultType(literal, args, derive);
       const result = scalar === undefined ? t : outsideScalarResult(t, scalar);
       if (result !== undefined || !dataArgument) return result;
     }
@@ -1065,6 +1100,153 @@ export function appliedLiteralResultType(
   } finally {
     appliedLiteralDepth -= 1;
   }
+}
+
+/**
+ * Whether a call of `literal`, whose signature was inferred, may be typed by
+ * the walk of its body with no bound (`unboundedLiteralResultType`) when the
+ * walk bounded by the inferred result declines.
+ *
+ * An inferred result is read from the body before any argument is known, and
+ * it can be narrower than the value: in `v ↦ PointList(PointY(v), PointX(v))`
+ * the components are typed `unknown`, which `PointList` reads as numbers, so
+ * the inferred result is `tuple<unknown, unknown>`; applied to a list of
+ * points the value is a list of points, which the walk types
+ * `list<tuple<integer, integer>>` (ROADMAP CE-514). Two cases keep the
+ * inferred result as the bound:
+ * - the literal writes its result type: that is a contract;
+ * - the literal reads a symbol from outside (`capturedSymbols`): its inferred
+ *   result records the types those symbols had, and a call whose captured
+ *   symbol has since changed type is refused against it (ROADMAP CE-473 (c)),
+ *   which a type derived from the current values would hide.
+ *
+ * The arguments must be numbers or lists (`isNumberOrListArgument`) that
+ * hold no string, boolean or character (`mayHoldDatum`). The other
+ * arguments keep the inferred result, because the walk of the body does not
+ * describe their value:
+ * - a tuple binds whole to a scalar parameter, and the call is typed by the
+ *   rules for that case (`lambdaBroadcastType`, `boxed-function.ts`, which
+ *   answers `any`, and `componentwiseTupleCallType`). Typing such a call
+ *   from the body gave wrong narrow types for a nested user call in a list
+ *   when it was tried on 2026-09-26 (the comment in `lambdaBroadcastType`
+ *   has the record);
+ * - a call does not map over a set: `f(Set(1, 2))` for `f := x ↦ x + 1` is
+ *   an `incompatible-type` error, which the walk types as a set;
+ * - an abstract collection (`collection<integer>`) may hold a tuple or a
+ *   set;
+ * - a numeric operation on a string, a boolean or a character is an error
+ *   that the walk does not always type as one.
+ */
+function mayDeriveUnbounded(
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[]
+): boolean {
+  return (
+    functionLiteralReturnType(literal) === undefined &&
+    capturedSymbols(literal).length === 0 &&
+    args.every((x) => isNumberOrListArgument(x.type) && !mayHoldDatum(x.type))
+  );
+}
+
+/** Whether each arm of `t` is a number type, `missing`, or a list type. */
+function isNumberOrListArgument(t: Readonly<Type>): boolean {
+  const r = resolveTypeAlias(t as Type);
+  if (typeof r === 'object' && r.kind === 'union')
+    return r.types.every((x) => isNumberOrListArgument(x));
+  if (typeof r === 'object' && r.kind === 'list') return true;
+  if (r === 'missing') return true;
+  return r !== 'never' && isSubtype(r, 'number');
+}
+
+/**
+ * Whether a value of type `t` may hold a string, a boolean or a character,
+ * at the top or in a slot at any depth. A type that does not name its
+ * contents (`list`, `tuple`, `any`, `unknown`) may.
+ *
+ * The walk of a body types each operation from the types of its operands,
+ * and a numeric operation on an element of a bare `list` (`-x` in
+ * `x ↦ (-x, x)`) is typed as if the element held a number. When the element
+ * is a string, the value has an `incompatible-type` error there, which the
+ * derived type does not hold. So the unbounded walk (`mayDeriveUnbounded`)
+ * runs only for arguments that answer false.
+ */
+function mayHoldDatum(t: Readonly<Type>, depth = 0): boolean {
+  if (depth > 8) return true;
+  const r = resolveTypeAlias(t as Type);
+  if (typeof r === 'string') {
+    if (
+      r === 'any' ||
+      r === 'unknown' ||
+      r === 'value' ||
+      r === 'expression' ||
+      r === 'tuple' ||
+      r === 'record' ||
+      r === 'list' ||
+      r === 'set' ||
+      r === 'collection' ||
+      r === 'indexed_collection' ||
+      r === 'dictionary'
+    )
+      return true;
+  }
+  for (const datum of ['string', 'boolean', 'character'] as const)
+    if (isSubtype(r, datum) || isSubtype(datum, r)) return true;
+  if (typeof r === 'string') return false;
+  switch (r.kind) {
+    case 'union':
+      return r.types.some((x) => mayHoldDatum(x, depth + 1));
+    case 'tuple':
+      return r.elements.some((x) => mayHoldDatum(x.type, depth + 1));
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+      return mayHoldDatum(r.elements, depth + 1);
+    case 'dictionary':
+      return mayHoldDatum(r.values, depth + 1);
+    case 'record':
+      return Object.values(r.elements).some((x) =>
+        mayHoldDatum(x, depth + 1)
+      );
+    case 'intersection':
+    case 'negation':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * The type of the body of `literal` with its parameters typed as `args`,
+ * not bounded by the result of its signature, or `undefined` when the walk
+ * declines or its type says nothing (`unknown`, `any` or `error`). See
+ * `mayDeriveUnbounded`. `declaredParams` are the parameter types declared
+ * for the called function, if any.
+ */
+function unboundedLiteralResultType(
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[],
+  derive: (
+    head: string,
+    args: readonly OperandDescriptor[]
+  ) => Type | undefined,
+  declaredParams?: ReadonlyArray<Type>
+): Type | undefined {
+  const t = literalBodyResultType(
+    literal.engine,
+    literal,
+    args,
+    'any',
+    derive,
+    declaredParams
+  );
+  if (t === undefined) return undefined;
+  const r = resolveTypeAlias(t);
+  // A tuple with an `error` slot is not a value: the call is an error as a
+  // whole (`dataArgumentCallType`), so the walk says nothing here.
+  return r === 'unknown' || r === 'any' || r === 'error' || isTupleWithErrorSlot(t)
+    ? undefined
+    : t;
 }
 
 /** The number of `appliedLiteralResultType` derivations in progress, one
