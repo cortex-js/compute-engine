@@ -144,7 +144,7 @@ describe('GLSL: the exact form', () => {
       1,
     ]);
     expect(rounded.code).toBe(
-      'fract(fract(10000.0 * _gpu_sin(10000.0 * floor(5.0 * x))))'
+      'fract(fract(10000.0 * sin(10000.0 * floor(5.0 * x))))'
     );
     expect(rounded.warnings?.[0]?.code).toBe('float32-unsafe-argument');
     const e = new ComputeEngine();
@@ -181,19 +181,19 @@ describe('GLSL: the exact form', () => {
     // A large constant in a term that does not hold the call, or behind
     // another function.
     expect(glsl('\\operatorname{mod}(1000x+\\sin(y),1)').code).toBe(
-      'fract(fract(1000.0 * x + _gpu_sin(y)))'
+      'fract(fract(1000.0 * x + sin(y)))'
     );
     expect(
       glsl(['Mod', ['Floor', ['Multiply', 1000, ['Sin', 'x']]], 7]).code
-    ).toBe('_gpu_fmod(floor(1000.0 * _gpu_sin(x)), 7.0)');
+    ).toBe('_gpu_fmod(floor(1000.0 * sin(x)), 7.0)');
     expect(glsl('\\operatorname{mod}(\\sin(x)+1,1)').code).toBe(
-      'fract(fract(_gpu_sin(x) + 1.0))'
+      'fract(fract(sin(x) + 1.0))'
     );
     expect(glsl('\\operatorname{mod}(10^4x,1)').code).toBe(
       'fract(fract(10000.0 * x))'
     );
     expect(glsl('\\operatorname{mod}(5\\sin(x),1)').code).toBe(
-      'fract(fract(5.0 * _gpu_sin(x)))'
+      'fract(fract(5.0 * sin(x)))'
     );
     expect(glsl('\\operatorname{mod}(\\sin(x)+1,1)').float32Bounds).toBe(
       undefined
@@ -244,7 +244,7 @@ describe('a warning where no exact form exists', () => {
       ['Multiply', 1.9e9, ['Sin', ['Multiply', 10000, 'x']]],
       1,
     ]);
-    expect(r.code).toBe('fract(fract(1900000000.0 * _gpu_sin(10000.0 * x)))');
+    expect(r.code).toBe('fract(fract(1900000000.0 * sin(10000.0 * x)))');
     // No warning for an operand that is not amplified.
     expect(glsl('\\operatorname{mod}(\\sin(x)+1,1)').warnings).toBe(undefined);
   });
@@ -303,6 +303,6 @@ describe('a warning where no exact form exists', () => {
     expect(
       compile(ce.parse('\\operatorname{mod}(\\sin(x)+1,1)'), { to: 'wgsl' })
         .code
-    ).toBe('fract(fract(_gpu_sin(x) + 1.0))');
+    ).toBe('fract(fract(sin(x) + 1.0))');
   });
 });

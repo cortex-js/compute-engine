@@ -7778,6 +7778,7 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     `Math.min(Math.max(${compile(args[0])}, ${compile(args[1])}), ${compile(
       args[2]
     )})`,
+  Smoothstep: '_SYS.smoothstep',
   Max: (args, compile, target) => compileExtremum('Max', args, compile, target),
   Mean: (args, compile, target) => {
     if (args.length === 0) return 'NaN';

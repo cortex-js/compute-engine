@@ -34,15 +34,11 @@ function code(latex: string, Target: typeof GLSLTarget | typeof WGSLTarget) {
 
 describe('CE-227.1 the emitted argument', () => {
   test.each(TARGETS)('%s', (_, Target) => {
-    expect(code('\\sin(x+\\Gamma(20))', Target)).toBe(
-      '_gpu_sin(x + 0.020641496)'
-    );
+    expect(code('\\sin(x+\\Gamma(20))', Target)).toBe('sin(x + 0.020641496)');
     expect(code('\\tan(x+\\Gamma(20))', Target)).toBe('tan(x + 0.020641496)');
-    expect(code('\\sin(x+20!)', Target)).toBe('_gpu_sin(x + 0.41282994)');
-    expect(code('\\cos(x+\\binom{40}{20})', Target)).toBe(
-      '_gpu_cos(x + -1.49282)'
-    );
-    expect(code('\\sin(x+e^{20})', Target)).toBe('_gpu_sin(x + 0.4122615)');
+    expect(code('\\sin(x+20!)', Target)).toBe('sin(x + 0.41282994)');
+    expect(code('\\cos(x+\\binom{40}{20})', Target)).toBe('cos(x + -1.49282)');
+    expect(code('\\sin(x+e^{20})', Target)).toBe('sin(x + 0.4122615)');
   });
 });
 

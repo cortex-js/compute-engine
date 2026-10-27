@@ -181,7 +181,7 @@ describe('a loop-invariant binding with no reader is not declared (CE-258)', () 
       to: 'glsl',
       fallback: false,
     });
-    expect(r.code).toMatch(/float _tv\d+ = _gpu_pow2\(_gpu_sin\(u\)\);/);
+    expect(r.code).toMatch(/float _tv\d+ = _gpu_pow2\(sin\(u\)\);/);
   });
 });
 

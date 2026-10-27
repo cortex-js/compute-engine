@@ -31,34 +31,30 @@ function code(latex: string, Target: typeof GLSLTarget | typeof WGSLTarget) {
 
 describe('the emitted argument', () => {
   test.each(TARGETS)('%s', (_, Target) => {
-    expect(code('\\sin(x+10^6)', Target)).toBe('_gpu_sin(x + -0.35756418)');
-    expect(code('\\cos(x-10^6)', Target)).toBe('_gpu_cos(x + 0.35756418)');
+    expect(code('\\sin(x+10^6)', Target)).toBe('sin(x + -0.35756418)');
+    expect(code('\\cos(x-10^6)', Target)).toBe('cos(x + 0.35756418)');
     // tan has the period π.
     expect(code('\\tan(x+10^6)', Target)).toBe('tan(x + -0.35756418)');
-    expect(code('\\sec(x+10^6)', Target)).toBe(
-      '(1.0 / _gpu_cos(x + -0.35756418))'
-    );
-    expect(code('\\csc(x+10^6)', Target)).toBe(
-      '(1.0 / _gpu_sin(x + -0.35756418))'
-    );
+    expect(code('\\sec(x+10^6)', Target)).toBe('(1.0 / cos(x + -0.35756418))');
+    expect(code('\\csc(x+10^6)', Target)).toBe('(1.0 / sin(x + -0.35756418))');
     expect(code('\\cot(x+10^6)', Target)).toBe(
-      '(_gpu_cos(x + -0.35756418) / _gpu_sin(x + -0.35756418))'
+      '(cos(x + -0.35756418) / sin(x + -0.35756418))'
     );
     // `k·(u + c)` reduces `c` by `P/k`.
     expect(code('\\sin(2(x+10^6))', Target)).toBe(
-      '_gpu_sin(2.0 * (x + -0.35756418))'
+      'sin(2.0 * (x + -0.35756418))'
     );
     // `e^{iπu}` reduces `u` by 2.
     expect(code('e^{i\\pi(x+10^6)}', Target)).toBe('_gpu_cossinpi(x)');
     // A whole number of periods disappears.
-    expect(code('\\sin(x+10^6\\pi)', Target)).toBe('_gpu_sin(x)');
+    expect(code('\\sin(x+10^6\\pi)', Target)).toBe('sin(x)');
     // The half-turn helpers reduce their argument by 2 (sin, cos) or 1 (tan).
     expect(code('\\sin(\\pi(x+10^6))', Target)).toBe('_gpu_sinpi(x)');
     expect(code('\\tan(\\pi(x+10^6+\\frac{1}{4}))', Target)).toBe(
       '_gpu_tanpi(x + 0.25)'
     );
     // An offset already within half a period is left as written.
-    expect(code('\\sin(x+1)', Target)).toBe('_gpu_sin(x + 1.0)');
+    expect(code('\\sin(x+1)', Target)).toBe('sin(x + 1.0)');
     expect(code('\\tan(x-1)', Target)).toBe('tan(x + -1.0)');
   });
 });
@@ -144,7 +140,7 @@ describe('terms that are not constants, and other routes', () => {
     cd.declare('x', 'real');
     const latex = '\\sin(x+10^6)';
     const r = new GLSLTarget().compile(cd.parse(latex));
-    expect(r.code).toBe('_gpu_sin(0.017453292 * (x + -80.0))');
+    expect(r.code).toBe('sin(0.017453292 * (x + -80.0))');
     const run = shaderFunctions(
       `${r.preamble ?? ''}\nfloat _main(float x) { return ${r.code}; }`,
       'glsl'

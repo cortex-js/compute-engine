@@ -2345,6 +2345,8 @@ def _ce_creal_elems(_v):
 const PYTHON_BCAST_HELPER = `def _ce_bcast_apply(_op, _arrs):
     if _op == 'clip':
         return np.clip(_arrs[0], _arrs[1], _arrs[2])
+    if _op == 'smoothstep':
+        return _ce_smoothstep(_arrs[0], _arrs[1], _arrs[2])
     _pair = np.maximum if _op == 'max' else np.minimum
     _r = _arrs[0]
     for _a in _arrs[1:]:
@@ -2818,6 +2820,23 @@ function pythonRoundToStep(
     `(np.asarray(${compile(x)}, dtype=float), np.abs(${compile(step)}))`
   );
 }
+
+/**
+ * `Smoothstep(e0, e1, x)` over numbers or NumPy arrays: t²(3 − 2t) with
+ * t = clip((x − e0)/(e1 − e0), 0, 1). With e0 = e1, the step function (0
+ * when x < e0, else 1), as the interpreter gives; a NaN operand gives NaN.
+ * The division by zero of that case is computed and then not selected, so
+ * its warning is silenced.
+ */
+const PYTHON_SMOOTHSTEP_HELPER = `def _ce_smoothstep(_e0, _e1, _x):
+    _e0 = np.asarray(_e0, dtype=float)
+    _e1 = np.asarray(_e1, dtype=float)
+    _x = np.asarray(_x, dtype=float)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        _t = np.clip((_x - _e0) / (_e1 - _e0), 0.0, 1.0)
+    _r = np.where(_e0 == _e1, np.where(_x < _e0, 0.0, 1.0), _t * _t * (3.0 - 2.0 * _t))
+    _r = np.where(np.isnan(_e0) | np.isnan(_e1) | np.isnan(_x), np.nan, _r)
+    return _r[()]`;
 
 /**
  * Round to an integer, elementwise, with a value halfway between two
@@ -3313,6 +3332,8 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
   if (out.includes('_ce_round(')) out = `${PYTHON_ROUND_HELPER}\n${out}`;
+  if (out.includes('_ce_smoothstep(') || out.includes("_ce_bcast('smoothstep'"))
+    out = `${PYTHON_SMOOTHSTEP_HELPER}\n${out}`;
   if (out.includes('_ce_int_operands(') || out.includes('_ce_remainder('))
     out = `${PYTHON_INT_OPERAND_HELPER}\n${out}`;
   if (out.includes('_ce_pow(')) out = `${pythonPowHelper()}\n${out}`;
@@ -5418,6 +5439,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     return `_ce_bcast('min', ${args.map((a) => compile(a)).join(', ')})`;
   },
+  // A collection operand goes through the positional broadcast
+  // (`_ce_bcast`), as for `Clamp`: NumPy would recycle a list of length 1
+  // where the interpreter reports `incompatible-dimensions`.
+  Smoothstep: (args, compile) =>
+    args.some(isPyCollectionOperand)
+      ? `_ce_bcast('smoothstep', ${args.map((a) => compile(a)).join(', ')})`
+      : `_ce_smoothstep(${args.map((a) => compile(a)).join(', ')})`,
   Clamp: (args, compile) => {
     if (!args.some(isPyCollectionOperand))
       return `np.clip(${compile(args[0])}, ${compile(args[1])}, ${compile(
@@ -7525,6 +7553,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
     if (body.includes('_ce_eqcoll(')) code += `${PYTHON_EQCOLL_HELPER}\n`;
     if (body.includes('_ce_indexof(')) code += `${PYTHON_INDEXOF_HELPER}\n`;
     if (body.includes('_ce_ord(')) code += `${PYTHON_ORD_HELPER}\n`;
+    if (
+      body.includes('_ce_smoothstep(') ||
+      body.includes("_ce_bcast('smoothstep'")
+    )
+      code += `${PYTHON_SMOOTHSTEP_HELPER}\n`;
     if (body.includes('_ce_round(')) code += `${PYTHON_ROUND_HELPER}\n`;
     if (body.includes('_ce_int_operands(') || body.includes('_ce_remainder('))
       code += `${PYTHON_INT_OPERAND_HELPER}\n`;

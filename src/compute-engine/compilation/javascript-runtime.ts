@@ -6313,6 +6313,15 @@ export const SYS_HELPERS = {
   lcm: (a: number, b: number): number =>
     lcm(integerOperand('LCM', a), integerOperand('LCM', b)),
   lngamma: lnAbsGamma,
+  // `Smoothstep(e0, e1, x)`: t²(3 − 2t) with t = clamp((x − e0)/(e1 − e0),
+  // 0, 1). With e0 = e1, the step function (0 when x < e0, else 1), as the
+  // interpreter gives; a NaN operand gives NaN.
+  smoothstep: (e0: number, e1: number, x: number): number => {
+    if (Number.isNaN(e0) || Number.isNaN(e1) || Number.isNaN(x)) return NaN;
+    if (e0 === e1) return x < e0 ? 0 : 1;
+    const t = Math.min(Math.max((x - e0) / (e1 - e0), 0), 1);
+    return t * t * (3 - 2 * t);
+  },
   limit: (f: (x: number) => number, x: number, dir?: number): number =>
     limit(realFn(f), x, dir),
   mean: oneDatumOk(mean),

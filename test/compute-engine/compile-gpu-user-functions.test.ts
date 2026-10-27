@@ -235,7 +235,7 @@ describe('GPU USER FUNCTIONS — a REAL argument to a COMPLEX parameter is lifte
 
   const cases: [string, string, string][] = [
     ['a real symbol', 'f(x)', '_fn_f(V(x, 0.0))'],
-    ['a real expression', 'f(\\sin(x))', '_fn_f(V(_gpu_sin(x), 0.0))'],
+    ['a real expression', 'f(\\sin(x))', '_fn_f(V(sin(x), 0.0))'],
     [
       'a real sum beside the call',
       'f(x) + 1',

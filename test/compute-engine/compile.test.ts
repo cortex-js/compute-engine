@@ -645,7 +645,6 @@ describe('COMPILE', () => {
       'glsl': new Set([
         'Clamp',
         'Mix',
-        'Smoothstep',
         'Step',
         'Degrees',
         'Radians',
@@ -665,7 +664,6 @@ describe('COMPILE', () => {
       'wgsl': new Set([
         'Clamp',
         'Mix',
-        'Smoothstep',
         'Step',
         'Degrees',
         'Radians',

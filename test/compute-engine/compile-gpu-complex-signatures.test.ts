@@ -184,26 +184,35 @@ function glslExprToJS(src: string): string {
 }
 
 function glslToJS(src: string): string {
-  return src
-    .replace(
-      /^(?:float|vec2|bool)\s+(\w+)\s*\(([^)]*)\)\s*\{/gm,
-      (_m, name: string, params: string) =>
-        `function ${name}(${params
-          .split(',')
-          .map((p) => p.trim().split(/\s+/).pop() ?? '')
-          .filter((p) => p.length > 0)
-          .join(', ')}) {`
-    )
-    .replace(
-      /^(\s*)(?:float|vec2|bool)\s+(\w+)\s*=\s*(.*);\s*$/gm,
-      (_m, indent: string, name: string, value: string) =>
-        `${indent}let ${name} = ${glslExprToJS(value)};`
-    )
-    .replace(
-      /^(\s*)return\s+(.*);\s*$/gm,
-      (_m, indent: string, value: string) =>
-        `${indent}return ${glslExprToJS(value)};`
-    );
+  return (
+    src
+      // The NaN-part guard of the complex and colour helpers
+      // (`gpuNaNPartGuard`): the bit test of one part is a NaN test.
+      .replace(
+        /^(\s*)if \(\(floatBitsToUint\((\w+)\.([xyz])\) & 0x7FFFFFFFu\) > 0x7F800000u\) return vec([23])\(\2\.\3\);\s*$/gm,
+        (_m, indent: string, v: string, p: string, n: string) =>
+          `${indent}if (Number.isNaN(${v}.${p})) return V${n}(${v}.${p});`
+      )
+      .replace(
+        /^(?:float|vec2|bool)\s+(\w+)\s*\(([^)]*)\)\s*\{/gm,
+        (_m, name: string, params: string) =>
+          `function ${name}(${params
+            .split(',')
+            .map((p) => p.trim().split(/\s+/).pop() ?? '')
+            .filter((p) => p.length > 0)
+            .join(', ')}) {`
+      )
+      .replace(
+        /^(\s*)(?:float|vec2|bool)\s+(\w+)\s*=\s*(.*);\s*$/gm,
+        (_m, indent: string, name: string, value: string) =>
+          `${indent}let ${name} = ${glslExprToJS(value)};`
+      )
+      .replace(
+        /^(\s*)return\s+(.*);\s*$/gm,
+        (_m, indent: string, value: string) =>
+          `${indent}return ${glslExprToJS(value)};`
+      )
+  );
 }
 
 /**
@@ -798,6 +807,61 @@ describe('GPU: the iteration count of a fractal is an integer', () => {
     );
     expect(wgsl(ce, ['Julia', Z, Z, 'u']).code).toBe(
       '_fractal_julia(vec2f(x, y), vec2f(x, y), i32(u))'
+    );
+  });
+});
+
+describe('a complex helper gives NaN for a NaN part', () => {
+  // On Apple GPUs (WebGL2 over ANGLE Metal, WebGPU over Metal) the built-ins
+  // `sin` and `cos` of a NaN give 0, so `exp(1 + NaN·i)` gave `(0, 0)`. The
+  // helpers test each part first (`gpuNaNPartGuard`, `gpu-target.ts`). This
+  // evaluator gives `sin` and `cos` that behaviour.
+  const zeroAtNaN =
+    (fn: (x: number) => number) =>
+    (x: unknown): number =>
+      isVec2(x) ? NaN : Number.isNaN(x as number) ? 0 : fn(x as number);
+  const APPLE = {
+    ...BUILTINS,
+    cos: zeroAtNaN(Math.cos),
+    sin: zeroAtNaN(Math.sin),
+  };
+  const run = (latex: string, vars: Record<string, number>): unknown => {
+    const r = glsl(new ComputeEngine(), latex);
+    expect(r.success).toBe(true);
+    const names = [...Object.keys(APPLE), ...Object.keys(vars)];
+    const body = `${glslToJS(r.preamble ?? '')}\nreturn (${glslExprToJS(r.code)});`;
+    // eslint-disable-next-line no-new-func
+    const f = new Function(...names, body);
+    return f(...Object.values(APPLE), ...Object.values(vars));
+  };
+
+  test.each([
+    '\\exp(x+iy)',
+    '\\sin(x+iy)',
+    '\\cos(x+iy)',
+    '\\sinh(x+iy)',
+    '\\cosh(x+iy)',
+    '\\tan(x+iy)',
+    '\\sqrt{x+iy}',
+  ])('%s', (latex) => {
+    for (const [x, y] of [
+      [1, NaN],
+      [NaN, 1],
+    ]) {
+      const v = run(latex, { x, y });
+      expect(isVec2(v)).toBe(true);
+      expect(Number.isNaN((v as Vec2).x)).toBe(true);
+      expect(Number.isNaN((v as Vec2).y)).toBe(true);
+    }
+    // A finite operand is unchanged by the guard.
+    const v = run(latex, { x: 0.5, y: 0.25 }) as Vec2;
+    expect(Number.isFinite(v.x) && Number.isFinite(v.y)).toBe(true);
+  });
+
+  test('the WGSL helpers test each part too', () => {
+    const r = wgsl(new ComputeEngine(), '\\exp(x+iy)');
+    expect(r.preamble).toContain(
+      'if ((bitcast<u32>(z.y) & 0x7FFFFFFFu) > 0x7F800000u) { return vec2f(z.y); }'
     );
   });
 });

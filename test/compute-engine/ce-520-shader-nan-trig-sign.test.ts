@@ -95,7 +95,7 @@ describe('CE-520 — the NaN-safe helpers', () => {
     );
     const s = shader(['Smoothstep', 0, 1, 'x'], 'glsl').preamble;
     expect(s).toContain(
-      'return (_gpu_isnan(e0) ? e0 : (_gpu_isnan(e1) ? e1 : (_gpu_isnan(x) ? x : smoothstep(e0, e1, x))));'
+      'return (_gpu_isnan(e0) ? e0 : (_gpu_isnan(e1) ? e1 : (_gpu_isnan(x) ? x : (e0 == e1 ? (x < e0 ? 0.0 : 1.0) : _gpu_hermite(min(max((x - e0) / (e1 - e0), 0.0), 1.0))))));'
     );
   });
 

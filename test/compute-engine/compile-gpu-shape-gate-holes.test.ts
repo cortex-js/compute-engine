@@ -170,8 +170,15 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
   });
 
   it('an all-scalar fold calls the scalar helper', () => {
+    // Finite operands call the built-in (`gpuProvablyFinite`); an operand
+    // that may be NaN calls the helper.
     expect(g(['ElementMax', 1, 2, 3, 4])).toBe(
-      '_gpu_max(_gpu_max(_gpu_max(1.0, 2.0), 3.0), 4.0)'
+      'max(max(max(1.0, 2.0), 3.0), 4.0)'
+    );
+    const cn = new ComputeEngine();
+    cn.declare('u', 'number');
+    expect(g(['ElementMax', 'u', 2, 3], cn)).toBe(
+      '_gpu_max(_gpu_max(u, 2.0), 3.0)'
     );
   });
 

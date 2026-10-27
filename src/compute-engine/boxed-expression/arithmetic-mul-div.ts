@@ -1863,10 +1863,14 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // is undefined (finiteness is not propagated through Sqrt) — sent the
   // division to NaN. Requiring a definite sign on op2 keeps could-be-zero
   // constants (e.g. sin(π)) out; the sign of op1 (incl. complex ∞) is carried
-  // by op1 / op1.neg().
+  // by op1 / op1.neg(). The denominator must be finite by its flag or by its
+  // type: an unevaluated sum of infinities (`∞ + ∞`, which the canonical
+  // form does not fold) has no finiteness flag but the type
+  // `nan | signed_infinity`, and `∞/(∞ + ∞)` has no value; it was `+∞`, and
+  // the evaluation of `∞ − (−∞)` as a denominator gave the same answer.
   if (
     op1.isInfinity &&
-    op2.isFinite !== false &&
+    (op2.isFinite === true || op2.type.matches('finite_number')) &&
     (op2.isPositive === true || op2.isNegative === true)
   )
     return op2.isPositive === true ? op1 : op1.neg();

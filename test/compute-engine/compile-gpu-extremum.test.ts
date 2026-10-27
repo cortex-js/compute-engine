@@ -116,8 +116,9 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
   });
 
   it('a scalar-only Max/Min is unchanged (no parentheses, no reduction)', () => {
-    expect(g(['Max', 1, 2, 3])).toBe('_gpu_max(_gpu_max(1.0, 2.0), 3.0)');
-    expect(w(['Min', 1, 2, 3])).toBe('_gpu_min(_gpu_min(1.0, 2.0), 3.0)');
+    // Finite operands call the built-in (`gpuProvablyFinite`).
+    expect(g(['Max', 1, 2, 3])).toBe('max(max(1.0, 2.0), 3.0)');
+    expect(w(['Min', 1, 2, 3])).toBe('min(min(1.0, 2.0), 3.0)');
     expect(g(['Min', 5])).toBe('5.0');
   });
 

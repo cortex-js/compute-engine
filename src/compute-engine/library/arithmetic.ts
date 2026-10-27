@@ -13447,6 +13447,75 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       },
     },
 
+    Smoothstep: {
+      description:
+        'Smooth Hermite interpolation between 0 and 1 as x goes from e0 to e1: t²(3 − 2t) with t = Clamp((x − e0)/(e1 − e0), 0, 1). Broadcasts over collection arguments.',
+      examples: [
+        '[Smoothstep(0, 1, -1), Smoothstep(0, 1, 1/2), Smoothstep(0, 1, 2)]',
+      ],
+      complexity: 1200,
+      broadcastable: true,
+      signature:
+        '(real | signed_infinity, real | signed_infinity, real | signed_infinity) -> real | nan',
+      nanBehavior: 'propagate',
+      // A finite real when both edges are finite. An infinite edge can give
+      // a quotient with no value (`∞/∞` for `Smoothstep(−∞, ∞, 0)`).
+      type: ([e0, e1], context) =>
+        BoxedType.forResult(
+          e0 !== undefined &&
+            e1 !== undefined &&
+            isSubtype(e0.type, 'finite_real') &&
+            isSubtype(e1.type, 'finite_real')
+            ? 'real'
+            : 'real | nan',
+          context.engine._typeResolver
+        ),
+      // The operands are `e0`, `e1`, `x`, in the order of the GLSL and WGSL
+      // built-in `smoothstep(e0, e1, x)`. With `e0 = e1` the result is the
+      // step function (0 when `x < e0`, else 1), the limit of the formula.
+      // With `e0 > e1` the formula is used as written: the result falls from
+      // 1 to 0 as `x` goes from `e1` to `e0`. The built-in has no defined
+      // result when `e0 >= e1`, so the shader targets write the formula out
+      // (`_gpu_smoothstep`, `compilation/gpu-target.ts`), and every target
+      // gives these values.
+      evaluate: ([e0, e1, x], { engine: ce, numericApproximation }) => {
+        const n = numericApproximation === true;
+        // The edges are compared by their exact order, with no tolerance, as
+        // the compiled targets compare them: `Smoothstep(0, 1e-12, 5e-13)` is
+        // `1/2`, not the step of equal edges.
+        const edges = exactOrder(e0, e1);
+        if (edges === undefined) return undefined;
+        if (edges === 0) {
+          const below = exactOrder(x, e0);
+          if (below === undefined) return undefined;
+          return below < 0 ? ce.Zero : ce.One;
+        }
+        // t = Clamp((x − e0) / (e1 − e0), 0, 1), exact when the operands are.
+        // The differences are evaluated first, so that an infinite edge
+        // gives `∞/∞` and its `Indeterminate`.
+        const ratio = ce
+          .function('Divide', [
+            ce.function('Subtract', [x, e0]).evaluate(),
+            ce.function('Subtract', [e1, e0]).evaluate(),
+          ])
+          .evaluate();
+        const lower = scalarExtremum(ratio, ce.Zero, true, false);
+        if (lower === undefined) return undefined;
+        const t = scalarExtremum(lower, ce.One, false, false);
+        if (t === undefined) return undefined;
+        const value = ce
+          .function('Multiply', [
+            ce.function('Square', [t]),
+            ce.function('Subtract', [
+              ce.number(3),
+              ce.function('Multiply', [ce.number(2), t]),
+            ]),
+          ])
+          .evaluate();
+        return n ? value.N() : value;
+      },
+    },
+
     Supremum: {
       description:
         'Like Max, but defined for open sets. Nothing data are omitted.',
