@@ -1209,6 +1209,17 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * Two definitions may give a helper of the same name only with the same
      * source.
      *
+     * On the `interval-javascript` target, a compiled operand comes in one
+     * of two forms, and a helper must accept both: a bare enclosure
+     * `{ lo, hi }` (an input such as `_.x`), or the result of an interval
+     * function, `{ kind: 'interval', value: { lo, hi } }` (for example
+     * `_IA.sqrt(_.x)`, or any operand in a branch of an `If` whose
+     * condition narrows it). A result can also be `{ kind: 'partial',
+     * value: { lo, hi }, … }`, `{ kind: 'empty' }`, `{ kind: 'entire' }`
+     * or `{ kind: 'singular', … }`. A helper that reads only `x.lo` reads
+     * `undefined` from the second form, with no error. A helper can return
+     * either form.
+     *
      * ```ts
      * ce.declare('Wrap', {
      *   signature: '(number, number) -> number',
