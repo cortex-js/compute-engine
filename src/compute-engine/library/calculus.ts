@@ -3,6 +3,7 @@ import { appliedLiteralResultType } from '../boxed-expression/call-result-type.j
 import { heldDenotedType } from './held-operand-type.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
+  BoxedDefinition,
   BoxedValueDefinition,
   Expression,
   IComputeEngine as ComputeEngine,
@@ -33,6 +34,7 @@ import {
   withValueShield,
   isOperatorDef,
   isValueDef,
+  awaitedOperandOptions,
 } from '../boxed-expression/utils.js';
 import {
   isAbsentArithmeticOperand,
@@ -50,13 +52,17 @@ import {
   operandsFrom,
   indexingSetSites,
   limitsIndexSites,
+  indefiniteIntegralVariables,
 } from '../boxed-expression/binding-sites.js';
 import { conditionalValue } from '../boxed-expression/conditional-value.js';
 import {
   boundVariableBindings,
   boundVariableNamesInOperand,
+  calledParameterValue,
+  callableBindingInContext,
   ownBindingRewriteCount,
   parameterActivationValue,
+  parameterValueVariesWith,
   rewriteWithBinders,
   sameBindingDef,
 } from '../boxed-expression/binders.js';
@@ -251,6 +257,220 @@ const MAX_NESTED_PARTIAL_ORDER = 64;
 // Anything outside this small table fails closed (caller stays inert) rather
 // than leaking an indeterminate form.
 //
+
+/**
+ * The result of a binder whose value is an open expression in its variables
+ * (`D`, `Series`, an indefinite `Integrate`), re-bound to the enclosing
+ * scope (`rebindEscapingCurrentScope`), with each occurrence of one of the
+ * `variables` that now denotes a parameter of the running function call
+ * replaced by the value of the parameter in the call.
+ *
+ * In `x ↦ D(x^2, x)`, the value `2x` of the derivative is an expression in
+ * the parameter `x`. The re-binding binds the `x` of `2x` to the binding of
+ * the call frame for the parameter. The call replaces such occurrences by the
+ * argument when its body is evaluated, except when the argument contains a
+ * symbol with the same name (`x + 1`): an occurrence bound to the frame can
+ * then come from the argument, which was bound in the frame, and the call
+ * does not replace it (`bindingKeyedSubs`, `function-utils.ts`). So
+ * `(x ↦ D(x^2, x))(x + 1)` gave `2x`. An occurrence that comes from the
+ * variable of the binder cannot come from the argument, so it is replaced
+ * here, where this is known: the value is `2(x + 1)`.
+ */
+function rebindEscapingBinderResult(
+  ce: ComputeEngine,
+  result: Expression,
+  variables: readonly string[],
+  numericApproximation: boolean | undefined
+): Expression {
+  const rebound = rebindEscapingCurrentScope(ce, result);
+  if (variables.length === 0) return rebound;
+  let closedValues = true;
+  const inlined = rewriteWithBinders(rebound, (s, shadowed) => {
+    if (shadowed?.has(s.symbol) || !variables.includes(s.symbol)) return s;
+    const value = parameterActivationValue(ce, s);
+    if (value === undefined) return s;
+    if (value.freeVariables.length > 0) closedValues = false;
+    return value;
+  });
+  // The result was folded before the values were put in it: `2x` at `3.5`
+  // is `2 · 3.5`. It is folded again, with the numeric request of the
+  // handler, when each value has no free variable.
+  // A value with a free variable is not evaluated here, in the call frame:
+  // its `x` would be read as the parameter `x`.
+  // A series keeps its `BigO` remainder, and a sum that holds a float and a
+  // `BigO` term folds to `NaN` (the remainder has no numeric value). The
+  // expansion is not folded here, so that `Normal` can strip the remainder
+  // first: `Normal(Series(sin x, x, 0, 3))` at `0.5` is `0.479…`; it was
+  // `NaN`, and the same under `.N()`.
+  return inlined !== rebound && closedValues && !inlined.has('BigO')
+    ? inlined.evaluate({ numericApproximation })
+    : inlined;
+}
+
+/**
+ * The names of the parameters of the running function call that `operand`
+ * reads, whose value holds a symbol with the name of one of `variables` but
+ * does not vary with that variable (`parameterValueVariesWith`). Call it
+ * inside the evaluation of the binder (`D`, `Integrate`) whose variables
+ * these are.
+ *
+ * In `(x, y) ↦ D(x·y, x)` applied at `(3, x)`, the value of `y` is the `x`
+ * of the caller. Read during the differentiation, it was folded with the
+ * variable `x` of the `D`: the product rule gave `x + 3`, and
+ * `(x, a) ↦ ∫ a·x dx` at `(x + 1, x)` gave `x³/2`. The binder shields these
+ * parameters, so that they are opaque symbols while it works (`D(x·y, x)`
+ * is `y`), and the call puts their values in its result after.
+ */
+function independentParameterNames(
+  ce: ComputeEngine,
+  operand: Expression,
+  variables: readonly string[]
+): string[] {
+  if (variables.length === 0) return [];
+  const names = new Set<string>();
+  rewriteWithBinders(operand, (s, shadowed) => {
+    const name = s.symbol;
+    if (shadowed?.has(name) || variables.includes(name) || names.has(name))
+      return s;
+    const v = parameterActivationValue(ce, s);
+    if (
+      v !== undefined &&
+      variables.some((n) => v.has(n)) &&
+      !variables.some((n) => parameterValueVariesWith(ce, v, n))
+    )
+      names.add(name);
+    return s;
+  });
+  return [...names];
+}
+
+/**
+ * The call `app` of a parameter of the running function call that holds a
+ * function, as an application of that function: `f(x)` becomes
+ * `Apply(value, x)`, where `ops` are the operands of `app` after a rewrite.
+ * `undefined` when the operator of `app` is not such a parameter, or is
+ * bound by a binder between the operand and `app` (`shadowed`).
+ *
+ * `differentiate()` reads the body of a called function by the name of the
+ * function. The value of the parameter `w` in `w ↦ D(w(x), x)` applied to
+ * `x ↦ 5·w(x)` calls the user function `w(x) := x + 100`, a different
+ * function with the same name: read by name, the call was taken for a
+ * recursive call and the derivative was `Apply(Derivative(w, 1), x)`, whose
+ * `w` was then read as the user function. The application of the value is
+ * differentiated as the value, with the name `w` bound to the user function
+ * while the binder works (`withOperandBindings`): the derivative is 5.
+ *
+ * The name of each parameter that is replaced is added to `replaced`.
+ */
+function callOfFunctionParameter(
+  ce: ComputeEngine,
+  app: Expression,
+  ops: ReadonlyArray<Expression>,
+  shadowed: ReadonlySet<string> | undefined,
+  replaced: Set<string>
+): Expression | undefined {
+  if (shadowed?.has(app.operator)) return undefined;
+  const value = calledParameterValue(ce, app);
+  if (value === undefined || !value.type.matches('function')) return undefined;
+  replaced.add(app.operator);
+  return ce.function('Apply', [value, ...ops], {
+    form: app.isCanonical ? 'canonical' : 'raw',
+  });
+}
+
+/**
+ * The value of `app`, an application `Apply(ℓ, …ops)` of a function literal
+ * `ℓ`, where `ops` are the operands of `app` after a rewrite: the body of
+ * the literal with the arguments in place of its parameters, as the
+ * evaluation of `Apply` gives it (`Apply(t ↦ t^2, x)` is `x^2`).
+ * `undefined` when `app` is not such an application, or when its
+ * evaluation does not reduce it (the arguments do not fit the parameters).
+ */
+function appliedFunctionLiteral(
+  ce: ComputeEngine,
+  app: Expression,
+  ops: ReadonlyArray<Expression>
+): Expression | undefined {
+  if (app.operator !== 'Apply' || !isFunction(ops[0], 'Function'))
+    return undefined;
+  const value = ce.function('Apply', ops).evaluate();
+  return value.operator === 'Apply' ? undefined : value;
+}
+
+/**
+ * Run `fn` with each of `names` bound to the definition that its
+ * occurrences in `operand` denote, in a scope pushed for the run.
+ *
+ * `names` are parameters of the running function call whose calls in
+ * `operand` were replaced by applications of their values
+ * (`callOfFunctionParameter`). An occurrence of such a name that is left in
+ * `operand` comes from a value: in `w ↦ D(w(x), x)` applied to
+ * `x ↦ 5·w(x)`, the `w` of the value is the user function `w`, not the
+ * parameter. `differentiate()` and the integration read a called function by
+ * its name in the current scope, where the name is the parameter. In the
+ * pushed scope, the name is the user function.
+ *
+ * A name is bound only when all its occurrences in `operand` denote one
+ * definition that is not the parameter (an occurrence of the parameter that
+ * is not a call, such as `w` in `Length([w])`, is still there). Otherwise,
+ * the scope does not bind it.
+ */
+function withOperandBindings<T>(
+  ce: ComputeEngine,
+  operand: Expression | undefined,
+  names: ReadonlySet<string>,
+  fn: () => T
+): T {
+  if (operand === undefined || names.size === 0) return fn();
+  const bindings = new Map<string, BoxedDefinition>();
+  for (const name of names) {
+    // `undefined`: no occurrence yet; `null`: no single definition.
+    let entry: BoxedDefinition | null | undefined;
+    const note = (e: Expression, isParameter: boolean): void => {
+      if (entry === null) return;
+      const own =
+        e.valueDefinition !== undefined
+          ? { value: e.valueDefinition }
+          : e.operatorDefinition !== undefined
+            ? { operator: e.operatorDefinition }
+            : undefined;
+      const found =
+        isParameter || own === undefined
+          ? undefined
+          : callableBindingInContext(ce, name, own);
+      if (found === undefined) entry = null;
+      else if (entry === undefined) entry = found;
+      else if (entry !== found) entry = null;
+    };
+    rewriteWithBinders(
+      operand,
+      (s, shadowed) => {
+        if (s.symbol === name && !shadowed?.has(name))
+          note(s, parameterActivationValue(ce, s) !== undefined);
+        return s;
+      },
+      undefined,
+      false,
+      undefined,
+      (app, _ops, shadowed) => {
+        if (app.operator === name && !shadowed?.has(name))
+          note(app, calledParameterValue(ce, app) !== undefined);
+        return undefined;
+      }
+    );
+    if (entry && entry !== ce.lookupDefinition(name)) bindings.set(name, entry);
+  }
+  if (bindings.size === 0) return fn();
+  ce.pushScope({ parent: ce.context.lexicalScope, bindings });
+  try {
+    return fn();
+  } finally {
+    // The scope borrows definitions: popping it must not dispose of their
+    // facts.
+    bindings.clear();
+    ce.popScope();
+  }
+}
 
 /**
  * Classify a single node as a limit-point endpoint leak. Returns:
@@ -5000,11 +5220,23 @@ volumes
         );
         if (declined !== undefined) return declined;
 
+        // A parameter of the running call whose value does not vary with a
+        // differentiation variable but holds a symbol with its name is
+        // shielded too: its value is put in by the call, after the
+        // derivative (`independentParameterNames`).
+        const independent = independentParameterNames(
+          ce,
+          isFunction(ops[0].canonical, 'Function')
+            ? ops[0].canonical.op1
+            : ops[0].canonical,
+          diffVars
+        );
+
         const result = withDeclinedDerivativeMemo(
           expression,
           numericApproximation === true,
           () =>
-            withValueShield(ce, diffVars, () => {
+            withValueShield(ce, [...diffVars, ...independent], () => {
               let f: Expression | undefined = ops[0].canonical;
 
               // Unwrap Function literals to get the body for differentiation.
@@ -5020,42 +5252,56 @@ volumes
               // that variable: in `g(f) = D(f, x)`, the call `g(x^2)` gives
               // `f` the value `x^2`, which `differentiate()` would not see
               // through the bare symbol and would take as 0 (CE-157).
-              f = rewriteWithBinders(f, (s, shadowed) => {
-                if (shadowed?.has(s.symbol) || diffVars.includes(s.symbol))
-                  return s;
-                const v = parameterActivationValue(ce, s);
-                return v !== undefined && diffVars.some((n) => v.has(n))
-                  ? v
-                  : s;
-              });
+              // A call of a parameter that holds a function is a call of
+              // its value (`callOfFunctionParameter`).
+              const replaced = new Set<string>();
+              f = rewriteWithBinders(
+                f,
+                (s, shadowed) => {
+                  if (shadowed?.has(s.symbol) || diffVars.includes(s.symbol))
+                    return s;
+                  const v = parameterActivationValue(ce, s);
+                  return v !== undefined &&
+                    diffVars.some((n) => parameterValueVariesWith(ce, v, n))
+                    ? v
+                    : s;
+                },
+                undefined,
+                false,
+                undefined,
+                (app, appOps, shadowed) =>
+                  callOfFunctionParameter(ce, app, appOps, shadowed, replaced)
+              );
 
-              const params = ops.slice(1);
-              if (params.length === 0) f = undefined;
-              for (const param of params) {
-                const paramSym = sym(param);
-                if (!paramSym) {
-                  f = undefined;
-                  break;
+              return withOperandBindings(ce, f, replaced, () => {
+                const params = ops.slice(1);
+                if (params.length === 0) f = undefined;
+                for (const param of params) {
+                  const paramSym = sym(param);
+                  if (!paramSym) {
+                    f = undefined;
+                    break;
+                  }
+                  f = differentiate(f!, paramSym);
+                  if (f === undefined) break;
                 }
-                f = differentiate(f!, paramSym);
-                if (f === undefined) break;
-              }
-              f = f?.canonical;
-              // Avoid recursive evaluation
-              if (f?.operator === 'D') return f;
-              // Avoid evaluating symbolic derivative applications like Digamma'(x)
-              // which would incorrectly evaluate to 0
-              if (
-                f?.operator === 'Apply' &&
-                isFunction(f) &&
-                f.op1?.operator === 'Derivative'
-              )
-                return f;
-              // Fold the raw rule output: a plain `evaluate()`, except that a
-              // result carrying symbolic transcendentals (like `ln(2)`) is
-              // returned as it stands to preserve the symbolic form, and a
-              // piecewise result is folded arm by arm.
-              return f === undefined ? undefined : foldDerivativeResult(f);
+                f = f?.canonical;
+                // Avoid recursive evaluation
+                if (f?.operator === 'D') return f;
+                // Avoid evaluating symbolic derivative applications like Digamma'(x)
+                // which would incorrectly evaluate to 0
+                if (
+                  f?.operator === 'Apply' &&
+                  isFunction(f) &&
+                  f.op1?.operator === 'Derivative'
+                )
+                  return f;
+                // Fold the raw rule output: a plain `evaluate()`, except that a
+                // result carrying symbolic transcendentals (like `ln(2)`) is
+                // returned as it stands to preserve the symbolic form, and a
+                // piecewise result is folded arm by arm.
+                return f === undefined ? undefined : foldDerivativeResult(f);
+              });
             })
         );
         // The memo recorded the decline: the node is its value.
@@ -5068,7 +5314,12 @@ volumes
         // the repair `Series` (stage 1) and `Integrate` (stage 5) both needed.
         return result === undefined
           ? undefined
-          : rebindEscapingCurrentScope(ce, result);
+          : rebindEscapingBinderResult(
+              ce,
+              result,
+              diffVars,
+              numericApproximation
+            );
       },
       compile: (args, compile, context) =>
         compileDerivative('D', args, compile, context),
@@ -5613,20 +5864,46 @@ volumes
           const substituted = substitutedIntegrands.some((e) =>
             e.isSame(lifted)
           );
+          // A call of a parameter that holds a function is a call of its
+          // value (`callOfFunctionParameter`). The integration has no rule
+          // for an application of a function literal, so the application
+          // is evaluated: `Apply(t ↦ t^2, x)` is `x^2`. An application of a
+          // literal written in the integrand is evaluated too: the integral
+          // of `Apply(t ↦ t^2, x)` stayed unevaluated.
+          const replaced = new Set<string>();
           const withValues = substituted
             ? lifted
-            : rewriteWithBinders(lifted, (s, shadowed) => {
-                if (shadowed?.has(s.symbol) || names.includes(s.symbol))
-                  return s;
-                const v = parameterActivationValue(ce, s);
-                return v !== undefined && names.some((n) => v.has(n)) ? v : s;
-              });
+            : rewriteWithBinders(
+                lifted,
+                (s, shadowed) => {
+                  if (shadowed?.has(s.symbol) || names.includes(s.symbol))
+                    return s;
+                  const v = parameterActivationValue(ce, s);
+                  return v !== undefined &&
+                    names.some((n) => parameterValueVariesWith(ce, v, n))
+                    ? v
+                    : s;
+                },
+                undefined,
+                false,
+                undefined,
+                (app, appOps, shadowed) =>
+                  callOfFunctionParameter(
+                    ce,
+                    app,
+                    appOps,
+                    shadowed,
+                    replaced
+                  )?.evaluate() ?? appliedFunctionLiteral(ce, app, appOps)
+              );
           if (withValues !== lifted) {
             substitutedIntegrands.push(withValues);
             try {
-              return ce
-                .function('Integrate', [withValues, ...ops.slice(1)])
-                .evaluate({ numericApproximation });
+              return withOperandBindings(ce, withValues, replaced, () =>
+                ce
+                  .function('Integrate', [withValues, ...ops.slice(1)])
+                  .evaluate({ numericApproximation })
+              );
             } finally {
               substitutedIntegrands.pop();
             }
@@ -5997,7 +6274,25 @@ volumes
           }
         }
 
-        if (numericApproximation) {
+        // An indefinite integral (every limit has no bounds) has no numeric
+        // value to compute by quadrature: the numeric route below read the
+        // `Nothing` bounds as `NaN` and kept the integral unevaluated, so
+        // `Apply(x ↦ ∫sin(x) dx, 1).N()` was `∫sin(x) dx` while `.evaluate()`
+        // gave `−cos(1)`. Its antiderivative is computed exactly, by the
+        // symbolic route below, and the numeric request applies to the
+        // result (`rebindEscapingBinderResult()`, which puts the values of
+        // the parameters of a running call in place of the variable).
+        const indefinite =
+          ops.length > 1 &&
+          ops
+            .slice(1)
+            .every(
+              (l) =>
+                isFunction(l, 'Limits') &&
+                sym(l.op2) === 'Nothing' &&
+                sym(l.op3) === 'Nothing'
+            );
+        if (numericApproximation && !indefinite) {
           // If a numeric approximation is requested, equivalent to NIntegrate
           const f = ops[0];
 
@@ -6280,7 +6575,15 @@ volumes
           return undefined;
         }
 
-        const result = withValueShield(ce, intVarNames, () => {
+        // A parameter of the running call whose value does not vary with an
+        // integration variable but holds a symbol with its name is shielded
+        // too: its value is put in by the call, after the integration
+        // (`independentParameterNames`).
+        const shielded = [
+          ...intVarNames,
+          ...independentParameterNames(ce, liftIntegrand(ops[0]), intVarNames),
+        ];
+        const result = withValueShield(ce, shielded, () => {
           let expr = ops[0];
           const argNames = isFunction(expr)
             ? expr.ops.slice(1).map((x) => sym(x))
@@ -6983,7 +7286,12 @@ volumes
         // leaves the frame still referencing the dying binding and compares
         // unequal to the same expression written in the ambient scope — the
         // repair `Series` needed for exactly the same reason (stage 1).
-        return rebindEscapingCurrentScope(ce, result);
+        return rebindEscapingBinderResult(
+          ce,
+          result,
+          [...((expression && indefiniteIntegralVariables(expression)) ?? [])],
+          numericApproximation
+        );
       },
     },
 
@@ -7576,18 +7884,34 @@ volumes
         if (!x || !x0) return undefined;
         let n = Math.floor(nExpr?.N().re ?? 5);
         if (!Number.isFinite(n)) n = 5;
+        // A call of a parameter that holds a function is a call of its
+        // value (`callOfFunctionParameter`).
+        const replaced = new Set<string>();
+        const operand = rewriteWithBinders(
+          f,
+          (s) => s,
+          undefined,
+          false,
+          undefined,
+          (app, appOps, shadowed) =>
+            callOfFunctionParameter(ce, app, appOps, shadowed, replaced)
+        );
         // Inject the limit resolver: series.ts cannot import symbolicLimit
         // (limit.ts imports its laurentData — the 7c pole wiring), so the
         // ±∞ coefficient limits are resolved through this parameter.
-        const result = computeSeries(f, x, x0, n, ce, symbolicLimit);
+        const result = withOperandBindings(ce, operand, replaced, () =>
+          computeSeries(operand, x, x0, n, ce, symbolicLimit)
+        );
         // No result: leave `Series(...)` unevaluated (deferred singular case).
         if (!result) return undefined;
         // The expansion is an OPEN expression in the expansion variable, which
         // this node binds in its own scope: re-bind it so the result denotes
         // the ambient variable rather than a binding of the frame being popped.
-        return rebindEscapingCurrentScope(
+        return rebindEscapingBinderResult(
           ce,
-          numericApproximation ? result.N() : result
+          numericApproximation ? result.N() : result,
+          [x],
+          numericApproximation
         );
       },
     },
@@ -7626,11 +7950,29 @@ volumes
       // unchanged) keeps its own type instead of a false `number` claim.
       type: ([x], context) =>
         BoxedType.forResult(x?.type ?? 'value', context.engine._typeResolver),
+      // Lazy: the operand is evaluated EXACTLY here, the remainder is
+      // stripped, and only then the numeric request is applied. When the
+      // operand arrived evaluated with the request, a numeric request made
+      // the series `NaN` before `Normal` saw it (`BigO` is `NaN` under
+      // `.N()`): `Normal(Series(sin x, x, 0, 3)).N()` was `NaN`, and so was
+      // the series at a float point. The held operand is unbound, so it is
+      // canonicalized first (see "lazy operators" in `CLAUDE.md`).
+      lazy: true,
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;
-        // Not lazy: the operand (typically a `Series`) is already evaluated.
-        const stripped = normalStrip(x);
+        const stripped = normalStrip(x.canonical.evaluate());
         return numericApproximation ? stripped.N() : stripped;
+      },
+      // The same on the asynchronous route: the operand is awaited exactly
+      // (the numeric request is withheld from it), the remainder is
+      // stripped, and the numeric request applies to what is left.
+      evaluateAsync: async ([x], options) => {
+        if (!x) return x;
+        const value = await x.canonical.evaluateAsync(
+          awaitedOperandOptions(options, { numericApproximation: false })
+        );
+        const stripped = normalStrip(value);
+        return options.numericApproximation ? stripped.N() : stripped;
       },
     },
   },

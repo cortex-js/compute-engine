@@ -681,7 +681,7 @@ export function canonicalFunctionLiteralOperands(
  * path falls back to the body's unknowns; the `["Function", body]` path keeps
  * the literal nullary).
  */
-function anonymousParameters(
+export function anonymousParameters(
   expr: Expression
 ): [body: Expression, params: Expression[]] {
   // Replace '_' with '_1'. The substitution is NOT canonicalized: a
@@ -5908,9 +5908,19 @@ function makeLambda(
       if (value.symbols.some((s) => bodySymbols.has(s))) return undefined;
       written.set(param.symbol, value);
     }
-    const applied = rewriteWithBinders(e, (sym, shadowed) =>
-      shadowed?.has(sym.symbol) ? sym : (written.get(sym.symbol) ?? sym)
-    );
+    // A binder of `e` that binds the name of a parameter (`x ↦ D(x^2, x)`)
+    // makes the substitution not safe: its occurrences are not replaced, but
+    // the value of `D`, of `Series` or of an indefinite `Integrate` is an
+    // expression in that name, which then denotes the parameter. The
+    // substituted `D(x^2, x)` gave `2x` under `.N()`, not the derivative at
+    // the argument. The call frame replaces such occurrences.
+    let bindsParameter = false;
+    const applied = rewriteWithBinders(e, (sym, shadowed) => {
+      if (!shadowed?.has(sym.symbol)) return written.get(sym.symbol) ?? sym;
+      if (written.has(sym.symbol)) bindsParameter = true;
+      return sym;
+    });
+    if (bindsParameter) return undefined;
     return applied.canonical;
   };
 

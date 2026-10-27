@@ -67,6 +67,7 @@ import type {
 } from '../global-types.js';
 
 import {
+  anonymousParameters,
   applicable,
   capturedValueMismatchNow,
   exactArgumentSources,
@@ -2440,8 +2441,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
         // `assume(p > 3); f := x ↦ (p > 2)` froze `(unknown) -> true`, which
         // survived `forget(p)`.
         this._setSignature(() => {
-          const body = boxedFn.ops[0];
-          const params = boxedFn.ops.slice(1);
+          // A literal with no parameter list whose body has anonymous
+          // parameters (`_`, `_1`, `_2`, …) takes one argument for each of
+          // them, as its application does (`canonicalFunctionLiteral()`
+          // makes them the parameters): the handler `_ + 1` has the
+          // signature `(unknown) -> unknown`, not `() -> unknown`, so that a
+          // caller that reads the declared counts (`EvaluateAt`) can trust
+          // them.
+          const [body, params] =
+            boxedFn.nops === 1
+              ? anonymousParameters(boxedFn.ops[0])
+              : [boxedFn.ops[0], boxedFn.ops.slice(1)];
           // The signature is assembled as a Type OBJECT, never as a string
           // that is re-parsed: a body type may REFERENCE a type declared
           // inside the body's own scope

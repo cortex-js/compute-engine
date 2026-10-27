@@ -1967,14 +1967,42 @@ export interface Expression {
    * The occurrences replaced are exactly those that `freeVariables` reports
    * as free. A name bound by a binder is not replaced where the binder binds
    * it: the index of a `Sum`, `Product` or `Comprehension`, the parameter of
-   * a `Function` literal, the variable of a definite or indefinite
-   * `Integrate`, a local of a `Block`. The variable of `D` or `Series` is
-   * free (it stays in the value), so it is replaced. So `["Sum", "j", ["Limits", "j", 1, 3]]` is unchanged by
+   * a `Function` literal, the variable of a definite `Integrate`, a local of
+   * a `Block`. So `["Sum", "j", ["Limits", "j", 1, 3]]` is unchanged by
    * `subs({j: 5})`, and in `["Add", "j", ["Sum", "j", ["Limits", "j", 1, 3]]]`
    * only the first `j` is replaced. The bounds of a `Limits` clause of a
    * `Sum`, `Product` or `Integrate` read the enclosing binding, so they are
    * replaced: `["Sum", "j", ["Limits", "j", 1, "j"]]` with `j` replaced by
    * `4` is `["Sum", "j", ["Limits", "j", 1, 4]]`.
+   *
+   * The variable of `D`, the expansion variable of `Series` and the variable
+   * of an indefinite `Integrate` are free: the value of the expression is a
+   * function of them. When such a variable is replaced, the expression keeps
+   * its variable, and the result is the value of the expression at the
+   * point: `["D", ["Power", "x", 2], "x"]` with `x` replaced by `3` is
+   * `["EvaluateAt", ["Function", ["D", ["Power", "x", 2], "x"], "x"], 3]`,
+   * written `\left.\left(\frac{\mathrm{d}x^2}{\mathrm{d}x}\right)\right|_{x=3}`,
+   * which evaluates to `6`. Only the variable itself is applied at a
+   * point. The replacement of another name is put in the derivative, the
+   * series or the integral before it is computed: `["D", ["Multiply", "y",
+   * ["Power", "x", 2]], "x"]` with `y` replaced by `3` is `["D",
+   * ["Multiply", 3, ["Power", "x", 2]], "x"]`, and `["D", ["Multiply", "x",
+   * "y"], "x"]` with `y` replaced by `x` is `["D", ["Multiply", "x", "x"],
+   * "x"]`, which evaluates to `2x`. When more than one such variable is
+   * replaced, the `Function` literal has one parameter per variable, the
+   * point is a `Tuple`, and all the variables are replaced at the same time:
+   * `\left.\left(…\right)\right|_{x=3, y=5}`. A replacement can contain the
+   * variable: with `x` replaced by `x + 1`, the `D` above evaluates to
+   * `2(x + 1)`, where the `x` of `x + 1` is the `x` of the enclosing scope.
+   * When the value has no
+   * closed form (`Series(e^{1/x}, x, 0, 3)`), the `EvaluateAt` stays
+   * unevaluated. The value of a `Series` at a point keeps its remainder:
+   * `Series(sin x, x, 0, 3)` with `x` replaced by `1/2` evaluates to
+   * `23/48 + BigO(1/32)`, and with `x` replaced by `0` to `BigO(0)`. A
+   * value that keeps a `BigO` term is `NaN` under `.N()` (the remainder has
+   * no numeric value): wrap the series in `Normal` to drop the remainder,
+   * before or after the substitution. `Normal(Series(sin x, x, 0, 3))` with
+   * `x` replaced by `0.5` evaluates to `0.479…` under `.N()`.
    *
    * The substitution does not avoid variable capture: a replacement that
    * contains a name that a binder binds is inserted as it is, and the

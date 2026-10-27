@@ -148,33 +148,169 @@ describe('MATCHFIX null delimiter (\\right.)', () => {
       canonical = x
     `));
 
+  // The subscript `_{x=2}` is the point of the `EvaluateAt`. It was read
+  // as a `Subscript` of `EvaluateAt(x^2)`.
   test('\\left.x^2\\right|_{x=2} (null open still works)', () =>
-    expect(engine.parse(`\\left.x^2\\right|_{x=2}`).json)
-      .toMatchInlineSnapshot(`
+    expect(engine.parse(`\\left.x^2\\right|_{x=2}`).json).toEqual([
+      'EvaluateAt',
+      ['Function', ['Block', ['Power', 'x', 2]], 'x'],
+      2,
+    ]));
+});
+
+describe('EVALUATEAT LATEX ROUND TRIP', () => {
+  // The LaTeX that `EvaluateAt` serializes to parses back to the same
+  // expression, and the value is the same.
+  const cases: [Parameters<typeof engine.box>[0], string][] = [
+    [
+      ['EvaluateAt', ['Function', ['Power', 'x', 2], 'x'], 3],
+      '\\left.\\left(x^2\\right)\\right|_{x=3}',
+    ],
+    [
+      ['EvaluateAt', ['Function', ['Power', 'x', 2], 'x'], 1, 3],
+      '\\left.\\left(x^2\\right)\\right|_{x=1}^{3}',
+    ],
+    [
       [
-        Subscript,
-        [
-          EvaluateAt,
-          [
-            Function,
-            [
-              Block,
-              [
-                Power,
-                x,
-                2,
-              ],
-            ],
-            x,
-          ],
-        ],
-        [
-          Equal,
-          x,
-          2,
-        ],
-      ]
-    `));
+        'EvaluateAt',
+        ['Function', ['Multiply', 'a', ['Power', 'x', 2]], 'x'],
+        'a',
+        'b',
+      ],
+      '\\left.\\left(ax^2\\right)\\right|_{x=a}^{b}',
+    ],
+    [
+      [
+        'EvaluateAt',
+        ['Function', ['Multiply', 'x', 'y'], 'x', 'y'],
+        ['Tuple', 1, 2],
+      ],
+      '\\left.\\left(xy\\right)\\right|_{x=1, y=2}',
+    ],
+    // Two points are the bounds of a difference, also for a function that
+    // is not a literal.
+    [
+      ['EvaluateAt', 'Sin', 1, 2],
+      '\\left.\\left(\\sin\\right)\\right|_{1}^{2}',
+    ],
+    [['EvaluateAt', 'Sin', 1], '\\left.\\left(\\sin\\right)\\right|_{1}'],
+    // A literal of several parameters between two bounds, a list of three
+    // points, a tuple point whose length is not the number of parameters,
+    // and no point.
+    [
+      ['EvaluateAt', ['Function', ['Multiply', 'x', 'y'], 'x', 'y'], 1, 2],
+      '\\left.\\left((x, y)\\mapsto xy\\right)\\right|_{1}^{2}',
+    ],
+    [
+      ['EvaluateAt', 'Sin', 1, 2, 3],
+      '\\left.\\left(\\sin\\right)\\right|_{1, 2, 3}',
+    ],
+    [
+      [
+        'EvaluateAt',
+        ['Function', ['Multiply', 'x', 'y'], 'x', 'y'],
+        ['Tuple', 1, 2, 3],
+      ],
+      '\\left.\\left((x, y)\\mapsto xy\\right)\\right|_{(1,2,3)}',
+    ],
+    [
+      ['EvaluateAt', ['Function', ['Power', 'x', 2], 'x']],
+      '\\left.\\left(x\\mapsto x^2\\right)\\right|',
+    ],
+    [
+      ['EvaluateAt', ['Function', ['D', ['Power', 'x', 2], 'x'], 'x'], 3],
+      '\\left.\\left(\\frac{\\mathrm{d}x^2}{\\mathrm{d}x}\\right)\\right|_{x=3}',
+    ],
+  ];
+  for (const [json, latex] of cases) {
+    test(latex, () => {
+      const expr = engine.box(json);
+      expect(expr.latex).toBe(latex);
+      const parsed = engine.parse(latex);
+      expect(parsed.json).toEqual(expr.json);
+      expect(parsed.evaluate().isSame(expr.evaluate())).toBe(true);
+    });
+  }
+
+  test('values', () => {
+    expect(
+      engine.parse('\\left.\\left(x^2\\right)\\right|_{x=1}^{3}').evaluate()
+        .json
+    ).toEqual(8);
+    expect(
+      engine.parse('\\left.\\left(xy\\right)\\right|_{x=1, y=2}').evaluate()
+        .json
+    ).toEqual(2);
+    expect(
+      engine.parse('\\left.\\frac{x^3}{3}\\right|_0^1').evaluate().toString()
+    ).toBe('1/3');
+  });
+
+  test('the bounds of an expression of several variables are for x', () => {
+    expect(
+      engine.parse('\\left.kx\\right|_{2}^{5}').evaluate().toString()
+    ).toBe('3k');
+    expect(
+      engine.parse('\\left.\\frac{ax^2}{2}\\right|_0^1').evaluate().toString()
+    ).toBe('1/2 * a');
+    // One point is for `x` too, and never a partial application.
+    expect(
+      engine.parse('\\left.\\left(kx\\right)\\right|_{2}').evaluate().toString()
+    ).toBe('2k');
+    expect(
+      engine.parse('\\left.\\left(ab\\right)\\right|_{2}').evaluate().operator
+    ).toBe('EvaluateAt');
+    // A tuple point gives one coordinate per variable.
+    expect(
+      engine
+        .box(['EvaluateAt', ['Multiply', 'x', 'y'], ['Tuple', 1, 2]])
+        .evaluate().json
+    ).toEqual(2);
+    expect(
+      engine.parse('\\left.\\left(xy\\right)\\right|_{(1,2)}').evaluate().json
+    ).toEqual(2);
+    // A bound is not a tuple: the form keeps the parse it had.
+    expect(
+      engine.parse('\\left.\\left(x^2\\right)\\right|_{(1,2)}^{3}', {
+        form: 'raw',
+      }).operator
+    ).toBe('Power');
+    // With no `x`, the variable is not known: the form stays unevaluated.
+    expect(engine.parse('\\left.ab\\right|_{2}^{5}').evaluate().operator).toBe(
+      'EvaluateAt'
+    );
+  });
+
+  test('two points in a list with no name are the bounds', () =>
+    expect(
+      engine
+        .parse('\\left.\\left(\\sin\\right)\\right|_{1, 2}')
+        .evaluate()
+        .toString()
+    ).toBe('-sin(1) + sin(2)'));
+
+  // A subscript that is not a point keeps the parse it had: the
+  // restriction `f|_A`, and a list that mixes `name=` and other points.
+  test('a subscript that is not a point', () => {
+    expect(engine.parse('\\left.f\\right|_{A}', { form: 'raw' }).json).toEqual([
+      'Subscript',
+      ['EvaluateAt', 'f'],
+      'A',
+    ]);
+    expect(
+      engine.parse('\\left.a\\right|_{x=1, 2}', { form: 'raw' }).json
+    ).toEqual([
+      'Subscript',
+      ['EvaluateAt', 'a'],
+      ['Delimiter', ['Sequence', ['Equal', 'x', 1], 2], "','"],
+    ]);
+  });
+
+  test('without a subscript', () =>
+    expect(engine.parse('\\left.x^2\\right|', { form: 'raw' }).json).toEqual([
+      'EvaluateAt',
+      ['Power', 'x', 2],
+    ]));
 });
 
 describe('MATCHFIX abs and norm', () => {

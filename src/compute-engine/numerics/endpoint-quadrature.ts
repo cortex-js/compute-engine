@@ -40,6 +40,12 @@ export interface CornerSeries {
   shells: number[];
   /** `shellErrors[k]` is the Gauss–Kronrod error estimate of `shells[k]`. */
   shellErrors: number[];
+  /** `shellQuadpackErrors[k]` is the QUADPACK part of `shellErrors[k]`,
+   * without the estimate of the null rules (`quadpackError`,
+   * `gauss-kronrod.ts`). The test of the accuracy of a shell reads it (see
+   * `SHELL_RELATIVE_ERROR`); the uncertainty of an extrapolation reads
+   * `shellErrors`. When it is absent, the test reads `shellErrors`. */
+  shellQuadpackErrors?: number[];
   /** The sum of the values and the sum of the errors of the panels of the
    * adaptive quadrature inside the corner panel before the first bisection
    * (the points at a distance less than `width` from the endpoint). */
@@ -49,6 +55,13 @@ export interface CornerSeries {
   width: number;
   /** The endpoint. */
   endpoint: number;
+  /** The last corner panel: the panel that touches the endpoint when the
+   * adaptive loop stopped, with its width, its value and its error. Its
+   * value is in `value` and its error in `error` only when they are finite:
+   * they are not when a node of the panel rounds to a singular endpoint (see
+   * `uncountedArea`). When they are finite, the error can be too small for a
+   * strong singularity (see `lastPanelGap`). */
+  last?: { width: number; value: number; error: number };
 }
 
 /** The result of the adaptive Gauss–Kronrod quadrature on a finite
@@ -472,24 +485,25 @@ export function extrapolateCorner(
 ):
   | { ok: true; value: number; error: number }
   | { ok: false; spread: number; oscillates?: true } {
-  // Only the shells that are accurate: finite (a shell next to the endpoint
-  // can overflow, `x^(−0.999)` is `+∞` at a denormal `x`), and wide enough
-  // for the rounding of its nodes not to matter (see
-  // `ACCURATE_SHELL_SPACINGS`).
-  const spacing = Math.max(
-    Math.abs(corner.endpoint) * Number.EPSILON,
-    Number.MIN_VALUE
-  );
-  let n = 0;
-  while (
-    n < corner.shells.length &&
-    Number.isFinite(corner.shells[n]) &&
-    corner.shellErrors[n] <=
-      SHELL_RELATIVE_ERROR * Math.abs(corner.shells[n]) + Number.MIN_VALUE &&
-    corner.width / 2 ** (n + 1) >= ACCURATE_SHELL_SPACINGS * spacing
-  )
-    n++;
+  const { count: n, wide, accurate } = accurateShells(corner);
   if (n < MIN_EXTRAPOLATION_SHELLS) return { ok: false, spread: 0 };
+  // An inaccurate shell followed by accurate ones is not the start of the
+  // behavior next to the endpoint: the integrand has a feature at that
+  // distance from the endpoint, and a model of the shells before it does not
+  // describe the shells after it. For `(x < 0.3 ? 0 : 1) + |x − c|^(−1/2)`
+  // with `c = 0.3 + 1e-6`, the shell that holds the step at 0.3 next to the
+  // singular endpoint `c` was inaccurate, the extrapolation of the shells
+  // before it left out the strip `[0.3, c]`, and the result was `± 3.1e-12`
+  // for a true error of `1e-6`. The corner then keeps the value of its
+  // panels, unless the shells oscillate (`shellTrend` below): the shells of
+  // `sin(3·ln t)/t` next to 0 include inaccurate shells whose value is near
+  // 0, between accurate ones.
+  let featureAfterShells = false;
+  for (let k = n + 1; k < corner.shells.length && wide(k); k++)
+    if (accurate(k)) {
+      featureAfterShells = true;
+      break;
+    }
   const shells = corner.shells.slice(0, n);
   // The index of a shell counted from a distance of 1 to the endpoint is
   // `k + beta` (see the Levin u-transform below).
@@ -540,6 +554,8 @@ export function extrapolateCorner(
   // Shells that do not decrease as a convergent series does have no limit to
   // find (see `shellTrend`).
   const trend = shellTrend(shells, beta);
+  if (featureAfterShells && trend !== 'oscillates')
+    return { ok: false, spread: 0 };
   if (trend !== 'converges') {
     let missing = 0;
     if (trend === 'unknown') {
@@ -623,6 +639,342 @@ export function extrapolateCorner(
       4 * Number.EPSILON * magnitude
     ) + shellError;
   return { ok: true, value: best.value, error };
+}
+
+/**
+ * The shells of a corner that the extrapolation uses (`extrapolateCorner`):
+ * the first `count` shells, each accurate and wide. A shell is accurate when
+ * it is finite (a shell next to the endpoint can overflow, `x^(−0.999)` is
+ * `+∞` at a denormal `x`) and its error is at most `SHELL_RELATIVE_ERROR`
+ * relative, and wide when its width is at least `ACCURATE_SHELL_SPACINGS`
+ * spacings of the doubles at the endpoint, so that the rounding of its nodes
+ * does not matter. The value of the corner nearer to the endpoint than
+ * `corner.width/2^count` comes from the extrapolation.
+ */
+function accurateShells(corner: CornerSeries): {
+  count: number;
+  wide: (k: number) => boolean;
+  accurate: (k: number) => boolean;
+} {
+  const spacing = Math.max(
+    Math.abs(corner.endpoint) * Number.EPSILON,
+    Number.MIN_VALUE
+  );
+  const wide = (k: number) =>
+    corner.width / 2 ** (k + 1) >= ACCURATE_SHELL_SPACINGS * spacing;
+  // The error of the shell must also be finite: `shellQuadpackErrors` can be
+  // finite for a shell whose error is `+∞` (a node position that is not
+  // finite, see `gk15`), and the sum of the shell errors would be `+∞`.
+  const accurate = (k: number) =>
+    Number.isFinite(corner.shells[k]) &&
+    Number.isFinite(corner.shellErrors[k]) &&
+    (corner.shellQuadpackErrors ?? corner.shellErrors)[k] <=
+      SHELL_RELATIVE_ERROR * Math.abs(corner.shells[k]) + Number.MIN_VALUE;
+  let count = 0;
+  while (count < corner.shells.length && accurate(count) && wide(count))
+    count++;
+  return { count, wide, accurate };
+}
+
+/** The smallest width of a shell that `uncountedArea` reads, in units of
+ * `|endpoint|·ε` (at least the spacing of the doubles at the endpoint).
+ * The nodes of a narrower shell are rounded to the doubles. Measured on
+ * `(x − 10⁶)^(−p)` next to `10⁶` (`p = 0.1` and `0.5`), the relative error of
+ * a shell of 2 to 32 units of `|endpoint|·ε` is at most `8e-4`, and of a
+ * shell of 1 unit `8e-3`. With 4 units or more instead of 2, the deepest
+ * shells that `uncountedArea` read were too far from the endpoint to see a
+ * second term: `(x − e)^(−1/2)·(x − e − 10⁻⁵)` with `e = 10⁹` was
+ * `± 6.4e-9` for a true error of `7.2e-9` (`± 2.8e-8` with 2 units). */
+const UNCOUNTED_MODEL_SPACINGS = 2;
+
+/** The largest relative difference between the three ratios of four
+ * consecutive shells that `uncountedArea` reads as one geometric
+ * decrease. */
+const UNCOUNTED_RATIO_SPREAD = 1e-2;
+
+/** The factor applied to the area of the model in `uncountedArea`. */
+const UNCOUNTED_SAFETY = 2;
+
+/**
+ * A bound of the integral over the last corner panel, `[0, δ]` from the
+ * endpoint (`δ = corner.last.width`), when the value or the error of
+ * that panel is not finite, so that the result of the adaptive quadrature
+ * does not count it. Else 0.
+ *
+ * Next to a singular endpoint `e` far from 0, the bisections of the corner
+ * panel stop at the spacing of the doubles at `e`: a node of the last panel
+ * rounds to `e`, where the integrand is not finite, and that panel is left
+ * out. For `(x − e)^(−p)` this is the area `u^(1−p)/(1 − p)` of the first
+ * double `u` above `e`. Tanh-sinh leaves it out too (its nodes that round to
+ * `e` are left out). Without this bound, `∫ (x − 10⁶)^(−0.9) dx` on
+ * `[10⁶, 10⁶ + 1]` was `± 0.12` for a true error of `1.03`, and
+ * `∫ (x − 10⁶)^(−0.1) dx` was `converged`, `± 5.7e-11`, for a true error of
+ * `7e-10`. Next to 0 the last panel is left out only when the integrand
+ * overflows at its nodes, which are denormals: for
+ * `x^(−0.97)·(x < 10⁻⁴ ? 2 : 1)` on `[0, 1]`, the last panel
+ * `[0, 5.2e-318]` holds `2.0e-8`, and the result was `± 2.6e-9` for a true
+ * error of `2.0e-8`. When the extrapolation of the shells is used, it
+ * replaces the whole corner, this panel included.
+ *
+ * The model: next to an endpoint where `|f| ≈ A·x^(−p)`, the shells decrease
+ * geometrically, each `r = 2^(p − 1)` times the one before, and the integral
+ * over `[0, D]` is the sum of the geometric tail: `s·r^m/(1 − r)` for a
+ * shell `s` that covers `[2^(m−1)·D, 2^m·D]`. The ratio `r` is read from
+ * the three ratios of four consecutive shells that have one sign and are at
+ * least `UNCOUNTED_MODEL_SPACINGS` spacings wide: the deepest such shells,
+ * or, when their ratios give no model, the next ones toward the interior.
+ * When the ratios agree to `UNCOUNTED_RATIO_SPREAD`, `r` is the largest. When
+ * they fall toward the endpoint (two terms, the deeper one more singular,
+ * as for `(x − e)^(−0.9)·(x − e − 10⁻⁷)` next to `e = 10⁶`, ratios `0.988`,
+ * `0.962`, `0.943`), `r` is the deepest ratio plus that margin: the next
+ * ratios are smaller. Ratios that rise toward the endpoint, or shells that
+ * change sign (a zero of a smooth factor), give no model. The result is
+ * `UNCOUNTED_SAFETY` times the area of the model. A ratio of at least 1 is a
+ * singularity that is not integrable, and the bound is `+∞`. When no four
+ * shells give a model, the bound is 0.
+ *
+ * A pole some doubles outside the interval does not make the last panel
+ * infinite (the integrand is finite at the endpoint), so the model of a
+ * singularity AT the endpoint is not used there. A guard that returns `NaN`
+ * at the endpoint does: the panel is left out, and the area of the model is
+ * then larger than the area of the panel, which is still a bound.
+ */
+export function uncountedArea(corner: CornerSeries): number {
+  const last = corner.last;
+  if (
+    last === undefined ||
+    (Number.isFinite(last.value) && Number.isFinite(last.error))
+  )
+    return 0;
+  return cornerModelArea(corner, last.width, true);
+}
+
+/** `UNCOUNTED_SAFETY` times the integral over the distances `[0, delta]`
+ * from the endpoint of the model of the shells of `uncountedArea`: `+∞` for
+ * a ratio of at least 1. When there is no model, `fallbackArea` with
+ * `fallback`, else 0. */
+function cornerModelArea(
+  corner: CornerSeries,
+  delta: number,
+  fallback = false
+): number {
+  const model = cornerModel(corner, delta);
+  if (model === undefined) return fallback ? fallbackArea(corner, delta) : 0;
+  if (model === 'divergent') return Number.POSITIVE_INFINITY;
+  return Number.isFinite(model.area)
+    ? UNCOUNTED_SAFETY * model.area
+    : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * The largest relative difference between the value of a finite last corner
+ * panel and the integral of the model of the shells over it
+ * (`cornerModel`) that `lastPanelHoldsFeature` reads as agreement, for
+ * shells that decrease at least as fast as those of a bounded integrand
+ * (ratio at most `1/2`). The Gauss–Kronrod value of `x^q` on `[0, w]`
+ * (`0 ≤ q ≤ 2`) is within `1e-4` of the integral.
+ */
+const LAST_PANEL_AGREEMENT = 1e-3;
+
+/**
+ * Whether the value of the finite last corner panel disagrees with the
+ * model of the shells (`LAST_PANEL_AGREEMENT`): the integrand changes inside
+ * that panel, where no shell samples it, and the model is no evidence about
+ * the part of the panel next to the endpoint. Read only when the ratio of
+ * the model is at most `1/2` (with the margin `UNCOUNTED_RATIO_SPREAD`):
+ * for a stronger singularity the Gauss–Kronrod value of the panel differs
+ * from the integral by much more (see `lastPanelGap`).
+ *
+ * `(x − 1000)^(−0.9)·(x − 1000 − 10⁻¹¹)` on `[1000, 1001]` has its zero 88
+ * spacings from 1000, inside a last panel of 65,000 spacings. The shells
+ * are those of `(x − 1000)^0.1`, the panel differs from their model by
+ * `0.57 %`, and with the model the error of the tanh-sinh value
+ * (`tanhSinhLoss`, `resolveCorners`) left out the part of
+ * `−10⁻¹¹·(x − 1000)^(−0.9)` next to 1000: the result was `converged`,
+ * `± 2.5e-12`, for a true error of `5.1e-12`.
+ */
+function lastPanelHoldsFeature(corner: CornerSeries): boolean {
+  const last = corner.last;
+  if (
+    last === undefined ||
+    !Number.isFinite(last.value) ||
+    !Number.isFinite(last.error)
+  )
+    return false;
+  const model = cornerModel(corner, last.width);
+  if (
+    typeof model !== 'object' ||
+    model.low === undefined ||
+    !(model.ratio <= 0.5 * (1 + UNCOUNTED_RATIO_SPREAD))
+  )
+    return false;
+  const expected = model.sign * model.area;
+  return (
+    Math.abs(last.value - expected) > LAST_PANEL_AGREEMENT * Math.abs(expected)
+  );
+}
+
+/**
+ * The ratio of the shells that `fallbackArea` assumes: the ratio of the
+ * shells of `x^(−0.99)`, `2^(−0.01)`. The exponent of an integrable
+ * singularity is less than 1, and no finite sampling tells `x^(−p)` with
+ * `p` close to 1 from a divergent integrand (see `SHELL_DECAY` in
+ * `gauss-kronrod.ts`), so a bound must assume a largest exponent.
+ */
+const UNCOUNTED_FALLBACK_RATIO = 2 ** -0.01;
+
+/**
+ * The area over the distances `[0, delta]` from the endpoint when the shells
+ * give no model (`cornerModel`): the tail of shells that continue the
+ * larger of the last two finite shells with the ratio
+ * `UNCOUNTED_FALLBACK_RATIO` (`x^(−0.99)`), or 0 when no shell is finite.
+ *
+ * The shells give no model when the integrand changes sign next to the
+ * endpoint, or when the ratios of the deepest shells fall below `1/2` (a
+ * zero of the integrand is close). For `(x − e)^(−0.9)·(x − e − z)` the
+ * deepest shells, past the zero, are those of `−z·(x − e)^(−0.9)`, whose
+ * area over the last panel is `1/(2^0.1 − 1) = 14` times the shell next to
+ * it; the fallback is `1/(2^0.01 − 1) = 144` times. With the model of the
+ * shells farther out instead (those of `(x − e)^0.1`), `e = 10⁶`,
+ * `z = 10⁻⁹` was `± 1.3e-10` for a true error of `1.0e-9`, and with
+ * `z = 10⁻⁷` and `e = 10⁹` (the zero inside the first double) `± 9.3e-8`
+ * for `1.85e-7`.
+ */
+function fallbackArea(corner: CornerSeries, delta: number): number {
+  const finite: number[] = [];
+  for (let k = corner.shells.length - 1; k >= 0 && finite.length < 2; k--)
+    if (Number.isFinite(corner.shells[k])) finite.push(k);
+  if (finite.length === 0 || !(delta > 0)) return 0;
+  const amplitude = Math.max(...finite.map((k) => Math.abs(corner.shells[k])));
+  // The halvings from the outer edge of the deepest finite shell to `delta`.
+  const m = Math.max(1, Math.log2(corner.width / 2 ** finite[0] / delta));
+  const r = UNCOUNTED_FALLBACK_RATIO;
+  const area = (amplitude * r ** m) / (1 - r);
+  return Number.isFinite(area) ? area : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * The integral over the distances `[0, delta]` from the endpoint of the
+ * model of the shells described in `uncountedArea`, as a magnitude: `area`
+ * with the ratio `r` of the model, and, when the ratios of the window agree
+ * (`UNCOUNTED_RATIO_SPREAD`), `low` with the smallest of them. When they
+ * fall toward the endpoint, `area` is an upper bound only, and `low` is
+ * `undefined`. `'divergent'` for a ratio of at least 1 that the ratios agree
+ * on, `undefined` when there is no model. `sign` is the sign of the shells
+ * of the window, and `ratio` the ratio `r`.
+ */
+function cornerModel(
+  corner: CornerSeries,
+  delta: number
+):
+  | { area: number; low: number | undefined; sign: number; ratio: number }
+  | 'divergent'
+  | undefined {
+  if (!(delta > 0)) return undefined;
+  const shells = corner.shells;
+  const spacing = Math.max(
+    Math.abs(corner.endpoint) * Number.EPSILON,
+    Number.MIN_VALUE
+  );
+  // `shells[k]` covers the distances from `width/2^(k+1)` to `width/2^k`.
+  let last = shells.length - 1;
+  while (
+    last >= 0 &&
+    !(corner.width / 2 ** (last + 1) >= UNCOUNTED_MODEL_SPACINGS * spacing)
+  )
+    last--;
+  for (let j = last; j >= 3; j--) {
+    const window = shells.slice(j - 3, j + 1);
+    if (!window.every(Number.isFinite)) continue;
+    const ratios = [1, 2, 3].map((i) => window[i] / window[i - 1]);
+    if (!ratios.every((q) => q > 0)) continue;
+    let r = Math.max(...ratios);
+    let low: number | undefined = Math.min(...ratios);
+    if (!(r - low <= UNCOUNTED_RATIO_SPREAD * r)) {
+      // Ratios that fall toward the endpoint: the deepest one, with the
+      // margin of the rounding of the shells.
+      if (!(ratios[0] >= ratios[1] && ratios[1] >= ratios[2])) continue;
+      // Ratios that fall below `1/2`: the shells shrink faster than those
+      // of a bounded integrand, toward a zero of the integrand next to the
+      // endpoint, and the integrand past that zero is not described by
+      // these shells or by the shells farther out (see
+      // `UNCOUNTED_FALLBACK_RATIO`).
+      if (ratios[2] < 0.5) return undefined;
+      r = ratios[2] * (1 + UNCOUNTED_RATIO_SPREAD);
+      low = undefined;
+      // Shells that still grow toward the endpoint, with ratios that fall:
+      // the limit of the ratios is not known, and it is not shown to be 1
+      // or more.
+      if (!(r < 1)) continue;
+    }
+    if (!(r < 1)) return 'divergent';
+    // The halvings from the outer edge of the shell `j` to `delta`.
+    const m = Math.log2(corner.width / 2 ** j / delta);
+    const tail = (q: number) => (Math.abs(shells[j]) * q ** m) / (1 - q);
+    return {
+      area: tail(r),
+      low: low === undefined ? undefined : tail(low),
+      sign: Math.sign(shells[j]),
+      ratio: r,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * The smallest ratio of the shells (`2^(p − 1)` for `x^(−p)`) for which
+ * `lastPanelGap` reads the model: `p ≥ 3/4`. For a weaker singularity the
+ * Gauss–Kronrod error of the panel is larger than its true error (2.8 times
+ * for `p = 0.8`), and the geometric model of shells that decrease as fast as
+ * those of a bounded integrand (ratio `1/2`) is not accurate enough to
+ * contradict it: for `ln|x − c|` on `[1000, 1001]` with `c` 10⁵ doubles
+ * above 1000, the shell that holds `c` is 13 % larger than the model, and
+ * the result was not converged, `± 1.9e-8`, for a true error of `8e-12`.
+ */
+const LAST_PANEL_MIN_RATIO = 2 ** -0.25;
+
+/**
+ * The amount by which the error of the last corner panel is smaller than
+ * the difference between its value and the integral of the model of the
+ * shells over it (see `cornerModel`), or 0. Only a model whose ratios agree,
+ * with a ratio of at least `LAST_PANEL_MIN_RATIO`, is read, and the panel
+ * must be finite (else see `uncountedArea`).
+ *
+ * The Gauss–Kronrod error of a panel that touches a singular endpoint is too
+ * small for a strong singularity. On `[0, 1]` for `x^(−p)` (the same for
+ * every panel `[0, w]`, by scaling), the error over the true error is `1.06`
+ * for `p = 0.9`, `0.46` for `p = 0.95`, `0.26` for `p = 0.97` and `0.08` for
+ * `p = 0.99`. The extrapolation of the shells or the tanh-sinh rule usually
+ * finds the difference. Neither did for `x^(−0.95)·(x < 0.01 ? 2 : 1)` on
+ * `[0, 1]`: the step is inside the corner panel, so the shell that holds it
+ * stops the extrapolation, and tanh-sinh did not converge. The last corner
+ * panel `[0, 5.4e-197]` was `1.8e-9 ± 2.0e-9` for an integral of `6.1e-9`,
+ * and the result was `converged`, `± 3.6e-9`, for a true error of `4.4e-9`.
+ */
+export function lastPanelGap(corner: CornerSeries): number {
+  const last = corner.last;
+  if (
+    last === undefined ||
+    !Number.isFinite(last.value) ||
+    !Number.isFinite(last.error)
+  )
+    return 0;
+  const model = cornerModel(corner, last.width);
+  if (
+    typeof model !== 'object' ||
+    model.low === undefined ||
+    !(model.ratio >= LAST_PANEL_MIN_RATIO)
+  )
+    return 0;
+  // Only a contradiction counts: no value of the model, between `low` and
+  // `area`, is within the error of the panel. The geometric model is not
+  // exact for a logarithmic factor (the ratios of the shells of `ln²(x − e)`
+  // fall slowly toward `1/2`), and the panel error was right there.
+  const value = model.sign * last.value;
+  if (model.low <= value + last.error && value - last.error <= model.area)
+    return 0;
+  const gap = Math.max(model.area - value, value - model.low) - last.error;
+  return Number.isFinite(gap) && gap > 0 ? gap : 0;
 }
 
 /** Whether the last `SINGULAR_SHELLS` shells of a corner are all positive
@@ -1152,16 +1504,632 @@ export function resolveSingularEndpoints(
     deadline: number | DeadlineFrame | undefined;
   }
 ): QuadratureResult {
-  const plain = (r: {
-    estimate: number;
-    error: number;
-    converged: boolean;
-  }): QuadratureResult => ({
-    estimate: r.estimate,
-    error: r.error,
-    converged: r.converged,
-    divergent: false,
+  const r = resolveCorners(f, a, b, gk, options);
+  // A singularity some doubles inside or outside an endpoint
+  // (`offsetSingularity`): the area next to it is not resolved by the
+  // shells, and it is added to the error.
+  // Where the value next to each singular corner comes from: the
+  // extrapolation of the shells (`r.extrapolated` is set only when every
+  // singular corner was extrapolated), which is a model of a singularity AT
+  // the endpoint nearer to it than the last accurate shell; the samples of
+  // the Gauss–Kronrod panels (the estimate is `gk.estimate`); or else the
+  // tanh-sinh rule.
+  const source = (corner: CornerSeries): CornerSource =>
+    r.extrapolated === true
+      ? {
+          kind: 'model',
+          width: corner.width / 2 ** accurateShells(corner).count,
+        }
+      : { kind: r.estimate === gk.estimate ? 'samples' : 'tanh-sinh' };
+  let offset = 0;
+  if (gk.lo.shells.length >= SINGULAR_SHELLS)
+    offset += offsetSingularity(f, a, b, 1, source(gk.lo), options.deadline);
+  if (gk.hi.shells.length >= SINGULAR_SHELLS)
+    offset += offsetSingularity(f, b, a, -1, source(gk.hi), options.deadline);
+  if (offset === 0 || !Number.isFinite(r.error)) return r;
+  const error = r.error + offset;
+  const tolerance = Math.max(
+    Math.min(options.atol, options.rtol * gk.magnitude),
+    options.rtol * Math.abs(r.estimate)
+  );
+  // An extrapolated result is accepted with an error above the tolerance
+  // only when that error is at most `EXTRAPOLATED_RELATIVE_ERROR` times its
+  // magnitude (`resolveCorners`), and the callers use an `extrapolated`
+  // estimate even when it is not `converged`. The same test is applied to
+  // the larger error: with poles 1 and 4 doubles above `0.3` on `[0.3, 1]`,
+  // the error was `+∞` and the result was still `extrapolated`.
+  const extrapolated =
+    r.extrapolated === true &&
+    Number.isFinite(error) &&
+    error <=
+      Math.max(tolerance, EXTRAPOLATED_RELATIVE_ERROR * Math.abs(r.estimate));
+  return {
+    ...r,
+    error,
+    converged: r.converged && error <= tolerance,
+    ...(r.extrapolated === true ? { extrapolated } : {}),
+  };
+}
+
+/** The smallest exponent of a power `|x − c|^(−p)` that `offsetSingularity`
+ * counts as a singularity. */
+const OUTSIDE_MIN_EXPONENT = 0.05;
+
+/**
+ * The largest difference, relative to the size of its parts, between a
+ * difference of two dyadic exponents and the model of a pole outside the
+ * interval (`outsidePoleShape`). For a pole 1 to 10⁵ doubles outside, with
+ * the smooth factors `1`, `1 + 100·u`, `1/(1 + 100·u)`, `e^u` and
+ * `e^(−300·u)` (endpoints 1 to 10⁶), the difference was at most `2.5e-5`;
+ * `5.4e-4` for `2 + sin(1000·u)` and `2.2e-3` for `1 + 1000·u` (at
+ * `e = 10⁶`, where `1000·u` reaches 0.12 at the last sample; with a
+ * tolerance of `10⁻³` that pole was not counted, and the result was
+ * `converged`, `± 5.48e-8`, for a true error of `5.53e-8`). For a logarithm
+ * at the endpoint the difference was `0.4` or more, and for `ln|x − c|`
+ * with `c` 10⁴ doubles outside `0.047` or more. A logarithm 10⁵ doubles
+ * outside (`1.4e-3` to `2e-3`) is counted as a pole: its error is too
+ * large, not too small.
+ */
+const OUTSIDE_SHAPE_TOLERANCE = 5e-3;
+
+/**
+ * The factor applied to the error that a pole outside the interval adds
+ * (`offsetSingularity`). The same factor 2 as the error of a singular point
+ * inside an endpoint, where the model puts about as much area in the wrong
+ * place as the area it leaves out. With it, the error bounded the true
+ * error in the 450 cases measured (see `offsetSingularity`); for the
+ * tanh-sinh rule the largest part needed was `0.56·R`, for a charge of
+ * `2·R`.
+ */
+const OUTSIDE_MODEL_SAFETY = 2;
+
+/** The largest number of doubles from an endpoint at which
+ * `offsetSingularity` reads the integrand. */
+export const OFFSET_SINGULARITY_SPACINGS = 2 ** 20;
+
+/**
+ * An error for a singular point some doubles inside or outside the endpoint
+ * `e` of the interval (`other` is the other endpoint, `direction` points
+ * from `e` into the interval), or 0.
+ *
+ * The shells next to a singular endpoint are accurate only down to
+ * `ACCURATE_SHELL_SPACINGS` doubles from it, and the part nearer to it is a
+ * model of a singularity AT the endpoint. A singular point that is not
+ * exact in binary can be some doubles from it:
+ *
+ * - Inside: `|t − 0.1·3|^(−1/2)` on `[0.3, 1]` is singular at
+ *   `0.30000000000000004`, one double above `0.3`; the result was
+ *   `converged`, `± 2.7e-13`, for a true error of `1.5e-8` (the part
+ *   between `0.3` and the singular point is lost).
+ * - Outside: `|t − (0.7 − 0.4)|^(−1/2)` on `[0.3, 1]` is singular at
+ *   `0.29999999999999993`, one double below; the result was `converged`,
+ *   `± 4e-13`, for a true error of `1.5e-8` (the model adds the area of a
+ *   singularity at `0.3`, which is not there).
+ *
+ * The function reads `|f|` at 1 to 8 doubles from `e`, then at 16, 32, …
+ * up to `OFFSET_SINGULARITY_SPACINGS` doubles (25 samples), except at
+ * `e = 0`, where the doubles are denormals. None of the samples is outside
+ * the interval.
+ *
+ * Inside: the largest sample is not the first one and is more than 1.5
+ * times the first one, or a sample is not finite. The point of largest
+ * `|f|` near it is found to the double (`samplePeak`), and it is a singular
+ * point only when `|f|` there is larger than at the doubles next to it by
+ * more than `2⁻²⁰` relative: a smooth peak (`1/((x − 10⁶ − 10⁻⁵)² +
+ * 10⁻¹²)`) is flat at that scale, and it was taken for a singularity (an
+ * error of `1.1e6` for a true error of `7`). The exponent `p` of the
+ * singularity is read from the samples at `D` and `3D` beyond the singular
+ * point `c`, where `D` is the distance from `e` to `c` (at `2D` and `5D`,
+ * then `1.5D` and `4D`, when the integrand is 0 at one of them), and the
+ * error is `2·D·|f(c + D)|/(1 − p)`: the integral of `|x − c|^(−p)` over
+ * the `D` between `e` and `c` is `D·|f(c + D)|/(1 − p)`, and the model puts
+ * about as much in the wrong place. (A bound `4·D·|f(c + D)|`, valid for
+ * `p ≤ 3/4` only, gave `± 2.75` for a true error of `69` with `p = 0.99`.)
+ * When `p ≥ 1` there is no finite bound, and the error is `+∞`.
+ *
+ * Outside: at a singularity AT `e`, `|f| ~ A·x^(−p)` and the exponent
+ * between two dyadic samples, `log₂(|f(2^j)|/|f(2^(j+1))|)`, is about `p`
+ * for every `j`. At a singular point `m` doubles outside, it is about 0 for
+ * `2^j ≪ m` and `p` for `2^j ≫ m`. `p`, `m` and the part of a smooth
+ * factor in the exponents are read from the exponents (`fitOutsidePole`).
+ * When the exponent of the first two samples, without the smooth part, is
+ * less than 0.8 times `p` (and `p` is more than 0.05), there is a pole at
+ * the distance `M = m·s` outside, and the error depends on where the value
+ * next to `e` comes from (`source`; `R = s·A·M^(−p)` is `|f|` next to `e`
+ * times the spacing `s`), times `OUTSIDE_MODEL_SAFETY`:
+ *
+ * - the extrapolation of the shells (`'model'`): the value nearer to `e`
+ *   than the last accurate shell, at the distance `D`, is the model of a
+ *   singularity AT `e`, which puts `A·D^(1−p)/(1 − p)` there, and the pole
+ *   puts `A·((D + M)^(1−p) − M^(1−p))/(1 − p)`. The error is the
+ *   difference, about `A·M^(1−p)/(1 − p)` for `M ≪ D`. For a pole 10⁴
+ *   doubles below `e = 1000` with `p = 3/4`, the true error was `2.32e-2`
+ *   and the difference `2.31e-2`.
+ * - the tanh-sinh rule (`'tanh-sinh'`): its nodes next to `e` are rounded to
+ *   the doubles, and the error is `R`. Measured on 154 such results (poles 1
+ *   to 10⁵ doubles outside, the smooth factors of `OUTSIDE_SHAPE_TOLERANCE`,
+ *   endpoints 1 to 10⁶), the part of the true error that the error of the
+ *   result did not cover was at most `0.56·R` for one double outside, and
+ *   `0.08·R` for 10 doubles or more.
+ * - the samples of the Gauss–Kronrod panels (`'samples'`): their error
+ *   includes the rounding of the nodes (`positionShift`, `gauss-kronrod.ts`),
+ *   except within one spacing of `e`, and the error is `R·min(1, s/M)`. Of
+ *   294 such results, one needed more than their error: `0.12·R`, for one
+ *   double outside.
+ *
+ * The area of the model over `4M`, `A·(4M)^(1−p)/(1 − p)`, for every
+ * result, made 21 of 162 correct converged results not converged (`± 0.354`
+ * for a true error of `7.5e-10` with a pole 10⁵ doubles below `e = 10⁶`).
+ * For one double outside and `p = 1/2`, the first
+ * exponent is `0.29`. A singularity AT `e` with a slowly varying factor
+ * (`x^(−1/2)·|ln x|`) has exponents from `0.53` to `0.55`. The exponents
+ * must also have the shape of a pole outside (`outsidePoleShape`): a pole
+ * at `e` with a zero of the numerator next to it, or a logarithm inside the
+ * interval, also gives a small first exponent. The function polls
+ * `deadline` before each sample.
+ */
+function offsetSingularity(
+  f: (x: number) => number,
+  e: number,
+  other: number,
+  direction: 1 | -1,
+  source: CornerSource,
+  deadline: number | DeadlineFrame | undefined
+): number {
+  // At 0 the doubles are denormals: a singular point some of them from it
+  // holds no area that matters.
+  if (e === 0 || !Number.isFinite(e) || !Number.isFinite(other)) return 0;
+  // The spacing of the doubles at `e`, toward the interval.
+  const spacing = Math.abs(nextDouble(e, direction) - e);
+  const inside = (x: number) =>
+    direction > 0 ? x > e && x < other : x < e && x > other;
+  const size = (x: number) => {
+    const v = Math.abs(f(x));
+    return Number.isNaN(v) ? Number.POSITIVE_INFINITY : v;
+  };
+  const at = (k: number) => e + direction * k * spacing;
+  const distances: number[] = [];
+  for (let k = 1; k <= 8; k++) distances.push(k);
+  for (let k = 16; k <= OFFSET_SINGULARITY_SPACINGS; k *= 2) distances.push(k);
+  const values: number[] = [];
+  for (const k of distances) {
+    if (!inside(at(k))) break;
+    checkDeadline(deadline);
+    values.push(size(at(k)));
+  }
+  if (values.length < 3) return 0;
+  let peak = 0;
+  for (let i = 1; i < values.length; i++)
+    if (values[i] > values[peak]) peak = i;
+
+  // Inside.
+  if (
+    !Number.isFinite(values[peak]) ||
+    (peak > 0 && peak < values.length - 1 && values[peak] > 1.5 * values[0])
+  ) {
+    let c = at(distances[peak]);
+    if (Number.isFinite(values[peak])) {
+      const lo = at(distances[Math.max(0, peak - 1)]);
+      const hi = at(distances[peak + 1]);
+      c = samplePeak(
+        size,
+        Math.min(lo, hi),
+        Math.max(lo, hi),
+        inside,
+        deadline
+      );
+      const top = size(c);
+      const below = nextDouble(c, -1);
+      const above = nextDouble(c, 1);
+      const side = Math.max(
+        inside(below) ? size(below) : 0,
+        inside(above) ? size(above) : 0
+      );
+      if (Number.isFinite(top) && side >= top * (1 - 2 ** -20)) return 0;
+    }
+    const d = Math.abs(c - e);
+    // The distances (in units of `d`) of the two samples that give `p`. When
+    // the integrand is 0 at a sample, the ratio gives no exponent, and the
+    // next pair is tried: in `(x − (1 + 4u))/√|x − (1 + u)|` on `[1, 2]`
+    // (`u = Number.EPSILON`), the numerator is 0 at `c + 3d`, and the error
+    // was `+∞`.
+    for (const [near, far] of [
+      [1, 3],
+      [2, 5],
+      [1.5, 4],
+    ]) {
+      const x1 = c + direction * near * d;
+      const x3 = c + direction * far * d;
+      if (!inside(x1) || !inside(x3)) continue;
+      const v1 = size(x1);
+      const v3 = size(x3);
+      // Both samples finite: a sample that is not finite is another singular
+      // point (poles at `e + s` and `e + 4s`), and `p` read from it is not an
+      // exponent (it was `−∞`, and the error was finite).
+      if (!Number.isFinite(v1) || !Number.isFinite(v3))
+        return Number.POSITIVE_INFINITY;
+      if (!(v1 > 0 && v3 > 0)) continue;
+      // The distances of the samples from `c`, after the rounding of `x1` and
+      // `x3` to doubles.
+      const r1 = Math.abs(x1 - c);
+      const r3 = Math.abs(x3 - c);
+      if (!(r3 > r1 && r1 > 0)) continue;
+      // A negative `p` (`|f|` grows away from `c`) is counted as 0: in
+      // `sin t/√|t − π|` on a lobe that starts one double below the double
+      // `π̃` nearest to `π`, the zero of `sin` is next to the pole at `π̃`.
+      const p = Math.log(v1 / v3) / Math.log(r3 / r1);
+      if (!(p < 1)) return Number.POSITIVE_INFINITY;
+      const q = Math.max(0, p);
+      // `|f|` at the distance `d` from `c`, from the sample at `r1`.
+      const v = v1 * (r1 / d) ** q;
+      return (2 * d * v) / (1 - q);
+    }
+    return Number.POSITIVE_INFINITY;
+  }
+
+  // Outside: the exponents between the dyadic samples (1, 2, 4, 8, 16, …).
+  const dyadic = distances
+    .map((k, i) => [k, values[i]] as const)
+    .filter(([k, v]) => (k & (k - 1)) === 0 && v !== undefined);
+  if (dyadic.length < 8) return 0;
+  const raw: number[] = [];
+  for (let i = 0; i + 1 < dyadic.length; i++)
+    raw.push(Math.log2(dyadic[i][1] / dyadic[i + 1][1]));
+  if (!raw.every((q) => Number.isFinite(q))) return 0;
+  const fit = fitOutsidePole(raw);
+  if (fit === undefined) return 0;
+  const { p } = fit;
+  const exponents = raw.map((q, j) => q - smoothExponent(fit, j));
+  if (!(p > OUTSIDE_MIN_EXPONENT)) return 0;
+  if (!(exponents[0] < 0.8 * p)) return 0;
+  if (!outsidePoleShape(exponents, raw, fit)) return 0;
+  if (!(p < 1)) return Number.POSITIVE_INFINITY;
+  // `|f| ≈ A·((k + m)·s)^(−p)` at the last sample, `k` doubles from `e` and
+  // `m` doubles from the pole. With `k·s` alone, `A` was 7 % too small for a
+  // pole 10⁵ doubles outside.
+  const [kLast, vLast] = dyadic[dyadic.length - 1];
+  const amplitude = vLast * ((kLast + fit.m) * spacing) ** p;
+  const M = fit.m * spacing;
+  // `|f|` next to `e` times the spacing of the doubles: the scale of the
+  // error of a rule whose nodes next to `e` are rounded to the doubles.
+  const rounding = spacing * amplitude * M ** -p;
+  if (source.kind !== 'model')
+    return (
+      OUTSIDE_MODEL_SAFETY *
+      rounding *
+      (source.kind === 'samples' ? Math.min(1, spacing / M) : 1)
+    );
+  const D = source.width;
+  // The model puts `A·D^(1−p)/(1 − p)` over `[e, e + D]`, and the pole puts
+  // `A·((D + M)^(1−p) − M^(1−p))/(1 − p)` there.
+  const misplaced =
+    (amplitude * Math.abs(D ** (1 - p) - ((D + M) ** (1 - p) - M ** (1 - p)))) /
+    (1 - p);
+  return OUTSIDE_MODEL_SAFETY * misplaced;
+}
+
+/** Where the value of the integral next to a singular corner comes from (see
+ * `resolveSingularEndpoints` and `offsetSingularity`). */
+type CornerSource =
+  | {
+      /** The extrapolation of the shells: a model of a singularity AT the
+       * endpoint over the distance `width` from it. */
+      kind: 'model';
+      width: number;
+    }
+  /** The samples of the Gauss–Kronrod panels, or of the tanh-sinh rule. */
+  | { kind: 'samples' | 'tanh-sinh' };
+
+/** The exponents of a pole `m` doubles outside an endpoint, with a smooth
+ * factor (see `fitOutsidePole`). */
+interface OutsidePoleFit {
+  /** The exponent of the pole. */
+  p: number;
+  /** The distance of the pole from the endpoint, in doubles. */
+  m: number;
+  /** The coefficient of `2^j` in the smooth part of the exponent `q_j`. */
+  linear: number;
+  /** The coefficient of `4^j` in the smooth part of the exponent `q_j`. */
+  quadratic: number;
+}
+
+/** The pole part `log₂((2^(j+1) + m)/(2^j + m))` of the dyadic exponent
+ * `q_j` of a pole `m` doubles outside an endpoint, for `p = 1`. */
+function outsidePoleExponent(j: number, m: number): number {
+  return Math.log2((2 ** (j + 1) + m) / (2 ** j + m));
+}
+
+/** The part of the smooth factor in the dyadic exponent `q_j`. */
+function smoothExponent(fit: OutsidePoleFit, j: number): number {
+  return fit.linear * 2 ** j + fit.quadratic * 4 ** j;
+}
+
+/**
+ * The exponent `p`, the distance `m` (in doubles) and the smooth part of a
+ * pole outside an endpoint, read from the dyadic exponents
+ * `q_j = log₂(|f(2^j·s)|/|f(2^(j+1)·s)|)` (`raw`), or `undefined`.
+ *
+ * The model is `q_j = p·log₂((2^(j+1) + m)/(2^j + m)) + C·2^j + D·4^j`: the
+ * pole `(k + m)^(−p)` and a smooth factor `g`. `log g` is about linear in
+ * the distance `k` at this scale, and its curvature is the `4^j` part (for
+ * `1 + 100·u` at `e = 10⁶`, without that part the last exponents missed the
+ * model by `5e-3`, with it by `2.5e-5`). For a fixed `m`, `p`, `C` and `D`
+ * are read from the last three exponents; `m` is read from the first one,
+ * `q₀ − C − D = p·log₂((2 + m)/(1 + m))`. The two steps alternate until `m`
+ * changes by less than `10⁻¹²` relative (at most 100 steps: the last
+ * exponents depend little on `m`).
+ *
+ * A model with a pole part that halves at each step (`p − A/2^j`) holds only
+ * for `2^j ≫ m`. For a pole 10⁴ doubles outside, the last exponents missed
+ * it by 3 %, and by 20 % for 10⁵ doubles, and the pole was not counted:
+ * `(x − c)^(−3/4)` with `c` 10⁴ doubles below `e = 10³` was `converged`,
+ * `± 1.5e-10`, for a true error of `2.3e-2`.
+ */
+function fitOutsidePole(raw: number[]): OutsidePoleFit | undefined {
+  const n = raw.length;
+  if (n < 6) return undefined;
+  const mFrom = (q0: number, p: number) => {
+    const r = 2 ** (q0 / p);
+    return r > 1 && r < 2 ? (2 - r) / (r - 1) : Number.NaN;
+  };
+  // The last three exponents are at `j = n − 1, n − 2, n − 3`, and
+  // `K = 2^(n−3)`.
+  const K = 2 ** (n - 3);
+  let m = mFrom(raw[0], raw[n - 1]);
+  for (let step = 0; step < 100; step++) {
+    if (!(m > 0 && Number.isFinite(m))) return undefined;
+    const a = outsidePoleExponent(n - 1, m);
+    const b = outsidePoleExponent(n - 2, m);
+    const c = outsidePoleExponent(n - 3, m);
+    // The weights `1, −6, 8` cancel `C·2^j` (`4K − 12K + 8K`) and `D·4^j`
+    // (`16K² − 24K² + 8K²`).
+    const p =
+      (raw[n - 1] - 6 * raw[n - 2] + 8 * raw[n - 3]) / (a - 6 * b + 8 * c);
+    if (!(p > 0 && Number.isFinite(p))) return undefined;
+    // `rb = 2K·C + 4K²·D` and `rc = K·C + K²·D`.
+    const rb = raw[n - 2] - p * b;
+    const rc = raw[n - 3] - p * c;
+    const quadratic = (rb - 2 * rc) / (2 * K * K);
+    const linear = (rc - K * K * quadratic) / K;
+    const next = mFrom(raw[0] - linear - quadratic, p);
+    if (!(next > 0 && Number.isFinite(next))) return undefined;
+    const done = Math.abs(next - m) <= 1e-12 * m;
+    m = next;
+    if (done) return { p, m, linear, quadratic };
+  }
+  return undefined;
+}
+
+/**
+ * Whether the dyadic exponents `q_j = log₂(|f(2^j·s)|/|f(2^(j+1)·s)|)` at
+ * the doubles next to an endpoint (`raw`, and `exponents` without their
+ * smooth part) are those of a pole `(k + m)^(−p)` that is `m > 0` doubles
+ * outside the interval: `q_j = p·log₂((2^(j+1) + m)/(2^j + m))`. `p`, `m`
+ * and the smooth part are the `fit` (`fitOutsidePole`).
+ *
+ * - `m` is read from `q₀`, and the model must give `q₁` and `q₂` within
+ *   `10⁻³·p`. For a pole outside (`m` from 1 to 10⁵), the difference was
+ *   at most `2e-7·p` with the smooth factors `1`, `1 + 100·u`,
+ *   `1/(1 + 100·u)`, `e^u` and `e^(−300·u)`, `2.2e-5·p` with
+ *   `2 + sin(1000·u)` and `1.7e-4·p` with `1 + 1000·u`. For a pole AT the
+ *   endpoint with a zero of the numerator next to it (`|f| ∝ |k −
+ *   z|·k^(−p−1)`, as in `sin t/|t − π|^1.5` on a lobe that starts at the
+ *   double nearest to `π`, where `z = 0.27`) it is at least `0.09·p`, and
+ *   for `ln²(x − e)` at least `0.17·p` (endpoints 0.3 to 10⁶).
+ * - No exponent is less than `−0.02`, and `m` is positive: for
+ *   `ln|x − c|` with `c` 10⁵ doubles INSIDE the interval, `m` is negative.
+ * - The last exponents settle as those of a pole with a smooth factor do.
+ *   The last three exponents give `p` and the smooth part, so the two
+ *   differences `q_j − q_(j−1)` before them (`j = n − 3` and `n − 4`) are
+ *   compared with the model: each must be within `OUTSIDE_SHAPE_TOLERANCE`
+ *   of it, relative to the size of its pole part, its smooth part and the
+ *   difference, unless the differences are at the level of rounding. (A test
+ *   that the differences halve missed a pole outside with a smooth factor,
+ *   whose last differences double: `(1 + 100·u)/√(x − c)`, `c` one double
+ *   below 1000, was `converged`, `± 5.4e-12`, for a true error of `6.7e-7`.)
+ *
+ * This replaces a test of `f(e)`, which the quadrature does not sample
+ * (`f(e)` is not finite at a singular endpoint, but a guard can return
+ * `NaN` or `+∞` there for a pole outside).
+ */
+function outsidePoleShape(
+  exponents: number[],
+  raw: number[],
+  fit: OutsidePoleFit
+): boolean {
+  const { p, m } = fit;
+  if (exponents.some((q) => q < -0.02)) return false;
+  if (!(m > 0)) return false;
+  const pole = (j: number) => p * outsidePoleExponent(j, m);
+  if (Math.abs(pole(1) - exponents[1]) > 1e-3 * p) return false;
+  if (Math.abs(pole(2) - exponents[2]) > 1e-3 * p) return false;
+  // The differences `q_j − q_(j−1)` of the two exponents before the last
+  // three (which give `p`, `C` and `D`), compared with the model with its
+  // smooth part.
+  const n = raw.length;
+  const differences = [n - 3, n - 4].map((j) => raw[j] - raw[j - 1]);
+  if (
+    [n - 1, n - 2, n - 3, n - 4].every(
+      (j) => Math.abs(raw[j] - raw[j - 1]) <= 1e-9
+    )
+  )
+    return true;
+  // Relative to the size of the parts, not of their sum: the parts can
+  // cancel in a difference (`e^u·(x − c)^(−1/4)` at `e = 10⁵`, `c` one
+  // double below: a difference was `−2.4e-11` for parts of `1.4e-6`, and
+  // the result `converged`, `± 7.6e-11`, for a true error of `3.7e-9`).
+  return [n - 3, n - 4].every((j, i) => {
+    const d = differences[i];
+    const polePart = pole(j) - pole(j - 1);
+    const smoothPart = smoothExponent(fit, j) - smoothExponent(fit, j - 1);
+    return (
+      Math.abs(polePart + smoothPart - d) <=
+      OUTSIDE_SHAPE_TOLERANCE *
+        (Math.abs(polePart) + Math.abs(smoothPart) + Math.abs(d))
+    );
   });
+}
+
+/** The double next to `x` toward `+∞` (`direction` 1) or `−∞` (−1). */
+export function nextDouble(x: number, direction: 1 | -1): number {
+  if (Number.isNaN(x) || x === direction * Infinity) return x;
+  if (x === 0) return direction * Number.MIN_VALUE;
+  const buffer = new Float64Array([x]);
+  const bits = new BigInt64Array(buffer.buffer);
+  bits[0] += x > 0 === direction > 0 ? 1n : -1n;
+  return buffer[0];
+}
+
+/**
+ * The point of `[lo, hi]` where `size` is largest, by a golden-section
+ * search and then a walk of at most 64 doubles while `size` is larger at a
+ * neighbor. Only the points where `inside` is true are read.
+ */
+function samplePeak(
+  size: (x: number) => number,
+  lo: number,
+  hi: number,
+  inside: (x: number) => boolean,
+  deadline: number | DeadlineFrame | undefined
+): number {
+  const ratio = (Math.sqrt(5) - 1) / 2;
+  let a = lo;
+  let b = hi;
+  let x1 = b - ratio * (b - a);
+  let x2 = a + ratio * (b - a);
+  let f1 = inside(x1) ? size(x1) : 0;
+  let f2 = inside(x2) ? size(x2) : 0;
+  for (let i = 0; i < 200 && a < x1 && x1 < x2 && x2 < b; i++) {
+    checkDeadline(deadline);
+    if (f1 >= f2) {
+      b = x2;
+      x2 = x1;
+      f2 = f1;
+      x1 = b - ratio * (b - a);
+      f1 = inside(x1) ? size(x1) : 0;
+    } else {
+      a = x1;
+      x1 = x2;
+      f1 = f2;
+      x2 = a + ratio * (b - a);
+      f2 = inside(x2) ? size(x2) : 0;
+    }
+  }
+  let s = f1 >= f2 ? x1 : x2;
+  let fs = Math.max(f1, f2);
+  for (let i = 0; i < 64 && fs < Infinity; i++) {
+    checkDeadline(deadline);
+    const down = nextDouble(s, -1);
+    const up = nextDouble(s, 1);
+    const fDown = inside(down) ? size(down) : 0;
+    const fUp = inside(up) ? size(up) : 0;
+    if (fDown <= fs && fUp <= fs) break;
+    if (fUp >= fDown) {
+      s = up;
+      fs = fUp;
+    } else {
+      s = down;
+      fs = fDown;
+    }
+  }
+  return s;
+}
+
+/** The result of `resolveSingularEndpoints` before the test of a singularity
+ * inside an endpoint (`offsetSingularity`). */
+function resolveCorners(
+  f: (x: number) => number,
+  a: number,
+  b: number,
+  gk: GaussKronrodOutcome,
+  options: {
+    rtol: number;
+    atol: number;
+    maxEvaluations: number;
+    deadline: number | DeadlineFrame | undefined;
+  }
+): QuadratureResult {
+  // The area of the last corner panel of each singular corner, when the
+  // adaptive quadrature left that panel out (`uncountedArea`). It is in the
+  // error of every Gauss–Kronrod value below. It is not in the error of an
+  // extrapolated value, whose extrapolation replaces the whole corner, and a
+  // tanh-sinh value has its own term (`tanhSinhExtra`).
+  const singular = [gk.lo, gk.hi].filter(
+    (c) => c.shells.length >= SINGULAR_SHELLS
+  );
+  const uncounted = singular.reduce((sum, c) => sum + uncountedArea(c), 0);
+  // The part of the error of the last corner panel of each singular corner
+  // that its Gauss–Kronrod error misses (`lastPanelGap`). It is in the error
+  // of every Gauss–Kronrod value below.
+  const gkError =
+    gk.error + singular.reduce((sum, c) => sum + lastPanelGap(c), 0);
+  // Tanh-sinh leaves out its nodes that round to an endpoint (those closer
+  // than half a spacing `u` of the doubles), and reads the other nodes at the
+  // nearest double: its value lacks about the integral over `[0, u/2]` from
+  // each singular endpoint. For `x^(−p)` (`0.1 ≤ p ≤ 0.99`), the reading at
+  // the nearest double adds a loss of at most `0.024` times the area of the
+  // first double, and the whole loss is `0.54` to `0.99` times that area,
+  // about half of the area of the model over `[0, u/2]` (which has the
+  // factor `UNCOUNTED_SAFETY`). For `∫ (x − 1000)^(−0.1) dx` on
+  // `[1000, 1001]`, the tanh-sinh value was `converged`, `± 1.77e-12`, for a
+  // true error of `1.85e-12` (the area of the first double is `2.5e-12`).
+  // The error of a tanh-sinh value `t` with the error `error` is the smaller
+  // of two bounds: `error` plus that area from the model of the shells
+  // (`cornerModelArea`), and `|t − g|` plus the error of the Gauss–Kronrod
+  // value `g` (with `uncounted` and `lastPanelGap`), never less than
+  // `error`. The second one is often smaller:
+  // the last corner panel of `g` is finite when its nodes do not round to
+  // the endpoint, and its value counts the first double. For
+  // `ln²(x − 1000)` on `[1000, 1001]` (0 at 1000), the first bound is
+  // `3.1e-10`, the second `1.5e-10`, and the true error `7e-11`.
+  const tanhSinhLoss = singular.reduce((sum, c) => {
+    const u = Math.abs(
+      nextDouble(c.endpoint, c === gk.lo ? 1 : -1) - c.endpoint
+    );
+    // A last corner panel wider than `TANH_SINH_MODEL_SPACINGS` spacings
+    // holds a part of the corner that no shell samples, and the model is no
+    // evidence about the first double: the loss is then not known, and the
+    // second bound is used.
+    if (lastPanelHoldsFeature(c)) return Number.POSITIVE_INFINITY;
+    return sum + cornerModelArea(c, 0.5 * u, uncountedArea(c) > 0);
+  }, 0);
+  const tanhSinhExtra = (t: { estimate: number }, error: number) =>
+    Math.min(
+      tanhSinhLoss,
+      Math.max(
+        0,
+        Math.abs(t.estimate - gk.estimate) + gkError + uncounted - error
+      )
+    );
+  const plain = (
+    r: {
+      estimate: number;
+      error: number;
+      converged: boolean;
+    },
+    extra = uncounted
+  ): QuadratureResult => {
+    if (extra === 0)
+      return {
+        estimate: r.estimate,
+        error: r.error,
+        converged: r.converged,
+        divergent: false,
+      };
+    const error = r.error + extra;
+    return {
+      estimate: r.estimate,
+      error,
+      converged:
+        r.converged &&
+        error <=
+          Math.max(
+            Math.min(options.atol, options.rtol * gk.magnitude),
+            options.rtol * Math.abs(r.estimate)
+          ),
+      divergent: false,
+    };
+  };
   const divergentResult: QuadratureResult = {
     estimate: gk.estimate,
     error: gk.error,
@@ -1193,14 +2161,19 @@ export function resolveSingularEndpoints(
       last.length > 0 && (last.every((v) => v > 0) || last.every((v) => v < 0))
     );
   });
-  const unresolvedCorner = (r: {
-    estimate: number;
-    error: number;
-    converged: boolean;
-  }): QuadratureResult =>
-    r.converged || !oneSign || !Number.isFinite(r.error)
-      ? plain(r)
-      : { ...plain(r), singularCorner: true };
+  const unresolvedCorner = (
+    r: {
+      estimate: number;
+      error: number;
+      converged: boolean;
+    },
+    extra = uncounted
+  ): QuadratureResult => {
+    const q = plain(r, extra);
+    return q.converged || !oneSign || !Number.isFinite(q.error)
+      ? q
+      : { ...q, singularCorner: true };
+  };
 
   const atol = Math.min(options.atol, options.rtol * gk.magnitude);
   const tolerance = (v: number) => Math.max(atol, options.rtol * Math.abs(v));
@@ -1214,15 +2187,40 @@ export function resolveSingularEndpoints(
   let contradiction: number | undefined;
   if (gk.converged && !gk.unresolved) {
     const t = runTanhSinh();
-    if (!t.usable || !t.converged) return plain(gk);
+    if (!t.usable || !t.converged)
+      return unresolvedCorner({
+        estimate: gk.estimate,
+        error: gkError,
+        converged: gkError === gk.error || gkError <= tolerance(gk.estimate),
+      });
     const difference = Math.abs(t.estimate - gk.estimate);
+    // A last corner panel that holds a feature the shells do not see
+    // (`lastPanelHoldsFeature`): the Gauss–Kronrod value integrates that
+    // panel, and tanh-sinh leaves out the part of it next to the endpoint,
+    // so the Gauss–Kronrod value is kept. With the tanh-sinh value and the
+    // bound of its error through the Gauss–Kronrod value (`tanhSinhExtra`),
+    // `(x − 10⁶)^(−0.9)·(x − 10⁶ − 10⁻¹¹)` on `[10⁶, 10⁶ + 1]` was not
+    // converged, `± 1.55e-10`, for a true error of `6.4e-11`; the
+    // Gauss–Kronrod value is `± 8.1e-11` for `1.1e-11`.
+    if (
+      difference <= Math.max(tolerance(gk.estimate), 10 * gk.error) &&
+      singular.some(lastPanelHoldsFeature)
+    )
+      return unresolvedCorner({
+        estimate: gk.estimate,
+        error: gkError,
+        converged: gkError <= tolerance(gk.estimate),
+      });
     if (difference <= Math.max(tolerance(gk.estimate), 10 * gk.error)) {
       const error = Math.max(t.error, difference);
-      return unresolvedCorner({
-        estimate: t.estimate,
-        error,
-        converged: error <= tolerance(t.estimate),
-      });
+      return unresolvedCorner(
+        {
+          estimate: t.estimate,
+          error,
+          converged: error <= tolerance(t.estimate),
+        },
+        tanhSinhExtra(t, error)
+      );
     }
     contradiction = difference;
   }
@@ -1280,7 +2278,7 @@ export function resolveSingularEndpoints(
   if (contradiction !== undefined)
     return unresolvedCorner({
       estimate: gk.estimate,
-      error: Math.max(gk.error, tailSpread, contradiction),
+      error: Math.max(gkError, tailSpread, contradiction),
       converged: false,
     });
 
@@ -1291,20 +2289,23 @@ export function resolveSingularEndpoints(
   if (!corners.every(shellsHaveOneSign))
     return unresolvedCorner({
       estimate: gk.estimate,
-      error: Math.max(gk.error, tailSpread),
+      error: Math.max(gkError, tailSpread),
       converged: false,
     });
 
   const t = runTanhSinh();
   if (t.usable && t.converged && Math.abs(t.estimate - gk.estimate) <= gk.error)
-    return plain({ estimate: t.estimate, error: t.error, converged: true });
+    return plain(
+      { estimate: t.estimate, error: t.error, converged: true },
+      tanhSinhExtra(t, t.error)
+    );
 
   // The Gauss–Kronrod result, with a bound that covers the difference with
   // tanh-sinh and the uncertainty of the corners. The difference
   // with tanh-sinh is used only when it is larger than the error estimate of
   // tanh-sinh (the difference of its last two levels): otherwise the
   // difference can come from the error of tanh-sinh.
-  let widened = Math.max(gk.error, tailSpread);
+  let widened = Math.max(gkError, tailSpread);
   const difference = Math.abs(t.estimate - gk.estimate);
   if (t.usable && t.error < difference) widened = Math.max(widened, difference);
   return unresolvedCorner({

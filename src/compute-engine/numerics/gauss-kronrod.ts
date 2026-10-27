@@ -1,8 +1,10 @@
 /**
  * Adaptive Gauss–Kronrod quadrature for definite integrals.
  *
- * The core rule is the 15-point Gauss–Kronrod rule (GK15) with the embedded
- * 7-point Gauss rule providing the local error estimate. Panels are subdivided
+ * The core rule is the 15-point Gauss–Kronrod rule (GK15). The local error
+ * estimate is the larger of the QUADPACK estimate, from the embedded 7-point
+ * Gauss rule, and the estimate of 8 null rules of the same 15 samples
+ * (`nullRuleError`). Panels are subdivided
  * largest-error-first until the total error meets the requested tolerance or the
  * interval budget is exhausted.
  *
@@ -21,6 +23,8 @@ import {
   type DeadlineFrame,
 } from '../../common/interruptible.js';
 import {
+  nextDouble,
+  OFFSET_SINGULARITY_SPACINGS,
   resolveSingularEndpoints,
   type GaussKronrodOutcome,
 } from './endpoint-quadrature.js';
@@ -49,6 +53,198 @@ const WG = [
   0.4179591836734694,
 ];
 
+/**
+ * The null rules of the 15 GK15 nodes, for the error estimate of a panel
+ * (`nullRuleError`). A null rule of degree `d` is a set of 15 weights, one
+ * per node, whose sum applied to any polynomial of degree at most `d` is 0.
+ * Applied to the integrand, it measures the part of the integrand that the
+ * polynomials of degree `d` cannot represent on the panel.
+ *
+ * The rules are the 8 vectors of highest degree of an orthonormal basis of
+ * `R^15` (Euclidean inner product over the nodes) made by the Gram–Schmidt
+ * process from the Legendre polynomials `P_0, …, P_14` sampled at the nodes,
+ * scaled to the Euclidean norm of the Kronrod weights. The vector made from
+ * `P_k` is orthogonal to the samples of all the polynomials of degree below
+ * `k`, so it is a null rule of degree `k − 1`. The rules are mutually
+ * orthogonal, as the error estimate requires. `NULL_RULES[i]` has degree
+ * `13 − i`, and its weights are in the increasing order of the nodes:
+ * `−XGK[0], …, −XGK[6], 0, XGK[6], …, XGK[0]`.
+ *
+ * Source: J. Berntsen and T. O. Espelid, "Error estimation in automatic
+ * quadrature routines", ACM Trans. Math. Software 17 (1991), 233–252.
+ */
+const GK15_NULL_RULES: {
+  nodes: readonly number[];
+  rules: readonly (readonly number[])[];
+} = (() => {
+  const nodes: number[] = [];
+  const weights: number[] = [];
+  for (let k = 0; k < 7; k++) {
+    nodes.push(-XGK[k]);
+    weights.push(WGK[k]);
+  }
+  nodes.push(0);
+  weights.push(WGK[7]);
+  for (let k = 6; k >= 0; k--) {
+    nodes.push(XGK[k]);
+    weights.push(WGK[k]);
+  }
+  const legendre = (n: number, x: number): number => {
+    if (n === 0) return 1;
+    let p0 = 1;
+    let p1 = x;
+    for (let k = 2; k <= n; k++) {
+      const p2 = ((2 * k - 1) * x * p1 - (k - 1) * p0) / k;
+      p0 = p1;
+      p1 = p2;
+    }
+    return p1;
+  };
+  const norm = (v: readonly number[]) =>
+    Math.sqrt(v.reduce((s, vi) => s + vi * vi, 0));
+  const basis: number[][] = [];
+  for (let n = 0; n < 15; n++) {
+    let v = nodes.map((x) => legendre(n, x));
+    // Two passes of the orthogonalization, for a basis orthogonal to the
+    // rounding of the machine.
+    for (let pass = 0; pass < 2; pass++)
+      for (const q of basis) {
+        const d = q.reduce((s, qi, i) => s + qi * v[i], 0);
+        v = v.map((vi, i) => vi - d * q[i]);
+      }
+    const length = norm(v);
+    basis.push(v.map((vi) => vi / length));
+  }
+  const scale = norm(weights);
+  return {
+    nodes,
+    rules: [14, 13, 12, 11, 10, 9, 8, 7].map((k) =>
+      basis[k].map((v) => v * scale)
+    ),
+  };
+})();
+const NULL_RULES = GK15_NULL_RULES.rules;
+
+/** The GK15 nodes on `[−1, 1]` in increasing order, and the null rules of
+ * `NULL_RULES` on them, for the tests. */
+export const GK15_NULL_RULES_FOR_TESTS = GK15_NULL_RULES;
+
+/**
+ * An estimate of the error of the GK15 value of a panel, from the null
+ * rules of its 15 samples (`NULL_RULES`), as in the Berntsen–Espelid
+ * method.
+ *
+ * The difference of the Kronrod and the Gauss sums is one number, and it
+ * can be near 0 by chance when the integrand has a kink or a jump inside the
+ * panel. For example, for `1/max(0.01, √(x² + 0.758125²) − 1)` on
+ * `[−0.6689453125, −0.66650390625]`, which has a kink at 0.31 of the
+ * half-width from the center, the difference is `1.2e-10`, the QUADPACK
+ * error is `4e-11`, and the true error is `1.6e-5`. The 8 null rules give 8
+ * numbers, and they are all near 0 only when the integrand is near a
+ * polynomial of degree 6 on the panel.
+ *
+ * The null rules are grouped in pairs of consecutive degrees, an even and an
+ * odd one, `E_k = √(N_(2k)² + N_(2k+1)²)`, so that a pair does not depend on
+ * the parity of the integrand. `E_0` is the pair of highest degree. On a
+ * panel where the integrand is smooth and well resolved, the pairs decrease
+ * fast as the degree increases: each ratio `E_k/E_(k+1)` is small, and `r`
+ * is the largest of them. The estimate is:
+ *
+ * - `r > 1` (the pairs do not decrease: the integrand is not resolved on the
+ *   panel): `NULL_RULE_SAFETY · max(E_k)`.
+ * - `NULL_RULE_CRITICAL_RATIO < r ≤ 1` (the pairs decrease slowly, as for a
+ *   kink): `NULL_RULE_SAFETY · r · E_0`.
+ * - `r ≤ NULL_RULE_CRITICAL_RATIO` (the asymptotic regime of a smooth
+ *   integrand): `NULL_RULE_SAFETY · c^(1 − α) · r^α · E_0`, with
+ *   `c = NULL_RULE_CRITICAL_RATIO` and `α = NULL_RULE_DECAY_POWER`. The
+ *   GK15 value is exact for polynomials of degree 22 and `E_0` measures the
+ *   degree 13, so with a decrease `r` per two degrees the error is about
+ *   `r^4.5·E_0`; the power `α = 3` is smaller, for safety.
+ *
+ * The panel error is the larger of this estimate and the QUADPACK error, so
+ * it is never smaller than the QUADPACK error.
+ *
+ * It is an estimate, not a bound. Measured on one panel `[−1, 1]` with a
+ * kink at `t`:
+ *
+ * - For `10x + 3 + max(0, x − t)` and `eˣ + 0.01·|x − t|` (25,000 positions
+ *   with `|t| < 0.99`), it was never smaller than the true error.
+ * - Nearer to an endpoint, the kink is seen by one node only (the outer
+ *   node is at `0.9915`), and the estimate was up to 15 times too small. A
+ *   kink between the outer node and the endpoint is seen by no node
+ *   (`hiddenEdgeError` examines that gap).
+ * - A smooth part that the null rules see more than the kink can hide a
+ *   small kink: for `e^(5x) + 0.0316·|x − 0.51|` the panel reports
+ *   `1.9e-6` for a true error of `8.3e-5`. In a sweep of `10x + 3`, `eˣ`
+ *   and `cos 3x` plus a kink or a jump of size `1`, `10⁻²` or `10⁻⁴`, 121
+ *   of 33,948 panels were too small, 116 of them with `cos 3x`. On the panels of the bisections, the
+ *   smooth part is resolved and the kink is seen: the adaptive quadrature of
+ *   this example reports `4.3e-10` for a true error of `1.7e-11`.
+ *
+ * On smooth integrands, the evaluation counts are the same as with the
+ * QUADPACK error alone (`∫₀¹ eˣ dx`, `∫₀^π sin x dx` and `∫₋₅⁵ dx/(1 + x²)`
+ * converge on the 16 starting panels).
+ *
+ * The estimate is `NaN` when a sample is not finite.
+ */
+function nullRuleError(
+  samples: readonly number[],
+  absHalfLength: number,
+  noise: number
+): number {
+  const pairs: number[] = [];
+  for (let k = 0; k < 4; k++) {
+    const even = NULL_RULES[2 * k];
+    const odd = NULL_RULES[2 * k + 1];
+    let n0 = 0;
+    let n1 = 0;
+    for (let i = 0; i < 15; i++) {
+      n0 += even[i] * samples[i];
+      n1 += odd[i] * samples[i];
+    }
+    pairs.push(Math.hypot(n0, n1) * absHalfLength);
+  }
+  if (!pairs.every((e) => Number.isFinite(e))) return NaN;
+  // A pair of the size of the rounding of the samples (`noise`, see `gk15`)
+  // is not information about the integrand: it is taken as 0. Without this,
+  // the rounding of a polynomial integrand gave an error of some units in
+  // the last place of the magnitude, and `∫₋₃₀³⁰ x³ dx = 0` did not meet the
+  // absolute tolerance `1e-12`.
+  for (let k = 0; k < 4; k++) if (pairs[k] <= noise) pairs[k] = 0;
+  const largest = Math.max(...pairs);
+  if (largest === 0) return 0;
+  let r = 0;
+  for (let k = 0; k < 3; k++) {
+    if (pairs[k] === 0) continue;
+    r =
+      pairs[k + 1] === 0
+        ? Number.POSITIVE_INFINITY
+        : Math.max(r, pairs[k] / pairs[k + 1]);
+  }
+  if (r > 1) return NULL_RULE_SAFETY * largest;
+  if (r > NULL_RULE_CRITICAL_RATIO) return NULL_RULE_SAFETY * r * pairs[0];
+  return (
+    NULL_RULE_SAFETY *
+    NULL_RULE_CRITICAL_RATIO ** (1 - NULL_RULE_DECAY_POWER) *
+    r ** NULL_RULE_DECAY_POWER *
+    pairs[0]
+  );
+}
+
+/** The size of the rounding of a null rule, in units of the rounding of the
+ * samples (`gk15`): `Number.EPSILON` times the integral of the magnitude of
+ * the integrand on the panel, plus the rounding of the positions of the
+ * nodes. QUADPACK uses the same bound for the rounding of the GK15 value. */
+const NULL_RULE_NOISE_ULPS = 50;
+/** The factor of safety of `nullRuleError`. */
+const NULL_RULE_SAFETY = 10;
+/** The largest ratio of two consecutive pairs of null rules for which
+ * `nullRuleError` takes the integrand as smooth on the panel. */
+const NULL_RULE_CRITICAL_RATIO = 0.25;
+/** The power of the ratio in the estimate of a smooth panel
+ * (`nullRuleError`). */
+const NULL_RULE_DECAY_POWER = 3;
+
 interface Panel {
   a: number;
   b: number;
@@ -58,6 +254,30 @@ interface Panel {
    * panel: 0 for a starting panel, and one more than the parent for a child.
    * Set by the adaptive loop, not by `gk15`. */
   depth?: number;
+  /** The QUADPACK error of the panel alone, without the null-rule estimate
+   * that `error` includes (`nullRuleError`), plus the same `hiddenEdgeError`
+   * as `error`. Set by `gk15`. The test of the accuracy of a shell next to a
+   * singular endpoint (`SHELL_RELATIVE_ERROR`, `endpoint-quadrature.ts`)
+   * reads this error: it was calibrated with the QUADPACK error, and on the
+   * shells of `sin(3·ln t)/t` next to 0 the null-rule estimate is 1 to 150
+   * times larger. With `error`, the first shell failed the test, and the
+   * oscillation of the shells was not found. With the test loosened to
+   * `1e-7` instead, the inaccurate shells of `|x − 0.7|^(−3/4)` passed it,
+   * and the result was `± 2.5e-7` for a true error of `9.1e-4`. */
+  quadpackError?: number;
+  /** The part of `error` that comes from the rounding of the nodes to the
+   * doubles (`positionShift`). Set by `gk15`, added to `error` by the
+   * adaptive loop (`adaptiveFinite`). Bisection does not make the
+   * sum of these parts smaller: each node is still up to half a unit in the
+   * last place from its exact position. */
+  positionError?: number;
+  /** The largest slope of the integrand between two consecutive nodes of the
+   * panel, at the positions of the nodes as `gk15` computes them (0 when
+   * they are all one double), times the half width of the panel. It is
+   * computed as `|Δf|·(h/Δx)`, without the slope itself, which can overflow
+   * when `Δx` is a few doubles (`(x − 1)·2¹⁰⁵⁰` on `[1, 1 + 129·ε]`). Set by
+   * `gk15`. */
+  slopeTimesHalfLength?: number;
   /** The number of samples of the integrand on this panel, of 15, that are
    * `NaN`. An infinite sample (an integrable singularity at a node) is not
    * counted. Set by `gk15`. */
@@ -152,20 +372,39 @@ const EDGE_NODE_DISTANCES = [1 - XGK[0], 1 - XGK[1], 1 - XGK[2], 1 - XGK[3]];
  */
 function hiddenEdgeError(p: Panel, f: (x: number) => number): number {
   const halfWidth = 0.5 * Math.abs(p.b - p.a);
-  const [d0, d1, d2, d3] = EDGE_NODE_DISTANCES;
-  const gap = d0 * halfWidth;
+  // The distances from each endpoint to the four nodes nearest to it, in
+  // half widths, at the positions of the nodes as `gk15` computes them. On a
+  // panel not many units in the last place wide, the nodes are rounded to
+  // the doubles, and these distances are not `EDGE_NODE_DISTANCES`: the
+  // parabolas of a smooth integrand fitted at the nominal distances miss the
+  // edge sample by the slope times the rounding. When rounded nodes
+  // coincide, no parabola can be fitted, and the edge sample is compared
+  // with the nearest node alone.
+  const distancesA = [0, 1, 2, 3].map(
+    (k) => (nodeAt(p.a, p.b, k) - p.a) / halfWidth
+  );
+  const distancesB = [0, 1, 2, 3].map(
+    (k) => (p.b - nodeAt(p.a, p.b, 14 - k)) / halfWidth
+  );
   const atEdge = (
     endpoint: number,
     direction: 1 | -1,
     edge: number | undefined,
-    nodes: [number, number, number, number] | undefined
+    nodes: [number, number, number, number] | undefined,
+    distances: number[]
   ): number => {
     if (edge === undefined || nodes === undefined) return 0;
     if (!Number.isFinite(edge) || !nodes.every((v) => Number.isFinite(v)))
       return 0;
     const [v0, v1, v2, v3] = nodes;
-    const miss = Math.abs(edge - parabolaAt([d0, d1, d2], [v0, v1, v2], 0));
-    const inward = Math.abs(v0 - parabolaAt([d1, d2, d3], [v1, v2, v3], d0));
+    const [d0, d1, d2, d3] = distances;
+    // The gap between the endpoint and its nearest node: at least the
+    // nominal one, and the whole distance to the rounded node when it is
+    // farther. On the panel `[J − u, J]` (`u` the spacing of the doubles at
+    // `J`, a jump at `J`), all the nodes round to `J`, the gap is the whole
+    // panel, and with the nominal gap the error was `5e-10` for a lost area
+    // of `1.2e-7` (`J = 10⁶ + 0.3`).
+    const gap = Math.max(EDGE_NODE_DISTANCES[0], d0) * halfWidth;
     const rounding =
       64 *
       Number.EPSILON *
@@ -176,6 +415,25 @@ function hiddenEdgeError(p: Panel, f: (x: number) => number): number {
         Math.abs(v2),
         Math.abs(v3)
       );
+    if (!(0 < d0 && d0 < d1 && d1 < d2 && d2 < d3)) {
+      // The step from the edge sample to the nearest node, against the
+      // change that the slope of the panel predicts over the gap. With the
+      // step alone, a smooth integrand on panels some doubles wide reported
+      // each change of one double as a hidden jump: on the 16 starting
+      // panels of `∫ e^(x − 10⁹) dx` over `[10⁹, 10⁹ + 10⁻⁵]` (5 doubles
+      // each), `1.4e-14` per endpoint.
+      // The slope is the largest between two distinct consecutive nodes of
+      // the panel (`Panel.slopeTimesHalfLength`): the four nodes nearest to the endpoint
+      // can be one double.
+      // A change that is not finite is no evidence that the step is smooth.
+      const step = Math.abs(edge - v0);
+      const change = 2 * (p.slopeTimesHalfLength ?? 0) * (gap / halfWidth);
+      return Number.isFinite(change) && step <= change + rounding
+        ? 0
+        : step * gap;
+    }
+    const miss = Math.abs(edge - parabolaAt([d0, d1, d2], [v0, v1, v2], 0));
+    const inward = Math.abs(v0 - parabolaAt([d1, d2, d3], [v1, v2, v3], d0));
     if (miss <= inward + rounding) return 0;
     // The probe is inside the gap, near the endpoint, and at least some
     // units in the last place from it (`direction` points into the panel).
@@ -203,9 +461,18 @@ function hiddenEdgeError(p: Panel, f: (x: number) => number): number {
     return miss * gap;
   };
   return (
-    atEdge(p.a, 1, p.edgeA, p.nodesNearA) +
-    atEdge(p.b, -1, p.edgeB, p.nodesNearB)
+    atEdge(p.a, 1, p.edgeA, p.nodesNearA, distancesA) +
+    atEdge(p.b, -1, p.edgeB, p.nodesNearB, distancesB)
   );
+}
+
+/** The spacing of the doubles at `x`, or twice it when `x` is just below a
+ * power of 2 (`Math.log2` can round up there): a distance from `x` that
+ * moves it to another double. */
+function ulpOf(x: number): number {
+  const m = Math.abs(x);
+  if (!(m >= 2 ** -1022)) return Number.MIN_VALUE;
+  return 2 ** (Math.floor(Math.log2(m)) - 52);
 }
 
 /** The distance from an endpoint of a panel to the probe of
@@ -213,16 +480,69 @@ function hiddenEdgeError(p: Panel, f: (x: number) => number): number {
  * nearest node. */
 const HIDDEN_EDGE_PROBE = 2 ** -40;
 
+/** The `i`-th GK15 node of the panel `[a, b]`, in increasing order (`i`
+ * from 0 to 14): the position where `gk15` samples the integrand. The node
+ * is clamped to the panel: on a panel a few doubles wide, the rounded
+ * center minus the rounded offset of an outer node can round to a double
+ * outside it, and `∫ (2 − x) dx` over `[1, 1 + 5ε]` sampled the integrand
+ * at `1 − ε/2`, where an integrand such as `√(x − 1)` is not defined. */
+function nodeAt(a: number, b: number, i: number): number {
+  const center = 0.5 * (a + b);
+  const halfLength = 0.5 * (b - a);
+  const x =
+    i < 7
+      ? center - halfLength * XGK[i]
+      : i === 7
+        ? center
+        : center + halfLength * XGK[14 - i];
+  return Math.min(Math.max(x, Math.min(a, b)), Math.max(a, b));
+}
+
+/**
+ * Twice the magnitude of the change of the GK15 value of the panel that
+ * the rounding of its nodes to the doubles makes (see `gk15`): `|h·Σ w_k·
+ * s_k·(x̃_k − x_k)|`, with `s_k` the slope of the samples at the nodes on each
+ * side of node `k` (one side at the outer nodes), 0 between nodes that
+ * round to the same double.
+ */
+function positionShift(
+  a: number,
+  b: number,
+  samples: readonly number[]
+): number {
+  const h = 0.5 * (b - a);
+  const xs = Array.from({ length: 15 }, (_, i) => nodeAt(a, b, i));
+  const abscissa = (i: number) => (i < 7 ? -XGK[i] : i === 7 ? 0 : XGK[14 - i]);
+  const weight = (i: number) =>
+    i < 7 ? WGK[i] : i === 7 ? WGK[7] : WGK[14 - i];
+  // `Δf·(shift/Δx)`, not `(Δf/Δx)·shift`: the slope alone can overflow
+  // when `Δx` is a few doubles.
+  let sum = 0;
+  for (let i = 0; i < 15; i++) {
+    const lo = Math.max(0, i - 1);
+    const hi = Math.min(14, i + 1);
+    const dx = xs[hi] - xs[lo];
+    if (dx === 0) continue;
+    const shift = xs[i] - a - h * (1 + abscissa(i));
+    sum += weight(i) * (samples[hi] - samples[lo]) * (shift / dx);
+  }
+  // Twice the first-order estimate: on `[10⁶, 10⁶ + 10⁻⁹]` (8 doubles) the
+  // estimate was 0.9 times the change.
+  return 2 * Math.abs(h * sum);
+}
+
 /**
  * Apply the GK15 rule to a single finite panel `[a, b]`.
- * Returns the 15-point estimate and a QUADPACK-style error estimate.
+ * Returns the 15-point estimate and an error estimate: the larger of the
+ * QUADPACK error and the null-rule error (`nullRuleError`).
  */
 export function gk15(f: (x: number) => number, a: number, b: number): Panel {
   const center = 0.5 * (a + b);
   const halfLength = 0.5 * (b - a);
   const absHalfLength = Math.abs(halfLength);
 
-  const fc = f(center);
+  // The integrand is sampled at the nodes of `nodeAt`, which are in `[a, b]`.
+  const fc = f(nodeAt(a, b, 7));
   let resg = WG[3] * fc; // 7-point Gauss accumulator
   let resk = WGK[7] * fc; // 15-point Kronrod accumulator
 
@@ -233,9 +553,8 @@ export function gk15(f: (x: number) => number, a: number, b: number): Panel {
   // Non-central Gauss nodes: XGK[1], XGK[3], XGK[5].
   for (let j = 0; j < 3; j++) {
     const k = 2 * j + 1;
-    const absc = halfLength * XGK[k];
-    const f1 = f(center - absc);
-    const f2 = f(center + absc);
+    const f1 = f(nodeAt(a, b, k));
+    const f2 = f(nodeAt(a, b, 14 - k));
     fv1[k] = f1;
     fv2[k] = f2;
     const fsum = f1 + f2;
@@ -246,9 +565,8 @@ export function gk15(f: (x: number) => number, a: number, b: number): Panel {
   // Kronrod-only nodes: XGK[0], XGK[2], XGK[4], XGK[6].
   for (let j = 0; j < 4; j++) {
     const k = 2 * j;
-    const absc = halfLength * XGK[k];
-    const f1 = f(center - absc);
-    const f2 = f(center + absc);
+    const f1 = f(nodeAt(a, b, k));
+    const f2 = f(nodeAt(a, b, 14 - k));
     fv1[k] = f1;
     fv2[k] = f2;
     resk += WGK[k] * (f1 + f2);
@@ -267,6 +585,101 @@ export function gk15(f: (x: number) => number, a: number, b: number): Panel {
   let error = Math.abs((resk - resg) * halfLength);
   if (resasc !== 0 && error !== 0)
     error = resasc * Math.min(1, Math.pow((200 * error) / resasc, 1.5));
+  const quadpackError = error;
+
+  // The difference of the two sums can be near 0 by chance for a kink or a
+  // jump inside the panel: the error is also at least the estimate of the
+  // null rules of the same 15 samples (`nullRuleError`).
+  let resabs = WGK[7] * Math.abs(fc);
+  for (let k = 0; k < 7; k++)
+    resabs += WGK[k] * (Math.abs(fv1[k]) + Math.abs(fv2[k]));
+  resabs *= absHalfLength;
+  const samples = [
+    fv1[0],
+    fv1[1],
+    fv1[2],
+    fv1[3],
+    fv1[4],
+    fv1[5],
+    fv1[6],
+    fc,
+    fv2[6],
+    fv2[5],
+    fv2[4],
+    fv2[3],
+    fv2[2],
+    fv2[1],
+    fv2[0],
+  ];
+  // The rounding of the samples: of their values (some units in the last
+  // place of `resabs`), and of the positions of the nodes, which are
+  // doubles. A node is up to half a unit in the last place of `center` from
+  // its exact position, and the sample there differs by up to the slope of
+  // the integrand times that distance. On `[10⁹, 10⁹ + 1e-6]` (8 units in
+  // the last place wide), the null rules of `e^(x − 10⁹)` measured this
+  // rounding, `2e-14`, and the error was `2.3e-13` for a true error of
+  // `8e-22`. The slope is the largest slope between two consecutive nodes,
+  // at their rounded positions, and it is kept multiplied by the half
+  // length (`Panel.slopeTimesHalfLength`), which does not overflow: with
+  // `(x − 1)·2¹⁰⁵⁰` on `[1, 1 + 129·ε]`, the slope was `+∞`, the noise floor
+  // `+∞` suppressed every null-rule pair, and the result was `converged` with
+  // a true error of 1e4 times its error.
+  let slopeTimesHalfLength = 0;
+  for (let i = 0; i + 1 < 15; i++) {
+    const dx = nodeAt(a, b, i + 1) - nodeAt(a, b, i);
+    if (dx !== 0)
+      slopeTimesHalfLength = Math.max(
+        slopeTimesHalfLength,
+        Math.abs(samples[i + 1] - samples[i]) * (absHalfLength / Math.abs(dx))
+      );
+  }
+  const nodeRounding = ulpOf(center) * slopeTimesHalfLength;
+  const noise = NULL_RULE_NOISE_ULPS * (Number.EPSILON * resabs + nodeRounding);
+  const nullError = nullRuleError(samples, absHalfLength, noise);
+  // The QUADPACK error is never larger than `resasc`, the integral of the
+  // deviation of the integrand from its mean on the panel, and the null-rule
+  // estimate is not either. A panel where the integrand is not resolved
+  // (`sin(1/x)` next to 0) has a null-rule estimate of 10 times its largest
+  // pair, which can be larger than `resasc`. With this bound, the error of
+  // `∫₀¹ sin(1/x) dx` is `6.1e-5` (`5.7e-5` with the QUADPACK error alone);
+  // without it, `3.4e-4`, for a true error of `4e-7`, and the caller used
+  // the Monte-Carlo fallback (`quadratureBeatsMonteCarlo`).
+  if (nullError > error) error = Math.max(error, Math.min(nullError, resasc));
+
+  // The nodes are doubles: the rule samples the integrand at `x̃_k`, not at
+  // the exact nodes `x_k = a + h·(1 + t_k)` (`t_k` the GK15 abscissae, `h`
+  // the half length). The value then differs from the GK15 value by about
+  // `h·Σ w_k·f'(x_k)·(x̃_k − x_k)`. The distance `x̃_k − a` is exact when
+  // `x̃_k` and `a` are within a factor 2 of each other (Sterbenz), which is
+  // the case when the shifts matter (the panel is narrow against its
+  // distance to 0); otherwise it is rounded by at most `ε·|x̃_k − a|`. So
+  // `x̃_k − x_k` is known, and the slope `f'` is read from the samples next
+  // to the node. Each shift is up to half a unit in the last place of
+  // `center`, whatever the width of the panel: `sin(10³·(x − a))` over
+  // `[10⁶, 10⁶ + 0.01]` was `converged`, `± 2.2e-13`, for a true error of
+  // `2.3e-11`, and `∫ e^(x − 10⁹) dx` over `[10⁹, 10⁹ + 10⁻⁴]` `± 1.1e-18`
+  // for `3.8e-13`. The term is computed only when it can be much larger than
+  // the rounding of the value: `ulp(center)·slope·h > 16·ε·resabs`. Below
+  // that, it is of the size of the rounding of the sum of the panels, and
+  // on the panels of `∫₋₃₀³⁰ x³ dx = 0` (where it cancels by symmetry) it
+  // was larger than the absolute tolerance `1e-12`.
+  const shift =
+    nodeRounding > 16 * Number.EPSILON * resabs
+      ? positionShift(a, b, samples)
+      : 0;
+  // The term is not in `error` here: the adaptive loop adds it
+  // (`adaptiveFinite`), and the lobes of the oscillatory quadrature
+  // (`oscillatory-quadrature.ts`) have their own floor for this rounding
+  // (`lobeRoundingScale`); with the term in the error of each lobe panel,
+  // `∫ from 10⁵ of sin t/√t` had no result. It is not in `quadpackError`
+  // either: the test of the accuracy of a shell next to a singular endpoint
+  // reads it (see `Panel.quadpackError`), and the term grows next to a
+  // singular point (the uncertainty of an extrapolation reads `error`).
+  // A term that is not finite is not known: it makes the error of the panel
+  // `+∞`, and the adaptive loop bisects the panel (it was 0).
+  const positionError = Number.isFinite(shift)
+    ? shift
+    : Number.POSITIVE_INFINITY;
 
   // Count the `NaN` samples and the other samples that are not finite, and
   // find the largest finite sample. A `NaN` value can also come from samples
@@ -288,10 +701,10 @@ export function gk15(f: (x: number) => number, a: number, b: number): Panel {
       nanLast = Math.max(nanLast, x);
     }
   };
-  tally(fc, center);
+  tally(fc, nodeAt(a, b, 7));
   for (let k = 0; k < 7; k++) {
-    tally(fv1[k], center - halfLength * XGK[k]);
-    tally(fv2[k], center + halfLength * XGK[k]);
+    tally(fv1[k], nodeAt(a, b, k));
+    tally(fv2[k], nodeAt(a, b, 14 - k));
   }
 
   const panel: Panel = {
@@ -299,6 +712,9 @@ export function gk15(f: (x: number) => number, a: number, b: number): Panel {
     b,
     value,
     error,
+    quadpackError,
+    positionError,
+    slopeTimesHalfLength,
     nanSamples,
     nonFiniteSamples,
     largestFinite,
@@ -1023,6 +1439,31 @@ function adaptiveFinite(
   // gates convergence until every one has been subdivided away.
   let totalValue = 0;
   let totalError = 0;
+  // The sum of the `positionError` parts of the errors of all the panels.
+  // It is a rounding: like the rounding floor of the result (see
+  // `ROUNDOFF_ULPS` in `quadrature`), it is held against
+  // `rtol·max(|estimate|, magnitude)`, not against the tolerance of the
+  // adaptive loop. With the tolerance, the first part of
+  // `∫ from 10⁵ of sin t/√t` (152 wide, a rounding of `6e-12` against a
+  // tolerance of `3e-13`) did not converge, and the oscillatory quadrature
+  // (`oscillatory-quadrature.ts`) had no result.
+  let totalRounding = 0;
+  const roundingMet = () =>
+    totalRounding <= rtol * Math.max(Math.abs(totalValue), totalMagnitude);
+  // Each part meets its own test, and their sum meets the larger of the two
+  // tests: with the two tests alone, a reducible error and a rounding of
+  // 0.75 times the tolerance each gave a `converged` result with an error of
+  // 1.5 times the tolerance (`1.5 + cos(3000·(x − 10⁵))` on
+  // `[10⁵, 10⁵ + 1]`, `rtol = 6.31e-10`: 1.89 times).
+  const metTolerance = () =>
+    totalError - totalRounding <= tolerance() &&
+    roundingMet() &&
+    totalError <=
+      Math.max(
+        tolerance(),
+        rtol * Math.max(Math.abs(totalValue), totalMagnitude)
+      );
+  const reducible = (p: Panel) => p.error - (p.positionError ?? 0);
   // The sum of the magnitudes of the panel values, for the absolute
   // tolerance (see `tolerance` below).
   let totalMagnitude = 0;
@@ -1039,7 +1480,13 @@ function adaptiveFinite(
   // Add to the error of a panel the bound of the area that a jump next to
   // one of its endpoints can hide from the nodes (`hiddenEdgeError`).
   const addHiddenEdgeError = (p: Panel) => {
-    if (Number.isFinite(p.error)) p.error += hiddenEdgeError(p, f);
+    // The rounding of the nodes to the doubles (`positionShift`).
+    if (Number.isFinite(p.error)) p.error += p.positionError ?? 0;
+    if (Number.isFinite(p.error)) {
+      const hidden = hiddenEdgeError(p, f);
+      p.error += hidden;
+      if (p.quadpackError !== undefined) p.quadpackError += hidden;
+    }
   };
 
   // Fold a panel into the running totals, skipping non-finite contributions.
@@ -1048,7 +1495,10 @@ function adaptiveFinite(
       totalValue += p.value;
       totalMagnitude += Math.abs(p.value);
     }
-    if (Number.isFinite(p.error)) totalError += p.error;
+    if (Number.isFinite(p.error)) {
+      totalError += p.error;
+      totalRounding += p.positionError ?? 0;
+    }
     if (panelIsBad(p)) badPanels += 1;
   };
   const removePanel = (p: Panel) => {
@@ -1056,7 +1506,10 @@ function adaptiveFinite(
       totalValue -= p.value;
       totalMagnitude -= Math.abs(p.value);
     }
-    if (Number.isFinite(p.error)) totalError -= p.error;
+    if (Number.isFinite(p.error)) {
+      totalError -= p.error;
+      totalRounding -= p.positionError ?? 0;
+    }
     if (panelIsBad(p)) badPanels -= 1;
   };
 
@@ -1116,6 +1569,10 @@ function adaptiveFinite(
   const shellsHi: number[] = [];
   const shellErrorsLo: number[] = [];
   const shellErrorsHi: number[] = [];
+  // The QUADPACK parts of the errors of the shells, for the test of their
+  // accuracy (`CornerSeries.shellQuadpackErrors`, `endpoint-quadrature.ts`).
+  const shellQuadpackErrorsLo: number[] = [];
+  const shellQuadpackErrorsHi: number[] = [];
   // The depth of the first shell of each corner, for `shellsDiverge`: the
   // number of halvings from a distance of 1 to the endpoint (0 for a corner
   // panel wider than 1), plus a margin.
@@ -1175,7 +1632,7 @@ function adaptiveFinite(
     refinementFailed && panels.length >= ALL_BAD_STOP_PANELS && allPanelsBad();
 
   while (panels.length < maxIntervals) {
-    if (badPanels === 0 && totalError <= tolerance()) break;
+    if (badPanels === 0 && metTolerance()) break;
     if (mustStopAllBad()) break;
     // Deadline check per bisection, as in the initial-panel loop above. Each
     // iteration costs two GK15 evaluations (30 integrand calls), so the
@@ -1192,12 +1649,29 @@ function adaptiveFinite(
       for (let i = 1; i < panels.length; i++)
         if ((panels[i].depth ?? 0) < (panels[worst].depth ?? 0)) worst = i;
     } else {
+      // The part of the error that a bisection can make smaller: without the
+      // rounding of the nodes (`positionError`).
       for (let i = 1; i < panels.length; i++)
-        if (errorKey(panels[i].error) > errorKey(panels[worst].error))
+        if (errorKey(reducible(panels[i])) > errorKey(reducible(panels[worst])))
           worst = i;
     }
 
     const iv = panels[worst];
+    // The errors that a bisection can make smaller meet the tolerance, and
+    // the rounding of the nodes does not: more panels cannot help. Without
+    // this stop, `sin(10³·(x − a))` over `[10⁶, 10⁶ + 0.01]` used the whole
+    // panel budget (44,775 evaluations). The result is not converged. A
+    // stop on the rounding alone, while other errors were still larger than
+    // the tolerance, ended `1/((x − 10⁶ − 10⁻⁵)² + 10⁻¹²)` on
+    // `[10⁶, 10⁶ + 1]` after 1,696 evaluations with a true error of `7.2`.
+    // A bad panel (a non-finite value, which `totalError` leaves out) is not
+    // a rounding: the loop goes on to bisect it away.
+    if (
+      badPanels === 0 &&
+      totalError - totalRounding <= tolerance() &&
+      !roundingMet()
+    )
+      break;
     const mid = 0.5 * (iv.a + iv.b);
     // Panel too small to subdivide further (float roundoff): no more progress
     // possible on the worst offender.
@@ -1321,12 +1795,25 @@ function adaptiveFinite(
       if (iv === cornerLo) {
         cornerLo = left;
         shellsLo.push(right.value);
-        shellErrorsLo.push(right.error);
+        // An error of `+∞` (a node position that is not finite, `gk15`)
+        // stays `+∞`: `+∞ − positionError` is `NaN` when `positionError` is
+        // also `+∞`.
+        shellErrorsLo.push(
+          Number.isFinite(right.error)
+            ? right.error - (right.positionError ?? 0)
+            : right.error
+        );
+        shellQuadpackErrorsLo.push(right.quadpackError ?? right.error);
       }
       if (iv === cornerHi) {
         cornerHi = right;
         shellsHi.push(left.value);
-        shellErrorsHi.push(left.error);
+        shellErrorsHi.push(
+          Number.isFinite(left.error)
+            ? left.error - (left.positionError ?? 0)
+            : left.error
+        );
+        shellQuadpackErrorsHi.push(left.quadpackError ?? left.error);
       }
     }
     // Stop as soon as the corner series is diagnosed: continuing only spends
@@ -1382,18 +1869,30 @@ function adaptiveFinite(
     lo: {
       shells: shellsLo,
       shellErrors: shellErrorsLo,
+      shellQuadpackErrors: shellQuadpackErrorsLo,
       value: insideValueLo,
       error: insideErrorLo,
       width: widthLo,
       endpoint: a,
+      last: {
+        width: cornerLo.b - cornerLo.a,
+        value: cornerLo.value,
+        error: cornerLo.error,
+      },
     },
     hi: {
       shells: shellsHi,
       shellErrors: shellErrorsHi,
+      shellQuadpackErrors: shellQuadpackErrorsHi,
       value: insideValueHi,
       error: insideErrorHi,
       width: widthHi,
       endpoint: b,
+      last: {
+        width: cornerHi.b - cornerHi.a,
+        value: cornerHi.value,
+        error: cornerHi.error,
+      },
     },
   };
 
@@ -1427,7 +1926,7 @@ function adaptiveFinite(
     badPanels === 0 &&
     Number.isFinite(totalValue) &&
     Number.isFinite(totalError) &&
-    totalError <= tolerance();
+    metTolerance();
 
   // A bad panel has a non-finite value, which the totals skip. When a bad
   // panel that does not touch an endpoint is left, `totalError` is not a
@@ -1759,6 +2258,8 @@ function interiorSingularPoint(
   const w = site.b - site.a;
   let a = Math.max(lo, site.a - w);
   let b = Math.min(hi, site.b + w);
+  const windowA = a;
+  const windowB = b;
   const size = (x: number) => {
     const y = Math.abs(f(x));
     return Number.isNaN(y) ? Number.POSITIVE_INFINITY : y;
@@ -1785,9 +2286,61 @@ function interiorSingularPoint(
       f2 = size(x2);
     }
   }
-  const s = f1 >= f2 ? x1 : x2;
+  let s = f1 >= f2 ? x1 : x2;
+  // The search stops when `x1` and `x2` stop moving, which can be some
+  // doubles from the singular point: for `|x − 0.3|^(−1/2)`, it stopped at
+  // `0.2999999999999999`, one double below the singular point `0.3`. The
+  // half that then held the singular point inside it was 3 doubles wide, its
+  // nodes rounded to these doubles, and it reported `2.2e-8 ± 2e-23` for an
+  // integral of about `4.5e-8` (the result was `± 6e-13` for a true error of
+  // `2.2e-8`). So the point moves to a neighboring double while `|f|` is
+  // larger there, at most `SINGULAR_POINT_STEPS` doubles.
+  // A neighbor outside `(lo, hi)` is not sampled: the integrand can be
+  // singular or not defined at an endpoint and beyond it (`2 − x` on
+  // `[1, 1 + 64·ε]` was sampled below 1).
+  let fs = size(s);
+  let localMaximum = false;
+  for (let i = 0; i < SINGULAR_POINT_STEPS && fs < Infinity; i++) {
+    const down = nextDouble(s, -1);
+    const up = nextDouble(s, 1);
+    const fDown = down > lo ? size(down) : Number.NEGATIVE_INFINITY;
+    const fUp = up < hi ? size(up) : Number.NEGATIVE_INFINITY;
+    if (fDown <= fs && fUp <= fs) {
+      localMaximum = true;
+      break;
+    }
+    if (fUp >= fDown) {
+      s = up;
+      fs = fUp;
+    } else {
+      s = down;
+      fs = fDown;
+    }
+  }
+  // A point at or past an edge of the search window that is not `lo` or
+  // `hi`, where `|f|` is finite and still grows (the walk found no local
+  // maximum), is not a singular point: `|f|` is monotone across the window.
+  // In `(x − e)^(−1/4) + (x − e < 2e-5 ? 10 : 0)` on `[e, e + 1/16]`,
+  // `e = 10⁵`, the window around the deep panels at the step ends below the
+  // step, where `|f|` grows toward the singular endpoint `e`. The split there
+  // left the step `6.3e-8` inside the right half, before its first node, and
+  // the result was `± 1.5e-8` for a true error of `6.4e-7`. A pole one double
+  // past the edge (`|x − 0.3|^(−1/2)`) ends the walk at `+∞` or at a local
+  // maximum.
+  const edge = (windowB - windowA) * 2 ** -30;
+  if (
+    !localMaximum &&
+    fs < Infinity &&
+    ((windowA > lo && s - windowA <= edge) ||
+      (windowB < hi && windowB - s <= edge))
+  )
+    return undefined;
   return s > lo && s < hi ? s : undefined;
 }
+
+/** The largest number of doubles by which `interiorSingularPoint` moves the
+ * point found by its search. */
+const SINGULAR_POINT_STEPS = 64;
 
 /**
  * Numerically approximate the definite integral of `f` from `a` to `b` using
@@ -1900,6 +2453,82 @@ export function adaptiveQuadrature(
     )
   );
   return result;
+}
+
+/** The distance from the split point to the nearest samples that
+ * `splitPointIsJump` reads, as a fraction of the interval. */
+const SPLIT_PROBE = 2 ** -30;
+
+/** The largest spread of the samples on one side of a jump, as a fraction
+ * of the jump (`splitPointIsJump`). */
+const SPLIT_FLAT = 2 ** -10;
+
+/** `quadrature` does not split off the part between a split point and an
+ * endpoint when that part is at most `OFFSET_SINGULARITY_SPACINGS` doubles
+ * wide and at most this fraction of the interval or of
+ * `OFFSET_SINGULARITY_SPACINGS` doubles. */
+const SLIVER_FRACTION = 2 ** -10;
+
+/**
+ * True when the point `s` of `[lo, hi]` found by `interiorSingularPoint` is
+ * at a jump of `f`, not at a singularity. The function reads `f` at `s` and
+ * at 1, 2, 4 and 8 times `δ = SPLIT_PROBE·(hi − lo)` (at least the spacing
+ * of the doubles at `s`) on each side of `s`. It is a jump when the 9
+ * values, in the order of their points, are two runs: the values of each
+ * run are within `SPLIT_FLAT` times the jump of each other, the jump being
+ * the distance between the two runs. The jump can be between any two of the
+ * samples.
+ *
+ * Not a jump:
+ * - One level only (the samples agree): there is no evidence of a jump, and
+ *   the interval is split as before.
+ * - Values that change continuously, as next to a singularity:
+ *   `|x − 20|^(−1/2)` on `[20, 20 + 3.4e-13]` read at `s = 20 + 4.6e-14`
+ *   changes by a factor 1.5 over the samples on the side of 20, and
+ *   `100000 − ln |x − 0.3|` read at `s = 0.3 + 1e-15` has `34.5` above the
+ *   constant at `s` and `18` to `20` at the other samples. (A test of the
+ *   relative spread of the magnitudes read the first case as a jump, and the
+ *   oscillatory integral `∫₀^∞ sin t/√|t − 5| + sin t/√|t − 20| dt` was
+ *   `NaN`; it also read the second case as a jump, because the constant
+ *   made the relative spread small.)
+ * - An oscillation at the scale of `δ`: the runs alternate.
+ *
+ * What remains relative: `δ` is relative to the interval, and the flatness
+ * is relative to the jump, so a singularity that changes the integrand by
+ * less than `SPLIT_FLAT` times the jump between `δ` and `8δ` from `s`, next
+ * to a jump at `s`, is read as a jump.
+ *
+ * The samples must be strictly inside `[lo, hi]`: an endpoint of the
+ * integral is not sampled, since the integrand can be singular there. When
+ * the interval is too narrow for that, the answer is `false`.
+ */
+export function splitPointIsJump(
+  f: (x: number) => number,
+  lo: number,
+  hi: number,
+  s: number
+): boolean {
+  const delta = Math.max((hi - lo) * SPLIT_PROBE, ulpOf(s));
+  if (!(s - 8 * delta > lo && s + 8 * delta < hi)) return false;
+  const values = [-8, -4, -2, -1, 0, 1, 2, 4, 8].map((k) => f(s + k * delta));
+  if (!values.every((v) => Number.isFinite(v))) return false;
+  // The two runs: the values before and after the one change of side.
+  for (let cut = 1; cut < values.length; cut++) {
+    const left = values.slice(0, cut);
+    const right = values.slice(cut);
+    const leftMin = Math.min(...left);
+    const leftMax = Math.max(...left);
+    const rightMin = Math.min(...right);
+    const rightMax = Math.max(...right);
+    const jump = Math.max(rightMin - leftMax, leftMin - rightMax);
+    if (
+      jump > 0 &&
+      leftMax - leftMin <= SPLIT_FLAT * jump &&
+      rightMax - rightMin <= SPLIT_FLAT * jump
+    )
+      return true;
+  }
+  return false;
 }
 
 /** The quadrature of `adaptiveQuadrature`, without the errors of the inner
@@ -2077,6 +2706,45 @@ function quadrature(
           return whole;
         const s = interiorSingularPoint(g, lo, hi, r.interiorSite);
         if (s === undefined) return whole;
+        // The refinement also goes deep at a jump, and the search then finds
+        // a point of the larger side, near the jump. The interval is not
+        // split there. The endpoint analysis of a half reads the jump next
+        // to its endpoint as a singularity and extrapolates the shells: for
+        // `x < 1000.3 ? 1000 : −3` on `[1000, 1001]`, the split points were
+        // `1.3e-10` from the jump and the result was `± 1.4e-11` for a true
+        // error of `1.3e-7`; the whole interval had `± 1.6e-8` for a true
+        // error of `2e-9`. A half also reported `0 ± 0` when the jump was
+        // between the split point and its nearest node: for
+        // `1/max(0.001, √(x² + y²) − 1)`, cut to 0 at `x = −√(1 − y²)`, on
+        // `[−10, 10]` with `y = 0.374625`, the split point was `2.4e-12`
+        // from the jump, and the result was `± 7.9e-12` for a true error of
+        // `2.4e-9`.
+        if (splitPointIsJump(g, lo, hi, s)) return whole;
+        // A singular point some doubles from an endpoint: the part between
+        // them cannot be integrated, and the test of a singularity inside
+        // an endpoint (`offsetSingularity`, `endpoint-quadrature.ts`) has
+        // added its area to the error of the whole interval. Split, the
+        // narrow part was 2 doubles wide for `|t − c|^(−1/2)` on `[0.3, 1]`
+        // with `c` 2 doubles above 0.3, and the result was `± 4e-13` for a
+        // true error of `6e-9`.
+        // The part must also be a small fraction of the interval, or hold
+        // few doubles (`SLIVER_FRACTION` of each): on a narrow interval,
+        // every point is within `OFFSET_SINGULARITY_SPACINGS` doubles of an
+        // endpoint. For `|x − c|^(−1/2)` with `c` the midpoint of
+        // `[1, 1 + 2⁻³²]`, each half holds 2¹⁹ doubles, and without this
+        // the interval was not split and the error was `+∞`. A part of at
+        // most 2¹⁰ doubles is not split off on any interval: the nodes of
+        // its panels are some doubles apart.
+        const sliver = (e: number) =>
+          SLIVER_FRACTION *
+          Math.max(hi - lo, OFFSET_SINGULARITY_SPACINGS * ulpOf(e));
+        if (
+          (s - lo <= OFFSET_SINGULARITY_SPACINGS * ulpOf(lo) &&
+            s - lo <= sliver(lo)) ||
+          (hi - s <= OFFSET_SINGULARITY_SPACINGS * ulpOf(hi) &&
+            hi - s <= sliver(hi))
+        )
+          return whole;
         const halfOptions = {
           rtol,
           atol,

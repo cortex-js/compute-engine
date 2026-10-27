@@ -1837,7 +1837,7 @@ const TUPLE_FLATTENING_EXTREMA = new Set(['Max', 'Min']);
  * value, an error or a symbolic `max(…)` that holds a string. A bare `tuple`
  * is accepted: it is the `tuple` arm of the open form
  * `number | tuple | list<…>` (ROADMAP CE-502), which stands for a point, a
- * tuple of numbers (ROADMAP CE-545 asks whether that reading is kept).
+ * tuple of numbers (user decision 2026-10-27, recorded in ROADMAP CE-545).
  */
 function extremumReadsANumber(t: Readonly<Type>): boolean {
   if (t === 'tuple') return true;

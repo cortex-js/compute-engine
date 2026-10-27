@@ -2,221 +2,344 @@
 
 ### Behavior Changes
 
+- **`subs()` of the variable of a derivative, a series or an indefinite integral
+  gives the value at the point** (ROADMAP CE-538). Before,
+  `D(x^2, x).subs({x: 3})` gave an invalid `D(…, Error('expected-a-symbol'))`.
+  It is now `EvaluateAt(Function(D(x^2, x), x), 3)`, written
+  `\left.\left(\frac{\mathrm{d}x^2}{\mathrm{d}x}\right)\right|_{x=3}`, which
+  evaluates to `6` (a float under `.N()`).
+  - This also applies inside a scoped expression: `Sum(D(x^k, x), k=1..3)` with
+    `x` replaced by `2` evaluates to `17`.
+  - `Integrate(a·x, x).subs({x: 3, a: 2})` evaluates to `9`, and
+    `D(x^2, x).subs({x: x + 1})` to `2(x + 1)`.
+  - Several variables are replaced at the same time, at one point that is a
+    `Tuple` (`|_{x=3, y=5}`).
+  - Only the variable itself is applied at a point. The replacement of another
+    name is put in the derivative, the series or the integral before it is
+    computed: `D(x·y, x).subs({y: x})` is `D(x·x, x)`, which evaluates to `2x`.
+  - A wildcard (`_f`) is still replaced inside the node. A value with no closed
+    form stays an unevaluated `EvaluateAt`. The value of a `Series` at a point
+    keeps its `BigO` remainder. A value that keeps a `BigO` term is `NaN` under
+    `.N()`; `Normal` drops the remainder, before or after the substitution, and
+    `Normal` now strips it before any numeric evaluation
+    (`Normal(Series(sin x, x, 0, 3)).N()` was `NaN`).
+- **`EvaluateAt` at a point has the value of `Apply`.** The statements of the
+  body run in order, and an `If` evaluates only the branch it selects. A point
+  is never a partial application: when there are fewer points than required
+  parameters, or more than a named callee accepts, the form stays unevaluated. A
+  constant is its own value at any point: `EvaluateAt(5, 3)` is `5`, and so is a
+  named function that takes no argument.
+  - A lazy callee receives the point as written, and the expression it returns
+    is not evaluated again: `EvaluateAt(p, Random())` for a lazy `p` that
+    returns its operand gives `Random()` without a draw.
+  - The form stays unevaluated only when a `D`, a `Series` or an `Integrate`
+    with no closed form comes from the BODY: the identity at
+    `Series(e^{1/x}, x, 0, 3)` is that series, and `x ↦ x` between `0` and an
+    integral with no closed form is that integral.
+  - A point that is a symbol whose value is a tuple is read at evaluation: with
+    `p := (2, 3)`, `(x·y)|_{p}` is `6`.
+  - `EvaluateAt` compiles: `EvaluateAt(f, a)` as the application `f(a)` and
+    `EvaluateAt(f, a, b)` as `f(b) − f(a)`, so the result of `subs()` on a
+    derivative compiles to JavaScript. `D` of an `EvaluateAt` evaluates it
+    first: the derivative in `y` of `(x^2)|_{x=y}` is `2y`.
+- **A function literal whose body is a derivative, a series or an indefinite
+  integral of one parameter, applied to arguments that name another parameter,
+  is a plain application.** `((x, y) ↦ D(x·y, x))(3, x)` is `x` (the derivative
+  `y` at `y = x` of the caller); it was `x + 3`, a product rule mixed with the
+  caller's `x`. `((x, a) ↦ ∫a·x dx)(x + 1, x)` is `x(x + 1)²/2`; the point was
+  lost. A function-valued parameter named like a user function no longer leaks
+  its name: with `w(x) := x + 100`, `(w ↦ D(w(x), x))(x ↦ 5·w(x))` is `5`, and
+  the same for `Integrate` and `Series`.
+- **An indefinite integral under `.N()` computes its antiderivative.**
+  `Integrate(Sin(x), x).N()` is `-cos(x)` and `(x ↦ ∫sin x dx)(1).N()` is
+  `-0.5403…`; both stayed an unevaluated `Integrate` (the numeric request sent
+  the integral to the quadrature route, which has no bounds to use).
+- **An `evaluate` handler written with anonymous parameters gets a signature
+  with as many parameters.**
+  `ce.declare('f', { evaluate: ['Function', ['Add', '_', 1]] })` is
+  `(unknown) -> unknown`, not `() -> unknown`.
+- **`D(Length([x ↦ x]), x)` is `0`**: an occurrence of the variable that a
+  function literal binds as its parameter does not make the expression depend on
+  the variable. `Integrate(Apply(t ↦ t², x), x)` is `x³/3`: an applied function
+  literal in the integrand is applied before integration.
+- **Canonicalizing a function literal whose raw body shares a subtree is linear
+  in the number of distinct nodes.** A body that shares the previous node twice
+  at each level, at depth 24, took 4.9 s and takes 2 ms: the canonical form of a
+  raw node is kept for the duration of one top-level canonicalization (ROADMAP
+  CE-548).
+- **A function literal whose body is `D`, `Series` or an indefinite `Integrate`
+  of its parameter**, applied to an argument that contains the parameter's name,
+  gives the value at the argument: `(x ↦ D(x^2, x))(x + 1)` is `2(x + 1)`, not
+  `2x`. Under `.N()`, `(x ↦ D(x^2, x))(1 + 2.5)` is `7`, not `2x`.
+- **The LaTeX of `EvaluateAt` parses back to the same `EvaluateAt`.**
+  `\left.x^2\right|_{x=2}` was `Subscript(EvaluateAt(x^2), x = 2)`. The
+  two-point form is now written with the name of the variable,
+  `\left.\left(\frac{x^3}{3}\right)\right|_{x=0}^{1}`. In a bracket with no name
+  for the variable and more free variables than coordinates in the point, the
+  point or the bounds are for `x`: `\left.kx\right|_{2}^{5}` is `3k`, while
+  `\left.\left(xy\right)\right|_{(1,2)}` is `2`. `\left.f\right|_{A}` and a
+  bound that is a tuple keep their earlier parse.
+- **Numeric integration reports an error that bounds the true error in more
+  cases** (ROADMAP CE-533, CE-376). The error reported for most integrals
+  changes; smooth integrands use the same number of evaluations.
+  - The error of a Gauss–Kronrod panel now also comes from null rules
+    (Berntsen–Espelid), with no extra evaluations, so a kink or a jump inside a
+    panel is counted. For the inner integral `∫₋₁₀¹⁰ n(x, 0.758125) dx` of a
+    Tycho document, the result was `± 5.7e-10` with a true error of `1.6e-5`; it
+    is now `± 9.3e-10` with a true error of `2.3e-11`.
+  - Far from 0, the rounding of the sample points to the doubles is counted:
+    `∫ sin(10³·(x − a)) dx` over `[10⁶, 10⁶ + 0.01]` was `converged`,
+    `± 2.2e-13`, for a true error of `2.3e-11`; it is now not converged,
+    `± 6.3e-10`. Some accurate results are now reported as not converged for
+    that reason (`∫ e^(x − a) dx` over `[10⁶, 10⁶ + 0.01]`).
+  - With `singularEndpoints`, a singular point that is not exactly a double is
+    found: `∫₋₁¹ |x − 0.3|^(−1/2) dx` was `± 3.9e-10` for a true error of
+    `1.3e-8` after 28,480 evaluations; it is now `± 4e-13` for `3e-14` after
+    6,117. A singular point a few doubles inside or outside an endpoint (for
+    example `|t − 0.1·3|^(−1/2)` or `|t − (0.7 − 0.4)|^(−1/2)` on `[0.3, 1]`)
+    now gives an error that bounds the true error.
+  - An interval is no longer split at a jump, and a step next to a singular
+    endpoint is no longer taken for a singularity:
+    `(x < 0.3 ? 0 : 1) + |x − c|^(−1/2)` with `c = 0.3 + 10⁻⁶` was `converged`,
+    `± 3.1e-12`, for a true error of `1e-6`; it is now not converged, with an
+    error that bounds the true error.
+  - At a singular endpoint far from 0, the area between the endpoint and the
+    first double above it, which no sample reaches, is now counted in the error
+    (ROADMAP CE-552): `(x − 10⁶)^(−1/2)` on `[10⁶, 10⁶ + 1]` was `± 1.4e-5` for
+    a true error of `2.3e-5` and is `± 5.7e-5`. In a sweep of 180 such cases,
+    the error was below the true error in 124 and is in none; the six cases that
+    lose their `converged` status had a wrong error. A zero of the smooth factor
+    a few doubles from the endpoint gets a fallback bound.
+  - A step next to a slowly decaying endpoint singularity
+    (`x^(−0.95)·(x < s ? 2 : 1)` on `[0, 1]`) no longer reports `converged` with
+    an error below the true error (ROADMAP CE-547): the last panel next to the
+    endpoint is compared with the model of the shells.
+  - A pole 10⁴ to 10⁵ doubles outside an endpoint is detected (ROADMAP CE-558),
+    and the error charged for a pole outside is the area the corner model
+    misplaces, not the whole model area: `(x − c)^(−1/4)` on `[10⁶, 10⁶ + 1]`
+    with `c` 1000 doubles below was `± 1.3e-7` and is `± 1.3e-10` for a true
+    error of `1e-11`. An exact zero of the integrand at the sample that gives
+    the exponent of a singularity inside an endpoint no longer gives an infinite
+    error (ROADMAP CE-557).
+  - The semi-infinite oscillatory quadrature returns a finite estimate with an
+    infinite error, not `NaN`, when one lobe cannot bound its error (ROADMAP
+    CE-549).
+  - The nodes of a Gauss–Kronrod panel are clamped to the panel: on a panel a
+    few doubles wide, a node could round one double outside it, and `√(x − 1)`
+    on `[1, 1 + ε]` gave `NaN`. An interval one double wide still reports
+    `0 ± 0` (ROADMAP CE-561).
+
 - **The interval library gives sound and tighter answers at poles, at domain
-  boundaries and for powers** (ROADMAP CE-522). These kernels are the ones
-  that the code compiled with `compile(…, { to: 'interval-js' })` calls, so
-  every user of that target sees the change. The design review of the
-  `Enclosure` value kind (see Features) found them: some answers excluded a
-  true value, others were wider than necessary.
-  - `mod` with a divisor interval that is not a point: `mod([5, 5], [2, 4])`
-    was `[1, 1]`, which excludes `Mod(5, 3) = 2` and `Mod(5, 2.5) = 0`. It is
-    now the hull `[0, 4]` (a `singular` result with that value). When the
-    quotient has one integer part over the whole box, the answer is the
-    continuous range: `mod([5, 5], [2.6, 4])` is `[1, 2.4]`, rounded outward.
+  boundaries and for powers** (ROADMAP CE-522). These kernels are the ones that
+  the code compiled with `compile(…, { to: 'interval-js' })` calls, so every
+  user of that target sees the change. The design review of the `Enclosure`
+  value kind (see Features) found them: some answers excluded a true value,
+  others were wider than necessary.
+  - `mod` with a divisor interval that is not a point: `mod([5, 5], [2, 4])` was
+    `[1, 1]`, which excludes `Mod(5, 3) = 2` and `Mod(5, 2.5) = 0`. It is now
+    the hull `[0, 4]` (a `singular` result with that value). When the quotient
+    has one integer part over the whole box, the answer is the continuous range:
+    `mod([5, 5], [2.6, 4])` is `[1, 2.4]`, rounded outward.
   - `atanh` at the boundary of its domain: `atanh([0, 1])` was
     `partial [0, 18.3684…]`, a clip of the argument to `1 − ε`. It is now
     `partial [0, +∞]`, and `atanh([1, 1])` is `empty`.
   - A pole at an ENDPOINT gives a half-line. `tan([0, Math.PI / 2])`,
     `cot([0, 1])`, `sec([0, Math.PI / 2])`, `csc([-1, 0])`, `gamma([0, 1])`,
     `powRational([-1, 0], -2, 3)` and `powRealBranch` with a negative exponent
-    were `singular` with no value (the whole line). They are now `partial`
-    with the half-line beside the pole: `gamma([0, 1])` is `[1, +∞]` and
-    `powRational([-1, 0], -2, 3)` is `[1, +∞]`. A pole inside the interval
-    still gives `singular`. A point at a pole has no value:
-    `gamma([0, 0])` and `powRational([0, 0], -1, 3)` are `empty`; `tan`,
-    `cot`, `sec` and `csc` at a point that is their pole stay `singular`,
-    because the interpreter answers `~oo` there.
+    were `singular` with no value (the whole line). They are now `partial` with
+    the half-line beside the pole: `gamma([0, 1])` is `[1, +∞]` and
+    `powRational([-1, 0], -2, 3)` is `[1, +∞]`. A pole inside the interval still
+    gives `singular`. A point at a pole has no value: `gamma([0, 0])` and
+    `powRational([0, 0], -1, 3)` are `empty`; `tan`, `cot`, `sec` and `csc` at a
+    point that is their pole stay `singular`, because the interpreter answers
+    `~oo` there.
   - `pow` with a negative integer exponent over a base with a zero endpoint:
     `pow([0, 1], -1)` was `partial [−∞, +∞]` and is now `partial [1, +∞]`;
     `pow([-1, 0], -1)` is `[−∞, −1]`, and `pow([0, 0], -1)` is `empty`.
   - `powInterval` with a negative base over an exponent interval:
-    `powInterval([-2, -2], [1, 2])` was `empty`, although `(−2)^1` and
-    `(−2)^2` exist. It is now `[−4, 4]`, the symmetric hull `[−M, M]` with
-    `M = max(|b|^c, |b|^d)`, which contains every real value of the power,
-    also at an exponent that is a fraction with an odd denominator
+    `powInterval([-2, -2], [1, 2])` was `empty`, although `(−2)^1` and `(−2)^2`
+    exist. It is now `[−4, 4]`, the symmetric hull `[−M, M]` with
+    `M = max(|b|^c, |b|^d)`, which contains every real value of the power, also
+    at an exponent that is a fraction with an odd denominator
     (`(−2)^(5/3) ≈ −3.17`). A base that crosses 0 takes the hull of its two
     parts: `[-1, 1]^[1, 2]` was `partial [0, 1]` and is `[−1, 1]`. At an
-    exponent that is a POINT and not an integer, a negative base still has
-    no value (`powInterval([-2, -2], [1.5, 1.5])` is `empty`). Visible to
-    Tycho's adaptive sampler (its rows 260 and 417): a box with `x < 0` and
-    an exponent interval that holds an integer is now an undecided hull that
-    the sampler subdivides, instead of a blank region; at a non-integer
-    point exponent the region stays blank.
-  - `pow` with a negative integer exponent rounds outward at each step. For
-    the double `x = 1.9678349534779586e-103`, `pow([x, x], -3)` was
-    `[1.3123025984121744e308, 1.3123025984121748e308]`, which excludes the
-    true value (its nearest double is `1.3123025984121742e308`). It now
-    contains it. An exact power stays exact: `pow([2, 2], -1)` is
-    `[0.5, 0.5]`.
-  - An angle in degrees, gradians or turns: the `interval-js` target
-    multiplied the angle by the double nearest to the factor
-    (`Math.PI / 180`, `2 * Math.PI`), which can be below the true factor. In
-    `turn` mode, the compiled `cos(x)` at the point `0.25` had two positive
-    bounds and excluded the true value `0`. The target now uses the exact
-    factor (`π/180`, `π/200`, `2π`, and its reciprocal for the inverse
-    functions), enclosed outward as any other exact constant, also in the
-    derivatives that the target compiles. The compiled `cos` and `arcsin` now
-    contain the true value at a quarter turn in `deg`, `grad` and `turn`
-    mode. The other targets keep the float factors.
+    exponent that is a POINT and not an integer, a negative base still has no
+    value (`powInterval([-2, -2], [1.5, 1.5])` is `empty`). Visible to Tycho's
+    adaptive sampler (its rows 260 and 417): a box with `x < 0` and an exponent
+    interval that holds an integer is now an undecided hull that the sampler
+    subdivides, instead of a blank region; at a non-integer point exponent the
+    region stays blank.
+  - `pow` with a negative integer exponent rounds outward at each step. For the
+    double `x = 1.9678349534779586e-103`, `pow([x, x], -3)` was
+    `[1.3123025984121744e308, 1.3123025984121748e308]`, which excludes the true
+    value (its nearest double is `1.3123025984121742e308`). It now contains it.
+    An exact power stays exact: `pow([2, 2], -1)` is `[0.5, 0.5]`.
+  - An angle in degrees, gradians or turns: the `interval-js` target multiplied
+    the angle by the double nearest to the factor (`Math.PI / 180`,
+    `2 * Math.PI`), which can be below the true factor. In `turn` mode, the
+    compiled `cos(x)` at the point `0.25` had two positive bounds and excluded
+    the true value `0`. The target now uses the exact factor (`π/180`, `π/200`,
+    `2π`, and its reciprocal for the inverse functions), enclosed outward as any
+    other exact constant, also in the derivatives that the target compiles. The
+    compiled `cos` and `arcsin` now contain the true value at a quarter turn in
+    `deg`, `grad` and `turn` mode. The other targets keep the float factors.
   - `fract([-1e-20, -1e-20])` was `[1, 1]`, while the true fractional part is
     below 1. The subtraction `x − floor(x)` is now rounded outward; an exact
     case stays exact.
-  - The other kernels with a pole now also give the half-line for a pole at
-    an endpoint: `coth([0, 1])` is `[coth(1), +∞]` (was `singular` with no
-    value), and the same for `csch`, `acoth`, `acsch` and `asech` at 0 and
-    for `gammaln` at a non-positive integer (`gammaln([0, 1])` is
-    `[0, +∞]`). A pole inside the interval, or a point at the pole, is still
-    `singular`. `asech([-1, 0])` is `empty`.
-  - `mod` with a divisor interval: when the quotient has one integer part
-    over the whole box, the answer takes no extra outward step:
-    `mod([1, 1], [2, 4])` is `[1, 1]` (was one ulp wider on each side).
-  - `Root(x, n)` with a symbolic degree `n`, compiled to `interval-js`,
-    reads the degree at run time: an integer degree keeps its exact value.
-    With `n = 6`, `x = [−64, −1]` gives `empty` (was `[−2, 2]`); with
-    `n = 3`, `[−4, −1]` (was `[−4, 4]`); a negative integer degree is the
-    reciprocal root (`n = −3`, `x = −8` gives `−1/2`). Another degree takes
-    the power `x^(1/n)` as before.
-- **`Degrees` refuses a complex number.** An angle is real, and the
-  signature of `Degrees` is `(real) -> real`. `Degrees(2 + 3i)` was
-  `(1/90 + i/60)·π`; it is now an `incompatible-type` error, as
-  `Degrees((2 + 3i) ± 0.1)` already was. A symbol declared `complex` that
-  holds a real number still converts. `NaN` and the infinities are not
-  changed.
-- **The `interval-js` runner checks the value of an input whose type can hold
-  an enclosure.** Before, this target declined every expression with a value
-  kind. Now, for a free symbol whose type is `enclosure` or a union with an
-  `enclosure` arm, `run()` checks the value BEFORE it converts the inputs:
-  a record `{ lo, hi }` must have `lo <= hi`, no `NaN` and not the same
-  infinity twice, and a number is a point. A union input is checked by arm:
-  with `y: number | enclosure`, `y: Infinity` is accepted by the numeric
-  arm. A refused value throws (it is not turned into an `entire` result).
-  `broadcast()` and `broadcastAsync()` check every cell before the loop, so
-  one refused cell rejects the whole call. The inputs of every other type
-  are not changed, including the `NaN` that marks an absent value of a
-  `real | missing` input.
+  - The other kernels with a pole now also give the half-line for a pole at an
+    endpoint: `coth([0, 1])` is `[coth(1), +∞]` (was `singular` with no value),
+    and the same for `csch`, `acoth`, `acsch` and `asech` at 0 and for `gammaln`
+    at a non-positive integer (`gammaln([0, 1])` is `[0, +∞]`). A pole inside
+    the interval, or a point at the pole, is still `singular`. `asech([-1, 0])`
+    is `empty`.
+  - `mod` with a divisor interval: when the quotient has one integer part over
+    the whole box, the answer takes no extra outward step: `mod([1, 1], [2, 4])`
+    is `[1, 1]` (was one ulp wider on each side).
+  - `Root(x, n)` with a symbolic degree `n`, compiled to `interval-js`, reads
+    the degree at run time: an integer degree keeps its exact value. With
+    `n = 6`, `x = [−64, −1]` gives `empty` (was `[−2, 2]`); with `n = 3`,
+    `[−4, −1]` (was `[−4, 4]`); a negative integer degree is the reciprocal root
+    (`n = −3`, `x = −8` gives `−1/2`). Another degree takes the power `x^(1/n)`
+    as before.
+- **`Degrees` refuses a complex number.** An angle is real, and the signature of
+  `Degrees` is `(real) -> real`. `Degrees(2 + 3i)` was `(1/90 + i/60)·π`; it is
+  now an `incompatible-type` error, as `Degrees((2 + 3i) ± 0.1)` already was. A
+  symbol declared `complex` that holds a real number still converts. `NaN` and
+  the infinities are not changed.
+- **The `interval-js` runner checks the value of an input whose type can hold an
+  enclosure.** Before, this target declined every expression with a value kind.
+  Now, for a free symbol whose type is `enclosure` or a union with an
+  `enclosure` arm, `run()` checks the value BEFORE it converts the inputs: a
+  record `{ lo, hi }` must have `lo <= hi`, no `NaN` and not the same infinity
+  twice, and a number is a point. A union input is checked by arm: with
+  `y: number | enclosure`, `y: Infinity` is accepted by the numeric arm. A
+  refused value throws (it is not turned into an `entire` result). `broadcast()`
+  and `broadcastAsync()` check every cell before the loop, so one refused cell
+  rejects the whole call. The inputs of every other type are not changed,
+  including the `NaN` that marks an absent value of a `real | missing` input.
 - **On `interval-js`, a decline of an expression with an enclosure is not
-  replaced by the interpreter**, also with `fallback: true`: it throws with
-  the message of the kind. The fallback of this target gives each input as
-  the midpoint of its interval, and would give a number to a symbol typed
+  replaced by the interpreter**, also with `fallback: true`: it throws with the
+  message of the kind. The fallback of this target gives each input as the
+  midpoint of its interval, and would give a number to a symbol typed
   `enclosure`. The other value kinds (`Measurement`, `Quantity`) keep the
   fallback.
 
 ### Features
 
 - **`Smoothstep(e0, e1, x)` is defined in the engine.** The shader targets
-  already lowered it to the GLSL and WGSL built-in `smoothstep`, but the
-  library had no definition: it stayed unevaluated, and the `javascript`
-  target did not compile it. It now evaluates to `t² (3 − 2t)` with
+  already lowered it to the GLSL and WGSL built-in `smoothstep`, but the library
+  had no definition: it stayed unevaluated, and the `javascript` target did not
+  compile it. It now evaluates to `t² (3 − 2t)` with
   `t = Clamp((x − e0) / (e1 − e0), 0, 1)`, exactly for exact operands
   (`Smoothstep(0, 1, 1/3)` is `7/27`), and broadcasts over lists. The
-  `javascript` and `python` targets compile it. When `e0 = e1` the result is
-  the step function (0 when `x < e0`, else 1), and when `e0 > e1` the formula
-  applies as written. The shader targets now write the formula out instead
-  of calling the built-in `smoothstep`, which has no defined result when
-  `e0 ≥ e1`, so every target gives the same value.
+  `javascript` and `python` targets compile it. When `e0 = e1` the result is the
+  step function (0 when `x < e0`, else 1), and when `e0 > e1` the formula
+  applies as written. The shader targets now write the formula out instead of
+  calling the built-in `smoothstep`, which has no defined result when `e0 ≥ e1`,
+  so every target gives the same value.
 
 - **`Enclosure`, an interval value with interval arithmetic** (ROADMAP CE-507
   phase 3, [#416](https://github.com/cortex-js/compute-engine/issues/416)).
   `Enclosure(lo, hi)` is a closed interval that holds ONE real number, whose
   value is somewhere in `[lo, hi]`. It is not the set `Interval(lo, hi)`:
   `Abs(Enclosure(-1, 2))` is `Enclosure(0, 2)`, while `Abs` of the set is its
-  cardinality. It is a library value kind, beside `ResidueClass`,
-  `Measurement` and `Quantity`, with the kind type `enclosure`, and it is accepted wherever a real is accepted
-  (`admittedAs: 'real'`). Its LaTeX is `\mathrm{Enclosure}(a, b)`.
+  cardinality. It is a library value kind, beside `ResidueClass`, `Measurement`
+  and `Quantity`, with the kind type `enclosure`, and it is accepted wherever a
+  real is accepted (`admittedAs: 'real'`). Its LaTeX is
+  `\mathrm{Enclosure}(a, b)`.
   - The canonical form orders the endpoints (`Enclosure(2, 1)` is
     `Enclosure(1, 2)`), reads one operand as a point (`Enclosure(3)` is
-    `Enclosure(3, 3)`), and converts a set `Interval` (`Enclosure(Interval(0,
-    1))` is `Enclosure(0, 1)`). An endpoint that is not an extended real, or
-    is a value of a kind, is an `incompatible-type` error. A `NaN` endpoint,
-    the same infinity twice and an empty set give the indeterminate value.
-  - The arithmetic hooks compute with the endpoints, and keep them exact
-    under `evaluate()`: `Enclosure(0, 1) + Enclosure(1/3, 2)` is
-    `Enclosure(1/3, 3)`, `Enclosure(-1, 2) · Enclosure(3, 4)` is
-    `Enclosure(-4, 8)`, and `Enclosure(1, 2) − Enclosure(1, 2)` is
-    `Enclosure(-1, 1)` (the two operands are independent). A division by an
-    enclosure with a zero endpoint gives a half-line
-    (`1 / Enclosure(0, 1)` is `Enclosure(1, +oo)`), and with `0` inside the
-    whole line.
+    `Enclosure(3, 3)`), and converts a set `Interval`
+    (`Enclosure(Interval(0, 1))` is `Enclosure(0, 1)`). An endpoint that is not
+    an extended real, or is a value of a kind, is an `incompatible-type` error.
+    A `NaN` endpoint, the same infinity twice and an empty set give the
+    indeterminate value.
+  - The arithmetic hooks compute with the endpoints, and keep them exact under
+    `evaluate()`: `Enclosure(0, 1) + Enclosure(1/3, 2)` is `Enclosure(1/3, 3)`,
+    `Enclosure(-1, 2) · Enclosure(3, 4)` is `Enclosure(-4, 8)`, and
+    `Enclosure(1, 2) − Enclosure(1, 2)` is `Enclosure(-1, 1)` (the two operands
+    are independent). A division by an enclosure with a zero endpoint gives a
+    half-line (`1 / Enclosure(0, 1)` is `Enclosure(1, +oo)`), and with `0`
+    inside the whole line.
   - A numeric function gives its image (the `apply` hook), with the critical
     points of the function: `Sin(Enclosure(0, Pi))` is `Enclosure(0, 1)`,
     `Sin(Enclosure(0, 1))` is `Enclosure(0, Sin(1))`, `Sqrt(Enclosure(-1, 4))`
-    is `Enclosure(0, 2)` (the domain is clipped), `Tan(Enclosure(0, Pi/2))`
-    is `Enclosure(0, +oo)`, and `Ln(Enclosure(-2, -1))` is indeterminate.
-    Under `evaluate()` with exact endpoints the endpoints are exact. Under
-    `.N()`, the endpoints are converted to doubles OUTWARD (the largest
-    double below `lo`, the smallest above `hi`) and the interval library
-    computes the image: `Enclosure(0, Pi).N()` is
-    `Enclosure(0, 3.1415926535897936)`, and `Sin(Enclosure(0, 1)).N()` is
-    `Enclosure(0, 0.8414709848078966)`. The endpoints under `.N()` are
-    machine doubles at every `ce.precision`. They are rigorous for the
-    rational operations and best effort for the transcendental functions
-    (ROADMAP CE-522.5).
+    is `Enclosure(0, 2)` (the domain is clipped), `Tan(Enclosure(0, Pi/2))` is
+    `Enclosure(0, +oo)`, and `Ln(Enclosure(-2, -1))` is indeterminate. Under
+    `evaluate()` with exact endpoints the endpoints are exact. Under `.N()`, the
+    endpoints are converted to doubles OUTWARD (the largest double below `lo`,
+    the smallest above `hi`) and the interval library computes the image:
+    `Enclosure(0, Pi).N()` is `Enclosure(0, 3.1415926535897936)`, and
+    `Sin(Enclosure(0, 1)).N()` is `Enclosure(0, 0.8414709848078966)`. The
+    endpoints under `.N()` are machine doubles at every `ce.precision`. They are
+    rigorous for the rational operations and best effort for the transcendental
+    functions (ROADMAP CE-522.5).
   - The comparisons use the partial order of intervals:
     `Enclosure(0, 1) < Enclosure(2, 3)` is `True`, and
-    `Enclosure(0, 2) < Enclosure(1, 3)` stays unevaluated. Two enclosures
-    that touch decide only the non-strict comparison:
-    `Enclosure(0, 1) <= Enclosure(1, 2)` is `True` and `>` is `False`, while
-    `<` stays unevaluated. `Enclosure(1, 1) = 1` is `True`; two enclosures
-    that overlap may hold the same real, so `Equal` stays unevaluated.
-  - `Max`, `Min`, `Clamp`, `ElementMax` and `ElementMin` give the hull of
-    the extrema: `Max(Enclosure(0, 2), Enclosure(1, 3))` is
-    `Enclosure(1, 3)`, and `Max(Enclosure(0, 1), +oo)` is `+oo`.
-  - `Sum`, `Product` and `Mean` of a list of enclosures and numbers fold
-    through the hooks: `Mean([Enclosure(0, 1), Enclosure(1, 2), 3])` is
+    `Enclosure(0, 2) < Enclosure(1, 3)` stays unevaluated. Two enclosures that
+    touch decide only the non-strict comparison:
+    `Enclosure(0, 1) <= Enclosure(1, 2)` is `True` and `>` is `False`, while `<`
+    stays unevaluated. `Enclosure(1, 1) = 1` is `True`; two enclosures that
+    overlap may hold the same real, so `Equal` stays unevaluated.
+  - `Max`, `Min`, `Clamp`, `ElementMax` and `ElementMin` give the hull of the
+    extrema: `Max(Enclosure(0, 2), Enclosure(1, 3))` is `Enclosure(1, 3)`, and
+    `Max(Enclosure(0, 1), +oo)` is `+oo`.
+  - `Sum`, `Product` and `Mean` of a list of enclosures and numbers fold through
+    the hooks: `Mean([Enclosure(0, 1), Enclosure(1, 2), 3])` is
     `Enclosure(4/3, 2)`. The other statistics stay unevaluated.
-  - The code compiled for the `interval-js` target computes with an
-    enclosure: an input typed `enclosure` is a `{ lo, hi }` record, and the
-    compiled code calls the same kernel of the interval library as `.N()`
-    for each form, so the two give the same doubles. With `x` declared
-    `enclosure`, `compile(ce.parse('x + 1'), { to: 'interval-js' })` gives
+  - The code compiled for the `interval-js` target computes with an enclosure:
+    an input typed `enclosure` is a `{ lo, hi }` record, and the compiled code
+    calls the same kernel of the interval library as `.N()` for each form, so
+    the two give the same doubles. With `x` declared `enclosure`,
+    `compile(ce.parse('x + 1'), { to: 'interval-js' })` gives
     `{ kind: 'interval', value: { lo: 1, hi: 2 } }` for
-    `run({ x: { lo: 0, hi: 1 } })`. The other targets decline an enclosure
-    with the message of the kind.
-  - `Measurement(Enclosure(0, 1), 0.1)` and `Quantity(Enclosure(0, 1), m)`
-    are `incompatible-type` errors.
+    `run({ x: { lo: 0, hi: 1 } })`. The other targets decline an enclosure with
+    the message of the kind.
+  - `Measurement(Enclosure(0, 1), 0.1)` and `Quantity(Enclosure(0, 1), m)` are
+    `incompatible-type` errors.
 
   The rules are in `doc/06-guide-augmenting.md`, "Enclosures"; the design is
   section 4.9.2 of `docs/plans/2026-10-26-value-kinds.md`.
+
 - **Two extensions of `ArithmeticDefinition` for a value kind that you
   declare.**
-  - The optional `extremum(which, ops, context)` hook gives the maximum
-    (`which` is `'max'`) or the minimum of operands of which one at least is
-    a value of the kind, for `Max`, `Min`, `Clamp`, `ElementMax` and
-    `ElementMin`. The engine asks it before it orders the operands with
-    `compare`, so a kind whose values can overlap can answer a value that is
-    not one of the operands. `undefined` declines, and the engine orders the
-    operands with `compare` as before.
+  - The optional `extremum(which, ops, context)` hook gives the maximum (`which`
+    is `'max'`) or the minimum of operands of which one at least is a value of
+    the kind, for `Max`, `Min`, `Clamp`, `ElementMax` and `ElementMin`. The
+    engine asks it before it orders the operands with `compare`, so a kind whose
+    values can overlap can answer a value that is not one of the operands.
+    `undefined` declines, and the engine orders the operands with `compare` as
+    before.
   - `compare` can answer `'<='` or `'>='`: the first value is less than (or
-    greater than) or equal to the second, and the hook cannot say which. On
-    a `'<='` answer, `LessEqual` is `True` and `Greater` is `False`, `Less`
-    and `GreaterEqual` stay unevaluated, and `Equal` asks the `eq` handlers.
-    A reader that needs a total order (`Sort`, and `Max`/`Min` without an
+    greater than) or equal to the second, and the hook cannot say which. On a
+    `'<='` answer, `LessEqual` is `True` and `Greater` is `False`, `Less` and
+    `GreaterEqual` stay unevaluated, and `Equal` asks the `eq` handlers. A
+    reader that needs a total order (`Sort`, and `Max`/`Min` without an
     `extremum` hook) reads it as no answer.
 
 ### Performance
 
-- **The shader targets call the built-in `sin`, `cos`, `sign`, `max` and
-  `min`, and write `clamp` as `min(max(x, lo), hi)`, for an operand that is
-  finite for certain.** The NaN-safe helpers that replaced them (`_gpu_sin`
-  and the others) cost a bit test and a selection per call, about 10% of the
-  frame time of a Tycho document on WebGPU, and on a finite operand they give
-  the same bits as the built-in (measured on an Apple M5 Max over WebGPU,
-  39,200 inputs). An operand is finite for certain when its static type is a
-  finite real, each symbol it reads has a declared type (a symbol declared
-  `real` holds a finite value), it reads no name that the caller maps with
-  `functions` or `operators` and no name that `vars` maps to other source,
-  and it cannot overflow in f32: it uses only heads whose result does not
-  grow past their operands (`+`, `−`, a product or quotient by a literal,
-  `sin`, `floor`, `abs`, …). A name that `vars` maps to its own identifier
-  (`vars: { T: 'T' }`, the way a host passes a uniform), with a declared type
-  and not a constant, counts as a declared symbol. `sin(x)` and
-  `cos(T + 1.9k)` with declared real symbols are now the built-ins, also with
-  `vars: { T: 'T' }`; `sin(u)` with `u: number`, `sin(x/y)`, `sin(√x)`,
-  `sin(e^x)`, `sin(xy)`, `vars: { T: 'uT' }`, a mapped constant and the
-  parameter of a function whose type is inferred keep the helper. One limit:
-  a sum or a product by a literal of values within that factor of the
-  largest f32 (3.4·10³⁸) overflows, and the built-in then gives 0 on Apple
-  GPUs where the helper gave NaN.
+- **The shader targets call the built-in `sin`, `cos`, `sign`, `max` and `min`,
+  and write `clamp` as `min(max(x, lo), hi)`, for an operand that is finite for
+  certain.** The NaN-safe helpers that replaced them (`_gpu_sin` and the others)
+  cost a bit test and a selection per call, about 10% of the frame time of a
+  Tycho document on WebGPU, and on a finite operand they give the same bits as
+  the built-in (measured on an Apple M5 Max over WebGPU, 39,200 inputs). An
+  operand is finite for certain when its static type is a finite real, each
+  symbol it reads has a declared type (a symbol declared `real` holds a finite
+  value), it reads no name that the caller maps with `functions` or `operators`
+  and no name that `vars` maps to other source, and it cannot overflow in f32:
+  it uses only heads whose result does not grow past their operands (`+`, `−`, a
+  product or quotient by a literal, `sin`, `floor`, `abs`, …). A name that
+  `vars` maps to its own identifier (`vars: { T: 'T' }`, the way a host passes a
+  uniform), with a declared type and not a constant, counts as a declared
+  symbol. `sin(x)` and `cos(T + 1.9k)` with declared real symbols are now the
+  built-ins, also with `vars: { T: 'T' }`; `sin(u)` with `u: number`,
+  `sin(x/y)`, `sin(√x)`, `sin(e^x)`, `sin(xy)`, `vars: { T: 'uT' }`, a mapped
+  constant and the parameter of a function whose type is inferred keep the
+  helper. One limit: a sum or a product by a literal of values within that
+  factor of the largest f32 (3.4·10³⁸) overflows, and the built-in then gives 0
+  on Apple GPUs where the helper gave NaN.
 
 - **The unit of a quantity is decoded once for each boxed value.** The
   arithmetic and the comparisons of quantities read the unit expression, its
@@ -225,13 +348,13 @@
   hooks of a value kind that you declare can decode the operands of a kind value
   once for each boxed expression in the same way.
 - **The canonicalization of a binder keeps the cached types** (ROADMAP CE-535).
-  `D`, `Sum`, `Integrate` and the other binders declare their bound variable
-  in a scope created for them. That declaration no longer invalidates the
-  cached types and signs of every expression, because no name was read through
-  the new scope before. A row of a Tycho document with `D(PointY(S(u)), u)`,
-  where `S` is a user function with a large body, typed `S(u)` again after
-  each `D`; the replay of the canonical rebinds of the document
-  `2ki2hjsouf` went from 848 ms to 664 ms (median of 5).
+  `D`, `Sum`, `Integrate` and the other binders declare their bound variable in
+  a scope created for them. That declaration no longer invalidates the cached
+  types and signs of every expression, because no name was read through the new
+  scope before. A row of a Tycho document with `D(PointY(S(u)), u)`, where `S`
+  is a user function with a large body, typed `S(u)` again after each `D`; the
+  replay of the canonical rebinds of the document `2ki2hjsouf` went from 848 ms
+  to 664 ms (median of 5).
 
 ### Resolved Issues
 
@@ -241,164 +364,163 @@
   has no value. The removal of the call scope that holds the parameter values
   now invalidates the cached types, signs and values that are keyed on the
   engine's cache version.
-- **A `Block` that declares a name and calls a function that reads the same
-  name no longer prints "error canonicalizing `Block`: Cannot read
-  properties of undefined (reading 'parent')"**, and the function's derived
-  signature is correct (ROADMAP CE-542). Example: `b` is declared `real`,
-  `f` is declared `(real) -> unknown` and assigned `p ↦ sin(b·p)`, and
+- **A `Block` that declares a name and calls a function that reads the same name
+  no longer prints "error canonicalizing `Block`: Cannot read properties of
+  undefined (reading 'parent')"**, and the function's derived signature is
+  correct (ROADMAP CE-542). Example: `b` is declared `real`, `f` is declared
+  `(real) -> unknown` and assigned `p ↦ sin(b·p)`, and
   `Block(Declare(b), Assign(b, 1), f(0.5))` is boxed. The call reads the
   signature of `f`, which is derived by boxing `f`'s body again in the scope
   where `f` is defined. That boxing read the names of the block being
   canonicalized, so the free `b` of `f` was taken for the block's local: the
   signature of `f` became `(real) -> number` instead of `(real) -> real`, and
   when the block was boxed in a scope from `ce.createScope()` the name
-  resolution walked past the root scope and threw. The value was not
-  affected: `f` reads the `b` of its own scope. A signature is now derived
-  with none of the names of the construct being canonicalized, and those
-  names shadow only inside the scopes of that construct. Found on the Tycho
-  document `g(x) with b = 1`, where `g` calls `f(x) = sin(b·x)`.
+  resolution walked past the root scope and threw. The value was not affected:
+  `f` reads the `b` of its own scope. A signature is now derived with none of
+  the names of the construct being canonicalized, and those names shadow only
+  inside the scopes of that construct. Found on the Tycho document
+  `g(x) with b = 1`, where `g` calls `f(x) = sin(b·x)`.
 
 - **On Apple GPUs, the complex shader helpers gave a finite value for a NaN
   part.** The built-ins `sin` and `cos` of a NaN give 0 on WebGL2 over ANGLE
   Metal and on WebGPU over Metal, so `exp(1 + NaN·i)` was `(0, 0)` on both
-  shader targets, and so were `sin`, `cos`, `sinh` and `cosh` of a complex
-  value with a NaN part (measured on an Apple M5 Max). The helpers
-  (`_gpu_cexp`, `_gpu_csin`, `_gpu_ccos`, `_gpu_csinh`, `_gpu_ccosh`, and also
-  `_gpu_csqrt` and `_gpu_cln`) now test each part first and give NaN, as the
-  interpreter and the `javascript` target do.
+  shader targets, and so were `sin`, `cos`, `sinh` and `cosh` of a complex value
+  with a NaN part (measured on an Apple M5 Max). The helpers (`_gpu_cexp`,
+  `_gpu_csin`, `_gpu_ccos`, `_gpu_csinh`, `_gpu_ccosh`, and also `_gpu_csqrt`
+  and `_gpu_cln`) now test each part first and give NaN, as the interpreter and
+  the `javascript` target do.
 
-- **A function body over a value kind keeps `x/x` in two more cases**
-  (ROADMAP CE-507.3 and CE-507.4). A parameter that the declared signature
-  types with a value kind is typed so in the body, so that `x/x` is not
-  folded to `1` before a kind value arrives. This did not happen with an
-  overloaded signature: with
-  `g: ((residue) -> residue) & ((integer) -> integer)` and the body
-  `x ↦ x/x`, `g(ResidueClass(2, 5))` was `1` and is now
-  `ResidueClass(1, 5)` (the parameter is typed with the union of its types
-  in the arms). It also did not happen for a recursive function literal
-  assigned to a symbol declared with a function type: the literal was boxed
-  again to bind its call to itself, and that step dropped the type.
-- **`N()` of an integral whose integrand restricts a list gives one integral
-  per element** (Tycho row 459). With `E = [0.1, 0.5]`,
+- **A function body over a value kind keeps `x/x` in two more cases** (ROADMAP
+  CE-507.3 and CE-507.4). A parameter that the declared signature types with a
+  value kind is typed so in the body, so that `x/x` is not folded to `1` before
+  a kind value arrives. This did not happen with an overloaded signature: with
+  `g: ((residue) -> residue) & ((integer) -> integer)` and the body `x ↦ x/x`,
+  `g(ResidueClass(2, 5))` was `1` and is now `ResidueClass(1, 5)` (the parameter
+  is typed with the union of its types in the arms). It also did not happen for
+  a recursive function literal assigned to a symbol declared with a function
+  type: the literal was boxed again to bind its call to itself, and that step
+  dropped the type.
+- **`N()` of an integral whose integrand restricts a list gives one integral per
+  element** (Tycho row 459). With `E = [0.1, 0.5]`,
   `∫_0^1 y·When(∫_{−1}^{1} 1/ElementMax(E, |x|) dx, 0 ≤ y ≤ 5) dy` gave `NaN`,
   and `∫_0^1 \{0 ≤ y ≤ 5: 1/ElementMax(E, y+1)\} dy` stayed unevaluated. Both
-  now give a list, here `[1 + ln 10, 1 + ln 2]`. A `When(L, c)` or a
-  `Which` with list values, alone or in a product, is distributed over the
-  elements of the list before the integration. A condition that is a list of
-  booleans is a mask, as before.
+  now give a list, here `[1 + ln 10, 1 + ln 2]`. A `When(L, c)` or a `Which`
+  with list values, alone or in a product, is distributed over the elements of
+  the list before the integration. A condition that is a list of booleans is a
+  mask, as before.
 
 - **A nested numeric integral of piecewise functions converges.** The body
   `∫_0^1 y·∫_{−10}^{10} n(x, y, ε) dx dy` of Tycho's document
   `neyret/2agcgxq87y`, where `n` has a jump and kinks, took about 25 s under
   `N()` and stopped at a relative uncertainty of 3e-4, which did not always
-  contain the true error. It now takes about 0.3 s and is correct to 1e-9,
-  for six values of ε. Two causes: a Gauss–Kronrod panel did not see a jump or
-  a kink between its last node and its end, and reported an error near zero;
-  and the error of an inner integral was not added to the error of the outer
-  one. A single integral now makes 15 more evaluations of its integrand.
+  contain the true error. It now takes about 0.3 s and is correct to 1e-9, for
+  six values of ε. Two causes: a Gauss–Kronrod panel did not see a jump or a
+  kink between its last node and its end, and reported an error near zero; and
+  the error of an inner integral was not added to the error of the outer one. A
+  single integral now makes 15 more evaluations of its integrand.
 
 - **The exact integral of a piecewise with a `Nothing` branch is no longer
   wrong.** `∫_0^1 Which(y < 1/2, y, True, Nothing) dy` gave `5/8`, because the
   antiderivative of `Nothing` was taken as that of a constant. It now stays
-  unevaluated, and `N()` gives `NaN`, as for a `Which` with no default
-  clause. `N()` of `∫_0^1 Nothing dx` is `NaN`, as for `Missing`.
+  unevaluated, and `N()` gives `NaN`, as for a `Which` with no default clause.
+  `N()` of `∫_0^1 Nothing dx` is `NaN`, as for `Missing`.
 
 - **A list combined with a piecewise evaluates to a list** (Tycho row 452).
   `[0, 1, 2, 3]·Which(x > 1, 0, True, 1)` with `x` free evaluated to
   `Which(1 < x, [0, 0, 0, 0], True, [0, 1, 2, 3])`, which is not a `List`. It
   now evaluates to `[Which(1 < x, 0, True, 0), Which(1 < x, 0, True, 1), …]`,
-  the same values at each `x`. The same applies under `Add`, `Abs` and a
-  bounded `Sum`, and to a `Which` or an `If` whose values are lists of one
-  length, when the condition is undecided. A `Which` with no default clause is
-  not changed. When such a `Which` is combined with an operand, the result
-  now has a last branch for "no condition holds": `3 + Which(x > 1, 0)` is
+  the same values at each `x`. The same applies under `Add`, `Abs` and a bounded
+  `Sum`, and to a `Which` or an `If` whose values are lists of one length, when
+  the condition is undecided. A `Which` with no default clause is not changed.
+  When such a `Which` is combined with an operand, the result now has a last
+  branch for "no condition holds": `3 + Which(x > 1, 0)` is
   `Which(1 < x, 3, True, NaN)`, the value that substituting `x` first gives.
 
 - **`subs()` replaces only the free occurrences of a name** (Tycho row 464).
-  `Comprehension(j + 1, Element(j, Range(0, 2))).subs({j: [4, 4, 5]})`
-  replaced the index and its binding site, and the index of a `Sum`, the
-  parameter of a `Function` and a `Block` local became `Error` nodes. A
-  binder now keeps its bound variables: `j + Sum(j, Limits(j, 1, 3))` with
-  `{j: 10}` gives `10 + Sum(j, Limits(j, 1, 3))`. The occurrences replaced are
-  exactly those that `freeVariables` reports, so the bounds of a `Limits`
-  clause, which read the enclosing binding, are still replaced. A
-  substitution can still capture a name: `Sum(j + k, Limits(k, 1, 3))` with
-  `{j: k}` gives `Sum(2k, …)`; rename the index first to avoid this.
+  `Comprehension(j + 1, Element(j, Range(0, 2))).subs({j: [4, 4, 5]})` replaced
+  the index and its binding site, and the index of a `Sum`, the parameter of a
+  `Function` and a `Block` local became `Error` nodes. A binder now keeps its
+  bound variables: `j + Sum(j, Limits(j, 1, 3))` with `{j: 10}` gives
+  `10 + Sum(j, Limits(j, 1, 3))`. The occurrences replaced are exactly those
+  that `freeVariables` reports, so the bounds of a `Limits` clause, which read
+  the enclosing binding, are still replaced. A substitution can still capture a
+  name: `Sum(j + k, Limits(k, 1, 3))` with `{j: k}` gives `Sum(2k, …)`; rename
+  the index first to avoid this.
 
 - **On `wgsl` and `glsl`, a call that several user functions repeat with the
   same arguments is computed once per pixel** (Tycho row 467). Each user
-  function was emitted as its own shader function, and the
-  common-subexpression pass worked inside one function only. The Metal
-  compiler under WebGPU does not merge identical calls across functions, so
-  Tycho's `voronoi-diagram` drew about 2.2 times slower on WebGPU than on
-  WebGL. The pure, non-recursive user functions of a shader are now
-  substituted at the root, and a sum with literal bounds that calls one is
-  written out, so the existing pass computes each shared call once. On that
-  row, `sqrt` is computed 16 times per pixel (was 560) and `sin` 32 times (was
-  544). The shader text is about 50% larger. An expression that draws a random
-  number, or a sum that stays a loop, is compiled as before.
+  function was emitted as its own shader function, and the common-subexpression
+  pass worked inside one function only. The Metal compiler under WebGPU does not
+  merge identical calls across functions, so Tycho's `voronoi-diagram` drew
+  about 2.2 times slower on WebGPU than on WebGL. The pure, non-recursive user
+  functions of a shader are now substituted at the root, and a sum with literal
+  bounds that calls one is written out, so the existing pass computes each
+  shared call once. On that row, `sqrt` is computed 16 times per pixel (was 560)
+  and `sin` 32 times (was 544). The shader text is about 50% larger. An
+  expression that draws a random number, or a sum that stays a loop, is compiled
+  as before.
 
-- **A recursive function whose step passes its own call to `Max` or `Min` is
-  no longer typed `any`** (Tycho row 468, a regression in 0.170.0). With
-  `S(a, b) = Max(a, b)` and `R(i) = Which(i = 0, 0, True, R(i − 1) + S(1,
-  R(i − 1)))`, `R(3)` was typed `any`. The type of a call whose body is `Max`
-  or `Min` over numbers and tuples is now `number` on its tuple arm, since
-  `Max` and `Min` read the coordinates of a tuple (`Max(1, (2, 3))` is 3), so
-  `R(3)` gets the same type as `R` without the call to `S`.
+- **A recursive function whose step passes its own call to `Max` or `Min` is no
+  longer typed `any`** (Tycho row 468, a regression in 0.170.0). With
+  `S(a, b) = Max(a, b)` and
+  `R(i) = Which(i = 0, 0, True, R(i − 1) + S(1, R(i − 1)))`, `R(3)` was typed
+  `any`. The type of a call whose body is `Max` or `Min` over numbers and tuples
+  is now `number` on its tuple arm, since `Max` and `Min` read the coordinates
+  of a tuple (`Max(1, (2, 3))` is 3), so `R(3)` gets the same type as `R`
+  without the call to `S`.
 
 - **Compiling a `Sum` or a `Product` whose bounds are above 2^53 no longer
   hangs.** `compile(\sum_{k=2^{53}}^{2^{53}+2} \sin(x+k))` never returned on
   `javascript`, `glsl`, `wgsl` and `interval-js`, because at 2^53 the index
-  `k + 1` is `k` again. The compile now declines with `out-of-range`, the
-  answer the interpreter gives for the same bounds.
+  `k + 1` is `k` again. The compile now declines with `out-of-range`, the answer
+  the interpreter gives for the same bounds.
 
 - **Reading a chain of lazy `Map`/`Zip` collections through index lists is
   linear in the depth of the chain** (Tycho row 453). A read such as `C[1]` of
-  `Map(W ↦ max(W[1], W[2]), Zip(A[I], Map(…)))`, nested 4 deep over 20
-  elements, computed 282 560 inner elements (about 17 s). It now computes
-  160. A pure lazy collection keeps each element that a read by index
-  computes, until a symbol it depends on is assigned again.
+  `Map(W ↦ max(W[1], W[2]), Zip(A[I], Map(…)))`, nested 4 deep over 20 elements,
+  computed 282 560 inner elements (about 17 s). It now computes 160. A pure lazy
+  collection keeps each element that a read by index computes, until a symbol it
+  depends on is assigned again.
 
 - **On `interval-js`, `run()` throws a `ReferenceError` instead of answering
-  `entire`.** A `ReferenceError` means that the compiled code names
-  something that is not defined, for example a helper of an operator's
-  `compileHelpers` that reads a variable from outside its own body. The
-  `compileHelpers` documentation says that such a read throws on every
-  thread, and the `javascript` target already threw. The function that
-  `createIntervalRuntime().load()` returns for a stored result does the
-  same. Other run-time errors still answer `entire` ("cannot bound"). A
-  helper of `compileHelpers` is defined for `run()` on `interval-js`, which
-  is now tested.
+  `entire`.** A `ReferenceError` means that the compiled code names something
+  that is not defined, for example a helper of an operator's `compileHelpers`
+  that reads a variable from outside its own body. The `compileHelpers`
+  documentation says that such a read throws on every thread, and the
+  `javascript` target already threw. The function that
+  `createIntervalRuntime().load()` returns for a stored result does the same.
+  Other run-time errors still answer `entire` ("cannot bound"). A helper of
+  `compileHelpers` is defined for `run()` on `interval-js`, which is now tested.
 
-- **On `wgsl`, a piecewise branch that draws a random value compiles to an
-  `if` statement** when the branch draws once and nothing else in the same
-  statement draws (Tycho row 466), so only the branch that is taken draws, as
-  in the interpreter and on `glsl`. `\operatorname{WithRandomSeed}(s,
-  \{x<0: \operatorname{Random}(), 0\})` compiles, and so does `1 +` it.
-  Other shapes still decline, because a hoisted `if` runs ahead of the rest
-  of its statement and could change the order of the draws. 0.170.0 already
-  used the `if` form, but also for a branch that draws twice, such as
-  `(\operatorname{Random}(), \cot(\operatorname{Random}()))`, where it
-  drew the second value first; that shape declines again. (The 0.170.0 note
-  that such a branch no longer compiles on `wgsl` describes the release
+- **On `wgsl`, a piecewise branch that draws a random value compiles to an `if`
+  statement** when the branch draws once and nothing else in the same statement
+  draws (Tycho row 466), so only the branch that is taken draws, as in the
+  interpreter and on `glsl`.
+  `\operatorname{WithRandomSeed}(s, \{x<0: \operatorname{Random}(), 0\})`
+  compiles, and so does `1 +` it. Other shapes still decline, because a hoisted
+  `if` runs ahead of the rest of its statement and could change the order of the
+  draws. 0.170.0 already used the `if` form, but also for a branch that draws
+  twice, such as `(\operatorname{Random}(), \cot(\operatorname{Random}()))`,
+  where it drew the second value first; that shape declines again. (The 0.170.0
+  note that such a branch no longer compiles on `wgsl` describes the release
   before.)
 - **On `glsl` and `wgsl`, a random draw bound to a temporary no longer comes
   before a draw written before it.** A lowering that uses an operand twice
-  (`\cot`, `\operatorname{Remainder}`, the components of a vector in
-  `\max`) binds an operand that draws to a temporary ahead of its statement,
-  and a `Sum` or `Product` hoists its loop or its terms the same way. So
-  `(\operatorname{Random}(), \cot(\operatorname{Random}()))` drew the
-  operand of `\cot` first, and `(\operatorname{Random}(), \sum_{k=1}^{n}
-  \operatorname{Random}())` drew the loop first, unlike the interpreter and
-  the `javascript` target. Such a shape now declines, and the interpreter
-  evaluates it; a statement whose draws are bound in their written order
-  (`\operatorname{Variance}` of a list of draws, a `Sum` that is written
-  first) still compiles.
+  (`\cot`, `\operatorname{Remainder}`, the components of a vector in `\max`)
+  binds an operand that draws to a temporary ahead of its statement, and a `Sum`
+  or `Product` hoists its loop or its terms the same way. So
+  `(\operatorname{Random}(), \cot(\operatorname{Random}()))` drew the operand of
+  `\cot` first, and
+  `(\operatorname{Random}(), \sum_{k=1}^{n} \operatorname{Random}())` drew the
+  loop first, unlike the interpreter and the `javascript` target. Such a shape
+  now declines, and the interpreter evaluates it; a statement whose draws are
+  bound in their written order (`\operatorname{Variance}` of a list of draws, a
+  `Sum` that is written first) still compiles.
 
 - **An interval value for interval arithmetic**
   ([#416](https://github.com/cortex-js/compute-engine/issues/416)): the
-  `Enclosure` value kind (see Features). With this third phase, the value
-  kinds of [#477](https://github.com/cortex-js/compute-engine/issues/477) are
+  `Enclosure` value kind (see Features). With this third phase, the value kinds
+  of [#477](https://github.com/cortex-js/compute-engine/issues/477) are
   complete: the mechanism and `ResidueClass` (phase 1), `Measurement` and
   `Quantity` (phase 2), and `Enclosure` (phase 3).
 
@@ -408,23 +530,22 @@
 
 - **The package is ESM only, and Node 22.12 or later is required.** The UMD
   builds (`dist/umd-min/*.cjs`), the `require` conditions of the `exports` map
-  and the `ComputeEngine` script-tag global are gone. A CommonJS consumer
-  keeps calling `require('@cortex-js/compute-engine')`: Node loads the ESM
-  entry through `require()` since Node 22.12 (and 20.19), and no entry has a
-  top-level `await`. `engines.node` is `>=22.12.0` (it was `>=22.3.0`). A
-  CommonJS Jest setup that imports the package loads it through Jest's own
-  module loader, not Node's, and needs a transform exception for the package
-  or an ESM-capable runner. The published files drop from 61 MB to 24 MB.
+  and the `ComputeEngine` script-tag global are gone. A CommonJS consumer keeps
+  calling `require('@cortex-js/compute-engine')`: Node loads the ESM entry
+  through `require()` since Node 22.12 (and 20.19), and no entry has a top-level
+  `await`. `engines.node` is `>=22.12.0` (it was `>=22.3.0`). A CommonJS Jest
+  setup that imports the package loads it through Jest's own module loader, not
+  Node's, and needs a transform exception for the package or an ESM-capable
+  runner. The published files drop from 61 MB to 24 MB.
 - **A program that loads only `@cortex-js/compute-engine/core` has the
-  `javascript` and `interval-js` compilation targets.** The GPU targets
-  (`glsl`, `wgsl`) and the source-only `python` target are no longer bundled
-  in that entry (together 408 KB minified). To use one there, import the
-  target class from `@cortex-js/compute-engine/compile` and register it:
-  `ce.registerCompilationTarget('glsl', new GLSLTarget())`. Once the full
-  entry, `…/epsil` or the `epsil` CLI is loaded anywhere in the program, every
-  engine has all five targets, an engine made earlier from `…/core` included.
-  An unregistered target name fails with a message that lists the registered
-  ones.
+  `javascript` and `interval-js` compilation targets.** The GPU targets (`glsl`,
+  `wgsl`) and the source-only `python` target are no longer bundled in that
+  entry (together 408 KB minified). To use one there, import the target class
+  from `@cortex-js/compute-engine/compile` and register it:
+  `ce.registerCompilationTarget('glsl', new GLSLTarget())`. Once the full entry,
+  `…/epsil` or the `epsil` CLI is loaded anywhere in the program, every engine
+  has all five targets, an engine made earlier from `…/core` included. An
+  unregistered target name fails with a message that lists the registered ones.
 
 ### Packaging
 
@@ -432,8 +553,8 @@
   and `kernel-worker` is now built in one code-splitting invocation, so the
   engine and the modules it shares with `…/numerics`, `…/latex-syntax` and
   `…/interval` are emitted once into shared chunks. A host that imported
-  `…/core` and `…/compile` loaded two copies of the engine (`compile.js` was
-  3.5 MB on its own), and a `NumericValue` made from `…/numerics` failed the
+  `…/core` and `…/compile` loaded two copies of the engine (`compile.js` was 3.5
+  MB on its own), and a `NumericValue` made from `…/numerics` failed the
   engine's `instanceof` checks. One effect: a `JavaScriptTarget` imported from
   `…/compile` compiled `n(n-1)(n-2)/6`, boxed by the main entry, to
   `0.16666666666666666 * …` (`559.9999999999999` at `n = 16`); it is now
@@ -447,31 +568,31 @@
 
 ### Behavior Changes
 
-- **The code that a caller's operator `compile` handler writes no longer goes
-  to the worker pool** (ROADMAP CE-518, Tycho row 460). Such code can call a
+- **The code that a caller's operator `compile` handler writes no longer goes to
+  the worker pool** (ROADMAP CE-518, Tycho row 460). Such code can call a
   function that exists only on the thread that compiled it, for example
   `globalThis.myFloorIndex(…)`. The result had `shippable: true`, so
-  `broadcastAsync()` sent it to the workers, where every cell threw: each
-  value was `NaN`, and the batch still reported every cell as done. Now a
-  result with code from a caller handler has `shippable: false` and runs on
-  the calling thread (`reason: 'not-shippable'`). This also holds for a
-  handler attached in place to a built-in definition
+  `broadcastAsync()` sent it to the workers, where every cell threw: each value
+  was `NaN`, and the batch still reported every cell as done. Now a result with
+  code from a caller handler has `shippable: false` and runs on the calling
+  thread (`reason: 'not-shippable'`). This also holds for a handler attached in
+  place to a built-in definition
   (`ce.lookupDefinition('At').operator.compile = …`). The handlers of the
   standard library are not affected. To send such code to the pool again, set
   `compileShippable: true` on the definition, and give the functions that the
   code calls in `compileHelpers` (see Features).
-- **A point parameter accepts a list that can hold both points and lists.**
-  With `k: (tuple<number, number>) -> number` and `y` declared
-  `list<P | list<P>>`, `type A = list<A | P>` or `type B = list<B> | P` (`P` is
-  `tuple<number, number>`), `k(y)` maps by the depth of the value: a point
-  gives a number, `[(1, 2), (3, 4)]` gives `[3, 7]` and `[[(1, 2)]]` gives
-  `[[3]]`. These calls were refused for every value. A value in which one list
-  holds both a point and a list, such as `[(1, 2), [(3, 4)]]`, still gives an
+- **A point parameter accepts a list that can hold both points and lists.** With
+  `k: (tuple<number, number>) -> number` and `y` declared `list<P | list<P>>`,
+  `type A = list<A | P>` or `type B = list<B> | P` (`P` is
+  `tuple<number, number>`), `k(y)` maps by the depth of the value: a point gives
+  a number, `[(1, 2), (3, 4)]` gives `[3, 7]` and `[[(1, 2)]]` gives `[[3]]`.
+  These calls were refused for every value. A value in which one list holds both
+  a point and a list, such as `[(1, 2), [(3, 4)]]`, still gives an
   `incompatible-type` error (the compiled call gives `NaN`), and the type of the
   call includes `error` for it.
-- **A point parameter accepts an empty list.** `k([])` is typed
-  `list<number>` (it was `number`, for the value `[]`), and a symbol declared
-  `list<never>` that holds `[]` gives `[]` (it was refused).
+- **A point parameter accepts an empty list.** `k([])` is typed `list<number>`
+  (it was `number`, for the value `[]`), and a symbol declared `list<never>`
+  that holds `[]` gives `[]` (it was refused).
 - **A point beside an operand that may be a list is typed as a point or a list
   of points** (CE-504). With `L: list<unknown>`, `(x, y)·(2·L[1])` was typed
   `tuple<number, number>`, while `L := [[1, 2]]` gives `[(6, 8), (12, 16)]`; it
@@ -492,11 +613,11 @@
   `[1..2, 3..4]^{-1}` and `\cdot` still apply element by element.
 - **A recursive alias of lists of points is accepted at a point parameter.**
   With `A = list<A> | list<tuple<number, number>>` and `y: A`, `k(y)` maps by
-  the depth of the value (`[(1, 2), (3, 4)]` gives `[3, 7]`); it was refused.
-  A union of a list of points and a list of lists of points
+  the depth of the value (`[(1, 2), (3, 4)]` gives `[3, 7]`); it was refused. A
+  union of a list of points and a list of lists of points
   (`list<P> | list<list<P>>`) also maps by the depth of the value, and the
-  compiled call of a point-or-point-list union now gives the same values as
-  the interpreter (it was refused).
+  compiled call of a point-or-point-list union now gives the same values as the
+  interpreter (it was refused).
 - **An element-wise operation over an operand of type `unknown` holds a ragged
   list or a point** (CE-502). With `L: list<unknown>`, `2·L[1]` was typed
   `broadcastable<number>`, which does not hold `[[1], [2, 3]]` or `(1, 2)` in
@@ -505,18 +626,17 @@
   undeclared function. A comparison over such an operand can be one boolean
   (`[1, 2] = L[1]` compares two whole lists). Compiled code is unchanged. A
   valueless symbol used as a number is still inferred `number`.
-- **A function with an inferred signature, called with a string or a boolean,
-  is typed from its body** (CE-490). With `f := x ↦ (-x, x)`, `f("s")` was
-  typed `tuple<number, number>` and is `error`; with `g := x ↦ x + 1`,
-  `g("s")` was `number` and is `error`.
+- **A function with an inferred signature, called with a string or a boolean, is
+  typed from its body** (CE-490). With `f := x ↦ (-x, x)`, `f("s")` was typed
+  `tuple<number, number>` and is `error`; with `g := x ↦ x + 1`, `g("s")` was
+  `number` and is `error`.
 - **A parameter used in arithmetic before an index read has a sound signature**
   (CE-503). `(P, t) ↦ t·P/(P[1] − 1)` was `(P: unknown, t: unknown) -> never`
-  and is `(P: indexed_collection<number>, t: unknown) -> list<number>`;
-  applied to `([3, 2], 2)` it gives `[3, 2]`, not a list of errors.
-- **A product of a list of points and a point is one
-  `no-product-between-points` error at evaluation**, as it already was when
-  boxed (CE-491). With `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` was a list of
-  two errors.
+  and is `(P: indexed_collection<number>, t: unknown) -> list<number>`; applied
+  to `([3, 2], 2)` it gives `[3, 2]`, not a list of errors.
+- **A product of a list of points and a point is one `no-product-between-points`
+  error at evaluation**, as it already was when boxed (CE-491). With
+  `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` was a list of two errors.
 - **The terms of a sum or a product with a residue class that are not classes
   are combined by `evaluate()`** (CE-507). `x + x + ResidueClass(1, 5)`
   evaluates to `2x + ResidueClass(1, 5)` (it was returned as written; only
@@ -675,9 +795,9 @@
 
 - **An operator `compile` handler can give the functions its code calls**
   (ROADMAP CE-518). The new `compileHelpers` field of an operator definition
-  maps a name to a function. The engine copies the source of each function
-  into the compiled code, as `const <name> = (<source>);`, so the code
-  carries its helpers to a worker of the pool and to a stored result. With
+  maps a name to a function. The engine copies the source of each function into
+  the compiled code, as `const <name> = (<source>);`, so the code carries its
+  helpers to a worker of the pool and to a stored result. With
   `compileShippable: true`, the result can then run on the pool:
 
   ```ts
@@ -692,18 +812,19 @@
   });
   ```
 
-  A helper must not read a variable from outside its own body, and its name
-  is an identifier that does not start with `_`. A built-in function, a bound
+  A helper must not read a variable from outside its own body, and its name is
+  an identifier that does not start with `_`. A built-in function, a bound
   function or a method has no source that can be copied, and the declaration
   refuses it. The compile contract of a value kind has the same field,
   `arithmetic.compile.type.helpers` (ROADMAP CE-507.1); `hostNames` there now
   names only the functions of the host that the code does not carry.
-- **`broadcastAsync()` reports the cells that threw.** The new `failed` field
-  of `BroadcastAsyncResult` counts the cells, among the first `done`, whose
-  evaluation threw, on the calling thread and on the workers. The value of
-  such a cell is `NaN`, as for a cell whose value is not a number, so this
-  count is the only way to tell the two apart. `done` keeps its meaning: a
-  cell that threw was evaluated.
+
+- **`broadcastAsync()` reports the cells that threw.** The new `failed` field of
+  `BroadcastAsyncResult` counts the cells, among the first `done`, whose
+  evaluation threw, on the calling thread and on the workers. The value of such
+  a cell is `NaN`, as for a cell whose value is not a number, so this count is
+  the only way to tell the two apart. `done` keeps its meaning: a cell that
+  threw was evaluated.
 - **An operator can declare the arithmetic of the values it constructs: a value
   kind** (ROADMAP CE-507,
   [#477](https://github.com/cortex-js/compute-engine/issues/477)). With `MyMod`
@@ -757,6 +878,7 @@
   phases, is `docs/plans/2026-10-26-value-kinds.md`. The guide is
   `doc/06-guide-augmenting.md`, "Declaring a Value Kind"; the type rules are in
   `doc/08-guide-types.md`, "Kind Types".
+
 - **`Measurement` and `Quantity` are value kinds** (ROADMAP CE-507 phase 2,
   CE-508, [#477](https://github.com/cortex-js/compute-engine/issues/477)). Their
   arithmetic, their order and their propagation of an uncertainty are now the
@@ -802,23 +924,24 @@
 
   The rules are in `doc/06-guide-augmenting.md`, "Measurements and Quantities";
   the decisions are in section 13 of `docs/plans/2026-10-26-value-kinds.md`.
+
 - **`factor()` accepts `variable` and `generator` options, and a new
-  `factorDetailed()` returns a structured result.** `factor(p, { variable,
-  generator })` factors over an explicit number field, as
+  `factorDetailed()` returns a structured result.**
+  `factor(p, { variable, generator })` factors over an explicit number field, as
   `Factor(p, x, generator)` does. `factorDetailed()` returns the exact factors
   with their multiplicities, the scalar content, whether the factorization is
   complete, and the reason and stage of a refusal; with `statistics: true` it
-  also returns the work counts of each step. Both are exported from the main
-  and the `core` entry points. No MathJSON operator is added.
+  also returns the work counts of each step. Both are exported from the main and
+  the `core` entry points. No MathJSON operator is added.
 - **Number-field factoring lifts at unramified prime ideals of any residue
   degree.** It used to need an inert prime, and ten inputs of the extended
   number-field corpus were refused because none was found. The factors are
-  recovered with an exact lattice reduction and the recombination is
-  certified. A weighted scaling of the generator and the variable and tighter
-  bounds on the coefficients of a divisor reduce coefficient growth. When the
-  coefficients are rational, the norm fallback skips the unshifted norm,
-  which is always repeated. The statistics keep the reason the direct method
-  failed before a norm fallback.
+  recovered with an exact lattice reduction and the recombination is certified.
+  A weighted scaling of the generator and the variable and tighter bounds on the
+  coefficients of a divisor reduce coefficient growth. When the coefficients are
+  rational, the norm fallback skips the unshifted norm, which is always
+  repeated. The statistics keep the reason the direct method failed before a
+  norm fallback.
 - **Number-field factoring reads `x^n` monomials directly** when it converts an
   expanded polynomial of high degree, and no longer refuses such an input
   because the conversion went over its budget.
@@ -828,88 +951,86 @@
 - **A coordinate of a list of points inside `PointList` compiles to a list**
   (CE-514, Tycho row 447). On the `javascript` target,
   `(v ↦ PointList(PointY(v), PointX(v)))([(1, 2, 3), (4, 5, 6)])` compiled to
-  `[NaN, NaN]`; it now gives `[[2, 1], [5, 4]]`, as `evaluate()` does. The
-  same holds for a named function called with a list of points. A
-  `PointX`/`PointY`/`PointZ` component whose operand is not provably one
-  point is a zip source when its value is an array and one slot otherwise,
-  decided at run time. The type of the call is now a list of points too:
-  `f(L)` for a list `L` of two points with integer coordinates is a
+  `[NaN, NaN]`; it now gives `[[2, 1], [5, 4]]`, as `evaluate()` does. The same
+  holds for a named function called with a list of points. A
+  `PointX`/`PointY`/`PointZ` component whose operand is not provably one point
+  is a zip source when its value is an array and one slot otherwise, decided at
+  run time. The type of the call is now a list of points too: `f(L)` for a list
+  `L` of two points with integer coordinates is a
   `list<tuple<integer, integer>^2>`, where it was `tuple<unknown, unknown>`.
-- **A call of a function whose signature was inferred is typed from its
-  body** with each parameter typed as its argument, when the type inferred
-  for the result does not describe the call (CE-514). The result inferred for
-  `v ↦ PointList(PointY(v), PointX(v))` is one point, and a call with a list
-  of points evaluates to a list of points. The call was typed one point; it
-  is now typed from the body. This applies only when the inferred result is
-  not a scalar and the walk of the body bounded by it gives no type, and
-  only for arguments that are numbers or lists of numbers or points. A result
-  type that the host declares, or that the literal writes, stays the bound,
-  and a function that reads a symbol from outside its parameters keeps its
-  inferred result, so a call after that symbol changes type is still refused
-  (CE-473).
-- **Five shader fixes found by comparing WebGL2 and WebGPU on a GPU**
-  (CE-509 to CE-513, Tycho rows 454 to 458).
-  - On `wgsl`, `tanh` calls a helper that answers `sign(x)` when
-    `|x| > 10`. On WebGPU over Metal the built-in returned 0 at x = 44 and NaN
-    from x = 45, where the value is 1. `Coth` is `1.0 / tanh(x)` on both
-    targets: the quotient `cosh(x) / sinh(x)` was NaN above about 89 in f32.
-  - On `wgsl`, a constant above the f32 maximum (`\exp(100) + x`,
-    `10^{40} + x`) is written `_gpu_inf()`, and a constant that rounds to the
-    maximum is written as the maximum. WebGPU rejected the whole shader for
-    such a literal.
-  - On `glsl`, `Mod` stays in the range of the divisor. The built-in `mod`
-    gave `mod(1e8, 3.0) = -2` and `mod(-1e6, 1000.0) = 1000` on WebGL2 over
-    ANGLE Metal; they are now 1 and 0. On both targets `Mod(x, 1)` is
+- **A call of a function whose signature was inferred is typed from its body**
+  with each parameter typed as its argument, when the type inferred for the
+  result does not describe the call (CE-514). The result inferred for
+  `v ↦ PointList(PointY(v), PointX(v))` is one point, and a call with a list of
+  points evaluates to a list of points. The call was typed one point; it is now
+  typed from the body. This applies only when the inferred result is not a
+  scalar and the walk of the body bounded by it gives no type, and only for
+  arguments that are numbers or lists of numbers or points. A result type that
+  the host declares, or that the literal writes, stays the bound, and a function
+  that reads a symbol from outside its parameters keeps its inferred result, so
+  a call after that symbol changes type is still refused (CE-473).
+- **Five shader fixes found by comparing WebGL2 and WebGPU on a GPU** (CE-509 to
+  CE-513, Tycho rows 454 to 458).
+  - On `wgsl`, `tanh` calls a helper that answers `sign(x)` when `|x| > 10`. On
+    WebGPU over Metal the built-in returned 0 at x = 44 and NaN from x = 45,
+    where the value is 1. `Coth` is `1.0 / tanh(x)` on both targets: the
+    quotient `cosh(x) / sinh(x)` was NaN above about 89 in f32.
+  - On `wgsl`, a constant above the f32 maximum (`\exp(100) + x`, `10^{40} + x`)
+    is written `_gpu_inf()`, and a constant that rounds to the maximum is
+    written as the maximum. WebGPU rejected the whole shader for such a literal.
+  - On `glsl`, `Mod` stays in the range of the divisor. The built-in `mod` gave
+    `mod(1e8, 3.0) = -2` and `mod(-1e6, 1000.0) = 1000` on WebGL2 over ANGLE
+    Metal; they are now 1 and 0. On both targets `Mod(x, 1)` is
     `fract(fract(x))`, so a tiny negative `x` gives 0 instead of 1.0.
   - On both targets, `Mod` calls a `_gpu_fmod` helper, which receives each
     operand once. On `wgsl` the inline formula wrote the dividend three times
     and the divisor five times.
-  - On `wgsl`, a piecewise arm that calls a user function, or a special
-    function with a loop (`Zeta`, `HurwitzZeta`, `PolyLog`, `LerchPhi`,
-    `BesselJ`, `Mandelbrot`, …), becomes a branch of an `if` statement.
-    `select` computes both arms: with `g(x) = \sum_{i=1}^{300}\cos(ix)`,
-    `\{x<0 : g(x), 0\}` took 5.05 ms on WebGPU against 2.36 ms with an `if`.
+  - On `wgsl`, a piecewise arm that calls a user function, or a special function
+    with a loop (`Zeta`, `HurwitzZeta`, `PolyLog`, `LerchPhi`, `BesselJ`,
+    `Mandelbrot`, …), becomes a branch of an `if` statement. `select` computes
+    both arms: with `g(x) = \sum_{i=1}^{300}\cos(ix)`, `\{x<0 : g(x), 0\}` took
+    5.05 ms on WebGPU against 2.36 ms with an `if`.
 - **`sin`, `cos` and `tan` of a quotient `π·u / d` compile to the exact
   half-turn forms** (`sinpi`, `cospi`, `tanpi`) on every target, as `π·u`
   already did. `\sin(2\pi s / P)` at `s = 2`, `P = -2` is now exactly 0 in the
   compiled code; it was `2.4e-16` in JavaScript, so a test `\sin(…) > 0` was
-  true in the compiled code and false in the interpreter. `e^{i\pi u/d}` and the hyperbolic functions of `i\pi u/d`
-  take the exact forms too.
-- **On `wgsl`, a piecewise branch that draws a random value no longer
-  compiles** (it is evaluated by the interpreter instead). WGSL `select`
-  computes every branch, so a draw in a branch that was not taken still
-  advanced the random stream and changed every later draw in the shader.
-  `glsl` is unchanged: its `?:` evaluates only the branch that is taken.
+  true in the compiled code and false in the interpreter. `e^{i\pi u/d}` and the
+  hyperbolic functions of `i\pi u/d` take the exact forms too.
+- **On `wgsl`, a piecewise branch that draws a random value no longer compiles**
+  (it is evaluated by the interpreter instead). WGSL `select` computes every
+  branch, so a draw in a branch that was not taken still advanced the random
+  stream and changed every later draw in the shader. `glsl` is unchanged: its
+  `?:` evaluates only the branch that is taken.
 - **On `glsl`, `Mod` of a scalar by a vector compiles** (`Mod(1, v)` broadcasts
   the scalar); the built-in `mod` has no such overload, and it was refused.
 - **On `glsl` and `wgsl`, `Sin`, `Cos`, `Sec`, `Csc`, `Cot`, `Sign`,
   `Smoothstep` and `Heaviside` give NaN when the operand is NaN** (CE-520), as
-  the `javascript` target does. On Apple GPUs the built-ins `sin`, `cos`,
-  `sign` and `smoothstep` of a NaN gave 0 (so `\sec x` gave +∞), and the GLSL
+  the `javascript` target does. On Apple GPUs the built-ins `sin`, `cos`, `sign`
+  and `smoothstep` of a NaN gave 0 (so `\sec x` gave +∞), and the GLSL
   `Heaviside` gave 0.5. They now call helpers that test the bit pattern of the
-  operand, as `Max` and `Min` do (CE-519). `\tan(\pi x)` on the shader
-  targets is now +∞ at every pole, as on the other compiled targets; it was
-  +∞ or −∞ depending on the sign of the zero cosine, and not the same on
-  WebGL2 and WebGPU.
-- **On `glsl` and `wgsl`, `Max`, `Min`, `Clamp`, `ElementMax` and
-  `ElementMin` give NaN when an operand is NaN** (CE-519, Tycho row 465), as
-  the interpreter and the `javascript` target do. The shader built-ins return
-  the other operand on Apple GPUs, so `\max(0, \sqrt{1 - x^2})` at `x = 2`
-  was 0. The targets now call helpers that test the bit pattern of each
-  operand (a test `a != a` was removed by the compiler on WebGPU over Metal)
-  and return the NaN operand itself. `Clamp(x, lo, hi)` with `lo > hi` now
-  gives `hi` on `glsl` as on the other targets (the built-in `clamp` left it
-  undefined). A vector `Clamp` with scalar bounds, and an `ElementMax` or
-  `ElementMin` of a vector and a scalar in any position, now compile on both
-  targets: the scalar is broadcast, as in the interpreter. They were refused
-  on `wgsl`, and on `glsl` when the scalar came first.
+  operand, as `Max` and `Min` do (CE-519). `\tan(\pi x)` on the shader targets
+  is now +∞ at every pole, as on the other compiled targets; it was +∞ or −∞
+  depending on the sign of the zero cosine, and not the same on WebGL2 and
+  WebGPU.
+- **On `glsl` and `wgsl`, `Max`, `Min`, `Clamp`, `ElementMax` and `ElementMin`
+  give NaN when an operand is NaN** (CE-519, Tycho row 465), as the interpreter
+  and the `javascript` target do. The shader built-ins return the other operand
+  on Apple GPUs, so `\max(0, \sqrt{1 - x^2})` at `x = 2` was 0. The targets now
+  call helpers that test the bit pattern of each operand (a test `a != a` was
+  removed by the compiler on WebGPU over Metal) and return the NaN operand
+  itself. `Clamp(x, lo, hi)` with `lo > hi` now gives `hi` on `glsl` as on the
+  other targets (the built-in `clamp` left it undefined). A vector `Clamp` with
+  scalar bounds, and an `ElementMax` or `ElementMin` of a vector and a scalar in
+  any position, now compile on both targets: the scalar is broadcast, as in the
+  interpreter. They were refused on `wgsl`, and on `glsl` when the scalar came
+  first.
 - **A part of a loop body printed or evaluated outside its operator keeps its
   index** (CE-498). `ReplaceAt([1,2,3], i, 9)` taken from
   `Loop(…, Element(i, Range(1, 3)))` printed an `incompatible-type` error, with
   `i` read as the imaginary unit; it now prints `ReplaceAt([1,2,3], i, 9)`.
 - **An undeclared recursive pair that builds a list is typed `-> list<number>`
-  in every install order** (CE-38). Assigning `G := (n, K) ↦ F(n, K)` before
-  `F` gave `-> list<any>`.
+  in every install order** (CE-38). Assigning `G := (n, K) ↦ F(n, K)` before `F`
+  gave `-> list<any>`.
 - **A symbol declared `list<residue>` is accepted by the arithmetic operators**
   (CE-507). With `L: list<residue>`, `L + L`, `-L` and `L · 2` were
   `incompatible-type` errors when boxed, while a list literal of classes was
@@ -1034,8 +1155,8 @@
 - **A coefficient times an ellipsis product keeps the product whole.**
   `3(2·4·…·2n)` evaluated, expanded and simplified to `3·2·4·…·2·n` or `48·…·n`;
   it now stays `3·(2·4·…·2n)`. The same holds in a sum: `x + 3(2·4·…·2n)` was
-  `x + 48·(…·n)`, and like terms still collect
-  (`(2·4·…·2n) + (2·4·…·2n)` is `2(2·4·…·2n)`).
+  `x + 48·(…·n)`, and like terms still collect (`(2·4·…·2n) + (2·4·…·2n)` is
+  `2(2·4·…·2n)`).
 - **The type of `Negate`, `Sqrt` and the other element-wise functions of a list
   of range rows holds its value.** `Negate([1..3, 4..6])` was typed
   `list<range>` for a matrix of integers; it is now `list<list<integer>>`.
@@ -2946,11 +3067,10 @@
     whose inferred signature returns it (`g := k ↦ ResidueClass(k, 4)` is
     `(unknown) -> residue`), and a symbol declared `residue`, which is protected
     before it has a value (`r/r` stays `r/r`). A head with another name gets the
-    admission and the protection, not the arithmetic of `ResidueClass`: a sum
-    or a product of its values stays unevaluated (a hook for the head to
-    supply that arithmetic is planned, ROADMAP CE-507). A symbol typed `value`
-    or left undeclared is still read as
-    a possible number: `w/w` is `1` for it.
+    admission and the protection, not the arithmetic of `ResidueClass`: a sum or
+    a product of its values stays unevaluated (a hook for the head to supply
+    that arithmetic is planned, ROADMAP CE-507). A symbol typed `value` or left
+    undeclared is still read as a possible number: `w/w` is `1` for it.
   - A juxtaposed class is a product: `\overline{3}_{7}x` parses to `Multiply`,
     not to a tuple. `compile()` declines an expression typed `residue` or one
     that holds a class; an expression that only may hold one (a parameter typed

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-547.
+Next free reference: CE-562.
 
 **Entry format.**
 
@@ -79,36 +79,34 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 With `R` declared `function` and then assigned
 `R(i) = Which(i = 0, 0, True, R(i − 1) + 1)`, the call `R(3)` is typed with the
-wide form `list<list<any> | number | tuple> | number | tuple`. Not declared,
-the same literal is typed `(i: unknown) -> number` and `R(3)` is `number`,
-because the operator definition runs the recursion check
-(`verifiedListHypothesis`). The value-definition route reads the raw type of
-the literal (`namedLiteralSignatureType`, `boxed-function.ts`) and does not run
-that check, and the recursive call in the stored literal reads the type of
-the literal boxed before the assignment, so the result also depends on the
-order of the definitions (`boxed-value-definition.ts`).
+wide form `list<list<any> | number | tuple> | number | tuple`. Not declared, the
+same literal is typed `(i: unknown) -> number` and `R(3)` is `number`, because
+the operator definition runs the recursion check (`verifiedListHypothesis`). The
+value-definition route reads the raw type of the literal
+(`namedLiteralSignatureType`, `boxed-function.ts`) and does not run that check,
+and the recursive call in the stored literal reads the type of the literal boxed
+before the assignment, so the result also depends on the order of the
+definitions (`boxed-value-definition.ts`).
 
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
-**Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row
-468.
+**Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row 468.
 
 A call over an operand typed `unknown` is typed with the wide form
 `number | tuple | list<number | tuple | list<any>>` (`S(1, g(2))`). A call over
-an operand typed with that wide form, which is narrower than `unknown`, is
-typed `any` when the body is not component-wise (`T(y)` with `T := a ↦ a + 1`):
-the tuple arm answers `any` (`componentwiseTupleCallType`,
-`call-result-type.ts`). Tests lock the `any` answer
-(`broadcastable-typing.test.ts`, `tycho-373-passthrough-broadcast-typing.test.ts`).
-Either the `unknown` rule is too narrow for a body that is not component-wise,
-or the wide-form rule is too wide. Since 2026-10-27 a `Max`/`Min` body over
-numbers and tuples is typed `number` on both (Tycho row 468). That rule
-reads a bare `tuple` argument as a point, a tuple of numbers
-(`extremumReadsANumber`, `call-result-type.ts`); a tuple whose coordinate types
-are known must hold numbers or collections of numbers. User decision
-2026-10-27: the bare `tuple` arm of the wide form keeps that reading (a
-point). What remains open is the first question: which of the two rules for a
-body that is not component-wise is right.
+an operand typed with that wide form, which is narrower than `unknown`, is typed
+`any` when the body is not component-wise (`T(y)` with `T := a ↦ a + 1`): the
+tuple arm answers `any` (`componentwiseTupleCallType`, `call-result-type.ts`).
+Tests lock the `any` answer (`broadcastable-typing.test.ts`,
+`tycho-373-passthrough-broadcast-typing.test.ts`). Either the `unknown` rule is
+too narrow for a body that is not component-wise, or the wide-form rule is too
+wide. Since 2026-10-27 a `Max`/`Min` body over numbers and tuples is typed
+`number` on both (Tycho row 468). That rule reads a bare `tuple` argument as a
+point, a tuple of numbers (`extremumReadsANumber`, `call-result-type.ts`); a
+tuple whose coordinate types are known must hold numbers or collections of
+numbers. User decision 2026-10-27: the bare `tuple` arm of the wide form keeps
+that reading (a point). What remains open is the first question: which of the
+two rules for a body that is not component-wise is right.
 
 ### CE-546. A call over a `number | tuple` operand is not split by arm
 
@@ -116,11 +114,11 @@ body that is not component-wise is right.
 Tycho row 468.
 
 With `y: number | tuple`, `T(y)` with `T := a ↦ a + 1` is typed `number`. The
-call is split by arm only when the operand has an arm that maps
-(`operandArms`, `boxed-function.ts`), and this type has none, so the tuple arm
-is never checked. With `y: tuple` the same call is typed `any`. For a
-component-wise body (`x ↦ 2x`) the value over a tuple is a tuple, so `number`
-may be an unsound type; measure the value first.
+call is split by arm only when the operand has an arm that maps (`operandArms`,
+`boxed-function.ts`), and this type has none, so the tuple arm is never checked.
+With `y: tuple` the same call is typed `any`. For a component-wise body
+(`x ↦ 2x`) the value over a tuple is a tuple, so `number` may be an unsound
+type; measure the value first.
 
 ### CE-524. A call of an inferred-signature function with a set, a character, a collection that holds a tuple, or a bare list of strings has a type that does not hold its value
 
@@ -139,14 +137,14 @@ broadcast over the argument, and the value does not fit that type:
 - `f := x ↦ (-x, x)`, `f` of the character `'a'` is typed
   `tuple<number, number>`; the value is
   `(Error(incompatible-type, number, character), "a")`. `isNonNumericDatum`
-  (`call-result-type.ts`) reads strings and booleans only, and `character` is
-  a type separate from `string`.
-- The same `f`, `B: list` with `B := ["s"]`: `f(B)` is typed `list<error>`;
-  the value is `[(Error(…), "s")]`, a list of tuples.
+  (`call-result-type.ts`) reads strings and booleans only, and `character` is a
+  type separate from `string`.
+- The same `f`, `B: list` with `B := ["s"]`: `f(B)` is typed `list<error>`; the
+  value is `[(Error(…), "s")]`, a list of tuples.
 
 The fix is probably to type such a call from the body, as `dataArgumentCallType`
-does for a string or a boolean argument, or to answer `any`. Measure the
-number of tests that change before landing it.
+does for a string or a boolean argument, or to answer `any`. Measure the number
+of tests that change before landing it.
 
 ### CE-27. An access over `any` or `unknown` elements has no `missing` arm
 
@@ -760,51 +758,32 @@ and `Chunk` have it (pins in
 **Status:** open; defect. Found 2026-10-27 while fixing `subs()` for Tycho row
 464; `subs()` now follows this walk, so it inherits both readings.
 
-- In a RAW `Sum(j·k, Limits(k, 1, k))` (no operator definition), the walk
-  treats the index as bound in the whole `Limits` clause, so it reports only
-  `j` as free. The upper bound `k` reads the enclosing binding and is free, as
-  the walk reports for the canonical form.
-- In `Exists(y < x, x)`, with a bare symbol as the quantified variable, the
-  walk reports `x` as free, where `Exists(y < x, Element(x, S))` binds it.
+- In a RAW `Sum(j·k, Limits(k, 1, k))` (no operator definition), the walk treats
+  the index as bound in the whole `Limits` clause, so it reports only `j` as
+  free. The upper bound `k` reads the enclosing binding and is free, as the walk
+  reports for the canonical form.
+- In `Exists(y < x, x)`, with a bare symbol as the quantified variable, the walk
+  reports `x` as free, where `Exists(y < x, Element(x, S))` binds it.
 - A set-builder with the membership in its condition, `{x² | x ∈ ℤ}`
   (`Set(x², Condition(Element(x, Integers)))`), reports `x` as free, and
   `subs({x: 3})` replaces it. Which name a set-builder binds is decided by the
   parser (`setBuilder()`, `latex-syntax/dictionary/definitions-sets.ts`); the
   walk would need the same rule.
-- The target of an `Assign` outside a `Block` is a write to an outer symbol.
-  The walk reports it as free, so `If(z > 0, Assign(z, 5), 0).subs({z: 7})`
-  replaces the target and gives an `Error` node. Decide whether a write target
-  is kept by `subs()`.
-
-### CE-538. What `subs()` should give for the variable of `D`, `Series` and an indefinite `Integrate`
-
-**Status:** decided, in progress. Found 2026-10-27 (Tycho row 464). User
-decision 2026-10-27: option (b), rewrite to a substitution at a point after
-the derivative.
-
-The free-variable walk reports the variable of `D(x^2, x)` and of
-`Series(sin x, x, 0, 3)` as free, because the result is a function of it.
-Since 2026-10-27 the variable of an indefinite `Integrate(a·x, x)` is read the
-same way: `∫ a·x dx` is `a·x²/2`, a function of `x`.
-`subs()` replaces exactly the free occurrences, so `D(x^2, x).subs({x: 3})`
-gives an invalid `D(…, Error('expected-a-symbol'))`, as it did before
-2026-10-27, and `Series(sin x, x, 0, 3).subs({x: 3})` gives
-`Series(Sin(3), 3, 0, 3)`. Treating the variable as bound would keep
-`D(x^2, x)`, which evaluates to `2x` with no sign that the substitution was
-dropped. The value a reader expects is the derivative at 3, `6`. Options: (a)
-keep the current invalid form; (b) rewrite to a substitution at a point after
-the derivative; (c) evaluate the `D` first.
+- The target of an `Assign` outside a `Block` is a write to an outer symbol. The
+  walk reports it as free, so `If(z > 0, Assign(z, 5), 0).subs({z: 7})` replaces
+  the target and gives an `Error` node. Decide whether a write target is kept by
+  `subs()`.
 
 ### CE-539. Compiling to a shader infers the root's free symbols as `number`
 
 **Status:** open; defect. Found 2026-10-27 while working on CE-525.
 
 The GPU root inliners (`inlineCollectionValuedCallsAtRoot`, and
-`inlineSharedUserFunctionCalls` in `compilation/gpu-shared-calls.ts`)
-substitute user-function bodies with `subs()`. As a side effect the engine
-infers the free `x` and `y` of the compiled expression as `number`: their
-type goes from `unknown` to `number` for the life of the engine. A compile
-should not change the declarations of the symbols it reads.
+`inlineSharedUserFunctionCalls` in `compilation/gpu-shared-calls.ts`) substitute
+user-function bodies with `subs()`. As a side effect the engine infers the free
+`x` and `y` of the compiled expression as `number`: their type goes from
+`unknown` to `number` for the life of the engine. A compile should not change
+the declarations of the symbols it reads.
 
 ### CE-534. A recursive `replace()` replaces a bound variable, the binder included
 
@@ -813,11 +792,11 @@ Tycho row 464 (CE-530).
 
 `j + Sum(j, Limits(j, 1, 3))` with
 `replace({match: 'j', replace: 10}, {recursive: true})` gives
-`10 + Sum(10, Limits(Error…, 1, 3))`: the rule rewrites the index of the
-`Sum` and its bound occurrences, as `subs()` did before CE-530. The recursion
-is in `applyRule` (`rules.ts`). A fix must decide how a rule that matches a
-literal symbol treats a bound occurrence, while the simplification rules must
-still rewrite inside the body of a binder (`Sum(2k, …)` to `2·Sum(k, …)`).
+`10 + Sum(10, Limits(Error…, 1, 3))`: the rule rewrites the index of the `Sum`
+and its bound occurrences, as `subs()` did before CE-530. The recursion is in
+`applyRule` (`rules.ts`). A fix must decide how a rule that matches a literal
+symbol treats a bound occurrence, while the simplification rules must still
+rewrite inside the body of a binder (`Sum(2k, …)` to `2·Sum(k, …)`).
 
 ### CE-91. Define value capture on assignment, mutable-object boundaries and view reads
 
@@ -1312,14 +1291,14 @@ capability, large.
 [#477](https://github.com/cortex-js/compute-engine/issues/477) (closed by the
 three phases, user decision 2026-10-26),
 [#416](https://github.com/cortex-js/compute-engine/issues/416) (answered by
-phase 3). Plan:
-`docs/plans/2026-10-26-value-kinds.md` (revision 7). User decisions of
-2026-10-26: one mechanism, the `arithmetic` field on the operator definition of
-the head, with recognition by the head's kind type; a kind type is a subtype of
-`value`, and the arithmetic operators admit a kind by rule (A); a function with
-a body admits a kind only when its parameter names it (B); a `compare` hook (C);
-`Measurement` is admitted as `number`, and a complex nominal is refused at
-evaluation (D); accidental behavior may change (section 6 of the plan).
+phase 3). Plan: `docs/plans/2026-10-26-value-kinds.md` (revision 7). User
+decisions of 2026-10-26: one mechanism, the `arithmetic` field on the operator
+definition of the head, with recognition by the head's kind type; a kind type is
+a subtype of `value`, and the arithmetic operators admit a kind by rule (A); a
+function with a body admits a kind only when its parameter names it (B); a
+`compare` hook (C); `Measurement` is admitted as `number`, and a complex nominal
+is refused at evaluation (D); accidental behavior may change (section 6 of the
+plan).
 
 Phase 1 (done) added the `arithmetic` field of an operator definition
 (`ArithmeticDefinition`: `add`, `multiply`, `negate`, `divide`, `power`,
@@ -1329,8 +1308,9 @@ with `{ mint: false }`, now a public option of `ce.declareType()`), the kind
 registry, the admission, dispatch, typing and `simplify()` rules, the compile
 contract, and moved `ResidueClass` onto the field. A head declared `-> residue`
 (or `-> gf8`) now gives its own arithmetic: `x + MyMod(2, 4) + MyMod(1, 4)` is
-`x + MyMod(3, 4)`. The documentation is in `doc/06-guide-augmenting.md`
-("Declaring a Value Kind"), `doc/08-guide-types.md` ("Kind Types"),
+`x + MyMod(3, 4)`. The documentation is in
+`cortexjs.io/docs/compute-engine/06-guide-augmenting.md` ("Declaring a Value
+Kind"), `cortexjs.io/docs/compute-engine/08-guide-types.md` ("Kind Types"),
 `docs/TYPE-SYSTEM.md` ("Value kinds and kind types") and
 `docs/COMPILATION-MODEL.md` ("Value kinds").
 
@@ -1345,54 +1325,54 @@ measurement keep the nominal). The kind primitives `measurement`
 `ArithmeticContext.tolerance` are new. The name-based branches of the
 arithmetic, relational and statistics operators are gone. It fixed CE-508. The
 visible changes are in `CHANGELOG.md` and in section 6 of the plan; the
-documentation is in `doc/06-guide-augmenting.md` ("Measurements and
-Quantities"), `doc/08-guide-types.md` ("Kind Types") and `docs/TYPE-SYSTEM.md`
-("Measurements and quantities").
+documentation is in `cortexjs.io/docs/compute-engine/06-guide-augmenting.md`
+("Measurements and Quantities"),
+`cortexjs.io/docs/compute-engine/08-guide-types.md` ("Kind Types") and
+`docs/TYPE-SYSTEM.md` ("Measurements and quantities").
 
-Phase 3 (done) added the `Enclosure` value kind, an interval that holds one
-real (plan sections 4.9.2 and 4.9.3; the user's decisions of 2026-10-26 took
-every recommendation of 4.9.1 and the defaults (b) of 4.9.3). The head is in
-`library/enclosure.ts`, the hooks in `library/enclosure-arithmetic.ts` and
-the `interval-js` contract in `library/enclosure-compile.ts`. The kind
-primitive `enclosure` (`admittedAs: 'real'`) is new. Under `evaluate()` the
-hooks keep exact endpoints; under `.N()` the endpoints are converted to
-doubles outward and the interval library computes the image, one kernel for
-each form; the compiled code calls the same kernels, so the two give the same
-doubles. Two fields of `ArithmeticDefinition` are new for every kind: the
-`extremum` hook (asked by `Max`, `Min`, `Clamp`, `ElementMax`, `ElementMin`
-before `compare`; `kindExtremum()`, `kind-compare.ts`) and the answers `'<='`
-and `'>='` of `compare`, which every reader maps through `orderAnswer()`
-(`kind-compare.ts`). The interval runner checks the host value of an input
-typed by the kind (`run()`, `broadcast()`, `broadcastAsync()`; a union input
-by arm), and the kernel fixes of CE-522 landed with it. Four differences
-between the interpreter and the compiled code are accepted and stated in
-`docs/COMPILATION-MODEL.md` ("Value kinds"): the identity shortcut of the six
-comparisons (`c = c` is `True` in the interpreter and `'maybe'` when
-compiled); the compiled comparisons compare doubles exactly, without the
-engine tolerance; in an angular mode other than radians the endpoints may
-differ by the rounding of the factor; and a non-integer point exponent with a
-negative base at run time is `empty` when compiled, where the interpreter
-uses the real branch. The implementation is tighter than one row of the plan:
-`Enclosure(-1, 1)^-2` is `Enclosure(1, +oo)` under `.N()` and compiled too
-(the composition `1 / x^2`), not the whole line. Tests:
-`test/compute-engine/enclosure-kind.test.ts`, `enclosure-apply.test.ts`,
+Phase 3 (done) added the `Enclosure` value kind, an interval that holds one real
+(plan sections 4.9.2 and 4.9.3; the user's decisions of 2026-10-26 took every
+recommendation of 4.9.1 and the defaults (b) of 4.9.3). The head is in
+`library/enclosure.ts`, the hooks in `library/enclosure-arithmetic.ts` and the
+`interval-js` contract in `library/enclosure-compile.ts`. The kind primitive
+`enclosure` (`admittedAs: 'real'`) is new. Under `evaluate()` the hooks keep
+exact endpoints; under `.N()` the endpoints are converted to doubles outward and
+the interval library computes the image, one kernel for each form; the compiled
+code calls the same kernels, so the two give the same doubles. Two fields of
+`ArithmeticDefinition` are new for every kind: the `extremum` hook (asked by
+`Max`, `Min`, `Clamp`, `ElementMax`, `ElementMin` before `compare`;
+`kindExtremum()`, `kind-compare.ts`) and the answers `'<='` and `'>='` of
+`compare`, which every reader maps through `orderAnswer()` (`kind-compare.ts`).
+The interval runner checks the host value of an input typed by the kind
+(`run()`, `broadcast()`, `broadcastAsync()`; a union input by arm), and the
+kernel fixes of CE-522 landed with it. Four differences between the interpreter
+and the compiled code are accepted and stated in `docs/COMPILATION-MODEL.md`
+("Value kinds"): the identity shortcut of the six comparisons (`c = c` is `True`
+in the interpreter and `'maybe'` when compiled); the compiled comparisons
+compare doubles exactly, without the engine tolerance; in an angular mode other
+than radians the endpoints may differ by the rounding of the factor; and a
+non-integer point exponent with a negative base at run time is `empty` when
+compiled, where the interpreter uses the real branch. The implementation is
+tighter than one row of the plan: `Enclosure(-1, 1)^-2` is `Enclosure(1, +oo)`
+under `.N()` and compiled too (the composition `1 / x^2`), not the whole line.
+Tests: `test/compute-engine/enclosure-kind.test.ts`, `enclosure-apply.test.ts`,
 `enclosure-compile.test.ts` and `interval-kernels-ce522.test.ts`. The
-documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
-`doc/08-guide-types.md` ("Kind Types"), `docs/TYPE-SYSTEM.md` and
-`docs/COMPILATION-MODEL.md`.
+documentation is in `cortexjs.io/docs/compute-engine/06-guide-augmenting.md`
+("Enclosures"), `cortexjs.io/docs/compute-engine/08-guide-types.md` ("Kind
+Types"), `docs/TYPE-SYSTEM.md` and `docs/COMPILATION-MODEL.md`.
 
-- **CE-507.12** (later step) A serializable kind entry check. Two limits of
-  the compile contract of phase 1 stay for the enclosure. (1) Code compiled
-  with a kind input cannot be loaded again from its stored form: the loaders of
+- **CE-507.12** (later step) A serializable kind entry check. Two limits of the
+  compile contract of phase 1 stay for the enclosure. (1) Code compiled with a
+  kind input cannot be loaded again from its stored form: the loaders of
   `createIntervalRuntime()` (`load()`, `loadBroadcast()`,
-  `loadBroadcastSlice()`) refuse it, because the `entry` check is a function
-  of the host and stored code cannot carry it; so `shippable` is `false` and
-  the kernel pool is not used. (2) An input typed `list<enclosure>` declines,
-  because `entry` and `lowered()` describe one value. On `interval-js` the
-  check of an enclosure is fixed (a record `{ lo, hi }` with `lo <= hi`, no
-  `NaN`, not the same infinity twice, or a number), so it could be written as
-  data in the stored code and applied to each element of a list. To do when a
-  host asks for stored or pooled enclosure code.
+  `loadBroadcastSlice()`) refuse it, because the `entry` check is a function of
+  the host and stored code cannot carry it; so `shippable` is `false` and the
+  kernel pool is not used. (2) An input typed `list<enclosure>` declines,
+  because `entry` and `lowered()` describe one value. On `interval-js` the check
+  of an enclosure is fixed (a record `{ lo, hi }` with `lo <= hi`, no `NaN`, not
+  the same infinity twice, or a number), so it could be written as data in the
+  stored code and applied to each element of a list. To do when a host asks for
+  stored or pooled enclosure code.
 
 - **CE-507.5** (defect, not reachable today) A kind registered inside an
   inference rollback frame, or inside the Epsil static pre-pass, is not undone
@@ -1400,16 +1380,15 @@ documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
   coverage", says so). No route reaches it: Epsil cannot declare an `arithmetic`
   field, and a host `ce.declare` with one runs outside a frame. Becomes
   reachable when Epsil can declare hooks.
-- **CE-507.7** (on demand; user decision 2026-10-27: nothing now, review when
-  a consumer asks for the syntax; the design to build then is the `Compose`
-  alternative below, never the flag on `Multiply`) A non-commutative product
-  for a value kind. PR #482 (group theory based on GAP) does not block on it:
-  it ships named operators and refuses `Permutation(…) * Permutation(…)` by
-  its own design note. Plan section 4.3 says
-  `multiply` must commute, because the canonical form sorts a product, and names
-  matrices over a finite field as out of scope. PR #482 (`installGroupTheory`,
-  132 operators) meets exactly this: it ships `PermutationCompose` and
-  `GroupMatrixMultiply` as named operators, and
+- **CE-507.7** (on demand; user decision 2026-10-27: nothing now, review when a
+  consumer asks for the syntax; the design to build then is the `Compose`
+  alternative below, never the flag on `Multiply`) A non-commutative product for
+  a value kind. PR #482 (group theory based on GAP) does not block on it: it
+  ships named operators and refuses `Permutation(…) * Permutation(…)` by its own
+  design note. Plan section 4.3 says `multiply` must commute, because the
+  canonical form sorts a product, and names matrices over a finite field as out
+  of scope. PR #482 (`installGroupTheory`, 132 operators) meets exactly this: it
+  ships `PermutationCompose` and `GroupMatrixMultiply` as named operators, and
   `Permutation(…) * Permutation(…)` is refused with `incompatible-type` (its
   design note `docs/group-theory/FOUNDATIONS.md`, decision D3, says why).
   Proposal: a kind declares `multiply: { commutes: false, … }` (or a separate
@@ -1428,9 +1407,9 @@ documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
   the compile targets), which a flag on `Multiply` would have to gate one by
   one. The engine's own precedent is the named operator (`MatrixMultiply`;
   `\cdot` over lists is element-wise).
-- Note (2026-10-26, phase-2 code review): `.N()` of a definite integral
-  returns a `Measurement` (the quadrature result), so the first such call opens
-  the kind gates of an engine (`engineHasKindValues`, `someKindAdmittedByCarrier`,
+- Note (2026-10-26, phase-2 code review): `.N()` of a definite integral returns
+  a `Measurement` (the quadrature result), so the first such call opens the kind
+  gates of an engine (`engineHasKindValues`, `someKindAdmittedByCarrier`,
   `someKindHasResultType`, `value-kinds.ts`) for the rest of its life, as any
   measurement operation does. Measured on 1500 evaluations of five ordinary
   expressions (`evaluate()` and `.N()`): 1.04× a fresh engine after the
@@ -1442,9 +1421,10 @@ documentation is in `doc/06-guide-augmenting.md` ("Enclosures"),
   4.1.1) and a nominal type over another definition (PR #482 declares
   `Permutation = tuple<images: list<integer>>` with a checked constructor
   operator of the same name). Only the first can take an `arithmetic` field;
-  `doc/08-guide-types.md` says so. PR #482 also edits the "no caller uses it
-  today" comment on `mint` in `src/compute-engine/index.ts` that phase 1
-  rewrote: a trivial merge conflict to expect.
+  `cortexjs.io/docs/compute-engine/08-guide-types.md` says so. PR #482 also
+  edits the "no caller uses it today" comment on `mint` in
+  `src/compute-engine/index.ts` that phase 1 rewrote: a trivial merge conflict
+  to expect.
 
 ### CE-137. Binder clauses and user-function calls under `Integrate`, `Solve` and `Sum`: gaps
 
@@ -2117,6 +2097,52 @@ iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
 
+### CE-561. An interval one double wide reports `0 ± 0`
+
+**Status:** open; defect (low); numerics. Found 2026-10-27 in the review of
+CE-533, after the nodes of a panel were clamped to the panel.
+
+`adaptiveQuadrature` of `√(x − 1)` on `[1, 1 + ε]` (`ε = Number.EPSILON`, an
+interval one double wide) gives `0 ± 0`, converged, for a true value of
+`(2/3)·ε^1.5 ≈ 2.2e-24`. All 15 nodes of the panel round to `1`, where the
+integrand is 0, and the far endpoint is never sampled: a single panel has no
+edge samples for `hiddenEdgeError` (`numerics/gauss-kronrod.ts`). Converged is
+right against the absolute tolerance, but an error of 0 does not bound the true
+error. Before the clamp the result was `NaN`. A panel whose nodes all round to
+one double could report `(b − a)·max(|f(a)|, |f(b)|)` as its error, with `+∞`
+when an endpoint value is not finite.
+
+### CE-559. A logarithm 10⁴ doubles outside an endpoint reports an error about 1 % smaller than the true error
+
+**Status:** open; defect (low); numerics. Found 2026-10-27 while fixing CE-558.
+
+`adaptiveQuadrature` with `singularEndpoints` of `ln|x − c|` on `[e, e + 1]`
+with `c` 10⁴ doubles below `e` reports, not converged, `± 1.05e-10` for a true
+error of `1.06e-10` at `e = 10⁵`, and `± 7.62e-10` for `7.78e-10` at `e = 10⁶`.
+The exponents next to the endpoint do not have the shape of a pole outside
+(`outsidePoleShape()`, `numerics/endpoint-quadrature.ts`, residual about 0.05),
+so the test of a singularity outside the interval does not apply, and the
+integrand is finite at `e`, so the area of the first double (`uncountedArea()`)
+is not charged either. A logarithm 10⁵ doubles outside is read as a pole and
+bounded. The probe is in the CE-558 sweep script (`scratchpad/c/p2.mts` of
+session compute-engine-07, 2026-10-27; rewrite it from the numbers above).
+
+### CE-560. Without `singularEndpoints`, an interior singularity reports an error 10 times smaller than the true error
+
+**Status:** open; defect; numerics; not reachable from the engine. Found
+2026-10-27 while checking CE-376.
+
+`adaptiveQuadrature(f, −1, 1)` without the `singularEndpoints` option, for
+`|x − c|^(−0.9)` with `c = 0.3`, is not converged and reports `± 4.7e-2` for a
+true error of `0.42`. Every caller in `src` passes `singularEndpoints: true`
+(`library/calculus.ts`, `numerics/oscillatory-quadrature.ts`,
+`compilation/javascript-runtime.ts`), so no engine route reaches it; the test
+files that call the function without the option (`compile-integrate.test.ts`,
+`quadrature-deadline.test.ts`, `integrate-endpoint-pole.test.ts` and others) do
+not integrate such a function. A fix needs the model of the singular point that
+the `singularEndpoints` mode provides, or the option should become the only
+mode.
+
 ### CE-541. A compiled nested integral does not add the errors of its inner integrals
 
 **Status:** open; defect. Found 2026-10-27 while fixing the error of nested
@@ -2130,52 +2156,6 @@ the error of the outer one (`nestedErrors`, `withNestedErrors()` in
 level but does not add the errors of its own inner integrals, and the
 uncertainty of a compiled three-level integral can be smaller than its true
 error.
-
-### CE-533. The GK15 error estimate can miss a kink inside a panel
-
-**Status:** decided, in progress; numerics. Found 2026-10-27 while fixing the
-nested integral of Tycho's document `neyret/2agcgxq87y`. User decision
-2026-10-27: fix it, although the error reported for every integral changes.
-
-A Gauss–Kronrod panel estimates its error from one difference: the Kronrod
-sum minus the Gauss sum (`gk15`, `numerics/gauss-kronrod.ts`). When the
-integrand has a kink inside the panel, the two sums can agree by chance. With
-the inner integrand of that document at y = 0.758125 and ε = 0.01, a kink at
-0.31 of the half-width gives a difference of 1.2e-10: the panel reports an
-error of 4e-11, and the true error is 1.6e-5. The jump or kink next to a panel
-END is detected since 2026-10-27 (`hiddenEdgeError`). A fix for a kink inside
-the panel needs a different error estimator (for example several null rules).
-That changes the error reported for every integral, so it needs a decision.
-On this document the effect is below 7e-10.
-
-### CE-376. A singular endpoint that is not exact in binary reports a converged result with a wrong error bound
-
-**Status:** open; cause not located. Found 2026-10-23 while fixing Tycho
-row 427.
-
-The adaptive quadrature (`adaptiveQuadrature` with `singularEndpoints`,
-`numerics/gauss-kronrod.ts`) integrates an integrable singularity at an endpoint
-correctly when the endpoint is 0 or 1, and not when it is 1/3:
-
-| Integral                        | Result                        | True error |
-| ------------------------------- | ----------------------------- | ---------- |
-| `∫₀^(5/3) t^(−1/2) dt`          | converged, error `9.7e-12`    | `4.4e-16`  |
-| `∫₁² (t − 1)^(−1/2) dt`         | extrapolated, error `1.5e-13` | `1.3e-15`  |
-| `∫_(1/3)^2 (t − 1/3)^(−1/2) dt` | converged, error `2.4e-10`    | `6.5e-9`   |
-
-The three integrals have the same value up to a translation. The missing part of
-the last one is about the integral over one spacing of the doubles next to 1/3
-(`2·√(5.5e-17)`), so the corner panel probably stops at that width with an error
-estimate that is too small, and the result is reported as `converged` instead of
-going to the extrapolation of the shells. A singularity inside the interval has
-the same error since Tycho row 427 was fixed, because the quadrature now splits
-the interval at the singularity and each half has it at an endpoint:
-`∫₋₁² |t − 1/3|^(−1/2) dt` reports `converged` with an error of `4.5e-10`, and
-its true error is `1.3e-8`. Before that fix, the true error was the same and the
-result was also reported as `converged`. The interpreter uses the same
-quadrature: `∫₋₁² |t − 0.3|^(−1/2) dt` evaluates to
-`4.88803179952 ± 0.00000000047`, and the value is
-`2·√1.3 + 2·√1.7 = 4.888031812279`.
 
 ### CE-179. Under `.N()`, some uses of a parameter in a user-function body read the rounded argument
 
@@ -2501,7 +2481,8 @@ result with `ce.number(n)` and so makes it exact is visible.
 
 Rules that stay: a literal with a fraction part (`1.0`, `2.0`, `{num: "1.0"}`)
 is a float on every route, and `ce.number(bigDecimal)` is exact for an
-integer-valued big decimal (`doc/12-guide-numerical-evaluations.md`, "Exact and
+integer-valued big decimal
+(`cortexjs.io/docs/compute-engine/12-guide-numerical-evaluations.md`, "Exact and
 Inexact Numbers: the Spelling Decides"). User decision 2026-10-15:
 `BoxedNumber.N()` returns a small exact integer unchanged (`\sqrt{4}.N()` is the
 exact `2`); changing it would touch many printed results for no gain.
@@ -4030,25 +4011,24 @@ is a shader-creation error in Chrome ("value inf cannot be represented as
 
 ### CE-522. Interval library kernels: a known limit of the outward rounding
 
-**Status:** open; one known limit, low. Found
-2026-10-26 by the spec review of plan `docs/plans/2026-10-26-value-kinds.md`
-section 4.9.2 (phase 3, the `Enclosure` value kind), which relies on these
-kernels (`src/compute-engine/interval/`); all are reachable through
+**Status:** open; one known limit, low. Found 2026-10-26 by the spec review of
+plan `docs/plans/2026-10-26-value-kinds.md` section 4.9.2 (phase 3, the
+`Enclosure` value kind), which relies on these kernels
+(`src/compute-engine/interval/`); all are reachable through
 `compile(…, { to: 'interval-js' })` and through `.N()` of an enclosure. The
 unsound and too-wide answers that the review found are fixed in phase 3
-(`CHANGELOG.md`, "The interval library gives sound and tighter answers";
-tests `test/compute-engine/interval-kernels-ce522.test.ts`). The answers
-that were sound but wider than necessary (.10 to .12) were made tighter on
-2026-10-27. What remains is .5, a known limit of the transcendental
-kernels.
+(`CHANGELOG.md`, "The interval library gives sound and tighter answers"; tests
+`test/compute-engine/interval-kernels-ce522.test.ts`). The answers that were
+sound but wider than necessary (.10 to .12) were made tighter on 2026-10-27.
+What remains is .5, a known limit of the transcendental kernels.
 
-- **CE-522.5** (known limit, not fixed in phase 3) The outward rounding of
-  the transcendental kernels is a minimum move, not a proof of containment
-  (`interval/rounding.ts` says so): `tanh` of a point can miss the true value
-  by one unit in the last place. The rational operations (`add`, `mul`,
-  `div`, integer powers, `abs`, the step functions) are rigorous. Certified
-  kernels (error bounds per function) are a separate project; the
-  `Enclosure` documentation states the limit.
+- **CE-522.5** (known limit, not fixed in phase 3) The outward rounding of the
+  transcendental kernels is a minimum move, not a proof of containment
+  (`interval/rounding.ts` says so): `tanh` of a point can miss the true value by
+  one unit in the last place. The rational operations (`add`, `mul`, `div`,
+  integer powers, `abs`, the step functions) are rigorous. Certified kernels
+  (error bounds per function) are a separate project; the `Enclosure`
+  documentation states the limit.
 
 ### CE-288. The f32 shader Hurwitz zeta answers NaN next to a zero of ζ(s, a)
 
@@ -4188,8 +4168,9 @@ first, and `nIntegrateMultiple` (`library/calculus.ts`) lets the bounds of limit
 `i` depend on the variables of limits `0…i−1`. Two tests in
 `test/compute-engine/calculus.test.ts` ("dependent inner bound: triangle", "a
 bound referencing an INNER integration variable declines") lock this in. `Sum`
-and `Product` document the same order (`doc/82-reference-collections.md`: "the
-first spec being the outermost").
+and `Product` document the same order
+(`cortexjs.io/docs/compute-engine/82-reference-collections.md`: "the first spec
+being the outermost").
 
 With constant bounds the order does not change the value. With a dependent bound
 it does: `Integrate(x·y, Limits(x, 0, 2y), Limits(y, 0, 1))` evaluates to `y²`
@@ -4200,8 +4181,8 @@ a nested `Integrate`, which is not affected.
 - **CE-296.1** Change the parser: it reads `\iint f\,dx\,dy` as
   `Limits(x), Limits(y)`, with the innermost variable (`dx`) first.
 - **CE-296.2** Correct the double-integral example of
-  `doc/81-reference-calculus.md`: it lists `Tuple(x, 0, 2)` (the inner integral
-  of `\int_1^3\int_0^2 … dx dy`) first.
+  `cortexjs.io/docs/compute-engine/81-reference-calculus.md`: it lists
+  `Tuple(x, 0, 2)` (the inner integral of `\int_1^3\int_0^2 … dx dy`) first.
 
 ### CE-297. The lenient grammar makes reading choices that a host cannot detect
 
@@ -4525,17 +4506,17 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 
-**Status:** open; performance, needs a design. Found by the Tycho
-document-open measurement, 2026-10-27. Same cause as CE-531.
+**Status:** open; performance, needs a design. Found by the Tycho document-open
+measurement, 2026-10-27. Same cause as CE-531.
 
 When Tycho opens the document `art/2ki2hjsouf`, it makes 1 994 canonical
 `ce.rebind` calls; the replay takes about 720 ms. A 425-byte tree such as
 `R_3(At(PointList(PointX(S_orry(u)) + … D(PointY(S_orry(u)), u) …)))` takes 14
 to 20 ms, about 85 % of it in typing `S_orry(u)` (`callResultTypeOfBinding` and
-`literalBodyResultType`, `boxed-expression/call-result-type.ts`, walk the
-8.7 KB body). That walk has a memo keyed on `_cacheGeneration()`, but each `D`
-goes through `canonicalizeBinder` (`box.ts`), which declares the bound variable
-in a new scope; the declaration and the pop advance the `any` axis, so the memo
+`literalBodyResultType`, `boxed-expression/call-result-type.ts`, walk the 8.7 KB
+body). That walk has a memo keyed on `_cacheGeneration()`, but each `D` goes
+through `canonicalizeBinder` (`box.ts`), which declares the bound variable in a
+new scope; the declaration and the pop advance the `any` axis, so the memo
 misses after each `D`.
 
 An exemption for a declaration into a scope that canonicalization has just
@@ -4543,15 +4524,15 @@ created was built and measured on 2026-10-27 (replay 848 → 664 ms) and then
 REMOVED, because it is unsound. A symbol reads its value by name through the
 current scope chain (`BoxedSymbol._value`, `boxed-symbol.ts`), and while the
 binder's `canonical` handler runs, the binder's variable shadows an outer
-binding of the same name; the binder marks its variable only after the
-handler. So an expression that existed before the scope (an operand boxed
-earlier, or the stored value of an operand symbol, such as `a := x + 1` with
-`x := 3`) can serve a sign cached outside, or cache a sign computed inside and
-keep it after a clean pop: `sgn(a)` was `undefined` after the binder, with
-`x := 3`. The type derivation of a user function reads signs the same way, so
-its memo is not lexically scoped either. A narrower rule does not help: all 32
-`D` binders of the replay bind `u`, which is visible outside every time. The
-regression tests are in `test/compute-engine/ce-535-531-binder-declaration-cache.test.ts`.
+binding of the same name; the binder marks its variable only after the handler.
+So an expression that existed before the scope (an operand boxed earlier, or the
+stored value of an operand symbol, such as `a := x + 1` with `x := 3`) can serve
+a sign cached outside, or cache a sign computed inside and keep it after a clean
+pop: `sgn(a)` was `undefined` after the binder, with `x := 3`. The type
+derivation of a user function reads signs the same way, so its memo is not
+lexically scoped either. A narrower rule does not help: all 32 `D` binders of
+the replay bind `u`, which is visible outside every time. The regression tests
+are in `test/compute-engine/ce-535-531-binder-declaration-cache.test.ts`.
 
 What a fix needs (a design change): either caches whose key does not depend on
 name lookups from the current scope (for example, keyed on the bindings they
@@ -4568,31 +4549,30 @@ Reproduction: `npx tsx benchmarks/tycho-document-open/rebind.ts`
 2026-10-27.
 
 When Tycho opens the document `art/2ki2hjsouf`, it calls `evaluate()` on 15
-surface bodies in `u` and `v` (2 to 67 KB of MathJSON each): 1 684 ms in
-Tycho, 1 623 ms in the replay with a production-like bundle (median of 5), 460
-ms for the largest input. Three causes:
+surface bodies in `u` and `v` (2 to 67 KB of MathJSON each): 1 684 ms in Tycho,
+1 623 ms in the replay with a production-like bundle (median of 5), 460 ms for
+the largest input. Three causes:
 
 - **Copies of a subtree.** Input 0 has 8 100 nodes but 244 distinct subtrees:
   one 3.6 KB `ListJoin` subtree occurs 18 times, because Tycho puts the body of
   `G_APS(u,v)` at each read of `R_3`. Evaluating the copies costs 46 % of input
   0 and 44 % of input 2.
-- **Type derivation on each new node.** `boundCallType` (`boxed-function.ts`)
-  is about 37 % of `evaluate`: 27 000 calls on input 0 with 184 distinct
-  (operator, operand types) keys, and 425 000 `isSubtype` calls
-  (`common/type/subtype.ts`) on 1 096 distinct pairs (`real <: number` alone
-  131 000 times).
+- **Type derivation on each new node.** `boundCallType` (`boxed-function.ts`) is
+  about 37 % of `evaluate`: 27 000 calls on input 0 with 184 distinct (operator,
+  operand types) keys, and 425 000 `isSubtype` calls (`common/type/subtype.ts`)
+  on 1 096 distinct pairs (`real <: number` alone 131 000 times).
 - **Cache invalidation.** In inputs 2 to 7, each write of a `Comprehension`
   index and each scope pop advances the `any` axis 104 to 112 times per call,
   and each advance retires the cached `_type` of every expression.
 
-Proposed fixes: (a) inside one `evaluate()` call, a memo keyed on the
-structural hash for a subtree with no effect (no `Assign`, no unseeded random
-draw), cleared by any state event on the `semantic` axis; (b) a memo of
-`boundCallType` keyed on the operator definition, the operand type objects and
+Proposed fixes: (a) inside one `evaluate()` call, a memo keyed on the structural
+hash for a subtree with no effect (no `Assign`, no unseeded random draw),
+cleared by any state event on the `semantic` axis; (b) a memo of `boundCallType`
+keyed on the operator definition, the operand type objects and
 `_cacheGeneration()`, after an audit of what else the function reads
 (`absentTerm`, `applySiteResultType`, reboxed callees); (c) a fast path in
-`isSubtype` for two primitive types. Tycho's side: evaluate an inlined
-function call once instead of copying its body at each read.
+`isSubtype` for two primitive types. Tycho's side: evaluate an inlined function
+call once instead of copying its body at each read.
 
 Reproduction: `npx tsx benchmarks/tycho-document-open/evaluate.ts` (`RUNS=`,
 `ONLY=0,2`; `CE_CACHE_STATS=1` prints the `isSubtype` counts). Under `tsx` the
@@ -4601,30 +4581,29 @@ them.
 
 ### CE-531. A call of a function literal invalidates the caches on the `any` axis
 
-**Status:** open; performance. Found 2026-10-27 while fixing the lazy
-collection chain of Tycho row 453.
+**Status:** open; performance. Found 2026-10-27 while fixing the lazy collection
+chain of Tycho row 453.
 
 Each call of a function literal declares its parameters in a new call scope
 (`declareParameterActivation`, `function-utils.ts`). That declaration sends a
 `declare` event that is neither `scratch` nor `parameter`, so it advances the
-engine's `any` version. Every cache keyed on that version
-(`_cacheGeneration()`: the evaluated form of `At(A, I)`, the memo of a lazy
-collection value, the `_type` and `_sgn` caches) then misses after each call.
-Measured on the chain of Tycho row 453 at depth 3: the version went from 17 to
-7 129 during one read.
+engine's `any` version. Every cache keyed on that version (`_cacheGeneration()`:
+the evaluated form of `At(A, I)`, the memo of a lazy collection value, the
+`_type` and `_sgn` caches) then misses after each call. Measured on the chain of
+Tycho row 453 at depth 3: the version went from 17 to 7 129 during one read.
 
 An exemption for a declaration into a scope that no lookup has walked through
-yet (tried on 2026-10-27 for binders, see CE-535, and removed there as
-unsound) is NOT sound for a call scope either. The cached `_type` of a body node is safe, because
-`BoxedSymbol.type` reads the body's own binding. But `BoxedSymbol.sgn` reads the
-parameter's VALUE by name through the call scope, and `_sgn` is keyed on the
-version only: with the exemption, a lazy operator whose operand is the body
-node `x + 1` answered `positive` for `f(-5)` right after `f(3)`. Exempting the
-entry and advancing at the exit saves nothing (still one advance per call).
+yet (tried on 2026-10-27 for binders, see CE-535, and removed there as unsound)
+is NOT sound for a call scope either. The cached `_type` of a body node is safe,
+because `BoxedSymbol.type` reads the body's own binding. But `BoxedSymbol.sgn`
+reads the parameter's VALUE by name through the call scope, and `_sgn` is keyed
+on the version only: with the exemption, a lazy operator whose operand is the
+body node `x + 1` answered `positive` for `f(-5)` right after `f(3)`. Exempting
+the entry and advancing at the exit saves nothing (still one advance per call).
 What a fix needs: a key for the value-dependent caches of a body node that
 includes the values of the call's parameters (or a per-activation cache), so
-that a call does not have to advance the engine-wide version. This is a
-design question.
+that a call does not have to advance the engine-wide version. This is a design
+question.
 
 ### CE-532. A public API that binds values to symbols for the duration of a callback
 
@@ -4639,9 +4618,9 @@ to do so, and cannot restore a type that `assign` changed. The public
 evaluation. Proposal: `ce.withValues(values, fn)`. It pushes a scope, declares
 in it each name with the given value and with the declared type of the visible
 binding (as the internal `withValueShield()` does for valueless names), runs
-`fn`, and pops the scope in a `finally`. The outer definition is never
-written, so there is nothing to restore. An expression created inside `fn`
-must not be kept after `fn` returns.
+`fn`, and pops the scope in a `finally`. The outer definition is never written,
+so there is nothing to restore. An expression created inside `fn` must not be
+kept after `fn` returns.
 
 ### CE-313. Evaluating a symbolic closed form again after a state change rebuilds its nodes
 
@@ -4734,7 +4713,7 @@ fit or a 2000-column plot takes under 10 ms and cannot gain. Tycho caps fits at
   in three browsers on 2026-10-24
   (`test/compute-engine/ce-314-3-nested-pool.test.ts`,
   `benchmarks/workers/nested-pool-browser-probe.mjs`) and documented in
-  `doc/13-guide-compile.md`.
+  `cortexjs.io/docs/compute-engine/13-guide-compile.md`.
 - The name stays `broadcast`/`broadcastAsync` (Tycho's feedback 2026-10-24: "one
   formula, many points"; `runMany` says less).
 
@@ -5481,15 +5460,14 @@ the second derivative (the first derivative) directly.
 The `test` job of CI fails on Node 22 and Node 26. The failing tests:
 
 - `test/compute-engine/ce-39-3-range-element-stays-range.test.ts`, "Shape and
-  Rank of many long range rows do not list the rows": the test requires the
-  two queries over 10,000 rows of `Range(1, 10000)` to finish in less than one
+  Rank of many long range rows do not list the rows": the test requires the two
+  queries over 10,000 rows of `Range(1, 10000)` to finish in less than one
   second, and the CI machine is slower. Do not replace the timing check with
   spies on the `iterator` and `at` handlers of `Range` only: hashing and
   `isSame` read the elements of a range through `integerRangeElements()`
   (`boxed-expression/type-guards.ts`), not through those handlers, so a
-  regression that hashes every row would pass. Count the work (for example,
-  spy on the hash as well), or keep a timing check with a limit that CI
-  meets.
+  regression that hashes every row would pass. Count the work (for example, spy
+  on the hash as well), or keep a timing check with a limit that CI meets.
 - `test/compute-engine/compile-gpu-statement-selection.test.ts`, "a selection
   with an effect keeps the ternary form and declines", and
   `test/compute-engine/ce-509-513-shader-fixes.test.ts`, "declines a plain draw

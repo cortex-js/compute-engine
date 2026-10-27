@@ -611,6 +611,30 @@ let _inStructuralRead = false;
  */
 let _transientStructural: Map<Expression, Expression> | undefined = undefined;
 
+/**
+ * The canonical forms that the CURRENT top-level `canonical` read of a raw
+ * node made, by raw node, each with the lexical scope that was current when
+ * it was made. `undefined` when no `canonical` read is in progress.
+ *
+ * The `canonical` getter of a raw node rebuilds it from its operands, and
+ * each operand is canonicalized through its own getter. A raw node that is
+ * an operand more than once (`Pair(t, t)`, with `t` built the same way at
+ * each level) was canonicalized once for each path from the root, so the
+ * canonical form was a tree with a number of nodes exponential in the depth.
+ * A function literal with such a raw body of depth 24 took 4.9 s to
+ * canonicalize; with this map, 1.8 ms.
+ *
+ * A raw node that the read meets again is given the canonical form it got
+ * the first time, if the lexical scope is the same: the canonical form of a
+ * raw node depends on the scope that resolves its names, and an occurrence
+ * below a binder (the index of a `Sum`) is canonicalized in another scope.
+ * The outermost read creates the map and drops it before it returns, also
+ * when it throws, so the map keeps no expression after that read, as the
+ * map of `structural` reads does ({@link _transientStructural}).
+ */
+let _transientCanonical:
+  Map<Expression, { scope: Scope; result: Expression }> | undefined = undefined;
+
 /** `CE_EFFECTS_PARANOID`: the effects-cache canary of the state-event
  * design's §6 (step 3) — on every served hit, `_effectsOf` recomputes the
  * projection and THROWS on divergence (a hard failure, per the A5
@@ -2175,15 +2199,31 @@ export class BoxedFunction
     // inside a scoped operator can be mapped back to source). `latex` is
     // deliberately NOT threaded here: the canonical form is a different
     // expression, for which verbatim source LaTeX would be a lie.
-    return this._withParseScope(() =>
-      this.engine.function(
-        this._operator,
-        this._ops,
-        this.sourceOffsets !== undefined
-          ? { metadata: { sourceOffsets: this.sourceOffsets } }
-          : undefined
-      )
-    );
+    //
+    // A raw node met again in the same read and the same scope is given the
+    // canonical form it got the first time (see `_transientCanonical`).
+    const scope = this.engine.context.lexicalScope;
+    const owner = _transientCanonical === undefined;
+    if (owner) _transientCanonical = new Map();
+    else {
+      const hit = _transientCanonical!.get(this);
+      if (hit !== undefined && hit.scope === scope) return hit.result;
+    }
+    try {
+      const result = this._withParseScope(() =>
+        this.engine.function(
+          this._operator,
+          this._ops,
+          this.sourceOffsets !== undefined
+            ? { metadata: { sourceOffsets: this.sourceOffsets } }
+            : undefined
+        )
+      );
+      _transientCanonical!.set(this, { scope, result });
+      return result;
+    } finally {
+      if (owner) _transientCanonical = undefined;
+    }
   }
 
   /** Per-node memo for `structural`. The rebuild recurses into every
@@ -2553,6 +2593,41 @@ export class BoxedFunction
     if (options.canonical === undefined)
       options = { canonical: structuralForm ? false : this.isCanonical };
 
+    // The variable of `D(f, x)`, of `Series(f, x, …)` and of an indefinite
+    // `Integrate(f, x)` is free: the value of the node is a function of it.
+    // Replacing the variable inside the node gives an invalid node
+    // (`D(9, 3)`), so the substitution of the variable is applied to the
+    // VALUE of the node instead, at a point: `D(x^2, x)` with `x` replaced by
+    // `3` is `EvaluateAt(Function(D(x^2, x), x), 3)`, the derivative at 3,
+    // which evaluates to `6`. The other entries of the substitution are
+    // applied inside the node, as for any other node.
+    const pointForm = structuralForm
+      ? 'structural'
+      : options.canonical === true
+        ? 'canonical'
+        : options.canonical === false
+          ? 'raw'
+          : options.canonical;
+    const atPoint = pointEntries(this, sub, (input) =>
+      this.engine.expr(input, { form: pointForm })
+    );
+    if (atPoint !== undefined) {
+      const inner = this._subsInParseScope(
+        withoutNames(
+          sub,
+          atPoint.entries.map((x) => x.name)
+        ),
+        // The node is made raw, and canonicalized again as the body of the
+        // literal: its own scope is then a child of the scope of the body,
+        // and the value of the node (an expression in its variable) reads
+        // the parameter of the literal. A canonical node kept the scope it
+        // was made in: inside a `Sum`, `D(x^k, x)` with `x` replaced by `2`
+        // gave `3x^2 + 2x + 1`, not `17`.
+        pointForm === 'canonical' ? { canonical: false } : options
+      );
+      return valueAtPoint(this.engine, inner, atPoint.entries, pointForm);
+    }
+
     // A non-canonical (held) child of a canonical parent — e.g. the index
     // symbol of `Limits`, held by `lazy` so it is never canonicalized — must
     // stay raw: canonicalizing it here happens OUTSIDE its binding scope (an
@@ -2595,8 +2670,8 @@ export class BoxedFunction
     // unchanged, and `j + Sum(j, Limits(j, 1, 3))` replaces only the first
     // `j`. The occurrences replaced are exactly those that the free-variable
     // walk (`getReferences()`, `abstract-boxed-expression.ts`) reports as
-    // free, so the variable of `D` or `Series` is replaced
-    // (`subsBinderView()`). The names in scope in each operand follow the
+    // free, so the variable of `D` or `Series` is replaced, at a point (see
+    // above). The names in scope in each operand follow the
     // binding-site selectors: an iterator clause's index is not in
     // scope in an earlier clause, and the bounds of a `Limits` clause (the
     // collection of an `Element` clause) of a `Sum`, `Product` or
@@ -20016,8 +20091,9 @@ function withProvedAbsentDomains(
  * A binder whose variable is a plain operand (`D`, `Series`) keeps the
  * variable in its value, so the walk reports it free and `subs()` replaces
  * it: `D(x^2, x).subs({x: 3})` is NOT left as `D(x^2, x)`, which evaluates to
- * `2x`, the value of another expression. (The replaced form is invalid, as it
- * was before this function existed.)
+ * `2x`, the value of another expression. The replacement is applied to the
+ * value of the node at a point, `EvaluateAt(Function(D(x^2, x), x), 3)`
+ * (`pointEntries()`, called before this function).
  *
  * A wildcard name (`_k`, `__k`, `_`) is never treated as bound: a binder in a
  * rule pattern or a rule replacement (`Sum(_f, Limits(_k, _a, _b))`) is
@@ -20095,6 +20171,107 @@ function subsBinderView(expr: Expression):
       ),
     readsFunctionBody,
   };
+}
+
+/**
+ * The entries of `sub` that are replaced at a point, after the value of
+ * `expr` is computed, when `expr` is a node whose value is a function of its
+ * variables: the variables of `D(f, x, …)`, the expansion variable of
+ * `Series(f, x, …)` and the variables of an indefinite `Integrate`
+ * (`indefiniteIntegralVariables()`). Each entry has the name, the symbol to
+ * use as the parameter of the function literal, and the replacement boxed
+ * with `box`. `undefined` when there is none.
+ *
+ * There is one entry for each replaced variable of `expr`, in the order of
+ * the operands, without repeats (`D(f, x, x)` has one entry). A replacement
+ * of another name is not an entry: it is put in the node before its value is
+ * computed (`D(x·y, x)` with `y` replaced by `x` is `D(x·x, x)`, whose value
+ * is `2x`).
+ *
+ * A wildcard variable (`_x`) is not included: a rule pattern or a rule
+ * replacement (`D(_f, _x)`) is instantiated with `subs()`, which must replace
+ * the wildcard in the node. A replacement of a variable by the same symbol
+ * (`x` by `x`, in any spelling: `"x"`, `{sym: "x"}`, a boxed symbol) changes
+ * nothing, and is not included either.
+ */
+function pointEntries(
+  expr: Expression,
+  sub: Substitution,
+  box: (input: NonNullable<Substitution[string]>) => Expression
+):
+  | { entries: { name: string; variable: Expression; point: Expression }[] }
+  | undefined {
+  if (!isFunction(expr)) return undefined;
+  const candidates: Expression[] = [];
+  if (expr.operator === 'D') candidates.push(...expr.ops.slice(1));
+  else if (expr.operator === 'Series') {
+    if (expr.ops[1] !== undefined) candidates.push(expr.ops[1]);
+  } else if (expr.operator === 'Integrate') {
+    const indefinite = indefiniteIntegralVariables(expr);
+    if (indefinite === undefined) return undefined;
+    for (const op of expr.ops.slice(1)) {
+      const v = isFunction(op, 'Limits') ? op.op1 : op;
+      if (isSymbol(v) && indefinite.has(v.symbol)) candidates.push(v);
+    }
+  } else return undefined;
+
+  const variables: Expression[] = [];
+  for (const v of candidates)
+    if (
+      isSymbol(v) &&
+      !v.symbol.startsWith('_') &&
+      !variables.some((x) => isSymbol(x) && x.symbol === v.symbol)
+    )
+      variables.push(v);
+  if (variables.length === 0) return undefined;
+  const names = variables.map(
+    (v) => (v as Expression & { symbol: string }).symbol
+  );
+
+  const result: { name: string; variable: Expression; point: Expression }[] =
+    [];
+  for (const [i, name] of names.entries()) {
+    if (!Object.hasOwn(sub, name) || sub[name] === undefined) continue;
+    const point = box(sub[name]!);
+    if (isSymbol(point, name)) continue;
+    result.push({ name, variable: variables[i], point });
+  }
+  if (result.length === 0) return undefined;
+  return { entries: result };
+}
+
+/**
+ * The value of `value` at the point where each entry of `entries` replaces
+ * its name by its point, without replacing the names inside `value`:
+ * `EvaluateAt(Function(value, x), p)`. `EvaluateAt` evaluates the value with
+ * its own variables, then puts the points in it, and its LaTeX is
+ * `\left.\left(…\right)\right|_{x=p}`. With more than one entry, the
+ * function literal has one parameter per entry and the point is a `Tuple`,
+ * `EvaluateAt(Function(value, x, y), Tuple(p₁, p₂))`, written
+ * `|_{x=p₁, y=p₂}`: all the names are replaced at the same time, and a name
+ * in a point (`y` replaced by `x`) is the name of the enclosing scope.
+ */
+function valueAtPoint(
+  ce: ComputeEngine,
+  value: Expression,
+  entries: readonly { variable: Expression; point: Expression }[],
+  form: NonNullable<Parameters<ComputeEngine['function']>[2]>['form']
+): Expression {
+  const opts = { form };
+  const fn = ce.function(
+    'Function',
+    [value, ...entries.map((x) => x.variable)],
+    opts
+  );
+  const point =
+    entries.length === 1
+      ? entries[0].point
+      : ce.function(
+          'Tuple',
+          entries.map((x) => x.point),
+          opts
+        );
+  return ce.function('EvaluateAt', [fn, point], opts);
 }
 
 /**

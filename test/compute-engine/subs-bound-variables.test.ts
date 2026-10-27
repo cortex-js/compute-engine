@@ -99,16 +99,17 @@ describe('SUBS LEAVES A BOUND VARIABLE AND ITS BINDER UNCHANGED', () => {
 describe('SUBS REPLACES THE VARIABLE OF AN INDEFINITE INTEGRAL', () => {
   // The value of an indefinite integral is a function of its variable
   // (`∫ a·x dx = a·x²/2`), as the value of `D(f, x)` is, so the variable is
-  // free and is replaced. The result is not an antiderivative in `x`.
+  // free and is replaced: the result is the value of the integral at the
+  // point, `EvaluateAt(Function(Integrate(a·x, x), x), 3)`.
   test('Integrate(a·x, x)', () => {
     const expr = ce.box(['Integrate', ['Multiply', 'a', 'x'], 'x']);
     expect(expr.freeVariables).toEqual(['a', 'x']);
     const result = subs(['Integrate', ['Multiply', 'a', 'x'], 'x'], {
       x: 3,
     });
-    expect(result.isValid).toBe(false);
-    // The body of the integrand (its parameter list is kept as written).
-    expect(JSON.stringify(result.op1.op1.json)).not.toMatch(/"x"/);
+    expect(result.isValid).toBe(true);
+    expect(result.operator).toBe('EvaluateAt');
+    expect(result.evaluate().toString()).toBe('9/2 * a');
   });
 
   test('Integrate(a·x, x) with only the coefficient replaced', () => {
@@ -116,6 +117,319 @@ describe('SUBS REPLACES THE VARIABLE OF AN INDEFINITE INTEGRAL', () => {
       a: 2,
     });
     expect(result.evaluate().isSame(ce.parse('x^2'))).toBe(true);
+  });
+});
+
+describe('SUBS OF THE VARIABLE OF D, SERIES OR AN INDEFINITE INTEGRAL IS A VALUE AT A POINT', () => {
+  // The value of `D(f, x)`, `Series(f, x, …)` and `Integrate(f, x)` is a
+  // function of `x`. Replacing `x` by `3` gives the value at `x = 3`:
+  // `EvaluateAt(Function(D(f, x), x), 3)`. The node keeps its own variable,
+  // and the other entries of the substitution are applied inside it.
+  const parseRoute = (latex: string, map: Record<string, Json>) => {
+    const boxed: Record<string, Expression> = {};
+    for (const [k, v] of Object.entries(map)) boxed[k] = ce.box(v);
+    return ce.parse(latex).subs(boxed);
+  };
+
+  test('D(x^2, x) with x = 3 (box route)', () => {
+    const result = subs(['D', ['Power', 'x', 2], 'x'], { x: 3 });
+    expect(result.json).toEqual([
+      'EvaluateAt',
+      ['Function', ['Block', ['D', ['Power', 'x', 2], 'x']], 'x'],
+      3,
+    ]);
+    expect(result.latex).toBe(
+      '\\left.\\left(\\frac{\\mathrm{d}x^2}{\\mathrm{d}x}\\right)\\right|_{x=3}'
+    );
+    expect(result.evaluate().json).toEqual(6);
+    expect(result.N().json).toEqual(6);
+  });
+
+  test('D(x^2, x) with x = 3 (parse route)', () => {
+    const result = parseRoute('\\frac{d}{dx}x^2', { x: 3 });
+    expect(result.operator).toBe('EvaluateAt');
+    expect(result.evaluate().json).toEqual(6);
+  });
+
+  test('Integrate(a·x, x) with x = 3 and a = 2 (box route)', () => {
+    const result = subs(['Integrate', ['Multiply', 'a', 'x'], 'x'], {
+      x: 3,
+      a: 2,
+    });
+    expect(result.operator).toBe('EvaluateAt');
+    expect(result.evaluate().json).toEqual(9);
+  });
+
+  test('Integrate(a·x, x) with x = 3 and a = 2 (parse route)', () => {
+    const result = parseRoute('\\int ax\\,dx', { x: 3, a: 2 });
+    expect(result.operator).toBe('EvaluateAt');
+    expect(result.evaluate().json).toEqual(9);
+  });
+
+  test('an integral with no closed form stays symbolic at the point', () => {
+    const result = subs(['Integrate', ['Sin', ['Sin', 'x']], 'x'], { x: 3 });
+    expect(result.evaluate().operator).toBe('EvaluateAt');
+  });
+
+  test('Series(sin x, x, 0, 3) with x = 1/2 (box route)', () => {
+    const result = subs(['Series', ['Sin', 'x'], 'x', 0, 3], {
+      x: ['Rational', 1, 2],
+    });
+    expect(result.operator).toBe('EvaluateAt');
+    // x - x³/6 at 1/2 is 23/48.
+    expect(result.evaluate().toString()).toBe('23/48 + BigO(1/32)');
+  });
+
+  test('Series(sin x, x, 0, 3) with x = 1/2 (parse route)', () => {
+    const result = parseRoute('\\operatorname{Series}(\\sin(x), x, 0, 3)', {
+      x: ['Rational', 1, 2],
+    });
+    expect(result.operator).toBe('EvaluateAt');
+    expect(result.evaluate().toString()).toBe('23/48 + BigO(1/32)');
+  });
+
+  test('a substitution of another name only is applied inside', () => {
+    const json: Json = ['D', ['Power', 'x', 2], 'x'];
+    expect(subs(json, { y: 3 }).json).toEqual(json);
+    const result = subs(['D', ['Multiply', ['Power', 'x', 2], 'y'], 'x'], {
+      y: 3,
+    });
+    expect(result.json).toEqual(['D', ['Multiply', 3, ['Power', 'x', 2]], 'x']);
+    expect(result.evaluate().toString()).toBe('6x');
+    const parsed = parseRoute('\\frac{d}{dx}(x^2y)', { y: 3 });
+    expect(parsed.operator).toBe('D');
+    expect(parsed.evaluate().toString()).toBe('6x');
+  });
+
+  test('a replacement by the same symbol changes nothing', () => {
+    const json: Json = ['D', ['Power', 'x', 2], 'x'];
+    expect(subs(json, { x: 'x' }).json).toEqual(json);
+  });
+
+  test('D(f(x), x) with x = g is the derivative at g', () => {
+    const result = subs(['D', ['f', 'x'], 'x'], { x: 'g' });
+    expect(result.operator).toBe('EvaluateAt');
+    expect(result.evaluate().toString()).toBe('Apply(Derivative(f, 1), g)');
+  });
+
+  test('a mixed partial derivative at a point', () => {
+    const json: Json = ['D', ['Multiply', ['Power', 'x', 2], 'y'], 'x', 'y'];
+    // ∂²(x²y)/∂x∂y = 2x, at x = 3.
+    expect(subs(json, { x: 3, y: 5 }).evaluate().json).toEqual(6);
+    // The points are applied at the same time: x = y and y = 5 is 2y, with
+    // the y of the enclosing scope.
+    const result = subs(json, { x: 'y', y: 5 });
+    expect(result.json).toEqual([
+      'EvaluateAt',
+      [
+        'Function',
+        ['Block', ['D', ['Multiply', 'y', ['Power', 'x', 2]], 'x', 'y']],
+        'x',
+        'y',
+      ],
+      ['Tuple', 'y', 5],
+    ]);
+    expect(result.latex).toBe(
+      '\\left.\\left(\\frac{\\partial^{2}(yx^2)}{\\partial x\\,\\partial y}\\right)\\right|_{x=y, y=5}'
+    );
+    expect(result.evaluate().toString()).toBe('2y');
+  });
+
+  test('a second derivative at a point', () => {
+    const result = subs(['D', ['Power', 'x', 3], 'x', 'x'], { x: 2 });
+    expect(result.evaluate().json).toEqual(12);
+  });
+
+  // The point can contain the variable: `D(x^2, x)` at `x + 1` is the
+  // derivative `2x` at `x + 1`, where the `x` of `x + 1` is the `x` of the
+  // enclosing scope. The `x` of `2x` was not replaced by the argument, and
+  // the value was `2x`.
+  test('a point that contains the variable (box route)', () => {
+    const result = subs(['D', ['Power', 'x', 2], 'x'], {
+      x: ['Add', 'x', 1],
+    });
+    expect(result.latex).toBe(
+      '\\left.\\left(\\frac{\\mathrm{d}x^2}{\\mathrm{d}x}\\right)\\right|_{x=x+1}'
+    );
+    expect(result.evaluate().toString()).toBe('2(x + 1)');
+    expect(
+      subs(['D', ['Power', 'x', 2], 'x'], { x: ['Multiply', 2, 'x'] })
+        .evaluate()
+        .toString()
+    ).toBe('4x');
+    expect(
+      subs(['Integrate', ['Multiply', 'a', 'x'], 'x'], { x: ['Add', 'x', 1] })
+        .evaluate()
+        .toString()
+    ).toBe('1/2 * a * (x + 1)^2');
+    expect(
+      subs(['Series', ['Sin', 'x'], 'x', 0, 3], { x: ['Add', 'x', 1] })
+        .evaluate()
+        .toString()
+    ).toBe('1 + x - 1/6 * (x + 1)^3 + BigO((x + 1)^5)');
+  });
+
+  // A replacement of another name is put in the node before the value is
+  // computed, also when it contains the variable: `D(x·y, x)` with `y`
+  // replaced by `x` is `D(x·x, x)`, whose value is `2x`. Only the variable
+  // itself is applied at a point.
+  test('a replacement of another name that contains the variable', () => {
+    const json: Json = ['D', ['Multiply', 'x', 'y'], 'x'];
+    const result = subs(json, { y: 'x' });
+    expect(result.json).toEqual(['D', ['Multiply', 'x', 'x'], 'x']);
+    expect(result.evaluate().toString()).toBe('2x');
+    const atPoint = subs(json, { x: 3, y: 'x' });
+    expect(atPoint.json).toEqual([
+      'EvaluateAt',
+      ['Function', ['Block', ['D', ['Multiply', 'x', 'x'], 'x']], 'x'],
+      3,
+    ]);
+    expect(atPoint.evaluate().toString()).toBe('6');
+    // ∂(x²·x)/∂x = 3x².
+    const value = subs(['D', ['Multiply', ['Power', 'x', 2], 'y'], 'x'], {
+      y: 'x',
+    }).evaluate();
+    for (const x of [0.5, 2, -3])
+      expect(value.subs({ x: ce.number(x) }).N().re).toBeCloseTo(3 * x * x, 9);
+  });
+
+  // A name with an assigned value is replaced in the node as any other name:
+  // with `y := 7`, `D(x·y, x)` with `y` replaced by `x` is `D(x·x, x)`.
+  test('a replacement of a name that has an assigned value', () => {
+    const engine = new ComputeEngine();
+    engine.assign('y', 7);
+    const result = engine
+      .box(['D', ['Multiply', 'x', 'y'], 'x'])
+      .subs({ y: engine.symbol('x') });
+    expect(result.operator).toBe('D');
+    expect(result.evaluate().toString()).toBe('2x');
+  });
+
+  // The replacements are simultaneous: `D(x·a·b, x)` with `a` replaced by
+  // `b` and `b` by `x` is `D(b·x·x, x)`, whose value is `2bx`.
+  test('simultaneous replacements of other names', () =>
+    expect(
+      subs(['D', ['Multiply', 'x', 'a', 'b'], 'x'], { a: 'b', b: 'x' })
+        .evaluate()
+        .toString()
+    ).toBe('2b * x'));
+
+  // Inside a scoped expression, the point is kept: the value of the
+  // derivative is computed in the body of the literal and the literal is
+  // built again with its parameters bound there.
+  test('a point inside a Sum or a Block (box route)', () => {
+    expect(
+      subs(['Sum', ['D', ['Power', 'x', 'k'], 'x'], ['Limits', 'k', 1, 3]], {
+        x: 2,
+      }).evaluate().json
+    ).toEqual(17);
+    expect(
+      subs(['Block', ['Add', 1, ['D', ['Power', 'x', 2], 'x']]], {
+        x: 2,
+      }).evaluate().json
+    ).toEqual(5);
+    expect(
+      subs(
+        [
+          'Sum',
+          ['D', ['Multiply', 'k', ['Power', 'x', 2]], 'x'],
+          ['Limits', 'k', 1, 3],
+        ],
+        { x: 2 }
+      ).evaluate().json
+    ).toEqual(24);
+    expect(
+      subs(
+        ['Sum', ['Integrate', ['Power', 'x', 'k'], 'x'], ['Limits', 'k', 1, 2]],
+        {
+          x: 2,
+        }
+      )
+        .evaluate()
+        .toString()
+    ).toBe('14/3');
+    // k·(x − x³/6) at 1/2 is 23k/48, and the sum for k = 1, 2 is 23/16.
+    expect(
+      subs(
+        [
+          'Sum',
+          ['Series', ['Multiply', 'k', ['Sin', 'x']], 'x', 0, 3],
+          ['Limits', 'k', 1, 2],
+        ],
+        { x: ['Rational', 1, 2] }
+      )
+        .evaluate()
+        .toString()
+    ).toBe('23/16 + 2BigO(1/32)');
+  });
+
+  test('a point inside a Sum (parse route)', () =>
+    expect(
+      parseRoute('\\sum_{k=1}^3 k\\frac{d}{dx} x^2', { x: 2 }).evaluate().json
+    ).toEqual(24));
+
+  // A wildcard is replaced inside the node: a rule instantiates `D(_f, x)`
+  // with `subs()`.
+  test('a wildcard is replaced inside the node', () => {
+    const result = ce
+      .box(['D', '_f', 'x'], { form: 'raw' })
+      .subs({ _f: ce.box(['Power', 'x', 2]) });
+    expect(result.json).toEqual(['D', ['Power', 'x', 2], 'x']);
+    expect(result.evaluate().toString()).toBe('2x');
+  });
+
+  test('the value at the point under N()', () => {
+    expect(subs(['D', ['Sin', 'x'], 'x'], { x: 1 }).N().re).toBeCloseTo(
+      Math.cos(1),
+      12
+    );
+    expect(subs(['Integrate', ['Sin', 'x'], 'x'], { x: 1 }).N().re).toBeCloseTo(
+      -Math.cos(1),
+      12
+    );
+  });
+
+  // An expansion or a derivative with no closed form keeps the point: the
+  // value is not the unevaluated `Series` in `x`.
+  test('a value with no closed form stays at the point', () => {
+    const series = subs(['Series', ['Exp', ['Divide', 1, 'x']], 'x', 0, 3], {
+      x: 3,
+    }).evaluate();
+    expect(series.operator).toBe('EvaluateAt');
+  });
+
+  test('a replacement by the same symbol, in any spelling', () => {
+    const engine = new ComputeEngine();
+    engine.assign('x', 5);
+    const json: Json = ['D', ['Power', 'x', 2], 'x'];
+    const expr = engine.box(json);
+    for (const same of ['x', { sym: 'x' }, engine.symbol('x')]) {
+      const result = expr.subs({ x: same } as Parameters<typeof expr.subs>[0]);
+      expect(result.json).toEqual(json);
+      expect(result.evaluate().toString()).toBe('2x');
+    }
+  });
+
+  test('a point that contains the variable (parse route)', () => {
+    const result = parseRoute('\\frac{d}{dx}x^2', { x: ['Add', 'x', 1] });
+    expect(result.evaluate().toString()).toBe('2(x + 1)');
+  });
+
+  test('a raw or structural receiver keeps its form', () => {
+    const json: Json = ['D', ['Power', 'x', 2], 'x'];
+    const raw = subs(json, { x: 3 }, 'raw');
+    expect(raw.operator).toBe('EvaluateAt');
+    expect(raw.isCanonical).toBe(false);
+    const structural = subs(json, { x: 3 }, 'structural');
+    expect(structural.operator).toBe('EvaluateAt');
+    expect(structural.isStructural).toBe(true);
+  });
+
+  test('a wildcard variable is replaced in the node', () => {
+    const result = ce
+      .box(['D', ['Power', '_x', 2], '_x'], { form: 'raw' })
+      .subs({ _x: ce.symbol('t') });
+    expect(result.json).toEqual(['D', ['Power', 't', 2], 't']);
   });
 });
 
@@ -411,6 +725,19 @@ describe('SUBS REPLACES EXACTLY THE NAMES THAT freeVariables REPORTS FREE', () =
     else if (Array.isArray(json)) for (const x of json) names(x, out);
     return out;
   };
+  // The variable of a `D` or a `Series`, or of an indefinite `Integrate`, in
+  // the cases below (each has one variable, its second operand).
+  const pointVariable = (json: Json): string | undefined => {
+    if (!Array.isArray(json)) return undefined;
+    const v = json[2];
+    if (json[0] === 'D' || json[0] === 'Series')
+      return typeof v === 'string' ? v : undefined;
+    if (json[0] !== 'Integrate') return undefined;
+    if (typeof v === 'string') return v;
+    if (Array.isArray(v) && v[0] === 'Limits' && v[2] === 'Nothing')
+      return v[1] as string;
+    return undefined;
+  };
   const cases: Json[] = [
     ['D', ['Power', 'x', 2], 'x'],
     ['D', ['Multiply', 'a', ['Power', 'x', 2]], 'x'],
@@ -450,10 +777,16 @@ describe('SUBS REPLACES EXACTLY THE NAMES THAT freeVariables REPORTS FREE', () =
       const free = new Set(expr.freeVariables);
       const fresh = ce.symbol('Fresh_Name');
       for (const n of names(json)) {
-        const replaced = JSON.stringify(
-          expr.subs({ [n]: fresh }).json
-        ).includes('Fresh_Name');
+        const result = expr.subs({ [n]: fresh });
+        const replaced = JSON.stringify(result.json).includes('Fresh_Name');
         expect([n, replaced]).toEqual([n, free.has(n)]);
+        // The variable of `D`, of `Series` and of an indefinite `Integrate`
+        // is free, and it is replaced at a point: the node keeps its
+        // variable, and the result is the value of the node at the point.
+        expect([n, result.operator === 'EvaluateAt']).toEqual([
+          n,
+          pointVariable(json) === n,
+        ]);
       }
     });
   }

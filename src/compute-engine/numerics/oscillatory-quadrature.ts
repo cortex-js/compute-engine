@@ -44,6 +44,9 @@ import { levinU, wynnEpsilon } from './endpoint-quadrature.js';
  * result is `{ estimate: NaN, error: NaN }`: the integral has a value that
  * this routine cannot find. A caller must not then sample the integrand
  * (Monte Carlo gave `0.072 ± 0.018` for `∫₀^∞ sin t·cos(√2·t)/t dt = 0`).
+ * When a lobe has a finite value but an error with no bound, and the
+ * adaptive quadrature over the whole interval does not converge, the result
+ * is the value of the lobes with an error of `+∞`, not `NaN`.
  */
 export function integrateSemiInfiniteOscillatory(
   f: (x: number) => number,
@@ -87,6 +90,14 @@ export function integrateSemiInfiniteOscillatory(
   // error plus this sum meets the tolerance, and this sum is added to the
   // reported error.
   let lobeError = 0;
+  // True after a lobe with a finite value and an error with no bound (a part
+  // of the lobe that `splitLobe` integrates reports an error of `+∞`). The
+  // lobes are integrated and accelerated as usual, without the error of that
+  // lobe in the tests of convergence, and the result has an error of `+∞`.
+  // The lobe made the result `NaN`: with poles at 4 and at the first and
+  // the fourth double above 4, `∫₀^∞ sin t·Σ|t − c|^(−1/2)/(1 + t) dt`
+  // gave `{ estimate: NaN, error: NaN }`.
+  let unbounded = false;
   // The lobes are integrated and summed in doubles: the error of the result
   // is at least `LOBE_ROUNDOFF_ULPS` units in the last place of `magnitude`,
   // the sum of the rounding scales of the lobes (`lobeRoundingScale`).
@@ -100,10 +111,23 @@ export function integrateSemiInfiniteOscillatory(
   const tolerance = (relative: number, estimate: number) =>
     relative * Math.max(Math.abs(estimate), largestLobe);
   const roundoff = () => LOBE_ROUNDOFF_ULPS * Number.EPSILON * magnitude;
-  const finish = (r: { estimate: number; error: number }) => ({
-    estimate: r.estimate,
-    error: Math.max(r.error + firstLobeError + lobeError, roundoff()),
-  });
+  const finish = (r: {
+    estimate: number;
+    error: number;
+  }): { estimate: number; error: number } => {
+    // A lobe with an error that has no bound: the adaptive quadrature over
+    // the whole interval can still give a bounded result. Otherwise the
+    // value of the lobes is returned with an error of `+∞`.
+    if (unbounded) {
+      const whole = wholeInterval();
+      if (Number.isFinite(whole.error)) return whole;
+      return { estimate: r.estimate, error: Number.POSITIVE_INFINITY };
+    }
+    return {
+      estimate: r.estimate,
+      error: Math.max(r.error + firstLobeError + lobeError, roundoff()),
+    };
+  };
   // The error of the values of the lobes: their rounding and the errors of
   // their quadratures. An accelerated value whose spread is not larger than
   // this cannot be made more accurate by more lobes.
@@ -209,11 +233,18 @@ export function integrateSemiInfiniteOscillatory(
       }
       lobe = r.value;
       thisLobeError = r.error;
-      lobeError += r.error;
       // A lobe whose value is not finite (a pole inside the lobe, as in
-      // `sin t/(t − 5)²`) has an infinite error: no sum of the lobes can be
+      // `sin t/(t − 5)²`) has no value: no sum of the lobes can be
       // accepted, and more lobes are not integrated.
-      if (!Number.isFinite(lobeError)) return wholeInterval();
+      if (!Number.isFinite(lobe)) return wholeInterval();
+      // A lobe with a finite value and an error with no bound: see
+      // `unbounded`. Its error is not in `lobeError` and `lobeErrors`, which
+      // the tests of convergence read.
+      if (Number.isFinite(r.error)) lobeError += r.error;
+      else {
+        unbounded = true;
+        thisLobeError = 0;
+      }
     }
     lobes.push(lobe);
     sums.push((sums.length > 0 ? sums[sums.length - 1] : 0) + lobe);
@@ -310,7 +341,9 @@ export function integrateSemiInfiniteOscillatory(
 
   // The lobes shrink, but neither the ε-algorithm nor the Levin u-transform
   // found the integral (`∫₀^∞ sin t·cos(√2·t)/t dt`, whose lobes have no
-  // period).
+  // period). After a lobe with an error that has no bound, the sum of the
+  // lobes is returned with an error of `+∞`, not `NaN`.
+  if (unbounded) return finish({ estimate: sums[sums.length - 1], error: 0 });
   return wholeInterval();
 }
 
@@ -535,9 +568,10 @@ function integrateLobe(
  * last place does not converge.
  *
  * The result is the sum of the values of the parts, with the sum of their
- * errors as its error. Returns `'diverges'` when a part diverges (the pole of
- * order 2 of `sin t/(t − 5)²`) or its value or error is not finite, and
- * `null` when a part does not converge or the sum of the errors is not
+ * errors as its error (`+∞` when the error of a part has no bound). Returns
+ * `'diverges'` when a part diverges (the pole of order 2 of
+ * `sin t/(t − 5)²`) or its value is not finite, and `null` when a part with
+ * a finite error does not converge or the sum of the finite errors is not
  * smaller than the error of `r`. In both cases the caller keeps `r`.
  * `budget` is the panel budget of the adaptive quadrature of each part.
  */
@@ -561,16 +595,21 @@ function splitLobe(
       deadline,
       ...budget,
     });
-    if (
-      q.divergent ||
-      !Number.isFinite(q.estimate) ||
-      !Number.isFinite(q.error)
-    )
-      return 'diverges';
-    if (!(q.converged || q.extrapolated === true)) return null;
+    if (q.divergent || !Number.isFinite(q.estimate)) return 'diverges';
+    // A part with a finite value and an error with no bound is not a
+    // divergence: with poles at 4 and at the first and the fourth double
+    // above 4, the part above 4 was `−1.279 ± ∞`, not divergent, and the
+    // integral of the lobes was `NaN`.
+    if (Number.isFinite(q.error) && !(q.converged || q.extrapolated === true))
+      return null;
     value += q.estimate;
     error += q.error;
   }
+  // A part whose error has no bound: the parts are used, with an error of
+  // `+∞`. The error of `r` is not a bound either: `r` did not meet its
+  // tolerance next to a singular point. With `r`, the witness above had an
+  // error larger than every tolerance at each of the 2000 lobes.
+  if (!Number.isFinite(error)) return { value, error };
   return error < r.error ? { value, error } : null;
 }
 

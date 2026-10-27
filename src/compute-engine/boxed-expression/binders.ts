@@ -664,6 +664,83 @@ export function parameterActivationValue(
 }
 
 /**
+ * The value a running function call gave to the parameter that the operator
+ * of the application `app` denotes (the `f` of `f(x)`, with `f` a parameter
+ * that holds a function), or `undefined` when the operator is not such a
+ * parameter. The binding is read as `parameterActivationValue` reads the
+ * binding of a symbol. An operator bound to an operator definition (a user
+ * function `w(x) := …`, a library function) is not a parameter.
+ */
+export function calledParameterValue(
+  ce: ComputeEngine,
+  app: Expression
+): Expression | undefined {
+  if (!isFunction(app)) return undefined;
+  const own = app.valueDefinition;
+  if (own === undefined && app.operatorDefinition !== undefined)
+    return undefined;
+  const def =
+    own === undefined
+      ? binderBindingOf(ce, app.operator)
+      : valueDefinitionInContext(ce, app.operator, own);
+  if (def === undefined || !isActivation(def)) return undefined;
+  return def.value;
+}
+
+/**
+ * Can `value`, the value of a parameter of a running function call, vary
+ * with the variable `name` of the binder that is being evaluated (the
+ * variable of a `D` or of an `Integrate`)?
+ *
+ * When the variable of the binder is a parameter of a running call too
+ * (`(x, y) ↦ D(x·y, x)`), the parameters are independent variables: the
+ * derivative is `y`, and the call then puts each argument in place of its
+ * parameter. The value of another parameter does not vary with that
+ * variable, even if it holds a symbol with the same name: in the
+ * application at `(3, x)`, the `x` that `y` receives is the `x` of the
+ * caller, not the parameter `x`. Put in place of `y` before the
+ * differentiation, it gave the derivative `x + 3`, which is neither
+ * reading; the value of the application is `x`. Only an occurrence bound to
+ * that same parameter, or one with no binding, varies with the variable.
+ *
+ * In other cases (`g(f) = D(f, x)` with `x` a global), the name decides:
+ * the value `x^2` of `f` in `g(x^2)` varies with `x`.
+ *
+ * Call this inside the evaluation of the binder: the binding of `name`
+ * outside the binder is the first binding on the scope chain that is not a
+ * shield and not the variable of a binder.
+ */
+export function parameterValueVariesWith(
+  ce: ComputeEngine,
+  value: Expression,
+  name: string
+): boolean {
+  if (!value.has(name)) return false;
+  let outer: BoxedValueDefinition | undefined;
+  for (
+    let scope: Scope | null = ce.context.lexicalScope;
+    scope;
+    scope = scope.parent
+  ) {
+    const found = scope.bindings.get(name);
+    if (found === undefined) continue;
+    if (!('value' in found)) break;
+    if (isShield(found.value) || isBinderVariable(found.value)) continue;
+    outer = found.value;
+    break;
+  }
+  if (outer === undefined || !isActivation(outer)) return true;
+  let varies = false;
+  rewriteWithBinders(value, (s, shadowed) => {
+    if (s.symbol !== name || shadowed?.has(name)) return s;
+    const def = s.valueDefinition;
+    if (def === undefined || sameBindingDef(def, outer)) varies = true;
+    return s;
+  });
+  return varies;
+}
+
+/**
  * The binding a BINDER holds for `name`, looked up from `scope` outward, or
  * `undefined` when the innermost binding of the name is not a binder's
  * variable.

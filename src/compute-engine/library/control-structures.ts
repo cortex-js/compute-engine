@@ -4714,8 +4714,18 @@ function containsAssignment(e: Expression): boolean {
  */
 function nestedAssignmentNames(ce: ComputeEngine, op: Expression): string[] {
   const result: string[] = [];
+  // A node that the walk reached already with the same set of bound names
+  // gives no new name: it is not walked again. A body built by sharing a
+  // node at each level (`Pair(t, t)`) has few distinct nodes but a number
+  // of paths exponential in its depth: a walk of each path took about 5
+  // seconds at depth 24.
+  const visited = new Map<Expression, Set<ReadonlySet<string>>>();
   const walk = (e: Expression, bound: ReadonlySet<string>): void => {
     if (!isFunction(e) || e.operator === 'Function') return;
+    let seen = visited.get(e);
+    if (seen === undefined) visited.set(e, (seen = new Set()));
+    if (seen.has(bound)) return;
+    seen.add(bound);
     // A part that is canonical already was canonicalized in its own scope,
     // which decided then which binding each of its assignments writes
     // (`lazyInexactElements()` in `library/core.ts` builds a function body

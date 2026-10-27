@@ -2224,41 +2224,137 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     closeTrigger: '|',
 
     kind: 'matchfix',
+    // The subscript and the superscript after the closing bar are the points,
+    // in the forms that `serialize` below writes:
+    // - `\left.\left(F\right)\right|_{x=3}` is `EvaluateAt(Function(F, x), 3)`;
+    // - `\left.\left(F\right)\right|_{x=1, y=2}` is
+    //   `EvaluateAt(Function(F, x, y), Tuple(1, 2))`, the value at one point;
+    // - `\left.\left(F\right)\right|_{x=a}^{b}` is
+    //   `EvaluateAt(Function(F, x), a, b)`, the difference `F(b) − F(a)`;
+    // - with no `name=`, `\left.F\right|_{a}^{b}` is `EvaluateAt(F, a, b)`,
+    //   and, with the function in parentheses as `serialize` writes it,
+    //   `\left.\left(f\right)\right|_{a}` is `EvaluateAt(f, a)` and
+    //   `\left.\left(f\right)\right|_{a, b}` is the difference
+    //   `EvaluateAt(f, a, b)` (a list of more points is kept as it is);
+    // - `\left.\left(F\right)\right|` with no subscript is `EvaluateAt(F)`.
+    // A tuple in parentheses, `_{(1, 2)}`, is one point.
+    // Any other subscript is not a point, and the form is `EvaluateAt(F)`
+    // followed by the subscript: `\left.f\right|_{A}` (the restriction of
+    // `f` to `A`) and a list that mixes `name=` points and other points
+    // (`\left.a\right|_{x=1, 2}`).
+    parse: (parser: Parser, body: MathJsonExpression): MathJsonExpression => {
+      const start = parser.index;
+      const notAPoint = (): MathJsonExpression => {
+        parser.index = start;
+        return ['EvaluateAt', body];
+      };
+      parser.skipSpace();
+      const sub = parser.match('_')
+        ? (parser.parseGroup() ?? parser.parseToken())
+        : null;
+      if (sub === null) return notAPoint();
+      const afterSub = parser.index;
+      parser.skipSpace();
+      const sup = parser.match('^')
+        ? (parser.parseGroup() ?? parser.parseToken())
+        : null;
+      if (sup === null) parser.index = afterSub;
+
+      // The function written in parentheses, as `serialize` writes it.
+      const parenthesized = operator(body) === 'Delimiter' && nops(body) === 1;
+      const fn = parenthesized ? operand(body, 1)! : body;
+      // The points: one expression, or a list separated by commas. A tuple
+      // in parentheses, `_{(1, 2)}`, is one point.
+      let points: MathJsonExpression[] = [sub];
+      if (
+        operator(sub) === 'Delimiter' &&
+        stringValue(operand(sub, 2)) === ',' &&
+        operator(operand(sub, 1)) === 'Sequence'
+      )
+        points = [...operands(operand(sub, 1))];
+
+      const isNamed = (p: MathJsonExpression): boolean =>
+        operator(p) === 'Equal' && symbol(operand(p, 1)) !== null;
+      const named = points.filter(isNamed).length;
+      if (named > 0 && named < points.length) return notAPoint();
+      // The two-point form `F |_a^b` has one lower point, and a bound is
+      // not a tuple: `\left.\left(F\right)\right|_{(1, 2)}^{3}` keeps the
+      // parse it had, a `Subscript` and a `Power`.
+      if (sup !== null && points.length !== 1) return notAPoint();
+      const bound = isNamed(points[0]) ? operand(points[0], 2) : points[0];
+      if (
+        sup !== null &&
+        operator(bound) === 'Delimiter' &&
+        operator(operand(bound, 1)) === 'Sequence'
+      )
+        return notAPoint();
+
+      if (named > 0) {
+        const literal: MathJsonExpression = [
+          'Function',
+          fn,
+          ...points.map((p) => operand(p, 1)!),
+        ];
+        const values = points.map((p) => operand(p, 2)!);
+        if (sup !== null) return ['EvaluateAt', literal, values[0], sup];
+        return [
+          'EvaluateAt',
+          literal,
+          values.length === 1 ? values[0] : ['Tuple', ...values],
+        ];
+      }
+      if (sup !== null) return ['EvaluateAt', fn, points[0], sup];
+      if (!parenthesized) return notAPoint();
+      return ['EvaluateAt', fn, ...points];
+    },
     serialize: (serializer: Serializer, expr: MathJsonExpression): string => {
       const fn = operand(expr, 1);
       if (!fn) return '';
       const args = operands(expr).slice(1);
+      const s = (x: MathJsonExpression | null) => serializer.serialize(x);
+      const enclosed = (x: MathJsonExpression | null) =>
+        `\\left.\\left(${s(x)}\\right)\\right|`;
 
       if (operator(fn) === 'Function') {
         const parameters = operands(fn).slice(1);
         let body = operand(fn, 1);
         if (operator(body) === 'Block' && nops(body) === 1)
           body = operand(body, 1);
-        // `EvaluateAt(Function(F, x), a, b)` — one parameter, two arguments —
-        // is the difference form F(b) − F(a) (produced by the `Integrate`
-        // evaluator applying the bounds): the textbook bracket F |_a^b.
-        if (parameters.length === 1 && args.length === 2) {
-          return `\\left.\\left(${serializer.serialize(
-            body
-          )}\\right)\\right|_{${serializer.serialize(
-            args[0]
-          )}}^{${serializer.serialize(args[1])}}`;
-        }
-        if (parameters.length > 0) {
-          return `\\left.\\left(${serializer.serialize(
-            body
-          )}\\right)\\right|_{${parameters
-            .map(
-              (x, i) =>
-                `${serializer.serialize(x)}=${serializer.serialize(args[i])}`
-            )
+        // Two points are the bounds of a difference, `F(b) − F(a)` (produced
+        // by the `Integrate` evaluator applying the bounds): the textbook
+        // bracket F |_{x=a}^b. The name of a single parameter is written, so
+        // that the form parses back to the same function.
+        // With several parameters, the literal itself is written, so that
+        // the parameters are kept.
+        if (args.length === 2)
+          return parameters.length === 1
+            ? `${enclosed(body)}_{${s(parameters[0])}=${s(args[0])}}^{${s(
+                args[1]
+              )}}`
+            : `${enclosed(fn)}_{${s(args[0])}}^{${s(args[1])}}`;
+        if (args.length === 1 && parameters.length === 1)
+          return `${enclosed(body)}_{${s(parameters[0])}=${s(args[0])}}`;
+        // One point of several coordinates, one per parameter. The
+        // serializer receives a `Tuple` of two or three elements as a
+        // `Pair` or a `Triple`.
+        const point = args[0];
+        if (
+          args.length === 1 &&
+          parameters.length > 1 &&
+          ['Tuple', 'Pair', 'Triple'].includes(operator(point)) &&
+          nops(point) === parameters.length
+        ) {
+          const values = operands(point);
+          return `${enclosed(body)}_{${parameters
+            .map((x, i) => `${s(x)}=${s(values[i])}`)
             .join(', ')}}`;
         }
       }
 
-      return `\\left.\\left(${serializer.serialize(fn)}\\right)\\right|_{${args
-        .map((x) => serializer.serialize(x))
-        .join(', ')}}`;
+      if (args.length === 0) return enclosed(fn);
+      if (args.length === 2)
+        return `${enclosed(fn)}_{${s(args[0])}}^{${s(args[1])}}`;
+      return `${enclosed(fn)}_{${args.map((x) => s(x)).join(', ')}}`;
     },
   },
 

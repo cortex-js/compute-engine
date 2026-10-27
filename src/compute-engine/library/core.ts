@@ -78,7 +78,11 @@ import {
   snapshotRunVariables,
 } from '../function-utils.js';
 import { scopeActivationTemplate } from '../boxed-expression/ambient-chain.js';
-import { freeAnonymousSlots } from '../boxed-expression/function-literal.js';
+import {
+  freeAnonymousSlots,
+  functionLiteralArity,
+  functionLiteralParameterNames,
+} from '../boxed-expression/function-literal.js';
 
 import { flatten, flattenSequence } from '../boxed-expression/flatten.js';
 import { listedBroadcastCells } from '../boxed-expression/listed-element.js';
@@ -200,6 +204,8 @@ import {
 } from '../../common/type/instantiate.js';
 import type { Rule } from '../types-evaluation.js';
 import { canonical } from '../boxed-expression/canonical-utils.js';
+import { evaluateInOwnBindings } from '../boxed-expression/binders.js';
+import { arityBounds } from '../boxed-expression/overload.js';
 import {
   admissionOf,
   concreteValueOf,
@@ -378,6 +384,209 @@ const ABSENCE_MARKERS: ReadonlySet<string> = new Set([
   'Missing',
   'Undefined',
 ]);
+
+/**
+ * The variables of `expr` when it is a `D`, a `Series` or an indefinite
+ * `Integrate`: a node whose value is a function of its variables. Empty for
+ * any other node.
+ */
+function pointVariablesOf(expr: Expression): string[] {
+  if (!isFunction(expr)) return [];
+  const variables =
+    expr.operator === 'D'
+      ? expr.ops.slice(1)
+      : expr.operator === 'Series'
+        ? expr.ops.slice(1, 2)
+        : expr.operator === 'Integrate'
+          ? expr.ops
+              .slice(1)
+              .map((op) =>
+                isFunction(op, 'Limits') &&
+                isSymbol(op.ops[1], 'Nothing') &&
+                isSymbol(op.ops[2], 'Nothing')
+                  ? op.op1
+                  : op
+              )
+          : [];
+  return variables.flatMap((v) => (isSymbol(v) ? [v.symbol] : []));
+}
+
+/**
+ * Whether `expr` contains a node of `pointVariablesOf()` on one of `names`.
+ * A function literal in `expr` is a value with its own parameters, and is
+ * not read: `x ↦ (x ↦ D(x^2, x))` at `3` is the inner literal.
+ *
+ * A node that is the same as one of `fromPoints` (and the nodes inside it)
+ * is not read: it is a `D`, a `Series` or an `Integrate` that the caller
+ * passed in a point, not a node of the body of the function.
+ */
+function hasPointNodeOf(
+  expr: Expression,
+  names: ReadonlySet<string>,
+  fromPoints: ReadonlyArray<Expression> = [],
+  visited: Set<Expression> = new Set()
+): boolean {
+  if (names.size === 0) return false;
+  if (!isFunction(expr) || expr.operator === 'Function') return false;
+  // A node shared by several parents (a value made by repeated
+  // substitution is a DAG) is read once, and written-out data (a list of
+  // numbers, a list stored as numbers) holds no `D`, `Series` or `Integrate`.
+  if (visited.has(expr) || expr._isLiteralData()) return false;
+  visited.add(expr);
+  if (fromPoints.some((x) => x.isSame(expr))) return false;
+  if (pointVariablesOf(expr).some((v) => names.has(v))) return true;
+  return expr.ops.some((op) => hasPointNodeOf(op, names, fromPoints, visited));
+}
+
+/**
+ * The `D`, `Series` and `Integrate` nodes of the points `points`. A value
+ * of a function at these points can contain them, and they do not come
+ * from the body of the function (see `hasPointNodeOf()`).
+ */
+function pointNodesOf(points: ReadonlyArray<Expression>): Expression[] {
+  return points.flatMap((p) =>
+    ['D', 'Series', 'Integrate'].flatMap((h) => [...p.getSubexpressions(h)])
+  );
+}
+
+/**
+ * Whether `expr` has an `Integrate` node that is not one of `fromPoints`
+ * and is not inside one of them.
+ */
+function hasIntegrateNotFrom(
+  expr: Expression,
+  fromPoints: ReadonlyArray<Expression>
+): boolean {
+  if (!expr.has('Integrate')) return false;
+  return expr
+    .getSubexpressions('Integrate')
+    .some((node) => !fromPoints.some((x) => x.isSame(node)));
+}
+
+/**
+ * The argument counts that the callee `f` of an `EvaluateAt` takes:
+ * `min` and `max` (`Infinity` with a rest parameter), and `slots`, the
+ * number of parameter positions (a rest parameter is one). A function
+ * literal gives its parameters (`functionLiteralArity()`). A named callee
+ * gives its declared signature (`arityBounds()`), read from its operator
+ * definition or from its type, so a user function and a symbol whose value
+ * is a function literal count their arguments as a call of the name does.
+ * `undefined` when the counts cannot be read (a signature with overloads, a
+ * callee that is not a function): the points are then passed as written, as
+ * `Apply` passes them.
+ */
+function calleeArity(
+  f: Expression
+): { min: number; max: number; slots: number } | undefined {
+  if (isFunction(f, 'Function')) {
+    const { fixed, variadic } = functionLiteralArity(f);
+    return {
+      min: fixed,
+      max: variadic ? Infinity : fixed,
+      slots: fixed + (variadic ? 1 : 0),
+    };
+  }
+  if (!isSymbol(f)) return undefined;
+  const def = f.operatorDefinition;
+  const type = def !== undefined ? def.signature.type : f.type.type;
+  if (typeof type !== 'object' || type.kind !== 'signature') return undefined;
+  const { min, max } = arityBounds(type);
+  const slots =
+    (type.args?.length ?? 0) +
+    (type.optArgs?.length ?? 0) +
+    (type.variadicArg ? 1 : 0);
+  return { min, max, slots };
+}
+
+/** Whether `arity` admits `count` arguments; true when it is not known. */
+function acceptsCount(
+  arity: { min: number; max: number } | undefined,
+  count: number
+): boolean {
+  return arity === undefined || (count >= arity.min && count <= arity.max);
+}
+
+/** Whether the function literal `f` takes no argument at all: a constant. */
+function isConstantLiteral(f: Expression): boolean {
+  const { fixed, variadic } = functionLiteralArity(f);
+  return fixed === 0 && !variadic;
+}
+
+/**
+ * The function that `EvaluateAt` applies when its first operand `expr` is
+ * written as an expression, not as a function literal, with `pointCount`
+ * operands after it (one point, or two bounds), and a point of
+ * `coordinates` coordinates (`1` for two bounds). `undefined` when `expr`
+ * is not a function.
+ *
+ * The literal made from an expression has all its free variables as
+ * parameters. When there are more of them than the coordinates of the
+ * point, and `x` is one of them, the point or the bounds are for `x`, the
+ * usual name of the variable of an antiderivative:
+ * `\left.kx\right|_{2}^{5}` is `5k − 2k = 3k`, and
+ * `\left.\left(kx\right)\right|_{2}` is `2k`. Otherwise the variable is not
+ * known, and the form stays unevaluated (`\left.ab\right|_{2}^{5}`). Write
+ * `\left.\left(F\right)\right|_{t=a}^{b}` to name the variable. A point that
+ * is a `Tuple` gives one coordinate per parameter: `(x·y)|_{(1, 2)}` is `2`.
+ *
+ * `fn` is the literal with all the free variables as parameters, when the
+ * caller has it already.
+ */
+function evaluateAtCallee(
+  ce: ComputeEngine,
+  expr: Expression,
+  pointCount: number,
+  coordinates: number,
+  fn: Expression | undefined = canonicalFunctionLiteral(expr)
+): Expression | undefined {
+  if (!fn) return undefined;
+  if (
+    (pointCount === 1 || pointCount === 2) &&
+    !isFunction(expr, 'Function') &&
+    isFunction(fn, 'Function') &&
+    takesXAmongSeveral(fn) &&
+    fn.nops - 1 > coordinates
+  )
+    return (
+      canonicalFunctionLiteral(expr, {
+        params: [ce.box('x', { form: 'raw' })],
+      }) ?? fn
+    );
+  return fn;
+}
+
+/** Whether `fn` is a function literal of two or more parameters, one of
+ * them `x`. */
+function takesXAmongSeveral(fn: Expression): boolean {
+  return (
+    isFunction(fn, 'Function') &&
+    fn.nops > 2 &&
+    fn.ops.slice(1).some((p) => isSymbol(p, 'x'))
+  );
+}
+
+/**
+ * Whether the canonical form of `EvaluateAt(expr, point)` waits for the
+ * value of `point` to choose the parameters of the function made from the
+ * expression `expr` (see `evaluateAtCallee()`). The number of coordinates
+ * of the point is known as written when the point is a `Tuple`, or when its
+ * type cannot be a tuple (a number: one coordinate). A symbol or another
+ * expression whose value can be a tuple has as many coordinates as its
+ * value: with `p := Tuple(2, 3)`, `(x·y)|_{p}` is `6`, as
+ * `(x·y)|_{(2, 3)}` is, and reading `p` as one coordinate applied the whole
+ * tuple to `x`. The value is not read here: a canonical form does not
+ * depend on the value of a symbol. Only an expression for which the choice
+ * depends on the number of coordinates waits: `fn`, the literal with all
+ * the free variables of `expr` as parameters, has several, one of them `x`.
+ */
+function evaluateAtWaitsForPoint(
+  expr: Expression,
+  fn: Expression,
+  point: Expression
+): boolean {
+  if (isFunction(expr, 'Function') || isFunction(point, 'Tuple')) return false;
+  return takesXAmongSeveral(fn) && point.type.couldMatch('tuple');
+}
 
 /** The simplification of the evaluated operand `x` of `Simplify`, under the
  * assumptions `assumptions` when given. */
@@ -7600,22 +7809,216 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         ),
       canonical: (ops, { engine: ce }) => {
         if (ops.length === 0) return null;
-        const fn = canonicalFunctionLiteral(ops[0]);
+        const all = canonicalFunctionLiteral(ops[0]);
+        if (!all) return null;
+        // The bracket `F |_a^b` or `F |_a` of an expression, not of a
+        // function literal, with several free variables
+        // (`\left.kx\right|_{2}^{5}`): the point or the bounds are for `x`
+        // when the point has fewer coordinates than the expression has free
+        // variables (`evaluateAtCallee()`).
+        const points = ops.slice(1).map((x) => x.canonical);
+        const point = points.length === 1 ? points[0] : undefined;
+        // A point whose number of coordinates is known only from its value
+        // (a symbol `p` with `p := Tuple(2, 3)`): the expression is kept,
+        // canonical, and the evaluation chooses the parameters once it has
+        // the value of the point (see `evaluate` below).
+        if (point !== undefined && evaluateAtWaitsForPoint(ops[0], all, point))
+          return ce._fn('EvaluateAt', [ops[0].canonical, point]);
+        const fn = evaluateAtCallee(
+          ce,
+          ops[0],
+          points.length,
+          isFunction(point, 'Tuple') ? point.nops : 1,
+          all
+        );
         if (!fn) return null;
-        return ce._fn('EvaluateAt', [
-          fn,
-          ...ops.slice(1).map((x) => x.canonical),
-        ]);
+        return ce._fn('EvaluateAt', [fn, ...points]);
       },
       // EvaluateAt(F, a, b) = F(b) - F(a); it is how a definite integral applies
       // its limits. See ../latex-syntax/dictionary/README.md (integral subsystem).
-      evaluate: ([f, lower, upper], options) => {
+      evaluate: (ops, options) => {
+        const [callee, lower, upper] = ops;
         const ce = options.engine;
         // The operator is `lazy`, so its arguments are not validated against
         // the signature: `EvaluateAt(f)` with no point arrives here, and
         // applying `f` to a missing argument threw a TypeError. It stays
         // unevaluated.
-        if (lower === undefined) return undefined;
+        if (callee === undefined || lower === undefined) return undefined;
+        // Three or more points (`\left.\left(f\right)\right|_{1, 2, 3}`) are
+        // neither a point nor two bounds: the form stays unevaluated, as the
+        // compiled form refuses it. Reading the first two as bounds dropped
+        // the third point.
+        if (ops.length > 3) return undefined;
+        // An expression whose parameters wait for the value of the point
+        // (`evaluateAtWaitsForPoint()`, see `canonical` above): the point is
+        // evaluated, and its number of coordinates chooses the parameters.
+        // With `p := Tuple(2, 3)`, `(x·y)|_{p}` is `6`.
+        let pointValue: Expression | undefined;
+        let fn = callee;
+        if (
+          upper === undefined &&
+          !isSymbol(callee) &&
+          !isFunction(callee, 'Function')
+        ) {
+          const all = canonicalFunctionLiteral(callee);
+          if (isFunction(all, 'Function')) {
+            pointValue = lower.evaluate();
+            fn =
+              evaluateAtCallee(
+                ce,
+                callee,
+                1,
+                isFunction(pointValue, 'Tuple') ? pointValue.nops : 1,
+                all
+              ) ?? all;
+          }
+        }
+        // The callee is applied as `Apply` applies it: a named callee (a user
+        // function, a symbol whose value is a function literal, a library
+        // operator) through the dispatch of its name, with the checks of its
+        // signature. The operand of the lazy `EvaluateAt` can be unbound: its
+        // canonical form gives the definitions.
+        const f = isSymbol(fn) ? fn.canonical : fn;
+        const arity = calleeArity(f);
+        // A lazy callee (`Hold`, a lazy operator) receives the points as
+        // written, as a direct call does. Any other callee receives their
+        // values, as the arguments of `Apply`, evaluated once, here, in the
+        // scope of the caller. They are evaluated exactly: a numeric request
+        // applies to the value at the point (`evaluateInOwnBindings()` with
+        // the options below), and a float point would round the work before
+        // it (`(x·y)|_{x=1/3, y=3}` is `1`, not `0.999…`).
+        const lazyCallee = isSymbol(f) && f.operatorDefinition?.lazy === true;
+        // Whether `f` is applied to `count` points: as many as its parameters
+        // (a literal) or as its declared signature takes (a named callee).
+        // The signature that a definition derives from an `evaluate` handler
+        // written `_ + 1` counts its anonymous parameter (`(unknown) ->
+        // unknown`), so the declared counts can be trusted.
+        const admitsPoints = (count: number): boolean =>
+          acceptsCount(arity, count);
+        // A callee that takes no argument is a constant: a literal with no
+        // parameter, or a named callee whose signature takes none (`g`
+        // declared `() -> integer`, a symbol whose value is `Function(42)`).
+        // Its value at any point is its value, and the difference between
+        // two bounds is the difference of two calls (`0` for a pure body).
+        const constantCallee = isFunction(f, 'Function')
+          ? isConstantLiteral(f)
+          : arity !== undefined && arity.max === 0;
+        const valueOf = (p: Expression): Expression =>
+          lazyCallee ? p : p.evaluate();
+        // The value of an application, as the request wants it. The
+        // application is exact, and its value is returned as it is, as
+        // `Apply` returns it: the application evaluated the value in the
+        // scope of the function, with the bindings it denotes. A second exact
+        // evaluation would also evaluate what a lazy operation of the body
+        // returned unevaluated: with a lazy `p` whose handler returns its
+        // operand, `x ↦ p(Random())` at `0` is `Random()`, and the draw is
+        // not made. Under `.N()` the value is approximated with the bindings
+        // it denotes, not by name in the scope of the caller (with
+        // `a := x + 1` and `f(t) := a`, `f` at `0` inside a block with a
+        // local `x := 10` is `x + 1`, not `11`). The application is not run
+        // with the numeric request: the body `Integrate(sin(x), x)` would
+        // then be approximated before the point is put in it, and
+        // `(∫sin(x) dx)|_1` would not be `−cos(1)`. A lazy callee returns
+        // the value of its application as it is, as a direct call does.
+        const requested = (value: Expression): Expression =>
+          lazyCallee || !options.numericApproximation
+            ? value
+            : evaluateInOwnBindings(ce, value, options);
+        // The names that the parameters of `f` bind, when `f` is a function
+        // literal or a user function defined by one: an annotated parameter
+        // (`x: number`) and the names of a destructuring one included. They
+        // are read only to keep the form when the value still has a `D`, a
+        // `Series` or an `Integrate` of a parameter (see `valueAtPoint`).
+        const literal = isFunction(f, 'Function')
+          ? f
+          : isSymbol(f)
+            ? (
+                f.operatorDefinition as
+                  { _lambdaLiteral?: Expression } | undefined
+              )?._lambdaLiteral
+            : undefined;
+        const params = new Set(
+          isFunction(literal, 'Function')
+            ? literal.ops
+                .slice(1)
+                .flatMap((p) => functionLiteralParameterNames(p))
+            : []
+        );
+        // The body of the literal, when it is known: only the body can hold
+        // a node that drops the point (see `valueAtPoint`).
+        const body = isFunction(literal, 'Function')
+          ? literal.ops[0]
+          : undefined;
+        // The value of `f` at `points` (already the values passed to the
+        // application), or `undefined` when the value has no closed form, or
+        // the points are not as many as the callee takes: the `EvaluateAt`
+        // form then stays symbolic (never a partial application). The value
+        // is evaluated with the options of the request: under `.N()` it is a
+        // float. A literal with no parameter is a constant: its value at any
+        // point is its value.
+        //
+        // The application is the one of `Apply`, with the same value: a
+        // point that contains the name of a parameter is not renamed.
+        //
+        // When the value still has a `D`, a `Series` or an `Integrate` of a
+        // parameter that comes from the body (no closed form:
+        // `Series(e^(1/x), x, 0, 3)`, or an antiderivative that stays an
+        // `Integrate`), the value would drop the point. Only the body can
+        // drop a point: a body with no such node of a parameter is not
+        // checked, and a node of the value that is a node of a point (and
+        // not of the body) is not a reason to keep the form. The identity
+        // `x ↦ x` at `Series(e^(1/x), x, 0, 3)` is that series, whatever the
+        // name of the parameter.
+        const valueAtPoint = (
+          points: ReadonlyArray<Expression>
+        ): Expression | undefined => {
+          if (constantCallee) return requested(apply(f, []));
+          // A callee that does not take as many arguments as there are
+          // points stays unevaluated. Fewer points than its required
+          // parameters would be a partial application (`u(x, y) := x + 10y`
+          // at `2` is `_ ↦ 10_ + 2`).
+          if (!admitsPoints(points.length)) return undefined;
+          const result = apply(f, points);
+          if (!result) return undefined;
+          // A lazy callee returns the value of its application as it is, as
+          // a direct call does: with a lazy `p` whose handler returns its
+          // operand, `p(Random())` is `Random()`, and the draw is not made.
+          if (lazyCallee) return result;
+          const bodyNodes = body !== undefined ? pointNodesOf([body]) : [];
+          const fromPoints = pointNodesOf(points).filter(
+            (x) => !bodyNodes.some((y) => y.isSame(x))
+          );
+          if (hasIntegrateNotFrom(result, fromPoints)) return undefined;
+          if (
+            body !== undefined &&
+            hasPointNodeOf(body, params) &&
+            hasPointNodeOf(result, params, fromPoints)
+          )
+            return undefined;
+          // See `requested` above.
+          return requested(result);
+        };
+        // A callee of two or more parameters at ONE point whose value is a
+        // `Tuple` with one element per parameter is applied to the elements:
+        // `EvaluateAt(Function(x·y, x, y), Tuple(1, 2))` is `2`, written
+        // `\left.\left(xy\right)\right|_{x=1, y=2}`, and with `p := (2, 3)`,
+        // the point `p` is `(2, 3)`. Two points are always the bounds of a
+        // difference: `\left.kx\right|_{2}^{5}` is
+        // `EvaluateAt(Function(k·x, x), 2, 5)` (see `canonical` above), and
+        // its value is `3k`. A named callee receives the elements only when
+        // a call with one argument is not valid (`arity.min > 1`): otherwise
+        // the tuple is one argument, as for `Apply` (a callee declared
+        // `(tuple<real, real>, real?) -> real` receives the point `(1, 2)`).
+        const point =
+          upper === undefined ? (pointValue ?? valueOf(lower)) : undefined;
+        if (
+          point !== undefined &&
+          arity !== undefined &&
+          (isFunction(f, 'Function') ? arity.slots > 1 : arity.min > 1) &&
+          isFunction(point, 'Tuple') &&
+          acceptsCount(arity, point.nops)
+        )
+          return valueAtPoint(point.ops) ?? ce._fn('EvaluateAt', [...ops]);
         // Defense in depth (see CORRECTNESS_FINDINGS P0-1): never beta-reduce
         // a function whose body still contains an inert `Integrate` (an
         // unresolved antiderivative). Substituting a bound for the parameter
@@ -7623,44 +8026,71 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // a wrong finite value. Keep the `EvaluateAt` form symbolic instead.
         // The definite-integral evaluator no longer produces such a form, but
         // any other caller is protected here too.
-        if (f.has('Integrate'))
-          return upper === undefined
-            ? ce._fn('EvaluateAt', [f, lower])
-            : ce._fn('EvaluateAt', [f, lower, upper]);
+        //
+        // The one-point form `f|_a` is applied even when the body contains
+        // an `Integrate`, and its result is kept only when it has no
+        // `Integrate` (see below). This form is the value of an indefinite
+        // integral at a point: `subs()` rewrites `Integrate(a·x, x)` with `x`
+        // replaced by `3` to `EvaluateAt(Function(Integrate(a·x, x), x), 3)`,
+        // whose value is `9a/2`. The application binds the parameter in a
+        // call frame, and the integral declares its own variable, so the
+        // integration variable is not captured. An integral with no closed
+        // form gives back an `Integrate`, and the form stays symbolic.
+        if (upper !== undefined && f.has('Integrate'))
+          return ce._fn('EvaluateAt', [...ops]);
+        // A callee that takes no argument is a constant: its difference is
+        // `0` (see `constantCallee`).
+        if (upper !== undefined && constantCallee) {
+          // Applied once per bound, the lower one first: a body with an
+          // effect (a counter, a random draw) runs two times.
+          const atLower = apply(f, []);
+          const atUpper = apply(f, []);
+          return ce.function('Subtract', [atUpper, atLower]).evaluate(options);
+        }
+        // The bounds of a difference are for a function of one variable: a
+        // literal that does not take one argument, or a named callee that
+        // requires more, stays unevaluated (its variable is not known). A rest parameter takes no argument or
+        // more: `(x, ...rest) ↦ …` takes one.
+        if (upper !== undefined && !admitsPoints(1))
+          return ce._fn('EvaluateAt', [...ops]);
 
         if (upper === undefined) {
           //
           // f|_a
           //
-          // Let's try to evaluate the function
-          const result = apply(f, [lower]);
-
-          // Return the reduced value, including symbolic results (e.g. with
-          // free variables). Only keep the symbolic `EvaluateAt` form when the
-          // application stalled on an unresolved antiderivative (its body still
-          // contains an inert `Integrate`).
-          if (result && !result.has('Integrate')) return result;
-
-          // Fallback: return unevaluated symbolic form
-          return ce._fn('EvaluateAt', [f, lower]);
+          return valueAtPoint([point!]) ?? ce._fn('EvaluateAt', [...ops]);
         }
 
         //
         // f|_a^b = f(b) - f(a)
         //
-        // Let's try to evaluate the function
-        const fLower = apply(f, [lower]);
-        const fUpper = apply(f, [upper]);
+        // Let's try to evaluate the function. The bounds are evaluated once,
+        // the lower one first, as the point of `f|_a` is (`valueOf`).
+        const lowerValue = valueOf(lower);
+        const fLower = apply(f, [lowerValue]);
+        const upperValue = valueOf(upper);
+        const fUpper = apply(f, [upperValue]);
         // Reduce to `f(b) - f(a)` whenever both applications succeed and
         // neither stalled on an unresolved antiderivative. The result may be
         // symbolic — e.g. `7/2·k` when integrating `k·x`, or the outer
         // variable of a nested integral (`∫∫ x·y dx dy`) — which is exactly
         // what definite integration of a parametric integrand should yield.
+        //
+        // Only an `Integrate` that comes from the function (an
+        // antiderivative with no closed form) is a reason to keep the form.
+        // An `Integrate` of a bound is a value like any other:
+        // `EvaluateAt(x ↦ x, 0, ∫sin(sin t) dt)` is that integral. The
+        // integral nodes of the body of the literal are not read as nodes
+        // of a bound, even when a bound holds the same integral.
+        const bodyNodes = body !== undefined ? pointNodesOf([body]) : [];
+        const boundNodes = pointNodesOf([lowerValue, upperValue]).filter(
+          (x) => !bodyNodes.some((y) => y.isSame(x))
+        );
         if (
           fLower &&
           fUpper &&
-          !fLower.has('Integrate') &&
-          !fUpper.has('Integrate')
+          !hasIntegrateNotFrom(fLower, boundNodes) &&
+          !hasIntegrateNotFrom(fUpper, boundNodes)
         ) {
           // Build the difference with `ce.function('Subtract', …)`, not the
           // `.sub()` method: `.sub()` folds two exact numbers into a machine
@@ -7674,7 +8104,103 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           return ce.function('Subtract', [fUpper, fLower]).evaluate(options);
         }
         // Fallback: return unevaluated symbolic form
-        return ce._fn('EvaluateAt', [f, lower, upper]);
+        return ce._fn('EvaluateAt', [...ops]);
+      },
+      // The compiled form is the application that the value denotes:
+      // `EvaluateAt(f, a)` is `Apply(f, a)`, and `EvaluateAt(f, a, b)` is
+      // `Apply(f, b) − Apply(f, a)`, with the points counted and spread as
+      // `evaluate` above counts and spreads them. `subs()` of the variable of
+      // a `D` gives such a form (`D(x^2, x)` with `x` replaced by `y + 1`),
+      // and the `Apply` of a literal whose body is a `D` compiles the closed
+      // form of the derivative. A form that `evaluate` keeps unevaluated (no
+      // point, points that are not as many as the parameters, two bounds of
+      // a function of several variables or of a body with an `Integrate`)
+      // has no compiled form, and the compilation fails with the reason.
+      compile: (args, compile) => {
+        const [callee, lower, upper] = args;
+        const refuse = (reason: string): never => {
+          throw new Error(`Could not compile \`EvaluateAt\`: ${reason}.`);
+        };
+        if (callee === undefined || lower === undefined)
+          return refuse('there is no point at which to evaluate the function');
+        if (args.length > 3)
+          return refuse('a list of more than two points is not a point');
+        const ce = callee.engine;
+        // An expression whose parameters wait for the value of the point
+        // (`evaluateAtWaitsForPoint()`): the compiled point has as many
+        // coordinates as its type gives (a tuple type), else one.
+        // A named callee can be unbound, as in `evaluate`: its canonical form
+        // gives the definition that the counts are read from.
+        let f = isSymbol(callee) ? callee.canonical : callee;
+        if (!isSymbol(callee) && !isFunction(callee, 'Function')) {
+          const all = canonicalFunctionLiteral(callee);
+          if (isFunction(all, 'Function')) {
+            const type = lower.type.type;
+            const coordinates =
+              upper === undefined &&
+              typeof type === 'object' &&
+              type.kind === 'tuple'
+                ? type.elements.length
+                : 1;
+            f =
+              evaluateAtCallee(
+                ce,
+                callee,
+                upper === undefined ? 1 : 2,
+                coordinates,
+                all
+              ) ?? all;
+          }
+        }
+        const call = (points: ReadonlyArray<Expression>): Expression =>
+          ce.function('Apply', [f, ...points]);
+        const arity = calleeArity(f);
+        // A callee that takes no argument is a constant (see
+        // `constantCallee` in `evaluate`).
+        if (
+          isFunction(f, 'Function')
+            ? isConstantLiteral(f)
+            : arity !== undefined && arity.max === 0
+        )
+          return compile(
+            upper === undefined
+              ? call([])
+              : ce.function('Subtract', [call([]), call([])])
+          );
+        if (upper !== undefined) {
+          if (!acceptsCount(arity, 1))
+            return refuse(
+              'the bounds of a difference are for a function of one variable'
+            );
+          if (f.has('Integrate'))
+            return refuse(
+              'the function holds an integral, and its value at the bounds is not known'
+            );
+          // `evaluate` applies the function at the lower bound first, then at
+          // the upper one. The canonical form of the difference can put the
+          // two applications in the other order, so a function with an
+          // effect (a counter, a random draw) would not give the same value
+          // when compiled. Only a pure application is compiled.
+          const atUpper = call([upper]);
+          const atLower = call([lower]);
+          if (!atUpper.isPure || !atLower.isPure)
+            return refuse(
+              'the function has an effect, and the order of its applications at the two bounds is not kept'
+            );
+          return compile(ce.function('Subtract', [atUpper, atLower]));
+        }
+        if (
+          arity !== undefined &&
+          (isFunction(f, 'Function') ? arity.slots > 1 : arity.min > 1) &&
+          isFunction(lower, 'Tuple') &&
+          acceptsCount(arity, lower.nops)
+        )
+          return compile(call(lower.ops));
+        if (!acceptsCount(arity, 1))
+          return refuse(
+            'the function takes another number of arguments than the point has coordinates'
+          );
+        return compile(call([lower]));
       },
     },
 

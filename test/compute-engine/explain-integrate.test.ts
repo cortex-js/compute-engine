@@ -189,7 +189,7 @@ describe('explain("Integrate") — definite integrals (FTC)', () => {
       [
         "integrate.antiderivative :: \\int\\!x^2\\, \\mathrm{d}x",
         "rubi:…#15 :: \\frac{x^3}{3}",
-        "integrate.fundamental-theorem :: \\left.\\left(\\frac{x^3}{3}\\right)\\right|_{0}^{1}",
+        "integrate.fundamental-theorem :: \\left.\\left(\\frac{x^3}{3}\\right)\\right|_{x=0}^{1}",
         "integrate.evaluate-bounds :: \\frac{1^3}{3}-\\frac{0^3}{3}",
         "integrate.simplify :: \\frac{1}{3}",
       ]

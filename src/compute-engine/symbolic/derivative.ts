@@ -1508,6 +1508,11 @@ function differentiateApplied(
   const terms: Expression[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    // An argument that does not depend on `v` adds no term, as in the trace
+    // above. Its derivative is not always the number 0: the derivative of
+    // the list `[x ↦ x]` is a list, and the term it gave made
+    // `D(Length([x ↦ x]), x)` a list, not 0.
+    if (!dependsOnVariable(arg, v)) continue;
     const argPrime =
       differentiate(arg, v, depth + 1, trace) ??
       ce._fn('D', [arg, ce.symbol(v)]);
@@ -2582,6 +2587,22 @@ function differentiateNode(
     return differentiate(simplified, v, depth + 1, trace);
   }
 
+  // EvaluateAt - the value of a function at a point: evaluate it first, then
+  // differentiate the value. `subs()` of the variable of a `D`, a `Series` or
+  // an indefinite `Integrate` gives such a form (`D(x^3, x)` with `x`
+  // replaced by `y` is `EvaluateAt(Function(D(x^3, x), x), y)`, whose value
+  // is `3y^2`), so without this rule the derivative of a substituted
+  // expression stayed unevaluated. A value that is still an `EvaluateAt`
+  // has no closed form, and the derivative stays unevaluated too.
+  if (expr.operator === 'EvaluateAt') {
+    const evaluated = expr.evaluate();
+    if (evaluated.operator === 'EvaluateAt') return undefined;
+    recordD(trace, expr, v, 'derivative.rewrite', () =>
+      dPlaceholder(evaluated, v)
+    );
+    return differentiate(evaluated, v, depth + 1, trace);
+  }
+
   // Differentiate an already-symbolic partial derivative, applying the chain
   // rule and bumping the multi-index:
   //
@@ -3002,10 +3023,14 @@ function differentiateNode(
     return simplifyDerivative(add(...terms));
   }
 
-  // Discrete functions: GCD, LCM
-  // These are step functions with derivative 0 almost everywhere
-  // (undefined at discontinuities, but we return 0 as a useful approximation)
-  if (['GCD', 'LCM'].includes(expr.operator)) {
+  // Discrete functions: GCD, LCM, and the integer-valued counts `Length`
+  // and `Count`. These are step functions with derivative 0 almost
+  // everywhere (undefined at discontinuities, but we return 0 as a useful
+  // approximation). The length of a list literal does not change with the
+  // values of its elements at all: `D(Length([x]), x)` is 0; it was the
+  // list `[Apply(Derivative("Length", 1), [x])]` from the generic chain
+  // rule, which broadcast over the list operand.
+  if (['GCD', 'LCM', 'Length', 'Count'].includes(expr.operator)) {
     recordD(trace, expr, v, 'derivative.zero', () => ce.Zero);
     return ce.Zero;
   }
@@ -3542,6 +3567,14 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
       // A store-backed list has only number operands, which never depend on
       // `v`, so it is not walked (and its elements are not boxed).
       if (e._numericStore !== undefined) continue;
+      // A function literal with a parameter named `v` (`x ↦ x` in
+      // `Length([x ↦ x])`) binds each `v` that it holds: the literal is a
+      // function, the same function for every value of `v`.
+      if (
+        e.operator === 'Function' &&
+        e.ops.slice(1).some((p) => functionLiteralParameterName(p) === v)
+      )
+        continue;
       for (const op of e.ops) pending.push(op);
     }
     return calls.some(({ name, nargs, fn }) => follow(name, nargs, fn));
