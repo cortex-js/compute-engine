@@ -103,19 +103,19 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
       'mix(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 5.0, 6.0), vec3f(7.0, 8.0, 9.0))'
     );
     expect(g(['Smoothstep', V3, W3, U3])).toBe(
-      'smoothstep(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
+      '_gpu_smoothstep3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
     );
     expect(g(['Clamp', V3, W3, U3])).toBe(
-      'clamp(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
+      '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
     );
     expect(g(['Step', V3, W3])).toBe(
       'step(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['Mod', V3, W3])).toBe(
-      'mod(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
+      '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['ElementMax', V3, W3])).toBe(
-      'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
+      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
   });
 
@@ -137,61 +137,51 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
   });
   afterAll(() => warn.mockRestore());
 
-  it('a misplaced scalar in a NESTED fold call declines (bare identifiers)', () => {
-    // `max(max(2.0, v), w)` — the inner call puts the scalar first, where
-    // GLSL's `max(genType, float)` has no overload. Neither `v` nor `w` has a
-    // `vecN` constructor in its source, so only the CE operand shapes can
-    // decide: the fold carries them in.
-    expect(() => g(['ElementMax', 2, 'v', 'w'], cev)).toThrow(
-      /^Could not compile `ElementMax`: the shader builtin `max` takes a scalar only in argument 2, but the emitted call `max\(2\.0, v\)` has a scalar in argument 1.*$/s
+  // `ElementMax`/`ElementMin` call the vector helpers `_gpu_max3`/`_gpu_min3`
+  // (CE-519), which take two vectors of one width, so a scalar operand is
+  // broadcast with `vec3(…)` wherever it stands. The shapes come from the CE
+  // operands: neither `v` nor `w` has a `vecN` constructor in its source.
+  it('a scalar in a NESTED fold call is broadcast (bare identifiers)', () => {
+    expect(g(['ElementMax', 2, 'v', 'w'], cev)).toBe(
+      '_gpu_max3(_gpu_max3(vec3(2.0), v), w)'
     );
-    expect(() => g(['ElementMin', 2, 'v', 'w'], cev)).toThrow(
-      /the emitted call `min\(2\.0, v\)` has a scalar in argument 1/
-    );
-  });
-
-  it('a scalar accumulator reaching a later vector operand declines', () => {
-    // `max(max(2.0, 3.0), v)`: the accumulator is still a scalar when `v`
-    // arrives, so the OUTER call is `max(float, vec3)`.
-    expect(() => g(['ElementMax', 2, 3, 'v'], cev)).toThrow(
-      /has a scalar in argument 1/
+    expect(g(['ElementMin', 2, 'v', 'w'], cev)).toBe(
+      '_gpu_min3(_gpu_min3(vec3(2.0), v), w)'
     );
   });
 
-  it('the same fold with the scalar LAST still compiles', () => {
-    // GLSL's `max(genType, float)` admits it there, and the accumulator is a
-    // vector by then.
-    expect(g(['ElementMax', 'v', 'w', 2], cev)).toBe('max(max(v, w), 2.0)');
+  it('a scalar accumulator reaching a later vector operand is broadcast', () => {
+    expect(g(['ElementMax', 2, 3, 'v'], cev)).toBe(
+      '_gpu_max3(_gpu_max3(vec3(2.0), vec3(3.0)), v)'
+    );
+  });
+
+  it('the same fold with the scalar LAST compiles', () => {
+    expect(g(['ElementMax', 'v', 'w', 2], cev)).toBe(
+      '_gpu_max3(_gpu_max3(v, w), vec3(2.0))'
+    );
     expect(g(['ElementMax', V3, W3, 2])).toBe(
-      'max(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), 2.0)'
+      '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
     );
-    expect(g(['ElementMax', 'v', 'w'], cev)).toBe('max(v, w)');
+    expect(g(['ElementMax', 'v', 'w'], cev)).toBe('_gpu_max3(v, w)');
     expect(g(['ElementMax', V3, W3, U3])).toBe(
-      'max(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(7.0, 8.0, 9.0))'
+      '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(7.0, 8.0, 9.0))'
     );
   });
 
-  it('an all-scalar fold is untouched', () => {
+  it('an all-scalar fold calls the scalar helper', () => {
     expect(g(['ElementMax', 1, 2, 3, 4])).toBe(
-      'max(max(max(1.0, 2.0), 3.0), 4.0)'
+      '_gpu_max(_gpu_max(_gpu_max(1.0, 2.0), 3.0), 4.0)'
     );
   });
 
-  it('WGSL keeps its own (stricter) verdict — it has no scalar/vector `max`', () => {
-    expect(() => w(['ElementMax', 2, 'v', 'w'], cev)).toThrow(
-      /requires MATCHING genType arguments/
+  it('WGSL broadcasts the scalar the same way', () => {
+    expect(w(['ElementMax', 2, 'v', 'w'], cev)).toBe(
+      '_gpu_max3(_gpu_max3(vec3f(2.0), v), w)'
     );
-    expect(() => w(['ElementMax', 'v', 'w', 2], cev)).toThrow(
-      /requires MATCHING genType arguments/
+    expect(w(['ElementMax', 'v', 'w', 2], cev)).toBe(
+      '_gpu_max3(_gpu_max3(v, w), vec3f(2.0))'
     );
-  });
-
-  it('reports `success: false` (no source) through the fallback route', () => {
-    const r = glsl.compile(cev.box(['ElementMax', 2, 'v', 'w'] as any), {
-      fallback: true,
-    });
-    expect(r.success).toBe(false);
-    expect(r.code ?? '').toBe('');
   });
 });
 
@@ -233,11 +223,11 @@ describe('GPU SHAPE GATE — ordinary compound lowerings (finding 3)', () => {
     // WGSL §8.7 defines the mixed scalar/vector arithmetic operators, so this
     // is valid source and must not be "fixed".
     expect(w(['Mod', 1, V3])).toBe(
-      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) - (vec3f(1.0, 2.0, 3.0)) * (((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))) - abs((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))))) * 0.5)) % (vec3f(1.0, 2.0, 3.0)))'
+      '_gpu_fmod3(vec3f(1.0), vec3f(1.0, 2.0, 3.0))'
     );
     // A divisor of 2: a divisor of 1 is the `fract` peephole (CE-254).
     expect(w(['Mod', V3, 2])).toBe(
-      '((((vec3f(1.0, 2.0, 3.0)) % (2.0)) - (2.0) * (((sign((vec3f(1.0, 2.0, 3.0)) % (2.0)) * sign((2.0))) - abs((sign((vec3f(1.0, 2.0, 3.0)) % (2.0)) * sign((2.0))))) * 0.5)) % (2.0))'
+      '_gpu_fmod3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
     );
   });
 
@@ -287,8 +277,8 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
   // keep compiling AND keep reducing to the interpreter's value.
   const runShader = (code: string): number => {
     const js = code
-      .replace(/\bmax\s*\(/g, 'Math.max(')
-      .replace(/\bmin\s*\(/g, 'Math.min(');
+      .replace(/\b(?:_gpu_)?max\s*\(/g, 'Math.max(')
+      .replace(/\b(?:_gpu_)?min\s*\(/g, 'Math.min(');
     // eslint-disable-next-line no-new-func
     return new Function(`return (${js});`)();
   };
@@ -315,14 +305,16 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
   });
 
   it('the canonical emissions are unchanged', () => {
-    expect(g(['Max', V3])).toBe('(max(max(1.0, 2.0), 3.0))');
+    expect(g(['Max', V3])).toBe('(_gpu_max(_gpu_max(1.0, 2.0), 3.0))');
     expect(g(['Min', ['Range', 1, 5]])).toBe(
-      '(min(min(min(min(1.0, 2.0), 3.0), 4.0), 5.0))'
+      '(_gpu_min(_gpu_min(_gpu_min(_gpu_min(1.0, 2.0), 3.0), 4.0), 5.0))'
     );
     // WGSL's `max` has no scalar/vector overload, so a `vec3f` mixed with a
     // scalar would fail the generic gate — the declared capability is what
     // keeps this reduction compiling there.
-    expect(w(['Max', V3, 5])).toBe('(max(max(max(1.0, 2.0), 3.0), 5.0))');
+    expect(w(['Max', V3, 5])).toBe(
+      '(_gpu_max(_gpu_max(_gpu_max(1.0, 2.0), 3.0), 5.0))'
+    );
     // An empty collection contributes nothing; the WGSL NaN is a CALL, which
     // the gate would otherwise judge against the `array` shape of `[]`.
     expect(g(['Max', ['List'], 5])).toBe('(5.0)');
@@ -345,16 +337,20 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
       'vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)'
     );
     expect(g(['Multiply', V3, 2])).toBe('2.0 * vec3(1.0, 2.0, 3.0)');
-    expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Sin', V4])).toBe('_gpu_sin4(vec4(1.0, 2.0, 3.0, 4.0))');
     expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
     expect(g(['Mix', V3, W3, 0.5])).toBe(
       'mix(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), 0.5)'
     );
-    expect(g(['Clamp', V3, 0, 1])).toBe('clamp(vec3(1.0, 2.0, 3.0), 0.0, 1.0)');
-    expect(g(['Smoothstep', 0, 1, V3])).toBe(
-      'smoothstep(0.0, 1.0, vec3(1.0, 2.0, 3.0))'
+    expect(g(['Clamp', V3, 0, 1])).toBe(
+      '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(0.0), vec3(1.0))'
     );
-    expect(g(['Mod', V3, 2])).toBe('mod(vec3(1.0, 2.0, 3.0), 2.0)');
+    expect(g(['Smoothstep', 0, 1, V3])).toBe(
+      '_gpu_smoothstep3(vec3(0.0), vec3(1.0), vec3(1.0, 2.0, 3.0))'
+    );
+    expect(g(['Mod', V3, 2])).toBe(
+      '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+    );
     expect(g(['Step', 1, V3])).toBe('step(1.0, vec3(1.0, 2.0, 3.0))');
   });
 
@@ -385,9 +381,13 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     );
   });
 
-  it('the per-language divergence holds: `max(vec3, 2.0)` is GLSL-only', () => {
-    expect(g(['ElementMax', V3, 2])).toBe('max(vec3(1.0, 2.0, 3.0), 2.0)');
-    expect(() => w(['ElementMax', V3, 2])).toThrow(/MATCHING genType/);
+  it('a vector and a scalar ElementMax compiles on both targets', () => {
+    expect(g(['ElementMax', V3, 2])).toBe(
+      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+    );
+    expect(w(['ElementMax', V3, 2])).toBe(
+      '_gpu_max3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
+    );
   });
 });
 
@@ -439,16 +439,16 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
   it('a static component count of 2–4 still compiles to the `vecN` call', () => {
     for (const type of ['vector<real^3>', 'list<real^3>']) {
       const e = withL(type);
-      expect(g(['Sin', 'L'], e)).toBe('sin(L)');
-      expect(w(['Sin', 'L'], e)).toBe('sin(L)');
+      expect(g(['Sin', 'L'], e)).toBe('_gpu_sin3(L)');
+      expect(w(['Sin', 'L'], e)).toBe('_gpu_sin3(L)');
     }
-    expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('sin(L)');
+    expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('_gpu_sin2(L)');
   });
 
   it('an `unknown`-typed symbol stays a scalar — the free-variable admission is untouched', () => {
     const e = withL('unknown');
-    expect(g(['Sin', 'L'], e)).toBe('sin(L)');
-    expect(w(['Sin', 'L'], e)).toBe('sin(L)');
+    expect(g(['Sin', 'L'], e)).toBe('_gpu_sin(L)');
+    expect(w(['Sin', 'L'], e)).toBe('_gpu_sin(L)');
   });
 
   it('a STRING operand keeps its own diagnostic rather than being reported as an array', () => {

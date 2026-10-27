@@ -3437,6 +3437,19 @@ function valueSignatureOf(
   const def = ce.lookupDefinition(name);
   if (def === undefined) return 'undeclared';
   if (!('value' in def)) return undefined;
+  // The arrow of an INFERRED binding type that came from the `Function`
+  // literal the binding holds (`let g = (x) => speak(x)`) states no
+  // contract: its effects are what a walk of the literal gave when the type
+  // was read. Answer `undefined`, so that the caller walks the stored
+  // literal (`storedFunctionLiteral`). That walk also records when the
+  // literal reaches a set derived from the conformance registry
+  // (`consultsRegistry`), so a caller re-derives its effects when a later
+  // conformance adds one. Without this, a caller of `g` whose literal
+  // already had an effect (`random`) read the effects of the arrow as a
+  // contract and did not see a `scope` effect that a later conformance of
+  // `speak` gave to `g`.
+  if (def.value.inferredType && storedFunctionLiteral(ce, name) !== undefined)
+    return undefined;
   const t = def.value.type?.type;
   return signatureEffects(t as Type | undefined);
 }

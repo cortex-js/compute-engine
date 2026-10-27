@@ -45,14 +45,7 @@ import type { SmallInteger } from '../numerics/types.js';
 
 import { toAsciiMath } from './ascii-math.js';
 // Dynamic import for serializeJson to avoid circular dependency
-import {
-  cmp,
-  eq,
-  eqIdentical,
-  quantityComparableValue,
-  quantityOrder,
-  same,
-} from './compare.js';
+import { cmp, eq, eqIdentical, same } from './compare.js';
 import { CancellationError } from '../../common/interruptible.js';
 import {
   isSymbol,
@@ -79,6 +72,7 @@ import { isFiniteCount } from './collection-count.js';
 import { recordObjectRead } from './object-deps.js';
 import { containsObject } from './object-walk.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
+import { isComparableKindValue, kindEqual, kindIs } from './kind-compare.js';
 
 // Lazy reference to break circular dependency:
 // serialize → numerics → utils → abstract-boxed-expression
@@ -972,6 +966,14 @@ export abstract class _BoxedExpression implements Expression {
     // Fast path: exact structural/value check
     if (this.isSame(other)) return true;
 
+    // A value of a value kind: `Equal` decides when the kind type declares
+    // `compare`, `isSame` otherwise (`kindIs()`). The `compare` hook gets the
+    // tolerance (`ArithmeticContext.tolerance`): the `tolerance` argument,
+    // else `engine.tolerance`, since `.is()` compares within a tolerance.
+    const kindTolerance = tolerance ?? this.engine.tolerance;
+    const kindAnswer = kindIs(this, other, kindTolerance);
+    if (kindAnswer !== undefined) return kindAnswer;
+
     // Try expansion — catches equivalences like (x+1)^2 vs x^2+2x+1
     // even when the expression has free variables (where the numeric
     // fallback below would bail out).
@@ -1000,38 +1002,22 @@ export abstract class _BoxedExpression implements Expression {
         return this.is(otherVal, tolerance);
     }
 
-    // Two quantities with units of the same dimension compare by their
-    // physical value within the tolerance: `1000 m` is `1 km`. Their unit
-    // symbols are free variables, so the check below would answer `false`.
-    // A quantity whose unit is dimensionless compares with a number in the
-    // same way: `6 percent` is `0.06`, also when `0.06` is a JavaScript
-    // number.
-    const otherQuantityOperand =
-      other instanceof _BoxedExpression
-        ? other
-        : this.operator === 'Quantity' &&
-            (typeof other === 'number' || typeof other === 'bigint')
-          ? this.engine.number(other)
-          : undefined;
-    if (otherQuantityOperand !== undefined) {
-      // When one side only is a quantity, the other side can have a number
-      // value that is not a number literal as written (`0.05 + 0.01`, a
-      // symbol whose value is `0.06`): its value is compared, exact when it
-      // has an exact value, as `isEqual()` does
-      // (`quantityComparableValue()`). So `6 percent` is `0.05 + 0.01`, in
-      // both directions.
-      const oneQuantity =
-        (this.operator === 'Quantity') !==
-        (otherQuantityOperand.operator === 'Quantity');
-      const order = quantityOrder(
-        oneQuantity ? quantityComparableValue(this) : this,
-        oneQuantity
-          ? quantityComparableValue(otherQuantityOperand)
-          : otherQuantityOperand,
-        tolerance ?? this.engine.tolerance,
-        false
-      );
-      if (order !== undefined) return order === 0;
+    // A value of a kind whose kind type declares `compare` (a quantity),
+    // compared with an expression that is not a value as written (`π`,
+    // `0.05 + 0.01`, a symbol whose value is `0.06`): the expression is
+    // evaluated, and the pair is compared by the kinds as `isEqual()`
+    // compares it (`kindIs()`). The unit symbols of a quantity are free
+    // variables, so the numeric check below would answer `false`: `180 deg`
+    // is `π`, and `6 percent` is `0.05 + 0.01`, in both directions. The
+    // tolerance applies, as for `kindIs()` above.
+    if (
+      other instanceof _BoxedExpression &&
+      (isComparableKindValue(this) || isComparableKindValue(other))
+    ) {
+      const kindAnswer = kindEqual(this.evaluate(), other.evaluate(), {
+        tolerance: kindTolerance,
+      });
+      if (kindAnswer === true || kindAnswer === false) return kindAnswer;
     }
 
     // Numeric fallback only when there are no free variables
@@ -1059,14 +1045,11 @@ export abstract class _BoxedExpression implements Expression {
       if (other.freeVariables.length > 0) return false;
       const nThis = this.N();
       const nOther = other.N();
-      // A value that is not a number (a residue class) has no tolerance:
-      // the two values are the same or they are not.
-      // `ResidueClass(1, 5) + 1` is `ResidueClass(2, 5)`.
-      if (
-        nThis.operator === 'ResidueClass' &&
-        nOther.operator === 'ResidueClass'
-      )
-        return nThis.isSame(nOther);
+      // A kind value that only the evaluation made: `ResidueClass(1, 5) + 1`
+      // is `ResidueClass(2, 5)`, `GF8(1) + GF8(2)` is `GF8(3)`. The
+      // tolerance applies, as for `kindIs()` above.
+      const evaluatedKindAnswer = kindIs(nThis, nOther, kindTolerance);
+      if (evaluatedKindAnswer !== undefined) return evaluatedKindAnswer;
       if (!isNumber(nThis) || !isNumber(nOther)) return false;
       const tol = tolerance ?? this.engine.tolerance;
       return (

@@ -4,7 +4,11 @@ import type { Expression, IComputeEngine, Scope } from '../global-types.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
-import { functionResult, returnTypeText } from '../../common/type/utils.js';
+import {
+  functionResult,
+  openDepthScalarArms,
+  returnTypeText,
+} from '../../common/type/utils.js';
 import { isFunction, isSymbol } from './type-guards.js';
 import {
   functionLiteralParameterNames,
@@ -313,6 +317,12 @@ function listHypothesisOf(t: Type): Type | undefined {
   if (t.kind === 'collection') return { kind: 'list', elements: t.elements };
   if (t.kind === 'broadcastable' && isSubtype(t.elements, 'number'))
     return t.elements;
+  // The open form `T | list<T | list<any>> | tuple` of a number type `T`
+  // (`openTriggerBroadcastType`, `broadcast-lift-type.ts`) is replaced by
+  // `T` for the same reason: it is the type of `n·fact(n − 1)` when the
+  // recursive call reads as `unknown`.
+  const open = openDepthScalarArms(t);
+  if (open !== undefined && isSubtype(open, 'number')) return open;
   if (t.kind === 'union') {
     let changed = false;
     const types = t.types.map((arm) => {
@@ -638,9 +648,43 @@ export function verifiedListHypothesis(
         ? { result: r.result, homes: r.homes }
         : undefined;
     };
+    // A call of another function of the cycle whose stored result is
+    // `unknown` gives elements of type `any` to `Join` (`G` assigned before
+    // `F`, with `F := (n, K) ↦ Which(…, join([n], G(n + 1, K)))` and
+    // `G := (n, K) ↦ F(n, K)`). So the hypothesis is `list<any>`, which the
+    // pass verifies at once, and the result is less precise than the
+    // `list<number>` that the other orders of assignment give. So, for a
+    // type `t` with elements `any`, a pass first runs with the result read
+    // as the same collection with elements `never` (`list<never>`, the type
+    // of an empty list), and the other functions of the cycle read their
+    // results under that seed too. That pass gives the elements that the
+    // bodies add (`list<number>`): one step of an iteration that starts
+    // below the result. The seed is not `never` itself, which an operand
+    // reads as an absent value, and not `list<unknown>`: the element join of
+    // `Join` keeps an `unknown` arm, so that pass gave `list<unknown>`
+    // again. The result of the pass is only a proposal, since the seed does
+    // not hold the values of a call. It is accepted only when the bodies
+    // verify it as a hypothesis, as any other candidate (`tryHypothesis`),
+    // so a result that does not hold every value is never stored. A
+    // proposal that names `unknown` is not tried: every type is a subtype
+    // of `unknown`, so the check would accept it with no evidence. The
+    // result is `undefined` when there is no seed or the proposal is
+    // refuted. (CE-38 in `ROADMAP.md`.)
+    const tryProposalBelow = (
+      t: Type
+    ): { result: Type; homes: HomeScope[] } | undefined => {
+      const seed = emptyElementSeedOf(t);
+      if (seed === undefined) return undefined;
+      for (const [g, r] of members.length > 0 ? memberResults(seed) : [])
+        memberCandidates.set(g, r);
+      const proposed = pass(seed).result;
+      for (const g of members) memberCandidates.set(g, 'unknown');
+      if (proposed === undefined || mentionsUnknown(proposed)) return undefined;
+      return tryHypothesis(proposed);
+    };
     const hypothesis = listHypothesisOf(derived);
     if (hypothesis !== undefined) {
-      const r = tryHypothesis(hypothesis);
+      const r = tryProposalBelow(hypothesis) ?? tryHypothesis(hypothesis);
       if (r !== undefined) return r;
     }
     // The plain derivation read the recursive call as `unknown`, and the
@@ -713,6 +757,12 @@ export function verifiedListHypothesis(
         const r = tryHypothesis(seeded);
         if (r !== undefined) return r;
       }
+      // A first result with elements `any` is tried from below first, as
+      // for the derived result above.
+      {
+        const r = tryProposalBelow(candidate);
+        if (r !== undefined) return r;
+      }
       for (let i = 0; i < RECURSION_PASS_LIMIT; i++) {
         const settled = membersSettle(candidate);
         const r = pass(candidate);
@@ -771,6 +821,77 @@ export function verifiedListHypothesis(
   }
 }
 
+/**
+ * `t` with each list or collection whose elements are `any` replaced by the
+ * same collection with elements `never`, at the top level and in the arms
+ * of a union: `list<any>` gives `list<never>`. `undefined` when `t` has no
+ * such collection. The seed of a proposal pass of
+ * {@link verifiedListHypothesis}.
+ */
+function emptyElementSeedOf(t: Type): Type | undefined {
+  if (typeof t !== 'object') return undefined;
+  if ((t.kind === 'list' || t.kind === 'collection') && t.elements === 'any')
+    return { ...t, elements: 'never' };
+  if (t.kind === 'union') {
+    let changed = false;
+    const types = t.types.map((arm) => {
+      const s = emptyElementSeedOf(arm);
+      if (s === undefined) return arm;
+      changed = true;
+      return s;
+    });
+    return changed ? { kind: 'union', types } : undefined;
+  }
+  return undefined;
+}
+
+/** True when the primitive type `unknown` is a part of the type `t`, at
+ * any depth: an arm of a union, an element, a field, a slot, a parameter or
+ * the result of a signature, or the definition of an alias. A type that
+ * holds it is not tried as a hypothesis, since every type is a subtype of
+ * `unknown`. A record key, an alias name or a value type whose text is
+ * "unknown" is not the primitive type. `seen` holds the aliases that are
+ * being read, so a recursive alias is read once. */
+function mentionsUnknown(t: Type, seen: Set<Type> = new Set()): boolean {
+  if (typeof t === 'string') return t === 'unknown';
+  const any = (types: readonly Type[]) =>
+    types.some((x) => mentionsUnknown(x, seen));
+  switch (t.kind) {
+    case 'union':
+    case 'intersection':
+      return any(t.types);
+    case 'negation':
+      return mentionsUnknown(t.type, seen);
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+    case 'broadcastable':
+      return mentionsUnknown(t.elements, seen);
+    case 'dictionary':
+      return mentionsUnknown(t.values, seen);
+    case 'record':
+    case 'object':
+      return any(Object.values(t.elements));
+    case 'tuple':
+      return any(t.elements.map((x) => x.type));
+    case 'signature':
+      return (
+        any((t.args ?? []).map((x) => x.type)) ||
+        any((t.optArgs ?? []).map((x) => x.type)) ||
+        (t.variadicArg !== undefined &&
+          mentionsUnknown(t.variadicArg.type, seen)) ||
+        mentionsUnknown(t.result, seen)
+      );
+    case 'reference':
+      if (!t.alias || t.def === undefined || seen.has(t)) return false;
+      seen.add(t);
+      return mentionsUnknown(t.def, seen);
+    default:
+      return false;
+  }
+}
+
 /** The function literals, other than `literal`, of the user functions that
  * `literal` calls, directly or transitively, and that call the function
  * named `name` in turn ({@link callsReach}): the other functions of its
@@ -808,8 +929,19 @@ export function cycleMemberDefinitions(
     const callee = calleeLiteral(expr);
     if (callee !== undefined && !seen.has(callee)) {
       seen.add(callee);
-      if (members.has(callee) && expr.operatorDefinition !== undefined)
-        out.push(expr.operatorDefinition);
+      if (members.has(callee)) {
+        // A call boxed before its head had a value is bound to the value
+        // definition made then (a forward reference), which has no
+        // signature to refine: the definition that the head holds now is
+        // read instead, as in `calleeLiteral`.
+        const current = expr.engine.lookupDefinition(expr.operator);
+        const def =
+          expr.operatorDefinition ??
+          (current !== undefined && 'operator' in current
+            ? current.operator
+            : undefined);
+        if (def !== undefined) out.push(def);
+      }
       visit(callee);
     }
     for (const op of expr.ops) visit(op);

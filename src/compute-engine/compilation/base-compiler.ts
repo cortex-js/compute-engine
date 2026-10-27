@@ -1,3 +1,4 @@
+import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
 import {
   describe as describeOperand,
   describeType,
@@ -83,6 +84,8 @@ import {
   isBroadcastablePointArgumentType,
   isPointOrPointListArgumentType,
   isPointParameterType,
+  pointArgumentMayMixDepths,
+  isEmptyListArgumentType,
   leafwardElementType,
   pointCollectionElementType,
   isTopTypedBlockLocal,
@@ -95,7 +98,13 @@ import {
   isPointElementType,
   nonNegativeRangeType,
   resolveTypeAlias,
-  resolveTypeForCompilation,
+  // The compiled lanes read the open form of a broadcast over an operand
+  // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
+  // The shape checks read the declared type as it is: the open form keeps
+  // its `tuple` arm there, and a point has no shape the run-time value
+  // tells apart from a list.
+  resolveTypeForCompilation as resolveDeclaredTypeForCompilation,
   signatureArms,
   signatureEffects,
   stripMissingFromType,
@@ -105,12 +114,31 @@ import {
   typeElementCount,
   unfoldAliasOnDescent,
   widen,
+  kindArmNames,
   type AliasDescent,
 } from '../../common/type/utils.js';
 import {
-  holdsResidueClassForCertain,
-  typeIsResidueForCertain,
+  holdsKindValue,
+  holdsKindValueForCertain,
+  kindTypesHeldBy,
+  typeIsKindForCertain,
 } from '../boxed-expression/residue-class.js';
+import {
+  arithmeticOf,
+  kindTypeNames,
+  kindTypesOfHead,
+} from '../boxed-expression/value-kinds.js';
+import {
+  certainKindTypesOf,
+  holdsKindCollection,
+  kindContractOf,
+  loweredKindType,
+  multiKindSymbols,
+  newKindLowering,
+  refusedRepresentationMessage,
+  type KindLowering,
+  type KindTypeContract,
+} from './kind-lowering.js';
 import {
   cannotHoldAList as typeCannotHoldAList,
   couldMatch,
@@ -119,7 +147,10 @@ import {
   isSubtypeOfBroadcastOrIndexed,
   provablyDisjoint,
 } from '../../common/type/subtype.js';
-import { typeToString } from '../../common/type/serialize.js';
+import {
+  typeToIdentityKey,
+  typeToString,
+} from '../../common/type/serialize.js';
 import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import {
   boundVariableNames,
@@ -309,6 +340,10 @@ import {
   isEffectSubset,
 } from '../../common/type/effects.js';
 import { effectsOf } from '../boxed-expression/effects-of.js';
+import {
+  assertValidCompileHelpers,
+  isEngineCompileHandler,
+} from './engine-compile-handlers.js';
 
 import {
   COMPLEX_CONTINUATION_HEADS,
@@ -1712,11 +1747,15 @@ export function isGatedIndexedCollection(a: Expression): boolean {
  */
 export function shapeOperandRefusal(a: Expression): string | undefined {
   if (a.isFiniteCollection === false) return 'is an infinite collection';
+  // The declared type is read without the compiled-lane reading of the open
+  // form (`resolveTypeForCompiledLanes`), which would hide its `tuple` arm:
+  // `Rank` of a value of that form that is the point `(3, 4)` is `0` in the
+  // interpreter, and the run-time shape of its array is `[2]`.
   const refusal = (t: Type, depth: number): string | undefined => {
-    const r = resolveTypeForCompilation(t);
+    const r = resolveDeclaredTypeForCompilation(t);
     const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
     for (const arm of arms) {
-      const b = resolveTypeForCompilation(arm);
+      const b = resolveDeclaredTypeForCompilation(arm);
       if (b === 'never') continue;
       if (isTupleShapedType(b))
         return (
@@ -3777,6 +3816,213 @@ export class BaseCompiler {
     }
   }
 
+  /**
+   * The kind lowering of the compilation in progress (`kind-lowering.ts`):
+   * set at the compile boundary when the expression holds a kind value and
+   * every kind type found has a representation on the target, `undefined`
+   * otherwise. Read by `compileKindOperation()`. Compilation is synchronous,
+   * so one static serves, like `_mode`; it is cleared when the outermost
+   * compilation ends.
+   */
+  private static _kindLowering: KindLowering | undefined;
+
+  /** The kind lowering of the most recent outermost compilation, kept after
+   * it ends for the target that builds the result (`kindLoweringReport()`). */
+  private static _lastKindLowering: KindLowering | undefined;
+
+  /**
+   * The kind types of the kind lowering of the most recent outermost
+   * compilation, with their contracts, or `undefined` when that compilation
+   * had no kind lowering. A kind type is listed when the expression holds a
+   * value of it or its result type names it (a bare symbol `g: gf8` is
+   * compiled with no hook, and its value is still a kind value), or when a
+   * hook of its contract emitted code. The JavaScript target reads it to
+   * build the result: the result of a kind lowering is returned raw, is not
+   * shippable unless every contract says so, and cannot be stored.
+   */
+  static kindLoweringReport():
+    | {
+        kinds: ReadonlyArray<string>;
+        contracts: ReadonlyArray<KindTypeContract>;
+      }
+    | undefined {
+    const lowering = BaseCompiler._lastKindLowering;
+    if (lowering === undefined) return undefined;
+    const kinds: string[] = [];
+    const contracts: KindTypeContract[] = [];
+    for (const [k, entry] of lowering.contracts) {
+      if (entry === undefined) continue;
+      kinds.push(k);
+      contracts.push(entry.contract);
+    }
+    return kinds.length === 0 ? undefined : { kinds, contracts };
+  }
+
+  /**
+   * The kind lowering of `expr`, which holds a kind value for certain, on
+   * `target`: every kind type that `expr` holds, or that its result type
+   * names, has a contract whose `lowered()` answers for the target. Throws
+   * for an expression that holds a collection of kind values, for the
+   * `interval-js` target, and for a representation that the runner would
+   * read as a number, a complex or a list. `undefined` when a kind type has
+   * no representation on the target (the caller declines with the general
+   * message).
+   */
+  private static kindLoweringOf(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): KindLowering | undefined {
+    const ce = expr.engine;
+    const kinds = new Set([
+      ...kindTypesHeldBy(expr),
+      ...kindArmNames(expr.type.type, kindTypeNames(ce)),
+    ]);
+    if (kinds.size === 0) return undefined;
+    const language = target.language ?? 'javascript';
+    const lowering = newKindLowering(ce, {
+      language,
+      typeOf: (x) => BaseCompiler.operandTypeInContext(x, target),
+    });
+    for (const k of kinds)
+      if (kindContractOf(lowering, k) === undefined) return undefined;
+    const names = [...kinds].map((t) => `'${t}'`).join(', ');
+    if (language.startsWith('interval'))
+      throw new Error(
+        `Could not compile an expression that holds a value of the kind ` +
+          `type ${names} to target '${language}': the run-time check of a ` +
+          `kind value given by the host is not available on this target.`
+      );
+    if (holdsKindCollection(expr))
+      throw new Error(
+        `Could not compile an expression that holds a collection of values ` +
+          `of the kind type ${names} to target '${language}': the compiled ` +
+          `representation of a value kind describes one value, not a ` +
+          `collection of them.`
+      );
+    const mixed = multiKindSymbols(expr)[0];
+    if (mixed !== undefined)
+      throw new Error(
+        `Could not compile an expression with the symbol "${mixed.name}" ` +
+          `of the type ${mixed.kinds.map((k) => `'${k}'`).join(' | ')} to ` +
+          `target '${language}': a binding of a union of kind types has no ` +
+          `run-time check, since the entry check of a binding reads the ` +
+          `contract of one kind type.`
+      );
+    for (const k of kinds) {
+      const message = refusedRepresentationMessage(
+        k,
+        kindContractOf(lowering, k)!.lowered,
+        language
+      );
+      if (message !== undefined) throw new Error(message);
+    }
+    return lowering;
+  }
+
+  /**
+   * The code of the function node `node` (operator `h`, operands `args`)
+   * through the kind contracts of the compilation (`_kindLowering`), or
+   * `undefined` when the node is compiled as usual:
+   *
+   * - a call of a kind head is a literal value of the head: its
+   *   `compile.value` gives the code, and a head without it declines;
+   * - a structural or control-flow operator (`If`, `Block`, `List`, `Tuple`,
+   *   `Assign`, `Hold`, …) and a call of a user function are compiled as
+   *   usual, and treat the representation of a kind value as an opaque
+   *   value;
+   * - an `Add` (a `Multiply`) with an operand that is a kind value for
+   *   certain is lowered by the `add` (`multiply`) of the kind type; any
+   *   other operator with such an operand by its `apply`. With operands of
+   *   two kind types, the types are asked in the order of their first
+   *   operand, and the first answer is the code.
+   *
+   * A hook that answers `undefined` (or an empty string) declines; when no
+   * kind type answers, the compilation declines. A kind type with no
+   * representation on the target declines too.
+   */
+  private static compileKindOperation(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    node: Expression | undefined
+  ): TargetSource | undefined {
+    const lowering = BaseCompiler._kindLowering;
+    if (lowering === undefined || node === undefined || !isFunction(node))
+      return undefined;
+    const ce = node.engine;
+    const language = lowering.context.language;
+    const compile = (x: Expression): string =>
+      BaseCompiler.compileValueOperand(x, target);
+    const noLowering = (kind: string, what: string): Error =>
+      new Error(
+        `Could not compile ${what} to target '${language}': the kind type ` +
+          `'${kind}' has no compiled lowering for it.`
+      );
+
+    // A literal value of a kind head.
+    const def = node.operatorDefinition;
+    const headKinds = def !== undefined ? kindTypesOfHead(ce, def) : undefined;
+    if (def !== undefined && headKinds !== undefined) {
+      for (const k of headKinds)
+        if (kindContractOf(lowering, k) === undefined)
+          throw noLowering(k, `a value of \`${h}\``);
+      const value = arithmeticOf(ce, def)?.compile?.value;
+      const code = value?.(node, compile, lowering.context);
+      if (typeof code !== 'string' || code === '')
+        throw new Error(
+          `Could not compile a value of \`${h}\` to target '${language}': ` +
+            `the head has no \`compile.value\` for this target.`
+        );
+      return code;
+    }
+
+    if (
+      BaseCompiler.CONTROL_FLOW_HEADS.has(h) ||
+      BaseCompiler.KIND_OPAQUE_HEADS.has(h) ||
+      BaseCompiler.userFunctionLiteral(ce, h) !== undefined ||
+      multiClauseState(ce.lookupDefinition(h)) !== undefined
+    )
+      return undefined;
+
+    // The kind types of the operands, in the order of their first operand.
+    const kinds: string[] = [];
+    for (const x of args)
+      for (const k of certainKindTypesOf(x))
+        if (!kinds.includes(k)) kinds.push(k);
+    if (kinds.length === 0) return undefined;
+    for (const k of kinds)
+      if (kindContractOf(lowering, k) === undefined)
+        throw noLowering(k, `\`${h}\``);
+    for (const k of kinds) {
+      const { contract } = kindContractOf(lowering, k)!;
+      const code =
+        h === 'Add'
+          ? contract.add?.(args, compile, lowering.context)
+          : h === 'Multiply'
+            ? contract.multiply?.(args, compile, lowering.context)
+            : contract.apply?.(h, args, compile, lowering.context);
+      if (typeof code === 'string' && code !== '') return code;
+    }
+    throw new Error(
+      `Could not compile \`${h}\` with an operand of the kind type ` +
+        `${kinds.map((k) => `'${k}'`).join(', ')} to target '${language}': ` +
+        `the compiled lowering of the kind does not define it.`
+    );
+  }
+
+  /**
+   * The structural operators that `compileKindOperation()` leaves to their
+   * usual lowering, beside `CONTROL_FLOW_HEADS`: they hold or pass a kind
+   * value without computing with it, so the representation is an opaque
+   * value for them.
+   */
+  private static readonly KIND_OPAQUE_HEADS: ReadonlySet<string> = new Set([
+    'List',
+    'Tuple',
+    'Hold',
+    'Apply',
+  ]);
+
   static compile(
     expr: Expression | undefined,
     target: CompileTarget<Expression>,
@@ -3837,28 +4083,80 @@ export class BaseCompiler {
           `'${target.language ?? 'unknown'}': a reified type expression has ` +
           `no compiled representation.`
       );
-    // A residue class (an element of ℤ/nℤ, type `residue`) has no compiled
+    // A value of a VALUE KIND (a residue class, an element of ℤ/nℤ, type
+    // `residue`; a value of a kind registered by the host) has no compiled
     // representation either: the targets compute over numbers, and the
-    // arithmetic of a class is the arithmetic of its ring. The test is the
-    // engine's own (`containsResidueClass`): a `ResidueClass(…)` call, a call
-    // of a head declared `-> residue`, a symbol declared `residue` or holding
-    // a class, at any depth; or a result that is a class for certain. Read at
-    // the compile boundary once, so that a class in an operand position
-    // (`Equal(r, r)` with `r: residue`) is refused as a class in the result
-    // is. A result that MAY be a class (`number | residue`, the sum of a
-    // parameter typed from a signature that admits a class) is not refused:
-    // the compiled code computes the number it is given.
+    // arithmetic of a kind value is its own. The test is the engine's own
+    // STRICT recognition (`holdsKindValueForCertain`): a call of a kind head,
+    // a call of a head declared to return a kind type, a symbol declared
+    // with a kind type or holding a kind value, at any depth; or a result
+    // that is a kind value for certain. Read at the compile boundary once, so
+    // that a class in an operand position (`Equal(r, r)` with `r: residue`)
+    // is refused as a class in the result is. A result that MAY be a kind
+    // value (`number | residue`, the sum of a parameter typed from a
+    // signature that admits a class) is not refused: the compiled code
+    // computes the number it is given. The message names the kind types
+    // found.
+    //
+    // A kind type whose `compile.type` contract answers `lowered()` for the
+    // target HAS a representation there (`kind-lowering.ts`): the expression
+    // is then compiled, and `compileKindOperation()` lowers each operation
+    // with an operand of the kind through the contract. Two limits of phase 1
+    // of the design (`docs/plans/2026-10-26-value-kinds.md`, section 4.8)
+    // decline anyway: a COLLECTION of kind values (`entry` and `lowered()`
+    // describe one value), and the `interval-js` target (its runner has no
+    // entry check of a kind binding).
+    if (BaseCompiler._compileDepth === 0) {
+      BaseCompiler._kindLowering = undefined;
+      BaseCompiler._lastKindLowering = undefined;
+    }
     if (
       BaseCompiler._compileDepth === 0 &&
-      (typeIsResidueForCertain(expr.type.type) ||
-        holdsResidueClassForCertain(expr))
-    )
-      throw new Error(
-        `Could not compile an expression that holds a residue class (type ` +
-          `'residue') to target '${target.language ?? 'unknown'}': the ` +
-          `compiled targets compute over numbers, and a class of ℤ/nℤ has ` +
-          `no compiled representation.`
+      (typeIsKindForCertain(expr.type.type, expr.engine) ||
+        holdsKindValueForCertain(expr))
+    ) {
+      const lowering = BaseCompiler.kindLoweringOf(expr, target);
+      if (lowering !== undefined) {
+        BaseCompiler._kindLowering = lowering;
+        BaseCompiler._lastKindLowering = lowering;
+      }
+    }
+    if (
+      BaseCompiler._compileDepth === 0 &&
+      BaseCompiler._kindLowering === undefined &&
+      (typeIsKindForCertain(expr.type.type, expr.engine) ||
+        holdsKindValueForCertain(expr))
+    ) {
+      // The kinds whose values the expression holds, else the kinds of its
+      // result type. The held kinds are read first because they name the
+      // kinds more precisely: the result type of an arithmetic operator
+      // over kind values (`residueResultType()`) can be a union of the kind
+      // types of its operands, or a type that a `resultType` hook gives.
+      const held = kindTypesHeldBy(expr);
+      const kindTypes = new Set(
+        held.length > 0
+          ? held
+          : kindArmNames(expr.type.type, kindTypeNames(expr.engine))
       );
+      const target_ = target.language ?? 'unknown';
+      if (
+        kindTypes.size === 0 ||
+        (kindTypes.size === 1 && kindTypes.has('residue'))
+      )
+        throw new Error(
+          `Could not compile an expression that holds a residue class (type ` +
+            `'residue') to target '${target_}': the ` +
+            `compiled targets compute over numbers, and a class of ℤ/nℤ has ` +
+            `no compiled representation.`
+        );
+      const names = [...kindTypes].map((t) => `'${t}'`).join(', ');
+      throw new Error(
+        `Could not compile an expression that holds a value of the kind ` +
+          `type ${names} to target '${target_}': the compiled targets ` +
+          `compute over numbers, and the value kind has no compiled ` +
+          `representation.`
+      );
+    }
     if (
       isFunction(expr, 'Subtype') ||
       isFunction(expr, 'MatchesType') ||
@@ -4177,7 +4475,14 @@ export class BaseCompiler {
       // (`Sum(Take(Map(_ ↦ _^2, 1..20), 10))` → `385`) instead of lowering
       // structurally. Runs before the CSE walk so eliminated regions are
       // never inventoried. All the safety gates live in `tryConstantFold`.
-      if (isFunction(expr)) {
+      // A node that may hold a kind value is not folded under a kind
+      // lowering: the fold would evaluate it to a kind value, which has no
+      // literal of the target; its operations are lowered by the kind's
+      // contract instead (`compileKindOperation`).
+      if (
+        isFunction(expr) &&
+        !(BaseCompiler._kindLowering !== undefined && holdsKindValue(expr))
+      ) {
         const folded = BaseCompiler.tryConstantFold(expr, target, prec);
         if (folded !== undefined) {
           emitted = true;
@@ -4227,6 +4532,8 @@ export class BaseCompiler {
       if (isParent) BaseCompiler._compileParents.pop();
       BaseCompiler._compileDepth -= 1;
       BaseCompiler._callSiteTarget = prevCallSiteTarget;
+      if (BaseCompiler._compileDepth === 0)
+        BaseCompiler._kindLowering = undefined;
       // Leaving the OUTERMOST compilation: freeze its report for the target
       // to attach (`withReferences` → `modeReport`), before the latches are
       // restored.
@@ -5769,6 +6076,11 @@ export class BaseCompiler {
    * at an integer or a half-integer `u` has an exact zero part: `sin(πx)` at
    * `x = 2` is `0`, where `Math.sin(Math.PI * 2)` is `−2.4·10⁻¹⁶`, and
    * `e^{iπx}` at `x = 1` is `−1`, as in the interpreter for the exact `x`.
+   * A quotient `π·u / d` whose denominator has no `Pi` and is real is
+   * `π·(u / d)`: `sin(2πs/P)` at `s = 2`, `P = −2` is `0`, where
+   * `Math.sin(2π·2 / −2)` is `2.4·10⁻¹⁶`, which made a test `sin(…) > 0`
+   * true in the compiled code and false in the interpreter (Tycho's
+   * `exoplanet-transit` document, 2026-10-26).
    * Returns `undefined` for any other expression.
    */
   static piMultiple(x: Expression): Expression | undefined {
@@ -5776,6 +6088,13 @@ export class BaseCompiler {
     // `−π·u` is `π·(−u)`. A product with the factor `−1` canonicalizes to a
     // `Negate`, so `e^{−iπx}` reaches this function as `Negate(π·x)`.
     if (isFunction(x, 'Negate')) return BaseCompiler.piMultiple(x.op1)?.neg();
+    if (isFunction(x, 'Divide')) {
+      const d = x.op2;
+      if (d.symbols.includes('Pi') || BaseCompiler.isComplexValued(d))
+        return undefined;
+      const u = BaseCompiler.piMultiple(x.op1);
+      return u === undefined ? undefined : ce.function('Divide', [u, d]);
+    }
     if (isSymbol(x, 'Pi'))
       return BaseCompiler.isLibraryPi(x) ? ce.One : undefined;
     if (!isFunction(x, 'Multiply')) return undefined;
@@ -5801,8 +6120,17 @@ export class BaseCompiler {
    * `x = 1`, is exact. Returns `undefined` for any other expression.
    */
   static imaginaryPiMultiple(x: Expression): Expression | undefined {
-    if (!isFunction(x, 'Multiply')) return undefined;
     const ce = x.engine;
+    // A quotient `i·π·u / d` with a real denominator that has no `Pi` is
+    // `i·π·(u / d)`, as in `piMultiple`.
+    if (isFunction(x, 'Divide')) {
+      const d = x.op2;
+      if (d.symbols.includes('Pi') || BaseCompiler.isComplexValued(d))
+        return undefined;
+      const u = BaseCompiler.imaginaryPiMultiple(x.op1);
+      return u === undefined ? undefined : ce.function('Divide', [u, d]);
+    }
+    if (!isFunction(x, 'Multiply')) return undefined;
     let scale: Expression | undefined = undefined;
     const rest: Expression[] = [];
     for (const op of x.ops) {
@@ -11992,6 +12320,35 @@ export class BaseCompiler {
     );
   }
 
+  /**
+   * Refuse a broadcastable head with an operand that is a read PROVED to
+   * find no row or point (`provedAbsentDomainOf()`): `At(M, 7) + 1` for a
+   * matrix `M` of two rows. Such a read is typed `missing`, and the
+   * application is typed from the row it would read, so the interpreter
+   * answers the marker of an absent row, `Missing`, where the scalar
+   * lowering of the `missing` operand answers `NaN` (`undefined + 1`). The
+   * compiled code fails closed and the interpreter evaluates the
+   * expression (`docs/ERROR-MODEL.md` §6). A read whose domain is a number
+   * is typed `nan`, not `missing`, and compiles as before.
+   */
+  static assertNoProvedAbsentObjectOperand(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    const def = engine.lookupDefinition(h);
+    if (!isOperatorDef(def) || def.operator.broadcastable !== true) return;
+    for (const a of args) {
+      const domain = provedAbsentDomainOf(a);
+      if (domain === undefined || isSubtype(domain, 'number')) continue;
+      throw new Error(
+        `Could not compile \`${h}\`: an operand is a read that finds no ` +
+          `\`${typeToString(domain)}\`, which the interpreter answers as an ` +
+          `absent \`${typeToString(domain)}\`. The interpreter evaluates it instead.`
+      );
+    }
+  }
+
   /** Reject omission-sensitive collections until targets can preserve Nothing. */
   static assertCollectionOmissionSupported(
     h: string,
@@ -12199,6 +12556,12 @@ export class BaseCompiler {
     if (sub !== undefined) return sub;
 
     BaseCompiler.assertCollectionOmissionSupported(h, args, node, target);
+    BaseCompiler.assertNoProvedAbsentObjectOperand(engine, h, args);
+
+    // An operation with a value of a value kind, lowered by the kind's
+    // compile contract (`compileKindOperation`).
+    sub = BaseCompiler.compileKindOperation(h, args, target, node);
+    if (sub !== undefined) return sub;
 
     // A node whose TYPE is the value `true` or `false` — a comparison proven
     // by its operands' types (`Equal(a, a)` over a NaN-free `a`), a
@@ -12333,8 +12696,10 @@ export class BaseCompiler {
             typeOf: (x) => BaseCompiler.operandTypeInContext(x, target),
           }
         );
-        if (custom !== undefined && custom !== null && custom !== '')
+        if (custom !== undefined && custom !== null && custom !== '') {
+          BaseCompiler.recordCallerHandlerCode(h, customDef.operator, target);
           return custom;
+        }
         declinedByCustomHandler = true;
       }
     }
@@ -18260,6 +18625,92 @@ export class BaseCompiler {
       }
     }
 
+    // A LIST OF POINTS times, or divided by, an array operand: the flat
+    // `_SYS.bcast` below pairs the i-th point with the i-th element of the
+    // other operand and, when that element is an array too, pairs the
+    // components of the point with the entries of that array. The
+    // interpreter applies the point whole to each entry instead: with
+    // `p = [(1, 2), (3, 4)]` and `q = [[1, 2], [3, 4]]`, `p·q` is
+    // `[[(1, 2), (2, 4)], [(9, 12), (12, 16)]]`, where the flat broadcast
+    // gave `[[1, 4], [9, 16]]`. So an array operand beside a list of points
+    // must be a flat list of scalars (a `list<number>`, a `vector<n>`;
+    // `isScalarElementSource`), which the flat broadcast pairs correctly.
+    // The run-time plan `pointListOverNumbers`, emitted below, takes exactly
+    // one shape: TWO operands, a list of points and an operand typed
+    // `broadcastable<E>`, `tensor<E>` or a nested list (`list<list<E>>`)
+    // whose leaves are numbers (`numberLeaves`; for a `Divide`, the list of
+    // points is the dividend). Each point is kept whole and applied to each
+    // number of its element. Every other operand beside a list of points
+    // that is not a flat list of scalars is refused on purpose, and the
+    // fail-closed guard of the caller refuses the form: an operand whose
+    // cells may be points or values of unknown kind (a `list<unknown>`, a
+    // call typed `unknown`, a `broadcastable<tuple<…>>`), a union of a
+    // number and a `broadcastable` (`number | broadcastable<real>`), and a
+    // product of three or more operands (`2·p·b`). A declared `matrix<…>`
+    // times a list of points is refused as well, by the matrix rule of the
+    // `Multiply` carve-out above; a list of points divided by a declared
+    // matrix takes the plan (each point divided by each number of its row).
+    // Each refused shape compiled to a wrong value before (ROADMAP CE-504).
+    let pointListOverNumbers: number | undefined;
+    if (
+      (h === 'Multiply' || h === 'Divide') &&
+      atomicTuple === undefined &&
+      args.some(isPointListShaped)
+    ) {
+      const flatScalars = (a: Expression): boolean => {
+        const t = compilationType(a);
+        if (typeof t !== 'string' && t.kind === 'broadcastable') return false;
+        return BaseCompiler.isScalarElementSource(a, target);
+      };
+      const deep = args.filter(
+        (a) =>
+          !isPointListShaped(a) &&
+          BaseCompiler.isArrayOperand(a, target) &&
+          !flatScalars(a)
+      );
+      if (deep.length > 0) {
+        const numberCells = (a: Expression): boolean => {
+          const t = compilationType(a);
+          const broadcastable =
+            typeof t !== 'string' && t.kind === 'broadcastable';
+          if (!broadcastable && isBoundPossiblyCollectionTyped(a, target))
+            return false;
+          // The leaves are read through the list, tensor and broadcastable
+          // constructors, and through unions. A tuple at any depth is
+          // refused: `broadcastCellType` reads a tuple as its components, so
+          // `broadcastable<tuple<integer, integer>>` would pass as numbers,
+          // and the product of two points has no value
+          // (`no-product-between-points`).
+          const numberLeaves = (x: Type, depth = 0): boolean => {
+            if (depth > 16) return false;
+            const r = resolveTypeAlias(x);
+            if (r === 'never') return false;
+            if (typeof r === 'string') return isSubtype(r, 'number');
+            if (r.kind === 'tuple') return false;
+            if (r.kind === 'list' || r.kind === 'broadcastable')
+              return numberLeaves(r.elements, depth + 1);
+            // A union at the top (`number | broadcastable<real>`) is not
+            // read; a union of cells below a constructor is.
+            if (r.kind === 'union')
+              return (
+                depth > 0 && r.types.every((m) => numberLeaves(m, depth + 1))
+              );
+            return isSubtype(r, 'number');
+          };
+          return numberLeaves(t);
+        };
+        const pointList = args.findIndex(isPointListShaped);
+        if (
+          args.length !== 2 ||
+          deep.length !== 1 ||
+          !numberCells(deep[0]) ||
+          (h === 'Divide' && pointList !== 0)
+        )
+          return null;
+        pointListOverNumbers = 1 - pointList;
+      }
+    }
+
     // A head with NO codegen at all has nothing to broadcast — decline (the
     // caller's fail-closed guard covers it). A *string*-mapped head (a scalar
     // helper such as `Sign` → `Math.sign`, `Arctan2` → `Math.atan2`, `Hypot` →
@@ -18645,17 +19096,23 @@ export class BaseCompiler {
     const applicationType = (): Type =>
       (resultType ??=
         node?.type.type ?? engine.function(h, [...args]).type.type);
-    // An operand whose type states nothing (`any` or `unknown`: a coordinate
-    // read off an operand whose shape is not known, the result of a function
-    // declared `-> unknown`) can be absent, spelled `undefined`. The
-    // interpreter answers the marker of the application's codomain for an
-    // absent operand: `NaN` when the application is provably a number, and
-    // `Missing` otherwise (`absentScalarMarker`, the missing-value gate of
-    // `BoxedFunction`). So when the application is not provably a number,
-    // such an operand keeps `undefined` through the arithmetic:
-    // `s·PointX(p)` with `p` absent is absent, as in the interpreter (ROADMAP
-    // CE-229, user decision 2026-10-23), unless an operand is a collection at
-    // run time (`scalarAbsent` below).
+    // A READ whose type states nothing (`any` or `unknown`: a coordinate
+    // read off an operand whose shape is not known, `PointX(p)`, or the
+    // result of a function declared `-> unknown`) can be absent, spelled
+    // `undefined`. The interpreter answers the marker of the application's
+    // codomain for such an absent operand: `NaN` when the application is
+    // provably a number, and `Missing` otherwise (`absentScalarMarker`, the
+    // missing-value gate of `BoxedFunction`). So when the application is not
+    // provably a number, such a read keeps `undefined` through the
+    // arithmetic: `s·PointX(p)` with `p` absent is absent, as in the
+    // interpreter (ROADMAP CE-229, user decision 2026-10-23), unless an
+    // operand is a collection at run time (`scalarAbsent` below).
+    //
+    // A symbol DECLARED `any` is not such a read: an absent value that it
+    // holds is `NaN` in arithmetic on every route (`absentArithmeticMarker`,
+    // `validate.ts`; ROADMAP CE-395). It reaches this code only in the list
+    // branch of `declaredTopGuard`, where its value is an array; the scalar
+    // branch reads it as a number, and `undefined + 1` is `NaN`.
     const statesNothing = (t: Type): boolean => {
       const r = resolveTypeForCompilation(t);
       return r === 'any' || r === 'unknown';
@@ -18997,6 +19454,42 @@ export class BaseCompiler {
     // recomputed for every element. Handing those operands to the outer
     // `_SYS.bcast` as arguments is not an option either — it would zip the
     // point's array against the list, the very shape this emission avoids.
+    // A list of points beside an operand that may be a scalar or a
+    // collection of numbers at any depth (`pointListOverNumbers`, set above),
+    // both evaluated once. A scalar is applied to every point. An array is
+    // paired with the list, element by element, and unequal lengths are the
+    // interpreter's `incompatible-dimensions` error, projected to NaN. An
+    // element that is an array is walked to its numbers, and the point is
+    // applied whole to each one: `f` keeps the point and descends into the
+    // element, where the flat `_SYS.bcast` would pair the components of the
+    // point with the entries of the element. A list operand that is not an
+    // array at run time is NaN, as in the other point-list plans.
+    if (
+      pointListOverNumbers !== undefined &&
+      !absentMode &&
+      scalarAbsent === undefined
+    ) {
+      const bound = args.map(() => BaseCompiler.tempVar(target));
+      const list = bound[1 - pointListOverNumbers];
+      const other = bound[pointListOverNumbers];
+      const f = BaseCompiler.tempVar(target);
+      const p = BaseCompiler.tempVar(target);
+      const x = BaseCompiler.tempVar(target);
+      const y = BaseCompiler.tempVar(target);
+      const k = BaseCompiler.tempVar(target);
+      const ordered = pointListOverNumbers === 1 ? `${p}, ${x}` : `${x}, ${p}`;
+      return (
+        `((${bound.join(', ')}) => { ` +
+        `const ${f} = (${p}, ${x}) => Array.isArray(${x}) ? ` +
+        `${x}.map((${y}) => ${f}(${p}, ${y})) : _SYS.bcast(${closure}, ${ordered}); ` +
+        `return !Array.isArray(${list}) ? NaN : ` +
+        `!Array.isArray(${other}) ? ${list}.map((${p}) => ${f}(${p}, ${other})) : ` +
+        `${list}.length !== ${other}.length ? NaN : ` +
+        `${list}.map((${p}, ${k}) => ${f}(${p}, ${other}[${k}])); })` +
+        `(${compiledArgs.join(', ')})`
+      );
+    }
+    if (pointListOverNumbers !== undefined) return null;
     if (atomicTuple !== undefined) {
       const bound = args.map(() => BaseCompiler.tempVar(target));
       if (atomicTupleOverPoints === 'runtime-list') {
@@ -29871,6 +30364,37 @@ export class BaseCompiler {
     return parts.length === 1 ? parts[0] : `(${parts.join(' || ')})`;
   }
 
+  /** Run `f` in the scope of the innermost expression being compiled that
+   * has a scope of its own (a `Block`, a function literal, a scoped loop),
+   * or in the current scope when there is none.
+   *
+   * The guards and bodies of a `Match` case are held raw, and they are
+   * canonicalized when they are emitted. Without the enclosing scope, a name
+   * in a case body does not resolve to the local of the block that holds the
+   * `Match`: `xs = Rest(xs)` in a case body of
+   * `let xs = [1, 2, 3]; while let [h, ...] = xs { …; xs = Rest(xs) }`
+   * created a second binding `xs` whose type came from that body alone, and
+   * the compiled code was gated on that type, not on the type of the local.
+   * The interpreter canonicalizes the case bodies in the scope of the
+   * running block (`buildCaseClosure`, `match-dispatch.ts`). */
+  private static inCompiledScope<T>(
+    engine: Expression['engine'],
+    f: () => T
+  ): T {
+    const parents = BaseCompiler._compileParents;
+    for (let i = parents.length - 1; i >= 0; i--) {
+      const scope = parents[i].localScope;
+      if (scope !== undefined) return engine._inScope(scope, f);
+    }
+    return f();
+  }
+
+  /** The canonical form of a raw `Match` case body or guard, made in the
+   * scope of the expression being compiled (`inCompiledScope`). */
+  private static canonicalInCompiledScope(expr: Expression): Expression {
+    return BaseCompiler.inCompiledScope(expr.engine, () => expr.canonical);
+  }
+
   /** Compile a case body, substituting each captured name with its target
    * accessor code. Bodies with no captures compile directly (the common
    * tier-0/1 case); bodies with captures compile the shadow-correct canonical
@@ -29884,11 +30408,12 @@ export class BaseCompiler {
     sequenceNames?: ReadonlySet<string>
   ): string {
     if (cc.captureNames.length === 0)
-      return BaseCompiler.compile(cc.body.canonical, target);
-    const bodyClosure = buildCaseClosure(
-      cc.body.engine,
-      cc.body,
-      cc.captureNames
+      return BaseCompiler.compile(
+        BaseCompiler.canonicalInCompiledScope(cc.body),
+        target
+      );
+    const bodyClosure = BaseCompiler.inCompiledScope(cc.body.engine, () =>
+      buildCaseClosure(cc.body.engine, cc.body, cc.captureNames)
     );
     if (bodyClosure === undefined || !isFunction(bodyClosure))
       throw new Error(
@@ -29910,11 +30435,13 @@ export class BaseCompiler {
   ): string | undefined {
     if (!cc.hasGuard || cc.guard === undefined) return undefined;
     if (cc.captureNames.length === 0)
-      return BaseCompiler.compile(cc.guard.canonical, target);
-    const guardClosure = buildCaseClosure(
-      cc.guard.engine,
-      cc.guard,
-      cc.captureNames
+      return BaseCompiler.compile(
+        BaseCompiler.canonicalInCompiledScope(cc.guard),
+        target
+      );
+    const guard = cc.guard;
+    const guardClosure = BaseCompiler.inCompiledScope(guard.engine, () =>
+      buildCaseClosure(guard.engine, guard, cc.captureNames)
     );
     if (guardClosure === undefined || !isFunction(guardClosure))
       throw new Error(
@@ -30281,11 +30808,12 @@ export class BaseCompiler {
     sequenceNames?: ReadonlySet<string>
   ): string {
     if (cc.captureNames.length === 0)
-      return BaseCompiler.compileLoopBody(cc.body.canonical, target);
-    const bodyClosure = buildCaseClosure(
-      cc.body.engine,
-      cc.body,
-      cc.captureNames
+      return BaseCompiler.compileLoopBody(
+        BaseCompiler.canonicalInCompiledScope(cc.body),
+        target
+      );
+    const bodyClosure = BaseCompiler.inCompiledScope(cc.body.engine, () =>
+      buildCaseClosure(cc.body.engine, cc.body, cc.captureNames)
     );
     if (bodyClosure === undefined || !isFunction(bodyClosure))
       throw new Error(
@@ -33901,7 +34429,10 @@ export class BaseCompiler {
         !maybe[i] &&
         !isTuple(a) &&
         (isPointListArgumentType(a.type.type, pt) ||
-          isPointTensorArgumentType(a.type.type, pt))
+          isPointTensorArgumentType(a.type.type, pt) ||
+          // The empty list (`list<never>`): the interpreter maps it to `[]`
+          // without a call of the function, as the compiled map does.
+          isEmptyListArgumentType(a.type.type, pt))
       );
     });
     let at = mapped.indexOf(true);
@@ -34280,11 +34811,32 @@ export class BaseCompiler {
       const pointArgs = onePointArgs.map((c, i) =>
         i === at ? BaseCompiler.presentCheckedCode(p, checks[at]) : c
       );
-      return (
-        `(${head}(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
+      const walk =
+        `(function ${go}(${p}) { return (${isListOf(p)}) ? ` +
         `${p}.map((${point}) => ${pointGuard}${go}(${point})) : ` +
-        `${name}(${pointArgs.join(', ')}); })(${v}))(${codes.join(', ')})`
-      );
+        `${name}(${pointArgs.join(', ')}); })(${v})`;
+      // A recursive alias whose lists can hold both points and lists
+      // (`type B = list<B> | P`): the interpreter refuses a value where one
+      // list holds a point and a list with an `incompatible-type` error.
+      // The compiled call gives `NaN` for such a value, as the compiled
+      // broadcast does for an error of the interpreter (ROADMAP CE-505).
+      if (pointArgumentMayMixDepths(args[at].type.type, params[at]!)) {
+        const ok = BaseCompiler.tempVar(target);
+        const q = BaseCompiler.tempVar(target);
+        const kind = BaseCompiler.tempVar(target);
+        const el = BaseCompiler.tempVar(target);
+        const l = BaseCompiler.tempVar(target);
+        const uniform =
+          `(function ${ok}(${q}) { if (!(${isListOf(q)})) return true; ` +
+          `let ${kind}; for (const ${el} of ${q}) { ` +
+          `if (${el} === undefined) continue; ` +
+          `const ${l} = ${isListOf(el)}; ` +
+          `if (${kind} === undefined) ${kind} = ${l}; ` +
+          `else if (${kind} !== ${l}) return false; ` +
+          `if (${l} && !${ok}(${el})) return false; } return true; })(${v})`;
+        return `(${head}(${uniform} ? ${walk} : NaN))(${codes.join(', ')})`;
+      }
+      return `(${head}${walk})(${codes.join(', ')})`;
     }
     return (
       `(${head}(${isList}) ? ${map} : ` +
@@ -37815,7 +38367,10 @@ export class BaseCompiler {
     const proofKey = hasPointProof
       ? `#points:${pointWidths.map((w) => w ?? '').join(',')}`
       : '';
-    const key = `${h}#${types.map((t) => typeToString(t)).join(';')}${proofKey}`;
+    // The key tells a closed record (a dictionary literal) from the open
+    // record with the same fields: they print alike but are different
+    // types, and the specializations differ.
+    const key = `${h}#${types.map((t) => typeToIdentityKey(t)).join(';')}${proofKey}`;
     const cache = (registry.specializations ??= new Map());
     let specialized = cache.get(key);
     if (specialized === undefined) {
@@ -38066,7 +38621,7 @@ export class BaseCompiler {
     h: string,
     types: ReadonlyArray<Type | undefined>
   ): string {
-    return `${h}#${types.map((t) => (t === undefined ? '' : typeToString(t))).join(';')}`;
+    return `${h}#${types.map((t) => (t === undefined ? '' : typeToIdentityKey(t))).join(';')}`;
   }
 
   /** `literalWithParameterTypes`, kept in the specialization cache of the
@@ -41048,6 +41603,91 @@ export class BaseCompiler {
     return BaseCompiler.compile(bodyExpr, bodyTarget);
   }
 
+  /**
+   * Record that the `compile` handler of `def`, the definition of the
+   * operator `name`, wrote part of the code of the compilation in progress.
+   *
+   * A handler of a standard library writes the engine's own code, and
+   * nothing is recorded (`isEngineCompileHandler()`). Any other handler is
+   * caller code that may call a function of this thread: unless its
+   * definition sets `compileShippable`, the root target is marked
+   * `hostNames`, so the result is not shippable and `broadcastAsync()` keeps
+   * it on this thread. The root target, not `target`: a nested target is a
+   * copy, and the result reads the flag on the root. The flag is not reset
+   * when a compilation that ran the handler is abandoned and its
+   * definitions are removed (`removeDefinitionsAddedSince()`): the result
+   * can then be marked not shippable with no caller code left in it. That
+   * only keeps the result on this thread, which is always correct.
+   *
+   * Each helper of the definition (`compileHelpers`) becomes a definition
+   * of the preamble (`addCompileHelpers()`), so that the code carries it to
+   * a worker and to a stored result.
+   */
+  static recordCallerHandlerCode(
+    name: string,
+    def: {
+      compile?: unknown;
+      compileShippable?: boolean;
+      compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
+    },
+    target: CompileTarget<Expression>
+  ): void {
+    if (isEngineCompileHandler(def.compile)) return;
+    const root = target.userFunctions?.root ?? target;
+    if (def.compileShippable !== true) root.hostNames = true;
+    if (def.compileHelpers !== undefined)
+      BaseCompiler.addCompileHelpers(name, def.compileHelpers, target);
+  }
+
+  /**
+   * Define each helper of `helpers` in the preamble of the compilation in
+   * progress, as `const <name> = (<source>);`, on the two JavaScript
+   * targets (a helper is JavaScript; another target ignores it). `owner`
+   * names the operator or the kind type whose code calls the helpers, for
+   * the error messages. A helper reads nothing outside its body, so it is
+   * evaluated once per compiled artifact (`hoistable`). Used for the
+   * `compileHelpers` of an operator definition and the `helpers` of a kind
+   * compile contract.
+   *
+   * A new helper goes FIRST in the definitions, which are emitted in their
+   * order: a definition emitted earlier can call it, and a hoisted constant
+   * (`const _val_a = …`) calls it while the preamble is evaluated, which
+   * throws a `ReferenceError` when the `const` of the helper comes later.
+   * The kind helpers are added after the whole body is compiled, so this
+   * order matters for them.
+   */
+  static addCompileHelpers(
+    owner: string,
+    helpers: Readonly<Record<string, (...args: never[]) => unknown>>,
+    target: CompileTarget<Expression>
+  ): void {
+    const language = target.language ?? 'javascript';
+    if (language !== 'javascript' && language !== 'interval-javascript')
+      return;
+    const registry = target.userFunctions;
+    if (registry === undefined)
+      throw new Error(
+        `Could not compile \`${owner}\`: its code calls helper functions, and this compilation has no preamble to define them in`
+      );
+    // A field assigned in place on a definition was not checked when the
+    // definition was declared.
+    assertValidCompileHelpers(`Could not compile \`${owner}\``, helpers);
+    for (const [helper, fn] of Object.entries(helpers)) {
+      const code = `const ${helper} = (${fn.toString()});`;
+      const existing = registry.defs.get(helper);
+      if (existing === undefined) {
+        const later = [...registry.defs];
+        registry.defs.clear();
+        registry.defs.set(helper, code);
+        for (const [name, text] of later) registry.defs.set(name, text);
+        (registry.hoistable ??= new Set()).add(helper);
+      } else if (existing !== code)
+        throw new Error(
+          `Could not compile \`${owner}\`: two definitions give the compile helper \`${helper}\` with different source, or the name is already used by the compiled code`
+        );
+    }
+  }
+
   static userFunctionsPreamble(target: CompileTarget<Expression>): string {
     const defs = target.userFunctions?.defs;
     if (!defs || defs.size === 0) return '';
@@ -42654,7 +43294,12 @@ export class BaseCompiler {
       const declared = valueDef !== undefined && !valueDef.inferredType;
       let lowered: string | undefined;
       try {
+        // A symbol of a kind type is read as the representation that the
+        // kind's compile contract gives (`compile.type.lowered()`).
         lowered =
+          loweredKindType(ce, symbol.type.type, {
+            language: target.language ?? 'javascript',
+          }) ??
           target.loweredSymbolType?.(symbol) ??
           BaseCompiler.defaultLoweredSymbolType(symbol, target.language);
       } catch (e) {

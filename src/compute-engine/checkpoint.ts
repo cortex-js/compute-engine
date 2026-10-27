@@ -98,6 +98,12 @@ type BoundedSnapshot = {
    * bump the invalidation axes only when they actually restored something. */
   readonly typeRegistry: () => void;
   readonly protocolRegistry: () => void;
+  /** The rollback thunk of the KIND registry (the value kinds declared by
+   * the `arithmetic` field of operator definitions,
+   * `boxed-expression/value-kinds.ts`). It copies the type records, which a
+   * registration changes in place, and increments the registry's generation
+   * on restore. */
+  readonly kindRegistry: () => void;
   readonly assumptions: ReadonlyArray<ContextAssumptions>;
   readonly config: ConfigSnapshot;
   readonly sequences: unknown;
@@ -436,10 +442,10 @@ function restoreConfig(ce: IComputeEngine, snapshot: ConfigSnapshot): void {
 
   const wanted = new Map(snapshot.compilationTargets);
   for (const name of ce._listCompilationTargets())
-    if (!wanted.has(name)) ce._unregisterCompilationTarget(name);
+    if (!wanted.has(name)) ce.unregisterCompilationTarget(name);
   for (const [name, target] of wanted)
     if (ce._getCompilationTarget(name) !== target)
-      ce._registerCompilationTarget(name, target as never);
+      ce.registerCompilationTarget(name, target as never);
 }
 
 // ─── The API (§3) ──────────────────────────────────────────────────────────
@@ -461,6 +467,7 @@ export function takeCheckpoint(
   const snapshot: BoundedSnapshot = {
     typeRegistry: ce._typeRegistryRollbackPoint(),
     protocolRegistry: ce._protocolRegistryRollbackPoint(),
+    kindRegistry: ce._kindRegistryRollbackPoint(),
     assumptions: snapshotAssumptions(ce),
     config: snapshotConfig(ce),
     sequences: _sequenceRegistrySnapshot(ce),
@@ -558,6 +565,9 @@ export function restoreCheckpoint(
     //    touch disjoint fields — definitions versus registry records.
     target.snapshot.typeRegistry();
     target.snapshot.protocolRegistry();
+    // The kind registry refers to definitions by identity: the journal undo
+    // above has put back the definitions it refers to.
+    target.snapshot.kindRegistry();
 
     // 4. Bounded-family snapshots.
     restoreAssumptions(target.snapshot.assumptions);

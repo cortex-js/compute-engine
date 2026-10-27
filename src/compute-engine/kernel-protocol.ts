@@ -151,9 +151,16 @@ export type WorkerToMainMessage =
     }
   | { type: 'loaded'; id: number }
   /** The slice's results, one value per cell (`javascript`) or three
-   * (`interval-js`), and the count of cells written: `to - from`, or fewer
-   * when the deadline stopped the loop. */
-  | { type: 'result'; job: number; out: Float64Array; done: number }
+   * (`interval-js`), the count of cells written: `to - from`, or fewer
+   * when the deadline stopped the loop, and the count of those cells whose
+   * evaluation threw (`BroadcastSlice.failures`). */
+  | {
+      type: 'result';
+      job: number;
+      out: Float64Array;
+      done: number;
+      failed: number;
+    }
   /** The solutions of a `fit-run` slice, per point a code (0 solved, 1 no
    * solution, 2 nonlinear), the sum of squared residuals and the full
    * parameter vector (`writeScanSolution()` in `fit-scan.ts`), and the count

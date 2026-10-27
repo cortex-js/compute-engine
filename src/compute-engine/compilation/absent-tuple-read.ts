@@ -14,7 +14,9 @@ import type { Expression } from '../global-types.js';
 import type { Type, TupleType } from '../../common/type/types.js';
 import {
   collectionElementType,
-  resolveTypeForCompilation,
+  // The compiled lanes read the open form of a broadcast over an operand
+  // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';

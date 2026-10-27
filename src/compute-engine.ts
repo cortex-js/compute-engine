@@ -104,6 +104,22 @@ export { PythonTarget } from './compute-engine/compilation/python-target.js';
 export { IntervalJavaScriptTarget } from './compute-engine/compilation/interval-javascript-target.js';
 export { BaseCompiler } from './compute-engine/compilation/base-compiler.js';
 
+// The engine module knows only `javascript` and `interval-js`
+// (`engine-compilation-targets.ts` says why: the `./core` entry must not
+// carry the GPU and Python targets). This full entry adds the three others to
+// the program-wide table of defaults, which every engine reads on each
+// lookup: every engine of the program, one made earlier from `./core`
+// included (such as the default engine the free functions cache), and every
+// engine of `./epsil` and of the CLI, has all five targets from here on. The
+// source-only Python target produces `.code` and no `run`.
+import { addDefaultCompilationTarget } from './compute-engine/engine-compilation-targets.js';
+import { GLSLTarget as _GLSLTarget } from './compute-engine/compilation/glsl-target.js';
+import { WGSLTarget as _WGSLTarget } from './compute-engine/compilation/wgsl-target.js';
+import { PythonTarget as _PythonTarget } from './compute-engine/compilation/python-target.js';
+addDefaultCompilationTarget('glsl', () => new _GLSLTarget());
+addDefaultCompilationTarget('wgsl', () => new _WGSLTarget());
+addDefaultCompilationTarget('python', () => new _PythonTarget());
+
 // ── Interval types ──────────────────────────────────────────────────
 export type {
   Interval,
@@ -151,11 +167,17 @@ export {
   expand,
   expandAll,
   factor,
+  factorDetailed,
   solve,
   compile,
   getDefaultEngine,
 } from './compute-engine/free-functions.js';
 export type { FreeFunctionOptions } from './compute-engine/free-functions.js';
+export type {
+  FactorOptions,
+  FactorizationResult,
+  FactorStatistics,
+} from './compute-engine/factoring-types.js';
 
 // ── Explanations (see `expr.explain()`) ─────────────────────────────
 export {

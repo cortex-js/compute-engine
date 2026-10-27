@@ -634,55 +634,443 @@ An unannotated function literal is deliberately excluded from definitive
 runtime type membership while its signature can still be inference-widened.
 Such a test stays symbolic rather than returning a false negative.
 
-## Residue classes: the type `residue`
+## Value kinds and kind types
 
-`residue` is the primitive type of a residue class, an element of ℤ/nℤ: the
-value of `ResidueClass(k, n)`, and of any head whose signature returns it
-(user decision 2026-10-23, `plans/2026-10-23-residue-class-type.md`). It is
-an opaque value like `regexp`, `color` and `type`:
+A **value kind** is a set of values that are not numbers but take part in
+arithmetic with their own rules: a residue class, an element of a finite
+field, a measurement. A kind is declared on the operator definition of the
+head that constructs its values, with the `arithmetic` field
+(`ArithmeticDefinition`, `types-definitions.ts`). The result type of that
+head is the **kind type**. The public description is in
+`doc/06-guide-augmenting.md` ("Declaring a Value Kind") and
+`doc/08-guide-types.md` ("Kind Types"); the design and the decisions are in
+`plans/2026-10-26-value-kinds.md` (ROADMAP CE-507). This section states the
+type rules.
 
-- `residue <: value <: expression <: any`; it is disjoint from every numeric
-  type, from `boolean`, `string`, `character`, and every collection type.
-  `narrow('residue', 'number')` is `never`.
-- A join with a number type is the union: `widen('residue', 'integer')` is
-  `integer | residue`, not `value`. The join with `unknown` is `residue`.
-- A list of classes is read by its cells, as a list of booleans is: `[c, d]`
-  is a `list<residue^2>`, and `ℤ/nℤ` (`QuotientRing(Integers, n)`) is a
-  `set<residue>`. A `residue` cell cannot hold a number, so such a list is
-  never a `vector` or a `tensor`.
-- A symbol declared `residue` accepts a class and refuses an integer: an
-  integer is a representative of a class, not the class (`Element(7, ℤ/5ℤ)` is
-  `False`).
+Two readings are used, and they cannot be merged:
 
-The type does two things that the name `ResidueClass` did before:
+- **Dispatch is by head.** A value is a call; its head names a definition;
+  the definition holds the hooks. Two heads can have one kind type
+  (`ResidueClass` and a user `MyMod` are both `residue`) with different
+  hooks.
+- **Recognition is by type.** `r - r` with `r: residue` and no value, and
+  `g(2)/g(2)` with `g: (integer) -> residue`, have no head to read. Only the
+  declared type says that the value will be of a kind. An expression is
+  recognized as holding a kind value when its symbol's declared type, its
+  callee's declared result type or the type of its symbol's value has an arm
+  that is a kind type, or when it holds a call of a kind head at any depth.
 
-- **Admission.** The arithmetic operators that have residue arithmetic
-  (`Add`, `Subtract`, `Multiply`, `Divide`, `Negate`, `Power`, `Square`,
-  `Sqrt`, `Root`) name `residue` in their parameter types, and their numeric
-  argument checks (`checkNumericArgs`, `validate.ts`) admit it. Every other
-  operator refuses a class through its declared parameter type: `Sin(c)`,
-  `Floor(c)`, `Mod(c, 5)` are `incompatible-type` errors at boxing. `Max`
-  and `Min` refuse a class in their canonical handlers, because classes have
-  no order and no parameter type can spell "a value that is not a class".
-- **Protection.** The rules of canonicalization, evaluation and
-  simplification that are wrong for a class (`c/c` is not 1 when `c` has no
-  inverse, `c - c` is the class 0, `c + ∞` is not `∞`) ask
-  `containsResidueClass()` (`boxed-expression/residue-class.ts`) first. Its
-  evidence is the name `ResidueClass` at any depth, the result type of a
-  callee's signature (an operator declared `(any, any) -> residue`, a
-  function value whose inferred signature returns `residue`, the callee of
-  an `Apply`), and the declared type of a symbol (`r: residue` is protected
-  before `r` has a value). The type of the expression itself is not read:
-  computing it for every expression a rule looks at costs more than the
-  rules. The arithmetic of `ResidueClass` (the residue fold) stays keyed on
-  the name: a head with another name gets the admission and the protection,
-  and defines its own arithmetic.
+### Kind types
 
-A symbol typed `value` or `unknown` can hold a class without saying so, and
-the number rules still apply to it: with `w: value`, `w/w` is `1` when it is
-boxed, as `x/x` is for an undeclared `x`. A symbol that will hold a class is
-declared `residue`. The compiled targets decline an expression that holds a
-class.
+A kind type is one of:
+
+- a **kind primitive**: a name of the type language with an entry in the
+  subtype table of `common/type/subtype.ts` that lists no subtype and no
+  supertype but `value`, and that is in `KIND_PRIMITIVES`
+  (`boxed-expression/value-kinds.ts`): `residue`, `measurement` and
+  `quantity`. Only the library adds one, because a library signature is
+  parsed before any engine exists and must be able to name it;
+- a **nominal type whose definition is exactly `value`**, declared with
+  `ce.declareType(name, 'value', { mint: false })`. This is the form a host
+  declares. Types are engine-level (one namespace for each engine), so the
+  kind type is too.
+
+The engine treats the two forms in the same way everywhere: the dispatch,
+the recognition, the admission, the registry and the compile contract read
+"a kind type", never "a primitive".
+
+Subtyping and disjointness:
+
+- A kind type is a subtype of `value`, and so of `expression` and `any`. For
+  a primitive this is its table entry. For a nominal type it is a rule that
+  reads the definition (`valueKindDeclaration()` in `subtype.ts`, used by
+  `isValue()`), in the same way as an object type is a subtype of `object`
+  (`isObjectType()`). Any other nominal type is opaque: not a subtype of its
+  definition.
+- A kind type is disjoint from every type except `value`, `expression`,
+  `any`, `unknown` and itself; two kind types are disjoint from each other.
+  For a nominal type this is a rule of `provablyDisjointRules()`, which
+  would otherwise unfold the reference to `value`, and `value` overlaps the
+  numbers, the strings and the collections. The disjointness is what keeps
+  the number rules away from a kind value.
+- `narrow('residue', 'number')` is `never`. A join with a number type is
+  the union: `widen('residue', 'integer')` is `integer | residue`, not
+  `value`. The join with `unknown` is the kind type.
+- A list of kind values is read by its cells: `[c, d]` is a
+  `list<residue^2>`, and `[GF8(1), GF8(2)]` a `list<gf8^2>`
+  (`cellTypeMayCarryDimensions()` in `common/type/primitive.ts` reads a
+  registered kind type). A kind cell cannot hold a number, so such a list is
+  never a `vector` or a `tensor`. `ℤ/nℤ` (`QuotientRing(Integers, n)`) is a
+  `set<residue>`.
+- A symbol declared with a kind type accepts a value of the kind and refuses
+  a number: an integer is a representative of a residue class, not the
+  class (`Element(7, ℤ/5ℤ)` is `False`).
+
+Both rules for a nominal type read the definition only, so they hold before
+any head of the kind is declared, and they do not depend on the kind
+registry or on the order of the declarations.
+
+### The declaration checks
+
+At `ce.declare(head, { signature, arithmetic })`, before anything is
+installed (`prepareKindRegistration()`, `value-kinds.ts`):
+
+- The result type of every arm of the signature must be a kind type, a union
+  of kind types, or one of these with the marker arms `nan`, `missing`,
+  `nothing`, `error`. A transparent alias is read as its definition. Refused:
+  a number type, `boolean`, `string`, `expression`, `symbol`, `function`, a
+  collection type, `value`, `any`, `unknown`, a generic signature, a nominal
+  type with type parameters (`gf<7>`), a nominal type defined as another
+  nominal type, a nominal type defined as anything but exactly `value`, and
+  a nominal type declared with a minted constructor (the default of
+  `declareType()`; the record keeps the choice in `_minted`). So
+  `-> residue | integer` is refused: recognition by that type would protect
+  every integer.
+- A head that gives `add` must give `negate`: `a - b` is canonically
+  `Add(a, Negate(b))`, so without `negate` a difference never folds.
+- **The fields of the type.** `admittedAs`, `resultType` and `compile.type`
+  belong to the kind type, because a free symbol of the type has no head to
+  ask. They are stored in the TYPE part of the registry. The first head of a
+  type that gives a field sets it. Another head of the type that is LIVE at
+  the same time (its definition is in the dispatch part, which includes a
+  definition of a popped scope) must leave the field out (it then uses the
+  type's) or give an equal one: by value for `admittedAs` (absent counts as
+  `'none'` for the first head), by identity for `resultType` and
+  `compile.type`. When no other head of the type is live, a new
+  registration replaces the fields. A head of a type that a LIBRARY head
+  registered while the engine was constructed cannot add a `resultType` or a
+  `compile.type` that the library left out, nor give another `admittedAs`:
+  `MyMod` cannot give `residue` a `compile.type`, because that would set the
+  lowering of every free `r: residue` and of `ResidueClass` arithmetic.
+
+The type-declaration funnel (`declareType()`, `engine-declarations.ts`)
+protects a registered kind type: a declaration of the same name that makes
+it an alias, gives it type parameters, mints a constructor for it, or
+defines it as anything but exactly `value` is refused, so the subtype and
+disjointness rules keep holding. This matters for a `DeclareType` statement
+that runs again in a later Epsil batch, the one route that can replace a
+type definition.
+
+### The kind registry
+
+The registry of an engine (`ce._kindRegistry`, read and written only through
+`boxed-expression/value-kinds.ts`) has two parts:
+
+- The TYPE part maps a kind type to its fields and its live heads. It is
+  engine-level, like the type registry: a head declared with a kind in a
+  nested scope registers its type for the engine, and `popScope()` does not
+  remove it. The head is gone, but the protection of its type stays, which
+  is the safe direction.
+- The DISPATCH part maps a bound operator DEFINITION (not the spelling of
+  the head) to its arithmetic, so an expression keeps the hooks of the
+  definition it was bound to. An inner scope that declares another head of
+  the same name does not change the outer expressions. A redeclaration of
+  the same binding (`{ extend: true }`) replaces the entry; a redeclaration
+  without `arithmetic`, and the removal of the binding, remove the entry
+  (the type, its protection and its fields stay).
+
+A generation counter is incremented by every registration, replacement,
+removal and checkpoint restore. The recognition caches
+(`boxed-expression/residue-class.ts`) store the generation they were
+computed under, so an expression boxed before a kind was declared is
+recognized after it. Admission is not revisited: an expression refused at
+boxing before the hook existed stays refused.
+
+Three per-engine gates for each kind type let an engine that never uses a
+kind skip the walks that look for its values: a value of the type was
+constructed; a value of the type was assigned to a symbol; a symbol or a
+user callable was declared with a type that has an arm of the kind type. A
+kind registered after the library bootstrap opens its gates at
+registration. The library signatures and the library kind heads do not open
+a gate. Nor does a value that a library makes while it loads: the value of
+a physical constant (`SpeedOfLight`) is a quantity, and
+`deferKindValueGates()` (`value-kinds.ts`) keeps the gates closed during
+`loadLibraryDefinitions()` (`engine-library-bootstrap.ts`), which then asks
+each such constant to make its value again when it is first read. So an
+engine that never reads a physical constant and never makes a quantity does
+not pay for the walks of the recognition of `quantity` (about 10% of the
+time of an ordinary evaluation, measured 2026-10-26). The `carrier` and
+`resultType` checks of the apply sites (`someKindAdmittedByCarrier()`,
+`someKindHasResultType()`) read the same gates, so the `'number'` kind
+`measurement` costs nothing in an engine that has made no measurement. A
+gate only opens: a checkpoint does not restore it, and an open gate costs a
+walk, never a wrong answer.
+
+The registry is part of the bounded state of a checkpoint
+(`CHECKPOINT-MODEL.md`).
+
+### Admission: where a kind value is accepted
+
+A kind type is disjoint from the number types, so a parameter typed with a
+number type does not accept it by subtyping. A kind value is admitted at
+three groups of parameters (`boxed-expression/kind-admission.ts`):
+
+1. **The arithmetic operators, by rule.** The operand check of `Add`,
+   `Subtract`, `Multiply`, `Negate`, `Divide`, `Power`, `Sqrt`, `Root` and
+   `Square` admits every kind type for which a registered head of the type
+   gives the hook the operator calls: `add` for `Add` and `Subtract`,
+   `multiply` for `Multiply`, `negate`, `divide`, and `power` for `Power`,
+   `Sqrt`, `Root`, `Square`. The check removes the absence arms of the
+   operand type and the admitted kind arms, and requires what remains to be
+   `never` or a subtype of `number`, element by element inside a collection
+   type. So `integer | gf8`, `gf8 | missing` and `list<integer | gf8>` are
+   admitted, and `string | gf8` is refused. The same rule runs on the
+   type-only route (`deriveApplicationType()`,
+   `boxed-expression/derive-application-type.ts`), so that boxing and the
+   typing of a mapping body agree. The signatures of these operators do not
+   name a kind type: the rule reads the registry, at boxing. An arithmetic
+   operator used as a function value (`Map(Negate, L)`, `Reduce(L, Add)`)
+   is checked with its signature widened by the same kind types
+   (`groupOneCallbackType()`). The operators of group 1 are selected by
+   their NAME.
+2. **By type.** A parameter typed `value`, `any`, `expression`, `unknown` or
+   with the kind type admits a kind value through subtyping: `List`, `Hold`,
+   `Equal`, `IsMissing`, `Assign`, `GCD` (`(any*)`), `Max`, `Min`, the
+   relational operators, and every lazy or structural operator. These
+   operators run their own handlers, which see the value as a value.
+3. **As a number**, by the `admittedAs` field of the kind type:
+   - `'none'` (the default): no further admission. `residue` is a `'none'`
+     kind (user decision 2026-10-23): a class is an element of a finite ring
+     with no order and no embedding into the reals, so `Sin(c)`, `Floor(c)`
+     and `c < d` have no meaning, and admitting it as an integer would let it
+     reach integer code that computes from the representative. `quantity`
+     is a `'none'` kind too: the operators that accept a quantity name
+     `quantity` in their parameter type (group 2), see "Measurements and
+     quantities" below;
+   - `'real'`: admitted at every parameter that admits `real` once its
+     absence arms are removed (`real`, `number`, `complex`,
+     `complex | infinity`; not `integer` nor a ranged type);
+   - `'number'`: admitted at every parameter that admits `number` or `real`.
+     `measurement` is a `'number'` kind.
+
+   The **carrier** is what the kind stands in for. The operand check
+   replaces each kind arm of the operand type by the narrowest carrier the
+   parameter admits (`real` when the parameter admits `real`, else
+   `number`), also in the cells of a collection type and the components of a
+   tuple type, and then checks the result against the parameter as usual
+   (`withKindCarriers()`). So `umeasurement` (a `'number'` kind) at `real`
+   passes as `real`, at `complex` as `number`, and at `integer` is refused;
+   `string | umeasurement` at `real` is refused through its `string` arm;
+   `list<umeasurement>` at `list<real>` passes. The carrier rule does not
+   apply at a parameter that admits the kind by type (group 2), nor at the
+   group-1 operators, which admit by hook only: a `'number'` kind without
+   `power` is refused by `Square` and `Sqrt`.
+
+**Admission is not subtyping.** `isSubtype('umeasurement', 'real')` is
+`false`. Inference never reads a kind value as a number, `real | umeasurement`
+is a union, and a symbol declared `real` refuses a kind value. The carrier
+rule belongs to the operand check only (`checkNumericArgs()`,
+`nonNumericOperandError()` in `validate.ts`, the signature check of
+`boxed-operator-definition.ts`, and the type-only route).
+
+**Overloads.** When an operator has several arms, an arm that admits each
+kind operand by type (`(real | umeasurement) -> …`) is chosen over an arm
+that admits it only through the carrier (`(real) -> …`), even when the
+specificity rule of `overload.ts` would prefer the narrower arm
+(`armAdmitsKindsByType()`). The apply status and the result type come from
+the chosen arm, on boxing and on the type-only route.
+
+**A function with a body** (its value is a `Function` expression: a lambda,
+a `ce.declare` with a MathJSON or LaTeX body, an Epsil function) does not use
+the carrier rule (user decision B, 2026-10-26). Its body was canonicalized
+with the declared types of its parameters, and the canonical form folds
+`x/x` to `1` for a symbol typed `real` or `unknown`. So a parameter typed
+with a number type refuses a kind value at the call (`f: (real) -> real`
+applied to a measurement is an `incompatible-type` error), and a parameter
+typed `unknown`, `value`, `any` or with the kind type admits it (an untyped
+lambda's body may have folded `x/x`; a lambda meant for kind values types
+its parameter). The bound variable of a binder over a collection of kind
+values is typed by the element type, so its body is recognized; the
+contextual element type given to an untyped lambda (`box.ts`) includes the
+registered kind types, and a pre-boxed untyped lambda passed to such a
+binder is canonicalized again with that element type, so the box, parse and
+`ce.function()` routes agree.
+
+### Apply sites
+
+An operator is an **apply site** for a kind when at least one operand that
+holds a value of the kind was admitted only through the carrier (group 3),
+the operator is not lazy, it has an `evaluate` handler, it is not a function
+with a body, and it is not one of the operators that use the other hooks
+(group 1, the six relational operators, `Max`, `Min`, `ElementMax`,
+`ElementMin`, `Sort`, `Clamp`) (`isApplySite()`). The dispatch calls the
+kind's `apply` hook in place of the operator's `evaluate` handler. A threadable operator maps over a
+collection operand first, and `apply` is called for each element; an
+operator whose parameter is a collection type is an apply site when the
+elements of the collection include a kind value, and `apply` receives the
+collection and its elements, enumerated once and only when the collection is
+small enough (`engine.maxCollectionSize`) and of known finite size. When the
+kind gives no `apply`, the operator's handler runs and sees the value as it
+is. The numeric fact queries on a kind value (`isPositive`, `sgn`,
+`isInteger`, `isFinite`, …) answer `undefined`, so a canonical fold that
+reads them does not fire. The numeric accessors (`re`, `im`, `bignumRe`,
+`bignumIm`, `valueOf()`) answer `NaN`, unless the kind gives
+`numericValue()`: then they read the number it answers (the nominal of a
+measurement, user decision of 2026-10-26, plan section 13.2). The `apply`
+dispatch runs before the handler at every admitted operator, so a kernel
+that reads `re` never sees a kind value. The canonical folds of a group-3
+operator that do not read a numeric property (`Log(1, b)` → `0`) are guarded
+like the number rules.
+
+### Result types
+
+The kind typing applies at the operators of group 1, the apply sites, and
+the group-2 operators that NAME a kind type in a parameter. Every other
+operator (`GCD`, `List`, `Hold`, a function with a body) uses its own type
+handler on the operand as typed. `Sum`, `Product` and `Reduce` over a
+collection of kind values are typed as `Add` (`Multiply`) over the element
+type: `Sum([c1, c2])` is `residue`. For the typing, a kind TYPE has `apply`
+or `compare` when any registered head of the type gives it. At those
+operators, the static result type is, in order:
+
+1. The SHAPE is derived by replacing each kind arm of an operand type by a
+   scalar placeholder and running the operator's own type handler:
+   `c · (1, 2)` is a `tuple<residue, residue>`, `c · [1, 2]` a
+   `list<residue^2>`.
+2. Each placeholder cell of the result is replaced by the CELL type: the
+   union, over the kind types among the operands, of that type's
+   `resultType()` answer when it gives one (it receives the dispatched
+   operator, `'Add'` for a difference and `'Power'` for `Sqrt`, `Root`,
+   `Square`, and the operand types without their shapes, and may answer a
+   type string), else the kind type itself. So a valueless `q1 / q2` with
+   `q1, q2: uq` and a `resultType` that answers `number | uq` for `Divide`
+   is typed `number | uq`.
+3. The kind-free arms of a possibly-kind operand keep the operator's
+   ordinary result: `Negate(u)` with `u: real | umeasurement` is
+   `real | umeasurement`.
+4. An operator whose declared result type is not a number type keeps it:
+   the relational operators are `boolean`.
+5. An apply site whose kind type has no `apply` is typed by the operator's
+   ordinary result with the carrier in place of the kind arm, because the
+   operator's own handler runs. A group-2 operator that names the kind type
+   in its parameter and has a handler keeps its declared result type, unless
+   the kind type's `resultType` answers for it.
+
+`Max`, `Min` and `Clamp` with a kind that has `compare` are typed as the
+union of the kind arms of their operands and of the operator's own type over
+the kind-free operands: `Max(U, 3)` is `integer<3..3> | umeasurement`. With
+a kind that has no `compare`, they are typed `error` and evaluate to an
+`incompatible-type` error.
+
+### Evaluation and protection, in short
+
+The type rules above decide where a kind value goes. The evaluation rules
+are in the guide; the ones that interact with types are:
+
+- A sum or a product with kind values asks each kind's `add` (`multiply`)
+  once, in the order of first occurrence. The operands that hold no kind
+  value are combined as one ordinary sub-sum (sub-product); the operands
+  that hold one (a fold's value, an operand no hook folded, a valueless
+  symbol of a kind type) are placed beside it with no other fold.
+- The comparisons use `compare`; `Equal` without an answer from `compare`
+  asks the `eq` handlers of the two heads, then answers `False` for two
+  values of disjoint types, `True` for two identical values, and stays
+  unevaluated otherwise. `compare` can answer `'unordered'` (two known
+  values with no order, a measurement with a complex nominal): the four
+  order operators answer `False`, `Equal` and `NotEqual` go to the `eq`
+  handlers, and `Max`, `Min`, `Sort` stay unevaluated. `Max` and `Min` keep
+  the first operand of a tie, and `Clamp(x, lo, hi)` returns `x` when it is
+  equal to a bound. `compare` receives `context.tolerance` from `.is()` (its
+  `tolerance` argument, or `engine.tolerance`), and `undefined` from every
+  other comparison.
+- `isExact(value)` of the kind says whether a value is exact, for the rule
+  that an inexact operand turns `Indeterminate` into `NaN`
+  (`isInexactOperand()`, `nanOperandAnswer()`). Absent, the values are
+  exact.
+- `isNaN(value)` of the kind says whether a value stands for no value (a
+  measurement with a `NaN` nominal, a quantity with a `NaN` magnitude;
+  `kindValueIsNaN()`). Such a value follows the rule of the number `NaN`
+  and `compare` is not asked: `Max`, `Min`, `ElementMax`, `ElementMin` and
+  `Clamp` give `NaN`, the four order operators give `False`, and `Equal`
+  gives `False` also for the value and itself. Absent, no value is `NaN`.
+  The type is not changed: such a value keeps its kind type, not `nan`.
+- `simplify()` applies no rewrite rule at a node whose operator is of group
+  1 or an apply site, when a kind value is held at any depth below it by the
+  non-strict recognition (an arm `real | umeasurement` counts); only the
+  evaluation through the hooks and the folding of the kind-free terms run
+  there. The hooks receive in `written` the operands as they were written
+  before `simplify()` simplified them (`withOperandsWrittenBefore()`,
+  `kind-dispatch.ts`), so a hook that reads `Negate(b)` there gives the same
+  answer as under `evaluate()`. The rules `x - x = 0`, `x/x = 1`, the absorbing zero and infinity,
+  `Expand`, `Factor` and `Together` check the same recognition.
+- The compile boundary uses the STRICT recognition: an expression that holds
+  a kind value for certain, or whose result type is a kind type for certain,
+  declines unless the kind type gives a lowering for the target; an
+  expression that only may hold one (`number | residue`) compiles as a
+  number. See `COMPILATION-MODEL.md`, "Value kinds".
+
+A symbol typed `value` or `unknown` can hold a kind value without saying so,
+and the number rules still apply to it: with `w: value`, `w/w` is `1` when
+it is boxed, as `x/x` is for an undeclared `x`. A symbol that will hold a
+kind value is declared with the kind type.
+
+### Residue classes
+
+`residue` is the kind primitive of a residue class, an element of ℤ/nℤ (user
+decision 2026-10-23, `plans/2026-10-23-residue-class-type.md`).
+`ResidueClass(k, n)` declares its arithmetic with the `arithmetic` field
+(`admittedAs: 'none'`, no `compare`, no `resultType`, no `compile`); its
+hooks are the residue functions of `boxed-expression/residue-class.ts`. A
+user head declared `-> residue` gives its own hooks, and its values do not
+combine with those of `ResidueClass` (each head folds its own values). The
+signatures of the arithmetic operators do not name `residue` any more: they
+admit it by the group-1 rule, which reads the registry. So an engine built
+without the `ResidueClass` definition does not admit `residue` at `Add`, but
+still protects a symbol declared `residue` (a primitive is a kind type in
+every engine). `Max(c, x)` and `Min(c, x)` are typed `error`, because
+classes have no `compare`.
+
+### Measurements and quantities
+
+`measurement` and `quantity` are the kind primitives of `Measurement(value,
+error)` (`library/measurement-arithmetic.ts`, `MEASUREMENT_ARITHMETIC`) and
+`Quantity(magnitude, unit)` (`library/quantity-kind.ts`,
+`QUANTITY_ARITHMETIC`). Each is in `KIND_PRIMITIVES` and has an entry in the
+subtype table of `common/type/subtype.ts`, so a library signature can name
+it. The decisions are in section 13 of `plans/2026-10-26-value-kinds.md`
+(ROADMAP CE-507). Both heads are typed by their signatures:
+`(value, value) -> measurement` and `(value, value) -> quantity`. Before
+phase 2, a measurement was typed with the type of its nominal and a quantity
+`value`.
+
+- **`measurement` is a `'number'` kind.** A measurement is admitted through
+  the carrier at every parameter that admits `number` or `real` (also a
+  parameter typed by a type variable bounded by `number`, `(T) -> T where
+  T: number`, where the call is typed with the kind arm and not with `T`),
+  and refused at `integer` and at a ranged parameter. A symbol declared
+  `real`, `number` or `integer`, and a function with a body over a number
+  type, refuse it (decision B). Every library operator that admits it is an
+  apply site, and `apply` answers. `resultType` answers
+  `number | measurement` for every operator except `Add`, `Negate`,
+  `PreIncrement`, `PreDecrement`, `Conjugate`, `Real`, `Re` and `Abs`,
+  whose result keeps the uncertainty of the operand and so is always a
+  measurement: a propagated uncertainty of 0 collapses to the bare value
+  (`makeMeasurement()`), so `Floor(2.5 ± 0.1)` is the number `2`. A complex
+  nominal is not visible in the type: a complex measurement at a parameter
+  that is real (no arm admits `complex`) is refused at evaluation by
+  `apply` (`realOnlyParameter()`), with `incompatible-type`.
+- **`quantity` is a `'none'` kind.** It is admitted at the arithmetic
+  operators (group 1), at the parameters typed `value`, `any`, `expression`
+  or `unknown` (group 2: `UnitConvert`, `List`, the relational operators,
+  `Max`, `Min`), and at the operators whose parameter type names `quantity`:
+  the 24 trigonometric, hyperbolic and inverse functions
+  (`(complex | quantity) -> number`, with an `infinity` or
+  `signed_infinity` arm where the function had one) and `Abs`
+  (`(complex | infinity | quantity) -> number`). An angle (`30 deg`) folds
+  to radians at canonicalization; any other quantity is admitted and stays
+  unevaluated. Every other operator refuses a quantity at boxing:
+  `Floor(2 m)`, `Hypot(2 m, 3)`, `Mean([2 m, 4 m])`. `resultType` answers
+  `number | quantity` for `Multiply`, `Divide` and `Power` (also `Sqrt`,
+  `Root`, `Square`: a unit with no dimension gives a number), `quantity` for
+  `Abs`, and `number` for the trigonometric functions. The `quantity` arm of
+  these signatures does not take part in inference: a use of a valueless
+  symbol at `Abs` or `Arctan` infers the other arms, not `quantity`.
+- **A union of numbers and kind values in a literal matrix keeps its
+  shape**: `[[2 ± 0.1, 2], [3, 4]]` is a
+  `matrix<integer | measurement^(2x2)>`, which the matrix operators admit
+  through the carrier (`shapedListTypeD()`, `collections.ts`).
+- **The physical constants** are declared `value` (`library/library.ts`),
+  and their value is a quantity, typed `quantity`.
 
 ## Protocols, sums, and objects
 

@@ -1226,6 +1226,55 @@ _getCompilationTarget(name):
 
 <MemberCard>
 
+##### ComputeEngine.registerCompilationTarget() {#registercompilationtarget-1}
+
+```ts
+registerCompilationTarget(name, target): void
+```
+
+Register a compilation target under `name`, so that
+`compile(expr, { to: name })` resolves it. A later registration under the
+same name replaces the earlier target. Throws when `name` is empty or the
+target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
+and `compile()`.
+
+Every engine has `javascript` and `interval-js`. Every engine also has
+`glsl`, `wgsl` and `python` once the full package entry,
+`@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
+the program, whichever entry made the engine and in whichever order. A
+program that loads only `@cortex-js/compute-engine/core` has the two
+built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+from `@cortex-js/compute-engine/compile` and register it here.
+
+####### name
+
+`string`
+
+####### target
+
+`LanguageTarget`\<[`Expression`](#expression-5)\>
+
+</MemberCard>
+
+<MemberCard>
+
+##### ComputeEngine.unregisterCompilationTarget() {#unregistercompilationtarget-1}
+
+```ts
+unregisterCompilationTarget(name): void
+```
+
+Remove the compilation target registered under `name`. A name that is
+not registered is ignored.
+
+####### name
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ComputeEngine.number() {#number-2}
 
 ###### number(value, options)
@@ -12653,6 +12702,55 @@ _getCompilationTarget(name):
 
 <MemberCard>
 
+##### IComputeEngine.registerCompilationTarget() {#registercompilationtarget}
+
+```ts
+registerCompilationTarget(name, target): void
+```
+
+Register a compilation target under `name`, so that
+`compile(expr, { to: name })` resolves it. A later registration under the
+same name replaces the earlier target. Throws when `name` is empty or the
+target lacks one of `getOperators()`, `getFunctions()`, `createTarget()`
+and `compile()`.
+
+Every engine has `javascript` and `interval-js`. Every engine also has
+`glsl`, `wgsl` and `python` once the full package entry,
+`@cortex-js/compute-engine/epsil` or the CLI has been loaded anywhere in
+the program, whichever entry made the engine and in whichever order. A
+program that loads only `@cortex-js/compute-engine/core` has the two
+built-in targets: import `GLSLTarget`, `WGSLTarget` or `PythonTarget`
+from `@cortex-js/compute-engine/compile` and register it here.
+
+####### name
+
+`string`
+
+####### target
+
+`LanguageTarget`\<[`Expression`](#expression-5)\>
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.unregisterCompilationTarget() {#unregistercompilationtarget}
+
+```ts
+unregisterCompilationTarget(name): void
+```
+
+Remove the compilation target registered under `name`. A name that is
+not registered is ignored.
+
+####### name
+
+`string`
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.number() {#number-1}
 
 ###### number(value, options)
@@ -15180,10 +15278,13 @@ readonly referencedFunctions: readonly string[];
 
 The user functions **applied** in this expression: the operator head of
 a function application when that head is a user-definable symbol — `f` in
-`f(x)`, `g` in `g(x) := f(x) + 1`. Built-in operators (`Add`, `Sin`, …),
-constants, and names bound to a value or by an enclosing scope (function
-parameters, summation indices, `Block` locals) are excluded — the same
-predicate [freeVariables](#freevariables) applies to ordinary symbols.
+`f(x)`, `g` in `g(x) := f(x) + 1`. A user function is listed whether it
+is undefined, declared, or already defined (`f(x) := …`,
+`ce.assign("f", …)`). The operators of a library (`Add`, `Sin`, …: the
+standard library, a library given to the constructor, or one loaded with
+`ce.loadLibrary()`), constants, and names bound by an enclosing scope of
+the expression (function parameters, summation indices, `Block` locals) are
+excluded.
 
 Operator heads are not symbols of the expression, so they appear in
 neither [symbols](#symbols) nor [freeVariables](#freevariables). This accessor recovers
@@ -15204,9 +15305,15 @@ readonly references: readonly string[];
 ```
 
 The symbols this expression **references** but does not itself define:
-the union of [freeVariables](#freevariables) (referenced values) and
-[referencedFunctions](#referencedfunctions) (applied user functions), minus
-[defines](#defines).
+every user name it reads, as a value or as an applied function
+([referencedFunctions](#referencedfunctions)), minus [defines](#defines). A name is listed
+whether or not it already has a value or a definition: after
+`a := 5`, `g(x) := x + a` still references `a`. This is the difference
+with [freeVariables](#freevariables), which lists only the symbols that have no
+value. The names of a library (`Pi`, `Sin`, …: the standard library, a
+library given to the constructor, or one loaded with
+`ce.loadLibrary()`), constants, and names bound by the expression itself (parameters, indices, `Block`
+locals) are excluded.
 
 This is the complete in-edge set for a dependency graph keyed on cells
 (e.g. a notebook): pair it with [defines](#defines) for the out-edges.
@@ -19792,6 +19899,7 @@ type ValueType = {
 type RecordType = {
   kind: "record";
   elements: Record<string, Type>;
+  closed: true;
 };
 ```
 
@@ -19802,6 +19910,19 @@ The keys are strings. The set of keys is fixed.
 For a record type to be a subtype of another record type, it must contain
 every key required by the other type, and all their types must match (width
 subtyping). It may contain additional keys.
+
+A record type is OPEN: `record{a: integer}` holds every value that has a
+field `a` of type `integer`, and also other fields of any type. So it is a
+`dictionary<T>` only when `T` holds every value.
+
+The type of a dictionary VALUE is CLOSED (`closed: true`): the value has
+exactly the listed fields and no other. `{a: 1}` is typed
+`record{a: integer}` with `closed: true`, and that type is a subtype of
+`dictionary<integer>`. No type syntax spells a closed record: a closed
+record prints as the open record with the same fields, and the parser
+makes only open records. A closed record is a subtype of the open record
+with the same fields, and a record type is a subtype of a closed record
+only when it is closed and has the same set of keys.
 
 </MemberCard>
 

@@ -256,12 +256,18 @@ describe('An argument at an inferred point parameter that may hold lists', () =>
 
   test('a parameter that is not a point is not refused', () => {
     // `f(x) := x + 1` infers `(unknown) -> number`: the call keeps the
-    // signature result for any operand.
+    // signature result for a number. A boolean or a string argument is
+    // typed from the body, which is an `incompatible-type` error: the value
+    // is that error, which `number` does not hold (ROADMAP CE-490).
     const ce = new ComputeEngine();
     ce.parse('f(x) := x + 1').evaluate();
     expect(ce.box('f').type.toString()).toBe('(x: unknown) -> number');
-    for (const arg of [3, 'True', { str: 'a' }] as const)
-      expect(ce.box(['f', arg as never]).type.toString()).toBe('number');
+    expect(ce.box(['f', 3]).type.toString()).toBe('number');
+    for (const arg of ['True', { str: 'a' }] as const) {
+      const call = ce.box(['f', arg as never]);
+      expect(call.type.toString()).toBe('error');
+      expect(valueFits(call.evaluate(), call.type.type)).toBe(true);
+    }
   });
 
   test('a list of lists bound whole while another argument maps', () => {
@@ -505,5 +511,50 @@ describe('An inferred signature is not a contract', () => {
       expect(call.type.toString()).toBe('error');
       expect(call.evaluate().type.toString()).toBe('error');
     }
+  });
+});
+
+describe('A point of another arity that the body reads whole, beside a mapped argument', () => {
+  // `c(P, t) := t · P/(P[1] − 1)` is inferred `(tuple<number>, unknown) ->
+  // tuple<number>`. `c((3, 2), [1, 2])` maps over `t` and binds the pair
+  // whole: its value is a list of pairs, which a list of one-component
+  // tuples does not hold. The boxed call and the descriptor route agree.
+  const ce = new ComputeEngine();
+  ce.assign(
+    'c',
+    ce.box([
+      'Function',
+      ['Multiply', 't', ['Divide', 'P', ['Subtract', ['At', 'P', 1], 1]]],
+      'P',
+      't',
+    ] as any)
+  );
+
+  test('the signature is inferred with a one-component point', () => {
+    expect(ce.box('c').type.toString()).toBe(
+      '(P: tuple<number>, t: unknown) -> tuple<number>'
+    );
+  });
+
+  test('the boxed call holds its value', () => {
+    const call = ce.box(['c', ['Tuple', 3, 2], ['List', 1, 2]] as any);
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[(3/2, 1),(3, 2)]');
+    expect(valueFits(value, call.type.type)).toBe(true);
+  });
+
+  test('the descriptor route holds the value too', () => {
+    const t = deriveApplicationType(
+      ce,
+      'c',
+      ['tuple<integer, integer>', 'list<integer>'].map((x) =>
+        describeType(ce.type(x).type)
+      )
+    );
+    expect(t).toBeDefined();
+    const value = ce
+      .box(['c', ['Tuple', 3, 2], ['List', 1, 2]] as any)
+      .evaluate();
+    expect(valueFits(value, t!)).toBe(true);
   });
 });

@@ -102,7 +102,11 @@ import {
   resolveContextualArm,
   type OverloadResolution,
 } from './overload.js';
-import { isSubtype, widen } from '../../common/type/subtype.js';
+import {
+  isSubtype,
+  valueKindDeclaration,
+  widen,
+} from '../../common/type/subtype.js';
 import { typesOverlap } from '../../common/type/reduce.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -113,8 +117,9 @@ import {
   resolveTypeForCompilation as resolveType,
   placeholderSlotsAs,
   signatureArms,
-  withoutResidueArm,
+  withoutKindArms,
 } from '../../common/type/utils.js';
+import { KIND_PRIMITIVES, kindTypeNames } from './value-kinds.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
   freeTypeVariables,
@@ -132,6 +137,7 @@ import {
 import {
   annotateFunctionLiteralParams,
   lookupApplicable,
+  writtenUntypedFunctionLiteral,
 } from '../function-utils.js';
 import {
   canonical,
@@ -482,7 +488,17 @@ function boxStructuralSymbol(
   // `ce.symbol()` normalizes the name to NFC: compare with that form, so that
   // a name such as `Å` (which normalizes to `Å`) is not taken for a
   // name that resolved to another expression.
-  if (isSymbol(bound, name.normalize())) return bound;
+  if (isSymbol(bound, name.normalize())) {
+    // Marked for the structural form, so that `subs()` boxes a replacement
+    // structurally (`BoxedSymbol._asStructural()`, which leaves a library
+    // symbol and a symbol with no definition unchanged). `ce.symbol()`
+    // returns a fresh instance for a user definition, so it is marked in
+    // place.
+    const symbol = bound as Expression & {
+      _asStructural?: (inPlace: boolean) => Expression;
+    };
+    return symbol._asStructural?.(true) ?? bound;
+  }
   return ce.symbol(name, { canonical: false, metadata });
 }
 
@@ -1307,7 +1323,7 @@ function triviallyAdmittedCall(
 }
 
 /** True when every declared parameter of `signature` is numeric. */
-function allParamsNumeric(signature: Type): boolean {
+function allParamsNumeric(ce: ComputeEngine, signature: Type): boolean {
   if (typeof signature === 'string' || signature.kind !== 'signature')
     return false;
   const params = [
@@ -1315,12 +1331,13 @@ function allParamsNumeric(signature: Type): boolean {
     ...(signature.optArgs ?? []),
     ...(signature.variadicArg ? [signature.variadicArg] : []),
   ];
-  // A parameter that admits a residue class beside its numbers (the
-  // arithmetic operators) is numeric here: a free argument of `x / 2` is
-  // inferred a number, as before the `residue` arm.
+  // A parameter that admits a kind value beside its numbers (the
+  // arithmetic operators admit a residue class) is numeric here: a free
+  // argument of `x / 2` is inferred a number, as before the `residue` arm.
+  const kinds = kindTypeNames(ce);
   return (
     params.length > 0 &&
-    params.every((p) => isSubtype(withoutResidueArm(p.type), 'number'))
+    params.every((p) => isSubtype(withoutKindArms(p.type, kinds), 'number'))
   );
 }
 
@@ -1642,6 +1659,12 @@ function boxInternal(
     // counted like the MathJSON one below (see `boxingDepth`).
     //
     const forms = options?.canonical ?? true;
+    // A boxed symbol requested in the structural form is marked for it, as a
+    // symbol boxed from MathJSON is (`boxStructuralSymbol()`), so that its
+    // `subs()` boxes a replacement structurally. The getter marks a copy, so
+    // the canonical symbol given here is not changed.
+    if (options?.structural === true && forms === false && isSymbol(expr))
+      return (rebound ?? expr).structural;
     boxingDepth += 1;
     const canonicalized =
       forms === true && options?.scope === undefined
@@ -2004,7 +2027,8 @@ function concreteCallbackParamType(t: Type): Type | undefined {
 function annotateCallbacksFromSignature(
   ce: ComputeEngine,
   ops: ReadonlyArray<ExpressionInput>,
-  sigType: Type | undefined
+  sigType: Type | undefined,
+  out?: { stamp?: ValueDerivedStamp }
 ): ReadonlyArray<ExpressionInput> {
   if (sigType === undefined || typeof sigType === 'string') return ops;
   const arms = overloadArms(sigType);
@@ -2015,7 +2039,7 @@ function annotateCallbacksFromSignature(
     // ratified conservative skip.
     const arm = resolveContextualArm(arms, ops.length);
     if (arm === undefined) return ops;
-    return annotateCallbacksFromContextualSolve(ce, ops, arm);
+    return annotateCallbacksFromContextualSolve(ce, ops, arm, out);
   }
   if (sigType.kind !== 'signature') return ops;
   // A POLYMORPHIC callee takes the CONTEXTUAL route instead (Design D): its
@@ -2025,7 +2049,7 @@ function annotateCallbacksFromSignature(
   // slot is contextually typed there, and only after `S` has been
   // instantiated from the sibling operands.
   if (sigType.typeParams !== undefined && sigType.typeParams.length > 0)
-    return annotateCallbacksFromContextualSolve(ce, ops, sigType);
+    return annotateCallbacksFromContextualSolve(ce, ops, sigType, out);
 
   return annotateFromDeclaredParams(ce, ops, sigType);
 }
@@ -2112,7 +2136,8 @@ function annotateFromDeclaredParams(
 function annotateCallbacksFromContextualSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<ExpressionInput>,
-  arm: FunctionSignature
+  arm: FunctionSignature,
+  out?: { stamp?: ValueDerivedStamp }
 ): ReadonlyArray<ExpressionInput> {
   // Discriminate FIRST, in strictly increasing cost, so an application with no
   // stampable literal at all — the overwhelmingly common case, including every
@@ -2155,7 +2180,11 @@ function annotateCallbacksFromContextualSolve(
   // but on an already-raw `Expression` that call is the identity, so what this
   // buys is the ARITY GUARD below, which needs this exact expression before the
   // stamp runs.
-  const stampable: { slot: CallbackSlot; raw: Expression }[] = [];
+  const stampable: {
+    slot: CallbackSlot;
+    raw: Expression;
+    preboxed: boolean;
+  }[] = [];
   for (const slot of plan.callbacks) {
     const op = ops[slot.index];
     if (op === undefined) continue;
@@ -2164,11 +2193,24 @@ function annotateCallbacksFromContextualSolve(
     // work every multi-collection `Map` would otherwise pay.
     if (!mayBeInlineFunctionLiteral(op)) continue;
     const raw = inlineLiteral(ce, op);
-    if (raw !== undefined) stampable.push({ slot, raw });
+    if (raw !== undefined) stampable.push({ slot, raw, preboxed: false });
+    else {
+      // A function literal boxed before the call, with no annotated
+      // parameter, is stamped too, from its written form, but only with the
+      // type of a value kind (see below).
+      const written =
+        op instanceof _BoxedExpression
+          ? writtenUntypedFunctionLiteral(op)
+          : undefined;
+      if (written !== undefined)
+        stampable.push({ slot, raw: written, preboxed: true });
+    }
   }
   if (stampable.length === 0) return ops;
 
   let result: ExpressionInput[] | undefined;
+  // The literals as written, at each index whose literal is stamped below.
+  let literals: Map<number, Expression> | undefined;
 
   // §5 step 1: canonicalize only the operands the solve needs, and hand the
   // CANONICAL form onward (canonical-of-canonical is the identity, so the
@@ -2195,7 +2237,7 @@ function annotateCallbacksFromContextualSolve(
 
   // §5 step 2 + step 3.
   const instantiated = instantiateCallbackSlots(arm, plan, actuals);
-  for (const { slot, raw } of stampable) {
+  for (const { slot, raw, preboxed } of stampable) {
     const s = instantiated.get(slot.index);
     if (s === undefined) continue;
     // A VARIADIC contextual arrow (`(T+) any -> U` as a SLOT) would pair one
@@ -2219,13 +2261,128 @@ function annotateCallbacksFromContextualSolve(
       stampableParamType(arg.type)
     );
     if (!paramTypes.some((x) => x !== undefined)) continue;
+    // A literal boxed before the call already has a canonical body, which
+    // reads each parameter as a possible number. It is canonicalized again
+    // from its written form only when a parameter takes the type of a value
+    // kind: the canonical body may have folded `x/x` to `1`, which is wrong
+    // for a kind value (`Map(f, [ResidueClass(2, 4), ResidueClass(3, 4)])`
+    // gave `[1, 1]`; `docs/plans/2026-10-26-value-kinds.md`, section 4.2).
+    // For any other element type the boxed literal is kept as it is.
+    if (
+      preboxed &&
+      !paramTypes.some((x) => x !== undefined && isKindElementType(x))
+    )
+      continue;
     const literal = annotateFunctionLiteralParams(ce, raw, paramTypes);
     if (literal === undefined) continue;
     result ??= [...ops];
     result[slot.index] = literal;
+    if (out !== undefined) (literals ??= new Map()).set(slot.index, raw);
+  }
+
+  // A parameter type solved from the type of a source operand that holds a
+  // variable can become wrong when a variable is assigned again: the type
+  // of the operand changes. This is true for a variable with an inferred
+  // type, for a variable declared with a bare constructor (`list`), whose
+  // element type follows each assignment, and for a variable whose value
+  // reads another variable. Record each such operand with its type now, so
+  // that the caller can box the call again when the type of the operand
+  // changes (`recordValueDerivedStamp()`). An operand that holds no
+  // variable, or only constants, is not recorded.
+  if (out !== undefined && literals !== undefined) {
+    const sources: { expr: Expression; type: Type }[] = [];
+    for (const i of plan.sources) {
+      const src = result?.[i] ?? ops[i];
+      if (!(src instanceof _BoxedExpression)) continue;
+      const holdsVariable = src.symbols.some((name) => {
+        const def = ce.lookupDefinition(name);
+        return isValueDef(def) && !def.value.isConstant;
+      });
+      if (holdsVariable) sources.push({ expr: src, type: src.type.type });
+    }
+    if (sources.length > 0) out.stamp = { literals, sources, ops: [] };
   }
 
   return result ?? ops;
+}
+
+/** What the contextual callback solve read to stamp a callback literal from
+ * the value of a variable. `literals` holds, for each operand index whose
+ * literal was stamped, the literal as written (with no stamp). `sources`
+ * holds each source operand that the solve read and that holds a variable,
+ * with the type that the operand had when the solve read it. `ops` holds
+ * the operands after the stamp. */
+type ValueDerivedStamp = {
+  literals: Map<number, Expression>;
+  sources: { expr: Expression; type: Type }[];
+  ops: ReadonlyArray<ExpressionInput>;
+};
+
+/**
+ * Make the call `result` follow the variables that its callback stamp was
+ * solved from.
+ *
+ * The contextual callback solve gives the parameter of an inline callback
+ * the element type of the value that a variable holds when the call is
+ * boxed. Example: with `L := [1, 2]`, `Map(x ↦ x + 1, L)` stamps
+ * `x: integer`. After `L := [1.5, 2.5]`, the stamp refuses each element,
+ * and the evaluation gave a list of `incompatible-type` errors, while the
+ * same call boxed after the assignment gave `[2.5, 3.5]`.
+ *
+ * The call records, as its receiver (`BoxedFunction._stampCallee()`), the
+ * source operands that the solve read, with their types then, and its
+ * operands as written. The counter of the receiver moves each time the
+ * type of a source operand is not the type that it had at the last read.
+ * Then the type and the value of the call are those of the same call boxed
+ * again (`BoxedFunction._reboxedForCallee()`), and the solve reads the type
+ * that the operand has now. The types are compared, not the change
+ * counters of the variables: the type of the operand `s`, when `s` holds
+ * `Reverse(L)`, changes when `L` is assigned again, and the counter of `s`
+ * does not move.
+ *
+ * The literal as written is not bound. It is boxed again in the lexical
+ * scope of this call, so that a name in its body has the binding that it
+ * had when the call was boxed, also after that scope was left.
+ *
+ * A canonical handler can give a call of another operator: `Fold(f, x, L)`
+ * becomes `Reduce(L, f, x)`. The record is then put on that call, with the
+ * operator and the operands of the call as written, and the call is boxed
+ * again from them. (ROADMAP CE-464)
+ */
+function recordValueDerivedStamp(
+  ce: ComputeEngine,
+  result: Expression,
+  name: MathJsonSymbol,
+  record: ValueDerivedStamp
+): void {
+  const ops = record.ops;
+  if (!(result instanceof BoxedFunction)) return;
+  if (result.operator === name && result.nops !== ops.length) return;
+  const written = ops.map(
+    (op, i) =>
+      record.literals.get(i) ??
+      (op instanceof _BoxedExpression ? op : ce.expr(op, { form: 'raw' }))
+  );
+  const sources = record.sources;
+  const seen = sources.map((x) => x.type);
+  let version = 0;
+  const receiver = {
+    get _writeVersion(): number {
+      for (let i = 0; i < sources.length; i++) {
+        const t = sources[i].expr.type.type;
+        const before = seen[i];
+        if (t === before) continue;
+        if (isSubtype(t, before) && isSubtype(before, t)) continue;
+        seen[i] = t;
+        version += 1;
+      }
+      return version;
+    },
+  };
+  result._stampCallee(undefined, written, receiver, {
+    operator: result.operator === name ? undefined : name,
+    scope: ce.context.lexicalScope,
+  });
 }
 
 /** Could `op` be an inline `Function` literal? A purely SYNTACTIC test on the
@@ -2267,8 +2424,23 @@ function inlineLiteral(
  * PERMANENT union exclusion — plus the ground-type invariant: a parameter
  * still mentioning a variable the solve could not pin says nothing about an
  * element, so it stays bare. */
+/** True when the stamped parameter type `t` is the type of a value kind:
+ * a kind primitive (`residue`) or a nominal type defined as exactly `value`
+ * (`valueKindDeclaration()`). */
+function isKindElementType(t: Type): boolean {
+  if (typeof t === 'string') return KIND_PRIMITIVES.includes(t);
+  return valueKindDeclaration(t) !== undefined;
+}
+
 function stampableParamType(t: Type): Type | undefined {
   if (freeTypeVariables(t).size > 0) return undefined;
+  // The type of a value kind declared by the host, a nominal type defined
+  // as exactly `value` (`valueKindDeclaration()`), is a leaf like `residue`:
+  // `Map(x ↦ x/x, [GF8(1), GF8(2)])` stamps `x: gf8` and keeps `x/x`, as it
+  // does for a list of classes. It is read before `resolveType()`, which
+  // unfolds a nominal reference to its definition (`value`, which is not
+  // admitted), and from the definition alone, so it needs no kind registry.
+  if (valueKindDeclaration(t) !== undefined) return t;
   const resolved = resolveType(t);
   return admissibleElementType(resolved) ? t : undefined;
 }
@@ -2537,9 +2709,11 @@ const ADMISSIBLE_ELEMENT_PRIMITIVES: ReadonlySet<string> = new Set<string>([
   // `type` (a reified type expression) is another such leaf: a callback over
   // a `list<type>` deserves the same contextual element stamp.
   'type',
-  // `residue` (a residue class) is another such leaf: a callback over the
-  // elements of `ℤ/nℤ`, a `set<residue>`, deserves the stamp too.
-  'residue',
+  // The kind primitives (`residue`, a residue class) are other such leaves:
+  // a callback over the elements of `ℤ/nℤ`, a `set<residue>`, deserves the
+  // stamp too. A nominal kind type (`gf8`) is admitted by
+  // `stampableParamType()`.
+  ...KIND_PRIMITIVES,
 ]);
 
 /**
@@ -3439,8 +3613,12 @@ function makeCanonicalFunctionCore(
       applyOperatorDefinition(ce, name, ops, metadata, scope, opDef)
     );
 
-  // Receives the operands as boxed before the check against `opDef`.
-  const checked: { ops?: ReadonlyArray<Expression> } = {};
+  // Receives the operands as boxed before the check against `opDef`, and
+  // what a callback stamp read from the value of a variable.
+  const checked: {
+    ops?: ReadonlyArray<Expression>;
+    stamp?: ValueDerivedStamp;
+  } = {};
   const result = applyOperatorDefinition(
     ce,
     name,
@@ -3484,6 +3662,10 @@ function makeCanonicalFunctionCore(
     result.nops === ops.length
   )
     result._stampCallee(writtenArguments, undefined, fieldReceiver);
+  // A callback literal stamped from the value of a variable: the call is
+  // boxed again after an assignment to the variable.
+  if (checked.stamp !== undefined)
+    recordValueDerivedStamp(ce, result, name, checked.stamp);
   return result;
 }
 
@@ -3739,7 +3921,10 @@ function applyOperatorDefinition(
   scope: Scope | undefined,
   opDef: BoxedOperatorDefinition,
   rawOps?: ReadonlyArray<Expression>,
-  checkedOut?: { ops?: ReadonlyArray<Expression> }
+  checkedOut?: {
+    ops?: ReadonlyArray<Expression>;
+    stamp?: ValueDerivedStamp;
+  }
 ): Expression {
   let result: Expression | null;
 
@@ -3757,8 +3942,15 @@ function applyOperatorDefinition(
   // converted operator declares binding sites, so nothing reaches the other
   // route today. TRIPWIRE: a converted operator that also BINDS variables must
   // re-visit this gate — it would silently stamp nothing.
-  if (rawOps === undefined && !ops.some(isSpreadOperand))
-    ops = annotateCallbacksFromSignature(ce, ops, opDef.signature.type);
+  if (rawOps === undefined && !ops.some(isSpreadOperand)) {
+    ops = annotateCallbacksFromSignature(
+      ce,
+      ops,
+      opDef.signature.type,
+      checkedOut
+    );
+    if (checkedOut?.stamp !== undefined) checkedOut.stamp.ops = ops;
+  }
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
@@ -3891,6 +4083,7 @@ function applyOperatorDefinition(
             {
               resolutionOut: lazyResolutionOut,
               operatorName: name,
+              operatorDefinition: opDef,
               // Contract B NaN admission — same as the strict site above.
               nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
               refusesAbsentAt: (i) => opDef.refusesAbsentOperandAt(i),
@@ -4029,7 +4222,7 @@ function applyOperatorDefinition(
           isFunction(result, name) &&
           result.isValid;
         const numericParams =
-          sameHeadValid && allParamsNumeric(opDef.signature.type);
+          sameHeadValid && allParamsNumeric(ce, opDef.signature.type);
         if (
           sameHeadValid &&
           !triviallyAdmittedCall(ce, opDef.signature.type, result.ops)
@@ -4056,6 +4249,7 @@ function applyOperatorDefinition(
             {
               resolutionOut: seamResolution,
               operatorName: name,
+              operatorDefinition: opDef,
               nanPolicyAt: (i) => opDef.resolvedNanBehaviorAt(i),
               refusesAbsentAt: (i) => opDef.refusesAbsentOperandAt(i),
               noInference: true,
@@ -4183,6 +4377,7 @@ function applyOperatorDefinition(
         {
           resolutionOut,
           operatorName: name,
+          operatorDefinition: opDef,
           // An absent argument at an annotated parameter of a function
           // literal is refused (`refusesAbsentArgument`, `validate.ts`).
           enforcesParameterAnnotations: opDef.enforcesParameterAnnotations,

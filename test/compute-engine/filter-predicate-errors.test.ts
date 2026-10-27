@@ -30,11 +30,13 @@ describe('Filter with an Error-valued predicate result', () => {
     // First evaluation auto-annotates the parameter with `integer`.
     expect(f.evaluate().toString()).toBe('[1,2,3]');
 
-    // Retract the source to floats: every element is now rejected by the
-    // annotation.
+    // Retract the source to floats. The annotation was solved from the value
+    // of `ds`, so the call is boxed again after the assignment, the new
+    // annotation admits the floats, and no element is rejected (ROADMAP
+    // CE-464). Before, every element was rejected by the old annotation.
     ce.assign('ds', ce.box(['List', 1.5, 2.5]));
     const result = f.evaluate().toString();
-    expect(result).toContain('incompatible-type');
+    expect(result).toBe('[1.5,2.5]');
     expect(result).not.toContain('Did you mean');
     expect(result).not.toContain('must return');
   });
@@ -248,11 +250,13 @@ describe('Any/All with an Error-valued predicate result', () => {
     // First evaluation auto-annotates the parameter with `integer`.
     expect(f.evaluate().toString()).toBe('"True"');
 
-    // Retract the source to floats: the retained annotation now rejects every
-    // element, and the quantifier reports it instead of going inert.
+    // Retract the source to floats. The annotation was solved from the value
+    // of `ds`, so the call is boxed again after the assignment and the new
+    // annotation admits the floats (ROADMAP CE-464). Before, the old
+    // annotation rejected every element.
     ce.assign('ds', ce.box(['List', 1.5, 2.5]));
     const result = f.evaluate().toString();
-    expect(result).toContain('incompatible-type');
+    expect(result).toBe('"True"');
     expect(result).not.toContain('Did you mean');
     expect(result).not.toContain('must return');
   });

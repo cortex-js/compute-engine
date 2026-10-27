@@ -163,7 +163,7 @@ describe('a Return in the body of an operator that takes an expression', () => {
   test('a call of a parameter named Return gives no `nothing` result', () => {
     expect(
       ce.box(['Function', ['Add', 1, ['Return']], 'Return']).type.toString()
-    ).toBe('(Return: unknown) -> broadcastable<number>');
+    ).toBe('(Return: unknown) -> list<list<any> | number | tuple> | number | tuple');
     // The call is in a nested literal, and calls the parameter of the
     // enclosing one.
     expect(
@@ -174,7 +174,9 @@ describe('a Return in the body of an operator that takes an expression', () => {
           'Return',
         ])
         .type.toString()
-    ).toBe('(Return: unknown) -> (x: unknown) any -> broadcastable<number>');
+    ).toBe(
+      '(Return: unknown) -> (x: unknown) any -> list<list<any> | number | tuple> | number | tuple'
+    );
     // In an `Apply`, the type of the nested literal is computed while the
     // body of the enclosing literal is canonicalized, and is cached.
     expect(
@@ -185,7 +187,9 @@ describe('a Return in the body of an operator that takes an expression', () => {
           'Return',
         ])
         .type.toString()
-    ).toBe('(Return: unknown) any -> broadcastable<number>');
+    ).toBe(
+      '(Return: unknown) any -> list<list<any> | number | tuple> | number | tuple'
+    );
   });
 
   test('a checkpoint restore keeps the Return statement of a block', () => {

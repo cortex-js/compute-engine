@@ -1285,13 +1285,13 @@ describe('OPERATIONS ON INDEXED COLLECTIONS', () => {
     expect(m.type.toString()).toMatchInlineSnapshot(`matrix<integer^(3x3)>`);
     // A single index into the matrix yields a row (vector), not a scalar. The
     // type of `mtx` states three rows, so row 2 exists and the type has no
-    // `| missing` arm (user decision 2026-09-30). A row that does not exist
-    // keeps `T | marker(T)` (§3.C).
+    // `| missing` arm (user decision 2026-09-30). A row that is proved not
+    // to exist is typed by the marker alone (CE-42.3).
     expect(engine.box(['At', 'mtx', 2]).type.toString()).toMatchInlineSnapshot(
       `vector<integer^3>`
     );
     expect(engine.box(['At', 'mtx', 7]).type.toString()).toMatchInlineSnapshot(
-      `missing | vector<integer^3>`
+      `missing`
     );
     // Nested `At` validates and evaluates (1-based indexing): row 2, column 1.
     expect(evaluate(['At', ['At', 'mtx', 2], 1])).toMatchInlineSnapshot(`6`);

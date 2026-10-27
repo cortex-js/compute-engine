@@ -44,7 +44,6 @@ import {
 import { reduceType } from '../../common/type/reduce.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { neg } from '../numerics/rationals.js';
-import { measurementLipschitzUnary } from './measurement-arithmetic.js';
 import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import {
@@ -549,11 +548,6 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return re > 0 ? 'positive' : 'negative';
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
-        // `Real(Measurement(v, σ))` is `Measurement(Real(v), σ)`: a numeric
-        // integral of a complex-valued integrand comes back as a complex
-        // Measurement, and its parts must stay extractable.
-        const m = measurementLipschitzUnary(ce, 'Real', ops[0]);
-        if (m !== undefined) return m;
         if (!isNumber(ops[0]))
           return complexParts(ops[0])?.[0].evaluate({
             numericApproximation,
@@ -604,9 +598,6 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         return im > 0 ? 'positive' : 'negative';
       },
       evaluate: (ops, { engine: ce, numericApproximation }) => {
-        // See `Real`: the imaginary part of a complex Measurement.
-        const m = measurementLipschitzUnary(ce, 'Imaginary', ops[0]);
-        if (m !== undefined) return m;
         // See `Real`: the imaginary part of a constant sum (`1 + √2·i`).
         if (!isNumber(ops[0]))
           return complexParts(ops[0])?.[1].evaluate({
@@ -876,13 +867,15 @@ export const COMPLEX_LIBRARY: SymbolDefinitions[] = [
         const [f] = ops;
         if (ops.length === 1 && f !== undefined && f.type.matches('function'))
           return pointwiseConjugate(ce, f);
-        return ce._fn('Conjugate', checkNumericArgs(ce, ops, 1));
+        // A value of a kind admitted as a number (a measurement) is an
+        // operand, as at a ground `number` parameter (`carrier: true`).
+        return ce._fn(
+          'Conjugate',
+          checkNumericArgs(ce, ops, { count: 1, carrier: true })
+        );
       },
       sgn: ([z]) => z.sgn,
       evaluate: (ops, { engine: ce }) => {
-        // See `Real`: the conjugate of a complex Measurement.
-        const m = measurementLipschitzUnary(ce, 'Conjugate', ops[0]);
-        if (m !== undefined) return m;
         if (!isNumber(ops[0])) return conjugateOfConstant(ce, ops[0]);
         const op = ops[0].numericValue;
         if (typeof op === 'number' || !op.isComplex) return ops[0];

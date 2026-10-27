@@ -10,7 +10,9 @@ import { isSubtype } from '../../common/type/subtype.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
   collectionElementType,
-  resolveTypeForCompilation,
+  // The compiled lanes read the open form of a broadcast over an operand
+  // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
   stripMissingFromType,
 } from '../../common/type/utils.js';
 

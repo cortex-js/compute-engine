@@ -1,5 +1,5 @@
 {
-  "version": "0.169.1",
+  "version": "0.170.0",
   "scripts": {
     "doc": "bash ./scripts/doc.sh",
     "build": "bash ./scripts/build.sh",
@@ -27,7 +27,8 @@
     "lint:code": "oxlint src && prettier --write 'src/**/*.{ts,js,css,md}'",
     "ci:corpus-pipeline": "npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim --check && npx --yes tsx scripts/fungrim/artifact-freshness.ts && npx --yes tsx scripts/fungrim/apply-solve-templates.ts --check && npx --yes tsx scripts/fungrim/recompile-drift.ts && npx --yes tsx scripts/fungrim/compile-properties.ts --check && npx --yes tsx scripts/rubi/bundle-corpus.ts && git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json && npm run check:corpus && npm run check:roundtrip",
     "ci": "npm run lint && npm test",
-    "typecheck": "bash ./scripts/typecheck.sh"
+    "typecheck": "bash ./scripts/typecheck.sh",
+    "test:require": "node ./test/consumer/require-smoke.cjs"
   },
   "name": "@cortex-js/compute-engine",
   "description": "Symbolic computing and numeric evaluations for JavaScript and Node.js",
@@ -58,7 +59,6 @@
   "files": [
     "/CHANGELOG.md",
     "/dist/esm-min",
-    "/dist/umd-min",
     "/dist/types"
   ],
   "type": "module",
@@ -66,49 +66,41 @@
     ".": {
       "types": "./dist/types/compute-engine.d.ts",
       "import": "./dist/esm-min/compute-engine.js",
-      "require": "./dist/umd-min/compute-engine.cjs",
       "default": "./dist/esm-min/compute-engine.js"
     },
     "./math-json": {
       "types": "./dist/types/math-json.d.ts",
       "import": "./dist/esm-min/math-json.js",
-      "require": "./dist/umd-min/math-json.cjs",
       "default": "./dist/esm-min/math-json.js"
     },
     "./latex-syntax": {
       "types": "./dist/types/latex-syntax.d.ts",
       "import": "./dist/esm-min/latex-syntax.js",
-      "require": "./dist/umd-min/latex-syntax.cjs",
       "default": "./dist/esm-min/latex-syntax.js"
     },
     "./interval": {
       "types": "./dist/types/interval.d.ts",
       "import": "./dist/esm-min/interval.js",
-      "require": "./dist/umd-min/interval.cjs",
       "default": "./dist/esm-min/interval.js"
     },
     "./numerics": {
       "types": "./dist/types/numerics.d.ts",
       "import": "./dist/esm-min/numerics.js",
-      "require": "./dist/umd-min/numerics.cjs",
       "default": "./dist/esm-min/numerics.js"
     },
     "./core": {
       "types": "./dist/types/core.d.ts",
       "import": "./dist/esm-min/core.js",
-      "require": "./dist/umd-min/core.cjs",
       "default": "./dist/esm-min/core.js"
     },
     "./compile": {
       "types": "./dist/types/compile.d.ts",
       "import": "./dist/esm-min/compile.js",
-      "require": "./dist/umd-min/compile.cjs",
       "default": "./dist/esm-min/compile.js"
     },
     "./runtime": {
       "types": "./dist/types/runtime.d.ts",
       "import": "./dist/esm-min/runtime.js",
-      "require": "./dist/umd-min/runtime.cjs",
       "default": "./dist/esm-min/runtime.js"
     },
     "./kernel-worker": {
@@ -119,19 +111,16 @@
     "./identities": {
       "types": "./dist/types/identities.d.ts",
       "import": "./dist/esm-min/identities.js",
-      "require": "./dist/umd-min/identities.cjs",
       "default": "./dist/esm-min/identities.js"
     },
     "./integration-rules": {
       "types": "./dist/types/integration-rules.d.ts",
       "import": "./dist/esm-min/integration-rules.js",
-      "require": "./dist/umd-min/integration-rules.cjs",
       "default": "./dist/esm-min/integration-rules.js"
     },
     "./epsil": {
       "types": "./dist/types/epsil.d.ts",
       "import": "./dist/esm-min/epsil.js",
-      "require": "./dist/umd-min/epsil.cjs",
       "default": "./dist/esm-min/epsil.js"
     },
     "./cli": {
@@ -141,12 +130,12 @@
   },
   "main": "./dist/esm-min/compute-engine.js",
   "module": "./dist/esm-min/compute-engine.js",
-  "browser": "./dist/umd-min/compute-engine.cjs",
-  "unpkg": "./dist/umd-min/compute-engine.cjs",
+  "browser": "./dist/esm-min/compute-engine.js",
+  "unpkg": "./dist/esm-min/compute-engine.js",
   "types": "./dist/types/compute-engine.d.ts",
   "engines": {
     "npm": ">=10.5.0",
-    "node": ">=22.3.0"
+    "node": ">=22.12.0"
   },
   "devDependencies": {
     "@cortex-js/prettier-config": "^1.2.0",

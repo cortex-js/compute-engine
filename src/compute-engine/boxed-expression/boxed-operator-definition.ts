@@ -23,6 +23,7 @@ import {
 } from './declared-parameter-result.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import { noteArithmeticDefinition } from './arithmetic-order-override.js';
+import { assertValidCompileHelpers } from '../compilation/engine-compile-handlers.js';
 import {
   hasDeclaredEffectLabel,
   isEffectSubset,
@@ -52,6 +53,7 @@ import type {
   BoxedOperatorDefinition,
   LambdaDefinition,
   CollectionHandlers,
+  ArithmeticDefinition,
   OperatorCompileHandler,
   OperatorDerivative,
   EvaluateOptions,
@@ -68,6 +70,7 @@ import {
   applicable,
   capturedValueMismatchNow,
   exactArgumentSources,
+  kindTypedFunctionLiteral,
   withCallerCapturedCheck,
   type ApplyOptions,
 } from '../function-utils.js';
@@ -90,8 +93,9 @@ import {
   broadcastCellType,
   functionResult,
   signatureArms,
-  withoutResidueArm,
+  withoutKindArms,
 } from '../../common/type/utils.js';
+import { kindGeneration, kindTypeNames } from './value-kinds.js';
 import { parseType } from '../../common/type/parse.js';
 import { readTypeVariablesAsBounds } from '../../common/type/instantiate.js';
 import { typeToString } from '../../common/type/serialize.js';
@@ -164,6 +168,8 @@ const OPERATOR_DEF_KEYS = new Set([
   'evaluateAsync',
   'evalDimension',
   'compile',
+  'compileShippable',
+  'compileHelpers',
   'derivative',
 
   'eq',
@@ -172,6 +178,9 @@ const OPERATOR_DEF_KEYS = new Set([
 
   // Collection Handlers
   'collection',
+
+  // Value kind
+  'arithmetic',
   'canEnumerate',
   'elementCount',
   'inferOperandTypes',
@@ -225,7 +234,10 @@ function normalizeSignatureField(
  * neutral: it neither admits nor blocks the policy. An `any`-typed parameter
  * blocks it, because such an operator may mean to read the absent datum.
  */
-function signatureParamsPropagateAbsence(signature: Type): boolean {
+function signatureParamsPropagateAbsence(
+  ce: ComputeEngine,
+  signature: Type
+): boolean {
   // ONE arm of an intersection signature qualifying is enough (`Reverse`
   // has a string arm and a list arm; the absent operand belongs to neither,
   // and the marker is read off the application's type), and a type variable
@@ -239,10 +251,11 @@ function signatureParamsPropagateAbsence(signature: Type): boolean {
     typeof t !== 'string' &&
     (t.kind === 'signature' ||
       (t.kind === 'union' && t.types.every((x) => isFunctionLike(x))));
-  // A parameter that admits a residue class beside its numbers
+  // A parameter that admits a kind value beside its numbers
   // (`complex | infinity | residue`, the arithmetic operators) is numeric
   // here: a class beside an absent operand gives `NaN`, as a number does.
-  const isNumeric = (t: Type) => isSubtype(withoutResidueArm(t), 'number');
+  const kinds = kindTypeNames(ce);
+  const isNumeric = (t: Type) => isSubtype(withoutKindArms(t, kinds), 'number');
   const isCollection = (t: Type) =>
     isSubtype(t, COLLECTION_SHAPE_TYPE) && !isSubtype(t, 'string');
   return arms.some((arm) => {
@@ -741,6 +754,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
 
   compile?: OperatorCompileHandler;
 
+  /** See `OperatorDefinition.compileShippable`. */
+  compileShippable?: boolean;
+
+  /** See `OperatorDefinition.compileHelpers`. */
+  compileHelpers?: Readonly<Record<string, (...args: never[]) => unknown>>;
+
   /** The partial derivatives of the operator, as given by the `derivative`
    * key of its definition: an array of function literals, one for each
    * argument, or a handler. Read by `differentiate()`
@@ -749,6 +768,12 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   derivative?: OperatorDerivative;
 
   collection?: CollectionHandlers;
+
+  /** The arithmetic of the value kind this operator constructs (the
+   * `arithmetic` field of its definition). Stored as given; the kind
+   * registry of the engine (`value-kinds.ts`) holds the checked
+   * registration that dispatch reads. */
+  arithmetic?: ArithmeticDefinition;
 
   /** The accessor pair installed as each instance's OWN `signature` property.
    * A single shared descriptor object, so every instance takes the same
@@ -1196,11 +1221,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     const inferred = this.inferredSignature === true;
     const lambda = this._isLambda;
     const memo = this._resolvedMissingBehaviorMemo;
+    // The answer reads the kind types of the engine (a parameter that admits
+    // a kind value beside its numbers is numeric), which a later
+    // registration changes: the generation of the kind registry is part of
+    // the key.
+    const kindGen = kindGeneration(this.engine);
     if (
       memo !== undefined &&
       memo.signature === signature &&
       memo.inferred === inferred &&
-      memo.lambda === lambda
+      memo.lambda === lambda &&
+      memo.kindGeneration === kindGen
     )
       return memo.behavior;
     // undeclared ∧ ¬inferredSignature ∧ every parameter numeric, collection or
@@ -1217,25 +1248,30 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // an error. The type of the call also gained a `missing` member, which
     // the compile targets decline (`Count` over `list<…> | missing`).
     const behavior =
-      !inferred && !lambda && signatureParamsPropagateAbsence(signature)
+      !inferred &&
+      !lambda &&
+      signatureParamsPropagateAbsence(this.engine, signature)
         ? 'propagate'
         : 'pass-through';
     this._resolvedMissingBehaviorMemo = {
       signature,
       inferred,
       lambda,
+      kindGeneration: kindGen,
       behavior,
     };
     return behavior;
   }
 
   /** Memo of `resolvedMissingBehavior`, keyed by the signature object, the
-   * `inferredSignature` flag and the `_isLambda` flag it was computed from. */
+   * `inferredSignature` flag, the `_isLambda` flag and the generation of the
+   * kind registry it was computed from. */
   private _resolvedMissingBehaviorMemo:
     | {
         signature: Type;
         inferred: boolean;
         lambda: boolean;
+        kindGeneration: number;
         behavior: 'propagate' | 'pass-through';
       }
     | undefined = undefined;
@@ -1851,8 +1887,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       evaluateAsync: this.evaluateAsync,
       evalDimension: this.evalDimension,
       compile: this.compile,
+      compileShippable: this.compileShippable,
+      compileHelpers: this.compileHelpers,
       derivative: this.derivative,
       collection: this.collection,
+      arithmetic: this.arithmetic,
     };
   }
 
@@ -1928,8 +1967,11 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evaluateAsync = s.evaluateAsync;
     this.evalDimension = s.evalDimension;
     this.compile = s.compile;
+    this.compileShippable = s.compileShippable;
+    this.compileHelpers = s.compileHelpers;
     this.derivative = s.derivative;
     this.collection = s.collection;
+    this.arithmetic = s.arithmetic;
     // `_signature` is written directly above, not by `_setSignature`.
     this._writeVersion += 1;
   }
@@ -2041,6 +2083,16 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       this.examples =
         typeof def.examples === 'string' ? [def.examples] : [...def.examples];
     this.collection = def.collection ?? this.collection;
+    // An in-place update that does not mention `arithmetic` keeps it. A
+    // redeclaration builds a new definition, so it carries `arithmetic` only
+    // when the new definition gives it.
+    if (def.arithmetic?.compile?.type?.helpers !== undefined)
+      assertValidCompileHelpers(
+        `Operator Definition "${this.name}"`,
+        def.arithmetic.compile.type.helpers,
+        'arithmetic.compile.type.helpers'
+      );
+    this.arithmetic = def.arithmetic ?? this.arithmetic;
     this.url = def.url ?? this.url;
     this.wikidata = def.wikidata ?? this.wikidata;
 
@@ -2267,7 +2319,23 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evalDimension = def.evalDimension ?? this.evalDimension;
     this.sgn = def.sgn ?? this.sgn;
     this.even = def.even ?? this.even;
-    this.compile = def.compile ?? this.compile;
+    // `compileShippable` and `compileHelpers` describe the code of one
+    // handler: an update that gives a new handler takes them from the same
+    // update (absent means not shippable and no helpers), and an update with
+    // no handler keeps them.
+    if (def.compile !== undefined) {
+      this.compile = def.compile;
+      this.compileShippable = def.compileShippable;
+      this.compileHelpers = def.compileHelpers;
+    } else {
+      this.compileShippable = def.compileShippable ?? this.compileShippable;
+      this.compileHelpers = def.compileHelpers ?? this.compileHelpers;
+    }
+    if (def.compileHelpers !== undefined)
+      assertValidCompileHelpers(
+        `Operator Definition "${this.name}"`,
+        def.compileHelpers
+      );
     if (def.derivative !== undefined)
       assertValidDerivativeKey(this.name, def.derivative);
     this.derivative = def.derivative ?? this.derivative;
@@ -2336,7 +2404,21 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
             bindings: new Map(),
           }
         : undefined;
-      const boxedFn = this.engine.expr(def.evaluate, {
+      // A parameter that the declared signature types with a value kind
+      // (`(real | umeasurement) -> …`, `(residue) -> residue`) is typed so
+      // in the body too. The body of an untyped parameter is canonicalized
+      // with the parameter `unknown`, which folds `x/x` to `1` before a
+      // call can pass a kind value; typed by the signature, the parameter
+      // holds a possible kind value and `x/x` is kept.
+      const kindTyped =
+        this.inferredSignature || this._derivedSignature
+          ? undefined
+          : kindTypedFunctionLiteral(
+              this.engine,
+              def.evaluate,
+              this.signature.type
+            );
+      const boxedFn = this.engine.expr(kindTyped ?? def.evaluate, {
         form: 'raw',
         scope,
       });

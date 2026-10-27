@@ -1,5 +1,5 @@
 import type { Type } from './types.js';
-import { typeToString } from './serialize.js';
+import { typeToIdentityKey } from './serialize.js';
 import { TYPE_SIZE_LIMIT } from './size-cap.js';
 
 /**
@@ -30,8 +30,9 @@ import { TYPE_SIZE_LIMIT } from './size-cap.js';
  * deep-frozen for the same reason (`parse.ts`), so no consumer may mutate a
  * type it did not build.
  *
- * The key is the type's spelling (`typeToString`). Two spellings of one
- * type (a union's members in another order) intern to two objects; that
+ * The key is the type's spelling (`typeToIdentityKey`, which also tells a
+ * closed record from the open record with the same fields). Two spellings of
+ * one type (a union's members in another order) intern to two objects; that
  * costs a dedup hit, never correctness.
  */
 
@@ -57,7 +58,7 @@ export function internType(t: Type): Type {
   const size = flatSize(t);
   if (size === undefined || size > TYPE_SIZE_LIMIT) return t;
 
-  const key = typeToString(t);
+  const key = typeToIdentityKey(t);
   const hit = table.get(key);
   if (hit !== undefined) return hit;
 

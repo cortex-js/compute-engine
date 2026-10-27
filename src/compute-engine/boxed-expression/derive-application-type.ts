@@ -3,7 +3,10 @@ import {
   installSignatureResultDerivation,
 } from './callee-type-derivation.js';
 import { deriveSignatureResultType } from './signature-result-type.js';
-import { callResultType } from './call-result-type.js';
+import {
+  callResultType,
+  componentwiseTupleCallType,
+} from './call-result-type.js';
 import type {
   BoxedDefinition,
   BoxedOperatorDefinition,
@@ -45,13 +48,40 @@ import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   collectionElementType,
   functionResult,
-  hasResidueArm,
+  hasKindArm,
+  isUninhabitedWithoutKinds,
+  kindArmNames,
   resolveTypeAlias,
   stripMissingFromType,
   typeContainsMissing,
-  withoutResidueArm,
+  withoutKindArms,
+  withoutKindArmsDeep,
+  type KindTypeNames,
 } from '../../common/type/utils.js';
-import { describeType, guardedTypeHandlerCall } from './operand-descriptor.js';
+import {
+  kindTypeHasHook,
+  kindTypeInfo,
+  kindTypeNames,
+  someKindHasResultType,
+} from './value-kinds.js';
+import {
+  admitsThroughCarrier,
+  armAdmitsKindsByType,
+  carrierKindTypeNames,
+  groupOneHookOf,
+  handlesKindsByHooks,
+  hasCarrierKindArm,
+  isApplySite,
+  kindCarrierOperands,
+  kindTypeNamesWithHook,
+  withKindCarriers,
+} from './kind-admission.js';
+import { residueResultType, typeWithoutShape } from './residue-class.js';
+import {
+  describe,
+  describeType,
+  guardedTypeHandlerCall,
+} from './operand-descriptor.js';
 import {
   collectionCellsProvablyNonNumeric,
   numericOperandTypeRefused,
@@ -82,6 +112,7 @@ import {
   absentCellsPresentType,
   absorbOperandAbsence,
   broadcastLiftType,
+  holdsIntegerValuedFloat,
   movesAbsentCells,
   passesAbsentCellsThrough,
   threadedPresentType,
@@ -135,10 +166,22 @@ export interface BroadcastLiftHooks {
  * The operators whose library canonical form checks each operand with
  * `checkNumericArgs` (`canonicalNumericOperator()`, `canonical-numeric.ts`,
  * and the `canonical` handlers of `Subtract`, `Exp2`, `PlusMinus` and
- * `Conjugate`). `'residue'` marks an operator with residue arithmetic,
- * which admits a residue class as an operand.
+ * `Conjugate`). `'residue'` marks an arithmetic operator of the value
+ * kinds, which admits a value of a kind whose head declares the matching
+ * hook (`groupOneHookOf()`, `kind-admission.ts`): a residue class, a `GF8`
+ * element. `'carrier'` marks an operator whose parameters admit a real
+ * number (`Exp`, `Ln`, `Log`): its canonical form admits a value of a kind
+ * admitted as a number (`admittedAs: 'real'` or `'number'`,
+ * `carrierKindTypeNames()`), as `checkNumericArgs` does with its `carrier`
+ * option. `'carrier'` also marks `Conjugate`, whose canonical handler
+ * passes `carrier: true`. `'carrier-power'` marks `Exp2`, whose canonical
+ * handler passes `carrier: 'power'`: it admits a value of a kind admitted
+ * as a number only when the heads of that kind also declare the `power`
+ * hook (`Exp2(x)` is `2^x`). `'number'` admits no kind value.
  */
-const NUMERIC_OPERAND_CHECK: Readonly<Record<string, 'residue' | 'number'>> = {
+const NUMERIC_OPERAND_CHECK: Readonly<
+  Record<string, 'residue' | 'carrier' | 'carrier-power' | 'number'>
+> = {
   Add: 'residue',
   Subtract: 'residue',
   Multiply: 'residue',
@@ -148,12 +191,36 @@ const NUMERIC_OPERAND_CHECK: Readonly<Record<string, 'residue' | 'number'>> = {
   Sqrt: 'residue',
   Power: 'residue',
   Root: 'residue',
-  Exp: 'number',
-  Ln: 'number',
-  Log: 'number',
-  Exp2: 'number',
+  Exp: 'carrier',
+  Ln: 'carrier',
+  Log: 'carrier',
+  Exp2: 'carrier-power',
   PlusMinus: 'number',
-  Conjugate: 'number',
+  Conjugate: 'carrier',
+};
+
+/**
+ * The heads of one operand whose library canonical form is a call of a
+ * different head, and which have no `evaluate` handler, so a value of a kind
+ * admitted through its carrier is typed by the head of the canonical form
+ * (`deriveApplicationType()`). Each entry is that head and, when the
+ * canonical form has a second operand, that operand: the base of `Power`,
+ * which comes first, or the base of `Log`, which comes second. The canonical
+ * handlers are in `library/arithmetic.ts`.
+ */
+const CANONICAL_HEAD_OF_KIND_CARRIER_CALL: Readonly<
+  Record<
+    string,
+    readonly [string, ((engine: ComputeEngine) => Expression) | undefined]
+  >
+> = {
+  Exp: ['Power', (engine) => engine.symbol('ExponentialE')],
+  Exp2: ['Power', (engine) => engine.number(2)],
+  Lb: ['Log', (engine) => engine.number(2)],
+  Log2: ['Log', (engine) => engine.number(2)],
+  // `Log(x)` is the base-10 logarithm.
+  Lg: ['Log', undefined],
+  Log10: ['Log', undefined],
 };
 
 /**
@@ -172,6 +239,7 @@ const NUMERIC_OPERAND_CHECK: Readonly<Record<string, 'residue' | 'number'>> = {
  * `call-result-type.ts`).
  */
 function signatureRefusesOperandType(
+  engine: ComputeEngine,
   def: BoxedOperatorDefinition,
   operands: ReadonlyArray<OperandDescriptor>
 ): boolean {
@@ -185,6 +253,22 @@ function signatureRefusesOperandType(
     let t = d.type;
     if (def.stripsMissingAt(i)) t = stripMissingFromType(t);
     if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
+      return false;
+    // A value of a value kind declared with `admittedAs: 'real'` or
+    // `'number'` is admitted where its carrier is, at an operator with a
+    // handler (`admitsThroughCarrier()`, `kind-admission.ts`), as on the
+    // boxed route; a function with a body admits it only by type. Otherwise
+    // the operand type is checked as it is: `umeasurement` at `integer` is
+    // refused, `integer | umeasurement` overlaps it.
+    if (
+      !def.isUserFunctionDefinition &&
+      admitsThroughCarrier(
+        engine,
+        t,
+        param,
+        def.broadcastable === true && typeCouldBeUnkeyedCollection(t)
+      )
+    )
       return false;
     if (def.inferredSignature && isPointParameterType(param)) return false;
     // A user function maps over a list of points at a point parameter
@@ -204,11 +288,19 @@ function signatureRefusesOperandType(
     // cells are provably not numbers (`Sin(L)` with `L: list<string>`, the
     // check of `validateThreadableOperand`, `validate.ts`). Any other
     // collection is admitted, as at the boxed route.
-    if (def.broadcastable && typeCouldBeUnkeyedCollection(t))
+    // The parameter is read without the kind types it names beside its
+    // numbers (`complex | quantity` is numeric), and those kinds are cells
+    // like numbers, as the boxed route reads them.
+    if (def.broadcastable && typeCouldBeUnkeyedCollection(t)) {
+      const kinds = kindTypeNames(engine);
       return (
-        isSubtype(param, 'number') &&
-        collectionCellsProvablyNonNumeric(t, hasResidueArm(param))
+        isSubtype(withoutKindArms(param, kinds), 'number') &&
+        collectionCellsProvablyNonNumeric(
+          t,
+          new Set(kindArmNames(param, kinds))
+        )
       );
+    }
     // A number at a numeric parameter is admitted, `NaN` and the infinities
     // included: the operator answers for such a point (`Abs(NaN)` is
     // `NaN`), as the signature promises under Contract B
@@ -467,10 +559,32 @@ export function parameterReachesBody(
   return name === '' || literal.op1.has(name);
 }
 
+/**
+ * Whether an argument of type `t` is a tuple that is bound whole at a scalar
+ * or open parameter of a function literal: a numeric tuple, a tuple that
+ * may be one (`mayBeNumericTupleType`), or any other tuple (a tuple with a
+ * tuple or a list component, or a component that is not a number). An
+ * argument that may be absent as a whole (`missing | tuple<…>`) is not one:
+ * the derivation from the body types each arm first
+ * (`isNumericTupleArgumentType`).
+ *
+ * The signature result of the literal describes a scalar argument, so it
+ * does not describe the value for such an argument. With `h := x ↦ 2x`,
+ * `h(((1, 2), 3))` is `((2, 4), 6)`, and it was typed `number`.
+ */
+export function isTupleArgumentType(t: Type): boolean {
+  if (isNumericTupleType(t) || mayBeNumericTupleType(t)) return true;
+  return isTupleShapedType(resolveTypeAlias(t));
+}
+
 /** Whether parameter `i` of the signature `ft` is typed to take a tuple
  * (a tuple, a collection, or any type a tuple inhabits other than the open
  * `unknown`/`any`, which bind a tuple whole as a scalar parameter does). */
-export function parameterAdmitsTuple(ft: Type, i: number): boolean {
+export function parameterAdmitsTuple(
+  ft: Type,
+  i: number,
+  kinds: KindTypeNames
+): boolean {
   if (typeof ft !== 'object' || ft.kind !== 'signature') return false;
   const param =
     ft.args?.[i]?.type ??
@@ -478,9 +592,10 @@ export function parameterAdmitsTuple(ft: Type, i: number): boolean {
     ft.variadicArg?.type;
   if (param === undefined || param === 'unknown' || param === 'any')
     return false;
-  // A parameter that admits a residue class beside its numbers (the
-  // arithmetic operators) binds a tuple as a scalar parameter does.
-  if (isSubtype(withoutResidueArm(param), 'number')) return false;
+  // A parameter that admits a kind value beside its numbers (the
+  // arithmetic operators admit a residue class) binds a tuple as a scalar
+  // parameter does.
+  if (isSubtype(withoutKindArms(param, kinds), 'number')) return false;
   return true;
 }
 
@@ -666,15 +781,23 @@ export function deriveApplicationType(
     // A tuple with an open component (`mayBeNumericTupleType`) is one such
     // tuple when the component holds a number, and so is such a tuple with a
     // whole-value `missing` arm (`isNumericTupleArgumentType`).
+    // Any other tuple binds whole too (`isTupleArgumentType`), and a body
+    // that computes a numeric tuple component by component gives a tuple of
+    // numbers (`componentwiseTupleCallType`).
     if (
       operands.some(
         (d, i) =>
-          isNumericTupleArgumentType(d.type) &&
-          !parameterAdmitsTuple(ft, i) &&
+          (isNumericTupleArgumentType(d.type) || isTupleArgumentType(d.type)) &&
+          !parameterAdmitsTuple(ft, i, kindTypeNames(engine)) &&
           parameterReachesBody(binding.value.value, i)
       )
     )
-      return 'any';
+      return (
+        componentwiseTupleCallType(
+          binding.value.value,
+          operands.map((d) => d.type)
+        ) ?? 'any'
+      );
     return (
       instantiatedResultTypeOverActuals(ft, operands.map(actualOfDescriptor), {
         threadable: true,
@@ -700,6 +823,44 @@ export function deriveApplicationType(
       return deriveApplicationType(engine, 'Inverse', [operands[0]]);
     if (k !== undefined)
       return deriveApplicationType(engine, 'MatrixPower', operands);
+  }
+
+  // The library canonical form of `Exp(x)` is `Power(ExponentialE, x)`, and
+  // `Exp` has no `evaluate` handler, so it is never an apply site of a value
+  // kind: the expression route types the `Power` node, whose `power` hook
+  // answers for a kind value (`Exp(U)` is `umeasurement`). This route types
+  // the same node for an operand that may be a kind value admitted through
+  // its carrier. Other operands keep the typing of `Exp`.
+  //
+  // The other heads whose library canonical form is a different head get
+  // the same treatment: `Exp2(x)` is `Power(2, x)`, `Lb(x)` and `Log2(x)`
+  // are `Log(x, 2)`, `Lg(x)` and `Log10(x)` are `Log(x)` (base 10). These
+  // heads have no `evaluate` handler either, so without this rule a
+  // measurement operand was typed with the declared `number`, while the
+  // boxed call is `measurement | number`.
+  //
+  // The test does not ask whether the engine holds a kind value yet
+  // (`someKindAdmittedByCarrier()`): an operand TYPE that names a kind type
+  // is the evidence. A derivation in an engine that has not boxed a
+  // measurement yet gave `number` for `Exp(m)` with `m: measurement`.
+  const canonicalHead = CANONICAL_HEAD_OF_KIND_CARRIER_CALL[operator];
+  if (
+    canonicalHead !== undefined &&
+    operands.length === 1 &&
+    hasCarrierKindArm(engine, operands[0].type) &&
+    runsLibraryCanonicalForm(engine, operator, binding.operator)
+  ) {
+    const [head, other] = canonicalHead;
+    const x = operands[0];
+    return deriveApplicationType(
+      engine,
+      head,
+      other === undefined
+        ? [x]
+        : head === 'Power'
+          ? [describe(other(engine)), x]
+          : [x, describe(other(engine))]
+    );
   }
 
   // Arithmetic over a tuple with a list coordinate always evaluates to an
@@ -761,7 +922,20 @@ export function deriveApplicationType(
     numericCheck !== undefined &&
     runsLibraryCanonicalForm(engine, operator, def) &&
     operands.some((d) =>
-      numericOperandTypeRefused(d.type, numericCheck === 'residue')
+      numericOperandTypeRefused(
+        d.type,
+        numericCheck === 'residue'
+          ? kindTypeNamesWithHook(engine, groupOneHookOf(operator)!)
+          : numericCheck === 'carrier'
+            ? carrierKindTypeNames(engine)
+            : numericCheck === 'carrier-power'
+              ? {
+                  has: (name: string) =>
+                    carrierKindTypeNames(engine).has(name) &&
+                    kindTypeNamesWithHook(engine, 'power').has(name),
+                }
+              : undefined
+      )
     )
   )
     return 'error';
@@ -776,9 +950,16 @@ export function deriveApplicationType(
   if (
     numericCheck === undefined &&
     !def.lazy &&
-    signatureRefusesOperandType(def, operands)
+    signatureRefusesOperandType(engine, def, operands)
   )
     return 'error';
+
+  // An APPLY SITE of a value kind (a measurement at `Sin`) and a parameter
+  // that names a kind type are typed by the rules of the kinds, as at the
+  // call site (`applySiteResultType()`, `apply-site.ts`): the `apply` hook
+  // of the kind answers in place of the operator's handler.
+  const kindType = kindCallResultType(engine, operator, def, operands);
+  if (kindType !== undefined) return kindType;
 
   const propagate = def.resolvedMissingBehavior === 'propagate';
   // An operand that is the library `Undefined` symbol stands for an absent
@@ -959,15 +1140,20 @@ export function deriveApplicationType(
       isSubtype(functionResult(sig) ?? 'unknown', 'number')) &&
     operands.some(
       (d, i) =>
-        isNumericTupleArgumentType(d.type) &&
-        !parameterAdmitsTuple(sig, i) &&
+        (isNumericTupleArgumentType(d.type) || isTupleArgumentType(d.type)) &&
+        !parameterAdmitsTuple(sig, i, kindTypeNames(engine)) &&
         parameterReachesBody(
           (def as { _lambdaLiteral?: Expression })._lambdaLiteral,
           i
         )
     )
   )
-    return 'any';
+    return (
+      componentwiseTupleCallType(
+        (def as { _lambdaLiteral?: Expression })._lambdaLiteral,
+        operands.map((d) => d.type)
+      ) ?? 'any'
+    );
   // An operand typed from its present type binds the type variables, and
   // takes part in the choice of an overload arm, with that type, as at the
   // call site.
@@ -1069,6 +1255,10 @@ export function deriveApplicationType(
     return (
       broadcastLiftType({
         def,
+        operator,
+        integerValuedFloat: (i) =>
+          handlerOperandsSeen[i] !== undefined &&
+          holdsIntegerValuedFloat(handlerOperandsSeen[i]),
         views,
         sigResult: perElement,
         sigResultIsPerElement: fromSignature,
@@ -1151,6 +1341,8 @@ function overloadResultType(
     instance: FunctionSignature;
     generic: boolean;
   }[] = [];
+  const threadableAt = (i: number) =>
+    isThreadableAt(options.threadable, i) && actuals[i].liftable === true;
   let decided = true;
   for (const arm of arms) {
     const { min, max } = arityBounds(arm);
@@ -1167,6 +1359,13 @@ function overloadResultType(
       }
       const t = operands[i].type;
       if (isSubtype(t, param)) continue;
+      // A value of a value kind admitted through its carrier decides the arm
+      // as a subtype does (`admitsThroughCarrier()`, `kind-admission.ts`).
+      if (
+        !options.lazy &&
+        admitsThroughCarrier(engine, t, param, threadableAt(i))
+      )
+        continue;
       subtypes = false;
       if (options.lazy || t === 'unknown' || t === 'any') continue;
       if (isThreadableAt(options.threadable, i) && actuals[i].liftable === true)
@@ -1196,8 +1395,22 @@ function overloadResultType(
         b.generic &&
         sameParameters(a.instance, b.instance, n) &&
         !isMoreSpecific(b.instance, a.instance, n));
-    let selected = taken[0];
-    for (const candidate of taken.slice(1))
+    // An arm that admits each kind operand by type is preferred over an arm
+    // that admits one only through its carrier, as on the boxed route
+    // (`armsAdmittingKindsByType`, `overload.ts`).
+    const byType = options.lazy
+      ? taken
+      : taken.filter((c) =>
+          armAdmitsKindsByType(
+            engine,
+            c.instance,
+            operands.map((d) => d.type),
+            threadableAt
+          )
+        );
+    const ranked = byType.length > 0 ? byType : taken;
+    let selected = ranked[0];
+    for (const candidate of ranked.slice(1))
       if (outranks(candidate, selected)) selected = candidate;
     return resultOf(selected.arm);
   }
@@ -1333,6 +1546,279 @@ export function withCodomainForAbsentAnswer(
   )
     return answered;
   return reduceType({ kind: 'union', types: ['missing', declared] });
+}
+
+/**
+ * The result type of a call of the operator `def`, named `operator`, over
+ * operands known only by their descriptors, by the rules of the value kinds
+ * (`docs/plans/2026-10-26-value-kinds.md`, section 4.5): at an APPLY SITE
+ * (a kind operand admitted only through the carrier of its kind,
+ * `isApplySite()`, `kind-admission.ts`), {@link kindApplySiteResultType};
+ * else, at a parameter that names a kind type,
+ * {@link namedKindResultTypeOverTypes}. `undefined` when neither applies,
+ * and the ordinary typing applies. The expression route gives the same
+ * answer for the boxed call (`applySiteResultType()`, `apply-site.ts`).
+ */
+function kindCallResultType(
+  engine: ComputeEngine,
+  operator: string,
+  def: BoxedOperatorDefinition,
+  operands: ReadonlyArray<OperandDescriptor>
+): Type | undefined {
+  if (def.lazy || def.evaluate === undefined || operands.length === 0)
+    return undefined;
+  // The operand types decide, not whether the engine holds a kind value
+  // yet (`someKindAdmittedByCarrier()`): a descriptor typed `measurement` is
+  // the evidence. With that gate, `Ln(m)` with `m: measurement` was typed
+  // `number` in an engine that had not boxed a measurement yet, and
+  // `measurement | number` after.
+  const types = operands.map((d) => d.type);
+  if (types.some((t) => hasCarrierKindArm(engine, t))) {
+    const arm = applySiteArmOverTypes(engine, def, types);
+    if (arm !== undefined)
+      return kindApplySiteResultType(
+        engine,
+        operator,
+        arm,
+        operands,
+        kindCarrierOperands(engine, def, arm, types),
+        (i, t) => ({
+          ...describeType(t, operands[i].facts.closed),
+          structureOf: operands[i].structureOf,
+        })
+      );
+  }
+  return namedKindResultTypeOverTypes(
+    engine,
+    operator,
+    def,
+    operands.map((d) => d.type)
+  );
+}
+
+/**
+ * The signature arm of `def` at which a call with operands of types
+ * `types` is an apply site of a value kind, or `undefined` when it is not
+ * one. For an overload set, the arm is selected from the types as the
+ * expression route selects it (`resolveOverload()`, `overload.ts`): among
+ * the arms that take the operands (each operand is a subtype of its
+ * parameter, or is admitted through its carrier), an arm that admits each
+ * kind operand by type is preferred, and the call is then not an apply
+ * site; otherwise the most specific arm is taken.
+ */
+function applySiteArmOverTypes(
+  engine: ComputeEngine,
+  def: BoxedOperatorDefinition,
+  types: ReadonlyArray<Type>
+): Type | undefined {
+  const sig = def.signature.type;
+  const arms = overloadArms(sig);
+  if (arms === undefined)
+    return isApplySite(engine, def, sig, types) ? sig : undefined;
+  const n = types.length;
+  const threadable = (i: number) =>
+    def.broadcastable === true && typeCouldBeUnkeyedCollection(types[i]);
+  const taken = arms.filter((arm) => {
+    const { min, max } = arityBounds(arm);
+    if (n < min || n > max) return false;
+    return types.every((t, i) => {
+      const param = paramAt(arm, i);
+      return (
+        param !== undefined &&
+        (isSubtype(t, param) ||
+          admitsThroughCarrier(engine, t, param, threadable(i)))
+      );
+    });
+  });
+  if (taken.length === 0) return undefined;
+  if (taken.some((arm) => armAdmitsKindsByType(engine, arm, types, threadable)))
+    return undefined;
+  let selected = taken[0];
+  for (const arm of taken.slice(1))
+    if (isMoreSpecific(arm, selected, n)) selected = arm;
+  return isApplySite(engine, def, selected, types) ? selected : undefined;
+}
+
+/**
+ * The static result type of a call of the operator `operator` that is an
+ * APPLY SITE of a value kind (`docs/plans/2026-10-26-value-kinds.md`,
+ * section 4.5), resolved to the signature arm `arm`, over the operands
+ * `operands`; `siteOperands` are the indices of the operands admitted only
+ * through the carrier of their kind (`kindCarrierOperands()`,
+ * `kind-admission.ts`), and `retype(i, t)` is the descriptor of the operand
+ * `i` with the type `t`. The expression route (`applySiteResultType()`,
+ * `apply-site.ts`) and the route from types (`deriveApplicationType()`)
+ * both call this function, so that the two give the same type. In order:
+ *
+ * - an operator whose declared result type is not a number type keeps it:
+ *   `IsInteger(U)` is `boolean`;
+ * - when no kind type among the operands declares `apply` (the reading per
+ *   type: any registered head of the type), the operator's own handler
+ *   runs, and the call is typed by the operator's ordinary result over the
+ *   operands with each kind arm replaced by its carrier (`h(K(1))` for
+ *   `h: (real) -> real` is `real`);
+ * - else the CELL type is the union, over the kind types of the operands
+ *   (in the elements of a collection operand too), of the answer of the
+ *   kind type's `resultType` hook, or of the kind type itself
+ *   (`residueResultType()`), put in the cells of the ordinary result, which
+ *   gives the shape (`Sin([U1, U2])` is a list of `umeasurement`,
+ *   `Mean([U, U])` is `umeasurement`); and when an operand may also be a
+ *   value with no kind (`real | umeasurement`), the ordinary result is
+ *   joined in.
+ */
+export function kindApplySiteResultType(
+  engine: ComputeEngine,
+  operator: string,
+  arm: Type,
+  operands: ReadonlyArray<OperandDescriptor>,
+  siteOperands: ReadonlyArray<number>,
+  retype: (i: number, t: Type) => OperandDescriptor
+): Type {
+  const declared = functionResult(arm);
+  if (
+    declared !== undefined &&
+    declared !== 'unknown' &&
+    declared !== 'any' &&
+    !isSubtype(declared, 'number')
+  )
+    return declared;
+
+  const kinds = carrierKindTypeNames(engine);
+  const substituted = operands.map((d, i) => {
+    if (!siteOperands.includes(i)) return d;
+    const param =
+      typeof arm === 'object' && arm.kind === 'signature'
+        ? paramAt(arm, i)
+        : undefined;
+    const carrier =
+      param === undefined ? undefined : withKindCarriers(engine, d.type, param);
+    return retype(i, carrier ?? withoutKindArmsDeep(d.type, kinds));
+  });
+  const ordinary =
+    deriveApplicationType(engine, operator, substituted) ??
+    declared ??
+    'unknown';
+
+  const names = new Set<string>();
+  for (const i of siteOperands)
+    for (const name of kindArmNames(operands[i].type, kinds)) names.add(name);
+  if (![...names].some((name) => kindTypeHasHook(engine, name, 'apply')))
+    return ordinary;
+
+  const cell = residueResultType(operands, engine, operator);
+  const certain = siteOperands.every((i) =>
+    isUninhabitedWithoutKinds(stripMissingFromType(operands[i].type), kinds)
+  );
+  return withCells(ordinary, cell, !certain);
+}
+
+/** `shape` with every cell replaced by `cell`, or joined with `cell` when
+ * `join` is true (a cell that may also be a value with no kind keeps its
+ * ordinary type beside the kind type): a list, a tuple, or a union of them
+ * keeps its structure; any other type is a cell. */
+function withCells(shape: Type, cell: Type, join: boolean): Type {
+  return mapCells(shape, (t) => (join ? widen(t, cell) : cell));
+}
+
+/** `shape` with every cell replaced by `leaf(cell)`: a list, a tuple, or a
+ * union of them keeps its structure; any other type is a cell. */
+function mapCells(shape: Type, leaf: (t: Type) => Type): Type {
+  if (typeof shape === 'string') return leaf(shape);
+  switch (shape.kind) {
+    case 'list':
+      return { ...shape, elements: mapCells(shape.elements, leaf) };
+    case 'tuple':
+      return {
+        ...shape,
+        elements: shape.elements.map((e) => ({
+          ...e,
+          type: mapCells(e.type, leaf),
+        })),
+      };
+    case 'union':
+      return reduceType({
+        kind: 'union',
+        types: shape.types.map((t) => mapCells(t, leaf)),
+      });
+    default:
+      return leaf(shape);
+  }
+}
+
+/**
+ * The result type of a call of the operator `def`, named `operator`, with
+ * its own handler, whose parameter NAMES a kind type
+ * (`h2: (real | umeasurement) -> real`, group 2 of
+ * `docs/plans/2026-10-26-value-kinds.md`, section 4.2), over operands of
+ * types `operandTypes`, when the `resultType` hook of the kind type of an
+ * operand at such a parameter answers for the operator (section 4.5, rule
+ * 5); else `undefined`, and the declared result type of the operator
+ * applies, which is the host's promise. Not for the operators that handle
+ * a kind through its hooks (`handlesKindsByHooks()`), which have their own
+ * rules, nor for an overload set. The expression route calls this function
+ * too (`applySiteResultType()`, `apply-site.ts`).
+ */
+export function namedKindResultTypeOverTypes(
+  engine: ComputeEngine,
+  operator: string,
+  def: BoxedOperatorDefinition,
+  operandTypes: ReadonlyArray<Type>
+): Type | undefined {
+  // Cheap gate: a kind type with a `resultType` hook is registered.
+  if (!someKindHasResultType(engine)) return undefined;
+  if (def.lazy || def.evaluate === undefined) return undefined;
+  if (handlesKindsByHooks(engine, operator, def)) return undefined;
+  const sig = def.signature.type;
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return undefined;
+  const kinds = kindTypeNames(engine);
+  const shapeless = operandTypes.map((t) => typeWithoutShape(t));
+  const answers: Type[] = [];
+  operandTypes.forEach((t, i) => {
+    const param = paramAt(sig, i);
+    if (param === undefined || !hasKindArm(param, kinds)) return;
+    for (const name of kindArmNames(t, kinds)) {
+      const hook = kindTypeInfo(engine, name)?.resultType;
+      const answer = hook?.(operator, shapeless);
+      if (answer === undefined) continue;
+      answers.push(
+        typeof answer === 'string' ? engine.type(answer).type : answer
+      );
+    }
+  });
+  if (answers.length === 0) return undefined;
+  const cell =
+    answers.length === 1
+      ? answers[0]
+      : reduceType({ kind: 'union', types: answers });
+  // A collection (or a tuple) at such a parameter of an operator that
+  // broadcasts is mapped over its cells, as a collection of numbers is, so
+  // the answer of the hook is the CELL type of the result, and the operand
+  // keeps its shape: `Sin(list<quantity>)` is `list<number>`,
+  // `Abs(list<quantity^2>)` is `list<quantity^2>`. A cell that may also
+  // hold a value with no kind (`list<quantity | integer>`) keeps the
+  // declared result of the operator beside the answer.
+  if (def.broadcastable === true) {
+    const shaped = operandTypes.findIndex((t, i) => {
+      const param = paramAt(sig, i);
+      return (
+        param !== undefined &&
+        hasKindArm(param, kinds) &&
+        hasKindArm(t, kinds) &&
+        (typeCouldBeUnkeyedCollection(t) || isTupleShapedType(t))
+      );
+    });
+    if (shaped >= 0) {
+      const declared = functionResult(sig) ?? 'unknown';
+      const shape = withoutKindArmsDeep(
+        stripMissingFromType(operandTypes[shaped]),
+        kinds
+      );
+      return mapCells(shape, (t) =>
+        t === 'never' ? cell : widen(declared, cell)
+      );
+    }
+  }
+  return cell;
 }
 
 installOperatorCalleeDerivation((engine, head, args, definition) =>

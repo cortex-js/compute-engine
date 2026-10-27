@@ -24,7 +24,14 @@
  * `atan` (one or two arguments) and `vec2`, and WGSL `atan` (one
  * argument), `atan2`, `select` and `vec2f`. The NaN and infinity helpers
  * `_gpu_nan` and `_gpu_inf`, which build their value from a bit pattern,
- * are read as `0.0 / 0.0` and `1.0 / 0.0`.
+ * are read as `0.0 / 0.0` and `1.0 / 0.0`. The NaN test on the bit pattern
+ * of a name, `(floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u` in GLSL and
+ * `(bitcast<u32>(x) & 0x7FFFFFFFu) > 0x7F800000u` in WGSL (the NaN-safe
+ * helpers of `gpuNaNSafeLibrary` and `_gpu_heaviside`), is read as a test
+ * that `x` is NaN, and the same test with `>=` (in `_gpu_cossinpi`) as a
+ * test that `x` is not finite. A NaN built from its bit pattern
+ * (`intBitsToFloat(0x7FC00000)`, or `bitcast<f32>` of a `let`) is read as
+ * `0.0 / 0.0`. A function can return `bool`.
  *
  * The text is also checked against some rules of its language, which a
  * shader compiler enforces and this interpreter would otherwise not see:
@@ -99,6 +106,8 @@ const COMMON_BUILTINS = new Set([
   'cos',
   'atan',
   'length',
+  '_gpu_bits_isnan',
+  '_gpu_bits_nonfinite',
 ]);
 const LANGUAGE_BUILTINS: Record<ShaderLanguage, Set<string>> = {
   glsl: new Set(['vec2']),
@@ -327,6 +336,9 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
     return fr(Math.sqrt(fr(fr(v.x * v.x) + fr(v.y * v.y))));
   },
   select: (f, t, c) => (c ? t : f),
+  // The NaN test on a bit pattern (see the rewrite in `shaderFunctions`).
+  _gpu_bits_isnan: (x) => Number.isNaN(num(x)) as unknown as Value,
+  _gpu_bits_nonfinite: (x) => !Number.isFinite(num(x)) as unknown as Value,
   vec2: (x, y) => ({ x: num(x), y: num(y ?? x) }),
   vec2f: (x, y) => ({ x: num(x), y: num(y ?? x) }),
 };
@@ -343,6 +355,20 @@ export function shaderFunctions(
     /(float _gpu_(inf|nan)\(\)|fn _gpu_(inf|nan)\(\) -> f32)\s*\{[^}]*\}/g,
     (_m, head: string, a?: string, b?: string) =>
       `${head} { return ${(a ?? b) === 'inf' ? '1.0' : '0.0'} / 0.0; }`
+  );
+  // A NaN built from its bit pattern, inline (`intBitsToFloat(0x7FC00000)`
+  // in GLSL) or from a `let` (`let bits = 0x7fc00000u;` and
+  // `bitcast<f32>(bits)` in WGSL), is read as `0.0 / 0.0`.
+  src = src
+    .replace(/intBitsToFloat\(0x7FC00000\)/g, '(0.0 / 0.0)')
+    .replace(/let bits = 0x7fc00000u;/g, '')
+    .replace(/bitcast<f32>\(bits\)/g, '(0.0 / 0.0)');
+  // The NaN test on the bit pattern of a name is read as a call of
+  // `_gpu_bits_isnan`, since the interpreter has no integer arithmetic.
+  src = src.replace(
+    /\((?:floatBitsToUint|bitcast<u32>)\(([A-Za-z_]\w*)\) & 0x7FFFFFFFu\) (>=?) 0x7F800000u/g,
+    (_m, name: string, op: string) =>
+      `${op === '>' ? '_gpu_bits_isnan' : '_gpu_bits_nonfinite'}(${name})`
   );
   const fns = new Parser(tokenize(src), language).functions();
 

@@ -350,10 +350,11 @@ describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {
       const got = r.run(args) as number[];
       want.forEach((v, i) => expect(got[i]).toBeCloseTo(v, 12));
     }
-    expect(compile(ce.box(['Map', 'Sin', FIVE]), { fallback: false }).code)
-      .toBe(
-        '[Math.sin(_.a), Math.sin(_.b), Math.sin(_.c), Math.sin(_.d), Math.sin(_.s)]'
-      );
+    expect(
+      compile(ce.box(['Map', 'Sin', FIVE]), { fallback: false }).code
+    ).toBe(
+      '[Math.sin(_.a), Math.sin(_.b), Math.sin(_.c), Math.sin(_.d), Math.sin(_.s)]'
+    );
     for (const to of ['interval-js', 'glsl'] as const) {
       const r: any = compile(ce.box(['Map', 'Sin', FIVE]), {
         to,
@@ -364,12 +365,17 @@ describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {
     expect(
       compile(ce.box(['Map', 'Sin', FIVE]), { to: 'glsl', fallback: false })
         .code
-    ).toBe('float[5](sin(a), sin(b), sin(c), sin(d), sin(s))');
+    ).toBe(
+      'float[5](_gpu_sin(a), _gpu_sin(b), _gpu_sin(c), _gpu_sin(d), _gpu_sin(s))'
+    );
   });
 
   it('applies a library head to each element that is a list', () => {
     // `Sin` of a list element broadcasts, as in the interpreter.
-    const pairs = ['List', ...['a', 'b', 'c', 'd', 's'].map((n) => ['List', n, 'a'])];
+    const pairs = [
+      'List',
+      ...['a', 'b', 'c', 'd', 's'].map((n) => ['List', n, 'a']),
+    ];
     const expr = ce.box(['Map', 'Sin', pairs]);
     const args = { a: 0.5, b: 2, c: 3, d: 7, s: -1.25 };
     const r: any = compile(expr, { to: 'javascript', fallback: false });
@@ -384,7 +390,10 @@ describe('FIXED-WIDTH UNROLL — Map with a bare user-function head', () => {
   it('leaves a VARIADIC library head untouched', () => {
     // `Max` has no required parameter, so the compiler has no one-argument
     // callback for it (`builtinCallbackArity`).
-    const pairs = ['List', ...['a', 'b', 'c', 'd', 's'].map((n) => ['List', n, 'a'])];
+    const pairs = [
+      'List',
+      ...['a', 'b', 'c', 'd', 's'].map((n) => ['List', n, 'a']),
+    ];
     const expr = ce.box(['Map', 'Max', pairs]);
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
   });
@@ -747,7 +756,11 @@ describe('FIXED-WIDTH UNROLL — reductions over a literal list', () => {
     const expr = engine.box([
       'Block',
       ['Declare', 'Max', "'function'"],
-      ['Assign', 'Max', ['Function', ['Add', ['Multiply', 2, 'a'], 'b'], 'a', 'b']],
+      [
+        'Assign',
+        'Max',
+        ['Function', ['Add', ['Multiply', 2, 'a'], 'b'], 'a', 'b'],
+      ],
       ['Reduce', ['List', 'x', ['Add', 'x', 1], ['Add', 'x', 2]], 'Max'],
     ]);
     const result = unrollFixedWidthCollections(expr);
@@ -1132,25 +1145,27 @@ describe('FIXED-WIDTH UNROLL — Voronoi route parity (by reference)', () => {
     // n-ary `Math.min` rather than a reduce over a runtime array.
     const engine = new ComputeEngine();
     engine.declare('u', 'number');
-    engine.box([
-      'DefineFunction',
-      'wide',
-      [
-        'Function',
+    engine
+      .box([
+        'DefineFunction',
+        'wide',
         [
-          'Min',
+          'Function',
           [
-            'List',
-            ['Add', 'u', 1],
-            ['Add', 'u', 2],
-            ['Add', 'u', 3],
-            ['Add', 'u', 4],
-            ['Add', 'u', 5],
+            'Min',
+            [
+              'List',
+              ['Add', 'u', 1],
+              ['Add', 'u', 2],
+              ['Add', 'u', 3],
+              ['Add', 'u', 4],
+              ['Add', 'u', 5],
+            ],
           ],
+          'u',
         ],
-        'u',
-      ],
-    ]).evaluate();
+      ])
+      .evaluate();
     const r: any = compile(engine.box(['wide', 'u']), {
       to: 'javascript',
       fallback: false,

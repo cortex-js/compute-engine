@@ -72,12 +72,15 @@ function rotationChain(): ComputeEngine {
 }
 
 describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
+  // `R_Z2` passes the value of `R_Y` through `r_zz`. That value can be a
+  // point, a ragged list or a number (ROADMAP CE-502), and the body of the
+  // callee decides the shape of a call over a point, so the result is `any`.
   test('the declared results carry the unknown of the pass-through (by design)', () => {
     const ce = rotationChain();
     expect(ce.box('r_zz').type.toString()).toBe(
       '(x: unknown, y: unknown, z: unknown, theta: unknown) -> unknown'
     );
-    expect(ce.box('R_Z2').type.toString()).toContain('broadcastable<unknown>');
+    expect(ce.box('R_Z2').type.toString()).toMatch(/-> any$/);
   });
 
   test('scalar calls type from the body (unchanged)', () => {
@@ -623,27 +626,34 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
 
       // A tuple with a component that can be neither a number nor open (a
       // string, a boolean) is not a numeric tuple, whatever its open
-      // components hold. So the `any` typing above does not apply to it:
-      // the call keeps the signature result, as `f("s")` does.
+      // components hold. It is still bound whole, and the value holds the
+      // tuple: the call is typed `any`. It kept the signature result
+      // `tuple<number, number>`, which does not hold `("s", a)` (ROADMAP
+      // CE-47).
       // The body `-x` cannot consume such a tuple, so the value carries the
       // `incompatible-type` error that `f("s")` carries, with the expected
       // and the actual type. Before, `-x` stayed the inert `-("s", a)`.
       test(`${route}: a tuple with a string or boolean component is an incompatible-type error`, () => {
         const ce = engine(declared);
+        // The call with a string is typed from the body: the value is a
+        // tuple with a failed cell, which has the type `error`. It kept the
+        // signature result `tuple<number, number>` (ROADMAP CE-490).
         const scalar = ce.parse('f("s")');
-        expect(scalar.type.toString()).toBe('tuple<number, number>');
-        expect(scalar.evaluate().toString()).toBe(
+        expect(scalar.type.toString()).toBe('error');
+        const scalarValue = scalar.evaluate();
+        expect(scalarValue.toString()).toBe(
           '(Error(ErrorCode("incompatible-type", "number", "string"), "s"), "s")'
         );
+        expect(scalarValue.type.matches(scalar.type)).toBe(true);
         const expected =
           '(Error(ErrorCode("incompatible-type", "number", "tuple<string, unknown>"), ("s", a)), ("s", a))';
         const parsed = ce.parse('f(("s", a))');
-        expect(parsed.type.toString()).toBe('tuple<number, number>');
+        expect(parsed.type.toString()).toBe('any');
         expect(parsed.evaluate().toString()).toBe(expected);
         const built = ce.function('f', [
           ce.function('Tuple', [ce.string('s'), ce.symbol('a')]),
         ]);
-        expect(built.type.toString()).toBe('tuple<number, number>');
+        expect(built.type.toString()).toBe('any');
         expect(built.evaluate().toString()).toBe(expected);
         const boolean = ce.function('f', [
           ce.function('Tuple', [ce.True, ce.number(1)]),
@@ -689,12 +699,13 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
               describeType(ce.type(t).type),
             ])
           ).toBe('any');
-        // A component that can be a string is not numeric, absent or not.
+        // A component that can be a string is not numeric, absent or not,
+        // but the tuple is bound whole too.
         expect(
           deriveApplicationType(ce as any, 'f', [
             describeType(ce.type('tuple<integer, string | missing>').type),
           ])
-        ).not.toBe('any');
+        ).toBe('any');
       });
 
       // An explicit tuple remains present even when every coordinate is
@@ -957,8 +968,6 @@ describe('Tycho 373 — a pass-through parameter under list broadcast', () => {
 
   test('an untyped (undeclared) argument still reads unknown: no promise is made', () => {
     const ce = rotationChain();
-    expect(ce.parse('R_{Z2}(u,u,u,0,0,18)').type.toString()).toBe(
-      'broadcastable<unknown>'
-    );
+    expect(ce.parse('R_{Z2}(u,u,u,0,0,18)').type.toString()).toBe('any');
   });
 });

@@ -52,7 +52,7 @@ describe('compiled Mod/Remainder operand parenthesization', () => {
       vars: { x: 'u_x' },
     }).code;
     expect(code).toBe(
-      '((((u_x + 29.0) % (900.0)) - (900.0) * (((sign((u_x + 29.0) % (900.0)) * sign((900.0))) - abs((sign((u_x + 29.0) % (900.0)) * sign((900.0))))) * 0.5)) % (900.0))'
+      '_gpu_fmod(u_x + 29.0, 900.0)'
     );
   });
 

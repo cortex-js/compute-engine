@@ -23,66 +23,66 @@ category.
 
 ### avogadroConstant
 
-MathJSON `AvogadroConstant` · constant `value` = `6.02214076e+23 mol^-1`
+MathJSON `AvogadroConstant` · constant `quantity` = `6.02214076e+23 mol^-1`
 
 Avogadro constant
 
 ### boltzmannConstant
 
-MathJSON `BoltzmannConstant` · constant `value` = `1.380649e-23 J/K`
+MathJSON `BoltzmannConstant` · constant `quantity` = `1.380649e-23 J/K`
 
 Boltzmann constant
 
 ### elementaryCharge
 
-MathJSON `ElementaryCharge` · constant `value` = `1.602176634e-19 C`
+MathJSON `ElementaryCharge` · constant `quantity` = `1.602176634e-19 C`
 
 Elementary electric charge
 
 ### gasConstant
 
-MathJSON `GasConstant` · constant `value` = `8.314462618 J/(K⋅mol)`
+MathJSON `GasConstant` · constant `quantity` = `8.314462618 J/(K⋅mol)`
 
 Molar gas constant
 
 ### gravitationalConstant
 
-MathJSON `GravitationalConstant` · constant `value` = `6.6743e-11 m^3/(kg⋅s^2)`
+MathJSON `GravitationalConstant` · constant `quantity` = `6.6743e-11 m^3/(kg⋅s^2)`
 
 Newtonian constant of gravitation
 
 ### mu0
 
-MathJSON `Mu0` · constant `value` = `0.00000125663706212 N/A^2`
+MathJSON `Mu0` · constant `quantity` = `0.00000125663706212 N/A^2`
 
 Vacuum permeability
 
 ### planckConstant
 
-MathJSON `PlanckConstant` · constant `value` = `6.62607015e-34 J⋅s`
+MathJSON `PlanckConstant` · constant `quantity` = `6.62607015e-34 J⋅s`
 
 Planck constant
 
 ### speedOfLight
 
-MathJSON `SpeedOfLight` · constant `value` = `299792458 m/s`
+MathJSON `SpeedOfLight` · constant `quantity` = `299792458 m/s`
 
 Speed of light in vacuum
 
 ### standardGravity
 
-MathJSON `StandardGravity` · constant `value` = `9.80665 m/s^2`
+MathJSON `StandardGravity` · constant `quantity` = `9.80665 m/s^2`
 
 Standard acceleration due to gravity
 
 ### stefanBoltzmannConstant
 
-MathJSON `StefanBoltzmannConstant` · constant `value` = `5.670374419e-8 W/(K^4⋅m^2)`
+MathJSON `StefanBoltzmannConstant` · constant `quantity` = `5.670374419e-8 W/(K^4⋅m^2)`
 
 Stefan-Boltzmann constant
 
 ### vacuumPermittivity
 
-MathJSON `VacuumPermittivity` · constant `value` = `8.8541878128e-12 F/m`
+MathJSON `VacuumPermittivity` · constant `quantity` = `8.8541878128e-12 F/m`
 
 Vacuum permittivity (electric constant)

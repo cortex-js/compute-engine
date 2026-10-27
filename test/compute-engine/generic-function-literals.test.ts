@@ -588,18 +588,16 @@ describe('§5.1 — identity and swap, end to end, on every route', () => {
   test('the ANONYMOUS `Apply` route instantiates its callee', () => {
     const ce = fresh();
     const f = e1(ce, 'x', '(x: T) -> T where T');
-    expect(ce.box(['Apply', f.json, 5] as any).type.toString()).toBe(
-      'integer'
-    );
+    expect(ce.box(['Apply', f.json, 5] as any).type.toString()).toBe('integer');
     expect(
       ce
         .box(['Apply', f.json, 5] as any)
         .evaluate()
         .toString()
     ).toBe('5');
-    expect(
-      ce.box(['Apply', f.json, { str: 'a' }] as any).type.toString()
-    ).toBe('string');
+    expect(ce.box(['Apply', f.json, { str: 'a' }] as any).type.toString()).toBe(
+      'string'
+    );
   });
 
   test('…and the application-HEAD spelling is the same node', () => {
@@ -889,11 +887,7 @@ describe('§5.3 — D10: a lift-admitted operand binds its ELEMENT', () => {
     );
     for (const [decl, value, expected] of [
       ['list<integer> | set<integer>', ['List', 1, 2], '[(1, 1),(2, 2)]'],
-      [
-        'list<integer> | set<integer>',
-        ['Set', 1, 2],
-        '(Set(1, 2), Set(1, 2))',
-      ],
+      ['list<integer> | set<integer>', ['Set', 1, 2], '(Set(1, 2), Set(1, 2))'],
       // A tuple arm and a string arm bind whole too.
       [
         'list<integer> | tuple<integer, integer>',
@@ -1180,9 +1174,7 @@ describe('§5.4 — generic recursion (declare-then-assign)', () => {
         .evaluate()
         .toString()
     ).toBe('5');
-    expect(ce.box(['nest', 5, 3] as any).type.toString()).toBe(
-      'integer'
-    );
+    expect(ce.box(['nest', 5, 3] as any).type.toString()).toBe('integer');
     expect(
       ce
         .box(['nest', { str: 'a' }, 2] as any)
@@ -1733,7 +1725,10 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     // …and the VALUE route agrees too.
     const value = fresh();
     value.declare('k', '(x: number) -> number');
-    value.assign('k', value.box(['Function', ['Multiply', 2, 'x'], 'x'] as any));
+    value.assign(
+      'k',
+      value.box(['Function', ['Multiply', 2, 'x'], 'x'] as any)
+    );
     const vcall = value.box(['k', ['List', 1, 2, 3]] as any);
     expect(call.type.toString()).toBe(vcall.type.toString());
     expect(call.evaluate().toString()).toBe(vcall.evaluate().toString());
@@ -1772,8 +1767,13 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     expect(call.type.toString()).toBe('list<vector<integer^2>>');
     expect(call.evaluate().toString()).toBe('[[1,1],[2,2]]');
     // …and the scalar call is unchanged.
-    expectTypeBetween(ce.box(['f', 3] as any), {atMost: 'list<number>'});
-    expect(ce.box(['f', 3] as any).evaluate().toString()).toBe('[3,3]');
+    expectTypeBetween(ce.box(['f', 3] as any), { atMost: 'list<number>' });
+    expect(
+      ce
+        .box(['f', 3] as any)
+        .evaluate()
+        .toString()
+    ).toBe('[3,3]');
   });
 
   test('a COLLECTION-typed parameter keeps binding its argument WHOLE', () => {
@@ -1846,7 +1846,8 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     // definition, dropping the operator half — and with it the derived
     // `broadcastable` flag and the `_isLambda`/`lambda` view.
     const ce = fresh();
-    const lit = () => e2(ce, ['Multiply', 2, 'x'], '(x: number) -> number', 'x');
+    const lit = () =>
+      e2(ce, ['Multiply', 2, 'x'], '(x: number) -> number', 'x');
 
     ce.assign('f', lit());
     const first = ce.lookupDefinition('f') as any;
@@ -1866,7 +1867,12 @@ describe('§follow-up — operator-route broadcastability derives from `paramsAr
     );
 
     // …and the BEHAVIOR is unchanged across the re-run.
-    expect(ce.box(['f', 3] as any).evaluate().toString()).toBe('6');
+    expect(
+      ce
+        .box(['f', 3] as any)
+        .evaluate()
+        .toString()
+    ).toBe('6');
     expect(
       ce
         .box(['f', ['List', 1, 2, 3]] as any)
@@ -1923,13 +1929,21 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
     const ce = fresh();
     // Arity mismatch…
     expect(
-      e2(ce, ['Multiply', 2, 'x'], '(a: number, b: number) -> number', 'x')
-        .toString()
+      e2(
+        ce,
+        ['Multiply', 2, 'x'],
+        '(a: number, b: number) -> number',
+        'x'
+      ).toString()
     ).toContain('A function-literal signature marker must be');
     // …optional arguments…
     expect(
-      e2(ce, ['Multiply', 2, 'x'], '(a: number, b: number?) -> number', 'x')
-        .toString()
+      e2(
+        ce,
+        ['Multiply', 2, 'x'],
+        '(a: number, b: number?) -> number',
+        'x'
+      ).toString()
     ).toContain('A function-literal signature marker must be');
     // …and a well-formed one is accepted.
     expect(
@@ -1968,19 +1982,22 @@ describe('§follow-up — an UNGROUPED ground marker is the literal’s own sign
       ).toContain('A function-literal signature marker must be');
       // …and a well-formed one still boxes.
       expect(
-        e2Block(ce, ['Add', 'x', 1], '(a: integer) -> integer', 'x').type
-          .toString()
+        e2Block(
+          ce,
+          ['Add', 'x', 1],
+          '(a: integer) -> integer',
+          'x'
+        ).type.toString()
       ).toBe('(x: unknown) -> integer');
     });
 
     test('a POLYTYPE marker erases its quantified parameters', () => {
       const ce = fresh();
-      const f = e2Block(
-        ce,
-        ['Add', 'x', 'x'],
-        '(x: T) -> T where T: number',
-        ['Typed', 'x', { str: 'T' }]
-      );
+      const f = e2Block(ce, ['Add', 'x', 'x'], '(x: T) -> T where T: number', [
+        'Typed',
+        'x',
+        { str: 'T' },
+      ]);
       // The quantified parameter is a BARE symbol — `T` never becomes the type
       // of a symbol (the §4.2 ground invariant).
       expect(f.ops[1].json).toBe('x');
@@ -2040,13 +2057,11 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
     );
   });
 
-  test("a literal with its OWN marker keeps it", () => {
+  test('a literal with its OWN marker keeps it', () => {
     const ce = fresh();
     ce.declare('f', '(x: T) -> T where T');
     ce.assign('f', e2(ce, 'x', '(y: U) -> U where U', 'x'));
-    expect(ce.box('f').evaluate().type.toString()).toBe(
-      '(y: U) -> U where U'
-    );
+    expect(ce.box('f').evaluate().type.toString()).toBe('(y: U) -> U where U');
   });
 
   test('a GROUND declaration is untouched (pre-existing asymmetry)', () => {
@@ -2055,7 +2070,9 @@ describe('R1 — a declared polytype is ascribed onto the stored literal', () =>
     ce.assign('g', ce.box(['Function', 'x', 'x']));
     expect(ce.box('g').type.toString()).toBe('(x: integer) -> integer');
     // The stored literal still loses the PARAMETER type — out of R1's scope.
-    expect(ce.box('g').evaluate().type.toString()).toBe('(x: unknown) -> integer');
+    expect(ce.box('g').evaluate().type.toString()).toBe(
+      '(x: unknown) -> integer'
+    );
   });
 });
 
@@ -2077,7 +2094,12 @@ describe('R4 — untyped re-assign replaces a derived signature', () => {
     ce.assign('g', untyped(ce));
     // Re-inferred from the NEW body — the old return annotation is gone.
     expect(ce.box('g').type.toString()).toBe('(x: unknown) -> number');
-    expect(ce.box(['g', 1.5] as any).evaluate().toString()).toBe('3');
+    expect(
+      ce
+        .box(['g', 1.5] as any)
+        .evaluate()
+        .toString()
+    ).toBe('3');
     // …and the representation stays an operator definition with a lambda.
     const def = ce.lookupDefinition('g');
     expect(def?.operator?.inferredSignature).toBe(true);

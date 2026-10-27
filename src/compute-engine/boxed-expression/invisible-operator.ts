@@ -22,10 +22,11 @@ import {
   noteProvisionalCall,
 } from './provisional-application.js';
 import {
-  hasResidueArm,
+  hasKindArm,
   stripMissingFromType,
   typeContainsMissing,
 } from '../../common/type/utils.js';
+import { kindTypeNames } from './value-kinds.js';
 
 const MATRIX_TYPE = new BoxedType('matrix');
 const FUNCTION_TYPE = new BoxedType('function');
@@ -643,11 +644,12 @@ function canonicalJuxtaposition(
       // `isIndexedCollection` below.
       t.type === 'value' ||
       t.matches('number') ||
-      // A residue class (`\overline{3}_{7}x`, a symbol declared `residue`)
-      // multiplies: the arithmetic operators admit a class in their
-      // signatures (`library/arithmetic.ts`), and a class beside a symbol or
-      // a number is a product, never a silent `Tuple`.
-      hasResidueArm(t.type) ||
+      // A value of a value kind (a residue class `\overline{3}_{7}x`, a
+      // symbol declared `residue`, a `GF8(1)` of a user kind) multiplies:
+      // the arithmetic operators admit a kind value, and a kind value beside
+      // a symbol, a number or another kind value is a product, never a
+      // silent `Tuple`.
+      hasKindArm(t.type, kindTypeNames(ce)) ||
       // A `broadcastable<…>`-typed operand — arithmetic over an
       // unknown-return call, e.g. `(2h(x)-1)` with `h: (number) ->
       // unknown` — is a number OR an indexed collection of numbers

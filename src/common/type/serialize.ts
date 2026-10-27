@@ -57,10 +57,40 @@ let ELIDE_STATED_PURE = false;
 export function typeToDedupKey(type: Type): string {
   if (typeof type === 'string') return type;
   ELIDE_STATED_PURE = true;
+  MARK_CLOSED_RECORDS = true;
   try {
     return typeToString(type);
   } finally {
     ELIDE_STATED_PURE = false;
+    MARK_CLOSED_RECORDS = false;
+  }
+}
+
+/**
+ * While set, {@link typeToString} writes a closed record (`closed: true`,
+ * the type of a dictionary value) as `record!{…}`, a spelling that the
+ * parser does not read. Set by {@link typeToDedupKey} and
+ * {@link typeToIdentityKey}, and restored around one synchronous,
+ * non-reentrant call.
+ */
+let MARK_CLOSED_RECORDS = false;
+
+/**
+ * A key that tells two types apart when they are different types: the
+ * serialization of the type, with a closed record written as `record!{…}`.
+ *
+ * A closed record prints as the open record with the same fields
+ * (`record{a: integer}`), but the two are different types: only the closed
+ * one is a `dictionary<integer>`. A table keyed by the plain serialization
+ * (the intern table, `intern.ts`) would merge them.
+ */
+export function typeToIdentityKey(type: Type): string {
+  if (typeof type === 'string') return type;
+  MARK_CLOSED_RECORDS = true;
+  try {
+    return typeToString(type);
+  } finally {
+    MARK_CLOSED_RECORDS = false;
   }
 }
 
@@ -283,7 +313,10 @@ export function typeToString(type: Type, precedence = 0): string {
       const elements = Object.entries(type.elements)
         .map(([key, value]) => `${symbolName(key)}: ${typeToString(value)}`)
         .join(', ');
-      result = `record{${elements}}`;
+      result =
+        MARK_CLOSED_RECORDS && type.closed === true
+          ? `record!{${elements}}`
+          : `record{${elements}}`;
       break;
 
     case 'object':

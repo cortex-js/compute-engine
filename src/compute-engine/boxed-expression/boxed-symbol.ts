@@ -1,5 +1,6 @@
+import { isDeclaredLocal } from './declared-local.js';
 import { isScratchBinding } from '../scratch-scopes.js';
-import { noteResidueDeclaration } from './residue-class.js';
+import { noteKindTypeDeclaration } from './residue-class.js';
 import type {
   MathJsonExpression,
   MathJsonSymbol,
@@ -55,6 +56,7 @@ import type {
 
 import { activeRollbackFrame } from '../inference-rollback.js';
 import { contractTupleOfNarrow } from './index-read-tuple.js';
+import { typeCouldBeNumericCollection } from '../collection-utils.js';
 import { readBeforeDeclarationError } from './read-before-declaration.js';
 import { noteFailedWalk } from './incomplete-walks.js';
 
@@ -96,6 +98,7 @@ import {
   isNumber,
   isSymbol,
 } from './type-guards.js';
+import { isKindValue } from './kind-compare.js';
 import { realExponentValue } from './imaginary-part.js';
 import {
   memoDepsStillValid,
@@ -222,6 +225,74 @@ function valueOfBinding(
     : undefined;
 }
 
+/**
+ * For a value definition whose inferred type is a scalar numeric type: true
+ * when every use that required a number was an operand of an operator that
+ * maps over a collection (a `broadcastable` operator such as `Multiply`,
+ * `Add` or `Sin`), false when at least one was not (the bound of `Range`,
+ * the count of `Take`). No entry means that no such use was recorded.
+ * `narrowInferredType` reads it.
+ */
+const SCALAR_USES_MAP = new WeakMap<object, boolean>();
+
+/**
+ * The type that a narrow write stores on a binding whose type is inferred,
+ * from its current type `current` and the requirement `requirement` of a
+ * new use. `scalarUsesMap` is true when every earlier use that gave the
+ * binding a scalar numeric type was an operand of an operator that maps
+ * over a collection (`SCALAR_USES_MAP`).
+ *
+ * This is the meet of the two types, with one exception. A numeric context
+ * of a mapping operator (`x + 1`, `t·x`) infers a scalar numeric type, but
+ * the operator maps over a numeric collection, so the use does not prove
+ * that the value is a scalar. When a later use requires a collection that
+ * can hold numbers (an index read `x[1]` requires
+ * `indexed_collection<number>`), the meet is `never`, and the binding then
+ * has a type that no value has. The requirement of the collection use is
+ * stored instead. The other order of the two uses also gives a collection
+ * type: a binding that already has a collection type is not given a scalar
+ * type by a numeric context (`excludedFromScalarInference()`,
+ * `validate.ts`). Without this rule, `(P, t) ↦ t·P/(P[1] − 1)` was typed
+ * `(unknown, unknown) -> never`, while `(P, t) ↦ t·(P/(P[1] − 1))` was typed
+ * correctly (ROADMAP CE-503).
+ *
+ * When one of the earlier uses requires a scalar and does not map (the bound
+ * of `Range`, the count of `Take`), no value can satisfy both uses, and the
+ * meet `never` is kept: `n ↦ Range(n) + n[1]` gives an `incompatible-type`
+ * error for a list argument, and a collection type for `n` would type the
+ * call with a value that it cannot have.
+ */
+function narrowInferredType(
+  current: Type,
+  requirement: Type,
+  scalarUsesMap: boolean
+): Type {
+  const meet = contractTupleOfNarrow(narrow(current, requirement), requirement);
+  if (
+    scalarUsesMap &&
+    meet === 'never' &&
+    current !== 'never' &&
+    isSubtype(current, 'number') &&
+    typeCouldBeNumericCollection(requirement)
+  )
+    return requirement;
+  return meet;
+}
+
+/** True when the operator that is being canonicalized while an inference
+ * is written (`_inferenceCause`) maps over a collection operand: its
+ * definition is `broadcastable`. A juxtaposition (`InvisibleOperator`, the
+ * `t P` of a parsed `\frac{t P}{…}`) counts too: it writes a numeric type
+ * on an operand only when it reads the juxtaposition as a product, and
+ * `Multiply` maps. */
+function inferenceCauseMaps(ce: ComputeEngine): boolean {
+  const name = ce._inferenceCause?.operator;
+  if (name === undefined) return false;
+  if (name === 'InvisibleOperator') return true;
+  const def = ce.lookupDefinition(name);
+  return def !== undefined && isOperatorDef(def) && def.operator.broadcastable;
+}
+
 export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   override readonly _kind = 'symbol';
 
@@ -235,6 +306,23 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * The definition of the symbol, if the symbol is bound/canonical.
    */
   private readonly _def: BoxedDefinition | undefined;
+
+  /**
+   * True when this symbol was boxed in the structural form and bound to its
+   * definition (`boxStructuralSymbol()`, `box.ts`). A bound symbol reports
+   * `isCanonical`, so without this flag `subs()` could not tell a structural
+   * symbol from a canonical one, and boxed its replacement canonically: with
+   * `x: real`, the structural `x` with `x` replaced by the structural `t + i`
+   * gave `t + (0 + 1i)`. Set only on an instance made for the structural
+   * form (`_asStructural()`), never on a shared (interned) symbol. Optional,
+   * so a plain symbol carries no own property for it.
+   * @internal
+   */
+  _structuralForm?: boolean;
+
+  /** The unmarked instance that `canonical` returns for a symbol marked
+   * `_structuralForm`, made on the first read. */
+  private _canonicalOfStructural: BoxedSymbol | undefined;
 
   /** Note: to indicate that the symbol should be canonical, pass a def. */
   constructor(
@@ -282,7 +370,39 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       def: this._def,
     });
     result._parseScope = this._parseScope;
+    // A copy for diagnostics keeps the structural form of its source.
+    if (this._structuralForm) result._structuralForm = true;
     return result;
+  }
+
+  /**
+   * This symbol in the structural form: a symbol bound to a USER definition,
+   * marked `_structuralForm`, so that `subs()` boxes a replacement in the
+   * structural form. `inPlace` marks this instance (the boxing route, which
+   * holds a fresh instance); otherwise a copy is marked, so a canonical
+   * symbol that other expressions share is never changed.
+   *
+   * Returned unchanged: a symbol with no definition (`subs()` already boxes
+   * its replacement raw), and a symbol bound to its library definition (the
+   * binding of the system scope). The shared (interned) symbols (`Pi`,
+   * `True`, `Nothing`, `Missing`, …) are library names, and engine code
+   * compares them by identity (`=== ce.Nothing`).
+   * @internal
+   */
+  _asStructural(inPlace: boolean): BoxedSymbol {
+    const def = this._def;
+    if (def === undefined || this._structuralForm) return this;
+    const library = this.engine.contextStack[0]?.lexicalScope.bindings.get(
+      this._id
+    );
+    if (library === def) return this;
+    const result = inPlace ? this : this._unshared();
+    result._structuralForm = true;
+    return result;
+  }
+
+  override get structural(): Expression {
+    return this._asStructural(false);
   }
 
   get isPure(): boolean {
@@ -308,6 +428,17 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   get canonical(): Expression {
+    // A symbol marked for the structural form gives an unmarked instance,
+    // with the same definition: its `subs()` boxes a replacement in the
+    // canonical form, as the caller asked.
+    if (this._structuralForm) {
+      if (this._canonicalOfStructural === undefined) {
+        const plain = this._unshared();
+        plain._structuralForm = undefined;
+        this._canonicalOfStructural = plain;
+      }
+      return this._canonicalOfStructural;
+    }
     // The symbol is canonical if it has a definition
     if (this._def) return this;
 
@@ -331,10 +462,11 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Structural check (syntactic: `isSame` does NOT follow the binding)
     if (tolerance === undefined && this.isSame(other)) return true;
 
-    // A quantity whose unit is dimensionless compares with a number
-    // (`π` is `180 deg`): the quantity makes the comparison, with the exact
-    // value of a constant such as `π`, as `.is()` is symmetric.
-    if (other instanceof _BoxedExpression && other.operator === 'Quantity')
+    // A value of a value kind makes the comparison, as `.is()` is
+    // symmetric: it follows the value of this symbol. A quantity whose unit
+    // is dimensionless compares with a number (`π` is `180 deg`), with the
+    // exact value of a constant such as `π`.
+    if (other instanceof _BoxedExpression && isKindValue(other))
       return other.is(this, tolerance);
 
     // The structural check never follows the binding, so if we have a bound
@@ -731,6 +863,31 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       // even if it is unknown (e.g. `ContinuationPlaceholder`)
       if (def.value.isConstant) return false;
 
+      // A valueless binding with assignment evidence (a block local that an
+      // `Assign` or a `let` initializer gave a value type when it was
+      // canonicalized) has the join of its assigned value types as its
+      // static type. A use does not narrow that type: the meet with a
+      // parameter type can exclude a value that an assignment gives, and it
+      // made the type depend on the order of the statements
+      // (`_assignmentEvidence`, `boxed-value-definition.ts`).
+      if (
+        inferenceMode === 'narrow' &&
+        def.value._assignmentEvidence &&
+        def.value.value === undefined
+      )
+        return false;
+
+      // A block local declared `any` keeps its declared type: a use does
+      // not narrow it (`isDeclaredLocal()`). Its assigned value can be any
+      // value, and a narrower type can contradict it: with `xs: any`
+      // assigned a string, `ReplaceAt(xs, i, "z")` narrowed `xs` to
+      // `indexed_collection<string>`, which a string is not.
+      if (
+        inferenceMode === 'narrow' &&
+        def.value.type.type === 'any' &&
+        isDeclaredLocal(def.value)
+      )
+        return false;
       if (def.value.inferredType || def.value.type.isUnknown) {
         const previousType = def.value.type;
         // `replace` is LAST-WRITE-WINS — the Epsil static pre-pass uses it
@@ -742,8 +899,26 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
             ? t
             : inferenceMode === 'widen'
               ? widen(def.value.type.type, t)
-              : contractTupleOfNarrow(narrow(def.value.type.type, t), t)
+              : narrowInferredType(
+                  def.value.type.type,
+                  t,
+                  SCALAR_USES_MAP.get(def.value) === true
+                )
         );
+        // Record whether the uses that require a number map over a
+        // collection (`SCALAR_USES_MAP`). The record is written before the
+        // no-op test below: a use of `Range` after `n + 1` does not change
+        // the type `number`, but it is a use that does not map.
+        if (inferenceMode === 'narrow') {
+          if (isSubtype(t, 'number'))
+            SCALAR_USES_MAP.set(
+              def.value,
+              (SCALAR_USES_MAP.get(def.value) ?? true) &&
+                inferenceCauseMaps(this.engine)
+            );
+          else if (!isSubtype(inferred.type, 'number'))
+            SCALAR_USES_MAP.delete(def.value);
+        }
         // Inferring `unknown` adds no information — the argument's type is
         // still open. It is a no-op, so skip the write: assigning `unknown`
         // to the value definition's type triggers the value-reset in the type
@@ -1303,11 +1478,12 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         `The type of the wildcard "${this._id}" cannot be changed`
       );
 
-    // A type that can hold a residue class (`r.type = 'residue'`) lets an
-    // expression of the engine hold a class: the engine joins the set that
-    // enables the test for classes, as a declaration does
+    // A type that can hold a value of a value kind (`r.type = 'residue'`,
+    // a function type that returns `gf8`) lets an expression of the engine
+    // hold such a value: the engine opens the gates of the kind type that
+    // enable the recognition of its values, as a declaration does
     // (`engine-declarations.ts`, `residue-class.ts`).
-    noteResidueDeclaration(this.engine, this.engine.type(t).type);
+    noteKindTypeDeclaration(this.engine, this.engine.type(t).type);
 
     // Clear assumptions about this symbol.
     //
@@ -2275,6 +2451,14 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     sub: Substitution,
     options?: { canonical?: CanonicalOptions }
   ): Expression {
+    // A structural symbol with no requested form keeps the structural form:
+    // its replacement is boxed structurally, which keeps the written names
+    // (`_structuralForm`).
+    if (options?.canonical === undefined && this._structuralForm) {
+      if (!Object.hasOwn(sub, this._id) || sub[this._id] === undefined)
+        return this;
+      return this.engine.expr(sub[this._id], { form: 'structural' });
+    }
     const canonical = options?.canonical ?? this.isCanonical;
     // `Object.hasOwn`, not a bare index: a symbol name is arbitrary user text,
     // so a symbol named `constructor` or `toString` would otherwise read the

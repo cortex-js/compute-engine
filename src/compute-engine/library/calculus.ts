@@ -16,7 +16,7 @@ import type { Type } from '../../common/type/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { functionResult, isPointElementType } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { checkType } from '../boxed-expression/validate.js';
+import { checkType, checkOperandType } from '../boxed-expression/validate.js';
 import {
   rebindEscaping,
   rebindEscapingCurrentScope,
@@ -206,7 +206,7 @@ import {
   canonicalWithEscapingReturn,
 } from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
-import { containsResidueClass } from '../boxed-expression/residue-class.js';
+import { holdsKindValue } from '../boxed-expression/residue-class.js';
 import {
   libraryNamesShadowedIn,
   shadowedLibraryNames,
@@ -4788,7 +4788,7 @@ volumes
         // A function that holds a residue class is not differentiated: a
         // class is not a real number, and the rules of differentiation do
         // not apply to it. The derivative stays unevaluated.
-        if (containsResidueClass(ops[0].canonical)) return undefined;
+        if (holdsKindValue(ops[0].canonical)) return undefined;
 
         // The differentiation variable(s) are bound by `D`: a same-named global
         // assignment (`x := 5`) must not substitute into the result. Shield
@@ -4919,7 +4919,7 @@ volumes
         if (returnError) return returnError;
         const fn = canonicalFunctionLiteral(ops[0]);
         if (!fn) return null;
-        const x = checkType(engine, ops[1]?.canonical, 'number');
+        const x = checkOperandType(engine, ops[1]?.canonical, 'number');
         return engine._fn('ND', [fn, x]);
       },
       evaluate: ([body, x], { engine }) => {
@@ -5591,7 +5591,7 @@ volumes
         // is not a real number, and the bounds are real numbers, not
         // elements of its ring (`1/2` is not the class `2⁻¹`). The integral
         // stays unevaluated, under `evaluate()` and `N()` alike.
-        if (containsResidueClass(body)) return undefined;
+        if (holdsKindValue(body)) return undefined;
         if (isNumber(body) && body.isNaN === true) {
           // A list bound gives one integral per element (see the `type`
           // handler), so the answer is a list of the same length, and two
@@ -6810,8 +6810,8 @@ volumes
         // written `Integrate(f, Limits(x, …), Limits(y, …)).N()`.
         return engine._fn('NIntegrate', [
           fn,
-          checkType(engine, lower, 'number'),
-          checkType(engine, upper, 'number'),
+          checkOperandType(engine, lower, 'number'),
+          checkOperandType(engine, upper, 'number'),
         ]);
       },
       evaluate: ([f, a, b], { engine }) => {

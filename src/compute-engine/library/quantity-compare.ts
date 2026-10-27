@@ -15,8 +15,7 @@ import {
   exactConstantOrder,
   isExactConstantExpression,
 } from '../boxed-expression/compare.js';
-import { isMeasurement, measurementNominal } from './measurement-arithmetic.js';
-import { isQuantity } from './quantity-arithmetic.js';
+import { isMeasurement } from './measurement-arithmetic.js';
 import { boxedToUnitExpression } from './units.js';
 import {
   type DimensionVector,
@@ -89,15 +88,12 @@ export type QuantityCompareOptions = {
  * decimal number, an exact number), and the result is `undefined` when this
  * is not possible either.
  *
- * With a `tolerance` of 0 and `exact`, the order is exact, as `exactOrder()`
- * needs for `Max`, `Min`, `Clamp` and `Sort`.
- *
  * This function is the one comparison of quantities for every route: the
- * operators `Equal`, `NotEqual`, `Less`, `LessEqual` and `IdenticallyEqual`
- * (`library/relational-operator.ts`), the methods `isEqual()`,
- * `isIdenticallyEqual()`, `isLess()` and the other order predicates, `is()`
- * and `exactOrder()` (`boxed-expression/compare.ts` reaches it through a
- * lazy reference that `src/compute-engine/index.ts` sets).
+ * `compare` hook and the `eq` handler of the quantity kind
+ * (`QUANTITY_ARITHMETIC` and `quantityEq()`, `quantity-kind.ts`) call it,
+ * and the comparison operators, `Max`, `Min`, `Sort`, `Clamp`, the methods
+ * `isEqual()`, `isLess()`, … and `is()` reach those through the dispatch of
+ * the kinds (`boxed-expression/kind-compare.ts`).
  */
 export function compareQuantities(
   a: Expression,
@@ -121,12 +117,16 @@ export function compareQuantities(
   )
     return undefined;
 
+  // A measured magnitude is compared by its nominal value, the first
+  // operand of the `Measurement`, as the order of the measurement kind
+  // compares a measurement (`MEASUREMENT_ARITHMETIC`,
+  // `measurement-arithmetic.ts`).
   let aMag = aMagnitude;
   let bMag = bMagnitude;
   if (isMeasurement(aMag) || isMeasurement(bMag)) {
     if (!options.nominal) return undefined;
-    aMag = measurementNominal(aMag);
-    bMag = measurementNominal(bMag);
+    if (isMeasurement(aMag)) aMag = aMag.op1;
+    if (isMeasurement(bMag)) bMag = bMag.op1;
   }
 
   if (!isRealMagnitude(aMag) || !isRealMagnitude(bMag)) return undefined;
@@ -274,7 +274,7 @@ const LOGARITHMIC_UNITS = new Set(['dB', 'Np']);
 
 /** True when the unit expression `unit` has a logarithmic unit
  * (`LOGARITHMIC_UNITS`) in it, at any depth. */
-function hasLogarithmicUnit(unit: UnitExpression): boolean {
+export function hasLogarithmicUnit(unit: UnitExpression): boolean {
   if (typeof unit === 'string') return LOGARITHMIC_UNITS.has(unit);
   return unit.some(
     (part, i) =>
@@ -325,6 +325,13 @@ function quantityOperands(
   return aQuantity
     ? [q.op1, unit, other, SCALE_ONE_UNIT]
     : [other, SCALE_ONE_UNIT, q.op1, unit];
+}
+
+/** True when `x` is a call of the head `Quantity`, with its two operands. */
+function isQuantity(
+  x: Expression
+): x is Expression & { readonly op1: Expression; readonly op2: Expression } {
+  return isFunction(x, 'Quantity');
 }
 
 /** The dimension of the unit of the quantity `q`, or `null` when it is not

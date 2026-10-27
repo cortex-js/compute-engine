@@ -89,12 +89,14 @@ describe('COMPILE DERIVATIVE — glsl', () => {
   });
 
   test('\\frac{d}{dx}\\sin(x) compiles on glsl', () => {
-    expect(glsl.compile(ce.parse('\\frac{d}{dx}\\sin(x)')).code).toBe('cos(x)');
+    expect(glsl.compile(ce.parse('\\frac{d}{dx}\\sin(x)')).code).toBe(
+      '_gpu_cos(x)'
+    );
   });
 
   test('\\frac{d}{dx}(x^3 + \\cos(x)) compiles on glsl', () => {
     expect(glsl.compile(ce.parse('\\frac{d}{dx}(x^3+\\cos(x))')).code).toBe(
-      '3.0 * (x * x) + -sin(x)'
+      '3.0 * (x * x) + -_gpu_sin(x)'
     );
   });
 });

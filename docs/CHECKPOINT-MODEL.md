@@ -54,8 +54,24 @@ from its baseline.
 ## State coverage
 
 Bounded state is snapshotted at checkpoint creation: type/protocol registries,
-assumptions, host-visible engine configuration, rule stores, compilation
-targets, and sequence registries.
+the kind registry, assumptions, host-visible engine configuration, rule
+stores, compilation targets, and sequence registries.
+
+The kind registry (`boxed-expression/value-kinds.ts`) holds the value kinds
+declared by the `arithmetic` field of operator definitions: the fields of
+each kind type and the hooks of each operator definition. Its snapshot
+copies the type records, because a registration changes them in place. Its
+dispatch part refers to operator definitions by identity, so it is restored
+after the journal has put those definitions back. A restore increments the
+registry's generation counter; it never sets it back, because the
+recognition caches keyed on the generation must see a change. The
+per-engine gates of the registry (an engine has made a value of a kind,
+assigned one, or declared a symbol with a kind type) are not restored: they
+only open, and an open gate costs a walk, never a wrong answer. When the
+binding of a kind head is removed inside a rollback frame (the Epsil static
+pre-pass), the frame puts its dispatch entry back. A registration made
+inside a rollback frame is not undone by the frame; no route reaches that
+case today, because an Epsil program cannot declare an `arithmetic` field.
 
 Unbounded mutable state is copy-on-write journaled after the checkpoint:
 definition fields, scope-map changes, object slots/versions, and expression

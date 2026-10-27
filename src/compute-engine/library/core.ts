@@ -1,4 +1,5 @@
 import { installAnonymousCalleeDerivation } from '../boxed-expression/callee-type-derivation.js';
+import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
 import {
   runOperandSteps,
   runOperandStepsAsync,
@@ -35,10 +36,14 @@ import {
 } from '../boxed-expression/tuple-pattern.js';
 import { instantiatedResultTypeOverActuals } from '../boxed-expression/generic-instantiation.js';
 import { actualOfDescriptor } from '../boxed-expression/derive-application-type.js';
-import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
+import {
+  appliedLiteralResultType,
+  componentwiseTupleCallType,
+} from '../boxed-expression/call-result-type.js';
 import {
   deriveApplicationOf,
   describeBoundSymbol,
+  describedFunctionLiteral,
   describeType,
   namesBoundAt,
   resolvesToSystemBinding,
@@ -1061,23 +1066,23 @@ function applyLiteralMapType(
     isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
     !isSubtype(t, 'string') &&
     !(typeof t === 'object' && t.kind === 'tuple');
-  // A numeric tuple binds whole (in every cell, beside a collection), and
-  // the body decides the shape (`x·y` with a point `y` gives a point), so
-  // a scalar result does not describe the cell: `any`, as on the named route
-  // (`lambdaBroadcastType`).
+  // A tuple binds whole (in every cell, beside a collection), and the body
+  // decides the shape (`x·y` with a point `y` gives a point, `2x` with
+  // `x = ((1, 2), 3)` gives `((2, 4), 6)`), so a scalar result does not
+  // describe the cell: `any`, as on the named route (`lambdaBroadcastType`).
+  // A body that computes a numeric tuple component by component gives a
+  // tuple of numbers of the same length (`componentwiseTupleCallType`).
   const perElement0 = functionResult(fn.type) ?? 'unknown';
   if (
-    args.some((a) => {
-      const t = resolveTypeAlias(a.type);
-      return (
-        typeof t === 'object' &&
-        t.kind === 'tuple' &&
-        t.elements.every((e) => isSubtype(e.type, 'number'))
-      );
-    }) &&
+    args.some((a) => isTupleShapedType(resolveTypeAlias(a.type))) &&
     (perElement0 === 'unknown' || isSubtype(perElement0, 'number'))
   )
-    return 'any';
+    return (
+      componentwiseTupleCallType(
+        describedFunctionLiteral(fn),
+        args.map((a) => a.type)
+      ) ?? 'any'
+    );
   // A rest parameter takes its arguments whole (`mappedArgumentCount`).
   args = args.slice(0, mappedArgumentCount(fn.type));
   const collections = args.filter((a) => mapsOver(a.type));
@@ -2997,6 +3002,27 @@ function joinAssignmentEvidence(
   });
 }
 
+/**
+ * The type that the assignment of `value` records on its target binding,
+ * or `undefined` when the type of `value` is `unknown`.
+ *
+ * An access PROVED to find nothing is typed `missing`, its absence marker
+ * alone (`provedAbsentDomainOf()`). An operator that propagates absence
+ * reads the domain of such an access to choose its marker: `At(M, 7) + 1`
+ * for a matrix `M` of two rows is the sum of a row and a number, and its
+ * value is `Missing`. A use of a local does not see the access, so the
+ * local records the domain beside the marker, `missing | vector<…>`, and
+ * `r + 1` after `r = At(M, 7)` is `Missing` too, not the `NaN` of an absent
+ * number.
+ */
+function assignedEvidenceType(value: Expression): Type | undefined {
+  if (value.type.isUnknown) return undefined;
+  const t = value.type.type;
+  if (t !== 'missing') return t;
+  const domain = provedAbsentDomainOf(value);
+  return domain === undefined ? t : { kind: 'union', types: [t, domain] };
+}
+
 /** Join `assignedType` (widened) with the recorded type of the binding
  * `target`. Return `true` when the recorded type changed. With `coarse`, the
  * join is bounded in height by `coarsenEvidenceType`. */
@@ -3018,12 +3044,25 @@ function joinEvidenceOnBinding(
   if (assignedType === 'never') return false;
   const widened = widenAssignedType(ce, assignedType);
   const recorded = target.type;
-  const joined = recorded.isUnknown
-    ? widened
-    : joinEvidenceTypes(recorded.type, widened);
+  // The type of a binding with no assignment evidence yet came from uses
+  // only (an argument at a typed parameter narrowed it). A use is a
+  // requirement on the value, not a value, so the first assignment replaces
+  // that type instead of joining with it. Otherwise the static type depends
+  // on the order of the statements: `mutate(v); v = [1.5, 2]` gave
+  // `list<real>` and `v = [1.5, 2]; mutate(v)` gave `vector<real^2>`.
+  // A block local with a declared type (`isDeclaredLocal()`) is excluded:
+  // its type came from the declaration, which is the contract, not from a
+  // use, so an assignment joins with it. With `xs: any`, `xs = "abc"` keeps
+  // `xs` typed `any`.
+  const fromUsesOnly = !target._assignmentEvidence && !isDeclaredLocal(target);
+  const joined =
+    recorded.isUnknown || fromUsesOnly
+      ? widened
+      : joinEvidenceTypes(recorded.type, widened);
   if (joined === undefined) return false;
   const next = coarse ? coarsenEvidenceType(joined) : joined;
-  if (!recorded.isUnknown && isSubtype(next, recorded.type)) return false;
+  if (!fromUsesOnly && !recorded.isUnknown && isSubtype(next, recorded.type))
+    return false;
   writeEvidenceType(ce, target, next);
   return true;
 }
@@ -3044,6 +3083,9 @@ function writeEvidenceType(
   }
   const wasCallable = containsSignatureArm(target.type.type);
   target._setType(() => ce.type(next));
+  // From now on, the type of the binding is the join of its assignment
+  // evidence, and a use does not narrow it (`_assignmentEvidence`).
+  target._assignmentEvidence = true;
   // The `_type` expression caches key on the engine's `any` axis, which a
   // `_setType()` write does not advance: without the event, an
   // expression typed before this join — a lambda body canonicalized earlier
@@ -6555,7 +6597,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           canonRhs.isValid
         )
           joinAssignmentEvidence(ce, symbolName, () =>
-            canonRhs.type.isUnknown ? undefined : canonRhs.type.type
+            assignedEvidenceType(canonRhs)
           );
         // A destructuring target `(x, y) := v` records the same evidence on
         // each pattern leaf, from the matching position of the RHS's static
@@ -6688,7 +6730,7 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           joinAssignmentEvidence(
             ce,
             symbolExpr.symbol,
-            () => (value.type.isUnknown ? undefined : value.type.type),
+            () => assignedEvidenceType(value),
             { currentScopeOnly: true }
           );
           recordAlias(symbolExpr.symbol, value);

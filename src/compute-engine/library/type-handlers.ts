@@ -31,6 +31,7 @@ import {
 import { reduceType } from '../../common/type/reduce.js';
 import { withoutNothing } from '../../common/type/omission.js';
 import { describeType } from '../boxed-expression/operand-descriptor.js';
+import { rangeElementsAsLists } from '../collection-utils.js';
 import {
   negativeSign,
   nonNegativeSign,
@@ -1662,15 +1663,6 @@ export function elementExtremumType(
 }
 
 /**
- * `Measurement(value, error)` — a nominal value carrying a 1σ absolute error.
- * The type is the nominal's scalar type (typically `real`); the error bar does
- * not widen it.
- */
-export function measurementType(ops: ReadonlyArray<OperandDescriptor>): Type {
-  return ops[0]?.type ?? 'real';
-}
-
-/**
  * The type of `Sum`, `Product` or `Mean` reducing values that are all on the
  * extended real line, with or without NaN: the elements of each rank-1
  * `list` operand, and each scalar operand. `undefined` for any
@@ -2305,6 +2297,18 @@ export function bigOpResultType(
   const top = bigOpTopType(ops);
   if (top !== undefined) return top;
   if (ops.length === 1 && operator !== undefined) {
+    // A `range` element of the collection is a list of integers: the sum of
+    // `[1..2, 3..4]` is the row `[4, 6]`, as the sum of `[[1, 2], [3, 4]]`
+    // is (`rangeElementsAsLists()`). (ROADMAP CE-496.)
+    const asLists = rangeElementsAsLists(ops[0].type);
+    if (asLists !== ops[0].type)
+      ops = [
+        {
+          type: asLists,
+          facts: ops[0].facts,
+          structureOf: ops[0].structureOf,
+        },
+      ];
     const reduced = extendedReductionType(operator, ops);
     if (reduced !== undefined) return reduced;
     const shaped =

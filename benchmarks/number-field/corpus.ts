@@ -4,6 +4,7 @@ import {
   rationalCoefficient as q,
 } from '../../src/compute-engine/polynomial/exact-field.js';
 import { SmallPrimePolynomials } from '../../src/compute-engine/polynomial/small-prime.js';
+import { extendedCases } from './extended-corpus.js';
 
 export type Rational = [string, string];
 export type Element = Rational[];
@@ -16,10 +17,19 @@ export interface Case {
     coefficient: Element;
     factors: { coefficients: Element[]; multiplicity: number }[];
   };
+  provenance?: {
+    kind: 'generated' | 'published' | 'adapted';
+    source?: string;
+    description: string;
+    irreducibility: string;
+  };
 }
 
+export type CorpusKind = 'regular' | 'challenge' | 'extended';
+
 /** Generated inputs; linearity and unramified Eisenstein certify the factors. */
-export function corpus(kind: 'regular' | 'challenge' = 'regular'): Case[] {
+export function corpus(kind: CorpusKind = 'regular'): Case[] {
+  if (kind === 'extended') return [...corpus('challenge'), ...extendedCases()];
   const result: Case[] = [];
   const moduli = [
     [-2, 0, 1],

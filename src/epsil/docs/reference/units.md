@@ -29,7 +29,7 @@ Check if two units have the same dimension
 
 ### quantity
 
-MathJSON `Quantity` · `(value, value) -> value`
+MathJSON `Quantity` · `(value, value) -> quantity`
 
 A value paired with a physical unit
 

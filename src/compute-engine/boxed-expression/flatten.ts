@@ -1,5 +1,10 @@
 import type { Expression } from '../global-types.js';
-import { isFoldBarrierProduct, isFunction, isSymbol } from './type-guards.js';
+import {
+  isFoldBarrierProduct,
+  isFunction,
+  isNotationalProduct,
+  isSymbol,
+} from './type-guards.js';
 
 /**
  *
@@ -131,6 +136,34 @@ export function flattenHoldingBarriers<
     else ys.push(x);
   }
   return ys as T;
+}
+
+/**
+ * Like {@link flatten} with no canonicalization, but a product with a direct
+ * `ContinuationPlaceholder` operand (`isNotationalProduct()`, such as
+ * `2 · 4 · … · 2n`) is kept whole. Its operands are not lifted, because the
+ * enclosing product would then read the last sample `2n` as the two factors
+ * `2` and `n`. Other nested applications of `operator` and `Sequence`
+ * operands are lifted recursively, so a notational product inside them is
+ * found and kept whole too: `3 · (5 · (2 · 4 · … · 2n))` gives the operands
+ * `3`, `5` and `2 · 4 · … · 2n`.
+ */
+export function flattenKeepingNotationalProducts(
+  ops: ReadonlyArray<Expression>,
+  operator: string
+): Expression[] {
+  const ys: Expression[] = [];
+  for (const x of ops) {
+    if (isNotationalProduct(x)) ys.push(x);
+    else if (isSymbol(x, 'Nothing')) continue;
+    else if (
+      isFunction(x) &&
+      (x.operator === operator || x.operator === 'Sequence')
+    )
+      ys.push(...flattenKeepingNotationalProducts(x.ops, operator));
+    else ys.push(x);
+  }
+  return ys;
 }
 
 export function flattenSequence(

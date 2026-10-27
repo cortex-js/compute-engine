@@ -4,7 +4,7 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { isEffectSubset } from '../../common/type/effects.js';
-import { typeToString } from '../../common/type/serialize.js';
+import { typeToIdentityKey } from '../../common/type/serialize.js';
 import { reduceType, typesOverlap } from '../../common/type/reduce.js';
 import {
   freeTypeVariables,
@@ -44,6 +44,11 @@ import {
   isErrorTypedWithoutErrorValue,
 } from './error-typed-operand.js';
 import { indexReadTupleExtension } from './index-read-tuple.js';
+import {
+  admitsThroughCarrier,
+  armAdmitsKindsByType,
+  hasCarrierKindArm,
+} from './kind-admission.js';
 import {
   admissionOf,
   hasValueComponent,
@@ -500,6 +505,21 @@ function prefilterAdmits(
   )
     return true;
   if (op.type.matches(param)) return true;
+
+  // A value of a value kind declared with `admittedAs: 'real'` or
+  // `'number'` is admitted where its carrier is (`admitsThroughCarrier()`,
+  // `kind-admission.ts`): `(real) -> real` takes `UserMeasurement(2, 0.1)`.
+  // The trial decides for a function with a body, which refuses it.
+  if (
+    admitsThroughCarrier(
+      ce,
+      op.type.type,
+      param,
+      isThreadableAt(policies?.threadable, index),
+      policies?.stripMissing?.(index) === true
+    )
+  )
+    return true;
 
   // A value-component parameter (`0`, `integer<0..10>`) is refutable by
   // MEMBERSHIP, which the type-level disjointness test below cannot see: a
@@ -1045,9 +1065,10 @@ export function resolveOverload(
           policies
         ),
       };
-    let selected = viable[0];
-    for (let i = 1; i < viable.length; i++)
-      if (isMoreSpecific(viable[i], selected, arity)) selected = viable[i];
+    const ranked = armsAdmittingKindsByType(ce, ops, viable, policies);
+    let selected = ranked[0];
+    for (let i = 1; i < ranked.length; i++)
+      if (isMoreSpecific(ranked[i], selected, arity)) selected = ranked[i];
     return {
       selected,
       selectedInstance: selected,
@@ -1138,9 +1159,23 @@ export function resolveOverload(
 
   // Rank: the first arm not beaten by any other wins. Scanning in declaration
   // order makes the tie-break fall out for free.
-  let best = candidates[0];
-  for (let i = 1; i < candidates.length; i++)
-    if (outranks(candidates[i], best, arity)) best = candidates[i];
+  // An arm that admits each kind operand by type is preferred over an arm
+  // that admits one only through its carrier (`armsAdmittingKindsByType`).
+  const byType = new Set(
+    armsAdmittingKindsByType(
+      ce,
+      ops,
+      candidates.map((c) => c.instance),
+      policies,
+      candidates.map((c) =>
+        c.permutation === undefined ? ops : permuteOps(ops, c.permutation)
+      )
+    )
+  );
+  const ranked = candidates.filter((c) => byType.has(c.instance));
+  let best = ranked[0];
+  for (let i = 1; i < ranked.length; i++)
+    if (outranks(ranked[i], best, arity)) best = ranked[i];
 
   // Sub-ruling R3: declaration order may break a tie between arms that consume
   // the written arguments in the SAME order — the pick is then only an
@@ -1165,6 +1200,39 @@ export function resolveOverload(
     permutationAmbiguous,
     undecidedResults: undecidedJoin(ops, joinArms, policies),
   };
+}
+
+/**
+ * The arms of `arms` to rank for the call of `ops`: when an operand holds a
+ * value of a value kind admitted through its carrier (`admittedAs`,
+ * `kind-admission.ts`), the arms that admit every such operand BY TYPE
+ * (`(real | umeasurement) -> …`), if there are any, else every arm. So an
+ * arm that names the kind is chosen over an arm that admits it only through
+ * the carrier (`(real) -> …`), even when the specificity rule would prefer
+ * the narrower `real` (`docs/plans/2026-10-26-value-kinds.md`, section
+ * 4.2). `armOps`, when given, holds the operands of each arm in its own
+ * order (a named call).
+ */
+function armsAdmittingKindsByType<T extends FunctionSignature>(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>,
+  arms: ReadonlyArray<T>,
+  policies: AdmissionPolicies | undefined,
+  armOps?: ReadonlyArray<ReadonlyArray<Expression>>
+): ReadonlyArray<T> {
+  if (arms.length < 2 || policies?.lazy) return arms;
+  if (!ops.some((op) => op.isValid && hasCarrierKindArm(ce, op.type.type)))
+    return arms;
+  const threadable = (i: number) => isThreadableAt(policies?.threadable, i);
+  const byType = arms.filter((arm, k) =>
+    armAdmitsKindsByType(
+      ce,
+      arm,
+      (armOps?.[k] ?? ops).map((op) => op.type.type),
+      threadable
+    )
+  );
+  return byType.length > 0 ? byType : arms;
 }
 
 /** One arity-admitted arm, as the undecided-operand result join reads it. */
@@ -1381,6 +1449,19 @@ function takesByOverlap(
       const arms = typeof r !== 'string' && r.kind === 'union' ? r.types : [r];
       if (arms.some((a) => resolveTypeAlias(a) === 'unknown')) return true;
     }
+    // A value of a value kind admitted through its carrier is a decided
+    // admission, not an overlap (`admitsThroughCarrier()`).
+    if (
+      !op.type.matches(param) &&
+      admitsThroughCarrier(
+        op.engine as ComputeEngine,
+        op.type.type,
+        param,
+        isThreadableAt(policies?.threadable, i),
+        policies?.stripMissing?.(i) === true
+      )
+    )
+      return false;
     return !op.type.matches(param);
   });
 }
@@ -1696,7 +1777,7 @@ function displayJoin(a: Type, b: Type): Type {
   const push = (t: Type): void => {
     const arms = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
     for (const arm of arms) {
-      const key = typeToString(arm);
+      const key = typeToIdentityKey(arm);
       if (seen.has(key)) continue;
       seen.add(key);
       members.push(arm);

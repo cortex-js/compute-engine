@@ -1,5 +1,13 @@
 import { noteScopeDeclaration } from './scope-declaration-count.js';
-import { noteResidueDeclaration } from './boxed-expression/residue-class.js';
+import { noteKindTypeDeclaration } from './boxed-expression/residue-class.js';
+import {
+  arithmeticOf,
+  commitKindRegistration,
+  isRegisteredKindTypeRecord,
+  kindRegistryRollbackPoint,
+  prepareKindRegistration,
+  unregisterKind,
+} from './boxed-expression/value-kinds.js';
 import { noteScratchBinding, scratchRootOf } from './scratch-scopes.js';
 import type {
   DeclarationOrigin,
@@ -123,7 +131,11 @@ import {
   updateDef,
   defIsCallableShaped,
 } from './boxed-expression/utils.js';
-import { canonicalFunctionLiteral, lookup } from './function-utils.js';
+import {
+  canonicalFunctionLiteral,
+  kindTypedFunctionLiteral,
+  lookup,
+} from './function-utils.js';
 import {
   extendedLibraryOperator,
   markLibraryExtension,
@@ -626,12 +638,12 @@ export function declareSymbolValue(
     }
     throw e;
   }
-  // A symbol declared with a type that can hold a residue class (`r:
-  // residue`, `f: (integer) -> residue`) lets an expression of the engine
-  // hold a class before any class is made: the engine joins the set that
-  // enables the test for classes (`residue-class.ts`).
+  // A symbol declared with a type that can hold a value of a value kind (`r:
+  // residue`, `f: (integer) -> gf8`) lets an expression of the engine hold
+  // such a value before any is made: the engine opens the gates of the kind
+  // type that enable the recognition of its values (`residue-class.ts`).
   if (isValueDef(boxedDef))
-    noteResidueDeclaration(ce, boxedDef.value.type.type);
+    noteKindTypeDeclaration(ce, boxedDef.value.type.type);
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({
@@ -688,6 +700,30 @@ export function declareSymbolOperator(
   scope?: Scope
 ): BoxedDefinition {
   scope ??= ce.context.lexicalScope;
+
+  // A VALUE KIND (the `arithmetic` field) is checked BEFORE anything is
+  // installed, so a refused kind leaves the previous binding as it was: the
+  // result type must be a kind type, `add` requires `negate`, and the fields
+  // that belong to the kind type must agree with the other live heads of the
+  // type (`prepareKindRegistration()`, `boxed-expression/value-kinds.ts`).
+  // The operator definition this declaration replaces in the SAME binding
+  // (a redeclaration with `{ extend: true }`) loses its kind registration:
+  // replaced by this one, or removed when this one has no `arithmetic`.
+  const previousRecord = scope.bindings.get(name);
+  const supersededOperator =
+    previousRecord !== undefined && isOperatorDef(previousRecord)
+      ? previousRecord.operator
+      : undefined;
+  const kindRegistration =
+    def.arithmetic === undefined
+      ? undefined
+      : prepareKindRegistration(
+          ce,
+          name,
+          declaredSignatureType(ce, def),
+          def.arithmetic,
+          { supersedes: supersededOperator }
+        );
 
   // Same first-boxing divergence check as `declareSymbolValue` above: an
   // operator declaration for a name the running construction transiently
@@ -748,11 +784,33 @@ export function declareSymbolOperator(
     throw e;
   }
 
-  // An operator declared to return a residue class (`MyMod: (any, any) ->
-  // residue`) lets an expression of the engine hold a class before any call
-  // of it is made: see `declareSymbolValue` above.
+  // An operator declared to return a value of a value kind (`MyMod: (any,
+  // any) -> residue`) lets an expression of the engine hold such a value
+  // before any call of it is made: see `declareSymbolValue` above.
   if (isOperatorDef(boxedDef))
-    noteResidueDeclaration(ce, boxedDef.operator.signature.type);
+    noteKindTypeDeclaration(ce, boxedDef.operator.signature.type);
+
+  // The value kind, checked above, is recorded now that its definition is
+  // installed. Inside an inference rollback frame, the registry is captured
+  // first, and the frame puts it back on rollback together with the previous
+  // binding (`journalDeclaration` above). Otherwise a rolled-back
+  // redeclaration leaves its own dispatch entry registered, and the restored
+  // definition without its entry.
+  if (isOperatorDef(boxedDef)) {
+    const restoreKinds =
+      rollbackFrame !== undefined &&
+      (kindRegistration !== undefined ||
+        (supersededOperator !== undefined &&
+          arithmeticOf(ce, supersededOperator) !== undefined))
+        ? kindRegistryRollbackPoint(ce)
+        : undefined;
+    if (kindRegistration !== undefined)
+      commitKindRegistration(ce, boxedDef.operator, kindRegistration);
+    else if (supersededOperator !== undefined)
+      unregisterKind(ce, supersededOperator);
+    if (restoreKinds !== undefined)
+      rollbackFrame!.record({ undo: restoreKinds });
+  }
 
   noteScopeDeclaration(scope);
   ce._noteStateEvent({
@@ -929,10 +987,7 @@ function normalizeDeclaredTypeParams(
  * of aliases terminates.
  */
 function reachesItselfNegated(target: TypeReference, def: Type): boolean {
-  const seen: [Set<TypeReference>, Set<TypeReference>] = [
-    new Set(),
-    new Set(),
-  ];
+  const seen: [Set<TypeReference>, Set<TypeReference>] = [new Set(), new Set()];
   const walk = (t: Type, odd: boolean): boolean => {
     if (typeof t !== 'object') return false;
     if (t.kind === 'negation') return walk(t.type, !odd);
@@ -1018,13 +1073,36 @@ export function declareType(
       );
   }
 
-  // A type declaration claims BOTH namespaces: the type record, and a
-  // value-level constructor of the same name (nominal-types design §4.1/D5).
-  // Minting is unconditional per the design — including for the engine's own
-  // bootstrap declarations, which therefore put `limits(…)`/`distribution(…)`
-  // in the system scope. `mint: false` is an INTERNAL escape hatch kept for a
-  // declaration that must not claim the value name; no caller uses it today.
+  // A type declaration claims BOTH namespaces by default: the type record,
+  // and a value-level constructor of the same name (decision D5 of the
+  // nominal-types design, §4.1). The engine's own bootstrap declarations
+  // therefore put `limits(…)`/`distribution(…)` in the system scope.
+  //
+  // `mint: false` is the public option that a VALUE KIND uses
+  // (`ce.declareType('gf8', 'value', { mint: false })`): a kind has its own
+  // head as constructor (`GF8(3)`, declared `(integer) -> gf8` with an
+  // `arithmetic` field), and a minted `gf8(…)` would be a second head of the
+  // kind type with no arithmetic. This changes decision D5, which said that a
+  // type declaration always claims both namespaces
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.1.1). The record keeps
+  // the choice in `_minted`, which the kind registration reads.
   mint ??= true;
+
+  // A registered KIND TYPE (the result type of a head with an `arithmetic`
+  // field) must stay a nominal type defined as exactly `value` with no
+  // minted constructor: the subtype rule (`<: value`) and the disjointness
+  // rule that protect its values from the number rules read that definition
+  // (`valueKindDeclaration()`, `common/type/subtype.ts`). A replacement that
+  // turns it into an alias, gives it parameters, mints a constructor for it,
+  // or (checked after the body is parsed, below) defines it as anything but
+  // `value` is refused here, before any namespace is touched.
+  const kindRecord = ce._typeRegistry[name];
+  const replacesKindType =
+    kindRecord !== undefined && isRegisteredKindTypeRecord(ce, kindRecord);
+  if (replacesKindType && (alias === true || mint || params !== undefined))
+    throw Error(
+      `The type "${name}" is the type of a value kind: it can only be declared again as a nominal type defined as exactly \`value\`, without type parameters and with \`{ mint: false }\``
+    );
 
   // Is the type already defined? Types live in the ENGINE-LEVEL registry —
   // one namespace per engine, not lexically scoped
@@ -1298,6 +1376,15 @@ export function declareType(
     throw e;
   }
 
+  // The definition of a registered kind type must stay exactly `value` (see
+  // the check of the options above).
+  if (replacesKindType && def !== 'value') {
+    rollbackTypeHalf();
+    throw Error(
+      `The type "${name}" is the type of a value kind: it can only be defined as exactly \`value\`, not as \`${typeToString(def)}\``
+    );
+  }
+
   // A body that is NOTHING BUT an application of the type being declared
   // (`type r<T> = r<T>`) defines nothing at all: erasure resolves the reference
   // to itself forever, and two such applications relate by a variance no body
@@ -1496,6 +1583,7 @@ export function declareType(
   // `declareConformance()`.
   if (origin === undefined) delete registry[name]._declOrigin;
   else registry[name]._declOrigin = origin;
+  registry[name]._minted = mint;
 
   // A5 — replacing a type record is a context change: bump the generation so
   // the caches keyed on it (and every expression boxed AFTER this point) see
@@ -2171,6 +2259,21 @@ function settleVarianceGroup(
  * its `type` field and its `matches()` method, as in
  * `normalizeSignatureField()` (`boxed-expression/boxed-operator-definition.ts`).
  */
+/** The signature of the operator definition `def` as a `Type`: its
+ * `signature` field (a type string, a `Type` or a `BoxedType`), or the
+ * signature an operator without one gets, `(any*) -> unknown`. */
+function declaredSignatureType(
+  ce: IComputeEngine,
+  def: OperatorDefinition
+): Type {
+  const sig = def.signature;
+  if (sig === undefined) return parseType('(any*) -> unknown');
+  return (
+    asBoxedType(sig)?.type ??
+    parseType(sig as Type | TypeString, ce._typeResolver)
+  );
+}
+
 function asBoxedType(t: unknown): BoxedType | undefined {
   if (
     typeof t === 'object' &&
@@ -2840,6 +2943,24 @@ function removeBinding(ce: IComputeEngine, scope: Scope, name: string): void {
   if (restorePending !== undefined)
     activeRollbackFrame(ce)?.record({ undo: restorePending });
 
+  // A head that declares a value kind (the `arithmetic` field) loses its
+  // dispatch entry: its values boxed before this call have no hooks any
+  // more. The kind TYPE stays a kind type, with its fields, so its values
+  // and its symbols stay protected from the number rules
+  // (`unregisterKind()`, `value-kinds.ts`). A checkpoint restore puts the
+  // entry back with the rest of the registry; a rollback frame restores it
+  // here. The registry is captured only when the definition has an entry.
+  if (
+    isOperatorDef(binding) &&
+    arithmeticOf(ce, binding.operator) !== undefined
+  ) {
+    const frame = activeRollbackFrame(ce);
+    const restoreKinds =
+      frame !== undefined ? kindRegistryRollbackPoint(ce) : undefined;
+    unregisterKind(ce, binding.operator);
+    if (restoreKinds !== undefined) frame!.record({ undo: restoreKinds });
+  }
+
   retireBindingRecord(ce, scope, name, binding);
 }
 
@@ -2960,6 +3081,27 @@ export function assignFn(
   // Cannot set the value of 'Nothing'
   // @todo: could have a 'locked' attribute on the definition
   if (id === 'Nothing') return ce;
+
+  // A function literal assigned to a symbol declared with a function type
+  // whose parameters have a value kind arm (`f: (real | umeasurement) -> …`)
+  // has those parameters typed from the declaration before its body is
+  // canonicalized, as for `ce.declare()` with a body
+  // (`kindTypedFunctionLiteral()`): an untyped parameter folds `x/x` to `1`.
+  {
+    const declared = ce.lookupDefinition(id);
+    if (
+      declared !== undefined &&
+      isValueDef(declared) &&
+      !declared.value.inferredType
+    ) {
+      const typed = kindTypedFunctionLiteral(
+        ce,
+        arg2,
+        declared.value.type.type
+      );
+      if (typed !== undefined) arg2 = typed as AssignValue;
+    }
+  }
 
   // §4.5b D13/D15: when `id` names a type in the CURRENT scope and its minted
   // constructor is bound, loosen the constructor's signature while the

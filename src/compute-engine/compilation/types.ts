@@ -2118,16 +2118,20 @@ export interface CompilationOptions<Expr = unknown> {
    * - `'wgsl'` - Compile to WGSL (WebGPU Shading Language)
    * - `'interval-js'` - Compile to JavaScript with interval arithmetic
    *
-   * Custom targets can be registered using `ce._registerCompilationTarget()`.
+   * The full package entry provides every built-in target. A program that
+   * loads only `@cortex-js/compute-engine/core` has `javascript` and
+   * `interval-js`, and registers the others, or a custom target, with
+   * `ce.registerCompilationTarget()`.
    *
    * @example
    * ```typescript
    * // Compile to GLSL
    * const glslCode = expr.compile({ to: 'glsl' });
    *
-   * // Compile to custom target
-   * ce._registerCompilationTarget('python', new PythonTarget());
-   * const pythonCode = expr.compile({ to: 'python' });
+   * // On an engine of `@cortex-js/compute-engine/core`: register the target
+   * // first (`GLSLTarget` comes from `@cortex-js/compute-engine/compile`)
+   * ce.registerCompilationTarget('glsl', new GLSLTarget());
+   * const shader = expr.compile({ to: 'glsl' });
    * ```
    */
   to?: string;
@@ -2658,7 +2662,7 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * flows into real arithmetic and the call returns `NaN` rather than throwing.
  * And the guard is the `javascript` target's own — the shader targets compile
  * to source and expose no `run` at all, while a target registered through
- * `ce._registerCompilationTarget()` gets whatever guard its author writes.
+ * `ce.registerCompilationTarget()` gets whatever guard its author writes.
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? IntervalInput
@@ -2720,6 +2724,11 @@ export type StoredEntryPlan = {
    * is here when its declared type is a collection type that compiled code
    * reads as an array and whose elements are not text. */
   strings?: [string | number, string][];
+  /** The bindings of a value kind type, checked by the `entry` of the
+   * kind's compile contract (`ArithmeticCompile`). That check is a function
+   * of the host, which stored data cannot carry, so a runtime refuses to
+   * load a plan that lists one. */
+  kinds?: (string | number)[];
 };
 
 /**
@@ -2849,6 +2858,15 @@ export interface BroadcastAsyncResult {
    * cells after `done` are untouched.
    */
   done: number;
+  /**
+   * The number of cells among the first `done` whose evaluation threw. The
+   * values of such a cell are `NaN` (an `interval-js` cell is an error
+   * enclosure), as for a cell whose value is not a number; this count tells
+   * the two apart. A cell throws, for example, when the compiled code calls
+   * a function that does not exist on the thread that runs it. The cell
+   * counts in `done`: it was evaluated.
+   */
+  failed: number;
   /**
    * Where the batch was evaluated. `'calling-thread'` with `inline: false`
    * means that no cell was evaluated on the calling thread: the batch was
@@ -2986,6 +3004,18 @@ export type CompilationResult<
    * nothing to check.
    */
   entryPlan?: StoredEntryPlan;
+
+  /**
+   * JavaScript only. The value kind types (`gf8`, a type declared by the
+   * host with a compile contract, `ArithmeticCompile`) whose compiled
+   * representation the code reads or makes. The value of `run()` is then
+   * returned as the code makes it (a kind value is the representation of the
+   * kind, not a number). Code compiled with a kind contract cannot be stored:
+   * the runtime of `@cortex-js/compute-engine/runtime` refuses to load it,
+   * because the run-time checks of the kind are functions of the host that
+   * compiled it. Absent when no value kind is involved.
+   */
+  valueKinds?: string[];
 
   /**
    * JavaScript only. The significant digits `run()` reads the float exponent

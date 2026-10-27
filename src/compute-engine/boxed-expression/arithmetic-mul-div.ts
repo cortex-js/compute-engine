@@ -37,6 +37,7 @@ import {
   numericValue,
   isContinuationOperand,
   containsContinuationOperand,
+  isNotationalProduct,
   isInexactOperand,
   nanOperandAnswer,
   indeterminateFormAnswer,
@@ -98,12 +99,17 @@ import {
 } from './order.js';
 import { asRadical, isMatrixTyped } from './arithmetic-power.js';
 import { mayBeMatrixPowerBase, typeMayHoldMatrix } from './matrix-operand.js';
-import { flatten, flattenHoldingBarriers } from './flatten.js';
+import {
+  flatten,
+  flattenHoldingBarriers,
+  flattenKeepingNotationalProducts,
+} from './flatten.js';
 import { asRational, asSmallInteger } from './numerics.js';
 import { heldNonNumericScalar } from './value-membership.js';
 import { negateProduct } from './negate.js';
 import { addArray } from './arithmetic-add.js';
-import { containsResidueClass, residueArithmetic } from './residue-class.js';
+import { holdsKindValue } from './residue-class.js';
+import { kindArithmetic } from './kind-dispatch.js';
 
 // Maximum number of decimal digits allowed in a *materialized* exact power
 // folded into a product's coefficient. Beyond this the factor is kept symbolic
@@ -1763,9 +1769,9 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
   // A quotient with a residue class is kept as it is: only the residue rules
   // of the evaluate handler know its ring. The rules below would read
   // `c/c` as 1 when `c` has no inverse, `c/0` as `~∞` and `c/∞` as 0 (see
-  // `containsResidueClass()`). A point divisor was rejected above, as for
+  // `holdsKindValue()`). A point divisor was rejected above, as for
   // any numerator. Division by an exact 1 is the same in every ring.
-  if (containsResidueClass(op1) || containsResidueClass(op2))
+  if (holdsKindValue(op1) || holdsKindValue(op2))
     return isLiteral(op2, 1) ? op1 : ce._fn('Divide', [op1, op2]);
 
   // An absent operand (`Missing` or `Undefined`) folds to `NaN` here, as a
@@ -2238,9 +2244,9 @@ export function div(num: Expression, denom: number | Expression): Expression {
     }
   }
 
-  // A residue class in the quotient: only the residue rules apply, after
-  // the point numerator above (`residueArithmetic()`).
-  const residue = residueArithmetic(ce, 'Divide', [
+  // A kind value in the quotient (a residue class): only the hooks of the
+  // kinds apply, after the point numerator above (`kindArithmetic()`).
+  const residue = kindArithmetic(ce, 'Divide', [
     num,
     typeof denom === 'number' ? ce.number(denom) : denom,
   ]);
@@ -2496,8 +2502,8 @@ export function canonicalMultiply(
   // A product with a residue class is only flattened and sorted: only the
   // residue rules of the evaluate handler know its ring. The folds below
   // would read `0·c` as the integer 0, `c·(1/c)` as 1 and `0.0·c` as `0.0`
-  // (see `containsResidueClass()`).
-  if (ops.some(containsResidueClass))
+  // (see `holdsKindValue()`).
+  if (ops.some(holdsKindValue))
     return ops.length === 1
       ? ops[0]
       : ce._fn('Multiply', sortProductOperands(ops));
@@ -2915,6 +2921,15 @@ function expandProduct(
     return addArray(terms);
   }
 
+  // A notational product (`2 · 4 · … · 2n`) is kept whole: the `Product`
+  // below would lift its factors and fold them across the ellipsis.
+  if (containsContinuationOperand(lhs) || containsContinuationOperand(rhs))
+    return mulAroundNotationalProducts([lhs, rhs], (rest) =>
+      rest.length === 1
+        ? rest[0]
+        : new Product(ce, rest, { matrixContext }).asExpression()
+    );
+
   return new Product(ce, [lhs, rhs], { matrixContext }).asExpression();
 }
 
@@ -3164,6 +3179,29 @@ export function mulFactoredArray(xs: ReadonlyArray<Expression>): Expression {
   return mulImpl(xs, false);
 }
 
+/**
+ * True when two or more of the factors `xs` are each a point or a list of
+ * points (`isTupleCarrier`, `isPointListCarrier`). Such a product has no
+ * value: `canonicalMultiply` answers the `no-product-between-points` error
+ * at boxing, and the evaluation must give the same answer for a product that
+ * was boxed before its operands had values. Without this test, the
+ * evaluation of `x·x[1]` in the body of `x ↦ x·x[1]`, with `x` bound to
+ * `[(3, 2), (1, 4)]`, mapped the product over the list of points and gave a
+ * list of two errors, where the same product written with the list
+ * (`[(3, 2), (1, 4)]·(3, 2)`) is one error, and the call was typed `error`
+ * (ROADMAP CE-491). This is the twin of the test for a divisor that is a
+ * point or a list of points in `div()`.
+ */
+function hasPointProductOperands(xs: ReadonlyArray<Expression>): boolean {
+  let count = 0;
+  for (const x of xs)
+    if (isTupleCarrier(x) || isPointListCarrier(x)) {
+      count += 1;
+      if (count >= 2) return true;
+    }
+  return false;
+}
+
 function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   console.assert(xs.length > 0);
   if (xs.length === 1) return xs[0];
@@ -3177,6 +3215,10 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
       'Multiply',
       xs.map((x) => x.canonical)
     );
+  // A factor that is (or holds) a notational product: multiply the other
+  // factors and keep the notational product whole.
+  if (xs.some((x) => containsContinuationOperand(x)))
+    return mulAroundNotationalProducts(xs, (rest) => mulImpl(rest, expand));
 
   // An `Indeterminate` factor beside a factor that reads a variable with an
   // assigned value: the answer is `NaN` or `Indeterminate` depending on the
@@ -3184,6 +3226,10 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   // is kept (`indeterminateAnswerReadsVariable()`).
   if (indeterminateAnswerReadsVariable(xs))
     return ce.function('Multiply', [...xs]);
+
+  // Two factors that are each a point or a list of points have no product
+  // (`hasPointProductOperands()`).
+  if (hasPointProductOperands(xs)) return pointProductError(ce, xs);
 
   // A factor that is collection-TYPED but has no collection value yet (a
   // declared-but-unassigned `list<number>` symbol) is not a broadcast
@@ -3282,9 +3328,13 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
   )
     return ce.NaN;
 
-  // A residue class among the factors: only the residue rules apply, after
-  // the broadcast over a collection above (`residueArithmetic()`).
-  const residue = residueArithmetic(ce, 'Multiply', xs);
+  // A kind value among the factors (a residue class): only the hooks of the
+  // kinds apply, after the broadcast over a collection above
+  // (`kindArithmetic()`). The factors that hold no kind value are multiplied
+  // by this function.
+  const residue = kindArithmetic(ce, 'Multiply', xs, (rest) =>
+    mulImpl(rest, expand)
+  );
   if (residue !== undefined) return residue;
 
   // A zero factor beside a factor that reads a variable with an assigned
@@ -3539,6 +3589,53 @@ function exactCoefficientOutOfRange(
   return [nv.bignumRe, rest];
 }
 
+/**
+ * The product of the factors `xs` when one or more of them is a product
+ * with a direct `ContinuationPlaceholder` operand (`isNotationalProduct()`),
+ * such as the `2 · 4 · … · 2n` of `3(2 · 4 · … · 2n)`, or holds one in a
+ * nested product.
+ *
+ * Such a product is a notation, not an arithmetic value. When its operands
+ * are lifted into the enclosing product, the factors on each side of the
+ * ellipsis are folded together and the last sample `2n` becomes the two
+ * factors `2` and `n`: `3(2 · 4 · … · 2n)` became `48 · … · n`. So the
+ * notational products are kept whole, the other factors are multiplied with
+ * `mulRest`, and the result is that product times the notational products:
+ * `3 · 5 · (2 · 4 · … · 2n)` is `15 · (2 · 4 · … · 2n)`. `expand()` keeps
+ * such a product whole for the same reason. `negate()` does not: it negates
+ * the first sample, and `-(2 · 4 · … · 2n)` is `(-2) · 4 · … · 2n`
+ * (`test/compute-engine/ce-163-negated-continuation.test.ts`). A coefficient
+ * `0`, `NaN` or `Indeterminate` gives the answer of `Product` for that
+ * coefficient (`0`, `NaN` or `Indeterminate`). (ROADMAP CE-462.)
+ */
+export function mulAroundNotationalProducts(
+  xs: ReadonlyArray<Expression>,
+  mulRest: (rest: ReadonlyArray<Expression>) => Expression
+): Expression {
+  const ce = xs[0].engine;
+  const flat = flattenKeepingNotationalProducts(xs, 'Multiply');
+  const notational = flat.filter((x) => isNotationalProduct(x));
+  const rest = flat.filter((x) => !isNotationalProduct(x));
+  const factors: Expression[] = [];
+  if (rest.length > 0) {
+    const coefficient = mulRest(rest);
+    // A `0`, `NaN` or `Indeterminate` coefficient follows the usual rules of
+    // a product: `Product` answers `0` (or the `NaN` of `0 · ∞`) for a zero
+    // coefficient and `NaN` or `Indeterminate` for a `NaN`-valued one. With
+    // such a coefficient, `Product` does not lift the factors of the
+    // notational products into the result.
+    if (isNumber(coefficient) && (coefficient.isNaN || coefficient.isSame(0)))
+      return new Product(ce, [coefficient, ...notational]).asExpression();
+    if (!(isNumber(coefficient) && coefficient.isSame(1)))
+      factors.push(coefficient);
+  }
+  factors.push(...notational);
+  const result = flattenKeepingNotationalProducts(factors, 'Multiply');
+  if (result.length === 0) return ce.One;
+  if (result.length === 1) return result[0];
+  return ce._fn('Multiply', result);
+}
+
 export function mulN(...xs: ReadonlyArray<Expression>): Expression {
   return mulNEvaluated(xs);
 }
@@ -3568,6 +3665,13 @@ export function mulNEvaluated(
       'Multiply',
       xs.map((x) => x.canonical)
     );
+  // A factor that is (or holds) a notational product: multiply the other
+  // factors and keep the notational product whole.
+  if (xs.some((x) => containsContinuationOperand(x)))
+    return mulAroundNotationalProducts(xs, (rest) => mulNEvaluated(rest));
+  // Two factors that are each a point or a list of points have no product
+  // (see `mulImpl`).
+  if (hasPointProductOperands(xs)) return pointProductError(ce, xs);
   // A collection-TYPED but valueless co-factor vetoes the element-wise
   // dispatch here exactly as it does on the exact route (see `mulImpl`).
   let unresolvedFactor = hasUnresolvedCollectionOperand(

@@ -1840,3 +1840,82 @@ describe('a broadcast over an operand of unknown rank holds the value', () => {
       ).toBe('list<list<tuple<integer, integer>>>');
   });
 });
+
+describe('chains of aliases of plain lists, sets and tuples', () => {
+  it('are met and compared in a bounded time', () => {
+    const ce = new ComputeEngine();
+    const alias = (name: string, def: string) =>
+      ce.declareType(name, def, { alias: true });
+    for (const [a, b] of [
+      ['A', 'B'],
+      ['P', 'Q'],
+      ['C', 'D'],
+    ]) {
+      alias(`${a}0`, 'integer');
+      alias(`${b}0`, 'string');
+    }
+    for (let n = 1; n <= 32; n++) {
+      const [a, b, p, q, c, d] = ['A', 'B', 'P', 'Q', 'C', 'D'].map(
+        (x) => `${x}${n - 1}`
+      );
+      alias(`A${n}`, `list<${a}> | list<list<${a}>>`);
+      alias(`B${n}`, `list<${b}> | list<list<${b}>>`);
+      alias(`P${n}`, `list<${p}> | set<${p}>`);
+      alias(`Q${n}`, `list<${q}> | set<${q}>`);
+      alias(`C${n}`, `tuple<${c}, ${c}> | list<${c}>`);
+      alias(`D${n}`, `list<list<${d}>> | tuple<${d}, ${d}>`);
+    }
+    const T = (s: string) => ce.type(s).type;
+    // The meet of two chains of depth 10 took 4.8 s, and the overlap of two
+    // chains of tuples and lists of depth 16 took 23 s; at depth 32 neither
+    // finished. Each pair below shares the empty list, and nothing else.
+    const start = Date.now();
+    for (const [a, b] of [
+      ['A32', 'B32'],
+      ['P32', 'Q32'],
+      ['C32', 'D32'],
+    ]) {
+      const m = reduceType({ kind: 'intersection', types: [T(a), T(b)] });
+      expect(isSubtype(T('list<never>'), m)).toBe(true);
+      // The meet holds no value outside either operand.
+      expect(isSubtype(m, T(a))).toBe(true);
+      expect(isSubtype(m, T(b))).toBe(true);
+      expect(typesOverlap(T(a), T(b))).toBe(true);
+    }
+    expect(Date.now() - start).toBeLessThan(5000);
+  });
+
+  it('keeps the meets of short chains in full', () => {
+    const ce = new ComputeEngine();
+    const alias = (name: string, def: string) =>
+      ce.declareType(name, def, { alias: true });
+    alias('C0', 'integer');
+    alias('D0', 'string');
+    for (let n = 1; n <= 2; n++) {
+      alias(`C${n}`, `tuple<C${n - 1}, C${n - 1}> | list<C${n - 1}>`);
+      alias(`D${n}`, `list<list<D${n - 1}>> | tuple<D${n - 1}, D${n - 1}>`);
+    }
+    const T = (s: string) => ce.type(s).type;
+    expect(
+      typeToString(
+        reduceType({ kind: 'intersection', types: [T('C2'), T('D2')] })
+      )
+    ).toBe(
+      'list<list<never>> | tuple<list<never>, list<never>>'
+    );
+  });
+});
+
+describe('an intersection against an alias of a union', () => {
+  it('is a subtype of each of its members', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('Z', 'list<integer> | set<integer>', { alias: true });
+    ce.declareType('W', 'list<string> | set<string>', { alias: true });
+    const T = (s: string) => ce.type(s).type;
+    const m = { kind: 'intersection' as const, types: [T('Z'), T('W')] };
+    expect(isSubtype(m, T('Z'))).toBe(true);
+    expect(isSubtype(m, T('W'))).toBe(true);
+    expect(isSubtype(m, T('list<integer> | set<integer>'))).toBe(true);
+    expect(isSubtype(m, T('list<integer>'))).toBe(false);
+  });
+});

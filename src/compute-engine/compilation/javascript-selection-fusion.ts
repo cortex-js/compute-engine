@@ -6,7 +6,9 @@ import {
 } from '../boxed-expression/type-guards.js';
 import {
   collectionElementType,
-  resolveTypeForCompilation,
+  // The compiled lanes read the open form of a broadcast over an operand
+  // of type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
 import { BaseCompiler } from './base-compiler.js';

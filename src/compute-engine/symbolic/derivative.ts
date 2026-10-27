@@ -456,7 +456,7 @@ function scaleForAngularUnit(
  * has the derivative `0`: its slope is zero almost everywhere.
  *
  * Used by the error propagation of a `Measurement` operand
- * (`measurementUnaryByHead`, `library/measurement-arithmetic.ts`): the
+ * (`partialDerivative()`, `library/measurement-arithmetic.ts`): the
  * first-order uncertainty of `f(a ± σ)` is `|f′(a)|·σ`, and this is `f′(a)`.
  */
 export function unaryDerivativeFormula(

@@ -163,14 +163,13 @@ describe('CE-77: a dictionary literal keeps the types of its fields', () => {
   });
 });
 
-describe('CE-77: a callback stamped from the current value of a symbol', () => {
+describe('CE-464: a callback stamped from the current value of a symbol', () => {
   // A callback literal over a symbol is stamped with the element type of the
   // value the symbol holds when the expression is boxed. After the symbol is
-  // reassigned to a value of another element type, the old boxed expression
-  // keeps the outdated parameter type and its evaluation is an error, while
-  // a fresh box gives the right value. A symbol that holds a list and a
-  // symbol that holds a dictionary behave the same way. This test records
-  // that both behave the same; ROADMAP CE-464 tracks the outdated stamp.
+  // reassigned to a value of another element type, the call is boxed again,
+  // so the old boxed expression has the type and the value of a fresh box.
+  // Before, the old expression kept the outdated parameter type and its
+  // evaluation was an `incompatible-type` error.
   test.each([
     [
       'a list symbol',
@@ -178,6 +177,13 @@ describe('CE-77: a callback stamped from the current value of a symbol', () => {
       ['List', { str: 'a' }],
       ['Function', 'x', 'x'],
       '["a"]',
+    ],
+    [
+      'a list symbol, numbers of another type',
+      ['List', 1, 2],
+      ['List', 1.5, 2.5],
+      ['Function', ['Add', 'x', 1], 'x'],
+      '[2.5,3.5]',
     ],
     [
       'a dictionary symbol',
@@ -190,8 +196,120 @@ describe('CE-77: a callback stamped from the current value of a symbol', () => {
     const ce2 = new ComputeEngine();
     ce2.assign('s', ce2.box(first as any));
     const old = ce2.box(['Map', fn, 's'] as any);
+    expect(old.evaluate().type.matches(old.type)).toBe(true);
     ce2.assign('s', ce2.box(second as any));
-    expect(old.evaluate().toString()).toContain('incompatible-type');
-    expect(ce2.box(['Map', fn, 's'] as any).evaluate().toString()).toBe(fresh);
+    const value = old.evaluate();
+    expect(value.toString()).toBe(fresh);
+    expect(value.type.matches(old.type)).toBe(true);
+    const box = ce2.box(['Map', fn, 's'] as any);
+    expect(box.evaluate().toString()).toBe(fresh);
+    expect(old.type.toString()).toBe(box.type.toString());
+  });
+
+  test('the parse route', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('L', ce2.box(['List', 1, 2]));
+    const exprs = [
+      '\\operatorname{Map}(x\\mapsto x+1, L)',
+      '\\operatorname{Filter}(L, x\\mapsto x>1)',
+      '\\operatorname{Reduce}(L, (a,b)\\mapsto a+b)',
+    ].map((x) => ce2.parse(x));
+    expect(exprs.map((x) => x.evaluate().toString())).toEqual([
+      '[2,3]',
+      '[2]',
+      '3',
+    ]);
+    ce2.assign('L', ce2.box(['List', 1.5, 2.5]));
+    const values = exprs.map((x) => x.evaluate());
+    expect(values.map((x) => x.toString())).toEqual([
+      '[2.5,3.5]',
+      '[1.5,2.5]',
+      '4',
+    ]);
+    for (let i = 0; i < exprs.length; i++)
+      expect(values[i].type.matches(exprs[i].type)).toBe(true);
+  });
+
+  test('a declared symbol keeps its stamp', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('d', 'list<integer>');
+    ce2.assign('d', ce2.box(['List', 1, 2]));
+    const old = ce2.box(['Map', ['Function', ['Add', 'x', 1], 'x'], 'd']);
+    ce2.assign('d', ce2.box(['List', 3, 4]));
+    expect(old.evaluate().toString()).toBe('[4,5]');
+    expect(old.evaluate().type.matches(old.type)).toBe(true);
+  });
+
+  // The element type of a symbol declared with a bare constructor follows
+  // each assignment, so the stamp follows it too.
+  test('a symbol declared with a bare constructor', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('d', 'list');
+    ce2.assign('d', ce2.box(['List', 1, 2]));
+    const fn = ['Function', ['Add', 'x', 1], 'x'];
+    const old = ce2.box(['Map', fn, 'd'] as any);
+    expect(old.evaluate().toString()).toBe('[2,3]');
+    ce2.assign('d', ce2.box(['List', 1.5, 2.5]));
+    const value = old.evaluate();
+    expect(value.toString()).toBe('[2.5,3.5]');
+    expect(value.type.matches(old.type)).toBe(true);
+    expect(ce2.box(['Map', fn, 'd'] as any).evaluate().toString()).toBe(
+      '[2.5,3.5]'
+    );
+  });
+
+  // The type of `s` comes from the value of `L`: an assignment to `L`
+  // changes it, and the counter of `s` does not move.
+  test('a symbol whose value reads another symbol', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('L', ce2.box(['List', 1, 2]));
+    ce2.assign('s', ce2.box(['Reverse', 'L'], { form: 'raw' }) as any);
+    const fn = ['Function', ['Add', 'x', 1], 'x'];
+    const old = ce2.box(['Map', fn, 's'] as any);
+    expect(old.evaluate().toString()).toBe('[3,2]');
+    ce2.assign('L', ce2.box(['List', 1.5, 2.5]));
+    const value = old.evaluate();
+    expect(value.toString()).toBe('[3.5,2.5]');
+    expect(value.type.matches(old.type)).toBe(true);
+    expect(ce2.box(['Map', fn, 's'] as any).evaluate().toString()).toBe(
+      '[3.5,2.5]'
+    );
+  });
+
+  // The callback is boxed again in the scope where the call was boxed: its
+  // `offset` is the local one, not the global one.
+  test('the callback keeps its lexical scope', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('L', ce2.box(['List', 1, 2]));
+    ce2.assign('offset', 100);
+    ce2.pushScope();
+    ce2.declare('offset', 'integer');
+    ce2.assign('offset', 10);
+    const old = ce2.box([
+      'Map',
+      ['Function', ['Add', 'x', 'offset'], 'x'],
+      'L',
+    ] as any);
+    expect(old.evaluate().toString()).toBe('[11,12]');
+    ce2.popScope();
+    ce2.assign('L', ce2.box(['List', 1.5, 2.5]));
+    const value = old.evaluate();
+    expect(value.toString()).toBe('[11.5,12.5]');
+    expect(value.type.matches(old.type)).toBe(true);
+  });
+
+  // The canonical handler of `Fold` gives a `Reduce`: the record is kept on
+  // the `Reduce`.
+  test('Fold', () => {
+    const ce2 = new ComputeEngine();
+    ce2.assign('L', ce2.box(['List', 1, 2]));
+    const fold = ['Fold', ['Function', ['Add', 'a', 'x'], 'a', 'x'], 0, 'L'];
+    const old = ce2.box(fold as any);
+    expect(old.evaluate().toString()).toBe('3');
+    ce2.assign('L', ce2.box(['List', 1.5, 2.5]));
+    const value = old.evaluate();
+    expect(value.toString()).toBe('4');
+    expect(value.type.matches(old.type)).toBe(true);
+    expect(ce2.box(fold as any).evaluate().toString()).toBe('4');
   });
 });

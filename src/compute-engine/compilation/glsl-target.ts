@@ -10,6 +10,7 @@ import {
   gpuAssertExpressionBody,
   gpuOperandShape,
   gpuAbsorbedConstant,
+  gpuFloorModCall,
   markOperandConsuming,
   type GPUShapeRules,
 } from './gpu-target.js';
@@ -70,12 +71,26 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
       // floored convention the interpreter's `Mod` uses as well). `fract` is a
       // single hardware instruction and needs no second operand.
       //
+      // `fract` is applied twice. For a tiny negative dividend `x − floor(x)`
+      // is `1 − |x|`, which rounds to 1.0 in f32 (`fract(-1e-20)` is 1.0),
+      // outside the range [0, 1); the interpreter's `Mod` maps a result equal
+      // to the divisor to 0. The second `fract` maps 1.0 to 0 and leaves every
+      // other result unchanged. CE-511 (`CHANGELOG.md`).
+      //
       // The divisor is left out of the emitted call, which the lowering
       // declares after this table (`markOperandConsuming`). So the
       // operand-shape check judges `fract(v)` against the dividend alone, and
       // a `vecN` dividend takes the peephole too.
-      if (tryGetConstant(b) === 1) return `fract(${compile(a)})`;
-      return `mod(${compile(a)}, ${compile(b)})`;
+      if (tryGetConstant(b) === 1) return `fract(fract(${compile(a)}))`;
+      // The general case calls a `_gpu_fmod` helper, which keeps the result
+      // in the range of the divisor where the built-in `mod` does not, and
+      // receives each operand once (`gpuFloorModLibrary`, CE-511). A shape
+      // with no helper (a matrix, an array) keeps the built-in, and the
+      // operand-shape check then judges it.
+      return (
+        gpuFloorModCall(a, b, compile, target) ??
+        `mod(${compile(a)}, ${compile(b)})`
+      );
     };
     // A trigonometric value amplified by a large constant (the "sine hash")
     // has the exact form, or the code above with a warning on the result
@@ -119,7 +134,8 @@ const GLSL_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 };
 
-// `Mod(a, 1)` emits `fract(a)` and leaves the divisor out of the emitted call;
+// `Mod(a, 1)` emits `fract(fract(a))` and leaves the divisor out of the
+// emitted call;
 // the operand-shape check reads that declaration (`markOperandConsuming`).
 markOperandConsuming(GLSL_FUNCTIONS.Mod, gpuAbsorbedConstant('fract', 1, 1));
 

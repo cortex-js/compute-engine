@@ -141,15 +141,15 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
 
   test('a real-element fixed-length list keeps its vecN reading', () => {
     const ce = engineWith({ v: 'vector<3>', w: 'vector<3>' });
-    expect(glsl.compile(ce.box(['Sin', 'v']), NO_FOLD).code).toBe('sin(v)');
-    expect(glsl.compile(ce.box(['Add', 'v', 'w']), NO_FOLD).code).toBe(
-      'v + w'
+    expect(glsl.compile(ce.box(['Sin', 'v']), NO_FOLD).code).toBe(
+      '_gpu_sin3(v)'
     );
+    expect(glsl.compile(ce.box(['Add', 'v', 'w']), NO_FOLD).code).toBe('v + w');
     expect(glsl.compile(ce.box(['Dot', 'v', 'w']), NO_FOLD).code).toBe(
       'dot(v, w)'
     );
     expect(glsl.compile(ce.box(['Max', 'v']), NO_FOLD).code).toBe(
-      '(max(max(v.x, v.y), v.z))'
+      '(_gpu_max(_gpu_max(v.x, v.y), v.z))'
     );
   });
 
@@ -162,13 +162,20 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
   // declined a real shape: a `PointList` component that is itself a computed
   // expression types `value`, and rejecting that turned `Dot` over a point
   // list into a decline even though `dot(vec2(…))` is its correct lowering.
-  test.each(['unknown', 'any', 'value', 'expression', 'number', 'real', 'integer'])(
-    'list<%s^3> keeps its vecN reading',
-    (element) => {
-      const ce = engineWith({ u: `list<${element}^3>` });
-      expect(glsl.compile(ce.box(['Sin', 'u']), NO_FOLD).code).toBe('sin(u)');
-    }
-  );
+  test.each([
+    'unknown',
+    'any',
+    'value',
+    'expression',
+    'number',
+    'real',
+    'integer',
+  ])('list<%s^3> keeps its vecN reading', (element) => {
+    const ce = engineWith({ u: `list<${element}^3>` });
+    expect(glsl.compile(ce.box(['Sin', 'u']), NO_FOLD).code).toBe(
+      '_gpu_sin3(u)'
+    );
+  });
 
   // Compilation is type erasure, so a nominal element answers layout questions
   // as its DEFINITION. A nominal type deliberately does not subtype that
@@ -209,7 +216,9 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
   // vector reading, so dropping the infinite branches cannot over-reject.
   test('a union whose finite part is real keeps its vecN reading', () => {
     const ce = engineWith({ r: 'list<real | +oo | -oo ^3>' });
-    expect(glsl.compile(ce.box(['Sin', 'r']), NO_FOLD).code).toBe('sin(r)');
+    expect(glsl.compile(ce.box(['Sin', 'r']), NO_FOLD).code).toBe(
+      '_gpu_sin3(r)'
+    );
   });
 
   test('Dot over value-typed components lowers, it does not decline', () => {
@@ -363,18 +372,16 @@ describe('GPU FIXED-LENGTH LIST — At decline reasons stay distinct', () => {
 
   test('a static index into that symbol folds to a subscript', () => {
     const ce = engineWith({ S: 'list<number^1600>', k: 'integer' });
-    expect(glsl.compile(ce.box(['At', 'S', 800]), NO_FOLD).code).toBe(
-      'S[799]'
-    );
+    expect(glsl.compile(ce.box(['At', 'S', 800]), NO_FOLD).code).toBe('S[799]');
   });
 });
 
 describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   test('folds a list literal', () => {
     const ce = new ComputeEngine();
-    expect(
-      glsl.compile(ce.box(['Sum', ['List', 1, 2, 3]]), NO_FOLD).code
-    ).toBe('((1.0) + (2.0) + (3.0))');
+    expect(glsl.compile(ce.box(['Sum', ['List', 1, 2, 3]]), NO_FOLD).code).toBe(
+      '((1.0) + (2.0) + (3.0))'
+    );
     // Past `vec4` the literal lowers to `float[5](…)`, whose constructor
     // arguments are the components just the same.
     expect(
@@ -409,7 +416,7 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   test('the fold is an ordinary subexpression', () => {
     const ce = engineWith({ v: 'vector<3>' });
     expect(glsl.compile(ce.box(['Sin', ['Sum', 'v']]), NO_FOLD).code).toBe(
-      'sin(((v.x) + (v.y) + (v.z)))'
+      '_gpu_sin(((v.x) + (v.y) + (v.z)))'
     );
   });
 
@@ -436,10 +443,8 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
       ).code
     ).toBe('2.0 * (x + 1.0)');
     expect(
-      glsl.compile(
-        ce.box(['Sum', ['Tuple', ['Add', 'x', 1], 'y']]),
-        NO_FOLD
-      ).code
+      glsl.compile(ce.box(['Sum', ['Tuple', ['Add', 'x', 1], 'y']]), NO_FOLD)
+        .code
     ).toBe('((x + 1.0) + (y))');
   });
 
@@ -448,9 +453,9 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   // Folding it answered a real `1.0` where the interpreter answers `i`.
   test('a complex scalar is not a two-element collection', () => {
     const ce = new ComputeEngine();
-    expect(() => glsl.compile(ce.box(['Sum', 'ImaginaryUnit']), NO_FOLD)).toThrow(
-      /is not a collection/
-    );
+    expect(() =>
+      glsl.compile(ce.box(['Sum', 'ImaginaryUnit']), NO_FOLD)
+    ).toThrow(/is not a collection/);
   });
 
   // `Sum([]) = 0` in the interpreter. Recognized before the operand is
@@ -473,9 +478,9 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
     expect(wgsl.compile(ce.box(['Sum', 'v']), NO_FOLD).code).toBe(
       '((v.x) + (v.y) + (v.z))'
     );
-    expect(
-      wgsl.compile(ce.box(['Sum', ['List', 1, 2, 3]]), NO_FOLD).code
-    ).toBe('((1.0) + (2.0) + (3.0))');
+    expect(wgsl.compile(ce.box(['Sum', ['List', 1, 2, 3]]), NO_FOLD).code).toBe(
+      '((1.0) + (2.0) + (3.0))'
+    );
   });
 
   describe('fails closed where there is no component list', () => {
@@ -517,11 +522,14 @@ describe('GPU FIXED-LENGTH LIST — Sum/Product collection form', () => {
   test('the indexed form is unchanged', () => {
     const ce = new ComputeEngine();
     expect(
-      glsl.compile(ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]), NO_FOLD)
-        .code
+      glsl.compile(
+        ce.box(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]),
+        NO_FOLD
+      ).code
     ).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
     expect(
-      glsl.compile(ce.box(['Product', 'i', ['Limits', 'i', 1, 4]]), NO_FOLD).code
+      glsl.compile(ce.box(['Product', 'i', ['Limits', 'i', 1, 4]]), NO_FOLD)
+        .code
     ).toBe('((1.0) * (2.0) * (3.0) * (4.0))');
     expect(
       glsl.compile(ce.box(['Sum', 'i', ['Limits', 'i', 5, 3]]), NO_FOLD).code

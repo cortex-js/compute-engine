@@ -64,7 +64,7 @@ function withDerivationCount<T>(
 
 const POINT = 'tuple<number, number> | list<tuple<number, number>>';
 const E_TYPE =
-  '(list<tuple<number, number>> | tuple<number, number>) -> broadcastable<number>';
+  '(list<tuple<number, number>> | tuple<number, number>) -> list<list<any> | number | tuple> | number | tuple';
 const W_TYPE =
   '(unknown, list<tuple<number, number>> | tuple<number, number>) -> unknown';
 // The full body applies the undeclared `b` to a `Sum` whose summand may be a
@@ -186,10 +186,10 @@ describe('TYCHO ITEM 336: NESTED CALLS OF FUNCTIONS DECLARED -> unknown', () => 
       ] as any)
     );
     expect(w1()).toBe(
-      '(unknown, list<tuple<number, number>> | tuple<number, number>) -> broadcastable<number>'
+      '(unknown, list<tuple<number, number>> | tuple<number, number>) -> list<list<any> | number | tuple> | number | tuple'
     );
     expect(e()).toBe(
-      '(list<tuple<number, number>> | tuple<number, number>) -> broadcastable<number>'
+      '(list<tuple<number, number>> | tuple<number, number>) -> list<list<any> | number | tuple> | number | tuple'
     );
 
     // Declaring the undeclared `T` that the new body applies.
@@ -467,7 +467,11 @@ describe('A CHAIN OF FUNCTIONS THAT EACH CALL THE NEXT TWICE', () => {
 
   test.each([
     [['Add', ['Random'], 'x'], '(y: unknown) random -> number', false],
-    [['b', 'x'], '(y: unknown) any -> broadcastable<number>', false],
+    [
+      ['b', 'x'],
+      '(y: unknown) any -> list<list<any> | number | tuple> | number | tuple',
+      false,
+    ],
     [['Add', 'x', 1], '(y: unknown) -> number', true],
   ])('the effects of %j still reach the first function', (last, type, pure) => {
     const ce = chain(5, last);

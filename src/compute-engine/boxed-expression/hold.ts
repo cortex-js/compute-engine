@@ -1,7 +1,11 @@
 import type { Expression } from '../global-types.js';
 
-import { flatten } from './flatten.js';
-import { isFunction, isContinuationOperand } from './type-guards.js';
+import { flatten, flattenKeepingNotationalProducts } from './flatten.js';
+import {
+  isFunction,
+  isContinuationOperand,
+  containsContinuationOperand,
+} from './type-guards.js';
 import { EventLoopPacer } from '../../common/cooperative-steps.js';
 import { CancellationError } from '../../common/interruptible.js';
 
@@ -60,7 +64,7 @@ export function holdMap(
     }
   }
   return def?.associative && !hasContinuation
-    ? flatten(result, expr.operator, false)
+    ? flattenOperands(result, expr.operator)
     : result;
 }
 
@@ -121,29 +125,48 @@ export async function holdMapAsync(
     }
   }
   return def?.associative && !hasContinuation
-    ? flatten(result, expr.operator, false)
+    ? flattenOperands(result, expr.operator)
     : result;
 }
 
 /**
- * `flatten(xs, operator, false)`, and for each resulting operand its
+ * Lift the nested applications of `operator` and the `Sequence` operands of
+ * `xs`, as `flatten()` does, but keep a nested product with a direct
+ * `ContinuationPlaceholder` operand (`2 · 4 · … · 2n`) whole. Such a product
+ * is a notation, not an arithmetic value: when its operands are lifted into
+ * the enclosing product, the last sample `2n` becomes the two factors `2` and
+ * `n`, and `3(2 · 4 · … · 2n)` evaluates to `3 · 2 · 4 · … · 2 · n`. The
+ * canonical form of `Multiply` keeps such a product whole for the same
+ * reason (`canonicalMultiply()`, `arithmetic-mul-div.ts`). (ROADMAP CE-462.)
+ */
+function flattenOperands(
+  xs: ReadonlyArray<Expression>,
+  operator: string
+): ReadonlyArray<Expression> {
+  if (xs.some((x) => containsContinuationOperand(x)))
+    return flattenKeepingNotationalProducts(xs, operator);
+  return flatten(xs, operator, false);
+}
+
+/**
+ * `flattenOperands(xs, operator)`, and for each resulting operand its
  * position in `xs`: the index of an operand that is kept as it is, and `-1`
  * for an operand lifted out of a nested `operator` application or a
  * `Sequence` (or the skipped `Nothing`, which has no result operand).
- * `flatten` treats each operand by itself, so flattening the operands one
- * by one gives the same list as flattening them all at once.
+ * `flattenOperands` treats each operand by itself, so flattening the
+ * operands one by one gives the same list as flattening them all at once.
  */
 function flattenWithPositions(
   xs: ReadonlyArray<Expression>,
   operator: string
 ): [ReadonlyArray<Expression>, ReadonlyArray<number> | undefined] {
-  const flat = flatten(xs, operator, false);
+  const flat = flattenOperands(xs, operator);
   // Nothing to flatten: the positions are the indexes.
   if (flat === xs) return [xs, undefined];
   const ys: Expression[] = [];
   const positions: number[] = [];
   for (const [i, x] of xs.entries()) {
-    const parts = flatten([x], operator, false);
+    const parts = flattenOperands([x], operator);
     const kept = parts.length === 1 && parts[0] === x;
     for (const y of parts) {
       ys.push(y);

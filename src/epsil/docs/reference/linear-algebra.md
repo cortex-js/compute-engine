@@ -28,6 +28,23 @@ have the same length.
 // ➔ [[1,3],[5,0]]
 ```
 
+A list of ranges of the same length keeps its ranges, but the functions of
+this library read each range as a row:
+
+```epsil
+determinant([1..2, 3..4])
+// ➔ -2
+```
+
+The operator `*` chooses from the type of its operands, and a list of ranges is
+not typed as a matrix, so `*` multiplies element by element. Use
+`matrixMultiply` for the matrix product:
+
+```epsil
+[1..2, 3..4] * [1..2, 3..4]
+// ➔ [[1,4],[9,16]]
+```
+
 Matrices are stored in **row-major** order: the first element of the outer
 list is the first row. An index reads an element. Indexes start at 1. The
 first index selects the row and the second index selects the column.

@@ -7,7 +7,7 @@ import type {
   TypeReference,
   TypeResolver,
 } from './types.js';
-import { typeToString } from './serialize.js';
+import { typeToIdentityKey, typeToString } from './serialize.js';
 import { RANGE_STRUCTURAL_TYPE, STRING_STRUCTURAL_TYPE } from './primitive.js';
 import { declarationOf, withTypeArguments } from './reference.js';
 import { subtypingVarianceOf } from './variance.js';
@@ -1406,7 +1406,11 @@ export function solveTypeArguments(
     const actual = actuals[i];
     if (pattern === undefined || actual === undefined) return actual;
     if (opts?.skip?.(i) || opts?.inferable?.(i)) return actual;
-    if (!opts?.lifted?.(i) || !isVariable(pattern)) return actual;
+    if (!opts?.lifted?.(i)) return actual;
+    // A callback parameter (`((integer) -> T) -> T`) at a lift-admitted
+    // position: the runtime maps over the collection, so the pattern is
+    // matched against the callbacks at its leaves (`liftedCallbackActual`).
+    if (!isVariable(pattern)) return liftedCallbackActual(pattern, actual);
     s.lifted.add(pattern.name);
     // A transparent alias is read through its definition, because the
     // runtime maps over the leaves of the value, not over the alias name.
@@ -1475,7 +1479,7 @@ export function solveTypeArguments(
         !algebra().isSubtype(joined.type, p.bound)
       ) {
         const arms = new Map<string, Type>();
-        for (const b of lowers) arms.set(typeToString(b.type), b.type);
+        for (const b of lowers) arms.set(typeToIdentityKey(b.type), b.type);
         const union: Type = { kind: 'union', types: [...arms.values()] };
         if (algebra().isSubtype(union, p.bound)) bindings[p.name] = union;
       }
@@ -2274,6 +2278,27 @@ function elementTypeOf(type: Type): Type | undefined {
 }
 
 /**
+ * The type that a lift-admitted operand of type `actual` contributes at a
+ * callback parameter `pattern` (a signature pattern, `(integer) -> T`):
+ * the type of the functions at the leaves of the collection, when `actual`
+ * is a collection that the runtime maps over and its leaves are functions.
+ * `actual` otherwise. With `k: ((integer) -> T) -> T where T` and
+ * `fs := [[x ↦ x + 1]]`, `k(fs)` applies `k` to each function of `fs`, so
+ * `T` is solved from `(x) -> number`, and is `number`. Matched against the
+ * whole matrix, the pattern found no function, and the result was typed
+ * `unknown`.
+ */
+export function liftedCallbackActual(pattern: Type, actual: Type): Type {
+  if (typeof pattern !== 'object' || pattern.kind !== 'signature')
+    return actual;
+  if (algebra().isSubtype(actual, 'function')) return actual;
+  const expanded = expandAliasesForLift(actual);
+  if (expanded === null) return actual;
+  const leaf = liftedElementTypeOf(expanded);
+  return algebra().isSubtype(leaf, 'function') ? leaf : actual;
+}
+
+/**
  * What ONE ELEMENT of a LIFT-ADMITTED operand is typed (D10, §4.4, re-ruled
  * 2026-08-04).
  *
@@ -2636,6 +2661,35 @@ function walkPattern(
         if (unfoldingActuals.size === 0) unfoldingActuals = null;
       }
     }
+  }
+
+  // A TOP-LEVEL `any` or `unknown` actual (an operand whose type is not
+  // inferred from this call) at a collection pattern can be any collection
+  // of the pattern: every variable of the pattern is absorbed, as at a bare
+  // variable pattern (D8). Another composite pattern (a union, as in
+  // `type opt<T> = T | missing`) has rules of its own below. Without this the variables were solved from the
+  // other positions only: with `xs: any` holding the string `"abc"`,
+  // `ReplaceAt(xs, 2, "z")` solved `T = string` from `"z"` and was typed
+  // `list<string>`, which its value `["a", "z", "c"]` (a character and two
+  // strings) is not. The bound is `any` for both actuals: a list of
+  // `unknown` and a list of `any` hold the same values, and the result is
+  // then spelled `list<any>`, as a bare variable at its `any` bound spells
+  // it. A value variable is pinned by equality, and is left to the other
+  // positions.
+  if (
+    topLevel &&
+    phase === 'lower' &&
+    covariant &&
+    (actual === 'any' || actual === 'unknown') &&
+    typeof pattern === 'object' &&
+    (pattern.kind === 'list' ||
+      pattern.kind === 'set' ||
+      pattern.kind === 'collection' ||
+      pattern.kind === 'indexed_collection')
+  ) {
+    for (const name of freeTypeVariables(pattern))
+      if (!s.valueParams.has(name)) addBound(s.lower, name, 'any', index, true);
+    return true;
   }
 
   // A UNION actual distributes: every arm must match the pattern, and each

@@ -226,7 +226,7 @@ describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
         .evaluate()
         .toString()
     ).toBe(
-      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity | residue", "string"), "banana"),9]'
+      '[4,2i,Error(ErrorCode("incompatible-type", "complex | infinity", "string"), "banana"),9]'
     );
     // Union source with a narrower predicate: admitted (partial overlap).
     expect(
@@ -236,15 +236,21 @@ describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
     ce.declare('p', 'function');
     expect(ce.box(['Filter', ['List', 1, 2, 3], 'p']).isValid).toBe(true);
     // Empty source: `list<never>` elements are vacuously compatible.
-    expect(ce.box(['Filter', ['List'], 'IsPrime']).evaluate().toString()).toBe(
-      '[]'
-    );
+    expect(
+      ce
+        .box(['Filter', ['List'], 'IsPrime'])
+        .evaluate()
+        .toString()
+    ).toBe('[]');
     // Effectful predicate at the effect-top slot.
     ce.declare('re', '(number) random -> boolean');
     expect(ce.box(['Filter', ['List', 1, 2, 3], 're']).isValid).toBe(true);
     // Evaluation parity.
     expect(
-      ce.box(['Filter', ['List', 1, 2, 3, 4], 'IsPrime']).evaluate().toString()
+      ce
+        .box(['Filter', ['List', 1, 2, 3, 4], 'IsPrime'])
+        .evaluate()
+        .toString()
     ).toBe('[2,3]');
   });
 
@@ -266,7 +272,12 @@ describe('E2 — the lazy-route gate (`canonicalCallbackOperand`)', () => {
     );
     // Zip arity parity: a unary callback over two sources keeps the shipped
     // `callback-arity` diagnostic (rule 2 owns arity).
-    const za = ce.box(['Map', ['Function', ['Sqrt', 'x'], 'x'], 'ints', 'strs']);
+    const za = ce.box([
+      'Map',
+      ['Function', ['Sqrt', 'x'], 'x'],
+      'ints',
+      'strs',
+    ]);
     expect(za.isValid).toBe(false);
     expect(za.toString()).toContain('callback-arity');
     // Homogeneous zip evaluation parity.
@@ -350,9 +361,9 @@ describe('E3 — user-declared slots get the static arity rejection (§12d)', ()
       signature: '(((number, number) -> number)) -> number',
       evaluate: (ops) => ops[0],
     });
-    expect(
-      ce.box(['myOp2', ['Function', 'a', 'a']]).toString()
-    ).toContain('myOp2 calls its callback with 2 arguments');
+    expect(ce.box(['myOp2', ['Function', 'a', 'a']]).toString()).toContain(
+      'myOp2 calls its callback with 2 arguments'
+    );
     // …and a literal of the arity the slot supplies is still admitted, at
     // either slot.
     expect(ce.box(['myOp', ['Function', 'a', 'a']]).isValid).toBe(true);
@@ -442,7 +453,10 @@ describe('E3 — user-declared slots get the static arity rejection (§12d)', ()
     expect(ce.box(['myOp', ['Function', 42]]).isValid).toBe(true);
     // The library equivalent, unchanged.
     expect(
-      ce.box(['CountIf', ['Range', 3], ['Function', 'True']]).evaluate().toString()
+      ce
+        .box(['CountIf', ['Range', 3], ['Function', 'True']])
+        .evaluate()
+        .toString()
     ).toBe('3');
     // A nullary SYMBOL gets no such exemption: its signature is a contract.
     ce.declare('nullarySym', '() -> number');
@@ -451,7 +465,7 @@ describe('E3 — user-declared slots get the static arity rejection (§12d)', ()
     );
   });
 
-  it('a `+` tail raises the slot arm\'s MINIMUM supply count', () => {
+  it("a `+` tail raises the slot arm's MINIMUM supply count", () => {
     // A variadic arm's range is unbounded ABOVE, but its minimum is real: a
     // `+` tail demands at least one occurrence, and those stack on top of the
     // optional parameters (`arityBounds`, `overload.ts`). Reading the arm's
@@ -486,9 +500,7 @@ describe('E3 — user-declared slots get the static arity rejection (§12d)', ()
     ).toBe(true);
     // Past the optional tail: no supply count applies the literal.
     expect(
-      ce
-        .box(['opt', ['Function', ['Add', 'a', 'b'], 'a', 'b', 'c']])
-        .toString()
+      ce.box(['opt', ['Function', ['Add', 'a', 'b'], 'a', 'b', 'c']]).toString()
     ).toContain('callback-arity');
 
     // A VARIADIC arm has no single supply count to word a sentence around,

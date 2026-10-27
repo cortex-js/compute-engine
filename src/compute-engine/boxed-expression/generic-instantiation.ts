@@ -1,7 +1,9 @@
+import { isDeclaredLocal } from './declared-local.js';
 import {
   admissionSkeleton,
   freeTypeVariables,
   hasFreeTypeVariables,
+  liftedCallbackActual,
   parameterPositions,
   solveTypeArguments,
   substituteTypeVariables,
@@ -273,9 +275,12 @@ export function actualOfOperand(op: Expression): SolveActual {
     solveType: dictionaryValueSolveType(op),
     literal: op._literalType !== undefined,
     valid: op.isValid,
+    // A block local declared `any` is not inferable: its type is the
+    // declaration (`isDeclaredLocal()`).
     inferable:
       (!!op.valueDefinition?.inferredType &&
-        (op.type.isUnknown || type === 'any')) ||
+        (op.type.isUnknown ||
+          (type === 'any' && !isDeclaredLocal(op.valueDefinition)))) ||
       forwardsRequirementWhileUnknown(op),
     get liftable(): boolean {
       return (liftable ??= couldBeUnkeyedCollectionOperand(op));
@@ -420,7 +425,22 @@ export function solveArmOverActuals(
         // nothing.
         if (ctx?.stripMissing?.(i) && typeContainsMissing(op.type)) return true;
         const skeleton = skeletons[i];
-        return skeleton !== undefined && !isSubtype(op.type, skeleton);
+        // An operand typed `any` or `unknown` is not skipped: it can be any
+        // value of the parameter, and the solver absorbs the variables of
+        // the parameter (`walkPattern()`, `instantiate.ts`).
+        if (op.type === 'any' || op.type === 'unknown') return false;
+        if (skeleton === undefined) return false;
+        // A collection of callbacks at a callback parameter, where the
+        // runtime maps over the collection, is checked by the callbacks at
+        // its leaves (`liftedCallbackActual`), which the solve reads.
+        const position = positions[i];
+        const actual =
+          position !== undefined &&
+          isThreadableAt(ctx?.threadable, i) &&
+          op.liftable
+            ? liftedCallbackActual(position, op.type)
+            : op.type;
+        return !isSubtype(actual, skeleton);
       },
       inferable: (i) => {
         // An INFERABLE unknown/`any` symbol contributes no bound; it stays

@@ -104,6 +104,19 @@ export type PrimitiveType =
   // in their signatures to admit one. See
   // `docs/plans/2026-10-23-residue-class-type.md`.
   | 'residue'
+  // A measurement, a nominal value with a standard uncertainty: the value of
+  // `Measurement(value, error)`. An OPAQUE value like `residue`: disjoint from
+  // every numeric type, so that the number rules (`x - x` is 0, `x/x` is 1)
+  // do not apply to it. It is a VALUE KIND admitted where a number is
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.7).
+  | 'measurement'
+  // A quantity, a magnitude with a physical unit: the value of
+  // `Quantity(magnitude, unit)`. An OPAQUE value like `residue`: disjoint
+  // from every numeric type, so that the number rules (`x - x` is 0, `x/x` is
+  // 1) do not apply to it. It is a VALUE KIND admitted only by the arithmetic
+  // operators and the operators that name it
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.7).
+  | 'quantity'
   // A type value: a type expression reified as a first-class runtime value
   // (`TypeFrom("list<integer>")`). An OPAQUE value like `regexp` and `color`:
   // not a `scalar`, not a `collection`, no hidden element type. In TYPE-STRING
@@ -443,10 +456,27 @@ export type ValueType = {
  * every key required by the other type, and all their types must match (width
  * subtyping). It may contain additional keys.
  *
+ * A record type is OPEN: `record{a: integer}` holds every value that has a
+ * field `a` of type `integer`, and also other fields of any type. So it is a
+ * `dictionary<T>` only when `T` holds every value.
+ *
+ * The type of a dictionary VALUE is CLOSED (`closed: true`): the value has
+ * exactly the listed fields and no other. `{a: 1}` is typed
+ * `record{a: integer}` with `closed: true`, and that type is a subtype of
+ * `dictionary<integer>`. No type syntax spells a closed record: a closed
+ * record prints as the open record with the same fields, and the parser
+ * makes only open records. A closed record is a subtype of the open record
+ * with the same fields, and a record type is a subtype of a closed record
+ * only when it is closed and has the same set of keys.
+ *
  */
 export type RecordType = {
   kind: 'record';
   elements: Record<string, Type>;
+  /** The values of this type have exactly the keys of `elements`. Set only
+   * on the type of a dictionary value; absent on every type that the parser
+   * makes. */
+  closed?: true;
 };
 
 /** The stored-field layout of an **object** type — the engine's one mutable
@@ -729,6 +759,16 @@ export type TypeReference = {
    * DECLARATION, like {@link _sumOf}: never part of a type's structure,
    * serialization or comparison. */
   _declOrigin?: DeclarationOrigin;
+
+  /** Whether the declaration of this record asked for a value-level
+   * constructor of the same name (the `mint` option of `declareType()`,
+   * `true` by default). `false` only for a declaration made with
+   * `{ mint: false }`, the form a value kind needs: a kind has its own head
+   * as constructor, and a minted one would be a second head of the kind type
+   * with no arithmetic. Absent on a record that no declaration completed (a
+   * forward reference). Metadata about the DECLARATION, like
+   * {@link _declOrigin}. */
+  _minted?: boolean;
 };
 
 /**

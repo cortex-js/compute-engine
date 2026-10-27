@@ -41,7 +41,7 @@ describe('GLSL COMPILATION', () => {
     it('should compile trigonometric functions', () => {
       const expr = ce.parse('\\sin(x) + \\cos(y)');
       const code = glsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`sin(x) + cos(y)`);
+      expect(code).toMatchInlineSnapshot(`_gpu_sin(x) + _gpu_cos(y)`);
     });
 
     it('should compile power function', () => {
@@ -73,9 +73,7 @@ describe('GLSL COMPILATION', () => {
         // Eight multiplies of a variable beat the helper call, whose only
         // arm past exponent 4 is `pow(abs(x), n)` with a sign correction.
         const r = glsl.compile(ce.parse('x^8'));
-        expect(r.code).toMatchInlineSnapshot(
-          `(x * x * x * x * x * x * x * x)`
-        );
+        expect(r.code).toMatchInlineSnapshot(`(x * x * x * x * x * x * x * x)`);
         expect(r.code).not.toContain('pow(');
       });
 
@@ -132,25 +130,25 @@ describe('GLSL COMPILATION', () => {
     it('should compile min/max', () => {
       const expr = ce.parse('\\max(x, y)');
       const code = glsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`max(x, y)`);
+      expect(code).toMatchInlineSnapshot(`_gpu_max(x, y)`);
     });
 
     it('should compile cot', () => {
       const expr = ce.parse('\\cot(x)');
       const code = glsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(cos(x) / sin(x))`);
+      expect(code).toMatchInlineSnapshot(`(_gpu_cos(x) / _gpu_sin(x))`);
     });
 
     it('should compile csc', () => {
       const expr = ce.parse('\\csc(x)');
       const code = glsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(1.0 / sin(x))`);
+      expect(code).toMatchInlineSnapshot(`(1.0 / _gpu_sin(x))`);
     });
 
     it('should compile sec', () => {
       const expr = ce.parse('\\sec(x)');
       const code = glsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(1.0 / cos(x))`);
+      expect(code).toMatchInlineSnapshot(`(1.0 / _gpu_cos(x))`);
     });
 
     // REVIEW.md E3: CE's `Degrees` converts degrees→radians (Degrees(180) = π),
@@ -187,7 +185,7 @@ describe('GLSL COMPILATION', () => {
 
     it('should compile reciprocal hyperbolic functions', () => {
       expect(glsl.compile(ce.expr(['Coth', 'x'])).code).toMatchInlineSnapshot(
-        `(cosh(x) / sinh(x))`
+        `(1.0 / tanh(x))`
       );
       expect(glsl.compile(ce.expr(['Csch', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / sinh(x))`
@@ -260,7 +258,9 @@ describe('GLSL COMPILATION', () => {
       // — this test pins the vector-addition lowering, not the fold.
       const code = glsl.compile(expr, { constantFold: false }).code;
       // GLSL supports vector operators natively; canonical form reorders
-      expect(code).toMatchInlineSnapshot(`vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)`);
+      expect(code).toMatchInlineSnapshot(
+        `vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)`
+      );
     });
 
     it('should compile vector multiplication', () => {
@@ -287,16 +287,11 @@ describe('GLSL COMPILATION', () => {
 
     it('should compile a vector function', () => {
       const expr = ce.parse('\\sqrt{x^2 + y^2 + z^2}');
-      const code = glsl.compileFunction(
-        expr,
-        'vectorLength',
-        'float',
-        [
-          ['x', 'float'],
-          ['y', 'float'],
-          ['z', 'float'],
-        ]
-      );
+      const code = glsl.compileFunction(expr, 'vectorLength', 'float', [
+        ['x', 'float'],
+        ['y', 'float'],
+        ['z', 'float'],
+      ]);
       expect(code).toMatchInlineSnapshot(`
         float vectorLength(float x, float y, float z) {
           return sqrt((x * x) + (y * y) + (z * z));
@@ -357,7 +352,7 @@ describe('GLSL COMPILATION', () => {
       const code = glsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`
         float a;
-        a = cos(t);
+        a = _gpu_cos(t);
         return a + 1.0;
       `);
     });
@@ -375,8 +370,8 @@ describe('GLSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`
         float a;
         float b;
-        a = sin(x);
-        b = cos(x);
+        a = _gpu_sin(x);
+        b = _gpu_cos(x);
         return a + b;
       `);
     });
@@ -392,9 +387,17 @@ describe('GLSL COMPILATION', () => {
         ['t', 'float'],
       ]);
       expect(code).toMatchInlineSnapshot(`
+
+        bool _gpu_isnonfinite(float x) {
+          return (floatBitsToUint(x) & 0x7FFFFFFFu) >= 0x7F800000u;
+        }
+        float _gpu_cos(float x) {
+          return (_gpu_isnonfinite(x) ? intBitsToFloat(0x7FC00000) : cos(x));
+        }
+
         float compute(float t) {
           float a;
-          a = cos(t);
+          a = _gpu_cos(t);
           return a + 1.0;
         }
       `);
@@ -682,7 +685,7 @@ describe('GLSL COMPILATION', () => {
     it('should keep real expressions unchanged', () => {
       // Verify no regressions with complex declarations in scope
       const code = glsl.compile(ce.parse('\\sin(x) + \\cos(y)')).code;
-      expect(code).toMatchInlineSnapshot(`sin(x) + cos(y)`);
+      expect(code).toMatchInlineSnapshot(`_gpu_sin(x) + _gpu_cos(y)`);
     });
   });
 
@@ -715,9 +718,7 @@ describe('GLSL COMPILATION', () => {
 
     it('should compile BesselJ', () => {
       const result = glsl.compile(ce.expr(['BesselJ', 0, 'x']));
-      expect(result.code).toMatchInlineSnapshot(
-        `_gpu_besselJ(int(0.0), x)`
-      );
+      expect(result.code).toMatchInlineSnapshot(`_gpu_besselJ(int(0.0), x)`);
       expect(result.preamble).toContain('_gpu_factorial');
       expect(result.preamble).toContain('_gpu_besselJ');
     });
@@ -783,9 +784,7 @@ describe('GLSL COMPILATION', () => {
       expect(() => glsl.compile(ce.expr(['Binomial', 'x', 9]))).toThrow(
         /would unroll to 9 factors/
       );
-      expect(() =>
-        glsl.compile(ce.expr(['Binomial', 'x', 8]))
-      ).not.toThrow();
+      expect(() => glsl.compile(ce.expr(['Binomial', 'x', 8]))).not.toThrow();
     });
 
     it('fails closed on a statically non-finite first operand', () => {
@@ -829,22 +828,23 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
   /** The value of an emitted expression in `x`, read as JavaScript. */
   const run = (code: string, x: number): number =>
     // eslint-disable-next-line no-new-func
-    new Function('x', 'min', 'max', 'cos', '_gpu_pow2', `return ${code};`)(
-      x,
-      Math.min,
-      Math.max,
-      Math.cos,
-      (v: number) => v * v
-    );
+    new Function(
+      'x',
+      '_gpu_min',
+      '_gpu_max',
+      '_gpu_cos',
+      '_gpu_pow2',
+      `return ${code};`
+    )(x, Math.min, Math.max, Math.cos, (v: number) => v * v);
 
   it('compiles the prime of a library function from its closed form', () => {
-    expect(glsl.compile(ce.parse("\\sin'(t)")).code).toBe('cos(t)');
-    expect(glsl.compile(ce.parse("\\sin''(t)")).code).toBe('(-sin(t))');
+    expect(glsl.compile(ce.parse("\\sin'(t)")).code).toBe('_gpu_cos(t)');
+    expect(glsl.compile(ce.parse("\\sin''(t)")).code).toBe('(-_gpu_sin(t))');
   });
 
   it('compiles the prime of a user function from its closed form', () => {
     const code = glsl.compile(ce.parse("h'(x)")).code!;
-    expect(code).toBe('(3.0 * (x * x) + cos(x))');
+    expect(code).toBe('(3.0 * (x * x) + _gpu_cos(x))');
     for (const x of [-2, 0.5, 3])
       expect(run(code, x)).toBeCloseTo(
         ce.parse("h'(x)").subs({ x }).N().re,
@@ -856,7 +856,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
     const result = glsl.compile(ce.parse('f(x)'));
     expect(result.code).toBe('_fn_f(x)');
     expect(result.preamble).toContain(
-      'float _fn_f(float t) {\n  return (3.0 * (t * t) + cos(t));\n}'
+      'float _fn_f(float t) {\n  return (3.0 * (t * t) + _gpu_cos(t));\n}'
     );
   });
 
@@ -897,7 +897,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
   it('writes out a Map of static width under a reduction', () => {
     const code = glsl.compile(ce.box(['Min', ['Map', SQUARE, SOURCE]])).code!;
     expect(code).toBe(
-      'min(min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
+      '_gpu_min(_gpu_min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
     );
     for (const x of [-5, -1.5, 0, 2])
       expect(run(code, x)).toBeCloseTo(
@@ -905,7 +905,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
         12
       );
     expect(glsl.compile(ce.box(['Max', ['Map', SQUARE, SOURCE]])).code).toBe(
-      'max(max((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
+      '_gpu_max(_gpu_max((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
     );
     expect(glsl.compile(ce.box(['Sum', ['Map', SQUARE, SOURCE]])).code).toBe(
       '(x * x) + _gpu_pow2(x + 4.0) + _gpu_pow2(x + 2.0)'
@@ -946,7 +946,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
     expect(
       glsl.compile(ce.box(['Apply', SINE, ['List', 'a', 'b', 'c']]), NO_FOLD)
         .code
-    ).toBe('vec3(sin(a), sin(b), sin(c))');
+    ).toBe('vec3(_gpu_sin(a), _gpu_sin(b), _gpu_sin(c))');
   });
 
   it('applies the prime of a function to each element', () => {
@@ -956,7 +956,9 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
       ['List', 'a', 'b'],
     ]);
     expect(expr.evaluate().toString()).toBe('[cos(a),cos(b)]');
-    expect(glsl.compile(expr, NO_FOLD).code).toBe('vec2(cos(a), cos(b))');
+    expect(glsl.compile(expr, NO_FOLD).code).toBe(
+      'vec2(_gpu_cos(a), _gpu_cos(b))'
+    );
   });
 
   it('substitutes a scalar argument whole', () => {
@@ -995,7 +997,9 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
     ce.declare('V', 'list<real^2>');
     const tuple = ce.box(['Apply', DOUBLE, ['Tuple', 'a', 'b']]);
     expect(tuple.evaluate().toString()).toBe('(2a, 2b)');
-    expect(glsl.compile(tuple, NO_FOLD).code).toBe('vec2((2.0 * a), (2.0 * b))');
+    expect(glsl.compile(tuple, NO_FOLD).code).toBe(
+      'vec2((2.0 * a), (2.0 * b))'
+    );
     expect(glsl.compile(ce.box(['Apply', DOUBLE, 'P']), NO_FOLD).code).toBe(
       'vec2((2.0 * P.x), (2.0 * P.y))'
     );
@@ -1009,11 +1013,7 @@ describe('GLSL APPLIED DERIVATIVE AND MAP', () => {
     // interpreter, declined here.
     expect(() =>
       glsl.compile(
-        ce.box([
-          'Apply',
-          DOUBLE,
-          ['Tuple', ['List', 1, 2], ['List', 3, 4]],
-        ])
+        ce.box(['Apply', DOUBLE, ['Tuple', ['List', 1, 2], ['List', 3, 4]]])
       )
     ).toThrow(/has a component that is a collection/);
     // A vector argument is bound whole when another parameter is a

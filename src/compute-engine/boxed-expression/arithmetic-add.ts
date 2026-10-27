@@ -7,7 +7,8 @@ import {
 import { flatten } from './flatten.js';
 import { isInvalidNonCollection } from './error-value.js';
 import { order, sortAddTerms } from './order.js';
-import { containsResidueClass, residueArithmetic } from './residue-class.js';
+import { holdsKindValue } from './residue-class.js';
+import { kindArithmetic } from './kind-dispatch.js';
 import { Type, type TypeReference } from '../../common/type/types.js';
 import {
   type AliasDescent,
@@ -160,8 +161,8 @@ export function canonicalAdd(
 
   // A sum with a residue class is only flattened and sorted: only the residue
   // rules of the evaluate handler know its ring. The folds below would read
-  // `c + ∞` as `∞` (see `containsResidueClass()`).
-  if (ops.some(containsResidueClass))
+  // `c + ∞` as `∞` (see `holdsKindValue()`).
+  if (ops.some(holdsKindValue))
     return ops.length === 1 ? ops[0] : ce._fn('Add', sortAddTerms(ops));
 
   // A numeric tuple (point/vector in ℝⁿ) cannot be added to a scalar. Reject
@@ -846,10 +847,12 @@ export function addArray(xs: ReadonlyArray<Expression>): Expression {
   )
     return xs[0].engine.NaN;
 
-  // A residue class among the terms: only the residue rules apply, after the
-  // broadcast over a collection above (`residueArithmetic()`).
-  const residue = residueArithmetic(xs[0].engine, 'Add', xs);
-  if (residue !== undefined) return residue;
+  // A kind value among the terms (a residue class): only the hooks of the
+  // kinds apply, after the broadcast over a collection above
+  // (`kindArithmetic()`). The terms that hold no kind value are added by
+  // this function.
+  const kind = kindArithmetic(xs[0].engine, 'Add', xs, addArray);
+  if (kind !== undefined) return kind;
 
   return new Terms(xs[0].engine, xs).asExpression();
 }

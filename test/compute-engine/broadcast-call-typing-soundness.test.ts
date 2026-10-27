@@ -176,6 +176,70 @@ describe('a structural expression boxed from MathJSON', () => {
     }
   );
 
+  // The same for a structural expression that is the lone symbol: the body of
+  // `f(x) = x`. With `X = [1, 2, 3]`, `Σ_{i=1}^{3} f(X + i)` inlined this way
+  // gave `[3+3i, 6+3i, 9+3i]`. Tycho row 451.
+  test.each(['real', 'unknown', undefined])(
+    'subs() on the lone structural x keeps a constant name: %s',
+    (type) => {
+      const ce = new ComputeEngine();
+      if (type !== undefined) ce.declare('x', type);
+      const body = ce.box('x', { form: 'structural' });
+      const arg = ce.box(['Add', 'X', 'i'], { form: 'structural' });
+      expect(JSON.stringify(body.subs({ x: arg }).json)).toBe(
+        '["Add","X","i"]'
+      );
+      // A requested form is still honored.
+      expect(body.subs({ x: arg }, { canonical: true }).isCanonical).toBe(true);
+    }
+  );
+
+  test('every route to a structural x keeps it, the canonical form drops it', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const arg = ce.box(['Add', 'X', 'i'], { form: 'structural' });
+    const kept = '["Add","X","i"]';
+    // A parse with diagnostics copies the result (`_unshared()`).
+    const parsed = ce.parse('x', { form: 'structural', diagnostics: true });
+    expect(JSON.stringify(parsed.subs({ x: arg }).json)).toBe(kept);
+    // A symbol boxed before, then asked for in the structural form.
+    const preboxed = ce.box(ce.symbol('x'), { form: 'structural' });
+    expect(JSON.stringify(preboxed.subs({ x: arg }).json)).toBe(kept);
+    // The canonical form of a structural symbol substitutes canonically.
+    const canonical = ce.box('x', { form: 'structural' }).canonical;
+    expect(canonical.subs({ x: ['Add', 1, 2] }).toString()).toBe('3');
+    // The canonical symbol itself is not changed by the structural route.
+    const plain = ce.symbol('x');
+    expect(plain.subs({ x: ['Add', 1, 2] }).toString()).toBe('3');
+  });
+
+  test('the sum of an inlined identity over an index named i', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const inlined = ce
+      .box('x', { form: 'structural' })
+      .subs({ x: ce.box(['Add', 'X', 'i'], { form: 'structural' }) });
+    ce.assign('X', ce.box(['List', 1, 2, 3]));
+    const sum = ce.box(['Sum', inlined.json, ['Tuple', 'i', 1, 3]]);
+    expect(sum.evaluate().toString()).toBe('[9,12,15]');
+  });
+
+  test('a library symbol boxed structurally is the shared instance', () => {
+    // Code compares these by identity (`=== ce.Nothing`).
+    const ce = new ComputeEngine();
+    for (const name of [
+      'Pi',
+      'True',
+      'False',
+      'Nothing',
+      'Missing',
+      'None',
+      'Undefined',
+      'ExponentialE',
+    ])
+      expect(ce.box(name, { form: 'structural' })).toBe(ce.symbol(name));
+  });
+
   test('a kept constant name is still the constant once canonical', () => {
     const ce = new ComputeEngine();
     const boxed = ce.box(['Power', 'i', 2], { form: 'structural' });

@@ -433,6 +433,11 @@ export function bindingInContext(
     if (found !== undefined) {
       if ('value' in found && isForeignBinderBinding(found.value, own)) {
         skippedBinder ??= found;
+      } else if (
+        'value' in found &&
+        isOutsideBindingOfBinderVariable(ce, scope, found.value, own)
+      ) {
+        // Skip this binding: it is not the variable of the binder.
       } else {
         if (
           own === undefined ||
@@ -588,6 +593,42 @@ function isForeignBinderBinding(
   if (isActivation(def)) return true;
   if (own === undefined || isShield(def)) return false;
   return isBinderVariable(def) && !isBinderVariable(own);
+}
+
+/**
+ * True when `own` is the variable of a binder operator (a loop index, a
+ * `Sum` index, a comprehension variable), and `def` is an ordinary binding
+ * of the same name in the global scope or in the system scope (`scope` holds
+ * `def`): not `own`, not the variable of a binder, not a parameter
+ * activation and not a shield.
+ *
+ * An occurrence of a binder's variable has a value only inside a run of its
+ * binder. When such an occurrence is evaluated outside its binder (a part of
+ * a loop body that is taken out of its `Loop`), a global or library
+ * definition of the same name is a different symbol. Reading its value gave
+ * a wrong result: with a loop index `i`, the detached part
+ * `ReplaceAt([1, 2, 3], i, 9)` read the imaginary unit and evaluated to an
+ * `incompatible-type` error. The occurrence now has no value there and stays
+ * symbolic.
+ *
+ * A binding in a scope below the global scope is still read by name. Some
+ * evaluations of a binder run in a scope that holds a copy of the index
+ * binding, not the binding the occurrence is bound to: a `Sum` in the body
+ * of a function literal that `Map` applies writes the value of its index in
+ * such a scope (`assignLoopIndex`, `library/utils.ts`), and the occurrence
+ * must read it.
+ */
+function isOutsideBindingOfBinderVariable(
+  ce: ComputeEngine,
+  scope: Scope,
+  def: BoxedValueDefinition,
+  own: BoxedBaseDefinition | undefined
+): boolean {
+  if (own === undefined || !isBinderVariable(own)) return false;
+  const globalScope = ce._evalContextStack[1]?.lexicalScope;
+  if (scope !== globalScope && scope !== globalScope?.parent) return false;
+  if (sameBindingDef(def, own)) return false;
+  return !isBinderVariable(def) && !isActivation(def) && !isShield(def);
 }
 
 /** Is `def` a call frame's parameter activation (see `markActivation`)? */

@@ -35,16 +35,14 @@ function code(latex: string, Target: typeof GLSLTarget | typeof WGSLTarget) {
 describe('CE-227.1 the emitted argument', () => {
   test.each(TARGETS)('%s', (_, Target) => {
     expect(code('\\sin(x+\\Gamma(20))', Target)).toBe(
-      'sin(x + 0.020641496)'
+      '_gpu_sin(x + 0.020641496)'
     );
-    expect(code('\\tan(x+\\Gamma(20))', Target)).toBe(
-      'tan(x + 0.020641496)'
-    );
-    expect(code('\\sin(x+20!)', Target)).toBe('sin(x + 0.41282994)');
+    expect(code('\\tan(x+\\Gamma(20))', Target)).toBe('tan(x + 0.020641496)');
+    expect(code('\\sin(x+20!)', Target)).toBe('_gpu_sin(x + 0.41282994)');
     expect(code('\\cos(x+\\binom{40}{20})', Target)).toBe(
-      'cos(x + -1.49282)'
+      '_gpu_cos(x + -1.49282)'
     );
-    expect(code('\\sin(x+e^{20})', Target)).toBe('sin(x + 0.4122615)');
+    expect(code('\\sin(x+e^{20})', Target)).toBe('_gpu_sin(x + 0.4122615)');
   });
 });
 
@@ -53,11 +51,14 @@ describe('CE-227.1 the shader value', () => {
     const latex = '\\sin(x+\\Gamma(20))';
     const r = new GLSLTarget().compile(ce.parse(latex));
     const run = shaderFunctions(
-      `float _main(float x) { return ${r.code}; }`,
+      `${r.preamble ?? ''}\nfloat _main(float x) { return ${r.code}; }`,
       'glsl'
     );
     for (const x of [-2.718, 0.1, 1.2345].map(Math.fround)) {
-      const want = ce.parse(latex).subs({ x: ce.number(x) }).N().re;
+      const want = ce
+        .parse(latex)
+        .subs({ x: ce.number(x) })
+        .N().re;
       expect(Math.abs((run('_main', x) as number) - want)).toBeLessThan(1e-6);
     }
   });
@@ -68,7 +69,7 @@ describe('CE-227.1 terms that stay unfolded', () => {
     const e = ce.box(['Sin', ['Add', 'x', ['Gamma', 20]]]);
     expect(
       compile(e, { to: 'glsl', functions: { Gamma: 'myGamma' } }).code
-    ).toBe('sin(x + myGamma(20.0))');
+    ).toBe('_gpu_sin(x + myGamma(20.0))');
   });
 
   test('a user function whose body calls a function the caller maps', () => {
@@ -76,14 +77,14 @@ describe('CE-227.1 terms that stay unfolded', () => {
     const e = ce.box(['Sin', ['Add', 'x', ['u', 20]]]);
     expect(
       compile(e, { to: 'glsl', functions: { Gamma: 'mygamma' } }).code
-    ).toBe('sin(x + _fn_u(20.0))');
+    ).toBe('_gpu_sin(x + _fn_u(20.0))');
   });
 
   test('a symbol the caller maps to a run-time input', () => {
     const e = ce.box(['Sin', ['Add', 'x', ['Power', 'ExponentialE', 10]]]);
     expect(
       compile(e, { to: 'glsl', vars: { ExponentialE: 'otherBase' } }).code
-    ).toBe('sin(x + _gpu_powi(otherBase, 10.0))');
+    ).toBe('_gpu_sin(x + _gpu_powi(otherBase, 10.0))');
   });
 
   test('a Random() term', () => {
@@ -93,7 +94,7 @@ describe('CE-227.1 terms that stay unfolded', () => {
 
   test('a term with a variable', () => {
     expect(code('\\sin(x+\\Gamma(a))', GLSLTarget)).toBe(
-      'sin(x + _gpu_gamma(a))'
+      '_gpu_sin(x + _gpu_gamma(a))'
     );
   });
 });

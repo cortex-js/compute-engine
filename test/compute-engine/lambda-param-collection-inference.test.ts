@@ -283,7 +283,7 @@ describe('callee defined after caller', () => {
     // Before the callee exists: nothing known, and the result type carries the
     // `broadcastable<>` marker that says the lambda will map over a list.
     expect(signatureIn(ce, 'process')).toBe(
-      '(cs: unknown) any -> broadcastable<number>'
+      '(cs: unknown) any -> list<list<any> | number | tuple> | number | tuple'
     );
     executeEpsil(ce, CALLEE_DECLARED);
     expect(signatureIn(ce, 'process')).toBe('(cs: list<number>) -> number');
@@ -365,7 +365,7 @@ describe('callee defined after caller', () => {
 
   test('a callee that never gains a definition is left alone', () => {
     expect(signatureOf(CALLER_BARE, 'process')).toBe(
-      '(cs: unknown) any -> broadcastable<number>'
+      '(cs: unknown) any -> list<list<any> | number | tuple> | number | tuple'
     );
   });
 
@@ -487,7 +487,7 @@ describe('callee defined after caller', () => {
       executeEpsil(ce, CHAIN3[1]);
       // Nothing known yet at either level.
       expect(signatureIn(ce, 'outer')).toBe(
-        '(cs: unknown) any -> broadcastable<number>'
+        '(cs: unknown) any -> list<list<any> | number | tuple> | number | tuple'
       );
       executeEpsil(ce, CHAIN3[2]);
       // `inner` repairs `middle`; `middle`'s rebuild cascades to `outer`.
@@ -721,7 +721,7 @@ describe('wildcard-declared callees', () => {
       // wildcard carries no effect specifier — so the caller's signature has
       // no `any` effects marker.)
       expect(signatureIn(ce, 'proc')).toBe(
-        '(cs: unknown) -> broadcastable<number>'
+        '(cs: unknown) -> list<list<any> | number | tuple> | number | tuple'
       );
       ce.assign('clean', listCallee(ce));
       expect(signatureIn(ce, 'proc')).toBe('(cs: list<number>) -> number');
@@ -738,7 +738,7 @@ describe('wildcard-declared callees', () => {
       ce.declare('clean', 'function');
       executeEpsil(ce, 'function proc(cs) { clean(cs) + 1 }');
       expect(signatureIn(ce, 'proc')).toBe(
-        '(cs: unknown) -> broadcastable<number>'
+        '(cs: unknown) -> list<list<any> | number | tuple> | number | tuple'
       );
       executeEpsil(ce, 'function clean(v: list<number>) { v[1] }');
       expect(signatureIn(ce, 'proc')).toBe('(cs: list<number>) -> number');
@@ -853,7 +853,7 @@ describe('wildcard-declared callees', () => {
     ce.declare('never2', 'function');
     executeEpsil(ce, 'function nproc(cs) { never2(cs) + 1 }');
     expect(signatureIn(ce, 'nproc')).toBe(
-      '(cs: unknown) -> broadcastable<number>'
+      '(cs: unknown) -> list<list<any> | number | tuple> | number | tuple'
     );
     // No error, and the vectorization default holds: the call broadcasts and
     // the unresolved applications surface inert.

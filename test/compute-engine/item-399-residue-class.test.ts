@@ -2,7 +2,7 @@ import { ComputeEngine, compile } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
 import { serializeEpsil } from '../../src/epsil/serialize-epsil';
-import { containsResidueClass } from '../../src/compute-engine/boxed-expression/residue-class';
+import { holdsKindValue } from '../../src/compute-engine/boxed-expression/residue-class';
 
 const ce = new ComputeEngine();
 
@@ -957,13 +957,13 @@ describe('ResidueClass: N() reads an exponent exactly (#399)', () => {
 });
 
 describe('ResidueClass: an engine with no class does not look for one (#399)', () => {
-  test('containsResidueClass() is false until the engine makes a class', () => {
+  test('holdsKindValue() is false until the engine makes a class', () => {
     const engine = new ComputeEngine();
     const sum = engine.box(['Add', 'x', 1]);
-    expect(containsResidueClass(sum)).toBe(false);
+    expect(holdsKindValue(sum)).toBe(false);
     const withClass = engine.box(['Add', 'x', RC(1, 5)] as Expression);
-    expect(containsResidueClass(withClass)).toBe(true);
-    expect(containsResidueClass(sum)).toBe(false);
+    expect(holdsKindValue(withClass)).toBe(true);
+    expect(holdsKindValue(sum)).toBe(false);
   });
 });
 
@@ -1264,8 +1264,8 @@ describe('ResidueClass: fourth review round (#399)', () => {
     engine.assign('q', engine.box('c'));
     engine.assign('r', engine.box(['Add', 'q', 'y']));
     test('q := c, c := ResidueClass(2, 4)', () => {
-      expect(containsResidueClass(engine.box('q'))).toBe(true);
-      expect(containsResidueClass(engine.box('r'))).toBe(true);
+      expect(holdsKindValue(engine.box('q'))).toBe(true);
+      expect(holdsKindValue(engine.box('r'))).toBe(true);
     });
     test('r/r with r := q + y is not simplified to 1', () => {
       const boxed = engine.box(['Divide', 'r', 'r']);
@@ -1274,7 +1274,7 @@ describe('ResidueClass: fourth review round (#399)', () => {
     test('a cycle of values ends', () => {
       engine.assign('a1', engine.box('b1'));
       engine.assign('b1', engine.box('a1'));
-      expect(containsResidueClass(engine.box('a1'))).toBe(false);
+      expect(holdsKindValue(engine.box('a1'))).toBe(false);
       expect(engine.box(['Divide', 'a1', 'a1']).simplify().json).toBe(1);
     });
   });

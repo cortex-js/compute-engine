@@ -253,9 +253,9 @@ describe('a definition that loses the library handler also loses `lazy`', () => 
       expect(def.canonical).toBeUndefined();
       expect(def.lazy).toBe(false);
       // Box route.
-      expect(
-        ce.box([name, ['Delimiter', [name, 'a', 'b']], 'c']).json
-      ).toEqual(expected);
+      expect(ce.box([name, ['Delimiter', [name, 'a', 'b']], 'c']).json).toEqual(
+        expected
+      );
       // Parse route.
       if (name === 'Add') expect(ce.parse(latex).json).toEqual(expected);
     }
@@ -362,7 +362,7 @@ describe('a copy that changes what canonicalization depends on', () => {
     const ce = new ComputeEngine();
     ce.declare('Sqrt', {
       ...ce.lookupDefinition('Sqrt')!.operator!,
-      signature: '(complex | infinity | residue) -> complex | infinity',
+      signature: '(complex | infinity) -> complex | infinity',
     });
     expect(ce.box(['Sqrt', 8]).toString()).toBe('2sqrt(2)');
   });

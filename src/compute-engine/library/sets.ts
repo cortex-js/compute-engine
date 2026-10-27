@@ -30,6 +30,7 @@ import { sortSetElements } from '../boxed-expression/order.js';
 import { checkArity, validateArguments } from '../boxed-expression/validate.js';
 import { asBigint } from '../boxed-expression/numerics.js';
 import {
+  RESIDUE_CLASS_ARITHMETIC,
   residueClassOf,
   residueExpression,
   residueOf,
@@ -1404,6 +1405,11 @@ export const SETS_LIBRARY: SymbolDefinitions = {
     // A fraction `k` with a unit denominator reads as `u · v⁻¹`, so
     // `ResidueClass(1/3, 7)` is `ResidueClass(5, 7)`.
     signature: '(any, any) -> residue',
+    // A class is a value of a VALUE KIND: this registers `residue` as a kind
+    // type in every engine, which is what the recognition of a class reads
+    // (`holdsKindValue()`, `residue-class.ts`). The hooks are the residue
+    // arithmetic (`RESIDUE_CLASS_ARITHMETIC`).
+    arithmetic: RESIDUE_CLASS_ARITHMETIC,
     // Lazy, so that `.N()` does not approximate the operands first: a class
     // is exact, and `ResidueClass(q, 7)` with `q = 1/3` is
     // `ResidueClass(5, 7)` under `.N()` as under `evaluate()`.

@@ -43,15 +43,16 @@ const g = (expr: any): string => glsl.compile(ce.box(expr), NO_FOLD).code!;
 const w = (expr: any): string => wgsl.compile(ce.box(expr), NO_FOLD).code!;
 
 /**
- * Evaluate an emitted shader EXPRESSION over the `max`/`min`/float-literal/
- * swizzle subset. `max`/`min` are the same builtins with the same semantics in
- * both shader languages and in `Math`, and a `vecN` swizzle is a plain index,
- * so this is a faithful reading of what a driver would compute.
+ * Evaluate an emitted shader EXPRESSION over the `_gpu_max`/`_gpu_min`/
+ * float-literal/swizzle subset. The helpers `_gpu_max` and `_gpu_min` give
+ * NaN for a NaN operand, as `Math.max` and `Math.min` do, and a `vecN`
+ * swizzle is a plain index, so this is a faithful reading of what a driver
+ * computes.
  */
 function runShader(code: string, env: Record<string, number[]> = {}): number {
   const js = code
-    .replace(/\bmax\s*\(/g, 'Math.max(')
-    .replace(/\bmin\s*\(/g, 'Math.min(')
+    .replace(/\b(?:_gpu_)?max\s*\(/g, 'Math.max(')
+    .replace(/\b(?:_gpu_)?min\s*\(/g, 'Math.min(')
     .replace(
       /\b([A-Za-z_]\w*)\.([xyzw])\b/g,
       (_m, name, comp) => `_env.${name}[${'xyzw'.indexOf(comp)}]`
@@ -103,16 +104,20 @@ describe('GPU Max/Min over a collection — REDUCES (was: returned a vector)', (
   );
 
   it('emits a pairwise fold of the elements, not the aggregate', () => {
-    expect(g(['Max', ['List', 1, 2, 3]])).toBe('(max(max(1.0, 2.0), 3.0))');
-    expect(w(['Min', ['List', 4, 1, 9]])).toBe('(min(min(4.0, 1.0), 9.0))');
+    expect(g(['Max', ['List', 1, 2, 3]])).toBe(
+      '(_gpu_max(_gpu_max(1.0, 2.0), 3.0))'
+    );
+    expect(w(['Min', ['List', 4, 1, 9]])).toBe(
+      '(_gpu_min(_gpu_min(4.0, 1.0), 9.0))'
+    );
     expect(g(['Max', ['List', 1, 2, 3], 5])).toBe(
-      '(max(max(max(1.0, 2.0), 3.0), 5.0))'
+      '(_gpu_max(_gpu_max(_gpu_max(1.0, 2.0), 3.0), 5.0))'
     );
   });
 
   it('a scalar-only Max/Min is unchanged (no parentheses, no reduction)', () => {
-    expect(g(['Max', 1, 2, 3])).toBe('max(max(1.0, 2.0), 3.0)');
-    expect(w(['Min', 1, 2, 3])).toBe('min(min(1.0, 2.0), 3.0)');
+    expect(g(['Max', 1, 2, 3])).toBe('_gpu_max(_gpu_max(1.0, 2.0), 3.0)');
+    expect(w(['Min', 1, 2, 3])).toBe('_gpu_min(_gpu_min(1.0, 2.0), 3.0)');
     expect(g(['Min', 5])).toBe('5.0');
   });
 
@@ -181,8 +186,14 @@ describe('GPU Max/Min over an EMPTY collection — the target NaN', () => {
       [['Max', ['List'], 5], '(5.0)'],
       [['Max', 5, ['List']], '(5.0)'],
       [['Min', ['List'], 5], '(5.0)'],
-      [['Max', ['List'], ['List', 1, 2, 3]], '(max(max(1.0, 2.0), 3.0))'],
-      [['Min', ['List'], ['List', 4, 1, 9]], '(min(min(4.0, 1.0), 9.0))'],
+      [
+        ['Max', ['List'], ['List', 1, 2, 3]],
+        '(_gpu_max(_gpu_max(1.0, 2.0), 3.0))',
+      ],
+      [
+        ['Min', ['List'], ['List', 4, 1, 9]],
+        '(_gpu_min(_gpu_min(4.0, 1.0), 9.0))',
+      ],
     ] as Array<[any, string]>) {
       expect(g(expr)).toBe(code);
       expect(w(expr)).toBe(code);
@@ -198,8 +209,8 @@ describe('GPU Max/Min over a declared vector operand', () => {
   const wv = (expr: any): string => wgsl.compile(cev.box(expr), NO_FOLD).code!;
 
   it('reduces a bare vector symbol over its swizzles', () => {
-    expect(gv(['Max', 'v'])).toBe('(max(max(v.x, v.y), v.z))');
-    expect(wv(['Max', 'v'])).toBe('(max(max(v.x, v.y), v.z))');
+    expect(gv(['Max', 'v'])).toBe('(_gpu_max(_gpu_max(v.x, v.y), v.z))');
+    expect(wv(['Max', 'v'])).toBe('(_gpu_max(_gpu_max(v.x, v.y), v.z))');
   });
 
   it.each([[[1, 2, 3]], [[-4, -1, -9]], [[0.5, 0.25, 0.75]], [[7, 7, 7]]])(
@@ -221,10 +232,10 @@ describe('GPU Max/Min over a declared vector operand', () => {
     // The operand source is repeated once per component, so a compound one is
     // hoisted: repeating it would be slow AND would re-advance `_gpu_rnd_draw`.
     expect(gv(['Max', ['Multiply', 2, 'v']])).toBe(
-      'vec3 _tv1 = 2.0 * v;\nreturn (max(max(_tv1.x, _tv1.y), _tv1.z));'
+      'vec3 _tv1 = 2.0 * v;\nreturn (_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z));'
     );
     expect(wv(['Max', ['Multiply', 2, 'v']])).toBe(
-      'var _tv1: vec3f = 2.0 * v;\nreturn (max(max(_tv1.x, _tv1.y), _tv1.z));'
+      'var _tv1: vec3f = 2.0 * v;\nreturn (_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z));'
     );
   });
 });
@@ -251,12 +262,12 @@ describe('GPU ElementMax/ElementMin stay COMPONENTWISE', () => {
   const V3 = ['List', 1, 2, 3];
   const W3 = ['List', 4, 0, 9];
 
-  it('a two-vector element-wise max is the native builtin, not a reduction', () => {
+  it('a two-vector element-wise max is the vector helper, not a reduction', () => {
     expect(g(['ElementMax', V3, W3])).toBe(
-      'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 0.0, 9.0))'
+      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 0.0, 9.0))'
     );
     expect(w(['ElementMin', V3, W3])).toBe(
-      'min(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 0.0, 9.0))'
+      '_gpu_min3(vec3f(1.0, 2.0, 3.0), vec3f(4.0, 0.0, 9.0))'
     );
     // …and the interpreter agrees it is element-wise.
     expect(ce.box(['ElementMax', V3, W3]).evaluate().toString()).toBe(

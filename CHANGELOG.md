@@ -1,3 +1,654 @@
+## 0.170.0 _2026-10-26_
+
+### Breaking Changes
+
+- **The package is ESM only, and Node 22.12 or later is required.** The UMD
+  builds (`dist/umd-min/*.cjs`), the `require` conditions of the `exports` map
+  and the `ComputeEngine` script-tag global are gone. A CommonJS consumer
+  keeps calling `require('@cortex-js/compute-engine')`: Node loads the ESM
+  entry through `require()` since Node 22.12 (and 20.19), and no entry has a
+  top-level `await`. `engines.node` is `>=22.12.0` (it was `>=22.3.0`). A
+  CommonJS Jest setup that imports the package loads it through Jest's own
+  module loader, not Node's, and needs a transform exception for the package
+  or an ESM-capable runner. The published files drop from 61 MB to 24 MB.
+- **A program that loads only `@cortex-js/compute-engine/core` has the
+  `javascript` and `interval-js` compilation targets.** The GPU targets
+  (`glsl`, `wgsl`) and the source-only `python` target are no longer bundled
+  in that entry (together 408 KB minified). To use one there, import the
+  target class from `@cortex-js/compute-engine/compile` and register it:
+  `ce.registerCompilationTarget('glsl', new GLSLTarget())`. Once the full
+  entry, `…/epsil` or the `epsil` CLI is loaded anywhere in the program, every
+  engine has all five targets, an engine made earlier from `…/core` included.
+  An unregistered target name fails with a message that lists the registered
+  ones.
+
+### Packaging
+
+- **One copy of each class across the entries.** Every entry except `runtime`
+  and `kernel-worker` is now built in one code-splitting invocation, so the
+  engine and the modules it shares with `…/numerics`, `…/latex-syntax` and
+  `…/interval` are emitted once into shared chunks. A host that imported
+  `…/core` and `…/compile` loaded two copies of the engine (`compile.js` was
+  3.5 MB on its own), and a `NumericValue` made from `…/numerics` failed the
+  engine's `instanceof` checks. One effect: a `JavaScriptTarget` imported from
+  `…/compile` compiled `n(n-1)(n-2)/6`, boxed by the main entry, to
+  `0.16666666666666666 * …` (`559.9999999999999` at `n = 16`); it is now
+  `(…) / 6`, which gives `560` (#480, reported by
+  [enumeratio](https://github.com/enumeratio)). `runtime` and `kernel-worker`
+  stay single self-contained files.
+- **`ce.registerCompilationTarget(name, target)` and
+  `ce.unregisterCompilationTarget(name)` are public.** The compile guide
+  documented the first under that name, but only the internal
+  `_registerCompilationTarget` existed.
+
+### Behavior Changes
+
+- **The code that a caller's operator `compile` handler writes no longer goes
+  to the worker pool** (ROADMAP CE-518, Tycho row 460). Such code can call a
+  function that exists only on the thread that compiled it, for example
+  `globalThis.myFloorIndex(…)`. The result had `shippable: true`, so
+  `broadcastAsync()` sent it to the workers, where every cell threw: each
+  value was `NaN`, and the batch still reported every cell as done. Now a
+  result with code from a caller handler has `shippable: false` and runs on
+  the calling thread (`reason: 'not-shippable'`). This also holds for a
+  handler attached in place to a built-in definition
+  (`ce.lookupDefinition('At').operator.compile = …`). The handlers of the
+  standard library are not affected. To send such code to the pool again, set
+  `compileShippable: true` on the definition, and give the functions that the
+  code calls in `compileHelpers` (see Features).
+- **A point parameter accepts a list that can hold both points and lists.**
+  With `k: (tuple<number, number>) -> number` and `y` declared
+  `list<P | list<P>>`, `type A = list<A | P>` or `type B = list<B> | P` (`P` is
+  `tuple<number, number>`), `k(y)` maps by the depth of the value: a point
+  gives a number, `[(1, 2), (3, 4)]` gives `[3, 7]` and `[[(1, 2)]]` gives
+  `[[3]]`. These calls were refused for every value. A value in which one list
+  holds both a point and a list, such as `[(1, 2), [(3, 4)]]`, still gives an
+  `incompatible-type` error (the compiled call gives `NaN`), and the type of the
+  call includes `error` for it.
+- **A point parameter accepts an empty list.** `k([])` is typed
+  `list<number>` (it was `number`, for the value `[]`), and a symbol declared
+  `list<never>` that holds `[]` gives `[]` (it was refused).
+- **A point beside an operand that may be a list is typed as a point or a list
+  of points** (CE-504). With `L: list<unknown>`, `(x, y)·(2·L[1])` was typed
+  `tuple<number, number>`, while `L := [[1, 2]]` gives `[(6, 8), (12, 16)]`; it
+  is now `tuple<number, number> | list<tuple<number, number> | list<any>>`. With
+  `b: broadcastable<number>`, `(x, y)·b` and `(x, y)/b` are
+  `broadcastable<tuple<number, number>>`, and `(x, y) + b` is
+  `broadcastable<error>`. A list of points beside a collection pairs each point
+  with an element: `p·t` with `t: tensor<integer>` is
+  `list<broadcastable<tuple<…>>>`; `p·v` with `v: vector<integer^2>` is
+  `list<tuple<…>>`. Compiled JavaScript gives the interpreter's value for a list
+  of points times or divided by a tensor of numbers (it gave wrong values for a
+  matrix), and refuses an operand whose cells may be points.
+- **A list of ranges of the same length is accepted as a matrix by the
+  linear-algebra functions.** `Determinant([1..2, 3..4])` is `-2`, and
+  `Inverse`, `MatrixMultiply`, `Dot`, `LinearSolve` and the other functions
+  whose parameter is a matrix read each range as a row; they refused the list
+  with `incompatible-type`. The list keeps its `list<range>` type, so
+  `[1..2, 3..4]^{-1}` and `\cdot` still apply element by element.
+- **A recursive alias of lists of points is accepted at a point parameter.**
+  With `A = list<A> | list<tuple<number, number>>` and `y: A`, `k(y)` maps by
+  the depth of the value (`[(1, 2), (3, 4)]` gives `[3, 7]`); it was refused.
+  A union of a list of points and a list of lists of points
+  (`list<P> | list<list<P>>`) also maps by the depth of the value, and the
+  compiled call of a point-or-point-list union now gives the same values as
+  the interpreter (it was refused).
+- **An element-wise operation over an operand of type `unknown` holds a ragged
+  list or a point** (CE-502). With `L: list<unknown>`, `2·L[1]` was typed
+  `broadcastable<number>`, which does not hold `[[1], [2, 3]]` or `(1, 2)` in
+  `L[1]`; it is now `list<list<any> | number | tuple> | number | tuple`. The
+  same holds for `k(L[1])` with `k: (real) -> real`, and for a call of an
+  undeclared function. A comparison over such an operand can be one boolean
+  (`[1, 2] = L[1]` compares two whole lists). Compiled code is unchanged. A
+  valueless symbol used as a number is still inferred `number`.
+- **A function with an inferred signature, called with a string or a boolean,
+  is typed from its body** (CE-490). With `f := x ↦ (-x, x)`, `f("s")` was
+  typed `tuple<number, number>` and is `error`; with `g := x ↦ x + 1`,
+  `g("s")` was `number` and is `error`.
+- **A parameter used in arithmetic before an index read has a sound signature**
+  (CE-503). `(P, t) ↦ t·P/(P[1] − 1)` was `(P: unknown, t: unknown) -> never`
+  and is `(P: indexed_collection<number>, t: unknown) -> list<number>`;
+  applied to `([3, 2], 2)` it gives `[3, 2]`, not a list of errors.
+- **A product of a list of points and a point is one
+  `no-product-between-points` error at evaluation**, as it already was when
+  boxed (CE-491). With `pd := x ↦ x·x[1]`, `pd([(3, 2), (1, 4)])` was a list of
+  two errors.
+- **The terms of a sum or a product with a residue class that are not classes
+  are combined by `evaluate()`** (CE-507). `x + x + ResidueClass(1, 5)`
+  evaluates to `2x + ResidueClass(1, 5)` (it was returned as written; only
+  `simplify()` combined it), and `(√2 + π + ResidueClass(1, 5)).N()` is
+  `4.5558… + ResidueClass(1, 5)` (the two floats were left apart). The rules for
+  the classes themselves do not change.
+- **The signatures of the arithmetic operators no longer name `residue`.**
+  `Multiply` is `(number*) -> number` again (it was
+  `((number | residue)*) -> number`), and `Divide`, `Negate`, `Power`, `Root`,
+  `Sqrt`, `Square` and `Subtract` lost their `residue` arm in the same way. They
+  accept a residue class, and a value of any kind that has the matching hook, by
+  a rule that reads the declared kinds, not by their signature. A host that
+  reads these signature strings sees the change, and an `incompatible-type`
+  error of these operators no longer names `residue` as an expected type. An
+  engine built without the `ResidueClass` definition no longer accepts a
+  `residue` operand at these operators.
+- **Two values of a kind written next to each other are a product**, as two
+  residue classes are: with `GF8` a head of the kind type `gf8`,
+  `\operatorname{GF8}(3)\operatorname{GF8}(5)` parses to a `Multiply`, not to a
+  `Tuple`. A list of such values is typed `list<gf8^2>` (it was `list<gf8>`).
+- **`Sum`, `Product` and `Reduce` over residue classes are typed `residue`.**
+  `Sum([c1, c2])` was typed `number` and `Map(Negate, [c1, c2])` `vector<2>`;
+  they are `residue` and `list<residue^2>`.
+- **A measurement is typed `measurement`, and a quantity is typed `quantity`**
+  (CE-507). `Measurement(2.5, 0.1)` was typed with the type of its nominal
+  (`real`; `integer`, `rational` or `complex` for other nominals), and
+  `Quantity(2, m)` was typed `value`. `measurement` and `quantity` are new
+  primitive types of the type language. They are kind types: each one is a
+  subtype of `value` and is disjoint from the number types, so
+  `ce.type('measurement').matches('real')` is `false`. A host that compares type
+  strings sees the change, and a host that declared a type named `measurement`
+  or `quantity` must rename it. The result type of an operator with a
+  measurement operand changes in the same way: `Floor(2.5 ± 0.1)` was typed
+  `integer` and is `measurement | number` (a propagated uncertainty of 0 gives a
+  plain number), `2 + (2.5 ± 0.1)` is `measurement`, and `Max(2 ± 0.1, 2)` is
+  `integer<2..2> | measurement`.
+- **A symbol or a function with a body that is declared over a number type
+  refuses a measurement.** With `s: real` (or `number`, `integer`),
+  `ce.assign('s', Measurement(2, 0.1))` throws; it assigned the measurement.
+  With `f: (real) -> real` and `f := x ↦ x^2`, `f(2 ± 0.1)` is an
+  `incompatible-type` error; it was `4 ± 0.4`, from a body that the canonical
+  form could have changed (`x/x` is `1` for a `real` parameter). Declare the
+  parameter `real | measurement` to accept one. An operator of your own declared
+  over `real` with an `evaluate` handler (`h`) now leaves `h(5 ± 0.1)`
+  unevaluated: the measurement does not know the derivative of `h`, so it does
+  not call the handler (it gave `2 · (5 ± 0.1)` for
+  `evaluate: ([x]) => x.mul(2)`). An operator that handles a measurement itself
+  names `measurement` in its parameter type, and its handler runs.
+- **A quantity is refused at every operator that does not accept it by type.**
+  The arithmetic operators, the comparisons, `Max`, `Min`, `Clamp`, `Sort`, the
+  operators with a `value` parameter (`UnitConvert`, `List`), the 24
+  trigonometric functions and `Abs` accept a quantity. Every other operator
+  gives an `incompatible-type` error at boxing: `Round(2.7 m)`, `Floor(2 m)`,
+  `Sign(2 m)`, `Exp(2 m)`, `Hypot(2 m, 3)` and `InverseHaversine(2 m)` stayed
+  unevaluated or gave a wrong value, and `Mean([2 m, 4 m])` stayed unevaluated.
+- **The trigonometric functions and `Abs` name `quantity` in their signatures.**
+  The 24 trigonometric, hyperbolic and inverse functions (`Sin` to `Arcsch`) are
+  `(complex | quantity) -> number` (a function that accepted `infinity` or
+  `signed_infinity` keeps that arm), and `Abs` is
+  `(complex | infinity | quantity) -> number`. So `Arctan(2 deg)` folds the
+  angle to `Arctan(π/90)` as the other functions do (it stayed `Arctan(2 deg)`),
+  `Abs(-2 m)` is `2 m`, typed `quantity` (it stayed unevaluated, typed `value`),
+  and `Sin(2 m)` is typed `number` (it was `value`) and stays unevaluated. The
+  `incompatible-type` error of these functions names the `quantity` arm as an
+  expected type (`Sin("a")` expects `complex | quantity`), and so does the type
+  of `Derivative(Sin)`.
+- **A measurement propagates its uncertainty through every operator with a known
+  derivative, and stays unevaluated where the rule has no answer.** The rule is
+  `f(a) ± |f′(a)|·σ`, and the quadrature `√(Σ |∂f/∂xᵢ|²·σᵢ²)` for several
+  uncertain operands, with the modulus of each partial derivative. A propagated
+  uncertainty of 0 gives the bare value (`Cos(0 ± 0.1)` is `1`, as before). The
+  rules by operator:
+  - A step function (`Floor`, `Ceil`, `Round`, `Truncate`, `Sign`, `Heaviside`,
+    `PrimePi`) of a real measurement gives the bare value of the function at the
+    nominal: `Floor(2.5 ± 0.1)` is `2`. When a jump of the function lies within
+    one σ of the nominal, the call stays unevaluated: `Floor(2.95 ± 0.1)` was
+    `2`. A complex nominal at `Sign` stays unevaluated.
+  - `Mod` and `Fract` propagate with the slope between their jumps:
+    `Mod(5 ± 0.1, 3)` is `2 ± 0.1` (it was `2`), and `Mod(7, 3 ± 0.1)` is
+    `1 ± 0.2`. A jump within one σ leaves the call unevaluated.
+  - An infinite value or an infinite derivative at the nominal leaves the call
+    unevaluated: `Sqrt(0 ± 0.1)` was `0`, `Arcsin(1 ± 0.1)` was `π/2`;
+    `Ln(0 ± 0.1)`, `Gamma(0 ± 0.1)` and `Tan(π/2 ± 0.1)` are unevaluated too. A
+    float nominal near a pole (`Tan(1.5707963 ± 0.1)`) gives the large finite
+    value with its large uncertainty.
+  - A real nominal whose value is not real keeps an uncertainty:
+    `Arccos(2.5 ± 0.1)` is `1.5668i ± 0.0436` (it was the bare `1.5668i`), and
+    `Ln(-1 ± 0.1)` is `πi ± 0.1`.
+  - `Hypot`, `Degrees`, `Haversine`, `InverseHaversine`, `Factorial`, `Log` with
+    an uncertain base, `Arctan2`, `Root` with an uncertain index, `Norm` with an
+    uncertain order, `Round` with an uncertain step, `PreIncrement`,
+    `PreDecrement`, and the multilinear operators `Dot`, `Cross`,
+    `MatrixMultiply`, `HadamardProduct` and `Trace` propagate every uncertain
+    operand. `Dot([2.5 ± 0.1, 2, 3], [1, 2, 3])` is `15.5 ± 0.1`.
+  - `Binomial`, `Choose`, `Pochhammer`, `Determinant`, `Inverse`, `Eigenvalues`,
+    `ContinuedFraction`, `ComplexRoots`, `Arg`, `Argument` and `BaseForm` stay
+    unevaluated with a measurement operand, and so does an operator whose
+    derivative the engine does not know (`Zeta`, `Beta`, the order of
+    `BesselJ`). `Binomial(5 ± 0.1, 2)` was `(5 ± 0.1)·((5 ± 0.1) − 1)/2` and
+    `Determinant([[1 ± 0.1, 2], [3, 4]])` was `-2 ± 0.4`: these formulas use the
+    same measurement more than once, and the arithmetic of measurements counts
+    each occurrence as an independent error.
+  - `Mean`, `Median`, `Variance`, `PopulationVariance`, `StandardDeviation` and
+    `PopulationStandardDeviation` of a list that holds measurements give the
+    statistic of the nominals with the propagated uncertainty of the independent
+    data. The other statistics (`Skewness`, `Kurtosis`, …) stay unevaluated.
+  - `Real`, `Imaginary`, `Conjugate` and `Abs` keep the uncertainty of the
+    operand: `Abs(0 ± 0.1)` is `0 ± 0.1`.
+- **A comparison of measurements uses the nominals.** The uncertainties take no
+  part: `1 ± 0.1 = 1 ± 0.5` is `True`, as before.
+  - `Max` and `Min` decide by nominal and keep the first operand of a tie:
+    `Max(1 ± 0.1, 1 ± 0.5)` is `1 ± 0.1` (it stayed unevaluated), and
+    `Max(2 ± 0.1, 2)` is `2 ± 0.1` (it was `2`).
+  - `Clamp(x, lo, hi)` returns `x` when `x` equals a bound:
+    `Clamp(3 ± 0.1, 0, 3)` is `3 ± 0.1` (it was `3`).
+  - `ElementMax` and `ElementMin` compare as `Max` and `Min` do.
+  - A measurement with a complex nominal has no order: `(2 + 3i) ± 0.1 < 3` is
+    `False`, as `2 + 3i < 3` is, and `Max` of it stays unevaluated. Its equality
+    is the equality of the nominal: `Equal((2 + 3i) ± 0.1, 2 + 3i)` is `True`.
+  - A measurement is not exact: `Max(3/2 ± 1/10, Indeterminate)` is `NaN`, not
+    `Indeterminate`.
+- **A comparison of quantities converts to the finer unit and uses the engine
+  tolerance there**, also in `Max`, `Min`, `Clamp`, `ElementMax`, `ElementMin`
+  and `Sort`. `Max(1 m, 1.000000000001 m)` is `1 m`: the extrema compared with a
+  tolerance of zero. The tolerance applies in the finer of the two units, so
+  `Equal(1 m, 100.0000000001 cm)` stays `False`. A quantity with a magnitude
+  that is a float is not exact: `Max(1.5 m, Indeterminate)` is `NaN`.
+- **The methods `.add()`, `.mul()`, `.div()`, `.pow()`, `.sub()` and `.sqrt()`
+  combine measurements and quantities** as the evaluation does. `M.add(M2)` for
+  `M = 3 ± 0.1` and `M2 = 2 ± 0.1` is `5 ± 0.141` (it was the sum
+  `(3 ± 0.1) + (2 ± 0.1)`), and `(2 m).add(30 cm)` is `2.3 m` (it was
+  `30 cm + 2 m`). `.neg()` does not call the `negate` hook of a kind: `c.neg()`
+  is `Negate(c)`, and `Negate(c).evaluate()` negates the value.
+- **`.re` and `.im` of a measurement are the parts of its nominal**, as before:
+  `Measurement(2.5, 0.1).re` is `2.5`. The numeric facts of a measurement
+  (`isPositive`, `sgn`, `isInteger`) are `undefined`; they were the facts of the
+  nominal (`Measurement(4, 0.1).isInteger` was `true`). So the canonical forms
+  of the numbers do not apply to a measurement.
+- **The uncertainties of several occurrences of one measurement are
+  independent.** The engine does not know that two occurrences of `M` are the
+  same measurement: with `M = 1 ± 0.1`, `Sin(M)^2 + Cos(M)^2` simplifies to
+  `1 ± 0.13` (it simplified to `1`), and `M − M` is `0 ± 0.141`. The operators
+  that use an operand more than once in their own formula (`Binomial`,
+  `Determinant`, …) stay unevaluated for this reason.
+- **A physical constant opens the quantity rules only when it is read.** The
+  value of `SpeedOfLight` and of the other physical constants is a quantity. An
+  engine that never makes a quantity does not pay the cost of the quantity
+  rules: the constants made while the libraries load do not count, and each
+  constant makes its value again when it is first read.
+- **Compiling an expression with a measurement or a quantity fails with a
+  message that names the kind type** ("holds a value of the kind type
+  'measurement'"). It failed before with "Could not compile `Measurement`".
+  Neither kind has a compiled representation.
+
+### Features
+
+- **An operator `compile` handler can give the functions its code calls**
+  (ROADMAP CE-518). The new `compileHelpers` field of an operator definition
+  maps a name to a function. The engine copies the source of each function
+  into the compiled code, as `const <name> = (<source>);`, so the code
+  carries its helpers to a worker of the pool and to a stored result. With
+  `compileShippable: true`, the result can then run on the pool:
+
+  ```ts
+  ce.declare('Wrap', {
+    signature: '(number, number) -> number',
+    compileShippable: true,
+    compileHelpers: { wrapIndex: (i, n) => ((i % n) + n) % n },
+    compile: (args, compile, { language }) =>
+      language === 'javascript'
+        ? `wrapIndex(${compile(args[0])}, ${compile(args[1])})`
+        : undefined,
+  });
+  ```
+
+  A helper must not read a variable from outside its own body, and its name
+  is an identifier that does not start with `_`. A built-in function, a bound
+  function or a method has no source that can be copied, and the declaration
+  refuses it. The compile contract of a value kind has the same field,
+  `arithmetic.compile.type.helpers` (ROADMAP CE-507.1); `hostNames` there now
+  names only the functions of the host that the code does not carry.
+- **`broadcastAsync()` reports the cells that threw.** The new `failed` field
+  of `BroadcastAsyncResult` counts the cells, among the first `done`, whose
+  evaluation threw, on the calling thread and on the workers. The value of
+  such a cell is `NaN`, as for a cell whose value is not a number, so this
+  count is the only way to tell the two apart. `done` keeps its meaning: a
+  cell that threw was evaluated.
+- **An operator can declare the arithmetic of the values it constructs: a value
+  kind** (ROADMAP CE-507,
+  [#477](https://github.com/cortex-js/compute-engine/issues/477)). With `MyMod`
+  declared `(integer, integer) -> residue`, `x + MyMod(2, 4) + MyMod(1, 4)` and
+  `MyMod(2, 4) - MyMod(2, 4)` stayed as they were: only `ResidueClass` values
+  were combined, and no definition could give the arithmetic of another head.
+  The new `arithmetic` field of an operator definition gives it:
+  - The field (`ArithmeticDefinition`) has the hooks `add` and `multiply` (they
+    answer folds, `KindFold`: the operands they combined and the value they
+    make), `negate`, `divide`, `power` (also called for `Sqrt`, `Root` and
+    `Square`), `compare` (one order for the comparisons, `Max`, `Min`, `Sort`,
+    `Clamp` and the methods `isEqual()`, `isLess()`, …), `apply` (called in
+    place of the handler of another operator that accepted the value as a
+    number), and the fields `admittedAs`, `resultType` and `compile`. The new
+    public types are `ArithmeticDefinition`, `KindOperands`, `KindOperand`,
+    `KindFold`, `ArithmeticContext` and `ArithmeticCompile`. With `MyMod`
+    declared with `add`, `multiply` and `negate`,
+    `x + MyMod(2, 4) + MyMod(1, 4)` is `x + MyMod(3, 4)`, and
+    `MyMod(2, 4) - MyMod(2, 4)` is `MyMod(0, 4)`, in `evaluate()` and
+    `simplify()`.
+  - The result type of an operator with an `arithmetic` field must be a **kind
+    type**: `residue`, or a nominal type defined as exactly `value` and declared
+    with `{ mint: false }`, such as
+    `ce.declareType('gf8', 'value', { mint: false })`. Such a nominal type is a
+    subtype of `value` and `expression`, and is disjoint from every other type,
+    as `residue` is: the engine keeps the number rules (`x - x = 0`, `x/x = 1`,
+    like terms) away from its values and from a symbol declared with it. Any
+    other result type (`integer`, `value`, `residue | integer`, a nominal type
+    with another definition) is refused when the operator is declared, with an
+    error that names the rule.
+  - The `mint` option of `ce.declareType()` is public. `{ mint: false }`
+    declares a type without a constructor of the same name; a kind uses it,
+    because its values are made by its own operator.
+  - `admittedAs: 'real'` or `'number'` lets every operator that accepts a `real`
+    (or a `number`) accept the values, and `apply` then computes the result: a
+    measurement kind can propagate its error through `Sin` and `Floor`.
+    `admittedAs: 'none'` (the default, and the rule of `residue`) admits the
+    values at the arithmetic operators only.
+  - `compile` gives a compiled representation to a kind type (`compile.type`)
+    and to the literals of a head (`compile.value`). Code compiled with it
+    reports the kind types in the new `CompilationResult.valueKinds`, and the
+    bindings of a kind type in `StoredEntryPlan.kinds`; it is returned without
+    the number conversion of `run()`, and `createJavaScriptRuntime().load()`
+    refuses it, because the run-time check of a kind is a function of the host.
+    Without `compile`, an expression with a value of a kind declines, as a
+    residue class does.
+
+  `ResidueClass` now declares its arithmetic with this field. The design, which
+  also covers `Quantity`, `Measurement` and an interval value
+  ([#416](https://github.com/cortex-js/compute-engine/issues/416)) in later
+  phases, is `docs/plans/2026-10-26-value-kinds.md`. The guide is
+  `doc/06-guide-augmenting.md`, "Declaring a Value Kind"; the type rules are in
+  `doc/08-guide-types.md`, "Kind Types".
+- **`Measurement` and `Quantity` are value kinds** (ROADMAP CE-507 phase 2,
+  CE-508, [#477](https://github.com/cortex-js/compute-engine/issues/477)). Their
+  arithmetic, their order and their propagation of an uncertainty are now the
+  hooks of their `arithmetic` field, and the operators no longer test the names
+  `Measurement` and `Quantity`. The visible changes are listed under Behavior
+  Changes and Resolved Issues.
+  - `Measurement` has the kind type `measurement` and is accepted where a number
+    is accepted (`admittedAs: 'number'`). An operator that accepted the
+    measurement as a number calls the `apply` hook of the kind, which computes
+    the value at the nominal and propagates the uncertainty.
+  - `Quantity` has the kind type `quantity` and is accepted only by the
+    arithmetic operators, the comparisons, the operators that name `quantity`
+    and the operators with a `value` parameter (`admittedAs: 'none'`). Its `add`
+    hook makes one sum for each physical dimension, in the unit with the largest
+    scale, and reads how each term was written to add temperatures with an
+    offset: `20 degC − 5 degC` is `15 K`, and `20 degC + 5 degC` is `571.3 K`,
+    as before.
+  - `ArithmeticDefinition.compare` can answer `'unordered'`: the two values are
+    known and have no order (a measurement with a complex nominal). The order
+    operators then answer `False`, `Equal` and `NotEqual` ask the `eq` handlers,
+    and `Max`, `Min` and `Sort` stay unevaluated.
+  - `ArithmeticDefinition.isExact(value)` says whether a value of the kind is
+    exact, for the rule that an inexact operand turns `Indeterminate` into
+    `NaN`. Absent: the values are exact.
+  - `ArithmeticDefinition.isNaN(value)` says whether a value of the kind stands
+    for no value, as the number `NaN` does (a measurement with a `NaN` nominal,
+    a quantity with a `NaN` magnitude). Such a value follows the rule of `NaN`:
+    `Max`, `Min`, `ElementMax`, `ElementMin` and `Clamp` give `NaN`, the order
+    operators give `False`, and `Equal` gives `False`, also for the value and
+    itself. Absent: no value of the kind is `NaN`.
+  - `KindOperands.written` holds the operands as they were written on every
+    route: under `simplify()`, the operands before their simplification. So a
+    kind whose `negate` gives a value and whose `add` reads `Negate(b)` in
+    `written` gives the same difference under `evaluate()`, `.N()` and
+    `simplify()`.
+  - `ArithmeticDefinition.numericValue(value)` gives the number that a value of
+    the kind stands for. `re`, `im`, `bignumRe`, `bignumIm` and `valueOf()` of
+    the value read it. The fact queries (`isPositive`, `sgn`, …) do not.
+  - `ArithmeticContext.tolerance` gives the `compare` hook the tolerance of
+    `.is()`: the `tolerance` argument of the call, or `engine.tolerance`. So
+    `M.is(2.6, 0.2)` for `M = 2.5 ± 0.1` uses the tolerance `0.2`. It is
+    `undefined` for the other comparisons.
+
+  The rules are in `doc/06-guide-augmenting.md`, "Measurements and Quantities";
+  the decisions are in section 13 of `docs/plans/2026-10-26-value-kinds.md`.
+- **`factor()` accepts `variable` and `generator` options, and a new
+  `factorDetailed()` returns a structured result.** `factor(p, { variable,
+  generator })` factors over an explicit number field, as
+  `Factor(p, x, generator)` does. `factorDetailed()` returns the exact factors
+  with their multiplicities, the scalar content, whether the factorization is
+  complete, and the reason and stage of a refusal; with `statistics: true` it
+  also returns the work counts of each step. Both are exported from the main
+  and the `core` entry points. No MathJSON operator is added.
+- **Number-field factoring lifts at unramified prime ideals of any residue
+  degree.** It used to need an inert prime, and ten inputs of the extended
+  number-field corpus were refused because none was found. The factors are
+  recovered with an exact lattice reduction and the recombination is
+  certified. A weighted scaling of the generator and the variable and tighter
+  bounds on the coefficients of a divisor reduce coefficient growth. When the
+  coefficients are rational, the norm fallback skips the unshifted norm,
+  which is always repeated. The statistics keep the reason the direct method
+  failed before a norm fallback.
+- **Number-field factoring reads `x^n` monomials directly** when it converts an
+  expanded polynomial of high degree, and no longer refuses such an input
+  because the conversion went over its budget.
+
+### Resolved Issues
+
+- **A coordinate of a list of points inside `PointList` compiles to a list**
+  (CE-514, Tycho row 447). On the `javascript` target,
+  `(v ↦ PointList(PointY(v), PointX(v)))([(1, 2, 3), (4, 5, 6)])` compiled to
+  `[NaN, NaN]`; it now gives `[[2, 1], [5, 4]]`, as `evaluate()` does. The
+  same holds for a named function called with a list of points. A
+  `PointX`/`PointY`/`PointZ` component whose operand is not provably one
+  point is a zip source when its value is an array and one slot otherwise,
+  decided at run time. The type of the call is now a list of points too:
+  `f(L)` for a list `L` of two points with integer coordinates is a
+  `list<tuple<integer, integer>^2>`, where it was `tuple<unknown, unknown>`.
+- **A call of a function whose signature was inferred is typed from its
+  body** with each parameter typed as its argument, when the type inferred
+  for the result does not describe the call (CE-514). The result inferred for
+  `v ↦ PointList(PointY(v), PointX(v))` is one point, and a call with a list
+  of points evaluates to a list of points. The call was typed one point; it
+  is now typed from the body. This applies only when the inferred result is
+  not a scalar and the walk of the body bounded by it gives no type, and
+  only for arguments that are numbers or lists of numbers or points. A result
+  type that the host declares, or that the literal writes, stays the bound,
+  and a function that reads a symbol from outside its parameters keeps its
+  inferred result, so a call after that symbol changes type is still refused
+  (CE-473).
+- **Five shader fixes found by comparing WebGL2 and WebGPU on a GPU**
+  (CE-509 to CE-513, Tycho rows 454 to 458).
+  - On `wgsl`, `tanh` calls a helper that answers `sign(x)` when
+    `|x| > 10`. On WebGPU over Metal the built-in returned 0 at x = 44 and NaN
+    from x = 45, where the value is 1. `Coth` is `1.0 / tanh(x)` on both
+    targets: the quotient `cosh(x) / sinh(x)` was NaN above about 89 in f32.
+  - On `wgsl`, a constant above the f32 maximum (`\exp(100) + x`,
+    `10^{40} + x`) is written `_gpu_inf()`, and a constant that rounds to the
+    maximum is written as the maximum. WebGPU rejected the whole shader for
+    such a literal.
+  - On `glsl`, `Mod` stays in the range of the divisor. The built-in `mod`
+    gave `mod(1e8, 3.0) = -2` and `mod(-1e6, 1000.0) = 1000` on WebGL2 over
+    ANGLE Metal; they are now 1 and 0. On both targets `Mod(x, 1)` is
+    `fract(fract(x))`, so a tiny negative `x` gives 0 instead of 1.0.
+  - On both targets, `Mod` calls a `_gpu_fmod` helper, which receives each
+    operand once. On `wgsl` the inline formula wrote the dividend three times
+    and the divisor five times.
+  - On `wgsl`, a piecewise arm that calls a user function, or a special
+    function with a loop (`Zeta`, `HurwitzZeta`, `PolyLog`, `LerchPhi`,
+    `BesselJ`, `Mandelbrot`, …), becomes a branch of an `if` statement.
+    `select` computes both arms: with `g(x) = \sum_{i=1}^{300}\cos(ix)`,
+    `\{x<0 : g(x), 0\}` took 5.05 ms on WebGPU against 2.36 ms with an `if`.
+- **`sin`, `cos` and `tan` of a quotient `π·u / d` compile to the exact
+  half-turn forms** (`sinpi`, `cospi`, `tanpi`) on every target, as `π·u`
+  already did. `\sin(2\pi s / P)` at `s = 2`, `P = -2` is now exactly 0 in the
+  compiled code; it was `2.4e-16` in JavaScript, so a test `\sin(…) > 0` was
+  true in the compiled code and false in the interpreter. `e^{i\pi u/d}` and the hyperbolic functions of `i\pi u/d`
+  take the exact forms too.
+- **On `wgsl`, a piecewise branch that draws a random value no longer
+  compiles** (it is evaluated by the interpreter instead). WGSL `select`
+  computes every branch, so a draw in a branch that was not taken still
+  advanced the random stream and changed every later draw in the shader.
+  `glsl` is unchanged: its `?:` evaluates only the branch that is taken.
+- **On `glsl`, `Mod` of a scalar by a vector compiles** (`Mod(1, v)` broadcasts
+  the scalar); the built-in `mod` has no such overload, and it was refused.
+- **On `glsl` and `wgsl`, `Sin`, `Cos`, `Sec`, `Csc`, `Cot`, `Sign`,
+  `Smoothstep` and `Heaviside` give NaN when the operand is NaN** (CE-520), as
+  the `javascript` target does. On Apple GPUs the built-ins `sin`, `cos`,
+  `sign` and `smoothstep` of a NaN gave 0 (so `\sec x` gave +∞), and the GLSL
+  `Heaviside` gave 0.5. They now call helpers that test the bit pattern of the
+  operand, as `Max` and `Min` do (CE-519). `\tan(\pi x)` on the shader
+  targets is now +∞ at every pole, as on the other compiled targets; it was
+  +∞ or −∞ depending on the sign of the zero cosine, and not the same on
+  WebGL2 and WebGPU.
+- **On `glsl` and `wgsl`, `Max`, `Min`, `Clamp`, `ElementMax` and
+  `ElementMin` give NaN when an operand is NaN** (CE-519, Tycho row 465), as
+  the interpreter and the `javascript` target do. The shader built-ins return
+  the other operand on Apple GPUs, so `\max(0, \sqrt{1 - x^2})` at `x = 2`
+  was 0. The targets now call helpers that test the bit pattern of each
+  operand (a test `a != a` was removed by the compiler on WebGPU over Metal)
+  and return the NaN operand itself. `Clamp(x, lo, hi)` with `lo > hi` now
+  gives `hi` on `glsl` as on the other targets (the built-in `clamp` left it
+  undefined). A vector `Clamp` with scalar bounds, and an `ElementMax` or
+  `ElementMin` of a vector and a scalar in any position, now compile on both
+  targets: the scalar is broadcast, as in the interpreter. They were refused
+  on `wgsl`, and on `glsl` when the scalar came first.
+- **A part of a loop body printed or evaluated outside its operator keeps its
+  index** (CE-498). `ReplaceAt([1,2,3], i, 9)` taken from
+  `Loop(…, Element(i, Range(1, 3)))` printed an `incompatible-type` error, with
+  `i` read as the imaginary unit; it now prints `ReplaceAt([1,2,3], i, 9)`.
+- **An undeclared recursive pair that builds a list is typed `-> list<number>`
+  in every install order** (CE-38). Assigning `G := (n, K) ↦ F(n, K)` before
+  `F` gave `-> list<any>`.
+- **A symbol declared `list<residue>` is accepted by the arithmetic operators**
+  (CE-507). With `L: list<residue>`, `L + L`, `-L` and `L · 2` were
+  `incompatible-type` errors when boxed, while a list literal of classes was
+  accepted. They are typed `list<residue>` and are computed element by element.
+- **A boxed function literal mapped over residue classes keeps the rules of the
+  classes** (CE-507).
+  `ce.function('Map', [ce.box(x ↦ x/x), [ResidueClass(2, 4), ResidueClass(3, 4)]])`
+  gave `[1, 1]`: the body was simplified to `1` before the type of the elements
+  was known, and 2 has no inverse modulo 4. It now gives
+  `[ResidueClass(2, 4) / ResidueClass(2, 4), ResidueClass(1, 4)]`, as `ce.box()`
+  and `ce.parse()` of the same expression do.
+- **Measurements and quantities: wrong values and wrong types** (CE-508, fixed
+  by making `Measurement` and `Quantity` value kinds, CE-507).
+  - `Quantity(2, m) − Quantity(2, m)` simplifies to `0 m`. It simplified to the
+    number `0`, without the unit.
+  - `Quantity(2, m) + Quantity(30, cm)` simplifies to `2.3 m`, and
+    `Quantity(2, m) · Quantity(3, s)` to `6 m·s`. `simplify()` returned them
+    unchanged.
+  - `x + Quantity(2, m) + Quantity(3, m)` evaluates to `x + 5 m`. It stayed
+    unchanged, because one operand was not a quantity.
+  - `Measurement(2, 0.1) − Measurement(2, 0.1)` simplifies to
+    `Measurement(0, 0.141…)`, as it evaluates. It simplified to `0`.
+  - `ResidueClass(2, 5) + Quantity(3, m)` is typed `quantity | residue`. It was
+    typed `list<list<any> | residue> | residue`.
+  - A comparison that is not decided keeps the measurement:
+    `Less(Measurement(2, 0.1), x)` evaluates to itself. It evaluated to
+    `Less(2, x)`, without the uncertainty, and `Equal` did the same.
+  - A measurement with a complex nominal at an operator whose parameter is real
+    is an `incompatible-type` error at evaluation:
+    `ContinuedFraction((2 + 3i) ± 0.1)` was `[2]`, and `Floor`, `Mod`, `Hypot`,
+    `Degrees` and the other operators with a real parameter read the real part.
+  - A unit is no longer read as a free symbol:
+    `InverseHaversine(Quantity(2, m))` evaluated to `2·arcsin(√2·√m)`. A
+    quantity at an operator that does not accept it is now an
+    `incompatible-type` error at boxing.
+  - `Measurement(2, 0.1).isLess(3)` is `true` and `.isEqual(2)` is `true`. The
+    methods answered `undefined`, while `Less` and `Equal` answered `True`.
+  - A complex nominal keeps its uncertainty through every operator with a
+    derivative: `Arctan((2 + 3i) ± 0.1)` is `(1.4099 + 0.2291i) ± 0.0079`. The
+    uncertainty was dropped for some operators and kept for others, depending on
+    how the derivative was printed.
+  - `Log2(Measurement(2 + 3i, 0.1))` is `(1.8502 + 1.4179i) ± 0.0400`. It was
+    `1`, a wrong value: the logarithms read only the real part of a complex
+    nominal.
+  - Two uncertain complex operands add the moduli of their contributions:
+    `Measurement(1, 0.1) · Measurement(i, 0.1)` is `i ± 0.1414`. The two
+    contributions cancelled, and the result was the bare `i`.
+  - `Power(-2, Measurement(2, 0.1))` is `4 ± 1.3`, propagated with the principal
+    logarithm of the base. It was the exact `4`, without an uncertainty. An
+    uncertain exponent of the base `0` leaves the power unevaluated.
+
+## 0.169.2 _2026-10-26_
+
+### Behavior Changes
+
+- **An open record type is no longer a dictionary of its listed field types**
+  (CE-4, CE-10). `record{a: integer}` was a subtype of `dictionary<integer>` and
+  is not now, because the record can hold other fields; the relation is now
+  transitive. A dictionary value such as `{a: 1}` still matches
+  `dictionary<integer>`. A read by a key known only at evaluation on an open
+  record is typed `any`.
+- **A declared type with `unknown` at a nested position refines from each
+  assignment** (CE-3.5): `t: tuple<unknown, integer> := ("x", 2)` was
+  `tuple<unknown, integer>` and is `tuple<string, integer>`.
+- **The static type of a block local no longer depends on statement order**
+  (CE-43): `mutate(v); v = [1.5, 2]` typed `v` as `list<real>`; it is
+  `vector<real^2>`, as in the other order. An assignment inside a `match` case
+  or a `while let` body widens the local:
+  `let xs = [1,2,3]; while let [h, ...] = xs { xs = Rest(xs) }; xs` was typed
+  `vector<integer^3>` for the value `[]`, and is `list<integer>`.
+- **A `let`-bound function literal's effects follow a later conformance**
+  (CE-62.2), and so do its callers.
+- **A numeric tuple at a scalar parameter is a tuple of numbers** (CE-47):
+  `h((1, 2))` with `h := x ↦ 2x` was `any` and is `tuple<number, number>`. A
+  tuple with a tuple or string component is `any`; `h(((1, 2), 3))` was typed
+  `number` for the value `((2, 4), 6)`.
+- **`Map` over elements whose depth the type does not state admits nested
+  lists**: `Map(k, L)` with `k: (real) -> real` and `L: list<unknown>` (or
+  `list<any>`, `list<list<unknown>>`) was typed `list<real>`, which did not hold
+  a ragged or nested element, and is `list<indexed_collection<any> | real>`. An
+  operand typed `any` at a declared scalar parameter types the same on the box
+  and derived routes (CE-485).
+- **A nominal list-of-points type is not read through its definition** (CE-488):
+  `k(x)` with `k: (tuple<number, number>) -> number` and `x` of a nominal
+  `list<tuple<…>>` type was typed `list<number>` and is `error`, as its value
+  is.
+- **An access proved to be out of range is typed by its marker alone**
+  (CE-42.3): `At(["a","b"], 9)` was `missing | string` and is `missing`;
+  `M[7][1]` over a matrix was `integer | nan` and is `nan`. Arithmetic over a
+  proved-absent row or point is `Missing`.
+- **A local declared `any` keeps its type** (CE-444), and an operand typed `any`
+  at a generic collection parameter no longer fixes the element type from the
+  other operands: `ReplaceAt(ys, 2, "z")` with `ys: any` was `list<string>` and
+  is `list<any>`.
+- **An absent value of a symbol declared `any` gives `NaN` in arithmetic** on
+  every route: with `p: any` assigned `Missing`, `p + 1` was `Missing` and is
+  `NaN`, as `subs` and compiled code already gave.
+
+### Resolved Issues
+
+- **`subs()` on a structural expression that is a lone symbol keeps a constant
+  name in the replacement.** With `x` declared `real`, the structural `x` with
+  `x` replaced by the structural `t + i` gave `t + (0 + 1i)` in 0.168.0 to
+  0.169.1, so a sum with an index `i` over an inlined `f(x) = x` gave complex
+  values: with `X = [1, 2, 3]`, `Σ_{i=1}^{3} f(X + i)` gave
+  `[3+3i, 6+3i, 9+3i]`. It gives `[9, 12, 15]` again. A requested form
+  (`subs(…, { canonical: true })`) is still honored.
+
+- **The count of a comprehension matches its cells when a clause can fail.**
+  `[j for i in 1..3 if bad(i), j in []]`, where the guard gives an error, had a
+  count of 0 but yields 3 error cells; its count is now 3.
+- **Testing whether a comprehension is finite no longer runs user code.** The
+  test does not evaluate a guard or an impure domain, so
+  `let r = [i for i in 1..3, j in filter(1..i, keep)]` no longer calls `keep`.
+- **A `Map`, `Filter` or `Reduce` callback follows a reassignment of its
+  source.** With `L := [1, 2]` and `m = Map(x ↦ x + 1, L)`, a later
+  `L := [["a"]]` made `m.evaluate()` a list of `incompatible-type` errors; it
+  now gives the value that a fresh `Map` gives.
+- **`Range(n)` with `n < 1` counts down from 1 on every route.** A raw
+  `Range(0)` and the compiled JavaScript `Range(0)` were empty; they are now
+  `[1, 0]`, as the canonical form already was.
+- **A coefficient times an ellipsis product keeps the product whole.**
+  `3(2·4·…·2n)` evaluated, expanded and simplified to `3·2·4·…·2·n` or `48·…·n`;
+  it now stays `3·(2·4·…·2n)`. The same holds in a sum: `x + 3(2·4·…·2n)` was
+  `x + 48·(…·n)`, and like terms still collect
+  (`(2·4·…·2n) + (2·4·…·2n)` is `2(2·4·…·2n)`).
+- **The type of `Negate`, `Sqrt` and the other element-wise functions of a list
+  of range rows holds its value.** `Negate([1..3, 4..6])` was typed
+  `list<range>` for a matrix of integers; it is now `list<list<integer>>`.
+  `Sum([1..2, 3..4])` is typed `integer | list<integer>` (it was `number`, for
+  the value `[4, 6]`).
+
+- **An undeclared recursive pair that builds a list is typed `-> list<number>`**
+  (CE-38), and a function literal boxed before the function it calls is typed
+  once that function is assigned: `g := (n, K) ↦ f(n, K)` boxed before
+  `f := (n, K) ↦ n + K` was `-> unknown` and is `-> number`.
+- **A polymorphic callback over rows** (CE-30): `Map(k, [[x ↦ x + 1]])` with
+  `k: ((integer) -> T) -> T` was `matrix<unknown^(1x1)>` and is
+  `matrix<number^(1x1)>`.
+- **The meet and overlap of chains of list, set and tuple aliases** (CE-449)
+  finish in under 0.25 s at depth 32; they took several seconds, or did not
+  finish.
+
 ## 0.169.1 _2026-10-25_
 
 ### Behavior Changes
@@ -1891,8 +2542,10 @@
     whose inferred signature returns it (`g := k ↦ ResidueClass(k, 4)` is
     `(unknown) -> residue`), and a symbol declared `residue`, which is protected
     before it has a value (`r/r` stays `r/r`). A head with another name gets the
-    admission and the protection, not the arithmetic of `ResidueClass`: it
-    defines its own. A symbol typed `value` or left undeclared is still read as
+    admission and the protection, not the arithmetic of `ResidueClass`: a sum
+    or a product of its values stays unevaluated (a hook for the head to
+    supply that arithmetic is planned, ROADMAP CE-507). A symbol typed `value`
+    or left undeclared is still read as
     a possible number: `w/w` is `1` for it.
   - A juxtaposed class is a product: `\overline{3}_{7}x` parses to `Multiply`,
     not to a tuple. `compile()` declines an expression typed `residue` or one

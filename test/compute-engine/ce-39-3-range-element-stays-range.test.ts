@@ -217,13 +217,186 @@ describe('A Range row is a row of its integers', () => {
       expect(value([op, infinite]).operator).toBe(op);
   });
 
-  // `Determinant` takes a `matrix`, and the type `list<range>` of the
-  // operand is not a matrix type: the operand is refused when it is boxed.
-  // When the type of a list of finite ranges is a matrix type, this test
-  // fails, and must become an ordinary test.
-  test.failing('Determinant', () => {
+  // `Determinant` takes a `matrix`. The operand keeps its type
+  // `list<range>`, and the argument check admits it because a list of
+  // finite ranges of the same length is a matrix of integers (ROADMAP
+  // CE-495, user decision 2026-10-26).
+  test('Determinant', () => {
     const det = value(['Determinant', SQUARE_ROWS]);
     expect(det.re).toBeCloseTo(-2);
     expect(value(['Determinant', SQUARE_LITERAL]).re).toBeCloseTo(-2);
+  });
+});
+
+// A list of finite `Range` rows of the same length is a matrix of integers
+// at a parameter that accepts a matrix: the operator reads each range as a
+// row. The list keeps its value and its type `list<range>` (ROADMAP CE-495,
+// user decision 2026-10-26).
+describe('A list of Range rows at a matrix parameter', () => {
+  const ROWS = ['List', ['Range', 1, 2], ['Range', 3, 4]];
+  const LITERAL = ['List', ['List', 1, 2], ['List', 3, 4]];
+  const RAGGED = ['List', ['Range', 1, 2], ['Range', 1, 3]];
+
+  /** The value, after a check that it is a member of the static type. */
+  function value(json: unknown) {
+    const expr = ce.box(json as any);
+    expect(expr.isValid).toBe(true);
+    const result = expr.evaluate();
+    expect(result.type.matches(expr.type)).toBe(true);
+    return result;
+  }
+
+  /** `json` with each list of range rows replaced by the literal matrix. */
+  function withLiteral(json: unknown[]): unknown[] {
+    return json.map((x) => (x === ROWS ? LITERAL : x));
+  }
+
+  test('the list keeps its value and its type', () => {
+    const rows = ce.box(ROWS as any);
+    expect(rows.type.toString()).toBe('list<range>');
+    expect(rows.evaluate().json).toEqual(ROWS);
+  });
+
+  test.each([
+    ['Determinant', [ROWS]],
+    ['Inverse', [ROWS]],
+    ['PseudoInverse', [ROWS]],
+    ['AdjugateMatrix', [ROWS]],
+    ['MatrixMultiply', [ROWS, ROWS]],
+    ['MatrixMultiply', [ROWS, LITERAL]],
+    ['MatrixMultiply', [LITERAL, ROWS]],
+    ['Dot', [ROWS, ROWS]],
+    ['HadamardProduct', [ROWS, ROWS]],
+    ['LinearSolve', [ROWS, ['List', 1, 2]]],
+    ['LinearSolve', [LITERAL, ROWS]],
+    ['MatrixPower', [ROWS, 2]],
+    ['MatrixPower', [ROWS, -1]],
+    ['CharacteristicPolynomial', [ROWS]],
+    ['RowReduce', [ROWS]],
+    ['Eigenvalues', [ROWS]],
+    ['Eigenvectors', [ROWS]],
+    ['LUDecomposition', [ROWS]],
+    ['QRDecomposition', [ROWS]],
+    ['SingularValues', [ROWS]],
+    ['Trace', [ROWS]],
+    ['Norm', [ROWS]],
+    ['Norm', [ROWS, 1]],
+  ])('box route: %s', (op, args) => {
+    const result = value([op, ...args]);
+    expect(result.operator).not.toBe(op);
+    expect(result.json).toEqual(value([op, ...withLiteral(args)]).json);
+  });
+
+  test('the values', () => {
+    expect(value(['Determinant', ROWS]).json).toBe(-2);
+    expect(value(['Inverse', ROWS]).json).toEqual([
+      'List',
+      ['List', -2, 1],
+      ['List', ['Rational', 3, 2], ['Rational', -1, 2]],
+    ]);
+    expect(value(['MatrixMultiply', ROWS, ROWS]).json).toEqual([
+      'List',
+      ['List', 7, 10],
+      ['List', 15, 22],
+    ]);
+  });
+
+  test('under N', () => {
+    const expr = ce.box(['Determinant', ROWS]);
+    const result = expr.N();
+    expect(result.type.matches(expr.type)).toBe(true);
+    expect(result.re).toBeCloseTo(-2);
+  });
+
+  test('parse route', () => {
+    expect(ce.parse('\\det([1..2, 3..4])').evaluate().json).toBe(-2);
+    expect(
+      ce.parse('\\operatorname{Inverse}([1..2, 3..4])').evaluate().json
+    ).toEqual(
+      ce.parse('\\operatorname{Inverse}([[1, 2], [3, 4]])').evaluate().json
+    );
+  });
+
+  test('a symbol that holds a list of range rows', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('L', 'list<range>');
+    expect(ce2.box(['Determinant', 'L']).isValid).toBe(true);
+    ce2.assign('L', ce2.box(ROWS as any));
+    expect(ce2.box(['Determinant', 'L']).evaluate().json).toBe(-2);
+  });
+
+  test('rows of different lengths are not a matrix', () => {
+    for (const json of [
+      ['Determinant', RAGGED],
+      ['Inverse', RAGGED],
+      ['MatrixMultiply', RAGGED, LITERAL],
+    ]) {
+      const result = ce.box(json as any).evaluate();
+      expect(result.operator).toBe('Error');
+      expect(result.toString()).toContain('incompatible-type');
+    }
+    expect(ce.parse('\\det([1..2, 1..3])').evaluate().toString()).toContain(
+      'incompatible-type'
+    );
+  });
+
+  test('Trace and Norm refuse ragged range rows, as they refuse the literal', () => {
+    const raggedLiteral = ['List', ['List', 1, 2], ['List', 1, 2, 3]];
+    for (const op of ['Trace', 'Norm']) {
+      for (const rows of [RAGGED, raggedLiteral]) {
+        const result = ce.box([op, rows] as any).evaluate();
+        expect(result.toString()).toContain('incompatible-type');
+      }
+    }
+  });
+
+  test('CharacteristicPolynomial does not convert its variable argument', () => {
+    // The second parameter is typed `any`: a list there is not read as a
+    // matrix, and the handler uses its default variable, as it did before
+    // range rows were admitted.
+    expect(value(['CharacteristicPolynomial', ROWS, 't']).toString()).toBe(
+      't^2 - 5t - 2'
+    );
+    const infiniteRows = [
+      'List',
+      ['Range', 1, 2],
+      ['Range', 3, 'PositiveInfinity'],
+    ];
+    for (const second of [ROWS, infiniteRows, ['List', 1, 2]]) {
+      const result = ce
+        .box(['CharacteristicPolynomial', LITERAL, second] as any)
+        .evaluate();
+      expect(result.toString()).toBe('x^2 - 5x - 2');
+    }
+  });
+
+  test('an infinite range row is not a matrix row', () => {
+    const infinite = [
+      'List',
+      ['Range', 1, 'PositiveInfinity'],
+      ['Range', 1, 'PositiveInfinity'],
+    ];
+    const result = ce.box(['Determinant', infinite] as any).evaluate();
+    expect(result.operator).toBe('Error');
+    expect(result.toString()).toContain('incompatible-type');
+  });
+
+  test('range rows with too many elements in total stay unevaluated', () => {
+    // The 400 rows have 160,000 elements together, which is more than the
+    // engine lists.
+    const rows: unknown[] = ['List'];
+    for (let i = 0; i < 400; i++) rows.push(['Range', 1, 400]);
+    expect(value(['Determinant', rows]).operator).toBe('Determinant');
+  });
+
+  test('a list of ranges and numbers is still refused', () => {
+    const expr = ce.box(['Determinant', ['List', ['Range', 1, 2], 3]]);
+    expect(expr.isValid).toBe(false);
+  });
+
+  test('a parameter of a user function declared matrix still refuses it', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('h', '(matrix) -> number');
+    expect(ce2.box(['h', ROWS] as any).isValid).toBe(false);
   });
 });

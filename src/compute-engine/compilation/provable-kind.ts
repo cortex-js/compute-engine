@@ -7,7 +7,9 @@ import {
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { resolveTypeForCompilation } from '../../common/type/utils.js';
+// The compiled lanes read the open form of a broadcast over an operand of
+// type `unknown` as `broadcastable<R>` (`resolveTypeForCompiledLanes`).
+import { resolveTypeForCompiledLanes as resolveTypeForCompilation } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 
 /**

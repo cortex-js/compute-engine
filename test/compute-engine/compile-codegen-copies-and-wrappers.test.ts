@@ -419,10 +419,12 @@ describe('a block local replaced element by element is written in place (CE-329)
     expect(code).toContain('_SYS.arr(xs, "ReplaceAt")');
   });
 
-  test('a string local is copied to an array once', () => {
-    // `_SYS.ownedCopy` returns a string unchanged. The temporary receives
-    // the array that the first update makes, so the next updates write that
-    // array in place.
+  test('a local declared any that holds a string is not compiled', () => {
+    // A use does not narrow a local declared `any` (CE-444): `xs` is not
+    // typed `indexed_collection<string>`, which a string is not. The
+    // operand can then be text at run time, and the compiled list lowering
+    // of `ReplaceAt` would read a string as UTF-16 code units, so the
+    // compilation declines and the interpreter evaluates the block.
     ce.declare('S', 'string');
     const json = [
       'Block',
@@ -435,9 +437,13 @@ describe('a block local replaced element by element is written in place (CE-329)
       ],
       'xs',
     ];
-    const code = codeOf(ce, json);
-    expect(code).toContain('= (_tv1 = _SYS.replaceAtInPlace(');
-    expect(run(ce, json, { S: 'abc' })).toEqual(['z', 'z', 'c']);
+    expect(() => compile(ce.box(json as never), { fallback: false })).toThrow(
+      /ReplaceAt/
+    );
+    const block = ce.box(json as never);
+    const value = block.subs({ S: ce.string('abc') }).evaluate();
+    expect(value.toString()).toBe('["z","z","c"]');
+    expect(block.type.toString()).toBe('any');
   });
 
   test('a function literal that reads the list keeps the copying form', () => {

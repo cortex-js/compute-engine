@@ -14,11 +14,12 @@ import {
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
-  checkType,
+  checkOperandType,
   checkTypes,
   checkNumericArgs,
   absentableCollectionOperandValue,
   absentScalarMarker,
+  absentArithmeticMarker,
   checkArity,
   hasAbsentScalarOperand,
   isAbsentableCollectionOperand,
@@ -193,6 +194,7 @@ import {
 import {
   mulFactoredArray,
   mulNEvaluated,
+  mulAroundNotationalProducts,
   isOutOfDoubleRangeLiteral,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
@@ -245,19 +247,29 @@ import {
   descendIntoConstructor,
   isBareCutOnDescent,
   topTypeBesideAbsence,
+  openDepthScalarArms,
   blockLocalTypeMayHoldList,
   unfoldAliasOnDescent,
   widen,
   widenAll,
-  hasResidueArm,
-  withoutResidueArmDeep,
-  isUninhabitedWithoutResidue,
+  hasKindArm,
+  isKindArm,
+  withoutKindArmsDeep,
+  isUninhabitedWithoutKinds,
+  kindArmNames,
+  type KindTypeNames,
   type AliasDescent,
 } from '../../common/type/utils.js';
+import {
+  kindTypeHasHook,
+  kindTypeNames,
+} from '../boxed-expression/value-kinds.js';
+import { isKindValue } from '../boxed-expression/kind-compare.js';
 import {
   couldMatch,
   isEmptyType,
   isSubtype,
+  cannotHoldAList,
 } from '../../common/type/subtype.js';
 import {
   negativeSign,
@@ -337,7 +349,6 @@ import {
   elementExtremumType as elementExtremumTypeOnTypes,
   extremumRangeType as extremumRangeTypeOnTypes,
   roundingFunctionType as roundingFunctionTypeOnTypes,
-  measurementType as measurementTypeOnTypes,
   bigOpResultType as bigOpResultTypeOnTypes,
   operandLiteralValue as operandLiteralValueOnTypes,
   operandSgn as operandSgnOnTypes,
@@ -393,43 +404,23 @@ const REAL_OR_POSITIVE_INFINITY_TYPE = parseType('real | +oo');
  * (same value, same convention: a dedicated per-file constant).
  */
 const MAX_EXACT_FACTORIAL_DIGITS = 1_000_000;
+import { isQuantity } from './quantity-arithmetic.js';
 import {
-  foldQuantityOperands,
-  isQuantity,
-  quantityAdd,
-  quantityMultiply,
-  quantityDivide,
-  quantityPower,
-} from './quantity-arithmetic.js';
-import { usesExpressionArithmetic } from './units.js';
-import {
-  containsResidueClass,
+  holdsKindValue,
   residueResultType,
-  typeIsResidueForCertain,
+  typeIsKindForCertain,
   isResidueClass,
-  isResidueClassOperand,
-  residueArithmetic,
-  residueDivide,
-  residueFold,
-  residueNegate,
-  residuePower,
+  isKindOperand,
+  typeWithoutShape,
 } from '../boxed-expression/residue-class.js';
+import {
+  kindOperation,
+  kindSumOrProduct,
+} from '../boxed-expression/kind-dispatch.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
-  foldMeasurementOperands,
-  isMeasurement,
-  measurementAdd,
-  measurementMultiply,
-  measurementDivide,
-  measurementNegate,
-  measurementPower,
-  measurementSqrt,
-  measurementRoot,
-  measurementLn,
-  measurementLog,
-  measurementLipschitzUnary,
-  measurementNominal,
-  measurementUnaryByHead,
+  MEASUREMENT_ARITHMETIC,
+  measurementEq,
 } from './measurement-arithmetic.js';
 import {
   range,
@@ -471,10 +462,12 @@ import {
   isCharacter,
   isSymbol,
   isContinuationOperand,
+  containsContinuationOperand,
   isAbsentValue,
   isAbsentSymbol,
   isAbsentArithmeticOperand,
   isInexactOperand,
+  kindValueIsNaN,
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
@@ -3293,6 +3286,264 @@ function isDeclaredNumberListOperand(d: OperandDescriptor): boolean {
 }
 
 /**
+ * An operand whose every value is a number or a tensor of numbers, as the
+ * user stated it: a symbol declared `broadcastable<number>` or
+ * `number | broadcastable<real>` (the `'tensor'` shape of
+ * `pointPartnerShape`), or an application of a broadcasting head whose every
+ * operand is such an operand or a proven scalar number
+ * (`isProvenScalarNumberOperand`), such as `-b` or `2b`. A point has no sum
+ * with such a value (`(x, y) + b` is an `incompatible-type` error for a
+ * number `b`, a tensor of such errors for a tensor `b`, and the empty list
+ * for `b = []`), so the sum is typed `broadcastable<error>`. A symbol whose type was only inferred is
+ * not read, and neither is an application over one: a broadcasting head over
+ * such an operand may still hold a point (Tycho item 241).
+ */
+function isDeclaredNumberTensorOperand(
+  d: OperandDescriptor,
+  engine: PureEngineView
+): boolean {
+  if (pointPartnerShape(d)?.shape !== 'tensor') return false;
+  const s = d.structureOf?.();
+  if (s?.kind === 'symbol') return s.inferred !== true;
+  if (s?.kind !== 'application' || s.children === undefined) return false;
+  if (engine.lookupDefinition(s.head)?.operator?.broadcastable !== true)
+    return false;
+  return s.children.every(
+    (c) =>
+      isProvenScalarNumberOperand(c, engine) ||
+      isDeclaredNumberTensorOperand(c, engine)
+  );
+}
+
+/**
+ * How an operand beside a point gives the shape of a component-wise result
+ * (a product, a quotient or a sum with the point), when the type of the
+ * operand is not a scalar type and not a collection of numbers with a
+ * known shape. `cell` is the number type that one scalar of the operand
+ * contributes to the components of the point.
+ *
+ * - `'any-depth'`: the value may be a scalar or a list of any depth, and the
+ *   list may be ragged. This is an application typed `unknown` (an element
+ *   read `L[1]` of a `list<unknown>`, a call of an undeclared function), the
+ *   open form `R | tuple | list<R | tuple | list<any>>`
+ *   (`openDepthScalarArms`), and a `broadcastable<unknown>`.
+ * - `'list-any-depth'`: the value is a list, and each element may be a
+ *   scalar or a list of any depth: `list<unknown>`, `list<any>`, the bare
+ *   `list`, `list<integer | list<integer>>`.
+ * - `'tensor'`: the value is a scalar or a rectangular tensor of numbers: a
+ *   `broadcastable<E>` with number cells `E`, or a union of such types and
+ *   number types (`number | broadcastable<number>`).
+ * - `'nested'`: the value is a list of lists of numbers, `list<list<E>>`
+ *   (the inner lists can have different lengths). The result has the shape
+ *   of `type`, with each number cell replaced by a point.
+ *
+ * `undefined` for every other operand. An auto-declared symbol typed
+ * `unknown` is read as a scalar, as `isPossiblyCollectionTypedOperand`
+ * reads it.
+ */
+type PointPartner = {
+  shape: 'any-depth' | 'list-any-depth' | 'tensor' | 'nested';
+  cell: Type;
+  type: Type;
+};
+
+function pointPartnerShape(d: OperandDescriptor): PointPartner | undefined {
+  const resolved = resolveTypeAlias(d.type);
+  const isApplication = operandChildren(d) !== undefined;
+  const t =
+    (isApplication ? topTypeBesideAbsence(resolved) : undefined) ?? resolved;
+  const partner = (
+    shape: PointPartner['shape'],
+    cell: Type = 'number'
+  ): PointPartner => ({ shape, cell, type: t });
+  if (t === 'unknown') return isApplication ? partner('any-depth') : undefined;
+  if (t === 'list') return partner('list-any-depth');
+  if (typeof t === 'string') return undefined;
+  const open = openDepthScalarArms(t);
+  if (open !== undefined)
+    return partner(
+      'any-depth',
+      open !== 'never' && factsOf(open).belowNumber ? open : 'number'
+    );
+  // The types that `pointShapedResultType` gives, `Q | list<Q | list<any>>`
+  // and `list<Q | list<any>>` for a point type `Q`: a list whose elements
+  // are `list<any>` or types that cannot hold a list, alone or beside types
+  // that cannot hold a list. The open form above needs a scalar arm, and
+  // these types have none.
+  const isAnyDepthList = (x: Type): boolean => {
+    const a = resolveTypeAlias(x);
+    if (
+      typeof a === 'string' ||
+      a.kind !== 'list' ||
+      a.dimensions !== undefined
+    )
+      return false;
+    const e = resolveTypeAlias(a.elements);
+    if (typeof e === 'string' || e.kind !== 'union') return false;
+    const isListOfAny = (m: Type): boolean => {
+      const r = resolveTypeAlias(m);
+      return (
+        typeof r !== 'string' &&
+        r.kind === 'list' &&
+        r.dimensions === undefined &&
+        r.elements === 'any'
+      );
+    };
+    return (
+      e.types.some(isListOfAny) &&
+      e.types.every((m) => isListOfAny(m) || cannotHoldAList(m))
+    );
+  };
+  if (isAnyDepthList(t)) return partner('list-any-depth');
+  if (
+    t.kind === 'union' &&
+    t.types.some(isAnyDepthList) &&
+    t.types.every((m) => isAnyDepthList(m) || cannotHoldAList(m))
+  )
+    return partner('any-depth');
+  // A union of lists of numbers (`vector<integer^1> | vector<integer^2>`,
+  // the element type of `[[1], [2, 3]]`): the result has the shape of each
+  // arm, as for a list of lists below.
+  if (
+    t.kind === 'union' &&
+    t.types.every((arm) => {
+      const a = resolveTypeAlias(arm);
+      return (
+        typeof a !== 'string' &&
+        a.kind === 'list' &&
+        a.dimensions !== null &&
+        mapProductCells(a, (c) => c) !== undefined
+      );
+    })
+  )
+    return partner('nested');
+  // The cells of a `broadcastable<E>`: `'any-depth'` when `E` can hold a
+  // list, the number type `E`, or `undefined` for cells that are not
+  // numbers.
+  const broadcastCells = (b: Type): 'any-depth' | Type | undefined => {
+    const e = resolveTypeAlias(b);
+    if (!cannotHoldAList(e)) return 'any-depth';
+    return factsOf(e).belowNumber ? e : undefined;
+  };
+  if (t.kind === 'broadcastable') {
+    const cells = broadcastCells(t.elements);
+    if (cells === undefined) return undefined;
+    return cells === 'any-depth'
+      ? partner('any-depth')
+      : partner('tensor', cells);
+  }
+  if (t.kind === 'union') {
+    const arms = flatUnionArms(t);
+    if (
+      !arms.some((arm) => {
+        const a = resolveTypeAlias(arm);
+        return typeof a !== 'string' && a.kind === 'broadcastable';
+      })
+    )
+      return undefined;
+    const cells: Type[] = [];
+    for (const arm of arms) {
+      const a = resolveTypeAlias(arm);
+      if (typeof a !== 'string' && a.kind === 'broadcastable') {
+        const c = broadcastCells(a.elements);
+        if (c === undefined) return undefined;
+        if (c === 'any-depth') return partner('any-depth');
+        cells.push(c);
+      } else if (a !== 'never' && factsOf(a).belowNumber) cells.push(a);
+      else return undefined;
+    }
+    return partner('tensor', widenAll(cells) as Type);
+  }
+  if (t.kind === 'list' && t.dimensions === undefined) {
+    const e = resolveTypeAlias(t.elements);
+    if (e === 'unknown' || e === 'any') return partner('list-any-depth');
+    const isList = (x: Type): boolean => {
+      const r = resolveTypeAlias(x);
+      return typeof r !== 'string' && r.kind === 'list';
+    };
+    if (
+      isList(e) ||
+      (typeof e !== 'string' && e.kind === 'union' && e.types.every(isList))
+    )
+      return partner('nested');
+    // An element that may be a number or a list (`list<integer |
+    // list<integer>>`, the type of `[[1], 2]`): an element of the result is
+    // a point or a list of points, `[[(1, 2)], (2, 4)]` for `(1, 2)·[[1], 2]`.
+    if (!cannotHoldAList(e)) return partner('list-any-depth');
+  }
+  return undefined;
+}
+
+/**
+ * The type of a component-wise result whose cell is the point type `point`,
+ * over operands whose shapes are `shapes` (`pointPartnerShape`, every shape
+ * but `'nested'`). An operand of any depth makes the result a point or a
+ * list of points of any depth, `point | list<point | list<any>>`: with
+ * `L: list<unknown>`, `(x, y)·L[1]` is a point when `L[1]` is a number, the
+ * list `[(x, y), (2x, 2y)]` when it is `[1, 2]`, and a ragged list of points
+ * when it is `[[1], [2, 3]]`. A list operand whose elements may be lists
+ * makes it `list<point | list<any>>`. A `broadcastable<E>` operand with
+ * number cells makes it `broadcastable<point>`: a point, or a rectangular
+ * tensor of points.
+ */
+function pointShapedResultType(
+  point: Type,
+  shapes: ReadonlyArray<PointPartner['shape']>
+): Type {
+  const anyDepthElement = widen(point, { kind: 'list', elements: 'any' });
+  if (shapes.includes('any-depth'))
+    return widen(point, { kind: 'list', elements: anyDepthElement });
+  if (shapes.includes('list-any-depth'))
+    return { kind: 'list', elements: anyDepthElement };
+  return { kind: 'broadcastable', elements: point };
+}
+
+/**
+ * The type of a product or a quotient of the point type `point` with the
+ * operands `others`, when one or more of them is a partner of a point
+ * (`pointPartnerShape`) and every other one is a scalar number
+ * (`scalarFactorCellType`). `combine(point, cells)` gives the point that
+ * the cell types `cells` (one for each operand of `others`, in order) make
+ * from `point`. `undefined` when an operand is neither, and when a
+ * `'nested'` operand is beside another partner.
+ */
+function pointBesidePartnersType(
+  point: Type,
+  others: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  combine: (point: Type, cells: Type[]) => Type
+): Type | undefined {
+  const partners = others.map(pointPartnerShape);
+  const found = partners.filter((p) => p !== undefined);
+  if (found.length === 0) return undefined;
+  const scalars = others.map((x, i) =>
+    partners[i] === undefined ? scalarFactorCellType(x, engine) : undefined
+  );
+  if (others.some((_, i) => partners[i] === undefined && !scalars[i]))
+    return undefined;
+  const nested = partners.findIndex((p) => p?.shape === 'nested');
+  if (nested >= 0) {
+    if (found.length > 1) return undefined;
+    // Each number cell of the nested list makes one point, and the result
+    // keeps the shape of the list: `(1, 2)·L` for `L := [[1], [2, 3]]` is
+    // `[[(1, 2)], [(2, 4), (3, 6)]]`.
+    return mapProductCells(partners[nested]!.type, (c) =>
+      combine(
+        point,
+        others.map((_, i) => (i === nested ? c : scalars[i]!))
+      )
+    );
+  }
+  return pointShapedResultType(
+    combine(
+      point,
+      others.map((_, i) => partners[i]?.cell ?? scalars[i]!)
+    ),
+    found.map((p) => p.shape)
+  );
+}
+
+/**
  * Twin of `isPossiblyCollectionTyped`: an operand whose collection-ness is
  * not statically visible, so an element-wise result must stay lifted.
  *
@@ -3339,6 +3590,12 @@ function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
     return operandChildren(d) !== undefined;
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>`
+  // (`openDepthScalarArms`), the type of an element-wise application over
+  // an operand of type `unknown`, may be a collection, as a
+  // `broadcastable<R>` may (`isPossiblyCollectionTyped`,
+  // `collection-utils.ts`).
+  if (openDepthScalarArms(t) !== undefined) return true;
   if (t.kind !== 'union') return false;
   return t.types.some((branch) => {
     const b = resolveTypeAlias(branch);
@@ -3371,8 +3628,10 @@ function isPossiblyCollectionTypedOperand(d: OperandDescriptor): boolean {
  *
  * An auto-declared symbol does not qualify: it is typed `unknown`, not
  * `any`, and the arithmetic's own inference refines it to a scalar. A call
- * of an undeclared function is typed `unknown` too, and keeps the
- * `broadcastable<number>` reading. The cell of an abstract collection
+ * of an undeclared function is typed `unknown` too. The broadcast lift
+ * types an application over it `number | tuple | list<number | tuple | list<any>>`
+ * (`openTriggerBroadcastType`, `broadcast-lift-type.ts`): its value can be
+ * a ragged list or a point. The cell of an abstract collection
  * (`P: collection<any>`) keeps the structural view of the symbol `P` with
  * the cell type `any` (`describeOperand(x, cell)` in `boxed-function.ts`,
  * and the `structureOf` carried over in `derive-application-type.ts`), so
@@ -3434,6 +3693,12 @@ function hasBroadcastableArm(d: OperandDescriptor): boolean {
   const t = resolveTypeAlias(d.type);
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>`
+  // (`openDepthScalarArms`), the type of an element-wise application over
+  // an operand of type `unknown`, may be a collection, as a
+  // `broadcastable<R>` may (`isPossiblyCollectionTyped`,
+  // `collection-utils.ts`).
+  if (openDepthScalarArms(t) !== undefined) return true;
   if (t.kind !== 'union') return false;
   return t.types.some((branch) => {
     const b = resolveTypeAlias(branch);
@@ -3888,6 +4153,78 @@ function addTypeOnTypes(
 ): Type {
   if (args.length === 0) return 'integer'; // = 0
   if (args.length === 1) return args[0].type;
+  // A point beside a term whose value may be a list of any depth
+  // (`pointPartnerShape`): an element read `L[1]` of a `list<unknown>`, or
+  // the open form of an element-wise application over one. The term may
+  // be a point, which gives a point, or a list of points of any depth,
+  // which gives a list of points of the same shape: with
+  // `L := [[(1, 2), (3, 4)]]`, `(x, y) + L[1]` is
+  // `[(x + 1, y + 2), (x + 3, y + 4)]`. The components of such a term can
+  // be any number, so the components of the sum are `number`. The join
+  // below is neutral in `unknown`, and typed the sum as one point. (A
+  // number beside a point has no sum, and evaluates to an error.) A term
+  // typed `broadcastable<Q>` for a point type `Q` (the product of a point
+  // and a `broadcastable<number>`) is a point or a tensor of points, and the
+  // sum is a `broadcastable` of the sum of the points: the join below typed
+  // it as the union of the two types, `broadcastable<Q> | tuple<…>`, which
+  // claims a point where the value is a list of points. Before the branch
+  // for cells of unknown type, which types the sum with a
+  // `broadcastable<unknown>` (`-L[1]`) as a `broadcastable<number>`.
+  {
+    const isPoint = (x: Type): boolean => {
+      const r = resolveTypeAlias(x);
+      return r === 'tuple' || (typeof r === 'object' && r.kind === 'tuple');
+    };
+    const pointsOfTensor = (x: OperandDescriptor): Type | undefined => {
+      const r = resolveTypeAlias(x.type);
+      return typeof r === 'object' &&
+        r.kind === 'broadcastable' &&
+        isPoint(r.elements)
+        ? resolveTypeAlias(r.elements)
+        : undefined;
+    };
+    const points: Type[] = [];
+    const shapes: PointPartner['shape'][] = [];
+    let hasPoint = false;
+    let open = false;
+    for (const x of args) {
+      if (isPoint(x.type)) {
+        hasPoint = true;
+        points.push(resolveTypeAlias(x.type));
+        continue;
+      }
+      const cells = pointsOfTensor(x);
+      if (cells !== undefined) {
+        points.push(cells);
+        shapes.push('tensor');
+        continue;
+      }
+      const p = pointPartnerShape(x);
+      if (p?.shape !== 'any-depth' && p?.shape !== 'list-any-depth') {
+        shapes.length = 0;
+        break;
+      }
+      open = true;
+      shapes.push(p.shape);
+    }
+    if (hasPoint && shapes.length > 0) {
+      const sum =
+        points.length === 1
+          ? points[0]
+          : tupleComponentwiseAddType(points.map((t) => describeType(t)));
+      if (sum !== undefined) {
+        const widened = open
+          ? (mapProductCells(stripNumericRanges(sum), (c) =>
+              widen(c, 'number')
+            ) ?? sum)
+          : sum;
+        return withFloatRationalCellsAsReal(
+          args,
+          pointShapedResultType(closeImaginaryPointComponents(widened), shapes)
+        );
+      }
+    }
+  }
   // A term with cells of unknown type and an unknown shape (see
   // `hasUnknownBroadcastCells`): before the tuple, tensor and collection
   // branches, which would fold it into the cells of a list as a scalar.
@@ -3920,6 +4257,16 @@ function addTypeOnTypes(
       )
     )
       return 'error';
+    // A point beside an operand whose every value is a number or a tensor of
+    // numbers (`isDeclaredNumberTensorOperand`) is not rejected at boxing,
+    // and the evaluation maps over a tensor: `(x, y) + b` is one error for a
+    // number `b`, a tensor of errors for a tensor `b`, and `[]` for `b = []`.
+    // `broadcastable<error>` holds each of these values.
+    if (
+      args.some((x) => isNumericTupleCarrierType(x.type)) &&
+      args.some((x) => isDeclaredNumberTensorOperand(x, engine))
+    )
+      return { kind: 'broadcastable', elements: 'error' };
     // A point BROADCAST over a list of points: the sum is a list of points,
     // not the union `list<tuple<…>> | tuple<…>` the widen below reports. A
     // matrix of points (a list of points of rank 2 or more) gives a matrix
@@ -4144,23 +4491,44 @@ function closeImaginaryPointComponents(t: Type): Type {
  * operator, or `context.derive`) over the operands with each class read as
  * an integer cell: a class scales a list or a point cell by cell, as a
  * number does.
+ *
+ * The cell type is read from the `resultType` hook of each kind type among
+ * the operands (`residueResultType()`, `docs/plans/2026-10-26-value-kinds.md`,
+ * section 4.5). `operator` is the operator the hooks are asked for: `'Add'`
+ * for `Subtract`, `'Power'` for `Sqrt` and `Root`, which give the type of
+ * their implied exponent in `operandTypes`.
  */
 function residueShapedResultType(
   ops: ReadonlyArray<OperandDescriptor>,
   engine: PureEngineView,
-  numericType: (ops: ReadonlyArray<OperandDescriptor>) => Type | undefined
+  numericType: (ops: ReadonlyArray<OperandDescriptor>) => Type | undefined,
+  operator: string,
+  operandTypes?: ReadonlyArray<Type>
 ): Type {
-  const cell = residueResultType(ops);
+  const cell = residueResultType(ops, engine, operator, operandTypes);
+  const kinds = kindTypeNames(engine);
   // The shape comes from the operator's own derivation over the operands
   // with each class read as an integer cell: `c · (1, 2)` is a tuple of
   // classes because `Multiply` scales a point, where `Add` of a scalar and
   // a point is an error.
+  //
+  // An operand typed as a number is read from its type alone, without its
+  // structural view. The generic broadcast lift (`Divide` and `Power` are
+  // not exempt from it) calls this handler again for one element, with the
+  // list operand typed as its cell (`integer`) but with the structural view
+  // of the whole list literal. The derivation would then read that view and
+  // lift a second time, and the result had one list level too many:
+  // `ResidueClass(3, 5) / [1, 2]` was typed `list<list<residue>>`, not
+  // `list<residue^2>`. A number operand has no shape, so the shape is the
+  // same without the view.
   const placeholders = ops.map((x) =>
-    isResidueClassOperand(x, engine)
+    isKindOperand(x, engine)
       ? describeType(
-          hasResidueArm(x.type) ? residueAsInteger(x.type) : 'integer'
+          hasKindArm(x.type, kinds) ? kindAsInteger(x.type, kinds) : 'integer'
         )
-      : x
+      : x.type !== 'never' && isSubtype(x.type, 'number')
+        ? describeType(x.type, x.facts.closed)
+        : x
   );
   const shaped = withResidueCells(numericType(placeholders) ?? cell, cell);
   // An operand that IS a class (typed `residue`, or holding a `ResidueClass`
@@ -4171,49 +4539,58 @@ function residueShapedResultType(
   // arm is joined in (`u / 2` with `u: integer | residue` is
   // `rational | residue`, not `integer | residue`).
   if (ops.some((x) => isCertainlyResidueClass(x, engine))) return shaped;
+  // A number operand is read from its type alone here too, for the reason
+  // given for `placeholders` above.
   const numeric = ops.map((x) =>
-    hasResidueArm(x.type) ? describeType(withoutResidueArmDeep(x.type)) : x
+    hasKindArm(x.type, kinds)
+      ? describeType(withoutKindArmsDeep(x.type, kinds))
+      : x.type !== 'never' && isSubtype(x.type, 'number')
+        ? describeType(x.type, x.facts.closed)
+        : x
   );
   const alternative = numericType(numeric);
   return alternative === undefined ? shaped : widen(shaped, alternative);
 }
 
 /**
- * Whether the operand is a residue class for certain: its type is `residue`
- * (an absent or `NaN` arm beside it aside), or its structure holds a
- * `ResidueClass` call or a symbol whose value holds one
- * (`isResidueClassOperand` with a type that does not say `residue`).
+ * Whether the operand is a kind value (a residue class) for certain: its
+ * type is a kind type (an absent or `NaN` arm beside it aside), or its
+ * structure holds a call of a kind head or a symbol whose value holds one
+ * (`isKindOperand` with a type that does not name a kind type).
  */
 function isCertainlyResidueClass(
   d: OperandDescriptor,
   engine: PureEngineView
 ): boolean {
-  if (!hasResidueArm(d.type)) return isResidueClassOperand(d, engine);
-  // `residue`, `nan | residue`, `list<residue^2>`: nothing but classes.
-  return isUninhabitedWithoutResidue(stripMissingFromType(d.type));
+  const kinds = kindTypeNames(engine);
+  if (!hasKindArm(d.type, kinds)) return isKindOperand(d, engine);
+  // `residue`, `nan | residue`, `list<residue^2>`: nothing but kind values.
+  return isUninhabitedWithoutKinds(stripMissingFromType(d.type), kinds);
 }
 
-/** `t` with `residue` read as `integer` at every level (`list<residue^2>`
- * is `list<integer^2>`, `integer | residue` is `integer`): the operand of
- * the operator's own derivation, which gives the shape of the result. */
-function residueAsInteger(t: Type): Type {
-  if (t === 'residue') return 'integer';
+/** `t` with each kind type of `kinds` read as `integer` at every level
+ * (`list<residue^2>` is `list<integer^2>`, `integer | residue` is
+ * `integer`): the operand of the operator's own derivation, which gives the
+ * shape of the result. */
+function kindAsInteger(t: Type, kinds: KindTypeNames): Type {
+  if (isKindArm(t, kinds)) return 'integer';
   if (typeof t === 'string') return t;
+  const asInteger = (x: Type) => kindAsInteger(x, kinds);
   switch (t.kind) {
     case 'union':
-      return reduceType({ ...t, types: t.types.map(residueAsInteger) });
+      return reduceType({ ...t, types: t.types.map(asInteger) });
     case 'list':
     case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable':
-      return { ...t, elements: residueAsInteger(t.elements) };
+      return { ...t, elements: asInteger(t.elements) };
     case 'tuple':
       return {
         ...t,
         elements: t.elements.map((e) => ({
           ...e,
-          type: residueAsInteger(e.type),
+          type: asInteger(e.type),
         })),
       };
     default:
@@ -4246,6 +4623,39 @@ function withResidueCells(shape: Type, cell: Type): Type {
   }
 }
 
+/**
+ * The type of the reduction `Sum(L)` (`operator` is `Add`) or `Product(L)`
+ * (`Multiply`) of a collection whose elements can be kind values (a list of
+ * residue classes): the type of `operator` applied to two elements, by the
+ * rules of the kinds (`residueShapedResultType()`,
+ * `docs/plans/2026-10-26-value-kinds.md`, section 4.5): `Sum([c1, c2])` is
+ * `residue`. A collection that is not provably non-empty can give the
+ * neutral element (`0`, `1`), so `integer` is joined in. `undefined` for any
+ * other operand: the big-operator rules apply.
+ */
+function kindReductionType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  context: TypeHandlerContext,
+  operator: 'Add' | 'Multiply'
+): Type | undefined {
+  if (ops.length !== 1) return undefined;
+  const element = collectionElementType(ops[0].type);
+  if (
+    element === undefined ||
+    !hasKindArm(element, kindTypeNames(context.engine))
+  )
+    return undefined;
+  const t = context.derive(operator, [
+    describeType(element),
+    describeType(element),
+  ]);
+  if (t === undefined) return undefined;
+  const n = ops[0].facts.shape?.[0];
+  return n !== undefined && n > 0
+    ? t
+    : reduceType({ kind: 'union', types: [t, 'integer'] });
+}
+
 /** The type handler of `Add`, also used by `Subtract`
  * (`subtractTypeHandler`). */
 function addTypeHandler(
@@ -4253,9 +4663,12 @@ function addTypeHandler(
   context: TypeHandlerContext
 ): BoxedType | undefined {
   return BoxedType.forResult(
-    ops.some((x) => isResidueClassOperand(x, context.engine))
-      ? residueShapedResultType(ops, context.engine, (o) =>
-          addTypeOnTypes(o, context.engine)
+    ops.some((x) => isKindOperand(x, context.engine))
+      ? residueShapedResultType(
+          ops,
+          context.engine,
+          (o) => addTypeOnTypes(o, context.engine),
+          'Add'
         )
       : signedInfinitySum(
           ops,
@@ -4284,10 +4697,13 @@ function subtractTypeHandler(
   context: TypeHandlerContext
 ): BoxedType | undefined {
   if (ops.length < 2) return undefined;
-  if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+  if (ops.some((x) => isKindOperand(x, context.engine)))
     return BoxedType.forResult(
-      residueShapedResultType(ops, context.engine, (o) =>
-        context.derive('Subtract', o)
+      residueShapedResultType(
+        ops,
+        context.engine,
+        (o) => context.derive('Subtract', o),
+        'Add'
       ),
       context.engine._typeResolver
     );
@@ -6312,10 +6728,6 @@ function evaluateGamma(
   }
 
   const x = ops[0];
-  // A `Measurement` argument: Γ(a ± σ) is Γ(a) ± |Γ(a)·ψ(a)|·σ
-  // (`measurementUnaryByHead`).
-  const m = measurementUnaryByHead(engine, 'Gamma', x);
-  if (m !== undefined) return numericApproximation ? m.N() : m;
   // Gamma has poles at the non-positive integers (0, -1, -2, ...).
   // This is exact, so return it regardless of numericApproximation.
   if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
@@ -6386,8 +6798,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // per call. A numeric tuple operand (a point, whose norm `Abs`
       // computes) is admitted by the numeric-argument validation's tuple
       // lane (`typeCouldBeNumericTuple`, validate.ts), not by this
-      // carrier.
-      signature: '(complex | infinity) -> number',
+      // carrier. The parameter names `quantity` too: the absolute value of a
+      // quantity is a quantity (`Abs(-2 m)` is `2 m`, typed `quantity` by
+      // the `resultType` hook of `QUANTITY_ARITHMETIC`, `quantity-kind.ts`).
+      signature: '(complex | infinity | quantity) -> number',
       examples: ['[Abs(-3), Abs(3 - 4i)]'],
       nanBehavior: 'propagate',
       // A TYPE test, not an `operator === 'Tuple'` check: a tuple-TYPED
@@ -6591,16 +7005,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x0, step0], { numericApproximation, expression }) => {
-        // A `Measurement` rounds as its nominal (see `Floor`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
+      evaluate: ([x, step], { numericApproximation, expression }) => {
         // The operand as written, for the exact recovery near a rounding
-        // jump, read through its nominal when it is a `Measurement`.
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // jump.
+        const original = originalOperand(expression, 0);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -6698,8 +7106,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       //
       // - if numer product of numbers, or denom product of numbers,
       // i.e. √2x/2 -> 0.707x, 2/√2x -> 1.4142x
-      signature:
-        '(complex | infinity | residue, (complex | infinity | residue)+) -> number',
+      signature: '(complex | infinity, (complex | infinity)+) -> number',
       examples: ['[6 / 4, x / 2]'],
       nanBehavior: 'propagate',
       type: (ops, context) => {
@@ -6720,10 +7127,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const [num, den] = ops;
         // A quotient that holds a residue class is not a number: it is a
         // class, or it stays unevaluated (see the `evaluate` handler).
-        if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+        if (ops.some((x) => isKindOperand(x, context.engine)))
           return BoxedType.forResult(
-            residueShapedResultType(ops, context.engine, (o) =>
-              context.derive('Divide', o)
+            residueShapedResultType(
+              ops,
+              context.engine,
+              (o) => context.derive('Divide', o),
+              'Divide'
             ),
             context.engine._typeResolver
           );
@@ -6748,6 +7158,33 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // every value of `U` makes it an error.
         if (ops.slice(1).some((x) => isPointCarrierType(x.type)))
           return BoxedType.forResult('error', context.engine._typeResolver);
+        // A point divided by a divisor whose type does not give the shape of
+        // its value (`pointPartnerShape`): an element read `L[1]` of a
+        // `list<unknown>`, a `broadcastable<number>`. The value of the
+        // divisor may be a scalar or a list (of any depth, and ragged for
+        // the first one), and the point is divided by each scalar of it. So
+        // the quotient is a point or a list of points of that shape
+        // (`pointBesidePartnersType`), as the product with the same factor is.
+        // The branch below read such a divisor as a scalar, or as a list of
+        // depth one, and typed the quotient `tuple<…>` or
+        // `list<tuple<…>> | tuple<…>`.
+        {
+          const point = resolveTypeAlias(num.type);
+          const floatNumerator = hasInexactRationalComponent(num);
+          const t =
+            point === 'tuple' ||
+            (typeof point === 'object' && point.kind === 'tuple')
+              ? pointBesidePartnersType(
+                  point,
+                  [den],
+                  context.engine,
+                  (p, [cell]) =>
+                    quotientShapeType(p, describeType(cell), floatNumerator)
+                )
+              : undefined;
+          if (t !== undefined)
+            return BoxedType.forResult(t, context.engine._typeResolver);
+        }
         // A numeric tuple (point/vector) divided by a scalar keeps the tuple
         // type, mirroring the `Multiply` handler. `canonicalDivide` scales
         // component-wise only when the numerator's components are ACCESSIBLE
@@ -7077,7 +7514,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([num, den], { numericApproximation, engine, expression }) => {
         // Non-lazy operator: operands arrive already evaluated by the
         // driver (`_computeValue` step 4) — do not re-evaluate them.
-        const nonNumeric = nonNumericOperandError(engine!, [num, den]);
+        const nonNumeric = nonNumericOperandError(
+          engine!,
+          [num, den],
+          'Divide'
+        );
         if (nonNumeric !== undefined) return nonNumeric;
         // A tuple with a list coordinate is data, not a point: arithmetic
         // over it is an error (see `listCoordinateTupleOperandError`).
@@ -7085,36 +7526,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (listTuple !== undefined) return listTuple;
         const evalNum = num;
         const evalDen = den;
-        // A quotient with a residue class is a class, or it stays
-        // unevaluated: the generic division below reads `c/c` as 1 even
-        // when the class `c` has no inverse. A class is exact, so under
-        // `.N()` a pure operand is read from its exact value.
-        if (containsResidueClass(evalNum) || containsResidueClass(evalDen)) {
-          const originals =
-            numericApproximation && expression && isFunction(expression)
-              ? expression.ops
-              : undefined;
-          const exact =
-            originals?.length === 2
-              ? exactOperands(originals, [evalNum, evalDen], true)
-              : [evalNum, evalDen];
-          return residueDivide(engine!, exact[0], exact[1]);
-        }
-        if (
-          evalNum.operator === 'Quantity' ||
-          evalDen.operator === 'Quantity'
-        ) {
-          const r = quantityDivide(engine!, evalNum, evalDen);
-          // An exact or Measurement magnitude is made numeric under `.N()`.
-          return numericApproximation ? r?.N() : r;
-        }
-        if (
-          evalNum.operator === 'Measurement' ||
-          evalDen.operator === 'Measurement'
-        ) {
-          const r = measurementDivide(engine!, evalNum, evalDen);
-          return numericApproximation ? r?.N() : r;
-        }
+        // A quotient with a kind value (a residue class) is the answer of
+        // the `divide` hook of the first kind among the operands that
+        // answers, or it stays unevaluated: the generic division below reads
+        // `c/c` as 1 even when the class `c` has no inverse. Under `.N()` a
+        // hook reads the exact value of an operand through `exact()`.
+        if (holdsKindValue(evalNum) || holdsKindValue(evalDen))
+          return kindOperation(
+            engine!,
+            'divide',
+            [evalNum, evalDen],
+            writtenOperands(expression, 2),
+            numericApproximation === true
+          );
         // An operand whose float is 0 or ±∞ can have an exact value that is
         // not: `10^{400} + 1` is an integer above the largest double. The
         // quotient is then computed from the exact values, and it can be in
@@ -7190,7 +7614,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Exp2(10), Exp2(1/2)]'],
       canonical: (args, { engine }) => {
-        args = checkNumericArgs(engine, args, 1);
+        // A value of a kind admitted as a number whose kind has a `power`
+        // hook (a measurement) is an operand, as at `Exp`: `Exp2(x)` is
+        // `Power(2, x)`.
+        args = checkNumericArgs(engine, args, { count: 1, carrier: 'power' });
         // See the `Exp` guard above: `['Exp2', 11, 12]` used to canonicalize
         // to `Power(2, 11, Error(…))`.
         if (args.length !== 1 || !args.every((x) => x.isValid))
@@ -7288,11 +7715,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         engine._fn('Factorial', [...checkArity(engine, args, 1)]),
       evaluate: ([x], { numericApproximation }) => {
         const ce = x.engine;
-
-        // A `Measurement` argument: (a ± σ)! is Γ(a + 1) with the same
-        // uncertainty, propagated (`measurementUnaryByHead`).
-        const m = measurementUnaryByHead(ce, 'Factorial', x);
-        if (m !== undefined) return numericApproximation ? m.N() : m;
 
         // If argument is symbolic (not a number literal), keep unevaluated
         if (!isNumber(x)) return undefined;
@@ -7619,19 +8041,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x0, step0], { numericApproximation, expression }) => {
-        // A `Measurement` rounds as its nominal: the slope of a step function
-        // is zero almost everywhere, so the first-order uncertainty of the
-        // result is zero and the answer is the bare value
-        // (`measurementNominal`; the same for `Ceil`, `Round` and `Mod`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
+      evaluate: ([x, step], { numericApproximation, expression }) => {
+        // A `Measurement` operand does not reach this handler: the `apply`
+        // hook of the measurement kind answers for it (the step rule of
+        // `stepApply()`, `measurement-arithmetic.ts`; the same for `Ceil`,
+        // `Round`, `Truncate`, `Fract` and `Mod`).
         // The operand as written, for the exact recovery near a rounding
-        // jump, read through its nominal when it is a `Measurement`.
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // jump.
+        const original = originalOperand(expression, 0);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -7708,16 +8125,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine: ce, expression }) => {
-        // A `Measurement` argument: the fractional part has slope 1 away
-        // from the integers, so the uncertainty is unchanged
-        // (`Fract(Measurement(2.5, 0.01))` is `Measurement(0.5, 0.01)`).
-        if (isMeasurement(x)) {
-          const r = ce.function('Measurement', [
-            ce.function('Fract', [x.op1]).evaluate({ numericApproximation }),
-            x.op2,
-          ]);
-          return numericApproximation ? r.N() : r.evaluate();
-        }
         // Exact fractional part for an exact real argument: x - floor(x),
         // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
         // `0.5`. Only an inexact (float) argument numericizes.
@@ -8727,11 +9134,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // Non-lazy: `z` is already evaluated by the driver.
           const nonNumeric = nonNumericOperandError(engine, [z]);
           if (nonNumeric !== undefined) return nonNumeric;
-          const evalZ = z;
-          if (isMeasurement(evalZ)) {
-            const r = measurementLn(engine, evalZ);
-            return numericApproximation ? r?.N() : r;
-          }
           if (!numericApproximation) return z.ln();
 
           // An exact argument outside the double range (`10^{400}`) has a
@@ -8845,12 +9247,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // Covers the whole log family: Lb/Lg/Log2/Log10 canonicalize to Log.
           const nonNumeric = nonNumericOperandError(engine, ops);
           if (nonNumeric !== undefined) return nonNumeric;
-          const evalArg = ops[0];
-          if (evalArg && isMeasurement(evalArg)) {
-            const base = ops[1] ?? engine.number(10);
-            const r = measurementLog(engine, evalArg, base);
-            return numericApproximation ? r?.N() : r;
-          }
           if (!numericApproximation)
             return ops[0]?.ln(ops[1] ?? 10) ?? undefined;
           const ce = engine;
@@ -8966,7 +9362,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['[Lb(8), N(Lb(3))]'],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn('Log', [x, engine.number(2), ...rest]);
       },
     },
@@ -8982,7 +9385,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine }) => {
         // An extra operand stays after the base 10, so that it is not read
         // as the base.
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn(
           'Log',
           rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
@@ -9000,7 +9410,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine }) => {
         // An extra operand stays after the base 10, so that it is not read
         // as the base.
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn(
           'Log',
           rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
@@ -9016,7 +9433,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['[Log2(32), N(Log2(3))]'],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn('Log', [x, engine.number(2), ...rest]);
       },
     },
@@ -9135,27 +9559,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: (
-        [a0, b0],
-        { engine: ce, numericApproximation, expression }
-      ) => {
-        // A `Measurement` operand stands for its nominal (see `Floor`); the
-        // operands as written are read through their nominals too, for the
-        // exact recovery near a jump.
-        const a = measurementNominal(a0);
-        const b = measurementNominal(b0);
-        if (
-          expression !== undefined &&
-          (isMeasurement(a0) || isMeasurement(b0))
-        ) {
-          const wa = originalOperand(expression, 0);
-          const wb = originalOperand(expression, 1);
-          if (wa !== undefined && wb !== undefined)
-            expression = ce._fn('Mod', [
-              measurementNominal(wa),
-              measurementNominal(wb),
-            ]);
-        }
+      evaluate: ([a, b], { engine: ce, numericApproximation, expression }) => {
         // Under `.N()`, `Mod` jumps where `a/b` is an integer: the exact
         // values of exact operands are used near such a point
         // (`exactModUnderN()`).
@@ -9282,14 +9686,19 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The canonical form is the one `makeNumericFunction` (`box.ts`) also
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Multiply'),
-      signature: '((number | residue)*) -> number',
+      signature: '(number*) -> number',
       examples: ['2 * x * 3 * x'],
       type: (ops, { engine, derive }) => {
         if (ops.length === 0)
           return BoxedType.forResult('integer', engine._typeResolver); // = 1
-        if (ops.some((x) => isResidueClassOperand(x, engine)))
+        if (ops.some((x) => isKindOperand(x, engine)))
           return BoxedType.forResult(
-            residueShapedResultType(ops, engine, (o) => derive('Multiply', o)),
+            residueShapedResultType(
+              ops,
+              engine,
+              (o) => derive('Multiply', o),
+              'Multiply'
+            ),
             engine._typeResolver
           );
         if (ops.length === 1)
@@ -9303,6 +9712,41 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         const topFactor = unrefinedTopTypeOfOperands(ops);
         if (topFactor !== undefined)
           return BoxedType.forResult(topFactor, engine._typeResolver);
+        // A point beside a factor whose type does not give the shape of its
+        // value (`pointPartnerShape`): an element read `L[1]` of a
+        // `list<unknown>`, a `broadcastable<number>`, a `list<unknown>`, a
+        // `list<list<integer>>`. The value of the factor may be a scalar or
+        // a list (of any depth, and ragged for some of them), and the product
+        // scales the point at each scalar of it. So the product is a point or
+        // a list of points of that shape (`pointBesidePartnersType`). The
+        // branches below read such a factor as a scalar or as a list of
+        // depth one, and typed the product as one point or as a list of
+        // points: with `L := [[1, 2]]`, `(x, y)·(2·L[1])` is
+        // `[(2x, 2y), (4x, 4y)]`. Every other factor must be a scalar
+        // number. Before the branch for cells of unknown type, which types
+        // the product with a `broadcastable<unknown>` as a
+        // `broadcastable<number>`.
+        {
+          const points = ops.filter((x) => {
+            const r = resolveTypeAlias(x.type);
+            return (
+              r === 'tuple' || (typeof r === 'object' && r.kind === 'tuple')
+            );
+          });
+          if (points.length === 1) {
+            const t = pointBesidePartnersType(
+              points[0].type,
+              ops.filter((x) => x !== points[0]),
+              engine,
+              (point, cells) => scaleTupleComponents(point, cells)
+            );
+            if (t !== undefined)
+              return BoxedType.forResult(
+                withFloatRationalCellsAsReal(ops, t),
+                engine._typeResolver
+              );
+          }
+        }
         // A factor with cells of unknown type and an unknown shape (see
         // `hasUnknownBroadcastCells`): before the tensor and collection
         // branches, which would fold it into the cells of a list as a scalar.
@@ -10245,6 +10689,12 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             ? x.evaluate({ numericApproximation: true })
             : x.evaluate()
         );
+        if (evaluated.some((x) => containsContinuationOperand(x)))
+          return mulAroundFoldBarriers(ops, evaluated, {
+            numericApproximation,
+            engine,
+            expression,
+          });
         return mulEvaluatedOperands(ops, evaluated, {
           numericApproximation,
           engine,
@@ -10297,11 +10747,17 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           engine,
           effects,
           () =>
-            mulEvaluatedOperands(ops, evaluated, {
-              numericApproximation,
-              engine,
-              expression,
-            }),
+            evaluated.some((x) => containsContinuationOperand(x))
+              ? mulAroundFoldBarriers(ops, evaluated, {
+                  numericApproximation,
+                  engine,
+                  expression,
+                })
+              : mulEvaluatedOperands(ops, evaluated, {
+                  numericApproximation,
+                  engine,
+                  expression,
+                }),
           _contextStack,
           _precisionWindow
         );
@@ -10335,9 +10791,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The hot box route runs `checkNumericArgs` once in
       // `makeNumericFunction()` and bypasses the definition handler and its
       // post-handler signature seam. That fast path is also what admits a
-      // `Quantity` or a `Measurement` operand, which type `value` and would
-      // be disjoint from this carrier. The handler below remains the guarded
-      // generic fallback for routes that do reach the definition.
+      // value of a kind (a quantity, a measurement), by the rule of the
+      // arithmetic operators (`checkNumericArgs` with the `negate` hook): its
+      // type is disjoint from this carrier. The handler below remains the
+      // guarded generic fallback for routes that do reach the definition.
       //
       // That handler folds a literal `NaN` operand to `NaN` at
       // canonicalization (through `.neg()`), rather than letting the node
@@ -10347,7 +10804,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // enforcement seam is being bypassed, the folded literal types more
       // sharply than the unfolded node, and the folded value is exactly
       // what the gate would answer.
-      signature: '(complex | infinity | residue) -> number',
+      signature: '(complex | infinity) -> number',
       examples: ['-(x - 1)'],
       nanBehavior: 'propagate',
       partiality: 'total',
@@ -10363,61 +10820,56 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // (`withoutNonArithmeticArms`): a negation never yields one.
       type: ([x], context) =>
         BoxedType.forResult(
-          negateNumericType(
-            resolveShapedTypeAlias(withoutNonArithmeticArms(x).type)
-          ),
+          // The negation of a kind value: the cell type from the
+          // `resultType` hook of its kind type (`residueShapedResultType()`).
+          isKindOperand(x, context.engine)
+            ? residueShapedResultType(
+                [x],
+                context.engine,
+                ([y]) =>
+                  negateNumericType(
+                    resolveShapedTypeAlias(withoutNonArithmeticArms(y).type)
+                  ),
+                'Negate'
+              )
+            : negateNumericType(
+                resolveShapedTypeAlias(withoutNonArithmeticArms(x).type)
+              ),
           context.engine._typeResolver
         ),
       sgn: ([x]) => oppositeSgn(x.sgn),
       // The canonical form is the one `makeNumericFunction` (`box.ts`) also
       // computes by name. See `numericCanonicalHandler`.
       canonical: numericCanonicalHandler('Negate'),
-      evaluate: ([x], { numericApproximation, engine }) => {
+      evaluate: ([x], { numericApproximation, engine, expression }) => {
         // Non-lazy: `x` is already evaluated by the driver.
-        const nonNumeric = nonNumericOperandError(engine!, [x]);
+        const nonNumeric = nonNumericOperandError(engine!, [x], 'Negate');
         if (nonNumeric !== undefined) return nonNumeric;
         // A tuple with a list coordinate is data, not a point: arithmetic
         // over it is an error (see `listCoordinateTupleOperandError`).
         const listTuple = listCoordinateTupleOperandError(engine!, [x]);
         if (listTuple !== undefined) return listTuple;
         const evalX = x;
-        if (isResidueClass(evalX)) return residueNegate(engine, evalX);
-        // The negation of a sum or product that holds a class is distributed
-        // by `neg()`, then its classes are folded: `-(x + c)` is `-x - c`,
-        // and `-c` is the class `-c` (`residueFold()` reads it so).
-        if (containsResidueClass(evalX)) {
+        // The negation of a kind value (a residue class) is the answer of
+        // the `negate` hook of its kind, or it stays unevaluated.
+        if (holdsKindValue(evalX)) {
+          const negated = kindOperation(
+            engine,
+            'negate',
+            [evalX],
+            writtenOperands(expression, 1),
+            numericApproximation === true
+          );
+          if (negated !== undefined) return negated;
+          // The negation of a sum or product that holds a kind value is
+          // distributed by `neg()`, then evaluated, so that each negated
+          // kind value goes to the `negate` hook of its kind and the terms
+          // go to the `add` hooks: `-(x + c)` is `-x + (-c)`, with `-c` the
+          // class `-c`.
           const r = evalX.neg();
           if (isFunction(r, 'Add') || isFunction(r, 'Multiply'))
-            return (
-              residueArithmetic(
-                engine,
-                r.operator as 'Add' | 'Multiply',
-                r.ops
-              ) ?? r
-            );
-          return r;
-        }
-        if (isQuantity(evalX)) {
-          // A symbolic magnitude has no numeric value (its `.re` is `NaN`),
-          // and an exact magnitude (`π`) must stay exact: negate it with the
-          // expression arithmetic of the `Measurement` branch, with no error.
-          if (usesExpressionArithmetic([evalX.op1])) {
-            const negM = measurementNegate(engine, evalX.op1);
-            if (negM !== undefined) {
-              const r = engine._fn('Quantity', [negM, evalX.op2]);
-              return numericApproximation ? r.N() : r;
-            }
-          }
-          const mag = evalX.op1.re;
-          if (mag !== undefined)
-            return engine._fn('Quantity', [
-              asFloat(engine.number(-mag)),
-              evalX.op2,
-            ]);
-        }
-        if (isMeasurement(evalX)) {
-          const r = measurementNegate(engine, evalX);
-          return numericApproximation ? r?.N() : r;
+            return numericApproximation ? r.N() : r.evaluate();
+          return isFunction(r, 'Negate') && r.op1 === evalX ? undefined : r;
         }
         const neg = evalX.neg();
         // If the operand only became a collection (vector/matrix) *after*
@@ -10442,16 +10894,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'A nominal value carrying a 1σ absolute uncertainty.',
       complexity: 1200,
       lazy: true,
-      signature: '(value, value) -> value',
+      // A measurement is a value of the VALUE KIND `measurement`
+      // (`MEASUREMENT_ARITHMETIC`, `measurement-arithmetic.ts`): an opaque
+      // type, admitted where a number is admitted, with its own arithmetic
+      // and order. `docs/plans/2026-10-26-value-kinds.md`, section 4.7.
+      signature: '(value, value) -> measurement',
+      arithmetic: MEASUREMENT_ARITHMETIC,
+      // Two measurements, or a measurement and a value, are equal when their
+      // nominals are (`measurementEq()`); `Equal` asks it when the order
+      // (`compare`) has no answer, as for a complex nominal.
+      eq: (a, b) => measurementEq(a, b),
       examples: [
         'Measurement(9.81, 0.02)',
         'N(Measurement(5, 0.2) * Measurement(3, 0.4))',
       ],
-      type: (ops, context) =>
-        BoxedType.forResult(
-          measurementTypeOnTypes(ops),
-          context.engine._typeResolver
-        ),
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return ce.error('incompatible-type');
         const value = args[0].canonical;
@@ -10556,8 +11012,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // discipline relies on it (`resultIsComplexValued`,
       // javascript-target.ts), and the per-call sharpness lives in the
       // type handler below.
-      signature:
-        '(complex | infinity | residue, complex | signed_infinity | residue) -> number',
+      signature: '(complex | infinity, complex | signed_infinity) -> number',
       examples: ['[2^10, 2^(1/2), x^2 * x^3]'],
       nanBehavior: 'propagate',
       type: (ops, context) =>
@@ -10568,10 +11023,13 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             const [base, exp] = ops;
             // A power that holds a residue class, in its base or in its
             // exponent, is not a number.
-            if (ops.some((x) => isResidueClassOperand(x, context.engine)))
+            if (ops.some((x) => isKindOperand(x, context.engine)))
               return BoxedType.forResult(
-                residueShapedResultType(ops, context.engine, (o) =>
-                  context.derive('Power', o)
+                residueShapedResultType(
+                  ops,
+                  context.engine,
+                  (o) => context.derive('Power', o),
+                  'Power'
                 ),
                 context.engine._typeResolver
               );
@@ -10963,7 +11421,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // 2026-07-19 symbolic-recursion re-walk). Only LAZY operators
           // (`Add`, `Multiply`, `Sum`, …) receive raw operands and own their
           // evaluation.
-          const nonNumeric = nonNumericOperandError(engine!, [x, n]);
+          const nonNumeric = nonNumericOperandError(engine!, [x, n], 'Power');
           if (nonNumeric !== undefined) return nonNumeric;
           // A tuple with a list coordinate is data, not a point: arithmetic
           // over it is an error (see `listCoordinateTupleOperandError`).
@@ -10990,37 +11448,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           )
             return engine!.typeError(POWER_EXPONENT_CARRIER_TYPE, n.type, n);
           const evalBase = x;
-          // A power of a residue class is a class, or it stays unevaluated (a
+          // A power with a kind value (a residue class), in its base or in
+          // its exponent, is the answer of the `power` hook of the first kind
+          // among the operands that answers, or it stays unevaluated (a
           // negative power of a class with no inverse, a call that is not a
-          // class yet, a base with a class inside it): the generic power reads
-          // `c^0` as 1 and `(1/c)^{-1}` as `c`.
-          if (containsResidueClass(evalBase)) {
-            // A class is exact: under `.N()`, a pure exponent is read from its
-            // exact value, not its approximation (`10^{20}` is not an exact
-            // integer as a float). See the same rule in `Divide`.
-            const original =
-              numericApproximation && expression && isFunction(expression)
-                ? expression.ops[1]
-                : undefined;
-            const exponent =
-              original !== undefined
-                ? exactOperands([original], [n], true)[0]
-                : n;
-            return residuePower(engine!, evalBase, exponent);
-          }
-          if (evalBase.operator === 'Quantity') {
-            const r = quantityPower(engine!, evalBase, n);
-            // An exact or Measurement magnitude is made numeric under `.N()`.
-            return numericApproximation ? r?.N() : r;
-          }
-          const evalExp = n;
-          if (
-            evalBase.operator === 'Measurement' ||
-            evalExp.operator === 'Measurement'
-          ) {
-            const r = measurementPower(engine!, evalBase, evalExp);
-            return numericApproximation ? r?.N() : r;
-          }
+          // class yet, a base with a class inside it): the generic power
+          // reads `c^0` as 1 and `(1/c)^{-1}` as `c`. Under `.N()` a hook
+          // reads the exact value of an operand through `exact()` (`10^{20}`
+          // is not an exact integer as a float).
+          if (holdsKindValue(evalBase) || holdsKindValue(n))
+            return kindOperation(
+              engine!,
+              'power',
+              [evalBase, n],
+              writtenOperands(expression, 2),
+              numericApproximation === true
+            );
           // Under `.N()`, an exact base raised to a large exact integer `k`: the
           // relative error of the base is multiplied by `|k|`, so the float of
           // `π` at 21 digits gives only 17 correct digits of `π^1000000`. The
@@ -11107,7 +11550,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 0) return ce._fn('Rational', [ce.error('missing')]);
 
         if (args.length === 1)
-          return ce._fn('Rational', [checkType(ce, args[0], 'real')]);
+          return ce._fn('Rational', [checkOperandType(ce, args[0], 'real')]);
 
         // `checkType` admits a merely-OVERLAPPING operand (deferred
         // validation: a `number`-typed symbol may turn out integral), so a
@@ -11221,8 +11664,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `complex`, so the policy derived from the signature would be
       // `reject`). The values are folded by `root()` (arithmetic-power.ts),
       // which delegates the non-finite cases to `pow`.
-      signature:
-        '(complex | infinity | residue, complex | infinity | residue) -> number',
+      signature: '(complex | infinity, complex | infinity) -> number',
       examples: ['[Root(8, 3), N(Root(2, 3))]'],
       nanBehavior: 'propagate',
       requires: ([, n]) => {
@@ -11233,12 +11675,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // A root that holds a residue class, in its radicand or in its
         // index, is not a number (it stays unevaluated).
         if (
-          isResidueClassOperand(base, context.engine) ||
-          isResidueClassOperand(exp, context.engine)
+          isKindOperand(base, context.engine) ||
+          isKindOperand(exp, context.engine)
         )
           return BoxedType.forResult(
-            residueShapedResultType([base, exp], context.engine, (o) =>
-              context.derive('Root', o)
+            residueShapedResultType(
+              [base, exp],
+              context.engine,
+              (o) => context.derive('Root', o),
+              'Power',
+              // The exponent of the `power` hook is `1/n`.
+              [
+                typeWithoutShape(base.type),
+                isSubtype(exp.type, 'integer') ? 'rational' : 'number',
+              ]
             ),
             context.engine._typeResolver
           );
@@ -11326,29 +11776,30 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: guardDigitsN(
         ([x, n], { numericApproximation, engine, expression }) => {
           // Non-lazy: operands are already evaluated by the driver.
-          const nonNumeric = nonNumericOperandError(engine, [x, n]);
+          const nonNumeric = nonNumericOperandError(engine, [x, n], 'Root');
           if (nonNumeric !== undefined) return nonNumeric;
           const evalX = x;
-          if (evalX.operator === 'Quantity') {
-            const nVal = n.re;
-            if (nVal !== undefined && nVal !== 0) {
-              // For an integer index, the exact `1/n`, not a float: the root of
-              // an exact magnitude stays exact under `evaluate()`.
-              const r = quantityPower(
-                engine,
+          // A root with a kind value (a residue class) is the answer of the
+          // `power` hook of its kind with the exponent `1/n`, or it stays
+          // unevaluated.
+          if (holdsKindValue(evalX) || holdsKindValue(n)) {
+            const writtenIndex = operandOf(expression, 1);
+            const exponent = engine.function('Divide', [engine.One, n]);
+            return kindOperation(
+              engine,
+              'power',
+              [
                 evalX,
-                Number.isInteger(nVal)
-                  ? engine.number([1, nVal])
-                  : engine.number(1 / nVal)
-              );
-              // Under `.N()` the magnitude is a float.
-              if (numericApproximation && r && isQuantity(r)) return r.N();
-              return r;
-            }
-          }
-          if (isMeasurement(evalX)) {
-            const r = measurementRoot(engine, evalX, n);
-            return numericApproximation ? r?.N() : r;
+                numericApproximation ? exponent.N() : exponent.evaluate(),
+              ],
+              [
+                operandOf(expression, 0),
+                writtenIndex === undefined
+                  ? undefined
+                  : engine.function('Divide', [engine.One, writtenIndex]),
+              ],
+              numericApproximation === true
+            );
           }
           // An exact radicand outside the double range (`10^{-900}`) can have
           // a root in the double range (`Root(10^{-900}, 3)` is `1e-300`). The
@@ -11555,13 +12006,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (
-        [x0, step0],
+        [x, step],
         { engine: ce, numericApproximation, expression }
       ) => {
-        // A `Measurement` rounds as its nominal (see `Floor`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
         // A value halfway between two integers is rounded with the rule of
         // `ce.roundingTies` at every precision (by default away from zero:
         // `Round(-0.5)` is `-1`, `Round(2.5)` is `3`). The machine lane
@@ -11571,10 +12018,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // helpers. `applyRounding()` boxes the rounded quotient as an exact
         // integer also for a float `x`, so the multiple of an exact step is
         // exact (`Round(3.14159, 1/100)` is `157/50`, as in Mathematica).
-        // The operand as written, read through its nominal (see `Floor`).
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // The operand as written, for the exact recovery near a rounding
+        // jump.
+        const original = originalOperand(expression, 0);
         const ties = ce.roundingTies;
         const roundValue = (v: Expression, original?: Expression) =>
           applyRounding(
@@ -11790,17 +12236,22 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // live in `BoxedNumber.sqrt()`, which both routes call. The result
       // needs the `infinity` arm because `√(−∞)` and `√(~oo)` are `~oo`,
       // which the signed pair excludes.
-      signature: '(complex | infinity | residue) -> complex | infinity',
+      signature: '(complex | infinity) -> complex | infinity',
       examples: ['[Sqrt(8), Sqrt(-4), N(Sqrt(2))]'],
       // Explicit: the DERIVED default answers `reject` for a carrier that
       // is not a subtype of `complex`, and `Sqrt(NaN)` must be `NaN`.
       nanBehavior: 'propagate',
       type: ([x], context) => {
         // A root of a residue class is not a number (it stays unevaluated).
-        if (isResidueClassOperand(x, context.engine))
+        if (isKindOperand(x, context.engine))
           return BoxedType.forResult(
-            residueShapedResultType([x], context.engine, (o) =>
-              context.derive('Sqrt', o)
+            residueShapedResultType(
+              [x],
+              context.engine,
+              (o) => context.derive('Sqrt', o),
+              'Power',
+              // The exponent of the `power` hook is `1/2`.
+              [typeWithoutShape(x.type), 'rational']
             ),
             context.engine._typeResolver
           );
@@ -11914,22 +12365,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       evaluate: guardDigitsN(
         ([x], { numericApproximation, engine, expression }) => {
           // Non-lazy: `x` is already evaluated by the driver.
-          const nonNumeric = nonNumericOperandError(engine, [x]);
+          const nonNumeric = nonNumericOperandError(engine, [x], 'Sqrt');
           if (nonNumeric !== undefined) return nonNumeric;
           const evalX = x;
-          if (evalX.operator === 'Quantity') {
-            // The exact one half, not the float 0.5: the root of an exact
-            // magnitude stays exact under `evaluate()`.
-            const r = quantityPower(engine, evalX, engine.Half);
-            // Under `.N()` the magnitude is a float: `√2 m` is `1.414… m`.
-            if (numericApproximation && r && isQuantity(r)) return r.N();
-            return r;
-          }
-
-          if (isMeasurement(evalX)) {
-            const r = measurementSqrt(engine, evalX);
-            return numericApproximation ? r?.N() : r;
-          }
+          // A square root of a kind value (a residue class) is the answer of
+          // the `power` hook of its kind with the exponent `1/2`, or it stays
+          // unevaluated.
+          if (holdsKindValue(evalX))
+            return kindOperation(
+              engine,
+              'power',
+              [evalX, engine.Half],
+              [operandOf(expression, 0), engine.Half],
+              numericApproximation === true
+            );
 
           if (!numericApproximation) return sqrtOfSquareFactors(x) ?? x.sqrt();
 
@@ -11983,7 +12432,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // `Square(±∞) = +∞`, and `Square(~oo) = ~oo` (a positive power of
       // `~oo` is `~oo` in every direction of approach). A precise carrier
       // declared here would be a claim nothing consults.
-      signature: '(number | residue) -> number',
+      signature: '(number) -> number',
       examples: ['[Square(3), Square(x + 1)]'],
       sgn: ([x]) => {
         if (x.isSame(0)) return 'zero';
@@ -12025,11 +12474,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       broadcastExemptions: ['tuples', 'collection-result'],
       // We accept from 1 to n arguments (see https://github.com/cortex-js/compute-engine/issues/171)
       // left-associative: a - b - c -> (a - b) - c
-      signature: '((number | residue)+) -> number',
+      signature: '(number+) -> number',
       examples: ['5 - 3 - x'],
       type: subtractTypeHandler,
       canonical: (args, { engine }) => {
-        args = checkNumericArgs(engine, args, { residue: true });
+        args = checkNumericArgs(engine, args, { kindHook: 'add' });
         if (args.length === 0) return engine.error('missing');
         // Unary `Subtract(x)` folds to `x` through `canonicalAdd`, erasing
         // the operator before the arithmetic evaluate guard can examine the
@@ -12075,16 +12524,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x0, step0], { numericApproximation, expression }) => {
-        // A `Measurement` truncates as its nominal (see `Floor`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
+      evaluate: ([x, step], { numericApproximation, expression }) => {
         // The operand as written, for the exact recovery near a rounding
-        // jump, read through its nominal when it is a `Measurement`.
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // jump.
+        const original = originalOperand(expression, 0);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -12798,7 +13241,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         BoxedType.forResult(
           // A residue class has no order: the call is an error
           // (`residueExtremumError`).
-          residueExtremumError(ops) ?? extremumTypeOnTypes(ops, 'max'),
+          residueExtremumError(ops, context.engine) ??
+            kindExtremumType(ops, context.engine, (o) =>
+              extremumTypeOnTypes(o, 'max')
+            ) ??
+            extremumTypeOnTypes(ops, 'max'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {
@@ -12836,7 +13283,11 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       missingBehavior: 'handle',
       type: (ops, context) =>
         BoxedType.forResult(
-          residueExtremumError(ops) ?? extremumTypeOnTypes(ops, 'min'),
+          residueExtremumError(ops, context.engine) ??
+            kindExtremumType(ops, context.engine, (o) =>
+              extremumTypeOnTypes(o, 'min')
+            ) ??
+            extremumTypeOnTypes(ops, 'min'),
           context.engine._typeResolver
         ),
       sgn: (ops) => {
@@ -12892,7 +13343,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumRangeTypeOnTypes('max', ops) ??
+          // A value of a kind with `compare` (a measurement) is ordered by
+          // its hook, and the result is one of the operands as written
+          // (`kindExtremumType()`), as for `Clamp`.
+          kindExtremumType(
+            ops,
+            context.engine,
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+          ) ??
+            extremumRangeTypeOnTypes('max', ops) ??
             elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
@@ -12913,7 +13372,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumRangeTypeOnTypes('min', ops) ??
+          // A value of a kind with `compare` (a measurement) is ordered by
+          // its hook, and the result is one of the operands as written
+          // (`kindExtremumType()`), as for `Clamp`.
+          kindExtremumType(
+            ops,
+            context.engine,
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+          ) ??
+            extremumRangeTypeOnTypes('min', ops) ??
             elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
@@ -12934,7 +13401,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumRangeTypeOnTypes('clamp', ops) ??
+          // A value of a kind with `compare` is ordered by its hook, and the
+          // result is the operand or a bound as written
+          // (`kindExtremumType()`).
+          kindExtremumType(
+            ops,
+            context.engine,
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+          ) ??
+            extremumRangeTypeOnTypes('clamp', ops) ??
             elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
@@ -13154,7 +13629,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['Product(k, (k, 1, 5))', 'Product(1 - 1/k^2, (k, 2, 10))'],
       type: (ops, context) =>
         BoxedType.forResult(
-          bigOpResultTypeOnTypes(ops, 'Product'),
+          kindReductionType(ops, context, 'Multiply') ??
+            bigOpResultTypeOnTypes(ops, 'Product'),
           context.engine._typeResolver
         ),
 
@@ -13521,7 +13997,8 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['Sum(k^2, (k, 1, 10))', 'Sum(1/k^2, (k, 1, oo))'],
       type: (ops, context) =>
         BoxedType.forResult(
-          bigOpResultTypeOnTypes(ops, 'Sum'),
+          kindReductionType(ops, context, 'Add') ??
+            bigOpResultTypeOnTypes(ops, 'Sum'),
           context.engine._typeResolver
         ),
 
@@ -14616,10 +15093,10 @@ function numericOfFold(
   seen: NonFiniteTerm
 ): Expression {
   if (seen.kind === 'exact' && value.isNaN !== true) return value;
-  // A `Measurement` is the value of the fold with its uncertainty
-  // (`Product([Measurement(0.7468, 0.001), 0.5, 0.9])`); the float of the
-  // exact value would drop the uncertainty.
-  if (isMeasurement(value)) return value;
+  // A value of a kind is the value of the fold as it is: a measurement keeps
+  // its uncertainty (`Product([Measurement(0.7468, 0.001), 0.5, 0.9])`), and
+  // the float of the exact value would drop it.
+  if (isKindValue(value)) return value;
   return numericFromExactValue(ce, expression, value) ?? value;
 }
 
@@ -14914,10 +15391,16 @@ function evaluateAbs(
   // (`Abs([3,-4]) → [3,4]`).
   if (isTuple(arg))
     return ce.function('Norm', [arg]).evaluate({ numericApproximation });
-  // `Abs(Measurement(v, σ))` is `Measurement(Abs(v), σ)` (see
-  // `measurementLipschitzUnary`).
-  const m = measurementLipschitzUnary(ce, 'Abs', arg);
-  if (m !== undefined) return numericApproximation ? m.N() : m;
+  // A quantity: the absolute value of its magnitude, with its unit
+  // (`Abs(-2 m)` is `2 m`). A magnitude whose absolute value is not known
+  // (a symbol) leaves the call unevaluated.
+  if (isQuantity(arg)) {
+    const magnitude = ce
+      .function('Abs', [arg.op1])
+      .evaluate({ numericApproximation });
+    if (isFunction(magnitude, 'Abs')) return undefined;
+    return ce._fn('Quantity', [magnitude, arg.op2]);
+  }
   if (isNumber(arg)) {
     const num = arg.numericValue;
     if (typeof num === 'number') return ce.number(Math.abs(num));
@@ -15069,8 +15552,23 @@ function processMinMaxItem(
   // `value`-typed operand turned out to hold, is an `incompatible-type`
   // error, as a dictionary is. (A call with an operand typed `residue` is
   // typed `error` when it is boxed, `residueExtremumError`.)
-  if (isResidueClass(item) || typeIsResidueForCertain(item.type.type))
-    return [ce.typeError('number', item.type, item), []];
+  //
+  // A value of a kind whose kind type declares `compare` (a measurement
+  // declared by a user) is a datum, ordered by the hook (`exactOrder()`,
+  // `kindCompare()`), and the chosen operand is returned as it is. An operand
+  // typed with such a kind that is not a value (a symbol with no value)
+  // stays in the unevaluated result.
+  if (isResidueClass(item) || typeIsKindForCertain(item.type.type, ce)) {
+    if (!kindTypesHaveCompare(ce, item.type.type))
+      return [ce.typeError('number', item.type, item), []];
+    // A kind value that stands for no value (`Measurement(NaN, 0.1)`,
+    // `Quantity(NaN, m)`: `ArithmeticDefinition.isNaN`) is absent, as the
+    // number `NaN` is: the extremum is `NaN`.
+    if (kindValueIsNaN(item)) return [ce.NaN, []];
+    if (isKindValue(item)) return [item, []];
+    // A collection of such values is walked below, element by element.
+    if (item.isCollection !== true) return [undefined, [item]];
+  }
 
   // An interval is continuous
   if (isFunction(item, 'Interval')) {
@@ -15254,42 +15752,6 @@ function processMinMaxItem(
   }
 
   if (isNumber(item)) return [item, []];
-  // A `Measurement(v, σ)` is a value ordered by its nominal `v`
-  // (`exactOrder`), and the chosen operand is returned as it is, uncertainty
-  // included: `Max(0.1, Measurement(0.7468, 6.6e-16))` is the measurement.
-  // A quadrature result is a measurement under `.N()`, so this is how
-  // `min(k, ∫…)` folds. The nominal decides as a bare operand would: a
-  // nominal that is `NaN` absorbs (`Max(1, Measurement(NaN, 0.1))` is `NaN`),
-  // a complex or symbolic nominal leaves the measurement in the unevaluated
-  // result (`Max(Measurement(z, 0.1))` stays unevaluated, as `Max(z)` does),
-  // and a float nominal makes the extremum inexact, as a float operand does
-  // (`isInexactOperand()` reads the nominal: `Max(Measurement(1.5, 0.1),
-  // Indeterminate)` is `NaN`, not `Indeterminate`).
-  if (isMeasurement(item)) {
-    const [nominal] = processMinMaxItem(item.op1, mode, walk);
-    // A complex number literal is reported as a value by the number branch
-    // below and set aside by `foldExtremumValue`, which sees only the bare
-    // literal; the measurement is set aside here.
-    if (nominal === undefined || (isNumber(nominal) && nominal.isComplex))
-      return [undefined, [item]];
-    if (nominal.isNaN) return [nominal, []];
-    return [item, []];
-  }
-  // A `Quantity` is a value when its magnitude is a value: `exactOrder`
-  // orders two quantities with units of the same dimension by their
-  // physical value, so `Max(1 km, 999 m)` is `1 km`. A quantity that cannot
-  // be ordered against the other values (units of another dimension, a
-  // number with no unit) stays in the unevaluated result, as a complex
-  // number does. The magnitude decides as a bare operand would: a complex or
-  // symbolic magnitude leaves the quantity in the unevaluated result, and a
-  // magnitude that is `NaN` absorbs.
-  if (isFunction(item, 'Quantity')) {
-    const [magnitude] = processMinMaxItem(item.op1, mode, walk);
-    if (magnitude === undefined || (isNumber(magnitude) && magnitude.isComplex))
-      return [undefined, [item]];
-    if (magnitude.isNaN) return [magnitude, []];
-    return [item, []];
-  }
   // A real constant that is not a number literal (`π`, `√10`, `e²`) has a
   // value, and `exactOrder` orders it against the other values:
   // `Max(π, 3)` is `π`. Any other operand (a symbol with no value, a complex
@@ -15517,19 +15979,18 @@ function scalarExtremum(
   numericApproximation: boolean
 ): Expression | undefined {
   const ce = a.engine;
-  // A `Measurement(v, σ)` is read through its nominal `v` by the guards
-  // below, as `Max`/`Min` read it (`processMinMaxItem`): a `NaN` nominal
-  // absorbs, a complex nominal is unordered, and a float nominal makes an
-  // `Indeterminate` answer `NaN`. The winner returned is still the operand
-  // itself, uncertainty included.
-  const an = isMeasurement(a) ? a.op1 : a;
-  const bn = isMeasurement(b) ? b.op1 : b;
   // A `NaN` operand gives `NaN`; an `Indeterminate` operand gives
   // `Indeterminate` when the other operand is neither `NaN` nor inexact
-  // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`).
-  if (an.isNaN === true || bn.isNaN === true)
-    return nanOperandAnswer(ce, [an, bn]);
-  if ((isNumber(an) && an.isComplex) || (isNumber(bn) && bn.isComplex))
+  // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`;
+  // a value of a kind is inexact when its kind says so, as a measurement
+  // does). A value of a kind (a measurement) is ordered by the `compare`
+  // hook of its kind (`extremumOrder()`, `exactOrder()`), and the winner is
+  // the operand itself, uncertainty included. The `isNaN` test also covers
+  // a kind value whose `isNaN` hook says it stands for no value
+  // (`ArithmeticDefinition.isNaN`: `Measurement(NaN, 0.1)`,
+  // `Quantity(NaN, m)`), because `BoxedFunction.isNaN` reads that hook.
+  if (a.isNaN === true || b.isNaN === true) return nanOperandAnswer(ce, [a, b]);
+  if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
   // keep `a`, unless `b` is a number literal and `a` is not (see
@@ -15565,8 +16026,16 @@ function extremumOrder(
 ): boolean | undefined {
   const order = exactOrder(candidate, current, { tieWithinTolerance: true });
   if (order === undefined) return undefined;
+  // A tie with a kind value keeps the first operand: the kind value is not
+  // replaced by a number literal of the same order (`Max(U, 2)` for a
+  // measurement `U` with the nominal 2 is `U`).
   if (order === 0)
-    return preferLiteralOnTie && isNumber(candidate) && !isNumber(current);
+    return (
+      preferLiteralOnTie &&
+      isNumber(candidate) &&
+      !isNumber(current) &&
+      !isKindValue(current)
+    );
   return upper ? order > 0 : order < 0;
 }
 
@@ -15688,12 +16157,77 @@ function linspaceHasInexactSample(list: Expression): boolean {
  * `value`-typed symbol) is refused when the call is evaluated only.
  */
 function residueExtremumError(
-  ops: ReadonlyArray<OperandDescriptor>
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView
 ): Type | undefined {
   // The strict reading: an operand typed `integer | residue` may be a
   // number, and the call is typed as if it were one; a class among its
   // values is refused when the call is evaluated (`processMinMaxItem`).
-  return ops.some((x) => typeIsResidueForCertain(x.type)) ? 'error' : undefined;
+  // A kind type that declares `compare` (any registered head of the type)
+  // has an order: its values are data of the extremum
+  // (`kindExtremumType()`).
+  return ops.some(
+    (x) =>
+      typeIsKindForCertain(x.type, engine) &&
+      !kindTypesHaveCompare(engine, x.type)
+  )
+    ? 'error'
+    : undefined;
+}
+
+/**
+ * True when every kind type that `t` has as an arm, at any level, declares
+ * `compare` (a registered head of the type declares it, the reading per
+ * type of `docs/plans/2026-10-26-value-kinds.md`, section 4.5), and `t` has
+ * at least one kind arm.
+ */
+function kindTypesHaveCompare(engine: PureEngineView, t: Type): boolean {
+  const names = kindArmNames(t, kindTypeNames(engine));
+  return (
+    names.length > 0 &&
+    names.every((n) => kindTypeHasHook(engine as ComputeEngine, n, 'compare'))
+  );
+}
+
+/**
+ * The type of `Max`, `Min` or `Clamp` when an operand has an arm of a kind
+ * type that declares `compare` (`docs/plans/2026-10-26-value-kinds.md`,
+ * section 4.5): the result is one of the operands as it is, so its type is
+ * the union of the kind arms of the operands (of their elements, for a
+ * collection operand) and of `ordinary`, the type of the operator over the
+ * operands without their kind arms. `Max(U, 3)` for a measurement `U` is
+ * `integer | umeasurement`; `Max(U1, U2)` is `umeasurement`. An operand
+ * that holds kind values only (`umeasurement`, `list<umeasurement>`) takes
+ * no part in `ordinary`. `undefined` when no operand has such a kind arm:
+ * the ordinary rules apply.
+ */
+function kindExtremumType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  engine: PureEngineView,
+  ordinary: (ops: ReadonlyArray<OperandDescriptor>) => Type
+): Type | undefined {
+  const kinds = kindTypeNames(engine);
+  const arms: string[] = [];
+  for (const d of ops)
+    for (const name of kindArmNames(d.type, kinds))
+      if (
+        !arms.includes(name) &&
+        kindTypeHasHook(engine as ComputeEngine, name, 'compare')
+      )
+        arms.push(name);
+  if (arms.length === 0) return undefined;
+  const free = ops
+    .filter(
+      (d) => !isUninhabitedWithoutKinds(stripMissingFromType(d.type), kinds)
+    )
+    .map((d) =>
+      hasKindArm(d.type, kinds)
+        ? describeType(withoutKindArmsDeep(d.type, kinds))
+        : d
+    );
+  const types: Type[] = arms.map((name) => engine.type(name).type);
+  if (free.length > 0) types.unshift(ordinary(free));
+  return types.length === 1 ? types[0] : reduceType({ kind: 'union', types });
 }
 
 function evaluateMinMax(
@@ -15984,63 +16518,16 @@ function divideFromExactValues(
 }
 
 /**
- * The value of a sum or a product when one of its evaluated operands
- * `evaluated` contains a residue class. `ops` are the operands before the
- * evaluation.
- *
- * Only the residue rules fold: the classes of one ring among the operands,
- * and the exact integer or rational literals that read in that ring, become
- * one class (`residueFold()`). Every other operand is kept as it is, beside
- * the class, and the result is built with no other fold: no like terms are
- * combined, no reciprocals cancel, and a zero, a float or an infinity does
- * not absorb the class.
- *
- * - `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`.
- * - `ResidueClass(1, 5) + ResidueClass(2, 5) + x` is
- *   `x + ResidueClass(3, 5)`.
- * - `ResidueClass(2, 5) + ∞` and `ResidueClass(2, 4) + ResidueClass(1, 6)`
- *   stay sums.
- * - `d·x - d·x` stays a sum: the generic sum would make it the integer 0.
- * - An operand that is `NaN` or `Indeterminate` decides the result, by the
- *   rule of `nanOperandAnswer()`: `Indeterminate + c` is `Indeterminate`,
- *   and under `.N()` the result is `NaN`.
- *
- * A class is exact, so under `.N()` the class is computed from the exact
- * values of the operands: `ResidueClass(5, 7) + 1/3` is `ResidueClass(3, 7)`
- * and not a sum with the float `0.333…`. A pure operand is evaluated again
- * without the numeric approximation. An impure operand (a `Random()` draw,
- * an assignment) keeps its value from `evaluated`, so that it runs once. The
- * operands that are not folded keep their numeric value: `(c·π).N()` is
- * `3.14159…·c`.
- */
-function residueOperands(
-  ce: ComputeEngine,
-  ops: ReadonlyArray<Expression>,
-  evaluated: ReadonlyArray<Expression>,
-  numericApproximation: boolean | undefined,
-  operator: 'Add' | 'Multiply'
-): Expression {
-  if (evaluated.some((x) => isNumber(x) && x.isNaN))
-    return numericApproximation ? ce.NaN : nanOperandAnswer(ce, evaluated);
-  const exact = exactOperands(ops, evaluated, numericApproximation);
-  const fold = residueFold(ce, exact, operator === 'Add' ? 'add' : 'multiply');
-  if (fold === undefined) return ce.function(operator, evaluated);
-  if (fold.rest.length === 0) return fold.value;
-  return ce.function(operator, [
-    fold.value,
-    ...fold.rest.map((i) => evaluated[i]),
-  ]);
-}
-
-/**
- * The exact values of the operands `ops` of an operation with a residue
- * class, when `evaluated` holds their values under `.N()`. A class is exact,
- * so the residue rules read the exact value of an operand (`1/3`, not
- * `0.333…`). An operand is evaluated again only when that cannot run a side
- * effect twice (`isTransitivelyPure()`: a symbol whose value is an impure
- * call is not evaluated again); otherwise its value from `evaluated` is
- * kept, and a float does not read as a class. Without a numeric
- * approximation, `evaluated` already holds the exact values.
+ * The exact values of the operands `ops` of a sum or a product with a kind
+ * value and a collection operand, when `evaluated` holds their values under
+ * `.N()`. A kind whose values are exact (a residue class) reads the exact
+ * value of an operand (`1/3`, not `0.333…`). An operand is evaluated again
+ * only when that cannot run a side effect twice (`isTransitivelyPure()`: a
+ * symbol whose value is an impure call is not evaluated again); otherwise
+ * its value from `evaluated` is kept, and a float does not read as a class.
+ * Without a numeric approximation, `evaluated` already holds the exact
+ * values. The hooks of the kinds read the same rule through `exact(i)`
+ * (`kind-dispatch.ts`).
  */
 function exactOperands(
   ops: ReadonlyArray<Expression>,
@@ -16049,9 +16536,7 @@ function exactOperands(
 ): ReadonlyArray<Expression> {
   if (!numericApproximation) return evaluated;
   return ops.map((op, i) =>
-    evaluated[i].operator !== 'ResidueClass' && isTransitivelyPure(op)
-      ? op.evaluate()
-      : evaluated[i]
+    isTransitivelyPure(op) ? op.evaluate() : evaluated[i]
   );
 }
 
@@ -16137,6 +16622,20 @@ function rescueExactCoefficients(
   }
 }
 
+/** The operands of `expression` before their evaluation, when it is a
+ * function expression with `count` operands: the written forms that the hooks
+ * of the value kinds read (`kindOperation()`). */
+function writtenOperands(
+  expression: Expression | undefined,
+  count: number
+): ReadonlyArray<Expression> | undefined {
+  return expression !== undefined &&
+    isFunction(expression) &&
+    expression.nops === count
+    ? expression.ops
+    : undefined;
+}
+
 /** The operand `i` of `expression` before its evaluation, if any. */
 function operandOf(
   expression: Expression | undefined,
@@ -16176,6 +16675,61 @@ function floorModFloat(a: Expression, b: Expression): Expression | undefined {
 }
 
 /**
+ * The value of a sum (`operator` is `Add`) or a product (`Multiply`) when
+ * one of its evaluated operands `evaluated` holds a kind value (a residue
+ * class, a value of a kind that a library user declared). `ops` are the
+ * operands before the evaluation.
+ *
+ * The hooks of the kinds fold (`kindSumOrProduct()`, `kind-dispatch.ts`),
+ * and the operands that hold no kind value are summed (multiplied) by the
+ * ordinary fold of this handler, as one sub-sum: `x + x + ResidueClass(1,
+ * 5)` is `2x + ResidueClass(1, 5)`, and `(√2 + π + ResidueClass(1, 5)).N()`
+ * adds the two floats. The operands that hold a kind value are placed
+ * beside the sub-sum with no other fold: no like terms are combined with
+ * them, no reciprocal cancels against them, and a zero, a float or an
+ * infinity does not absorb them.
+ *
+ * - `ResidueClass(5, 7) + 3` is `ResidueClass(1, 7)`.
+ * - `ResidueClass(2, 5) + ∞` and `ResidueClass(2, 4) + ResidueClass(1, 6)`
+ *   stay sums.
+ * - An operand that is `NaN` or `Indeterminate` decides the result, by the
+ *   rule of `nanOperandAnswer()`: `Indeterminate + c` is `Indeterminate`,
+ *   and under `.N()` the result is `NaN`.
+ *
+ * Under `.N()` a hook reads the exact value of an operand through
+ * `exact(i)` and returns its own numeric form: the result of a hook is not
+ * numericized again here.
+ */
+function kindEvaluatedOperands(
+  operator: 'Add' | 'Multiply',
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  options: Pick<EvaluateHandlerOptions, 'numericApproximation' | 'engine'>
+): Expression {
+  const ce = options.engine!;
+  const numericApproximation = options.numericApproximation === true;
+  if (evaluated.some((x) => isNumber(x) && x.isNaN))
+    return numericApproximation ? ce.NaN : nanOperandAnswer(ce, evaluated);
+  return kindSumOrProduct(
+    ce,
+    operator,
+    evaluated,
+    ops,
+    numericApproximation,
+    (written, values) =>
+      (operator === 'Add'
+        ? addEvaluatedOperands(written, values, {
+            numericApproximation,
+            engine: ce,
+          })
+        : mulEvaluatedOperands(written, values, {
+            numericApproximation,
+            engine: ce,
+          })) ?? ce.function(operator, values)
+  );
+}
+
+/**
  * The value of `Add(...ops)` from the values `evaluated` of its operands (one
  * value per operand, in order). `Add` is lazy: the handler evaluates the
  * operands itself, synchronously in `evaluate` and with `evaluateAsync` in
@@ -16202,7 +16756,7 @@ function addEvaluatedOperands(
     numericApproximation
   );
   if (rethreaded !== undefined) return rethreaded;
-  const nonNumeric = nonNumericOperandError(engine!, evaluated);
+  const nonNumeric = nonNumericOperandError(engine!, evaluated, 'Add');
   if (nonNumeric !== undefined) return nonNumeric;
   // A tuple with a list coordinate is data, not a point: arithmetic
   // over it is an error (see `listCoordinateTupleOperandError`).
@@ -16247,36 +16801,26 @@ function addEvaluatedOperands(
     )
       return engine!.Missing;
     if (hasAbsentScalarOperand(evaluated))
-      return absentScalarMarker(engine!, expression);
+      return absentArithmeticMarker(engine!, expression, ops, evaluated);
   }
-  // A sum with a residue class is folded by the residue rules only.
-  // The generic sum below does not know the ring of the class. A
-  // collection operand is first broadcast by the generic sum, and each
-  // element sum then comes back here: `ResidueClass(1, 5) + [1, 2]` is
-  // `[ResidueClass(2, 5), ResidueClass(3, 5)]`.
-  if (evaluated.some(containsResidueClass)) {
+  // A sum with a kind value (a residue class) is folded by the hooks of
+  // the kinds (`kindSumOrProduct()`): the generic sum below does not know
+  // their arithmetic. The operands that hold no kind value are summed by
+  // this function, as one sub-sum. A collection operand is first broadcast
+  // by the generic sum, and each element sum then comes back here:
+  // `ResidueClass(1, 5) + [1, 2]` is `[ResidueClass(2, 5), ResidueClass(3,
+  // 5)]`.
+  if (evaluated.some(holdsKindValue)) {
     // The broadcast is the exact `add()`, also under `.N()`: the
     // numeric route does not evaluate the elements it builds.
     if (evaluated.some((x) => x.isCollection)) {
       const r = addArray(exactOperands(ops, evaluated, numericApproximation));
       return numericApproximation ? r.N() : r;
     }
-    return residueOperands(
-      engine!,
-      ops,
-      evaluated,
+    return kindEvaluatedOperands('Add', ops, evaluated, {
       numericApproximation,
-      'Add'
-    );
-  }
-  if (evaluated.some((x) => x.operator === 'Quantity')) {
-    const r = quantityAdd(engine!, evaluated, ops);
-    // An exact or Measurement magnitude is made numeric under `.N()`.
-    return numericApproximation ? r?.N() : r;
-  }
-  if (evaluated.some((x) => x.operator === 'Measurement')) {
-    const r = measurementAdd(engine!, evaluated);
-    return numericApproximation ? r?.N() : r;
+      engine,
+    });
   }
   // Only a pure number literal or a pure symbol goes to
   // `addNEvaluated` raw, to be numericized there. Every other operand
@@ -16329,14 +16873,10 @@ function addEvaluatedOperands(
       terms,
       raw.map((x) => !x)
     );
-    // An operand may only have BECOME a Quantity or Measurement through
-    // `addN`'s numericization, past the `evaluated` checks above
-    // (Tycho item 101). Quantity first, matching the handler precedence.
-    return (
-      foldQuantityOperands(engine!, r) ??
-      foldMeasurementOperands(engine!, r) ??
-      markAbsentPointCells(engine!, expression, r)
-    );
+    // A quantity or a measurement is a value of a kind: the evaluated
+    // operands are numeric already, so an operand that became one under
+    // `.N()` (Tycho item 101) went to the kind dispatch above.
+    return markAbsentPointCells(engine!, expression, r);
   }
   const result = addArray(evaluated);
   // D2: an inexact (float) operand has no exactness to preserve, so it
@@ -16370,6 +16910,46 @@ function addEvaluatedOperands(
 }
 
 /**
+ * The value of a product where one or more evaluated operands are a
+ * product with a direct `ContinuationPlaceholder` operand, such as the
+ * `2 · 4 · … · 2n` of `3(2 · 4 · … · 2n)`. Such a product is a notation, not
+ * an arithmetic value, and it is kept whole: the other operands are
+ * multiplied together, and the result is that product times each notational
+ * product (`mulAroundNotationalProducts()`). (ROADMAP CE-462.)
+ */
+function mulAroundFoldBarriers(
+  ops: ReadonlyArray<Expression>,
+  evaluated: ReadonlyArray<Expression>,
+  options: Pick<
+    EvaluateHandlerOptions,
+    'numericApproximation' | 'engine' | 'expression'
+  >
+): Expression {
+  const ce = options.engine!;
+  const kept = evaluated.map((x) => containsContinuationOperand(x));
+  const restOps = ops.filter((_, i) => !kept[i]);
+  const restValues = evaluated.filter((_, i) => !kept[i]);
+  return mulAroundNotationalProducts(evaluated, (rest) => {
+    if (rest.length === 1) return rest[0];
+    // The usual case: the other factors are the evaluated operands that are
+    // not notational, and the fold of the handler applies to them.
+    if (
+      rest.length === restValues.length &&
+      rest.every((x, i) => x === restValues[i])
+    )
+      return (
+        mulEvaluatedOperands(restOps, restValues, options) ??
+        ce._fn('Multiply', rest)
+      );
+    // An evaluated operand held a notational product in a nested product:
+    // the other factors are not all operands of this product.
+    return options.numericApproximation
+      ? mulNEvaluated(rest)
+      : mulFactoredArray(rest);
+  });
+}
+
+/**
  * The value of `Multiply(...ops)` from the values `evaluated` of its operands (one
  * value per operand, in order). `Multiply` is lazy: the handler evaluates the
  * operands itself, synchronously in `evaluate` and with `evaluateAsync` in
@@ -16396,7 +16976,7 @@ function mulEvaluatedOperands(
     numericApproximation
   );
   if (rethreaded !== undefined) return rethreaded;
-  const nonNumeric = nonNumericOperandError(engine!, evaluated);
+  const nonNumeric = nonNumericOperandError(engine!, evaluated, 'Multiply');
   if (nonNumeric !== undefined) return nonNumeric;
   // A tuple with a list coordinate is data, not a point: arithmetic
   // over it is an error (see `listCoordinateTupleOperandError`).
@@ -16426,32 +17006,20 @@ function mulEvaluatedOperands(
     )
       return engine!.Missing;
     if (hasAbsentScalarOperand(evaluated))
-      return absentScalarMarker(engine!, expression);
+      return absentArithmeticMarker(engine!, expression, ops, evaluated);
   }
-  // A product with a residue class: see the matching comment in `Add`.
-  if (evaluated.some(containsResidueClass)) {
+  // A product with a kind value: see the matching comment in `Add`.
+  if (evaluated.some(holdsKindValue)) {
     if (evaluated.some((x) => x.isCollection)) {
       const r = mulFactoredArray(
         exactOperands(ops, evaluated, numericApproximation)
       );
       return numericApproximation ? r.N() : r;
     }
-    return residueOperands(
-      engine!,
-      ops,
-      evaluated,
+    return kindEvaluatedOperands('Multiply', ops, evaluated, {
       numericApproximation,
-      'Multiply'
-    );
-  }
-  if (evaluated.some((x) => x.operator === 'Quantity')) {
-    const r = quantityMultiply(engine!, evaluated);
-    // An exact or Measurement magnitude is made numeric under `.N()`.
-    return numericApproximation ? r?.N() : r;
-  }
-  if (evaluated.some((x) => x.operator === 'Measurement')) {
-    const r = measurementMultiply(engine!, evaluated);
-    return numericApproximation ? r?.N() : r;
+      engine,
+    });
   }
   // Only a pure number literal or a pure symbol passes raw; every other
   // operand passes its numeric value, so it is evaluated once and its
@@ -16488,11 +17056,7 @@ function mulEvaluatedOperands(
       raw.map((x) => !x)
     );
     // See the matching comment in `Add` (Tycho item 101).
-    return (
-      foldQuantityOperands(engine!, r) ??
-      foldMeasurementOperands(engine!, r) ??
-      markAbsentPointCells(engine!, expression, r)
-    );
+    return markAbsentPointCells(engine!, expression, r);
   }
   // `mulFactored`, not `mul`: `evaluate()` promises the most EXACT form,
   // and a product of sums is exactly as exact factored as expanded while

@@ -88,6 +88,7 @@ import {
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from './type-guards.js';
+import { isKindValue } from './kind-compare.js';
 import { machineNumberOf, isExactNonInteger } from './machine-number.js';
 import { asFloat, hasFloatOperand } from './float-result.js';
 import {
@@ -952,8 +953,14 @@ export class BoxedNumber
     // `b` are both integer powers of a common integer base c (e.g. 2 = 2^1 and
     // 8 = 2^3), then log_b(a) = p/q is exact. Handles both orders —
     // log_2(8) = 3, log_8(2) = 1/3, log_4(8) = 3/2 — and stays symbolic when
-    // the bases have different prime support (log_8(10)).
-    if (base !== undefined && isNumber(base) && base.isInteger) {
+    // the bases have different prime support (log_8(10)). The argument must
+    // be real: `this.re` alone would read `log_2(2 + 3i)` as `log_2(2) = 1`.
+    if (
+      base !== undefined &&
+      isNumber(base) &&
+      base.isInteger &&
+      this.im === 0
+    ) {
       const a = this.re;
       const b = base.re;
       if (
@@ -1580,6 +1587,11 @@ export class BoxedNumber
   ): boolean {
     if (this.isSame(other)) return true;
 
+    // A value of a value kind makes the comparison (`kindIs()`), as
+    // `.is()` is symmetric.
+    if (other instanceof _BoxedExpression && isKindValue(other))
+      return other.is(this, tolerance);
+
     // An exact value (a rational, a radical, an exact complex, a large
     // integer) is compared with a number, a bigint or another exact value
     // through their EXACT difference. The doubles of the two operands can be
@@ -1650,12 +1662,6 @@ export class BoxedNumber
     // the two EXACTLY (a double is a dyadic rational), so `1/3` is not the
     // same as the double `1/3`, but `.is()` is the tolerant check.
     if (!(other instanceof _BoxedExpression)) return false;
-
-    // A quantity whose unit is dimensionless compares with a number
-    // (`0.06` is `6 percent`). The unit symbol of the quantity is a free
-    // variable, so the comparison is made by the quantity, as `.is()` is
-    // symmetric.
-    if (other.operator === 'Quantity') return other.is(this, tolerance);
 
     // Expression: evaluate other side and compare numerically
     if (other.freeVariables.length > 0) return false;

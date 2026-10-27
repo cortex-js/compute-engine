@@ -218,12 +218,13 @@ describe('SYM P1-19 — higher-order result types are sound', () => {
     // `number` — see the residual documented in `Derivative.evaluate`.
     // The Derivative type handler preserves the derived function's signature
     // (a derivative of Sin has Sin's own carrier — `(complex) -> number`
-    // since the Phase F flip), so the type is a concrete signature, not the
-    // bare `function` it reported before.
+    // since the Phase F flip, with the `quantity` arm that `Sin` names since
+    // quantities became a value kind), so the type is a concrete signature,
+    // not the bare `function` it reported before.
     const ce = strictEngine();
     const t = ce.box(['Derivative', 'Sin']).type;
     expect(t.matches('function')).toBe(true);
-    expect(t.toString()).toBe('(complex) -> number');
+    expect(t.toString()).toBe('(complex | quantity) -> number');
   });
 });
 

@@ -569,7 +569,11 @@ describe('a seeded draw that reads no per-call value is computed once per artifa
   it('a body that reads an input keeps the draw per call', () => {
     const ce = new ComputeEngine();
     ce.declare('s', 'real');
-    const r = compiled(ce, ['WithRandomSeed', 4, ['Multiply', 's', ['Random']]]);
+    const r = compiled(ce, [
+      'WithRandomSeed',
+      4,
+      ['Multiply', 's', ['Random']],
+    ]);
     expect(r.code).toContain('_SYS.withRandomSeed(4, ');
     expect(r.code).not.toContain('_rnd_');
     expect(r.preambleOnce).toBeUndefined();
@@ -746,13 +750,13 @@ describe('an impure operand spliced by a multi-use template draws exactly once',
   test('GLSL: pure operands keep the direct emission (byte-identical pins)', () => {
     const g = ce._getCompilationTarget('glsl')!;
     expect(g.compile(ce.box(['Cot', 'x']) as any).code).toBe(
-      '(cos(x) / sin(x))'
+      '(_gpu_cos(x) / _gpu_sin(x))'
     );
     expect(g.compile(ce.box(['Remainder', 'x', 2]) as any).code).toBe(
       '((x) - (2.0) * _gpu_round_up((x) / (2.0)))'
     );
     expect(g.compile(ce.box(['Coth', 'x']) as any).code).toBe(
-      '(cosh(x) / sinh(x))'
+      '(1.0 / tanh(x))'
     );
     expect(g.compile(ce.box(['Beta', 'x', 2]) as any).code).toBe(
       '(_gpu_gamma(x) * _gpu_gamma(2.0) / _gpu_gamma(x + 2.0))'
@@ -993,7 +997,11 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     // inputs may contain Nothing and are deliberately refused.
     ce.declare('varianceX', 'real');
     ce.declare('varianceY', 'real');
-    expect(gpuCode(['Variance', 'varianceX', 'varianceY']).replace(/varianceX/g, 'x').replace(/varianceY/g, 'y')).toBe(
+    expect(
+      gpuCode(['Variance', 'varianceX', 'varianceY'])
+        .replace(/varianceX/g, 'x')
+        .replace(/varianceY/g, 'y')
+    ).toBe(
       '(((x - ((x + y) / 2.0)) * (x - ((x + y) / 2.0)) + ' +
         '(y - ((x + y) / 2.0)) * (y - ((x + y) / 2.0))) / 1.0)'
     );

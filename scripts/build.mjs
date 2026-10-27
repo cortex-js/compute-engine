@@ -7,140 +7,13 @@ import { chmod, copyFile } from 'node:fs/promises';
 import pkg from '../package.json' with { type: 'json' };
 const SDK_VERSION = pkg.version || 'v?.?.?';
 
-// UMD wrapper
-// (while iife works for `<script>` loading, sadly, some environemnts use
-// `require()` which needs the UMD wrapper. See MathLive #1833)
-const COMPUTE_ENGINE_UMD_OPTIONS = {
-  banner: {
-    js: `/** Compute Engine ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ComputeEngine = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, ComputeEngine); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const MATH_JSON_UMD_OPTIONS = {
-  banner: {
-    js: `/** MathJSON ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.MathJson = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, MathJson); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const LATEX_SYNTAX_UMD_OPTIONS = {
-  banner: {
-    js: `/** LatexSyntax ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.LatexSyntax = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, LatexSyntax); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const INTERVAL_UMD_OPTIONS = {
-  banner: {
-    js: `/** Interval ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Interval = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, Interval); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const NUMERICS_UMD_OPTIONS = {
-  banner: {
-    js: `/** Numerics ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Numerics = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, Numerics); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const CORE_UMD_OPTIONS = {
-  banner: {
-    js: `/** ComputeEngineCore ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ComputeEngineCore = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, ComputeEngineCore); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const COMPILE_UMD_OPTIONS = {
-  banner: {
-    js: `/** Compile ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Compile = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, Compile); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const RUNTIME_UMD_OPTIONS = {
-  banner: {
-    js: `/** Runtime ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.ComputeEngineRuntime = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, ComputeEngineRuntime); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const IDENTITIES_UMD_OPTIONS = {
-  banner: {
-    js: `/** Identities ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Identities = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, Identities); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const INTEGRATION_RULES_UMD_OPTIONS = {
-  banner: {
-    js: `/** IntegrationRules ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.IntegrationRules = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, IntegrationRules); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
-
-const EPSIL_UMD_OPTIONS = {
-  banner: {
-    js: `/** Epsil ${SDK_VERSION} ${
-      process.env.GIT_VERSION ? ' -- ' + process.env.GIT_VERSION : ''
-    }*/
-    (function(global,factory){typeof exports === 'object' && typeof module !== 'undefined' ? factory(exports) : typeof define === 'function' && define.amd ? define(['exports'],factory):(global = typeof globalThis !== 'undefined' ? globalThis : global || self, factory(global.Epsil = {}));})(this, (function (exports) { 'use strict';`,
-  },
-  footer: {
-    js: `Object.assign(exports, Epsil); Object.defineProperty(exports, '__esModule', { value: true });}));`,
-  },
-};
+// The package is ESM only (since 2026-10-26). There is no UMD or CommonJS
+// build: Node loads an ESM entry through `require()` since Node 22.12, which
+// is the floor in `engines.node`, and the `exports` map has no `require`
+// condition, so a CommonJS consumer falls through to the `default` ESM file.
+// None of the entries uses a top-level `await` (the kernel worker's
+// `await import()` runs inside a function), which is what `require()` of an
+// ESM module forbids.
 
 const BUILD_OPTIONS = {
   banner: {
@@ -162,79 +35,53 @@ const BUILD_OPTIONS = {
   resolveExtensions: ['.ts', '.js'],
 };
 
-// Minification settings shared by every `*-min` variant. Kept identical in
-// effect to the previous per-call inline options.
+// Minification settings shared by every `*-min` variant.
 const MIN_OPTIONS = {
   drop: ['debugger'],
   pure: ['console.assert', 'console.log'],
   minify: true,
 };
 
-// Entry table: source entry name → its UMD wrapper options + IIFE globalName.
-// `esmViaSplit` entries (compute-engine + integration-rules + epsil) do NOT
-// get a standalone single-entry ESM build — their ESM output comes from the
-// shared code-splitting invocation below. Every entry still gets both UMD
-// variants.
-const ENTRIES = [
-  {
-    name: 'compute-engine',
-    umd: COMPUTE_ENGINE_UMD_OPTIONS,
-    globalName: 'ComputeEngine',
-    esmViaSplit: true,
-  },
-  { name: 'math-json', umd: MATH_JSON_UMD_OPTIONS, globalName: 'MathJson' },
-  {
-    name: 'latex-syntax',
-    umd: LATEX_SYNTAX_UMD_OPTIONS,
-    globalName: 'LatexSyntax',
-  },
-  { name: 'interval', umd: INTERVAL_UMD_OPTIONS, globalName: 'Interval' },
-  { name: 'numerics', umd: NUMERICS_UMD_OPTIONS, globalName: 'Numerics' },
-  { name: 'core', umd: CORE_UMD_OPTIONS, globalName: 'ComputeEngineCore' },
-  { name: 'compile', umd: COMPILE_UMD_OPTIONS, globalName: 'Compile' },
-  {
-    name: 'runtime',
-    umd: RUNTIME_UMD_OPTIONS,
-    globalName: 'ComputeEngineRuntime',
-  },
-  { name: 'identities', umd: IDENTITIES_UMD_OPTIONS, globalName: 'Identities' },
-  {
-    name: 'integration-rules',
-    umd: INTEGRATION_RULES_UMD_OPTIONS,
-    globalName: 'IntegrationRules',
-    esmViaSplit: true,
-  },
-  {
-    name: 'epsil',
-    umd: EPSIL_UMD_OPTIONS,
-    globalName: 'Epsil',
-    esmViaSplit: true,
-  },
-  // The script of a kernel worker thread (`src/kernel-worker.ts`): one
-  // self-contained ESM file that a host copies next to its own files and
-  // starts with `new Worker(url, { type: 'module' })`. A worker script has
-  // no use for a UMD wrapper, so `esmOnly` skips those builds.
-  { name: 'kernel-worker', esmOnly: true },
+// Every entry that shares code with the engine is built in ONE esbuild
+// invocation per variant with code splitting, so each shared module is
+// emitted once into a chunk that the entries import. A consumer that imports
+// two of them (`./core` and `./compile`, say, or the full entry and
+// `./integration-rules`, or `./numerics` and the full entry) then loads one
+// copy of each class. Without the split, each entry re-bundles what it uses,
+// and the duplicate class definitions break cross-bundle `instanceof`
+// checks: a host-created `BigDecimal` fails `instanceof BigDecimal` inside
+// the plugin's own engine code, `executeEpsil(ce, …)` receives an engine of
+// the other copy, and a `NumericValue` made from `./numerics` fails the
+// engine's `instanceof NumericValue` tests (`src/compute-engine/index.ts`).
+// Measured on 0.169.2, before `core` and `compile` joined the split:
+// `core.js` was 5.2 MB and `compile.js` 3.5 MB, each with its own engine.
+const SPLIT_ENTRIES = [
+  'compute-engine',
+  'core',
+  'compile',
+  'epsil',
+  'integration-rules',
+  'identities',
+  'math-json',
+  'latex-syntax',
+  'interval',
+  'numerics',
 ];
 
+// The two entries that must stay a single file and import no chunk:
+// `runtime` (its smoke test, `test/consumer/js-runtime-smoke.mjs`, asserts
+// that it imports nothing, so that compiled code can run without the engine)
+// and `kernel-worker` (a host copies the file next to its own files and
+// starts it with `new Worker(url, { type: 'module' })`). Each has its own
+// copy of the modules it uses; neither exchanges class instances with the
+// engine, so the duplicate definitions do no harm there.
+const STANDALONE_ENTRIES = ['runtime', 'kernel-worker'];
+
 // The published layout puts the variant marker in the DIRECTORY, not the
-// filename: `esm/<name>.js`, `esm-min/<name>.js`, `umd/<name>.cjs`,
-// `umd-min/<name>.cjs`. Each ESM directory is self-contained (its own
-// `chunks/`).
+// filename: `esm/<name>.js` and `esm-min/<name>.js`. Each ESM directory is
+// self-contained (its own `chunks/`).
 const builds = [];
 
-// Build the library + the integration-rules plugin + the epsil language as
-// ONE esbuild invocation per ESM variant with code splitting, so the shared
-// engine core (BigDecimal, boxed expressions, numeric-value, latex-syntax, …)
-// is emitted ONCE into a common chunk that `esm/compute-engine.js`,
-// `esm/integration-rules.js` and `esm/epsil.js` import (and likewise under
-// `esm-min/`). Without this, each bundle re-bundles the entire engine and its
-// duplicate class definitions break cross-bundle `instanceof` checks (e.g. a
-// host-created BigDecimal fails `instanceof BigDecimal` inside the plugin's
-// statically-imported engine code, and `executeEpsil(ce, …)` receives a
-// host-created engine). Splitting is ESM-only; the UMD variants stay
-// self-contained single files. The variant marker is the outdir
-// (`dist/esm` vs `dist/esm-min`), so the entry/chunk names carry no suffix.
 for (const [outdir, extra] of [
   ['./dist/esm', {}],
   ['./dist/esm-min', MIN_OPTIONS],
@@ -243,11 +90,7 @@ for (const [outdir, extra] of [
     esbuild.build({
       ...BUILD_OPTIONS,
       ...extra,
-      entryPoints: [
-        './src/compute-engine.ts',
-        './src/integration-rules.ts',
-        './src/epsil.ts',
-      ],
+      entryPoints: SPLIT_ENTRIES.map((name) => `./src/${name}.ts`),
       outdir,
       format: 'esm',
       splitting: true,
@@ -255,50 +98,17 @@ for (const [outdir, extra] of [
       chunkNames: 'chunks/[name]-[hash]',
     })
   );
-}
-
-// Single-entry ESM builds for every entry NOT covered by the split builds.
-for (const e of ENTRIES) {
-  if (e.esmViaSplit) continue;
-  builds.push(
-    esbuild.build({
-      ...BUILD_OPTIONS,
-      entryPoints: [`./src/${e.name}.ts`],
-      outfile: `./dist/esm/${e.name}.js`,
-      format: 'esm',
-    }),
-    esbuild.build({
-      ...BUILD_OPTIONS,
-      ...MIN_OPTIONS,
-      entryPoints: [`./src/${e.name}.ts`],
-      outfile: `./dist/esm-min/${e.name}.js`,
-      format: 'esm',
-    })
-  );
-}
-
-// Self-contained UMD (IIFE) builds for every entry, minified and not.
-for (const e of ENTRIES) {
-  if (e.esmOnly) continue;
-  builds.push(
-    esbuild.build({
-      ...BUILD_OPTIONS,
-      entryPoints: [`./src/${e.name}.ts`],
-      outfile: `./dist/umd/${e.name}.cjs`,
-      format: 'iife',
-      ...e.umd,
-      globalName: e.globalName,
-    }),
-    esbuild.build({
-      ...BUILD_OPTIONS,
-      ...MIN_OPTIONS,
-      entryPoints: [`./src/${e.name}.ts`],
-      outfile: `./dist/umd-min/${e.name}.cjs`,
-      format: 'iife',
-      ...e.umd,
-      globalName: e.globalName,
-    })
-  );
+  for (const name of STANDALONE_ENTRIES) {
+    builds.push(
+      esbuild.build({
+        ...BUILD_OPTIONS,
+        ...extra,
+        entryPoints: [`./src/${name}.ts`],
+        outfile: `${outdir}/${name}.js`,
+        format: 'esm',
+      })
+    );
+  }
 }
 
 // Node CLI. Keep this as a small bundle of the command-line implementation,

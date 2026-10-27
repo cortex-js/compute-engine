@@ -23,7 +23,7 @@ import {
   type HomeScope,
 } from './declared-parameter-result.js';
 
-import type { Type, TypeString } from '../../common/type/types.js';
+import type { EffectSet, Type, TypeString } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
 import { typeToString } from '../../common/type/serialize.js';
 import {
@@ -32,6 +32,7 @@ import {
   functionResult,
   isValidType,
   resolveTypeAlias,
+  signatureEffects,
   widen,
 } from '../../common/type/utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -53,9 +54,12 @@ import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import {
   hasSignaturePlaceholder,
+  inferFunctionLiteralEffects,
   matchesDeclaredTypeAxes,
   refineDeclaredPlaceholders,
+  withArrowEffects,
 } from './effects-inference.js';
+import { isEffectSubset, unionEffectSets } from '../../common/type/effects.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import { noteDefinitionCapturedTypes } from './function-literal.js';
 import { isLatexString } from '../latex-syntax/utils.js';
@@ -251,6 +255,19 @@ export class _BoxedValueDefinition
    * `tycho/docs/COMPUTE_ENGINE.md`). Set once, at the declaration; a
    * checkpoint restores it with the binding. */
   _initializerAlias: Expression | undefined = undefined;
+
+  /** True when an assignment to this binding recorded the type of its value
+   * at canonicalization time (`joinAssignmentEvidence`, `library/core.ts`).
+   * The static type of a valueless binding with this flag is the join of the
+   * types of its assigned values only. A use of the binding (an argument at
+   * a typed parameter) does not narrow it (`BoxedSymbol._inferWithoutFacts`,
+   * `boxed-symbol.ts`), and the first assignment replaces a type that came
+   * from uses only. The order of the uses and the assignments in a block
+   * then does not change the static type. A narrowing by a use cannot be
+   * part of that type: a meet with the uses is not sound, because it can
+   * exclude a value that an assignment gives (`v = [1.5]` and a use at a
+   * `list<integer>` parameter gave `vector<integer^1>`). */
+  _assignmentEvidence: boolean = false;
 
   /** Memo of the signature derived from `_signatureSkeleton`, keyed on the
    * identities of the skeleton and of the stored value's type object. It is
@@ -734,6 +751,9 @@ export class _BoxedValueDefinition
       // matches the restored type.
       _placeholderSkeleton: this._placeholderSkeleton,
       _signatureSkeleton: this._signatureSkeleton,
+      // The evidence flag decides how the next write joins the type, so it
+      // is restored with the type.
+      _assignmentEvidence: this._assignmentEvidence,
       // Effects annotation provenance rides in the tuple: the typed-`let`
       // upgrade writes it alongside `type`/`inferredType`
       // (`docs/EFFECTS-MODEL.md`, rollback
@@ -768,9 +788,11 @@ export class _BoxedValueDefinition
       _isSelfReferential: boolean;
       _placeholderSkeleton: Type | undefined;
       _signatureSkeleton: Type | undefined;
+      _assignmentEvidence: boolean;
       effectsDeclared: boolean;
     };
     this._type = s._type;
+    this._assignmentEvidence = s._assignmentEvidence;
     this._placeholderSkeleton = s._placeholderSkeleton;
     this._signatureSkeleton = s._signatureSkeleton;
     this._value = s._value;
@@ -826,6 +848,7 @@ export class _BoxedValueDefinition
       _placeholderSkeleton: this._placeholderSkeleton,
       _signatureSkeleton: this._signatureSkeleton,
       _initializerAlias: this._initializerAlias,
+      _assignmentEvidence: this._assignmentEvidence,
       // COPIED, not aliased: provenance is appended to in place, so a
       // snapshot sharing the array would grow with the writes it exists to
       // undo and restore the post-write history.
@@ -897,6 +920,7 @@ export class _BoxedValueDefinition
     this._placeholderSkeleton = s._placeholderSkeleton as Type | undefined;
     this._signatureSkeleton = s._signatureSkeleton as Type | undefined;
     this._initializerAlias = s._initializerAlias as Expression | undefined;
+    this._assignmentEvidence = s._assignmentEvidence as boolean;
     this._typeProvenance = s._typeProvenance as
       TypeProvenanceEntry[] | undefined;
     this.effectsDeclared = s.effectsDeclared as boolean;
@@ -1221,10 +1245,68 @@ export class _BoxedValueDefinition
       return recorded;
     const v = this.storedValue;
     if (v === undefined || !isFunction(v)) return recorded;
-    if (v.operator === 'Function') return recorded;
+    if (v.operator === 'Function')
+      return this._reviseLiteralArrowEffects(recorded, v);
     const live = v.type;
     if (live.isUnknown || live.matches(recorded)) return recorded;
     return live;
+  }
+
+  /** The effects of a stored `Function` literal, when a walk of its body
+   * reads an effect set that is derived from the conformance registry (a
+   * protocol dispatcher), memoized on the literal and on the version of the
+   * registry. `null` when the walk reads no such set. */
+  private _literalRegistryEffects:
+    | {
+        literal: Expression;
+        version: number;
+        effects: EffectSet | undefined | null;
+      }
+    | undefined = undefined;
+
+  /**
+   * The recorded inferred type of a binding that holds the `Function`
+   * literal `v`, with the effects of its arrow brought up to date.
+   *
+   * The recorded type is the arrow of the literal when it was assigned. When
+   * the body of the literal calls a protocol dispatcher, directly or through
+   * other functions, the effects of the literal depend on the conformances
+   * registered at the time of the call. A later conformance can add an
+   * effect: with `let g = (x) => speak(x)`, a conformance whose `speak`
+   * writes an outer variable makes `g` a `scope` function. So the effects of
+   * the arrow are the union of the recorded effects and the effects of a new
+   * walk of the body. The other parts of the recorded type do not change. A
+   * literal whose walk reads no registry-derived set keeps the recorded
+   * type, and its body is walked again only when the registry changes.
+   */
+  private _reviseLiteralArrowEffects(
+    recorded: BoxedType,
+    v: Expression
+  ): BoxedType {
+    const ce = this._engine;
+    const version = ce._conformanceVersion;
+    let memo = this._literalRegistryEffects;
+    if (memo === undefined || memo.literal !== v || memo.version !== version) {
+      let effects: EffectSet | undefined | null = null;
+      try {
+        const inferred = inferFunctionLiteralEffects(ce, v, {
+          selfName: this.name,
+        });
+        if (inferred.consultsRegistry) effects = inferred.effects;
+      } catch {
+        // A walk that cannot run says nothing new about the body.
+        effects = null;
+      }
+      memo = { literal: v, version, effects };
+      this._literalRegistryEffects = memo;
+    }
+    if (memo.effects === null || memo.effects === undefined) return recorded;
+    const before = signatureEffects(recorded.type);
+    if (isEffectSubset(memo.effects, before)) return recorded;
+    return new BoxedType(
+      withArrowEffects(recorded.type, unionEffectSets(before, memo.effects)!),
+      ce._typeResolver
+    );
   }
 
   set type(t: Type | TypeString | BoxedType) {
@@ -1446,6 +1528,13 @@ function isSelfReferentialValue(
  * - a transparent alias of one of those (`type L = list`): an alias IS its
  *   definition, so it carries the definition's instruction.
  *
+ * - a collection type with an `unknown` at a NESTED position
+ *   (`tuple<unknown, integer>`, `list<list<unknown>>`, `record{a: unknown}`,
+ *   `dictionary<list<unknown>>`). The skeleton is then the resolved type
+ *   itself, and each assignment replaces only its `unknown` positions with
+ *   the types the value has at those positions (the later slice of
+ *   decision D2).
+ *
  * An explicit content contract (`list<any>`, `list<integer>`,
  * `tuple<integer, string>`) is never a placeholder. The answer is the
  * resolved skeleton, which `refineConstructorPlaceholder` reads.
@@ -1462,11 +1551,133 @@ export function placeholderSkeletonOf(t: Type): Type | undefined {
       // A list with dimensions (`list<unknown^3>`) states a shape, which is
       // a contract on its own; only the shapeless spelling is a placeholder.
       if (r.kind === 'list' && r.dimensions !== undefined) return undefined;
-      return r.elements === 'unknown' ? r.kind : undefined;
+      if (r.elements === 'unknown') return r.kind;
+      break;
     case 'dictionary':
-      return r.values === 'unknown' ? 'dictionary' : undefined;
+      if (r.values === 'unknown') return 'dictionary';
+      break;
+  }
+  return hasNestedUnknownPosition(r) ? r : undefined;
+}
+
+/**
+ * The type at each content position of a collection type that the nested
+ * refinement reads: the elements of a shapeless list, set, collection or
+ * indexed collection, the values of a dictionary, the slots of a tuple and
+ * the fields of a record. A list with dimensions states a shape, and a
+ * union, a function type or an alias at a nested position is a contract of
+ * its own, so these have no content positions here.
+ */
+function contentPositions(t: Type): Type[] {
+  if (typeof t === 'string') return [];
+  switch (t.kind) {
+    case 'list':
+      return t.dimensions === undefined ? [t.elements] : [];
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+      return [t.elements];
+    case 'dictionary':
+      return [t.values];
+    case 'tuple':
+      return t.elements.map((x) => x.type);
+    case 'record':
+      return Object.values(t.elements);
     default:
-      return undefined;
+      return [];
+  }
+}
+
+/** Is there an `unknown` at a content position of `t`, at any depth? */
+function hasNestedUnknownPosition(t: Type): boolean {
+  return contentPositions(t).some(
+    (x) => x === 'unknown' || hasNestedUnknownPosition(x)
+  );
+}
+
+/**
+ * Refine a skeleton that has `unknown` at nested positions from the type of
+ * an assigned value. Each `unknown` position takes the type the value has at
+ * the same position, raw (not assignment-widened), as the element of a bare
+ * `list` does. All other positions keep the skeleton's type, so the result
+ * is always a subtype of the skeleton. When the value's type cannot be read
+ * at a position, that position stays `unknown`. A value whose type is a
+ * union is refined arm by arm, and the results are joined.
+ */
+function refineNestedUnknown(skeleton: Type, valueType: Type): Type {
+  if (skeleton === 'unknown')
+    return valueType === 'never' ? skeleton : valueType;
+  if (typeof skeleton === 'string' || !hasNestedUnknownPosition(skeleton))
+    return skeleton;
+  valueType = resolveTypeAlias(valueType);
+  if (typeof valueType !== 'string' && valueType.kind === 'union') {
+    const arms = valueType.types.map((x) => refineNestedUnknown(skeleton, x));
+    if (arms.some((x) => x === skeleton)) return skeleton;
+    return widen(...arms);
+  }
+  switch (skeleton.kind) {
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection': {
+      const elements = collectionElementType(valueType);
+      if (elements === undefined) return skeleton;
+      const refined = refineNestedUnknown(skeleton.elements, elements);
+      if (refined === skeleton.elements) return skeleton;
+      return { ...skeleton, elements: refined } as Type;
+    }
+    case 'dictionary': {
+      if (typeof valueType === 'string') return skeleton;
+      // Only a closed record (the type of a dictionary value) lists every
+      // field of its values. An open record type can have other fields, of
+      // any type, so it leaves the skeleton.
+      const values =
+        valueType.kind === 'dictionary'
+          ? valueType.values
+          : valueType.kind === 'record' && valueType.closed === true
+            ? widen(...Object.values(valueType.elements))
+            : undefined;
+      if (values === undefined) return skeleton;
+      const refined = refineNestedUnknown(skeleton.values, values);
+      if (refined === skeleton.values) return skeleton;
+      return { kind: 'dictionary', values: refined };
+    }
+    case 'tuple': {
+      if (
+        typeof valueType === 'string' ||
+        valueType.kind !== 'tuple' ||
+        valueType.elements.length !== skeleton.elements.length
+      )
+        return skeleton;
+      const vt = valueType;
+      let changed = false;
+      const elements = skeleton.elements.map((slot, i) => {
+        const refined = refineNestedUnknown(slot.type, vt.elements[i].type);
+        if (refined === slot.type) return slot;
+        changed = true;
+        return { ...slot, type: refined };
+      });
+      return changed ? { kind: 'tuple', elements } : skeleton;
+    }
+    case 'record': {
+      if (typeof valueType === 'string' || valueType.kind !== 'record')
+        return skeleton;
+      const vt = valueType;
+      let changed = false;
+      const elements: Record<string, Type> = {};
+      for (const [key, field] of Object.entries(skeleton.elements)) {
+        const valueField = vt.elements[key];
+        const refined =
+          valueField === undefined
+            ? field
+            : refineNestedUnknown(field, valueField);
+        if (refined !== field) changed = true;
+        elements[key] = refined;
+      }
+      return changed ? { kind: 'record', elements } : skeleton;
+    }
+    default:
+      return skeleton;
   }
 }
 
@@ -1514,6 +1725,10 @@ export function refineConstructorPlaceholder(
   // with `type alias cyc = cyc | list<integer>`); the refinement reads its
   // structure.
   valueType = resolveTypeAlias(valueType);
+  // A skeleton with `unknown` at nested positions is a structured type, not
+  // a family name (`placeholderSkeletonOf`).
+  if (typeof skeleton !== 'string')
+    return refineNestedUnknown(skeleton, valueType);
   switch (skeleton) {
     case 'list':
     case 'indexed_collection':
@@ -1541,10 +1756,13 @@ export function refineConstructorPlaceholder(
       return { kind: 'set', elements: valueType.elements };
     case 'dictionary': {
       if (typeof valueType === 'string') return skeleton;
+      // Only a closed record (the type of a dictionary value) lists every
+      // field of its values. An open record type can have other fields, of
+      // any type, so it leaves the skeleton.
       const values =
         valueType.kind === 'dictionary'
           ? valueType.values
-          : valueType.kind === 'record'
+          : valueType.kind === 'record' && valueType.closed === true
             ? widen(...Object.values(valueType.elements))
             : undefined;
       if (values === undefined || values === 'unknown') return skeleton;

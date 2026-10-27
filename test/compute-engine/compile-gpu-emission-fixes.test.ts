@@ -133,7 +133,7 @@ describe('identity lowerings keep the grouping of their operand (CE-251.1)', () 
     const e = new ComputeEngine();
     e.parse('h(x) \\coloneq x^3 + \\sin x').evaluate();
     const r = compile(e.parse("3h'(x)"), { to, fallback: false } as never);
-    expect(r.code).toBe('3.0 * (3.0 * (x * x) + cos(x))');
+    expect(r.code).toBe('3.0 * (3.0 * (x * x) + _gpu_cos(x))');
   });
 });
 
@@ -142,7 +142,7 @@ describe('identity lowerings keep the grouping of their operand (CE-251.1)', () 
 // vector operand takes the peephole too.
 describe('the fract and exp2 peepholes apply to a vector operand (CE-254)', () => {
   test.each(TARGETS)('%s', (to) => {
-    expect(shader(['Mod', 'v', 1], to).code).toBe('fract(v)');
+    expect(shader(['Mod', 'v', 1], to).code).toBe('fract(fract(v))');
     expect(shader(['Power', 2, 'v'], to).code).toBe('exp2(v)');
     // A divisor other than 1 keeps the general lowering.
     expect(shader(['Mod', 'v', 2], to).code).not.toContain('fract');
@@ -181,7 +181,7 @@ describe('a loop-invariant binding with no reader is not declared (CE-258)', () 
       to: 'glsl',
       fallback: false,
     });
-    expect(r.code).toMatch(/float _tv\d+ = _gpu_pow2\(sin\(u\)\);/);
+    expect(r.code).toMatch(/float _tv\d+ = _gpu_pow2\(_gpu_sin\(u\)\);/);
   });
 });
 

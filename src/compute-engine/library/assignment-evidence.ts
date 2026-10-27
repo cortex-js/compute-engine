@@ -118,23 +118,13 @@ export function coarsenEvidenceType(
   }
 }
 
-/**
- * The block locals whose hoisted binding carries a DECLARED type
- * (`Declare(v, "list<real>")`, `let v: list<real>`). The declared type is
- * the contract, so a second read of an assignment's value type must not
- * widen it: `joinAssignmentEvidence` registers no evidence site for them.
- */
-const DECLARED_LOCALS = new WeakSet<object>();
-
-/** Record that the block-local binding `def` has a declared type. */
-export function markDeclaredLocal(def: object): void {
-  DECLARED_LOCALS.add(def);
-}
-
-/** Whether the block-local binding `def` has a declared type. */
-export function isDeclaredLocal(def: object): boolean {
-  return DECLARED_LOCALS.has(def);
-}
+// The record of the block locals with a declared type lives with the
+// expressions, because a use of such a local reads it too
+// (`boxed-expression/declared-local.ts`).
+export {
+  markDeclaredLocal,
+  isDeclaredLocal,
+} from '../boxed-expression/declared-local.js';
 
 type EvidenceSession = {
   depth: number;
@@ -165,6 +155,14 @@ const SESSIONS = new WeakMap<object, EvidenceSession>();
 export function registerEvidenceSite(engine: object, site: EvidenceSite): void {
   const session = SESSIONS.get(engine);
   if (session !== undefined && session.depth > 0) session.sites.push(site);
+}
+
+/** Whether a block canonicalization is in progress, so that an assignment
+ * canonicalized now records evidence that the block joins again at its end
+ * (`registerEvidenceSite`). */
+export function isInEvidenceSession(engine: object): boolean {
+  const session = SESSIONS.get(engine);
+  return session !== undefined && session.depth > 0;
 }
 
 /**

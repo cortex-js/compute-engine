@@ -261,16 +261,25 @@ describe('LAZY ARGUMENT CAPTURE — arguments with no lazy collection', () => {
   // bound is large: each call also infers the type of the list when it binds
   // the parameter, which is proportional to the length of the list. The bound
   // catches a walk that rebuilds the list at each call.
+  //
+  // The depth is 100, not 200. Each level of this recursion uses 4 to 5 KB of
+  // the JavaScript stack, and the engine ends a recursion with the error
+  // "Recursion limit exceeded" when less than 64 KB of the stack is free
+  // (`enterRecursion()`, `engine-runtime-state.ts`). In a new Node process
+  // that happens at a depth of about 210, and later, at about 240, when V8
+  // has optimized the code. Under Jest on a loaded machine a depth of 200
+  // failed once. The value is compared as a string, so that a failure shows
+  // the error and not the NaN that `.re` gives for it.
   const strings = Array.from({ length: 3000 }, (_, i) => `"s${i}"`).join(', ');
 
-  test('a recursion of depth 200 that passes a list of 3000 strings', () => {
+  test('a recursion of depth 100 that passes a list of 3000 strings', () => {
     const start = Date.now();
     const { value, diagnostics } = run(`
 f(xs, n) = length(xs) if n == 0 else f(xs, n - 1)
-f([${strings}], 200)`);
+f([${strings}], 100)`);
     const elapsed = Date.now() - start;
     expect(diagnostics).toEqual([]);
-    expect(value.re).toBe(3000);
+    expect(value.toString()).toBe('3000');
     if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(10000);
   });
 
@@ -278,11 +287,11 @@ f([${strings}], 200)`);
     const start = Date.now();
     const { value, diagnostics } = run(`
 f(xs, g, n) = g(length(xs)) if n == 0 else f(xs, k => k + n, n - 1)
-f([${strings}], k => k, 200)`);
+f([${strings}], k => k, 100)`);
     const elapsed = Date.now() - start;
     expect(diagnostics).toEqual([]);
     // The literal made by the call with `n = 1` is the one applied.
-    expect(value.re).toBe(3001);
+    expect(value.toString()).toBe('3001');
     if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(10000);
   });
 });

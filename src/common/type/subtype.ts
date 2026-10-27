@@ -165,6 +165,14 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // no entry but `value` (through `VALUE_TYPES`) and so disjoint from every
   // numeric type, which is what keeps the number rules away from a class.
   residue: [],
+  // A measurement (a nominal value with a standard uncertainty): an atom with
+  // no subtypes, listed by no entry but `value`, and so disjoint from every
+  // numeric type, as `residue` is.
+  measurement: [],
+  // A quantity (a magnitude with a physical unit): an atom with no subtypes,
+  // listed by no entry but `value`, and so disjoint from every numeric type,
+  // as `residue` is.
+  quantity: [],
   // A type value: an atom with no subtypes, like `regexp` — a reified type
   // expression is not text, not a number, and not a collection of anything.
   type: [],
@@ -614,6 +622,9 @@ function cycleNodeStructure(t: Exclude<Type, string>): string {
         : `value(${cycleDataKey(p)})`;
     }
     case 'record':
+      // A closed record (the type of a dictionary value) is another type
+      // than the open record with the same fields.
+      return `${t.kind}${t.closed === true ? '!' : ''}${fieldMap(t.elements)}`;
     case 'object':
       return `${t.kind}${fieldMap(t.elements)}`;
     case 'tuple':
@@ -870,6 +881,18 @@ function provablyDisjointRules(a: Type, b: Type): boolean {
   // on the DECLARATION record (an application is a fresh object each time it
   // is instantiated, so the node itself is not a stable key); on a cycle we
   // answer `false` — "may overlap" — which is this predicate's safe direction.
+  //
+  // One kind of nominal reference is NOT answered from its definition: a
+  // nominal type defined as exactly `value` (a value kind, see
+  // `valueKindDeclaration()`). Its definition overlaps numbers, strings and
+  // collections, but its values are none of them: it is disjoint from every
+  // type except `value`, `expression`, `any`, `unknown` and itself, as the
+  // `residue` primitive is. Two such types of different names are disjoint.
+  const kindA = valueKindDeclaration(a);
+  const kindB = valueKindDeclaration(b);
+  if (kindA !== undefined && kindB !== undefined) return kindA !== kindB;
+  if (kindA !== undefined) return valueKindDisjointFrom(a, b);
+  if (kindB !== undefined) return valueKindDisjointFrom(b, a);
   if (typeof a === 'object' && a.kind === 'reference') {
     const def = resolveTypeReference(a);
     if (def === undefined) return false;
@@ -2773,7 +2796,7 @@ export function isSubtype(
 
 /** Create `subtypePairs` when no question holds it, and return whether
  * this call created it (pass the result to {@link closeSubtypePairs}). */
-function openSubtypePairs(): boolean {
+export function openSubtypePairs(): boolean {
   if (subtypePairs !== undefined) return false;
   enterCycleKeys();
   subtypePairs = { answers: new Map(), active: new Map() };
@@ -2783,7 +2806,7 @@ function openSubtypePairs(): boolean {
 
 /** Drop `subtypePairs` when `owned`, the result of
  * {@link openSubtypePairs}, says this question created it. */
-function closeSubtypePairs(owned: boolean): void {
+export function closeSubtypePairs(owned: boolean): void {
   if (!owned) return;
   subtypePairs = undefined;
   subtypeLow = Infinity;
@@ -3116,6 +3139,20 @@ function isSubtypeRules(
   // covers on its own. (Before the finite-by-default flip it could — the
   // doubled tower made `finite_X | non_finite_number` cover `X` — and the
   // members had to be augmented first.)
+  //
+  // An intersection lhs is first tested arm by arm against the WHOLE rhs,
+  // as the intersection rule below does for an rhs that is not a union or
+  // a reference: `A & B <: A <: R`. The member-wise probe of a union rhs,
+  // and the unfold of an alias rhs into a union, otherwise compared the
+  // intersection with each member of that union alone, so that
+  // `Z & W <: Z` was false for `type alias Z = list<integer> | set<integer>`.
+  if (
+    typeof lhs !== 'string' &&
+    lhs.kind === 'intersection' &&
+    (rhs.kind === 'union' || rhs.kind === 'reference') &&
+    lhs.types.some((t) => isSubtype(t, rhs))
+  )
+    return true;
   if (rhs.kind === 'union') {
     const rhsMembers = rhs.types;
     // A broadcastable lhs is the union of `T` and its collection arm
@@ -3482,6 +3519,13 @@ function isSubtypeRules(
   // but there may be additional fields in the lhs (width subtyping)
   //
   if (lhs.kind === 'record' && rhs.kind === 'record') {
+    // A closed rhs (the type of a dictionary value) holds only values with
+    // exactly its keys: the lhs must be closed too, with the same keys.
+    if (rhs.closed === true) {
+      if (lhs.closed !== true) return false;
+      if (Object.keys(lhs.elements).length !== Object.keys(rhs.elements).length)
+        return false;
+    }
     for (const key of Object.keys(rhs.elements)) {
       // An own-property test, not `key in`: `Object.prototype` member names
       // are valid record keys (`record{toString: string}` parses and
@@ -3544,10 +3588,19 @@ function isSubtypeRules(
     return isSubtype(lhs.values, rhs.values);
   }
 
-  // A record is a dictionary whose keys are statically known: it is a subtype
-  // of `dictionary<T>` when every field type is a subtype of `T`.
-  if (lhs.kind === 'record' && rhs.kind === 'dictionary')
-    return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
+  // A record type is open: `record{a: integer}` also holds values with other
+  // fields, of any type (`{a: 1, b: "x"}`). So it is a subtype of
+  // `dictionary<T>` only when `T` holds every value. The type of a dictionary
+  // VALUE is a closed record (`closed: true`): the value has exactly the
+  // listed fields, so `{a: 1}` is a `dictionary<integer>`. With the old rule
+  // (every listed field type is a subtype of `T`) the relation was not
+  // transitive: `record{a: integer, b: string} <: record{a: integer} <:
+  // dictionary<integer>`, but the first is not a `dictionary<integer>`.
+  if (lhs.kind === 'record' && rhs.kind === 'dictionary') {
+    if (lhs.closed === true)
+      return Object.values(lhs.elements).every((t) => isSubtype(t, rhs.values));
+    return isSubtype('any', rhs.values);
+  }
 
   //
   // Handle collections
@@ -3590,14 +3643,21 @@ function isSubtypeRules(
         rhs.elements
       );
 
+    // A record type is open (see the dictionary case above), so an entry of
+    // a value can have any key and any value: `tuple<string, any>`. The
+    // entries of a closed record are its listed fields only.
     if (lhs.kind === 'record') {
+      if (lhs.closed === true)
+        return Object.values(lhs.elements).every((t) =>
+          isSubtype(
+            { kind: 'tuple', elements: [{ type: 'string' }, { type: t }] },
+            rhs.elements
+          )
+        );
       return isSubtype(
         {
           kind: 'tuple',
-          elements: [
-            { type: 'string' },
-            { type: widen(...Object.values(lhs.elements)) },
-          ],
+          elements: [{ type: 'string' }, { type: 'any' }],
         },
         rhs.elements
       );
@@ -4086,7 +4146,95 @@ function fitsBroadcastOrIndexed(
  * (`docs/TYPE_SYSTEM_ROADMAP.md` Appendix B, ruling B6).
  */
 function isValue(type: Type): boolean {
-  return isScalar(type) || isCollection(type) || isObjectType(type);
+  return (
+    isScalar(type) ||
+    isCollection(type) ||
+    isObjectType(type) ||
+    valueKindDeclaration(type) !== undefined
+  );
+}
+
+/**
+ * The declaration record of `type` when `type` is a reference to a NOMINAL
+ * type whose definition is exactly the primitive `value`
+ * (`ce.declareType('gf8', 'value', { mint: false })`), else `undefined`.
+ *
+ * Such a type is the form of a VALUE KIND that a library user declares
+ * (`docs/plans/2026-10-26-value-kinds.md`, section 4.1.1). Two rules of this
+ * file read it, from the definition alone, so they hold before any head of
+ * the kind is declared and do not depend on the kind registry of an engine:
+ *
+ * - It is a subtype of `value`, and so of `expression` (`isValue()`). A
+ *   nominal type is otherwise opaque, not a subtype of its definition; this
+ *   is the same exception as the one that makes a declared object type a
+ *   subtype of `object` (`isObjectType()`).
+ * - It is disjoint from every type except `value`, `expression`, `any`,
+ *   `unknown` and itself (`provablyDisjointRules()`), as the `residue`
+ *   primitive is by its entry in the subtype table. This is what keeps the
+ *   number rules away from a value of the kind.
+ *
+ * An applied reference (`gf<7>`), a declaration with type parameters, an
+ * alias, and a nominal type defined as another nominal type (`type h =
+ * gf8`) do not qualify.
+ */
+export function valueKindDeclaration(type: Type): TypeReference | undefined {
+  if (typeof type !== 'object' || type.kind !== 'reference') return undefined;
+  if (type.args !== undefined) return undefined;
+  const decl = declarationOf(type);
+  if (decl.alias || decl.typeParams !== undefined) return undefined;
+  return decl.def === 'value' ? decl : undefined;
+}
+
+/**
+ * Whether the value kind declared by `kind` (a record returned by
+ * {@link valueKindDeclaration}) is provably disjoint from `other`, which is
+ * not itself a value kind of that form. See {@link valueKindDeclaration}.
+ */
+function valueKindDisjointFrom(kind: Type, other: Type): boolean {
+  if (typeof other === 'string')
+    return !(
+      other === 'value' ||
+      other === 'expression' ||
+      other === 'any' ||
+      other === 'unknown'
+    );
+  switch (other.kind) {
+    case 'union':
+      return other.types.every((t) => provablyDisjoint(kind, t));
+    case 'intersection':
+      return other.types.some((t) => provablyDisjoint(kind, t));
+    case 'negation':
+      return isSubtype(kind, other.type);
+    case 'broadcastable':
+      return (
+        provablyDisjoint(kind, other.elements) &&
+        provablyDisjoint(kind, broadcastCollectionArm(other.elements))
+      );
+    case 'reference': {
+      // Another reference: an alias is its definition, and a nominal type is
+      // disjoint from the kind when its definition is (every value of the
+      // nominal type has the shape of its definition).
+      const def = resolveTypeReference(other);
+      if (def === undefined) return false;
+      const frame = declarationOf(other);
+      if (!beginUnfold(frame)) return false;
+      try {
+        return provablyDisjoint(kind, def);
+      } finally {
+        endUnfold(frame);
+      }
+    }
+    case 'expression':
+    case 'symbol':
+      // A value of the kind is an expression (a call of its head), so an
+      // `expression<…>` or `symbol<…>` type is not provably disjoint from
+      // it: "may overlap" is the safe answer.
+      return false;
+    default:
+      // Numbers, ranges, literal values, collections, tuples, records,
+      // objects, functions, dictionaries: none holds a value of the kind.
+      return true;
+  }
 }
 
 function isFunction(type: Type): boolean {

@@ -1,10 +1,11 @@
 /**
  * Arithmetic helpers for Quantity expressions.
  *
- * Extracted from arithmetic.ts to keep that file focused on scalar
- * arithmetic.  Every function here operates on Quantity expressions
- * (magnitude + unit pairs) and is called from the evaluate paths of
- * Add, Multiply, Divide, Power, Negate, Sqrt, and Root.
+ * Every function here operates on Quantity expressions (magnitude + unit
+ * pairs). The hooks of the value kind `quantity` (`QUANTITY_ARITHMETIC`,
+ * `quantity-kind.ts`) call them for `Add`, `Multiply`, `Divide`, `Power`,
+ * `Negate`, `Sqrt` and `Root`, and for the arithmetic methods of an
+ * expression.
  */
 
 import type {
@@ -47,6 +48,7 @@ import {
   measurementAdd,
   measurementMultiply,
   measurementDivide,
+  measurementNegate,
   measurementPower,
 } from './measurement-arithmetic.js';
 
@@ -196,13 +198,14 @@ function divideMagnitudes(
  * sum in kelvin (see `kelvinSum()`).
  *
  * `rawOps`, when given, are the operands as written, one for each operand of
- * `ops`, in order. They tell which operands are negated (`Negate(…)`), which
- * matters for a temperature with an offset.
+ * `ops`, in order (`undefined` for an operand with no written form). They
+ * tell which operands are negated (`Negate(…)`), which matters for a
+ * temperature with an offset.
  */
 export function quantityAdd(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>,
-  rawOps?: ReadonlyArray<Expression>
+  rawOps?: ReadonlyArray<Expression | undefined>
 ): Expression | undefined {
   if (ops.length === 0) return undefined;
 
@@ -304,7 +307,7 @@ export function quantityAdd(
  * not the zero of the kelvin scale (`0 degC` is `273.15 K`). The unit table
  * has two such units, `degC` and `degF`.
  */
-function isOffsetTemperatureUnit(
+export function isOffsetTemperatureUnit(
   ue: ReturnType<typeof boxedToUnitExpression>
 ): boolean {
   if (typeof ue !== 'string') return false;
@@ -318,13 +321,27 @@ function isOffsetTemperatureUnit(
  * canonical form puts the number coefficient of a product first: `a − b` is
  * `Add(Negate(b), a)`, `a − 2b` is `Add(Multiply(-2, b), a)` and `a − b/2` is
  * `Add(Multiply(-1/2, b), a)`.
+ *
+ * The negation can also be inside the term: a quotient whose numerator is
+ * negated (`a − b/2` with a quantity `b` is `Add(Divide(Negate(b), 2), a)`),
+ * or a product with a negated factor (`a + 2·(−b)` is
+ * `Add(Multiply(2, Negate(b)), a)`). The term is negated when the number of
+ * negations (a `Negate`, a negative real number factor or divisor) is odd.
  */
-function isNegatedOperand(op: Expression | undefined): boolean {
-  if (op === undefined) return false;
+function isNegatedOperand(op: Expression | undefined, depth = 0): boolean {
+  if (op === undefined || depth > 8) return false;
+  const isNegativeNumber = (c: Expression | undefined): boolean =>
+    c !== undefined && isNumber(c) && c.im === 0 && c.re < 0;
   if (op.operator === 'Negate') return true;
+  if (isFunction(op, 'Divide'))
+    return isNegatedOperand(op.op1, depth + 1) !== isNegativeNumber(op.op2);
   if (!isFunction(op, 'Multiply')) return false;
-  const c = op.ops[0];
-  return c !== undefined && isNumber(c) && c.im === 0 && c.re < 0;
+  let negated = false;
+  for (const factor of op.ops) {
+    if (isNegativeNumber(factor) || isNegatedOperand(factor, depth + 1))
+      negated = !negated;
+  }
+  return negated;
 }
 
 /**
@@ -488,42 +505,20 @@ export function quantityMultiply(
 }
 
 /**
- * Post-numericization re-dispatch for `Add`/`Multiply` (Tycho item 101).
- *
- * The Quantity check in the `Add`/`Multiply` evaluate handlers runs against
- * the operands as returned by `evaluate()`.  An operand that only BECOMES a
- * Quantity under numeric approximation is invisible to that check, so
- * `addN`/`mulN` leave the fold undone — the same structural gap as the
- * Measurement one closed by `foldMeasurementOperands`, and the same fix:
- * `addN`/`mulN` numericize their operands, so the Quantity IS visible in the
- * result they return; fold it here so the FIRST `.N()` yields a Quantity.
- *
- * Checked BEFORE the Measurement fold at the call sites, mirroring the
- * handlers' precedence for mixed operands (`quantityAdd`/`quantityMultiply`
- * route Measurement-carrying magnitudes through the measurement combinators
- * themselves).  The result is made numeric, as in the handlers'
- * numeric-approximation branch: a Measurement magnitude, and an exact
- * magnitude that the exact arithmetic of `quantityMultiply` kept exact, are
- * `.N()`-ed.
- *
- * Keyed off the RESULT's operator, not the caller's: `addN` may return a
- * `Multiply` (`q + q` → `2·q`).  Returns `undefined` when there is nothing to
- * fold, which is the hot path (a plain numeric sum returns a number literal,
- * rejected by the operator test alone).
+ * The negation of the quantity `q`: the magnitude is negated, the unit is
+ * kept. A symbolic magnitude has no numeric value (its `.re` is `NaN`), and
+ * an exact magnitude (`π`) must stay exact: it is negated with the
+ * expression arithmetic of the `Measurement` helpers, with no error.
  */
-export function foldQuantityOperands(
+export function quantityNegate(
   ce: ComputeEngine,
-  expr: Expression
+  q: QuantityExpr
 ): Expression | undefined {
-  const operator = expr.operator;
-  if (operator !== 'Add' && operator !== 'Multiply') return undefined;
-  if (!isFunction(expr)) return undefined;
-  const ops = expr.ops;
-  if (!ops.some((x) => isQuantity(x))) return undefined;
-  const r =
-    operator === 'Add' ? quantityAdd(ce, ops) : quantityMultiply(ce, ops);
-  if (r === undefined) return undefined;
-  return r.N();
+  if (usesExpressionArithmetic([q.op1])) {
+    const negM = measurementNegate(ce, q.op1);
+    if (negM !== undefined) return ce._fn('Quantity', [negM, q.op2]);
+  }
+  return ce._fn('Quantity', [asFloat(ce.number(-q.op1.re)), q.op2]);
 }
 
 /**

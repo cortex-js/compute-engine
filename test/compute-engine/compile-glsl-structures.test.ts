@@ -25,7 +25,9 @@ describe('GLSL COMPILATION — structures and control flow', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = glsl.compile(expr, NO_FOLD).code;
-      expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
+      expect(code).toBe(
+        '((sin(1.0)) + (sin(2.0)) + (sin(3.0)))'
+      );
     });
 
     it('should unroll Product with small constant bounds', () => {
@@ -53,7 +55,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       });
       expect(fn).toContain('float sumSin()');
       expect(fn).toContain('for (int i = 1; i <= 1000; i++)');
-      expect(fn).toContain('+= sin(float(i))');
+      expect(fn).toContain('+= _gpu_sin(float(i))');
       expect(fn).toContain('return ');
       expect(fn).not.toContain('let ');
       expect(fn).not.toContain('while');
@@ -156,19 +158,19 @@ describe('GLSL COMPILATION — structures and control flow', () => {
   // CO-P1-2: GLSL/WGSL `min`/`max` are 2-argument builtins; 3+ args must fold
   // into a nest of 2-argument calls (a variadic `max(a, b, c)` is invalid).
   describe('CO-P1-2 min/max variadic folding', () => {
-    it('folds 3-arg Max into nested max()', () => {
+    it('folds 3-arg Max into nested _gpu_max()', () => {
       const code = glsl.compile(ce.box(['Max', 'a', 'b', 'c'])).code;
-      expect(code).toBe('max(max(a, b), c)');
+      expect(code).toBe('_gpu_max(_gpu_max(a, b), c)');
     });
 
-    it('folds 4-arg Min into nested min()', () => {
+    it('folds 4-arg Min into nested _gpu_min()', () => {
       const code = glsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd'])).code;
-      expect(code).toBe('min(min(min(a, b), c), d)');
+      expect(code).toBe('_gpu_min(_gpu_min(_gpu_min(a, b), c), d)');
     });
 
     it('leaves 2-arg Max unchanged', () => {
       const code = glsl.compile(ce.box(['Max', 'a', 'b'])).code;
-      expect(code).toBe('max(a, b)');
+      expect(code).toBe('_gpu_max(a, b)');
     });
   });
 
@@ -322,7 +324,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
 
       it('names the impure-temporary cause too, not just a loop', () => {
         // The same escape detector fires for a hoisted impure temporary —
-        // `Coth` splices its operand twice and so binds an impure one to a
+        // `Cot` splices its operand twice and so binds an impure one to a
         // `_tv` — so the message must not blame a loop-form Sum/Product
         // exclusively.
         expect(() =>
@@ -330,7 +332,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
             ce.box([
               'WithRandomSeed',
               7,
-              ['Which', ['Less', 'x', 1], ['Coth', ['Random']], 'True', 2],
+              ['Which', ['Less', 'x', 1], ['Cot', ['Random']], 'True', 2],
             ] as any)
           )
         ).toThrow(/or an impure operand bound to a hoisted temporary/);
@@ -444,7 +446,7 @@ describe('GLSL COMPILATION — structures and control flow', () => {
         glsl.compile(ce.box(['Add', 'x', ['Sin', 'in']]), {
           vars: { in: 'u_in' },
         }).code
-      ).toBe('x + sin(u_in)');
+      ).toBe('x + _gpu_sin(u_in)');
       expect(
         glsl.compile(ce.box(['Add', 'x', 'q']), { vars: { q: 'u.in' } }).code
       ).toBe('u.in + x');
@@ -516,7 +518,7 @@ describe('GLSL When/Which NaN branch matches the value shape (Tycho item 49)', (
         ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]],
       ])
     ).code;
-    expect(code).toContain('vec2(cos(t), sin(t))');
+    expect(code).toContain('vec2(_gpu_cos(t), _gpu_sin(t))');
     expect(code).toContain('vec2(_gpu_nan())');
     expect(code).not.toMatch(/: \(_gpu_nan\(\)\)/);
   });
@@ -661,7 +663,7 @@ describe('GLSL vecN constructor arity (no vector-valued components)', () => {
 
   it('an all-scalar tuple still lowers to vec2', () => {
     const expr = ce.box(['Tuple', ['Cos', 't'], ['Sin', 't']]);
-    expect(glsl.compile(expr).code).toBe('vec2(cos(t), sin(t))');
+    expect(glsl.compile(expr).code).toBe('vec2(_gpu_cos(t), _gpu_sin(t))');
   });
 
   // Defect B: the guard asked "does this element have a vecN lowering?", so an
@@ -733,7 +735,7 @@ describe('GLSL block local with disagreeing binding shapes fails closed', () => 
     ]);
     const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
     expect(code).toContain('vec2 p;');
-    expect(code).toContain('p = vec2(cos(t), sin(t));');
+    expect(code).toContain('p = vec2(_gpu_cos(t), _gpu_sin(t));');
   });
 });
 
@@ -822,7 +824,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `fract(((sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y))))`
+      `fract(fract(((_gpu_sin(100000.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y)))) < 0.0) ? (x) : ((y)))))`
     );
   });
 
@@ -834,7 +836,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `fract(100000.0 * sqrt(_gpu_pow2(ceil(x)) + 1.0))`
+      `fract(fract(100000.0 * sqrt(_gpu_pow2(ceil(x)) + 1.0)))`
     );
   });
 
@@ -846,7 +848,7 @@ describe('GLSL Tycho item 144: complexness must not be over-reported', () => {
     ]);
     const code = glsl.compile(expr).code;
     expect(code).toMatchInlineSnapshot(
-      `fract(((2.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y))) < 0.0) ? (x) : ((y))))`
+      `fract(fract(((2.0 * sqrt(_gpu_pow2(ceil(x)) + _gpu_pow2(ceil(y))) < 0.0) ? (x) : ((y)))))`
     );
   });
 
@@ -886,32 +888,32 @@ describe('GLSL Tycho item 147: real-by-definition heads read real', () => {
 
   it('compiles Mod over Imaginary/Real/Argument of a complex symbol', () => {
     expect(glsl.compile(e.box(['Mod', ['Imaginary', 'z'], 1])).code).toBe(
-      'fract((z).y)'
+      'fract(fract((z).y))'
     );
     expect(glsl.compile(e.box(['Mod', ['Real', 'z'], 1])).code).toBe(
-      'fract((z).x)'
+      'fract(fract((z).x))'
     );
     expect(glsl.compile(e.box(['Mod', ['Argument', 'z'], 1])).code).toBe(
-      'fract(atan(z.y, z.x))'
+      'fract(fract(atan(z.y, z.x)))'
     );
   });
 
   it('compiles Mod with a real-by-definition head in BOTH positions', () => {
     expect(
       glsl.compile(e.box(['Mod', ['Imaginary', 'z'], ['Imaginary', 'w']])).code
-    ).toBe('mod((z).y, (w).y)');
+    ).toBe('_gpu_fmod((z).y, (w).y)');
   });
 
   it('still compiles Mod over Abs (the head that already worked)', () => {
     expect(glsl.compile(e.box(['Mod', ['Abs', 'z'], 1])).code).toBe(
-      'fract(length(z))'
+      'fract(fract(length(z)))'
     );
   });
 
   it('survives enclosing arithmetic (the propagating-heads path)', () => {
     expect(
       glsl.compile(e.box(['Mod', ['Multiply', 2, ['Imaginary', 'z']], 1])).code
-    ).toBe('fract(2.0 * (z).y)');
+    ).toBe('fract(fract(2.0 * (z).y))');
   });
 
   it('still fails closed on a genuinely complex-shaped operand', () => {

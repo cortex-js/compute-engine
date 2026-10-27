@@ -22,10 +22,12 @@ describe('broadcastable<T> typing (phase B)', () => {
     ce.declare('h', '(number) -> unknown');
 
     const inner = ce.box(['Multiply', 2, ['h', 'x']]);
-    expect(inner.type.toString()).toBe('broadcastable<number>');
+    expect(inner.type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
 
     const e = ce.box(['Subtract', ['Multiply', 2, ['h', 'x']], 1]);
-    expect(e.type.toString()).toBe('broadcastable<number>');
+    expect(e.type.toString()).toBe('list<list<any> | number | tuple> | number | tuple');
 
     // No `incompatible-type` (or other) Error baked in at canonicalization.
     expect(e.isValid).toBe(true);
@@ -36,11 +38,13 @@ describe('broadcastable<T> typing (phase B)', () => {
     const ce = new ComputeEngine();
     ce.declare('h', '(number) -> unknown');
     const b = ce.box(['Multiply', 2, ['h', 'x']]);
-    expect(b.type.toString()).toBe('broadcastable<number>');
+    expect(b.type.toString()).toBe('list<list<any> | number | tuple> | number | tuple');
 
-    expect(ce.box(['Add', b, 5]).type.toString()).toBe('broadcastable<number>');
+    expect(ce.box(['Add', b, 5]).type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
     expect(ce.box(['Multiply', b, b]).type.toString()).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
   });
 
@@ -51,10 +55,10 @@ describe('broadcastable<T> typing (phase B)', () => {
     expect(at.operator).toBe('At');
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
-    // A `broadcastable<number>` is a number or a tensor of any rank: the
-    // first element is a number (rank 1) or a tensor (rank 2 and more), and
-    // the read of a scalar has no element, which `missing` records.
-    expect(at.type.toString()).toBe('missing | number | tensor');
+    // The base is typed `number | list<number | list<any>> | tuple`: its
+    // value can be a point, whose element can be any value, so the element
+    // read is typed `any` (ROADMAP CE-502).
+    expect(at.type.toString()).toBe('any');
   });
 
   test('runtime agreement: list-returning `f` broadcasts, scalar `g` stays scalar', () => {
@@ -98,7 +102,10 @@ describe('broadcastable<T> typing (phase B)', () => {
     ce.declare('h', '(number) -> unknown');
     const b = ce.box(['Multiply', 2, ['h', 'x']]);
     expect(b.type.matches('number')).toBe(false);
-    expect(b.type.matches('broadcastable<number>')).toBe(true);
+    // The value of `h(x)` can be a ragged list or a point, which
+    // `broadcastable<number>` does not hold (ROADMAP CE-502).
+    expect(b.type.matches('broadcastable<number>')).toBe(false);
+    expect(b.type.matches('number | list<any> | tuple')).toBe(true);
   });
 
   test('cold-engine symbol exclusion: bare unknown symbols do not trigger', () => {
@@ -160,7 +167,7 @@ describe('broadcastable<T> typing (phase B)', () => {
     // TYPE of `pxh`, not for any value fact). The exact string also rejects
     // a scalar fold (`number <: broadcastable<number>`).
     expect(ce.box(['Power', pxh.json, 2]).type.toString()).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
   });
 
@@ -169,7 +176,7 @@ describe('broadcastable<T> typing (phase B)', () => {
     ce.declare('h', '(number) -> unknown');
     const e = ce.parse('2(2h(x)-1)');
     expect(e.operator).toBe('Multiply');
-    expect(e.type.toString()).toBe('broadcastable<number>');
+    expect(e.type.toString()).toBe('list<list<any> | number | tuple> | number | tuple');
   });
 });
 
@@ -261,17 +268,21 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // the cells were branded `number` by an `isFinite === false` read that
     // fired for the operand's non-number TYPE). The exact string also
     // rejects a scalar fold.
-    expect(ce.box(['Sin', arg]).type.toString()).toBe('broadcastable<number>');
-    expect(ce.box(['Sqrt', arg]).type.toString()).toBe('broadcastable<number>');
+    expect(ce.box(['Sin', arg]).type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
+    expect(ce.box(['Sqrt', arg]).type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
     expect(ce.box(['Power', arg, 2]).type.toString()).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
     // `Abs` cells carry their non-negative range (ranged-results round), plus
     // the signed pair: unlike the heads above, `absFunctionType` does not
     // apply the generic-point convention to an operand of unproven
     // finiteness — `|±∞| = +∞` — so the cell names that outcome.
     expect(ce.box(['Abs', arg]).type.toString()).toBe(
-      'broadcastable<real<0..> | signed_infinity>'
+      '+oo | list<+oo | list<any> | nan | real<0..>> | nan | real<0..>'
     );
   });
 
@@ -303,10 +314,10 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // claim, exactly as their scalar paths do.
     expect(
       ce.box(['Add', ['Sin', ['Multiply', 2, ['h', 'x']]], 1]).type.toString()
-    ).toBe('broadcastable<number>');
+    ).toBe('list<list<any> | number | tuple> | number | tuple');
     expect(
       ce.box(['Sqrt', ['Sin', ['Multiply', 2, ['h', 'x']]]]).type.toString()
-    ).toBe('broadcastable<number>');
+    ).toBe('list<list<any> | number | tuple> | number | tuple');
   });
 
   test('non-interference: bare-symbol and literal operands stay scalar', () => {
@@ -326,9 +337,9 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     ]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
-    // The element of a `broadcastable<number>` is a number or a tensor, and
-    // the read of a scalar has no element (`missing`).
-    expect(at.type.toString()).toBe('missing | number | tensor');
+    // The base can be a point, whose element can be any value (ROADMAP
+    // CE-502).
+    expect(at.type.toString()).toBe('any');
   });
 });
 
@@ -363,20 +374,25 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     ce.assign('g', ce.parse('x \\mapsto 2x'));
     ce.declare('h', '(number) -> unknown');
     const arg = ce.box(['Multiply', 2, ['h', 1]]);
-    expect(arg.type.toString()).toBe('broadcastable<number>');
-    expect(ce.box(['g', arg]).type.toString()).toBe('broadcastable<number>');
+    expect(arg.type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
+    expect(ce.box(['g', arg]).type.toString()).toBe('any');
   });
 
-  test('numeric-tuple argument of an inferred-signature lambda types `any`', () => {
+  test('numeric-tuple argument of an inferred-signature lambda types a tuple', () => {
     const ce = new ComputeEngine();
     ce.assign('g', ce.parse('x \\mapsto 2x'));
     const app = ce.box(['g', ['Tuple', 1, 2]]);
     // The tuple binds WHOLE to the scalar parameter (atomic, never mapped), then
     // the body's arithmetic broadcasts it: `2·(1,2) = (2,4)` — a tuple, not the
-    // scalar `number` the inferred signature would report. Since the body
-    // shape isn't statically knowable, the honest type is `any`.
-    expect(app.type.toString()).toBe('any');
+    // scalar `number` the inferred signature would report. The body scales the
+    // tuple component by component, so the call is a tuple of numbers of the
+    // same length (ROADMAP CE-47); another body is typed `any`.
+    expect(app.type.toString()).toBe('tuple<number, number>');
     expect(app.evaluate().toString()).toBe('(2, 4)');
+    ce.assign('n', ce.parse('x \\mapsto |x|'));
+    expect(ce.box(['n', ['Tuple', 3, 4]]).type.toString()).toBe('any');
   });
 
   test('declared collection-typed parameter binds whole: NO list-wrap', () => {
@@ -440,22 +456,25 @@ describe('broadcastable<T> typing (phase E — application-site typing)', () => 
     ce.assign('m', ce.parse('x \\mapsto 2x - 1'));
     ce.declare('h', '(number) -> unknown');
     const p0 = ce.box(['Multiply', 2, ['h', 1]]);
-    expect(p0.type.toString()).toBe('broadcastable<number>');
+    expect(p0.type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
 
     const p1 = ce.box(['m', p0]);
-    expect(p1.type.toString()).toBe('broadcastable<number>');
+    expect(p1.type.toString()).toBe('any');
 
-    // `At(m(2h(1)), 1)` is valid with an element type from the return: the
-    // access is `T | marker(T)` where `T` is the element of a
-    // `broadcastable<number>`, a number or a tensor (a tensor of any rank
-    // has rows), and the marker of that union is `missing`.
+    // `At(m(2h(1)), 1)` is valid. The call is typed `any`: its argument can
+    // be a point, and the body of `m` decides the shape of a call over a
+    // point (ROADMAP CE-502).
     const at = ce.box(['At', ['m', p0], 1]);
     expect(at.isValid).toBe(true);
     expect(hasErrorOperand(at)).toBe(false);
-    expect(at.type.toString()).toBe('missing | number | tensor');
+    expect(at.type.toString()).toBe('any');
 
     // Chaining stays single-layer broadcastable (idempotent).
-    expect(ce.box(['m', p1]).type.toString()).toBe('broadcastable<number>');
+    expect(ce.box(['m', p1]).type.toString()).toBe(
+      'broadcastable<dictionary<any> | indexed_collection<any> | number>'
+    );
   });
 });
 

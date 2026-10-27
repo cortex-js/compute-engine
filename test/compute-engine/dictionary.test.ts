@@ -551,10 +551,16 @@ describe('Dictionary', () => {
       ]);
       // The synthesized `record{…}` type survives its own spelling: the type
       // parser's element map is prototype-free too, so `__proto__` is not
-      // dropped on the way back in.
+      // dropped on the way back in. The spelling is read as the OPEN record
+      // with the same fields; the type of the literal is the closed record,
+      // which is a subtype of it (CE-4).
       const spelled = proto.type.toString();
       expect(spelled).toContain('__proto__');
-      expect(engine.type(spelled).matches(proto.type)).toBe(true);
+      const parsed = engine.type(spelled);
+      expect(proto.type.matches(parsed)).toBe(true);
+      expect(
+        Object.keys((parsed.type as { elements: object }).elements)
+      ).toEqual(['__proto__', 'toString']);
     });
   });
 });

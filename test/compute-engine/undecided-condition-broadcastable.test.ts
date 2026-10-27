@@ -33,8 +33,10 @@ describe('an undecided `broadcastable<boolean>` condition is held, not an error'
       ['Which', ['Less', ['h', 'x'], 10], 1, 'True', 0],
     ] as const) {
       const e = ce.box(j as never);
-      // The type handlers already answered for this shape…
-      expect(e.type.toString()).toBe('broadcastable<integer>');
+      // The type handlers already answered for this shape. The value of
+      // `h(x)` can be a ragged list, and the selection then maps over it to
+      // any depth (ROADMAP CE-502)…
+      expect(e.type.toString()).toBe('integer | list<integer | list<any>>');
       // …and evaluate() must hold it rather than throw.
       const r = e.evaluate();
       expect(r.operator).toBe(j[0]);

@@ -74,11 +74,11 @@ describe('Measurement — propagation through the circular functions', () => {
     expect(ce.box(['Arctan2', 1, 1]).N().json).toBeCloseTo(Math.PI / 4, 12);
   });
 
-  test('an argument at the edge of the domain keeps the bare nominal', () => {
-    // arcsin has an infinite slope at 1: the error bar is dropped.
+  test('an argument where the slope is infinite leaves the call unevaluated (decision 4)', () => {
+    // arcsin has an infinite slope at 1: no first-order uncertainty.
     const r = ce.box(['Arcsin', ['Measurement', 1, 0.01]]).N();
-    expect(r.operator).not.toBe('Measurement');
-    expect(r.re).toBeCloseTo(Math.PI / 2, 12);
+    expect(r.operator).toBe('Arcsin');
+    expect(r.op1.operator).toBe('Measurement');
   });
 
   test('exact input keeps an exact nominal and error under evaluate()', () => {
@@ -165,9 +165,16 @@ describe('Measurement — step functions answer the bare value of the nominal', 
     ).toEqual(3);
   });
 
-  test('Mod, with a measurement dividend or divisor', () => {
-    expect(ce.box(['Mod', ['Measurement', 2.5, 0.2], 1]).N().re).toBe(0.5);
-    expect(ce.box(['Mod', 7, ['Measurement', 2.5, 0.1]]).N().re).toBe(2);
+  test('Mod, with a measurement dividend or divisor, propagates to first order (decision 2)', () => {
+    // Slope 1 in the dividend, −⌊a/b⌋ = −2 in the divisor.
+    expect(ce.box(['Mod', ['Measurement', 2.5, 0.2], 1]).N().json).toEqual([
+      'Measurement',
+      0.5,
+      0.2,
+    ]);
+    const r = ce.box(['Mod', 7, ['Measurement', 2.5, 0.1]]).N();
+    expect(nominal(r)).toBe(2);
+    expect(error(r)).toBeCloseTo(0.2, 12);
   });
 });
 
@@ -322,8 +329,11 @@ describe('Measurement — statistics edge cases', () => {
 
 describe('Measurement — step functions near a rounding jump, Truncate and Fract', () => {
   test('the exact nominal decides a jump that the float cannot', () => {
-    // 1 − 10⁻³⁰ is the double 1, but its floor is 0.
-    const m = ['Measurement', ['Subtract', 1, ['Power', 10, -30]], ['Rational', 1, 100]];
+    // 1 − 10⁻³⁰ is the double 1, but its floor is 0. The uncertainty is
+    // smaller than the distance to the jump at 1 (with an uncertainty of
+    // 1/100 the jump is within one σ, and the call stays unevaluated:
+    // decision 1).
+    const m = ['Measurement', ['Subtract', 1, ['Power', 10, -30]], ['Power', 10, -40]];
     expect(ce.box(['Floor', m]).N().re).toBe(0);
     expect(ce.box(['Ceil', m]).N().re).toBe(1);
   });

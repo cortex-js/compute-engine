@@ -127,7 +127,7 @@ describe('COMPILE deterministic naming', () => {
     expect(first).toMatchInlineSnapshot(`
       float _tv1 = 0.0;
       for (int i = 1; i <= int(floor(n)); i++) {
-        _tv1 += sin(float(i));
+        _tv1 += _gpu_sin(float(i));
       }
       return _tv1;
     `);
@@ -1732,7 +1732,11 @@ describe('COMPILE CSE — shadowed names are never admitted', () => {
     const engine = new ComputeEngine();
     engine.assign('f', engine.parse('(t)\\mapsto \\sin(t)+t^2'));
     const mapped = ['Sum', ['Map', 'f', ['List', 1, 2, 3, 4]]];
-    const untyped = engine.box(['Function', ['Add', mapped, mapped], 'f'] as any);
+    const untyped = engine.box([
+      'Function',
+      ['Add', mapped, mapped],
+      'f',
+    ] as any);
     expect(() => compile(untyped, { fallback: false })).toThrow(/Nothing/);
     const expr = engine.box([
       'Function',

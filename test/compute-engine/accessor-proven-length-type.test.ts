@@ -75,18 +75,20 @@ describe('an access into an operand proved to hold the position', () => {
 describe('an access into an operand proved NOT to hold the position', () => {
   const ce = engine();
 
-  // The value is always the marker. For number elements the type is the
-  // marker `nan`. For other elements the type keeps `T | marker(T)`: a
-  // chained read chooses its marker from the element type the inner access
-  // states (`M[7][1]` over a matrix answers `NaN` because `M[7]` is typed
-  // `missing | vector<…>`, a row of numbers).
+  // The value is always the marker, and the type is the marker alone:
+  // `nan` for number elements, `missing` for other elements. A chained read
+  // reads its marker from the element type of the operand of the inner
+  // access (`M[7][1]` over a matrix is `NaN`, typed `nan`).
   test.each([
-    ['Third', [POINTS], 'missing | tuple<integer, integer>'],
-    ['At', [POINTS, 9], 'missing | tuple<integer, integer>'],
-    ['At', [POINTS, 0], 'missing | tuple<integer, integer>'],
+    ['Third', [POINTS], 'missing'],
+    ['At', [POINTS, 9], 'missing'],
+    ['At', [POINTS, 0], 'missing'],
     ['At', [['List', 7, 8, 9], 9], 'nan'],
     ['At', ['v3', 4], 'nan'],
-    ['At', [{ str: 'abc' }, 9], 'character | missing'],
+    ['At', [{ str: 'abc' }, 9], 'missing'],
+    ['At', [['List', { str: 'a' }, { str: 'b' }], -3], 'missing'],
+    ['First', [['Take', POINTS, 0]], 'missing'],
+    ['At', ['m23', 3], 'missing'],
     // A range that holds fewer elements than the position.
     ['Third', [['Range', 1, 2]], 'nan'],
     ['First', [['Range', 1, 5, -1]], 'nan'],
@@ -133,6 +135,40 @@ describe('an access into an operand proved NOT to hold the position', () => {
     expect(ce.box(['At', ['At', rows, 7], 1] as any).evaluate().isNaN).toBe(
       true
     );
+  });
+
+  test('a chained read reads its marker from the rows of the inner operand', () => {
+    const rows = ['List', ['List', 1, 2], ['List', 3, 4]];
+    const strings = ['List', { str: 'ab' }, { str: 'cd' }];
+    for (const [json, type, value] of [
+      [['At', rows, 7], 'missing', '"Missing"'],
+      [['At', ['At', rows, 7], 1], 'nan', 'NaN'],
+      [['First', ['At', rows, 7]], 'nan', 'NaN'],
+      [['Last', ['Third', rows]], 'nan', 'NaN'],
+      [['At', ['At', POINTS, 9], 2], 'nan', 'NaN'],
+      [['Second', ['At', POINTS, -5]], 'nan', 'NaN'],
+      [['At', ['At', strings, 3], 1], 'missing', '"Missing"'],
+      [['First', ['First', ['Take', rows, 0]]], 'nan', 'NaN'],
+      // Two levels of absent access.
+      [
+        ['At', ['At', ['At', ['List', rows, rows], 5], 1], 2],
+        'nan',
+        'NaN',
+      ],
+    ] as [unknown, string, string][]) {
+      const expr = ce.box(json as any);
+      expect([json, expr.type.toString()]).toEqual([json, type]);
+      const v = expr.evaluate();
+      expect([json, v.toString()]).toEqual([json, value]);
+      expect(v.type.matches(expr.type)).toBe(true);
+    }
+    // A declared matrix with no value: the read stays symbolic, with the
+    // type of the marker it answers once the matrix has a value.
+    expect(typeOf(ce, ['At', ['At', 'm23', 3], 1])).toBe('nan');
+    // The same through the LaTeX route.
+    const parsed = ce.parse('\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix}[7][1]');
+    expect(parsed.type.toString()).toBe('nan');
+    expect(parsed.evaluate().isNaN).toBe(true);
   });
 });
 
@@ -442,7 +478,7 @@ describe('an element read over a base that declares any elements', () => {
     expect(ce.symbol('P').type.toString()).toBe('indexed_collection<any>');
     expect(typeOf(ce, ['At', ['Rest', 'P'], 1])).toBe('unknown');
     expect(typeOf(ce, ['Add', ['At', ['Rest', 'P'], 1], 1])).toBe(
-      'broadcastable<number>'
+      'list<list<any> | number | tuple> | number | tuple'
     );
   });
 
@@ -456,7 +492,9 @@ describe('an element read over a base that declares any elements', () => {
       expect(typeOf(ce, ['At', part, 'i'])).toBe('unknown');
       const sum = ce.box(['Add', ['At', part, 'i'], 1] as any);
       expect(sum.isValid).toBe(true);
-      expect(sum.type.toString()).toBe('broadcastable<number>');
+      expect(sum.type.toString()).toBe(
+        'list<list<any> | number | tuple> | number | tuple'
+      );
     }
   );
 });
@@ -524,5 +562,58 @@ describe('compiling tuple coordinates requires omission-free reads', () => {
     );
     expect(result.success).toBe(false);
     expect(result.diagnostic?.message ?? '').toMatch(/Nothing/);
+  });
+});
+
+describe('arithmetic over a read proved to find no row', () => {
+  // The read is typed `missing`, but it is an absent ROW: the sum of a row
+  // and a number is a row, and an absent row is `Missing`
+  // (`docs/ERROR-MODEL.md`, "An absent OBJECT in compiled arithmetic is the
+  // object null too"). An absent number is `NaN`.
+  const ce = engine();
+  const rows = ['List', ['List', 1, 2], ['List', 3, 4]];
+
+  test.each([
+    [['Add', ['At', rows, 5], 1], 'Missing'],
+    [['Multiply', 2, ['Third', rows]], 'Missing'],
+    [['Add', ['At', POINTS, 9], ['Tuple', 1, 1]], 'Missing'],
+    [['Add', ['At', ['List', 7, 8], 5], 1], 'NaN'],
+  ])('%j is %s, with a type that holds it', (json, value) => {
+    const expr = ce.box(json as any);
+    const v = expr.evaluate();
+    expect(v.toString().replace(/"/g, '')).toBe(value);
+    expect(v.type.matches(expr.type)).toBe(true);
+  });
+
+  // A block local that holds the read keeps the domain of the read: the
+  // local is typed `missing | <row type>`, and the sum is `Missing`, as for
+  // the read itself. An absent number stays `NaN`.
+  test.each([
+    [['At', rows, 7], 'Missing'],
+    [['Third', rows], 'Missing'],
+    [['At', ['At', rows, 7], 1], 'NaN'],
+    [['At', ['List', 7, 8], 5], 'NaN'],
+  ])('a block local bound to %j gives %s in a sum', (read, value) => {
+    for (const json of [
+      ['Block', ['Assign', 'r', read], ['Add', 'r', 1]],
+      ['Block', ['Declare', 'r'], ['Assign', 'r', read], ['Add', 'r', 1]],
+    ]) {
+      const expr = ce.box(json as any);
+      const v = expr.evaluate();
+      expect(v.toString().replace(/"/g, '')).toBe(value);
+      expect(v.type.matches(expr.type)).toBe(true);
+    }
+  });
+
+  test('the compiled code declines an absent row, and keeps an absent number', () => {
+    expect(() =>
+      compile(ce.box(['Add', ['At', rows, 5], 1] as any), {
+        fallback: false,
+      } as any)
+    ).toThrow(/absent/);
+    const n = compile(ce.box(['Add', ['At', ['List', 7, 8], 5], 1] as any), {
+      fallback: false,
+    } as any);
+    expect(Number.isNaN((n.run as any)({}))).toBe(true);
   });
 });

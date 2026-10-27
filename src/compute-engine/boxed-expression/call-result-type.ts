@@ -36,6 +36,8 @@ import {
   functionLiteralParameterName,
   functionLiteralParameterNames,
   functionLiteralParameterType,
+  functionLiteralReturnType,
+  capturedSymbols,
   isRestParameter,
   isDestructuringParameter,
   isScalarType,
@@ -48,7 +50,7 @@ import {
 } from '../collection-utils.js';
 import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
-import { isFunction, isSymbol } from './type-guards.js';
+import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { provisionalRecursionResult } from './declared-parameter-result.js';
 
 const cache = new WeakMap<
@@ -237,12 +239,101 @@ export function callResultType(
   if (binding && 'value' in binding && isForwardCallReference(binding.value))
     binding = callableBindingInContext(engine, head, binding);
   binding ??= engine.lookupDefinition(head);
+  const literal = userFunctionLiteral(binding);
+  const inferred =
+    literal !== undefined && inferredCallSignature(binding) !== undefined;
+  // An argument that is an error: a call of a user function with an error
+  // argument is that error (`docs/ERROR-MODEL.md`, section 3), whatever
+  // its signature says. The body of `r := x ↦ If(x = 0, 0, r(x − 1) + 1)`
+  // calls `r("s" − 1)`, and the derivation of `r("s")` reads that call.
+  if (inferred && args.some((x) => x.type === 'error')) return 'error';
+  // A parameter whose uses require types that no value has (`n` in
+  // `n ↦ Range(n) + n[1]`, a scalar bound and a collection) is typed
+  // `never` (`narrowInferredType`, `boxed-symbol.ts`). Every call of such a
+  // function is an error: a list argument at that parameter fails the scalar
+  // use, and any other argument fails the index read. The result of the
+  // signature, derived from a body with a parameter of type `never`, does
+  // not describe that value.
+  if (
+    inferred &&
+    !args.some((x) => mayBroadcast(presentPart(x.type))) &&
+    literal.ops.slice(1).some((p) => isSymbol(p) && p.type.type === 'never')
+  )
+    return 'error';
+  // A string or a boolean argument of a function whose signature was
+  // inferred: the result of the signature can be false for it, and so can
+  // the candidate result of a cycle of recursive calls, which was derived
+  // with numeric arguments (`provisionalRecursionResult`). When the rules
+  // below keep the result of the signature (`undefined`), the call is
+  // typed from the body (`dataArgumentCallType`).
+  const dataArgument = inferred && args.some((x) => isNonNumericDatum(x.type));
+  const declined = { walk: false };
+  let t = callResultTypeOfBinding(
+    engine,
+    args,
+    declared,
+    derive,
+    binding,
+    dataArgument,
+    declined
+  );
+  // An inferred result is not a contract: see `mayDeriveUnbounded`. A
+  // result type that the host declared for the function stays the bound.
+  // Only when the walk bounded by the inferred result ran and gave no type:
+  // when the result is a scalar and the arguments fit the signature, or
+  // when the call maps over an argument, no walk runs and the rules that
+  // decided so stand (the walk of a body can be narrower than the value:
+  // `Mod(x, y)` is typed `real`, and is `NaN` for `y = 0`).
+  if (
+    declined.walk &&
+    t === undefined &&
+    inferred &&
+    !dataArgument &&
+    mayDeriveUnbounded(literal, args)
+  )
+    t = unboundedLiteralResultType(
+      literal,
+      args,
+      derive,
+      declaredParameterTypes(binding)
+    );
+  if (t !== undefined || !dataArgument) return t;
+  return dataArgumentCallType(
+    literalBodyResultType(
+      engine,
+      literal,
+      args,
+      'any',
+      derive,
+      declaredParameterTypes(binding)
+    ),
+    declared
+  );
+}
+
+/** The part of `callResultType` that reads the binding of the called
+ * function, after it is resolved. With `skipProvisional`, the candidate
+ * result of a cycle of recursive calls is not read. */
+function callResultTypeOfBinding(
+  engine: IComputeEngine,
+  args: readonly OperandDescriptor[],
+  declared: Type,
+  derive: (
+    head: string,
+    args: readonly OperandDescriptor[]
+  ) => Type | undefined,
+  binding: BoxedDefinition | undefined,
+  skipProvisional: boolean,
+  declined?: { walk: boolean }
+): Type | undefined {
   // A call of a function of a cycle of calls whose result is verified is
   // typed by the candidate result of that function
   // (`provisionalRecursionResult`).
   const called = userFunctionLiteral(binding);
   const provisional =
-    called === undefined ? undefined : provisionalRecursionResult(called);
+    called === undefined || skipProvisional
+      ? undefined
+      : provisionalRecursionResult(called);
   if (provisional !== undefined) return provisional;
   const inferredSig = inferredPointSignature(binding);
   if (inferredSig !== undefined) {
@@ -281,7 +372,74 @@ export function callResultType(
     derive,
     declaredParameterTypes(binding)
   );
+  // The walk of the body, bounded by a result that is not a scalar, ran and
+  // gave no type (`mayDeriveUnbounded`).
+  if (declined !== undefined && t === undefined && scalar === undefined)
+    declined.walk = true;
   return scalar === undefined ? t : outsideScalarResult(t, scalar);
+}
+
+/**
+ * True when an argument of type `type` is a string or a boolean (an absent
+ * arm aside): a value that is not a number and that a call does not map
+ * over.
+ */
+function isNonNumericDatum(type: Type): boolean {
+  const t = presentPart(type);
+  if (t === 'never' || t === 'unknown' || t === 'any' || t === 'error')
+    return false;
+  return isSubtype(t, 'string') || isSubtype(t, 'boolean');
+}
+
+/** True when `t` is a tuple type with a slot of type `error`, or with a
+ * slot that is such a tuple (`dataArgumentCallType`). */
+function isTupleWithErrorSlot(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  return (
+    typeof r === 'object' &&
+    r.kind === 'tuple' &&
+    r.elements.some((x) => x.type === 'error' || isTupleWithErrorSlot(x.type))
+  );
+}
+
+/**
+ * The type of a call of a function with an inferred signature that has a
+ * string or a boolean argument, from `derived`, the type of the body with
+ * each parameter typed as its argument (`literalBodyResultType`, with no
+ * bound on the result).
+ *
+ * The engine infers the signature from the uses of each parameter in the
+ * body, and a numeric use (`-x`) reads the parameter as a number. The
+ * result of the signature is then a numeric type, which does not describe
+ * a call with a string: with `f := x ↦ (-x, x)`, the signature is
+ * `(x: unknown) -> tuple<number, number>`, and `f("s")` evaluates to
+ * `(Error(incompatible-type), "s")`, which has the type `error`. So the
+ * call is typed from the body. When the body gives no type, the call is
+ * typed `any`, which holds every value. When the result of the signature,
+ * `declared`, holds the derived type and is not `unknown` or `any`, the
+ * call keeps that result
+ * (`undefined` is returned): with `h := u ↦ 1`, `h("abc")` is typed
+ * `integer`, not `1`.
+ *
+ * The derivation types the body `(-x, x)` as `tuple<error, string>`, a
+ * tuple with an `error` slot. A tuple value with a failed cell has the type
+ * `error`: only a `List` or a `Set` literal keeps a collection type for a
+ * failed cell (`docs/ERROR-MODEL.md`, section 3). So a derived tuple type
+ * with an `error` slot gives the type `error`, also when the slot is in a
+ * nested tuple (`x ↦ ((-x, 1), x)`): the inner tuple is then an error, which
+ * is a failed cell of the outer one.
+ * (ROADMAP CE-490.)
+ */
+function dataArgumentCallType(
+  derived: Type | undefined,
+  declared: Type
+): Type | undefined {
+  if (derived === undefined || derived === 'unknown') return 'any';
+  if (isTupleWithErrorSlot(derived)) return 'error';
+  // Every type is a subtype of `unknown` and of `any`: such a result says
+  // nothing, and the derived type is kept.
+  if (declared === 'unknown' || declared === 'any') return derived;
+  return isSubtype(derived, declared) ? undefined : derived;
 }
 
 /**
@@ -496,6 +654,76 @@ export function bindsWholeAtInferredPoint(t: Type, point: Type): boolean {
 }
 
 /**
+ * True when the argument of type `t` at the point parameter `point` of an
+ * inferred signature is not of the parameter type, mapping does not apply
+ * to it, and the body of `literal` reads parameter `i` whole, not only by
+ * index. The parameter type was inferred from the index reads
+ * (`P[1]` gives `tuple<number>`), so it states only the components that the
+ * body reads. A body that reads the parameter whole computes with the
+ * argument as it is, and its value has the shape of the argument: with
+ * `c := P ↦ P/(P[1] − 1)` (inferred `(tuple<number>) -> tuple<number>`),
+ * `c((3, 2))` is `(3/2, 1)` and `c([3, 2])` is `[3/2, 1]`, which
+ * `tuple<number>` does not hold. Such a call is typed from the body
+ * (`inferredPointCallType`).
+ */
+function readsOtherPointWhole(
+  literal: (Expression & FunctionInterface) | undefined,
+  i: number,
+  t: Type,
+  point: Type
+): boolean {
+  if (literal === undefined) return false;
+  if (t === 'unknown' || t === 'any' || t === 'error' || t === 'never')
+    return false;
+  if (isSubtype(t, point)) return false;
+  if (inferredArgumentMaps(point, t) === true) return false;
+  const param = literal.ops[i + 1];
+  if (param === undefined) return false;
+  const name = functionLiteralParameterName(param);
+  if (!name) return false;
+  // A read of the parameter that is not the collection of an index read
+  // `At(P, k)`. A nested function literal that binds the same name hides
+  // the parameter.
+  const visit = (e: Expression): boolean => {
+    if (isSymbol(e)) return e.symbol === name;
+    if (!isFunction(e)) return false;
+    if (
+      e.operator === 'Function' &&
+      e.ops
+        .slice(1)
+        .some((p) => functionLiteralParameterNames(p).includes(name))
+    )
+      return false;
+    if (e.operator === 'At' && isSymbol(e.op1) && e.op1.symbol === name)
+      return e.ops.slice(1).some(visit);
+    return e.ops.some(visit);
+  };
+  return visit(literal.op1);
+}
+
+/**
+ * True when the argument of type `t` at parameter `i`, whose type `point`
+ * was inferred as a point, is bound whole by the call of the function that
+ * `binding` holds, and the signature result does not describe the call:
+ * the argument is not a point and the call does not map over it
+ * (`bindsWholeAtInferredPoint`), or it is of another point type and the
+ * body reads the parameter whole (`readsOtherPointWhole`). Both routes
+ * that type a call (the boxed call and the descriptor route) ask this
+ * question, so that they agree.
+ */
+export function bindsWholeAtInferredPointParameter(
+  binding: BoxedDefinition | undefined,
+  i: number,
+  t: Type,
+  point: Type
+): boolean {
+  return (
+    bindsWholeAtInferredPoint(t, point) ||
+    readsOtherPointWhole(userFunctionLiteral(binding), i, t, point)
+  );
+}
+
+/**
  * The element type of `t` when it is a collection that the body can read
  * by index (a list, a tuple, not a string, not a set). `undefined`
  * otherwise.
@@ -580,7 +808,7 @@ function inferredPointCallType(
   const whole = args.map(
     (_, i) =>
       isPointParameterType(slots[i]) &&
-      bindsWholeAtInferredPoint(types[i], slots[i])
+      bindsWholeAtInferredPointParameter(binding, i, types[i], slots[i])
   );
   const maps = mapping.some((x) => x === true);
   const bindsWhole = whole.some((x) => x);
@@ -825,12 +1053,22 @@ export function appliedLiteralResultType(
       return undefined;
     outside = true;
   }
+  // A string or a boolean argument at a parameter that the literal does not
+  // annotate: when the rules below keep the result of the signature, that
+  // result was inferred with the parameter read as a number, so the call is
+  // typed from the body (`dataArgumentCallType`).
+  const dataArgument = args.some(
+    (x, i) =>
+      isNonNumericDatum(x.type) &&
+      functionLiteralParameterType(literal.ops[i + 1]) === undefined
+  );
   let scalar: Type | undefined;
+  let derives = true;
   if (isScalarResult(declared)) {
-    if (!outside) return undefined;
-    scalar = declared;
-    declared = 'any';
-  } else if (outside) return undefined;
+    if (!outside) derives = false;
+    else scalar = declared;
+  } else if (outside) derives = false;
+  if (!derives && !dataArgument) return undefined;
   // An applied literal in the body of another is typed by this function
   // again, and the walk of its body is not memoized across the different
   // argument types it meets. Beyond a depth of 8 the result type of the
@@ -838,17 +1076,177 @@ export function appliedLiteralResultType(
   if (appliedLiteralDepth >= 8) return undefined;
   appliedLiteralDepth += 1;
   try {
-    const t = literalBodyResultType(
-      literal.engine,
-      literal,
-      args,
-      declared,
-      derive
+    if (derives) {
+      let t = literalBodyResultType(
+        literal.engine,
+        literal,
+        args,
+        scalar === undefined ? declared : 'any',
+        derive
+      );
+      if (
+        t === undefined &&
+        scalar === undefined &&
+        mayDeriveUnbounded(literal, args)
+      )
+        t = unboundedLiteralResultType(literal, args, derive);
+      const result = scalar === undefined ? t : outsideScalarResult(t, scalar);
+      if (result !== undefined || !dataArgument) return result;
+    }
+    return dataArgumentCallType(
+      literalBodyResultType(literal.engine, literal, args, 'any', derive),
+      declared
     );
-    return scalar === undefined ? t : outsideScalarResult(t, scalar);
   } finally {
     appliedLiteralDepth -= 1;
   }
+}
+
+/**
+ * Whether a call of `literal`, whose signature was inferred, may be typed by
+ * the walk of its body with no bound (`unboundedLiteralResultType`) when the
+ * walk bounded by the inferred result declines.
+ *
+ * An inferred result is read from the body before any argument is known, and
+ * it can be narrower than the value: in `v ↦ PointList(PointY(v), PointX(v))`
+ * the components are typed `unknown`, which `PointList` reads as numbers, so
+ * the inferred result is `tuple<unknown, unknown>`; applied to a list of
+ * points the value is a list of points, which the walk types
+ * `list<tuple<integer, integer>>` (ROADMAP CE-514). Two cases keep the
+ * inferred result as the bound:
+ * - the literal writes its result type: that is a contract;
+ * - the literal reads a symbol from outside (`capturedSymbols`): its inferred
+ *   result records the types those symbols had, and a call whose captured
+ *   symbol has since changed type is refused against it (ROADMAP CE-473 (c)),
+ *   which a type derived from the current values would hide.
+ *
+ * The arguments must be numbers or lists (`isNumberOrListArgument`) that
+ * hold no string, boolean or character (`mayHoldDatum`). The other
+ * arguments keep the inferred result, because the walk of the body does not
+ * describe their value:
+ * - a tuple binds whole to a scalar parameter, and the call is typed by the
+ *   rules for that case (`lambdaBroadcastType`, `boxed-function.ts`, which
+ *   answers `any`, and `componentwiseTupleCallType`). Typing such a call
+ *   from the body gave wrong narrow types for a nested user call in a list
+ *   when it was tried on 2026-09-26 (the comment in `lambdaBroadcastType`
+ *   has the record);
+ * - a call does not map over a set: `f(Set(1, 2))` for `f := x ↦ x + 1` is
+ *   an `incompatible-type` error, which the walk types as a set;
+ * - an abstract collection (`collection<integer>`) may hold a tuple or a
+ *   set;
+ * - a numeric operation on a string, a boolean or a character is an error
+ *   that the walk does not always type as one.
+ */
+function mayDeriveUnbounded(
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[]
+): boolean {
+  return (
+    functionLiteralReturnType(literal) === undefined &&
+    capturedSymbols(literal).length === 0 &&
+    args.every((x) => isNumberOrListArgument(x.type) && !mayHoldDatum(x.type))
+  );
+}
+
+/** Whether each arm of `t` is a number type, `missing`, or a list type. */
+function isNumberOrListArgument(t: Readonly<Type>): boolean {
+  const r = resolveTypeAlias(t as Type);
+  if (typeof r === 'object' && r.kind === 'union')
+    return r.types.every((x) => isNumberOrListArgument(x));
+  if (typeof r === 'object' && r.kind === 'list') return true;
+  if (r === 'missing') return true;
+  return r !== 'never' && isSubtype(r, 'number');
+}
+
+/**
+ * Whether a value of type `t` may hold a string, a boolean or a character,
+ * at the top or in a slot at any depth. A type that does not name its
+ * contents (`list`, `tuple`, `any`, `unknown`) may.
+ *
+ * The walk of a body types each operation from the types of its operands,
+ * and a numeric operation on an element of a bare `list` (`-x` in
+ * `x ↦ (-x, x)`) is typed as if the element held a number. When the element
+ * is a string, the value has an `incompatible-type` error there, which the
+ * derived type does not hold. So the unbounded walk (`mayDeriveUnbounded`)
+ * runs only for arguments that answer false.
+ */
+function mayHoldDatum(t: Readonly<Type>, depth = 0): boolean {
+  if (depth > 8) return true;
+  const r = resolveTypeAlias(t as Type);
+  if (typeof r === 'string') {
+    if (
+      r === 'any' ||
+      r === 'unknown' ||
+      r === 'value' ||
+      r === 'expression' ||
+      r === 'tuple' ||
+      r === 'record' ||
+      r === 'list' ||
+      r === 'set' ||
+      r === 'collection' ||
+      r === 'indexed_collection' ||
+      r === 'dictionary'
+    )
+      return true;
+  }
+  for (const datum of ['string', 'boolean', 'character'] as const)
+    if (isSubtype(r, datum) || isSubtype(datum, r)) return true;
+  if (typeof r === 'string') return false;
+  switch (r.kind) {
+    case 'union':
+      return r.types.some((x) => mayHoldDatum(x, depth + 1));
+    case 'tuple':
+      return r.elements.some((x) => mayHoldDatum(x.type, depth + 1));
+    case 'list':
+    case 'set':
+    case 'collection':
+    case 'indexed_collection':
+      return mayHoldDatum(r.elements, depth + 1);
+    case 'dictionary':
+      return mayHoldDatum(r.values, depth + 1);
+    case 'record':
+      return Object.values(r.elements).some((x) =>
+        mayHoldDatum(x, depth + 1)
+      );
+    case 'intersection':
+    case 'negation':
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * The type of the body of `literal` with its parameters typed as `args`,
+ * not bounded by the result of its signature, or `undefined` when the walk
+ * declines or its type says nothing (`unknown`, `any` or `error`). See
+ * `mayDeriveUnbounded`. `declaredParams` are the parameter types declared
+ * for the called function, if any.
+ */
+function unboundedLiteralResultType(
+  literal: Expression & FunctionInterface,
+  args: readonly OperandDescriptor[],
+  derive: (
+    head: string,
+    args: readonly OperandDescriptor[]
+  ) => Type | undefined,
+  declaredParams?: ReadonlyArray<Type>
+): Type | undefined {
+  const t = literalBodyResultType(
+    literal.engine,
+    literal,
+    args,
+    'any',
+    derive,
+    declaredParams
+  );
+  if (t === undefined) return undefined;
+  const r = resolveTypeAlias(t);
+  // A tuple with an `error` slot is not a value: the call is an error as a
+  // whole (`dataArgumentCallType`), so the walk says nothing here.
+  return r === 'unknown' || r === 'any' || r === 'error' || isTupleWithErrorSlot(t)
+    ? undefined
+    : t;
 }
 
 /** The number of `appliedLiteralResultType` derivations in progress, one
@@ -1394,4 +1792,141 @@ function literalBodyResultType(
   } finally {
     running.delete(literal);
   }
+}
+
+/** The unary functions that, applied to a numeric tuple, give the tuple of
+ * their values at each component: `Sin((1, 2))` is `(Sin(1), Sin(2))`.
+ * `Abs` is not one of them: `Abs((3, 4))` is the norm, `5`. Each was
+ * checked by evaluation (`Floor((1.5, -2))` is `(1, -2)`). */
+const COMPONENTWISE_UNARY = new Set([
+  'Negate',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Sec',
+  'Csc',
+  'Cot',
+  'Arctan',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+  'Exp',
+  'Ln',
+  'Sqrt',
+  'Square',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Truncate',
+  'Sign',
+]);
+
+/**
+ * The type of a call of the function literal `literal` when exactly one
+ * argument is a numeric tuple with `n` number components, the other
+ * arguments are numbers, and the body computes the tuple component by
+ * component: `tuple<number, …>` with `n` components. `undefined` when the
+ * body has another form, and the caller keeps its answer (`any`).
+ *
+ * The body must be built from these forms only, where `P` is a form that
+ * gives a tuple of `n` numbers and `S` is a number that does not read the
+ * tuple parameter:
+ *
+ * - the tuple parameter;
+ * - `Negate(P)` and a function of `COMPONENTWISE_UNARY` applied to `P`;
+ * - `Multiply(S, …, P, …, S)`, with one `P` operand;
+ * - `Add(P, …, P)` and `Subtract(P, P)`: every operand reads the same
+ *   tuple, so the lengths agree;
+ * - `Divide(P, S)`;
+ * - `Power(P, k)` with a number literal `k ≥ 0`, and `Power(S, P)`.
+ *
+ * The other forms can fail or give a value of another shape: `x + 1` is an
+ * `incompatible-type` error, `x·x` is the error `no-product-between-points`,
+ * `2/x` and `x^(-1)` are the error `no-division-by-point`, and `|x|` is the
+ * norm of the tuple.
+ *
+ * With `h := x ↦ 2x`, `h((1, 2))` is `(2, 4)`: the call is typed
+ * `tuple<number, number>`, and it was typed `any` (ROADMAP CE-47). A
+ * component of the value can be a complex number (`Sqrt((1, -2))`), an
+ * infinity (`(1, 2)/0`) or `NaN`, which the type `number` holds.
+ */
+export function componentwiseTupleCallType(
+  literal: Expression | undefined,
+  argTypes: ReadonlyArray<Type>
+): Type | undefined {
+  if (literal === undefined || !isFunction(literal, 'Function'))
+    return undefined;
+  const params = literal.ops.slice(1);
+  if (params.length !== argTypes.length) return undefined;
+  const names: string[] = [];
+  for (const p of params) {
+    if (isRestParameter(p) || isDestructuringParameter(p)) return undefined;
+    const name = functionLiteralParameterName(p);
+    if (!name) return undefined;
+    names.push(name);
+  }
+  let tupleName: string | undefined;
+  let arity = 0;
+  for (let i = 0; i < argTypes.length; i++) {
+    const t = resolveTypeAlias(argTypes[i]);
+    if (isSubtype(t, 'number')) continue;
+    if (
+      tupleName !== undefined ||
+      typeof t !== 'object' ||
+      t.kind !== 'tuple' ||
+      t.elements.length === 0 ||
+      !t.elements.every((e) => isSubtype(e.type, 'number'))
+    )
+      return undefined;
+    tupleName = names[i];
+    arity = t.elements.length;
+  }
+  if (tupleName === undefined) return undefined;
+  const scalarNames = new Set(names.filter((n) => n !== tupleName));
+  const tuple = tupleName;
+  // The form of `e`: 'point' for a tuple of `arity` numbers, 'scalar' for a
+  // number that does not read the tuple parameter, `undefined` otherwise.
+  const formOf = (e: Expression): 'point' | 'scalar' | undefined => {
+    if (isSymbol(e)) {
+      const s = e.symbol;
+      if (s === tuple) return 'point';
+      if (scalarNames.has(s)) return 'scalar';
+      return isSubtype(e.type.type, 'number') ? 'scalar' : undefined;
+    }
+    if (!isFunction(e)) {
+      return isSubtype(e.type.type, 'number') ? 'scalar' : undefined;
+    }
+    if (!e.has(tuple)) {
+      // A number computed from the other parameters, which hold numbers.
+      return isSubtype(e.type.type, 'number') ? 'scalar' : undefined;
+    }
+    const op = e.operator;
+    const forms = e.ops.map(formOf);
+    if (forms.some((f) => f === undefined)) return undefined;
+    if (op === 'Block') return e.nops === 1 ? forms[0] : undefined;
+    if (COMPONENTWISE_UNARY.has(op))
+      return e.nops === 1 && forms[0] === 'point' ? 'point' : undefined;
+    if (op === 'Multiply')
+      return forms.filter((f) => f === 'point').length === 1
+        ? 'point'
+        : undefined;
+    if (op === 'Add' || op === 'Subtract')
+      return forms.every((f) => f === 'point') ? 'point' : undefined;
+    if (op === 'Divide')
+      return e.nops === 2 && forms[0] === 'point' && forms[1] === 'scalar'
+        ? 'point'
+        : undefined;
+    if (op === 'Power' && e.nops === 2) {
+      if (forms[0] === 'scalar' && forms[1] === 'point') return 'point';
+      const k = e.ops[1];
+      if (forms[0] === 'point' && isNumber(k) && k.isNonNegative === true)
+        return 'point';
+    }
+    return undefined;
+  };
+  if (formOf(literal.ops[0]) !== 'point') return undefined;
+  return {
+    kind: 'tuple',
+    elements: Array.from({ length: arity }, () => ({ type: 'number' })),
+  };
 }

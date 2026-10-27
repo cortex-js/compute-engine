@@ -267,6 +267,17 @@ The result and the runtime both carry `runtimeVersion`; a mismatch means the
 code was compiled by another release, and `runtime.load()` refuses it, as it
 refuses code with no `runtimeVersion`.
 
+`runtime.load()` and `runtime.loadBroadcast()` also refuse code compiled with
+the compile contract of a value kind (see "Value kinds" below): the result
+lists the kind types in `valueKinds`, and the entry plan lists the bindings
+of a kind type in `entryPlan.kinds`. Such code reads a host value for a
+symbol of a kind type through the `entry` check of the kind's contract, which
+is a function of the host that compiled the code, and stored code cannot
+carry a function. Code that reads no binding of a kind type and whose
+contracts all say `shippable: true` is accepted by the batch loaders that a
+worker of the kernel pool uses; `load()` refuses it. There is no `store()`:
+such code runs only through the `run()` of its compilation result.
+
 Functions passed in the `functions` or `imports` compile options are copied into
 the code as source (`toString()`): a closure loses its enclosing scope, and a
 function given by name must exist where the code runs.
@@ -1004,6 +1015,92 @@ overlap uses tagged JavaScript objects. Other targets decline unless they gain
 an equivalent representation. Mutable boxed objects do not cross into compiled
 code unless a target explicitly implements identity, slots, versioning, and
 effects.
+
+## Value kinds
+
+A value of a value kind (a residue class, an element of a finite field, a
+kind declared by a host with the `arithmetic` field of an operator
+definition; `TYPE-SYSTEM.md`, "Value kinds and kind types") is not a number,
+and the number lowerings compute a wrong value for it with no error: `c - c`
+lowered to `0`, `c / c` to `1`. So the compile boundary declines it unless
+the kind type gives a lowering for the target.
+
+The boundary uses the STRICT recognition: an expression that holds a kind
+value for certain, or whose result type is a kind type for certain,
+declines, with a message that names the kind type ("holds a residue class
+(type 'residue')", "holds a value of the kind type 'gf8'"). An expression
+that only MAY hold a kind value (a parameter typed `number | residue`, a
+symbol of a signature that admits a kind) compiles as a number, as before.
+
+The library kinds `measurement` and `quantity` have no `compile` contract,
+so an expression with a `Measurement` or a `Quantity` value declines with
+the kind message ("holds a value of the kind type 'measurement'"). A
+physical constant symbol (`SpeedOfLight`) is declared `value`, so the strict
+recognition does not see its quantity: `x · SpeedOfLight` declines at the
+`Quantity` call of its value, with the message "Could not compile
+`Quantity`".
+
+**The compile contract.** The `compile` field of an `ArithmeticDefinition`
+(`ArithmeticCompile`, `types-definitions.ts`; read by
+`compilation/kind-lowering.ts` and `base-compiler.ts`) has two parts:
+
+- `compile.type` belongs to the kind TYPE, because a free symbol of the
+  type has no head, and every head of the type must lower `Add`, `Multiply`
+  and the other operators to one representation. Its fields: `lowered()`,
+  the name of the representation on the target, which
+  `freeSymbolTypes[…].lowered` reports; `add()` and `multiply()`, a sum and
+  a product with an operand of the kind (a number operand beside a kind
+  value is the hook's to promote); `apply()`, the other arithmetic
+  operators, the comparisons and the other operators with an operand of the
+  kind; `entry()`, the run-time check of a host value given for a symbol of
+  the type (the JavaScript runner calls it in place of its numeric and
+  collection checks); `shippable` and `hostNames`.
+- `compile.value` belongs to the HEAD: the source of a literal value of that
+  head in the type's representation. A literal of a head without it
+  declines.
+
+Each hook receives the `OperatorCompileContext` and branches on
+`context.language`, so a target registered with
+`ce.registerCompilationTarget()` is reachable. `undefined` from any hook
+declines, with the message "Could not compile `<Operator>` with an operand
+of the kind type '<type>'". The structural and control-flow operators (`If`,
+`Block`, `List`, `Tuple`, `Assign`, `Hold`, a call of a user function) do
+not call the contract: they pass the representation through as an opaque
+value. With two kinds that have a contract among the operands, the kinds are
+asked in the order of their first occurrence and the first answer wins, as
+at evaluation.
+
+**The representation.** The value of `run()` for a kind result is returned
+as the code makes it: `normalizeRunResult()`, which reads a `{ re, im: 0 }`
+record as a number, is not applied. So on the JavaScript targets a kind type
+may not name, with `lowered()`, a value convention of the runner (`number`,
+`real`, `integer`, `complex`, `array`, `list`, `point`, `color`): the host
+would read the value as a number, a complex number or a list. Such a
+contract is refused with a message that asks for a representation of its
+own (an object with a field that names the kind). The representation must be
+faithful (the rule of "Fail closed").
+
+**The result.** `CompilationResult.valueKinds` lists the kind types whose
+representation the code reads or makes, and `StoredEntryPlan.kinds` the
+bindings of a kind type (both JavaScript only, absent when no kind is
+involved). A result is `shippable` only when every contract involved says
+`shippable: true`, lists no `hostNames`, and no input of the code is a kind
+value: a worker cannot run the host's `entry` check, and it cannot carry
+the helpers that `hostNames` would name. Such code cannot be stored and
+loaded again (see "Running stored JavaScript").
+
+**Limits.**
+
+- An expression that holds a COLLECTION of kind values (`L + L` with
+  `L: list<gf8>`, a list literal of kind values) declines on every target:
+  `entry` and `lowered()` describe one value.
+- The `interval-js` target declines a kind lowering: its runner has no entry
+  check for a kind.
+- No library kind declares a contract: a residue class declines on every
+  target.
+- A kind is never compiled through the number rules.
+
+The design is `docs/plans/2026-10-26-value-kinds.md`, section 4.8.
 
 ## CSE and naming
 

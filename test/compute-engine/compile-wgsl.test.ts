@@ -48,9 +48,7 @@ describe('WGSL COMPILATION', () => {
       // truncated → floored.
       const expr = ce.expr(['Mod', 'x', 'y']);
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(
-        `((((x) % (y)) - (y) * (((sign((x) % (y)) * sign((y))) - abs((sign((x) % (y)) * sign((y))))) * 0.5)) % (y))`
-      );
+      expect(code).toMatchInlineSnapshot(`_gpu_fmod(x, y)`);
     });
   });
 
@@ -58,7 +56,7 @@ describe('WGSL COMPILATION', () => {
     it('should compile trigonometric functions', () => {
       const expr = ce.parse('\\sin(x) + \\cos(y)');
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`sin(x) + cos(y)`);
+      expect(code).toMatchInlineSnapshot(`_gpu_sin(x) + _gpu_cos(y)`);
     });
 
     it('should compile power function', () => {
@@ -118,25 +116,25 @@ describe('WGSL COMPILATION', () => {
     it('should compile min/max', () => {
       const expr = ce.parse('\\max(x, y)');
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`max(x, y)`);
+      expect(code).toMatchInlineSnapshot(`_gpu_max(x, y)`);
     });
 
     it('should compile cot', () => {
       const expr = ce.parse('\\cot(x)');
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(cos(x) / sin(x))`);
+      expect(code).toMatchInlineSnapshot(`(_gpu_cos(x) / _gpu_sin(x))`);
     });
 
     it('should compile csc', () => {
       const expr = ce.parse('\\csc(x)');
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(1.0 / sin(x))`);
+      expect(code).toMatchInlineSnapshot(`(1.0 / _gpu_sin(x))`);
     });
 
     it('should compile sec', () => {
       const expr = ce.parse('\\sec(x)');
       const code = wgsl.compile(expr).code;
-      expect(code).toMatchInlineSnapshot(`(1.0 / cos(x))`);
+      expect(code).toMatchInlineSnapshot(`(1.0 / _gpu_cos(x))`);
     });
 
     it('should compile hyperbolic functions', () => {
@@ -147,7 +145,7 @@ describe('WGSL COMPILATION', () => {
         `cosh(x)`
       );
       expect(wgsl.compile(ce.parse('\\tanh(x)')).code).toMatchInlineSnapshot(
-        `tanh(x)`
+        `_gpu_tanh(x)`
       );
     });
 
@@ -171,7 +169,7 @@ describe('WGSL COMPILATION', () => {
 
     it('should compile reciprocal hyperbolic functions', () => {
       expect(wgsl.compile(ce.expr(['Coth', 'x'])).code).toMatchInlineSnapshot(
-        `(cosh(x) / sinh(x))`
+        `(1.0 / _gpu_tanh(x))`
       );
       expect(wgsl.compile(ce.expr(['Csch', 'x'])).code).toMatchInlineSnapshot(
         `(1.0 / sinh(x))`
@@ -380,7 +378,7 @@ describe('WGSL COMPILATION', () => {
       const code = wgsl.compile(expr).code;
       expect(code).toMatchInlineSnapshot(`
         var a: f32;
-        a = cos(t);
+        a = _gpu_cos(t);
         return a + 1.0;
       `);
     });
@@ -398,8 +396,8 @@ describe('WGSL COMPILATION', () => {
       expect(code).toMatchInlineSnapshot(`
         var a: f32;
         var b: f32;
-        a = sin(x);
-        b = cos(x);
+        a = _gpu_sin(x);
+        b = _gpu_cos(x);
         return a + b;
       `);
     });
@@ -415,9 +413,18 @@ describe('WGSL COMPILATION', () => {
         ['t', 'float'],
       ]);
       expect(code).toMatchInlineSnapshot(`
+
+        fn _gpu_isnonfinite(x: f32) -> bool {
+          return (bitcast<u32>(x) & 0x7FFFFFFFu) >= 0x7F800000u;
+        }
+        fn _gpu_cos(x: f32) -> f32 {
+          let bits = 0x7fc00000u;
+          return select(cos(x), bitcast<f32>(bits), _gpu_isnonfinite(x));
+        }
+
         fn compute(t: f32) -> f32 {
           var a: f32;
-          a = cos(t);
+          a = _gpu_cos(t);
           return a + 1.0;
         }
       `);
@@ -500,7 +507,9 @@ describe('WGSL COMPILATION', () => {
     it('should unroll Sum with small constant bounds', () => {
       const expr = ce.expr(['Sum', ['Sin', 'i'], ['Limits', 'i', 1, 3]]);
       const code = wgsl.compile(expr, NO_FOLD).code;
-      expect(code).toBe('((sin(1.0)) + (sin(2.0)) + (sin(3.0)))');
+      expect(code).toBe(
+        '((sin(1.0)) + (sin(2.0)) + (sin(3.0)))'
+      );
     });
 
     it('should unroll Product with small constant bounds', () => {
@@ -522,9 +531,11 @@ describe('WGSL COMPILATION', () => {
       });
       expect(fn).toContain('fn sumSin() -> f32');
       expect(fn).toContain('for (var i: i32 = 1; i <= 1000; i++)');
-      expect(fn).toContain('+= sin(f32(i))');
+      expect(fn).toContain('+= _gpu_sin(f32(i))');
       expect(fn).toContain('return ');
-      expect(fn).not.toContain('let ');
+      // The body of `sumSin`, without the preamble: the NaN-safe helpers
+      // declare a `let` of their own.
+      expect(fn.slice(fn.indexOf('fn sumSin'))).not.toContain('let ');
       expect(fn).not.toContain('while');
       expect(fn).not.toContain('() =>');
     });
@@ -676,14 +687,14 @@ describe('WGSL COMPILATION', () => {
 
   // CO-P1-2: `min`/`max` are 2-argument builtins in WGSL.
   describe('CO-P1-2 min/max variadic folding', () => {
-    it('folds 3-arg Max into nested max()', () => {
+    it('folds 3-arg Max into nested _gpu_max()', () => {
       const code = wgsl.compile(ce.box(['Max', 'a', 'b', 'c'])).code;
-      expect(code).toBe('max(max(a, b), c)');
+      expect(code).toBe('_gpu_max(_gpu_max(a, b), c)');
     });
 
-    it('folds 4-arg Min into nested min()', () => {
+    it('folds 4-arg Min into nested _gpu_min()', () => {
       const code = wgsl.compile(ce.box(['Min', 'a', 'b', 'c', 'd'])).code;
-      expect(code).toBe('min(min(min(a, b), c), d)');
+      expect(code).toBe('_gpu_min(_gpu_min(_gpu_min(a, b), c), d)');
     });
   });
 
@@ -800,7 +811,7 @@ describe('WGSL When NaN branch matches the value shape (Tycho item 49)', () => {
         ['And', ['LessEqual', 0, 't'], ['LessEqual', 't', 1]],
       ])
     ).code;
-    expect(code).toContain('vec2f(cos(t), sin(t))');
+    expect(code).toContain('vec2f(_gpu_cos(t), _gpu_sin(t))');
     expect(code).toContain('vec2f(_gpu_nan())');
   });
 
@@ -919,7 +930,7 @@ describe('WGSL block local with disagreeing binding shapes fails closed', () => 
     ]);
     const code = wgsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
     expect(code).toContain('var p: vec2f');
-    expect(code).toContain('p = vec2f(cos(t), sin(t));');
+    expect(code).toContain('p = vec2f(_gpu_cos(t), _gpu_sin(t));');
   });
 });
 
@@ -983,12 +994,10 @@ describe('WGSL Mod with an impure operand draws once', () => {
     expect((code.match(/_gpu_rnd_draw/g) ?? []).length).toBe(1);
   });
 
-  it('a pure Mod emission is unchanged', () => {
+  it('a pure Mod emission passes its operands to the helper once (CE-512)', () => {
     const target = ce._getCompilationTarget('wgsl')!;
     const code = target.compile(ce.box(['Mod', ['Add', 'x', 29], 900])).code;
-    expect(code).toBe(
-      '((((x + 29.0) % (900.0)) - (900.0) * (((sign((x + 29.0) % (900.0)) * sign((900.0))) - abs((sign((x + 29.0) % (900.0)) * sign((900.0))))) * 0.5)) % (900.0))'
-    );
+    expect(code).toBe('_gpu_fmod(x + 29.0, 900.0)');
   });
 });
 
@@ -1059,14 +1068,14 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
   ce.declare('L', 'list<real>');
 
   it('compiles the prime of a library function from its closed form', () => {
-    expect(wgsl.compile(ce.parse("\\sin'(t)")).code).toBe('cos(t)');
+    expect(wgsl.compile(ce.parse("\\sin'(t)")).code).toBe('_gpu_cos(t)');
   });
 
   it('compiles a function whose body is the prime of a user function', () => {
     const result = wgsl.compile(ce.parse('f(x)'));
     expect(result.code).toBe('_fn_f(x)');
     expect(result.preamble).toContain(
-      'fn _fn_f(t: f32) -> f32 {\n  return (3.0 * (t * t) + cos(t));\n}'
+      'fn _fn_f(t: f32) -> f32 {\n  return (3.0 * (t * t) + _gpu_cos(t));\n}'
     );
   });
 
@@ -1094,7 +1103,7 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
 
   it('writes out a Map of static width under a reduction', () => {
     expect(wgsl.compile(ce.box(['Min', ['Map', SQUARE, SOURCE]])).code).toBe(
-      'min(min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
+      '_gpu_min(_gpu_min((x * x), _gpu_pow2(x + 4.0)), _gpu_pow2(x + 2.0))'
     );
   });
 
@@ -1135,7 +1144,9 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
       ['List', 'a', 'b'],
     ]);
     expect(expr.evaluate().toString()).toBe('[cos(a),cos(b)]');
-    expect(wgsl.compile(expr, NO_FOLD).code).toBe('vec2f(cos(a), cos(b))');
+    expect(wgsl.compile(expr, NO_FOLD).code).toBe(
+      'vec2f(_gpu_cos(a), _gpu_cos(b))'
+    );
   });
 
   it('substitutes a scalar argument whole', () => {
@@ -1161,7 +1172,9 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
     ce.declare('V', 'list<real^2>');
     const tuple = ce.box(['Apply', DOUBLE, ['Tuple', 'a', 'b']]);
     expect(tuple.evaluate().toString()).toBe('(2a, 2b)');
-    expect(wgsl.compile(tuple, NO_FOLD).code).toBe('vec2f((2.0 * a), (2.0 * b))');
+    expect(wgsl.compile(tuple, NO_FOLD).code).toBe(
+      'vec2f((2.0 * a), (2.0 * b))'
+    );
     expect(wgsl.compile(ce.box(['Apply', DOUBLE, 'P']), NO_FOLD).code).toBe(
       'vec2f((2.0 * P.x), (2.0 * P.y))'
     );
@@ -1175,11 +1188,7 @@ describe('WGSL APPLIED DERIVATIVE AND MAP', () => {
     // interpreter, declined here.
     expect(() =>
       wgsl.compile(
-        ce.box([
-          'Apply',
-          DOUBLE,
-          ['Tuple', ['List', 1, 2], ['List', 3, 4]],
-        ])
+        ce.box(['Apply', DOUBLE, ['Tuple', ['List', 1, 2], ['List', 3, 4]]])
       )
     ).toThrow(/has a component that is a collection/);
     // A vector argument is bound whole when another parameter is a
@@ -1303,18 +1312,26 @@ describe('WGSL - SQUARE OF A VECTOR', () => {
 });
 
 describe('WGSL Mod keeps the sign of the divisor when the quotient underflows (CE-246)', () => {
-  // The WGSL source is valid JavaScript once `sign` and `abs` exist, and
-  // JavaScript `%` is the truncated remainder, as in WGSL. Doubles stand in for
-  // `f32`: the dividend and the divisor are chosen so that `r / b` underflows
-  // to `-0` in a double too.
+  // The WGSL source — the `_gpu_fmod` helper of the preamble and the call —
+  // is valid JavaScript once `sign` and `abs` exist and the typed helper
+  // signature `fn f(x: f32, y: f32) -> f32 {` is written `function f(x, y) {`,
+  // and JavaScript `%` is the truncated remainder, as in WGSL. Doubles stand
+  // in for `f32`: the dividend and the divisor are chosen so that `r / b`
+  // underflows to `-0` in a double too.
   const ce = new ComputeEngine();
-  const code = new WGSLTarget().compile(ce.expr(['Mod', 'x', 'y'])).code;
+  const { code, preamble } = new WGSLTarget().compile(
+    ce.expr(['Mod', 'x', 'y'])
+  );
+  const helpers = (preamble ?? '').replace(
+    /\bfn (\w+)\(x: f32, y: f32\) -> f32 \{/g,
+    'function $1(x, y) {'
+  );
   const mod = new Function(
     'x',
     'y',
     'sign',
     'abs',
-    `return ${code};`
+    `${helpers}\nreturn ${code};`
   ) as (x: number, y: number, s: unknown, a: unknown) => number;
   const at = (x: number, y: number) => mod(x, y, Math.sign, Math.abs);
 

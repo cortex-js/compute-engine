@@ -137,19 +137,26 @@ describe('D4: a value-derived join keeps the unresolved arm', () => {
     const join = ce.box(['ListJoin', 'fs', ['List', 2]]);
     expect(join.type.toString()).toBe('list<unknown>');
     ce.declare('tu', 'tuple<unknown, missing>');
-    ce.assign('tu', ce.box(['Tuple', 1, 'Missing']));
-    const filtered = ce.box([
-      'Filter',
-      'tu',
-      ['Function', ['Greater', '_', 0], '_'],
-    ]);
-    expect(filtered.type.toString()).toBe('list<missing | unknown>');
-    expect(filtered.evaluate().toString()).toBe('[1]');
+    const keep: MathJsonExpression = ['Function', ['Greater', '_', 0], '_'];
+    // Before an assignment, the first slot of `tu` is unresolved.
+    expect(ce.box(['Filter', 'tu', keep]).type.toString()).toBe(
+      'list<missing | unknown>'
+    );
     // `Sort(tu)` goes through the generic solver. The element type of a
     // tuple, read for the pattern `indexed_collection<T>`, keeps the
     // `unknown` slot beside the `missing` slot, as `Filter` does.
+    expect(ce.box(['Sort', 'tu']).type.toString()).toBe(
+      'list<missing | unknown>'
+    );
+    // An assignment refines the nested `unknown` slot (CE-3.5): `tu` is then
+    // a `tuple<integer, missing>`.
+    ce.assign('tu', ce.box(['Tuple', 1, 'Missing']));
+    expect(ce.box('tu').type.toString()).toBe('tuple<integer, missing>');
+    const filtered = ce.box(['Filter', 'tu', keep]);
+    expect(filtered.type.toString()).toBe('list<integer | missing>');
+    expect(filtered.evaluate().toString()).toBe('[1]');
     const sorted = ce.box(['Sort', 'tu']);
-    expect(sorted.type.toString()).toBe('list<missing | unknown>');
+    expect(sorted.type.toString()).toBe('list<integer | missing>');
     const value = sorted.evaluate();
     expect(value.toString()).toBe('[1,"Missing"]');
     expect(value.type.matches(sorted.type)).toBe(true);
@@ -274,6 +281,69 @@ describe('D2, D3, R7: a declaration with contents left to inference refines from
     ce.assign('u', ce.box(['List', { str: 'a' }]));
     expect(ce.box('u').type.toString()).toBe('list<string>');
     expect(() => ce.assign('u', 42)).toThrow();
+  });
+
+  test('an unknown at a nested position refines from each assignment (CE-3.5)', () => {
+    const check = (
+      type: string,
+      value: MathJsonExpression,
+      expected: string
+    ): void => {
+      const ce = new ComputeEngine();
+      ce.declare('v', type);
+      ce.assign('v', ce.box(value));
+      const sym = ce.box('v');
+      expect(sym.type.toString()).toBe(expected);
+      // The refined static type holds the value.
+      expect(sym.evaluate().type.matches(sym.type)).toBe(true);
+    };
+    check(
+      'tuple<unknown, integer>',
+      ['Tuple', { str: 'x' }, 2],
+      'tuple<string, integer>'
+    );
+    check(
+      'list<list<unknown>>',
+      ['List', ['List', 1, 2], ['List', 3]],
+      'list<list<integer>>'
+    );
+    check(
+      'record{a: unknown}',
+      ['Dictionary', ['Tuple', { str: 'a' }, 1.5]],
+      'record{a: real}'
+    );
+    check(
+      'list<tuple<unknown, string>>',
+      ['List', ['Tuple', 1, { str: 'a' }]],
+      'list<tuple<integer, string>>'
+    );
+    check(
+      'dictionary<list<unknown>>',
+      ['Dictionary', ['Tuple', { str: 'a' }, ['List', 1]]],
+      'dictionary<list<integer>>'
+    );
+    // A position that is not `unknown` is a contract and does not move.
+    check(
+      'tuple<unknown, real>',
+      ['Tuple', 1, 2],
+      'tuple<integer, real>'
+    );
+  });
+
+  test('a nested unknown position re-refines, and the other positions stay the contract', () => {
+    const ce = new ComputeEngine();
+    ce.declare('t', 'tuple<unknown, integer>');
+    ce.assign('t', ce.box(['Tuple', { str: 'x' }, 2]));
+    expect(ce.box('t').type.toString()).toBe('tuple<string, integer>');
+    ce.assign('t', ce.box(['Tuple', 1.5, 3]));
+    expect(ce.box('t').type.toString()).toBe('tuple<real, integer>');
+    expect(() =>
+      ce.assign('t', ce.box(['Tuple', 1.5, { str: 'y' }]))
+    ).toThrow();
+    // The Epsil `let` route refines in the same way.
+    const ce2 = new ComputeEngine();
+    executeEpsil(ce2, 'let p: tuple<unknown, integer> = ("a", 2)');
+    expect(ce2.symbol('p').type.toString()).toBe('tuple<string, integer>');
   });
 
   test('a transparent alias carries the instruction of its definition', () => {

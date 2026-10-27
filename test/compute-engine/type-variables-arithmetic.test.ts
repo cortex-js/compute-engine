@@ -49,26 +49,18 @@ describe('TYPE VARIABLES / arithmetic — declared signatures', () => {
     // batch 11): the extended complex plane, on which negation is total,
     // plus a residue class, which `Negate` has arithmetic for
     // (`docs/plans/2026-10-23-residue-class-type.md`).
-    expect(sig('Negate')).toBe('(complex | infinity | residue) -> number');
+    expect(sig('Negate')).toBe('(complex | infinity) -> number');
   });
 });
 
 describe('TYPE VARIABLES / Chop — `(T) -> T where T: number`', () => {
   test('result type echoes the operand (exact and inexact)', () => {
     const ce = engine();
-    expect(ce.function('Chop', [ce.number(2)]).type.toString()).toBe(
-      'integer'
-    );
-    expect(ce.function('Chop', [ce.number(2.5)]).type.toString()).toBe(
-      'real'
-    );
+    expect(ce.function('Chop', [ce.number(2)]).type.toString()).toBe('integer');
+    expect(ce.function('Chop', [ce.number(2.5)]).type.toString()).toBe('real');
     expect(ce.box(['Chop', 2]).type.toString()).toBe('integer');
-    expect(ce.parse('\\operatorname{chop}(2)').type.toString()).toBe(
-      'integer'
-    );
-    expect(ce.parse('\\operatorname{chop}(2.5)').type.toString()).toBe(
-      'real'
-    );
+    expect(ce.parse('\\operatorname{chop}(2)').type.toString()).toBe('integer');
+    expect(ce.parse('\\operatorname{chop}(2.5)').type.toString()).toBe('real');
   });
 
   test('a declared operand echoes verbatim (bound satisfied)', () => {
@@ -114,9 +106,12 @@ describe('TYPE VARIABLES / Chop — `(T) -> T where T: number`', () => {
       3,
     ]);
     // The chopped float `1e-12` is the float zero `0.0`
-    expect(
-      ce.box(['Chop', ['List', 1, 1e-12, 3]]).evaluate().json
-    ).toEqual(['List', 1, { num: '0.0' }, 3]);
+    expect(ce.box(['Chop', ['List', 1, 1e-12, 3]]).evaluate().json).toEqual([
+      'List',
+      1,
+      { num: '0.0' },
+      3,
+    ]);
   });
 });
 
@@ -142,7 +137,12 @@ describe('TYPE VARIABLES / Negate — conversion DECLINED (blocking behavior)', 
   test('`(x = y).solve(x)` still yields the assignment', () => {
     // Regressed to `[]` under the converted signature.
     const ce = engine();
-    expect(ce.parse('x = y').solve('x')?.map((x) => x.json)).toEqual(['y']);
+    expect(
+      ce
+        .parse('x = y')
+        .solve('x')
+        ?.map((x) => x.json)
+    ).toEqual(['y']);
   });
 
   test('the echo handler still preserves the operand type on every route', () => {
@@ -176,9 +176,9 @@ describe('TYPE VARIABLES / PlusMinus — `(T, U) -> tuple<T, U> where T: value, 
     expect(ce.box(['PlusMinus', 2.5, 3]).type.toString()).toBe(
       'tuple<real, integer>'
     );
-    expect(
-      ce.parse('\\operatorname{PlusMinus}(2,3)').type.toString()
-    ).toBe('tuple<integer, integer>');
+    expect(ce.parse('\\operatorname{PlusMinus}(2,3)').type.toString()).toBe(
+      'tuple<integer, integer>'
+    );
   });
 
   test('evaluation is unchanged', () => {
@@ -188,9 +188,11 @@ describe('TYPE VARIABLES / PlusMinus — `(T, U) -> tuple<T, U> where T: value, 
       -1,
       5,
     ]);
-    expect(
-      ce.parse('\\operatorname{PlusMinus}(2,3)').evaluate().json
-    ).toEqual(['Tuple', -1, 5]);
+    expect(ce.parse('\\operatorname{PlusMinus}(2,3)').evaluate().json).toEqual([
+      'Tuple',
+      -1,
+      5,
+    ]);
   });
 
   test('a non-numeric operand is still rejected', () => {
@@ -210,9 +212,9 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     ).toBe('integer');
     expect(ce.box(['Remainder', 5, 3]).type.toString()).toBe('integer');
     expect(ce.box(['Remainder', 5.5, 3]).type.toString()).toBe('real');
-    expect(
-      ce.parse('\\operatorname{Remainder}(5,3)').type.toString()
-    ).toBe('integer');
+    expect(ce.parse('\\operatorname{Remainder}(5,3)').type.toString()).toBe(
+      'integer'
+    );
 
     ce.declare('remN', 'integer');
     ce.declare('remR', 'real');
@@ -229,9 +231,9 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
 
   test('D10 lifted echo over a collection operand', () => {
     const ce = engine();
-    expect(
-      ce.box(['Remainder', ['List', 10, 11, 12], 7]).type.toString()
-    ).toBe('vector<integer^3>');
+    expect(ce.box(['Remainder', ['List', 10, 11, 12], 7]).type.toString()).toBe(
+      'vector<integer^3>'
+    );
     ce.declare('remL', 'list<integer>');
     expect(ce.box(['Remainder', 'remL', 3]).type.toString()).toBe(
       'list<integer>'
@@ -274,9 +276,7 @@ describe('TYPE VARIABLES / Remainder — `(T, T) -> T where T: number`', () => {
     // §4.3 table, last row: the free symbol contributes nothing, `T` solves
     // from the literal, and the symbol narrows to the instantiated parameter.
     const ce = engine();
-    expect(ce.box(['Remainder', 'remX', 3]).type.toString()).toBe(
-      'integer'
-    );
+    expect(ce.box(['Remainder', 'remX', 3]).type.toString()).toBe('integer');
     expect(ce.box('remX').type.toString()).toBe('integer');
   });
 

@@ -11,7 +11,6 @@ import {
 import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
 import {
   isSymbol,
-  isString,
   isFunction,
   isNumber,
 } from '../boxed-expression/type-guards.js';
@@ -20,7 +19,6 @@ import {
   unitConversionCoefficients,
   convertCompoundUnit,
   dimensionsEqual,
-  parseUnitDSL,
   getExpressionDimension,
   getExpressionScale,
   findNamedUnit,
@@ -342,7 +340,7 @@ export function canonicalUnit(ce: ComputeEngine, unit: Expression): Expression {
  * not cancel stays a unit also when its dimension is zero: `in/ft` (inches
  * per foot) is the unit of a slope.
  */
-function cancelledUnitValue(
+export function cancelledUnitValue(
   ce: ComputeEngine,
   mag: Expression,
   unit: Expression
@@ -624,80 +622,8 @@ export const UNITS_LIBRARY: SymbolDefinitions = {
     },
   },
 
-  Quantity: {
-    description: 'A value paired with a physical unit',
-    wikidata: 'Q309314',
-    complexity: 1200,
-    lazy: true,
-    signature: '(value, value) -> value',
-    canonical: (args, { engine: ce }) => {
-      if (args.length !== 2) return ce.error('incompatible-type');
-
-      // Canonicalize the magnitude (first arg) but leave the unit as-is
-      const mag = args[0].canonical;
-
-      // A unit name (`m`, `km`, `K`) is not a variable. The unit is boxed
-      // resolve-only: a name binds to an existing definition, but a name
-      // with no definition stays unbound and is not declared in the current
-      // scope.
-      //
-      // A string second argument (e.g. "km/h", "km") is parsed into a
-      // structured unit expression with the same DSL parser the LaTeX/text
-      // path uses. A simple unit becomes a symbol; a compound unit becomes a
-      // Multiply/Divide/Power expression — so the string form canonicalizes
-      // identically to the symbolic-unit form `Quantity(30, km/h)`.
-      const unitArg = args[1];
-      if (isString(unitArg)) {
-        const parsed = parseUnitDSL(unitArg.string);
-        if (parsed === null)
-          return ce._fn('Quantity', [
-            mag,
-            ce.error(['unexpected-argument', unitArg.string]),
-          ]);
-        // The compound unit is boxed raw: `canonicalUnit()` makes it
-        // canonical.
-        const boxed = ce._resolveOnly(() =>
-          typeof parsed === 'string'
-            ? ce.symbol(parsed)
-            : ce.box(parsed as any, { form: 'raw' })
-        );
-        return (
-          cancelledUnitValue(ce, mag, boxed) ??
-          ce._fn('Quantity', [mag, canonicalUnit(ce, boxed)])
-        );
-      }
-
-      // A compound unit whose factors cancel (`m/m`) gives a plain number,
-      // as the quantity arithmetic does.
-      const value = cancelledUnitValue(ce, mag, unitArg);
-      if (value !== undefined) return value;
-
-      // The unit takes its canonical form (see `canonicalUnit()`): a unit
-      // has one tree, whatever the tree of the input.
-      return ce._fn('Quantity', [mag, canonicalUnit(ce, unitArg)]);
-    },
-    evaluate: (ops, { numericApproximation, engine: ce }) => {
-      const mag = numericApproximation ? ops[0].N() : ops[0].evaluate();
-      return ce._fn('Quantity', [mag, ops[1]]);
-    },
-    // Only the magnitude is evaluated, not the unit.
-    evaluateAsync: async (ops, options) => {
-      const { numericApproximation, engine: ce } = options;
-      // A leaf keeps its own `N()`, which reads its value through the
-      // ambient scope chain.
-      const mag =
-        numericApproximation && !isFunction(ops[0])
-          ? runWithEvaluationEffects(
-              ce,
-              options.effects,
-              () => ops[0].N(),
-              options._contextStack,
-              options._precisionWindow
-            )
-          : await ops[0].evaluateAsync(awaitedOperandOptions(options));
-      return ce._fn('Quantity', [mag, ops[1]]);
-    },
-  },
+  // `Quantity` is defined with its value kind in `quantity-kind.ts`
+  // (`QUANTITY_LIBRARY`).
 
   QuantityMagnitude: {
     description: 'Extract the numeric value from a quantity',

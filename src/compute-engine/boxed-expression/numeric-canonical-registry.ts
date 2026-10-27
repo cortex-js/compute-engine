@@ -30,8 +30,9 @@
  *
  * The registration is a property of the handler function, keyed by a GLOBAL
  * symbol (`Symbol.for`). Not a module-level `WeakMap`, and not a class to
- * test with `instanceof`: each bundle that includes the engine code (the
- * UMD bundles, a plugin bundle) has its own copy of this module, so a
+ * test with `instanceof`: each bundle that includes the engine code (a
+ * plugin bundle, a second copy of the package) has its own copy of this
+ * module, so a
  * `WeakMap` or a class of one bundle does not recognize the handlers of the
  * library definitions of another bundle (`ComputeEngine.getStandardLibrary()`
  * of bundle A given to an engine of bundle B). `Symbol.for` returns the same

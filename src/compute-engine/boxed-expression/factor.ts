@@ -20,7 +20,7 @@ import { mayBeTensorProductOperand } from './matrix-operand.js';
 import { expand } from './expand.js';
 import { hasVolatileDigest, isOperatorDef } from './utils.js';
 import { cycleDetectionCount } from './cycle-guard.js';
-import { containsResidueClass, residueFoldOrKeep } from './residue-class.js';
+import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
 import { factorRationalExpression } from '../polynomial/boxed-factor.js';
 
 function hasNonTrivialRadical(value: unknown): boolean {
@@ -38,7 +38,7 @@ export function together(op: Expression): Expression {
   const ce = op.engine;
   const h = op.operator;
   // See `factor()`: an expression with a residue class is not combined.
-  if (containsResidueClass(op)) return residueFoldOrKeep(op);
+  if (holdsKindValue(op)) return residueFoldOrKeep(op);
 
   // Thread over inequality
   if (isFunction(op)) {
@@ -1007,7 +1007,7 @@ export function factor(expr: Expression): Expression {
   // (`(c·x)/(c·y)` is not `x/y` when `c` has no inverse). A closed
   // expression is folded by the residue rules instead
   // (`residueFoldOrKeep()`).
-  if (containsResidueClass(expr)) return residueFoldOrKeep(expr);
+  if (holdsKindValue(expr)) return residueFoldOrKeep(expr);
   // The digest is read first: reading it is also what marks a node that sits
   // above a mutable object as volatile.
   const key = expr.digest;

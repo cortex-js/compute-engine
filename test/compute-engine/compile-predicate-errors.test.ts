@@ -174,11 +174,12 @@ describe('Compiled callback run parity on valid input', () => {
 });
 
 /**
- * The exact retraction repro of `filter-predicate-errors.test.ts`: the
- * parameter is auto-annotated from the source's element type at
- * canonicalization; RETRACTING the source to floats makes that annotation
- * unsatisfiable. The interpreter emits an Error per element; the compiled
- * lowering must not answer with the elements themselves.
+ * The retraction repro of `filter-predicate-errors.test.ts`. The parameter
+ * is annotated from the source's element type when the call is boxed. When
+ * the source is reassigned to floats, the annotation that was derived from
+ * the old value is retired: the call is typed and evaluated again from the
+ * operands as written, so the interpreter and both compiled targets give
+ * the new elements.
  */
 describe('the retraction repro', () => {
   const retracted = () => {
@@ -202,11 +203,43 @@ describe('the retraction repro', () => {
     return expr;
   };
 
-  it('declines on the JavaScript target once the source retracts', () => {
+  it('the JavaScript target follows the reassigned source', () => {
+    expect(js(retracted()).run!({})).toEqual([1.5, 2.5]);
+  });
+
+  it('the Python target compiles the reassigned source', () => {
+    expect(() => python.compile(retracted())).not.toThrow();
+  });
+
+  it('the interpreter follows the reassigned source', () => {
+    expect(retracted().evaluate().toString()).toBe('[1.5,2.5]');
+  });
+});
+
+/**
+ * An annotation that the author writes is a contract, not a value-derived
+ * stamp: it stays when the source is reassigned. When the new elements do
+ * not satisfy it, the compiled lowering must not answer with the elements
+ * themselves.
+ */
+describe('a written annotation and a reassigned source', () => {
+  const retracted = () => {
+    const ce = new ComputeEngine();
+    ce.assign('ds', ce.box(['List', 1, 2, 3]));
+    const expr = ce.box([
+      'Filter',
+      'ds',
+      ['Function', ['Greater', 'n', 0], ['Typed', 'n', "'integer'"]],
+    ]);
+    ce.assign('ds', ce.box(['List', 1.5, 2.5]));
+    return expr;
+  };
+
+  it('declines on the JavaScript target', () => {
     expect(() => js(retracted())).toThrow(/Could not compile/);
   });
 
-  it('declines on the Python target once the source retracts', () => {
+  it('declines on the Python target', () => {
     expect(() => python.compile(retracted())).toThrow(/integer/);
   });
 

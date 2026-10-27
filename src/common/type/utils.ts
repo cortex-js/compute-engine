@@ -20,6 +20,7 @@ import {
   listElementType,
   provablyAdmits,
   provablyDisjoint,
+  valueKindDeclaration,
   widen,
 } from './subtype.js';
 
@@ -655,11 +656,21 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   // value is `("b", Missing)`, so the entry type is `tuple<string, any>`,
   // not the join of the declared fields: with that join, `FlatMap(ra, x ↦
   // [At(x, 2)])` refused the entry `("b", Missing)` with an
-  // `incompatible-type` error. (CE-77)
+  // `incompatible-type` error. (CE-77) A closed record (the type of a
+  // dictionary value) has exactly its listed fields, so its entries hold the
+  // join of their types.
   if (type.kind === 'record')
     return {
       kind: 'tuple',
-      elements: [{ type: 'string' }, { type: 'any' }],
+      elements: [
+        { type: 'string' },
+        {
+          type:
+            type.closed === true
+              ? widen(...Object.values(type.elements))
+              : 'any',
+        },
+      ],
     };
   return undefined;
 }
@@ -674,15 +685,16 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
  * whose type was inferred from the dictionary it holds
  * (`closedDictionaryType()`, `boxed-expression/generic-instantiation.ts`).
  * The type of a dictionary value is
- * the record of exactly the fields it has (`BoxedDictionary`), so the join of
- * those fields holds every value. A declared record type is open
- * (`collectionElementType()` gives `tuple<string, any>` for its entries).
- * (CE-77)
+ * the closed record of exactly the fields it has (`BoxedDictionary`), so the
+ * join of those fields holds every value. A declared record type is open
+ * (`collectionElementType()` gives `tuple<string, any>` for its entries), so
+ * its values are `any`. (CE-77)
  */
 export function dictionaryValueValuesType(t: Readonly<Type>): Type | undefined {
   if (typeof t === 'string') return undefined;
   if (t.kind === 'dictionary') return t.values;
-  if (t.kind === 'record') return widen(...Object.values(t.elements));
+  if (t.kind === 'record')
+    return t.closed === true ? widen(...Object.values(t.elements)) : 'any';
   return undefined;
 }
 
@@ -1370,72 +1382,126 @@ export function typeContainsMissing(
 }
 
 /**
- * True when a value of type `t` can be a residue class: `t` is `residue`, or
- * has a `residue` arm at some nesting level (`integer | residue`,
- * `list<residue>`, `residue | missing`), read through transparent aliases
- * as {@link typeContainsMissing} reads them. `value`, `unknown` and `any`
- * answer false: they can hold a class, but they do not say so, and the
- * arithmetic operators read them as possible numbers (`validate.ts`).
- *
- * The test that admits a class in a numeric position and that recognizes a
- * class by its type (`residue-class.ts`): a class is protected from the
- * number rules by its type, not by the name of the head that made it
- * (`docs/plans/2026-10-23-residue-class-type.md`).
+ * A set of KIND TYPE names: the names of the types of the value kinds of an
+ * engine (a kind primitive such as `residue`, and the nominal types defined
+ * as exactly `value` that a head with an `arithmetic` field returns). Read
+ * by name only. The engine gives one with `kindTypeNames()`
+ * (`compute-engine/boxed-expression/value-kinds.ts`); this module has no
+ * engine, so every function below that reads a kind arm takes the set as a
+ * parameter.
  */
-export function hasResidueArm(t: Readonly<Type>, seen?: AliasDescent): boolean {
-  return containsPrimitive(t, (p) => p === 'residue', seen);
+export type KindTypeNames = { has(name: string): boolean };
+
+/** True when the arm `t` itself is a kind type of `kinds`: a primitive name
+ * in the set, or a reference, with no type arguments, to a nominal type
+ * whose name is in the set. A transparent alias is not unfolded here. */
+export function isKindArm(t: Readonly<Type>, kinds: KindTypeNames): boolean {
+  if (typeof t === 'string') return kinds.has(t);
+  return (
+    t.kind === 'reference' &&
+    t.alias !== true &&
+    t.args === undefined &&
+    kinds.has(t.name)
+  );
 }
 
 /**
- * `t` without its `residue` arm, at the top level only: `residue` is
- * `never`, `complex | infinity | residue` is `complex | infinity`, any other
- * type is itself. For a predicate that asks whether a PARAMETER is numeric
- * (the propagation of an absent operand, `boxed-operator-definition.ts`; the
- * numeric inference of free arguments, `box.ts`): the arithmetic operators
- * admit a residue class beside their numbers, and a class beside an absent
- * operand gives `NaN` as a number does, so the `residue` arm does not change
- * what those predicates decide.
+ * True when a value of type `t` can be a value of a kind of `kinds`: `t` is
+ * a kind type, or has a kind arm at some nesting level (`integer | residue`,
+ * `list<gf8>`, `residue | missing`), read through transparent aliases as
+ * {@link typeContainsMissing} reads them. `value`, `unknown` and `any`
+ * answer false: they can hold a kind value, but they do not say so, and the
+ * arithmetic operators read them as possible numbers (`validate.ts`).
+ *
+ * The test that admits a kind value in a numeric position and that
+ * recognizes a kind value by its type (`residue-class.ts`): a kind value is
+ * protected from the number rules by its type, not by the name of the head
+ * that made it (`docs/plans/2026-10-23-residue-class-type.md`,
+ * `docs/plans/2026-10-26-value-kinds.md` section 4.6).
  */
-export function withoutResidueArm(t: Readonly<Type>): Type {
-  if (t === 'residue') return 'never';
-  if (typeof t === 'string' || t.kind !== 'union') return t;
-  if (!t.types.includes('residue')) return t;
-  const rest = t.types.filter((x) => x !== 'residue');
+export function hasKindArm(
+  t: Readonly<Type>,
+  kinds: KindTypeNames,
+  seen?: AliasDescent
+): boolean {
+  return containsPrimitive(
+    t,
+    (p) => kinds.has(p),
+    seen,
+    new Map(),
+    (name) => kinds.has(name)
+  );
+}
+
+/**
+ * The names of the kind types of `kinds` that `t` has as an arm at some
+ * nesting level (the arms {@link hasKindArm} finds), each once.
+ */
+export function kindArmNames(
+  t: Readonly<Type>,
+  kinds: KindTypeNames
+): string[] {
+  const found = new Set<string>();
+  const collect = (name: string): boolean => {
+    if (kinds.has(name)) found.add(name);
+    // `false` keeps the walk going, so that every arm is visited.
+    return false;
+  };
+  containsPrimitive(t, collect, undefined, new Map(), collect);
+  return [...found];
+}
+
+/**
+ * `t` without its kind arms (see {@link KindTypeNames}), at the top level
+ * only: `residue` is `never`, `complex | infinity | residue` is
+ * `complex | infinity`, any other type is itself. For a predicate that asks
+ * whether a PARAMETER is numeric (the propagation of an absent operand,
+ * `boxed-operator-definition.ts`; the numeric inference of free arguments,
+ * `box.ts`): the arithmetic operators admit a kind value beside their
+ * numbers, and a kind value beside an absent operand gives `NaN` as a number
+ * does, so the kind arm does not change what those predicates decide.
+ */
+export function withoutKindArms(t: Readonly<Type>, kinds: KindTypeNames): Type {
+  if (isKindArm(t, kinds)) return 'never';
+  if (typeof t === 'string' || t.kind !== 'union') return t as Type;
+  if (!t.types.some((x) => isKindArm(x, kinds))) return t;
+  const rest = t.types.filter((x) => !isKindArm(x, kinds));
   if (rest.length === 0) return 'never';
   if (rest.length === 1) return rest[0];
   return { kind: 'union', types: rest };
 }
 
 /**
- * `t` without its `residue` arms at every level: the top level
- * ({@link withoutResidueArm}), the cells of a list, a set or a collection
+ * `t` without its kind arms at every level: the top level
+ * ({@link withoutKindArms}), the cells of a list, a set or a collection
  * (`list<integer | residue>` is `list<integer>`, `list<residue>` is
  * `list<never>`), the components of a tuple, and the arms of a union of
  * them. For the type handlers of the arithmetic operators, which type the
- * numeric answer over the operands read without their classes
+ * numeric answer over the operands read without their kind values
  * (`library/arithmetic.ts`).
  */
-export function withoutResidueArmDeep(t: Readonly<Type>): Type {
-  const top = withoutResidueArm(t);
+export function withoutKindArmsDeep(
+  t: Readonly<Type>,
+  kinds: KindTypeNames
+): Type {
+  const top = withoutKindArms(t, kinds);
   if (typeof top === 'string') return top;
+  const deep = (x: Readonly<Type>) => withoutKindArmsDeep(x, kinds);
   switch (top.kind) {
     case 'union':
-      return { ...top, types: top.types.map(withoutResidueArmDeep) };
+      return { ...top, types: top.types.map(deep) };
     case 'list':
     case 'set':
     case 'collection':
     case 'indexed_collection':
     case 'broadcastable': {
-      const elements = withoutResidueArmDeep(top.elements);
+      const elements = deep(top.elements);
       return elements === top.elements ? top : { ...top, elements };
     }
     case 'tuple':
       return {
         ...top,
-        elements: top.elements.map((e) => ({
-          ...e,
-          type: withoutResidueArmDeep(e.type),
-        })),
+        elements: top.elements.map((e) => ({ ...e, type: deep(e.type) })),
       };
     default:
       return top;
@@ -1443,13 +1509,16 @@ export function withoutResidueArmDeep(t: Readonly<Type>): Type {
 }
 
 /**
- * Whether no value of type `t` is left once its `residue` arms are removed
- * ({@link withoutResidueArmDeep}): `t` is `never` or `nan`, or a collection
- * or a tuple with such a cell. The values of such a type are residue
- * classes, or collections of them, for certain.
+ * Whether no value of type `t` is left once its kind arms are removed
+ * ({@link withoutKindArmsDeep}): `t` is `never` or `nan`, or a collection
+ * or a tuple with such a cell. The values of such a type are kind values,
+ * or collections of them, for certain.
  */
-export function isUninhabitedWithoutResidue(t: Readonly<Type>): boolean {
-  const rest = withoutResidueArmDeep(t);
+export function isUninhabitedWithoutKinds(
+  t: Readonly<Type>,
+  kinds: KindTypeNames
+): boolean {
+  const rest = withoutKindArmsDeep(t, kinds);
   const uninhabited = (x: Readonly<Type>): boolean => {
     if (x === 'never' || x === 'nan') return true;
     if (typeof x === 'string') return false;
@@ -1514,20 +1583,25 @@ export function typeCouldHoldMissing(
  * once, not once per arm, so a chain of such aliases costs its depth and not
  * two to the power of its depth (a chain of depth 32 took minutes without
  * it, measured 2026-10-23 on `declareType()`, which asks this question for
- * every declaration through `hasResidueArm`). The registry does not change
+ * every declaration through `hasKindArm`). The registry does not change
  * during one walk, so the memo is sound for the walk; it is not kept
  * between walks. A reference with type arguments (an applied nominal type)
  * is not unfolded here, so only an alias name is a key.
+ *
+ * `nominal`, when given, is asked for the name of a reference to a NOMINAL
+ * type with no type arguments (a nominal type is not unfolded): a kind type
+ * can be a nominal type (`hasKindArm()`).
  */
 function containsPrimitive(
   t: Readonly<Type>,
   leaf: (p: string) => boolean,
   seen?: AliasDescent,
-  memo: Map<string, boolean> = new Map()
+  memo: Map<string, boolean> = new Map(),
+  nominal?: (name: string) => boolean
 ): boolean {
   if (typeof t === 'string') return leaf(t);
   const contains = (x: Readonly<Type>) =>
-    containsPrimitive(x, leaf, seen, memo);
+    containsPrimitive(x, leaf, seen, memo, nominal);
   switch (t.kind) {
     case 'union':
     case 'intersection':
@@ -1565,12 +1639,16 @@ function containsPrimitive(
       // occurrence of `B` is read. Not keeping an answer computed below a
       // cut made a chain of 32 aliases with a self-recursive arm
       // exponential again (measured 2026-10-23).
-      if (unfolded === undefined || unfolded.type === t) return false;
+      if (unfolded === undefined) return false;
+      // Not an alias: a nominal type, which is not unfolded.
+      if (unfolded.type === t)
+        return nominal !== undefined && t.args === undefined && nominal(t.name);
       const result = containsPrimitive(
         unfolded.type,
         leaf,
         unfolded.seen,
-        memo
+        memo,
+        nominal
       );
       if (key !== undefined) memo.set(key, result);
       return result;
@@ -2136,6 +2214,13 @@ export function isAtomicValueType(
       return false; // can't bound the negated set; conservative
 
     case 'reference': {
+      // A nominal type defined as exactly `value` (the type of a value
+      // kind, `valueKindDeclaration()`) is a cell: its values are calls of
+      // the kind's head, and the type is disjoint from every collection, so
+      // `[GF8(1), GF8(2)]` is a `list<gf8^2>` as `[c1, c2]` is a
+      // `list<residue^2>` (`docs/plans/2026-10-26-value-kinds.md`, section
+      // 4.6). Its definition, `value`, is not atomic, so it is not read.
+      if (valueKindDeclaration(t) !== undefined) return true;
       // Recurse on the resolved definition; unresolved → conservative.
       if (t.def === undefined) return false;
       // The definition is read under the descent guard
@@ -3286,6 +3371,27 @@ function overlapsDeferred(
   if (typeof t !== 'string' && t.kind === 'union')
     return t.types.some((arm) => overlapsDeferred(arm, param, visiting));
 
+  // A RECORD operand at a `dictionary<V>` parameter. A dictionary parameter
+  // is exempt from the general overlap admission (`runtimeCheckExemptParam`
+  // classes it with the collection kinds), so this function is the only
+  // admission for such an operand that the subtype relation does not
+  // already accept. An open record type is not a subtype of
+  // `dictionary<V>` (its values can have other fields of any type), but its
+  // values with only the listed fields are dictionaries of `V` when each
+  // field can hold a `V`: `record{a: integer}` holds `{a: 1}`, a
+  // `dictionary<integer>`. So the operand is deferred unless a field type is
+  // provably disjoint from `V` (`record{a: string}` at
+  // `dictionary<integer>`).
+  if (
+    typeof t !== 'string' &&
+    typeof param !== 'string' &&
+    t.kind === 'record' &&
+    param.kind === 'dictionary'
+  )
+    return Object.values(t.elements).every(
+      (field) => !provablyDisjoint(field, param.values)
+    );
+
   // TUPLE parameters participate too, and only against a tuple operand.
   //
   // Without this arm there was a HOLE. A tuple-shaped parameter is exempt from
@@ -3961,6 +4067,10 @@ export function containsBroadcastableType(type: Readonly<Type>): boolean {
   const t = resolveTypeAlias(type);
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>` (`openDepthScalarArms`),
+  // the type of an element-wise application over an operand of type
+  // `unknown`, is also a scalar or a collection decided at run time.
+  if (openDepthScalarArms(t) !== undefined) return true;
   if (t.kind === 'union') return t.types.some(containsBroadcastableType);
   return false;
 }
@@ -4063,4 +4173,76 @@ export function placeholderSlotsAs(
       declared[i].type === 'unknown' ? { ...a, type: replacement } : a
     ),
   };
+}
+
+/**
+ * The scalar arms of a type of the open form that
+ * `openTriggerBroadcastType` (`broadcast-lift-type.ts`) answers,
+ * `R | list<R | list<any>>` with or without a `tuple` arm: a union with one
+ * or more arms that are a plain list whose elements are `list<any>` and
+ * types that cannot hold a list, and other arms that are a tuple or types
+ * that cannot hold a list. The answer is the union of the arms that are not
+ * lists and not tuples (`R`), or `undefined` for a type of another form, or
+ * for such a type with no scalar arm. A plain `R | list<any>` is not of this
+ * form: an element read of a `list<any>` is typed so.
+ */
+export function openDepthScalarArms(t: Type): Type | undefined {
+  const r = resolveTypeAlias(t);
+  if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  const isListOfAny = (x: Type): boolean => {
+    const a = resolveTypeAlias(x);
+    return (
+      typeof a !== 'string' &&
+      a.kind === 'list' &&
+      a.dimensions === undefined &&
+      a.elements === 'any'
+    );
+  };
+  const openList = (x: Type): boolean => {
+    const a = resolveTypeAlias(x);
+    if (typeof a === 'string' || a.kind !== 'list') return false;
+    if (a.dimensions !== undefined) return false;
+    const e = resolveTypeAlias(a.elements);
+    if (typeof e === 'string' || e.kind !== 'union') return false;
+    return (
+      e.types.some(isListOfAny) &&
+      e.types.every((m) => isListOfAny(m) || cannotHoldAList(m))
+    );
+  };
+  let hasOpenList = false;
+  const scalars: Type[] = [];
+  for (const arm of r.types) {
+    if (openList(arm)) {
+      hasOpenList = true;
+      continue;
+    }
+    const a = resolveTypeAlias(arm);
+    if (a === 'tuple' || (typeof a !== 'string' && a.kind === 'tuple'))
+      continue;
+    if (!cannotHoldAList(a)) return undefined;
+    scalars.push(arm);
+  }
+  if (!hasOpenList || scalars.length === 0) return undefined;
+  return scalars.length === 1 ? scalars[0] : widen(...scalars);
+}
+
+/**
+ * `resolveTypeForCompilation`, for the compiled lanes: the open form
+ * `R | tuple | list<R | tuple | list<any>>` of a scalar type `R`
+ * (`openDepthScalarArms`) is read as `broadcastable<R>`.
+ *
+ * The open form is the type of an element-wise application over an operand
+ * of type `unknown` (an element read of a `list<unknown>`, a call of an
+ * undeclared function). The compiled code does not read the shape from the
+ * type: it checks the value at run time (`Array.isArray`) and maps over an
+ * array at any depth, which is how it compiles a `broadcastable<R>` operand.
+ * So the compiled lanes read both types in the same way. The typing keeps
+ * the open form, because `broadcastable<R>` (`R | tensor<R>`) does not hold
+ * a ragged list or a point. (ROADMAP CE-502.)
+ */
+export function resolveTypeForCompiledLanes(t: Readonly<Type>): Type {
+  const r = resolveTypeForCompilation(t);
+  const scalar = openDepthScalarArms(r);
+  if (scalar === undefined || !cannotHoldAList(scalar)) return r;
+  return { kind: 'broadcastable', elements: scalar };
 }

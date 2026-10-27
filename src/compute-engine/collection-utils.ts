@@ -10,6 +10,7 @@ import {
   resolveTypeAlias,
   stripMissingFromType,
   topTypeBesideAbsence,
+  openDepthScalarArms,
   blockLocalTypeMayHoldList,
   isPointElementType,
   unfoldAliasOnDescent,
@@ -17,6 +18,7 @@ import {
   descendIntoConstructor,
   isBareCutOnDescent,
   isCutOnDescent,
+  MAX_CELL_DEPTH,
   type AliasDescent,
 } from '../common/type/utils.js';
 import {
@@ -1594,8 +1596,15 @@ export function typeCouldBeNumericTuple(
   if (typeof type === 'string') return type === 'tuple';
   if (type.kind === 'tuple')
     return type.elements.every((el) => couldBeNumericElement(el.type, seen));
-  if (type.kind === 'union')
+  if (type.kind === 'union') {
+    // The open form `R | tuple | list<R | tuple | list<any>>`
+    // (`openDepthScalarArms`), the type of an element-wise application over
+    // an operand of type `unknown`, is read as a possible collection
+    // (`isPossiblyCollectionTyped`), not as a point: its `tuple` arm only
+    // records that the operand of the application can be a point.
+    if (openDepthScalarArms(type) !== undefined) return false;
     return type.types.some((t) => typeCouldBeNumericTuple(t, seen));
+  }
   return false;
 }
 
@@ -1630,6 +1639,11 @@ export function typeCouldBeNumericTupleCollection(
   type = unfolded.type;
   seen = unfolded.seen;
   if (typeof type === 'string') return false;
+  // The open form (`openDepthScalarArms`) is read as a possible collection
+  // of numbers, as in `typeCouldBeNumericTuple`: the `tuple` arm of its
+  // elements only records that the operand of the application can hold
+  // points.
+  if (openDepthScalarArms(type) !== undefined) return false;
   if (type.kind === 'union')
     return type.types.some((t) => typeCouldBeNumericTupleCollection(t, seen));
   if (
@@ -1783,6 +1797,76 @@ export function leafwardElementType(t: Readonly<Type>): Type | undefined {
   if (typeof r !== 'string' && r.kind === 'list' && r.dimensions === null)
     return r.elements;
   return collectionElementType(t);
+}
+
+/**
+ * The type `t` with each `range` element of a collection replaced by
+ * `list<integer>`, at any depth; `t` itself (the same object) when it has no
+ * such element. A `range` is a list of integers, but the name does not show
+ * the list level: `[1..3, 4..6]` is typed `list<range>`, and the lift read
+ * it as a list of rank 1 whose cells are `range` values. So `Negate` of it
+ * was typed `list<range>` and `Sqrt` of it `list<number>`, while the value is
+ * a list of lists of numbers. Read as `list<list<integer>>`, the operand has
+ * the shape of its value, and its cells are typed as they are for the
+ * sum `[1..3, 4..6] + [1..3, 4..6]` (`absorbScalarsIntoCell()`,
+ * `arithmetic-add.ts`, reads a `range` cell the same way). A `range` at the
+ * top level is not replaced: the readers read it as a list of integers
+ * already. The broadcast lift (`broadcastLiftType()`) and the type of
+ * `Sum(L)` and `Product(L)` (`bigOpResultType()`) read their operands
+ * through this function. (ROADMAP CE-496.)
+ *
+ * A transparent alias is unfolded before its constructors are read, under
+ * the descent guard (`unfoldAliasOnDescent()`), so a self-referential alias
+ * stops the walk. Thus `Rows` declared as an alias of `list<range>` is read
+ * as `list<list<integer>>`. When the alias holds no `range` element, the
+ * alias itself is returned. A nominal type is not unfolded: its name is the
+ * contract.
+ */
+export function rangeElementsAsLists(
+  t: Type,
+  depth = 0,
+  isElement = false,
+  seen?: AliasDescent
+): Type {
+  if (typeof t === 'object' && t.kind === 'reference' && t.alias === true) {
+    const unfolded = unfoldAliasOnDescent(t, seen);
+    if (unfolded === undefined || unfolded.type === t) return t;
+    const r = rangeElementsAsLists(
+      unfolded.type,
+      depth + 1,
+      isElement,
+      unfolded.seen
+    );
+    return r === unfolded.type ? t : r;
+  }
+  // An element `range` is read as a list, also as an arm of a union
+  // element (`list<integer | range>` for `[1..3, 5]`).
+  if (t === 'range')
+    return isElement ? { kind: 'list', elements: 'integer' } : t;
+  if (typeof t === 'string' || depth > MAX_CELL_DEPTH) return t;
+  if (t.kind === 'union') {
+    const arms = t.types.map((x) =>
+      rangeElementsAsLists(x, depth + 1, isElement, seen)
+    );
+    return arms.every((x, i) => x === t.types[i])
+      ? t
+      : reduceType({ kind: 'union', types: arms });
+  }
+  if (
+    (t.kind === 'list' && t.dimensions === undefined) ||
+    t.kind === 'set' ||
+    t.kind === 'collection' ||
+    t.kind === 'indexed_collection'
+  ) {
+    const el = rangeElementsAsLists(
+      t.elements,
+      depth + 1,
+      true,
+      descendIntoConstructor(seen)
+    );
+    return el === t.elements ? t : { ...t, elements: el };
+  }
+  return t;
 }
 
 /**
@@ -2783,6 +2867,11 @@ export function isPossiblyCollectionTyped(
   }
   if (typeof t === 'string') return false;
   if (t.kind === 'broadcastable') return true;
+  // The open form `R | tuple | list<R | tuple | list<any>>` (`openDepthScalarArms`)
+  // is the type of an element-wise application over an operand of type
+  // `unknown`. Like a `broadcastable<R>`, its value is a scalar or a
+  // collection that only the run-time value decides.
+  if (openDepthScalarArms(t) !== undefined) return true;
   // A `broadcastable<…>` branch inside a union hides its collection-ness the
   // same way a bare `broadcastable<…>` does: a valueless `b: number |
   // broadcastable<number>` may hold a list at runtime, so `2b` typed as a
@@ -5822,9 +5911,12 @@ export function isPointParameterType(param: Type): boolean {
  * application maps over the points, and each point is bound whole to the
  * parameter (user decision 2026-09-25). A list whose elements are not known
  * to be points (`list<real>`, `list<unknown>`) does not conform, and neither
- * does a type alone of `list<never>`: those are bound whole. A literal
- * empty `List` is recognized separately by argument validation and evaluation;
- * it maps to an empty result without invoking the function.
+ * does a type alone of `list<never>`: a list whose elements are not known
+ * to be points is bound whole. An operand typed `list<never>` (the literal
+ * `[]`, or a symbol declared `list<never>` that holds it) is recognized
+ * separately by argument validation, the typing and evaluation
+ * (`isEmptyListArgumentType`): it maps to an empty result without invoking
+ * the function.
  *
  * A `missing` arm is removed from `arg` and from its element type first, as
  * the broadcast typing does: a restricted list of points (`(A, B)\{0 < t\}`,
@@ -5844,7 +5936,7 @@ export function isPointListArgumentType(
 ): boolean {
   if (!isPointParameterType(param)) return false;
   const stripped = stripMissingFromType(arg);
-  const a = resolveTypeReference(stripped) ?? stripped;
+  const a = resolveTypeAlias(stripped);
   if (typeof a === 'string') return false;
   if (a.kind === 'tuple') return false;
   // A union of lists of points (`list<P^1> | list<P^2>`, the type of an
@@ -5885,6 +5977,25 @@ export function isPointListArgumentType(
 }
 
 /**
+ * Whether an argument of type `arg` is the empty list at a user-function
+ * parameter declared as the point type `param`: `arg`, without its
+ * `missing` arms, is `list<never>`, the type of the literal `[]`. A value
+ * of that type can only be `[]`, and the evaluation maps `[]` to `[]`
+ * without a call of the function, so the call is typed as a map, `list<R>`.
+ * Before, a symbol declared `list<never>` that holds `[]` was refused with
+ * an `incompatible-type` error, while the literal `[]` was accepted, and
+ * `k([])` was typed `R` (ROADMAP CE-506).
+ */
+export function isEmptyListArgumentType(arg: Type, param: Type): boolean {
+  if (!isPointParameterType(param)) return false;
+  const t = resolveTypeAlias(stripMissingFromType(arg));
+  if (typeof t === 'string' || t.kind !== 'list' || t.elements !== 'never')
+    return false;
+  const dims = t.dimensions;
+  return dims === undefined || (dims?.length === 1 && dims[0] === 0);
+}
+
+/**
  * Whether an argument of type `arg` is a TENSOR OF POINTS of rank 2 or more,
  * or of a rank that the type does not give, at a user-function parameter
  * declared as the point type `param`: a matrix of points
@@ -5905,10 +6016,284 @@ export function isPointListArgumentType(
  * points: each of its cells in the result is `Missing`, as for a list of
  * points of rank 1 (`hasOnlyAbsentElements`). Before, such a value was
  * refused with an `incompatible-type` error.
+ *
+ * A recursive alias whose self-reference is inside a constructor, such as
+ * `type A = list<A> | list<tuple<number, number>>`, gives no fixed rank:
+ * a value of `A` can be a list of points, a list of lists of points, and
+ * so on. Such a type is a tensor of points when every arm that the walk
+ * reads is a nesting of lists of points (`recursivePointNesting`): the
+ * call maps over it, and the evaluation reads the depth of each point from
+ * the value (user decision 2026-10-26, ROADMAP CE-489). Before, the call
+ * was an `incompatible-type` error.
+ *
+ * A list whose elements can be a point or a list (`list<P | list<P>>`,
+ * `type B = list<B> | P`) is accepted in the same way. The type cannot tell
+ * such a declaration from the type of a value that mixes points and lists
+ * in one list (`[(1, 2), [(3, 4)]]`), which the call refuses: the argument
+ * validation and the evaluation read the value for that
+ * (`listMixesPointsAndLists`), and the type of the call has an `error` arm
+ * (`pointArgumentMayMixDepths`, ROADMAP CE-505).
  */
 export function isPointTensorArgumentType(arg: Type, param: Type): boolean {
   if (!isPointParameterType(param)) return false;
-  return pointTensorOf(arg, param, 0);
+  if (pointTensorOf(arg, param, 0)) return true;
+  if (pointArmsOfMixedRanks(arg, param)) return true;
+  return isRecursivePointNesting(arg, param, undefined);
+}
+
+/**
+ * Whether `t` is a nesting of lists of points whose depth the type does not
+ * fix (`recursivePointNesting`): the walk accepts `t`, it read at least one
+ * point (`state.leaf`), and it met a self-reference inside a constructor
+ * (`state.cut`, a recursive alias) or a list whose elements can be a point
+ * or a list (`state.mixed`, `list<P | list<P>>`). Without a point, a type
+ * such as `type A = list<A>` holds only nested empty lists, and its values
+ * have no point to map to.
+ */
+function isRecursivePointNesting(
+  t: Type,
+  param: Type,
+  seen: AliasDescent
+): boolean {
+  const state = { cut: false, leaf: false, mixed: false };
+  return recursivePointNesting(t, param, 0, seen, state) === true
+    ? state.leaf && (state.cut || state.mixed)
+    : false;
+}
+
+/**
+ * Whether an argument of type `arg`, at a user-function parameter declared
+ * as the point type `param`, is a nesting of points
+ * (`isPointTensorArgumentType`) in which a list can hold both points and
+ * lists: with `list<P | list<P>>`, `type A = list<A | P>` or
+ * `type B = list<B> | P`, a value can be `[(1, 2), [(3, 4)]]`. The call maps
+ * over a value whose elements at each level are all points or all lists,
+ * and the evaluation refuses any other value with an `incompatible-type`
+ * error, as it refuses a literal of that shape
+ * (`listMixesPointsAndLists`). So the type of the call has an `error` arm,
+ * and the compiled call gives `NaN` for such a value (ROADMAP CE-505).
+ */
+export function pointArgumentMayMixDepths(arg: Type, param: Type): boolean {
+  if (!isPointParameterType(param)) return false;
+  const state = { cut: false, leaf: false, mixed: false };
+  return (
+    recursivePointNesting(arg, param, 0, undefined, state) === true &&
+    state.mixed
+  );
+}
+
+/**
+ * Whether the value `x` is a `List` in which one list, at any depth, holds
+ * both a point and a list: `[(1, 2), [(3, 4)]]` or
+ * `[[(1, 2)], [(1, 2), [(3, 4)]]]`. The type of such a value
+ * (`list<list<P^1> | P>`) is also the type of a declaration whose values
+ * may mix depths, such as `list<P | list<P>>`, which the call accepts
+ * (`pointArgumentMayMixDepths`). The value itself is refused at a point
+ * parameter: a row of a tensor of points must be a list. So the argument
+ * validation and the evaluation read the value with this predicate.
+ *
+ * Each element is a known point (a `Tuple`, or an operand typed as a
+ * tuple), a known list (a `List`, or an operand typed as a list), or not
+ * known (an absent element, or an operand whose type can be either). Only
+ * a known point beside a known list is a mix: with `r` typed
+ * `list<tuple<number, number>>`, `[r, [(3, 4)]]` holds two lists. An
+ * element that is not known is decided at evaluation, where its value is
+ * read. Only a `List` literal is entered.
+ */
+export function listMixesPointsAndLists(x: Expression): boolean {
+  if (!isFunction(x, 'List')) return false;
+  let lists = false;
+  let points = false;
+  for (const e of x.ops) {
+    if (isSymbol(e, 'Missing')) continue;
+    if (isFunction(e, 'List')) {
+      lists = true;
+      if (listMixesPointsAndLists(e)) return true;
+      continue;
+    }
+    if (isTuple(e)) {
+      points = true;
+      continue;
+    }
+    const t = resolveTypeAlias(stripMissingFromType(e.type.type));
+    if (typeof t === 'string') continue;
+    if (t.kind === 'tuple') points = true;
+    else if (t.kind === 'list') lists = true;
+  }
+  return lists && points;
+}
+
+/**
+ * `t` without its literal `missing` arms: `P | missing` gives `P`, and
+ * `missing` gives `never`. A reference is kept as it is, and is not
+ * unfolded, so that a walk with a descent guard meets the reference and
+ * counts it. `stripMissingFromType` unfolds an alias with a `missing` arm in
+ * place, and a self-referential alias then is never met again by the walk.
+ */
+function withoutMissingArms(t: Type): Type {
+  if (t === 'missing') return 'never';
+  if (typeof t === 'string' || t.kind !== 'union') return t;
+  if (!t.types.includes('missing')) return t;
+  const arms = t.types.filter((x) => x !== 'missing');
+  if (arms.length === 0) return 'never';
+  return arms.length === 1 ? arms[0] : { kind: 'union', types: arms };
+}
+
+/**
+ * Whether `arg` is a union whose arms are each a list of points
+ * (`isPointListArgumentType`) or a tensor of points (`pointTensorOf`), of
+ * different ranks: `list<tuple<number, number>> |
+ * list<list<tuple<number, number>>>`. A value of such a type has one depth,
+ * and the evaluation reads it from the value, so the call maps over the
+ * value to its points. The type of the call is the union of the result of
+ * each arm (`list<R> | list<list<R>>`). Before, the call was an
+ * `incompatible-type` error, though each arm maps (ROADMAP CE-489).
+ *
+ * This applies to the arms of a union only. A list whose ELEMENTS can be a
+ * point or a list of points (`list<tuple<number, number> |
+ * list<tuple<number, number>>>`) is read by `isRecursivePointNesting`: the
+ * call maps over a value whose lists do not mix points and lists, and the
+ * evaluation refuses any other value (`pointArgumentMayMixDepths`).
+ *
+ * An arm that is a reference is unfolded under the descent guard `seen`, as
+ * in `isPointListArgumentType`. An arm that has spent its unfolds is
+ * ignored. An arm that is itself such a union is read again.
+ */
+function pointArmsOfMixedRanks(
+  arg: Type,
+  param: Type,
+  seen?: AliasDescent
+): boolean {
+  // Only the literal `missing` arms are removed: `stripMissingFromType`
+  // unfolds an alias with a `missing` arm in place, and the walk below would
+  // then not meet the reference under its descent guard.
+  const a = withoutMissingArms(resolveTypeAlias(withoutMissingArms(arg)));
+  if (typeof a === 'string' || a.kind !== 'union') return false;
+  // `deep` is set by an arm of rank 2 or more. A union of points and lists
+  // of points of rank 1 only is not a tensor of points: it is
+  // `isPointListArgumentType` or `isPointOrPointListArgumentType`.
+  let deep = false;
+  for (const x of a.types) {
+    if (x === 'missing') continue;
+    let next = seen;
+    if (typeof x === 'object' && x.kind === 'reference') {
+      next = recordUnfoldOnDescent(declarationOf(x), seen);
+      if (next === undefined) continue;
+    }
+    // One point: the call binds it whole.
+    const r = resolveTypeAlias(x);
+    if (typeof r !== 'string' && r.kind === 'tuple' && isSubtype(r, param))
+      continue;
+    if (
+      isPointListArgumentType(x, param) ||
+      isPointOrPointListArgumentType(x, param)
+    )
+      continue;
+    // An arm that is a recursive alias (`type A = list<A> | list<P>`) is read
+    // by `recursivePointNesting`. It receives the descent before the unfold
+    // of `x`, since it records that unfold itself.
+    if (
+      pointTensorOf(x, param, 0) ||
+      pointArmsOfMixedRanks(x, param, next) ||
+      isRecursivePointNesting(x, param, seen)
+    )
+      deep = true;
+    else return false;
+  }
+  return deep;
+}
+
+/**
+ * Whether `t` is a nesting of lists of points of type `param`, read through
+ * a recursive alias (see `isPointTensorArgumentType`): a list whose elements
+ * are points, or a list whose elements are such nestings. A list whose
+ * elements can be a point or a list (`list<A | tuple<number, number>>`) is
+ * accepted, and sets `state.mixed`: the evaluation refuses a value of such
+ * a list whose elements mix points and lists (`pointArgumentMayMixDepths`).
+ *
+ * The answer is `true`, `false`, or `undefined` for an arm that the walk
+ * drops: an alias that reaches itself as a bare arm of its own union adds
+ * no value that the other arms do not hold. An alias that reaches itself
+ * through a constructor (a list element) stands for the values deeper in
+ * the structure, which the walk already reads at the outer level. The walk
+ * accepts such an occurrence and sets `state.cut`: the rank is then not
+ * fixed by the type, and the evaluation reads it from the value. A type
+ * that does not set `state.cut` is decided by `pointTensorOf` and
+ * `isPointListArgumentType` alone, so this walk does not change their
+ * answers for a type that is not recursive.
+ *
+ * The walk sets `state.leaf` when it reads a point: a list whose elements
+ * are points, or a point at the top of the argument, which the call binds
+ * whole.
+ *
+ * A nominal type is not a subtype of its definition, so the walk does not
+ * unfold it, and answers `false`.
+ */
+function recursivePointNesting(
+  t: Type,
+  param: Type,
+  depth: number,
+  seen: AliasDescent,
+  state: { cut: boolean; leaf: boolean; mixed?: boolean }
+): boolean | undefined {
+  if (depth > 16) return false;
+  if (typeof t === 'object' && t.kind === 'reference') {
+    if (t.alias !== true || t.def === undefined) return false;
+    const next = recordUnfoldOnDescent(declarationOf(t), seen);
+    if (next === undefined) {
+      if (isBareCutOnDescent(t, seen)) return undefined;
+      state.cut = true;
+      return true;
+    }
+    seen = next;
+  }
+  const a = resolveTypeAlias(t);
+  if (typeof a === 'string') return false;
+  if (a.kind === 'union') {
+    let any = false;
+    for (const x of a.types) {
+      if (x === 'missing') continue;
+      const answer = recursivePointNesting(x, param, depth, seen, state);
+      if (answer === false) return false;
+      if (answer === true) any = true;
+    }
+    return any ? true : undefined;
+  }
+  // One point at the top of the argument, as an arm of its union
+  // (`P | A`): the call binds it whole.
+  //
+  // A point below the top is an arm of the union that is the element type
+  // of a list (a list whose elements are all points is read by the list
+  // check below). With `list<P | list<P>>`, or `type B = list<B> | P`, a
+  // list can hold both points and lists. The call maps by the depth of the
+  // value, and the evaluation refuses a list whose elements mix points and
+  // lists (`[(1, 2), [(3, 4)]]`) with an `incompatible-type` error, so the
+  // walk sets `state.mixed`, and the type of the call gets an `error` arm
+  // (ROADMAP CE-505). Before, such a type was refused, though its values
+  // whose elements do not mix depths map.
+  if (a.kind === 'tuple' && isSubtype(a, param)) {
+    state.leaf = true;
+    if (depth > 0) state.mixed = true;
+    return true;
+  }
+  if (a.kind !== 'list') return false;
+  // Only the literal `missing` arms are removed (`withoutMissingArms`): an
+  // element type such as `A | missing` keeps the reference `A`, so that the
+  // descent guard meets it and the walk stops there.
+  const e = withoutMissingArms(a.elements);
+  if (e === 'never') return true;
+  const point = isSubtype(e, param);
+  if (point) state.leaf = true;
+  if (point || a.dimensions !== undefined) return point;
+  return (
+    recursivePointNesting(
+      e,
+      param,
+      depth + 1,
+      descendIntoConstructor(seen),
+      state
+    ) === true
+  );
 }
 
 /**
@@ -5925,7 +6310,7 @@ export function isBroadcastablePointArgumentType(
 ): boolean {
   if (!isPointParameterType(param)) return false;
   const stripped = stripMissingFromType(arg);
-  const a = resolveTypeReference(stripped) ?? stripped;
+  const a = resolveTypeAlias(stripped);
   if (typeof a === 'string' || a.kind !== 'broadcastable') return false;
   const e = stripMissingFromType(a.elements);
   return e !== 'never' && isSubtype(e, param);
@@ -5939,7 +6324,7 @@ function pointTensorOf(
 ): boolean {
   // A deep nesting of lists is read up to a fixed depth only.
   if (depth > 8) return false;
-  const a = resolveTypeReference(t) ?? t;
+  const a = resolveTypeAlias(t);
   if (typeof a === 'string') return false;
   // An arm that is a reference is unfolded under the descent guard, as in
   // `isPointListArgumentType`: a self-referential declaration reaches itself
@@ -5966,9 +6351,15 @@ function pointTensorOf(
   const dims = a.dimensions;
   if (dims === null || (dims !== undefined && dims.length >= 2)) {
     const stripped = stripMissingFromType(a.elements);
-    const cell = resolveTypeReference(stripped) ?? stripped;
-    // All the cells are absent (`matrix<missing^(1x1)>`).
-    if (cell === 'never') return a.elements === 'missing';
+    const cell = resolveTypeAlias(stripped);
+    // All the cells are absent (`matrix<missing^(1x1)>`), or there is no
+    // cell: a list of empty rows (`matrix<never^(1x0)>`, the type of
+    // `[[]]`). The map gives a list of the same shape, of empty lists.
+    if (cell === 'never')
+      return (
+        a.elements === 'missing' ||
+        (a.elements === 'never' && dims !== null && dims.includes(0))
+      );
     return isSubtype(cell, param);
   }
   // A list with one dimension (`list<P^3>`) holds its cells as elements: it
@@ -5980,7 +6371,7 @@ function pointTensorOf(
   const row = (x: Type) =>
     isPointListArgumentType(x, param) || pointTensorOf(x, param, depth + 1);
   if (row(a.elements)) return true;
-  const e = resolveTypeReference(a.elements) ?? a.elements;
+  const e = resolveTypeAlias(a.elements);
   if (typeof e === 'string' || e.kind !== 'union') return false;
   const arms = e.types.filter((x) => x !== 'missing');
   return arms.length > 0 && arms.every(row);
@@ -5996,7 +6387,7 @@ function pointTensorOf(
  * `incompatible-type` error.
  */
 function hasOnlyAbsentElements(arg: Type): boolean {
-  const r = resolveTypeReference(arg) ?? arg;
+  const r = resolveTypeAlias(arg);
   if (typeof r === 'string') return false;
   if (r.kind === 'union') {
     const arms = r.types.filter((x) => x !== 'missing');
@@ -6033,7 +6424,7 @@ export function isPointOrPointListArgumentType(
 ): boolean {
   if (!isPointParameterType(param)) return false;
   const stripped = stripMissingFromType(arg);
-  const a = resolveTypeReference(stripped) ?? stripped;
+  const a = resolveTypeAlias(stripped);
   if (typeof a === 'string') return false;
   if (a.kind === 'broadcastable') {
     const e = stripMissingFromType(a.elements);
@@ -6043,7 +6434,7 @@ export function isPointOrPointListArgumentType(
   let point = false;
   let list = false;
   for (const arm of a.types) {
-    const r = resolveTypeReference(arm) ?? arm;
+    const r = resolveTypeAlias(arm);
     if (typeof r !== 'string' && r.kind === 'tuple' && isSubtype(r, param))
       point = true;
     else if (isPointListArgumentType(r, param)) list = true;

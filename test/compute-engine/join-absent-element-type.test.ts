@@ -476,7 +476,12 @@ describe('AN OPERAND TYPED WITH `any` CAN HOLD AN ABSENT ELEMENT', () => {
       ['Map', 'Sqrt', 'B'],
       'list<complex | indexed_collection<any> | infinity | nan | nothing>',
     ],
-    [['Map', 'g', 'B'], 'list<integer | nan | nothing>'],
+    // `g` has only scalar parameters, so it maps over an element that is a
+    // list, as `Sqrt` does (ROADMAP CE-485).
+    [
+      ['Map', 'g', 'B'],
+      'list<indexed_collection<any> | integer | nan | nothing>',
+    ],
   ])('%j', (json, type) => {
     const expr = ce4.box(json as any);
     expect(expr.type.toString()).toBe(type);

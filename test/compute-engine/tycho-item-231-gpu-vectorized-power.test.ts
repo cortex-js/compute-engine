@@ -71,12 +71,12 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     expect(gl(latex)).toBe(
       'vec3 _tv1 = _gpu_pow2_v3(x + vec3(1.0, 3.0, 5.0)) + ' +
         '_gpu_pow2_v3(y + vec3(-2.0, -4.0, -6.0));\n' +
-        'return (min(min(_tv1.x, _tv1.y), _tv1.z));'
+        'return (_gpu_min(_gpu_min(_tv1.x, _tv1.y), _tv1.z));'
     );
     expect(wl(latex)).toBe(
       'var _tv1: vec3f = _gpu_pow2_v3(x + vec3f(1.0, 3.0, 5.0)) + ' +
         '_gpu_pow2_v3(y + vec3f(-2.0, -4.0, -6.0));\n' +
-        'return (min(min(_tv1.x, _tv1.y), _tv1.z));'
+        'return (_gpu_min(_gpu_min(_tv1.x, _tv1.y), _tv1.z));'
     );
   });
 
@@ -237,7 +237,7 @@ describe('vectorized Power on the shader targets (Tycho item 231)', () => {
     for (const code of [gl(latex), wl(latex)]) {
       expect(code).toContain('_gpu_pow2_v3(');
       expect(code).toContain('pow(vec3');
-      expect(code).toMatch(/max\(max\(/);
+      expect(code).toMatch(/_gpu_max\(_gpu_max\(/);
     }
   });
 

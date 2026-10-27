@@ -14,8 +14,9 @@ import {
 } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { corpus, type Case } from './corpus.js';
-import { verify } from './verify.js';
+import { buildSync } from 'esbuild';
+import { corpus, type Case, type CorpusKind } from './corpus.js';
+import { verify, decodePublicFactor } from './verify.js';
 
 const { values } = parseArgs({
   options: {
@@ -46,6 +47,9 @@ if (
     (b) =>
       ![
         'typescript',
+        'public-factor',
+        'public-helper',
+        'public-detailed',
         'typescript-baseline',
         'typescript-unfiltered',
         'typescript-trager',
@@ -64,12 +68,17 @@ if (backends.includes('sympy') && !values.python)
   throw new Error('Provide --python for SymPy');
 if (backends.includes('typescript-baseline') !== Boolean(values.baseline))
   throw new Error('Use --baseline with the typescript-baseline backend');
-if (!['regular', 'challenge'].includes(values.corpus!))
+if (!['regular', 'challenge', 'extended'].includes(values.corpus!))
   throw new Error('Unknown corpus');
-const cases = corpus(values.corpus as 'regular' | 'challenge');
+const cases = corpus(values.corpus as CorpusKind);
+// Refuse malformed fixtures before spending time in any comparator.
+if (new Set(cases.map((c) => c.id)).size !== cases.length)
+  throw new Error('Duplicate corpus IDs');
+for (const c of cases) verify(c, c.expected);
 mkdirSync(output); // Never overwrite or append to another run.
 const json = JSON.stringify(cases);
 writeFileSync(join(output, 'corpus.json'), json);
+const publicRun = backends.some((b) => b.startsWith('public-'));
 const sources = [
   'src/compute-engine/polynomial',
   'benchmarks/number-field',
@@ -80,6 +89,18 @@ const sources = [
     .map((f) => join(dir, f))
 );
 const sourceContents = new Map(sources.map((f) => [f, readFileSync(f)]));
+// Public entry points depend on the expression engine, not only the kernels.
+// Freeze their complete source dependency tree before starting any worker.
+if (publicRun) {
+  for (const file of readdirSync('src', {
+    recursive: true,
+    encoding: 'utf8',
+  })) {
+    if (!/\.(ts|js|json)$/.test(file)) continue;
+    const path = join('src', file);
+    sourceContents.set(path, readFileSync(path));
+  }
+}
 const sourceHashes = Object.fromEntries(
   [...sourceContents].map(([f, bytes]) => [
     f.replaceAll('\\', '/'),
@@ -151,7 +172,26 @@ const strategies: Record<string, object> = {
   'typescript-lattice': { numberFieldRecombination: 'lattice' },
   'typescript-unfiltered': { numberFieldRecovery: 'unfiltered' },
 };
+let publicBundleHash: string | undefined;
+if (publicRun) {
+  const bundle = join(output, 'public-worker.mjs');
+  buildSync({
+    entryPoints: [
+      join(output, 'sources/benchmarks/number-field/public-worker.ts'),
+    ],
+    outfile: bundle,
+    bundle: true,
+    platform: 'node',
+    format: 'esm',
+    packages: 'external',
+    logLevel: 'silent',
+  });
+  publicBundleHash = createHash('sha256')
+    .update(readFileSync(bundle))
+    .digest('hex');
+}
 const manifest = {
+  publicBundleHash,
   runtime: process.version,
   createdAt: new Date().toISOString(),
   corpus: values.corpus,
@@ -168,6 +208,13 @@ const manifest = {
   corpusHash: createHash('sha256').update(json).digest('hex'),
   profile: values.profile,
   options: { maxOperations: 5_000_000, maxNormDegree: 128 },
+  publicOptions: publicRun
+    ? {
+        maxOperations: 20_000_000,
+        maxNormDegree: 128,
+        note: 'All public routes use their defaults; kernel options above do not apply.',
+      }
+    : undefined,
   warmupCases: 3,
   scheduleSeed: 1729,
 };
@@ -216,6 +263,13 @@ class Worker {
               ),
               this.backend,
             ];
+      if (this.backend.startsWith('public-'))
+        args.splice(
+          0,
+          args.length,
+          join(output, 'public-worker.mjs'),
+          this.backend
+        );
       const child = spawn(
         this.backend === 'sympy' ? values.python! : process.execPath,
         args,
@@ -322,6 +376,10 @@ try {
         if (status === 'complete') {
           try {
             verify(c, r.result);
+            if (w.backend.startsWith('public-'))
+              verify(c, decodePublicFactor(c.modulus, r.expression));
+            if (r.structuredExpression)
+              verify(c, decodePublicFactor(c.modulus, r.structuredExpression));
             status = 'verified';
           } catch (e) {
             status = 'mismatch';

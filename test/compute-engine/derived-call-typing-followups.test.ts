@@ -319,9 +319,15 @@ describe('A SELF-REFERENTIAL ALIAS AT A DECLARED POINT PARAMETER', () => {
     expect(ce.box(['k', 'x']).type.toString()).toBe('list<missing | number>');
   });
 
+  // A nominal type is not a subtype of its definition, so the typing does
+  // not read through it to the lists of points, and the call is typed
+  // `error`, as its value is an `incompatible-type` error (ROADMAP CE-488,
+  // `ce-485-488-call-operand-typing.test.ts`).
   test('a nominal type', () => {
     const ce = engine('A | list<list<tuple<number, number>>>', false);
-    expect(ce.box(['k', 'x']).type.toString()).toBe('list<list<number>>');
+    const e = ce.box(['k', 'x']);
+    expect(e.type.toString()).toBe('error');
+    expect(e.evaluate().type.toString()).toBe('error');
   });
 });
 

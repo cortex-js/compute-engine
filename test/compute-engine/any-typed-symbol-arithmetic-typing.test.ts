@@ -92,9 +92,12 @@ describe('a symbol declared `any` under a unary numeric function', () => {
     expect(typeOf('\\sin(a) + \\cos(a)')).toBe('any');
   });
 
-  test('a comparison keeps `broadcastable<boolean>`: its value is never a point', () => {
-    expect(typeOf('a = 1')).toBe('broadcastable<boolean>');
-    expect(typeOf('a < 2')).toBe('broadcastable<boolean>');
+  // The value of `a` can be a ragged list, and the comparison maps over it
+  // to any depth, so the type is `boolean | list<boolean | list<any>>`
+  // (ROADMAP CE-502).
+  test('a comparison is a boolean or a list of any depth: its value is never a point', () => {
+    expect(typeOf('a = 1')).toBe('boolean | list<boolean | list<any>>');
+    expect(typeOf('a < 2')).toBe('boolean | list<boolean | list<any>>');
   });
 
   test('a comparison with a list is element-wise once the symbol has a value', () => {
@@ -183,9 +186,13 @@ describe('an application typed `any`', () => {
     expect(typeOf('\\sin(g(p))')).toBe('any');
   });
 
-  test('a call of an undeclared function keeps the `broadcastable<number>` reading', () => {
-    expect(typeOf('2h(p)')).toBe('broadcastable<number>');
-    expect(typeOf('\\sin(h(p))')).toBe('broadcastable<number>');
+  // The call is typed `unknown`: its value can be a ragged list or a point
+  // (ROADMAP CE-502).
+  test('a call of an undeclared function is a number, a list of any depth or a point', () => {
+    expect(typeOf('2h(p)')).toBe('list<list<any> | number | tuple> | number | tuple');
+    expect(typeOf('\\sin(h(p))')).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
   });
 
   test('a colour mix over an `any`-typed call is summed with a point without an error', () => {

@@ -916,15 +916,18 @@ describe('12. MAP OF A BROADCASTABLE OPERATOR OVER RAGGED ROWS', () => {
       'list<vector<integer^2> | vector<integer^3>>',
       ['List', ['List', 1, 2], ['List', 3, 4, 5]],
       '[[2,4],[6,8,10]]',
+      'list<list<number>>',
     ],
+    // A row of a fixed length gives a result of the same length.
     [
       'list<vector<integer^2>>',
       ['List', ['List', 1, 2], ['List', 3, 4]],
       '[[2,4],[6,8]]',
+      'list<vector<2>>',
     ],
-  ] as [string, MathJsonExpression, string][])(
+  ] as [string, MathJsonExpression, string, string][])(
     'rows of %s',
-    (declared, held, doubled) => {
+    (declared, held, doubled, type) => {
       const engine = new ComputeEngine();
       engine.declare('pr', declared);
       engine.assign('pr', engine.box(held));
@@ -959,9 +962,7 @@ describe('12. MAP OF A BROADCASTABLE OPERATOR OVER RAGGED ROWS', () => {
           engine.box(['Map', fn, 'pr']),
           engine.parse(`\\operatorname{Map}(${fn}, \\mathrm{pr})`),
         ])
-          expect(expectTypeHoldsValue(engine, expr, 'list<list<number>>')).toBe(
-            doubled
-          );
+          expect(expectTypeHoldsValue(engine, expr, type)).toBe(doubled);
     }
   );
 
@@ -1010,9 +1011,9 @@ describe('12. MAP OF A BROADCASTABLE OPERATOR OVER RAGGED ROWS', () => {
     expect(expr.evaluate().type.matches(expr.type)).toBe(true);
   });
 
-  test('the type variable is bound only when it is the parameter', () => {
-    // `((integer) -> T) -> T` over function leaves needs a solve of `T`:
-    // the lifted type is not given, and the older call typing decides.
+  test('a type variable in a callback parameter is solved against the leaves', () => {
+    // `((integer) -> T) -> T` over function leaves solves `T` against the
+    // leaf `(integer) -> integer`, so `T` is `integer` (ROADMAP CE-30).
     const lifted = (signature: string, element: string): string | undefined => {
       const t = broadcastCallbackResultType(
         parseType(signature),
@@ -1022,6 +1023,10 @@ describe('12. MAP OF A BROADCASTABLE OPERATOR OVER RAGGED ROWS', () => {
     };
     expect(
       lifted('((integer) -> T) -> T where T', 'list<(integer) -> integer>')
+    ).toBe('list<integer>');
+    // A leaf that the parameter does not admit is not solved.
+    expect(
+      lifted('((integer) -> T) -> T where T', 'list<(string) -> integer>')
     ).toBeUndefined();
     expect(lifted('(T) -> T where T', 'list<integer>')).toBe('list<integer>');
   });

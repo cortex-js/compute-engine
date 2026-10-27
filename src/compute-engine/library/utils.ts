@@ -38,6 +38,7 @@ import {
   sameRationalFunction,
 } from '../boxed-expression/rational-body.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { noteKindTypeDeclaration } from '../boxed-expression/residue-class.js';
 import { symbolicLimit } from '../symbolic/limit.js';
 import { constantProductOverInfiniteRange } from '../symbolic/simplify-product.js';
 import { limitsHaveInfinitelyManyTerms } from '../symbolic/simplify-sum.js';
@@ -3726,6 +3727,15 @@ export function bindIndexAuthoritatively(
   binding: Expression,
   type: Type
 ): void {
+  // An element type with a kind arm (`residue`, a nominal kind `gf8`) makes
+  // the index a symbol that holds a kind value. The recognition of such a
+  // symbol in the body reads the declared types of the symbols only when the
+  // declaration gate of the engine is open (`residue-class.ts`), and a
+  // narrowing by `_infer()` does not open it, as a declaration does. Without
+  // this, the body of `Sum(k/k, Element(k, [c1, c2]))` was canonicalized
+  // with an index typed `residue` that was not recognized, `k/k` folded to
+  // `1`, and the sum was the integer `2`.
+  noteKindTypeDeclaration(ce, type);
   binding._infer(() => type, 'narrow');
   const def = binding.valueDefinition;
   const fresh = ce._freshlyInferred;

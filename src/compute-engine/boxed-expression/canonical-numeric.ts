@@ -5,6 +5,7 @@ import type {
   Metadata,
   Scope,
 } from '../global-types.js';
+import { holdsKindValue } from './residue-class.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { operands, operator } from '../../math-json/utils.js';
 import { canonicalAdd } from './arithmetic-add.js';
@@ -347,15 +348,28 @@ export function canonicalNumericOperator(
   metadata?: Metadata
 ): Expression | null {
   let ops: ReadonlyArray<Expression> = [];
-  // `residue: true` for the operators that have residue arithmetic (a
-  // residue class is admitted as an operand); `Exp`, `Ln` and `Log` do not.
+  // `kindHook` for the arithmetic operators of the value kinds: a value of a
+  // kind whose head declares that hook is admitted as an operand (a residue
+  // class). `Ln`, `Log` and `Exp` admit a value of a kind admitted as a
+  // number (`carrier`), as `Sin` does. `Exp(x)` is rewritten to
+  // `Power(e, x)` below, so the evaluation gives such a value to the
+  // `power` hook of its kind, with the base `e`. For this reason `Exp`
+  // admits such a value only when its kind declares a `power` hook:
+  // `Power` refuses the value of a kind without one at evaluation.
   if (name === 'Add' || name === 'Multiply')
-    ops = checkNumericArgs(ce, canonicalOps, { flatten: name, residue: true });
+    ops = checkNumericArgs(ce, canonicalOps, {
+      flatten: name,
+      kindHook: name === 'Add' ? 'add' : 'multiply',
+    });
   else if (name === 'Negate' || name === 'Square' || name === 'Sqrt')
-    ops = checkNumericArgs(ce, canonicalOps, { count: 1, residue: true });
-  else if (name === 'Exp') ops = checkNumericArgs(ce, canonicalOps, 1);
+    ops = checkNumericArgs(ce, canonicalOps, {
+      count: 1,
+      kindHook: name === 'Negate' ? 'negate' : 'power',
+    });
+  else if (name === 'Exp')
+    ops = checkNumericArgs(ce, canonicalOps, { count: 1, carrier: 'power' });
   else if (name === 'Ln' || name === 'Log') {
-    ops = checkNumericArgs(ce, canonicalOps);
+    ops = checkNumericArgs(ce, canonicalOps, { carrier: true });
     if (ops.length === 0) ops = [ce.error('missing')];
     // The base is optional, so `Ln` and `Log` take one or two operands
     // (`Ln(a, b)` is `Log(a, b)`). An operand after the base is an
@@ -365,12 +379,12 @@ export function canonicalNumericOperator(
     // is `Log(8, 2, 3)`). Evaluation reads only the first two operands.
     else if (ops.length > 2 && ce.strict) ops = checkArity(ce, ops, 2);
   } else if (name === 'Power' || name === 'Root')
-    ops = checkNumericArgs(ce, canonicalOps, { count: 2, residue: true });
+    ops = checkNumericArgs(ce, canonicalOps, { count: 2, kindHook: 'power' });
   else if (name === 'Divide') {
     // Note: Divide can have more than one argument, i.e.
     // Divide(a, b, c) = a / b / c
     // But it needs at least two arguments
-    ops = checkNumericArgs(ce, canonicalOps, { residue: true });
+    ops = checkNumericArgs(ce, canonicalOps, { kindHook: 'divide' });
     if (ops.length === 0) ops = [ce.error('missing'), ce.error('missing')];
     if (ops.length === 1) ops = [ops[0], ce.error('missing')];
   } else return null;
@@ -425,13 +439,19 @@ export function canonicalNumericOperator(
     // the scalar `0`. This includes a union such as `real | list<real>`,
     // since the base may hold a list when the expression is evaluated.
     const baseIsCollection = base !== undefined && logOperandMayThread(base);
+    // A base that may be a value of a VALUE KIND (non-strict recognition,
+    // `holdsKindValue()`): `Log(1, b) = 0` is a rule about numbers, and the
+    // logarithm of a kind value is decided by its kind, so the fold is
+    // withheld, as the number rules are (`Log(1, K(2))` stays).
+    const baseIsKindValue = base !== undefined && holdsKindValue(base);
     if (
       isNumber(ops[0]) &&
       ops[0].isExact &&
       ops[0].isSame(1) &&
       !baseIsOneOrNaN &&
       !baseIsFloat &&
-      !baseIsCollection
+      !baseIsCollection &&
+      !baseIsKindValue
     )
       return ce.Zero;
     // Ln(a) -> Ln(a), Log(a) -> Log(a)

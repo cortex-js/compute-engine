@@ -140,7 +140,7 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     // `ElementMax` — not `Max`, which is a REDUCTION on the GPU too (it
     // destructures its collection operands; see `compileGPUExtremum`).
     expect(g(['ElementMax', V3, W3])).toBe(
-      'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
+      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['Dot', V3, W3])).toBe(
       'dot(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
@@ -171,8 +171,8 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   });
 
   it('the unary fan-out lowerings are unaffected', () => {
-    expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
-    expect(w(['Sin', V4])).toBe('sin(vec4f(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Sin', V4])).toBe('_gpu_sin4(vec4(1.0, 2.0, 3.0, 4.0))');
+    expect(w(['Sin', V4])).toBe('_gpu_sin4(vec4f(1.0, 2.0, 3.0, 4.0))');
     expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
     expect(w(['Negate', V4])).toBe('(-(vec4f(1.0, 2.0, 3.0, 4.0)))');
   });
@@ -242,14 +242,18 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 
   it('GLSL `mod(genType, float)` takes its scalar LAST', () => {
     // A divisor of 2: a divisor of 1 is the `fract` peephole (CE-254).
-    expect(g(['Mod', V3, 2])).toBe('mod(vec3(1.0, 2.0, 3.0), 2.0)');
-    expect(() => g(['Mod', 1, V3])).toThrow(
-      /^Could not compile `Mod`: the shader builtin `mod` takes a scalar only in argument 2, but here the scalar stands in argument 1/
+    expect(g(['Mod', V3, 2])).toBe(
+      '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+    );
+    // A scalar dividend beside a vector divisor is broadcast by the
+    // `_gpu_fmod` helper, so it no longer reaches the built-in `mod`.
+    expect(g(['Mod', 1, V3])).toBe(
+      '_gpu_fmod3(vec3(1.0), vec3(1.0, 2.0, 3.0))'
     );
     // WGSL is unaffected: it lowers `Mod` to `%`, whose scalar/vector mixed
     // forms ARE defined, so there is no builtin overload to violate.
     expect(w(['Mod', 1, V3])).toBe(
-      '((((1.0) % (vec3f(1.0, 2.0, 3.0))) - (vec3f(1.0, 2.0, 3.0)) * (((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))) - abs((sign((1.0) % (vec3f(1.0, 2.0, 3.0))) * sign((vec3f(1.0, 2.0, 3.0)))))) * 0.5)) % (vec3f(1.0, 2.0, 3.0)))'
+      '_gpu_fmod3(vec3f(1.0), vec3f(1.0, 2.0, 3.0))'
     );
   });
 
@@ -293,16 +297,22 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   });
 
   it('GLSL `clamp(genType, float, float)` takes its scalars in the BOUNDS', () => {
-    expect(g(['Clamp', V3, 0, 1])).toBe('clamp(vec3(1.0, 2.0, 3.0), 0.0, 1.0)');
+    expect(g(['Clamp', V3, 0, 1])).toBe(
+      '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(0.0), vec3(1.0))'
+    );
     expect(() => g(['Clamp', 0, V3, 1])).toThrow(
       /^Could not compile `Clamp`: the shader builtin `clamp` takes a scalar only in arguments 2 and 3, but here the scalar stands in argument 1/
     );
-    expect(() => w(['Clamp', V3, 0, 1])).toThrow(/MATCHING genType/);
+    // WGSL has no `clamp(genType, float, float)` overload. The `_gpu_clamp3`
+    // helper takes three vectors, so the scalar bounds are broadcast.
+    expect(w(['Clamp', V3, 0, 1])).toBe(
+      '_gpu_clamp3(vec3f(1.0, 2.0, 3.0), vec3f(0.0), vec3f(1.0))'
+    );
   });
 
   it('GLSL `smoothstep(float, float, genType)` takes its scalars in the EDGES', () => {
     expect(g(['Smoothstep', 0, 1, V3])).toBe(
-      'smoothstep(0.0, 1.0, vec3(1.0, 2.0, 3.0))'
+      '_gpu_smoothstep3(vec3(0.0), vec3(1.0), vec3(1.0, 2.0, 3.0))'
     );
     // Slot 2 is a legal home for a scalar, slot 3 is not — the first
     // MISPLACED scalar is the one named.
@@ -317,30 +327,28 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
     const cev = new ComputeEngine();
     cev.declare('v', 'vector<3>');
     const gv = (expr: any): string => glsl.compile(cev.box(expr)).code!;
-    expect(gv(['ElementMax', 'v', 2])).toBe('max(v, 2.0)');
-    expect(() => gv(['ElementMax', 2, 'v'])).toThrow(
-      /takes a scalar only in argument 2, but here the scalar stands in argument 1/
+    expect(gv(['Step', 2, 'v'])).toBe('step(2.0, v)');
+    expect(() => gv(['Step', 'v', 2])).toThrow(
+      /takes a scalar only in argument 1, but here the scalar stands in argument 2/
     );
-    expect(gv(['Mod', 'v', 2])).toBe('mod(v, 2.0)');
-    expect(() => gv(['Mod', 1, 'v'])).toThrow(
-      /takes a scalar only in argument 2/
-    );
+    expect(gv(['Mod', 'v', 2])).toBe('_gpu_fmod3(v, vec3(2.0))');
+    expect(gv(['Mod', 1, 'v'])).toBe('_gpu_fmod3(vec3(1.0), v)');
   });
 
-  it('a VARIADIC fold is judged on the emitted call tree', () => {
-    // `ElementMax(a, b, c)` folds to `max(max(a, b), c)`: the CE operand
-    // positions no longer line up with the emitted ones, so each nested call
-    // is judged on its own arguments.
+  it('a VARIADIC element-wise fold broadcasts a scalar in any position', () => {
+    // `ElementMax` calls the vector helper `_gpu_max3`, which takes two
+    // vectors, so a scalar operand is broadcast wherever it stands, as the
+    // interpreter broadcasts it.
     expect(g(['ElementMax', V3, W3, 2])).toBe(
-      'max(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), 2.0)'
+      '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
     );
-    expect(() => g(['ElementMax', 2, V3, W3])).toThrow(
-      /the emitted call `max\(2\.0, vec3\(1\.0, 2\.0, 3\.0\)\)` has a scalar in argument 1/
+    expect(g(['ElementMax', 2, V3, W3])).toBe(
+      '_gpu_max3(_gpu_max3(vec3(2.0), vec3(1.0, 2.0, 3.0)), vec3(4.0, 5.0, 6.0))'
     );
   });
 
   it('every positional decline names the head and ends with the D6 marker', () => {
-    expect(() => g(['Mod', 1, V3])).toThrow(/^Could not compile `Mod`: .*$/s);
+    expect(() => g(['Step', V3, 1])).toThrow(/^Could not compile `Step`: .*$/s);
     expect(() => w(['Mix', 0.5, V3, W3])).toThrow(
       /^Could not compile `Mix`: .*$/s
     );
@@ -348,7 +356,6 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 
   it('reports `success: false` (no source) through the fallback route', () => {
     for (const [target, expr] of [
-      [glsl, ['Mod', 1, V3]],
       [glsl, ['Step', V3, 1]],
       [glsl, ['Clamp', 0, V3, 1]],
       [wgsl, ['Mix', 0.5, V3, W3]],
@@ -367,9 +374,15 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 });
 
 describe('GPU OPERAND SHAPE GATE — the two languages differ', () => {
-  it('GLSL promotes a scalar in `max(genType, float)`; WGSL does not', () => {
-    expect(g(['ElementMax', V3, 2])).toBe('max(vec3(1.0, 2.0, 3.0), 2.0)');
-    expect(() => w(['ElementMax', V3, 2])).toThrow(/MATCHING genType/);
+  it('an element-wise max broadcasts a scalar in both languages', () => {
+    // The built-in `max` has a `max(genType, float)` overload in GLSL only;
+    // the `_gpu_max3` helper takes two vectors on both targets.
+    expect(g(['ElementMax', V3, 2])).toBe(
+      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+    );
+    expect(w(['ElementMax', V3, 2])).toBe(
+      '_gpu_max3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
+    );
   });
 
   it('a matrix and a vector combine only under `*`, in both languages', () => {

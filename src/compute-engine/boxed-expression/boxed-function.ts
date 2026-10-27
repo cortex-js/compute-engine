@@ -1,3 +1,4 @@
+import { provedAbsentDomainOf } from './proved-absent-domain.js';
 import { isCapturedValuelessSymbol } from './canonical-utils.js';
 import { isForwardCallReference } from './forward-call-reference.js';
 import {
@@ -36,8 +37,9 @@ import {
 } from './ambient-chain.js';
 import type { PrecisionWindow } from '../types-kernel-evaluation.js';
 import {
-  bindsWholeAtInferredPoint,
+  bindsWholeAtInferredPointParameter,
   callResultType,
+  componentwiseTupleCallType,
   inferredPointSignature,
   partialApplicationType,
 } from './call-result-type.js';
@@ -94,6 +96,7 @@ import {
   installBroadcastLiftHooks,
   isNumericTupleArgumentType,
   isNumericTupleType,
+  isTupleArgumentType,
   mayBeNumericTupleType,
   parameterAdmitsTuple,
   parameterReachesBody,
@@ -112,12 +115,14 @@ import {
   withThreadedAbsence,
   abstractCollectionCell,
   broadcastLiftType,
+  holdsIntegerValuedFloat,
   isAbstractCollectionTypeOf,
   isKindOpenOperandType,
   skipBroadcastForVectorOpsOnViews,
   type BroadcastOperandView,
   broadcastableOf,
   topTypeOfTriggers,
+  openTriggerBroadcastType,
   viewOfDescriptor,
   isBroadcastCollectionTypeOf,
   isFixedShapeCollectionTypeOf,
@@ -145,6 +150,9 @@ import {
   isPointOrPointListArgumentType,
   isPointTensorArgumentType,
   isBroadcastablePointArgumentType,
+  pointArgumentMayMixDepths,
+  isEmptyListArgumentType,
+  listMixesPointsAndLists,
   isPointParameterType,
   isFixedShapeCollection,
   isKnownFinitenessBroadcast,
@@ -206,10 +214,12 @@ import {
   isSymbol,
   isContinuationOperand,
   isFoldBarrierProduct,
+  isNotationalProduct,
   nanOperandAnswer,
   indeterminateFormAnswer,
   isUnorderedSet,
   integerRangeElements,
+  kindValueIsNaN,
 } from './type-guards.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
@@ -279,9 +289,12 @@ import {
   stripMissingFromType,
   collectionElementType,
   resolveTypeAlias,
+  topTypeBesideAbsence,
+  openDepthScalarArms,
   unfoldAliasOnDescent,
   recordUnfoldOnDescent,
   descendIntoConstructor,
+  isBareCutOnDescent,
   type AliasDescent,
   typeContainsMissing,
   typeHasNanFreeNumericCell,
@@ -293,7 +306,7 @@ import {
   signatureSlotType,
   signatureArms,
   staticCollectionDims,
-  withoutResidueArm,
+  withoutKindArms,
 } from '../../common/type/utils.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
@@ -328,11 +341,24 @@ import {
   hasSymbolOrOperator,
 } from './abstract-boxed-expression.js';
 import { DEFAULT_COMPLEXITY, sortOperands } from './order.js';
+import { holdsKindValue } from './residue-class.js';
 import {
-  containsResidueClass,
-  noteResidueClass,
-  residueArithmetic,
-} from './residue-class.js';
+  kindApply,
+  kindArithmetic,
+  type KindApplyAnswer,
+} from './kind-dispatch.js';
+import { isKindValue, kindOfValue } from './kind-compare.js';
+import {
+  applySiteOperands,
+  applySiteOperandsOfValues,
+  applySiteResultType,
+} from './apply-site.js';
+import {
+  kindTypeNames,
+  kindTypesOfHeadName,
+  noteKindHeadValue,
+  noteKindValue,
+} from './value-kinds.js';
 import {
   digest128,
   hashCode,
@@ -392,6 +418,7 @@ import {
 import { isInferredTypedParameter } from './inferred-annotations.js';
 import {
   absentScalarMarker,
+  absentArithmeticMarker,
   hasAbsentScalarOperand,
   isAbsentScalarSymbol,
   listCoordinateTupleOperandError,
@@ -876,6 +903,16 @@ export class BoxedFunction
    * `rechecked` keeps the last new call, with the definition and the counter
    * it was boxed against, so that the call is boxed again only once for
    * each change.
+   *
+   * `operator` is set when the call was written with another operator,
+   * which its canonical handler replaced (`Fold(f, x, L)` becomes
+   * `Reduce(L, f, x)`): the call is boxed again with that operator and
+   * `ops`.
+   *
+   * `scope` is set when `ops` holds an operand that is not bound (a
+   * callback literal as written): the call is boxed again in that lexical
+   * scope, which was the current scope when the call was boxed, so that the
+   * names in the operand have the bindings that they had then.
    * @internal */
   _calleeStamp:
     | {
@@ -885,6 +922,8 @@ export class BoxedFunction
           ReadonlyArray<{ name: string | undefined; slot: number }> | undefined;
         ops?: ReadonlyArray<Expression>;
         receiver?: { _writeVersion: number };
+        operator?: string;
+        scope?: Scope;
         rechecked?: {
           half: { _writeVersion: number };
           version: number;
@@ -907,12 +946,14 @@ export class BoxedFunction
    * derived for the function.
    *
    * `receiver` is the definition to record in place of the definition of
-   * the name of the call (see `_calleeStamp`).
+   * the name of the call (see `_calleeStamp`). `options` sets the
+   * `operator` and the `scope` of the record (see `_calleeStamp`).
    * @internal */
   _stampCallee(
     written?: ReadonlyArray<{ name: string | undefined; slot: number }>,
     ops?: ReadonlyArray<Expression>,
-    receiver?: { _writeVersion: number }
+    receiver?: { _writeVersion: number },
+    options?: { operator?: string; scope?: Scope }
   ): void {
     if (this._calleeStamp !== undefined) return;
     if (this.engine._recursionKnots.has(this._operator)) return;
@@ -920,6 +961,9 @@ export class BoxedFunction
     if (half === undefined) return;
     this._calleeStamp = { half, version: half._writeVersion, written };
     if (receiver !== undefined) this._calleeStamp.receiver = receiver;
+    if (options?.operator !== undefined)
+      this._calleeStamp.operator = options.operator;
+    if (options?.scope !== undefined) this._calleeStamp.scope = options.scope;
     const own = this._ops;
     if (
       ops !== undefined &&
@@ -987,10 +1031,12 @@ export class BoxedFunction
       ) !== this._def
     )
       return undefined;
-    const fresh = withCallableBinding(this, () =>
-      this.engine.function(
-        this._operator,
-        this._writtenOperands(stamp.ops ?? this._ops)
+    const fresh = this.engine._inScope(stamp.scope, () =>
+      withCallableBinding(this, () =>
+        this.engine.function(
+          stamp.operator ?? this._operator,
+          this._writtenOperands(stamp.ops ?? this._ops)
+        )
       )
     );
     // The counter is read after the new call was boxed: boxing it can
@@ -1011,6 +1057,60 @@ export class BoxedFunction
       return undefined;
     }
     stamp.rechecked = { half, version, call: fresh };
+    return fresh;
+  }
+
+  /** The memo of `_reboxedForForwardCallee()`: the definition half the name
+   * held and its change counter when the call was boxed again, and the new
+   * call. */
+  private _forwardRebox:
+    | { half: { _writeVersion: number }; version: number; call: Expression }
+    | undefined = undefined;
+
+  /** This call boxed again against the definition that its name holds now,
+   * when the call was boxed before the name had a value (a forward
+   * reference, `isForwardCallReference`) and the name now has a definition.
+   * `undefined` otherwise.
+   *
+   * The evaluation of such a call reads the definition that the name holds
+   * when the call is evaluated (`callableBindingInContext`). Its type must
+   * do the same. Example: with `G := (n, K) ↦ F(n, K)` boxed before
+   * `F := (n, K) ↦ n + K`, the call `F(n, K)` in the body of `G` was typed
+   * `unknown`, from the empty definition that the boxing made for `F`, so
+   * `G` was typed `-> unknown`, and a mutually recursive pair that builds a
+   * list was typed `-> collection<number>` (ROADMAP CE-38).
+   * @internal */
+  _reboxedForForwardCallee(): Expression | undefined {
+    const own = this._def;
+    if (!own || !isValueDef(own) || !isForwardCallReference(own.value))
+      return undefined;
+    const current = callableBindingInContext(this.engine, this._operator, own);
+    if (current === undefined || current === own) return undefined;
+    if (isValueDef(current) && current.value === own.value) return undefined;
+    const half = calleeHalf(current);
+    if (half === undefined) return undefined;
+    const memo = this._forwardRebox;
+    if (
+      memo !== undefined &&
+      memo.half === half &&
+      memo.version === half._writeVersion
+    )
+      return memo.call;
+    const fresh = withCallableBinding(this, () =>
+      this.engine.function(this._operator, this._writtenOperands(this._ops))
+    );
+    // The new call must be bound to the current definition: a call that is
+    // still a forward reference gives no more information than this one.
+    if (
+      !(fresh instanceof BoxedFunction) ||
+      fresh === this ||
+      fresh._operator !== this._operator
+    )
+      return undefined;
+    const freshDef = fresh._def ?? undefined;
+    if (isValueDef(freshDef) && isForwardCallReference(freshDef.value))
+      return undefined;
+    this._forwardRebox = { half, version: half._writeVersion, call: fresh };
     return fresh;
   }
 
@@ -1308,8 +1408,6 @@ export class BoxedFunction
     super(ce, options?.metadata);
 
     this._operator = operator;
-    // Lets `containsResidueClass()` skip its walk in an engine with no class.
-    if (operator === 'ResidueClass') noteResidueClass(ce);
     const store = options?.numericStore;
     if (store !== undefined) {
       // The store is the list's literal content. Any other head would give
@@ -1335,12 +1433,29 @@ export class BoxedFunction
     this._localScope = options?.scope;
 
     this._isStructural = options?.structural ?? false;
-    if (options?.canonical || this._isStructural) this._bind();
-    // `null` is "not bound" — as documented on `_def`, and as distinct from
-    // the `undefined` `_bind()` leaves when it finds no definition. Only
-    // `evaluate()` reads the two apart (see `_canonicalToEvaluate()`); every
-    // other use tests `_def` for falsiness.
-    else this._def = null;
+    if (options?.canonical || this._isStructural) {
+      this._bind();
+      // A value of a head that declares a value kind opens the value gate of
+      // its kind type for the engine (`noteKindHeadValue()`,
+      // `value-kinds.ts`), which lets `holdsKindValue()` skip its walk in an
+      // engine that has made no kind value.
+      const bound = this._def;
+      if (bound && 'operator' in bound && bound.operator.arithmetic)
+        noteKindHeadValue(ce, bound.operator);
+    } else {
+      // `null` is "not bound" — as documented on `_def`, and as distinct from
+      // the `undefined` `_bind()` leaves when it finds no definition. Only
+      // `evaluate()` reads the two apart (see `_canonicalToEvaluate()`);
+      // every other use tests `_def` for falsiness.
+      this._def = null;
+      // A call that is not bound (a non-canonical `ResidueClass(…)`) has
+      // only its name: a registered kind head of that name opens the gates
+      // of its kind types. Recognition reads such a call by name too
+      // (`isKindHeadCall()`, `residue-class.ts`).
+      const kindTypes = kindTypesOfHeadName(ce, operator);
+      if (kindTypes !== undefined)
+        for (const t of kindTypes) noteKindValue(ce, t);
+    }
   }
 
   // NOTE: this hash folds bound-variable NAMES (via each symbol operand's
@@ -2228,9 +2343,20 @@ export class BoxedFunction
     // Multiply
     //
     if (isFunction(expr, 'Multiply')) {
+      // A product with a direct `ContinuationPlaceholder` operand
+      // (`2 · 4 · … · 2n`) is a notation, not an arithmetic value: it has no
+      // coefficient. If its samples gave their numbers to the coefficient,
+      // `2n` became the two factors `2` and `n`, and a sum such as
+      // `x + 3(2 · 4 · … · 2n)` was collected as `x + 48 · … · n`. Such a
+      // product is kept whole, as the rest of the term.
+      if (isNotationalProduct(expr)) return [ce._numericValue(1), expr];
       const rest: Expression[] = [];
       let coef = ce._numericValue(1);
       for (const arg of expr.ops) {
+        if (isNotationalProduct(arg)) {
+          rest.push(arg);
+          continue;
+        }
         const [c, r] = arg.toNumericValue();
         // A float 1 is multiplied in, so the coefficient becomes a float
         if (!c.isOne || !c.isExact) {
@@ -2523,62 +2649,50 @@ export class BoxedFunction
   }
 
   /**
-   * The nominal value of a `Measurement(value, error)`, or `undefined` for
-   * every other operator.
+   * The number that this expression stands for when it is a value of a
+   * kind whose `arithmetic` declares `numericValue` (the nominal of a
+   * `Measurement`), else `undefined`.
    *
-   * `Measurement` types as its nominal's scalar type (see `measurementType()`),
-   * so `Integrate(…).N()` reports `real` and `isNumber === true`. The
-   * numeric read surface has to honor that: a head that claims to be a real
-   * number and then answers `NaN` to every numeric accessor is not a strict
-   * contract, it is an unfinished one — and the failure is silent, because a
-   * consumer reading `.re` cannot tell a poisoned read from a genuine `NaN`.
-   * So the numeric accessors below project the nominal; the uncertainty stays
-   * reachable through `.ops`/`op2` (after an `isFunction()` narrow) and the
-   * MathJSON. `re`/`im` are the channel, and they are sufficient: a
-   * `Measurement` is a quadrature result, so its nominal is never an exact
-   * number.
-   *
-   * Deliberately NOT projected, all three for the same reason — a `Measurement`
-   * is a FUNCTION expression, and the number-literal surface belongs behind the
-   * `isNumber()` guard, which narrows on expression kind:
-   * - `numericValue`, declared only on `NumberLiteralInterface`. Projecting it
-   *   would advertise an exact numeric representation this expression does not
-   *   have, on a surface a `Measurement` cannot legitimately narrow to.
-   * - `isNumberLiteral`, for the same reason — claiming it would hand callers a
-   *   `BoxedNumber` interface this expression does not implement.
-   * - `value`, documented as the expression itself for a literal and
-   *   `undefined` for a symbolic expression; a `Measurement` is the latter.
+   * Only the numeric accessors below project it: `re`, `im`, `bignumRe`,
+   * `bignumIm` and `valueOf()`. A consumer that reads `.re` of the result of
+   * a numeric quadrature (a measurement under `.N()`) gets the nominal, not
+   * `NaN`; the uncertainty stays reachable through the operands and the
+   * MathJSON. The FACT queries (`sgn`, `isPositive`, `isInteger`,
+   * `isFinite`, …) do not project it and stay `undefined` for a value of a
+   * kind, so that no canonical fold of the numbers applies to it. A kernel
+   * that would read `.re` of a measurement operand does not see one: the
+   * `apply` dispatch of the kinds runs before the `evaluate` handler at
+   * every operator that admits the measurement.
+   * (Plan: `docs/plans/2026-10-26-value-kinds.md`, section 13.2.)
    */
-  private get _measurementNominal(): Expression | undefined {
-    if (this._operator !== 'Measurement' || this._ops.length === 0)
-      return undefined;
-    return this._ops[0];
+  private get _kindNumericValue(): Expression | undefined {
+    const arithmetic = kindOfValue(this);
+    return arithmetic?.numericValue?.call(arithmetic, this);
   }
 
   get re(): number {
-    return this._measurementNominal?.re ?? super.re;
+    return this._kindNumericValue?.re ?? super.re;
   }
 
   get im(): number {
-    return this._measurementNominal?.im ?? super.im;
+    return this._kindNumericValue?.im ?? super.im;
   }
 
   get bignumRe(): BigDecimal | undefined {
-    return this._measurementNominal?.bignumRe ?? super.bignumRe;
+    const nominal = this._kindNumericValue;
+    return nominal !== undefined ? nominal.bignumRe : super.bignumRe;
   }
 
   get bignumIm(): BigDecimal | undefined {
-    return this._measurementNominal?.bignumIm ?? super.bignumIm;
+    const nominal = this._kindNumericValue;
+    return nominal !== undefined ? nominal.bignumIm : super.bignumIm;
   }
 
   valueOf(): number | number[] | number[][] | number[][][] | string | boolean {
-    return this._measurementNominal?.valueOf() ?? super.valueOf();
+    return this._kindNumericValue?.valueOf() ?? super.valueOf();
   }
 
   get sgn(): Sign | undefined {
-    const nominal = this._measurementNominal;
-    if (nominal) return nominal.sgn;
-
     // Keyed on the engine generation unconditionally: an all-constant, pure
     // node's answer still moves when its OPERATOR's definition is rewritten
     // in place, so a generation-independent key would never expire. The full
@@ -2598,6 +2712,11 @@ export class BoxedFunction
   }
 
   get isNaN(): boolean | undefined {
+    // A value of a kind whose `isNaN` hook says it stands for no value (a
+    // measurement with a `NaN` nominal, a quantity with a `NaN` magnitude)
+    // answers `true`, as the extrema and the comparisons already read it
+    // (`kindValueIsNaN()`); the expression and the hook must agree.
+    if (kindValueIsNaN(this)) return true;
     if (!this.isNumber) return false;
     return undefined; // We don't know until we evaluate
   }
@@ -2622,6 +2741,11 @@ export class BoxedFunction
 
   // Not +- Infinity, not NaN
   get isFinite(): boolean | undefined {
+    // A value of a value kind (`isKindValue()`) is not a number, and has no
+    // numeric property to read: the answer is `undefined`, so a fold that
+    // reads it does not fire (`docs/plans/2026-10-26-value-kinds.md`,
+    // section 4.3). Only the kind's hooks decide.
+    if (isKindValue(this)) return undefined;
     if (this.isNumber !== true) return false;
     if (this.isNaN === true || this.isInfinity === true) return false;
 
@@ -2887,16 +3011,26 @@ export class BoxedFunction
   neg(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
+    // A value of a kind (a measurement, a residue class, a quantity) is NOT
+    // given to the `negate` hook of its kind here, unlike the other public
+    // methods (`.add()`, `.mul()`, `.sqrt()`, …), which fold kind values.
+    // Canonicalization calls `.neg()` for `a - b`, and the `add` hook of a
+    // kind must then see the term as written, `Negate(b)`, in
+    // `ops.written`: the sum of temperatures with an offset reads the sign
+    // of each term there (`20 degC - 5 degC` is `15 K`, not the sum of
+    // `20 degC` and the temperature `-5 degC`). So `c.neg()` is `Negate(c)`,
+    // and `Negate(c).evaluate()` runs the `negate` hook.
+    // (Plan: `docs/plans/2026-10-26-value-kinds.md`, section 4.4 step 4a.)
     return negate(this);
   }
 
   inv(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
-    // The reciprocal of an expression with a residue class: only the residue
-    // rules apply. The rules below read `(1/c)^{-1}` as `c` even when `1/c`
-    // has no value.
-    const residue = residueArithmetic(this.engine, 'Divide', [
+    // The reciprocal of an expression with a kind value (a residue class):
+    // only the hooks of the kinds apply. The rules below read `(1/c)^{-1}` as
+    // `c` even when `1/c` has no value.
+    const residue = kindArithmetic(this.engine, 'Divide', [
       this.engine.One,
       this,
     ]);
@@ -2960,7 +3094,7 @@ export class BoxedFunction
     // A product with a residue class goes to `mul()`, which broadcasts over
     // a collection and then applies only the residue rules. The shortcuts
     // below read `c · 0` as the integer 0.
-    if (containsResidueClass(this))
+    if (holdsKindValue(this))
       return mul(
         this,
         rhs instanceof NumericValue
@@ -2996,8 +3130,9 @@ export class BoxedFunction
       (typeof exp !== 'number' && !(exp.isCanonical || exp.isStructural))
     )
       throw new Error('Not canonical');
-    // A root of a residue class is kept as written (`residueArithmetic()`).
-    const residue = residueArithmetic(this.engine, 'Root', [
+    // A root of a kind value: the `power` hook of its kind, with the exponent
+    // `1/n`, or the root as written (`kindArithmetic()`).
+    const residue = kindArithmetic(this.engine, 'Root', [
       this,
       this.engine.expr(exp),
     ]);
@@ -3223,17 +3358,23 @@ export class BoxedFunction
   }
 
   get isInteger(): boolean | undefined {
+    // A kind value: see `isFinite`.
+    if (isKindValue(this)) return undefined;
     if (this.type.isUnknown) return undefined;
     return staticMembership(this.type.type, 'integer');
   }
 
   get isRational(): boolean | undefined {
+    // A kind value: see `isFinite`.
+    if (isKindValue(this)) return undefined;
     if (this.type.isUnknown) return undefined;
     // Every integer is a rational: `integer` is below `rational`.
     return staticMembership(this.type.type, 'rational');
   }
 
   get isExtendedReal(): boolean | undefined {
+    // A kind value: see `isFinite`.
+    if (isKindValue(this)) return undefined;
     const t = this.type;
     if (t.isUnknown) return undefined;
     // Rationals and integers are real. `+oo | -oo` is admitted
@@ -4514,7 +4655,7 @@ export class BoxedFunction
     // An equation that holds a residue class is not solved (see
     // `evaluateSolve()`): `null`, as for any equation the solver cannot
     // solve, and not an empty list of roots.
-    if (containsResidueClass(this)) return null;
+    if (holdsKindValue(this)) return null;
 
     const varNames = normalizedUnknownsForSolve(vars ?? this.unknowns);
 
@@ -6821,7 +6962,12 @@ export class BoxedFunction
                 tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
               ).toString(),
             ]);
-          return absentScalarMarker(this.engine, this);
+          // An absent value that a symbol holds, in a broadcastable numeric
+          // operator over numbers (`p + 1`, `Sin(p)`, `-p`), is `NaN`
+          // (`absentArithmeticMarker`).
+          return def.broadcastable
+            ? absentArithmeticMarker(this.engine, this, this.ops, tail)
+            : absentScalarMarker(this.engine, this);
         }
         // The default for an operator with no absence behavior of its own
         // (`pass-through`): an absent operand at a position whose declared
@@ -7217,36 +7363,52 @@ export class BoxedFunction
       const failuresBefore = failedWalksMeasuredBy(def);
       let evalResult: Expression | undefined;
       try {
-        evalResult = def.evaluate?.(handlerOperands, {
-          numericApproximation,
-          engine: this.engine,
-          materialization: materialization,
-          // The node itself, so a handler can reach its RAW (pre-numericized)
-          // operands — `tail` has already been evaluated. See
-          // `EvaluateHandlerOptions.expression`.
-          expression: this,
-          // The digits requested by an enclosing `N(x, p)`, else the
-          // precision of the engine. Only for a numeric approximation: an
-          // exact evaluation has no precision.
-          precision: numericApproximation
-            ? (this.engine._requestedPrecision ?? this.engine.precision)
-            : undefined,
-          // Set by the enclosing `evaluate()`; the fallback covers a caller
-          // that reaches this step without going through it.
-          effects: this.engine._evaluationEffects ?? this.engine.effects,
-        });
-        // A copy of a library definition under another name keeps its head
-        // (`withOwnHead()`): the library handler of `Sin` returns `Sin(x)`
-        // for `MySin(x)`, and the nodes that the handler builds with the
-        // name `Sin` get the name `MySin`.
-        evalResult = withOwnHead(
-          this.engine,
-          this._operator,
-          'evaluate',
-          def.evaluate,
-          evalResult,
-          () => tail
+        // 6-kind/ At an APPLY SITE of a value kind (`applySiteOperands()`),
+        // the `apply` hook of the kind of a value among the operands is
+        // called in place of the handler (`kindApply()`). A threadable
+        // operator has mapped its collection operands above; the elements of
+        // an operand at a collection parameter are enumerated once.
+        const kindAnswer = this._kindApplyAnswer(
+          def,
+          handlerOperands,
+          tail,
+          numericApproximation
         );
+        if (kindAnswer === 'unevaluated') evalResult = undefined;
+        else if (kindAnswer !== undefined && 'value' in kindAnswer)
+          evalResult = kindAnswer.value;
+        else {
+          evalResult = def.evaluate?.(kindAnswer?.operands ?? handlerOperands, {
+            numericApproximation,
+            engine: this.engine,
+            materialization: materialization,
+            // The node itself, so a handler can reach its RAW (pre-numericized)
+            // operands — `tail` has already been evaluated. See
+            // `EvaluateHandlerOptions.expression`.
+            expression: this,
+            // The digits requested by an enclosing `N(x, p)`, else the
+            // precision of the engine. Only for a numeric approximation: an
+            // exact evaluation has no precision.
+            precision: numericApproximation
+              ? (this.engine._requestedPrecision ?? this.engine.precision)
+              : undefined,
+            // Set by the enclosing `evaluate()`; the fallback covers a caller
+            // that reaches this step without going through it.
+            effects: this.engine._evaluationEffects ?? this.engine.effects,
+          });
+          // A copy of a library definition under another name keeps its head
+          // (`withOwnHead()`): the library handler of `Sin` returns `Sin(x)`
+          // for `MySin(x)`, and the nodes that the handler builds with the
+          // name `Sin` get the name `MySin`.
+          evalResult = withOwnHead(
+            this.engine,
+            this._operator,
+            'evaluate',
+            def.evaluate,
+            evalResult,
+            () => tail
+          );
+        }
       } catch (e) {
         // An assignment to a constant keeps the source range of the
         // `Assign` node that made it, so that Epsil can match it to the
@@ -7282,6 +7444,15 @@ export class BoxedFunction
       // operators WITH a handler that declined (e.g. a symbolic `Sum`, whose
       // re-canonicalization performs big-op cleanups the rubi pipeline
       // depends on).
+      //
+      // The re-box keeps the binding of this node (`withCallableBinding()`):
+      // a lookup of the name in the current scope can find another
+      // definition (a head declared again in an inner scope, or a scope
+      // that was popped), and the result must denote the definition this
+      // node was bound to (`docs/SCOPING-MODEL.md`, "Callable resolution").
+      // The hooks of a value kind are read from that definition: `GF8(1)`
+      // made before a scope that declares another `GF8` keeps the hooks of
+      // the first `GF8` when it is evaluated in that scope.
       const result =
         evalResult ??
         (isScoped &&
@@ -7290,7 +7461,9 @@ export class BoxedFunction
         tail.every((x, i) => x === this._ops[i])
           ? this
           : this._withParseScope(() =>
-              this.engine.function(this._operator, tail)
+              withCallableBinding(this, () =>
+                this.engine.function(this._operator, tail)
+              )
             ));
 
       // 6a/ String preservation, re-checked on the RESULT. Step 2d could only
@@ -7319,6 +7492,39 @@ export class BoxedFunction
 
   /** `sourceValues` holds the values of eager operands that the finiteness
    * read of this evaluation computed (`_evaluateAsyncUncounted()`). */
+  /**
+   * The answer of the `apply` dispatch of the value kinds for this call
+   * (`kindApply()`, `kind-dispatch.ts`), or `undefined` when this call is
+   * not an apply site, by the types of its operands
+   * (`applySiteOperands()`) or by their values
+   * (`applySiteOperandsOfValues()`), or the dispatch leaves the
+   * call to the handler with its own operands. `operands` are the evaluated
+   * operands the handler would receive; `tail` the operands as evaluated
+   * by the call, aligned with the operands as written when it has as many.
+   * At an operator that is not threadable, an operand at an apply-site
+   * position that is a collection is enumerated once.
+   */
+  private _kindApplyAnswer(
+    def: BoxedOperatorDefinition,
+    operands: ReadonlyArray<Expression>,
+    tail: ReadonlyArray<Expression>,
+    numericApproximation: boolean
+  ): KindApplyAnswer | undefined {
+    let sites = applySiteOperands(this);
+    // An operand typed as a number whose value is a value of a kind (the
+    // quadrature of an integral is a measurement under `.N()`).
+    if (sites.length === 0) sites = applySiteOperandsOfValues(this, operands);
+    if (sites.length === 0) return undefined;
+    return kindApply(
+      this.engine,
+      this._operator,
+      operands,
+      tail.length === this.ops.length ? this.ops : undefined,
+      numericApproximation,
+      def.broadcastable === true ? [] : sites
+    );
+  }
+
   _computeValueAsync(
     options?: Partial<EvaluateOptions>,
     sourceValues?: EagerSourceValues
@@ -8068,7 +8274,12 @@ export class BoxedFunction
                 tail.find(isAbsentScalarSymbol) ?? this.engine.Missing
               ).toString(),
             ]);
-          return absentScalarMarker(this.engine, this);
+          // An absent value that a symbol holds, in a broadcastable numeric
+          // operator over numbers (`p + 1`, `Sin(p)`, `-p`), is `NaN`
+          // (`absentArithmeticMarker`).
+          return def.broadcastable
+            ? absentArithmeticMarker(this.engine, this, this.ops, tail)
+            : absentScalarMarker(this.engine, this);
         }
         // The default for an operator with no absence behavior of its own
         // (`pass-through`): an absent operand at a position whose declared
@@ -8602,13 +8813,29 @@ export class BoxedFunction
             const enclosingNumericRequest = engine._numericRequest;
             engine._numericRequest = numericApproximation;
             try {
+              // At an apply site of a value kind, the `apply` hook answers in
+              // place of the handler, as on the synchronous route
+              // (`_kindApplyAnswer()`).
+              const kindAnswer = this._kindApplyAnswer(
+                def,
+                handlerOps,
+                tail,
+                numericApproximation
+              );
+              if (kindAnswer === 'unevaluated') return undefined;
+              if (kindAnswer !== undefined && 'value' in kindAnswer)
+                return kindAnswer.value;
+              if (kindAnswer !== undefined) handlerOps = kindAnswer.operands;
               if (def.evaluateAsync !== undefined) {
                 // A walk that failed in the synchronous part of the call
                 // (before its first `await`), where no other evaluation can
                 // run, gives its error to a handler that declines
                 // (`failedWalksMeasuredBy()`).
                 const failuresBefore = failedWalksMeasuredBy(def);
-                const answer = def.evaluateAsync(declaredOps, opts);
+                const answer = def.evaluateAsync(
+                  kindAnswer !== undefined ? handlerOps : declaredOps,
+                  opts
+                );
                 asyncSliceFailure = handlerWalkFailure(failuresBefore);
                 return answer;
               }
@@ -8704,7 +8931,11 @@ export class BoxedFunction
           this.isCanonical &&
           tail.every((x, i) => x === this._ops[i])
             ? this
-            : this._withParseScope(() => engine.function(this._operator, tail)))
+            : this._withParseScope(() =>
+                withCallableBinding(this, () =>
+                  engine.function(this._operator, tail)
+                )
+              ))
       );
 
       // 5a/ String preservation, re-checked on the RESULT. The step that
@@ -10554,8 +10785,17 @@ function lambdaCallOperandOfDescriptor(
   // collection), which is not the value that a later call reads. Such an
   // operand is typed by the envelope of `lambdaBroadcastType`
   // (`unknownCapture`), and it does not take part in the broadcast.
+  const structure = d.structureOf?.();
   const unknownCapture =
-    view.typeIsUnknown && isCapturedSymbolStructure(d.structureOf?.());
+    view.typeIsUnknown && isCapturedSymbolStructure(structure);
+  // A descriptor made from a type only (`describeType`) has no structure.
+  // When that type is `any` or `value`, the operand can be any value, also
+  // a list, which the call maps over. So the operand may be a collection,
+  // as a symbol declared `any` is on the expression route: the call
+  // `k(w)` with `k: (real) -> real` holding `x ↦ 2x` and `w: any` is typed
+  // `any`, and its value is `[2, 4]` for `w := [1, 2]` (ROADMAP CE-485).
+  const structurelessTop =
+    structure === undefined && (t === 'any' || t === 'value');
   return {
     type: d.type,
     participates:
@@ -10564,7 +10804,7 @@ function lambdaCallOperandOfDescriptor(
         isBroadcastCollectionTypeOf(d.type) ||
         (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions)),
     possiblyCollectionTyped:
-      isPossiblyCollectionTypedView(view) || unknownCapture,
+      isPossiblyCollectionTypedView(view) || unknownCapture || structurelessTop,
     holdsUnindexedCollection: false,
     unknownCapture,
   };
@@ -10607,7 +10847,10 @@ function wholeAbsentTupleArgumentType(
     ops.some(
       (x, i) =>
         isNumericTupleArgumentType(x.type.type) &&
-        !(signature !== undefined && parameterAdmitsTuple(signature, i)) &&
+        !(
+          signature !== undefined &&
+          parameterAdmitsTuple(signature, i, kindTypeNames(x.engine))
+        ) &&
         parameterReachesBody(literal, i)
     )
   )
@@ -10747,16 +10990,27 @@ function lambdaBroadcastType(
       (slot.elements === undefined || !isPointParameterType(slot.elements))
     );
   };
+  // Any other tuple (a tuple with a tuple or a list component) binds whole
+  // too, and the signature result does not describe the value either:
+  // `h(((1, 2), 3))` is `((2, 4), 6)` (`isTupleArgumentType`). A body that
+  // computes the tuple component by component (`x ↦ 2x`, `x ↦ Sin(x)`)
+  // gives a tuple of numbers of the same length
+  // (`componentwiseTupleCallType`).
   if (
     ops.some(
       (_x, i) =>
-        (isNumericTupleType(typeAt(i)) || mayBeNumericTupleType(typeAt(i))) &&
+        isTupleArgumentType(typeAt(i)) &&
         bindsAtScalarSlot(i) &&
         parameterReachesBody(literal, i)
     ) &&
     (inferredResult || isSubtype(perElementResult, 'number'))
   )
-    return 'any';
+    return (
+      componentwiseTupleCallType(
+        literal,
+        ops.map((_x, i) => typeAt(i))
+      ) ?? 'any'
+    );
 
   const mappable = (i: number) => slots === undefined || slots.at(i).mappable;
   const participates = (i: number) =>
@@ -10809,13 +11063,16 @@ function lambdaBroadcastType(
       literal !== undefined &&
       indices.some(
         (i, k) =>
-          (isNumericTupleType(combo[k].type) ||
-            mayBeNumericTupleType(combo[k].type)) &&
-          parameterReachesBody(literal, i)
+          isTupleArgumentType(combo[k].type) && parameterReachesBody(literal, i)
       ) &&
       (inferredResult || isSubtype(armResult, 'number'))
     )
-      return 'any';
+      return (
+        componentwiseTupleCallType(
+          literal,
+          ops.map((_x, i) => types[i] ?? typeAt(i))
+        ) ?? 'any'
+      );
     if (generic) return armResult;
     // When the body gives no type for the arms, the signature result
     // stands, as it does for a call over operands of those types alone.
@@ -11129,6 +11386,30 @@ function lambdaBroadcastType(
       )
         return listOfAnyDepth();
     }
+    // An operand typed `unknown` (an element read `L[1]` of `L:
+    // list<unknown>`, a call of an undeclared function) can hold a ragged
+    // list, which the call maps at its leaves, or a point, which binds whole
+    // to the parameter and which a numeric body maps: with `k: (real) ->
+    // real` holding `x ↦ 2x`, `k(L[1])` is `[[2], [4, 6]]` for
+    // `L := [[[1], [2, 3]]]` and `(2, 4)` for `L := [(1, 2)]`.
+    // `broadcastable<R>` holds neither value (ROADMAP CE-502). An operand
+    // typed `broadcastable<unknown>` (`unknown | list<unknown>`), or with
+    // the open form of such an application (`openDepthScalarArms`), can
+    // hold the same values.
+    if (
+      triggers.some((i) => {
+        const r = resolveTypeAlias(ops[i].type);
+        const t = topTypeBesideAbsence(r) ?? r;
+        if (t === 'unknown' || openDepthScalarArms(t) !== undefined)
+          return true;
+        return (
+          typeof t !== 'string' &&
+          t.kind === 'broadcastable' &&
+          resolveTypeAlias(t.elements) === 'unknown'
+        );
+      })
+    )
+      return openTriggerBroadcastType(perElementResult, true);
     return broadcastableOf(perElementResult);
   }
   return undefined;
@@ -11616,7 +11897,11 @@ function lambdaCallTypeOverDescriptors(
         (h, a) => deriveApplicationType(engine, h, a)
       );
     const pointPlan = pointListParamSlots(def);
-    if (pointPlan !== undefined && def.inferredSignature) return undefined;
+    if (
+      pointPlan !== undefined &&
+      inferredPointCallBindsWhole(binding, pointPlan, operands)
+    )
+      return undefined;
     // The signature result, as `declaredResultType()` in `type()` gives it
     // for a ground signature, and the result of a generic signature solved
     // against the operands.
@@ -11690,7 +11975,10 @@ function lambdaCallTypeOverDescriptors(
       deriveApplicationType(engine, h, a)
     );
   const pointPlan = pointListParamSlots(sig);
-  if (pointPlan !== undefined && inferredPointSignature(binding) !== undefined)
+  if (
+    pointPlan !== undefined &&
+    inferredPointCallBindsWhole(binding, pointPlan, operands)
+  )
     return undefined;
   const valueSlots = broadcastableParamSlots(sig);
   const threadable = paramsAreScalar(sig) || valueSlots !== undefined;
@@ -12044,6 +12332,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
   // changed after the call was boxed (`_reboxedForCallee()`).
   const reboxed = expr._reboxedForCallee();
   if (reboxed !== undefined) return reboxed.type;
+  // A call boxed before its name had a value has the type of the same call
+  // boxed against the definition that the name holds now, as its value has
+  // (`_reboxedForForwardCallee()`).
+  const forward = expr._reboxedForForwardCallee();
+  if (forward !== undefined) return forward.type;
 
   // Is this a 'Function' expression?
   // The arrow — parameters, result AND effect specifier — is built by the
@@ -12113,6 +12406,11 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       )
     )
       return 'error';
+    // An APPLY SITE of a value kind (a measurement at `Sin`) is typed by the
+    // rules of the kinds (`applySiteResultType()`): the `apply` hook of the
+    // kind answers in place of the operator's handler.
+    const applySiteType = applySiteResultType(expr);
+    if (applySiteType !== undefined) return applySiteType;
     const sig =
       def.signature instanceof BoxedType
         ? def.signature.type
@@ -12170,12 +12468,23 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     // inserted value of `Insert`) the operand goes into the result whole,
     // its `missing` arm included, and the absorption that adds the whole
     // absence back runs for a `propagate` operator only.
+    // An operand that is an access proved to find nothing is typed by its
+    // marker alone (`missing`); it is typed here from the value it would
+    // read, its whole absence kept for the absorption, so that the marker
+    // of the result is the marker of its codomain: `At(M, 7) + 1`, for a
+    // matrix `M` of two rows, is an absent row, `Missing`, not `NaN`
+    // (`provedAbsentDomainOf()`).
     const cellsPresent =
-      def.resolvedMissingBehavior === 'propagate' &&
-      movesAbsentCells(expr.operator)
-        ? expr.ops.map((x, i) =>
-            def.stripsMissingAt(i) && x.type.facts.containsMissing
-              ? absentCellsPresentType(expr.operator, x.type.type)
+      def.resolvedMissingBehavior === 'propagate'
+        ? withProvedAbsentDomains(
+            expr.ops,
+            (i) => def.stripsMissingAt(i),
+            movesAbsentCells(expr.operator)
+              ? expr.ops.map((x, i) =>
+                  def.stripsMissingAt(i) && x.type.facts.containsMissing
+                    ? absentCellsPresentType(expr.operator, x.type.type)
+                    : undefined
+                )
               : undefined
           )
         : undefined;
@@ -12670,6 +12979,9 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
       // viewed through the value-level predicates this route always read.
       const lifted = broadcastLiftType({
         def,
+        operator: expr.operator,
+        integerValuedFloat: (i) =>
+          holdsIntegerValuedFloat(describeOperand(expr.ops[i])),
         views: expr.ops.map(viewOfExpression),
         sigResult,
         sigResultIsPerElement: !typeHandlerAnswered,
@@ -13173,11 +13485,13 @@ function declaredScalarConformance(
     if (i < args.length + opt.length) return opt[i - args.length].type;
     return declared.variadicArg?.type;
   };
-  // A parameter that admits a residue class beside its numbers (the
-  // arithmetic operators) is numeric here (`withoutResidueArm`).
+  // A parameter that admits a kind value beside its numbers (the
+  // arithmetic operators admit a residue class) is numeric here
+  // (`withoutKindArms`).
+  const kinds = kindTypeNames(ce);
   const isNumericParam = (i: number): boolean => {
     const p = paramAt(i);
-    return p !== undefined && isSubtype(withoutResidueArm(p), 'number');
+    return p !== undefined && isSubtype(withoutKindArms(p, kinds), 'number');
   };
   for (let i = 0; i < ops.length; i++) {
     if (!isAbsentScalarSymbol(ops[i])) continue;
@@ -13185,7 +13499,7 @@ function declaredScalarConformance(
     if (
       p === undefined ||
       runtimeCheckExemptParam(p) ||
-      isSubtype(withoutResidueArm(p), 'number') ||
+      isSubtype(withoutKindArms(p, kinds), 'number') ||
       provablyAdmits('missing', p)
     )
       continue;
@@ -14964,10 +15278,17 @@ function mapsAsPointList(
     return !isSubtype(x.type.type, 'string');
   // A tensor of points of rank 2 or more maps too, to the points at every
   // depth (`isPointTensorArgumentType`): each row is a list of points that
-  // the map enters again (`mapsToCells`).
+  // the map enters again (`mapsToCells`). A value where one list holds both
+  // a point and a list is not mapped, and the argument check refuses it
+  // with an `incompatible-type` error, as for a literal of that shape
+  // (`listMixesPointsAndLists`, ROADMAP CE-505).
   return (
     isPointListArgumentType(x.type.type, slot.elements) ||
-    isPointTensorArgumentType(x.type.type, slot.elements)
+    (isPointTensorArgumentType(x.type.type, slot.elements) &&
+      !(
+        pointArgumentMayMixDepths(x.type.type, slot.elements) &&
+        listMixesPointsAndLists(x)
+      ))
   );
 }
 
@@ -14999,6 +15320,48 @@ function pointListOperandOf(x: Expression): PointListOperand {
 /** The {@link PointListOperand} of the operand descriptor `d`. */
 function pointListOperandOfDescriptor(d: OperandDescriptor): PointListOperand {
   return { type: d.type, tuple: viewOfDescriptor(d).tuple };
+}
+
+/**
+ * Whether the descriptor route must decline the call of a function with a
+ * point parameter (`pointListParamSlots`) over `operands`, so that
+ * `callResultType` types it from the body. That is the case when the
+ * engine inferred the signature (`inferredPointSignature`) and an operand
+ * at a point parameter is not a point or a list of points and is bound
+ * whole (`bindsWholeAtInferredPointParameter`, which includes a point of
+ * another arity that the body reads whole): the expression route types
+ * such a call from the body (`wholeBoundPointArgumentResult`), with the
+ * same test. Any other call of
+ * such a function is typed by the point-list map, on both routes: with
+ * `h := p ↦ p[1] + p[2]`, `h` over a `list<tuple<number, number>>` is a
+ * `list<number>` (ROADMAP CE-488).
+ */
+function inferredPointCallBindsWhole(
+  binding: BoxedDefinition,
+  plan: BroadcastSlotPlan,
+  operands: ReadonlyArray<OperandDescriptor>
+): boolean {
+  if (inferredPointSignature(binding) === undefined) return false;
+  return operands.some((d, i) => {
+    const slot = plan.at(i);
+    if (
+      !slot.mappable ||
+      slot.elements === undefined ||
+      !isPointParameterType(slot.elements)
+    )
+      return false;
+    const x = pointListOperandOfDescriptor(d);
+    return (
+      !mapsAsPointOrPointList(plan, i, x) &&
+      !mapsAsPointListByType(plan, i, x) &&
+      bindsWholeAtInferredPointParameter(
+        binding,
+        i,
+        stripMissingFromType(x.type),
+        slot.elements
+      )
+    );
+  });
 }
 
 /**
@@ -15053,10 +15416,13 @@ function mapsAsPointListByType(
  * which calls `callResultType`): a list mapped at a scalar parameter is
  * read as one of its cells, an argument that maps at a point parameter as
  * one point of the parameter type, and an argument bound whole as itself.
- * Which argument is bound whole is decided by `bindsWholeAtInferredPoint`
- * (`call-result-type.ts`): a list of numbers (`h([1, 2], [10, 20])`) is
- * read by index as a point, and keeps the signature result; a matrix, a
- * number, a string are bound whole. When the body gives no type, the
+ * Which argument is bound whole is decided by
+ * `bindsWholeAtInferredPointParameter` (`call-result-type.ts`): a list of
+ * numbers (`h([1, 2], [10, 20])`) is read by index as a point, and keeps
+ * the signature result; a matrix, a number, a string are bound whole, and
+ * so is a point of another arity that the body reads whole (with
+ * `c(P, t) := t · P/(P[1] − 1)`, inferred `(tuple<number>, unknown) ->
+ * tuple<number>`, `c((3, 2), [1, 2])` is `[(3/2, 1), (3, 2)]`). When the body gives no type, the
  * result is `any`. `binding` is the definition of the function: a
  * signature that the author declared is a contract, and this function
  * gives `undefined` for it.
@@ -15084,7 +15450,9 @@ function wholeBoundPointArgumentResult(
       )
         operandTypes[i] = slot.elements;
       else if (
-        bindsWholeAtInferredPoint(
+        bindsWholeAtInferredPointParameter(
+          binding,
+          i,
           stripMissingFromType(x.type.type),
           slot.elements
         )
@@ -15150,6 +15518,7 @@ function pointListApplicationType(
   let shape: MapShape = 'cell';
   let deepWhole = false;
   let deepCell = false;
+  let mixedDepths = false;
   const deepDepths = new Set<number>();
   ops.forEach((x, i) => {
     const slot = plan.at(i);
@@ -15173,8 +15542,22 @@ function pointListApplicationType(
       // makes the call `Missing`.
       if (isDeepPointOperand(plan, i, x)) {
         const t = x.type;
-        const present = withoutTopLevelMissing(t);
+        // An alias whose definition has a `missing` arm at the top
+        // (`type A = list<A> | list<P> | missing`) is absent as a whole when
+        // its value is `Missing`: its definition is read one level for that
+        // arm.
+        let present = withoutTopLevelMissing(t);
+        if (present === t && typeof t === 'object' && t.kind === 'reference') {
+          const def = resolveTypeReference(t) ?? t;
+          const presentDef = withoutTopLevelMissing(def);
+          if (presentDef !== def) present = presentDef;
+        }
         if (present !== t) deepWhole = true;
+        // A recursive alias whose lists can hold both points and lists
+        // (`type B = list<B> | P`): the evaluation refuses a value whose
+        // elements mix the two with an `incompatible-type` error, so the
+        // type of the call holds `error` too (ROADMAP CE-505).
+        if (pointArgumentMayMixDepths(t, slot.elements)) mixedDepths = true;
         // Each absent element is `Missing` at its own depth in the result:
         // with `S: list<list<P> | missing>`, an absent row is an element of
         // the top list, so `g(S)` is `list<list<R> | missing>`, not
@@ -15182,10 +15565,12 @@ function pointListApplicationType(
         // show (a `broadcastable<P | missing>`) is put on the cells.
         const s = stripAbsentPoints(present, slot.elements, 0, deepDepths);
         if (typeContainsMissing(s)) deepCell = true;
-        shape = combineMapShapes(
-          shape,
-          operandMapShape(stripMissingFromType(s))
-        );
+        // The shape is read from the type of the operand, with its `missing`
+        // arms skipped, not from `s`: `stripAbsentPoints` unfolds a
+        // recursive alias, and a walk over `s` would meet its
+        // self-reference deeper, so the type would repeat the alias at each
+        // level down to the descent limit.
+        shape = combineMapShapes(shape, operandMapShape(t, 0, undefined, true));
         return;
       }
       if (mapsAsPointOrPointList(plan, i, x))
@@ -15193,7 +15578,10 @@ function pointListApplicationType(
           shape,
           mapShapeUnion(['cell', { list: 'cell' }])
         );
-      else if (mapsAsPointListByType(plan, i, x))
+      else if (
+        mapsAsPointListByType(plan, i, x) ||
+        (!x.tuple && isEmptyListArgumentType(x.type, slot.elements))
+      )
         shape = combineMapShapes(shape, { list: 'cell' });
       return;
     }
@@ -15267,7 +15655,9 @@ function pointListApplicationType(
       slot.elements !== undefined &&
       isPointParameterType(slot.elements) &&
       !isDeepPointOperand(plan, i, x) &&
-      (mapsAsPointOrPointList(plan, i, x) || mapsAsPointListByType(plan, i, x))
+      (mapsAsPointOrPointList(plan, i, x) ||
+        mapsAsPointListByType(plan, i, x) ||
+        (!x.tuple && isEmptyListArgumentType(x.type, slot.elements)))
     );
   });
   const cellResult: Type = deepCell
@@ -15280,6 +15670,7 @@ function pointListApplicationType(
   );
   if (deepDepths.size > 0) mapType = withMissingAtDepths(mapType, deepDepths);
   if (deepWhole) mapType = { kind: 'union', types: [mapType, 'missing'] };
+  if (mixedDepths) mapType = { kind: 'union', types: [mapType, 'error'] };
   return absence === undefined
     ? mapType
     : withMissingAtDepths(mapType, absence.depths, 0, absence.whole);
@@ -15371,29 +15762,74 @@ function combineMapShapes(a: MapShape, b: MapShape): MapShape {
  * declaration (`type A = A | list<list<tuple<number, number>>>`) reaches
  * itself through a bare arm at the same depth, and when that arm has spent
  * its unfolds, it adds no value that the other arms do not hold, so the walk
- * ignores it. The elements start a new descent: the depth limit already
- * stops the walk through the list elements.
+ * ignores it.
+ *
+ * The elements keep the descent, so that a declaration that reaches itself
+ * through a constructor (`type A = list<A> | list<tuple<number, number>>`)
+ * is cut too. Such an occurrence stands for the values deeper in the
+ * structure, whose depth the type does not fix: the walk gives `'list'` for
+ * it when the declaration is surely a list, else `'cell'` or `'list'`. So
+ * the map over `A` is typed `list<list<list> | list<R>> | list<R>`, not
+ * a union of lists nested to the depth limit (ROADMAP CE-489).
  */
 function operandMapShape(
   t: Type,
   depth = 0,
-  seen?: AliasDescent
+  seen?: AliasDescent,
+  skipMissing = false
 ): MapShape {
+  return operandMapShapeOrCut(t, depth, seen, skipMissing) ?? 'cell';
+}
+
+/**
+ * `operandMapShape`, or `null` for an alias that reaches itself as a bare
+ * arm of its own union: a union drops such an arm. An occurrence that the
+ * descent guard cuts after the walk entered a constructor gives `'list'`
+ * when the declaration is surely a list, else `'cell'` or `'list'`.
+ *
+ * With `skipMissing`, a `missing` arm of a union adds no shape: the caller
+ * reads the absences apart (`stripAbsentPoints`). This is used in place of
+ * `stripMissingFromType`, which unfolds an alias with a `missing` arm in
+ * place: the walk would then meet the self-reference of a recursive alias
+ * deeper, and the type of the map would repeat the alias at each level
+ * down to the descent limit.
+ */
+function operandMapShapeOrCut(
+  t: Type,
+  depth: number,
+  seen: AliasDescent,
+  skipMissing = false
+): MapShape | null {
+  if (typeof t === 'object' && t.kind === 'reference') {
+    const next = recordUnfoldOnDescent(declarationOf(t), seen);
+    if (next === undefined) {
+      if (isBareCutOnDescent(t, seen)) return null;
+      return isSurelyListType(resolveTypeReference(t) ?? t, seen)
+        ? 'list'
+        : mapShapeUnion(['cell', 'list']);
+    }
+    seen = next;
+  }
   const r = resolveTypeReference(t) ?? t;
   if (typeof r !== 'string' && r.kind === 'union') {
     const shapes: MapShape[] = [];
     for (const arm of r.types) {
-      let next = seen;
-      if (typeof arm === 'object' && arm.kind === 'reference') {
-        next = recordUnfoldOnDescent(declarationOf(arm), seen);
-        if (next === undefined) continue;
-      }
-      shapes.push(operandMapShape(arm, depth, next));
+      if (skipMissing && arm === 'missing') continue;
+      const s = operandMapShapeOrCut(arm, depth, seen, skipMissing);
+      if (s !== null) shapes.push(s);
     }
     return shapes.length === 0 ? 'cell' : mapShapeUnion(shapes);
   }
   if (typeof r !== 'string' && r.kind === 'broadcastable')
-    return mapShapeUnion([operandMapShape(r.elements, depth), 'tensor']);
+    return mapShapeUnion([
+      operandMapShape(
+        r.elements,
+        depth,
+        descendIntoConstructor(seen),
+        skipMissing
+      ),
+      'tensor',
+    ]);
   const surelyList =
     isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE) &&
     !isTupleShapedType(r) &&
@@ -15407,7 +15843,40 @@ function operandMapShape(
   if (depth >= 8) return 'list';
   const element = collectionElementType(r);
   if (element === undefined) return 'list';
-  return { list: operandMapShape(element, depth + 1) };
+  return {
+    list: operandMapShape(
+      element,
+      depth + 1,
+      descendIntoConstructor(seen),
+      skipMissing
+    ),
+  };
+}
+
+/**
+ * Whether every value of `t` is a list (not a tuple, not a string), read
+ * arm by arm. A union is surely a list only when each of its arms is: the
+ * declaration `type B = list<B> | tuple<number, number>` is a subtype of
+ * `indexed_collection`, but its point arm is one cell of the map. An arm
+ * that is a reference is unfolded under the descent guard `seen`, so that
+ * an alias of a union of tuples (`type C = tuple<integer, real> |
+ * tuple<real, integer>`, in `type B = list<B> | C`) is read too. An arm
+ * that has spent its unfolds reaches itself as a bare arm: it adds no value
+ * that the other arms do not hold, and it is ignored.
+ */
+function isSurelyListType(t: Type, seen: AliasDescent): boolean {
+  if (typeof t === 'object' && t.kind === 'reference') {
+    const next = recordUnfoldOnDescent(declarationOf(t), seen);
+    if (next === undefined) return true;
+    return isSurelyListType(resolveTypeReference(t) ?? t, next);
+  }
+  if (typeof t === 'object' && t.kind === 'union')
+    return t.types.every((x) => isSurelyListType(x, seen));
+  return (
+    isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE) &&
+    !isTupleShapedType(t) &&
+    !isSubtype(t, 'string')
+  );
 }
 
 /** The shape `s` cut after its first list level: the shape of a map that
@@ -15609,7 +16078,8 @@ function pointListAbsence(
         !isTuple(c) &&
         (isPointListArgumentType(c.type.type, slot.elements) ||
           isPointTensorArgumentType(c.type.type, slot.elements) ||
-          isPointOrPointListArgumentType(c.type.type, slot.elements))
+          isPointOrPointListArgumentType(c.type.type, slot.elements) ||
+          isEmptyListAtPointSlot(plan, i, c))
       )
         whole = true;
       return;
@@ -15690,7 +16160,30 @@ function holdsForValuelessPointList(
     (x, i) =>
       isValuelessCollectionSymbol(x) &&
       (mapsAsPointList(plan, i, x, false) ||
-        isDeepPointOperand(plan, i, pointListOperandOf(x)))
+        isDeepPointOperand(plan, i, pointListOperandOf(x)) ||
+        isEmptyListAtPointSlot(plan, i, x))
+  );
+}
+
+/**
+ * Whether operand `x`, at slot `i` of the point-list plan `plan`, is typed
+ * as the empty list (`isEmptyListArgumentType`) at a point slot. The call
+ * maps such an operand to `[]` once it has a value, so a symbol with no
+ * value yet holds the call (`holdsForValuelessPointList`), and an absent
+ * value makes the call `Missing` (`pointListAbsence`), as for a symbol
+ * declared as a list of points (ROADMAP CE-506).
+ */
+function isEmptyListAtPointSlot(
+  plan: BroadcastSlotPlan,
+  i: number,
+  x: Expression
+): boolean {
+  const slot = plan.at(i);
+  return (
+    slot.mappable &&
+    slot.elements !== undefined &&
+    !isTuple(x) &&
+    isEmptyListArgumentType(x.type.type, slot.elements)
   );
 }
 
@@ -16309,6 +16802,13 @@ function stripAbsentPoints(
   if (present !== elements || present === 'missing') {
     depths.add(at);
     elements = present === 'never' || present === 'missing' ? point : present;
+  } else if (typeof elements === 'object' && elements.kind === 'reference') {
+    // An element that is an alias whose definition has a `missing` arm at
+    // the top (`list<A>` with `type A = list<A> | list<P> | missing`) can be
+    // absent too. The reference is kept, so that the walk below meets it
+    // under the descent guard.
+    const def = resolveTypeReference(elements) ?? elements;
+    if (withoutTopLevelMissing(def) !== def) depths.add(at);
   }
   elements =
     rank === undefined
@@ -16355,9 +16855,19 @@ function withMissingAtDepths(
     rank === undefined
       ? r.elements
       : withMissingAtDepths(r.elements, depths, d + rank);
+  // An element type that already has a `missing` arm, also in a nested
+  // union, does not get a second one.
+  const hasMissingArm = (x: Type): boolean =>
+    x === 'missing' ||
+    (typeof x === 'object' &&
+      x.kind === 'union' &&
+      x.types.some(hasMissingArm));
   return {
     ...r,
-    elements: absentHere ? { kind: 'union', types: [inner, 'missing'] } : inner,
+    elements:
+      absentHere && !hasMissingArm(inner)
+        ? { kind: 'union', types: [inner, 'missing'] }
+        : inner,
   };
 }
 
@@ -16777,9 +17287,13 @@ function unindexedOperandBroadcast(
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
-    // A parameter that admits a residue class beside its numbers (the
-    // arithmetic operators) is a numeric slot here (`withoutResidueArm`).
-    if (param === undefined || isSubtype(withoutResidueArm(param), 'number'))
+    // A parameter that admits a kind value beside its numbers (the
+    // arithmetic operators admit a residue class) is a numeric slot here
+    // (`withoutKindArms`).
+    if (
+      param === undefined ||
+      isSubtype(withoutKindArms(param, kindTypeNames(ops[i].engine)), 'number')
+    )
       return 'veto';
   }
   return 'lift';
@@ -16864,7 +17378,10 @@ function unindexedCollectionOperandError(
   for (let i = 0; i < ops.length; i++) {
     if (!isUnindexedCollectionOperand(ops[i])) continue;
     const param = declaredParameterType(def, i);
-    if (param === undefined || !isSubtype(withoutResidueArm(param), 'number'))
+    if (
+      param === undefined ||
+      !isSubtype(withoutKindArms(param, kindTypeNames(ce)), 'number')
+    )
       continue;
     const err = nonNumericOperandError(ce, [ops[i]]);
     if (err !== undefined) return err;
@@ -17540,7 +18057,10 @@ function heldEagerSources(
       return [];
     ops.forEach((x, index) => {
       const slot = signatureSlotType(signature, index);
-      if (slot === undefined || !isSubtype(withoutResidueArm(slot), 'number'))
+      if (
+        slot === undefined ||
+        !isSubtype(withoutKindArms(slot, kindTypeNames(expr.engine)), 'number')
+      )
         return;
       if (isHeldEagerSource(x) && isTypedAsCollection(x))
         sources.push({ index, source: x, expected: undefined });
@@ -19289,5 +19809,27 @@ function asyncScopeActivation(ce: ComputeEngine, scope: Scope): Scope {
     } else result.bindings.set(name, binding);
   }
   registerScopeActivation(result, scope);
+  return result;
+}
+
+/**
+ * `present`, with the present type of each operand at a position that
+ * strips `missing` (`strips`) that is an access proved to find nothing
+ * (`provedAbsentDomainOf()`) and has no present type in `present` yet.
+ * `undefined` when no operand has a present type.
+ */
+function withProvedAbsentDomains(
+  ops: ReadonlyArray<Expression>,
+  strips: (i: number) => boolean,
+  present: Array<Type | undefined> | undefined
+): Array<Type | undefined> | undefined {
+  let result = present;
+  ops.forEach((x, i) => {
+    if (result?.[i] !== undefined || !strips(i)) return;
+    const domain = provedAbsentDomainOf(x);
+    if (domain === undefined) return;
+    result ??= ops.map(() => undefined);
+    result[i] = domain;
+  });
   return result;
 }

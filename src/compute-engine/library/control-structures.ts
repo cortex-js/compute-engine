@@ -37,6 +37,7 @@ import {
   functionResult,
   resolveTypeAlias,
   resolveTypeForCompilation,
+  openDepthScalarArms,
   widen,
   stripMissingFromType,
   stripNumericRanges,
@@ -121,7 +122,11 @@ import {
   elementMemoFillTo,
   ELEMENT_MEMO_CAP,
 } from '../boxed-expression/collection-element-memo.js';
-import { evaluateMatch } from '../boxed-expression/match-dispatch.js';
+import {
+  buildCaseClosure,
+  evaluateMatch,
+  getMatchPlan,
+} from '../boxed-expression/match-dispatch.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { isNearTiePair } from './relational-operator.js';
 import { isExactConstantExpression } from '../boxed-expression/compare.js';
@@ -137,9 +142,9 @@ import {
   asyncEvaluationOf,
   topLevelEvaluationEpoch,
 } from '../boxed-expression/evaluation-epoch.js';
-import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   coarsenEvidenceType,
+  isInEvidenceSession,
   markDeclaredLocal,
   registerEvidenceSite,
   withEvidenceSession,
@@ -951,7 +956,8 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
             conds.every(
               (ci) =>
                 ci.type.matches('boolean') ||
-                possiblyElementwiseCondition([ci.type.type])
+                possiblyElementwiseCondition([ci.type.type]) ||
+                isOpenConditionCell(ci.type.type)
             )
           ) {
             // If `expr` itself evaluates to a finite indexed collection, zip
@@ -1355,10 +1361,30 @@ export const CONTROL_STRUCTURES_LIBRARY: SymbolDefinitions[] = [
         // Canonicalize the subject (op 0); keep each case's pattern/guard/body
         // raw (via the `MatchCase` canonical handler) so wildcards are not
         // mangled by canonicalization before matching.
-        return ce._fn('Match', [
+        const ops2 = [
           ops[0].canonical,
           ...ops.slice(1).map((c) => c.canonical),
-        ]);
+        ];
+        // An assignment in a case body to a local of the enclosing block is
+        // an assignment of that local, and the static type of the local
+        // must admit its value. The case bodies stay raw, so canonicalize
+        // each closure once now, in the scope of the block, only for the
+        // assignment evidence that its `Assign` records
+        // (`joinAssignmentEvidence`, `library/core.ts`). The closure is
+        // discarded: the evaluation builds its own (`buildCaseClosure`).
+        // Without this, `let xs = [1, 2, 3]; while let [h, ...] = xs
+        // { xs = Rest(xs) }; xs` was typed `vector<integer^3>` and
+        // evaluated to `[]`.
+        if (isInEvidenceSession(ce)) {
+          for (const cc of getMatchPlan(ce, ops2).segments.flatMap(
+            (seg) => seg.cases
+          )) {
+            for (const part of [cc.guard, cc.body])
+              if (part !== undefined && containsAssignment(part))
+                buildCaseClosure(ce, part, cc.captureNames);
+          }
+        }
+        return ce._fn('Match', ops2);
       },
       evaluate: (ops, options) => evaluateMatch(ops, options),
     },
@@ -3021,6 +3047,18 @@ function possiblyElementwiseCondition(
 }
 
 /**
+ * True when `t` is the open form `B | list<B | list<any>>`
+ * (`openDepthScalarArms`) of a condition type `B`: the type of a comparison
+ * over an operand of type `unknown` (`h(x) ≤ 1` with `h` undeclared). As a
+ * cell of a materialized mask, such a comparison is one scalar relation, as
+ * a cell typed `broadcastable<boolean>` is.
+ */
+function isOpenConditionCell(t: Type): boolean {
+  const open = openDepthScalarArms(t);
+  return open !== undefined && isSubtype(open, CONDITION_CELL_TYPE);
+}
+
+/**
  * True when a condition of type `t` cannot be read (`conditionShape` is
  * `unreadable`: `unknown`, `any`, a union of a scalar and a mask) and may
  * hold a list. At run time such a condition can be a mask of any rank, and
@@ -4530,6 +4568,12 @@ function canonicalBlock(
  */
 function typedStatement(op: Expression): Expression {
   return isFunction(op, 'Typed') ? op.op1 : op;
+}
+
+/** Whether the raw expression `e` has an `Assign` at any depth. */
+function containsAssignment(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  return e.operator === 'Assign' || e.ops.some(containsAssignment);
 }
 
 /**
@@ -6073,13 +6117,34 @@ function comprehensionEnumeratedCount(
 
 /** The independent-clause tally: whether any clause is empty / unknown-count /
  * infinite, and the product of the finite clause counts. `undefined` if a
- * clause is not a collection. Shared by `count` and `isFinite` so the two never
- * disagree — every clause is examined (order-independent), and an empty clause
- * is recorded even when it appears after an unknown or infinite one. */
-function scanIndependentClauses(
-  expr: Expression
-):
-  | { empty: boolean; unknown: boolean; infinite: boolean; product: number }
+ * clause is not a collection. Every clause is examined (order-independent),
+ * and an empty clause is recorded even when it appears after an unknown or
+ * infinite one.
+ *
+ * A clause with a guard or a destructuring pattern can FAIL for an element:
+ * the walk then yields one error cell for that element and does not visit
+ * the later clauses (`runNested`). So the cells of a comprehension are not
+ * always the product of the clause counts. The tally also records:
+ * - `failsBeforeEmpty`: a clause before the first empty clause can fail, so
+ *   the comprehension can have error cells although a clause is empty;
+ * - `finiteBeforeEmpty`: every clause before the first empty clause has a
+ *   known finite count;
+ * - `patternBeforeInfinite`: a destructuring clause comes before the first
+ *   infinite clause, so the infinite clause is possibly never reached;
+ * - `patternBeforeLast`: a destructuring clause is not the last clause, so
+ *   an element that does not match gives one cell, not the product of the
+ *   later counts. */
+function scanIndependentClauses(expr: Expression):
+  | {
+      empty: boolean;
+      unknown: boolean;
+      infinite: boolean;
+      product: number;
+      failsBeforeEmpty: boolean;
+      finiteBeforeEmpty: boolean;
+      patternBeforeInfinite: boolean;
+      patternBeforeLast: boolean;
+    }
   | undefined {
   if (!isFunction(expr)) return undefined;
   const ce = expr.engine;
@@ -6092,7 +6157,15 @@ function scanIndependentClauses(
     let unknown = false;
     let infinite = false;
     let product = 1;
-    for (const clause of clauses) {
+    let failsBeforeEmpty = false;
+    let finiteBeforeEmpty = true;
+    let patternBeforeInfinite = false;
+    let patternBeforeLast = false;
+    // Whether an earlier clause can fail, and whether an earlier clause is a
+    // destructuring pattern.
+    let fails = false;
+    let pattern = false;
+    for (const [i, clause] of clauses.entries()) {
       if (!isFunction(clause, 'Element')) return undefined;
       const coll = clause.ops[1]?.evaluate();
       // A domain that is an error value: the error is the value of the
@@ -6104,13 +6177,40 @@ function scanIndependentClauses(
       if (!coll?.isCollection) return undefined;
       // A count that is not a safe integer (a `bigint`) is read as unknown:
       // `Number.isFinite()` below would read it as infinite.
-      const c = smallCount(coll);
-      if (coll.isEmptyCollection === true || c === 0) empty = true;
-      else if (c === undefined) unknown = true;
-      else if (!Number.isFinite(c)) infinite = true;
-      else product *= c;
+      // The emptiness is read only when the count is not known: each read
+      // can walk the domain, and a walk of `filter(1..3, keep)` calls `keep`
+      // again when the memo of the domain has expired (`keep` changes a
+      // symbol). A known count (a `bigint` included) gives the emptiness; a
+      // count that is `NaN` is read as not known.
+      const n = coll.count;
+      const c = typeof n === 'bigint' ? undefined : n;
+      const countKnown =
+        typeof n === 'bigint' || (typeof n === 'number' && !Number.isNaN(n));
+      if (n === 0 || (!countKnown && coll.isEmptyCollection === true)) {
+        if (!empty) failsBeforeEmpty = fails;
+        empty = true;
+      } else if (c === undefined) unknown = true;
+      else if (!Number.isFinite(c)) {
+        if (!infinite) patternBeforeInfinite = pattern;
+        infinite = true;
+      } else product *= c;
+      if (!empty && (c === undefined || !Number.isFinite(c)))
+        finiteBeforeEmpty = false;
+      const isPattern = isFunction(clause.ops[0], 'Tuple');
+      if (isPattern && i < clauses.length - 1) patternBeforeLast = true;
+      pattern ||= isPattern;
+      fails ||= isPattern || comprehensionHasGuard([clause]);
     }
-    return { empty, unknown, infinite, product };
+    return {
+      empty,
+      unknown,
+      infinite,
+      product,
+      failsBeforeEmpty,
+      finiteBeforeEmpty,
+      patternBeforeInfinite,
+      patternBeforeLast,
+    };
   } finally {
     if (scoped) ce._popEvalContext();
   }
@@ -6132,16 +6232,33 @@ function comprehensionCount(expr: Expression): number | undefined {
 
   const s = scanIndependentClauses(expr);
   if (s === undefined) return undefined;
-  if (s.empty) return 0;
+  // An empty clause gives no cell at its prefixes. But an earlier clause
+  // that fails for an element (a guard that gives an error, an element that
+  // does not match a destructuring pattern) gives one error cell, and the
+  // walk does not visit the empty clause for that element:
+  // `[j for i in 1..3 if bad(i), j in []]` has 3 error cells when `bad`
+  // gives an error. Then the count is the domain-only traversal, which
+  // counts these cells, when the clauses before the empty one are finite.
+  if (s.empty) {
+    if (!s.failsBeforeEmpty) return 0;
+    return s.finiteBeforeEmpty ? comprehensionEnumeratedCount(expr) : undefined;
+  }
   if (s.unknown) return undefined;
   // A GUARDED clause (`Element(x, xs, cond)`) keeps only the elements its
   // guard accepts, so the product of the domain counts is an upper bound,
   // not the count. Over finite domains the count is the domain-only
   // traversal, which applies the guard; over an infinite domain nothing
-  // decides how many elements the guard keeps.
+  // decides how many elements the guard keeps. A destructuring clause that
+  // is not the last clause is counted by the traversal too: an element that
+  // does not match gives one cell, not the product of the later counts. If
+  // such a clause comes before an infinite clause, and no element matches,
+  // the infinite clause is never reached, so the count is not known.
   const guarded = comprehensionHasGuard(clauses);
-  if (s.infinite) return guarded ? undefined : Infinity;
-  return guarded ? comprehensionEnumeratedCount(expr) : s.product;
+  if (s.infinite)
+    return guarded || s.patternBeforeInfinite ? undefined : Infinity;
+  return guarded || s.patternBeforeLast
+    ? comprehensionEnumeratedCount(expr)
+    : s.product;
 }
 
 /** Whether any clause carries a guard, a third `Element` operand. */
@@ -6155,36 +6272,259 @@ function comprehensionHasGuard(clauses: ReadonlyArray<Expression>): boolean {
 }
 
 /**
- * Finiteness of a `Comprehension`. For an INDEPENDENT one it is read from the
- * clauses without materializing (finite iff every clause is a finite collection;
- * an empty clause makes it finite-empty even if another clause is infinite) —
- * so a finite-but-astronomically-large comprehension whose count would overflow
- * a JS number is still correctly reported finite. A DEPENDENT one can't be
- * judged structurally (a later range's size depends on an earlier index), so a
- * finite enumerated count is the evidence.
+ * Finiteness of a `Comprehension`, read from the clause domains without a
+ * walk of the elements, so that a finite-but-astronomically-large
+ * comprehension whose count would overflow a JS number is still correctly
+ * reported finite.
+ *
+ * The test does not run user code: callers of `isWalkableFiniteCollection`
+ * read this flag before they decide to walk, and a domain such as
+ * `filter(1..i, keep)` calls `keep` for each element that a walk reads. So
+ * the guards are not evaluated, and the count or the emptiness of a domain
+ * is read only when the domain is transitively pure (a count of a lazy
+ * `Filter` walks its source and calls the predicate). The finiteness of a
+ * domain (`isFiniteCollection`) is read from its form.
+ *
+ * - An INDEPENDENT domain (one that reads no earlier index) is evaluated,
+ *   as the walk evaluates it, and its finiteness is read, when it is
+ *   transitively pure. An impure independent domain is not evaluated: its
+ *   finiteness is read from its form, as for a dependent domain.
+ * - A DEPENDENT domain is finite for each value of the earlier indices when
+ *   its form says so (`dependentDomainShape`): `1..i` with `i` from a
+ *   collection of finite real numbers is finite.
+ * - A dependent domain whose form decides nothing is walked with no guards
+ *   (a guard only removes elements, so the comprehension is finite when
+ *   that walk is finite), but only when every domain is transitively pure.
+ *   Otherwise the finiteness is not known.
+ *
+ * An empty clause makes the comprehension finite when no earlier clause can
+ * fail, or when every earlier clause is finite: a clause that fails for an
+ * element gives an error cell in place of the later clauses.
  */
 function comprehensionIsFinite(expr: Expression): boolean | undefined {
   if (!isFunction(expr)) return undefined;
   const clauses = expr.ops.slice(1);
   if (clauses.length === 0) return undefined;
-  if (comprehensionIsDependent(clauses)) {
-    // The walk does not evaluate the guards: a guard only removes elements,
-    // so the comprehension is finite when the walk with no guards is
-    // finite. A guard can have a side effect, and a test of finiteness must
-    // not run it.
-    const c = comprehensionEnumeratedCount(expr, true);
-    return c === undefined ? undefined : Number.isFinite(c);
+  const ce = expr.engine;
+  const scoped = expr.isScoped && expr.localScope !== undefined;
+  if (scoped)
+    ce._pushEvalContext(expr.localScope!, undefined, { ambient: true });
+  let walk = false;
+  let infinite = false;
+  let unknown = false;
+  try {
+    // The index names bound by the earlier clauses, and those whose values
+    // are finite real numbers.
+    const bound: string[] = [];
+    const finiteValued = new Set<string>();
+    // Whether every earlier clause is finite, an earlier clause can fail,
+    // and an earlier clause is a destructuring pattern.
+    let finiteSoFar = true;
+    let allNonEmpty = true;
+    let fails = false;
+    let pattern = false;
+    // Whether every domain is transitively pure, so that a walk of the
+    // domains runs no user side effect.
+    let pure = true;
+    for (const clause of clauses) {
+      if (!isFunction(clause, 'Element')) return undefined;
+      const domain = clause.ops[1];
+      if (domain === undefined) return undefined;
+      let finite: boolean | undefined;
+      let empty = false;
+      let nonEmpty = false;
+      let valuesFinite = false;
+      // Whether the form of this dependent domain decides nothing, so that
+      // only a walk can tell.
+      let needsWalk = false;
+      if (bound.length > 0 && domain.has(bound)) {
+        if (!isTransitivelyPure(domain)) pure = false;
+        const shape = dependentDomainShape(domain, bound, finiteValued);
+        if (shape === undefined) needsWalk = walk = true;
+        else {
+          finite = true;
+          valuesFinite = shape.valuesFinite;
+        }
+      } else if (!isTransitivelyPure(domain)) {
+        // An independent domain that runs user code (`mk()` with `mk`
+        // declared impure) is not evaluated: the walk evaluates it, and an
+        // evaluation here would run that code one more time. Its finiteness
+        // is read from its form, as for a dependent domain, and is not known
+        // when the form decides nothing.
+        pure = false;
+        const shape = dependentDomainShape(domain, [], finiteValued);
+        if (shape !== undefined) {
+          finite = true;
+          valuesFinite = shape.valuesFinite;
+        }
+      } else {
+        const coll = domain.evaluate();
+        // A domain that is an error value: the error is the value of the
+        // comprehension (see `comprehensionStream`).
+        if (coll.operator === 'Error') {
+          noteFailedWalk(coll);
+          return undefined;
+        }
+        if (!coll.isCollection) return undefined;
+        finite = coll.isFiniteCollection;
+        valuesFinite = finite === true && collectionHoldsFiniteReals(coll);
+        if (isTransitivelyPure(domain) && isTransitivelyPure(coll)) {
+          // The emptiness is read only when the count is not known (a count
+          // that is `NaN` is not known), so the domain is walked at most once
+          // here. The domain is pure, so a second walk could not be seen from
+          // outside: this only saves work.
+          const n = coll.count;
+          const countKnown =
+            typeof n === 'bigint' ||
+            (typeof n === 'number' && !Number.isNaN(n));
+          empty = n === 0 || (!countKnown && coll.isEmptyCollection === true);
+          nonEmpty = !empty && typeof n === 'number' && !Number.isNaN(n);
+        } else pure = false;
+      }
+      if (empty && (!fails || finiteSoFar)) return true;
+      if (finite === false) {
+        // A destructuring clause before the infinite clause can stop the
+        // walk from reaching it: then the result is not known.
+        if (!infinite && pattern) unknown = true;
+        infinite = true;
+      } else if (finite === undefined && !needsWalk) unknown = true;
+      if (!nonEmpty && finite !== false) allNonEmpty = false;
+      if (finite !== true) finiteSoFar = false;
+      const idx = clause.ops[0];
+      if (isFunction(idx, 'Tuple')) {
+        bound.push(...tuplePatternNames(idx));
+        pattern = true;
+        fails = true;
+      } else if (isSymbol(idx) && idx.symbol !== 'Nothing') {
+        bound.push(idx.symbol);
+        if (valuesFinite) finiteValued.add(idx.symbol);
+      }
+      if (comprehensionHasGuard([clause])) fails = true;
+    }
+    if (unknown) return undefined;
+    // An infinite clause gives an infinite comprehension when the walk
+    // reaches it and every other clause has at least one element. A guard
+    // may keep finitely many elements or infinitely many; nothing here can
+    // tell.
+    if (infinite)
+      return allNonEmpty && !comprehensionHasGuard(clauses) ? false : undefined;
+    if (!walk) return true;
+    if (!pure) return undefined;
+  } finally {
+    if (scoped) ce._popEvalContext();
   }
+  // The walk pushes the scope of the comprehension itself.
+  const c = comprehensionEnumeratedCount(expr, true);
+  return c === undefined ? undefined : Number.isFinite(c);
+}
 
-  const s = scanIndependentClauses(expr);
-  if (s === undefined) return undefined;
-  if (s.empty) return true; // 0 elements ⇒ finite
-  if (s.unknown) return undefined;
-  // A guard over an infinite domain may keep finitely many elements or
-  // infinitely many; nothing here can tell. Over finite domains it keeps a
-  // subset, which is finite.
-  if (s.infinite) return comprehensionHasGuard(clauses) ? undefined : false;
-  return true;
+/** Whether every element of the finite collection `coll` is a finite real
+ * number, read from its type. */
+function collectionHoldsFiniteReals(coll: Expression): boolean {
+  const element = collectionElementType(coll.type.type);
+  return element !== undefined && isSubtype(element, 'real');
+}
+
+/**
+ * The form of a dependent clause domain `domain`, which reads the earlier
+ * indices `bound`, when the form proves that the domain is finite for each
+ * value of these indices. `finiteValued` holds the earlier indices whose
+ * values are finite real numbers. `valuesFinite` tells whether the elements
+ * of the domain are finite real numbers too. `undefined` when the form
+ * decides nothing. Nothing in the domain is evaluated, except a part that
+ * reads no earlier index and is transitively pure.
+ *
+ * - `Range(a, b)` and `Range(a, b, step)`: finite when `a` and `b` are
+ *   finite for finite indices (`isFiniteForFiniteIndices`) and the step reads
+ *   no index and is a nonzero finite real number.
+ * - A `List` literal: finite, whatever its elements are.
+ * - `Filter(source, predicate)`: a subset of `source`, so it has the form of
+ *   `source`. The predicate is not evaluated.
+ */
+function dependentDomainShape(
+  domain: Expression,
+  bound: ReadonlyArray<string>,
+  finiteValued: ReadonlySet<string>
+): { valuesFinite: boolean } | undefined {
+  if (!isFunction(domain)) return undefined;
+  if (domain.operator === 'Range') {
+    const [a, b, step] = domain.ops;
+    if (a === undefined || b === undefined || domain.nops > 3) return undefined;
+    if (!isFiniteForFiniteIndices(a, bound, finiteValued)) return undefined;
+    if (!isFiniteForFiniteIndices(b, bound, finiteValued)) return undefined;
+    if (step !== undefined) {
+      if (step.has([...bound]) || !isTransitivelyPure(step)) return undefined;
+      const s = step.evaluate();
+      if (!isNumber(s) || s.isSame(0) || !isSubtype(s.type.type, 'real'))
+        return undefined;
+    }
+    return { valuesFinite: true };
+  }
+  if (domain.operator === 'List' && !domain.isLazyCollection)
+    return {
+      valuesFinite: domain.ops.every((x) =>
+        isFiniteForFiniteIndices(x, bound, finiteValued)
+      ),
+    };
+  if (domain.operator === 'Filter' && domain.nops === 2) {
+    const source = domain.ops[0];
+    if (source.has([...bound]))
+      return dependentDomainShape(source, bound, finiteValued);
+    if (!isTransitivelyPure(source)) return undefined;
+    const coll = source.evaluate();
+    if (coll.isFiniteCollection !== true) return undefined;
+    return { valuesFinite: collectionHoldsFiniteReals(coll) };
+  }
+  return undefined;
+}
+
+/**
+ * Whether `x` is a finite real number for each value of the earlier indices
+ * `bound`, given that the indices of `finiteValued` hold finite real
+ * numbers. `x` is built with `Add`, `Subtract`, `Negate`, `Multiply`, `Abs`,
+ * `Floor`, `Ceil`, `Round`, `Min`, `Max` and `Power` with a nonnegative
+ * integer exponent from such indices and from parts that read no index, are
+ * transitively pure and evaluate to a finite real number. A division is not
+ * accepted: `1/i` is infinite for `i = 0`.
+ */
+function isFiniteForFiniteIndices(
+  x: Expression,
+  bound: ReadonlyArray<string>,
+  finiteValued: ReadonlySet<string>
+): boolean {
+  if (!x.has([...bound])) {
+    if (!isTransitivelyPure(x)) return false;
+    const v = x.evaluate();
+    return isNumber(v) && isSubtype(v.type.type, 'real');
+  }
+  if (isSymbol(x)) return finiteValued.has(x.symbol);
+  if (!isFunction(x)) return false;
+  if (x.operator === 'Power') {
+    const [base, exp] = x.ops;
+    return (
+      base !== undefined &&
+      isFiniteForFiniteIndices(base, bound, finiteValued) &&
+      isNumber(exp) &&
+      exp.isInteger === true &&
+      exp.isNonNegative === true
+    );
+  }
+  if (
+    ![
+      'Add',
+      'Subtract',
+      'Negate',
+      'Multiply',
+      'Abs',
+      'Floor',
+      'Ceil',
+      'Round',
+      'Min',
+      'Max',
+    ].includes(x.operator)
+  )
+    return false;
+  return x.ops.every((op) => isFiniteForFiniteIndices(op, bound, finiteValued));
 }
 
 /**

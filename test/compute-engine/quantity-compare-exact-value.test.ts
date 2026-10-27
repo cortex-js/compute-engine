@@ -5,8 +5,9 @@ import { ComputeEngine } from '../../src/compute-engine';
 // the number is not a number literal as written (a symbol with a value, a
 // sum of floats), its value is compared: the EXACT value when it has one,
 // so that a difference smaller than the working precision is seen, and the
-// value after `.N()` otherwise (`quantityComparableValue()`,
-// `src/compute-engine/boxed-expression/compare.ts`).
+// value after `.N()` otherwise (the `compare` hook of the quantity kind
+// reads the exact value of an operand, `QUANTITY_ARITHMETIC`,
+// `src/compute-engine/library/quantity-kind.ts`).
 //
 
 describe('A QUANTITY COMPARED WITH THE EXACT VALUE OF A SYMBOL', () => {

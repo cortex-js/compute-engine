@@ -1011,9 +1011,7 @@ describe('a LONE union-typed operand keeps the union in the result type', () => 
     expect(ce.box(['Power', 'u', 2]).type.toString()).toBe(
       'list<number> | number'
     );
-    expect(ce.box(['Sin', 'u']).type.toString()).toBe(
-      'list<number> | number'
-    );
+    expect(ce.box(['Sin', 'u']).type.toString()).toBe('list<number> | number');
   });
 
   // The point of the ruling: a scalar-or-collection union must not answer a
@@ -1088,7 +1086,9 @@ describe('a LONE union-typed operand keeps the union in the result type', () => 
     ce.assign('u', ce.box(['List', 1, 2]));
     ce.assign('w', ce.box(['List', 10, 20]));
     expect(ce.box(['Add', 'u', 'w']).evaluate().toString()).toBe('[11,22]');
-    expect(ce.box(['Multiply', 'u', 'w']).evaluate().toString()).toBe('[10,40]');
+    expect(ce.box(['Multiply', 'u', 'w']).evaluate().toString()).toBe(
+      '[10,40]'
+    );
 
     const mixedCe = engineWithU();
     mixedCe.declare('w', 'number | list<number>');
@@ -1175,7 +1175,9 @@ describe('a big op over a body that MIGHT be a collection stays inert', () => {
   it('declines a broadcastable-typed body and an undeclared application', () => {
     const ce = new ComputeEngine();
     const lifted = ce.box(['Sum', ['Add', 2, ['h', 'x']]]);
-    expect(lifted.ops![0].type.toString()).toBe('broadcastable<number>');
+    expect(lifted.ops![0].type.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
     expect(lifted.evaluate().operator).toBe('Sum');
     expect(ce.box(['Sum', ['h', 'x']]).evaluate().operator).toBe('Sum');
     ce.declare('b', 'broadcastable<number>');
@@ -1291,9 +1293,7 @@ describe('a lambda applied to a LONE union-typed argument', () => {
     const ce = new ComputeEngine();
     ce.declare('u', 'number | list<number>');
     ce.assign('f', ce.parse('x \\mapsto 2x'));
-    expect(ce.box(['f', 'u']).type.toString()).toBe(
-      'list<number> | number'
-    );
+    expect(ce.box(['f', 'u']).type.toString()).toBe('list<number> | number');
     // The control: a DEFINITE collection argument still types a definite,
     // shape-aware list.
     expect(ce.box(['f', ['List', 1, 2]]).type.toString()).toBe(
@@ -1408,32 +1408,52 @@ describe('a valueless collection-typed operand of a lazy collection operator', (
   it('materializes once the symbol is assigned', () => {
     const ce = withV();
     ce.assign('v', ce.box(['List', 7, 8]));
-    expect(ce.box(['Join', ['List', 1], 'v']).evaluate().toString()).toBe(
-      '[1,7,8]'
-    );
+    expect(
+      ce
+        .box(['Join', ['List', 1], 'v'])
+        .evaluate()
+        .toString()
+    ).toBe('[1,7,8]');
     expect(ce.box(['Append', 'v', 2]).evaluate().toString()).toBe('[7,8,2]');
-    expect(ce.box(['Sum', ['Join', ['List', 1], 'v']]).evaluate().toString()).toBe(
-      '16'
-    );
+    expect(
+      ce
+        .box(['Sum', ['Join', ['List', 1], 'v']])
+        .evaluate()
+        .toString()
+    ).toBe('16');
   });
 
   it('still materializes a view that is provably empty', () => {
     // `Zip([], v)` cannot be walked until `v` holds a value, but one empty
     // source makes it empty whatever `v` holds, so its literal is `[]`.
     const ce = withV();
-    expect(ce.box(['Zip', ['List'], 'v']).evaluate().toString()).toBe('[]');
+    expect(
+      ce
+        .box(['Zip', ['List'], 'v'])
+        .evaluate()
+        .toString()
+    ).toBe('[]');
   });
 
   it('still materializes over an absent or empty operand', () => {
     const ce = new ComputeEngine();
-    expect(ce.box(['Join', ['List', 1], 'Nothing']).evaluate().toString()).toBe(
-      '[1]'
-    );
-    expect(ce.box(['Join', ['List', 1], ['List']]).evaluate().toString()).toBe(
-      '[1]'
-    );
-    expect(ce.box(['Join', ['List', 1], ['List', 2]]).evaluate().toString()).toBe(
-      '[1,2]'
-    );
+    expect(
+      ce
+        .box(['Join', ['List', 1], 'Nothing'])
+        .evaluate()
+        .toString()
+    ).toBe('[1]');
+    expect(
+      ce
+        .box(['Join', ['List', 1], ['List']])
+        .evaluate()
+        .toString()
+    ).toBe('[1]');
+    expect(
+      ce
+        .box(['Join', ['List', 1], ['List', 2]])
+        .evaluate()
+        .toString()
+    ).toBe('[1,2]');
   });
 });

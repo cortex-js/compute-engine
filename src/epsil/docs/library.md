@@ -432,7 +432,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `abs` | `Abs` | `(complex \| infinity) -> number` | Absolute value (magnitude) of a number. |
+| `abs` | `Abs` | `(complex \| infinity \| quantity) -> number` | Absolute value (magnitude) of a number. |
 | `absArg` | `AbsArg` | `(complex \| infinity) -> tuple<+oo \| real, real>` | Tuple of magnitude and argument of a complex number. |
 | — | `Add` | `(value+) -> value` | Sum of two or more values. |
 | `airyAi` | `AiryAi` | `(complex \| infinity) -> number` | Airy function of the first kind |
@@ -460,7 +460,7 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `dirichletBeta` | `DirichletBeta` | `(complex \| infinity) -> number` | Dirichlet beta function β(s) = Σ_&#123;n≥0&#125; (−1)^n/(2n+1)^s = 4^(−s) (ζ(s, 1/4) − ζ(s, 3/4)), entire; β(1) = π/4, β(2) = G, β(+∞) = 1. |
 | `dirichletEta` | `DirichletEta` | `(complex \| infinity) -> number` | Dirichlet eta function η(s) = Σ_&#123;n≥1&#125; (−1)^(n−1)/n^s = (1 − 2^(1−s)) ζ(s), entire; η(1) = ln 2, η(+∞) = 1. |
 | `distance` | `Distance` | `(list<list<number>> \| list<number> \| list<tuple> \| tuple, list<list<number>> \| list<number> \| list<tuple> \| tuple) -> number` | Euclidean distance between two points, broadcasting over a list of points. |
-| — | `Divide` | `(complex \| infinity \| residue, (complex \| infinity \| residue)+) -> number` | Quotient of a numerator and one or more denominators. |
+| — | `Divide` | `(complex \| infinity, (complex \| infinity)+) -> number` | Quotient of a numerator and one or more denominators. |
 | `elementMax` | `ElementMax` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise maximum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
 | `elementMin` | `ElementMin` | `(real \| signed_infinity, (real \| signed_infinity)+) -> real \| signed_infinity` | Element-wise minimum: broadcasts scalars over collections (and zips collections), returning a collection; all-scalar arguments give a scalar. |
 | `eulerGamma` | `EulerGamma` | constant `real<0.5772156649015328..0.5772156649015329>` = `0.577215664901532860607` | The Euler–Mascheroni constant γ ≈ 0.5772. |
@@ -499,19 +499,19 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `log2` | `Log2` | `(number) -> number` | Base-2 Logarithm |
 | `machineEpsilon` | `MachineEpsilon` | constant `real` = `2.220446049250313e-16` | The difference between 1 and the next larger floating point number (machine epsilon). |
 | `max` | `Max` | `(value*) -> number` | Maximum of two or more numbers. |
-| `measurement` | `Measurement` | `(value, value) -> value` | A nominal value carrying a 1σ absolute uncertainty. |
+| `measurement` | `Measurement` | `(value, value) -> measurement` | A nominal value carrying a 1σ absolute uncertainty. |
 | `min` | `Min` | `(value+) -> number` | Minimum of two or more numbers. |
 | — | `Mod` | `(real, real) -> real` | Modulo: the remainder of the floored division of x by y. |
-| — | `Multiply` | `((number \| residue)*) -> number` | Product of two or more values. |
+| — | `Multiply` | `(number*) -> number` | Product of two or more values. |
 | — | `NaN` | constant `number` = `NaN` | Not a Number, the result of a floating-point operation that is undefined or unrepresentable, such as 0.0/0.0. |
-| — | `Negate` | `(complex \| infinity \| residue) -> number` | Additive Inverse |
+| — | `Negate` | `(complex \| infinity) -> number` | Additive Inverse |
 | `negativeInfinity` | `NegativeInfinity` | constant `-oo` = `-oo` | Negative infinity (−∞). |
 | `numerator` | `Numerator` | `(number) -> nothing \| number` | Numerator of an expression |
 | `numeratorDenominator` | `NumeratorDenominator` | `(number) -> nothing \| tuple<number, number>` | Sequence of Numerator and Denominator of an expression |
 | — | `PlusMinus` | `(T, U) -> tuple<T, U> where T: value, U: value` | Plus or Minus |
 | `polyGamma` | `PolyGamma` | `(order: integer, complex \| infinity) -> number` | Polygamma function, the n-th derivative of the digamma function |
 | `positiveInfinity` | `PositiveInfinity` | constant `+oo` = `+oo` | Positive infinity (+∞). |
-| — | `Power` | `(complex \| infinity \| residue, complex \| residue \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
+| — | `Power` | `(complex \| infinity, complex \| signed_infinity) -> number` | Exponentiation: raise a base to a power. |
 | — | `PreDecrement` | `(number) -> number` | Decrement a number by one. |
 | — | `PreIncrement` | `(number) -> number` | Increment a number by one. |
 | `product` | `Product` | `(any, tuple*) -> number` | `Product(f, a, b)` computes the product of `f` from `a` to `b`. |
@@ -520,12 +520,12 @@ The [Arithmetic reference](/epsil/reference/arithmetic/) has the full descriptio
 | `re` | `Re` | `(complex \| infinity) -> number` | `Re` is an alias for `Real`, which is the preferred name. |
 | `real` | `Real` | `(complex \| infinity) -> number` | Real part of a complex number. |
 | `remainder` | `Remainder` | `(T, T) -> T where T: number` | IEEE remainder: the signed remainder after dividing x by y, with the quotient rounded to the nearest integer (ties round toward +Infinity, matching JavaScript `Math.round`) |
-| `root` | `Root` | `(complex \| infinity \| residue, complex \| infinity \| residue) -> number` | n-th root of a value. |
+| `root` | `Root` | `(complex \| infinity, complex \| infinity) -> number` | n-th root of a value. |
 | `round` | `Round` | `(x: real \| signed_infinity \| ~oo, step: real?) -> real \| signed_infinity \| ~oo` | Rounds a number to the nearest integer, or with a step to the nearest multiple of the step. |
 | `sign` | `Sign` | `(complex \| signed_infinity \| ~oo) -> complex` | Sign of a number: -1, 0, or 1 for a real; `z/\|z\|`, the point of the unit circle in its direction, for a complex `z`. |
-| `sqrt` | `Sqrt` | `(complex \| infinity \| residue) -> complex \| infinity` | Square Root |
-| — | `Square` | `(number \| residue) -> number` | Square of a number: x^2. |
-| — | `Subtract` | `((number \| residue)+) -> number` | Difference between two or more values. |
+| `sqrt` | `Sqrt` | `(complex \| infinity) -> complex \| infinity` | Square Root |
+| — | `Square` | `(number) -> number` | Square of a number: x^2. |
+| — | `Subtract` | `(number+) -> number` | Difference between two or more values. |
 | `sum` | `Sum` | `(any, tuple*) -> number` | `Sum(f, [a, b])` computes the sum of `f` from `a` to `b`; `Sum(L)` sums the elements of a collection `L`. |
 | `supremum` | `Supremum` | `(value*) -> number` | Like Max, but defined for open sets. |
 | `trigamma` | `Trigamma` | `(complex \| infinity) -> number` | Trigamma function, the derivative of the digamma function |
@@ -549,27 +549,27 @@ The [Trigonometry reference](/epsil/reference/trigonometry/) has the full descri
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `arccos` | `Arccos` | `(complex) -> number` | Arccosine, the inverse cosine function. |
-| `arccot` | `Arccot` | `(complex \| signed_infinity) -> number` | Arccotangent, the inverse cotangent function. |
-| `arccsc` | `Arccsc` | `(complex \| infinity) -> number` | Arccosecant, the inverse cosecant function. |
-| `arcosh` | `Arcosh` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic cosine (area hyperbolic cosine). |
-| `arcoth` | `Arcoth` | `(complex \| infinity) -> number` | Inverse hyperbolic cotangent (area hyperbolic cotangent). |
-| `arcsch` | `Arcsch` | `(complex \| infinity) -> number` | Inverse hyperbolic cosecant (area hyperbolic cosecant). |
-| `arcsec` | `Arcsec` | `(complex \| infinity) -> number` | Arcsecant, the inverse secant function. |
-| `arcsin` | `Arcsin` | `(complex) -> number` | Arcsine, the inverse sine function. |
-| `arctan` | `Arctan` | `(complex \| signed_infinity) -> number` | Inverse tangent. |
+| `arccos` | `Arccos` | `(complex \| quantity) -> number` | Arccosine, the inverse cosine function. |
+| `arccot` | `Arccot` | `(complex \| quantity \| signed_infinity) -> number` | Arccotangent, the inverse cotangent function. |
+| `arccsc` | `Arccsc` | `(complex \| infinity \| quantity) -> number` | Arccosecant, the inverse cosecant function. |
+| `arcosh` | `Arcosh` | `(complex \| quantity \| signed_infinity) -> number` | Inverse hyperbolic cosine (area hyperbolic cosine). |
+| `arcoth` | `Arcoth` | `(complex \| infinity \| quantity) -> number` | Inverse hyperbolic cotangent (area hyperbolic cotangent). |
+| `arcsch` | `Arcsch` | `(complex \| infinity \| quantity) -> number` | Inverse hyperbolic cosecant (area hyperbolic cosecant). |
+| `arcsec` | `Arcsec` | `(complex \| infinity \| quantity) -> number` | Arcsecant, the inverse secant function. |
+| `arcsin` | `Arcsin` | `(complex \| quantity) -> number` | Arcsine, the inverse sine function. |
+| `arctan` | `Arctan` | `(complex \| quantity \| signed_infinity) -> number` | Inverse tangent. |
 | `arctan2` | `Arctan2` | `(y: real \| signed_infinity, x: real \| signed_infinity) -> real` | Two-argument arctangent giving the angle of a vector. |
-| `arsech` | `Arsech` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic secant (area hyperbolic secant). |
-| `arsinh` | `Arsinh` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic sine (area hyperbolic sine). |
-| `artanh` | `Artanh` | `(complex \| signed_infinity) -> number` | Inverse hyperbolic tangent (area hyperbolic tangent). |
-| `cos` | `Cos` | `(complex) -> number` | Cosine of an angle. |
+| `arsech` | `Arsech` | `(complex \| quantity \| signed_infinity) -> number` | Inverse hyperbolic secant (area hyperbolic secant). |
+| `arsinh` | `Arsinh` | `(complex \| quantity \| signed_infinity) -> number` | Inverse hyperbolic sine (area hyperbolic sine). |
+| `artanh` | `Artanh` | `(complex \| quantity \| signed_infinity) -> number` | Inverse hyperbolic tangent (area hyperbolic tangent). |
+| `cos` | `Cos` | `(complex \| quantity) -> number` | Cosine of an angle. |
 | `cosIntegral` | `CosIntegral` | `(complex \| infinity) -> number` | Cosine integral: γ + ln(x) + ∫₀ˣ (cos(t)−1)/t dt. |
-| `cosh` | `Cosh` | `(complex \| signed_infinity) -> number` | Hyperbolic cosine. |
+| `cosh` | `Cosh` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic cosine. |
 | `coshIntegral` | `CoshIntegral` | `(complex \| infinity) -> number` | Hyperbolic cosine integral: γ + ln\|x\| + ∫₀ˣ (cosh(t)−1)/t dt. |
-| `cot` | `Cot` | `(complex) -> number` | Cotangent, the reciprocal of tangent. |
-| `coth` | `Coth` | `(complex \| signed_infinity) -> number` | Hyperbolic cotangent, the reciprocal of hyperbolic tangent. |
-| `csc` | `Csc` | `(complex) -> number` | Cosecant, the reciprocal of sine. |
-| `csch` | `Csch` | `(complex \| signed_infinity) -> number` | Hyperbolic cosecant, the reciprocal of hyperbolic sine. |
+| `cot` | `Cot` | `(complex \| quantity) -> number` | Cotangent, the reciprocal of tangent. |
+| `coth` | `Coth` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic cotangent, the reciprocal of hyperbolic tangent. |
+| `csc` | `Csc` | `(complex \| quantity) -> number` | Cosecant, the reciprocal of sine. |
+| `csch` | `Csch` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic cosecant, the reciprocal of hyperbolic sine. |
 | `dms` | `DMS` | `(number, number?, number?) -> number` | Construct an angle from degrees, minutes, and seconds. |
 | `degrees` | `Degrees` | `(real) -> real` | Convert an angle in degrees. |
 | `fresnelC` | `FresnelC` | `(complex \| signed_infinity) -> complex` | Fresnel cosine integral. |
@@ -579,15 +579,15 @@ The [Trigonometry reference](/epsil/reference/trigonometry/) has the full descri
 | `inverseFunction` | `InverseFunction` | `(function) -> function` | Inverse of a function. |
 | `inverseHaversine` | `InverseHaversine` | `(real) -> number` | Inverse haversine function. |
 | `pi` | `Pi` | constant `real<3.141592653589793..3.141592653589794>` = `3.14159265358979323846` | The constant π ≈ 3.14159, the ratio of a circle's circumference to its diameter. |
-| `sec` | `Sec` | `(complex) -> number` | Secant, the reciprocal of cosine. |
-| `sech` | `Sech` | `(complex \| signed_infinity) -> number` | Hyperbolic secant, the reciprocal of hyperbolic cosine. |
-| `sin` | `Sin` | `(complex) -> number` | Sine of an angle. |
+| `sec` | `Sec` | `(complex \| quantity) -> number` | Secant, the reciprocal of cosine. |
+| `sech` | `Sech` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic secant, the reciprocal of hyperbolic cosine. |
+| `sin` | `Sin` | `(complex \| quantity) -> number` | Sine of an angle. |
 | `sinIntegral` | `SinIntegral` | `(complex \| infinity) -> number` | Sine integral: ∫₀ˣ sin(t)/t dt. |
 | `sinc` | `Sinc` | `(complex \| signed_infinity) -> complex` | Unnormalized sinc function: sin(x)/x with sinc(0)=1. |
-| `sinh` | `Sinh` | `(complex \| signed_infinity) -> number` | Hyperbolic sine. |
+| `sinh` | `Sinh` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic sine. |
 | `sinhIntegral` | `SinhIntegral` | `(complex \| infinity) -> number` | Hyperbolic sine integral: ∫₀ˣ sinh(t)/t dt. |
-| `tan` | `Tan` | `(complex) -> number` | Tangent of an angle. |
-| `tanh` | `Tanh` | `(complex \| signed_infinity) -> number` | Hyperbolic tangent. |
+| `tan` | `Tan` | `(complex \| quantity) -> number` | Tangent of an angle. |
+| `tanh` | `Tanh` | `(complex \| quantity \| signed_infinity) -> number` | Hyperbolic tangent. |
 | `trigExpand` | `TrigExpand` | `(value) -> value` | Expand trigonometric and hyperbolic functions of sums and integer multiples of angles. |
 | `trigReduce` | `TrigReduce` | `(value) -> value` | Rewrite products and integer powers of trigonometric and hyperbolic functions as a linear combination of functions of multiple angles (the inverse of TrigExpand). |
 | `trigToExp` | `TrigToExp` | `(value) -> value` | Rewrite trigonometric and hyperbolic functions in terms of the complex exponential, exactly. |
@@ -858,7 +858,7 @@ The [Units reference](/epsil/reference/units/) has the full description and the 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
 | `isCompatibleUnit` | `IsCompatibleUnit` | `(value, value) -> value` | Check if two units have the same dimension |
-| `quantity` | `Quantity` | `(value, value) -> value` | A value paired with a physical unit |
+| `quantity` | `Quantity` | `(value, value) -> quantity` | A value paired with a physical unit |
 | `quantityMagnitude` | `QuantityMagnitude` | `(value) -> value` | Extract the numeric value from a quantity |
 | `quantityUnit` | `QuantityUnit` | `(value) -> value` | Extract the unit from a quantity |
 | `unitConvert` | `UnitConvert` | `(value, value) -> value` | Convert a quantity to a different compatible unit |
@@ -871,14 +871,14 @@ The [Physics reference](/epsil/reference/physics/) has the full description and 
 
 | Epsil | MathJSON | Signature | Summary |
 |:------|:---------|:----------|:--------|
-| `avogadroConstant` | `AvogadroConstant` | constant `value` = `6.02214076e+23 mol^-1` | Avogadro constant |
-| `boltzmannConstant` | `BoltzmannConstant` | constant `value` = `1.380649e-23 J/K` | Boltzmann constant |
-| `elementaryCharge` | `ElementaryCharge` | constant `value` = `1.602176634e-19 C` | Elementary electric charge |
-| `gasConstant` | `GasConstant` | constant `value` = `8.314462618 J/(K⋅mol)` | Molar gas constant |
-| `gravitationalConstant` | `GravitationalConstant` | constant `value` = `6.6743e-11 m^3/(kg⋅s^2)` | Newtonian constant of gravitation |
-| `mu0` | `Mu0` | constant `value` = `0.00000125663706212 N/A^2` | Vacuum permeability |
-| `planckConstant` | `PlanckConstant` | constant `value` = `6.62607015e-34 J⋅s` | Planck constant |
-| `speedOfLight` | `SpeedOfLight` | constant `value` = `299792458 m/s` | Speed of light in vacuum |
-| `standardGravity` | `StandardGravity` | constant `value` = `9.80665 m/s^2` | Standard acceleration due to gravity |
-| `stefanBoltzmannConstant` | `StefanBoltzmannConstant` | constant `value` = `5.670374419e-8 W/(K^4⋅m^2)` | Stefan-Boltzmann constant |
-| `vacuumPermittivity` | `VacuumPermittivity` | constant `value` = `8.8541878128e-12 F/m` | Vacuum permittivity (electric constant) |
+| `avogadroConstant` | `AvogadroConstant` | constant `quantity` = `6.02214076e+23 mol^-1` | Avogadro constant |
+| `boltzmannConstant` | `BoltzmannConstant` | constant `quantity` = `1.380649e-23 J/K` | Boltzmann constant |
+| `elementaryCharge` | `ElementaryCharge` | constant `quantity` = `1.602176634e-19 C` | Elementary electric charge |
+| `gasConstant` | `GasConstant` | constant `quantity` = `8.314462618 J/(K⋅mol)` | Molar gas constant |
+| `gravitationalConstant` | `GravitationalConstant` | constant `quantity` = `6.6743e-11 m^3/(kg⋅s^2)` | Newtonian constant of gravitation |
+| `mu0` | `Mu0` | constant `quantity` = `0.00000125663706212 N/A^2` | Vacuum permeability |
+| `planckConstant` | `PlanckConstant` | constant `quantity` = `6.62607015e-34 J⋅s` | Planck constant |
+| `speedOfLight` | `SpeedOfLight` | constant `quantity` = `299792458 m/s` | Speed of light in vacuum |
+| `standardGravity` | `StandardGravity` | constant `quantity` = `9.80665 m/s^2` | Standard acceleration due to gravity |
+| `stefanBoltzmannConstant` | `StefanBoltzmannConstant` | constant `quantity` = `5.670374419e-8 W/(K^4⋅m^2)` | Stefan-Boltzmann constant |
+| `vacuumPermittivity` | `VacuumPermittivity` | constant `quantity` = `8.8541878128e-12 F/m` | Vacuum permittivity (electric constant) |

@@ -1,4 +1,3 @@
-import { measurementUnaryByHead } from './measurement-arithmetic.js';
 import { Complex } from 'complex.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
@@ -272,10 +271,6 @@ export const SPECIAL_FUNCTIONS_LIBRARY: SymbolDefinitions[] = [
       type: (_ops, context) =>
         BoxedType.forResult('number', context.engine._typeResolver),
       evaluate: guardDigitsN(([z], { numericApproximation, engine }) => {
-        // A `Measurement` argument: lnΓ(a ± σ) is lnΓ(a) ± |ψ(a)|·σ
-        // (`measurementUnaryByHead`).
-        const m = measurementUnaryByHead(engine, 'LogGamma', z);
-        if (m !== undefined) return numericApproximation ? m.N() : m;
         if (isNumber(z) && !z.isComplex && z.isInteger && z.isNonPositive)
           return engine.PositiveInfinity;
         const infinite = infiniteGammaFamilyValue(z, engine);

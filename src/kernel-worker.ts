@@ -394,19 +394,28 @@ port.on((m) => {
           deadline === undefined
             ? cancelled
             : () => Date.now() > deadline || cancelled?.() === true;
+        const failures = { count: 0 };
         const done = kernel.slice(inputs, options, out, {
           from: m.from,
           to: m.to,
           deadline,
           stop,
+          failures,
         });
         // Only the written prefix travels back, and its buffer is
         // transferred, not copied.
         const sent =
           done === m.to - m.from ? out : out.slice(0, perCellOut * done);
-        port.post({ type: 'result', job: m.job, out: sent, done }, [
-          sent.buffer as ArrayBuffer,
-        ]);
+        port.post(
+          {
+            type: 'result',
+            job: m.job,
+            out: sent,
+            done,
+            failed: failures.count,
+          },
+          [sent.buffer as ArrayBuffer]
+        );
       } catch (e) {
         port.post({ type: 'error', job: m.job, message: messageOf(e) });
       }
