@@ -612,13 +612,13 @@ describe('QUANTITY COMPARISON WITH NO ROUNDING', () => {
     expect(evalStr(['Less', c, 5000000000])).toBe('True');
   });
 
-  // Two big decimal floats are ordered by all their digits with no
-  // tolerance (`Sort`), and are equal within the tolerance (`isEqual`)
+  // Two big decimal floats are equal within the tolerance (`isEqual`), and
+  // the extrema use the same order: a tie keeps the first operand
   test('big decimal magnitudes', () => {
     const a = Q({ num: '1.00000000000000000001' }, 'm');
     const b = Q({ num: '1.00000000000000000002' }, 'm');
-    expect(evalStr(['Min', b, a])).toBe(evalStr(a));
-    expect(evalStr(['Max', a, b])).toBe(evalStr(b));
+    expect(evalStr(['Min', b, a])).toBe(evalStr(b));
+    expect(evalStr(['Max', a, b])).toBe(evalStr(a));
     expect(ce.box(a).evaluate().isEqual(ce.box(b).evaluate())).toBe(true);
   });
 
@@ -900,10 +900,14 @@ describe('QUANTITIES OF DIFFERENT DIMENSIONS', () => {
     expect(q(6, 'dB').isEqual(ce.box(6))).toBe(undefined);
     expect(q(6, 'Np').isEqual(ce.box(6))).toBe(undefined);
     expect(q('Missing', 'm').isEqual(q(6, 's'))).toBe(undefined);
-    // A list is not decided by the dimensions here
+    // A quantity is not a collection (its type is `quantity`): the
+    // comparison with a list is element-wise, as for a number
     expect(
-      evalStr(['Equal', Q(6, 'm'), ['List', Q(6, 'm'), Q(600, 'cm')]])
-    ).toBe('Equal');
+      ce
+        .box(['Equal', Q(6, 'm'), ['List', Q(6, 'm'), Q(600, 'cm')]])
+        .evaluate()
+        .toString()
+    ).toBe('["True","True"]');
     // A quantity with a logarithmic unit and a number
     expect(evalStr(['Equal', Q(6, 'dB'), 6])).toBe('Equal');
     expect(evalStr(['Equal', Q(1, 'dB'), Q(1, 'Np')])).toBe('Equal');

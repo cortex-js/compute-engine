@@ -55,7 +55,11 @@ import { typeToString } from '../../common/type/serialize.js';
  * of `common/type/subtype.ts` that lists no subtype and no supertype but
  * `value`.
  */
-export const KIND_PRIMITIVES: ReadonlyArray<string> = ['residue'];
+export const KIND_PRIMITIVES: ReadonlyArray<string> = [
+  'residue',
+  'measurement',
+  'quantity',
+];
 
 /** The marker arms that may be added to the kind arms of a result type. */
 const MARKER_ARMS: ReadonlyArray<string> = [
@@ -619,36 +623,52 @@ export function kindGeneration(ce: object): number {
 /**
  * True when a registered kind type has `admittedAs` other than `'none'`, so
  * that a value of the kind can be admitted through its carrier and a call
- * can be an apply site. The library kind `residue` is admitted only by its
- * own type, so this is false in an engine with no host kind of that sort,
- * and the apply-site readers (`apply-site.ts`) return at once there.
+ * can be an apply site, AND the engine may hold a value of that type: a
+ * value of the type was made, or a symbol or a callable was declared with
+ * it (the gates of `noteKindValue()` and `noteKindDeclaration()`). The
+ * library kind `measurement` is admitted through the carrier `number`, but
+ * an engine that has made no measurement and declared nothing with the type
+ * cannot have a call with a measurement operand, so the apply-site readers
+ * (`apply-site.ts`) return at once there. A user kind opens its gates when
+ * it is registered.
  */
 export function someKindAdmittedByCarrier(ce: object): boolean {
-  return kindFlags(ce).admittedByCarrier;
+  return gatedKindTypeAmong(ce, kindFlags(ce).carrierTypes);
 }
 
 /**
- * True when a registered kind type has a `resultType` hook. The library
- * kind `residue` has none, so this is false in an engine with no host kind
- * that declares one.
+ * True when a registered kind type has a `resultType` hook and the engine
+ * may hold a value of that type (the gates, as for
+ * {@link someKindAdmittedByCarrier}).
  */
 export function someKindHasResultType(ce: object): boolean {
-  return kindFlags(ce).resultType;
+  return gatedKindTypeAmong(ce, kindFlags(ce).resultTypeTypes);
 }
 
-/** The two flags of the registry of `ce`, computed again when the
- * generation moves (a registration, a removal or a checkpoint restore). */
+/** True when the value gate or the declaration gate of one of the kind
+ * types `types` is open in the engine. */
+function gatedKindTypeAmong(ce: object, types: ReadonlyArray<string>): boolean {
+  if (types.length === 0) return false;
+  const registry = registryOf(ce);
+  return types.some(
+    (t) => registry.withValues.has(t) || registry.withDeclarations.has(t)
+  );
+}
+
+/** The kind types with a carrier and with a `resultType` hook of the
+ * registry of `ce`, computed again when the generation moves (a
+ * registration, a removal or a checkpoint restore). */
 function kindFlags(ce: object): KindFlags {
   const registry = registryOf(ce);
   let flags = KIND_FLAGS.get(registry);
   if (flags === undefined || flags.generation !== registry.generation) {
-    let admittedByCarrier = false;
-    let resultType = false;
-    for (const rec of registry.types.values()) {
-      if (rec.admittedAs !== 'none') admittedByCarrier = true;
-      if (rec.resultType !== undefined) resultType = true;
+    const carrierTypes: string[] = [];
+    const resultTypeTypes: string[] = [];
+    for (const [name, rec] of registry.types) {
+      if (rec.admittedAs !== 'none') carrierTypes.push(name);
+      if (rec.resultType !== undefined) resultTypeTypes.push(name);
     }
-    flags = { generation: registry.generation, admittedByCarrier, resultType };
+    flags = { generation: registry.generation, carrierTypes, resultTypeTypes };
     KIND_FLAGS.set(registry, flags);
   }
   return flags;
@@ -656,8 +676,8 @@ function kindFlags(ce: object): KindFlags {
 
 type KindFlags = {
   generation: number;
-  admittedByCarrier: boolean;
-  resultType: boolean;
+  carrierTypes: ReadonlyArray<string>;
+  resultTypeTypes: ReadonlyArray<string>;
 };
 
 const KIND_FLAGS = new WeakMap<KindRegistryState, KindFlags>();
@@ -666,10 +686,61 @@ const KIND_FLAGS = new WeakMap<KindRegistryState, KindFlags>();
 // The per-engine gates
 //
 
+/**
+ * The kind types whose value gates were withheld while the libraries of an
+ * engine were loaded ({@link deferKindValueGates}), by registry. An entry
+ * exists only while the libraries load.
+ */
+const DEFERRED_GATES = new WeakMap<KindRegistryState, Set<string>>();
+
+/**
+ * Run `load`, the loading of the libraries of the engine `ce`, with the
+ * value gates of the kind types closed, and return the kind types of the
+ * values that were made meanwhile.
+ *
+ * A library can make a kind value while it loads: the value of a physical
+ * constant (`SpeedOfLight`) is a quantity. That value alone would open the
+ * value and assigned gates of `quantity` in every engine, and every engine
+ * would then pay the walks of the recognition (`holdsKindValue()`), also an
+ * engine that never uses a quantity (about 10% of the time of an ordinary
+ * evaluation, measured 2026-10-26). So the gates stay closed here, and the
+ * caller makes such a value again when it is first read (the constants
+ * compute their value again then, `onConfigurationChange()`), which opens
+ * the value gate at that time, in the `BoxedFunction` constructor.
+ */
+export function deferKindValueGates(
+  ce: object,
+  load: () => void
+): ReadonlySet<string> {
+  const registry = registryOf(ce);
+  const deferred = new Set<string>();
+  DEFERRED_GATES.set(registry, deferred);
+  try {
+    load();
+  } finally {
+    DEFERRED_GATES.delete(registry);
+  }
+  return deferred;
+}
+
+/** True when the value gates of `registry` are withheld
+ * ({@link deferKindValueGates}); records `typeNames` as deferred then. */
+function deferredGate(
+  registry: KindRegistryState,
+  typeNames: Iterable<string>
+): boolean {
+  const deferred = DEFERRED_GATES.get(registry);
+  if (deferred === undefined) return false;
+  for (const t of typeNames) deferred.add(t);
+  return true;
+}
+
 /** Record that the engine constructed a value of the kind type `typeName`.
  * Gates every walk that looks for a value of the kind. */
 export function noteKindValue(ce: object, typeName: string): void {
-  registryOf(ce).withValues.add(typeName);
+  const registry = registryOf(ce);
+  if (deferredGate(registry, [typeName])) return;
+  registry.withValues.add(typeName);
 }
 
 /** Record that the engine constructed a value of the head `def` (the
@@ -681,6 +752,7 @@ export function noteKindHeadValue(
   const registry = registryOf(ce);
   const entry = registry.dispatch.get(def);
   if (entry === undefined) return;
+  if (deferredGate(registry, entry.kindTypes)) return;
   for (const typeName of entry.kindTypes) registry.withValues.add(typeName);
 }
 
@@ -688,6 +760,7 @@ export function noteKindHeadValue(
  * `typeName`. Gates the walk of symbol values. */
 export function noteKindValueAssigned(ce: object, typeName: string): void {
   const registry = registryOf(ce);
+  if (deferredGate(registry, [typeName])) return;
   registry.withValues.add(typeName);
   registry.withAssignedValues.add(typeName);
 }

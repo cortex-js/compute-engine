@@ -48,6 +48,7 @@ import {
   stripMissingFromElements,
   typeContainsMissing,
   hasKindArm,
+  kindArmNames,
   withoutKindArms,
   withoutKindArmsDeep,
   type KindTypeNames,
@@ -357,9 +358,18 @@ function validateThreadableOperand(
   // `list<string>`. Missing cells themselves are owned by the operator's
   // propagation policy and remain valid broadcast input
   // (`Sin(list<missing>) -> list<number>`, `Sin(list<number | missing>)`).
+  // A parameter that names a kind type beside its numbers (`complex |
+  // quantity`, the trigonometric heads) is a numeric parameter for this
+  // check, and the kinds it names are cells like numbers (`Sin(list<quantity>)`
+  // is admitted as `Sin(quantity)` is), so `Sin(list<string>)` is refused
+  // as `Sin("a")` is.
+  const kinds = kindTypeNames(ce);
   if (
-    isSubtype(param, 'number') &&
-    collectionCellsProvablyNonNumeric(op.type.type)
+    isSubtype(withoutKindArms(param, kinds), 'number') &&
+    collectionCellsProvablyNonNumeric(
+      op.type.type,
+      new Set(kindArmNames(param, kinds))
+    )
   )
     return ce.typeError(displayParam ?? param, op.type, op);
   return op;
@@ -1048,13 +1058,14 @@ export function checkNumericArgs(
   // `Exp`, which is rewritten to `Power(e, x)`). A kind admitted as nothing
   // (a residue class) is refused. The registry is read now, when the
   // expression is boxed: an expression refused before the hook was
-  // registered is not checked again. The other operators that check their
-  // operands here (`Exp2`, `PlusMinus`) refuse a kind value.
+  // registered is not checked again. `PlusMinus` checks its operands here
+  // with neither option and refuses a kind value.
   // When `carrier` names a hook, a kind admitted as a number is admitted
-  // only when its heads also declare that hook. `Exp` uses `'power'`: it is
-  // rewritten to `Power(e, x)`, and `Power` refuses at evaluation a kind
-  // value whose kind has no `power` hook, so such a value is refused here,
-  // at boxing, as at `Sqrt` and `Square`.
+  // only when its heads also declare that hook. `Exp` and `Exp2` use
+  // `'power'`: they are rewritten to `Power(e, x)` and `Power(2, x)`, and
+  // `Power` refuses at evaluation a kind value whose kind has no `power`
+  // hook, so such a value is refused here, at boxing, as at `Sqrt` and
+  // `Square`.
   const carrierOption =
     typeof options === 'object' ? options?.carrier : undefined;
   const admittedKinds: KindTypeNames | undefined =
@@ -1159,10 +1170,6 @@ export function checkNumericArgs(
       xs.push(op);
     } else if (op.isNumber) {
       // The argument is a number literal or a function whose result is a number
-      xs.push(op);
-    } else if (op.operator === 'Quantity') {
-      // Quantity expressions are accepted in arithmetic contexts;
-      // the evaluate handler will handle unit arithmetic.
       xs.push(op);
     } else if (isSymbol(op) && !ce.lookupDefinition(op.symbol)) {
       // We have an unknown symbol, we'll infer it's a number later
@@ -1390,10 +1397,10 @@ export function checkNumericArgs(
  *   VALUES that arithmetic can never consume;
  * - `error`: the operand already carries its own problem — wrapping it
  *   would bury the original report.
- * `Quantity`/`Measurement` operands pass because their types (`value`,
- * numeric) are not disjoint from the union. Invalid operands are skipped
- * for the same reason as `error`-typed ones. Returns `undefined` when every
- * operand could still be numeric.
+ * A value of a kind (a quantity, a measurement) is not refused here: its
+ * admission is decided at boxing (`kind-admission.ts`). Invalid operands are
+ * skipped for the same reason as `error`-typed ones. Returns `undefined` when
+ * every operand could still be numeric.
  *
  * A tuple operand is also an error when one of its components can be
  * neither a number nor a numeric collection or tuple, for example a string
@@ -2526,6 +2533,28 @@ function isCollectionTypeNode(t: Type): boolean {
   );
 }
 
+/**
+ * `checkType()` for an operand at a parameter of a LIBRARY operator that
+ * checks its operands in its `canonical` handler: a value of a value kind
+ * declared with `admittedAs: 'real'` or `'number'` is admitted where its
+ * carrier is (`admitsThroughCarrier()`), as at a parameter that the
+ * signature checks (`docs/plans/2026-10-26-value-kinds.md`, section 4.2,
+ * group 3): `Rational(2.5 ± 0.1)`, `ND(f, 2.5 ± 0.1)`. Not for an
+ * assignment or a declaration, where a measurement is refused by a `real`
+ * type (section 4.2: admission is not subtyping).
+ */
+export function checkOperandType(
+  ce: ComputeEngine,
+  arg: Expression | undefined | null,
+  type: Type
+): Expression {
+  if (arg !== undefined && arg !== null) {
+    const x = arg.canonical;
+    if (x.isValid && admitsThroughCarrier(ce, x.type.type, type)) return x;
+  }
+  return checkType(ce, arg, type);
+}
+
 export function checkType(
   ce: ComputeEngine,
   arg: Expression | undefined | null,
@@ -3546,11 +3575,19 @@ function kindOperandAdmitted(
     const kinds = kindTypeNamesWithHook(ce, hook);
     return hasKindArm(t, kinds) && !numericOperandTypeRefused(t, kinds);
   }
-  // `Clamp` orders its operands, and admits a kind value whose kind type
-  // declares `compare` whatever its `admittedAs`, by the rule of the
-  // arithmetic operators (`docs/plans/2026-10-26-value-kinds.md`, section
-  // 4.4): `Clamp(x, lo, hi)` answers `x` or a bound as written.
-  if (libraryRules && internals?.operatorName === 'Clamp') {
+  // `Clamp`, `ElementMax` and `ElementMin` order their operands, and admit
+  // a kind value whose kind type declares `compare` whatever its
+  // `admittedAs`, by the rule of the arithmetic operators
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.4, and decision 8 of
+  // section 13): `Clamp(x, lo, hi)` answers `x` or a bound as written, and
+  // `ElementMin(2 deg, 3)` is `2 deg`.
+  const operatorName = internals?.operatorName;
+  if (
+    libraryRules &&
+    (operatorName === 'Clamp' ||
+      operatorName === 'ElementMax' ||
+      operatorName === 'ElementMin')
+  ) {
     const kinds = kindTypeNamesWithHook(ce, 'compare');
     if (hasKindArm(t, kinds) && !numericOperandTypeRefused(t, kinds))
       return true;
@@ -3965,7 +4002,10 @@ export function validateArguments(
    * is the parameter itself; for an overload set it is the JOIN over every
    * viable arm (§4.3) — never the selected arm's parameter, which would
    * over-constrain the symbol (§4.5). */
-  const inferenceTypeAt = (idx: number, param: Type): Type | undefined => {
+  const inferenceTypeWithKindsAt = (
+    idx: number,
+    param: Type
+  ): Type | undefined => {
     // §4.2 rule 1: never write while a parameter is still open.
     if (paramStillOpen) return undefined;
     if (!viableArms) return param;
@@ -3977,6 +4017,21 @@ export function validateArguments(
     if (joined !== undefined && freeTypeVariables(joined).size > 0)
       return undefined;
     return joined;
+  };
+  // The type that the narrowing below writes on an operand at a parameter
+  // whose type is `param`. A parameter that names a kind type beside other
+  // types (`complex | quantity` at `Sin` and `Abs`) admits a value of the
+  // kind, but a use there is no evidence that a valueless symbol holds one:
+  // `Abs(x)` gives `x` the type `complex | infinity`, not `complex |
+  // infinity | quantity`, which would make `x` a possible quantity (it would
+  // keep the number rules away from `x - x`). A parameter that is only kind
+  // types (`residue`) gives its type.
+  const kinds = kindTypeNames(ce);
+  const inferenceTypeAt = (idx: number, param: Type): Type | undefined => {
+    const t = inferenceTypeWithKindsAt(idx, param);
+    if (t === undefined || !hasKindArm(t, kinds)) return t;
+    const numeric = withoutKindArms(t, kinds);
+    return numeric === 'never' ? t : numeric;
   };
 
   let i = 0;
@@ -5017,6 +5072,30 @@ export function validateArguments(
       if (
         f.kind === 'bound' &&
         nanPolicyAdmitsParam(ops[idx], idx, internals?.nanPolicyAt)
+      ) {
+        deferredIdx.add(idx);
+        continue;
+      }
+      // A value of a value kind declared with `admittedAs: 'real'` or
+      // `'number'` at a type variable whose declared bound admits its carrier
+      // (`(T) -> T where T: number` at `Conjugate`, `Chop`, `Remainder`,
+      // `BaseForm`): the carrier is checked against the bound, as at a
+      // ground parameter (`admitsThroughCarrier()`), and the call is typed
+      // by the rules of the kinds, not by `T`
+      // (`docs/plans/2026-10-26-value-kinds.md`, section 4.2 and A14 of
+      // section 13). A function with a body admits a kind value only by type
+      // (decision B).
+      if (
+        f.kind === 'bound' &&
+        !internals?.userFunction &&
+        ops[idx] !== undefined &&
+        admitsThroughCarrier(
+          ce,
+          ops[idx].type.type,
+          f.expected,
+          isThreadableAt(threadable, idx),
+          stripMissing?.(idx) === true
+        )
       ) {
         deferredIdx.add(idx);
         continue;

@@ -219,6 +219,7 @@ import {
   indeterminateFormAnswer,
   isUnorderedSet,
   integerRangeElements,
+  kindValueIsNaN,
 } from './type-guards.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { realExponentValue } from './imaginary-part.js';
@@ -346,8 +347,12 @@ import {
   kindArithmetic,
   type KindApplyAnswer,
 } from './kind-dispatch.js';
-import { isKindValue } from './kind-compare.js';
-import { applySiteOperands, applySiteResultType } from './apply-site.js';
+import { isKindValue, kindOfValue } from './kind-compare.js';
+import {
+  applySiteOperands,
+  applySiteOperandsOfValues,
+  applySiteResultType,
+} from './apply-site.js';
 import {
   kindTypeNames,
   kindTypesOfHeadName,
@@ -2644,62 +2649,50 @@ export class BoxedFunction
   }
 
   /**
-   * The nominal value of a `Measurement(value, error)`, or `undefined` for
-   * every other operator.
+   * The number that this expression stands for when it is a value of a
+   * kind whose `arithmetic` declares `numericValue` (the nominal of a
+   * `Measurement`), else `undefined`.
    *
-   * `Measurement` types as its nominal's scalar type (see `measurementType()`),
-   * so `Integrate(…).N()` reports `real` and `isNumber === true`. The
-   * numeric read surface has to honor that: a head that claims to be a real
-   * number and then answers `NaN` to every numeric accessor is not a strict
-   * contract, it is an unfinished one — and the failure is silent, because a
-   * consumer reading `.re` cannot tell a poisoned read from a genuine `NaN`.
-   * So the numeric accessors below project the nominal; the uncertainty stays
-   * reachable through `.ops`/`op2` (after an `isFunction()` narrow) and the
-   * MathJSON. `re`/`im` are the channel, and they are sufficient: a
-   * `Measurement` is a quadrature result, so its nominal is never an exact
-   * number.
-   *
-   * Deliberately NOT projected, all three for the same reason — a `Measurement`
-   * is a FUNCTION expression, and the number-literal surface belongs behind the
-   * `isNumber()` guard, which narrows on expression kind:
-   * - `numericValue`, declared only on `NumberLiteralInterface`. Projecting it
-   *   would advertise an exact numeric representation this expression does not
-   *   have, on a surface a `Measurement` cannot legitimately narrow to.
-   * - `isNumberLiteral`, for the same reason — claiming it would hand callers a
-   *   `BoxedNumber` interface this expression does not implement.
-   * - `value`, documented as the expression itself for a literal and
-   *   `undefined` for a symbolic expression; a `Measurement` is the latter.
+   * Only the numeric accessors below project it: `re`, `im`, `bignumRe`,
+   * `bignumIm` and `valueOf()`. A consumer that reads `.re` of the result of
+   * a numeric quadrature (a measurement under `.N()`) gets the nominal, not
+   * `NaN`; the uncertainty stays reachable through the operands and the
+   * MathJSON. The FACT queries (`sgn`, `isPositive`, `isInteger`,
+   * `isFinite`, …) do not project it and stay `undefined` for a value of a
+   * kind, so that no canonical fold of the numbers applies to it. A kernel
+   * that would read `.re` of a measurement operand does not see one: the
+   * `apply` dispatch of the kinds runs before the `evaluate` handler at
+   * every operator that admits the measurement.
+   * (Plan: `docs/plans/2026-10-26-value-kinds.md`, section 13.2.)
    */
-  private get _measurementNominal(): Expression | undefined {
-    if (this._operator !== 'Measurement' || this._ops.length === 0)
-      return undefined;
-    return this._ops[0];
+  private get _kindNumericValue(): Expression | undefined {
+    const arithmetic = kindOfValue(this);
+    return arithmetic?.numericValue?.call(arithmetic, this);
   }
 
   get re(): number {
-    return this._measurementNominal?.re ?? super.re;
+    return this._kindNumericValue?.re ?? super.re;
   }
 
   get im(): number {
-    return this._measurementNominal?.im ?? super.im;
+    return this._kindNumericValue?.im ?? super.im;
   }
 
   get bignumRe(): BigDecimal | undefined {
-    return this._measurementNominal?.bignumRe ?? super.bignumRe;
+    const nominal = this._kindNumericValue;
+    return nominal !== undefined ? nominal.bignumRe : super.bignumRe;
   }
 
   get bignumIm(): BigDecimal | undefined {
-    return this._measurementNominal?.bignumIm ?? super.bignumIm;
+    const nominal = this._kindNumericValue;
+    return nominal !== undefined ? nominal.bignumIm : super.bignumIm;
   }
 
   valueOf(): number | number[] | number[][] | number[][][] | string | boolean {
-    return this._measurementNominal?.valueOf() ?? super.valueOf();
+    return this._kindNumericValue?.valueOf() ?? super.valueOf();
   }
 
   get sgn(): Sign | undefined {
-    const nominal = this._measurementNominal;
-    if (nominal) return nominal.sgn;
-
     // Keyed on the engine generation unconditionally: an all-constant, pure
     // node's answer still moves when its OPERATOR's definition is rewritten
     // in place, so a generation-independent key would never expire. The full
@@ -2719,6 +2712,11 @@ export class BoxedFunction
   }
 
   get isNaN(): boolean | undefined {
+    // A value of a kind whose `isNaN` hook says it stands for no value (a
+    // measurement with a `NaN` nominal, a quantity with a `NaN` magnitude)
+    // answers `true`, as the extrema and the comparisons already read it
+    // (`kindValueIsNaN()`); the expression and the hook must agree.
+    if (kindValueIsNaN(this)) return true;
     if (!this.isNumber) return false;
     return undefined; // We don't know until we evaluate
   }
@@ -3013,6 +3011,16 @@ export class BoxedFunction
   neg(): Expression {
     if (!(this.isCanonical || this.isStructural))
       throw new Error('Not canonical');
+    // A value of a kind (a measurement, a residue class, a quantity) is NOT
+    // given to the `negate` hook of its kind here, unlike the other public
+    // methods (`.add()`, `.mul()`, `.sqrt()`, …), which fold kind values.
+    // Canonicalization calls `.neg()` for `a - b`, and the `add` hook of a
+    // kind must then see the term as written, `Negate(b)`, in
+    // `ops.written`: the sum of temperatures with an offset reads the sign
+    // of each term there (`20 degC - 5 degC` is `15 K`, not the sum of
+    // `20 degC` and the temperature `-5 degC`). So `c.neg()` is `Negate(c)`,
+    // and `Negate(c).evaluate()` runs the `negate` hook.
+    // (Plan: `docs/plans/2026-10-26-value-kinds.md`, section 4.4 step 4a.)
     return negate(this);
   }
 
@@ -7487,7 +7495,9 @@ export class BoxedFunction
   /**
    * The answer of the `apply` dispatch of the value kinds for this call
    * (`kindApply()`, `kind-dispatch.ts`), or `undefined` when this call is
-   * not an apply site (`applySiteOperands()`) or the dispatch leaves the
+   * not an apply site, by the types of its operands
+   * (`applySiteOperands()`) or by their values
+   * (`applySiteOperandsOfValues()`), or the dispatch leaves the
    * call to the handler with its own operands. `operands` are the evaluated
    * operands the handler would receive; `tail` the operands as evaluated
    * by the call, aligned with the operands as written when it has as many.
@@ -7500,7 +7510,10 @@ export class BoxedFunction
     tail: ReadonlyArray<Expression>,
     numericApproximation: boolean
   ): KindApplyAnswer | undefined {
-    const sites = applySiteOperands(this);
+    let sites = applySiteOperands(this);
+    // An operand typed as a number whose value is a value of a kind (the
+    // quadrature of an integral is a measurement under `.N()`).
+    if (sites.length === 0) sites = applySiteOperandsOfValues(this, operands);
     if (sites.length === 0) return undefined;
     return kindApply(
       this.engine,

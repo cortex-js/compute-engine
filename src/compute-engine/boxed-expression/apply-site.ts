@@ -30,7 +30,12 @@ import {
   isApplySite,
   kindCarrierOperands,
 } from './kind-admission.js';
-import { kindGeneration, someKindAdmittedByCarrier } from './value-kinds.js';
+import {
+  engineHasKindValues,
+  kindGeneration,
+  someKindAdmittedByCarrier,
+} from './value-kinds.js';
+import { isKindValue } from './kind-compare.js';
 import { isFunction } from './type-guards.js';
 import { describe } from './operand-descriptor.js';
 import {
@@ -90,32 +95,76 @@ function applySite(expr: Expression): ApplySiteMemo | undefined {
   )
     return memo;
 
-  let operands: ReadonlyArray<number> = NONE;
-  let siteArm: Type | undefined;
-  if (types.some((t) => hasCarrierKindArm(ce, t))) {
-    const sig = def.signature.type;
-    let arm: Type | undefined = sig;
-    const arms = overloadArms(sig);
-    if (arms !== undefined) {
-      const recorded = (expr as { _resolvedOverload?: OverloadResolution })
-        ._resolvedOverload;
-      arm = (
-        recorded ??
-        resolveOverload(ce, ops, arms, {
-          lazy: def.lazy,
-          threadable: def.broadcastable,
-          couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
-        })
-      ).selected;
-    }
-    if (arm !== undefined && isApplySite(ce, def, arm, types)) {
-      operands = kindCarrierOperands(ce, def, arm, types);
-      siteArm = arm;
-    }
-  }
-  const result = { generation, types, operands, arm: siteArm };
+  const recorded = (expr as { _resolvedOverload?: OverloadResolution })
+    ._resolvedOverload;
+  const site = siteOfOperands(ce, def, ops, types, recorded);
+  const result = { generation, types, ...site };
   MEMO.set(expr, result);
   return result;
+}
+
+/**
+ * The operands that make a call of the operator `def` with the operands
+ * `ops`, of types `types`, an apply site, and the signature arm the call
+ * resolves to (`recorded`, the arm the call was validated against, or the
+ * arm `resolveOverload()` selects); no operand when it is not an apply site.
+ */
+function siteOfOperands(
+  ce: ComputeEngine,
+  def: NonNullable<Expression['operatorDefinition']>,
+  ops: ReadonlyArray<Expression>,
+  types: ReadonlyArray<Type>,
+  recorded: OverloadResolution | undefined
+): { operands: ReadonlyArray<number>; arm: Type | undefined } {
+  if (!types.some((t) => hasCarrierKindArm(ce, t)))
+    return { operands: NONE, arm: undefined };
+  const sig = def.signature.type;
+  let arm: Type | undefined = sig;
+  const arms = overloadArms(sig);
+  if (arms !== undefined) {
+    arm = (
+      recorded ??
+      resolveOverload(ce, ops, arms, {
+        lazy: def.lazy,
+        threadable: def.broadcastable,
+        couldBeUnkeyedCollection: couldBeUnkeyedCollectionOperand,
+      })
+    ).selected;
+  }
+  if (arm === undefined || !isApplySite(ce, def, arm, types))
+    return { operands: NONE, arm: undefined };
+  return { operands: kindCarrierOperands(ce, def, arm, types), arm };
+}
+
+/**
+ * The indices of the operands that make the call `expr` an apply site when
+ * its operands have the values `values`, for a call that is not an apply
+ * site by the types of its operands as written (`applySiteOperands()`).
+ *
+ * An operand typed as a number can have a value of a kind when it is
+ * evaluated: a definite integral is typed `number`, and its numeric
+ * quadrature under `.N()` is a measurement, so `Real(∫₀^π e^(ix) dx)` meets
+ * a measurement only then. The kind of that value decides the call as for
+ * an operand written with it (`docs/plans/2026-10-26-value-kinds.md`,
+ * section 4.3), so that the `apply` hook, and not the operator's handler,
+ * computes the value. Empty when no value is, or holds, a value of a kind
+ * admitted through its carrier. The answer is not memoized: the values
+ * change with each evaluation.
+ */
+export function applySiteOperandsOfValues(
+  expr: Expression,
+  values: ReadonlyArray<Expression>
+): ReadonlyArray<number> {
+  if (!isFunction(expr) || values.length === 0) return NONE;
+  const def = expr.operatorDefinition;
+  if (def === undefined || def.lazy || def.evaluate === undefined) return NONE;
+  const ce = expr.engine as ComputeEngine;
+  if (!someKindAdmittedByCarrier(ce) || !engineHasKindValues(ce)) return NONE;
+  // Only a value of a kind, or a collection, can hold a value of a kind.
+  if (!values.some((x) => isKindValue(x) || x.isCollection === true))
+    return NONE;
+  const types = values.map((x) => x.type.type);
+  return siteOfOperands(ce, def, values, types, undefined).operands;
 }
 
 /** True when the call `expr` is an apply site for a value kind

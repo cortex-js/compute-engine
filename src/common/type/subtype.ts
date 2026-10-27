@@ -165,6 +165,14 @@ const PRIMITIVE_SUBTYPES: Record<PrimitiveType, PrimitiveType[]> = {
   // no entry but `value` (through `VALUE_TYPES`) and so disjoint from every
   // numeric type, which is what keeps the number rules away from a class.
   residue: [],
+  // A measurement (a nominal value with a standard uncertainty): an atom with
+  // no subtypes, listed by no entry but `value`, and so disjoint from every
+  // numeric type, as `residue` is.
+  measurement: [],
+  // A quantity (a magnitude with a physical unit): an atom with no subtypes,
+  // listed by no entry but `value`, and so disjoint from every numeric type,
+  // as `residue` is.
+  quantity: [],
   // A type value: an atom with no subtypes, like `regexp` — a reified type
   // expression is not text, not a number, and not a collection of anything.
   type: [],

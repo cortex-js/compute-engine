@@ -1895,6 +1895,15 @@ export interface ArithmeticContext {
    * kind whose values carry a float (a measurement, an interval) returns the
    * numeric form. The caller does not apply `.N()` to the result. */
   readonly numericApproximation: boolean;
+  /** For the `compare` hook only: the tolerance of the caller, when it
+   * compares within a tolerance. `.is()` gives the `tolerance` argument of
+   * the call, or `engine.tolerance` when the call has none (`.is()` is the
+   * comparison within a tolerance, also for two exact values). `undefined`
+   * for every other comparison (the relational operators, `isEqual()`,
+   * `isLess()`, `Max`, `Min`, `Sort`, …): the hook then applies its own
+   * rule, usually two exact values compared exactly and a float within
+   * `engine.tolerance`. */
+  readonly tolerance?: number;
 }
 
 /**
@@ -2095,15 +2104,58 @@ export interface ArithmeticDefinition {
 
   /**
    * The order of two values of which at least one is of this kind, for the
-   * comparison operators, `Max`, `Min`, `Sort`, `Clamp` and the comparison
-   * methods: `-1`, `0`, `1`, or `undefined` when the two are not comparable.
+   * comparison operators, `Max`, `Min`, `ElementMax`, `ElementMin`, `Sort`,
+   * `Clamp` and the comparison methods:
+   *
+   * - `-1`, `0` or `1`: the order of the two values;
+   * - `'unordered'`: the two values are known and have no order (a value
+   *   with a complex or `NaN` nominal). The four order operators (`Less`,
+   *   `LessEqual`, `Greater`, `GreaterEqual`) answer `False`, as they do for
+   *   a complex number; `Equal` and `NotEqual` ask the `eq` handler of the
+   *   head definitions; `Max`, `Min` and `Sort` leave the call unevaluated;
+   * - `undefined`: the two values are not comparable (a value of another
+   *   kind, a symbol with no value). An order comparison stays unevaluated,
+   *   `Equal` and `NotEqual` ask the `eq` handlers.
+   *
    * A kind without `compare` has no order.
    */
   compare?(
     a: KindOperand,
     b: KindOperand,
     context: ArithmeticContext
-  ): -1 | 0 | 1 | undefined;
+  ): -1 | 0 | 1 | 'unordered' | undefined;
+
+  /**
+   * Whether the value `value` of this kind is exact, for the rule that an
+   * inexact operand turns an `Indeterminate` answer into `NaN`
+   * (`Max(x, Indeterminate)` is `NaN` when `x` is inexact). Absent: a value
+   * of the kind is exact. A measurement is never exact.
+   */
+  isExact?(value: Expression): boolean;
+
+  /**
+   * Whether the value `value` of this kind stands for no value, as the
+   * number `NaN` does: a measurement with a `NaN` nominal, a quantity with a
+   * `NaN` magnitude. Such a value follows the rule of `NaN` at `Max`, `Min`,
+   * `ElementMax`, `ElementMin` and `Clamp`: `Max(Quantity(NaN, m), 2 m)` is
+   * `NaN`, as `Max(NaN, 2)` is. Absent: no value of the kind is `NaN`.
+   */
+  isNaN?(value: Expression): boolean;
+
+  /**
+   * The number that the value `value` of this kind stands for, when the
+   * values of the kind stand for a number: the nominal of a measurement.
+   * The numeric accessors of the value read it: `re`, `im`, `bignumRe`,
+   * `bignumIm` and `valueOf()` (`Measurement(2.5, 0.1).re` is `2.5`, and a
+   * complex nominal gives its real and imaginary parts). Absent, or
+   * `undefined`: those accessors answer as for any other expression that
+   * is not a number (`re` is `NaN`).
+   *
+   * The FACT queries (`isPositive`, `sgn`, `isInteger`, `isFinite`, …) do
+   * not read it: they stay `undefined` for a value of a kind, so that no
+   * canonical fold of the numbers applies to it.
+   */
+  numericValue?(value: Expression): Expression | undefined;
 
   /**
    * Called in place of the `evaluate` handler of `operator` when at least one

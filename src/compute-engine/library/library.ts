@@ -18,6 +18,7 @@ import { STATISTICS_LIBRARY } from './statistics.js';
 import { DISTRIBUTIONS_LIBRARY } from './distributions.js';
 import { TRIGONOMETRY_LIBRARY } from './trigonometry.js';
 import { UNITS_LIBRARY, canonicalUnit } from './units.js';
+import { QUANTITY_LIBRARY } from './quantity-kind.js';
 import { FRACTALS_LIBRARY } from './fractals.js';
 
 import type { LibraryCategory } from '../latex-syntax/types.js';
@@ -166,7 +167,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
   {
     name: 'units',
     requires: ['arithmetic'],
-    definitions: UNITS_LIBRARY,
+    definitions: [UNITS_LIBRARY, QUANTITY_LIBRARY],
   },
   {
     name: 'physics',
@@ -176,7 +177,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Speed of light in vacuum',
         isConstant: true,
         wikidata: 'Q2111',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(299792458),
@@ -187,7 +188,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Planck constant',
         isConstant: true,
         wikidata: 'Q122894',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(6.62607015e-34),
@@ -198,7 +199,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Vacuum permeability',
         isConstant: true,
         wikidata: 'Q1515261',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(1.25663706212e-6),
@@ -212,7 +213,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Standard acceleration due to gravity',
         isConstant: true,
         wikidata: 'Q30006',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(9.80665),
@@ -226,7 +227,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Elementary electric charge',
         isConstant: true,
         wikidata: 'Q2101',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [ce.number(1.602176634e-19), unit(ce, 'C')]),
       },
@@ -234,7 +235,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Boltzmann constant',
         isConstant: true,
         wikidata: 'Q5962',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(1.380649e-23),
@@ -245,7 +246,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Avogadro constant',
         isConstant: true,
         wikidata: 'Q6203',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(6.02214076e23),
@@ -256,7 +257,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Vacuum permittivity (electric constant)',
         isConstant: true,
         wikidata: 'Q6158',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(8.8541878128e-12),
@@ -267,7 +268,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Newtonian constant of gravitation',
         isConstant: true,
         wikidata: 'Q18373',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(6.6743e-11),
@@ -284,7 +285,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Stefan-Boltzmann constant',
         isConstant: true,
         wikidata: 'Q51374',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(5.670374419e-8),
@@ -301,7 +302,7 @@ export const STANDARD_LIBRARIES: LibraryDefinition[] = [
         description: 'Molar gas constant',
         isConstant: true,
         wikidata: 'Q182333',
-        type: 'value',
+        type: 'quantity',
         value: (ce) =>
           constantQuantity(ce, [
             ce.number(8.314462618),

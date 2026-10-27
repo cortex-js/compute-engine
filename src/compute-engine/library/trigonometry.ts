@@ -83,11 +83,6 @@ import {
   iv,
   type RealDomain,
 } from './type-handlers.js';
-import {
-  isMeasurement,
-  measurementArctan2,
-  measurementUnaryByHead,
-} from './measurement-arithmetic.js';
 import { trigExpand, trigToExp, trigReduce } from '../symbolic/trig-rewrite.js';
 import { angularChainFactor } from '../symbolic/angular-unit.js';
 import { exactUnitConversion, getUnitScale } from './unit-data.js';
@@ -692,14 +687,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // checks a `canonical`-handler head against its declaration; the
       // factory's evaluate handler enforces the same carrier for a
       // non-finite value that only evaluation reveals. `NaN`
-      // propagates by the mechanical default (finite complex carrier,
-      // numeric result). The RESULT stays the wide `number` on purpose:
-      // the compiled lanes' kind-preservation discipline documents its
+      // propagates (declared by `trigFunction()`). The RESULT stays the
+      // wide `number` on purpose: the compiled lanes' kind-preservation
+      // discipline documents its
       // reliance on it (`resultIsComplexValued`,
       // `compilation/javascript-target.ts` — a declared `complex` result
       // flips synthesized callback wrappers to the complex kernel), and
-      // the per-call sharpness lives in the type handler.
-      signature: '(complex) -> number',
+      // the per-call sharpness lives in the type handler. The parameter
+      // names `quantity`, as for every head of `trigFunction()`.
+      signature: '(complex | quantity) -> number',
     },
   },
   {
@@ -731,9 +727,15 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // propagates (explicit: the carrier is not a subtype of `complex`).
       // The result stays the wide `number` (a complex argument gives a
       // complex value; the type handler carries the per-call sharpness).
-      signature: '(complex | signed_infinity) -> number',
+      // The parameter names `quantity` too, as for the other trigonometric
+      // functions (`trigFunction()`): `Arctan(2 deg)` is `Arctan(π/90)`.
+      signature: '(complex | signed_infinity | quantity) -> number',
       nanBehavior: 'propagate',
       canonical: (ops, { engine: ce }) => {
+        if (ops.length === 1) {
+          const radians = angularQuantityToRadians(ops[0]);
+          if (radians) return ce._fn('Arctan', [radians]);
+        }
         ops = ce.strict ? flatten(ops) : checkArity(ce, ops, 1);
         // The validation of a head with no `canonical` handler, which also
         // types a valueless symbol operand from the signature (`y` in
@@ -777,11 +779,9 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         ([x], { numericApproximation, engine, expression }) => {
           const nonNumeric = nonNumericOperandError(engine, [x]);
           if (nonNumeric !== undefined) return nonNumeric;
-          // A `Measurement` argument: arctan(a ± σ) is arctan(a) ± σ/(1 + a²)
-          // (`measurementUnaryByHead`; this head is not built by
-          // `trigFunction`, which carries the hook for the others).
-          const m = measurementUnaryByHead(engine, 'Arctan', x);
-          if (m !== undefined) return numericApproximation ? m.N() : m;
+          // A quantity that only the evaluation reveals: see `trigFunction()`.
+          if (isFunction(x, 'Quantity'))
+            return quantityTrigValue('Arctan', x, numericApproximation);
           // An argument outside the range of a double, read from the operand
           // before its numeric evaluation (`.N()` at machine precision makes
           // `10^{400}·(1 + i)` the double `~oo`).
@@ -893,11 +893,6 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
         return ce.function('Divide', [partial, angularChainFactor(ce)]);
       },
       evaluate: guardDigitsN(([y, x], { engine: ce, numericApproximation }) => {
-        // A `Measurement` operand: the angle of the nominals, with the
-        // uncertainty propagated through both partial derivatives
-        // (`measurementArctan2`).
-        const m = measurementArctan2(ce, y, x);
-        if (m !== undefined) return numericApproximation ? m.N() : m;
         // NaN in → NaN out, in BOTH the evaluate and the N() paths. A NaN
         // operand is not finite, so without this early return it would slip
         // through the isFinite/isPositive guards below (isPositive is
@@ -1044,7 +1039,8 @@ export const TRIGONOMETRY_LIBRARY: SymbolDefinitions[] = [
       // seam of a `canonical`-handler head), and in the factory's evaluate
       // handler for a value only evaluation reveals. The result stays the
       // wide `number` for the same compiled-lane reason as `Sin` above.
-      signature: '(complex) -> number',
+      // The parameter names `quantity`, as for `Sin`.
+      signature: '(complex | quantity) -> number',
     },
 
     // `Arsinh(±∞) = ±∞` (odd, increasing on the whole real line); the two
@@ -1969,6 +1965,20 @@ function angularQuantityToRadians(expr: Expression): Expression | null {
   if (!ANGULAR_UNITS.has(unitSymbol)) return null;
 
   const m = expr.op1;
+  // A magnitude that is a `Measurement` (`(30 ± 0.1) deg`) is scaled as a
+  // measurement: the `multiply` hook of the measurement kind scales the
+  // nominal value and the uncertainty, and the trigonometric function then
+  // applies to the measurement through its `apply` hook, which propagates
+  // the uncertainty. Reading `.re` would keep only the nominal value.
+  if (isFunction(m, 'Measurement')) {
+    const map = exactUnitConversion(unitSymbol, 'rad');
+    if (map === null || map.offset[0] !== 0n) return null;
+    const ce = expr.engine;
+    const factor: Expression[] = [ce.number(map.factor)];
+    if (map.piPower !== 0)
+      factor.push(ce.function('Power', [ce.Pi, ce.number(map.piPower)]));
+    return m.mul(ce.function('Multiply', factor));
+  }
   if (
     (isNumber(m) && m.isExact && m.isFinite === true) ||
     (!isNumber(m) && isExactConstantExpression(m))
@@ -1990,6 +2000,26 @@ function angularQuantityToRadians(expr: Expression): Expression | null {
   if (!Number.isFinite(magnitude)) return null;
 
   return expr.engine.number(magnitude * scale);
+}
+
+/**
+ * The value of the trigonometric function `operator` of the quantity `q`
+ * when `q` is an operand that only the evaluation revealed (the value of a
+ * symbol): the function of the angle in radians when `q` is an angle
+ * (`angularQuantityToRadians()`), evaluated (or approximated under `.N()`);
+ * `undefined` (the call stays unevaluated) for another quantity
+ * (`Sin(2 m)`).
+ */
+function quantityTrigValue(
+  operator: string,
+  q: Expression,
+  numericApproximation: boolean | undefined
+): Expression | undefined {
+  const radians = angularQuantityToRadians(q);
+  if (radians === null) return undefined;
+  return q.engine
+    .function(operator, [radians])
+    .evaluate({ numericApproximation: numericApproximation === true });
 }
 
 /**
@@ -2161,9 +2191,9 @@ function trigFunction(
   // and again at EVALUATION by the head itself for a non-finite value only
   // evaluation reveals, where an in-carrier infinity folds to the head's
   // value (`nonFiniteTrigValue`). `NaN` is NOT an error — it
-  // propagates: derived for the `complex` carrier, declared explicitly for
-  // the extended carriers (which are not subtypes of `complex`, so the
-  // mechanical default there would be `reject`).
+  // propagates, declared explicitly for every carrier: the parameter also
+  // names `quantity`, so it is not a subtype of `complex`, and the
+  // mechanical default would be `reject`.
   //
   // Every call site passes the carrier explicitly; the parameter defaults
   // to the MOST RESTRICTIVE carrier (TypeScript disallows a required
@@ -2179,8 +2209,15 @@ function trigFunction(
     complexity,
     description,
     broadcastable: true,
-    signature: `(${carrier}) -> number`,
-    ...(carrier !== 'complex' ? { nanBehavior: 'propagate' as const } : {}),
+    // The parameter names `quantity` too: an angle (`Sin(30 deg)`) is
+    // converted to radians at canonicalization, and another quantity
+    // (`Sin(2 m)`) is admitted and stays unevaluated, typed `number`
+    // (`QUANTITY_ARITHMETIC`, `quantity-kind.ts`).
+    signature: `(${carrier} | quantity) -> number`,
+    // `NaN` propagates. It is declared: the parameter, with its `quantity`
+    // arm, is not a subtype of `complex`, so the policy derived from the
+    // signature would be `reject`.
+    nanBehavior: 'propagate' as const,
     sgn: ([x]) => trigSign(operator, x),
     canonical: (ops, { engine: ce }) => {
       if (ops.length === 1) {
@@ -2202,6 +2239,12 @@ function trigFunction(
         // `Sin(At(["a", 2], 1))` — which no boxing-time check can settle.
         const nonNumeric = nonNumericOperandError(engine, [x]);
         if (nonNumeric !== undefined) return nonNumeric;
+        // A quantity that only the evaluation reveals (the value of a
+        // symbol): an angle is converted to radians, as the canonical form
+        // converts a quantity written as the operand; another quantity
+        // leaves the call unevaluated.
+        if (isFunction(x, 'Quantity'))
+          return quantityTrigValue(operator, x, numericApproximation);
         // An inverse function at an argument outside the range of a double:
         // at machine precision `.N()` made `10^{400}` the double `+∞`, which
         // the branch below would read as an infinite argument. The operand
@@ -2238,16 +2281,6 @@ function trigFunction(
           // (`holdsShadowedPi()`).
           if (v !== undefined && !holdsShadowedPi(engine, v)) return v;
           return engine._fn(operator, [x]);
-        }
-        // Measurement error propagation for every head built here (circular,
-        // hyperbolic and inverse functions), from the derivative table. Guard
-        // on the evaluated argument being a Measurement. Without this a
-        // measurement fell through to the numeric kernel, which read it as `0`
-        // (`Sec(Measurement(0.7468, 0.001))` was `1`).
-        const evalX = x.evaluate();
-        if (isMeasurement(evalX)) {
-          const r = measurementUnaryByHead(engine, operator, evalX);
-          if (r !== undefined) return numericApproximation ? r.N() : r;
         }
         // Exact hyperbolic values (`sinh(0) = 0`, `coth(0) = ~oo`,
         // `artanh(1) = +oo`, ...), ahead of the numeric branch so `.N()` agrees

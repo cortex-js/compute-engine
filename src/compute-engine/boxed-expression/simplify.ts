@@ -15,6 +15,7 @@ import {
   RESIDUE_ARITHMETIC,
 } from './residue-class.js';
 import { isKindType } from './value-kinds.js';
+import { withOperandsWrittenBefore } from './kind-dispatch.js';
 import { isApplySiteCall } from './apply-site.js';
 import {
   rebindEscaping,
@@ -987,7 +988,13 @@ function simplifyOperands(
   // `expr.explain()`), the operand-level sub-chains are lifted and appended
   // here to enrich the `'simplified operands'` aggregate step. When undefined,
   // this function is byte-for-byte the plain simplify path.
-  substepsOut?: RuleSteps
+  substepsOut?: RuleSteps,
+  // Out-param: when provided, each operand that the simplification changed
+  // and that holds a kind value is recorded, with the operand as it was
+  // written before the simplification. The kind step of
+  // `simplifyExpression()` gives these to the hooks of the kinds as the
+  // written operands (`withOperandsWrittenBefore()`, `kind-dispatch.ts`).
+  writtenBeforeOut?: Map<Expression, Expression>
 ): Expression {
   if (!isFunction(expr)) return expr;
 
@@ -1122,6 +1129,7 @@ function simplifyOperands(
       // Fold the constant subexpressions of every other operand
       else simplifiedOps.push(foldConstants(x));
     }
+    recordWrittenBefore(ops, simplifiedOps, writtenBeforeOut);
     return build(simplifiedOps);
   }
 
@@ -1178,6 +1186,7 @@ function simplifyOperands(
     }
     const changed = simplifiedOps.some((op, i) => !sameSyntactic(op, ops[i]));
     if (!changed) return expr;
+    recordWrittenBefore(ops, simplifiedOps, writtenBeforeOut);
     return build(simplifiedOps);
   }
 
@@ -1202,7 +1211,26 @@ function simplifyOperands(
       );
     else simplifiedOps.push(x);
   }
+  recordWrittenBefore(ops, simplifiedOps, writtenBeforeOut);
   return build(simplifiedOps);
+}
+
+/**
+ * Record in `out` each operand of `simplified` that differs from the operand
+ * at the same position of `written` and that holds a kind value, with that
+ * written operand (the out-param of `simplifyOperands()`). Only an operand
+ * that holds a kind value is recorded: a hook of a kind reads it, and such an
+ * operand is never a shared number literal or symbol.
+ */
+function recordWrittenBefore(
+  written: ReadonlyArray<Expression>,
+  simplified: ReadonlyArray<Expression>,
+  out: Map<Expression, Expression> | undefined
+): void {
+  if (out === undefined || written.length !== simplified.length) return;
+  simplified.forEach((x, i) => {
+    if (x !== written[i] && holdsKindValue(x)) out.set(x, written[i]);
+  });
 }
 
 function simplifyExpression(
@@ -1258,7 +1286,8 @@ function simplifyExpression(
     : undefined;
   const original = expr;
   const stepsBefore = steps;
-  const alt = simplifyOperands(expr, options, substeps);
+  const writtenBefore = new Map<Expression, Expression>();
+  const alt = simplifyOperands(expr, options, substeps, writtenBefore);
   const operandsChanged = !sameSyntactic(alt, expr);
   if (operandsChanged) {
     const aggregate: RuleStep =
@@ -1322,7 +1351,15 @@ function simplifyExpression(
         ]);
       }
     }
-    const folded = value.evaluate();
+    // A hook reads in `ops.written[i]` the operand as it was written before
+    // the simplification of the operands, as under `evaluate()`: the term
+    // `Negate(Celsius(5))` of a difference, not the `Celsius(-5)` that the
+    // simplification made of it when the kind gives a value for the
+    // negation.
+    const folded =
+      writtenBefore.size === 0
+        ? value.evaluate()
+        : withOperandsWrittenBefore(writtenBefore, () => value.evaluate());
     if (sameSyntactic(folded, expr)) return steps;
     return [
       ...steps,

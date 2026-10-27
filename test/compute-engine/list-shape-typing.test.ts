@@ -104,11 +104,14 @@ describe('Phase A — honest List shape typing (§D3 normative table)', () => {
     expect(e.isValid).toBe(true);
   });
 
-  test('[SpeedOfLight, PlanckConstant] (value-typed) → list<value>, no shape', () => {
-    // Precondition: these physics constants type `value`.
-    expect(ce.symbol('SpeedOfLight').type.toString()).toBe('value');
+  test('[SpeedOfLight, PlanckConstant] (quantity-typed) → list<quantity^2>, not a vector', () => {
+    // Precondition: these physics constants type `quantity` (a value kind
+    // since phase 2 of `docs/plans/2026-10-26-value-kinds.md`). A kind cell
+    // carries dimensions, but a quantity is not a number, so the list is not
+    // a `vector`.
+    expect(ce.symbol('SpeedOfLight').type.toString()).toBe('quantity');
     const t = typeOf(['List', 'SpeedOfLight', 'PlanckConstant']);
-    expect(t).toBe('list<value>');
+    expect(t).toBe('list<quantity^2>');
     expect(
       ce
         .box(['List', 'SpeedOfLight', 'PlanckConstant'])
@@ -402,6 +405,8 @@ describe('a shaped list of unknown rank whose cells may be lists', () => {
     ]);
     expect(rank2.type.matches(ce.type(typeToString(t)))).toBe(true);
     // A cell that cannot be a list keeps the tensor of unknown rank.
-    expect(typeToString(shapedOrPlainListType('integer', null))).toBe('tensor<integer>');
+    expect(typeToString(shapedOrPlainListType('integer', null))).toBe(
+      'tensor<integer>'
+    );
   });
 });

@@ -62,7 +62,6 @@ import {
   kindTypeHasHook,
   kindTypeInfo,
   kindTypeNames,
-  someKindAdmittedByCarrier,
   someKindHasResultType,
 } from './value-kinds.js';
 import {
@@ -174,10 +173,14 @@ export interface BroadcastLiftHooks {
  * number (`Exp`, `Ln`, `Log`): its canonical form admits a value of a kind
  * admitted as a number (`admittedAs: 'real'` or `'number'`,
  * `carrierKindTypeNames()`), as `checkNumericArgs` does with its `carrier`
- * option. `'number'` admits no kind value.
+ * option. `'carrier'` also marks `Conjugate`, whose canonical handler
+ * passes `carrier: true`. `'carrier-power'` marks `Exp2`, whose canonical
+ * handler passes `carrier: 'power'`: it admits a value of a kind admitted
+ * as a number only when the heads of that kind also declare the `power`
+ * hook (`Exp2(x)` is `2^x`). `'number'` admits no kind value.
  */
 const NUMERIC_OPERAND_CHECK: Readonly<
-  Record<string, 'residue' | 'carrier' | 'number'>
+  Record<string, 'residue' | 'carrier' | 'carrier-power' | 'number'>
 > = {
   Add: 'residue',
   Subtract: 'residue',
@@ -191,9 +194,33 @@ const NUMERIC_OPERAND_CHECK: Readonly<
   Exp: 'carrier',
   Ln: 'carrier',
   Log: 'carrier',
-  Exp2: 'number',
+  Exp2: 'carrier-power',
   PlusMinus: 'number',
-  Conjugate: 'number',
+  Conjugate: 'carrier',
+};
+
+/**
+ * The heads of one operand whose library canonical form is a call of a
+ * different head, and which have no `evaluate` handler, so a value of a kind
+ * admitted through its carrier is typed by the head of the canonical form
+ * (`deriveApplicationType()`). Each entry is that head and, when the
+ * canonical form has a second operand, that operand: the base of `Power`,
+ * which comes first, or the base of `Log`, which comes second. The canonical
+ * handlers are in `library/arithmetic.ts`.
+ */
+const CANONICAL_HEAD_OF_KIND_CARRIER_CALL: Readonly<
+  Record<
+    string,
+    readonly [string, ((engine: ComputeEngine) => Expression) | undefined]
+  >
+> = {
+  Exp: ['Power', (engine) => engine.symbol('ExponentialE')],
+  Exp2: ['Power', (engine) => engine.number(2)],
+  Lb: ['Log', (engine) => engine.number(2)],
+  Log2: ['Log', (engine) => engine.number(2)],
+  // `Log(x)` is the base-10 logarithm.
+  Lg: ['Log', undefined],
+  Log10: ['Log', undefined],
 };
 
 /**
@@ -261,16 +288,19 @@ function signatureRefusesOperandType(
     // cells are provably not numbers (`Sin(L)` with `L: list<string>`, the
     // check of `validateThreadableOperand`, `validate.ts`). Any other
     // collection is admitted, as at the boxed route.
-    if (def.broadcastable && typeCouldBeUnkeyedCollection(t))
+    // The parameter is read without the kind types it names beside its
+    // numbers (`complex | quantity` is numeric), and those kinds are cells
+    // like numbers, as the boxed route reads them.
+    if (def.broadcastable && typeCouldBeUnkeyedCollection(t)) {
+      const kinds = kindTypeNames(engine);
       return (
-        isSubtype(param, 'number') &&
+        isSubtype(withoutKindArms(param, kinds), 'number') &&
         collectionCellsProvablyNonNumeric(
           t,
-          hasKindArm(param, kindTypeNames(engine))
-            ? kindTypeNames(engine)
-            : undefined
+          new Set(kindArmNames(param, kinds))
         )
       );
+    }
     // A number at a numeric parameter is admitted, `NaN` and the infinities
     // included: the operator answers for such a point (`Abs(NaN)` is
     // `NaN`), as the signature promises under Contract B
@@ -801,17 +831,37 @@ export function deriveApplicationType(
   // answers for a kind value (`Exp(U)` is `umeasurement`). This route types
   // the same node for an operand that may be a kind value admitted through
   // its carrier. Other operands keep the typing of `Exp`.
+  //
+  // The other heads whose library canonical form is a different head get
+  // the same treatment: `Exp2(x)` is `Power(2, x)`, `Lb(x)` and `Log2(x)`
+  // are `Log(x, 2)`, `Lg(x)` and `Log10(x)` are `Log(x)` (base 10). These
+  // heads have no `evaluate` handler either, so without this rule a
+  // measurement operand was typed with the declared `number`, while the
+  // boxed call is `measurement | number`.
+  //
+  // The test does not ask whether the engine holds a kind value yet
+  // (`someKindAdmittedByCarrier()`): an operand TYPE that names a kind type
+  // is the evidence. A derivation in an engine that has not boxed a
+  // measurement yet gave `number` for `Exp(m)` with `m: measurement`.
+  const canonicalHead = CANONICAL_HEAD_OF_KIND_CARRIER_CALL[operator];
   if (
-    operator === 'Exp' &&
+    canonicalHead !== undefined &&
     operands.length === 1 &&
-    someKindAdmittedByCarrier(engine) &&
     hasCarrierKindArm(engine, operands[0].type) &&
     runsLibraryCanonicalForm(engine, operator, binding.operator)
-  )
-    return deriveApplicationType(engine, 'Power', [
-      describe(engine.symbol('ExponentialE')),
-      operands[0],
-    ]);
+  ) {
+    const [head, other] = canonicalHead;
+    const x = operands[0];
+    return deriveApplicationType(
+      engine,
+      head,
+      other === undefined
+        ? [x]
+        : head === 'Power'
+          ? [describe(other(engine)), x]
+          : [x, describe(other(engine))]
+    );
+  }
 
   // Arithmetic over a tuple with a list coordinate always evaluates to an
   // error, and is typed `error`, as at the call site (`type()` in
@@ -878,7 +928,13 @@ export function deriveApplicationType(
           ? kindTypeNamesWithHook(engine, groupOneHookOf(operator)!)
           : numericCheck === 'carrier'
             ? carrierKindTypeNames(engine)
-            : undefined
+            : numericCheck === 'carrier-power'
+              ? {
+                  has: (name: string) =>
+                    carrierKindTypeNames(engine).has(name) &&
+                    kindTypeNamesWithHook(engine, 'power').has(name),
+                }
+              : undefined
       )
     )
   )
@@ -1511,25 +1567,26 @@ function kindCallResultType(
 ): Type | undefined {
   if (def.lazy || def.evaluate === undefined || operands.length === 0)
     return undefined;
-  // Cheap gate: no kind type is admitted through its carrier, and no call
-  // can be an apply site.
-  if (someKindAdmittedByCarrier(engine)) {
-    const types = operands.map((d) => d.type);
-    if (types.some((t) => hasCarrierKindArm(engine, t))) {
-      const arm = applySiteArmOverTypes(engine, def, types);
-      if (arm !== undefined)
-        return kindApplySiteResultType(
-          engine,
-          operator,
-          arm,
-          operands,
-          kindCarrierOperands(engine, def, arm, types),
-          (i, t) => ({
-            ...describeType(t, operands[i].facts.closed),
-            structureOf: operands[i].structureOf,
-          })
-        );
-    }
+  // The operand types decide, not whether the engine holds a kind value
+  // yet (`someKindAdmittedByCarrier()`): a descriptor typed `measurement` is
+  // the evidence. With that gate, `Ln(m)` with `m: measurement` was typed
+  // `number` in an engine that had not boxed a measurement yet, and
+  // `measurement | number` after.
+  const types = operands.map((d) => d.type);
+  if (types.some((t) => hasCarrierKindArm(engine, t))) {
+    const arm = applySiteArmOverTypes(engine, def, types);
+    if (arm !== undefined)
+      return kindApplySiteResultType(
+        engine,
+        operator,
+        arm,
+        operands,
+        kindCarrierOperands(engine, def, arm, types),
+        (i, t) => ({
+          ...describeType(t, operands[i].facts.closed),
+          structureOf: operands[i].structureOf,
+        })
+      );
   }
   return namedKindResultTypeOverTypes(
     engine,
@@ -1660,23 +1717,28 @@ export function kindApplySiteResultType(
  * ordinary type beside the kind type): a list, a tuple, or a union of them
  * keeps its structure; any other type is a cell. */
 function withCells(shape: Type, cell: Type, join: boolean): Type {
-  const leaf = (t: Type): Type => (join ? widen(t, cell) : cell);
+  return mapCells(shape, (t) => (join ? widen(t, cell) : cell));
+}
+
+/** `shape` with every cell replaced by `leaf(cell)`: a list, a tuple, or a
+ * union of them keeps its structure; any other type is a cell. */
+function mapCells(shape: Type, leaf: (t: Type) => Type): Type {
   if (typeof shape === 'string') return leaf(shape);
   switch (shape.kind) {
     case 'list':
-      return { ...shape, elements: withCells(shape.elements, cell, join) };
+      return { ...shape, elements: mapCells(shape.elements, leaf) };
     case 'tuple':
       return {
         ...shape,
         elements: shape.elements.map((e) => ({
           ...e,
-          type: withCells(e.type, cell, join),
+          type: mapCells(e.type, leaf),
         })),
       };
     case 'union':
       return reduceType({
         kind: 'union',
-        types: shape.types.map((t) => withCells(t, cell, join)),
+        types: shape.types.map((t) => mapCells(t, leaf)),
       });
     default:
       return leaf(shape);
@@ -1724,9 +1786,39 @@ export function namedKindResultTypeOverTypes(
     }
   });
   if (answers.length === 0) return undefined;
-  return answers.length === 1
-    ? answers[0]
-    : reduceType({ kind: 'union', types: answers });
+  const cell =
+    answers.length === 1
+      ? answers[0]
+      : reduceType({ kind: 'union', types: answers });
+  // A collection (or a tuple) at such a parameter of an operator that
+  // broadcasts is mapped over its cells, as a collection of numbers is, so
+  // the answer of the hook is the CELL type of the result, and the operand
+  // keeps its shape: `Sin(list<quantity>)` is `list<number>`,
+  // `Abs(list<quantity^2>)` is `list<quantity^2>`. A cell that may also
+  // hold a value with no kind (`list<quantity | integer>`) keeps the
+  // declared result of the operator beside the answer.
+  if (def.broadcastable === true) {
+    const shaped = operandTypes.findIndex((t, i) => {
+      const param = paramAt(sig, i);
+      return (
+        param !== undefined &&
+        hasKindArm(param, kinds) &&
+        hasKindArm(t, kinds) &&
+        (typeCouldBeUnkeyedCollection(t) || isTupleShapedType(t))
+      );
+    });
+    if (shaped >= 0) {
+      const declared = functionResult(sig) ?? 'unknown';
+      const shape = withoutKindArmsDeep(
+        stripMissingFromType(operandTypes[shaped]),
+        kinds
+      );
+      return mapCells(shape, (t) =>
+        t === 'never' ? cell : widen(declared, cell)
+      );
+    }
+  }
+  return cell;
 }
 
 installOperatorCalleeDerivation((engine, head, args, definition) =>

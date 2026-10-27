@@ -842,7 +842,7 @@ collection operand counts), and the group-2 operators that NAME a kind type
 in a parameter (`Abs`, `Sin`, `Convert` for `quantity`). Every other
 operator (`GCD (any*)`, `List`, `Hold`, a function with a body) uses its own
 type handler on the operand as typed: `GCD(4 ± 0.1, 6)` is typed `integer`
-as today. `Sum`, `Product`, `Total` and `Reduce` over a collection of kind
+as today. `Sum`, `Product` and `Reduce` over a collection of kind
 values are typed as `Add` (`Multiply`) over the element type by the rules
 below (`Sum([c1, c2])` is `residue`; today `number`). For the typing, a
 kind TYPE "has `apply`" or "has `compare`" when ANY registered head of the
@@ -1239,7 +1239,14 @@ exists. This plan meets it as follows:
    parameters of the operators of 4.7. Fixes CE-508.1 to CE-508.4 and
    CE-508.6. Visible changes (section 6), measured before landing.
 3. **The interval value kind.** After the open questions of 4.9 are decided,
-   with the `interval-js` lowering.
+   with the `interval-js` lowering. Prerequisite (2026-10-26): CE-507.8, a
+   decoded-payload cache on a boxed call (a `WeakMap` from the boxed value to
+   its decoded payload, filled on the first decode, never invalidated
+   because boxed expressions are immutable, derived state under the
+   checkpoint model), so that the quantity hooks stop parsing the unit
+   expression on every call and the interval hooks decode `{lo, hi}` once.
+   CE-507.7 (a non-commutative product; PR #482 asks for it) is pinned by the
+   user until after phase 3.
 
 ## 6. Public changes
 
@@ -1316,6 +1323,78 @@ exists. This plan meets it as follows:
   longer simplifies to `1`; `ce.box(['Add', c, q]).type` for a class and a
   quantity is `quantity | residue` (was a wrong list type);
   `Sin(Quantity(2, m))` is typed `number` (was `value`).
+- Phase 2, as implemented (2026-10-26; the CHANGELOG has the same list for
+  hosts). Where this list and the items above differ, this list and section
+  13 hold:
+  - The zero-uncertainty collapse stays (decision 3, A1): `Cos(0 ± 0.1)` and
+    `1 ^ (2 ± 0.1)` are `1`, as before. The item above that says `1 ± 0` is
+    withdrawn. The result of an operator with a measurement operand is typed
+    `number | measurement`, except at `Add`, `Negate`, `PreIncrement`,
+    `PreDecrement`, `Conjugate`, `Real`, `Re` and `Abs`, which keep the
+    uncertainty and are typed `measurement`. `Floor(2.5 ± 0.1)` was typed
+    `integer`.
+  - `.re` and `.im` of a measurement keep the nominal (13.2), through the new
+    optional field `ArithmeticDefinition.numericValue()`. The fact queries
+    (`isPositive`, `sgn`, `isInteger`) of a measurement are `undefined`; they
+    were the facts of the nominal (`Measurement(4, 0.1).isInteger` was
+    `true`).
+  - New public fields: the answer `'unordered'` of `compare` (A6),
+    `ArithmeticDefinition.isExact()` (decision 13),
+    `ArithmeticDefinition.numericValue()`, and `ArithmeticContext.tolerance`
+    (the tolerance of `.is()`, given to `compare`; `undefined` for the other
+    comparisons). `M.is(2.6, 0.2)` for `M = 2.5 ± 0.1` uses the tolerance
+    `0.2`; the tolerance of `.is()` was not given to a kind in phase 1.
+  - Signatures: the 24 trigonometric functions are `(complex | quantity) ->
+    number` (or with `signed_infinity`), `Abs` is
+    `(complex | infinity | quantity) -> number`, `Measurement` is
+    `(value, value) -> measurement` and `Quantity` is
+    `(value, value) -> quantity`. The `incompatible-type` messages of these
+    functions name the `quantity` arm (`Sin("a")` expects
+    `complex | quantity`), and so does the type of `Derivative(Sin)`.
+    `Arctan(2 deg)` folds to `Arctan(π/90)` (decision 15; it stayed as
+    written).
+  - A quantity is refused at boxing by every operator that does not accept
+    it: `Round`, `Floor`, `Sign`, `Exp`, `Hypot`, `InverseHaversine` (they
+    stayed unevaluated or gave a wrong value), and `Mean([2 m, 4 m])` (it
+    stayed unevaluated, typed `number`; ROADMAP CE-507.10).
+  - Measurement values that change: `Floor(2.95 ± 0.1)` was `2` and is
+    unevaluated (decision 1); `Mod(5 ± 0.1, 3)` was `2` and is `2 ± 0.1`
+    (decision 2); `Sqrt(0 ± 0.1)` was `0` and `Arcsin(1 ± 0.1)` was `π/2`,
+    both unevaluated (decision 4); `Arccos(2.5 ± 0.1)` was the bare
+    `1.5668i` and is `1.5668i ± 0.0436` (decision 5);
+    `Binomial(5 ± 0.1, 2)` was `(5 ± 0.1)·((5 ± 0.1) − 1)/2` and
+    `Determinant([[1 ± 0.1, 2], [3, 4]])` was `-2 ± 0.4`, both unevaluated
+    (decision 7); `Degrees((2 + 3i) ± 0.1)` was a complex value with an
+    uncertainty and is an `incompatible-type` error, while `Degrees(2 + 3i)`
+    still folds (ROADMAP CE-507.9); `Max(2 ± 0.1, 2)` was `2` and is
+    `2 ± 0.1` (decision 12); `Clamp(3 ± 0.1, 0, 3)` was `3` and is `3 ± 0.1`
+    (decision 10); `ElementMax(2.5 ± 0.1, 3)` is typed
+    `integer | measurement` (was `real<3..>`); `Max(3/2 ± 1/10,
+    Indeterminate)` is `NaN` (decision 13). A measurement assigned to a symbol
+    declared `real` was accepted and now throws; `f: (real) -> real` with a body gave `4 ± 0.4`
+    for `f(2 ± 0.1)` and is an error; `h(5 ± 0.1)` with a handler gave
+    `2 · (5 ± 0.1)` and stays unevaluated.
+  - Quantity values: `Max(1 m, 1.000000000001 m)` is `1 m` (the engine
+    tolerance, with a tie keeping the first operand); the finer-unit
+    tolerance policy stays (A7). A quantity with a float magnitude is not
+    exact: `Max(1.5 m, Indeterminate)` is `NaN`.
+  - The public methods fold kind values (A15): `M.add(M2)` is `5 ± 0.141`
+    (it was the sum of the two measurements), `(2 m).add(30 cm)` is `2.3 m`
+    (it was `30 cm + 2 m`), `.sqrt()` of a measurement propagates. `.neg()`
+    does not call the `negate` hook: `c.neg()` is `Negate(c)`, so that the
+    `add` hook sees `Negate(b)` in `a - b` (the temperatures with an offset,
+    A16).
+  - Compilation: an expression with a measurement or a quantity fails with
+    the kind message ("holds a value of the kind type 'measurement'"); it
+    failed with "Could not compile `Measurement`". A product with a physical
+    constant symbol (`x · SpeedOfLight`) still fails with the old message:
+    the symbol is declared `value`.
+  - Cost: the value of a physical constant is a quantity, made while the
+    libraries load. The gates of `quantity` stay closed during the load
+    (`deferKindValueGates()`), and the constant makes its value again at its
+    first read, so an engine that never reads a constant and never makes a
+    quantity does not pay for the quantity recognition (about 10% of an
+    ordinary evaluation).
 
 ## 7. Tests
 
@@ -1560,7 +1639,7 @@ Round 7 (phase 1 only):
   unless `resultType` overrides (4.5 rule 5).
 - 3: the sites that read the `residue` primitive by name, listed and
   generalized (4.6, 11, 6).
-- 4: operators as function values; `Sum`/`Product`/`Total`/`Reduce` typing
+- 4: operators as function values; `Sum`/`Product`/`Reduce` typing
   (4.2, 4.5, 3).
 - 5: a kind type "has `apply`/`compare`" when any registered head declares
   it (4.5).
@@ -1775,3 +1854,182 @@ Round 1:
 - 20: `Quantity` is `admittedAs: 'none'` with explicit `quantity` parameters
   (4.7); the question is closed.
 - 21: the branch count (1).
+
+## 13. Phase-2 decisions (the user, 2026-10-26)
+
+The phase-2 inventory (`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`,
+section "Decisions needed") put 16 questions; the user took every
+recommendation. They are the rules of phase 2, and they override section 3
+and section 6 where those differ:
+
+1. A step function (`Floor`, `Ceil`, `Round`, `Truncate`, `Sign`,
+   `Heaviside`, `PrimePi`) of a measurement propagates to first order (an
+   uncertainty of 0, so with decision 3 the bare value, as today), and stays
+   UNEVALUATED when a jump of the function lies within one σ of the nominal
+   (`Floor(2.95 ± 0.1)`, `Sign(0 ± 0.1)`). The row `Floor(Measurement(2.5, 0.1))
+   → Measurement(2, 0.1)` of section 3 is withdrawn: the answer is `2`.
+2. `Mod` and `Fract` propagate to first order (`Mod(5 ± 0.1, 3)` is
+   `2 ± 0.1`, `Mod(7, 3 ± 0.1)` is `1 ± 0.2`), with the same near-jump rule.
+3. The zero-uncertainty collapse of the `Measurement` constructor stays
+   (decision of 2026-07-07): a hook result can be a plain number, and the
+   measurement kind declares `resultType` `number | measurement` for the
+   operators where that can happen. The section-6 change "`Cos(0 ± 0.1)` is
+   `1 ± 0`" is withdrawn: `Cos(0 ± 0.1)` is `1`.
+4. An infinite derivative or an infinite value (`Sqrt(0 ± 0.1)`,
+   `Arcsin(1 ± 0.1)`, `Ln(0 ± 0.1)`, `Gamma(0 ± 0.1)`, a pole) leaves the
+   call unevaluated (today: the bare value).
+5. A real measurement whose value is not real (`Arccos(2.5 ± 0.1)`,
+   `Ln(−1 ± 0.1)`) gives `f(a) ± |f′(a)|·σ` (today: the bare complex value).
+6. A complex nominal at an operator that admits complex numbers gives
+   `f(a) ± |f′(a)|·σ` for every operator with a derivative (today:
+   inconsistent, CE-508.12).
+7. Of the 21 operators that compute a value today through the hooks and
+   that `apply` would not know: those where the measurement appears once in
+   each result cell (`Hypot`, `Dot`, `Cross`, `MatrixMultiply`,
+   `HadamardProduct`, `Trace`, `Norm`, `Distance`, `Degrees`, `Haversine`,
+   `PreIncrement`, `PreDecrement`) name `measurement` in their parameter
+   type (group 2), so their handler runs as today; `apply` uses the symbolic
+   derivative `D` where the engine has one; `Binomial`, `Choose`,
+   `Pochhammer`, a determinant by cofactors, `Inverse`, `Eigenvalues` and
+   the like stay unevaluated (the hooks would treat repeated occurrences of
+   one measurement as independent); `ContinuedFraction`, `ComplexRoots`,
+   `Arg`, `Argument` stay unevaluated. Never "the handler runs through the
+   hooks" for a repeated occurrence.
+8. `ElementMax` and `ElementMin` are comparison sites (the `compare`
+   dispatch, element-wise), like `Max` and `Min`.
+9. The phase-1 admission gaps are fixed: a parameter typed by a type
+   variable bounded by `number` (`Conjugate`, `Chop`, `Remainder`,
+   `BaseForm`), the `Rational` overload, and the `number` parameters of
+   `Exp2`, `ND`, `NIntegrate` admit a `'number'` kind through the carrier; a
+   matrix of measurements is admitted at the matrix operators (element-wise
+   carrier), and decision 7 says what each one does.
+10. `Clamp(x, lo, hi)` returns `x` when `x` equals a bound (`3 ± 0.1`, not
+    the bound `3`).
+11. A complex measurement compares as its nominal: `Less((2 + 3i) ± 0.1, 3)`
+    is `False`, as `Less(2 + 3i, 3)` is; the relational operator applies to
+    a `compare` that declines the rule it applies to a complex literal.
+12. A tie in `Max`/`Min` keeps the first operand: `Max(2 ± 0.1, 2)` is
+    `2 ± 0.1` (today `2`).
+13. `ArithmeticDefinition` gains an optional `isExact(value)` field; the
+    `NaN`/`Indeterminate` rule (`isInexactOperand()`, `nanOperandAnswer()`)
+    reads it for a kind value (a measurement is inexact; a quantity is as
+    exact as its magnitude).
+14. `.re` and `.im` of a measurement are `NaN` (section 4.3); listed in
+    section 6 as a visible change.
+15. All 24 trigonometric heads name `quantity` (the angle fold then applies
+    to `Arctan` as to the others), and `Abs` does; `Hypot` does not (a
+    feature for later).
+16. A ranged parameter (`NormalDistribution`, `Quantile`, the distribution
+    constructors) refuses a measurement after phase 2 (nothing is lost:
+    those calls stay unevaluated today).
+
+The six wrong values the inventory found are CE-508.7 to CE-508.12.
+
+### 13.1 Amendments from the review of the inventory (2026-10-26)
+
+The dual review of the inventory (`docs/scratch/2026-10-26-value-kinds-phase2-inventory_SPEC_REVIEW.md`,
+24 findings) refines the decisions above. These amendments are part of the
+phase-2 rules:
+
+- **A1** Decision 3 is an explicit amendment of 4.7 and section 6: the
+  zero-uncertainty collapse stays in the constructor AND in the hooks
+  (`makeMeasurement()`); the measurement kind declares `resultType`
+  `number | measurement` at every operator where a hook can give a plain
+  number (the apply sites, `Power`, `Multiply`, `Divide`, `Im`/`Imaginary`).
+  The section-6 line "`Cos(0 ± 0.1)` is `1 ± 0`" is withdrawn.
+- **A2** The step rule of decision 1 applies to a REAL nominal only. A
+  complex nominal at `Sign`, `Floor`, `Ceil`, `Round`, `Truncate` leaves the
+  call unevaluated (complex `Sign` is `z/|z|`, not zero-slope).
+- **A3** Propagation with several uncertain operands, real or complex, is the
+  quadrature of non-negative terms `|∂f/∂xᵢ|²·σᵢ²` (today the complex
+  helpers square complex partials and contributions cancel, CE-508.14):
+  `Multiply(1 ± 0.1, i ± 0.1)` is `i ± 0.1414`.
+- **A4** `power` with an uncertain exponent and a base that is not provably
+  positive never returns the bare nominal (CE-508.15): for a real base
+  `b ≠ 0`, `b^a ± |b^a·ln|b||·σ_a`-style propagation with the principal
+  logarithm where the value is defined; otherwise unevaluated.
+- **A5** The logarithm aliases (`Ln`, `Log`, `Lb`, `Lg`, `Log2`, `Log10`),
+  `Sqrt`, `Root` and `Power` with a complex base give `f(a) ± |f′(a)|·σ`
+  with the correct complex nominal (today `Log2((2 + 3i) ± 0.1)` is `1`,
+  CE-508.13).
+- **A6** `compare` gains a fourth answer, `'unordered'`: the two values are
+  not ordered but are not "unknown" either; the four order operators answer
+  `False`, and `Equal`/`NotEqual` fall to the kind's `eq`. `Measurement`
+  declares `eq` by nominal (with the engine tolerance for floats; a complex
+  nominal compares as a complex number): `Equal((2 + 3i) ± 0.1, 2 + 3i)` is
+  `True`, `Less((2 + 3i) ± 0.1, 3)` is `False` (decision 11, without a
+  name-based fallback). `ArithmeticDefinition.compare` returns
+  `-1 | 0 | 1 | 'unordered' | undefined`.
+- **A7** The quantity `compare` keeps the finer-unit tolerance policy of
+  `quantity-compare.ts` (`Equal(1 m, 100.0000000001 cm)` stays `False`;
+  CE-508.10 is not a defect). The zero tolerance of today's extrema goes
+  (section 6).
+- **A8** Decision 7: `apply` propagates through the partial derivatives
+  wherever they are known in closed form, including `Hypot`, `Dot`, `Norm`,
+  `Distance`, `Cross`, `MatrixMultiply`, `HadamardProduct`, `Trace`,
+  `Degrees`, `Haversine`, `PreIncrement`, `PreDecrement` (implemented in the
+  measurement `apply`, not by running the handler through the hooks); an
+  operator names `measurement` in its parameter only when no closed partials
+  exist, and then its handler validates the nominal (complex at a real-only
+  parameter → `incompatible-type`) and its declared result type becomes
+  `real | measurement`. `Binomial`, `Choose`, `Pochhammer`, a determinant by
+  cofactors, `Inverse`, `Eigenvalues`, `ContinuedFraction`, `ComplexRoots`,
+  `Arg`, `Argument` stay unevaluated.
+- **A9** Static types follow 4.5 everywhere: `Clamp(M, 0, 3)` is
+  `integer<0..3> | measurement`-shaped (the union), a lazy operator keeps its
+  own type.
+- **A10** A literal matrix with kind cells is typed with its dimensions
+  (`matrix<(integer | measurement)^(2x2)>`-shaped), so the matrix operators
+  admit it, and `Determinant([[M, 2], [3, 4]])` equals
+  `Determinant(Matrix([[M, 2], [3, 4]]))` (a phase-1 defect in the literal
+  typing of kind cells).
+- **A11** Every numeric parameter propagates, not only the first: an
+  uncertain `Log` base, `Round` step, `Root` index, `Norm` order, and
+  several uncertain operands (`Log(2 ± 0.1, 3 ± 0.1)`, `Hypot(M1, M2)`).
+- **A12** The acceptance table includes the CE-508 rows under `simplify()`,
+  `Supremum`/`Infimum`, the reducers (`Sum`, `Product`, `Reduce`)
+  and the public methods (`M.add(M2)` is `5 ± 0.141`, `q.add(30 cm)` is
+  `2.3 m`, route parity with `ce.function(…).evaluate()`).
+- **A13** Decision 4: a decline is only for an infinite VALUE or DERIVATIVE
+  at the nominal; a nominal whose numeric kernel is missing (`LogIntegral`
+  of a complex nominal) keeps a symbolic nominal with its finite propagated
+  σ. The `power` hook declines for `Sqrt`/`Root` at 0, `apply` for the
+  others. A float nominal near a pole (`Tan(1.5707963 ± 0.1)`) gives the
+  large finite value with its large σ; the symbolic pole (`Tan(π/2 ± 0.1)`)
+  is unevaluated.
+- **A14** A parameter typed by a type variable bounded by `number`
+  (`(T) -> T where T: number`): the carrier checks the bound, and the call is
+  typed by 4.5 (the kind arm), not by `T`.
+- **A15** The public methods `.add()`, `.mul()`, `.neg()`, `.sqrt()`, … fold
+  kind values after phase 2 (today they do not): a visible change of
+  section 6.
+- **A16** Temperatures with an offset are acceptance rows: `20 degC − 5 degC`
+  is `15 K`, `20 degC + 5 degC` is `571.3 K` (today's values, kept), a
+  difference with a third term, `.N()`, `Negate(20 degC)`, a mix of degC and
+  K, a quantity with a measured magnitude; the `add` hook reads `written[i]`
+  for the sign.
+- Also: exact nominals (`Sin(Measurement(1/3, 0.1))` keeps `Sin(1/3)` under
+  `evaluate()` and numericizes under `.N()`), a bigint nominal, a
+  measurement inside a list broadcast (`Sin([M, 3])`), the routes outside
+  the library (a symbol declared `real`, a symbol inferred `real` by a use,
+  `f: (real) -> real` with a body, `h` with a handler, `compile()` declines,
+  an Epsil `let r: real = 2 ± 0.1`), quantity collections (`Sum([2 m, 4 m])`
+  is `6 m` typed `quantity`, `Max([2 m, 4 m])` is `4 m`), and `Round`/
+  `Floor`/`Sign` of a quantity becoming refusals, are acceptance rows. The
+  snapshot blast radius is MEASURED in the worktree after the type change
+  (not estimated). The Tycho and Epsil sources are grepped for
+  `declareType('measurement'|'quantity')` before landing.
+
+### 13.2 Decision 14 reversed (the user, 2026-10-26)
+
+`.re` and `.im` of a measurement KEEP the nominal (`Measurement(2.5, 0.1).re`
+is `2.5`; a complex nominal gives its parts). Tycho reads `expr.re` of every
+quadrature result (`src/plot-core/classification-numeric.ts`,
+`getNumericValue()`), and `NaN` there would make every integral row `null`.
+The protection of a kind value from canonical folds rests on the FACT queries
+(`isPositive`, `isNegative`, `sgn`, `isInteger`, `isFinite`, …), which stay
+`undefined` for a kind value (4.3); the wrong-value route of a kernel reading
+`.re` is closed by the `apply` dispatch, which runs before the handler at
+every admitted operator. The rule of 4.3 for `re`/`im` applies to the other
+kinds; a kind whose values stand for a number may project it through
+`re`/`im`. Section 6's "`.re` is `NaN`" line is withdrawn.

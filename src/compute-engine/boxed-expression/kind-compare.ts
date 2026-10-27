@@ -21,7 +21,12 @@ import type {
   KindOperand,
   KindOperands,
 } from '../global-types.js';
-import { isFunction, isNumber, isString } from './type-guards.js';
+import {
+  isFunction,
+  isNumber,
+  isString,
+  kindValueIsNaN,
+} from './type-guards.js';
 import {
   arithmeticOf,
   engineHasKindValues,
@@ -176,15 +181,21 @@ export function isComparableKindValue(expr: Expression): boolean {
  * - two identical values (`isSame`) are a tie, `0`, for every kind; under
  *   `.N()`, only when their exact values are identical too;
  * - the kinds of `a` and `b` that declare `compare` are asked in order of
- *   first occurrence, and the first answer (`-1`, `0`, `1`) decides;
+ *   first occurrence, and the first answer (`-1`, `0`, `1`, `'unordered'`)
+ *   decides. `'unordered'` says that the two values are known and have no
+ *   order (a measurement with a complex nominal): the four order operators
+ *   answer `False`, `Equal` and `NotEqual` ask the `eq` handlers
+ *   (`kindEqual()`), and `Max`, `Min`, `Sort` stay unevaluated;
  * - when every kind answers `undefined`, the pair is `'incomparable'`: an
  *   order comparison of it stays unevaluated, and a comparison method
  *   answers `undefined`.
  *
  * `written` holds the operands as they were written, for `exact()` under
- * `.N()` (`numericApproximation`). A hook that throws propagates its error;
- * a hook that answers a value other than `-1`, `0`, `1` or `undefined`
- * throws an error that names the head of the kind.
+ * `.N()` (`numericApproximation`). `tolerance` is the tolerance of a caller
+ * that compares within one (`.is()`), given to the hooks in
+ * `ArithmeticContext.tolerance`. A hook that throws propagates its error;
+ * a hook that answers a value other than `-1`, `0`, `1`, `'unordered'` or
+ * `undefined` throws an error that names the head of the kind.
  */
 export function kindCompare(
   a: Expression,
@@ -192,9 +203,14 @@ export function kindCompare(
   options?: {
     written?: readonly [Expression | undefined, Expression | undefined];
     numericApproximation?: boolean;
+    tolerance?: number;
   }
-): -1 | 0 | 1 | 'incomparable' | undefined {
+): -1 | 0 | 1 | 'unordered' | 'incomparable' | undefined {
   if (!isComparableKindValue(a) && !isComparableKindValue(b)) return undefined;
+  // A value that stands for no value (`ArithmeticDefinition.isNaN`: a
+  // measurement with a `NaN` nominal, a quantity with a `NaN` magnitude) has
+  // no order, as the number `NaN` has none, also with itself.
+  if (kindValueIsNaN(a) || kindValueIsNaN(b)) return 'unordered';
   const numericApproximation = options?.numericApproximation ?? false;
   const x = kindOperand(a, options?.written?.[0], numericApproximation);
   const y = kindOperand(b, options?.written?.[1], numericApproximation);
@@ -208,20 +224,23 @@ export function kindCompare(
     const u = x.exact();
     const v = y.exact();
     if (u.isSame(v)) return 0;
-    return kindCompare(u, v) ?? 'incomparable';
+    return (
+      kindCompare(u, v, { tolerance: options?.tolerance }) ?? 'incomparable'
+    );
   }
   const context: ArithmeticContext = {
     engine: a.engine,
     numericApproximation,
+    tolerance: options?.tolerance,
   };
   for (const kind of kindsAmong([a, b])) {
     const fn = kind.arithmetic.compare;
     if (fn === undefined) continue;
     const order = fn.call(kind.arithmetic, x, y, context);
     if (order === undefined) continue;
-    if (order !== -1 && order !== 0 && order !== 1)
+    if (order !== -1 && order !== 0 && order !== 1 && order !== 'unordered')
       throw new Error(
-        `Value kind of "${kind.name}": the \`compare\` hook returned ${String(order)}, which is not -1, 0, 1 or undefined`
+        `Value kind of "${kind.name}": the \`compare\` hook returned ${String(order)}, which is not -1, 0, 1, 'unordered' or undefined`
       );
     return order;
   }
@@ -237,8 +256,10 @@ export function kindCompare(
  *
  * 1. two identical values (`isSame`) are equal; under `.N()`, only when
  *    their exact values are identical too;
- * 2. when a kind of the pair declares `compare` and the pair is comparable
- *    (`kindCompare()`), they are equal when the order is `0`;
+ * 2. when a kind of the pair declares `compare` and the pair is ordered
+ *    (`kindCompare()` answers `-1`, `0` or `1`), they are equal when the
+ *    order is `0`; a pair that is `'unordered'` (a complex nominal) or
+ *    `'incomparable'` goes to step 3;
  * 3. else the `eq` handlers of the definitions of the heads of `a` and `b`
  *    are asked, in operand order; the first `eq` that exists decides, also
  *    when it answers `undefined` (`Equal(ResidueClass(1, 5), 2)` stays
@@ -250,6 +271,7 @@ export function kindCompare(
  *    two forms of one value (`MyMod(7, 5)` and `MyMod(2, 5)`).
  *
  * `prover` is passed to the `eq` handlers (the tier of `isIdenticallyEqual()`).
+ * `tolerance` is passed to the `compare` hooks (`kindCompare()`).
  */
 export function kindEqual(
   a: Expression,
@@ -258,9 +280,13 @@ export function kindEqual(
     prover?: boolean;
     written?: readonly [Expression | undefined, Expression | undefined];
     numericApproximation?: boolean;
+    tolerance?: number;
   }
 ): boolean | undefined | 'not-applicable' {
   if (!isKindValue(a) && !isKindValue(b)) return 'not-applicable';
+  // A value that stands for no value (`ArithmeticDefinition.isNaN`) is
+  // equal to nothing, itself included, as the number `NaN` is.
+  if (kindValueIsNaN(a) || kindValueIsNaN(b)) return false;
   if (a.isSame(b)) {
     // Two identical approximate values are equal only when their exact
     // values are identical too: see the tie in `kindCompare()`. Else the
@@ -269,11 +295,14 @@ export function kindEqual(
     const u = exactValue(a, options?.written?.[0], numericApproximation);
     const v = exactValue(b, options?.written?.[1], numericApproximation);
     if (u.isSame(v)) return true;
-    const exact = kindEqual(u, v, { prover: options?.prover });
+    const exact = kindEqual(u, v, {
+      prover: options?.prover,
+      tolerance: options?.tolerance,
+    });
     return exact === 'not-applicable' ? undefined : exact;
   }
   const order = kindCompare(a, b, options);
-  if (order !== undefined && order !== 'incomparable') return order === 0;
+  if (order === -1 || order === 0 || order === 1) return order === 0;
   for (const [x, y] of [
     [a, b],
     [b, a],
@@ -314,11 +343,14 @@ export function isKindValuePair(a: Expression, b: Expression): boolean {
  * 4.4). When the kind type of a side declares `compare`, the answer is the
  * `Equal` of the two (`kindEqual()`, symmetric in the order of the
  * operands); else it is `isSame`. A JavaScript `number` or `bigint` is
- * boxed. A tolerance does not apply: the `compare` hook has its own.
+ * boxed. `tolerance` is given to the `compare` hooks
+ * (`ArithmeticContext.tolerance`): `.is()` passes its `tolerance` argument,
+ * or `engine.tolerance` when the call has none.
  */
 export function kindIs(
   a: Expression,
-  other: Expression | number | bigint | boolean | string
+  other: Expression | number | bigint | boolean | string,
+  tolerance?: number
 ): boolean | undefined {
   // An engine that has made no kind value does not box `other`.
   if (!engineHasKindValues(a.engine)) return undefined;
@@ -330,6 +362,6 @@ export function kindIs(
         : undefined;
   if (b === undefined || !isKindValuePair(a, b)) return undefined;
   if (isComparableKindValue(a) || isComparableKindValue(b))
-    return kindEqual(a, b) === true;
+    return kindEqual(a, b, { tolerance }) === true;
   return a.isSame(b);
 }

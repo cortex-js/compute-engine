@@ -667,9 +667,9 @@ A kind type is one of:
 - a **kind primitive**: a name of the type language with an entry in the
   subtype table of `common/type/subtype.ts` that lists no subtype and no
   supertype but `value`, and that is in `KIND_PRIMITIVES`
-  (`boxed-expression/value-kinds.ts`). `residue` is the only one. Only the
-  library adds one, because a library signature is parsed before any engine
-  exists and must be able to name it;
+  (`boxed-expression/value-kinds.ts`): `residue`, `measurement` and
+  `quantity`. Only the library adds one, because a library signature is
+  parsed before any engine exists and must be able to name it;
 - a **nominal type whose definition is exactly `value`**, declared with
   `ce.declareType(name, 'value', { mint: false })`. This is the form a host
   declares. Types are engine-level (one namespace for each engine), so the
@@ -782,8 +782,19 @@ constructed; a value of the type was assigned to a symbol; a symbol or a
 user callable was declared with a type that has an arm of the kind type. A
 kind registered after the library bootstrap opens its gates at
 registration. The library signatures and the library kind heads do not open
-a gate. A gate only opens: a checkpoint does not restore it, and an open
-gate costs a walk, never a wrong answer.
+a gate. Nor does a value that a library makes while it loads: the value of
+a physical constant (`SpeedOfLight`) is a quantity, and
+`deferKindValueGates()` (`value-kinds.ts`) keeps the gates closed during
+`loadLibraryDefinitions()` (`engine-library-bootstrap.ts`), which then asks
+each such constant to make its value again when it is first read. So an
+engine that never reads a physical constant and never makes a quantity does
+not pay for the walks of the recognition of `quantity` (about 10% of the
+time of an ordinary evaluation, measured 2026-10-26). The `carrier` and
+`resultType` checks of the apply sites (`someKindAdmittedByCarrier()`,
+`someKindHasResultType()`) read the same gates, so the `'number'` kind
+`measurement` costs nothing in an engine that has made no measurement. A
+gate only opens: a checkpoint does not restore it, and an open gate costs a
+walk, never a wrong answer.
 
 The registry is part of the bounded state of a checkpoint
 (`CHECKPOINT-MODEL.md`).
@@ -822,11 +833,15 @@ three groups of parameters (`boxed-expression/kind-admission.ts`):
      kind (user decision 2026-10-23): a class is an element of a finite ring
      with no order and no embedding into the reals, so `Sin(c)`, `Floor(c)`
      and `c < d` have no meaning, and admitting it as an integer would let it
-     reach integer code that computes from the representative;
+     reach integer code that computes from the representative. `quantity`
+     is a `'none'` kind too: the operators that accept a quantity name
+     `quantity` in their parameter type (group 2), see "Measurements and
+     quantities" below;
    - `'real'`: admitted at every parameter that admits `real` once its
      absence arms are removed (`real`, `number`, `complex`,
      `complex | infinity`; not `integer` nor a ranged type);
    - `'number'`: admitted at every parameter that admits `number` or `real`.
+     `measurement` is a `'number'` kind.
 
    The **carrier** is what the kind stands in for. The operand check
    replaces each kind arm of the operand type by the narrowest carrier the
@@ -877,20 +892,25 @@ An operator is an **apply site** for a kind when at least one operand that
 holds a value of the kind was admitted only through the carrier (group 3),
 the operator is not lazy, it has an `evaluate` handler, it is not a function
 with a body, and it is not one of the operators that use the other hooks
-(group 1, the six relational operators, `Max`, `Min`, `Sort`, `Clamp`)
-(`isApplySite()`). The dispatch calls the kind's `apply` hook in place of
-the operator's `evaluate` handler. A threadable operator maps over a
+(group 1, the six relational operators, `Max`, `Min`, `ElementMax`,
+`ElementMin`, `Sort`, `Clamp`) (`isApplySite()`). The dispatch calls the
+kind's `apply` hook in place of the operator's `evaluate` handler. A threadable operator maps over a
 collection operand first, and `apply` is called for each element; an
 operator whose parameter is a collection type is an apply site when the
 elements of the collection include a kind value, and `apply` receives the
 collection and its elements, enumerated once and only when the collection is
 small enough (`engine.maxCollectionSize`) and of known finite size. When the
 kind gives no `apply`, the operator's handler runs and sees the value as it
-is. The numeric property queries on a kind value (`isPositive`, `sgn`,
-`isInteger`, `re`, …) answer `undefined` or `NaN`, so a canonical fold that
-reads them does not fire. The canonical folds of a group-3 operator that do
-not read a numeric property (`Log(1, b)` → `0`) are guarded like the number
-rules.
+is. The numeric fact queries on a kind value (`isPositive`, `sgn`,
+`isInteger`, `isFinite`, …) answer `undefined`, so a canonical fold that
+reads them does not fire. The numeric accessors (`re`, `im`, `bignumRe`,
+`bignumIm`, `valueOf()`) answer `NaN`, unless the kind gives
+`numericValue()`: then they read the number it answers (the nominal of a
+measurement, user decision of 2026-10-26, plan section 13.2). The `apply`
+dispatch runs before the handler at every admitted operator, so a kernel
+that reads `re` never sees a kind value. The canonical folds of a group-3
+operator that do not read a numeric property (`Log(1, b)` → `0`) are guarded
+like the number rules.
 
 ### Result types
 
@@ -945,12 +965,33 @@ are in the guide; the ones that interact with types are:
 - The comparisons use `compare`; `Equal` without an answer from `compare`
   asks the `eq` handlers of the two heads, then answers `False` for two
   values of disjoint types, `True` for two identical values, and stays
-  unevaluated otherwise.
+  unevaluated otherwise. `compare` can answer `'unordered'` (two known
+  values with no order, a measurement with a complex nominal): the four
+  order operators answer `False`, `Equal` and `NotEqual` go to the `eq`
+  handlers, and `Max`, `Min`, `Sort` stay unevaluated. `Max` and `Min` keep
+  the first operand of a tie, and `Clamp(x, lo, hi)` returns `x` when it is
+  equal to a bound. `compare` receives `context.tolerance` from `.is()` (its
+  `tolerance` argument, or `engine.tolerance`), and `undefined` from every
+  other comparison.
+- `isExact(value)` of the kind says whether a value is exact, for the rule
+  that an inexact operand turns `Indeterminate` into `NaN`
+  (`isInexactOperand()`, `nanOperandAnswer()`). Absent, the values are
+  exact.
+- `isNaN(value)` of the kind says whether a value stands for no value (a
+  measurement with a `NaN` nominal, a quantity with a `NaN` magnitude;
+  `kindValueIsNaN()`). Such a value follows the rule of the number `NaN`
+  and `compare` is not asked: `Max`, `Min`, `ElementMax`, `ElementMin` and
+  `Clamp` give `NaN`, the four order operators give `False`, and `Equal`
+  gives `False` also for the value and itself. Absent, no value is `NaN`.
+  The type is not changed: such a value keeps its kind type, not `nan`.
 - `simplify()` applies no rewrite rule at a node whose operator is of group
   1 or an apply site, when a kind value is held at any depth below it by the
   non-strict recognition (an arm `real | umeasurement` counts); only the
   evaluation through the hooks and the folding of the kind-free terms run
-  there. The rules `x - x = 0`, `x/x = 1`, the absorbing zero and infinity,
+  there. The hooks receive in `written` the operands as they were written
+  before `simplify()` simplified them (`withOperandsWrittenBefore()`,
+  `kind-dispatch.ts`), so a hook that reads `Negate(b)` there gives the same
+  answer as under `evaluate()`. The rules `x - x = 0`, `x/x = 1`, the absorbing zero and infinity,
   `Expand`, `Factor` and `Together` check the same recognition.
 - The compile boundary uses the STRICT recognition: an expression that holds
   a kind value for certain, or whose result type is a kind type for certain,
@@ -978,6 +1019,58 @@ without the `ResidueClass` definition does not admit `residue` at `Add`, but
 still protects a symbol declared `residue` (a primitive is a kind type in
 every engine). `Max(c, x)` and `Min(c, x)` are typed `error`, because
 classes have no `compare`.
+
+### Measurements and quantities
+
+`measurement` and `quantity` are the kind primitives of `Measurement(value,
+error)` (`library/measurement-arithmetic.ts`, `MEASUREMENT_ARITHMETIC`) and
+`Quantity(magnitude, unit)` (`library/quantity-kind.ts`,
+`QUANTITY_ARITHMETIC`). Each is in `KIND_PRIMITIVES` and has an entry in the
+subtype table of `common/type/subtype.ts`, so a library signature can name
+it. The decisions are in section 13 of `plans/2026-10-26-value-kinds.md`
+(ROADMAP CE-507). Both heads are typed by their signatures:
+`(value, value) -> measurement` and `(value, value) -> quantity`. Before
+phase 2, a measurement was typed with the type of its nominal and a quantity
+`value`.
+
+- **`measurement` is a `'number'` kind.** A measurement is admitted through
+  the carrier at every parameter that admits `number` or `real` (also a
+  parameter typed by a type variable bounded by `number`, `(T) -> T where
+  T: number`, where the call is typed with the kind arm and not with `T`),
+  and refused at `integer` and at a ranged parameter. A symbol declared
+  `real`, `number` or `integer`, and a function with a body over a number
+  type, refuse it (decision B). Every library operator that admits it is an
+  apply site, and `apply` answers. `resultType` answers
+  `number | measurement` for every operator except `Add`, `Negate`,
+  `PreIncrement`, `PreDecrement`, `Conjugate`, `Real`, `Re` and `Abs`,
+  whose result keeps the uncertainty of the operand and so is always a
+  measurement: a propagated uncertainty of 0 collapses to the bare value
+  (`makeMeasurement()`), so `Floor(2.5 ± 0.1)` is the number `2`. A complex
+  nominal is not visible in the type: a complex measurement at a parameter
+  that is real (no arm admits `complex`) is refused at evaluation by
+  `apply` (`realOnlyParameter()`), with `incompatible-type`.
+- **`quantity` is a `'none'` kind.** It is admitted at the arithmetic
+  operators (group 1), at the parameters typed `value`, `any`, `expression`
+  or `unknown` (group 2: `UnitConvert`, `List`, the relational operators,
+  `Max`, `Min`), and at the operators whose parameter type names `quantity`:
+  the 24 trigonometric, hyperbolic and inverse functions
+  (`(complex | quantity) -> number`, with an `infinity` or
+  `signed_infinity` arm where the function had one) and `Abs`
+  (`(complex | infinity | quantity) -> number`). An angle (`30 deg`) folds
+  to radians at canonicalization; any other quantity is admitted and stays
+  unevaluated. Every other operator refuses a quantity at boxing:
+  `Floor(2 m)`, `Hypot(2 m, 3)`, `Mean([2 m, 4 m])`. `resultType` answers
+  `number | quantity` for `Multiply`, `Divide` and `Power` (also `Sqrt`,
+  `Root`, `Square`: a unit with no dimension gives a number), `quantity` for
+  `Abs`, and `number` for the trigonometric functions. The `quantity` arm of
+  these signatures does not take part in inference: a use of a valueless
+  symbol at `Abs` or `Arctan` infers the other arms, not `quantity`.
+- **A union of numbers and kind values in a literal matrix keeps its
+  shape**: `[[2 ± 0.1, 2], [3, 4]]` is a
+  `matrix<integer | measurement^(2x2)>`, which the matrix operators admit
+  through the carrier (`shapedListTypeD()`, `collections.ts`).
+- **The physical constants** are declared `value` (`library/library.ts`),
+  and their value is a quantity, typed `quantity`.
 
 ## Protocols, sums, and objects
 

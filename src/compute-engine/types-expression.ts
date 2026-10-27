@@ -2136,13 +2136,15 @@ export interface Expression {
    * When one side is a value of a value kind (a value made by a head
    * declared with an `arithmetic` field), the result is the result of
    * `Equal` for the two sides when the kind type declares `compare` (the
-   * `compare` hook orders the two values, with its own tolerance), and of
-   * `isSame()` otherwise.
+   * `compare` hook orders the two values within the tolerance: `tolerance`,
+   * else `engine.tolerance`, also for two exact values), and of `isSame()`
+   * otherwise.
    *
    * @param tolerance - If provided, overrides `engine.tolerance` for the
    * numeric comparison. Has no effect when the comparison is structural
-   * (i.e., when `isSame()` succeeds or the expression has free variables),
-   * and none when one side is a value of a value kind.
+   * (i.e., when `isSame()` succeeds or the expression has free variables).
+   * When one side is a value of a value kind, it is given to the `compare`
+   * hook of the kind (`ArithmeticContext.tolerance`).
    *
    * @category Primitive Methods
    */

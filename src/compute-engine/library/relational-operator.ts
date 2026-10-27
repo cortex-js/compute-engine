@@ -1,4 +1,3 @@
-import { measurementNominal } from './measurement-arithmetic.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
@@ -61,11 +60,9 @@ import {
   exactCompareNumbers,
   isExactRealLiteral,
   exactRealValueOf,
-  readsRecordedParameter,
 } from '../boxed-expression/constraint-subject.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import { getInequalityBoundsFromAssumptions } from '../boxed-expression/inequality-bounds.js';
-import { compareQuantities } from './quantity-compare.js';
 import {
   isKindValue,
   kindCompare,
@@ -75,24 +72,6 @@ import {
   nonNumericOperandError,
   isAbsentScalarSymbol,
 } from '../boxed-expression/validate.js';
-
-/**
- * The order of two `Quantity` expressions by their physical value: `-1`,
- * `0` or `1`, or `undefined` when they are not two quantities with units of
- * the same dimension, or when a magnitude has no real numeric value. Two
- * values within the engine tolerance are a tie, and a tie of two exact
- * magnitudes is decided again exactly. A `Measurement` magnitude is compared
- * through its nominal value, as a `Measurement` operand is. See
- * `compareQuantities()`, which the methods `isEqual()`, `isLess()`… also
- * use.
- */
-function quantityCompare(a: Expression, b: Expression): -1 | 0 | 1 | undefined {
-  return compareQuantities(a, b, {
-    tolerance: a.engine.tolerance,
-    exact: true,
-    nominal: true,
-  });
-}
 
 /**
  * The options of `kindCompare()` and `kindEqual()` for the pair of evaluated
@@ -208,7 +187,7 @@ function compareFromAssumedBounds(
  * otherwise the evaluated operands, in order, for the caller's ordinary
  * (all-operands) code path — each operand evaluated exactly once. Each
  * adjacent pair is decided by `pairIsFalse`, which the caller builds from the
- * SAME cheap primitives its own pairwise loop uses (`quantityCompare`,
+ * SAME cheap primitives its own pairwise loop uses (`kindCompare`,
  * `isLess`/`isLessEqual`/`isEqual`/`eq`, `compareFromAssumedBounds`) — not by
  * re-dispatching the operator, which would pay canonicalization and a full
  * handler re-entry per pair. Anything but a definite `False` (`True`, an
@@ -233,15 +212,15 @@ function evaluateChainOperands(
   ) => boolean
 ): Expression[] | Expression {
   const evalOptions = { numericApproximation };
-  // A `Measurement(v, σ)` operand is compared through its nominal `v`
-  // (`measurementNominal`): `0.1 < ∫₀¹ e^(−x²) dx` under `.N()` is decided,
-  // where the measurement that the quadrature answers left it unevaluated.
+  // A `Measurement(v, σ)` operand is kept as it is: the pair deciders order
+  // it by its nominal through the `compare` hook of the measurement kind
+  // (`kindCompare()`), and an undecided comparison keeps the measurement
+  // (`Less(2 ± 0.1, x)` stays as written; the nominal it held before lost
+  // the uncertainty).
   if (rawOps.some(isCollectionShaped))
-    return rawOps.map((op) => measurementNominal(op.evaluate(evalOptions)));
+    return rawOps.map((op) => op.evaluate(evalOptions));
   if (rawOps.length <= 2) {
-    const ops = rawOps.map((op) =>
-      measurementNominal(op.evaluate(evalOptions))
-    );
+    const ops = rawOps.map((op) => op.evaluate(evalOptions));
     if (numericApproximation && ops.length === 2) {
       const exact = exactPairAtNearTie(rawOps[0], ops[0], rawOps[1], ops[1]);
       if (exact !== undefined) return exact;
@@ -254,7 +233,7 @@ function evaluateChainOperands(
       ce,
       rawOps,
       i,
-      measurementNominal(rawOps[i].evaluate(evalOptions)),
+      rawOps[i].evaluate(evalOptions),
       ops,
       numericApproximation,
       pairIsFalse
@@ -342,10 +321,9 @@ async function evaluateChainOperandsAsync(
     runWithEvaluationEffects(ce, effects, f, _contextStack, _precisionWindow);
   const ops: Expression[] = [];
   if (rawOps.some(isCollectionShaped) || rawOps.length <= 2) {
-    // A measurement is compared through its nominal, as in the synchronous
-    // form (`evaluateChainOperands`).
-    for (const op of rawOps)
-      ops.push(measurementNominal(await op.evaluateAsync(options)));
+    // A measurement is kept, as in the synchronous form
+    // (`evaluateChainOperands`).
+    for (const op of rawOps) ops.push(await op.evaluateAsync(options));
     if (
       numericApproximation &&
       ops.length === 2 &&
@@ -359,7 +337,7 @@ async function evaluateChainOperandsAsync(
     return ops;
   }
   for (let i = 0; i < rawOps.length; i++) {
-    const v = measurementNominal(await rawOps[i].evaluateAsync(options));
+    const v = await rawOps[i].evaluateAsync(options);
     const stop = inContext(() =>
       chainStep(ce, rawOps, i, v, ops, numericApproximation, pairIsFalse)
     );
@@ -405,12 +383,6 @@ function exactPairAtNearTie(
   // approximate values are compared again by their exact values in
   // `kindCompare()` and `kindEqual()`.
   if (isKindValue(a) || isKindValue(b)) return undefined;
-  if (isFunction(a, 'Quantity') && isFunction(b, 'Quantity'))
-    return exactQuantityPair(rawA, a, rawB, b);
-  if (isFunction(a, 'Quantity'))
-    return exactQuantityNumberPair(rawA, a, rawB, b, false);
-  if (isFunction(b, 'Quantity'))
-    return exactQuantityNumberPair(rawB, b, rawA, a, true);
   // An exact constant expression that is not a number (`π`,
   // `√(10⁶⁰ + 10⁴⁰) − 10³⁰`) is always compared by its exact form, also far
   // from a tie: its float at the working precision can be wrong by much more
@@ -436,129 +408,6 @@ function exactPairAtNearTie(
   const exactB = isExactRealLiteral(b) ? b : exactValueOrConstant(rawB);
   if (exactB === undefined) return undefined;
   return [exactA, exactB];
-}
-
-/**
- * The two quantities `a` and `b` (the values of `rawA` and `rawB` under
- * `.N()`) with the exact magnitudes of `rawA` and `rawB`, or `undefined`
- * when a magnitude has no exact value. This is `exactPairAtNearTie()` for
- * quantities: under `.N()`, `Quantity(1 + 10⁻³⁰, m)` has the magnitude
- * `1`, and `1 m < (1 + 10⁻³⁰) m` must still be `True`, as it is with
- * `evaluate()`.
- *
- * A magnitude that is an exact number literal or an exact constant
- * expression as it is written is used at any distance from a tie: reading
- * it costs no evaluation. A magnitude that needs an exact evaluation (a
- * symbol with an exact value) is evaluated again only at a near tie: two
- * quantities whose values in the finer unit are within
- * `nearJumpTolerance()`, relative to the larger magnitude, of each other.
- */
-function exactQuantityPair(
-  rawA: Expression,
-  a: Expression,
-  rawB: Expression,
-  b: Expression
-): [Expression, Expression] | undefined {
-  const u = exactQuantityOf(rawA, a, false);
-  const v = exactQuantityOf(rawB, b, false);
-  if (u !== undefined && v !== undefined) return [u, v];
-  if (!isFunction(a) || !isFunction(b)) return undefined;
-  const scale = Math.max(1, Math.abs(a.op1.re), Math.abs(b.op1.re));
-  const near = compareQuantities(a, b, {
-    tolerance: nearJumpTolerance(a.engine) * scale,
-    exact: false,
-    nominal: false,
-  });
-  if (near !== 0) return undefined;
-  const u1 = u ?? exactQuantityOf(rawA, a, true);
-  if (u1 === undefined) return undefined;
-  const v1 = v ?? exactQuantityOf(rawB, b, true);
-  if (v1 === undefined) return undefined;
-  return [u1, v1];
-}
-
-/**
- * `exactQuantityPair()` for a quantity `q` (the value of `rawQ` under
- * `.N()`) and a number `n` (the value of `rawN`): a quantity whose unit is
- * dimensionless is compared with a number (`compareQuantities()`). Returns
- * the quantity with its exact magnitude and the exact value of the number,
- * in the order of the operands (`[number, quantity]` when `swap`), or
- * `undefined`.
- *
- * An exact magnitude or an exact number as written (`π`, `1/2`) is used at
- * any distance from a tie. Otherwise the operands are evaluated again
- * exactly only at a near tie, as in `exactQuantityPair()`: under `.N()`,
- * `Quantity(1/2 − 10⁻³⁰, rad) < 1/2` must be `True`, as it is with
- * `evaluate()`. A float operand has no exact value: the pair is then
- * compared as it is.
- */
-function exactQuantityNumberPair(
-  rawQ: Expression,
-  q: Expression,
-  rawN: Expression,
-  n: Expression,
-  swap: boolean
-): [Expression, Expression] | undefined {
-  if (!isFunction(q, 'Quantity')) return undefined;
-  let u = exactQuantityOf(rawQ, q, false);
-  let v: Expression | undefined =
-    isExactRealLiteral(n) || isExactConstantExpression(n)
-      ? n
-      : (exactConstantOf(rawN) ?? exactOperandOf(rawN, n));
-  if (u === undefined || v === undefined) {
-    const scale = Math.max(1, Math.abs(q.op1.re), Math.abs(n.re));
-    const near = compareQuantities(q, n, {
-      tolerance: nearJumpTolerance(q.engine) * scale,
-      exact: false,
-      nominal: false,
-    });
-    if (near !== 0) return undefined;
-    u ??= exactQuantityOf(rawQ, q, true);
-    if (u === undefined) return undefined;
-    v ??= exactValueOrConstant(rawN);
-    if (v === undefined) return undefined;
-  }
-  return swap ? [v, u] : [u, v];
-}
-
-/**
- * The quantity `value` (the value of `raw` under `.N()`) with the exact
- * magnitude of `raw`, or `undefined`. `value` itself when its magnitude is
- * exact. Otherwise `raw` gives the exact magnitude: a `Quantity` whose
- * magnitude is an exact number literal or an exact constant expression, or,
- * with `evaluate`, whose magnitude has an exact value
- * (`exactRealValueOf()`), or, with `evaluate`, a pure expression whose exact
- * evaluation is a quantity with an exact magnitude (a symbol that holds a
- * quantity). An expression that reads a parameter bound to a float is not
- * evaluated (`readsRecordedParameter()`): its exact evaluation is not its
- * exact value.
- */
-function exactQuantityOf(
-  raw: Expression,
-  value: Expression,
-  evaluate: boolean
-): Expression | undefined {
-  if (!isFunction(value, 'Quantity')) return undefined;
-  const isExact = (x: Expression) =>
-    isExactRealLiteral(x) || isExactConstantExpression(x);
-  if (isExact(value.op1)) return value;
-  const canonical = raw.isCanonical ? raw : raw.canonical;
-  if (isFunction(canonical, 'Quantity')) {
-    const m = canonical.op1;
-    const exact = isExact(m) ? m : evaluate ? exactRealValueOf(m) : undefined;
-    if (exact === undefined) return undefined;
-    return value.engine._fn('Quantity', [exact, value.op2]);
-  }
-  if (
-    !evaluate ||
-    !isTransitivelyPure(canonical) ||
-    readsRecordedParameter(canonical)
-  )
-    return undefined;
-  const exactValue = canonical.evaluate();
-  if (isFunction(exactValue, 'Quantity') && isExact(exactValue.op1))
-    return exactValue;
-  return undefined;
 }
 
 /**
@@ -665,8 +514,6 @@ const CHAIN_PAIR_IS_FALSE = {
         chainKindOptions(numericApproximation, written)
       );
       if (k !== 'not-applicable') return k === false;
-      const q = quantityCompare(a, b);
-      if (q !== undefined) return q !== 0;
       if (unorderedChainPair(a, b, false, 'pole')) return true;
       const o = exactLiteralOrder(a, b);
       if (o !== undefined) return o !== 0;
@@ -685,8 +532,6 @@ const CHAIN_PAIR_IS_FALSE = {
         chainKindOptions(numericApproximation, written)
       );
       if (k !== 'not-applicable') return k === true;
-      const q = quantityCompare(a, b);
-      if (q !== undefined) return q === 0;
       const o = exactLiteralOrder(a, b);
       if (o !== undefined) return o === 0;
       return a.isEqual(b) === true;
@@ -703,9 +548,9 @@ const CHAIN_PAIR_IS_FALSE = {
         b,
         chainKindOptions(numericApproximation, written)
       );
-      if (k !== undefined) return k !== 'incomparable' && k >= 0;
-      const q = quantityCompare(a, b);
-      if (q !== undefined) return q >= 0;
+      // `'unordered'` (no order, a complex nominal) makes the pair `False`.
+      if (k !== undefined)
+        return k !== 'incomparable' && (k === 'unordered' || k >= 0);
       if (unorderedChainPair(a, b, false)) return true;
       const o = exactLiteralOrder(a, b);
       if (o !== undefined) return o >= 0;
@@ -725,9 +570,8 @@ const CHAIN_PAIR_IS_FALSE = {
         b,
         chainKindOptions(numericApproximation, written)
       );
-      if (k !== undefined) return k !== 'incomparable' && k > 0;
-      const q = quantityCompare(a, b);
-      if (q !== undefined) return q > 0;
+      if (k !== undefined)
+        return k !== 'incomparable' && (k === 'unordered' || k > 0);
       if (unorderedChainPair(a, b, false)) return true;
       const o = exactLiteralOrder(a, b);
       if (o !== undefined) return o > 0;
@@ -830,7 +674,9 @@ function inertRelation(
  * (`π`, `ln 2`), or that holds an operator whose numeric evaluation is an
  * iteration with no fixed bound (`ITERATIVE_NUMERIC_OPERATORS`: an infinite
  * `Sum` can take a second to fail to converge). The approximation of a
- * quadrature is a `Measurement(v, σ)`, read through its nominal value `v`.
+ * quadrature is a `Measurement(v, σ)`, a value of a kind, which is not a
+ * number literal: its order is the `compare` hook's to decide, and this
+ * function gives `undefined` for it.
  * An imaginary part of the approximation of size up to `10⁻¹⁴` times the
  * modulus is not read as nonzero: it can be the rounding error of a real
  * value that was computed through complex intermediate values. This is the
@@ -842,8 +688,16 @@ function nonRealKind(
 ): 'pole' | 'complex' | undefined {
   if (isNumber(x)) return literalNonRealKind(x);
   if (!approximate || !mayApproximateNonReal(x)) return undefined;
-  const v = measurementNominal(x.N());
-  if (!isNumber(v)) return undefined;
+  const v = x.N();
+  if (!isNumber(v)) {
+    // A value of a kind that has no order against a number (a measurement
+    // with a complex nominal, the approximation of an integral whose value
+    // is not real) is not real, as the complex number is: its kind says so
+    // (`'unordered'`, `kindCompare()`).
+    return isKindValue(v) && kindCompare(v, x.engine.Zero) === 'unordered'
+      ? 'complex'
+      : undefined;
+  }
   const kind = literalNonRealKind(v);
   if (kind !== 'complex') return kind;
   return isRoundingNoiseImaginaryPart(v) ? undefined : 'complex';
@@ -1087,8 +941,7 @@ function decideEqual(
   for (const [i, arg] of ops.entries()) {
     if (!lhs) lhs = arg;
     else {
-      // A pair with a kind value is decided by the kinds (`kindEqual()`),
-      // before the name-based quantity rule.
+      // A pair with a kind value is decided by the kinds (`kindEqual()`).
       const k = kindEqual(
         lhs,
         arg,
@@ -1097,14 +950,6 @@ function decideEqual(
       if (k !== 'not-applicable') {
         if (k === false) return ce.False;
         if (k === undefined) return inertRelation(ce, 'Equal', rawOps, ops);
-        lhs = arg;
-        lhsIndex = i;
-        continue;
-      }
-      // Try quantity comparison first
-      const qcmp = quantityCompare(lhs, arg);
-      if (qcmp !== undefined) {
-        if (qcmp !== 0) return ce.False;
         lhs = arg;
         lhsIndex = i;
         continue;
@@ -1193,12 +1038,6 @@ function decideNotEqual(
         if (k === undefined) return inertRelation(ce, 'NotEqual', rawOps, ops);
         continue;
       }
-      // Two quantities compare by their physical value, as in `Equal`.
-      const qcmp = quantityCompare(lhs, arg);
-      if (qcmp !== undefined) {
-        if (qcmp === 0) return ce.False;
-        continue;
-      }
       const order = exactLiteralOrder(lhs, arg);
       const test = order !== undefined ? order === 0 : lhs.isEqual(arg);
       if (test === true) return ce.False;
@@ -1259,17 +1098,17 @@ function decideLess(
   if (ops.length === 2) {
     const [lhs, rhs] = ops;
     // A pair with a value of a kind that has `compare` is decided by the
-    // kinds (`kindCompare()`), before the name-based quantity rule.
+    // kinds (`kindCompare()`).
     const k = kindCompare(
       lhs,
       rhs,
       kindPairOptions(numericApproximation, rawOps, ops, 0, 1)
     );
     if (k === 'incomparable') return inertRelation(ce, 'Less', rawOps, ops);
+    // Two values with no order (a measurement with a complex nominal): no
+    // order relation holds, as for a complex number.
+    if (k === 'unordered') return ce.False;
     if (k !== undefined) return k < 0 ? ce.True : ce.False;
-    // Try quantity comparison first
-    const qcmp = quantityCompare(lhs, rhs);
-    if (qcmp !== undefined) return qcmp < 0 ? ce.True : ce.False;
     const order = exactLiteralOrder(lhs, rhs);
     const cmp =
       order !== undefined
@@ -1292,9 +1131,9 @@ function decideLess(
         kindPairOptions(numericApproximation, rawOps, ops, i - 1, i)
       );
       if (k === 'incomparable') return inertRelation(ce, 'Less', rawOps, ops);
-      const qcmp = k ?? quantityCompare(lhs, arg);
-      if (qcmp !== undefined) {
-        if (qcmp >= 0) return ce.False;
+      if (k === 'unordered') return ce.False;
+      if (k !== undefined) {
+        if (k >= 0) return ce.False;
       } else {
         const order = exactLiteralOrder(lhs, arg);
         const cmp =
@@ -1346,9 +1185,8 @@ function decideLessEqual(
     );
     if (k === 'incomparable')
       return inertRelation(ce, 'LessEqual', rawOps, ops);
+    if (k === 'unordered') return ce.False;
     if (k !== undefined) return k <= 0 ? ce.True : ce.False;
-    const qcmp = quantityCompare(lhs, rhs);
-    if (qcmp !== undefined) return qcmp <= 0 ? ce.True : ce.False;
     const order = exactLiteralOrder(lhs, rhs);
     const cmp =
       order !== undefined
@@ -1372,9 +1210,9 @@ function decideLessEqual(
       );
       if (k === 'incomparable')
         return inertRelation(ce, 'LessEqual', rawOps, ops);
-      const qcmp = k ?? quantityCompare(lhs, arg);
-      if (qcmp !== undefined) {
-        if (qcmp > 0) return ce.False;
+      if (k === 'unordered') return ce.False;
+      if (k !== undefined) {
+        if (k > 0) return ce.False;
       } else {
         const order = exactLiteralOrder(lhs, arg);
         const cmp =
@@ -1619,15 +1457,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       for (const arg of ops) {
         if (!lhs) lhs = arg;
         else {
-          // Dimensioned quantities compare by their SI magnitude, like
-          // `Equal` (`5 m ≡ 500 cm`).
-          const qcmp = quantityCompare(lhs, arg);
-          if (qcmp !== undefined) {
-            if (qcmp !== 0) return ce.False;
-            lhs = arg;
-            continue;
-          }
-
+          // Two quantities compare by their physical value, like `Equal`
+          // (`5 m ≡ 500 cm`): `eqIdentical()` asks the kinds
+          // (`kindEqual()`).
           const test = eqIdentical(lhs, arg);
           if (test === false) return ce.False;
           // Undecidable stays INERT, like `Equal`: `x ≡ y` is a *claim*, not a
@@ -2543,15 +2375,8 @@ function undecidedCollectionComparison(
   // `isUnresolvedCollectionOperand` sees an operand with no value that is
   // typed as a collection, and one whose type only admits a collection
   // (`P: number | collection<number>`): `P = [1, 2]` may still be `True`.
-  // A `Quantity` compared with a string is not an operand whose collection
-  // is not known yet, although its type `value` admits a collection:
-  // `6 m = "a"` is decided by the dimensions (`quantityDimensionsDiffer()`),
-  // not kept inert because the string is a collection of characters. A
-  // `Quantity` compared with a list is still kept inert here.
-  const textOnly = ops.every((op) => !op.isCollection || isTextAtom(op));
   const unresolved = (op: Expression): boolean =>
-    !(textOnly && isFunction(op, 'Quantity')) &&
-    (isPossiblyCollectionTyped(op) || isUnresolvedCollectionOperand(op));
+    isPossiblyCollectionTyped(op) || isUnresolvedCollectionOperand(op);
   return ops.some(unresolved) && ops.some((op) => op.isCollection);
 }
 

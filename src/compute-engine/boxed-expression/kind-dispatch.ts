@@ -44,6 +44,55 @@ import {
 } from './kind-compare.js';
 
 //
+// The operands as written, under `simplify()`
+//
+
+/**
+ * The operands as they were written before the simplification of a node,
+ * by the operand that the simplification made, while `simplify()` evaluates
+ * that node through the hooks of the kinds (`withOperandsWrittenBefore()`).
+ * `undefined` at every other time.
+ */
+let operandsWrittenBefore: ReadonlyMap<Expression, Expression> | undefined;
+
+/**
+ * Run `fn` with `pairs` as the written form of the operands it gives: each
+ * key is an operand made by the simplification of a node, and its value is
+ * the operand as it was written before that simplification.
+ *
+ * A hook reads in `ops.written[i]` the operand as it was written before the
+ * evaluation: under `evaluate()` and `.N()` it is the operand of the node.
+ * `simplify()` simplifies the operands of a node before it evaluates the
+ * node through the hooks of the kinds (`simplifyExpression()`,
+ * `simplify.ts`), and the simplification evaluates a constant operand: the
+ * term `Negate(Celsius(5))` of `Celsius(20) − Celsius(5)` becomes
+ * `Celsius(-5)` when the kind gives a value for the negation. In `fn`, the
+ * hooks receive the simplified operand in `evaluated` and the operand before
+ * the simplification in `written`, as under `evaluate()`. The keys are
+ * compared by identity; the caller gives only operands that hold a kind
+ * value, so a number literal or a symbol that another expression shares is
+ * never a key.
+ */
+export function withOperandsWrittenBefore<T>(
+  pairs: ReadonlyMap<Expression, Expression>,
+  fn: () => T
+): T {
+  const previous = operandsWrittenBefore;
+  operandsWrittenBefore = pairs;
+  try {
+    return fn();
+  } finally {
+    operandsWrittenBefore = previous;
+  }
+}
+
+/** The operand `x` as it was written (`withOperandsWrittenBefore()`). */
+function asWritten(x: Expression | undefined): Expression | undefined {
+  if (x === undefined || operandsWrittenBefore === undefined) return x;
+  return operandsWrittenBefore.get(x) ?? x;
+}
+
+//
 // `Add` and `Multiply`
 //
 
@@ -74,7 +123,7 @@ function foldKindOperands(
   numericApproximation: boolean
 ): { values: Expression[]; written: (Expression | undefined)[] } {
   let values = [...evaluated];
-  let writ = [...written];
+  let writ = written.map(asWritten);
   // The memo of `exact(i)`, aligned with `values`: it moves with its operand
   // when a fold removes the operands before it.
   let memo: (Expression | undefined)[] = values.map(() => undefined);
@@ -267,7 +316,7 @@ export function kindOperation(
   const kinds = kindsAmong(evaluated);
   if (kinds.length === 0) return undefined;
   const operands = evaluated.map((x, i) =>
-    kindOperand(x, written?.[i], numericApproximation)
+    kindOperand(x, asWritten(written?.[i]), numericApproximation)
   );
   const context: ArithmeticContext = { engine: ce, numericApproximation };
   for (const kind of kinds) {
@@ -426,7 +475,12 @@ export function kindApply(
     elements[i] = snapshot;
     enumerated = true;
   }
-  const candidates = evaluated.flatMap((x, i) => elements[i] ?? [x]);
+  // The cells of an enumerated element that is a literal row (a `List` or a
+  // `Tuple`) are candidates too: the elements of a matrix are its rows, and
+  // a kind value is a cell of a row.
+  const candidates = evaluated.flatMap((x, i) =>
+    elements[i] === undefined ? [x] : literalCells(elements[i]!)
+  );
   const kinds = kindsAmong(candidates);
   // The operands the handler receives when no kind answers: a collection
   // that was enumerated is given as the list of its elements.
@@ -446,7 +500,7 @@ export function kindApply(
   const ops = kindOperands(
     kinds[0].name,
     evaluated,
-    evaluated.map((x, i) => written?.[i]),
+    evaluated.map((x, i) => asWritten(written?.[i])),
     evaluated.map(() => undefined),
     numericApproximation,
     elements
@@ -466,6 +520,26 @@ export function kindApply(
     return { value: result };
   }
   return asked ? 'unevaluated' : handlerOperands();
+}
+
+/**
+ * The values `xs`, with each literal `List` or `Tuple` among them replaced
+ * by its cells, at every depth up to 8 (the rows of a matrix, the rows of a
+ * tensor of rank 3, …). A collection that is not a literal (a `Range`, a
+ * lazy collection) is kept as it is: it is not enumerated here.
+ */
+function literalCells(
+  xs: ReadonlyArray<Expression>,
+  depth = 0
+): ReadonlyArray<Expression> {
+  if (depth >= 8) return xs;
+  if (!xs.some((x) => isFunction(x, 'List') || isFunction(x, 'Tuple')))
+    return xs;
+  return xs.flatMap((x) =>
+    isFunction(x, 'List') || isFunction(x, 'Tuple')
+      ? literalCells(x.ops, depth + 1)
+      : [x]
+  );
 }
 
 /**

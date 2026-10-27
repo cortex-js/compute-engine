@@ -221,6 +221,16 @@ export const VALUE_TYPES: PrimitiveType[] = [
   // arithmetic operators that have residue arithmetic name it in their
   // signatures (`library/arithmetic.ts`).
   'residue',
+  // `measurement` (the value of `Measurement(value, error)`) sits here for the
+  // same reasons as `residue`: an opaque value, disjoint from every numeric
+  // type. The kind registry admits it where a number is admitted
+  // (`admittedAs: 'number'`, `library/measurement-arithmetic.ts`).
+  'measurement',
+  // `quantity` (the value of `Quantity(magnitude, unit)`) sits here for the
+  // same reasons: an opaque value, disjoint from every numeric type. It is
+  // admitted only by the arithmetic operators and the operators that name it
+  // (`admittedAs: 'none'`, `library/quantity-arithmetic.ts`).
+  'quantity',
   // `type` (a reified type expression, the value `TypeFrom(...)` constructs)
   // sits beside `regexp` for the same reasons: an opaque value with no
   // numeric/boolean reading and no hidden element type, clear of the

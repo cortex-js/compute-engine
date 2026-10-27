@@ -414,8 +414,11 @@ export function admittedOnlyThroughCarrier(
 
 /**
  * The operators that are never an apply site: they handle a kind value
- * through `compare` (the comparisons, `Max`, `Min`, `Sort`, `Clamp`),
- * through the hooks of group 1, or they hold their operands.
+ * through `compare` (the comparisons, `Max`, `Min`, `ElementMax`,
+ * `ElementMin`, `Sort`, `Clamp`), through the hooks of group 1, or they
+ * hold their operands. `ElementMax` and `ElementMin` are extrema, decided by
+ * an order, as `Max` and `Min` are (decision 8 of
+ * `docs/plans/2026-10-26-value-kinds.md`, section 13).
  */
 const NEVER_APPLY_SITES = new Set([
   'Equal',
@@ -426,6 +429,8 @@ const NEVER_APPLY_SITES = new Set([
   'GreaterEqual',
   'Max',
   'Min',
+  'ElementMax',
+  'ElementMin',
   'Sort',
   'Clamp',
   ...Object.keys(GROUP_ONE_HOOK),
@@ -450,6 +455,20 @@ export function handlesKindsByHooks(
 }
 
 /**
+ * The parameter of the arm `arm` at the position `i`, as the carrier rule
+ * reads it: a parameter that is a type variable (`(T) -> T where T: number`)
+ * is read as the declared bound of the variable (`any` when it has none),
+ * since the call-site check admits a kind value there when the bound admits
+ * its carrier (`docs/plans/2026-10-26-value-kinds.md`, A14 of section 13).
+ */
+function carrierParamAt(arm: FunctionSignature, i: number): Type | undefined {
+  const param = paramAt(arm, i);
+  if (param === undefined || typeof param !== 'object') return param;
+  if (param.kind !== 'variable') return param;
+  return arm.typeParams?.find((tp) => tp.name === param.name)?.bound ?? 'any';
+}
+
+/**
  * The indices of the operands, of types `operandTypes`, that the arm
  * `arm` of the operator `def` admits ONLY through the carrier rule of
  * group 3 (section 4.2): the parameter is not `value`, `any`, `expression`,
@@ -471,7 +490,7 @@ export function kindCarrierOperands(
   for (let i = 0; i < operandTypes.length; i++) {
     const t = operandTypes[i];
     if (!hasKindArm(t, kinds)) continue;
-    const param = paramAt(arm as FunctionSignature, i);
+    const param = carrierParamAt(arm as FunctionSignature, i);
     if (param === undefined) continue;
     if (admittedOnlyThroughCarrier(ce, t, param, def.broadcastable === true))
       out.push(i);
@@ -522,7 +541,7 @@ export function armAdmitsKindsByType(
   for (let i = 0; i < operandTypes.length; i++) {
     const t = operandTypes[i];
     if (!hasKindArm(t, kinds)) continue;
-    const param = paramAt(arm, i);
+    const param = carrierParamAt(arm, i);
     if (param === undefined) continue;
     if (admittedOnlyThroughCarrier(ce, t, param, threadable(i))) return false;
   }

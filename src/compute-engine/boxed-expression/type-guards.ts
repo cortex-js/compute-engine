@@ -1,4 +1,5 @@
 import { anyObjectExists } from './object-deps.js';
+import { arithmeticOf } from './value-kinds.js';
 
 import type {
   Expression,
@@ -131,6 +132,36 @@ export function isMissingValue(expr: Expression | null | undefined): boolean {
 }
 
 /**
+ * The answer of the `isExact` hook of the kind of `x` when `x` is a value of
+ * a value kind (a call of a head whose bound definition declares
+ * `arithmetic`): `true` when the kind has no `isExact` hook, `undefined`
+ * when `x` is not a kind value.
+ */
+function kindValueIsExact(x: Expression): boolean | undefined {
+  if (!isFunction(x)) return undefined;
+  const def = x.operatorDefinition;
+  if (def === undefined) return undefined;
+  const arithmetic = arithmeticOf(x.engine, def);
+  if (arithmetic === undefined) return undefined;
+  return arithmetic.isExact === undefined ? true : arithmetic.isExact(x);
+}
+
+/**
+ * True when `x` is a value of a value kind whose `isNaN` hook says that it
+ * stands for no value (`ArithmeticDefinition.isNaN`): a measurement with a
+ * `NaN` nominal, a quantity with a `NaN` magnitude. The extrema (`Max`,
+ * `Min`, `ElementMax`, `ElementMin`, `Clamp`) treat it as the number `NaN`.
+ * `false` for any other expression, including a kind without the hook.
+ */
+export function kindValueIsNaN(x: Expression): boolean {
+  if (!isFunction(x)) return false;
+  const def = x.operatorDefinition;
+  if (def === undefined) return false;
+  const arithmetic = arithmeticOf(x.engine, def);
+  return arithmetic?.isNaN?.call(arithmetic, x) === true;
+}
+
+/**
  * Does the operand make a numeric result inexact: the `NaN` literal, or a
  * finite float (a machine or big-decimal number that is not exact)? The
  * `Indeterminate` literal is not inexact (it is the answer of an exact
@@ -143,13 +174,14 @@ export function isMissingValue(expr: Expression | null | undefined): boolean {
  * `NaN`).
  */
 export function isInexactOperand(x: Expression): boolean {
-  // A `Measurement(v, σ)` is as inexact as its nominal `v`: a measurement
-  // with a float nominal is a float datum, so `Max(Measurement(1.5, 0.1),
-  // Indeterminate)` is `NaN`, as `Max(1.5, Indeterminate)` is.
-  if (isFunction(x, 'Measurement')) return isInexactOperand(x.op1);
-  // A `Quantity` is as inexact as its magnitude: `Max(Quantity(1.5, m),
-  // Indeterminate)` is `NaN`, as `Max(1.5, Indeterminate)` is.
-  if (isFunction(x, 'Quantity')) return isInexactOperand(x.op1);
+  // A value of a kind is inexact when the `isExact` hook of its kind says
+  // so (`ArithmeticDefinition.isExact`): a measurement is never exact, so
+  // `Max(Measurement(3/2, 1/10), Indeterminate)` is `NaN`, as
+  // `Max(1.5, Indeterminate)` is, and a quantity is as exact as its
+  // magnitude (`Max(Quantity(1.5, m), Indeterminate)` is `NaN`). A kind
+  // without the hook is exact.
+  const exact = kindValueIsExact(x);
+  if (exact !== undefined) return !exact;
   if (!isNumber(x) || x.isIndeterminate) return false;
   if (x.isNaN === true) return true;
   return x.isFinite === true && !x.isExact;
@@ -172,10 +204,10 @@ export function nanOperandAnswer(
   ops: ReadonlyArray<Expression>
 ): Expression {
   let sawIndeterminate = false;
-  for (let x of ops) {
-    // A `Measurement(v, σ)` answers as its nominal `v` does
-    // (`isInexactOperand()`).
-    if (isFunction(x, 'Measurement')) x = x.op1;
+  for (const x of ops) {
+    // A value of a kind that is not exact (a measurement) makes the answer
+    // `NaN`, as a float does (`isInexactOperand()`).
+    if (kindValueIsExact(x) === false) return ce.NaN;
     if (isNumber(x)) {
       if (x.isIndeterminate) sawIndeterminate = true;
       else if (isInexactOperand(x)) return ce.NaN;

@@ -1663,15 +1663,6 @@ export function elementExtremumType(
 }
 
 /**
- * `Measurement(value, error)` — a nominal value carrying a 1σ absolute error.
- * The type is the nominal's scalar type (typically `real`); the error bar does
- * not widen it.
- */
-export function measurementType(ops: ReadonlyArray<OperandDescriptor>): Type {
-  return ops[0]?.type ?? 'real';
-}
-
-/**
  * The type of `Sum`, `Product` or `Mean` reducing values that are all on the
  * extended real line, with or without NaN: the elements of each rank-1
  * `list` operand, and each scalar operand. `undefined` for any

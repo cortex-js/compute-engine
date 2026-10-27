@@ -15,6 +15,12 @@ import {
 } from './boxed-expression/definition-guards.js';
 import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
 import { recordEngineCompileHandler } from './compilation/engine-compile-handlers.js';
+import type { ConfigurationChangeListener } from '../common/configuration-change.js';
+import { isFunction } from './boxed-expression/type-guards.js';
+import {
+  deferKindValueGates,
+  kindTypesOfHeadName,
+} from './boxed-expression/value-kinds.js';
 
 import {
   STANDARD_LIBRARIES,
@@ -59,6 +65,44 @@ export function loadLibraryDefinitions(
   engine: ComputeEngine,
   libraries: readonly LibraryDefinition[]
 ): void {
+  // A library constant whose value is a kind value (a physical constant is a
+  // quantity) does not open the gates of its kind type while the libraries
+  // load: its value is made again when it is first read, which opens them
+  // then (`deferKindValueGates()`, `value-kinds.ts`).
+  const deferred = deferKindValueGates(engine, () =>
+    installLibraryDefinitions(engine, libraries)
+  );
+  if (deferred.size > 0) recomputeKindConstants(engine);
+  for (const library of libraries)
+    engine._loadedLibraries.set(library.name, library);
+}
+
+/**
+ * Ask each constant of the system scope whose value is a call of a head
+ * that declares a value kind (the `Quantity` value of `SpeedOfLight`) to
+ * compute its value again when it is next read. The value made while the
+ * libraries loaded did not open the gates of its kind type
+ * (`deferKindValueGates()`); the value made at the first read does.
+ */
+function recomputeKindConstants(engine: ComputeEngine): void {
+  for (const binding of engine.context.lexicalScope.bindings.values()) {
+    if (!isValueDef(binding)) continue;
+    const def = binding.value;
+    if (!def.isConstant) continue;
+    const value = def.storedValue;
+    if (value === undefined || !isFunction(value)) continue;
+    if (kindTypesOfHeadName(engine, value.operator) === undefined) continue;
+    // A constant listens to the changes of configuration (precision, angular
+    // unit), and computes its value again at the next read after one.
+    if ('onConfigurationChange' in def)
+      (def as unknown as ConfigurationChangeListener).onConfigurationChange?.();
+  }
+}
+
+function installLibraryDefinitions(
+  engine: ComputeEngine,
+  libraries: readonly LibraryDefinition[]
+): void {
   for (const library of libraries) {
     const definitions = library.definitions;
     if (!definitions) continue;
@@ -100,8 +144,6 @@ export function loadLibraryDefinitions(
       });
     }
   }
-  for (const library of libraries)
-    engine._loadedLibraries.set(library.name, library);
 }
 
 /**

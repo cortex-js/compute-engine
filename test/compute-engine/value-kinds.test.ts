@@ -218,7 +218,14 @@ describe('VALUE KINDS: the declaration check', () => {
       signature: '(integer) -> gf8',
       arithmetic: gf8Arithmetic(),
     });
-    expect([...kindTypesOf(ce)].sort()).toEqual(['gf8', 'residue']);
+    // `measurement`, `quantity` and `residue` are the kind types of the
+    // library.
+    expect([...kindTypesOf(ce)].sort()).toEqual([
+      'gf8',
+      'measurement',
+      'quantity',
+      'residue',
+    ]);
     expect(isKindType(ce, ce.type('gf8').type)).toBe(true);
     expect(isKindType(ce, 'residue')).toBe(true);
     expect(isKindType(ce, 'integer')).toBe(false);
@@ -450,9 +457,14 @@ describe('VALUE KINDS: the generation counter and the checkpoint model', () => {
     const before = kindGeneration(ce);
 
     ce.restore(cp);
-    // `residue` was registered by the library head `ResidueClass` before
-    // the checkpoint.
-    expect([...kindTypesOf(ce)]).toEqual(['residue']);
+    // `residue`, `measurement` and `quantity` were registered by the library
+    // heads `ResidueClass`, `Measurement` and `Quantity` before the
+    // checkpoint.
+    expect([...kindTypesOf(ce)]).toEqual([
+      'residue',
+      'measurement',
+      'quantity',
+    ]);
     expect(kindTypeInfo(ce, 'gf8')).toBeUndefined();
     expect(arithmeticOf(ce, def)).toBeUndefined();
     expect(ce.lookupDefinition('GF8')).toBeUndefined();
@@ -884,5 +896,41 @@ describe('VALUE KINDS: the sites that read the kind types', () => {
         fallback: false,
       })
     ).toThrow("holds a residue class (type 'residue')");
+  });
+});
+
+describe('VALUE KINDS: a kind scalar and a list operand of Divide and Power', () => {
+  // `Divide` and `Power` are not exempt from the generic broadcast lift,
+  // which types them again for one element. The static type had one list
+  // level too many (`list<list<number | quantity>>`) while the value is a
+  // list of kind values (`list<quantity^2>`).
+  const ce = new ComputeEngine();
+  const L = ['List', 1, 2];
+  const q = ['Quantity', 3, 'm'];
+  const m = ['Measurement', 3, 0.1];
+  const r = ['ResidueClass', 3, 5];
+  test.each([
+    ['Divide', q, L, 'list<number | quantity^2>'],
+    ['Divide', L, q, 'list<number | quantity^2>'],
+    ['Power', q, L, 'list<number | quantity^2>'],
+    ['Divide', m, L, 'list<measurement | number^2>'],
+    ['Divide', L, m, 'list<measurement | number^2>'],
+    ['Power', m, L, 'list<measurement | number^2>'],
+    ['Divide', r, L, 'list<residue^2>'],
+    ['Divide', L, r, 'list<residue^2>'],
+    ['Power', r, L, 'list<residue^2>'],
+  ] as const)('%s(%j, %j) is typed %s', (op, a, b, expected) => {
+    const expr = ce.box([op, a, b] as any);
+    expect(expr.type.toString()).toBe(expected);
+    // The static type admits the type of the value.
+    expect(expr.evaluate().type.matches(expr.type)).toBe(true);
+  });
+
+  test('an operand that may be a kind value has one list level too', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('u', 'integer | residue');
+    expect(ce2.box(['Divide', 'u', L] as any).type.toString()).toBe(
+      'list<number | residue^2>'
+    );
   });
 });

@@ -14,7 +14,7 @@ import {
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import {
-  checkType,
+  checkOperandType,
   checkTypes,
   checkNumericArgs,
   absentableCollectionOperandValue,
@@ -349,7 +349,6 @@ import {
   elementExtremumType as elementExtremumTypeOnTypes,
   extremumRangeType as extremumRangeTypeOnTypes,
   roundingFunctionType as roundingFunctionTypeOnTypes,
-  measurementType as measurementTypeOnTypes,
   bigOpResultType as bigOpResultTypeOnTypes,
   operandLiteralValue as operandLiteralValueOnTypes,
   operandSgn as operandSgnOnTypes,
@@ -405,15 +404,7 @@ const REAL_OR_POSITIVE_INFINITY_TYPE = parseType('real | +oo');
  * (same value, same convention: a dedicated per-file constant).
  */
 const MAX_EXACT_FACTORIAL_DIGITS = 1_000_000;
-import {
-  foldQuantityOperands,
-  isQuantity,
-  quantityAdd,
-  quantityMultiply,
-  quantityDivide,
-  quantityPower,
-} from './quantity-arithmetic.js';
-import { usesExpressionArithmetic } from './units.js';
+import { isQuantity } from './quantity-arithmetic.js';
 import {
   holdsKindValue,
   residueResultType,
@@ -428,20 +419,8 @@ import {
 } from '../boxed-expression/kind-dispatch.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
 import {
-  foldMeasurementOperands,
-  isMeasurement,
-  measurementAdd,
-  measurementMultiply,
-  measurementDivide,
-  measurementNegate,
-  measurementPower,
-  measurementSqrt,
-  measurementRoot,
-  measurementLn,
-  measurementLog,
-  measurementLipschitzUnary,
-  measurementNominal,
-  measurementUnaryByHead,
+  MEASUREMENT_ARITHMETIC,
+  measurementEq,
 } from './measurement-arithmetic.js';
 import {
   range,
@@ -488,6 +467,7 @@ import {
   isAbsentSymbol,
   isAbsentArithmeticOperand,
   isInexactOperand,
+  kindValueIsNaN,
   nanOperandAnswer,
   indeterminateFormAnswer,
 } from '../boxed-expression/type-guards.js';
@@ -4531,12 +4511,24 @@ function residueShapedResultType(
   // with each class read as an integer cell: `c · (1, 2)` is a tuple of
   // classes because `Multiply` scales a point, where `Add` of a scalar and
   // a point is an error.
+  //
+  // An operand typed as a number is read from its type alone, without its
+  // structural view. The generic broadcast lift (`Divide` and `Power` are
+  // not exempt from it) calls this handler again for one element, with the
+  // list operand typed as its cell (`integer`) but with the structural view
+  // of the whole list literal. The derivation would then read that view and
+  // lift a second time, and the result had one list level too many:
+  // `ResidueClass(3, 5) / [1, 2]` was typed `list<list<residue>>`, not
+  // `list<residue^2>`. A number operand has no shape, so the shape is the
+  // same without the view.
   const placeholders = ops.map((x) =>
     isKindOperand(x, engine)
       ? describeType(
           hasKindArm(x.type, kinds) ? kindAsInteger(x.type, kinds) : 'integer'
         )
-      : x
+      : x.type !== 'never' && isSubtype(x.type, 'number')
+        ? describeType(x.type, x.facts.closed)
+        : x
   );
   const shaped = withResidueCells(numericType(placeholders) ?? cell, cell);
   // An operand that IS a class (typed `residue`, or holding a `ResidueClass`
@@ -4547,10 +4539,14 @@ function residueShapedResultType(
   // arm is joined in (`u / 2` with `u: integer | residue` is
   // `rational | residue`, not `integer | residue`).
   if (ops.some((x) => isCertainlyResidueClass(x, engine))) return shaped;
+  // A number operand is read from its type alone here too, for the reason
+  // given for `placeholders` above.
   const numeric = ops.map((x) =>
     hasKindArm(x.type, kinds)
       ? describeType(withoutKindArmsDeep(x.type, kinds))
-      : x
+      : x.type !== 'never' && isSubtype(x.type, 'number')
+        ? describeType(x.type, x.facts.closed)
+        : x
   );
   const alternative = numericType(numeric);
   return alternative === undefined ? shaped : widen(shaped, alternative);
@@ -6732,10 +6728,6 @@ function evaluateGamma(
   }
 
   const x = ops[0];
-  // A `Measurement` argument: Γ(a ± σ) is Γ(a) ± |Γ(a)·ψ(a)|·σ
-  // (`measurementUnaryByHead`).
-  const m = measurementUnaryByHead(engine, 'Gamma', x);
-  if (m !== undefined) return numericApproximation ? m.N() : m;
   // Gamma has poles at the non-positive integers (0, -1, -2, ...).
   // This is exact, so return it regardless of numericApproximation.
   if (isNumber(x) && !x.isComplex && x.isInteger && x.isNonPositive)
@@ -6806,8 +6798,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // per call. A numeric tuple operand (a point, whose norm `Abs`
       // computes) is admitted by the numeric-argument validation's tuple
       // lane (`typeCouldBeNumericTuple`, validate.ts), not by this
-      // carrier.
-      signature: '(complex | infinity) -> number',
+      // carrier. The parameter names `quantity` too: the absolute value of a
+      // quantity is a quantity (`Abs(-2 m)` is `2 m`, typed `quantity` by
+      // the `resultType` hook of `QUANTITY_ARITHMETIC`, `quantity-kind.ts`).
+      signature: '(complex | infinity | quantity) -> number',
       examples: ['[Abs(-3), Abs(3 - 4i)]'],
       nanBehavior: 'propagate',
       // A TYPE test, not an `operator === 'Tuple'` check: a tuple-TYPED
@@ -7011,16 +7005,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x0, step0], { numericApproximation, expression }) => {
-        // A `Measurement` rounds as its nominal (see `Floor`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
+      evaluate: ([x, step], { numericApproximation, expression }) => {
         // The operand as written, for the exact recovery near a rounding
-        // jump, read through its nominal when it is a `Measurement`.
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // jump.
+        const original = originalOperand(expression, 0);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -7551,21 +7539,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             writtenOperands(expression, 2),
             numericApproximation === true
           );
-        if (
-          evalNum.operator === 'Quantity' ||
-          evalDen.operator === 'Quantity'
-        ) {
-          const r = quantityDivide(engine!, evalNum, evalDen);
-          // An exact or Measurement magnitude is made numeric under `.N()`.
-          return numericApproximation ? r?.N() : r;
-        }
-        if (
-          evalNum.operator === 'Measurement' ||
-          evalDen.operator === 'Measurement'
-        ) {
-          const r = measurementDivide(engine!, evalNum, evalDen);
-          return numericApproximation ? r?.N() : r;
-        }
         // An operand whose float is 0 or ±∞ can have an exact value that is
         // not: `10^{400} + 1` is an integer above the largest double. The
         // quotient is then computed from the exact values, and it can be in
@@ -7641,7 +7614,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       signature: '(number) -> number',
       examples: ['[Exp2(10), Exp2(1/2)]'],
       canonical: (args, { engine }) => {
-        args = checkNumericArgs(engine, args, 1);
+        // A value of a kind admitted as a number whose kind has a `power`
+        // hook (a measurement) is an operand, as at `Exp`: `Exp2(x)` is
+        // `Power(2, x)`.
+        args = checkNumericArgs(engine, args, { count: 1, carrier: 'power' });
         // See the `Exp` guard above: `['Exp2', 11, 12]` used to canonicalize
         // to `Power(2, 11, Error(…))`.
         if (args.length !== 1 || !args.every((x) => x.isValid))
@@ -7739,11 +7715,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         engine._fn('Factorial', [...checkArity(engine, args, 1)]),
       evaluate: ([x], { numericApproximation }) => {
         const ce = x.engine;
-
-        // A `Measurement` argument: (a ± σ)! is Γ(a + 1) with the same
-        // uncertainty, propagated (`measurementUnaryByHead`).
-        const m = measurementUnaryByHead(ce, 'Factorial', x);
-        if (m !== undefined) return numericApproximation ? m.N() : m;
 
         // If argument is symbolic (not a number literal), keep unevaluated
         if (!isNumber(x)) return undefined;
@@ -8070,19 +8041,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonNegative) return 'non-negative';
         return undefined;
       },
-      evaluate: ([x0, step0], { numericApproximation, expression }) => {
-        // A `Measurement` rounds as its nominal: the slope of a step function
-        // is zero almost everywhere, so the first-order uncertainty of the
-        // result is zero and the answer is the bare value
-        // (`measurementNominal`; the same for `Ceil`, `Round` and `Mod`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
+      evaluate: ([x, step], { numericApproximation, expression }) => {
+        // A `Measurement` operand does not reach this handler: the `apply`
+        // hook of the measurement kind answers for it (the step rule of
+        // `stepApply()`, `measurement-arithmetic.ts`; the same for `Ceil`,
+        // `Round`, `Truncate`, `Fract` and `Mod`).
         // The operand as written, for the exact recovery near a rounding
-        // jump, read through its nominal when it is a `Measurement`.
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // jump.
+        const original = originalOperand(expression, 0);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -8159,16 +8125,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: ([x], { numericApproximation, engine: ce, expression }) => {
-        // A `Measurement` argument: the fractional part has slope 1 away
-        // from the integers, so the uncertainty is unchanged
-        // (`Fract(Measurement(2.5, 0.01))` is `Measurement(0.5, 0.01)`).
-        if (isMeasurement(x)) {
-          const r = ce.function('Measurement', [
-            ce.function('Fract', [x.op1]).evaluate({ numericApproximation }),
-            x.op2,
-          ]);
-          return numericApproximation ? r.N() : r.evaluate();
-        }
         // Exact fractional part for an exact real argument: x - floor(x),
         // computed exactly (rational arithmetic) so `Fract(1/2) → 1/2`, not
         // `0.5`. Only an inexact (float) argument numericizes.
@@ -9178,11 +9134,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // Non-lazy: `z` is already evaluated by the driver.
           const nonNumeric = nonNumericOperandError(engine, [z]);
           if (nonNumeric !== undefined) return nonNumeric;
-          const evalZ = z;
-          if (isMeasurement(evalZ)) {
-            const r = measurementLn(engine, evalZ);
-            return numericApproximation ? r?.N() : r;
-          }
           if (!numericApproximation) return z.ln();
 
           // An exact argument outside the double range (`10^{400}`) has a
@@ -9296,12 +9247,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
           // Covers the whole log family: Lb/Lg/Log2/Log10 canonicalize to Log.
           const nonNumeric = nonNumericOperandError(engine, ops);
           if (nonNumeric !== undefined) return nonNumeric;
-          const evalArg = ops[0];
-          if (evalArg && isMeasurement(evalArg)) {
-            const base = ops[1] ?? engine.number(10);
-            const r = measurementLog(engine, evalArg, base);
-            return numericApproximation ? r?.N() : r;
-          }
           if (!numericApproximation)
             return ops[0]?.ln(ops[1] ?? 10) ?? undefined;
           const ce = engine;
@@ -9417,7 +9362,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['[Lb(8), N(Lb(3))]'],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn('Log', [x, engine.number(2), ...rest]);
       },
     },
@@ -9433,7 +9385,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine }) => {
         // An extra operand stays after the base 10, so that it is not read
         // as the base.
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn(
           'Log',
           rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
@@ -9451,7 +9410,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       canonical: (ops, { engine }) => {
         // An extra operand stays after the base 10, so that it is not read
         // as the base.
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn(
           'Log',
           rest.length === 0 ? [x] : [x, engine.number(10), ...rest]
@@ -9467,7 +9433,14 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       examples: ['[Log2(32), N(Log2(3))]'],
       sgn: ([x]) => lnSign(x),
       canonical: (ops, { engine }) => {
-        const [x, ...rest] = checkArity(engine, ops, 1);
+        // The operand is checked as the canonical form of `Log` checks it
+        // (`carrier: true`): the `Log` call below is not canonicalized
+        // again, so with only an arity check a string, a residue class or
+        // a quantity was admitted, where `Log` refuses it.
+        const [x, ...rest] = checkNumericArgs(engine, ops, {
+          count: 1,
+          carrier: true,
+        });
         return engine._fn('Log', [x, engine.number(2), ...rest]);
       },
     },
@@ -9586,27 +9559,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         }
         return undefined;
       },
-      evaluate: (
-        [a0, b0],
-        { engine: ce, numericApproximation, expression }
-      ) => {
-        // A `Measurement` operand stands for its nominal (see `Floor`); the
-        // operands as written are read through their nominals too, for the
-        // exact recovery near a jump.
-        const a = measurementNominal(a0);
-        const b = measurementNominal(b0);
-        if (
-          expression !== undefined &&
-          (isMeasurement(a0) || isMeasurement(b0))
-        ) {
-          const wa = originalOperand(expression, 0);
-          const wb = originalOperand(expression, 1);
-          if (wa !== undefined && wb !== undefined)
-            expression = ce._fn('Mod', [
-              measurementNominal(wa),
-              measurementNominal(wb),
-            ]);
-        }
+      evaluate: ([a, b], { engine: ce, numericApproximation, expression }) => {
         // Under `.N()`, `Mod` jumps where `a/b` is an integer: the exact
         // values of exact operands are used near such a point
         // (`exactModUnderN()`).
@@ -10838,9 +10791,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       // The hot box route runs `checkNumericArgs` once in
       // `makeNumericFunction()` and bypasses the definition handler and its
       // post-handler signature seam. That fast path is also what admits a
-      // `Quantity` or a `Measurement` operand, which type `value` and would
-      // be disjoint from this carrier. The handler below remains the guarded
-      // generic fallback for routes that do reach the definition.
+      // value of a kind (a quantity, a measurement), by the rule of the
+      // arithmetic operators (`checkNumericArgs` with the `negate` hook): its
+      // type is disjoint from this carrier. The handler below remains the
+      // guarded generic fallback for routes that do reach the definition.
       //
       // That handler folds a literal `NaN` operand to `NaN` at
       // canonicalization (through `.neg()`), rather than letting the node
@@ -10917,28 +10871,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
             return numericApproximation ? r.N() : r.evaluate();
           return isFunction(r, 'Negate') && r.op1 === evalX ? undefined : r;
         }
-        if (isQuantity(evalX)) {
-          // A symbolic magnitude has no numeric value (its `.re` is `NaN`),
-          // and an exact magnitude (`π`) must stay exact: negate it with the
-          // expression arithmetic of the `Measurement` branch, with no error.
-          if (usesExpressionArithmetic([evalX.op1])) {
-            const negM = measurementNegate(engine, evalX.op1);
-            if (negM !== undefined) {
-              const r = engine._fn('Quantity', [negM, evalX.op2]);
-              return numericApproximation ? r.N() : r;
-            }
-          }
-          const mag = evalX.op1.re;
-          if (mag !== undefined)
-            return engine._fn('Quantity', [
-              asFloat(engine.number(-mag)),
-              evalX.op2,
-            ]);
-        }
-        if (isMeasurement(evalX)) {
-          const r = measurementNegate(engine, evalX);
-          return numericApproximation ? r?.N() : r;
-        }
         const neg = evalX.neg();
         // If the operand only became a collection (vector/matrix) *after*
         // evaluation — e.g. `Negate(Multiply(A, B))` — the broadcast path was
@@ -10962,16 +10894,20 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       description: 'A nominal value carrying a 1σ absolute uncertainty.',
       complexity: 1200,
       lazy: true,
-      signature: '(value, value) -> value',
+      // A measurement is a value of the VALUE KIND `measurement`
+      // (`MEASUREMENT_ARITHMETIC`, `measurement-arithmetic.ts`): an opaque
+      // type, admitted where a number is admitted, with its own arithmetic
+      // and order. `docs/plans/2026-10-26-value-kinds.md`, section 4.7.
+      signature: '(value, value) -> measurement',
+      arithmetic: MEASUREMENT_ARITHMETIC,
+      // Two measurements, or a measurement and a value, are equal when their
+      // nominals are (`measurementEq()`); `Equal` asks it when the order
+      // (`compare`) has no answer, as for a complex nominal.
+      eq: (a, b) => measurementEq(a, b),
       examples: [
         'Measurement(9.81, 0.02)',
         'N(Measurement(5, 0.2) * Measurement(3, 0.4))',
       ],
-      type: (ops, context) =>
-        BoxedType.forResult(
-          measurementTypeOnTypes(ops),
-          context.engine._typeResolver
-        ),
       canonical: (args, { engine: ce }) => {
         if (args.length !== 2) return ce.error('incompatible-type');
         const value = args[0].canonical;
@@ -11528,19 +11464,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               writtenOperands(expression, 2),
               numericApproximation === true
             );
-          if (evalBase.operator === 'Quantity') {
-            const r = quantityPower(engine!, evalBase, n);
-            // An exact or Measurement magnitude is made numeric under `.N()`.
-            return numericApproximation ? r?.N() : r;
-          }
-          const evalExp = n;
-          if (
-            evalBase.operator === 'Measurement' ||
-            evalExp.operator === 'Measurement'
-          ) {
-            const r = measurementPower(engine!, evalBase, evalExp);
-            return numericApproximation ? r?.N() : r;
-          }
           // Under `.N()`, an exact base raised to a large exact integer `k`: the
           // relative error of the base is multiplied by `|k|`, so the float of
           // `π` at 21 digits gives only 17 correct digits of `π^1000000`. The
@@ -11627,7 +11550,7 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (args.length === 0) return ce._fn('Rational', [ce.error('missing')]);
 
         if (args.length === 1)
-          return ce._fn('Rational', [checkType(ce, args[0], 'real')]);
+          return ce._fn('Rational', [checkOperandType(ce, args[0], 'real')]);
 
         // `checkType` admits a merely-OVERLAPPING operand (deferred
         // validation: a `number`-typed symbol may turn out integral), so a
@@ -11878,27 +11801,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               numericApproximation === true
             );
           }
-          if (evalX.operator === 'Quantity') {
-            const nVal = n.re;
-            if (nVal !== undefined && nVal !== 0) {
-              // For an integer index, the exact `1/n`, not a float: the root of
-              // an exact magnitude stays exact under `evaluate()`.
-              const r = quantityPower(
-                engine,
-                evalX,
-                Number.isInteger(nVal)
-                  ? engine.number([1, nVal])
-                  : engine.number(1 / nVal)
-              );
-              // Under `.N()` the magnitude is a float.
-              if (numericApproximation && r && isQuantity(r)) return r.N();
-              return r;
-            }
-          }
-          if (isMeasurement(evalX)) {
-            const r = measurementRoot(engine, evalX, n);
-            return numericApproximation ? r?.N() : r;
-          }
           // An exact radicand outside the double range (`10^{-900}`) can have
           // a root in the double range (`Root(10^{-900}, 3)` is `1e-300`). The
           // root is computed with big decimals, as `exp(ln(x) / n)`. A negative
@@ -12104,13 +12006,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         return undefined;
       },
       evaluate: (
-        [x0, step0],
+        [x, step],
         { engine: ce, numericApproximation, expression }
       ) => {
-        // A `Measurement` rounds as its nominal (see `Floor`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
         // A value halfway between two integers is rounded with the rule of
         // `ce.roundingTies` at every precision (by default away from zero:
         // `Round(-0.5)` is `-1`, `Round(2.5)` is `3`). The machine lane
@@ -12120,10 +12018,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // helpers. `applyRounding()` boxes the rounded quotient as an exact
         // integer also for a float `x`, so the multiple of an exact step is
         // exact (`Round(3.14159, 1/100)` is `157/50`, as in Mathematica).
-        // The operand as written, read through its nominal (see `Floor`).
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // The operand as written, for the exact recovery near a rounding
+        // jump.
+        const original = originalOperand(expression, 0);
         const ties = ce.roundingTies;
         const roundValue = (v: Expression, original?: Expression) =>
           applyRounding(
@@ -12482,19 +12379,6 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               [operandOf(expression, 0), engine.Half],
               numericApproximation === true
             );
-          if (evalX.operator === 'Quantity') {
-            // The exact one half, not the float 0.5: the root of an exact
-            // magnitude stays exact under `evaluate()`.
-            const r = quantityPower(engine, evalX, engine.Half);
-            // Under `.N()` the magnitude is a float: `√2 m` is `1.414… m`.
-            if (numericApproximation && r && isQuantity(r)) return r.N();
-            return r;
-          }
-
-          if (isMeasurement(evalX)) {
-            const r = measurementSqrt(engine, evalX);
-            return numericApproximation ? r?.N() : r;
-          }
 
           if (!numericApproximation) return sqrtOfSquareFactors(x) ?? x.sqrt();
 
@@ -12640,16 +12524,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         if (x.isNonPositive) return 'non-positive';
         return undefined;
       },
-      evaluate: ([x0, step0], { numericApproximation, expression }) => {
-        // A `Measurement` truncates as its nominal (see `Floor`).
-        const x = measurementNominal(x0);
-        const step =
-          step0 === undefined ? undefined : measurementNominal(step0);
+      evaluate: ([x, step], { numericApproximation, expression }) => {
         // The operand as written, for the exact recovery near a rounding
-        // jump, read through its nominal when it is a `Measurement`.
-        const written = originalOperand(expression, 0);
-        const original =
-          written === undefined ? undefined : measurementNominal(written);
+        // jump.
+        const original = originalOperand(expression, 0);
         const round = (v: Expression, original?: Expression) =>
           applyRounding(
             v,
@@ -13465,7 +13343,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumRangeTypeOnTypes('max', ops) ??
+          // A value of a kind with `compare` (a measurement) is ordered by
+          // its hook, and the result is one of the operands as written
+          // (`kindExtremumType()`), as for `Clamp`.
+          kindExtremumType(
+            ops,
+            context.engine,
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+          ) ??
+            extremumRangeTypeOnTypes('max', ops) ??
             elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
@@ -13486,7 +13372,15 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       partiality: 'total',
       type: (ops, context) =>
         BoxedType.forResult(
-          extremumRangeTypeOnTypes('min', ops) ??
+          // A value of a kind with `compare` (a measurement) is ordered by
+          // its hook, and the result is one of the operands as written
+          // (`kindExtremumType()`), as for `Clamp`.
+          kindExtremumType(
+            ops,
+            context.engine,
+            (o) => elementExtremumTypeOnTypes(o) ?? 'number'
+          ) ??
+            extremumRangeTypeOnTypes('min', ops) ??
             elementExtremumTypeOnTypes(ops),
           context.engine._typeResolver
         ),
@@ -15199,10 +15093,10 @@ function numericOfFold(
   seen: NonFiniteTerm
 ): Expression {
   if (seen.kind === 'exact' && value.isNaN !== true) return value;
-  // A `Measurement` is the value of the fold with its uncertainty
-  // (`Product([Measurement(0.7468, 0.001), 0.5, 0.9])`); the float of the
-  // exact value would drop the uncertainty.
-  if (isMeasurement(value)) return value;
+  // A value of a kind is the value of the fold as it is: a measurement keeps
+  // its uncertainty (`Product([Measurement(0.7468, 0.001), 0.5, 0.9])`), and
+  // the float of the exact value would drop it.
+  if (isKindValue(value)) return value;
   return numericFromExactValue(ce, expression, value) ?? value;
 }
 
@@ -15497,10 +15391,16 @@ function evaluateAbs(
   // (`Abs([3,-4]) → [3,4]`).
   if (isTuple(arg))
     return ce.function('Norm', [arg]).evaluate({ numericApproximation });
-  // `Abs(Measurement(v, σ))` is `Measurement(Abs(v), σ)` (see
-  // `measurementLipschitzUnary`).
-  const m = measurementLipschitzUnary(ce, 'Abs', arg);
-  if (m !== undefined) return numericApproximation ? m.N() : m;
+  // A quantity: the absolute value of its magnitude, with its unit
+  // (`Abs(-2 m)` is `2 m`). A magnitude whose absolute value is not known
+  // (a symbol) leaves the call unevaluated.
+  if (isQuantity(arg)) {
+    const magnitude = ce
+      .function('Abs', [arg.op1])
+      .evaluate({ numericApproximation });
+    if (isFunction(magnitude, 'Abs')) return undefined;
+    return ce._fn('Quantity', [magnitude, arg.op2]);
+  }
   if (isNumber(arg)) {
     const num = arg.numericValue;
     if (typeof num === 'number') return ce.number(Math.abs(num));
@@ -15661,6 +15561,10 @@ function processMinMaxItem(
   if (isResidueClass(item) || typeIsKindForCertain(item.type.type, ce)) {
     if (!kindTypesHaveCompare(ce, item.type.type))
       return [ce.typeError('number', item.type, item), []];
+    // A kind value that stands for no value (`Measurement(NaN, 0.1)`,
+    // `Quantity(NaN, m)`: `ArithmeticDefinition.isNaN`) is absent, as the
+    // number `NaN` is: the extremum is `NaN`.
+    if (kindValueIsNaN(item)) return [ce.NaN, []];
     if (isKindValue(item)) return [item, []];
     // A collection of such values is walked below, element by element.
     if (item.isCollection !== true) return [undefined, [item]];
@@ -15848,42 +15752,6 @@ function processMinMaxItem(
   }
 
   if (isNumber(item)) return [item, []];
-  // A `Measurement(v, σ)` is a value ordered by its nominal `v`
-  // (`exactOrder`), and the chosen operand is returned as it is, uncertainty
-  // included: `Max(0.1, Measurement(0.7468, 6.6e-16))` is the measurement.
-  // A quadrature result is a measurement under `.N()`, so this is how
-  // `min(k, ∫…)` folds. The nominal decides as a bare operand would: a
-  // nominal that is `NaN` absorbs (`Max(1, Measurement(NaN, 0.1))` is `NaN`),
-  // a complex or symbolic nominal leaves the measurement in the unevaluated
-  // result (`Max(Measurement(z, 0.1))` stays unevaluated, as `Max(z)` does),
-  // and a float nominal makes the extremum inexact, as a float operand does
-  // (`isInexactOperand()` reads the nominal: `Max(Measurement(1.5, 0.1),
-  // Indeterminate)` is `NaN`, not `Indeterminate`).
-  if (isMeasurement(item)) {
-    const [nominal] = processMinMaxItem(item.op1, mode, walk);
-    // A complex number literal is reported as a value by the number branch
-    // below and set aside by `foldExtremumValue`, which sees only the bare
-    // literal; the measurement is set aside here.
-    if (nominal === undefined || (isNumber(nominal) && nominal.isComplex))
-      return [undefined, [item]];
-    if (nominal.isNaN) return [nominal, []];
-    return [item, []];
-  }
-  // A `Quantity` is a value when its magnitude is a value: `exactOrder`
-  // orders two quantities with units of the same dimension by their
-  // physical value, so `Max(1 km, 999 m)` is `1 km`. A quantity that cannot
-  // be ordered against the other values (units of another dimension, a
-  // number with no unit) stays in the unevaluated result, as a complex
-  // number does. The magnitude decides as a bare operand would: a complex or
-  // symbolic magnitude leaves the quantity in the unevaluated result, and a
-  // magnitude that is `NaN` absorbs.
-  if (isFunction(item, 'Quantity')) {
-    const [magnitude] = processMinMaxItem(item.op1, mode, walk);
-    if (magnitude === undefined || (isNumber(magnitude) && magnitude.isComplex))
-      return [undefined, [item]];
-    if (magnitude.isNaN) return [magnitude, []];
-    return [item, []];
-  }
   // A real constant that is not a number literal (`π`, `√10`, `e²`) has a
   // value, and `exactOrder` orders it against the other values:
   // `Max(π, 3)` is `π`. Any other operand (a symbol with no value, a complex
@@ -16111,19 +15979,18 @@ function scalarExtremum(
   numericApproximation: boolean
 ): Expression | undefined {
   const ce = a.engine;
-  // A `Measurement(v, σ)` is read through its nominal `v` by the guards
-  // below, as `Max`/`Min` read it (`processMinMaxItem`): a `NaN` nominal
-  // absorbs, a complex nominal is unordered, and a float nominal makes an
-  // `Indeterminate` answer `NaN`. The winner returned is still the operand
-  // itself, uncertainty included.
-  const an = isMeasurement(a) ? a.op1 : a;
-  const bn = isMeasurement(b) ? b.op1 : b;
   // A `NaN` operand gives `NaN`; an `Indeterminate` operand gives
   // `Indeterminate` when the other operand is neither `NaN` nor inexact
-  // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`).
-  if (an.isNaN === true || bn.isNaN === true)
-    return nanOperandAnswer(ce, [an, bn]);
-  if ((isNumber(an) && an.isComplex) || (isNumber(bn) && bn.isComplex))
+  // (`nanOperandAnswer()`, the rule of the reducers, see `evaluateMinMax`;
+  // a value of a kind is inexact when its kind says so, as a measurement
+  // does). A value of a kind (a measurement) is ordered by the `compare`
+  // hook of its kind (`extremumOrder()`, `exactOrder()`), and the winner is
+  // the operand itself, uncertainty included. The `isNaN` test also covers
+  // a kind value whose `isNaN` hook says it stands for no value
+  // (`ArithmeticDefinition.isNaN`: `Measurement(NaN, 0.1)`,
+  // `Quantity(NaN, m)`), because `BoxedFunction.isNaN` reads that hook.
+  if (a.isNaN === true || b.isNaN === true) return nanOperandAnswer(ce, [a, b]);
+  if ((isNumber(a) && a.isComplex) || (isNumber(b) && b.isComplex))
     return undefined;
   // `undefined` when the comparison is not decidable (a free symbol); ties
   // keep `a`, unless `b` is a number literal and `a` is not (see
@@ -16942,8 +16809,7 @@ function addEvaluatedOperands(
   // this function, as one sub-sum. A collection operand is first broadcast
   // by the generic sum, and each element sum then comes back here:
   // `ResidueClass(1, 5) + [1, 2]` is `[ResidueClass(2, 5), ResidueClass(3,
-  // 5)]`. The name-based `Quantity` and `Measurement` branches below run
-  // only when no operand holds a kind value.
+  // 5)]`.
   if (evaluated.some(holdsKindValue)) {
     // The broadcast is the exact `add()`, also under `.N()`: the
     // numeric route does not evaluate the elements it builds.
@@ -16955,15 +16821,6 @@ function addEvaluatedOperands(
       numericApproximation,
       engine,
     });
-  }
-  if (evaluated.some((x) => x.operator === 'Quantity')) {
-    const r = quantityAdd(engine!, evaluated, ops);
-    // An exact or Measurement magnitude is made numeric under `.N()`.
-    return numericApproximation ? r?.N() : r;
-  }
-  if (evaluated.some((x) => x.operator === 'Measurement')) {
-    const r = measurementAdd(engine!, evaluated);
-    return numericApproximation ? r?.N() : r;
   }
   // Only a pure number literal or a pure symbol goes to
   // `addNEvaluated` raw, to be numericized there. Every other operand
@@ -17016,14 +16873,10 @@ function addEvaluatedOperands(
       terms,
       raw.map((x) => !x)
     );
-    // An operand may only have BECOME a Quantity or Measurement through
-    // `addN`'s numericization, past the `evaluated` checks above
-    // (Tycho item 101). Quantity first, matching the handler precedence.
-    return (
-      foldQuantityOperands(engine!, r) ??
-      foldMeasurementOperands(engine!, r) ??
-      markAbsentPointCells(engine!, expression, r)
-    );
+    // A quantity or a measurement is a value of a kind: the evaluated
+    // operands are numeric already, so an operand that became one under
+    // `.N()` (Tycho item 101) went to the kind dispatch above.
+    return markAbsentPointCells(engine!, expression, r);
   }
   const result = addArray(evaluated);
   // D2: an inexact (float) operand has no exactness to preserve, so it
@@ -17168,15 +17021,6 @@ function mulEvaluatedOperands(
       engine,
     });
   }
-  if (evaluated.some((x) => x.operator === 'Quantity')) {
-    const r = quantityMultiply(engine!, evaluated);
-    // An exact or Measurement magnitude is made numeric under `.N()`.
-    return numericApproximation ? r?.N() : r;
-  }
-  if (evaluated.some((x) => x.operator === 'Measurement')) {
-    const r = measurementMultiply(engine!, evaluated);
-    return numericApproximation ? r?.N() : r;
-  }
   // Only a pure number literal or a pure symbol passes raw; every other
   // operand passes its numeric value, so it is evaluated once and its
   // side effects run once — see the matching comment in `Add`. A
@@ -17212,11 +17056,7 @@ function mulEvaluatedOperands(
       raw.map((x) => !x)
     );
     // See the matching comment in `Add` (Tycho item 101).
-    return (
-      foldQuantityOperands(engine!, r) ??
-      foldMeasurementOperands(engine!, r) ??
-      markAbsentPointCells(engine!, expression, r)
-    );
+    return markAbsentPointCells(engine!, expression, r);
   }
   // `mulFactored`, not `mul`: `evaluate()` promises the most EXACT form,
   // and a product of sums is exactly as exact factored as expanded while

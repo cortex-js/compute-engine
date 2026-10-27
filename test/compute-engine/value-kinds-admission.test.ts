@@ -222,7 +222,7 @@ describe('VALUE KINDS ADMISSION: group 3, the carrier', () => {
     const ce = kindEngine();
     ce.declare('su', 'string | umeasurement');
     expect(errorOf(ce.box(['Sin', 'su']))).toBe(
-      'incompatible-type: expected complex, got string | umeasurement'
+      'incompatible-type: expected complex | quantity, got string | umeasurement'
     );
   });
 
@@ -238,10 +238,10 @@ describe('VALUE KINDS ADMISSION: group 3, the carrier', () => {
   test('a `none` kind is refused at `Sin`', () => {
     const ce = kindEngine();
     expect(errorOf(ce.box(['Sin', ['GF8', 1]]))).toBe(
-      'incompatible-type: expected complex, got gf8'
+      'incompatible-type: expected complex | quantity, got gf8'
     );
     expect(errorOf(ce.box(['Sin', ['ResidueClass', 2, 5]]))).toBe(
-      'incompatible-type: expected complex, got residue'
+      'incompatible-type: expected complex | quantity, got residue'
     );
   });
 

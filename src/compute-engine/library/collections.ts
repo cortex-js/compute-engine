@@ -194,9 +194,11 @@ import {
   hasKindArm,
   dictionaryValueValuesType,
   type AliasDescent,
+  type KindTypeNames,
 } from '../../common/type/utils.js';
 import { kindTypeNames } from '../boxed-expression/value-kinds.js';
 import { groupOneCallbackType } from '../boxed-expression/kind-admission.js';
+import { isKindValue } from '../boxed-expression/kind-compare.js';
 import {
   arityProvablyIncapable,
   callbackIncompatibility,
@@ -2027,6 +2029,10 @@ function callbackCompatibilityError(
 
   // The operand's type, side-effect-free; every unreadable shape ADMITS.
   let opType: Type | undefined;
+  // The type the error shows as the operand's: its DECLARED type, before the
+  // widening by the kind types below, so that `Filter(names, IsPrime)` says
+  // `(number) -> boolean` and not `(measurement | number) -> boolean`.
+  let displayOpType: Type | undefined;
   if (isSymbol(fn)) {
     // An OPERATOR name (`IsPrime`) reads its signature; a VALUE symbol its
     // declared/held type — the same two-branch read `callbackArity` uses.
@@ -2040,6 +2046,7 @@ function callbackCompatibilityError(
           : undefined);
     // An arithmetic operator of the value kinds admits a kind value as its
     // operand check does (`groupOneCallbackType()`).
+    displayOpType = opType;
     if (opType !== undefined)
       opType = groupOneCallbackType(
         ce,
@@ -2152,7 +2159,7 @@ function callbackCompatibilityError(
     if (declared!.effects !== undefined) display.effects = declared!.effects;
     // Boxed, not the raw AST: `typeError`'s actual-side stringification
     // handles a BoxedType (and primitive strings), not a composite `Type`.
-    return ce.typeError(display, ce.type(opType!), fn);
+    return ce.typeError(display, ce.type(displayOpType ?? opType!), fn);
   };
 
   // Rule 5 — the effect bound, checked against the declared arrow.
@@ -8093,6 +8100,17 @@ function literalElementType(types: ReadonlyArray<Type>): Readonly<Type> {
  * flat `list<integer | string>` claimed that the elements are the cells,
  * where they are the rows.
  */
+/** True when the union `t` has an arm of a kind type of `kinds` and its
+ * other arms are numbers (`integer | measurement`, `integer | residue`). */
+function isNumbersAndKindValues(
+  t: Readonly<Type>,
+  kinds: KindTypeNames | undefined
+): boolean {
+  if (kinds === undefined || !hasKindArm(t, kinds)) return false;
+  const rest = withoutKindArms(t, kinds);
+  return rest !== 'never' && isSubtype(rest, 'number');
+}
+
 /** True when every type of `types` is a tuple type, all of the same arity,
  * or `missing` (an absent point, such as a restricted point whose condition
  * fails). */
@@ -8108,7 +8126,10 @@ function isUnionOfTuplesOfOneArity(types: ReadonlyArray<Type>): boolean {
   return arity !== undefined;
 }
 
-function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
+function shapedListTypeD(
+  ops: ReadonlyArray<OperandDescriptor>,
+  kinds?: KindTypeNames
+): Type | null {
   const analysis = analyzeLevelD(ops, new Map());
   if (analysis === null) return null;
 
@@ -8133,13 +8154,21 @@ function shapedListTypeD(ops: ReadonlyArray<OperandDescriptor>): Type | null {
   // `matrix<(integer | missing)^(2x2)>`, and can be assigned to a symbol
   // declared with that type. It was a `list<list<integer | missing>>`, which
   // no such declaration admits.
+  // A union of numbers and values of a kind (`[[2 ± 0.1, 2], [3, 4]]`,
+  // `[c, 2]` for a residue class `c`) keeps the shape too, as the cells of
+  // one numeric population: the literal is a
+  // `matrix<(integer | measurement)^(2x2)>`, which the matrix operators
+  // admit through the carrier of the kind
+  // (`docs/plans/2026-10-26-value-kinds.md`, A10 of section 13). It was a
+  // `list<list<integer | measurement>>`, which `matrix` refused.
   if (
     !mayCarryDimensions(widened) ||
     (typeof widened !== 'string' &&
       widened.kind === 'union' &&
       !isSubtype(widened, 'number') &&
       !isNumberThatMayBeAbsent(widened.types) &&
-      !isUnionOfTuplesOfOneArity(widened.types))
+      !isUnionOfTuplesOfOneArity(widened.types) &&
+      !isNumbersAndKindValues(widened, kinds))
   )
     return internType(nestedPlainListType(widened as Type, dims.length));
 
@@ -10253,10 +10282,11 @@ function withExactFoldFallback(
   folded: Expression | undefined
 ): Expression | undefined {
   if (!options.numericApproximation || folded === undefined) return folded;
-  // A `Measurement` is a numeric answer with its uncertainty; the float of
-  // the exact value of the fold would drop the uncertainty
-  // (`Product([∫₀¹ e^(−x²) dx, 0.5]).N()` was the bare `0.3734`).
-  if (isFunction(folded, 'Measurement')) return folded;
+  // A value of a kind is the answer as it is: a measurement is a numeric
+  // answer with its uncertainty, and the float of the exact value of the
+  // fold would drop the uncertainty (`Product([∫₀¹ e^(−x²) dx, 0.5]).N()`
+  // was the bare `0.3734`).
+  if (isKindValue(folded)) return folded;
   return (
     numericFromExactValue(options.engine, options.expression, folded) ?? folded
   );
@@ -10270,8 +10300,8 @@ async function withExactFoldFallbackAsync(
   folded: Expression | undefined
 ): Promise<Expression | undefined> {
   if (!options.numericApproximation || folded === undefined) return folded;
-  // See `withExactFoldFallback`: a `Measurement` keeps its uncertainty.
-  if (isFunction(folded, 'Measurement')) return folded;
+  // See `withExactFoldFallback`: a value of a kind is kept.
+  if (isKindValue(folded)) return folded;
   return (
     (await numericFromExactValueAsync(
       options.engine,
@@ -10314,11 +10344,12 @@ function machineStep(
     value = item.N();
     re = value.re;
   }
-  // A `Measurement(a, σ)` reads `re` as its nominal `a`, but folding it as a
-  // double drops the uncertainty: `Product([Measurement(0.7468, 0.001),
-  // 0.5]).N()` was the bare `0.3734`. Reported as not machine-foldable, so
-  // the fold continues with boxed arithmetic, which propagates it.
-  if (isFunction(value, 'Measurement')) re = NaN;
+  // A value of a kind (a measurement) is not machine-foldable: folding a
+  // measurement as a double drops the uncertainty
+  // (`Product([Measurement(0.7468, 0.001), 0.5]).N()` was the bare
+  // `0.3734`). Reported as not machine-foldable, so the fold continues with
+  // boxed arithmetic, which propagates it.
+  if (isKindValue(value)) re = NaN;
   // The exact value decides whether a double of 0 is an underflow. It is read
   // only from a pure expression: an impure one (`Floor(Random())`) must not
   // run a second time, and its fold is not recovered from the exact fold
@@ -10971,7 +11002,7 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
     signature: '(any*) -> list',
     type: (ops, context) =>
       BoxedType.forResult(
-        shapedListTypeD(ops) ??
+        shapedListTypeD(ops, kindTypeNames(context.engine)) ??
           internType({
             kind: 'list',
             elements: literalElementType(

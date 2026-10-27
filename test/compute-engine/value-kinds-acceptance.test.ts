@@ -231,7 +231,11 @@ describe('VALUE KINDS ACCEPTANCE: the per-kind engine shortcut', () => {
     ce.declare('QuantityLike', { signature: '(real, string) -> value' });
     ce.box(['QuantityLike', 2, "'m'"]);
     expect(engineHasKindValues(ce)).toBe(false);
-    expect([...kindTypesOf(ce)]).toEqual(['residue']);
+    expect([...kindTypesOf(ce)]).toEqual([
+      'residue',
+      'measurement',
+      'quantity',
+    ]);
     ce.box(RC(1, 5));
     expect(engineHasKindValues(ce, 'residue')).toBe(true);
   });
@@ -886,5 +890,80 @@ describe('VALUE KINDS ACCEPTANCE: UserMeasurement, a user kind admitted as a num
     expect(e.box(['Less', q(2, 'm'), q(2, 's')]).evaluate().operator).toBe(
       'Less'
     );
+  });
+});
+
+describe('VALUE KINDS ACCEPTANCE: the written operands under simplify()', () => {
+  // A temperature in degrees Celsius whose `negate` gives a value
+  // (`Celsius(-t)`), and whose `add` reads `Negate(Celsius(…))` in
+  // `ops.written[i]` to fold a difference of two temperatures to a number.
+  // `simplify()` evaluates the constant term `Negate(Celsius(5))` to
+  // `Celsius(-5)` before the hook runs; the hook still reads the term as it
+  // was written, so the three routes give the same difference.
+  const ce = new ComputeEngine();
+  const isCelsius = (x: Expression | undefined) => x?.operator === 'Celsius';
+  ce.declareType('celsius', 'value', { mint: false });
+  ce.declare('Celsius', {
+    signature: '(real) -> celsius',
+    arithmetic: {
+      negate: (x, { engine }) =>
+        isFunction(x.evaluated, 'Celsius')
+          ? engine.function('Celsius', [x.evaluated.op1.neg()])
+          : undefined,
+      add: (ops, { engine, numericApproximation }) => {
+        const plus: { i: number; t: Expression }[] = [];
+        const minus: { i: number; t: Expression }[] = [];
+        ops.evaluated.forEach((x, i) => {
+          const w = ops.written[i] ?? x;
+          if (isFunction(w, 'Negate') && isCelsius(w.op1))
+            minus.push({ i, t: w.op1 });
+          else if (isCelsius(w)) plus.push({ i, t: w });
+        });
+        if (plus.length !== 1 || minus.length !== 1) return undefined;
+        const [p, m] = [plus[0].t, minus[0].t];
+        if (!isFunction(p) || !isFunction(m)) return undefined;
+        const value = engine
+          .function('Subtract', [p.op1, m.op1])
+          .evaluate({ numericApproximation });
+        return [{ value, operands: [plus[0].i, minus[0].i] }];
+      },
+    },
+  });
+
+  test.each([
+    [['Subtract', ['Celsius', 20], ['Celsius', 5]], '15'],
+    [['Add', 'x', ['Subtract', ['Celsius', 20], ['Celsius', 5]]], 'x + 15'],
+  ] as [Json, string][])(
+    '%j gives one value on the three routes',
+    (json, expected) => {
+      const expr = ce.box(json);
+      expect(expr.evaluate().toString()).toBe(expected);
+      expect(expr.N().toString()).toBe(expected);
+      expect(expr.simplify().toString()).toBe(expected);
+    }
+  );
+
+  test('the kind-free terms are simplified beside the difference', () => {
+    const expr = ce.box([
+      'Add',
+      ['Power', ['Sin', 'x'], 2],
+      ['Power', ['Cos', 'x'], 2],
+      ['Subtract', ['Celsius', 20], ['Celsius', 5]],
+    ]);
+    expect(expr.simplify().toString()).toBe('16');
+  });
+
+  test('the negation alone is the value of `negate` on every route', () => {
+    const expr = ce.box(['Negate', ['Celsius', 5]]);
+    expect(expr.evaluate().toString()).toBe('Celsius(-5)');
+    expect(expr.simplify().toString()).toBe('Celsius(-5)');
+  });
+
+  test('the library Quantity: 20 degC − 5 degC is 15 K on every route', () => {
+    const e = new ComputeEngine();
+    const expr = e.parse('20\\,\\mathrm{degC} - 5\\,\\mathrm{degC}');
+    expect(expr.evaluate().toString()).toBe('15 K');
+    expect(expr.N().toString()).toBe('15 K');
+    expect(expr.simplify().toString()).toBe('15 K');
   });
 });

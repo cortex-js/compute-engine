@@ -41,6 +41,47 @@ staged through the staging queue. Sessions never commit.
    `doc/08-guide-types.md`, `docs/TYPE-SYSTEM.md`, `CHANGELOG.md`,
    `ROADMAP.md` (CE-507 phase 1 done, CE-508 unchanged).
 
+## Phase 2 (started 2026-10-26 after the phase-1 commit `0be912cef`)
+
+The user decided to continue to phase 2 and to update #477 when all phases
+are delivered. Order: (1) the inventory of plan section 8 (a probe script
+`scripts/probe-value-kinds-inventory.ts` and
+`docs/scratch/2026-10-26-value-kinds-phase2-inventory.md`); (2) a dual spec
+review of the inventory as the phase-2 acceptance table; (3) the
+implementation in a new worktree: the kind primitives `measurement` and
+`quantity`, `Measurement` (`admittedAs: 'number'`, `compare` by nominal,
+`apply` from the measurement helpers), `Quantity` (`'none'`, `compare`
+after conversion, `resultType`, the `quantity` parameters), the removal of
+the name-based branches, CE-508.1–.4 and .6 fixed, the snapshot blast
+radius measured and reported.
+
+Phase-2 state (2026-10-26): the inventory is written
+(`scripts/probe-value-kinds-inventory.ts`, 1551 lines; the document, 1713
+lines) and dual-reviewed (24 findings, `…phase2-inventory_SPEC_REVIEW.md`);
+the user took the 16 recommendations ("All recommended"); the review's
+amendments are plan section 13.1 (A1–A16). The six wrong values found are
+CE-508.7–.9 and .11–.15 (CE-508.10 was withdrawn: the finer-unit tolerance
+is a documented policy). No host type named `measurement` or `quantity`
+exists in Tycho or the Epsil sources (grepped 2026-10-26). Worktree:
+`/Users/arno/dev/wt-compute-engine-df2` at `140ad66f5`. Steps: P1a
+(`Measurement` on the field: the primitive, the hooks, `compare` with
+`'unordered'`, `eq`, `isExact`, the removal of the name-based arithmetic and
+comparison branches, the admission gaps, the blast-radius measurement) →
+P1b (the `apply` propagation rules of decisions 1–7 and A2–A5, A8, A11,
+A13; the statistics sites; the step functions) → P2 (`Quantity`: the
+primitive, `'none'`, the offset-temperature `add`, `compare` with the
+finer-unit policy, `resultType`, the 24 trig heads and `Abs` naming
+`quantity`, quantity collections, the refusals) → P3 (docs, CHANGELOG,
+ROADMAP, the full suite, the dual review, staging).
+
+LANDING NOTE for phase 2: `ROADMAP.md` is merged by hand (the worktree's
+CE-507/CE-508 text from P3b, PLUS the main tree's CE-507.7, CE-507.8 and the
+`mint: false` note added 2026-10-26 from the PR #482 review by session
+compute-engine-0f; they are not in the worktree). `CHANGELOG.md`: take the
+worktree's blocks only (prettier rewraps the whole file). `doc/` guides:
+copy from the worktree. The plan file: the worktree copy is the main copy
+plus P3b's section-6 edits; take the worktree's.
+
 ## Status
 
 - Step 1: DONE in the worktree (11 files + `value-kinds.ts` + the test
@@ -139,6 +180,56 @@ staged through the staging queue. Sessions never commit.
   `removeBinding` copies the registry only for a kind head. Visible change
   from the review: the `incompatible-type` message of a callback over kind
   elements shows the widened type (`(complex | umeasurement) -> number`).
+
+- Phase 2, step P3b (documentation): DONE in the worktree
+  `/Users/arno/dev/wt-compute-engine-df2`: `CHANGELOG.md` (Behavior Changes,
+  Features, Resolved Issues), `doc/06-guide-augmenting.md` ("Measurements and
+  Quantities", `'unordered'`, `isExact`, `numericValue`, `tolerance`),
+  `doc/08-guide-types.md`, `docs/TYPE-SYSTEM.md`, `docs/COMPILATION-MODEL.md`,
+  ROADMAP (CE-507 phase 2 done, CE-507.9 to CE-507.11 filed, CE-508 removed),
+  plan section 6, and the generated Epsil docs.
+
+- Phase 2, full-suite fixes (coordinator, 2026-10-26): the first full run
+  in the worktree had 15 failures in 7 suites, two causes, both fixed.
+  (1) A parameter that names a kind type beside its numbers
+  (`complex | quantity`, the 24 trigonometric heads and `Abs`) was no longer
+  a numeric slot for the collection check: `Sin(list<string>)` boxed as
+  valid. `validateThreadableOperand()` (`validate.ts`) and
+  `signatureRefusesOperandType()` (`derive-application-type.ts`) now read
+  the parameter without its kind arms (`withoutKindArms`) and admit the
+  kinds it names as cells (`kindArmNames`). (2) `list-shape-typing.test.ts`
+  expected the physics constants typed `value`; they are `quantity`
+  (`[SpeedOfLight, PlanckConstant]` is `list<quantity^2>`, not a `vector`).
+  A third defect found by the probe: the `resultType` answer of a
+  parameter-named kind dropped the collection shape (`Sin(list<quantity>)`
+  was typed `number`, `Abs(matrix<quantity^(2x2)>)` `quantity`).
+  `namedKindResultTypeOverTypes()` now puts the answer in the cells of the
+  operand's shape (`mapCells`), with the declared result beside it for a
+  cell that may hold a value with no kind. Tests: `quantity-kind.test.ts`
+  ("THE OPERATORS THAT NAME `quantity`", two new tests).
+
+- Phase 2, dual code review on the main tree (2026-10-26, Claude Opus +
+  Codex gpt-6.1-sol, 8 findings, 1 refuted). Applied: `Sin` of a quantity
+  whose magnitude is a measurement keeps the uncertainty
+  (`angularQuantityToRadians()` scales the measurement, `trigonometry.ts`);
+  an explicit tolerance of `.is()` on a measurement is authoritative
+  (`compareMeasurements()`); `Divide`/`Power` with a kind scalar and a list
+  are typed `list<… ^2>`, not a nested list (`residueShapedResultType()`
+  reads a numeric operand from its type alone); the descriptor route admits
+  `Conjugate` (`'carrier'`) and `Exp2` (`'carrier-power'`) and types `Exp`,
+  `Exp2`, `Lb`, `Lg`, `Log2`, `Log10` through their canonical head
+  (`CANONICAL_HEAD_OF_KIND_CARRIER_CALL`, `derive-application-type.ts`); the
+  kind rules of that route no longer wait for `someKindAdmittedByCarrier`
+  (measured 7 µs per derivation in an engine with no kind value); a
+  quantity `compare` answers `'unordered'` for a non-real magnitude and
+  `quantityEq()` decides `Equal((1+i) m, 1 m)` (`hasLogarithmicUnit()` is
+  now exported from `quantity-compare.ts`); the unreachable
+  `kindValueIsNaN` check of `scalarExtremum()` is removed. Found and fixed on
+  the way: `Lb`/`Lg`/`Log2`/`Log10` now run `Log`'s operand check (a residue
+  class, a quantity, a string are refused at boxing). Refuted: an exact
+  nominal through `Negate` under `Ceil(...).N()` (the probe gives `0`).
+  Recorded in ROADMAP CE-507: the kind gates open after `.N()` of an
+  integral, measured as no significant cost.
 
 ## Rules for every agent
 

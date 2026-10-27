@@ -1291,6 +1291,15 @@ What remains:
   decoded payload on the boxed call, as `BoxedNumber` holds its numeric value,
   would serve both; the invalidation rule is simple because boxed expressions
   are immutable. To do before phase 3 adds many `apply` sites.
+- Note (2026-10-26, phase-2 code review): `.N()` of a definite integral
+  returns a `Measurement` (the quadrature result), so the first such call opens
+  the kind gates of an engine (`engineHasKindValues`, `someKindAdmittedByCarrier`,
+  `someKindHasResultType`, `value-kinds.ts`) for the rest of its life, as any
+  measurement operation does. Measured on 1500 evaluations of five ordinary
+  expressions (`evaluate()` and `.N()`): 1.04× a fresh engine after the
+  integral, 0.92× after a measurement sum, both within the run-to-run noise.
+  Accepted as is; the deferred gates at bootstrap (`deferKindValueGates()`)
+  stay, because the constants would open them for every engine.
 - Note (2026-10-26, from the review of PR #482): `mint: false` has two uses that
   are compatible: a kind type (a nominal type defined as exactly `value`, plan
   4.1.1) and a nominal type over another definition (PR #482 declares

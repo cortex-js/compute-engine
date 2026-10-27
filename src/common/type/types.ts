@@ -104,6 +104,19 @@ export type PrimitiveType =
   // in their signatures to admit one. See
   // `docs/plans/2026-10-23-residue-class-type.md`.
   | 'residue'
+  // A measurement, a nominal value with a standard uncertainty: the value of
+  // `Measurement(value, error)`. An OPAQUE value like `residue`: disjoint from
+  // every numeric type, so that the number rules (`x - x` is 0, `x/x` is 1)
+  // do not apply to it. It is a VALUE KIND admitted where a number is
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.7).
+  | 'measurement'
+  // A quantity, a magnitude with a physical unit: the value of
+  // `Quantity(magnitude, unit)`. An OPAQUE value like `residue`: disjoint
+  // from every numeric type, so that the number rules (`x - x` is 0, `x/x` is
+  // 1) do not apply to it. It is a VALUE KIND admitted only by the arithmetic
+  // operators and the operators that name it
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 4.7).
+  | 'quantity'
   // A type value: a type expression reified as a first-class runtime value
   // (`TypeFrom("list<integer>")`). An OPAQUE value like `regexp` and `color`:
   // not a `scalar`, not a `collection`, no hidden element type. In TYPE-STRING

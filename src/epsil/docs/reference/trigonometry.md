@@ -198,7 +198,7 @@ category.
 
 ### arccos
 
-MathJSON `Arccos` · `(complex) -> number`
+MathJSON `Arccos` · `(complex | quantity) -> number`
 
 Arccosine, the inverse cosine function.
 
@@ -214,7 +214,7 @@ N(arccos(1/3))
 
 ### arccot
 
-MathJSON `Arccot` · `(complex | signed_infinity) -> number`
+MathJSON `Arccot` · `(complex | quantity | signed_infinity) -> number`
 
 Arccotangent, the inverse cotangent function.
 
@@ -230,7 +230,7 @@ N(arccot(-1))
 
 ### arccsc
 
-MathJSON `Arccsc` · `(complex | infinity) -> number`
+MathJSON `Arccsc` · `(complex | infinity | quantity) -> number`
 
 Arccosecant, the inverse cosecant function.
 
@@ -246,7 +246,7 @@ N(arccsc(3))
 
 ### arcosh
 
-MathJSON `Arcosh` · `(complex | signed_infinity) -> number`
+MathJSON `Arcosh` · `(complex | quantity | signed_infinity) -> number`
 
 Inverse hyperbolic cosine (area hyperbolic cosine).
 
@@ -262,7 +262,7 @@ N(arcosh(2))
 
 ### arcoth
 
-MathJSON `Arcoth` · `(complex | infinity) -> number`
+MathJSON `Arcoth` · `(complex | infinity | quantity) -> number`
 
 Inverse hyperbolic cotangent (area hyperbolic cotangent).
 
@@ -273,7 +273,7 @@ N(arcoth(2))
 
 ### arcsch
 
-MathJSON `Arcsch` · `(complex | infinity) -> number`
+MathJSON `Arcsch` · `(complex | infinity | quantity) -> number`
 
 Inverse hyperbolic cosecant (area hyperbolic cosecant).
 
@@ -284,7 +284,7 @@ N(arcsch(1))
 
 ### arcsec
 
-MathJSON `Arcsec` · `(complex | infinity) -> number`
+MathJSON `Arcsec` · `(complex | infinity | quantity) -> number`
 
 Arcsecant, the inverse secant function.
 
@@ -300,7 +300,7 @@ N(arcsec(3))
 
 ### arcsin
 
-MathJSON `Arcsin` · `(complex) -> number`
+MathJSON `Arcsin` · `(complex | quantity) -> number`
 
 Arcsine, the inverse sine function.
 
@@ -316,7 +316,7 @@ N(arcsin(2))
 
 ### arctan
 
-MathJSON `Arctan` · `(complex | signed_infinity) -> number`
+MathJSON `Arctan` · `(complex | quantity | signed_infinity) -> number`
 
 Inverse tangent.
 
@@ -348,7 +348,7 @@ arctan2(-1, -1)
 
 ### arsech
 
-MathJSON `Arsech` · `(complex | signed_infinity) -> number`
+MathJSON `Arsech` · `(complex | quantity | signed_infinity) -> number`
 
 Inverse hyperbolic secant (area hyperbolic secant).
 
@@ -364,7 +364,7 @@ N(arsech(1/2))
 
 ### arsinh
 
-MathJSON `Arsinh` · `(complex | signed_infinity) -> number`
+MathJSON `Arsinh` · `(complex | quantity | signed_infinity) -> number`
 
 Inverse hyperbolic sine (area hyperbolic sine).
 
@@ -380,7 +380,7 @@ N(arsinh(1))
 
 ### artanh
 
-MathJSON `Artanh` · `(complex | signed_infinity) -> number`
+MathJSON `Artanh` · `(complex | quantity | signed_infinity) -> number`
 
 Inverse hyperbolic tangent (area hyperbolic tangent).
 
@@ -396,7 +396,7 @@ N(artanh(1/2))
 
 ### cos
 
-MathJSON `Cos` · `(complex) -> number`
+MathJSON `Cos` · `(complex | quantity) -> number`
 
 Cosine of an angle.
 
@@ -423,7 +423,7 @@ N(cosIntegral(1))
 
 ### cosh
 
-MathJSON `Cosh` · `(complex | signed_infinity) -> number`
+MathJSON `Cosh` · `(complex | quantity | signed_infinity) -> number`
 
 Hyperbolic cosine.
 
@@ -450,7 +450,7 @@ N(coshIntegral(1))
 
 ### cot
 
-MathJSON `Cot` · `(complex) -> number`
+MathJSON `Cot` · `(complex | quantity) -> number`
 
 Cotangent, the reciprocal of tangent.
 
@@ -466,7 +466,7 @@ N(cot(1))
 
 ### coth
 
-MathJSON `Coth` · `(complex | signed_infinity) -> number`
+MathJSON `Coth` · `(complex | quantity | signed_infinity) -> number`
 
 Hyperbolic cotangent, the reciprocal of hyperbolic tangent.
 
@@ -477,7 +477,7 @@ N(coth(1))
 
 ### csc
 
-MathJSON `Csc` · `(complex) -> number`
+MathJSON `Csc` · `(complex | quantity) -> number`
 
 Cosecant, the reciprocal of sine.
 
@@ -493,7 +493,7 @@ N(csc(1))
 
 ### csch
 
-MathJSON `Csch` · `(complex | signed_infinity) -> number`
+MathJSON `Csch` · `(complex | quantity | signed_infinity) -> number`
 
 Hyperbolic cosecant, the reciprocal of hyperbolic sine.
 
@@ -648,7 +648,7 @@ cos(pi)
 
 ### sec
 
-MathJSON `Sec` · `(complex) -> number`
+MathJSON `Sec` · `(complex | quantity) -> number`
 
 Secant, the reciprocal of cosine.
 
@@ -664,7 +664,7 @@ N(sec(1))
 
 ### sech
 
-MathJSON `Sech` · `(complex | signed_infinity) -> number`
+MathJSON `Sech` · `(complex | quantity | signed_infinity) -> number`
 
 Hyperbolic secant, the reciprocal of hyperbolic cosine.
 
@@ -680,7 +680,7 @@ N(sech(1))
 
 ### sin
 
-MathJSON `Sin` · `(complex) -> number`
+MathJSON `Sin` · `(complex | quantity) -> number`
 
 Sine of an angle.
 
@@ -733,7 +733,7 @@ N(sinc(1))
 
 ### sinh
 
-MathJSON `Sinh` · `(complex | signed_infinity) -> number`
+MathJSON `Sinh` · `(complex | quantity | signed_infinity) -> number`
 
 Hyperbolic sine.
 
@@ -765,7 +765,7 @@ N(sinhIntegral(1))
 
 ### tan
 
-MathJSON `Tan` · `(complex) -> number`
+MathJSON `Tan` · `(complex | quantity) -> number`
 
 Tangent of an angle.
 
@@ -781,7 +781,7 @@ N(tan(1))
 
 ### tanh
 
-MathJSON `Tanh` · `(complex | signed_infinity) -> number`
+MathJSON `Tanh` · `(complex | quantity | signed_infinity) -> number`
 
 Hyperbolic tangent.
 

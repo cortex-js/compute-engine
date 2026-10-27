@@ -1032,6 +1032,14 @@ declines, with a message that names the kind type ("holds a residue class
 that only MAY hold a kind value (a parameter typed `number | residue`, a
 symbol of a signature that admits a kind) compiles as a number, as before.
 
+The library kinds `measurement` and `quantity` have no `compile` contract,
+so an expression with a `Measurement` or a `Quantity` value declines with
+the kind message ("holds a value of the kind type 'measurement'"). A
+physical constant symbol (`SpeedOfLight`) is declared `value`, so the strict
+recognition does not see its quantity: `x · SpeedOfLight` declines at the
+`Quantity` call of its value, with the message "Could not compile
+`Quantity`".
+
 **The compile contract.** The `compile` field of an `ArithmeticDefinition`
 (`ArithmeticCompile`, `types-definitions.ts`; read by
 `compilation/kind-lowering.ts` and `base-compiler.ts`) has two parts:

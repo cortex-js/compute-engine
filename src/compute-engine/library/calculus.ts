@@ -16,7 +16,7 @@ import type { Type } from '../../common/type/types.js';
 import type { MathJsonExpression } from '../../math-json/types.js';
 import { functionResult, isPointElementType } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
-import { checkType } from '../boxed-expression/validate.js';
+import { checkType, checkOperandType } from '../boxed-expression/validate.js';
 import {
   rebindEscaping,
   rebindEscapingCurrentScope,
@@ -4919,7 +4919,7 @@ volumes
         if (returnError) return returnError;
         const fn = canonicalFunctionLiteral(ops[0]);
         if (!fn) return null;
-        const x = checkType(engine, ops[1]?.canonical, 'number');
+        const x = checkOperandType(engine, ops[1]?.canonical, 'number');
         return engine._fn('ND', [fn, x]);
       },
       evaluate: ([body, x], { engine }) => {
@@ -6810,8 +6810,8 @@ volumes
         // written `Integrate(f, Limits(x, …), Limits(y, …)).N()`.
         return engine._fn('NIntegrate', [
           fn,
-          checkType(engine, lower, 'number'),
-          checkType(engine, upper, 'number'),
+          checkOperandType(engine, lower, 'number'),
+          checkOperandType(engine, upper, 'number'),
         ]);
       },
       evaluate: ([f, a, b], { engine }) => {

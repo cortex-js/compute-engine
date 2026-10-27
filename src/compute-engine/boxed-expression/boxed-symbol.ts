@@ -462,13 +462,10 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     // Structural check (syntactic: `isSame` does NOT follow the binding)
     if (tolerance === undefined && this.isSame(other)) return true;
 
-    // A quantity whose unit is dimensionless compares with a number
-    // (`π` is `180 deg`): the quantity makes the comparison, with the exact
-    // value of a constant such as `π`, as `.is()` is symmetric.
-    if (other instanceof _BoxedExpression && other.operator === 'Quantity')
-      return other.is(this, tolerance);
     // A value of a value kind makes the comparison, as `.is()` is
-    // symmetric: it follows the value of this symbol.
+    // symmetric: it follows the value of this symbol. A quantity whose unit
+    // is dimensionless compares with a number (`π` is `180 deg`), with the
+    // exact value of a constant such as `π`.
     if (other instanceof _BoxedExpression && isKindValue(other))
       return other.is(this, tolerance);
 

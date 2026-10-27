@@ -226,8 +226,11 @@ describe('Measurement — angular-unit-aware trig propagation', () => {
 });
 
 describe('Measurement — type', () => {
-  test('Measurement of real inputs is real', () => {
-    expect(M(5, 0.2).type.matches('real')).toBe(true);
+  // A measurement is a value of the kind `measurement`, not a real number
+  // (`docs/plans/2026-10-26-value-kinds.md`, section 6).
+  test('Measurement of real inputs is typed `measurement`', () => {
+    expect(M(5, 0.2).type.toString()).toBe('measurement');
+    expect(M(5, 0.2).type.matches('real')).toBe(false);
   });
 });
 
@@ -470,19 +473,20 @@ describe('Measurement — units interaction (Phase 5)', () => {
 });
 
 describe('Measurement — numeric projection (Tycho item 95)', () => {
-  // `measurementType()` reports the nominal's scalar type, so a Measurement
-  // answers `real` / `isNumber === true`. The numeric read surface has
-  // to honor that: every accessor used to answer NaN/undefined, so a consumer
-  // reading `.re` silently got NaN for every numerically-integrated result and
-  // could not distinguish it from a genuine NaN.
+  // A measurement is a value of the kind `measurement`, typed `measurement`
+  // (not its nominal's type), so `isNumber` is `false`. Its numeric read
+  // surface still projects the nominal (`numericValue` of the measurement
+  // kind; `docs/plans/2026-10-26-value-kinds.md`, section 13.2): a consumer
+  // reading `.re` of a numerically-integrated result gets its value, not
+  // `NaN`. The FACT queries (`sgn`, `isPositive`, …) do not project it: they
+  // stay `undefined` for a value of a kind (section 4.3).
   const m = ce.parse('\\int_0^1 \\sin(x) dx').N();
   const expected = 1 - Math.cos(1); // 0.45969769413186023
 
-  test('the fixture is in fact a Measurement claiming to be a real', () => {
+  test('the fixture is a Measurement typed `measurement`', () => {
     expect(m.operator).toBe('Measurement');
-    expect(m.type.toString()).toBe('real');
-    expect(m.isNumber).toBe(true);
-    expect(m.isExtendedReal).toBe(true);
+    expect(m.type.toString()).toBe('measurement');
+    expect(m.isNumber).toBe(false);
   });
 
   test('.re / .im project the nominal', () => {
@@ -505,7 +509,6 @@ describe('Measurement — numeric projection (Tycho item 95)', () => {
     expect(e.re).toBeCloseTo(expected, 12);
     expect(e.im).toBe(0);
     expect(Number(e.bignumRe)).toBeCloseTo(expected, 12);
-    expect(e.sgn).toBe('positive');
     expect(Number(e.valueOf())).toBeCloseTo(expected, 12);
   });
 
@@ -520,10 +523,10 @@ describe('Measurement — numeric projection (Tycho item 95)', () => {
     ).toBeUndefined();
   });
 
-  test('.sgn / .isPositive answer from the nominal', () => {
-    expect(m.sgn).toBe('positive');
-    expect(m.isPositive).toBe(true);
-    expect(ce.function('Measurement', [-3, 0.5]).sgn).toBe('negative');
+  test('.sgn / .isPositive do not answer for a kind value', () => {
+    expect(m.sgn).toBeUndefined();
+    expect(m.isPositive).toBeUndefined();
+    expect(ce.function('Measurement', [-3, 0.5]).sgn).toBeUndefined();
   });
 
   test('the uncertainty is still reachable, and display keeps it', () => {
@@ -545,6 +548,7 @@ describe('Measurement — numeric projection (Tycho item 95)', () => {
     // must not be handed a BoxedNumber interface it does not implement.
     expect(m.value).toBeUndefined();
     expect(m.isNumberLiteral).toBe(false);
+    expect(isNumber(m)).toBe(false);
   });
 
   test('a non-Measurement function expression is unaffected', () => {
@@ -812,9 +816,16 @@ describe('Measurement — ordered by the nominal in the extremum operators', () 
     expect(max.json).toEqual(['Measurement', 0.7, 0.02]);
   });
 
-  test('a tie with a number literal gives the literal, whatever the operand order', () => {
+  test('a tie with a number literal keeps the first operand', () => {
+    // Decision 12 of `docs/plans/2026-10-26-value-kinds.md`, section 13: a
+    // tie keeps the first operand, the measurement included (it gave the
+    // literal in both orders).
     expect(ce.box(['Max', 1, ['Measurement', 1, 0.01]]).N().json).toEqual(1);
-    expect(ce.box(['Max', ['Measurement', 1, 0.01], 1]).N().json).toEqual(1);
+    expect(ce.box(['Max', ['Measurement', 1, 0.01], 1]).N().json).toEqual([
+      'Measurement',
+      1,
+      0.01,
+    ]);
   });
 
   test('a measurement inside a list operand folds too', () => {
@@ -845,57 +856,70 @@ describe('Measurement — ordered by the nominal in the extremum operators', () 
   test('a nominal that cannot be ordered leaves the extremum unevaluated', () => {
     const r = ce.box(['Max', 1, ['Measurement', 'z', 0.1]]).evaluate();
     expect(r.operator).toBe('Max');
-    // Alone or first, the measurement is not taken as the answer either:
-    // `Max(z)` stays unevaluated, and so does `Max(Measurement(z, 0.1))`.
-    expect(ce.box(['Max', ['Measurement', 'z', 0.1]]).evaluate().operator).toBe('Max');
+    // First, the measurement is not taken as the answer either. Alone, it is
+    // a value of the measurement kind with no other operand to compare it
+    // with, and `Max` gives it (`docs/plans/2026-10-26-value-kinds.md`,
+    // section 4.4: `Max` compares the operands pairwise).
+    expect(ce.box(['Max', ['Measurement', 'z', 0.1]]).evaluate().operator).toBe(
+      'Measurement'
+    );
     expect(ce.box(['Max', ['Measurement', 'z', 0.1], 1]).evaluate().operator).toBe('Max');
   });
 
   test('a complex nominal is unordered, in Max and in ElementMax', () => {
     const m = ['Measurement', ['Complex', 1, 1], 0.1];
-    expect(ce.box(['Max', m]).evaluate().operator).toBe('Max');
+    // Alone, the measurement is the answer: see the test above.
+    expect(ce.box(['Max', m]).evaluate().operator).toBe('Measurement');
     expect(ce.box(['Max', m, 2]).evaluate().operator).toBe('Max');
     expect(ce.box(['ElementMax', m, 2]).evaluate().operator).toBe('ElementMax');
   });
 
   test('a NaN nominal absorbs in Max, as a NaN operand does', () => {
+    // The `isNaN` hook of the measurement kind: a measurement with a `NaN`
+    // nominal stands for no value. `ElementMax` gives `NaN` too, as for a
+    // `NaN` operand (it was an `incompatible-type` error at boxing while a
+    // measurement was typed by its nominal, `nan`).
     expect(ce.box(['Max', 1, ['Measurement', 'NaN', 0.1]]).evaluate().isNaN).toBe(true);
-    // `ElementMax` is declared over the extended real line, and a measurement
-    // with a `NaN` nominal is typed `nan`, so the signature check refuses it
-    // at boxing (`incompatible-type`), as it refuses any `nan`-typed operand
-    // that is not the `NaN` literal.
     const r = ce.box(['ElementMax', 1, ['Measurement', 'NaN', 0.1]]).evaluate();
-    expect(r.operator).toBe('Error');
+    expect(r.isNaN).toBe(true);
   });
 
-  test('equal nominals with different uncertainties stay unevaluated in both orders', () => {
+  test('equal nominals with different uncertainties are a tie: the first is kept', () => {
+    // `docs/plans/2026-10-26-value-kinds.md`, section 6: `Max`/`Min` decide
+    // by the nominal, as `Less` and `Equal` do (they stayed unevaluated).
     const a = ['Measurement', 1, 0.1];
     const b = ['Measurement', 1, 0.5];
-    expect(ce.box(['Max', a, b]).evaluate().operator).toBe('Max');
-    expect(ce.box(['Max', b, a]).evaluate().operator).toBe('Max');
-    expect(ce.box(['ElementMin', a, b]).evaluate().operator).toBe('ElementMin');
+    expect(ce.box(['Max', a, b]).evaluate().json).toEqual(a);
+    expect(ce.box(['Max', b, a]).evaluate().json).toEqual(b);
+    expect(ce.box(['ElementMin', a, b]).evaluate().json).toEqual(a);
     // Equal nominals AND equal uncertainties are one value: the first is kept.
     expect(ce.box(['Max', a, ['Measurement', 1, 0.1]]).evaluate().json).toEqual(a);
   });
 
-  test('ElementMax and Clamp read inexactness off the nominal, as Max does', () => {
+  // Decision 13 of `docs/plans/2026-10-26-value-kinds.md`, section 13: a
+  // measurement is inexact (the `isExact` hook of its kind), whatever its
+  // nominal, so `Indeterminate` beside it becomes `NaN` (an exact nominal
+  // gave `Indeterminate`).
+  test('ElementMax reads inexactness off the kind, as Max does', () => {
     const r = ce.box(['ElementMax', ['Measurement', 1.5, 0.1], 'Indeterminate']).evaluate();
     expect(r.isNaN).toBe(true);
     expect(r.isIndeterminate).toBe(false);
     const exact = ce
       .box(['ElementMax', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'Indeterminate'])
       .evaluate();
-    expect(exact.isIndeterminate).toBe(true);
+    expect(exact.isNaN).toBe(true);
+    expect(exact.isIndeterminate).toBe(false);
   });
 
-  test('a float nominal makes the extremum inexact: Indeterminate becomes NaN', () => {
+  test('a measurement makes the extremum inexact: Indeterminate becomes NaN', () => {
     const inexact = ce.box(['Max', ['Measurement', 1.5, 0.1], 'Indeterminate']).evaluate();
     expect(inexact.isNaN).toBe(true);
     expect(inexact.isIndeterminate).toBe(false);
     const exact = ce
       .box(['Max', ['Measurement', ['Rational', 3, 2], ['Rational', 1, 10]], 'Indeterminate'])
       .evaluate();
-    expect(exact.isIndeterminate).toBe(true);
+    expect(exact.isNaN).toBe(true);
+    expect(exact.isIndeterminate).toBe(false);
   });
 
   test('a Measurement with an error below 1e-100 prints (CE-185.8)', () => {
