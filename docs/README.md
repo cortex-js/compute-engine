@@ -29,7 +29,7 @@ read the repository [`README.md`](../README.md).
 | Understand collection representation and execution | [`COLLECTIONS-MODEL.md`](./COLLECTIONS-MODEL.md) |
 | Understand compilation invariants | [`COMPILATION-MODEL.md`](./COMPILATION-MODEL.md) |
 | Understand Epsil lowering semantics | [`LANGUAGE-MODEL.md`](./LANGUAGE-MODEL.md) |
-| Plan Epsil-native group theory and algebraic infrastructure | [`group-theory/README.md`](./group-theory/README.md) |
+| Understand permutation values, group queries and verified stabilizer chains | [`group-theory/DESIGN.md`](./group-theory/DESIGN.md) |
 | Track active Epsil language and tooling work | [`epsil/ROADMAP.md`](./epsil/ROADMAP.md) |
 | Understand open type-system direction | [`TYPE_SYSTEM_ROADMAP.md`](./TYPE_SYSTEM_ROADMAP.md) |
 | Understand collection-element inference | [`INFERENCE_ROADMAP.md`](./INFERENCE_ROADMAP.md) |

@@ -20,12 +20,12 @@ if (!isMainThread) {
   installGroupTheory(ce);
   const result = executeEpsil(
     ce,
-    'let G=PermutationGroup([Permutation([2,1]),Permutation([2,3,1])],PermutationAction(3))\n(GroupOrder(G,1,50000000),GroupPcRelativeOrders(GroupPcgs(G,256,50000000),50000000))'
+    'let G=PermutationGroup([Permutation([2,1]),Permutation([2,3,1])],PermutationAction(3))\n(PermutationGroupOrder(G),PermutationGroupContains(G,Permutation([2,1])))'
   );
   assert.deepEqual(result.diagnostics, []);
-  assert.deepEqual(result.value.json, ['Tuple', 6, ['List', 2, 3]]);
+  assert.deepEqual(result.value.json, ['Tuple', 6, 'True']);
   const query: MJ = [
-    'GroupOrder',
+    'PermutationGroupOrder',
     [
       'PermutationGroup',
       [
@@ -38,8 +38,6 @@ if (!isMainThread) {
       ],
       ['PermutationAction', 20],
     ],
-    1,
-    50000000,
   ];
   const expected = ce.number(2432902008176640000n).json;
   assert.deepEqual(ce.box(query).evaluate().json, expected);

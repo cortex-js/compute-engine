@@ -41,15 +41,12 @@ if (mode === 'test') {
     process.platform === 'win32' ? 'C:/Program Files/Git/bin/bash.exe' : 'bash',
     ['scripts/typecheck.sh']
   );
-} else if (mode === 'bench' || mode === 'smoke') {
+} else if (mode === 'smoke') {
   const directory = mkdtempSync(join(tmpdir(), 'epsil-group-'));
   const output = join(directory, mode + '.mjs');
   await build({
     absWorkingDir: root,
-    entryPoints: [
-      'scripts/group-theory/' +
-        (mode === 'bench' ? 'benchmark.ts' : 'runtime-smoke.ts'),
-    ],
+    entryPoints: ['scripts/group-theory/runtime-smoke.ts'],
     outfile: output,
     bundle: true,
     format: 'esm',
@@ -60,4 +57,4 @@ if (mode === 'test') {
     define: { 'process.env.NODE_ENV': '"production"' },
   });
   run(process.execPath, [output, ...process.argv.slice(3)]);
-} else throw new Error('Expected test, typecheck, bench or smoke');
+} else throw new Error('Expected test, typecheck or smoke');

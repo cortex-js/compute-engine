@@ -9,15 +9,35 @@ const G: MathJsonExpression = [
   ['List', ['Permutation', ['List', 2, 1]], ['Permutation', ['List', 1, 3, 2]]],
   ['PermutationAction', 5],
 ];
-const orbit: MathJsonExpression = ['PermutationOrbit', G, 1, 3, 6];
-const orbits: MathJsonExpression = ['PermutationOrbits', G, 5, 10];
+const orbit: MathJsonExpression = [
+  'PermutationOrbit',
+  G,
+  1,
+  [
+    'Dictionary',
+    ['Tuple', { str: 'maxPoints' }, 3],
+    ['Tuple', { str: 'maxEdges' }, 6],
+  ],
+];
+const orbits: MathJsonExpression = [
+  'PermutationOrbits',
+  G,
+  [
+    'Dictionary',
+    ['Tuple', { str: 'maxPoints' }, 5],
+    ['Tuple', { str: 'maxEdges' }, 10],
+  ],
+];
 const transversal: MathJsonExpression = [
   'PermutationTransversal',
   G,
   1,
-  3,
-  6,
-  2,
+  [
+    'Dictionary',
+    ['Tuple', { str: 'maxPoints' }, 3],
+    ['Tuple', { str: 'maxEdges' }, 6],
+    ['Tuple', { str: 'maxProducts' }, 2],
+  ],
 ];
 const expected: MathJsonExpression = [
   'List',
@@ -45,13 +65,13 @@ describe('Epsil point orbits and transversals', () => {
       ce,
       `
 function pointOrbit(g: PermutationGroup, p: integer) -> list<integer> {
-  PermutationOrbit(g,p,5,10)
+  PermutationOrbit(g,p, options: {maxPoints -> 5, maxEdges -> 10})
 }
 function pointTransversal(g: PermutationGroup, p: integer) -> list<tuple<integer, Permutation>> {
-  PermutationTransversal(g,p,5,10,4)
+  PermutationTransversal(g,p, options: {maxPoints -> 5, maxEdges -> 10, maxProducts -> 4})
 }
 let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAction(5))
-(pointOrbit(G,1), PermutationOrbits(G,5,10), pointTransversal(G,1))
+(pointOrbit(G,1), PermutationOrbits(G, options: {maxPoints -> 5, maxEdges -> 10}), pointTransversal(G,1))
 `
     );
     expect(result.json).toEqual([
@@ -82,7 +102,16 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
   );
 
   test('boxing, hashing, printing, and JSON do not perform an orbit query', () => {
-    const query = ce.box(['PermutationOrbit', G, 1, 0, 0]);
+    const query = ce.box([
+      'PermutationOrbit',
+      G,
+      1,
+      [
+        'Dictionary',
+        ['Tuple', { str: 'maxPoints' }, 0],
+        ['Tuple', { str: 'maxEdges' }, 0],
+      ],
+    ]);
     expect(query.operator).toBe('PermutationOrbit');
     expect(query.hash).toBe(ce.box(query.json).hash);
     expect(query.toString()).toContain('PermutationOrbit');
@@ -97,8 +126,11 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
       'PermutationOrbit',
       'pending_group',
       'pending_point',
-      3,
-      6,
+      [
+        'Dictionary',
+        ['Tuple', { str: 'maxPoints' }, 3],
+        ['Tuple', { str: 'maxEdges' }, 6],
+      ],
     ]);
     expect(query.evaluate().operator).toBe('PermutationOrbit');
     fresh.assign('pending_group', G);
@@ -107,7 +139,7 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
     expect(
       run(
         fresh,
-        'PermutationOrbit(PermutationGroup(listFrom([Permutation([2,1])]),PermutationAction(3)),1,2,2)'
+        'PermutationOrbit(PermutationGroup(listFrom([Permutation([2,1])]),PermutationAction(3)),1, options: {maxPoints -> 2, maxEdges -> 2})'
       ).json
     ).toEqual(['List', 1, 2]);
   });
@@ -151,11 +183,70 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
 
   test('budgets produce errors, with no partial list; later calls succeed', () => {
     const cases: [MathJsonExpression, string][] = [
-      [['PermutationOrbit', G, 1, 2, 6], 'orbit-point'],
-      [['PermutationOrbit', G, 1, 3, 5], 'orbit-edge'],
-      [['PermutationOrbits', G, 4, 10], 'orbit-point'],
-      [['PermutationOrbits', G, 5, 9], 'orbit-edge'],
-      [['PermutationTransversal', G, 1, 3, 6, 1], 'transversal-product'],
+      [
+        [
+          'PermutationOrbit',
+          G,
+          1,
+          [
+            'Dictionary',
+            ['Tuple', { str: 'maxPoints' }, 2],
+            ['Tuple', { str: 'maxEdges' }, 6],
+          ],
+        ],
+        'orbit-point',
+      ],
+      [
+        [
+          'PermutationOrbit',
+          G,
+          1,
+          [
+            'Dictionary',
+            ['Tuple', { str: 'maxPoints' }, 3],
+            ['Tuple', { str: 'maxEdges' }, 5],
+          ],
+        ],
+        'orbit-edge',
+      ],
+      [
+        [
+          'PermutationOrbits',
+          G,
+          [
+            'Dictionary',
+            ['Tuple', { str: 'maxPoints' }, 4],
+            ['Tuple', { str: 'maxEdges' }, 10],
+          ],
+        ],
+        'orbit-point',
+      ],
+      [
+        [
+          'PermutationOrbits',
+          G,
+          [
+            'Dictionary',
+            ['Tuple', { str: 'maxPoints' }, 5],
+            ['Tuple', { str: 'maxEdges' }, 9],
+          ],
+        ],
+        'orbit-edge',
+      ],
+      [
+        [
+          'PermutationTransversal',
+          G,
+          1,
+          [
+            'Dictionary',
+            ['Tuple', { str: 'maxPoints' }, 3],
+            ['Tuple', { str: 'maxEdges' }, 6],
+            ['Tuple', { str: 'maxProducts' }, 1],
+          ],
+        ],
+        'transversal-product',
+      ],
     ];
     for (const [query, code] of cases) {
       const result = ce.box(query).evaluate();
@@ -200,27 +291,49 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
     expect(
       run(
         ce,
-        'PermutationOrbits(PermutationGroup([],PermutationAction(0)),0,0)'
+        'PermutationOrbits(PermutationGroup([],PermutationAction(0)), options: {maxPoints -> 0, maxEdges -> 0})'
       ).json
     ).toEqual(['List']);
     expect(
       run(
         ce,
-        'PermutationOrbit(PermutationGroup([],PermutationAction(0)),1,1,0)'
+        'PermutationOrbit(PermutationGroup([],PermutationAction(0)),1, options: {maxPoints -> 1, maxEdges -> 0})'
       ).operator
     ).toBe('Error');
     expect(
       run(
         ce,
-        'PermutationTransversal(PermutationGroup([],PermutationAction(5)),5,1,0,0)'
+        'PermutationTransversal(PermutationGroup([],PermutationAction(5)),5, options: {maxPoints -> 1, maxEdges -> 0, maxProducts -> 0})'
       ).json
     ).toEqual(['List', ['Tuple', 5, ['Permutation', ['List']]]]);
-    expect(ce.box(['PermutationOrbit', G, 0, 3, 6]).evaluate().operator).toBe(
-      'Error'
-    );
-    expect(ce.box(['PermutationOrbit', G, 6, 3, 6]).evaluate().operator).toBe(
-      'Error'
-    );
+    expect(
+      ce
+        .box([
+          'PermutationOrbit',
+          G,
+          0,
+          [
+            'Dictionary',
+            ['Tuple', { str: 'maxPoints' }, 3],
+            ['Tuple', { str: 'maxEdges' }, 6],
+          ],
+        ])
+        .evaluate().operator
+    ).toBe('Error');
+    expect(
+      ce
+        .box([
+          'PermutationOrbit',
+          G,
+          6,
+          [
+            'Dictionary',
+            ['Tuple', { str: 'maxPoints' }, 3],
+            ['Tuple', { str: 'maxEdges' }, 6],
+          ],
+        ])
+        .evaluate().operator
+    ).toBe('Error');
   });
 
   test('invalid and missing limits or arguments are rejected', () => {
@@ -228,9 +341,37 @@ let G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAc
       ['PermutationOrbit', G, 1, 3],
       ['PermutationOrbits', G, 5, 10, 0],
       ['PermutationTransversal', G, 1, 3, 6],
-      ['PermutationOrbit', G, 1, -1, 6],
-      ['PermutationOrbit', G, 1, 3, 0.5],
-      ['PermutationTransversal', G, 1, 3, 6, -1],
+      [
+        'PermutationOrbit',
+        G,
+        1,
+        [
+          'Dictionary',
+          ['Tuple', { str: 'maxPoints' }, -1],
+          ['Tuple', { str: 'maxEdges' }, 6],
+        ],
+      ],
+      [
+        'PermutationOrbit',
+        G,
+        1,
+        [
+          'Dictionary',
+          ['Tuple', { str: 'maxPoints' }, 3],
+          ['Tuple', { str: 'maxEdges' }, 0.5],
+        ],
+      ],
+      [
+        'PermutationTransversal',
+        G,
+        1,
+        [
+          'Dictionary',
+          ['Tuple', { str: 'maxPoints' }, 3],
+          ['Tuple', { str: 'maxEdges' }, 6],
+          ['Tuple', { str: 'maxProducts' }, -1],
+        ],
+      ],
     ];
     const loose = engine();
     loose.strict = false;

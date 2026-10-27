@@ -1,5 +1,4 @@
 import { PermutationQuerySession } from '../group-theory/permutation/query-session.js';
-import { exactGroupDefinitions } from './finite-group-theory.js';
 import type {
   Expression,
   IComputeEngine,
@@ -9,6 +8,7 @@ import {
   isFunction,
   isNumber,
   isSymbol,
+  isDictionary,
 } from '../boxed-expression/type-guards.js';
 import { checkDeadline } from '../../common/interruptible.js';
 import {
@@ -27,13 +27,11 @@ import {
   permutationGroupLimits,
   enumeratePermutationGroup,
   permutationClosureLimits,
-  PermutationClosureLimitError,
   type PermutationGroupWork,
 } from '../group-theory/permutation/groups.js';
 
 import {
   PermutationOrbitTree,
-  PermutationOrbitLimitError,
   permutationOrbitLimits,
   permutationOrbits,
   permutationTransversalLimits,
@@ -48,12 +46,33 @@ import {
   permutationCommutator,
 } from '../group-theory/permutation/element-operations.js';
 import {
-  PermutationChainLimitError,
   permutationChainLimits,
   permutationPointStabilizer,
   permutationGroupRelation,
   permutationGroupIsAbelian,
 } from '../group-theory/permutation/stabilizer-chain.js';
+
+/** Recognize kernel errors across separate host/plugin copies of the module. */
+export function isPermutationError(
+  error: unknown
+): error is { name: string; code: string } {
+  if (
+    !error ||
+    typeof error !== 'object' ||
+    !('name' in error) ||
+    !('code' in error)
+  )
+    return false;
+  return (
+    typeof error.code === 'string' &&
+    [
+      'PermutationInputError',
+      'PermutationClosureLimitError',
+      'PermutationOrbitLimitError',
+      'PermutationChainLimitError',
+    ].includes(String(error.name))
+  );
+}
 
 const NAMES = [
   'Permutation',
@@ -93,6 +112,13 @@ export function installPermutationFoundation(
   ce: IComputeEngine,
   options: {
     maxDegree?: number;
+    maxClosureElements?: number;
+    maxClosureProducts?: number;
+    maxOrbitPoints?: number;
+    maxOrbitEdges?: number;
+    maxTransversalProducts?: number;
+    maxChainWork?: number;
+    maxChainProofSteps?: number;
     maxGenerators?: number;
     maxGeneratorImages?: number;
     maxClosureImageWork?: number;
@@ -107,21 +133,26 @@ export function installPermutationFoundation(
   const maxDegree = degreeLimit(options);
   const groupLimits = permutationGroupLimits(options);
   const closureLimits = permutationClosureLimits({
-    maxElements: 1,
-    maxProducts: 0,
+    maxElements: options.maxClosureElements ?? 10_000,
+    maxProducts: options.maxClosureProducts ?? 100_000,
     maxImageWork: options.maxClosureImageWork,
     maxStoredImages: options.maxClosureStoredImages,
   });
   const transversalLimits = permutationTransversalLimits({
-    maxProducts: 0,
+    maxProducts: options.maxTransversalProducts ?? 100_000,
     maxImageWork: options.maxTransversalImageWork,
     maxStoredImages: options.maxTransversalStoredImages,
   });
   const chainLimits = permutationChainLimits({
-    maxWork: 0,
+    maxWork: options.maxChainWork ?? 50_000_000,
+    maxProofSteps: options.maxChainProofSteps,
     maxLevels: options.maxChainLevels,
     maxOrbitPoints: options.maxChainOrbitPoints,
     maxStoredImages: options.maxChainStoredImages,
+  });
+  const orbitLimits = permutationOrbitLimits({
+    maxPoints: options.maxOrbitPoints ?? 100_000,
+    maxEdges: options.maxOrbitEdges ?? 1_000_000,
   });
   for (const name of NAMES) {
     if (ce.lookupDefinition(name)) throw new Error(`Already defined: ${name}`);
@@ -132,18 +163,6 @@ export function installPermutationFoundation(
     check: () => checkDeadline(ce._deadlineFrame),
   };
   const queries = new PermutationQuerySession();
-  const queryPermutation = (
-    value: PermutationGroupValue,
-    kind: 'order' | 'contains' | 'abelian',
-    maxWork: number,
-    element?: PermutationValue
-  ): bigint | boolean => {
-    const requested = permutationChainLimits({ ...chainLimits, maxWork });
-    if (kind === 'order') return queries.order(value, requested, work);
-    if (kind === 'contains')
-      return queries.contains(value, element!, requested, work);
-    return permutationGroupIsAbelian(value, requested, work);
-  };
   const fail = (code: string): never => {
     throw new PermutationInputError(code);
   };
@@ -153,13 +172,7 @@ export function installPermutationFoundation(
     try {
       return body();
     } catch (error) {
-      if (
-        error instanceof PermutationInputError ||
-        error instanceof PermutationClosureLimitError ||
-        error instanceof PermutationOrbitLimitError ||
-        error instanceof PermutationChainLimitError
-      )
-        return ce.error(error.code);
+      if (isPermutationError(error)) return ce.error(error.code);
       throw error;
     }
   };
@@ -337,17 +350,45 @@ export function installPermutationFoundation(
         return ce.number(point);
       })
     );
+  // A call may lower the installer's ceilings; execution settings never enter a value.
+  const queryOptions = <T extends Record<string, number>>(
+    ops: readonly Expression[],
+    count: number,
+    defaults: T
+  ): T | undefined => {
+    if (ops.length < count || ops.length > count + 1)
+      fail('invalid-permutation-arity');
+    const input = ops[count];
+    if (!input || isSymbol(input, 'Nothing')) return defaults;
+    if (isSymbol(input) && !input.isConstant) return undefined;
+    if (!isDictionary(input)) return fail('invalid-permutation-options');
+    const result = { ...defaults };
+    for (const key of input.keys) {
+      work.check?.();
+      if (!Object.hasOwn(defaults, key))
+        return fail('unknown-permutation-option');
+      const value = integer(input.get(key)!);
+      if (value === undefined) return undefined;
+      if (value < 0 || value > defaults[key])
+        return fail('permutation-option-exceeds-limit');
+      result[key as keyof T] = value as T[keyof T];
+    }
+    return result;
+  };
   const orbitQuery = (
     ops: readonly Expression[],
     kind: 'orbit' | 'orbits' | 'transversal'
   ): Expression | undefined =>
     adapt(() => {
-      arity(ops, kind === 'orbits' ? 3 : kind === 'orbit' ? 4 : 5);
-      const offset = kind === 'orbits' ? 1 : 2;
-      const maxPoints = integer(ops[offset]),
-        maxEdges = integer(ops[offset + 1]);
-      if (maxPoints === undefined || maxEdges === undefined) return undefined;
-      const requested = permutationOrbitLimits({ maxPoints, maxEdges });
+      const settings = queryOptions(
+        ops,
+        kind === 'orbits' ? 1 : 2,
+        kind === 'transversal'
+          ? { ...orbitLimits, ...transversalLimits }
+          : orbitLimits
+      );
+      if (!settings) return undefined;
+      const requested = permutationOrbitLimits(settings);
       const value = readGroup(ops[0]);
       if (!value) return undefined;
       if (kind === 'orbits') {
@@ -358,12 +399,9 @@ export function installPermutationFoundation(
       }
       const point = integer(ops[1]);
       if (point === undefined) return undefined;
-      // Validate every requested bound before starting the orbit search.
-      const maxProducts = kind === 'transversal' ? integer(ops[4]) : 0;
-      if (maxProducts === undefined) return undefined;
       const products = permutationTransversalLimits({
         ...transversalLimits,
-        maxProducts,
+        ...settings,
       });
       const orbit = PermutationOrbitTree.compute(value, point, requested, work);
       if (kind === 'orbit') return encodePoints(orbit.points);
@@ -391,10 +429,13 @@ export function installPermutationFoundation(
       | 'abelian'
   ): Expression | undefined =>
     adapt(() => {
-      arity(ops, kind === 'order' || kind === 'abelian' ? 2 : 3);
-      const maxWork = integer(ops[ops.length - 1]);
-      if (maxWork === undefined) return undefined;
-      const requested = permutationChainLimits({ ...chainLimits, maxWork });
+      const settings = queryOptions(
+        ops,
+        kind === 'order' || kind === 'abelian' ? 1 : 2,
+        chainLimits
+      );
+      if (!settings) return undefined;
+      const requested = permutationChainLimits(settings);
       const value = readGroup(ops[0]);
       if (!value) return undefined;
       if (kind === 'order')
@@ -522,86 +563,89 @@ export function installPermutationFoundation(
         }),
     },
     PermutationGroupOrder: {
-      signature: '(PermutationGroup, integer) -> integer',
+      signature:
+        '(group: PermutationGroup, options: dictionary<integer>?) -> integer',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'order'),
     },
     PermutationGroupContains: {
-      signature: '(PermutationGroup, Permutation, integer) -> boolean',
+      signature:
+        '(group: PermutationGroup, element: Permutation, options: dictionary<integer>?) -> boolean',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'contains'),
     },
     PermutationPointStabilizer: {
-      signature: '(PermutationGroup, integer, integer) -> PermutationGroup',
+      signature:
+        '(group: PermutationGroup, point: integer, options: dictionary<integer>?) -> PermutationGroup',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'stabilizer'),
     },
     PermutationIsSubgroup: {
-      signature: '(PermutationGroup, PermutationGroup, integer) -> boolean',
+      signature:
+        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'subgroup'),
     },
     PermutationSubgroupIndex: {
-      signature: '(PermutationGroup, PermutationGroup, integer) -> integer',
+      signature:
+        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> integer',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'index'),
     },
     PermutationGroupEqual: {
-      signature: '(PermutationGroup, PermutationGroup, integer) -> boolean',
+      signature:
+        '(left: PermutationGroup, right: PermutationGroup, options: dictionary<integer>?) -> boolean',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'equal'),
     },
     PermutationIsNormal: {
-      signature: '(PermutationGroup, PermutationGroup, integer) -> boolean',
+      signature:
+        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'normal'),
     },
     PermutationGroupIsAbelian: {
-      signature: '(PermutationGroup, integer) -> boolean',
+      signature:
+        '(group: PermutationGroup, options: dictionary<integer>?) -> boolean',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'abelian'),
     },
     PermutationOrbit: {
       signature:
-        '(PermutationGroup, integer, integer, integer) -> list<integer>',
+        '(group: PermutationGroup, point: integer, options: dictionary<integer>?) -> list<integer>',
       pure: true,
       evaluate: (ops) => orbitQuery(ops, 'orbit'),
     },
     PermutationOrbits: {
-      signature: '(PermutationGroup, integer, integer) -> list<list<integer>>',
+      signature:
+        '(group: PermutationGroup, options: dictionary<integer>?) -> list<list<integer>>',
       pure: true,
       evaluate: (ops) => orbitQuery(ops, 'orbits'),
     },
     PermutationTransversal: {
       signature:
-        '(PermutationGroup, integer, integer, integer, integer) -> list<tuple<integer, Permutation>>',
+        '(group: PermutationGroup, point: integer, options: dictionary<integer>?) -> list<tuple<integer, Permutation>>',
       pure: true,
       evaluate: (ops) => orbitQuery(ops, 'transversal'),
     },
     PermutationGroup: {
-      signature: '(any, PermutationAction) -> PermutationGroup',
+      signature: '(list<Permutation>, PermutationAction) -> PermutationGroup',
       pure: true,
       invokes: false,
       canonical: (ops) => group(ops, true) ?? ce._fn('PermutationGroup', ops),
       evaluate: (ops) => group(ops),
       // No injective-constructor equality: distinct generators may generate
-      // the same subgroup, and deciding that is an explicit future query.
+      // the same subgroup; PermutationGroupEqual is the explicit mathematical query.
     },
     PermutationGroupElements: {
-      signature: '(PermutationGroup, integer, integer) -> list<Permutation>',
+      signature:
+        '(group: PermutationGroup, options: dictionary<integer>?) -> list<Permutation>',
       pure: true,
       evaluate: (ops) =>
         adapt(() => {
-          arity(ops, 3);
-          const maxElements = integer(ops[1]),
-            maxProducts = integer(ops[2]);
-          if (maxElements === undefined || maxProducts === undefined)
-            return undefined;
-          const requested = permutationClosureLimits({
-            ...closureLimits,
-            maxElements,
-            maxProducts,
-          });
+          const settings = queryOptions(ops, 1, closureLimits);
+          if (!settings) return undefined;
+          const requested = permutationClosureLimits(settings);
           const value = readGroup(ops[0]);
           if (!value) return undefined;
           const elements = enumeratePermutationGroup(value, requested, work);
@@ -615,7 +659,7 @@ export function installPermutationFoundation(
         }),
     },
     Permutation: {
-      signature: '(any) -> Permutation',
+      signature: '(list<integer>) -> Permutation',
       pure: true,
       invokes: false,
       canonical: (ops) => permutation(ops, true) ?? ce._fn('Permutation', ops),
@@ -632,7 +676,11 @@ export function installPermutationFoundation(
             left.images.every((x, i) => x === right.images[i])
           );
         } catch (error) {
-          if (error instanceof PermutationInputError) return undefined;
+          if (
+            isPermutationError(error) &&
+            error.name === 'PermutationInputError'
+          )
+            return undefined;
           throw error;
         }
       },
@@ -654,7 +702,11 @@ export function installPermutationFoundation(
             right = readAction(b);
           return left && right ? left.degree === right.degree : undefined;
         } catch (error) {
-          if (error instanceof PermutationInputError) return undefined;
+          if (
+            isPermutationError(error) &&
+            error.name === 'PermutationInputError'
+          )
+            return undefined;
           throw error;
         }
       },
@@ -709,24 +761,6 @@ export function installPermutationFoundation(
         }),
     },
   };
-  Object.assign(
-    definitions,
-    exactGroupDefinitions(ce, {
-      readPermutation,
-      readGroup,
-      encodePermutation: encode,
-      encodeGroup,
-      queryPermutation,
-      queryPermutationRelation: (g, h, query, maxWork) =>
-        permutationGroupRelation(
-          g,
-          h,
-          query,
-          permutationChainLimits({ ...chainLimits, maxWork }),
-          work
-        ),
-    })
-  );
   for (const name of Object.keys(definitions)) {
     if (ce.lookupDefinition(name)) throw new Error(`Already defined: ${name}`);
   }
@@ -734,21 +768,6 @@ export function installPermutationFoundation(
   // also own the installed definitions; no module-global registry is needed.
   const checkpoint = ce.checkpoint();
   try {
-    ce.declareType(
-      'GroupMatrix',
-      'tuple<characteristic: integer, rows: list<list<rational>>>',
-      { mint: false }
-    );
-    ce.declareType(
-      'MatrixGroup',
-      'tuple<dimension: integer, characteristic: integer, generators: list<GroupMatrix>>',
-      { mint: false }
-    );
-    ce.declareType(
-      'GroupPcSequence',
-      'tuple<group: any, sequence: list<any>, maxElements: integer, maxWork: integer>',
-      { mint: false }
-    );
     ce.declareType('Permutation', 'tuple<images: list<integer>>', {
       mint: false,
     });
@@ -770,5 +789,5 @@ export function installPermutationFoundation(
   }
 }
 
-/** Opt-in Epsil group library, including permutation, finite, matrix and pcgs operations. */
+/** Opt-in Epsil permutation group library. */
 export const installGroupTheory = installPermutationFoundation;

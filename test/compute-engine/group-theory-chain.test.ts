@@ -102,7 +102,7 @@ describe('verified bounded Schreier chains and group baseline', () => {
     (_, g, order) => {
       const chain = Chain.compute(g, bounds);
       expect(chain.order).toBe(order);
-      expect(verifyPermutationChain(g, chain.levels, bounds)).toBe(true);
+      expect(verifyPermutationChain(g, chain.certificate, bounds)).toBe(true);
       expect(BigInt(elements(g).length)).toBe(order);
       expect(Chain.is(chain)).toBe(true);
       expect(Chain.is(Object.create(Chain.prototype))).toBe(false);
@@ -245,12 +245,24 @@ describe('verified bounded Schreier chains and group baseline', () => {
   test('verification rejects incomplete, forged, and unrelated certificates', () => {
     const chain = Chain.compute(symmetric(4), bounds),
       levels = chain.levels;
-    const replace = (i: number, change: Partial<PermutationChainLevel>) =>
-      levels.map((l, j) => (j === i ? { ...l, ...change } : l));
+    const replace = (i: number, change: Partial<PermutationChainLevel>) => ({
+      ...chain.certificate,
+      levels: levels.map((l, j) => (j === i ? { ...l, ...change } : l)),
+    });
     expect(
-      verifyPermutationChain(symmetric(4), levels.slice(0, -1), bounds)
+      verifyPermutationChain(
+        symmetric(4),
+        { ...chain.certificate, levels: levels.slice(0, -1) },
+        bounds
+      )
     ).toBe(false);
-    expect(verifyPermutationChain(symmetric(4), [], bounds)).toBe(false);
+    expect(
+      verifyPermutationChain(
+        symmetric(4),
+        { ...chain.certificate, levels: [] },
+        bounds
+      )
+    ).toBe(false);
     expect(
       verifyPermutationChain(
         symmetric(4),
@@ -296,7 +308,7 @@ describe('verified bounded Schreier chains and group baseline', () => {
       )
     ).toBe(false);
     expect(
-      verifyPermutationChain(a3, Chain.compute(c2, bounds).levels, bounds)
+      verifyPermutationChain(a3, Chain.compute(c2, bounds).certificate, bounds)
     ).toBe(false);
     expect(() =>
       verifyPermutationChain(s3, [null] as never, bounds)
@@ -337,7 +349,10 @@ describe('verified bounded Schreier chains and group baseline', () => {
       'permutation-degree-limit'
     );
     expect(() =>
-      verifyPermutationChain(s3, chain.levels, { ...bounds, maxOrbitPoints: 2 })
+      verifyPermutationChain(s3, chain.certificate, {
+        ...bounds,
+        maxOrbitPoints: 2,
+      })
     ).toThrow('permutation-chain-orbit-point-limit');
   });
 
@@ -369,7 +384,7 @@ describe('verified bounded Schreier chains and group baseline', () => {
     expect(() => Chain.compute(g, bounds, work(100))).toThrow(sentinel);
     const chain = Chain.compute(g, bounds);
     expect(() =>
-      verifyPermutationChain(g, chain.levels, bounds, work(100))
+      verifyPermutationChain(g, chain.certificate, bounds, work(100))
     ).toThrow(sentinel);
     expect(() =>
       chain.sift(new P([2, 3, 4, 5, 6, 7, 8, 9, 1]), bounds, work(20))

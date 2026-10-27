@@ -27,6 +27,7 @@ export class PermutationQuerySession {
     // All resource settings are part of the key. A warm query cannot bypass a
     // smaller work, storage, degree or generator bound supplied by its caller.
     const key = JSON.stringify([
+      1, // Certificate format version; independent of the construction algorithm.
       limits,
       work.maxDegree ?? null,
       work.maxGenerators ?? null,

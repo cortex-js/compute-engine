@@ -23,6 +23,142 @@
  * labels (`"Type error"`).
  */
 export const ERROR_EXPLANATIONS: Record<string, string> = {
+  'Constructed chain failed verification':
+    'This value is not a valid checked permutation group or generator. Use Permutation and PermutationGroup constructors with an explicit compatible action; a forged expression or prototype is not accepted.',
+  'duplicate-permutation-image':
+    'A permutation image occurs more than once. Supply a list containing every integer from 1 through the list length exactly once.',
+  'expected-explicit-permutation-generators':
+    'A group requires an explicit list of checked Permutation values and a PermutationAction. Evaluate a symbolic list producer before constructing the group.',
+  'expected-explicit-permutation-images':
+    'Permutation requires an explicit list of integer images forming a bijection. Evaluate symbolic list producers before constructing the value.',
+  'expected-permutation-generators':
+    'A group requires an explicit list of checked Permutation values and a PermutationAction. Evaluate a symbolic list producer before constructing the group.',
+  'expected-permutation-images':
+    'Permutation requires an explicit list of integer images forming a bijection. Evaluate symbolic list producers before constructing the value.',
+  'incompatible-permutation-actions':
+    'The groups act on different explicit domains. Subgroup, normality, equality and index queries require the same PermutationAction degree.',
+  'incompatible-permutation-domain':
+    'This operation requires a checked permutation or explicit permutation action. Ordinary lists, tuples and matrices are not implicitly converted; use the matching constructor.',
+  'invalid-permutation-action-degree':
+    'An action degree must be a nonnegative safe integer within the configured degree limit.',
+  'invalid-permutation-arity':
+    'This permutation operation received the wrong number of operands. Query budgets belong in the optional options dictionary, not trailing integers.',
+  'invalid-permutation-chain-generator-image-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-chain-generator-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-chain-level-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-chain-limits':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-chain-orbit-point-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-chain-proof-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-chain-storage-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-chain-work-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-closure-element-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-closure-image-work-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-closure-limits':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-closure-product-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-closure-storage-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-degree-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-descriptor':
+    'The serialized permutation value has an unsupported version, fields or payload. Construct it through the checked permutation API; imported data is validated again by the receiving engine.',
+  'invalid-permutation-exponent':
+    'Permutation powers require an exact integer exponent. Negative integers use the inverse permutation; approximate or complex exponents are not supported.',
+  'invalid-permutation-exponent-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-generator':
+    'This value is not a valid checked permutation group or generator. Use Permutation and PermutationGroup constructors with an explicit compatible action; a forged expression or prototype is not accepted.',
+  'invalid-permutation-generator-image-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-generator-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-group':
+    'This value is not a valid checked permutation group or generator. Use Permutation and PermutationGroup constructors with an explicit compatible action; a forged expression or prototype is not accepted.',
+  'invalid-permutation-group-descriptor':
+    'The serialized permutation value has an unsupported version, fields or payload. Construct it through the checked permutation API; imported data is validated again by the receiving engine.',
+  'invalid-permutation-image':
+    'A permutation image must be a safe positive integer within the image list. Supply a bijection of 1 through the list length; trailing fixed points may be omitted.',
+  'invalid-permutation-integer':
+    'A permutation point, degree or resource limit must be an exact safe integer.',
+  'invalid-permutation-option-exceeds-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-options':
+    'Query options must be a dictionary of integer limits. For example, use options: {maxWork -> 1000000}. Positional numeric budgets are not supported.',
+  'invalid-permutation-orbit-edge-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-orbit-limits':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-orbit-point-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-transversal-image-work-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-transversal-limits':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-transversal-product-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'invalid-permutation-transversal-storage-limit':
+    'A permutation resource setting is missing or outside its supported integer range. Check the installer ceilings and query options in docs/group-theory/DESIGN.md; closure maxElements must be at least one.',
+  'not-a-permutation-subgroup':
+    'The proposed subgroup has a generator outside the parent group. Its index in that parent is undefined.',
+  'permutation-chain-generator-image-limit':
+    'The configured chain generator image limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-chain-generator-limit':
+    'The configured chain generator limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-chain-level-limit':
+    'The configured chain level limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-chain-orbit-point-limit':
+    'The configured chain orbit point limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-chain-proof-limit':
+    'The configured chain proof limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-chain-storage-limit':
+    'The configured chain storage limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-chain-work-limit':
+    'The configured chain work limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-closure-element-limit':
+    'The configured closure element limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-closure-image-work-limit':
+    'The configured closure image work limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-closure-product-limit':
+    'The configured closure product limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-closure-storage-limit':
+    'The configured closure storage limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-degree-limit':
+    'The configured degree limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-exponent-limit':
+    'The exact exponent exceeds the 16384-bit input bound. Reduce it modulo the permutation order before requesting the power.',
+  'permutation-generator-image-limit':
+    'The configured generator image limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-generator-limit':
+    'The configured generator limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-option-exceeds-limit':
+    'A query limit must be nonnegative and no larger than the installer ceiling. Per-call options can reduce resource use but cannot override the receiving engine policy.',
+  'permutation-orbit-edge-limit':
+    'The configured orbit edge limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-orbit-point-limit':
+    'The configured orbit point limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-outside-action':
+    'The permutation moves a point beyond this action degree. Choose an action containing its support.',
+  'permutation-transversal-image-work-limit':
+    'The configured transversal image work limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-transversal-product-limit':
+    'The configured transversal product limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'permutation-transversal-storage-limit':
+    'The configured transversal storage limit was reached. No partial result or negative membership answer is returned. Reduce the input or choose a larger supported budget; installer ceilings still apply.',
+  'point-outside-permutation-action':
+    'The point must be an integer from 1 through the explicit action degree. A degree-zero action has no points.',
+  'unknown-permutation-option':
+    'An option name is not supported by this query. Chain queries accept maxWork, maxLevels, maxOrbitPoints, maxStoredImages and maxProofSteps; closure and orbit queries have their own limits. See docs/group-theory/DESIGN.md.',
   'spread-tuple': `A spread (\`...x\`) in a list or set literal was given a tuple. Tuples are units — a point, a pair — so they do not splice into a surrounding collection; the spread would silently do nothing, which is why it is rejected instead.
 
 To use a tuple's elements as list elements, convert explicitly: \`ListFrom(t)\` is the list of t's elements, so \`[...ListFrom(t), 3]\` splices them. (In a CALL argument list the rule is reversed: argument lists are tuple-shaped, so there \`f(...t)\` spreads exactly tuples.)`,
