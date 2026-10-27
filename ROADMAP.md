@@ -3945,12 +3945,6 @@ the WGSL versions bitcast a `let`: a constant `bitcast<f32>` to NaN or infinity
 is a shader-creation error in Chrome ("value inf cannot be represented as
 'f32'").
 
-- **CE-287.1** GLSL on the same driver also loses NaN. Tycho measured a
-  `_gpu_nan()` branch multiplied by `0·cos(…)` (corpus state `zstlwmmpkp`): GLSL
-  returns finite values in 51 of 64 samples where float64 JavaScript and WGSL
-  give NaN. Probably the same cause as the infinity case above. Reported by
-  Tycho session tycho-90 on 2026-10-26, not filed as a Tycho row.
-
 ### CE-288. The f32 shader Hurwitz zeta answers NaN next to a zero of ζ(s, a)
 
 **Status:** open; capability, small.
@@ -5326,11 +5320,3 @@ one fails in a full run on a quiet box, investigate it as a real defect.
   `RUBI_NO_*` tests) in another. The integral stayed inert, which agrees with
   the 10-second rule-engine time limit running out under contention. Not run on
   an idle box.
-- **CE-359.7** `test/epsil/lazy-argument-capture.test.ts`, "a recursion of depth
-  200 that passes a list of 3000 strings": in one full run on 2026-10-26 (the
-  shader fixes CE-509 to CE-513 in a worktree, load average about 8.5) the value
-  was NaN with no diagnostic, where 3000 is expected. It passes alone, and the
-  program takes 30 to 70 ms, with or without a short `ce.timeLimit`. A NaN with
-  no diagnostic is not an expected answer for an overrun, so if it comes back,
-  record the value with `toString()` and the load average, and treat it as a
-  defect.

@@ -36,13 +36,6 @@
   `(…) / 6`, which gives `560` (#480, reported by
   [enumeratio](https://github.com/enumeratio)). `runtime` and `kernel-worker`
   stay single self-contained files.
-
-  One result of the two copies: a `JavaScriptTarget` imported from
-  `…/compile` did not recognize the exact rational `1/6` in an expression
-  boxed by the full entry, so `n(n-1)(n-2)/6` compiled to
-  `0.16666666666666666 * n * …` and gave `559.9999999999999` at `n = 16`. It
-  now compiles to `(n * …) / 6` and gives `560` (#480, reported by
-  [enumeratio](https://github.com/enumeratio)).
 - **`ce.registerCompilationTarget(name, target)` and
   `ce.unregisterCompilationTarget(name)` are public.** The compile guide
   documented the first under that name, but only the internal
