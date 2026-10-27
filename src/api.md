@@ -559,7 +559,7 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
-##### ComputeEngine.tolerance {#tolerance-2}
+##### ComputeEngine.tolerance {#tolerance-3}
 
 ```ts
 get tolerance(): number
@@ -720,7 +720,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
 parses one.
 
 ####### type
@@ -1552,7 +1552,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### ComputeEngine.type() {#type-11}
+##### ComputeEngine.type() {#type-12}
 
 ```ts
 type(type): BoxedType
@@ -1795,6 +1795,14 @@ declareType(name, type, options?): void
 
 `boolean`
 
+Whether the declaration also declares a value-level constructor
+of the same name (`point(1, 2)` for `type point = tuple<…>`). Default
+`true`. A VALUE KIND uses `false`: its type is a nominal type defined
+as exactly `value` (`ce.declareType('gf8', 'value', { mint: false })`),
+and its values are made by the head that declares its arithmetic
+(`GF8(3)`), so a second constructor with no arithmetic must not
+exist. See the `arithmetic` field of `OperatorDefinition`.
+
 ####### typeParams?
 
 [`TypeParamsOption`](#typeparamsoption)
@@ -1990,9 +1998,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
+  `compileShippable`: `boolean`;
+  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
@@ -2070,9 +2081,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
+  `compileShippable`: `boolean`;
+  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
@@ -2861,7 +2875,7 @@ Obtained via `isNumber()`.
 
 <MemberCard>
 
-##### NumberLiteralInterface.numericValue {#numericvalue}
+##### NumberLiteralInterface.numericValue {#numericvalue-1}
 
 ```ts
 readonly numericValue: number | NumericValue;
@@ -2871,7 +2885,7 @@ readonly numericValue: number | NumericValue;
 
 <MemberCard>
 
-##### NumberLiteralInterface.isExact {#isexact-1}
+##### NumberLiteralInterface.isExact {#isexact-2}
 
 ```ts
 readonly isExact: boolean;
@@ -3675,6 +3689,102 @@ type AssumeResult =
 </MemberCard>
 
 ## Compiling
+
+### ArithmeticCompile {#arithmeticcompile}
+
+The compiled form of a value kind (the `compile` field of an
+[ArithmeticDefinition](#arithmeticdefinition)).
+
+The hooks branch on `context.language`, like the `compile` handler of an
+operator definition. `undefined` from a hook declines: the compilation
+then fails with a diagnostic that names the kind type.
+
+<MemberCard>
+
+##### ArithmeticCompile.type? {#type-5}
+
+```ts
+type?: {
+  lowered: string | undefined;
+  add: string | undefined;
+  multiply: string | undefined;
+  apply: string | undefined;
+  entry: boolean;
+  shippable: boolean;
+  helpers: Readonly<Record<string, (...args) => unknown>>;
+  hostNames: readonly string[];
+};
+```
+
+The representation of the kind TYPE and its operations. It belongs to
+the kind type, not to one operator: the operators of one kind type that
+are declared at the same time must give the same object (or none, and
+then they use the one another operator gave).
+
+##### type.shippable?
+
+```ts
+shippable?: boolean;
+```
+
+Whether code from this lowering may be sent to a worker as text.
+Default `false`. A compilation result is shippable only when every
+kind contract it uses says `true` and lists no `hostNames`, and no
+input of the code is a value of a kind (its `entry` check is a
+function of the host, which a worker does not have).
+
+##### type.helpers?
+
+```ts
+helpers?: Readonly<Record<string, (...args) => unknown>>;
+```
+
+Functions that the code of this lowering calls by name. The engine
+copies the source of each one into the compiled code, as
+`const <name> = (<source>);`, so the code carries them to a worker
+and to a stored result. The rules are those of
+`OperatorDefinition.compileHelpers`: a helper must not read a
+variable from outside its own body, and its name is an identifier
+that does not start with `_`. Put a helper here, not in `hostNames`,
+when the code can carry it.
+
+##### type.hostNames?
+
+```ts
+hostNames?: readonly string[];
+```
+
+The functions of the host that the code of this lowering calls and
+that it does not carry (they are not in `helpers`). A worker does not
+have them, so a non-empty list makes the result not shippable,
+whatever `shippable` says.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticCompile.value()? {#value-4}
+
+```ts
+value(value, compile, context): string | undefined
+```
+
+The source of a literal value of THIS operator, in the representation of
+the kind type. An operator without it declines a literal of its own.
+
+####### value
+
+[`Expression`](#expression-5)
+
+####### compile
+
+(`expr`) => `string`
+
+####### context
+
+[`OperatorCompileContext`](#operatorcompilecontext)
+
+</MemberCard>
 
 <MemberCard>
 
@@ -5444,6 +5554,506 @@ performed on collections, such as lists, sets, tuples, etc...
 
 </MemberCard>
 
+### ArithmeticContext {#arithmeticcontext}
+
+The context passed to the hooks of an [ArithmeticDefinition](#arithmeticdefinition).
+
+<MemberCard>
+
+##### ArithmeticContext.engine {#engine-1}
+
+```ts
+readonly engine: ComputeEngine;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticContext.numericApproximation {#numericapproximation}
+
+```ts
+readonly numericApproximation: boolean;
+```
+
+`true` under `.N()`. The hook numericizes its own result: a kind whose
+values are exact (a residue class) computes the exact value anyway; a
+kind whose values carry a float (a measurement, an interval) returns the
+numeric form. The caller does not apply `.N()` to the result.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticContext.tolerance? {#tolerance-1}
+
+```ts
+readonly tolerance?: number;
+```
+
+For the `compare` hook only: the tolerance of the caller, when it
+compares within a tolerance. `.is()` gives the `tolerance` argument of
+the call, or `engine.tolerance` when the call has none (`.is()` is the
+comparison within a tolerance, also for two exact values). `undefined`
+for every other comparison (the relational operators, `isEqual()`,
+`isLess()`, `Max`, `Min`, `Sort`, …): the hook then applies its own
+rule, usually two exact values compared exactly and a float within
+`engine.tolerance`.
+
+</MemberCard>
+
+### KindOperands {#kindoperands}
+
+The operands of an `add`, `multiply` or `apply` hook of an
+[ArithmeticDefinition](#arithmeticdefinition).
+
+<MemberCard>
+
+##### KindOperands.evaluated {#evaluated}
+
+```ts
+readonly evaluated: readonly Expression[];
+```
+
+The evaluated operands.
+
+</MemberCard>
+
+<MemberCard>
+
+##### KindOperands.written {#written}
+
+```ts
+readonly written: readonly (Expression | undefined)[];
+```
+
+The operands as they were written before evaluation, aligned with
+`evaluated`. `undefined` for a value that an earlier fold made, which
+has no written form. A kind whose rule depends on how a term was
+written reads it here (a temperature with an offset reads `Negate(b)` in
+`a - b`).
+
+</MemberCard>
+
+<MemberCard>
+
+##### KindOperands.exact() {#exact}
+
+```ts
+exact(i): Expression
+```
+
+The exact value of operand `i`: `evaluated[i]` outside `.N()`. Under
+`.N()`, the operand evaluated again without the numeric approximation
+when it is transitively pure (evaluating it again cannot repeat a side
+effect), else `evaluated[i]`. The result is memoized.
+
+####### i
+
+`number`
+
+</MemberCard>
+
+<MemberCard>
+
+##### KindOperands.elements() {#elements}
+
+```ts
+elements(i): readonly Expression[] | undefined
+```
+
+At an operator whose parameter is a collection type, the elements of
+collection operand `i`, enumerated once by the engine. `undefined` for an
+operand that is not a collection, or that was not enumerated (a
+collection larger than `engine.maxCollectionSize`, of unknown or
+infinite count, or whose element type cannot hold a value of a kind).
+
+####### i
+
+`number`
+
+</MemberCard>
+
+<MemberCard>
+
+### KindOperand {#kindoperand}
+
+```ts
+type KindOperand = {
+  evaluated: Expression;
+  written: Expression | undefined;
+  exact: Expression;
+};
+```
+
+One operand of a `negate`, `divide`, `power` or `compare` hook of an
+[ArithmeticDefinition](#arithmeticdefinition). The fields have the meaning of the fields of
+[KindOperands](#kindoperands) with the same name.
+
+</MemberCard>
+
+### KindFold {#kindfold}
+
+The result of an `add` or `multiply` hook of an
+[ArithmeticDefinition](#arithmeticdefinition): the operands that the hook combined, by their
+index in `ops.evaluated`, and the value they make.
+
+<MemberCard>
+
+##### KindFold.value {#value-3}
+
+```ts
+readonly value: Expression;
+```
+
+</MemberCard>
+
+<MemberCard>
+
+##### KindFold.operands {#operands}
+
+```ts
+readonly operands: readonly number[];
+```
+
+</MemberCard>
+
+### ArithmeticDefinition {#arithmeticdefinition}
+
+The arithmetic of a VALUE KIND, given by the `arithmetic` field of the
+operator definition of the head that constructs its values.
+
+The fields marked PER TYPE belong to the kind type (the result type of the
+head), because a symbol of that type has no head to ask: `admittedAs`,
+`resultType` and `compile.type`. The other fields belong to the head.
+
+Rules for a hook:
+- The operands of `add` and `multiply` arrive in canonical order, and
+  `multiply` must commute.
+- A hook may build and evaluate expressions through the engine, including
+  expressions with values of another kind. A hook never calls
+  `.simplify()`.
+- A hook that throws propagates the error, as an `evaluate` handler does.
+- A fold that names an operand index out of range or twice is an error in
+  the definition of the kind and throws.
+
+<MemberCard>
+
+##### ArithmeticDefinition.admittedAs? {#admittedas}
+
+```ts
+admittedAs?: "number" | "real" | "none";
+```
+
+PER TYPE. Where a value of this kind is admitted beyond the arithmetic
+operators and the parameters that name its type or admit `value`.
+Default `'none'`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.compile? {#compile}
+
+```ts
+compile?: ArithmeticCompile;
+```
+
+The compiled form of the kind. Absent: every target declines an
+expression that holds a value of the kind.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.add()? {#add-1}
+
+```ts
+add(ops, context): readonly KindFold[] | undefined
+```
+
+The sum of the operands of which at least one is a value of this kind.
+`ops` are the evaluated operands. A fold names the operands it combined,
+by their index in `ops.evaluated`, and the value they make. A hook may
+return several folds and must not name an operand twice. A fold may name
+an operand of another kind only to absorb it into its own value. A
+fold's `value` may be a value of another kind or a plain number.
+`undefined`, or an empty list, folds nothing.
+
+####### ops
+
+[`KindOperands`](#kindoperands)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.multiply()? {#multiply}
+
+```ts
+multiply(ops, context): readonly KindFold[] | undefined
+```
+
+The product of the operands of which at least one is a value of this
+kind. The contract is the one of `add`.
+
+####### ops
+
+[`KindOperands`](#kindoperands)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.negate()? {#negate}
+
+```ts
+negate(x, context): Expression | undefined
+```
+
+`-x`. `undefined` declines.
+
+####### x
+
+[`KindOperand`](#kindoperand)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.divide()? {#divide}
+
+```ts
+divide(a, b, context): Expression | undefined
+```
+
+`a / b`, at least one operand of this kind. `undefined` declines.
+
+####### a
+
+[`KindOperand`](#kindoperand)
+
+####### b
+
+[`KindOperand`](#kindoperand)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.power()? {#power}
+
+```ts
+power(base, exponent, context): Expression | undefined
+```
+
+`base ^ exponent`, at least one operand of this kind. `Sqrt(x)` calls it
+with the exponent `1/2`, `Root(x, n)` with `1/n`, `Square(x)` with `2`.
+`undefined` declines.
+
+####### base
+
+[`KindOperand`](#kindoperand)
+
+####### exponent
+
+[`KindOperand`](#kindoperand)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.compare()? {#compare}
+
+```ts
+compare(a, b, context): 0 | 1 | -1 | "unordered" | undefined
+```
+
+The order of two values of which at least one is of this kind, for the
+comparison operators, `Max`, `Min`, `ElementMax`, `ElementMin`, `Sort`,
+`Clamp` and the comparison methods:
+
+- `-1`, `0` or `1`: the order of the two values;
+- `'unordered'`: the two values are known and have no order (a value
+  with a complex or `NaN` nominal). The four order operators (`Less`,
+  `LessEqual`, `Greater`, `GreaterEqual`) answer `False`, as they do for
+  a complex number; `Equal` and `NotEqual` ask the `eq` handler of the
+  head definitions; `Max`, `Min` and `Sort` leave the call unevaluated;
+- `undefined`: the two values are not comparable (a value of another
+  kind, a symbol with no value). An order comparison stays unevaluated,
+  `Equal` and `NotEqual` ask the `eq` handlers.
+
+A kind without `compare` has no order.
+
+####### a
+
+[`KindOperand`](#kindoperand)
+
+####### b
+
+[`KindOperand`](#kindoperand)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.isExact()? {#isexact-1}
+
+```ts
+isExact(value): boolean
+```
+
+Whether the value `value` of this kind is exact, for the rule that an
+inexact operand turns an `Indeterminate` answer into `NaN`
+(`Max(x, Indeterminate)` is `NaN` when `x` is inexact). Absent: a value
+of the kind is exact. A measurement is never exact.
+
+####### value
+
+[`Expression`](#expression-5)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.isNaN()? {#isnan-1}
+
+```ts
+isNaN(value): boolean
+```
+
+Whether the value `value` of this kind stands for no value, as the
+number `NaN` does: a measurement with a `NaN` nominal, a quantity with a
+`NaN` magnitude. Such a value follows the rule of `NaN` at `Max`, `Min`,
+`ElementMax`, `ElementMin` and `Clamp`: `Max(Quantity(NaN, m), 2 m)` is
+`NaN`, as `Max(NaN, 2)` is. Absent: no value of the kind is `NaN`.
+
+####### value
+
+[`Expression`](#expression-5)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.numericValue()? {#numericvalue}
+
+```ts
+numericValue(value): Expression | undefined
+```
+
+The number that the value `value` of this kind stands for, when the
+values of the kind stand for a number: the nominal of a measurement.
+The numeric accessors of the value read it: `re`, `im`, `bignumRe`,
+`bignumIm` and `valueOf()` (`Measurement(2.5, 0.1).re` is `2.5`, and a
+complex nominal gives its real and imaginary parts). Absent, or
+`undefined`: those accessors answer as for any other expression that
+is not a number (`re` is `NaN`).
+
+The FACT queries (`isPositive`, `sgn`, `isInteger`, `isFinite`, …) do
+not read it: they stay `undefined` for a value of a kind, so that no
+canonical fold of the numbers applies to it.
+
+####### value
+
+[`Expression`](#expression-5)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.apply()? {#apply}
+
+```ts
+apply(operator, ops, context): Expression | undefined
+```
+
+Called in place of the `evaluate` handler of `operator` when at least one
+operand is a value of this kind that the operator admitted only because
+of `admittedAs`. `undefined` leaves the expression unevaluated.
+
+####### operator
+
+`string`
+
+####### ops
+
+[`KindOperands`](#kindoperands)
+
+####### context
+
+[`ArithmeticContext`](#arithmeticcontext)
+
+</MemberCard>
+
+<MemberCard>
+
+##### ArithmeticDefinition.resultType()? {#resulttype}
+
+```ts
+resultType(operator, operandTypes): 
+  | string
+  | ListType
+  | AlgebraicType
+  | NegationType
+  | CollectionType
+  | SetType
+  | BroadcastableType
+  | RecordType
+  | ObjectType
+  | DictionaryType
+  | TupleType
+  | SymbolType
+  | ExpressionType
+  | NumericType
+  | FunctionSignature
+  | ValueType
+  | TypeVariable
+  | TypeReference
+  | undefined
+```
+
+PER TYPE. The static result type of a cell of `operator` with an operand
+of this kind's type, from the operand types without their shapes, or
+`undefined` for the default. `operator` is the dispatched operator:
+`'Add'` for a sum or a difference, `'Power'` for `Sqrt`, `Root` and
+`Square`, with the type of the implied exponent among `operandTypes`.
+A type string is parsed in the engine (`'number | uq'`).
+
+####### operator
+
+`string`
+
+####### operandTypes
+
+readonly [`Type`](#type-3)[]
+
+</MemberCard>
+
 <MemberCard>
 
 ### TaggedValueDefinition {#taggedvaluedefinition}
@@ -5599,7 +6209,7 @@ Some examples:
 
 <MemberCard>
 
-##### BoxedValueDefinition.value {#value-4}
+##### BoxedValueDefinition.value {#value-6}
 
 ```ts
 value: Expression | undefined;
@@ -5693,7 +6303,7 @@ accepted and re-stamped, never checked against the declaration.
 
 <MemberCard>
 
-##### BoxedValueDefinition.type {#type-6}
+##### BoxedValueDefinition.type {#type-7}
 
 ```ts
 type: BoxedType;
@@ -6036,7 +6646,7 @@ re-parsing or textually inlining its source.
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.type? {#type-8}
+##### BoxedOperatorDefinition.type? {#type-9}
 
 ```ts
 type?: OperatorTypeHandlerOnTypes;
@@ -6200,11 +6810,49 @@ key of its definition. See [OperatorDerivative](#operatorderivative).
 
 <MemberCard>
 
-##### BoxedOperatorDefinition.compile? {#compile}
+##### BoxedOperatorDefinition.compile? {#compile-1}
 
 ```ts
 compile?: OperatorCompileHandler;
 ```
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.compileShippable? {#compileshippable}
+
+```ts
+compileShippable?: boolean;
+```
+
+See `OperatorDefinition.compileShippable`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.compileHelpers? {#compilehelpers}
+
+```ts
+compileHelpers?: Readonly<Record<string, (...args) => unknown>>;
+```
+
+See `OperatorDefinition.compileHelpers`.
+
+</MemberCard>
+
+<MemberCard>
+
+##### BoxedOperatorDefinition.arithmetic? {#arithmetic}
+
+```ts
+arithmetic?: ArithmeticDefinition;
+```
+
+The arithmetic of the value kind this operator constructs, as given by
+the `arithmetic` field of its definition. See
+[ArithmeticDefinition](#arithmeticdefinition).
 
 </MemberCard>
 
@@ -10609,9 +11257,12 @@ type OperatorDefinition = Partial<BaseDefinition> & Partial<OperatorDefinitionFl
   evalDimension: (args, options) => Expression;
   derivative: OperatorDerivative;
   compile: OperatorCompileHandler;
+  compileShippable: boolean;
+  compileHelpers: Readonly<Record<string, (...args) => unknown>>;
   eq: (a, b, prover?) => boolean | undefined;
   neq: (a, b) => boolean | undefined;
   collection: CollectionHandlers;
+  arithmetic: ArithmeticDefinition;
   canEnumerate: (expr) => boolean | undefined;
   elementCount: (expr) => number | undefined;
   inferOperandTypes: (ops, requirement) => 
@@ -10989,6 +11640,69 @@ Return `undefined` (or an empty string) to fall back to the
 default compilation (a `null` returned from untyped JavaScript is
 tolerated and treated the same). See [OperatorCompileHandler](#operatorcompilehandler).
 
+The code a caller handler writes runs only on the thread that compiled
+it: the result is not shippable, so `broadcastAsync()` does not send
+it to the kernel pool (`reason: 'not-shippable'`). This holds also
+for a handler attached in place to a built-in definition. Set
+compileShippable when the code can run on a worker.
+
+#### OperatorDefinition.compileShippable?
+
+```ts
+compileShippable?: boolean;
+```
+
+Whether the code that the compile handler writes can run on
+a worker of the kernel pool. Default: `false`.
+
+A worker receives the compiled code as text and has none of the
+functions or global variables of the thread that compiled it. Set
+`true` only when the code calls nothing but the helpers of the
+compiled-code runtime, the operands that the handler compiled, and the
+functions given in compileHelpers. When the code calls a
+function of the compiling thread (`globalThis.myFn(…)`) and this flag
+is `true`, every cell that a worker evaluates throws, and its value is
+`NaN` (`BroadcastAsyncResult.failed` counts these cells).
+
+A compiled result is shippable only when every caller handler that
+wrote part of its code has this flag.
+
+#### OperatorDefinition.compileHelpers?
+
+```ts
+compileHelpers?: Readonly<Record<string, (...args) => unknown>>;
+```
+
+Functions that the code of the compile handler calls by name.
+The engine copies the source of each function (`fn.toString()`) into
+the code it compiles, as `const <name> = (<source>);`, so the code
+carries its helpers to a worker of the kernel pool and to a stored
+result. A helper is defined only when the handler wrote code for the
+`javascript` or `interval-javascript` target.
+
+Because only the source is copied, a helper must not read a variable
+from outside its own body (a closure variable or an import). Such a
+read throws when the compiled code runs, on every thread. A name must
+be a JavaScript identifier that does not start with `_` (the engine
+uses that prefix for its own names). Choose a name that a parameter of
+a compiled function cannot shadow, for example `myLibFloorIndex`.
+Two definitions may give a helper of the same name only with the same
+source.
+
+```ts
+ce.declare('Wrap', {
+  signature: '(number, number) -> number',
+  compileShippable: true,
+  compileHelpers: {
+    wrapIndex: (i: number, n: number) => ((i % n) + n) % n,
+  },
+  compile: (args, compile, { language }) =>
+    language === 'javascript'
+      ? `wrapIndex(${compile(args[0])}, ${compile(args[1])})`
+      : undefined,
+});
+```
+
 #### OperatorDefinition.eq?
 
 ```ts
@@ -11004,6 +11718,31 @@ caller does not distinguish (e.g. `cmp()`). A handler that does
 prover-tier work (sampling, expand/simplify, identity questions in the
 free variables) must decline — return `undefined` — when
 `prover === false`.
+
+#### OperatorDefinition.arithmetic?
+
+```ts
+arithmetic?: ArithmeticDefinition;
+```
+
+Declares that the values this operator constructs are a VALUE KIND:
+values with their own arithmetic (a residue class, a measurement, an
+element of a finite field). See [ArithmeticDefinition](#arithmeticdefinition).
+
+The result type of every arm of the signature must be a KIND TYPE: a
+kind primitive (`residue`), or a nominal type whose definition is
+exactly `value`, declared with
+`ce.declareType(name, 'value', { mint: false })`. The marker arms
+`nan`, `missing`, `nothing` and `error` may be added. Any other result
+type (a number type, `boolean`, `string`, a collection, `value`,
+`any`, `expression`, a nominal type with another definition) is
+refused when the operator is declared. A definition that gives `add`
+must also give `negate`.
+
+The fields `admittedAs`, `resultType` and `compile.type` belong to the
+kind TYPE, not to this operator: the operators of one kind type that
+are declared at the same time must give equal values for them (or
+leave them out).
 
 #### OperatorDefinition.canEnumerate?
 
@@ -12035,7 +12774,7 @@ set precision(p: number | "auto" | "machine"): void
 
 <MemberCard>
 
-##### IComputeEngine.tolerance {#tolerance-1}
+##### IComputeEngine.tolerance {#tolerance-2}
 
 ```ts
 get tolerance(): number
@@ -12196,7 +12935,7 @@ Inheritance included: a conformance registered for a supertype answers
 for its subtypes. A CONDITIONAL conformance (`list<T> is P where T is
 P`) recurses, deciding itself against `type`'s own arguments.
 
-`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-10)
+`type` may be a `TypeString`, parsed the way [IComputeEngine.type](#type-11)
 parses one.
 
 ####### type
@@ -13028,7 +13767,7 @@ back with `expr.array`.
 
 <MemberCard>
 
-##### IComputeEngine.type() {#type-10}
+##### IComputeEngine.type() {#type-11}
 
 ```ts
 type(type): BoxedType
@@ -13271,6 +14010,14 @@ declareType(name, type, options?): void
 
 `boolean`
 
+Whether the declaration also declares a value-level constructor
+of the same name (`point(1, 2)` for `type point = tuple<…>`). Default
+`true`. A VALUE KIND uses `false`: its type is a nominal type defined
+as exactly `value` (`ce.declareType('gf8', 'value', { mint: false })`),
+and its values are made by the head that declares its arithmetic
+(`GF8(3)`), so a second constructor with no arithmetic must not
+exist. See the `arithmetic` field of `OperatorDefinition`.
+
 ####### typeParams?
 
 [`TypeParamsOption`](#typeparamsoption)
@@ -13466,9 +14213,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
+  `compileShippable`: `boolean`;
+  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
@@ -13546,9 +14296,12 @@ declare(arg1, arg2?, arg3?): IComputeEngine
   `evalDimension`: (`args`, `options`) => [`Expression`](#expression-5);
   `derivative`: [`OperatorDerivative`](#operatorderivative);
   `compile`: [`OperatorCompileHandler`](#operatorcompilehandler);
+  `compileShippable`: `boolean`;
+  `compileHelpers`: `Readonly`\<`Record`\<`string`, (...`args`) => `unknown`\>\>;
   `eq`: (`a`, `b`, `prover?`) => `boolean` \| `undefined`;
   `neq`: (`a`, `b`) => `boolean` \| `undefined`;
   `collection`: [`CollectionHandlers`](#collectionhandlers);
+  `arithmetic`: [`ArithmeticDefinition`](#arithmeticdefinition);
   `canEnumerate`: (`expr`) => `boolean` \| `undefined`;
   `elementCount`: (`expr`) => `number` \| `undefined`;
   `inferOperandTypes`: (`ops`, `requirement`) => 
@@ -14602,7 +15355,7 @@ The  value of this expression is &lt;= 0, same as `isLessEqual(0)`
 
 <MemberCard>
 
-##### Expression.isNaN {#isnan-1}
+##### Expression.isNaN {#isnan-2}
 
 ```ts
 readonly isNaN: boolean | undefined;
@@ -14758,7 +15511,7 @@ It is therefore **not an `isSame` key**, in both directions, and
 
 <MemberCard>
 
-##### Expression.engine {#engine-1}
+##### Expression.engine {#engine-2}
 
 ```ts
 readonly engine: ComputeEngine;
@@ -15393,7 +16146,7 @@ Absolute value
 
 <MemberCard>
 
-##### Expression.add() {#add-3}
+##### Expression.add() {#add-4}
 
 ```ts
 add(rhs): Expression
@@ -16322,7 +17075,7 @@ console.log(nonlinear.solve(["x", "y"])); // Returns [{ x: 2, y: 3 }, { x: 3, y:
 
 <MemberCard>
 
-##### Expression.value {#value-5}
+##### Expression.value {#value-7}
 
 ```ts
 get value(): Expression | undefined
@@ -16927,6 +17680,13 @@ products, applying the multinomial theorem, etc.) and re-checks
 structural equality. This catches equivalences like `(x+1)^2` vs
 `x^2+2x+1` even when the expression has free variables.
 
+When one side is a value of a value kind (a value made by a head
+declared with an `arithmetic` field), the result is the result of
+`Equal` for the two sides when the kind type declares `compare` (the
+`compare` hook orders the two values within the tolerance: `tolerance`,
+else `engine.tolerance`, also for two exact values), and of `isSame()`
+otherwise.
+
 ####### other
 
 `string` \| `number` \| `bigint` \| `boolean` \| [`Expression`](#expression-5)
@@ -16938,6 +17698,8 @@ structural equality. This catches equivalences like `(x+1)^2` vs
 If provided, overrides `engine.tolerance` for the
 numeric comparison. Has no effect when the comparison is structural
 (i.e., when `isSame()` succeeds or the expression has free variables).
+When one side is a value of a value kind, it is given to the `compare`
+hook of the kind (`ArithmeticContext.tolerance`).
 
 </MemberCard>
 
@@ -17214,7 +17976,7 @@ singular values of a matrix.
 
 <MemberCard>
 
-##### Expression.type {#type-12}
+##### Expression.type {#type-13}
 
 ```ts
 get type(): BoxedType
@@ -17996,7 +18758,7 @@ equals(lhs, rhs): boolean
 
 <MemberCard>
 
-##### TensorField.add() {#add-1}
+##### TensorField.add() {#add-2}
 
 ```ts
 add(lhs, rhs): T
@@ -18545,7 +19307,7 @@ map2(fn, rhs): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.add() {#add-2}
+##### Tensor.add() {#add-3}
 
 ```ts
 add(other): Tensor<DT>
@@ -18573,7 +19335,7 @@ subtract(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.multiply() {#multiply}
+##### Tensor.multiply() {#multiply-1}
 
 ```ts
 multiply(other): Tensor<DT>
@@ -18587,7 +19349,7 @@ multiply(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.divide() {#divide}
+##### Tensor.divide() {#divide-1}
 
 ```ts
 divide(other): Tensor<DT>
@@ -18601,7 +19363,7 @@ divide(other): Tensor<DT>
 
 <MemberCard>
 
-##### Tensor.power() {#power}
+##### Tensor.power() {#power-1}
 
 ```ts
 power(other): Tensor<DT>
@@ -19544,6 +20306,8 @@ type PrimitiveType =
   | "regexp"
   | "color"
   | "residue"
+  | "measurement"
+  | "quantity"
   | "type"
   | "expression"
   | "unknown"
@@ -20167,6 +20931,7 @@ type TypeReference = {
      typeParams: string[];
     }[];
   _declOrigin: DeclarationOrigin;
+  _minted: boolean;
 };
 ```
 

@@ -1205,9 +1205,7 @@ function mayHoldDatum(t: Readonly<Type>, depth = 0): boolean {
     case 'dictionary':
       return mayHoldDatum(r.values, depth + 1);
     case 'record':
-      return Object.values(r.elements).some((x) =>
-        mayHoldDatum(x, depth + 1)
-      );
+      return Object.values(r.elements).some((x) => mayHoldDatum(x, depth + 1));
     case 'intersection':
     case 'negation':
       return true;
@@ -1244,7 +1242,10 @@ function unboundedLiteralResultType(
   const r = resolveTypeAlias(t);
   // A tuple with an `error` slot is not a value: the call is an error as a
   // whole (`dataArgumentCallType`), so the walk says nothing here.
-  return r === 'unknown' || r === 'any' || r === 'error' || isTupleWithErrorSlot(t)
+  return r === 'unknown' ||
+    r === 'any' ||
+    r === 'error' ||
+    isTupleWithErrorSlot(t)
     ? undefined
     : t;
 }

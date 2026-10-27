@@ -340,10 +340,8 @@ import {
   isEffectSubset,
 } from '../../common/type/effects.js';
 import { effectsOf } from '../boxed-expression/effects-of.js';
-import {
-  assertValidCompileHelpers,
-  isEngineCompileHandler,
-} from './engine-compile-handlers.js';
+import { assertValidCompileHelpers } from '../boxed-expression/compile-helpers-check.js';
+import { isEngineCompileHandler } from './engine-compile-handlers.js';
 
 import {
   COMPLEX_CONTINUATION_HEADS,
@@ -41662,8 +41660,7 @@ export class BaseCompiler {
     target: CompileTarget<Expression>
   ): void {
     const language = target.language ?? 'javascript';
-    if (language !== 'javascript' && language !== 'interval-javascript')
-      return;
+    if (language !== 'javascript' && language !== 'interval-javascript') return;
     const registry = target.userFunctions;
     if (registry === undefined)
       throw new Error(
