@@ -105,8 +105,10 @@ or the wide-form rule is too wide. Since 2026-10-27 a `Max`/`Min` body over
 numbers and tuples is typed `number` on both (Tycho row 468). That rule
 reads a bare `tuple` argument as a point, a tuple of numbers
 (`extremumReadsANumber`, `call-result-type.ts`); a tuple whose coordinate types
-are known must hold numbers or collections of numbers. Decide whether the
-bare `tuple` arm of the wide form keeps that reading.
+are known must hold numbers or collections of numbers. User decision
+2026-10-27: the bare `tuple` arm of the wide form keeps that reading (a
+point). What remains open is the first question: which of the two rules for a
+body that is not component-wise is right.
 
 ### CE-546. A call over a `number | tuple` operand is not split by arm
 
@@ -776,7 +778,9 @@ and `Chunk` have it (pins in
 
 ### CE-538. What `subs()` should give for the variable of `D`, `Series` and an indefinite `Integrate`
 
-**Status:** decision needed; design. Found 2026-10-27 (Tycho row 464).
+**Status:** decided, in progress. Found 2026-10-27 (Tycho row 464). User
+decision 2026-10-27: option (b), rewrite to a substitution at a point after
+the derivative.
 
 The free-variable walk reports the variable of `D(x^2, x)` and of
 `Series(sin x, x, 0, 3)` as free, because the result is a function of it.
@@ -2129,8 +2133,9 @@ error.
 
 ### CE-533. The GK15 error estimate can miss a kink inside a panel
 
-**Status:** decision needed; numerics. Found 2026-10-27 while fixing the
-nested integral of Tycho's document `neyret/2agcgxq87y`.
+**Status:** decided, in progress; numerics. Found 2026-10-27 while fixing the
+nested integral of Tycho's document `neyret/2agcgxq87y`. User decision
+2026-10-27: fix it, although the error reported for every integral changes.
 
 A Gauss–Kronrod panel estimates its error from one difference: the Kronrod
 sum minus the Gauss sum (`gk15`, `numerics/gauss-kronrod.ts`). When the
@@ -4518,6 +4523,45 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
+### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
+
+**Status:** open; performance, needs a design. Found by the Tycho
+document-open measurement, 2026-10-27. Same cause as CE-531.
+
+When Tycho opens the document `art/2ki2hjsouf`, it makes 1 994 canonical
+`ce.rebind` calls; the replay takes about 720 ms. A 425-byte tree such as
+`R_3(At(PointList(PointX(S_orry(u)) + … D(PointY(S_orry(u)), u) …)))` takes 14
+to 20 ms, about 85 % of it in typing `S_orry(u)` (`callResultTypeOfBinding` and
+`literalBodyResultType`, `boxed-expression/call-result-type.ts`, walk the
+8.7 KB body). That walk has a memo keyed on `_cacheGeneration()`, but each `D`
+goes through `canonicalizeBinder` (`box.ts`), which declares the bound variable
+in a new scope; the declaration and the pop advance the `any` axis, so the memo
+misses after each `D`.
+
+An exemption for a declaration into a scope that canonicalization has just
+created was built and measured on 2026-10-27 (replay 848 → 664 ms) and then
+REMOVED, because it is unsound. A symbol reads its value by name through the
+current scope chain (`BoxedSymbol._value`, `boxed-symbol.ts`), and while the
+binder's `canonical` handler runs, the binder's variable shadows an outer
+binding of the same name; the binder marks its variable only after the
+handler. So an expression that existed before the scope (an operand boxed
+earlier, or the stored value of an operand symbol, such as `a := x + 1` with
+`x := 3`) can serve a sign cached outside, or cache a sign computed inside and
+keep it after a clean pop: `sgn(a)` was `undefined` after the binder, with
+`x := 3`. The type derivation of a user function reads signs the same way, so
+its memo is not lexically scoped either. A narrower rule does not help: all 32
+`D` binders of the replay bind `u`, which is visible outside every time. The
+regression tests are in `test/compute-engine/ce-535-531-binder-declaration-cache.test.ts`.
+
+What a fix needs (a design change): either caches whose key does not depend on
+name lookups from the current scope (for example, keyed on the bindings they
+read), or a binder variable that lookups see as bound before the `canonical`
+handler runs. Tycho's side: it classifies each row twice, which doubles the
+rebind work (Tycho row ID).
+
+Reproduction: `npx tsx benchmarks/tycho-document-open/rebind.ts`
+(`COLD=1 RUNS=1` for the first run only).
+
 ### CE-536. `evaluate()` of a large surface body evaluates each copy of a subtree again and types every new node again
 
 **Status:** open; performance. Found by the Tycho document-open measurement,
@@ -4569,10 +4613,9 @@ collection value, the `_type` and `_sgn` caches) then misses after each call.
 Measured on the chain of Tycho row 453 at depth 3: the version went from 17 to
 7 129 during one read.
 
-The exemption that the binder declarations of `D`, `Sum` and the other binders
-got on 2026-10-27 (a declaration into a scope that no lookup has walked
-through yet does not advance the version; `unread-scopes.ts`) is NOT sound for
-a call scope. The cached `_type` of a body node is safe, because
+An exemption for a declaration into a scope that no lookup has walked through
+yet (tried on 2026-10-27 for binders, see CE-535, and removed there as
+unsound) is NOT sound for a call scope either. The cached `_type` of a body node is safe, because
 `BoxedSymbol.type` reads the body's own binding. But `BoxedSymbol.sgn` reads the
 parameter's VALUE by name through the call scope, and `_sgn` is keyed on the
 version only: with the exemption, a lazy operator whose operand is the body

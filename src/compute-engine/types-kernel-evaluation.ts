@@ -585,6 +585,16 @@ export type EvalContext<
   /** See `_anyVersionAtPush` — the `world` half of the same stamp. */
   _worldVersionAtPush?: number;
   /**
+   * Set on the frame of a call of a function literal whose scope holds the
+   * VALUES of the parameters (`function-utils.ts`). They were declared
+   * before the push, so the stamps above do not see them. The nodes of the
+   * literal's body read those values by name through this scope, and cache
+   * answers derived from them (the sign of `x + 1`) keyed on the `any` axis.
+   * So the pop of such a frame is never clean: it advances `any`, or the
+   * answer of the call would be served after it returns.
+   */
+  _bindsValues?: boolean;
+  /**
    * The parent link of `lexicalScope` as it was before this frame chained
    * the scope onto the ambient scope (`pushEvalContext` with `ambient`),
    * restored when the frame is discarded. Absent when the frame changed

@@ -6471,6 +6471,9 @@ function makeLambda(
       // statement hook uses this to delimit stack frames (one per
       // activation — nested unnamed Block/loop contexts group into it).
       ce.pushScope(freshScope, 'call');
+      // The scope holds the values of the applied parameters: its pop must
+      // advance the cache version (see `_bindsValues`).
+      ce.context._bindsValues = true;
       ACTIVE_FRAMES.add(freshScope);
       let newBody: Expression;
       try {
@@ -6796,6 +6799,9 @@ function makeLambda(
     // statement hook uses this to delimit stack frames (one per
     // activation — nested unnamed Block/loop contexts group into it).
     ce.pushScope(freshScope, 'call');
+    // The scope holds the values of the parameters: its pop must advance the
+    // cache version (see `_bindsValues`).
+    ce.context._bindsValues = true;
     ACTIVE_FRAMES.add(freshScope);
     let result: Expression;
     // The numeric request, when the last statement of the body takes it

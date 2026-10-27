@@ -239,7 +239,10 @@ function discardEvalContext(
   // comprehension-bound name recomputed the whole subtree per node (Tycho
   // item 181: 872K clean pops and 1.85M wasted type recomputes in ONE
   // canonical box, ~60–90 s per `.type` read).
+  // A frame whose scope received values before the push (a call of a
+  // function literal, `_bindsValues`) is never clean: see that field.
   const clean =
+    context?._bindsValues !== true &&
     context?._assumptionsDirty !== true &&
     context?._anyVersionAtPush === ce._anyVersion &&
     context?._semanticVersionAtPush === ce._semanticVersion &&

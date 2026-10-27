@@ -32,6 +32,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Scalar block accumulation** | `scalar-accumulator.ts [baseline-entry.ts]` | CE baseline · CE current | stdout |
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
+| **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
 | **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
 
 The first six are the **release baseline** (see below). Benchmark sources
