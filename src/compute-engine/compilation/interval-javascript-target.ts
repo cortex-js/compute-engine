@@ -2031,9 +2031,15 @@ const INTERVAL_JAVASCRIPT_CONSTANTS: Record<string, string> = {
  * result drops the jump tag that a singular result carries, while `sub`
  * keeps it, so a subtrahend that is a point-valued singular result stays
  * tagged now. No kernel of the interval library produces such a value.
+ *
+ * A `Negate` node whose code is overridden (`BaseCompiler.hasCodeOverride`)
+ * is not taken apart: the override names a value already computed, such as
+ * the extra parameter of an invariant-prefix variant that carries `-F(x, y)`,
+ * and compiling the operand on its own would compute `F(x, y)` again.
  */
 function negatedIntervalOperand(expr: Expression): Expression | undefined {
   if (!isFunction(expr, 'Negate') || expr.nops !== 1) return undefined;
+  if (BaseCompiler.hasCodeOverride(expr)) return undefined;
   return expr.op1;
 }
 

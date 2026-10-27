@@ -5310,6 +5310,23 @@ export class BaseCompiler {
    */
   private static readonly _codeAliases = new Map<Expression, string>();
 
+  /**
+   * Does `compile()` currently emit fixed code for `expr` (an entry in
+   * `_codeOverrides` or `_codeAliases`) instead of lowering it? A target
+   * handler that takes a node apart and compiles its operands directly (the
+   * interval `Add` chain compiles the operand of a `Negate` as a
+   * subtrahend) must compile such a node whole: its parts are not
+   * overridden, so lowering them emits the expression again where the
+   * override emits a name. The invariant-prefix variant of a user function
+   * installs such overrides for the prefixes its extra parameters carry.
+   */
+  static hasCodeOverride(expr: Expression): boolean {
+    return (
+      BaseCompiler._codeOverrides.has(expr) ||
+      BaseCompiler._codeAliases.has(expr)
+    );
+  }
+
   /** The `Power` nodes whose base `compileRuntimeMatrixPower` is emitting,
    * so that its element-wise branch does not dispatch a second time. */
   private static readonly _runtimeMatrixPowerBases = new Set<Expression>();
@@ -40643,6 +40660,7 @@ export class BaseCompiler {
                   `over a collection return value. Fix the declaration (e.g. ` +
                   `'-> list<number>') or evaluate instead.`
               );
+            BaseCompiler.assertExtraParamsRead(h, def, extraParams, 1);
             (registry.literals ??= new Map()).set(name, literal);
             registry.defs.set(name, def);
             return name;
@@ -40762,6 +40780,7 @@ export class BaseCompiler {
           if (BaseCompiler._promoted) promotedDefs.set(name, true);
           BaseCompiler._promoted = outerPromoted;
         }
+        BaseCompiler.assertExtraParamsRead(h, body, extraParams, 0);
         if (complexShaped) (registry.complexShaped ??= new Set()).add(h);
         (registry.literals ??= new Map()).set(name, literal);
         const statements = javascriptStatements(bodyTarget);
@@ -45775,6 +45794,42 @@ export class BaseCompiler {
     });
     if (chosen.length === 0) return undefined;
     return { prefixes: chosen, values };
+  }
+
+  /**
+   * Throw when the emitted code of an invariant-prefix variant of `h` does
+   * not read one of its extra parameters `extraParams`. The body compile
+   * emits a parameter's name where a node carries its code override, but a
+   * target handler that takes such a node apart compiles its parts instead,
+   * and then the body computes the prefix again while the call site
+   * computes it once more to pass it. The check before the body compile
+   * finds each prefix in the expression tree; this one reads the emitted
+   * text. The throw declines the variant, and the call site takes the
+   * ordinary call. The names are temporaries of the compilation, so a
+   * whole-word match cannot hit anything else.
+   *
+   * `inSignature` is the number of times `code` names each parameter
+   * outside the body: 0 for a body alone (the arrow form), 1 for a complete
+   * definition from a target lowering, whose `define` writes every extra
+   * parameter into the declaration (the GPU targets do). A parameter is
+   * read when it occurs more often than that.
+   */
+  private static assertExtraParamsRead(
+    h: string,
+    code: TargetSource,
+    extraParams: ReadonlyArray<string>,
+    inSignature: 0 | 1
+  ): void {
+    const unread = extraParams.find(
+      (p) =>
+        (code.match(new RegExp(`(?<![\\w$])${p}(?![\\w$])`, 'g'))?.length ??
+          0) <= inSignature
+    );
+    if (unread !== undefined)
+      throw new Error(
+        `Could not compile \`${h}\`: the emitted body does not read the ` +
+          `invariant-prefix parameter \`${unread}\`, so no variant is emitted`
+      );
   }
 
   /**

@@ -99,6 +99,24 @@ def(
   'k'
 );
 
+// W(x, k, n) subtracts V(x, k): the invariant prefix of W is `-V(x, k)`.
+def('V', ['Add', ['Sin', 'x'], ['Cos', 'k']], 'x', 'k');
+def(
+  'W',
+  [
+    'Exp',
+    [
+      'Subtract',
+      ['Multiply', -50, ['Square', ['Subtract', 'x', ['Cos', 'n']]]],
+      ['V', 'x', 'k'],
+    ],
+  ],
+  'x',
+  'k',
+  'n'
+);
+const SUM_OF_W = ['Sum', ['W', 'x', 'k', 'i'], ['Limits', 'i', 1, 16]];
+
 function compiled(
   json: unknown,
   options: { to?: 'javascript' | 'interval-js'; cse?: boolean } = {}
@@ -178,6 +196,73 @@ describe('Invariant prefix reuse across the calls of a repetition site', () => {
     const value = interpreted(json, { x: 0.3, k: 0.6 });
     expect(lo).toBeLessThanOrEqual(value);
     expect(hi).toBeGreaterThanOrEqual(value);
+  });
+
+  test('interval-js reads a SUBTRACTED prefix from the extra parameter', () => {
+    // W(x, k, n) subtracts V(x, k), as the Voronoi kernel of the Tycho
+    // showcase does. The prefix is `-V(x, k)`, a `Negate` node. The interval
+    // `Add` chain compiled the operand of a `Negate` as a subtrahend
+    // (`_IA.sub`), so the variant computed `V(x, k)` again on every term
+    // while the call site also computed it once to pass it.
+    const json = SUM_OF_W;
+    for (const to of ['javascript', 'interval-js'] as const) {
+      const { source, preamble } = compiled(json, { to });
+      // The index after `$inv` depends on the target's prefix list.
+      const variant =
+        preamble.split('\n').find((l) => l.startsWith('const _fn_W$inv')) ??
+        '';
+      expect(variant).not.toBe('');
+      expect(variant).not.toContain('_fn_V(');
+      const extra = variant.match(/^const _fn_W\$inv\d+ = \(x, k, n, (\w+)\)/);
+      expect(extra).not.toBeNull();
+      expect(variant.slice(extra![0].length)).toContain(extra![1]);
+      // One call of V per sample, in the binding before the sixteen terms.
+      expect(source.match(/_fn_V\(/g)).toHaveLength(1);
+    }
+    const { run } = compiled(json, { to: 'interval-js' });
+    const v: any = run({ x: { lo: 0.5, hi: 0.5 }, k: { lo: 0.2, hi: 0.2 } });
+    const { lo, hi } = v.value ?? v;
+    const value = interpreted(json, { x: 0.5, k: 0.2 });
+    expect(lo).toBeLessThanOrEqual(value);
+    expect(hi).toBeGreaterThanOrEqual(value);
+  });
+
+  test('a variant whose emitted body does not read an extra parameter is declined', () => {
+    // A target handler that takes an overridden node apart emits the prefix
+    // again instead of the parameter. Simulate one by hiding every override
+    // from the interval `Add` chain: the variant must not be emitted, and
+    // the call site takes the ordinary call.
+    const json = SUM_OF_W;
+    const spy = jest
+      .spyOn(BaseCompiler, 'hasCodeOverride')
+      .mockReturnValue(false);
+    try {
+      const { source, run } = compiled(json, { to: 'interval-js' });
+      expect(source).not.toContain('_fn_W$inv');
+      expect(source).toContain('_fn_W(');
+      const v: any = run({ x: { lo: 0.5, hi: 0.5 }, k: { lo: 0.2, hi: 0.2 } });
+      const { lo, hi } = v.value ?? v;
+      const value = interpreted(json, { x: 0.5, k: 0.2 });
+      expect(lo).toBeLessThanOrEqual(value);
+      expect(hi).toBeGreaterThanOrEqual(value);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test('the read check skips the declaration of a complete definition', () => {
+    // A target lowering (GLSL, WGSL) returns the whole definition, whose
+    // signature names every extra parameter once: a parameter is read only
+    // when the text names it again.
+    const check = (code: string, inSignature: 0 | 1) => () =>
+      (BaseCompiler as any).assertExtraParamsRead('W', code, ['_tv2'], inSignature);
+    const unread = 'float _fn_W_inv0(float x, float _tv2) {\n  return x;\n}';
+    const read = 'float _fn_W_inv0(float x, float _tv2) {\n  return x + _tv2;\n}';
+    expect(check(unread, 1)).toThrow(/does not read/);
+    expect(check(read, 1)).not.toThrow();
+    // The arrow form passes the body alone; `_tv23` is another name.
+    expect(check('x + _tv23', 0)).toThrow(/does not read/);
+    expect(check('x + _tv2', 0)).not.toThrow();
   });
 
   test('a prefix in a conditional arm reads the parameter too', () => {

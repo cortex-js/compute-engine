@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-562.
+Next free reference: CE-566.
 
 **Entry format.**
 
@@ -3337,23 +3337,75 @@ deliberate factor of three. The composed hyperbolic and reciprocal routines are
 built from unrounded kernels and take one rounding step at their own export,
 except `remainder`, whose three-operation composition takes three.
 
-### CE-252. Tycho code-generation audit of 2026-09-08: run it again at HEAD
+### CE-562. CSE does not share a call between a condition and its arm
 
-**Status:** open; task.
+**Status:** open; performance.
 
-The audit is
-`~/dev/tycho/_TASK/desmos/desmos-corpus/codegen-audit/2026-09-08-report.md` (CE
-0.126.2, 862 records over 71 documents).
+`T_4(t) = \{-0.816 < \cos(T_3(t)) : T_3(t)\}` compiles on the JavaScript and
+GLSL targets to `(-0.816… < Math.cos(_fn_T_3(t))) ? _fn_T_3(t) : NaN`: the
+condition is always evaluated, so its call `T_3(t)` can be bound once and read
+by the arm. Tycho codegen audit at CE 0.171.0 (CORE corpus, 1,053 records):
+3 JavaScript and 3 GLSL function bodies (`zstlwmmpkp`, and the
+`p_rand(...)` call in `hyvhlz4chj`). The CSE harvest treats a conditional as a
+region boundary; a subexpression of the condition is safe to hoist above the
+selection because the condition is evaluated on every path.
 
-- **CE-252.1** Audit item J3 does not reproduce at HEAD. The 496 `_SYS.bcast`
-  sites over user-function results needed the call to have the type top. Every
-  construction tried (assign, declared `-> unknown`, `Block`, `If`, `Which`,
-  piecewise) has the type `number` at HEAD, because the Block analysis reads the
-  value before the type since 2026-09-08. The constructed-scalar arm is a guard
-  for weaker inference. Run the audit again against HEAD before more work here.
-- **CE-252.2** Audit item I4 was not worked: interval piecewise arms are
-  compiled as per-call closures, and the `Sum` bound is read through an inline
-  shape probe.
+### CE-563. GLSL helpers that are emitted but not called
+
+**Status:** open; performance, small.
+
+`GPU_GCD_PREAMBLE_GLSL` (`gpu-target.ts`) holds `_gpu_gcd` and `_gpu_lcm`, so a
+shader that calls only `\gcd` also carries `_gpu_lcm` (Tycho document
+`1e9rxgmywb`). It is the only unreferenced helper left in the CORE corpus at CE
+0.171.0 (there were 12 in 4 shaders at 0.126.2). Emit each helper on its own
+use.
+
+### CE-564. Rows of the all-states census that compiled on 2026-09-16 and decline at 0.171.0
+
+**Status:** open; task (triage).
+
+Tycho codegen census, all 757 documents, CE 0.171.0 against the unreleased
+build of 2026-09-16 (Tycho `03ebe4fc8`): 15 rows of the 734 common documents
+compiled then and decline now. Each needs a decision: a deliberate refusal of
+a compile that was unsound (keep, nothing to do), or a regression (fix).
+
+- **CE-564.1** Probably deliberate refusals: `AsOklab` over an operand that
+  may be a collection (`digxkh3uk8`, `wgxnrn87sx`); a call that maps a list
+  over a scalar parameter of a function with a point parameter
+  (`njncrg9fkv`); a complex value at a parameter shaped real on interval-js
+  (`m7oc1p6cys`, 2 rows); `Set` in a condition (`jaayqz1o06`, malformed
+  input).
+- **CE-564.2** A type error in the expression handed to `compile()`:
+  `L(x, [0, 0.1, ..., 1])` with `L(x, n) = (f_1(x)^n + f_2(x)^n)^{1/n}` gives
+  `Error(incompatible-type, "complex | signed_infinity", ~oo)` (`dmibg1uaof`,
+  javascript and interval-js; the element `n = 0` makes `1/n` be `~oo`);
+  `d(B(A(P)))` gives `l(Error(incompatible-type, "tuple", "number"))`
+  (`ra1p9naofs`). CE alone does not reproduce the first one
+  (`ce.parse('L(x, 0..0.1..1)')` is valid): find the step of Tycho's route that
+  makes the error.
+- **CE-564.3** interval-js: `f(x, 0)` declines with "an object-domain absent
+  ('missing') position … Discharge with 'Coalesce' first" (`ond0vgpslf`, 3
+  rows).
+- **CE-564.4** GLSL: `R(v - (-p_0), φ)` with a point argument declines with
+  "lowers to vec2 but parameter is declared float" (`pqflulcixs`, 2 rows):
+  the parameter type of `R` was inferred scalar.
+
+Not CE: the spherical rows `\rho = f(\theta, \phi)` (7 documents) arrive with
+`rho` typed as a function by Tycho's importer; CE leaves `rho` untyped.
+
+### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
+
+**Status:** open; performance; decision needed.
+
+Since CE-520, `sin`/`cos` on the shader targets call `_gpu_sin`/`_gpu_cos`
+(a bit test and a selection per call, about 10% of a Tycho frame on WebGPU)
+unless the operand is finite for certain, which needs each symbol it reads to
+have a declared type. In the Tycho CORE corpus at CE 0.171.0, 611 call sites in
+122 of 196 shaders take the helper, among them `(\cos(t), \sin(t))` of a
+parametric curve. Either Tycho declares its plot parameters (`t`, `θ`, `x`,
+`y`) `real`, or CE reads the variables that the host binds with `vars` (a plot
+parameter is finite by construction) as finite. The decision is which side
+does it.
 
 ### CE-253. `Sum(At(P, Range(a, b)))` materializes the range on the JavaScript target
 
@@ -3582,24 +3634,34 @@ registered-target route throws (pinned in `compile-fold-size-guard.test.ts`).
   symbol value, or a binding per node for each sub-expression with several
   parents.
 
-### CE-270. Compile declines in the code-generation census of CE 0.128.13
+### CE-270. Compile declines in the code-generation census of CE 0.171.0
 
 **Status:** open; capability. Plan:
 docs/plans/2026-09-15-interval-js-collection-lowerings-handoff.md (§9).
 
-Declines per target on the all-states Tycho corpus (684 documents, measured
-2026-09-16): javascript 112 in 38 documents, glsl 148 in 55, interval-js 188
-in 66. Open candidates:
+Declines (distinct records) per target on the all-states Tycho corpus, CE
+0.171.0, measured 2026-10-27 (757 documents, 17,782 records): javascript 35 in
+28 documents, glsl 68 in 36, interval-js 89 in 39. At CE 0.128.13 (2026-09-16,
+734 documents) they were 112 in 38, 148 in 55 and 188 in 66. Run:
+`npx tsx scripts/audit-ce-codegen.mts --all` in Tycho. Open candidates:
 
-- **CE-270.1** JavaScript scalar arithmetic over a list-valued operand, 33 rows
+- **CE-270.1** JavaScript scalar arithmetic over a list-valued operand: 5 rows
+  in 3 documents (was 33), all a point list plus a scalar or a list index
+  (`0.7C[C_i] + A`, `Q(T) + \frac{1}{3}[\operatorname{PointList}(0,0), D]`)
   (CE-268).
-- **CE-270.2** GLSL `At` over a collection indexed at run time, 32 rows.
-- **CE-270.3** GLSL `Integrate`, 15 rows.
-- **CE-270.4** The remaining interval `List` rows (CE-240).
-- **CE-270.5** Measure a new all-states baseline on the current release.
+- **CE-270.2** GLSL `At` over a collection with no static length: 12 rows in 7
+  documents (was 32).
+- **CE-270.3** GLSL `Integrate`: 1 row (was 15).
+- **CE-270.4** interval-js rows over a collection: 14 rows in 5 documents (a
+  condition that may be a list, a seeded `RandomChoice` list, a `Which` over a
+  collection condition, an absent position) (CE-240).
 
-`D`, `PointList` and the complex rows on the interval target are design limits,
-not candidates.
+Other classes in that run: GLSL recursive user functions (9 rows), GLSL
+constant collections over 256 elements (7), interval-js ordering over a
+complex operand (20), interval-js operators with no lowering (27 rows:
+`Mandelbrot`, `Julia`, `GeometricVector`, `D`, `Range` in a comprehension
+source, `Real`), and the rows of CE-564. `D`, `PointList` and the complex rows
+on the interval target are design limits, not candidates.
 
 ### CE-271. Collection values on the interval target: three cases that remain
 
