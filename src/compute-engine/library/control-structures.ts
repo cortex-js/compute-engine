@@ -1,4 +1,5 @@
 import { markCallableHome } from '../boxed-expression/binders.js';
+import { canonicalValueOperand } from '../boxed-expression/validate.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
 import {
   applicable,
@@ -4647,7 +4648,17 @@ function canonicalBlock(
             );
             deferredFrames += 1;
           }
-          return refused.get(op) ?? canonicalStatement(ce, op);
+          const refusal = refused.get(op);
+          if (refusal !== undefined) return refusal;
+          // A bare `N` or `D` statement is a value: when it still names the
+          // library operator (no local of the block or parameter of the
+          // literal binds it), it is a variable, as in `x + N`.
+          // The repair runs here, once the scope of the block and its locals
+          // exist, so that a local `N` stays the local.
+          const statement = canonicalStatement(ce, op);
+          return isSymbol(statement)
+            ? canonicalValueOperand(ce, statement)
+            : statement;
         })
       )
     );

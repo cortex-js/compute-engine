@@ -21,7 +21,11 @@ import {
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
-import { checkType, checkOperandType } from '../boxed-expression/validate.js';
+import {
+  checkType,
+  checkOperandType,
+  devolveValueElements,
+} from '../boxed-expression/validate.js';
 import {
   rebindEscaping,
   rebindEscapingCurrentScope,
@@ -5853,6 +5857,14 @@ volumes
           integrand.op1.nops > 1
         )
           integrand = integrand.canonical;
+
+        // A bare-symbol integrand stays bare, and the integration reads it as
+        // a value (a constant integrand). A bare `N` or `D` is then a
+        // variable, not the library operator. Any other bare symbol is left
+        // as it is (`devolveValueElements` canonicalizes only a name that
+        // resolves to the library operator).
+        if (isSymbol(integrand))
+          integrand = devolveValueElements(ce, [integrand])[0];
 
         const f = canonicalFunctionLiteral(
           integrand,

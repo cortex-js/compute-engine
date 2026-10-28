@@ -119,14 +119,18 @@ describe('an operand boxed by the caller is rebound too', () => {
     expect(n.operatorDefinition).toBeDefined();
   });
 
-  test('a pre-boxed symbol with nothing to repair is untouched', () => {
-    // Nothing devolves here (a `Tuple` operand requires no value type), so the
-    // pre-boxed operator symbol is passed through as-is and `N` remains
-    // applicable.
+  test('a pre-boxed symbol at a value position of a Tuple is rebound', () => {
+    // A `Tuple` coordinate is a value position: an unapplied library letter
+    // there is a variable, as in `x + N` (ROADMAP CE-597, user decision
+    // 2026-10-28). The caller's symbol is not mutated, and a name used as a
+    // function still finds the library operator.
     const n = ce.box('N');
     const expr = ce.function('Tuple', [n, 2]);
-    expect(expr.ops![0]).toBe(n);
-    expect(expr.ops![0].operatorDefinition).toBeDefined();
+    const op = expr.ops![0];
+    expect(op.symbol).toBe('N');
+    expect(op.operatorDefinition).toBeUndefined();
+    expect(op.valueDefinition).toBeDefined();
+    expect(n.operatorDefinition).toBeDefined();
     expect(ce.box(['N', 2.3]).evaluate().toString()).toBe('2.3');
   });
 });

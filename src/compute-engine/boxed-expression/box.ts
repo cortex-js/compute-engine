@@ -88,6 +88,9 @@ import { canonicalForm } from './canonical.js';
 import { sortOperands } from './order.js';
 import {
   validateArguments,
+  devolveAtValuePositions,
+  devolveValueElements,
+  isAnnotatedValueParameter,
   inferCollectionSourceArgs,
   isCollectionSourceOperator,
   refusedCollectionSourceOperands,
@@ -2898,11 +2901,15 @@ function makeCanonicalFunctionCore(
     // whole list in the AMBIENT scope the moment any one of them came back
     // non-canonical (an error node, a declined handler). `flatten` is wanted
     // here only for the splice-and-erase step.
-    const canonicalOps = flatten(
+    let canonicalOps = flatten(
       canonical(ce, boxedOps, scope),
       undefined,
       false
     );
+    // An element is a value: a bare `N` or `D` there is a variable
+    // (`devolveAtValuePositions`, which `canonicalList` gets through the
+    // lazy route).
+    canonicalOps = devolveValueElements(ce, canonicalOps);
     // The free symbols of the literal are inferred as numbers here too, as
     // in `canonicalList` (`narrowFreeSymbolCells`, `canonical-utils.ts`).
     return narrowFreeSymbolCells(
@@ -2977,7 +2984,9 @@ function makeCanonicalFunctionCore(
       if (declared !== undefined && ce._isShadowedParameter(name))
         ce._setShadowedParameterDef(name, declared);
     }
-    const boxedOps = flatten(semiCanonical(ce, ops));
+    // An argument of a function with no declared signature is a value: a
+    // bare `N` or `D` there is a variable (`devolveAtValuePositions`).
+    const boxedOps = devolveValueElements(ce, flatten(semiCanonical(ce, ops)));
     // Definition order must not change semantics. `name` has no definition
     // yet, so the collection evidence its parameters would have narrowed onto
     // an unknown symbol argument (`narrowArgsFromInferredSignature`) does not
@@ -3282,11 +3291,26 @@ function makeCanonicalFunctionCore(
     // signature-driven trigger), so the literal canonicalizes once, already
     // annotated. Runs ahead of the wildcard narrowing sink below, preserving
     // the documented sink-before-noting order.
+    const calleeType = calleeSignatureType(def.value);
     const calleeOps = ops.some(isSpreadOperand)
       ? ops
-      : annotateCallbacksFromSignature(ce, ops, calleeSignatureType(def.value));
+      : annotateCallbacksFromSignature(ce, ops, calleeType);
 
-    const boxedOps = flatten(semiCanonical(ce, calleeOps));
+    // A bare `N` or `D` at an argument whose parameter takes any value is a
+    // variable (`devolveAtValuePositions`). A callee with no parameter types
+    // (declared `function`, holding no literal) takes values at every
+    // argument.
+    const flatOps = flatten(semiCanonical(ce, calleeOps));
+    const boxedOps =
+      calleeType === undefined || isWildcardFunctionType(calleeType)
+        ? devolveValueElements(ce, flatOps)
+        : (devolveAtValuePositions(
+            ce,
+            name,
+            calleeType,
+            flatOps,
+            isAnnotatedValueParameter
+          ) ?? flatOps);
     // The written arguments index the operands in declaration order, so they
     // are kept only when no operand was spliced or removed.
     const written =
@@ -3915,6 +3939,28 @@ function canonicalErrorDetail(e: unknown): unknown {
   return e.message;
 }
 
+/** The lazy operators whose operands are all values: the comparisons, the
+ * collection constructors and the conditionals. `Same` and `IsSame` are not
+ * listed: they compare their operands as written (canonical forms, never a
+ * value), so an operand there is an expression, not a value. None of them opens a
+ * scope, so an operand resolves here as it would in the handler. The
+ * statements of a `Block` are repaired by its handler (`canonicalBlock`),
+ * once its scope and its locals exist. */
+const LAZY_VALUE_OPERAND_HEADS: ReadonlySet<string> = new Set([
+  'Equal',
+  'NotEqual',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'IdenticallyEqual',
+  'List',
+  'Set',
+  'If',
+  'Which',
+  'When',
+]);
+
 function applyOperatorDefinition(
   ce: ComputeEngine,
   name: MathJsonSymbol,
@@ -3956,7 +4002,17 @@ function applyOperatorDefinition(
 
   if (opDef.lazy) {
     // If we have a lazy function, we don't canonicalize the arguments
-    const xs = rawOps ?? boxOperands(ce, ops, RAW_OPERAND);
+    let xs = rawOps ?? boxOperands(ce, ops, RAW_OPERAND);
+    // A bare `N` or `D` held at a value operand of these operators is a
+    // variable (`devolveAtValuePositions`). The other lazy operators hold
+    // a name, a pattern, a type or an unevaluated form at their `any`
+    // parameters (`Assign`, `Hold`, `Head`, `Match`), and keep the operand
+    // as written.
+    // Every operand of these operators is a value, whatever its position: a
+    // comparison is a chain of any length (`Equal(2, 2, N)`), although its
+    // signature lists two parameters.
+    if (LAZY_VALUE_OPERAND_HEADS.has(name) && !opDef.inferredSignature)
+      xs = devolveValueElements(ce, xs);
     if (opDef.canonical) {
       let failure: { error: unknown } | undefined;
       try {
@@ -4175,6 +4231,24 @@ function applyOperatorDefinition(
   //
   // The arguments have been put in canonical form
   //
+  // A bare `N` or `D` at an operand whose parameter takes any value is a
+  // variable (`devolveAtValuePositions`): `(N, 1)`, `Max(N, 2)`. A parameter
+  // of a user function counts only when it is annotated
+  // (`isAnnotatedValueParameter`): `g(N)` with `g = (f) ↦ f(2)` keeps the
+  // library `N`, as `Apply((f) ↦ f(2), N)` does.
+  {
+    const userFunction =
+      opDef.isUserFunctionDefinition || opDef.inferredSignature;
+    const devolved = devolveAtValuePositions(
+      ce,
+      name,
+      opDef.signature.type,
+      xs,
+      userFunction ? isAnnotatedValueParameter : undefined
+    );
+    if (devolved !== undefined) xs.splice(0, xs.length, ...devolved);
+  }
+
   if (opDef.canonical) {
     let failure: { error: unknown } | undefined;
     try {

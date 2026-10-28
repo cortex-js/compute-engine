@@ -7514,9 +7514,25 @@ export function lookup(
 export function isApplicableDef(def: BoxedDefinition): boolean {
   if ('operator' in def) return true;
   if ('value' in def) {
-    const t = (def as { value: BoxedValueDefinition }).value.type;
-    if (t.isUnknown) return true;
+    const value = (def as { value: BoxedValueDefinition }).value;
+    const t = value.type;
     const tt = t.type;
+    // The variable that the repair of `devolveUnappliedOperator`
+    // (`validate.ts`) declares when a library operator name is used as a
+    // value (`[N, 1]`, `∫ N dt`) stays applicable only once its type says it
+    // holds a function. Its type is often still `unknown` (no numeric use
+    // narrowed it), and an `unknown` binding is applicable: `N(2.3)` then
+    // called the variable, not the library operator, for the lifetime of the
+    // engine.
+    if (value._isDevolvedShadow === true)
+      return (
+        !t.isUnknown &&
+        tt !== 'any' &&
+        tt !== 'value' &&
+        tt !== 'unknown' &&
+        t.matches('function')
+      );
+    if (t.isUnknown) return true;
     if (tt === 'any' || tt === 'value' || tt === 'unknown') return true;
     return t.matches('function');
   }

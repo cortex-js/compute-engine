@@ -515,10 +515,12 @@ describe('COMPILE DERIVATIVE — the no-closed-form guard is head-aware', () => 
 });
 
 describe('COMPILE DERIVATIVE — compiling does not mutate the engine', () => {
-  // Route matters. Boxing `["D", ["Multiply", "D", …], "x"]` canonicalizes
-  // eagerly, so the devolution lands in the node's OWN `localScope` and never
-  // reaches the engine. Parsing defers it, so the declaration happens during
-  // the handler's `evaluate()` — the route that leaked.
+  // Boxing `D·x²` inside the derivative turns the un-applied builtin `D` into
+  // a variable (`devolveUnappliedOperator`), declared where a free variable
+  // goes: outside the scope of the derivative, as `M` in `d/dx (M x²)` is
+  // (user decision 2026-10-28, ROADMAP CE-597). That is a change made by
+  // BOXING. Compiling evaluates the derivative to obtain its closed form, and
+  // that evaluation must not change the binding of `D` again.
   test.each([
     ['parse', (ce: ComputeEngine) => ce.parse('\\frac{d}{dx}(D x^2)')],
     [
@@ -530,18 +532,20 @@ describe('COMPILE DERIVATIVE — compiling does not mutate the engine', () => {
     'a free symbol in the closed form does not shadow the `D` operator (%s route)',
     (_route, make) => {
       // The handler obtains the closed form by EVALUATING, and canonicalizing
-      // `D·x²` devolves the un-applied builtin `D` into a variable by declaring
-      // it (`devolveUnappliedOperator`). That declaration must stay inside the
-      // handler's throwaway scope: landing it in the caller's scope would
-      // replace the `D` OPERATOR definition for the engine's lifetime.
+      // `D·x²` again could declare `D` again. Any declaration made while
+      // compiling must stay inside the handler's throwaway scope: the binding
+      // of `D` after compiling is the one that boxing left.
       const engine = new ComputeEngine();
       expect(Object.keys(engine.lookupDefinition('D')!)).toEqual(['operator']);
 
-      const result = compile(make(engine));
+      const expr = make(engine);
+      const afterBoxing = engine.lookupDefinition('D');
+
+      const result = compile(expr);
       expect(result.success).toBe(true);
       expect(result.code).toBe('2 * _.D * _.x');
 
-      expect(Object.keys(engine.lookupDefinition('D')!)).toEqual(['operator']);
+      expect(engine.lookupDefinition('D')).toBe(afterBoxing);
 
       // ...and a later derivative still compiles on the same engine.
       const later = compile(engine.box(['D', ['Power', 'x', 2], 'x']));

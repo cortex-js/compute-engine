@@ -75,6 +75,7 @@ import {
   enumerationDeclinedAfterWalk,
 } from './collections.js';
 import { extractFiniteDomainWithReason } from './logic-analysis.js';
+import { canonicalValueOperand } from '../boxed-expression/validate.js';
 import {
   broadcastingComponentKind,
   isPossiblyCollectionTyped,
@@ -4038,7 +4039,9 @@ export function canonicalBigop(
     (x) =>
       canonicalIndexingSet(x) ?? (x === returnError ? x : ce.error('missing'))
   );
-  body = body?.canonical ?? ce.error('missing');
+  // The body is a value: a bare `N` or `D` there is a variable, not the
+  // library operator (it was a type error, `Σ_{k=1}^{3} N`).
+  body = canonicalValueOperand(ce, body) ?? ce.error('missing');
   // The canonical body is read too: a parse form that holds no `Return`
   // node before it is canonicalized can hold one after.
   if (hasEscapingReturn(body)) body = returnError;

@@ -34,6 +34,7 @@ import {
   absentScalarMarker,
   absentMarkerIsNumeric,
   checkCollectionOperand,
+  canonicalValueOperand,
 } from '../boxed-expression/validate.js';
 import type { OverloadResolution } from '../boxed-expression/overload.js';
 import { arityBounds } from '../boxed-expression/overload.js';
@@ -14477,7 +14478,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // The seed is canonicalized before the reducer: its type is what the
         // bare accumulator is typed from (the fixpoint of the seed and the
         // body's result, `canonicalFoldCombiner`, an inferred type only).
-        const initial = ops[2]?.canonical;
+        // The seed is a value: a bare `N` there is a variable, not the
+        // library operator (`canonicalValueOperand`). The reducer is not
+        // repaired. In `Reduce([1, 2], N, N)` the variable that the seed
+        // declares is in scope when the reducer is canonicalized, so the
+        // reducer operand binds to it too; but applying the reducer resolves
+        // `N` as a function, and a repaired variable whose type is not a
+        // function type is not applicable (`isApplicableDef`,
+        // `function-utils.ts`), so the fold applies the library `N`.
+        const initial = canonicalValueOperand(engine, ops[2]);
         // A collection operand that is an error gives `null` whatever the
         // reducer: the reducer is admitted for its diagnostics, not refined.
         const fn = isInvalidNonCollection(collection)

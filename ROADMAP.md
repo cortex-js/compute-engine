@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-609.
+Next free reference: CE-610.
 
 **Entry format.**
 
@@ -786,21 +786,19 @@ walk (`collectReferences`, `abstract-boxed-expression.ts`) does not count the
 symbols of a `Tuple` target of `Assign` as locals of the block. Same on main
 before CE-597.
 
-### CE-597. `unknowns` leaves out a library letter used as a value in an integrand or in the initial value of `Reduce`
+### CE-609. A library letter passed to an unannotated function parameter stays the operator
 
-**Status:** open; defect. Tycho ledger row 473, 2026-10-28; instrument
-`~/dev/tycho/scripts/repros/2026-10-28-ce473-unknowns-library-letter-operand-repro.mts`.
+**Status:** open; known limit. Found 2026-10-28 while fixing Tycho row 473.
 
-`ce.parse('y=\\int_0^1 N\\,dt').unknowns` is `["y"]`, and
-`ce.parse('y=x+\\operatorname{Reduce}([1,2],N,N)').unknowns` is `["x","y"]`;
-with `M` in place of `N`, `M` is listed. In `x + N`, canonicalization binds `N`
-to a value definition, so `unknowns` lists it
-(`test/compute-engine/unknowns-scoped-library-letter.test.ts`). In the
-integrand of `Integrate` and in the initial-value operand of `Reduce`, `N` stays
-bound to the library operator `N`, and the walk (`collectReferences`,
-`abstract-boxed-expression.ts`) skips a symbol bound to an operator definition.
-The second operand of `Reduce` is a function position: the operator binding is
-right there.
+An unapplied library letter (`N`, `D`) used as a value becomes a variable, but
+an argument at an unannotated parameter of a function literal or a user
+function keeps the operator binding: with `g = (x) ↦ x + 1`, `g(N)` and
+`Apply((x) ↦ x + 1, N)` have no unknowns and evaluate to `N + 1` even after
+`N := 4`. The literal does not infer from its body whether a parameter is
+applied (`(f) ↦ f(2)`, where `N` must stay the operator) or read as a value. A
+fix needs that inference (`isAnnotatedValueParameter`,
+`boxed-expression/validate.ts`). An annotated parameter (`(x: number) ↦ x + 1`)
+works.
 
 ### CE-590. After a checkpoint restore, a symbol declared in a scope pushed and popped during the window reads a later value with its old type
 

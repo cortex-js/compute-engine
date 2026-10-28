@@ -27,6 +27,7 @@ import {
 import {
   checkType,
   checkArity,
+  devolveValueElements,
   expectsCharacterNotString,
   inferNumericArgs,
 } from '../boxed-expression/validate.js';
@@ -4808,11 +4809,15 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         const delim = isString(args[1]) ? args[1].string : undefined;
 
         if (isFunction(body, 'Sequence')) {
-          const xs = flatten(
-            canonical(ce, flatten(body.ops, undefined, false, true)),
-            undefined,
-            true,
-            true
+          // A coordinate is a value: a bare `N` or `D` there is a variable.
+          const xs = devolveValueElements(
+            ce,
+            flatten(
+              canonical(ce, flatten(body.ops, undefined, false, true)),
+              undefined,
+              true,
+              true
+            )
           );
           if (
             (delim === undefined || delim === '(,)') &&

@@ -2,6 +2,24 @@
 
 ### Resolved Issues
 
+- **A one-letter library operator name used as a value is a variable in more
+  places.** `N` and `D` are library operators. When one of them appears
+  unapplied where a value is expected, it already became a variable in a sum
+  (`x + N`). Now this also happens in an integrand (`\int_0^1 N\,dt`), the
+  initial value of `Reduce`, a comparison or a chain of comparisons
+  (`N = 2`, `2 = 2 = N`, `N \equiv x`), a list, a tuple, a set, the branches of
+  `If`/`Which`/`When`, the body of a sum or a product, a limit, a statement of
+  a `Block`, and an argument of an undeclared function or of a parameter typed
+  as a value. So `unknowns` lists it, and a later `N := 3` is used. Before,
+  `ce.parse('y=\\int_0^1 N\\,dt').unknowns` was `["y"]`. The variable is
+  declared where an automatic free variable is declared, so an assignment
+  reaches it from inside an integral or a sum. A name at a function position
+  (`Apply(N, x)`, the function of `Map`, a parameter typed as a function) stays
+  the operator, and `N(2.3)` and `D(x^2, x)` still call the library operators
+  after a value use. In `Reduce(L, N, N)` the initial value is the variable and
+  the fold uses the library `N`. A local of a `Block` and a parameter of a
+  function named `N` stay local.
+
 - **Two random draws are no longer merged into one.** Two draws are two
   independent values, and merging them changed the distribution of the result.
   Before: `Random() + Random()` simplified to `2Random()`, `Random()·Random()`

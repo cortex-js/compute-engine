@@ -994,7 +994,18 @@ function devolveUnappliedOperator(
       def.operator._isLambda
     )
       return null;
-    ce.declare(name, 'unknown');
+    // The shadow is declared where an auto-declared free variable goes: in
+    // the first scope that is not marked `noAutoDeclare`. The scope of a
+    // binder (`Sum`, `Product`, `Integrate`, `D`) is marked so: the letter is
+    // a free variable of the whole expression, as `M` is in `Σ M·k`, not a
+    // local of the binder. A shadow declared in the scope of the binder is
+    // not reached by a later `ce.assign('N', 2)`: `Sum(N·k, (k, 1, 3))`
+    // evaluated to `6N` while `unknowns` no longer listed `N`.
+    let declareScope = ce.context.lexicalScope;
+    while (declareScope.noAutoDeclare && declareScope.parent)
+      declareScope = declareScope.parent;
+    if (declareScope === ce.context.lexicalScope) ce.declare(name, 'unknown');
+    else ce._inScope(declareScope, () => ce.declare(name, 'unknown'));
     // Remember the shadow we just created: a later operand of the same
     // expression still carries the stale operator binding and has to be
     // rebound to it (see below).
@@ -1014,6 +1025,271 @@ function devolveUnappliedOperator(
   // is not a repair target.
   if (isValueDef(def) && def.value._isDevolvedShadow) return ce.box(name);
   return null;
+}
+
+/**
+ * The canonical form of `op`, an operand that a lazy operator holds at a
+ * position that takes a VALUE, with the repair of `devolveUnappliedOperator`
+ * applied: a bare `N` or `D` bound to the library operator becomes a
+ * variable.
+ *
+ * The repair otherwise runs only when an operand fails the type check of its
+ * parameter (`N + 1`: `Add` requires a number). A lazy operator with a
+ * `canonical` handler does not check its held operands against its
+ * signature, and the value positions read here have a type that a function
+ * matches (`any`, `value`). So in the integrand of `Integrate`, in the body
+ * of `Sum` and `Product` and in the initial value of `Reduce`, `N` stayed
+ * bound to the operator: `unknowns` left it out, and the body of `Sum` was a
+ * type error. A position that takes a FUNCTION (the reducer of `Reduce`)
+ * must not call this: there the operator binding is correct.
+ *
+ * Returns `op` unchanged when the repair does not apply, and in a rollback
+ * frame that forbids repairs.
+ */
+export function canonicalValueOperand(
+  ce: ComputeEngine,
+  op: Expression
+): Expression;
+export function canonicalValueOperand(
+  ce: ComputeEngine,
+  op: Expression | undefined
+): Expression | undefined;
+export function canonicalValueOperand(
+  ce: ComputeEngine,
+  op: Expression | undefined
+): Expression | undefined {
+  if (op === undefined) return undefined;
+  const canonical = op.canonical;
+  if (!isSymbol(canonical) || !/^[A-Z]$/.test(canonical.symbol))
+    return canonical;
+  if (repairsForbiddenByRollbackFrame(ce)) return canonical;
+  if (!isRepairableOperatorSymbol(ce, canonical)) return canonical;
+  return devolveUnappliedOperator(ce, canonical) ?? canonical;
+}
+
+/** The parameter types that take any value: a library operator name passed
+ * there is read as a variable, not as a function. A parameter that takes a
+ * function has a function type (`function`, a signature). */
+const VALUE_POSITION_TYPES: ReadonlySet<Type> = new Set([
+  'any',
+  'value',
+  'expression',
+  'unknown',
+]);
+
+/**
+ * The operators whose operands are typed `any` but are not all values, so
+ * none of their operands is repaired here (`ALL_OPERANDS`):
+ * - `Apply(f, x…)` and `ApplyWhole(f, x…)` apply their first operand, and
+ *   forward the others to `f`, whose own parameters say whether each one is
+ *   a value or a function: `Apply(g, N)` with `g: (function) -> number` must
+ *   keep the library `N`, as `g(N)` does. The repair of a forwarded argument
+ *   is left to the call of `f` (its canonicalization, or its application).
+ * - The operand of `__unit__` is the name of a unit (`\mathrm{N}` is
+ *   `__unit__(N)`, the newton).
+ */
+const ALL_OPERANDS = 'all';
+const FUNCTION_OPERAND_POSITIONS: ReadonlyMap<string, number | 'all'> =
+  new Map<string, number | 'all'>([
+    ['Apply', ALL_OPERANDS],
+    ['ApplyWhole', ALL_OPERANDS],
+    ['__unit__', ALL_OPERANDS],
+  ]);
+
+/** A symbol whose name is one uppercase letter: the names the repair of
+ * `devolveUnappliedOperator` can apply to (`N`, `D`). */
+function isLibraryLetterCandidate(op: Expression): boolean {
+  if (!isSymbol(op)) return false;
+  const name = op.symbol;
+  return name.length === 1 && /^[A-Z]$/.test(name);
+}
+
+/**
+ * The one-uppercase-letter symbol that the operand `op` is, or that it holds
+ * inside parentheses, or `undefined`. A raw (held) operand of a lazy operator
+ * can still be written `Delimiter(N)` or `Delimiter(Delimiter(N))` (the parse
+ * of `(N) = 2`): its canonical form is `N`, so it is read as `N` here. The
+ * repaired operand replaces the whole `Delimiter`. A `Delimiter` with
+ * another delimiter than parentheses (`[N]`, `|N|`) is not read through.
+ */
+function candidateOperand(
+  op: Expression
+): (Expression & { readonly symbol: string }) | undefined {
+  let x: Expression = op;
+  while (!x.isCanonical && isFunction(x, 'Delimiter')) {
+    if (x.nops === 2) {
+      const delim = isString(x.op2) ? x.op2.string : undefined;
+      if (delim === undefined || !(delim.startsWith('(') && delim.endsWith(')')))
+        return undefined;
+    } else if (x.nops !== 1) return undefined;
+    let inner = x.op1;
+    if (isFunction(inner, 'Sequence')) {
+      if (inner.nops !== 1) return undefined;
+      inner = inner.op1;
+    }
+    x = inner;
+  }
+  if (!isSymbol(x) || !isLibraryLetterCandidate(x)) return undefined;
+  return x;
+}
+
+/**
+ * True when the name `name`, read in the current scope, resolves to a library
+ * operator that `devolveUnappliedOperator` would repair (or to the variable
+ * that repair already declared), WITHOUT binding or declaring anything. A
+ * parameter of the function literal being canonicalized resolves to the
+ * parameter, so it is not repaired.
+ */
+function resolvesToRepairableOperator(
+  ce: ComputeEngine,
+  name: string
+): boolean {
+  if (ce._isShadowedParameter(name)) return false;
+  let scope: Scope | null = ce.context.lexicalScope;
+  while (scope && !scope.bindings.has(name)) scope = scope.parent;
+  if (!scope) return false;
+  const def = scope.bindings.get(name)!;
+  if (!scope.parent)
+    return (
+      isOperatorDef(def) &&
+      !(
+        def.operator instanceof _BoxedOperatorDefinition &&
+        def.operator._isLambda
+      )
+    );
+  return isValueDef(def) && def.value._isDevolvedShadow === true;
+}
+
+const ANY_VALUES_SIGNATURE: FunctionSignature = {
+  kind: 'signature',
+  variadicArg: { type: 'any' },
+  result: 'any',
+};
+
+/** `devolveAtValuePositions` for operands that are all values, the elements
+ * of a collection literal (`[N, 1]`, `(N, 1)`) built without its operator
+ * definition. */
+export function devolveValueElements(
+  ce: ComputeEngine,
+  ops: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  return devolveAtValuePositions(ce, '', ANY_VALUES_SIGNATURE, ops) ?? ops;
+}
+
+/**
+ * The rule for a parameter of a user function (a function literal, inline or
+ * assigned to a name): whether the parameter `param` reads the operand `op`
+ * as a value. A parameter with no annotation is typed `unknown` whether the
+ * body applies it (`(f) ↦ f(2)`) or reads it as a value (`(x) ↦ x + 1`): the
+ * literal does not infer from its body which of the two it is. So an
+ * `unknown` parameter is not a value position, and the argument `N` stays
+ * the library operator, as it did before the repair read value positions.
+ * Only a parameter that says so is: an annotation `any`, `value` or
+ * `expression`, or a type that the operator does not match
+ * (`(x: number) ↦ x + 1`).
+ */
+export function isAnnotatedValueParameter(
+  param: Type,
+  op: Expression
+): boolean {
+  return (
+    param !== 'unknown' &&
+    (VALUE_POSITION_TYPES.has(param) || !op.type.matches(param))
+  );
+}
+
+/** The type of the parameter that receives operand `index` of a call with
+ * the signature `sig`, or `undefined` past the last parameter. */
+function parameterTypeAt(
+  sig: FunctionSignature,
+  index: number
+): Type | undefined {
+  const args = sig.args ?? [];
+  if (index < args.length) return args[index].type;
+  const optArgs = sig.optArgs ?? [];
+  if (index < args.length + optArgs.length)
+    return optArgs[index - args.length].type;
+  return sig.variadicArg?.type;
+}
+
+/**
+ * The repair of `devolveUnappliedOperator` applied at each operand whose
+ * parameter takes any value (`any`, `value`, `expression`, `unknown`): a bare
+ * `N` or `D` bound to the library operator becomes a variable there, as it
+ * does at a numeric parameter. `N = 2`, `[N, 1]`, `(N, 1)` and `f(N)` (with
+ * `f` undeclared) did not count `N` as unknown, and `N = 2` evaluated to
+ * `False` by comparing the operator with 2.
+ *
+ * Only a signature with one arm is read: in an overload set the parameter of
+ * a position can differ between arms. A parameter typed as a function (the
+ * reducer of `Reduce`, the function of `Map`) and the head operand of `Apply`
+ * keep the operator binding.
+ *
+ * Returns the new operands, or `undefined` when no operand changed.
+ */
+export function devolveAtValuePositions(
+  ce: ComputeEngine,
+  name: string,
+  signature: Type,
+  ops: ReadonlyArray<Expression>,
+  /** Whether the parameter `param` reads the operand `op` as a value. By
+   * default, a parameter typed `any`, `value`, `expression` or `unknown`. */
+  isValueParameter: (param: Type, op: Expression) => boolean = (param) =>
+    VALUE_POSITION_TYPES.has(param)
+): Expression[] | undefined {
+  if (typeof signature === 'string' || signature.kind !== 'signature')
+    return undefined;
+  if (!ops.some((op) => candidateOperand(op) !== undefined)) return undefined;
+  const skip = FUNCTION_OPERAND_POSITIONS.get(name);
+  if (skip === ALL_OPERANDS) {
+    // `Apply(f, x…)` with a function literal `f`: the literal is not called
+    // again by name, so its forwarded arguments are read against ITS
+    // parameters here. A named `f` is rebuilt as the call `f(x…)` by the
+    // `Apply` handler, which reads them against the parameters of `f`.
+    const callee = ops[0];
+    if (
+      (name === 'Apply' || name === 'ApplyWhole') &&
+      isFunction(callee, 'Function') &&
+      callee.isCanonical
+    ) {
+      const forwarded = devolveAtValuePositions(
+        ce,
+        '',
+        callee.type.type,
+        ops.slice(1),
+        isAnnotatedValueParameter
+      );
+      if (forwarded !== undefined) return [callee, ...forwarded];
+    }
+    return undefined;
+  }
+  let result: Expression[] | undefined;
+  ops.forEach((written, i) => {
+    if (i === skip) return;
+    const op = candidateOperand(written);
+    if (op === undefined) return;
+    const param = parameterTypeAt(signature, i);
+    if (param === undefined || !isValueParameter(param, op)) return;
+    // A RAW operand (a lazy operator's held operand) is canonicalized only
+    // when its name resolves to the library operator: canonicalizing it just
+    // to test it would bind it, or declare it, in the current scope, before
+    // the operator's handler opens its own (a parameter of a function
+    // literal, a local of a block).
+    if (!op.isCanonical && !resolvesToRepairableOperator(ce, op.symbol))
+      return;
+    const devolved = canonicalValueOperand(ce, op);
+    // Only a repaired operand replaces the operand: a raw operand that was
+    // not repaired stays raw, for the operator to canonicalize itself.
+    if (
+      devolved === op ||
+      !isSymbol(devolved) ||
+      devolved.valueDefinition?._isDevolvedShadow !== true
+    )
+      return;
+    result ??= [...ops];
+    result[i] = devolved;
+  });
+  return result;
 }
 
 /**
