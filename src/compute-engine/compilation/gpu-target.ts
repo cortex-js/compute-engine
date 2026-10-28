@@ -2506,7 +2506,8 @@ export const GPU_NAN_SAFE_PREAMBLE_WGSL = `\n${gpuNaNSafeLibrary(true)}\n`;
  * matrix, an array, a vector bound beside a scalar `x`, or vectors of
  * different widths. `main` is the position of `x`, whose shape sets the
  * width. A scalar bound beside a vector `x` is broadcast with the vector
- * constructor.
+ * constructor. A `clamp` whose operands are all finite for certain
+ * (`gpuProvablyFinite`) is `min(max(x, lo), hi)` with the built-ins.
  */
 function gpuNaNSafeTernaryCall(
   name: 'clamp' | 'smoothstep',
@@ -2541,15 +2542,12 @@ function gpuNaNSafeTernaryCall(
   const codes = args.map((a, i) =>
     shapes[i] === 'scalar' ? `${ctor}(${compile(a)})` : compile(a)
   );
-  // Finite `vecN` operands of one width of a `clamp`, as for scalars above:
-  // `min` and `max` are componentwise. A scalar bound beside a vector keeps
-  // the helper, which broadcasts it with the vector constructor: WGSL has no
-  // `max(vecN, f32)`.
-  if (
-    name === 'clamp' &&
-    shapes.every((s) => s === width) &&
-    args.every((a) => gpuProvablyFinite(a, target))
-  )
+  // Finite `vecN` operands of a `clamp`, as for scalars above: `min` and
+  // `max` are componentwise. A scalar bound beside the vector is broadcast
+  // with the vector constructor (WGSL has no `max(vecN, f32)`), and the
+  // proof reads the bound as written: `vecN(s)` is finite exactly when `s`
+  // is. So `Clamp(v, 0, 1)` is `min(max(v, vec3(0.0)), vec3(1.0))`.
+  if (name === 'clamp' && args.every((a) => gpuProvablyFinite(a, target)))
     return `min(max(${codes[0]}, ${codes[1]}), ${codes[2]})`;
   return `_gpu_${name}${width}(${codes.join(', ')})`;
 }
@@ -5850,6 +5848,9 @@ function foldNaryBuiltin(
  * scalar, and `_gpu_maxN(a, b)` when the operands are `vecN` values of one
  * width and scalars, each scalar broadcast with the vector constructor, as
  * the interpreter broadcasts it (`ElementMax(2, [1, 3, 5])` is `[2, 3, 5]`).
+ * When every operand is finite for certain (`gpuProvablyFinite`, asked of
+ * each operand as written, before a scalar is broadcast), the built-in
+ * `max`/`min` takes the same operands: `max(v, vec3(0.0))`.
  * Each operand is compiled once.
  *
  * Other operand shapes (a matrix, an array, a complex operand, vectors of
@@ -5869,15 +5870,16 @@ function compileGPUElementExtremum(
   if (args.length < 2) return builtin();
   if (args.some((a) => BaseCompiler.isComplexValued(a))) return builtin();
   const shapes = args.map(gpuOperandShape);
-  // Finite operands need no guard (`gpuProvablyFinite`) when they have one
-  // shape: all scalars, or `vecN` values of one width, which the built-in
-  // takes as they are. A scalar beside a vector keeps the helper, which
-  // broadcasts it with the vector constructor: WGSL has no `max(vecN, f32)`
-  // and GLSL no `max(float, vecN)`.
+  // Finite operands need no guard (`gpuProvablyFinite`). The proof reads the
+  // operands as written, before a scalar is broadcast: a scalar widened to
+  // `vecN(s)` is finite exactly when `s` is. Operands of one shape (all
+  // scalars, or `vecN` values of one width) go to the built-in fold as they
+  // are.
+  const finite = args.every((a) => gpuProvablyFinite(a, target));
   if (
+    finite &&
     new Set(shapes).size === 1 &&
-    (shapes[0] === 'scalar' || typeof shapes[0] === 'number') &&
-    args.every((a) => gpuProvablyFinite(a, target))
+    (shapes[0] === 'scalar' || typeof shapes[0] === 'number')
   )
     return builtin();
   if (!shapes.every((s) => s === 'scalar' || typeof s === 'number'))
@@ -5892,7 +5894,13 @@ function compileGPUElementExtremum(
       ? `${ctor}(${compile(a)})`
       : compile(a)
   );
-  const helper = `_gpu_${name}${width ?? ''}`;
+  // A scalar beside a vector is broadcast with the vector constructor, for
+  // the helper and for the built-in alike: WGSL has no `max(vecN, f32)` and
+  // GLSL no `max(float, vecN)`. When every operand is finite for certain,
+  // the built-in `max`/`min` takes the broadcast operands
+  // (`max(v, vec3(0.0))`); otherwise the helper keeps the NaN of the
+  // interpreter.
+  const helper = finite ? name : `_gpu_${name}${width ?? ''}`;
   let acc = codes[0];
   for (let i = 1; i < codes.length; i++) acc = `${helper}(${acc}, ${codes[i]})`;
   return acc;
@@ -9678,8 +9686,10 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
   // A scalar or `vecN` operand calls a `_gpu_clamp` helper, which gives NaN
   // for a NaN operand and computes CE's `min(max(x, lo), hi)` (see
-  // `gpuNaNSafeLibrary`). Other shapes keep the built-in `clamp`, so
-  // that the shape gate gives its reason for a decline.
+  // `gpuNaNSafeLibrary`), or the built-ins `min(max(x, lo), hi)` when every
+  // operand is finite for certain (`gpuNaNSafeTernaryCall`). Other shapes
+  // keep the built-in `clamp`, so that the shape gate gives its reason for a
+  // decline.
   Clamp: (args, compile, target) =>
     gpuNaNSafeTernaryCall('clamp', 0, args, compile, target) ??
     `clamp(${args.map((a) => compile(a)).join(', ')})`,
@@ -11916,6 +11926,54 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
 // `Power(2, y)` emits `exp2(y)` and leaves the base out of the emitted call;
 // the operand-shape check reads that declaration (`GPU_OPERAND_CONSUMING`).
 markOperandConsuming(GPU_FUNCTIONS.Power, gpuAbsorbedConstant('exp2', 0, 2));
+
+// `Clamp`, `ElementMax` and `ElementMin` of finite operands emit the built-in
+// `min`/`max` with each scalar operand broadcast to the vector width
+// (`Clamp(v, 0, 1)` → `min(max(v, vec3(0.0)), vec3(1.0))`). The scalar
+// operands do not reach the emitted calls, so the operand-shape check judges
+// the vector operands only (`GPU_OPERAND_CONSUMING`, `gpuBroadcastScalars`).
+markOperandConsuming(GPU_FUNCTIONS.Clamp, gpuBroadcastScalars('min', 0));
+markOperandConsuming(GPU_FUNCTIONS.ElementMax, gpuBroadcastScalars('max'));
+markOperandConsuming(GPU_FUNCTIONS.ElementMin, gpuBroadcastScalars('min'));
+
+/**
+ * The `consumed` predicate (`GPU_OPERAND_CONSUMING`) of a lowering that
+ * broadcasts its scalar operands itself, with the vector constructor, before
+ * it calls the built-in `callee`: the 0-based positions of the scalar
+ * operands, or `undefined` for every other form. That form is a call of
+ * `callee` (not of a `_gpu_` helper) on non-complex operands that are scalars
+ * and `vecN` values of ONE width, with at least one of each, and a vector at
+ * position `main` when it is given (`Clamp` broadcasts only its bounds).
+ *
+ * Without it the check reads the nested call `max(v, vec3(0.0))` of a
+ * three-operand `Clamp` as a scalar `v` (a bare identifier has no shape in the
+ * source, `gpuSourceIsVector`) beside a vector, and declines valid source.
+ */
+function gpuBroadcastScalars(
+  callee: 'min' | 'max',
+  main?: number
+): (
+  args: ReadonlyArray<Expression>,
+  code: string
+) => ReadonlySet<number> | undefined {
+  return (args, code) => {
+    if (gpuTopLevelCall(code)?.callee !== callee) return undefined;
+    if (args.some((a) => a === null || a === undefined)) return undefined;
+    if (args.some((a) => BaseCompiler.isComplexValued(a))) return undefined;
+    const shapes = args.map(gpuOperandShape);
+    if (main !== undefined && typeof shapes[main] !== 'number')
+      return undefined;
+    const widths = new Set(shapes.filter((s) => typeof s === 'number'));
+    if (widths.size !== 1) return undefined;
+    if (!shapes.every((s) => s === 'scalar' || typeof s === 'number'))
+      return undefined;
+    const scalars = new Set<number>();
+    shapes.forEach((s, i) => {
+      if (s === 'scalar') scalars.add(i);
+    });
+    return scalars.size > 0 ? scalars : undefined;
+  };
+}
 
 /**
  * The body of the callee of `Apply(callee, args…)` with the arguments
