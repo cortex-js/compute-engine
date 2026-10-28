@@ -229,6 +229,38 @@ describe('CE-597: evaluate(), N() and subs() agree with unknowns', () => {
     expect(expr.evaluate().toString()).toBe('6');
   });
 
+  test('initial value of `Fold`, rewritten to `Reduce`', () => {
+    // `Fold(f, x, L)` canonicalizes to `Reduce(L, f, x)`; its seed is a
+    // value too (Tycho ledger row 473, which reads Desmos `Fold`).
+    const ce = new ComputeEngine();
+    const expr = ce.parse(
+      'y=x+\\operatorname{Fold}((a,b)\\mapsto a+b,N,[1,2])'
+    );
+    expect(expr.unknowns).toEqual(['N', 'x', 'y']);
+    const fold = ce.box([
+      'Fold',
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+      'N',
+      ['List', 1, 2],
+    ]);
+    ce.assign('N', 10);
+    expect(fold.evaluate().toString()).toBe('13');
+    expect(ce.box(['N', 2.3]).evaluate().toString()).toBe('2.3');
+  });
+
+  test('initial value of `Scan`', () => {
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Scan',
+      ['List', 1, 2],
+      ['Function', ['Add', 'a', 'b'], 'a', 'b'],
+      'N',
+    ]);
+    expect(expr.unknowns).toEqual(['N']);
+    ce.assign('N', 10);
+    expect(expr.evaluate().toString()).toBe('[11,13]');
+  });
+
   test('a letter devolved in the body of a binder is not local to it', () => {
     // The shadow is declared outside the scope of `Sum`, so a later
     // assignment reaches it.

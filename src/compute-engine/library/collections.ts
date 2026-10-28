@@ -14578,7 +14578,10 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // canonicalize each inner level three times, which is exponential in
         // the depth (CE-347).
         if (isInvalidNonCollection(collection)) return null;
-        const initial = ops[1]?.canonical;
+        // The seed is a value: a bare `N` there is a variable, not the
+        // library operator, as in the seed of `Reduce`
+        // (`canonicalValueOperand`).
+        const initial = canonicalValueOperand(engine, ops[1]);
         if (!initial?.isValid) return null;
         const fn = canonicalFoldCombiner(
           engine,
@@ -14668,8 +14671,9 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         // would fold unseeded and diverge. Keep the (canonicalized) operand so
         // the standard error machinery surfaces the error. It is canonicalized
         // before the reducer, whose bare accumulator is typed from the seed's
-        // type (as `Reduce`).
-        const initial = ops[2]?.canonical;
+        // type (as `Reduce`). As in `Reduce`, a bare `N` there is a variable,
+        // not the library operator (`canonicalValueOperand`).
+        const initial = canonicalValueOperand(engine, ops[2]);
         // As `Reduce`: an error collection gives `null` whatever the reducer.
         const fn = isInvalidNonCollection(collection)
           ? canonicalCallbackOperand(ops[1], arity)

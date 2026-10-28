@@ -6,7 +6,8 @@
   places.** `N` and `D` are library operators. When one of them appears
   unapplied where a value is expected, it already became a variable in a sum
   (`x + N`). Now this also happens in an integrand (`\int_0^1 N\,dt`), the
-  initial value of `Reduce`, a comparison or a chain of comparisons
+  initial value of `Reduce`, `Fold` and `Scan`, a comparison or a chain of
+  comparisons
   (`N = 2`, `2 = 2 = N`, `N \equiv x`), a list, a tuple, a set, the branches of
   `If`/`Which`/`When`, the body of a sum or a product, a limit, a statement of
   a `Block`, and an argument of an undeclared function or of a parameter typed
