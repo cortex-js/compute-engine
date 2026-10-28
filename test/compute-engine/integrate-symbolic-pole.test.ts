@@ -311,10 +311,18 @@ describe('AN ISOLATED SINGULAR POINT IN A DOUBLE INTEGRAL', () => {
       ],
       ['Rational', -1, 2],
     ];
-    const value = integral(ce, body, [
-      ['x', 0, 1],
-      ['y', 0, 1],
-    ]).N();
+    // The grid scan finds the pole at the center of the cell, so the result
+    // is `NaN` as soon as one level of the nested quadrature fails. The
+    // quadrature then stops: it took about 0.1 s here. Before, it ran to the
+    // end (1.7·10⁸ evaluations of the integrand, about 60 s, and up to 300 s
+    // on a loaded machine) and returned the same `NaN`. The time limit is far
+    // above the time it takes now and far below the time it took before.
+    const value = ce.withTimeLimit(10_000, () =>
+      integral(ce, body, [
+        ['x', 0, 1],
+        ['y', 0, 1],
+      ]).N()
+    );
     expect(value.isInfinity).not.toBe(true);
     expect(
       value.isNaN === true || Math.abs(value.re - 1.9451316) < 1e-2

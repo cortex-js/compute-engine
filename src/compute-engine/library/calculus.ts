@@ -3032,6 +3032,25 @@ function nIntegrateMultiple(
   // Whether a level did not converge and kept its quadrature result or fell
   // back to Monte Carlo (see `integrateDim`).
   let unconverged = false;
+  // When the grid scan found a pole (`dependentPoles`), the first pass ends
+  // in `NaN` as soon as a level diverges or does not converge, unless the
+  // check for a pole at a bound gives a value (see the end of this
+  // function). That check reads only the integrand and the limits, so it is
+  // made when the first level fails, and if it gives no value the
+  // quadrature stops there: the rest of the work cannot change the result.
+  // For `((x − 1/64)² + (y − 1/64)²)^(−1/2)` on the unit square, the first
+  // inner level diverged after about 2·10⁴ evaluations of the integrand, and
+  // the nested quadrature then ran to 1.7·10⁸ evaluations (about 60 s)
+  // before it returned `NaN`. The second pass (the imaginary part) is never
+  // stopped: a failure there does not give `NaN` (see the end).
+  let stopOnFailure = dependentPoles !== undefined;
+  const firstPassStopped = Symbol('first pass stopped');
+  let endpointValue: Expression | undefined | null = null;
+  const levelFailed = () => {
+    if (!stopOnFailure) return;
+    endpointValue ??= poleValue(endpointPoleVerdict);
+    if (endpointValue === undefined) throw firstPassStopped;
+  };
   const integrateDim = (dim: number): { estimate: number; error: number } => {
     // Inner-level error accumulated over this level-invocation's quadrature
     // nodes (the recursion is strictly sequential, so plain locals suffice).
@@ -3124,7 +3143,10 @@ function nIntegrateMultiple(
     // `integrateRealPart`): it is not marked `divergent`, so no pole sign is
     // looked for.
     if (gk.divergent) {
-      if (gk.oscillates !== true) divergent = true;
+      if (gk.oscillates !== true) {
+        divergent = true;
+        levelFailed();
+      }
       return { estimate: NaN, error: NaN };
     }
     // The integrand of this level is `NaN` on a set that is not some isolated
@@ -3135,6 +3157,7 @@ function nIntegrateMultiple(
     // quadrature result: sampling it would be both less accurate and, since
     // every inner level re-runs per outer node, far more expensive.
     unconverged = true;
+    levelFailed();
     // Its error estimate can be far too small (see `integrateRealPart`), so
     // the error is at least the standard error of the Monte-Carlo estimate it
     // replaces, `|estimate|/√1e4`.
@@ -3160,11 +3183,20 @@ function nIntegrateMultiple(
 
   // The reported uncertainty is the outermost level's error estimate, inflated
   // by the propagated inner-level error (see `inflate` above).
-  const r = integrateDim(0);
+  let r: { estimate: number; error: number };
+  try {
+    r = integrateDim(0);
+  } catch (err) {
+    if (err === firstPassStopped) return ce.NaN;
+    throw err;
+  } finally {
+    stopOnFailure = false;
+  }
   // A level found a divergence: a pole AT a bound of a dimension gives its
   // sign (`∫₀² ∫₀¹ t⁻² dt dx` is `+∞`).
   if (divergent && Number.isNaN(r.estimate)) {
-    const endpoint = poleValue(endpointPoleVerdict);
+    // Made already when a level failed with a pole found by the scan.
+    const endpoint = endpointValue ?? poleValue(endpointPoleVerdict);
     if (endpoint !== undefined) return endpoint;
   }
   // A level did not converge or diverged, and one point of the grid of

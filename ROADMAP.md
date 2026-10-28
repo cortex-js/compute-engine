@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-596.
+Next free reference: CE-601.
 
 **Entry format.**
 
@@ -737,6 +737,49 @@ and `Chunk` have it (pins in
   correct broadcast type lift. Both are tracked in CE-103.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-596. `Together(g(t) + g(t))` with `g` undeclared gives `0/Error("missing")`; `Factor` and `Cancel` do not collect the terms
+
+**Status:** open; defect. Tycho ledger row 472, 2026-10-28; instrument
+`~/dev/tycho/scripts/repros/2026-10-28-ce472-together-undeclared-call-sum-repro.mts`.
+
+`ce.box(['Together', ['Add', ['g', 't'], ['g', 't']]]).evaluate()` gives
+`0 / Error("missing")`, an invalid expression. `Factor` and `Cancel` of the same
+sum return `g(t) + g(t)`, where the evaluated sum is `2g(t)`. Measured on main
+after 0.172.0. The like-term collection added by CE-577 (`collectLikeTerms()`,
+`factorExpression()`) does not merge the two calls of an undeclared function:
+it does not merge impure terms, and a call of an undeclared function may be
+read as impure. The `Together` result is a defect independently of that.
+
+### CE-598. `simplify()` and the `Add` evaluation merge two random draws into one
+
+**Status:** open; defect. Found 2026-10-28 while fixing CE-596.
+
+Two draws are two independent values; merging them into `2·draw` changes the
+distribution of the result. Measured on main:
+`ce.box(['Add', ['Random'], ['Random']]).simplify()` gives `2Random()`, and
+`RandomInteger(1,6) + RandomInteger(1,6)` simplifies to `2RandomInteger(1, 6)`.
+With `r` declared `(number) random -> number` and no `evaluate` handler,
+`ce.box(['Add', ['r','t'], ['r','t']]).evaluate()` gives `2r(t)`. The like-term
+collection of `Add` (evaluate and simplify) must not merge a term with a stated
+or computed random effect, as `Factor`, `Together` and `Cancel` do not since
+CE-596 (`isMergeable()`, `boxed-expression/factor.ts`).
+
+### CE-597. `unknowns` leaves out a library letter used as a value in an integrand or in the initial value of `Reduce`
+
+**Status:** open; defect. Tycho ledger row 473, 2026-10-28; instrument
+`~/dev/tycho/scripts/repros/2026-10-28-ce473-unknowns-library-letter-operand-repro.mts`.
+
+`ce.parse('y=\\int_0^1 N\\,dt').unknowns` is `["y"]`, and
+`ce.parse('y=x+\\operatorname{Reduce}([1,2],N,N)').unknowns` is `["x","y"]`;
+with `M` in place of `N`, `M` is listed. In `x + N`, canonicalization binds `N`
+to a value definition, so `unknowns` lists it
+(`test/compute-engine/unknowns-scoped-library-letter.test.ts`). In the
+integrand of `Integrate` and in the initial-value operand of `Reduce`, `N` stays
+bound to the library operator `N`, and the walk (`collectReferences`,
+`abstract-boxed-expression.ts`) skips a symbol bound to an operator definition.
+The second operand of `Reduce` is a function position: the operator binding is
+right there.
 
 ### CE-590. After a checkpoint restore, a symbol declared in a scope pushed and popped during the window reads a later value with its old type
 
@@ -2125,6 +2168,39 @@ enumerate it, the multi-set walk must resolve dependent bounds again at each
 iteration. This may be the same problem as CE-115.
 
 ## Numeric evaluation and special functions
+
+### CE-600. An engine computes at the precision of the engine built last, not its own
+
+**Status:** open; defect (needs a design). Found 2026-10-28 while measuring
+why `test/compute-engine/item-395-log-gamma-barnes-g.test.ts` took 38 s.
+
+`BigDecimal.precision` is global to the module, and constructing an engine (or
+setting its precision) writes it. An engine whose `precision` is 21 then
+computes at the precision of the engine built after it: with a 3000-digit
+engine built first, `LogBarnesG(0.7).N()` on a 21-digit engine takes 33 s
+instead of 4 ms (measured in a probe on HEAD `0904d0592`). The test file now
+restores the global precision after each test, which hides the defect there
+only. Expected: each engine evaluates at its own precision, whatever other
+engines exist. Options to decide: each engine sets the global precision on
+entry to a numeric evaluation (cheap, but a nested call of another engine and
+an asynchronous evaluation can still interleave), or the precision is passed
+to the big-decimal operations instead of read from a global (correct, a large
+change). `CLAUDE.md` records the current behavior as an API trap.
+
+### CE-599. A double integral with an integrable isolated singular point gives `NaN`
+
+**Status:** open; defect. Found 2026-10-28 (the test "AN ISOLATED SINGULAR
+POINT IN A DOUBLE INTEGRAL", `test/compute-engine/integrate-symbolic-pole.test.ts`,
+accepts `NaN` or the value).
+
+`∫₀¹∫₀¹ ((x − 1/64)² + (y − 1/64)²)^(−1/2) dy dx` is finite, about 1.9451
+(around the point the integrand is `1/r` and the area element `r dr dθ`). The
+numeric evaluation returns `NaN`: the scan for moving poles finds the point,
+the inner integral diverges on the two lines through it (a set of zero
+measure), and `nIntegrateMultiple` (`library/calculus.ts`) then gives `NaN`.
+Expected: about 1.9451, for example by splitting the domain at the point, or a
+change of variables around it, when the singular set is a point where the
+integrand grows like `1/r^p` with `p` less than the dimension.
 
 ### CE-561. An interval one double wide reports `0 ± 0`
 
@@ -3564,6 +3640,18 @@ call 1,223 → 980). What remains:
   argument such as `exp(x)` can overflow to `+∞` in f32 before the call.
   Making these routes run the call-site proof needs that session, which
   changes how they emit code.
+- **CE-565.6** (Tycho ledger row 470, 2026-10-28) A `min`/`max` whose
+  arguments read a common-subexpression temporary keeps the `_gpu_min` helper:
+  in Tycho's `showcase/voronoi-diagram` on GLSL (0.172.0), `_gpu_sin` and
+  `_gpu_cos` went from 4 to 0 but `_gpu_min` stays at 15, and its arguments read
+  temporaries such as `_cse2 = cos(T + 1.9)`. The finiteness proof does not
+  treat a name the compiled code assigns as finite (`GPU_WRITTEN_NAMES`,
+  `gpu-target.ts`). A temporary that is assigned once, from an expression the
+  proof shows finite (a `sin`/`cos` of finite reals), could be treated as
+  finite. Record: Tycho
+  `_TASK/desmos/desmos-corpus/codegen-audit/ce-0.172.0.json`, doc
+  `voronoi-diagram`, target `glsl`. To confirm against the generated code
+  first.
 - **CE-565.3** Tycho side, not CE: the document-level `x`/`y` are still typed
   `real | signed_infinity | nan`; a slider range (`k: real<0..10>`) would prove
   `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions

@@ -38,6 +38,17 @@ const withPrecision = <T>(digits: number, f: () => T): T => {
   }
 };
 
+// Constructing an engine, or setting its precision, writes the precision of
+// the big decimals, which is global to the module. Several tests below make
+// their own engine at another precision (3000 digits for the time-limit test
+// of Γ, 54, 30, machine), and the shared engine `ce` then computed at that
+// precision in every later test: after the 3000-digit engine,
+// `LogBarnesG(0.7).N()` took 33 s instead of 4 ms. Each test starts again
+// from the precision of `ce`.
+afterEach(() => {
+  BigDecimal.precision = ce.precision;
+});
+
 const cx = (re: number, im: number) => ['Complex', re, im];
 
 describe('LogGamma(z), the continuation of ln Γ', () => {
