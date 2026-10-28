@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-587.
+Next free reference: CE-591.
 
 **Entry format.**
 
@@ -738,23 +738,47 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
-### CE-586. After a checkpoint restore, a symbol bound to a disposed definition reads a later value with the old type
+### CE-590. After a checkpoint restore, a symbol declared in a scope pushed and popped during the window reads a later value with its old type
 
-**Status:** open; defect. Found 2026-10-27 by the review of the `restore()` doc
-comment (`IComputeEngine.restore`, `types-engine.ts`).
+**Status:** open; defect. Found 2026-10-28 by the review of the CE-586 fix.
 
-`restore()` disposes each definition created during the rewound window
-(`checkpoint.ts`, step 5), but an expression built during the window keeps a
-pointer to the disposed definition. After the restore it reads the symbol as
-having no value, as intended. But after a later `assign` or `declare` of the
-same name, the value lookup finds the NEW value while the type and flags stay
-those of the disposed definition. Measured: in the window, `ce.parse('w + 1')`
-(first use of `w`); restore; `ce.declare('w', {type: 'integer', value: 9})`;
-the window's `ce.symbol('w')` gives `.value` 9 and `.evaluate()` 9, but `.type`
-`unknown`. Decide one reading: the disposed symbol stays inert (no value, never
-rebinds), or it rebinds fully (value, type and flags of the new definition).
-The `restore()` doc comment describes the current mixed behavior and tells
-hosts not to keep such an expression.
+A checkpoint restore makes a symbol inert (no value, counted as unknown) when
+the definition it is bound to was created during the rewound window in a scope
+that is on the engine's scope chain when the restore runs (`checkpoint.ts`,
+step 5, `_rewound`; read by `bindingInContext`, `boxed-expression/binders.ts`).
+A scope that existed before the window, pushed and popped during it, is not on
+that chain, so its definitions are not marked. A host that keeps one scope per
+cell does this. Measured: create a scope with `pushScope()`/`popScope()`, take
+a checkpoint, push the scope again, `declare('q', {type: 'integer', value:
+3})`, build `q + 1`, pop, restore; push the scope, declare `q` as a string
+`'hello'`: the old `q + 1` evaluates to an `incompatible-type` error, its type
+is `integer`, and `unknowns` is `[]`. The fix: mark a definition whose home
+scope was not CREATED in the window (rather than one on the chain). That needs
+a creation mark on each scope, and scopes are built in about 24 places
+(`bindings: new Map()`). Binder and `Block` scopes are created in the window,
+so they would stay unmarked. The `restore()` doc comment states the current
+limit.
+
+### CE-587. Hiding a stored value equal to an assumed value, during an evaluation, loses the stored value (known limit)
+
+**Status:** known limit; user decision 2026-10-28: no change. Reported by
+Tycho (`withValuesHidden()`, `src/plot-core/ce-module-registry.ts`).
+
+A host that evaluates an expression with some symbol values hidden removes each
+value, evaluates, and puts the values back. With `ce.checkpoint()`/`restore()`
+this is exact. But a checkpoint is refused while an evaluation is in progress
+(`assertQuiescent`, `checkpoint.ts`), so a host called from inside an
+evaluation falls back to the public `value` setter. With the public API, a name
+can hold a stored value and an assumed value only when the two are equal
+(`ce.assume(a = 3)` when `a` stores 2 returns `'contradiction'`, and
+`ce.assign` under an assumption that it contradicts throws). In that case
+(`a := 3`, then `Assume(a = 3)` typed by a user), clearing `a` with the setter
+leaves `a` reading 3 from the assumption, no public read tells the host that a
+stored 3 was also there, and when the assumption's scope pops, `a` has no
+value. Options considered: a public read of whether a stored value exists, or a
+checkpoint allowed during an evaluation. The user chose no change because the
+case needs a user assumption equal to the stored value and a call during an
+evaluation.
 
 ### CE-537. The free-variable walk misreads two binders
 
@@ -2850,7 +2874,12 @@ Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
 
 ### CE-580. `compileShader()`: the assignment targets of the body are not checked
 
-**Status:** open; defect. Found 2026-10-27 while fixing CE-575.
+**Status:** open; defect, being fixed (session compute-engine-0c). Found
+2026-10-27 while fixing CE-575. User decision 2026-10-28, option (a): check
+vertex and fragment targets (a declared output, a value type that fits) and
+refuse every compute-stage assignment. Option (b), a writable
+`'storage-buffer'` in `compileShader()` so a compute body can write
+`S.data[i]`, is asked of Tycho (session tycho-3b) before it is designed.
 
 `compileShader()` (GLSL and WGSL) writes each body statement as
 `<variable> = <code>;`, with `variable` copied as text. Nothing checks that
@@ -2881,7 +2910,19 @@ its reads index it directly. A written input already does this (CE-574).
 
 ### CE-584. Shader targets: compiling an expression with shared subexpressions is exponential
 
-**Status:** open; defect (performance). Found 2026-10-27 while reviewing
+**Status:** open; defect (performance). Measured 2026-10-28 (raw data:
+session compute-engine-0c scratchpad `ce584/`): the exponential case comes
+from `compileFieldFunction()`. It passes each parameter as
+`vars: { c: 'ce_params.c' }`, and `isOpaqueVarsSource()` (`compilation/cse.ts`)
+makes the common-subexpression pass bind no node that reads a source that is
+not a bare name. The same 20-level expression through `compile()` gives 2,324
+characters in 335 ms; through `compileFieldFunction()`, 24 MB in 25 s. A limit
+on the raw path count would refuse working shaders: 4 Tycho compilations
+(the voronoi row, 498,274 paths) and 10 CE test compilations are above 10,000
+paths, and all of them succeed with small code. A limit of 50,000 on the
+written size (each node that the common-subexpression pass binds counted
+once) refuses no compilation in either corpus (largest success 3,385).
+Found 2026-10-27 while reviewing
 CE-571; probe
 `/private/tmp/claude-501/-Users-arno-dev-compute-engine/812bf472-9d45-4cf3-a48a-3e8e8941a94a/scratchpad/int/dag.mts`.
 
@@ -3409,23 +3450,30 @@ deliberate factor of three. The composed hyperbolic and reciprocal routines are
 built from unrounded kernels and take one rounding step at their own export,
 except `remainder`, whose three-operation composition takes three.
 
-### CE-569. Compile `When(e, c)` as `If(c, e, m)` when `c` is a boolean
+### CE-589. The type of a compiled `run()` refuses a boolean input that the `javascript` target accepts
 
-**Status:** open; capability (simplification).
+**Status:** open; defect (public type). Found 2026-10-28.
 
-For a condition whose type is provably `boolean` (not a list of booleans),
-`When(e, c)` means `If(c, e, m)`, with `m` the absence marker of the type of
-`e` (`NaN` for a number, `Missing` otherwise; definition in
-`library/control-structures.ts`). Lower it so in the compiler, before the
-targets see it, and keep `When` in the expression tree (it carries the LaTeX
-round trip of `x\{y\}`, the stacking rule into `And`, the derivative rule and
-Tycho's masked points). The emitted code stays the same ternary. Gain: one
-code route instead of a `When` handler in the javascript, GPU, Python and
-interval-js targets and the fixed-width unroll, and every pass sees the
-condition first as for `If` (the operand order of `When` caused CE-562). Keep
-each target's checks: the GPU refusal of a random draw in the masked value
-(`gpuAssertNoEagerDraw`), and the interval-js `_IA.restrict` enclosure (lower
-there only if the `If` route gives the same enclosure).
+With `c` declared `boolean`, `ce.box(['When', 'x', 'c']).compile().run({ x: 2,
+c: true })` returns `2` at run time, but TypeScript refuses the call: the
+variable type of a runner is `number | ComplexResult | RunnerListInput`
+(`DefaultRunnerVars` and `JavaScriptCompilationTarget` in
+`compilation/types.ts`), with no `boolean`. A caller must cast. The list case
+of the same type was fixed as CE-581. Check what the entry guards of the
+`javascript` target do with a boolean for a `real` variable before widening
+the type, and whether a list of booleans should be admitted too.
+
+### CE-588. An `If` whose written else branch is `Missing` beside a point value compiles wrongly on GLSL and Python
+
+**Status:** open; defect. Found 2026-10-28.
+
+`If(c, (x, y), Missing)` compiles on GLSL to a ternary whose else branch is a
+scalar NaN beside a `vec2` branch, which is not a valid shader, and on Python
+to `math.nan`, where the interpreter gives `Missing` (`None` in Python). The
+else-less `If(c, (x, y))` and `When((x, y), c)` give the right absence marker
+on each target (`vec2` NaN on GLSL, `None` on Python), so the written
+`Missing` branch must be compiled with the marker of the other branch's
+shape.
 
 ### CE-568. CSE: share a pure call across the statements of a `Block`
 

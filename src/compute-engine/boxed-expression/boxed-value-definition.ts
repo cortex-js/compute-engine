@@ -1804,6 +1804,15 @@ export class _BoxedValueDefinition
    * when it re-reads what the applied facts prove (`assume.ts`). */
   disposed = false;
 
+  /** See `BoxedValueDefinition._rewound`. Declared here, not added by the
+   * restore, so that every definition object has the same shape. */
+  _rewound: true | undefined = undefined;
+
+  /** The scope this definition was installed in, when it was constructed in
+   * an open checkpoint window by a site that knows it (`noteCreated`,
+   * `checkpoint-journal.ts`). Read only by a restore. */
+  _checkpointHome: object | undefined = undefined;
+
   dispose(): void {
     this.disposed = true;
     this._writeVersion += 1;

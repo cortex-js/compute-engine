@@ -12065,8 +12065,12 @@ export class BaseCompiler {
     // It reaches this point only on a direct custom target, whose own `var`
     // hook knows nothing of `vars`: it is emitted by name below, like a free
     // symbol.
+    // A symbol bound to a definition that a checkpoint restore marked
+    // `_rewound` is inert: it has no value, also when a later definition of
+    // the same name has one, so it is not folded either (ROADMAP CE-586).
     const folded =
-      target.varsKeys?.has(s) === true
+      target.varsKeys?.has(s) === true ||
+      (expr.valueDefinition as { _rewound?: true } | undefined)?._rewound
         ? undefined
         : BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
     if (folded !== undefined) {

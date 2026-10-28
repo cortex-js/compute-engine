@@ -875,13 +875,21 @@ export interface IComputeEngine {
    * and disposed. This includes a symbol that was declared or assigned for
    * the first time there, and a free symbol that was boxed for the first
    * time there (boxing declares it). An expression built during the window
-   * that names such a symbol keeps the disposed definition. After the
-   * restore, it reads the symbol as having no value. After a later
-   * declaration or assignment of the same name, it reads the new value but
-   * keeps the type and flags of the disposed definition. `isSame` with the
-   * same expression built after the restore is false. Do not keep such an
-   * expression; cache a cell output as a serialized artifact rather than as
-   * a live boxed node.
+   * that names such a symbol keeps the disposed definition, and the symbol
+   * is inert: it reads no value and counts as unknown (`unknowns`, a
+   * compile reads it as an input), also after a later declaration or
+   * assignment of the same name, and its type is the one its record had
+   * before the declaration (usually `unknown`). The index of a `Sum` and the
+   * locals of a `Block` built during the window are not affected: they
+   * still take their values when the expression runs. Nor is a symbol
+   * declared in a scope that is not on the scope chain when `restore()`
+   * runs (a scope pushed and popped during the window): it still resolves
+   * by name, so it reads a later declaration of the same name in that scope
+   * with its old type (ROADMAP CE-590). `isSame` with the
+   * same expression built after the
+   * restore is false. Do not keep such an expression: build it again to
+   * read the new definition, and cache a cell output as a serialized
+   * artifact rather than as a live boxed node.
    */
   restore(cp: EngineCheckpoint): void;
 

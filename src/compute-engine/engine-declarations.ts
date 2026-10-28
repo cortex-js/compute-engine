@@ -613,7 +613,8 @@ export function declareSymbolValue(
     );
   // The placeholder half is constructed here, so a restore through the
   // current window orphans it and must dispose it (§6 step 5).
-  if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
+  if (isValueDef(boxedDef))
+    ce._checkpointWindow?.noteCreated(boxedDef.value, scope);
   noteScratchDeclaration(ce, scope, boxedDef);
   // When the value or its type is refused (the value throws, or does not
   // match the declared type), put back the binding that the placeholder
@@ -763,7 +764,8 @@ export function declareSymbolOperator(
       boxedDef
     );
   // The placeholder half is constructed here — see `declareSymbolValue`.
-  if (isValueDef(boxedDef)) ce._checkpointWindow?.noteCreated(boxedDef.value);
+  if (isValueDef(boxedDef))
+    ce._checkpointWindow?.noteCreated(boxedDef.value, scope);
   noteScratchDeclaration(ce, scope, boxedDef);
   // When the operator definition constructor refuses the definition (for
   // example a `canonical` handler with the `commutative` flag), put back the

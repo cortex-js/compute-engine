@@ -2434,6 +2434,21 @@ export interface BoxedValueDefinition extends BoxedBaseDefinition {
    * @internal */
   disposed: boolean;
 
+  /** True when a checkpoint restore disposed this definition because it was
+   * created in a rewound window, in a scope that is still on the engine's
+   * scope chain after the restore (a name the host declared, or a free
+   * symbol boxed for the first time). A symbol bound to such a definition
+   * resolves to no binding (`bindingInContext`), so it reads no value and
+   * counts as unknown: a later definition of the same name has another type
+   * and flags. A definition installed in a scope created in the window (a
+   * `Sum` index, a `Block` local) is not marked, because the expression that
+   * holds that scope reads it by name when it runs; nor is one that
+   * `popScope()` disposed. Never cleared: a definition created in a rewound
+   * window cannot be restored again, since the checkpoints taken in that
+   * window are invalidated.
+   * @internal */
+  _rewound?: true;
+
   /** Bumped on every semantic change to this definition (value write, type
    * change, disposal). Used to validate per-dependency caches.
    * @internal */

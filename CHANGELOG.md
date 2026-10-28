@@ -213,6 +213,14 @@
 
 ### Resolved Issues
 
+- **After `ce.restore(cp)`, a symbol first declared after `cp` no longer reads
+  a later value with its old type.** An expression built before the restore
+  that names such a symbol (for example `w + 1` with `w` first used after the
+  checkpoint) now stays inert: it reads no value, also after a later
+  declaration or assignment of the same name. Before, it read the new value
+  while keeping the type and flags of the removed definition. Build the
+  expression again to read the new definition.
+
 - **Assigning a call of a recursive function while an assumption is in force
   no longer overflows the stack.** With `F` declared `function`,
   `F := n ↦ \{n = 0: x > 0, F(n - 1)\}` and any assumption (`x > 0`),
