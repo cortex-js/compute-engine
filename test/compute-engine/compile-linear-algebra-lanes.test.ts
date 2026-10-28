@@ -485,11 +485,11 @@ describe('THE GPU COMPLEX POWER AT ZERO', () => {
 // present (`test-python.ts`). The value checks are skipped without it.
 const PYTHON = TEST_PYTHON;
 
-/** Run the Python compilation `r` with the variable bindings `setup`, and
- * return its value as `[re, im]`. */
-function runPython(r: any, setup: string): [number, number] {
+/** The Python program that binds the variables of `setup`, runs the
+ * compilation `r`, and prints its value as two floats on one line. */
+function pythonProgram(r: any, setup: string): string {
   const lines = (r.code as string).split('\n');
-  const program = [
+  return [
     'import numpy as np',
     'import scipy.special',
     'import cmath',
@@ -502,14 +502,45 @@ function runPython(r: any, setup: string): [number, number] {
     `v = complex(${lines[lines.length - 1]})`,
     'print(repr(float(v.real)), repr(float(v.imag)))',
   ].join('\n');
-  const out = execFileSync(PYTHON!, ['-c', program], {
+}
+
+/** Run each program of `programs` (see `pythonProgram()`) and return the
+ * value of each as `[re, im]`, in the same order.
+ *
+ * One Python process runs all the programs: starting Python and importing
+ * NumPy and SciPy takes about 0.14 s, and a test that started one process
+ * per sample point took about 8 s. Each program runs with `exec` in a new,
+ * empty global namespace, so no variable or helper of one program is visible
+ * to the next one. An exception in a program stops the process with a
+ * non-zero exit code, and `execFileSync` then throws, as it did when each
+ * program had its own process. */
+function runPythonPrograms(programs: string[]): Array<[number, number]> {
+  const driver = [
+    'import json, sys',
+    'for p in json.load(sys.stdin):',
+    '    exec(p, {})',
+  ].join('\n');
+  const out = execFileSync(PYTHON!, ['-c', driver], {
     encoding: 'utf8',
+    input: JSON.stringify(programs),
   }).trim();
-  return out
-    .split(/\s+/)
-    .map((t) =>
-      t === 'inf' ? Infinity : t === '-inf' ? -Infinity : Number(t)
-    ) as [number, number];
+  const results = out.split('\n').map(
+    (line) =>
+      line
+        .trim()
+        .split(/\s+/)
+        .map((t) =>
+          t === 'inf' ? Infinity : t === '-inf' ? -Infinity : Number(t)
+        ) as [number, number]
+  );
+  expect(results.length).toBe(programs.length);
+  return results;
+}
+
+/** Run the Python compilation `r` with the variable bindings `setup`, and
+ * return its value as `[re, im]`. */
+function runPython(r: any, setup: string): [number, number] {
+  return runPythonPrograms([pythonProgram(r, setup)])[0];
 }
 
 describe('PYTHON: THE OPERANDS OF A COMPLEX PRODUCT AND POWER', () => {
@@ -545,10 +576,18 @@ describe('PYTHON: THE OPERANDS OF A COMPLEX PRODUCT AND POWER', () => {
     'the values agree with the interpreter',
     () => {
       const ce = engine();
-      for (const [json] of CASES) {
-        const expr = ce.box(json);
-        const r = compile(expr, { to: 'python', fallback: false } as any);
-        const actual = runPython(r, 'x = 0.5\ny = -1.5\nz = complex(0.25, 2)');
+      const exprs = CASES.map(([json]) => ce.box(json));
+      const values = runPythonPrograms(
+        exprs.map((expr) =>
+          pythonProgram(
+            compile(expr, { to: 'python', fallback: false } as any),
+            'x = 0.5\ny = -1.5\nz = complex(0.25, 2)'
+          )
+        )
+      );
+      for (const [i, [json]] of CASES.entries()) {
+        const expr = exprs[i];
+        const actual = values[i];
         const expected = expr
           .subs({ x: 0.5, y: -1.5, z: ce.parse('0.25 + 2\\imaginaryI') })
           .N();
@@ -611,8 +650,11 @@ describe('PYTHON: SPECIAL FUNCTIONS OF A COMPLEX ARGUMENT', () => {
           fallback: false,
         } as any) as any;
         expect(r.code).not.toContain('_ce_cisreal');
-        for (const [x, y] of POINTS) {
-          const [re, im] = runPython(r, `x = ${x}\ny = ${y}`);
+        const values = runPythonPrograms(
+          POINTS.map(([x, y]) => pythonProgram(r, `x = ${x}\ny = ${y}`))
+        );
+        for (const [i, [x, y]] of POINTS.entries()) {
+          const [re, im] = values[i];
           const expected = expr.subs({ x, y }).N();
           const same = (a: number, b: number) =>
             a === b || Math.abs(a - b) <= 1e-9 * (1 + Math.abs(b));

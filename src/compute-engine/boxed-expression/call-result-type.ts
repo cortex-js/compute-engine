@@ -97,12 +97,21 @@ function namesRunningLiteral(
  * `running`, or a symbol bound to such a function
  * (`namesRunningLiteral`), directly or through the literals of the user
  * functions it calls: `x ↦ hb(x − 1)` in the body of `ha`, when `hb` calls
- * `ha`. Each literal is read once (`seen`). */
+ * `ha`.
+ *
+ * Each node, a callee literal included, is read once (`seen`). An
+ * expression can share a subexpression in several places (`Max(e, e)`
+ * nested 30 deep has 31 distinct nodes and 2^30 paths), and a walk that
+ * reads a node once per path does not finish. Skipping a node already read
+ * is exact: `running` does not change during the walk, so a node that held
+ * no such call when it was read holds none the second time (CE-594.1). */
 function callsRunningLiteral(
   expr: Expression,
   running: ReadonlySet<Expression>,
   seen: Set<Expression> = new Set()
 ): boolean {
+  if (seen.has(expr)) return false;
+  seen.add(expr);
   if (namesRunningLiteral(expr, running)) return true;
   const binding: BoxedDefinition | undefined =
     expr.valueDefinition !== undefined
@@ -111,10 +120,8 @@ function callsRunningLiteral(
         ? { operator: expr.operatorDefinition }
         : undefined;
   const callee = userFunctionLiteral(binding);
-  if (callee !== undefined && !seen.has(callee)) {
-    seen.add(callee);
-    if (callsRunningLiteral(callee, running, seen)) return true;
-  }
+  if (callee !== undefined && callsRunningLiteral(callee, running, seen))
+    return true;
   if (!isFunction(expr)) return false;
   return expr.ops.some((op) => callsRunningLiteral(op, running, seen));
 }

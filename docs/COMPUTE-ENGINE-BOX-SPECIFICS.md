@@ -112,10 +112,12 @@ find src test -name '*.ts' -exec stat -f "%m %N" {} + | sort | shasum
 - **A release.** The GitHub workflow `.github/workflows/publish.yml` runs
   `npm test` (the full suite) before it publishes, so a release published
   from GitHub needs nothing more. A publish from this machine goes through
-  `scripts/prepublish-check.sh`: it refuses a tree with an uncommitted
-  source change, and when the full suite has not passed at HEAD it runs it
+  `scripts/prepublish-check.sh`. Before the build it refuses a tree with an
+  uncommitted source change. After the build (the `postpack` hook, before
+  the upload), when the full suite has not passed at HEAD, it runs it
   (`bash scripts/ci-nightly.sh run`, about 7 minutes once it has the box
-  lock) and publishes only if it passes.
+  lock) and publishes only if it passes. So a failing build is found before
+  the long test run.
 
 ## §8 Handoff
 

@@ -843,9 +843,16 @@ describe('row 426 third review: a shared tower in a function literal', () => {
       ce.function('Map', [inner, ce.symbol('a')]),
       ce.symbol('a'),
     ]);
+    // The time is part of the test. The walk that looks for a call of a
+    // running literal read each node once per path, and the typing below
+    // took about 130 s (2^30 paths); the test still passed, because a jest
+    // time limit cannot stop a synchronous test. Read once per node, it
+    // takes a few milliseconds (CE-594.1).
+    const start = performance.now();
     expect(ce.function('Apply', [outer, ce.symbol('M')]).type.toString()).toBe(
       'list<number>'
     );
+    expect(performance.now() - start).toBeLessThan(2000);
   });
 });
 

@@ -2917,6 +2917,10 @@ The compilers then count shared nodes by structure (CE-584), so the problem is
 only the canonicalization. Expected: canonicalizing a node that was already
 canonicalized in the same pass returns the same result object (a memo per
 pass), so the work and the memory are linear in the number of distinct nodes.
+The same cause makes `ce.assign` of a RECURSIVE literal over a shared tower
+exponential: `assignFn` re-boxes a literal that names itself, and the re-box
+canonicalizes the body (`r := n ↦ Max(t, t)` nested 14 deep, with a leaf
+`If(n < 1, 0, r(n − 1))`, takes 1 s; 18 deep, 18 s; measured 2026-10-28).
 
 ### CE-593. GPU targets: a point declared `list<tuple<number, number>> | tuple<number, number>` declines with a "missing" position
 

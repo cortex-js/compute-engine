@@ -157,6 +157,7 @@ import {
 } from './type-constructors.js';
 import {
   adoptsForeignEngineObject,
+  isDictionary,
   isExpression,
   isFunction,
   isNumber,
@@ -3036,6 +3037,33 @@ export type AssignFnOptions = {
   effectContract?: { declared: boolean; effects: EffectSet | undefined };
 };
 
+/**
+ * True when `expr` names `id` as a symbol or as an operator. Each node is
+ * read once: an expression can share a subexpression in several places
+ * (`Max(e, e)` nested 30 deep has 31 distinct nodes and 2^30 paths), and
+ * its serialized MathJSON, which this replaces, writes out every path and
+ * ran out of memory at depth 30 (CE-594.1).
+ */
+function mentionsName(
+  expr: Expression,
+  id: string,
+  read: Set<Expression> = new Set()
+): boolean {
+  if (isSymbol(expr)) return expr.symbol === id;
+  if (read.has(expr)) return false;
+  // A dictionary is not a function node (it has no operands): its values,
+  // which can hold unevaluated expressions such as a self-call, are read
+  // explicitly.
+  if (isDictionary(expr)) {
+    read.add(expr);
+    return expr.keys.some((key) => mentionsName(expr.get(key)!, id, read));
+  }
+  if (!isFunction(expr)) return false;
+  read.add(expr);
+  if (expr.operator === id) return true;
+  return expr.ops.some((op) => mentionsName(op, id, read));
+}
+
 export function assignFn(
   ce: IComputeEngine,
   arg1: string | { [id: string]: AssignValue },
@@ -3144,8 +3172,9 @@ export function assignFn(
       const rawFn =
         boxedFn === undefined && Array.isArray(arg2) && arg2[0] === 'Function';
       if (
-        (boxedFn || rawFn) &&
-        JSON.stringify(boxedFn ? boxedFn.json : arg2).includes(`"${id}"`)
+        boxedFn
+          ? mentionsName(boxedFn, id)
+          : rawFn && JSON.stringify(arg2).includes(`"${id}"`)
       ) {
         if (!ce.lookupDefinition(id)) ce.symbol(id);
         const selfDef = ce.lookupDefinition(id);

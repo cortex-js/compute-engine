@@ -353,20 +353,34 @@ function listHypothesisOf(t: Type): Type | undefined {
  * named `name` is then recursive, alone (`F` calls `F`) or with others (`F`
  * calls `G`, and `G` calls `F`). A callee is read from the definition its
  * call is bound to, so a parameter or a local of the same name is not
- * followed. Each literal is read once.
+ * followed.
+ *
+ * Each literal, and each node, is read once (`seen`, `nodes`). An
+ * expression can share a subexpression in several places (`Max(e, e)`
+ * nested 30 deep has 31 distinct nodes and 2^30 paths), and a walk that
+ * reads a node once per path does not finish. Skipping a node already read
+ * is exact: the answer for a node depends only on the node and `name`, and
+ * a node read before answered no, or the walk would have stopped
+ * (CE-594.1).
  */
 export function callsReach(
   literal: Expression,
   name: string,
-  seen: Set<Expression> = new Set()
+  seen: Set<Expression> = new Set(),
+  nodes: { calls: Set<Expression>; names: Set<Expression> } = {
+    calls: new Set(),
+    names: new Set(),
+  }
 ): boolean {
   if (seen.has(literal)) return false;
   seen.add(literal);
-  if (namesFunction(literal, name)) return true;
+  if (namesFunction(literal, name, nodes.names)) return true;
   const visit = (expr: Expression): boolean => {
-    if (!isFunction(expr)) return false;
+    if (!isFunction(expr) || nodes.calls.has(expr)) return false;
+    nodes.calls.add(expr);
     const callee = calleeLiteral(expr);
-    if (callee !== undefined && callsReach(callee, name, seen)) return true;
+    if (callee !== undefined && callsReach(callee, name, seen, nodes))
+      return true;
     return expr.ops.some((op) => visit(op));
   };
   return visit(literal);
@@ -375,10 +389,16 @@ export function callsReach(
 /** True when `expr` names `name`, as a head or as a symbol, outside the
  * function literals in it that bind a parameter of that name. A parameter
  * `p` of a function that the function `p` calls is not a call of `p`: with
- * `p_rand := p ↦ …` called by `p`, `p` was read as recursive. */
-function namesFunction(expr: Expression, name: string): boolean {
+ * `p_rand := p ↦ …` called by `p`, `p` was read as recursive. Each node is
+ * read once (`read`), for the reason given at `callsReach()`. */
+function namesFunction(
+  expr: Expression,
+  name: string,
+  read: Set<Expression> = new Set()
+): boolean {
   if (isSymbol(expr)) return expr.symbol === name;
-  if (!isFunction(expr)) return false;
+  if (!isFunction(expr) || read.has(expr)) return false;
+  read.add(expr);
   if (
     expr.operator === 'Function' &&
     expr.ops
@@ -387,7 +407,7 @@ function namesFunction(expr: Expression, name: string): boolean {
   )
     return false;
   if (expr.operator === name) return true;
-  return expr.ops.some((op) => namesFunction(op, name));
+  return expr.ops.some((op) => namesFunction(op, name, read));
 }
 
 /** The function literal of the user function that the application `expr`
@@ -925,9 +945,14 @@ function mentionsUnknown(t: Type, seen: Set<Type> = new Set()): boolean {
  * cycle of calls. */
 function cycleMembers(literal: Expression, name: string): Expression[] {
   const seen = new Set<Expression>([literal]);
+  // Each node is read once, for the reason given at `callsReach()`: a
+  // second visit of a node adds nothing, since the callees it leads to are
+  // already in `seen`.
+  const read = new Set<Expression>();
   const out: Expression[] = [];
   const visit = (expr: Expression): void => {
-    if (!isFunction(expr)) return;
+    if (!isFunction(expr) || read.has(expr)) return;
+    read.add(expr);
     const callee = calleeLiteral(expr);
     if (callee !== undefined && !seen.has(callee)) {
       seen.add(callee);
@@ -951,8 +976,11 @@ export function cycleMemberDefinitions(
   const members = new Set(cycleMembers(literal, name));
   const out: unknown[] = [];
   const seen = new Set<Expression>([literal]);
+  // Each node is read once, as in `cycleMembers()`.
+  const read = new Set<Expression>();
   const visit = (expr: Expression): void => {
-    if (!isFunction(expr)) return;
+    if (!isFunction(expr) || read.has(expr)) return;
+    read.add(expr);
     const callee = calleeLiteral(expr);
     if (callee !== undefined && !seen.has(callee)) {
       seen.add(callee);

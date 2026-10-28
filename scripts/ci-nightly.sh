@@ -108,16 +108,15 @@ write_state() {
   ' "$@"
 }
 
-# last_passed_sha: the commit of the last complete run when that run
-# passed, or nothing. A failed commit is run again on the next night (a test
-# that failed once may pass, and the release check needs a passing run).
-last_passed_sha() {
-  node -e '
-    try {
-      const last = JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8"));
-      console.log(last.result === "passed" ? last.sha ?? "" : "");
-    } catch { console.log(""); }
-  ' "$STATE_DIR/last.json"
+# covered <sha>: true when a passing full run already covers the commit, by
+# the same rule as the release check: the run tested that commit, or every
+# change since the tested commit is markdown outside src/ and test/ or a
+# version number. A run queued behind another one that covers its commit
+# (a publish of a version bump while the run of the commit before it is in
+# progress) then does nothing. A commit whose latest run failed is not
+# covered and runs again.
+covered() {
+  node "$SUITE_STATUS" release-check --repo "$REPO" --head "$1" >/dev/null 2>&1
 }
 
 find_node() {
@@ -256,11 +255,11 @@ cmd_run() {
     return 1
   fi
   sha="$(git -C "$REPO" rev-parse "${commit:-HEAD}^{commit}")" || return 1
-  if [ "$force" != "--force" ] && [ "$(last_passed_sha)" = "$sha" ]; then
+  if [ "$force" != "--force" ] && covered "$sha"; then
     # Record that the job ran, so that suite-status.mjs does not report a
     # stopped job after days with no commit.
     write_state "$STATE_DIR/attempt.json" "$sha" "$(now)" "$(now)" 0 unchanged ""
-    echo "ci-nightly: the full suite already passed at ${sha:0:9}; nothing to do (run --force to run anyway)"
+    echo "ci-nightly: a passing full run already covers ${sha:0:9}; nothing to do (run --force to run anyway)"
     return 0
   fi
   started="$(now)"
@@ -294,9 +293,9 @@ cmd_run() {
   sha="$(git -C "$REPO" rev-parse "${commit:-HEAD}^{commit}")" || { finish_run; return 1; }
   RUN_SHA="$sha"
   echo "ci-nightly: testing ${sha:0:9}" | tee -a "$log"
-  if [ "$force" != "--force" ] && [ "$(last_passed_sha)" = "$sha" ]; then
+  if [ "$force" != "--force" ] && covered "$sha"; then
     finish_run
-    echo "ci-nightly: another run passed ${sha:0:9} during the wait; nothing to do"
+    echo "ci-nightly: a run that passed during the wait covers ${sha:0:9}; nothing to do"
     return 0
   fi
 

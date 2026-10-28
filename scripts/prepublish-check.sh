@@ -39,17 +39,18 @@ echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 # published. `suite-status.mjs release-check` refuses uncommitted source
 # changes (exit 1), and accepts HEAD when the last passing full run was at
 # HEAD, or when every change since that run is markdown outside src/ and
-# test/ or a version number (what `npm version` writes). When the tree is
-# clean but no passing run covers HEAD (exit 3), this script runs the full
-# suite now on that commit (`scripts/ci-nightly.sh run --commit`, in a
-# worktree, under the box lock; about 7 minutes once it has the lock) and
-# checks again. So a publish never depends on whether the nightly job ran or
-# anyone read its result.
+# test/ or a version number (what `npm version` writes).
 #
-# The build (`prepare`) runs after this hook and reads the files on disk,
-# and other sessions apply their changes to this tree. So the same check
-# runs again as the `postpack` hook (`--after-pack`), after the build and
-# before the upload, and the HEAD must not have moved.
+# npm runs this script twice. As `prepublishOnly`, before the build, it does
+# only the fast checks (npm login, uncommitted changes) and records HEAD.
+# As `postpack` (`--after-pack`), after the build and before the upload, it
+# checks again (other sessions apply their changes to this tree, and the
+# build reads the files on disk), and when no passing full run covers HEAD
+# (exit 3) it runs the full suite on that commit (`scripts/ci-nightly.sh run
+# --commit`, in a worktree, under the box lock; about 7 minutes once it has
+# the lock). So a failing build is found before the long test run, and a
+# publish never depends on whether the nightly job ran or anyone read its
+# result.
 #
 # The check is skipped in two cases:
 # - In GitHub Actions (`GITHUB_ACTIONS=true`): the publish workflow
@@ -87,28 +88,36 @@ refuse_status() {
   exit 1
 }
 
-if [ "${1:-}" = "--after-pack" ]; then
-  # `postpack` also runs for a plain `npm pack`, which publishes nothing.
-  [ "${npm_command:-}" = "publish" ] || exit 0
-  node "$SUITE_STATUS" release-check --repo . || refuse_status $?
-  if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
-    echo ""
-    echo "✗ HEAD moved during the build: the package may not be the code that was checked."
-    echo "  Re-run npm publish."
-    echo ""
-    exit 1
-  fi
-  echo "✓ Full test suite: still passed at HEAD after the build"
+if [ "${1:-}" != "--after-pack" ]; then
+  # Before the build: only the fast refusal. The full suite, when it is
+  # needed, runs after the build (below), so that a failing build, a failing
+  # declaration or documentation step, or a failing consumer smoke test is
+  # found in a minute or two and not after the test run.
+  node "$SUITE_STATUS" release-check --repo .
+  STATUS=$?
+  [ "$STATUS" -eq 0 ] || [ "$STATUS" -eq 3 ] || refuse_status "$STATUS"
+  git rev-parse HEAD > "$HEAD_FILE"
   exit 0
 fi
 
+# After the build (`postpack`), before the upload. `postpack` also runs for
+# a plain `npm pack`, which publishes nothing.
+[ "${npm_command:-}" = "publish" ] || exit 0
+if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
+  echo ""
+  echo "✗ HEAD moved during the build: the package may not be the code that was checked."
+  echo "  Re-run npm publish."
+  echo ""
+  exit 1
+fi
 node "$SUITE_STATUS" release-check --repo .
 STATUS=$?
 if [ "$STATUS" -eq 3 ]; then
   echo ""
-  echo "→ Running the full test suite at HEAD now. It waits for the box lock, then"
-  echo "  takes about 7 minutes. (A one-time password given with --otp expires"
-  echo "  meanwhile: in that case run 'bash scripts/ci-nightly.sh run' first.)"
+  echo "→ The build passed. Running the full test suite at HEAD now. It waits for"
+  echo "  the box lock, then takes about 7 minutes. (A one-time password given with"
+  echo "  --otp expires meanwhile: in that case run 'bash scripts/ci-nightly.sh run'"
+  echo "  first.)"
   echo ""
   bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)"
   node "$SUITE_STATUS" release-check --repo .
@@ -123,4 +132,12 @@ if [ "$STATUS" -eq 3 ]; then
   fi
 fi
 [ "$STATUS" -eq 0 ] || refuse_status "$STATUS"
-git rev-parse HEAD > "$HEAD_FILE"
+# The tree must not have changed while the suite ran either.
+if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
+  echo ""
+  echo "✗ HEAD moved while the checks ran: the package may not be the code that was checked."
+  echo "  Re-run npm publish."
+  echo ""
+  exit 1
+fi
+echo "✓ Full test suite: passed at HEAD; the package is the checked code"
