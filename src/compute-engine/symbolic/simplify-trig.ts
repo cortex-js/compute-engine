@@ -7,6 +7,7 @@ import { add } from '../boxed-expression/arithmetic-add.js';
 import { isFunction, isNumber, sym } from '../boxed-expression/type-guards.js';
 import { halfTurnAngle } from '../boxed-expression/trigonometry.js';
 import { negatedArgument } from '../boxed-expression/negated-argument.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 
 /**
  * Trigonometric simplification rules consolidated from simplify-rules.ts.
@@ -555,7 +556,9 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       if (sinTerm && cosTerm) {
         const sinArg = sinTerm.op1;
         const cosArg = cosTerm.op1;
-        if (sinArg?.isSame(cosArg)) {
+        // Not for an argument that draws: `sin(Random())·cos(Random())` has
+        // two independent arguments.
+        if (sinArg?.isSame(cosArg) && isMergeable(sinArg)) {
           const sin2x = ce._fn('Sin', [sinArg.mul(2)]);
           if (otherTerms.length === 0) {
             // Plain sin(x)*cos(x) -> sin(2x)/2
@@ -623,7 +626,8 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       if (isFunction(a, 'Tan') && isFunction(b) && b.operator === 'Cot') {
         const argA = a.op1;
         const argB = b.op1;
-        if (argA?.isSame(argB)) {
+        // Not for an argument that draws: two independent values.
+        if (argA?.isSame(argB) && isMergeable(argA)) {
           return { value: ce.One, because: 'tan(x)*cot(x) -> 1' };
         }
       }
@@ -632,7 +636,8 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
       if (isFunction(a, 'Cot') && isFunction(b) && b.operator === 'Tan') {
         const argA = a.op1;
         const argB = b.op1;
-        if (argA?.isSame(argB)) {
+        // Not for an argument that draws: two independent values.
+        if (argA?.isSame(argB) && isMergeable(argA)) {
           return { value: ce.One, because: 'cot(x)*tan(x) -> 1' };
         }
       }
@@ -723,6 +728,9 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
         if (j === i) continue;
         const tj = squaredTrig(ops[j]);
         if (!tj || tj.fn !== wantFn || !tj.arg.isSame(ti.arg)) continue;
+        // Two arguments that draw (`Random()`) are two independent values:
+        // `sin²(Random()) + cos²(Random())` is not `1`.
+        if (!isMergeable(ti.arg)) continue;
         return combinePair(i, j, ce.One, 'sin²(x) + cos²(x) -> 1');
       }
     }
@@ -761,7 +769,9 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
           !tj ||
           tj.fn !== wantFn ||
           !tj.arg.isSame(ti.arg) ||
-          !tj.coeff.isSame(ti.coeff)
+          !tj.coeff.isSame(ti.coeff) ||
+          !isMergeable(ti.arg) ||
+          !isMergeable(ti.coeff)
         )
           continue;
         return combinePair(i, j, ti.coeff, 'a*sin²(x) + a*cos²(x) -> a');
@@ -829,7 +839,9 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
             (vj) =>
               vj.fn === wantFn &&
               vj.arg.isSame(vi.arg) &&
-              vj.rest.isSame(vi.rest)
+              vj.rest.isSame(vi.rest) &&
+              isMergeable(vi.arg) &&
+              isMergeable(vi.rest)
           );
           if (match)
             return combinePair(i, j, vi.rest, 'g*sin²(x) + g*cos²(x) -> g');
@@ -907,12 +919,15 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
     const t0 = sinCosProduct(x.ops[0]);
     const t1 = sinCosProduct(x.ops[1]);
     // For the identity the two terms are sin(a)cos(b) and cos(a)sin(b), i.e.
-    // their sin/cos arguments are cross-matched.
+    // their sin/cos arguments are cross-matched. Not for an argument that
+    // draws: each occurrence of `Random()` is an independent value.
     if (
       t0 &&
       t1 &&
       t0.sinArg.isSame(t1.cosArg) &&
-      t0.cosArg.isSame(t1.sinArg)
+      t0.cosArg.isSame(t1.sinArg) &&
+      isMergeable(t0.sinArg) &&
+      isMergeable(t0.cosArg)
     ) {
       if (t0.sign === t1.sign) {
         // sin(a)cos(b) + cos(a)sin(b) = sin(a+b) (overall sign carried through)
@@ -1083,7 +1098,9 @@ export function simplifyTrig(x: Expression): RuleStep | undefined {
           isFunction(bBase) &&
           ((aBase.operator === 'Sin' && bBase.operator === 'Cos') ||
             (aBase.operator === 'Cos' && bBase.operator === 'Sin')) &&
-          aBase.op1?.isSame(bBase.op1)
+          aBase.op1?.isSame(bBase.op1) &&
+          // Not for an argument that draws: two independent values.
+          isMergeable(aBase.op1)
         ) {
           return { value: ce.NegativeOne, because: '-sin²(x) - cos²(x) -> -1' };
         }

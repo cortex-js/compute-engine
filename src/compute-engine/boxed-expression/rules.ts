@@ -34,6 +34,7 @@ import { LATEX_DICTIONARY } from '../latex-syntax/dictionary/default-dictionary.
 
 import { isComposite, isPrime } from './predicates.js';
 import { sameSyntactic } from './compare.js';
+import { isMergeable } from './effects-of.js';
 import {
   isString,
   isNumber,
@@ -1045,6 +1046,40 @@ function canonicalMatchLosesWildcards(match: Expression): boolean {
 }
 
 /**
+ * The options of `replace()` and `applyRule()`, with one option that only
+ * the engine sets.
+ *
+ * `refuseRepeatedDraws`: a wildcard that occurs more than once in the match
+ * pattern (`_x` in `sin(_x)^2 + cos(_x)^2`) reads its captures as one value.
+ * When this option is set, a match whose repeated wildcard captured a term
+ * that draws (`Random()`, a call of a function with the `random` effect, see
+ * `isMergeable()`) is refused, because each occurrence of the draw is an
+ * independent value. `simplify()` sets it. The public `match()` and
+ * `replace()` do not: they stay structural.
+ */
+export type InternalReplaceOptions = Partial<ReplaceOptions> & {
+  refuseRepeatedDraws?: boolean;
+};
+
+/**
+ * The wildcards that occur more than once in the match pattern `match`.
+ * Memoized per pattern, as `canonicalMatchLosesWildcards()` is.
+ */
+const _repeatedWildcards = new WeakMap<Expression, string[]>();
+
+function repeatedWildcards(match: Expression): string[] {
+  let result = _repeatedWildcards.get(match);
+  if (result === undefined) {
+    const all = getWildcards(match).filter(
+      (w) => w !== '_' && w !== '__' && w !== '___'
+    );
+    result = [...new Set(all.filter((w, i) => all.indexOf(w) !== i))];
+    _repeatedWildcards.set(match, result);
+  }
+  return result;
+}
+
+/**
  * Apply a rule to an expression, assuming an incoming substitution
  * @param rule the rule to apply
  * @param expr the expression to apply the rule to
@@ -1056,7 +1091,7 @@ export function applyRule(
   rule: Readonly<BoxedRule>,
   expr: Expression,
   substitution: BoxedSubstitution,
-  options?: Readonly<Partial<ReplaceOptions>>
+  options?: Readonly<InternalReplaceOptions>
 ): RuleStep | null {
   if (!rule) return null;
   const requestedForm = options?.form;
@@ -1149,6 +1184,17 @@ export function applyRule(
 
   // If the `expr` does not match the pattern, the rule doesn't apply
   if (sub === null) return operandsMatched ? stepOf(expr) : null;
+
+  // A repeated wildcard that captured a draw: the rule would read two
+  // independent draws as one value (see `InternalReplaceOptions`).
+  if (
+    options?.refuseRepeatedDraws &&
+    match &&
+    repeatedWildcards(match).some(
+      (w) => sub[w] !== undefined && !isMergeable(sub[w])
+    )
+  )
+    return operandsMatched ? stepOf(expr) : null;
 
   // If the condition doesn't match, the rule doesn't apply
   if (typeof condition === 'function') {
@@ -1352,7 +1398,7 @@ export function applyRule(
 export function replace(
   expr: Expression,
   rules: Rule | (Rule | BoxedRule)[] | BoxedRuleSet,
-  options?: Partial<ReplaceOptions>
+  options?: InternalReplaceOptions
 ): RuleSteps {
   if (!rules) throw new Error('replace(): Expected one or more rules');
 

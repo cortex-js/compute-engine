@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-603.
+Next free reference: CE-609.
 
 **Entry format.**
 
@@ -738,19 +738,53 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
-### CE-598. `simplify()` and the `Add` evaluation merge two random draws into one
+### CE-606. `Equal(r(t), r(t))` of a drawing function evaluates to `True`
 
-**Status:** open; defect. Found 2026-10-28 while fixing CE-596.
+**Status:** open; defect. Found 2026-10-28 while fixing CE-598.
 
-Two draws are two independent values; merging them into `2·draw` changes the
-distribution of the result. Measured on main:
-`ce.box(['Add', ['Random'], ['Random']]).simplify()` gives `2Random()`, and
-`RandomInteger(1,6) + RandomInteger(1,6)` simplifies to `2RandomInteger(1, 6)`.
-With `r` declared `(number) random -> number` and no `evaluate` handler,
-`ce.box(['Add', ['r','t'], ['r','t']]).evaluate()` gives `2r(t)`. The like-term
-collection of `Add` (evaluate and simplify) must not merge a term with a stated
-or computed random effect, as `Factor`, `Together` and `Cancel` do not since
-CE-596 (`isMergeable()`, `boxed-expression/factor.ts`).
+With `r` declared `(number) random -> number`, `Equal(r(t), r(t)).evaluate()`
+gives `True`: the comparison reads the two calls as one value because they are
+structurally the same. They are two independent draws, so the answer is not
+known (or, for a continuous distribution, almost surely `False`). The same
+probably holds for the other comparisons and for `isEqual()`. A structural
+shortcut in a comparison must not apply to a term with a random effect
+(`isMergeable()`, `boxed-expression/effects-of.ts`).
+
+### CE-607. `Expand` and other rewrites copy one random draw into several
+
+**Status:** open; defect. Found 2026-10-28 while fixing CE-598.
+
+`Expand((r(t) + 1)^2)`, with `r` declared with the `random` effect, gives
+`r(t)^2 + 2r(t) + 1`: one draw becomes three independent ones, which changes
+the distribution. This is the opposite of CE-598 (one draw copied rather than
+two merged). Any rewrite that duplicates a subexpression (expansion of a power
+or a product, distribution, substitution of a repeated variable) has the same
+problem when the subexpression draws. A fix needs a rule for when such a
+rewrite is allowed (for example, refuse it, or keep the power unexpanded).
+CE-598 also guarded only the identity rules that its sweep showed merging
+draws; other hand-written simplify rules compare subexpressions with `isSame`
+(`simplify-trig.ts`, `simplify-power.ts`, `simplify-log.ts`,
+`simplify-abs.ts`, `fu.ts`, the Rubi rules) and may still read two draws as one
+value. Both need a systematic audit. Same-argument identities that the CE-598
+fix found and left unguarded: `commonTerms()` (`arithmetic-mul-div.ts`, used by
+`Factor` on relations); `collectFactors()` (`factor.ts`, partial fractions,
+probably unreachable with a draw); `a!/b!` and `n!/(k!(n−k)!) → Binomial`
+(`simplify-divide.ts`); `log_c(c^x·y)`, `log_c(c^x/y)` and the denominator form,
+`c^log_c(x) → x`, `c^(log_c x + y)`, `c^(log_c x · y)`, `c^(log_c x / y)`
+(`simplify-log.ts`); `Root(x^n, n) → |x|` with a drawn index
+(`simplify-power.ts`); the grouping of sum terms by a common remaining factor
+(`simplify-rules.ts`).
+
+### CE-608. The targets of a destructuring assignment in a `Block` are listed as unknowns
+
+**Status:** open; defect. Found 2026-10-28 by the review of CE-597.
+
+`Block(Assign(Tuple(a, b), Tuple(1, 2)), Add(a, b))` evaluates to 3 and does not
+declare `a` or `b` outside the block, but its `.unknowns` is `['a', 'b']`. A
+plain local, `Block(Assign(c, 1), Add(c, 1))`, gives `[]`. The free-variable
+walk (`collectReferences`, `abstract-boxed-expression.ts`) does not count the
+symbols of a `Tuple` target of `Assign` as locals of the block. Same on main
+before CE-597.
 
 ### CE-597. `unknowns` leaves out a library letter used as a value in an integrand or in the initial value of `Reduce`
 
@@ -2916,6 +2950,16 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-605. GLSL and WGSL decline a `Map` inside the lambda of another `Map`
+
+**Status:** open; defect. Tycho ledger row 475, 2026-10-28; instrument
+`~/dev/tycho/scripts/repros/2026-10-28-ce475-glsl-nested-map-reduction-repro.mts`.
+
+`\min(\mathrm{Map}(k\mapsto\max(\mathrm{Map}(j\mapsto j\cdot k,[1,3]))+x,[1,2]))`
+declines on `glsl` and `wgsl` ("Could not compile `Map`: … no lowering"). One
+level of `Map` compiles, and the `javascript` and `interval-js` targets compile
+both levels.
+
 ### CE-573. An `interval-wgsl` target for interval refinement on the GPU
 
 **Status:** open; not now (user decision 2026-10-27, Q4 (a) of
@@ -4817,6 +4861,29 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
+
+### CE-603. Reading the elements of a `Map` of 1,000 symbolic sums evaluates each sum with its free variable
+
+**Status:** open; performance. Tycho ledger row 474, 2026-10-28; instrument
+`~/dev/tycho/scripts/repros/2026-10-28-ce474-literal-list-summand-evaluate-repro.mts`.
+
+Reading the elements of `evaluate()` of
+`\sum_{n=0}^{3}2^{-n}|\sin(2^nx+[0...999]/1000)|` (a `Map` of 1,000) evaluates
+each member's symbolic `Sum` with `x` free: about 1,745 ms, against 96 ms to
+box the 1,000 members (Tycho's measure, median of 3). Target: at most 2× the
+boxing time.
+
+### CE-604. An integral whose integrand calls a function with a list argument expands into a list of integrals with the function body written in
+
+**Status:** open; performance. Tycho ledger row 476, 2026-10-28; instrument
+`~/dev/tycho/scripts/repros/2026-10-28-ce476-integral-list-argument-evaluate-repro.mts`.
+
+With `c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx`, `E` a list of 6 and `L`
+declared real without a value, evaluating four expressions
+`\int_a^b y\,c(y, L, E)\,dy` takes about 687 ms: each becomes a `List` of 6
+`Integrate` with the body of `c` written in. The same 24 integrals, one element
+each, take 48 ms (Tycho's measure, median of 3). Target: at most 2× the
+per-element time.
 
 ### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 

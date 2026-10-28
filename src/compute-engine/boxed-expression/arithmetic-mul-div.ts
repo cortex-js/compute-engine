@@ -110,6 +110,7 @@ import { negateProduct } from './negate.js';
 import { addArray } from './arithmetic-add.js';
 import { holdsKindValue } from './residue-class.js';
 import { kindArithmetic } from './kind-dispatch.js';
+import { isMergeable } from './effects-of.js';
 
 // Maximum number of decimal digits allowed in a *materialized* exact power
 // folded into a product's coefficient. Beyond this the factor is kept symbolic
@@ -937,6 +938,8 @@ export class Product {
     let found = false;
     for (const [i, x] of this.terms.entries()) {
       if (!x.term.isSame(tallyTerm)) continue;
+      // A term that draws is never merged (see `findTerm`).
+      if (!isMergeable(tallyTerm)) break;
       // A different term between the two that does not commute with them
       if (
         this.terms.some(
@@ -1066,9 +1069,16 @@ export class Product {
   }
 
   /** The first entry of `terms` whose `term` is the same as `term`, read
-   * from `termIndex`. */
+   * from `termIndex`.
+   *
+   * A term that draws (`Random()`, a call of a function with the `random`
+   * effect) has no like term: two draws are two independent values, and
+   * `Random()·Random()` is not `Random()²`. The test is made only when an
+   * entry was found, so a product with no repeated term does not pay for it.
+   */
   private findTerm(term: Expression): ProductTerm | undefined {
-    return this.termIndex.get(term.hash)?.find((x) => x.term.isSame(term));
+    const x = this.termIndex.get(term.hash)?.find((x) => x.term.isSame(term));
+    return x !== undefined && isMergeable(term) ? x : undefined;
   }
 
   /** Add `entry` at the end of `terms`, and to `termIndex`. */
@@ -1435,6 +1445,10 @@ export function commonTerms(
   const xs: Expression[] = [];
 
   for (const x of lhs.terms) {
+    // A factor that draws is never common: the draw on each side is
+    // independent, so dividing both sides by it would add a new draw to
+    // each side rather than cancel one (`x·e^Random() = y·e^Random()`).
+    if (!isMergeable(x.term)) continue;
     // Find the term in the rhs product
     const y = rhs.terms.find((y) => x.term.isSame(y.term));
     if (!y) continue;
@@ -1895,8 +1909,10 @@ export function canonicalDivide(op1: Expression, op2: Expression): Expression {
     )
       return ce.One;
 
-    // (x+1)/(x+1) = 1 (if x+1 ≠ 0)
-    if (op1.isSame(op2)) {
+    // (x+1)/(x+1) = 1 (if x+1 ≠ 0). Not for an operand that draws: the two
+    // occurrences of `Random()` in `Random()/Random()` are two independent
+    // values.
+    if (op1.isSame(op2) && isMergeable(op1)) {
       // Same conservative guard as above: don't collapse constant expressions
       // like (1-1)/(1-1) or tan(π/2)/tan(π/2) into 1 during canonicalization.
       // Use structural mode so the expression is bound and can evaluate later.

@@ -8,6 +8,7 @@ import { asRational, toBigint } from '../boxed-expression/numerics.js';
 import { gcd } from '../numerics/numeric-bigint.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { logarithmAtExceptionalPoint } from '../boxed-expression/logarithm.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 
 /** Whether `logBase` is Euler's number — `Log(x, e)` is `Ln(x)`. */
 function isNaturalLogBase(base: Expression): boolean {
@@ -159,12 +160,17 @@ function combineLogGroup(
   const combinable = entries.filter((e) => isNonNegativeLogArgument(e.arg));
   const kept = entries.filter((e) => !isNonNegativeLogArgument(e.arg));
 
-  // Cancel kept terms with the same argument and opposite signs.
+  // Cancel kept terms with the same argument and opposite signs. Not for an
+  // argument that draws: `ln(Random()) − ln(Random())` is the difference of
+  // two independent values, not `0`.
   let cancelled = 0;
   for (let i = 0; i < kept.length; i++) {
     const j = kept.findIndex(
       (e, k) =>
-        k > i && e.positive !== kept[i].positive && e.arg.isSame(kept[i].arg)
+        k > i &&
+        e.positive !== kept[i].positive &&
+        e.arg.isSame(kept[i].arg) &&
+        isMergeable(e.arg)
     );
     if (j < 0) continue;
     kept.splice(j, 1);
@@ -611,8 +617,14 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       return { value: ce._fn('Ln', [arg]), because: 'log_e(x) -> ln(x)' };
     }
 
-    // log_c(c) -> 1 (an infinite base was answered above: `∞/∞` is NaN)
-    if (arg.isSame(logBase) && logBase.isInfinity !== true) {
+    // log_c(c) -> 1 (an infinite base was answered above: `∞/∞` is NaN).
+    // Not for a base that draws: `log_{r(t)}(r(t))` has two independent
+    // values when `r` has the `random` effect.
+    if (
+      arg.isSame(logBase) &&
+      logBase.isInfinity !== true &&
+      isMergeable(logBase)
+    ) {
       return { value: ce.One, because: 'log_c(c) -> 1' };
     }
 
@@ -625,8 +637,12 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
       };
     }
 
-    // log_c(c^x) -> x
-    if (isFunction(arg, 'Power') && arg.op1?.isSame(logBase)) {
+    // log_c(c^x) -> x (not for a base that draws, as above)
+    if (
+      isFunction(arg, 'Power') &&
+      arg.op1?.isSame(logBase) &&
+      isMergeable(logBase)
+    ) {
       return { value: arg.op2, because: 'log_c(c^x) -> x' };
     }
 
@@ -1107,12 +1123,18 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
     const denom = x.op2;
 
     if (num && denom) {
+      // The three rules below read two occurrences of a subexpression as one
+      // value. They do not apply when it draws (`Random()`, a call of a
+      // function with the `random` effect): each occurrence is an independent
+      // value.
+
       // log_c(a) / log_c(b) -> ln(a) / ln(b)
       if (
         isFunction(num, 'Log') &&
         denom.operator === 'Log' &&
         isFunction(denom) &&
-        num.op2?.isSame(denom.op2)
+        num.op2?.isSame(denom.op2) &&
+        isMergeable(num.op2)
       ) {
         return {
           value: ce._fn('Ln', [num.op1]).div(ce._fn('Ln', [denom.op1])),
@@ -1125,7 +1147,8 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
         isFunction(num, 'Log') &&
         denom.operator === 'Ln' &&
         isFunction(denom) &&
-        num.op1?.isSame(denom.op1)
+        num.op1?.isSame(denom.op1) &&
+        isMergeable(num.op1)
       ) {
         return {
           value: ce.One.div(ce._fn('Ln', [num.op2])),
@@ -1138,7 +1161,8 @@ function simplifyLogCore(x: Expression): RuleStep | undefined {
         isFunction(num, 'Ln') &&
         denom.operator === 'Log' &&
         isFunction(denom) &&
-        num.op1?.isSame(denom.op1)
+        num.op1?.isSame(denom.op1) &&
+        isMergeable(num.op1)
       ) {
         return {
           value: ce._fn('Ln', [denom.op2]),

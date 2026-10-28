@@ -9,6 +9,7 @@ import { asFloat, hasFloatOperand } from '../boxed-expression/float-result.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { isEligibleRealRewrite } from '../function-properties/index.js';
 import { isCollectionShaped } from '../collection-utils.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 import {
   isProvablyScalar,
   isSquareMatrixTyped,
@@ -608,6 +609,10 @@ export function canCombineSameBase(
   kind: 'product' | 'quotient'
 ): boolean {
   if (base.isFinite === false) return false;
+  // A base that draws (`Random()`) is a different value at each occurrence:
+  // `Random()^2·Random()` is not `Random()^3`, and `Random()/Random()` is
+  // not `1`.
+  if (!isMergeable(base)) return false;
   if (exponents.some(isCollectionShaped)) return false;
   // A base whose type admits a matrix (`any`, `tensor<number>`) is treated
   // as a collection: `p·p^-1` is the identity matrix, not the number 1.

@@ -456,7 +456,11 @@ import {
   resultOutsideCallType,
 } from './function-literal.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
-import { applicationEffects, publicEffects } from './effects-of.js';
+import {
+  applicationEffects,
+  isMergeable,
+  publicEffects,
+} from './effects-of.js';
 import type { ComputedEffects } from '../../common/type/effects.js';
 import {
   isPureComputedEffects,
@@ -3408,8 +3412,9 @@ export class BoxedFunction
       return this.op1.div(base.ln()); // log_c(e^x) = x / ln(c)
     }
 
-    // ln_c(c) = 1
-    if (base && this.isSame(base)) return this.engine.One;
+    // ln_c(c) = 1. Not for a value that draws: `log_{r(t)}(r(t))` has two
+    // independent values when `r` has the `random` effect.
+    if (base && this.isSame(base) && isMergeable(this)) return this.engine.One;
 
     // ln(e) = 1
     // ln_c(e) = 1 / ln(c)

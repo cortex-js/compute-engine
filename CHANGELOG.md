@@ -2,6 +2,19 @@
 
 ### Resolved Issues
 
+- **Two random draws are no longer merged into one.** Two draws are two
+  independent values, and merging them changed the distribution of the result.
+  Before: `Random() + Random()` simplified to `2Random()`, `Random()·Random()`
+  to `Random()^2`, `Random()/Random()` to `1`, and with `r` declared
+  `(number) random -> number`, `r(t) + r(t)` evaluated to `2r(t)`; the trig and
+  log identities (`sin²u + cos²u → 1`, `tan u·cot u → 1`, `ln u − ln u → 0`,
+  `log_u(u) → 1`, …) and `Factor` (`r(t)² + 2r(t) + 1 → (r(t) + 1)²`, a common
+  factor on both sides of a relation) did the same. Now the canonical form,
+  `evaluate()`, `simplify()` and `Factor` keep the draws apart. A rule given to
+  `simplify()` with a repeated wildcard does not match two draws; the public
+  `match()` and `replace()` are unchanged. Pure terms and calls of an
+  undeclared function still merge.
+
 - **`Together`, `Factor` and `Cancel` of a sum of calls of an undeclared
   function** (Tycho ledger row 472). `Together(g(t) + g(t))` gave the invalid
   `0 / Error("missing")`: a term not known to be a number was split into the

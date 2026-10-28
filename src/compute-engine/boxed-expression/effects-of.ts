@@ -3,6 +3,7 @@ import type { ComputedEffects } from '../../common/type/effects.js';
 import {
   hasDeclaredEffectLabel,
   isCoFiniteEffects,
+  isPureComputedEffects,
   sameEffectSet,
   subtractEffects,
   unionComputedEffects,
@@ -592,6 +593,59 @@ export function shallowApplicationEffects(expr: Expression): ComputedEffects {
     );
   }
   return effects;
+}
+
+/**
+ * Can two occurrences of `expr` be merged into one (`e + e` → `2e`,
+ * `e·e` → `e²`, `e/e` → `1`, `e − e` → `0`)? No when evaluating `expr` has a
+ * known effect: two occurrences of `Random()` are two independent values,
+ * and merging them changes the distribution of the result.
+ *
+ * `expr.isPure` is not the test. A call of a function that the engine knows
+ * nothing about (`g(t)` with `g` undeclared) has the effects `any`, which
+ * means "unknown", and so is not pure. (A function declared with a
+ * signature and no stated effects counts as pure, so `isPure` already
+ * merges it.) The like-term collection of `Add` and `Multiply` merges such
+ * calls: `g(t) + g(t)` evaluates to `2g(t)`, and the transformers `Factor`,
+ * `Together` and `Cancel` follow the same rule. A call whose effects are
+ * stated or computed (`Random()`, a function declared with the `random`
+ * effect, a function value whose body draws) is not merged. This is the rule
+ * of the pending-draw walk too (`hasDeclaredEffectLabel()` in
+ * `common/type/effects.ts`): an unknown effect does not count as a draw.
+ *
+ * Each node is examined by its OWN effects (`shallowApplicationEffects()`),
+ * and the operands are examined in turn, so `g(Random())` is not merged.
+ * `seen` holds the answer for each node already examined in this call: a
+ * subexpression can be shared by several nodes.
+ *
+ * Every site that merges two terms found to be the same (the like-term
+ * collections of `Add` and `Multiply`, the transformers, the simplify rules
+ * that read two occurrences of a subexpression as one value, and the rule
+ * application of `simplify()` for a repeated wildcard) asks this predicate.
+ * The sites ask only after the two terms are found to be the same, so the
+ * cost is paid only for a merge that would happen.
+ */
+export function isMergeable(
+  expr: Expression,
+  seen: Map<Expression, boolean> = new Map()
+): boolean {
+  if (expr.isPure) return true;
+  if (!isFunction(expr)) return false;
+  const known = seen.get(expr);
+  if (known !== undefined) return known;
+  // A head with no operator definition: read the effects of the head and of
+  // each callback it may invoke one by one, since their join lets an unknown
+  // (`'any'`) part hide a known `random` part (`r(u)`, with `r` drawing and
+  // `u` of unknown effects). Each part must be pure or unknown.
+  const parts = valueHeadEffectParts(expr);
+  const own = parts === undefined ? shallowApplicationEffects(expr) : undefined;
+  const result =
+    (parts !== undefined
+      ? parts.every((e) => e === 'any' || isPureComputedEffects(e))
+      : own !== 'any' && isPureComputedEffects(own)) &&
+    expr.ops.every((op) => isMergeable(op, seen));
+  seen.set(expr, result);
+  return result;
 }
 
 /**

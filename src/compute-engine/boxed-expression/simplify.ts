@@ -1258,6 +1258,7 @@ function simplifyExpression(
       recursive: false,
       form: 'canonical',
       useVariations: false,
+      refuseRepeatedDraws: true,
     });
     if (result.length > 0) return [...steps, ...result];
     return steps;
@@ -1951,6 +1952,9 @@ function simplifyNonCommutativeFunction(
     recursive: false,
     form: 'canonical',
     useVariations: options.useVariations ?? false,
+    // A rule whose repeated wildcard captured a draw is not applied: the two
+    // occurrences of `Random()` are two independent values.
+    refuseRepeatedDraws: true,
   });
 
   if (result.length === 0) return steps;

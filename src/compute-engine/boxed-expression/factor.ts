@@ -23,11 +23,7 @@ import { hasVolatileDigest, isOperatorDef } from './utils.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
 import { factorRationalExpression } from '../polynomial/boxed-factor.js';
-import {
-  shallowApplicationEffects,
-  valueHeadEffectParts,
-} from './effects-of.js';
-import { isPureComputedEffects } from '../../common/type/effects.js';
+import { isMergeable } from './effects-of.js';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (
@@ -179,6 +175,11 @@ export function factorPerfectSquare(expr: Expression): Expression | null {
 
   // Perfect square trinomial must have exactly 3 terms
   if (terms.length !== 3) return null;
+
+  // A term that draws is not a perfect square of anything: the match reads
+  // the draws of the three terms as one value (`r(t)² + 2r(t) + 1` is not
+  // `(r(t) + 1)²` when `r` has the `random` effect).
+  if (!isMergeable(expr)) return null;
 
   // Try all permutations: any two terms could be the squares, the third is the cross term
   // For efficiency, we'll try to identify which terms look like squares
@@ -339,6 +340,10 @@ export function factorDifferenceOfSquares(expr: Expression): Expression | null {
 
   const terms = expr.ops;
   if (terms.length !== 2) return null;
+
+  // Not for a term that draws: `(a−b)(a+b)` has two occurrences of `a`, so a
+  // single draw `Random()² − 1` would become two independent draws.
+  if (!isMergeable(expr)) return null;
 
   // Try to extract square roots of both terms
   // One should be positive, one negative
@@ -1087,53 +1092,6 @@ function extractCommonFactor(expr: Expression): Expression | null {
     ...common.map(({ base, exp }) => power(base, exp)),
     factorPolynomial(add(...cofactors)),
   ]);
-}
-
-/**
- * Can two occurrences of `expr` be merged into one (`e + e` → `2e`,
- * `e·e` → `e²`)? No when evaluating `expr` has a known effect: two
- * occurrences of `Random()` are two values.
- *
- * `expr.isPure` is not the test. A call of a function that the engine knows
- * nothing about (`g(t)` with `g` undeclared) has the effects `any`, which
- * means "unknown", and so is not pure. (A function declared with a
- * signature and no stated effects counts as pure, so `isPure` already
- * merges it.) The evaluation of `Add` merges such
- * calls: `g(t) + g(t)` evaluates to `2g(t)`. The transformers that call this
- * predicate (`Factor`, `Together`, `Cancel`) give the same sums as
- * `evaluate()`, so they follow the same rule: a call with unknown effects is
- * merged. A call whose effects are stated or computed (`Random()`, a
- * function declared with the `random` effect, a function value whose body
- * draws) is not merged. This is the rule of the pending-draw walk too
- * (`hasDeclaredEffectLabel()` in `common/type/effects.ts`): an unknown
- * effect does not count as a draw.
- *
- * Each node is examined by its OWN effects (`shallowApplicationEffects()`),
- * and the operands are examined in turn, so `g(Random())` is not merged.
- * `seen` holds the answer for each node already examined in this call: a
- * subexpression can be shared by several nodes.
- */
-function isMergeable(
-  expr: Expression,
-  seen: Map<Expression, boolean> = new Map()
-): boolean {
-  if (expr.isPure) return true;
-  if (!isFunction(expr)) return false;
-  const known = seen.get(expr);
-  if (known !== undefined) return known;
-  // A head with no operator definition: read the effects of the head and of
-  // each callback it may invoke one by one, since their join lets an unknown
-  // (`'any'`) part hide a known `random` part (`r(u)`, with `r` drawing and
-  // `u` of unknown effects). Each part must be pure or unknown.
-  const parts = valueHeadEffectParts(expr);
-  const own = parts === undefined ? shallowApplicationEffects(expr) : undefined;
-  const result =
-    (parts !== undefined
-      ? parts.every((e) => e === 'any' || isPureComputedEffects(e))
-      : own !== 'any' && isPureComputedEffects(own)) &&
-    expr.ops.every((op) => isMergeable(op, seen));
-  seen.set(expr, result);
-  return result;
 }
 
 /**

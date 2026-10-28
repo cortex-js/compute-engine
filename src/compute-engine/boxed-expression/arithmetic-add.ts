@@ -9,6 +9,7 @@ import { isInvalidNonCollection } from './error-value.js';
 import { order, sortAddTerms } from './order.js';
 import { holdsKindValue } from './residue-class.js';
 import { kindArithmetic } from './kind-dispatch.js';
+import { isMergeable } from './effects-of.js';
 import { Type, type TypeReference } from '../../common/type/types.js';
 import {
   type AliasDescent,
@@ -1433,9 +1434,13 @@ export class Terms {
       return;
     }
 
-    // Try to find a like term, i.e. if "2x", look for "x"
+    // Try to find a like term, i.e. if "2x", look for "x". A term that draws
+    // (`Random()`, a call of a function with the `random` effect) is not
+    // merged with a like term: two draws are two independent values, and
+    // `Random() + Random()` is not `2Random()`. The test is made only when a
+    // like term was found, so a sum with no repeated term does not pay for it.
     const i = this.find(term);
-    if (i >= 0) {
+    if (i >= 0 && isMergeable(term)) {
       // There was an existing term matching: add the coefficients
       this.terms[i].coef.push(coef);
       return;

@@ -3,6 +3,7 @@ import { isFunction, isNumber } from '../boxed-expression/type-guards.js';
 import { asRational } from '../boxed-expression/numerics.js';
 import { baseOffset } from './simplify-factorial.js';
 import { isCollectionShaped } from '../collection-utils.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 import { canCombineSameBase } from './simplify-power.js';
 
 /**
@@ -50,13 +51,16 @@ export function simplifyDivide(x: Expression): RuleStep | undefined {
 
   // a/a -> 1 when a ≠ 0 and a is finite (∞/∞ is indeterminate). Not for a
   // collection: `[x]/[x]` is the list `[1]`, which the element-wise
-  // evaluation gives, not the number 1.
+  // evaluation gives, not the number 1. Not for an operand that draws: the
+  // two occurrences of `r(x)` (with `r` a function with the `random` effect)
+  // in `r(x)/r(x)` are two independent values.
   if (
     num.isSame(denom) &&
     num.isSame(0) === false &&
     num.isInfinity !== true &&
     (isNumber(num) || num.symbols.length !== 0) &&
-    !isCollectionShaped(num)
+    !isCollectionShaped(num) &&
+    isMergeable(num)
   ) {
     return { value: ce.One, because: 'a/a -> 1' };
   }

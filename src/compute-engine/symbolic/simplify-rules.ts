@@ -52,6 +52,7 @@ import {
   simplifyFactorialAdd,
 } from './simplify-factorial.js';
 import { isCollectionShaped } from '../collection-utils.js';
+import { isMergeable } from '../boxed-expression/effects-of.js';
 import {
   hasCollectionShape,
   mayBeTensorProductOperand,
@@ -350,12 +351,15 @@ export const SIMPLIFY_RULES: Rule[] = [
     const denom = x.op2;
     if (!num || !denom) return undefined;
     // Not for a collection: `[x]/[x]` is the list `[1]`, which the
-    // element-wise evaluation gives, not the number 1.
+    // element-wise evaluation gives, not the number 1. Not for an operand
+    // that draws: the two occurrences of `Random()` in `Random()/Random()`
+    // are two independent values.
     if (
       num.isSame(denom) &&
       num.isSame(0) === false &&
       num.isInfinity !== true &&
-      !isCollectionShaped(num)
+      !isCollectionShaped(num) &&
+      isMergeable(num)
     ) {
       return { value: x.engine.One, because: 'a/a -> 1' };
     }
