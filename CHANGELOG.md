@@ -19,6 +19,23 @@
 
 ### Behavior Changes
 
+- **`Factor`, `Together` and `Cancel` collect like terms in their result**
+  (ROADMAP CE-577), as evaluating the sum does. Before, they returned the sum
+  unchanged when they found nothing to rewrite.
+  - `Together(a+a)` and `Cancel(a+a)` are `2a` (they were `a+a`), and
+    `Factor(\sin(t)+\sin(t))` is `2\sin(t)`. With `g(t) := \sin(t)`,
+    `Factor(g(t)+g(t))` is `2\sin(t)`.
+  - Without a variable, `Factor` takes out a factor common to every term of a
+    sum: `Factor(ax+ay)` is `a(x+y)`. It treats a term that is not a
+    polynomial as a variable of its own: `Factor(x\sin(t)+y\sin(t))` is
+    `(x+y)\sin(t)`.
+  - `Cancel` with no variable and no single free variable collects the like
+    terms of its operand: `Cancel((a+b)(c+d)+(a+b)(c+d))` is `2(a+b)(c+d)`.
+    It stayed unevaluated.
+  - A sum with an absent term gives `NaN`, as evaluating it does:
+    `Factor(Missing+1)` was `1+NaN`.
+  - Terms with a random or other impure value are not collected:
+    `Together(Random()+Random())` keeps two draws.
 - **The join of types does not depend on the order of its operands.**
   `widen(nan, real, missing)` gave `missing | number` and
   `widen(missing, nan, real)` gave `missing | nan | real`. Both now give
@@ -99,7 +116,8 @@
   the parameter type that the body's use had narrowed (`number`), not the
   function's own signature. `javascript` now gives the interpreter's value,
   `glsl` and `wgsl` compile a copy of `R` with a `vec2` parameter, and
-  `interval-js` declines instead of giving a wrong interval.
+  `interval-js` compiles a copy of `R` for the list argument, whose interval
+  contains the interpreter's value.
 - **A recursive function inside `Mod` declined on `interval-js`.**
   `f(x, n) := 1/\operatorname{mod}(f(x, n-1), 1)` with `f(x, 0) = x` declined
   with "an object-domain absent ('missing') position". It compiles again.
@@ -110,7 +128,26 @@
   number refuses. Such a type does not prove a point: the call is now compiled
   for the argument's own type (a list), as the interpreter evaluates it.
   `d(B(A(P(x, y))))` in the Tycho document `ra1p9naofs` compiles on
-  `javascript` and gives the interpreter's value.
+  `javascript`, `interval-js` and `glsl`, and gives the interpreter's value.
+- **On `interval-js`, a user function called with a list argument compiles.**
+  `interval-js` now compiles a copy of the function for the argument's type,
+  as `javascript` does. Before, a call such as `d(B(A(P(x, y))))`, where `B`
+  returns a list of two numbers, declined. A parameter declared as a point
+  still refuses a list, as the interpreter does.
+- **On `glsl` and `wgsl`, a function of a number called with a list of 2 to 4
+  numbers compiles.** With `f(p) := \operatorname{mod}(p, 1) - 0.5`, the call
+  `f([x, y])` declined with "lowers to vec2 but parameter is declared float";
+  the interpreter applies `f` to each element. The shader now calls a wrapper
+  that applies `f` to each component. A point argument still declines.
+- **A recursive function compiled after an evaluation kept a wide type in its
+  body.** With `R(i, x, y)` declared `function` and defined by recursion, the
+  sequence evaluate, compile, evaluate, compile (the order of a plotting
+  host) declined on `interval-js`: "may be a collection at run time", because
+  the recursive call inside the body kept the type it had while the signature
+  was derived. It compiles again (Tycho document `ndqj7hupta`).
+- **A recursive function's type follows a change to a value its body reads.**
+  With `a := 5` and `R(i) := \{i \le 0: 0, R(i-1) + a\}`, the assignment
+  `a := [1, 2]` left `R(n)` typed `number`, while `R(2)` is `[2, 4]`.
 - **On `interval-js`, a user function whose invariant part is subtracted
   computed it on every term.** In `\sum_{i=1}^{16} n(x, y, i)` with
   `n(x, y, i) := \exp(\ldots - F(x, y))`, `F(x, y)` was computed 17 times per

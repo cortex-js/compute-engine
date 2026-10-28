@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-581.
+Next free reference: CE-583.
 
 **Entry format.**
 
@@ -2941,6 +2941,21 @@ Expected: refuse a target that is not a declared output (or a declared
 storage variable, once CE-572 adds them), and a value whose type does not fit
 the target, with a message that names both.
 
+### CE-581. The type of `run()` refuses a list argument that the `javascript` target accepts
+
+**Status:** open; defect (public types). Found 2026-10-27 while reviewing CE-571
+and CE-574. Fix it when CE-571 lands, because CE-571 also changes
+`compilation/types.ts`.
+
+`DefaultRunnerVars` (`compilation/types.ts`) is `number | ComplexResult` for
+every target except `interval-js`. The `javascript` target accepts an array for
+a symbol that it compiles as a list: `run({ S: [1, 2, 3] })` for
+`S: list<real>` gives 6, and `run({ P: [[1, 2], [3, 4]] })` for a list of points
+works. The call does not type-check, so a TypeScript host needs a cast. A typed
+array (`Float64Array`) is refused at run time, with a message. Expected: the
+runner's value type also admits a `ReadonlyArray` of numbers, complex values
+and nested arrays.
+
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 
 **Status:** open; capability, small.
@@ -3483,36 +3498,29 @@ calls `p_rand(n + s_eed, n, n)` in both. Sharing across statements needs the
 temporary to be bound before the first statement and to stay valid across any
 assignment the statements make to a symbol the call reads.
 
-### CE-578. A recursive signature derived during an evaluation leaves a wide type in the type cache
+### CE-582. Typing a recursive function while the assumptions are hidden overflows the stack
 
-**Status:** open; defect (regression of CE-544). A fix exists, not yet
-applied.
+**Status:** open; defect. Found 2026-10-27; reachability from the public API
+not yet checked.
 
-Tycho `neyret/ndqj7hupta`, rows `R(20, x, y) - k` (6 records), compiled on
-interval-js at CE 0.171.0 and decline after CE-544 (commit `279b93cfd`, found
-by bisecting): "the operand `0.5 * S(x, y, R(i - 1, x, y))` may be a
-collection at run time (type `list<list<any> | number | tuple> | number |
-tuple`)". `R` is a recursive function declared `function`. The failure needs
-the order evaluate, compile, evaluate, compile. While
-`_deriveSignatureOnce` (`boxed-value-definition.ts`) derives the recursive
-signature, the recursive calls in the body read the skeleton, whose result is
-`unknown`, so the body node gets the wide type and keeps it in its type cache.
-After the evaluation moves the cache generation, the compiler reads that type.
-The settled type of `R(…)` is `number`. The same defect is in 0.171.0 for `R`
-declared `(unknown, unknown, unknown) -> unknown`; CE-544 extended it to a
-bare `function` declaration. The fix (session scratchpad
-`triage/triage.patch`, the `boxed-value-definition.ts` hunk and the
-`ndqj7hupta` block of `census-head-new-declines.test.ts`): a second
-derivation in the same lexical scope reads the result of the first, not
-`unknown`; the scope check matters, because a wide result from a Tycho scratch
-scope otherwise stays in force. Two other fixes were measured and rejected:
-no caching during a derivation (a symbolic `R(2..8)` goes from 5 ms to 1–10
-s), and a value shield (stack overflow). Waiting for the file to be free of
-another session's staged CE-566 change; the CE-544 author was asked.
+With `x: real`, `F: function`, the assumption `x > 0` and
+`F := n ↦ If(n = 0, x > 0, F(n - 1))`, the type of `F(m)` is `boolean` and
+`F(2)` is `True`. Read inside `ce._withoutFacts(() => …)`, the type of
+`F(m)` throws "Maximum call stack size exceeded" (the trace goes through
+`functionLiteralSignatureType`, `boundCallType` and `BoxedFunction.type`).
+Measured at HEAD `edd50e5be`, so it is not caused by the recursive-hypothesis
+change of 2026-10-27. The engine hides the assumptions itself in some paths
+(`_withoutFacts` in `boxed-value-definition.ts`, the value-definition
+constructor and the type writers), so check whether a public call reaches
+it. A test that a hypothesis derived with the assumptions visible is not
+reused while they are hidden (the hidden-assumption bit in
+`_definitionsKey()`, `boxed-value-definition.ts`) can be written only once
+this is fixed.
 
 ### CE-579. javascript: `asOklab(c_f)` in Tycho `art/s8ishknvhe` declines during the Tycho compile only
 
-**Status:** open; defect (probably the same cause as CE-578).
+**Status:** open; defect (probably the same cause as the recursive-signature
+fix of 2026-10-27, `_deriveSignatureOnce` in `boxed-value-definition.ts`).
 
 The row compiled at CE 0.171.0 (it mapped `N` over the list of points, as the
 interpreter does) and declines at HEAD: "the argument `C_c` has the type
@@ -3520,11 +3528,12 @@ interpreter does) and declines at HEAD: "the argument `C_c` has the type
 number>` of the parameter". During Tycho's compile of the row, `C_c` is typed
 `list<tuple<list<…> | number | tuple, …>>`; after the run it is
 `list<tuple<number, number, number>>` and the compile succeeds. `F` is a
-recursive function declared `function`, as in CE-578. Not reproduced without
-Tycho. The interpreter cannot give the row's value with the document's
-`D = 10000` (the iteration limit is reached, at 0.171.0 too); with `D = 4` it
-applies `N` to each point. Next step: check the row again once CE-578 is
-applied.
+recursive function declared `function`, like `R` in Tycho `ndqj7hupta`, whose
+decline the recursive-signature fix of 2026-10-27 removed. Not reproduced
+without Tycho. The interpreter cannot give the row's value with the
+document's `D = 10000` (the iteration limit is reached, at 0.171.0 too); with
+`D = 4` it applies `N` to each point. Next step: run the Tycho row against a
+CE build that has that fix.
 
 ### CE-567. Infer `list<E> | tuple<…>` from index reads instead of a marked tuple
 
@@ -3603,6 +3612,23 @@ call 1,223 → 980). What remains:
   `real` from its argument keeps the helper (`_gpu_sin(t)`), while a
   `list<real^2>` parameter of the same copy gets the built-in: the scalar
   parameter is not read as declared there.
+- **CE-565.4** The body of a SHARED user function (`_fn_F`, emitted once in
+  the preamble by `gpu-shared-calls.ts`) keeps the helper for every parameter,
+  even when the signature is declared: with `x`, `y` declared `real`,
+  `F` declared `(real, real) -> real` (with or without parameter names) and
+  `F := (a, b) ↦ sin(a) + cos(b) + min(a, b)`, compiling
+  `F(x, y) + F(2x, y) + F(y, x)` to GLSL gives `_gpu_sin(a) + _gpu_cos(b) +
+  _gpu_min(a, b)` (measured on HEAD 2026-10-27). A parameter reads as an
+  inferred type, which `gpuProvablyFinite` (`gpu-target.ts`) refuses. Since
+  the shader holds every call of `_fn_F`, the sound rule is: a parameter is
+  finite for certain when the argument at that position is finite for certain
+  at every call site of the compiled expression. Tycho measured the cost on
+  WebGL, 0.169.2 to 0.171.0, full-screen 2048² draws: `voronoi-diagram`
+  0.51 → 0.58 ms (+14 %), `kelvin-wake` +9 to +10 %, `underwater-caustics`
+  +2 to +3 % (Tycho `docs/COMPUTE_ENGINE_LOG.md`, 0.171.0 adoption record).
+  `voronoi`'s `_fn_F`, `_fn_B` and `_fn_H` call `_gpu_min` 15 times and
+  `_gpu_sin`/`_gpu_cos` 4 times each; every call site passes `x`, `y`
+  (declared `real`) and literals. Nothing Tycho can declare removes it.
 - **CE-565.2** A scalar beside a vector in `ElementMax`, `ElementMin` and
   `Clamp` keeps the helper (`Clamp(v, 0, 1)` emits `_gpu_clamp3(v, vec3(0.0),
   vec3(1.0))`), although the widened `vec3(0.0)` is finite.

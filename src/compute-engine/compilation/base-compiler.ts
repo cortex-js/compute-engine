@@ -33230,6 +33230,21 @@ export class BaseCompiler {
     return name;
   }
 
+  /**
+   * The emitted name of a helper that a target adds to the registry beside
+   * the user functions (for example the element-wise wrapper of a shader
+   * call). The name comes from the same allocator as the user functions, so
+   * it never collides with another emitted definition or with a name the
+   * expression uses. `key` must not be the id of a user function: build it
+   * from the function id and a separator that no symbol name contains (`#`).
+   */
+  static registryHelperName(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    key: string
+  ): string {
+    return BaseCompiler.registryLocalName(registry, '_fn_', key);
+  }
+
   private static userFunctionName(
     registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
     id: string
@@ -33765,19 +33780,44 @@ export class BaseCompiler {
       );
     }
 
-    const specialized =
-      literal === undefined
-        ? undefined
-        : BaseCompiler.trySpecializedUserCall(
-            engine,
-            h,
-            literal,
-            args,
-            target,
-            node === undefined
-              ? undefined
-              : BaseCompiler._prefixCallOverrides.get(node)
-          );
+    // A copy typed by the arguments has no run-time test of a declared
+    // parameter type. On interval-js the test is `_IA.checkedCall`, emitted
+    // only on the ordinary route below, so a call that needs it does not
+    // take a copy.
+    //
+    // On interval-js, a copy whose body does not compile with the parameter
+    // typed by the argument does not end the compilation of the call: the
+    // definitions added by the attempt are removed, and the call takes the
+    // routes below, which can inline it (the substitution folds `[a, b][1]`
+    // to `a`). A cancellation propagates.
+    let specialized: TargetSource | undefined;
+    if (
+      literal !== undefined &&
+      !intervalChecks.some((checks) => checks.length > 0)
+    ) {
+      const registry = target.userFunctions;
+      const definedBefore =
+        target.language === 'interval-javascript' && registry !== undefined
+          ? new Set(registry.defs.keys())
+          : undefined;
+      try {
+        specialized = BaseCompiler.trySpecializedUserCall(
+          engine,
+          h,
+          literal,
+          args,
+          target,
+          node === undefined
+            ? undefined
+            : BaseCompiler._prefixCallOverrides.get(node)
+        );
+      } catch (e) {
+        if (e instanceof Error && e.name === 'CancellationError') throw e;
+        if (definedBefore === undefined || registry === undefined) throw e;
+        BaseCompiler.removeDefinitionsAddedSince(registry, definedBefore);
+        specialized = undefined;
+      }
+    }
     if (specialized !== undefined) return specialized;
 
     // A POINT bound to an UNTYPED parameter never goes by reference: the
@@ -36715,7 +36755,7 @@ export class BaseCompiler {
     };
   }
 
-  private static userFunctionParamsAreScalar(
+  static userFunctionParamsAreScalar(
     engine: ComputeEngine,
     h: string
   ): boolean {
@@ -36903,7 +36943,7 @@ export class BaseCompiler {
    * shader computes in floats, and an argument with a complex element is
    * refused through `isComplexValued`.
    */
-  private static isShaderVectorListArg(a: Expression): boolean {
+  static isShaderVectorListArg(a: Expression): boolean {
     if (BaseCompiler.isSinglePointArg(a)) return false;
     if (BaseCompiler.isComplexValued(a)) return false;
     const t = resolveTypeForCompilation(a.type.type);
@@ -38528,6 +38568,22 @@ export class BaseCompiler {
     const registry = target.userFunctions;
     if (registry?.lowering)
       return registry.lowering.call({ id: h, name, args, target });
+    // On interval-js a list is an array of intervals, which only the
+    // target's collection spelling (`compileCollectionValue`) writes: a
+    // list literal `[x, y]` has no ordinary lowering there. The call
+    // emitter spells each argument that way when no parameter is scalar,
+    // which is the case here: an interval-js copy binds a list whole.
+    if (target.language === 'interval-javascript')
+      return BaseCompiler.emitUserFunctionCall(
+        name,
+        args,
+        target,
+        args.map(() => false),
+        false,
+        false,
+        [],
+        absentChecks
+      );
     return `${name}(${args
       .map((a, i) => {
         return BaseCompiler.presentCheckedCode(
@@ -38562,11 +38618,25 @@ export class BaseCompiler {
       }
     | undefined {
     const registry = target.userFunctions;
+    // On interval-js, a copy is made for one case only: a list of real
+    // numbers that the interpreter binds WHOLE to a parameter whose element
+    // type is open (the branch that sets `wholeListArgument` below). The
+    // generic definition compiles the body against the open parameter type,
+    // and a nested call can then refuse it: with `d(p) := … r(p) …` and `r`
+    // typed by index reads, the parameter of `d` is inferred
+    // `dictionary<any> | indexed_collection<any>`, which `r` refuses. The
+    // copy typed by the argument (`vector<2>`) compiles, and its parameter
+    // is the array of intervals that a list is on this target, which is
+    // also how the generic definition receives a list bound whole
+    // (`compile-interval-collections.test.ts`). Scalar, point and complex
+    // arguments keep the generic definition on interval-js. ROADMAP CE-564.
+    const interval = target.language === 'interval-javascript';
     if (
       !registry ||
       (target.language !== 'javascript' &&
         target.language !== 'glsl' &&
-        target.language !== 'wgsl')
+        target.language !== 'wgsl' &&
+        !interval)
     )
       return undefined;
     if (
@@ -38591,6 +38661,7 @@ export class BaseCompiler {
     let pointArgument = false;
     let listArgument = false;
     let complexArgument = false;
+    let wholeListArgument = false;
     // How the interpreter binds a LIST argument at an untyped parameter
     // depends on the definition as a whole (`paramsAreScalar`): when every
     // parameter is scalar or untyped the call is BROADCAST over the list,
@@ -38639,6 +38710,7 @@ export class BaseCompiler {
         declared === 'value';
       let t = a.type.type;
       if (BaseCompiler.isSinglePointArg(a)) {
+        if (interval) return undefined;
         pointArgument = true;
         const width = BaseCompiler.aggregateComponentCount(a);
         if (width === undefined) return undefined;
@@ -38694,16 +38766,17 @@ export class BaseCompiler {
           // it. A parameter declared `real` rejects the `complex` type
           // below, so that call still declines: the declaration is a
           // contract.
-          if (target.language === 'javascript') return undefined;
+          if (target.language === 'javascript' || interval) return undefined;
           t = 'complex';
           complexArgument = true;
         } else t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
       } else if (
-        target.language === 'javascript' &&
+        (target.language === 'javascript' || interval) &&
         bindsListsWhole &&
         BaseCompiler.isRealListArg(a) &&
         BaseCompiler.paramElementTypeIsOpen(engine, h, i)
       ) {
+        wholeListArgument = true;
         // A LIST of real numbers that the interpreter binds WHOLE (the
         // definition declares or infers a collection parameter, so no
         // parameter list is all scalar). This branch applies only when the
@@ -38770,6 +38843,7 @@ export class BaseCompiler {
         t = bindsListsWhole ? a.type.type : 'number';
       } else if (
         target.language !== 'javascript' &&
+        !interval &&
         bindsListsWhole &&
         BaseCompiler.paramElementTypeIsOpen(engine, h, i) &&
         BaseCompiler.isShaderVectorListArg(a)
@@ -38865,6 +38939,9 @@ export class BaseCompiler {
       narrower = true;
     }
     if (listArgument && !pointArgument) return undefined;
+    // On interval-js, only a call with a list bound whole takes a copy (see
+    // the comment on `interval` above).
+    if (interval && !wholeListArgument) return undefined;
     const hasPointProof = pointWidths.some((w) => w !== undefined);
     if (!narrower && !hasPointProof) return undefined;
     if (BaseCompiler.isContradictedScalarDeclaration(engine.function(h, args)))

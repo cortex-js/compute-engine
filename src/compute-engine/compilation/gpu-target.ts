@@ -19254,6 +19254,104 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       body: string
     ) => this.declareGPUFunction(name, ret, params, body);
 
+    // A call of a function whose parameters are all scalar, with a LIST of 2
+    // to 4 real numbers at one or more of its scalar parameters. The
+    // interpreter applies the function to each element of the list (the
+    // call broadcasts), so `f([a, b])` with `f(q) := Mod(q, 1) - 0.5` is
+    // `[f(a), f(b)]`. The JavaScript target does the same at run time
+    // (`_SYS.bcastFn`). Here the list is a `vecN`, and the definition of
+    // `f` has a `float` parameter, which a `vecN` does not convert to. The
+    // call is emitted through a wrapper that applies the definition to each
+    // component and builds the `vecN` of the results:
+    //
+    //   vec2 _fn_f_each2(vec2 a0) {
+    //     return vec2(_fn_f(a0.x), _fn_f(a0.y));
+    //   }
+    //
+    // The wrapper evaluates its list argument once, and holds every other
+    // argument whole, as the interpreter does with a scalar beside a list.
+    // All the lists must have the same width. The definition must return a
+    // `float`: the elements of the result are then the components of the
+    // `vecN`. A point (a tuple) and a complex value are not lists
+    // (`isShaderVectorListArg`), so they keep the strict shape check of the
+    // call below. Returns `undefined` when the call is not of this form.
+    const elementwiseCall = (
+      id: string,
+      name: string,
+      sig: GPUUserFunctionSignature,
+      args: ReadonlyArray<Expression>,
+      target: CompileTarget<Expression>
+    ): string | undefined => {
+      if (args.length === 0 || sig.ret !== (isWGSL ? 'f32' : 'float'))
+        return undefined;
+      const engine = args[0].engine;
+      if (!BaseCompiler.userFunctionParamsAreScalar(engine, id))
+        return undefined;
+      let width: number | undefined;
+      let vecType: string | undefined;
+      const mapped = args.map((arg, i) => {
+        // A colour or complex parameter converts its argument at the call
+        // (`gpuColorOperand`, the `vec2(x, 0.0)` lift), which the wrapper
+        // does not do.
+        if (sig.complex[i] || sig.colors[i]) return undefined;
+        const t = gpuTypeOfValue(arg, isWGSL);
+        if (t === sig.params[i]) return false;
+        if (
+          sig.params[i] !== (isWGSL ? 'f32' : 'float') ||
+          t === undefined ||
+          !/^vec[234]f?$/.test(t) ||
+          (isWGSL ? !t.endsWith('f') : t.endsWith('f')) ||
+          !BaseCompiler.isShaderVectorListArg(arg)
+        )
+          return undefined;
+        const n = gpuComponentCountOfShaderType(t);
+        if (BaseCompiler.aggregateComponentCount(arg) !== n) return undefined;
+        if (width !== undefined && width !== n) return undefined;
+        width = n;
+        vecType = t;
+        return true;
+      });
+      if (
+        width === undefined ||
+        vecType === undefined ||
+        mapped.some((m) => m === undefined)
+      )
+        return undefined;
+      const registry = target.userFunctions;
+      if (registry === undefined) return undefined;
+      const mask = mapped.map((m) => (m ? '1' : '0')).join('');
+      // The name comes from the allocator of the user functions, under a key
+      // that no user function has (`#` is not in a function id). A name
+      // built by hand could be the name of a user function such as
+      // `f_each2_1`, or of a variable of the expression.
+      const wrapper = BaseCompiler.registryHelperName(
+        registry,
+        `${id}#each${width}_${mask}`
+      );
+      if (!registry.defs.has(wrapper)) {
+        const params = args.map((_, i): [string, string] => [
+          `a${i}`,
+          mapped[i] ? vecType! : sig.params[i],
+        ]);
+        const components = ['x', 'y', 'z', 'w'].slice(0, width);
+        const body = `${vecType}(${components
+          .map(
+            (c) =>
+              `${name}(${args
+                .map((_, i) => (mapped[i] ? `a${i}.${c}` : `a${i}`))
+                .join(', ')})`
+          )
+          .join(', ')})`;
+        registry.defs.set(
+          wrapper,
+          declareFn(wrapper, vecType, params, body)
+        );
+      }
+      return `${wrapper}(${args
+        .map((arg) => BaseCompiler.compileValueOperand(arg, target))
+        .join(', ')})`;
+    };
+
     return {
       defs: new Map<string, string>(),
       compiling: new Set<string>(),
@@ -19498,6 +19596,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 `must match its declaration exactly (there are no optional or ` +
                 `variadic parameters).`
             );
+          if (held === undefined) {
+            const each = elementwiseCall(id, name, sig, args, target);
+            if (each !== undefined) return each;
+          }
           const code = args.map((arg, i) => {
             const t = gpuTypeOfValue(arg, isWGSL);
             // A name the CALLER declared with a spelling this analysis has no
