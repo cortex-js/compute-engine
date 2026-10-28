@@ -77,7 +77,11 @@ describe('finite polycyclic coordinates', () => {
         for (const kind of ['conjugate', 'commutator'] as const)
           expect(
             pcgs.element(pcgs.specialExponents(kind, i, j, work), work)
-          ).toBe(session[kind](generator, pcgs.sequence[j - 1]));
+          ).toBe(
+            kind === 'conjugate'
+              ? session.conjugate(pcgs.sequence[j - 1], generator)
+              : session.commutator(generator, pcgs.sequence[j - 1])
+          );
     }
   });
 

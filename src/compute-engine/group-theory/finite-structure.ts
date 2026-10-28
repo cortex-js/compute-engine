@@ -1,8 +1,23 @@
 /**
- * Structure algorithms on validated finite-group tables. These operations share
- * the caller's GroupWork ledger with all subgroup and map computations.
- * Algebraic formulas handle p-groups and abelian groups where available;
- * subgroup lattices and generator-image searches remain bounded fallbacks.
+ * Structural queries on the finite tables and subgroup values in finite-group.ts.
+ * The kernel uses element indices, not symbolic expressions. All subgroups in a
+ * computation belong to the same table; different enumerations are different
+ * domains even when the abstract groups are isomorphic.
+ *
+ * Methods. Prime-power and nilpotent groups use the Frattini quotient, central
+ * prime-factor refinements and primary powers. Other groups use complete
+ * subgroup lattices or generator-image searches. Those searches are exponential
+ * in general; the table-order bound alone does not make them inexpensive.
+ *
+ * Automorphisms are specified by generator images and certified by Cayley-graph
+ * propagation. Characteristic tests first recompute subgroups fixed by every
+ * automorphism, then use the exhaustive search if no structural answer applies.
+ * No value carries trusted construction history.
+ *
+ * Resources. Every nested operation shares the session's GroupWork ledger.
+ * Lattices contain at most 4,096 subgroups and automorphism lists at most 4,096
+ * maps. A completed empty list or false answer is mathematical; a GroupLimitError
+ * means the requested computation is incomplete and carries no partial answer.
  */
 import {
   FiniteSubgroup,
@@ -15,6 +30,10 @@ import { integerGcd } from '../polynomial/exact-field.js';
 
 export { FiniteGroupHomomorphism } from './finite-group.js';
 
+/**
+ * The exponent is the least common multiple of all element orders. The direct
+ * scan uses at most |G|² table products; it makes no cyclicity assumption.
+ */
 export function finiteGroupExponent(
   s: FiniteGroupSession,
   g = s.whole
@@ -33,6 +52,10 @@ export function finiteGroupPrime(
 ): number | undefined {
   return s.primePower(g);
 }
+/**
+ * An abelian group of prime-power order is elementary abelian exactly when its
+ * exponent is that prime. The trivial group satisfies the predicate as well.
+ */
 export function finiteGroupIsElementaryAbelian(
   s: FiniteGroupSession,
   g = s.whole
@@ -42,14 +65,18 @@ export function finiteGroupIsElementaryAbelian(
   const p = finiteGroupPrime(s, g);
   return p !== undefined && finiteGroupExponent(s, g) === BigInt(p);
 }
+/**
+ * Return all Hall subgroups for the selected primes. Nilpotent groups have one
+ * such subgroup, computed by primary projection; the general fallback filters
+ * the complete subgroup lattice by its required order.
+ */
 export function finiteHallSubgroups(
   s: FiniteGroupSession,
   g: FiniteSubgroup,
   primes: readonly number[]
 ): readonly FiniteSubgroup[] {
   s.receive(g);
-  if (!Array.isArray(primes) || primes.length > 256)
-    throw new GroupInputError('invalid-hall-primes');
+  if (primes.length > 256) throw new GroupInputError('invalid-hall-primes');
   primes.forEach((p) => s.prime(p));
   let remaining = g.order,
     target = 1;
@@ -60,8 +87,20 @@ export function finiteHallSubgroups(
     }
   if (target === g.order) return [g];
   if (target === 1) return [s.trivial];
+  if (s.isNilpotent(g)) {
+    // A finite nilpotent group is the direct product of its Sylow subgroups.
+    // The selected factors form its unique Hall subgroup H. The complementary
+    // order kills all other factors and is coprime to |H|, so these powers of
+    // the original generators generate exactly H (no subgroup search).
+    return [s.generated(g.generators.map((x) => s.pow(x, BigInt(remaining))))];
+  }
   return s.subgroups(g).filter((h) => h.order === target);
 }
+/**
+ * A subgroup complements N exactly when its order times |N| is |G| and its
+ * intersection with N is trivial. Enumerate those subgroups and retain one per
+ * conjugacy orbit; normality of N makes G = NH follow from the order test.
+ */
 export function finiteComplementRepresentatives(
   s: FiniteGroupSession,
   g: FiniteSubgroup,
@@ -83,12 +122,56 @@ export function finiteComplementRepresentatives(
   }
   return result;
 }
+/**
+ * Construct a descending series including G and the identity. Central
+ * prime-order extensions handle nilpotent groups. Otherwise composition
+ * factors come from maximal proper normal subgroups of each term; chief and
+ * supersolvable series search the normal-subgroup lattice of G.
+ */
 export function finiteGroupSeries(
   s: FiniteGroupSession,
   kind: 'composition' | 'chief' | 'supersolvable',
   g = s.whole
 ): readonly FiniteSubgroup[] | undefined {
   s.receive(g);
+  if (s.isNilpotent(g)) {
+    // Every nontrivial quotient of a finite nilpotent group has a nontrivial
+    // center. Extend N by a central element of prime order modulo N. Each
+    // extension is normal in G and has prime index, hence the reversed chain
+    // is simultaneously a composition, chief and supersolvable series.
+    // Testing centrality against generators suffices; no quotient table or
+    // subgroup lattice is constructed. There are at most log2(|G|) steps.
+    const ascending = [s.trivial];
+    while (ascending.at(-1)!.order < g.order) {
+      const last = ascending.at(-1)!;
+      const x = g.members.find((element) => {
+        s.work.tick();
+        return (
+          !last.has(element) &&
+          g.generators.every((generator) =>
+            last.has(s.commutator(element, generator))
+          )
+        );
+      });
+      if (x === undefined)
+        throw new Error('Nilpotent quotient has trivial center');
+      let power = x,
+        order = 1;
+      while (!last.has(power)) {
+        power = s.mul(power, x);
+        order++;
+      }
+      let prime = 2;
+      while (order % prime !== 0) {
+        s.work.tick();
+        prime++;
+      }
+      ascending.push(
+        s.generated([...last.generators, s.pow(x, BigInt(order / prime))])
+      );
+    }
+    return ascending.reverse();
+  }
   if (kind === 'composition') {
     const result = [g];
     while (g.order > 1) {
@@ -101,8 +184,6 @@ export function finiteGroupSeries(
     }
     return result;
   }
-  if (kind !== 'chief' && kind !== 'supersolvable')
-    throw new GroupInputError('invalid-normal-series-kind');
   // Ascending normal subgroups form a DAG under inclusion. A chief series
   // follows cover edges (no normal subgroup between them); a supersolvable
   // series follows prime-index edges. A path to G certifies the entire series.
@@ -138,6 +219,11 @@ export function finiteGroupSeries(
   }
   return undefined;
 }
+/**
+ * For a p-group, omega is generated by elements killed by p^k and agemo by
+ * p^k-th powers. The torsion elements need not themselves form a subgroup, so
+ * both answers take generated closure.
+ */
 export function finitePowerSubgroup(
   s: FiniteGroupSession,
   g: FiniteSubgroup,
@@ -151,8 +237,6 @@ export function finitePowerSubgroup(
     throw new GroupInputError('invalid-prime-power-exponent');
   if (g.order > 1 && finiteGroupPrime(s, g) !== p)
     throw new GroupInputError('requires-p-group');
-  if (kind !== 'omega' && kind !== 'agemo')
-    throw new GroupInputError('invalid-power-subgroup-kind');
   // No element order exceeds |G|, so powers beyond this point have stabilized.
   let exponent = 1n;
   for (let i = 0; i < k && exponent < BigInt(g.order); i++) {
@@ -165,6 +249,11 @@ export function finitePowerSubgroup(
       : [...new Set(g.members.map((x) => s.pow(x, exponent)))]
   );
 }
+/**
+ * Iterate P_(i+1) = [P_i,G] P_i^p. Each term is characteristic in G, and the
+ * sequence strictly descends to the identity for a finite p-group. Table scans
+ * provide all commutators and powers before taking closure.
+ */
 export function finitePCentralSeries(
   s: FiniteGroupSession,
   g: FiniteSubgroup,
@@ -187,6 +276,11 @@ export function finitePCentralSeries(
   }
   return result;
 }
+/**
+ * Rational conjugacy joins the conjugacy classes of x^k for k coprime to |x|.
+ * These are exactly the generators of conjugates of <x>. Marking complete
+ * classes prevents repeated orbit construction.
+ */
 export function finiteRationalClasses(
   s: FiniteGroupSession,
   g = s.whole
@@ -277,11 +371,30 @@ export function finiteAutomorphisms(
   visit([]);
   return result;
 }
+/**
+ * Decide invariance under every automorphism of the session group. Canonical
+ * subgroup constructions provide exact positive shortcuts; otherwise all
+ * generator-image automorphisms are checked. Exhaustion is never evidence of
+ * invariance.
+ */
 export function finiteIsCharacteristic(
   s: FiniteGroupSession,
   h: FiniteSubgroup
 ): boolean {
   s.receive(h);
+  const whole = s.whole;
+  if (h.order === 1 || h.order === whole.order) return true;
+  if (!s.isNormal(whole, h)) return false;
+  // GL(d,p) is transitive on nonzero vectors. No nonzero proper subspace of
+  // an elementary abelian group is invariant under every automorphism.
+  if (finiteGroupIsElementaryAbelian(s, whole)) return false;
+  // These constructions commute with every automorphism. Recompute their
+  // actual members and compare sets: an imported subgroup is accepted on its
+  // mathematics, never on a claimed name or construction history.
+  if (s.equal(h, s.center(whole))) return true;
+  for (const kind of ['derived', 'lower-central', 'upper-central'] as const)
+    if (s.series(kind, whole).some((term) => s.equal(h, term))) return true;
+  if (s.equal(h, s.frattini(whole))) return true;
   return finiteAutomorphisms(s).every((a) =>
     h.members.every((x) => {
       s.work.tick();
@@ -385,6 +498,11 @@ export function finiteEulerianFunction(
   }
   return counts.get(lattice.at(-1)!)!;
 }
+/**
+ * Return a generating tuple of minimum length. A Frattini basis handles
+ * p-groups, primary factors handle abelian groups, and breadth-first subgroup
+ * extension provides the bounded general fallback.
+ */
 export function finiteMinimalGenerators(
   s: FiniteGroupSession,
   g = s.whole
@@ -455,6 +573,12 @@ export function finiteMinimalGenerators(
   }
   throw new Error('Finite group cannot be generated by all of its elements');
 }
+/**
+ * Find primary cyclic direct factors of an abelian group. Their orders come
+ * from torsion counts; backtracking chooses generators with trivial
+ * intersection with earlier factors. The retained factors therefore multiply
+ * directly to G.
+ */
 export function finiteIndependentAbelianGenerators(
   s: FiniteGroupSession,
   g = s.whole
@@ -491,6 +615,11 @@ export function finiteIndependentAbelianGenerators(
     );
   return gens.sort((a, b) => elementOrders.get(a)! - elementOrders.get(b)!);
 }
+/**
+ * The shortest word in the complete set of commutators has the least number of
+ * commutator factors. Breadth-first factorization returns undefined exactly
+ * when the element lies outside the derived subgroup.
+ */
 export function finiteCommutatorLength(
   s: FiniteGroupSession,
   x: number,
@@ -503,6 +632,11 @@ export function finiteCommutatorLength(
     for (const b of g.members) commutators.add(s.commutator(a, b));
   return s.factorization([...commutators], x)?.length;
 }
+/**
+ * Partition the complete subgroup lattice into conjugacy orbits. Conjugation
+ * preserves subgroup order and membership in G, so every orbit member is
+ * already represented in the lattice index.
+ */
 export function finiteSubgroupConjugacyClasses(
   s: FiniteGroupSession,
   g = s.whole

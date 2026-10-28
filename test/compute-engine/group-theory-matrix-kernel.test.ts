@@ -15,6 +15,10 @@ import {
 import { PermutationStabilizerChain } from '../../src/compute-engine/group-theory/permutation/stabilizer-chain';
 import { composePermutations } from '../../src/compute-engine/group-theory/permutation/values';
 
+import { rationalField } from '../../src/compute-engine/polynomial/exact-field';
+import { primitiveRootList } from '../../src/compute-engine/numerics/modular';
+import { bitLength } from '../../src/big-decimal/utils';
+
 const ledger = () => new GroupWork(50_000_000);
 const rational = new ExactMatrixField();
 const matrix = (rows: bigint[][], prime = 0) =>
@@ -115,7 +119,7 @@ describe('exact matrix values and domain boundaries', () => {
         [1n, 0n],
         [0n, 1n],
       ]).act(vector, ledger())
-    ).toThrow('invalid-exact-matrix-coefficient');
+    ).toThrow('incompatible-type');
   });
 
   test('zero budgets and cancellation stop arithmetic, including transpose', () => {
@@ -404,4 +408,144 @@ describe('invariant forms and rational lattices', () => {
       'matrix-group-element-limit'
     );
   });
+});
+
+describe('fraction-free rational elimination', () => {
+  // Dense deterministic 300-bit entries exercise cancellation between minors.
+  function largeRows(): bigint[][] {
+    let seed = 0x6a09e667;
+    return Array.from({ length: 12 }, () =>
+      Array.from({ length: 12 }, () => {
+        let value = 0n;
+        for (let k = 0; k < 10; k++) {
+          seed ^= seed << 13;
+          seed ^= seed >>> 17;
+          seed ^= seed << 5;
+          value = (value << 32n) | BigInt(seed >>> 0);
+        }
+        return (value & ((1n << 300n) - 1n)) | (1n << 299n);
+      })
+    );
+  }
+
+  test('12x12 300-bit determinant and inverse fit the returned coefficient bound', () => {
+    const a = matrix(largeRows());
+    // Independent Gaussian elimination uses unrestricted rational arithmetic.
+    const rows = a.rows.map((row) => [...row]);
+    let reference = rationalField.one;
+    for (let j = 0; j < rows.length; j++) {
+      let k = j;
+      while (rows[k][j].numerator === 0n) k++;
+      if (j !== k) {
+        [rows[j], rows[k]] = [rows[k], rows[j]];
+        reference = rationalField.neg(reference);
+      }
+      const pivot = rows[j][j];
+      reference = rationalField.mul(reference, pivot);
+      for (let i = j + 1; i < rows.length; i++) {
+        const factor = rationalField.mul(rows[i][j], rationalField.inv(pivot));
+        for (let h = j; h < rows.length; h++)
+          rows[i][h] = rationalField.add(
+            rows[i][h],
+            rationalField.neg(rationalField.mul(factor, rows[j][h]))
+          );
+      }
+    }
+    expect(bitLength(reference.numerator)).toBeGreaterThan(3500);
+    expect(bitLength(reference.numerator)).toBeLessThanOrEqual(4096);
+    expect(a.determinant(ledger())).toEqual(reference);
+    const inverse = a.inverse(ledger());
+    expect(a.multiply(inverse, ledger()).rows).toEqual(
+      ExactMatrixValue.identity(rational, 12, ledger()).rows
+    );
+    const work = ledger();
+    a.inverse(work);
+    expect(a.inverse(new GroupWork(work.used)).rows).toEqual(inverse.rows);
+    expect(() => a.inverse(new GroupWork(work.used - 1))).toThrow(
+      GroupLimitError
+    );
+  });
+
+  test('rational row scales, pivot swaps and rank deficiency remain exact', () => {
+    const a = ExactMatrixValue.fromRows(
+      rational,
+      [
+        [0n, { numerator: 1n, denominator: 3n }, 2n],
+        [{ numerator: 1n, denominator: 5n }, 2n, 0n],
+        [1n, 0n, { numerator: 1n, denominator: 7n }],
+      ],
+      ledger()
+    );
+    expect(a.determinant(ledger())).toEqual({
+      numerator: -421n,
+      denominator: 105n,
+    });
+    expect(a.multiply(a.inverse(ledger()), ledger()).rows).toEqual(
+      ExactMatrixValue.identity(rational, 3, ledger()).rows
+    );
+    const swap = matrix([
+      [0n, 1n, 0n],
+      [1n, 0n, 0n],
+      [0n, 0n, 1n],
+    ]);
+    const group = new ExactMatrixGroup(rational, 3, [swap], ledger());
+    const forms = group.invariantBilinearForms(ledger());
+    expect(forms).toHaveLength(5);
+    for (const form of forms)
+      expect(
+        swap
+          .multiply(form, ledger())
+          .multiply(swap.transpose(ledger()), ledger()).rows
+      ).toEqual(form.rows);
+  });
+
+  test('true output overflow and cancellation still stop elimination', () => {
+    const a = matrix(
+      Array.from({ length: 12 }, (_, i) =>
+        Array.from({ length: 12 }, (_, j) => (i === j ? 1n << 399n : 0n))
+      )
+    );
+    expect(() => a.determinant(ledger())).toThrow(
+      'matrix-coefficient-bit-limit'
+    );
+    const cancelled = new Error('cancelled');
+    let checks = 0;
+    expect(() =>
+      a.inverse(
+        new GroupWork(50_000_000, () => {
+          if (++checks === 100) throw cancelled;
+        })
+      )
+    ).toThrow(cancelled);
+  });
+});
+
+describe('shared multiplicative generator selection', () => {
+  test.each([3, 5, 7, 17, 257, 65521])(
+    'GL(1,%s) chooses a primitive scalar',
+    (prime) => {
+      const scalar = naturalLinearGroup(1, prime, false, ledger())
+        .generators[0];
+      const roots = primitiveRootList(BigInt(prime));
+      expect(roots).toContain(scalar.rows[0][0].numerator);
+      expect(
+        scalar.power(BigInt(prime - 1), ledger()).rows[0][0].numerator
+      ).toBe(1n);
+    }
+  );
+  test.each([
+    [0n, []],
+    [1n, [0n]],
+    [2n, [1n]],
+    [4n, [3n]],
+    [8n, []],
+    [9n, [2n, 5n]],
+    [14n, [3n, 5n]],
+    [-7n, [3n, 5n]],
+  ] as const)(
+    'primitive roots of %s preserve the shared helper contract',
+    (n, expected) => {
+      expect(primitiveRootList(n)).toEqual(expected);
+    }
+  );
 });

@@ -1,3 +1,9 @@
+/**
+ * Coordinates on a finite section N/D inside a parent pc group.
+ * The numerator and denominator retain their ambient domains; only quotient
+ * arithmetic uses the quotient table. Lifts choose representatives and never
+ * claim to preserve multiplication. Linear actions use row-vector convention.
+ */
 import { FinitePcgs } from './polycyclic.js';
 import { FiniteSubgroup, GroupInputError, GroupWork } from './finite-group.js';
 import {

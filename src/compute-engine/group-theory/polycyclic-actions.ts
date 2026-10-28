@@ -1,3 +1,9 @@
+/**
+ * Finite-table pc sequences adapted to subnormal series and permutation actions.
+ * Action images cover the whole ambient table and are proved homomorphic on
+ * Cayley edges before orbit traversal. Representatives remain ambient elements;
+ * the induced stabilizer sequence uses the original parent coordinates.
+ */
 import { FinitePcgs } from './polycyclic.js';
 import {
   FiniteSubgroup,

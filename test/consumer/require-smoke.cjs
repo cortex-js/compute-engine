@@ -149,7 +149,7 @@ for (const engine of [ce, full]) {
     fail('group-theory loader report is incorrect');
   const order = engine
     .box([
-      'PermutationGroupOrder',
+      'GroupOrder',
       [
         'PermutationGroup',
         [

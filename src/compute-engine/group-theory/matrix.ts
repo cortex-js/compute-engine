@@ -1,3 +1,19 @@
+/**
+ * Exact square matrices over Q and small prime fields, represented by canonical
+ * rational coefficient records (prime-field denominators are one). Row vectors
+ * act on the right. Constructors validate external values; internal arithmetic
+ * preserves the field and dimension.
+ *
+ * Products and elimination cost O(n³) coefficient operations. Rational
+ * elimination uses fraction-free integer minors; finite-field elimination uses
+ * ordinary pivots. Groups use bounded closure for explicit tables, or faithful
+ * finite vector actions and permutation stabilizer chains for larger orders.
+ * Every path shares a GroupWork ledger; coefficient, scratch, point, and closure
+ * bounds also limit storage. Exhausted rational closure does not prove infinity.
+ */
+import { bitLength } from '../../big-decimal/utils.js';
+import { primeFactors } from '../numerics/primes.js';
+import { primitiveRootFromFactors } from '../numerics/modular.js';
 import { integerRowBasis } from '../polynomial/integer-lattice.js';
 import {
   integerGcd,
@@ -22,7 +38,9 @@ import { PermutationValue, PermutationAction } from './permutation/values.js';
 import { PermutationGroupValue } from './permutation/groups.js';
 
 export type MatrixCoefficient = bigint | RationalCoefficient;
-const bitLength = (x: bigint) => (x < 0n ? -x : x).toString(2).length;
+// Scratch minors may be larger than the 4096-bit returned coefficients. Bound
+// stored integers separately; each cross-product uses at most twice this size.
+const MAX_ELIMINATION_BITS = 262_144;
 
 /** Explicit Q or prime-field identity; rational coefficients never pass through floats. */
 export class ExactMatrixField {
@@ -48,10 +66,11 @@ export class ExactMatrixField {
       !x ||
       typeof x !== 'object' ||
       typeof x.numerator !== 'bigint' ||
-      typeof x.denominator !== 'bigint' ||
-      x.denominator === 0n
+      typeof x.denominator !== 'bigint'
     )
-      throw new GroupInputError('invalid-exact-matrix-coefficient');
+      throw new GroupInputError('incompatible-type');
+    if (x.denominator === 0n)
+      throw new GroupInputError('matrix-denominator-zero-in-field');
     if (bitLength(x.numerator) > 4096 || bitLength(x.denominator) > 4096)
       throw new GroupLimitError('matrix-coefficient-bit-limit');
     const q = rationalCoefficient(x.numerator, x.denominator);
@@ -109,8 +128,10 @@ export class ExactMatrixField {
   /** Arithmetic backends already normalize; enforce the shared coefficient bound only. */
   #checked(value: MatrixCoefficient, work: GroupWork): RationalCoefficient {
     work.tick();
-    const result =
-      typeof value === 'bigint' ? { numerator: value, denominator: 1n } : value;
+    // Prime-field arithmetic already returns a residue below p <= 65521.
+    // Only rational results can grow past the coefficient bound.
+    if (typeof value === 'bigint') return { numerator: value, denominator: 1n };
+    const result = value;
     if (
       bitLength(result.numerator) > 4096 ||
       bitLength(result.denominator) > 4096
@@ -147,13 +168,13 @@ export class ExactMatrixValue {
     input: readonly (readonly MatrixCoefficient[])[],
     work: GroupWork
   ): ExactMatrixValue {
+    if (!Array.isArray(input)) throw new GroupInputError('incompatible-type');
+    if (Array.from(input).some((row) => !Array.isArray(row)))
+      throw new GroupInputError('incompatible-type');
     if (
-      !Array.isArray(input) ||
       input.length < 1 ||
       input.length > 32 ||
-      Array.from(input).some(
-        (row) => !Array.isArray(row) || row.length !== input.length
-      )
+      input.some((row) => row.length !== input.length)
     )
       throw new GroupInputError('invalid-exact-square-matrix');
     return new ExactMatrixValue(
@@ -230,7 +251,10 @@ export class ExactMatrixValue {
       this.rows.map((_, i) => this.rows.map((r) => r[i]))
     );
   }
+  /** Bareiss over Q keeps integer minors; field pivots suffice over Fp. */
   determinant(w: GroupWork): RationalCoefficient {
+    if (this.field.characteristic === 0)
+      return rationalDeterminant(this.field, this.rows, w);
     const F = this.field,
       a = this.rows.map((r) => [...r]);
     let det = F.normalize(1n, w);
@@ -268,8 +292,10 @@ export class ExactMatrixValue {
     );
   }
   power(exponent: bigint, w: GroupWork): ExactMatrixValue {
-    if (typeof exponent !== 'bigint' || bitLength(exponent) > 16384)
-      throw new GroupInputError('invalid-matrix-exponent');
+    if (typeof exponent !== 'bigint')
+      throw new GroupInputError('incompatible-type');
+    if (bitLength(exponent) > 16384)
+      throw new GroupLimitError('matrix-exponent-bit-limit');
     let a = exponent < 0n ? this.inverse(w) : this;
     let result = ExactMatrixValue.identity(this.field, this.dimension, w);
     if (exponent < 0n) exponent = -exponent;
@@ -284,7 +310,8 @@ export class ExactMatrixValue {
     vector: readonly MatrixCoefficient[],
     w: GroupWork
   ): readonly RationalCoefficient[] {
-    if (!Array.isArray(vector) || vector.length !== this.dimension)
+    if (!Array.isArray(vector)) throw new GroupInputError('incompatible-type');
+    if (vector.length !== this.dimension)
       throw new GroupInputError('invalid-matrix-vector');
     const F = this.field,
       v = Array.from(vector, (x: MatrixCoefficient) => F.normalize(x, w)),
@@ -295,6 +322,132 @@ export class ExactMatrixValue {
   }
 }
 
+/** Bound stored minors after exact division, not the cancelling cross-products. */
+function checkedMinor(value: bigint, w: GroupWork): bigint {
+  w.tick();
+  if (bitLength(value) > MAX_ELIMINATION_BITS)
+    throw new GroupLimitError('matrix-elimination-bit-limit');
+  return value;
+}
+
+/** Scaling each row independently preserves its linear equation over Q. */
+function integerRows(
+  rows: readonly (readonly RationalCoefficient[])[],
+  w: GroupWork
+): { rows: bigint[][]; scales: bigint[] } {
+  const scales: bigint[] = [];
+  const integers = rows.map((row) => {
+    let scale = 1n;
+    for (const x of row)
+      scale = checkedMinor(
+        (scale / integerGcd(scale, x.denominator)) * x.denominator,
+        w
+      );
+    scales.push(scale);
+    return row.map((x) =>
+      checkedMinor(x.numerator * (scale / x.denominator), w)
+    );
+  });
+  return { rows: integers, scales };
+}
+
+/**
+ * Bareiss elimination: after k pivots the remaining entries are bordered minors.
+ * Sylvester's identity makes division by the preceding pivot exact, including
+ * after row swaps. Unlike rational Gaussian elimination, no growing denominators
+ * enter the O(n³) inner loop.
+ */
+function rationalDeterminant(
+  F: ExactMatrixField,
+  rows: readonly (readonly RationalCoefficient[])[],
+  w: GroupWork
+): RationalCoefficient {
+  const { rows: a, scales } = integerRows(rows, w);
+  let previous = 1n,
+    sign = 1n;
+  const n = a.length;
+  for (let j = 0; j + 1 < n; j++) {
+    let k = j;
+    while (k < n && a[k][j] === 0n) {
+      w.tick();
+      k++;
+    }
+    if (k === n) return F.normalize(0n, w);
+    if (k !== j) {
+      [a[k], a[j]] = [a[j], a[k]];
+      sign = -sign;
+    }
+    const pivot = a[j][j];
+    for (let i = j + 1; i < n; i++) {
+      for (let h = j + 1; h < n; h++)
+        a[i][h] = checkedMinor(
+          (pivot * a[i][h] - a[i][j] * a[j][h]) / previous,
+          w
+        );
+      a[i][j] = 0n;
+    }
+    previous = pivot;
+  }
+  let denominator = 1n;
+  for (const scale of scales)
+    denominator = checkedMinor(denominator * scale, w);
+  // Cancel row scales before enforcing the returned coefficient bound.
+  return F.normalize(
+    rationalCoefficient(sign * a[n - 1][n - 1], denominator),
+    w
+  );
+}
+
+/**
+ * Fraction-free Gauss–Jordan (the Bareiss update applied above and below each
+ * pivot). Every nonpivot row must be scaled even when its pivot-column entry is
+ * zero: this preserves exact division by the previous pivot. At termination,
+ * dividing each pivot row by its pivot gives RREF, including rectangular and
+ * rank-deficient systems used for invariant forms.
+ */
+function rationalRowReduce(
+  F: ExactMatrixField,
+  a: RationalCoefficient[][],
+  columns: number,
+  w: GroupWork
+): number[] {
+  const { rows: integers } = integerRows(a, w);
+  const pivots: number[] = [];
+  let previous = 1n;
+  for (let j = 0; j < columns && pivots.length < integers.length; j++) {
+    const r = pivots.length;
+    let k = r;
+    while (k < integers.length && integers[k][j] === 0n) {
+      w.tick();
+      k++;
+    }
+    if (k === integers.length) continue;
+    [integers[k], integers[r]] = [integers[r], integers[k]];
+    const pivot = integers[r][j];
+    for (let i = 0; i < integers.length; i++) {
+      if (i === r) continue;
+      const factor = integers[i][j];
+      for (let h = 0; h < integers[i].length; h++) {
+        if (h === j) continue;
+        integers[i][h] = checkedMinor(
+          (pivot * integers[i][h] - factor * integers[r][h]) / previous,
+          w
+        );
+      }
+      integers[i][j] = 0n;
+    }
+    previous = pivot;
+    pivots.push(j);
+  }
+  for (let i = 0; i < integers.length; i++) {
+    const divisor = i < pivots.length ? integers[i][pivots[i]] : 1n;
+    a[i] = integers[i].map((x) =>
+      F.normalize(rationalCoefficient(x, divisor), w)
+    );
+  }
+  return pivots;
+}
+
 /** Gauss–Jordan elimination mutates rows; returned columns identify unit pivots. */
 function rowReduce(
   F: ExactMatrixField,
@@ -302,6 +455,7 @@ function rowReduce(
   columns: number,
   w: GroupWork
 ): number[] {
+  if (F.characteristic === 0) return rationalRowReduce(F, a, columns, w);
   const pivots: number[] = [];
   for (let j = 0; j < columns && pivots.length < a.length; j++) {
     const r = pivots.length;
@@ -334,8 +488,10 @@ export class ExactMatrixGroup {
     w: GroupWork
   ) {
     const identity = ExactMatrixValue.identity(field, dimension, w);
-    if (!Array.isArray(generators) || generators.length > 256)
-      throw new GroupInputError('invalid-matrix-generators');
+    if (!Array.isArray(generators))
+      throw new GroupInputError('incompatible-type');
+    if (generators.length > 256)
+      throw new GroupLimitError('matrix-generator-limit');
     for (const g of generators) {
       identity.compatible(g);
       if (g.determinant(w).numerator === 0n)
@@ -416,6 +572,8 @@ export class ExactMatrixGroup {
     const rows = elements.map((a) =>
       elements.map((b) => {
         const i = index.get(a.multiply(b, w).key(w));
+        // Completed finite generator closure is a group: finite cancellative
+        // matrix multiplication supplies inverses, hence every product is present.
         if (i === undefined) throw new Error('Incomplete matrix closure');
         return i;
       })
@@ -478,12 +636,16 @@ export class ExactMatrixGroup {
           let y = g.act(v, w);
           if (projective) {
             const lead = y.find((x) => x.numerator !== 0n);
+            // Generator construction rejects determinant zero, so its kernel
+            // contains only zero and cannot kill a projective representative.
             if (!lead)
               throw new Error('Invertible matrix killed nonzero vector');
             const inv = this.field.inv(lead, w);
             y = y.map((x) => this.field.mul(x, inv, w));
           }
           const target = index.get(key(y));
+          // The domain lists every vector (or its unique normalized projective
+          // representative); multiplication in the same field stays in it.
           if (target === undefined)
             throw new Error('Matrix action is not closed');
           return target;
@@ -613,40 +775,20 @@ export function naturalLinearGroup(
     gens.push(elementary(i, i + 1, 1n), elementary(i + 1, i, 1n));
   }
   if (!special && prime > 2) {
-    const K = primeField(prime);
-    const factors: number[] = [];
-    let remaining = prime - 1;
-    for (let divisor = 2; divisor * divisor <= remaining; divisor++) {
-      w.tick();
-      if (remaining % divisor !== 0) continue;
-      factors.push(divisor);
-      while (remaining % divisor === 0) remaining /= divisor;
-    }
-    if (remaining > 1) factors.push(remaining);
-    const power = (base: bigint, exponent: number): bigint => {
-      let result = 1n;
-      while (exponent > 0) {
-        w.tick();
-        if (exponent % 2 === 1) result = K.mul(result, base);
-        exponent = Math.floor(exponent / 2);
-        if (exponent) base = K.mul(base, base);
-      }
-      return result;
-    };
-    // An element generates F_p^* exactly when none of these proper-divisor
-    // powers is one. Avoid enumerating its whole cyclic subgroup per candidate.
-    let primitive = 0n;
-    for (let candidate = 2; candidate < prime; candidate++) {
-      if (
-        factors.every(
-          (divisor) => power(BigInt(candidate), (prime - 1) / divisor) !== 1n
-        )
-      ) {
-        primitive = BigInt(candidate);
-        break;
-      }
-    }
-    if (!primitive)
+    // The field bound p <= 65521 bounds trial factoring by sqrt(p-1).
+    // Reserve that work before the shared synchronous factorization.
+    w.tick(Math.ceil(Math.sqrt(prime - 1)));
+    const factors = Object.keys(primeFactors(prime - 1)).map(BigInt);
+    const primitive = primitiveRootFromFactors(
+      BigInt(prime),
+      BigInt(prime - 1),
+      factors,
+      undefined,
+      (cost) => w.tick(cost)
+    );
+    // A validated prime has a cyclic multiplicative group of order p-1;
+    // a missing generator would violate the shared root helper's invariant.
+    if (primitive === undefined)
       throw new Error('Prime field has no multiplicative generator');
     gens.push(elementary(0, 0, primitive));
   }
@@ -759,6 +901,8 @@ export function invariantRationalGroupLattice(
       (determinant.numerator !== determinant.denominator &&
         determinant.numerator !== -determinant.denominator)
     )
+      // The sum of all row lattices of a completed finite group is invariant,
+      // and integerRowBasis preserves that lattice. Failure is an internal bug.
       throw new Error('Invariant lattice verification failed');
   }
   return B;

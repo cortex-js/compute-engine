@@ -8,6 +8,7 @@
  * This proves consistency without enumerating the elements of H.
  */
 import { GroupInputError, GroupLimitError, GroupWork } from './finite-group.js';
+import type { FinitePcgs } from './polycyclic.js';
 
 export type PcCoordinates = readonly bigint[];
 
@@ -48,7 +49,8 @@ function equalCoordinates(
 
 /**
  * A finite consistent presentation; storage depends on rank, not group order.
- * Coordinates are g0^e0 ... gr^er with exponents in their relative ranges.
+ * Coordinates are g1^e1 ... gr^er with exponents in their relative ranges.
+ * Array offsets and generator(index) are zero-based; public positions are one-based.
  *
  * coordinates() is the validation boundary. Arithmetic accepts canonical
  * vectors from this group, returned by that method or by earlier operations.
@@ -380,4 +382,45 @@ export class CollectedPcGroup {
       }
     }
   }
+}
+
+/**
+ * Preserve a finite pc sequence's coordinates in a collected presentation.
+ * Relations are read from the table, then independently checked as cyclic
+ * extensions. Extraction uses O(r² + Σ log(mi)) table operations, where mi are
+ * the relative orders, and O(r³) coefficients;
+ * consistency checking is charged separately by extend().
+ */
+export function fromFinitePcgs(
+  pcgs: FinitePcgs,
+  work: GroupWork
+): CollectedPcGroup {
+  if (pcgs.relativeOrders.some((order) => order < 2))
+    throw new GroupInputError('redundant-pc-generator');
+  const session = pcgs.group.session(work);
+  let group = CollectedPcGroup.trivial(work);
+  for (let i = pcgs.sequence.length - 1; i >= 0; i--) {
+    const generator = pcgs.sequence[i];
+    const inverse = session.inv(generator);
+    // Each relation lies in the strict suffix, so all earlier coordinates vanish.
+    const suffix = (element: number) =>
+      pcgs
+        .exponents(element, work)
+        .slice(i + 1)
+        .map(BigInt);
+    const tail = pcgs.sequence.slice(i + 1);
+    group = CollectedPcGroup.extend(
+      group,
+      {
+        relativeOrder: BigInt(pcgs.relativeOrders[i]),
+        power: suffix(session.pow(generator, BigInt(pcgs.relativeOrders[i]))),
+        conjugates: tail.map((x) => suffix(session.conjugate(x, generator))),
+        inverseConjugates: tail.map((x) =>
+          suffix(session.conjugate(x, inverse))
+        ),
+      },
+      work
+    );
+  }
+  return group;
 }

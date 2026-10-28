@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const temporary = mkdtempSync(join(tmpdir(), 'ce-group-bench-'));
-const results = join(root, 'benchmarks/results');
+const results = join(root, 'build/group-theory-benchmarks');
 mkdirSync(results, { recursive: true });
 const families = process.argv.slice(2);
 const selected = families.length

@@ -287,7 +287,7 @@ describe('checked finite polycyclic sequences', () => {
     for (let i = 1; i <= pc.sequence.length; i++)
       for (let j = 1; j <= pc.sequence.length; j++) {
         expect(pc.element(pc.specialExponents('conjugate', i, j, w), w)).toBe(
-          s.conjugate(pc.sequence[i - 1], pc.sequence[j - 1])
+          s.conjugate(pc.sequence[j - 1], pc.sequence[i - 1])
         );
         expect(pc.element(pc.specialExponents('commutator', i, j, w), w)).toBe(
           s.commutator(pc.sequence[i - 1], pc.sequence[j - 1])

@@ -50,6 +50,8 @@ import {
   finiteSubgroupConjugacyClasses,
 } from '../group-theory/finite-structure.js';
 import { FinitePcgs } from '../group-theory/polycyclic.js';
+import { fromFinitePcgs } from '../group-theory/polycyclic-presentation.js';
+import { encodeCollectedPcGroup } from './pc-group-theory.js';
 import {
   ExactMatrixField,
   ExactMatrixValue,
@@ -277,7 +279,8 @@ export function exactGroupDefinitions(
   };
   const readMatrix = (x: Expression, w: GroupWork): ExactMatrixValue => {
     if (!isFunction(x, 'GroupMatrix')) return unresolved(x);
-    if (x.ops.length !== 2) return invalid('invalid-matrix-arity');
+    if (x.ops.length !== 2)
+      return invalid(x.ops.length < 2 ? 'missing' : 'unexpected-argument');
     const F = new ExactMatrixField(integer(x.op1)),
       input = list(x.op2);
     if (input.length < 1 || input.length > 32)
@@ -289,10 +292,9 @@ export function exactGroupDefinitions(
       return cells.map((cell) => {
         w.tick();
         if (!isNumber(cell)) return unresolved(cell);
-        if (!cell.isExact)
-          return invalid('expected-exact-rational-matrix-entry');
+        if (!cell.isExact) return invalid('incompatible-type');
         const r = asRational(cell);
-        if (!r) return invalid('expected-exact-rational-matrix-entry');
+        if (!r) return invalid('incompatible-type');
         return { numerator: BigInt(r[0]), denominator: BigInt(r[1]) };
       });
     });
@@ -309,7 +311,8 @@ export function exactGroupDefinitions(
     ]);
   const readMatrixGroup = (x: Expression, w: GroupWork): ExactMatrixGroup => {
     if (!isFunction(x, 'MatrixGroup')) return unresolved(x);
-    if (x.ops.length !== 3) return invalid('invalid-matrix-group-arity');
+    if (x.ops.length !== 3)
+      return invalid(x.ops.length < 3 ? 'missing' : 'unexpected-argument');
     const n = integer(x.ops[0]),
       F = new ExactMatrixField(integer(x.ops[1])),
       input = list(x.ops[2]);
@@ -792,6 +795,41 @@ export function exactGroupDefinitions(
     (ops, work, limits) =>
       encodeDescriptor(readQuotient(ops[0], work, limits).map.target.descriptor)
   );
+  // Right multiplication gives a faithful action: the image of identity under
+  // x is x itself. Preserve table order so a verified quotient projection can
+  // reuse its indices. Construction costs O(n²) table lookups and image storage.
+  const regularModel = (
+    table: FiniteGroupTable,
+    work: GroupWork
+  ): Model & { descriptor: PermutationGroupValue } => {
+    const elements = Array.from({ length: table.order }, (_, x) =>
+      PermutationValue.fromImages(
+        Array.from(
+          { length: table.order },
+          (_, i) => table.product(i, x, work) + 1
+        ),
+        { check: () => work.tick() }
+      )
+    );
+    const indices = new Map(
+      elements.map((element, index) => [element.images.join(','), index])
+    );
+    const descriptor = new PermutationGroupValue(
+      table.session(work).whole.generators.map((index) => elements[index]),
+      new PermutationAction(table.order),
+      { check: () => work.tick() }
+    );
+    return {
+      table,
+      elements,
+      descriptor,
+      indexOf: (element) => {
+        if (!isPermutationValue(element)) return undefined;
+        work.tick(element.supportDegree + 1);
+        return indices.get(element.images.join(','));
+      },
+    };
+  };
   // An arbitrary multiplication table is checked cubically before its regular
   // permutation action is exposed. Table index zero denotes the identity.
   register(
@@ -814,20 +852,7 @@ export function exactGroupDefinitions(
         }),
         work
       );
-      const generators = table.session(work).whole.generators;
-      return bridge.encodeGroup(
-        new PermutationGroupValue(
-          generators.map((x) =>
-            PermutationValue.fromImages(
-              Array.from(
-                { length: table.order },
-                (_, i) => table.product(i, x, work) + 1
-              )
-            )
-          ),
-          new PermutationAction(table.order)
-        )
-      );
+      return bridge.encodeGroup(regularModel(table, work).descriptor);
     }
   );
 
@@ -1246,6 +1271,9 @@ export function exactGroupDefinitions(
             );
           case 'GroupNthRoots':
             return elts(s.roots(g, member(ops[1], m, w), bigint(ops[2])));
+          // Breadth-first traversal returns a shortest positive word in the
+          // supplied generators. Letter positions are one-based; inverse letters
+          // are not added to the alphabet.
           case 'GroupFactorization': {
             const gens = m.descriptor.generators.map((x) => m.indexOf(x)!),
               word = s.factorization(gens, member(ops[1], m, w));
@@ -1257,38 +1285,8 @@ export function exactGroupDefinitions(
           case 'GroupIndex':
             return ce.number(s.index(g, h));
           case 'GroupQuotient': {
-            const q = s.quotient(g, h),
-              qs = q.group.session(w);
-            const images = Array.from({ length: q.group.order }, (_, x) =>
-              PermutationValue.fromImages(
-                Array.from(
-                  { length: q.group.order },
-                  (_, i) => qs.mul(i, x) + 1
-                ),
-                { check: () => w.tick() }
-              )
-            );
-            const quotient = new PermutationGroupValue(
-              qs.whole.generators.map((x) => images[x]),
-              new PermutationAction(q.group.order),
-              { check: () => w.tick() }
-            );
-            // The regular action uses the quotient table's existing order, so
-            // its verified projection can be rendered without recertification.
-            const quotientModel: Model = {
-              table: q.group,
-              elements: images,
-              descriptor: quotient,
-              indexOf: (element) => {
-                if (!isPermutationValue(element)) return undefined;
-                const index = images.findIndex(
-                  (x) =>
-                    x.supportDegree === element.supportDegree &&
-                    x.images.every((point, i) => point === element.images[i])
-                );
-                return index < 0 ? undefined : index;
-              },
-            };
+            const q = s.quotient(g, h);
+            const quotientModel = regularModel(q.group, w);
             const projection = encodeMap(
               {
                 source: m,
@@ -1492,6 +1490,10 @@ export function exactGroupDefinitions(
       input.map((x) => member(x, m, w)),
       w
     );
+    // Public sequences represent strict cyclic factors. Quotient kernels may
+    // retain relative-order-one coordinates internally to preserve their indexing.
+    if (pc.relativeOrders.some((order) => order <= 1))
+      return invalid('redundant-pc-generator');
     return { pc, m };
   };
   register(
@@ -1513,6 +1515,17 @@ export function exactGroupDefinitions(
         limits.maxElements
       );
       return encodePc(pc, m);
+    }
+  );
+  // Coordinate positions are preserved by conversion; only the computational
+  // representation changes from enumerated elements to checked cyclic relations.
+  register(
+    'GroupPcPresentation',
+    '(GroupPcSequence) -> PcGroup',
+    1,
+    (ops, work, limits) => {
+      const { pc } = readPc(ops[0], work, limits.maxElements);
+      return encodeCollectedPcGroup(ce, fromFinitePcgs(pc, work));
     }
   );
   const pcOps: Record<string, readonly [string, string]> = {
@@ -1632,6 +1645,9 @@ export function exactGroupDefinitions(
       );
     }
   );
+  // Sifting preserves the right coset Hx and detects membership by an identity
+  // residue. It is not a canonical coset representative; canonical reduction
+  // scans Hx for its least parent coordinate vector.
   for (const name of ['GroupPcSift', 'GroupPcCanonicalElement'])
     register(
       name,

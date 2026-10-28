@@ -2,8 +2,10 @@
 
 This record connects the native group kernels, their resource bounds, and the
 workloads used to measure them. It is a developer capability ledger, not a claim
-of complete GAP compatibility. The public user guide belongs in the
-`cortex-js/cortexjs.io` documentation repository.
+of complete GAP compatibility. The
+[operator reference](../docs/compute-engine/group-theory.md) documents the
+public interface and can be moved to the `cortex-js/cortexjs.io` documentation
+repository.
 
 ## Integration and representation contracts
 
@@ -91,7 +93,13 @@ The public constructor is
 use the outermost-generator-first order. For generator i, `powers[i]` is a
 coordinate vector in the later generators, and each row of `conjugates[i]` or
 `inverseConjugates[i]` gives the image of one later generator in that same tail.
-Four empty lists describe the trivial group.
+Public generator positions are one-based. The conjugator comes first:
+`GroupPcConjugateExponents(pc, i, j)` describes `g_i^-1 g_j g_i`, matching row
+`i` of the collected presentation. Four empty lists describe the trivial group.
+
+`GroupPcPresentation(pc)` converts a validated finite sequence to this format,
+preserves its coordinates, and independently verifies the cyclic extensions.
+Public sequences must have every relative order greater than one.
 
 For each extension of a collected tail H, the new generator g has relative order
 m, relation g^m=t, and right conjugation phi(h)=g^-1 h g. Construction checks
@@ -113,7 +121,9 @@ presentation. The initial interface consists of `PcGroupOrder`,
 `PcRelativeOrders`, `PcIdentity`, `PcGenerators`, `PcCoordinates`, `PcMultiply`,
 `PcInverse`, and `PcPower`. Arithmetic requires the same presentation domain; it
 does not attempt an isomorphism between two different presentations of the same
-abstract group.
+abstract group. Validation is cached by boxed identity within an engine; a new
+transported value is checked before use. Cached queries replay the validation
+work charge, so a warm cache does not bypass a smaller per-call budget.
 
 The kernel accepts up to 64 generators, relative orders at least two, and
 coordinate/relative-order/power-exponent inputs of at most 4,096 bits. The group
@@ -171,9 +181,9 @@ dependencies are already installed.
 
 The runner bundles all five benchmark families to ES2022, executes them
 sequentially with the current Node executable, writes records under
-`benchmarks/results/`, and removes its temporary bundles. TypeScript loading is
-outside the timed process, and native private fields retain their modern runtime
-behavior.
+`build/group-theory-benchmarks/`, and removes its temporary bundles. TypeScript
+loading is outside the timed process, and native private fields retain their
+modern runtime behavior.
 
 ```sh
 node --version
@@ -216,54 +226,38 @@ but do not include an Epsil parser or a UI. Logical-work reductions corroborate
 algorithmic improvements when elapsed times vary with JIT compilation, garbage
 collection, or competing processes.
 
-Raw records:
+The runner writes machine-local JSON records to the ignored
+`build/group-theory-benchmarks/` directory. Each record includes the runtime,
+CPU, build target, commit, warmup count, raw samples, and logical work. These
+outputs are not repository baselines.
 
-- [Finite kernels](results/group-theory-finite.json)
-- [Matrix kernels](results/group-theory-matrix.json)
-- [Finite polycyclic coordinates](results/group-theory-polycyclic.json)
-- [Collected presentations](results/group-theory-presentation.json)
-- [Public expression path](results/group-theory-api.json)
-- [Independent GAP workloads](results/group-theory-gap.json)
+An exploratory GAP 4.15.1 run checked comparable mathematical workloads, but
+used different representations and a Linux container alongside Windows Node. It
+established no controlled performance ranking. Future external comparisons must
+isolate construction, conversion, caching, and output materialization and record
+equal resource conditions. GAP is not required to build or use the library.
 
-## External GAP comparison
+## Representative results
 
-The independent [GAP script](group-theory-gap.g) runs with GAP 4.15.1 and
-packages disabled (`gap -q -A -b benchmarks/group-theory-gap.g`). The recorded
-run uses `ghcr.io/gap-system/gap:4.15.1-bare`, with its exact image digest in
-the result metadata, inside a Linux container limited to two CPUs and 1 GiB of
-memory. CE runs on Windows under Node 26.12.1 on an Intel Core Ultra 7 165U.
-Both use three warmups and nine samples, with fresh GAP groups per query sample.
+Node 26.12.1 with ES2022 bundles successfully runs all five families. The review
+regressions below record logical work rather than portable latency claims.
+Finite structural counts exclude table construction and use a fresh session.
 
-GAP's recorded timer is `gettimeofday`, with 1,000 ns resolution; GAP reports it
-as nonmonotonic and not reliable. The harness rejects negative durations, but
-wall-clock adjustments remain a limitation. Platform, container limits,
-representations, allocation, and timing facilities differ. The comparison is a
-diagnostic reference, not an overall CAS ranking or a controlled language
-performance comparison. These are shared development-machine measurements;
-background activity is not controlled. Preserve the raw sample ranges and
-compare repeated runs before treating a timing change as a regression.
+| Workload                                                         | Logical work | Result                                    |
+| ---------------------------------------------------------------- | -----------: | ----------------------------------------- |
+| C2^7 Fitting subgroup                                            |        1,797 | Whole group                               |
+| C2^7 socle                                                       |        7,686 | Whole group                               |
+| C2^7 composition/chief series or supersolvability                |   4,828 each | Complete series / true                    |
+| C2^6 × C3 Hall subgroup for π = {2}                              |        3,093 | Unique subgroup of order 64               |
+| UT(9,2) collected multiplication, separately boxed equal domains |   47,448,124 | Exact product below the default 50M limit |
 
-The following medians are milliseconds from the linked matrix, polycyclic, and
-GAP records. All paired queries verify the same mathematical result:
-
-| Workload                      | CE kernel median ms | GAP median ms | Representation note                                                                          |
-| ----------------------------- | ------------------: | ------------: | -------------------------------------------------------------------------------------------- |
-| GL(4,2) order, 20,160         |               7.176 |         1.262 | Generic prime-field matrices with adjacent transvections; CE builds a faithful vector action |
-| GL(5,2) order, 9,999,360      |              17.774 |         4.989 | Same generator construction; group construction excluded                                     |
-| GL(6,2) order, 20,158,709,760 |              57.125 |        16.833 | Same generator construction; group construction excluded                                     |
-| S4 polycyclic sequence        |               0.628 |         0.113 | CE starts from a validated table; GAP starts from permutation generators                     |
-| C2^7 polycyclic sequence      |               1.094 |         0.329 | CE starts from a validated table; GAP starts from a regular permutation action               |
-
-The matrix constructors do not attach a precomputed named-GL order. GAP's D128
-automorphism workload converts fresh regular permutations to a pc group outside
-the query timer, measures that conversion separately, then materializes all
-2,048 automorphisms as complete images. CE's corresponding kernel uses a finite
-table. Descriptor construction, table validation, conversion, and query costs
-must therefore remain separate when interpreting those results.
-
-No external GAP measurement currently covers the specialized collected
-presentation benchmarks. The GAP comparison is a development tool; GAP is not
-required by the package or its runtime.
+The collected multiplication count includes one consistency-validation charge;
+warm queries replay that charge while reusing the checked presentation. A 12×12
+dense integer matrix with 300-bit entries now completes determinant and inverse
+calculations through fraction-free elimination, with final exact coefficients
+checked against the existing 4,096-bit bound. These are targeted regressions,
+not evidence that every group of the same order or matrix of the same dimension
+has the same cost.
 
 ## Algorithm and capability references
 

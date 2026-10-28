@@ -11,12 +11,17 @@ import {
   finiteMinimalGenerators,
   finiteHallSubgroups,
   finiteEulerianFunction,
+  finiteGroupSeries,
+  finiteIsCharacteristic,
 } from '../../src/compute-engine/group-theory/finite-structure';
 import {
   PermutationValue,
   PermutationAction,
 } from '../../src/compute-engine/group-theory/permutation/values';
-import { PermutationGroupValue } from '../../src/compute-engine/group-theory/permutation/groups';
+import {
+  PermutationGroupValue,
+  enumeratePermutationGroup,
+} from '../../src/compute-engine/group-theory/permutation/groups';
 
 const work = (limit = 50_000_000) => new GroupWork(limit);
 const cyclic = (order: number) =>
@@ -83,6 +88,23 @@ describe('finite-group algorithms and verified maps', () => {
     expect(session.sylow(session.whole, 3).order).toBe(1);
     expect(session.frattini().order).toBe(1);
     expect(session.isSimple()).toBe(false);
+    expect(session.radical(session.whole, 'fitting').order).toBe(128);
+    expect(session.radical(session.whole, 'socle').order).toBe(128);
+    for (const kind of ['composition', 'chief', 'supersolvable'] as const) {
+      const series = finiteGroupSeries(session, kind)!;
+      expect(series.map((term) => term.order)).toEqual([
+        128, 64, 32, 16, 8, 4, 2, 1,
+      ]);
+      expect(
+        series.every((term) => session.isNormal(session.whole, term))
+      ).toBe(true);
+    }
+    expect(finiteIsCharacteristic(session, session.trivial)).toBe(true);
+    expect(finiteIsCharacteristic(session, session.frattini())).toBe(true);
+    expect(finiteIsCharacteristic(session, session.whole)).toBe(true);
+    expect(finiteIsCharacteristic(session, session.generated([1, 2, 4]))).toBe(
+      false
+    );
     const generators = finiteMinimalGenerators(session);
     expect(generators.length).toBe(7);
     expect(session.generated(generators).order).toBe(128);
@@ -98,6 +120,101 @@ describe('finite-group algorithms and verified maps', () => {
     );
     expect(lattice).not.toHaveBeenCalled();
     expect(ledger.used).toBeLessThan(100_000);
+  });
+  test('nilpotent Hall projections avoid mixed-primary subgroup lattices', () => {
+    const table = FiniteGroupTable.fromTable(
+      Array.from({ length: 192 }, (_, a) =>
+        Array.from(
+          { length: 192 },
+          (_, b) =>
+            ((a % 64) ^ (b % 64)) +
+            64 * ((Math.floor(a / 64) + Math.floor(b / 64)) % 3)
+        )
+      ),
+      work()
+    );
+    const ledger = work(50_000),
+      session = table.session(ledger);
+    const lattice = jest.spyOn(session, 'subgroups').mockImplementation(() => {
+      throw new Error('unnecessary lattice');
+    });
+    const two = finiteHallSubgroups(session, session.whole, [2]);
+    expect(two).toHaveLength(1);
+    expect(two[0].members).toEqual(Array.from({ length: 64 }, (_, i) => i));
+    expect(finiteHallSubgroups(session, session.whole, [3])[0].members).toEqual(
+      [0, 64, 128]
+    );
+    expect(
+      finiteHallSubgroups(session, session.whole, [2, 3, 2])[0].order
+    ).toBe(192);
+    expect(lattice).not.toHaveBeenCalled();
+    expect(ledger.used).toBeLessThan(50_000);
+  });
+  test('canonical characteristic subgroups are recognized from independently rebuilt members', () => {
+    const table = dihedral(64),
+      reference = table.session(work());
+    const canonical = [
+      reference.center(),
+      reference.derived(),
+      reference.frattini(),
+      ...reference.series('derived'),
+      ...reference.series('lower-central'),
+      ...reference.series('upper-central'),
+    ];
+    for (const subgroup of canonical) {
+      const ledger = work(500_000),
+        session = table.session(ledger);
+      const imported = session.generated([...subgroup.members]);
+      expect(imported).not.toBe(subgroup);
+      expect(finiteIsCharacteristic(session, imported)).toBe(true);
+      expect(ledger.used).toBeLessThan(500_000);
+    }
+  });
+  test('nilpotent prime-factor series and socles agree with independent subgroup oracles', () => {
+    for (const table of [
+      cyclic(1),
+      cyclic(8),
+      cyclic(12),
+      dihedral(4),
+      dihedral(8),
+    ]) {
+      const session = table.session(work()),
+        normals = session.normalSubgroups();
+      const minimal = normals.filter(
+        (h) =>
+          h.order > 1 &&
+          !normals.some(
+            (k) => k.order > 1 && k.order < h.order && session.subset(h, k)
+          )
+      );
+      const expectedSocle = minimal.reduce(
+        (a, h) => session.closure(a, h),
+        session.trivial
+      );
+      expect(session.radical(session.whole, 'socle').members).toEqual(
+        expectedSocle.members
+      );
+      expect(session.radical(session.whole, 'fitting').order).toBe(table.order);
+      for (const kind of ['composition', 'chief', 'supersolvable'] as const) {
+        const series = finiteGroupSeries(session, kind)!;
+        expect(series[0].order).toBe(table.order);
+        expect(series.at(-1)!.order).toBe(1);
+        for (let i = 1; i < series.length; i++) {
+          expect(session.isNormal(session.whole, series[i])).toBe(true);
+          expect(session.index(series[i - 1], series[i])).toBeGreaterThan(1);
+          expect(() =>
+            session.prime(session.index(series[i - 1], series[i]))
+          ).not.toThrow();
+        }
+      }
+      const automorphisms = finiteAutomorphisms(session);
+      for (const subgroup of session.subgroups()) {
+        const invariant = automorphisms.every((map) =>
+          subgroup.members.every((x) => subgroup.has(map.apply(x)))
+        );
+        expect(finiteIsCharacteristic(session, subgroup)).toBe(invariant);
+      }
+    }
   });
   test('D128 automorphisms use one generator-edge certification per map', () => {
     const table = dihedral(64),
@@ -159,6 +276,24 @@ describe('finite-group algorithms and verified maps', () => {
           expected *= prime;
         }
         expect(session.sylow(session.whole, prime).order).toBe(expected);
+      }
+      for (const primes of [[2], [3], [2, 3]]) {
+        let target = 1,
+          remaining = table.order;
+        for (const prime of primes)
+          while (remaining % prime === 0) {
+            target *= prime;
+            remaining /= prime;
+          }
+        const expected = lattice
+          .filter((h) => h.order === target)
+          .map((h) => h.members.join(','))
+          .sort();
+        expect(
+          finiteHallSubgroups(session, session.whole, primes)
+            .map((h) => h.members.join(','))
+            .sort()
+        ).toEqual(expected);
       }
       const generators = finiteMinimalGenerators(session);
       expect(session.generated(generators).order).toBe(table.order);
@@ -336,7 +471,31 @@ describe('finite-group algorithms and verified maps', () => {
     expect(() => finitePermutationModel(group, 4, work(3))).toThrow(
       'group-work-limit'
     );
-    expect(finitePermutationModel(group, 4, work()).table.order).toBe(4);
+    const finite = finitePermutationModel(group, 4, work());
+    expect(finite.table.order).toBe(4);
+    expect(finite.elements.map((element) => element.images)).toEqual(
+      enumeratePermutationGroup(group, { maxElements: 4, maxProducts: 4 }).map(
+        (element) => element.images
+      )
+    );
+    expect(() => finitePermutationModel(group, 3, work())).toThrow(
+      'finite-group-element-limit'
+    );
+    // The shared traversal must retain the finite model's larger work envelope,
+    // independently of the public closure API's 100,000-product ceiling.
+    const repeated = new PermutationGroupValue(
+      Array.from({ length: 1024 }, () =>
+        PermutationValue.fromImages(
+          Array.from({ length: 128 }, (_, i) => ((i + 1) % 128) + 1)
+        )
+      ),
+      new PermutationAction(128)
+    );
+    const repeatedLedger = work(20_000_000);
+    expect(
+      finitePermutationModel(repeated, 128, repeatedLedger).table.order
+    ).toBe(128);
+    expect(repeatedLedger.used).toBeLessThan(20_000_000);
     const sentinel = new Error('cancel');
     expect(() =>
       finitePermutationModel(

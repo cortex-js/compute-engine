@@ -2,8 +2,18 @@
 
 ### New Features
 
+- **Finite-group maps, quotients, matrices, and polycyclic coordinates.** The
+  optional group-theory library adds checked homomorphisms, quotient
+  projections, bounded structural algorithms, exact rational and prime-field
+  matrix groups, and finite polycyclic sequences. Collected presentations
+  support exact arithmetic without enumerating the group. Generic `Group*`
+  queries dispatch to the appropriate representation; permutation-specific
+  element and action operations remain available. General finite models have at
+  most 256 elements, with explicit work and output limits. Contributed by
+  @KingArth0r (#484).
+
 - **Permutation groups, an optional entry:
-  `@cortex-js/compute-engine/group-theory`.** `loadGroupTheory(ce)` adds 26
+  `@cortex-js/compute-engine/group-theory`.** `loadGroupTheory(ce)` adds
   operators to an engine: permutations and their products, inverses, powers,
   conjugates (b⁻¹ab) and commutators (a⁻¹b⁻¹ab); groups given by generators
   on an explicit action `PermutationAction(n)`; orbits and transversals; the
@@ -18,6 +28,14 @@
   operators. Contributed by @KingArth0r (#482).
 
 ### Behavior Changes
+
+- **Group queries use generic names across representations.** The unreleased
+  permutation-only order, membership, subgroup, index, equality, normality,
+  abelian, element-list, generator-list, and identity queries now use
+  `GroupOrder`, `GroupContains`, `GroupIsSubgroup`, `GroupIndex`, `GroupEqual`,
+  `GroupIsNormal`, `GroupIsAbelian`, `GroupElements`, `GroupGenerators`, and
+  `GroupIdentity`. Permutation queries retain their stabilizer-chain and closure
+  algorithms and corresponding resource options.
 
 - **The join of types does not depend on the order of its operands.**
   `widen(nan, real, missing)` gave `missing | number` and

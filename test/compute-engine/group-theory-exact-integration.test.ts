@@ -62,8 +62,7 @@ describe('Epsil exact group theory', () => {
     expect(ce.box(['GroupIsSolvable', G]).evaluate().json).toBe('True');
     expect(ce.box(['GroupExponent', G]).evaluate().json).toBe(6);
     expect(
-      ce.box(['PermutationGroupOrder', ['GroupDerivedSubgroup', G]]).evaluate()
-        .json
+      ce.box(['GroupOrder', ['GroupDerivedSubgroup', G]]).evaluate().json
     ).toBe(3);
     expect(ce.box(['GroupPcRelativeOrders', pc]).evaluate().json).toEqual([
       'List',

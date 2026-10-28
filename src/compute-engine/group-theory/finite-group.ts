@@ -1,12 +1,37 @@
 /**
- * Small finite groups represented by complete multiplication tables. Identity is
- * index zero; subgroup and map domains refer to a particular table object.
- * Imported tables (at most 256 elements) pay an O(n³) associativity check.
- * Tables derived from proved group operations use an O(n²) bridge instead.
- * A session shares one work ledger across nested algorithms and returns only
- * complete results; exhausting a bound is never a mathematical conclusion.
+ * Exact finite groups represented by complete multiplication tables.
+ *
+ * Representation. A table of order n has elements 0..n-1 and identity 0.
+ * Its rows store the product of the row and column indices, in that order.
+ * Subgroups store sorted members, a membership bitset and a generating subset.
+ * Their ambient table is part of their domain: equally sized or isomorphic
+ * tables do not make their element indices interchangeable.
+ *
+ * Validation. Arbitrary imported tables (n <= 256) pay an O(n³) associativity
+ * check, in addition to closure, identity and inverse checks. Permutation and
+ * exact-matrix bridges inherit associativity from their group operation and
+ * use an O(n²) table check. Private constructors keep these facts invariant.
+ * Maps are certified either against all products or by generator-image
+ * propagation along the Cayley graph. Quotients retain the verified projection.
+ *
+ * Algorithms. Generated subgroups use finite Cayley-graph closure. Direct
+ * scans handle cosets, normalizers, centralizers and conjugacy. Prime-power
+ * and nilpotent formulas avoid subgroup lattices where possible. Other
+ * structural queries enumerate subgroup extensions, with a fixed count bound.
+ * These fallback searches can be exponential even for a table of modest order.
+ *
+ * Resources. A session shares one GroupWork ledger across nested algorithms;
+ * table products cost one unit and permutation products cost their image-array
+ * length. Closure retains at most one million permutation image entries.
+ * Lattices stop at 4,096 subgroups and the session cache retains at most 8,192
+ * subgroup values. Every charge checks cancellation. Exhaustion throws a named
+ * GroupLimitError and never returns an incomplete mathematical answer.
  */
-import { PermutationGroupValue } from './permutation/groups.js';
+import {
+  PermutationGroupValue,
+  PermutationClosureLimitError,
+  enumeratePermutationGroupWithLimits,
+} from './permutation/groups.js';
 import { PermutationValue, composePermutations } from './permutation/values.js';
 
 export class GroupInputError extends Error {
@@ -119,35 +144,37 @@ export class FiniteGroupTable {
     )
       throw new GroupInputError('invalid-finite-permutation-model');
     const values = { check: work.check };
-    const elements: PermutationValue[] = [
-      PermutationValue.fromImages([], values),
-    ];
-    const index = new Map<string, number>([['', 0]]);
-    let storedImages = 0;
-    // The closure and table share one ledger. Charge image widths, not merely
-    // cancellation callbacks, so a large action cannot evade the work limit.
-    for (let cursor = 0; cursor < elements.length; cursor++) {
-      work.tick();
-      for (const generator of group.generators) {
-        work.tick(
-          Math.max(1, elements[cursor].supportDegree, generator.supportDegree)
-        );
-        const candidate = composePermutations(
-          elements[cursor],
-          generator,
-          values
-        );
-        const key = candidate.images.join(',');
-        if (index.has(key)) continue;
-        if (elements.length >= maxElements)
-          throw new GroupLimitError('finite-group-element-limit');
-        storedImages += candidate.supportDegree;
-        if (storedImages > 1_000_000)
-          throw new GroupLimitError('finite-group-storage-limit');
-        index.set(key, elements.length);
-        elements.push(candidate);
-      }
+    let elements: readonly PermutationValue[];
+    try {
+      // Reuse the reference traversal, retaining the finite model's ceilings.
+      // Product widths are charged before allocation to the same ledger used
+      // below for all n² table products; repeated closure edges still cost work.
+      elements = enumeratePermutationGroupWithLimits(
+        group,
+        {
+          maxElements,
+          maxProducts: work.limit,
+          maxImageWork: work.limit,
+          maxStoredImages: 1_000_000,
+        },
+        {
+          check: () => work.tick(0),
+          chargeProduct: (width) => work.tick(width),
+        }
+      );
+    } catch (error) {
+      if (!(error instanceof PermutationClosureLimitError)) throw error;
+      const code =
+        error.code === 'permutation-closure-element-limit'
+          ? 'finite-group-element-limit'
+          : error.code === 'permutation-closure-storage-limit'
+            ? 'finite-group-storage-limit'
+            : 'group-work-limit';
+      throw new GroupLimitError(code);
     }
+    const index = new Map(
+      elements.map((element, i) => [element.images.join(','), i])
+    );
     const rows = elements.map((a) =>
       elements.map((b) => {
         work.tick(Math.max(1, a.supportDegree, b.supportDegree));
@@ -189,6 +216,9 @@ export class FiniteGroupTable {
   }
 }
 
+/** A generated subgroup owns its member list and refers to one ambient table.
+ * Membership uses one bit per ambient element. The retained generator list is
+ * irredundant in insertion order, so it has at most log2(order) entries. */
 export class FiniteSubgroup {
   readonly #members: readonly number[];
   readonly #ambient: FiniteGroupTable;
@@ -210,7 +240,7 @@ export class FiniteSubgroup {
     generators: readonly number[],
     work: GroupWork
   ): FiniteSubgroup {
-    if (!Array.isArray(generators) || generators.length > 256)
+    if (generators.length > 256)
       throw new GroupInputError('invalid-finite-subgroup-generators');
     generators.forEach((x) => {
       work.tick();
@@ -299,10 +329,7 @@ export class FiniteGroupSession {
   }
   pow(a: number, exponent: bigint): number {
     this.group.element(a);
-    if (
-      typeof exponent !== 'bigint' ||
-      (exponent < 0n ? -exponent : exponent).toString(2).length > 16384
-    )
+    if ((exponent < 0n ? -exponent : exponent).toString(2).length > 16384)
       throw new GroupInputError('invalid-group-exponent');
     if (exponent < 0n) {
       a = this.inv(a);
@@ -368,6 +395,12 @@ export class FiniteGroupSession {
         if (!h.has(this.conjugate(a, x))) return false;
     return true;
   }
+  /**
+   * Conjugating every generator into H proves H^x is contained in H; equal
+   * finite orders give equality. Test each x in G, then generate the resulting
+   * subgroup. Cost before closure is O(|G| times the number of generators of
+   * H).
+   */
   normalizer(g: FiniteSubgroup, h: FiniteSubgroup): FiniteSubgroup {
     this.receive(g);
     this.receive(h);
@@ -377,6 +410,11 @@ export class FiniteGroupSession {
       )
     );
   }
+  /**
+   * Commuting with generators is equivalent to commuting with every element
+   * they generate. Scan G against those generators and close the resulting
+   * centralizer.
+   */
   centralizer(g: FiniteSubgroup, h: FiniteSubgroup): FiniteSubgroup {
     this.receive(g);
     this.receive(h);
@@ -389,6 +427,11 @@ export class FiniteGroupSession {
   center(g = this.whole): FiniteSubgroup {
     return this.centralizer(g, g);
   }
+  /**
+   * The conjugates of a generating set of H generate every conjugate H^x.
+   * Their join is normal in G and is contained in every normal subgroup
+   * containing H.
+   */
   normalClosure(g: FiniteSubgroup, h: FiniteSubgroup): FiniteSubgroup {
     if (!this.subset(g, h)) throw new GroupInputError('not-a-subgroup');
     const gens = new Set(h.generators);
@@ -396,6 +439,11 @@ export class FiniteGroupSession {
       for (const a of h.generators) gens.add(this.conjugate(a, x));
     return this.generated([...gens]);
   }
+  /**
+   * Intersect all conjugates of H by testing which elements of H remain in H
+   * under every conjugation by G. This is the largest normal subgroup of G
+   * contained in H.
+   */
   core(g: FiniteSubgroup, h: FiniteSubgroup): FiniteSubgroup {
     if (!this.subset(g, h)) throw new GroupInputError('not-a-subgroup');
     return this.generated(
@@ -404,6 +452,11 @@ export class FiniteGroupSession {
       )
     );
   }
+  /**
+   * Generate all pairwise commutators [a,b] with a in G and b in H. No
+   * normalization assumptions on these subgroups are needed; the direct scan
+   * costs O(|G||H|) products before closure.
+   */
   commutatorSubgroup(g: FiniteSubgroup, h: FiniteSubgroup): FiniteSubgroup {
     this.receive(g);
     this.receive(h);
@@ -415,21 +468,29 @@ export class FiniteGroupSession {
   derived(g = this.whole): FiniteSubgroup {
     return this.isAbelian(g) ? this.trivial : this.commutatorSubgroup(g, g);
   }
+  /**
+   * Derived and lower-central series descend by commutator closure. The
+   * upper-central series lifts the center modulo the previous term. Equality
+   * detects the stable term; only series ending at the identity (or G for the
+   * upper series) certify solvability or nilpotence.
+   */
   series(
     kind: 'derived' | 'lower-central' | 'upper-central',
     g = this.whole
   ): readonly FiniteSubgroup[] {
     this.receive(g);
-    if (!['derived', 'lower-central', 'upper-central'].includes(kind))
-      throw new GroupInputError('invalid-group-series');
     const result = [kind === 'upper-central' ? this.trivial : g];
     while (true) {
       const last = result[result.length - 1];
+      if (kind === 'upper-central' ? last.order === g.order : last.order === 1)
+        return result;
       const next =
         kind === 'upper-central'
           ? this.generated(
               g.members.filter((a) =>
-                g.members.every((b) => last.has(this.commutator(a, b)))
+                // The previous term is normal in G, so centrality in G/last
+                // is determined by the images of G's generators.
+                g.generators.every((b) => last.has(this.commutator(a, b)))
               )
             )
           : kind === 'derived'
@@ -443,6 +504,10 @@ export class FiniteGroupSession {
     return this.series('derived', g).at(-1)!.order === 1;
   }
   isNilpotent(g = this.whole): boolean {
+    this.receive(g);
+    // Finite p-groups and abelian groups are nilpotent regardless of their
+    // subgroup counts. Other groups are decided by the lower central series.
+    if (this.primePower(g) !== undefined || this.isAbelian(g)) return true;
     return this.series('lower-central', g).at(-1)!.order === 1;
   }
   isAbelian(g = this.whole): boolean {
@@ -489,6 +554,11 @@ export class FiniteGroupSession {
     }
     return result;
   }
+  /**
+   * Each HxK is a complete orbit under left H and right K multiplication.
+   * Marking every visited element partitions G; only the first unvisited
+   * representative generates each orbit.
+   */
   doubleCosets(
     g: FiniteSubgroup,
     h: FiniteSubgroup,
@@ -510,6 +580,10 @@ export class FiniteGroupSession {
     }
     return result;
   }
+  /**
+   * Conjugates x^a for all a in G form the entire orbit of x. Complete-orbit
+   * marking partitions G and bounds the scan by O(|G|²) conjugations.
+   */
   conjugacyClasses(g = this.whole): readonly (readonly number[])[] {
     this.receive(g);
     const seen = new Set<number>(),
@@ -530,7 +604,13 @@ export class FiniteGroupSession {
     this.group.element(x);
     return g.members.filter((a) => this.pow(a, n) === x);
   }
-  /** Enumerates the complete subgroup lattice or throws before returning any part. */
+  /**
+   * Breadth-first extension H -> <H,x> reaches every subgroup, since a finite
+   * generating set can be adjoined one element at a time. Sorted member lists
+   * identify equal subgroups. Right-coset representatives eliminate equivalent
+   * extensions without assuming H normal. Return only the complete lattice;
+   * exponential growth is bounded by both the subgroup cap and the work ledger.
+   */
   subgroups(g = this.whole, maxSubgroups = 4096): readonly FiniteSubgroup[] {
     this.receive(g);
     if (
@@ -628,12 +708,36 @@ export class FiniteGroupSession {
       g
     );
   }
+  /**
+   * Join all normal solvable, normal nilpotent, or minimal normal subgroups
+   * for the requested radical. Whole-group tests and the central socle formula
+   * handle nilpotent cases first; the remaining fallback requires the complete
+   * normal-subgroup lattice.
+   */
   radical(
     g = this.whole,
     kind: 'solvable' | 'fitting' | 'socle' = 'solvable'
   ): FiniteSubgroup {
-    if (!['solvable', 'fitting', 'socle'].includes(kind))
-      throw new GroupInputError('invalid-group-radical');
+    this.receive(g);
+    if (kind === 'solvable' && this.isSolvable(g)) return g;
+    if (kind !== 'solvable' && this.isNilpotent(g)) {
+      if (kind === 'fitting') return g;
+      // Minimal normal subgroups of a finite nilpotent group lie in its center
+      // and have prime order. Conversely, every central prime-order subgroup
+      // is minimal normal. The socle is their join, found without a lattice.
+      const generators: number[] = [];
+      for (const x of this.center(g).members) {
+        const order = this.elementOrder(x);
+        let remaining = order;
+        for (let prime = 2; prime <= remaining; prime++) {
+          this.work.tick();
+          if (remaining % prime !== 0) continue;
+          generators.push(this.pow(x, BigInt(order / prime)));
+          while (remaining % prime === 0) remaining /= prime;
+        }
+      }
+      return this.generated([...new Set(generators)]);
+    }
     const normals = this.normalSubgroups(g);
     const selected =
       kind === 'socle'
@@ -702,6 +806,10 @@ export class FiniteGroupSession {
       if (p % d === 0) throw new GroupInputError('invalid-small-prime');
     }
   }
+  /**
+   * A normal p-subgroup lies in every Sylow p-subgroup. The core of any Sylow
+   * subgroup is therefore exactly the largest normal p-subgroup.
+   */
   pCore(g: FiniteSubgroup, p: number): FiniteSubgroup {
     this.prime(p);
     const syl = this.sylow(g, p);
@@ -711,6 +819,12 @@ export class FiniteGroupSession {
     return FiniteGroupQuotient.fromNormalSubgroup(this, g, n);
   }
 
+  /**
+   * Breadth-first traversal of the Cayley graph gives a shortest positive
+   * word. Finite generators have inverses among their positive powers, so the
+   * search reaches the generated subgroup. Labels in the returned word are
+   * one-based generator indices.
+   */
   factorization(
     generators: readonly number[],
     x: number
@@ -820,7 +934,7 @@ export class FiniteGroupHomomorphism {
     images: readonly number[],
     work: GroupWork
   ): FiniteGroupHomomorphism {
-    if (!Array.isArray(images) || images.length !== source.order)
+    if (images.length !== source.order)
       throw new GroupInputError('invalid-group-homomorphism');
     const copy = [...images];
     for (const x of copy) {

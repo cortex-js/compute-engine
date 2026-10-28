@@ -1,4 +1,7 @@
-import { CollectedPcGroup } from '../../src/compute-engine/group-theory/polycyclic-presentation';
+import {
+  CollectedPcGroup,
+  fromFinitePcgs,
+} from '../../src/compute-engine/group-theory/polycyclic-presentation';
 import {
   FiniteGroupTable,
   GroupWork,
@@ -39,41 +42,6 @@ function symmetric(degree: number) {
     256,
     budget()
   );
-}
-
-function fromTablePcgs(pcgs: FinitePcgs, work: GroupWork) {
-  const session = pcgs.group.session(work);
-  let group = CollectedPcGroup.trivial(work);
-  for (let i = pcgs.sequence.length - 1; i >= 0; i--) {
-    const tailPcgs = FinitePcgs.fromSequence(
-      pcgs.group,
-      pcgs.sequence.slice(i + 1),
-      work
-    );
-    const generator = pcgs.sequence[i];
-    group = CollectedPcGroup.extend(
-      group,
-      {
-        relativeOrder: BigInt(pcgs.relativeOrders[i]),
-        power: tailPcgs
-          .exponents(
-            session.pow(generator, BigInt(pcgs.relativeOrders[i])),
-            work
-          )
-          .map(BigInt),
-        conjugates: tailPcgs.sequence.map((x) =>
-          tailPcgs.exponents(session.conjugate(x, generator), work).map(BigInt)
-        ),
-        inverseConjugates: tailPcgs.sequence.map((x) =>
-          tailPcgs
-            .exponents(session.conjugate(x, session.inv(generator)), work)
-            .map(BigInt)
-        ),
-      },
-      work
-    );
-  }
-  return group;
 }
 
 describe('collected finite cyclic extensions', () => {
@@ -232,7 +200,7 @@ describe('collected finite cyclic extensions', () => {
     const work = budget();
     const { table } = symmetric(4);
     const pcgs = FinitePcgs.compute(table, work)!;
-    const group = fromTablePcgs(pcgs, work);
+    const group = fromFinitePcgs(pcgs, work);
     const session = table.session(work);
     const vectors = session.whole.members.map((x) =>
       pcgs.exponents(x, work).map(BigInt)
@@ -254,7 +222,7 @@ describe('collected finite cyclic extensions', () => {
     const work = budget();
     const { table, indexOf } = symmetric(3);
     const pcgs = FinitePcgs.compute(table, work)!;
-    const tail = fromTablePcgs(pcgs, work);
+    const tail = fromFinitePcgs(pcgs, work);
     const session = table.session(work);
     const a = indexOf(PermutationValue.fromImages([2, 3, 1]))!;
     const coordinates = (x: number) => pcgs.exponents(x, work).map(BigInt);
@@ -346,7 +314,7 @@ describe('collected finite cyclic extensions', () => {
     ).toThrow('pc-automorphism-images-are-not-inverse');
     const { table } = symmetric(3);
     const pcgs = FinitePcgs.compute(table, work)!;
-    const symmetricTail = fromTablePcgs(pcgs, work);
+    const symmetricTail = fromFinitePcgs(pcgs, work);
     expect(() =>
       CollectedPcGroup.extend(
         symmetricTail,
@@ -473,5 +441,48 @@ describe('collected finite cyclic extensions', () => {
         })
       )
     ).toThrow(cancelled);
+  });
+});
+
+describe('finite pc sequence conversion', () => {
+  test.each([1, 4, 6, 8, 12, 27])(
+    'preserves every product and coordinate for C%p',
+    (order) => {
+      const work = budget();
+      const table = FiniteGroupTable.fromTable(
+        Array.from({ length: order }, (_, a) =>
+          Array.from({ length: order }, (_, b) => (a + b) % order)
+        ),
+        work
+      );
+      const pcgs = FinitePcgs.compute(table, work)!;
+      const group = fromFinitePcgs(pcgs, work);
+      const coordinates = Array.from({ length: order }, (_, x) =>
+        pcgs.exponents(x, work).map(BigInt)
+      );
+      expect(group.relativeOrders).toEqual(pcgs.relativeOrders.map(BigInt));
+      expect(group.order).toBe(BigInt(order));
+      for (let a = 0; a < order; a++) {
+        expect(group.inverse(coordinates[a], work)).toEqual(
+          coordinates[(order - a) % order]
+        );
+        for (let b = 0; b < order; b++)
+          expect(group.multiply(coordinates[a], coordinates[b], work)).toEqual(
+            coordinates[(a + b) % order]
+          );
+      }
+    }
+  );
+  test('does not silently renumber redundant generators', () => {
+    const work = budget();
+    const table = FiniteGroupTable.fromTable(
+      [
+        [0, 1],
+        [1, 0],
+      ],
+      work
+    );
+    const pcgs = FinitePcgs.fromSequence(table, [1, 1], work);
+    expect(() => fromFinitePcgs(pcgs, work)).toThrow('redundant-pc-generator');
   });
 });
