@@ -2044,7 +2044,7 @@ export class ComputeEngine implements IComputeEngine {
       throw new Error(
         `withStepBudget: \`steps\` must be a non-negative integer no larger than Number.MAX_SAFE_INTEGER, got ${String(steps)}`
       );
-    return this._withBudget({ steps, label }, fn);
+    return this._withBudget({ steps, label, host: true }, fn);
   }
 
   /** See `IComputeEngine.timeRemaining`. Unlike the internal
@@ -2067,6 +2067,18 @@ export class ComputeEngine implements IComputeEngine {
     );
   }
 
+  /** See `IComputeEngine.stepsLeft`. The frame lists the budget of each
+   * enclosing step-budget span, outermost first. The engine opens step
+   * budgets of its own (integration, Rubi, contour integrals), and host code
+   * can run inside one (an `evaluate` handler): those budgets are skipped,
+   * and the last budget that `withStepBudget` created (`host`) is read. */
+  get stepsLeft(): number | undefined {
+    const budgets = this._runtimeState.deadlineFrame?.budgets ?? [];
+    for (let i = budgets.length - 1; i >= 0; i--)
+      if (budgets[i].host) return budgets[i].left;
+    return undefined;
+  }
+
   /**
    * Run `fn` in a span with a wall-clock limit (`ms`), a step budget
    * (`steps`, see `StepBudget` in `common/interruptible.ts`), or both. With
@@ -2087,10 +2099,16 @@ export class ComputeEngine implements IComputeEngine {
    * @internal
    */
   _withBudget<T>(
-    limit: { ms?: number; steps?: number; label?: string; ruleSteps?: boolean },
+    limit: {
+      ms?: number;
+      steps?: number;
+      label?: string;
+      ruleSteps?: boolean;
+      host?: true;
+    },
     fn: () => T
   ): T {
-    const { ms, steps, label, ruleSteps } = limit;
+    const { ms, steps, label, ruleSteps, host } = limit;
     const prevFrame = this._runtimeState.deadlineFrame;
     const own = ms === undefined ? Infinity : Date.now() + ms;
     const spans = [
@@ -2102,9 +2120,13 @@ export class ComputeEngine implements IComputeEngine {
         ? prevFrame?.budgets
         : [
             ...(prevFrame?.budgets ?? []),
-            ruleSteps === true
-              ? { left: steps, owner: label, spans, ruleSteps }
-              : { left: steps, owner: label, spans },
+            {
+              left: steps,
+              owner: label,
+              spans,
+              ...(ruleSteps === true ? { ruleSteps } : {}),
+              ...(host === true ? { host } : {}),
+            },
           ];
 
     // Nesting stays `min()`: if an enclosing span's deadline is already at or

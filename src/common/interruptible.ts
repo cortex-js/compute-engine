@@ -92,6 +92,14 @@ export interface StepBudget {
    * do not change the step count of the other budgets.
    */
   readonly ruleSteps?: boolean;
+  /**
+   * True for a budget that the public `withStepBudget` created, false or
+   * absent for one the engine opened for its own search (integration, Rubi,
+   * contour integrals). `ce.stepsLeft` reads the last budget with this flag,
+   * so host code that runs inside an engine search (an `evaluate` handler)
+   * still reads the host's budget.
+   */
+  readonly host?: true;
 }
 
 /** Has the time of `frame` passed, or has one of its step budgets been

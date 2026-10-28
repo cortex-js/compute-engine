@@ -1583,6 +1583,26 @@ export interface IComputeEngine {
   readonly stepBudgetSpent: boolean;
 
   /**
+   * The number of steps left in the budget of the innermost
+   * `withStepBudget` span, or `undefined` when no such span is active.
+   * It is negative once that budget is spent: after the throw that spends
+   * it, each later check still counts one step, so `steps - ce.stepsLeft`
+   * is the number of steps used only while the budget is not spent. A
+   * `withTimeLimit` span nested in a step-budget span does not change it,
+   * nor does a budget the engine opens for its own search: host code that
+   * the engine calls during that search reads the host's budget.
+   *
+   * Read inside the callback of `withStepBudget`, it tells the two things
+   * {@link stepBudgetSpent} cannot: how many steps the span has used
+   * (`steps - ce.stepsLeft`), and whether THIS span's budget is spent
+   * (`ce.stepsLeft < 0`) rather than the budget of an enclosing span. A
+   * step is an opaque unit: compare counts only on one engine version.
+   * Like {@link timeRemaining}, it describes the span of the current
+   * synchronous code.
+   */
+  readonly stepsLeft: number | undefined;
+
+  /**
    * Run `fn` in a span with a wall-clock limit (`ms`), a step budget
    * (`steps`), or both. A step budget bounds an internal search on every
    * machine at the same point, so its result does not depend on the speed or
@@ -1593,7 +1613,14 @@ export interface IComputeEngine {
    * @internal
    */
   _withBudget<T>(
-    limit: { ms?: number; steps?: number; label?: string; ruleSteps?: boolean },
+    limit: {
+      ms?: number;
+      steps?: number;
+      label?: string;
+      ruleSteps?: boolean;
+      /** Set by `withStepBudget` only: see `StepBudget.host`. */
+      host?: true;
+    },
     fn: () => T
   ): T;
 

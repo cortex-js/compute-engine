@@ -79,6 +79,66 @@ describe('ce.timeRemaining and ce.stepBudgetSpent', () => {
   });
 });
 
+describe('ce.stepsLeft', () => {
+  test('outside any step budget', () => {
+    const ce = new ComputeEngine();
+    expect(ce.stepsLeft).toBeUndefined();
+    ce.withTimeLimit(5_000, () => {
+      expect(ce.stepsLeft).toBeUndefined();
+      return 0;
+    });
+  });
+
+  test('reads the innermost budget, which tells this span from an enclosing one', () => {
+    const ce = new ComputeEngine();
+    ce.withStepBudget({ steps: 5_000 }, () => {
+      expect(ce.stepsLeft).toBe(5_000);
+      ce.withStepBudget({ steps: 1 }, () => {
+        try {
+          ce.parse('\\sum_{k=1}^{2000} \\sin(kx)').evaluate();
+        } catch {
+          // The inner budget is spent.
+        }
+        expect(ce.stepsLeft).toBeLessThan(0);
+        return 0;
+      });
+      // The enclosing budget counted the steps of the inner span too, and
+      // it is not spent.
+      const left = ce.stepsLeft!;
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(left).toBeLessThan(5_000);
+      expect(ce.stepBudgetSpent).toBe(false);
+      // A time limit nested in the span reads the same budget.
+      ce.withTimeLimit(5_000, () => {
+        expect(ce.stepsLeft).toBe(left);
+        return 0;
+      });
+      return 0;
+    });
+    expect(ce.stepsLeft).toBeUndefined();
+  });
+
+  test('a budget the engine opens for its own search is skipped', () => {
+    const ce = new ComputeEngine();
+    ce.withStepBudget({ steps: 5_000, label: 'host' }, () => {
+      // The integration and Rubi routes open a span like this one; host
+      // code (an `evaluate` handler) can run inside it.
+      (
+        ce as unknown as {
+          _withBudget: (
+            limit: { steps: number; label: string },
+            fn: () => number
+          ) => number;
+        }
+      )._withBudget({ steps: 7, label: 'engine-search' }, () => {
+        expect(ce.stepsLeft).toBe(5_000);
+        return 0;
+      });
+      return 0;
+    });
+  });
+});
+
 describe('the global slot', () => {
   test('holds the documented members', () => {
     new ComputeEngine();

@@ -1,3 +1,14 @@
+## [Unreleased]
+
+### New Features
+
+- **`ce.stepsLeft`: the steps left in the innermost step budget.** Inside a
+  `withStepBudget` span it gives the steps left in that span's budget
+  (negative once it is spent), and `undefined` when no step budget is active.
+  `steps - ce.stepsLeft` is the number of steps the span used, and
+  `ce.stepsLeft < 0` tells that this span's budget, not an enclosing one, is
+  spent; `ce.stepBudgetSpent` cannot tell the two apart.
+
 ## 0.172.0 _2026-10-28_
 
 ### New Features
