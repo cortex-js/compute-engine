@@ -695,7 +695,11 @@ export class WGSLTarget extends GPUShaderTarget {
 
     // A built-in value has no location: only the other declarations take one.
     const locations = (
-      decls: ReadonlyArray<{ name: string; location?: number; builtin?: string }>
+      decls: ReadonlyArray<{
+        name: string;
+        location?: number;
+        builtin?: string;
+      }>
     ): Map<string, number> => {
       const located = decls.filter((d) => !d.builtin);
       const slots = assignSlots(

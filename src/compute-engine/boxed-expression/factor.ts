@@ -941,9 +941,7 @@ function extractMonomialContent(
  * depending on `b`, and splitting it would read `0` as a factor of the term
  * (`a·0/b`) and remove the term.
  */
-function termAsPowers(
-  term: Expression
-): {
+function termAsPowers(term: Expression): {
   numbers: Expression[];
   powers: { base: Expression; exp: number }[];
 } | null {

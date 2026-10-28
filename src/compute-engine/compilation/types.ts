@@ -280,7 +280,6 @@ export type FieldFunctionResult = {
   storageBuffers?: StorageBufferLayout[];
 };
 
-
 /**
  * Which of the two kinds of compile decline a diagnostic reports:
  *

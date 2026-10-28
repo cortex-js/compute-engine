@@ -67,10 +67,7 @@ import {
   compileSubject,
 } from './diagnostics.js';
 import { colorSpaceIsUnsettled, colorSpaceOf } from './color-space-fact.js';
-import {
-  resolveStorageHints,
-  storageBufferBindings,
-} from './storage-hints.js';
+import { resolveStorageHints, storageBufferBindings } from './storage-hints.js';
 import { WGSL_PREDECLARED } from './wgsl-predeclared.js';
 import {
   storageBufferAtHelper,
@@ -9835,7 +9832,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // operand gives the message of an operator with no lowering.
   Mean: markAggregateConsuming((args, compile, target) => {
     if (args.some((a) => gpuIsStorageBufferSymbol(a, target)))
-      return compileGPUStorageBufferReduce('Mean', 'mean', args, compile, target);
+      return compileGPUStorageBufferReduce(
+        'Mean',
+        'mean',
+        args,
+        compile,
+        target
+      );
     throw new Error(
       `Could not compile \`Mean\`: the operator is known to the engine but ` +
         `target '${target.language ?? 'unknown'}' has no lowering for it.`
@@ -19774,7 +19777,10 @@ function gpuTypeOfDeclaredType(
  * those to an array constructor, which is not a value a shader function
  * parameter or return slot accepts here.
  */
-export function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
+export function gpuTypeOfValue(
+  expr: Expression,
+  isWGSL: boolean
+): string | undefined {
   // A name whose shader type the CALLER declared (a `compileFunction`
   // parameter, a shader input/uniform). Asked FIRST and answered in full:
   // nothing else carries that type — `expr.type` for such a name is the
@@ -21079,10 +21085,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 .join(', ')})`
           )
           .join(', ')})`;
-        registry.defs.set(
-          wrapper,
-          declareFn(wrapper, vecType, params, body)
-        );
+        registry.defs.set(wrapper, declareFn(wrapper, vecType, params, body));
       }
       return `${wrapper}(${args
         .map((arg) => BaseCompiler.compileValueOperand(arg, target))

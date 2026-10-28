@@ -103,8 +103,13 @@ export function storageBufferDeclarations(
  * `name`: `_gpu_sbat_<name>` for a list of numbers, `_gpu_sbatp<M>_<name>`
  * for a list of points of `M` coordinates.
  */
-export function storageBufferAtHelper(name: string, components: number): string {
-  return components === 1 ? `_gpu_sbat_${name}` : `_gpu_sbatp${components}_${name}`;
+export function storageBufferAtHelper(
+  name: string,
+  components: number
+): string {
+  return components === 1
+    ? `_gpu_sbat_${name}`
+    : `_gpu_sbatp${components}_${name}`;
 }
 
 /** The name of the helper of `reduction` over the buffer `name`. */

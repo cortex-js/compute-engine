@@ -4568,10 +4568,7 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   // element (`{ kind: 'value', value: NaN }`, the type of each operand of
   // `[NaN, 1]`) keeps its arm too: the boxed list and the packed `ce.list()`
   // of the same numbers then have one element type (`integer | nan`).
-  if (
-    sup === 'number' &&
-    (isSubtype(a, 'nan') || isSubtype(b, 'nan'))
-  )
+  if (sup === 'number' && (isSubtype(a, 'nan') || isSubtype(b, 'nan')))
     return unionTypes(a, b);
   return sup;
 }
@@ -4591,9 +4588,7 @@ const isAbsorbedArm = (t: Readonly<Type>): boolean =>
 
 function joinArms(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   const armsOf = (t: Readonly<Type>): Readonly<Type>[] =>
-    typeof t === 'object' && t.kind === 'union'
-      ? t.types.flatMap(armsOf)
-      : [t];
+    typeof t === 'object' && t.kind === 'union' ? t.types.flatMap(armsOf) : [t];
   // Each arm with the operands whose arms it contains: `inA` for an arm of
   // `a`, `inB` for an arm of `b`, and both for the result of a join.
   type Arm = { type: Readonly<Type>; inA: boolean; inB: boolean };
