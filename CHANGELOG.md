@@ -1,5 +1,17 @@
 ## [Unreleased]
 
+### Resolved Issues
+
+- **`Together`, `Factor` and `Cancel` of a sum of calls of an undeclared
+  function** (Tycho ledger row 472). `Together(g(t) + g(t))` gave the invalid
+  `0 / Error("missing")`: a term not known to be a number was split into the
+  symbols `Nothing`, which a guard did not recognize. `Factor` and `Cancel`
+  returned `g(t) + g(t)`. All three now give `2g(t)`, as `evaluate()` does. A
+  term that draws is still not merged (`Random() + Random()`, a function
+  declared with the `random` effect, `g(Random())`), and `Together` leaves a
+  sum alone when a denominator draws: `1/Random() + 1/Random()` is not
+  `2/Random()`.
+
 ### New Features
 
 - **`ce.stepsLeft`: the steps left in the innermost step budget.** Inside a

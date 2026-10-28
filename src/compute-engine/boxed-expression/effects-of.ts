@@ -531,6 +531,29 @@ function binderClauseOperands(
  * pending draw), so it must ask each node what THAT node does, not what its
  * whole subtree does.
  */
+/**
+ * The parts that {@link shallowApplicationEffects} joins for a call whose head
+ * has no operator definition: the effects of the head's own arrow, then the
+ * latent effects of each operand it may invoke. `undefined` for a node that is
+ * not such a call. A head that is not callable gives `'any'`.
+ *
+ * The join loses information: an `'any'` part (unknown effects) absorbs a
+ * known `random` part. A caller that treats unknown effects differently from
+ * known ones (the like-term collection of `Factor`, `factor.ts`) reads the
+ * parts one by one.
+ */
+export function valueHeadEffectParts(
+  expr: Expression
+): ComputedEffects[] | undefined {
+  if (!isFunction(expr) || expr.operator === 'Function') return undefined;
+  if (operatorDefinitionOf(expr) !== undefined) return undefined;
+  const own = valueHeadEffects(expr);
+  return [
+    own === NOT_CALLABLE ? 'any' : own,
+    ...expr.ops.map((op) => latentEffectsOf(op)),
+  ];
+}
+
 export function shallowApplicationEffects(expr: Expression): ComputedEffects {
   if (!isFunction(expr)) return undefined;
   if (expr.operator === 'Function') return undefined;

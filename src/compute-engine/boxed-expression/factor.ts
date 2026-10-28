@@ -23,6 +23,11 @@ import { hasVolatileDigest, isOperatorDef } from './utils.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
 import { factorRationalExpression } from '../polynomial/boxed-factor.js';
+import {
+  shallowApplicationEffects,
+  valueHeadEffectParts,
+} from './effects-of.js';
+import { isPureComputedEffects } from '../../common/type/effects.js';
 
 function hasNonTrivialRadical(value: unknown): boolean {
   return (
@@ -71,10 +76,15 @@ export function together(op: Expression): Expression {
           // Number literals are deliberately excluded: splitting `1/2` into
           // `[1, 2]` here would put every rational coefficient over a common
           // denominator, which is not what `Together` is asked to do.
+          // A term that is not known to be a number (the call `g(t)` of an
+          // undeclared `g`) has no numerator and denominator: both are the
+          // SYMBOL `Nothing`, and such a term stays whole in the numerator.
+          // The test must be on the symbol name: the `operator` of a symbol
+          // is `'Symbol'`, never `'Nothing'`.
           const [n, d] = t.numeratorDenominator;
           if (
-            n.operator !== 'Nothing' &&
-            d.operator !== 'Nothing' &&
+            !isSymbol(n, 'Nothing') &&
+            !isSymbol(d, 'Nothing') &&
             !d.isSame(1)
           ) {
             tn = n;
@@ -82,6 +92,12 @@ export function together(op: Expression): Expression {
             sawDenominator = true;
           }
         }
+        // A denominator that draws cannot be put over a common denominator:
+        // the fold copies each denominator into the other terms, so one draw
+        // would become several independent draws (`1/Random() + 1/Random()`
+        // gave `(Random() + Random())/(Random()·Random())`, four draws). The
+        // sum is returned as it is.
+        if (td !== undefined && !isMergeable(td)) return op;
         if (num === undefined) {
           [num, den] = [tn, td];
         } else if (td === undefined || den === undefined || td.isSame(den)) {
@@ -863,7 +879,7 @@ function mergeEqualFactors(
       inOrder.push(f);
       return;
     }
-    if (!f.isPure) {
+    if (!isMergeable(f)) {
       others.push(f);
       return;
     }
@@ -971,7 +987,7 @@ function termAsPowers(term: Expression): {
         exp = n;
       }
     }
-    if (!base.isPure || isTensorProductOperand(base)) return false;
+    if (!isMergeable(base) || isTensorProductOperand(base)) return false;
     const entry = powers.find((p) => p.base.isSame(base));
     if (entry) entry.exp += sign * exp;
     else powers.push({ base, exp: sign * exp });
@@ -1074,6 +1090,53 @@ function extractCommonFactor(expr: Expression): Expression | null {
 }
 
 /**
+ * Can two occurrences of `expr` be merged into one (`e + e` → `2e`,
+ * `e·e` → `e²`)? No when evaluating `expr` has a known effect: two
+ * occurrences of `Random()` are two values.
+ *
+ * `expr.isPure` is not the test. A call of a function that the engine knows
+ * nothing about (`g(t)` with `g` undeclared) has the effects `any`, which
+ * means "unknown", and so is not pure. (A function declared with a
+ * signature and no stated effects counts as pure, so `isPure` already
+ * merges it.) The evaluation of `Add` merges such
+ * calls: `g(t) + g(t)` evaluates to `2g(t)`. The transformers that call this
+ * predicate (`Factor`, `Together`, `Cancel`) give the same sums as
+ * `evaluate()`, so they follow the same rule: a call with unknown effects is
+ * merged. A call whose effects are stated or computed (`Random()`, a
+ * function declared with the `random` effect, a function value whose body
+ * draws) is not merged. This is the rule of the pending-draw walk too
+ * (`hasDeclaredEffectLabel()` in `common/type/effects.ts`): an unknown
+ * effect does not count as a draw.
+ *
+ * Each node is examined by its OWN effects (`shallowApplicationEffects()`),
+ * and the operands are examined in turn, so `g(Random())` is not merged.
+ * `seen` holds the answer for each node already examined in this call: a
+ * subexpression can be shared by several nodes.
+ */
+function isMergeable(
+  expr: Expression,
+  seen: Map<Expression, boolean> = new Map()
+): boolean {
+  if (expr.isPure) return true;
+  if (!isFunction(expr)) return false;
+  const known = seen.get(expr);
+  if (known !== undefined) return known;
+  // A head with no operator definition: read the effects of the head and of
+  // each callback it may invoke one by one, since their join lets an unknown
+  // (`'any'`) part hide a known `random` part (`r(u)`, with `r` drawing and
+  // `u` of unknown effects). Each part must be pure or unknown.
+  const parts = valueHeadEffectParts(expr);
+  const own = parts === undefined ? shallowApplicationEffects(expr) : undefined;
+  const result =
+    (parts !== undefined
+      ? parts.every((e) => e === 'any' || isPureComputedEffects(e))
+      : own !== 'any' && isPureComputedEffects(own)) &&
+    expr.ops.every((op) => isMergeable(op, seen));
+  seen.set(expr, result);
+  return result;
+}
+
+/**
  * Is `expr` a sum, a product, a quotient, a negation or an integer power,
  * the operators that `collectLikeTerms()` walks through?
  */
@@ -1120,15 +1183,16 @@ export function collectLikeTerms(expr: Expression): Expression {
     expr.operator === 'Add' &&
     !ops.some((op) => isTensorValue(op) || hasCollectionShape(op))
   ) {
-    // A term that is not pure is kept apart: `Random() + Random()` is the
+    // A term with a known effect is kept apart: `Random() + Random()` is the
     // sum of two values, not `2·Random()`. `add()` merges two equal terms
-    // without checking that they are pure.
-    if (ops.every((op) => op.isPure)) return add(...ops);
-    const pure = ops.filter((op) => op.isPure);
+    // without checking their effects. See `isMergeable()`.
+    const mergeable = ops.map((op) => isMergeable(op));
+    if (mergeable.every(Boolean)) return add(...ops);
+    const pure = ops.filter((_, i) => mergeable[i]);
     if (pure.length < 2) return expr.engine.function('Add', ops);
     return expr.engine.function('Add', [
       add(...pure),
-      ...ops.filter((op) => !op.isPure),
+      ...ops.filter((_, i) => !mergeable[i]),
     ]);
   }
   if (ops.every((op, i) => op === expr.ops[i])) return expr;
@@ -1156,7 +1220,11 @@ function polynomialAtoms(expr: Expression, atoms: AtomTable): void {
     polynomialAtoms(expr.op1, atoms);
     return;
   }
-  if (!expr.isPure || !expr.isValid || expr.type.facts.collection !== false)
+  if (
+    !isMergeable(expr) ||
+    !expr.isValid ||
+    expr.type.facts.collection !== false
+  )
     return;
   if (atomIndex(atoms, expr) < 0) {
     const bucket = atoms.byHash.get(expr.hash);

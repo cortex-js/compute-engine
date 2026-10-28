@@ -738,19 +738,6 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
-### CE-596. `Together(g(t) + g(t))` with `g` undeclared gives `0/Error("missing")`; `Factor` and `Cancel` do not collect the terms
-
-**Status:** open; defect. Tycho ledger row 472, 2026-10-28; instrument
-`~/dev/tycho/scripts/repros/2026-10-28-ce472-together-undeclared-call-sum-repro.mts`.
-
-`ce.box(['Together', ['Add', ['g', 't'], ['g', 't']]]).evaluate()` gives
-`0 / Error("missing")`, an invalid expression. `Factor` and `Cancel` of the same
-sum return `g(t) + g(t)`, where the evaluated sum is `2g(t)`. Measured on main
-after 0.172.0. The like-term collection added by CE-577 (`collectLikeTerms()`,
-`factorExpression()`) does not merge the two calls of an undeclared function:
-it does not merge impure terms, and a call of an undeclared function may be
-read as impure. The `Together` result is a defect independently of that.
-
 ### CE-598. `simplify()` and the `Add` evaluation merge two random draws into one
 
 **Status:** open; defect. Found 2026-10-28 while fixing CE-596.
