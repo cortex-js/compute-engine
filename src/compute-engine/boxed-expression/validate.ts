@@ -23,6 +23,7 @@ import {
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import {
   functionLiteralBody,
+  functionLiteralDeclaredSignature,
   functionLiteralParameterType,
   restParameterSignatureTail,
 } from './function-literal.js';
@@ -1273,6 +1274,11 @@ export function devolveAtValuePositions(
       // are the ones of the derived type (annotations, destructuring and
       // inferred collection types), and a rest parameter keeps its `any*`
       // tail.
+      // A literal that declares its full signature (a generic one included:
+      // `(x: T) -> T where T: number`, whose parameter annotation
+      // canonicalization erases) is read from that declaration, each type
+      // variable as its bound.
+      const declared = functionLiteralDeclaredSignature(callee);
       const body = functionLiteralBody(callee);
       const slots =
         body === undefined
@@ -1281,12 +1287,14 @@ export function devolveAtValuePositions(
       const forwarded = devolveAtValuePositions(
         ce,
         '',
-        {
-          kind: 'signature',
-          ...(slots !== undefined ? { args: slots } : {}),
-          ...restParameterSignatureTail(callee.ops.slice(1)),
-          result: 'unknown',
-        },
+        declared !== undefined
+          ? readTypeVariablesAsBounds(declared)
+          : {
+              kind: 'signature',
+              ...(slots !== undefined ? { args: slots } : {}),
+              ...restParameterSignatureTail(callee.ops.slice(1)),
+              result: 'unknown',
+            },
         ops.slice(1),
         isAnnotatedValueParameter
       );

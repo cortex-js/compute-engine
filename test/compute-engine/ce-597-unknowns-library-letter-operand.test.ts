@@ -363,6 +363,63 @@ describe('CE-597: the arguments that `Apply` forwards', () => {
     return ce.context.lexicalScope.bindings.get('N');
   }
 
+  test('a literal parameter inferred as a collection reads a value', () => {
+    // `xs ↦ Length(xs)` infers a collection slot for `xs`, which the operator
+    // `N` does not match, so `N` is a variable, as in a named call.
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Apply', ['Function', ['Length', 'xs'], 'xs'], 'N']).unknowns
+    ).toEqual(['N']);
+  });
+
+  test('a generic declared signature reads its parameter by its bound', () => {
+    // Canonicalization erases the annotation of `x`; the declared signature
+    // `(x: T) -> T where T: number` still makes it a number parameter.
+    const ce = new ComputeEngine();
+    const expr = ce.box([
+      'Apply',
+      [
+        'Function',
+        ['Typed', ['Add', 'x', 'x'], "'(x: T) -> T where T: number'"],
+        'x',
+      ],
+      'N',
+    ]);
+    expect(expr.unknowns).toEqual(['N']);
+    ce.assign('N', 4);
+    expect(expr.evaluate().toString()).toBe('8');
+  });
+
+  test('a rest parameter of a literal reads its arguments as values', () => {
+    const ce = new ComputeEngine();
+    expect(
+      ce.box(['Apply', ['Function', 1, ['Spread', 'xs']], 'N']).unknowns
+    ).toEqual(['N']);
+  });
+
+  test('the repair does not derive the type of the literal body', () => {
+    // Deriving it while `Apply` is boxed typed a recursive `r` inside the
+    // `Map` type handler, which the type-handler purity check refuses
+    // (`tycho-row-426-apply-lambda-type.test.ts`, "the step of Tycho case
+    // 12").
+    const ce = new ComputeEngine();
+    ce.declare('s', 'real');
+    ce.declare('r', 'function');
+    ce.assign(
+      'r',
+      ce.parse(
+        'n \\mapsto \\begin{cases} 0 & n \\le 0 \\\\ s + r(n-1) & \\text{otherwise}\\end{cases}'
+      )
+    );
+    ce.declare('N', 'list<real>');
+    const expr = ce.box([
+      'Apply',
+      ['Function', ['Block', ['Map', 'r', 'v']], 'v'],
+      'N',
+    ]);
+    expect(expr.type.toString()).toBe(ce.box(['Map', 'r', 'N']).type.toString());
+  });
+
   test('a named callee with a function parameter keeps the operator', () => {
     const ce = new ComputeEngine();
     ce.declare('g', '(function) -> number');

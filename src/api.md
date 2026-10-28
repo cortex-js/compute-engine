@@ -378,6 +378,33 @@ reads this before a write, so that it does not keep a partial value.
 
 <MemberCard>
 
+##### ComputeEngine.stepsLeft {#stepsleft-1}
+
+```ts
+readonly stepsLeft: number | undefined;
+```
+
+The number of steps left in the budget of the innermost
+`withStepBudget` span, or `undefined` when no such span is active.
+It is negative once that budget is spent: after the throw that spends
+it, each later check still counts one step, so `steps - ce.stepsLeft`
+is the number of steps used only while the budget is not spent. A
+`withTimeLimit` span nested in a step-budget span does not change it,
+nor does a budget the engine opens for its own search: host code that
+the engine calls during that search reads the host's budget.
+
+Read inside the callback of `withStepBudget`, it tells the two things
+[stepBudgetSpent](#stepbudgetspent-1) cannot: how many steps the span has used
+(`steps - ce.stepsLeft`), and whether THIS span's budget is spent
+(`ce.stepsLeft < 0`) rather than the budget of an enclosing span. A
+step is an opaque unit: compare counts only on one engine version.
+Like [timeRemaining](#timeremaining-1), it describes the span of the current
+synchronous code.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ComputeEngine.iterationLimit {#iterationlimit-1}
 
 ```ts
@@ -12722,6 +12749,33 @@ When a budget is spent, the engine throws a `CancellationError`, but
 code between the throw and the end of the span can catch it and return
 a value. Such a value is partial. A host that stores values in a cache
 reads this before a write, so that it does not keep a partial value.
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.stepsLeft {#stepsleft}
+
+```ts
+readonly stepsLeft: number | undefined;
+```
+
+The number of steps left in the budget of the innermost
+`withStepBudget` span, or `undefined` when no such span is active.
+It is negative once that budget is spent: after the throw that spends
+it, each later check still counts one step, so `steps - ce.stepsLeft`
+is the number of steps used only while the budget is not spent. A
+`withTimeLimit` span nested in a step-budget span does not change it,
+nor does a budget the engine opens for its own search: host code that
+the engine calls during that search reads the host's budget.
+
+Read inside the callback of `withStepBudget`, it tells the two things
+[stepBudgetSpent](#stepbudgetspent-1) cannot: how many steps the span has used
+(`steps - ce.stepsLeft`), and whether THIS span's budget is spent
+(`ce.stepsLeft < 0`) rather than the budget of an enclosing span. A
+step is an opaque unit: compare counts only on one engine version.
+Like [timeRemaining](#timeremaining-1), it describes the span of the current
+synchronous code.
 
 </MemberCard>
 
