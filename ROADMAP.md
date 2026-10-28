@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-580.
+Next free reference: CE-581.
 
 **Entry format.**
 
@@ -2844,7 +2844,11 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ### CE-571. WGSL: a documented interface for GPU compute jobs over a 3-D grid
 
-**Status:** open; design. Tycho ledger row 461 (filed 2026-10-26).
+**Status:** open; decided 2026-10-27, ready to implement. Tycho ledger row 461
+(filed 2026-10-26). User decision 2026-10-27 (Q1 (a), Q2 (a) of
+`docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`): add `WGSLTarget.compileFieldFunction()` as the
+recommendation for 461 in that document specifies; CE emits the parameter
+struct type, and the host declares the one `var<uniform>`.
 
 Tycho supplies a compute entry point and the grid and storage buffers; CE
 supplies a scalar field function that can be called from it, its helper
@@ -2857,8 +2861,12 @@ dispatch, the mesher and the measurements.
 
 ### CE-572. WGSL: storage-buffer input for a numeric list whose contents and length change
 
-**Status:** open; design. Tycho ledger row 462 (filed 2026-10-26); follows the
-width ceiling of CE-280.
+**Status:** open; decided 2026-10-27, ready to implement. Tycho ledger row 462
+(filed 2026-10-26); follows the width ceiling of CE-280. User decision
+2026-10-27 (Q2 (a), Q3 (a) of `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`):
+a storage kind `'storage-buffer'` on WGSL only; CE emits the struct and the
+`var<storage, read>` declaration with the group and binding the host passes;
+the logical length is a `len: u32` header in the buffer.
 
 Asked: a binding for a numeric list or point list that the shader reads from a
 storage buffer, so that a change of its contents or length does not embed
@@ -2871,8 +2879,10 @@ JavaScript for an empty list, a one-element list and a length change.
 
 ### CE-573. An `interval-wgsl` target for interval refinement on the GPU
 
-**Status:** open; design (feasibility). Tycho ledger row 463 (filed
-2026-10-26). The interval GLSL route was removed earlier; this asks again for a
+**Status:** open; not now (user decision 2026-10-27, Q4 (a) of
+`docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`): keep the contract in that
+document and wait for a profile where interval evaluation is the main cost and
+a measured prototype. Tycho ledger row 463 (filed 2026-10-26). The interval GLSL route was removed earlier; this asks again for a
 GPU interval target where Tycho keeps the cells, the subdivision and the output
 on the GPU.
 
@@ -2890,8 +2900,9 @@ Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
 
 ### CE-574. WGSL: an index read copies the whole list into a local variable
 
-**Status:** open; defect (not yet checked on a GPU). Found 2026-10-27 while
-answering Tycho rows 461–463.
+**Status:** open; defect, being fixed (session compute-engine-0c, 2026-10-27).
+Found 2026-10-27 while answering Tycho rows 461–463 (F1 of the design answers;
+user decision Q5: file it and fix it).
 
 The WGSL index helper `_gpu_atN(v: array<f32, N>, i)` takes the list by value
 and copies it (`var a = v;`, the preamble built in `gpu-target.ts`), because
@@ -2905,13 +2916,30 @@ variable instead of a copy (see CE-572).
 
 ### CE-575. `compileShader()`: compute stage gets a `VertexInput` struct, and free symbols are not refused
 
-**Status:** open; defect. Found 2026-10-27 while answering Tycho rows 461–463.
+**Status:** open; defect, being fixed (session compute-engine-0c, 2026-10-27).
+Found 2026-10-27 while answering Tycho rows 461–463 (F2 of the design answers;
+user decision Q5: file it and fix it).
 
 `compileShader()` (`wgsl-target.ts`) names the input struct `VertexInput` for
 every stage, the compute stage included. It also accepts a body that reads a
 symbol that no input, uniform or local declares (`x`, `y`), and the shader
 then fails only when the GPU compiles it. Expected: a stage-appropriate struct
 name, and a decline at compile time that names the undeclared symbols.
+
+### CE-580. `compileShader()`: the assignment targets of the body are not checked
+
+**Status:** open; defect. Found 2026-10-27 while fixing CE-575.
+
+`compileShader()` (GLSL and WGSL) writes each body statement as
+`<variable> = <code>;`, with `variable` copied as text. Nothing checks that
+the target is declared (an output, or a variable the host adds), nor that the
+type of the value matches the type of the target: `output.c = vec2f(…)` into
+an `f32` output, or a `float` into a `vec4 fragColor`, is emitted, and the
+shader fails only when the GPU compiles it. A compute shader has no outputs,
+so its body can only assign a name that the returned shader does not declare.
+Expected: refuse a target that is not a declared output (or a declared
+storage variable, once CE-572 adds them), and a value whose type does not fit
+the target, with a message that names both.
 
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 
@@ -4746,31 +4774,6 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
-
-### CE-576. Group theory: a stabilizer chain is reused only by a query of the same kind
-
-**Status:** open; performance, small. Found while landing PR #482
-(2026-10-27).
-
-The optional group-theory entry (`src/group-theory.ts`) keeps completed
-stabilizer chains in a per-engine cache (`PermutationQuerySession`,
-`src/compute-engine/group-theory/permutation/query-session.ts`). The cache key
-includes the chain limits as the query receives them. `PermutationGroupOrder`
-and `PermutationGroupContains` pass the limits of the call, but the relation
-queries (`PermutationIsSubgroup`, `PermutationGroupEqual`, `PermutationIsNormal`,
-`PermutationSubgroupIndex`) and `PermutationPointStabilizer` pass the budget that
-remains after the work already done. Their keys then differ, so one kind of
-query does not reuse a chain that another kind built.
-
-Measured 2026-10-27 on S₉₀ (generated by a transposition and a 90-cycle),
-default limits: `PermutationGroupOrder` cold 124 ms, warm 24 ms;
-`PermutationIsSubgroup(G, G)` next takes 153 ms (a new chain), then 11 ms. The
-results are correct; only the time is lost.
-
-Fix: build the key from the limits that decide whether a chain can complete
-(the ceilings of the engine or of the call), not from the remaining budget, and
-charge the stored chain's work to the receiving query, as a cache hit already
-does.
 
 ### CE-566. A stored function reads a lazy collection definition again at each call; Tycho binds the value through engine internals
 
