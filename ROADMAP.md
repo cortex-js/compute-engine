@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-576.
+Next free reference: CE-580.
 
 **Entry format.**
 
@@ -1268,6 +1268,39 @@ the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
 ## Symbolic computation
+
+### CE-577. `Factor`, `Together` and `Cancel` return a sum with like terms uncombined when they find nothing to rewrite
+
+**Status:** in progress; defect. User decision 2026-10-27: option (a). Asked
+by Tycho (session tycho-3b), 2026-10-27.
+
+With `g(t) := \sin(t)`, `Factor(g(t)+g(t))` evaluates to `\sin(t)+\sin(t)`,
+where `g(t)+g(t)` evaluates to `2\sin(t)`. Measured on HEAD 2026-10-27:
+
+| Input                     | `Factor`              | `Together`     | `Cancel`              |
+| ------------------------- | --------------------- | -------------- | --------------------- |
+| `a+a`                     | `2a`                  | `a+a`          | `a+a`                 |
+| `\sin t+\sin t`           | `\sin t+\sin t`       | same           | same                  |
+| `\frac1a+\frac1a`         | `\frac1a+\frac1a`     | `\frac2a`      | `\frac1a+\frac1a`     |
+| `ax+ay`                   | `ax+ay`               | `ax+ay`        | `ax+ay`               |
+| `x\sin t+y\sin t`         | `x\sin t+y\sin t`     |                |                       |
+
+`Factor(\sin(t)^2-1)` gives `(\sin t-1)(\sin t+1)` and
+`Factor(2\sin t+2\cos t)` gives `2(\sin t+\cos t)`, so some strategies already
+treat `\sin t` as an atom. Cause for `Factor`: with no variable given,
+`factorPolynomialWith()` (`boxed-expression/factor.ts`) infers the single
+unknown `t`, the sum is not a polynomial in `t`, every strategy declines, and
+the fallback `factor()` does not collect like terms. `Together` and `Cancel`
+return their canonical operand, and the canonical form of `Add` does not
+collect like terms (only `evaluate()` does).
+
+Decision needed: (a) each of the three collects like terms in its result, as
+`evaluate()` of `Add` does, and `Factor` treats each non-polynomial subterm
+(`\sin t`) as a variable, which also gives `x\sin t+y\sin t → (x+y)\sin t`
+and `ax+ay → a(x+y)` (a common non-numeric factor of a multivariate sum); or
+(b) keep the operand as is when there is nothing to rewrite (today), and
+document it. Tycho works around it: it does not offer a rewrite whose result,
+evaluated once more, equals what the cell shows.
 
 ### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
@@ -2809,29 +2842,6 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-570. Shader targets: a call that several user functions repeat with the same arguments is computed once per function
-
-**Status:** fixed in the main tree, not committed (2026-10-27, session
-compute-engine-0c); remove this entry when it is committed. Tycho ledger row
-467 (filed 2026-10-26). The root inlining of `gpu-shared-calls.ts` (CE-525)
-already did what is asked below, but declined Tycho's real row: its expansion
-holds 498,274 paths, above `GPU_SHARED_CALLS_MAX_PATHS` (250,000). The limit
-is now 1,000,000; Tycho's instrument reads 0.88 (was 2.09).
-
-Each user function compiles to its own shader function, and CSE works inside
-one function body. In Tycho's `voronoi-diagram`, the row
-`{F(x,y) < 0.0008: 0, B(x,y) > 1.3: 0, 0.12 + 0.8H(x,y)}` calls `B` and `H`,
-and `B`, `H` and the functions they call each call `F(x, y)`, `Z(x, y)` and the
-same distance terms again. The WebGL driver (ANGLE over Metal) merges the
-repeated calls across functions; the WebGPU route does not, so the row draws
-about 2.2 times slower on WebGPU (Apple M5 Max, 2048×2048: F + B + H 0.47 ms on
-WebGL2, 1.13 ms on WebGPU). Asked: on `wgsl` (and `glsl`), compute such a call
-once per pixel, for example by inlining the user functions into one body before
-CSE, or by computing the shared calls in the main body and passing their values
-as arguments. Related: CE-562 and CE-568 (CSE inside one body). Tycho repro:
-`~/dev/tycho/scripts/repros/2026-10-26-ce467-wgsl-shared-calls-repro.mts`
-(take the box lock); done when the WebGPU/WebGL ratio is 1.2 or less.
-
 ### CE-571. WGSL: a documented interface for GPU compute jobs over a 3-D grid
 
 **Status:** open; design. Tycho ledger row 461 (filed 2026-10-26).
@@ -3445,20 +3455,48 @@ calls `p_rand(n + s_eed, n, n)` in both. Sharing across statements needs the
 temporary to be bound before the first statement and to stay valid across any
 assignment the statements make to a symbol the call reads.
 
-### CE-564. interval-js: a call whose argument is another user function's list result
+### CE-578. A recursive signature derived during an evaluation leaves a wide type in the type cache
 
-**Status:** open; capability.
+**Status:** open; defect (regression of CE-544). A fix exists, not yet
+applied.
 
-`d(B(A(P(x, y))))` (Tycho document `ra1p9naofs`, `B(p)` returns a list of two
-numbers) compiles on javascript, which compiles a copy of each callee for the
-argument's type, but declines on interval-js: "call of `r`: argument 1 has the
-type `dictionary<any> | indexed_collection<any>` … at a parameter inferred as
-the point …". interval-js has no per-call copies of a user function, and the
-parameter of `d` is inferred as `dictionary<any> | indexed_collection<any>`,
-not as a tuple from index reads only, so the inline fallback does not take it.
-It declined on 2026-09-16 too. Covering it needs per-call copies on
-interval-js, or inlining `d` with a call expression as its argument.
-`r([x, y])` already compiles there.
+Tycho `neyret/ndqj7hupta`, rows `R(20, x, y) - k` (6 records), compiled on
+interval-js at CE 0.171.0 and decline after CE-544 (commit `279b93cfd`, found
+by bisecting): "the operand `0.5 * S(x, y, R(i - 1, x, y))` may be a
+collection at run time (type `list<list<any> | number | tuple> | number |
+tuple`)". `R` is a recursive function declared `function`. The failure needs
+the order evaluate, compile, evaluate, compile. While
+`_deriveSignatureOnce` (`boxed-value-definition.ts`) derives the recursive
+signature, the recursive calls in the body read the skeleton, whose result is
+`unknown`, so the body node gets the wide type and keeps it in its type cache.
+After the evaluation moves the cache generation, the compiler reads that type.
+The settled type of `R(…)` is `number`. The same defect is in 0.171.0 for `R`
+declared `(unknown, unknown, unknown) -> unknown`; CE-544 extended it to a
+bare `function` declaration. The fix (session scratchpad
+`triage/triage.patch`, the `boxed-value-definition.ts` hunk and the
+`ndqj7hupta` block of `census-head-new-declines.test.ts`): a second
+derivation in the same lexical scope reads the result of the first, not
+`unknown`; the scope check matters, because a wide result from a Tycho scratch
+scope otherwise stays in force. Two other fixes were measured and rejected:
+no caching during a derivation (a symbolic `R(2..8)` goes from 5 ms to 1–10
+s), and a value shield (stack overflow). Waiting for the file to be free of
+another session's staged CE-566 change; the CE-544 author was asked.
+
+### CE-579. javascript: `asOklab(c_f)` in Tycho `art/s8ishknvhe` declines during the Tycho compile only
+
+**Status:** open; defect (probably the same cause as CE-578).
+
+The row compiled at CE 0.171.0 (it mapped `N` over the list of points, as the
+interpreter does) and declines at HEAD: "the argument `C_c` has the type
+`list<tuple<…>>`, which does not match the type `tuple<number, number,
+number>` of the parameter". During Tycho's compile of the row, `C_c` is typed
+`list<tuple<list<…> | number | tuple, …>>`; after the run it is
+`list<tuple<number, number, number>>` and the compile succeeds. `F` is a
+recursive function declared `function`, as in CE-578. Not reproduced without
+Tycho. The interpreter cannot give the row's value with the document's
+`D = 10000` (the iteration limit is reached, at 0.171.0 too); with `D = 4` it
+applies `N` to each point. Next step: check the row again once CE-578 is
+applied.
 
 ### CE-567. Infer `list<E> | tuple<…>` from index reads instead of a marked tuple
 
@@ -4708,6 +4746,31 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
+
+### CE-576. Group theory: a stabilizer chain is reused only by a query of the same kind
+
+**Status:** open; performance, small. Found while landing PR #482
+(2026-10-27).
+
+The optional group-theory entry (`src/group-theory.ts`) keeps completed
+stabilizer chains in a per-engine cache (`PermutationQuerySession`,
+`src/compute-engine/group-theory/permutation/query-session.ts`). The cache key
+includes the chain limits as the query receives them. `PermutationGroupOrder`
+and `PermutationGroupContains` pass the limits of the call, but the relation
+queries (`PermutationIsSubgroup`, `PermutationGroupEqual`, `PermutationIsNormal`,
+`PermutationSubgroupIndex`) and `PermutationPointStabilizer` pass the budget that
+remains after the work already done. Their keys then differ, so one kind of
+query does not reuse a chain that another kind built.
+
+Measured 2026-10-27 on S₉₀ (generated by a transposition and a 90-cycle),
+default limits: `PermutationGroupOrder` cold 124 ms, warm 24 ms;
+`PermutationIsSubgroup(G, G)` next takes 153 ms (a new chain), then 11 ms. The
+results are correct; only the time is lost.
+
+Fix: build the key from the limits that decide whether a chain can complete
+(the ceilings of the engine or of the call), not from the remaining budget, and
+charge the stored chain's work to the receiving query, as a cache hit already
+does.
 
 ### CE-566. A stored function reads a lazy collection definition again at each call; Tycho binds the value through engine internals
 

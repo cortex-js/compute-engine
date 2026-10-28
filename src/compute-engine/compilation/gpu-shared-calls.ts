@@ -62,7 +62,7 @@ import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import { BaseCompiler, type EnclosingDefinition } from './base-compiler.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
-import { CSE_MIN_SIZE } from './cse.js';
+import { CSE_MIN_SIZE, lazyOperandRegions } from './cse.js';
 
 /**
  * Most distinct expression nodes the expanded root may hold. The emitted
@@ -76,17 +76,28 @@ export const GPU_SHARED_CALLS_MAX_NODES = 10_000;
  * expanded root may hold. This bounds the code written for the nodes that
  * the common-subexpression pass does NOT bind (a node below its size
  * threshold, a node in two branches that are evaluated only conditionally),
- * which are written once per path. The expansion of the `voronoi-diagram`
- * row of Tycho holds 143,103 paths.
+ * which are written once per path. The count of a node is kept, so
+ * computing it costs one visit of each distinct node, whatever the count.
+ *
+ * The expansion of the `voronoi-diagram` row as Tycho compiles it holds
+ * 498,274 paths and 1,936 distinct nodes, and its shader is smaller than the
+ * code by reference (10.8 KB of WGSL against 12.3 KB): most paths go through
+ * nodes that the common-subexpression pass binds once. With the earlier
+ * limit, 250,000, that row stayed by reference, and WebGPU drew it about 2.1
+ * times slower than WebGL (ROADMAP CE-570).
  */
-export const GPU_SHARED_CALLS_MAX_PATHS = 250_000;
+export const GPU_SHARED_CALLS_MAX_PATHS = 1_000_000;
 
 /**
  * Most nodes that the shader may write for the expanded root, for each node
  * that it writes for the code by reference (`SharedCallsPass.sourceSize`).
- * The nodes written for the expanded root are estimated by
- * `SharedCallsPass.writtenSize`. For the `voronoi-diagram` row of Tycho, the
- * code by reference is 1,161 nodes and the estimate is 1,846 nodes.
+ * Two estimates of the nodes written for the expanded root must be under
+ * it: `SharedCallsPass.writtenSize`, which counts the nodes that are not
+ * shared once per parent, and {@link branchWrittenSize}, which counts a
+ * shared node once per branch that writes it. For the `voronoi-diagram` row
+ * as written in `compile-gpu-shared-calls.test.ts`, the code by reference is
+ * 1,161 nodes and `writtenSize` is 1,846 nodes; for the row as Tycho stores
+ * it, 2,249 and 3,353 nodes.
  */
 export const GPU_SHARED_CALLS_GROWTH_LIMIT = 8;
 
@@ -133,11 +144,9 @@ export function inlineSharedUserFunctionCalls(
     throw e;
   }
   if (result === expr || !pass.sharesACallAcrossBodies()) return expr;
-  if (
-    pass.writtenSize(result) >
-    GPU_SHARED_CALLS_GROWTH_LIMIT * pass.sourceSize(expr)
-  )
-    return expr;
+  const limit = GPU_SHARED_CALLS_GROWTH_LIMIT * pass.sourceSize(expr);
+  if (pass.writtenSize(result) > limit) return expr;
+  if (branchWrittenSize(result, limit) > limit) return expr;
   if (result.isValid !== true) return expr;
   for (const name of pass.substituted) target.symbolDeps?.add(name);
   return result;
@@ -151,6 +160,84 @@ const ROOT_BODY = '';
 /** Thrown to abandon an expansion: it exceeds `MAX_SUBSTITUTIONS` or a size
  * limit, it would substitute a call inside a loop (`expandNode`), or it
  * meets a node that is not transitively pure (`checkPure`). */
+/**
+ * An estimate of the number of nodes that the shader writes for `expr`, an
+ * expansion of this pass, that counts a shared node once in each BRANCH that
+ * writes it. Returns a number above `limit` as soon as the count passes it.
+ *
+ * The common-subexpression pass binds a node to a temporary in a region, and
+ * an arm that is evaluated only conditionally (`lazyOperandRegions`,
+ * `cse.ts`: the arms of an `If`, the operands of a `Which` after the first
+ * condition, the value of a `When`, the operands of `And`/`Or` after the
+ * first) can read a temporary of a region that encloses
+ * it, but not one of a sibling arm. A node that two sibling arms reach, and
+ * that no enclosing region reaches, is written once in each arm.
+ * `SharedCallsPass.writtenSize` counts it once, so a chain of functions
+ * whose two arms both call the function of the level below
+ * (`h_k(x) = {x > c_k: 2h_{k-1}(x), 3h_{k-1}(x)}`) passed that check with a
+ * shader that doubled at each level: 2.5 MB and 388 s of compilation at
+ * depth 14.
+ *
+ * Each node is given the set of arm instances that reach it: the root, and
+ * for each arm of each instance of its parent, one new instance. A node is
+ * counted once for each instance of its set. That can count a node that an
+ * arm reads from a temporary of an enclosing region, which is the safe
+ * direction: whether the arm can read it depends on whether the enclosing
+ * occurrence is emitted before the arm (`cse.ts`), and an estimate that
+ * ignored that order accepted `atan2(If(c, 2h(x), 3h(x)), h(x))` chains
+ * (review of 2026-10-27). The arms are the regions of the
+ * common-subexpression pass: for a `Which`, every operand after the first
+ * condition, conditions included. The count stops at `limit`, and it is the
+ * number of set entries, so the work is bounded by it too.
+ */
+function branchWrittenSize(expr: Expression, limit: number): number {
+  // The distinct nodes, parents before children.
+  const order: Expression[] = [];
+  const visited = new Set<Expression>();
+  const visit = (node: Expression): void => {
+    if (visited.has(node)) return;
+    visited.add(node);
+    if (isFunction(node)) for (const op of node.ops) visit(op);
+    order.push(node);
+  };
+  visit(expr);
+  order.reverse();
+
+  // The arm instances: `parent[i]` is the instance that encloses instance i
+  // (-1 for the root, instance 0).
+  const parent: number[] = [-1];
+  const armInstances = new Map<string, number>();
+  const armInstance = (enclosing: number, node: number, arm: number) => {
+    const key = `${enclosing}:${node}:${arm}`;
+    let id = armInstances.get(key);
+    if (id === undefined) {
+      id = parent.length;
+      parent.push(enclosing);
+      armInstances.set(key, id);
+    }
+    return id;
+  };
+  const index = new Map<Expression, number>();
+  order.forEach((node, i) => index.set(node, i));
+  const instances = new Map<Expression, Set<number>>([[expr, new Set([0])]]);
+  let total = 0;
+  for (const node of order) {
+    const own = instances.get(node)!;
+    total += own.size;
+    if (total > limit) return total;
+    if (!isFunction(node)) continue;
+    const arms = new Set(lazyOperandRegions(node).map((site) => site.index));
+    node.ops.forEach((op, i) => {
+      let set = instances.get(op);
+      if (set === undefined) instances.set(op, (set = new Set()));
+      if (arms.has(i))
+        for (const id of own) set.add(armInstance(id, index.get(node)!, i));
+      else for (const id of own) set.add(id);
+    });
+  }
+  return total;
+}
+
 const OVER_BUDGET = Symbol('over budget');
 
 class SharedCallsPass {

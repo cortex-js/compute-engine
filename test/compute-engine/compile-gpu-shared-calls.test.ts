@@ -5,6 +5,10 @@ import { inlineSharedUserFunctionCalls } from '../../src/compute-engine/compilat
 import type { CompileTarget } from '../../src/compute-engine/compilation/types';
 import type { Expression } from '../../src/compute-engine/global-types';
 import type { MathJsonExpression } from '../../src/math-json';
+import {
+  TYCHO_VORONOI_DEFINITIONS,
+  TYCHO_VORONOI_ROW,
+} from './fixtures/tycho-voronoi-diagram';
 
 /**
  * On the shader targets, a pure user-function call that several shader
@@ -117,6 +121,57 @@ describe('the voronoi-diagram row (Tycho row 467)', () => {
         [0.05, 0.9, 5.5],
       ];
       for (const [x, y, T] of points) {
+        const want = js.run!({ x, y, T }) as number;
+        const got = run('_main', x, y, T) as number;
+        expect(Math.abs(got - want)).toBeLessThan(1e-4);
+      }
+    });
+  }
+});
+
+// ROADMAP CE-570: the same row as Tycho stores it. Its expansion holds
+// 498,274 paths (the bodies of `F`, `n` and `B` write the distance out), more
+// than the earlier limit of 250,000, so every call stayed by reference and
+// WebGPU drew the row about 2.1 times slower than WebGL.
+describe('the voronoi-diagram row as Tycho stores it (Tycho row 467)', () => {
+  function tychoEngine(): ComputeEngine {
+    const ce = new ComputeEngine();
+    ce.declare('T', 'real<-10..10>');
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    for (const [name, type] of TYCHO_VORONOI_DEFINITIONS) ce.declare(name, type);
+    for (const [name, , value] of TYCHO_VORONOI_DEFINITIONS)
+      ce.assign(name, ce.box(value));
+    return ce;
+  }
+
+  for (const language of TARGETS) {
+    test(`${language}: no document function is emitted`, () => {
+      const ce = tychoEngine();
+      const r = compile(ce.box(TYCHO_VORONOI_ROW), { to: language });
+      expect(r.success).toBe(true);
+      expect(`${r.preamble ?? ''}\n${r.code}`).not.toMatch(/_fn_/);
+      // The sixteen weights and the sixteen terms of B, as for the row
+      // above.
+      expect(count(r.code, 'exp(')).toBe(32);
+    });
+
+    test(`${language}: the shader agrees with the JavaScript target`, () => {
+      const ce = tychoEngine();
+      const expr = ce.box(TYCHO_VORONOI_ROW);
+      const r = compile(expr, { to: language });
+      const js = compile(expr, { to: 'javascript' });
+      const run = shaderFunctions(
+        `${r.preamble ?? ''}\n${mainFunction(r.code, ['x', 'y', 'T'], language)}`,
+        language
+      );
+      for (const [x, y, T] of [
+        [0.3, 0.2, 1],
+        [-0.7, 0.4, 1],
+        [1.1, -0.6, 2.5],
+        [-1.3, -0.8, 4],
+        [0.05, 0.9, 5.5],
+      ]) {
         const want = js.run!({ x, y, T }) as number;
         const got = run('_main', x, y, T) as number;
         expect(Math.abs(got - want)).toBeLessThan(1e-4);
@@ -256,10 +311,131 @@ describe('the limits of the substitution', () => {
     expect(elapsed).toBeLessThan(1000);
   });
 
+  test('a call shared by two exclusive arms at each level stays a call', () => {
+    // `h_k` calls `h_{k-1}` in both values of a `Which`. The shader writes a
+    // node that two sibling arms share once in each arm, so the expansion
+    // doubles at each level. Its estimate by parent (`writtenSize`) did not
+    // see it: depth 14 was accepted, and compiled to 2.5 MB of GLSL in
+    // 388 s (review of 2026-10-27, ROADMAP CE-570).
+    const compileChain = (depth: number) => {
+      const ce = new ComputeEngine();
+      ce.parse('h_0(x) := \\sin(x) + x x + \\cos(x)').evaluate();
+      for (let k = 1; k <= depth; k++)
+        ce.parse(
+          `h_{${k}}(x) := \\left\\{x > 0.${k}: 2 h_{${k - 1}}(x), 3 h_{${k - 1}}(x)\\right\\}`
+        ).evaluate();
+      ce.parse('g(x) := h_0(x) + 1').evaluate();
+      const start = performance.now();
+      const r = compile(ce.parse(`h_{${depth}}(x) + g(x)`), { to: 'glsl' });
+      const elapsed = performance.now() - start;
+      expect(r.success).toBe(true);
+      return { code: `${r.preamble ?? ''}\n${r.code}`, elapsed };
+    };
+    // Small: substituted, and the arms share nothing they could not.
+    expect(compileChain(3).code).not.toMatch(/_fn_/);
+    const deep = compileChain(14);
+    expect(deep.code).toMatch(/_fn_h_/);
+    expect(deep.code.length).toBeLessThan(20_000);
+    expect(deep.elapsed).toBeLessThan(5_000);
+  });
+
+  test('a call shared by two later conditions of a Which stays a call', () => {
+    // `h_k(x) = Which(x > k, 0.1, h_{k-1}(x) > 0, 0.2, h_{k-1}(x) < 0, 0.3)`:
+    // each condition after the first is a region of its own, and this
+    // `Which` has no default clause, so it is not emitted as nested `if`
+    // statements either (review of 2026-10-27).
+    const compileChain = (depth: number) => {
+      const ce = new ComputeEngine();
+      ce.parse('h_0(x) := \\sin(x) + x x + \\cos(x)').evaluate();
+      for (let k = 1; k <= depth; k++) {
+        const below: MathJsonExpression = [`h_${k - 1}`, 'x'];
+        ce.box([
+          'Assign',
+          `h_${k}`,
+          [
+            'Function',
+            [
+              'Which',
+              ['Greater', 'x', k],
+              0.1,
+              ['Greater', below, 0],
+              0.2,
+              ['Less', below, 0],
+              0.3,
+            ],
+            'x',
+          ],
+        ]).evaluate();
+      }
+      ce.parse('g(x) := h_0(x) + 1').evaluate();
+      const start = performance.now();
+      const r = compile(ce.box(['Add', [`h_${depth}`, 'x'], ['g', 'x']]), {
+        to: 'glsl',
+      });
+      const elapsed = performance.now() - start;
+      expect(r.success).toBe(true);
+      return { body: r.code, elapsed };
+    };
+    // The functions stay shader functions of their own (in the preamble),
+    // and the root calls them. At depth 10 the root used to be a body of
+    // 312 KB, with every function written out.
+    const deep = compileChain(10);
+    expect(deep.body).toMatch(/_fn_h_/);
+    expect(deep.body.length).toBeLessThan(1_000);
+    expect(deep.elapsed).toBeLessThan(5_000);
+  });
+
+  test('an enclosing call emitted after the arms does not serve them', () => {
+    // `h_k(x) = atan2(If(x > c_k, 2h_{k-1}(x), 3h_{k-1}(x)), h_{k-1}(x))`:
+    // the third call of `h_{k-1}` encloses the two arms but is emitted after
+    // them, so the arms cannot read its temporary and the expansion still
+    // doubles at each level (review of 2026-10-27).
+    const compileChain = (depth: number) => {
+      const ce = new ComputeEngine();
+      ce.parse('h_0(x) := \\sin(x) + x x + \\cos(x)').evaluate();
+      for (let k = 1; k <= depth; k++) {
+        const below: MathJsonExpression = [`h_${k - 1}`, 'x'];
+        ce.box([
+          'Assign',
+          `h_${k}`,
+          [
+            'Function',
+            [
+              'Arctan2',
+              [
+                'If',
+                ['Greater', 'x', k / 10],
+                ['Multiply', 2, below],
+                ['Multiply', 3, below],
+              ],
+              below,
+            ],
+            'x',
+          ],
+        ]).evaluate();
+      }
+      ce.parse('g(x) := h_0(x) + 1').evaluate();
+      const start = performance.now();
+      const r = compile(ce.box(['Add', [`h_${depth}`, 'x'], ['g', 'x']]), {
+        to: 'glsl',
+      });
+      const elapsed = performance.now() - start;
+      expect(r.success).toBe(true);
+      return { code: `${r.preamble ?? ''}\n${r.code}`, elapsed };
+    };
+    expect(compileChain(3).code).not.toMatch(/_fn_/);
+    const deep = compileChain(14);
+    expect(deep.code).toMatch(/_fn_h_/);
+    expect(deep.code.length).toBeLessThan(20_000);
+    expect(deep.elapsed).toBeLessThan(5_000);
+  });
+
   test('an expansion above the size limits is not used', () => {
-    // `g(x)` and the innermost call of the chain share `f(x)`. The chain of
-    // depth 9 holds more paths than `GPU_SHARED_CALLS_MAX_PATHS`, so the
-    // calls stay by reference; the chain of depth 3 is substituted.
+    // `g(x)` and the innermost call of the chain share `f(x)`. Each level
+    // of the chain multiplies the paths by about 4 (the body reads `x` four
+    // times), so the chain of depth 10 holds more paths than
+    // `GPU_SHARED_CALLS_MAX_PATHS` (1,000,000) and the calls stay by
+    // reference; the chain of depth 3 is substituted.
     const compileChain = (depth: number) => {
       const ce = new ComputeEngine();
       ce.parse('f(x) := x x + \\sin(x) + x').evaluate();
@@ -271,7 +447,7 @@ describe('the limits of the substitution', () => {
       return `${r.preamble ?? ''}\n${r.code}`;
     };
     expect(compileChain(3)).not.toMatch(/_fn_/);
-    expect(compileChain(9)).toMatch(/_fn_f\(/);
+    expect(compileChain(10)).toMatch(/_fn_f\(/);
   });
 
   test('a sum whose head the caller supplies is not written out', () => {

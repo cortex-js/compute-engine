@@ -1,5 +1,22 @@
 ## [Unreleased]
 
+### New Features
+
+- **Permutation groups, an optional entry:
+  `@cortex-js/compute-engine/group-theory`.** `loadGroupTheory(ce)` adds 26
+  operators to an engine: permutations and their products, inverses, powers,
+  conjugates (b⁻¹ab) and commutators (a⁻¹b⁻¹ab); groups given by generators
+  on an explicit action `PermutationAction(n)`; orbits and transversals; the
+  exact order, membership, point stabilizers, and the subgroup, index,
+  equality, normality and abelian queries. The order and membership queries
+  use an incremental Schreier–Sims algorithm: the order of S₁₀₀, generated
+  by a transposition and a 100-cycle, takes about 30 ms. The loader options
+  set resource limits, and a query can lower them with a named `options`
+  dictionary. A query that reaches a limit returns an error such as
+  `Error("permutation-chain-orbit-edge-limit")`, never a partial list or a
+  false answer. An engine that does not load the entry does not have these
+  operators. Contributed by @KingArth0r (#482).
+
 ### Behavior Changes
 
 - **The join of types does not depend on the order of its operands.**
@@ -66,6 +83,14 @@
 
 ### Resolved Issues
 
+- **A shader compile no longer writes out a chain of user functions whose
+  branches all call the function below.** With
+  `h_k(x) = \{x > c_k: 2h_{k-1}(x), 3h_{k-1}(x)\}` (or a `Which` whose later
+  conditions call it), the `glsl` and `wgsl` targets wrote the function
+  bodies into the main body, where a call shared by two branches is written
+  once in each, so the shader doubled at each level: 2.5 MB of GLSL and
+  388 s of compilation at depth 14. Such a chain now stays a set of shader
+  functions that call each other.
 - **Compiled code gave wrong values for a user function called with a list
   argument at a parameter that the interpreter binds whole.** With `R`
   declared `function` and assigned `(V, θ) ↦ [Σ V·[cos θ, -sin θ], …]`,
