@@ -113,6 +113,11 @@
       "import": "./dist/esm-min/identities.js",
       "default": "./dist/esm-min/identities.js"
     },
+    "./group-theory": {
+      "types": "./dist/types/group-theory.d.ts",
+      "import": "./dist/esm-min/group-theory.js",
+      "default": "./dist/esm-min/group-theory.js"
+    },
     "./integration-rules": {
       "types": "./dist/types/integration-rules.d.ts",
       "import": "./dist/esm-min/integration-rules.js",

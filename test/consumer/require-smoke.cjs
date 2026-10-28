@@ -41,6 +41,7 @@ const ENTRIES = {
   runtime: ['createJavaScriptRuntime', 'runtimeVersion'],
   identities: ['loadIdentities'],
   'integration-rules': ['loadIntegrationRules'],
+  'group-theory': ['loadGroupTheory'],
   epsil: ['ComputeEngine', 'executeEpsil', 'parseEpsil'],
 };
 
@@ -140,4 +141,26 @@ const cubic = new loaded.compile.JavaScriptTarget().compile(
 if (!/\/ 6$/.test(cubic.code) || cubic.run({ n: 16 }) !== 560)
   fail(`n(n-1)(n-2)/6 from the ./compile target is ${cubic.code}, ${cubic.run({ n: 16 })} at n = 16`);
 
+// The optional subpath must operate on expressions owned by either engine entry.
+for (const engine of [ce, full]) {
+  const first = loaded['group-theory'].loadGroupTheory(engine);
+  const second = loaded['group-theory'].loadGroupTheory(engine);
+  if (first.operatorCount !== 26 || second.operatorCount !== 26)
+    fail('group-theory loader report is incorrect');
+  const order = engine
+    .box([
+      'PermutationGroupOrder',
+      [
+        'PermutationGroup',
+        [
+          'List',
+          ['Permutation', ['List', 2, 1]],
+          ['Permutation', ['List', 2, 3, 1]],
+        ],
+        ['PermutationAction', 3],
+      ],
+    ])
+    .evaluate();
+  if (order.json !== 6) fail('group-theory subpath did not compute S3 order');
+}
 console.log('require-smoke: OK');

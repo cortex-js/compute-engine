@@ -47,7 +47,7 @@ fi
 export BUILD="${1-production}"
 
 # export TARGETS="math-json epsil compute-engine"
-export TARGETS="math-json latex-syntax interval numerics core compile runtime kernel-worker identities integration-rules epsil compute-engine"
+export TARGETS="math-json latex-syntax interval numerics core compile runtime kernel-worker identities integration-rules group-theory epsil compute-engine"
 
 # export GIT_VERSION=`git describe --long --dirty`
 
@@ -147,6 +147,11 @@ if [[ "$TARGETS" == *integration-rules* ]]; then
     --resolveJsonModule --esModuleInterop \
     --emitDeclarationOnly --outDir ./dist/types ./src/integration-rules.ts
 fi
+if [[ "$TARGETS" == *group-theory* ]]; then
+  "$TS7" $DTS_FLAGS \
+    --emitDeclarationOnly --outDir ./dist/types ./src/group-theory.ts
+fi
+
 echo -e $LINECLEAR$BASENAME$CHECK$DIM" Building TypeScript declaration files$RESET"
 
 #
