@@ -4066,10 +4066,12 @@ export class BoxedFunction
    * `def.lazy` test): `Add` and `Multiply` carry the flag for their folding
    * canonical handlers, so the arithmetic skeleton around an inert node is
    * rebuilt while the inert nodes themselves answer from their memo. The
-   * entry is always generation-keyed and the result is never primed as its
-   * own value (`_lazyCollectionMemoKey`, `_storeLazyCollectionValue`): a
-   * call with constant operands can read a free variable of its body, and a
-   * handler's result is not an evaluated value.
+   * entry is always generation-keyed (`_lazyCollectionMemoKey`): a call with
+   * constant operands can read a free variable of its body. The result is
+   * not primed as its own value (`_storeLazyCollectionValue`), because a
+   * handler's result is not an evaluated value, with one exception: a result
+   * that is the same call as the node (`isSameCall()`) receives the node's
+   * own entry, under the same key (`_primeUnchangedResult`).
    */
   private _isMemoizableInertEvaluation(
     options?: Partial<EvaluateOptions>
@@ -4402,6 +4404,9 @@ export class BoxedFunction
       // has lowered it again by now, so what is recorded is the state the
       // result belongs to.
       this._lazyValueFactsHidden = this.engine._factsHidden();
+      // The inert rule: a result that is the same call as this node is given
+      // this entry too (`_primeUnchangedResult`).
+      if (!this.isLazyCollection) this._primeUnchangedResult(result);
     }
 
     // Prime the result's own memo with itself — but only with the
@@ -4418,7 +4423,9 @@ export class BoxedFunction
       // its expression without evaluating it, so `f(1)` whose handler answers
       // `g(1)` would freeze `g(1)` as its own value where `g(1)` evaluates
       // to `2`. Only a result that is itself a constant lazy view is primed,
-      // as before.
+      // as before. (A result that is the same call as this node is the
+      // exception: it received this node's entry above,
+      // `_primeUnchangedResult`.)
       if (
         result._value.value === null &&
         result._isMemoizableLazyCollection(options) &&
@@ -4433,6 +4440,51 @@ export class BoxedFunction
         result._lazyValueFactsHidden = this.engine._factsHidden();
       }
     }
+  }
+
+  /**
+   * Under the inert rule (`_isMemoizableInertEvaluation`), give `result`, the
+   * value that this node's evaluation just stored, the same memo entry as
+   * this node, when `result` is the same call as this node
+   * (`isSameCall()`) and has no entry yet. The evaluation of `result` under
+   * the same key then gives `result` again, without a walk.
+   *
+   * This is sound because the evaluation is a function of the call and of
+   * the state that the key records (the generation, the world epoch, the
+   * lexical scope, the side of a fact-suppression window and the object
+   * dependencies): `result` is the same call as this node, so under that key
+   * it evaluates to what this node evaluated to, which is `result`. A result
+   * that is a different call is not primed: an evaluate handler can return
+   * an expression that is not evaluated (`f(1)` whose handler answers
+   * `g(1)`, where `g(1)` evaluates to `2`). `isSame()` is not the test: it
+   * makes a character and a one-character string the same value, and an
+   * integer `Range` and the `List` of its elements, and a handler can treat
+   * the two kinds differently.
+   *
+   * Why: an evaluation builds a new node for a value that stayed symbolic,
+   * and an enclosing evaluation that holds that node evaluated it again, with
+   * all of its operands. In a chain of `Map` levels (`Abs(Sin(2x + k/1000))`
+   * read as one level per operator) each level evaluated again the whole
+   * value of the levels below it, so a chain of `d` levels did about `d²/2`
+   * evaluations per element (ROADMAP CE-603).
+   */
+  private _primeUnchangedResult(result: Expression): void {
+    if (
+      result === this ||
+      !(result instanceof BoxedFunction) ||
+      result._value.value !== null ||
+      result._numericStore !== undefined ||
+      !result.isCanonical ||
+      result.isLazyCollection ||
+      !isSameCall(result, this)
+    )
+      return;
+    result._value.generation = this._value.generation;
+    result._value.value = result;
+    result._value.objectDeps = this._value.objectDeps;
+    result._lazyValueEpoch = this._lazyValueEpoch;
+    result._lazyValueScope = this._lazyValueScope;
+    result._lazyValueFactsHidden = this._lazyValueFactsHidden;
   }
 
   /** The memo key of {@link _memoizedLazyCollectionValue}: `undefined` for a
@@ -19324,6 +19376,63 @@ function isCollectionOperand(op: Expression): boolean {
  * (`BoxedFunction.each()` evaluates an eager source), and the caller must
  * know that the walk missed elements.
  */
+/**
+ * True when `a` and `b` are the same call: the same object, or two function
+ * nodes bound to the same definitions (the operator definition, and the
+ * value definition of a call to a function value) whose operands are the
+ * same call, two symbols with the same name bound to the same definitions,
+ * two number literals of the same class with the same value and exactness,
+ * or two strings (or two characters) with the same content.
+ *
+ * The test keeps the kind of each operand and the binding of each symbol
+ * and call, which `isSame()` does not: a character and a one-character
+ * string are `isSame`, and so are an integer `Range` and the `List` of its
+ * elements, and two symbols or two calls of the same name bound in different
+ * scopes. A handler can answer differently for each of these. Any other
+ * kind of node (a dictionary, a tensor, a list that holds its numbers
+ * unboxed) must be the same object. Used by `_primeUnchangedResult()`.
+ *
+ * The pairs of function nodes found to be the same call are remembered for
+ * the duration of one test, so that a pair reached by several paths of a
+ * graph that shares its subtrees is compared once: `e = q(e, e)` built 40
+ * levels deep has 40 distinct nodes and 2⁴⁰ paths.
+ */
+function isSameCall(
+  a: Expression,
+  b: Expression,
+  same: Map<Expression, Set<Expression>> = new Map()
+): boolean {
+  if (a === b) return true;
+  if (a.constructor !== b.constructor) return false;
+  if (a instanceof BoxedFunction && b instanceof BoxedFunction) {
+    if (same.get(a)?.has(b)) return true;
+    if (a._numericStore !== undefined || b._numericStore !== undefined)
+      return false;
+    if (a.operatorDefinition !== b.operatorDefinition) return false;
+    if (a.valueDefinition !== b.valueDefinition) return false;
+    if (a.operator !== b.operator || a.nops !== b.nops) return false;
+    const aOps = a.ops;
+    const bOps = b.ops;
+    for (let i = 0; i < aOps.length; i++)
+      if (!isSameCall(aOps[i], bOps[i], same)) return false;
+    let set = same.get(a);
+    if (set === undefined) same.set(a, (set = new Set()));
+    set.add(b);
+    return true;
+  }
+  if (isSymbol(a) && isSymbol(b))
+    return (
+      a.symbol === b.symbol &&
+      a.valueDefinition === b.valueDefinition &&
+      a.operatorDefinition === b.operatorDefinition
+    );
+  if (isNumber(a) && isNumber(b))
+    return a.isExact === b.isExact && a.isSame(b);
+  if ((isString(a) && isString(b)) || (isCharacter(a) && isCharacter(b)))
+    return a.string === b.string;
+  return false;
+}
+
 function resultHoldsNoIncompleteWalk(result: Expression): boolean {
   if (result.operator === 'List' || result.operator === 'Tuple')
     return result.isLazyCollection !== true;

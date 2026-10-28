@@ -17223,7 +17223,8 @@ function mulEvaluatedOperands(
   // reproduces the expanded form verbatim (user ruling, 2026-08-20).
   // Internal callers keep `mul()`, whose distribution several
   // normalization paths need to reach a fixpoint — see `mulFactored`.
-  const result = mulFactoredArray(evaluated);
+  // The operands are values: a vector or matrix factor is not evaluated again.
+  const result = mulFactoredArray(evaluated, true);
   // D2: see the matching comment in `Add` — an inexact (float) operand
   // numericizes the whole product even when mixed with an exact
   // symbolic constant (`Multiply(0.5, Pi)` → 1.57…). Only when the

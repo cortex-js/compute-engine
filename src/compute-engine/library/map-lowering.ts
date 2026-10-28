@@ -279,8 +279,10 @@ export function makeSpineRunner(
         if (!rowEvaluated && !writtenBase) {
           // `makeLambda` step 4 evaluates every argument in the calling scope
           // before the body runs: a row of symbols carrying assigned values
-          // would otherwise pass through raw. `.evaluate()` is cheap on an
-          // already-evaluated value.
+          // would otherwise pass through raw. A second `.evaluate()` of a
+          // symbolic value reuses its memo only for a non-lazy operator
+          // (`_primeUnchangedResult`, `boxed-function.ts`); a lazy one (`Add`,
+          // `Multiply`) is evaluated again.
           row = row.map((e) => e.evaluate());
           if (row.some((e) => isSymbol(e, 'Nothing'))) return ce.Nothing;
           rowEvaluated = true;

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-612.
+Next free reference: CE-613.
 
 **Entry format.**
 
@@ -4893,6 +4893,19 @@ each member's symbolic `Sum` with `x` free: about 1,745 ms, against 96 ms to
 box the 1,000 members (Tycho's measure, median of 3). Target: at most 2× the
 boxing time.
 
+Partly done 2026-10-28: an evaluation whose result is the same call as the
+node (same operand objects, kinds and bindings, `isSameCall()`) gives the
+result the node's memo entry (`_primeUnchangedResult`, `boxed-function.ts`),
+so each level of the lazy `Map` chain (`makeSpineRunner`,
+`library/map-lowering.ts`) no longer evaluates every level below again. About
+19× → 12–15× the boxing time (bundle measure); results identical. What remains:
+reading an element now costs about one evaluation of a member sum. Reaching 2×
+of the BOXING time means an element read must not evaluate symbolically: either
+the elements of the evaluated `Map` become canonical rather than evaluated
+forms (a change of what `evaluate()` returns, needs a user decision), or a
+general speed-up of typing and symbolic arithmetic (types take about 40 % of
+the time).
+
 ### CE-604. An integral whose integrand calls a function with a list argument expands into a list of integrals with the function body written in
 
 **Status:** open; performance. Tycho ledger row 476, 2026-10-28; instrument
@@ -4904,6 +4917,35 @@ declared real without a value, evaluating four expressions
 `Integrate` with the body of `c` written in. The same 24 integrals, one element
 each, take 48 ms (Tycho's measure, median of 3). Target: at most 2× the
 per-element time.
+
+Partly done 2026-10-28: the `Multiply` evaluate handler no longer has
+`mulTensors` evaluate its (already evaluated) list operand again
+(`operandsAreValues`, `arithmetic-mul-div.ts`). Antiderivative attempts per
+head 30 → 24; about 11.5× → 8–10× (bundle measure); results identical. What
+remains, in four groups of about 6 attempts each:
+- `multiplyCell` (`mulTensors`) calls `.evaluate()` on each cell product
+  `y·I_k`, which evaluates the inner `Integrate` again. A fix needs a "fold of
+  values" entry into the `Multiply` handler; an inline change could change the
+  errors for string cells and absence markers.
+- `Integrate` is lazy and gets no evaluate memo; each evaluation also moves the
+  generation about 19 times, so a generation-keyed memo is outdated at once
+  (same family as CE-535).
+- The list route of `Integrate` (`integrateListIntegrand`, `calculus.ts`)
+  evaluates the whole integrand, so it writes in the body of `c`
+  (`[∫ y·∫ n(x, y, 0.001) dx dy, …]`), while the scalar route keeps the call
+  (`∫ y·c(y, L, 0.01) dy`). Keeping the call on the list route would reach the
+  target but changes the form of these results: needs a user decision.
+
+### CE-612. `isSame()` takes exponential time on an expression that shares its subtrees
+
+**Status:** open; defect (performance). Found 2026-10-28 while fixing CE-603.
+
+`isSame()` (`boxed-expression/compare.ts`) follows every path of a graph whose
+subtrees are shared objects: with `e = q(e, e)` built k levels deep,
+`r.isSame(e)` takes 6 ms at k = 16, 32 ms at 20, and does not end at 40. Same
+class as commit `0904d0592` ("Fix exponential walks over shared expressions").
+Fix: remember the pairs already found equal during one top-level comparison,
+as `isSameCall()` (`boxed-function.ts`) does.
 
 ### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 

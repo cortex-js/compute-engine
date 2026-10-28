@@ -3194,9 +3194,16 @@ export function mulFactored(...xs: ReadonlyArray<Expression>): Expression {
  * as a separate argument, and JavaScript throws `RangeError: Maximum call
  * stack size exceeded` when the number of arguments is too large (about
  * 100 000 factors or more).
+ *
+ * `operandsAreValues` is `true` when each factor is already the value of an
+ * operand of the product (the `Multiply` evaluate handler): a vector or
+ * matrix factor is then not evaluated again (see `mulTensors()`).
  */
-export function mulFactoredArray(xs: ReadonlyArray<Expression>): Expression {
-  return mulImpl(xs, false);
+export function mulFactoredArray(
+  xs: ReadonlyArray<Expression>,
+  operandsAreValues = false
+): Expression {
+  return mulImpl(xs, false, operandsAreValues);
 }
 
 /**
@@ -3222,7 +3229,11 @@ function hasPointProductOperands(xs: ReadonlyArray<Expression>): boolean {
   return false;
 }
 
-function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
+function mulImpl(
+  xs: ReadonlyArray<Expression>,
+  expand: boolean,
+  operandsAreValues = false
+): Expression {
   console.assert(xs.length > 0);
   if (xs.length === 1) return xs[0];
 
@@ -3307,7 +3318,7 @@ function mulImpl(xs: ReadonlyArray<Expression>, expand: boolean): Expression {
     !unresolvedFactor &&
     (xs.some((x) => isTensorValue(x)) || isMatrixProductOfValues(xs))
   ) {
-    const r = mulTensors(ce, xs, false, expand);
+    const r = mulTensors(ce, xs, false, expand, operandsAreValues);
     if (r) return r;
   }
 
@@ -4065,7 +4076,9 @@ function mulTensors(
   // evaluates to `[x + 1, 2(x + 1)]`, the same rule a scalar product follows.
   // The `.N()` route is always factored (`mulN`); internal `mul()` callers
   // keep the expansion.
-  expand = true
+  expand = true,
+  // `true` when `xs` are already evaluated: see `mulFactoredArray()`.
+  operandsAreValues = false
 ): Expression | undefined {
   const multiply = numericApproximation ? mulN : expand ? mul : mulFactored;
   // A CELL product on the exact routes is finished with `.evaluate()`, so the
@@ -4120,8 +4133,16 @@ function mulTensors(
   // operands are classified: such a matrix is then a tensor value, and a
   // `Range` beside it is read as a vector (`[[2, Missing], [3, 4]]·Range(1, 2)`
   // is the matrix-vector product `[NaN, 11]`).
+  // On the `Multiply` evaluate route the operands are already the values of
+  // the operands of the product (`operandsAreValues`), and they are not
+  // evaluated again. A list of symbolic cells is not data, so its
+  // evaluation evaluates every cell again: a list of six unevaluated
+  // integrals tried each antiderivative once more (ROADMAP CE-604).
   const evaluated = xs.map((op) =>
-    absentCellsAsNaN(ce, numericApproximation ? op.N() : op.evaluate())
+    absentCellsAsNaN(
+      ce,
+      numericApproximation ? op.N() : operandsAreValues ? op : op.evaluate()
+    )
   );
   // The rank of each operand that is a lazy collection of vectors or
   // matrices, read once from its type (`lazyCollectionRank()`).
@@ -4233,7 +4254,8 @@ function mulTensors(
       tensors.some((t) => t.shape.length > 2)
     )
       return undefined;
-    const product = mulTensors(ce, tensors, numericApproximation, expand);
+    // The tensors are values (from `evaluated` above).
+    const product = mulTensors(ce, tensors, numericApproximation, expand, true);
     if (product === undefined) return undefined;
     if (isFunction(product, 'Error')) return product;
     if (!isTensorValue(product)) return undefined;

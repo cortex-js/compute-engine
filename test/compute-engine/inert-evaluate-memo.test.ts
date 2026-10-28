@@ -38,17 +38,18 @@ describe('an inert result is not walked again at the same state', () => {
     expect(q.calls).toBe(1);
     e.evaluate();
     expect(q.calls).toBe(1);
-    // The result is a value: its first evaluate walks it once more (its
-    // operand `x` is a free symbol, so the result is not primed as a constant
-    // entry); from then on the inert `q(x)` answers from its memo. The `Add`
-    // around it is rebuilt each time: `Add` is a lazy head (its canonical
-    // handler folds the numbers), and the memo keeps the lazy-collection
-    // contract of not serving a lazy head.
+    // The result is a value. The `Add` around the inert `q(x)` is rebuilt
+    // each time: `Add` is a lazy head (its canonical handler folds the
+    // numbers), and the memo keeps the lazy-collection contract of not
+    // serving a lazy head. The `q(x)` of the result is written as the `q(x)`
+    // of `e`, so it received the memo entry of that node when `e` was
+    // evaluated (`_primeUnchangedResult`), and it answers from it: `q` is not
+    // called again (ROADMAP CE-603; it was called once more before).
     const r2 = r1.evaluate();
     expect(r2.isSame(r1)).toBe(true);
-    expect(q.calls).toBe(2);
+    expect(q.calls).toBe(1);
     r1.evaluate();
-    expect(q.calls).toBe(2);
+    expect(q.calls).toBe(1);
   });
 
   test('a value write makes the node evaluate again', () => {
