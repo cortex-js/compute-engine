@@ -11,6 +11,7 @@
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { compile } from '../../src/compile';
+import { isSubtype } from '../../src/common/type/subtype';
 
 /** `F(n, K) = { n = K - 1: [n], otherwise: join([n], F(n + 1, K)) }` with
  * the given join head and base-clause head. */
@@ -250,17 +251,34 @@ describe('a call typed from the body of a recursive function', () => {
     's',
   ];
 
-  test.each([
-    ['assigned', false],
-    ['declared as a function, then assigned', true],
-  ])('%s', (_, declare) => {
+  test('assigned', () => {
     const ce = new ComputeEngine();
-    if (declare) ce.declare('m', 'function');
     ce.assign('m', ce.box(body));
     const call = ce.box(['m', 1, ['List', 0]]);
     expect(call.evaluate().toString()).toBe('[1,2]');
     expect(call.type.toString()).not.toBe('vector<integer^1>');
     expect(call.type.isUnknown).toBe(true);
+  });
+
+  // Declared `function`, the recursive literal is typed by the signature the
+  // binding derives with the recursion check (CE-544), and the call types
+  // the arms of the body: the type holds the value, and it is not the type
+  // of the base case alone. `m(2, 3)` was typed `integer` (review of
+  // 2026-10-27).
+  test('declared as a function, then assigned', () => {
+    const ce = new ComputeEngine();
+    ce.declare('m', 'function');
+    ce.assign('m', ce.box(body));
+    for (const call of [
+      ce.box(['m', 1, ['List', 0]]),
+      ce.box(['m', 2, 3]),
+    ]) {
+      const value = call.evaluate();
+      expect(value.toString()).toBe('[1,2]');
+      expect(call.type.toString()).not.toBe('vector<integer^1>');
+      expect(call.type.toString()).not.toBe('integer');
+      expect(isSubtype(value.type.type, call.type.type)).toBe(true);
+    }
   });
 
   test('a recursion that is not a branch evaluates as before', () => {

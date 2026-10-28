@@ -7,7 +7,9 @@ import type {
   IComputeEngine as ComputeEngine,
   TypeProvenanceEntry,
 } from '../global-types.js';
+import type { FunctionInterface } from '../types-expression.js';
 import {
+  callsReach,
   calleeHomesDeclarationCount,
   collectCalleeHomes,
   declaredResultMemoKey,
@@ -31,11 +33,13 @@ import {
   containsSignatureArm,
   functionResult,
   isValidType,
+  isWildcardFunctionType,
   resolveTypeAlias,
   signatureEffects,
   widen,
 } from '../../common/type/utils.js';
 import { BoxedType } from '../../common/type/boxed-type.js';
+import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { reduceType } from '../../common/type/reduce.js';
 
 import { defaultCollectionHandlers } from '../collection-utils.js';
@@ -61,7 +65,14 @@ import {
 } from './effects-inference.js';
 import { isEffectSubset, unionEffectSets } from '../../common/type/effects.js';
 import { declaredTypeError } from './type-compatibility-error.js';
-import { noteDefinitionCapturedTypes } from './function-literal.js';
+import {
+  functionLiteralDeclaredSignature,
+  functionLiteralParameterType,
+  functionLiteralReturnType,
+  isDestructuringParameter,
+  isRestParameter,
+  noteDefinitionCapturedTypes,
+} from './function-literal.js';
 import { isLatexString } from '../latex-syntax/utils.js';
 import { parse as parseLatex } from '../latex-syntax/latex-syntax.js';
 import { ConfigurationChangeListener } from '../../common/configuration-change.js';
@@ -298,6 +309,20 @@ export class _BoxedValueDefinition
    * `undefined` outside that pass, where the re-entrant read answers the
    * recorded type unchanged. Transient, not state. */
   private _recursionResult: Type | undefined = undefined;
+
+  /** The skeleton that {@link _wildcardRecursiveSignature} derives the
+   * signature from, with the function literal it was built for, or no
+   * skeleton when that literal does not call itself (then with the engine
+   * versions the answer was read at). Rebuilt when the stored literal
+   * changes; the skeleton object stays the same between reads so that the
+   * signature memo, which keys on its identity, can hit. Not state. */
+  private _wildcardSkeleton:
+    | {
+        literal: Expression;
+        versions: string;
+        skeleton: BoxedType | undefined;
+      }
+    | undefined = undefined;
 
   // History of writes to this definition's type (see `TypeProvenanceEntry`
   // in `types-definitions.ts` and the phase-1 design in
@@ -989,6 +1014,117 @@ export class _BoxedValueDefinition
     } finally {
       endSignatureDerivation(frame);
     }
+  }
+
+  /**
+   * The signature of the RECURSIVE function literal held by a binding that is
+   * declared with the bare `function` type, or `undefined` when the binding is
+   * not declared `function`, holds no function literal, or the literal does
+   * not call itself (directly or through the functions it calls).
+   *
+   * A bare `function` declaration has no signature of its own, so a call of
+   * the binding is typed by the literal's own type. That type is computed
+   * from the body, and the recursive call in the body reads the literal's
+   * type again: the cache answers that re-entrant read with the type the
+   * literal had before (`cachedValue`, `cache.ts`), which was computed when
+   * the binding held no value. With `R(i) = {i = 0: 0, R(i−1) + S(1, 2,
+   * R(i−1))}` and `S` a function whose body calls another user function,
+   * that earlier type is wide, and `R(3)` was typed `any`, where the same
+   * functions without the declaration type it `number`.
+   *
+   * The signature is derived as for a binding declared with a signature
+   * whose slots are `unknown` (`ce.declare('R', '(unknown) -> unknown')`):
+   * the skeleton has one slot per parameter of the literal (its annotation,
+   * or `unknown`) and the result `unknown`, and {@link _deriveSignature}
+   * types the body under it, with the recursive call reading the skeleton,
+   * and verifies the result (`verifiedListHypothesis`). The effects of the
+   * literal's own type are kept on the derived signature: the skeleton
+   * declares none, and a pure signature for a body that draws a random
+   * number would let a partial application be typed as a pure function.
+   *
+   * These literals keep their own type: one with a rest or a destructuring
+   * parameter, one whose author wrote its result type or its full signature
+   * (that is a contract, possibly a generic one `where T`), and one with a
+   * parameter annotation that names a type variable. The skeleton has no
+   * `where` clause, so a type variable copied into it is not quantified,
+   * and building the derived type threw `unresolved-type-variable`.
+   * @internal
+   */
+  _wildcardRecursiveSignature(): Type | undefined {
+    const t = this._type;
+    if (t === undefined || t === null || !isWildcardFunctionType(t.type))
+      return undefined;
+    const literal = this.storedValue;
+    if (literal === undefined || !isFunction(literal, 'Function'))
+      return undefined;
+    // Whether the literal calls itself depends on the definitions of the
+    // functions it calls, so the answer is kept with the engine versions
+    // that a new definition or assignment moves (`declaredResultMemoKey`),
+    // and read again when they move. The skeleton object is kept while the
+    // answer stays the same, because the signature memo of
+    // `_deriveSignature` keys on its identity.
+    let cached = this._wildcardSkeleton;
+    if (cached === undefined || cached.literal !== literal) {
+      cached = { literal, versions: '', skeleton: undefined };
+      this._wildcardSkeleton = cached;
+    }
+    const versions = declaredResultMemoKey(this._engine, literal);
+    if (cached.versions !== versions) {
+      const recursive = this._isDerivableRecursiveLiteral(literal);
+      if (!recursive) cached.skeleton = undefined;
+      else if (cached.skeleton === undefined)
+        cached.skeleton = new BoxedType(
+          {
+            kind: 'signature',
+            args: literal.ops.slice(1).map((p) => ({
+              type: functionLiteralParameterType(p) ?? 'unknown',
+            })),
+            result: 'unknown',
+          },
+          this._engine._typeResolver
+        );
+      cached.versions = versions;
+    }
+    if (cached.skeleton === undefined) return undefined;
+    const derived = this._deriveSignature(
+      cached.skeleton,
+      cached.skeleton.type
+    ).type;
+    const own = literal.type.type;
+    if (
+      typeof derived !== 'object' ||
+      derived.kind !== 'signature' ||
+      derived.effects !== undefined ||
+      typeof own !== 'object' ||
+      own.kind !== 'signature' ||
+      own.effects === undefined
+    )
+      return derived;
+    return { ...derived, effects: own.effects };
+  }
+
+  /** True when `literal` calls the function this binding names, directly or
+   * through the functions it calls, and its signature can be derived from a
+   * skeleton of `unknown` slots (see {@link _wildcardRecursiveSignature}). */
+  private _isDerivableRecursiveLiteral(
+    literal: Expression & FunctionInterface
+  ): boolean {
+    const params = literal.ops.slice(1);
+    if (params.some((p) => isRestParameter(p) || isDestructuringParameter(p)))
+      return false;
+    if (
+      functionLiteralReturnType(literal) !== undefined ||
+      functionLiteralDeclaredSignature(literal) !== undefined
+    )
+      return false;
+    if (
+      params.some((p) => {
+        const annotation = functionLiteralParameterType(p);
+        return annotation !== undefined && isPolymorphicType(annotation);
+      })
+    )
+      return false;
+    return callsReach(literal, this.name);
   }
 
   /** The body of {@link _deriveSignature}, run inside the derivation frame

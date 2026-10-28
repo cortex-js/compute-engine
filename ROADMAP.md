@@ -73,30 +73,6 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Types and type inference
 
-### CE-544. A function declared `function` and then assigned skips the recursion check
-
-**Status:** open; defect. Found 2026-10-27 while fixing Tycho row 468. Tycho
-row 469 is this defect.
-
-Tycho row 469 (measured 2026-10-27 on the CE main tree): with
-`G(a,b,c) = |sin a| − 0.1`, `S(a,b,c) = max(G(a,b,c), c − 3)` and
-`R(i) = {i = 0: 0, R(i−1) + S(1, 2, R(i−1))}`, `R(3)` and `R(x)` (`x: real`)
-are typed `any` when the three functions are declared `function` and then
-assigned, and `number` when they are only assigned. With `S(a,b,c) =
-max(a,b,c)` and the declarations, the type is the wide form below. Tycho
-repro: `~/dev/tycho/scripts/repros/2026-10-27-ce469-recursive-call-nested-callee-any-repro.mts`.
-
-With `R` declared `function` and then assigned
-`R(i) = Which(i = 0, 0, True, R(i − 1) + 1)`, the call `R(3)` is typed with the
-wide form `list<list<any> | number | tuple> | number | tuple`. Not declared, the
-same literal is typed `(i: unknown) -> number` and `R(3)` is `number`, because
-the operator definition runs the recursion check (`verifiedListHypothesis`). The
-value-definition route reads the raw type of the literal
-(`namedLiteralSignatureType`, `boxed-function.ts`) and does not run that check,
-and the recursive call in the stored literal reads the type of the literal boxed
-before the assignment, so the result also depends on the order of the
-definitions (`boxed-value-definition.ts`).
-
 ### CE-545. A call over an `unknown` operand and over the wide CE-502 form are typed by different rules
 
 **Status:** decision needed; types. Found 2026-10-27 while fixing Tycho row 468.

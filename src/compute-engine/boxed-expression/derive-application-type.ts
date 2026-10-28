@@ -6,6 +6,7 @@ import { deriveSignatureResultType } from './signature-result-type.js';
 import {
   callResultType,
   componentwiseTupleCallType,
+  wildcardRecursiveSignature,
 } from './call-result-type.js';
 import type {
   BoxedDefinition,
@@ -735,8 +736,15 @@ export function deriveApplicationType(
       // a call to such a function inside another function's body could not
       // be derived, and the enclosing call fell back to its declared
       // result, in which a pass-through parameter reads `unknown`.
+      // A recursive literal is read with the signature the binding derives
+      // with the recursion check (`wildcardRecursiveSignature`): the
+      // literal's own type reads its recursive call as the type the literal
+      // had before it was assigned.
       const literal = binding.value.value;
-      const lt = literal === undefined ? undefined : literal.type.type;
+      const lt =
+        literal === undefined
+          ? undefined
+          : (wildcardRecursiveSignature(binding.value) ?? literal.type.type);
       if (typeof lt !== 'object' || lt.kind !== 'signature') return undefined;
       ft = lt;
     } else if (

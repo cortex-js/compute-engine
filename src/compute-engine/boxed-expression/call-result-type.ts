@@ -873,6 +873,27 @@ function inferredPointCallType(
 }
 
 /**
+ * The signature that the value binding `def` derives for the RECURSIVE
+ * function literal it holds when it is declared with the bare `function`
+ * type, or `undefined` (then a call reads the literal's own type, which is
+ * an inferred signature).
+ *
+ * The literal's own type reads the recursive call of its body as the type
+ * the literal had before it was assigned. With a callee whose body calls
+ * another user function, `R(3)` was typed `any`, where an assignment to an
+ * undeclared name typed it `number`. The binding derives the signature as
+ * for a declaration `(unknown) -> unknown`, which checks the recursion
+ * (`_wildcardRecursiveSignature`, `boxed-value-definition.ts`), and the
+ * call sites read that signature as a declared one. The method is internal
+ * to the definition class, so it is read through a structural type.
+ */
+export function wildcardRecursiveSignature(def: object): Type | undefined {
+  return (
+    def as { _wildcardRecursiveSignature?: () => Type | undefined }
+  )._wildcardRecursiveSignature?.();
+}
+
+/**
  * The signature of the function that `binding` holds, when the engine
  * INFERRED it from the body and the author did not declare it. `undefined`
  * when the signature is a contract, or when `binding` holds no function.
@@ -905,7 +926,11 @@ export function inferredCallSignature(
   if (!literal || !isFunction(literal, 'Function')) return undefined;
   if (literal.ops.slice(1).some((p) => functionLiteralParameterType(p)))
     return undefined;
-  return literal.type.type;
+  // A recursive literal under a bare `function` declaration: the signature
+  // derived with the recursion check (`wildcardRecursiveSignature`). It is
+  // still an inferred signature, not a contract: the checks of an error, a
+  // string or a boolean argument of `callResultType` apply to it.
+  return wildcardRecursiveSignature(value) ?? literal.type.type;
 }
 
 /**

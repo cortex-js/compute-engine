@@ -42,6 +42,7 @@ import {
   componentwiseTupleCallType,
   inferredPointSignature,
   partialApplicationType,
+  wildcardRecursiveSignature,
 } from './call-result-type.js';
 import {
   expandAliasesForLift,
@@ -12169,8 +12170,10 @@ function lambdaCallTypeOverDescriptors(
   }
 
   // A value definition: the signature is read as in the value-definition
-  // branch of `type()`.
-  const declaredType = binding.value.type.type;
+  // branch of `type()`, with the same reading of a recursive literal under a
+  // bare `function` declaration (`wildcardRecursiveSignature`).
+  const recursive = wildcardRecursiveSignature(binding.value);
+  const declaredType = recursive ?? binding.value.type.type;
   const heldValue = binding.value.value;
   const sig =
     heldValue === undefined
@@ -13460,7 +13463,18 @@ function boundCallType(expr: BoxedFunction): Type | BoxedType {
     // The assigned literal is read under the name it is held by, as in
     // `applyFunctionLiteral` (`namedLiteralSignatureType`). A signature
     // INFERRED from the literal is read the same way.
-    const declaredType = expr.valueDefinition.type.type;
+    // A recursive literal under a bare `function` declaration is read with
+    // the signature the binding derives for it, which checks the recursion
+    // (`wildcardRecursiveSignature`). That signature then stands for the
+    // declaration in the whole branch, as a declared `(unknown) -> unknown`
+    // does: a reading of the literal's body would see the recursive call as
+    // typed before the literal was assigned. The self-call evidence
+    // (`namedLiteralSignatureType`) is not applied to it: with
+    // `m(n, s) = If(n = 0, s, m(n − 1, [1, 2]))`, the evidence types `s` as
+    // a list, and `m(2, 3)` was then typed `integer`, the type of the base
+    // case alone, although its value is `[1, 2]`.
+    const recursive = wildcardRecursiveSignature(expr.valueDefinition);
+    const declaredType = recursive ?? expr.valueDefinition.type.type;
     const heldValue = expr.valueDefinition.value;
     const sigSource =
       heldValue === undefined

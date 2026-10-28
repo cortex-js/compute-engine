@@ -14,6 +14,11 @@
  * that is a call of `Max` or `Min` gives a number for a tuple argument of
  * any arity and contents (`componentwiseTupleCallType`), so `R` is typed
  * with the open form, as it is without the call of `S` (box route).
+ *
+ * Since CE-544 (2026-10-27), a recursive literal held by a binding declared
+ * `function` derives its signature as a binding declared
+ * `(unknown) -> unknown` does, with the recursion check, so these calls are
+ * typed `number`, as they are when `R` is assigned without a declaration.
  */
 import { ComputeEngine } from '../../src/compute-engine';
 import { isSubtype } from '../../src/common/type/subtype';
@@ -58,8 +63,8 @@ function typesAndValue(step: MathJson): [string, string, string, boolean] {
 describe('CE-543: a recursive call as an argument of another function', () => {
   test('R(i − 1) + S(1, R(i − 1))', () => {
     expect(typesAndValue(['Add', R_PREV, ['S', 1, R_PREV]])).toEqual([
-      OPEN_NUMBER,
-      OPEN_NUMBER,
+      'number',
+      'number',
       '4',
       true,
     ]);
@@ -67,8 +72,8 @@ describe('CE-543: a recursive call as an argument of another function', () => {
 
   test('S(1, R(i − 1)) alone', () => {
     expect(typesAndValue(['S', 1, R_PREV])).toEqual([
-      'list<list<any> | number | tuple> | number',
-      'list<list<any> | number | tuple> | number',
+      'number',
+      'number',
       '1',
       true,
     ]);
@@ -76,14 +81,14 @@ describe('CE-543: a recursive call as an argument of another function', () => {
 
   test('controls: R(i − 1) + 1 and R(i − 1) + S(1, i)', () => {
     expect(typesAndValue(['Add', R_PREV, 1])).toEqual([
-      OPEN_NUMBER,
-      OPEN_NUMBER,
+      'number',
+      'number',
       '3',
       true,
     ]);
     expect(typesAndValue(['Add', R_PREV, ['S', 1, 'i']])).toEqual([
-      OPEN_NUMBER,
-      OPEN_NUMBER,
+      'number',
+      'number',
       '6',
       true,
     ]);

@@ -355,7 +355,7 @@ function listHypothesisOf(t: Type): Type | undefined {
  * call is bound to, so a parameter or a local of the same name is not
  * followed. Each literal is read once.
  */
-function callsReach(
+export function callsReach(
   literal: Expression,
   name: string,
   seen: Set<Expression> = new Set()
