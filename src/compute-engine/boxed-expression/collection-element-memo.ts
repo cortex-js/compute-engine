@@ -126,6 +126,38 @@ interface ElementMemoDep {
    * the `worldVersion` axis (`redefine {callableAfter: true}` advances
    * `world`). */
   resolvedOperator?: BoxedOperatorDefinition;
+  /**
+   * Set on a BINDING-SITE dependency, recorded only for a snapshot taken
+   * with `bindingSites` (see `snapshotMemoDeps`). The occurrence is a
+   * variable bound inside the instance: a parameter of a `Function` literal,
+   * the index of a binder, or a parameter of a user function whose body the
+   * walk reads. A value memo does not depend on such a variable, because the
+   * evaluation installs its value. A TYPE read does: `BoxedSymbol.sgn` reads
+   * the value of the variable by name through the current scope chain
+   * (`bindingInContext`), and the type of the instance is derived without
+   * the scope of the node that binds the variable. Inside a call frame
+   * whose parameter has the same name, that read finds the parameter's
+   * value: the type of `Map(x ↦ √x, [1, 2])` is `vector<real^2>` inside a
+   * call `f(1)` with the parameter `x`, and `vector<complex^2>` outside.
+   * This is the definition of the occurrence; validated by resolving the
+   * name again from the current scope, which must give the same binding.
+   */
+  site?: BoxedValueDefinition;
+  /** `site._writeVersion` at fill time, on a binding-site dependency. A type
+   * read also reads the definition of the occurrence itself (`BoxedSymbol`
+   * reads its type there, and a function literal derives its result type
+   * from the type of its body), so a write of that definition (a retyped
+   * parameter, an inference that narrows it, a loop-index write) changes
+   * the type of the instance. */
+  siteVersion?: number;
+  /** `resolvedOperator._writeVersion` at fill time, recorded only for a
+   * snapshot taken with `bindingSites`. A write of the signature of an
+   * operator (the public `signature` setter, which any operator definition
+   * has, a library one included) changes the type of each application of
+   * that operator, and advances only this counter of the definition and the
+   * `any` cache axis, which a type memo keyed on the dependencies does not
+   * read. */
+  operatorVersion?: number;
 }
 
 interface ElementMemoCache {
@@ -353,9 +385,12 @@ function resolveDepBinding(
  */
 function snapshotDeps(
   expr: Expression,
-  rawOperands = false
+  rawOperands = false,
+  bindingSites = false
 ): ElementMemoDep[] | undefined {
-  return underWalkChain(expr, () => snapshotDepsUnderChain(expr, rawOperands));
+  return underWalkChain(expr, () =>
+    snapshotDepsUnderChain(expr, rawOperands, bindingSites)
+  );
 }
 
 /**
@@ -378,7 +413,8 @@ function snapshotDeps(
  */
 function snapshotDepsUnderChain(
   expr: Expression,
-  rawOperands: boolean
+  rawOperands: boolean,
+  bindingSites: boolean
 ): ElementMemoDep[] | undefined {
   const ce = expr.engine;
   const depScope = depResolutionScope(expr);
@@ -424,6 +460,48 @@ function snapshotDepsUnderChain(
   const deps: ElementMemoDep[] = [];
   let eligible = true;
 
+  /** The variables already recorded by `visitBindingSite`. */
+  const seenSites = new Set<BoxedValueDefinition>();
+  /** With `bindingSites`, record what the name of the bound variable
+   * `occurrence` resolves to from the current scope (see
+   * `ElementMemoDep.site`). When the name resolves to another binding that
+   * holds a value, a read of the variable by name sees that value, and no
+   * stamp of this snapshot follows it: the instance is ineligible. A
+   * valueless other binding is recorded with its write version, since an
+   * assignment to it gives the read a value. */
+  const visitBindingSite = (occurrence: Expression): void => {
+    if (!bindingSites || !isSymbol(occurrence)) return;
+    const own = occurrence.valueDefinition;
+    if (own === undefined) {
+      eligible = false;
+      return;
+    }
+    if (seenSites.has(own)) return;
+    seenSites.add(own);
+    const name = occurrence.symbol;
+    const resolved = resolveDepBinding(ce, undefined, name, own);
+    const other =
+      isValueDef(resolved) && resolved.value !== own
+        ? resolved.value
+        : undefined;
+    if (other !== undefined && other.value !== undefined) {
+      if (DEBUG_DEPS)
+        console.log(`[deps] ineligible: bound '${name}' reads a value`);
+      eligible = false;
+      return;
+    }
+    deps.push({
+      occurrence,
+      name,
+      site: own,
+      siteVersion: own._writeVersion,
+      resolved,
+      ...(other !== undefined
+        ? { valueDef: other, version: other._writeVersion }
+        : {}),
+    });
+  };
+
   /** Walk a USER-DEFINED operator's lambda body for transitive
    * dependencies, recording the operator itself as a dependency (shared by
    * the applied-head branch of `visit` and the forward-reference heal;
@@ -447,7 +525,11 @@ function snapshotDepsUnderChain(
     recordDep: boolean
   ): void => {
     const lambda = opDef.lambda;
-    if (lambda === undefined) return;
+    // A snapshot for a type read records every operator the instance
+    // applies, with or without a lambda, with its write version (see
+    // `ElementMemoDep.operatorVersion`). A value memo records only the
+    // operators with a lambda.
+    if (lambda === undefined && !bindingSites) return;
     if (recordDep && !seenOperatorNames.has(name)) {
       seenOperatorNames.add(name);
       deps.push({
@@ -455,8 +537,10 @@ function snapshotDepsUnderChain(
         name,
         resolved: resolveDepBinding(ce, depScope, name),
         resolvedOperator: opDef,
+        ...(bindingSites ? { operatorVersion: opDef._writeVersion } : {}),
       });
     }
+    if (lambda === undefined) return;
     if (seenOperators.has(opDef)) return;
     seenOperators.add(opDef);
     // A nested literal inside this body excludes its own parameters while
@@ -522,6 +606,9 @@ function snapshotDepsUnderChain(
           version: valueDef._writeVersion,
           resolved,
           resolvedOperator: resolved.operator,
+          ...(bindingSites
+            ? { operatorVersion: resolved.operator._writeVersion }
+            : {}),
         });
         visitLambdaBody(occurrence, name, resolved.operator, false);
         return;
@@ -706,10 +793,17 @@ function snapshotDepsUnderChain(
         );
     }
     if (isSymbol(e)) {
-      if (skipNames?.has(e.symbol)) return;
+      if (skipNames?.has(e.symbol)) {
+        visitBindingSite(e);
+        return;
+      }
       const valueDef = e.valueDefinition;
       if (valueDef !== undefined) {
-        if (excluded.has(valueDef) || seen.has(valueDef)) return;
+        if (excluded.has(valueDef)) {
+          visitBindingSite(e);
+          return;
+        }
+        if (seen.has(valueDef)) return;
         visitValueDef(e, valueDef);
         // A symbol with a `subscriptEvaluate` handler, such as a sequence
         // `B` with `B_n = B_{n−1} + x`: `B_k` evaluates the expressions that
@@ -811,7 +905,9 @@ function snapshotDepsUnderChain(
       // dependencies) — and record the operator itself as a dependency,
       // because a same-kind redefinition bumps `_worldVersion` but an
       // operator→scalar KIND SWAP does not (see `visitLambdaBody`).
-      // Built-in operators have no lambda: no walk, no entry.
+      // Built-in operators have no lambda: no walk, and an entry only in a
+      // snapshot for a type read (`bindingSites`), which tracks the write
+      // version of each applied operator's signature.
       const opDef = e.operatorDefinition;
       if (opDef !== undefined) visitLambdaBody(e, e.operator, opDef, true);
       // A store-backed list (`ce.list()`) holds numbers only: no dependency
@@ -839,9 +935,19 @@ function snapshotDepsUnderChain(
  * for the element memo only (`rawOperands` of `snapshotDepsUnderChain`), so
  * the facet memo of such an instance stays ineligible. The returned value
  * is opaque: hold it and hand it back to `memoDepsStillValid`.
+ *
+ * `bindingSites`: also record, for each variable bound inside the instance,
+ * the binding its name resolves to from the current scope (see
+ * `ElementMemoDep.site`) with the write version of the variable's own
+ * definition, and each operator the instance applies with the write version
+ * of its definition (`ElementMemoDep.operatorVersion`). A memo of the TYPE
+ * of the instance needs them; a memo of its value does not.
  */
-export function snapshotMemoDeps(expr: Expression): MemoDeps | undefined {
-  return snapshotDeps(expr);
+export function snapshotMemoDeps(
+  expr: Expression,
+  options?: { bindingSites?: boolean }
+): MemoDeps | undefined {
+  return snapshotDeps(expr, false, options?.bindingSites === true);
 }
 
 /** Opaque dependency snapshot — see {@link snapshotMemoDeps}. */
@@ -872,6 +978,20 @@ function memoDepsStillValidUnderChain(
   const ce = expr.engine;
   const depScope = depResolutionScope(expr);
   for (const d of deps) {
+    if (d.site !== undefined) {
+      // A binding-site dependency: the name of the bound variable must
+      // resolve from the current scope to the same binding as at fill time,
+      // and a valueless other binding it resolved to must be unwritten.
+      // The definition of the occurrence itself must be unwritten.
+      if (d.site._writeVersion !== d.siteVersion) return false;
+      const r = resolveDepBinding(ce, undefined, d.name, d.site);
+      if (r !== d.resolved) return false;
+      const other = isValueDef(r) && r.value !== d.site ? r.value : undefined;
+      if (other !== d.valueDef) return false;
+      if (other !== undefined && other._writeVersion !== d.version)
+        return false;
+      continue;
+    }
     if (d.shadow === true && d.valueDef !== undefined) {
       // The binding the chain resolved to must be unwritten, and the chain
       // must still resolve the name to it.
@@ -935,6 +1055,12 @@ function memoDepsStillValidUnderChain(
       // wrapper and swaps the inner (and bumps no version axis at all).
       if (!isOperatorDef(r)) return false;
       if (r.operator !== d.resolvedOperator) return false;
+      // In a snapshot for a type read, the signature must be unwritten.
+      if (
+        d.operatorVersion !== undefined &&
+        d.resolvedOperator._writeVersion !== d.operatorVersion
+      )
+        return false;
     } else if (r !== d.resolved) return false;
   }
   return true;

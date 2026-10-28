@@ -443,6 +443,21 @@ export function endSignatureDerivation(frame: SignatureDerivationFrame): void {
   if (i >= 0) derivationStack.splice(i, 1);
 }
 
+/** The number of calls of {@link noteReentrantSignatureRead} in this
+ * process. It only increases. */
+let reentrantSignatureReads = 0;
+
+/**
+ * The number of re-entrant signature reads so far
+ * ({@link noteReentrantSignatureRead}). A memo that is not a signature
+ * derivation, and so is not on the derivation stack, compares this count
+ * before and after its computation: when it moved, the computation may have
+ * read a provisional signature, and its result must not be stored.
+ */
+export function reentrantSignatureReadCount(): number {
+  return reentrantSignatureReads;
+}
+
 /**
  * Record a re-entrant read of the signature of `owner` while its derivation
  * runs: the read answers a provisional signature (the recorded one, or the
@@ -457,6 +472,7 @@ export function endSignatureDerivation(frame: SignatureDerivationFrame): void {
  * `-> unknown`, was memoized, and stayed `-> unknown` after `F` settled.
  */
 export function noteReentrantSignatureRead(owner: object): void {
+  reentrantSignatureReads += 1;
   let i = derivationStack.length - 1;
   while (i >= 0 && derivationStack[i].owner !== owner) i -= 1;
   if (i < 0) return;

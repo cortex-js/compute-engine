@@ -36,6 +36,14 @@
 
 ### Performance
 
+- **On the shader targets, a call that several user functions repeat is
+  computed once in more cases.** A large expansion was kept by reference: in
+  Tycho's `voronoi-diagram` document, `B`, `H`, `u`, `v` and `Z` each called
+  `F(x, y)` and the same sixteen weight terms again, so WebGPU drew the row
+  about 2.1 times slower than WebGL. The function bodies are now written into
+  the main body, where each shared call is computed once per pixel. The
+  shader is also smaller (10.8 KB of WGSL instead of 12.3 KB). The size check
+  that counts the code written is unchanged.
 - **A common subexpression of a restriction's condition is shared with its
   value.** `T_3(t)\{-0.8 < \cos(T_3(t))\}` (`When(T_3(t), …)`) computed
   `T_3(t)` twice on every target; it is now computed once. On the shader
@@ -49,6 +57,12 @@
   components are all finite for certain (`sin([t, k, 1])` with `t`, `k`
   declared `real`). A shader that calls only `gcd` no longer carries the
   `lcm` helper.
+- **A function that reads a symbol holding a long symbolic expression is
+  faster to call** (ROADMAP CE-566). With `X(l) := C_0[l]` and `C_0` assigned
+  a `Sum` over a chain of lazy `Map` and `Unique` collections, each call of `X`
+  derived the type of that chain again, although nothing it reads had changed.
+  The type is now remembered until a binding it reads changes: 1 495 calls
+  took 350 ms instead of 1 746 ms.
 
 ### Resolved Issues
 
@@ -76,6 +90,12 @@
   computed it on every term.** In `\sum_{i=1}^{16} n(x, y, i)` with
   `n(x, y, i) := \exp(\ldots - F(x, y))`, `F(x, y)` was computed 17 times per
   sample instead of once.
+- **A letter that names a library operator is a free variable in an
+  expression parsed in a scope.** `ce.parse('y=x+N', { scope: ce.createScope() })`
+  had the unknowns `["x", "y"]`, and the same for `D`; read outside the scope,
+  the name `N` found the library operator `N`. It now has `["N", "x", "y"]`,
+  as the expression parsed without a scope, and as `evaluate()` and `subs()`
+  already treated it.
 
 ## 0.171.0 _2026-10-27_
 

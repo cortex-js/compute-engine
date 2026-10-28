@@ -2811,7 +2811,12 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ### CE-570. Shader targets: a call that several user functions repeat with the same arguments is computed once per function
 
-**Status:** open; performance. Tycho ledger row 467 (filed 2026-10-26).
+**Status:** fixed in the main tree, not committed (2026-10-27, session
+compute-engine-0c); remove this entry when it is committed. Tycho ledger row
+467 (filed 2026-10-26). The root inlining of `gpu-shared-calls.ts` (CE-525)
+already did what is asked below, but declined Tycho's real row: its expansion
+holds 498,274 paths, above `GPU_SHARED_CALLS_MAX_PATHS` (250,000). The limit
+is now 1,000,000; Tycho's instrument reads 0.88 (was 2.09).
 
 Each user function compiles to its own shader function, and CSE works inside
 one function body. In Tycho's `voronoi-diagram`, the row
@@ -3457,7 +3462,8 @@ interval-js, or inlining `d` with a call expression as its argument.
 
 ### CE-567. Infer `list<E> | tuple<…>` from index reads instead of a marked tuple
 
-**Status:** open; design. Measure before a decision.
+**Status:** open; decision. Measured 2026-10-27; recommendation: close
+without the change (see "Prototype result" below).
 
 Index reads `p[1]`, `p[2]` of an unannotated parameter infer
 `tuple<…>` (`parameterIndexReadType()`, `library/collections.ts`), with a
@@ -3485,6 +3491,36 @@ that becomes a silent value) and codegen coverage (census declines that go
 away on each target, from Tycho's `scripts/audit-ce-codegen.mts --all`). The
 number of tests and snapshots to update is a cost to report, not a reason to
 decide against.
+
+Prototype result (2026-10-27, patch kept at the session scratchpad
+`ce567/ce567.patch`, 7 files):
+
+- Correctness holds. Compiled values equal the interpreter's on javascript,
+  interval-js and glsl for `r([x, y])`, `r((x, y))` (an error everywhere),
+  `p ↦ !p[1] if p[2] % 2 == 0 else p[1]` with `(True, 4)`, `Abs(p)` (element
+  by element for a list, the norm for a point) and a declared
+  `h(p: tuple<real, real>)` reached with a list (an error everywhere). One
+  silent value appeared during the work (javascript broadcast `f` over a point
+  in `r((x, y))`) and was fixed in the prototype.
+- Codegen coverage gain is zero. All 17,782 javascript, interval-js and glsl
+  inputs of the 0.171.0 census, compiled in CE alone, give the same result and
+  the same code at HEAD and in the prototype; `ra1p9naofs` gives the same
+  result in both (its javascript gain comes from the compiler change already
+  at HEAD, which compiles the callee for the argument's type).
+- Cost: 26 tests and 1 test file (0 snapshots). 18 change only the printed
+  signature (`(a: tuple<number, number>) -> number` becomes
+  `(a: list<number> | tuple<number, number>) -> number`); 3 widen a result
+  (`… -> boolean` becomes `… -> boolean | missing | nan | real`, from the list
+  arm's possibly absent read); 3 make a call result less precise
+  (`d([[1, 2], [3, 4]])` is `list<number>` instead of `vector<integer^2>`); 2
+  make the call typing and the operand derivation disagree; 1 javascript
+  compile declines. Also, the union is recognized by its shape, so a DECLARED
+  `list<number> | tuple<number, number>` would be read as inferred; a real
+  version must record the origin.
+
+Recommendation: keep the marked index-read tuple and close this entry. The
+change gains no coverage and no correctness over HEAD and loses type
+precision.
 
 ### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
 

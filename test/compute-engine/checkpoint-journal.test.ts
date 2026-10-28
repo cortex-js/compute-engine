@@ -605,6 +605,11 @@ describe('snapshot completeness — the drift guard', () => {
     // version is a counter that only increases, so a restore that changes
     // the stored value or the registry makes the memo miss.
     '_literalRegistryEffects',
+    // A memo of the live type of the stored value, keyed on the identity of
+    // the value, on the world version and on the write version of every
+    // definition the value reads. A restore emits a `config` event, which
+    // advances the world version, so the memo misses after any restore.
+    '_liveTypeMemo',
   ]);
 
   const OPERATOR_DEF_EXCLUSIONS = new Set([

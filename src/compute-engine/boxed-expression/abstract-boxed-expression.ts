@@ -2096,7 +2096,20 @@ function collectReferences(
     // definition — is a function reference, not a free variable. (The
     // def-kind check is inlined, as in `isReferencedFunctionHead`, to avoid
     // an import cycle.)
-    if (def !== undefined && 'operator' in def) return;
+    //
+    // An occurrence BOUND to a value definition is a value, never the
+    // operator of the same name. The name lookup can still find an operator
+    // when the occurrence's own binding is not reachable from the current
+    // scope: `x + N` parsed with `{ scope: ce.createScope() }` binds `N` in
+    // that scope, and read outside it the name finds the library operator
+    // `N`. The evaluator reads the binding found from the current scope,
+    // which holds no value, so it keeps such an `N` as a symbol even when
+    // its own definition holds one, and `subs()` replaces it: it is free.
+    // (A constant was left out above.)
+    if (def !== undefined && 'operator' in def) {
+      if (own !== undefined) freeVars.add(s);
+      return;
+    }
 
     // A name bound to a value is resolved, not free (mirrors
     // `_getSymbolValue`: only a value definition carries a value).

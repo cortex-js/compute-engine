@@ -20,6 +20,7 @@ import {
   beginSignatureDerivation,
   endSignatureDerivation,
   noteReentrantSignatureRead,
+  reentrantSignatureReadCount,
   type SignatureDerivationFrame,
   withSignatureResult,
   type HomeScope,
@@ -56,6 +57,12 @@ import type { LatexString } from '../latex-syntax/types.js';
 
 import { _BoxedExpression } from './abstract-boxed-expression.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
+import { cycleDetectionCount } from './cycle-guard.js';
+import {
+  type MemoDeps,
+  memoDepsStillValid,
+  snapshotMemoDeps as snapshotTypeDeps,
+} from './collection-element-memo.js';
 import {
   hasSignaturePlaceholder,
   inferFunctionLiteralEffects,
@@ -171,6 +178,13 @@ function trustedValueInhabitsDeclaredType(
   }
 }
 
+/** The definitions whose `_liveValueType()` read is running. A read of the
+ * same definition from inside it (two stored values that read each other)
+ * is answered without the memo, and the reads around it store nothing. */
+const LIVE_TYPE_IN_FLIGHT = new Set<object>();
+/** The number of such re-entrant reads so far. Compared before and after a
+ * computation, as `cycleDetectionCount()` is. */
+let liveTypeReentries = 0;
 export class _BoxedValueDefinition
   implements BoxedValueDefinition, ConfigurationChangeListener
 {
@@ -1357,19 +1371,22 @@ export class _BoxedValueDefinition
    *
    * The revision is a LIVE READ WITH NO WRITE (R4 of the type-handler
    * design, `docs/plans/2026-08-22-type-handlers-on-types.md` §4.2,
-   * re-ratified 2026-08-22): compute the value's current type — itself a
-   * memo keyed on `ce._anyVersion`, so this is cheap after the first read
-   * of a generation — and answer with it when it refutes the recorded
-   * guess; answer with the recorded type when the live type is unknown or
-   * still admits it. NOTHING is written: no `_type`, no `_writeVersion`
-   * bump, no journal entry, no `type-write` event. Whatever changed the
-   * value's type already advanced the `any` axis (or invalidated the
-   * memo's object dependencies), so consumers keyed on that axis re-read;
-   * the event this getter used to emit was a second advance for a change
-   * the first had already covered — the item-219 hazard — and its
-   * generation gate was keyed on `_semanticVersion` while the value-type
-   * memo is keyed on `_anyVersion`, which is the staleness defect §2.5
-   * records. A value whose live type is still ADMITTED by the guess (a
+   * re-ratified 2026-08-22): compute the value's current type — read
+   * through {@link _liveValueType}, a memo keyed on the identity of the
+   * value, `ce._worldVersion`, the facts-hidden state and a dependency
+   * snapshot of the value (each definition it reads with its write version,
+   * the binding each bound variable's name resolves to with the write
+   * version of the variable's own definition, and each applied operator
+   * with its write version), so this is cheap until one of them changes —
+   * and answer with it when it refutes the recorded guess; answer with the
+   * recorded type when the live type is unknown or still admits it.
+   * NOTHING is written: no `_type`, no `_writeVersion` bump, no journal
+   * entry, no `type-write` event. Whatever changed the value's type moved
+   * a key of that memo, so the next read computes the type again; the
+   * event this getter used to emit was a second advance for a change that
+   * was already covered — the item-219 hazard — and its generation gate was
+   * keyed on `_semanticVersion` while the value-type memo was keyed on
+   * `_anyVersion`, which is the staleness defect §2.5 records. A value whose live type is still ADMITTED by the guess (a
    * subtype) leaves the likely type in place. Self-referential bindings
    * (`a := a + 1`) are skipped: reading their value's type reads this
    * type. Mutual recursion terminates through the expression type memo's
@@ -1383,9 +1400,117 @@ export class _BoxedValueDefinition
     if (v === undefined || !isFunction(v)) return recorded;
     if (v.operator === 'Function')
       return this._reviseLiteralArrowEffects(recorded, v);
-    const live = v.type;
+    const live = this._liveValueType(v);
     if (live.isUnknown || live.matches(recorded)) return recorded;
     return live;
+  }
+
+  /** The memo of {@link _liveValueType}. */
+  private _liveTypeMemo:
+    | {
+        value: Expression;
+        worldVersion: number;
+        factsHidden: boolean;
+        deps: MemoDeps;
+        type: BoxedType;
+      }
+    | undefined = undefined;
+
+  /**
+   * The current type of `v`, the stored value of this definition, memoized
+   * on the bindings that `v` reads and not on the `any` axis.
+   *
+   * `v.type` is memoized on the `any` axis, and each call of a function
+   * literal advances that axis when its frame is popped (the frame binds
+   * the values of the parameters, `discardEvalContext` in
+   * `engine-scope.ts`). So with `X(l) := C_0[l]`, where `C_0` holds a chain
+   * such as `Sum(If(C = U[i], i, 0), i = 1..Length(U))` over lazy
+   * collections, each call `X(i)` derived the type of the whole chain again
+   * through this definition, although nothing the chain reads had changed.
+   *
+   * The entry is valid while these hold:
+   *
+   * - The stored value is the same expression object (an assignment stores
+   *   a new one).
+   * - The world version is unmoved: an assumption, a `forget()`, a scope pop
+   *   that reverts an assumption, a redefinition of a function and a change
+   *   of the configuration advance it. The facts-hidden state is the same.
+   * - The dependency snapshot of `v` still validates
+   *   (`snapshotMemoDeps`/`memoDepsStillValid`,
+   *   `collection-element-memo.ts`). It holds each value definition that
+   *   `v` reads, transitively through stored values and the bodies of user
+   *   functions, with its write version: a value write, a type write
+   *   (a declaration, an inference) and a loop-index write each advance the
+   *   version of the definition they write. It holds the binding each name
+   *   resolves to from the current scope, so a declaration that shadows a
+   *   name, or a call frame that binds it, misses. With `bindingSites` it
+   *   also holds what the name of each variable bound INSIDE `v` resolves
+   *   to, because a type read finds the value of such a variable by name
+   *   (`ElementMemoDep.site`), with the write version of the variable's own
+   *   definition, and each operator `v` applies with its write version, which
+   *   a write of the operator's signature advances.
+   *
+   * Nothing is served or stored inside a value shield (`_withValueShieldKey`,
+   * where `_cacheGeneration()` is not derived from the `any` axis): the
+   * shield hides values that existing expressions read by name, and runs
+   * under a cache key of its own for that reason. A type computed while a
+   * read of the type of this same definition was already running, or while
+   * a cycle guard cut a read short (`cycleDetectionCount`), or that read
+   * the provisional signature of a function whose derivation was running
+   * (`reentrantSignatureReadCount`), is a provisional answer and is not
+   * stored. Nor is a type computed while an inference rollback frame is
+   * open or a list-hypothesis pass runs (`inListHypothesisPass`), as for
+   * the signature memo.
+   */
+  private _liveValueType(v: Expression): BoxedType {
+    const ce = this._engine;
+    if (ce._cacheGeneration() >> 1 !== ce._anyVersion) return v.type;
+    if (LIVE_TYPE_IN_FLIGHT.has(this)) {
+      liveTypeReentries += 1;
+      return v.type;
+    }
+    const memo = this._liveTypeMemo;
+    if (
+      memo !== undefined &&
+      memo.value === v &&
+      memo.worldVersion === ce._worldVersion &&
+      memo.factsHidden === ce._factsHidden() &&
+      memoDepsStillValid(v, memo.deps)
+    ) {
+      return memo.type;
+    }
+    const reentriesBefore = liveTypeReentries;
+    const cyclesBefore = cycleDetectionCount();
+    const signatureReadsBefore = reentrantSignatureReadCount();
+    LIVE_TYPE_IN_FLIGHT.add(this);
+    let type: BoxedType;
+    try {
+      type = v.type;
+    } finally {
+      LIVE_TYPE_IN_FLIGHT.delete(this);
+    }
+    if (
+      liveTypeReentries !== reentriesBefore ||
+      cycleDetectionCount() !== cyclesBefore ||
+      reentrantSignatureReadCount() !== signatureReadsBefore
+    )
+      return type;
+    // Not stored while an inference rollback frame is open, or while a
+    // list-hypothesis pass runs: the rollback restores declarations and
+    // types by writes that advance no key of this memo, and a refuted
+    // hypothesis retires nothing, so the entry would be served after the
+    // provisional state it was computed in is gone.
+    if (ce._rollbackFrames.length !== 0 || inListHypothesisPass()) return type;
+    const deps = snapshotTypeDeps(v, { bindingSites: true });
+    if (deps !== undefined)
+      this._liveTypeMemo = {
+        value: v,
+        worldVersion: ce._worldVersion,
+        factsHidden: ce._factsHidden(),
+        deps,
+        type,
+      };
+    return type;
   }
 
   /** The effects of a stored `Function` literal, when a walk of its body
