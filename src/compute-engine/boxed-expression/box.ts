@@ -1602,7 +1602,9 @@ export function rebind(
 
 /** The operands `get json()` serializes for a function node: those of its
  *  structural form, minus a `Function` literal's inference-written parameter
- *  annotations (see `BoxedFunction.json`). */
+ *  annotations (see `BoxedFunction.json`). The same rule is written again in
+ *  `jsonWithSourceOffsets()` and `rawCopyWithSourceOffsets()`
+ *  (`engine-declarations.ts`): a change here must be made there too. */
 function serializedOperands(
   node: Expression & {
     readonly operator: string;

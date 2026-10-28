@@ -1012,14 +1012,26 @@ function nestedLiteralCallsCycle(
   literal: Expression,
   cycle: readonly Expression[]
 ): boolean {
+  // Each walk reads a node once, not once for each path that reaches it: a
+  // body can share a node between several parents (`Max(t, t)` nested 23
+  // deep took 1 s to assign). The answer for a node depends only on the
+  // node (and, for `visit`, on `nested`), and a walk stops at the first
+  // `true`, so a node that a walk meets again has already answered `false`.
+  const readInCycle = new Set<Expression>();
   const inCycle = (expr: Expression): boolean => {
+    if (readInCycle.has(expr)) return false;
+    readInCycle.add(expr);
     const callee = calleeLiteral(expr);
     if (callee !== undefined && cycle.includes(callee)) return true;
     if (isFunction(expr)) return expr.ops.some(inCycle);
     return false;
   };
+  const visited = [new Set<Expression>(), new Set<Expression>()];
   const visit = (expr: Expression, nested: boolean): boolean => {
     if (!isFunction(expr)) return nested && inCycle(expr);
+    const seen = visited[nested ? 1 : 0];
+    if (seen.has(expr)) return false;
+    seen.add(expr);
     if (nested && inCycle(expr)) return true;
     const inner = nested || (expr.operator === 'Function' && expr !== literal);
     return expr.ops.some((op) => visit(op, inner));

@@ -3194,8 +3194,19 @@ export function assignFn(
         // the MathJSON would also drop the annotations that are marked as
         // inferred, and so fold `x/x` to `1` in a recursive literal over a
         // value kind.
+        //
+        // A valid literal is copied as a raw expression that keeps shared
+        // nodes shared (`rawCopyWithSourceOffsets()`), and the copy is
+        // canonicalized. Its MathJSON would be a tree, with one copy of a
+        // shared node for each path: `Max(t, t)` nested 18 deep took about
+        // 20 s to box again. An invalid literal is boxed again from its MathJSON
+        // (see `rawCopyWithSourceOffsets()` for the reason).
         if (boxedFn?.isCanonical)
-          arg2 = ce.box(jsonWithSourceOffsets(boxedFn)) as AssignValue;
+          arg2 = (
+            boxedFn.isValid
+              ? ce.box(rawCopyWithSourceOffsets(ce, boxedFn))
+              : ce.box(jsonWithSourceOffsets(boxedFn))
+          ) as AssignValue;
       }
     }
 
@@ -4274,6 +4285,10 @@ function assignValueAsValue(
  * Deliberately NOT `toMathJson()`: that is the display serializer, whose
  * function shorthand rewrites a `Function` literal (collapsing its parameter
  * list) — the re-boxed value must be structurally faithful.
+ *
+ * The operands of a function node follow `serializedOperands()`
+ * (`boxed-expression/box.ts`), as does `rawCopyWithSourceOffsets()` below:
+ * the three must stay the same.
  */
 function jsonWithSourceOffsets(expr: Expression): MathJsonExpression {
   const sourceOffsets = expr.sourceOffsets;
@@ -4318,6 +4333,71 @@ function jsonWithSourceOffsets(expr: Expression): MathJsonExpression {
     ),
   ] as [MathJsonSymbol, ...MathJsonExpression[]];
   return sourceOffsets !== undefined ? { fn, sourceOffsets } : fn;
+}
+
+/**
+ * The raw expression that `ce.box(jsonWithSourceOffsets(expr), { form:
+ * 'raw' })` gives, built without writing the MathJSON tree: each distinct
+ * node of `expr` is copied once, so a node that several parents share is
+ * shared in the copy too. Work and memory are linear in the number of
+ * distinct nodes, where the MathJSON has one copy of a node for each path
+ * from the root (`Max(t, t)` nested 30 deep has 31 distinct nodes and 2^30
+ * paths).
+ *
+ * Each function node is boxed from a MathJSON node whose operands are the
+ * copies of its operands, with the same operator, the same operands (those
+ * of the structural form, minus the parameter annotations that inference
+ * wrote on a `Function` literal) and the same `sourceOffsets` as in
+ * `jsonWithSourceOffsets()`. A leaf, and a `Hold` with what it holds, are
+ * boxed from their MathJSON, as on that route.
+ *
+ * The canonical form of the copy is the canonical form of the MathJSON.
+ * When one `canonical` read meets the same raw node again, it returns the
+ * result of the first meeting, but only if the lexical scope is the same
+ * (`_transientCanonical`, `boxed-function.ts`): an occurrence below a
+ * binder is still canonicalized in the scope of the binder. That holds
+ * only for a VALID copy: the `canonical` read of a raw node that holds an
+ * `Error` returns the raw node, where boxing the MathJSON canonicalizes the
+ * nodes around the error. The caller boxes an invalid literal from its
+ * MathJSON.
+ */
+function rawCopyWithSourceOffsets(
+  ce: IComputeEngine,
+  expr: Expression
+): Expression {
+  const copies = new Map<Expression, Expression>();
+  const copy = (node: Expression): Expression => {
+    let out = copies.get(node);
+    if (out !== undefined) return out;
+    if (!isFunction(node) || node.operator === 'Hold')
+      out = ce.box(jsonWithSourceOffsets(node), { form: 'raw' });
+    else {
+      // The same operands as `jsonWithSourceOffsets()`.
+      const structural = node.structural;
+      const ops = isFunction(structural) ? structural.ops : node.ops;
+      const fn = [
+        node.operator,
+        ...ops.map((op, i) =>
+          node.operator === 'Function' &&
+          i > 0 &&
+          isInferredTypedParameter(op) &&
+          isFunction(op)
+            ? copy(op.op1)
+            : copy(op)
+        ),
+      ] as [MathJsonSymbol, ...Expression[]];
+      const sourceOffsets = node.sourceOffsets;
+      out = ce.box(
+        (sourceOffsets !== undefined
+          ? { fn, sourceOffsets }
+          : fn) as unknown as MathJsonExpression,
+        { form: 'raw' }
+      );
+    }
+    copies.set(node, out);
+    return out;
+  };
+  return copy(expr);
 }
 
 export function assignValueAsOperatorDef(
@@ -4744,6 +4824,27 @@ function refineDeclaredType(
   return refined === declared.type ? declared : ce.type(refined);
 }
 
+/**
+ * The body of a function literal, for a literal that is boxed again so that
+ * its body is canonicalized afresh: `body.json` when the body is invalid,
+ * else the raw expression that boxing `body.json` with `form: 'raw'` gives
+ * (`ce.rebind(body, { form: 'raw' })`). The raw expression keeps a node that
+ * several parents share shared, and the canonicalization of the literal then
+ * makes its canonical form once for each scope
+ * (`rawCopyWithSourceOffsets()` says why the two routes agree, and why an
+ * invalid body takes the MathJSON route). `body.json` is a tree, with one
+ * copy of a shared node for each path: with the body `e_{k+1} = e_k +
+ * sin(e_k)` 14 deep under a declared `(real) -> real`, the return
+ * ascription took 0.7 s and made a body of 65,540 nodes for 34 distinct
+ * ones.
+ */
+function rawBodyForRebox(
+  ce: IComputeEngine,
+  body: Expression
+): MathJsonExpression | Expression {
+  return body.isValid ? ce.rebind(body, { form: 'raw' }) : body.json;
+}
+
 export function reconcileFunctionLiteralReturn(
   ce: IComputeEngine,
   literal: Expression,
@@ -4816,7 +4917,11 @@ export function reconcileFunctionLiteralReturn(
   // literal's own contract (`functionLiteralDeclaredSignature`).
   const rebuilt = ce.box([
     'Function',
-    ['Typed', literal.ops[0].json, `'${returnTypeText(declaredResult)}'`],
+    [
+      'Typed',
+      rawBodyForRebox(ce, literal.ops[0]),
+      `'${returnTypeText(declaredResult)}'`,
+    ],
     ...literal.ops.slice(1).map((p) => p.json),
   ]);
   return isFunction(rebuilt, 'Function') ? rebuilt : literal;
@@ -4937,7 +5042,11 @@ export function ascribeDeclaredParameterTypes(
   // already-canonical body object through instead leaves them bound at
   // whatever the pre-ascription inference chose, and the emitted code stays
   // scalar.
-  const rebuiltLiteral = ce.box(['Function', literal.ops[0].json, ...rebuilt]);
+  const rebuiltLiteral = ce.box([
+    'Function',
+    rawBodyForRebox(ce, literal.ops[0]),
+    ...rebuilt,
+  ]);
   if (!isFunction(rebuiltLiteral, 'Function')) return literal;
 
   // A fresh body object orphans the literal's PROVISIONAL reading — a

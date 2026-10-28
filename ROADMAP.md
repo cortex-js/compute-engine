@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-601.
+Next free reference: CE-603.
 
 **Entry format.**
 
@@ -2979,24 +2979,34 @@ characters of code). The size limit of CE-584 runs before the pass and lets
 these graphs through, because their written size is small. Expected: the pass is linear (or
 close to it) in the number of distinct nodes, as the written-size estimate is.
 
-### CE-594. Canonicalizing a function literal turns a shared expression graph into a tree, in exponential time and memory
+### CE-601. Evaluating an expression that shares a subexpression evaluates it once per path
 
-**Status:** open; defect (performance). Found 2026-10-28 while fixing CE-584.
+**Status:** open; defect (needs a design). Found 2026-10-28 with the fix of
+CE-594 (canonicalization of a shared graph).
 
-An expression whose subexpressions are shared (`e_{k+1} = e_k + sin(e_k)`, 2k+1
-distinct nodes at depth k) is held as a graph. When it becomes the body of a
-function literal (`ce.function('Function', [e, 't'])`, or `ce.assign('h',
-…)`), canonicalization copies each shared node once per path: at depth 16 the
-body holds 262,146 node objects for 35 distinct structures. Assigning `h` takes
-0.8 s at depth 14, 2 to 3 s at depth 16, and runs out of memory at depth 20.
-The compilers then count shared nodes by structure (CE-584), so the problem is
-only the canonicalization. Expected: canonicalizing a node that was already
-canonicalized in the same pass returns the same result object (a memo per
-pass), so the work and the memory are linear in the number of distinct nodes.
-The same cause makes `ce.assign` of a RECURSIVE literal over a shared tower
-exponential: `assignFn` re-boxes a literal that names itself, and the re-box
-canonicalizes the body (`r := n ↦ Max(t, t)` nested 14 deep, with a leaf
-`If(n < 1, 0, r(n − 1))`, takes 1 s; 18 deep, 18 s; measured 2026-10-28).
+`Max(t, t)` nested d deep (31 distinct nodes and 2^30 paths at d = 30) is
+canonicalized and typed in linear time, but `evaluate()` evaluates both
+operands of each `Max` once per path: with `r := n ↦ tower`, whose leaf is
+`If(n < 1, 0, r(n − 1))`, `r(0)` takes 391 ms at depth 16 and does not end in
+120 s at depth 30 (measured 2026-10-28). A memo of evaluated nodes within one
+evaluation would make it linear, but the decision is what such a memo may
+reuse: an operand with a side effect or a random value (`Random()`, an
+assignment, a `Print`) must be evaluated at each occurrence, and the memo must
+key on the scope and the values of the variables in it.
+
+### CE-602. Re-boxing an invalid function literal over a shared graph is exponential
+
+**Status:** open; defect. Found 2026-10-28 with the fix of CE-594.
+
+`ce.assign` re-boxes a recursive literal, and a literal with a declared
+signature, from a raw copy that keeps each shared node once. A literal that
+holds an `Error` node still takes the MathJSON route, which writes a shared
+graph out once per path: the `canonical` read of an invalid raw node returns
+it unchanged, where boxing the MathJSON canonicalizes the nodes around the
+error. Both assignments end in an error (`Invalid function …` for the
+recursive literal, a type error for the declared one), but only after the
+exponential re-box. Expected: the raw copy canonicalizes the valid nodes
+around an `Error` itself, so the route is linear for an invalid literal too.
 
 ### CE-593. GPU targets: a point declared `list<tuple<number, number>> | tuple<number, number>` declines with a "missing" position
 
