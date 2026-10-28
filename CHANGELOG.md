@@ -213,6 +213,13 @@
 
 ### Resolved Issues
 
+- **Assigning a call of a recursive function while an assumption is in force
+  no longer overflows the stack.** With `F` declared `function`,
+  `F := n ↦ \{n = 0: x > 0, F(n - 1)\}` and any assumption (`x > 0`),
+  `ce.assign('y', F(m))` threw "Maximum call stack size exceeded": the
+  assignment reads the type of `F(m)` with the assumptions hidden, and the
+  recursive call typed the body again at each level. It now gives `boolean`,
+  the type an engine with no assumptions gives.
 - **A `wgsl` read of a long list no longer copies the list.** `At(S, i)` with
   `S` a free list symbol called a helper that copied the whole list into a local
   variable before it read one element, and a `Sum` over `S_k` copied it again on

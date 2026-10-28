@@ -3438,25 +3438,6 @@ calls `p_rand(n + s_eed, n, n)` in both. Sharing across statements needs the
 temporary to be bound before the first statement and to stay valid across any
 assignment the statements make to a symbol the call reads.
 
-### CE-582. Typing a recursive function while the assumptions are hidden overflows the stack
-
-**Status:** in progress; defect, reachable from the public API.
-
-With `x: real`, `F: function`, any assumption (`x > 0`) and
-`F := n ↦ If(n = 0, x > 0, F(n - 1))`, `ce.assign('y', ce.box(['F', 'm']))`
-throws "Maximum call stack size exceeded" (at HEAD `edd50e5be` and later).
-`ce.assign` and the value-definition constructor derive a type with the
-assumptions hidden (`_withoutFacts`). Cause, in `cachedValue()`
-(`boxed-expression/cache.ts`): a node keeps one type cell for reads with the
-assumptions visible and one for reads with them hidden. A re-entrant read of
-a cell gets the cell's earlier value; the hidden cell of the recursive body
-has none, so each level typed the body again. Fix in progress: a re-entrant
-read of an empty cell at the key its own computation stamped gets `unknown`
-(the type of a recursive call before the function has a value). Open from the
-review: when the engine has built an object, that answer is counted as
-provisional, nothing in the window is stored, and the hidden read of
-`F := n ↦ If(n = 0, [1, 2], 2·F(n - 1))` does not finish in 40 s.
-
 ### CE-585. The type of a recursive `function` binding depends on whether its first read hid the assumptions
 
 **Status:** open; defect (determinism). Found 2026-10-27 at HEAD
