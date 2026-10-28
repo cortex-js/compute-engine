@@ -21,7 +21,11 @@ import {
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../../common/type/primitive.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
-import { functionLiteralParameterType } from './function-literal.js';
+import {
+  functionLiteralParameters,
+  functionLiteralParameterType,
+  restParameterIndex,
+} from './function-literal.js';
 import {
   couldMatchNonEmpty,
   isSubtype,
@@ -1252,10 +1256,25 @@ export function devolveAtValuePositions(
       isFunction(callee, 'Function') &&
       callee.isCanonical
     ) {
+      // Only the ANNOTATED parameter types matter here
+      // (`isAnnotatedValueParameter` reads a bare parameter as `unknown`), so
+      // they are read from the literal, not from `callee.type`. Deriving the
+      // literal's full type here also derives its body's type while the
+      // enclosing call is being boxed: with `Map(r, v)` in the body and `r` a
+      // recursive user function, that types `r` for the first time inside a
+      // type handler, which the type-handler purity check refuses. A rest
+      // parameter (always last) is not a value position.
+      const params = functionLiteralParameters(callee);
+      const rest = restParameterIndex(callee.ops.slice(1));
+      const fixed = rest < 0 ? params : params.slice(0, rest);
       const forwarded = devolveAtValuePositions(
         ce,
         '',
-        callee.type.type,
+        {
+          kind: 'signature',
+          args: fixed.map((p) => ({ type: p.type ?? 'unknown' })),
+          result: 'unknown',
+        },
         ops.slice(1),
         isAnnotatedValueParameter
       );

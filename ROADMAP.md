@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-610.
+Next free reference: CE-611.
 
 **Entry format.**
 
@@ -785,6 +785,21 @@ plain local, `Block(Assign(c, 1), Add(c, 1))`, gives `[]`. The free-variable
 walk (`collectReferences`, `abstract-boxed-expression.ts`) does not count the
 symbols of a `Tuple` target of `Assign` as locals of the block. Same on main
 before CE-597.
+
+### CE-610. Canonicalizing `Apply` of a literal whose body maps a recursive function trips the type-handler purity check
+
+**Status:** open; defect. Found 2026-10-28 while fixing a CE-597 regression.
+
+With `r` assigned a recursive function literal (`n ↦ 0` when `n ≤ 0`, else
+`s + r(n − 1)`) and `N: list<real>`,
+`ce.box(['Apply', ['Function', ['Block', ['Map', 'r', 'v']], 'v'], 'N'])`
+under the purity check (`CE_TYPE_PURITY_GUARD`, always on under jest) logs
+"error canonicalizing `Apply`: The type handler of "Map" modified engine state
+while deriving a type (moved: callable)". The `Apply` handler recovers and the
+result is right (`list<number>`), but the `Map` type handler types `r` for the
+first time, and that inference changes engine state, which a type handler must
+not do. Same at commit `bd33f2310`, before CE-597. Test:
+`tycho-row-426-apply-lambda-type.test.ts`, "the step of Tycho case 12".
 
 ### CE-609. A library letter passed to an unannotated function parameter stays the operator
 
@@ -3679,18 +3694,21 @@ call 1,223 → 980). What remains:
   argument such as `exp(x)` can overflow to `+∞` in f32 before the call.
   Making these routes run the call-site proof needs that session, which
   changes how they emit code.
-- **CE-565.6** (Tycho ledger row 470, 2026-10-28) A `min`/`max` whose
-  arguments read a common-subexpression temporary keeps the `_gpu_min` helper:
-  in Tycho's `showcase/voronoi-diagram` on GLSL (0.172.0), `_gpu_sin` and
-  `_gpu_cos` went from 4 to 0 but `_gpu_min` stays at 15, and its arguments read
-  temporaries such as `_cse2 = cos(T + 1.9)`. The finiteness proof does not
-  treat a name the compiled code assigns as finite (`GPU_WRITTEN_NAMES`,
-  `gpu-target.ts`). A temporary that is assigned once, from an expression the
-  proof shows finite (a `sin`/`cos` of finite reals), could be treated as
-  finite. Record: Tycho
-  `_TASK/desmos/desmos-corpus/codegen-audit/ce-0.172.0.json`, doc
-  `voronoi-diagram`, target `glsl`. To confirm against the generated code
-  first.
+- **CE-565.6** (Tycho ledger row 470, 2026-10-28) In Tycho's
+  `showcase/voronoi-diagram` on GLSL (0.172.0), `_gpu_min` stays at 15. Checked
+  2026-10-28: a common-subexpression temporary is NOT the cause (the `min`
+  handler sees the original subexpressions; with `T: real<-10..10>`,
+  `\min(2\cos(T+1.9)+\sin(2T+2.7), \cos(T+1.9)-\sin(2T+2.7))` uses the
+  built-in `min`). In that document each operand reads `x` or `y`, typed
+  `nan | real | signed_infinity`, so the helper is correct there (CE-565.3).
+  What remains on the CE side: `gpuFiniteProof` (`gpu-target.ts`) refuses
+  every `Power`. A `Power(b, n)` with a small positive integer literal `n` could
+  use the product rule on `n` copies of `b` (`productStaysFinite`), so a square
+  of an operand of known magnitude is proven finite
+  (`\min((x-\cos(T))^2, y)` with `x, y: real<-10..10>` keeps `_gpu_min`). An
+  `Exp` of an operand whose declared upper bound is at most 88 could also be
+  accepted (`\min(\exp(T)+1, 2\exp(T))` keeps it). Neither helps Tycho's
+  voronoi rows while `x` and `y` keep that type.
 - **CE-565.3** Tycho side, not CE: the document-level `x`/`y` are still typed
   `real | signed_infinity | nan`; a slider range (`k: real<0..10>`) would prove
   `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions
