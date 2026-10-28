@@ -2,10 +2,13 @@
  * The `storage` compile option: a per-name hint that says where a free
  * symbol's values live on a shader target.
  *
- * Today one storage kind exists, `'sampler2D'`: the values of a fixed-length
+ * Two storage kinds exist. With `'sampler2D'`, the values of a fixed-length
  * numeric list live in a single-channel float texture that the host uploads,
  * and a positional read (`At(S, i)`) lowers to a texel fetch instead of a
- * uniform-array subscript. The hint changes only the shader-target lowering.
+ * uniform-array subscript. With `{ kind: 'storage-buffer', group, binding }`
+ * (WGSL only), the list lives in a storage buffer that holds its length and
+ * its elements, so the host can change both with no new compilation. The
+ * hint changes only the shader-target lowering.
  * On the JavaScript, interval and Python targets it is IGNORED — the caller
  * compiles one expression to several targets from one options bag, and the
  * hint describes the shader lane only.
@@ -18,16 +21,27 @@
  * contract violations (raised before compilation starts, never converted into
  * an interpreter fallback), like an unknown `mode`.
  *
- * Design record: `docs/plans/2026-09-05-sampler-backed-positional-access.md`.
+ * Design records: `docs/plans/2026-09-05-sampler-backed-positional-access.md`
+ * (`'sampler2D'`) and the section "Row 462 (CE-572)" of
+ * `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
+ * (`'storage-buffer'`).
  */
 
 import type { MathJsonSymbol } from '../../math-json/types.js';
 import type { Expression } from '../global-types.js';
-import type { CompileTarget, StorageHint, StorageKind } from './types.js';
+import type {
+  CompileTarget,
+  StorageBufferBinding,
+  StorageHint,
+  StorageKind,
+} from './types.js';
 import { BaseCompiler } from './base-compiler.js';
 
 /** The storage kinds a hint may name, in the order diagnostics list them. */
-export const STORAGE_KINDS: ReadonlyArray<StorageKind> = ['sampler2D'];
+export const STORAGE_KINDS: ReadonlyArray<StorageKind> = [
+  'sampler2D',
+  'storage-buffer',
+];
 
 function invalid(detail: string): never {
   throw new Error(`Invalid compilation option "storage": ${detail}`);
@@ -58,7 +72,64 @@ function storageKindOf(name: string, value: unknown): StorageKind {
       `"${name}" names the storage kind "${kind}", which is not one this ` +
         `version knows — the storage kinds are: ${STORAGE_KINDS.join(', ')}`
     );
+  if (kind === 'storage-buffer') storageBufferBindingOf(name, value);
   return kind as StorageKind;
+}
+
+/**
+ * The group and the binding of a `'storage-buffer'` hint value. The kind
+ * has no bare-string form, because the shader declaration needs both
+ * numbers. Each must be a non-negative integer. Throws otherwise.
+ */
+function storageBufferBindingOf(
+  name: string,
+  value: unknown
+): StorageBufferBinding {
+  if (typeof value === 'string')
+    invalid(
+      `the storage kind "storage-buffer" of "${name}" needs a group and a ` +
+        `binding: write \`{ kind: 'storage-buffer', group: 0, binding: 0 }\``
+    );
+  const hint = value as { group?: unknown; binding?: unknown };
+  for (const field of ['group', 'binding'] as const) {
+    const v = Object.hasOwn(hint, field) ? hint[field] : undefined;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0 || v > 0xffff)
+      invalid(
+        `the \`${field}\` of the "storage-buffer" hint for "${name}" must ` +
+          `be an integer from 0 to 65535`
+      );
+  }
+  return { group: hint.group as number, binding: hint.binding as number };
+}
+
+/**
+ * The group and the binding of each `'storage-buffer'` hint of a `storage`
+ * option, by symbol name, or `undefined` when there is none. The option
+ * must have passed `assertStorageHintsShape`. Two hints that name the same
+ * group and binding throw: two shader declarations cannot share one
+ * binding.
+ */
+export function storageBufferBindings(
+  storage: Readonly<Record<MathJsonSymbol, StorageHint>> | undefined
+): ReadonlyMap<MathJsonSymbol, StorageBufferBinding> | undefined {
+  if (storage === undefined) return undefined;
+  const result = new Map<MathJsonSymbol, StorageBufferBinding>();
+  const used = new Map<string, string>();
+  for (const name of Object.keys(storage)) {
+    const value = storage[name];
+    if (typeof value === 'string' || value.kind !== 'storage-buffer') continue;
+    const b = storageBufferBindingOf(name, value);
+    const key = `${b.group}:${b.binding}`;
+    const other = used.get(key);
+    if (other !== undefined)
+      invalid(
+        `"${other}" and "${name}" both name group ${b.group} and binding ` +
+          `${b.binding}; each storage buffer needs its own binding`
+      );
+    used.set(key, name);
+    result.set(name, b);
+  }
+  return result.size === 0 ? undefined : result;
 }
 
 /**
@@ -78,6 +149,9 @@ export function assertStorageHintsShape(
   // carry an ordinary prototype, and a hint is an OWN entry of it.
   for (const name of Object.keys(storage))
     storageKindOf(name, (storage as Record<string, unknown>)[name]);
+  storageBufferBindings(
+    storage as Readonly<Record<MathJsonSymbol, StorageHint>>
+  );
 }
 
 /**

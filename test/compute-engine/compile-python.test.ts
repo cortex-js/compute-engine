@@ -1019,16 +1019,17 @@ describe('PYTHON TARGET', () => {
       // every domain and `When`, `If` and `Which` answer alike.
       const e = new ComputeEngine();
       e.declare('c', 'boolean');
-      // Unknown arm type: numeric until proven otherwise.
+      // Unknown arm type: numeric until proven otherwise. A value of `c`
+      // that is not a boolean selects nothing (ROADMAP CE-569).
       expect(python.compile(e.box(['When', 'x', 'c'])).code).toBe(
-        "((x) if (c) else float('nan'))"
+        "((x) if (isinstance(c, (bool, np.bool_)) and c) else float('nan'))"
       );
       expect(python.compile(e.box(['Which', 'c', 'x'])).code).toContain(
         "float('nan')"
       );
       // A string arm: the object null.
       expect(python.compile(e.box(['When', { str: 's' }, 'c'])).code).toBe(
-        '(("s") if (c) else None)'
+        '(("s") if (isinstance(c, (bool, np.bool_)) and c) else None)'
       );
       const which = python.compile(e.box(['Which', 'c', { str: 's' }])).code;
       expect(which).toContain('None');

@@ -73,7 +73,7 @@ Recursively expand out products and positive integer powers
 
 MathJSON `Factor` · `(value, symbol?, value?) -> value`
 
-Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. An optional third argument selects the generator of an exact number field. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²
+Factor a polynomial expression into a product of irreducible factors. Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. Without a variable, a factor common to every term of a sum is taken out, a term that is not a polynomial (such as sin(t)) is treated as a variable, and like terms are collected. An optional third argument selects the generator of an exact number field. Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²
 
 ### partialFraction
 

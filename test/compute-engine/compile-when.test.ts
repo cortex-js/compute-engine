@@ -67,15 +67,17 @@ describe('COMPILE When', () => {
     });
   });
 
-  // CO-P2-24: like Which, a non-boolean When condition fails closed on the JS
-  // target (matching the interpreter's throw) rather than silently returning
-  // NaN via the else branch.
-  describe('non-boolean condition (JS) fails closed', () => {
-    it('guards a numeric/NaN condition with _SYS.cond and rethrows', () => {
+  // A non-boolean When condition selects nothing on the JS target: the
+  // interpreter holds `When(5, x/y)` unevaluated, and `If(b, 5)` answers NaN
+  // for a value of `b` that is not a boolean. It raised through `_SYS.cond`
+  // before ROADMAP CE-569.
+  describe('non-boolean condition (JS) selects nothing', () => {
+    it('tests a numeric/NaN condition for being exactly true', () => {
       const expr = ce.expr(['When', 5, ['Divide', 'x', 'y']]);
       const result = compile(expr, { fallback: false })!;
-      expect(result.code).toContain('_SYS.cond(');
-      expect(() => result.run!({ x: 0, y: 0 })).toThrow();
+      expect(result.code).not.toContain('_SYS.cond(');
+      expect(result.run!({ x: 0, y: 0 })).toBeNaN();
+      expect(result.run!({ x: 1, y: 1 })).toBeNaN();
     });
 
     it('leaves a relational condition unguarded', () => {

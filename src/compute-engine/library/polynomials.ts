@@ -1,4 +1,6 @@
 import {
+  collectLikeTerms,
+  factorExpression,
   factorPolynomial,
   togetherReduced,
   partialFraction,
@@ -205,7 +207,9 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
     Factor: {
       description:
         'Factor a polynomial expression into a product of irreducible factors. ' +
-        'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. An optional third argument selects the generator of an exact number field. ' +
+        'Uses exact modular factorization for univariate rational polynomials within its work limits, with structural methods for other expressions. ' +
+        'Without a variable, a factor common to every term of a sum is taken out, a term that is not a polynomial (such as sin(t)) is treated as a variable, and like terms are collected. ' +
+        'An optional third argument selects the generator of an exact number field. ' +
         'Example: Factor(x² + 5x + 6) → (x+2)(x+3), Factor(x² + 2x + 1) → (x+1)²',
       lazy: true,
       inspectsErrors: true, // see `Expand`
@@ -241,21 +245,26 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
 
         // With a variable, factor in that variable. The variable is protected
         // from resolution: with `x := 5`, `Factor(x^2 - 1, x)` is a question
-        // about `x`, not about `24`.
+        // about `x`, not about `24`. The like terms are collected first, as
+        // `evaluate()` of `Add` does (`collectLikeTerms()`).
         if (varExpr) {
           const variable = sym(varExpr.canonical);
           if (!variable) return reduceTransformerOperand(x.canonical);
           return evaluateTensorProduct(
             factorPolynomial(
-              reduceTransformerOperand(x.canonical, new Set([variable])),
+              collectLikeTerms(
+                reduceTransformerOperand(x.canonical, new Set([variable]))
+              ),
               variable
             )
           );
         }
 
-        // Otherwise, try polynomial factoring without specific variable
+        // Otherwise, factor with no specific variable: the like terms are
+        // collected, and a non-polynomial subexpression (`sin(t)`) can be
+        // a variable (`factorExpression()`).
         return evaluateTensorProduct(
-          factorPolynomial(reduceTransformerOperand(x.canonical))
+          factorExpression(reduceTransformerOperand(x.canonical))
         );
       },
     },
@@ -272,7 +281,10 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
         // `1 / Error("missing")`, dropping the real error. Stay inert, like
         // the sibling transformers.
         if (!target.isValid) return target;
-        return togetherReduced(target);
+        // The canonical form of `Add` does not collect like terms, so a sum
+        // with nothing to combine (`a + a`) is collected here, as
+        // `evaluate()` of `Add` does: `Together(a + a)` is `2a`.
+        return collectLikeTerms(togetherReduced(target));
       },
     },
 
@@ -402,10 +414,19 @@ export const POLYNOMIALS_LIBRARY: SymbolDefinitions[] = [
       evaluate: ([expr, varExpr]) => {
         if (!expr) return undefined;
         const resolved = polynomialOperands(varExpr, expr);
-        if (!resolved) return undefined;
+        // With no variable argument and no single unknown to cancel in
+        // (`Cancel((a+b)(c+d) + (a+b)(c+d))`), there is no common factor to
+        // look for, but the like terms of the operand are still collected,
+        // as `Together` and `Factor` do.
+        if (!resolved)
+          return varExpr === undefined
+            ? collectLikeTerms(reduceTransformerOperand(expr.canonical))
+            : undefined;
         const [target] = resolved.targets;
         const { variable } = resolved;
-        return cancelCommonFactors(target, variable);
+        // The like terms of the result are collected, as `evaluate()` of
+        // `Add` does (see `Together`): `Cancel(1/a + 1/a)` is `2/a`.
+        return collectLikeTerms(cancelCommonFactors(target, variable));
       },
     },
 

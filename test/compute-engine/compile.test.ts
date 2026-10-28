@@ -5655,7 +5655,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     target.compileShader({
       type: 'fragment',
       inputs: [{ name: 'x', type: 'float' }],
-      outputs: [{ name: 'fragColor', type: 'vec4' }],
+      outputs: [{ name: 'fragColor', type: 'float' }],
       body: [
         {
           variable:
@@ -5798,8 +5798,23 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     expect(glsl.compileToSource(engineWithX().box(['Assign', 's', 'x']))).toBe(
       's = x'
     );
-    expect(shaderFor(glsl, ASSIGN_ONLY, engineWithX())).toContain(
-      '  fragColor = s = x;\n'
+    // `s` is declared as an output of the shader: a body that writes a name
+    // the shader does not declare is refused (CE-575).
+    expect(
+      glsl.compileShader({
+        type: 'fragment',
+        inputs: [{ name: 'x', type: 'float' }],
+        outputs: [
+          { name: 'fragColor', type: 'float' },
+          { name: 's', type: 'float' },
+        ],
+        body: [
+          { variable: 'fragColor', expression: engineWithX().box(ASSIGN_ONLY) },
+        ],
+      })
+    ).toContain('  fragColor = s = x;\n');
+    expect(() => shaderFor(glsl, ASSIGN_ONLY, engineWithX())).toThrow(
+      /the body reads "s", which no input or uniform of the shader declares/
     );
   });
 

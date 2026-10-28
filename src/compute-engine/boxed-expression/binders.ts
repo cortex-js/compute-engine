@@ -426,6 +426,19 @@ export function bindingInContext(
   own: BoxedBaseDefinition | undefined,
   scope: Scope | null = ce.context.lexicalScope
 ): BoxedDefinition | undefined {
+  // A definition that a checkpoint restore marked `_rewound` (created in the
+  // rewound window, in a scope that survived the restore) has no binding.
+  // Without this test, the walk below would find a later definition of the
+  // same name, and a symbol bound to the disposed definition would read
+  // that value (and count as bound in `unknowns`, and be inlined by a
+  // compile) while its type and flags stay those of its own record. Such a
+  // symbol stays inert: rebuild the expression to read the new definition.
+  // A definition that `popScope()` disposed, or that was installed in a
+  // scope created in the window (a `Sum` index, a `Block` local), is not
+  // marked and still resolves by name. (ROADMAP CE-586, user decision
+  // 2026-10-28.)
+  if (own !== undefined && (own as { _rewound?: true })._rewound)
+    return undefined;
   const start = scope;
   let skippedBinder: BoxedDefinition | undefined;
   while (scope) {

@@ -7398,6 +7398,7 @@ export type EntryPlan =
       lists: string[];
       strings: Map<string, string>;
       kinds?: Map<string, KindEntry>;
+      scalars?: string[];
     }
   | {
       kind: 'args';
@@ -7406,6 +7407,7 @@ export type EntryPlan =
       lists: number[];
       strings: Map<number, string>;
       kinds?: Map<number, KindEntry>;
+      scalars?: number[];
     };
 
 /**
@@ -7460,6 +7462,29 @@ function refuseTypedArrayEntry(label: string): never {
 function entryCheckError(binding: string): TypeError {
   return new TypeError(
     `${binding} was compiled as a real number but received a complex {re, im} value. Declare it complex, or compile with \`mode: 'complex'\`.`
+  );
+}
+
+/**
+ * Throw for an array bound to a binding of `scalars`: a symbol or a parameter
+ * that the host DECLARED with a number type (`x: real`), which the compiled
+ * code reads as a scalar. Without this check the array reaches the
+ * arithmetic of the body, and JavaScript converts it to a string: `x + 1`
+ * with `x = [1, 2]` gave `"1,21"`. A binding whose type the engine inferred,
+ * or that has no type, is not in `scalars`: the compiled code can broadcast
+ * a call over an array bound to it at run time (`q(u)` with `u = [1, 2, 3]`).
+ * The lookup runs only when the value is an array. `kind` names the scalar
+ * kind in the message.
+ */
+function refuseArrayAtScalar<K>(
+  scalars: readonly K[] | undefined,
+  key: K,
+  label: string,
+  kind: 'real' | 'complex'
+): void {
+  if (scalars === undefined || !scalars.includes(key)) return;
+  throw new TypeError(
+    `${label} was compiled as a ${kind} number but received an array. Declare it as a list (for example \`list<real>\`) to pass a list.`
   );
 }
 
@@ -7545,6 +7570,8 @@ export function checkEntry(
     for (const id of plan.real) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
+      if (Array.isArray(x))
+        refuseArrayAtScalar(plan.scalars, id, `"${id}"`, 'real');
       if (!isComplexObject(x)) continue;
       if (!isUnsignedPole(x)) throw entryCheckError(`"${id}"`);
       lifted ??= { ...v };
@@ -7553,6 +7580,8 @@ export function checkEntry(
     for (const id of plan.complex) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
+      if (Array.isArray(x))
+        refuseArrayAtScalar(plan.scalars, id, `"${id}"`, 'complex');
       if (typeof x === 'number') {
         lifted ??= { ...v };
         lifted[id] = { re: x, im: 0 };
@@ -7578,6 +7607,8 @@ export function checkEntry(
   for (const i of plan.real) {
     const x = argumentsList[i];
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
+    if (Array.isArray(x))
+      refuseArrayAtScalar(plan.scalars, i, `argument ${i + 1}`, 'real');
     if (!isComplexObject(x)) continue;
     if (!isUnsignedPole(x)) throw entryCheckError(`argument ${i + 1}`);
     lifted ??= [...argumentsList];
@@ -7586,6 +7617,8 @@ export function checkEntry(
   for (const i of plan.complex) {
     const x = argumentsList[i];
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
+    if (Array.isArray(x))
+      refuseArrayAtScalar(plan.scalars, i, `argument ${i + 1}`, 'complex');
     if (typeof x === 'number') {
       lifted ??= [...argumentsList];
       lifted[i] = { re: x, im: 0 };
@@ -7617,6 +7650,9 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
     ...(plan.kinds !== undefined && plan.kinds.size > 0
       ? { kinds: [...plan.kinds.keys()] }
       : {}),
+    ...(plan.scalars !== undefined && plan.scalars.length > 0
+      ? { scalars: [...plan.scalars] }
+      : {}),
   };
 }
 
@@ -7635,6 +7671,8 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
     lists: [...stored.lists],
     // A plan stored without the field refuses no string.
     strings: new Map(stored.strings ?? []),
+    // A plan stored without the field refuses no array.
+    ...(stored.scalars !== undefined ? { scalars: [...stored.scalars] } : {}),
   } as EntryPlan;
 }
 

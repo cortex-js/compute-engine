@@ -7,7 +7,7 @@
 // import { loadGroupTheory } from '@cortex-js/compute-engine/group-theory';
 // const ce = new ComputeEngine();
 // loadGroupTheory(ce);
-// ce.box(['PermutationOrder', ['Permutation', ['List', 2, 3, 1]]]).evaluate();
+// ce.expr(['PermutationOrder', ['Permutation', ['List', 2, 3, 1]]]).evaluate();
 //
 // Loading is synchronous and idempotent per engine with equal effective options.
 export const version = '{{SDK_VERSION}}';

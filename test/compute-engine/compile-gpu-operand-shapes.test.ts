@@ -297,16 +297,18 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   });
 
   it('GLSL `clamp(genType, float, float)` takes its scalars in the BOUNDS', () => {
+    // The literal cells and bounds are finite for certain, so the built-ins
+    // `min`/`max` take the broadcast bounds (CE-565.2).
     expect(g(['Clamp', V3, 0, 1])).toBe(
-      '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(0.0), vec3(1.0))'
+      'min(max(vec3(1.0, 2.0, 3.0), vec3(0.0)), vec3(1.0))'
     );
     expect(() => g(['Clamp', 0, V3, 1])).toThrow(
       /^Could not compile `Clamp`: the shader builtin `clamp` takes a scalar only in arguments 2 and 3, but here the scalar stands in argument 1/
     );
-    // WGSL has no `clamp(genType, float, float)` overload. The `_gpu_clamp3`
-    // helper takes three vectors, so the scalar bounds are broadcast.
+    // WGSL has no `clamp(genType, float, float)` overload, and its `min`
+    // and `max` take two vectors, so the scalar bounds are broadcast.
     expect(w(['Clamp', V3, 0, 1])).toBe(
-      '_gpu_clamp3(vec3f(1.0, 2.0, 3.0), vec3f(0.0), vec3f(1.0))'
+      'min(max(vec3f(1.0, 2.0, 3.0), vec3f(0.0)), vec3f(1.0))'
     );
   });
 
@@ -336,14 +338,15 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
   });
 
   it('a VARIADIC element-wise fold broadcasts a scalar in any position', () => {
-    // `ElementMax` calls the vector helper `_gpu_max3`, which takes two
-    // vectors, so a scalar operand is broadcast wherever it stands, as the
-    // interpreter broadcasts it.
+    // A scalar operand is broadcast wherever it stands, as the interpreter
+    // broadcasts it: GLSL has no `max(float, genType)`. The literal operands
+    // are finite for certain, so the built-in `max` takes the broadcast
+    // operands (CE-565.2); otherwise the vector helper `_gpu_max3` does.
     expect(g(['ElementMax', V3, W3, 2])).toBe(
-      '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
+      'max(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
     );
     expect(g(['ElementMax', 2, V3, W3])).toBe(
-      '_gpu_max3(_gpu_max3(vec3(2.0), vec3(1.0, 2.0, 3.0)), vec3(4.0, 5.0, 6.0))'
+      'max(max(vec3(2.0), vec3(1.0, 2.0, 3.0)), vec3(4.0, 5.0, 6.0))'
     );
   });
 
@@ -375,13 +378,14 @@ describe('GPU OPERAND SHAPE GATE — a scalar in the WRONG argument slot', () =>
 
 describe('GPU OPERAND SHAPE GATE — the two languages differ', () => {
   it('an element-wise max broadcasts a scalar in both languages', () => {
-    // The built-in `max` has a `max(genType, float)` overload in GLSL only;
-    // the `_gpu_max3` helper takes two vectors on both targets.
+    // The built-in `max` has a `max(genType, float)` overload in GLSL only,
+    // so the scalar is broadcast on both targets. The literal operands are
+    // finite for certain: the built-in (CE-565.2).
     expect(g(['ElementMax', V3, 2])).toBe(
-      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+      'max(vec3(1.0, 2.0, 3.0), vec3(2.0))'
     );
     expect(w(['ElementMax', V3, 2])).toBe(
-      '_gpu_max3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
+      'max(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
     );
   });
 

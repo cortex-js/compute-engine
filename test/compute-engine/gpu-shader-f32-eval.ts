@@ -23,8 +23,11 @@
  * `.x` and `.y`, and calls of the helpers and of `abs`, `max`, `min`,
  * `sqrt`, `log`, `exp`, `pow`, `floor`, `fract`, `sin`, `cos`, `length`, GLSL
  * `atan` (one or two arguments) and `vec2`, and WGSL `atan` (one
- * argument), `atan2`, `select` and `vec2f`. `sin`, `cos`, `sign`, `max`
- * and `min` are componentwise on a `vec2`. The NaN and infinity helpers
+ * argument), `atan2`, `select`, `vec2f`, `vec3f`, `vec4f`, `dot` and
+ * `distance`. A WGSL vector has 2, 3 or 4 components (the members `.z` and
+ * `.w` of a `vec3f` or `vec4f` are read too), and the arithmetic operators
+ * are componentwise on it. `sin`, `cos`, `sign`, `max`
+ * and `min` are componentwise on a vector. The NaN and infinity helpers
  * `_gpu_nan` and `_gpu_inf`, which build their value from a bit pattern,
  * are read as `0.0 / 0.0` and `1.0 / 0.0`. The NaN test on the bit pattern
  * of a name, `(floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u` in GLSL and
@@ -33,7 +36,11 @@
  * that `x` is NaN, and the same test with `>=` (in `_gpu_cossinpi`) as a
  * test that `x` is not finite. A NaN built from its bit pattern
  * (`intBitsToFloat(0x7FC00000)`, or `bitcast<f32>` of a `let`) is read as
- * `0.0 / 0.0`. A function can return `bool`.
+ * `0.0 / 0.0`. A function can return `bool`. The operator `!`, the
+ * conversion `i32` (read as a truncation) and an index `a[i]` are read too,
+ * and a name that no function declares is read from `globals`: a struct is
+ * an object, and an array (`array<vec4f, k>`) is a JavaScript array. An
+ * index out of bounds is an error.
  *
  * The text is also checked against some rules of its language, which a
  * shader compiler enforces and this interpreter would otherwise not see:
@@ -47,14 +54,33 @@
  *    a `let` cannot); there is no `vec2` and no two-argument `atan`.
  */
 
-export type Value = number | { x: number; y: number };
+/** A scalar, or a vector of 2, 3 or 4 components (`z` and `w` present
+ * for a `vec3f` and a `vec4f`). */
+export type Value = number | { x: number; y: number; z?: number; w?: number };
+
+/** The components of a vector, in order. */
+const KEYS = ['x', 'y', 'z', 'w'] as const;
+type Vec = Exclude<Value, number>;
+function width(v: Vec): number {
+  return v.w !== undefined ? 4 : v.z !== undefined ? 3 : 2;
+}
+function components(v: Vec): number[] {
+  return KEYS.slice(0, width(v)).map((k) => v[k]!);
+}
+function vec(c: number[]): Vec {
+  const out: Record<string, number> = {};
+  c.forEach((v, i) => (out[KEYS[i]] = v));
+  return out as unknown as Vec;
+}
 
 const fr = Math.fround;
 
 type Node =
   | { k: 'num'; v: number }
   | { k: 'id'; name: string }
-  | { k: 'member'; obj: Node; name: 'x' | 'y' }
+  | { k: 'member'; obj: Node; name: string }
+  | { k: 'index'; obj: Node; i: Node }
+  | { k: 'not'; e: Node }
   | { k: 'call'; name: string; args: Node[] }
   | { k: 'neg'; e: Node }
   | { k: 'bin'; op: string; a: Node; b: Node }
@@ -75,7 +101,7 @@ export type ShaderLanguage = 'glsl' | 'wgsl';
 
 function tokenize(src: string): string[] {
   const re =
-    /\s*([0-9]+\.[0-9]*(?:e[-+]?[0-9]+)?|[0-9]+(?:e[-+]?[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*|->|==|!=|<=|>=|\|\||&&|[-+*/(){}<>=?:;,.])/y;
+    /\s*([0-9]+\.[0-9]*(?:e[-+]?[0-9]+)?|[0-9]+(?:e[-+]?[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*|->|==|!=|<=|>=|\|\||&&|[-+*/(){}<>=?:;,.!\[\]])/y;
   const out: string[] = [];
   let i = 0;
   while (i < src.length) {
@@ -92,7 +118,7 @@ function tokenize(src: string): string[] {
   return out;
 }
 
-const TYPES = new Set(['float', 'vec2', 'f32', 'vec2f']);
+const TYPES = new Set(['float', 'vec2', 'f32', 'vec2f', 'vec3f', 'vec4f']);
 
 const COMMON_BUILTINS = new Set([
   'abs',
@@ -114,7 +140,15 @@ const COMMON_BUILTINS = new Set([
 ]);
 const LANGUAGE_BUILTINS: Record<ShaderLanguage, Set<string>> = {
   glsl: new Set(['vec2']),
-  wgsl: new Set(['atan2', 'select', 'vec2f']),
+  wgsl: new Set([
+    'atan2',
+    'select',
+    'vec2f',
+    'vec3f',
+    'vec4f',
+    'dot',
+    'distance',
+  ]),
 };
 
 class Parser {
@@ -287,11 +321,19 @@ class Parser {
       this.next();
       return { k: 'neg', e: this.unary() };
     }
-    let e = this.primary();
-    while (this.peek() === '.') {
+    if (this.peek() === '!') {
       this.next();
+      return { k: 'not', e: this.unary() };
+    }
+    let e = this.primary();
+    while (this.peek() === '.' || this.peek() === '[') {
+      if (this.next() === '[') {
+        const i = this.expr();
+        this.expect(']');
+        e = { k: 'index', obj: e, i };
+        continue;
+      }
       const name = this.next();
-      if (name !== 'x' && name !== 'y') throw new Error(`Member .${name}`);
       e = { k: 'member', obj: e, name };
     }
     return e;
@@ -326,9 +368,13 @@ class Parser {
 
 function lift(a: Value, b: Value, f: (x: number, y: number) => number): Value {
   if (typeof a === 'number' && typeof b === 'number') return fr(f(a, b));
-  const ax = typeof a === 'number' ? { x: a, y: a } : a;
-  const bx = typeof b === 'number' ? { x: b, y: b } : b;
-  return { x: fr(f(ax.x, bx.x)), y: fr(f(ax.y, bx.y)) };
+  const n = Math.max(
+    typeof a === 'number' ? 0 : width(a),
+    typeof b === 'number' ? 0 : width(b)
+  );
+  const at = (v: Value, i: number) =>
+    typeof v === 'number' ? v : components(v)[i];
+  return vec(Array.from({ length: n }, (_, i) => fr(f(at(a, i), at(b, i)))));
 }
 
 const num = (v: Value): number => {
@@ -340,7 +386,7 @@ const num = (v: Value): number => {
  * `cos` and `sign` are in both languages. */
 function each(x: Value, f: (x: number) => number): Value {
   if (typeof x === 'number') return f(x);
-  return { x: f(x.x), y: f(x.y) };
+  return vec(components(x).map(f));
 }
 
 const BUILTINS: Record<string, (...a: Value[]) => Value> = {
@@ -361,22 +407,38 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   atan2: (y, x) => fr(Math.atan2(num(y), num(x))),
   length: (v) => {
     if (typeof v === 'number') return Math.abs(v);
-    return fr(Math.sqrt(fr(fr(v.x * v.x) + fr(v.y * v.y))));
+    return fr(Math.sqrt(num(BUILTINS.dot(v, v))));
   },
+  dot: (a, b) => {
+    if (typeof a === 'number' || typeof b === 'number')
+      throw new Error('`dot` of a scalar');
+    const bc = components(b);
+    return components(a).reduce((s, v, i) => fr(s + fr(v * bc[i])), 0);
+  },
+  distance: (a, b) => BUILTINS.length(lift(a, b, (x, y) => x - y)),
   select: (f, t, c) => (c ? t : f),
   // The NaN test on a bit pattern (see the rewrite in `shaderFunctions`).
   _gpu_bits_isnan: (x) => Number.isNaN(num(x)) as unknown as Value,
   _gpu_bits_nonfinite: (x) => !Number.isFinite(num(x)) as unknown as Value,
   vec2: (x, y) => ({ x: num(x), y: num(y ?? x) }),
   vec2f: (x, y) => ({ x: num(x), y: num(y ?? x) }),
+  vec3f: (...a) =>
+    vec(a.length === 1 ? [0, 1, 2].map(() => num(a[0])) : a.map(num)),
+  vec4f: (...a) =>
+    vec(a.length === 1 ? [0, 1, 2, 3].map(() => num(a[0])) : a.map(num)),
+  // The conversion to an integer, used only for an array index here.
+  i32: (x) => Math.trunc(num(x)),
 };
 
 /** Parse the shader text `src` (one or more function definitions) and
  * return a function that calls the named shader function. */
 export function shaderFunctions(
   src: string,
-  language: ShaderLanguage
+  language: ShaderLanguage,
+  globals: Readonly<Record<string, unknown>> = {}
 ): (name: string, ...args: Value[]) => Value {
+  // A line comment is not read.
+  src = src.replace(/\/\/[^\n]*/g, '');
   // The NaN and infinity helpers are built from a bit pattern (a hex literal
   // and `intBitsToFloat` or `bitcast<f32>`): their bodies are replaced.
   src = src.replace(
@@ -419,18 +481,32 @@ export function shaderFunctions(
       case 'num':
         return e.v;
       case 'id': {
-        const v = env.get(e.name);
+        const v = env.get(e.name) ?? (globals[e.name] as Value | undefined);
         if (v === undefined) throw new Error(`Unknown name ${e.name}`);
         return v;
       }
       case 'member': {
+        // A member of a vector (`.x`, `.y`) or a field of a struct global.
         const v = evaluate(e.obj, env) as Value;
         if (typeof v === 'number') throw new Error('Member of a scalar');
-        return v[e.name];
+        const m = (v as unknown as Record<string, Value | undefined>)[e.name];
+        if (m === undefined) throw new Error(`Member .${e.name}`);
+        return m;
       }
+      case 'index': {
+        // An element of an array global (a list of numbers or of arrays).
+        const a = evaluate(e.obj, env) as unknown;
+        const i = num(evaluate(e.i, env) as Value);
+        if (!Array.isArray(a)) throw new Error('Index of a value that is not an array');
+        if (!Number.isInteger(i) || i < 0 || i >= a.length)
+          throw new Error(`Index ${i} out of bounds (length ${a.length})`);
+        return a[i] as Value;
+      }
+      case 'not':
+        return !evaluate(e.e, env);
       case 'neg': {
         const v = evaluate(e.e, env) as Value;
-        return typeof v === 'number' ? -v : { x: -v.x, y: -v.y };
+        return typeof v === 'number' ? -v : vec(components(v).map((c) => -c));
       }
       case 'cond':
         return evaluate(e.c, env) ? evaluate(e.t, env) : evaluate(e.f, env);
@@ -491,7 +567,7 @@ export function shaderFunctions(
     call(
       name,
       args.map((a) =>
-        typeof a === 'number' ? fr(a) : { x: fr(a.x), y: fr(a.y) }
+        typeof a === 'number' ? fr(a) : vec(components(a).map(fr))
       )
     );
 }

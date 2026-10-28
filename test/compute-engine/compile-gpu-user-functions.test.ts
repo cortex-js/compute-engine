@@ -436,6 +436,7 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     const shader = glsl.compileShader({
       type: 'fragment',
       outputs: [{ name: 'fragColor', type: 'vec4' }],
+      uniforms: [{ name: 'u', type: 'float' }],
       body: [{ variable: 'fragColor.r', expression: ce.parse('f(u) + f(2u)') }],
     });
     expect(count(shader, 'float _fn_f(')).toBe(1);
@@ -450,6 +451,7 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     const shader = wgsl.compileShader({
       type: 'fragment',
       outputs: [{ name: 'color', type: 'vec4f' }],
+      uniforms: [{ name: 'u', type: 'float' }],
       body: [{ variable: 'output.color.r', expression: ce.parse('f(u)') }],
     });
     expect(count(shader, 'fn _fn_f(')).toBe(1);
@@ -630,6 +632,7 @@ describe('GPU USER FUNCTIONS — determinism', () => {
     const options = {
       type: 'fragment' as const,
       outputs: [{ name: 'fragColor', type: 'vec4' }],
+      uniforms: [{ name: 'u', type: 'float' }],
       body: [{ variable: 'fragColor.r', expression: ce.parse('f(u) + f(2u)') }],
     };
     expect(glsl.compileShader(options)).toBe(glsl.compileShader(options));
@@ -1502,7 +1505,13 @@ describe('GPU USER FUNCTIONS — a WGSL shader input is a struct FIELD', () => {
     expect(shader).toContain('fn _fn_h(w: vec2f) -> f32');
     // …and the emission names the struct field, not a bare `v`.
     expect(shader).toContain('output.color.r = _fn_h(input.v);');
-    expect(shader).toContain('output.color.rg = input.v;');
+    // A target of two components is written one component at a time, which
+    // WGSL accepts without the `swizzle_assignment` extension (CE-580).
+    expect(shader).toContain(
+      '  let _tv1 = input.v;\n' +
+        '  output.color.r = _tv1.x;\n' +
+        '  output.color.g = _tv1.y;\n'
+    );
     expect(shader).not.toMatch(/= _fn_h\(v\)/);
     expect(shader).not.toMatch(/= v;/);
   });

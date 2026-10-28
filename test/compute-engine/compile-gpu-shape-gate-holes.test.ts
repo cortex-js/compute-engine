@@ -62,6 +62,7 @@ const M2 = ['Matrix', ['List', ['List', 1, 2], ['List', 3, 4]]];
 const cev = new ComputeEngine();
 cev.declare('v', 'vector<real^3>');
 cev.declare('w', 'vector<real^3>');
+cev.declare('n', 'vector<3>');
 cev.declare('P', 'vector<real^3>');
 cev.declare('Q', 'vector<real^2>');
 
@@ -137,31 +138,37 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
   });
   afterAll(() => warn.mockRestore());
 
-  // `ElementMax`/`ElementMin` call the vector helpers `_gpu_max3`/`_gpu_min3`
-  // (CE-519), which take two vectors of one width, so a scalar operand is
-  // broadcast with `vec3(…)` wherever it stands. The shapes come from the CE
-  // operands: neither `v` nor `w` has a `vecN` constructor in its source.
+  // `ElementMax`/`ElementMin` broadcast a scalar operand with `vec3(…)`
+  // wherever it stands: the vector helpers `_gpu_max3`/`_gpu_min3` (CE-519)
+  // take two vectors of one width, and so does the WGSL built-in. The shapes
+  // come from the CE operands: neither `v` nor `w` has a `vecN` constructor in
+  // its source. The cells of `v` and `w` (`vector<real^3>`) and the literals
+  // are finite for certain, so the built-in `max`/`min` takes the broadcast
+  // operands (CE-565.2); `n` (`vector<3>`) can hold NaN and keeps the helper.
   it('a scalar in a NESTED fold call is broadcast (bare identifiers)', () => {
     expect(g(['ElementMax', 2, 'v', 'w'], cev)).toBe(
-      '_gpu_max3(_gpu_max3(vec3(2.0), v), w)'
+      'max(max(vec3(2.0), v), w)'
     );
     expect(g(['ElementMin', 2, 'v', 'w'], cev)).toBe(
-      '_gpu_min3(_gpu_min3(vec3(2.0), v), w)'
+      'min(min(vec3(2.0), v), w)'
+    );
+    expect(g(['ElementMax', 2, 'n', 'w'], cev)).toBe(
+      '_gpu_max3(_gpu_max3(vec3(2.0), n), w)'
     );
   });
 
   it('a scalar accumulator reaching a later vector operand is broadcast', () => {
     expect(g(['ElementMax', 2, 3, 'v'], cev)).toBe(
-      '_gpu_max3(_gpu_max3(vec3(2.0), vec3(3.0)), v)'
+      'max(max(vec3(2.0), vec3(3.0)), v)'
     );
   });
 
   it('the same fold with the scalar LAST compiles', () => {
     expect(g(['ElementMax', 'v', 'w', 2], cev)).toBe(
-      '_gpu_max3(_gpu_max3(v, w), vec3(2.0))'
+      'max(max(v, w), vec3(2.0))'
     );
     expect(g(['ElementMax', V3, W3, 2])).toBe(
-      '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
+      'max(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
     );
     expect(g(['ElementMax', 'v', 'w'], cev)).toBe('max(v, w)');
     expect(g(['ElementMax', V3, W3, U3])).toBe(
@@ -184,10 +191,13 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
 
   it('WGSL broadcasts the scalar the same way', () => {
     expect(w(['ElementMax', 2, 'v', 'w'], cev)).toBe(
-      '_gpu_max3(_gpu_max3(vec3f(2.0), v), w)'
+      'max(max(vec3f(2.0), v), w)'
     );
     expect(w(['ElementMax', 'v', 'w', 2], cev)).toBe(
-      '_gpu_max3(_gpu_max3(v, w), vec3f(2.0))'
+      'max(max(v, w), vec3f(2.0))'
+    );
+    expect(w(['ElementMax', 'v', 'n', 2], cev)).toBe(
+      '_gpu_max3(_gpu_max3(v, n), vec3f(2.0))'
     );
   });
 });
@@ -347,8 +357,10 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
     expect(g(['Mix', V3, W3, 0.5])).toBe(
       'mix(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), 0.5)'
     );
+    // Finite cells and bounds: the built-ins, with the bounds broadcast
+    // (CE-565.2).
     expect(g(['Clamp', V3, 0, 1])).toBe(
-      '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(0.0), vec3(1.0))'
+      'min(max(vec3(1.0, 2.0, 3.0), vec3(0.0)), vec3(1.0))'
     );
     expect(g(['Smoothstep', 0, 1, V3])).toBe(
       '_gpu_smoothstep3(vec3(0.0), vec3(1.0), vec3(1.0, 2.0, 3.0))'
@@ -387,11 +399,12 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
   });
 
   it('a vector and a scalar ElementMax compiles on both targets', () => {
+    // Finite operands: the built-in, with the scalar broadcast (CE-565.2).
     expect(g(['ElementMax', V3, 2])).toBe(
-      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(2.0))'
+      'max(vec3(1.0, 2.0, 3.0), vec3(2.0))'
     );
     expect(w(['ElementMax', V3, 2])).toBe(
-      '_gpu_max3(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
+      'max(vec3f(1.0, 2.0, 3.0), vec3f(2.0))'
     );
   });
 });

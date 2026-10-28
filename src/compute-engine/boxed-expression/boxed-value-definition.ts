@@ -74,6 +74,7 @@ import { isEffectSubset, unionEffectSets } from '../../common/type/effects.js';
 import { declaredTypeError } from './type-compatibility-error.js';
 import {
   functionLiteralDeclaredSignature,
+  functionLiteralParameterName,
   functionLiteralParameterType,
   functionLiteralReturnType,
   isDestructuringParameter,
@@ -310,6 +311,13 @@ export class _BoxedValueDefinition
         calleeHomes: HomeScope[];
         calleeCount: number;
         type: BoxedType;
+        /** The engine's semantic, world and definition versions when the
+         * result was derived: they move when a value is written, and when a
+         * function is redefined or retyped. */
+        definitions: string;
+        /** The definitions that the free symbols of the body resolved to
+         * when the result was derived (`_freeSymbolDefinitions`). */
+        freeDefinitions: ReadonlyArray<object | undefined>;
       }
     | undefined = undefined;
 
@@ -1150,11 +1158,80 @@ export class _BoxedValueDefinition
     frame: SignatureDerivationFrame
   ): BoxedType {
     let valueType: BoxedType;
+    // The recursive calls in the body read the provisional signature while
+    // the type of the stored literal is computed, and the types of the body
+    // nodes computed from it are cached. With the skeleton's `unknown`
+    // result, they are wider than the settled signature gives, and a later
+    // reader gets them: with `R(i, x, y) := R(i − 1, x, y) + 0.5·S(x, y,
+    // R(i − 1, x, y))`, after an evaluation moved the cache generation, a
+    // compilation of the body read `0.5·S(…)` as `list<…> | number | tuple`
+    // and declined it as "may be a collection at run time". So when an
+    // earlier derivation of the same literal under the same skeleton
+    // settled a result, the recursive calls of the stored literal read that
+    // result instead (the hypothesis), and the cached body types are those
+    // of the recursive calls typed by that earlier result.
+    //
+    // The result that this derivation stores is read from the type of the
+    // stored literal, as in the first derivation, so when a hypothesis is
+    // read it is computed under the hypothesis: f(H) for the earlier result
+    // H. That is sound when f(H) contains the result of the body, which
+    // holds when H does, that is, when H is still the result of the body:
+    // the conditions below check that nothing H depends on has changed.
+    // When f(H) differs from H, the next derivation reads f(H). The tests
+    // (`census-head-new-declines.test.ts`: a nested list, a nested tuple,
+    // the ndqj7hupta functions) find f(H) = H. Deriving the stored result on
+    // a fresh boxing of the body instead (`rebox`), so that it never depends
+    // on H, was measured and rejected: the fresh boxing reads the skeleton's
+    // `unknown` for the recursive calls, and the signature of `r(n) :=
+    // If(n ≤ 0, 0, s + r(n − 1))` became `unknown` instead of `number`
+    // (`tycho-row-426-apply-lambda-type.test.ts`, case 12).
+    //
+    // When the signature is derived again and the earlier result is NOT
+    // read, the stored result is derived on a fresh boxing of the body
+    // (`rebox` below): the type of the stored literal can be outdated then.
+    // With `a := 5`, `R(i) := If(i ≤ 0, 0, R(i − 1) + a)` and then `a := [1,
+    // 2]`, the signature read from that type stayed `number` while `R(2)`
+    // is a list.
+    //
+    // The earlier result is read only when nothing it depends on can have
+    // changed since:
+    // - no value was written and no function was redefined or retyped (the
+    //   semantic, world and definition versions): after `a := [1, 2]` in the
+    //   example above, the earlier `number` is outdated;
+    // - no declaration was added in the home scopes of the functions the
+    //   body calls (`calleeHomesDeclarationCount`);
+    // - the free symbols of the body resolve to the same definitions from
+    //   the scope of the read (`_freeSymbolDefinitions`). This is a
+    //   conservative check: a scope that declares one of them again (a
+    //   probe that declares it `broadcastable<…>`) does not read the earlier
+    //   result, and a scope that declares other symbols (a `Block` with a
+    //   local) does. The scope of the read itself is not compared: after a
+    //   `Block` evaluated a call of `R`, the read in the scope of the block
+    //   did not reuse the result, and the body types were wide again.
+    // For a body whose result grows at each step (`R(i) := If(i ≤ 0, 0,
+    // [R(i − 1)])`), the signature and the body types stay the same from
+    // one cache generation to the next (`census-head-new-declines.test.ts`).
+    const previous = this._signatureMemo;
+    const derivedBefore =
+      previous !== undefined &&
+      previous.skeleton === skeleton &&
+      previous.value === v &&
+      callsItselfDirectly(v, this.name);
+    const hypothesis =
+      derivedBefore &&
+      previous.definitions === this._definitionsKey() &&
+      calleeHomesDeclarationCount(previous.calleeHomes) ===
+        previous.calleeCount &&
+      sameDefinitions(previous.freeDefinitions, this._freeSymbolDefinitions(v))
+        ? functionResult(previous.type.type)
+        : undefined;
     this._derivingSignature = true;
+    this._recursionResult = hypothesis;
     try {
       valueType = v.type;
     } finally {
       this._derivingSignature = false;
+      this._recursionResult = undefined;
     }
     // The memo keys on the value's type by CONTENT: the object is rebuilt
     // whenever the cache generation moves, which the computation below does
@@ -1188,7 +1265,14 @@ export class _BoxedValueDefinition
     this._derivingSignature = true;
     try {
       ({ result: typedResult, homes: calleeHomes } = collectCalleeHomes(() =>
-        resultUnderDeclaredParameters(this._engine, v, skeleton)
+        resultUnderDeclaredParameters(
+          this._engine,
+          v,
+          skeleton,
+          derivedBefore && hypothesis === undefined
+            ? { rebox: true }
+            : undefined
+        )
       ));
     } finally {
       this._derivingSignature = false;
@@ -1252,8 +1336,36 @@ export class _BoxedValueDefinition
         calleeHomes,
         calleeCount: calleeHomesDeclarationCount(calleeHomes),
         type,
+        definitions: this._definitionsKey(),
+        freeDefinitions: this._freeSymbolDefinitions(v),
       };
     return this._noted(type, calleeHomes);
+  }
+
+  /** The engine state that the reuse of an earlier derivation's result as
+   * the hypothesis of the recursive calls depends on (see
+   * {@link _deriveSignatureOnce}): the engine versions, and whether the
+   * assumptions are hidden. A result derived with the assumptions visible
+   * (`x > 0` makes `x > 0` the value `True`) must not be read while they
+   * are hidden (`_withoutFacts()`), where the same call can also be
+   * `False`; hiding them moves none of the versions. */
+  private _definitionsKey(): string {
+    const ce = this._engine;
+    return `${ce._semanticVersion}:${ce._worldVersion}:${ce._definitionVersion}:${ce._factsHidden() ? 1 : 0}`;
+  }
+
+  /** The definitions that the free symbols of the function literal `v` (its
+   * symbols other than its parameters) resolve to in the current scope, in
+   * the order of `v.symbols`. */
+  private _freeSymbolDefinitions(
+    v: Expression
+  ): ReadonlyArray<object | undefined> {
+    const params = isFunction(v, 'Function')
+      ? new Set(v.ops.slice(1).map((p) => functionLiteralParameterName(p)))
+      : new Set<string | undefined>();
+    return v.symbols
+      .filter((name) => !params.has(name))
+      .map((name) => this._engine.lookupDefinition(name));
   }
 
   /** `type`, after recording this function's home scope and the home scopes
@@ -1691,6 +1803,15 @@ export class _BoxedValueDefinition
    * `assume()` transaction's consistency pass ignores a disposed definition
    * when it re-reads what the applied facts prove (`assume.ts`). */
   disposed = false;
+
+  /** See `BoxedValueDefinition._rewound`. Declared here, not added by the
+   * restore, so that every definition object has the same shape. */
+  _rewound: true | undefined = undefined;
+
+  /** The scope this definition was installed in, when it was constructed in
+   * an open checkpoint window by a site that knows it (`noteCreated`,
+   * `checkpoint-journal.ts`). Read only by a restore. */
+  _checkpointHome: object | undefined = undefined;
 
   dispose(): void {
     this.disposed = true;
@@ -2143,4 +2264,27 @@ export function inferTypeFromValue(
   // No promotion for other types.
   // @todo: could consider promoting `list<T>` to `list` or...?
   return value.type;
+}
+
+/** True when the two lists hold the same definitions, in the same order. */
+function sameDefinitions(
+  a: ReadonlyArray<object | undefined>,
+  b: ReadonlyArray<object | undefined>
+): boolean {
+  return a.length === b.length && a.every((d, i) => d === b[i]);
+}
+
+/** True when the body of the function literal `v` calls `name` itself,
+ * not only through another function. The reuse of an earlier result and the
+ * fresh boxing of a re-derivation (`_deriveSignatureOnce`) apply to such a
+ * literal only. For a mutually recursive pair (`F` calls `G`, `G` calls
+ * `F`), the fresh boxing derives the signature of each function again
+ * inside the derivation of the other, and the result printed differently
+ * (`set<any>` instead of `set`, `recursive-function-result-type.test.ts`):
+ * such a pair keeps the derivation it had without them. */
+function callsItselfDirectly(v: Expression, name: string): boolean {
+  if (!isFunction(v, 'Function')) return false;
+  const visit = (e: Expression): boolean =>
+    (isFunction(e) && (e.operator === name || e.ops.some(visit))) || false;
+  return visit(v.ops[0]);
 }

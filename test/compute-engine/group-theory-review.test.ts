@@ -49,7 +49,7 @@ describe('group-theory public validation and representation contracts', () => {
       1
     );
   });
-  test('generic names replace unreleased permutation aliases', () => {
+  test('generic names replace permutation-only aliases', () => {
     const ce = engine();
     for (const name of [
       'PermutationGroupOrder',

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-580.
+Next free reference: CE-596.
 
 **Entry format.**
 
@@ -738,6 +738,50 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
+### CE-590. After a checkpoint restore, a symbol declared in a scope pushed and popped during the window reads a later value with its old type
+
+**Status:** open; defect, known limit. Found 2026-10-28 by the review of the
+CE-586 fix. User decision 2026-10-28: leave open and accept the limit for now;
+fix it when a host needs it.
+
+A checkpoint restore makes a symbol inert (no value, counted as unknown) when
+the definition it is bound to was created during the rewound window in a scope
+that is on the engine's scope chain when the restore runs (`checkpoint.ts`,
+step 5, `_rewound`; read by `bindingInContext`, `boxed-expression/binders.ts`).
+A scope that existed before the window, pushed and popped during it, is not on
+that chain, so its definitions are not marked. A host that keeps one scope per
+cell does this. Measured: create a scope with `pushScope()`/`popScope()`, take
+a checkpoint, push the scope again, `declare('q', {type: 'integer', value:
+3})`, build `q + 1`, pop, restore; push the scope, declare `q` as a string
+`'hello'`: the old `q + 1` evaluates to an `incompatible-type` error, its type
+is `integer`, and `unknowns` is `[]`. The fix: mark a definition whose home
+scope was not CREATED in the window (rather than one on the chain). That needs
+a creation mark on each scope, and scopes are built in about 24 places
+(`bindings: new Map()`). Binder and `Block` scopes are created in the window,
+so they would stay unmarked. The `restore()` doc comment states the current
+limit.
+
+### CE-587. Hiding a stored value equal to an assumed value, during an evaluation, loses the stored value (known limit)
+
+**Status:** known limit; user decision 2026-10-28: no change. Reported by
+Tycho (`withValuesHidden()`, `src/plot-core/ce-module-registry.ts`).
+
+A host that evaluates an expression with some symbol values hidden removes each
+value, evaluates, and puts the values back. With `ce.checkpoint()`/`restore()`
+this is exact. But a checkpoint is refused while an evaluation is in progress
+(`assertQuiescent`, `checkpoint.ts`), so a host called from inside an
+evaluation falls back to the public `value` setter. With the public API, a name
+can hold a stored value and an assumed value only when the two are equal
+(`ce.assume(a = 3)` when `a` stores 2 returns `'contradiction'`, and
+`ce.assign` under an assumption that it contradicts throws). In that case
+(`a := 3`, then `Assume(a = 3)` typed by a user), clearing `a` with the setter
+leaves `a` reading 3 from the assumption, no public read tells the host that a
+stored 3 was also there, and when the assumption's scope pops, `a` has no
+value. Options considered: a public read of whether a stored value exists, or a
+checkpoint allowed during an evaluation. The user chose no change because the
+case needs a user assumption equal to the stored value and a call during an
+evaluation.
+
 ### CE-537. The free-variable walk misreads two binders
 
 **Status:** open; defect. Found 2026-10-27 while fixing `subs()` for Tycho row
@@ -1268,39 +1312,6 @@ the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
 ## Symbolic computation
-
-### CE-577. `Factor`, `Together` and `Cancel` return a sum with like terms uncombined when they find nothing to rewrite
-
-**Status:** in progress; defect. User decision 2026-10-27: option (a). Asked
-by Tycho (session tycho-3b), 2026-10-27.
-
-With `g(t) := \sin(t)`, `Factor(g(t)+g(t))` evaluates to `\sin(t)+\sin(t)`,
-where `g(t)+g(t)` evaluates to `2\sin(t)`. Measured on HEAD 2026-10-27:
-
-| Input                     | `Factor`              | `Together`     | `Cancel`              |
-| ------------------------- | --------------------- | -------------- | --------------------- |
-| `a+a`                     | `2a`                  | `a+a`          | `a+a`                 |
-| `\sin t+\sin t`           | `\sin t+\sin t`       | same           | same                  |
-| `\frac1a+\frac1a`         | `\frac1a+\frac1a`     | `\frac2a`      | `\frac1a+\frac1a`     |
-| `ax+ay`                   | `ax+ay`               | `ax+ay`        | `ax+ay`               |
-| `x\sin t+y\sin t`         | `x\sin t+y\sin t`     |                |                       |
-
-`Factor(\sin(t)^2-1)` gives `(\sin t-1)(\sin t+1)` and
-`Factor(2\sin t+2\cos t)` gives `2(\sin t+\cos t)`, so some strategies already
-treat `\sin t` as an atom. Cause for `Factor`: with no variable given,
-`factorPolynomialWith()` (`boxed-expression/factor.ts`) infers the single
-unknown `t`, the sum is not a polynomial in `t`, every strategy declines, and
-the fallback `factor()` does not collect like terms. `Together` and `Cancel`
-return their canonical operand, and the canonical form of `Add` does not
-collect like terms (only `evaluate()` does).
-
-Decision needed: (a) each of the three collects like terms in its result, as
-`evaluate()` of `Add` does, and `Factor` treats each non-polynomial subterm
-(`\sin t`) as a variable, which also gives `x\sin t+y\sin t → (x+y)\sin t`
-and `ax+ay → a(x+y)` (a common non-numeric factor of a multivariate sum); or
-(b) keep the operand as is when there is nothing to rewrite (today), and
-document it. Tycho works around it: it does not offer a rewrite whose result,
-evaluated once more, equals what the cell shows.
 
 ### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
@@ -2842,37 +2853,12 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-571. WGSL: a documented interface for GPU compute jobs over a 3-D grid
-
-**Status:** open; design. Tycho ledger row 461 (filed 2026-10-26).
-
-Tycho supplies a compute entry point and the grid and storage buffers; CE
-supplies a scalar field function that can be called from it, its helper
-functions, the parameter types and the binding layout. A parameter change must
-not rebuild the expression or the pipeline. Asked: say whether the WGSL
-function output and `compileShader()` can supply this today, and write a recipe
-or a scoped API proposal, with numerical limits and the cases it does not
-support. Witnesses: Tycho showcases `gyroid` and `metaballs`. Tycho owns the
-dispatch, the mesher and the measurements.
-
-### CE-572. WGSL: storage-buffer input for a numeric list whose contents and length change
-
-**Status:** open; design. Tycho ledger row 462 (filed 2026-10-26); follows the
-width ceiling of CE-280.
-
-Asked: a binding for a numeric list or point list that the shader reads from a
-storage buffer, so that a change of its contents or length does not embed
-constants or recompile. The design must define the layout and stride, the
-element type, the logical length, the index rules and the result of an index
-out of range, and which reductions and index reads accept the binding. Witness:
-Tycho's `game-of-life` (a 150×150 board `S`, read as
-`S[N floor(y)+floor(x)+1]`). If implemented, check the values against
-JavaScript for an empty list, a one-element list and a length change.
-
 ### CE-573. An `interval-wgsl` target for interval refinement on the GPU
 
-**Status:** open; design (feasibility). Tycho ledger row 463 (filed
-2026-10-26). The interval GLSL route was removed earlier; this asks again for a
+**Status:** open; not now (user decision 2026-10-27, Q4 (a) of
+`docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`): keep the contract in that
+document and wait for a profile where interval evaluation is the main cost and
+a measured prototype. Tycho ledger row 463 (filed 2026-10-26). The interval GLSL route was removed earlier; this asks again for a
 GPU interval target where Tycho keeps the cells, the subdivision and the output
 on the GPU.
 
@@ -2888,30 +2874,87 @@ isolated zeros, branch boundaries, subnormals and overflow. Tycho's profile
 Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
 (the same document answers CE-571 and CE-572).
 
-### CE-574. WGSL: an index read copies the whole list into a local variable
+### CE-583. WGSL: a list held by a `Block` local is copied again at each read
 
-**Status:** open; defect (not yet checked on a GPU). Found 2026-10-27 while
-answering Tycho rows 461–463.
+**Status:** open; defect (memory and speed). Found 2026-10-27 while fixing
+CE-574. The fix needs a change in `base-compiler.ts`.
 
-The WGSL index helper `_gpu_atN(v: array<f32, N>, i)` takes the list by value
-and copies it (`var a = v;`, the preamble built in `gpu-target.ts`), because
-WGSL allows a dynamic index only into a variable. A list of more than 2048
-`f32` values then needs more than the 8 192 bytes of function-scope variables
-that the WGSL specification guarantees; Tycho's `game-of-life` board (22 500
-values) needs 90 KB. `\sum_{k=1}^{22500} S_k` also emits the copy inside the
-loop (`var _tv2 = S;` on each pass). Next step: check on a GPU whether the
-copy fails or is slow, then read a long list from a module-scope or storage
-variable instead of a copy (see CE-572).
+On WGSL, a read with a proven index of a list held by a `Block` local emits a
+second function-scope copy before the statement (`var U = …; var _tv1 = U;
+… _tv1[k - 1]`), once per read. The local is already a `var`, which WGSL
+can index with a run-time index, so the copy doubles the memory and the work
+for nothing. The compiler cannot tell a block-local `var` from a function
+parameter of the same name, and a parameter (a value) must be copied before a
+dynamic index. Expected: the block-local binding is marked as a variable, and
+its reads index it directly. A written input already does this (CE-574).
 
-### CE-575. `compileShader()`: compute stage gets a `VertexInput` struct, and free symbols are not refused
+### CE-595. The common-subexpression pass takes exponential time on a graph that reuses a value inside an `If` arm
 
-**Status:** open; defect. Found 2026-10-27 while answering Tycho rows 461–463.
+**Status:** open; defect (performance). Found 2026-10-28 while fixing CE-584.
 
-`compileShader()` (`wgsl-target.ts`) names the input struct `VertexInput` for
-every stage, the compute stage included. It also accepts a body that reads a
-symbol that no input, uniform or local declares (`x`, `y`), and the shader
-then fails only when the GPU compiles it. Expected: a stage-appropriate struct
-name, and a decline at compile time that names the undeclared symbols.
+With `e_0 = sin(x)` and `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))`, the
+emitted code is linear in the depth (the `If` arm reuses the binding made by
+the first argument), but the pass that finds shared subexpressions
+(`selectCandidates`, `pathsAfter` and `forEachCoveringReplay` in
+`compilation/cse.ts`) takes 1.6 s at depth 12, 8 s at depth 13 and 36 s at
+depth 14. The graph `e_{k+1} = When(sin(e_k), e_k > k)` has the same problem
+(126 ms at depth 10, 2.1 s at depth 12, 9.8 s at depth 13, for 1,510
+characters of code). The size limit of CE-584 runs before the pass and lets
+these graphs through, because their written size is small. Expected: the pass is linear (or
+close to it) in the number of distinct nodes, as the written-size estimate is.
+
+### CE-594. Canonicalizing a function literal turns a shared expression graph into a tree, in exponential time and memory
+
+**Status:** open; defect (performance). Found 2026-10-28 while fixing CE-584.
+
+An expression whose subexpressions are shared (`e_{k+1} = e_k + sin(e_k)`, 2k+1
+distinct nodes at depth k) is held as a graph. When it becomes the body of a
+function literal (`ce.function('Function', [e, 't'])`, or `ce.assign('h',
+…)`), canonicalization copies each shared node once per path: at depth 16 the
+body holds 262,146 node objects for 35 distinct structures. Assigning `h` takes
+0.8 s at depth 14, 2 to 3 s at depth 16, and runs out of memory at depth 20.
+The compilers then count shared nodes by structure (CE-584), so the problem is
+only the canonicalization. Expected: canonicalizing a node that was already
+canonicalized in the same pass returns the same result object (a memo per
+pass), so the work and the memory are linear in the number of distinct nodes.
+
+### CE-593. GPU targets: a point declared `list<tuple<number, number>> | tuple<number, number>` declines with a "missing" position
+
+**Status:** open; defect. Reported 2026-10-28 by Tycho (session tycho-3b):
+some Tycho points have this union type, and their rows decline on the shader
+targets.
+
+Repro: declare `P: list<tuple<number, number>> | tuple<number, number>`,
+assign `(1, 2)`, then `compile(ce.parse('P.x + y'), { to: 'glsl', fallback:
+false })` throws `Could not compile an object-domain absent ('missing')
+position (type 'list<number> | missing | number') to target 'glsl': it has no
+object null representation. Discharge with 'Coalesce' first.` The `javascript`
+target compiles it (`_SYS.pointComponent(_val_P, 0)` under a broadcast).
+Expected: on a shader target, a symbol whose union admits a point and a list of
+points is read by its value when the value is known and fixed (a point is a
+`vec2`), and otherwise declines with a message that names the union and the
+declaration to write (`tuple<real, real>`), not an internal "missing" position.
+Find also where `missing` enters the type of `P.x`: a component of a
+`tuple<number, number>` cannot be absent.
+
+### CE-592. `compileFieldFunction()`: a user function that reads a parameter with an inferred integer type declines
+
+**Status:** open; defect (needs a design). Found 2026-10-28 in the review of
+CE-591.
+
+With `a := 5` and `h(t) := t + a` (or `A := (1, 2)` and `h(t) := t + A.x`),
+`compileFieldFunction(h(x))` declines: the field function reads `a` from the
+buffer as a real number, but the signature of `h`, and the result types that
+its callers read, were derived when `a` was an integer. Accepting the wider
+type only in the body of `h` is unsound: `Floor(h(x))` would drop `floor`
+because the caller still reads an integer result. Today the decline names the
+remedy: declare the parameter (`ce.declare('a', 'real')`,
+`ce.declare('A', 'tuple<real, real>')`) before its first assignment. Expected:
+the field compile derives again the signatures and the memoized call types of
+the user functions that read a hidden parameter, and restores all of them,
+including the captured-type snapshots of the checkpoint journal, on every exit
+(`boxed-operator-definition.ts`, `call-result-type.ts`,
+`checkpoint-journal.ts`).
 
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 
@@ -3426,23 +3469,30 @@ deliberate factor of three. The composed hyperbolic and reciprocal routines are
 built from unrounded kernels and take one rounding step at their own export,
 except `remainder`, whose three-operation composition takes three.
 
-### CE-569. Compile `When(e, c)` as `If(c, e, m)` when `c` is a boolean
+### CE-589. The type of a compiled `run()` refuses a boolean input that the `javascript` target accepts
 
-**Status:** open; capability (simplification).
+**Status:** open; defect (public type). Found 2026-10-28.
 
-For a condition whose type is provably `boolean` (not a list of booleans),
-`When(e, c)` means `If(c, e, m)`, with `m` the absence marker of the type of
-`e` (`NaN` for a number, `Missing` otherwise; definition in
-`library/control-structures.ts`). Lower it so in the compiler, before the
-targets see it, and keep `When` in the expression tree (it carries the LaTeX
-round trip of `x\{y\}`, the stacking rule into `And`, the derivative rule and
-Tycho's masked points). The emitted code stays the same ternary. Gain: one
-code route instead of a `When` handler in the javascript, GPU, Python and
-interval-js targets and the fixed-width unroll, and every pass sees the
-condition first as for `If` (the operand order of `When` caused CE-562). Keep
-each target's checks: the GPU refusal of a random draw in the masked value
-(`gpuAssertNoEagerDraw`), and the interval-js `_IA.restrict` enclosure (lower
-there only if the `If` route gives the same enclosure).
+With `c` declared `boolean`, `ce.box(['When', 'x', 'c']).compile().run({ x: 2,
+c: true })` returns `2` at run time, but TypeScript refuses the call: the
+variable type of a runner is `number | ComplexResult | RunnerListInput`
+(`DefaultRunnerVars` and `JavaScriptCompilationTarget` in
+`compilation/types.ts`), with no `boolean`. A caller must cast. The list case
+of the same type was fixed as CE-581. Check what the entry guards of the
+`javascript` target do with a boolean for a `real` variable before widening
+the type, and whether a list of booleans should be admitted too.
+
+### CE-588. An `If` whose written else branch is `Missing` beside a point value compiles wrongly on GLSL and Python
+
+**Status:** open; defect. Found 2026-10-28.
+
+`If(c, (x, y), Missing)` compiles on GLSL to a ternary whose else branch is a
+scalar NaN beside a `vec2` branch, which is not a valid shader, and on Python
+to `math.nan`, where the interpreter gives `Missing` (`None` in Python). The
+else-less `If(c, (x, y))` and `When((x, y), c)` give the right absence marker
+on each target (`vec2` NaN on GLSL, `None` on Python), so the written
+`Missing` branch must be compiled with the marker of the other branch's
+shape.
 
 ### CE-568. CSE: share a pure call across the statements of a `Block`
 
@@ -3455,36 +3505,27 @@ calls `p_rand(n + s_eed, n, n)` in both. Sharing across statements needs the
 temporary to be bound before the first statement and to stay valid across any
 assignment the statements make to a symbol the call reads.
 
-### CE-578. A recursive signature derived during an evaluation leaves a wide type in the type cache
+### CE-585. The type of a recursive `function` binding depends on whether its first read hid the assumptions
 
-**Status:** open; defect (regression of CE-544). A fix exists, not yet
-applied.
+**Status:** open; defect (determinism). Found 2026-10-27 at HEAD
+`df6edc26b`.
 
-Tycho `neyret/ndqj7hupta`, rows `R(20, x, y) - k` (6 records), compiled on
-interval-js at CE 0.171.0 and decline after CE-544 (commit `279b93cfd`, found
-by bisecting): "the operand `0.5 * S(x, y, R(i - 1, x, y))` may be a
-collection at run time (type `list<list<any> | number | tuple> | number |
-tuple`)". `R` is a recursive function declared `function`. The failure needs
-the order evaluate, compile, evaluate, compile. While
-`_deriveSignatureOnce` (`boxed-value-definition.ts`) derives the recursive
-signature, the recursive calls in the body read the skeleton, whose result is
-`unknown`, so the body node gets the wide type and keeps it in its type cache.
-After the evaluation moves the cache generation, the compiler reads that type.
-The settled type of `R(…)` is `number`. The same defect is in 0.171.0 for `R`
-declared `(unknown, unknown, unknown) -> unknown`; CE-544 extended it to a
-bare `function` declaration. The fix (session scratchpad
-`triage/triage.patch`, the `boxed-value-definition.ts` hunk and the
-`ndqj7hupta` block of `census-head-new-declines.test.ts`): a second
-derivation in the same lexical scope reads the result of the first, not
-`unknown`; the scope check matters, because a wide result from a Tycho scratch
-scope otherwise stays in force. Two other fixes were measured and rejected:
-no caching during a derivation (a symbolic `R(2..8)` goes from 5 ms to 1–10
-s), and a value shield (stack overflow). Waiting for the file to be free of
-another session's staged CE-566 change; the CE-544 author was asked.
+With `F: function`, the assumption `x > 0` and
+`F := n ↦ If(n = 0, [1, 2], -F(n - 1))`: if the first read of `F(m).type` has
+the assumptions visible, the type is `broadcastable<unknown>`, the same as in
+an engine with no assumptions. If the first read has them hidden (any
+`ce.assign('y', F(m))`), it is `vector<integer^2>`, and every later read,
+visible too, gives `vector<integer^2>`. Same effect for `-F(n - 1)` with a
+number base (`number` against `broadcastable<unknown>`) and for
+`2·F(n - 1)`. No probe found an unsound type: each answer contains the values
+of `F(0)` … `F(5)`. The derived result of the binding is kept by whichever
+read derives it first. `definition-order.test.ts` already pins order
+independence for compiled results; a check of this case belongs there.
 
 ### CE-579. javascript: `asOklab(c_f)` in Tycho `art/s8ishknvhe` declines during the Tycho compile only
 
-**Status:** open; defect (probably the same cause as CE-578).
+**Status:** open; defect (probably the same cause as the recursive-signature
+fix of 2026-10-27, `_deriveSignatureOnce` in `boxed-value-definition.ts`).
 
 The row compiled at CE 0.171.0 (it mapped `N` over the list of points, as the
 interpreter does) and declines at HEAD: "the argument `C_c` has the type
@@ -3492,73 +3533,12 @@ interpreter does) and declines at HEAD: "the argument `C_c` has the type
 number>` of the parameter". During Tycho's compile of the row, `C_c` is typed
 `list<tuple<list<…> | number | tuple, …>>`; after the run it is
 `list<tuple<number, number, number>>` and the compile succeeds. `F` is a
-recursive function declared `function`, as in CE-578. Not reproduced without
-Tycho. The interpreter cannot give the row's value with the document's
-`D = 10000` (the iteration limit is reached, at 0.171.0 too); with `D = 4` it
-applies `N` to each point. Next step: check the row again once CE-578 is
-applied.
-
-### CE-567. Infer `list<E> | tuple<…>` from index reads instead of a marked tuple
-
-**Status:** open; decision. Measured 2026-10-27; recommendation: close
-without the change (see "Prototype result" below).
-
-Index reads `p[1]`, `p[2]` of an unannotated parameter infer
-`tuple<…>` (`parameterIndexReadType()`, `library/collections.ts`), with a
-mark that says the reads do not prove a point (`isIndexReadTuple()`). Only
-the code that checks the mark knows it. The compiler used such a tuple as a
-proven point (in `r(p) := … l(f(p))` with `f(q) := Mod(q, 1) - 0.5`, the
-substituted body was an `incompatible-type` error, while the interpreter maps
-over a list argument); since 2026-10-27 the compiler reads the mark and
-compiles the callee for the argument's type, which this proposal would make
-unnecessary.
-Proposal: infer `list<E> | tuple<T1, T2, …>` (`E` the union of the read
-requirements), and narrow with evidence: a declared tuple parameter of a
-callee narrows to the tuple, an argument type at a call site picks its arm.
-Checked 2026-10-27 on a declared `p: list<number> | tuple<number, number>`:
-`Mod(p, 1) - 0.5` is valid (`list<number> | number`), `p[1] + p[2]` is
-`number`, and per-index types stay (`!q[1]` is `boolean | missing` for
-`q: list<boolean | number> | tuple<boolean, number>`). Costs: an error for a
-genuine point moves from canonicalization to evaluation; the list arm makes a
-read past the end possibly `missing`; every printed inferred signature changes
-(snapshots); the sites that read the mark (`oneElementTypeOf()` in `box.ts`,
-`contractTupleOfNarrow()`, `parameterIndexReadType()`) are rewritten. Next
-step: a prototype in a worktree. The deciding measures (user, 2026-10-27) are
-correctness (compiled values equal to the interpreter's, and no error case
-that becomes a silent value) and codegen coverage (census declines that go
-away on each target, from Tycho's `scripts/audit-ce-codegen.mts --all`). The
-number of tests and snapshots to update is a cost to report, not a reason to
-decide against.
-
-Prototype result (2026-10-27, patch kept at the session scratchpad
-`ce567/ce567.patch`, 7 files):
-
-- Correctness holds. Compiled values equal the interpreter's on javascript,
-  interval-js and glsl for `r([x, y])`, `r((x, y))` (an error everywhere),
-  `p ↦ !p[1] if p[2] % 2 == 0 else p[1]` with `(True, 4)`, `Abs(p)` (element
-  by element for a list, the norm for a point) and a declared
-  `h(p: tuple<real, real>)` reached with a list (an error everywhere). One
-  silent value appeared during the work (javascript broadcast `f` over a point
-  in `r((x, y))`) and was fixed in the prototype.
-- Codegen coverage gain is zero. All 17,782 javascript, interval-js and glsl
-  inputs of the 0.171.0 census, compiled in CE alone, give the same result and
-  the same code at HEAD and in the prototype; `ra1p9naofs` gives the same
-  result in both (its javascript gain comes from the compiler change already
-  at HEAD, which compiles the callee for the argument's type).
-- Cost: 26 tests and 1 test file (0 snapshots). 18 change only the printed
-  signature (`(a: tuple<number, number>) -> number` becomes
-  `(a: list<number> | tuple<number, number>) -> number`); 3 widen a result
-  (`… -> boolean` becomes `… -> boolean | missing | nan | real`, from the list
-  arm's possibly absent read); 3 make a call result less precise
-  (`d([[1, 2], [3, 4]])` is `list<number>` instead of `vector<integer^2>`); 2
-  make the call typing and the operand derivation disagree; 1 javascript
-  compile declines. Also, the union is recognized by its shape, so a DECLARED
-  `list<number> | tuple<number, number>` would be read as inferred; a real
-  version must record the origin.
-
-Recommendation: keep the marked index-read tuple and close this entry. The
-change gains no coverage and no correctness over HEAD and loses type
-precision.
+recursive function declared `function`, like `R` in Tycho `ndqj7hupta`, whose
+decline the recursive-signature fix of 2026-10-27 removed. Not reproduced
+without Tycho. The interpreter cannot give the row's value with the
+document's `D = 10000` (the iteration limit is reached, at 0.171.0 too); with
+`D = 4` it applies `N` to each point. Next step: run the Tycho row against a
+CE build that has that fix.
 
 ### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
 
@@ -3571,13 +3551,15 @@ targets call a NaN-safe helper (a bit test and a selection per call, about
 and 1-D axes `real` since Tycho `a2cd808f0` (all-states records with a helper
 call 1,223 → 980). What remains:
 
-- **CE-565.1** Inside a per-call copy of a user function, a parameter typed
-  `real` from its argument keeps the helper (`_gpu_sin(t)`), while a
-  `list<real^2>` parameter of the same copy gets the built-in: the scalar
-  parameter is not read as declared there.
-- **CE-565.2** A scalar beside a vector in `ElementMax`, `ElementMin` and
-  `Clamp` keeps the helper (`Clamp(v, 0, 1)` emits `_gpu_clamp3(v, vec3(0.0),
-  vec3(1.0))`), although the widened `vec3(0.0)` is finite.
+- **CE-565.5** On the `compileFunction` and shader routes
+  (`compileDeclaredFunctionBody`, `compileShaderBody` in `gpu-target.ts`), the
+  body of a user function keeps the helper for every parameter: these routes
+  open no common-subexpression session, so the call-site proof that the
+  expression route (`compileOrThrow`, `gpuRecordCallSiteFacts`) uses does not
+  run there. A declared parameter type is not enough on its own, because an
+  argument such as `exp(x)` can overflow to `+∞` in f32 before the call.
+  Making these routes run the call-site proof needs that session, which
+  changes how they emit code.
 - **CE-565.3** Tycho side, not CE: the document-level `x`/`y` are still typed
   `real | signed_infinity | nan`; a slider range (`k: real<0..10>`) would prove
   `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions
@@ -4746,183 +4728,6 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
-
-### CE-576. Group theory: a stabilizer chain is reused only by a query of the same kind
-
-**Status:** open; performance, small. Found while landing PR #482
-(2026-10-27).
-
-The optional group-theory entry (`src/group-theory.ts`) keeps completed
-stabilizer chains in a per-engine cache (`PermutationQuerySession`,
-`src/compute-engine/group-theory/permutation/query-session.ts`). The cache key
-includes the chain limits as the query receives them. `PermutationGroupOrder`
-and `PermutationGroupContains` pass the limits of the call, but the relation
-queries (`PermutationIsSubgroup`, `PermutationGroupEqual`, `PermutationIsNormal`,
-`PermutationSubgroupIndex`) and `PermutationPointStabilizer` pass the budget that
-remains after the work already done. Their keys then differ, so one kind of
-query does not reuse a chain that another kind built.
-
-Measured 2026-10-27 on S₉₀ (generated by a transposition and a 90-cycle),
-default limits: `PermutationGroupOrder` cold 124 ms, warm 24 ms;
-`PermutationIsSubgroup(G, G)` next takes 153 ms (a new chain), then 11 ms. The
-results are correct; only the time is lost.
-
-Fix: build the key from the limits that decide whether a chain can complete
-(the ceilings of the engine or of the call), not from the remaining budget, and
-charge the stored chain's work to the receiving query, as a cache hit already
-does.
-
-### CE-566. A stored function reads a lazy collection definition again at each call; Tycho binds the value through engine internals
-
-**Status:** in progress; performance. User decision 2026-10-27: try option (a)
-first; do not add a public API or make internal fields public if it can be
-avoided. Asked by Tycho
-(session tycho-3b), 2026-10-27, as Tycho ledger row 453 (`docs/COMPUTE_ENGINE.md`
-in the Tycho repo).
-
-In the Tycho document `neyret/frqpa78i6s`, `X(l)` is a stored function that
-reads `C_0[l]`. `C_0` is a symbol whose stored value is a symbolic collection,
-`\sum_{i=1}^{|U|}\{C=U[i]:i,0\}`, over a chain of lazy Map/Zip collections.
-Materializing the points of `PointList(X(L), Y(L))` takes 147 to 204 ms. Tycho
-first resolves `C_0` to a plain list (about 3 ms), assigns that list to `C_0`
-for the duration of one call, and restores the stored value afterwards. With
-that binding the row takes 18 to 21 ms. (Measured by Tycho on 0.171.0.)
-
-Tycho does the save and the restore with three internal fields:
-`definition.value.storedValue`, `_placeholderSkeleton` and `_signatureSkeleton`.
-Its owner rule is "no CE internals". A child scope does not help: a stored
-function body resolves its free symbols in the scope where it was defined, so
-`pushScope()` then `declare('C')` then `assign('C', …)` does not change what `X`
-reads (measured 2026-10-27 on HEAD: `X(2)` stays the global value).
-
-Options:
-
-- (a) Cache the materialized value of a lazy collection definition during an
-  evaluation, cleared when an assignment, assumption or declaration changes. No
-  new public API. Needs a measurement on a plain-engine copy of the chain first.
-- (b) A scoped public API, for example `ce.withValues({ C_0: list }, () => …)`,
-  which binds on the existing definitions for the duration of the callback, so
-  that stored function bodies see the value, and restores the value and the type
-  slots exactly.
-- (c) Smaller public parts: a read of the stored, unevaluated value of a symbol
-  definition, and a predicate that tells whether `assign(name, v)` would change
-  the type of the definition.
-
-Plain-engine repro, measured 2026-10-27 on HEAD (the user chose to look into
-option (a) first, and wants no internal fields made public if it can be
-avoided). `L` is a list of N integers. `C` is assigned `Map(k ↦ k+1, L)`, `U`
-is `Unique(C)`, `C_0` is `Sum(If(C = U[i], i, 0), i = 1..Length(U))`, and
-`X(l)` is `C_0[l]`. Each is assigned as an unevaluated expression, so it stays
-symbolic. The test evaluates `Map(l ↦ X(l), 1..N)` and reads every element.
-After a change of `L`:
-
-| N   | `C_0.evaluate()` alone | then the `X` map | the `X` map as the first read |
-| --- | ---------------------- | ---------------- | ----------------------------- |
-| 50  | 59 ms                  | 81 ms            | 117 ms                        |
-| 300 | 154 ms                 | 162 ms           | 323 ms                        |
-| 600 | 270 ms                 | 550 ms           | 747 ms                        |
-
-- With `C_0` assigned its evaluated list, the first `X` map is 38 ms (N = 300).
-- The next `X` map without a change is 5 to 7 ms, and an unrelated
-  `ce.assign('Z', 1)` does not invalidate it. So a cache by generation exists.
-- Reading the list with `C_0.evaluate()` first does not help the `X` map: it
-  still costs about as much as evaluating `C_0` again. The first read of
-  `C_0[l]` inside the body of `X` does not reuse the value that
-  `C_0.evaluate()` computed. Finding out why is the first step of option (a).
-
-Per-call timing (N = 100, 300, 1000; one `X(i)` call at a time after a change of
-`L`): the first call costs 201, 244 and 452 ms (it derives the whole chain
-once), and each later call costs about 0.7 to 1.0 ms, constant in N. A bound
-list costs about 0.13 ms per call. Cache statistics (`ce._cacheStats`) show the
-`storedValue` memo hitting 98.6 % (347 of 352 reads), so the stored value of
-`C_0` is cached; the 625 `lazyValue` "declineStore" events are numbers and
-lists, which the memo skips on purpose. So two costs remain: (1) the first
-derivation after a dependency change, and (2) about 0.8 ms per call that is
-neither the derivation nor the stored-value lookup. Tycho's row (147 to 204 ms
-against 18 to 21 ms) fits cost (2) if the row makes about 150 to 250 calls; it
-does not fit cost (1), because Tycho resolves `C_0` in 3 ms. Next step: a
-profile of the later calls only (the first CPU profile mixed the two costs);
-`_memoizedLazyCollectionValue`, `evaluateStatements`, `holdMap` and
-`_reviseInferredType` (`boxed-value-definition.ts`) are the largest inclusive
-entries so far.
-
-Cause of cost (2), found 2026-10-27 with a CPU profile of the later calls only
-(1 495 calls, 1.17 ms each). About 70 % of each call is the TYPE of the call
-node `X(i)`: `boundCallType`, then `declaredType` and `_reviseInferredType`
-(`boxed-value-definition.ts`), which reads the live type of the stored value of
-`C_0` (the whole `Sum`/`Unique`/`Map` chain), then `capturedTypesWidened` and
-`_effectsOf` (`function-literal.ts`, `effects-of.ts`). The cache statistics
-show `type` with 7 279 generation misses, all "wasted" (the recompute gives the
-same type). Reason: the call of a function literal pushes a frame with
-`_bindsValues` set (`function-utils.ts`), and the pop of such a frame always
-advances the `any` axis (`discardEvalContext`, `engine-scope.ts`; field comment
-in `types-kernel-evaluation.ts`). Every `X(i)` therefore retires every
-`_type` and `_sgn` cache engine-wide, and the next call derives the type of
-the chain again.
-
-Done 2026-10-27 (option (i), uncommitted): `_liveValueType`
-(`boxed-value-definition.ts`) remembers the live type of the stored value
-against the bindings it reads. A first version was unsound: the dependency
-snapshot leaves out variables bound inside the value, and a type read finds
-such a variable by name, so `M := Map(x ↦ √x, [1, 2])` read as
-`vector<complex^2>` inside a call frame with a parameter `x`. Session
-compute-engine-0c found it and supplied the fix (`bindingSites` option of
-`snapshotMemoDeps`, no store or serve inside a value shield, a re-entrancy set
-and a cycle guard); that version is the one applied, with test
-`ce-566-revise-inferred-type-cache.test.ts`. 0c measured that
-`capturedValueMismatchEntry` (`function-utils.ts`) reads `value.type` on the
-`any` axis and is about a third of the remaining cost per call; routing it
-through the same memo cut the per-call cost by about 55 %. Not done. The later calls of the repro went from 1 746 ms
-to 350 ms (1 495 calls, profiled), median per call 0.57 to 0.35 ms unprofiled.
-Option (ii) was measured with a throwaway change and rejected: skipping the
-`any` advance at the pop cuts the wasted type misses from 7 279 to 3 992 only,
-because the write of the parameter value before the push also advances `any`.
-Full suite green except the `checkpoint-journal` field guard, fixed by listing
-`_liveTypeMemo` as a memo. Test: `ce-566-live-value-type-memo.test.ts`.
-
-Tycho's measurement (session tycho-3b, plain engine, its own chain of depth 4
-over 300 elements, Map/Zip): the first read through `X` costs about one
-evaluation of `C_0` (1.3 to 1.5 s symbolic; 0.9 to 1.1 s when `C_0` is
-evaluated once, assigned and read; 9 to 10 ms when a precomputed list is
-assigned). So for that chain cost (1), the interpreted evaluation of `C_0`
-itself, dominates, and the fix above does not reach Tycho's target.
-
-Profile of that evaluation, 2026-10-27 (Tycho's chain, `ce.box("C_0").evaluate()`,
-about 1.5 to 1.8 s on a loaded box): about 1.25 s of it is the evaluation of
-`Length(U)` in `absentBigopBound` (`library/utils.ts`), called from
-`classifyBigopDomain` for the upper bound of the `Sum`. That evaluation
-materializes `U = Unique(A_4)`, so it is the one pass over the depth-4 chain
-that the `Sum` needs anyway (about 4 ms per element, 300 elements, 4 levels);
-the `Sum` itself is the remaining 0.3 s. Within the pass, the largest parts are
-`boundCallType` (the type of each call of the `maxOfPair` literal, about
-0.95 s inclusive), `elementMemoComputeCell` and `mapAtCell`. The throwaway
-test that makes the pop of a `_bindsValues` frame leave the `any` axis alone
-gave 1.51 s against 1.47 s, so cache churn is NOT the lever on this chain;
-the per-element cost is the work itself.
-
-Consequence for Tycho's criterion (symbolic within 2 times of assigned): the
-"assigned" timing leaves out the evaluation of `C_0`, which costs at least the
-pass above. An interpreter cannot meet that criterion, whatever the cache
-design; only a different execution of the chain could (for example, compiling
-the lazy chain, which is what Tycho's resolver does in 3 ms). Open: decide
-whether the interpreter should evaluate a chain of lazy `Map`/`Zip` over
-index reads through the compiler (`compile()` of the collection), a design
-question for the user.
-
-Fix options for (2), as first considered:
-
-- (i) Key the live-type read of `_reviseInferredType` on the dependency
-  snapshot of the stored value (as `_memoizedStoredValue` does with
-  `memoDepsStillValid`) and not on the `any` axis. Local to one function; the
-  type of `C_0`'s value cannot depend on the parameter `l`.
-- (ii) Do not advance `any` at the pop of a `_bindsValues` frame when nothing
-  read by the cached answers can have read a parameter name. Larger effect,
-  but it changes the invalidation rule for every function-literal call, so it
-  needs the full suite and a soundness argument.
-
-The repro scripts are `r.ts`, `s.ts` and `u.ts` in the scratchpad of session
-ce-desk (`/private/tmp/claude-501/-Users-arno-dev-compute-engine/3f89ed16-813a-4ec0-900c-ea26d433b8ad/scratchpad/`); make one a file in
-`scripts/repros/` when the work starts.
 
 ### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 

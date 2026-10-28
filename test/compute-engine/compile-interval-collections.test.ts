@@ -1670,10 +1670,12 @@ describe('Interval target — a selection among list values', () => {
       [-1, 1],
       [-2, 2],
     ]);
-    // Consumed whole by a norm and a dot product.
+    // Consumed whole by a norm and a dot product. The parameter of `l` is
+    // typed only by index reads, so the list argument takes the copy of `l`
+    // typed by the argument (`_fn_l_vector_2_`, ROADMAP CE-564).
     const norm = run(ce, 'l(Z(x))', { x: pt(3) });
     expect(norm.code).toBe(
-      "_fn_l(((_tv1 = _IA.less(_k3, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _tv1 === 'false' ? _IA.res([_.x, _IA.scale(_k2, _.x)]) : _IA.hull([_.x, _.x], [_.x, _IA.scale(_k2, _.x)])))"
+      "_fn_l_vector_2_(((_tv1 = _IA.less(_k3, _.x)) === 'true' ? _IA.res([_.x, _.x]) : _tv1 === 'false' ? _IA.res([_.x, _IA.scale(_k2, _.x)]) : _IA.hull([_.x, _.x], [_.x, _IA.scale(_k2, _.x)])))"
     );
     expectEncloses(norm.out, Math.hypot(3, 3));
     expectEncloses(

@@ -23,10 +23,15 @@
  *   (`gpuFiniteRealCells`): a written vector of declared reals, a declared
  *   `vector<real^n>` or tuple of reals, or arithmetic over those under the
  *   scalar rules. Then `sin`, `cos`, `sign`, and `max`, `min` and `clamp`
- *   of vectors of one width, are the built-ins. A scalar beside a vector in
- *   `max`, `min` or `clamp` keeps the helper, which broadcasts it, and
- *   `smoothstep` always keeps its helper (the built-in has no defined result
- *   when `e0 >= e1`).
+ *   of vectors of one width, are the built-ins. `smoothstep` always keeps
+ *   its helper (the built-in has no defined result when `e0 >= e1`).
+ * - CE-565.2: a scalar beside a vector in `ElementMax`, `ElementMin` or
+ *   `Clamp` is broadcast with the vector constructor (WGSL has no
+ *   `max(vecN, f32)`, GLSL no `max(float, vecN)`). The proof reads the scalar
+ *   as written: `vec3(s)` is finite exactly when `s` is. When every operand
+ *   is finite for certain, `Clamp(v, 0, 1)` is
+ *   `min(max(v, vec3(0.0)), vec3(1.0))`; a scalar that can be NaN (`x:
+ *   number`, `0/0`) or a vector that can hold NaN keeps the helper.
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -201,8 +206,11 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
     });
 
     it('a parameter keeps the guard, also when a global of its name has a value', () => {
-      // The parameter `c` of `p` is not the global `c := 2.5`.
-      expect(shader(ce, 'p(x)', to).preamble).toMatch(/_gpu_cos\(/);
+      // The parameter `c` of `p` is not the global `c := 2.5`. The argument
+      // `u` has no declared type, so the parameter is not finite for certain
+      // (`p(x)`, with `x` declared `real`, proves it: CE-565.4).
+      expect(shader(ce, 'p(u)', to).preamble).toMatch(/_gpu_cos\(/);
+      expect(shader(ce, 'p(x)', to).preamble).toMatch(/ cos\(1\.9 \* c/);
     });
   });
 
@@ -304,10 +312,11 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
       );
     });
 
-    it('a scalar beside a vector keeps the helper, which broadcasts it', () => {
-      expect(box(['ElementMax', 'v', 0])).toBe(`_gpu_max3(v, ${vec3}(0.0))`);
+    it('a finite scalar beside a finite vector is broadcast to the built-in', () => {
+      // CE-565.2: `vec3(0.0)` is finite because `0` is.
+      expect(box(['ElementMax', 'v', 0])).toBe(`max(v, ${vec3}(0.0))`);
       expect(box(['Clamp', 'v', 0, 1])).toBe(
-        `_gpu_clamp3(v, ${vec3}(0.0), ${vec3}(1.0))`
+        `min(max(v, ${vec3}(0.0)), ${vec3}(1.0))`
       );
       expect(box(['Smoothstep', 'a', 'b', 'v'])).toBe(
         '_gpu_smoothstep3(a, b, v)'
@@ -342,3 +351,142 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
     });
   });
 });
+
+describe.each(['glsl', 'wgsl'] as const)(
+  'CE-565.2: a scalar beside a vector on %s',
+  (to) => {
+    const ce = new ComputeEngine();
+    // Declared reals with a range, and without one: the cells of a written
+    // vector of them are finite for certain (`gpuFiniteRealCells`).
+    ce.declare('a', 'real<-5..5>');
+    ce.declare('b', 'real<-5..5>');
+    ce.declare('c', 'real<-5..5>');
+    ce.declare('d', 'real<-5..5>');
+    ce.declare('t', 'real');
+    // A scalar that can be NaN or infinite.
+    ce.declare('x', 'number');
+    ce.declare('u', 'number');
+    // A vector whose cells can be NaN.
+    ce.declare('n2', 'vector<2>');
+    ce.declare('n3', 'vector<3>');
+    ce.declare('n4', 'vector<4>');
+    // `constantFold: false`: an all-literal operation would be folded to a
+    // literal and never reach the lowering.
+    const box = (json: unknown): string => {
+      const r = compile(ce.box(json as never), {
+        to,
+        fallback: false,
+        constantFold: false,
+      } as never) as { success: boolean; code?: string };
+      expect([json, r.success]).toEqual([json, true]);
+      return r.code ?? '';
+    };
+    const vt = (n: number) => (to === 'glsl' ? `vec${n}` : `vec${n}f`);
+    const cells = ['a', 'b', 'c', 'd'];
+
+    describe.each([2, 3, 4])('of width %i', (n) => {
+      const V = ['List', ...cells.slice(0, n)];
+      const VC = `${vt(n)}(${cells.slice(0, n).join(', ')})`;
+      const L = ['List', ...[1, 2, 3, 4].slice(0, n)];
+      const LC = `${vt(n)}(${['1.0', '2.0', '3.0', '4.0'].slice(0, n).join(', ')})`;
+      const N = `n${n}`;
+
+      it('finite operands call the built-ins', () => {
+        expect(box(['Clamp', V, 0, 1])).toBe(
+          `min(max(${VC}, ${vt(n)}(0.0)), ${vt(n)}(1.0))`
+        );
+        expect(box(['ElementMax', V, 0])).toBe(`max(${VC}, ${vt(n)}(0.0))`);
+        expect(box(['ElementMin', 1, V])).toBe(`min(${vt(n)}(1.0), ${VC})`);
+        // A declared `real` with no range is finite too.
+        expect(box(['ElementMax', V, 't'])).toBe(`max(${VC}, ${vt(n)}(t))`);
+        // A literal vector.
+        expect(box(['Clamp', L, 0, 1])).toBe(
+          `min(max(${LC}, ${vt(n)}(0.0)), ${vt(n)}(1.0))`
+        );
+        expect(box(['ElementMin', 1, L])).toBe(`min(${vt(n)}(1.0), ${LC})`);
+      });
+
+      it('a scalar that can be NaN keeps the helper', () => {
+        expect(box(['Clamp', V, 'x', 1])).toBe(
+          `_gpu_clamp${n}(${VC}, ${vt(n)}(x), ${vt(n)}(1.0))`
+        );
+        expect(box(['ElementMax', V, 'x'])).toBe(
+          `_gpu_max${n}(${VC}, ${vt(n)}(x))`
+        );
+        expect(box(['ElementMin', 'x', V])).toBe(
+          `_gpu_min${n}(${vt(n)}(x), ${VC})`
+        );
+        // `0/0` is NaN.
+        expect(box(['ElementMax', V, ['Divide', 0, 0]])).toMatch(
+          new RegExp(`^_gpu_max${n}\\(`)
+        );
+      });
+
+      it('a vector that can hold NaN keeps the helper', () => {
+        expect(box(['Clamp', N, 0, 1])).toBe(
+          `_gpu_clamp${n}(${N}, ${vt(n)}(0.0), ${vt(n)}(1.0))`
+        );
+        expect(box(['ElementMax', N, 0])).toBe(
+          `_gpu_max${n}(${N}, ${vt(n)}(0.0))`
+        );
+        expect(box(['ElementMin', 1, N])).toBe(
+          `_gpu_min${n}(${vt(n)}(1.0), ${N})`
+        );
+        // One cell `u: number` is enough.
+        const VU = ['List', 'u', ...cells.slice(1, n)];
+        expect(box(['Clamp', VU, 0, 1])).toMatch(
+          new RegExp(`^_gpu_clamp${n}\\(`)
+        );
+      });
+    });
+
+    it('a three-operand fold with a broadcast scalar uses the built-in', () => {
+      expect(
+        box(['ElementMax', ['List', 'a', 'b'], 0, ['List', 'c', 'd']])
+      ).toBe(`max(max(${vt(2)}(a, b), ${vt(2)}(0.0)), ${vt(2)}(c, d))`);
+    });
+
+    it('the built-ins give the interpreter values', () => {
+      // The f32 interpreter has `vec2` only. The function takes the cells
+      // `a` and `b` as parameters.
+      const run = (json: unknown, x: number, y: number) => {
+        const code = box(json);
+        expect(code).not.toMatch(/_gpu_/);
+        const src =
+          to === 'glsl'
+            ? `vec2 f(float a, float b) {\n  return ${code};\n}`
+            : `fn f(a: f32, b: f32) -> vec2f {\n  return ${code};\n}`;
+        const shaderValue = shaderFunctions(src, to)('f', x, y) as {
+          x: number;
+          y: number;
+        };
+        const expected = ce
+          .box(json as never)
+          .subs({ a: x, b: y })
+          .evaluate()
+          .toJSON() as unknown;
+        return { shaderValue, expected };
+      };
+      for (const [x, y] of [
+        [-2.5, 0.25],
+        [0.75, 4.5],
+        [1, 0],
+      ]) {
+        for (const json of [
+          ['Clamp', ['List', 'a', 'b'], 0, 1],
+          // Bounds in the wrong order: the library `Clamp` gives the upper
+          // bound, as `min(max(x, lo), hi)` does; the built-in `clamp` is
+          // undefined there, so the emitted form must stay `min(max(…))`.
+          ['Clamp', ['List', 'a', 'b'], 1, 0],
+          ['ElementMax', ['List', 'a', 'b'], 0],
+          ['ElementMin', 1, ['List', 'a', 'b']],
+        ]) {
+          const { shaderValue, expected } = run(json, x, y);
+          const [ex, ey] = (expected as unknown[]).slice(1) as number[];
+          expect([json, x, y, shaderValue.x]).toEqual([json, x, y, ex]);
+          expect([json, x, y, shaderValue.y]).toEqual([json, x, y, ey]);
+        }
+      }
+    });
+  }
+);

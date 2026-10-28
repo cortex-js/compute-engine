@@ -51,8 +51,21 @@
 
 /** What a restore has to release when it orphans a definition half: the
  * configuration-change subscription a constant's value definition takes out
- * when it is constructed. Only `_BoxedValueDefinition` has one. */
-export type CheckpointDisposable = { dispose(): void };
+ * when it is constructed. Only `_BoxedValueDefinition` has one.
+ *
+ * `_checkpointHome` is the scope the half was installed in, when the site
+ * that constructed it knows it. `_rewound` is set by the restore on a half
+ * whose home scope is still on the engine's scope chain after the restore
+ * (a name the host declared, which it can declare again later): a symbol
+ * bound to such a half reads no value (`bindingInContext`,
+ * `boxed-expression/binders.ts`). A half installed in a scope created in the
+ * window (the scope of a binder such as `Sum`, or of a `Block` run) belongs
+ * to the expression that holds that scope and is not marked. */
+export type CheckpointDisposable = {
+  dispose(): void;
+  _checkpointHome?: object;
+  _rewound?: true;
+};
 
 /** The stand-in owner of a DELTA entry — see {@link CheckpointWindow.recordDelta}.
  * A module-private object, so no caller's record can collide with it. */
@@ -264,7 +277,8 @@ export class CheckpointWindow {
 
   /** Record a value-definition half constructed while this window was open —
    * see {@link created}. */
-  noteCreated(half: CheckpointDisposable): void {
+  noteCreated(half: CheckpointDisposable, home?: object): void {
+    if (home !== undefined) half._checkpointHome = home;
     this._created.push(half);
   }
 

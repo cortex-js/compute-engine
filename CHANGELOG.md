@@ -12,112 +12,454 @@
   most 256 elements, with explicit work and output limits. Contributed by
   @KingArth0r (#484).
 
-- **Permutation groups, an optional entry:
-  `@cortex-js/compute-engine/group-theory`.** `loadGroupTheory(ce)` adds
-  operators to an engine: permutations and their products, inverses, powers,
-  conjugates (b⁻¹ab) and commutators (a⁻¹b⁻¹ab); groups given by generators
-  on an explicit action `PermutationAction(n)`; orbits and transversals; the
-  exact order, membership, point stabilizers, and the subgroup, index,
-  equality, normality and abelian queries. The order and membership queries
-  use an incremental Schreier–Sims algorithm: the order of S₁₀₀, generated
-  by a transposition and a 100-cycle, takes about 30 ms. The loader options
-  set resource limits, and a query can lower them with a named `options`
-  dictionary. A query that reaches a limit returns an error such as
-  `Error("permutation-chain-orbit-edge-limit")`, never a partial list or a
-  false answer. An engine that does not load the entry does not have these
-  operators. Contributed by @KingArth0r (#482).
-
 ### Behavior Changes
 
-- **Group queries use generic names across representations.** The unreleased
+- **Group queries use generic names across representations.** The
   permutation-only order, membership, subgroup, index, equality, normality,
   abelian, element-list, generator-list, and identity queries now use
   `GroupOrder`, `GroupContains`, `GroupIsSubgroup`, `GroupIndex`, `GroupEqual`,
   `GroupIsNormal`, `GroupIsAbelian`, `GroupElements`, `GroupGenerators`, and
   `GroupIdentity`. Permutation queries retain their stabilizer-chain and closure
-  algorithms and corresponding resource options.
+  algorithms and corresponding resource options. These names replace the
+  permutation-only queries shipped in 0.172.0; callers must update their query
+  names.
 
+## 0.172.0 _2026-10-28_
+
+### New Features
+
+- **A point parameter of a WGSL field function is a vector field of the
+  parameter struct** (ROADMAP CE-591). A parameter of
+  `WGSLTarget.compileFieldFunction()` that is a tuple of 2, 3 or 4 real numbers,
+  by its declaration (`tuple<real, real, real>`, or `tuple<number, number>`: the
+  host writes only real values into the buffer) or by its value
+  (`ce.assign('A', ['Tuple', 1, 2])`), is one `vec2f`, `vec3f` or `vec4f` field
+  of the struct. The field function reads it as a WGSL vector, so whole-vector
+  operations and component reads compile: with `A := (1, 2)` and
+  `B := (0.5, -1, 2)`, the field
+  `c + \operatorname{distance}((x,y,z),B) + A.x \sin(y) - B.z` gives
+  `return ce_params.c + sin(y) * ce_params.A.x + -ce_params.B.z + distance(vec3f(x, y, z), ce_params.B);`
+  and the struct `{ c: f32, A: vec2f, B: vec3f }` with the offsets 0, 8 and 16.
+  The offsets follow the alignment rules of the uniform address space (`vec2f`
+  at a multiple of 8, `vec3f` and `vec4f` at a multiple of 16). A tuple of
+  integers is a vector of `f32` too. A change of the point is a buffer write:
+  the compiled text does not change. A tuple of 1 or more than 4 components, or
+  with a component that is not a real number (complex, `NaN`, a list), declines.
+  A list parameter keeps its `array<vec4f, ⌈n/4⌉>` layout. A user-defined
+  function that the field calls can read a point declared before its first
+  assignment (`ce.declare('A', 'tuple<real, real>')`); with a type inferred from
+  integer values (`A := (1, 2)` and then `h(t) := t + A.x`) the field declines
+  and names that declaration. A point whose value reads other symbols is not a
+  parameter: `A := (a, b)` gives the parameters `a` and `b` and the code
+  `vec2f(ce_params.a, ce_params.b)`, and `A := (x, 1)` reads the coordinate `x`.
+  Checked on WebGPU (Apple GPU, headless Chromium) against the `javascript`
+  target.
+
+- **`ce.timeRemaining` and `ce.stepBudgetSpent`: the state of the current
+  span.** `ce.timeRemaining` is the number of milliseconds left before the
+  earliest deadline of the active `withTimeLimit` spans (`Infinity` when no span
+  has a time limit, `0` or less once the deadline has passed).
+  `ce.stepBudgetSpent` is `true` when a step budget of the current span or of an
+  enclosing one is spent. A host loop that does its own work inside a span reads
+  the first to stop on time; a cache reads the second before it stores a value,
+  so that it does not keep a value computed after a caught cancellation. Both
+  describe the span of the current synchronous code: after an `await` they read
+  `Infinity` and `false`.
+
+- **The global slot `Symbol.for('io.cortexjs.compute-engine')` is documented and
+  typed (`ComputeEngineGlobal`).** A component that must work with a copy of the
+  Compute Engine loaded by the page finds the `ComputeEngine` class, `version`,
+  `LatexSyntax`, `LATEX_DICTIONARY`, `compile`, the type guards, `numericValue`
+  and `sym` there. Its contents are an additive contract: a later version can
+  add a member, but does not remove or change one. The main entry point and
+  `/epsil` store it; `/core` does not.
+
+- **Two runtime helpers of compiled JavaScript are a stable contract for a
+  `compile` handler:** `_SYS.atNoWrap(base, index)` (1-based position, no
+  wrap-around) and `_SYS.atMask(base, mask)` (the elements where a list of
+  booleans is `true`). Every other `_SYS` member stays internal.
+
+- **WGSL field functions for compute shaders:
+  `WGSLTarget.compileFieldFunction(expr, { name, coordinates })`** (Tycho ledger
+  row 461, ROADMAP CE-571). It returns a function
+  `fn <name>(x: f32, y: f32, z: f32) -> f32` that a compute shader of the host
+  calls at each grid point, the helper functions it needs by name, and the
+  layout of one uniform struct that holds its parameters. Every free symbol that
+  is not a coordinate (and every symbol with a value that is not a constant or a
+  function) is a parameter, read as `ce_params.<name>`: a real or integer scalar
+  is an `f32`, and a numeric list of known length (at most 1024 elements) is
+  `array<vec4f, ⌈n/4⌉>`, read by position with the index rules of `At`. The
+  result gives the struct declaration (`paramsStructSource`), each field with
+  its byte offset and size (`params`), and the buffer size (`paramsSize`, a
+  multiple of 16); the host declares the one `var<uniform>`. A change of a
+  parameter value is a buffer write: the compiled text does not change, and
+  neither the value nor a fact that it gives (its sign) is read. A list with a
+  `'storage-buffer'` hint is read from its storage buffer, also in the
+  user-defined functions that the field calls: its struct and its
+  `var<storage, read>` declaration are in the helpers, and its layout in
+  `storageBuffers`. A helper name always has the same source text, so the
+  helpers of several field functions merge by name; the one exception is the
+  declaration of a storage buffer, which has one text only for one hint and
+  element type, so a buffer that several fields read must have the same hint in
+  each. The user-defined functions are named after the field
+  (`_fn_<k>_<name>_h`, with k the length of the field name). An expression that
+  `compile(expr, { to: 'wgsl' })` declines is declined with the same diagnostic;
+  a boolean, text, complex or longer-list parameter, a `Return` or a result that
+  is not a real scalar, a body that assigns an input, and a user-defined
+  function that reads a coordinate it does not take, also decline. A parameter
+  declared `real` is read as a finite value, so `sin` and `cos` of an operand
+  that reads it are the built-ins, with no `NaN` test. Checked on WebGPU (Apple
+  GPU, headless Chromium) against the `javascript` target.
+
+- **A list in a `wgsl` storage buffer, with a length that changes at run time.**
+  The hint `storage: { S: { kind: 'storage-buffer', group, binding } }` on
+  `compile(…, { to: 'wgsl' })` makes the preamble declare
+  `struct CE_List_f32 { len: u32, data: array<f32> }` and
+  `@group(G) @binding(B) var<storage, read> S: CE_List_f32;`. The struct is
+  named by its element type (`CE_List_f32`, `CE_List_vec2f`, …), so a host that
+  merges preambles keeps one copy of each struct and one `var` line per buffer.
+  The host writes the logical length `len` at byte 0 and the elements from
+  `dataOffset` (4 for numbers, 8 for 2-D points, 16 for 3-D and 4-D points,
+  which have a stride of 16 bytes); a change of length is one 4-byte write, with
+  no new compilation. `CompilationResult.storageBuffers` gives the layout of
+  each buffer the code reads. `At(S, i)` (the index rules of `At`, against
+  `len`), `Length(S)`, `Sum`, `Product`, `Max`, `Min` and `Mean` of `S`, and a
+  `Sum` or `Product` whose bound is `Length(S)` read the buffer, with no copy;
+  on the empty list they give the values of the `javascript` target (0, 1,
+  `NaN`, `NaN`, `NaN`). A `len` above the elements the buffer holds gives `NaN`,
+  and `Length(S)` is then the number of elements the buffer holds, so that a
+  loop bounded by it stops. An expression that uses the whole list otherwise
+  (`S + 1`, `Map`) declines, and so do lists of complex numbers, booleans,
+  strings or lists. The `glsl` target declines the kind: WebGL2 has no storage
+  buffers. Requested by Tycho (row 462, CE-572).
+
+- **Permutation groups, an optional entry:
+  `@cortex-js/compute-engine/group-theory`.** `loadGroupTheory(ce)` adds 26
+  operators to an engine: permutations and their products, inverses, powers,
+  conjugates (b⁻¹ab) and commutators (a⁻¹b⁻¹ab); groups given by generators on
+  an explicit action `PermutationAction(n)`; orbits and transversals; the exact
+  order, membership, point stabilizers, and the subgroup, index, equality,
+  normality and abelian queries. The order and membership queries use an
+  incremental Schreier–Sims algorithm: the order of S₁₀₀, generated by a
+  transposition and a 100-cycle, takes about 30 ms. The loader options set
+  resource limits, and a query can lower them with a named `options` dictionary.
+  A query that reaches a limit returns an error such as
+  `Error("permutation-chain-orbit-edge-limit")`, never a partial list or a false
+  answer. An engine that does not load the entry does not have these operators.
+  Contributed by @KingArth0r (#482).
+
+### Behavior Changes
+
+- **The GLSL and WGSL targets refuse an expression whose code would have more
+  than 50,000 nodes.** A subexpression that several paths reach is written once
+  for each path when the shader cannot compute it once: the paths go through the
+  two branches of an `If`, it reads a `vars` source that is not a variable or a
+  field of a variable, it is not pure, or `cse: false` is given. A chain of such
+  subexpressions doubled the code at each level: 14 levels of
+  `If(x > k, e, sin(e))` wrote 2 MB of WGSL in 63 s. The compilation now fails
+  with
+  `Could not compile: the WGSL code for this expression would have more than 50,000 nodes`
+  in less than 0.1 s (with `fallback: true`, the result uses the interpreter).
+  The estimate counts each subexpression that the shader computes once only
+  once, so no compilation of the Tycho code-generation audit (2,229
+  compilations, 1,383 of them on the shader targets) or of the shader tests is
+  refused. The limit applies to the body of each user-defined function that the
+  code calls, as a shader function of its own or substituted at the call site,
+  and to the body statements of `compileShader()`, which has no
+  common-subexpression pass: there each path counts, and depth 16 of
+  `e_{k+1} = e_k + sin(e_k)` (1.5 MB of WGSL) now throws. A subexpression that
+  holds an operator the caller replaces (the `functions` option) or compiles
+  with its own `compile` handler counts once for each path too, and a body that
+  is written in full at each call site counts once for each site. The estimate
+  is a model of the code that the compiler writes, not a copy of it: a rare
+  expression shape can still pass it and give large code, in which case the
+  compilation is slow, but its result is never wrong.
+
+- **A `vars` source that is a field of a variable the shader declares is refused
+  on the GLSL and WGSL targets**, as a bare name already was: with
+  `vars: { a: 'k.x' }` and a `Block` that declares its own `k`, the compilation
+  fails, because the shader would read the local `k`, not the uniform.
+
+- **`compileShader()` checks the target and the type of each body statement.**
+  On the GLSL and WGSL targets, the `variable` of a body statement must be a
+  declared output of the shader, in the spelling of the emitted code
+  (`fragColor` in GLSL, `output.fragColor` in WGSL), or components of a vector
+  output (`fragColor.r`, `output.color.rg`). On WGSL, a target of two or more
+  components is written as one assignment per component
+  (`let _tv1 = input.uv; output.color.r = _tv1.x; output.color.g = _tv1.y;`),
+  because WGSL accepts `output.color.rg = …` only with the `swizzle_assignment`
+  language extension. Such a target is refused when the number of components of
+  the value cannot be determined (`Clamp` of a vector, for example): assign the
+  whole output, or one component in each statement. A GLSL body can also assign
+  the built-in outputs of its stage: `gl_Position` and `gl_PointSize` in a
+  vertex shader, `gl_FragDepth` in a fragment shader. The value must have the
+  type of the target: for example, a body statement `fragColor = 1.0` with
+  `out vec4 fragColor` now throws `the value has the type \`float\`, and the
+  target "fragColor" has the type \`vec4\``, and `output.c =
+  input.uv`with a`vec2f`input and an`f32`output is refused in the same way. Neither GLSL ES nor WGSL converts one type to the other in an assignment; desktop GLSL (a`version`such as`330`) converts an integer value to a float, and that is accepted. The type of the value is checked only when it is certain: a declared input, uniform or output, a GLSL built-in variable, a literal, a comparison, a matrix or an array, or arithmetic on scalars. A vector expression such as `s *
+  uv`is checked by its number of components only:`2·uv`with a`vec3`input is refused for a`vec2`target. A float value into an integer output is refused, because the shader computes float values. A body statement in a WGSL compute shader is refused, because such a shader has no outputs: use`compile()`or`WGSLTarget.compileFieldFunction()`to compute values on the GPU. The GLSL`compileShader()`refuses a`type`other than`'vertex'`and`'fragment'`: GLSL ES 3.00 has no compute stage. Before, each of these shaders was emitted and failed only when the GPU compiled it (`gl_FragColor`,
+  which GLSL ES 3.00 does not have, was accepted too). (CE-580)
+
+- **`compileShader()` refuses a body that reads an undeclared name.** On the
+  GLSL and WGSL targets, a body statement that reads a symbol which is not an
+  input, a uniform or (in GLSL) an output of the shader now throws an error that
+  names each such symbol, for example
+  `the body reads "x", "y", which no input or uniform of the shader declares`.
+  Before, the shader was emitted with the bare names and failed only when the
+  GPU compiled it. Library constants such as `Pi`, symbols with a value in the
+  engine, `Sum` and `Product` indexes, function-literal parameters, `Block`
+  locals and user functions are not affected, and a GLSL built-in variable such
+  as `gl_FragCoord` is still accepted. On WGSL, the input struct of a fragment
+  shader is now `FragmentInput` and that of a compute shader `ComputeInput` (the
+  vertex stage keeps `VertexInput`), and a compute shader with `outputs` or with
+  an input that has no `builtin` is refused: WGSL accepts neither. Also on WGSL:
+  a uniform, input or output with no `location` or `binding` now takes the next
+  free one (all of them took 0 before, which WGSL refuses when there are two);
+  two declarations given the same location or binding, and a boolean uniform,
+  input or output, are refused; and the GLSL type names `ivec2`…`ivec4` and
+  `uvec2`…`uvec4` now become `vec2i`… and `vec2u`… (they were written
+  unchanged). (CE-575)
+
+- **`run()` refuses an array for a symbol declared with a number type.** On the
+  `javascript` target, with `x` declared `real`, `x + 1` called with
+  `{ x: [1, 2] }` returned the string `"1,21"`: JavaScript converted the array
+  to a string. It now throws a `TypeError` that names `x`. A symbol declared as
+  a list, a union with a list member (`real | list<real>`), and an undeclared
+  symbol over which the code broadcasts a call still accept an array. (CE-581)
+
+- **`Factor`, `Together` and `Cancel` collect like terms in their result**
+  (ROADMAP CE-577), as evaluating the sum does. Before, they returned the sum
+  unchanged when they found nothing to rewrite.
+  - `Together(a+a)` and `Cancel(a+a)` are `2a` (they were `a+a`), and
+    `Factor(\sin(t)+\sin(t))` is `2\sin(t)`. With `g(t) := \sin(t)`,
+    `Factor(g(t)+g(t))` is `2\sin(t)`.
+  - Without a variable, `Factor` takes out a factor common to every term of a
+    sum: `Factor(ax+ay)` is `a(x+y)`. It treats a term that is not a polynomial
+    as a variable of its own: `Factor(x\sin(t)+y\sin(t))` is `(x+y)\sin(t)`.
+  - `Cancel` with no variable and no single free variable collects the like
+    terms of its operand: `Cancel((a+b)(c+d)+(a+b)(c+d))` is `2(a+b)(c+d)`. It
+    stayed unevaluated.
+  - A sum with an absent term gives `NaN`, as evaluating it does:
+    `Factor(Missing+1)` was `1+NaN`.
+  - Terms with a random or other impure value are not collected:
+    `Together(Random()+Random())` keeps two draws.
 - **The join of types does not depend on the order of its operands.**
   `widen(nan, real, missing)` gave `missing | number` and
   `widen(missing, nan, real)` gave `missing | nan | real`. Both now give
-  `missing | nan | real`: `nan` beside another number type is kept as its
-  own arm (`widen(real, nan)` is `nan | real`, not `number`, which also admits
-  the complex numbers). A finite type joined with an infinity is still
-  `number`. The join of `+oo` and `-oo` is `signed_infinity`, not `infinity`
-  (which also admits `~oo`), and a union of `+oo` and `-oo` no longer drops
-  `-oo`. `[NaN, 1]` has the element type `integer | nan` whether it is built
-  with `ce.box()` or `ce.list()`.
+  `missing | nan | real`: `nan` beside another number type is kept as its own
+  arm (`widen(real, nan)` is `nan | real`, not `number`, which also admits the
+  complex numbers). A finite type joined with an infinity is still `number`. The
+  join of `+oo` and `-oo` is `signed_infinity`, not `infinity` (which also
+  admits `~oo`), and a union of `+oo` and `-oo` no longer drops `-oo`.
+  `[NaN, 1]` has the element type `integer | nan` whether it is built with
+  `ce.box()` or `ce.list()`.
 - **A shader compile refuses a `vars` entry that names a variable of the
   compiled code.** On `glsl` and `wgsl`, `vars: { a: 'k' }` beside a `Block`
   that declares `k` (or a `Sum` index, a loop variable, a function parameter
   named `k`) compiled to code that read the local `k` instead of the uniform.
-  The compile now fails with a message that names the entry and the symbol.
-  A self-mapped entry (`vars: { T: 'T' }`) is not affected.
+  The compile now fails with a message that names the entry and the symbol. A
+  self-mapped entry (`vars: { T: 'T' }`) is not affected.
 - **A list argument at a declared point parameter is refused by the compiled
   code, as by the interpreter.** With `h(p: tuple<real, real>) := p[1] + p[2]`
   and `g(p) := h(p) + 1`, `g([x, y])` is an `incompatible-type` error in the
-  interpreter, and compiled to code that gave a value. It now declines on
-  every target.
+  interpreter, and compiled to code that gave a value. It now declines on every
+  target.
 - **A recursive function declared `function` is typed as the same function
-  assigned without the declaration.** With `G`, `S` and `R` declared
-  `function` and then assigned `G(a,b,c) = |\sin a| - 0.1`,
+  assigned without the declaration.** With `G`, `S` and `R` declared `function`
+  and then assigned `G(a,b,c) = |\sin a| - 0.1`,
   `S(a,b,c) = \max(G(a,b,c), c - 3)` and
-  `R(i) = \{i = 0: 0, R(i-1) + S(1, 2, R(i-1))\}`, `R(3)` and `R(x)` were
-  typed `any` (with a simpler `S`, a union of numbers, tuples and lists).
-  They are now typed `number`. A recursive list builder declared `function`
-  is typed `list<number>`, not `collection<number>`. The signature of such a
-  function is derived as for a declaration `(unknown) -> unknown`, which
-  checks the recursion.
+  `R(i) = \{i = 0: 0, R(i-1) + S(1, 2, R(i-1))\}`, `R(3)` and `R(x)` were typed
+  `any` (with a simpler `S`, a union of numbers, tuples and lists). They are now
+  typed `number`. A recursive list builder declared `function` is typed
+  `list<number>`, not `collection<number>`. The signature of such a function is
+  derived as for a declaration `(unknown) -> unknown`, which checks the
+  recursion.
 
 ### Performance
 
-- **On the shader targets, a call that several user functions repeat is
-  computed once in more cases.** A large expansion was kept by reference: in
-  Tycho's `voronoi-diagram` document, `B`, `H`, `u`, `v` and `Z` each called
-  `F(x, y)` and the same sixteen weight terms again, so WebGPU drew the row
-  about 2.1 times slower than WebGL. The function bodies are now written into
-  the main body, where each shared call is computed once per pixel. The
-  shader is also smaller (10.8 KB of WGSL instead of 12.3 KB). The size check
-  that counts the code written is unchanged.
+- **On `glsl` and `wgsl`, `Clamp`, `ElementMax` and `ElementMin` of a vector and
+  a number use the built-in `min` and `max` when every operand is finite for
+  certain.** `Clamp(v, 0, 1)` with `v` a vector of declared `real` cells
+  compiled to the NaN-safe helper `_gpu_clamp3(v, vec3(0.0), vec3(1.0))`; it now
+  compiles to `min(max(v, vec3(0.0)), vec3(1.0))`. The helper stays when a cell
+  or the number can be NaN or infinite.
+- **On the shader targets, the body of a user function uses the built-in `sin`,
+  `cos`, `min`, `max`, `clamp` and `sign` for a parameter that every call passes
+  a finite value** (ROADMAP CE-565.4, CE-565.1). With `x`, `y` declared `real`
+  and `F(a, b) := \sin(a) + \cos(b) + \min(a, b)`, compiling
+  `F(x, y) + F(2x, y)` to GLSL gives
+  `float _fn_F(float a, float b) { return sin(a) + cos(b) + min(a, b); }`; it
+  called the NaN-safe helpers (`_gpu_sin(a)`, …), which cost 2 % to 14 % of a
+  frame in Tycho's shaders on WebGL. The proof reads the arguments at the call
+  sites, not a declared parameter type: `F(\exp(x), y)` keeps the helper for
+  `a`, because `\exp(x)` can overflow to `+\infty` in f32 before the call.
+- **On the shader targets, a call that several user functions repeat is computed
+  once in more cases.** A large expansion was kept by reference: in Tycho's
+  `voronoi-diagram` document, `B`, `H`, `u`, `v` and `Z` each called `F(x, y)`
+  and the same sixteen weight terms again, so WebGPU drew the row about 2.1
+  times slower than WebGL. The function bodies are now written into the main
+  body, where each shared call is computed once per pixel. The shader is also
+  smaller (10.8 KB of WGSL instead of 12.3 KB). The size check that counts the
+  code written is unchanged.
 - **A common subexpression of a restriction's condition is shared with its
-  value.** `T_3(t)\{-0.8 < \cos(T_3(t))\}` (`When(T_3(t), …)`) computed
-  `T_3(t)` twice on every target; it is now computed once. On the shader
-  targets, a call that reads a uniform passed with a renamed `vars` entry
-  (`vars: { s: 'u_s' }`) can now be shared too.
-- **More shader operands use the built-in `sin`, `cos`, `sign`, `max`, `min`
-  and `clamp` instead of the NaN-safe helpers**: a product whose factors have
+  value.** `T_3(t)\{-0.8 < \cos(T_3(t))\}` (`When(T_3(t), …)`) computed `T_3(t)`
+  twice on every target; it is now computed once. On the shader targets, a call
+  that reads a uniform passed with a renamed `vars` entry (`vars: { s: 'u_s' }`)
+  can now be shared too.
+- **More shader operands use the built-in `sin`, `cos`, `sign`, `max`, `min` and
+  `clamp` instead of the NaN-safe helpers**: a product whose factors have
   declared ranges (`sin(k t)` with `k: real<0..10>`, `t: real<-7..7>`), a
-  product with a `sin`, `cos` or `tanh` factor, a symbol with an assigned
-  value that is compiled as that value, and a `vec2` to `vec4` operand whose
-  components are all finite for certain (`sin([t, k, 1])` with `t`, `k`
-  declared `real`). A shader that calls only `gcd` no longer carries the
-  `lcm` helper.
-- **A function that reads a symbol holding a long symbolic expression is
-  faster to call** (ROADMAP CE-566). With `X(l) := C_0[l]` and `C_0` assigned
-  a `Sum` over a chain of lazy `Map` and `Unique` collections, each call of `X`
-  derived the type of that chain again, although nothing it reads had changed.
-  The type is now remembered until a binding it reads changes: 1 495 calls
-  took 350 ms instead of 1 746 ms.
+  product with a `sin`, `cos` or `tanh` factor, a symbol with an assigned value
+  that is compiled as that value, and a `vec2` to `vec4` operand whose
+  components are all finite for certain (`sin([t, k, 1])` with `t`, `k` declared
+  `real`). A shader that calls only `gcd` no longer carries the `lcm` helper.
+- **A function that reads a symbol holding a long symbolic expression is faster
+  to call** (ROADMAP CE-566). With `X(l) := C_0[l]` and `C_0` assigned a `Sum`
+  over a chain of lazy `Map` and `Unique` collections, each call of `X` derived
+  the type of that chain again, although nothing it reads had changed. The type
+  is now remembered until a binding it reads changes: 1 495 calls took 350 ms
+  instead of 1 746 ms.
 
 ### Resolved Issues
+
+- **Shader code for an expression with shared subexpressions no longer grows
+  exponentially when a parameter is a field of a struct.** On the GLSL and WGSL
+  targets, a `vars` source that reads a variable through fields or literal
+  indexes (`ce_params.c`, `u.x`, `v[0]`) is now a plain read, so a subexpression
+  that reads it is computed once and shared, as for a bare name.
+  `compileFieldFunction()` maps each parameter this way. For
+  `e_{k+1} = e_k + sin(e_k)` with `e_0 = x + c` at depth 20, the field function
+  had 24 MB of WGSL and took 25 s; it now has 2,599 characters and takes 27 ms.
+  `compile()` with `vars: { c: 'p.c' }` gave 20,467 characters at depth 10 and
+  now gives 2,466 at depth 20. In the Tycho audit, one GLSL compilation that
+  maps `x` and `y` to `v_pos.x` and `v_pos.y` went from 4,965 to 899 characters.
+  A source that is other code (`f()`, `u.x + 1`, `v[i]`) is not shared, as
+  before, and every string source stays unshared on the JavaScript and Python
+  targets, where a property read can run a getter.
+
+- **Two walks of a GPU compilation visit a shared node once.** The search for
+  text-typed symbols and the substitution of collection-valued function calls at
+  the root walked the expression once for each path: 22 levels of
+  `e_{k+1} = e_k + sin(e_k)` took 1.2 s through `compile(e, { to: 'wgsl' })`
+  before any code was written. It now takes 32 ms, and 36 ms at 26 levels.
+
+- **`WGSLTarget.compileFieldFunction()`: parameters that have a value.** A
+  symbol whose value reads other symbols or calls a user-defined function is no
+  longer a buffer field: with `a := x + 1`, where `x` is a coordinate, the field
+  read `ce_params.a` and lost its dependence on `x`. The value is now written
+  into the code (`(x + 1.0)`), and each symbol of the value is a coordinate or a
+  parameter. Only a symbol whose value is a numeric constant is a parameter. A
+  user-defined function reached through such a value that reads a coordinate
+  declines, as a function called by the field does. A user function whose
+  captured parameter changed type since it was defined (`a := 5`,
+  `h(t) := t + a`, `a := 2.5`) declines; the field function threw an error
+  before. A user function that reads a parameter whose type was inferred from an
+  integer value declines with a message that names the declaration to add
+  (`ce.declare('a', 'real')` before the first assignment), also when it reads
+  the parameter through a symbol compiled in place (`c := a + 1`) or shadows a
+  library function (`\Gamma(t) := A.x`). A symbol compiled in place whose
+  inferred type comes from such a parameter (`b := a`), or whose declared type
+  its value no longer fits (`b` declared `integer`), declines with the remedy. A
+  parameter or a `Sum` index named like a global symbol compiled in place is no
+  longer read as that symbol.
+
+- **GLSL and WGSL: a vector expression of a declared vector is typed as a
+  vector.** With `in vec2 uv` (a shader input, or a `compileFunction`
+  parameter), `Sin(2·uv)` emitted `_gpu_sin(2.0 * uv)`, a `vec2` passed to a
+  `float` helper, and a `Block` local assigned `2·uv` was declared `float q;`.
+  The value of an arithmetic operator or of a one-argument function such as
+  `Sin` now has the width of its vector operands: `_gpu_sin2(2.0 * uv)` and
+  `vec2 q;`. A loop `Sum` or `Product` of vectors now has a vector accumulator
+  (`vec2 _tv1 = vec2(0.0);`, not `float _tv1 = 0.0;`). In a GLSL
+  `compileShader()` body, the outputs and the built-in variables of the stage
+  are read with their types: `Sin(gl_FragCoord)` gives
+  `_gpu_sin4(gl_FragCoord)`, and `gl_VertexID + 1` gives
+  `float(gl_VertexID) + 1.0` (GLSL ES does not add an `int` to a `float`). A
+  GLSL qualifier before a declared type (`highp vec2 uv`) no longer hides the
+  type. Complex arithmetic with a vector operand is now refused with a message
+  that names the operand and says that a list of complex numbers has no GPU
+  representation: `q + i` with a `vec2` local `q` emitted `vec2(q, 1.0)`, and
+  `compile([x, 2] + i, { to: 'glsl' })` reported success with
+  `vec2(vec2(x, 2.0), 1.0)`. Each of these shaders failed when the GPU compiled
+  it. (CE-580)
+
+- **A compiled `When(value, condition)` gives no value when the condition is not
+  `True`, as the interpreter does.** On `javascript`, an input that the caller
+  did not supply made some conditions true: `When(5, x ≠ 0)` with `run({})` gave
+  `5`, and so did `When(5, ¬(x > 0))`, `When(5, Heaviside(x) > 0)` and each cell
+  of `When(5, [x ≠ 0, ¬(x > 0)])`. A condition that is not a boolean selected
+  the value: `When(x, c)` with `c = 1` gave `x` on `javascript` and on `python`.
+  A condition of unknown type threw an error for an undecided input. Each of
+  these now gives the absence marker (`NaN`), as `If` already did.
+- **On `javascript`, an equality over a boolean compiles correctly.**
+  `If(c = True, 5, -1)` gave `-1` for `c = true`, because the compiled test
+  checked that `c` was a number. An equality or a comparison over a boolean or
+  string input that the caller did not supply now gives no value, as the
+  interpreter does: `If(c = True, 5, -1)` with `run({})` gave `-1`.
+- **After `ce.restore(cp)`, a symbol first declared after `cp` no longer reads a
+  later value with its old type.** An expression built before the restore that
+  names such a symbol (for example `w + 1` with `w` first used after the
+  checkpoint) now stays inert: it reads no value, also after a later declaration
+  or assignment of the same name. Before, it read the new value while keeping
+  the type and flags of the removed definition. Build the expression again to
+  read the new definition.
+
+- **Assigning a call of a recursive function while an assumption is in force no
+  longer overflows the stack.** With `F` declared `function`,
+  `F := n ↦ \{n = 0: x > 0, F(n - 1)\}` and any assumption (`x > 0`),
+  `ce.assign('y', F(m))` threw "Maximum call stack size exceeded": the
+  assignment reads the type of `F(m)` with the assumptions hidden, and the
+  recursive call typed the body again at each level. It now gives `boolean`, the
+  type an engine with no assumptions gives.
+- **A `wgsl` read of a long list no longer copies the list.** `At(S, i)` with
+  `S` a free list symbol called a helper that copied the whole list into a local
+  variable before it read one element, and a `Sum` over `S_k` copied it again on
+  each pass of its loop. WGSL guarantees only 8192 bytes of local variables per
+  function, so a list of more than 2048 numbers could fail to compile: a 150 ×
+  150 board of 22 500 numbers needs 90 KB. When the copy would need more than
+  8192 bytes (more than 2048 numbers, 1024 points of 2 coordinates, or 512
+  points of 3 or 4), the read now indexes the list where the host declares it:
+  `At(S, i)` compiles to `_gpu_at_S_22500(i)`, a helper whose body reads `S`
+  directly, and a proven index compiles to `S[k - 1]`. Above that size the
+  symbol, or the identifier that `vars` maps it to, must be a `var<storage>`
+  declaration (a `var<private>` has the same 8192-byte guarantee as a local
+  variable, and a `const` array constructor is guaranteed only 2047 elements);
+  the storage kind `'storage-buffer'` is the recommended form. A read of that
+  size that cannot index in place (a `vars` mapping to a struct field such as
+  `u.S`), a body that writes such an input (which needs a local copy of it), and
+  a `Block` local list of more than 8192 bytes now decline, with a message that
+  names `'storage-buffer'`. A shorter list keeps the copying helper, which is
+  also valid when the host declares the list as a parameter or a local of its
+  own function. A written input read with a proven index reads its local copy
+  directly instead of copying it again. The index rules do not change (1-based,
+  a negative index counts from the end, and any other index gives `NaN`). The
+  `glsl` output does not change.
+
+- **The type of `run()` accepts a list argument.** `run({ S: [1, 2, 3] })` for
+  `S: list<real>` worked on the `javascript` target, but did not type-check: the
+  value type of the runner was `number | ComplexResult`. It is now
+  `number | ComplexResult | RunnerListInput`, where `RunnerListInput` is an
+  array of numbers, complex values or such arrays. A typed array
+  (`Float64Array`) is still refused at run time, with a message. (CE-581)
 
 - **A shader compile no longer writes out a chain of user functions whose
   branches all call the function below.** With
   `h_k(x) = \{x > c_k: 2h_{k-1}(x), 3h_{k-1}(x)\}` (or a `Which` whose later
-  conditions call it), the `glsl` and `wgsl` targets wrote the function
-  bodies into the main body, where a call shared by two branches is written
-  once in each, so the shader doubled at each level: 2.5 MB of GLSL and
-  388 s of compilation at depth 14. Such a chain now stays a set of shader
-  functions that call each other.
+  conditions call it), the `glsl` and `wgsl` targets wrote the function bodies
+  into the main body, where a call shared by two branches is written once in
+  each, so the shader doubled at each level: 2.5 MB of GLSL and 388 s of
+  compilation at depth 14. Such a chain now stays a set of shader functions that
+  call each other.
 - **Compiled code gave wrong values for a user function called with a list
-  argument at a parameter that the interpreter binds whole.** With `R`
-  declared `function` and assigned `(V, θ) ↦ [Σ V·[cos θ, -sin θ], …]`,
-  `R([x, y] + [-0.57, 2.8], φ)` gave `NaN` on `javascript` and an empty
-  interval on `interval-js`; the interpreter gives the value. The compiler read
-  the parameter type that the body's use had narrowed (`number`), not the
-  function's own signature. `javascript` now gives the interpreter's value,
-  `glsl` and `wgsl` compile a copy of `R` with a `vec2` parameter, and
-  `interval-js` declines instead of giving a wrong interval.
+  argument at a parameter that the interpreter binds whole.** With `R` declared
+  `function` and assigned `(V, θ) ↦ [Σ V·[cos θ, -sin θ], …]`,
+  `R([x, y] + [-0.57, 2.8], φ)` gave `NaN` on `javascript` and an empty interval
+  on `interval-js`; the interpreter gives the value. The compiler read the
+  parameter type that the body's use had narrowed (`number`), not the function's
+  own signature. `javascript` now gives the interpreter's value, `glsl` and
+  `wgsl` compile a copy of `R` with a `vec2` parameter, and `interval-js`
+  compiles a copy of `R` for the list argument, whose interval contains the
+  interpreter's value.
 - **A recursive function inside `Mod` declined on `interval-js`.**
   `f(x, n) := 1/\operatorname{mod}(f(x, n-1), 1)` with `f(x, 0) = x` declined
   with "an object-domain absent ('missing') position". It compiles again.
@@ -128,17 +470,36 @@
   number refuses. Such a type does not prove a point: the call is now compiled
   for the argument's own type (a list), as the interpreter evaluates it.
   `d(B(A(P(x, y))))` in the Tycho document `ra1p9naofs` compiles on
-  `javascript` and gives the interpreter's value.
+  `javascript`, `interval-js` and `glsl`, and gives the interpreter's value.
+- **On `interval-js`, a user function called with a list argument compiles.**
+  `interval-js` now compiles a copy of the function for the argument's type, as
+  `javascript` does. Before, a call such as `d(B(A(P(x, y))))`, where `B`
+  returns a list of two numbers, declined. A parameter declared as a point still
+  refuses a list, as the interpreter does.
+- **On `glsl` and `wgsl`, a function of a number called with a list of 2 to 4
+  numbers compiles.** With `f(p) := \operatorname{mod}(p, 1) - 0.5`, the call
+  `f([x, y])` declined with "lowers to vec2 but parameter is declared float";
+  the interpreter applies `f` to each element. The shader now calls a wrapper
+  that applies `f` to each component. A point argument still declines.
+- **A recursive function compiled after an evaluation kept a wide type in its
+  body.** With `R(i, x, y)` declared `function` and defined by recursion, the
+  sequence evaluate, compile, evaluate, compile (the order of a plotting host)
+  declined on `interval-js`: "may be a collection at run time", because the
+  recursive call inside the body kept the type it had while the signature was
+  derived. It compiles again (Tycho document `ndqj7hupta`).
+- **A recursive function's type follows a change to a value its body reads.**
+  With `a := 5` and `R(i) := \{i \le 0: 0, R(i-1) + a\}`, the assignment
+  `a := [1, 2]` left `R(n)` typed `number`, while `R(2)` is `[2, 4]`.
 - **On `interval-js`, a user function whose invariant part is subtracted
   computed it on every term.** In `\sum_{i=1}^{16} n(x, y, i)` with
   `n(x, y, i) := \exp(\ldots - F(x, y))`, `F(x, y)` was computed 17 times per
   sample instead of once.
-- **A letter that names a library operator is a free variable in an
-  expression parsed in a scope.** `ce.parse('y=x+N', { scope: ce.createScope() })`
-  had the unknowns `["x", "y"]`, and the same for `D`; read outside the scope,
-  the name `N` found the library operator `N`. It now has `["N", "x", "y"]`,
-  as the expression parsed without a scope, and as `evaluate()` and `subs()`
-  already treated it.
+- **A letter that names a library operator is a free variable in an expression
+  parsed in a scope.** `ce.parse('y=x+N', { scope: ce.createScope() })` had the
+  unknowns `["x", "y"]`, and the same for `D`; read outside the scope, the name
+  `N` found the library operator `N`. It now has `["N", "x", "y"]`, as the
+  expression parsed without a scope, and as `evaluate()` and `subs()` already
+  treated it.
 
 ## 0.171.0 _2026-10-27_
 
@@ -365,15 +726,15 @@
   midpoint of its interval, and would give a number to a symbol typed
   `enclosure`. The other value kinds (`Measurement`, `Quantity`) keep the
   fallback.
-- **The target of an `Assign` outside a `Block` is a free variable.** The
-  target is a write to a symbol of the enclosing scope, so `unknowns` and
+- **The target of an `Assign` outside a `Block` is a free variable.** The target
+  is a write to a symbol of the enclosing scope, so `unknowns` and
   `freeVariables` list it. Before, any `Assign`, `Declare` or `DefineFunction`
   operand made its target local to the node that held it. Example:
-  `y=(k\coloneq2)` (`Equal(y, Assign(k, 2))`) had the free variables `["y"]`
-  and now has `["k", "y"]`, as `Assign(k, 2)` alone always had. A `Block`
-  still keeps the names it assigns or declares local: `(k\coloneq2; kx)` has
-  the free variable `x` only. `If(z > 0, Assign(z, 5), 0)` lists `z`. The
-  `subs()` of such a target is still open (ROADMAP CE-537).
+  `y=(k\coloneq2)` (`Equal(y, Assign(k, 2))`) had the free variables `["y"]` and
+  now has `["k", "y"]`, as `Assign(k, 2)` alone always had. A `Block` still
+  keeps the names it assigns or declares local: `(k\coloneq2; kx)` has the free
+  variable `x` only. `If(z > 0, Assign(z, 5), 0)` lists `z`. The `subs()` of
+  such a target is still open (ROADMAP CE-537).
 
 ### Features
 

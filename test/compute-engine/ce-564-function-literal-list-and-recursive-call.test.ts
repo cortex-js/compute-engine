@@ -22,7 +22,8 @@
  * refused the `vec2` argument at a `float` parameter. GLSL now emits a copy
  * of `R` with a `vec2` parameter. A list argument that no specialization
  * takes is inlined, or the call fails closed: interval-js answered an empty
- * interval.
+ * interval. interval-js now emits a copy of `R` typed by the list argument,
+ * as javascript does (ROADMAP CE-564).
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
@@ -273,12 +274,45 @@ describe('CE-564.4: a list argument at a parameter bound whole', () => {
       expect(result.preamble).toMatch(/fn _fn_R_\w+\(V: vec2f, t: f32\)/);
     });
 
-    test(`interval-js fails closed instead of an empty interval (${route})`, () => {
+    // interval-js compiled the generic definition of `R` against the scalar
+    // arm of its parameter and answered an empty interval, then failed
+    // closed. It now emits a copy of `R` typed by the list argument, as
+    // javascript does (ROADMAP CE-564), and encloses the interpreter's value.
+    test(`interval-js encloses the interpreter's value (${route})`, () => {
       const ce = engineWithR(route);
       const result = compile(ce.box(row as any) as any, {
         to: 'interval-js',
       });
-      expect(result.success).toBe(false);
+      expect(result.success).toBe(true);
+      expect(result.code).toMatch(/_fn_R_vector_real_2__number\(/);
+      const point = result.run!({
+        x: { lo: 1, hi: 1 },
+        y: { lo: 2, hi: 2 },
+        phi: { lo: 0.5, hi: 0.5 },
+      }) as any;
+      expect(point.kind).toBe('interval');
+      expect(point.value.lo).toBeLessThanOrEqual(expected);
+      expect(point.value.hi).toBeGreaterThanOrEqual(expected);
+      expect(point.value.hi - point.value.lo).toBeLessThan(1e-9);
+      // A small box: the enclosure holds the interpreter's value at the
+      // corners and at the centre.
+      const h = 0.01;
+      const box = result.run!({
+        x: { lo: 1 - h, hi: 1 + h },
+        y: { lo: 2 - h, hi: 2 + h },
+        phi: { lo: 0.5 - h, hi: 0.5 + h },
+      }) as any;
+      expect(box.kind).toBe('interval');
+      for (const dx of [-h, 0, h])
+        for (const dy of [-h, 0, h])
+          for (const dp of [-h, 0, h]) {
+            const v = ce
+              .box(row as any)
+              .subs({ x: 1 + dx, y: 2 + dy, phi: 0.5 + dp })
+              .evaluate().re;
+            expect(box.value.lo).toBeLessThanOrEqual(v);
+            expect(box.value.hi).toBeGreaterThanOrEqual(v);
+          }
     });
   }
 

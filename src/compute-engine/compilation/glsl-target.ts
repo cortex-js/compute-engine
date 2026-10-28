@@ -276,6 +276,17 @@ export class GLSLTarget extends GPUShaderTarget {
       constantFold,
     } = options;
 
+    // The type of `type` admits only these two stages, but a JavaScript caller
+    // can pass another one. GLSL ES 3.00 (WebGL 2) has no compute stage, and
+    // this function writes no compute layout, so such a shader is refused.
+    if (type !== 'vertex' && type !== 'fragment')
+      throw new Error(
+        `Could not compile \`compileShader()\`: the GLSL target writes only ` +
+          `vertex and fragment shaders, not a "${String(type)}" shader. ` +
+          `GLSL ES 3.00 (WebGL 2) has no compute stage. For a compute ` +
+          `shader, use the WGSL target.`
+      );
+
     // ES 3.00+ (or desktop 3.30+) only: the emitted code uses `in`/`out` and
     // ES 3.00 builtins. Reject an older version rather than emit constructs the
     // declared header does not support.
@@ -319,12 +330,19 @@ export class GLSLTarget extends GPUShaderTarget {
     // random frames in different statements get DISTINCT counters.
     // The declared inputs and uniforms are framed and bound for the body
     // analysis: nothing but these declarations carries their shader types, and
-    // GLSL references both kinds bare (see `compileShaderBody`).
+    // GLSL references both kinds bare (see `compileShaderBody`). An `out`
+    // variable is a global of the shader too, and GLSL can read it, so a body
+    // statement that reads an output names a declared variable.
     const statements = this.compileShaderBody(
       body,
       type,
       [...inputs, ...uniforms],
-      constantFold
+      constantFold,
+      outputs.map((d) => d.name),
+      outputs,
+      // A desktop version (`330`, `450`) converts integers to floats in an
+      // assignment; a GLSL ES version (`300 es`) converts nothing.
+      /es/i.test(version) ? undefined : versionNumber
     );
     // Over the FULL emission: a helper may be referenced only from inside a
     // hoisted loop (Tycho item 110), and an undeclared helper is a shader that

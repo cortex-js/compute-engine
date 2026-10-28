@@ -3691,7 +3691,13 @@ export class BoxedFunction
               same: (a, b) => a?.toString() === b?.toString(),
             }
           : undefined,
-        this.engine
+        this.engine,
+        // A re-entrant read of a type cell that holds no value is answered
+        // `unknown` (the empty-cell terminator of `cachedValue`). Without
+        // it, a recursive function typed for the first time with the
+        // assumptions hidden typed its body again at each level until the
+        // stack overflowed.
+        BoxedType.unknown
       ) ?? BoxedType.unknown;
     // Record the generation OBSERVED ON ENTRY: a computation that bumped the
     // generation (signature inference does) must leave the fast path closed.

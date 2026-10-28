@@ -166,8 +166,14 @@ describe('ANGULAR UNIT — compiled output agrees with evaluate()', () => {
         inputs: [{ name: 'x', type: 'float' }],
         outputs: [{ name: 'o', type: language === 'glsl' ? 'float' : 'f32' }],
         body: [
-          { variable: 'o', expression: ce.parse('\\sin(x)') },
-          { variable: 'o', expression: ce.parse('\\arctan(x)') },
+          {
+            variable: language === 'glsl' ? 'o' : 'output.o',
+            expression: ce.parse('\\sin(x)'),
+          },
+          {
+            variable: language === 'glsl' ? 'o' : 'output.o',
+            expression: ce.parse('\\arctan(x)'),
+          },
         ],
       });
       expect(shader).toContain('0.017453292');

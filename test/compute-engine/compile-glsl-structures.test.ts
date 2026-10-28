@@ -367,9 +367,10 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       const shader = glsl.compileShader({
         type: 'fragment',
         uniforms: [{ name: 'n', type: 'int' }],
+        outputs: [{ name: '_tv1', type: 'float' }],
         body: [
           {
-            variable: 'float _tv1',
+            variable: '_tv1',
             expression: ce.box(['Add', bigSum, 1] as any),
           },
         ],

@@ -57,7 +57,11 @@ import type {
   EvalContext,
   FactRecord,
 } from './global-types.js';
-import { CheckpointWindow } from './checkpoint-journal.js';
+import {
+  CheckpointWindow,
+  type CheckpointDisposable,
+} from './checkpoint-journal.js';
+import type { Scope } from './types-evaluation.js';
 import { clearClauseProvenance } from './clause-identity.js';
 import {
   _sequenceRegistrySnapshot,
@@ -548,7 +552,7 @@ export function restoreCheckpoint(
     //    order-independent (first-write-wins makes each carry the value as of
     //    window open), so only the window order matters.
     const touched = new Set<object>();
-    const created: { dispose(): void }[] = [];
+    const created: CheckpointDisposable[] = [];
     for (const w of windows) {
       for (const owner of w.owners()) touched.add(owner);
       for (const half of w.created()) created.push(half);
@@ -579,8 +583,27 @@ export function restoreCheckpoint(
     //    be reinstated by an older one. Skipping this leaks the
     //    configuration-change listener a constant's definition subscribes on
     //    construction, for the engine's lifetime.
+    //    A half whose home scope is still on the engine's scope chain is
+    //    also marked `_rewound`: it named a symbol the host declared (or a
+    //    free symbol boxed for the first time), and the host can declare the
+    //    same name again. A symbol bound to it resolves to no binding, so it
+    //    reads no value and counts as unknown, rather than read the later
+    //    definition's value with this half's type (`bindingInContext`,
+    //    `boxed-expression/binders.ts`). A half installed in a scope created
+    //    in the window (a binder such as `Sum`, a `Block` run) is not
+    //    marked: the expression that holds that scope reads it by name when
+    //    it runs, as a block body reads the locals of its current run.
+    const liveScopes = new Set<object>();
+    for (const context of ce._evalContextStack)
+      for (let s: Scope | null = context.lexicalScope; s; s = s.parent)
+        liveScopes.add(s);
     for (const half of created) {
       try {
+        if (
+          half._checkpointHome !== undefined &&
+          liveScopes.has(half._checkpointHome)
+        )
+          half._rewound = true;
         half.dispose();
       } catch (error) {
         failure ??= { error };

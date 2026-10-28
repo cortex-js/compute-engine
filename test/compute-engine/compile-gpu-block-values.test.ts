@@ -232,9 +232,10 @@ describe.each(['glsl', 'wgsl'] as const)(
         glslTarget.compileShader({
           type: 'fragment',
           uniforms: [{ name: 'x', type: 'float' }],
+          outputs: [{ name: 'fragColor', type: 'vec4' }],
           body: [
             {
-              variable: 'gl_FragColor.r',
+              variable: 'fragColor.r',
               expression: ce.box([
                 'Block',
                 ['Declare', 'q'],
@@ -363,9 +364,10 @@ describe('GLSL expression routes', () => {
     const shader = glsl.compileShader({
       type: 'fragment',
       uniforms: [{ name: 'x', type: 'float' }],
+      outputs: [{ name: 'fragColor', type: 'vec4' }],
       body: [
         {
-          variable: 'gl_FragColor.r',
+          variable: 'fragColor.r',
           expression: ce.expr([
             'Add',
             ['Block', ['Declare', 'q'], ['Assign', 'q', 2], 'q'],
@@ -377,7 +379,7 @@ describe('GLSL expression routes', () => {
     });
     expectValidShape(shader);
     expect(shader).toMatch(
-      /float _tv1;\n\s*{\n\s*float q;\n\s*q = 2\.0;\n\s*_tv1 = q;\n\s*}\n\s*gl_FragColor\.r = x \+ _tv1;/
+      /float _tv1;\n\s*{\n\s*float q;\n\s*q = 2\.0;\n\s*_tv1 = q;\n\s*}\n\s*fragColor\.r = x \+ _tv1;/
     );
   });
 });

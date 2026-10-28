@@ -334,9 +334,14 @@ export type {
   CompileDiagnosticKind,
   StorageHint,
   StorageKind,
+  StorageBufferBinding,
+  StorageBufferLayout,
   LanguageTarget,
   TargetSource,
   CompiledFunction,
+  FieldFunctionOptions,
+  FieldFunctionParameter,
+  FieldFunctionResult,
 } from './compilation/types.js';
 export {
   CompileDeclineError,
@@ -2040,6 +2045,26 @@ export class ComputeEngine implements IComputeEngine {
         `withStepBudget: \`steps\` must be a non-negative integer no larger than Number.MAX_SAFE_INTEGER, got ${String(steps)}`
       );
     return this._withBudget({ steps, label }, fn);
+  }
+
+  /** See `IComputeEngine.timeRemaining`. Unlike the internal
+   * `_timeRemaining`, a spent step budget does not make it `0`: the two
+   * conditions are read separately (`stepBudgetSpent`). */
+  get timeRemaining(): number {
+    const frame = this._runtimeState.deadlineFrame;
+    return frame === undefined
+      ? Number.POSITIVE_INFINITY
+      : frame.at - Date.now();
+  }
+
+  /** See `IComputeEngine.stepBudgetSpent`. The frame lists the budget of
+   * each enclosing step-budget span, outermost first; any spent one cancels
+   * the work of the span. */
+  get stepBudgetSpent(): boolean {
+    return (
+      this._runtimeState.deadlineFrame?.budgets?.some((b) => b.left < 0) ??
+      false
+    );
   }
 
   /**

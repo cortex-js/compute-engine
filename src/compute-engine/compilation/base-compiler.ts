@@ -12065,8 +12065,12 @@ export class BaseCompiler {
     // It reaches this point only on a direct custom target, whose own `var`
     // hook knows nothing of `vars`: it is emitted by name below, like a free
     // symbol.
+    // A symbol bound to a definition that a checkpoint restore marked
+    // `_rewound` is inert: it has no value, also when a later definition of
+    // the same name has one, so it is not folded either (ROADMAP CE-586).
     const folded =
-      target.varsKeys?.has(s) === true
+      target.varsKeys?.has(s) === true ||
+      (expr.valueDefinition as { _rewound?: true } | undefined)?._rewound
         ? undefined
         : BaseCompiler.tryFoldKnownSymbol(expr.engine, s, target);
     if (folded !== undefined) {
@@ -16416,7 +16420,36 @@ export class BaseCompiler {
               `tell the two apart.`
           );
         // The conditions compile first, as in the scalar case below.
-        const conds = BaseCompiler.compile(args[1], target);
+        //
+        // A literal list of scalar conditions compiles each cell to `true`
+        // exactly when that condition is decided true (`compileGuardTest`),
+        // as the scalar case below selects. Its plain code answered `true`
+        // for an input the caller did not supply (`undefined !== 0`), so
+        // `When(5, [x ≠ 0, ¬(x > 0)])` gave `[5, 5]` where the interpreter
+        // has no value in either cell (ROADMAP CE-569).
+        const conds =
+          isFunction(args[1], 'List') &&
+          args[1].ops.every(
+            (cell) =>
+              cell.type.matches('boolean') &&
+              !BaseCompiler.mayBeCollectionCondition(cell.type.type)
+          )
+            ? `[${args[1].ops
+                .map((cell) => {
+                  // An ordering relation over symbols and number literals
+                  // keeps its plain code: it is `false` when undecided.
+                  const d = BaseCompiler.conditionDecidability(
+                    cell,
+                    true,
+                    target
+                  );
+                  return d === null ||
+                    BaseCompiler.isFalsyWhenUndecided(d, target)
+                    ? BaseCompiler.compile(cell, target)
+                    : BaseCompiler.compileGuardTest(cell, target);
+                })
+                .join(', ')}]`
+            : BaseCompiler.compile(args[1], target);
         const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
         // The absence at each position is decided from what one position
         // holds — a list element, or the whole value — not from the node's
@@ -16481,11 +16514,122 @@ export class BaseCompiler {
       // condition compiles first, the order of the CSE harvest walk
       // (`operandEmissionOrder`, `cse.ts`), so the value arm can read a
       // temporary that the condition binds.
-      const cond = BaseCompiler.guardCondition(args[1], target);
+      //
+      // The value is selected only when the condition is decided TRUE (see
+      // "Branch conditions that cannot be decided"). A condition read by its
+      // value (a boolean input `c`, a call) must be exactly `true`: before,
+      // `When(x, c)` with `c = 1` selected `x`. A condition that is false
+      // or undecided gives the same masked value, so the plain conditional
+      // expression is enough when the plain code of the condition is falsy
+      // whenever the condition is undecided (`isFalsyWhenUndecided`): an
+      // ordering relation between symbols and number literals, or an
+      // `And`/`Or` of them. Any other condition is tested for being decided
+      // first. Before, `When(5, x ≠ 0)` answered `5` for an `x` the caller
+      // did not supply (`undefined !== 0` is `true`), where the interpreter
+      // has no value (ROADMAP CE-569).
+      //
+      // A condition read by its value that is not provably boolean-valued
+      // (an undeclared `b`, `x/y`) takes the same strict test: a value that
+      // is not a boolean selects nothing, as in `If`, and the interpreter
+      // holds such a `When` unevaluated. Before, the run-time guard of the
+      // target (`_SYS.cond`) raised for it.
+      const decidability = BaseCompiler.conditionDecidability(
+        args[1],
+        target.bindExpr !== undefined,
+        target
+      );
+      if (
+        decidability === null ||
+        BaseCompiler.isFalsyWhenUndecided(decidability, target)
+      ) {
+        const cond = BaseCompiler.guardCondition(args[1], target);
+        const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
+        return `((${cond}) ? (${val}) : ${nan})`;
+      }
+      const compiledCond = BaseCompiler.compileExactCondition(
+        args[1],
+        decidability,
+        target
+      );
       const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
-      return `((${cond}) ? (${val}) : ${nan})`;
+      // A condition read by its value: the value is selected only when the
+      // condition is exactly `true` (`false` under a negation). The false
+      // and the undecided answers are the same masked value, so one strict
+      // comparison is enough, and the condition is evaluated once.
+      if (compiledCond.conjuncts === 'value')
+        return `((${compiledCond.code}) === ${
+          compiledCond.negate ? 'false' : 'true'
+        } ? (${val}) : ${nan})`;
+      return BaseCompiler.exactSelect(
+        compiledCond,
+        `(${val})`,
+        nan,
+        nan,
+        target
+      );
     }
     return undefined;
+  }
+
+  /**
+   * Is the plain JavaScript code of the branch condition `node` falsy
+   * whenever the condition is undecided?
+   *
+   * An ordering relation (`<`, `≤`, `>`, `≥`) whose operands are number
+   * literals and NUMERIC inputs that compile to a bare read of the vars
+   * object (`_.x`) is `false` when an operand is `undefined` (an input the
+   * caller did not supply): `undefined < 1` is `false`. Other operands do
+   * not qualify:
+   * - an operand computed from an input: arithmetic can turn `undefined`
+   *   into a number (`_SYS.pow(undefined, 0)` and
+   *   `_SYS.heaviside(undefined)` are `1`). An ASSIGNED symbol, and a
+   *   symbol that the `vars` option maps to code, compile to such a
+   *   computation, so the compiled code of each symbol is checked;
+   * - a string input: the comparison reads `_SYS.ct(_.s)`, and an
+   *   unsupplied `s` becomes the string `'undefined'`, which compares like
+   *   any other string;
+   * - a boolean input, or an input of unknown type, which can be a string.
+   *
+   * A NaN operand gives the IEEE value,
+   * which is the decided answer. An `And` or an `Or` of such relations,
+   * compiled to `&&` and `||`, is then falsy when its Kleene value is
+   * undecided: an undecided operand reads as `false`, which only a `true`
+   * operand of an `Or` overrides, and the Kleene `Or` is `true` then too.
+   *
+   * Not such a condition: a negation (`!undefined` is `true`), `Equal` and
+   * `NotEqual` (`undefined !== 0` is `true`, `undefined === undefined` is
+   * `true`), and a condition read by its VALUE (a boolean input, a call): a
+   * caller can supply a value that is not a boolean, such as `1`, which is
+   * truthy, where the interpreter has no value.
+   */
+  private static isFalsyWhenUndecided(
+    node: ConditionNode,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (node.negate) return false;
+    const t = node.test;
+    if (t.kind === 'operands')
+      return (
+        isFunction(t.expr) &&
+        ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(
+          t.expr.operator
+        ) &&
+        t.expr.ops.every(
+          (op) =>
+            isNumber(op) ||
+            (isSymbol(op) &&
+              op.type.matches('number') &&
+              BaseCompiler.isVarsObjectRead(
+                BaseCompiler.compile(op, target),
+                target
+              ))
+        )
+      );
+    if (t.kind === 'connective')
+      return t.operands.every((n) =>
+        BaseCompiler.isFalsyWhenUndecided(n, target)
+      );
+    return false;
   }
 
   /**
@@ -27549,7 +27693,10 @@ export class BaseCompiler {
    * constructor guard, the block-local type hint — need THIS one: a 1- or
    * 5-element tuple is still an aggregate even though no `vecN` fits it.
    */
-  static aggregateComponentCount(expr: Expression | null): number | undefined {
+  static aggregateComponentCount(
+    expr: Expression | null,
+    memo?: Map<Expression, number | undefined>
+  ): number | undefined {
     if (expr === null) return undefined;
     if (isFunction(expr, 'Tuple') || isFunction(expr, 'List')) return expr.nops;
     // A value typed as a list or a tuple is a collection, even when it is
@@ -27575,8 +27722,160 @@ export class BaseCompiler {
       if (t.kind === 'list' && t.dimensions?.length === 1)
         return t.dimensions[0];
     }
+    // A selection has the width of its arms, and a `Block` the width of its
+    // value (its last operand). A `Block` that ends with one of its locals
+    // has the width of the last value assigned to that local, because the
+    // frame of the block's locals exists only while the block compiles.
+    // Arms with no width are not read; arms of different widths give none.
+    if (
+      !collectionTyped &&
+      (isFunction(expr, 'If') ||
+        isFunction(expr, 'Which') ||
+        isFunction(expr, 'Block'))
+    ) {
+      memo ??= new Map();
+      if (memo.has(expr)) return memo.get(expr);
+      memo.set(expr, undefined);
+      let values: ReadonlyArray<Expression>;
+      if (expr.operator === 'Block') {
+        let last = expr.ops[expr.nops - 1];
+        if (last !== undefined && isSymbol(last)) {
+          const local = last.symbol;
+          for (const op of expr.ops)
+            if (isFunction(op, 'Assign') && isSymbol(op.op1, local))
+              last = op.op2;
+            else if (isFunction(op, 'Declare') && isSymbol(op.op1, local)) {
+              const v = BaseCompiler.declareValueOperand(op.ops);
+              if (v !== undefined) last = v;
+            }
+        }
+        values = last === undefined ? [] : [last];
+      } else values = BaseCompiler.liveSelectionArms(expr);
+      let width: number | undefined;
+      for (const v of values) {
+        const n = BaseCompiler.aggregateComponentCount(v, memo);
+        if (n === undefined) continue;
+        if (width !== undefined && width !== n) {
+          width = undefined;
+          break;
+        }
+        width = n;
+      }
+      memo.set(expr, width);
+      return width;
+    }
+    // A `Sum` or a `Product` has the width of its body, read with each index
+    // as a scalar (an index is an integer loop counter): the loop adds or
+    // multiplies the values component by component.
+    if (
+      !collectionTyped &&
+      (isFunction(expr, 'Sum') || isFunction(expr, 'Product')) &&
+      expr.nops >= 2
+    ) {
+      memo ??= new Map();
+      if (memo.has(expr)) return memo.get(expr);
+      memo.set(expr, undefined);
+      const indices = expr.ops
+        .slice(1)
+        .map((limits) =>
+          isFunction(limits, 'Limits') && isSymbol(limits.op1)
+            ? limits.op1.symbol
+            : undefined
+        );
+      const width = indices.every((i) => i !== undefined)
+        ? BaseCompiler.withRealLoopIndices(indices as string[], () =>
+            BaseCompiler.aggregateComponentCount(expr.op1, memo)
+          )
+        : undefined;
+      memo.set(expr, width);
+      return width;
+    }
+    // An element-wise operator over a name whose width only a shape frame
+    // gives (a shader input `vec2 uv`, a block local). The engine does not
+    // know that width, so it types `2·uv` or `Sin(uv)` as a number. The
+    // value has the width of its operands, as the emission gives it:
+    // `2.0 * uv` and `_gpu_sin2(uv)` are `vec2` values. When two operands
+    // have different widths, an operand is complex, or an operand is a
+    // matrix or an array with no width, no width is given. `memo` keeps the
+    // answer for each operand of one walk, so that a subexpression shared by
+    // several operands is not walked again.
+    //
+    // The engine type of such a value can be a number, or a wider type such
+    // as `any` or `number | vector<2>` (a `Block` local declared `any` or
+    // `real` and assigned a point), so only a list or a tuple type, which
+    // gives its own count above, skips this walk. `Abs` of a point, or of a
+    // list of points, is not element-wise: it compiles to `Norm`, one length
+    // per point (the `Abs` rewrite in `compileExpr`), so it has no width here.
+    if (
+      isFunction(expr) &&
+      BaseCompiler.ELEMENTWISE_WIDTH_OPERATORS.has(expr.operator) &&
+      !collectionTyped &&
+      !(
+        expr.operator === 'Abs' &&
+        expr.nops === 1 &&
+        (isTuple(expr.op1) ||
+          BaseCompiler.isUnionOfPoints(expr.op1) ||
+          isGatedPoint(expr.op1) ||
+          isPointListValue(expr.op1) ||
+          isGatedPointList(expr.op1))
+      )
+    ) {
+      memo ??= new Map();
+      if (memo.has(expr)) return memo.get(expr);
+      let width: number | undefined;
+      for (const op of expr.ops) {
+        const n = BaseCompiler.isComplexValued(op)
+          ? -1
+          : BaseCompiler.aggregateComponentCount(op, memo);
+        if (n === undefined) {
+          if (!BaseCompiler.isNonScalarByShapeAlone(op)) continue;
+        } else if (n >= 0 && (width === undefined || width === n)) {
+          width = n;
+          continue;
+        }
+        width = undefined;
+        break;
+      }
+      memo.set(expr, width);
+      return width;
+    }
     return undefined;
   }
+
+  /**
+   * The operators whose value has the width of their vector operands, with
+   * a scalar operand applied to each component: the arithmetic operators and
+   * the one-argument functions that the shader targets apply to each
+   * component (`sin(vec2)` is a `vec2`). Read by `aggregateComponentCount`.
+   */
+  static readonly ELEMENTWISE_WIDTH_OPERATORS: ReadonlySet<string> = new Set([
+    'Add',
+    'Subtract',
+    'Multiply',
+    'Divide',
+    'Negate',
+    'Power',
+    'Square',
+    'Sqrt',
+    'Exp',
+    'Ln',
+    'Abs',
+    'Sign',
+    'Floor',
+    'Ceil',
+    'Round',
+    'Truncate',
+    'Fract',
+    'Sin',
+    'Cos',
+    'Tan',
+    'Arcsin',
+    'Arccos',
+    'Arctan',
+    'Sinh',
+    'Cosh',
+    'Tanh',
+  ]);
 
   /**
    * Whether `expr` is provably NOT a shader scalar — it lowers to a `vecN`, an
@@ -27599,6 +27898,15 @@ export class BaseCompiler {
   static isNonScalarShape(expr: Expression | null): boolean {
     if (expr === null) return false;
     if (BaseCompiler.aggregateComponentCount(expr) !== undefined) return true;
+    return BaseCompiler.isNonScalarByShapeAlone(expr);
+  }
+
+  /**
+   * The part of `isNonScalarShape` that does not count components: a
+   * `Matrix`, a value with a `list` type that has no single count, or a
+   * collection value.
+   */
+  private static isNonScalarByShapeAlone(expr: Expression): boolean {
     if (isFunction(expr, 'Matrix')) return true;
     const t = compilationType(expr);
     // A `list` type that `aggregateComponentCount` declined to size: either
@@ -29195,9 +29503,16 @@ export class BaseCompiler {
    * cost is not measurable, so there is nothing to gain by exempting the types
    * that exclude NaN.
    *
-   * An operand that does not hold a number — a string, a list — is never the
-   * NaN value, and neither is a complex one: the JavaScript target represents
-   * it as a `{ re, im }` object. Neither needs a test.
+   * An operand that does not hold a number — a boolean, a string — is never
+   * the NaN value, but a SYMBOL of that type is an input the caller can leave
+   * out, and `undefined === true` is an ordinary `false`. So such a symbol
+   * qualifies too, and gets only the absence test (`operandDecidedConjuncts`
+   * emits `!== undefined` for a read of the vars object, and no NaN test for
+   * it). Without it, `If(c = True, 5, -1)` took the else arm for an
+   * unsupplied `c`, where the interpreter has no value (ROADMAP CE-569). Any
+   * other operand that does not hold a number needs no test, and neither does
+   * a complex one: the JavaScript target represents it as a `{ re, im }`
+   * object.
    *
    * The one numeric exemption is a name the emitted code itself binds to the
    * successive values of a range with a finite literal start and step
@@ -29209,7 +29524,8 @@ export class BaseCompiler {
     target?: CompileTarget<Expression>
   ): boolean {
     const t = expr.type;
-    if (!t || !t.couldMatch('number')) return false;
+    if (!t || !t.couldMatch('number'))
+      return isSymbol(expr) && !BaseCompiler.isComplexValued(expr);
     if (isSymbol(expr) && isDecidedLoopIndex(expr.symbol, target?.boundVars))
       return false;
     return !BaseCompiler.isComplexValued(expr);
@@ -33230,6 +33546,21 @@ export class BaseCompiler {
     return name;
   }
 
+  /**
+   * The emitted name of a helper that a target adds to the registry beside
+   * the user functions (for example the element-wise wrapper of a shader
+   * call). The name comes from the same allocator as the user functions, so
+   * it never collides with another emitted definition or with a name the
+   * expression uses. `key` must not be the id of a user function: build it
+   * from the function id and a separator that no symbol name contains (`#`).
+   */
+  static registryHelperName(
+    registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
+    key: string
+  ): string {
+    return BaseCompiler.registryLocalName(registry, '_fn_', key);
+  }
+
   private static userFunctionName(
     registry: NonNullable<CompileTarget<Expression>['userFunctions']>,
     id: string
@@ -33765,19 +34096,44 @@ export class BaseCompiler {
       );
     }
 
-    const specialized =
-      literal === undefined
-        ? undefined
-        : BaseCompiler.trySpecializedUserCall(
-            engine,
-            h,
-            literal,
-            args,
-            target,
-            node === undefined
-              ? undefined
-              : BaseCompiler._prefixCallOverrides.get(node)
-          );
+    // A copy typed by the arguments has no run-time test of a declared
+    // parameter type. On interval-js the test is `_IA.checkedCall`, emitted
+    // only on the ordinary route below, so a call that needs it does not
+    // take a copy.
+    //
+    // On interval-js, a copy whose body does not compile with the parameter
+    // typed by the argument does not end the compilation of the call: the
+    // definitions added by the attempt are removed, and the call takes the
+    // routes below, which can inline it (the substitution folds `[a, b][1]`
+    // to `a`). A cancellation propagates.
+    let specialized: TargetSource | undefined;
+    if (
+      literal !== undefined &&
+      !intervalChecks.some((checks) => checks.length > 0)
+    ) {
+      const registry = target.userFunctions;
+      const definedBefore =
+        target.language === 'interval-javascript' && registry !== undefined
+          ? new Set(registry.defs.keys())
+          : undefined;
+      try {
+        specialized = BaseCompiler.trySpecializedUserCall(
+          engine,
+          h,
+          literal,
+          args,
+          target,
+          node === undefined
+            ? undefined
+            : BaseCompiler._prefixCallOverrides.get(node)
+        );
+      } catch (e) {
+        if (e instanceof Error && e.name === 'CancellationError') throw e;
+        if (definedBefore === undefined || registry === undefined) throw e;
+        BaseCompiler.removeDefinitionsAddedSince(registry, definedBefore);
+        specialized = undefined;
+      }
+    }
     if (specialized !== undefined) return specialized;
 
     // A POINT bound to an UNTYPED parameter never goes by reference: the
@@ -36715,7 +37071,7 @@ export class BaseCompiler {
     };
   }
 
-  private static userFunctionParamsAreScalar(
+  static userFunctionParamsAreScalar(
     engine: ComputeEngine,
     h: string
   ): boolean {
@@ -36903,7 +37259,7 @@ export class BaseCompiler {
    * shader computes in floats, and an argument with a complex element is
    * refused through `isComplexValued`.
    */
-  private static isShaderVectorListArg(a: Expression): boolean {
+  static isShaderVectorListArg(a: Expression): boolean {
     if (BaseCompiler.isSinglePointArg(a)) return false;
     if (BaseCompiler.isComplexValued(a)) return false;
     const t = resolveTypeForCompilation(a.type.type);
@@ -37496,6 +37852,11 @@ export class BaseCompiler {
       admits
     );
     if (inlined === undefined) return undefined;
+    // The body is written at this call site, with no common-subexpression
+    // pass of its own (`CompileTarget.checkDefinitionBody`). Asked here,
+    // where the body is compiled, and not in `inlinedUserFunctionCall`,
+    // which also answers questions about calls that are not compiled.
+    target.checkDefinitionBody?.(inlined, target, false);
     // The generated code bakes this definition, as an emitted one would.
     target.symbolDeps?.add(h);
     const inlining = (target.userFunctions!.inlining ??= new Set<string>());
@@ -37844,8 +38205,59 @@ export class BaseCompiler {
    * A head the caller overrode (`CompileTarget.unrollSkipHeads`) is left as
    * written, and so is everything under it: the caller's implementation
    * replaces the emission and receives the node's own operands.
+   *
+   * An expression can share a node between several parents, and a walk of
+   * every path takes a time exponential in the depth (ROADMAP CE-584). A
+   * node that the walk leaves unchanged is recorded in `budget.unchanged`,
+   * for its `enclosing` record, and the walk does not visit it again. The
+   * record is read and written only when `onPath` is empty: a smaller
+   * `onPath` or a larger `budget.left` could let a call below the node be
+   * substituted, and `budget.left` only decreases.
    */
   private static inlineCollectionValuedCalls(
+    engine: ComputeEngine,
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    onPath: Set<string>,
+    budget: {
+      left: number;
+      unchanged?: Map<EnclosingDefinition | undefined, Set<Expression>>;
+    },
+    enclosing?: EnclosingDefinition,
+    bodyType?: string
+  ): Expression {
+    if (!isFunction(expr)) return expr;
+    if (onPath.size > 0)
+      return BaseCompiler.inlineCollectionValuedCallsOnce(
+        engine,
+        expr,
+        target,
+        onPath,
+        budget,
+        enclosing,
+        bodyType
+      );
+    budget.unchanged ??= new Map();
+    let unchanged = budget.unchanged.get(enclosing);
+    if (unchanged === undefined)
+      budget.unchanged.set(enclosing, (unchanged = new Set()));
+    if (unchanged.has(expr)) return expr;
+    const result = BaseCompiler.inlineCollectionValuedCallsOnce(
+      engine,
+      expr,
+      target,
+      onPath,
+      budget,
+      enclosing,
+      bodyType
+    );
+    if (result === expr) unchanged.add(expr);
+    return result;
+  }
+
+  /** One step of {@link inlineCollectionValuedCalls}, which it calls for
+   * each operand. */
+  private static inlineCollectionValuedCallsOnce(
     engine: ComputeEngine,
     expr: Expression,
     target: CompileTarget<Expression>,
@@ -38528,6 +38940,22 @@ export class BaseCompiler {
     const registry = target.userFunctions;
     if (registry?.lowering)
       return registry.lowering.call({ id: h, name, args, target });
+    // On interval-js a list is an array of intervals, which only the
+    // target's collection spelling (`compileCollectionValue`) writes: a
+    // list literal `[x, y]` has no ordinary lowering there. The call
+    // emitter spells each argument that way when no parameter is scalar,
+    // which is the case here: an interval-js copy binds a list whole.
+    if (target.language === 'interval-javascript')
+      return BaseCompiler.emitUserFunctionCall(
+        name,
+        args,
+        target,
+        args.map(() => false),
+        false,
+        false,
+        [],
+        absentChecks
+      );
     return `${name}(${args
       .map((a, i) => {
         return BaseCompiler.presentCheckedCode(
@@ -38562,11 +38990,25 @@ export class BaseCompiler {
       }
     | undefined {
     const registry = target.userFunctions;
+    // On interval-js, a copy is made for one case only: a list of real
+    // numbers that the interpreter binds WHOLE to a parameter whose element
+    // type is open (the branch that sets `wholeListArgument` below). The
+    // generic definition compiles the body against the open parameter type,
+    // and a nested call can then refuse it: with `d(p) := … r(p) …` and `r`
+    // typed by index reads, the parameter of `d` is inferred
+    // `dictionary<any> | indexed_collection<any>`, which `r` refuses. The
+    // copy typed by the argument (`vector<2>`) compiles, and its parameter
+    // is the array of intervals that a list is on this target, which is
+    // also how the generic definition receives a list bound whole
+    // (`compile-interval-collections.test.ts`). Scalar, point and complex
+    // arguments keep the generic definition on interval-js. ROADMAP CE-564.
+    const interval = target.language === 'interval-javascript';
     if (
       !registry ||
       (target.language !== 'javascript' &&
         target.language !== 'glsl' &&
-        target.language !== 'wgsl')
+        target.language !== 'wgsl' &&
+        !interval)
     )
       return undefined;
     if (
@@ -38591,6 +39033,7 @@ export class BaseCompiler {
     let pointArgument = false;
     let listArgument = false;
     let complexArgument = false;
+    let wholeListArgument = false;
     // How the interpreter binds a LIST argument at an untyped parameter
     // depends on the definition as a whole (`paramsAreScalar`): when every
     // parameter is scalar or untyped the call is BROADCAST over the list,
@@ -38639,6 +39082,7 @@ export class BaseCompiler {
         declared === 'value';
       let t = a.type.type;
       if (BaseCompiler.isSinglePointArg(a)) {
+        if (interval) return undefined;
         pointArgument = true;
         const width = BaseCompiler.aggregateComponentCount(a);
         if (width === undefined) return undefined;
@@ -38694,16 +39138,17 @@ export class BaseCompiler {
           // it. A parameter declared `real` rejects the `complex` type
           // below, so that call still declines: the declaration is a
           // contract.
-          if (target.language === 'javascript') return undefined;
+          if (target.language === 'javascript' || interval) return undefined;
           t = 'complex';
           complexArgument = true;
         } else t = isSubtype(t, 'boolean') ? 'boolean' : 'number';
       } else if (
-        target.language === 'javascript' &&
+        (target.language === 'javascript' || interval) &&
         bindsListsWhole &&
         BaseCompiler.isRealListArg(a) &&
         BaseCompiler.paramElementTypeIsOpen(engine, h, i)
       ) {
+        wholeListArgument = true;
         // A LIST of real numbers that the interpreter binds WHOLE (the
         // definition declares or infers a collection parameter, so no
         // parameter list is all scalar). This branch applies only when the
@@ -38770,6 +39215,7 @@ export class BaseCompiler {
         t = bindsListsWhole ? a.type.type : 'number';
       } else if (
         target.language !== 'javascript' &&
+        !interval &&
         bindsListsWhole &&
         BaseCompiler.paramElementTypeIsOpen(engine, h, i) &&
         BaseCompiler.isShaderVectorListArg(a)
@@ -38865,6 +39311,9 @@ export class BaseCompiler {
       narrower = true;
     }
     if (listArgument && !pointArgument) return undefined;
+    // On interval-js, only a call with a list bound whole takes a copy (see
+    // the comment on `interval` above).
+    if (interval && !wholeListArgument) return undefined;
     const hasPointProof = pointWidths.some((w) => w !== undefined);
     if (!narrower && !hasPointProof) return undefined;
     if (BaseCompiler.isContradictedScalarDeclaration(engine.function(h, args)))
@@ -41509,6 +41958,7 @@ export class BaseCompiler {
       declaredVarTypes: BaseCompiler.literalDeclaredParamTypes(literal),
     };
     BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
+    bodyTarget.checkDefinitionBody?.(bodyExpr, bodyTarget, true);
     return { params, bodyExpr, bodyTarget };
   }
 

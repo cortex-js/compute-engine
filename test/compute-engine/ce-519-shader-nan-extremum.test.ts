@@ -23,6 +23,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 
 const ce = new ComputeEngine();
 ce.declare('v', 'vector<real^3>');
+// `vector<3>` has `number` cells, which can be NaN: the vector operand of the
+// helper tests. The cells of `v` are finite for certain, so the operations on
+// `v` and on finite scalars call the built-ins (CE-565.2).
+ce.declare('n', 'vector<3>');
 
 const ROOT = ['Sqrt', ['Subtract', 1, ['Square', 'x']]];
 
@@ -74,16 +78,19 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
   });
 
   it('a vector Clamp calls the vector helper, with scalar bounds broadcast', () => {
+    expect(shader(['Clamp', 'n', 0, 1], 'glsl').code).toBe(
+      '_gpu_clamp3(n, vec3(0.0), vec3(1.0))'
+    );
+    expect(shader(['Clamp', 'n', 0, 1], 'wgsl').code).toBe(
+      '_gpu_clamp3(n, vec3f(0.0), vec3f(1.0))'
+    );
     expect(shader(['Clamp', 'v', 0, 1], 'glsl').code).toBe(
-      '_gpu_clamp3(v, vec3(0.0), vec3(1.0))'
+      'min(max(v, vec3(0.0)), vec3(1.0))'
     );
-    expect(shader(['Clamp', 'v', 0, 1], 'wgsl').code).toBe(
-      '_gpu_clamp3(v, vec3f(0.0), vec3f(1.0))'
-    );
-    expect(shader(['Clamp', 'v', 0, 1], 'glsl').preamble).toContain(
+    expect(shader(['Clamp', 'n', 0, 1], 'glsl').preamble).toContain(
       'return mix(mix(mix(min(max(x, lo), hi), hi, _gpu_isnan3(hi)), lo, _gpu_isnan3(lo)), x, _gpu_isnan3(x));'
     );
-    expect(shader(['Clamp', 'v', 0, 1], 'wgsl').preamble).toContain(
+    expect(shader(['Clamp', 'n', 0, 1], 'wgsl').preamble).toContain(
       'return select(select(select(min(max(x, lo), hi), hi, _gpu_isnan3(hi)), lo, _gpu_isnan3(lo)), x, _gpu_isnan3(x));'
     );
   });
@@ -93,11 +100,14 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
       expect(shader(['ElementMax', 'x', ROOT], to).code).toBe(
         '_gpu_max(x, sqrt(-(x * x) + 1.0))'
       );
-    expect(shader(['ElementMin', 0.5, 'v'], 'glsl').code).toBe(
-      '_gpu_min3(vec3(0.5), v)'
+    expect(shader(['ElementMin', 0.5, 'n'], 'glsl').code).toBe(
+      '_gpu_min3(vec3(0.5), n)'
+    );
+    expect(shader(['ElementMin', 0.5, 'n'], 'wgsl').code).toBe(
+      '_gpu_min3(vec3f(0.5), n)'
     );
     expect(shader(['ElementMin', 0.5, 'v'], 'wgsl').code).toBe(
-      '_gpu_min3(vec3f(0.5), v)'
+      'min(vec3f(0.5), v)'
     );
   });
 
@@ -114,8 +124,8 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
   });
 
   it('the vector helpers test each component and return a NaN operand', () => {
-    const g = shader(['ElementMax', 2, 'v', 'v'], 'glsl');
-    expect(g.code).toBe('_gpu_max3(_gpu_max3(vec3(2.0), v), v)');
+    const g = shader(['ElementMax', 2, 'n', 'n'], 'glsl');
+    expect(g.code).toBe('_gpu_max3(_gpu_max3(vec3(2.0), n), n)');
     expect(g.preamble).toContain(
       'bvec3 _gpu_isnan3(vec3 x) {\n  return greaterThan(floatBitsToUint(x) & 0x7FFFFFFFu, uvec3(0x7F800000u));\n}'
     );
@@ -126,8 +136,8 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
     expect(g.preamble.indexOf('_gpu_isnan3(vec3 x)')).toBeLessThan(
       g.preamble.indexOf('_gpu_max3(vec3 a')
     );
-    const w = shader(['ElementMax', 2, 'v', 'v'], 'wgsl');
-    expect(w.code).toBe('_gpu_max3(_gpu_max3(vec3f(2.0), v), v)');
+    const w = shader(['ElementMax', 2, 'n', 'n'], 'wgsl');
+    expect(w.code).toBe('_gpu_max3(_gpu_max3(vec3f(2.0), n), n)');
     expect(w.preamble).toContain(
       'fn _gpu_isnan3(x: vec3f) -> vec3<bool> {\n  return (bitcast<vec3u>(x) & vec3u(0x7FFFFFFFu)) > vec3u(0x7F800000u);\n}'
     );
@@ -137,8 +147,11 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
   });
 
   it('a Clamp with vector bounds calls the vector helper', () => {
+    expect(shader(['Clamp', 'n', 'n', 1], 'glsl').code).toBe(
+      '_gpu_clamp3(n, n, vec3(1.0))'
+    );
     expect(shader(['Clamp', 'v', 'v', 1], 'glsl').code).toBe(
-      '_gpu_clamp3(v, v, vec3(1.0))'
+      'min(max(v, v), vec3(1.0))'
     );
   });
 

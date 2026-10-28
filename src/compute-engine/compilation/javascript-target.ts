@@ -575,9 +575,18 @@ import type {
   CompiledValue,
   ComplexResult,
   OperandCompiler,
+  RunnerListInput,
   StoredBatchBody,
   TargetSource,
 } from './types.js';
+
+/**
+ * The values that the `run()` of a `javascript` compilation accepts for a
+ * variable or an argument: a real, a complex value (`mode: 'complex'`), or a
+ * list for a symbol that the code reads as a list. This is
+ * `DefaultRunnerVars<'javascript'>` in `types.ts`.
+ */
+type JavaScriptRunnerVars = number | ComplexResult | RunnerListInput;
 
 /**
  * The state of the compilation of a `broadcast()` batch body
@@ -1585,7 +1594,7 @@ function compileJSEquality(
     mayReadUndefinedJS(args[j], direct[j], target);
   // An IMPURE operand (the Random family) must be evaluated exactly once — the
   // interpreter evaluates each operand once. Three positions splice an operand
-  // MORE than once: the LEFT operand of a guarded pair appears in the `typeof`
+  // MORE than once: the LEFT operand of a guarded pair appears in the absence
   // test and in the comparison, a COMPLEX operand is spliced twice by
   // `part()` (once for `.re`, once for `.im`), and a MIDDLE operand of a
   // chained (n-ary) form appears in the two comparisons that straddle it. So
@@ -1600,7 +1609,7 @@ function compileJSEquality(
     (i < args.length - 1 && guardedPair(i, i + 1));
   // An operand can also be spliced where it is CONDITIONALLY evaluated, which
   // costs a draw just as surely as splicing it twice. The absence guard of a
-  // pair tests the left operand with `typeof` and joins it with `&&`, so the
+  // pair tests the left operand against `undefined` and joins it with `&&`, so the
   // RIGHT operand of a guarded pair is never evaluated when the left one
   // reads `undefined`. The interpreter evaluates both operands whatever they
   // hold, so a skipped draw of the Random family would move every later draw
@@ -1635,7 +1644,11 @@ function compileJSEquality(
       return kind === 'Equal' ? equal : `(!${equal})`;
     }
     if (guardedPair(i, j)) {
-      const equal = `(typeof (${code(i)}) === 'number' && (${code(i)}) === (${code(j)}))`;
+      // The test is for absence, not for a number: a boolean or a string
+      // operand compares by `===` too (`c = True` with `c = true` is
+      // `true`). A `typeof … === 'number'` test answered `false` for every
+      // operand that is not a number (ROADMAP CE-569).
+      const equal = `((${code(i)}) !== undefined && (${code(i)}) === (${code(j)}))`;
       return kind === 'Equal' ? equal : `(!${equal})`;
     }
     return `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`;
@@ -11296,6 +11309,7 @@ function lambdaEntryPlan(
   const lists: number[] = [];
   const strings = new Map<number, string>();
   const kinds = new Map<number, KindEntry>();
+  const scalars: number[] = [];
   literalParams.forEach((p, i) => {
     // The shared accessor reads a user-declared type name too (with the
     // engine's type resolver), not only a built-in type.
@@ -11334,6 +11348,9 @@ function lambdaEntryPlan(
           (mode === 'complex' && BaseCompiler.wideNumericType(t))
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
+    // An annotation with a number type makes the parameter a scalar: an
+    // array for it is refused at entry (`refuseArrayAtScalar`).
+    if (t !== undefined && isSubtype(t, 'number')) scalars.push(i);
   });
   return {
     kind: 'args',
@@ -11342,6 +11359,7 @@ function lambdaEntryPlan(
     lists,
     strings,
     ...(kinds.size > 0 ? { kinds } : {}),
+    ...(scalars.length > 0 ? { scalars } : {}),
   };
 }
 
@@ -11364,6 +11382,7 @@ function varsEntryPlan(
   const lists: string[] = [];
   const strings = new Map<string, string>();
   const kinds = new Map<string, KindEntry>();
+  const scalars: string[] = [];
   for (const id of refs) {
     const sym = engine.symbol(id);
     // A symbol whose declared type proves an array is classed as a list
@@ -11402,6 +11421,16 @@ function varsEntryPlan(
       BaseCompiler.isComplexValued(sym) ||
       (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
     (isComplex ? complex : real).push(id);
+    // A symbol that the host declared with a number type is a scalar: an
+    // array for it is refused at entry (`refuseArrayAtScalar`). A type the
+    // engine inferred is not a declaration: the compiled code can broadcast
+    // over an array bound to such a symbol at run time.
+    if (
+      declared !== undefined &&
+      sym.valueDefinition?.inferredType !== true &&
+      isSubtype(declared, 'number')
+    )
+      scalars.push(id);
   }
   return {
     kind: 'vars',
@@ -11410,6 +11439,7 @@ function varsEntryPlan(
     lists,
     strings,
     ...(kinds.size > 0 ? { kinds } : {}),
+    ...(scalars.length > 0 ? { scalars } : {}),
   };
 }
 
@@ -11564,10 +11594,7 @@ function compileToTarget(
       reconstructionDigits,
       ...(entryPlan ? { entryPlan: storeEntryPlan(entryPlan) } : {}),
       ...(kinds !== undefined ? { valueKinds: [...kinds.kinds] } : {}),
-      run: fn as unknown as CompiledRunner<
-        CompiledValue,
-        number | ComplexResult
-      >,
+      run: fn as unknown as CompiledRunner<CompiledValue, JavaScriptRunnerVars>,
     };
   }
 
@@ -11586,7 +11613,7 @@ function compileToTarget(
         calling: 'lambda' as const,
         run: fn as unknown as CompiledRunner<
           CompiledValue,
-          number | ComplexResult
+          JavaScriptRunnerVars
         >,
       };
     }
@@ -11710,7 +11737,7 @@ function compileToTarget(
     // The batch body, stored so that a runtime that rebuilds the result runs
     // it too.
     ...(batch !== undefined ? { batch } : {}),
-    run: fn as unknown as CompiledRunner<CompiledValue, number | ComplexResult>,
+    run: fn as unknown as CompiledRunner<CompiledValue, JavaScriptRunnerVars>,
     // The whole batch runs inside one reconstruction-digit frame, as each
     // `run()` call does (see the constructor of `ComputeEngineFunction`).
     broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {

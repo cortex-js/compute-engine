@@ -34,8 +34,17 @@ export type CachedCell<T> = {
    * now, or `undefined` when none is. A count rather than a flag because a
    * re-entrant read of a cell that has no previous value falls through and
    * recomputes, nesting a second computation of the same slot inside the
-   * first. See the re-entrancy section of {@link cachedValue}. */
+   * first. The exception is a read at the key that the computation stamped
+   * when the caller passes `reentrantEmpty`: that value then answers the
+   * read (the empty-cell terminator). See the re-entrancy section of
+   * {@link cachedValue}. */
   inFlight?: number;
+  /** How many re-entrant reads of this cell the empty-cell terminator of
+   * {@link cachedValue} has answered and counted as provisional, ever.
+   * Monotonic, and only compared before and after a computation of this
+   * cell, so that its outermost computation can commit when those answers
+   * were the only provisional reads in its window. */
+  emptyServed?: number;
 };
 
 export type CachedValue<T> = CachedCell<T> & {
@@ -191,7 +200,11 @@ export function cachedValue<T>(
    * tuning one. Optional so a caller with no engine in hand (there are none
    * today) degrades to never counting a same-cell re-entrant read, i.e. to the
    * pre-object behaviour. */
-  engine?: object
+  engine?: object,
+  /** The value served to a re-entrant read of a cell that holds no value
+   * (the empty-cell terminator below). Without it, such a read computes
+   * again. */
+  reentrantEmpty?: T
 ): T {
   const cell = cachedCell(v, generation);
   // The other side of the entry, consulted only by the in-flight terminator
@@ -231,6 +244,55 @@ export function cachedValue<T>(
     } else if (stats && CACHE_STATS)
       recordCache(stats.cls, generation === undefined ? 'hitConstant' : 'hit');
     return cell.value;
+  }
+
+  // The empty-cell terminator. A re-entrant read of this cell, at the key
+  // that its own computation stamped, finds no value when nothing was ever
+  // committed on this side. The same-cell serve above answers such a read
+  // with the cell's previous value, computed at whatever generation. The
+  // live cell of a node usually has one, because the node is typed when it
+  // is boxed. The suppressed cell has none until a read with the assumptions
+  // hidden commits. The cross-cell terminator below needs the twin to be at
+  // the same `any` axis, which is not the case once a write (an assignment,
+  // or the signature derivation itself) moved the axis after the live cell
+  // was filled; then the read computed again, and so did each level below
+  // it. A recursive function read for the first time with the assumptions
+  // hidden overflowed the stack: with `F: function`, `x > 0` assumed and
+  // `F := n ↦ If(n = 0, x > 0, F(n − 1))`, `ce.assign('y', F(m))` types
+  // `F(m)` with the assumptions hidden.
+  //
+  // A caller that has a value for "no answer yet" passes it as
+  // `reentrantEmpty`, and such a read is answered with it, as the same-cell
+  // serve answers with the previous value, and counted in the same way.
+  // The type cache passes `unknown`, which is the type the recursive call
+  // has before the function has a value.
+  //
+  // This terminator is tried BEFORE the cross-cell one, also when the twin
+  // is at the same axis. The cross-cell answer is always provisional, so
+  // nothing in the window commits: with `F := n ↦ If(n = 0, [x],
+  // Append(F(n − 1), x))`, the first read with the assumptions hidden after
+  // a visible read ran 4,327 signature derivations and cached nothing, where
+  // this terminator runs 3. Serving the twin's value whatever its axis was
+  // also measured and rejected, for the same reason: that read took 3.3 s
+  // instead of 15 ms.
+  // (`test/compute-engine/ce-582-recursive-type-facts-hidden.test.ts`)
+  if (
+    reentrantEmpty !== undefined &&
+    generation !== undefined &&
+    cell.inFlight &&
+    cell.value === null &&
+    cell.generation === generation
+  ) {
+    // Counted as provisional only where the engine has objects, as the
+    // same-cell serve is. The count on the cell (`emptyServed`) lets the
+    // outermost computation of this cell commit (see the settled-only gate
+    // below).
+    if (engine !== undefined && engineHasObjects(engine)) {
+      _provisionalReads += 1;
+      cell.emptyServed = (cell.emptyServed ?? 0) + 1;
+    }
+    if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
+    return reentrantEmpty;
   }
 
   // The cross-cell terminator. While a computation OF THIS ENTRY — either
@@ -286,6 +348,7 @@ export function cachedValue<T>(
   // sitting in the cell, which is the value such a read is served, and
   // clearing it would advertise that value as depending on nothing.
   const provisionalBefore = _provisionalReads;
+  const emptyServedBefore = cell.emptyServed ?? 0;
   const prevGeneration = cell.generation;
   cell.generation = generation;
   cell.inFlight = (cell.inFlight ?? 0) + 1;
@@ -322,6 +385,28 @@ export function cachedValue<T>(
   // computation of the other, forever. Keeping it is sound: a value that
   // stays is one an earlier, settled computation committed with its full
   // dependency set, and it is re-validated before it is ever served.
+  //
+  // One exception: the OUTERMOST computation of this cell (no other
+  // computation of it is left on the stack) commits when the only
+  // provisional reads in its window were empty-cell answers for this same
+  // cell (`emptyServed`, the empty-cell terminator above). Every other read
+  // in the window was a real read whose object dependencies were collected
+  // by this computation, and the stand-in is the value the cell has before
+  // anything was computed, which depends on nothing. The engine without
+  // objects commits the same result, because it does not count these
+  // answers. Those reads are then taken off the counter, so that the
+  // computations around this one, which read its committed value, can
+  // commit too. The computations inside the window still commit nothing.
+  // Without this exception, on an engine that had built an object, each read
+  // computed the recursion again, and `F := n ↦ If(n = 0, [1, 2],
+  // 2·F(n − 1))` read with the assumptions hidden did not finish.
+  const ownEmptyServed = (cell.emptyServed ?? 0) - emptyServedBefore;
+  if (
+    ownEmptyServed > 0 &&
+    !cell.inFlight &&
+    _provisionalReads - provisionalBefore === ownEmptyServed
+  )
+    _provisionalReads -= ownEmptyServed;
   if (_provisionalReads !== provisionalBefore) {
     cell.generation = prevGeneration;
     if (stats && CACHE_STATS) recordCache(stats.cls, 'declineStore');

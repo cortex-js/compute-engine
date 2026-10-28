@@ -44,10 +44,10 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
 
   test('two free symbols keep the absence guard, no tolerance', () => {
     expect(js(ce, ['Equal', 'a', 'b']).code).toBe(
-      "(typeof (_.a) === 'number' && (_.a) === (_.b))"
+      '((_.a) !== undefined && (_.a) === (_.b))'
     );
     expect(js(ce, ['NotEqual', 'a', 'b']).code).toBe(
-      "(!(typeof (_.a) === 'number' && (_.a) === (_.b)))"
+      '(!((_.a) !== undefined && (_.a) === (_.b)))'
     );
   });
 
@@ -64,7 +64,7 @@ describe('compiled Equal/NotEqual is exact (JavaScript)', () => {
 
   test('the chained form conjoins exact pairs', () => {
     expect(js(ce, ['Equal', 'a', 'b', 'c']).code).toBe(
-      "((typeof (_.a) === 'number' && (_.a) === (_.b)) && (typeof (_.b) === 'number' && (_.b) === (_.c)))"
+      '(((_.a) !== undefined && (_.a) === (_.b)) && ((_.b) !== undefined && (_.b) === (_.c)))'
     );
   });
 

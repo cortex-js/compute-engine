@@ -1,5 +1,9 @@
 import type { Expression } from '../global-types.js';
-import type { CompiledFunctions } from './types.js';
+import type {
+  CompiledFunctions,
+  FieldFunctionOptions,
+  FieldFunctionResult,
+} from './types.js';
 import {
   GPUShaderTarget,
   assertGPUInlineElementCount,
@@ -17,6 +21,7 @@ import { BaseCompiler, isTailAssignmentBlock } from './base-compiler.js';
 import { tryGetConstant } from './constant-folding.js';
 import { gpuAmplifiedTrigMod } from './gpu-exact-trig.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
+import { compileWGSLFieldFunction } from './wgsl-field-function.js';
 
 /**
  * WGSL-specific function overrides.
@@ -176,6 +181,15 @@ const WGSL_TYPE_MAP: Record<string, string> = {
   vec2: 'vec2f',
   vec3: 'vec3f',
   vec4: 'vec4f',
+  ivec2: 'vec2i',
+  ivec3: 'vec3i',
+  ivec4: 'vec4i',
+  uvec2: 'vec2u',
+  uvec3: 'vec3u',
+  uvec4: 'vec4u',
+  bvec2: 'vec2<bool>',
+  bvec3: 'vec3<bool>',
+  bvec4: 'vec4<bool>',
   mat2: 'mat2x2f',
   mat3: 'mat3x3f',
   mat4: 'mat4x4f',
@@ -183,6 +197,59 @@ const WGSL_TYPE_MAP: Record<string, string> = {
 
 function toWGSLType(type: string): string {
   return WGSL_TYPE_MAP[type] ?? type;
+}
+
+/**
+ * ` @interpolate(flat)` for a vertex output or a fragment input (`interstage`)
+ * of an integer scalar or vector type, else ''. WGSL requires the flat
+ * interpolation for such a value between the two stages, and a shader without
+ * it fails when the GPU compiles it.
+ */
+function flatIf(interstage: boolean, type: string): string {
+  if (!interstage) return '';
+  return /^(i32|u32|vec[234][iu]|vec[234]<[iu]32>)$/.test(
+    toWGSLType(type.replace(/\s+/g, ''))
+  )
+    ? ' @interpolate(flat)'
+    : '';
+}
+
+/**
+ * The location, or binding, of each declaration of a list, in order. A
+ * declaration that gives one keeps it. A declaration that gives none takes the
+ * smallest number that no declaration of the list gives. WGSL refuses two
+ * stage inputs (or two outputs) at one `@location`, and two resources at one
+ * `@group`/`@binding`: such a shader fails only when the GPU compiles it, so
+ * two declarations that give the same number are refused here. `key` gives the
+ * space a number belongs to (the group of a binding).
+ */
+function assignSlots(
+  what: string,
+  decls: ReadonlyArray<{ name: string; slot: number | undefined; key?: number }>
+): number[] {
+  const used = new Map<string, string>();
+  const slotKey = (key: number | undefined, slot: number) =>
+    `${key ?? 0}:${slot}`;
+  for (const d of decls) {
+    if (d.slot === undefined) continue;
+    const k = slotKey(d.key, d.slot);
+    const other = used.get(k);
+    if (other !== undefined)
+      throw new Error(
+        `Could not compile \`compileShader()\`: "${other}" and "${d.name}" ` +
+          `have the same ${what} (${d.key === undefined ? '' : `group ${d.key}, `}` +
+          `${d.slot}). WGSL refuses two declarations at one ${what}. ` +
+          `Give each one its own ${what}, or leave it out to get a free one.`
+      );
+    used.set(k, d.name);
+  }
+  return decls.map((d) => {
+    if (d.slot !== undefined) return d.slot;
+    let slot = 0;
+    while (used.has(slotKey(d.key, slot))) slot += 1;
+    used.set(slotKey(d.key, slot), d.name);
+    return slot;
+  });
 }
 
 /**
@@ -281,6 +348,88 @@ function isNestedTailAssignmentBlock(expr: Expression): boolean {
 }
 
 /**
+ * What `wgslFunctionBodyShape` found about a body before its compilation,
+ * for `wgslAssertFunctionBody` to check the emitted body.
+ */
+type WGSLFunctionBodyShape = {
+  tailAssignment: boolean;
+  nestedTailAssignment: boolean;
+};
+
+/**
+ * Decline a body that has no value before it is compiled, for an entry
+ * point that puts the body in a WGSL function declaration
+ * (`compileFunction()`, `compileFieldFunction()`). `subject` names the entry
+ * point in the message.
+ *
+ * Both forms of the declaration put the body in a position that requires a
+ * VALUE: a single-line body is wrapped in `return`, and a multi-line body
+ * relies on the block hook to end it with `return`. A body whose value
+ * statement is an assignment or a declaration has neither form (D6): WGSL
+ * assignment is a STATEMENT, unlike GLSL (see `gpuAssertExpressionBody`).
+ *
+ * A block whose last statement is an assignment to a name, or a `Declare`
+ * with an initializer (`isTailAssignmentBlock`), is not declined before it
+ * is compiled: the block hook emits that statement followed by
+ * `return <name>;` (`Block(s ≔ x; t ≔ s)` → `s = x;`, `t = s;`,
+ * `return t;`), as `compile()` does for the same body. The emitted body is
+ * checked instead (`wgslAssertFunctionBody`): a single-statement block with
+ * no local is unwrapped to its statement and emits the single line `s = x`,
+ * which stays declined.
+ *
+ * A block whose last statement is a nested block that ends with such an
+ * assignment (`Block(s ≔ x; Block(t ≔ s + 1))`) is not declined before it is
+ * compiled either. The block compilation gives the nested block a
+ * temporary, which the nested block assigns last, and the outer block
+ * returns it (`var _tv1: f32;`, `{ … _tv1 = t; }`, `return _tv1;`), as on
+ * GLSL. The emitted body is checked for that final `return <name>;`.
+ */
+export function wgslFunctionBodyShape(
+  subject: string,
+  expr: Expression
+): WGSLFunctionBodyShape {
+  const tailAssignment = isTailAssignmentBlock(expr);
+  const nestedTailAssignment =
+    !tailAssignment && isNestedTailAssignmentBlock(expr);
+  if (!tailAssignment && !nestedTailAssignment)
+    gpuAssertExpressionBody(subject, expr, 'wgsl');
+  return { tailAssignment, nestedTailAssignment };
+}
+
+/**
+ * Decline the emitted `body` of a block that `wgslFunctionBodyShape`
+ * accepted because it ends with an assignment. The body is accepted only
+ * when its last line is `return <name>;` and, for an assignment, the line
+ * before it is the assignment `<name> = …;`: when the block hook does not
+ * recognize the assignment target, it puts `return` in front of the whole
+ * assignment (`return a[0] = x;`), which is not valid WGSL.
+ */
+export function wgslAssertFunctionBody(
+  subject: string,
+  expr: Expression,
+  body: string,
+  shape: WGSLFunctionBodyShape
+): void {
+  const lines = body.split('\n');
+  if (shape.tailAssignment) {
+    const returned = /^return\s+([^\s;]+);?$/.exec(lines[lines.length - 1]);
+    if (
+      lines.length < 2 ||
+      returned === null ||
+      !lines[lines.length - 2].startsWith(`${returned[1]} = `)
+    )
+      gpuAssertExpressionBody(subject, expr, 'wgsl');
+  }
+  if (shape.nestedTailAssignment) {
+    if (
+      lines.length < 2 ||
+      !/^return\s+[A-Za-z_]\w*;?$/.test(lines[lines.length - 1])
+    )
+      gpuAssertExpressionBody(subject, expr, 'wgsl');
+  }
+}
+
+/**
  * WGSL (WebGPU Shading Language) compilation target.
  *
  * Extends the shared GPU base class with WGSL-specific function names,
@@ -298,6 +447,83 @@ export class WGSLTarget extends GPUShaderTarget {
     return WGSL_SHAPE_RULES;
   }
 
+  /**
+   * Compile `expr` to a scalar field function that a host compute shader
+   * calls over a grid: `fn <name>(x: f32, y: f32, z: f32) -> f32`, with the
+   * coordinates of `options.coordinates` as arguments.
+   *
+   * Every other free symbol is a parameter, read as
+   * `<paramsVariable>.<symbol>` from one uniform struct. A symbol whose
+   * value is a numeric constant (a number, or a tuple or list of numbers) is
+   * a parameter too, unless the symbol is a constant (`Pi`): the field
+   * function does not read its value in the engine. A symbol whose value
+   * reads other symbols (`a := x + 1`) or calls a user-defined function
+   * (`c := g(2)`) is not a parameter: its value is compiled in place, and
+   * its symbols are coordinates or parameters. A user-defined function that
+   * such a value calls must not read a coordinate that it does not take as
+   * a parameter, as for a function that the expression calls. A
+   * user-defined function, or a symbol compiled in place, whose type was
+   * derived from a parameter with a type inferred from an integer value
+   * (`a := 5` and `h(t) := a`) declines: declare the parameter (`real`)
+   * before its first assignment.
+   * The host declares
+   * `@group(G) @binding(B) var<uniform> ce_params: CEParams;` (the names of
+   * `paramsVariable` and `paramsStruct`), adds `paramsStructSource` and the
+   * `helpers` to its module, and writes the parameter values at the offsets
+   * of `params`. A real or integer scalar is an `f32`. A point, a tuple of
+   * 2, 3 or 4 real numbers (declared `tuple<real, real>` or
+   * `tuple<number, number>`, or assigned `Tuple(1, 2)`), is a `vec2f`,
+   * `vec3f` or `vec4f`, with the alignment
+   * of the uniform address space in its offset. A list of n numbers
+   * (`list<number^n>`, n ≤ 1024) is `array<vec4f, ⌈n/4⌉>`, and element i is
+   * read with the index rules of `At`. A change of a parameter value is a
+   * buffer write, with no new compilation. A list with a `'storage-buffer'`
+   * hint is read from its storage buffer, not from the struct: its struct
+   * type and its `var<storage, read>` declaration are in `helpers` (under
+   * the struct name and the buffer name) and its layout in
+   * `storageBuffers`.
+   *
+   * The result is `success: false` with a `diagnostic` when `compile(expr,
+   * { to: 'wgsl' })` declines the expression (with the same diagnostic), when
+   * the body has no value to return (as for `compileFunction()`) or a
+   * `Return` whose value is not a real scalar, when the body assigns a
+   * coordinate or a parameter, when a user-defined function
+   * reads a coordinate that it does not take as a parameter or declares the
+   * name `paramsVariable`, when a parameter has no layout in the struct, or
+   * when the value is not a real scalar. A helper name always has the same
+   * source text, so the host can merge the `helpers` of several field
+   * functions by name. The exception is the declaration of a storage
+   * buffer: it has the same text only for the same hint and element type,
+   * so a host gives each buffer name one hint in every field, and treats
+   * two texts under one key as an error. A `name`, `paramsStruct`, `paramsVariable` or
+   * coordinate that is not a WGSL identifier, or that is a reserved word or
+   * a predeclared function or type of WGSL (`sin`, `vec4f`), throws.
+   */
+  compileFieldFunction(
+    expr: Expression,
+    options: FieldFunctionOptions
+  ): FieldFunctionResult {
+    return compileWGSLFieldFunction(
+      {
+        compile: (e, o) => this.compile(e, o),
+        createTarget: () => this.createTarget(),
+        withTargetExtension: (extension, fn) =>
+          this.withTargetExtension(extension, fn),
+        emittedUserFunctionNames: () => this.emittedUserFunctionNames(),
+        bodyShape: (e) => wgslFunctionBodyShape('compileFieldFunction()', e),
+        assertBody: (e, body, shape) =>
+          wgslAssertFunctionBody(
+            'compileFieldFunction()',
+            e,
+            body,
+            shape as WGSLFunctionBodyShape
+          ),
+      },
+      expr,
+      options
+    );
+  }
+
   compileFunction(
     expr: Expression,
     functionName: string,
@@ -305,32 +531,8 @@ export class WGSLTarget extends GPUShaderTarget {
     parameters: Array<[name: string, type: string]>,
     options?: { constantFold?: boolean }
   ): string {
-    // Both branches below put the body in a position that requires a VALUE:
-    // the single-line one wraps it in `return`, the multi-line one relies on
-    // the block hook having done so. A body whose value statement is an
-    // assignment or a declaration has neither emission (D6) — WGSL
-    // assignment is a STATEMENT, unlike GLSL (see `gpuAssertExpressionBody`).
-    //
-    // A block whose last statement is an assignment to a name, or a
-    // `Declare` with an initializer (`isTailAssignmentBlock`), is not
-    // declined before it is compiled: the block hook emits that statement
-    // followed by `return <name>;` (`Block(s ≔ x; t ≔ s)` → `s = x;`,
-    // `t = s;`, `return t;`), so the multi-line branch below carries it, as
-    // `compile()` does for the same body. The emitted body is checked
-    // instead: a single-statement block with no local is unwrapped to its
-    // statement and emits the single line `s = x`, which stays declined.
-    //
-    // A block whose last statement is a nested block that ends with such an
-    // assignment (`Block(s ≔ x; Block(t ≔ s + 1))`) is not declined before it
-    // is compiled either. The block compilation gives the nested block a
-    // temporary, which the nested block assigns last, and the outer block
-    // returns it (`var _tv1: f32;`, `{ … _tv1 = t; }`, `return _tv1;`), as on
-    // GLSL. The emitted body is checked for that final `return <name>;`.
-    const tailAssignment = isTailAssignmentBlock(expr);
-    const nestedTailAssignment =
-      !tailAssignment && isNestedTailAssignmentBlock(expr);
-    if (!tailAssignment && !nestedTailAssignment)
-      gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
+    // The body must have a value (`wgslFunctionBodyShape`).
+    const shape = wgslFunctionBodyShape('compileFunction()', expr);
     // A WGSL function parameter is an immutable value, so an assignment to it
     // (`x = x + 1.0;` in `fn f(x: f32)`) is not valid source. GLSL passes a
     // parameter as a copy that the body can write, so only WGSL declines. The
@@ -350,28 +552,7 @@ export class WGSLTarget extends GPUShaderTarget {
     // Compiled under the caller's declared parameter shapes, so the body
     // analysis agrees with the signature emitted below.
     const body = this.compileDeclaredFunctionBody(expr, parameters, options);
-    // The body is accepted only when its last line is `return <name>;` and
-    // the line before it is the assignment `<name> = …;`: when the block hook
-    // does not recognize the assignment target, it puts `return` in front of
-    // the whole assignment (`return a[0] = x;`), which is not valid WGSL.
-    if (tailAssignment) {
-      const lines = body.split('\n');
-      const returned = /^return\s+([^\s;]+);?$/.exec(lines[lines.length - 1]);
-      if (
-        lines.length < 2 ||
-        returned === null ||
-        !lines[lines.length - 2].startsWith(`${returned[1]} = `)
-      )
-        gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
-    }
-    if (nestedTailAssignment) {
-      const lines = body.split('\n');
-      if (
-        lines.length < 2 ||
-        !/^return\s+[A-Za-z_]\w*;?$/.test(lines[lines.length - 1])
-      )
-        gpuAssertExpressionBody('compileFunction()', expr, this.languageId);
-    }
+    wgslAssertFunctionBody('compileFunction()', expr, body, shape);
 
     const params = parameters
       .map(([name, type]) => `${name}: ${toWGSLType(type)}`)
@@ -470,15 +651,91 @@ export class WGSLTarget extends GPUShaderTarget {
       constantFold,
     } = options;
 
+    // A compute entry point has no stage outputs and no `@location` inputs:
+    // WGSL refuses a return type on it, and its only inputs are built-in
+    // values (`global_invocation_id`, ...). Such a shader fails when the GPU
+    // compiles it, so it is refused here.
+    if (type === 'compute') {
+      if (outputs.length > 0)
+        throw new Error(
+          'Could not compile `compileShader()`: a WGSL compute shader has no ' +
+            'stage outputs, and its entry point cannot return a value. ' +
+            'Remove the `outputs` option.'
+        );
+      const located = inputs.filter((d) => !d.builtin).map((d) => d.name);
+      if (located.length > 0)
+        throw new Error(
+          'Could not compile `compileShader()`: these compute shader ' +
+            'inputs have no `builtin`: ' +
+            `${located.map((n) => `"${n}"`).join(', ')}. ` +
+            'A compute shader input must be a built-in value ' +
+            '(`global_invocation_id`, `local_invocation_id`, ...); pass other ' +
+            'values as uniforms.'
+        );
+    }
+
+    // WGSL refuses `bool` in the uniform address space and at a
+    // `@location` (neither is host-shareable): such a shader fails only when
+    // the GPU compiles it.
+    for (const [kind, decls] of [
+      ['uniform', uniforms],
+      ['input', inputs.filter((d) => !d.builtin)],
+      ['output', outputs.filter((d) => !d.builtin)],
+    ] as const) {
+      const booleans = decls
+        .filter((d) => /\bbool\b/.test(toWGSLType(d.type)))
+        .map((d) => `"${d.name}"`);
+      if (booleans.length > 0)
+        throw new Error(
+          `Could not compile \`compileShader()\`: the ${kind} ` +
+            `${booleans.join(', ')} has a boolean type, which WGSL does not ` +
+            `allow for a ${kind}. Use \`u32\` (or \`uint\`) with 0 and 1.`
+        );
+    }
+
+    // A built-in value has no location: only the other declarations take one.
+    const locations = (
+      decls: ReadonlyArray<{
+        name: string;
+        location?: number;
+        builtin?: string;
+      }>
+    ): Map<string, number> => {
+      const located = decls.filter((d) => !d.builtin);
+      const slots = assignSlots(
+        'location',
+        located.map((d) => ({ name: d.name, slot: d.location }))
+      );
+      return new Map(located.map((d, i) => [d.name, slots[i]]));
+    };
+    const inputLocations = locations(inputs);
+    const outputLocations = locations(outputs);
+    const uniformBindings = assignSlots(
+      'binding',
+      uniforms.map((d) => ({
+        name: d.name,
+        slot: d.binding,
+        key: d.group ?? 0,
+      }))
+    );
+
     let code = '';
+
+    // The input struct is named for its stage (`VertexInput`,
+    // `FragmentInput`, `ComputeInput`). The host does not read this name: the
+    // pipeline binds the fields by location or built-in.
+    const inputStructName = `${type[0].toUpperCase()}${type.slice(1)}Input`;
 
     // Generate input struct
     if (inputs.length > 0) {
-      code += 'struct VertexInput {\n';
+      code += `struct ${inputStructName} {\n`;
       for (const input of inputs) {
         const attr = input.builtin
           ? `@builtin(${input.builtin})`
-          : `@location(${input.location ?? 0})`;
+          : `@location(${inputLocations.get(input.name)})${flatIf(
+              type === 'fragment',
+              input.type
+            )}`;
         code += `  ${attr} ${input.name}: ${toWGSLType(input.type)},\n`;
       }
       code += '};\n\n';
@@ -491,16 +748,19 @@ export class WGSLTarget extends GPUShaderTarget {
       for (const output of outputs) {
         const attr = output.builtin
           ? `@builtin(${output.builtin})`
-          : `@location(${output.location ?? 0})`;
+          : `@location(${outputLocations.get(output.name)})${flatIf(
+              type === 'vertex',
+              output.type
+            )}`;
         code += `  ${attr} ${output.name}: ${toWGSLType(output.type)},\n`;
       }
       code += '};\n\n';
     }
 
     // Generate uniform bindings
-    for (const uniform of uniforms) {
+    for (const [i, uniform] of uniforms.entries()) {
       const group = uniform.group ?? 0;
-      const binding = uniform.binding ?? 0;
+      const binding = uniformBindings[i];
       code += `@group(${group}) @binding(${binding}) var<uniform> ${
         uniform.name
       }: ${toWGSLType(uniform.type)};\n`;
@@ -519,7 +779,7 @@ export class WGSLTarget extends GPUShaderTarget {
     const outputStructName =
       type === 'vertex' ? 'VertexOutput' : 'FragmentOutput';
 
-    const paramStr = hasInputStruct ? 'input: VertexInput' : '';
+    const paramStr = hasInputStruct ? `input: ${inputStructName}` : '';
     const returnStr = hasOutputStruct ? ` -> ${outputStructName}` : '';
 
     // Compile the body statements FIRST so the `_gpu_*` helper preamble they
@@ -530,7 +790,7 @@ export class WGSLTarget extends GPUShaderTarget {
     // counters.
     // The declared inputs and uniforms are framed and bound for the body
     // analysis: nothing but these declarations carries their shader types (see
-    // `compileShaderBody`). An INPUT is a field of the `VertexInput` struct the
+    // `compileShaderBody`). An INPUT is a field of the stage input struct the
     // entry point binds as `input`, so it is referenced `input.<name>` — a bare
     // `v` names nothing in a WGSL shader. A uniform is a module-scope global
     // and stays bare.
@@ -545,7 +805,11 @@ export class WGSLTarget extends GPUShaderTarget {
         })),
         ...uniforms,
       ],
-      constantFold
+      constantFold,
+      [],
+      // An output is a field of the `output` struct that the entry point
+      // returns, so a body statement assigns `output.<name>`.
+      outputs.map((d) => ({ name: `output.${d.name}`, type: d.type }))
     );
     // Over the FULL emission: a helper may be referenced only from inside a
     // hoisted loop (Tycho item 110), and an undeclared helper is a shader that

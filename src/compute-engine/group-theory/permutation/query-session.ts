@@ -38,20 +38,22 @@ export class PermutationQuerySession {
   /**
    * Return a completed chain for `group`, from the cache or new.
    *
-   * The cache key holds everything that can change the chain or decide
-   * whether it can be built:
+   * The cache key holds what decides the chain itself:
    *
    * - the requested first base point (`firstBase`), because the stabilizer
    *   query puts that point first and reads the second level;
-   * - the normalized chain limits as received. A nested query passes its
-   *   remaining budget, so the same group with a different remaining budget
-   *   is a different key;
    * - the receiving degree and generator limits of `work`;
    * - the action degree and the image list of each generator, in order.
    *
-   * Because the limits are part of the key, a cached chain was built under
-   * the same limits as the current request. A query with smaller limits does
-   * not get a chain that it could not build itself.
+   * The chain limits are not in the key, so a chain built by one query is
+   * found by another query on the same group, also by a nested query that
+   * passes its remaining budget. A cached chain is returned only when
+   * `chain.fits(limits)`: a construction under `limits` would succeed and
+   * give the same chain with the same costs. Otherwise the chain is built
+   * again under `limits`, which gives the same answer or limit error as a
+   * query without the cache. So a query with smaller limits does not get a
+   * chain that it could not build itself, and the costs that the caller
+   * charges for a cached chain are the costs of its own construction.
    *
    * Throws the kernel errors of `PermutationStabilizerChain.compute()` when
    * a limit is reached; a failed chain is not cached.
@@ -70,11 +72,11 @@ export class PermutationQuerySession {
       group.action,
       work
     );
-    // All resource settings are part of the key. A warm query cannot bypass a
-    // smaller work, storage, degree or generator bound supplied by its caller.
+    // The receiving policy is part of the key; the chain limits are checked
+    // with `fits()` below. A warm query cannot bypass a smaller work,
+    // storage, degree or generator bound supplied by its caller.
     const key = JSON.stringify([
       firstBase ?? null,
-      limits,
       work.maxDegree ?? null,
       work.maxGenerators ?? null,
       work.maxGeneratorImages ?? null,
@@ -82,20 +84,41 @@ export class PermutationQuerySession {
       received.generators.map((g) => g.images),
     ]);
     work.check?.();
-    const cached = this.#chains.get(key);
-    if (cached) {
+    // A chain whose construction the storage limit changed (see
+    // `storageLimited`) fits only its own limits. It is cached under a second
+    // key that adds those limits, so that it does not replace the entry of
+    // `key`, which fits more requests, and so that a repeated query with the
+    // same small storage limit still finds it.
+    const exactKey = key + JSON.stringify(limits);
+    const touch = (entry: string) => {
+      const value = this.#chains.get(entry);
+      if (!value?.fits(limits)) return undefined;
       // Insert the entry again to mark it as the most recently used.
-      this.#chains.delete(key);
-      this.#chains.set(key, cached);
-      return cached;
-    }
+      this.#chains.delete(entry);
+      this.#chains.set(entry, value);
+      return value;
+    };
+    const hit = touch(key) ?? touch(exactKey);
+    if (hit) return hit;
+    // A cached chain that does not fit `limits` stays in the cache until a
+    // new construction succeeds. A query whose limits are too small then
+    // fails with its limit error and does not remove a chain that other
+    // queries can use.
     const chain = PermutationStabilizerChain.compute(
       received,
       limits,
       work,
       firstBase
     );
-    if (key.length <= 100000 && chain.storedImagesCharged <= 1000000) {
+    const target = chain.storageLimited ? exactKey : key;
+    if (target.length <= 100000 && chain.storedImagesCharged <= 1000000) {
+      // The new chain replaces a cached chain of the same key that did not
+      // fit the limits of this query.
+      const replaced = this.#chains.get(target);
+      if (replaced) {
+        this.#images -= replaced.storedImagesCharged;
+        this.#chains.delete(target);
+      }
       // Remove the oldest entries until there is space for one more chain
       // and for its images.
       while (
@@ -106,7 +129,7 @@ export class PermutationQuerySession {
         this.#images -= this.#chains.get(oldest)!.storedImagesCharged;
         this.#chains.delete(oldest);
       }
-      this.#chains.set(key, chain);
+      this.#chains.set(target, chain);
       this.#images += chain.storedImagesCharged;
     }
     return chain;

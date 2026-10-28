@@ -43,6 +43,15 @@
  * (mutual recursion). A node whose head the caller overrides (a `Sum` given
  * in `functions`) is left as written, with its operands: the caller's code
  * receives them as they were.
+ *
+ * A function whose calls stay calls is emitted once, as a shader function
+ * of its own (`_fn_F`). In its body, `sin`, `cos`, `min` and the other
+ * operations with a NaN-safe helper call the built-in for a parameter that
+ * is finite for certain: every call of the function in the expression that
+ * this pass returns passes an argument that is finite for certain at that
+ * position (`gpuProvablyFinite` and `gpuRecordCallSiteFacts` in
+ * `gpu-target.ts`). A declared parameter type is not enough here: an
+ * argument such as `exp(x)` is a `real` that overflows in f32.
  */
 
 import type {

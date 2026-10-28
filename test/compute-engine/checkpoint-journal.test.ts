@@ -610,6 +610,13 @@ describe('snapshot completeness — the drift guard', () => {
     // definition the value reads. A restore emits a `config` event, which
     // advances the world version, so the memo misses after any restore.
     '_liveTypeMemo',
+    // Set by a restore on a definition created in the rewound window, and
+    // never cleared: such a definition cannot be restored again, since the
+    // checkpoints taken in that window are invalidated (ROADMAP CE-586).
+    '_rewound',
+    // The scope the definition was installed in, written once when it is
+    // constructed in an open window and read only by a restore.
+    '_checkpointHome',
   ]);
 
   const OPERATOR_DEF_EXCLUSIONS = new Set([

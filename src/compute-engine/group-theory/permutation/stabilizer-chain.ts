@@ -190,6 +190,16 @@ class ChainWork {
   points = 0;
   /** Orbit edges examined so far, over all levels. */
   edges = 0;
+  /**
+   * The largest storage total that any storage check asked for:
+   * `stored + count` in `reserve()`, and `stored` plus the new entry when a
+   * transversal element is cached. Every decision that depends on
+   * `maxStoredImages` (an eviction, a cache entry that is not stored, a
+   * storage-limit error) compares one of these totals with the limit. So
+   * when `demand <= maxStoredImages`, no such decision happened, and a run
+   * with any storage limit of at least `demand` makes the same steps.
+   */
+  demand = 0;
   readonly limits: ReturnType<typeof permutationChainLimits>;
   // `values` and `caller` are the same caller policy object. `values` is
   // passed to permutation operations (degree limit, cancellation), and
@@ -248,6 +258,7 @@ class ChainWork {
    * reservation still does not fit.
    */
   reserve(count: number) {
+    this.demand = Math.max(this.demand, this.stored + count);
     while (
       this.cacheOrder.length &&
       this.stored + count > this.limits.maxStoredImages
@@ -375,6 +386,7 @@ class ChainWork {
     }
     // Make space for the new entry: keep at most 16384 entries, and evict old
     // entries while the new one does not fit in the storage limit.
+    this.demand = Math.max(this.demand, this.stored + value.supportDegree);
     while (
       this.cacheOrder.length &&
       (this.cacheOrder.length >= 16384 ||
@@ -1229,6 +1241,17 @@ export class PermutationStabilizerChain {
   readonly #storedImagesCharged: number;
   readonly #orbitPoints: number;
   readonly #orbitEdges: number;
+  /** `ChainWork.demand` at the end of construction. */
+  readonly #storageDemand: number;
+  /**
+   * True when the storage limit changed a step of construction (an
+   * eviction or a cache entry that was not stored): `#storageDemand` was
+   * above `maxStoredImages`. Such a chain can cost a different amount of
+   * work under another storage limit.
+   */
+  readonly #storageLimited: boolean;
+  /** The normalized limits of construction, as JSON, for an exact match. */
+  readonly #limitsKey: string;
   private constructor(
     group: PermutationGroupValue,
     requested: PermutationChainLimits,
@@ -1259,6 +1282,41 @@ export class PermutationStabilizerChain {
     this.#storedImagesCharged = ledger.stored;
     this.#orbitPoints = ledger.points;
     this.#orbitEdges = ledger.edges;
+    this.#storageDemand = ledger.demand;
+    this.#storageLimited = ledger.demand > ledger.limits.maxStoredImages;
+    this.#limitsKey = JSON.stringify(ledger.limits);
+  }
+  /**
+   * Whether a construction of the same group, with the same first base and
+   * the same receiving policy, under `requested` would succeed and give this
+   * chain with the same costs. A cache can then return this chain for
+   * `requested`: the answer, and the costs that the caller charges, are the
+   * ones of a construction without the cache.
+   *
+   * Construction is deterministic. A limit other than `maxStoredImages`
+   * only decides whether construction stops with a limit error, and each
+   * check stops it when a total goes above its limit. So construction under
+   * `requested` reaches the same end when each recorded total is at most its
+   * limit: work, orbit points, orbit edges and levels.
+   *
+   * `maxStoredImages` can also change the steps: a smaller limit evicts more
+   * transversal elements, which costs more work to build again. The steps
+   * are the same when no storage check was decided by the limit, that is
+   * when the storage demand of construction is at most both the original
+   * limit and `requested`. When the original limit did decide a check, only
+   * the same limits give the same steps.
+   */
+  fits(requested: PermutationChainLimits): boolean {
+    const limits = permutationChainLimits(requested);
+    if (JSON.stringify(limits) === this.#limitsKey) return true;
+    return (
+      !this.#storageLimited &&
+      this.#storageDemand <= limits.maxStoredImages &&
+      this.#workUsed <= limits.maxWork &&
+      this.#orbitPoints <= limits.maxOrbitPoints &&
+      this.#orbitEdges <= limits.maxOrbitEdges &&
+      this.#levels.length <= limits.maxLevels
+    );
   }
   /**
    * Build the chain of `group` within the `requested` limits. When
@@ -1292,6 +1350,10 @@ export class PermutationStabilizerChain {
    * and generators as `levels`, because construction is deterministic.
    * Proof steps cost work, so this build can reach a limit that the first
    * build did not reach.
+   *
+   * The original limits are the ones of the first construction. A chain
+   * from `PermutationQuerySession` can be shared by queries with other
+   * limits, so for such a chain they can be the limits of an earlier query.
    */
   get certificate() {
     return buildCertificate(
@@ -1321,6 +1383,13 @@ export class PermutationStabilizerChain {
   }
   get orbitPoints() {
     return this.#orbitPoints;
+  }
+  /**
+   * True when the storage limit changed a step of construction. Such a
+   * chain `fits()` only its own limits.
+   */
+  get storageLimited() {
+    return this.#storageLimited;
   }
   /**
    * Sift `value` through every level, with a new ledger for the `requested`
@@ -1382,8 +1451,9 @@ export class PermutationStabilizerChain {
 /**
  * Optional owner-provided cache; the pure kernel has no engine or session import.
  * A provider returns a complete chain of `group`, built within `limits`, or
- * a cached chain that was built with the same inputs. The default provider
- * is `PermutationStabilizerChain.compute`.
+ * a cached chain of the same group and first base for which
+ * `chain.fits(limits)` is true. The default provider is
+ * `PermutationStabilizerChain.compute`.
  */
 export type PermutationChainProvider = (
   group: PermutationGroupValue,
