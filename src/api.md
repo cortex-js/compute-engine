@@ -330,6 +330,54 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
+##### ComputeEngine.timeRemaining {#timeremaining-1}
+
+```ts
+readonly timeRemaining: number;
+```
+
+The number of milliseconds left before the earliest deadline of the
+active `withTimeLimit` spans (an enclosing span preempts a later inner
+limit), and `0` or less once that deadline has passed. `Infinity` when
+no active span has a time limit, which includes a `withStepBudget` span
+with no `withTimeLimit` around it.
+
+This value and [stepBudgetSpent](#stepbudgetspent-1) describe the span that is active
+in the current synchronous code. Code that runs after an `await`, even
+inside `withTimeLimit` or an `evaluateAsync()` call, is outside the
+span: it reads `Infinity` and `false`.
+
+The engine checks its deadline only inside its own work (evaluation,
+canonicalization). A host loop that runs inside a span and does work of
+its own (walking expressions, building a list) reads this value to stop
+on time: `if (ce.timeRemaining <= 0) break;`.
+
+A spent step budget does not change this value; read
+[stepBudgetSpent](#stepbudgetspent-1) for it.
+
+</MemberCard>
+
+<MemberCard>
+
+##### ComputeEngine.stepBudgetSpent {#stepbudgetspent-1}
+
+```ts
+readonly stepBudgetSpent: boolean;
+```
+
+True inside a `withStepBudget` span (or a span nested in one) when a
+step budget of the current span or of an enclosing one is spent; false
+otherwise, and always false outside any span.
+
+When a budget is spent, the engine throws a `CancellationError`, but
+code between the throw and the end of the span can catch it and return
+a value. Such a value is partial. A host that stores values in a cache
+reads this before a write, so that it does not keep a partial value.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### ComputeEngine.iterationLimit {#iterationlimit-1}
 
 ```ts
@@ -605,10 +653,36 @@ restore(cp): void
 ```
 
 Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
-stays live and can be restored again. Expressions built BEFORE `cp` stay
-valid — their definitions are rewritten in place. Expressions built
-during the rewound window are not: cache cell outputs as serialized
-artifacts, never as live boxed nodes.
+stays live and can be restored again.
+
+The definitions that existed when `cp` was taken are rewritten in place,
+and the version counters advance, so every expression that reads them,
+whether it was built before or during the rewound window, reads the
+restored state afterwards and its cached answers are computed again.
+The structure of an expression (`ops`, `json`, `digest`, `hash`) is not
+affected, with one exception: the fields of a mutable object are
+rewound in place, so the `json` and `digest` of that object, and of
+every expression that holds it, can change.
+
+The definitions CREATED during the window are removed from their scope
+and disposed. This includes a symbol that was declared or assigned for
+the first time there, and a free symbol that was boxed for the first
+time there (boxing declares it). An expression built during the window
+that names such a symbol keeps the disposed definition, and the symbol
+is inert: it reads no value and counts as unknown (`unknowns`, a
+compile reads it as an input), also after a later declaration or
+assignment of the same name, and its type is the one its record had
+before the declaration (usually `unknown`). The index of a `Sum` and the
+locals of a `Block` built during the window are not affected: they
+still take their values when the expression runs. Nor is a symbol
+declared in a scope that is not on the scope chain when `restore()`
+runs (a scope pushed and popped during the window): it still resolves
+by name, so it reads a later declaration of the same name in that scope
+with its old type (ROADMAP CE-590). `isSame` with the
+same expression built after the
+restore is false. Do not keep such an expression: build it again to
+read the new definition, and cache a cell output as a serialized
+artifact rather than as a live boxed node.
 
 ####### cp
 
@@ -11679,6 +11753,16 @@ Return `undefined` (or an empty string) to fall back to the
 default compilation (a `null` returned from untyped JavaScript is
 tolerated and treated the same). See [OperatorCompileHandler](#operatorcompilehandler).
 
+On the `javascript` target, the code may call two runtime helpers,
+which keep their names and behavior across releases:
+`_SYS.atNoWrap(base, index)` reads the element at a 1-based position
+(or the elements at a list of positions) with no wrap-around, and
+`_SYS.atMask(base, mask)` keeps the elements where a list of booleans
+is `true`, and reads any other index as `atNoWrap` does. The other
+members of `_SYS` are internal and can change in any release. The
+compile guide ("Runtime Helpers for Generated JavaScript") gives the
+details.
+
 The code a caller handler writes runs only on the thread that compiled
 it: the result is not shippable, so `broadcastAsync()` does not send
 it to the kernel pool (`reason: 'not-shippable'`). This holds also
@@ -12595,6 +12679,54 @@ contextStack: readonly EvalContext[];
 
 <MemberCard>
 
+##### IComputeEngine.timeRemaining {#timeremaining}
+
+```ts
+readonly timeRemaining: number;
+```
+
+The number of milliseconds left before the earliest deadline of the
+active `withTimeLimit` spans (an enclosing span preempts a later inner
+limit), and `0` or less once that deadline has passed. `Infinity` when
+no active span has a time limit, which includes a `withStepBudget` span
+with no `withTimeLimit` around it.
+
+This value and [stepBudgetSpent](#stepbudgetspent-1) describe the span that is active
+in the current synchronous code. Code that runs after an `await`, even
+inside `withTimeLimit` or an `evaluateAsync()` call, is outside the
+span: it reads `Infinity` and `false`.
+
+The engine checks its deadline only inside its own work (evaluation,
+canonicalization). A host loop that runs inside a span and does work of
+its own (walking expressions, building a list) reads this value to stop
+on time: `if (ce.timeRemaining <= 0) break;`.
+
+A spent step budget does not change this value; read
+[stepBudgetSpent](#stepbudgetspent-1) for it.
+
+</MemberCard>
+
+<MemberCard>
+
+##### IComputeEngine.stepBudgetSpent {#stepbudgetspent}
+
+```ts
+readonly stepBudgetSpent: boolean;
+```
+
+True inside a `withStepBudget` span (or a span nested in one) when a
+step budget of the current span or of an enclosing one is spent; false
+otherwise, and always false outside any span.
+
+When a budget is spent, the engine throws a `CancellationError`, but
+code between the throw and the end of the span can catch it and return
+a value. Such a value is partial. A host that stores values in a cache
+reads this before a write, so that it does not keep a partial value.
+
+</MemberCard>
+
+<MemberCard>
+
 ##### IComputeEngine.iterationLimit {#iterationlimit}
 
 ```ts
@@ -12870,10 +13002,36 @@ restore(cp): void
 ```
 
 Rewind to `cp`, invalidating every checkpoint taken after it; `cp` itself
-stays live and can be restored again. Expressions built BEFORE `cp` stay
-valid — their definitions are rewritten in place. Expressions built
-during the rewound window are not: cache cell outputs as serialized
-artifacts, never as live boxed nodes.
+stays live and can be restored again.
+
+The definitions that existed when `cp` was taken are rewritten in place,
+and the version counters advance, so every expression that reads them,
+whether it was built before or during the rewound window, reads the
+restored state afterwards and its cached answers are computed again.
+The structure of an expression (`ops`, `json`, `digest`, `hash`) is not
+affected, with one exception: the fields of a mutable object are
+rewound in place, so the `json` and `digest` of that object, and of
+every expression that holds it, can change.
+
+The definitions CREATED during the window are removed from their scope
+and disposed. This includes a symbol that was declared or assigned for
+the first time there, and a free symbol that was boxed for the first
+time there (boxing declares it). An expression built during the window
+that names such a symbol keeps the disposed definition, and the symbol
+is inert: it reads no value and counts as unknown (`unknowns`, a
+compile reads it as an input), also after a later declaration or
+assignment of the same name, and its type is the one its record had
+before the declaration (usually `unknown`). The index of a `Sum` and the
+locals of a `Block` built during the window are not affected: they
+still take their values when the expression runs. Nor is a symbol
+declared in a scope that is not on the scope chain when `restore()`
+runs (a scope pushed and popped during the window): it still resolves
+by name, so it reads a later declaration of the same name in that scope
+with its old type (ROADMAP CE-590). `isSame` with the
+same expression built after the
+restore is false. Do not keep such an expression: build it again to
+read the new definition, and cache a cell output as a serialized
+artifact rather than as a live boxed node.
 
 ####### cp
 
