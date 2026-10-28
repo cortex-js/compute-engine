@@ -24,7 +24,7 @@ const G: MathJsonExpression = [
 function close(ce: ComputeEngine, group = G, elements = 6, products = 12) {
   return ce
     .box([
-      'PermutationGroupElements',
+      'GroupElements',
       group,
       [
         'Dictionary',
@@ -40,14 +40,14 @@ describe('CE generator descriptors and bounded closure', () => {
   test('Epsil supports a typed group function and complete S3 closure', () => {
     const result = run(
       ce,
-      'function enumerateSmall(g: PermutationGroup) -> list<Permutation> { PermutationGroupElements(g, options: {maxElements -> 6, maxProducts -> 12}) }\nlet G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAction(3))\nenumerateSmall(G)'
+      'function enumerateSmall(g: PermutationGroup) -> list<Permutation> { GroupElements(g, options: {maxElements -> 6, maxProducts -> 12}) }\nlet G = PermutationGroup([Permutation([2,1]),Permutation([1,3,2])],PermutationAction(3))\nenumerateSmall(G)'
     );
     expect(isFunction(result, 'List')).toBe(true);
     if (isFunction(result)) expect(result.ops).toHaveLength(6);
     expect(
       run(
         ce,
-        'count(PermutationGroupElements(G, options: {maxElements -> 6, maxProducts -> 12}))'
+        'count(GroupElements(G, options: {maxElements -> 6, maxProducts -> 12}))'
       ).json
     ).toBe(6);
   });
@@ -97,7 +97,7 @@ describe('CE generator descriptors and bounded closure', () => {
       loose
         .box(
           [
-            'PermutationGroupElements',
+            'GroupElements',
             forged,
             [
               'Dictionary',
@@ -112,7 +112,7 @@ describe('CE generator descriptors and bounded closure', () => {
     expect(
       loose
         .box([
-          'PermutationGroupElements',
+          'GroupElements',
           'True',
           [
             'Dictionary',
@@ -126,7 +126,7 @@ describe('CE generator descriptors and bounded closure', () => {
   test('an explicit empty generator list defines a trivial group on its action', () => {
     const result = run(
       ce,
-      'PermutationGroupElements(PermutationGroup([],PermutationAction(5)), options: {maxElements -> 1, maxProducts -> 0})'
+      'GroupElements(PermutationGroup([],PermutationAction(5)), options: {maxElements -> 1, maxProducts -> 0})'
     );
     expect(result.json).toEqual(['List', ['Permutation', ['List']]]);
   });
@@ -134,7 +134,7 @@ describe('CE generator descriptors and bounded closure', () => {
     expect(
       run(
         ce,
-        'PermutationGroupElements(PermutationGroup(listFrom([Permutation([2,1])]),PermutationAction(3)), options: {maxElements -> 2, maxProducts -> 2})'
+        'GroupElements(PermutationGroup(listFrom([Permutation([2,1])]),PermutationAction(3)), options: {maxElements -> 2, maxProducts -> 2})'
       ).operator
     ).toBe('List');
     const symbolic = ce.box([
@@ -201,7 +201,7 @@ describe('CE generator descriptors and bounded closure', () => {
     expect(
       run(
         fresh,
-        'count(PermutationGroupElements(saved_group, options: {maxElements -> 6, maxProducts -> 12}))'
+        'count(GroupElements(saved_group, options: {maxElements -> 6, maxProducts -> 12}))'
       ).json
     ).toBe(6);
     fresh.discard(cp);
@@ -211,7 +211,7 @@ describe('CE generator descriptors and bounded closure', () => {
     failed.declareType('PermutationGroup', 'integer', { mint: false });
     expect(() => loadGroupTheory(failed)).toThrow();
     expect(failed.lookupDefinition('Permutation')).toBeUndefined();
-    expect(failed.lookupDefinition('PermutationGroupElements')).toBeUndefined();
+    expect(failed.lookupDefinition('GroupElements')).toBeUndefined();
     const fresh = new ComputeEngine(),
       cp = fresh.checkpoint();
     loadGroupTheory(fresh);
@@ -224,7 +224,7 @@ describe('CE generator descriptors and bounded closure', () => {
   test('caller cancellation remains distinct from resource errors', () => {
     const fresh = engine();
     const query = fresh.box([
-      'PermutationGroupElements',
+      'GroupElements',
       G,
       [
         'Dictionary',

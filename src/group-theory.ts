@@ -1,5 +1,6 @@
 // Entry point for @cortex-js/compute-engine/group-theory.
-// Load native permutation operations without adding them to the default library.
+// Load native permutation, bounded finite-group, matrix and polycyclic operations.
+// The default library remains unchanged.
 //
 // Usage:
 // import { ComputeEngine } from '@cortex-js/compute-engine';

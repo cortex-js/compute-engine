@@ -1,9 +1,9 @@
-// MathJSON adapter for the permutation-group kernel in
+// MathJSON adapter and optional loader for group theory. The permutation kernel is in
 // `src/compute-engine/group-theory/permutation/`. It is not part of the default
 // library: a host calls `loadGroupTheory(ce)` (exported from the
 // `@cortex-js/compute-engine/group-theory` subpath) to install it in one engine.
 //
-// What the loader registers:
+// The permutation definitions below register:
 //
 //  - three types, all declared with `mint: false`:
 //    `Permutation` (`tuple<images: list<integer>>`),
@@ -16,7 +16,12 @@
 //    commutator, apply) and the group queries (order, membership, orbits,
 //    transversal, stabilizer, subgroup relations, element list).
 //
-// Conventions of the values:
+// The finite-group adapter also registers exact matrix descriptors, polycyclic
+// sequences, checked homomorphisms and quotients, plus structural aliases for
+// supported groups and elements. Its constructors validate on evaluation; its
+// queries share a work ledger and bounded finite models. See finite-group-theory.ts.
+//
+// Conventions of the permutation values:
 //
 //  - A permutation is a bijection of the positive integers that moves only
 //    finitely many points. `Permutation([2, 3, 1])` maps 1 to 2, 2 to 3 and
@@ -30,7 +35,7 @@
 //    of `PermutationApply` and the point of a stabilizer are read in that set.
 //  - A `PermutationGroup` is the list of generators as given, plus the action.
 //    Two groups with different generators can be the same subgroup, so the
-//    constructor has no `eq` handler; `PermutationGroupEqual` is the query
+//    constructor has no `eq` handler; `GroupEqual` is the query
 //    that compares the subgroups.
 //
 // Loading:
@@ -76,6 +81,11 @@
 // (`ce._deadlineFrame`), so a time limit set by the host also stops a
 // permutation query.
 
+import { collectedPcDefinitions } from './pc-group-theory.js';
+import {
+  exactGroupDefinitions,
+  finiteGroupLimits,
+} from './finite-group-theory.js';
 import { PermutationQuerySession } from '../group-theory/permutation/query-session.js';
 import type {
   Expression,
@@ -167,10 +177,12 @@ export function isPermutationError(
  * integer from 0 to the kernel maximum, otherwise `loadGroupTheory()`
  * throws.
  *
+ * - `maxFiniteElements`, `maxFiniteWork`: finite-model size and work ceilings.
+ * - `maxMatrixActionPoints`: point ceiling for finite-field vector actions.
  * - `maxDegree`: the largest action degree and image-list length.
  * - `maxGenerators`, `maxGeneratorImages`: the number of generators of one
  *   group, and the sum of their support degrees.
- * - `maxClosure*`: limits of `PermutationGroupElements`, which lists every
+ * - `maxClosure*`: limits of `GroupElements`, which lists every
  *   element.
  * - `maxOrbitPoints`, `maxOrbitEdges`: limits of the orbit queries.
  * - `maxTransversal*`: limits of `PermutationTransversal`.
@@ -178,6 +190,12 @@ export function isPermutationError(
  *   order, membership, stabilizer and subgroup queries use.
  */
 export interface GroupTheoryLoadOptions {
+  /** Bounded finite models and coordinate calculations, default 256 elements. */
+  maxFiniteElements?: number;
+  /** Shared work ceiling for finite, matrix, and polycyclic queries. */
+  maxFiniteWork?: number;
+  /** Maximum points in a full finite-field matrix action. */
+  maxMatrixActionPoints?: number;
   maxDegree?: number;
   maxClosureElements?: number;
   maxClosureProducts?: number;
@@ -197,7 +215,7 @@ export interface GroupTheoryLoadOptions {
   maxChainStoredImages?: number;
 }
 export interface GroupTheoryLoadReport {
-  /** Number of registered permutation operators. */
+  /** Number of registered group-theory operators. */
   operatorCount: number;
 }
 /**
@@ -216,7 +234,7 @@ const loaded = new WeakMap<
 >();
 
 /**
- * Register the optional permutation library. Equal effective options are
+ * Register the optional group-theory library. Equal effective options are
  * idempotent; changing ceilings on an already-loaded engine is an error.
  * Definitions are installed atomically so a failed load leaves no partial types.
  *
@@ -259,7 +277,13 @@ export function loadGroupTheory(
     maxPoints: options.maxOrbitPoints ?? 100_000,
     maxEdges: options.maxOrbitEdges ?? 1_000_000,
   });
+  const finiteLimits = finiteGroupLimits({
+    maxElements: options.maxFiniteElements ?? 256,
+    maxWork: options.maxFiniteWork ?? 50_000_000,
+    maxPoints: options.maxMatrixActionPoints ?? 100_000,
+  });
   const settings = JSON.stringify({
+    finiteLimits,
     maxDegree,
     groupLimits,
     closureLimits,
@@ -688,9 +712,20 @@ export function loadGroupTheory(
       const settings = queryOptions(
         ops,
         kind === 'order' || kind === 'abelian' ? 1 : 2,
-        chainLimits
+        kind === 'stabilizer'
+          ? chainLimits
+          : {
+              ...finiteLimits,
+              ...chainLimits,
+              maxWork: Math.min(finiteLimits.maxWork, chainLimits.maxWork),
+            }
       );
       if (!settings) return undefined;
+      // Generic finite controls remain valid across representations. A chain
+      // allocates no finite table or matrix action, so only their work ceiling
+      // constrains this path; validate the other controls without enumerating.
+      if ('maxElements' in settings && settings.maxElements === 0)
+        return fail('invalid-group-option');
       const requested = permutationChainLimits(settings);
       const value = readGroup(ops[0]);
       if (!value) return undefined;
@@ -774,6 +809,86 @@ export function loadGroupTheory(
   // below; the engine refuses an operand of the wrong type with
   // `incompatible-type` before a handler runs. Every operator is pure: the
   // result depends only on the operands.
+  // Generic names retain the specialized permutation algorithms and their
+  // per-call chain/closure options. Only representation-specific operations
+  // are registered with a Permutation prefix.
+  const permutationQueries: Record<string, OperatorDefinition> = {
+    // Stabilizer-chain queries: see `chainQuery()`.
+    GroupOrder: {
+      signature:
+        '(group: PermutationGroup, options: dictionary<integer>?) -> integer',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'order'),
+    },
+
+    GroupContains: {
+      signature:
+        '(group: PermutationGroup, element: Permutation, options: dictionary<integer>?) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'contains'),
+    },
+
+    GroupIsSubgroup: {
+      signature:
+        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'subgroup'),
+    },
+
+    GroupIndex: {
+      signature:
+        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> integer',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'index'),
+    },
+
+    GroupEqual: {
+      signature:
+        '(left: PermutationGroup, right: PermutationGroup, options: dictionary<integer>?) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'equal'),
+    },
+
+    GroupIsNormal: {
+      signature:
+        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'normal'),
+    },
+
+    GroupIsAbelian: {
+      signature:
+        '(group: PermutationGroup, options: dictionary<integer>?) -> boolean',
+      pure: true,
+      evaluate: (ops) => chainQuery(ops, 'abelian'),
+    },
+
+    // List every element of the group, by a breadth-first closure over the
+    // generators. The identity comes first. Options: `maxElements`,
+    // `maxProducts`, `maxImageWork`, `maxStoredImages`. Errors:
+    // `permutation-closure-*-limit`. A limit error gives no partial list.
+    GroupElements: {
+      signature:
+        '(group: PermutationGroup, options: dictionary<integer>?) -> list<Permutation>',
+      pure: true,
+      evaluate: (ops) =>
+        adapt(() => {
+          const settings = queryOptions(ops, 1, closureLimits);
+          if (!settings) return undefined;
+          const requested = permutationClosureLimits(settings);
+          const value = readGroup(ops[0]);
+          if (!value) return undefined;
+          const elements = enumeratePermutationGroup(value, requested, work);
+          return ce.function(
+            'List',
+            elements.map((element) => {
+              work.check?.();
+              return encode(element);
+            })
+          );
+        }),
+    },
+  };
   const definitions: Record<string, OperatorDefinition> = {
     // Element operations: see `elementQuery()`.
     PermutationCycles: {
@@ -801,84 +916,11 @@ export function loadGroupTheory(
       pure: true,
       evaluate: (ops) => elementQuery(ops, 'commutator'),
     },
-    // The generator list exactly as given, after validation.
-    PermutationGroupGenerators: {
-      signature: '(PermutationGroup) -> list<Permutation>',
-      pure: true,
-      evaluate: (ops) =>
-        adapt(() => {
-          const value = readGroup(ops[0]);
-          return value
-            ? ce.function(
-                'List',
-                value.generators.map((g) => {
-                  work.check?.();
-                  return encode(g);
-                })
-              )
-            : undefined;
-        }),
-    },
-    // The identity permutation, `Permutation([])`. The group operand is read
-    // only to validate it.
-    PermutationGroupIdentity: {
-      signature: '(PermutationGroup) -> Permutation',
-      pure: true,
-      evaluate: (ops) =>
-        adapt(() => {
-          return readGroup(ops[0])
-            ? encode(PermutationValue.fromImages([], work))
-            : undefined;
-        }),
-    },
-    // Stabilizer-chain queries: see `chainQuery()`.
-    PermutationGroupOrder: {
-      signature:
-        '(group: PermutationGroup, options: dictionary<integer>?) -> integer',
-      pure: true,
-      evaluate: (ops) => chainQuery(ops, 'order'),
-    },
-    PermutationGroupContains: {
-      signature:
-        '(group: PermutationGroup, element: Permutation, options: dictionary<integer>?) -> boolean',
-      pure: true,
-      evaluate: (ops) => chainQuery(ops, 'contains'),
-    },
     PermutationPointStabilizer: {
       signature:
         '(group: PermutationGroup, point: integer, options: dictionary<integer>?) -> PermutationGroup',
       pure: true,
       evaluate: (ops) => chainQuery(ops, 'stabilizer'),
-    },
-    PermutationIsSubgroup: {
-      signature:
-        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
-      pure: true,
-      evaluate: (ops) => chainQuery(ops, 'subgroup'),
-    },
-    PermutationSubgroupIndex: {
-      signature:
-        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> integer',
-      pure: true,
-      evaluate: (ops) => chainQuery(ops, 'index'),
-    },
-    PermutationGroupEqual: {
-      signature:
-        '(left: PermutationGroup, right: PermutationGroup, options: dictionary<integer>?) -> boolean',
-      pure: true,
-      evaluate: (ops) => chainQuery(ops, 'equal'),
-    },
-    PermutationIsNormal: {
-      signature:
-        '(parent: PermutationGroup, candidate: PermutationGroup, options: dictionary<integer>?) -> boolean',
-      pure: true,
-      evaluate: (ops) => chainQuery(ops, 'normal'),
-    },
-    PermutationGroupIsAbelian: {
-      signature:
-        '(group: PermutationGroup, options: dictionary<integer>?) -> boolean',
-      pure: true,
-      evaluate: (ops) => chainQuery(ops, 'abelian'),
     },
     // Orbit queries: see `orbitQuery()`.
     PermutationOrbit: {
@@ -911,32 +953,7 @@ export function loadGroupTheory(
       canonical: (ops) => group(ops, true) ?? ce._fn('PermutationGroup', ops),
       evaluate: (ops) => group(ops),
       // No injective-constructor equality: distinct generators may generate
-      // the same subgroup; PermutationGroupEqual is the explicit mathematical query.
-    },
-    // List every element of the group, by a breadth-first closure over the
-    // generators. The identity comes first. Options: `maxElements`,
-    // `maxProducts`, `maxImageWork`, `maxStoredImages`. Errors:
-    // `permutation-closure-*-limit`. A limit error gives no partial list.
-    PermutationGroupElements: {
-      signature:
-        '(group: PermutationGroup, options: dictionary<integer>?) -> list<Permutation>',
-      pure: true,
-      evaluate: (ops) =>
-        adapt(() => {
-          const settings = queryOptions(ops, 1, closureLimits);
-          if (!settings) return undefined;
-          const requested = permutationClosureLimits(settings);
-          const value = readGroup(ops[0]);
-          if (!value) return undefined;
-          const elements = enumeratePermutationGroup(value, requested, work);
-          return ce.function(
-            'List',
-            elements.map((element) => {
-              work.check?.();
-              return encode(element);
-            })
-          );
-        }),
+      // the same subgroup; GroupEqual is the explicit mathematical query.
     },
     Permutation: {
       signature: '(list<integer>) -> Permutation',
@@ -1048,6 +1065,58 @@ export function loadGroupTheory(
         }),
     },
   };
+  Object.assign(
+    definitions,
+    exactGroupDefinitions(ce, finiteLimits, {
+      readPermutation,
+      readGroup,
+      encodePermutation: encode,
+      encodeGroup: (value) => {
+        // Representation conversions can increase degree or generator storage.
+        // Enforce the receiving engine's ceilings before publishing a new value.
+        const action = new PermutationAction(value.action.degree, work);
+        return encodeGroup(
+          new PermutationGroupValue(value.generators, action, work)
+        );
+      },
+      queryPermutation: (group, kind, maxWork, element) => {
+        const limits = {
+          ...chainLimits,
+          maxWork: Math.min(chainLimits.maxWork, maxWork),
+        };
+        if (kind === 'order') return queries.order(group, limits, work);
+        if (kind === 'contains')
+          return queries.contains(group, element!, limits, work);
+        return permutationGroupIsAbelian(group, limits, work);
+      },
+      queryPermutationRelation: (group, other, kind, maxWork) =>
+        queries.relation(
+          group,
+          other,
+          kind,
+          { ...chainLimits, maxWork: Math.min(chainLimits.maxWork, maxWork) },
+          work
+        ),
+    })
+  );
+  for (const [name, permutation] of Object.entries(permutationQueries)) {
+    const generic = definitions[name];
+    const permutationHandler = permutation.evaluate;
+    const genericHandler = generic.evaluate;
+    if (
+      typeof permutationHandler !== 'function' ||
+      typeof genericHandler !== 'function'
+    )
+      throw new Error('Group query registration requires evaluator functions');
+    definitions[name] = {
+      ...generic,
+      evaluate: (ops, options) =>
+        isFunction(ops[0], 'PermutationGroup')
+          ? permutationHandler(ops, options)
+          : genericHandler(ops, options),
+    };
+  }
+  Object.assign(definitions, collectedPcDefinitions(ce, finiteLimits.maxWork));
   // Do not replace a definition that the host or another library made.
   for (const name of Object.keys(definitions)) {
     if (ce.lookupDefinition(name)) throw new Error(`Already defined: ${name}`);
@@ -1069,6 +1138,48 @@ export function loadGroupTheory(
     ce.declareType(
       'PermutationGroup',
       'tuple<generators: list<Permutation>, action: PermutationAction>',
+      { mint: false }
+    );
+    ce.declareType(
+      'GroupMatrix',
+      'tuple<characteristic: integer, rows: list<list<rational>>>',
+      { mint: false }
+    );
+    ce.declareType(
+      'MatrixGroup',
+      'tuple<dimension: integer, characteristic: integer, generators: list<GroupMatrix>>',
+      { mint: false }
+    );
+    // Union aliases allow representation-specific methods to share honest signatures.
+    ce.declareType('GroupDescriptor', 'PermutationGroup | MatrixGroup', {
+      alias: true,
+    });
+    ce.declareType('GroupElement', 'Permutation | GroupMatrix', {
+      alias: true,
+    });
+    ce.declareType(
+      'GroupPcSequence',
+      'tuple<group: GroupDescriptor, sequence: list<GroupElement>>',
+      { mint: false }
+    );
+    ce.declareType(
+      'GroupHomomorphism',
+      'tuple<source: GroupDescriptor, target: GroupDescriptor, images: list<tuple<GroupElement, GroupElement>>>',
+      { mint: false }
+    );
+    ce.declareType(
+      'GroupQuotientValue',
+      'tuple<source: GroupDescriptor, kernel: GroupDescriptor, projection: GroupHomomorphism>',
+      { mint: false }
+    );
+    ce.declareType(
+      'PcGroup',
+      'tuple<orders: list<integer>, powers: list<list<integer>>, conjugates: list<list<list<integer>>>, inverseConjugates: list<list<list<integer>>>>',
+      { mint: false }
+    );
+    ce.declareType(
+      'PcElement',
+      'tuple<group: PcGroup, coordinates: list<integer>>',
       { mint: false }
     );
     for (const [name, definition] of Object.entries(definitions))

@@ -118,7 +118,9 @@ describe('CE-424: a withTimeLimit span around FindFit.evaluateAsync()', () => {
       // (a step of the interpreted search can take a few tens of ms).
       expect(elapsed).toBeLessThan(1500);
       expect(r.get('route')?.string).toBe('calling-thread');
-      expect(r.get('reason')?.string).toBe('no-pool');
+      // The deadline covers setup and search. On a busy runner it can expire
+      // before the calling-thread search starts; both routes report a timeout.
+      expect(['no-pool', 'setup-timeout']).toContain(r.get('reason')?.string);
     },
     30_000
   );

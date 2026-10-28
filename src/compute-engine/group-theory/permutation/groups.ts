@@ -259,6 +259,27 @@ export function enumeratePermutationGroup(
     group.action,
     work
   );
+  return enumeratePermutationGroupWithLimits(validated, limits, work);
+}
+
+/**
+ * Internal closure traversal shared by bounded representations. The caller has
+ * validated the group and supplied finite, nonnegative limits (maxElements >= 1).
+ * Public closure requests enter through enumeratePermutationGroup(), which also
+ * applies that API's ceilings. A finite-table bridge instead shares its existing
+ * work ceiling across closure and table construction.
+ *
+ * chargeProduct is called before every attempted product with max(1, width),
+ * including repeated elements. It lets a surrounding computation charge this
+ * traversal to the same ledger without counting cancellation polls as work.
+ */
+export function enumeratePermutationGroupWithLimits(
+  group: PermutationGroupValue,
+  limits: Required<PermutationClosureLimits>,
+  work: PermutationGroupWork & {
+    readonly chargeProduct?: (width: number) => void;
+  } = {}
+): readonly PermutationValue[] {
   const elements: PermutationValue[] = [PermutationValue.fromImages([], work)];
   const seen = new Set<string>(['']);
   let products = 0,
@@ -266,7 +287,7 @@ export function enumeratePermutationGroup(
     storedImages = 0;
   for (let cursor = 0; cursor < elements.length; cursor++) {
     work.check?.();
-    for (const generator of validated.generators) {
+    for (const generator of group.generators) {
       work.check?.();
       if (products >= limits.maxProducts)
         throw new PermutationClosureLimitError(

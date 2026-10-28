@@ -1,3 +1,29 @@
+## [Unreleased]
+
+### New Features
+
+- **Finite-group maps, quotients, matrices, and polycyclic coordinates.** The
+  optional group-theory library adds checked homomorphisms, quotient
+  projections, bounded structural algorithms, exact rational and prime-field
+  matrix groups, and finite polycyclic sequences. Collected presentations
+  support exact arithmetic without enumerating the group. Generic `Group*`
+  queries dispatch to the appropriate representation; permutation-specific
+  element and action operations remain available. General finite models have at
+  most 256 elements, with explicit work and output limits. Contributed by
+  @KingArth0r (#484).
+
+### Behavior Changes
+
+- **Group queries use generic names across representations.** The
+  permutation-only order, membership, subgroup, index, equality, normality,
+  abelian, element-list, generator-list, and identity queries now use
+  `GroupOrder`, `GroupContains`, `GroupIsSubgroup`, `GroupIndex`, `GroupEqual`,
+  `GroupIsNormal`, `GroupIsAbelian`, `GroupElements`, `GroupGenerators`, and
+  `GroupIdentity`. Permutation queries retain their stabilizer-chain and closure
+  algorithms and corresponding resource options. These names replace the
+  permutation-only queries shipped in 0.172.0; callers must update their query
+  names.
+
 ## 0.172.0 _2026-10-28_
 
 ### New Features
