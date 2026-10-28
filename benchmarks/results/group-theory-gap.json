@@ -1,0 +1,324 @@
+{
+  "kind": "metadata",
+  "gap": "4.15.1",
+  "architecture": "x86_64-pc-linux-gnu-default64-kv10",
+  "timer": "gettimeofday",
+  "timerResolutionNs": 1000,
+  "timerMonotonic": false,
+  "timerReliable": false,
+  "warmups": 3,
+  "samples": 9,
+  "packagesAutoloaded": false,
+  "platform": "Linux container",
+  "cpuLimit": 2,
+  "memoryLimitBytes": 1073741824,
+  "image": "ghcr.io/gap-system/gap:4.15.1-bare",
+  "imageDigest": "sha256:7d5e5f22fa865a24080d544b1067932250e453b713f03925746bea3a775d15cc",
+  "comparisonLimits": "Windows Node26 versus Linux Docker; different group representations and implementations; query construction excluded; GAP timer is not monotonic",
+  "elementaryRepresentation": "regular permutation action on 128 points from seven bit flips",
+  "dihedralRepresentation": "PC group converted from fresh regular permutations; conversion excluded from query and measured separately",
+  "matrixRepresentation": "generic GF(2) matrix groups with adjacent transvections; no named-GL order metadata",
+  "timing": "NanosecondsSinceEpoch differences in nanoseconds",
+  "measurements": [
+    {
+      "kind": "measurement",
+      "name": "C2^7 generic descriptor construction",
+      "status": "ok",
+      "result": 7,
+      "samplesNs": [
+        341000,
+        320000,
+        297000,
+        255000,
+        323000,
+        262000,
+        248000,
+        240000,
+        265000
+      ],
+      "medianNs": 265000,
+      "minNs": 240000,
+      "maxNs": 341000
+    },
+    {
+      "kind": "measurement",
+      "name": "C2^7 Sylow(2)",
+      "status": "ok",
+      "result": 128,
+      "samplesNs": [
+        3509000,
+        2903000,
+        3309000,
+        3863000,
+        2384000,
+        2707000,
+        3159000,
+        2496000,
+        2800000
+      ],
+      "medianNs": 2903000,
+      "minNs": 2384000,
+      "maxNs": 3863000
+    },
+    {
+      "kind": "measurement",
+      "name": "C2^7 Frattini",
+      "status": "ok",
+      "result": 1,
+      "samplesNs": [
+        487000,
+        471000,
+        510000,
+        437000,
+        500000,
+        527000,
+        370000,
+        396000,
+        521000
+      ],
+      "medianNs": 487000,
+      "minNs": 370000,
+      "maxNs": 527000
+    },
+    {
+      "kind": "measurement",
+      "name": "C2^7 simplicity",
+      "status": "ok",
+      "result": false,
+      "samplesNs": [
+        8612000,
+        7262000,
+        7764000,
+        6644000,
+        8306000,
+        6384000,
+        7300000,
+        5175000,
+        6504000
+      ],
+      "medianNs": 7262000,
+      "minNs": 5175000,
+      "maxNs": 8612000
+    },
+    {
+      "kind": "measurement",
+      "name": "C2^7 minimum generators",
+      "status": "ok",
+      "result": 7,
+      "samplesNs": [
+        1652000,
+        2977000,
+        2536000,
+        2412000,
+        2291000,
+        2206000,
+        2304000,
+        3097000,
+        2416000
+      ],
+      "medianNs": 2412000,
+      "minNs": 1652000,
+      "maxNs": 3097000
+    },
+    {
+      "kind": "measurement",
+      "name": "D128 pc representation construction",
+      "status": "ok",
+      "result": 128,
+      "samplesNs": [
+        3359000,
+        2360000,
+        2780000,
+        3497000,
+        7905000,
+        7354000,
+        3458000,
+        3374000,
+        7035000
+      ],
+      "medianNs": 3458000,
+      "minNs": 2360000,
+      "maxNs": 7905000
+    },
+    {
+      "kind": "measurement",
+      "name": "D128 pc automorphisms explicit images",
+      "status": "ok",
+      "result": 2048,
+      "samplesNs": [
+        3594697000,
+        2945317000,
+        2580226000,
+        3126463000,
+        4382873000,
+        1921542000,
+        2452212000,
+        2842199000,
+        1833015000
+      ],
+      "medianNs": 2842199000,
+      "minNs": 1833015000,
+      "maxNs": 4382873000
+    },
+    {
+      "kind": "measurement",
+      "name": "S4 pcgs",
+      "status": "ok",
+      "result": 24,
+      "samplesNs": [
+        114000,
+        113000,
+        151000,
+        112000,
+        110000,
+        107000,
+        126000,
+        110000,
+        338000
+      ],
+      "medianNs": 113000,
+      "minNs": 107000,
+      "maxNs": 338000
+    },
+    {
+      "kind": "measurement",
+      "name": "C2^7 pcgs",
+      "status": "ok",
+      "result": 128,
+      "samplesNs": [
+        342000,
+        318000,
+        329000,
+        1175000,
+        338000,
+        423000,
+        207000,
+        188000,
+        224000
+      ],
+      "medianNs": 329000,
+      "minNs": 188000,
+      "maxNs": 1175000
+    },
+    {
+      "kind": "measurement",
+      "name": "GL(4,2) generic descriptor construction",
+      "status": "ok",
+      "result": 6,
+      "samplesNs": [
+        151000,
+        123000,
+        116000,
+        115000,
+        113000,
+        114000,
+        113000,
+        113000,
+        112000
+      ],
+      "medianNs": 114000,
+      "minNs": 112000,
+      "maxNs": 151000
+    },
+    {
+      "kind": "measurement",
+      "name": "GL(4,2) exact order",
+      "status": "ok",
+      "result": 20160,
+      "samplesNs": [
+        1262000,
+        1232000,
+        1353000,
+        1394000,
+        1772000,
+        1378000,
+        1242000,
+        1203000,
+        1247000
+      ],
+      "medianNs": 1262000,
+      "minNs": 1203000,
+      "maxNs": 1772000
+    },
+    {
+      "kind": "measurement",
+      "name": "GL(5,2) generic descriptor construction",
+      "status": "ok",
+      "result": 8,
+      "samplesNs": [
+        171000,
+        169000,
+        169000,
+        163000,
+        163000,
+        213000,
+        174000,
+        167000,
+        213000
+      ],
+      "medianNs": 169000,
+      "minNs": 163000,
+      "maxNs": 213000
+    },
+    {
+      "kind": "measurement",
+      "name": "GL(5,2) exact order",
+      "status": "ok",
+      "result": 9999360,
+      "samplesNs": [
+        5344000,
+        5328000,
+        11438000,
+        4128000,
+        5049000,
+        4820000,
+        4571000,
+        4989000,
+        4574000
+      ],
+      "medianNs": 4989000,
+      "minNs": 4128000,
+      "maxNs": 11438000
+    },
+    {
+      "kind": "measurement",
+      "name": "GL(6,2) generic descriptor construction",
+      "status": "ok",
+      "result": 10,
+      "samplesNs": [
+        341000,
+        296000,
+        262000,
+        257000,
+        281000,
+        277000,
+        265000,
+        253000,
+        293000
+      ],
+      "medianNs": 277000,
+      "minNs": 253000,
+      "maxNs": 341000
+    },
+    {
+      "kind": "measurement",
+      "name": "GL(6,2) exact order",
+      "status": "ok",
+      "result": 20158709760,
+      "samplesNs": [
+        16307000,
+        16833000,
+        24745000,
+        16788000,
+        14776000,
+        14530000,
+        20419000,
+        18541000,
+        27630000
+      ],
+      "medianNs": 16833000,
+      "minNs": 14530000,
+      "maxNs": 27630000
+    }
+  ]
+}

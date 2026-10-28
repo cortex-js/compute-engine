@@ -145,7 +145,7 @@ if (!/\/ 6$/.test(cubic.code) || cubic.run({ n: 16 }) !== 560)
 for (const engine of [ce, full]) {
   const first = loaded['group-theory'].loadGroupTheory(engine);
   const second = loaded['group-theory'].loadGroupTheory(engine);
-  if (first.operatorCount !== 26 || second.operatorCount !== 26)
+  if (first.operatorCount < 26 || second.operatorCount !== first.operatorCount)
     fail('group-theory loader report is incorrect');
   const order = engine
     .box([
@@ -162,5 +162,10 @@ for (const engine of [ce, full]) {
     ])
     .evaluate();
   if (order.json !== 6) fail('group-theory subpath did not compute S3 order');
+  const matrixOrder = engine.box(['GroupOrder', ['GeneralLinearGroup', 2, 2]]).evaluate();
+  if (matrixOrder.json !== 6) fail('group-theory subpath did not compute GL(2,2) order');
+  const cyclic = ['PcGroup', ['List', 1000000000000], ['List', ['List']], ['List', ['List']], ['List', ['List']]];
+  const pcOrder = engine.box(['PcGroupOrder', cyclic]).evaluate();
+  if (pcOrder.json !== 1000000000000) fail('group-theory subpath did not compute collected group order');
 }
 console.log('require-smoke: OK');
