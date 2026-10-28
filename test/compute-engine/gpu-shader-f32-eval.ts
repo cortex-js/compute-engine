@@ -33,7 +33,11 @@
  * that `x` is NaN, and the same test with `>=` (in `_gpu_cossinpi`) as a
  * test that `x` is not finite. A NaN built from its bit pattern
  * (`intBitsToFloat(0x7FC00000)`, or `bitcast<f32>` of a `let`) is read as
- * `0.0 / 0.0`. A function can return `bool`.
+ * `0.0 / 0.0`. A function can return `bool`. The operator `!`, the
+ * conversion `i32` (read as a truncation) and an index `a[i]` are read too,
+ * and a name that no function declares is read from `globals`: a struct is
+ * an object, and an array (`array<vec4f, k>`) is a JavaScript array. An
+ * index out of bounds is an error.
  *
  * The text is also checked against some rules of its language, which a
  * shader compiler enforces and this interpreter would otherwise not see:
@@ -54,7 +58,9 @@ const fr = Math.fround;
 type Node =
   | { k: 'num'; v: number }
   | { k: 'id'; name: string }
-  | { k: 'member'; obj: Node; name: 'x' | 'y' }
+  | { k: 'member'; obj: Node; name: string }
+  | { k: 'index'; obj: Node; i: Node }
+  | { k: 'not'; e: Node }
   | { k: 'call'; name: string; args: Node[] }
   | { k: 'neg'; e: Node }
   | { k: 'bin'; op: string; a: Node; b: Node }
@@ -75,7 +81,7 @@ export type ShaderLanguage = 'glsl' | 'wgsl';
 
 function tokenize(src: string): string[] {
   const re =
-    /\s*([0-9]+\.[0-9]*(?:e[-+]?[0-9]+)?|[0-9]+(?:e[-+]?[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*|->|==|!=|<=|>=|\|\||&&|[-+*/(){}<>=?:;,.])/y;
+    /\s*([0-9]+\.[0-9]*(?:e[-+]?[0-9]+)?|[0-9]+(?:e[-+]?[0-9]+)?|[A-Za-z_][A-Za-z0-9_]*|->|==|!=|<=|>=|\|\||&&|[-+*/(){}<>=?:;,.!\[\]])/y;
   const out: string[] = [];
   let i = 0;
   while (i < src.length) {
@@ -287,11 +293,19 @@ class Parser {
       this.next();
       return { k: 'neg', e: this.unary() };
     }
-    let e = this.primary();
-    while (this.peek() === '.') {
+    if (this.peek() === '!') {
       this.next();
+      return { k: 'not', e: this.unary() };
+    }
+    let e = this.primary();
+    while (this.peek() === '.' || this.peek() === '[') {
+      if (this.next() === '[') {
+        const i = this.expr();
+        this.expect(']');
+        e = { k: 'index', obj: e, i };
+        continue;
+      }
       const name = this.next();
-      if (name !== 'x' && name !== 'y') throw new Error(`Member .${name}`);
       e = { k: 'member', obj: e, name };
     }
     return e;
@@ -369,14 +383,19 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   _gpu_bits_nonfinite: (x) => !Number.isFinite(num(x)) as unknown as Value,
   vec2: (x, y) => ({ x: num(x), y: num(y ?? x) }),
   vec2f: (x, y) => ({ x: num(x), y: num(y ?? x) }),
+  // The conversion to an integer, used only for an array index here.
+  i32: (x) => Math.trunc(num(x)),
 };
 
 /** Parse the shader text `src` (one or more function definitions) and
  * return a function that calls the named shader function. */
 export function shaderFunctions(
   src: string,
-  language: ShaderLanguage
+  language: ShaderLanguage,
+  globals: Readonly<Record<string, unknown>> = {}
 ): (name: string, ...args: Value[]) => Value {
+  // A line comment is not read.
+  src = src.replace(/\/\/[^\n]*/g, '');
   // The NaN and infinity helpers are built from a bit pattern (a hex literal
   // and `intBitsToFloat` or `bitcast<f32>`): their bodies are replaced.
   src = src.replace(
@@ -419,15 +438,29 @@ export function shaderFunctions(
       case 'num':
         return e.v;
       case 'id': {
-        const v = env.get(e.name);
+        const v = env.get(e.name) ?? (globals[e.name] as Value | undefined);
         if (v === undefined) throw new Error(`Unknown name ${e.name}`);
         return v;
       }
       case 'member': {
+        // A member of a vector (`.x`, `.y`) or a field of a struct global.
         const v = evaluate(e.obj, env) as Value;
         if (typeof v === 'number') throw new Error('Member of a scalar');
-        return v[e.name];
+        const m = (v as unknown as Record<string, Value | undefined>)[e.name];
+        if (m === undefined) throw new Error(`Member .${e.name}`);
+        return m;
       }
+      case 'index': {
+        // An element of an array global (a list of numbers or of arrays).
+        const a = evaluate(e.obj, env) as unknown;
+        const i = num(evaluate(e.i, env) as Value);
+        if (!Array.isArray(a)) throw new Error('Index of a value that is not an array');
+        if (!Number.isInteger(i) || i < 0 || i >= a.length)
+          throw new Error(`Index ${i} out of bounds (length ${a.length})`);
+        return a[i] as Value;
+      }
+      case 'not':
+        return !evaluate(e.e, env);
       case 'neg': {
         const v = evaluate(e.e, env) as Value;
         return typeof v === 'number' ? -v : { x: -v.x, y: -v.y };

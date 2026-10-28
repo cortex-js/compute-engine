@@ -319,12 +319,15 @@ export class GLSLTarget extends GPUShaderTarget {
     // random frames in different statements get DISTINCT counters.
     // The declared inputs and uniforms are framed and bound for the body
     // analysis: nothing but these declarations carries their shader types, and
-    // GLSL references both kinds bare (see `compileShaderBody`).
+    // GLSL references both kinds bare (see `compileShaderBody`). An `out`
+    // variable is a global of the shader too, and GLSL can read it, so a body
+    // statement that reads an output names a declared variable.
     const statements = this.compileShaderBody(
       body,
       type,
       [...inputs, ...uniforms],
-      constantFold
+      constantFold,
+      outputs.map((d) => d.name)
     );
     // Over the FULL emission: a helper may be referenced only from inside a
     // hoisted loop (Tycho item 110), and an undeclared helper is a shader that

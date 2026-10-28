@@ -85,6 +85,9 @@ export type {
   CompilationResult,
   ExecutableTarget,
   ComplexResult,
+  RunnerListInput,
+  StorageBufferBinding,
+  StorageBufferLayout,
   CompiledColor,
   CompiledColorSpace,
   CompiledValue,
@@ -94,6 +97,13 @@ export type {
   LanguageTarget,
   TargetSource,
   CompiledFunction,
+  FieldFunctionOptions,
+  FieldFunctionParameter,
+  FieldFunctionResult,
+  CompileDiagnostic,
+  CompileDiagnosticKind,
+  StorageHint,
+  StorageKind,
 } from './compute-engine/compilation/types.js';
 
 export { JavaScriptTarget } from './compute-engine/compilation/javascript-target.js';

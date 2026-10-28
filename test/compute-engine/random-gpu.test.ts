@@ -757,6 +757,7 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
     const shader = glsl.compileShader({
       type: 'fragment',
       outputs: [{ name: 'fragColor', type: 'vec4' }],
+      uniforms: [{ name: 'a', type: 'float' }],
       body: [{ variable: 'fragColor.r', expression: ce.box(['Gamma', 'a']) }],
     });
     expect(shader.indexOf('float _gpu_gamma')).toBeGreaterThanOrEqual(0);
@@ -834,6 +835,7 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
     const shader = glsl.compileShader({
       type: 'fragment',
       outputs: [{ name: 'fragColor', type: 'vec4' }],
+      uniforms: [{ name: 'a', type: 'float' }],
       body: [
         { variable: 'fragColor.r', expression: ce.box(['Add', 'a', 1]) },
       ],

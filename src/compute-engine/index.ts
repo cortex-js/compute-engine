@@ -334,9 +334,14 @@ export type {
   CompileDiagnosticKind,
   StorageHint,
   StorageKind,
+  StorageBufferBinding,
+  StorageBufferLayout,
   LanguageTarget,
   TargetSource,
   CompiledFunction,
+  FieldFunctionOptions,
+  FieldFunctionParameter,
+  FieldFunctionResult,
 } from './compilation/types.js';
 export {
   CompileDeclineError,

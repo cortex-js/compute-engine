@@ -52,6 +52,8 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
+  InternalStorageKind,
+  StorageBufferLayout,
   StorageKind,
 } from './types.js';
 import {
@@ -60,7 +62,21 @@ import {
   compileSubject,
 } from './diagnostics.js';
 import { colorSpaceIsUnsettled, colorSpaceOf } from './color-space-fact.js';
-import { resolveStorageHints } from './storage-hints.js';
+import {
+  resolveStorageHints,
+  storageBufferBindings,
+} from './storage-hints.js';
+import { WGSL_PREDECLARED } from './wgsl-predeclared.js';
+import {
+  storageBufferAtHelper,
+  storageBufferDeclarations,
+  storageBufferHelpers,
+  storageBufferIsRead,
+  storageBufferLayout,
+  storageBufferLength,
+  storageBufferReductionHelper,
+  type StorageBufferReduction,
+} from './gpu-storage-buffer.js';
 import {
   BaseCompiler,
   explicitBroadcastPointNorm,
@@ -466,7 +482,7 @@ function gpuReservedWords(language?: string): ReadonlySet<string> {
  * fails to compile on the GPU — surface a clear diagnostic instead. Returns the
  * identifier unchanged when it is safe.
  */
-function gpuCheckIdentifier(id: string, language?: string): string {
+export function gpuCheckIdentifier(id: string, language?: string): string {
   if (gpuReservedWords(language).has(id))
     throw new Error(
       `"${id}" is a reserved word in ${language ?? 'this shader language'} and cannot be used as a variable name. Rename it before compiling to a GPU target (fail closed, D6).`
@@ -1966,10 +1982,13 @@ function gpuFiniteProof(
       // source, or a mapping of a library constant, replaces a value whose
       // type the engine knows with one it does not.
       const mapped = isMapped(e.symbol);
+      // A field of the uniform parameter struct of `compileFieldFunction()`
+      // (`hostInputVars`) is also the host's input of the declared type.
       const selfMapped =
         mapped &&
         e.valueDefinition?.isConstant !== true &&
-        target.var(e.symbol) === e.symbol;
+        (target.var(e.symbol) === e.symbol ||
+          target.hostInputVars?.has(e.symbol) === true);
       result =
         (baked !== undefined || e.valueDefinition?.inferredType !== true) &&
         (!strict || baked !== undefined || gpuFiniteRealCells(e)) &&
@@ -6388,7 +6407,7 @@ type GPUAtBase =
        * in shader storage of this kind: the read then lowers to a fetch from
        * that storage rather than to a subscript of a shader value.
        */
-      storage?: StorageKind;
+      storage?: StorageKind | InternalStorageKind;
     }
   | { decline: string };
 
@@ -6576,10 +6595,13 @@ function gpuAtFramedIndex(
  */
 function gpuStorageAtBaseShape(
   base: Expression & { symbol: string },
-  kind: StorageKind
+  kind: StorageKind | InternalStorageKind
 ): GPUAtBase {
   const name = base.symbol;
-  const hinted = `the base "${name}" is ${kind}-backed (storage hint)`;
+  const hinted =
+    kind === 'uniform-struct'
+      ? `the base "${name}" is a list parameter of the uniform parameter struct`
+      : `the base "${name}" is ${kind}-backed (storage hint)`;
   // A name the current shape frame binds — a caller-declared parameter or
   // shader input, a `Block` local, a lambda parameter — is not the free
   // symbol the hint was validated against: a declared name's shape comes from
@@ -6590,8 +6612,8 @@ function gpuStorageAtBaseShape(
       decline:
         `${hinted}, but here "${name}" is a declared or local name whose ` +
         `shape comes from its declaration, not from the engine type the ` +
-        `hint applies to — a sampler-backed name must be a free symbol of ` +
-        `the expression`,
+        `hint applies to — a name with a storage hint must be a free ` +
+        `symbol of the expression`,
     };
   const t = resolveTypeAlias(base.type.type);
   const spelled = base.type.toString();
@@ -7169,7 +7191,17 @@ function compileGPUPointListAt(
   const idx = compile(index);
   const floatIdx =
     framed === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`;
-  return `_gpu_atp${m}_${n}(${shape.source()}, ${floatIdx})`;
+  // A module-scope array of points whose copy would not fit the
+  // function-scope memory of WGSL is indexed by its name, with no copy
+  // (`gpuWGSLInPlaceArray`). WGSL gives a `vec2f` 8 bytes, and a `vec3f` or
+  // a `vec4f` 16 bytes, in an array.
+  const pointBytes = m === 2 ? 8 : 16;
+  const inPlace = gpuWGSLInPlaceArray(base, n, pointBytes, compile, target);
+  if (inPlace !== undefined && 'name' in inPlace)
+    return `_gpu_atp_${inPlace.name}_${m}_${n}(${floatIdx})`;
+  if (isWGSL) gpuAssertWGSLCopyFits(base, n, pointBytes, decline);
+  const source = inPlace !== undefined ? inPlace.code : shape.source();
+  return `_gpu_atp${m}_${n}(${source}, ${floatIdx})`;
 }
 
 /**
@@ -7242,6 +7274,11 @@ function compileGPUAt(
   const base = args[0];
   const index = args[1];
 
+  // A list in a storage buffer: the length is read at run time
+  // (`compileGPUStorageBufferAt`).
+  if (gpuIsStorageBufferSymbol(base, target))
+    return compileGPUStorageBufferAt(base, index, compile, target, decline);
+
   // A list of points: the result is a point, a `vecM`, and an absent point is
   // a vector of NaN components (`compileGPUPointListAt`).
   const points =
@@ -7276,6 +7313,14 @@ function compileGPUAt(
   // the access to NaN without emitting the base.
   let texAtSource: string | undefined;
   const texAtCall = (floatIndex: string): string => {
+    // A list field of the parameter struct of `compileFieldFunction()`: the
+    // entry point that placed it there supplies the read.
+    if (storage === 'uniform-struct' && target.storageRead !== undefined)
+      return target.storageRead(
+        (base as Expression & { symbol: string }).symbol,
+        n,
+        floatIndex
+      );
     texAtSource ??= gpuStorageOperandSource(
       base as Expression & { symbol: string },
       compile
@@ -7567,9 +7612,36 @@ function compileGPUAt(
         `number, so it selects no element and \`At\` has no value to project`
     );
 
+  // A WGSL base whose copy would not fit the function-scope memory that WGSL
+  // guarantees is indexed by its name, with no copy, when it is a
+  // module-scope declaration (`gpuWGSLInPlaceArray`). When it is not one, the
+  // read declines (`gpuAssertWGSLCopyFits`). `baseCode` is the emission of
+  // the base when the test compiled it, so that it is not compiled twice.
+  const inPlaceTest =
+    storage === undefined
+      ? gpuWGSLInPlaceArray(base, n, 4, compile, target)
+      : undefined;
+  const inPlace =
+    inPlaceTest !== undefined && 'name' in inPlaceTest
+      ? inPlaceTest.name
+      : undefined;
+  let baseCode =
+    inPlaceTest !== undefined && 'code' in inPlaceTest
+      ? inPlaceTest.code
+      : undefined;
+  const compileBase = (): string => (baseCode ??= compile(base));
+  // The local copy of an input that the body writes is a function-scope
+  // `var`, which WGSL indexes with a run-time index as it is. So a proven
+  // index reads it directly, with no second copy.
+  const isInputLocal =
+    isSymbol(base) &&
+    !target.boundVars?.has(base.symbol) &&
+    target.inputLocals?.has(base.symbol) === true;
+
   // A proven positive, in-range integer needs neither a guard nor a float
-  // conversion. Textures retain their storage helper. WGSL array values are
-  // copied to a local reference before dynamic indexing, as in gpuAtPreamble.
+  // conversion. Textures retain their storage helper. Other WGSL array values
+  // are copied to a local reference before dynamic indexing, as in
+  // gpuAtPreamble.
   const fact = gpuIntegerFact(
     index,
     target,
@@ -7585,11 +7657,15 @@ function compileGPUAt(
     fact.max <= n &&
     (target.language !== 'wgsl' ||
       n <= 4 ||
+      inPlace !== undefined ||
+      isInputLocal ||
       (BaseCompiler.canHoist(target) &&
         !conditionalGPUSinks.has(target.hoist!)))
   ) {
-    let code = compile(base);
-    if (target.language === 'wgsl' && n > 4) {
+    if (inPlace !== undefined) return `${inPlace}[${fact.code} - 1]`;
+    let code = compileBase();
+    if (target.language === 'wgsl' && n > 4 && !isInputLocal) {
+      gpuAssertWGSLCopyFits(base, n, 4, decline);
       // The base runs ahead of the statement once it is bound, so a draw in
       // it must not come before a draw written before the `At`.
       const draws = BaseCompiler.foldValueImpure(base);
@@ -7609,13 +7685,306 @@ function compileGPUAt(
   const idx = compile(index);
   const floatIdx =
     framedIndex === undefined ? idx : `${isWGSL ? 'f32' : 'float'}(${idx})`;
-  if (storage === undefined || !isSymbol(base))
-    return `_gpu_at${n}(${compile(base)}, ${floatIdx})`;
+  if (inPlace !== undefined) return `_gpu_at_${inPlace}_${n}(${floatIdx})`;
+  if (storage === undefined || !isSymbol(base)) {
+    if (isWGSL && n > 4) gpuAssertWGSLCopyFits(base, n, 4, decline);
+    return `_gpu_at${n}(${compileBase()}, ${floatIdx})`;
+  }
 
   // A sampler-backed base: the same call shape and the same index contract,
   // through the texel-fetch helper (`texAtCall`: per length on GLSL, per
   // binding on WGSL).
   return texAtCall(floatIdx);
+}
+
+/**
+ * Is `e` a free symbol that the caller's `storage` hint places in a storage
+ * buffer (`{ kind: 'storage-buffer', group, binding }`)? A name that a
+ * binding form of the expression binds is not the free symbol of the hint
+ * and is not one (`gpuStorageBufferOperand` declines it).
+ */
+function gpuIsStorageBufferSymbol(
+  e: Expression | undefined | null,
+  target: CompileTarget<Expression>
+): e is Expression & { symbol: string } {
+  return (
+    e !== undefined &&
+    e !== null &&
+    isSymbol(e) &&
+    target.storage?.get(e.symbol) === 'storage-buffer' &&
+    !gpuIsBoundName(e.symbol, target)
+  );
+}
+
+/**
+ * Does a binding form of the expression bind `name` here (a `Block` local, a
+ * loop index, a parameter)? Such a name is not the free symbol that a
+ * `storage` hint of the same name applies to.
+ */
+function gpuIsBoundName(
+  name: string,
+  target: CompileTarget<Expression>
+): boolean {
+  return (
+    target.boundVars?.has(name) === true ||
+    BaseCompiler.localShapeFrameOf(name) !== undefined
+  );
+}
+
+/**
+ * The number of f32 components of an element of the storage-buffer list
+ * `base`, from its engine type: 1 for a list of real numbers, 2 to 4 for a
+ * list of points of real coordinates. Otherwise the reason it has no
+ * storage-buffer layout: a complex, boolean, string or nested-list element,
+ * or a list of two or more dimensions.
+ *
+ * The declared length of the list, if any, is not used: the length is the
+ * `len` header that the host writes.
+ */
+function gpuStorageBufferComponents(
+  base: Expression & { symbol: string }
+): number | { decline: string } {
+  const name = base.symbol;
+  const hinted = `the list "${name}" is in a storage buffer (storage hint)`;
+  const t = resolveTypeAlias(base.type.type);
+  const spelled = base.type.toString();
+  if (typeof t === 'string' || t.kind !== 'list')
+    return {
+      decline: `${hinted}, which requires a list of numbers or of points, but its type is \`${spelled}\``,
+    };
+  if ((t.dimensions?.length ?? 0) > 1)
+    return {
+      decline:
+        `${hinted}, which requires a ONE-dimensional list, but its type ` +
+        `\`${spelled}\` has ${t.dimensions!.length} dimensions`,
+    };
+  const element = resolveTypeForCompilation(t.elements);
+  if (typeof element !== 'string' && element.kind === 'tuple') {
+    const m = element.elements.length;
+    if (
+      m >= 2 &&
+      m <= 4 &&
+      element.elements.every((e) => gpuIsVectorComponentType(e.type))
+    )
+      return m;
+    return {
+      decline:
+        `${hinted}, and its elements (type \`${typeToString(t.elements)}\`) ` +
+        `are not points of 2 to 4 real coordinates, which is the element ` +
+        `shape of a storage-buffer list besides a real number`,
+    };
+  }
+  if (gpuIsVectorComponentType(t.elements)) return 1;
+  return {
+    decline:
+      `${hinted}, and its element type \`${typeToString(t.elements)}\` is ` +
+      `not a real number or a point of 2 to 4 real coordinates; a complex ` +
+      `number, a boolean, a string or a nested list has no storage-buffer ` +
+      `layout`,
+  };
+}
+
+/**
+ * The WGSL name of the buffer of the storage-buffer list `base` and the
+ * number of components of its elements, or a decline of `head`. The name is
+ * the ordinary emission of the symbol: its `vars` mapping when the caller
+ * gave one, else its own name. It must be a plain identifier without the
+ * reserved prefix `_gpu_`, because the compilation declares the buffer under
+ * that name and the helpers carry it in their names and use the prefix for
+ * their own locals.
+ */
+function gpuStorageBufferOperand(
+  base: Expression & { symbol: string },
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>,
+  head: string
+): { name: string; components: number } {
+  const decline = (reason: string): never => {
+    throw new Error(`Could not compile \`${head}\`: ${reason}.`);
+  };
+  if (target.language !== 'wgsl')
+    decline(
+      `the list "${base.symbol}" is in a storage buffer (storage hint), and ` +
+        `the ${target.language ?? 'GPU'} target has no storage buffers`
+    );
+  // A name that a binding form binds (a `Block` local, a parameter) is not
+  // the free symbol the hint was validated against.
+  if (
+    BaseCompiler.localShapeFrameOf(base.symbol) !== undefined ||
+    target.boundVars?.has(base.symbol)
+  )
+    decline(
+      `the list "${base.symbol}" is in a storage buffer (storage hint), but ` +
+        `here "${base.symbol}" is a local or bound name, not the free symbol ` +
+        `of the expression that the hint applies to`
+    );
+  const components = gpuStorageBufferComponents(base);
+  if (typeof components !== 'number') decline(components.decline);
+  const name = gpuStorageOperandSource(base, compile);
+  if (!/^[A-Za-z_]\w*$/.test(name) || name.startsWith('_gpu_'))
+    decline(
+      `the list "${base.symbol}" is in a storage buffer (storage hint) and ` +
+        `maps to \`${name}\`, which is not a plain identifier without the ` +
+        `reserved prefix \`_gpu_\`; the compilation declares the buffer ` +
+        `under that name`
+    );
+  // The structs of the buffers are named `CE_List_<element type>`, and a
+  // WGSL module cannot declare a struct and a variable with one name.
+  if (name.startsWith('CE_List_'))
+    decline(
+      `the list "${base.symbol}" is in a storage buffer (storage hint) and ` +
+        `maps to \`${name}\`, which starts with \`CE_List_\`, the prefix ` +
+        `of the struct names that the compilation declares for its buffers`
+    );
+  // The buffer is a module-scope variable, and a module-scope declaration
+  // with the name of a built-in function or type (`min`, `f32`) hides that
+  // built-in from the whole module: the read `min(S.len, arrayLength(…))`
+  // of the length would call the variable.
+  if (WGSL_PREDECLARED.has(name))
+    decline(
+      `the list "${base.symbol}" is in a storage buffer (storage hint) and ` +
+        `maps to \`${name}\`, which is a predeclared function or type of ` +
+        `WGSL; a buffer declared under that name hides the built-in that ` +
+        `the compiled code calls`
+    );
+  // Record the list, so that the compilation declares its buffer with this
+  // name and this element shape (`gpuStorageBuffersRead`). Two lists that
+  // map to one name would need two declarations of that name.
+  const read = target.storageBuffersRead;
+  if (read !== undefined) {
+    for (const [other, entry] of read)
+      if (other !== base.symbol && entry.name === name)
+        decline(
+          `the lists "${other}" and "${base.symbol}" are in storage buffers ` +
+            `(storage hint) and both map to \`${name}\`; each buffer needs ` +
+            `its own WGSL name`
+        );
+    read.set(base.symbol, { name, components: components as number });
+  }
+  return { name, components: components as number };
+}
+
+/**
+ * `At(S, i)` for a list `S` in a storage buffer: one call of the helper
+ * `_gpu_sbat_S` (`_gpu_sbatp<M>_S` for a list of points), which reads the
+ * length from the buffer and applies the index rules of `At` against it
+ * (`storageBufferHelpers`). The list is indexed where it is, with no copy.
+ * A collection index (a gather or a mask) declines: its result has no
+ * shader shape when the length is known only at run time.
+ */
+function compileGPUStorageBufferAt(
+  base: Expression & { symbol: string },
+  index: Expression,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>,
+  decline: (reason: string) => never
+): string {
+  if (
+    isFunction(index, 'List') ||
+    (isSubtype(gpuType(index), COLLECTION_SHAPE_TYPE) &&
+      !isSubtype(gpuType(index), 'string'))
+  )
+    decline(
+      `the index is a collection, and the list "${base.symbol}" is in a ` +
+        `storage buffer, whose length is known only at run time; only a ` +
+        `scalar index has a lowering`
+    );
+  if (
+    isSymbol(index, 'Missing') ||
+    isSymbol(index, 'Undefined') ||
+    BaseCompiler.isComplexValued(index) ||
+    !couldMatch(gpuType(index), 'number')
+  )
+    decline(
+      `the index (type \`${index.type.toString()}\`) is not a real number, ` +
+        `so it selects no element`
+    );
+  const framed = gpuAtFramedIndex(index);
+  if (framed !== undefined && 'decline' in framed) decline(framed.decline);
+  const { name, components } = gpuStorageBufferOperand(
+    base,
+    compile,
+    target,
+    'At'
+  );
+  // A literal index is checked as written, before it is rounded to f32:
+  // `1.0000000001` is not an integer and selects no element, but its f32
+  // spelling `1.0` would read the first one. So would an integer that f32
+  // cannot hold exactly (16777217 is written 16777216.0). Both give NaN, as
+  // the array form does.
+  if (isNumber(index)) {
+    const re = index.re;
+    if (!Number.isInteger(re) || Math.fround(re) !== re) {
+      const nan = gpuNaN(target);
+      return components === 1 ? nan : `vec${components}f(${nan})`;
+    }
+  }
+  const idx = isNumber(index)
+    ? formatFloat(index.re, target.language)
+    : compile(index);
+  const floatIdx = framed === undefined ? idx : `f32(${idx})`;
+  return `${storageBufferAtHelper(name, components)}(${floatIdx})`;
+}
+
+/**
+ * `Sum`, `Product`, `Max`, `Min` or `Mean` (`head`) of a list in a storage
+ * buffer: one call of the helper that loops over the run-time length of the
+ * list (`storageBufferHelpers`). Only the form with the list as its one
+ * operand has a lowering, and only for a list of numbers.
+ */
+function compileGPUStorageBufferReduce(
+  head: string,
+  reduction: StorageBufferReduction,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  const operand = args[0];
+  if (args.length !== 1 || !gpuIsStorageBufferSymbol(operand, target))
+    throw new Error(
+      `Could not compile \`${head}\`: an operand is a list in a storage ` +
+        `buffer, and only \`${head}\` of that list alone has a lowering`
+    );
+  const { name, components } = gpuStorageBufferOperand(
+    operand,
+    compile,
+    target,
+    head
+  );
+  if (components !== 1)
+    throw new Error(
+      `Could not compile \`${head}\`: the list "${operand.symbol}" in a ` +
+        `storage buffer holds points, and only a list of numbers has a ` +
+        `reduction; read the points with \`At\``
+    );
+  return `${storageBufferReductionHelper(reduction, name)}()`;
+}
+
+/**
+ * The layouts of the storage-buffer lists that `text` (the code and the
+ * preamble of a WGSL compilation) reads, in the order of the hints
+ * (`bindings`), with their declarations. `read` holds the WGSL name and the
+ * element shape of each list as `gpuStorageBufferOperand` validated it
+ * while the code was compiled (`CompileTarget.storageBuffersRead`), so the
+ * layout is the one the helpers read, whatever scope is current now.
+ */
+function gpuStorageBuffersRead(
+  text: string,
+  bindings: ReturnType<typeof storageBufferBindings>,
+  read: ReadonlyMap<string, { name: string; components: number }>
+): { layouts: StorageBufferLayout[]; declarations: string } {
+  const layouts: StorageBufferLayout[] = [];
+  for (const [symbol, binding] of bindings ?? []) {
+    const entry = read.get(symbol);
+    if (entry === undefined || !storageBufferIsRead(text, entry.name)) continue;
+    layouts.push(
+      storageBufferLayout(symbol, entry.name, binding, entry.components)
+    );
+  }
+  return {
+    layouts,
+    declarations: layouts.length > 0 ? storageBufferDeclarations(layouts) : '',
+  };
 }
 
 /**
@@ -7663,11 +8032,31 @@ function gpuStorageOperandSource(
  */
 function gpuRefuseStorageReference(
   id: string,
-  storage: ReadonlyMap<string, StorageKind>,
+  storage: ReadonlyMap<string, StorageKind | InternalStorageKind>,
   language: string
 ): void {
   const kind = storage.get(id);
   if (kind === undefined || gpuOpenStorageOperand === id) return;
+  if (kind === 'uniform-struct')
+    throw new Error(
+      `Could not compile \`${id}\`: the list parameter is packed in the ` +
+        `uniform parameter struct of \`compileFieldFunction()\` as an array ` +
+        `of \`vec4f\`, which is not a value of the list's own type: it can ` +
+        `be read only through a positional access (\`At(${id}, i)\`). Here ` +
+        `it is referenced as a whole — as an operand, in a reduction, or as ` +
+        `a bare value — which has no lowering.`
+    );
+  if (kind === 'storage-buffer')
+    throw new Error(
+      `Could not compile \`${id}\`: the symbol is a list in a storage buffer ` +
+        `(compile option \`storage: { ${id}: { kind: 'storage-buffer', … } }\`), ` +
+        `whose length is known only at run time, and a shader value must ` +
+        `have a length known at compile time. On the ${language} target it ` +
+        `can be read only through \`At(${id}, i)\`, \`Length(${id})\`, and ` +
+        `\`Sum\`, \`Product\`, \`Max\`, \`Min\` or \`Mean\` of \`${id}\` ` +
+        `alone. Here it is referenced as a whole (as an operand, an argument ` +
+        `or a bare value), which has no lowering.`
+    );
   throw new Error(
     `Could not compile \`${id}\`: the symbol is ${kind}-backed (compile option ` +
       `\`storage: { ${id}: '${kind}' }\`), and a texture has no shader value ` +
@@ -7725,6 +8114,199 @@ ${doc}
 }
 
 /**
+ * The number of bytes of function-scope variables that WGSL guarantees to a
+ * shader function. An implementation can refuse a function whose `var`s
+ * need more.
+ */
+const GPU_WGSL_FUNCTION_SCOPE_BYTES = 8192;
+
+/**
+ * How a WGSL positional read of the array `base` of `n` elements of
+ * `elementBytes` bytes each reads it: `{ name }` when the read indexes the
+ * module-scope declaration `name` IN PLACE, `{ code }` when the test had to
+ * compile the base and it is not such a name (the caller reuses `code`, so
+ * that the base is not compiled twice: a second compilation can hoist its
+ * statements again and repeat a random draw), and `undefined` when the read
+ * takes the copying helper (`_gpu_atN`, `_gpu_atpM_N`) and the base was not
+ * compiled.
+ *
+ * The copying helpers take the array as a value parameter and copy it to a
+ * function-scope `var`. WGSL guarantees only 8192 bytes of function-scope
+ * variables per function, so the copy of a list of more than 2048 numbers
+ * can fail to compile (a list of 22 500 numbers needs 90 KB). A free symbol
+ * whose copy would need more than 8192 bytes is read in place instead: WGSL
+ * lets an expression index a module-scope declaration by its name with a
+ * run-time index, so the read copies nothing. The host must then declare the
+ * list as a `var<storage>`, or use the `'storage-buffer'` storage kind. A
+ * `var<private>` does not do: WGSL gives `private` variables the same
+ * 8192-byte guarantee as `function` variables. Nor does a `const` array: its
+ * constructor is guaranteed only 2047 elements. A smaller list
+ * keeps the copying helper, which is also valid when the host declares the
+ * list as a parameter or a local of its own function.
+ *
+ * The base is read in place when all of these are true:
+ *  - the target is WGSL and the copy needs more than 8192 bytes;
+ *  - the base is a symbol that no enclosing binding form binds (a `Block`
+ *    local is a function-scope name, which a helper at module scope cannot
+ *    see), that the body does not write (a written input is read from a
+ *    function-scope copy, `CompileTarget.inputLocals`), and that has no
+ *    `storage` hint (a texture has its own helper);
+ *  - its emission is a plain identifier that does not start with the
+ *    reserved prefix `_gpu_`. A symbol with an assigned value emits that
+ *    value, and a `vars` mapping to a field (`u.S`) emits a path; neither is
+ *    a name a helper can carry. The helpers name their own parameter and
+ *    local with the `_gpu_` prefix, so a binding with that prefix could be
+ *    hidden by them.
+ */
+function gpuWGSLInPlaceArray(
+  base: Expression,
+  n: number,
+  elementBytes: number,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): { name: string } | { code: string } | undefined {
+  if (
+    target.language !== 'wgsl' ||
+    n * elementBytes <= GPU_WGSL_FUNCTION_SCOPE_BYTES ||
+    !isSymbol(base)
+  )
+    return undefined;
+  if (target.boundVars?.has(base.symbol)) return undefined;
+  if (target.inputLocals?.has(base.symbol)) return undefined;
+  if (target.storage?.get(base.symbol) !== undefined) return undefined;
+  const code = compile(base);
+  return /^[A-Za-z_]\w*$/.test(code) && !code.startsWith('_gpu_')
+    ? { name: code }
+    : { code };
+}
+
+/**
+ * The size in bytes of the WGSL array type `type` (`array<f32, 3000>`,
+ * `array<vec3f, 10>`), or `undefined` when it is not an array of `f32` or
+ * of `vecNf`. A `vec3f` takes 16 bytes in an array.
+ */
+function gpuWGSLArrayBytes(type: string): number | undefined {
+  const m = /^array<(f32|vec([234])f), (\d+)>$/.exec(type);
+  if (m === null) return undefined;
+  const element = m[2] === undefined ? 4 : m[2] === '2' ? 8 : 16;
+  return element * Number(m[3]);
+}
+
+/**
+ * Decline a WGSL positional read that would copy the array `base` of `n`
+ * elements of `elementBytes` bytes each into a function-scope `var` of more
+ * than the 8192 bytes that WGSL guarantees (`gpuWGSLInPlaceArray`). The
+ * message names the storage kind `'storage-buffer'`, which reads a list of
+ * any length with no copy.
+ */
+function gpuAssertWGSLCopyFits(
+  base: Expression,
+  n: number,
+  elementBytes: number,
+  decline: (reason: string) => never
+): void {
+  const bytes = n * elementBytes;
+  if (bytes <= GPU_WGSL_FUNCTION_SCOPE_BYTES) return;
+  const name = isSymbol(base) ? `"${base.symbol}"` : 'the base';
+  const symbol = isSymbol(base) ? base.symbol : 'S';
+  decline(
+    `the read copies ${name} (${n} elements, ${bytes} bytes) into a ` +
+      `function-scope variable, and WGSL guarantees only ` +
+      `${GPU_WGSL_FUNCTION_SCOPE_BYTES} bytes of them per function. A free ` +
+      `list symbol of this size is read with no copy when it, or the ` +
+      `identifier \`vars\` maps it to, is a \`var<storage>\` declaration; use the ` +
+      `storage kind 'storage-buffer' (\`storage: { ${symbol}: { kind: ` +
+      `'storage-buffer', group, binding } }\`) to read it from a storage ` +
+      `buffer`
+  );
+}
+
+/**
+ * The `_gpu_at_<binding>_<N>` positional-access helper on WGSL, for an array
+ * of `N` numbers that the host declares at module scope as `binding`
+ * (`gpuWGSLInPlaceArray`). It has the guard and the index contract of
+ * `_gpu_atN`, but it indexes `binding` by name instead of a copy of it.
+ * It is generated per binding, as the texture helper is, because the name of
+ * the declaration is in the body. The parameter and the local have the
+ * reserved `_gpu_` prefix, so that a binding named `i` or `k` is not
+ * shadowed by them.
+ */
+function gpuAtInPlacePreambleWGSL(binding: string, n: number): string {
+  const nan = gpuNonFiniteLiteral(NaN, 'wgsl');
+  const { guard, doc } = gpuAtIndexGuard(n, 'wgsl', '_gpu_i');
+  return `
+fn _gpu_at_${binding}_${n}(_gpu_i: f32) -> f32 {
+${doc}
+  if (${guard}) {
+    return ${nan};
+  }
+  let _gpu_k = i32(_gpu_i);
+  return ${binding}[select(${n} + _gpu_k, _gpu_k - 1, _gpu_k > 0)];
+}
+`;
+}
+
+/**
+ * The `_gpu_atp_<binding>_<M>_<N>` helper on WGSL: the point form of
+ * `gpuAtInPlacePreambleWGSL`, for an array of `N` points of arity `M` that
+ * the host declares at module scope. Same guard and index contract as
+ * `_gpu_atpM_N`; an absent point is a vector of NaN components.
+ */
+function gpuAtPointInPlacePreambleWGSL(
+  binding: string,
+  m: number,
+  n: number
+): string {
+  const nan = gpuNonFiniteLiteral(NaN, 'wgsl');
+  const { guard, doc } = gpuAtIndexGuard(n, 'wgsl', '_gpu_i');
+  return `
+fn _gpu_atp_${binding}_${m}_${n}(_gpu_i: f32) -> vec${m}f {
+${doc}
+  if (${guard}) {
+    return vec${m}f(${nan});
+  }
+  let _gpu_k = i32(_gpu_i);
+  return ${binding}[select(${n} + _gpu_k, _gpu_k - 1, _gpu_k > 0)];
+}
+`;
+}
+
+/**
+ * The (binding, length) pairs of the `_gpu_at_<binding>_<N>` helpers `code`
+ * calls, and the (binding, arity, length) triples of the
+ * `_gpu_atp_<binding>_<M>_<N>` helpers, in first-use order and each once.
+ * They are read off the helper NAME, as `gpuTexAtBindings` reads the texture
+ * helpers: the length is the digits just before the call's parenthesis (and
+ * the arity the one digit before them), so the lazy binding match stops
+ * there. The names do not match the scans of `_gpu_atN` and `_gpu_atpM_N`,
+ * which need a digit right after the prefix.
+ */
+function gpuAtInPlaceBindings(code: string): {
+  numbers: [binding: string, n: number][];
+  points: [binding: string, m: number, n: number][];
+} {
+  const seen = new Set<string>();
+  const numbers: [string, number][] = [];
+  const points: [string, number, number][] = [];
+  const re = /(?<![\w$])_gpu_at_([A-Za-z_]\w*?)_(\d+)\s*\(/g;
+  let r: RegExpExecArray | null;
+  while ((r = re.exec(code)) !== null) {
+    const key = `n:${r[1]}_${r[2]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    numbers.push([r[1], Number(r[2])]);
+  }
+  const rp = /(?<![\w$])_gpu_atp_([A-Za-z_]\w*?)_([234])_(\d+)\s*\(/g;
+  while ((r = rp.exec(code)) !== null) {
+    const key = `p:${r[1]}_${r[2]}_${r[3]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    points.push([r[1], Number(r[2]), Number(r[3])]);
+  }
+  return { numbers, points };
+}
+
+/**
  * The index guard every positional-access helper opens with, over a base of
  * `n` elements, plus the comment that documents it. Written ONCE and shared
  * by the array helper (`gpuAtPreamble`) and the texture helper
@@ -7736,7 +8318,7 @@ ${doc}
  * test, and the negated compound (`!(i >= -N && i <= N)`) swallows `NaN` and
  * `±∞` — which `floor` alone would not.
  */
-function gpuAtIndexGuard(
+export function gpuAtIndexGuard(
   n: number,
   lang: 'glsl' | 'wgsl',
   i = 'i'
@@ -8240,6 +8822,14 @@ function gpuCounterIsStable(
   if (isNumber(expr)) return true;
   if (isSymbol(expr)) {
     if (expr.symbol === index) return true;
+    // A symbol in shader storage (`storage` hint) is read only through a
+    // helper that writes no variable, and its own emission is refused
+    // outside such a read (`gpuRefuseStorageReference`).
+    if (
+      target.storage?.get(expr.symbol) !== undefined &&
+      !gpuIsBoundName(expr.symbol, target)
+    )
+      return true;
     const ref = target.var(expr.symbol);
     return (
       !target.varsKeys?.has(expr.symbol) &&
@@ -8410,6 +9000,15 @@ function compileGPUSumProduct(
   target: CompileTarget<Expression>
 ): string {
   if (!args[0]) throw new Error(`Could not compile \`${kind}\`: no body`);
+  // A list in a storage buffer: a loop over its run-time length.
+  if (!args[1] && gpuIsStorageBufferSymbol(args[0], target))
+    return compileGPUStorageBufferReduce(
+      kind,
+      kind === 'Sum' ? 'sum' : 'prod',
+      args,
+      _compile,
+      target
+    );
   // No indexing set: the operand IS the collection to reduce
   // (`Sum([3, 4, 5])`), not a body indexed by one.
   if (!args[1])
@@ -9178,11 +9777,25 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // operands, so the generic shape gate must not judge the emission against
   // operand shapes the emission no longer contains (`GPU_AGGREGATE_CONSUMING`).
   Max: markAggregateConsuming((args, compile, target) =>
-    compileGPUExtremum('max', 'Max', args, compile, target)
+    args.some((a) => gpuIsStorageBufferSymbol(a, target))
+      ? compileGPUStorageBufferReduce('Max', 'max', args, compile, target)
+      : compileGPUExtremum('max', 'Max', args, compile, target)
   ),
   Min: markAggregateConsuming((args, compile, target) =>
-    compileGPUExtremum('min', 'Min', args, compile, target)
+    args.some((a) => gpuIsStorageBufferSymbol(a, target))
+      ? compileGPUStorageBufferReduce('Min', 'min', args, compile, target)
+      : compileGPUExtremum('min', 'Min', args, compile, target)
   ),
+  // `Mean` has a lowering only for a list in a storage buffer. Any other
+  // operand gives the message of an operator with no lowering.
+  Mean: markAggregateConsuming((args, compile, target) => {
+    if (args.some((a) => gpuIsStorageBufferSymbol(a, target)))
+      return compileGPUStorageBufferReduce('Mean', 'mean', args, compile, target);
+    throw new Error(
+      `Could not compile \`Mean\`: the operator is known to the engine but ` +
+        `target '${target.language ?? 'unknown'}' has no lowering for it.`
+    );
+  }),
   // Element-wise max/min — genuinely COMPONENTWISE, unlike `Max`/`Min` above,
   // so a `vecN` operand stays a vector. Both require at least two operands (a
   // lone collection is a `Max`/`Min`, and CE rejects `ElementMax([1,2,3])` as
@@ -10879,13 +11492,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // Non-literal operand (e.g. a vec-typed symbol): `length()` applies.
     return `length(${compile(arg)})`;
   }, isBroadcastPointNormOperand),
-  Length: (_args, _compile, target) => {
+  // `markAggregateConsuming`: the length of a list in a storage buffer is a
+  // scalar (`f32(S.len)`), and every other operand declines.
+  Length: markAggregateConsuming((args, compile, target) => {
+    // The length of a list in a storage buffer is its `len` header.
+    if (args.length === 1 && gpuIsStorageBufferSymbol(args[0], target))
+      return storageBufferLength(
+        gpuStorageBufferOperand(args[0], compile, target, 'Length').name
+      );
     throw new Error(
       `Could not compile \`Length\`: the collection element count is not supported on the ` +
         `${target.language ?? 'GPU'} target: the '${target.language ?? 'GPU'}' ` +
         `'length()' builtin is the Euclidean norm (CE 'Norm'), not a count.`
     );
-  },
+  }),
   Normalize: 'normalize',
   Reflect: 'reflect',
   Refract: 'refract',
@@ -11711,7 +12331,7 @@ function allocGPURandomCounter(state: GPURandomState): string {
 
 /** The prefix every allocated counter name carries (scanned for by the
  * preamble assembly). */
-const GPU_RANDOM_COUNTER_PREFIX = '_gpu_rnd_n';
+export const GPU_RANDOM_COUNTER_PREFIX = '_gpu_rnd_n';
 
 /** How a draw site passes its counter: GLSL takes it by `inout`, WGSL by a
  * pointer into the private address space. */
@@ -11899,7 +12519,7 @@ function gpuTextSymbols(expr: Expression | undefined): ReadonlySet<string> {
  * the walk also reaches that value: a local or a binder inside it is emitted
  * with its own name.
  */
-function gpuReachableSymbolNames(
+export function gpuReachableSymbolNames(
   expr: Expression,
   vars?: Readonly<Record<string, unknown>>
 ): {
@@ -11925,7 +12545,14 @@ function gpuReachableSymbolNames(
     const literal = BaseCompiler.userFunctionLiteral(engine, name);
     if (literal !== undefined) walk(literal);
   };
+  // An expression is a graph that can share a node between many parents. A
+  // visit of a node only adds to the sets, and what it adds depends only on
+  // the node, so a node is visited once: a walk of the tree that the graph
+  // unfolds to can take an exponential time.
+  const visited = new Set<Expression>();
   const walk = (e: Expression): void => {
+    if (visited.has(e)) return;
+    visited.add(e);
     if (isSymbol(e)) {
       out.add(e.symbol);
       walkUserFunction(e, e.symbol);
@@ -18046,7 +18673,7 @@ float _gpu_inf() {
  * read back as NaN and +∞. WGSL declarations are order-independent, so
  * `preambleFor` adds these after scanning the whole preamble.
  */
-const GPU_NAN_PREAMBLE_WGSL = `
+export const GPU_NAN_PREAMBLE_WGSL = `
 fn _gpu_nan() -> f32 {
   let bits = 0x7fc00000u;
   return bitcast<f32>(bits);
@@ -18660,7 +19287,8 @@ function gpuVecType(n: number, isWGSL: boolean): string {
  * emitted body must REFERENCE it by when that is not the bare name.
  *
  * `ref` exists for the WGSL shader inputs, which are FIELDS of the entry
- * point's `input: VertexInput` struct — a body referencing a bare `v` names
+ * point's `input` struct (`VertexInput`, `FragmentInput` or `ComputeInput`,
+ * by stage) — a body referencing a bare `v` names
  * nothing at all. Uniforms (both languages) and the GLSL `in` varyings are
  * bare globals and leave it unset.
  */
@@ -19033,7 +19661,7 @@ function gpuTypeOfDeclaredType(
  * those to an array constructor, which is not a value a shader function
  * parameter or return slot accepts here.
  */
-function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
+export function gpuTypeOfValue(expr: Expression, isWGSL: boolean): string | undefined {
   // A name whose shader type the CALLER declared (a `compileFunction`
   // parameter, a shader input/uniform). Asked FIRST and answered in full:
   // nothing else carries that type — `expr.type` for such a name is the
@@ -19178,6 +19806,54 @@ type GPUUserFunctionSignature = {
  * only. See `createTarget`.
  */
 const GPU_SUPPORTED_MODES: readonly CompileMode[] = ['strict'];
+
+/**
+ * The target fields that `GPUShaderTarget.withTargetExtension` adds to each
+ * target of one compilation.
+ */
+export type GPUTargetExtension = Pick<
+  CompileTarget<Expression>,
+  'storage' | 'storageRead' | 'hostInputVars' | 'onReturn'
+>;
+
+/**
+ * The built-in variables that a GLSL shader body of each stage may read with
+ * no declaration: GLSL ES 3.00 (WebGL 2) and the desktop GLSL 3.30+ names of
+ * the same stages. `compileShaderBody()` accepts a free symbol with one of
+ * these names; any other undeclared name is refused, because the shader would
+ * fail when the GPU compiles it.
+ */
+const GLSL_STAGE_BUILTINS: Record<string, ReadonlySet<string>> = {
+  vertex: new Set([
+    'gl_VertexID',
+    'gl_InstanceID',
+    'gl_Position',
+    'gl_PointSize',
+    'gl_ClipDistance',
+    'gl_DepthRange',
+  ]),
+  fragment: new Set([
+    'gl_FragCoord',
+    'gl_FrontFacing',
+    'gl_PointCoord',
+    'gl_FragDepth',
+    'gl_PrimitiveID',
+    'gl_SampleID',
+    'gl_SamplePosition',
+    'gl_Layer',
+    'gl_ViewportIndex',
+    'gl_ClipDistance',
+    'gl_DepthRange',
+  ]),
+  compute: new Set([
+    'gl_NumWorkGroups',
+    'gl_WorkGroupID',
+    'gl_LocalInvocationID',
+    'gl_GlobalInvocationID',
+    'gl_LocalInvocationIndex',
+    'gl_WorkGroupSize',
+  ]),
+};
 
 export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   /** Language identifier (e.g., 'glsl', 'wgsl') */
@@ -19518,6 +20194,19 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       preamble: '',
       declare: (name, typeHint) => {
         const type = typeHint ?? (this.languageId === 'wgsl' ? 'f32' : 'float');
+        // A `Block` local is a function-scope variable, and WGSL guarantees
+        // only 8192 bytes of them per function.
+        const bytes =
+          this.languageId === 'wgsl' ? gpuWGSLArrayBytes(type) : undefined;
+        if (bytes !== undefined && bytes > GPU_WGSL_FUNCTION_SCOPE_BYTES)
+          throw new Error(
+            `Could not compile \`Block\`: the local "${name}" (\`${type}\`, ` +
+              `${bytes} bytes) is a function-scope variable, and WGSL ` +
+              `guarantees only ${GPU_WGSL_FUNCTION_SCOPE_BYTES} bytes of ` +
+              `them per function. Read the list where it is, from a ` +
+              `storage buffer (the storage kind 'storage-buffer'), instead ` +
+              `of copying it into a local.`
+          );
         return this.languageId === 'wgsl'
           ? `var ${name}: ${type}`
           : `${type} ${name}`;
@@ -19592,6 +20281,46 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   }
 
   /**
+   * The target fields that `withTargetExtension` adds to each target that
+   * `createTargetFor` makes while `fn` runs, else `undefined`.
+   */
+  private targetExtension?: GPUTargetExtension;
+
+  /**
+   * Run `fn` (a compilation) with `extension` added to each target that
+   * `createTargetFor` makes. An entry point of a subclass uses it to give
+   * `compile()` facts that its public options cannot carry: the list
+   * parameters of `WGSLTarget.compileFieldFunction()` and their read
+   * (`storage`, `storageRead`), the parameters read from a struct field
+   * (`hostInputVars`), and the check of the value of each `Return` of the
+   * body against the return type of the function (`onReturn`). Instance
+   * state is safe here for the reason given at `currentUserFunctions`: a GPU
+   * compilation is synchronous and not reentrant.
+   */
+  protected withTargetExtension<T>(
+    extension: GPUTargetExtension,
+    fn: () => T
+  ): T {
+    const saved = this.targetExtension;
+    this.targetExtension = extension;
+    try {
+      return fn();
+    } finally {
+      this.targetExtension = saved;
+    }
+  }
+
+  /**
+   * The names of the user-defined function declarations that the most
+   * recent compilation emitted: the keys of the `defs` of its user-function
+   * registry. `WGSLTarget.compileFieldFunction()` renames these names, and
+   * only these, after the compilation.
+   */
+  protected emittedUserFunctionNames(): string[] {
+    return [...(this.currentUserFunctions?.defs?.keys() ?? [])];
+  }
+
+  /**
    * A target for compiling `expr`, with the random-draw context (§7) stamped
    * on it: the shader stage when the caller knows it, and whether a HOST
    * `WithRandomSeed` frame is active — the cross-domain case an unframed
@@ -19603,6 +20332,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     options: Partial<CompileTarget<Expression>> = {}
   ): CompileTarget<Expression> {
     const target = this.createTarget(options);
+    // The fields that `withTargetExtension` adds for the compilation in
+    // flight. The list parameters it places in storage are added to the
+    // validated `storage` hints of the caller, before the reference gate
+    // below reads them.
+    const extension = this.targetExtension;
+    if (extension !== undefined) {
+      if (extension.storage !== undefined)
+        target.storage = new Map([
+          ...(target.storage ?? []),
+          ...extension.storage,
+        ]);
+      target.storageRead = extension.storageRead;
+      target.hostInputVars = extension.hostInputVars;
+      if (extension.onReturn !== undefined)
+        target.onReturn = extension.onReturn;
+    }
     // A TEXT-TYPED SYMBOL is the same target limitation as the string literal
     // the `string` hook refuses, one step later: a `string`- or
     // `character`-typed free symbol emits a bare identifier, which the caller
@@ -20367,6 +21112,20 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     writtenInputs?: ReadonlyArray<string>
   ): CompilationResult {
     const source = expr;
+    // WebGL2 has no storage buffers, so a `'storage-buffer'` hint has no
+    // lowering on GLSL. It is a decline, which the interpreter fallback can
+    // take, not an error of the option: the same options can serve the WGSL
+    // target.
+    if (this.languageId !== 'wgsl')
+      for (const [name, kind] of storage ?? [])
+        if (kind === 'storage-buffer')
+          throw new Error(
+            `Could not compile \`${name}\`: the storage kind ` +
+              `'storage-buffer' of "${name}" is not supported on the ` +
+              `${this.languageId} target, because WebGL2 has no storage ` +
+              `buffers. Compile to 'wgsl', or give "${name}" the storage ` +
+              `kind 'sampler2D'.`
+          );
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
     // Turn a collection whose WIDTH is known at compile time into straight-line
@@ -20447,6 +21206,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // the `At` lowering and by the reference gate `createTargetFor`
       // installs. Stamped per call like `constantFold`.
       storage,
+      storageBufferBindings: storageBufferBindings(options.storage),
+      // Filled by the storage-buffer reads (`gpuStorageBufferOperand`).
+      storageBuffersRead: new Map(),
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
       mode: options.mode,
@@ -20599,7 +21361,20 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       success: true,
       code,
     };
-    const preamble = this.preambleFor(code);
+    let preamble = this.preambleFor(code);
+    // The declarations of the storage buffers that the code reads, ahead of
+    // the helpers that name them, and their layouts for the host.
+    if (target.storageBufferBindings !== undefined) {
+      const buffers = gpuStorageBuffersRead(
+        `${code}\n${preamble}`,
+        target.storageBufferBindings,
+        target.storageBuffersRead ?? new Map()
+      );
+      if (buffers.layouts.length > 0) {
+        result.storageBuffers = buffers.layouts;
+        preamble = buffers.declarations + preamble;
+      }
+    }
     if (preamble) result.preamble = preamble;
     // The operands of an exact sine hash and the range in which its value is
     // exact (`gpuAmplifiedTrigMod`).
@@ -20616,6 +21391,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       target,
       vars ? new Set(Object.keys(vars)) : undefined
     );
+    // A list in a storage buffer is read as the struct of its buffer.
+    for (const layout of result.storageBuffers ?? []) {
+      const entry = result.freeSymbolTypes?.[layout.symbol];
+      if (entry !== undefined) entry.lowered = layout.struct;
+    }
     if (inputLocals.size > 0)
       result.code = this.withInputLocalCopies(
         result.code,
@@ -20683,6 +21463,19 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           `Could not compile \`Assign\`: the body writes "${name}", an input ` +
             `of the shader, and the shader type of "${name}" is not known, so ` +
             `the local copy that the body writes cannot be declared.`
+        );
+      // The local copy is a function-scope variable, and WGSL guarantees
+      // only 8192 bytes of them per function.
+      const bytes = isWGSL ? gpuWGSLArrayBytes(type) : undefined;
+      if (bytes !== undefined && bytes > GPU_WGSL_FUNCTION_SCOPE_BYTES)
+        throw new Error(
+          `Could not compile \`Assign\`: the body writes "${name}", an input ` +
+            `of the shader, so it reads and writes a local copy of it, and ` +
+            `the copy (\`${type}\`, ${bytes} bytes) is larger than the ` +
+            `${GPU_WGSL_FUNCTION_SCOPE_BYTES} bytes of function-scope ` +
+            `variables that WGSL guarantees per function. Write a new name ` +
+            `instead of "${name}", or read "${name}" from a storage buffer ` +
+            `(the storage kind 'storage-buffer'), which the body cannot write.`
         );
       const value = gpuWrittenFirst(code, local) ? '' : ` = ${initial(name)}`;
       declarations.push(
@@ -20798,6 +21591,24 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     if (isWGSL)
       for (const [binding, w] of gpuTexAtBindings(code))
         preamble += gpuTexAtPreambleWGSL(binding, w);
+    // The WGSL helpers that index a module-scope array by its name.
+    if (isWGSL) {
+      const inPlace = gpuAtInPlaceBindings(code);
+      for (const [binding, w] of inPlace.numbers)
+        preamble += gpuAtInPlacePreambleWGSL(binding, w);
+      for (const [binding, m, w] of inPlace.points)
+        preamble += gpuAtPointInPlacePreambleWGSL(binding, m, w);
+    }
+    // The helpers that read a list in a storage buffer. Their text is added
+    // to the code that the library scans below read, because they call
+    // `_gpu_max` and `_gpu_min`.
+    if (isWGSL) {
+      const helpers = storageBufferHelpers(code);
+      if (helpers) {
+        preamble += helpers;
+        code = `${code}\n${helpers}`;
+      }
+    }
     // The scalar `_gpu_powi` and its per-width `vecN` overloads
     // (`_gpu_powi2`–`_gpu_powi4`) are declared independently: a compilation
     // that only powers a vector needs the vector form alone.
@@ -21037,12 +21848,17 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * folded over the declaration, and a WGSL input — a FIELD of the entry
    * point's `input` struct — emitted a bare identifier that names nothing
    * (each declaration's `ref` supplies the identifier to emit).
+   *
+   * `stageNames` are the other names of the shader that the body can read
+   * bare: the `out` variables of a GLSL shader. A free symbol of the body
+   * that is not a declaration and not one of these names is refused.
    */
   protected compileShaderBody(
     body: ReadonlyArray<{ variable: string; expression: Expression }>,
     stage: string,
     declarations: ReadonlyArray<GPUShaderDeclaration> = [],
-    constantFold?: boolean
+    constantFold?: boolean,
+    stageNames: ReadonlyArray<string> = []
   ): Array<{ variable: string; code: string; stmts: string[] }> {
     // Put each body expression in the radian convention, as `compileOrThrow`
     // does for a single expression: under a non-radian `angularUnit` the
@@ -21074,22 +21890,39 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // seeded as source text as well: a hoisted loop declares its accumulator
     // ahead of the assignment, so a shader output spelled `_tv1` would
     // otherwise be shadowed and left unwritten (`_tv1 = _tv1`).
-    const target = gpuDeclaredBodyTarget(
-      this.createTargetFor(body[0]?.expression, stage, {
-        constantFold,
-        naming: BaseCompiler.newNamingContext(
-          body.map((a) => a.expression),
-          body.map((a) => a.variable)
-        ),
-      }),
-      declarations
-    );
+    const rawTarget = this.createTargetFor(body[0]?.expression, stage, {
+      constantFold,
+      naming: BaseCompiler.newNamingContext(
+        body.map((a) => a.expression),
+        body.map((a) => a.variable)
+      ),
+    });
+    // The names that reach the raw target's `var()` with no answer while the
+    // statements compile. A bound name (a parameter, a temporary, a loop
+    // index) is answered by an inner scope before it gets here, and a
+    // declaration by `gpuDeclaredBodyTarget`. Such a name is either folded (a
+    // symbol with a value) or written bare. The recorder is on the raw target
+    // itself, not on a copy: the body of a user function compiles on a copy
+    // of this object (the registry root), so its names get here too. The
+    // free-symbol check below refuses only a name that is also in this set:
+    // an operand that the emitter drops (`x^0` is `1.0`) is not compiled, so
+    // its symbols never get here.
+    const unanswered = new Set<string>();
+    let recording = false;
+    const rawVar = rawTarget.var.bind(rawTarget);
+    rawTarget.var = (id) => {
+      const ref = rawVar(id);
+      if (recording && ref === undefined) unanswered.add(id);
+      return ref;
+    };
+    const target = gpuDeclaredBodyTarget(rawTarget, declarations);
     // Each assignment is a statement position of its own, so a loop-form
     // `Sum`/`Product` inside it hoists its loop into `stmts`, which the shader
     // assembly emits ahead of the assignment (Tycho item 110). The whole body
     // compiles under the shader's declared shapes: the declarations are in
     // scope for every statement.
-    return BaseCompiler.withLocalShapeFrame(
+    recording = true;
+    const statements = BaseCompiler.withLocalShapeFrame(
       new Map(),
       gpuDeclaredShapeFrame(declarations),
       () =>
@@ -21136,5 +21969,51 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           return { variable: assignment.variable, code, stmts };
         })
     );
+    recording = false;
+    // A free symbol of the body is emitted as a bare identifier (or, for a
+    // WGSL input, as a field of the input struct). This route returns a
+    // complete shader, so only the shader's own inputs and uniforms, and the
+    // names the stage itself declares (`stageNames`), are in scope there. Any
+    // other free symbol names nothing, and the shader fails when the GPU
+    // compiles it. A symbol with a value in the engine, a library constant
+    // (`Pi`), a bound variable (a `Sum` index, a function-literal parameter,
+    // a `Block` local) and a user function are not free symbols. A GLSL
+    // built-in variable of the stage (`GLSL_STAGE_BUILTINS`) is in scope too;
+    // another `gl_` name (a typing error, or a built-in of another stage) is
+    // not. The check
+    // runs after the statements compile, so that an error in the form of a
+    // statement is reported first.
+    const inScope = new Set([
+      ...declarations.map((d) => d.name),
+      ...stageNames,
+    ]);
+    // The declared names are passed as external inputs: the body reads a
+    // declaration, not the engine value or the user function of the same
+    // name, so the analysis must not go into that value or function body.
+    const undeclared = new Set<string>();
+    for (const assignment of body)
+      for (const name of BaseCompiler.analyzeReferences(
+        assignment.expression,
+        target,
+        inScope
+      ).freeSymbols)
+        if (
+          !inScope.has(name) &&
+          !(
+            this.languageId === 'glsl' &&
+            GLSL_STAGE_BUILTINS[stage]?.has(name) === true
+          ) &&
+          unanswered.has(name)
+        )
+          undeclared.add(name);
+    if (undeclared.size > 0)
+      throw new Error(
+        `Could not compile \`compileShader()\`: the body reads ` +
+          `${[...undeclared].map((n) => `"${n}"`).join(', ')}, which no ` +
+          `input or uniform of the shader declares. The emitted ` +
+          `${this.languageId.toUpperCase()} would read an undeclared name. ` +
+          `Declare each name as an input or a uniform, or assign it a value.`
+      );
+    return statements;
   }
 }

@@ -87,16 +87,197 @@ export type CompileMode = 'strict' | 'complex' | 'auto';
  *   is fine (its trailing texels are never addressed). The texture's width is
  *   read at run time inside the generated helper, so the host may pick any
  *   width and resize without recompiling.
+ * - `'storage-buffer'` (WGSL only): a numeric list, or a list of points of
+ *   2 to 4 real coordinates, whose contents AND length the host can change
+ *   with no new compilation. The list lives in a storage buffer that holds
+ *   its logical length in a `len: u32` header, followed by its elements. The
+ *   compilation declares the buffer at the group and binding of the hint
+ *   (see {@link StorageBufferLayout}). The GLSL target declines it: WebGL2
+ *   has no storage buffers.
  */
-export type StorageKind = 'sampler2D';
+export type StorageKind = 'sampler2D' | 'storage-buffer';
+
+/**
+ * The group and the binding at which a `'storage-buffer'` hint declares its
+ * buffer: `@group(group) @binding(binding)`. Each is an integer from 0 to
+ * 65535.
+ */
+export type StorageBufferBinding = {
+  readonly group: number;
+  readonly binding: number;
+};
 
 /**
  * One `storage` hint: a storage kind, spelled either as the bare kind string
  * (`'sampler2D'`) or as an object with a `kind` field (`{ kind: 'sampler2D' }`).
- * The two spellings are the same hint; the object form leaves room for
- * per-kind settings should a storage kind ever need one.
+ * The two spellings are the same hint. A `'storage-buffer'` hint has only the
+ * object form, because it also gives the group and the binding of the buffer:
+ * `{ kind: 'storage-buffer', group: 1, binding: 0 }`.
  */
-export type StorageHint = StorageKind | { readonly kind: StorageKind };
+export type StorageHint =
+  | 'sampler2D'
+  | { readonly kind: 'sampler2D' }
+  | ({ readonly kind: 'storage-buffer' } & StorageBufferBinding);
+
+/**
+ * The layout of a `'storage-buffer'` list, as a WGSL compilation that reads
+ * it declares it (`CompilationResult.storageBuffers`). The preamble of the
+ * compilation holds the declaration:
+ *
+ * ```wgsl
+ * struct CE_List_f32 { len: u32, data: array<f32> }
+ * @group(1) @binding(0) var<storage, read> S: CE_List_f32;
+ * ```
+ *
+ * The struct is named by its element type, so one name always has the same
+ * text. The `var` line is declared once per buffer: a host that merges the
+ * preambles of several compilations keeps one copy of each struct and one
+ * `var` line per buffer.
+ *
+ * The host writes the logical length of the list as a `u32` at byte offset
+ * 0, and element `k` (0-based) at byte offset `dataOffset + k * stride`. The
+ * bytes between the two are padding that the WGSL layout rules put before
+ * `data`. A change of length is one 4-byte write at offset 0, with no new
+ * buffer, bind group or compilation; `len = 0` is the empty list. The
+ * buffer can hold more elements than `len`. A `len` larger than the buffer
+ * holds makes every read of the list give NaN, and the length of the list
+ * is then the number of elements the buffer holds, so that a loop bounded by
+ * it stops.
+ */
+export type StorageBufferLayout = {
+  /** The engine symbol of the hint. */
+  readonly symbol: string;
+  /** The WGSL name of the buffer variable: the symbol, or its `vars` mapping. */
+  readonly name: string;
+  /** The name of the WGSL struct of the buffer: `CE_List_<element>`. */
+  readonly struct: string;
+  readonly group: number;
+  readonly binding: number;
+  /** The WGSL type of an element: `f32` for a number, `vecNf` for a point. */
+  readonly element: 'f32' | 'vec2f' | 'vec3f' | 'vec4f';
+  /** The number of `f32` components of an element: 1 to 4. */
+  readonly components: number;
+  /** The byte offset of the `len: u32` header. Always 0. */
+  readonly lengthOffset: 0;
+  /** The byte offset of the first element: 4, 8 (`vec2f`) or 16. */
+  readonly dataOffset: number;
+  /** The bytes from one element to the next: 4, 8 (`vec2f`) or 16. */
+  readonly stride: number;
+  /**
+   * The smallest buffer size that WebGPU accepts for the binding:
+   * `dataOffset + stride`. WebGPU requires room for one element, also for
+   * an empty list.
+   */
+  readonly minBindingSize: number;
+};
+
+/**
+ * A storage kind that only an entry point of the compute engine assigns. A
+ * `storage` hint cannot name it.
+ *
+ * - `'uniform-struct'`: a fixed-length numeric list that is a field of the
+ *   parameter struct of `WGSLTarget.compileFieldFunction()`, packed as
+ *   `array<vec4f, ⌈n/4⌉>`. The shader can read it only by position, and the
+ *   read is the code that `CompileTarget.storageRead` returns.
+ */
+export type InternalStorageKind = 'uniform-struct';
+
+/**
+ * The options of `WGSLTarget.compileFieldFunction()`.
+ *
+ * The field function is `fn <name>(<coordinates>: f32, …) -> f32`. Each free
+ * symbol of the expression that is not a coordinate is a PARAMETER: the
+ * function reads it as `<paramsVariable>.<symbol>`, a field of one uniform
+ * struct. A symbol with a value is a parameter too, unless it is a constant
+ * (`Pi`) or its value is a function; the field function does not read its
+ * value in the engine. The host declares
+ * `@group(G) @binding(B) var<uniform> <paramsVariable>: <paramsStruct>;`
+ * and writes the parameter values at the offsets of
+ * `FieldFunctionResult.params`. A change of a parameter value is a buffer
+ * write: the compiled text does not change.
+ */
+export type FieldFunctionOptions = {
+  /** The WGSL name of the field function. It is also in the names of the
+   * user-defined functions it calls: `h` is `_fn_<k>_<name>_h`, with k the
+   * length of `name` (`_fn_7_gyroid2_h`). */
+  name: string;
+  /** The free symbols that are the `f32` arguments of the function, in
+   * argument order, for example `['x', 'y', 'z']`. */
+  coordinates: ReadonlyArray<string>;
+  /** The name of the parameter struct type. Default `'CEParams'`. */
+  paramsStruct?: string;
+  /** The name of the uniform variable that the host declares with the type
+   * `paramsStruct`. Default `'ce_params'`. */
+  paramsVariable?: string;
+  /** The storage hints of `compile()` (`CompilationOptions.storage`). A
+   * symbol with a hint is not a field of the parameter struct: the host
+   * supplies the storage that the hint names. For a `'storage-buffer'`
+   * hint, the declaration of the buffer is in `FieldFunctionResult.helpers`
+   * and its layout in `FieldFunctionResult.storageBuffers`. */
+  storage?: Readonly<Record<MathJsonSymbol, StorageHint>>;
+  /** See `CompilationOptions.constantFold`. */
+  constantFold?: boolean;
+};
+
+/** One field of the parameter struct of a field function. */
+export type FieldFunctionParameter = {
+  /** The symbol, which is also the name of the struct field. */
+  name: string;
+  /** The type of the symbol in the compute engine, as `toString()` writes
+   * it (`real`, `list<number^30>`). */
+  ceType: string;
+  /** The WGSL type of the struct field: `f32`, or `array<vec4f, k>` for a
+   * list of n elements with k = ⌈n/4⌉. */
+  wgslType: string;
+  /** The byte offset of the field from the start of the struct. */
+  offset: number;
+  /** The number of bytes of the field. */
+  size: number;
+  /** For a list, its number of elements n. Element i (1-based) is the f32
+   * at byte `offset + 4 × (i − 1)`. */
+  length?: number;
+};
+
+/** The result of `WGSLTarget.compileFieldFunction()`. */
+export type FieldFunctionResult = {
+  /** `false` when the compilation declined. The other fields are then
+   * empty, and `diagnostic` gives the reason. */
+  success: boolean;
+  /** The reason of a decline, as `CompilationResult.diagnostic`. */
+  diagnostic?: CompileDiagnostic;
+  /** Warnings about a successful compilation, as
+   * `CompilationResult.warnings`. */
+  warnings?: CompileDiagnostic[];
+  /** The WGSL declaration of the field function. */
+  function: string;
+  /** The declarations that the function needs, by name: shared helpers
+   * (`_gpu_…`), parameter readers, user-defined functions, and the struct
+   * type and `var<storage, read>` declaration of each storage buffer. A
+   * helper name always has the same source text, so the host can merge the
+   * maps of several field functions into one module by name, with one
+   * exception: the declaration of a storage buffer, under the name of the
+   * buffer, has the same text only for the same hint (group and binding)
+   * and the same element type. A host that merges fields gives each buffer
+   * name one hint in every field. Two different texts under one key mean
+   * that the hints of the fields disagree, which the host must treat as an
+   * error. */
+  helpers: Record<string, string>;
+  /** The WGSL declaration of the parameter struct type, or `''` when the
+   * function has no parameter. */
+  paramsStructSource: string;
+  /** The fields of the parameter struct, in struct order. */
+  params: FieldFunctionParameter[];
+  /** The number of bytes of the parameter buffer: a multiple of 16, and 0
+   * when there is no parameter. */
+  paramsSize: number;
+  /** The layout of each storage buffer that the function reads (a symbol
+   * with a `'storage-buffer'` hint), as `CompilationResult.storageBuffers`.
+   * Its struct type (`CE_List_f32`) and its `var<storage, read>`
+   * declaration are in `helpers`, under the name of the struct and the
+   * name of the buffer. */
+  storageBuffers?: StorageBufferLayout[];
+};
+
 
 /**
  * Which of the two kinds of compile decline a diagnostic reports:
@@ -1172,7 +1353,44 @@ export interface CompileTarget<Expr = unknown> {
    * The JavaScript, interval and Python targets never set it: the hint is
    * validated there and then ignored.
    */
-  storage?: ReadonlyMap<MathJsonSymbol, StorageKind>;
+  storage?: ReadonlyMap<MathJsonSymbol, StorageKind | InternalStorageKind>;
+
+  /**
+   * The positional read of element `index` of the free symbol `symbol`,
+   * which `storage` maps to `'uniform-struct'` and which has `length`
+   * elements. `index` is the code of the 1-based index as a float. Set only
+   * by `WGSLTarget.compileFieldFunction()`.
+   */
+  storageRead?: (symbol: string, length: number, index: string) => string;
+
+  /**
+   * The `vars` keys whose source reads an input that the host gives with
+   * the declared type of the symbol, although the source is not the bare
+   * name of the symbol: a field of the uniform parameter struct of
+   * `WGSLTarget.compileFieldFunction()` (`ce_params.c`). The finite-operand
+   * test of the shader targets accepts such a symbol as it accepts a symbol
+   * that `vars` maps to its own name.
+   */
+  hostInputVars?: ReadonlySet<string>;
+
+  /**
+   * The group and the binding of each `'storage-buffer'` hint of
+   * {@link storage}, by symbol name (`storageBufferBindings`). Stamped per
+   * call with `storage`.
+   */
+  storageBufferBindings?: ReadonlyMap<MathJsonSymbol, StorageBufferBinding>;
+
+  /**
+   * The storage-buffer lists that the compilation reads, by symbol name: the
+   * WGSL name of the buffer and the number of `f32` components of an
+   * element, as the read validated them. One map is shared by every target
+   * derived from the root target of a compilation; the declarations of the
+   * buffers are built from it. Set by the WGSL target only.
+   */
+  storageBuffersRead?: Map<
+    MathJsonSymbol,
+    { readonly name: string; readonly components: number }
+  >;
 
   /**
    * The compile mode requested for this compilation (`CompileMode`). The
@@ -2131,15 +2349,16 @@ export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
 
 /**
  * The `javascript` target, typed concretely: its compiled `run` accepts
- * `number | ComplexResult` variables (plain reals or complex domain-coloring
- * inputs) and returns `number | ComplexResult`. Returned by
+ * `number | ComplexResult | RunnerListInput` variables (plain reals, complex
+ * domain-coloring inputs, or a list for a symbol that the code reads as a
+ * list) and returns a `CompiledValue`. Returned by
  * `_getCompilationTarget("javascript")`.
  */
 export type JavaScriptCompilationTarget<Expr = unknown> = LanguageTarget<
   Expr,
   'javascript',
   CompiledValue,
-  number | ComplexResult
+  number | ComplexResult | RunnerListInput
 >;
 
 /**
@@ -2517,7 +2736,9 @@ export type FreeSymbolType = {
    *   `float` / `f32`, `bool`, `vec2` / `vec2f` for a complex value or a
    *   two-component point, `vec3` / `vec3f` for a colour or a
    *   three-component point, `vec4`, a matrix (`mat2`, `mat3x3f`) or an
-   *   array (`float[5]`, `array<f32, 5>`).
+   *   array (`float[5]`, `array<f32, 5>`). A list in a storage buffer
+   *   (`'storage-buffer'` storage hint) is the struct of its buffer
+   *   (`CE_List_f32`), which the compilation declares itself.
    * - `javascript`: the runner value convention: `number`, `complex` (a
    *   `{ re, im }` object), `boolean`, `string`, `point` (an array of
    *   numbers of a fixed width), `color`, `array` (a list), or `function`.
@@ -2677,7 +2898,9 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * target but not a `V`, selected on the same target-dependent basis as
  * {@link DefaultRunnerResult}: `interval-js` binds variables to intervals (a
  * plain number is auto-converted to a point interval), while every other
- * executable target accepts a real or a complex domain-coloring input.
+ * executable target accepts a real or a complex domain-coloring input, or a
+ * list of them ({@link RunnerListInput}) for a symbol that the compiled code
+ * reads as a list.
  *
  * Deliberately keyed on the TARGET and not on the compilation MODE, even
  * though a complex variable is only meaningful under `mode: 'complex'`. On the
@@ -2703,7 +2926,18 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? IntervalInput
-  : number | ComplexResult;
+  : number | ComplexResult | RunnerListInput;
+
+/**
+ * A list argument of a compiled runner: an array of numbers, of complex
+ * values or of such lists (a list of points is an array of arrays). The
+ * `javascript` target reads it for a symbol that it compiles as a list
+ * (`run({ S: [1, 2, 3] })` for `S: list<real>`). A typed array
+ * (`Float64Array`) is refused at run time, with a message.
+ */
+export type RunnerListInput = ReadonlyArray<
+  number | ComplexResult | RunnerListInput
+>;
 
 /**
  * Runner for compiled expressions — called with a variables object.
@@ -2740,7 +2974,9 @@ export type LambdaRunner<R = CompiledValue, V = number> = (...args: V[]) => R;
  * (the `javascript` target's real-valued convention). Non-`number` targets
  * bind it to their own value type — e.g. `interval-js` uses
  * `number | Interval` (a plain number is auto-converted to a point interval),
- * and a complex domain-coloring runner uses `number | ComplexResult`.
+ * and the `javascript` runner uses `number | ComplexResult | RunnerListInput`
+ * (a complex domain-coloring input, or a list for a symbol that the code
+ * reads as a list).
  */
 export interface CompiledRunner<R = CompiledValue, V = number> {
   /** Call with a variables object (for compiled expressions) */
@@ -2766,6 +3002,9 @@ export type StoredEntryPlan = {
    * of the host, which stored data cannot carry, so a runtime refuses to
    * load a plan that lists one. */
   kinds?: (string | number)[];
+  /** The bindings that refuse an array: those that the host declared with
+   * a number type, which the compiled code reads as a scalar. */
+  scalars?: (string | number)[];
 };
 
 /**
@@ -2972,8 +3211,9 @@ export type StoredBatchBody = {
  *   know which one your expression yields — `compile<'javascript', number>()`
  *   — and see the arithmetic example below.
  * - `V` — the type of the variable/argument values `run` accepts. Defaults to
- *   `number`; `interval-js` binds it to `number | Interval`, a complex runner
- *   to `number | ComplexResult`. (Positioned after `R` so existing
+ *   `number`; `interval-js` binds it to `number | Interval`, the `javascript`
+ *   runner to `number | ComplexResult | RunnerListInput`. (Positioned after
+ *   `R` so existing
  *   `CompilationResult<T, R>` uses keep the `number` default.)
  *
  * The `calling` field indicates which convention `run` uses:
@@ -3153,6 +3393,16 @@ export type CompilationResult<
    * Absent when the code has no exact sine hash.
    */
   float32Bounds?: { operand: string; maxAbs: number }[];
+
+  /**
+   * WGSL only. The storage buffers that the code reads, one entry for each
+   * `'storage-buffer'` hint of the `storage` option whose list the code
+   * reads, in the order of the hints. The preamble declares each one; the
+   * host creates a buffer of this layout and binds it at `group` and
+   * `binding` (see {@link StorageBufferLayout}). Absent when the code reads
+   * no storage buffer.
+   */
+  storageBuffers?: StorageBufferLayout[];
 
   /**
    * Shader targets only. Facts about a SUCCESSFUL compilation that the caller

@@ -436,6 +436,7 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     const shader = glsl.compileShader({
       type: 'fragment',
       outputs: [{ name: 'fragColor', type: 'vec4' }],
+      uniforms: [{ name: 'u', type: 'float' }],
       body: [{ variable: 'fragColor.r', expression: ce.parse('f(u) + f(2u)') }],
     });
     expect(count(shader, 'float _fn_f(')).toBe(1);
@@ -450,6 +451,7 @@ describe('GPU USER FUNCTIONS — delivery on every compile route', () => {
     const shader = wgsl.compileShader({
       type: 'fragment',
       outputs: [{ name: 'color', type: 'vec4f' }],
+      uniforms: [{ name: 'u', type: 'float' }],
       body: [{ variable: 'output.color.r', expression: ce.parse('f(u)') }],
     });
     expect(count(shader, 'fn _fn_f(')).toBe(1);
@@ -630,6 +632,7 @@ describe('GPU USER FUNCTIONS — determinism', () => {
     const options = {
       type: 'fragment' as const,
       outputs: [{ name: 'fragColor', type: 'vec4' }],
+      uniforms: [{ name: 'u', type: 'float' }],
       body: [{ variable: 'fragColor.r', expression: ce.parse('f(u) + f(2u)') }],
     };
     expect(glsl.compileShader(options)).toBe(glsl.compileShader(options));

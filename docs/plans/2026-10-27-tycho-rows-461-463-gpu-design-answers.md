@@ -125,7 +125,14 @@ Contract:
   symbol is a **parameter**, read as `ce_params.<name>` from one uniform
   struct. The host declares `@group(G) @binding(B) var<uniform> ce_params:
   CEParams;` and writes the values at the `params` offsets. A parameter change
-  is a buffer write: no recompile, no new pipeline.
+  is a buffer write: no recompile, no new pipeline. As implemented
+  (2026-10-27, after the review): a symbol with a value in the engine is a
+  parameter too, unless it is a constant (`Pi`, or declared constant) or its
+  value is a function. The field function does not read that value, nor any
+  fact it gives (the sign of `a := 5` does not remove the `abs` of `|a|`,
+  also when the type of `a` was inferred from its value; the same holds for
+  a coordinate with a value), so a host that keeps slider values as assigned
+  symbols gets the same text for each value.
 - A real or integer scalar parameter is `f32`. A list `list<number^n>` is
   `array<vec4f, ceil(n/4)>` (16-byte stride); element k (1-based) is
   component `(k-1) % 4` of entry `(k-1) / 4`, with the index rules of today's
@@ -138,13 +145,46 @@ Contract:
   declines (`kind: 'capability'`).
 - Helpers are returned by name. CE guarantees that a helper name always has
   the same source text in every compilation, so the host merges the maps of
-  several fields by name. User functions get a prefix from `name`
-  (`_fn_<name>_h`).
+  several fields by name. User functions get a prefix from `name`:
+  `_fn_<k>_<name>_h`, with k the length of `name` (as implemented; the
+  length keeps the field `my` with the function `field_h` and the field
+  `my_field` with the function `h` from having one name).
+- As implemented with CE-572: a symbol with a `'storage-buffer'` hint is not
+  a struct field. The field function reads it by `At`, `Length`, the
+  reductions and a `Sum` to `Length(S)`, also inside the user-defined
+  functions it calls. Its struct type (`CE_List_f32`) is in `helpers` under
+  the struct name, its `@group(G) @binding(B) var<storage, read>`
+  declaration under the WGSL name of the buffer, and its layout in
+  `storageBuffers`, as `compile()` gives it. The struct has the same text
+  for one element type. The buffer declaration has the same text only for
+  the same hint (group and binding) and the same element type: it is the
+  one exception to "a helper name always has the same source" (decision
+  2026-10-27). A host that merges fields gives each buffer name one hint in
+  every field; two different texts under one key mean that the hints of the
+  fields disagree, and the host treats that as an error.
 - Everything that declines on `compile(…, { to: 'wgsl' })` declines here with
   the same diagnostic: recursion, an unseeded `Random` (use
   `WithRandomSeed`), `Integrate` (CE-280.1), a body that assigns a
   parameter, a list of unknown length (until row 462), a constant outside the
   f32 range.
+  As implemented, measured on 2026-10-27: `compile()` accepts a body that
+  assigns a parameter (it writes a local copy) and a constant outside the f32
+  range (it emits `_gpu_inf()`). The field function declines a body that
+  assigns a coordinate or a parameter (it cannot write its inputs); names
+  that only the body assigns are its locals. It accepts a constant outside
+  the f32 range as `compile()` does. It also declines: a body with no value
+  to return (the check of `compileFunction()`), a `Return` whose value is not
+  `f32`, a user-defined function that reads a coordinate it does not take as
+  a parameter (it is declared at module scope, where the coordinates do not
+  exist; each reachable user-defined function is checked on its own), and a
+  user-defined function that declares the name `paramsVariable`. A `name`,
+  `paramsStruct`, `paramsVariable` or coordinate that is a predeclared WGSL
+  function or type (`sin`, `vec4f`) throws: it would hide the built-in that
+  the helpers call; so does one that starts with `CE_List_`, the prefix of
+  the storage-buffer structs. A storage buffer whose name is a predeclared
+  WGSL name declines, in `compile()` too. A parameter struct above the
+  65,536 bytes of `maxUniformBufferBindingSize` (the default limit of the
+  WebGPU specification) declines and points to storage buffers.
 - Documented numerical limits: f32 arithmetic; NaN and infinity computed at
   run time are not guaranteed on GPUs (a division by zero can give a finite
   value); `sin`/`cos` of large arguments lose accuracy; a sine hash is
@@ -374,6 +414,9 @@ contract above for use when evidence items 1 and 2 arrive.
   `y`) that nothing declares; the shader then fails only on the GPU.
 
 ## Questions for the CE owner
+
+**Decided 2026-10-27 by the user:** Q1 (a), Q2 (a), Q3 (a), Q4 (a); Q5: file
+F1 and F2 (ROADMAP CE-574 and CE-575) and fix them.
 
 **Q1 (461). Add `compileFieldFunction()`, or document a recipe only?**
 - (a) Add the method. Tycho gets the layout, mergeable helpers and declines
