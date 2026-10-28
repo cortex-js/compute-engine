@@ -1505,7 +1505,13 @@ describe('GPU USER FUNCTIONS — a WGSL shader input is a struct FIELD', () => {
     expect(shader).toContain('fn _fn_h(w: vec2f) -> f32');
     // …and the emission names the struct field, not a bare `v`.
     expect(shader).toContain('output.color.r = _fn_h(input.v);');
-    expect(shader).toContain('output.color.rg = input.v;');
+    // A target of two components is written one component at a time, which
+    // WGSL accepts without the `swizzle_assignment` extension (CE-580).
+    expect(shader).toContain(
+      '  let _tv1 = input.v;\n' +
+        '  output.color.r = _tv1.x;\n' +
+        '  output.color.g = _tv1.y;\n'
+    );
     expect(shader).not.toMatch(/= _fn_h\(v\)/);
     expect(shader).not.toMatch(/= v;/);
   });

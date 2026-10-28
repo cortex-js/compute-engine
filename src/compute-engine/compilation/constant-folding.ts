@@ -322,6 +322,37 @@ export function parenthesizeFactor(expr: Expression, code: string): string {
 }
 
 /**
+ * Refuse a real operand of a complex shader value when it is a vector.
+ *
+ * The shader targets hold a complex value as `vec2(re, im)`, and the complex
+ * lowerings read each real operand as a scalar: they write it into one slot
+ * of a `vec2` (`vec2(q, 0.0)`, `vec2(q, 1.0)`) or scale a `vec2` by it. A
+ * vector operand (`vec2 q`, whose width the shape frame gives,
+ * `aggregateComponentCount`) has no such reading: `q + i` emitted
+ * `vec2(q, 1.0)`, which is not valid source, and `q · z` multiplied the
+ * components one by one. So the compilation fails, naming the operand.
+ *
+ * @param head The operator whose complex lowering reads the operand, or
+ *             `undefined` when the caller does not know it.
+ * @param x    A real operand of that lowering.
+ */
+export function assertScalarComplexOperand(
+  head: string | undefined,
+  x: Expression
+): void {
+  if (BaseCompiler.isComplexValued(x)) return;
+  const n = BaseCompiler.aggregateComponentCount(x);
+  if (n !== undefined && n > 1)
+    throw new Error(
+      `Could not compile ${head === undefined ? 'a complex value' : `\`${head}\``}: ` +
+        `the operand \`${x.toString()}\` is a vector of ${n} components, ` +
+        `and the value is complex. A list of complex numbers has no ` +
+        `representation on the GPU targets (each complex number is a ` +
+        `\`vec2\`), so complex arithmetic on a vector is not supported there.`
+    );
+}
+
+/**
  * Decompose an expression into real and imaginary compiled code strings
  * for direct `vec2(re, im)` construction.
  *
@@ -369,6 +400,7 @@ export function tryGetComplexParts(
         ? 1
         : (iFactor as any).im;
       const remaining = ops.filter((_, idx) => idx !== iIndex);
+      for (const r of remaining) assertScalarComplexOperand('Multiply', r);
       if (remaining.length === 0) {
         return { re: null, im: formatFloat(iScale, language) };
       }
@@ -389,6 +421,7 @@ export function tryGetComplexParts(
   }
 
   // Symbol, number (real), or real-valued function → purely real
+  assertScalarComplexOperand('Add', expr);
   return { re: compile(expr), im: null };
 }
 

@@ -23,8 +23,11 @@
  * `.x` and `.y`, and calls of the helpers and of `abs`, `max`, `min`,
  * `sqrt`, `log`, `exp`, `pow`, `floor`, `fract`, `sin`, `cos`, `length`, GLSL
  * `atan` (one or two arguments) and `vec2`, and WGSL `atan` (one
- * argument), `atan2`, `select` and `vec2f`. `sin`, `cos`, `sign`, `max`
- * and `min` are componentwise on a `vec2`. The NaN and infinity helpers
+ * argument), `atan2`, `select`, `vec2f`, `vec3f`, `vec4f`, `dot` and
+ * `distance`. A WGSL vector has 2, 3 or 4 components (the members `.z` and
+ * `.w` of a `vec3f` or `vec4f` are read too), and the arithmetic operators
+ * are componentwise on it. `sin`, `cos`, `sign`, `max`
+ * and `min` are componentwise on a vector. The NaN and infinity helpers
  * `_gpu_nan` and `_gpu_inf`, which build their value from a bit pattern,
  * are read as `0.0 / 0.0` and `1.0 / 0.0`. The NaN test on the bit pattern
  * of a name, `(floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u` in GLSL and
@@ -51,7 +54,24 @@
  *    a `let` cannot); there is no `vec2` and no two-argument `atan`.
  */
 
-export type Value = number | { x: number; y: number };
+/** A scalar, or a vector of 2, 3 or 4 components (`z` and `w` present
+ * for a `vec3f` and a `vec4f`). */
+export type Value = number | { x: number; y: number; z?: number; w?: number };
+
+/** The components of a vector, in order. */
+const KEYS = ['x', 'y', 'z', 'w'] as const;
+type Vec = Exclude<Value, number>;
+function width(v: Vec): number {
+  return v.w !== undefined ? 4 : v.z !== undefined ? 3 : 2;
+}
+function components(v: Vec): number[] {
+  return KEYS.slice(0, width(v)).map((k) => v[k]!);
+}
+function vec(c: number[]): Vec {
+  const out: Record<string, number> = {};
+  c.forEach((v, i) => (out[KEYS[i]] = v));
+  return out as unknown as Vec;
+}
 
 const fr = Math.fround;
 
@@ -98,7 +118,7 @@ function tokenize(src: string): string[] {
   return out;
 }
 
-const TYPES = new Set(['float', 'vec2', 'f32', 'vec2f']);
+const TYPES = new Set(['float', 'vec2', 'f32', 'vec2f', 'vec3f', 'vec4f']);
 
 const COMMON_BUILTINS = new Set([
   'abs',
@@ -120,7 +140,15 @@ const COMMON_BUILTINS = new Set([
 ]);
 const LANGUAGE_BUILTINS: Record<ShaderLanguage, Set<string>> = {
   glsl: new Set(['vec2']),
-  wgsl: new Set(['atan2', 'select', 'vec2f']),
+  wgsl: new Set([
+    'atan2',
+    'select',
+    'vec2f',
+    'vec3f',
+    'vec4f',
+    'dot',
+    'distance',
+  ]),
 };
 
 class Parser {
@@ -340,9 +368,13 @@ class Parser {
 
 function lift(a: Value, b: Value, f: (x: number, y: number) => number): Value {
   if (typeof a === 'number' && typeof b === 'number') return fr(f(a, b));
-  const ax = typeof a === 'number' ? { x: a, y: a } : a;
-  const bx = typeof b === 'number' ? { x: b, y: b } : b;
-  return { x: fr(f(ax.x, bx.x)), y: fr(f(ax.y, bx.y)) };
+  const n = Math.max(
+    typeof a === 'number' ? 0 : width(a),
+    typeof b === 'number' ? 0 : width(b)
+  );
+  const at = (v: Value, i: number) =>
+    typeof v === 'number' ? v : components(v)[i];
+  return vec(Array.from({ length: n }, (_, i) => fr(f(at(a, i), at(b, i)))));
 }
 
 const num = (v: Value): number => {
@@ -354,7 +386,7 @@ const num = (v: Value): number => {
  * `cos` and `sign` are in both languages. */
 function each(x: Value, f: (x: number) => number): Value {
   if (typeof x === 'number') return f(x);
-  return { x: f(x.x), y: f(x.y) };
+  return vec(components(x).map(f));
 }
 
 const BUILTINS: Record<string, (...a: Value[]) => Value> = {
@@ -375,14 +407,25 @@ const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   atan2: (y, x) => fr(Math.atan2(num(y), num(x))),
   length: (v) => {
     if (typeof v === 'number') return Math.abs(v);
-    return fr(Math.sqrt(fr(fr(v.x * v.x) + fr(v.y * v.y))));
+    return fr(Math.sqrt(num(BUILTINS.dot(v, v))));
   },
+  dot: (a, b) => {
+    if (typeof a === 'number' || typeof b === 'number')
+      throw new Error('`dot` of a scalar');
+    const bc = components(b);
+    return components(a).reduce((s, v, i) => fr(s + fr(v * bc[i])), 0);
+  },
+  distance: (a, b) => BUILTINS.length(lift(a, b, (x, y) => x - y)),
   select: (f, t, c) => (c ? t : f),
   // The NaN test on a bit pattern (see the rewrite in `shaderFunctions`).
   _gpu_bits_isnan: (x) => Number.isNaN(num(x)) as unknown as Value,
   _gpu_bits_nonfinite: (x) => !Number.isFinite(num(x)) as unknown as Value,
   vec2: (x, y) => ({ x: num(x), y: num(y ?? x) }),
   vec2f: (x, y) => ({ x: num(x), y: num(y ?? x) }),
+  vec3f: (...a) =>
+    vec(a.length === 1 ? [0, 1, 2].map(() => num(a[0])) : a.map(num)),
+  vec4f: (...a) =>
+    vec(a.length === 1 ? [0, 1, 2, 3].map(() => num(a[0])) : a.map(num)),
   // The conversion to an integer, used only for an array index here.
   i32: (x) => Math.trunc(num(x)),
 };
@@ -463,7 +506,7 @@ export function shaderFunctions(
         return !evaluate(e.e, env);
       case 'neg': {
         const v = evaluate(e.e, env) as Value;
-        return typeof v === 'number' ? -v : { x: -v.x, y: -v.y };
+        return typeof v === 'number' ? -v : vec(components(v).map((c) => -c));
       }
       case 'cond':
         return evaluate(e.c, env) ? evaluate(e.t, env) : evaluate(e.f, env);
@@ -524,7 +567,7 @@ export function shaderFunctions(
     call(
       name,
       args.map((a) =>
-        typeof a === 'number' ? fr(a) : { x: fr(a.x), y: fr(a.y) }
+        typeof a === 'number' ? fr(a) : vec(components(a).map(fr))
       )
     );
 }

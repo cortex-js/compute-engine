@@ -12,7 +12,7 @@
  * - each list parameter is a `'uniform-struct'` storage symbol, so that every
  *   positional read of it calls the reader of this file, and every other
  *   reference to it declines;
- * - each scalar parameter, which `vars` maps to the struct field
+ * - each scalar or point parameter, which `vars` maps to the struct field
  *   `<paramsVariable>.<name>`, is a host input of its declared type
  *   (`hostInputVars`). Without this the finite-operand test of the shader
  *   targets accepts only a symbol that `vars` maps to its own name, and it
@@ -47,6 +47,7 @@ import { withVarsValuesHidden } from './vars-inputs.js';
 import { WGSL_PREDECLARED } from './wgsl-predeclared.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
 import { isValueDef } from '../boxed-expression/utils.js';
+import { capturedTypeWidenings } from '../boxed-expression/function-literal.js';
 import type { BoxedValueDefinition } from '../types-definitions.js';
 import { BaseCompiler } from './base-compiler.js';
 import { compileDiagnosticOf } from './diagnostics.js';
@@ -54,6 +55,8 @@ import { resolveStorageHints } from './storage-hints.js';
 import { formatFloat } from './constant-folding.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
 import { isNonRealNumber, resolveTypeAlias } from '../../common/type/utils.js';
+import { isSubtype } from '../../common/type/subtype.js';
+import type { Type } from '../../common/type/types.js';
 
 /**
  * The largest number of elements of a list parameter. 1024 elements take
@@ -111,7 +114,8 @@ function declined(diagnostic: CompileDiagnostic): FieldFunctionResult {
 
 /** The text that the decline of a parameter adds about longer lists. */
 const STORAGE_BUFFER_NOTE =
-  'A parameter of a field function is a real or integer scalar, or a ' +
+  'A parameter of a field function is a real or integer scalar, a point ' +
+  '(a tuple of 2, 3 or 4 real numbers), or a ' +
   `numeric list of known length with at most ${FIELD_FUNCTION_MAX_LIST_LENGTH} ` +
   'elements, in the uniform parameter struct. A list of numbers or points ' +
   `of unknown length, or with more than ${FIELD_FUNCTION_MAX_LIST_LENGTH} ` +
@@ -236,6 +240,217 @@ export function wgslDeclarationsByName(src: string): Map<string, string> {
   return result;
 }
 
+/**
+ * The number of components of the tuple type `t` when `t` is a point that
+ * can be a vector field of the parameter struct: a tuple of 2, 3 or 4
+ * components, each a real number or a `number`. Else `undefined`.
+ *
+ * A component declared `number` is accepted, as a list parameter accepts
+ * `list<number^n>`: the host can write only real values into the buffer, so
+ * the field reads the component as a real number. A component type that
+ * holds only non-real values (`complex`, `imaginary`) is refused, and so is
+ * the type `nan`, which a value with a `NaN` component gives.
+ */
+function pointComponentCount(t: Type): number | undefined {
+  if (typeof t === 'string' || t.kind !== 'tuple') return undefined;
+  const n = t.elements.length;
+  if (n < 2 || n > 4) return undefined;
+  return t.elements.every(
+    (e) =>
+      isSubtype(e.type, 'number') &&
+      !isNonRealNumber(e.type) &&
+      !isSubtype(e.type, 'nan')
+  )
+    ? n
+    : undefined;
+}
+
+/**
+ * True when `value`, the value of a symbol, is a numeric constant: it reads
+ * no symbol other than a constant (`Pi`, or a symbol declared constant), and
+ * it calls no user-defined function (the body of a user-defined function can
+ * read a coordinate or another symbol). `5`, `(1, 2)`, `(1.5, √2)` and
+ * `[1, 2, 3]` are constants; `x + 1`, `(a, b)` and `g(2)` are not.
+ */
+function isConstantValue(ce: Expression['engine'], value: Expression): boolean {
+  const visited = new Set<Expression>();
+  const constant = (e: Expression): boolean => {
+    if (visited.has(e)) return true;
+    visited.add(e);
+    if (isSymbol(e)) {
+      const def = ce.lookupDefinition(e.symbol);
+      return isValueDef(def) && def.value.isConstant === true;
+    }
+    if (!isFunction(e)) return true;
+    let literal: Expression | undefined;
+    try {
+      literal = BaseCompiler.userFunctionLiteral(ce, e.operator);
+    } catch {
+      return false;
+    }
+    return literal === undefined && e.ops.every(constant);
+  };
+  return constant(value);
+}
+
+/**
+ * The definition object that holds the literal of the user-defined function
+ * `id`: the operator definition (`h(t) := …`), or the value definition of a
+ * symbol whose value is a function literal. This is the object that the
+ * check of the types of the captured symbols (`capturedTypeWidening()`) is
+ * keyed on.
+ */
+function userFunctionOwner(
+  ce: Expression['engine'],
+  id: string
+): object | undefined {
+  const def = ce.lookupDefinition(id);
+  if (def !== undefined && 'operator' in def) return def.operator;
+  if (isValueDef(def)) return def.value;
+  return undefined;
+}
+
+/**
+ * The name of the user-defined function `id` in a message. A function that
+ * shadows a library operator (`Gamma`) is read under a private name
+ * (`GammaUser`, `GammaCopy2`: `withShadowingCallsRenamed()`), whose
+ * definition no longer exists after the renaming: the message names the
+ * user's function instead.
+ */
+function userFunctionName(ce: Expression['engine'], id: string): string {
+  if (ce.lookupDefinition(id) !== undefined) return id;
+  const m = /^(.+?)(?:User|Copy)\d*$/.exec(id);
+  return m !== null && ce.lookupDefinition(m[1]) !== undefined ? m[1] : id;
+}
+
+/**
+ * Throw when a type that the engine derived from the type of a parameter
+ * is outdated while the value of the parameter is hidden. Called inside
+ * the bracket of `withInferredValuesHidden()`, before the compilation.
+ *
+ * A parameter whose type was inferred from its value has, in the bracket,
+ * the type of the value with no fact: `a := 5` is `integer` before and
+ * `real` in the bracket. A type that was derived from `integer` is then
+ * outdated, and code compiled from it is wrong for a non-integer buffer
+ * value:
+ *
+ * - a user-defined function that reads the parameter, directly or through a
+ *   symbol whose value is compiled in place, was typed with the earlier
+ *   type (`h(t) := a` returns an integer), and `Floor(h(x))` would drop the
+ *   `floor`. Its record of the types of its captured symbols
+ *   (`capturedTypeWidenings()`) gives each such symbol. The definition is
+ *   the one that the discovery read (`discovery.functions`): a function
+ *   that shadows a library operator is a private copy that the compilation
+ *   makes again in the bracket, with a record of the types in the bracket.
+ * - a symbol whose value is compiled in place (`b := a`) has a type,
+ *   inferred from that value or declared (`b: integer`), that the value no
+ *   longer fits. The compilation reads the type of the symbol
+ *   (`Floor(b)` drops the `floor` for an integer `b`) and the value from
+ *   the buffer.
+ *
+ * The message names each parameter behind the outdated type, and the
+ * remedy: a parameter declared before its first assignment has the same
+ * type in the bracket and out of it.
+ */
+function checkHiddenTypeChanges(
+  ce: Expression['engine'],
+  vars: Readonly<Record<string, string>>,
+  discovery: {
+    functions: ReadonlyArray<[name: string, owner: object]>;
+    inlined: ReadonlyMap<string, { value: Expression; reads: string[] }>;
+  },
+  typesBefore: ReadonlyMap<string, Type>
+): void {
+  const typeNow = (p: string): Type | undefined => {
+    const def = ce.lookupDefinition(p);
+    return isValueDef(def) ? def.value.type.type : undefined;
+  };
+  // The parameters whose type changed in the bracket, behind the symbol
+  // `name`: `name` itself, or the parameters that its value reads when the
+  // compilation writes the value in place.
+  const parametersBehind = (
+    name: string,
+    seen: Set<string> = new Set()
+  ): string[] => {
+    if (seen.has(name)) return [];
+    seen.add(name);
+    if (Object.hasOwn(vars, name)) {
+      const before = typesBefore.get(name);
+      const now = typeNow(name);
+      return before !== undefined &&
+        now !== undefined &&
+        !isSubtype(now, before)
+        ? [name]
+        : [];
+    }
+    const inlined = discovery.inlined.get(name);
+    if (inlined === undefined) return [];
+    return inlined.reads.flatMap((s) => parametersBehind(s, seen));
+  };
+  const remedy = (parameters: string[]): string =>
+    `Declare ${parameters
+      .map((p) => `"${p}" (\`ce.declare('${p}', '${ce.box(p).type}')\`)`)
+      .join(' and ')} before its first assignment`;
+  const named = (parameters: string[]): string =>
+    parameters.map((p) => `"${p}"`).join(' and ');
+
+  for (const [id, owner] of discovery.functions) {
+    for (const w of capturedTypeWidenings(owner)) {
+      const parameters = parametersBehind(w.name);
+      if (parameters.length === 0) continue;
+      const fn = userFunctionName(ce, id);
+      const through =
+        parameters.length === 1 && parameters[0] === w.name
+          ? `the parameter "${w.name}"`
+          : `"${w.name}", whose value reads the parameter${
+              parameters.length > 1 ? 's' : ''
+            } ${named(parameters)}`;
+      throw new Error(
+        `Could not compile with \`compileFieldFunction()\`: the ` +
+          `user-defined function "${fn}" reads ${through}, and the body of ` +
+          `"${fn}" was typed when "${w.name}" had the type ` +
+          `\`${w.before.toString()}\`. A field function reads ` +
+          `${named(parameters)} from the buffer with no fact of the value ` +
+          `(as \`${w.now.toString()}\` for "${w.name}"), so the types that ` +
+          `the callers of "${fn}" read are outdated. ${remedy(parameters)} ` +
+          `and before "${fn}" is defined.`
+      );
+    }
+  }
+
+  for (const [s, { value }] of discovery.inlined) {
+    const def = ce.lookupDefinition(s);
+    if (!isValueDef(def)) continue;
+    const stored = def.value.type;
+    if (stored.isUnknown || isSubtype(value.type.type, stored.type)) continue;
+    const parameters = parametersBehind(s);
+    if (parameters.length === 0) continue;
+    const inferred = def.value.inferredType;
+    // A declared symbol keeps its type: the parameters must be declared
+    // with types that its value fits. For a value that is one parameter
+    // (`b := a`), that is the type of the symbol.
+    const fit =
+      isSymbol(value) && parameters.length === 1
+        ? `Declare "${parameters[0]}" ` +
+          `(\`ce.declare('${parameters[0]}', '${stored.toString()}')\`) ` +
+          `before its first assignment`
+        : `Declare ${named(parameters)} before the first assignment with ` +
+          `types for which the value of "${s}" is a \`${stored.toString()}\``;
+    throw new Error(
+      `Could not compile with \`compileFieldFunction()\`: the value of ` +
+        `"${s}" is compiled in place, and "${s}" has the ` +
+        `${inferred ? 'inferred' : 'declared'} type ` +
+        `\`${stored.toString()}\`. A field function reads ` +
+        `${named(parameters)} from the buffer with no fact of the value, ` +
+        `and the value of "${s}" then has the type ` +
+        `\`${value.type.toString()}\`. ` +
+        (inferred
+          ? `${remedy(parameters)}.`
+          : `${fit}, or declare "${s}" as \`${value.type.toString()}\`.`)
+    );
+  }
+}
+
 /** Round `value` up to a multiple of `alignment`. */
 function roundUp(alignment: number, value: number): number {
   return Math.ceil(value / alignment) * alignment;
@@ -257,8 +472,9 @@ function roundUp(alignment: number, value: number): number {
  *
  * While `fn` runs, each such definition has no value, and its type is the
  * type that the value gives with no fact about the value: `real` for a real
- * number, `list<real^n>` for a list of n real numbers. Any other value keeps
- * its type (a complex value then declines as a parameter). The type stays
+ * number, `list<real^n>` for a list of n real numbers, `tuple<real, real>`
+ * (with 2, 3 or 4 components) for a point of real numbers. Any other value
+ * keeps its type (a complex value then declines as a parameter). The type stays
  * marked as inferred, so the finite-operand test of the shader targets does
  * not take it as a promise of the host. The definition is restored from a
  * snapshot of all its fields (`_checkpointSnapshot`), so that a type that a
@@ -288,11 +504,14 @@ function withInferredValuesHidden<T>(
         typeof t !== 'string' && t.kind === 'list' && t.dimensions?.length === 1
           ? t.dimensions[0]
           : undefined;
+      const point = pointComponentCount(t);
       const type = stored.type.matches('real')
         ? 'real'
         : n !== undefined && n > 0 && stored.type.matches('list<real>')
           ? `list<real^${n}>`
-          : stored.type.type;
+          : point !== undefined
+            ? `tuple<${Array(point).fill('real').join(', ')}>`
+            : stored.type.type;
       hidden.push({ def: v, snapshot: v._checkpointSnapshot() });
       v.value = undefined;
       v.type = ce.type(type);
@@ -441,8 +660,9 @@ export function compileWGSLFieldFunction(
   // given a private name (`withShadowingCallsRenamed`), so that the free
   // symbols of its body are found.
   //
-  // A symbol with a value is a parameter too, unless it is a constant (`Pi`,
-  // or a symbol declared constant), or its value is a function: a value
+  // A symbol with a value that is a numeric constant (see below) is a
+  // parameter too, unless it is a constant (`Pi`, or a symbol declared
+  // constant), or its value is a function: a value
   // that the host changes must be a buffer write, not new WGSL text. Its
   // value in the engine is not read: `vars` hides it (`withVarsValuesHidden`
   // and `withInferredValuesHidden`). The candidates are given to the
@@ -450,87 +670,218 @@ export function compileWGSLFieldFunction(
   // occurrences that no binding of the expression covers: with `a := 5` and
   // `h(a) := a + 1`, the `a` of `a + h(x)` is a parameter, and the parameter
   // `a` of `h` stays the parameter of `h`.
-  const discovery = withShadowingCallsRenamed(expr, { vars }, (renamed) => {
-    const reachable = gpuReachableSymbolNames(renamed, vars);
-    const valued: string[] = [];
-    for (const s of reachable.all) {
-      if (coordinateSet.has(s) || hints?.has(s)) continue;
-      const def = ce.lookupDefinition(s);
-      if (!isValueDef(def) || def.value.isConstant) continue;
-      const value = def.value.value;
-      if (value === undefined || isFunction(value, 'Function')) continue;
-      if (value.type.matches('function')) continue;
-      valued.push(s);
-    }
-    const target = host.createTarget();
-    const analysis: CompileTarget<Expression> = {
-      ...target,
-      userFunctions: target.userFunctions ?? {
-        defs: new Map(),
-        compiling: new Set(),
-      },
-    };
-    const occurrences = new Map<string, Expression>();
-    const free = BaseCompiler.analyzeReferences(
-      renamed,
-      analysis,
-      new Set([...coordinates, ...valued]),
-      occurrences
-    ).freeSymbols;
-    // The type of each free symbol is read from its occurrence in the
-    // expression: the definition bound when the expression was made, which
-    // can differ from the definition of the name in the current scope. A
-    // symbol that occurs only in the body of a user function has the type
-    // of its definition in the current scope, which is the scope the
-    // compilation reads that body in.
-    const types = new Map(
-      free.map((s) => [s, (occurrences.get(s) ?? ce.symbol(s)).type])
-    );
-    // The coordinates that a user-defined function reads without taking
-    // them as parameters. A user-defined function is declared at module
-    // scope, where the coordinates do not exist. Each reachable user-defined
-    // function is analyzed on its own: the reference analysis of its literal
-    // binds its own parameters and the variables of its inner scopes (a
-    // `Sum` index). The analysis target has no user-function registry, so
-    // the analysis does not follow the functions that the body calls: it
-    // would read their bodies with the parameters of the caller bound
-    // (`h(x) := g(x)` would hide the free `x` of `g(t) := t + x`). The walk
-    // below reaches each called function instead.
-    const captures: Array<[string, string]> = [];
-    const seen = new Set<string>();
-    const visitName = (id: string): void => {
-      if (seen.has(id)) return;
-      seen.add(id);
-      let literal: Expression | undefined;
-      try {
-        literal = BaseCompiler.userFunctionLiteral(ce, id);
-      } catch {
-        literal = undefined;
+  //
+  // Only a symbol whose value is a numeric constant (a number, or a tuple or
+  // a list of numbers, with no symbol other than a constant such as `Pi`) is
+  // a parameter. A value that reads other symbols (`a := x + 1`,
+  // `A := (a, b)`) is not a buffer field: the compilation writes the value
+  // in place, as `compile()` does, so that a coordinate in it stays a
+  // coordinate, and each symbol of the value is a parameter or a coordinate
+  // itself. Such a symbol is a reference candidate too, so that its
+  // occurrences are found, and then its value is analyzed in its place. A
+  // value that reads itself through other symbols is analyzed once, and the
+  // compilation declines it.
+  //
+  // The discovery reads the definitions of the user-defined functions, and
+  // a definition whose captured symbols changed type since it was made
+  // throws (`BaseCompiler.userFunctionLiteral()`): that is a decline, as in
+  // the compilation.
+  let discovery: {
+    free: string[];
+    types: Map<string, Expression['type']>;
+    assigned: Set<string>;
+    captures: Array<[string, string]>;
+    functions: Array<[name: string, owner: object]>;
+    inlined: Map<string, { value: Expression; reads: string[] }>;
+    written: ReadonlySet<string>;
+    declaring: string | undefined;
+  };
+  try {
+    discovery = withShadowingCallsRenamed(expr, { vars }, (renamed) => {
+      const reachable = gpuReachableSymbolNames(renamed, vars);
+      const valued: string[] = [];
+      const inlined = new Map<string, Expression>();
+      for (const s of reachable.all) {
+        if (coordinateSet.has(s) || hints?.has(s)) continue;
+        const def = ce.lookupDefinition(s);
+        if (!isValueDef(def) || def.value.isConstant) continue;
+        const value = def.value.value;
+        if (value === undefined || isFunction(value, 'Function')) continue;
+        if (value.type.matches('function')) continue;
+        if (isConstantValue(ce, value)) valued.push(s);
+        else inlined.set(s, value);
       }
-      if (literal === undefined) return;
-      for (const s of BaseCompiler.analyzeReferences(
-        literal,
-        target,
-        coordinateSet
-      ).freeSymbols)
-        if (coordinateSet.has(s)) captures.push([id, s]);
-      visit(literal);
-    };
-    // Each node is visited once: a node can have many parents
-    // (`assignedSymbols`).
-    const visitedNodes = new Set<Expression>();
-    const visit = (e: Expression): void => {
-      if (visitedNodes.has(e)) return;
-      visitedNodes.add(e);
-      if (isSymbol(e)) visitName(e.symbol);
-      else if (isFunction(e)) {
-        visitName(e.operator);
-        for (const op of e.ops) visit(op);
+      const target = host.createTarget();
+      const analysis: CompileTarget<Expression> = {
+        ...target,
+        userFunctions: target.userFunctions ?? {
+          defs: new Map(),
+          compiling: new Set(),
+        },
+      };
+      const occurrences = new Map<string, Expression>();
+      const candidates = new Set([
+        ...coordinates,
+        ...valued,
+        ...inlined.keys(),
+      ]);
+      const free: string[] = [];
+      const pending = BaseCompiler.analyzeReferences(
+        renamed,
+        analysis,
+        candidates,
+        occurrences
+      ).freeSymbols;
+      // The symbols compiled in place that the field reads, found by the
+      // reference analysis, which follows the scope rules: a parameter or a
+      // local of the same name as a global symbol is not that symbol
+      // (`h(b) := b + 1` with a global `b`).
+      const reached = new Set<string>();
+      const toVisit: string[] = [];
+      const reach = (s: string): void => {
+        if (reached.has(s)) return;
+        reached.add(s);
+        toVisit.push(s);
+      };
+      const analyzed = new Set<string>();
+      while (pending.length > 0) {
+        const s = pending.pop()!;
+        const value = inlined.get(s);
+        if (value === undefined) {
+          if (!free.includes(s)) free.push(s);
+          continue;
+        }
+        if (analyzed.has(s)) continue;
+        analyzed.add(s);
+        reach(s);
+        pending.push(
+          ...BaseCompiler.analyzeReferences(
+            value,
+            analysis,
+            candidates,
+            occurrences
+          ).freeSymbols
+        );
       }
-    };
-    visit(renamed);
-    return { free, types, assigned: assignedSymbols(renamed), captures };
-  });
+      // The type of each free symbol is read from its occurrence in the
+      // expression: the definition bound when the expression was made, which
+      // can differ from the definition of the name in the current scope. A
+      // symbol that occurs only in the body of a user function has the type
+      // of its definition in the current scope, which is the scope the
+      // compilation reads that body in.
+      const types = new Map(
+        free.map((s) => [s, (occurrences.get(s) ?? ce.symbol(s)).type])
+      );
+      // The coordinates that a user-defined function reads without taking
+      // them as parameters. A user-defined function is declared at module
+      // scope, where the coordinates do not exist. Each reachable user-defined
+      // function is analyzed on its own: the reference analysis of its literal
+      // binds its own parameters and the variables of its inner scopes (a
+      // `Sum` index). The analysis target has no user-function registry, so
+      // the analysis does not follow the functions that the body calls: it
+      // would read their bodies with the parameters of the caller bound
+      // (`h(x) := g(x)` would hide the free `x` of `g(t) := t + x`). The walk
+      // below reaches each called function instead.
+      //
+      // A value that the compilation writes in place (`inlined`) is written in
+      // the body of the user-defined function that reads it too, so a
+      // coordinate in that value is also read by the function
+      // (`h(t) := t + c` with `c := x + 1`). The analysis of a literal
+      // therefore follows each such value, and the walk below visits the
+      // value of each such symbol, to reach the functions that the value calls
+      // (`a := h(y)`).
+      const captures: Array<[string, string]> = [];
+      // Each reachable user-defined function, with the definition that
+      // holds its literal. The definition is read here, in the scope of the
+      // renaming: a function that shadows a library operator (`Gamma`) is
+      // a private copy in this scope, and its record of the types of its
+      // captured symbols was made before any value is hidden.
+      const functions: Array<[name: string, owner: object]> = [];
+      // The first reachable user-defined function that declares or writes a
+      // variable named `paramsVariable` (see the check before the
+      // compilation).
+      let declaring: string | undefined;
+      const coordinatesRead = (
+        e: Expression,
+        out: Set<string>,
+        followed: Set<string>
+      ): void => {
+        for (const s of BaseCompiler.analyzeReferences(
+          e,
+          target,
+          new Set([...coordinates, ...inlined.keys()])
+        ).freeSymbols) {
+          if (coordinateSet.has(s)) out.add(s);
+          const value = inlined.get(s);
+          if (value !== undefined && !followed.has(s)) {
+            followed.add(s);
+            reach(s);
+            coordinatesRead(value, out, followed);
+          }
+        }
+      };
+      const seen = new Set<string>();
+      const visitName = (id: string): void => {
+        if (seen.has(id)) return;
+        seen.add(id);
+        const literal = BaseCompiler.userFunctionLiteral(ce, id);
+        if (literal === undefined) return;
+        if (
+          declaring === undefined &&
+          gpuReachableSymbolNames(literal, vars).written.has(paramsVariable)
+        )
+          declaring = id;
+        const owner = userFunctionOwner(ce, id);
+        if (owner !== undefined) functions.push([id, owner]);
+        const read = new Set<string>();
+        coordinatesRead(literal, read, new Set());
+        for (const c of read) captures.push([id, c]);
+        visit(literal);
+      };
+      // Each node is visited once: a node can have many parents
+      // (`assignedSymbols`). The value of a symbol compiled in place is
+      // visited when the reference analysis finds that symbol free
+      // (`reached`), not by the name of a symbol in the walk.
+      const visitedNodes = new Set<Expression>();
+      const visit = (e: Expression): void => {
+        if (visitedNodes.has(e)) return;
+        visitedNodes.add(e);
+        if (isSymbol(e)) visitName(e.symbol);
+        else if (isFunction(e)) {
+          visitName(e.operator);
+          for (const op of e.ops) visit(op);
+        }
+      };
+      visit(renamed);
+      while (toVisit.length > 0) visit(inlined.get(toVisit.pop()!)!);
+      // The symbols that each value compiled in place reads, by the same
+      // scope rules.
+      const reachedValues = new Map(
+        [...reached].map((s) => {
+          const value = inlined.get(s)!;
+          const reads = BaseCompiler.analyzeReferences(
+            value,
+            target,
+            candidates
+          ).freeSymbols;
+          return [s, { value, reads }] as const;
+        })
+      );
+      return {
+        free,
+        types,
+        assigned: assignedSymbols(renamed),
+        captures,
+        functions,
+        inlined: reachedValues,
+        written: reachable.written,
+        declaring,
+      };
+    });
+  } catch (e) {
+    throwIfCallerCancellation(e, ce._deadlineFrame);
+    return declined(compileDiagnosticOf(e));
+  }
 
   // A body that assigns a coordinate or a parameter declines: a field
   // function cannot write its inputs. A local is declared first
@@ -572,6 +923,7 @@ export function compileWGSLFieldFunction(
   // storage hint. A list parameter must be known now, to place it in
   // storage before the compilation.
   const scalars: string[] = [];
+  const points = new Map<string, number>();
   const lists = new Map<string, { n: number; ceType: string }>();
   for (const p of [...discovery.free].sort()) {
     if (coordinateSet.has(p) || hints?.has(p)) continue;
@@ -623,6 +975,22 @@ export function compileWGSLFieldFunction(
       lists.set(p, { n, ceType: spelled });
       continue;
     }
+    // A point: a tuple of 2, 3 or 4 real numbers is one `vec2f`, `vec3f`
+    // or `vec4f` field. The compilation reads it as the WGSL vector of its
+    // type, as it reads a symbol declared `tuple<real, real, real>`.
+    if (typeof t !== 'string' && t.kind === 'tuple') {
+      const n = pointComponentCount(t);
+      if (n === undefined)
+        return parameterDecline(
+          p,
+          `has the type \`${type.toString()}\`, and only a point of 2, 3 or ` +
+            `4 real numbers (a tuple such as \`tuple<real, real>\` or ` +
+            `\`tuple<number, number, number>\`, with no complex or \`NaN\` ` +
+            `component) can be a field of the parameter struct`
+        );
+      points.set(p, n);
+      continue;
+    }
     if (type.matches('boolean')) return parameterDecline(p, 'is a boolean');
     if (type.matches('string') || type.matches('character'))
       return parameterDecline(p, 'is text');
@@ -633,8 +1001,34 @@ export function compileWGSLFieldFunction(
     scalars.push(p);
   }
 
+  // A variable named `paramsVariable` that the code declares or writes (a
+  // parameter `p` of a user-defined function when `paramsVariable` is `'p'`)
+  // hides the struct where it is in scope. `compile()` refuses each `vars`
+  // source `p.c` for that reason, with a message about `vars`; the check
+  // here runs first, with the same condition, and names the option to
+  // change. The checks of the emitted code after the compilation stay.
+  if (
+    scalars.length + points.size + lists.size > 0 &&
+    discovery.written.has(paramsVariable)
+  )
+    return declined({
+      code: 'unsupported-parameter',
+      kind: 'capability',
+      message:
+        discovery.declaring !== undefined
+          ? `Could not compile with \`compileFieldFunction()\`: a ` +
+            `user-defined function that the expression calls declares ` +
+            `"${paramsVariable}", the name of the parameter struct variable, ` +
+            `which hides the struct in its body. Choose another ` +
+            `\`paramsVariable\`.`
+          : `Could not compile with \`compileFieldFunction()\`: the body ` +
+            `declares "${paramsVariable}", the name of the parameter struct ` +
+            `variable. Choose another \`paramsVariable\`.`,
+      binding: paramsVariable,
+    });
+
   // The compilation. A parameter is read from its field of the struct.
-  for (const p of [...scalars, ...lists.keys()])
+  for (const p of [...scalars, ...points.keys(), ...lists.keys()])
     vars[p] = `${paramsVariable}.${p}`;
   const readers = new Map<string, string>();
   const extension: GPUTargetExtension = {
@@ -655,7 +1049,7 @@ export function compileWGSLFieldFunction(
         readers.set(reader, listReaderSource(paramsVariable, symbol, n));
       return `${reader}(${index})`;
     },
-    hostInputVars: new Set(scalars),
+    hostInputVars: new Set([...scalars, ...points.keys()]),
     // Each `Return` of the body leaves the field function, which returns
     // `f32`. The check runs while the local frames of the body are active
     // (`CompileTarget.onReturn`), so a `Return` of a block local reads the
@@ -677,6 +1071,13 @@ export function compileWGSLFieldFunction(
   let result: CompilationResult;
   let userNames: string[];
   let resultType: string | undefined;
+  // The type of each parameter before its value is hidden, for the check of
+  // the types that were derived from it (`checkHiddenTypeChanges()`).
+  const typesBefore = new Map<string, Type>();
+  for (const p of Object.keys(vars)) {
+    const def = ce.lookupDefinition(p);
+    if (isValueDef(def)) typesBefore.set(p, def.value.type.type);
+  }
   try {
     // One bracket for the compilation and the check of the result type:
     // the value of each coordinate and each parameter (the keys of `vars`),
@@ -688,6 +1089,7 @@ export function compileWGSLFieldFunction(
     // `a := -5` compiles to `sqrt(ce_params.a)` and then reads as complex.
     result = withVarsValuesHidden(expr, vars, () =>
       withInferredValuesHidden(ce, Object.keys(vars), () => {
+        checkHiddenTypeChanges(ce, vars, discovery, typesBefore);
         const compiled = host.withTargetExtension(extension, () =>
           host.compile(expr, {
             vars,
@@ -764,16 +1166,29 @@ export function compileWGSLFieldFunction(
     if (l !== undefined && l !== 'f32')
       return parameterDecline(p, `is read as \`${l}\``);
   }
+  for (const [p, n] of points) {
+    const l = lowered(p);
+    if (l !== undefined && l !== `vec${n}f`)
+      return parameterDecline(
+        p,
+        `is a point of ${n} components read as \`${l}\``
+      );
+  }
 
-  // The parameter struct. The scalars come first and the lists after them,
-  // each group in name order, so that the layout does not depend on the
-  // order of the terms of the expression. The offsets follow the layout
-  // rules of the WGSL specification ("Alignment and Size", "Structure
-  // Member Layout"): an `f32` has alignment 4 and size 4; `array<vec4f, k>`
-  // has alignment 16 and size 16k, and its stride of 16 bytes satisfies the
-  // rule of the uniform address space that an array stride is a multiple of
-  // 16. A parameter that the compilation does not read (folded away) is not
-  // a field.
+  // The parameter struct. The scalars come first, then the points, then
+  // the lists, each group in name order, so that the layout does not
+  // depend on the order of the terms of the expression. The offsets follow
+  // the layout rules of the WGSL specification (§14.4.1 "Alignment and
+  // Size", §14.4.2 "Structure Member Layout"): a member starts at the next
+  // multiple of its alignment after the end of the member before it. An
+  // `f32` has alignment 4 and size 4; `vec2f` alignment 8 and size 8;
+  // `vec3f` alignment 16 and size 12; `vec4f` alignment 16 and size 16;
+  // `array<vec4f, k>` alignment 16 and size 16k. In the uniform address
+  // space (§14.4.5 "Address Space Layout Constraints"), a vector needs only
+  // its own alignment, and an array needs an alignment and a stride that are
+  // multiples of 16, which the stride of 16 bytes of `vec4f` satisfies. A
+  // parameter that the compilation does not read (folded away) is not a
+  // field.
   const used = new Set(result.freeSymbols ?? []);
   const params: FieldFunctionParameter[] = [];
   let offset = 0;
@@ -787,6 +1202,18 @@ export function compileWGSLFieldFunction(
       size: 4,
     });
     offset += 4;
+  }
+  for (const [p, n] of points) {
+    if (!used.has(p)) continue;
+    offset = roundUp(n === 2 ? 8 : 16, offset);
+    params.push({
+      name: p,
+      ceType: discovery.types.get(p)!.toString(),
+      wgslType: `vec${n}f`,
+      offset,
+      size: 4 * n,
+    });
+    offset += 4 * n;
   }
   for (const [p, { n, ceType }] of lists) {
     if (!used.has(p)) continue;

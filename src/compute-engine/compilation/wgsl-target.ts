@@ -453,14 +453,28 @@ export class WGSLTarget extends GPUShaderTarget {
    * coordinates of `options.coordinates` as arguments.
    *
    * Every other free symbol is a parameter, read as
-   * `<paramsVariable>.<symbol>` from one uniform struct. A symbol with a
-   * value is a parameter too, unless it is a constant (`Pi`) or its value is
-   * a function: the field function does not read its value in the engine.
+   * `<paramsVariable>.<symbol>` from one uniform struct. A symbol whose
+   * value is a numeric constant (a number, or a tuple or list of numbers) is
+   * a parameter too, unless the symbol is a constant (`Pi`): the field
+   * function does not read its value in the engine. A symbol whose value
+   * reads other symbols (`a := x + 1`) or calls a user-defined function
+   * (`c := g(2)`) is not a parameter: its value is compiled in place, and
+   * its symbols are coordinates or parameters. A user-defined function that
+   * such a value calls must not read a coordinate that it does not take as
+   * a parameter, as for a function that the expression calls. A
+   * user-defined function, or a symbol compiled in place, whose type was
+   * derived from a parameter with a type inferred from an integer value
+   * (`a := 5` and `h(t) := a`) declines: declare the parameter (`real`)
+   * before its first assignment.
    * The host declares
    * `@group(G) @binding(B) var<uniform> ce_params: CEParams;` (the names of
    * `paramsVariable` and `paramsStruct`), adds `paramsStructSource` and the
    * `helpers` to its module, and writes the parameter values at the offsets
-   * of `params`. A real or integer scalar is an `f32`. A list of n numbers
+   * of `params`. A real or integer scalar is an `f32`. A point, a tuple of
+   * 2, 3 or 4 real numbers (declared `tuple<real, real>` or
+   * `tuple<number, number>`, or assigned `Tuple(1, 2)`), is a `vec2f`,
+   * `vec3f` or `vec4f`, with the alignment
+   * of the uniform address space in its offset. A list of n numbers
    * (`list<number^n>`, n ≤ 1024) is `array<vec4f, ⌈n/4⌉>`, and element i is
    * read with the index rules of `At`. A change of a parameter value is a
    * buffer write, with no new compilation. A list with a `'storage-buffer'`
@@ -787,7 +801,11 @@ export class WGSLTarget extends GPUShaderTarget {
         })),
         ...uniforms,
       ],
-      constantFold
+      constantFold,
+      [],
+      // An output is a field of the `output` struct that the entry point
+      // returns, so a body statement assigns `output.<name>`.
+      outputs.map((d) => ({ name: `output.${d.name}`, type: d.type }))
     );
     // Over the FULL emission: a helper may be referenced only from inside a
     // hoisted loop (Tycho item 110), and an undeclared helper is a shader that

@@ -226,8 +226,10 @@ export type FieldFunctionParameter = {
   /** The type of the symbol in the compute engine, as `toString()` writes
    * it (`real`, `list<number^30>`). */
   ceType: string;
-  /** The WGSL type of the struct field: `f32`, or `array<vec4f, k>` for a
-   * list of n elements with k = ⌈n/4⌉. */
+  /** The WGSL type of the struct field: `f32` for a scalar, `vec2f`,
+   * `vec3f` or `vec4f` for a point (a tuple of 2, 3 or 4 real numbers;
+   * component i, 1-based, is the f32 at byte `offset + 4 × (i − 1)`), or
+   * `array<vec4f, k>` for a list of n elements with k = ⌈n/4⌉. */
   wgslType: string;
   /** The byte offset of the field from the start of the struct. */
   offset: number;
@@ -1321,6 +1323,23 @@ export interface CompileTarget<Expr = unknown> {
    */
   cseMinSize?: number;
   cseMinScore?: number;
+
+  /**
+   * Called with the body of each user-defined function that the compilation
+   * emits, before the body compiles, and with the target the body compiles
+   * under: the body of a definition, with `shared` true, and the body
+   * substituted for an inlined call, with `shared` false. A definition body
+   * has a common-subexpression pass of its own; a substituted body is not
+   * read by the pass of the code around it, so none of its nodes is shared.
+   * It throws to decline the compilation. The shader targets use it to
+   * refuse a body whose code would be too large (`gpuWrittenSize()`,
+   * `gpu-written-size.ts`).
+   */
+  checkDefinitionBody?: (
+    body: Expr,
+    target: CompileTarget<Expr>,
+    shared: boolean
+  ) => void;
 
   /**
    * Whether the folded right-hand side `code` of a common-subexpression

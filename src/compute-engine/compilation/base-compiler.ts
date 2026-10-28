@@ -27693,7 +27693,10 @@ export class BaseCompiler {
    * constructor guard, the block-local type hint — need THIS one: a 1- or
    * 5-element tuple is still an aggregate even though no `vecN` fits it.
    */
-  static aggregateComponentCount(expr: Expression | null): number | undefined {
+  static aggregateComponentCount(
+    expr: Expression | null,
+    memo?: Map<Expression, number | undefined>
+  ): number | undefined {
     if (expr === null) return undefined;
     if (isFunction(expr, 'Tuple') || isFunction(expr, 'List')) return expr.nops;
     // A value typed as a list or a tuple is a collection, even when it is
@@ -27719,8 +27722,160 @@ export class BaseCompiler {
       if (t.kind === 'list' && t.dimensions?.length === 1)
         return t.dimensions[0];
     }
+    // A selection has the width of its arms, and a `Block` the width of its
+    // value (its last operand). A `Block` that ends with one of its locals
+    // has the width of the last value assigned to that local, because the
+    // frame of the block's locals exists only while the block compiles.
+    // Arms with no width are not read; arms of different widths give none.
+    if (
+      !collectionTyped &&
+      (isFunction(expr, 'If') ||
+        isFunction(expr, 'Which') ||
+        isFunction(expr, 'Block'))
+    ) {
+      memo ??= new Map();
+      if (memo.has(expr)) return memo.get(expr);
+      memo.set(expr, undefined);
+      let values: ReadonlyArray<Expression>;
+      if (expr.operator === 'Block') {
+        let last = expr.ops[expr.nops - 1];
+        if (last !== undefined && isSymbol(last)) {
+          const local = last.symbol;
+          for (const op of expr.ops)
+            if (isFunction(op, 'Assign') && isSymbol(op.op1, local))
+              last = op.op2;
+            else if (isFunction(op, 'Declare') && isSymbol(op.op1, local)) {
+              const v = BaseCompiler.declareValueOperand(op.ops);
+              if (v !== undefined) last = v;
+            }
+        }
+        values = last === undefined ? [] : [last];
+      } else values = BaseCompiler.liveSelectionArms(expr);
+      let width: number | undefined;
+      for (const v of values) {
+        const n = BaseCompiler.aggregateComponentCount(v, memo);
+        if (n === undefined) continue;
+        if (width !== undefined && width !== n) {
+          width = undefined;
+          break;
+        }
+        width = n;
+      }
+      memo.set(expr, width);
+      return width;
+    }
+    // A `Sum` or a `Product` has the width of its body, read with each index
+    // as a scalar (an index is an integer loop counter): the loop adds or
+    // multiplies the values component by component.
+    if (
+      !collectionTyped &&
+      (isFunction(expr, 'Sum') || isFunction(expr, 'Product')) &&
+      expr.nops >= 2
+    ) {
+      memo ??= new Map();
+      if (memo.has(expr)) return memo.get(expr);
+      memo.set(expr, undefined);
+      const indices = expr.ops
+        .slice(1)
+        .map((limits) =>
+          isFunction(limits, 'Limits') && isSymbol(limits.op1)
+            ? limits.op1.symbol
+            : undefined
+        );
+      const width = indices.every((i) => i !== undefined)
+        ? BaseCompiler.withRealLoopIndices(indices as string[], () =>
+            BaseCompiler.aggregateComponentCount(expr.op1, memo)
+          )
+        : undefined;
+      memo.set(expr, width);
+      return width;
+    }
+    // An element-wise operator over a name whose width only a shape frame
+    // gives (a shader input `vec2 uv`, a block local). The engine does not
+    // know that width, so it types `2·uv` or `Sin(uv)` as a number. The
+    // value has the width of its operands, as the emission gives it:
+    // `2.0 * uv` and `_gpu_sin2(uv)` are `vec2` values. When two operands
+    // have different widths, an operand is complex, or an operand is a
+    // matrix or an array with no width, no width is given. `memo` keeps the
+    // answer for each operand of one walk, so that a subexpression shared by
+    // several operands is not walked again.
+    //
+    // The engine type of such a value can be a number, or a wider type such
+    // as `any` or `number | vector<2>` (a `Block` local declared `any` or
+    // `real` and assigned a point), so only a list or a tuple type, which
+    // gives its own count above, skips this walk. `Abs` of a point, or of a
+    // list of points, is not element-wise: it compiles to `Norm`, one length
+    // per point (the `Abs` rewrite in `compileExpr`), so it has no width here.
+    if (
+      isFunction(expr) &&
+      BaseCompiler.ELEMENTWISE_WIDTH_OPERATORS.has(expr.operator) &&
+      !collectionTyped &&
+      !(
+        expr.operator === 'Abs' &&
+        expr.nops === 1 &&
+        (isTuple(expr.op1) ||
+          BaseCompiler.isUnionOfPoints(expr.op1) ||
+          isGatedPoint(expr.op1) ||
+          isPointListValue(expr.op1) ||
+          isGatedPointList(expr.op1))
+      )
+    ) {
+      memo ??= new Map();
+      if (memo.has(expr)) return memo.get(expr);
+      let width: number | undefined;
+      for (const op of expr.ops) {
+        const n = BaseCompiler.isComplexValued(op)
+          ? -1
+          : BaseCompiler.aggregateComponentCount(op, memo);
+        if (n === undefined) {
+          if (!BaseCompiler.isNonScalarByShapeAlone(op)) continue;
+        } else if (n >= 0 && (width === undefined || width === n)) {
+          width = n;
+          continue;
+        }
+        width = undefined;
+        break;
+      }
+      memo.set(expr, width);
+      return width;
+    }
     return undefined;
   }
+
+  /**
+   * The operators whose value has the width of their vector operands, with
+   * a scalar operand applied to each component: the arithmetic operators and
+   * the one-argument functions that the shader targets apply to each
+   * component (`sin(vec2)` is a `vec2`). Read by `aggregateComponentCount`.
+   */
+  static readonly ELEMENTWISE_WIDTH_OPERATORS: ReadonlySet<string> = new Set([
+    'Add',
+    'Subtract',
+    'Multiply',
+    'Divide',
+    'Negate',
+    'Power',
+    'Square',
+    'Sqrt',
+    'Exp',
+    'Ln',
+    'Abs',
+    'Sign',
+    'Floor',
+    'Ceil',
+    'Round',
+    'Truncate',
+    'Fract',
+    'Sin',
+    'Cos',
+    'Tan',
+    'Arcsin',
+    'Arccos',
+    'Arctan',
+    'Sinh',
+    'Cosh',
+    'Tanh',
+  ]);
 
   /**
    * Whether `expr` is provably NOT a shader scalar — it lowers to a `vecN`, an
@@ -27743,6 +27898,15 @@ export class BaseCompiler {
   static isNonScalarShape(expr: Expression | null): boolean {
     if (expr === null) return false;
     if (BaseCompiler.aggregateComponentCount(expr) !== undefined) return true;
+    return BaseCompiler.isNonScalarByShapeAlone(expr);
+  }
+
+  /**
+   * The part of `isNonScalarShape` that does not count components: a
+   * `Matrix`, a value with a `list` type that has no single count, or a
+   * collection value.
+   */
+  private static isNonScalarByShapeAlone(expr: Expression): boolean {
     if (isFunction(expr, 'Matrix')) return true;
     const t = compilationType(expr);
     // A `list` type that `aggregateComponentCount` declined to size: either
@@ -37688,6 +37852,11 @@ export class BaseCompiler {
       admits
     );
     if (inlined === undefined) return undefined;
+    // The body is written at this call site, with no common-subexpression
+    // pass of its own (`CompileTarget.checkDefinitionBody`). Asked here,
+    // where the body is compiled, and not in `inlinedUserFunctionCall`,
+    // which also answers questions about calls that are not compiled.
+    target.checkDefinitionBody?.(inlined, target, false);
     // The generated code bakes this definition, as an emitted one would.
     target.symbolDeps?.add(h);
     const inlining = (target.userFunctions!.inlining ??= new Set<string>());
@@ -38036,8 +38205,59 @@ export class BaseCompiler {
    * A head the caller overrode (`CompileTarget.unrollSkipHeads`) is left as
    * written, and so is everything under it: the caller's implementation
    * replaces the emission and receives the node's own operands.
+   *
+   * An expression can share a node between several parents, and a walk of
+   * every path takes a time exponential in the depth (ROADMAP CE-584). A
+   * node that the walk leaves unchanged is recorded in `budget.unchanged`,
+   * for its `enclosing` record, and the walk does not visit it again. The
+   * record is read and written only when `onPath` is empty: a smaller
+   * `onPath` or a larger `budget.left` could let a call below the node be
+   * substituted, and `budget.left` only decreases.
    */
   private static inlineCollectionValuedCalls(
+    engine: ComputeEngine,
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    onPath: Set<string>,
+    budget: {
+      left: number;
+      unchanged?: Map<EnclosingDefinition | undefined, Set<Expression>>;
+    },
+    enclosing?: EnclosingDefinition,
+    bodyType?: string
+  ): Expression {
+    if (!isFunction(expr)) return expr;
+    if (onPath.size > 0)
+      return BaseCompiler.inlineCollectionValuedCallsOnce(
+        engine,
+        expr,
+        target,
+        onPath,
+        budget,
+        enclosing,
+        bodyType
+      );
+    budget.unchanged ??= new Map();
+    let unchanged = budget.unchanged.get(enclosing);
+    if (unchanged === undefined)
+      budget.unchanged.set(enclosing, (unchanged = new Set()));
+    if (unchanged.has(expr)) return expr;
+    const result = BaseCompiler.inlineCollectionValuedCallsOnce(
+      engine,
+      expr,
+      target,
+      onPath,
+      budget,
+      enclosing,
+      bodyType
+    );
+    if (result === expr) unchanged.add(expr);
+    return result;
+  }
+
+  /** One step of {@link inlineCollectionValuedCalls}, which it calls for
+   * each operand. */
+  private static inlineCollectionValuedCallsOnce(
     engine: ComputeEngine,
     expr: Expression,
     target: CompileTarget<Expression>,
@@ -41738,6 +41958,7 @@ export class BaseCompiler {
       declaredVarTypes: BaseCompiler.literalDeclaredParamTypes(literal),
     };
     BaseCompiler.mergeUsedNames(target, collectUsedNames(bodyExpr));
+    bodyTarget.checkDefinitionBody?.(bodyExpr, bodyTarget, true);
     return { params, bodyExpr, bodyTarget };
   }
 

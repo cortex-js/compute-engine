@@ -378,7 +378,10 @@ describe('the random state is per-compilation, never on the caller’s target', 
     // alias one counter.
     const src = glsl.compileShader({
       type: 'fragment',
-      outputs: [{ name: 'a', type: 'float' }],
+      outputs: [
+        { name: 'a', type: 'float' },
+        { name: 'b', type: 'float' },
+      ],
       body: [
         { variable: 'a', expression: framed(1, ce.expr(['Random'])) },
         { variable: 'b', expression: framed(2, ce.expr(['Random'])) },
@@ -771,7 +774,7 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
       type: 'fragment',
       outputs: [{ name: 'color', type: 'vec4' }],
       body: [
-        { variable: 'output.color', expression: framed(42, ['Random']) },
+        { variable: 'output.color.r', expression: framed(42, ['Random']) },
       ],
       ...NO_FOLD,
     });
@@ -808,8 +811,8 @@ describe('compileShader splices the helper preamble (2026-07-25 fix)', () => {
       type: 'fragment',
       outputs: [{ name: 'color', type: 'vec4' }],
       body: [
-        { variable: 'output.color', expression: framed(42, ['Random']) },
-        { variable: 'output.color2', expression: framed(42, ['Random']) },
+        { variable: 'output.color.r', expression: framed(42, ['Random']) },
+        { variable: 'output.color.g', expression: framed(42, ['Random']) },
       ],
       ...NO_FOLD,
     });

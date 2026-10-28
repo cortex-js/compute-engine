@@ -5655,7 +5655,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
     target.compileShader({
       type: 'fragment',
       inputs: [{ name: 'x', type: 'float' }],
-      outputs: [{ name: 'fragColor', type: 'vec4' }],
+      outputs: [{ name: 'fragColor', type: 'float' }],
       body: [
         {
           variable:
@@ -5805,7 +5805,7 @@ describe('the expression-only GPU routes decline statement bodies', () => {
         type: 'fragment',
         inputs: [{ name: 'x', type: 'float' }],
         outputs: [
-          { name: 'fragColor', type: 'vec4' },
+          { name: 'fragColor', type: 'float' },
           { name: 's', type: 'float' },
         ],
         body: [

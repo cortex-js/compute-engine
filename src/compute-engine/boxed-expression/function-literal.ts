@@ -882,14 +882,27 @@ export function capturedTypesWidened(def: object): boolean {
 export function capturedTypeWidening(
   def: object
 ): { name: string; before: BoxedType; now: BoxedType } | undefined {
+  return capturedTypeWidenings(def)[0];
+}
+
+/**
+ * Every captured symbol of the literal of the definition `def` whose binding
+ * has a type now that is not a subtype of its type when the type of `def`
+ * was inferred, in the order of the record. `capturedTypeWidening()` gives
+ * the first one.
+ */
+export function capturedTypeWidenings(
+  def: object
+): Array<{ name: string; before: BoxedType; now: BoxedType }> {
   const snapshot = DEFINITION_CAPTURED_TYPES.get(def);
-  if (snapshot === undefined) return undefined;
+  if (snapshot === undefined) return [];
+  const out: Array<{ name: string; before: BoxedType; now: BoxedType }> = [];
   for (const [binding, before, name] of snapshot) {
     const now = binding.type;
     if (now === before || now.isUnknown) continue;
-    if (!isSubtype(now.type, before.type)) return { name, before, now };
+    if (!isSubtype(now.type, before.type)) out.push({ name, before, now });
   }
-  return undefined;
+  return out;
 }
 
 /**

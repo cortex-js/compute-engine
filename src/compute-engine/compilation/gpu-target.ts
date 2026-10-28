@@ -1,6 +1,10 @@
 import type { Expression, RoundingTies } from '../global-types.js';
 import { entrySource } from './function-purity.js';
-import { isCallerMapped, isOpaqueVarsSource } from './cse.js';
+import {
+  cseRecordingRules,
+  isCallerMapped,
+  isOpaqueVarsSource,
+} from './cse.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import {
   clearGPUCounters,
@@ -33,6 +37,7 @@ import {
   tryGetConstant,
   foldTerms,
   tryGetComplexParts,
+  assertScalarComplexOperand,
   isOpaqueComplexOperand,
   formatFloat,
   gpuNonFiniteLiteral,
@@ -118,6 +123,7 @@ import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { unrollFits, unrolledTermSize } from './unroll-budget.js';
 import { inlineSharedUserFunctionCalls } from './gpu-shared-calls.js';
+import { GPU_MAX_WRITTEN_NODES, gpuWrittenSize } from './gpu-written-size.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import {
   overriddenCompilationHeads,
@@ -1025,6 +1031,7 @@ function gpuComplexOperand(
   target?: CompileTarget<Expression>
 ): string {
   if (BaseCompiler.isComplexValued(x)) return compile(x);
+  assertScalarComplexOperand(undefined, x);
   return `${gpuVec2(target)}(${compile(x)}, 0.0)`;
 }
 
@@ -9074,13 +9081,36 @@ function compileGPUSumProduct(
   const op = isSum ? '+' : '*';
   const isWGSL = target.language === 'wgsl';
   const v2 = gpuVec2(target);
+  // A body that is a vector (`k·uv` with `vec2 uv`) gives a vector sum, so
+  // the accumulator is a vector of the same width: a `float` accumulator
+  // would not accept the terms. The `+` and `*` of two vectors are component
+  // by component in both languages, as the sum and the product of the
+  // engine are for a point. A body of another width (an array) has no
+  // accumulator, and the compilation fails.
+  const width = complex
+    ? undefined
+    : underRealIndex(() => BaseCompiler.aggregateComponentCount(args[0]));
+  if (width !== undefined && (width < 2 || width > 4))
+    throw new Error(
+      `Could not compile \`${kind}\`: each term is a list of ${width} ` +
+        `elements, and a shader has no accumulator for a list of that length ` +
+        `(only a vector of 2 to 4 components).`
+    );
   const identity = complex
     ? `${v2}(${isSum ? '0.0' : '1.0'}, 0.0)`
-    : isSum
-      ? '0.0'
-      : '1.0';
+    : width !== undefined
+      ? `${gpuVecType(width, isWGSL)}(${isSum ? '0.0' : '1.0'})`
+      : isSum
+        ? '0.0'
+        : '1.0';
   // The shader type of the accumulator and of a term bound to a temporary.
-  const valueType = complex ? gpuVecType(2, isWGSL) : isWGSL ? 'f32' : 'float';
+  const valueType = complex
+    ? gpuVecType(2, isWGSL)
+    : width !== undefined
+      ? gpuVecType(width, isWGSL)
+      : isWGSL
+        ? 'f32'
+        : 'float';
   // Combine two values of the body's type: the complex product is not the
   // component-wise `*` of two `vec2`.
   const combine = (a: string, b: string): string =>
@@ -9487,6 +9517,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // compile every other operand TWICE. For an impure (Random-family) operand
     // that is an extra draw, and the discarded compile's hoisted statement
     // stays in the shader as an orphan feeding nothing.
+    // A real operand of a complex sum must be a scalar.
+    for (const a of args) assertScalarComplexOperand('Add', a);
     if (args.some((a) => isOpaqueComplexOperand(a))) {
       const v2 = gpuVec2(target);
       return args
@@ -9522,6 +9554,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target.language
       );
     }
+    // A real factor of a complex product must be a scalar.
+    for (const a of args) assertScalarComplexOperand('Multiply', a);
     // Special case: scalars * imaginary_factor → vec2(0.0, product)
     // Recognizes both ImaginaryUnit symbol and Complex(0, k) literals
     const iIndex = args.findIndex(
@@ -9614,7 +9648,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         result = `${result} / (${compile(args[i])})`;
       return result;
     }
-    // Complex division
+    // Complex division. A real operand must be a scalar.
+    for (const a of args) assertScalarComplexOperand('Divide', a);
     if (ac && bc) return `_gpu_cdiv(${compile(args[0])}, ${compile(args[1])})`;
     if (ac && !bc) return `((${compile(args[0])}) / (${compile(args[1])}))`;
     const v2 = gpuVec2(target);
@@ -10087,6 +10122,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         }
         return `_gpu_cexp(${compile(exp)})`;
       }
+      assertScalarComplexOperand('Power', base);
+      assertScalarComplexOperand('Power', exp);
       const v2 = gpuVec2(target);
       const bCode = BaseCompiler.isComplexValued(base)
         ? compile(base)
@@ -12539,7 +12576,13 @@ function gpuTextSymbols(expr: Expression | undefined): ReadonlySet<string> {
     // text, so such a parameter fails closed in `lowering.define`.
     if (literal !== undefined && literal.ops.length > 0) walk(literal.ops[0]);
   };
+  // A node that several parents share is visited once: what a visit adds
+  // depends only on the node, and a walk of every path can take a time
+  // exponential in the depth of the expression.
+  const visited = new Set<Expression>();
   const walk = (e: Expression): void => {
+    if (visited.has(e)) return;
+    visited.add(e);
     if (isSymbol(e)) {
       if (isProvablyStringOperand(e) || isProvablyCharacterOperand(e))
         out.add(e.symbol);
@@ -12636,34 +12679,39 @@ export function gpuReachableSymbolNames(
 }
 
 /**
- * Is the `vars` source `identifier`, given for the symbol `name`, a plain
- * read of a shader variable (a uniform) whose value cannot change while the
- * shader runs? Then reading it twice gives the same value, and the passes
- * may share, skip or repeat its reads (`isOpaqueVarsSource`, `cse.ts`).
+ * Is the `vars` source `path`, given for the symbol `name`, a plain read of
+ * a shader variable (a uniform) whose value cannot change while the shader
+ * runs? Then reading it twice gives the same value, and the passes may
+ * share, skip or repeat its reads (`isOpaqueVarsSource`, `cse.ts`). `path`
+ * is a bare identifier (`u_a`), or an identifier `root` followed by field
+ * accesses and literal indexes (`ce_params.c`, `v[0]`), which only read the
+ * variable `root`.
  *
- * A uniform is read-only in GLSL and WGSL. The one way for a read of
- * `identifier` to give a different value is a variable of the shader with
- * the same name that the shader writes: a `Block` local, an assigned symbol,
- * a loop or binder variable, or a parameter, here or in a user-function
- * definition that the code reaches. Each of these is emitted with its
- * symbol name, so the read is refused when `identifier` is the name of any
- * symbol in `symbols` (see {@link gpuReachableSymbolNames}), when it is
- * another `vars` key, or when another `vars` key has the same source. These
- * tests are stricter than necessary, as a symbol that is only read also
- * counts.
+ * A uniform is read-only in GLSL and WGSL. The one way for a read of `path`
+ * to give a different value is a variable of the shader named `root` that
+ * the shader writes: a `Block` local, an assigned symbol, a loop or binder
+ * variable, or a parameter, here or in a user-function definition that the
+ * code reaches. Each of these is emitted with its symbol name, so the read
+ * is refused when `root` is the name of any symbol in `symbols` (see
+ * {@link gpuReachableSymbolNames}), when it is another `vars` key, or when
+ * another `vars` key has the source `path` or `root`. These tests are
+ * stricter than necessary, as a symbol that is only read also counts.
  */
 function gpuPlainUniformRead(
-  identifier: string,
+  path: string,
+  root: string,
   name: string,
   vars: Readonly<Record<string, unknown>>,
   symbols: () => ReadonlySet<string>
 ): boolean {
-  if (symbols().has(identifier)) return false;
+  if (symbols().has(root)) return false;
   for (const key of Object.keys(vars)) {
     if (key === name) continue;
-    if (key === identifier) return false;
+    if (key === root) return false;
     const other = vars[key];
-    if (typeof other === 'string' && other.trim() === identifier) return false;
+    if (typeof other !== 'string') continue;
+    const otherText = other.trim();
+    if (otherText === path || otherText === root) return false;
   }
   return true;
 }
@@ -12671,7 +12719,9 @@ function gpuPlainUniformRead(
 /**
  * Refuse a `vars` entry whose source is a bare identifier that names a
  * variable the compiled code declares or writes (`written`, see
- * {@link gpuReachableSymbolNames}).
+ * {@link gpuReachableSymbolNames}). A source that is a read path
+ * (`k.x`, `k[0]`, see `isOpaqueVarsSource()` in `cse.ts`) is refused when
+ * its first identifier names such a variable, for the same reason.
  *
  * The shader emits that variable with the same name, so inside its scope the
  * identifier reads the variable, not the uniform the host meant: with
@@ -12695,9 +12745,11 @@ function gpuRefuseShadowedVarsSources(
     if (!all().has(key)) continue;
     const source = vars[key];
     if (typeof source !== 'string') continue;
-    const identifier = source.trim();
-    if (identifier === key) continue;
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) continue;
+    const identifier =
+      /^\s*([A-Za-z_][A-Za-z0-9_]*)(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*\s*$/.exec(
+        source
+      )?.[1];
+    if (identifier === undefined || identifier === key) continue;
     if (!written().has(identifier)) continue;
     throw new Error(
       `Could not compile: the \`vars\` entry for \`${key}\` reads the ` +
@@ -19430,9 +19482,12 @@ function gpuDeclaredIsIntegerScalar(v: GPUValueType | undefined): boolean {
  *
  * Both languages' spellings are accepted whatever the target: `compileFunction`
  * takes GLSL-flavored names on the WGSL route too (`toWGSLType` maps them).
+ * A leading GLSL precision, interpolation or storage qualifier is ignored
+ * (`gpuWithoutQualifiers`).
  */
 function gpuNormalizeShaderType(type: string): GPUValueType | undefined {
-  const t = type.trim();
+  // A GLSL qualifier before the type (`highp vec2`) does not change it.
+  const t = gpuWithoutQualifiers(type);
   // Every float width collapses to the ONE float element: the emission has a
   // single float precision, so `double`/`f16`/`f64` are the same value type
   // here as `float`/`f32`.
@@ -19912,6 +19967,366 @@ const GLSL_STAGE_BUILTINS: Record<string, ReadonlySet<string>> = {
     'gl_WorkGroupSize',
   ]),
 };
+
+/**
+ * The built-in OUTPUT variables that a GLSL shader body of each stage may
+ * assign with no declaration, and their types: GLSL ES 3.00 §7.1 and §7.2
+ * (`gl_Position` and `gl_PointSize` in a vertex shader, `gl_FragDepth` in a
+ * fragment shader). The other names of `GLSL_STAGE_BUILTINS` are inputs, which
+ * a shader cannot assign. `gl_ClipDistance` is not here: it is an array of the
+ * desktop language only, and a body target is a whole output or components of
+ * a vector output, never an array element.
+ */
+const GLSL_STAGE_BUILTIN_OUTPUTS: Record<
+  string,
+  ReadonlyArray<{ name: string; type: string }>
+> = {
+  vertex: [
+    { name: 'gl_Position', type: 'vec4' },
+    { name: 'gl_PointSize', type: 'float' },
+  ],
+  fragment: [{ name: 'gl_FragDepth', type: 'float' }],
+};
+
+/**
+ * The types of the built-in variables of `GLSL_STAGE_BUILTINS` that a body
+ * can read as a value, for the type check of a `compileShader()` body
+ * statement: GLSL ES 3.00 §7.1 and §7.2, and §7.1 of desktop GLSL 4.60 for
+ * the names that GLSL ES does not have. `gl_DepthRange` is a struct, which no
+ * output type accepts, and is not here.
+ */
+const GLSL_STAGE_BUILTIN_TYPES: Record<string, Record<string, string>> = {
+  vertex: {
+    gl_VertexID: 'int',
+    gl_InstanceID: 'int',
+    gl_Position: 'vec4',
+    gl_PointSize: 'float',
+    gl_ClipDistance: 'float[]',
+  },
+  fragment: {
+    gl_FragCoord: 'vec4',
+    gl_FrontFacing: 'bool',
+    gl_PointCoord: 'vec2',
+    gl_FragDepth: 'float',
+    gl_PrimitiveID: 'int',
+    gl_SampleID: 'int',
+    gl_SamplePosition: 'vec2',
+    gl_Layer: 'int',
+    gl_ViewportIndex: 'int',
+    gl_ClipDistance: 'float[]',
+  },
+};
+
+/**
+ * A GLSL type spelling without its leading precision, interpolation and
+ * storage qualifiers (`highp vec4` is `vec4`). The GLSL `compileShader()`
+ * writes an output as `out ${type} ${name};`, so a caller can put such a
+ * qualifier in the type.
+ */
+function gpuWithoutQualifiers(type: string): string {
+  return type
+    .trim()
+    .replace(
+      /^((lowp|mediump|highp|flat|smooth|noperspective|centroid)\s+)+/,
+      ''
+    );
+}
+
+/**
+ * The value type of a matrix or array spelling of either language (`mat2`,
+ * `mat3x2f`, `mat2x2<f32>`, `float[5]`, `array<f32, 5>`), or `undefined` for
+ * another spelling. No scalar or vector target accepts such a value.
+ */
+function gpuMatrixOrArraySpelling(
+  type: string
+): { kind: 'matrix' | 'array'; spelling: string } | undefined {
+  const t = gpuWithoutQualifiers(type);
+  if (/^d?mat[234](x[234])?([fh]|<\s*\w+\s*>)?$/.test(t))
+    return { kind: 'matrix', spelling: t };
+  if (/^array\s*<.*>$/.test(t) || /\[\s*\d*\s*\]$/.test(t))
+    return { kind: 'array', spelling: t };
+  return undefined;
+}
+
+/**
+ * The operators that `gpuCertainValueType` reads as element-wise: each gives a
+ * float scalar when all its operands are float scalars. An operator that can
+ * give a vector from scalars (`Tuple`, a color function, a user function) is
+ * not here.
+ */
+const GPU_SCALAR_ARITHMETIC = new Set([
+  'Add',
+  'Subtract',
+  'Multiply',
+  'Divide',
+  'Negate',
+  'Power',
+  'Square',
+  'Sqrt',
+  'Root',
+  'Exp',
+  'Ln',
+  'Log',
+  'Abs',
+  'Sign',
+  'Floor',
+  'Ceil',
+  'Round',
+  'Truncate',
+  'Fract',
+  'Mod',
+  'Sin',
+  'Cos',
+  'Tan',
+  'Arcsin',
+  'Arccos',
+  'Arctan',
+  'Sinh',
+  'Cosh',
+  'Tanh',
+]);
+
+/** The operators that give a `bool` from scalar operands. */
+const GPU_SCALAR_PREDICATES = new Set([
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+  'Equal',
+  'NotEqual',
+  'And',
+  'Or',
+  'Not',
+]);
+
+/**
+ * The type of the value `expr` when it is CERTAIN, or `undefined`.
+ *
+ * Used only for the type check of a `compileShader()` body statement, which
+ * must never refuse a valid shader. The emitter decides the width of a
+ * compound value operator by operator (`gpuOperandShape`), and there is no
+ * single function that gives it, so this function answers only in the cases
+ * where the type cannot be wrong:
+ * - a name with a declared type in the frame of the body (read with
+ *   `gpuDeclaredTypeOf`): an input, a uniform, and in GLSL an output or a
+ *   built-in variable of the stage. An integer scalar name is read through a
+ *   float conversion, so it is a float;
+ * - a real number literal, a real library constant (`Pi`), `True`, `False`;
+ * - a `Tuple` or `List` of float scalars: a vector of 2 to 4 components, or
+ *   an array for another count; a `Matrix` literal;
+ * - an element-wise operator (`GPU_SCALAR_ARITHMETIC`) whose operands are all
+ *   float scalars (a float scalar), and a comparison or a logic operator whose
+ *   operands are all scalars (a `bool`);
+ * - an `If` whose two branches have the same certain type.
+ * A complex value (lowered as `vec2(re, im)`) and anything else answer
+ * `undefined`: a vector expression such as `s * uv` or `Sin(uv)` is not
+ * typed, and its statement is not checked.
+ */
+function gpuCertainValueType(
+  expr: Expression,
+  isWGSL: boolean
+): GPUValueType | { kind: 'matrix' | 'array'; spelling: string } | undefined {
+  if (BaseCompiler.isComplexValued(expr)) return undefined;
+  const isFloatScalar = (e: Expression): boolean => {
+    const t = gpuCertainValueType(e, isWGSL);
+    return (
+      t !== undefined && 'element' in t && t.element === 'f' && t.width === 1
+    );
+  };
+  if (isNumber(expr)) return { element: 'f', width: 1 };
+  if (isSymbol(expr)) {
+    const declared = gpuDeclaredTypeOf(expr);
+    if (declared !== undefined) {
+      if (gpuDeclaredIsIntegerScalar(declared.value))
+        return { element: 'f', width: 1 };
+      return declared.value ?? gpuMatrixOrArraySpelling(declared.spelling);
+    }
+    if (expr.symbol === 'True' || expr.symbol === 'False')
+      return { element: 'b', width: 1 };
+    if (expr.isConstant === true && expr.type.matches('real'))
+      return { element: 'f', width: 1 };
+    return undefined;
+  }
+  if (!isFunction(expr)) return undefined;
+  const op = expr.operator;
+  if (op === 'Matrix') {
+    // `compileGPUMatrix` writes a column `Matrix` (N rows of one element) as
+    // a `vecN` (N from 2 to 4) or an array, and a square one (2 to 4) as a
+    // `matN`. Another shape is written as its nested lists.
+    const dims = gpuMatrixDims(expr);
+    if (dims === undefined) return undefined;
+    const [rows, cols] = dims;
+    if (cols === 1) {
+      const body = expr.ops[0];
+      const cells = isFunction(body)
+        ? body.ops.map((row) => (isFunction(row) ? row.ops[0] : row))
+        : [];
+      if (!cells.every(isFloatScalar)) return undefined;
+      if (rows >= 2 && rows <= 4) return { element: 'f', width: rows };
+      return {
+        kind: 'array',
+        spelling: isWGSL ? `array<f32, ${rows}>` : `float[${rows}]`,
+      };
+    }
+    // Another shape with 2 to 4 columns is written as an array of its rows
+    // (`vec2[1](vec2(1.0, 2.0))` for a 1×2 `Matrix`).
+    if (rows !== cols || rows > 4)
+      return cols >= 2 && cols <= 4
+        ? {
+            kind: 'array',
+            spelling: isWGSL
+              ? `array<vec${cols}f, ${rows}>`
+              : `vec${cols}[${rows}]`,
+          }
+        : undefined;
+    return {
+      kind: 'matrix',
+      spelling: isWGSL ? `mat${cols}x${rows}f` : `mat${cols}`,
+    };
+  }
+  if (op === 'Tuple' || op === 'List') {
+    if (!expr.ops.every(isFloatScalar)) return undefined;
+    const n = expr.nops;
+    if (n >= 2 && n <= 4) return { element: 'f', width: n };
+    return {
+      kind: 'array',
+      spelling: isWGSL ? `array<f32, ${n}>` : `float[${n}]`,
+    };
+  }
+  if (GPU_SCALAR_ARITHMETIC.has(op))
+    return expr.nops > 0 && expr.ops.every(isFloatScalar)
+      ? { element: 'f', width: 1 }
+      : undefined;
+  if (GPU_SCALAR_PREDICATES.has(op))
+    return expr.nops > 0 &&
+      expr.ops.every((e) => {
+        const t = gpuCertainValueType(e, isWGSL);
+        return t !== undefined && 'element' in t && t.width === 1;
+      })
+      ? { element: 'b', width: 1 }
+      : undefined;
+  if (op === 'If' && expr.nops === 3) {
+    const a = gpuCertainValueType(expr.ops[1], isWGSL);
+    const b = gpuCertainValueType(expr.ops[2], isWGSL);
+    if (
+      a !== undefined &&
+      b !== undefined &&
+      'element' in a &&
+      'element' in b &&
+      a.element === b.element &&
+      a.width === b.width
+    )
+      return a;
+  }
+  return undefined;
+}
+
+/**
+ * The type that a `compileShader()` body statement assigns, from its target
+ * `variable`, or the reason why the target is not valid.
+ *
+ * `outputs` are the names that the body can assign, in the spelling of the
+ * emitted source (a WGSL output is a field of the `output` struct, so it is
+ * `output.c`), with the type the caller declared. A target is one of these
+ * names, or a component selection of one with a vector type (`c.x`,
+ * `output.c.rg`). The selection letters come from one set (`xyzw` or `rgba`,
+ * and also `stpq` in GLSL), each letter selects a component that the vector
+ * has, and no letter is repeated: GLSL ES 3.00 §5.5 refuses a repeated
+ * component in an assignment target.
+ *
+ * The type is `undefined` when the declared type of the output is not a
+ * scalar or vector type that `gpuNormalizeShaderType` reads (a matrix, an
+ * array, a struct). The value of such a target is not checked. A GLSL
+ * qualifier before the type (`highp vec4`) is ignored.
+ *
+ * For a component selection, `base` is the output and `letters` are the
+ * selection letters. `compileShaderBody()` uses them to write a WGSL target of
+ * two or more components as one assignment per component.
+ */
+function gpuShaderAssignmentTarget(
+  variable: string,
+  outputs: ReadonlyArray<{ name: string; type: string }>,
+  isWGSL: boolean
+):
+  | { type: GPUValueType | undefined; base?: string; letters?: string }
+  | { error: string } {
+  const whole = outputs.find((d) => d.name === variable);
+  if (whole !== undefined) return { type: gpuNormalizeShaderType(whole.type) };
+  const selection = /^(.+)\.([a-z]{1,4})$/.exec(variable);
+  const base =
+    selection === null
+      ? undefined
+      : outputs.find((d) => d.name === selection[1]);
+  if (selection === null || base === undefined) {
+    const declared =
+      outputs.length === 0
+        ? 'This shader declares no outputs.'
+        : `The outputs are ${outputs
+            .map((d) => `"${d.name}" (\`${d.type}\`)`)
+            .join(', ')}.`;
+    const vector = outputs.find(
+      (d) => (gpuNormalizeShaderType(d.type)?.width ?? 1) >= 2
+    );
+    return {
+      error:
+        `"${variable}" is not an output of the shader. A body statement ` +
+        `must assign a declared output, or components of a vector output` +
+        `${vector === undefined ? '' : ` (\`${vector.name}.x\`)`}. ${declared}`,
+    };
+  }
+  const letters = selection[2];
+  const t = gpuNormalizeShaderType(base.type);
+  const invalid = (reason: string) => ({
+    error:
+      `"${variable}" selects the components "${letters}" of the output ` +
+      `"${base.name}" (\`${base.type}\`), but ${reason}.`,
+  });
+  if (t === undefined || t.width < 2)
+    return invalid('the output is not a vector');
+  const sets = isWGSL ? ['xyzw', 'rgba'] : ['xyzw', 'rgba', 'stpq'];
+  const set = sets.find((s) => [...letters].every((c) => s.includes(c)));
+  if (set === undefined)
+    return invalid(
+      `these letters are not all from one of the sets ${sets
+        .map((s) => `"${s}"`)
+        .join(', ')}`
+    );
+  if ([...letters].some((c) => set.indexOf(c) >= t.width))
+    return invalid(`the vector has only ${t.width} components`);
+  if (new Set(letters).size !== letters.length)
+    return invalid('an assignment cannot write a component more than once');
+  return {
+    type: { element: t.element, width: letters.length },
+    base: base.name,
+    letters,
+  };
+}
+
+/**
+ * Can a value of type `from` be assigned to a target of type `to`?
+ *
+ * WGSL converts only abstract types (the types of literals) implicitly, and
+ * the emitted values are concrete, so the two types must be the same. GLSL
+ * ES 3.00 has no implicit conversions (§4.1.10 says so). Desktop GLSL 3.30
+ * converts an `int` or a `uint` to a `float`, and an `ivecN` or a `uvecN` to a
+ * `vecN`; desktop GLSL 4.00 and later also convert an `int` to a `uint`
+ * (§4.1.10 "Implicit Conversions" of each version). A scalar is never
+ * converted to a vector. `desktopGLSLVersion` is the version number of a
+ * desktop GLSL shader, and `undefined` for WGSL and GLSL ES.
+ */
+function gpuAssignmentConverts(
+  from: GPUValueType,
+  to: GPUValueType,
+  desktopGLSLVersion: number | undefined
+): boolean {
+  if (from.width !== to.width) return false;
+  if (from.element === to.element) return true;
+  if (desktopGLSLVersion === undefined) return false;
+  if (to.element === 'f') return from.element === 'i' || from.element === 'u';
+  return (
+    desktopGLSLVersion >= 400 && from.element === 'i' && to.element === 'u'
+  );
+}
 
 export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
   /** Language identifier (e.g., 'glsl', 'wgsl') */
@@ -20406,6 +20821,41 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       if (extension.onReturn !== undefined)
         target.onReturn = extension.onReturn;
     }
+    // The body of each user-defined function is a shader function of its
+    // own, with its own common-subexpression pass, or is substituted at a
+    // call site, where no pass reads it. The size limit of the root
+    // (`compileOrThrow`) applies to each body too, with the rules of the
+    // pass that compiles it (`cseRecordingRules()`, `cse.ts`): no node
+    // is shared in a substituted body, or when the pass is off (the `cse`
+    // option is false, or the `compileShader()` route). A body substituted
+    // at several call sites is written at each of them, so the limit
+    // applies to the sum of the substituted bodies of one compilation too.
+    let substituted = 0;
+    target.checkDefinitionBody = (body, bodyTarget, shared) => {
+      const cse = bodyTarget.cse;
+      const rules = {
+        ...cseRecordingRules(body, {
+          ...cse?.harvestOptions,
+          admitPureUserFunctions: true,
+        }),
+        share: shared && cse?.enabled === true,
+      };
+      const size = gpuWrittenSize(body, rules);
+      if (!shared) substituted += size;
+      if (size > GPU_MAX_WRITTEN_NODES || substituted > GPU_MAX_WRITTEN_NODES)
+        throw new Error(
+          `Could not compile: the ${this.languageId.toUpperCase()} code of ` +
+            `the user-defined functions that the expression calls would ` +
+            `have more than ${GPU_MAX_WRITTEN_NODES.toLocaleString('en-US')} ` +
+            `nodes. A subexpression that several paths reach is written once ` +
+            `for each path when the shader cannot compute it once: the paths ` +
+            `go through different branches of an \`If\`, the subexpression ` +
+            `reads a \`vars\` source that is not a variable or a field of a ` +
+            `variable (\`u.c\`), it is not pure, or the \`cse\` option is ` +
+            `false. A call that is written in place of its definition is ` +
+            `written in full at each call site.`
+        );
+    };
     // A TEXT-TYPED SYMBOL is the same target limitation as the string literal
     // the `string` hook refuses, one step later: a `string`- or
     // `character`-typed free symbol emits a bare identifier, which the caller
@@ -21218,9 +21668,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       isOpaqueVarsSource(
         options.vars?.[name],
         /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : undefined,
-        (identifier) =>
+        (path, root) =>
           gpuPlainUniformRead(
-            identifier,
+            path,
+            root,
             name,
             options.vars ?? {},
             reachableNames
@@ -21380,16 +21831,49 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     );
     if (vars) gpuRandomState(target).varNames = new Set(Object.keys(vars));
 
+    const cseOptions = {
+      isOverriddenOperator: (name: string) =>
+        userFunctions !== undefined && Object.hasOwn(userFunctions, name),
+      isStringVar: opaqueVar,
+      isVarsKey: (name: string) =>
+        vars !== undefined && Object.hasOwn(vars, name),
+    };
+    // The code for a node that several paths reach is written once for each
+    // path, unless the common-subexpression pass binds the node. A deep
+    // graph that the pass cannot bind gives code that grows exponentially
+    // with the depth (ROADMAP CE-584), so it is refused here, before it is
+    // written (`gpuWrittenSize`, `gpu-written-size.ts`).
+    // The check uses the rules of the pass (`cseRecordingRules()`,
+    // `cse.ts`) with the options of the session below, and runs before the
+    // session opens: the harvest of the pass can itself take a time
+    // exponential in the depth of such a graph.
+    const writtenSize = gpuWrittenSize(expr, {
+      ...cseRecordingRules(expr, {
+        ...cseOptions,
+        admitPureUserFunctions: true,
+      }),
+      share: options.cse !== false,
+    });
+    if (writtenSize > GPU_MAX_WRITTEN_NODES)
+      throw new Error(
+        `Could not compile: the ${this.languageId.toUpperCase()} code for ` +
+          `this expression would have more than ` +
+          `${GPU_MAX_WRITTEN_NODES.toLocaleString('en-US')} nodes. A ` +
+          `subexpression that several paths reach is written once for each ` +
+          `path when the shader cannot compute it once: the paths go ` +
+          `through different branches of an \`If\`, the subexpression reads ` +
+          `a \`vars\` source that is not a variable or a field of a ` +
+          `variable (\`u.c\`), it is not pure, or the \`cse\` option is ` +
+          `false.`
+      );
+
     // A statement position: the emitted `code` is a function body, so a
     // loop-form `Sum`/`Product` nested anywhere inside may hoist its loop ahead
     // of the value (Tycho item 110). With nothing hoisted this is byte-identical
     // to a plain `compile()`.
     BaseCompiler.openCseSession(expr, target, {
       enabled: options.cse,
-      isOverriddenOperator: (name) =>
-        userFunctions !== undefined && Object.hasOwn(userFunctions, name),
-      isStringVar: opaqueVar,
-      isVarsKey: (name) => vars !== undefined && Object.hasOwn(vars, name),
+      ...cseOptions,
     });
     // The parameters of the emitted definitions that every call of the
     // shader passes a finite value (`gpuRecordCallSiteFacts`).
@@ -21910,14 +22394,57 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
    * `stageNames` are the other names of the shader that the body can read
    * bare: the `out` variables of a GLSL shader. A free symbol of the body
    * that is not a declaration and not one of these names is refused.
+   *
+   * `outputs` are the names that a body statement can assign, in the spelling
+   * of the emitted source (`output.c` for a WGSL output), with their declared
+   * types. A GLSL body can also assign the built-in outputs of its stage
+   * (`GLSL_STAGE_BUILTIN_OUTPUTS`). A statement whose target is not one of
+   * these names, or components of one of them, is refused, and so is a
+   * statement whose value has a type that the target does not accept
+   * (`gpuAssignmentConverts`). A compute shader has no outputs, so every
+   * statement of its body is refused. `desktopGLSLVersion` is the version
+   * number of a desktop GLSL shader, which converts integers to floats.
    */
   protected compileShaderBody(
     body: ReadonlyArray<{ variable: string; expression: Expression }>,
     stage: string,
     declarations: ReadonlyArray<GPUShaderDeclaration> = [],
     constantFold?: boolean,
-    stageNames: ReadonlyArray<string> = []
+    stageNames: ReadonlyArray<string> = [],
+    outputs: ReadonlyArray<{ name: string; type: string }> = [],
+    desktopGLSLVersion?: number
   ): Array<{ variable: string; code: string; stmts: string[] }> {
+    const isWGSL = this.languageId === 'wgsl';
+    // The target of each statement is copied as text to the left of
+    // `<variable> = <code>;`. A target that names nothing, or a value of
+    // another type, gives a shader that fails only when the GPU compiles it,
+    // so both are refused here.
+    if (stage === 'compute' && body.length > 0)
+      throw new Error(
+        `Could not compile the body statement "${body[0].variable}" of ` +
+          `\`compileShader()\`: a compute shader from \`compileShader()\` ` +
+          `cannot write a result. It has no outputs and no storage buffer, ` +
+          `so the statement would assign a name that the shader does not ` +
+          `declare. To compute values on the GPU, use \`compile()\` or ` +
+          `\`WGSLTarget.compileFieldFunction()\`.`
+      );
+    const assignable = [
+      ...outputs,
+      ...(isWGSL ? [] : (GLSL_STAGE_BUILTIN_OUTPUTS[stage] ?? [])),
+    ];
+    const targetTypes = body.map((assignment) => {
+      const target = gpuShaderAssignmentTarget(
+        assignment.variable,
+        assignable,
+        isWGSL
+      );
+      if ('error' in target)
+        throw new Error(
+          `Could not compile the body statement "${assignment.variable}" ` +
+            `of \`compileShader()\`: ${target.error}`
+        );
+      return target;
+    });
     // Put each body expression in the radian convention, as `compileOrThrow`
     // does for a single expression: under a non-radian `angularUnit` the
     // trigonometric calls would otherwise read their argument as radians
@@ -21926,6 +22453,27 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       ...assignment,
       expression: rewriteAngularUnit(assignment.expression),
     }));
+    // The body statements compile with no common-subexpression pass, so a
+    // node that several paths reach is written once for each path, and the
+    // code of a deep graph grows exponentially with its depth. The size
+    // limit of `compileOrThrow` applies to the whole body, with every node
+    // counted once for each path (`gpuWrittenSize`, `gpu-written-size.ts`).
+    let bodySize = 0;
+    for (const assignment of body)
+      bodySize += gpuWrittenSize(assignment.expression, {
+        ...cseRecordingRules(assignment.expression),
+        share: false,
+      });
+    if (bodySize > GPU_MAX_WRITTEN_NODES)
+      throw new Error(
+        `Could not compile \`compileShader()\`: the ` +
+          `${this.languageId.toUpperCase()} code of the body statements ` +
+          `would have more than ` +
+          `${GPU_MAX_WRITTEN_NODES.toLocaleString('en-US')} nodes. A ` +
+          `subexpression that several paths reach is written once for each ` +
+          `path in a body statement. Assign the subexpression to a variable ` +
+          `of its own (\`Block\`).`
+      );
     // One name, two declarations (an input AND a uniform) is a redeclaration
     // neither language accepts — and on WGSL the two do not even resolve to
     // the same identifier (`input.v` vs the global `v`), so there is no
@@ -21941,6 +22489,25 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         );
       seen.add(d.name);
     }
+    // A GLSL body reads its outputs and the built-in variables of its stage
+    // bare, as it reads its inputs and uniforms, so they are framed with
+    // their types too. Without them, `Sin(gl_FragCoord)` read the `vec4` as
+    // a float and emitted `_gpu_sin(gl_FragCoord)`. A built-in integer, such
+    // as `gl_VertexID`, is then read through a float conversion, as an
+    // integer input is (`gpuDeclaredBodyTarget`). They are not inputs or
+    // uniforms, so the read-only check below does not apply to them.
+    const framed: GPUShaderDeclaration[] = [...declarations];
+    if (!isWGSL)
+      for (const d of [
+        ...outputs,
+        ...Object.entries(GLSL_STAGE_BUILTIN_TYPES[stage] ?? {}).map(
+          ([name, type]) => ({ name, type })
+        ),
+      ])
+        if (!seen.has(d.name)) {
+          seen.add(d.name);
+          framed.push({ name: d.name, type: d.type });
+        }
     // ONE naming context for the whole body too, seeded from EVERY statement:
     // the counter must stay distinct across statements (same reason as the
     // random counters), and a `_tv`-named symbol in any statement is a
@@ -21973,7 +22540,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       if (recording && ref === undefined) unanswered.add(id);
       return ref;
     };
-    const target = gpuDeclaredBodyTarget(rawTarget, declarations);
+    const target = gpuDeclaredBodyTarget(rawTarget, framed);
     // Each assignment is a statement position of its own, so a loop-form
     // `Sum`/`Product` inside it hoists its loop into `stmts`, which the shader
     // assembly emits ahead of the assignment (Tycho item 110). The whole body
@@ -21982,9 +22549,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     recording = true;
     const statements = BaseCompiler.withLocalShapeFrame(
       new Map(),
-      gpuDeclaredShapeFrame(declarations),
+      gpuDeclaredShapeFrame(framed),
       () =>
-        body.map((assignment) => {
+        body.map((assignment, i) => {
           // Same single-line holes as `compileToSource()`: `code` lands on the
           // right of `${variable} = …;`, where neither a WGSL assignment nor a
           // declaration (either language) is an expression. Checked on the
@@ -22012,10 +22579,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 `${this.languageId.toUpperCase()}. Assign a local copy of it ` +
                 `instead (\`Block(y ≔ ${written}; y ≔ y + 1; y)\`).`
             );
-          const { stmts, code } = BaseCompiler.compileStatementBody(
+          const compiled = BaseCompiler.compileStatementBody(
             assignment.expression,
             target
           );
+          const { stmts } = compiled;
+          let { code } = compiled;
           // `stmts` are hoisted STATEMENTS and the assembly emits them ahead of
           // the assignment, so they are legal. `code` is not: it lands on the
           // right of `${variable} = …;`, an expression position (D6).
@@ -22024,6 +22593,135 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             code,
             this.languageId
           );
+          // The value must have the type of the target. The test is made only
+          // when both types are known: the type of the value only when it is
+          // certain (`gpuCertainValueType`), so that a valid shader is never
+          // refused, and the type of the target only when it is a scalar or
+          // a vector type.
+          const to = targetTypes[i].type;
+          // A statement whose value is an integer scalar name (an input, a
+          // uniform or a built-in such as `gl_VertexID`) assigned to an
+          // integer target is written with the integer itself: the float
+          // conversion that reads such a name in float arithmetic
+          // (`gpuDeclaredBodyTarget`) would give a float, which the target
+          // does not accept. Its type is then the integer type of the name.
+          const value = assignment.expression;
+          const integerName = isSymbol(value)
+            ? framed.find((d) => d.name === value.symbol)
+            : undefined;
+          const integerType =
+            integerName === undefined
+              ? undefined
+              : gpuNormalizeShaderType(integerName.type);
+          const keepsInteger =
+            to !== undefined &&
+            to.element !== 'f' &&
+            integerType !== undefined &&
+            gpuDeclaredIsIntegerScalar(integerType);
+          const from = keepsInteger
+            ? integerType
+            : gpuCertainValueType(value, isWGSL);
+          // When the type of the value is not certain, the number of its
+          // components can still be known: the width that the emitter gives
+          // a vector expression (`aggregateComponentCount`), such as 3 for
+          // `2·uv` with `vec3 uv`. A value of another width than the target
+          // is refused, because nothing would assign the other components
+          // (and the WGSL split below would copy only some of them).
+          const width =
+            from === undefined
+              ? BaseCompiler.aggregateComponentCount(value)
+              : undefined;
+          const subject = (valueType: string) =>
+            `Could not compile the body statement "${assignment.variable}" ` +
+            `of \`compileShader()\`: the value ${valueType}, and the target ` +
+            `"${assignment.variable}" has the type ` +
+            `\`${gpuSpellValueType(to!, isWGSL)}\`.`;
+          const noConversion =
+            `${this.languageId.toUpperCase()} does not convert the one to ` +
+            `the other in an assignment. Give the value the type of the ` +
+            `target, or declare the output with the type of the value.`;
+          if (
+            to !== undefined &&
+            width !== undefined &&
+            width > 0 &&
+            width !== to.width
+          )
+            throw new Error(
+              `${subject(`has ${width} components`)} ${noConversion}`
+            );
+          if (
+            keepsInteger &&
+            gpuAssignmentConverts(integerType!, to!, desktopGLSLVersion)
+          )
+            code = integerName!.ref ?? integerName!.name;
+          else if (
+            to !== undefined &&
+            from !== undefined &&
+            (!('element' in from) ||
+              !gpuAssignmentConverts(from, to, desktopGLSLVersion))
+          ) {
+            const valueType = `has the type \`${
+              'element' in from
+                ? gpuSpellValueType(from, isWGSL)
+                : from.spelling
+            }\``;
+            // Every scalar that the shader computes is a float, so an
+            // integer output can receive only an integer name or an integer
+            // vector input or uniform.
+            if ('element' in from && from.element === 'f' && to.element !== 'f')
+              throw new Error(
+                `${subject(valueType)} \`compileShader()\` computes float ` +
+                  `values, and cannot assign an integer output. Declare the ` +
+                  `output with a float type ` +
+                  `(\`${gpuSpellValueType({ element: 'f', width: to.width }, isWGSL)}\`).`
+              );
+            throw new Error(`${subject(valueType)} ${noConversion}`);
+          }
+          // WGSL writes through a selection of two or more components
+          // (`output.c.rg = v;`) only with the `swizzle_assignment` language
+          // extension (WGSL §6.5.4 and §9.2.2), which a GPU does not always
+          // have. A selection of one component is a reference without any
+          // extension (WGSL §8.5.1.3). So the value is bound to a `let`, and
+          // each component is assigned on its own:
+          // `let _tv1 = v; output.c.r = _tv1.x; output.c.g = _tv1.y;`. The
+          // last assignment is the statement itself, and the others go after
+          // the hoisted statements of the value.
+          const { base, letters } = targetTypes[i];
+          if (
+            isWGSL &&
+            base !== undefined &&
+            letters !== undefined &&
+            letters.length > 1
+          ) {
+            // The split reads one component of the value for each letter, so
+            // a value with more components would be cut without an error.
+            // When neither check above gives the width of the value, the
+            // split is refused.
+            if (from === undefined && width === undefined)
+              throw new Error(
+                `Could not compile the body statement "${assignment.variable}" ` +
+                  `of \`compileShader()\`: the number of components of the ` +
+                  `value cannot be determined, and WGSL assigns a target of ` +
+                  `${letters.length} components one component at a time. ` +
+                  `Assign the whole output, or one component in each ` +
+                  `statement (\`${base}.${letters[0]}\`).`
+              );
+            const temp = BaseCompiler.tempVar(target);
+            const writes = [...letters].map((letter, k) => [
+              `${base}.${letter}`,
+              `${temp}.${'xyzw'[k]}`,
+            ]);
+            const [variable, value] = writes.pop()!;
+            return {
+              variable,
+              code: value,
+              stmts: [
+                ...stmts,
+                `let ${temp} = ${code};`,
+                ...writes.map(([v, c]) => `${v} = ${c};`),
+              ],
+            };
+          }
           return { variable: assignment.variable, code, stmts };
         })
     );

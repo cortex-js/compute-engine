@@ -212,7 +212,9 @@ const NO_LAZY_SITES: readonly LazyOperandSite[] = [];
  * Each `When` handler (the base compiler, the GPU, interval and Python
  * targets) compiles the condition before the value.
  */
-function operandEmissionOrder(node: Expression & FunctionInterface): number[] {
+export function operandEmissionOrder(
+  node: Expression & FunctionInterface
+): number[] {
   if (node.operator === 'When' && node.nops === 2) return [1, 0];
   const order: number[] = [];
   for (let i = 0; i < node.nops; i++) order.push(i);
@@ -547,6 +549,36 @@ export function candidateAt(
 }
 
 /**
+ * Two rules of the harvest of `root` with `options`, for a node of `root`:
+ * - `mayRecord`: can the harvest record the node as an occurrence, so that
+ *   the pass can bind it (`Harvester.mayRecord`)? The size and benefit
+ *   thresholds are not applied, and neither is the position of the
+ *   occurrence (below an operator that `isCallerMapped` accepts, the
+ *   harvest records nothing);
+ * - `isCallerMapped`: is the node emitted by caller source (an operator the
+ *   caller replaces, or one with a compile handler of the caller), so that
+ *   nothing below it is recorded (`Harvester.isCallerMapped`)?
+ * One harvester answers every question, so the answers share its memos:
+ * the cost is one visit of each distinct node. The shader targets use the
+ * rules to estimate the size of their code (`gpuWrittenSize()`,
+ * `gpu-written-size.ts`).
+ */
+export function cseRecordingRules(
+  root: Expression,
+  options: CseHarvestOptions = {}
+): {
+  mayRecord: (node: Expression) => boolean;
+  isCallerMapped: (node: Expression) => boolean;
+} {
+  const harvester = new Harvester(root, options);
+  return {
+    mayRecord: (node) => harvester.mayRecord(node),
+    isCallerMapped: (node) =>
+      isFunction(node) && harvester.isCallerMapped(node),
+  };
+}
+
+/**
  * Whether `node` may be emitted ONCE and referred to by name everywhere it
  * would otherwise be emitted again — the admissibility question a CSE
  * candidate answers, asked directly of a single node.
@@ -619,27 +651,35 @@ export function isCallerMapped(
  * `isPlainRead` accepts when the target passes it (the shader targets; see
  * the next paragraph).
  *
- * `isPlainRead` lets a target accept one more kind of string: a bare
- * identifier (`u_var_s`) that the target reads as a plain variable, with no
- * effect and no value change between two reads. The shader targets pass it:
- * GLSL and WGSL have no getters, and a uniform cannot be written by the
- * shader. The target must answer `false` when anything in the compiled
- * expression can write a variable with that name (see
- * `gpuPlainUniformRead()`, `gpu-target.ts`). The JavaScript targets do not
- * pass it, because a bare global name there can be a getter.
+ * `isPlainRead` lets a target accept one more kind of string: a READ PATH
+ * that the target reads as a plain variable, with no effect and no value
+ * change between two reads. A read path is a bare identifier (`u_var_s`),
+ * optionally followed by field accesses (`ce_params.c`, `u.x`) and indexes
+ * that are integer literals (`v[0]`). The callback receives the whole path
+ * and its first identifier. The shader targets pass it: GLSL and WGSL have
+ * no getters, a field access or a constant index of a variable only reads
+ * it, and a uniform cannot be written by the shader. The target must answer
+ * `false` when anything in the compiled expression can write a variable
+ * with the name of the first identifier (see `gpuPlainUniformRead()`,
+ * `gpu-target.ts`). The JavaScript targets do not pass it, because a bare
+ * global name or a property there can be a getter. Any other text (a call
+ * `f()`, an operator `u.x + 1`, an index that is not a literal `v[i]`) stays
+ * opaque on every target.
  */
 export function isOpaqueVarsSource(
   source: unknown,
   defaultSpelling: string | undefined,
-  isPlainRead?: (identifier: string) => boolean
+  isPlainRead?: (path: string, root: string) => boolean
 ): boolean {
   if (typeof source !== 'string') return false;
   const text = source.trim();
   if (defaultSpelling !== undefined && text === defaultSpelling) return false;
   if (
     isPlainRead !== undefined &&
-    /^[A-Za-z_][A-Za-z0-9_]*$/.test(text) &&
-    isPlainRead(text)
+    /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[[0-9]+\])*$/.test(
+      text
+    ) &&
+    isPlainRead(text, /^[A-Za-z_][A-Za-z0-9_]*/.exec(text)![0])
   )
     return false;
   return true;
@@ -1015,6 +1055,24 @@ class Harvester {
   admits(node: Expression): boolean {
     this.prepass(this.root, new Set<Expression>());
     return this.isEligible(node);
+  }
+
+  private prepassDone = false;
+
+  /**
+   * Can the harvest of `this.root` record `node` as an occurrence: the node
+   * is a function application, it is pure, and it passes the eligibility
+   * gates (`isEligible`: no `vars` source that may have an effect, no
+   * operator that the caller replaces or compiles with its own handler, in
+   * the node or below it). The size and benefit thresholds are not applied.
+   * The shadow prepass runs once, on the first question.
+   */
+  mayRecord(node: Expression): boolean {
+    if (!this.prepassDone) {
+      this.prepass(this.root, new Set<Expression>());
+      this.prepassDone = true;
+    }
+    return isFunction(node) && node.isPure && this.isEligible(node);
   }
 
   /**

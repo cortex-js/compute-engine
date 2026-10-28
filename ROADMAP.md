@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-592.
+Next free reference: CE-596.
 
 **Entry format.**
 
@@ -2874,32 +2874,6 @@ isolated zeros, branch boundaries, subnormals and overflow. Tycho's profile
 Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
 (the same document answers CE-571 and CE-572).
 
-### CE-580. `compileShader()`: the assignment targets of the body are not checked
-
-**Status:** open; defect, being fixed (session compute-engine-0c). Found
-2026-10-27 while fixing CE-575. User decision 2026-10-28, option (a): check
-vertex and fragment targets (a declared output, a value type that fits) and
-refuse every compute-stage assignment. Option (b), a writable
-`'storage-buffer'` in `compileShader()` so a compute body can write
-`S.data[i]`, is not needed: Tycho has no GPU compute job planned (answer of
-session tycho-3b, 2026-10-28). User decision 2026-10-28: a list of complex
-numbers (`[x, 2] + i`, typed `vector<complex^2>`) has no GPU representation and
-is refused on the GLSL and WGSL targets; before, `compile()` reported success
-with `vec2(vec2(…), 1.0)`.
-
-`compileShader()` (GLSL and WGSL) writes each body statement as
-`<variable> = <code>;`, with `variable` copied as text. Nothing checks that
-the target is declared (an output, or a variable the host adds), nor that the
-type of the value matches the type of the target: `output.c = vec2f(…)` into
-an `f32` output, or a `float` into a `vec4 fragColor`, is emitted, and the
-shader fails only when the GPU compiles it. A compute shader has no outputs,
-so its body can only assign a name that the returned shader does not declare.
-Expected: refuse a target that is not a declared output (or a storage
-variable that the shader declares), and a value whose type does not fit the
-target, with a message that names both. `compileShader()` has no storage
-option: the `'storage-buffer'` kind is read only through `compile()` and
-`compileFieldFunction()`, and is read-only.
-
 ### CE-583. WGSL: a list held by a `Block` local is copied again at each read
 
 **Status:** open; defect (memory and speed). Found 2026-10-27 while fixing
@@ -2914,48 +2888,73 @@ parameter of the same name, and a parameter (a value) must be copied before a
 dynamic index. Expected: the block-local binding is marked as a variable, and
 its reads index it directly. A written input already does this (CE-574).
 
-### CE-591. `compileFieldFunction()`: a point parameter (a tuple of 2 to 4 reals) is refused
+### CE-595. The common-subexpression pass takes exponential time on a graph that reuses a value inside an `If` arm
 
-**Status:** open; being implemented (session compute-engine-0c). User decision
-2026-10-28: add it before the next release, because Tycho can use it.
+**Status:** open; defect (performance). Found 2026-10-28 while fixing CE-584.
 
-`WGSLTarget.compileFieldFunction()` refuses a parameter whose value is a tuple.
-Tycho stores a point with `ce.assign` as a `Tuple`, and about 13 states of its
-Desmos corpus read such a point as a whole inside a field (`distance(X, A)`,
-`(x - d.x)^2 + (y - d.y)^2 <= 16`, `D / length(D)`; answer of session tycho-3b,
-2026-10-28). Expected: a tuple of 2, 3 or 4 finite reals is one `vec2f`,
-`vec3f` or `vec4f` field of the parameter struct, with the WGSL alignment rules
-in the reported offsets, so that a change of the point is a buffer write. A
-list parameter keeps its `array<vec4f, ⌈n/4⌉>` layout.
+With `e_0 = sin(x)` and `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))`, the
+emitted code is linear in the depth (the `If` arm reuses the binding made by
+the first argument), but the pass that finds shared subexpressions
+(`selectCandidates`, `pathsAfter` and `forEachCoveringReplay` in
+`compilation/cse.ts`) takes 1.6 s at depth 12, 8 s at depth 13 and 36 s at
+depth 14. The graph `e_{k+1} = When(sin(e_k), e_k > k)` has the same problem
+(126 ms at depth 10, 2.1 s at depth 12, 9.8 s at depth 13, for 1,510
+characters of code). The size limit of CE-584 runs before the pass and lets
+these graphs through, because their written size is small. Expected: the pass is linear (or
+close to it) in the number of distinct nodes, as the written-size estimate is.
 
-### CE-584. Shader targets: compiling an expression with shared subexpressions is exponential
+### CE-594. Canonicalizing a function literal turns a shared expression graph into a tree, in exponential time and memory
 
-**Status:** open; defect (performance). Measured 2026-10-28 (raw data:
-session compute-engine-0c scratchpad `ce584/`): the exponential case comes
-from `compileFieldFunction()`. It passes each parameter as
-`vars: { c: 'ce_params.c' }`, and `isOpaqueVarsSource()` (`compilation/cse.ts`)
-makes the common-subexpression pass bind no node that reads a source that is
-not a bare name. The same 20-level expression through `compile()` gives 2,324
-characters in 335 ms; through `compileFieldFunction()`, 24 MB in 25 s. A limit
-on the raw path count would refuse working shaders: 4 Tycho compilations
-(the voronoi row, 498,274 paths) and 10 CE test compilations are above 10,000
-paths, and all of them succeed with small code. A limit of 50,000 on the
-written size (each node that the common-subexpression pass binds counted
-once) refuses no compilation in either corpus (largest success 3,385).
-Found 2026-10-27 while reviewing
-CE-571; probe
-`/private/tmp/claude-501/-Users-arno-dev-compute-engine/812bf472-9d45-4cf3-a48a-3e8e8941a94a/scratchpad/int/dag.mts`.
+**Status:** open; defect (performance). Found 2026-10-28 while fixing CE-584.
 
-An expression in which each level reads the node of the level below twice
-has a number of distinct nodes linear in its depth, but its compilation on
-the `wgsl` target takes 113 ms at 10 levels and 38 s with 24 MB of code at
-20 levels. The emitted code writes each shared node once per path, and
-`gpuTypeOfValue` also walks the tree once per path. The walks that find the
-parameters and the free symbols visit each node once (fixed with CE-571).
-Expected: the emission binds a shared node once (as the common-subexpression
-pass does for nodes above its size threshold), and every walk of the
-emission is linear in the number of distinct nodes, or the compilation
-declines above a size limit, as `gpu-shared-calls.ts` does.
+An expression whose subexpressions are shared (`e_{k+1} = e_k + sin(e_k)`, 2k+1
+distinct nodes at depth k) is held as a graph. When it becomes the body of a
+function literal (`ce.function('Function', [e, 't'])`, or `ce.assign('h',
+…)`), canonicalization copies each shared node once per path: at depth 16 the
+body holds 262,146 node objects for 35 distinct structures. Assigning `h` takes
+0.8 s at depth 14, 2 to 3 s at depth 16, and runs out of memory at depth 20.
+The compilers then count shared nodes by structure (CE-584), so the problem is
+only the canonicalization. Expected: canonicalizing a node that was already
+canonicalized in the same pass returns the same result object (a memo per
+pass), so the work and the memory are linear in the number of distinct nodes.
+
+### CE-593. GPU targets: a point declared `list<tuple<number, number>> | tuple<number, number>` declines with a "missing" position
+
+**Status:** open; defect. Reported 2026-10-28 by Tycho (session tycho-3b):
+some Tycho points have this union type, and their rows decline on the shader
+targets.
+
+Repro: declare `P: list<tuple<number, number>> | tuple<number, number>`,
+assign `(1, 2)`, then `compile(ce.parse('P.x + y'), { to: 'glsl', fallback:
+false })` throws `Could not compile an object-domain absent ('missing')
+position (type 'list<number> | missing | number') to target 'glsl': it has no
+object null representation. Discharge with 'Coalesce' first.` The `javascript`
+target compiles it (`_SYS.pointComponent(_val_P, 0)` under a broadcast).
+Expected: on a shader target, a symbol whose union admits a point and a list of
+points is read by its value when the value is known and fixed (a point is a
+`vec2`), and otherwise declines with a message that names the union and the
+declaration to write (`tuple<real, real>`), not an internal "missing" position.
+Find also where `missing` enters the type of `P.x`: a component of a
+`tuple<number, number>` cannot be absent.
+
+### CE-592. `compileFieldFunction()`: a user function that reads a parameter with an inferred integer type declines
+
+**Status:** open; defect (needs a design). Found 2026-10-28 in the review of
+CE-591.
+
+With `a := 5` and `h(t) := t + a` (or `A := (1, 2)` and `h(t) := t + A.x`),
+`compileFieldFunction(h(x))` declines: the field function reads `a` from the
+buffer as a real number, but the signature of `h`, and the result types that
+its callers read, were derived when `a` was an integer. Accepting the wider
+type only in the body of `h` is unsound: `Floor(h(x))` would drop `floor`
+because the caller still reads an integer result. Today the decline names the
+remedy: declare the parameter (`ce.declare('a', 'real')`,
+`ce.declare('A', 'tuple<real, real>')`) before its first assignment. Expected:
+the field compile derives again the signatures and the memoized call types of
+the user functions that read a hidden parameter, and restores all of them,
+including the captured-type snapshots of the checkpoint journal, on every exit
+(`boxed-operator-definition.ts`, `call-result-type.ts`,
+`checkpoint-journal.ts`).
 
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 

@@ -353,7 +353,7 @@ describe('GPU FIXED-LENGTH LIST — At decline reasons stay distinct', () => {
           { name: 'k', type: 'i32' },
         ],
         outputs: [{ name: 'pos', type: 'vec4f' }],
-        body: [{ variable: 'pos.x', expression: ce.box(['At', 'S', 'k']) }],
+        body: [{ variable: 'output.pos.x', expression: ce.box(['At', 'S', 'k']) }],
         constantFold: false,
       });
     } catch (e) {

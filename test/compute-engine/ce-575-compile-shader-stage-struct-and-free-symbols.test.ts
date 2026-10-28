@@ -68,9 +68,7 @@ describe('CE-575 the WGSL input struct is named for its stage', () => {
         { name: 'gid', type: 'vec3<u32>', builtin: 'global_invocation_id' },
       ],
       uniforms: [{ name: 'uT', type: 'float' }],
-      body: [
-        { variable: 'r', expression: engine().box(['Multiply', 'uT', 2]) },
-      ],
+      body: [],
     });
     expect(shader).toBe(
       'struct ComputeInput {\n' +
@@ -80,7 +78,6 @@ describe('CE-575 the WGSL input struct is named for its stage', () => {
         '@compute\n' +
         '@workgroup_size(8)\n' +
         'fn main(input: ComputeInput) {\n' +
-        '  r = 2.0 * uT;\n' +
         '}\n'
     );
   });
@@ -107,16 +104,13 @@ describe('CE-575 the WGSL input struct is named for its stage', () => {
 });
 
 describe('CE-575 a body that reads an undeclared symbol is refused', () => {
-  it('compute stage, x + y: the message names both symbols', () => {
+  it('x + y: the message names both symbols', () => {
     const ce = engine();
     expect(() =>
       wgsl.compileShader({
-        type: 'compute',
-        workgroupSize: [8],
-        inputs: [
-          { name: 'gid', type: 'vec3<u32>', builtin: 'global_invocation_id' },
-        ],
-        body: [{ variable: 'r', expression: ce.parse('x+y') }],
+        type: 'fragment',
+        outputs: [{ name: 'r', type: 'float', location: 0 }],
+        body: [{ variable: 'output.r', expression: ce.parse('x+y') }],
       })
     ).toThrow(
       'Could not compile `compileShader()`: the body reads "x", "y", which ' +
@@ -195,9 +189,17 @@ describe('CE-575 a body that reads an undeclared symbol is refused', () => {
 
   it('GLSL: a `gl_` built-in variable and an output are in scope', () => {
     const ce = engine();
-    expect(glslFragment(ce.box(['Add', 'gl_FragCoord', 1]))).toContain(
-      'c = gl_FragCoord + 1.0;'
-    );
+    // `gl_FragCoord` is a `vec4`, so the output that receives it is a `vec4`
+    // too: a `float` output is refused (CE-580).
+    expect(
+      glsl.compileShader({
+        type: 'fragment',
+        outputs: [{ name: 'c', type: 'vec4' }],
+        body: [
+          { variable: 'c', expression: ce.box(['Add', 'gl_FragCoord', 1]) },
+        ],
+      })
+    ).toContain('c = gl_FragCoord + 1.0;');
     expect(glslFragment(ce.box(['Add', 'c', 1]))).toContain('c = c + 1.0;');
   });
 
@@ -307,14 +309,16 @@ describe('compileShader(): review cases', () => {
   it('a declaration shadows an engine value of the same name', () => {
     const ce = engine();
     ce.assign('q', ce.parse('w+1'));
-    const options = {
+    const options = (variable: string) => ({
       type: 'fragment' as const,
       uniforms: [{ name: 'q', type: 'float' }],
       outputs: [{ name: 'o', type: 'float', location: 0 }],
-      body: [{ variable: 'o', expression: ce.parse('q*2') }],
-    };
-    expect(new GLSLTarget().compileShader(options)).toContain('2.0 * q');
-    expect(new WGSLTarget().compileShader(options)).toContain('2.0 * q');
+      body: [{ variable, expression: ce.parse('q*2') }],
+    });
+    expect(new GLSLTarget().compileShader(options('o'))).toContain('2.0 * q');
+    expect(new WGSLTarget().compileShader(options('output.o'))).toContain(
+      '2.0 * q'
+    );
   });
 
   it('an integer value between the stages is flat on WGSL', () => {
@@ -350,7 +354,12 @@ describe('compileShader(): second review cases', () => {
         target.compileShader({
           type: 'fragment',
           outputs: [{ name: 'o', type: 'float', location: 0 }],
-          body: [{ variable: 'o', expression: ce.box(['If', 'True', 1, 'x']) }],
+          body: [
+            {
+              variable: target instanceof WGSLTarget ? 'output.o' : 'o',
+              expression: ce.box(['If', 'True', 1, 'x']),
+            },
+          ],
         })
       ).toThrow(/the body reads "x"/);
   });
