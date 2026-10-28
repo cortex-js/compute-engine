@@ -87,6 +87,35 @@ find src test -name '*.ts' -exec stat -f "%m %N" {} + | sort | shasum
   than absorbing a large snapshot diff silently.
 - After a change to imports, `npm run check:deps` must stay clean; the repo
   has a zero-circular-dependency budget.
+- **The staging test gate** (shared protocol §5.7, user decision
+  2026-10-28). A session does not run the full suite before staging. It runs
+  `npm run typecheck`, the test files of the area it changed
+  (`npx tsx scripts/where.ts <Operator>` lists them for an operator), and
+  the core test set:
+  `npx jest --config ./config/jest.config.cjs -w 4 -- $(grep -v '^#' config/core-tests.txt)`
+  (18 files, about 20 s; in zsh, put the list in a variable and write
+  `${=FILES}`). The nightly job, `scripts/ci-nightly.sh` (launchd, 02:30),
+  runs the full suite at HEAD, with the nightly suites (`CE_NIGHTLY=1`) and
+  the Python tests (the main tree's `venv`); a run took about 7 minutes
+  once it had the lock (2026-10-28), and it stops at 55 minutes.
+- **The full suite is still required before staging** when the change
+  touches a hot file for testing: anything under
+  `src/compute-engine/boxed-expression/` or `src/common/type/`, the jest
+  configuration (`config/jest.config.cjs`, `config/jest-environment.cjs`,
+  `test/jest-config.ts`), or `package.json` dependencies; when the change is
+  expected to change many snapshots (the snapshot policy below); and when
+  `node ~/.claude/scripts/suite-status.mjs train` exits 3 (5 or more commits
+  since the last passing full run). For a hot file or a snapshot change,
+  take the lock and run `npm run test` in the tree that holds the change.
+  For a full train, run `bash scripts/ci-nightly.sh run`: it tests the
+  committed HEAD and moves the green mark when it passes.
+- **A release.** The GitHub workflow `.github/workflows/publish.yml` runs
+  `npm test` (the full suite) before it publishes, so a release published
+  from GitHub needs nothing more. A publish from this machine goes through
+  `scripts/prepublish-check.sh`: it refuses a tree with an uncommitted
+  source change, and when the full suite has not passed at HEAD it runs it
+  (`bash scripts/ci-nightly.sh run`, about 7 minutes once it has the box
+  lock) and publishes only if it passes.
 
 ## §8 Handoff
 

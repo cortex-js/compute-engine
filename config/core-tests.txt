@@ -1,0 +1,27 @@
+# The core test set of compute-engine: a session runs these files, at -w 4,
+# with the test files of the area it changed, before it stages a change to
+# src/. They are the files with the most tests in the main areas (arithmetic,
+# simplification, collections, types, parsing, compilation, Epsil), so a
+# change that breaks something outside its own area is likely to fail here.
+# The nightly full run (scripts/ci-nightly.sh) catches the rest.
+# Run them: npx jest --config ./config/jest.config.cjs -w 4 -- $(grep -v '^#' config/core-tests.txt)
+# Rules: ~/.claude/SHARED-BOX-PROTOCOL.md section 5.7, and
+# docs/COMPUTE-ENGINE-BOX-SPECIFICS.md section 5 (user decision 2026-10-28).
+test/compute-engine/arithmetic.test.ts
+test/compute-engine/exactness-regressions.test.ts
+test/compute-engine/simplify.test.ts
+test/compute-engine/collections.test.ts
+test/compute-engine/linear-algebra.test.ts
+test/compute-engine/calculus.test.ts
+test/compute-engine/solve.test.ts
+test/compute-engine/functions.test.ts
+test/compute-engine/relational-operators.test.ts
+test/compute-engine/error-model.test.ts
+test/compute-engine/type-variables.test.ts
+test/common/types.test.ts
+test/compute-engine/latex-syntax/parsing.test.ts
+test/compute-engine/latex-syntax/operators.test.ts
+test/compute-engine/compile.test.ts
+test/compute-engine/interval-arithmetic.test.ts
+test/epsil/execute.test.ts
+test/epsil/declare-type.test.ts
