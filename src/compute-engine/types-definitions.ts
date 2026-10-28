@@ -1166,6 +1166,16 @@ export type OperatorDefinition = Partial<BaseDefinition> &
      * default compilation (a `null` returned from untyped JavaScript is
      * tolerated and treated the same). See {@link OperatorCompileHandler}.
      *
+     * On the `javascript` target, the code may call two runtime helpers,
+     * which keep their names and behavior across releases:
+     * `_SYS.atNoWrap(base, index)` reads the element at a 1-based position
+     * (or the elements at a list of positions) with no wrap-around, and
+     * `_SYS.atMask(base, mask)` keeps the elements where a list of booleans
+     * is `true`, and reads any other index as `atNoWrap` does. The other
+     * members of `_SYS` are internal and can change in any release. The
+     * compile guide ("Runtime Helpers for Generated JavaScript") gives the
+     * details.
+     *
      * The code a caller handler writes runs only on the thread that compiled
      * it: the result is not shippable, so `broadcastAsync()` does not send
      * it to the kernel pool (`reason: 'not-shippable'`). This holds also

@@ -253,11 +253,10 @@ export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object
 // `instanceof`), so a slot-discovered guard from one copy is safe on
 // expressions from another. Treat this object's shape as an additive contract —
 // consumers feature-detect each name, so new entries can be added but existing
-// ones should not change meaning or be removed.
-(globalThis as Record<symbol, unknown>)[
-  Symbol.for('io.cortexjs.compute-engine')
-] = {
-  ComputeEngine: ComputeEngineImpl,
+// ones should not change meaning or be removed. The documented, typed form of
+// this contract is `ComputeEngineGlobal` below.
+const COMPUTE_ENGINE_GLOBAL: ComputeEngineGlobal = {
+  ComputeEngine,
   version: '{{SDK_VERSION}}',
   LatexSyntax,
   LATEX_DICTIONARY,
@@ -281,3 +280,54 @@ export type { BoxedObject } from './compute-engine/boxed-expression/boxed-object
   // consumer must discover at runtime.
   compile,
 };
+
+/**
+ * The object that this bundle stores on `globalThis` under the key
+ * `Symbol.for('io.cortexjs.compute-engine')` when it loads. A page that
+ * loads the Compute Engine with a `<script>` tag, next to a component built
+ * against another copy of the bundle, can find the engine through this slot
+ * without importing it:
+ *
+ * ```ts
+ * const ce = (globalThis as any)[Symbol.for('io.cortexjs.compute-engine')] as
+ *   ComputeEngineGlobal | undefined;
+ * const engine = ce ? new ce.ComputeEngine() : undefined;
+ * ```
+ *
+ * The contract is additive: a later version can add a member, but a member
+ * keeps its meaning and is not removed. Test each member you use before
+ * calling it, since an older bundle can lack a newer one. When several copies
+ * of the bundle load, the last one to load owns the slot. The main entry
+ * point (`@cortex-js/compute-engine`) stores it, and so does the Epsil entry
+ * point (`/epsil`), which re-exports it; `/core` and the other entry points
+ * do not.
+ *
+ * The interface is written out, rather than derived from the stored object,
+ * so that a change to the object cannot change the public contract by
+ * accident. `ComputeEngine` has the public constructor type, so the engine
+ * it makes has the type `ComputeEngine` (the `IComputeEngine` interface).
+ */
+export interface ComputeEngineGlobal {
+  ComputeEngine: ComputeEngineConstructor;
+  version: string;
+  LatexSyntax: typeof LatexSyntax;
+  LATEX_DICTIONARY: typeof LATEX_DICTIONARY;
+  isExpression: typeof isExpression;
+  isNumber: typeof isNumber;
+  isSymbol: typeof isSymbol;
+  isFunction: typeof isFunction;
+  isString: typeof isString;
+  isCharacter: typeof isCharacter;
+  isTensor: typeof isTensor;
+  isDictionary: typeof isDictionary;
+  isObject: typeof isObject;
+  isCollection: typeof isCollection;
+  isIndexedCollection: typeof isIndexedCollection;
+  numericValue: typeof numericValue;
+  sym: typeof sym;
+  compile: typeof compile;
+}
+
+(globalThis as Record<symbol, unknown>)[
+  Symbol.for('io.cortexjs.compute-engine')
+] = COMPUTE_ENGINE_GLOBAL;
