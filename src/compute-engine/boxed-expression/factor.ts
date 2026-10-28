@@ -1,7 +1,8 @@
 import type { Expression } from '../global-types.js';
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
-import { isNumber, isFunction } from './type-guards.js';
+import { isNumber, isFunction, isSymbol } from './type-guards.js';
+import { isTensorValue } from './tensor-view.js';
 import { NumericValue } from '../numeric-value/types.js';
 
 import { Product, commonTerms, mul } from './arithmetic-mul-div.js';
@@ -14,7 +15,7 @@ import {
   cancelCommonFactors,
 } from './polynomials.js';
 import { asExactSmallInteger, asSmallInteger } from './numerics.js';
-import { isTensorProductOperand } from './order.js';
+import { hasCollectionShape, isTensorProductOperand } from './order.js';
 import { mayHaveOrderedArithmetic } from './arithmetic-order-override.js';
 import { mayBeTensorProductOperand } from './matrix-operand.js';
 import { expand } from './expand.js';
@@ -706,6 +707,14 @@ function factorPolynomialWith(
     if (monomialFactored !== null) return monomialFactored;
   }
 
+  // A sum in several unknowns: take out the factor that all its terms share,
+  // ax + ay → a(x + y), a²b + ab² → ab(a + b). The univariate case does this
+  // with `extractContent()` and `extractMonomialContent()` above.
+  if (variable === undefined) {
+    const commonFactored = extractCommonFactor(expr);
+    if (commonFactored !== null) return commonFactored;
+  }
+
   // Try perfect square trinomial
   // The base of the square can factor further: x⁴−2x²+1 = (x²−1)² →
   // (x−1)²(x+1)².
@@ -915,6 +924,364 @@ function extractMonomialContent(
     ce.function('Power', [ce.symbol(variable).json, ce.number(k).json]),
     factoredCofactor,
   ]);
+}
+
+/**
+ * A term of a sum, read as a product: the number factors, and each other
+ * factor as a base with an integer exponent. `x²·y/3` gives the numbers
+ * `[1/3]` and the powers `[x², y¹]`. A factor that is not a number, a
+ * product, a negation, a quotient or an integer power is a base with the
+ * exponent 1 (`sin(t)`, `(a + b)`).
+ *
+ * `null` when a factor cannot be moved out of the term: a factor that is not
+ * pure (`Random()`: two occurrences are two values), or a factor that is or
+ * can be a matrix (a matrix product does not commute). The result is `null`
+ * too for a term with a quotient by the number 0 (`a/(b/0)`): the canonical
+ * forms keep such a quotient as it is, because its value is `0/0` or a pole
+ * depending on `b`, and splitting it would read `0` as a factor of the term
+ * (`a·0/b`) and remove the term.
+ */
+function termAsPowers(
+  term: Expression
+): {
+  numbers: Expression[];
+  powers: { base: Expression; exp: number }[];
+} | null {
+  const ce = term.engine;
+  const numbers: Expression[] = [];
+  const powers: { base: Expression; exp: number }[] = [];
+  const visit = (f: Expression, sign: 1 | -1): boolean => {
+    if (isNumber(f)) {
+      numbers.push(sign === 1 ? f : ce.function('Divide', [ce.One, f]));
+      return true;
+    }
+    if (isFunction(f, 'Negate')) {
+      numbers.push(ce.NegativeOne);
+      return visit(f.op1, sign);
+    }
+    if (isFunction(f, 'Multiply')) return f.ops.every((op) => visit(op, sign));
+    if (isFunction(f, 'Divide')) {
+      if (isNumber(f.op2) && f.op2.isSame(0)) return false;
+      return visit(f.op1, sign) && visit(f.op2, sign === 1 ? -1 : 1);
+    }
+    let base = f;
+    let exp = 1;
+    if (isFunction(f, 'Power')) {
+      const n = asExactSmallInteger(f.op2);
+      if (n !== null && n !== 0 && !isNumber(f.op1)) {
+        base = f.op1;
+        exp = n;
+      }
+    }
+    if (!base.isPure || isTensorProductOperand(base)) return false;
+    const entry = powers.find((p) => p.base.isSame(base));
+    if (entry) entry.exp += sign * exp;
+    else powers.push({ base, exp: sign * exp });
+    return true;
+  };
+  return visit(term, 1) ? { numbers, powers } : null;
+}
+
+/**
+ * Take out of a sum the factor that all its terms share, other than a
+ * number: ax + ay → a·(x + y), a²b + ab² → ab·(a + b),
+ * x·sin(t) + y·sin(t) → sin(t)·(x + y). Each base of the common factor has
+ * the smallest exponent it has in the terms, and only a base with a positive
+ * exponent in every term, or a negative exponent in every term, is taken
+ * out: a/b + a²/b → (a/b)·(1 + a), but 1/a + 1/b has no common factor here
+ * (combining it is the work of `Together`). The cofactor is factored again
+ * with `factorPolynomial()`, which also takes out a numeric content:
+ * 6x²y + 9xy² → 3xy·(2x + 3y).
+ *
+ * `null` when the input is not a sum, when the terms share no factor, when
+ * the sum holds a residue class, or when a host has declared `Multiply` not
+ * commutative.
+ *
+ * The product is built with `ce.function`, not `.mul()`: `.mul()` would
+ * distribute the common factor over the cofactor again.
+ *
+ * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
+ */
+function extractCommonFactor(expr: Expression): Expression | null {
+  if (!isFunction(expr, 'Add')) return null;
+  // See `factor()`: an expression with a residue class is not factored.
+  if (holdsKindValue(expr)) return null;
+  const ce = expr.engine;
+  if (mayHaveOrderedArithmetic(ce)) {
+    const def = ce.lookupDefinition('Multiply');
+    if (def && isOperatorDef(def) && !def.operator.commutative) return null;
+  }
+
+  const terms: {
+    numbers: Expression[];
+    powers: { base: Expression; exp: number }[];
+  }[] = [];
+  for (const op of expr.ops) {
+    const term = termAsPowers(op);
+    if (term === null) return null;
+    terms.push(term);
+  }
+
+  // A base is taken out when its exponent has the same sign in every term,
+  // with the smallest exponent: a·x + a²·y → a·(x + a·y), and
+  // b/a² + b/a → (b/a²)·(1 + a). So no cofactor has a negative exponent of
+  // a base taken out.
+  const common: { base: Expression; exp: number }[] = [];
+  for (const { base, exp } of terms[0].powers) {
+    let min = exp;
+    for (const term of terms.slice(1)) {
+      const e = term.powers.find((p) => p.base.isSame(base))?.exp ?? 0;
+      if (Math.sign(e) !== Math.sign(exp)) {
+        min = 0;
+        break;
+      }
+      min = Math.min(min, e);
+    }
+    if (min !== 0) common.push({ base, exp: min });
+  }
+  if (common.length === 0) return null;
+
+  // When the numeric coefficient of every term is negative, -1 is taken out
+  // too: -a·x - a·y → -a·(x + y), not a·(-x - y). A number whose sign is not
+  // known (a complex number) is not negative here.
+  const isNegativeTerm = ({ numbers }: { numbers: Expression[] }) =>
+    numbers.filter((n) => n.isNegative === true).length % 2 === 1;
+  const negate = terms.every(isNegativeTerm);
+  if (negate) for (const term of terms) term.numbers.push(ce.NegativeOne);
+
+  const power = (base: Expression, exp: number): Expression =>
+    exp === 1 ? base : ce.function('Power', [base, ce.number(exp)]);
+  const product = (ops: Expression[]): Expression =>
+    ops.length === 0
+      ? ce.One
+      : ops.length === 1
+        ? ops[0]
+        : ce.function('Multiply', ops);
+
+  const cofactors = terms.map(({ numbers, powers }) =>
+    product([
+      ...numbers,
+      ...powers.flatMap(({ base, exp }) => {
+        const shared = common.find((c) => c.base.isSame(base))?.exp ?? 0;
+        return exp === shared ? [] : [power(base, exp - shared)];
+      }),
+    ])
+  );
+
+  return mergeEqualFactors(ce, [
+    ...(negate ? [ce.NegativeOne] : []),
+    ...common.map(({ base, exp }) => power(base, exp)),
+    factorPolynomial(add(...cofactors)),
+  ]);
+}
+
+/**
+ * Is `expr` a sum, a product, a quotient, a negation or an integer power,
+ * the operators that `collectLikeTerms()` walks through?
+ */
+function isArithmeticNode(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const h = expr.operator;
+  return (
+    h === 'Add' ||
+    h === 'Multiply' ||
+    h === 'Divide' ||
+    h === 'Negate' ||
+    h === 'Power' ||
+    h === 'Sqrt' ||
+    h === 'Root'
+  );
+}
+
+/**
+ * Collect the like terms of each sum in `expr`, as the evaluation of `Add`
+ * does: a + a → 2a, sin(t) + sin(t) → 2·sin(t), 1/a + 1/a → 2/a. The
+ * canonical form of `Add` does not collect like terms, so the lazy
+ * transformers (`Factor`, `Together`, `Cancel`) use this function to give
+ * the same sums as `evaluate()`.
+ *
+ * Only the sums reached through the arithmetic operators (`Add`, `Multiply`,
+ * `Divide`, `Negate`, `Power`, `Sqrt`, `Root`) are collected; the argument
+ * of another function (`sin(t + t)`) is kept as it is. The operands are not
+ * evaluated, and a symbol is not replaced by its value. A product of sums
+ * is kept as a product: (a + b)(c + d) + (a + b)(c + d) → 2(a + b)(c + d).
+ * As with `evaluate()`, a numeric multiple of a sum that has a like term in
+ * the sum is expanded to collect it: a + b + 2(a + b) → 3a + 3b.
+ *
+ * A sum with an operand that is a collection (a list, a matrix) is kept as
+ * it is: adding it would broadcast the other terms over its elements. An
+ * expression with a residue class is kept as it is too (see `factor()`).
+ *
+ * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
+ */
+export function collectLikeTerms(expr: Expression): Expression {
+  if (!isArithmeticNode(expr) || !isFunction(expr)) return expr;
+  if (holdsKindValue(expr)) return expr;
+  const ops = expr.ops.map(collectLikeTerms);
+  if (
+    expr.operator === 'Add' &&
+    !ops.some((op) => isTensorValue(op) || hasCollectionShape(op))
+  ) {
+    // A term that is not pure is kept apart: `Random() + Random()` is the
+    // sum of two values, not `2·Random()`. `add()` merges two equal terms
+    // without checking that they are pure.
+    if (ops.every((op) => op.isPure)) return add(...ops);
+    const pure = ops.filter((op) => op.isPure);
+    if (pure.length < 2) return expr.engine.function('Add', ops);
+    return expr.engine.function('Add', [
+      add(...pure),
+      ...ops.filter((op) => !op.isPure),
+    ]);
+  }
+  if (ops.every((op, i) => op === expr.ops[i])) return expr;
+  return expr.engine.function(expr.operator, ops);
+}
+
+/**
+ * The subexpressions of `expr` that `factorExpression()` treats as
+ * variables: each maximal subexpression that is not a number, a symbol, a
+ * sum, a product, a quotient, a negation or an integer power, such as
+ * `sin(t)`, `e^x` or `√x`. Each one is listed once (by `isSame()`).
+ *
+ * A subexpression is listed only when it is pure (two occurrences of
+ * `Random()` are two values) and its type is not a collection (a matrix
+ * does not commute in a product).
+ */
+function polynomialAtoms(expr: Expression, atoms: AtomTable): void {
+  if (isNumber(expr) || isSymbol(expr) || !isFunction(expr)) return;
+  const h = expr.operator;
+  if (h === 'Add' || h === 'Multiply' || h === 'Divide' || h === 'Negate') {
+    for (const op of expr.ops) polynomialAtoms(op, atoms);
+    return;
+  }
+  if (h === 'Power' && asExactSmallInteger(expr.op2) !== null) {
+    polynomialAtoms(expr.op1, atoms);
+    return;
+  }
+  if (!expr.isPure || !expr.isValid || expr.type.facts.collection !== false)
+    return;
+  if (atomIndex(atoms, expr) < 0) {
+    const bucket = atoms.byHash.get(expr.hash);
+    if (bucket) bucket.push(atoms.list.length);
+    else atoms.byHash.set(expr.hash, [atoms.list.length]);
+    atoms.list.push(expr);
+  }
+}
+
+/**
+ * The subexpressions found by `polynomialAtoms()`, in the order found. The
+ * indexes of the subexpressions are also kept by their `hash`, so that the
+ * search for a subexpression compares it with `isSame()` only to the ones
+ * of the same hash: a search through the whole list at each node of a sum
+ * of n terms takes a time in n².
+ */
+type AtomTable = { list: Expression[]; byHash: Map<number, number[]> };
+
+/** The index of `expr` in `atoms`, or -1 when it is not there. */
+function atomIndex(atoms: AtomTable, expr: Expression): number {
+  const bucket = atoms.byHash.get(expr.hash);
+  return bucket?.find((k) => atoms.list[k].isSame(expr)) ?? -1;
+}
+
+/**
+ * Factor `expr` with no variable given: the `Factor` operator with one
+ * argument.
+ *
+ * 1. The like terms of each sum are collected (`collectLikeTerms()`), so
+ *    `sin(t) + sin(t)` gives `2·sin(t)`, as `evaluate()` does.
+ * 2. The sum is factored by `factorPolynomial()`.
+ * 3. When step 2 finds nothing, each non-polynomial subexpression
+ *    (`polynomialAtoms()`: `sin(t)`, `e^x`) is replaced by a new symbol,
+ *    the result is factored again, and the subexpressions are put back:
+ *    x·sin(t) + y·sin(t) → (x + y)·sin(t), and
+ *    sin(t)² + 5·sin(t) + 6 → (sin(t) + 2)(sin(t) + 3). Step 3 is not done
+ *    first, so that a result step 2 already gives does not change
+ *    (e^(2x) − 1 is not a polynomial in the symbol that stands for e^(2x)).
+ *    When step 2 gives a product, step 3 is done on each factor of the
+ *    product that is a sum, and equal factors are merged:
+ *    2·sin(t)² + 10·sin(t) + 12 → 2·(sin(t) + 2)(sin(t) + 3). Step 3 does
+ *    not call this function again, so the recursion ends.
+ *
+ * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
+ */
+export function factorExpression(expr: Expression): Expression {
+  const collected = collectLikeTerms(expr);
+  const factored = factorPolynomial(collected);
+  // See `factor()`: an expression with a residue class is not factored, and
+  // a class must not become a symbol that the factoring can cancel.
+  if (holdsKindValue(collected)) return factored;
+  if (factored.isSame(collected)) return factorWithAtoms(collected) ?? factored;
+  if (!isFunction(factored, 'Multiply')) return factored;
+  let changed = false;
+  const factors = factored.ops.map((f) => {
+    if (!isFunction(f, 'Add')) return f;
+    const result = factorWithAtoms(f);
+    if (result === null) return f;
+    changed = true;
+    return result;
+  });
+  return changed ? mergeEqualFactors(expr.engine, factors) : factored;
+}
+
+/**
+ * Step 3 of `factorExpression()`: replace each non-polynomial subexpression
+ * of `expr` (`polynomialAtoms()`) by a new symbol, factor the result with
+ * `factorPolynomial()`, and put the subexpressions back. `null` when `expr`
+ * has no such subexpression or the factoring finds nothing.
+ *
+ * The new symbols are declared in a scope that is discarded afterwards, so
+ * that a value or a type of the same name in the current scope does not
+ * apply to them, and each name is one that `expr` does not use.
+ *
+ * IMPORTANT: Does not call .simplify() to avoid infinite recursion.
+ */
+function factorWithAtoms(expr: Expression): Expression | null {
+  const atoms: AtomTable = { list: [], byHash: new Map() };
+  polynomialAtoms(expr, atoms);
+  if (atoms.list.length === 0) return null;
+
+  const ce = expr.engine;
+  const names: string[] = [];
+  for (let i = 1; names.length < atoms.list.length; i++) {
+    const name = `FactorAtom${i}`;
+    if (!expr.has(name)) names.push(name);
+  }
+
+  ce.pushScope();
+  try {
+    for (const name of names) ce.declare(name, 'unknown');
+    const symbols = names.map((name) => ce.symbol(name));
+
+    const substitute = (node: Expression): Expression => {
+      const k = atomIndex(atoms, node);
+      if (k >= 0) return symbols[k];
+      if (!isFunction(node)) return node;
+      const ops = node.ops.map(substitute);
+      if (ops.every((op, i) => op === node.ops[i])) return node;
+      return ce.function(node.operator, ops);
+    };
+    const restore = (node: Expression): Expression => {
+      if (isSymbol(node)) {
+        const k = names.indexOf(node.symbol);
+        return k >= 0 ? atoms.list[k] : node;
+      }
+      if (!isFunction(node)) return node;
+      const ops = node.ops.map(restore);
+      if (ops.every((op, i) => op === node.ops[i])) return node;
+      return ce.function(node.operator, ops);
+    };
+
+    const polynomial = substitute(expr);
+    const result = factorPolynomial(polynomial);
+    if (result.isSame(polynomial)) return null;
+    const restored = restore(result);
+    // Every new symbol must be gone: a symbol left in the result would
+    // belong to the discarded scope.
+    if (names.some((name) => restored.has(name))) return null;
+    return restored;
+  } finally {
+    ce.popScope();
+  }
 }
 
 /**

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-583.
+Next free reference: CE-584.
 
 **Entry format.**
 
@@ -1268,39 +1268,6 @@ the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
 ## Symbolic computation
-
-### CE-577. `Factor`, `Together` and `Cancel` return a sum with like terms uncombined when they find nothing to rewrite
-
-**Status:** in progress; defect. User decision 2026-10-27: option (a). Asked
-by Tycho (session tycho-3b), 2026-10-27.
-
-With `g(t) := \sin(t)`, `Factor(g(t)+g(t))` evaluates to `\sin(t)+\sin(t)`,
-where `g(t)+g(t)` evaluates to `2\sin(t)`. Measured on HEAD 2026-10-27:
-
-| Input                     | `Factor`              | `Together`     | `Cancel`              |
-| ------------------------- | --------------------- | -------------- | --------------------- |
-| `a+a`                     | `2a`                  | `a+a`          | `a+a`                 |
-| `\sin t+\sin t`           | `\sin t+\sin t`       | same           | same                  |
-| `\frac1a+\frac1a`         | `\frac1a+\frac1a`     | `\frac2a`      | `\frac1a+\frac1a`     |
-| `ax+ay`                   | `ax+ay`               | `ax+ay`        | `ax+ay`               |
-| `x\sin t+y\sin t`         | `x\sin t+y\sin t`     |                |                       |
-
-`Factor(\sin(t)^2-1)` gives `(\sin t-1)(\sin t+1)` and
-`Factor(2\sin t+2\cos t)` gives `2(\sin t+\cos t)`, so some strategies already
-treat `\sin t` as an atom. Cause for `Factor`: with no variable given,
-`factorPolynomialWith()` (`boxed-expression/factor.ts`) infers the single
-unknown `t`, the sum is not a polynomial in `t`, every strategy declines, and
-the fallback `factor()` does not collect like terms. `Together` and `Cancel`
-return their canonical operand, and the canonical form of `Add` does not
-collect like terms (only `evaluate()` does).
-
-Decision needed: (a) each of the three collects like terms in its result, as
-`evaluate()` of `Add` does, and `Factor` treats each non-polynomial subterm
-(`\sin t`) as a variable, which also gives `x\sin t+y\sin t → (x+y)\sin t`
-and `ax+ay → a(x+y)` (a common non-numeric factor of a multivariate sum); or
-(b) keep the operand as is when there is nothing to rewrite (today), and
-document it. Tycho works around it: it does not offer a rewrite whose result,
-evaluated once more, equals what the cell shows.
 
 ### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
@@ -2956,6 +2923,20 @@ array (`Float64Array`) is refused at run time, with a message. Expected: the
 runner's value type also admits a `ReadonlyArray` of numbers, complex values
 and nested arrays.
 
+### CE-583. WGSL: a list held by a `Block` local is copied again at each read
+
+**Status:** open; defect (memory and speed). Found 2026-10-27 while fixing
+CE-574. The fix needs a change in `base-compiler.ts`.
+
+On WGSL, a read with a proven index of a list held by a `Block` local emits a
+second function-scope copy before the statement (`var U = …; var _tv1 = U;
+… _tv1[k - 1]`), once per read. The local is already a `var`, which WGSL
+can index with a run-time index, so the copy doubles the memory and the work
+for nothing. The compiler cannot tell a block-local `var` from a function
+parameter of the same name, and a parameter (a value) must be copied before a
+dynamic index. Expected: the block-local binding is marked as a variable, and
+its reads index it directly. A written input already does this (CE-574).
+
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 
 **Status:** open; capability, small.
@@ -3535,68 +3516,6 @@ document's `D = 10000` (the iteration limit is reached, at 0.171.0 too); with
 `D = 4` it applies `N` to each point. Next step: run the Tycho row against a
 CE build that has that fix.
 
-### CE-567. Infer `list<E> | tuple<…>` from index reads instead of a marked tuple
-
-**Status:** open; decision. Measured 2026-10-27; recommendation: close
-without the change (see "Prototype result" below).
-
-Index reads `p[1]`, `p[2]` of an unannotated parameter infer
-`tuple<…>` (`parameterIndexReadType()`, `library/collections.ts`), with a
-mark that says the reads do not prove a point (`isIndexReadTuple()`). Only
-the code that checks the mark knows it. The compiler used such a tuple as a
-proven point (in `r(p) := … l(f(p))` with `f(q) := Mod(q, 1) - 0.5`, the
-substituted body was an `incompatible-type` error, while the interpreter maps
-over a list argument); since 2026-10-27 the compiler reads the mark and
-compiles the callee for the argument's type, which this proposal would make
-unnecessary.
-Proposal: infer `list<E> | tuple<T1, T2, …>` (`E` the union of the read
-requirements), and narrow with evidence: a declared tuple parameter of a
-callee narrows to the tuple, an argument type at a call site picks its arm.
-Checked 2026-10-27 on a declared `p: list<number> | tuple<number, number>`:
-`Mod(p, 1) - 0.5` is valid (`list<number> | number`), `p[1] + p[2]` is
-`number`, and per-index types stay (`!q[1]` is `boolean | missing` for
-`q: list<boolean | number> | tuple<boolean, number>`). Costs: an error for a
-genuine point moves from canonicalization to evaluation; the list arm makes a
-read past the end possibly `missing`; every printed inferred signature changes
-(snapshots); the sites that read the mark (`oneElementTypeOf()` in `box.ts`,
-`contractTupleOfNarrow()`, `parameterIndexReadType()`) are rewritten. Next
-step: a prototype in a worktree. The deciding measures (user, 2026-10-27) are
-correctness (compiled values equal to the interpreter's, and no error case
-that becomes a silent value) and codegen coverage (census declines that go
-away on each target, from Tycho's `scripts/audit-ce-codegen.mts --all`). The
-number of tests and snapshots to update is a cost to report, not a reason to
-decide against.
-
-Prototype result (2026-10-27, patch kept at the session scratchpad
-`ce567/ce567.patch`, 7 files):
-
-- Correctness holds. Compiled values equal the interpreter's on javascript,
-  interval-js and glsl for `r([x, y])`, `r((x, y))` (an error everywhere),
-  `p ↦ !p[1] if p[2] % 2 == 0 else p[1]` with `(True, 4)`, `Abs(p)` (element
-  by element for a list, the norm for a point) and a declared
-  `h(p: tuple<real, real>)` reached with a list (an error everywhere). One
-  silent value appeared during the work (javascript broadcast `f` over a point
-  in `r((x, y))`) and was fixed in the prototype.
-- Codegen coverage gain is zero. All 17,782 javascript, interval-js and glsl
-  inputs of the 0.171.0 census, compiled in CE alone, give the same result and
-  the same code at HEAD and in the prototype; `ra1p9naofs` gives the same
-  result in both (its javascript gain comes from the compiler change already
-  at HEAD, which compiles the callee for the argument's type).
-- Cost: 26 tests and 1 test file (0 snapshots). 18 change only the printed
-  signature (`(a: tuple<number, number>) -> number` becomes
-  `(a: list<number> | tuple<number, number>) -> number`); 3 widen a result
-  (`… -> boolean` becomes `… -> boolean | missing | nan | real`, from the list
-  arm's possibly absent read); 3 make a call result less precise
-  (`d([[1, 2], [3, 4]])` is `list<number>` instead of `vector<integer^2>`); 2
-  make the call typing and the operand derivation disagree; 1 javascript
-  compile declines. Also, the union is recognized by its shape, so a DECLARED
-  `list<number> | tuple<number, number>` would be read as inferred; a real
-  version must record the origin.
-
-Recommendation: keep the marked index-read tuple and close this entry. The
-change gains no coverage and no correctness over HEAD and loses type
-precision.
-
 ### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
 
 **Status:** open; performance.
@@ -3608,27 +3527,15 @@ targets call a NaN-safe helper (a bit test and a selection per call, about
 and 1-D axes `real` since Tycho `a2cd808f0` (all-states records with a helper
 call 1,223 → 980). What remains:
 
-- **CE-565.1** Inside a per-call copy of a user function, a parameter typed
-  `real` from its argument keeps the helper (`_gpu_sin(t)`), while a
-  `list<real^2>` parameter of the same copy gets the built-in: the scalar
-  parameter is not read as declared there.
-- **CE-565.4** The body of a SHARED user function (`_fn_F`, emitted once in
-  the preamble by `gpu-shared-calls.ts`) keeps the helper for every parameter,
-  even when the signature is declared: with `x`, `y` declared `real`,
-  `F` declared `(real, real) -> real` (with or without parameter names) and
-  `F := (a, b) ↦ sin(a) + cos(b) + min(a, b)`, compiling
-  `F(x, y) + F(2x, y) + F(y, x)` to GLSL gives `_gpu_sin(a) + _gpu_cos(b) +
-  _gpu_min(a, b)` (measured on HEAD 2026-10-27). A parameter reads as an
-  inferred type, which `gpuProvablyFinite` (`gpu-target.ts`) refuses. Since
-  the shader holds every call of `_fn_F`, the sound rule is: a parameter is
-  finite for certain when the argument at that position is finite for certain
-  at every call site of the compiled expression. Tycho measured the cost on
-  WebGL, 0.169.2 to 0.171.0, full-screen 2048² draws: `voronoi-diagram`
-  0.51 → 0.58 ms (+14 %), `kelvin-wake` +9 to +10 %, `underwater-caustics`
-  +2 to +3 % (Tycho `docs/COMPUTE_ENGINE_LOG.md`, 0.171.0 adoption record).
-  `voronoi`'s `_fn_F`, `_fn_B` and `_fn_H` call `_gpu_min` 15 times and
-  `_gpu_sin`/`_gpu_cos` 4 times each; every call site passes `x`, `y`
-  (declared `real`) and literals. Nothing Tycho can declare removes it.
+- **CE-565.5** On the `compileFunction` and shader routes
+  (`compileDeclaredFunctionBody`, `compileShaderBody` in `gpu-target.ts`), the
+  body of a user function keeps the helper for every parameter: these routes
+  open no common-subexpression session, so the call-site proof that the
+  expression route (`compileOrThrow`, `gpuRecordCallSiteFacts`) uses does not
+  run there. A declared parameter type is not enough on its own, because an
+  argument such as `exp(x)` can overflow to `+∞` in f32 before the call.
+  Making these routes run the call-site proof needs that session, which
+  changes how they emit code.
 - **CE-565.2** A scalar beside a vector in `ElementMax`, `ElementMin` and
   `Clamp` keeps the helper (`Clamp(v, 0, 1)` emits `_gpu_clamp3(v, vec3(0.0),
   vec3(1.0))`), although the widened `vec3(0.0)` is finite.

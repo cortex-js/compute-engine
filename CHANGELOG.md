@@ -70,6 +70,16 @@
 
 ### Performance
 
+- **On the shader targets, the body of a user function uses the built-in
+  `sin`, `cos`, `min`, `max`, `clamp` and `sign` for a parameter that every
+  call passes a finite value** (ROADMAP CE-565.4, CE-565.1). With `x`, `y`
+  declared `real` and `F(a, b) := \sin(a) + \cos(b) + \min(a, b)`, compiling
+  `F(x, y) + F(2x, y)` to GLSL gives `float _fn_F(float a, float b) { return
+  sin(a) + cos(b) + min(a, b); }`; it called the NaN-safe helpers
+  (`_gpu_sin(a)`, …), which cost 2 % to 14 % of a frame in Tycho's shaders on
+  WebGL. The proof reads the arguments at the call sites, not a declared
+  parameter type: `F(\exp(x), y)` keeps the helper for `a`, because `\exp(x)`
+  can overflow to `+\infty` in f32 before the call.
 - **On the shader targets, a call that several user functions repeat is
   computed once in more cases.** A large expansion was kept by reference: in
   Tycho's `voronoi-diagram` document, `B`, `H`, `u`, `v` and `Z` each called

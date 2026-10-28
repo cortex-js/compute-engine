@@ -72,8 +72,11 @@ describe.each(['glsl', 'wgsl'] as const)('on %s', (to) => {
   });
 
   it('a parameter whose type is inferred keeps the guard', () => {
-    // `p(0/0)` is NaN in the interpreter.
-    expect(code('p(x)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
+    // `p(0/0)` is NaN in the interpreter, and so is `p(u)` for `u: number`.
+    expect(code('p(u)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
+    // When every call passes a finite value (`x` is declared `real`), the
+    // parameter is finite for certain (CE-565.4).
+    expect(code('p(x)', to).preamble).toContain(' cos(1.9 * k + x)');
   });
 
   it('a uniform that vars maps to its own name keeps the built-in', () => {

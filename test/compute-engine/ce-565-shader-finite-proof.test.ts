@@ -201,8 +201,11 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
     });
 
     it('a parameter keeps the guard, also when a global of its name has a value', () => {
-      // The parameter `c` of `p` is not the global `c := 2.5`.
-      expect(shader(ce, 'p(x)', to).preamble).toMatch(/_gpu_cos\(/);
+      // The parameter `c` of `p` is not the global `c := 2.5`. The argument
+      // `u` has no declared type, so the parameter is not finite for certain
+      // (`p(x)`, with `x` declared `real`, proves it: CE-565.4).
+      expect(shader(ce, 'p(u)', to).preamble).toMatch(/_gpu_cos\(/);
+      expect(shader(ce, 'p(x)', to).preamble).toMatch(/ cos\(1\.9 \* c/);
     });
   });
 
