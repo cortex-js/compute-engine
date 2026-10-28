@@ -16420,7 +16420,36 @@ export class BaseCompiler {
               `tell the two apart.`
           );
         // The conditions compile first, as in the scalar case below.
-        const conds = BaseCompiler.compile(args[1], target);
+        //
+        // A literal list of scalar conditions compiles each cell to `true`
+        // exactly when that condition is decided true (`compileGuardTest`),
+        // as the scalar case below selects. Its plain code answered `true`
+        // for an input the caller did not supply (`undefined !== 0`), so
+        // `When(5, [x ≠ 0, ¬(x > 0)])` gave `[5, 5]` where the interpreter
+        // has no value in either cell (ROADMAP CE-569).
+        const conds =
+          isFunction(args[1], 'List') &&
+          args[1].ops.every(
+            (cell) =>
+              cell.type.matches('boolean') &&
+              !BaseCompiler.mayBeCollectionCondition(cell.type.type)
+          )
+            ? `[${args[1].ops
+                .map((cell) => {
+                  // An ordering relation over symbols and number literals
+                  // keeps its plain code: it is `false` when undecided.
+                  const d = BaseCompiler.conditionDecidability(
+                    cell,
+                    true,
+                    target
+                  );
+                  return d === null ||
+                    BaseCompiler.isFalsyWhenUndecided(d, target)
+                    ? BaseCompiler.compile(cell, target)
+                    : BaseCompiler.compileGuardTest(cell, target);
+                })
+                .join(', ')}]`
+            : BaseCompiler.compile(args[1], target);
         const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
         // The absence at each position is decided from what one position
         // holds — a list element, or the whole value — not from the node's
@@ -16485,11 +16514,122 @@ export class BaseCompiler {
       // condition compiles first, the order of the CSE harvest walk
       // (`operandEmissionOrder`, `cse.ts`), so the value arm can read a
       // temporary that the condition binds.
-      const cond = BaseCompiler.guardCondition(args[1], target);
+      //
+      // The value is selected only when the condition is decided TRUE (see
+      // "Branch conditions that cannot be decided"). A condition read by its
+      // value (a boolean input `c`, a call) must be exactly `true`: before,
+      // `When(x, c)` with `c = 1` selected `x`. A condition that is false
+      // or undecided gives the same masked value, so the plain conditional
+      // expression is enough when the plain code of the condition is falsy
+      // whenever the condition is undecided (`isFalsyWhenUndecided`): an
+      // ordering relation between symbols and number literals, or an
+      // `And`/`Or` of them. Any other condition is tested for being decided
+      // first. Before, `When(5, x ≠ 0)` answered `5` for an `x` the caller
+      // did not supply (`undefined !== 0` is `true`), where the interpreter
+      // has no value (ROADMAP CE-569).
+      //
+      // A condition read by its value that is not provably boolean-valued
+      // (an undeclared `b`, `x/y`) takes the same strict test: a value that
+      // is not a boolean selects nothing, as in `If`, and the interpreter
+      // holds such a `When` unevaluated. Before, the run-time guard of the
+      // target (`_SYS.cond`) raised for it.
+      const decidability = BaseCompiler.conditionDecidability(
+        args[1],
+        target.bindExpr !== undefined,
+        target
+      );
+      if (
+        decidability === null ||
+        BaseCompiler.isFalsyWhenUndecided(decidability, target)
+      ) {
+        const cond = BaseCompiler.guardCondition(args[1], target);
+        const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
+        return `((${cond}) ? (${val}) : ${nan})`;
+      }
+      const compiledCond = BaseCompiler.compileExactCondition(
+        args[1],
+        decidability,
+        target
+      );
       const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
-      return `((${cond}) ? (${val}) : ${nan})`;
+      // A condition read by its value: the value is selected only when the
+      // condition is exactly `true` (`false` under a negation). The false
+      // and the undecided answers are the same masked value, so one strict
+      // comparison is enough, and the condition is evaluated once.
+      if (compiledCond.conjuncts === 'value')
+        return `((${compiledCond.code}) === ${
+          compiledCond.negate ? 'false' : 'true'
+        } ? (${val}) : ${nan})`;
+      return BaseCompiler.exactSelect(
+        compiledCond,
+        `(${val})`,
+        nan,
+        nan,
+        target
+      );
     }
     return undefined;
+  }
+
+  /**
+   * Is the plain JavaScript code of the branch condition `node` falsy
+   * whenever the condition is undecided?
+   *
+   * An ordering relation (`<`, `≤`, `>`, `≥`) whose operands are number
+   * literals and NUMERIC inputs that compile to a bare read of the vars
+   * object (`_.x`) is `false` when an operand is `undefined` (an input the
+   * caller did not supply): `undefined < 1` is `false`. Other operands do
+   * not qualify:
+   * - an operand computed from an input: arithmetic can turn `undefined`
+   *   into a number (`_SYS.pow(undefined, 0)` and
+   *   `_SYS.heaviside(undefined)` are `1`). An ASSIGNED symbol, and a
+   *   symbol that the `vars` option maps to code, compile to such a
+   *   computation, so the compiled code of each symbol is checked;
+   * - a string input: the comparison reads `_SYS.ct(_.s)`, and an
+   *   unsupplied `s` becomes the string `'undefined'`, which compares like
+   *   any other string;
+   * - a boolean input, or an input of unknown type, which can be a string.
+   *
+   * A NaN operand gives the IEEE value,
+   * which is the decided answer. An `And` or an `Or` of such relations,
+   * compiled to `&&` and `||`, is then falsy when its Kleene value is
+   * undecided: an undecided operand reads as `false`, which only a `true`
+   * operand of an `Or` overrides, and the Kleene `Or` is `true` then too.
+   *
+   * Not such a condition: a negation (`!undefined` is `true`), `Equal` and
+   * `NotEqual` (`undefined !== 0` is `true`, `undefined === undefined` is
+   * `true`), and a condition read by its VALUE (a boolean input, a call): a
+   * caller can supply a value that is not a boolean, such as `1`, which is
+   * truthy, where the interpreter has no value.
+   */
+  private static isFalsyWhenUndecided(
+    node: ConditionNode,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (node.negate) return false;
+    const t = node.test;
+    if (t.kind === 'operands')
+      return (
+        isFunction(t.expr) &&
+        ['Less', 'LessEqual', 'Greater', 'GreaterEqual'].includes(
+          t.expr.operator
+        ) &&
+        t.expr.ops.every(
+          (op) =>
+            isNumber(op) ||
+            (isSymbol(op) &&
+              op.type.matches('number') &&
+              BaseCompiler.isVarsObjectRead(
+                BaseCompiler.compile(op, target),
+                target
+              ))
+        )
+      );
+    if (t.kind === 'connective')
+      return t.operands.every((n) =>
+        BaseCompiler.isFalsyWhenUndecided(n, target)
+      );
+    return false;
   }
 
   /**
@@ -29199,9 +29339,16 @@ export class BaseCompiler {
    * cost is not measurable, so there is nothing to gain by exempting the types
    * that exclude NaN.
    *
-   * An operand that does not hold a number — a string, a list — is never the
-   * NaN value, and neither is a complex one: the JavaScript target represents
-   * it as a `{ re, im }` object. Neither needs a test.
+   * An operand that does not hold a number — a boolean, a string — is never
+   * the NaN value, but a SYMBOL of that type is an input the caller can leave
+   * out, and `undefined === true` is an ordinary `false`. So such a symbol
+   * qualifies too, and gets only the absence test (`operandDecidedConjuncts`
+   * emits `!== undefined` for a read of the vars object, and no NaN test for
+   * it). Without it, `If(c = True, 5, -1)` took the else arm for an
+   * unsupplied `c`, where the interpreter has no value (ROADMAP CE-569). Any
+   * other operand that does not hold a number needs no test, and neither does
+   * a complex one: the JavaScript target represents it as a `{ re, im }`
+   * object.
    *
    * The one numeric exemption is a name the emitted code itself binds to the
    * successive values of a range with a finite literal start and step
@@ -29213,7 +29360,8 @@ export class BaseCompiler {
     target?: CompileTarget<Expression>
   ): boolean {
     const t = expr.type;
-    if (!t || !t.couldMatch('number')) return false;
+    if (!t || !t.couldMatch('number'))
+      return isSymbol(expr) && !BaseCompiler.isComplexValued(expr);
     if (isSymbol(expr) && isDecidedLoopIndex(expr.symbol, target?.boundVars))
       return false;
     return !BaseCompiler.isComplexValued(expr);

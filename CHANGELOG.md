@@ -174,6 +174,12 @@
 
 ### Performance
 
+- **On `glsl` and `wgsl`, `Clamp`, `ElementMax` and `ElementMin` of a vector
+  and a number use the built-in `min` and `max` when every operand is finite
+  for certain.** `Clamp(v, 0, 1)` with `v` a vector of declared `real` cells
+  compiled to the NaN-safe helper `_gpu_clamp3(v, vec3(0.0), vec3(1.0))`; it
+  now compiles to `min(max(v, vec3(0.0)), vec3(1.0))`. The helper stays when a
+  cell or the number can be NaN or infinite.
 - **On the shader targets, the body of a user function uses the built-in `sin`,
   `cos`, `min`, `max`, `clamp` and `sign` for a parameter that every call passes
   a finite value** (ROADMAP CE-565.4, CE-565.1). With `x`, `y` declared `real`
@@ -213,6 +219,20 @@
 
 ### Resolved Issues
 
+- **A compiled `When(value, condition)` gives no value when the condition is
+  not `True`, as the interpreter does.** On `javascript`, an input that the
+  caller did not supply made some conditions true: `When(5, x ≠ 0)` with
+  `run({})` gave `5`, and so did `When(5, ¬(x > 0))`,
+  `When(5, Heaviside(x) > 0)` and each cell of `When(5, [x ≠ 0, ¬(x > 0)])`.
+  A condition that is not a boolean selected the value: `When(x, c)` with
+  `c = 1` gave `x` on `javascript` and on `python`. A condition of unknown
+  type threw an error for an undecided input. Each of these now gives the
+  absence marker (`NaN`), as `If` already did.
+- **On `javascript`, an equality over a boolean compiles correctly.**
+  `If(c = True, 5, -1)` gave `-1` for `c = true`, because the compiled test
+  checked that `c` was a number. An equality or a comparison over a boolean or
+  string input that the caller did not supply now gives no value, as the
+  interpreter does: `If(c = True, 5, -1)` with `run({})` gave `-1`.
 - **After `ce.restore(cp)`, a symbol first declared after `cp` no longer reads
   a later value with its old type.** An expression built before the restore
   that names such a symbol (for example `w + 1` with `w` first used after the

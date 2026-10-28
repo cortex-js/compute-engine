@@ -22,7 +22,7 @@ import {
   compileDiagnosticOf,
   compileSubject,
 } from './diagnostics.js';
-import type { ConditionDialect } from './base-compiler.js';
+import type { ConditionDialect, ConditionNode } from './base-compiler.js';
 import {
   BaseCompiler,
   couldBeCollectionParticipant,
@@ -4396,6 +4396,19 @@ function pythonAbsent(
 }
 
 /**
+ * Does the branch condition `node` read a sub-expression by its VALUE (a
+ * boolean input, a call, any condition that is not a relation)? Such a
+ * value can be something other than a boolean at run time, which Python
+ * truthiness would read as a decision.
+ */
+function conditionReadsAValue(node: ConditionNode): boolean {
+  const t = node.test;
+  if (t.kind === 'value') return true;
+  if (t.kind === 'connective') return t.operands.some(conditionReadsAValue);
+  return false;
+}
+
+/**
  * Produce a Python conditional expression that takes an arm only when its
  * condition is exactly `True` or `False` when the function runs. A condition
  * that is anything else takes neither arm and the value is the absence
@@ -5919,8 +5932,45 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // The condition compiles first, the order of the CSE harvest walk
     // (`operandEmissionOrder`, `cse.ts`), so the value can read a temporary
     // that the condition binds.
-    const cond = compile(args[1]);
-    return `((${compile(args[0], 0)}) if (${cond}) else ${absent})`;
+    //
+    // A condition read by its VALUE (a boolean input, a call, or a connective
+    // with such an operand) can hold something that is not a boolean, and
+    // Python truthiness would then take the value branch from no evidence:
+    // `c = 1` selected the value. The value is selected only when the
+    // condition is a boolean `True`, as in `If` (`compilePythonBranch`); the
+    // interpreter has no value for such a condition either (ROADMAP CE-569).
+    // A relation, and a connective of relations, is a genuine boolean and
+    // keeps the plain conditional expression.
+    const decidability = BaseCompiler.conditionDecidability(
+      args[1],
+      target.bindExpr !== undefined,
+      target
+    );
+    if (decidability === null || !conditionReadsAValue(decidability)) {
+      const cond = compile(args[1]);
+      return `((${compile(args[0], 0)}) if (${cond}) else ${absent})`;
+    }
+    const connective = decidability.test.kind === 'connective';
+    const { expr, negate } = connective
+      ? { expr: args[1], negate: false }
+      : BaseCompiler.peelNegations(args[1]);
+    const code = connective
+      ? BaseCompiler.kleeneCondition(
+          decidability,
+          target,
+          PYTHON_CONDITION_DIALECT
+        )
+      : compile(expr);
+    const value = compile(args[0], 0);
+    const body = (v: string): string =>
+      `((${value}) if (${pythonIsBoolean(v)} and ${
+        negate ? `not ${v}` : v
+      }) else ${absent})`;
+    if (PYTHON_ATOM.test(code)) return body(code);
+    // A generated name, so the parameter cannot hide a variable of the
+    // value that has the same name.
+    const v = BaseCompiler.tempVar(target);
+    return `(lambda ${v}: ${body(v)})(${code})`;
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)

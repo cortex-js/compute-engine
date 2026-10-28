@@ -1594,7 +1594,7 @@ function compileJSEquality(
     mayReadUndefinedJS(args[j], direct[j], target);
   // An IMPURE operand (the Random family) must be evaluated exactly once — the
   // interpreter evaluates each operand once. Three positions splice an operand
-  // MORE than once: the LEFT operand of a guarded pair appears in the `typeof`
+  // MORE than once: the LEFT operand of a guarded pair appears in the absence
   // test and in the comparison, a COMPLEX operand is spliced twice by
   // `part()` (once for `.re`, once for `.im`), and a MIDDLE operand of a
   // chained (n-ary) form appears in the two comparisons that straddle it. So
@@ -1609,7 +1609,7 @@ function compileJSEquality(
     (i < args.length - 1 && guardedPair(i, i + 1));
   // An operand can also be spliced where it is CONDITIONALLY evaluated, which
   // costs a draw just as surely as splicing it twice. The absence guard of a
-  // pair tests the left operand with `typeof` and joins it with `&&`, so the
+  // pair tests the left operand against `undefined` and joins it with `&&`, so the
   // RIGHT operand of a guarded pair is never evaluated when the left one
   // reads `undefined`. The interpreter evaluates both operands whatever they
   // hold, so a skipped draw of the Random family would move every later draw
@@ -1644,7 +1644,11 @@ function compileJSEquality(
       return kind === 'Equal' ? equal : `(!${equal})`;
     }
     if (guardedPair(i, j)) {
-      const equal = `(typeof (${code(i)}) === 'number' && (${code(i)}) === (${code(j)}))`;
+      // The test is for absence, not for a number: a boolean or a string
+      // operand compares by `===` too (`c = True` with `c = true` is
+      // `true`). A `typeof … === 'number'` test answered `false` for every
+      // operand that is not a number (ROADMAP CE-569).
+      const equal = `((${code(i)}) !== undefined && (${code(i)}) === (${code(j)}))`;
       return kind === 'Equal' ? equal : `(!${equal})`;
     }
     return `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`;

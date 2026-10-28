@@ -162,9 +162,11 @@ describe('CE-562 — a top-level When', () => {
   it('javascript: the emission', () => {
     const ce = engineWithF();
     const r = compile(ce.box(shared as never), { to: 'javascript' });
+    // The condition compares a value computed from the input `x`, so it
+    // is tested for being decided first, as in `If` (ROADMAP CE-569).
     expect(r.code).toBe(
       '(() => { const _cse1 = _fn_f(_.x); ' +
-        'return ((0 < Math.cos(_cse1)) ? (_cse1) : NaN); })()'
+        'return ((_.x !== undefined) ? ((0 < Math.cos(_cse1)) ? (_cse1) : NaN) : NaN); })()'
     );
   });
 

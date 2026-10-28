@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-591.
+Next free reference: CE-592.
 
 **Entry format.**
 
@@ -740,7 +740,9 @@ and `Chunk` have it (pins in
 
 ### CE-590. After a checkpoint restore, a symbol declared in a scope pushed and popped during the window reads a later value with its old type
 
-**Status:** open; defect. Found 2026-10-28 by the review of the CE-586 fix.
+**Status:** open; defect, known limit. Found 2026-10-28 by the review of the
+CE-586 fix. User decision 2026-10-28: leave open and accept the limit for now;
+fix it when a host needs it.
 
 A checkpoint restore makes a symbol inert (no value, counted as unknown) when
 the definition it is bound to was created during the rewound window in a scope
@@ -2879,7 +2881,11 @@ Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
 vertex and fragment targets (a declared output, a value type that fits) and
 refuse every compute-stage assignment. Option (b), a writable
 `'storage-buffer'` in `compileShader()` so a compute body can write
-`S.data[i]`, is asked of Tycho (session tycho-3b) before it is designed.
+`S.data[i]`, is not needed: Tycho has no GPU compute job planned (answer of
+session tycho-3b, 2026-10-28). User decision 2026-10-28: a list of complex
+numbers (`[x, 2] + i`, typed `vector<complex^2>`) has no GPU representation and
+is refused on the GLSL and WGSL targets; before, `compile()` reported success
+with `vec2(vec2(…), 1.0)`.
 
 `compileShader()` (GLSL and WGSL) writes each body statement as
 `<variable> = <code>;`, with `variable` copied as text. Nothing checks that
@@ -2907,6 +2913,20 @@ for nothing. The compiler cannot tell a block-local `var` from a function
 parameter of the same name, and a parameter (a value) must be copied before a
 dynamic index. Expected: the block-local binding is marked as a variable, and
 its reads index it directly. A written input already does this (CE-574).
+
+### CE-591. `compileFieldFunction()`: a point parameter (a tuple of 2 to 4 reals) is refused
+
+**Status:** open; being implemented (session compute-engine-0c). User decision
+2026-10-28: add it before the next release, because Tycho can use it.
+
+`WGSLTarget.compileFieldFunction()` refuses a parameter whose value is a tuple.
+Tycho stores a point with `ce.assign` as a `Tuple`, and about 13 states of its
+Desmos corpus read such a point as a whole inside a field (`distance(X, A)`,
+`(x - d.x)^2 + (y - d.y)^2 <= 16`, `D / length(D)`; answer of session tycho-3b,
+2026-10-28). Expected: a tuple of 2, 3 or 4 finite reals is one `vec2f`,
+`vec3f` or `vec4f` field of the parameter struct, with the WGSL alignment rules
+in the reported offsets, so that a change of the point is a buffer write. A
+list parameter keeps its `array<vec4f, ⌈n/4⌉>` layout.
 
 ### CE-584. Shader targets: compiling an expression with shared subexpressions is exponential
 
@@ -3541,9 +3561,6 @@ call 1,223 → 980). What remains:
   argument such as `exp(x)` can overflow to `+∞` in f32 before the call.
   Making these routes run the call-site proof needs that session, which
   changes how they emit code.
-- **CE-565.2** A scalar beside a vector in `ElementMax`, `ElementMin` and
-  `Clamp` keeps the helper (`Clamp(v, 0, 1)` emits `_gpu_clamp3(v, vec3(0.0),
-  vec3(1.0))`), although the widened `vec3(0.0)` is finite.
 - **CE-565.3** Tycho side, not CE: the document-level `x`/`y` are still typed
   `real | signed_infinity | nan`; a slider range (`k: real<0..10>`) would prove
   `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions

@@ -53,14 +53,14 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     expect(js(ce.box(['Equal', 'nqr', 3])).code).toBe('((_.nqr) === (3))');
     // Two free symbols may both be absent: the left one is type-tested.
     expect(js(ce.box(['Equal', 'nqr', 'nqs'])).code).toBe(
-      "(typeof (_.nqr) === 'number' && (_.nqr) === (_.nqs))"
+      '((_.nqr) !== undefined && (_.nqr) === (_.nqs))'
     );
   });
 
   test('NotEqual is the negation of the whole Equal test', () => {
     expect(js(ce.box(['NotEqual', 'nqr', 3])).code).toBe('((_.nqr) !== (3))');
     expect(js(ce.box(['NotEqual', 'nqr', 'nqs'])).code).toBe(
-      "(!(typeof (_.nqr) === 'number' && (_.nqr) === (_.nqs)))"
+      '(!((_.nqr) !== undefined && (_.nqr) === (_.nqs)))'
     );
   });
 
@@ -118,8 +118,8 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
     ce.declare('nqt', 'real');
     const r = js(ce.box(['NotEqual', 'nqr', 'nqs', 'nqt']));
     expect(r.code).toBe(
-      "(!(typeof (_.nqr) === 'number' && (_.nqr) === (_.nqs))) && " +
-        "(!(typeof (_.nqs) === 'number' && (_.nqs) === (_.nqt)))"
+      '(!((_.nqr) !== undefined && (_.nqr) === (_.nqs))) && ' +
+        '(!((_.nqs) !== undefined && (_.nqs) === (_.nqt)))'
     );
     expect(r.run({ nqr: NaN, nqs: 1, nqt: 2 })).toBe(true);
     expect(r.run({ nqr: 1, nqs: NaN, nqt: 2 })).toBe(true);
@@ -274,7 +274,7 @@ describe('two absent operands are not equal', () => {
     expect(ne.run!({})).toBe(true);
     expect(eq.run!({ x: 2 })).toBe(false);
     expect(eq.run!({ x: 2, y: 2 })).toBe(true);
-    expect(eq.code).toContain("typeof (_.x) === 'number'");
+    expect(eq.code).toContain('(_.x) !== undefined');
   });
 
   test('python: the exact test excludes None where both sides may be absent', () => {

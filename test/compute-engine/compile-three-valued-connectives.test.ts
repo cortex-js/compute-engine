@@ -492,18 +492,23 @@ describe('COMPILE three-valued connectives — no new code on the common path', 
   ce.declare('s', 'string');
   ce.declare('t', 'string');
 
-  it('leaves a connective every leaf of which is decided by construction alone', () => {
-    // A string comparison has no undecided value to guard against — no
-    // operand of it can be NaN or missing — so the analysis reports "decided
-    // by construction" and the plain conditional expression is emitted.
+  it('tests an unsupplied string input, as it tests a number input', () => {
+    // A string comparison has no NaN value to guard against, but a string
+    // INPUT the caller did not supply is undecided, as an unsupplied number
+    // is: the interpreter has no value there. So the connective takes the
+    // three-valued lowering, with an absence test of each input (ROADMAP
+    // CE-569; before, it was the plain conditional expression
+    // `(((_SYS.ct(_.s) < _SYS.ct(_.t)) && …) ? (1) : (-1))`, which answered
+    // -1 for unsupplied inputs).
     const and = js(ce, ['If', ['And', ['Less', 's', 't'], ['Less', 't', 's']], 1, -1]);
-    expect(and.code).toBe(
-      '(((_SYS.ct(_.s) < _SYS.ct(_.t)) && (_SYS.ct(_.t) < _SYS.ct(_.s))) ? (1) : (-1))'
-    );
+    expect(and.code).toContain('_.s !== undefined && _.t !== undefined');
+    expect(and.run!({})).toBeNaN();
+    expect(and.run!({ s: 'a', t: 'b' })).toBe(-1);
     const or = js(ce, ['If', ['Or', ['Less', 's', 't'], ['Less', 't', 's']], 1, -1]);
-    expect(or.code).toBe(
-      '(((_SYS.ct(_.s) < _SYS.ct(_.t)) || (_SYS.ct(_.t) < _SYS.ct(_.s))) ? (1) : (-1))'
-    );
+    expect(or.code).toContain('_.s !== undefined && _.t !== undefined');
+    expect(or.run!({})).toBeNaN();
+    expect(or.run!({ s: 'a', t: 'b' })).toBe(1);
+    expect(or.run!({ s: 'a', t: 'a' })).toBe(-1);
   });
 });
 
