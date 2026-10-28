@@ -18,6 +18,7 @@ import {
   RANGE_STRUCTURAL_TYPE,
   SCALAR_TYPES,
   SCALAR_TYPES_SET,
+  SIGNED_INFINITY_TYPE,
   STRING_STRUCTURAL_TYPE,
   VALUE_TYPES,
 } from './primitive.js';
@@ -4507,6 +4508,21 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   if (isSubtype(a, b)) return b;
   if (isSubtype(b, a)) return a;
 
+  // A UNION operand is joined arm by arm. The common supertype of a union
+  // and another type is usually a lossy category (`any`), so the pair used
+  // to become the union of the two sides, with no arm joined to another.
+  // That made the join depend on the order of its operands:
+  // `widen(nan, real, missing)` joined `nan` and `real` first and gave
+  // `missing | number`, while `widen(missing, nan, real)` met the union
+  // `missing | nan` and gave `missing | nan | real`. Joining each arm with
+  // the arms it has a non-lossy supertype with gives the same answer as
+  // the pairwise join, in every order.
+  if (
+    (typeof a === 'object' && a.kind === 'union') ||
+    (typeof b === 'object' && b.kind === 'union')
+  )
+    return joinArms(a, b);
+
   // The join of a tensor (a dimension list, or an unknown rank) and a plain
   // list is a plain list of the join of their elements: the rows of the
   // tensor (`listElementType`) beside the elements of the list.
@@ -4532,9 +4548,103 @@ function widen2(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
   // or 'tuple' for two tuples of different shape), surface the
   // heterogeneity as an explicit union so downstream consumers (e.g.
   // the List operator's type handler) can detect mixed-kind content.
+  // `+oo` and `-oo` join to the signed pair, not to `infinity`, which also
+  // admits the unsigned `~oo` (the first common rung of `superType`).
+  if (isSubtype(a, SIGNED_INFINITY_TYPE) && isSubtype(b, SIGNED_INFINITY_TYPE))
+    return SIGNED_INFINITY_TYPE;
   const sup = superType(a, b);
   if (LOSSY_SUPERTYPE.has(sup as string)) return unionTypes(a, b);
+  // `nan` beside another number type is kept as its own arm:
+  // `widen(real, nan)` is `nan | real`, not `number`. `number` also admits
+  // the complex numbers, which neither side holds, and a union operand
+  // already kept the arm (`widen(real | missing, nan)` was
+  // `missing | nan | real`), so the two orders of one join disagreed. The
+  // element join of a literal collection keeps the arm in the same way
+  // (`widenElementTypes`, user decision 2026-09-25). An infinity is not
+  // kept apart: a finite type joined with an infinity is `number`, the
+  // only common supertype of two of the three disjoint children of
+  // `number` (`test/compute-engine/lattice-phase0.test.ts`). The test is
+  // `isSubtype(…, 'nan')`, not `=== 'nan'`, so the literal type of a NaN
+  // element (`{ kind: 'value', value: NaN }`, the type of each operand of
+  // `[NaN, 1]`) keeps its arm too: the boxed list and the packed `ce.list()`
+  // of the same numbers then have one element type (`integer | nan`).
+  if (
+    sup === 'number' &&
+    (isSubtype(a, 'nan') || isSubtype(b, 'nan'))
+  )
+    return unionTypes(a, b);
   return sup;
+}
+
+/**
+ * The join of `a` and `b` when one of them is a union. Each arm of `b` is
+ * joined (`widen2`) with each arm of `a` whose join with it is not a union,
+ * and the result of such a join is joined again with the other arms, so
+ * the result does not depend on the order of the operands: `nan`, `real`
+ * and `missing` give `missing | nan | real` in any order. Two arms of the
+ * SAME operand are never joined with each other: the union states them, and
+ * joining them would lose what it says (`real | signed_infinity` would
+ * become `number`, and `vector<2> | list<any>` would become `list<any>`).
+ */
+const isAbsorbedArm = (t: Readonly<Type>): boolean =>
+  t === 'nothing' || t === 'unknown';
+
+function joinArms(a: Readonly<Type>, b: Readonly<Type>): Readonly<Type> {
+  const armsOf = (t: Readonly<Type>): Readonly<Type>[] =>
+    typeof t === 'object' && t.kind === 'union'
+      ? t.types.flatMap(armsOf)
+      : [t];
+  // Each arm with the operands whose arms it contains: `inA` for an arm of
+  // `a`, `inB` for an arm of `b`, and both for the result of a join.
+  type Arm = { type: Readonly<Type>; inA: boolean; inB: boolean };
+  const arms: Arm[] = armsOf(a).map((type) => ({
+    type,
+    inA: true,
+    inB: false,
+  }));
+  for (const arm of armsOf(b)) {
+    let x: Arm = { type: arm, inA: false, inB: true };
+    let i = 0;
+    while (i < arms.length) {
+      const y = arms[i];
+      // Two arms that contain an arm of the same operand are not joined,
+      // unless one is a subtype of the other: a join of `integer` (from
+      // `b`) and `real` (from `a`) is not joined again with `+oo` (from
+      // `a`), which would give `number`, but `-oo` is absorbed by a join of
+      // `+oo` and `~oo` (`infinity`). `widen2` absorbs `nothing` and
+      // `unknown` into the other side; as an arm a union states, each is
+      // kept (`integer | nothing` joined with `string` keeps `nothing`).
+      if (
+        (((x.inA && y.inA) || (x.inB && y.inB)) &&
+          !isSubtype(x.type, y.type) &&
+          !isSubtype(y.type, x.type)) ||
+        isAbsorbedArm(y.type) ||
+        isAbsorbedArm(x.type)
+      ) {
+        i += 1;
+        continue;
+      }
+      const joined = widen2(y.type, x.type);
+      if (typeof joined === 'object' && joined.kind === 'union') {
+        i += 1;
+        continue;
+      }
+      // The two arms have a join that is not a union: replace them with it,
+      // and compare it again with every arm. When the join is one of the
+      // two arms (the other is a subtype of it, as `integer` is of `real`),
+      // it keeps the operands of that arm only: the subtype adds no value,
+      // so it must not stop or allow a join with the siblings of that arm.
+      arms.splice(i, 1);
+      if (isSubtype(joined, y.type)) x = { ...y, type: joined };
+      else if (isSubtype(joined, x.type)) x = { ...x, type: joined };
+      else x = { type: joined, inA: true, inB: true };
+      i = 0;
+    }
+    arms.push(x);
+  }
+  const types = arms.map((x) => x.type);
+  if (types.length === 1) return types[0];
+  return types.reduce((u, t) => unionTypes(u, t));
 }
 
 const LOSSY_SUPERTYPE = new Set<string>([
@@ -4632,7 +4742,15 @@ function sameTypeApplication(
  * is the only back edge, since a cycle can only re-enter through a reference.
  */
 function dedupKeyReplacer(key: string, value: unknown): unknown {
-  return key === 'def' ? undefined : value;
+  if (key === 'def') return undefined;
+  // `JSON.stringify` writes `Infinity`, `-Infinity` and `NaN` as `null`, so
+  // the value types `+oo` and `-oo` had the same key and a union of the two
+  // kept `+oo` only. Write each non-finite number by name, in an object, so
+  // that its key differs from the key of any string literal type (the string
+  // `'#Infinity'` is written as a JSON string, never as an object).
+  if (typeof value === 'number' && !Number.isFinite(value))
+    return { '#num': String(value) };
+  return value;
 }
 
 /** Build a union of two types, flattening if either is already a union and
@@ -4759,9 +4877,10 @@ export function widenAll(types: ReadonlyArray<Readonly<Type>>): Readonly<Type> {
  * without NaN, and one of them is infinite or NaN (`[1, ∞]`, `[1.5, NaN]`).
  * Then the join is the union of the widened finite tier, each signed
  * infinity present, and `nan` when present (`list<real | signed_infinity>`,
- * not `list<number>`). `widen` joins `integer` and `+oo`, or `real` and
- * `nan`, to their common supertype `number`, which a host reads as possibly
- * complex (user decision 2026-09-25). An absent element (`missing`) beside
+ * not `list<number>`). Their common supertype `number` would be read by a
+ * host as possibly complex (user decision 2026-09-25). `widen` keeps a
+ * `nan` arm in the same way (`widen2`), but joins a finite tier and an
+ * infinity to `number`. An absent element (`missing`) beside
  * such elements is kept as its own arm: `[-2, NaN, Missing]` is a
  * `list<integer | missing | nan>`, the type an operator that answers `NaN`
  * for an absent cell gives (`absorbNumericAbsence`, `utils.ts`).

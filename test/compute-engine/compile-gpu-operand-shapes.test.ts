@@ -140,7 +140,7 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
     // `ElementMax` — not `Max`, which is a REDUCTION on the GPU too (it
     // destructures its collection operands; see `compileGPUExtremum`).
     expect(g(['ElementMax', V3, W3])).toBe(
-      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
+      'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['Dot', V3, W3])).toBe(
       'dot(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
@@ -171,8 +171,8 @@ describe('GPU OPERAND SHAPE GATE — valid componentwise shapes still compile', 
   });
 
   it('the unary fan-out lowerings are unaffected', () => {
-    expect(g(['Sin', V4])).toBe('_gpu_sin4(vec4(1.0, 2.0, 3.0, 4.0))');
-    expect(w(['Sin', V4])).toBe('_gpu_sin4(vec4f(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
+    expect(w(['Sin', V4])).toBe('sin(vec4f(1.0, 2.0, 3.0, 4.0))');
     expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
     expect(w(['Negate', V4])).toBe('(-(vec4f(1.0, 2.0, 3.0, 4.0)))');
   });

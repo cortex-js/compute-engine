@@ -193,6 +193,32 @@ export function lazyOperandRegions(
 
 const NO_LAZY_SITES: readonly LazyOperandSite[] = [];
 
+/**
+ * The order in which the harvest walks the operands of a generic node: the
+ * order in which every compile target EMITS them.
+ *
+ * The order is important for sharing. A temporary is bound when the first
+ * occurrence in its own region is emitted, and an occurrence in a
+ * conditional child region (a lazy arm) can read that temporary only when it
+ * is emitted after that first occurrence. The harvest credits such a read
+ * only when the arm comes after the region's first occurrence in its walk
+ * (the dominance rule in `Harvester.run`), so the walk must follow the
+ * emission order.
+ *
+ * This order is the operand order, except for `When(value, cond)`: its
+ * condition is evaluated on every path and is emitted first, and the value
+ * is the conditional arm. Walking the value first made a call that the
+ * condition and the value share (`When(T(t), cos(T(t)) > 0)`) compute twice.
+ * Each `When` handler (the base compiler, the GPU, interval and Python
+ * targets) compiles the condition before the value.
+ */
+function operandEmissionOrder(node: Expression & FunctionInterface): number[] {
+  if (node.operator === 'When' && node.nops === 2) return [1, 0];
+  const order: number[] = [];
+  for (let i = 0; i < node.nops; i++) order.push(i);
+  return order;
+}
+
 // ---------------------------------------------------------------------------
 // Output data model
 // ---------------------------------------------------------------------------
@@ -589,14 +615,34 @@ export function isCallerMapped(
  * passes would not see, and the bare vars object `_` is not a read the
  * runner recognizes as per call. `defaultSpelling` is `undefined` where no
  * spelling is safe (a compiled `Function` literal, whose runner has no vars
- * object), and every string is then opaque.
+ * object), and every string is then opaque, except a bare identifier that
+ * `isPlainRead` accepts when the target passes it (the shader targets; see
+ * the next paragraph).
+ *
+ * `isPlainRead` lets a target accept one more kind of string: a bare
+ * identifier (`u_var_s`) that the target reads as a plain variable, with no
+ * effect and no value change between two reads. The shader targets pass it:
+ * GLSL and WGSL have no getters, and a uniform cannot be written by the
+ * shader. The target must answer `false` when anything in the compiled
+ * expression can write a variable with that name (see
+ * `gpuPlainUniformRead()`, `gpu-target.ts`). The JavaScript targets do not
+ * pass it, because a bare global name there can be a getter.
  */
 export function isOpaqueVarsSource(
   source: unknown,
-  defaultSpelling: string | undefined
+  defaultSpelling: string | undefined,
+  isPlainRead?: (identifier: string) => boolean
 ): boolean {
   if (typeof source !== 'string') return false;
-  return defaultSpelling === undefined || source.trim() !== defaultSpelling;
+  const text = source.trim();
+  if (defaultSpelling !== undefined && text === defaultSpelling) return false;
+  if (
+    isPlainRead !== undefined &&
+    /^[A-Za-z_][A-Za-z0-9_]*$/.test(text) &&
+    isPlainRead(text)
+  )
+    return false;
+  return true;
 }
 
 /**
@@ -1790,7 +1836,7 @@ class Harvester {
     }
 
     const plans = this.operandPlans(node);
-    for (let i = 0; i < node.nops; i++) {
+    for (const i of operandEmissionOrder(node)) {
       const plan = plans[i];
       if (plan === undefined) {
         this.walk(node.ops[i], region, underMapped, false);

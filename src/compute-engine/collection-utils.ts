@@ -39,7 +39,10 @@ import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../common/type/primitive.js';
-import { numericStoreTiers } from './boxed-expression/literal-tier.js';
+import {
+  numberLiteralTierType,
+  numericStoreTiers,
+} from './boxed-expression/literal-tier.js';
 import {
   boxStoreElement,
   machineNumberOf,
@@ -5460,8 +5463,10 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
       const store = expr._numericStore;
       if (store !== undefined) {
         // Parity with the operand walk below: one element answers its own
-        // literal type; more widen. `widen` over the literal types of the
-        // elements equals `widen` over their tiers, so the tiers are
+        // literal type; more widen their tiers. The operand walk below also
+        // joins the tiers of several number literals (not their literal
+        // types, which keep a `nan` arm apart: `[NaN, 1]` would join to
+        // `1 | NaN`), so both routes give one element type. The tiers are
         // collected once (`numericStoreTiers`) instead of boxing a literal
         // per element.
         if (store.length === 1) return expr.engine.number(store[0]).type.type;
@@ -5476,7 +5481,17 @@ export function basicIndexedCollectionHandlers(): CollectionHandlers {
       const elementType = (op: Expression): Type =>
         isSymbol(op, 'Undefined') ? 'missing' : op.type.type;
       if (expr.nops === 1) return elementType(expr.ops[0]);
-      return widenAll(expr.ops.map(elementType));
+      // Several elements join their TIERS, as the numeric store above does:
+      // a number literal is typed by its value (`{ kind: 'value', value: 1 }`),
+      // and `widen` keeps a `nan` arm as a union, so the literal types of
+      // `[NaN, 1]` joined to `1 | NaN`, while the store of the same numbers
+      // gave `integer | nan`. `numberLiteralTierType` is the rule that
+      // `machineNumberTierType` applies to a stored element.
+      return widenAll(
+        expr.ops.map((op) =>
+          isNumber(op) ? numberLiteralTierType(op) : elementType(op)
+        )
+      );
     },
   };
 }

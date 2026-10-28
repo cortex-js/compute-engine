@@ -306,7 +306,7 @@ describe('Tycho row 425: a restricted list, a union T', () => {
   test('the index into h(x) holds a number', () => {
     const ce = whenEngine();
     expect(ce.box(['h', 'x']).type.toString()).toBe(
-      'list<list<any> | missing | vector<2>> | missing | vector<2>'
+      'list<list<any> | missing | number> | missing'
     );
     expect(
       staticTypeAndValues(ce, ce.box(['At', ['h', 'x'], 1]), 'x', [
@@ -380,7 +380,7 @@ describe('Tycho row 425: a declared broadcastable<T>', () => {
       'broadcastable<broadcastable<vector<2>>>',
       [...VECTOR, ['List', ['List', ['List', 1, 2], ['List', 3, 4]]]],
       'broadcastable<vector<2>> | missing | number',
-      'list<broadcastable<vector<2>> | number | vector<2>>',
+      'list<broadcastable<vector<2>> | number>',
     ],
     [
       // An `unknown` element of the `T` arm does not absorb the list arm,

@@ -172,8 +172,10 @@ describe('GPU FIXED-LENGTH LIST — element type gates the vecN reading', () => 
     'integer',
   ])('list<%s^3> keeps its vecN reading', (element) => {
     const ce = engineWith({ u: `list<${element}^3>` });
+    // Real or integer cells are finite for certain, so `sin` needs no NaN
+    // guard (CE-565).
     expect(glsl.compile(ce.box(['Sin', 'u']), NO_FOLD).code).toBe(
-      '_gpu_sin3(u)'
+      element === 'real' || element === 'integer' ? 'sin(u)' : '_gpu_sin3(u)'
     );
   });
 

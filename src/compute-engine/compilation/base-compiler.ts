@@ -1,4 +1,5 @@
 import { provedAbsentDomainOf } from '../boxed-expression/proved-absent-domain.js';
+import { isIndexReadTuple } from '../boxed-expression/index-read-tuple.js';
 import {
   describe as describeOperand,
   describeType,
@@ -16414,8 +16415,9 @@ export class BaseCompiler {
               `conditions and a point is repeated, and a flat array cannot ` +
               `tell the two apart.`
           );
-        const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
+        // The conditions compile first, as in the scalar case below.
         const conds = BaseCompiler.compile(args[1], target);
+        const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
         // The absence at each position is decided from what one position
         // holds — a list element, or the whole value — not from the node's
         // own type, the list of results. A missing number is the numeric
@@ -16475,9 +16477,12 @@ export class BaseCompiler {
         );
       }
       // The VALUE is the conditional position here (the single condition is
-      // eager) — see the `When` entry of the lazy-operand inventory.
-      const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
+      // eager) — see the `When` entry of the lazy-operand inventory. The
+      // condition compiles first, the order of the CSE harvest walk
+      // (`operandEmissionOrder`, `cse.ts`), so the value arm can read a
+      // temporary that the condition binds.
       const cond = BaseCompiler.guardCondition(args[1], target);
+      const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
       return `((${cond}) ? (${val}) : ${nan})`;
     }
     return undefined;
@@ -33568,6 +33573,7 @@ export class BaseCompiler {
     BaseCompiler.checkListCoordinateTupleArgs(engine, h, args);
     BaseCompiler.checkPointListAtMatrixUnionArgs(engine, h, args);
     BaseCompiler.checkPointParamCollectionUnionArgs(engine, h, args);
+    BaseCompiler.checkScalarListAtContractPointParam(engine, h, args);
 
     // Fail closed BEFORE emission: whether the callee can be emitted at
     // all is irrelevant to whether an emitted call would be sound, and the
@@ -33806,6 +33812,42 @@ export class BaseCompiler {
       );
     }
 
+    // A LIST bound WHOLE to a parameter whose element type is open (the
+    // `collection<any> | value` slot that a body consuming the parameter
+    // whole infers) never goes by reference either, when no specialization
+    // took the call above. The emitted definition compiles the body against
+    // the scalar arm of the slot: `R(V, θ) := [Σ V·[cos θ, -sin θ], …]`
+    // becomes `V·cos θ - V·sin θ`, which answers `NaN` (JavaScript) or an
+    // empty interval (interval-js) over the array a list lowers to, while
+    // the interpreter multiplies the list element by element and sums. The
+    // call is inlined, which hands the list itself to the body; when that
+    // is not sound, the call fails closed.
+    const wholeListAt = BaseCompiler.listArgumentAtOpenWholeParameter(
+      engine,
+      h,
+      args
+    );
+    if (wholeListAt >= 0) {
+      // A pure list argument is substituted whole: it is not evaluated
+      // twice in a way that changes a value.
+      const inlined = BaseCompiler.tryInlineUserFunctionCall(
+        engine,
+        h,
+        args,
+        target,
+        (a) => a === args[wholeListAt] && a.isPure === true
+      );
+      if (inlined !== undefined) return inlined;
+      throw new Error(
+        `Could not compile a call of \`${h}\`: argument ${wholeListAt + 1} ` +
+          `is a list, which the interpreter binds whole to a parameter with ` +
+          `no declared element type. The emitted definition reads that ` +
+          `parameter as a scalar, and the call could not be inlined ` +
+          `instead. Declare the parameter's type (for example ` +
+          `\`list<real>\`).`
+      );
+    }
+
     // A real-analyzed argument bound to a complex-typed parameter is coerced
     // to the `{ re, im }` convention (the call-boundary face of the Tycho
     // item-60 convention-mismatch class): the body consumes such a parameter
@@ -33944,11 +33986,27 @@ export class BaseCompiler {
       if (e instanceof Error && e.name === 'CancellationError') throw e;
       // An inlined call does not test the declared parameter types.
       if (checked) throw e;
+      // A list of real numbers at a parameter typed as a tuple only by
+      // index reads in the body is substituted whole too. Such a tuple is
+      // not a contract (`isIndexReadTuple()`, index-read-tuple.ts): the
+      // interpreter binds the list whole and runs the body with it, which
+      // is what the substituted body computes. The definition could not be
+      // emitted against the tuple (example: `r(p) := Floor(p[1]) · l(f(p))`
+      // with `f(q) := Mod(q, 1) - 0.5`, where `f` of a point is refused).
+      // The argument must be pure, so that reading it once per use computes
+      // the same value.
       const inlined = BaseCompiler.tryInlineUserFunctionCall(
         engine,
         h,
         args,
-        target
+        target,
+        (a) =>
+          a.isPure === true &&
+          BaseCompiler.isRealListArg(a) &&
+          isIndexReadTuple(
+            BaseCompiler.userFunctionParamType(engine, h, args.indexOf(a)) ??
+              'unknown'
+          )
       );
       if (inlined !== undefined) return inlined;
       throw e;
@@ -35357,6 +35415,64 @@ export class BaseCompiler {
   }
 
   /**
+   * Fail closed for a call of user function `h` with an argument whose
+   * static type is a LIST of scalars (`vector<real^2>`, `list<number>`) at a
+   * parameter typed as a point, when that point type is a contract.
+   *
+   * The point type is a contract when it is declared (`p: tuple<real,
+   * real>`), or when the engine inferred it from a call in the body that
+   * requires a point: with `h2(q: tuple<real, real>) := q[1] + q[2]` and
+   * `rc(p) := h2(p) + f(p[1])`, the parameter `p` is inferred as
+   * `tuple<real, real>` from the call of `h2` (`contractTupleOfNarrow()`,
+   * `boxed-expression/index-read-tuple.ts`). The interpreter refuses the
+   * list at that contract: `rc([0.3, 0.4])` is an `incompatible-type`
+   * error raised by `h2`. The compiled call cannot test the argument at run
+   * time, because a point and a list are both arrays on JavaScript, so it
+   * computed `0.5`. The call is declined instead.
+   *
+   * A point type that index reads alone made (`p[1] + p[2]`) is not a
+   * contract (`isIndexReadTuple()`): the interpreter binds a list whole and
+   * reads it by index, so such a parameter keeps accepting a list. A list
+   * whose elements may be points is left to the point-list route
+   * (`tryCompilePointListCall`) and to the union check below.
+   */
+  private static checkScalarListAtContractPointParam(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): void {
+    args.forEach((a, i) => {
+      if (isTuple(a) || BaseCompiler.isSinglePointArg(a)) return;
+      const pt = BaseCompiler.userFunctionParamType(engine, h, i);
+      if (pt === undefined || !isPointParameterType(pt)) return;
+      if (isIndexReadTuple(pt)) return;
+      const r = resolveTypeForCompilation(stripMissingFromType(a.type.type));
+      if (typeof r === 'string' || r.kind === 'union' || r.kind === 'tuple')
+        return;
+      if (!isSubtype(r, INDEXED_COLLECTION_SHAPE_TYPE)) return;
+      const e = collectionElementType(r);
+      if (
+        e === undefined ||
+        !(
+          isSubtype(e, 'number') ||
+          isSubtype(e, 'boolean') ||
+          isSubtype(e, 'string')
+        )
+      )
+        return;
+      const inferred = BaseCompiler.userFunctionSignatureIsInferred(engine, h);
+      throw new Error(
+        `Could not compile a call of \`${h}\`: argument ${i + 1} has the ` +
+          `type \`${typeToString(a.type.type)}\`, a list, at a parameter ` +
+          `${inferred ? 'that a call in the body requires to be' : 'declared as'} ` +
+          `the point \`${typeToString(pt)}\`. The interpreter refuses a list ` +
+          `there (incompatible-type), and the compiled call cannot tell a ` +
+          `list from a point at run time.`
+      );
+    });
+  }
+
+  /**
    * Fail closed for a call of user function `h` with an argument whose type
    * is a UNION with a collection arm (a list, not a tuple) at a parameter
    * declared as a point (`isPointParameterType`), when the point-list route
@@ -35392,6 +35508,13 @@ export class BaseCompiler {
       const r = resolveTypeForCompilation(stripMissingFromType(a.type.type));
       if (typeof r === 'string' || r.kind !== 'union') return;
       const inferred = BaseCompiler.userFunctionSignatureIsInferred(engine, h);
+      // Only a point type that index reads alone made is exempt
+      // (`isIndexReadTuple()`, index-read-tuple.ts). An inferred signature
+      // can also hold a point type that a CALL in the body proves: with
+      // `h2(q: tuple<real, real>)` and `rc(p) := h2(p) + …`, the parameter
+      // `p` is inferred as `tuple<real, real>` from the call, and a list
+      // that reaches it is refused by `h2` in the interpreter.
+      const indexReadOnly = inferred && isIndexReadTuple(pt);
       // A bare name counts too (`list`, `range`, `matrix`), except `string`
       // and `tuple`: neither is a collection the call maps over.
       const collectionArm = r.types.some((arm) => {
@@ -35402,7 +35525,7 @@ export class BaseCompiler {
             x !== 'tuple' &&
             isSubtype(x, INDEXED_COLLECTION_SHAPE_TYPE)
           );
-        if (inferred && isSubtype(x, 'list<number>')) return false;
+        if (indexReadOnly && isSubtype(x, 'list<number>')) return false;
         return (
           x.kind !== 'tuple' && isSubtype(x, INDEXED_COLLECTION_SHAPE_TYPE)
         );
@@ -36773,6 +36896,25 @@ export class BaseCompiler {
   }
 
   /**
+   * Is this argument, on a shader target, a LIST of 2 to 4 real numbers —
+   * a value that lowers to a `vec2`, `vec3` or `vec4` — and not a point or
+   * a complex value? The width comes from `aggregateComponentCount`. The
+   * element type may be `number` (an element that is a free symbol): a
+   * shader computes in floats, and an argument with a complex element is
+   * refused through `isComplexValued`.
+   */
+  private static isShaderVectorListArg(a: Expression): boolean {
+    if (BaseCompiler.isSinglePointArg(a)) return false;
+    if (BaseCompiler.isComplexValued(a)) return false;
+    const t = resolveTypeForCompilation(a.type.type);
+    if (!isSubtype(t, 'indexed_collection<number>')) return false;
+    const elt = collectionElementType(t);
+    if (elt === undefined || !isSubtype(elt, 'number')) return false;
+    const width = BaseCompiler.aggregateComponentCount(a);
+    return width !== undefined && width >= 2 && width <= 4;
+  }
+
+  /**
    * Is this argument a LIST of real numbers by its type — an indexed
    * collection whose element type is a real number subtype (`vector<real^4>`,
    * `list<number>`) — and not a point? A complex element type is refused:
@@ -36833,6 +36975,65 @@ export class BaseCompiler {
       if (pt === undefined || pt === 'unknown' || pt === 'any') return i;
     }
     return -1;
+  }
+
+  /**
+   * The 0-based position of the first argument that is a LIST (its type is
+   * an indexed collection, and it is not a point) bound WHOLE to a
+   * parameter of `h` whose element type is open, or `-1` when there is
+   * none.
+   *
+   * A list is bound whole when a parameter of `h` admits a collection
+   * (`userFunctionParamsAreScalar` is false). The element type is open when
+   * the signature is inferred, or the parameter is declared with no element
+   * type (`paramElementTypeIsOpen`). The emitted definition of such a
+   * function compiles the body against the scalar arm of the slot, so it
+   * cannot receive the list. A parameter declared with an element type
+   * (`list<real>`) is the host's contract, and the definition is compiled
+   * against it. Only a parameter that the body mentions free is counted.
+   */
+  private static listArgumentAtOpenWholeParameter(
+    engine: ComputeEngine,
+    h: string,
+    args: ReadonlyArray<Expression>
+  ): number {
+    if (BaseCompiler.userFunctionParamsAreScalar(engine, h)) return -1;
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return -1;
+    const mentioned = freeSymbolNames(literal.ops[0]);
+    for (const [i, a] of args.entries()) {
+      if (BaseCompiler.isSinglePointArg(a)) continue;
+      const t = resolveTypeForCompilation(a.type.type);
+      if (t === 'never' || !isSubtype(t, 'indexed_collection<any>')) continue;
+      const name = functionLiteralParameterName(literal.ops[i + 1]);
+      if (!name || !mentioned.has(name)) continue;
+      if (!BaseCompiler.paramElementTypeIsOpen(engine, h, i)) continue;
+      if (BaseCompiler.isElementWiseOperand(literal.ops[0], name)) return i;
+    }
+    return -1;
+  }
+
+  /**
+   * Is the symbol `name` a direct operand of an element-wise
+   * (`broadcastable`) application somewhere in `body`? Such an application
+   * is compiled for the scalar arm of an open parameter slot, so it is the
+   * use that gives a wrong value over a list. A parameter that reaches only
+   * whole-collection readers (`a[1]`, `Length(a)`) is compiled correctly
+   * over an array, and is not counted.
+   */
+  private static isElementWiseOperand(body: Expression, name: string): boolean {
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): boolean => {
+      if (!isFunction(e) || seen.has(e)) return false;
+      seen.add(e);
+      if (
+        e.operatorDefinition?.broadcastable === true &&
+        e.ops.some((op) => isSymbol(op) && op.symbol === name)
+      )
+        return true;
+      return e.ops.some(visit);
+    };
+    return visit(body);
   }
 
   /**
@@ -37536,9 +37737,22 @@ export class BaseCompiler {
     // On `interval-js` the factors of the angular unit are exact, as at the
     // compile entry of that target, so the scaled angle is an enclosure of
     // the true angle.
-    return rewriteAngularUnit(statement, {
+    const substituted = rewriteAngularUnit(statement, {
       exactFactors: target.language === 'interval-javascript',
     }).subs(substitution);
+    // The substitution re-canonicalizes the body with the arguments in
+    // place, and that can make it INVALID when an argument's static type
+    // does not fit the body. Example: with `f(p) := Mod(p, 1) - 0.5` and a
+    // definition `r(p) := l(f(p))` whose parameter `p` is inferred as a
+    // point from an index read (`p[1]`), substituting the point-typed `p`
+    // gives `Mod(p, 1) - 0.5`, a tuple minus a number, which is an
+    // `incompatible-type` error (a tuple plus a scalar is refused, see
+    // `docs/plans/2026-07-07-tuple-point-semantics.md`). The interpreter
+    // binds the run-time value instead (a list, for which the expression is
+    // valid), so the error is not the value of the call. The substitution
+    // is declined and the call stays a call, compiled by reference.
+    if (!substituted.isValid) return undefined;
+    return substituted;
   }
 
   /**
@@ -38389,8 +38603,40 @@ export class BaseCompiler {
     );
     for (let i = 0; i < args.length; i++) {
       const a = args[i];
+      // With no declared signature (a symbol declared `function`, then
+      // assigned a literal), an untyped parameter is read from the slot of
+      // the literal's own signature, not from the parameter symbol. A use in
+      // the body narrows the symbol (`V·[cos θ, -sin θ]` makes `V` a
+      // `number`), which is not an argument contract: the literal's slot
+      // is `collection<any> | value`, and the interpreter binds a list
+      // whole there. Read from the symbol, a list argument was refused
+      // here, and the call took the generic definition (ROADMAP CE-564.4).
       const declared =
-        BaseCompiler.userFunctionParamType(engine, h, i) ?? params[i].type.type;
+        BaseCompiler.userFunctionParamType(engine, h, i) ??
+        (isSymbol(params[i])
+          ? BaseCompiler.signatureParamType(literal.type.type, i)
+          : undefined) ??
+        params[i].type.type;
+      // A parameter typed as a tuple ONLY by index reads in the body
+      // (`r(p) := Floor(p[1]) + …` types `p` as `tuple<real>`) has no
+      // contract: the reads do not prove that the argument is a point, and
+      // the interpreter binds a list argument whole and runs the body with
+      // the list (user decision of 2026-10-15, `isIndexReadTuple()` in
+      // `boxed-expression/index-read-tuple.ts`). For an argument that is not
+      // a point, that tuple is therefore read as an open parameter type, and
+      // the specialization takes the argument's own type. Without this, the
+      // generic definition compiles the body against the tuple: a nested
+      // `f(p)` with `f(q) := Mod(q, 1) - 0.5` is then a tuple minus a number,
+      // which is refused, while the interpreter maps `f` over the list.
+      // A point argument keeps the tuple, so a call that the interpreter
+      // refuses (`f((0.3, 1.4))`) is refused here too.
+      const openIndexReadTuple =
+        isIndexReadTuple(declared) && !BaseCompiler.isSinglePointArg(a);
+      const declaredIsOpen =
+        openIndexReadTuple ||
+        declared === 'unknown' ||
+        declared === 'any' ||
+        declared === 'value';
       let t = a.type.type;
       if (BaseCompiler.isSinglePointArg(a)) {
         pointArgument = true;
@@ -38522,23 +38768,50 @@ export class BaseCompiler {
         // `PointList` had no list source, so the call declined.
         listArgument = true;
         t = bindsListsWhole ? a.type.type : 'number';
-      } else return undefined;
-      if (
-        declared !== 'unknown' &&
-        declared !== 'any' &&
-        declared !== 'value' &&
-        !isSubtype(t, declared)
+      } else if (
+        target.language !== 'javascript' &&
+        bindsListsWhole &&
+        BaseCompiler.paramElementTypeIsOpen(engine, h, i) &&
+        BaseCompiler.isShaderVectorListArg(a)
       ) {
+        // A LIST of 2 to 4 real numbers on a shader target, at a parameter
+        // that the interpreter binds WHOLE (the definition infers or
+        // declares a collection parameter, as `R(V, θ) := [Σ V·[cos θ,
+        // -sin θ], Σ V·[sin θ, cos θ]]` does) and whose element type is
+        // open. The generic definition cannot be emitted: its parameter
+        // type (`collection<any> | value`, or the `number` its symbol is
+        // narrowed to) has no single shader type, or is a `float` that the
+        // `vec2` argument does not convert to. The copy typed by the
+        // argument (`list<real^2>`) has a `vec2` parameter, and the body
+        // is compiled with that parameter a vector, which is how the
+        // interpreter binds the list. Witness: the Tycho code-generation
+        // census document `pqflulcixs` (ROADMAP CE-564.4).
+        //
+        // The element type is `real` only when the argument's elements are
+        // finite reals. The parameter is emitted as a declared vector of
+        // that element type, and the GPU finiteness proof
+        // (`gpuProvablyFinite`, gpu-target.ts) then emits the built-in
+        // `sin`, `sign`, `max` without the NaN guard. An element that can be
+        // non-finite (a free symbol typed `number`, the `nan` of `0/0`, an
+        // infinity) keeps its own type, so the guard stays: the interpreter
+        // gives NaN for `sin(+∞)`, the built-in `sin` gives 0.
+        const elt = collectionElementType(
+          resolveTypeForCompilation(a.type.type)
+        );
+        t = {
+          kind: 'list',
+          elements:
+            elt !== undefined && isSubtype(elt, 'finite_real')
+              ? 'real'
+              : (elt ?? 'number'),
+          dimensions: [BaseCompiler.aggregateComponentCount(a)!],
+        };
+      } else return undefined;
+      if (!declaredIsOpen && !isSubtype(t, declared)) {
         if (isSubtype(a.type.type, declared)) t = declared;
         else return undefined;
       }
-      if (
-        declared === 'unknown' ||
-        declared === 'any' ||
-        declared === 'value' ||
-        !isSubtype(declared, t)
-      )
-        narrower = true;
+      if (declaredIsOpen || !isSubtype(declared, t)) narrower = true;
       types.push(t);
       let pointWidth: number | undefined;
       if (

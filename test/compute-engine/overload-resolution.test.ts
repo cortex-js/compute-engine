@@ -216,7 +216,9 @@ describe('overload resolution: diagnostics', () => {
     const b = ce.box(['Rnd', 'True']);
     expect(b.isValid).toBe(false);
     // The expected type names the whole overload set at that position.
-    expect(b.toString()).toContain('collection | number | set<real>');
+    // `set<real>` is a `collection`, so the join of the arms is
+    // `collection | number`: the same set of values.
+    expect(b.toString()).toContain('collection | number');
   });
 
   it('blames ONLY the operands at fault', () => {
@@ -365,8 +367,10 @@ describe('overload resolution: inference (design §4.3)', () => {
     const ce = engine();
     ce.declare('x', 'unknown');
     expect(ce.box(['Rnd', 'x']).isValid).toBe(true);
+    // `set<real>` is a `collection` (see the two-argument case above), so
+    // the join of the three arms is `collection | number`.
     expect(ce.symbol('x').type.toString()).toBe(
-      'collection | number | set<real>'
+      'collection | number'
     );
   });
 

@@ -224,7 +224,7 @@ describe('a warning where no exact form exists', () => {
 
   test('Fract of a vector is reported too', () => {
     const r = glsl(['Fract', ['Multiply', 43758.5453, ['Sin', 'p']]]);
-    expect(r.code).toBe('fract(43758.547 * _gpu_sin3(p))');
+    expect(r.code).toBe('fract(43758.547 * sin(p))');
     expect(r.warnings?.[0]?.code).toBe('float32-unsafe-argument');
   });
 

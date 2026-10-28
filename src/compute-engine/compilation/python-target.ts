@@ -5916,7 +5916,11 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     if (isSymbol(args[1], 'True')) return `(${compile(args[0], 0)})`;
     const absent = pythonAbsent([args[0]], target);
     if (isSymbol(args[1], 'False')) return absent;
-    return `((${compile(args[0], 0)}) if (${compile(args[1])}) else ${absent})`;
+    // The condition compiles first, the order of the CSE harvest walk
+    // (`operandEmissionOrder`, `cse.ts`), so the value can read a temporary
+    // that the condition binds.
+    const cond = compile(args[1]);
+    return `((${compile(args[0], 0)}) if (${cond}) else ${absent})`;
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)

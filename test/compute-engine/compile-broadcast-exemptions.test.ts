@@ -135,7 +135,7 @@ describe('BROADCAST EXEMPTION — the shapes it does NOT cover', () => {
     const r = js(['Sin', ['Tuple', 1, 2]]);
     expect(r.success).toBe(true);
     expect(r.code).toBe('[Math.sin(1), Math.sin(2)]');
-    expect(g(['Sin', ['Tuple', 1, 2]])).toBe('_gpu_sin2(vec2(1.0, 2.0))');
+    expect(g(['Sin', ['Tuple', 1, 2]])).toBe('sin(vec2(1.0, 2.0))');
   });
 
   test('a LIST operand of an exempt head is still a collection', () => {

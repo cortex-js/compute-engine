@@ -471,7 +471,7 @@ describe('8. MAP OVER AN ALIAS OF A TUPLE', () => {
 
   test.each([
     [ADD_10, 'list<integer | nan>', '[11,NaN]'],
-    ['Sqrt', 'list<complex | infinity | nan>', '[1,NaN]'],
+    ['Sqrt', 'list<complex | nan>', '[1,NaN]'],
   ] as [MathJsonExpression, string, string][])('%j', (fn, type, value) => {
     expect(
       expectTypeHoldsValue(engine, engine.box(['Map', fn, 'q']), type)

@@ -237,6 +237,30 @@ describe('GCD and LCM fold over the components (CE-280.11)', () => {
   });
 });
 
+// CE-563: the GCD preamble holds `_gpu_gcd` and `_gpu_lcm`. A shader that
+// calls only `_gpu_gcd` carried `_gpu_lcm` too; each helper is now emitted
+// on its own use, and `_gpu_lcm` brings `_gpu_gcd`, which its body calls.
+describe('a shader carries only the GCD helpers it calls (CE-563)', () => {
+  const definitions = (preamble: string, name: string): number =>
+    (preamble.match(new RegExp(`(float|fn) ${name}\\(`, 'g')) ?? []).length;
+
+  test.each(TARGETS)('%s', (to) => {
+    const gcd = shader(['GCD', 'u', 'n'], to);
+    expect(gcd.code).toMatch(/^_gpu_gcd\(u, /);
+    expect(definitions(gcd.preamble, '_gpu_gcd')).toBe(1);
+    expect(gcd.preamble).not.toContain('_gpu_lcm');
+
+    const lcm = shader(['LCM', 'u', 'n'], to);
+    expect(lcm.code).toMatch(/^_gpu_lcm\(u, /);
+    expect(definitions(lcm.preamble, '_gpu_gcd')).toBe(1);
+    expect(definitions(lcm.preamble, '_gpu_lcm')).toBe(1);
+    // GLSL needs a declaration before its use.
+    expect(lcm.preamble.indexOf('_gpu_gcd(')).toBeLessThan(
+      lcm.preamble.indexOf('_gpu_lcm(')
+    );
+  });
+});
+
 // CE-274: a `Match` case body that needs statements takes the statement form
 // of `If`/`Which`.
 describe('Match with a loop-form Sum in a case body (CE-274)', () => {

@@ -1310,7 +1310,9 @@ describe('STATIC SHAPE READERS', () => {
       str(
         broadcastShapedResultType([t('tensor')], t('integer | list<integer>'))
       )
-    ).toBe('list<integer | list<any> | list<integer>>');
+      // `list<integer>` is a subtype of the `list<any>` arm, so the join of
+      // the arms keeps `list<any>` only: the same set of values.
+    ).toBe('list<integer | list<any>>');
   });
 
   test('the broadcast result type holds the value (engine)', () => {

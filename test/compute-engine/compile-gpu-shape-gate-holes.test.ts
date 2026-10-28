@@ -106,7 +106,7 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
       '_gpu_smoothstep3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
     );
     expect(g(['Clamp', V3, W3, U3])).toBe(
-      '_gpu_clamp3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), vec3(7.0, 8.0, 9.0))'
+      'min(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(7.0, 8.0, 9.0))'
     );
     expect(g(['Step', V3, W3])).toBe(
       'step(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
@@ -115,7 +115,7 @@ describe('GPU SHAPE GATE — a MANDATORY scalar slot (finding 1)', () => {
       '_gpu_fmod3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
     expect(g(['ElementMax', V3, W3])).toBe(
-      '_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
+      'max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0))'
     );
   });
 
@@ -163,9 +163,9 @@ describe('GPU SHAPE GATE — the variadic fold over declared vectors (finding 2)
     expect(g(['ElementMax', V3, W3, 2])).toBe(
       '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(2.0))'
     );
-    expect(g(['ElementMax', 'v', 'w'], cev)).toBe('_gpu_max3(v, w)');
+    expect(g(['ElementMax', 'v', 'w'], cev)).toBe('max(v, w)');
     expect(g(['ElementMax', V3, W3, U3])).toBe(
-      '_gpu_max3(_gpu_max3(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(7.0, 8.0, 9.0))'
+      'max(max(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0)), vec3(7.0, 8.0, 9.0))'
     );
   });
 
@@ -312,16 +312,14 @@ describe('GPU SHAPE GATE — the Max/Min reduction is DECLARED, not inferred', (
   });
 
   it('the canonical emissions are unchanged', () => {
-    expect(g(['Max', V3])).toBe('(_gpu_max(_gpu_max(1.0, 2.0), 3.0))');
+    expect(g(['Max', V3])).toBe('(max(max(1.0, 2.0), 3.0))');
     expect(g(['Min', ['Range', 1, 5]])).toBe(
       '(_gpu_min(_gpu_min(_gpu_min(_gpu_min(1.0, 2.0), 3.0), 4.0), 5.0))'
     );
     // WGSL's `max` has no scalar/vector overload, so a `vec3f` mixed with a
     // scalar would fail the generic gate — the declared capability is what
     // keeps this reduction compiling there.
-    expect(w(['Max', V3, 5])).toBe(
-      '(_gpu_max(_gpu_max(_gpu_max(1.0, 2.0), 3.0), 5.0))'
-    );
+    expect(w(['Max', V3, 5])).toBe('(max(max(max(1.0, 2.0), 3.0), 5.0))');
     // An empty collection contributes nothing; the WGSL NaN is a CALL, which
     // the gate would otherwise judge against the `array` shape of `[]`.
     expect(g(['Max', ['List'], 5])).toBe('(5.0)');
@@ -344,7 +342,7 @@ describe('GPU SHAPE GATE — valid source still compiles (regression guard)', ()
       'vec3(1.0, 2.0, 3.0) + vec3(4.0, 5.0, 6.0)'
     );
     expect(g(['Multiply', V3, 2])).toBe('2.0 * vec3(1.0, 2.0, 3.0)');
-    expect(g(['Sin', V4])).toBe('_gpu_sin4(vec4(1.0, 2.0, 3.0, 4.0))');
+    expect(g(['Sin', V4])).toBe('sin(vec4(1.0, 2.0, 3.0, 4.0))');
     expect(g(['Negate', V4])).toBe('(-(vec4(1.0, 2.0, 3.0, 4.0)))');
     expect(g(['Mix', V3, W3, 0.5])).toBe(
       'mix(vec3(1.0, 2.0, 3.0), vec3(4.0, 5.0, 6.0), 0.5)'
@@ -446,10 +444,11 @@ describe('GPU SHAPE GATE — collection-typed operands with no static count', ()
   it('a static component count of 2–4 still compiles to the `vecN` call', () => {
     for (const type of ['vector<real^3>', 'list<real^3>']) {
       const e = withL(type);
-      expect(g(['Sin', 'L'], e)).toBe('_gpu_sin3(L)');
-      expect(w(['Sin', 'L'], e)).toBe('_gpu_sin3(L)');
+      // Real cells are finite for certain: the built-in (CE-565).
+      expect(g(['Sin', 'L'], e)).toBe('sin(L)');
+      expect(w(['Sin', 'L'], e)).toBe('sin(L)');
     }
-    expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('_gpu_sin2(L)');
+    expect(g(['Sin', 'L'], withL('tuple<real, real>'))).toBe('sin(L)');
   });
 
   it('an `unknown`-typed symbol stays a scalar — the free-variable admission is untouched', () => {

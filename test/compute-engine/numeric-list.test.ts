@@ -9,6 +9,8 @@
  */
 import { ComputeEngine, isFunction, isNumber } from '../../src/compute-engine';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { typeToString } from '../../src/common/type/serialize';
+import type { Type } from '../../src/common/type/types';
 
 const ce = new ComputeEngine();
 
@@ -130,10 +132,13 @@ describe('ce.list() — construction and parity with the boxed list', () => {
     const def = ce.lookupDefinition('List') as any;
     const elttype = (def.operator ?? def).collection.elttype as (
       e: unknown
-    ) => unknown;
+    ) => Type;
+    // `typeToString`, not `String`: a union type is an object, and `String`
+    // prints every object as `[object Object]`, so two different unions
+    // compared equal.
     for (const xs of Object.values(SAMPLES))
-      expect(String(elttype(ce.list(xs)))).toBe(
-        String(elttype(ce.box(['List', ...xs])))
+      expect(typeToString(elttype(ce.list(xs)))).toBe(
+        typeToString(elttype(ce.box(['List', ...xs])))
       );
   });
 

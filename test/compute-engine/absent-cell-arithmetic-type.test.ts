@@ -132,7 +132,8 @@ const FAMILIES: Family[] = [
       '-L': 'list<integer | list<integer | nan> | nan>',
       'L^2': MIXED,
       'Sqrt(L)': MIXED,
-      'Abs(L)': 'list<+oo | list<nan | real | signed_infinity> | nan | real>',
+      'Abs(L)':
+        'list<list<nan | real | signed_infinity> | nan | real | signed_infinity>',
       'Sin(L)': MIXED,
       'Exp(L)': MIXED,
       'Ln(L)': MIXED,

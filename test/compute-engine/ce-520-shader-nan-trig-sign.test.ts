@@ -72,7 +72,13 @@ describe('CE-520 — the NaN-safe helpers', () => {
   });
 
   it('a vector operand calls the helper of its width', () => {
-    expect(shader(['Sin', 'v'], 'glsl').code).toBe('_gpu_sin3(v)');
+    // `x` has no declared type, so the vector can hold NaN. A vector whose
+    // components are finite for certain (`v: vector<real^3>`) takes the
+    // built-in (CE-565).
+    expect(shader(['Sin', ['List', 'x', 1, 2]], 'glsl').code).toBe(
+      '_gpu_sin3(vec3(x, 1.0, 2.0))'
+    );
+    expect(shader(['Sin', 'v'], 'glsl').code).toBe('sin(v)');
     expect(shader(['Sign', ['List', 'x', 1]], 'wgsl').code).toBe(
       '_gpu_sign2(vec2f(x, 1.0))'
     );
@@ -89,7 +95,7 @@ describe('CE-520 — the NaN-safe helpers', () => {
     expect(g).toContain(
       'return (_gpu_isnonfinite(x) ? intBitsToFloat(0x7FC00000) : sin(x));'
     );
-    const w = shader(['Sign', 'v'], 'wgsl').preamble;
+    const w = shader(['Sign', ['List', 'x', 1, 2]], 'wgsl').preamble;
     expect(w).toContain(
       'fn _gpu_sign3(x: vec3f) -> vec3f {\n  return select(sign(x), x, _gpu_isnan3(x));\n}'
     );

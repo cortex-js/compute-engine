@@ -1896,18 +1896,39 @@ export function absorbNumericAbsence(t: Readonly<Type>): Type {
       if (arms.length === 0) return 'never';
       if (arms.length === 1) return arms[0];
       // Numeric arms are kept side by side, not joined: `widen` joins
-      // `integer | nan` and `+oo | nan` to `number`, which loses the arms the
-      // handler answered.
-      if (arms.every((x) => isSubtype(x, 'number'))) {
-        const flat: Type[] = [];
-        for (const arm of arms)
-          for (const x of typeof arm !== 'string' && arm.kind === 'union'
-            ? arm.types
-            : [arm])
-            if (!flat.includes(x)) flat.push(x);
-        return flat.length === 1 ? flat[0] : { kind: 'union', types: flat };
+      // `real` and `+oo` to `number`, which loses the arms the handler
+      // answered. Only the other arms (a list, a tuple) are joined with
+      // `widen`, and the numeric arms are added beside the result: with a
+      // list arm, `Abs` of `list<integer> | integer | missing` cells keeps
+      // `nan | real | signed_infinity` beside the list.
+      const flat: Type[] = [];
+      const others: Type[] = [];
+      for (const arm of arms) {
+        if (!isSubtype(arm, 'number')) {
+          others.push(arm);
+          continue;
+        }
+        for (const x of typeof arm !== 'string' && arm.kind === 'union'
+          ? arm.types
+          : [arm])
+          if (!flat.includes(x)) flat.push(x);
       }
-      return widen(...arms);
+      if (others.length === 0)
+        return flat.length === 1 ? flat[0] : { kind: 'union', types: flat };
+      const joined = widen(...others);
+      // A joined arm that already holds every number (`value`, `any`) keeps
+      // the answer `widen` gave.
+      if (flat.length === 0 || flat.every((x) => isSubtype(x, joined)))
+        return joined;
+      return {
+        kind: 'union',
+        types: [
+          ...(typeof joined !== 'string' && joined.kind === 'union'
+            ? joined.types
+            : [joined]),
+          ...flat,
+        ],
+      };
     }
     case 'intersection':
       return {
@@ -4189,6 +4210,20 @@ export function placeholderSlotsAs(
 export function openDepthScalarArms(t: Type): Type | undefined {
   const r = resolveTypeAlias(t);
   if (typeof r === 'string' || r.kind !== 'union') return undefined;
+  // The arms of a union, with every nested union replaced by its own arms.
+  // The open form can be built with nested unions: a recursive call typed
+  // `unknown` inside `Mod` gives `(real | nan) | (tuple | missing) |
+  // list<…>`. Read without flattening, the arm `tuple | missing` is not a
+  // tuple, so the `tuple` arm was kept as a scalar arm, and the compiled
+  // lanes read the type as `broadcastable<missing | nan | real | tuple>`.
+  // Only a union written in place is flattened. An alias is not unfolded
+  // here: a self-referential alias (`nn2 = list<integer> | (nn2 |
+  // integer)`) would unfold forever. Each arm is still resolved where it
+  // is read below.
+  const flatArms = (u: Type): Type[] =>
+    typeof u !== 'string' && u.kind === 'union'
+      ? u.types.flatMap(flatArms)
+      : [u];
   const isListOfAny = (x: Type): boolean => {
     const a = resolveTypeAlias(x);
     return (
@@ -4204,14 +4239,15 @@ export function openDepthScalarArms(t: Type): Type | undefined {
     if (a.dimensions !== undefined) return false;
     const e = resolveTypeAlias(a.elements);
     if (typeof e === 'string' || e.kind !== 'union') return false;
+    const members = flatArms(e);
     return (
-      e.types.some(isListOfAny) &&
-      e.types.every((m) => isListOfAny(m) || cannotHoldAList(m))
+      members.some(isListOfAny) &&
+      members.every((m) => isListOfAny(m) || cannotHoldAList(m))
     );
   };
   let hasOpenList = false;
   const scalars: Type[] = [];
-  for (const arm of r.types) {
+  for (const arm of flatArms(r)) {
     if (openList(arm)) {
       hasOpenList = true;
       continue;

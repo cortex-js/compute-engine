@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-566.
+Next free reference: CE-576.
 
 **Entry format.**
 
@@ -75,7 +75,16 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ### CE-544. A function declared `function` and then assigned skips the recursion check
 
-**Status:** open; defect. Found 2026-10-27 while fixing Tycho row 468.
+**Status:** open; defect. Found 2026-10-27 while fixing Tycho row 468. Tycho
+row 469 is this defect.
+
+Tycho row 469 (measured 2026-10-27 on the CE main tree): with
+`G(a,b,c) = |sin a| − 0.1`, `S(a,b,c) = max(G(a,b,c), c − 3)` and
+`R(i) = {i = 0: 0, R(i−1) + S(1, 2, R(i−1))}`, `R(3)` and `R(x)` (`x: real`)
+are typed `any` when the three functions are declared `function` and then
+assigned, and `number` when they are only assigned. With `S(a,b,c) =
+max(a,b,c)` and the declarations, the type is the wide form below. Tycho
+repro: `~/dev/tycho/scripts/repros/2026-10-27-ce469-recursive-call-nested-callee-any-repro.mts`.
 
 With `R` declared `function` and then assigned
 `R(i) = Which(i = 0, 0, True, R(i − 1) + 1)`, the call `R(3)` is typed with the
@@ -2824,6 +2833,95 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-570. Shader targets: a call that several user functions repeat with the same arguments is computed once per function
+
+**Status:** open; performance. Tycho ledger row 467 (filed 2026-10-26).
+
+Each user function compiles to its own shader function, and CSE works inside
+one function body. In Tycho's `voronoi-diagram`, the row
+`{F(x,y) < 0.0008: 0, B(x,y) > 1.3: 0, 0.12 + 0.8H(x,y)}` calls `B` and `H`,
+and `B`, `H` and the functions they call each call `F(x, y)`, `Z(x, y)` and the
+same distance terms again. The WebGL driver (ANGLE over Metal) merges the
+repeated calls across functions; the WebGPU route does not, so the row draws
+about 2.2 times slower on WebGPU (Apple M5 Max, 2048×2048: F + B + H 0.47 ms on
+WebGL2, 1.13 ms on WebGPU). Asked: on `wgsl` (and `glsl`), compute such a call
+once per pixel, for example by inlining the user functions into one body before
+CSE, or by computing the shared calls in the main body and passing their values
+as arguments. Related: CE-562 and CE-568 (CSE inside one body). Tycho repro:
+`~/dev/tycho/scripts/repros/2026-10-26-ce467-wgsl-shared-calls-repro.mts`
+(take the box lock); done when the WebGPU/WebGL ratio is 1.2 or less.
+
+### CE-571. WGSL: a documented interface for GPU compute jobs over a 3-D grid
+
+**Status:** open; design. Tycho ledger row 461 (filed 2026-10-26).
+
+Tycho supplies a compute entry point and the grid and storage buffers; CE
+supplies a scalar field function that can be called from it, its helper
+functions, the parameter types and the binding layout. A parameter change must
+not rebuild the expression or the pipeline. Asked: say whether the WGSL
+function output and `compileShader()` can supply this today, and write a recipe
+or a scoped API proposal, with numerical limits and the cases it does not
+support. Witnesses: Tycho showcases `gyroid` and `metaballs`. Tycho owns the
+dispatch, the mesher and the measurements.
+
+### CE-572. WGSL: storage-buffer input for a numeric list whose contents and length change
+
+**Status:** open; design. Tycho ledger row 462 (filed 2026-10-26); follows the
+width ceiling of CE-280.
+
+Asked: a binding for a numeric list or point list that the shader reads from a
+storage buffer, so that a change of its contents or length does not embed
+constants or recompile. The design must define the layout and stride, the
+element type, the logical length, the index rules and the result of an index
+out of range, and which reductions and index reads accept the binding. Witness:
+Tycho's `game-of-life` (a 150×150 board `S`, read as
+`S[N floor(y)+floor(x)+1]`). If implemented, check the values against
+JavaScript for an empty list, a one-element list and a length change.
+
+### CE-573. An `interval-wgsl` target for interval refinement on the GPU
+
+**Status:** open; design (feasibility). Tycho ledger row 463 (filed
+2026-10-26). The interval GLSL route was removed earlier; this asks again for a
+GPU interval target where Tycho keeps the cells, the subdivision and the output
+on the GPU.
+
+Asked now: feasibility, a minimal supported set and the semantic contract, not
+an implementation. The contract must include three-valued results for
+comparisons and booleans (restrictions, piecewise fields), the distinctions
+between a partial, singular, empty and entire interval, the error bounds of
+the endpoint conversion and of each built-in function, and a decline when the
+result is not certain. No rejection may depend on f32 rounding or on the NaN
+behavior of a GPU. Acceptance needs containment tests for poles, tangencies,
+isolated zeros, branch boundaries, subnormals and overflow. Tycho's profile
+(`sin(x²)+sin(y²)=0`) does not show that interval evaluation is the main cost.
+Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
+(the same document answers CE-571 and CE-572).
+
+### CE-574. WGSL: an index read copies the whole list into a local variable
+
+**Status:** open; defect (not yet checked on a GPU). Found 2026-10-27 while
+answering Tycho rows 461–463.
+
+The WGSL index helper `_gpu_atN(v: array<f32, N>, i)` takes the list by value
+and copies it (`var a = v;`, the preamble built in `gpu-target.ts`), because
+WGSL allows a dynamic index only into a variable. A list of more than 2048
+`f32` values then needs more than the 8 192 bytes of function-scope variables
+that the WGSL specification guarantees; Tycho's `game-of-life` board (22 500
+values) needs 90 KB. `\sum_{k=1}^{22500} S_k` also emits the copy inside the
+loop (`var _tv2 = S;` on each pass). Next step: check on a GPU whether the
+copy fails or is slow, then read a long list from a module-scope or storage
+variable instead of a copy (see CE-572).
+
+### CE-575. `compileShader()`: compute stage gets a `VertexInput` struct, and free symbols are not refused
+
+**Status:** open; defect. Found 2026-10-27 while answering Tycho rows 461–463.
+
+`compileShader()` (`wgsl-target.ts`) names the input struct `VertexInput` for
+every stage, the compute stage included. It also accepts a body that reads a
+symbol that no input, uniform or local declares (`x`, `y`), and the shader
+then fails only when the GPU compiles it. Expected: a stage-appropriate struct
+name, and a decline at compile time that names the undeclared symbols.
+
 ### CE-467. A `range` argument at an inferred point parameter declines to compile
 
 **Status:** open; capability, small.
@@ -3337,75 +3435,108 @@ deliberate factor of three. The composed hyperbolic and reciprocal routines are
 built from unrounded kernels and take one rounding step at their own export,
 except `remainder`, whose three-operation composition takes three.
 
-### CE-562. CSE does not share a call between a condition and its arm
+### CE-569. Compile `When(e, c)` as `If(c, e, m)` when `c` is a boolean
+
+**Status:** open; capability (simplification).
+
+For a condition whose type is provably `boolean` (not a list of booleans),
+`When(e, c)` means `If(c, e, m)`, with `m` the absence marker of the type of
+`e` (`NaN` for a number, `Missing` otherwise; definition in
+`library/control-structures.ts`). Lower it so in the compiler, before the
+targets see it, and keep `When` in the expression tree (it carries the LaTeX
+round trip of `x\{y\}`, the stacking rule into `And`, the derivative rule and
+Tycho's masked points). The emitted code stays the same ternary. Gain: one
+code route instead of a `When` handler in the javascript, GPU, Python and
+interval-js targets and the fixed-width unroll, and every pass sees the
+condition first as for `If` (the operand order of `When` caused CE-562). Keep
+each target's checks: the GPU refusal of a random draw in the masked value
+(`gpuAssertNoEagerDraw`), and the interval-js `_IA.restrict` enclosure (lower
+there only if the `If` route gives the same enclosure).
+
+### CE-568. CSE: share a pure call across the statements of a `Block`
 
 **Status:** open; performance.
 
-`T_4(t) = \{-0.816 < \cos(T_3(t)) : T_3(t)\}` compiles on the JavaScript and
-GLSL targets to `(-0.816… < Math.cos(_fn_T_3(t))) ? _fn_T_3(t) : NaN`: the
-condition is always evaluated, so its call `T_3(t)` can be bound once and read
-by the arm. Tycho codegen audit at CE 0.171.0 (CORE corpus, 1,053 records):
-3 JavaScript and 3 GLSL function bodies (`zstlwmmpkp`, and the
-`p_rand(...)` call in `hyvhlz4chj`). The CSE harvest treats a conditional as a
-region boundary; a subexpression of the condition is safe to hoist above the
-selection because the condition is evaluated on every path.
+Each statement value of a `Block` is its own CSE region, so a pure call
+repeated in two statements is computed once per statement. Tycho `hyvhlz4chj`:
+the body of `f_Bm` (a Desmos `with` lowered to a `Block` of two statements)
+calls `p_rand(n + s_eed, n, n)` in both. Sharing across statements needs the
+temporary to be bound before the first statement and to stay valid across any
+assignment the statements make to a symbol the call reads.
 
-### CE-563. GLSL helpers that are emitted but not called
+### CE-564. interval-js: a call whose argument is another user function's list result
 
-**Status:** open; performance, small.
+**Status:** open; capability.
 
-`GPU_GCD_PREAMBLE_GLSL` (`gpu-target.ts`) holds `_gpu_gcd` and `_gpu_lcm`, so a
-shader that calls only `\gcd` also carries `_gpu_lcm` (Tycho document
-`1e9rxgmywb`). It is the only unreferenced helper left in the CORE corpus at CE
-0.171.0 (there were 12 in 4 shaders at 0.126.2). Emit each helper on its own
-use.
+`d(B(A(P(x, y))))` (Tycho document `ra1p9naofs`, `B(p)` returns a list of two
+numbers) compiles on javascript, which compiles a copy of each callee for the
+argument's type, but declines on interval-js: "call of `r`: argument 1 has the
+type `dictionary<any> | indexed_collection<any>` … at a parameter inferred as
+the point …". interval-js has no per-call copies of a user function, and the
+parameter of `d` is inferred as `dictionary<any> | indexed_collection<any>`,
+not as a tuple from index reads only, so the inline fallback does not take it.
+It declined on 2026-09-16 too. Covering it needs per-call copies on
+interval-js, or inlining `d` with a call expression as its argument.
+`r([x, y])` already compiles there.
 
-### CE-564. Rows of the all-states census that compiled on 2026-09-16 and decline at 0.171.0
+### CE-567. Infer `list<E> | tuple<…>` from index reads instead of a marked tuple
 
-**Status:** open; task (triage).
+**Status:** open; design. Measure before a decision.
 
-Tycho codegen census, all 757 documents, CE 0.171.0 against the unreleased
-build of 2026-09-16 (Tycho `03ebe4fc8`): 15 rows of the 734 common documents
-compiled then and decline now. Each needs a decision: a deliberate refusal of
-a compile that was unsound (keep, nothing to do), or a regression (fix).
-
-- **CE-564.1** Probably deliberate refusals: `AsOklab` over an operand that
-  may be a collection (`digxkh3uk8`, `wgxnrn87sx`); a call that maps a list
-  over a scalar parameter of a function with a point parameter
-  (`njncrg9fkv`); a complex value at a parameter shaped real on interval-js
-  (`m7oc1p6cys`, 2 rows); `Set` in a condition (`jaayqz1o06`, malformed
-  input).
-- **CE-564.2** A type error in the expression handed to `compile()`:
-  `L(x, [0, 0.1, ..., 1])` with `L(x, n) = (f_1(x)^n + f_2(x)^n)^{1/n}` gives
-  `Error(incompatible-type, "complex | signed_infinity", ~oo)` (`dmibg1uaof`,
-  javascript and interval-js; the element `n = 0` makes `1/n` be `~oo`);
-  `d(B(A(P)))` gives `l(Error(incompatible-type, "tuple", "number"))`
-  (`ra1p9naofs`). CE alone does not reproduce the first one
-  (`ce.parse('L(x, 0..0.1..1)')` is valid): find the step of Tycho's route that
-  makes the error.
-- **CE-564.3** interval-js: `f(x, 0)` declines with "an object-domain absent
-  ('missing') position … Discharge with 'Coalesce' first" (`ond0vgpslf`, 3
-  rows).
-- **CE-564.4** GLSL: `R(v - (-p_0), φ)` with a point argument declines with
-  "lowers to vec2 but parameter is declared float" (`pqflulcixs`, 2 rows):
-  the parameter type of `R` was inferred scalar.
-
-Not CE: the spherical rows `\rho = f(\theta, \phi)` (7 documents) arrive with
-`rho` typed as a function by Tycho's importer; CE leaves `rho` untyped.
+Index reads `p[1]`, `p[2]` of an unannotated parameter infer
+`tuple<…>` (`parameterIndexReadType()`, `library/collections.ts`), with a
+mark that says the reads do not prove a point (`isIndexReadTuple()`). Only
+the code that checks the mark knows it. The compiler used such a tuple as a
+proven point (in `r(p) := … l(f(p))` with `f(q) := Mod(q, 1) - 0.5`, the
+substituted body was an `incompatible-type` error, while the interpreter maps
+over a list argument); since 2026-10-27 the compiler reads the mark and
+compiles the callee for the argument's type, which this proposal would make
+unnecessary.
+Proposal: infer `list<E> | tuple<T1, T2, …>` (`E` the union of the read
+requirements), and narrow with evidence: a declared tuple parameter of a
+callee narrows to the tuple, an argument type at a call site picks its arm.
+Checked 2026-10-27 on a declared `p: list<number> | tuple<number, number>`:
+`Mod(p, 1) - 0.5` is valid (`list<number> | number`), `p[1] + p[2]` is
+`number`, and per-index types stay (`!q[1]` is `boolean | missing` for
+`q: list<boolean | number> | tuple<boolean, number>`). Costs: an error for a
+genuine point moves from canonicalization to evaluation; the list arm makes a
+read past the end possibly `missing`; every printed inferred signature changes
+(snapshots); the sites that read the mark (`oneElementTypeOf()` in `box.ts`,
+`contractTupleOfNarrow()`, `parameterIndexReadType()`) are rewritten. Next
+step: a prototype in a worktree. The deciding measures (user, 2026-10-27) are
+correctness (compiled values equal to the interpreter's, and no error case
+that becomes a silent value) and codegen coverage (census declines that go
+away on each target, from Tycho's `scripts/audit-ce-codegen.mts --all`). The
+number of tests and snapshots to update is a cost to report, not a reason to
+decide against.
 
 ### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
 
-**Status:** open; performance; decision needed.
+**Status:** open; performance.
 
-Since CE-520, `sin`/`cos` on the shader targets call `_gpu_sin`/`_gpu_cos`
-(a bit test and a selection per call, about 10% of a Tycho frame on WebGPU)
-unless the operand is finite for certain, which needs each symbol it reads to
-have a declared type. In the Tycho CORE corpus at CE 0.171.0, 611 call sites in
-122 of 196 shaders take the helper, among them `(\cos(t), \sin(t))` of a
-parametric curve. Either Tycho declares its plot parameters (`t`, `θ`, `x`,
-`y`) `real`, or CE reads the variables that the host binds with `vars` (a plot
-parameter is finite by construction) as finite. The decision is which side
-does it.
+Since CE-520, `sin`/`cos` (and `sign`, `max`, `min`, `clamp`) on the shader
+targets call a NaN-safe helper (a bit test and a selection per call, about
+10% of a Tycho frame on WebGPU) unless the operand is finite for certain
+(`gpuProvablyFinite`, `gpu-target.ts`). Tycho declares its curve parameters
+and 1-D axes `real` since Tycho `a2cd808f0` (all-states records with a helper
+call 1,223 → 980). What remains:
+
+- **CE-565.1** Inside a per-call copy of a user function, a parameter typed
+  `real` from its argument keeps the helper (`_gpu_sin(t)`), while a
+  `list<real^2>` parameter of the same copy gets the built-in: the scalar
+  parameter is not read as declared there.
+- **CE-565.2** A scalar beside a vector in `ElementMax`, `ElementMin` and
+  `Clamp` keeps the helper (`Clamp(v, 0, 1)` emits `_gpu_clamp3(v, vec3(0.0),
+  vec3(1.0))`), although the widened `vec3(0.0)` is finite.
+- **CE-565.3** Tycho side, not CE: the document-level `x`/`y` are still typed
+  `real | signed_infinity | nan`; a slider range (`k: real<0..10>`) would prove
+  `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions
+  and animation can leave the range), so only a hard-bounded slider can carry
+  it.
+
+By design the helper stays for a product of two symbols with no declared
+range (`sin(k t)`: f32 overflow), for a symbol whose `real` type is only
+inferred, for `smoothstep`, and for a value that can be NaN (an `arcsin`).
 
 ### CE-253. `Sum(At(P, Range(a, b)))` materializes the range on the JavaScript target
 
@@ -4565,6 +4696,158 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
+
+### CE-566. A stored function reads a lazy collection definition again at each call; Tycho binds the value through engine internals
+
+**Status:** in progress; performance. User decision 2026-10-27: try option (a)
+first; do not add a public API or make internal fields public if it can be
+avoided. Asked by Tycho
+(session tycho-3b), 2026-10-27, as Tycho ledger row 453 (`docs/COMPUTE_ENGINE.md`
+in the Tycho repo).
+
+In the Tycho document `neyret/frqpa78i6s`, `X(l)` is a stored function that
+reads `C_0[l]`. `C_0` is a symbol whose stored value is a symbolic collection,
+`\sum_{i=1}^{|U|}\{C=U[i]:i,0\}`, over a chain of lazy Map/Zip collections.
+Materializing the points of `PointList(X(L), Y(L))` takes 147 to 204 ms. Tycho
+first resolves `C_0` to a plain list (about 3 ms), assigns that list to `C_0`
+for the duration of one call, and restores the stored value afterwards. With
+that binding the row takes 18 to 21 ms. (Measured by Tycho on 0.171.0.)
+
+Tycho does the save and the restore with three internal fields:
+`definition.value.storedValue`, `_placeholderSkeleton` and `_signatureSkeleton`.
+Its owner rule is "no CE internals". A child scope does not help: a stored
+function body resolves its free symbols in the scope where it was defined, so
+`pushScope()` then `declare('C')` then `assign('C', …)` does not change what `X`
+reads (measured 2026-10-27 on HEAD: `X(2)` stays the global value).
+
+Options:
+
+- (a) Cache the materialized value of a lazy collection definition during an
+  evaluation, cleared when an assignment, assumption or declaration changes. No
+  new public API. Needs a measurement on a plain-engine copy of the chain first.
+- (b) A scoped public API, for example `ce.withValues({ C_0: list }, () => …)`,
+  which binds on the existing definitions for the duration of the callback, so
+  that stored function bodies see the value, and restores the value and the type
+  slots exactly.
+- (c) Smaller public parts: a read of the stored, unevaluated value of a symbol
+  definition, and a predicate that tells whether `assign(name, v)` would change
+  the type of the definition.
+
+Plain-engine repro, measured 2026-10-27 on HEAD (the user chose to look into
+option (a) first, and wants no internal fields made public if it can be
+avoided). `L` is a list of N integers. `C` is assigned `Map(k ↦ k+1, L)`, `U`
+is `Unique(C)`, `C_0` is `Sum(If(C = U[i], i, 0), i = 1..Length(U))`, and
+`X(l)` is `C_0[l]`. Each is assigned as an unevaluated expression, so it stays
+symbolic. The test evaluates `Map(l ↦ X(l), 1..N)` and reads every element.
+After a change of `L`:
+
+| N   | `C_0.evaluate()` alone | then the `X` map | the `X` map as the first read |
+| --- | ---------------------- | ---------------- | ----------------------------- |
+| 50  | 59 ms                  | 81 ms            | 117 ms                        |
+| 300 | 154 ms                 | 162 ms           | 323 ms                        |
+| 600 | 270 ms                 | 550 ms           | 747 ms                        |
+
+- With `C_0` assigned its evaluated list, the first `X` map is 38 ms (N = 300).
+- The next `X` map without a change is 5 to 7 ms, and an unrelated
+  `ce.assign('Z', 1)` does not invalidate it. So a cache by generation exists.
+- Reading the list with `C_0.evaluate()` first does not help the `X` map: it
+  still costs about as much as evaluating `C_0` again. The first read of
+  `C_0[l]` inside the body of `X` does not reuse the value that
+  `C_0.evaluate()` computed. Finding out why is the first step of option (a).
+
+Per-call timing (N = 100, 300, 1000; one `X(i)` call at a time after a change of
+`L`): the first call costs 201, 244 and 452 ms (it derives the whole chain
+once), and each later call costs about 0.7 to 1.0 ms, constant in N. A bound
+list costs about 0.13 ms per call. Cache statistics (`ce._cacheStats`) show the
+`storedValue` memo hitting 98.6 % (347 of 352 reads), so the stored value of
+`C_0` is cached; the 625 `lazyValue` "declineStore" events are numbers and
+lists, which the memo skips on purpose. So two costs remain: (1) the first
+derivation after a dependency change, and (2) about 0.8 ms per call that is
+neither the derivation nor the stored-value lookup. Tycho's row (147 to 204 ms
+against 18 to 21 ms) fits cost (2) if the row makes about 150 to 250 calls; it
+does not fit cost (1), because Tycho resolves `C_0` in 3 ms. Next step: a
+profile of the later calls only (the first CPU profile mixed the two costs);
+`_memoizedLazyCollectionValue`, `evaluateStatements`, `holdMap` and
+`_reviseInferredType` (`boxed-value-definition.ts`) are the largest inclusive
+entries so far.
+
+Cause of cost (2), found 2026-10-27 with a CPU profile of the later calls only
+(1 495 calls, 1.17 ms each). About 70 % of each call is the TYPE of the call
+node `X(i)`: `boundCallType`, then `declaredType` and `_reviseInferredType`
+(`boxed-value-definition.ts`), which reads the live type of the stored value of
+`C_0` (the whole `Sum`/`Unique`/`Map` chain), then `capturedTypesWidened` and
+`_effectsOf` (`function-literal.ts`, `effects-of.ts`). The cache statistics
+show `type` with 7 279 generation misses, all "wasted" (the recompute gives the
+same type). Reason: the call of a function literal pushes a frame with
+`_bindsValues` set (`function-utils.ts`), and the pop of such a frame always
+advances the `any` axis (`discardEvalContext`, `engine-scope.ts`; field comment
+in `types-kernel-evaluation.ts`). Every `X(i)` therefore retires every
+`_type` and `_sgn` cache engine-wide, and the next call derives the type of
+the chain again.
+
+Done 2026-10-27 (option (i), uncommitted): `_liveValueType`
+(`boxed-value-definition.ts`) remembers the live type of the stored value
+against the bindings it reads. A first version was unsound: the dependency
+snapshot leaves out variables bound inside the value, and a type read finds
+such a variable by name, so `M := Map(x ↦ √x, [1, 2])` read as
+`vector<complex^2>` inside a call frame with a parameter `x`. Session
+compute-engine-0c found it and supplied the fix (`bindingSites` option of
+`snapshotMemoDeps`, no store or serve inside a value shield, a re-entrancy set
+and a cycle guard); that version is the one applied, with test
+`ce-566-revise-inferred-type-cache.test.ts`. 0c measured that
+`capturedValueMismatchEntry` (`function-utils.ts`) reads `value.type` on the
+`any` axis and is about a third of the remaining cost per call; routing it
+through the same memo cut the per-call cost by about 55 %. Not done. The later calls of the repro went from 1 746 ms
+to 350 ms (1 495 calls, profiled), median per call 0.57 to 0.35 ms unprofiled.
+Option (ii) was measured with a throwaway change and rejected: skipping the
+`any` advance at the pop cuts the wasted type misses from 7 279 to 3 992 only,
+because the write of the parameter value before the push also advances `any`.
+Full suite green except the `checkpoint-journal` field guard, fixed by listing
+`_liveTypeMemo` as a memo. Test: `ce-566-live-value-type-memo.test.ts`.
+
+Tycho's measurement (session tycho-3b, plain engine, its own chain of depth 4
+over 300 elements, Map/Zip): the first read through `X` costs about one
+evaluation of `C_0` (1.3 to 1.5 s symbolic; 0.9 to 1.1 s when `C_0` is
+evaluated once, assigned and read; 9 to 10 ms when a precomputed list is
+assigned). So for that chain cost (1), the interpreted evaluation of `C_0`
+itself, dominates, and the fix above does not reach Tycho's target.
+
+Profile of that evaluation, 2026-10-27 (Tycho's chain, `ce.box("C_0").evaluate()`,
+about 1.5 to 1.8 s on a loaded box): about 1.25 s of it is the evaluation of
+`Length(U)` in `absentBigopBound` (`library/utils.ts`), called from
+`classifyBigopDomain` for the upper bound of the `Sum`. That evaluation
+materializes `U = Unique(A_4)`, so it is the one pass over the depth-4 chain
+that the `Sum` needs anyway (about 4 ms per element, 300 elements, 4 levels);
+the `Sum` itself is the remaining 0.3 s. Within the pass, the largest parts are
+`boundCallType` (the type of each call of the `maxOfPair` literal, about
+0.95 s inclusive), `elementMemoComputeCell` and `mapAtCell`. The throwaway
+test that makes the pop of a `_bindsValues` frame leave the `any` axis alone
+gave 1.51 s against 1.47 s, so cache churn is NOT the lever on this chain;
+the per-element cost is the work itself.
+
+Consequence for Tycho's criterion (symbolic within 2 times of assigned): the
+"assigned" timing leaves out the evaluation of `C_0`, which costs at least the
+pass above. An interpreter cannot meet that criterion, whatever the cache
+design; only a different execution of the chain could (for example, compiling
+the lazy chain, which is what Tycho's resolver does in 3 ms). Open: decide
+whether the interpreter should evaluate a chain of lazy `Map`/`Zip` over
+index reads through the compiler (`compile()` of the collection), a design
+question for the user.
+
+Fix options for (2), as first considered:
+
+- (i) Key the live-type read of `_reviseInferredType` on the dependency
+  snapshot of the stored value (as `_memoizedStoredValue` does with
+  `memoDepsStillValid`) and not on the `any` axis. Local to one function; the
+  type of `C_0`'s value cannot depend on the parameter `l`.
+- (ii) Do not advance `any` at the pop of a `_bindsValues` frame when nothing
+  read by the cached answers can have read a parameter name. Larger effect,
+  but it changes the invalidation rule for every function-literal call, so it
+  needs the full suite and a soundness argument.
+
+The repro scripts are `r.ts`, `s.ts` and `u.ts` in the scratchpad of session
+ce-desk (`/private/tmp/claude-501/-Users-arno-dev-compute-engine/3f89ed16-813a-4ec0-900c-ea26d433b8ad/scratchpad/`); make one a file in
+`scripts/repros/` when the work starts.
 
 ### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 

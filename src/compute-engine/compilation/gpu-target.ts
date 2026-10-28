@@ -110,6 +110,7 @@ import {
 import { foldSeed } from '../numerics/random.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { declaredBinders } from '../boxed-expression/binding-sites.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -1744,6 +1745,25 @@ function gpuNaNSafeUnary(
 /** The largest finite f32 value, 2¹²⁸ − 2¹⁰⁴. */
 const GPU_F32_MAX = 3.4028234663852886e38;
 
+/**
+ * Is each value that `x` holds in the shader typed a finite real? A scalar
+ * whose static type is a finite real, or a `vec2`–`vec4` operand
+ * (`gpuOperandShape`) whose cells are: a vector of reals
+ * (`vector<real^3>`, a written `[t, k, 1]` with `t` and `k` declared
+ * `real`) or a tuple of reals of that width. A vector of `number` cells
+ * (`vector<3>`) can hold NaN, and an array or a matrix has no componentwise
+ * built-in.
+ */
+function gpuFiniteRealCells(x: Expression): boolean {
+  const shape = gpuOperandShape(x);
+  if (shape === 'scalar') return x.type.matches('finite_real');
+  if (typeof shape !== 'number') return false;
+  return (
+    x.type.matches('list<finite_real>') ||
+    x.type.matches(`tuple<${Array(shape).fill('finite_real').join(', ')}>`)
+  );
+}
+
 const GPU_F32_BOUNDED_HEADS = new Set([
   'Add',
   'Subtract',
@@ -1773,12 +1793,19 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  * Is `x` finite for certain in the shader, so that a NaN-safe helper of it
  * (`gpuNaNSafeLibrary`) can be the built-in? Four conditions:
  *
- * - its static type is a finite real;
+ * - its static type is a finite real, or it is a `vec2`–`vec4` whose cells
+ *   are finite reals (`gpuFiniteRealCells`). The rules below then apply to
+ *   each component: a written vector `[t, k, 1]` is finite when each of its
+ *   components is, and arithmetic over vectors is componentwise;
  * - each symbol it reads has a DECLARED type (a symbol declared `real`
  *   holds a finite value). An inferred type is not a promise of the host: a
- *   parameter of `p(k) := cos(1.9k)` called with `0/0` is NaN. (The engine
+ *   parameter of `p(k) := cos(1.9k)` called with `0/0` is NaN, and a
+ *   uniform (`vars: { a: 'a' }`) holds what the host passes. (The engine
  *   types such a parameter `number`, which already fails the first test.) A
- *   symbol with a value is read through its value, which the shader inlines;
+ *   symbol with a value is read through its value. When the shader computes
+ *   that value in place of the symbol (no `vars` entry and no binder names
+ *   it), the type of the symbol does not matter, and an inferred type is
+ *   accepted: `c := 2.5` makes `sin(c + x)` the built-in `sin(2.5 + x)`;
  * - it reads no name that the caller maps to its own source: `vars` can map
  *   `ExponentialE` to a run-time input, `functions` can map `Gamma` to code
  *   of the caller's, and the static type does not describe either. A name
@@ -1786,16 +1813,24 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   passes a uniform) is the exception: it is the host's input, of its
  *   declared type;
  * - it cannot overflow in f32: each head is in `GPU_F32_BOUNDED_HEADS`, a
- *   product has at most one factor that is not a number literal, a
- *   quotient has a non-zero literal divisor, and a subtree with no unknowns
- *   has a value that is finite in f32. A finite operand that
+ *   product has at most one factor of unknown magnitude (a factor of known
+ *   magnitude is a number literal, `sin`, `cos` or `tanh` of a real, or an
+ *   expression whose static type has a finite range, such as a symbol
+ *   declared `real<0..10>`), a product of factors that all have a known
+ *   magnitude stays within half the largest f32, a quotient has a non-zero
+ *   literal divisor, and a subtree with no unknowns has a value that is
+ *   finite in f32. A finite operand that
  *   overflows becomes `±∞` in the shader, and the guard turns `sin(∞)` into
  *   NaN, where the built-in gives 0 on Apple GPUs. One limit is accepted:
  *   a sum, or a product by a literal, of finite values overflows when they
  *   are within that factor of the largest f32 (3.4·10³⁸): `cos(2T)` at
  *   `T = 2·10³⁸` gives 0 there on Apple, where the guard gave NaN. A proof
  *   that excluded it would need a range for every symbol, and would keep
- *   the guard on every declared `real` that has none.
+ *   the guard on every declared `real` that has none. For the same reason
+ *   `k·t` of two declared `real` symbols keeps the guard: the operand can
+ *   be `+∞` in f32 (`k = t = 10²⁰`), where the interpreter's f64 value is
+ *   finite. Declared ranges (`k: real<0..10>`, `t: real<0..6.3>`) prove it
+ *   finite.
  *
  * The guard costs a bit test and a selection per call: about 10% of the
  * frame time of Tycho's `voronoi-diagram` on WebGPU. On a finite argument it
@@ -1807,7 +1842,7 @@ function gpuProvablyFinite(
   x: Expression,
   target: CompileTarget<Expression>
 ): boolean {
-  if (!x.type.matches('finite_real')) return false;
+  if (!gpuFiniteRealCells(x)) return false;
   // The names the caller maps to its own source (`vars`, `functions`,
   // `operators`), recorded on the common-subexpression session; with no
   // record (a direct custom target) every name may be the caller's.
@@ -1815,27 +1850,48 @@ function gpuProvablyFinite(
   if (caller === undefined) return false;
   const seen = new Map<Expression, boolean>();
   const reading = new Set<string>();
+  const isMapped = (s: string): boolean =>
+    target.varsKeys?.has(s) === true || caller.isVarsKey?.(s) === true;
+  // The value that the shader computes in place of the symbol `e`, or
+  // `undefined` when the shader reads `e` as an input. A symbol with a value
+  // that no `vars` entry, binder (a parameter, an index, a local) or target
+  // constant resolves is compiled as its value, written into the shader
+  // (`tryFoldKnownSymbol()` in `base-compiler.ts`). A later assignment does
+  // not change the compiled code, so the value, not the type of the symbol,
+  // tells what the shader computes: `c := 2.5` gives `c` the INFERRED type
+  // `real`, and `sin(c + x)` is `sin(2.5 + x)` in the shader.
+  const bakedValue = (e: Expression & { symbol: string }) => {
+    if (isMapped(e.symbol) || target.boundVars?.has(e.symbol) === true)
+      return undefined;
+    if (target.var(e.symbol) !== undefined) return undefined;
+    return e.engine._getSymbolValue(e.symbol);
+  };
   const finite = (e: Expression): boolean => {
     const known = seen.get(e);
     if (known !== undefined) return known;
     let result = false;
-    if (isNumber(e)) result = e.type.matches('finite_real');
+    // A literal is finite in the shader when it is finite in f32: `1e39` is
+    // a finite f64 value, but `+∞` in f32.
+    if (isNumber(e))
+      result =
+        e.type.matches('finite_real') &&
+        e.im === 0 &&
+        Math.abs(e.re) <= GPU_F32_MAX;
     else if (isSymbol(e)) {
-      const value = e.engine._getSymbolValue(e.symbol);
+      const baked = bakedValue(e);
+      const value = baked ?? e.engine._getSymbolValue(e.symbol);
       // A name that `vars` maps to its own bare identifier (`{ T: 'T' }`,
       // how a host passes a uniform) reads the host's input of its
       // declared type, as an unmapped symbol does. A mapping to other
       // source, or a mapping of a library constant, replaces a value whose
       // type the engine knows with one it does not.
-      const mapped =
-        target.varsKeys?.has(e.symbol) === true ||
-        caller.isVarsKey?.(e.symbol) === true;
+      const mapped = isMapped(e.symbol);
       const selfMapped =
         mapped &&
         e.valueDefinition?.isConstant !== true &&
         target.var(e.symbol) === e.symbol;
       result =
-        e.valueDefinition?.inferredType !== true &&
+        (baked !== undefined || e.valueDefinition?.inferredType !== true) &&
         (!mapped || selfMapped) &&
         (value === undefined ||
           (!reading.has(e.symbol) && (reading.add(e.symbol), finite(value))));
@@ -1855,14 +1911,75 @@ function gpuProvablyFinite(
           return true;
         }
       }
-      const literals = e.ops.filter((op) => isNumber(op)).length;
-      if (e.operator === 'Multiply') result = e.nops - literals <= 1;
+      if (e.operator === 'Multiply') result = productStaysFinite(e.ops);
+      // A written vector (`[t, k, 1]` is `vec3(t, k, 1.0)`) is finite when
+      // each of its components is.
+      else if (e.operator === 'List' || e.operator === 'Tuple') result = true;
       else if (e.operator === 'Divide')
         result = isNumber(e.op2) && e.op2.isSame(0) === false;
       else result = GPU_F32_BOUNDED_HEADS.has(e.operator);
     }
     seen.set(e, result);
     return result;
+  };
+  // The largest magnitude that the finite operand `e` can have in the
+  // shader, or `undefined` when no bound is known: the value of a number
+  // literal; the bound of the value written in place of a symbol; 1 for
+  // `sin`, `cos` and `tanh` of a real operand; else the bounds of a numeric
+  // range in the static type of `e` (`real<0..10>`, a range that the
+  // declaration of a symbol gives, and that the type of a sum or a product
+  // of such symbols carries: `k·t` with `k: real<0..10>` and
+  // `t: real<-7..7>` is typed `real<-70..70>`). A declared range is a
+  // promise of the host, as a declared `real` is (see above).
+  const magnitude = (e: Expression, depth = 0): number | undefined => {
+    if (isNumber(e))
+      return e.im === 0 && Number.isFinite(e.re) ? Math.abs(e.re) : undefined;
+    // A written vector: the largest magnitude of its components.
+    if (isFunction(e) && (e.operator === 'List' || e.operator === 'Tuple')) {
+      let m = 0;
+      for (const op of e.ops) {
+        const c = magnitude(op, depth + 1);
+        if (c === undefined) return undefined;
+        m = Math.max(m, c);
+      }
+      return m;
+    }
+    if (isSymbol(e)) {
+      const baked = bakedValue(e);
+      if (baked !== undefined && depth < 8) return magnitude(baked, depth + 1);
+    } else if (
+      isFunction(e) &&
+      (e.operator === 'Sin' || e.operator === 'Cos' || e.operator === 'Tanh') &&
+      e.type.matches('real')
+    )
+      return 1;
+    const t = e.type.type;
+    if (typeof t !== 'object' || t.kind !== 'numeric') return undefined;
+    const { lower, upper } = t;
+    if (lower === undefined || upper === undefined) return undefined;
+    const m = Math.max(Math.abs(lower), Math.abs(upper));
+    return Number.isFinite(m) ? m : undefined;
+  };
+  // A product of finite factors cannot overflow in f32 when every factor
+  // has a known magnitude and the product of those magnitudes (each counted
+  // as at least 1, so that every partial product of the shader's evaluation
+  // order is bounded too) is at most half the largest f32. The half covers
+  // the rounding of each factor and each partial product to f32. A product
+  // with one factor of unknown magnitude is accepted when the product of the
+  // known magnitudes meets the same bound, as a product by a literal is (see
+  // the limit above): `5·x` is accepted, but `H·G·t` with
+  // `H, G: real<0..10³⁰>` is not, as `H·G` alone overflows f32. Two factors
+  // of unknown magnitude can overflow: `x·y` with `x = y = 10²⁰`.
+  const productStaysFinite = (ops: ReadonlyArray<Expression>): boolean => {
+    let unknown = 0;
+    let bound = 1;
+    for (const op of ops) {
+      const m = magnitude(op);
+      if (m === undefined) unknown += 1;
+      else bound *= Math.max(1, m);
+    }
+    if (unknown > 1) return false;
+    return Number.isFinite(bound) && bound <= GPU_F32_MAX / 2;
   };
   return finite(x);
 }
@@ -1921,6 +2038,16 @@ function gpuNaNSafeTernaryCall(
   const codes = args.map((a, i) =>
     shapes[i] === 'scalar' ? `${ctor}(${compile(a)})` : compile(a)
   );
+  // Finite `vecN` operands of one width of a `clamp`, as for scalars above:
+  // `min` and `max` are componentwise. A scalar bound beside a vector keeps
+  // the helper, which broadcasts it with the vector constructor: WGSL has no
+  // `max(vecN, f32)`.
+  if (
+    name === 'clamp' &&
+    shapes.every((s) => s === width) &&
+    args.every((a) => gpuProvablyFinite(a, target))
+  )
+    return `min(max(${codes[0]}, ${codes[1]}), ${codes[2]})`;
   return `_gpu_${name}${width}(${codes.join(', ')})`;
 }
 
@@ -3557,7 +3684,8 @@ function compileGPUBroadcastUnary(
   lowering: {
     collection: () => string;
     element: (code: string) => string;
-  }
+  },
+  target: CompileTarget<Expression>
 ): string {
   const decline = (reason: string): never => {
     throw new Error(`Could not compile \`${head}\`: ${reason}`);
@@ -3613,12 +3741,20 @@ function compileGPUBroadcastUnary(
   // `gpuNaNSafeLibrary`) have the same problem, and also a `vecN` form of
   // each width. Each call on the vector code takes the form of its width,
   // which is componentwise, so the check below reads it as the operand.
+  // The element lowering sees a placeholder, not the operand, so it cannot
+  // prove the operand finite; a vector whose components are all finite for
+  // certain (`gpuProvablyFinite`) takes the built-in, which is componentwise.
   const width = gpuComponentCount(operand);
+  const finiteOperand = gpuProvablyFinite(operand, target);
   let emitted = code;
   let judged = code;
   for (const name of GPU_NAN_SAFE_UNARY) {
     const scalarCall = `_gpu_${name}(${vector})`;
-    emitted = emitted.split(scalarCall).join(`_gpu_${name}${width}(${vector})`);
+    emitted = emitted
+      .split(scalarCall)
+      .join(
+        finiteOperand ? `${name}(${vector})` : `_gpu_${name}${width}(${vector})`
+      );
     judged = judged.split(scalarCall).join(vector);
   }
   // The check reads only the text that the element lowering adds around the
@@ -5229,9 +5365,18 @@ function compileGPUElementExtremum(
     foldNaryBuiltin(name, head, args, compile, gpuShapeRules(target), target);
   if (args.length < 2) return builtin();
   if (args.some((a) => BaseCompiler.isComplexValued(a))) return builtin();
-  // Finite operands need no guard (`gpuProvablyFinite`).
-  if (args.every((a) => gpuProvablyFinite(a, target))) return builtin();
   const shapes = args.map(gpuOperandShape);
+  // Finite operands need no guard (`gpuProvablyFinite`) when they have one
+  // shape: all scalars, or `vecN` values of one width, which the built-in
+  // takes as they are. A scalar beside a vector keeps the helper, which
+  // broadcasts it with the vector constructor: WGSL has no `max(vecN, f32)`
+  // and GLSL no `max(float, vecN)`.
+  if (
+    new Set(shapes).size === 1 &&
+    (shapes[0] === 'scalar' || typeof shapes[0] === 'number') &&
+    args.every((a) => gpuProvablyFinite(a, target))
+  )
+    return builtin();
   if (!shapes.every((s) => s === 'scalar' || typeof s === 'number'))
     return builtin();
   const widths = new Set(shapes.filter((s) => typeof s === 'number'));
@@ -5389,6 +5534,9 @@ function compileGPUExtremum(
   // interpreter and the JavaScript target both answer NaN here (an empty
   // reduction has no extremum), and the shader NaN is reachable for a literal.
   if (parts.length === 0) return `(${gpuNaN(target)})`;
+  // Each component of a finite vector is finite: the built-in fold.
+  if (args.every((a, i) => isEmpty[i] || gpuProvablyFinite(a, target)))
+    return `(${parts.slice(1).reduce((acc, c) => `${name}(${acc}, ${c})`, parts[0])})`;
   return `(${fold(parts)})`;
 }
 
@@ -11244,6 +11392,152 @@ function gpuTextSymbols(expr: Expression | undefined): ReadonlySet<string> {
   };
   if (expr !== undefined) walk(expr);
   return out;
+}
+
+/**
+ * Every symbol name in `expr` and in the definition of each user function it
+ * reaches, transitively, parameters included. On the shader targets a symbol
+ * is emitted with its own name (`gpuCheckIdentifier`), so this set holds every
+ * identifier that a local, an assignment target, a loop or binder variable or
+ * a parameter of the compiled code can have. It also holds names that are
+ * only read; that makes the set larger than needed, which is safe for its
+ * use in {@link gpuPlainUniformRead}.
+ *
+ * `written` is the subset that the compiled code declares or writes: the
+ * target of a `Declare` or an `Assign`, a variable bound by a binder (the
+ * index of a `Sum`, a `Loop` element), and a parameter of a function literal,
+ * the reachable user-function definitions included. A shader variable of
+ * that name exists in the emitted code, and it hides a uniform of the same
+ * name ({@link gpuRefuseShadowedVarsSources}).
+ *
+ * A symbol with a value that no `vars` entry maps is compiled as its value,
+ * written into the shader (`tryFoldKnownSymbol()` in `base-compiler.ts`), so
+ * the walk also reaches that value: a local or a binder inside it is emitted
+ * with its own name.
+ */
+function gpuReachableSymbolNames(
+  expr: Expression,
+  vars?: Readonly<Record<string, unknown>>
+): {
+  all: ReadonlySet<string>;
+  written: ReadonlySet<string>;
+} {
+  const out = new Set<string>();
+  const written = new Set<string>();
+  const expanded = new Set<string>();
+  const expandedValues = new Set<string>();
+  const walkValue = (e: Expression, name: string): void => {
+    if (vars !== undefined && Object.hasOwn(vars, name)) return;
+    if (expandedValues.has(name)) return;
+    expandedValues.add(name);
+    const value = e.engine?._getSymbolValue(name);
+    if (value !== undefined) walk(value);
+  };
+  const walkUserFunction = (e: Expression, name: string): void => {
+    if (expanded.has(name)) return;
+    expanded.add(name);
+    const engine = e.engine;
+    if (engine === undefined) return;
+    const literal = BaseCompiler.userFunctionLiteral(engine, name);
+    if (literal !== undefined) walk(literal);
+  };
+  const walk = (e: Expression): void => {
+    if (isSymbol(e)) {
+      out.add(e.symbol);
+      walkUserFunction(e, e.symbol);
+      walkValue(e, e.symbol);
+      return;
+    }
+    if (isFunction(e)) {
+      if (typeof e.operator === 'string' && e.operator !== '')
+        walkUserFunction(e, e.operator);
+      if (
+        (e.operator === 'Declare' || e.operator === 'Assign') &&
+        isSymbol(e.ops[0])
+      )
+        written.add(e.ops[0].symbol);
+      const binders = declaredBinders(e, 'post');
+      if (binders !== undefined)
+        for (const name of binders.visibleFrom.keys()) written.add(name);
+      for (const op of e.ops) walk(op);
+    }
+  };
+  walk(expr);
+  return { all: out, written };
+}
+
+/**
+ * Is the `vars` source `identifier`, given for the symbol `name`, a plain
+ * read of a shader variable (a uniform) whose value cannot change while the
+ * shader runs? Then reading it twice gives the same value, and the passes
+ * may share, skip or repeat its reads (`isOpaqueVarsSource`, `cse.ts`).
+ *
+ * A uniform is read-only in GLSL and WGSL. The one way for a read of
+ * `identifier` to give a different value is a variable of the shader with
+ * the same name that the shader writes: a `Block` local, an assigned symbol,
+ * a loop or binder variable, or a parameter, here or in a user-function
+ * definition that the code reaches. Each of these is emitted with its
+ * symbol name, so the read is refused when `identifier` is the name of any
+ * symbol in `symbols` (see {@link gpuReachableSymbolNames}), when it is
+ * another `vars` key, or when another `vars` key has the same source. These
+ * tests are stricter than necessary, as a symbol that is only read also
+ * counts.
+ */
+function gpuPlainUniformRead(
+  identifier: string,
+  name: string,
+  vars: Readonly<Record<string, unknown>>,
+  symbols: () => ReadonlySet<string>
+): boolean {
+  if (symbols().has(identifier)) return false;
+  for (const key of Object.keys(vars)) {
+    if (key === name) continue;
+    if (key === identifier) return false;
+    const other = vars[key];
+    if (typeof other === 'string' && other.trim() === identifier) return false;
+  }
+  return true;
+}
+
+/**
+ * Refuse a `vars` entry whose source is a bare identifier that names a
+ * variable the compiled code declares or writes (`written`, see
+ * {@link gpuReachableSymbolNames}).
+ *
+ * The shader emits that variable with the same name, so inside its scope the
+ * identifier reads the variable, not the uniform the host meant: with
+ * `vars: { a: 'k' }` and a `Block` that declares and assigns its own `k`,
+ * every read of `a` gave the value of the local. The compile throws instead,
+ * and the interpreter gives the answer.
+ *
+ * A self-mapped entry (`vars: { T: 'T' }`) is not refused: the source is the
+ * symbol's own spelling, and a written input is read from a local copy
+ * (`inputLocals` in `compileOrThrow`). A source that names a symbol the code
+ * only reads is not refused either. An entry whose key the code never reads
+ * (`all`) is not refused: a host can pass one `vars` map for many
+ * expressions.
+ */
+function gpuRefuseShadowedVarsSources(
+  vars: Readonly<Record<string, unknown>>,
+  written: () => ReadonlySet<string>,
+  all: () => ReadonlySet<string>
+): void {
+  for (const key of Object.keys(vars)) {
+    if (!all().has(key)) continue;
+    const source = vars[key];
+    if (typeof source !== 'string') continue;
+    const identifier = source.trim();
+    if (identifier === key) continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(identifier)) continue;
+    if (!written().has(identifier)) continue;
+    throw new Error(
+      `Could not compile: the \`vars\` entry for \`${key}\` reads the ` +
+        `uniform \`${identifier}\`, but the compiled code declares or writes ` +
+        `the symbol \`${identifier}\`, which the shader emits with the same ` +
+        `name. The shader would read that variable instead of the uniform. ` +
+        `Rename the uniform or the symbol.`
+    );
+  }
 }
 
 /** The message for a random form that would need general collection indexing. */
@@ -18666,8 +18960,8 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       // already componentwise on a vector, so the scalar form applies directly
       // to the vector operand. Fails closed on anything with no static
       // vector shape.
-      broadcastUnary: (head, operand, lowering) =>
-        compileGPUBroadcastUnary(head, operand, lowering),
+      broadcastUnary: (head, operand, lowering, unaryTarget) =>
+        compileGPUBroadcastUnary(head, operand, lowering, unaryTarget),
       // The same defect class on every emission that does NOT go through the
       // fan-out hook (the generic function-codegen and string-helper paths):
       // a collection, matrix or array operand reaching a lowering the shader
@@ -19487,12 +19781,34 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       options.functions
     );
     // A string `vars` entry is caller source unless it is the spelling this
-    // target emits for the symbol anyway, its bare name
-    // (`isOpaqueVarsSource`).
+    // target emits for the symbol anyway, its bare name, or a bare identifier
+    // that reads a uniform no variable of the shader can shadow and write
+    // (`isOpaqueVarsSource`, `gpuPlainUniformRead`). The symbol names are
+    // collected once, on the first question, from the expression before the
+    // passes below change it: they inline user-function bodies, whose names
+    // the walk already reaches.
+    let symbolNames: ReturnType<typeof gpuReachableSymbolNames> | undefined;
+    const rootForNames = expr;
+    const reachable = (): ReturnType<typeof gpuReachableSymbolNames> =>
+      (symbolNames ??= gpuReachableSymbolNames(rootForNames, options.vars));
+    const reachableNames = (): ReadonlySet<string> => reachable().all;
+    if (options.vars !== undefined)
+      gpuRefuseShadowedVarsSources(
+        options.vars,
+        () => reachable().written,
+        reachableNames
+      );
     const opaqueVar = (name: string): boolean =>
       isOpaqueVarsSource(
         options.vars?.[name],
-        /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : undefined
+        /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : undefined,
+        (identifier) =>
+          gpuPlainUniformRead(
+            identifier,
+            name,
+            options.vars ?? {},
+            reachableNames
+          )
       );
     expr = unrollFixedWidthCollections(expr, {
       skipHeads: unrollSkipHeads,
@@ -20012,11 +20328,12 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         isWGSL ? GPU_PCG3D_PREAMBLE_WGSL : GPU_PCG3D_PREAMBLE_GLSL
       );
     }
-    if (code.includes('_gpu_gcd') || code.includes('_gpu_lcm'))
-      preamble +=
-        this.languageId === 'wgsl'
-          ? GPU_GCD_PREAMBLE_WGSL
-          : GPU_GCD_PREAMBLE_GLSL;
+    // A shader that calls only `_gpu_gcd` does not carry `_gpu_lcm`; one
+    // that calls `_gpu_lcm` also gets `_gpu_gcd`, which its body calls.
+    preamble += gpuLibrarySubset(
+      code,
+      isWGSL ? GPU_GCD_PREAMBLE_WGSL : GPU_GCD_PREAMBLE_GLSL
+    );
     preamble += gpuLibrarySubset(
       code,
       isWGSL ? GPU_MEDIAN_PREAMBLE_WGSL : GPU_MEDIAN_PREAMBLE_GLSL

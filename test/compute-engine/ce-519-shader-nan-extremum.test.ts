@@ -102,8 +102,14 @@ describe('CE-519 — Max, Min and Clamp call the NaN-safe helpers', () => {
   });
 
   it('a Max over a vector folds the helper over its components', () => {
+    // `x` has no declared type and can be NaN.
+    expect(shader(['Max', ['List', 'x', 1, 2], 0], 'wgsl').code).toBe(
+      '(_gpu_max(_gpu_max(_gpu_max(x, 1.0), 2.0), 0.0))'
+    );
+    // The components of `v: vector<real^3>` are finite for certain: the
+    // built-in (CE-565).
     expect(shader(['Max', 'v', 0], 'wgsl').code).toBe(
-      '(_gpu_max(_gpu_max(_gpu_max(v.x, v.y), v.z), 0.0))'
+      '(max(max(max(v.x, v.y), v.z), 0.0))'
     );
   });
 

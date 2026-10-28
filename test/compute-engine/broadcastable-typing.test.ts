@@ -280,9 +280,12 @@ describe('broadcastable<T> typing (phase C — generic wrapper)', () => {
     // `Abs` cells carry their non-negative range (ranged-results round), plus
     // the signed pair: unlike the heads above, `absFunctionType` does not
     // apply the generic-point convention to an operand of unproven
-    // finiteness — `|±∞| = +∞` — so the cell names that outcome.
+    // finiteness — `|±∞| = +∞` — so the cell names that outcome. The
+    // handler claims the signed pair (`absFunctionType`); it printed `+oo`
+    // until 2026-10-27 because the union de-duplication gave `+oo` and
+    // `-oo` the same key and dropped `-oo`.
     expect(ce.box(['Abs', arg]).type.toString()).toBe(
-      '+oo | list<+oo | list<any> | nan | real<0..>> | nan | real<0..>'
+      'list<list<any> | nan | real<0..> | signed_infinity> | nan | real<0..> | signed_infinity'
     );
   });
 

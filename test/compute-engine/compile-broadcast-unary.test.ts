@@ -72,10 +72,10 @@ describe('BROADCAST UNARY OVER A COLLECTION — four-target matrix', () => {
   describe('GLSL / WGSL — componentwise, no fan-out', () => {
     it('applies a builtin directly to a static vec4 operand', () => {
       expect(g(['Sin', ['List', 1, 2, 3, 4]])).toBe(
-        '_gpu_sin4(vec4(1.0, 2.0, 3.0, 4.0))'
+        'sin(vec4(1.0, 2.0, 3.0, 4.0))'
       );
       expect(w(['Sin', ['List', 1, 2, 3, 4]])).toBe(
-        '_gpu_sin4(vec4f(1.0, 2.0, 3.0, 4.0))'
+        'sin(vec4f(1.0, 2.0, 3.0, 4.0))'
       );
     });
 

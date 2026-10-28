@@ -203,7 +203,9 @@ const ROWS: Row[] = [
     name: 'Differences',
     json: (s) => ['Differences', s],
     latex: '\\operatorname{Differences}(%)',
-    absentSlot: ['list<number>', '[NaN]'],
+    // `integer` joined with `nan` keeps the `nan` arm (it was `number`,
+    // which also admits complex numbers), as the list control does.
+    absentSlot: ['list<integer | nan>', '[NaN]'],
     values: 'list<integer>',
     list: 'list<integer | nan>',
   },

@@ -23,7 +23,8 @@
  * `.x` and `.y`, and calls of the helpers and of `abs`, `max`, `min`,
  * `sqrt`, `log`, `exp`, `pow`, `floor`, `fract`, `sin`, `cos`, `length`, GLSL
  * `atan` (one or two arguments) and `vec2`, and WGSL `atan` (one
- * argument), `atan2`, `select` and `vec2f`. The NaN and infinity helpers
+ * argument), `atan2`, `select` and `vec2f`. `sin`, `cos`, `sign`, `max`
+ * and `min` are componentwise on a `vec2`. The NaN and infinity helpers
  * `_gpu_nan` and `_gpu_inf`, which build their value from a bit pattern,
  * are read as `0.0 / 0.0` and `1.0 / 0.0`. The NaN test on the bit pattern
  * of a name, `(floatBitsToUint(x) & 0x7FFFFFFFu) > 0x7F800000u` in GLSL and
@@ -335,19 +336,26 @@ const num = (v: Value): number => {
   return v;
 };
 
+/** A one-operand built-in that is componentwise on a `vec2`, as `sin`,
+ * `cos` and `sign` are in both languages. */
+function each(x: Value, f: (x: number) => number): Value {
+  if (typeof x === 'number') return f(x);
+  return { x: f(x.x), y: f(x.y) };
+}
+
 const BUILTINS: Record<string, (...a: Value[]) => Value> = {
   abs: (x) => Math.abs(num(x)),
-  sign: (x) => Math.sign(num(x)),
-  max: (x, y) => Math.max(num(x), num(y)),
-  min: (x, y) => Math.min(num(x), num(y)),
+  sign: (x) => each(x, Math.sign),
+  max: (x, y) => lift(x, y, Math.max),
+  min: (x, y) => lift(x, y, Math.min),
   sqrt: (x) => fr(Math.sqrt(num(x))),
   log: (x) => fr(Math.log(num(x))),
   exp: (x) => fr(Math.exp(num(x))),
   pow: (x, y) => fr(Math.pow(num(x), num(y))),
   floor: (x) => Math.floor(num(x)),
   fract: (x) => fr(num(x) - Math.floor(num(x))),
-  sin: (x) => fr(Math.sin(num(x))),
-  cos: (x) => fr(Math.cos(num(x))),
+  sin: (x) => each(x, (v) => fr(Math.sin(v))),
+  cos: (x) => each(x, (v) => fr(Math.cos(v))),
   atan: (y, x) =>
     x === undefined ? fr(Math.atan(num(y))) : fr(Math.atan2(num(y), num(x))),
   atan2: (y, x) => fr(Math.atan2(num(y), num(x))),
