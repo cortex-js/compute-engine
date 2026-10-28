@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { executeEpsil } from '../../src/epsil/execute-epsil';
+import { isTransitivelyPure } from '../../src/compute-engine/boxed-expression/transitive-purity';
 
 //
 // `isTransitivelyPure()` reads the canonical form of a value that is not
@@ -13,7 +14,6 @@ import { executeEpsil } from '../../src/epsil/execute-epsil';
 
 describe('A STORED VALUE WHOSE CANONICAL FORM IS NOT CANONICAL', () => {
   test('the read returns, as the expression written in place does', () => {
-    const start = Date.now();
     const held = executeEpsil(
       new ComputeEngine(),
       'r = Map(t, (x) => x * 2)\nLength(r)'
@@ -27,8 +27,31 @@ describe('A STORED VALUE WHOSE CANONICAL FORM IS NOT CANONICAL', () => {
       'Length',
       ['Map', 't', ['Function', ['Multiply', 'x', 2], 'x']],
     ]);
-    expect(Date.now() - start).toBeLessThan(4000);
   }, 5000);
+
+  test('the purity walk stops at a canonical form that is still noncanonical', () => {
+    const ce = new ComputeEngine();
+    const value = ce.box(
+      ['Map', 't', ['Function', ['Multiply', 'x', 2], 'x']],
+      { form: 'raw' }
+    );
+    const next = value.canonical;
+    expect(next.isCanonical).toBe(false);
+    let reads = 0;
+    const canonical = jest
+      .spyOn(value, 'canonical', 'get')
+      .mockImplementation(() => {
+        if (++reads > 1)
+          throw new Error('Purity revisited a noncanonical value');
+        return next;
+      });
+    try {
+      expect(isTransitivelyPure(value)).toBe(false);
+      expect(reads).toBe(1);
+    } finally {
+      canonical.mockRestore();
+    }
+  });
 
   test('the engine route', () => {
     const ce = new ComputeEngine();

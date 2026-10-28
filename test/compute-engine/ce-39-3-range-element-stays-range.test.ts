@@ -197,10 +197,28 @@ describe('A Range row is a row of its integers', () => {
   test('Shape and Rank of many long range rows do not list the rows', () => {
     const rows: unknown[] = ['List'];
     for (let i = 0; i < 10_000; i++) rows.push(['Range', 1, 10_000]);
-    const start = performance.now();
-    expect(value(['Shape', rows]).json).toEqual(['Tuple', 10_000, 10_000]);
-    expect(value(['Rank', rows]).json).toBe(2);
-    expect(performance.now() - start).toBeLessThan(1000);
+    const definition = ce.lookupDefinition('Range');
+    if (
+      !definition ||
+      !('operator' in definition) ||
+      !definition.operator.collection
+    )
+      throw new Error('Range collection handlers are required');
+    const collection = definition.operator.collection;
+    const iterator = jest.spyOn(collection, 'iterator');
+    const at = jest.spyOn(collection, 'at');
+    try {
+      expect(value(['Shape', rows]).json).toEqual(['Tuple', 10_000, 10_000]);
+      expect(value(['Rank', rows]).json).toBe(2);
+      // Reading dimensions may inspect row metadata, but must not traverse the
+      // 100 million scalar entries. Counts guard the algorithm independently
+      // of machine speed and concurrent CI workers.
+      expect(iterator).not.toHaveBeenCalled();
+      expect(at.mock.calls.length).toBeLessThanOrEqual(2 * 10_000);
+    } finally {
+      iterator.mockRestore();
+      at.mockRestore();
+    }
   });
 
   test('range rows with too many elements in total are not listed', () => {
