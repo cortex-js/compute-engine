@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-611.
+Next free reference: CE-612.
 
 **Entry format.**
 
@@ -2963,15 +2963,19 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-605. GLSL and WGSL decline a `Map` inside the lambda of another `Map`
+### CE-611. `interval-js` writes out a nested `Map` with no size limit
 
-**Status:** open; defect. Tycho ledger row 475, 2026-10-28; instrument
-`~/dev/tycho/scripts/repros/2026-10-28-ce475-glsl-nested-map-reduction-repro.mts`.
+**Status:** open; performance. Found 2026-10-28 while fixing CE-605.
 
-`\min(\mathrm{Map}(k\mapsto\max(\mathrm{Map}(j\mapsto j\cdot k,[1,3]))+x,[1,2]))`
-declines on `glsl` and `wgsl` ("Could not compile `Map`: … no lowering"). One
-level of `Map` compiles, and the `javascript` and `interval-js` targets compile
-both levels.
+The `interval-js` target writes out each element of a `Map` through its own
+lowering, and nothing limits the product of the widths of nested `Map`s. A
+100×100 nested `Map` (`min(Map(k ↦ max(Map(j ↦ j·k, L2)), L1))`) compiles to
+about 570,000 characters in about 1.4 s; 20×20 gives about 23,000 characters.
+The `javascript` target emits two loops (about 2,600 characters at 100×100).
+Since CE-605 the shader targets decline above 64 written-out bodies
+(`nestedUnrollFits`, `compilation/fixed-width-unroll.ts`). Possible fixes: the
+same limit (decline, or fall back to a loop) or a loop lowering on
+`interval-js`. Same on main before CE-605.
 
 ### CE-573. An `interval-wgsl` target for interval refinement on the GPU
 

@@ -995,9 +995,12 @@ function literalPointOperands(
  *    ONE argument, the element, and canonicalization rejects a callback of
  *    any other arity as a `callback-arity` error, so only that shape is a
  *    mapping the substitution can reproduce;
- *  - the body binds no name of its own: `subs` is not capture-avoiding, so an
- *    inner binder could rebind the parameter or capture a symbol of an
- *    element;
+ *  - the body binds no name of its own: `subs` is not capture-avoiding, so
+ *    an inner binder could capture a symbol of an element. A target that
+ *    asks for `UnrollOptions.unrollComprehensions` (the shader targets,
+ *    which have no `Map` lowering) accepts a body with binders when the
+ *    substitution is still correct ({@link binderSafeSubstitution}): that
+ *    is what writes out a `Map` inside the lambda of another `Map` there;
  *  - the body is pure: an effect in it runs once per element either way, but
  *    only an effect-free body may be duplicated by CSE and by the emitters;
  *  - every element is pure: the body may mention the parameter several times,
@@ -1041,13 +1044,151 @@ function tryUnrollMap(
     isFunction(inner, 'Block') && inner.nops === 1 ? inner.op1 : inner;
   if (isFunction(body, 'Block')) return undefined;
   if (body.isPure !== true) return undefined;
-  if (collectBinderNames(body).size > 0) return undefined;
   if (!elements.every((e) => e.isPure === true)) return undefined;
+  // A body with a binder of its own (an inner lambda, a `Sum`) is written
+  // out only for a target with no `Map` lowering at all (the shader
+  // targets). Every other target lowers the `Map` as a loop, and writing
+  // out a nested `Map` over two wide lists there gives N×M copies of the
+  // inner body: 2 MB of JavaScript for two lists of 300 elements.
+  if (
+    options.unrollComprehensions === true
+      ? !binderSafeSubstitution(body, parameter, elements) ||
+        !nestedUnrollFits(body, elements.length)
+      : collectBinderNames(body).size > 0
+  )
+    return undefined;
 
   return expr.engine.function(
     'List',
     elements.map((e) => body.subs({ [parameter]: e }))
   );
+}
+
+/**
+ * Can `body[p := e]`, for the parameter `p` of the lambda, be computed with
+ * `subs` for each element `e`, although `body` can contain binders of its
+ * own?
+ *
+ * Two cases make the substitution wrong, and the function refuses both:
+ *  - an inner binder binds `p` again, and `subs` does not see it as a
+ *    binder. `subs` replaces only the FREE occurrences of a name: it does
+ *    not enter an inner binder of the same name (a `Function` parameter, an
+ *    index of a `Sum`, a local of a `Block`; `subsBinderView()` in
+ *    `boxed-function.ts`). That protection does not apply to a name that
+ *    starts with `_` (a wildcard name, which a rule instantiates with
+ *    `subs`), and an anonymous lambda parameter (`_`, `_1`) is such a name.
+ *    With the outer and the inner lambda both written with `_`, `subs`
+ *    would replace the parameter and the body of the inner lambda too. So
+ *    a `p` that starts with `_` is refused when a scope in `body` holds it.
+ *    Any other `p` is not refused for that reason: a scope can hold more
+ *    names than its binder writes (the `Block` of the inner lambda of
+ *    `k ↦ Map(j ↦ j·k, …)` also holds `k`, which `subs` still treats as
+ *    free there), and `subs` protects a real inner binder of that name;
+ *  - an element mentions a name that an inner binder binds. `subs` is not
+ *    capture-avoiding: the copy of the element under that binder refers to
+ *    the inner binder, not to the outer value. So the substitution is
+ *    refused when a symbol of an element is a name that a scope in `body`
+ *    holds.
+ *
+ * The test reads every name of every scope in `body`
+ * (`collectBinderNames()`), and every symbol at any depth of each element,
+ * so it is conservative.
+ *
+ * This is what lets the rule write out a `Map` whose lambda holds another
+ * `Map` or a `Sum`: `Map(k ↦ Max(Map(j ↦ j·k, [1, 3])), [1, 2])` becomes
+ * `[Max(Map(j ↦ j·1, [1, 3])), Max(Map(j ↦ j·2, [1, 3]))]`, and the pass
+ * then writes out the inner `Map` of each element. The shader targets have
+ * no `Map` lowering, so without this the nested form was a decline there.
+ */
+function binderSafeSubstitution(
+  body: Expression,
+  parameter: string,
+  elements: ReadonlyArray<Expression>
+): boolean {
+  const binders = collectBinderNames(body);
+  if (binders.size === 0) return true;
+  if (parameter.startsWith('_') && binders.has(parameter)) return false;
+  return elements.every((e) => e.symbols.every((s) => !binders.has(s)));
+}
+
+/**
+ * Does writing out a `Map` of `width` elements over `body` stay within
+ * `MAX_UNROLLED_COMPREHENSION_SIZE` written-out bodies, counting the `Map`
+ * and `Comprehension` nodes inside `body`, which the pass then writes out
+ * in each copy?
+ *
+ * Each level checks only its own size, so without this test a `Map` or a
+ * `Comprehension` inside the lambda of a `Map` gives the PRODUCT of the
+ * sizes: a nested `Map` over two lists of 100 elements was a GLSL shader of
+ * 330,000 characters. A shader of that size probably fails in the driver,
+ * and a decline (the `Map` stays, and the target reports that it has no
+ * lowering for it) is clearer.
+ *
+ * The test applies only to a body that binds a name of its own: a `Map` or
+ * a `Comprehension` inside the body has a binder, so this is exactly the
+ * case that the shader option of {@link tryUnrollMap} accepts and the other
+ * targets refuse. A body without a binder is written out as before. An inner
+ * `Map` or `Comprehension` whose size is not known before the substitution
+ * (`Range(1, k)`, a list symbol) cannot be counted, and the test fails: the
+ * shader targets declined such a nested form before the rule accepted
+ * bodies with binders.
+ *
+ * The other constructs the pass writes out are not counted. A `Sum` or a
+ * `Product` stays a loop. The element-wise fan-out (rule 4), the selection
+ * fan-out and the point rules have no binder, so they are written out in a
+ * body with no binder too, as before this rule accepted binders.
+ */
+function nestedUnrollFits(body: Expression, width: number): boolean {
+  if (collectBinderNames(body).size === 0) return true;
+  const inner = writtenBodies(body);
+  if (inner === undefined) return false;
+  return width * Math.max(1, inner) <= MAX_UNROLLED_COMPREHENSION_SIZE;
+}
+
+/**
+ * The number of bodies that writing out every `Map` and every
+ * `Comprehension` in `e` gives, or `undefined` when the size of one of them
+ * is not known. Siblings add up. A `Map` multiplies the count of its lambda
+ * body by its width, and a `Comprehension` multiplies the count of its body
+ * by the product of the counts of its domains (`literalDomainCount`).
+ */
+function writtenBodies(e: Expression): number | undefined {
+  if (!isFunction(e)) return 0;
+  let size: number | undefined;
+  let inner: Expression | undefined;
+  let rest: ReadonlyArray<Expression> = e.ops;
+  if (isFunction(e, 'Map') && e.nops === 2) {
+    const source = e.op2;
+    size = isFunction(source, 'List')
+      ? source.nops
+      : staticListWidth(source, true);
+    if (size === undefined) return undefined;
+    if (isFunction(e.op1, 'Function')) inner = e.op1.op1;
+    rest = [source];
+  } else if (isFunction(e, 'Comprehension') && e.nops >= 2) {
+    size = 1;
+    for (const clause of e.ops.slice(1)) {
+      if (!isFunction(clause, 'Element') || clause.nops !== 2)
+        return undefined;
+      const count = literalDomainCount(clause.op2);
+      if (count === undefined) return undefined;
+      size *= count;
+    }
+    inner = e.op1;
+    rest = e.ops.slice(1);
+  }
+  let count = 0;
+  if (size !== undefined) {
+    const n = inner === undefined ? 0 : writtenBodies(inner);
+    if (n === undefined) return undefined;
+    count = size * Math.max(1, n);
+  }
+  for (const op of rest) {
+    const n = writtenBodies(op);
+    if (n === undefined) return undefined;
+    count += n;
+  }
+  return count;
 }
 
 /**

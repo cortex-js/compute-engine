@@ -161,14 +161,75 @@ describe('FIXED-WIDTH UNROLL — Map over a literal list', () => {
     expect(unrollFixedWidthCollections(expr)).toBe(expr);
   });
 
-  it('leaves a body that BINDS a name untouched', () => {
-    // `subs` is not capture-avoiding.
+  // A body that binds a name of its own. The targets with a `Map` lowering
+  // keep the `Map`: written out, a `Map` inside another `Map` over two wide
+  // lists would give N×M copies of the inner body. The shader targets
+  // (`unrollComprehensions`), which have no `Map` lowering, write it out
+  // when the substitution is correct (CE-605).
+  const SUM_BODY = [
+    'Map',
+    ['Function', ['Sum', ['Multiply', 'p', 'i'], ['Limits', 'i', 1, 3]], 'p'],
+    FIVE,
+  ];
+  const shaderRoute = (json: any) =>
+    unrollFixedWidthCollections(ce.box(json), { unrollComprehensions: true });
+
+  it('leaves a body that BINDS a name untouched, on a target with a Map lowering', () => {
+    const expr = ce.box(SUM_BODY as any);
+    expect(unrollFixedWidthCollections(expr) === expr).toBe(true);
+  });
+
+  it('on the shader route, substitutes into a body that BINDS a name no element mentions', () => {
+    // The index `i` of the `Sum` is not a symbol of any element, so `subs`
+    // captures nothing.
+    expect(shaderRoute(SUM_BODY).json).toEqual([
+      'List',
+      ['Sum', ['Multiply', 'a', 'i'], ['Limits', 'i', 1, 3]],
+      ['Sum', ['Multiply', 'b', 'i'], ['Limits', 'i', 1, 3]],
+      ['Sum', ['Multiply', 'c', 'i'], ['Limits', 'i', 1, 3]],
+      ['Sum', ['Multiply', 'd', 'i'], ['Limits', 'i', 1, 3]],
+      ['Sum', ['Multiply', 'i', 's'], ['Limits', 'i', 1, 3]],
+    ]);
+  });
+
+  it('on the shader route, leaves a body whose binder would CAPTURE an element untouched', () => {
+    // `subs` is not capture-avoiding: the element `k` substituted under the
+    // `Sum` over `k` would read the index, not the outer `k`. (The index is
+    // not `i`: in MathJSON, the element `i` is the imaginary unit.)
     const expr = ce.box([
       'Map',
-      ['Function', ['Sum', ['Multiply', '_', 'i'], ['Limits', 'i', 1, 3]], '_'],
+      ['Function', ['Sum', ['Multiply', 'p', 'k'], ['Limits', 'k', 1, 3]], 'p'],
+      ['List', 'a', 'b', 'c', 'd', 'k'],
+    ]);
+    expect(
+      unrollFixedWidthCollections(expr, { unrollComprehensions: true }) ===
+        expr
+    ).toBe(true);
+  });
+
+  it('on the shader route, leaves an anonymous parameter bound again inside untouched', () => {
+    // `subs` does not treat a name that starts with `_` as a binder, so it
+    // would replace the parameter and the body of the inner lambda too.
+    const expr = ce.box([
+      'Map',
+      [
+        'Function',
+        [
+          'Add',
+          '_1',
+          [
+            'Max',
+            ['Map', ['Function', ['Multiply', '_1', 'x'], '_1'], FIVE],
+          ],
+        ],
+        '_1',
+      ],
       FIVE,
     ]);
-    expect(unrollFixedWidthCollections(expr)).toBe(expr);
+    expect(
+      unrollFixedWidthCollections(expr, { unrollComprehensions: true }) ===
+        expr
+    ).toBe(true);
   });
 
   it('leaves a REST parameter untouched', () => {

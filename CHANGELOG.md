@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **GLSL and WGSL compile a `Map` inside the lambda of another `Map`.** Before,
+  `\min(\mathrm{Map}(k\mapsto\max(\mathrm{Map}(j\mapsto j\cdot k,[1,3]))+x,[1,2]))`
+  failed on both shader targets with "Could not compile `Map`: … no lowering";
+  now it compiles to `min(x + 3.0, x + 6.0)` (with the NaN-safe helper). A
+  `Map` over a list of known length whose lambda body binds a name (an inner
+  `Map`, a `Sum`, a `Comprehension`) is written out on the shader targets. The
+  shader targets still decline when an element of the list would be captured by
+  a name the body binds, when an anonymous parameter (`_`, `_1`) is bound again
+  inside the body, when an inner length is not known, or when the result would
+  hold more than 64 written-out lambda bodies (a larger shader would probably
+  fail in the driver). The other targets are unchanged: they compile such a
+  `Map` as a loop.
+
 ## 0.173.0 _2026-10-28_
 
 ### Resolved Issues
