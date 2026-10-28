@@ -22,9 +22,9 @@ import {
 } from '../../common/type/primitive.js';
 import { flatten, flattenHoldingBarriers } from './flatten.js';
 import {
-  functionLiteralParameters,
+  functionLiteralBody,
   functionLiteralParameterType,
-  restParameterIndex,
+  restParameterSignatureTail,
 } from './function-literal.js';
 import {
   couldMatchNonEmpty,
@@ -109,7 +109,10 @@ import {
   type Threadable,
 } from './generic-instantiation.js';
 import { FunctionSignature, Type } from '../../common/type/types.js';
-import { adoptTopPlaceholderSlots } from './effects-inference.js';
+import {
+  adoptTopPlaceholderSlots,
+  functionLiteralParameterSlots,
+} from './effects-inference.js';
 import type { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
@@ -1093,12 +1096,14 @@ const VALUE_POSITION_TYPES: ReadonlySet<Type> = new Set([
  *   `__unit__(N)`, the newton).
  */
 const ALL_OPERANDS = 'all';
-const FUNCTION_OPERAND_POSITIONS: ReadonlyMap<string, number | 'all'> =
-  new Map<string, number | 'all'>([
-    ['Apply', ALL_OPERANDS],
-    ['ApplyWhole', ALL_OPERANDS],
-    ['__unit__', ALL_OPERANDS],
-  ]);
+const FUNCTION_OPERAND_POSITIONS: ReadonlyMap<string, number | 'all'> = new Map<
+  string,
+  number | 'all'
+>([
+  ['Apply', ALL_OPERANDS],
+  ['ApplyWhole', ALL_OPERANDS],
+  ['__unit__', ALL_OPERANDS],
+]);
 
 /** A symbol whose name is one uppercase letter: the names the repair of
  * `devolveUnappliedOperator` can apply to (`N`, `D`). */
@@ -1123,7 +1128,10 @@ function candidateOperand(
   while (!x.isCanonical && isFunction(x, 'Delimiter')) {
     if (x.nops === 2) {
       const delim = isString(x.op2) ? x.op2.string : undefined;
-      if (delim === undefined || !(delim.startsWith('(') && delim.endsWith(')')))
+      if (
+        delim === undefined ||
+        !(delim.startsWith('(') && delim.endsWith(')'))
+      )
         return undefined;
     } else if (x.nops !== 1) return undefined;
     let inner = x.op1;
@@ -1256,23 +1264,27 @@ export function devolveAtValuePositions(
       isFunction(callee, 'Function') &&
       callee.isCanonical
     ) {
-      // Only the ANNOTATED parameter types matter here
-      // (`isAnnotatedValueParameter` reads a bare parameter as `unknown`), so
-      // they are read from the literal, not from `callee.type`. Deriving the
-      // literal's full type here also derives its body's type while the
+      // The parameter slots are read from the literal
+      // (`functionLiteralParameterSlots`), not from `callee.type`. Deriving
+      // the literal's full type here also derives its body's type while the
       // enclosing call is being boxed: with `Map(r, v)` in the body and `r` a
       // recursive user function, that types `r` for the first time inside a
-      // type handler, which the type-handler purity check refuses. A rest
-      // parameter (always last) is not a value position.
-      const params = functionLiteralParameters(callee);
-      const rest = restParameterIndex(callee.ops.slice(1));
-      const fixed = rest < 0 ? params : params.slice(0, rest);
+      // type handler, which the type-handler purity check refuses. The slots
+      // are the ones of the derived type (annotations, destructuring and
+      // inferred collection types), and a rest parameter keeps its `any*`
+      // tail.
+      const body = functionLiteralBody(callee);
+      const slots =
+        body === undefined
+          ? undefined
+          : functionLiteralParameterSlots(callee, body);
       const forwarded = devolveAtValuePositions(
         ce,
         '',
         {
           kind: 'signature',
-          args: fixed.map((p) => ({ type: p.type ?? 'unknown' })),
+          ...(slots !== undefined ? { args: slots } : {}),
+          ...restParameterSignatureTail(callee.ops.slice(1)),
           result: 'unknown',
         },
         ops.slice(1),
@@ -1294,8 +1306,7 @@ export function devolveAtValuePositions(
     // to test it would bind it, or declare it, in the current scope, before
     // the operator's handler opens its own (a parameter of a function
     // literal, a local of a block).
-    if (!op.isCanonical && !resolvesToRepairableOperator(ce, op.symbol))
-      return;
+    if (!op.isCanonical && !resolvesToRepairableOperator(ce, op.symbol)) return;
     const devolved = canonicalValueOperand(ce, op);
     // Only a repaired operand replaces the operand: a raw operand that was
     // not repaired stays raw, for the operator to canonicalize itself.

@@ -1520,6 +1520,55 @@ export function namedLiteralSignatureType(
   return type;
 }
 
+/**
+ * The positional parameter slots of the `Function` literal `expr` with the
+ * body `body`, or `undefined` when it has none. A rest parameter is not a
+ * slot: `restParameterSignatureTail()` gives its variadic tail.
+ *
+ * This reads the parameters and the structure of the body, never the body's
+ * type, so it can run while an enclosing call is being boxed.
+ */
+export function functionLiteralParameterSlots(
+  expr: Expression,
+  body: Expression
+): { name?: string; type: Type }[] | undefined {
+  const params = functionLiteralParameters(expr);
+  // Parameter slots: an annotated param carries its declared type, named
+  // (`x: integer`); a bare param is `unknown` and keeps its name, so that a
+  // named call can find the slot (`inferredSignatureParameterName`). The Type
+  // OBJECT is carried through — never serialized and re-parsed: an annotation may name
+  // a SCOPE-LOCAL type (resolved when the literal was canonicalized), and a
+  // text round-trip here — possibly after that scope popped — either threw
+  // `Unknown type` or silently dropped the annotation. Same hazard class as
+  // the inferred-signature fix in `boxed-operator-definition.ts`.
+  const paramOps = isFunction(expr, 'Function') ? expr.ops.slice(1) : [];
+  // A REST parameter (`(a, ...rest) => …`) is not a positional slot: it
+  // absorbs every argument from its position onwards, so it leaves the
+  // signature's argument list and becomes the variadic tail.
+  const restOp = restParameterIndex(paramOps);
+  const fixedParams = restOp < 0 ? params : params.slice(0, restOp);
+  if (fixedParams.length === 0) return undefined;
+  return fixedParams.map((p, i) => {
+    if (p.type !== undefined) return { name: p.name, type: p.type };
+    // A DESTRUCTURING parameter (`((p, q)) => …`) states its own slot: the
+    // tuple shape its pattern will match. See `destructuringParameterType`
+    // for why the slot must not read as a bare `unknown` scalar.
+    if (paramOps[i] !== undefined && isDestructuringParameter(paramOps[i]))
+      return { type: destructuringParameterType(paramOps[i]) };
+    // A parameter the body consumes whole is lifted too, even when its
+    // inferred type admits a scalar (`wholeCollectionParameterType`).
+    const inferred =
+      inferredCollectionParameterType(paramOps[i]) ??
+      wholeCollectionParameterType(paramOps[i], body);
+    const name =
+      paramOps[i] !== undefined
+        ? inferredSignatureParameterName(paramOps[i])
+        : undefined;
+    const type = inferred ?? ('unknown' as Type);
+    return name !== undefined ? { name, type } : { type };
+  });
+}
+
 export function functionLiteralSignatureType(expr: Expression): Type {
   const ce = expr.engine;
   const body = functionLiteralBody(expr);
@@ -1547,46 +1596,8 @@ export function functionLiteralSignatureType(expr: Expression): Type {
       ? ascribedReturn
       : bodyTypeSource.type;
 
-  // Parameter slots: an annotated param carries its declared type, named
-  // (`x: integer`); a bare param is `unknown` and keeps its name, so that a
-  // named call can find the slot (`inferredSignatureParameterName`). The Type
-  // OBJECT is carried through — never serialized and re-parsed: an annotation may name
-  // a SCOPE-LOCAL type (resolved when the literal was canonicalized), and a
-  // text round-trip here — possibly after that scope popped — either threw
-  // `Unknown type` or silently dropped the annotation. Same hazard class as
-  // the inferred-signature fix in `boxed-operator-definition.ts`.
   const paramOps = isFunction(expr, 'Function') ? expr.ops.slice(1) : [];
-  // A REST parameter (`(a, ...rest) => …`) is not a positional slot: it
-  // absorbs every argument from its position onwards, so it leaves the
-  // signature's argument list and becomes the variadic tail below.
-  const restOp = restParameterIndex(paramOps);
-  const fixedParams = restOp < 0 ? params : params.slice(0, restOp);
-  const args =
-    fixedParams.length > 0
-      ? fixedParams.map((p, i) => {
-          if (p.type !== undefined) return { name: p.name, type: p.type };
-          // A DESTRUCTURING parameter (`((p, q)) => …`) states its own slot:
-          // the tuple shape its pattern will match. See
-          // `destructuringParameterType` for why the slot must not read as a
-          // bare `unknown` scalar.
-          if (
-            paramOps[i] !== undefined &&
-            isDestructuringParameter(paramOps[i])
-          )
-            return { type: destructuringParameterType(paramOps[i]) };
-          // A parameter the body consumes whole is lifted too, even when
-          // its inferred type admits a scalar (`wholeCollectionParameterType`).
-          const inferred =
-            inferredCollectionParameterType(paramOps[i]) ??
-            wholeCollectionParameterType(paramOps[i], body);
-          const name =
-            paramOps[i] !== undefined
-              ? inferredSignatureParameterName(paramOps[i])
-              : undefined;
-          const type = inferred ?? ('unknown' as Type);
-          return name !== undefined ? { name, type } : { type };
-        })
-      : undefined;
+  const args = functionLiteralParameterSlots(expr, body);
 
   // A derived result reads a parameter of type `unknown` in a cell of a list
   // literal as a cell of unknown type, not as a number: `x ↦ [x]` has the
