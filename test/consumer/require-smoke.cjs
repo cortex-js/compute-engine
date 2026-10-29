@@ -4,8 +4,8 @@
 // The package is ESM only (since 2026-10-26): there is no UMD or CommonJS
 // build, and the `exports` map has no `require` condition. A CommonJS
 // consumer (a NestJS application, say; see issue 292) reaches the ESM entries
-// through Node's `require()` of an ES module, which Node supports since
-// 22.12, the floor in `engines.node`. This test loads the *built* entries the
+// through Node's `require()` of an ES module, supported by every Node version
+// allowed by `engines.node`. This test loads the *built* entries the
 // way such a consumer does and checks three things:
 //
 // 1. `require()` of each entry returns its named exports (an entry with a

@@ -11,51 +11,44 @@ cd "$(dirname "$0")/.."
 VARIANT="${1-test}"
 
 export TEST="true"
+# Forward Jest options while retaining the historical test/<name> shorthand.
+JEST_ARGS=()
+if [ "$#" -gt 0 ]; then
+  case "$1" in
+    test|-test|coverage|-coverage|snapshot|-snapshot) shift ;;
+    --*) VARIANT=test ;;
+    *) shift ;;
+  esac
+  JEST_ARGS=("$@")
+fi
 
-run_declaration_type_tests() {
-    echo -e "\n🧐 Running Declaration Type test suite..."
-    # Runs on the native (Go) compiler (@typescript/native, npm:typescript@7),
-    # referenced by explicit path (both it and the TS 6 API package ship a `tsc`
-    # bin). --ignoreConfig avoids TS5112 (tsconfig present + file on CLI). TS 7
-    # removed --baseUrl, so main.ts imports dist/types by relative path instead;
-    # the flag set matches the .d.ts build so the import resolves under bundler
-    # resolution.
-    ./node_modules/@typescript/native/bin/tsc --noEmit --ignoreConfig \
-      --target es2022 --module es2022 --moduleResolution bundler --types node \
-      --skipLibCheck --allowImportingTsExtensions true \
-      ./test/public-ts-declarations/main.ts
-    echo -e "\033[2K\033[80D\033[32m✔ \033[0m Declaration Type test suite complete"
-}
 
 if [ "$VARIANT" = "coverage" ] || [ "$VARIANT" = "-coverage" ]; then
-    run_declaration_type_tests
-    npx jest --config ./config/jest.config.cjs --coverage --no-cache
-    echo -e "\n🕯  Checkpoint bypass canary..."
-    CE_CHECKPOINT_CANARY=1 npx jest --config ./config/jest.config.cjs \
-      --reporters summary -- test/compute-engine/checkpoint-differential.test.ts
+    npx --no-install jest --coverage "${JEST_ARGS[@]}"
+    echo 'Running checkpoint bypass canary'
+    CE_CHECKPOINT_CANARY=1 npx --no-install jest \
+      --reporters summary "${JEST_ARGS[@]}" -- test/compute-engine/checkpoint-differential.test.ts
 elif [ "$VARIANT" = "test" ] || [ "$VARIANT" = "-test" ]; then
-    run_declaration_type_tests
     # The jest cache stays ON for the full suite: the transform cache is
     # content-keyed (a changed file re-transpiles, an unchanged one does not),
     # and the timing cache is what lets jest schedule the slowest test files
     # first — without it files are ordered by SIZE, and a small-but-slow file
     # scheduled last extends the whole run by its own duration.
-    npx jest --config ./config/jest.config.cjs --reporters summary
+    npx --no-install jest --reporters summary "${JEST_ARGS[@]}"
     # The checkpoint journal's bypass canary (CE_CHECKPOINT_CANARY) is a
     # module-load flag, so its assertions are inert in the run above. Re-run
     # the one differential-harness file in a fresh process with the flag set:
     # every state event a checkpoint window sees must be backed by a journal
     # hook of the matching kind, or a write has bypassed the journal.
-    echo -e "\n🕯  Checkpoint bypass canary..."
-    CE_CHECKPOINT_CANARY=1 npx jest --config ./config/jest.config.cjs \
-      --reporters summary -- test/compute-engine/checkpoint-differential.test.ts
+    echo 'Running checkpoint bypass canary'
+    CE_CHECKPOINT_CANARY=1 npx --no-install jest \
+      --reporters summary "${JEST_ARGS[@]}" -- test/compute-engine/checkpoint-differential.test.ts
 elif [ "$VARIANT" = "snapshot" ]  || [ "$VARIANT" = "-snapshot" ]; then
-    run_declaration_type_tests
-    npx jest --config ./config/jest.config.cjs  --updateSnapshot
+    npx --no-install jest  --updateSnapshot "${JEST_ARGS[@]}"
 else
     # Skip Declaration Type test for specific test files - run it directly
-    echo "${1}".test.ts
+    echo "${VARIANT}".test.ts
     # Jest 30 changed positional path-pattern matching: a leading `./` no longer
     # matches, so pass the path without it (e.g. `test/foo`, not `./test/foo`).
-    npx jest --config ./config/jest.config.cjs test/"${1}" --verbose false
+    npx --no-install jest test/"${VARIANT}" --verbose false "${JEST_ARGS[@]}"
 fi

@@ -2739,7 +2739,7 @@ export function canonicalMultiply(
     // the exact fold above: `∞·i` has no exact pure-imaginary form, and
     // promoting it built a bogus value out of an infinite component
     // (`∞·i` canonicalized to NaN, while the other operand order stayed
-    // symbolic — see the canonicalization contract in CLAUDE.md: machine
+    // symbolic — see the canonicalization contract in ARCHITECTURE.md: machine
     // floats, infinity and NaN are excluded from folding).
 
     if (isNumber(x) && !x.isInfinity && !x.isNaN) {

@@ -5,8 +5,8 @@
     "build": "bash ./scripts/build.sh",
     "clean": "bash ./scripts/clean.sh",
     "coverage": "bash ./scripts/test.sh coverage",
-    "dist": "bash ./scripts/build.sh production; bash ./scripts/test.sh",
-    "prepare": "bash ./scripts/build.sh production",
+    "dist": "npm run build && npm run test:types && npm test",
+    "prepare": "husky",
     "start": "bash ./scripts/start.sh",
     "snapshot": "bash ./scripts/test.sh snapshot",
     "version": "bash ./scripts/version.sh",
@@ -18,18 +18,29 @@
     "test:js-runtime": "node ./test/consumer/js-runtime-smoke.mjs",
     "test:epsil-runtime": "node ./test/consumer/epsil-runtime-smoke.mjs",
     "test:epsil-cli": "node ./test/consumer/epsil-cli-smoke.mjs",
-    "epsil:corpus-report": "npx --yes tsx scripts/epsil-corpus-report.ts",
-    "test:nightly": "CE_NIGHTLY=1 jest --config ./config/jest.config.cjs --reporters default -- test/compute-engine/nightly/",
-    "test:perf": "CE_PERF=1 jest --config ./config/jest.config.cjs --runInBand --reporters default -- $(grep -rl CE_PERF test --include=*.test.ts)",
-    "check:deps": "madge --circular --extensions ts src/compute-engine && echo 'No circular dependencies found'",
-    "check:corpus": "npx --yes tsx docs/mathnet/scripts/check-corpus.ts",
-    "check:roundtrip": "npx --yes tsx docs/mathnet/scripts/check-roundtrip.ts",
-    "lint": "npm run lint:code && npm run typecheck && npm run ci:corpus-pipeline",
-    "lint:code": "oxlint src && prettier --write 'src/**/*.{ts,js,css,md}'",
-    "ci:corpus-pipeline": "npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim --check && npx --yes tsx scripts/fungrim/artifact-freshness.ts && npx --yes tsx scripts/fungrim/apply-solve-templates.ts --check && npx --yes tsx scripts/fungrim/recompile-drift.ts && npx --yes tsx scripts/fungrim/compile-properties.ts --check && npx --yes tsx scripts/rubi/bundle-corpus.ts && git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json && npm run check:corpus && npm run check:roundtrip",
-    "ci": "npm run lint && npm test",
+    "epsil:corpus-report": "tsx scripts/epsil-corpus-report.ts",
+    "test:nightly": "CE_NIGHTLY=1 jest --reporters default -- test/compute-engine/nightly/",
+    "test:perf": "CE_PERF=1 jest --runInBand --reporters default -- $(grep -rl CE_PERF test --include=*.test.ts)",
+    "check:deps": "madge --circular --extensions ts src/compute-engine",
+    "check:corpus": "tsx docs/mathnet/scripts/check-corpus.ts",
+    "check:roundtrip": "tsx docs/mathnet/scripts/check-roundtrip.ts",
+    "lint": "npm run lint:code && npm run format:check",
+    "lint:code": "oxlint src",
+    "ci:corpus-pipeline": "tsx scripts/fungrim/validate.ts --corpus data/fungrim --check && tsx scripts/fungrim/artifact-freshness.ts && tsx scripts/fungrim/apply-solve-templates.ts --check && tsx scripts/fungrim/recompile-drift.ts && tsx scripts/fungrim/compile-properties.ts --check && tsx scripts/rubi/bundle-corpus.ts && git diff --exit-code -- src/compute-engine/rubi/rubi-rules-data.json && npm run check:corpus && npm run check:roundtrip",
+    "ci": "npm run check:docs && npm run test:tools && npm run lint && npm run typecheck && npm run check:deps && npm run ci:corpus-pipeline && bash scripts/test-types.sh && npm test",
     "typecheck": "bash ./scripts/typecheck.sh",
-    "test:require": "node ./test/consumer/require-smoke.cjs"
+    "test:require": "node ./test/consumer/require-smoke.cjs",
+    "prepack": "npm run clean && npm run build",
+    "format": "prettier --write 'src/**/*.{ts,js,css,md}'",
+    "format:check": "prettier --check 'src/**/*.{ts,js,css,md}'",
+    "test:types": "npm run types && bash scripts/test-types.sh",
+    "types": "node scripts/types.mjs",
+    "ci:extended": "npm run ci && npm run test:python",
+    "test:python": "node scripts/test-python.mjs",
+    "test:core": "node scripts/test-core.mjs",
+    "check:docs": "node scripts/check-doc-references.mjs",
+    "setup:agents": "node scripts/setup-agent-skills.mjs",
+    "test:tools": "node --test scripts/tests/*.test.mjs"
   },
   "name": "@cortex-js/compute-engine",
   "description": "Symbolic computing and numeric evaluations for JavaScript and Node.js",
@@ -141,7 +152,7 @@
   "types": "./dist/types/compute-engine.d.ts",
   "engines": {
     "npm": ">=10.5.0",
-    "node": ">=22.12.0"
+    "node": ">=26.13.0"
   },
   "devDependencies": {
     "@cortex-js/prettier-config": "^1.2.0",
@@ -154,9 +165,12 @@
     "concat-md": "^0.5.1",
     "decimal.js": "^10.6.0",
     "esbuild": "^0.28.2",
+    "husky": "^9.1.7",
     "jest": "^30.5.2",
     "jest-silent-reporter": "^0.6.0",
+    "lint-staged": "^16.4.0",
     "madge": "^8.0.0",
+    "mdast-util-from-markdown": "^2.1.0",
     "open": "^11.0.4",
     "oxlint": "^1.89.0",
     "prettier": "^3.9.10",
@@ -174,5 +188,8 @@
   "dependencies": {
     "@arnog/colors": "^0.7.3",
     "complex.js": "^2.4.3"
+  },
+  "lint-staged": {
+    "src/**/*.{ts,js,css,md}": "prettier --write"
   }
 }

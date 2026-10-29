@@ -1,7 +1,7 @@
 // Minimal Rubi `Int` driver (Phase R1, docs/rubi/RUBI.md §4B): a
 // fixed-point rewriter over the compiled rule set, completely separate
 // from CE's simplify() pipeline (Rubi rules recurse by construction —
-// see the CLAUDE.md recursion constraints).
+// see the ARCHITECTURE.md recursion constraints).
 //
 // Dispatch is priority-ordered (= Rubi's rule order). A small structural
 // prelude handles the linearity scaffolding Rubi keeps in its

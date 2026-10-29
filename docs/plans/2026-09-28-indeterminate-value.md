@@ -723,8 +723,8 @@ examples corrected). Both guides also claimed that `Sin(+∞)` stays
 symbolic; it is an `incompatible-type` error (the trigonometric carrier is
 finite, pinned in `boxing-seam-canonical-heads.test.ts`), so the example
 became `Arctan(+∞)`, which evaluates to the exact `π/2`. The Epsil reference was already
-amended in Phase 2. The bullet for the "Common API Traps" section of
-`CLAUDE.md` (a gitignored file) is drafted with the Tycho notice and the
+amended in Phase 2. The bullet for the "Implementation conventions" section of
+`ARCHITECTURE.md` (a gitignored file) is drafted with the Tycho notice and the
 #355 reply.
 
 ## 7. Decisions for the user

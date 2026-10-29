@@ -28,7 +28,7 @@ import { TEST_PYTHON } from './test-python';
 
 // Repo root is two levels up from test/compute-engine; fall back to cwd.
 const VENV_PYTHON =
-  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? '';
 
 function venvHasNumpy(): boolean {
   try {

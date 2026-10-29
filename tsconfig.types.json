@@ -1,0 +1,27 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "emitDeclarationOnly": true,
+    "outDir": "./dist/types",
+    "tsBuildInfoFile": "./dist/types/.tsbuildinfo",
+    "allowImportingTsExtensions": true,
+    "noEmitOnError": true,
+    "sourceMap": false
+  },
+  "include": [],
+  "files": [
+    "src/math-json.ts",
+    "src/compute-engine.ts",
+    "src/epsil.ts",
+    "src/latex-syntax.ts",
+    "src/interval.ts",
+    "src/numerics.ts",
+    "src/core.ts",
+    "src/compile.ts",
+    "src/runtime.ts",
+    "src/kernel-worker.ts",
+    "src/identities.ts",
+    "src/integration-rules.ts",
+    "src/group-theory.ts"
+  ]
+}

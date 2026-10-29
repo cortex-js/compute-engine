@@ -6,17 +6,16 @@ source project is fun and rewarding.
 ## Funding
 
 Consider donating to project development via
-[Patreon](https://patreon.com/arnog) (recurring donation) or
-[PayPal](https://www.paypal.me/arnogourdol) (one time donation).
+[PayPal](https://www.paypal.me/arnogourdol).
 
 Encourage the business partners in your organization to provide financial
 support of open source projects.
 
 Funds go to general development, support, and infrastructure costs.
 
-We welcome both individual and corporate sponsors. In addition to Patreon and
-PayPal, we can also accept short-term development contracts for specific
-features or maintenance of the project.
+We welcome both individual and corporate sponsors. In addition we also accept
+short-term development contracts for specific features or maintenance of the
+project.
 
 ## Contributing Issues
 
@@ -37,9 +36,14 @@ for it!
 Whether you have a fix for an issue, some improved test cases, or a brand new
 feature, we welcome contributions in the form of pull requests.
 
-## Code comments
+## Coding conventions
 
-Comments should explain current intent, invariants, and non-obvious constraints
-rather than restate code or preserve its history. See the
-[code comment guidelines](./docs/COMMENTING-GUIDELINES.md) for examples,
-action-comment requirements, and the review checklist.
+See [CODING-STYLEGUIDE.md](CODING-STYLEGUIDE.md) for formatting, TypeScript,
+module boundaries, tests, and comments. It is the shared reference for
+contributors and coding agents.
+
+## Building and validation
+
+See [BUILD.md](BUILD.md) for setup, staged Prettier formatting, command
+responsibilities, validation frequency, and npm release preparation. It is the
+single command reference for contributors and agents.

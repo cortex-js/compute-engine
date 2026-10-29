@@ -1,3 +1,4 @@
+import { stripVTControlCharacters } from 'node:util';
 // eslint-disable-next-line import/no-extraneous-dependencies
 import { CustomConsole, LogType, LogMessage } from '@jest/console';
 
@@ -34,6 +35,8 @@ function simpleFormatter(type: LogType, ...message: LogMessage[]): string {
   else if (type === 'log') s = BLUE + message + RESET;
   else if (type === 'warn') s = YELLOW + 'WARNING ' + YELLOW + message + RESET;
 
+  if (!process.stderr.isTTY || process.env.NO_COLOR !== undefined)
+    s = stripVTControlCharacters(s);
   return s
     .split(/\n/)
     .map((line) => CONSOLE_INDENT + line)
@@ -163,4 +166,3 @@ global.console = new EpsilConsole(
   process.stderr,
   simpleFormatter
 ) as Console;
-

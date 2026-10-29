@@ -1,126 +1,121 @@
 # Shared-box protocol: Compute Engine specifics
 
-The protocol itself is shared by every repo on this machine and lives at
-`~/.claude/SHARED-BOX-PROTOCOL.md` (a link into the dotfiles repo, so both
-machines read one copy). Read it first. This file holds only what is specific
-to the Compute Engine: its commands, worker counts, process names, hot files
-and review exemptions. A rule that applies to more than one repo belongs in
-the shared file, not here. Section numbers below refer to the shared file.
+Read `~/.claude/SHARED-BOX-PROTOCOL.md` for shared-machine coordination. Section
+numbers below refer to that protocol. This file contains only Compute Engine
+rules; [BUILD.md](../BUILD.md) owns build, validation, formatting, and release
+commands.
 
-## §1 Where to work
+## §1 Worktrees and applying changes
 
-- **A worktree is the default for any multi-file task** in this repo, not
-  only when a peer's work or a torn run forces it.
-- **Worktree setup** is the `node_modules` link alone:
+Use a worktree for multi-file tasks. Link its dependencies to the main checkout:
 
-  ```
-  ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-<session-name>/node_modules
-  ```
-
-  Measured 2026-10-13: without it `npx tsx` and jest fail in the worktree
-  with `Cannot find module`. No other gitignored file is needed.
-- **Hot files**, which deserve the earliest applies: the snapshot files under
-  `test/` and anything under `src/compute-engine/boxed-expression/`.
-- **After the apply, run the targeted tests once in the main tree** before
-  the review. They take seconds here (§2 table), and the apply landed on a
-  tree that may differ from the one you tested in.
-
-## §2 CPU
-
-`config/jest.config.cjs` sets **`maxWorkers: 12`** outside continuous
-integration. There is no light jest invocation: a targeted three-file run
-fans out like a full suite, so cap the workers. The budgets below were raised
-from 1 and 2 by the user on 2026-09-22, after the move to 18 cores.
-
-| Situation | Command |
-| --- | --- |
-| One test file | `npx jest --config ./config/jest.config.cjs -w 2 -- <path>` |
-| Several files | `npx jest --config ./config/jest.config.cjs -w 4 -- <paths>` |
-| Full suite | take the lock, then run normally |
-| Timing suites (`npm run test:perf`) | take the lock; they run serially |
-
-Measured 2026-10-17 on an idle box: `npm run typecheck` takes 4 s, the
-whole-`src/` check with the native compiler 4 s cold and under a second
-incremental (`tsconfig.json` sets `incremental: true`), one test file 4 s,
-61 test suites at `-w 4` 10 s.
-
-Never run `npx jest <file>` without the config: it fails with ESM import
-errors. A jest path that matches no file is dropped silently: check that the
-number of suites run equals the number of files given. In zsh, a variable
-holding several paths needs `${=FILES}` to split into words.
-
-Neither typecheck needs the lock. `npm run typecheck` covers the entry
-points plus the Epsil CLI, the type-level test pins, the circular-dependency
-budget and the explicit-`any` check, and is the gate before a review. The
-whole-`src/` check (`./node_modules/@typescript/native/bin/tsc -p
-tsconfig.json --noEmit`) was a lock-taking job under the TypeScript 6
-compiler; under the native TypeScript 7 compiler it is light, and a
-user-level PostToolUse hook runs it after every Edit or Write of a `.ts`
-file, so there is no reason to run it by hand after an edit.
-
-## §3 Verifying that the box is clear
-
-```
-pgrep -f "bin/[j]est"       # the jest runner
-pgrep -f "[j]est-worker"    # the workers: check these too
+```sh
+ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-<session-name>/node_modules
 ```
 
-## §4 Fingerprint for a run against the shared tree
+No other Git-ignored files are required for normal development.
 
+**Files prone to conflicts:** snapshots under `test/` and files under
+`src/compute-engine/boxed-expression/`. Apply completed changes from your
+worktree promptly to reduce conflicts with other sessions. This is separate from
+the full-suite requirements in §5.
+
+After applying a worktree's changes, rerun the targeted tests in the main
+checkout before review.
+
+## §2 Worker limits and the box lock
+
+Jest defaults to 12 local workers. Set a smaller limit for targeted runs:
+
+| Run           | Command                    |
+| ------------- | -------------------------- |
+| One test file | `npx jest -w 2 -- <path>`  |
+| Several files | `npx jest -w 4 -- <paths>` |
+
+Jest discovers the root `jest.config.cjs` automatically. Confirm that the
+expected test files ran. In zsh, use `${=FILES}` to split a variable containing
+several paths.
+
+Take the box lock for full suites, aggregate CI, builds, corpus checks, and
+`npm run test:python`. Timing tests (`npm run test:perf`) also require the lock
+and run serially. Type checking and capped targeted tests do not need the lock.
+Worktrees share these CPU limits.
+
+## §3 Checking for running tests
+
+Check both the runner and its workers:
+
+```sh
+pgrep -f "bin/[j]est"
+pgrep -f "[j]est-worker"
 ```
+
+## §4 Detecting source changes during a shared-tree run
+
+Use this fingerprint before and after a run when the shared protocol requires
+it:
+
+```sh
 find src test -name '*.ts' -exec stat -f "%m %N" {} + | sort | shasum
 ```
 
 ## §5 Review and staging
 
-- The review checklist both reviewers use is `docs/REVIEW-CHECKLIST.md`.
-- **Also exempt from the dual review in this repo**: test files, and the
-  generated documentation (`src/epsil/docs/errors.md`,
-  `src/epsil/docs/library.md`, `src/api.md`). `src/api.md` is regenerated by
-  `npm run doc`; never edit it by hand.
-- **Never exempt**: anything under `src/` whose code changed, `package.json`
-  dependency versions, the jest and build configuration under `config/`, and
-  the continuous-integration workflows.
-- **The snapshot policy**: never update a snapshot marked `@fixme`. Before
-  landing broad canonicalization or serialization churn, run the full suite
-  (with the lock), count the changed snapshots, and report the number rather
-  than absorbing a large snapshot diff silently.
-- After a change to imports, `npm run check:deps` must stay clean; the repo
-  has a zero-circular-dependency budget.
-- **The staging test gate** (shared protocol §5.7, user decision
-  2026-10-28). A session does not run the full suite before staging. It runs
-  `npm run typecheck`, the test files of the area it changed
-  (`npx tsx scripts/where.ts <Operator>` lists them for an operator), and
-  the core test set:
-  `npx jest --config ./config/jest.config.cjs -w 4 -- $(grep -v '^#' config/core-tests.txt)`
-  (18 files, about 20 s; in zsh, put the list in a variable and write
-  `${=FILES}`). The nightly job, `scripts/ci-nightly.sh` (launchd, 02:30),
-  runs the full suite at HEAD, with the nightly suites (`CE_NIGHTLY=1`) and
-  the Python tests (the main tree's `venv`); a run took about 7 minutes
-  once it had the lock (2026-10-28), and it stops at 55 minutes.
-- **The full suite is still required before staging** when the change
-  touches a hot file for testing: anything under
-  `src/compute-engine/boxed-expression/` or `src/common/type/`, the jest
-  configuration (`config/jest.config.cjs`, `config/jest-environment.cjs`,
-  `test/jest-config.ts`), or `package.json` dependencies; when the change is
-  expected to change many snapshots (the snapshot policy below); and when
-  `node ~/.claude/scripts/suite-status.mjs train` exits 3 (5 or more commits
-  since the last passing full run). For a hot file or a snapshot change,
-  take the lock and run `npm run test` in the tree that holds the change.
-  For a full train, run `bash scripts/ci-nightly.sh run`: it tests the
-  committed HEAD and moves the green mark when it passes.
-- **A release.** The GitHub workflow `.github/workflows/publish.yml` runs
-  `npm test` (the full suite) before it publishes, so a release published
-  from GitHub needs nothing more. A publish from this machine goes through
-  `scripts/prepublish-check.sh`. Before the build it refuses a tree with an
-  uncommitted source change. After the build (the `postpack` hook, before
-  the upload), when the full suite has not passed at HEAD, it runs it
-  (`bash scripts/ci-nightly.sh run`, about 7 minutes once it has the box
-  lock) and publishes only if it passes. So a failing build is found before
-  the long test run.
+### Review scope
+
+Both reviewers use [REVIEW-CHECKLIST.md](REVIEW-CHECKLIST.md).
+
+- Test files are exempt from dual review, in addition to the shared protocol's
+  documentation and comment-only exemptions.
+- Production code, dependency versions, Jest/build configuration, and CI
+  workflows require dual review.
+- Never hand-edit generated documentation, including `src/api.md`; use the
+  appropriate generator described in BUILD.md.
+- Never update a snapshot marked `@fixme`.
+
+### Checks before staging source changes
+
+The orchestrator validates the combined tree with typecheck, tests for the
+changed area, and the core test set. Reuse results only when their relevant
+inputs are unchanged; sub-agent handoffs follow
+[BUILD.md](../BUILD.md#completing-delegated-tasks). The core test command is:
+
+```sh
+npm run test:core
+```
+
+Use `npx tsx scripts/where.ts <Operator>` to find tests for an operator. After
+import changes, also run `npm run check:deps`; no circular dependencies are
+allowed. Follow the shared protocol's staging queue and review requirements.
+
+Normally, leave the full suite to the nightly pipeline. Run it before staging
+when any of these applies:
+
+- The change affects code under `src/compute-engine/boxed-expression/` or
+  `src/common/type/`, Jest configuration (`jest.config.cjs`,
+  `config/jest.config.cjs`, `config/jest-environment.cjs`,
+  `test/jest-config.ts`), or package dependencies.
+- The change is expected to affect many snapshots. Count and report the changed
+  snapshots before accepting them.
+- `node ~/.claude/scripts/suite-status.mjs train` exits 3: at least five commits
+  have accumulated since the last recorded passing full run.
+
+For affected code/configuration or broad snapshot changes, take the box lock and
+run `npm test` in the checkout containing the changes. For the five-commit
+limit, run `bash scripts/ci-nightly.sh run`; it checks committed HEAD and
+records its result. It takes the lock automatically.
+
+### Formatting, hooks, and releases
+
+Prettier formats staged source at commit time. It does not replace validation,
+review, or staging-queue checks. Husky owns `core.hooksPath` (`.husky/_`);
+`.husky/post-commit` forwards to the common Git directory's local post-commit
+hook for queue cleanup. Integrate additional hooks without replacing that path.
+
+Follow [BUILD.md](../BUILD.md#releasing-to-npm) for releases.
 
 ## §8 Handoff
 
-The handoff file is `docs/scratch/<date>-<topic>-handoff.md`. The completion
-line of a redirected jest run is the `JEST_EXIT=` line that the command in
-`CLAUDE.md` ("Fast Verification Loop") appends to the log.
+Before a long run, write `docs/scratch/<date>-<topic>-handoff.md` as required by
+the shared protocol. Record the command, log path, and actual exit status when
+it finishes; keep the handoff current.

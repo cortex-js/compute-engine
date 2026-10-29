@@ -1,3 +1,4 @@
+import { TEST_PYTHON } from './test-python';
 /**
  * The compiled inverse trigonometric and inverse hyperbolic functions of a
  * complex argument on the GLSL, WGSL and Python targets agree with the
@@ -245,11 +246,7 @@ describe('GPU: the language checks of the f32 shader interpreter', () => {
 
 // The Python with NumPy: `CE_PYTHON` when it is set (a git worktree has no
 // `venv` of its own), else the repo's `./venv/bin/python3`.
-const VENV_PYTHON = [
-  process.env.CE_PYTHON,
-  path.join(__dirname, '..', '..', 'venv', 'bin', 'python3'),
-  path.join(process.cwd(), 'venv', 'bin', 'python3'),
-].find((p) => p !== undefined && p !== '' && fs.existsSync(p));
+const VENV_PYTHON = TEST_PYTHON;
 
 describe('PYTHON: inverse trigonometric functions of a complex argument', () => {
   const HEADS = [

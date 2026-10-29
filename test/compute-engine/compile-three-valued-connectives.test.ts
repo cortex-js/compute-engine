@@ -622,7 +622,7 @@ describe('COMPILE three-valued connectives — Python target', () => {
  * benchmark environment is never blocked.
  */
 const VENV_PYTHON =
-  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? '';
 function venvHasNumpy(): boolean {
   try {
     if (!fs.existsSync(VENV_PYTHON)) return false;

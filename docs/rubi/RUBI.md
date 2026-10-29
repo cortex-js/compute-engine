@@ -267,7 +267,7 @@ antiderivative form.
 
 ### B. A dedicated `Int` driver — **required**
 
-A fixed-point rewriter, **completely separate from `simplify()`** (CLAUDE.md
+A fixed-point rewriter, **completely separate from `simplify()`** (ARCHITECTURE.md
 recursion constraints apply: Rubi rules recurse by construction):
 
 - **Second-level dispatch index** keyed on integrand skeleton (operator

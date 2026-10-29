@@ -698,7 +698,7 @@ fn _gpu_rnd_draw(seed: vec2<u32>, n: ptr<private, u32>) -> f32 {
 describe('route parity — `WithRandomSeed` is lazy', () => {
   // A `lazy: true` operator's held operands arrive UNBOUND on the box and
   // parse routes, so a suite exercising only `ce.function(...)` would miss the
-  // whole failure class (CLAUDE.md, "Common API Traps").
+  // whole failure class (ARCHITECTURE.md, "Implementation conventions").
   const expected =
     '_gpu_rnd_draw(uvec2(0x40450000u, 0x00000000u), _gpu_rnd_n0)';
 

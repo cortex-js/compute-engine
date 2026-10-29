@@ -682,7 +682,7 @@ describe('CALLBACK ARITY — the pipe stage (1 argument supplied)', () => {
 });
 
 describe('CALLBACK ARITY — every route into the engine', () => {
-  // The lazy-operator trap (CLAUDE.md): a `lazy: true` operator holds its
+  // The lazy-operator trap (ARCHITECTURE.md): a `lazy: true` operator holds its
   // operands RAW, so a check that only works through `ce.function(pre-boxed)`
   // misses the `ce.box` and parse routes entirely. `Map` is lazy, `Filter` is
   // lazy, and both are probed on all four routes.

@@ -355,7 +355,7 @@ describe('P0-7 — Mod/Remainder agree across lanes (WP-2.5)', () => {
 //
 // WP-2.13 — the exactness sweep (P0-12, P0-16 b–h/j/k, P0-17, P0-18).
 //
-// The contract (CLAUDE.md "Evaluate vs. N"): under `evaluate()` an exact
+// The contract (ARCHITECTURE.md "What `.N()` promises"): under `evaluate()` an exact
 // argument yields an exact result or stays symbolic — never a float; `.N()`
 // produces the float; and `evaluate().N()` agrees with `.N()`.
 //

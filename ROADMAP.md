@@ -2292,7 +2292,7 @@ engines exist. Options to decide: each engine sets the global precision on
 entry to a numeric evaluation (cheap, but a nested call of another engine and
 an asynchronous evaluation can still interleave), or the precision is passed
 to the big-decimal operations instead of read from a global (correct, a large
-change). `CLAUDE.md` records the current behavior as an API trap.
+change). `ARCHITECTURE.md` records the current behavior as an API trap.
 
 ### CE-599. A double integral with an integrable isolated singular point gives `NaN`
 
@@ -4786,7 +4786,7 @@ A fix there changes behavior that a user sees.
 **Why it is not the canonicalization fix.** Nothing under `latex-syntax/`
 references `ComputeEngine`, `_deadlineFrame` or `_timeRemaining`. This is
 deliberate: `LatexSyntax` is an injected, structurally typed dependency
-(`ILatexSyntax`), as `CLAUDE.md` and `ARCHITECTURE.md` describe. So the parser
+(`ILatexSyntax`), as `ARCHITECTURE.md` and `ARCHITECTURE.md` describe. So the parser
 has no deadline to read.
 
 - **CE-302.1** Fix when picked up: give the parser an optional cancellation

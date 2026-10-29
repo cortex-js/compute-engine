@@ -514,7 +514,7 @@ export function measurementEq(
 // nominal keeps an exact value under `evaluate()` (`Sin(1/3 ± 0.1)` is
 // `Sin(1/3) ± …`), and under `.N()` the operator itself makes the float, so
 // that a step function decides its jump on the exact value (the exactness
-// contract of CLAUDE.md, "Evaluate vs. N").
+// contract of ARCHITECTURE.md, "What `.N()` promises").
 
 /** An operand of an apply site, read as a nominal and an uncertainty.
  * `sigma` is `undefined` for an operand that is not a measurement: an

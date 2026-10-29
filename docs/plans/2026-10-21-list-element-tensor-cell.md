@@ -347,7 +347,7 @@ green or rewritten.
 to the rules; `ROADMAP.md` (the entry of D5 closed, the `narrow` versus
 reducer residue recorded); `CHANGELOG.md` Unreleased (breaking: the three
 readings); `docs/TYPE-SYSTEM.md`; `doc/08-guide-types.md`; the "Common API
-Traps" entry of `CLAUDE.md`; `src/api.md` through `npm run doc` if the type
+Traps" entry of `ARCHITECTURE.md`; `src/api.md` through `npm run doc` if the type
 grammar is in it.
 
 Coordination: session `ce-unknown-workstream` holds its edits to
@@ -386,7 +386,7 @@ day changes two rules (see "Rules changed by the code review" below).
 - The documents: `CHANGELOG.md` (the Breaking Changes entry "A list type with no
   dimensions is read by its elements" and a Resolved Issues entry),
   `docs/TYPE-SYSTEM.md` (section "Lists, tensors and `broadcastable`"),
-  `ARCHITECTURE.md`, `ROADMAP.md`, and the local files `CLAUDE.md` and
+  `ARCHITECTURE.md`, `ROADMAP.md`, and the local files `ARCHITECTURE.md` and
   `doc/08-guide-types.md`.
 
 **The cell rule chosen, and why.** A list with dimensions can have any cells

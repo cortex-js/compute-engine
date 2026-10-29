@@ -1999,7 +1999,7 @@ ce.declareProtocolImplementation('string', 'Comparable', {
 Host declarations validate eagerly and **throw** on error, including on
 re-declaration (see "Scope and lifecycle"); the Epsil route emits
 diagnostics and replaces on statement re-run. Route-parity tests must
-exercise both routes (cf. the box/parse-route convention in `CLAUDE.md`).
+exercise both routes (cf. the box/parse-route convention in `ARCHITECTURE.md`).
 
 The registry also answers a plain conformance query, without calling a
 member and reading `protocol-implementation-missing` as "no":

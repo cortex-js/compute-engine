@@ -146,7 +146,7 @@ describe('COMPILE Python: an absent input in arithmetic (CE-395)', () => {
 });
 
 const VENV_PYTHON =
-  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? '';
 function venvHasNumpy(): boolean {
   try {
     if (!fs.existsSync(VENV_PYTHON)) return false;

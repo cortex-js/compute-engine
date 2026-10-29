@@ -410,7 +410,7 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
 // ---------------------------------------------------------------------------
 
 const VENV_PYTHON =
-  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? '';
 
 // None of the cases below lowers through numpy, so the block needs only the
 // venv's Python itself.

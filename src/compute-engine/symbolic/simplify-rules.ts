@@ -132,7 +132,7 @@ const ODD_SPECIAL_FUNCTIONS = new Set([
  *
  * ## 5. Sanctioned `.simplify()` calls inside rule-path code
  *
- * CLAUDE.md warns against calling `.simplify()` from code reachable by the
+ * ARCHITECTURE.md warns against calling `.simplify()` from code reachable by the
  * simplification pipeline (each nested call opens a fresh context that bypasses
  * the dedup / step-limit guards). A handful of sites here call `.simplify()`
  * anyway; every one is a **sanctioned exception** because it recurses only into

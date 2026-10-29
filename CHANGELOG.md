@@ -1,5 +1,9 @@
 ## [Unreleased]
 
+### Breaking Changes
+
+- The minimum supported Node.js version is now **26.13.0** (LTS).
+
 ### Performance
 
 - **An expression that shares a subexpression evaluates it once** (ROADMAP

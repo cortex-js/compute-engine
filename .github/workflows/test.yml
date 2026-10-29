@@ -10,48 +10,21 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    # The suite runs on the newest Node the project is developed on and on
-    # the oldest major version `package.json` declares support for
-    # (`engines.node`). The two are not interchangeable: `Math.pow` answers a
-    # different last digit on about one input in ten between V8 12 (Node 22)
-    # and V8 14 (Node 26), so a test that pins such a digit passes on one and
-    # fails on the other.
-    strategy:
-      fail-fast: false
-      matrix:
-        node-version: ['22', '26']
-
+    # Test the minimum supported Node runtime.
     steps:
       - uses: actions/checkout@v5
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
-      # The tests that run compiled Python code need a python3 with NumPy and
-      # SciPy. `test/compute-engine/test-python.ts` reads `CE_PYTHON`, which
-      # must be the path of an existing file, so the interpreter path that
-      # setup-python outputs is passed, not the bare name `python3`. Without
-      # it those tests are skipped, with a warning in each test file that
-      # runs Python.
-      - name: Setup Python
-        id: python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-
-      - name: Install NumPy and SciPy
-        run: python -m pip install numpy scipy
-
       - name: Run tests
         run: npm test
-        env:
-          CE_PYTHON: ${{ steps.python.outputs.python-path }}
 
   corpus-pipeline:
     runs-on: ubuntu-latest
@@ -62,7 +35,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '26'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
@@ -75,7 +48,9 @@ jobs:
       # (the committed report is stale — regenerate it). The prior soft >=99%
       # pass-rate gate silently absorbed a multi-entry drift; this does not.
       - name: Corpus box-check
-        run: npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim --check
+        run:
+          npx --yes tsx scripts/fungrim/validate.ts --corpus data/fungrim
+          --check
 
       # Recompile a deterministic rule sample and assert the checked-in
       # artifact is still in sync with the engine (catches canonicalization
@@ -141,14 +116,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '26'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run Oxlint
-        run: npx oxlint src
+        run: npm run check:docs && npm run test:tools && npm run lint
 
   typecheck:
     runs-on: ubuntu-latest
@@ -159,11 +134,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '26'
+          node-version: '26.13.0'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
 
       - name: Run typecheck
-        run: npm run typecheck
+        run:
+          npm run typecheck && bash scripts/test-types.sh && npm run check:deps
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - run: npm ci
+      - name: Build and validate package artifacts
+        run: npm run build

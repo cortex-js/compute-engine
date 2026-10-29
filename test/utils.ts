@@ -455,7 +455,7 @@ expect.addSnapshotSerializer({
  * An exact-string pin (`expect(String(t)).toBe('…')`) guards both directions
  * at once but also fails on every sound refinement; keep it only where the
  * exact tier is the contract, and say so in the test name. The rationale and
- * the three spellings are in `docs/COMMENTING-GUIDELINES.md` ("Type
+ * the three spellings are in `CODING-STYLEGUIDE.md` ("Type
  * assertions in tests").
  */
 export function expectTypeBetween(

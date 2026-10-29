@@ -14779,7 +14779,7 @@ function betaPositiveIntegerArg(
   // (`B(√2, 2)`: `√2 + 1` → 2.41421356…) and the whole result numericized, in
   // violation of the evaluate/N contract. Integer and rational arguments were
   // unaffected — they fold exactly — which is why only the irrational case
-  // showed it. See CLAUDE.md, "`.add()`/`.mul()` methods fold exact literals
+  // showed it. See ARCHITECTURE.md, "`.add()`/`.mul()` methods fold exact literals
   // to floats".
   const factors: Expression[] = [];
   for (let k = 0; k < m; k++) {

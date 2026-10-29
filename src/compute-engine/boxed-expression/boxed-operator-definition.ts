@@ -196,7 +196,7 @@ const OPERATOR_DEF_KEYS = new Set([
  * `signature` field is a `BoxedType` instance. Detect it by duck-typing on its
  * inner `type` property and `matches` method — NOT `instanceof BoxedType`,
  * which fails across a host/plugin bundle boundary (see the cross-bundle
- * identity hazard in CLAUDE.md) — and unwrap it to its inner `Type` so a fresh,
+ * identity hazard in ARCHITECTURE.md) — and unwrap it to its inner `Type` so a fresh,
  * local `BoxedType` can be constructed from it. A plain `Type`/`TypeString` is
  * returned unchanged.
  */

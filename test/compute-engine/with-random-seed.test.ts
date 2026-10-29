@@ -16,7 +16,7 @@ import {
  * Every form is probed on BOTH the box route and the parse route:
  * `WithRandomSeed` is `lazy: true`, so its held operands arrive UNBOUND on
  * those routes, and a `ce.function(...)`-only suite misses that entire failure
- * class (CLAUDE.md, "Common API Traps").
+ * class (ARCHITECTURE.md, "Implementation conventions").
  *
  * These tests use fresh `new ComputeEngine()` instances so they never perturb
  * the shared test engine.

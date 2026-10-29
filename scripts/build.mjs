@@ -8,8 +8,8 @@ import pkg from '../package.json' with { type: 'json' };
 const SDK_VERSION = pkg.version || 'v?.?.?';
 
 // The package is ESM only (since 2026-10-26). There is no UMD or CommonJS
-// build: Node loads an ESM entry through `require()` since Node 22.12, which
-// is the floor in `engines.node`, and the `exports` map has no `require`
+// build: every supported Node version loads ESM through `require()`, and
+// the `exports` map has no `require`
 // condition, so a CommonJS consumer falls through to the `default` ESM file.
 // None of the entries uses a top-level `await` (the kernel worker's
 // `await import()` runs inside a function), which is what `require()` of an

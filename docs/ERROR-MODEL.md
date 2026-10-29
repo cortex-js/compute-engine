@@ -598,7 +598,7 @@ stays exact or symbolic (`Ln(2)` stays `Ln(2)`) — while `.N()`
 (equivalently `evaluate({numericApproximation: true})`) produces a float;
 an inexact (float) argument numericizes under plain `evaluate()` too
 (`Sin(5.1) → -0.925…`). (Previously written down only in the untracked
-`CLAUDE.md`; this sentence is its durable statement.)
+`ARCHITECTURE.md`; this sentence is its durable statement.)
 
 Given an operator receiving a wrong or dubious argument, apply the first
 rule that matches. The gate throughout is **evidence-based**: reject when

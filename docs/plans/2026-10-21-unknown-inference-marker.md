@@ -513,7 +513,7 @@ snapshots changed):
   Conclusion: the rewrite to `any` changes the documentation text and, where
   a handler gives up or is missing, removes inference. It is not applied.
 - Documentation: the types guide (local), `docs/INFERENCE_ROADMAP.md`,
-  `docs/ERROR-MODEL.md`, `CLAUDE.md` (API trap) and `CHANGELOG.md`.
+  `docs/ERROR-MODEL.md`, `ARCHITECTURE.md` (API trap) and `CHANGELOG.md`.
 - Not done: the Epsil hover does not show the written contract beside the
   refined type (R6); a nested `unknown` position does not refine (D2 scope).
   Both are in `ROADMAP.md` under the `unknown` residues.

@@ -1107,7 +1107,7 @@ What shipped, and what the batch measured:
      branch); the comment now says what the code does.
   7. FIXED (Codex, low): the new comments carried date stamps and
      behavior-history clauses ("it used to answer NaN"), against
-     `docs/COMMENTING-GUIDELINES.md` ("Keep comments durable"); the pass
+     `CODING-STYLEGUIDE.md` ("Keep comments durable"); the pass
      removed them, keeping the numerical justifications and one pointer
      to this record per head.
   8. REFUTED-BY-RULING (Codex, high): "`DedekindEta(~oo) = 0` and

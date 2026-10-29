@@ -3149,7 +3149,7 @@ const BUILTIN_FOLD_HEADS: ReadonlySet<string> = new Set([
  *
  * These operators are deliberately kept non-`lazy`: their `evaluate` handlers
  * read pre-evaluated operands, and a held operand arrives UNBOUND on the
- * `ce.box`/parse routes (see the lazy-operator trap in CLAUDE.md).
+ * `ce.box`/parse routes (see the lazy-operator trap in ARCHITECTURE.md).
  *
  * `supply` is the eager half of the static callback-arity check the lazy
  * operators get through {@link canonicalCallbackOperand}: how many arguments

@@ -1298,6 +1298,7 @@ export interface Expression {
    *
    * Numeric values are rounded to `ce.precision` significant digits.
    */
+  // oxlint-disable-next-line typescript/no-explicit-any -- existing serializer options compatibility
   toLatex(options?: Record<string, any>): string;
 
   /**

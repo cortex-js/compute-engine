@@ -1,6 +1,6 @@
 # ast-grep project configuration for the Compute Engine API-trap rules.
 #
-# Each rule in `rules/` detects one trap that CLAUDE.md and AGENT.md describe
+# Each rule in `rules/` detects one trap that ARCHITECTURE.md and CODING-STYLEGUIDE.md describe
 # in prose, and its `note` explains the trap. Run from the repository root.
 #
 # The whole engine source:

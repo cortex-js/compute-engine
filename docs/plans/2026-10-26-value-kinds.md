@@ -464,7 +464,7 @@ kind's `apply`. A body is canonicalized at its declaration with its
 parameter's declared type, and the canonical form already folds `x/x` to
 `1` for a symbol typed `real` or left untyped (`unknown`) (measured
 2026-10-26; ARCHITECTURE.md, "Generic-symbol conventions at
-canonicalization"; the 2026-10-23 plan §4.8 and CLAUDE.md: a symbol typed
+canonicalization"; the 2026-10-23 plan §4.8 and ARCHITECTURE.md: a symbol typed
 `value` or left undeclared is read as a possible number, `w/w` is `1`). So:
 
 - a parameter typed with a number type (`real`, `integer`, `number`, …)
@@ -611,7 +611,7 @@ interface ArithmeticDefinition {
  * never runs a side effect twice), else `evaluated[i]`. The result is
  * memoized. A class reads `exact(i)` so that `(c + 1/3).N()` is a class and
  * not a sum with `0.333…`; the `Floor` family reads it so that a jump is
- * decided on the exact nominal (the exactness contract, CLAUDE.md). */
+ * decided on the exact nominal (the exactness contract, ARCHITECTURE.md). */
 interface KindOperands {
   readonly evaluated: ReadonlyArray<Expression>;
   readonly written: ReadonlyArray<Expression | undefined>;
@@ -667,7 +667,7 @@ Rules for a hook, documented with the field:
   (`engine.function('Add', […]).evaluate()`), including sums of another
   kind (a quantity whose magnitude is a measurement). The dispatch is
   re-entrant: the nested evaluation runs the other kind's hook. A hook never
-  calls `.simplify()` (the recursion rule of CLAUDE.md, "Simplification and
+  calls `.simplify()` (the recursion rule of ARCHITECTURE.md, "Simplification and
   Recursion Prevention").
 - A hook that throws propagates the error as an `evaluate` handler's error
   does.
@@ -2153,7 +2153,7 @@ exists. This plan meets it as follows:
 - Phase 2, admission of a measurement: refused at every parameter that does
   not admit `real` (an `integer` parameter, a ranged parameter), at a symbol
   declared `real`, `number` or `integer`, at a valueless symbol that a prior
-  use inferred `real` (CLAUDE.md, "Symbol inference is asymmetric": `Sin(x)`
+  use inferred `real` (ARCHITECTURE.md, "Symbol inference is asymmetric": `Sin(x)`
   then `x := Measurement(…)` throws), and at a user function or lambda whose
   parameter is a number type (decision B; `f: (real) -> real` applied to a
   measurement is an `incompatible-type` error; it is admitted today and
@@ -2396,7 +2396,7 @@ exists. This plan meets it as follows:
   (`finite_real` is `real`).
 - The snapshot blast radius of the phase-2 type changes: run the full suite
   after phase 2, count the changed snapshots, and report the number before
-  landing (`CLAUDE.md`, snapshot policy).
+  landing (`ARCHITECTURE.md`, snapshot policy).
 - The cost of the generalized recognition on the arithmetic benchmark
   (`benchmarks/`, the `parse`/`rule-dispatch` suites under `CE_PERF`) for an
   engine with no kind value, which must not change, and for one with a

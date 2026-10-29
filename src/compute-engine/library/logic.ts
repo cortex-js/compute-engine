@@ -69,7 +69,7 @@ const QUANTIFIER_SITES = limitsIndexSites(0);
  * The quantifiers are `lazy`, so their operands arrive RAW — unbound and
  * uncanonicalized — on the `ce.box()` and `ce.parse()` routes (see the
  * "`lazy: true` operators with no `canonical` handler are inert" trap in
- * CLAUDE.md). Without this handler a *parenthesized* body kept its parse
+ * ARCHITECTURE.md). Without this handler a *parenthesized* body kept its parse
  * sugar: `\forall n, (a, b)` came back as
  * `ForAll(n, Delimiter(Sequence(a, b)))` instead of `ForAll(n, Tuple(a, b))`,
  * and the serializer therefore could not delimit the body with parentheses
@@ -122,7 +122,7 @@ function canonicalQuantifier(
  *
  * The lazy route needs a `canonical` handler (a lazy operator without one
  * receives RAW, unbound operands — see the "inert on box/parse" trap in
- * CLAUDE.md). Framework validation deliberately does not bind or type-check
+ * ARCHITECTURE.md). Framework validation deliberately does not bind or type-check
  * lazy operands, so the handler runs `validateArguments` with the now-bound
  * operands itself: `And(1, 2)` still reports `incompatible-type`, an unknown
  * symbol operand is still inferred `boolean`, and a possibly-absent operand

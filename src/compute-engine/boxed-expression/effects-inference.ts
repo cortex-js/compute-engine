@@ -161,7 +161,7 @@ export interface InferredLiteralEffects {
 export class EffectContractError extends Error {
   /** Identifies the class by STRING, not `instanceof`: a plugin bundle
    * re-bundles the engine, so a cross-bundle `instanceof` check fails (see the
-   * cross-bundle identity hazard in CLAUDE.md). */
+   * cross-bundle identity hazard in ARCHITECTURE.md). */
   readonly name = 'EffectContractError';
 
   constructor(

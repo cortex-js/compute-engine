@@ -207,7 +207,7 @@ most consumers use: `.json`, `.latex`/`.toLatex()`, `.operator`, `.ops`,
 `.type`, `.canonical`, `.structural`, `.evaluate()`, `.simplify()`, `.N()`,
 `.subs()`, `.match()`, the algebra helpers (`.add()`, `.mul()`, `.pow()`, …),
 and the three comparison methods `.isSame()` / `.is()` / `.isEqual()` (see
-[CLAUDE.md](./CLAUDE.md#expression-comparison-methods) for their distinct
+[implementation conventions](#expression-comparison-methods) for their distinct
 semantics).
 
 ### Boxing and canonical forms
@@ -230,7 +230,7 @@ modules implement the per-operator canonical logic:
 Three creation modes exist — **canonical** (default), **structural** (bound but
 not canonicalized), and **non-canonical** (not bound, usable only for pattern
 matching/serialization). The distinctions and pitfalls are documented in detail
-in [CLAUDE.md](./CLAUDE.md#expression-creation-modes-canonical-vs-structural).
+in [implementation conventions](#expression-creation-modes).
 
 ### Generic-symbol conventions at canonicalization
 
@@ -418,7 +418,7 @@ The standard library (below) is just a large table of such definitions.
 `BoxedFunction.evaluate()` looks up the operator definition and dispatches to its
 `evaluate` handler. `simplify.ts` drives rule-based simplification with guards
 against infinite recursion (deduplication, a step limit, and loop detection —
-see [CLAUDE.md](./CLAUDE.md#simplification-and-recursion-prevention)).
+see [implementation conventions](CODING-STYLEGUIDE.md#engine-implementation)).
 `serialize.ts` produces MathJSON from a boxed expression. The directory also
 holds focused modules for `expand.ts`, `factor.ts`, `solve.ts` /
 `solve-linear-system.ts`, `polynomials.ts`, `trigonometry.ts`, pattern matching
@@ -574,7 +574,7 @@ domain files (`definitions-arithmetic.ts`, `definitions-algebra.ts`,
 `symbol`, `function`, `infix`, `prefix`, `postfix`, `matchfix`, or `environment`
 entries with precedence. A **lenient** (non-strict) mode accepts ASCIIMath-style
 input such as bare `sin(x)` and `x^(2)`; see the public
-[LaTeX syntax guide](./doc/07-guide-latex-syntax.md#other-parsing-options).
+[LaTeX syntax guide](https://cortexjs.io/compute-engine/guides/latex-syntax/#other-parsing-options).
 
 `LatexSyntax` is an **injectable dependency** of `ComputeEngine`, not a static
 import. The full package entry wires it in via a factory so `ce.parse()` works
@@ -740,7 +740,7 @@ and consumers can register their own (validated by the extension contracts).
 
 Rules are pattern/predicate based and must avoid re-entrant `.simplify()` calls;
 the recursion constraints are documented in
-[CLAUDE.md](./CLAUDE.md#simplification-and-recursion-prevention).
+[implementation conventions](CODING-STYLEGUIDE.md#engine-implementation).
 
 ## Integration rules: Rubi and Fungrim
 
@@ -763,7 +763,7 @@ separately-bundled plugins whose rule corpora live in `data/`:
 Because these plugins re-bundle engine code, `instanceof` and
 `constructor.name` checks fail across the host/plugin boundary — use string
 checks like `e.name === '…'` (see
-[CLAUDE.md](./CLAUDE.md#common-api-traps)).
+[implementation conventions](#implementation-conventions)).
 
 ## Numerics
 
@@ -1140,7 +1140,7 @@ These properties are intentional and enforced; preserve them when contributing:
 
 1. **Zero circular dependencies** in `src/compute-engine` (runtime *and*
    type-only), checked with `madge`. See
-   [CLAUDE.md](./CLAUDE.md#circular-dependencies).
+   [implementation conventions](#circular-dependencies).
 2. **Layered imports**: kernel types → wrappers → services → composition root;
    no upward imports. Enforced by the per-layer `no-restricted-imports`
    overrides in `.oxlintrc.json`.
@@ -1152,11 +1152,175 @@ These properties are intentional and enforced; preserve them when contributing:
 6. **Don't call `.simplify()` from within simplification rules** or functions
    they invoke (infinite-recursion risk).
 
+## Implementation conventions
+
+### Expression creation modes
+
+The public option is `form`:
+
+| Form                  | Binding and normalization   | Use                                            |
+| --------------------- | --------------------------- | ---------------------------------------------- |
+| `canonical` (default) | Bound and canonicalized     | Normal expression construction                 |
+| `structural`          | Bound, preserving structure | Arithmetic without canonical rewriting         |
+| `raw`                 | Unbound                     | Patterns, serialization, or intermediate input |
+
+A raw expression cannot safely reach arithmetic methods. Use
+`ce.function('Power', [base, exponent], { form: 'structural' })` when binding
+without canonical rewriting is needed. `ce._fn()` does not accept `form`.
+Selective normalization such as `{ form: ['Flatten', 'Order'] }` is a separate
+choice. Canonical numeric folding reads literals, never a symbol's assigned
+value.
+
+### Expression comparison methods
+
+There are four ways to check if expressions are equal, each with different
+semantics:
+
+- **`.isSame(v)`** — Fast exact structural/symbolic check. No evaluation, no
+  tolerance. Accepts primitives (`number`, `bigint`, `boolean`, `string`) and
+  `Expression`. **Strictly syntactic, everywhere**: a symbol's assigned value is
+  never dereferenced, at any depth or in either direction (with `x := 5`,
+  `ce.symbol('x').isSame(5)` and `ce.box(5).isSame(ce.symbol('x'))` are both
+  `false`, just as `a.isSame(b)` is `false` for `a := 5, b := 5`). An
+  unconditional equivalence relation, so it is safe as a dedup/matching key. Use
+  this in internal engine code where you need a quick check against a known
+  literal. **Two deliberate cross-kind cases. The first (user-ruled
+  2026-08-16):** a `character` and the one-cluster `string` with identical NFC
+  content are the SAME value — `ce.string('a').isSame(ce.character('a'))` is
+  `true` in both directions and their hashes agree — even though the TYPES
+  `character` and `string` are disjoint. This is what lets `"a" in "abc"`,
+  `Contains`, `Tally`, `Unique`, `Set` membership, `IndexOf` and `c == "a"` work
+  without per-operator narrowing hooks (design decision D5 in
+  `docs/plans/2026-08-16-string-phase1-character-type.md`). A test that wants to
+  witness literal NARROWING must therefore assert on the operand's kind
+  (`isCharacter(op)`) or type, never on `isSame`. **A second cross-kind case
+  (user decision 2026-10-25):** a finite `Range` whose bounds and step are
+  integer literals, with at most 10,000 elements (`integerRangeElements()`,
+  `boxed-expression/type-guards.ts`), is the SAME value as the `List` of its
+  integers: `Range(1, 3)`, `Range(1, 3, 1)` and `[1, 2, 3]` are `isSame` in both
+  directions with equal hashes, so `Set(Range(1, 3), [1, 2, 3])` has one
+  element. A range that is an element of a collection stays a range (it is not
+  listed), and this rule keeps set merging and membership as they were when it
+  was listed.
+
+- **`.is(v, tolerance?)`** — Smart check for external API use. Symmetric:
+  `a.is(b)` always equals `b.is(a)`. Tries `.isSame()` first; if that fails and
+  the expression has no free variables (including variables with assigned
+  values), evaluates numerically and compares within the given `tolerance`
+  (defaults to `engine.tolerance`). For a machine-number literal compared to a
+  primitive, delegates to `.isSame()` when no explicit tolerance is provided; an
+  exact literal (a rational, a radical, an exact complex) compared to a
+  `number`/`bigint` compares within `engine.tolerance`, as `.is(ce.number(v))`
+  does. When an explicit `tolerance` is given, always compares numerically.
+
+- **`.isEqual(v)`** — Arithmetic equality (the `Equal` / `=` tier). Cheap:
+  evaluates the operands, compares structurally, then compares the difference
+  against zero within the engine tolerance when neither side has unknowns. No
+  expand, no simplify, no sampling. Returns `undefined` when undecided — in
+  particular for an identity in free variables (`sin²x + cos²x` vs `1`), which
+  is `.isIdenticallyEqual()`'s job, not this one's. **Two EXACT numbers
+  (integers, rationals, rational·√r) are compared exactly, with no tolerance** —
+  by `.isEqual()`/`.isLess()`/… and by the `Equal`/`Less`/… operators alike
+  (user-decided 2026-09-30): `1/3` vs `3333333333333/10^13` is not equal. The
+  tolerance applies only when a float is involved (`1/10 = 0.1` is `True`).
+  `.is()` keeps the tolerance.
+
+- **`.isIdenticallyEqual(v)`** — Full identity in all free variables (the
+  `IdenticallyEqual` / `\equiv` tier). Everything `.isEqual()` does, plus the
+  prover: stochastic sampling at random points, then a symbolic expand+simplify
+  proof. Three-valued — a stochastic disagreement degrades to `undefined`, and a
+  `True` from sampling is a probabilistic verdict, confined to this tier by
+  design.
+
+**Internal code convention**: All internal engine code uses `.isSame()` for
+numeric comparisons (e.g., `.isSame(0)`, `.isSame(1)`). Those checks are on
+number literals, so the syntactic semantics is what they want — but a fold that
+could see a SYMBOL must guard with `isNumber(op)` first (`isLiteral()` in
+`arithmetic-mul-div.ts`), since `.isSame(0)` on a symbol is now always `false`.
+The `.is()` method is reserved for the external API where the numeric evaluation
+fallback is desired.
+
+### Type and collection implementation
+
+[TYPE-SYSTEM.md](docs/TYPE-SYSTEM.md) owns subtype, inference, presence, and
+collection contracts. In particular:
+
+- Bare collection names test the collection kind, not its element types. A bare
+  `tuple` accepts any arity; `tuple<any>` describes one slot.
+- `unknown` is an inference marker. Use `provablyAdmits()` when evidence of
+  `missing`, `nothing`, or `error` is needed; subtyping against `unknown` does
+  not establish that evidence. `joinUnresolvedArm()` preserves unresolved arms
+  in joins derived from values; the general join treats `unknown` as neutral.
+- `list<T>` describes elements; tensors describe cells. `broadcastable<T>`
+  includes tensors, not arbitrary nested lists. Use `leafwardElementType()` for
+  recursive descent toward cells: `collectionElementType()` can return a tensor
+  that contains the same tensor type again.
+- `ListType.dimensions` can be absent, an array, or `null` for unknown rank. Use
+  `listTensorRank()` rather than assuming every present value is an array. Use
+  `cellTypeMayCarryDimensions()` before attaching dimensions;
+  `cellTypeCanHoldANumber()` controls printing, not validity.
+- A valueless symbol can narrow from use; assignment evidence is checked rather
+  than rewritten by use. Bare-constructor declarations refine element types
+  while keeping the declared constructor contract.
+- Declared types enforce presence. Declare `string | missing` or `real | nan`
+  when those values are permitted. `AssertPresent` is spelled `x?!` in Epsil;
+  separate it from a following operator (`x?! + 1`).
+- A declared function result is a host promise; the interpreter does not
+  validate the returned value against it. Compilers reject contradictory
+  representations.
+
+### Evaluation and rules
+
+- A lazy handler must canonicalize the held operands it consumes. Binding with
+  `op.canonical` does not substitute assigned symbol values. Box and parse input
+  can contain unresolved syntax that direct function construction has resolved.
+- `evaluate()` preserves exact values and leaves exact transcendentals symbolic
+  when no exact reduction exists. Numeric handlers honor `numericApproximation`
+  and use `isExact` to distinguish exact from floating operands. See
+  [the numerical evaluation contract](#what-n-promises-user-decision-2026-09-30).
+- Both `evaluate()` and `.N()` keep products of sums factored. The lower-level
+  `mul()` and `.mul()` methods distribute; preserve `mulFactored()` for callers
+  that need factored results. `.add()` and `.mul()` on exact literals can
+  produce floats; use `ce.function('Add' | 'Multiply', ...)` for symbolic
+  construction.
+- Exact forms without a value produce `Indeterminate`; floating operands and
+  compiled numerical results produce `NaN`. Both satisfy `isNaN`. Use
+  `indeterminateFormAnswer()` at sites that can receive floating operands rather
+  than returning `ce.Indeterminate` unconditionally. Poles such as `5/0` are
+  infinity, not indeterminate forms.
+- Rule strings are LaTeX. Patterns are boxed in a clean scope without operator
+  definitions. `replace()` catches rule exceptions, and simplification can
+  reject a correct rewrite that does not lower the cost.
+- Never recursively call `.simplify()` from a simplification rule or its
+  helpers. Return canonical results and leave simplification to the caller.
+
+### Binding and runtime boundaries
+
+- Binding operators declare a `scoped` binding-site selector. Obtain binding
+  symbols through `ce._bindingSymbol`, so library constants such as `Pi`, `e`,
+  and `i` do not replace lexical symbols. Lift integrands with `liftIntegrand()`
+  before passing them to integration providers.
+- `BigDecimal.precision` is module-global, and engine construction writes it.
+  Save and restore it when later tests in the same file reuse an earlier engine.
+  Boolean use also infers a symbol's type for the engine's lifetime.
+- Shared ESM chunks preserve class identity among package entries. Custom or
+  separately bundled plugins may still contain duplicate classes; test package
+  boundaries against built artifacts and avoid assuming constructor names or
+  `instanceof` work across independent bundles.
+
+### Circular dependencies
+
+Runtime and type-only cycles are prohibited. Respect the import layers and
+extract shared types/utilities to a lower layer instead of introducing a cycle.
+Inline type imports or lazy registration can break type-only dependencies where
+appropriate. Dynamic imports hidden behind a variable are not proven acyclic by
+Madge; do not use the check's limitations as permission to bypass the layering.
+
 ## Where to go next
 
 - [`README.md`](./README.md) — installation, quick start, public API examples.
-- [`CLAUDE.md`](./CLAUDE.md) — detailed conventions: comparison methods,
-  creation modes, simplification/recursion rules, circular-dependency patterns.
+- [CODING-STYLEGUIDE.md](CODING-STYLEGUIDE.md) — code, comment, and testing conventions.
+- [AGENTS.md](AGENTS.md) — agent workflow and reference routing.
 - [`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md) — internal architecture
   history and documentation lifecycle.
 - [`docs/`](./docs/) — focused internal specifications and active design work.

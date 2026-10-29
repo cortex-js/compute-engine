@@ -283,7 +283,7 @@ is what ships in the next release, together with the change of
 A change to U must also rewrite the comments and documents that state the
 number-cell rule for `vector` and `matrix`: `type-builder.ts`,
 `serialize.ts`, `primitive.ts`, `types.ts`, `docs/TYPE-SYSTEM.md`, and the
-`list<T>`/`tensor<U>` trap in `CLAUDE.md`.
+`list<T>`/`tensor<U>` trap in `ARCHITECTURE.md`.
 
 ## 6. What makes the rules checkable
 

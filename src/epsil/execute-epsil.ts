@@ -2597,7 +2597,7 @@ function scanUnknownFunctions(
  *
  * Detection is by `name` rather than `instanceof` so it survives a re-bundled
  * `CancellationError` crossing a plugin/host boundary (see the cross-bundle
- * identity hazard in CLAUDE.md).
+ * identity hazard in ARCHITECTURE.md).
  */
 function cancellationCause(e: unknown): CancellationCause | undefined {
   if (!(e instanceof Error) || e.name !== 'CancellationError') return undefined;

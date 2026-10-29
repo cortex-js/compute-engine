@@ -14,7 +14,7 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 //
 // Each rule is probed on the box route and on the parse route, because a
 // lazy operator with no `canonical` handler can behave differently on the
-// two (`CLAUDE.md`, "Common API Traps").
+// two (`ARCHITECTURE.md`, "Implementation conventions").
 
 const L = (...xs: unknown[]) => ['List', ...xs];
 const gt0 = ['Function', ['Greater', 'x', 0], 'x'];

@@ -220,7 +220,7 @@ describe('Table also accepts the TUPLE spelling of an iterator spec', () => {
   //
   // `Table` is `lazy`, so its operands arrive HELD (raw, unbound) on the
   // `ce.box` and Epsil routes and pre-boxed on the `ce.function` route — all
-  // three are probed here (see CLAUDE.md, "lazy: true operators").
+  // three are probed here (see ARCHITECTURE.md, "lazy: true operators").
 
   /** Materialize the (lazy) collection a `Table` canonicalizes to. */
   const table = (...ops: any[]) =>

@@ -71,7 +71,7 @@ of the signature, `Sq(a₁, …, aₙ)` equals the body of the literal with each
 parameter replaced by the matching argument. The engine does not check this
 statement. It is a promise the author makes, in the same way as a declared
 result type (see "A declared result type is a promise the host makes" in
-`CLAUDE.md`).
+`ARCHITECTURE.md`).
 
 Proposed results with the definition above:
 
@@ -177,7 +177,7 @@ formula and NO `evaluate` handler, or the handler declines (returns
 and approximate the result. Example: a definition with only a formula, and
 `Sq(2).N()`. Without unfolding the result is `Sq(2)`; with unfolding it is
 `4`. Unfolding only under `.N()` keeps the exactness contract of `evaluate()`
-(see "Evaluate vs. N: the exactness contract" in `CLAUDE.md`), since `.N()`
+(see "What `.N()` promises: the exactness contract" in `ARCHITECTURE.md`), since `.N()`
 returns a float anyway.
 
 ### 3.7 Others, later
@@ -218,7 +218,7 @@ it samples numerically.
    on its result: `D` and `Expand` are called from simplification rules, and a
    nested `.simplify()` starts a new simplification with its own loop guards,
    which can recurse without end (see "Simplification and Recursion
-   Prevention" in `CLAUDE.md`). The unfolded result is returned canonical,
+   Prevention" in `ARCHITECTURE.md`). The unfolded result is returned canonical,
    not simplified.
 3. **Fold and unfold rules.** If a later version adds a rule that folds
    `x^2` back to `Sq(x)`, it must never run in the same pass as an unfolding.

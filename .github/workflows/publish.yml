@@ -15,18 +15,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '26.13.0'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm test
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.13'
 
-      - name: Build production
-        run: npm run build prod
+      - run: python -m pip install numpy scipy
+
+      - name: Extended validation
+        run: npm run ci:extended
+        env:
+          CE_PYTHON: ${{ steps.python.outputs.python-path }}
 
       - name: Publish to npm
         run: npm publish
@@ -55,7 +61,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '26.13.0'
           cache: 'npm'
 
       # Two dependency trees: the root one for the engine sources that get
@@ -92,7 +98,9 @@ jobs:
                "https://marketplace.visualstudio.com/manage/publishers/FarfieldStudio"
 
       - name: Attach .vsix to the release
-        run: gh release upload "${{ github.event.release.tag_name }}" epsil.vsix --clobber
+        run:
+          gh release upload "${{ github.event.release.tag_name }}" epsil.vsix
+          --clobber
         working-directory: vscode-epsil
         env:
           GH_TOKEN: ${{ github.token }}

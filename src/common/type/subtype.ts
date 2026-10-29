@@ -4997,7 +4997,7 @@ function superType(a: Readonly<Type>, b: Readonly<Type>): Type {
  * Dev-time tripwire (§4.2): the algebra helpers never see an OPEN type. The
  * production defense is the skip/ground-projection rules in `validate.ts` and
  * the solver's ground-only bound joins — not a throw. `console.assert` is
- * stripped in the minified production build (CLAUDE.md), so this costs nothing
+ * stripped in the minified production build (ARCHITECTURE.md), so this costs nothing
  * where it matters and is loud where a leak would otherwise be silent.
  */
 function assertGroundInputs(who: string, types: ReadonlyArray<Type>): void {
@@ -5020,7 +5020,7 @@ export function assertGroundType(who: string, t: Type): void {
 // Hand the solver (`instantiate.ts`) the three algebra primitives it needs.
 // Registered here, unconditionally at module load, because `subtype.ts`
 // already depends on `instantiate.ts` and the reverse import would be a cycle
-// (zero-cycle budget, CLAUDE.md). Anything that can reach `isSubtype` has
+// (zero-cycle budget, ARCHITECTURE.md). Anything that can reach `isSubtype` has
 // therefore loaded this module and armed the solver.
 _setTypeAlgebra({
   isSubtype,

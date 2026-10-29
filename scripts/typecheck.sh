@@ -23,19 +23,7 @@ if [ ! -x "$TSC" ]; then
   fi
 fi
 
-echo "Running TypeScript type check..."
-"$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node \
-  --skipLibCheck -d --allowImportingTsExtensions true --emitDeclarationOnly \
-  --ignoreConfig --outDir /tmp/typecheck ./src/compute-engine.ts
-
-echo "Checking optional group-theory entry..."
-"$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node \
-  --skipLibCheck --noEmit --ignoreConfig ./src/group-theory.ts
-
-echo "Checking Epsil CLI..."
-"$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node \
-  --skipLibCheck --allowImportingTsExtensions true --noEmit \
-  --ignoreConfig ./src/cli/epsil.ts
+node ./scripts/types.mjs
 
 # Type-LEVEL pins in the test suite.
 #
@@ -50,9 +38,10 @@ echo "Checking Epsil CLI..."
 # An `@ts-expect-error` in these files is a real assertion under this run: if
 # the line it guards stops erroring, tsc reports the unused directive.
 echo ""
-echo "Checking type-level pins in the test suite..."
+echo "Checking CLI and type-level assertions..."
 "$TSC" --target es2022 --module es2022 --moduleResolution bundler --types node,jest \
   --skipLibCheck --allowImportingTsExtensions true --noEmit --ignoreConfig \
+  ./src/cli/epsil.ts \
   ./test/compute-engine/compile-free-function-typing.test.ts \
   ./test/compute-engine/compile-mode-plumbing.test.ts \
   ./test/compute-engine/user-collection-handlers.test.ts \
@@ -60,85 +49,4 @@ echo "Checking type-level pins in the test suite..."
   ./test/compute-engine/bigint-count.test.ts \
   ./test/compute-engine/ce-581-runner-list-argument-type.test.ts
 
-# Circular dependency check
-MAX_CYCLES=0
-echo ""
-echo "Checking circular dependencies (budget: $MAX_CYCLES)..."
-
-CYCLE_OUTPUT=$(npx madge --circular --extensions ts src/compute-engine 2>&1) || true
-CYCLE_COUNT=$(
-  echo "$CYCLE_OUTPUT" | grep -oE 'Found [0-9]+ circular' | grep -oE '[0-9]+' || true
-)
-
-if [ -z "$CYCLE_COUNT" ]; then
-  echo "No circular dependencies found."
-  CYCLE_COUNT=0
-fi
-
-echo "Found $CYCLE_COUNT circular dependencies (budget: $MAX_CYCLES)"
-
-if [ "$CYCLE_COUNT" -gt "$MAX_CYCLES" ]; then
-  echo ""
-  echo "FAIL: Circular dependency count ($CYCLE_COUNT) exceeds budget ($MAX_CYCLES)."
-  echo "A new cycle was likely introduced. Run 'npx madge --circular --extensions ts src/compute-engine' to see details."
-  exit 1
-fi
-
-if [ "$CYCLE_COUNT" -lt "$MAX_CYCLES" ]; then
-  echo ""
-  echo "NOTE: Cycle count ($CYCLE_COUNT) is below budget ($MAX_CYCLES)."
-  echo "Please lower MAX_CYCLES in scripts/typecheck.sh to $CYCLE_COUNT to lock in progress."
-fi
-
-echo ""
-echo "Checking public type surfaces for explicit 'any'..."
-
-# Spelled in POSIX extended syntax only — `[[:space:]]` for a blank and an
-# explicit identifier boundary instead of `\s` and `\b`, which are GNU and
-# ripgrep extensions that a strict `grep -E` does not know. `rg` reads the
-# same pattern.
-ANY_PATTERN='as any([^[:alnum:]_]|$)|:[[:space:]]*any([^[:alnum:]_]|$)|<any>|any\[\]'
-# Comment-ONLY lines are excluded: the check targets TypeScript type
-# surfaces, and doc comments legitimately spell the ENGINE's type-language
-# literals (`collection<any>`, `list<any>`), which are unrelated to
-# TypeScript `any`. A line is dropped (content = after the rg `file:line:`
-# prefix) only when it is comment to its end:
-#   - `//…`                        line comment
-#   - `* …` or a lone `*`          doc-comment interior prose — `*` must be
-#                                  followed by whitespace/EOL, so a generator
-#                                  method (`*items(x: any)`) and a
-#                                  close-then-code line (`*/ code`) are KEPT
-#   - `/*…` never closing, or      whole-line block comment — `/* c */ code`
-#     closing exactly at EOL       does NOT match and is KEPT
-# Known gap (fails LOUD, not silent): a block-comment interior line written
-# without the conventional leading `*` is not dropped and still trips the
-# gate; prettier formats doc comments with the `*` prefix, so that spelling
-# does not occur in practice.
-# `rg` is not installed on every machine that runs this script. When it is
-# missing, `rg … || true` used to swallow the "command not found" failure,
-# so the check printed its success line without having searched anything.
-# The search falls back to `grep -rE` (the `--include` globs cover the same
-# files as the `rg` globs: `types*.ts` also matches `types-*.ts`), and both
-# spellings of the pattern are plain ERE, so the two tools agree.
-if command -v rg >/dev/null 2>&1; then
-  ANY_MATCHES=$(rg -n --glob 'types*.ts' --glob 'types-*.ts' --glob 'global-types.ts' "$ANY_PATTERN" src/compute-engine || true)
-else
-  ANY_MATCHES=$(grep -rnE --include='types*.ts' --include='global-types.ts' "$ANY_PATTERN" src/compute-engine || true)
-fi
-ANY_OUTPUT=$(
-  printf '%s\n' "$ANY_MATCHES" |
-    grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*([[:space:]]|$)|/\*([^*]|\*[^/])*(\*/)?[[:space:]]*$)' || true
-)
-
-if [ -n "$ANY_OUTPUT" ]; then
-  echo "$ANY_OUTPUT"
-  echo ""
-  echo "FAIL: Explicit 'any' found in public type surfaces."
-  echo "Use 'unknown' plus narrowing, or a constrained generic."
-  exit 1
-fi
-
-echo "No explicit 'any' found in public type surfaces."
-
-echo ""
-echo "All checks passed."
+echo 'PASS typecheck'

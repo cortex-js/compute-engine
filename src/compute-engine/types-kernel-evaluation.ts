@@ -182,6 +182,7 @@ export type EvaluateOptions = {
    * (`runWithEvaluationEffects`). Not an input.
    * @internal
    */
+  // oxlint-disable-next-line typescript/no-explicit-any -- heterogeneous internal evaluation contexts
   _contextStack: EvalContext<any, any, any>[];
 
   /**

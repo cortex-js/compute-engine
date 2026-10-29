@@ -663,7 +663,7 @@ function numeric(e: Expression): { re: number; im: number } | undefined {
   return { re: n.re, im };
 }
 
-/** The operators that jump at a point (CLAUDE.md, "Evaluate vs. N"): their
+/** The operators that jump at a point (ARCHITECTURE.md, "What `.N()` promises"): their
  * slope is zero almost everywhere, except `Fract` and the first operand of
  * `Mod`, whose slope is 1. */
 const ZERO_SLOPE_OPS = new Set([

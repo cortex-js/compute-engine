@@ -2106,7 +2106,7 @@ function pipeMapResultType(source: Readonly<Type>, elementType: Type): Type {
  * route.
  *
  * `Signature` is `lazy` and has no `canonical` handler, so its operand arrives
- * UNBOUND on the `ce.box`/parse routes (the held-operand trap in CLAUDE.md):
+ * UNBOUND on the `ce.box`/parse routes (the held-operand trap in ARCHITECTURE.md):
  * reading `.operatorDefinition` off it answers `undefined` there, and only the
  * `ce.function` route — which boxes its arguments before the call — worked.
  * The name is therefore looked up directly when the operand is an unbound

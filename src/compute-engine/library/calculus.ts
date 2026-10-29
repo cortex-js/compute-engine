@@ -4297,7 +4297,7 @@ function withDeclinedDerivativeMemo(
  *
  * `.evaluate()`, never `.simplify()`: evaluate is what produces the closed
  * form here, and `.simplify()` inside a compile path invites the recursion
- * hazards documented in CLAUDE.md.
+ * hazards documented in ARCHITECTURE.md.
  *
  * Only a PURE derivative node is evaluated: evaluating happens at COMPILE
  * time, so an impure body (`ND(Function(Random(), x), 1.5)` runs the numerical
@@ -8343,7 +8343,7 @@ volumes
       // the series `NaN` before `Normal` saw it (`BigO` is `NaN` under
       // `.N()`): `Normal(Series(sin x, x, 0, 3)).N()` was `NaN`, and so was
       // the series at a float point. The held operand is unbound, so it is
-      // canonicalized first (see "lazy operators" in `CLAUDE.md`).
+      // canonicalized first (see "lazy operators" in `ARCHITECTURE.md`).
       lazy: true,
       evaluate: ([x], { numericApproximation }) => {
         if (!x) return x;

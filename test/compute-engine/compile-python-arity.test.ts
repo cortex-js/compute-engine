@@ -321,7 +321,7 @@ describe('PYTHON ARITY — Norm / Covariance operand guards', () => {
 // ---------------------------------------------------------------------------
 
 const VENV_PYTHON =
-  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? '';
 
 function venvHas(mod: string): boolean {
   try {

@@ -4,7 +4,7 @@
 # package is prepared/packed for `npm publish` (and ONLY for publish, never
 # for a plain `npm install`).
 #
-# Why: `npm publish` runs the full production build (via `prepare`) and only
+# Why: `npm publish` runs the full production build (via `prepack`) and only
 # then talks to the registry. When the npm auth token has expired, that
 # multi-minute build is wasted and the failure surfaces at the very end,
 # sometimes without a helpful message. Checking auth first fails fast.
@@ -54,10 +54,10 @@ echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 #
 # The check is skipped in two cases:
 # - In GitHub Actions (`GITHUB_ACTIONS=true`): the publish workflow
-#   (.github/workflows/publish.yml) runs `npm test`, the full suite, on the
+#   (.github/workflows/publish.yml) runs `npm run ci:extended`, the full suite, on the
 #   same checkout just before `npm publish`, and the helper script below
 #   does not exist there.
-# - `CE_FULL_SUITE_PASSED=1`: the person publishing ran `npm test` on this
+# - `CE_FULL_SUITE_PASSED=1`: the person publishing ran `npm run ci:extended` on this
 #   tree and it passed. Use it on a machine without the helper script.
 # Rules: ~/.claude/SHARED-BOX-PROTOCOL.md, section 5.7 (user decision
 # 2026-10-28).
@@ -69,7 +69,7 @@ SUITE_STATUS="$HOME/.claude/scripts/suite-status.mjs"
 if [ ! -f "$SUITE_STATUS" ]; then
   echo ""
   echo "✗ $SUITE_STATUS is missing, so this script cannot tell whether the"
-  echo "  full test suite passed at HEAD. Run 'npm test'; if it passes, run"
+  echo "  full test suite passed at HEAD. Run 'npm run ci:extended'; if it passes, run"
   echo "  'CE_FULL_SUITE_PASSED=1 npm publish'."
   echo ""
   exit 1

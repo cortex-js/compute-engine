@@ -276,6 +276,13 @@
   },
   "overrides": [
     {
+      "files": [
+        "src/compute-engine/**/types*.ts",
+        "src/compute-engine/**/global-types.ts"
+      ],
+      "rules": { "typescript/no-explicit-any": "error" }
+    },
+    {
       "files": ["src/common/**"],
       "rules": {
         "no-restricted-imports": [

@@ -1,0 +1,23 @@
+name: Extended validation
+on:
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '26.13.0'
+          cache: npm
+      - run: npm ci
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.13'
+      - run: python -m pip install numpy scipy
+      - run: npm run test:python
+        env:
+          CE_PYTHON: ${{ steps.python.outputs.python-path }}

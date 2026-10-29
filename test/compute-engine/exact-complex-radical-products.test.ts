@@ -2,7 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine';
 
 // `evaluate()` returns the most exact form (the exactness contract in
-// CLAUDE.md, "Evaluate vs. N"). Two cases broke it:
+// ARCHITECTURE.md, "What `.N()` promises"). Two cases broke it:
 //
 // 1. A product of a radical and a complex value. `√2·(1 + i)` evaluated to
 //    the float `1.414… + 1.414…i`. An exact literal now holds one radical

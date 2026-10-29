@@ -161,7 +161,7 @@ rational (`1/3`), a radical, a bignum, or a complex number, even one whose
 imaginary part is zero. The accessor never projects through `.re`, so it
 never returns an approximation of an exact value; a caller that wants
 floats of an exact list evaluates it with `.N()` first, which is the
-existing exact-versus-numeric contract (CLAUDE.md, "Evaluate vs. N").
+existing exact-versus-numeric contract (ARCHITECTURE.md, "What `.N()` promises").
 
 **The derived array is never promoted to a store.** For an ordinary list
 the walk's result is cached on the node for repeated reads, but it stays a

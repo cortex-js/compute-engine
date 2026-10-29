@@ -119,7 +119,7 @@ to compute in doubles.
   to the imaginary part through `bignumIm`; this is a comparison of an exact
   value with an approximation and is not transitive across precisions, which
   is today's behaviour for the real part and is not changed here.
-  `.isSame()` on two exact values, the case CLAUDE.md's equivalence-relation
+  `.isSame()` on two exact values, the case ARCHITECTURE.md's equivalence-relation
   rule covers, is unaffected.
 - `_toFloat()` (`:417`) passes `{ re: this.bignumRe, im: this.bignumIm }` to
   the factory once `NumericValueData.im` is widened (Phase 2); in Phase 1 it

@@ -89,7 +89,7 @@ describe('COMPILED ROOT OF A COMPLEX RADICAND', () => {
 });
 
 const VENV_PYTHON =
-  TEST_PYTHON ?? path.join(process.cwd(), 'venv', 'bin', 'python3');
+  TEST_PYTHON ?? '';
 
 function venvHasNumpy(): boolean {
   try {

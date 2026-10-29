@@ -10,7 +10,7 @@ import { isSymbol } from '../../src/compute-engine/boxed-expression/type-guards'
 // an expression must hold its value: `value.type.matches(expr.type)`. The
 // bare `unknown` and the bare collection types admit values only, and `any`
 // admits the absence markers (`docs/ERROR-MODEL.md`, and "Bare collection
-// types are values-only synonyms" in `CLAUDE.md`). Each block below was a
+// types are values-only synonyms" in `ARCHITECTURE.md`). Each block below was a
 // case where the type did not hold the value, or where two views of one
 // value did not agree:
 //

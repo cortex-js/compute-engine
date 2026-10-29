@@ -261,7 +261,7 @@ produces a *more* precise type, so any sound improvement anywhere broke
 dozens of tests that were guarding nothing in particular; and a bare
 `.matches()` passes when the type is *too* precise, which is the unsound
 direction. §3 records what was done; the rule for new assertions is in
-`docs/COMMENTING-GUIDELINES.md` under "Type assertions in tests".
+`CODING-STYLEGUIDE.md` under "Type assertions in tests".
 
 ### 2.4 The argument gate, measured
 
@@ -420,7 +420,7 @@ types more precise *and different* looks exactly like 22 regressions.
 - **What was done:** 23 assertions examined; 15 converted; 8 kept exact,
   each with its reason; the two signature assertions split (parameter
   list exact, result bracketed); the rule added to
-  `docs/COMMENTING-GUIDELINES.md`; reviewed; committed as d3faf62d.
+  `CODING-STYLEGUIDE.md`; reviewed; committed as d3faf62d.
 - **Three traps for the next conversion.** First, `number` *is* a subtype
   of `broadcastable<number>`, so a bare `.matches('broadcastable<…>')`
   accepts a result that wrongly collapsed to a scalar. Second, "more
@@ -1220,7 +1220,7 @@ vocabulary; it does not get an expression.
 **Raw, never bound.** `Hold`, `ReleaseHold`, `Typed` and `Subscript` are
 lazy operators with no `canonical` handler, so when an expression comes
 through `ce.box` or `ce.parse` their operands arrive *unbound* (a known
-trap, recorded in CLAUDE.md). Their handlers read that raw form today —
+trap, recorded in ARCHITECTURE.md). Their handlers read that raw form today —
 `Typed` is lazy precisely "so the type operand stays raw" — and
 `describe` / `structureOf()` read the same raw form. Building a
 descriptor never binds or canonicalizes an operand: a raw symbol's name

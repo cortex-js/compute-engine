@@ -333,7 +333,7 @@ describe('GPU tier — f32 presentation', () => {
 describe('draws are IEEE float64 regardless of precision mode', () => {
   // `BigDecimal.precision` is process-global: an engine created with a
   // non-default precision mutates it for the whole process, so it is restored
-  // afterwards (CLAUDE.md, "Common API Traps").
+  // afterwards (ARCHITECTURE.md, "Implementation conventions").
   const engines: ComputeEngine[] = [];
   afterAll(() => {
     for (const ce of engines) ce.precision = 'auto';

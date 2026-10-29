@@ -125,7 +125,7 @@ console.log(factored?.latex);  // (x+1)^2
 1. **No .simplify() calls in factoring functions**
    - To avoid infinite recursion, factoring functions don't call `.simplify()` on their results
    - However, `.simplify()` is called on individual square roots during extraction, which is safe
-   - See CLAUDE.md section "Simplification and Recursion Prevention" for details
+   - See ARCHITECTURE.md section "Simplification and Recursion Prevention" for details
 
 2. **Handling different representations**
    - `4x²` is represented as `Multiply(4, Power(x, 2))`, not `Power(2x, 2)`

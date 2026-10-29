@@ -75,7 +75,7 @@ export function isExactNumber(x: Expression): boolean {
  * Decide whether a numeric `evaluate()` handler should numericize now
  * (dispatch to `apply`/`apply2`/`applyN`) rather than stay symbolic.
  *
- * Per the exactness contract (CLAUDE.md "Evaluate vs. N"): a *numeric
+ * Per the exactness contract (ARCHITECTURE.md "What `.N()` promises"): a *numeric
  * approximation* request (`numericApproximation`, i.e. `.N()`) always
  * numericizes; otherwise an *inexact* (float) argument has no exactness to
  * preserve and numericizes even under plain `evaluate()` — mirroring the

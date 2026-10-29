@@ -4,9 +4,9 @@
 # simplification, collections, types, parsing, compilation, Epsil), so a
 # change that breaks something outside its own area is likely to fail here.
 # The nightly full run (scripts/ci-nightly.sh) catches the rest.
-# Run them: npx jest --config ./config/jest.config.cjs -w 4 -- $(grep -v '^#' config/core-tests.txt)
-# Rules: ~/.claude/SHARED-BOX-PROTOCOL.md section 5.7, and
-# docs/COMPUTE-ENGINE-BOX-SPECIFICS.md section 5 (user decision 2026-10-28).
+# Run them: npm run test:core
+# Policy: docs/COMPUTE-ENGINE-BOX-SPECIFICS.md, checks before staging.
+
 test/compute-engine/arithmetic.test.ts
 test/compute-engine/exactness-regressions.test.ts
 test/compute-engine/simplify.test.ts

@@ -1080,7 +1080,7 @@ function walk(
  *
  * `subtype.ts` already imports this module (`substituteTypeVariables`, for
  * α-equivalence), so an ordinary import in the other direction would be a
- * cycle — and the zero-cycle budget is enforced (CLAUDE.md). Injection keeps
+ * cycle — and the zero-cycle budget is enforced (ARCHITECTURE.md). Injection keeps
  * this module dependency-free while making registration unconditional:
  * `subtype.ts` registers at module load, so the algebra is available to
  * anything that can reach `isSubtype` at all.

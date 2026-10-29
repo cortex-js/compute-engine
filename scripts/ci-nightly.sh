@@ -321,14 +321,9 @@ cmd_run() {
     echo "=== typecheck"
     npm run typecheck || echo "ci-nightly: failed job: typecheck"
     # The declaration test (test/public-ts-declarations/main.ts) imports
-    # dist/types/compute-engine, which only the build writes. These are the
-    # flags of the same step in scripts/build.sh.
+    # dist/types/compute-engine, refreshed by typecheck above.
     echo "=== declarations"
-    ./node_modules/@typescript/native/bin/tsc --target es2022 --module es2022 \
-      --moduleResolution bundler --types node --skipLibCheck -d \
-      --allowImportingTsExtensions true --ignoreConfig \
-      --emitDeclarationOnly --outDir ./dist/types ./src/compute-engine.ts ||
-      echo "ci-nightly: failed job: declarations"
+    bash scripts/test-types.sh || echo "ci-nightly: failed job: declarations"
     echo "=== test.sh"
     # test.sh stops at the first failing step (set -e); its exit code is
     # what tells a pass. CE_NIGHTLY=1 turns on the nightly suites
@@ -338,6 +333,7 @@ cmd_run() {
     if [ -z "${CE_PYTHON:-}" ] && [ -x "$REPO/venv/bin/python3" ]; then
       export CE_PYTHON="$REPO/venv/bin/python3"
     fi
+    npm run test:python || echo "ci-nightly: failed job: python"
     CE_NIGHTLY=1 bash scripts/test.sh || echo "ci-nightly: failed job: tests"
   ) >> "$log" 2>&1 &
   # In the background with `wait`: bash runs a trap only after a foreground

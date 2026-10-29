@@ -1,0 +1,6 @@
+# Husky owns core.hooksPath; preserve machine-local post-commit integrations.
+common_dir=$(git rev-parse --path-format=absolute --git-common-dir) || exit 0
+hook="$common_dir/hooks/post-commit"
+if [ -x "$hook" ]; then
+  "$hook" "$@" || true
+fi
