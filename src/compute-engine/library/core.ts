@@ -5714,6 +5714,44 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       examples: ['Identity(x + 1)'],
       evaluate: ([x]) => x,
     },
+
+    Composition: {
+      description:
+        'The composition of functions, applied right to left: ' +
+        '`Composition(f, g, h)(x)` is `f(g(h(x)))`',
+      examples: ['Composition(Sin, Exp)(0)', 'Composition(f, g)(x)'],
+      signature: '(function*) -> function',
+      // The type is that of the rightmost step's parameters and the leftmost
+      // step's result, when each step's signature is known.
+      type: (ops, { engine: ce }) => {
+        if (ops.length === 0) return undefined;
+        const arms = ops.map((op) => signatureArms(op.type));
+        if (arms.some((a) => a === undefined || a.length !== 1))
+          return undefined;
+        const first = arms[0]![0];
+        const last = arms[ops.length - 1]![0];
+        if (first.typeParams?.length || last.typeParams?.length)
+          return undefined;
+        return BoxedType.forResult(
+          { ...last, result: first.result },
+          ce._typeResolver
+        );
+      },
+      // Nested compositions flatten, `Identity` steps drop, the empty
+      // composition is `Identity` and a single step is itself, as in
+      // Wolfram's `Composition`.
+      canonical: (args, { engine: ce }) => {
+        const steps = args
+          .flatMap((arg) => {
+            const op = arg.canonical;
+            return isFunction(op, 'Composition') ? op.ops : [op];
+          })
+          .filter((op) => !isSymbol(op, 'Identity'));
+        if (steps.length === 0) return ce.symbol('Identity');
+        if (steps.length === 1) return steps[0];
+        return ce._fn('Composition', steps);
+      },
+    },
   },
   {
     Apply: {

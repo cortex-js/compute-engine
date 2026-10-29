@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### New Features
+
+- **`Composition(f, g, h)` is the composition of functions, applied right to
+  left.** `Composition(f, g, h)(x)` is `f(g(h(x)))`, each step through its own
+  head: `Composition(Sin, Exp)(0)` is `sin(1)`, and with undeclared `f`, `g`
+  and `h` the application `Composition(f, g, h)(x)` is `f(g(h(x)))`. As in
+  Wolfram, the rightmost function takes all the arguments
+  (`Composition(Sqrt, Add)(3, 6)` is `3`), nested compositions flatten,
+  `Identity` steps drop, the
+  empty composition is `Identity` and a single step is itself. The steps can
+  be symbols, function literals or other function values. The composition is a
+  function value of type `function`, or `(list) -> rational` when the steps
+  have signatures (`Composition(half, size)`), and it works wherever a
+  function does: `Apply`, a call, `Pipe`, `Map`. It compiles to the nested
+  call on the JavaScript and shader targets. It follows the naming policy of
+  #395 (same function, same arguments, same order as Wolfram's `Composition`);
+  `RightComposition` is not added (#495, contributed by
+  [enumeratio](https://github.com/enumeratio)).
+
 ## 0.173.0 _2026-10-28_
 
 ### Resolved Issues

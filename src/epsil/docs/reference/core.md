@@ -513,6 +513,22 @@ Coalesce(missing, NaN, 3, 4)
 
 Type annotation (`a : b`) — opaque typed head.
 
+### composition
+
+MathJSON `Composition` · `(function*) -> function`
+
+The composition of functions, applied right to left: `Composition(f, g, h)(x)` is `f(g(h(x)))`
+
+```epsil
+composition(sin, exp)(0)
+// ➔ sin(1)
+```
+
+```epsil
+composition(f, g)(x)
+// ➔ f(g(x))
+```
+
 ### conforms
 
 MathJSON `Conforms` · `(subject: any, protocols: string+) -> boolean`

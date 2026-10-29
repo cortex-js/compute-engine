@@ -2279,7 +2279,9 @@ function isQualifiedProtocolMember(e: Expression): boolean {
 function isRawFunctionValuedApplication(e: Expression): boolean {
   return (
     isFunction(e) &&
-    (e.operator === 'InverseFunction' || e.operator === 'Derivative') &&
+    (e.operator === 'InverseFunction' ||
+      e.operator === 'Derivative' ||
+      e.operator === 'Composition') &&
     freeAnonymousSlots(e).size === 0
   );
 }
@@ -2437,6 +2439,35 @@ function isCheapWrittenArgument(source: Expression): boolean {
 }
 
 /**
+ * The application `steps[0](steps[1](… steps[n-1](...args)))` of a
+ * composition, as an unevaluated canonical expression. The last step takes
+ * all the arguments, every other step the single result of the one after it
+ * (Wolfram's `Composition[f, g, h][x, y]` is `f[g[h[x, y]]]`). A symbol step
+ * is called by name, so a library head or a user function dispatches as in a
+ * direct call; any other step (a function literal, a held callee) is applied
+ * with `Apply`. Shared by `apply()` and the compilers, which lower the nested
+ * call and so agree with the interpreter by construction.
+ */
+export function composedApplication(
+  ce: ComputeEngine,
+  steps: ReadonlyArray<Expression>,
+  args: ReadonlyArray<Expression>
+): Expression {
+  let value: ReadonlyArray<Expression> = args;
+  let result: Expression | undefined;
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i];
+    const name = sym(step);
+    result =
+      name !== undefined
+        ? ce.function(name, [...value])
+        : ce.function('Apply', [step, ...value]);
+    value = [result];
+  }
+  return result ?? ce.function('Identity', [...args]);
+}
+
+/**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
@@ -2468,6 +2499,13 @@ export function apply(
     const err = errorValue(fn) ?? firstErrorArg(args);
     if (err !== undefined) return err;
   }
+
+  // `Composition(f, g)` applied is the nested call `f(g(…args))`, each step
+  // through its own head (`composedApplication`).
+  if (isFunction(fn, 'Composition'))
+    return composedApplication(fn.engine, fn.ops, args).evaluate(
+      options?.numericApproximation ? { numericApproximation: true } : undefined
+    );
 
   if (denotesFunction(fn) || isHeldCallee(fn))
     return fn.engine._fn('Apply', [fn, ...args]);

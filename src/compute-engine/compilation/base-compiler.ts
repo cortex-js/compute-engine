@@ -63,6 +63,7 @@ import {
 } from '../boxed-expression/boxed-function.js';
 import {
   capturedValueMismatchNowEntry,
+  composedApplication,
   lookupApplicable,
 } from '../function-utils.js';
 import {
@@ -11595,6 +11596,14 @@ export class BaseCompiler {
     if (isFunction(expr) && expr.ops.some((x) => x.operator === 'Spread'))
       return BaseCompiler.compile(
         BaseCompiler.spliceSpreadOperands(expr),
+        target,
+        prec
+      );
+    // `Apply(Composition(f, g), …args)` is the nested call `f(g(…args))`,
+    // the same rewrite `apply()` makes, so the lanes agree with `evaluate()`.
+    if (isFunction(expr, 'Apply') && isFunction(expr.ops[0], 'Composition'))
+      return BaseCompiler.compile(
+        composedApplication(expr.engine, expr.ops[0].ops, expr.ops.slice(1)),
         target,
         prec
       );
