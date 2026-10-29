@@ -1,3 +1,27 @@
+## [Unreleased]
+
+### New Features
+
+- **Algebraic numbers: minimal polynomials and the ring of integers of the field
+  a number generates** (#492, contributed by
+  [enumeratio](https://github.com/enumeratio)). `MinimalPolynomial(1 + ∛2, x)`
+  is `x³ − 3x² + 3x − 3`, `AlgebraicIntegerQ((1 + √−5)/2)` is `False`,
+  `AlgebraicNumberNorm(1 + √2)` is `−1` and `AlgebraicNumberTrace(1 + √2)` is
+  `2`. `NumberFieldDiscriminant(∛19)` is `−1083`,
+  `NumberFieldIntegralBasis(∛19)` is `[1, ∛19, (1 + ∛19 + ∛19²)/3]` and
+  `NumberFieldSignature(∛2)` is `[1, 1]`. `PolynomialRoot(p, k)` is
+  Mathematica's `Root`, the `k`-th root of a polynomial `p`, real roots first in
+  increasing order and then complex roots: `PolynomialRoot(x² + x + 1, 1)` is
+  `(−1 − i√3)/2`, and the root of a cubic or higher stays `PolynomialRoot`,
+  which the other heads read as a generator (`Root` is the n-th root and keeps
+  its meaning). An argument is read as a polynomial in one generator: a radical
+  of a rational, `i`, the golden ratio or a `PolynomialRoot`. Anything else,
+  such as `√2 + √3` or `π`, a field of degree above 12, or a polynomial whose
+  irreducibility or discriminant's factorization cannot be certified, stays
+  unevaluated. The arithmetic is exact in bigints (Cohen, _A Course in
+  Computational Algebraic Number Theory_, §§4.5-4.7, 6.1-6.2), and the answers
+  agree with Mathematica and Sage.
+
 ## 0.173.0 _2026-10-28_
 
 ### Resolved Issues
