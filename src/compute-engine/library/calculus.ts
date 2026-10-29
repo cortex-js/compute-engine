@@ -51,6 +51,7 @@ import {
   sym,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import {
   operandSites,
   operandsFrom,
@@ -69,6 +70,7 @@ import {
   parameterValueVariesWith,
   rewriteWithBinders,
   sameBindingDef,
+  withCallableBinding,
 } from '../boxed-expression/binders.js';
 import {
   memoDepsStillValid,
@@ -124,6 +126,7 @@ import {
   memoizedPartialDerivative,
 } from '../symbolic/derivative.js';
 import {
+  MAX_SIZE_EAGER_COLLECTION,
   typeCouldBeCollection,
   typeCouldBeNumericCollection,
   typeCouldBeNumericTuple,
@@ -2424,15 +2427,28 @@ function integrateListIntegrand(
     }
 
   return withValueShield(ce, names, () => {
-    // The integrand is evaluated exactly, also under `N()`: an inner integral
-    // with a free outer integration variable has no numeric value, but its
-    // exact value can be a list of expressions in that variable.
-    value ??= liftIntegrand(integrand).evaluate();
-    value = distributeRestriction(ce, value);
-    if (isFunction(value, 'Tuple'))
-      return integrateTupleIntegrand(ce, value, limits, numericApproximation);
-    if (!isFunction(value, 'List')) return undefined;
-    const elements = value.ops;
+    // A function literal whose body is a list because a call in it maps over
+    // a list argument (`y ↦ y·c(y, L, E)` with `E` a list) is split into one
+    // integrand per element of that list (`y ↦ y·c(y, L, E_k)`), without
+    // evaluating the call (`threadedListIntegrands()`). Each integral then
+    // goes through the scalar route, as it does when the argument is one
+    // element of the list.
+    let elements: ReadonlyArray<Expression> | undefined =
+      value === undefined && isFunction(integrand, 'Function')
+        ? threadedListIntegrands(ce, integrand, names)
+        : undefined;
+    if (elements === undefined) {
+      // The integrand is evaluated exactly, also under `N()`: an inner
+      // integral with a free outer integration variable has no numeric
+      // value, but its exact value can be a list of expressions in that
+      // variable.
+      value ??= liftIntegrand(integrand).evaluate();
+      value = distributeRestriction(ce, value);
+      if (isFunction(value, 'Tuple'))
+        return integrateTupleIntegrand(ce, value, limits, numericApproximation);
+      if (!isFunction(value, 'List')) return undefined;
+      elements = value.ops;
+    }
     const count = elements.length;
 
     // Evaluate each bound once, and pair a list bound with the integrand.
@@ -2464,6 +2480,333 @@ function integrateListIntegrand(
     });
     return ce.function('List', results);
   });
+}
+
+/**
+ * The library operators through which `threadedListParts()` maps a list
+ * operand: each of them applied to one list and scalars is the list of its
+ * applications to the elements of the list.
+ */
+const LIST_THREADING_OPERATORS = new Set([
+  'Multiply',
+  'Add',
+  'Negate',
+  'Divide',
+]);
+
+/**
+ * The integrands, one per element, of the function literal `literal` whose
+ * body is a list because a call in it maps over a list argument. With
+ * `c(y, D, e) := ∫_{−D}^{D} n(x, y, e) dx` and `E = [0.001, 0.005]`, the
+ * integrand `y ↦ y·c(y, L, E)` gives `[y ↦ y·c(y, L, 0.001), y ↦ y·c(y, L,
+ * 0.005)]`. The call `c(y, L, E)` is not evaluated: evaluating it writes the
+ * body of `c` into each element, and the integral of that body is slow to
+ * decline when `L` has no value. An integrand with one element of `E` keeps
+ * the call, so the list keeps it too. (User decision 2026-10-28 on CE-604
+ * in `ROADMAP.md`.)
+ *
+ * The split follows the broadcast rules, and declines (returns `undefined`)
+ * for anything outside the cases below; the caller then evaluates the
+ * integrand as before:
+ * - a call of a user function whose parameters are all scalars
+ *   (`paramsAreScalar()`) maps over each list argument, and the lists must
+ *   have the same length;
+ * - `Multiply`, `Add`, `Negate` and `Divide` map over ONE list operand, the
+ *   other operands being scalars;
+ * - a list operand does not read an integration variable (`names`), and its
+ *   value is a nonempty `List` whose elements are not collections. That
+ *   operand alone is evaluated.
+ *
+ * The split is only for a body that holds a call of a user function, which
+ * the evaluation of the whole integrand would replace by the body of the
+ * function: the case of the decision. A body such as `(Σ k·x)·E`, with no
+ * such call, is evaluated by the caller as before: the scalar route does not
+ * evaluate a held operator of the integrand (`Sum`, `Product`, `D`), so the
+ * split would lose the exact value that the evaluation of the whole
+ * integrand finds.
+ *
+ * A list of more than `MAX_SIZE_EAGER_COLLECTION` elements is not split: a
+ * broadcast over it gives a lazy `Map`, and the caller keeps that result.
+ *
+ * The body must be transitively pure (`isTransitivelyPure()`): every node
+ * other than the list operands is copied into each integrand, so a
+ * `Random()` argument would be drawn once per element, where the broadcast
+ * draws it once and shares the value.
+ *
+ * The structure is checked before any list operand is evaluated, so that a
+ * decline for the structure evaluates nothing. A decline after the
+ * evaluation (lists of different lengths, an integrand whose body is still
+ * typed as a list, such as a call of a function that returns a list) costs
+ * one more evaluation of the list operands in the caller; they are pure, so
+ * the value is the same.
+ *
+ * Each integrand is rebuilt from the bound nodes of `literal`: only the list
+ * operands are replaced, and each rebuilt node keeps the binding of its
+ * operator and its scope (`rebuildWithBinding()`). A call of `c` stays a call
+ * of the `c` it named, also when the integral is evaluated in a scope that
+ * declares another `c`.
+ */
+function threadedListIntegrands(
+  ce: ComputeEngine,
+  literal: Expression,
+  names: ReadonlyArray<string>
+): Expression[] | undefined {
+  if (!isFunction(literal, 'Function') || !isTransitivelyPure(literal.op1))
+    return undefined;
+  const plan = threadingPlan(literal.op1, names);
+  if (
+    plan === undefined ||
+    plan === null ||
+    !holdsUserFunctionCall(literal.op1) ||
+    holdsHeldOperator(literal.op1)
+  )
+    return undefined;
+  const elements = new Map<Expression, ReadonlyArray<Expression>>();
+  for (const leaf of planLeaves(plan)) {
+    const known = leaf.count;
+    if (typeof known === 'number' && known > MAX_SIZE_EAGER_COLLECTION)
+      return undefined;
+    const value = leaf.evaluate();
+    if (
+      !isFunction(value, 'List') ||
+      value.nops === 0 ||
+      value.nops > MAX_SIZE_EAGER_COLLECTION ||
+      value.ops.some((x) => typeCouldBeCollection(x.type.type))
+    )
+      return undefined;
+    elements.set(leaf, value.ops);
+  }
+  const count = elements.values().next().value!.length;
+  for (const xs of elements.values()) if (xs.length !== count) return undefined;
+  const integrands = Array.from({ length: count }, (_, k) =>
+    rebuildWithBinding(ce, literal, [
+      buildThreadedElement(ce, plan, elements, k),
+      ...literal.ops.slice(1),
+    ])
+  );
+  if (
+    integrands.some(
+      (f) =>
+        !isFunction(f, 'Function') ||
+        listIntegrandShape(functionResult(f.type.type)) !== undefined
+    )
+  )
+    return undefined;
+  return integrands;
+}
+
+/**
+ * How an expression of the body of an integrand maps over its list operands
+ * (see `threadedListIntegrands()`): a `leaf` is a list operand, replaced by
+ * its element k in the integrand k; a `node` is rebuilt over the elements of
+ * its operands, where an operand that is `null` cannot be a collection and is
+ * kept as it is.
+ */
+type ThreadingPlan =
+  | { kind: 'leaf'; expr: Expression }
+  | {
+      kind: 'node';
+      expr: Expression;
+      ops: ReadonlyArray<ThreadingPlan | null>;
+    };
+
+/**
+ * The plan of `e` (see `ThreadingPlan`), read from its structure and types
+ * only: nothing is evaluated. `null` when `e` cannot be a collection, and
+ * `undefined` when the split declines.
+ */
+function threadingPlan(
+  e: Expression,
+  names: ReadonlyArray<string>
+): ThreadingPlan | null | undefined {
+  if (!typeCouldBeCollection(e.type.type)) return null;
+
+  if (isFunction(e, 'Block')) {
+    if (e.nops !== 1) return undefined;
+    const op = threadingPlan(e.op1, names);
+    return op ? { kind: 'node', expr: e, ops: [op] } : undefined;
+  }
+
+  if (isFunction(e) && e.operator !== 'List') {
+    const def = e.operatorDefinition;
+    let userCall: boolean;
+    let libraryCall = false;
+    if (def === undefined) {
+      // A call of a function held as a value (`ce.declare('c', 'function')`
+      // then `ce.assign('c', literal)`).
+      userCall = valueCallMapsOverLists(e);
+    } else {
+      const sig = def.signature.type;
+      userCall =
+        def.isUserFunctionDefinition &&
+        !def.lazy &&
+        paramsAreScalar(def) &&
+        typeof sig === 'object' &&
+        sig.kind === 'signature' &&
+        e.nops <= (sig.args?.length ?? 0) + (sig.optArgs?.length ?? 0);
+      libraryCall =
+        !def.isUserFunctionDefinition &&
+        LIST_THREADING_OPERATORS.has(e.operator);
+    }
+    if (!userCall && !libraryCall) return undefined;
+    const ops = e.ops.map((op) => threadingPlan(op, names));
+    if (ops.some((x) => x === undefined)) return undefined;
+    const lists = ops.filter((x) => x !== null).length;
+    if (lists === 0 || (libraryCall && lists > 1)) return undefined;
+    return { kind: 'node', expr: e, ops: ops as ThreadingPlan[] };
+  }
+
+  // A list operand: a symbol or a `List` that does not read an integration
+  // variable. It is evaluated later, by `threadedListIntegrands()`.
+  if (e.symbols.some((s) => names.includes(s))) return undefined;
+  return { kind: 'leaf', expr: e };
+}
+
+/** True when `e` is, or holds, a call of a user function. */
+function holdsUserFunctionCall(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operatorDefinition?.isUserFunctionDefinition === true) return true;
+  if (e.operatorDefinition === undefined && valueHeldLiteral(e) !== undefined)
+    return true;
+  return e.ops.some((op) => holdsUserFunctionCall(op));
+}
+
+/**
+ * The operators that hold their operands and that are not binders, which
+ * `holdsHeldOperator()` reads in addition to the binders.
+ */
+const HELD_INTEGRAND_OPERATORS = new Set([
+  'Limit',
+  'Hold',
+  'ND',
+  'NIntegrate',
+  'Derivative',
+]);
+
+/**
+ * True when the expression `e` of an integrand, read as written (the body
+ * of a called function is not read), holds a binder other than `Block`
+ * (`Sum`, `Product`, `D`, `Integrate`: a definition with `scoped`) or
+ * another operator that holds its operands (`HELD_INTEGRAND_OPERATORS`).
+ * The scalar route does not evaluate such an operator before it integrates,
+ * where the evaluation of the whole integrand does: `∫_0^1 (Σ_{k=1}^3 k·x)·
+ * f(x, E) dx` is `[9/2, 15/2]` only when the integrand is evaluated whole.
+ * So the split declines for it.
+ */
+function holdsHeldOperator(e: Expression): boolean {
+  if (!isFunction(e)) return false;
+  if (HELD_INTEGRAND_OPERATORS.has(e.operator)) return true;
+  if (e.operator !== 'Block' && e.operatorDefinition?.scoped) return true;
+  return e.ops.some((op) => holdsHeldOperator(op));
+}
+
+/**
+ * The function literal that the call `e` applies when its operator is a
+ * function HELD AS A VALUE (`ce.declare('c', 'function')`, then
+ * `ce.assign('c', literal)`): the value of the definition the call is bound
+ * to, read through `callableBindingInContext()`, as the evaluation of the
+ * call reads it. `undefined` when `e` is not such a call, or when the value
+ * is not a `Function` literal.
+ */
+function valueHeldLiteral(e: Expression): Expression | undefined {
+  if (!isFunction(e) || e.operatorDefinition !== undefined) return undefined;
+  const def = e.valueDefinition;
+  if (def === undefined) return undefined;
+  const binding = callableBindingInContext(e.engine, e.operator, {
+    value: def,
+  });
+  if (binding === undefined || !('value' in binding)) return undefined;
+  const literal = binding.value.value;
+  return isFunction(literal, 'Function') ? literal : undefined;
+}
+
+/**
+ * True when a call `e` of a function held as a value maps over its list
+ * arguments: every parameter is a scalar, read from the signature the
+ * evaluation of the call reads (the declared signature, or the type of the
+ * literal when the name is declared `function`), and the call has no more
+ * arguments than the literal has parameters. A parameter that takes a whole
+ * collection (`(t, e) ↦ t·Length(e)`) makes the call bind the list whole,
+ * and the split declines.
+ *
+ * A literal that calls itself by name declines too: the evaluation reads its
+ * signature with the evidence of the self-calls (`namedLiteralSignatureType()`
+ * in `boxed-expression/effects-inference.ts`, which this module may not
+ * import), and a self-call with a list can make a parameter a collection.
+ */
+function valueCallMapsOverLists(e: Expression): boolean {
+  const literal = valueHeldLiteral(e);
+  const def = e.valueDefinition;
+  if (!isFunction(literal) || def === undefined || !isFunction(e)) return false;
+  if (callsOperator(literal.op1, e.operator)) return false;
+  const declared = def.type?.type;
+  const gate =
+    typeof declared === 'object' &&
+    declared.kind === 'signature' &&
+    !def.inferredType
+      ? declared
+      : literal.type.type;
+  return paramsAreScalar(gate) && e.nops <= literal.nops - 1;
+}
+
+/** True when `e` is, or holds, a call whose operator is `name`. */
+function callsOperator(e: Expression, name: string): boolean {
+  if (!isFunction(e)) return false;
+  if (e.operator === name) return true;
+  return e.ops.some((op) => callsOperator(op, name));
+}
+
+/** The list operands of `plan`, each once. */
+function planLeaves(plan: ThreadingPlan): Expression[] {
+  if (plan.kind === 'leaf') return [plan.expr];
+  const leaves = plan.ops.flatMap((op) => (op ? planLeaves(op) : []));
+  return [...new Set(leaves)];
+}
+
+/**
+ * The element `k` of the expression of `plan`: each list operand is replaced
+ * by its element `k` (from `elements`), and every other node is kept, or
+ * rebuilt with its binding (`rebuildWithBinding()`).
+ */
+function buildThreadedElement(
+  ce: ComputeEngine,
+  plan: ThreadingPlan,
+  elements: ReadonlyMap<Expression, ReadonlyArray<Expression>>,
+  k: number
+): Expression {
+  if (plan.kind === 'leaf') return elements.get(plan.expr)![k];
+  const e = plan.expr;
+  if (!isFunction(e)) return e;
+  return rebuildWithBinding(
+    ce,
+    e,
+    e.ops.map((op, i) => {
+      const p = plan.ops[i];
+      return p ? buildThreadedElement(ce, p, elements, k) : op;
+    })
+  );
+}
+
+/**
+ * The node `e` over the operands `ops`, bound to the definition of the
+ * operator of `e` (`withCallableBinding()`), with the scope of `e`, in the
+ * form of `e`. A rebuild through `ce.function()` alone would look the
+ * operator up in the current scope, which can declare another function with
+ * that name.
+ */
+function rebuildWithBinding(
+  ce: ComputeEngine,
+  e: Expression,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  const form = e.isCanonical
+    ? 'canonical'
+    : e.isStructural
+      ? 'structural'
+      : 'raw';
+  return withCallableBinding(e, () =>
+    ce.function(e.operator, ops, { form, scope: e.localScope })
+  );
 }
 
 /**

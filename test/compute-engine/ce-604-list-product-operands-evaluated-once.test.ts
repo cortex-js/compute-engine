@@ -71,24 +71,11 @@ describe('CE-604: the operands of a product with a list are evaluated once', () 
     const value = ce
       .parse(String.raw`\int_{0}^{1}y\cdot c\left(y,L,E\right)dy`)
       .evaluate();
+    // Each element keeps the call of `c`, as the integral with one element
+    // of `E` does (user decision 2026-10-28, ROADMAP CE-604).
     const integral = (e: number) => [
       'Integrate',
-      [
-        'Function',
-        [
-          'Block',
-          [
-            'Multiply',
-            'y',
-            [
-              'Integrate',
-              ['Function', ['Block', ['n', 'x', 'y', e]], 'x'],
-              ['Limits', 'x', ['Negate', 'L'], 'L'],
-            ],
-          ],
-        ],
-        'y',
-      ],
+      ['Function', ['Block', ['Multiply', 'y', ['c', 'y', 'L', e]]], 'y'],
       ['Limits', 'y', 0, 1],
     ];
     expect(value.json).toEqual(['List', integral(0.001), integral(0.2)]);

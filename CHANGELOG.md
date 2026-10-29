@@ -1,19 +1,126 @@
 ## [Unreleased]
 
+### Performance
+
+- **An expression that shares a subexpression evaluates it once** (ROADMAP
+  CE-601). During one evaluation, a pure subexpression that the expression uses
+  at several places (a node built once with `ce.function()` and used twice) is
+  evaluated once per evaluation frame, then reused while no state that it reads
+  changes. `Max(t, t)` nested 30 deep over `x + y` took longer than 2 minutes
+  and now takes about 3 ms, and so does a recursive function whose body is such
+  an expression. The exact result and the numeric approximation are kept apart,
+  and so are the results under another precision, angular unit, random seed
+  frame or entropy handler. An impure subexpression (`Random()`, an assignment)
+  is evaluated at each occurrence.
+
+- **GLSL/WGSL: a small power of a bounded value no longer needs the NaN-safe
+  helper.** A power `b^n` with `n` from 2 to 4, whose base is a symbol with a
+  declared range, a `sin` or `cos` of a real value, or a sum of those, is now
+  proven finite when it is the operand of `sin`, `cos`, `sign`, `min`, `max` or
+  `clamp`, or a term of a sum there. With `x, y, T: real<-10..10>`,
+  `\min((x-\cos(T))^2, y)` compiles to the built-in `min` instead of `_gpu_min`.
+  A power elsewhere (a factor of a product, under `\lfloor\rfloor`) and a sum
+  whose terms can overflow together keep the helper.
+
+### Behavior Changes
+
+- **A host operator is cached only when it states its purity.** An operator that
+  the host declares (with `ce.declare()`, in a library passed to the
+  constructor, or with `ce.loadLibrary()`, or a JavaScript function assigned
+  with `ce.assign()`) and that does not state its purity is now evaluated at
+  each occurrence, on the synchronous and the asynchronous routes (`evaluate`
+  and `evaluateAsync` handlers): no memo keeps its result, nor a result computed
+  while it ran. Before, such an operator was pure by default and the memos could
+  keep a result that it computed: with `R(a)` returning `a` plus the value of
+  `x`, read in its handler, and `g(n) := R(n)`, `g(1)` stayed `2` after
+  `ce.assign('x', 100)`; it is now `101`. The same applies to:
+  - each call of a collection handler (`at`, `iterator` and each step of the
+    iterator, `count`, `contains`, …) of a host operator that does not state its
+    purity, and of a symbol that the host declares with collection handlers. The
+    handlers that describe the collection (`isCollection`, `isLazy`,
+    `isEnumerable`, `eltsgn`, `elttype`) are not counted;
+  - each call of a host callback of a protocol implementation
+    (`ce.declareProtocolImplementation()` with a JavaScript function, getter or
+    setter);
+  - the `evaluateAsync` handler of a user function, on the asynchronous route;
+  - each call of a `subscriptEvaluate` handler that the host gives (a value
+    definition cannot state its purity; the handlers of `ce.declareSequence()`
+    are not host code).
+
+  The memos that follow this rule are: the memo of shared subexpressions, the
+  memo of the applications of a function literal, the memo of the value of a
+  lazy collection or an inert expression, the memo of the elements of a
+  collection, the memo of the `count`, `isEmpty` and `isFinite` of a collection,
+  the evaluated value that `at()` reads for a function expression with no
+  collection handlers, the memo of the bounds of a slice, the memo of the value
+  of a symbol, the memo of the terms of a sequence, the memos of exact zeros and
+  exact complex parts of the series and residue code, the memo of the
+  approximations of the comparisons, the compiled probes of `Limit`, the
+  compiled functions of `Map`, and the values of the sources of a lazy view that
+  its finiteness test evaluates and its operand step reuses.
+
+  A declaration states its purity with `pure: true` (or `pure: false`),
+  `drawsRandom: true`, an `effects` set (`effects: []` for a pure operator), or
+  an effect specifier on the signature (the `pure` keyword for a pure operator);
+  `drawsRandom: false` alone states nothing. An extension
+  (`ce.declare(name, patch, { extend: true })`) that states nothing about purity
+  keeps the statement of the operator that it extends, and an extension of an
+  operator of a standard library that keeps its `evaluate`, `evaluateAsync` and
+  collection handlers stays library code. State `pure: true` only for a handler
+  that depends on its operands alone. The compiler skips the calls of a host
+  `compile` handler only when its definition states `pure: true`. The operators
+  of the standard libraries and the user functions keep their purity. A host
+  handler that changes state (`ce.assign` of a symbol, also from a collection
+  handler such as `at`) stops every memo from keeping a result computed across
+  it, even when its operator states `pure: true`. The other host hooks
+  (`canonical`, `type`, `sgn`, `eq`, `neq`, `cmp`, `even`, `canEnumerate`,
+  `elementCount`, `derivative`, `compile`, the descriptive collection handlers,
+  and the function `value` of a constant) describe the operator or the symbol
+  and are not counted.
+
+- **A definite integral whose integrand calls a user function with a list
+  argument keeps the call in each element.** With
+  `c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx` and `E` a list,
+  `\int_a^b y\,c(y, L, E)\,dy` evaluated to a list of integrals with the body of
+  `c` written in (`[∫ y·∫ n(x, y, E_1) dx dy, …]`); each element is now the same
+  as the integral with one element of `E`: `[∫ y·c(y, L, E_1) dy, …]`. The
+  values do not change, and evaluating it is about 7 to 10 times faster (about
+  the time of the integrals of the elements one by one). This applies when the
+  integrand calls a user function (defined with `:=`, or declared `function` and
+  assigned a function literal), has no side effects, holds no `Sum`, `Product`,
+  `D` or other held operator outside the called functions, and the list has at
+  most 100 elements; otherwise the integrand is evaluated whole, as before.
+
 ### Resolved Issues
+
+- **A compiled integral keeps a parameter named `e`, `i` or `\pi`.** With
+  `q(y, e) := \int_0^1 e x\,dx`, the compiled `q(y, 2)` gave 1.359 (Euler's
+  number divided by 2) instead of 1: the compiler boxed the operands of a
+  closed-form integral again from MathJSON, so a parameter named `e`, `i` or
+  `\pi` became the constant, and a parameter named like a global read the
+  global. The same names no longer make the compilation of a function over a
+  list of points decline.
+
+- **The compiled probes of `Limit` are computed again after a change of state.**
+  A limit that the engine computed once kept the compiled probe of its
+  expression, with the values of its symbols at that time: with
+  `L = Limit(e^(a x)/x^3, x → ∞)`, `L` gave `+∞` for `a = 2`, and still `+∞`
+  after `ce.assign('a', -2)`; it now gives `0`. The memos of exact zeros and
+  exact complex parts of the series and residue code are computed again after a
+  redefinition of an operator.
 
 - **GLSL and WGSL compile a `Map` inside the lambda of another `Map`.** Before,
   `\min(\mathrm{Map}(k\mapsto\max(\mathrm{Map}(j\mapsto j\cdot k,[1,3]))+x,[1,2]))`
   failed on both shader targets with "Could not compile `Map`: … no lowering";
-  now it compiles to `min(x + 3.0, x + 6.0)` (with the NaN-safe helper). A
-  `Map` over a list of known length whose lambda body binds a name (an inner
-  `Map`, a `Sum`, a `Comprehension`) is written out on the shader targets. The
-  shader targets still decline when an element of the list would be captured by
-  a name the body binds, when an anonymous parameter (`_`, `_1`) is bound again
-  inside the body, when an inner length is not known, or when the result would
-  hold more than 64 written-out lambda bodies (a larger shader would probably
-  fail in the driver). The other targets are unchanged: they compile such a
-  `Map` as a loop.
+  now it compiles to `min(x + 3.0, x + 6.0)` (with the NaN-safe helper). A `Map`
+  over a list of known length whose lambda body binds a name (an inner `Map`, a
+  `Sum`, a `Comprehension`) is written out on the shader targets. The shader
+  targets still decline when an element of the list would be captured by a name
+  the body binds, when an anonymous parameter (`_`, `_1`) is bound again inside
+  the body, when an inner length is not known, or when the result would hold
+  more than 64 written-out lambda bodies (a larger shader would probably fail in
+  the driver). The other targets are unchanged: they compile such a `Map` as a
+  loop.
 
 ## 0.173.0 _2026-10-28_
 
@@ -24,19 +131,18 @@
   unapplied where a value is expected, it already became a variable in a sum
   (`x + N`). Now this also happens in an integrand (`\int_0^1 N\,dt`), the
   initial value of `Reduce`, `Fold` and `Scan`, a comparison or a chain of
-  comparisons
-  (`N = 2`, `2 = 2 = N`, `N \equiv x`), a list, a tuple, a set, the branches of
-  `If`/`Which`/`When`, the body of a sum or a product, a limit, a statement of
-  a `Block`, and an argument of an undeclared function or of a parameter typed
-  as a value. So `unknowns` lists it, and a later `N := 3` is used. Before,
-  `ce.parse('y=\\int_0^1 N\\,dt').unknowns` was `["y"]`. The variable is
-  declared where an automatic free variable is declared, so an assignment
-  reaches it from inside an integral or a sum. A name at a function position
-  (`Apply(N, x)`, the function of `Map`, a parameter typed as a function) stays
-  the operator, and `N(2.3)` and `D(x^2, x)` still call the library operators
-  after a value use. In `Reduce(L, N, N)` the initial value is the variable and
-  the fold uses the library `N`. A local of a `Block` and a parameter of a
-  function named `N` stay local.
+  comparisons (`N = 2`, `2 = 2 = N`, `N \equiv x`), a list, a tuple, a set, the
+  branches of `If`/`Which`/`When`, the body of a sum or a product, a limit, a
+  statement of a `Block`, and an argument of an undeclared function or of a
+  parameter typed as a value. So `unknowns` lists it, and a later `N := 3` is
+  used. Before, `ce.parse('y=\\int_0^1 N\\,dt').unknowns` was `["y"]`. The
+  variable is declared where an automatic free variable is declared, so an
+  assignment reaches it from inside an integral or a sum. A name at a function
+  position (`Apply(N, x)`, the function of `Map`, a parameter typed as a
+  function) stays the operator, and `N(2.3)` and `D(x^2, x)` still call the
+  library operators after a value use. In `Reduce(L, N, N)` the initial value is
+  the variable and the fold uses the library `N`. A local of a `Block` and a
+  parameter of a function named `N` stay local.
 
 - **Two random draws are no longer merged into one.** Two draws are two
   independent values, and merging them changed the distribution of the result.
@@ -48,8 +154,8 @@
   factor on both sides of a relation) did the same. Now the canonical form,
   `evaluate()`, `simplify()` and `Factor` keep the draws apart. A rule given to
   `simplify()` with a repeated wildcard does not match two draws; the public
-  `match()` and `replace()` are unchanged. Pure terms and calls of an
-  undeclared function still merge.
+  `match()` and `replace()` are unchanged. Pure terms and calls of an undeclared
+  function still merge.
 
 - **`Together`, `Factor` and `Cancel` of a sum of calls of an undeclared
   function** (Tycho ledger row 472). `Together(g(t) + g(t))` gave the invalid
@@ -57,15 +163,14 @@
   symbols `Nothing`, which a guard did not recognize. `Factor` and `Cancel`
   returned `g(t) + g(t)`. All three now give `2g(t)`, as `evaluate()` does. A
   term that draws is still not merged (`Random() + Random()`, a function
-  declared with the `random` effect, `g(Random())`), and `Together` leaves a
-  sum alone when a denominator draws: `1/Random() + 1/Random()` is not
-  `2/Random()`.
+  declared with the `random` effect, `g(Random())`), and `Together` leaves a sum
+  alone when a denominator draws: `1/Random() + 1/Random()` is not `2/Random()`.
 
 ### New Features
 
 - **`ce.stepsLeft`: the steps left in the innermost step budget.** Inside a
-  `withStepBudget` span it gives the steps left in that span's budget
-  (negative once it is spent), and `undefined` when no step budget is active.
+  `withStepBudget` span it gives the steps left in that span's budget (negative
+  once it is spent), and `undefined` when no step budget is active.
   `steps - ce.stepsLeft` is the number of steps the span used, and
   `ce.stepsLeft < 0` tells that this span's budget, not an enclosing one, is
   spent; `ce.stepBudgetSpent` cannot tell the two apart.

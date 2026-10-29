@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-613.
+Next free reference: CE-626.
 
 **Entry format.**
 
@@ -738,6 +738,66 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
+### CE-620. The element memo samples part of its baseline at the first pull, not when the walk starts
+
+**Status:** open; defect. Found 2026-10-28 by the review of CE-601; the same
+on HEAD `bd814978c` without CE-601.
+
+`each()` builds the operator's iterator before the element memo's recording
+stream reads its baseline: the dependency snapshot of the expression, the
+semantic and world versions and the lexical scope are read at the first
+`next()`. Eager iterators (`Join`, `Filter`) read their operands when the
+iterator is built. If the state changes between the two, the walk holds the
+old elements and is stored under the new state. Repro:
+`ce.assign('a', [1,2,3])`; `j = Join(a, [9])`; `it = j.each()`;
+`ce.assign('a', [7,8])`; draining `it` gives `1,2,3,9`, and a later
+`j.each()` also gives `1,2,3,9` (expected `7,8,9`), `j.at(1)` gives 1, while
+`j.evaluate()` gives `[7,8,9]`. `Filter` behaves the same. Expected: sample the
+whole baseline in `each()` before the iterator is built, as CE-601 does for
+the host-call, sequence-stop and incomplete-walk counts
+(`elementMemoWalkBaseline()`).
+
+### CE-621. Host-code rule of CE-601: remaining gaps on the asynchronous route and in the store of host-derived source values
+
+**Status:** open; defects. Found 2026-10-28 by the last review round of
+CE-601. None of them gives a result that 0.173.0 did not give (0.173.0 kept
+every host result); they cause extra host calls, or, in concurrent
+evaluations, a value that the rule says must not be shared. To be handled by
+the evaluation-cache audit (`docs/plans/2026-10-28-evaluation-cache-audit-handoff.md`).
+
+- **CE-621.1** Two concurrent `evaluateAsync()` calls of the same node join
+  one pending promise even when the result depends on host code that does
+  not state its purity (`boxed-function.ts`, the pending-result join): with a
+  source returning `List(++calls)`, both evaluations get the first one's
+  result.
+- **CE-621.2** A nested `evaluateAsync()` started by a handler without a
+  carried context stack gets the parent's evaluation number but its own
+  pending count; when it ends, it releases the parent's host-derived source
+  values (`releaseHostEagerSourceValues`), and the parent calls the source
+  again. The same happens when a synchronous top-level evaluation ends while a
+  nested asynchronous evaluation that shares its number is pending.
+- **CE-621.3** `eager-source-values.ts`: a lookup takes the ordinary entry
+  before validating it, so an out-of-date ordinary entry hides a valid host
+  entry for the same source (repeated host calls within one evaluation).
+- **CE-621.4** A synchronous throw at the start of `evaluateAsync` does not
+  release that evaluation's host-derived source values (only memory, until
+  the engine is idle).
+
+### CE-615. An operator extended with `{ extend: true }` keeps its old handler in expressions boxed before the extension
+
+**Status:** open; defect (needs a decision). Found 2026-10-28 by the review
+of CE-601; the same on HEAD.
+
+`ce.declare('g', { evaluate: … }, { extend: true })` makes a new definition
+object. An expression boxed before the extension keeps the old definition:
+with `g(x) = 2x` extended to `3x`, a `g(3)` boxed earlier (or stored in a
+symbol, `v := g(3)`) still evaluates to 6, while a fresh `g(3)` gives 9; a
+`Sum` built earlier gives 12 and a fresh one 18. The decision: must an
+extension reach expressions that already exist? If yes, the definition is
+changed in place (or `_definitionVersion` moves and an expression rebinds on
+its next evaluation). If no, the documentation of `extend` says that only
+expressions boxed after it see the change.
+
 ### CE-606. `Equal(r(t), r(t))` of a drawing function evaluates to `True`
 
 **Status:** open; defect. Found 2026-10-28 while fixing CE-598.
@@ -1389,6 +1449,19 @@ the enclosing binder. Workaround: the call form `["a_", "k"]` (the Fungrim
 corpus uses it).
 
 ## Symbolic computation
+
+### CE-613. `Limit` of `e^{√x}/x^5` at infinity gives 0 instead of `+∞`
+
+**Status:** open; defect. Found 2026-10-28 by the review of CE-601 (the
+same result on HEAD `5fd069b6c` and with the CE-601 change).
+
+`lim_{x→∞} e^{√x}/x^5` is `+∞`: `e^{√x}` grows faster than every power of
+`x`. The numeric growth test in `symbolic/limit.ts` samples the expression at
+the probe points `x = 8, 30, 120`, where it is still small and decreasing
+(about `5.6·10⁻⁴`, `1.0·10⁻⁵`, `2.3·10⁻⁶`), and answers that it tends to 0.
+Expected: `+∞`, from a comparison of the growth of the logarithms (`√x`
+against `5 ln x`, as in Gruntz's algorithm), or from probes far enough out
+that the order of growth is settled before the numeric test decides.
 
 ### CE-507. Value kinds: `Measurement`, `Quantity` and an interval value do not use the `arithmetic` field yet
 
@@ -3027,21 +3100,6 @@ characters of code). The size limit of CE-584 runs before the pass and lets
 these graphs through, because their written size is small. Expected: the pass is linear (or
 close to it) in the number of distinct nodes, as the written-size estimate is.
 
-### CE-601. Evaluating an expression that shares a subexpression evaluates it once per path
-
-**Status:** open; defect (needs a design). Found 2026-10-28 with the fix of
-CE-594 (canonicalization of a shared graph).
-
-`Max(t, t)` nested d deep (31 distinct nodes and 2^30 paths at d = 30) is
-canonicalized and typed in linear time, but `evaluate()` evaluates both
-operands of each `Max` once per path: with `r := n ↦ tower`, whose leaf is
-`If(n < 1, 0, r(n − 1))`, `r(0)` takes 391 ms at depth 16 and does not end in
-120 s at depth 30 (measured 2026-10-28). A memo of evaluated nodes within one
-evaluation would make it linear, but the decision is what such a memo may
-reuse: an operand with a side effect or a random value (`Random()`, an
-assignment, a `Print`) must be evaluated at each occurrence, and the memo must
-key on the scope and the values of the variables in it.
-
 ### CE-602. Re-boxing an invalid function literal over a shared graph is exponential
 
 **Status:** open; defect. Found 2026-10-28 with the fix of CE-594.
@@ -3705,14 +3763,14 @@ call 1,223 → 980). What remains:
   `\min(2\cos(T+1.9)+\sin(2T+2.7), \cos(T+1.9)-\sin(2T+2.7))` uses the
   built-in `min`). In that document each operand reads `x` or `y`, typed
   `nan | real | signed_infinity`, so the helper is correct there (CE-565.3).
-  What remains on the CE side: `gpuFiniteProof` (`gpu-target.ts`) refuses
-  every `Power`. A `Power(b, n)` with a small positive integer literal `n` could
-  use the product rule on `n` copies of `b` (`productStaysFinite`), so a square
-  of an operand of known magnitude is proven finite
-  (`\min((x-\cos(T))^2, y)` with `x, y: real<-10..10>` keeps `_gpu_min`). An
-  `Exp` of an operand whose declared upper bound is at most 88 could also be
-  accepted (`\min(\exp(T)+1, 2\exp(T))` keeps it). Neither helps Tycho's
-  voronoi rows while `x` and `y` keep that type.
+  Done 2026-10-28: a power `b^n` (n = 2..4) of a base of declared range,
+  `sin`/`cos` or a sum of those is proven finite when it is the operand of the
+  guarded call or a term of a sum there (`\min((x-\cos(T))^2, y)` uses the
+  built-in `min`). What remains: an `Exp` of an operand whose declared upper
+  bound is at most 88 (`\min(\exp(T)+1, 2\exp(T))` keeps `_gpu_min`), and a
+  power in any other position (a factor, under `Floor`). A first attempt at
+  both was unsound in three review rounds; it needs CE-619 fixed first.
+  Neither helps Tycho's voronoi rows while `x` and `y` keep that type.
 - **CE-565.3** Tycho side, not CE: the document-level `x`/`y` are still typed
   `real | signed_infinity | nan`; a slider range (`k: real<0..10>`) would prove
   `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions
@@ -3722,6 +3780,39 @@ call 1,223 → 980). What remains:
 By design the helper stays for a product of two symbols with no declared
 range (`sin(k t)`: f32 overflow), for a symbol whose `real` type is only
 inferred, for `smoothstep`, and for a value that can be NaN (an `arcsin`).
+
+### CE-619. The GPU finiteness proof accepts operands that overflow f32
+
+**Status:** open; defect. Found 2026-10-28 while working on CE-565.6; each
+item measured on main with GLSL. When the proof (`gpuFiniteProof`,
+`gpu-target.ts`) accepts an operand that is `+∞` or NaN in f32, the shader
+emits the built-in (`sin`, `min`, …) instead of the NaN-safe helper, and
+`sin(∞)` gives 0 on Apple GPUs where the helper gives NaN. A larger attempt to
+prove `exp` and more powers finite was found unsound in three review rounds
+and dropped; these holes need fixing before such rules come back.
+- **CE-619.1** A function parameter counts as a host input: `F(p) := \sin(Hp)`
+  with `H: real<0..1e19>`, called as `F(Hx)`, emits `sin(H * p)`, but `p` holds
+  `H·x`, so the operand is `H²·x`, `+∞` from `x ≈ 4`. `gpuRecordCallSiteFacts`
+  records only `finite` and `magnitude` for a parameter.
+- **CE-619.2** A product with one factor of unknown size accepts known factors
+  up to `F32_MAX/2` (`productStaysFinite`): `\sin(Hx)` with
+  `H: real<0..1e30>` emits `sin(H * x)` (`+∞` for `x ≥ 3.4·10⁸`);
+  `\sin(x/10^{-30})`, `\sin(\lfloor x\rfloor\cdot10^{30})` and `\sin(H(Hx))`
+  with `H: real<0..1e19>` are accepted the same way. The comment calls it an
+  accepted limit (a host value near the f32 maximum), but ordinary inputs
+  reach it.
+- **CE-619.3** `Random()` is evaluated at compile time by the constant-subtree
+  check (`e.unknowns.length === 0`, then `e.N()`): `\sin(5\mathrm{Random}()\cdot10^{38})`
+  emitted the built-in in 6 of 8 compilations (`+∞` for any draw above 0.68),
+  and the compiled output changes from run to run.
+- **CE-619.4** `Mod` with a tiny divisor: `\sin(\operatorname{mod}(R, 10^{-30}))`
+  with `R: real<0..1e17>` emits `sin(_gpu_fmod(R, 1e-30))`; in f32 the quotient
+  is `+∞` and the result NaN. `Mod` is in `GPU_F32_BOUNDED_HEADS` with no check
+  of the quotient.
+- **CE-619.5** A sum of terms with large declared ranges: `\sin(R+Q)` with
+  `R, Q: real<0..2e38>` emits `sin(Q + R)` (up to 4·10³⁸). The comment of
+  `gpuProvablyFinite` calls it an accepted limit, but the declared ranges show
+  the overflow and a check is simple.
 
 ### CE-253. `Sum(At(P, Range(a, b)))` materializes the range on the JavaScript target
 
@@ -4902,39 +4993,25 @@ so each level of the lazy `Map` chain (`makeSpineRunner`,
 reading an element now costs about one evaluation of a member sum. Reaching 2×
 of the BOXING time means an element read must not evaluate symbolically: either
 the elements of the evaluated `Map` become canonical rather than evaluated
-forms (a change of what `evaluate()` returns, needs a user decision), or a
-general speed-up of typing and symbolic arithmetic (types take about 40 % of
-the time).
+forms, or a general speed-up of typing and symbolic arithmetic (types take
+about 40 % of the time). User decision 2026-10-28: the elements stay evaluated
+forms; this entry stays open as a typing and arithmetic speed item.
 
-### CE-604. An integral whose integrand calls a function with a list argument expands into a list of integrals with the function body written in
+### CE-618. A product with a list operand evaluates each cell product again, and `Integrate` has no evaluate memo
 
-**Status:** open; performance. Tycho ledger row 476, 2026-10-28; instrument
-`~/dev/tycho/scripts/repros/2026-10-28-ce476-integral-list-argument-evaluate-repro.mts`.
+**Status:** open; performance. Found 2026-10-28 while fixing CE-604 (Tycho
+row 476, fixed by keeping the call on the list route of `Integrate`).
 
-With `c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx`, `E` a list of 6 and `L`
-declared real without a value, evaluating four expressions
-`\int_a^b y\,c(y, L, E)\,dy` takes about 687 ms: each becomes a `List` of 6
-`Integrate` with the body of `c` written in. The same 24 integrals, one element
-each, take 48 ms (Tycho's measure, median of 3). Target: at most 2× the
-per-element time.
-
-Partly done 2026-10-28: the `Multiply` evaluate handler no longer has
-`mulTensors` evaluate its (already evaluated) list operand again
-(`operandsAreValues`, `arithmetic-mul-div.ts`). Antiderivative attempts per
-head 30 → 24; about 11.5× → 8–10× (bundle measure); results identical. What
-remains, in four groups of about 6 attempts each:
-- `multiplyCell` (`mulTensors`) calls `.evaluate()` on each cell product
-  `y·I_k`, which evaluates the inner `Integrate` again. A fix needs a "fold of
-  values" entry into the `Multiply` handler; an inline change could change the
-  errors for string cells and absence markers.
+Two costs remain when a list of unevaluated integrals is multiplied or
+evaluated again:
+- `multiplyCell` (`mulTensors`, `arithmetic-mul-div.ts`) calls `.evaluate()`
+  on each cell product `y·I_k`, which evaluates the inner `Integrate` again. A
+  fix needs a "fold of values" entry into the `Multiply` handler; an inline
+  change could change the errors for string cells and absence markers.
 - `Integrate` is lazy and gets no evaluate memo; each evaluation also moves the
   generation about 19 times, so a generation-keyed memo is outdated at once
-  (same family as CE-535).
-- The list route of `Integrate` (`integrateListIntegrand`, `calculus.ts`)
-  evaluates the whole integrand, so it writes in the body of `c`
-  (`[∫ y·∫ n(x, y, 0.001) dx dy, …]`), while the scalar route keeps the call
-  (`∫ y·c(y, L, 0.01) dy`). Keeping the call on the list route would reach the
-  target but changes the form of these results: needs a user decision.
+  (same family as CE-535). Evaluating the same unevaluated
+  `∫_{-L}^{L} n(x, y, 0.001) dx` again costs about 9 ms each time.
 
 ### CE-612. `isSame()` takes exponential time on an expression that shares its subtrees
 
@@ -4946,6 +5023,101 @@ subtrees are shared objects: with `e = q(e, e)` built k levels deep,
 class as commit `0904d0592` ("Fix exponential walks over shared expressions").
 Fix: remember the pairs already found equal during one top-level comparison,
 as `isSameCall()` (`boxed-function.ts`) does.
+
+### CE-614. An integral of a user-function call reads the function of the current scope, not the one it was written with
+
+**Status:** open; defect (wrong values). Found 2026-10-28 while fixing CE-604.
+
+For a function held as a value, `evaluate()` gives a WRONG value:
+`ce.declare('g', 'function'); ce.assign('g', (t) ↦ t)`, then
+`I = ce.parse('\int_0^1 g(x)\,dx')`, then in a new scope
+`ce.declare('g', 'function'); ce.assign('g', (t) ↦ 100)`: `I.evaluate()` gives
+`100` (should be `1/2`); `I.N()` gives `0.5`. A plain call `g(3)` and
+`\sum_{k=1}^2 g(k)` read the right `g`, and with `g(t) := t` (an operator
+definition) the integral is right. Probable cause: `liftIntegrand()`
+(`boxed-expression/utils.ts`) calls `rebindEscaping()`, which binds each name
+that escapes the integrand again by looking it up in the current scope, so a
+call head held as a value is redirected to the shadowing declaration; the
+comment of `callableBindingInContext()` (`binders.ts`) says callable positions
+use lexical identity, so the lift should probably leave call heads alone. Under
+such a scope, Tycho's row-476 heads give `[50, 50]`, as the integral of one
+element does.
+
+A related case:
+
+With `c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx` and `L := 0.5`,
+`∫_0^1 y·c(y, L, 0.001) dy` parsed while `c` is that function gives 1.98376
+under `.N()`. Evaluated under a scope that declares another `c`, `.N()` returns
+the integral unevaluated (same on main before CE-604). The call should keep the
+binding it was parsed with (`docs/SCOPING-MODEL.md`); a guess is that the
+numeric route of `Integrate` looks `c` up by name in the current scope. Before
+CE-604, the list route of the same integral gave numbers because it wrote the
+body of `c` in first; it now keeps the call and shows the same defect.
+
+Two related gaps of the CE-604 list route, not defects: a literal list
+integrand (`∫ [y·c(y, L, 0.1), y] dy`) still writes the body of `c` into each
+element, and a function held as a value (declared `function`, then assigned)
+is not split, so it takes the old, slower route. Both give the right values.
+
+### CE-616. A definite integral does not evaluate a `Sum`, `Product` or `D` held in its integrand
+
+**Status:** open; defect. Found 2026-10-28 while fixing CE-604.
+
+`∫_0^1 2·Σ_{k=1}^3 k·x dx` and `∫_0^1 2·D(x^3, x) dx` stay unevaluated
+`Integrate` (they are 6 and 2): the scalar route of `Integrate` does not
+evaluate a held operator in the integrand before it integrates. With
+`f(t, a) := t^2 + a`, `∫_0^1 (Σ_{k=1}^3 k·x)·f(x, 1) dx` stays unevaluated too.
+Since CE-604, the list route sends an integrand that calls a user function
+through the scalar route for each element, so `∫_0^1 (Σ_{k=1}^3 k·x)·f(x, E) dx`
+with `E = [1, 2]` now gives two unevaluated integrals where it gave
+`[9/2, 15/2]` before. `.N()` gives the right values on both routes.
+
+### CE-617. The LaTeX `\frac{d}{dx}` inside an integral takes the closing `dx` as `d·x`
+
+**Status:** open; defect. Found 2026-10-28 while fixing CE-604.
+
+`\int_0^1 \frac{d}{dx}x^3 \cdot E\,dx` parses to
+`["Integrate", ["Function", ["Block", ["D", ["Multiply", "E", "d", "x",
+["Power", "x", 3]], "x"]], "d", "x"], ["Limits", "Nothing", 0, 1]]`: the
+derivative reads the integral's `dx` as the product `d·x`, so the integral has
+no variable (`Nothing`), and `evaluate()` with `E = [1, 2]` gives
+`[2x^3, 4x^3]`, which still holds `x` after a definite integral. The MathJSON
+route (`["Integrate", ["D", ["Power", "x", 3], "x"], …]`) gives `[1, 2]`.
+
+### CE-622. `subs()` binds a rebuilt call to the function of the current scope
+
+**Status:** open; defect (wrong values); needs a decision. Found 2026-10-28
+while fixing CE-614.
+
+With `h := a ↦ a·x`, take `Add(h(a), 1)`, then push a scope that declares
+`h := a ↦ 100`: `.subs({a: k})` gives `h(k)` bound to the inner `h`, which
+evaluates to 101 (the call was written with the outer `h`: `k·x + 1`). So,
+with `g := a ↦ h(a) + 1`, `D(g(k), x)` under that scope gives 0 instead of
+`k`, and an integral or a limit of a nested call reads the inner `h` too
+(through `betaReduceLambda`, which uses `body.subs`). `docs/SCOPING-MODEL.md`
+calls an expression rebuilt by `subs()` "a new call", which does not say
+whether a call keeps its binding. Decision needed: does `subs()` keep the
+binding of each call it rebuilds?
+
+### CE-625. A limit of a call that passes a function as an argument leaves a parameter name in the result
+
+**Status:** open; defect (wrong values). Found 2026-10-28 while reviewing
+CE-614.
+
+With `g := t ↦ t^2` and `h := (p, a) ↦ p(a)`, `Limit(x ↦ h(g, x), 2)`
+evaluates to `["p", 2]` (the parameter name of `h`), where the value is 4. The
+same happens on main and with no shadowing scope: the inlining of the call of
+`h` does not substitute the function argument `g` for the parameter `p` in a
+call position.
+
+### CE-624. The interpreter cannot compute a nested integral of a user-function call
+
+**Status:** open; capability. Found 2026-10-28 while fixing CE-614.
+
+With Tycho's row-476 definitions (`c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx`)
+and `L := 0.5`, `.N()` of `\int_0^1 y\,c(y, L, 0.001)\,dy` gives 1.98376 only
+through the compiled route; with `jit = 'off'` it stays unevaluated, and
+`NIntegrate` gives NaN after about 6 s.
 
 ### CE-535. Canonical `rebind` derives the result type of a user function again after each `D` binder
 
