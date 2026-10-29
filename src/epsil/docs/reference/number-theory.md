@@ -12,7 +12,7 @@ date: Last Modified
 ---
 # Number theory
 
-The 60 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
+The 68 definitions of the number theory library, each with its Epsil spelling, its MathJSON name, its signature and its full description.
 
 Each definition is listed under its Epsil spelling (the MathJSON name when
 it has none), with its signature in the engine's type syntax. The
@@ -20,6 +20,24 @@ it has none), with its signature in the engine's type syntax. The
 category.
 
 ## Definitions
+
+### algebraicIntegerQ
+
+MathJSON `AlgebraicIntegerQ` · `(number) -> boolean`
+
+Whether a is an algebraic integer: a root of a monic polynomial over ℤ.
+
+### algebraicNumberNorm
+
+MathJSON `AlgebraicNumberNorm` · `(number) -> number`
+
+The norm of a over ℚ in the field ℚ(a): (−1)ᵈ times its minimal polynomial's constant term over its leading one.
+
+### algebraicNumberTrace
+
+MathJSON `AlgebraicNumberTrace` · `(number) -> number`
+
+The trace of a over ℚ in the field ℚ(a): minus its minimal polynomial's second coefficient over its leading one.
 
 ### bernoulliB
 
@@ -354,6 +372,12 @@ lucasL(10)
 // ➔ 123
 ```
 
+### minimalPolynomial
+
+MathJSON `MinimalPolynomial` · `(number, any) -> expression`
+
+The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient.
+
 ### modularInverse
 
 MathJSON `ModularInverse` · `(integer, integer) -> integer`
@@ -436,6 +460,24 @@ nthPrime(10)
 // ➔ 29
 ```
 
+### numberFieldDiscriminant
+
+MathJSON `NumberFieldDiscriminant` · `(number) -> integer`
+
+The discriminant of the field ℚ(a): of its ring of integers.
+
+### numberFieldIntegralBasis
+
+MathJSON `NumberFieldIntegralBasis` · `(number) -> list`
+
+A ℤ-basis of the ring of integers of ℚ(a), written on a's powers as Wolfram writes it.
+
+### numberFieldSignature
+
+MathJSON `NumberFieldSignature` · `(number) -> list<integer>`
+
+The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of complex ones.
+
 ### partitionsP
 
 MathJSON `PartitionsP` · `(integer) -> integer`
@@ -446,6 +488,12 @@ MathJSON `PartitionsP` · `(integer) -> integer`
 partitionsP(5)
 // ➔ 7
 ```
+
+### polynomialRoot
+
+MathJSON `PolynomialRoot` · `(any, integer) -> number`
+
+The k-th root of the polynomial p in its unknown: real roots first in increasing order, then complex roots by increasing real part and then imaginary part (Wolfram's Root).
 
 ### powerMod
 

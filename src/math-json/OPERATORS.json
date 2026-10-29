@@ -9370,6 +9370,102 @@
       "examples": [
         "Zip([1, 2, 3], [\"a\", \"b\", \"c\"])"
       ]
+    },
+    {
+      "name": "AlgebraicIntegerQ",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(number) -> boolean",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "Whether a is an algebraic integer: a root of a monic polynomial over ℤ."
+    },
+    {
+      "name": "AlgebraicNumberNorm",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "The norm of a over ℚ in the field ℚ(a): (−1)ᵈ times its minimal polynomial's constant term over its leading one."
+    },
+    {
+      "name": "AlgebraicNumberTrace",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(number) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "The trace of a over ℚ in the field ℚ(a): minus its minimal polynomial's second coefficient over its leading one."
+    },
+    {
+      "name": "MinimalPolynomial",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(number, any) -> expression",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "The minimal polynomial of the algebraic number a in x: primitive over ℤ, positive leading coefficient."
+    },
+    {
+      "name": "NumberFieldDiscriminant",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(number) -> integer",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "The discriminant of the field ℚ(a): of its ring of integers."
+    },
+    {
+      "name": "NumberFieldIntegralBasis",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(number) -> list",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "A ℤ-basis of the ring of integers of ℚ(a), written on a's powers as Wolfram writes it."
+    },
+    {
+      "name": "NumberFieldSignature",
+      "category": "Number Theory",
+      "arity": "1",
+      "signature": "(number) -> list<integer>",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "The signature (r₁, r₂) of ℚ(a): its real embeddings and its pairs of complex ones."
+    },
+    {
+      "name": "PolynomialRoot",
+      "category": "Number Theory",
+      "arity": "2",
+      "signature": "(any, integer) -> number",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": true,
+      "broadcastable": false,
+      "description": "The k-th root of the polynomial p in its unknown: real roots first in increasing order, then complex roots by increasing real part and then imaginary part (Wolfram's Root)."
     }
   ],
   "constants": [
