@@ -82,6 +82,17 @@
 
 ### Resolved Issues
 
+- **GLSL/WGSL: a call of a function that returns a coordinate of a point or a
+  list of points.** With
+  `P: tuple<number, number> | list<tuple<number, number>>` and `P := (3, 4)`, a
+  user function `f(t) := At(P, 1)` has a signature that returns
+  `missing | number | tuple<number, number>`, which has no shader type, and
+  `f(x) + x` declined with "Could not compile an object-domain absent
+  ('missing') position". The call is now replaced by the body of the function
+  when that body, with the point in place of `P`, is a number, as it already was
+  when the body is a point: `f(x) + x` compiles to `x + 3.0`. When `P` holds a
+  list of points, the compilation declines as before.
+
 - **Compiled code: a `Block` local that may have no value is no longer read as
   `undefined`, 0 or an earlier value** (ROADMAP CE-636). With a local declared
   with no value (`Declare(n, integer)`) and assigned on some paths only, at

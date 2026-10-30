@@ -402,6 +402,81 @@ describe('CE-593: user functions and locals read the point', () => {
     );
     expect(s.code).toBe(coordinate);
   });
+
+  // A function whose body reads a coordinate of `P` (`f(t) := At(P, 1)`)
+  // has a signature that returns `missing | number | tuple<number, number>`:
+  // the coordinate of a point, or the first point of a list of points. That
+  // union has no shader type. The call is replaced by its body, which is a
+  // number once the point is in place. Before, `f(x) + x` declined with
+  // "Could not compile an object-domain absent ('missing') position".
+  // (Tycho ledger row 479.)
+  test.each(['glsl', 'wgsl'] as const)(
+    '%s: a call that returns a coordinate of P',
+    (to) => {
+      const ce = engine(['Tuple', 3, 4]);
+      ce.declare('f', 'function');
+      ce.assign('f', ce.box(['Function', ['At', 'P', 1], 't']));
+      expect(ce.box(['Add', ['f', 2], 2]).evaluate().re).toBe(5);
+      const r = compile(ce.box(['Add', ['f', 'x'], 'x']), {
+        to,
+        fallback: false,
+      });
+      expect(r.success).toBe(true);
+      expect(r.code).toBe('x + 3.0');
+    }
+  );
+
+  // A number body whose type is a range (`Square(3)` is an integer from 0
+  // up) or the type of a ranged coordinate (`u: real<0..1>`) is kept too.
+  test.each(['glsl', 'wgsl'] as const)(
+    '%s: a call whose body has a ranged number type',
+    (to) => {
+      const ce = engine(['Tuple', 3, 4]);
+      ce.declare('f', 'function');
+      ce.assign('f', ce.box(['Function', ['Square', ['At', 'P', 1]], 't']));
+      expect(ce.box(['Add', ['f', 2], 2]).evaluate().re).toBe(11);
+      const r = compile(ce.box(['Add', ['f', 'x'], 'x']), {
+        to,
+        fallback: false,
+      });
+      expect(r.success).toBe(true);
+
+      const ce2 = engine();
+      ce2.declare('u', 'real<0..1>');
+      ce2.assign('P', ce2.box(['Tuple', 'u', 4]));
+      ce2.declare('g', 'function');
+      ce2.assign('g', ce2.box(['Function', ['At', 'P', 1], 't']));
+      const r2 = compile(ce2.box(['Add', ['g', 'x'], 'x']), {
+        to,
+        fallback: false,
+      });
+      expect(r2.success).toBe(true);
+      expect(r2.code).toMatch(/\bu\b/);
+    }
+  );
+
+  // A body that stays a union after the substitution keeps the call as
+  // written, and the compilation declines as before: with a list of points
+  // in `P`, `At(P, 1)` is not written in place.
+  test.each(['glsl', 'wgsl'] as const)(
+    '%s: a call over a list of points still declines',
+    (to) => {
+      const ce = engine(['List', ['Tuple', 3, 4], ['Tuple', 5, 6]]);
+      ce.declare('f', 'function');
+      ce.assign('f', ce.box(['Function', ['At', 'P', 1], 't']));
+      let message = '';
+      try {
+        const r = compile(ce.box(['Add', ['f', 'x'], 'x']), {
+          to,
+          fallback: false,
+        });
+        message = r.success ? `success: ${r.code}` : `failure: ${r.error}`;
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toMatch(/^Could not compile/);
+    }
+  );
 });
 
 describe('CE-593: only the union is read through its value', () => {

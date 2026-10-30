@@ -6633,14 +6633,15 @@ function gpuInlinePointValues(
 const GPU_MAX_POINT_CALL_INLINES = 512;
 
 /**
- * `expr` with each call of a user function whose type admits a point and a
- * list of points (`gpuPointOrPointListUnion`) replaced by the body of the
- * function, when that body, with its point values written in place
- * (`gpuInlinePointValues`), is a point. `expr` itself when there is no such
- * call.
+ * `expr` with each call of a user function whose type is a union that has a
+ * point option and no shader type (`gpuCallTypeAdmitsInlinedPoint`)
+ * replaced by the body of the function, when that body, with its point
+ * values written in place (`gpuInlinePointValues`), is a point or a number.
+ * `expr` itself when there is no such call.
  *
  * The signature of such a function was derived from its stored body, which
- * reads the union symbol, so the type of the call is the union, and the
+ * reads the union symbol, so the type of the call is the union (or, for
+ * `f(t) := At(P, 1)`, `missing | number | tuple<number, number>`), and the
  * shape and type readings at the call site have no width for it
  * (`f(t) := t·P` and `f(x).x`). The body with the point in place is an
  * ordinary point expression, `x·(1, 2)`. The stored definition and its
@@ -6727,7 +6728,7 @@ function gpuInlinePointCalls(
       ? e
       : engine.function(e.operator, ops);
     if (!isFunction(node)) return node;
-    if (gpuPointOrPointListUnion(node.type.type) === undefined) return node;
+    if (!gpuCallTypeAdmitsInlinedPoint(node.type.type)) return node;
     const h = node.operator;
     if (onPath.has(h)) return node;
     // A call of a name that the enclosing code binds is a call of that
@@ -6749,11 +6750,12 @@ function gpuInlinePointCalls(
     if (body === undefined) return node;
     if (inlinesLeft <= 0)
       throw new Error(
-        `Could not compile \`${h}\`: its value can be a point or a list of ` +
-          `points, which has no shader type, and the calls of the functions ` +
-          `that give a point would be written out more than ` +
-          `${GPU_MAX_POINT_CALL_INLINES} times. Declare the point-valued ` +
-          `symbol with the point type (\`tuple<real, real>\`).`
+        `Could not compile \`${h}\`: its value has the type ` +
+          `\`${node.type.toString()}\`, which has no shader type, and the ` +
+          `calls of the functions that give such a value would be written ` +
+          `out more than ${GPU_MAX_POINT_CALL_INLINES} times. If the value ` +
+          `reads a symbol that can be a point or a list of points, declare ` +
+          `that symbol with the point type (\`tuple<real, real>\`).`
       );
     inlinesLeft -= 1;
     onPath.add(h);
@@ -6767,8 +6769,15 @@ function gpuInlinePointCalls(
           ...gpuReachableSymbolNames(inner).written,
         ])
       );
+      // The body is kept when it has a shader type: a point, or a number
+      // (`f(t) := P.x` gives `3` for `P := (3, 4)`). A number type can be
+      // a name (`real`), a range (`integer` from 0 up, for `Square(P.x)`)
+      // or a literal value, so it is tested with `isSubtype`. A body that
+      // is still a union has no shader type, and the call is left as
+      // written.
       const t = resolveTypeForCompilation(point.type.type);
-      if (typeof t === 'string' || t.kind !== 'tuple') return node;
+      const isPoint = typeof t !== 'string' && t.kind === 'tuple';
+      if (!isPoint && !isSubtype(point.type.type, 'number')) return node;
       target.symbolDeps?.add(h);
       return point;
     } finally {
@@ -6776,6 +6785,29 @@ function gpuInlinePointCalls(
     }
   };
   return visit(expr, enclosing);
+}
+
+/**
+ * Whether `gpuInlinePointCalls` tries to replace a call of type `type` by
+ * the body of the function. This is the case for a union that admits a
+ * point and a list of points (`gpuPointOrPointListUnion`), and for any other
+ * union that has a `tuple` option and an option that is not a tuple. The
+ * signature of a function whose body reads a coordinate of such a symbol
+ * (`f(t) := At(P, 1)`) has the second kind of type,
+ * `missing | number | tuple<number, number>`: the coordinate of a point or
+ * the first point of a list of points. Neither union has a shader type. A
+ * union of tuples only, or a type that is not a union, is left to the
+ * ordinary compilation.
+ */
+function gpuCallTypeAdmitsInlinedPoint(type: Type): boolean {
+  if (gpuPointOrPointListUnion(type) !== undefined) return true;
+  const t = resolveTypeForCompilation(type);
+  if (typeof t === 'string' || t.kind !== 'union') return false;
+  const isTupleArm = (arm: Type): boolean => {
+    const a = resolveTypeForCompilation(arm);
+    return typeof a !== 'string' && a.kind === 'tuple';
+  };
+  return t.types.some(isTupleArm) && !t.types.every(isTupleArm);
 }
 
 /**
