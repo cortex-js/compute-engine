@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-660.
+Next free reference: CE-663.
 
 **Entry format.**
 
@@ -461,6 +461,54 @@ but it refuses programs that are correct for a record with more fields.
 
 ## Collections, absence and broadcasting
 
+### CE-661. The count and the elements of a family of points are not known before evaluation
+
+**Status:** open; capability, medium. Tycho ledger row 477. CE-536 is not
+required first: this work answers `count` and `at()` without the evaluation that
+CE-536 makes faster.
+
+Input: a body of the form
+`Add(T, PointList(Add(Multiply(c, PointX(PointList(PointX(J), PointY(J)))), …), …, 0.4))`,
+where `T` is a point symbol and `J` is
+`ListJoin(L20, Add(L4, PointList(1.8, 0)), Add(L4, PointList(3.57, 0)), Add(L4, PointList(5.01, 0)), L2)`.
+`L20`, `L4` and `L2` are literal lists of 20, 4 and 2 points in `u` and `v`. The
+value is a list of 34 points (20 + 3 × 4 + 2). Today `count` is `undefined` at
+every node above the literal lists, and `at(k)` evaluates the whole body
+(`_materializedAt()` in `boxed-expression/boxed-function.ts`). Checked on
+0.174.0 and on main, 2026-10-30, with the two `G_{APS}` text faces of the Tycho
+document `art/2ki2hjsouf` (about 67 KB of MathJSON each).
+
+- **CE-661.1** `_broadcastCount()` (`boxed-function.ts`) counts every operand
+  whose type can be an unkeyed collection as a participant, a point too. The
+  evaluation lifts a point added to a list of points:
+  `Add(L4, PointList(1.8, 0))` has 4 elements. The count reads the point as a
+  participant: `PointList(1.8, 0)` has no count, so the answer is `undefined`;
+  with `Tuple(1.8, 0)` the counts 2 and 4 disagree, and the answer is also
+  `undefined`. The outer `Add(T, PointList(…))` loses its count in the same way
+  (`T` has the count 3). Fix: use the participant rule of the evaluation. Then
+  the count handler of `ListJoin` (`JOIN_COLLECTION_HANDLERS` in
+  `library/collections.ts`) can add the operand counts. Today it calls
+  `eagerViewSource()` for an operand with no count, which does not evaluate an
+  operand that holds an unevaluated call (here `PointList(1.8, 0)`).
+- **CE-661.2** `PointX`, `PointY`, `PointZ` and `PointList` have no
+  `elementCount`. `PointX(L)` of a list of points has the count of `L`.
+  `PointList(c₁, …, cₙ)` with at least one list component has the smallest count
+  of its list components (the zip rule of `docs/BROADCAST-MODEL.md`), and no
+  count when a list component has none.
+- **CE-661.3** Element reads without evaluation. A broadcast, `PointList` and
+  `PointX`/`PointY`/`PointZ` have no `at` handler, so `at(k)` evaluates the
+  whole expression. A structural read gives the k-th element unevaluated: for a
+  broadcast, `at(k)` of each participant with the lifted operands unchanged; for
+  `ListJoin`, the element of the operand that holds position k; for `PointX(L)`,
+  the first coordinate of `L.at(k)`; for `PointList`, the tuple of the
+  `cᵢ.at(k)`, with a scalar component `cᵢ` unchanged. Requirements: the element
+  equals `evaluate().at(k)`; a `When` gap stays at its position; the read is
+  done only for a draw-free expression; it answers `undefined` when a count
+  depends on a free variable (`Range(1, Floor(u))`). Each of the 34 members is
+  then a small part of the body. (Tycho's prototype that compiles `At(body, k)`
+  for each k increased the size of the members it transfers from 67 KB to 8.35
+  MB.)
+
 ### CE-466. The type of a sum of a ragged list and a `broadcastable` is wider than needed
 
 **Status:** open; task (precision; the type is sound).
@@ -751,25 +799,34 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
-### CE-645. The element memo can store elements computed inside a temporary precision or angular-unit window
+### CE-660. The interpreter runs a `Loop` over a list with no value zero times
 
-**Status:** open; defect. Found 2026-10-30 by the review of the CE-620 fix; the
-same on HEAD before that fix.
+**Status:** deprioritized; design. User decision 2026-10-30: the result should
+have no value, but neither design is done now. Spec (on hold):
+`docs/plans/2026-10-30-loop-domain-no-value.md`; its review:
+`docs/scratch/LOOP_DOMAIN_NO_VALUE_SPEC_REVIEW.md`.
 
-The element memo of a collection walk compares, before each pull and when it
-stores the walk, the dependency snapshot of the expression, the semantic and
-world versions and the lexical scope. `_withTransientPrecision()` and
-`_withTransientAngularUnit()` (`engine-numeric-configuration.ts`) change the
-working precision or the angular unit without moving any of these; the memo
-checks `_atTransientConfiguration` only when it stores the walk. So a walk
-started outside such a window, pulled inside it and finished outside it stores
-the elements computed in the window. Repro: `ce.assign('a', [1/3])`;
-`j = Join(Map(x ↦ N(x), a), [9])`; `it = j.each()`;
-`ce._withTransientPrecision(5, () => { it.next(); it.next(); })`; `it.next()`; a
-later `j.each()` gives `0.33333, 9` and `j.at(1)` gives `0.33333`, expected
-`0.3333333333333333`. Only the internal `_with…` methods reach it. Expected: the
-walk samples whether a transient window is open, or the window depths, with the
-rest of its baseline, and does not store a walk during which that changed.
+With `L` declared `list<number>` and no value,
+`Block(c := 5, Loop(c := c + k, Element(k, L)), c)` gives `5`: the loop reads
+`L` as an empty list. `Sum(k, Element(k, L))` over the same `L` stays
+unevaluated, so `Loop` gives a definite value where `Sum` has none. The same
+holds for an Epsil `for k in L` and for a guard that stays undecided
+(`Element(k, [1, 2], k > m)` with `m` missing skips every element). Compiled
+code gives no value for a `Loop` over such an input, which is stricter than the
+interpreter.
+
+A statement list stops early only on `Return`, `Break`, `Continue` and an
+`Error` value, so the interpreter has no way to give "no value" for a statement
+that acts by effect. The two designs considered:
+
+- **A "no value" stop**: a new internal result that stops the statement lists
+  and leaves the block unevaluated. The spec review found 17 findings, the main
+  one being that the stop must be defined for every operator that can hold a
+  `Block` as an operand (`Assign`, `Add`, `Return`, a `Sum` body), for Epsil,
+  the debugger hooks and every compile target.
+- **An `Error` result**: the existing route of a loop domain that evaluates to
+  an error (`LoopState.domainError`, `library/control-structures.ts`). Small,
+  but the result is an error, not "no value".
 
 ### CE-621. Host-code rule of CE-601: a nested asynchronous evaluation releases the host-derived source values of its parent
 
@@ -3115,6 +3172,24 @@ References: do not take references for `Re(a)` far below 0 from mpmath's
 the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
+
+### CE-662. Compiled code does not check the declared type of a local when a value is assigned to it
+
+**Status:** open; defect.
+
+`Block(Declare(p, "integer"), Assign(p, 0.5), p)`: the interpreter returns
+`Error(ErrorCode("incompatible-type", "integer", "0.5"), "p")`;
+`compile(…, { to: "javascript" })` succeeds, and the run returns 0.5. Also
+`Block(Declare(p, "integer"), Assign(p, u/2), p)` with `u = 1`: the interpreter
+gives `incompatible-type` (`rational<0.5..0.5>`), the compiled run gives 0.5.
+Checked on main, 2026-10-30. The interpreter checks the static type of the
+assigned value against the declaration of the local; the `Assign` lowering of
+the compiler (`compilation/base-compiler.ts`) does not. Proposed fix, by the
+simple sound rule: the compiler declines an `Assign` to a declared local when
+the static type of the value is not a subtype of the declared type. That
+declines some programs whose interpreted value is not an error once the inputs
+have values (`Declare(p, "real")`, `Assign(p, Sin(u))` with `u` undeclared,
+whose static type is `number`); a run-time check for those is a separate task.
 
 ### CE-646. Compiled `Contains`/`Unique` over lists of lists decline in any program that holds a lazy collection
 
