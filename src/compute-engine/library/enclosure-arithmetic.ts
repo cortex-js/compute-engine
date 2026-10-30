@@ -57,7 +57,6 @@ import type {
 import type { Type } from '../../common/type/types.js';
 import { provablyDisjoint } from '../../common/type/subtype.js';
 import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
-import { cacheOff } from '../../common/cache-switches.js';
 import {
   isFunction,
   isNumber,
@@ -103,49 +102,16 @@ export interface Range {
 /** The marker of a number operand that is `+oo` or `-oo`. */
 const INFINITE = 'infinite';
 
-/**
- * For each expression, the results of the decodes of this module, with the
- * angular unit and the precision of the engine when each was computed.
- */
-const SETTINGS_PAYLOADS = new WeakMap<
-  Expression,
-  Map<
-    (x: Expression) => unknown,
-    { angularUnit: string; precision: number; value: unknown }
-  >
->();
-
-/**
- * The result of `decode(x)`, read from a cache when it was computed for this
- * expression with the current angular unit and precision of the engine, and
- * computed again otherwise. The decodes of this module evaluate numerically
- * (`.N()`, `exactConstantOrder()`), and the value of `Sin(1)` depends on the
- * angular unit, so the cache of `decodedPayload()`, which is never
- * invalidated and must read only the structure of an expression, cannot hold
- * them.
- */
-function settingsPayload<T>(x: Expression, decode: (x: Expression) => T): T {
-  const ce = x.engine;
-  const angularUnit: string = ce.angularUnit;
-  const precision = ce.precision;
-  if (cacheOff('settingspayload')) return decode(x);
-  let entries = SETTINGS_PAYLOADS.get(x);
-  if (entries === undefined) {
-    entries = new Map();
-    SETTINGS_PAYLOADS.set(x, entries);
-  } else {
-    const e = entries.get(decode);
-    if (
-      e !== undefined &&
-      e.angularUnit === angularUnit &&
-      e.precision === precision
-    )
-      return e.value as T;
-  }
-  const value = decode(x);
-  entries.set(decode, { angularUnit, precision, value });
-  return value;
-}
+// The decodes below evaluate numerically (`.N()`, `exactConstantOrder()`),
+// and the value of `Sin(1)` depends on the angular unit and the precision,
+// so the cache of `decodedPayload()`, which is never invalidated and reads
+// only the structure of an expression, cannot hold them. They are computed
+// at each read. A cache keyed on the angular unit and the precision saved at
+// most 15% on a probe made for it, below the ratio of 1.5 that a cache must
+// reach to be kept, and each cache of evaluated values must follow the store
+// rules of `boxed-expression/store-guard.ts`
+// (`docs/plans/2026-10-30-evaluation-cache-architecture.md`, section 3.5 and
+// decision 1).
 
 //
 // The endpoint classes
@@ -158,12 +124,12 @@ function settingsPayload<T>(x: Expression, decode: (x: Expression) => T): T {
  */
 function endpointClass(x: Expression): 1 | 2 | 3 {
   if (isNumber(x)) return x.isNaN === true || x.isComplex ? 3 : 1;
-  return settingsPayload(x, decodeConstantClass);
+  return decodeConstantClass(x);
 }
 
-/** `endpointClass()` of an expression that is not a number literal. Read
- * once for each expression and each setting of the engine
- * (`settingsPayload()`), since it approximates the expression. */
+/** `endpointClass()` of an expression that is not a number literal. It
+ * approximates the expression, so the result depends on the angular unit and
+ * the precision. */
 function decodeConstantClass(x: Expression): 2 | 3 {
   if (!isExactConstantExpression(x) || !x.type.matches('real')) return 3;
   const v = x.N();
@@ -324,8 +290,7 @@ function outwardOfConstant(x: Expression, d: number): [number, number] {
   return [nextDown(d), nextUp(d)];
 }
 
-/** `outwardDoubles()` of an endpoint, computed once for each expression
- * and each setting of the engine (`settingsPayload()`). */
+/** `outwardDoubles()` of an endpoint. */
 function decodeOutward(x: Expression): readonly [number, number] {
   if (isNumber(x)) {
     if (x.isNaN === true || x.isComplex) return [-Infinity, Infinity];
@@ -347,7 +312,7 @@ function decodeOutward(x: Expression): readonly [number, number] {
  * enclosure too.
  */
 export function outwardDoubles(x: Expression): readonly [number, number] {
-  return settingsPayload(x, decodeOutward);
+  return decodeOutward(x);
 }
 
 /** The doubles of the range `r`, outward: `[min(down), max(up)]` of its two
@@ -400,9 +365,8 @@ function strictlyLess(x: Expression, y: Expression): boolean {
 // Reading the operands
 //
 
-/** The range of the enclosure `x`, computed once for each expression and
- * each setting of the engine (`settingsPayload()`), or `undefined` when an
- * endpoint is of class 3. */
+/** The range of the enclosure `x`, or `undefined` when an endpoint is of
+ * class 3. */
 function decodeEnclosure(x: Expression): Range | undefined {
   if (!isFunction(x) || x.nops !== 2) return undefined;
   const [a, b] = x.ops;
@@ -417,7 +381,7 @@ function decodeEnclosure(x: Expression): Range | undefined {
 }
 
 export function enclosureRange(x: Expression): Range | undefined {
-  return settingsPayload(x, decodeEnclosure);
+  return decodeEnclosure(x);
 }
 
 /** The point range `[x, x]` of the endpoint `x`. */

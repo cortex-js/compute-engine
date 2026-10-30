@@ -66,17 +66,18 @@ the Tycho `rebind` replay, 3 alternating rounds) gave median ratios from 0.93
 to 1.06, under the 1.25 limit of decision 6; every digest was the same before
 and after.
 
-### Not done
+### The other steps
 
 | Step | State | Owner |
 |---|---|---|
-| 2 | Not started. The numeric context stamp (plan 6.3); also fixes CE-645. | Session `compute-engine-aa`, told on 2026-10-30 that it can start. |
+| 5 | Done, STAGED 2026-10-30 (not committed; session `compute-engine-aa`): the enclosure endpoint cache and both contour memos (zero verdicts, complex parts) are removed, and CE-659 is fixed by the user's option (a): `Series` tests each constant coefficient instead of reading the zero-verdict memo, so its result no longer depends on the zero tests that the engine made before. The factor memo stays (decision 1 (a)). Checks in a worktree at HEAD `32096f0bd` with only this change: the 20 series, residue, contour, limit and memo test files (937 tests), the 11 `Enclosure` test files (1,070 tests), `npm run test:core` (5,400 passed), `check:deps`, `tsc`, oxlint, prettier; the paired benchmark (12 workloads, 3 alternating rounds): median ratios 0.99 to 1.17, every digest the same. Dual review of the enclosure part: Codex 0 findings, Claude 1 low (fixed). Dual review of the contour part: 3 rounds. Codex found, one after the other, that the new zero test could run host code through a coefficient that calls a host operator, through a symbol whose value does, and through a host-declared constant; each is fixed with a test in `ce-659-series-zero-coefficient.test.ts` (`isKnownZero()` tests only a coefficient whose calls, and the values of the symbols it reads, are all standard-library operators). The fix of round 3 had no further review (at most three rounds). The Claude reviewer found a missing CHANGELOG entry and two comment nits, all fixed. The paired benchmark ran before these review fixes. | — |
+| 4 | Not started. The dictionary memo compares the settings that the shared memo compares (its host-code fix is in step 1). Small. | Next session. |
+| CE-645 | Not started. A narrow fix instead of all of step 2: the element memo samples whether a transient precision or angular-unit window is open with the rest of its baseline, and does not store a walk during which that changed. | Next session. |
+| 2 | Postponed by the user (2026-10-30, reduced plan): the numeric context stamp of plan 6.3. Do it only if a new defect shows a cache that misses a setting. | — |
 | 3a | Done (counts in plan decision 3). | — |
-| 3b | Not started. The dependency stamp per value cache, and decision 3 (c): a flag on the `type-write` event, explicit retypes and extensions move the world version. Requires steps 1b and 2. | Not assigned. |
-| 4 | Not started. The dictionary memo: no accepted host count, the settings of the shared memo. Requires step 2. | Session `compute-engine-aa`. |
-| 5 | Not started. Remove the contour memos (`symbolic/contour.ts`) and the enclosure endpoint cache (`library/enclosure-arithmetic.ts`, `SETTINGS_PAYLOADS`), one commit each; keep the factor memo (decision 1 (a)). | Session `compute-engine-aa`. |
-| 6 | Not started. Decide per cache whether the semantic version is still needed next to the dependency snapshot. Requires 3b. | Not assigned. |
-| 7 | Not done, by decision 2 (no per-call key for the type and sign caches). | — |
+| 3b | Postponed by the user (reduced plan): the dependency stamp per value cache. Decision 3 (c) (a flag on the `type-write` event; explicit retypes and extensions move the world version) is small and can be done alone if wanted. | — |
+| 6 | Postponed with 3b. | — |
+| 7 | Not done, by decision 2. | — |
 
 The plan's step 1c ("narrow each accept list, one site per commit, with a
 test that counts host calls or draws") was merged into 1b by decision 6.
@@ -148,19 +149,20 @@ each cache was added for (plan section 3.5).
 
 ## 3. Remaining work, in order
 
-1. **Step 2** (session `compute-engine-aa`). Then **steps 4 and 5**, which
-   can go in either order after step 2 (step 5 needs only step 0).
-2. **Step 3b**, after step 2. Assign it first. It implements decision 3 (c);
-   the derivative cache's CE-647 fix (it reads `_definitionVersion`) can then
-   read the world version instead. Each cache gets a retype test and an
-   extension test (plan section 7, step 3b).
-3. **Step 6**, after 3b.
-4. For every step: the full suite under the box lock (the changes are under
-   `boxed-expression/`), the paired benchmark against a baseline of HEAD
-   with the driver added (no workload's median ratio above 1.25), and the
-   dual review. The element memo and the eager source values keep their
-   accept lists unless a step says otherwise, with a test that counts the
-   draws and the host calls.
+The user reduced the plan on 2026-10-30, after it took much longer than
+expected: finish step 5 (done), step 4 and a narrow fix of CE-645, and
+postpone steps 2, 3b and 6 until a defect needs them.
+
+1. **Review the work so far** (the user's next session): commits `5029c5d77`
+   (steps 0 and 1) and the staged step 5 change.
+2. **Step 4** and **the CE-645 fix**, as one change if they are small.
+3. For each change: the tests of the changed area, `npm run test:core`, the
+   full suite under the box lock when the change is under
+   `boxed-expression/`, the paired benchmark against a baseline of HEAD (no
+   workload's median ratio above 1.25), and the dual review. Stop the review
+   after about three rounds when the rounds find only defects that HEAD also
+   has, and file them. The element memo and the eager source values keep
+   their accept lists, with a test that counts the draws and the host calls.
 
 ## 4. Open decisions for the user
 
@@ -168,7 +170,6 @@ each cache was added for (plan section 3.5).
 |---|---|---|
 | CE-649 | An async host handler that evaluates the node containing it waits forever. (a) carry the evaluation context across `await` (`AsyncLocalStorage`, Node.js only), or (b) never join a walk for a caller that host code started (two concurrent evaluations then run the node's host code twice). | The hang stays, as before. |
 | CE-657 | A cache keeps a random draw or an impure operator's value when the node does not look impure. Needs a design: which caches define a result, and how a seeded frame is identified so that its draws are cached only with it. | Wrong values stay, as before. |
-| `AGENTS.md` rule | File an older defect that a review finds, instead of fixing it in the same change, unless the change made it worse? | The current rule stays. |
 
 ## 5. Other open items
 
@@ -176,7 +177,7 @@ each cache was added for (plan section 3.5).
   parent's host-derived source values. Needs one count of the evaluations in
   progress for each evaluation number, shared by the sync and async routes.
 - **CE-645**: the element memo can store elements computed inside a
-  temporary precision window; step 2 fixes it.
+  temporary precision window; the narrow fix of section 3 is next.
 - **CE-615**, decided (b): `{ extend: true }` applies only to expressions
   boxed after the extension. The user documentation of this, and a new
   "Caching" section on `pure: true`, are in

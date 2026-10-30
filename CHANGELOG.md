@@ -53,6 +53,14 @@
 
 ### Behavior Changes
 
+- **`Series` drops a term whose constant coefficient is an unfolded 0 at every
+  call** (CE-659). `Series(sin x + (sin²1 + cos²1 − 1)·x², x, 0, 5)` kept the
+  `x²` term in a new engine and dropped it after the engine had tested that
+  constant for 0 once (`exactZeroVerdict()` kept its answers for the life of the
+  engine). Each constant coefficient is now tested, so the result is always
+  `x − 1/6·x³ + 1/120·x⁵ + O(x⁷)`. A coefficient that is not pure is not tested
+  and stays in the result.
+
 - **JavaScript: a comparison over a variable the caller did not supply has no
   value** (user decision 2026-10-30). With `x` declared `real`,
   `compile("x > 0").run({})` gave `false`; it now gives `undefined`, as the

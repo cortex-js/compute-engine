@@ -19,13 +19,14 @@ start with `src/`, `test/`, `docs/` or `benchmarks/`.
 This document changes no source code. It found three defects, filed as
 ROADMAP CE-628, CE-647 and CE-648; step 1 fixes them.
 
-**Status of the steps.** Steps 0 and 1 (1a to 1d) are done by session
-`compute-engine-3e` and staged in the main tree on 2026-10-30, waiting for
-the user's commit: the off switches, the benchmark driver, the store guard,
-the fixes of CE-628, CE-647 and CE-648, and CE-621.1, .3 and .4. CE-621.2
-stays open. Section 7 says what that work does beyond the plan. Steps 2, 4
-and 5 come next (session `compute-engine-aa`), after that commit; step 3b is
-not assigned; step 6 is not started; step 7 is not done (decision 2).
+**Status of the steps (2026-10-30).** Steps 0 and 1 are committed
+(`5029c5d77`). Step 5 is staged: the enclosure endpoint cache and both
+contour memos are removed, and CE-659 (a `Series` result depended on the zero
+tests made before it) is fixed by the user's option (a). On 2026-10-30 the
+user reduced the plan: step 4 and a narrow fix of CE-645 remain; steps 2, 3b
+and 6 are postponed until a defect needs them; step 7 is not done (decision
+2). The current state and the next work are in
+`docs/plans/2026-10-30-evaluation-cache-status-handoff.md`.
 
 ## 1. Summary
 
@@ -147,7 +148,11 @@ process per setting):
 | `type-reads` | The type and sign of a sum, 300 times with an unrelated write between reads | Type and sign caches |
 
 The workload driver prints a digest of the results of each workload, so that
-a run with a cache off shows a changed result.
+a run with a cache off shows a changed result. This audit driver made the
+digest from `toString()`, which prints only the first and last five elements
+of a long collection, so its "same digest" was a weaker check than it says.
+The driver of step 0 (`benchmarks/evaluation-caches.ts`) serializes every
+element, and the timings of section 3.5 compare full results.
 
 **Correction.** In the runs of revision 1, `lazy-reads` and `map-compile`
 wrote `Map` with its arguments in the wrong order (the signature is

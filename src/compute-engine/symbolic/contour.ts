@@ -1,4 +1,3 @@
-import { cacheOff } from '../../common/cache-switches.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 import type {
   ContourInput,
@@ -21,7 +20,6 @@ import {
   refineExactConstants,
 } from '../boxed-expression/compare.js';
 import { expandAll } from '../boxed-expression/expand.js';
-import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 
 type Point = { x: Expression; y: Expression };
 type Location = ContourPole['location'];
@@ -177,20 +175,14 @@ export function isUnfoldedZero(c: Expression): boolean {
  *    value that is not 0. An enclosure that still holds 0 at the precision
  *    limit decides nothing.
  *
- * The verdicts are kept in a memo for each engine, keyed by the structure of
- * the expression (its hash, then `isSame()`): the series and limit code test
- * the same constant many times. The verdict of an expression whose symbols
- * are all constants stays valid, since the value of a constant cannot
- * change; the verdict of an expression that reads another symbol is valid
- * only for the cache generation of the engine when it was computed.
- * The value of `Exp` depends on the angular unit and the enclosures depend
- * on the precision, thus both are part of the key.
+ * The verdict is computed at each call. A memo of the verdicts saved at most
+ * 14% on the residue, series, limit and contour-integral cases that it was
+ * added for, below the ratio of 1.5 that a cache must reach to be kept
+ * (`docs/plans/2026-10-30-evaluation-cache-architecture.md`, section 3.5 and
+ * decision 1).
  */
 export function exactZeroVerdict(c: Expression): boolean | undefined {
-  const hit = memoizedZeroVerdict(c);
-  if (hit !== 'none') return hit;
   const ce = c.engine;
-  const guard = beginStoreGuard();
   const v = c.evaluate();
   let zero: boolean | undefined;
   if (isNumber(v)) zero = v.isSame(0);
@@ -208,70 +200,8 @@ export function exactZeroVerdict(c: Expression): boolean | undefined {
       ? expanded.isSame(0)
       : exactlyEqual(expanded, ce.Zero);
   }
-  // A verdict computed with host code that does not state its purity, or
-  // with a host handler that changed state, is not kept: the host code can
-  // read state that the key does not record (`host-handler-changes.ts`).
-  // Nor is a verdict computed from a provisional answer (`store-guard.ts`).
-  if (!guard.allowsStore()) return zero;
-  // The memo finds an entry by the structure of the expression, so the
-  // verdict of an expression that reads a symbol that is not a constant
-  // (`sin(a) − sin(1)` with `a := 1`) is valid only for the cache
-  // generation of the engine when it was computed: after `a := 2` it is not
-  // served. The verdict of an expression whose symbols are all constants
-  // stays valid.
-  const generation = hasOnlyConstantSymbols(c)
-    ? undefined
-    : ce._cacheGeneration();
-  let memo = zeroMemo.get(ce);
-  if (!memo) {
-    memo = new Map();
-    zeroMemo.set(ce, memo);
-  }
-  storeMemoEntry(
-    memo,
-    c.hash,
-    { c, key: memoKeyOf(ce), zero, generation },
-    (e) => e.c.isSame(c)
-  );
   return zero;
 }
-
-/** The verdict of `exactZeroVerdict()` for `c` when it is in the memo, or
- * `'none'` when it is not. It computes nothing. */
-export function memoizedZeroVerdict(
-  c: Expression
-): boolean | undefined | 'none' {
-  const ce = c.engine;
-  if (cacheOff('contour')) return 'none';
-  const key = memoKeyOf(ce);
-  const hit = zeroMemo
-    .get(ce)
-    ?.get(c.hash)
-    ?.find(
-      (entry) =>
-        entry.key === key &&
-        (entry.generation === undefined ||
-          entry.generation === ce._cacheGeneration()) &&
-        entry.c.isSame(c)
-    );
-  return hit ? hit.zero : 'none';
-}
-
-const zeroMemo = new WeakMap<
-  IComputeEngine,
-  Map<
-    number,
-    {
-      c: Expression;
-      key: string;
-      zero: boolean | undefined;
-      /** `undefined` for an expression whose symbols are all constants;
-       * otherwise the cache generation of the engine when the verdict was
-       * computed. */
-      generation: number | undefined;
-    }[]
-  >
->();
 
 /**
  * Whether `e` contains an algebraic constant that is not rational: an exact
@@ -294,113 +224,15 @@ export function hasIrrationalAlgebraic(e: Expression): boolean {
 const sign = exactSign;
 
 /** The exact real and imaginary parts of a pure constant expression, or
- * `undefined` when they cannot be computed exactly.
- *
- * The callers compute the parts of the same constant many times: a pole is
- * classified, compared with the other poles, and tested for a zero numerator
- * and denominator, and each step builds a new expression that contains the
- * pole. Thus the parts are kept in a memo for each engine, keyed by the
- * structure of the expression (its hash, then `isSame()`). The memo is used
- * only for an expression whose symbols are all constants: the value of a
- * constant cannot change, so the parts stay valid. The parts of `Exp` depend
- * on the angular unit and the enclosures depend on the precision, thus both
- * are part of the key. */
+ * `undefined` when they cannot be computed exactly. They are computed at each
+ * call. A memo of them saved at most 14% on the residue, series, limit and
+ * contour-integral cases that it was added for, below the ratio of 1.5 that
+ * a cache must reach to be kept
+ * (`docs/plans/2026-10-30-evaluation-cache-architecture.md`, section 3.5 and
+ * decision 1). */
 export function exactComplexParts(z: Expression): Point | undefined {
   if (!z.isPure) return undefined;
-  if (!hasOnlyConstantSymbols(z) || cacheOff('contour'))
-    return computeExactComplexParts(z);
-  const ce = z.engine;
-  let memo = partsMemo.get(ce);
-  if (!memo) {
-    memo = new Map();
-    partsMemo.set(ce, memo);
-  }
-  const key = memoKeyOf(ce);
-  const bucket = memo.get(z.hash);
-  const hit = bucket?.find((entry) => entry.key === key && entry.z.isSame(z));
-  if (hit) return hit.parts;
-  const guard = beginStoreGuard();
-  const parts = computeExactComplexParts(z);
-  // Parts computed with host code that does not state its purity, or with a
-  // host handler that changed state, are not kept (`host-handler-changes.ts`),
-  // nor parts computed from a provisional answer (`store-guard.ts`).
-  if (!guard.allowsStore()) return parts;
-  storeMemoEntry(memo, z.hash, { z, key, parts }, (e) => e.z.isSame(z));
-  return parts;
-}
-
-const partsMemo = new WeakMap<
-  IComputeEngine,
-  Map<number, { z: Expression; key: string; parts: Point | undefined }[]>
->();
-
-/** When the memo of an engine has this many entries, it is cleared. */
-const MAX_MEMO_SIZE = 2000;
-
-/** The number of entries in each memo map of this module. */
-const memoEntryCounts = new WeakMap<Map<number, unknown[]>, number>();
-
-/**
- * Put `entry` in the bucket `hash` of `memo`, in place of the entries for
- * the same expression (`sameExpression`): an entry made for an earlier key
- * (another generation, precision or definition version) is obsolete or
- * rarely read again, and keeping it made each look-up scan every earlier
- * entry. The memo is cleared when it holds `MAX_MEMO_SIZE` entries.
- */
-function storeMemoEntry<E>(
-  memo: Map<number, E[]>,
-  hash: number,
-  entry: E,
-  sameExpression: (e: E) => boolean
-): void {
-  let count = memoEntryCounts.get(memo) ?? 0;
-  if (count >= MAX_MEMO_SIZE) {
-    memo.clear();
-    count = 0;
-  }
-  const bucket = memo.get(hash);
-  if (bucket === undefined) {
-    memo.set(hash, [entry]);
-    memoEntryCounts.set(memo, count + 1);
-    return;
-  }
-  const kept = bucket.filter((e) => !sameExpression(e));
-  kept.push(entry);
-  memo.set(hash, kept);
-  memoEntryCounts.set(memo, count - bucket.length + kept.length);
-}
-
-/** For tests: the number of entries for `c` in the zero-verdict memo. */
-export function zeroVerdictEntryCount(c: Expression): number {
-  return (
-    zeroMemo
-      .get(c.engine)
-      ?.get(c.hash)
-      ?.filter((e) => e.c.isSame(c)).length ?? 0
-  );
-}
-
-/** The key of an entry of the memos of this module, with the expression.
- * The value of `Exp` depends on the angular unit and the enclosures depend
- * on the precision. A redefinition of an operator (it moves the definition
- * version of the engine) can change the value of a constant expression that
- * holds the operator, and the memos find an entry by the structure of the
- * expression, not by the definitions that it is bound to. */
-function memoKeyOf(ce: IComputeEngine): string {
-  return `${ce.angularUnit} ${ce.precision} ${ce._definitionVersion}`;
-}
-
-function hasOnlyConstantSymbols(
-  z: Expression,
-  visited: Set<Expression> = new Set()
-): boolean {
-  if (isSymbol(z)) return z.isConstant === true;
-  if (!isFunction(z)) return true;
-  // A node that an expression uses at several places (a tower of `Max(t, t)`)
-  // is read once: without this, the scan followed every path to it.
-  if (visited.has(z)) return true;
-  visited.add(z);
-  return z.ops.every((op) => hasOnlyConstantSymbols(op, visited));
+  return computeExactComplexParts(z);
 }
 
 function computeExactComplexParts(z: Expression): Point | undefined {

@@ -9,7 +9,6 @@ import {
 import {
   exactComplexParts,
   exactZeroVerdict,
-  zeroVerdictEntryCount,
 } from '../../src/compute-engine/symbolic/contour';
 
 /**
@@ -1259,16 +1258,6 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     ]);
     expect(results.map((r) => r.json)).toEqual([10, 10]);
     expect(calls).toBe(2);
-  });
-
-  test('The zero verdict memo keeps one entry for an expression across assignments', () => {
-    const ce = new ComputeEngine();
-    const c = ce.box(['Subtract', ['Sin', 'a'], ['Sin', 1]]);
-    for (let k = 1; k <= 20; k++) {
-      ce.assign('a', k);
-      exactZeroVerdict(c);
-    }
-    expect(zeroVerdictEntryCount(c)).toBe(1);
   });
 
   test('The element memo: a walk whose iterator evaluates an unstated host source', () => {

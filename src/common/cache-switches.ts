@@ -9,7 +9,7 @@
  * - Most switches skip the look-up, and the cache still stores its entries
  *   (`appmemo`, `approx`, `dictionary`, `eagersource`, `effects`,
  *   `facet`, `lazyvalue`, `limitprobe`, `slice`, `typeparse`, and the
- *   look-up of `element` and of the zero verdicts of `contour`).
+ *   look-up of `element`).
  * - `sgn` and `type` empty their cell before each read, unless a
  *   computation of the cell is in progress: a re-entrant read must still get
  *   the answer that ends a recursive read (`forgetSettledValue()`,
@@ -19,10 +19,9 @@
  *   `F := n ↦ If(n = 0, [1, 2], 2·F(n − 1))` takes more than a minute, and
  *   several workloads of the benchmark driver do not finish.
  * - Some switches bypass the cache completely, with no look-up and no store
- *   (`factor`, `materializedat`, `settingspayload`, `storedvalue`, the
- *   complex parts of `contour`, and the cells that `element` computes one
- *   index at a time). `shared` does not create the memo of the top-level
- *   evaluation.
+ *   (`factor`, `materializedat`, `storedvalue`, and the cells that
+ *   `element` computes one index at a time). `shared` does not create the
+ *   memo of the top-level evaluation.
  * - `mapcompile` deletes the entry before the look-up, so each call
  *   compiles again.
  * - `sequence` stops the store of the terms in the memo of the sequence.
@@ -57,7 +56,6 @@
 export const CACHE_SWITCHES = [
   'appmemo', // application memo of function literals (`function-utils.ts`)
   'approx', // approximations of the comparisons (`boxed-expression/compare.ts`)
-  'contour', // contour zero and complex-parts memos (`symbolic/contour.ts`)
   'dictionary', // dictionary evaluation memo (`boxed-dictionary.ts`)
   'eagersource', // eager source values (`boxed-expression/eager-source-values.ts`)
   'effects', // effects cache of a function expression (`boxed-function.ts`)
@@ -69,7 +67,6 @@ export const CACHE_SWITCHES = [
   'mapcompile', // compiled element function of `Map` (`library/map-auto-compile.ts`)
   'materializedat', // the evaluated collection that `at()` reads (`boxed-function.ts`)
   'sequence', // terms of a declared sequence kept across reads (`sequence.ts`)
-  'settingspayload', // enclosure endpoints (`library/enclosure-arithmetic.ts`)
   'sgn', // sign cache of a function expression (`boxed-function.ts`)
   'shared', // memo of shared subexpressions (`shared-evaluation-memo.ts`)
   'slice', // bounds of a `Slice` (`library/collections.ts`)

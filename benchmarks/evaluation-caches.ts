@@ -215,8 +215,8 @@ workloads.push({
   },
 });
 
-// Four limits, 3 times, and one `Series` (`Limit` probes, contour memos,
-// approximations of the comparisons).
+// Four limits, 3 times, and one `Series` (`Limit` probes, approximations of
+// the comparisons).
 workloads.push({
   name: 'limits-series',
   setup: () => () => {

@@ -14,11 +14,7 @@ import { bernoulliRational } from '../numerics/bernoulli.js';
 import { differentiate } from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
-import {
-  exactComplexParts,
-  exactZeroVerdict,
-  memoizedZeroVerdict,
-} from './contour.js';
+import { exactComplexParts, exactZeroVerdict } from './contour.js';
 
 //
 // This module implements `Series` — symbolic Taylor expansion at a regular
@@ -123,7 +119,7 @@ function factorialBig(k: number): bigint {
  * A number literal is decided by its value. A symbol, or a function of an
  * unknown (a parameter such as `a`), is read as not 0: an expansion in a
  * parameter is valid for its generic values. A constant is decided by
- * `exactZeroVerdict()`, which keeps its verdicts in a memo.
+ * `exactZeroVerdict()`.
  */
 function zeroVerdict(c: Expression): boolean | undefined {
   if (isNumber(c)) return c.isSame(0);
@@ -132,17 +128,46 @@ function zeroVerdict(c: Expression): boolean | undefined {
 }
 
 /**
- * Whether `c` is known to be 0 without a new test: the number 0, or a
- * constant whose verdict is in the memo of `exactZeroVerdict()` and is
- * `true`. The assembly of a result uses this test to drop terms. A
- * coefficient that is an unfolded 0 and was not tested gives a larger
- * result, not a wrong one, and the test of the valuation (`trueVal()`) has
- * already put the verdict of each coefficient below the valuation in the
- * memo.
+ * Whether `c` is proved 0 (`zeroVerdict()`). The assembly of a result uses
+ * this test to drop terms, so a coefficient that is an unfolded 0, such as
+ * `sin(1)² + cos(1)² − 1`, is dropped at every call. The result does not
+ * depend on the constants that the engine tested before.
+ *
+ * The test evaluates the coefficient. So it tests only a coefficient that
+ * runs no host code: each call in it, and in the value of each symbol it
+ * reads (`a := 1` in `sin(a) − sin(1)`), is a call of an operator that the
+ * standard library defines (`callsOnlyLibraryOperators()`). Another
+ * coefficient is not tested, and stays in the result as it is: a host
+ * operator that does not state its purity is pure by default (`isPure` is
+ * true), but its host code must not run more often than the expression asks.
  */
 function isKnownZero(c: Expression): boolean {
   if (c.isSame(0)) return true;
-  return isFunction(c) && memoizedZeroVerdict(c) === true;
+  if (!c.isPure || !callsOnlyLibraryOperators(c, new Set())) return false;
+  return zeroVerdict(c) === true;
+}
+
+/** Whether every call in `e`, and in the value of each symbol that `e`
+ * reads, is a call of an operator that the standard library defines. A
+ * symbol with no value passes: `zeroVerdict()` does not evaluate a
+ * coefficient that has an unknown. A value that the host declared as a
+ * function is computed by this read, once, as the evaluation would compute
+ * it. `seen` holds the nodes and symbols already visited, so a node that the
+ * expression uses at several places is visited once, and a value that reads
+ * its own symbol ends the walk. */
+function callsOnlyLibraryOperators(
+  e: Expression,
+  seen: Set<Expression>
+): boolean {
+  if (seen.has(e)) return true;
+  seen.add(e);
+  if (isSymbol(e)) {
+    const value = e.valueDefinition?.value;
+    return value === undefined || callsOnlyLibraryOperators(value, seen);
+  }
+  if (!isFunction(e)) return true;
+  if (e.operatorDefinition?._standardLibrary !== true) return false;
+  return e.ops.every((op) => callsOnlyLibraryOperators(op, seen));
 }
 
 /** `c`, or the number 0 when `c` is proved 0 (`zeroVerdict()`). The value of
