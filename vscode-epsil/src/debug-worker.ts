@@ -17,7 +17,11 @@
 // A statement with no hook fires (a pure computation) cannot be paused —
 // only terminated, or bounded with `statementTimeLimit`.
 
-import { parentPort, workerData, receiveMessageOnPort } from 'node:worker_threads';
+import {
+  parentPort,
+  workerData,
+  receiveMessageOnPort,
+} from 'node:worker_threads';
 import { basename } from 'node:path';
 
 import {
@@ -30,7 +34,7 @@ import {
   isFunction,
   isSymbol,
   type BoxedDefinition,
-  type BoxedExpression,
+  type Expression,
 } from '../../src/compute-engine.js';
 import {
   setDebugStatementHook,
@@ -141,21 +145,21 @@ let functionSpans: Array<{ name: string; start: number; end: number }> = [];
 // ── Variables (handles live only while paused) ────────────────────────────
 
 let nextRef = LOCALS_REF + 1;
-const handleTable = new Map<number, BoxedExpression>();
+const handleTable = new Map<number, Expression>();
 
 function resetHandles(): void {
   handleTable.clear();
   nextRef = LOCALS_REF + 1;
 }
 
-function referenceFor(expr: BoxedExpression): number {
+function referenceFor(expr: Expression): number {
   if (!isFunction(expr) || expr.nops === 0) return 0;
   const ref = nextRef++;
   handleTable.set(ref, expr);
   return ref;
 }
 
-function render(expr: BoxedExpression, maxLength: number): string {
+function render(expr: Expression, maxLength: number): string {
   let text: string;
   try {
     text = serializeEpsil(expr.json);
@@ -252,12 +256,8 @@ function signatureDisplay(
   return `(${params.join(', ')}) -> ${typeToString(result)}${broadcast}`;
 }
 
-function definitionVariable(
-  name: string,
-  def: BoxedDefinition
-): VariableInfo {
-  if ('operator' in def)
-    return { name, value: signatureDisplay(def), ref: 0 };
+function definitionVariable(name: string, def: BoxedDefinition): VariableInfo {
+  if ('operator' in def) return { name, value: signatureDisplay(def), ref: 0 };
   const expr = def.value.value;
   return {
     name,
@@ -267,7 +267,7 @@ function definitionVariable(
   };
 }
 
-function childVariables(expr: BoxedExpression): VariableInfo[] {
+function childVariables(expr: Expression): VariableInfo[] {
   if (!isFunction(expr)) return [];
   return expr.ops.map((op, i) => {
     if (
@@ -448,10 +448,7 @@ function currentFrames(pausedLine: number, atTopLevel: boolean): FrameInfo[] {
     // Deepest entry per activation (hookStack is depth-ascending; later
     // entries overwrite, leaving the deepest). Entries below every `'call'`
     // context belong to the top-level group (`-1`).
-    const deepestOfGroup = new Map<
-      number,
-      { line: number; offset: number }
-    >();
+    const deepestOfGroup = new Map<number, { line: number; offset: number }>();
     for (const entry of hookStack) {
       const contextIndex = baseDepth + entry.depth - 1;
       let group = -1;
@@ -489,7 +486,12 @@ function pauseAt(reason: string, line: number, atTopLevel: boolean): void {
   resetHandles();
   pauseRequested = false;
   resumeAction = undefined;
-  post({ type: 'stopped', reason, line, frames: currentFrames(line, atTopLevel) });
+  post({
+    type: 'stopped',
+    reason,
+    line,
+    frames: currentFrames(line, atTopLevel),
+  });
   while (resumeAction === undefined) {
     // Wake instantly on a command (the main thread flips the flag and
     // notifies); the timeout is only a safety net.
@@ -577,10 +579,13 @@ let exceptionHandled = false;
  * value share a line; stopping on both reads as a double-stop) — while a
  * re-entry of the same statement (a loop iteration: identical span) does. */
 let lastBreakpointStop:
-  | { line: number; start: number; end: number }
-  | undefined;
+  { line: number; start: number; end: number } | undefined;
 
-function suppressedByLastStop(line: number, start: number, end: number): boolean {
+function suppressedByLastStop(
+  line: number,
+  start: number,
+  end: number
+): boolean {
   return (
     lastBreakpointStop !== undefined &&
     line === lastBreakpointStop.line &&
@@ -591,7 +596,7 @@ function suppressedByLastStop(line: number, start: number, end: number): boolean
 
 function statementHook(raw: unknown): void {
   if (servicing) return;
-  const stmt = raw as BoxedExpression;
+  const stmt = raw as Expression;
   drainCommands();
   exceptionHandled = false;
 
@@ -606,10 +611,7 @@ function statementHook(raw: unknown): void {
   const depth = currentRelativeDepth();
 
   // Maintain the live call-stack positions: one entry per nesting level.
-  while (
-    hookStack.length > 0 &&
-    hookStack[hookStack.length - 1].depth >= depth
-  )
+  while (hookStack.length > 0 && hookStack[hookStack.length - 1].depth >= depth)
     hookStack.pop();
   hookStack.push({ depth, line, offset: offsets[0] });
 
@@ -640,12 +642,12 @@ function statementHook(raw: unknown): void {
 function statementResultHook(rawStmt: unknown, rawResult: unknown): void {
   if (servicing || !breakOnErrorValues || config.noDebug) return;
   if (exceptionHandled) return;
-  const result = rawResult as BoxedExpression;
+  const result = rawResult as Expression;
   // Deep error check (`.errors` walks the value) — only paid when the user
   // enabled the Error Values filter; an error nested in a partial result
   // (`Add(x, Error(…))`) still pauses.
   if (result.errors.length === 0) return;
-  const stmt = rawStmt as BoxedExpression;
+  const stmt = rawStmt as Expression;
   // A Block's error is its inner statement's, which already fired.
   if (stmt.operator === 'Block') return;
   const offsets = stmt.sourceOffsets;
@@ -788,7 +790,7 @@ function run(): void {
   setDebugStatementHook(statementHook);
   setDebugStatementResultHook(statementResultHook);
   try {
-    let lastValue: BoxedExpression | undefined;
+    let lastValue: Expression | undefined;
     for (topIndex = 0; topIndex < statements.length; topIndex++) {
       const stmt = statements[topIndex];
       hookStack = [];
@@ -827,12 +829,12 @@ function run(): void {
   }
 }
 
-function executeTopLevel(stmt: StatementInfo): BoxedExpression {
+function executeTopLevel(stmt: StatementInfo): Expression {
   // Mirrors `executeEpsil`: runtime problems become `["Error", …]` values;
   // the try/catch is the backstop for the throwing paths (const
   // reassignment, cap breaches). A debugger terminate unwinds through here
   // and must NOT be converted to a value.
-  let value: BoxedExpression;
+  let value: Expression;
   const run = () => engine.box(stmt.json).evaluate();
   try {
     const limit = config.statementTimeLimit;

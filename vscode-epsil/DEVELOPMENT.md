@@ -25,10 +25,10 @@ Useful commands:
 | `npm test`                         | Build, then run the DAP and LSP test suites (`test/dap.test.mjs`, `test/lsp.test.mjs`).     |
 | `./node_modules/.bin/tsc --noEmit` | Type-check the extension (esbuild does the emit).                                           |
 
-The extension sources do not follow the root prettier configuration. Do not
-run the repository's prettier on files under `vscode-epsil/`:
-`npx prettier --check vscode-epsil/src/server.ts` reports changes, and
-`--write` reformats a large part of the file.
+The extension sources (`src/` and `test/`) use the root prettier configuration,
+like the rest of the repository. The root `npm run format` and
+`npm run format:check` include them, and the pre-commit hook formats them when
+they are staged.
 
 The server is transport-agnostic (`vscode-languageserver` picks its transport
 from the command line), so it can also be driven directly for debugging:

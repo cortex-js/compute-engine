@@ -14,9 +14,10 @@ installs also need `npm run build` before using package exports. Worktree setup
 is documented in the shared-box specifics.
 
 All source files use Prettier. The pre-commit hook runs lint-staged on staged
-`src/**/*.{ts,js,css,md}` files and preserves unstaged edits. Agents still stage
-only their intended hunks and never commit on the user's behalf. CI is the
-formatting gate even when hooks are bypassed.
+`src/**/*.{ts,js,css,md}` and `vscode-epsil/{src,test}/**/*.{ts,mjs}` files and
+preserves unstaged edits. Agents still stage only their intended hunks and never
+commit on the user's behalf. CI is the formatting gate even when hooks are
+bypassed.
 
 - `npm run format`: format all source files explicitly.
 - `npm run format:check`: check source formatting without modifying files.

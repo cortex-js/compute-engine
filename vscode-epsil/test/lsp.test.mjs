@@ -46,7 +46,8 @@ await scenario('hover', undefined, async (c) => {
   const length = await c.hover(URI, 3, 14);
   check(
     'a library function shows its signature and description',
-    length?.contents.value.includes('Length: (any) -> infinity | integer') === true &&
+    length?.contents.value.includes('Length: (any) -> infinity | integer') ===
+      true &&
       length.contents.value.includes('*function*') &&
       length.contents.value.toLowerCase().includes('number of elements'),
     JSON.stringify(length)
@@ -67,10 +68,9 @@ await scenario('hover', undefined, async (c) => {
 
   const foo = await c.hover(URI, 0, 10);
   check(
-    "a function defined in the file shows its header, not its body",
-    foo?.contents.value.includes(
-      'function foo(x: string, n: integer)'
-    ) === true && !foo.contents.value.includes('{'),
+    'a function defined in the file shows its header, not its body',
+    foo?.contents.value.includes('function foo(x: string, n: integer)') ===
+      true && !foo.contents.value.includes('{'),
     JSON.stringify(foo)
   );
 
@@ -106,20 +106,33 @@ await scenario('hover', undefined, async (c) => {
   const declared = await c.hover(URI, 3, 6);
   check(
     'a const shows its declaring statement',
-    declared?.contents.value.includes('const total = Length([1, 2, 3]) + Pi') ===
-      true,
+    declared?.contents.value.includes(
+      'const total = Length([1, 2, 3]) + Pi'
+    ) === true,
     JSON.stringify(declared)
   );
 
   // Text that merely LOOKS like a name is not one: the lexer decides.
   const inComment = await c.hover(URI, 1, 21);
-  check('a name inside a comment has no hover', inComment === null, JSON.stringify(inComment));
+  check(
+    'a name inside a comment has no hover',
+    inComment === null,
+    JSON.stringify(inComment)
+  );
   const inString = await c.hover(URI, 2, 17);
-  check('a name inside a string has no hover', inString === null, JSON.stringify(inString));
+  check(
+    'a name inside a string has no hover',
+    inString === null,
+    JSON.stringify(inString)
+  );
   const onNumber = await c.hover(URI, 3, 24);
   check('a number has no hover', onNumber === null, JSON.stringify(onNumber));
   const onKeyword = await c.hover(URI, 0, 0);
-  check('a keyword has no hover', onKeyword === null, JSON.stringify(onKeyword));
+  check(
+    'a keyword has no hover',
+    onKeyword === null,
+    JSON.stringify(onKeyword)
+  );
 });
 
 // ── Diagnostics: signature notes ────────────────────────────────────────
@@ -175,7 +188,8 @@ await scenario('user-defined callee', undefined, async (c) => {
   );
   check(
     'the definition is published as related information',
-    first?.relatedInformation?.[0]?.message === '`parseDigits` is defined here' &&
+    first?.relatedInformation?.[0]?.message ===
+      '`parseDigits` is defined here' &&
       first.relatedInformation[0].location.range.start.line === 0 &&
       first.relatedInformation[0].location.range.start.character === 9,
     JSON.stringify(first?.relatedInformation)
@@ -271,31 +285,35 @@ await scenario('diagnostic hover', undefined, async (c) => {
   );
 });
 
-await scenario('diagnostic hover with CR line endings', undefined, async (c) => {
-  // Lines separated by lone carriage returns — a break the language (and the
-  // diagnostic renderer) recognizes. The quoted line and the line numbers
-  // must follow those rules, not just '\n'.
-  await c.open(
-    URI,
-    'function parseDigits(cs: string, i: integer) {\r  i\r}\r\rparseDigits("42")'
-  );
-  // Inside the argument string: no symbol hover, so the "defined here" note
-  // renders in full.
-  const hover = await c.hover(URI, 4, 13);
-  const value = hover?.contents.value ?? '';
-  check(
-    'the "defined here" quote is the definition line, not the whole document',
-    value.includes(
-      '```epsil\nfunction parseDigits(cs: string, i: integer) {\n```'
-    ),
-    value
-  );
-  check(
-    'captions still number lines correctly',
-    value.includes('Declaration of `parseDigits` (line 1):'),
-    value
-  );
-});
+await scenario(
+  'diagnostic hover with CR line endings',
+  undefined,
+  async (c) => {
+    // Lines separated by lone carriage returns — a break the language (and the
+    // diagnostic renderer) recognizes. The quoted line and the line numbers
+    // must follow those rules, not just '\n'.
+    await c.open(
+      URI,
+      'function parseDigits(cs: string, i: integer) {\r  i\r}\r\rparseDigits("42")'
+    );
+    // Inside the argument string: no symbol hover, so the "defined here" note
+    // renders in full.
+    const hover = await c.hover(URI, 4, 13);
+    const value = hover?.contents.value ?? '';
+    check(
+      'the "defined here" quote is the definition line, not the whole document',
+      value.includes(
+        '```epsil\nfunction parseDigits(cs: string, i: integer) {\n```'
+      ),
+      value
+    );
+    check(
+      'captions still number lines correctly',
+      value.includes('Declaration of `parseDigits` (line 1):'),
+      value
+    );
+  }
+);
 
 await scenario(
   'signature notes without relatedInformation',
@@ -406,48 +424,56 @@ await scenario('representation views', undefined, async (c) => {
     uri: 'file:///tmp/not-open.epsil',
     view: 'ast',
   });
-  check('a document the server is not tracking yields null', unknown === null, JSON.stringify(unknown));
-});
-
-await scenario('representation views on a broken program', undefined, async (c) => {
-  const diagnostics = await c.open(URI, 'let = 42');
-  // `symbol-expected` has an entry in the error reference, so it links;
-  // `closing-bracket-expected` (below) has none, so it must not — a code is
-  // never a dead link.
   check(
-    'a documented parse-error code links to the reference',
-    diagnostics[0]?.code === 'symbol-expected' &&
-      diagnostics[0].codeDescription?.href ===
-        'https://epsil.dev/errors/#symbol-expected',
-    JSON.stringify(diagnostics[0])
-  );
-  const unclosed = await c.open(URI, '(1');
-  check(
-    'an undocumented code carries no codeDescription',
-    unclosed[0]?.code === 'closing-bracket-expected' &&
-      unclosed[0].codeDescription === undefined,
-    JSON.stringify(unclosed[0])
-  );
-  await c.open(URI, 'let = 42');
-
-  const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
-  check(
-    'the parsed view reports the errors and still shows the recovered AST',
-    ast?.content.includes('// error, line 1:') === true,
-    JSON.stringify(ast)
-  );
-
-  const canonical = await c.request('epsil/view', {
-    uri: URI,
-    view: 'canonical',
-  });
-  check(
-    'the canonicalizing views decline until the program parses',
-    canonical?.content.includes('needs a program that parses') === true &&
-      canonical.content.includes('// error, line 1:'),
-    JSON.stringify(canonical)
+    'a document the server is not tracking yields null',
+    unknown === null,
+    JSON.stringify(unknown)
   );
 });
+
+await scenario(
+  'representation views on a broken program',
+  undefined,
+  async (c) => {
+    const diagnostics = await c.open(URI, 'let = 42');
+    // `symbol-expected` has an entry in the error reference, so it links;
+    // `closing-bracket-expected` (below) has none, so it must not — a code is
+    // never a dead link.
+    check(
+      'a documented parse-error code links to the reference',
+      diagnostics[0]?.code === 'symbol-expected' &&
+        diagnostics[0].codeDescription?.href ===
+          'https://epsil.dev/errors/#symbol-expected',
+      JSON.stringify(diagnostics[0])
+    );
+    const unclosed = await c.open(URI, '(1');
+    check(
+      'an undocumented code carries no codeDescription',
+      unclosed[0]?.code === 'closing-bracket-expected' &&
+        unclosed[0].codeDescription === undefined,
+      JSON.stringify(unclosed[0])
+    );
+    await c.open(URI, 'let = 42');
+
+    const ast = await c.request('epsil/view', { uri: URI, view: 'ast' });
+    check(
+      'the parsed view reports the errors and still shows the recovered AST',
+      ast?.content.includes('// error, line 1:') === true,
+      JSON.stringify(ast)
+    );
+
+    const canonical = await c.request('epsil/view', {
+      uri: URI,
+      view: 'canonical',
+    });
+    check(
+      'the canonicalizing views decline until the program parses',
+      canonical?.content.includes('needs a program that parses') === true &&
+        canonical.content.includes('// error, line 1:'),
+      JSON.stringify(canonical)
+    );
+  }
+);
 
 // ── Navigation: definition, references, highlights, rename ─────────────
 //
@@ -583,12 +609,20 @@ await scenario('navigation', undefined, async (c) => {
     textDocument: { uri: URI },
     position: { line: 1, character: 0 }, // the `function` keyword
   });
-  check('a non-name position has no definition', notAName === null, JSON.stringify(notAName));
+  check(
+    'a non-name position has no definition',
+    notAName === null,
+    JSON.stringify(notAName)
+  );
 });
 
 await scenario(
   'outline',
-  { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+  {
+    textDocument: {
+      documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+    },
+  },
   async (c) => {
     await c.open(URI, NAV_SOURCE);
     const symbols = await c.request('textDocument/documentSymbol', {
@@ -609,7 +643,11 @@ await scenario(
 
 await scenario(
   'outline with interleaved function clauses',
-  { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+  {
+    textDocument: {
+      documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+    },
+  },
   async (c) => {
     await c.open(URI, 'f(0) = 0\nlet between = 1\nf(n: integer) = n');
     const symbols = await c.request('textDocument/documentSymbol', {
@@ -627,7 +665,11 @@ await scenario(
 
 await scenario(
   'outline with a local in a clause after an interleaved declaration',
-  { textDocument: { documentSymbol: { hierarchicalDocumentSymbolSupport: true } } },
+  {
+    textDocument: {
+      documentSymbol: { hierarchicalDocumentSymbolSupport: true },
+    },
+  },
   async (c) => {
     await c.open(
       URI,
@@ -672,7 +714,6 @@ await scenario('rename refusals', undefined, async (c) => {
     URI,
     ['type Point = tuple<number, number>', 'let z = Pi + 1', 'w = z'].join('\n')
   );
-
 
   const library = await c.requestRaw('textDocument/prepareRename', {
     textDocument: { uri: URI },
@@ -763,61 +804,66 @@ await scenario('rename refusals', undefined, async (c) => {
   );
 });
 
-await scenario('rename capture by the library and by labels', undefined, async (c) => {
-  await c.open(URI, 'k + 1');
-  const intoLibrary = await c.requestRaw('textDocument/rename', {
-    textDocument: { uri: URI },
-    position: { line: 0, character: 0 },
-    newName: 'Pi',
-  });
-  check(
-    'a free name cannot be renamed INTO a library name',
-    intoLibrary.error?.message.includes('library name') === true,
-    JSON.stringify(intoLibrary)
-  );
+await scenario(
+  'rename capture by the library and by labels',
+  undefined,
+  async (c) => {
+    await c.open(URI, 'k + 1');
+    const intoLibrary = await c.requestRaw('textDocument/rename', {
+      textDocument: { uri: URI },
+      position: { line: 0, character: 0 },
+      newName: 'Pi',
+    });
+    check(
+      'a free name cannot be renamed INTO a library name',
+      intoLibrary.error?.message.includes('library name') === true,
+      JSON.stringify(intoLibrary)
+    );
 
-  // A label is renamed with its parameter when the callee's parameters are
-  // certain: a name bound to exactly one function literal.
-  await c.open(URI, 'g(a) = a + 1\ng(a: 2)');
-  const labeled = await c.request('textDocument/rename', {
-    textDocument: { uri: URI },
-    position: { line: 0, character: 2 },
-    newName: 'n',
-  });
-  const labelEdits = labeled?.changes?.[URI];
-  check(
-    'renaming a parameter rewrites the named-argument label with it',
-    labelEdits?.length === 3 &&
-      labelEdits.every((e) => e.newText === 'n') &&
-      labelEdits.some(
-        (e) => e.range.start.line === 1 && e.range.start.character === 2
-      ),
-    JSON.stringify(labeled)
-  );
+    // A label is renamed with its parameter when the callee's parameters are
+    // certain: a name bound to exactly one function literal.
+    await c.open(URI, 'g(a) = a + 1\ng(a: 2)');
+    const labeled = await c.request('textDocument/rename', {
+      textDocument: { uri: URI },
+      position: { line: 0, character: 2 },
+      newName: 'n',
+    });
+    const labelEdits = labeled?.changes?.[URI];
+    check(
+      'renaming a parameter rewrites the named-argument label with it',
+      labelEdits?.length === 3 &&
+        labelEdits.every((e) => e.newText === 'n') &&
+        labelEdits.some(
+          (e) => e.range.start.line === 1 && e.range.start.character === 2
+        ),
+      JSON.stringify(labeled)
+    );
 
-  const fromLabel = await c.request('textDocument/definition', {
-    textDocument: { uri: URI },
-    position: { line: 1, character: 2 },
-  });
-  check(
-    'go-to-definition on a label reaches the parameter',
-    fromLabel?.range.start.line === 0 && fromLabel.range.start.character === 2,
-    JSON.stringify(fromLabel)
-  );
+    const fromLabel = await c.request('textDocument/definition', {
+      textDocument: { uri: URI },
+      position: { line: 1, character: 2 },
+    });
+    check(
+      'go-to-definition on a label reaches the parameter',
+      fromLabel?.range.start.line === 0 &&
+        fromLabel.range.start.character === 2,
+      JSON.stringify(fromLabel)
+    );
 
-  // Two clauses have one parameter list each, so the label names no single
-  // parameter and the rename is refused rather than done by halves.
-  await c.open(URI, 'g(a) = a + 1\ng(a, b) = a * b\ng(a: 2)');
-  const ambiguous = await c.requestRaw('textDocument/prepareRename', {
-    textDocument: { uri: URI },
-    position: { line: 0, character: 2 },
-  });
-  check(
-    'a label whose callee cannot be resolved refuses the parameter rename',
-    ambiguous.error?.message.includes('could not be resolved') === true,
-    JSON.stringify(ambiguous)
-  );
-});
+    // Two clauses have one parameter list each, so the label names no single
+    // parameter and the rename is refused rather than done by halves.
+    await c.open(URI, 'g(a) = a + 1\ng(a, b) = a * b\ng(a: 2)');
+    const ambiguous = await c.requestRaw('textDocument/prepareRename', {
+      textDocument: { uri: URI },
+      position: { line: 0, character: 2 },
+    });
+    check(
+      'a label whose callee cannot be resolved refuses the parameter rename',
+      ambiguous.error?.message.includes('could not be resolved') === true,
+      JSON.stringify(ambiguous)
+    );
+  }
+);
 
 await scenario('rename and navigate a type', undefined, async (c) => {
   await c.open(
@@ -886,7 +932,9 @@ await scenario('rename and navigate a type', undefined, async (c) => {
 
   await c.open(
     URI,
-    ['type Point = integer', 'function f<T>(x: Point, y: T) -> T { y }'].join('\n')
+    ['type Point = integer', 'function f<T>(x: Point, y: T) -> T { y }'].join(
+      '\n'
+    )
   );
   const captured = await c.requestRaw('textDocument/rename', {
     textDocument: { uri: URI },
@@ -929,7 +977,10 @@ await scenario('rename and navigate a type', undefined, async (c) => {
   // gives to no binding, so the rename fails closed.
   await c.open(
     URI,
-    ['type Point = tuple<number, number>', 'type shape = Point(number) | other'].join('\n')
+    [
+      'type Point = tuple<number, number>',
+      'type shape = Point(number) | other',
+    ].join('\n')
   );
   const stray = await c.requestRaw('textDocument/prepareRename', {
     textDocument: { uri: URI },
@@ -943,10 +994,7 @@ await scenario('rename and navigate a type', undefined, async (c) => {
 });
 
 await scenario('rename with LaTeX islands', undefined, async (c) => {
-  const diagnostics = await c.open(
-    URI,
-    'let y = 1\n$\\frac{1}{2}$\ny'
-  );
+  const diagnostics = await c.open(URI, 'let y = 1\n$\\frac{1}{2}$\ny');
   const unrelated = await c.request('textDocument/rename', {
     textDocument: { uri: URI },
     position: { line: 0, character: 4 },
@@ -978,25 +1026,31 @@ await scenario('rename with LaTeX islands', undefined, async (c) => {
 // Parsing a `$…$` island canonicalizes it, and canonicalizing `x + 1`
 // DECLARES `x` in the engine that ran the parse — which would then report
 // `x` as a defined name and refuse to rename a free `x` anywhere else.
-await scenario('LaTeX islands do not leak declarations across documents', undefined, async (c) => {
-  const OTHER = 'file:///tmp/lsp-test-other.epsil';
-  await c.open(URI, ['let a = 1', '$x + 1$', 'a'].join('\n'));
-  // `documentSymbol` goes through the parse that injects the LaTeX parser.
-  await c.request('textDocument/documentSymbol', { textDocument: { uri: URI } });
+await scenario(
+  'LaTeX islands do not leak declarations across documents',
+  undefined,
+  async (c) => {
+    const OTHER = 'file:///tmp/lsp-test-other.epsil';
+    await c.open(URI, ['let a = 1', '$x + 1$', 'a'].join('\n'));
+    // `documentSymbol` goes through the parse that injects the LaTeX parser.
+    await c.request('textDocument/documentSymbol', {
+      textDocument: { uri: URI },
+    });
 
-  await c.open(OTHER, 'x + 1');
-  const renamed = await c.requestRaw('textDocument/rename', {
-    textDocument: { uri: OTHER },
-    position: { line: 0, character: 0 },
-    newName: 'w',
-  });
-  check(
-    'a free name is still renamable after another document mentioned it in LaTeX',
-    renamed.error === undefined &&
-      renamed.result?.changes?.[OTHER]?.length === 1,
-    JSON.stringify(renamed)
-  );
-});
+    await c.open(OTHER, 'x + 1');
+    const renamed = await c.requestRaw('textDocument/rename', {
+      textDocument: { uri: OTHER },
+      position: { line: 0, character: 0 },
+      newName: 'w',
+    });
+    check(
+      'a free name is still renamable after another document mentioned it in LaTeX',
+      renamed.error === undefined &&
+        renamed.result?.changes?.[OTHER]?.length === 1,
+      JSON.stringify(renamed)
+    );
+  }
+);
 
 await scenario('rename on a broken parse', undefined, async (c) => {
   await c.open(URI, 'q = 2\nlet = 1');

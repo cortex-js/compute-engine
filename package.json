@@ -32,8 +32,8 @@
     "typecheck": "bash ./scripts/typecheck.sh",
     "test:require": "node ./test/consumer/require-smoke.cjs",
     "prepack": "bash ./scripts/run-quietly.sh 'Build (production)' bash -c 'npm run clean && npm run build'",
-    "format": "prettier --write 'src/**/*.{ts,js,css,md}'",
-    "format:check": "prettier --check 'src/**/*.{ts,js,css,md}'",
+    "format": "prettier --write 'src/**/*.{ts,js,css,md}' 'vscode-epsil/{src,test}/**/*.{ts,mjs}'",
+    "format:check": "prettier --check 'src/**/*.{ts,js,css,md}' 'vscode-epsil/{src,test}/**/*.{ts,mjs}'",
     "test:types": "npm run types && bash scripts/test-types.sh",
     "types": "node scripts/types.mjs",
     "ci:extended": "npm run ci && npm run test:python",
@@ -191,6 +191,7 @@
     "complex.js": "^2.4.3"
   },
   "lint-staged": {
-    "src/**/*.{ts,js,css,md}": "prettier --write"
+    "src/**/*.{ts,js,css,md}": "prettier --write",
+    "vscode-epsil/{src,test}/**/*.{ts,mjs}": "prettier --write"
   }
 }

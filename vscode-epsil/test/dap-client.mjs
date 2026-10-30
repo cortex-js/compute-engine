@@ -30,7 +30,9 @@ export class DapClient {
         const headerEnd = this.buffer.indexOf('\r\n\r\n');
         if (headerEnd < 0) return;
         const length = Number(
-          /Content-Length: (\d+)/.exec(this.buffer.slice(0, headerEnd).toString())?.[1]
+          /Content-Length: (\d+)/.exec(
+            this.buffer.slice(0, headerEnd).toString()
+          )?.[1]
         );
         if (this.buffer.length < headerEnd + 4 + length) return;
         const msg = JSON.parse(
@@ -54,7 +56,12 @@ export class DapClient {
   }
 
   send(command, args) {
-    const msg = { seq: this.seq++, type: 'request', command, arguments: args ?? {} };
+    const msg = {
+      seq: this.seq++,
+      type: 'request',
+      command,
+      arguments: args ?? {},
+    };
     const json = JSON.stringify(msg);
     this.child.stdin.write(
       `Content-Length: ${Buffer.byteLength(json)}\r\n\r\n${json}`

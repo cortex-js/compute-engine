@@ -43,6 +43,19 @@ proposed fix.>
   and functions, the options and their costs. Do not record who found the item,
   when, or how.
 
+**Requests from Tycho** (user decision 2026-10-30). Tycho files its requests as
+numbered rows in its `docs/COMPUTE_ENGINE.md` ("Open Requests for CE
+Maintainers"). An open row there is work this project owes, even when its
+wording sounds settled. A row fixed in one step gets no entry here: the reply in
+the row is the record. A row whose fix needs a decision, a design or several
+steps gets an entry here, and each fact is written in one place only. The Tycho
+row keeps what Tycho sees: the symptom, its instrument, and Tycho's check of the
+fix. The entry here keeps the work: the cause, the files, the options and the
+decision. It names the row number and does not copy the symptom or the status of
+the row. Delete the entry when the fix is released; Tycho deletes the row when
+the fix verifies. How to answer a row is described in the "Instructions for the
+CE team" section of that file.
+
 **Finished work.** When an entry is done, delete it. When a sub-item is done,
 delete its bullet and keep the numbers of the other sub-items. When part of an
 entry is done, change its text to say only what remains.
@@ -3221,16 +3234,16 @@ error. Python reports `NameError` at run time for the same block.
 
 **Status:** open; defect (wrong value), in progress. Found 2026-10-30 in the
 review of CE-583. User decision 2026-10-30 (design): a read of a block local is
-classified at compile time. A read that certainly follows an assignment
-compiles with no check. A read that certainly comes before any assignment
-fails to compile (use before assignment). Only a read that the compiler cannot
-decide gets a check at run time: on `javascript` it throws
-`read-before-declaration` when the local has no value, and on Python the
-`_ce_unset` start value already raises. GLSL and WGSL cannot raise an error,
-so they refuse every read that is not certain to follow an assignment on every
-path. A read of a local with no value never gives a value. This is expected to
-be rare. User decision 2026-10-30: this is a separate task. Two
-attempts made during CE-583 were removed (see below).
+classified at compile time. A read that certainly follows an assignment compiles
+with no check. A read that certainly comes before any assignment fails to
+compile (use before assignment). Only a read that the compiler cannot decide
+gets a check at run time: on `javascript` it throws `read-before-declaration`
+when the local has no value, and on Python the `_ce_unset` start value already
+raises. GLSL and WGSL cannot raise an error, so they refuse every read that is
+not certain to follow an assignment on every path. A read of a local with no
+value never gives a value. This is expected to be rare. User decision
+2026-10-30: this is a separate task. Two attempts made during CE-583 were
+removed (see below).
 
 A block local declared with no value and assigned on only some paths can be read
 before it has a value. Example, `x = 1`:

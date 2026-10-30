@@ -63,29 +63,54 @@ await scenario('basics', async (c) => {
 
   const vars = await c.variables();
   check('x = 30', vars.x?.value === '30', JSON.stringify(vars.x));
-  check('y = 5 with type', vars.y?.value === '5' && vars.y?.type === 'integer', JSON.stringify(vars.y));
+  check(
+    'y = 5 with type',
+    vars.y?.value === '5' && vars.y?.type === 'integer',
+    JSON.stringify(vars.y)
+  );
   check('z not yet declared', vars.z === undefined);
   const locals = await c.scopeVariables('Locals');
-  check('locals empty at top level', Object.keys(locals).length === 0, JSON.stringify(locals));
+  check(
+    'locals empty at top level',
+    Object.keys(locals).length === 0,
+    JSON.stringify(locals)
+  );
 
-  const evalResp = await c.send('evaluate', { expression: 'x + 100', context: 'repl' });
-  check('evaluate x + 100 = 130', evalResp.body?.result === '130', JSON.stringify(evalResp.body));
+  const evalResp = await c.send('evaluate', {
+    expression: 'x + 100',
+    context: 'repl',
+  });
+  check(
+    'evaluate x + 100 = 130',
+    evalResp.body?.result === '130',
+    JSON.stringify(evalResp.body)
+  );
   const hover = await c.send('evaluate', { expression: 'x', context: 'hover' });
   check('hover x = 30', hover.success && hover.body.result === '30');
-  const hoverCall = await c.send('evaluate', { expression: 'Random(1,10)', context: 'hover' });
+  const hoverCall = await c.send('evaluate', {
+    expression: 'Random(1,10)',
+    context: 'hover',
+  });
   check('hover on a call declined', hoverCall.success === false);
 
   await c.send('next', { threadId: 1 });
   const stepStop = await c.waitEvent('stopped');
   check('step stops', stepStop.body.reason === 'step');
   const vars2 = await c.variables();
-  check('z = [35, 2, 3] after step', vars2.z?.value === '[35, 2, 3]', JSON.stringify(vars2.z));
+  check(
+    'z = [35, 2, 3] after step',
+    vars2.z?.value === '[35, 2, 3]',
+    JSON.stringify(vars2.z)
+  );
   check('z expandable', (vars2.z?.variablesReference ?? 0) > 0);
   if (vars2.z?.variablesReference) {
-    const kids = await c.send('variables', { variablesReference: vars2.z.variablesReference });
+    const kids = await c.send('variables', {
+      variablesReference: vars2.z.variablesReference,
+    });
     check(
       'z children 1-based',
-      kids.body.variables[0]?.name === '[1]' && kids.body.variables[0]?.value === '35',
+      kids.body.variables[0]?.name === '[1]' &&
+        kids.body.variables[0]?.value === '35',
       JSON.stringify(kids.body.variables)
     );
   }
@@ -93,12 +118,20 @@ await scenario('basics', async (c) => {
   await c.send('continue', { threadId: 1 });
   await c.waitEvent('terminated');
   const final = c.outputs.find((o) => o.category === 'stdout');
-  check('program result 36 printed', final?.output.trim() === '36', JSON.stringify(c.outputs));
+  check(
+    'program result 36 printed',
+    final?.output.trim() === '36',
+    JSON.stringify(c.outputs)
+  );
 });
 
 // ── S2: parse error stops launch; stopOnEntry; statement time limit ──────
 await scenario('parse error', async (c) => {
-  await c.send('initialize', { adapterID: 'epsil', pathFormat: 'path', linesStartAt1: true });
+  await c.send('initialize', {
+    adapterID: 'epsil',
+    pathFormat: 'path',
+    linesStartAt1: true,
+  });
   const launch = c.send('launch', { program: fixture('bad.epsil') });
   await c.waitEvent('terminated');
   await launch;
@@ -149,9 +182,16 @@ await scenario('body breakpoints', async (c) => {
     const stopped = await c.waitEvent('stopped');
     check(`loop stop, x = ${expected}`, stopped.body.reason === 'breakpoint');
     const vars = await c.variables();
-    check(`x is ${expected}`, vars.x?.value === expected, JSON.stringify(vars.x));
+    check(
+      `x is ${expected}`,
+      vars.x?.value === expected,
+      JSON.stringify(vars.x)
+    );
     if (expected === '1') {
-      const watch = await c.send('evaluate', { expression: 'x * 100', context: 'watch' });
+      const watch = await c.send('evaluate', {
+        expression: 'x * 100',
+        context: 'watch',
+      });
       check('watch mid-loop', watch.body?.result === '100');
     }
     await c.send('continue', { threadId: 1 });
@@ -162,14 +202,25 @@ await scenario('body breakpoints', async (c) => {
   check('function body stop', fnStop.body.reason === 'breakpoint');
   check('frame double@2', (await c.frames())[0] === 'double@2');
   const locals = await c.scopeVariables('Locals');
-  check('param n = 3 in Locals', locals.n?.value === '3', JSON.stringify(locals));
+  check(
+    'param n = 3 in Locals',
+    locals.n?.value === '3',
+    JSON.stringify(locals)
+  );
   await c.send('next', { threadId: 1 });
   await c.waitEvent('stopped');
   const locals2 = await c.scopeVariables('Locals');
-  check('local a = 6 after step', locals2.a?.value === '6', JSON.stringify(locals2));
+  check(
+    'local a = 6 after step',
+    locals2.a?.value === '6',
+    JSON.stringify(locals2)
+  );
   await c.send('stepOut', { threadId: 1 });
   await c.waitEvent('terminated');
-  check('result 7', c.outputs.some((o) => o.category === 'stdout' && o.output.trim() === '7'));
+  check(
+    'result 7',
+    c.outputs.some((o) => o.category === 'stdout' && o.output.trim() === '7')
+  );
 });
 
 // ── S4: call stack — names, one frame per activation, recursion ──────────
@@ -202,7 +253,11 @@ await scenario('call stack', async (c) => {
 
   await c.waitEvent('stopped');
   const frames = await c.frames();
-  check('direct recursion: two fact frames', frames.filter((f) => f.startsWith('fact@')).length === 2, JSON.stringify(frames));
+  check(
+    'direct recursion: two fact frames',
+    frames.filter((f) => f.startsWith('fact@')).length === 2,
+    JSON.stringify(frames)
+  );
   check('recursive call site line 11', frames[1] === 'fact@11');
   await c.send('continue', { threadId: 1 });
   await c.waitEvent('terminated');
@@ -219,7 +274,11 @@ await scenario('conditional breakpoint', async (c) => {
   const stopped = await c.waitEvent('stopped');
   check('stops when condition holds', stopped.body.reason === 'breakpoint');
   const vars = await c.variables();
-  check('x = 3 at the conditional stop', vars.x?.value === '3', JSON.stringify(vars.x));
+  check(
+    'x = 3 at the conditional stop',
+    vars.x?.value === '3',
+    JSON.stringify(vars.x)
+  );
   await c.send('continue', { threadId: 1 });
   await c.waitEvent('terminated');
   check('only one stop (condition true once)', true);
@@ -234,10 +293,14 @@ await scenario('logpoint', async (c) => {
   });
   await c.send('configurationDone');
   await c.waitEvent('terminated');
-  const logs = c.outputs.filter((o) => o.category === 'console' && o.output.startsWith('x is '));
+  const logs = c.outputs.filter(
+    (o) => o.category === 'console' && o.output.startsWith('x is ')
+  );
   check(
     'five log messages, never stopped',
-    logs.length === 5 && logs[0].output.trim() === 'x is 0' && logs[4].output.trim() === 'x is 4',
+    logs.length === 5 &&
+      logs[0].output.trim() === 'x is 0' &&
+      logs[4].output.trim() === 'x is 4',
     JSON.stringify(logs)
   );
 });
@@ -251,8 +314,16 @@ await scenario('error values filter', async (c) => {
   await c.send('setExceptionBreakpoints', { filters: ['error-values'] });
   await c.send('configurationDone');
   const stopped = await c.waitEvent('stopped');
-  check('exception stop', stopped.body.reason === 'exception', JSON.stringify(stopped.body));
-  check('at the erroring statement', (await c.frames())[0] === 'top level@2', JSON.stringify(await c.frames()));
+  check(
+    'exception stop',
+    stopped.body.reason === 'exception',
+    JSON.stringify(stopped.body)
+  );
+  check(
+    'at the erroring statement',
+    (await c.frames())[0] === 'top level@2',
+    JSON.stringify(await c.frames())
+  );
   await c.send('continue', { threadId: 1 });
   await c.waitEvent('terminated');
 });
@@ -275,9 +346,16 @@ await scenario('restart', async (c) => {
   await c.waitEvent('stopped');
   await c.send('restart');
   const stopped = await c.waitEvent('stopped');
-  check('stopped again after restart (bps re-applied)', stopped.body.reason === 'breakpoint');
+  check(
+    'stopped again after restart (bps re-applied)',
+    stopped.body.reason === 'breakpoint'
+  );
   const vars = await c.variables();
-  check('fresh session state, x = 30', vars.x?.value === '30', JSON.stringify(vars.x));
+  check(
+    'fresh session state, x = 30',
+    vars.x?.value === '30',
+    JSON.stringify(vars.x)
+  );
   await c.send('continue', { threadId: 1 });
   await c.waitEvent('terminated');
 });
@@ -296,7 +374,11 @@ await scenario('lambda frame name', async (c) => {
   await c.send('continue', { threadId: 1 });
   // Second stop: the lambda BODY (same line) when `sq(4)` runs.
   await c.waitEvent('stopped');
-  check('lambda frame named sq', (await c.frames())[0] === 'sq@1', JSON.stringify(await c.frames()));
+  check(
+    'lambda frame named sq',
+    (await c.frames())[0] === 'sq@1',
+    JSON.stringify(await c.frames())
+  );
   const locals = await c.scopeVariables('Locals');
   check('lambda param n = 4', locals.n?.value === '4', JSON.stringify(locals));
   await c.send('continue', { threadId: 1 });
@@ -309,13 +391,21 @@ try {
   const out = execFileSync(
     'node',
     [
-      join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'inline-runner.js'),
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        '..',
+        'dist',
+        'inline-runner.js'
+      ),
       fixture('frames.epsil'),
       '5000',
     ],
     { encoding: 'utf8' }
   );
-  const records = out.trim().split('\n').map((l) => JSON.parse(l));
+  const records = out
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
   check('one record per top-level statement', records.length === 4, out);
   check(
     'function statements valueless',

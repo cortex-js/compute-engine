@@ -17,14 +17,16 @@ export class LspClient {
    * what VS Code sends; a scenario overrides it to exercise a fallback (a
    * client without `relatedInformation`, say).
    */
-  constructor(capabilities = {
-    textDocument: {
-      publishDiagnostics: {
-        relatedInformation: true,
-        codeDescriptionSupport: true,
+  constructor(
+    capabilities = {
+      textDocument: {
+        publishDiagnostics: {
+          relatedInformation: true,
+          codeDescriptionSupport: true,
+        },
       },
-    },
-  }) {
+    }
+  ) {
     this.child = spawn('node', [SERVER, '--stdio'], {
       stdio: ['pipe', 'pipe', 'inherit'],
     });

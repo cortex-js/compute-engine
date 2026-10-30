@@ -16,7 +16,7 @@
 import { readFileSync } from 'node:fs';
 
 import { ComputeEngine, parseEpsil, serializeEpsil } from '../../src/epsil.js';
-import { isSymbol, type BoxedExpression } from '../../src/compute-engine.js';
+import { isSymbol, type Expression } from '../../src/compute-engine.js';
 import type { MathJsonExpression } from '../../src/math-json/types.js';
 import { operands, operator } from '../../src/math-json/utils.js';
 import { FatalParsingError } from '../../src/epsil/diagnostics.js';
@@ -77,7 +77,7 @@ function lineOfOffset(offset: number): number {
   return line;
 }
 
-function render(expr: BoxedExpression): string {
+function render(expr: Expression): string {
   let text: string;
   try {
     text = serializeEpsil(expr.json);
@@ -90,12 +90,13 @@ function render(expr: BoxedExpression): string {
 }
 
 for (const stmt of statements) {
-  const offsets =
-    (typeof stmt === 'object' && stmt !== null && !Array.isArray(stmt)
-      ? (stmt as { sourceOffsets?: [number, number] }).sourceOffsets
-      : undefined) ?? [0, sourceText.length];
+  const offsets = (typeof stmt === 'object' &&
+  stmt !== null &&
+  !Array.isArray(stmt)
+    ? (stmt as { sourceOffsets?: [number, number] }).sourceOffsets
+    : undefined) ?? [0, sourceText.length];
 
-  let value: BoxedExpression;
+  let value: Expression;
   const run = () => engine.box(stmt).evaluate();
   try {
     value =

@@ -446,10 +446,7 @@ class EpsilViewProvider implements vscode.TextDocumentContentProvider {
 
 /** The virtual URI of `view` over `source`. Stable for a given pair, so
  * reopening a view reuses its pane instead of stacking new tabs. */
-function viewUri(
-  source: vscode.Uri,
-  view: (typeof VIEWS)[number]
-): vscode.Uri {
+function viewUri(source: vscode.Uri, view: (typeof VIEWS)[number]): vscode.Uri {
   return vscode.Uri.from({
     scheme: VIEW_SCHEME,
     path: source.path + view.suffix,

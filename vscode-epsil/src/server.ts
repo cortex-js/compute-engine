@@ -314,7 +314,7 @@ function validate(uri: string): void {
     // A check that throws is a bug in the engine, not in the user's program:
     // report it in place of diagnostics rather than going silent.
     connection.console.error(
-      `Epsil check failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`
+      `Epsil check failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
     );
     return;
   }
@@ -631,7 +631,10 @@ function tokensOf(text: string): Token[] {
 /** The document's raw AST with its error count. The PARSER can throw (a
  * `#error` pragma), which is reported as "no tree, one error" — hovers then
  * know no declarations and a rename knows to refuse. */
-function parseOf(text: string): { ast: MathJsonExpression | null; errors: number } {
+function parseOf(text: string): {
+  ast: MathJsonExpression | null;
+  errors: number;
+} {
   const cache = cacheFor(text);
   if (cache.parse === undefined) {
     // Match diagnostics' LaTeX-aware parser configuration so navigation and
@@ -644,7 +647,11 @@ function parseOf(text: string): { ast: MathJsonExpression | null; errors: number
     // be refused a rename because another document's island made the engine
     // report `x` as library-defined. Only one construction per edit: this
     // result is memoized by document text.
-    const { ast, diagnostics } = parseSource(text, undefined, new ComputeEngine());
+    const { ast, diagnostics } = parseSource(
+      text,
+      undefined,
+      new ComputeEngine()
+    );
     cache.parse = {
       ast,
       errors: diagnostics.filter((d) => d.severity === 'error').length,
@@ -877,23 +884,29 @@ connection.onDefinition(({ textDocument, position }): Location | null => {
   return { uri: textDocument.uri, range: rangeOf(at.document, definition) };
 });
 
-connection.onReferences(({ textDocument, position, context }): Location[] | null => {
-  const at = bindingAt(textDocument.uri, position);
-  if (at === undefined) return null;
-  return at.group.occurrences
-    .filter((o) => context.includeDeclaration || o.role !== 'definition')
-    .map((o) => ({ uri: textDocument.uri, range: rangeOf(at.document, o) }));
-});
+connection.onReferences(
+  ({ textDocument, position, context }): Location[] | null => {
+    const at = bindingAt(textDocument.uri, position);
+    if (at === undefined) return null;
+    return at.group.occurrences
+      .filter((o) => context.includeDeclaration || o.role !== 'definition')
+      .map((o) => ({ uri: textDocument.uri, range: rangeOf(at.document, o) }));
+  }
+);
 
-connection.onDocumentHighlight(({ textDocument, position }): DocumentHighlight[] | null => {
-  const at = bindingAt(textDocument.uri, position);
-  if (at === undefined) return null;
-  return at.group.occurrences.map((o) => ({
-    range: rangeOf(at.document, o),
-    kind:
-      o.role === 'read' ? DocumentHighlightKind.Read : DocumentHighlightKind.Write,
-  }));
-});
+connection.onDocumentHighlight(
+  ({ textDocument, position }): DocumentHighlight[] | null => {
+    const at = bindingAt(textDocument.uri, position);
+    if (at === undefined) return null;
+    return at.group.occurrences.map((o) => ({
+      range: rangeOf(at.document, o),
+      kind:
+        o.role === 'read'
+          ? DocumentHighlightKind.Read
+          : DocumentHighlightKind.Write,
+    }));
+  }
+);
 
 //
 // ─── Outline ────────────────────────────────────────────────────────────────
@@ -908,86 +921,88 @@ function outlineKind(group: BindingGroup): SymbolKind | undefined {
   return undefined;
 }
 
-connection.onDocumentSymbol(({ textDocument }): DocumentSymbol[] | SymbolInformation[] | null => {
-  const document = documents.get(textDocument.uri);
-  if (document === undefined) return null;
-  const text = document.getText();
+connection.onDocumentSymbol(
+  ({ textDocument }): DocumentSymbol[] | SymbolInformation[] | null => {
+    const document = documents.get(textDocument.uri);
+    if (document === undefined) return null;
+    const text = document.getText();
 
-  type Entry = DocumentSymbol & {
-    span: [number, number];
-    scope: [number, number];
-    container: boolean;
-  };
-  const entries: Entry[] = [];
-  for (const group of bindingsOf(text)) {
-    const kind = outlineKind(group);
-    const definition = group.occurrences.find((o) => o.role === 'definition');
-    if (kind === undefined || definition === undefined) continue;
-    const span = group.declaration ?? [definition.start, definition.end];
-    entries.push({
-      name: group.name,
-      kind,
-      span,
-      scope: group.scope,
-      container: kind === SymbolKind.Function,
-      range: {
-        start: document.positionAt(span[0]),
-        end: document.positionAt(span[1]),
-      },
-      selectionRange: rangeOf(document, definition),
-      children: [],
-    });
-  }
-  // Source order; at an equal start the WIDER span first, so a container
-  // precedes its contents when nesting below.
-  entries.sort((a, b) => a.span[0] - b.span[0] || b.span[1] - a.span[1]);
-
-  if (!hasHierarchicalSymbolCapability)
-    return entries.map(({ name, kind, range }) => ({
-      name,
-      kind,
-      location: { uri: textDocument.uri, range },
-    }));
-
-  // Nest by lexical scope, not declaration range. A multi-clause function's
-  // display range crosses every clause, including unrelated top-level
-  // declarations between them. Only functions are outline containers.
-  const roots: DocumentSymbol[] = [];
-  // Every container seen so far, in source order, rather than a stack that is
-  // unwound: a multi-clause function is a SINGLE entry, so once it were popped
-  // it could never be pushed back — and a declaration between two of its
-  // clauses does pop it, orphaning the locals of every later clause. The
-  // parent is instead searched for per entry, which needs no re-push.
-  const containers: {
-    span: [number, number];
-    enclosingScope: [number, number];
-    symbol: DocumentSymbol;
-  }[] = [];
-  for (const entry of entries) {
-    const { span, scope, container, ...symbol } = entry;
-    // The innermost container whose display range encloses this entry's SCOPE.
-    // Entries are sorted by start, so among the containers that enclose it the
-    // last one is the innermost. A declaration sharing the container's own
-    // enclosing scope is a sibling, even when the container's widened display
-    // range surrounds it.
-    let parent: (typeof containers)[number] | undefined;
-    for (let i = containers.length - 1; i >= 0; i--) {
-      const candidate = containers[i];
-      if (
-        (scope[0] !== candidate.enclosingScope[0] ||
-          scope[1] !== candidate.enclosingScope[1]) &&
-        candidate.span[0] <= scope[0] &&
-        scope[1] <= candidate.span[1]
-      ) {
-        parent = candidate;
-        break;
-      }
+    type Entry = DocumentSymbol & {
+      span: [number, number];
+      scope: [number, number];
+      container: boolean;
+    };
+    const entries: Entry[] = [];
+    for (const group of bindingsOf(text)) {
+      const kind = outlineKind(group);
+      const definition = group.occurrences.find((o) => o.role === 'definition');
+      if (kind === undefined || definition === undefined) continue;
+      const span = group.declaration ?? [definition.start, definition.end];
+      entries.push({
+        name: group.name,
+        kind,
+        span,
+        scope: group.scope,
+        container: kind === SymbolKind.Function,
+        range: {
+          start: document.positionAt(span[0]),
+          end: document.positionAt(span[1]),
+        },
+        selectionRange: rangeOf(document, definition),
+        children: [],
+      });
     }
-    (parent === undefined ? roots : parent.symbol.children!).push(symbol);
-    if (container) containers.push({ span, enclosingScope: scope, symbol });
+    // Source order; at an equal start the WIDER span first, so a container
+    // precedes its contents when nesting below.
+    entries.sort((a, b) => a.span[0] - b.span[0] || b.span[1] - a.span[1]);
+
+    if (!hasHierarchicalSymbolCapability)
+      return entries.map(({ name, kind, range }) => ({
+        name,
+        kind,
+        location: { uri: textDocument.uri, range },
+      }));
+
+    // Nest by lexical scope, not declaration range. A multi-clause function's
+    // display range crosses every clause, including unrelated top-level
+    // declarations between them. Only functions are outline containers.
+    const roots: DocumentSymbol[] = [];
+    // Every container seen so far, in source order, rather than a stack that is
+    // unwound: a multi-clause function is a SINGLE entry, so once it were popped
+    // it could never be pushed back — and a declaration between two of its
+    // clauses does pop it, orphaning the locals of every later clause. The
+    // parent is instead searched for per entry, which needs no re-push.
+    const containers: {
+      span: [number, number];
+      enclosingScope: [number, number];
+      symbol: DocumentSymbol;
+    }[] = [];
+    for (const entry of entries) {
+      const { span, scope, container, ...symbol } = entry;
+      // The innermost container whose display range encloses this entry's SCOPE.
+      // Entries are sorted by start, so among the containers that enclose it the
+      // last one is the innermost. A declaration sharing the container's own
+      // enclosing scope is a sibling, even when the container's widened display
+      // range surrounds it.
+      let parent: (typeof containers)[number] | undefined;
+      for (let i = containers.length - 1; i >= 0; i--) {
+        const candidate = containers[i];
+        if (
+          (scope[0] !== candidate.enclosingScope[0] ||
+            scope[1] !== candidate.enclosingScope[1]) &&
+          candidate.span[0] <= scope[0] &&
+          scope[1] <= candidate.span[1]
+        ) {
+          parent = candidate;
+          break;
+        }
+      }
+      (parent === undefined ? roots : parent.symbol.children!).push(symbol);
+      if (container) containers.push({ span, enclosingScope: scope, symbol });
+    }
+    return roots;
   }
-  return roots;
-});
+);
 
 //
 // ─── Rename ─────────────────────────────────────────────────────────────────
@@ -995,7 +1010,10 @@ connection.onDocumentSymbol(({ textDocument }): DocumentSymbol[] | SymbolInforma
 /** Names referenced by embedded LaTeX. Those MathJSON nodes lack individual
  * Epsil offsets, so rename cannot edit them; collecting their names lets an
  * unrelated rename proceed while a potentially incomplete one fails closed. */
-function latexReferences(text: string): { names: Set<string>; complete: boolean } {
+function latexReferences(text: string): {
+  names: Set<string>;
+  complete: boolean;
+} {
   const cache = cacheFor(text);
   if (cache.latexReferences !== undefined) return cache.latexReferences;
 
@@ -1103,7 +1121,8 @@ function unaccountedSpelling(name: string, text: string): number | undefined {
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i];
     if (token.type !== 'SYMBOL' && token.type !== 'VERBATIM_SYMBOL') continue;
-    if ((token.value ?? token.text) !== name || owned.has(token.start)) continue;
+    if ((token.value ?? token.text) !== name || owned.has(token.start))
+      continue;
     const next = tokens[i + 1];
     if (next?.type === 'OPERATOR' && next.text === ':') continue;
     return token.start;
@@ -1134,134 +1153,138 @@ connection.onPrepareRename(({ textDocument, position }) => {
   };
 });
 
-connection.onRenameRequest(({ textDocument, position, newName }): WorkspaceEdit | null => {
-  const at = bindingAt(textDocument.uri, position);
-  if (at === undefined) return null;
-  const refusal = renameRefusal(at.group, at.text);
-  if (refusal !== undefined)
-    throw new ResponseError(LSPErrorCodes.RequestFailed, refusal);
+connection.onRenameRequest(
+  ({ textDocument, position, newName }): WorkspaceEdit | null => {
+    const at = bindingAt(textDocument.uri, position);
+    if (at === undefined) return null;
+    const refusal = renameRefusal(at.group, at.text);
+    if (refusal !== undefined)
+      throw new ResponseError(LSPErrorCodes.RequestFailed, refusal);
 
-  // On a broken parse the occurrence list is incomplete (whatever failed to
-  // parse resolved nothing), and an incomplete rename corrupts the program.
-  if (parseOf(at.text).errors > 0)
-    throw new ResponseError(
-      LSPErrorCodes.RequestFailed,
-      'Cannot rename while the file has parse errors.'
-    );
-
-  // The new name must lex as ONE symbol token — plain or verbatim — covering
-  // the whole input. A verbatim spelling must also be well-formed: the lexer
-  // RECOVERS an unterminated `` `foo `` into a symbol token, but inserting
-  // that raw spelling would leave an unterminated name in the program.
-  const spelling = newName.trim();
-  const tokens = tokenize(spelling).filter((t) => t.type !== 'EOF');
-  const token =
-    tokens.length === 1 &&
-    tokens[0].start === 0 &&
-    tokens[0].end === spelling.length &&
-    (tokens[0].type === 'SYMBOL' ||
-      (tokens[0].type === 'VERBATIM_SYMBOL' &&
-        spelling.length >= 3 &&
-        spelling.endsWith('`')))
-      ? tokens[0]
-      : undefined;
-  if (token === undefined)
-    throw new ResponseError(
-      LSPErrorCodes.RequestFailed,
-      `\`${newName}\` is not a valid symbol name.`
-    );
-  // The checks below run on the COOKED name — `∞` lexes as the literal
-  // `Infinity` and must be caught by what it MEANS, not how it is typed. An
-  // underscore-only plain spelling is the discard wildcard in pattern
-  // position: renaming a binding to `_` would orphan its uses.
-  const cooked = token.value ?? token.text;
-  if (token.type === 'SYMBOL' && /^_+$/.test(cooked))
-    throw new ResponseError(
-      LSPErrorCodes.RequestFailed,
-      `\`${spelling}\` is the discard wildcard, not a name.`
-    );
-  if (token.type === 'SYMBOL' && HARD_RESERVED_WORDS.has(cooked))
-    throw new ResponseError(
-      LSPErrorCodes.RequestFailed,
-      `\`${cooked}\` is a reserved word. The verbatim form \`\`${cooked}\`\` can spell it.`
-    );
-  if (cooked === at.group.name) return null;
-
-  // A TYPE name obeys the type grammar, which is narrower than the symbol
-  // grammar: a plain ASCII identifier, not one of the words the grammar
-  // reserves (`where`, `Self`), and not the name of a builtin type — the
-  // declaration would be refused when the program runs. It must also not be
-  // spelled already by a name no binding owns — a generic parameter
-  // (`function f<T>(x: Point)` would become `x: T`), or a builtin type name
-  // in an annotation — since the renamed uses would be captured by it, and
-  // the capture check below only knows the names that have a binding group.
-  if (at.group.kind === 'type') {
-    const refuseType = (why: string): never => {
+    // On a broken parse the occurrence list is incomplete (whatever failed to
+    // parse resolved nothing), and an incomplete rename corrupts the program.
+    if (parseOf(at.text).errors > 0)
       throw new ResponseError(
         LSPErrorCodes.RequestFailed,
-        `\`${spelling}\` cannot name a type: ${why}.`
+        'Cannot rename while the file has parse errors.'
       );
-    };
-    if (token.type !== 'SYMBOL' || !isValidTypeName(cooked))
-      refuseType('a type name is a plain identifier (letters, digits and `_`)');
-    if (isReservedTypeName(cooked))
-      refuseType('the type grammar reserves that word');
-    let builtin = true;
-    try {
-      parseType(cooked);
-    } catch {
-      builtin = false;
+
+    // The new name must lex as ONE symbol token — plain or verbatim — covering
+    // the whole input. A verbatim spelling must also be well-formed: the lexer
+    // RECOVERS an unterminated `` `foo `` into a symbol token, but inserting
+    // that raw spelling would leave an unterminated name in the program.
+    const spelling = newName.trim();
+    const tokens = tokenize(spelling).filter((t) => t.type !== 'EOF');
+    const token =
+      tokens.length === 1 &&
+      tokens[0].start === 0 &&
+      tokens[0].end === spelling.length &&
+      (tokens[0].type === 'SYMBOL' ||
+        (tokens[0].type === 'VERBATIM_SYMBOL' &&
+          spelling.length >= 3 &&
+          spelling.endsWith('`')))
+        ? tokens[0]
+        : undefined;
+    if (token === undefined)
+      throw new ResponseError(
+        LSPErrorCodes.RequestFailed,
+        `\`${newName}\` is not a valid symbol name.`
+      );
+    // The checks below run on the COOKED name — `∞` lexes as the literal
+    // `Infinity` and must be caught by what it MEANS, not how it is typed. An
+    // underscore-only plain spelling is the discard wildcard in pattern
+    // position: renaming a binding to `_` would orphan its uses.
+    const cooked = token.value ?? token.text;
+    if (token.type === 'SYMBOL' && /^_+$/.test(cooked))
+      throw new ResponseError(
+        LSPErrorCodes.RequestFailed,
+        `\`${spelling}\` is the discard wildcard, not a name.`
+      );
+    if (token.type === 'SYMBOL' && HARD_RESERVED_WORDS.has(cooked))
+      throw new ResponseError(
+        LSPErrorCodes.RequestFailed,
+        `\`${cooked}\` is a reserved word. The verbatim form \`\`${cooked}\`\` can spell it.`
+      );
+    if (cooked === at.group.name) return null;
+
+    // A TYPE name obeys the type grammar, which is narrower than the symbol
+    // grammar: a plain ASCII identifier, not one of the words the grammar
+    // reserves (`where`, `Self`), and not the name of a builtin type — the
+    // declaration would be refused when the program runs. It must also not be
+    // spelled already by a name no binding owns — a generic parameter
+    // (`function f<T>(x: Point)` would become `x: T`), or a builtin type name
+    // in an annotation — since the renamed uses would be captured by it, and
+    // the capture check below only knows the names that have a binding group.
+    if (at.group.kind === 'type') {
+      const refuseType = (why: string): never => {
+        throw new ResponseError(
+          LSPErrorCodes.RequestFailed,
+          `\`${spelling}\` cannot name a type: ${why}.`
+        );
+      };
+      if (token.type !== 'SYMBOL' || !isValidTypeName(cooked))
+        refuseType(
+          'a type name is a plain identifier (letters, digits and `_`)'
+        );
+      if (isReservedTypeName(cooked))
+        refuseType('the type grammar reserves that word');
+      let builtin = true;
+      try {
+        parseType(cooked);
+      } catch {
+        builtin = false;
+      }
+      if (builtin) refuseType('it is the name of a builtin type');
+      if (unaccountedSpelling(cooked, at.text) !== undefined)
+        refuseType(
+          'this file already uses that name as a type parameter or a type, ' +
+            'and the renamed uses would refer to it'
+        );
     }
-    if (builtin) refuseType('it is the name of a builtin type');
-    if (unaccountedSpelling(cooked, at.text) !== undefined)
-      refuseType(
-        'this file already uses that name as a type parameter or a type, ' +
-          'and the renamed uses would refer to it'
-      );
+
+    // Renaming a FREE name to a library name would silently rebind every use
+    // to the library's meaning (`x` → `Pi` turns `x + 1` into π + 1). A BOUND
+    // group is safe: its binder shadows the library inside its scope.
+    if (at.group.kind === 'free') {
+      hoverEngine ??= new ComputeEngine();
+      if (describeName(hoverEngine, cooked) !== undefined)
+        throw new ResponseError(
+          LSPErrorCodes.RequestFailed,
+          `\`${cooked}\` is a library name; renaming \`${at.group.name}\` to it would change what the program means.`
+        );
+    }
+
+    // Refuse a rename that would change what any occurrence binds to — in
+    // either direction: the new name already visible at a renamed occurrence
+    // would capture it, and an existing use of the new name inside the renamed
+    // binding's scope would be captured by it. Deliberately over-approximate
+    // (scope spans, not exact shadowing): declining a safe rename costs a
+    // manual edit; performing an unsafe one corrupts the program.
+    const conflict = new ResponseError(
+      LSPErrorCodes.RequestFailed,
+      `\`${cooked}\` is already in use in an overlapping scope; renaming would change what it refers to.`
+    );
+    for (const o of at.group.occurrences)
+      if (isNameVisibleAt(at.groups, cooked, o.start)) throw conflict;
+    const visibleFrom = Math.max(at.group.scope[0], at.group.visibleFrom);
+    for (const other of at.groups)
+      if (other !== at.group && other.name === cooked)
+        for (const o of other.occurrences)
+          if (o.start >= visibleFrom && o.start < at.group.scope[1])
+            throw conflict;
+
+    return {
+      changes: {
+        [textDocument.uri]: at.group.occurrences.map((o) => ({
+          range: rangeOf(at.document, o),
+          // The spelling as typed: a verbatim occurrence being renamed to a
+          // plain name loses its backticks (the span covers them).
+          newText: spelling,
+        })),
+      },
+    };
   }
-
-  // Renaming a FREE name to a library name would silently rebind every use
-  // to the library's meaning (`x` → `Pi` turns `x + 1` into π + 1). A BOUND
-  // group is safe: its binder shadows the library inside its scope.
-  if (at.group.kind === 'free') {
-    hoverEngine ??= new ComputeEngine();
-    if (describeName(hoverEngine, cooked) !== undefined)
-      throw new ResponseError(
-        LSPErrorCodes.RequestFailed,
-        `\`${cooked}\` is a library name; renaming \`${at.group.name}\` to it would change what the program means.`
-      );
-  }
-
-  // Refuse a rename that would change what any occurrence binds to — in
-  // either direction: the new name already visible at a renamed occurrence
-  // would capture it, and an existing use of the new name inside the renamed
-  // binding's scope would be captured by it. Deliberately over-approximate
-  // (scope spans, not exact shadowing): declining a safe rename costs a
-  // manual edit; performing an unsafe one corrupts the program.
-  const conflict = new ResponseError(
-    LSPErrorCodes.RequestFailed,
-    `\`${cooked}\` is already in use in an overlapping scope; renaming would change what it refers to.`
-  );
-  for (const o of at.group.occurrences)
-    if (isNameVisibleAt(at.groups, cooked, o.start)) throw conflict;
-  const visibleFrom = Math.max(at.group.scope[0], at.group.visibleFrom);
-  for (const other of at.groups)
-    if (other !== at.group && other.name === cooked)
-      for (const o of other.occurrences)
-        if (o.start >= visibleFrom && o.start < at.group.scope[1])
-          throw conflict;
-
-  return {
-    changes: {
-      [textDocument.uri]: at.group.occurrences.map((o) => ({
-        range: rangeOf(at.document, o),
-        // The spelling as typed: a verbatim occurrence being renamed to a
-        // plain name loses its backticks (the span covers them).
-        newText: spelling,
-      })),
-    },
-  };
-});
+);
 
 //
 // ─── Quick fixes ────────────────────────────────────────────────────────────
@@ -1362,7 +1385,7 @@ connection.onRequest(
       // A view that throws is a bug in the engine, not in the user's program:
       // put the failure where the reader is looking instead of going silent.
       const message =
-        error instanceof Error ? error.stack ?? error.message : String(error);
+        error instanceof Error ? (error.stack ?? error.message) : String(error);
       return {
         content: [
           '// This view could not be computed (this is a bug in the engine):',
@@ -1381,7 +1404,9 @@ function renderView(text: string, uri: string, view: ViewKind): string {
   const errors = diagnostics.filter((x) => x.severity === 'error');
 
   if (view === 'ast') {
-    const lines = ['// MathJSON as parsed — before binding and canonicalization.'];
+    const lines = [
+      '// MathJSON as parsed — before binding and canonicalization.',
+    ];
     if (diagnostics.length > 0)
       lines.push('//', ...diagnosticComments(diagnostics, text));
     lines.push('');
@@ -1421,8 +1446,7 @@ function renderCanonical(
   engine: ComputeEngine,
   ast: MathJsonExpression
 ): string {
-  const statements =
-    operator(ast) === 'Block' ? [...operands(ast)] : undefined;
+  const statements = operator(ast) === 'Block' ? [...operands(ast)] : undefined;
 
   if (statements === undefined) {
     // A single statement is not `Block`-wrapped; show its value bare.
@@ -1491,9 +1515,11 @@ function renderCompiled(
   try {
     const result = compile(engine.box(ast), { to: target, fallback: false });
     const note = functionBody
-      ? [`${comment} This is a function BODY — its result leaves through a`,
-         `${comment} \`return\`, so it belongs inside a function, not at the`,
-         `${comment} top level of a ${title} file.`]
+      ? [
+          `${comment} This is a function BODY — its result leaves through a`,
+          `${comment} \`return\`, so it belongs inside a function, not at the`,
+          `${comment} top level of a ${title} file.`,
+        ]
       : [];
     return [header, ...note, '', result.code, ''].join('\n');
   } catch (error) {

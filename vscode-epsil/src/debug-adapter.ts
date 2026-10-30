@@ -323,7 +323,10 @@ export class EpsilDebugSession extends DebugSession {
       return new Breakpoint(true, this.convertDebuggerLineToClient(target));
     });
     this.lastBreakpoints = [...specs.values()];
-    this.postCommand({ type: 'breakpoints', breakpoints: this.lastBreakpoints });
+    this.postCommand({
+      type: 'breakpoints',
+      breakpoints: this.lastBreakpoints,
+    });
     response.body = { breakpoints };
     this.sendResponse(response);
   }
@@ -399,9 +402,7 @@ export class EpsilDebugSession extends DebugSession {
     this.resume({ type: 'step', mode: 'out' });
   }
 
-  protected override pauseRequest(
-    response: DebugProtocol.PauseResponse
-  ): void {
+  protected override pauseRequest(response: DebugProtocol.PauseResponse): void {
     this.postCommand({ type: 'pause' });
     this.sendResponse(response);
   }
