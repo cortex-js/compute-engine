@@ -1,3 +1,11 @@
+## [Unreleased]
+
+### Performance
+
+- **Integer `Binomial` is faster.** For integer `n` and `k`, the compiled
+  `Binomial` and `.N()` now multiply exactly while the product is a safe
+  integer, and take a gcd step only past that. Results are unchanged. (#501)
+
 ## 0.173.0 _2026-10-28_
 
 ### Resolved Issues

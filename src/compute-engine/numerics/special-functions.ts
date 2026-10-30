@@ -288,7 +288,16 @@ export function binomial(n: number, k: number): number {
     // `i` by `g = gcd(result, i)` first keeps the product at the size of the
     // next value, so no intermediate exceeds the final value.
     let result = 1;
-    for (let i = 1; i <= kk; i++) {
+    let i = 1;
+    // Exact fast step: `result · (n − kk + i)` is `i · C(n − kk + i, i)`, so
+    // `i` divides it, and both the product and the quotient are exact while
+    // the product is a safe integer.
+    for (; i <= kk; i++) {
+      const p = result * (n - kk + i);
+      if (p > Number.MAX_SAFE_INTEGER) break;
+      result = p / i;
+    }
+    for (; i <= kk; i++) {
       let a = result;
       let b = i;
       while (b !== 0) [a, b] = [b, a % b];
