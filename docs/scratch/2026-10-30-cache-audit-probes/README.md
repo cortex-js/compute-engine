@@ -16,6 +16,16 @@ the build.
   the paired run of the two corrected workloads. They hold absolute paths of
   the session's scratchpad and worktrees: change them before use. Take the
   box lock first (`~/.claude/SHARED-BOX-PROTOCOL.md`).
+- `origin/`: the probes of section 3.5 of the design document, one per cache
+  (`probe-<cache>.mts`), each timed on the case for which the cache was
+  added; `run-all.sh` runs them with the cache on and off (it holds absolute
+  paths of the session's scratchpad: change them before use), and
+  `summarize.py` prints the table of medians from its logs. The logs are not
+  kept (git ignores `*.log`); the results are in section 3.5.
+- `event-sites.patch`: a counter of the state events by kind and code site.
+  Apply it in the same worktree after `cache-switches.patch`, then run a
+  benchmark with `CE_EVENT_SITES=1`; the counts are printed on stderr when
+  the process exits. Used for step 3a of the migration.
 - `stats-wrap.mts`: runs a benchmark module with `CE_CACHE_STATS=1` and
   prints the hit counts.
 - Probes of behavior, each runnable with `npx tsx <file> <repo root>`:

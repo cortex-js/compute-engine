@@ -1,0 +1,71 @@
+diff --git a/src/compute-engine/engine-configuration-lifecycle.ts b/src/compute-engine/engine-configuration-lifecycle.ts
+index 259078d75..95e7b3be4 100644
+--- a/src/compute-engine/engine-configuration-lifecycle.ts
++++ b/src/compute-engine/engine-configuration-lifecycle.ts
+@@ -5,6 +5,42 @@ import {
+ import { CACHE_STATS, recordBump } from '../common/cache-stats.js';
+ import { runWhenIdle } from '../common/computation-depth.js';
+ 
++// Probe only (not for delivery): with CE_EVENT_SITES=1, count each state
++// event by its kind and the first stack frame outside this file, and print
++// the counts when the process exits.
++const PROBE_EVENT_SITES =
++  (globalThis as { process?: { env?: Record<string, string | undefined> } })
++    .process?.env?.CE_EVENT_SITES === '1';
++const probeSites = new Map<string, number>();
++function probeRecordSite(label: string): void {
++  const frames = (new Error().stack ?? '').split('\n').slice(2);
++  const first = frames.findIndex(
++    (f) =>
++      !f.includes('engine-configuration-lifecycle') &&
++      !f.includes('_noteStateEvent')
++  );
++  const site = frames
++    .slice(first, first + 2)
++    .map((frame) =>
++      frame
++        .replace(/^\s*at\s+/, '')
++        .replace(/\(?\/.*\/src\//, '')
++        .replace(/:\d+\)?$/, '')
++    )
++    .join(' < ');
++  const key = `${label} | ${site}`;
++  probeSites.set(key, (probeSites.get(key) ?? 0) + 1);
++}
++if (PROBE_EVENT_SITES)
++  (
++    globalThis as unknown as {
++      process: { on: (e: string, f: () => void) => void };
++    }
++  ).process.on('exit', () => {
++    const rows = [...probeSites].sort((a, b) => b[1] - a[1]);
++    for (const [k, n] of rows) console.error(`${String(n).padStart(8)}  ${k}`);
++  });
++
+ type ResetHooks = {
+   refreshNumericConstants: () => void;
+   resetCommonSymbols: () => void;
+@@ -444,6 +480,7 @@ export class EngineConfigurationLifecycle {
+    * event, and the dispatch functions decide which versions advance.
+    */
+   noteStateEvent(e: StateEvent): void {
++    if (PROBE_EVENT_SITES) probeRecordSite(`event ${e.kind}`);
+     // A value-type inference changes the type of a symbol that expressions
+     // built earlier have cached types from (`l = List(x)` keeps `vector<1>`
+     // after a use narrows `x` to `real`). It cannot advance the `any` axis
+@@ -538,8 +575,14 @@ export class EngineConfigurationLifecycle {
+             : e.kind === 'inference' && e.valueType === true && !e.widening
+               ? false
+               : callableAxisSelects(e)))
+-    )
++    ) {
+       this._definitionVersion += 1;
++      if (PROBE_EVENT_SITES) probeRecordSite(`definition ${e.kind}`);
++    }
++    if (PROBE_EVENT_SITES && e.kind === 'type-write')
++      probeRecordSite(
++        `type-write callable ${e.callableBefore}->${e.callableAfter}`
++      );
+     if (CACHE_STATS) {
+       if (m.any) recordBump('generation');
+       if (m.semantic) recordBump('mutationGeneration');

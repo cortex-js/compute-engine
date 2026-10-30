@@ -62,10 +62,14 @@ Section 7 says what in that work matches revision 2 and what does not.
   (one runs out of memory). Nine caches show no gain on any workload and no
   test fails without them: facet, slice bounds, contour, approximations,
   `Limit` probes, eager source values, factor, enclosure endpoints, `Map`
-  compile. Two of these nine stay for a reason that the workloads do not
-  show: the facet memo (its recorded case is a document open with 210,000
-  facet probes) and the eager source values (they decide how often host code
-  runs).
+  compile. But timed on the case that each one was added for (section 3.5),
+  four of them save time: slice bounds (16×), `Limit` probes (4.5×), `Map`
+  compile (85× on repeated `at()` reads) and approximations (1.7×); the
+  factor memo is at the threshold (1.26 to 1.55×). Two more stay for a reason
+  that no probe shows: the facet memo (its recorded case is a document open
+  with 210,000 facet probes) and the eager source values (they decide how
+  often host code runs). Only the contour memos and the enclosure endpoint
+  cache show no gain on any case.
 - **Proposed design** (section 6): five kinds of cache, each with one rule;
   one store guard that samples every fail-closed count before a computation
   and decides at the end whether the value may be stored, with an explicit
@@ -73,10 +77,11 @@ Section 7 says what in that work matches revision 2 and what does not.
   for the settings that can change a numeric value; one dependency stamp for
   the caches that track the values they read. The migration has eight steps
   that can land one at a time (section 7).
-- **Decisions for the user** (section 8): whether to remove seven caches with
-  no measured benefit, whether the per-call invalidation of the type and sign
-  caches gets a design now, and whether an explicit retype or extension must
-  move the world version.
+- **Decisions for the user** (section 8): whether to remove the two caches
+  with no measured benefit (and what to do with the factor memo), whether the
+  per-call invalidation of the type and sign caches gets a design now, and
+  how to narrow the store-guard accept lists. Decided: an explicit retype or
+  extension moves the world version (decision 3, option (c)).
 
 ## 2. Method
 
@@ -310,7 +315,9 @@ calls). With the element memo off, every drain compiles again with the
 `Map` compile cache off (5 attempts) and reads the cache with it on (1
 attempt), and the time is the same (169.8 ms and 168.7 ms): a compile attempt
 is small next to 20,000 element calls. So the `Map` compile cache shows no
-gain, and the element memo gives 2.2× on this workload.
+gain on full drains, and the element memo gives 2.2× on this workload. It
+does save time when the elements are read one at a time with `at()`: each
+`at()` is its own drain (section 3.5).
 
 The four workloads not shown (`accumulator`, `limits-series`,
 `compare-constants`, `simplify-factor`) show no ratio above 1.25 except for
@@ -345,6 +352,33 @@ The comment on `_memoizedFacet()` (`boxed-function.ts`) records the case of
 the facet memo: the facet probes during canonicalization reached 210,000 per
 document open (84% of the open), and without a deadline the allocation churn
 exhausted a 4 GB heap. No workload of this audit reproduces that case.
+
+### 3.5 The case that each cache was added for
+
+The workloads of section 3.4 do not reproduce every case for which a cache
+was added. So each of the seven caches that decision 1 of revision 2 proposed
+to remove was timed on its own case, found in its comment, the commit that
+added it, or its tests (`docs/scratch/2026-10-30-cache-audit-probes/origin/`).
+Median of 5 runs after one warm-up, the cache on and then off in the same
+pair, under the box lock (load average 6 to 32), two timed runs. Every probe
+gave the same result digest with the cache on and off.
+
+| Cache | Case and source | On → off (ms), ratio | Result |
+|---|---|---|---|
+| Slice bounds | Element reads of a `Slice(xs, RangeOf(xs, needle))` that was not evaluated (the test "the span is resolved once per node" in `sequence-search.test.ts`, commit `e523dab98`); 400 elements, needle of 100, `each()` and every `at(k)` | 0.47 → 7.69, 16.4; 0.43 → 7.83, 18.2. After `evaluate()` the span is a `Range` and there is no gain (0.88 to 0.96) | Keep |
+| `Limit` probes | Gruntz limits at +∞ (commit `a2b789283`: compiled probes took nested-exponential limits from about 18 minutes to 4 ms); 6 limits | 31.3 → 139.9, 4.47; 25.7 → 123.2, 4.79. Probe compilations per run: 29 on, 603 off. The switch turns off only the cache, not the compiling | Keep |
+| `Map` compile | `docs/plans/2026-07-19-map-auto-compile-design.md` (commit `0eb257562`): a numeric `Map` over 2,469 elements read in three ways | 5 full drains: 0.89; 1.03 (the element memo serves them). 5 drains with the element memo cleared: 1.40; 1.53. 500 `at()` reads: 8.2 → 766, 93; 7.6 → 645, 85 (500 compile attempts with the cache off) | Keep |
+| Approximations | `Sort` of values closer than the rounding error, which alternates two precisions (comment; test `exact-ordering-fixes.test.ts`, commit `5e29489a6`); `Sort` and `Max` of 40 values `√(2 + k·10⁻³⁰)` | 22.7 → 37.8, 1.67; 20.5 → 35.7, 1.75 | Keep (just above 1.5) |
+| Factor memo | Derivatives of `√(x+√(x+√(x+√(x+x))))` (comment; test `factor-nested-quotients.test.ts`, commit `458389f6c`) | 2nd derivative: 214 → 271, 1.26; 184 → 271, 1.47. 3rd derivative: 1,794 → 2,773, 1.55; 1,684 → 2,613, 1.55. Factorizations: 52 against 20,883 (2nd), 709 against 240,927 (3rd) | At the threshold |
+| Contour memos | Residues, series and limits at algebraic and transcendental points, and contour integrals with algebraic poles (comments; commits `b82b50ef3`, `f43af0ee1`) | 431 → 489, 1.14; 411 → 431, 1.05. Contour integrals only: 1.14; 1.13 | No gain |
+| Enclosure endpoints | Commit `22d77a2ea` records no slow case (a review moved the decodes that read the settings into this cache). Probe built for this audit: a 40-step Horner polynomial in two enclosures, `Max`, `Less`, `Sin`; and a variant with special-function endpoints | 408 → 455, 1.12; 360 → 391, 1.09. Variant: 1.15; 1.11 | No gain |
+
+The factor memo cuts the number of factorizations by a factor of 400 on the
+3rd derivative, but each factorization is cheap, so the time falls much less.
+The number of factorizations without the memo grows exponentially with the
+nesting depth of the input (the comment on `FACTOR_MEMO` records 1,166,395
+for the 3rd derivative when the memo was added; it is 240,927 at
+`d7c8fe8b9`).
 
 ## 4. The validity counters
 
@@ -663,11 +697,14 @@ by the element body, and a suspended iterator that resumes after a change.
   `dictionary-shared-value-evaluation.test.ts` (CE-372) runs out of memory.
   Instead, step 4 gives the dictionary memo the store guard (it has no host
   rule today) and the settings of the shared memo.
-- **Remove** (decision 1): seven caches with no measured gain and no failing
-  test: slice bounds, contour memos, approximations, `Limit` probes, factor
-  memo, enclosure endpoints, `Map` compile. Each removal comes after a probe
-  made from the case in the commit that added it.
-- **Stay separate**, with a reason:
+- **Remove** (decision 1): the two caches with no measured gain on any
+  workload or on their own case (section 3.5): the contour memos and the
+  enclosure endpoint cache. The factor memo is at the threshold (decision 1).
+- **Stay separate**, with a reason (besides the caches that save time on the
+  workloads):
+  - the slice bounds memo, the `Limit` probes, the `Map` compile cache and the
+    approximations: each saves time on the case it was added for (section
+    3.5); the probe of each case becomes a workload of the driver;
   - the element memo: it defines a result (one instance, one draw set);
   - the eager source values: they define how often host code runs in one
     evaluation;
@@ -697,8 +734,9 @@ entries made after the checkpoint.
 - The numeric context stamp is derived state: a restore computes it again
   (6.3). It is not journaled.
 - The `Limit` probe cache is one of the two "unstamped expression-keyed
-  memos" that the checkpoint journal lists. If decision 1 removes it, step 5
-  removes its journal hook and the line in `docs/CHECKPOINT-MODEL.md`.
+  memos" that the checkpoint journal lists. It stays (section 3.5), so its
+  journal hook stays until step 3b gives it a version key that a restore
+  advances.
 - Steps 2, 3 and 5 update `docs/CHECKPOINT-MODEL.md` and run
   `test/compute-engine/checkpoint-journal.test.ts`; step 3 adds a test that
   fills a value cache after a checkpoint, restores, and reads the entry.
@@ -721,9 +759,9 @@ lock, paired with a baseline run made just before. All test paths are under
 | 1d | 1b | CE-621: one change and one deterministic test per item. .1 (concurrent `evaluateAsync()` calls join one pending promise), .3 (look-up order of the eager source values), .4 (release after a synchronous throw); .2 (a nested asynchronous evaluation releases its parent's host values) needs one in-progress count per evaluation number, shared by the synchronous and asynchronous routes | A new test per CE-621 item, and an asynchronous read, field store, read test for `objectReadCount()` | — |
 | 2 | 1b | Numeric context stamp (6.3); replace the settings fields of the shared memo, the approximations, the contour memos, the `Map` compile cache, the enclosure endpoint cache, the application memo, the sequence numeric memo and the element memo (fixes CE-645); route the `_requestedPrecision` writes through one function | `ce-601-shared-evaluation.test.ts`, `relational-operators.test.ts`, `compare-set-and-scalar-or-collection.test.ts`, `limit-*.test.ts`, `compile-lazy-collections.test.ts`, `checkpoint-journal.test.ts`, a new test per cache that changes each setting through the setter and inside a transient window, a test with two engines at different precisions, a test of the CE-645 repro, a test that reads one random collection under two seed frames and outside both and gets the same draws | `compare-constants`, `limits-series`, `map-compile` |
 | 3a | — | Count, on the two Tycho document benchmarks, the `type-write` events that come from an explicit retype or extension and those that come from an inference. Report the counts to the user for decision 3 | — | `tycho-evaluate`, `rebind` |
-| 3b | 1b, 2, 3a | Dependency stamp (6.4) for the value-with-dependencies caches, one cache per commit. For each cache, a test that fills an entry, retypes a symbol it read, and reads the same entry; and a test that fills an entry, extends an operator it read, and compares the same entry with the value computed with the cache off (CE-615 decides what a node boxed before the extension gives; the test checks only that the cache does not change it). If decision 3 is (c): a flag on the `type-write` event that tells an explicit retype from an inferred one, with a test of each | The cache's own tests, the new ones, `lambda-param-collection-inference.test.ts` and `recursive-application-memo-across-evaluations.test.ts` for the element and application memos, `checkpoint-journal.test.ts` with a restore test | The workload of that cache |
+| 3b | 1b, 2, 3a | Dependency stamp (6.4) for the value-with-dependencies caches, one cache per commit. For each cache, a test that fills an entry, retypes a symbol it read, and reads the same entry; and a test that fills an entry, extends an operator it read, and compares the same entry with the value computed with the cache off (CE-615 decides what a node boxed before the extension gives; the test checks only that the cache does not change it). Decision 3 is (c) (user decision 2026-10-30), so this step also adds a flag on the `type-write` event that tells an explicit retype from an inferred one, makes an explicit retype and an extension with `{ extend: true }` move the world version, and moves the readers of `_definitionVersion` that read it only to see a retype or an extension to the world version, with a test of each | The cache's own tests, the new ones, `lambda-param-collection-inference.test.ts` and `recursive-application-memo-across-evaluations.test.ts` for the element and application memos, `checkpoint-journal.test.ts` with a restore test | The workload of that cache |
 | 4 | 1b, 2 | The dictionary memo: store guard with no accepted host count, and the settings of the shared memo (6.5) | `dictionary-shared-value-evaluation.test.ts`, extended with a standalone `BoxedDictionary.evaluate()`, an engine with objects, a debugger hook, `evaluateAsync()`, and a dictionary that holds a host call | A new dictionary workload |
-| 5 | 0 | Remove the caches of decision 1, one commit each, after the probe of its origin case. Can land before steps 1 to 3, so that the removed caches are not converted first | Their own tests (a test that checks only that a cache hit happens is removed with the cache), `checkpoint-journal.test.ts` for the `Limit` probes | All workloads |
+| 5 | 0 | Remove the caches of decision 1 (option (a): the contour memos and the enclosure endpoint cache), one commit each. Can land before steps 1 to 3, so that the removed caches are not converted first. Add the probes of section 3.5 for the kept caches to the workload driver | Their own tests (a test that checks only that a cache hit happens is removed with the cache), the residue, series and contour-integral tests, the enclosure tests | All workloads, and the contour and enclosure probes of section 3.5 |
 | 6 | 3b | Counters: for each cache that reads both the semantic version and a dependency snapshot (`Map` compile, derivative chains, element memo), decide whether the semantic version is still needed; remove it only with a test that shows the snapshot sees each event the semantic version saw. The element memo keeps it for its between-pull checks | `compile-lazy-collections.test.ts`, `derivative-closed-form-cache.test.ts`, `collection-element-memo.test.ts` | `map-compile` |
 | 7 | 3b | Only with decision 2: a per-activation key for the description caches of body nodes (CE-531, CE-334, CE-321) | `lambda-param-collection-inference.test.ts`, `inert-evaluate-memo.test.ts`, `ce-535-531-binder-declaration-cache.test.ts`, the full suite | `recursion-fib`, `type-reads`, Tycho row 453 repro |
 
@@ -752,38 +790,52 @@ the fail-closed rules; each review round of CE-601 found a cache that did
 not. The audit turned off each cache, timed 13 workloads (the two Tycho
 document benchmarks among them) in pairs with a baseline, and ran 15 test
 files that count evaluations. Nine caches show no gain on any workload and no
-failing test. Two of them stay for a reason that the workloads do not show
-(section 6.5): the facet memo and the eager source values. That leaves
-seven: the slice bounds memo, the contour memos, the approximations of the
-comparisons, the `Limit` probes, the factor memo, the enclosure endpoint
-cache and the `Map` compile cache.
+failing test. Then each of them was timed on the case it was added for
+(section 3.5). Four save time there: the slice bounds memo (16×), the
+`Limit` probes (4.5×), the `Map` compile cache (85× on repeated `at()`
+reads) and the approximations (1.7×). Two stay for a reason that no probe
+shows (section 6.5): the facet memo and the eager source values. That leaves
+three:
 
-**Example.** The `Limit` probe cache keeps a compiled function of the limit
-variable for each probed expression. The `limits-series` workload (four
-limits computed three times each, and one series) takes 61.5 ms with it and
-76.6 ms without it (ratio 1.25, at the edge of the noise). In October 2026
-it returned `+∞` for `Limit(e^(a x)/x^3, x → ∞)` after `a` changed from 2 to
-−2, because it had no version stamp.
+- the contour memos: no gain on any workload or on their case (1.05 to
+  1.14);
+- the enclosure endpoint cache: no gain (1.09 to 1.15), and its commit
+  records no slow case;
+- the factor memo: at the threshold. On the second derivative of
+  `√(x+√(x+√(x+√(x+x))))` (the case in its comment) it saves 1.26 to 1.47×;
+  on the third derivative, 1.55×. Without it, the number of factorizations
+  grows exponentially with the nesting depth (709 against 240,927 on the
+  third derivative).
 
 **The removal rule.** A cache is removed only when all three hold: (1) no
 workload gives a ratio above 1.5 in a paired run; (2) no test fails with the
-cache off; (3) a probe made from the case in the commit that added the cache
-gives a ratio of 1.5 or less. A cache that fails (3) stays, and its probe
-becomes a workload of the driver.
+cache off; (3) a probe made from the case for which the cache was added
+gives a ratio of 1.5 or less.
+
+**Example.** The contour memos keep, for each constant expression, whether
+it is exactly 0 and its exact real and imaginary parts. A residue at
+`1 + √2` asks this of the same constants several times. Five residues, two
+series, one limit and eight contour integrals take 431 ms with the memos and
+489 ms without them (1.14), inside the noise. Each conversion to the store
+guard and the stamps is code to review at each new rule, and each review
+round of CE-601 found a cache that did not follow the rule of the moment.
 
 **Options.**
 
-- (a) Remove the seven caches (migration step 5), each in its own commit,
-  each after its probe. Less code to keep correct; steps 1 to 3 have fewer
-  sites to convert if step 5 comes first. The risk: a consumer workload that
-  no probe reproduces becomes slower. A removed cache comes back by reverting
-  its commit.
-- (b) Keep all seven and convert them to the store guard and the stamps
+- (a) Remove the contour memos and the enclosure endpoint cache (migration
+  step 5), each in its own commit; keep the factor memo. Less code to keep
+  correct. The risk: a consumer case that no probe reproduces becomes slower.
+  A removed cache comes back by reverting its commit.
+- (b) Remove the factor memo too. It is the only one of the three that
+  changes the growth rate of a computation, so a deeper nesting than the
+  test's case can become much slower.
+- (c) Keep all three and convert them to the store guard and the stamps
   (steps 1 to 3). No risk of a slowdown; the code stays.
-- If nothing is decided: they stay, as in (b).
+- If nothing is decided: they stay, as in (c).
 
-**Recommendation.** (a). A cache that saves nothing measurable still costs a
-review at each new rule.
+**Recommendation.** (a). The factor memo turns an exponential walk into a
+linear one; a measured 1.5× on a small input is the lower bound of what it
+saves on a larger one.
 
 ### Decision 2: give the type and sign caches a key per call now?
 
@@ -813,6 +865,13 @@ gain on a document of noise functions: 465 → 442 ms (5%); a list recursion:
 (0.5% of the type reads, 5% on the noise document).
 
 ### Decision 3: must the world version move when a definition changes?
+
+**User decision 2026-10-30: option (c)**, below the user comment: an
+explicit retype and an extension with `{ extend: true }` move the world
+version; the retypes that an inference makes and the declarations that
+shadow a callable do not. Step 3b implements it. The step 3a counts (at the
+end of this section) show no explicit retype or extension on the two Tycho
+document benchmarks, so (c) adds no world event there.
 
 **The situation.** The value caches check the world version, which moves on
 rare global events only. A retype or an extension with `{ extend: true }`
@@ -863,6 +922,28 @@ see a retype or an extension can read the world version instead.
 
 (Revision 2: the measurement is step 3a, and the flag is part of step 3b.
 The decision between (b) and (c) is the user's, with the counts of step 3a.)
+
+**Step 3a result (2026-10-30, HEAD `d7c8fe8b9`).** A probe counted each
+event that advances the definition version on the two Tycho document
+benchmarks, with the code site that caused it (one run each, under the box
+lock; the counter is `event-sites.patch` in
+`docs/scratch/2026-10-30-cache-audit-probes/`).
+
+| Event | `evaluate` | `rebind` |
+|---|---|---|
+| Explicit retype (`declare` of an existing name, a type assignment by the caller) or extension with `{ extend: true }` | 0 | 0 |
+| `type-write` from an inference: the type that an assignment gives to a binding that was typed only from its uses (`writeEvidenceType()`, `library/core.ts`) | 10 | 200 |
+| `type-write` from an inference: the type that an assignment derives when the incumbent type is a callable guess (`deriveAndWriteAssignedType()`, `engine-declarations.ts`) | 10 | 0 |
+| Declaration that shadows a callable (`declareSymbolValue()`) | 0 | 38 |
+| Signature inference | 0 | 2 |
+| Configuration (`_reset()`: engine creation, precision, angular unit) | 3 | 3 |
+
+All 20 and 200 `type-write` events change a binding from a callable type to
+a value type. So on these benchmarks option (c) adds no world event. Option
+(a) adds 20 world events on `evaluate` and 238 on `rebind` (the
+`type-write` events and the shadowing declarations; the configuration events
+and the signature inferences move the world version already). Each added
+world event empties every value cache that keys on the world version.
 
 ### Decision 5 (user request 2026-10-30): static types instead of type strings
 
@@ -936,7 +1017,7 @@ Findings of `docs/scratch/EVALUATION-CACHE-ARCHITECTURE_SPEC_REVIEW.md`:
 | 6 `objectReadCount()` | 4.2, 6.2, step 1b test |
 | 7 Lazy value and `at()` rule | 6.1 (they stay on rule G) |
 | 8 Base out of date | Header, 4.3, 4.4 (CE-620 removed, CE-645 added), step 2 |
-| 9 Nine or eight | 1, 6.5, decision 1 (seven, with reasons for the two kept) |
+| 9 Nine or eight | 1, 3.5, 6.5, decision 1 (each cache timed on its own case) |
 | 10 "The switches make it simple to put one back" | Decision 1 (revert of one commit) |
 | 11 Facet memo, removal rule | 3.4, 6.5, decision 1 |
 | 12 Checkpoint | 6.6, steps 2, 3b, 5 |
