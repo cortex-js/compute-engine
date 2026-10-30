@@ -86,7 +86,10 @@ describe('a user function with a jump body under .N()', () => {
   // loaded continuous-integration runner. A limit of 15 s separates the two
   // routes on any of these machines; a limit of 2 s failed on the Node 26
   // runner. The jest timeout is set above the limit, so a regression fails on
-  // the assertion and not on the default 5 s jest timeout.
+  // the assertion and not on the default 5 s jest timeout. The time is checked
+  // only in a `CE_PERF=1` run (CODING-STYLEGUIDE.md): in a full suite on the
+  // shared machine this test once took 44 s (2026-10-30) and 155 ms when run
+  // alone. The value check above does not depend on time.
   test(
     'an argument far from a jump is not evaluated exactly',
     () => {
@@ -97,7 +100,7 @@ describe('a user function with a jump body under .N()', () => {
       const viaFunction = ce.box(['f', sum]).N().toString();
       const elapsed = Date.now() - start;
       expect(viaFunction).toBe(ce.box(['Floor', sum]).N().toString());
-      expect(elapsed).toBeLessThan(15_000);
+      if (process.env.CE_PERF === '1') expect(elapsed).toBeLessThan(15_000);
     },
     20_000
   );
