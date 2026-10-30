@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-646.
+Next free reference: CE-649.
 
 **Entry format.**
 
@@ -805,6 +805,45 @@ constant call of a host operator. Repro: declare `h` with
 `Derivative(f)(5)`, still give `3`; a new engine gives `(x) => 1002`.
 Expected: no chain step is stored when the count moved while it was computed,
 as the other caches do.
+
+### CE-647. The derivative cache does not see a retype of a symbol that the function reads
+
+**Status:** open; wrong value. Found 2026-10-30 by the evaluation-cache audit
+(`docs/plans/2026-10-30-evaluation-cache-architecture.md`, section 4.4); the
+same on HEAD `d7c8fe8b9`.
+
+The cache of derivative chains (`derivativeChains`, `symbolic/derivative.ts`)
+is keyed on the function literal and is emptied when the semantic version
+moves. A retype (a write to the type of a value definition) does not move the
+semantic version, and the dependency snapshot of the chain does not see it.
+Repro: `ce.declare('b', 'integer')`;
+`ce.assign('f', ['Function', ['Multiply', 'x', ['If', ['Element', 'b', 'Integers'], 10, 20]], 'x'])`;
+`Derivative(f)` gives `(x) => 10`. Then
+`ce.box('b').valueDefinition.type = 'real'`: `f(1)` gives
+`If(Element(b, "Integers"), 10, 20)`, but `Derivative(f)`, also a new node,
+still gives `(x) => 10`. With the chain cache turned off (probe worktree), the
+same node gives
+`(x) => x * If(Element(b, "Integers"), 0, 0) + If(Element(b, "Integers"), 10, 20)`.
+Expected: a chain step is not used after a retype of a definition it read.
+The migration plan of the audit (step 3) gives this cache the definition
+version with its dependency stamp.
+
+### CE-648. The zero-test and simplification caches of the Rubi integrator keep values that host code computed
+
+**Status:** open; wrong value (only with the opt-in Rubi rules and a host
+operator whose value changes during one integration). Found 2026-10-30 by the
+evaluation-cache audit (`docs/plans/2026-10-30-evaluation-cache-architecture.md`).
+
+`zeroQ()` and `safeSimplify()` (`rubi/rubi-utils.ts`) keep their results for
+one integration call, keyed on the text of the expression. They call
+`simplify()` and `N()`, which run host operators, and they do not read the
+count of host calls (`uncachedHostCallCount()`, `host-handler-changes.ts`).
+The memo of shared subexpressions has the same lifetime (one evaluation) and
+does not keep such values. Repro (direct call, the caches installed as the
+driver does): `h(x) = x + k`, a host operator with no purity statement, `k = 1`;
+`zeroQ(h(1) - 2)` is `true`; set `k = 5`; `zeroQ(h(1) - 2)` is still `true`
+(expected `false`), and `h` runs once instead of twice. Expected: no entry is
+stored when the host count moved while it was computed.
 
 ### CE-606. `Equal(r(t), r(t))` of a drawing function evaluates to `True`
 
@@ -3044,6 +3083,30 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-646. Compiled `Contains`/`Unique` over lists of lists decline in any program that holds a lazy collection
+
+**Status:** open; enhancement (needs a design). Recorded 2026-10-30 when PR #500
+(issue #499) landed in `f2c053f1e`. Not a regression: before that commit
+every list-of-lists element was refused.
+
+On the JavaScript target, `Contains`, `Element`, `Unique`, `RangeOf`,
+`ContainsSequence`, `StartsWith` and `EndsWith` compare list elements by
+value (`_SYS.eqs`). Compiled code lowers every collection to a plain array,
+but the interpreter's `.isSame()` keeps a lazy view (`Map`, `Filter`, …)
+and a `Range` other than an integer range with literal bounds apart from a
+list with the same values. A lazy view stays unlisted when a callback
+returns it or passes on an element of a literal unchanged:
+`Contains(Map(e ↦ e, [Map(j ↦ j + 1, ys), [9]]), [2, 3])` gives `False`.
+Three review rounds found a new gap in each rule for the safe positions of
+a lazy node, so by user decision (2026-10-30) the lowering declines when the
+program, a value it reads or a user function it calls holds any lazy
+collection or such a `Range` (`mayMakeDistinctElement`,
+`compilation/javascript-target.ts`). So `Map(k ↦ Contains(xss, k), xss)`
+evaluates in the interpreter. A design must say where a lazy view can
+become a list element at run time (or list callback results in the
+interpreter, which changes `.isSame()` results), with tests that compare
+each case against `evaluate()`.
+
 ### CE-611. `interval-js` writes out a nested `Map` with no size limit
 
 **Status:** open; performance. Found 2026-10-28 while fixing CE-605.
@@ -3118,50 +3181,50 @@ nested block (an implicit local) and read after that block reads the input of
 the same name (`_.W`), so the code gives `NaN` where the interpreter reports an
 error. Python reports `NameError` at run time for the same block.
 
-### CE-636. JavaScript: a declared local assigned in only one branch is compared as `undefined`
+### CE-636. Compiled code: a block local that may have no value is read as `undefined`, 0 or an earlier value
 
-**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
-CE-583.
+**Status:** open; defect (wrong value), needs a design. Found 2026-10-30 in the
+review of CE-583. User decision 2026-10-30: this is a separate task. Two
+attempts made during CE-583 were removed (see below).
 
-`Block(s ≔ 0; Loop(Block(Declare(n, integer); If(i > 3, n ≔ 1); If(n ≠ 1, s ≔ s + i)), i ∈ 1..5); s)`:
-the interpreter gives 0, because `n ≠ 1` cannot be decided while `n` has no
-value. The `javascript` target gives 6: `n` is `undefined` on the passes where
-the first `If` does not assign it, and `undefined != 1` is true, so the second
-branch runs. The compile-time check `assertLocalsAssignedBeforeRead` accepts
-the read because a write comes before it in one branch. The interpreter does
-not report an error: a comparison that reads a local with no value is
+A block local declared with no value and assigned on only some paths can be
+read before it has a value. Example, `x = 1`:
+`Block(s ≔ 0; Loop(Block(Declare(n, integer); If(i > 3, n ≔ 1); If(n ≠ 1, s ≔ s + i)), i ∈ 1..5); s)`.
+The interpreter gives 0: a comparison that reads a local with no value is
 undecided, and an `If` statement with an undecided condition runs neither
-branch. Expected: the compiled code does the same. The comparison is
-undecided, and the `If` runs neither branch.
+branch. `javascript` gives 6, because `n` is `undefined` and `undefined != 1`
+is true. Python raises `UnboundLocalError`, because the local starts at the
+`_ce_unset` value (since CE-583). Other forms of the same defect:
+- a read outside a branch condition: `n ≠ 1` as the block's value gives
+  `true` on `javascript`, where the interpreter gives the symbolic `n ≠ 1`;
+  `5 + Boole(n ≠ 1)` gives 6;
+- GLSL and WGSL compile any such read: WGSL reads 0 (a `var` starts at zero),
+  GLSL reads an undefined value;
+- a copy: `m ≔ n; If(m ≠ 1, …)`;
+- a condition inside a function literal called while `n` has no value;
+- a lazy read under another operator: `If(i > 2, n + 1, 2) = 2` gives 112 on
+  `javascript`, where the interpreter gives 12.
 
-### CE-644. Compiled code: a lazy read of a local with no value, under another operator, decides a comparison
+Attempts that were removed:
+1. A run-time test that the local has a value before each comparison. Review
+   rounds found wrong values in lazy operands, in operand evaluation order, in
+   operands that assign the local, and in nested blocks.
+2. A compile-time refusal backed by an analysis of which locals are definitely
+   assigned (about 750 lines). It refused programs that HEAD `0f1020490`
+   compiled correctly, and every review round found new cases.
 
-**Status:** open; defect (wrong value on `javascript`; run-time error on
-Python). Found 2026-10-30 in the review of CE-583.
+A design must keep these programs compiling, because HEAD compiles them
+correctly:
+- a conditional update that keeps the old value, `n ≔ If(x > 5, 1, n)`;
+- a first-pass accumulator,
+  `Loop(If(i = 1, m ≔ i, If(i·x > m, m ≔ i·x)), i ∈ 1..5)`;
+- a function literal that reads `n` and is called only after `n` is assigned;
+- a local assigned in both arms of an `If`, in a nested block, in a loop over
+  a constant non-empty range or list, or first in a loop body before the
+  condition reads it.
 
-Inside a loop body, `Block(Declare(n, integer); If(i > 3, n ≔ 1); If(<condition>, s ≔ s + i))`
-leaves `n` with no value on some passes. When the condition compares a value
-that reads `n` lazily (in an `If` arm, a `Which` value or a `Coalesce`
-fallback) and the read sits under another operator, the interpreter treats the
-comparison as undecided when the read runs, and the `If` statement runs
-neither branch. The compiled code does not:
-
-| Condition | Interpreter | `javascript` | Python |
-| --- | --- | --- | --- |
-| `If(i > 2, n + 1, 2) = 2` | 12 | 112 | `UnboundLocalError` |
-| `Equal(And(i > 2, n ≠ 1), False)` | 12 | 112 | `UnboundLocalError` |
-| `Equal(Or(i < 3, n ≠ 1), True)` | 12 | 206 | `UnboundLocalError` |
-| `Coalesce(When(n, i > 2), 1) = 1` | 12 | 15 | `UnboundLocalError` |
-
-On `javascript` the read gives `undefined`, the operator turns it into `NaN`
-or a boolean, and the comparison is then decided. A read whose value becomes
-the compared value directly (`If(i > 2, n, 1) = 1`, `Coalesce(1, n) = 1`) is
-already correct on both targets: the compiled condition tests that value
-(`lazyUnassignedLocalValue()` in `base-compiler.ts`). The same limit applies
-to an input with no value read in an arm (the comment on
-`operandInputNodes()`). Expected: the compiled code records at run time
-whether a lazy read of a local with no value ran, and makes the comparison
-undecided in that case.
+Expected: the compiled code gives the interpreter's result for every case in
+the first list, or refuses it, and compiles every case in the second list.
 
 ### CE-643. Compilation: the shared-subexpression harvest takes about 0.6 s for 160 repeated terms
 

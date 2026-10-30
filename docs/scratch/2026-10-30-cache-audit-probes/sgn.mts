@@ -1,0 +1,18 @@
+const root = process.argv[2] ?? '/Users/arno/dev/compute-engine';
+const { ComputeEngine } = await import(`${root}/src/compute-engine.ts`);
+const ce = new ComputeEngine();
+const state = { k: 1, calls: 0 };
+ce.declare('h', { signature: '(number) -> number', evaluate: ([x]: any[], { engine }: any) => { state.calls++; return engine.number(x.re + state.k); } });
+const e = ce.box(['h', 2]);
+console.log('sgn k=1:', e.sgn, 'isPositive', e.isPositive, 'calls', state.calls);
+state.k = -1000;
+console.log('sgn k=-1000 same node:', e.sgn, 'isPositive', e.isPositive, 'calls', state.calls);
+console.log('fresh node:', ce.box(['h', 2]).sgn, 'evaluate:', e.evaluate().toString());
+const s = ce.box(['Sqrt', ['h', 2]]);
+state.k = 1;
+console.log('Sqrt(h(2)) k=1:', s.evaluate().toString(), s.type.toString());
+state.k = -1000;
+console.log('Sqrt(h(2)) k=-1000:', s.evaluate().toString(), s.type.toString());
+const a = ce.box(['Abs', ['h', 2]]);
+state.k = 1; console.log('Abs(h(2)) k=1', a.evaluate().toString(), a.simplify().toString());
+state.k = -1000; console.log('Abs(h(2)) k=-1000', a.evaluate().toString(), a.simplify().toString());

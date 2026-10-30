@@ -1,0 +1,11 @@
+const root = process.argv[2] ?? '/Users/arno/dev/compute-engine';
+const { ComputeEngine } = await import(`${root}/src/compute-engine.ts`);
+const ce = new ComputeEngine();
+ce.declare('b', 'integer');
+ce.assign('f', ce.box(['Function', ['Multiply', 'x', ['If', ['Element', 'b', 'Integers'], 10, 20]], 'x']));
+const d = ce.box(['Derivative', 'f']);
+console.log('before:', d.evaluate().toString());
+ce.box('b').valueDefinition!.type = 'real';
+console.log('same node after the retype:', d.evaluate().toString());
+console.log('new node:', ce.box(['Derivative', 'f']).evaluate().toString());
+console.log('f(1) after the retype:', ce.box(['f', 1]).evaluate().toString());

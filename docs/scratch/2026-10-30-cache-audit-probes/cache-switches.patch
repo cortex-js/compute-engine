@@ -1,0 +1,452 @@
+diff --git a/src/common/type/parse.ts b/src/common/type/parse.ts
+index 5ba784f88..22a8d685a 100644
+--- a/src/common/type/parse.ts
++++ b/src/common/type/parse.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from '../../compute-engine/boxed-expression/cache-switches.js';
+ import type {
+   Type,
+   TypeParameter,
+@@ -161,7 +162,7 @@ export function parseType(
+   // Sound for resolver-aware calls too: `cacheResult()` admits only strings
+   // whose resolver-less parse is resolver-independent; `cacheResult` enforces
+   // that condition before inserting it.
+-  const cached = TYPE_CACHE.get(s);
++  const cached = cacheOff('typeparse') ? undefined : TYPE_CACHE.get(s);
+   if (cached !== undefined) {
+     if (CACHE_STATS) recordCache('typeParse', 'hit');
+     return cached;
+diff --git a/src/compute-engine/boxed-expression/boxed-dictionary.ts b/src/compute-engine/boxed-expression/boxed-dictionary.ts
+index b720e49a3..eddade2c5 100644
+--- a/src/compute-engine/boxed-expression/boxed-dictionary.ts
++++ b/src/compute-engine/boxed-expression/boxed-dictionary.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from './cache-switches.js';
+ import type {
+   Expression,
+   PatternMatchOptions,
+@@ -616,7 +617,9 @@ export class BoxedDictionary
+     const version = ce._anyVersion;
+     const pure = this.isPure;
+     if (pure) {
+-      const hit = dictionaryEvaluationMemo?.get(this);
++      const hit = cacheOff('dictionary')
++        ? undefined
++        : dictionaryEvaluationMemo?.get(this);
+       if (
+         hit !== undefined &&
+         hit.options === options &&
+diff --git a/src/compute-engine/boxed-expression/boxed-function.ts b/src/compute-engine/boxed-expression/boxed-function.ts
+index c6d8bee3c..11d999409 100644
+--- a/src/compute-engine/boxed-expression/boxed-function.ts
++++ b/src/compute-engine/boxed-expression/boxed-function.ts
+@@ -411,6 +411,7 @@ import {
+ } from './sgn.js';
+ import { cachedCell, cachedValue, CachedValue } from './cache.js';
+ import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
++import { cacheOff } from './cache-switches.js';
+ import {
+   beginObjectDeps,
+   endObjectDeps,
+@@ -1908,6 +1909,7 @@ export class BoxedFunction
+     const callableVersion = this.engine._callableVersion;
+     const scope = this.engine.context?.lexicalScope;
+     if (
++      !cacheOff('effects') &&
+       this._effects.generation === callableVersion &&
+       this._effects.value !== null &&
+       this._effectsScope === scope
+@@ -2904,6 +2906,7 @@ export class BoxedFunction
+       if (!this.isValid || this.isNumber !== true) return undefined;
+       return sgn(this);
+     };
++    if (cacheOff('sgn')) return compute();
+     return cachedValue(
+       this._sgn,
+       gen,
+@@ -3635,6 +3638,7 @@ export class BoxedFunction
+     // since the value-shield key (`_cacheGeneration()`) can be the
+     // value-blind answer of a shield, or the valued answer outside one.
+     if (
++      !cacheOff('type') &&
+       this._typeGeneration === generation &&
+       typeCell.generation === generation &&
+       typeCell.value !== null &&
+@@ -3718,6 +3722,7 @@ export class BoxedFunction
+           );
+     };
+     const result =
++      (cacheOff('type') ? compute() : null) ??
+       cachedValue(
+         this._type,
+         key,
+@@ -4535,6 +4540,7 @@ export class BoxedFunction
+    * The suppression stamp is checked on BOTH kinds of entry — see
+    * {@link _lazyValueFactsHidden}. */
+   private _lazyCollectionMemoHit(): Expression | undefined {
++    if (cacheOff('lazyvalue')) return undefined;
+     const factsHidden = this.engine._factsHidden();
+     if (
+       this._value.value !== null &&
+@@ -5367,6 +5373,7 @@ export class BoxedFunction
+     const slot = this._facetMemo;
+     if (
+       slot !== undefined &&
++      !cacheOff('facet') &&
+       slot.worldVersion === ce._worldVersion &&
+       slot.factsHidden === factsHidden
+     ) {
+@@ -6012,13 +6019,15 @@ export class BoxedFunction
+     // account is on the same key in `get type`.
+     const gen = this.engine._cacheGeneration();
+     const hostCallsBefore = uncachedHostCallCount();
+-    const evaluated = cachedValue(
+-      this._eagerSource,
+-      gen,
+-      () => this.evaluate(),
+-      undefined,
+-      this.engine
+-    );
++    const evaluated = cacheOff('materializedat')
++      ? this.evaluate()
++      : cachedValue(
++          this._eagerSource,
++          gen,
++          () => this.evaluate(),
++          undefined,
++          this.engine
++        );
+     // An evaluation that ran host code that does not state its purity, or a
+     // host handler that changed state, is not kept: the host code can read
+     // state that the generation does not record (`host-handler-changes.ts`).
+diff --git a/src/compute-engine/boxed-expression/boxed-symbol.ts b/src/compute-engine/boxed-expression/boxed-symbol.ts
+index cfe221785..f6b4b4019 100644
+--- a/src/compute-engine/boxed-expression/boxed-symbol.ts
++++ b/src/compute-engine/boxed-expression/boxed-symbol.ts
+@@ -135,6 +135,7 @@ import {
+   beginAsyncEvaluation,
+   copyContextStack,
+ } from './evaluation-epoch.js';
++import { cacheOff } from './cache-switches.js';
+ import {
+   CYCLE_DETECTED,
+   CycleDepthQuery,
+@@ -2143,7 +2144,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
+     route: StoredValueRoute,
+     compute: () => Expression
+   ): Expression {
+-    if (!isFunction(value) || value.isPure !== true) return compute();
++    if (!isFunction(value) || value.isPure !== true || cacheOff('storedvalue'))
++      return compute();
+     // Inside a transient precision window (`_withTransientPrecision`, the
+     // raised-precision step of the exact ordering), a computed value carries
+     // the raised precision, and the memo below is keyed on the world version,
+diff --git a/src/compute-engine/boxed-expression/cache-switches.ts b/src/compute-engine/boxed-expression/cache-switches.ts
+new file mode 100644
+index 000000000..ca89e3531
+--- /dev/null
++++ b/src/compute-engine/boxed-expression/cache-switches.ts
+@@ -0,0 +1,20 @@
++/**
++ * Probe only (evaluation-cache audit, 2026-10-30): turn off named caches to
++ * measure what each one saves. `CE_CACHE_OFF=name1,name2` (or `all`).
++ * This module imports nothing, so that each module can import it with no
++ * dependency cycle.
++ */
++const off = new Set(
++  (
++    (globalThis as { process?: { env?: Record<string, string | undefined> } })
++      .process?.env?.CE_CACHE_OFF ?? ''
++  )
++    .split(',')
++    .map((s) => s.trim())
++    .filter(Boolean)
++);
++
++/** Is the cache `name` turned off for this probe run? */
++export function cacheOff(name: string): boolean {
++  return off.size > 0 && (off.has(name) || off.has('all'));
++}
+diff --git a/src/compute-engine/boxed-expression/collection-element-memo.ts b/src/compute-engine/boxed-expression/collection-element-memo.ts
+index c37fd67a5..842b1be8e 100644
+--- a/src/compute-engine/boxed-expression/collection-element-memo.ts
++++ b/src/compute-engine/boxed-expression/collection-element-memo.ts
+@@ -25,6 +25,7 @@ import { subscriptEvaluateReads } from './transitive-purity';
+ import { sequenceReadStopCount } from './sequence-read-stops';
+ import { incompleteWalkCount } from './incomplete-walks';
+ import { uncachedHostCallCount } from './host-handler-changes';
++import { cacheOff } from './cache-switches';
+ 
+ /**
+  * Element memoization for lazy collection operators (Tycho item 126).
+@@ -1089,6 +1090,7 @@ export function validElementMemo(
+  * element of the entry. */
+ function validEntryOf(expr: Expression): ElementMemoCache | undefined {
+   const ce = expr.engine;
++  if (cacheOff('element')) return undefined;
+   // Inside a transient precision window (`_withTransientPrecision`, the
+   // window of a `N(x, p)` call), the elements that a read would compute have
+   // more digits than the ones a memo holds, and the ones a read inside the
+@@ -1599,7 +1601,8 @@ export function elementMemoComputeCell(
+ ): Expression | undefined {
+   const ce = expr.engine;
+   if (!Number.isInteger(index) || index < 1) return compute();
+-  if (ce._atTransientConfiguration || !expr.isPure) return compute();
++  if (ce._atTransientConfiguration || !expr.isPure || cacheOff('element'))
++    return compute();
+   const sequenceStopsBefore = sequenceReadStopCount();
+   const incompleteWalksBefore = incompleteWalkCount();
+   const hostCallsBefore = uncachedHostCallCount();
+diff --git a/src/compute-engine/boxed-expression/compare.ts b/src/compute-engine/boxed-expression/compare.ts
+index 62496e49c..41fa08554 100644
+--- a/src/compute-engine/boxed-expression/compare.ts
++++ b/src/compute-engine/boxed-expression/compare.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from './cache-switches.js';
+ import { BigDecimal } from '../../big-decimal/index.js';
+ import { NumericValue } from '../numeric-value/types.js';
+ import { MACHINE_PRECISION } from '../numerics/numeric.js';
+@@ -2756,7 +2757,7 @@ function approximateNode(
+ ): { approximation: Approximation | undefined; pure: boolean } {
+   const ce = x.engine;
+   const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}:${ce.roundingTies}`;
+-  const known = approximations.get(x);
++  const known = cacheOff('approx') ? undefined : approximations.get(x);
+   const entry = known?.find((k) => k.key === key);
+   if (entry !== undefined)
+     return { approximation: entry.approximation, pure: true };
+diff --git a/src/compute-engine/boxed-expression/eager-source-values.ts b/src/compute-engine/boxed-expression/eager-source-values.ts
+index 418998858..92d016d74 100644
+--- a/src/compute-engine/boxed-expression/eager-source-values.ts
++++ b/src/compute-engine/boxed-expression/eager-source-values.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from './cache-switches.js';
+ import type { Expression } from '../global-types.js';
+ import {
+   beginObjectDeps,
+@@ -232,7 +233,7 @@ export function takeDetachedEagerSourceValue(
+   values: EagerSourceValues | undefined,
+   operand: Expression
+ ): Expression | undefined {
+-  if (values === undefined) return undefined;
++  if (values === undefined || cacheOff('eagersource')) return undefined;
+   const entry = values.get(operand);
+   if (entry === undefined) return undefined;
+   values.delete(operand);
+@@ -356,7 +357,7 @@ const hostKeptByEngine = new WeakMap<
+  * evaluation of `expr` (no numeric approximation, no materialization).
+  */
+ export function keptEagerSourceValue(expr: Expression): Expression | undefined {
+-  if (keptCount === 0) return undefined;
++  if (keptCount === 0 || cacheOff('eagersource')) return undefined;
+   const ce = expr.engine;
+   const entry =
+     keptByEngine.get(ce)?.get(expr) ??
+diff --git a/src/compute-engine/boxed-expression/factor.ts b/src/compute-engine/boxed-expression/factor.ts
+index 23b7677c2..b8dc0bff8 100644
+--- a/src/compute-engine/boxed-expression/factor.ts
++++ b/src/compute-engine/boxed-expression/factor.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from './cache-switches.js';
+ import type { Expression } from '../global-types.js';
+ 
+ import { isRelationalOperator } from '../latex-syntax/utils.js';
+@@ -1408,7 +1409,7 @@ export function factor(expr: Expression): Expression {
+   // expression, and an entry holding it would keep the object alive for as
+   // long as the entry lives (the same rule `cachedValue()` applies to its
+   // payloads in `cache.ts`).
+-  if (hasVolatileDigest(expr)) {
++  if (hasVolatileDigest(expr) || cacheOff('factor')) {
+     _factorMisses += 1;
+     return factorUncached(expr);
+   }
+diff --git a/src/compute-engine/boxed-expression/shared-evaluation-memo.ts b/src/compute-engine/boxed-expression/shared-evaluation-memo.ts
+index 9284637ce..7da656992 100644
+--- a/src/compute-engine/boxed-expression/shared-evaluation-memo.ts
++++ b/src/compute-engine/boxed-expression/shared-evaluation-memo.ts
+@@ -111,6 +111,7 @@ import {
+   noteUncachedHostCall,
+   uncachedHostCallCount,
+ } from './host-handler-changes.js';
++import { cacheOff } from './cache-switches.js';
+ 
+ /** The parts of the engine that the memo reads. */
+ type MemoEngine = {
+@@ -201,6 +202,7 @@ export function beginSharedEvaluationMemo(
+   let memo = memoOf(engine);
+   if (
+     noMemo ||
++    cacheOff('shared') ||
+     debugStatementHook !== undefined ||
+     debugStatementResultHook !== undefined
+   ) {
+diff --git a/src/compute-engine/function-utils.ts b/src/compute-engine/function-utils.ts
+index 016c01e20..06267e211 100644
+--- a/src/compute-engine/function-utils.ts
++++ b/src/compute-engine/function-utils.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from './boxed-expression/cache-switches.js';
+ import { clearForwardCallReference } from './boxed-expression/forward-call-reference.js';
+ import { MathJsonSymbol } from '../math-json.js';
+ import {
+@@ -7221,7 +7222,9 @@ function validApplicationMemo(
+   ce: ComputeEngine,
+   fnExpr: Expression
+ ): ApplicationMemo | undefined {
+-  const memo = ce._applicationMemo?.get(fnExpr);
++  const memo = cacheOff('appmemo')
++    ? undefined
++    : ce._applicationMemo?.get(fnExpr);
+   if (
+     memo !== undefined &&
+     memo.worldVersion === ce._worldVersion &&
+diff --git a/src/compute-engine/library/collections.ts b/src/compute-engine/library/collections.ts
+index 0d666061f..64175dacf 100644
+--- a/src/compute-engine/library/collections.ts
++++ b/src/compute-engine/library/collections.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from '../boxed-expression/cache-switches.js';
+ import { registerProvedAbsentDomain } from '../boxed-expression/proved-absent-domain.js';
+ import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
+ import { callableBindingInContext } from '../boxed-expression/binders.js';
+@@ -25479,7 +25480,7 @@ function sliceBounds(
+   // reachable for this; a WeakMap keyed by the node holds the entry for
+   // exactly as long as the node itself lives.
+   const factsHidden = expr.engine._factsHidden();
+-  const cached = SLICE_BOUNDS_MEMO.get(expr);
++  const cached = cacheOff('slice') ? undefined : SLICE_BOUNDS_MEMO.get(expr);
+   if (
+     cached !== undefined &&
+     cached.worldVersion === expr.engine._worldVersion &&
+diff --git a/src/compute-engine/library/enclosure-arithmetic.ts b/src/compute-engine/library/enclosure-arithmetic.ts
+index 4808e1ffc..f0b0636a8 100644
+--- a/src/compute-engine/library/enclosure-arithmetic.ts
++++ b/src/compute-engine/library/enclosure-arithmetic.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from '../boxed-expression/cache-switches.js';
+ /**
+  * The VALUE KIND of the head `Enclosure` (`ENCLOSURE_ARITHMETIC`, the
+  * `arithmetic` field of its definition in `enclosure.ts`).
+@@ -128,6 +129,7 @@ function settingsPayload<T>(x: Expression, decode: (x: Expression) => T): T {
+   const angularUnit: string = ce.angularUnit;
+   const precision = ce.precision;
+   let entries = SETTINGS_PAYLOADS.get(x);
++  if (cacheOff('settingspayload')) return decode(x);
+   if (entries === undefined) {
+     entries = new Map();
+     SETTINGS_PAYLOADS.set(x, entries);
+diff --git a/src/compute-engine/library/map-auto-compile.ts b/src/compute-engine/library/map-auto-compile.ts
+index 0720cbf92..790000397 100644
+--- a/src/compute-engine/library/map-auto-compile.ts
++++ b/src/compute-engine/library/map-auto-compile.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from '../boxed-expression/cache-switches.js';
+ import type {
+   Expression,
+   IComputeEngine as ComputeEngine,
+@@ -919,6 +920,7 @@ export function mapCompiledElementRunner(
+   if (named === undefined && !calleesResolveLexically(ce, fn, new Set()))
+     return undefined;
+ 
++  if (cacheOff('mapcompile')) mapCompileCaches.delete(expr);
+   const existing = mapCompileCaches.get(expr);
+   if (drainStart && existing) existing.attemptedThisDrain = false;
+   // Cheap short-circuit: a deterministic no-compile is permanent for the
+diff --git a/src/compute-engine/sequence.ts b/src/compute-engine/sequence.ts
+index e5734654b..878145736 100644
+--- a/src/compute-engine/sequence.ts
++++ b/src/compute-engine/sequence.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from './boxed-expression/cache-switches.js';
+ /**
+  * Utilities for declarative sequence definitions.
+  *
+@@ -1045,6 +1046,7 @@ export function createSequenceHandler(
+       termStamp !== undefined &&
+       stamp === termStamp &&
+       uncachedHostCallCount() === read.hostCalls &&
++      !cacheOff('sequence') &&
+       memoStampIsValid(engine, termStamp)
+     )
+       memoizeTerm(engine, indices, numericApproximation, term);
+diff --git a/src/compute-engine/symbolic/contour.ts b/src/compute-engine/symbolic/contour.ts
+index 0732b5794..19241623c 100644
+--- a/src/compute-engine/symbolic/contour.ts
++++ b/src/compute-engine/symbolic/contour.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from '../boxed-expression/cache-switches.js';
+ import type { Expression, IComputeEngine } from '../global-types.js';
+ import type {
+   ContourInput,
+@@ -241,6 +242,7 @@ export function memoizedZeroVerdict(
+ ): boolean | undefined | 'none' {
+   const ce = c.engine;
+   const key = memoKeyOf(ce);
++  if (cacheOff('contour')) return 'none';
+   const hit = zeroMemo
+     .get(ce)
+     ?.get(c.hash)
+@@ -304,7 +306,8 @@ const sign = exactSign;
+  * are part of the key. */
+ export function exactComplexParts(z: Expression): Point | undefined {
+   if (!z.isPure) return undefined;
+-  if (!hasOnlyConstantSymbols(z)) return computeExactComplexParts(z);
++  if (!hasOnlyConstantSymbols(z) || cacheOff('contour'))
++    return computeExactComplexParts(z);
+   const ce = z.engine;
+   let memo = partsMemo.get(ce);
+   if (!memo) {
+diff --git a/src/compute-engine/symbolic/derivative.ts b/src/compute-engine/symbolic/derivative.ts
+index 595e64642..9c5083598 100644
+--- a/src/compute-engine/symbolic/derivative.ts
++++ b/src/compute-engine/symbolic/derivative.ts
+@@ -1,4 +1,5 @@
+ import { apply } from '../function-utils.js';
++import { cacheOff } from '../boxed-expression/cache-switches.js';
+ import { checkDeadlineEvery } from '../../common/interruptible.js';
+ import { mul } from '../boxed-expression/arithmetic-mul-div.js';
+ import { mayBeMatrixValued } from '../boxed-expression/matrix-operand.js';
+@@ -994,7 +995,11 @@ function partialDerivativeCache(
+   }
+   const version = ce._semanticVersion;
+   let entry = byKey.get(key);
+-  if (entry === undefined || entry.semanticVersion !== version) {
++  if (
++    entry === undefined ||
++    entry.semanticVersion !== version ||
++    cacheOff('derivative')
++  ) {
+     entry = {
+       semanticVersion: version,
+       iterates: new Map(),
+@@ -1152,7 +1157,11 @@ function derivativeChainCache(
+ ): DerivativeChainCache {
+   const version = ce._semanticVersion;
+   let entry = derivativeChains.get(key);
+-  if (entry === undefined || entry.semanticVersion !== version) {
++  if (
++    entry === undefined ||
++    entry.semanticVersion !== version ||
++    cacheOff('derivative')
++  ) {
+     entry = {
+       semanticVersion: version,
+       iterates: new Map(),
+diff --git a/src/compute-engine/symbolic/limit.ts b/src/compute-engine/symbolic/limit.ts
+index e5ad592ce..be51abcd5 100644
+--- a/src/compute-engine/symbolic/limit.ts
++++ b/src/compute-engine/symbolic/limit.ts
+@@ -1,3 +1,4 @@
++import { cacheOff } from '../boxed-expression/cache-switches.js';
+ import type {
+   Expression,
+   IComputeEngine as ComputeEngine,
+@@ -2123,7 +2124,7 @@ function compiledProbe(
+   ce: ComputeEngine
+ ): ((x: number) => number) | null {
+   const key = e as unknown as object;
+-  const cached = probeCache.get(key);
++  const cached = cacheOff('limitprobe') ? undefined : probeCache.get(key);
+   if (
+     cached !== undefined &&
+     cached.x === x &&

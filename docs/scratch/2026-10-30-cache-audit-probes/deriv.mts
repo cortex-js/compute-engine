@@ -1,0 +1,22 @@
+const root = process.argv[2] ?? '/Users/arno/dev/compute-engine';
+const { ComputeEngine } = await import(`${root}/src/compute-engine.ts`);
+const ce = new ComputeEngine();
+const state = { k: 1, calls: 0 };
+ce.declare('h', { signature: '(number) -> number', evaluate: ([x]: any[], { engine }: any) => { state.calls++; return engine.number(x.re + state.k); } });
+ce.assign('f', ce.box(['Function', ['Multiply', 'x', ['h', 2]], 'x']));
+const d1 = ce.box(['Derivative', 'f']);
+console.log('Derivative(f) k=1:', d1.evaluate().toString());
+state.k = 1000;
+console.log('same node, k=1000:', d1.evaluate().toString());
+console.log('fresh node, k=1000:', ce.box(['Derivative', 'f']).evaluate().toString());
+console.log('applied at 5, fresh:', ce.box([['Derivative', 'f'], 5]).evaluate().toString());
+const d2 = ce.box(['Derivative', 'f', 2]);
+console.log('Derivative(f,2):', d2.evaluate().toString());
+// Same with the variable read by name instead of JS state
+const ce2 = new ComputeEngine();
+ce2.declare('g', { signature: '(number) -> number', evaluate: ([x]: any[], { engine }: any) => engine.number(x.re + engine.symbol('a').value.re) });
+ce2.assign('a', 1);
+ce2.assign('f', ce2.box(['Function', ['Multiply', 'x', ['g', 2]], 'x']));
+console.log('read-by-name a=1:', ce2.box(['Derivative', 'f']).evaluate().toString());
+ce2.assign('a', 50);
+console.log('read-by-name a=50 fresh:', ce2.box(['Derivative', 'f']).evaluate().toString());
