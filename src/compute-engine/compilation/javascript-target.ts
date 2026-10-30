@@ -65,6 +65,7 @@ import {
   isNumber,
   isFunction,
   isString,
+  isDictionary,
   integerRangeElements,
 } from '../boxed-expression/type-guards.js';
 import { multiClauseState } from '../multi-clause.js';
@@ -576,7 +577,6 @@ import type {
   CompiledRunner,
   CompiledValue,
   ComplexResult,
-  NamingContext,
   OperandCompiler,
   RunnerListInput,
   StoredBatchBody,
@@ -13943,11 +13943,17 @@ function isPrimitiveElementType(elt: Type): boolean {
  * elements lower to JS arrays and compare through `_SYS.eqs`, the structural
  * element test, instead of by reference.
  */
-function isStructuralListElementType(elt: Type): boolean {
+function isStructuralListElementType(elt: Type, depth = 0): boolean {
+  // A recursive alias (`R = list<R>`) resolves to a list at every level:
+  // stop and decline past a depth that no real data reaches.
+  if (depth > 32) return false;
   const t = resolveTypeForCompilation(elt);
   if (typeof t === 'string' || t.kind !== 'list') return false;
   const inner = resolveTypeForCompilation(t.elements);
-  return isPrimitiveElementType(inner) || isStructuralListElementType(inner);
+  return (
+    isPrimitiveElementType(inner) ||
+    isStructuralListElementType(inner, depth + 1)
+  );
 }
 
 /**
@@ -13965,7 +13971,14 @@ function requireComparableElements(
   if (elt !== undefined && !BaseCompiler.isComplexValued(arg)) {
     if (isStructuralListElementType(elt)) {
       const root = target.rootExpression;
-      if (root === undefined || mayMakeDistinctElement(root, target.naming))
+      if (root === undefined)
+        throw new Error(
+          `Could not compile \`${kind}\`: the elements are lists, and this ` +
+            `target does not give the whole compiled expression to the check ` +
+            `that the elements compare by value (the registered ` +
+            `\`javascript\` target does).`
+        );
+      if (mayMakeDistinctElement(root))
         throw new Error(
           `Could not compile \`${kind}\`: the elements are lists, and the ` +
             `compiled expression can make a \`Range\` or a lazy collection ` +
@@ -13982,8 +13995,6 @@ function requireComparableElements(
       `elements, and lists of them, compare by value.`
   );
 }
-
-const distinctElementMemo = new WeakMap<NamingContext, boolean>();
 
 /**
  * True when the program `root` can make, at run time, a list element that
@@ -14008,24 +14019,36 @@ const distinctElementMemo = new WeakMap<NamingContext, boolean>();
  *   compiles these lowerings only through the interpreter.
  *
  * The walk covers the program, the values of the symbols that it reads, and
- * the bodies of the user functions that it calls, at any depth. A name that a
- * `Function` parameter binds is not looked up. A host input is a plain array.
- * A definition that cannot be read makes this true. The answer is kept for
- * the compilation (`target.naming` is one object per root compilation), so
- * that a later `ce.assign()` is seen by the next compilation.
+ * the bodies of the user functions that it calls, at any depth, and the
+ * values of a dictionary. Only a `Function` parameter counts as a bound name,
+ * which is not looked up; the index of a `Sum` or a `Block` local is looked
+ * up as a global, which can refuse a program that is safe but never admits
+ * one that is not. A host input is a plain array. A definition that cannot be
+ * read, or a lazy test that throws, makes this true.
+ *
+ * The answer is kept for `root`, stamped with the engine's `_anyVersion`
+ * and its current scope (`ce.context`): the lowerings of one compilation
+ * scan once. A later compilation scans again after an assignment or a
+ * declaration (which advance `_anyVersion`), and after a scope push or pop
+ * (which changes the scope that a symbol's value is read from, without
+ * advancing a version), also with a reused target.
  */
-function mayMakeDistinctElement(
-  root: Expression,
-  naming: NamingContext | undefined
-): boolean {
-  if (naming !== undefined) {
-    const memo = distinctElementMemo.get(naming);
-    if (memo !== undefined) return memo;
-  }
+function mayMakeDistinctElement(root: Expression): boolean {
+  const engine = root.engine;
+  const version = engine._anyVersion;
+  const scope = engine.context;
+  const memo = distinctElementMemo.get(root);
+  if (memo !== undefined && memo.version === version && memo.scope === scope)
+    return memo.result;
   const result = scanForDistinctElement(root);
-  if (naming !== undefined) distinctElementMemo.set(naming, result);
+  distinctElementMemo.set(root, { version, scope, result });
   return result;
 }
+
+const distinctElementMemo = new WeakMap<
+  Expression,
+  { version: number; scope: object; result: boolean }
+>();
 
 function scanForDistinctElement(root: Expression): boolean {
   const engine = root.engine;
@@ -14065,13 +14088,24 @@ function scanForDistinctElement(root: Expression): boolean {
       if (!bound.has(node.symbol) && reach(node.symbol)) return true;
       continue;
     }
+    // The values of a dictionary can hold a `Range` that a key read returns.
+    if (isDictionary(node)) {
+      for (const value of node.values) pending.push({ node: value, bound });
+      continue;
+    }
     if (!isFunction(node)) continue;
     // A list of machine numbers holds no collection.
     if (node._numericStore !== undefined) continue;
     const integerRange =
       node.operator === 'Range' && integerRangeElements(node) !== undefined;
     if (node.operator === 'Range' && !integerRange) return true;
-    if (!integerRange && node.isLazyCollection) return true;
+    // `isLazyCollection` can count a collection (the `isLazy` of `When`), and
+    // that count can call a user callback that throws.
+    try {
+      if (!integerRange && node.isLazyCollection) return true;
+    } catch {
+      return true;
+    }
     if (reach(node.operator)) return true;
     let innerBound = bound;
     if (node.operator === 'Function') {

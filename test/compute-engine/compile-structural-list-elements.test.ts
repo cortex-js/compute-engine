@@ -1,4 +1,6 @@
 import { ComputeEngine, compile } from '../../src/compute-engine';
+import { JavaScriptTarget } from '../../src/compute-engine/compilation/javascript-target';
+import { BaseCompiler } from '../../src/compute-engine/compilation/base-compiler';
 
 /**
  * Element comparison over a collection whose elements are lists
@@ -420,6 +422,108 @@ test('a lambda parameter is not read as the global of the same name', () => {
   expect(r.success).toBe(true);
   const run = r.run as unknown as (k: unknown, xss: unknown) => boolean;
   expect(run([2], [[1], [2]])).toBe(true);
+});
+
+describe('review of f2c053f1e', () => {
+  test('a Range in a dictionary value fails closed', () => {
+    const ce = setup();
+    ce.declare('rs', 'list<real>');
+    const dict = [
+      'Dictionary',
+      ['Tuple', { str: 'a' }, ['Range', 0.5, 1.5]],
+      ['Tuple', { str: 'b' }, ['List', 2, 3]],
+    ];
+    const expr = ['Contains', ['List', ['At', dict, { str: 'a' }]], 'rs'];
+    expect(
+      ce
+        .box([
+          'Contains',
+          ['List', ['At', dict, { str: 'a' }]],
+          ['List', 0.5, 1.5],
+        ] as never)
+        .evaluate().json
+    ).toBe('False');
+    expect(() => js(expr, ce)).toThrow(/Range/);
+    ce.assign('d', ce.box(dict as never));
+    expect(() =>
+      js(['Contains', ['List', ['At', 'd', { str: 'a' }]], 'rs'], ce)
+    ).toThrow(/Range/);
+  });
+
+  test('a recursive list alias fails closed instead of overflowing', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('R', 'list<R>', { alias: true });
+    ce.declare('rr', 'list<R>');
+    // A stack overflow would be a `RangeError`, which this message excludes.
+    expect(() => js(['Unique', 'rr'], ce)).toThrow(
+      /only real\/boolean\/string elements, and lists of them/
+    );
+  });
+
+  test('a reused target sees a later assignment', () => {
+    const ce = setup();
+    ce.declare('rs', 'list<real>');
+    ce.declare('w', 'list<list<real>>');
+    ce.assign('w', ce.box(['List', ['List', 0.5, 1.5]]));
+    const expr = ce.box(['Contains', 'w', 'rs']);
+    const target = new JavaScriptTarget().createTarget({
+      var: (id) => `_.${id}`,
+      rootExpression: expr,
+    });
+    BaseCompiler.compileRoot(expr, target);
+    ce.assign('w', ce.box(['List', ['Range', 0.5, 1.5]]));
+    expect(() => BaseCompiler.compileRoot(expr, target)).toThrow(/Range/);
+  });
+
+  test('a scope push or pop is seen by the next compilation', () => {
+    const R = ['List', ['Range', 0.5, 1.5]];
+    const S = ['List', ['List', 0.5, 1.5]];
+    const type = 'list<list<real>>';
+    // A value declared in a pushed scope, then the scope popped.
+    {
+      const ce = setup();
+      ce.declare('rs', 'list<real>');
+      ce.declare('w', type);
+      ce.assign('w', ce.box(R as never));
+      ce.pushScope();
+      ce.declare('w', { type, value: ce.box(S as never) });
+      const expr = ce.box(['Contains', 'w', 'rs']);
+      expect(compile(expr, { to: 'javascript', fallback: false }).success).toBe(
+        true
+      );
+      ce.popScope();
+      expect(() =>
+        compile(expr, { to: 'javascript', fallback: false })
+      ).toThrow(/Range/);
+    }
+    // A Range declared in a pushed scope.
+    {
+      const ce = setup();
+      ce.declare('rs', 'list<real>');
+      ce.declare('w', type);
+      ce.assign('w', ce.box(S as never));
+      const expr = ce.box(['Contains', 'w', 'rs']);
+      expect(compile(expr, { to: 'javascript', fallback: false }).success).toBe(
+        true
+      );
+      ce.pushScope();
+      ce.declare('w', { type, value: ce.box(R as never) });
+      expect(() =>
+        compile(expr, { to: 'javascript', fallback: false })
+      ).toThrow(/Range/);
+      ce.popScope();
+    }
+  });
+
+  test('a target without the root expression says so', () => {
+    const ce = setup();
+    const target = new JavaScriptTarget().createTarget({
+      var: (id) => `_.${id}`,
+    });
+    expect(() =>
+      BaseCompiler.compileRoot(ce.box(['Unique', 'xss']), target)
+    ).toThrow(/does not give the whole compiled expression/);
+  });
 });
 
 test('list Equal still compiles through _SYS.eq', () => {
