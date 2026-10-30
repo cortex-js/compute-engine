@@ -4024,7 +4024,7 @@ what it can compute from the evaluated operands alone.
 **On a `lazy: true` operator there is no contrast to draw**: `holdMap`
 returns the operands unchanged, so the handler's first parameter is raw
 and held too — and, on the box/parse routes, not even canonicalized (see
-the lazy-operator trap in `CLAUDE.md`: such a handler must canonicalize
+the lazy-operator trap in `ARCHITECTURE.md`: such a handler must canonicalize
 each held operand it consumes).
 
 Read-only: do not mutate it, and do not assume it is present (a handler
