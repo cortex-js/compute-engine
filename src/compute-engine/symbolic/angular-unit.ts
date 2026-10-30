@@ -163,7 +163,22 @@ export function rewriteAngularUnit(
     ? ce.function('Divide', [ce.One, toRadFactor])
     : ce.number(1 / toRad);
 
+  // The result of each node, for this call. An expression can share a node
+  // between many parents (`u = Add(u, Sin(u))`), and without the memo the
+  // walk rewrote the node once for each path, which takes a time exponential
+  // in the depth of the sharing and writes a tree without the sharing. With
+  // the memo, a shared node is rewritten once and stays shared.
+  const memo = new Map<Expression, Expression>();
   const walk = (e: Expression): Expression => {
+    if (!isFunction(e)) return e;
+    const known = memo.get(e);
+    if (known !== undefined) return known;
+    const result = walkNode(e);
+    memo.set(e, result);
+    return result;
+  };
+
+  const walkNode = (e: Expression): Expression => {
     if (!isFunction(e)) return e;
 
     // A derivative head differentiates in the engine's angular convention —
@@ -197,6 +212,15 @@ export function rewriteAngularUnit(
     if (DIRECT_TRIG_OPERATORS.has(h) && ops.length === 1) {
       return ce.function(h, [ce.function('Multiply', [toRadFactor, ops[0]])]);
     }
+    // `AbsArg(z)` is the pair `(Abs(z), Argument(z))`, and its second
+    // component is an angle in the engine's unit, which the compiled code
+    // would compute in radians. The pair has no correct rewrite here: over a
+    // list operand the interpreter maps the pair over the elements, and the
+    // operand would be evaluated two times. So the compilation is refused
+    // in any unit other than radians. The rewrite runs on the compiled tree,
+    // on each stored value (`foldedValueInRadians()`) and on each function
+    // body that the compilation writes, so each of them is refused.
+    if (h === 'AbsArg') throw new Error(ABS_ARG_REFUSAL);
     if (INVERSE_TRIG_OPERATORS.has(h) && ops.length >= 1) {
       const call = changed ? ce.function(h, ops) : e;
       return ce.function('Multiply', [fromRadFactor, call]);
@@ -206,6 +230,17 @@ export function rewriteAngularUnit(
 
   return walk(expr);
 }
+
+/**
+ * The refusal of the compilation of `AbsArg` in an angular unit other than
+ * radians, by `rewriteAngularUnit()` and by the outermost
+ * `BaseCompiler.compile()`, which also reads the stored definitions.
+ */
+export const ABS_ARG_REFUSAL =
+  'Could not compile `AbsArg` when the angular unit is not radians: the ' +
+  'second component of `AbsArg(z)` is an angle in the angular unit of the ' +
+  'engine, and the compiled code computes it in radians. For a number `z`, ' +
+  'write the pair as `(Abs(z), Argument(z))`, or compile in radians.';
 
 /**
  * Rewrite an expression from the engine's angular convention to the RADIAN
@@ -320,11 +355,13 @@ export function fromRadianConvention(expr: Expression): Expression {
 }
 
 /** The heads whose meaning depends on the engine's angular unit. */
-const UNIT_DEPENDENT_HEADS: ReadonlySet<string> = new Set([
+export const UNIT_DEPENDENT_HEADS: ReadonlySet<string> = new Set([
   ...DIRECT_TRIG_OPERATORS,
   ...INVERSE_TRIG_OPERATORS,
   'Degrees',
   'DMS',
+  // The second component of the pair is an angle (`Argument`).
+  'AbsArg',
 ]);
 
 /**

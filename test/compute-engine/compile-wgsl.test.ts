@@ -680,7 +680,10 @@ describe('WGSL COMPILATION', () => {
   describe('CO-P1-2 Argument uses select, never a ternary', () => {
     it('compiles Argument of a real value to select(...)', () => {
       const code = wgsl.compile(ce.box(['Argument', 'x'])).code;
-      expect(code).toBe('select(3.14159265359, 0.0, x >= 0.0)');
+      // The inner `select` gives NaN for a NaN operand, as `evaluate()` does.
+      expect(code).toBe(
+        'select(select(_gpu_nan(), 3.14159265359, x < 0.0), 0.0, x >= 0.0)'
+      );
       expect(code).not.toContain('?');
     });
   });

@@ -39,6 +39,8 @@ import {
   GPU_RANDOM_COUNTER_PREFIX,
   gpuAtIndexGuard,
   gpuCheckIdentifier,
+  gpuPointDeclaration,
+  gpuPointOrPointListUnion,
   gpuReachableSymbolNames,
   gpuTypeOfValue,
 } from './gpu-target.js';
@@ -975,6 +977,22 @@ export function compileWGSLFieldFunction(
       lists.set(p, { n, ceType: spelled });
       continue;
     }
+    // A type that admits a point and a list of points
+    // (`list<tuple<number, number>> | tuple<number, number>`) has no field
+    // type: a field has one fixed type for every value that the host can
+    // write, and a list of points cannot be a `vecNf` field. The value of
+    // the symbol is not read here, because a field function reads each
+    // parameter from the buffer, so a change of the value must not change
+    // the compiled text.
+    const pointOrList = gpuPointOrPointListUnion(type.type);
+    if (pointOrList !== undefined)
+      return parameterDecline(
+        p,
+        `has the type \`${type.toString()}\`, which admits a point and a ` +
+          `list of points, and a field of the parameter struct has one ` +
+          `fixed type. Declare "${p}" as a point ` +
+          `(\`${gpuPointDeclaration(p, pointOrList.arity)}\`)`
+      );
     // A point: a tuple of 2, 3 or 4 real numbers is one `vec2f`, `vec3f`
     // or `vec4f` field. The compilation reads it as the WGSL vector of its
     // type, as it reads a symbol declared `tuple<real, real, real>`.

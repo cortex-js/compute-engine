@@ -2,45 +2,244 @@
 
 ### Performance
 
+- **Compilation: the shared-subexpression pass is linear when a conditional
+  branch reads a value computed before it** (ROADMAP CE-595). In
+  `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))` and
+  `e_{k+1} = When(sin(e_k), e_k > k)`, with each `e_k` built once with
+  `ce.function()`, the pass made a copy of its analysis of `e_k` for the branch,
+  and the copies doubled at each level: 36 seconds at depth 14, for about 1,500
+  characters of code. When the analysis grows faster than the number of branches
+  and binders in the expression, the branch now reuses the analysis made before
+  it: depth 40 compiles in about 10 ms. The code for these two graphs is the
+  same as before. For other graphs in this case, the pass can put the
+  temporaries at other places than before (the values do not change). An
+  expression whose analysis does not grow in this way gives the same code as
+  before.
+
+- **Interval target: smaller code for conditional branches over a shared
+  graph.** The `interval-js` target compiles each branch of an `If` again over
+  the inputs narrowed to where the branch can be selected. A narrowed branch did
+  not share its repeated subexpressions, and a branch nested in a narrowed
+  branch was compiled again for each path to it: in
+  `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))` the code doubled at each level
+  (314 KB at depth 10, out of memory at depth 20). Now a narrowed branch shares
+  its own repeated subexpressions, a narrowing that cannot change a value (the
+  branch of `x > k - 1` inside the branch of `x > k`) is not written, and a
+  branch nested in a narrowed branch is a local function compiled once. The
+  graph above gives 36 KB at depth 20, and
+  `e_{k+1} = e_k + If(x > k, e_k, 0) + If(x < -k, sqrt(e_k), 1)` gives 266 KB at
+  depth 10 (2 MB at depth 8 before). The results of the compiled code do not
+  change.
+
+- **Interval target: a check of block-local functions visits each shared node
+  once.** It walked an expression graph once for each path, and
+  `e_{k+1} = When(sin(e_k), e_k > k)` took 8 seconds to compile at depth 28. It
+  now takes about 15 ms. The result of the check does not change.
+
+- **Non-radian angular unit: a shared value is converted once.** In degree mode,
+  the conversion of a stored value to radians walked a shared graph once for
+  each path, so a stored point that holds `u_{k+1} = u_k + \sin(u_k)` took 6.8
+  seconds at depth 18 and ran out of memory at depth 20. It now takes a few
+  milliseconds, and the converted value keeps its sharing.
+
 - **GLSL/WGSL: a small power of a scaled bounded value no longer needs the
   NaN-safe helper.** The base of a power `b^n` (`n` from 2 to 4) proven finite
   for `sin`, `cos`, `sign`, `min`, `max` and `clamp` can now hold a product of
-  number literals and one bounded part: with `x, y: real<-10^{15}..10^{15}>`
-  and `T: real<-10..10>`, `\min((x - 0.14\cos(T+1.9) + 0.189)^2, y)` and
+  number literals and one bounded part: with `x, y: real<-10^{15}..10^{15}>` and
+  `T: real<-10..10>`, `\min((x - 0.14\cos(T+1.9) + 0.189)^2, y)` and
   `\min((2x)^2, y)` compile to the built-in `min` instead of `_gpu_min`. A
   rational factor (`\frac{2}{3}x`), two symbols (`xy`), or a product whose size
   can overflow keeps the helper.
 
 ### Resolved Issues
 
+- **WGSL: a list held by a `Block` local is no longer copied at each read**
+  (ROADMAP CE-583). A read with a proven index of such a list indexes the local
+  directly (`U[k - 1]`), because a `Block` local is a `var`, which WGSL can
+  index with a run-time index. Before, each read first copied the list to a new
+  local (`var _tv1 = U;`). A free input of the same name is still copied. The
+  GLSL output does not change.
+
+- **GLSL/WGSL: a `Block` local can have the name of a function parameter.** On a
+  shader target, a local whose name is bound outside its block (a parameter, a
+  loop index, a local of an enclosing block) now gets a fresh name. With
+  `f := U ↦ …` and a block inside the body that declares a list `U`, GLSL
+  emitted `float _fn_f(float U) { float[10] U; …`, a redeclaration of the
+  parameter, and WGSL refused the function with "the body assigns the parameter
+  "U"". The WGSL check of `compileFunction()` also reads an assignment that
+  comes after a `Declare` of the name in the same block as a write of the local,
+  not of the parameter.
+
+- **GLSL/WGSL: a nested `Block` used as a statement no longer returns its
+  value.** A block that is not the last statement of a block is now emitted as a
+  compound statement (`{ … }`). Before, the body
+  `Block(Block(Declare(U, list<real^10>); U ≔ C; U), U + 1)` put the statements
+  of the inner block in the scope of the function with `return U;` in front of
+  `return U + 1.0;`, so the function returned the list. A block whose value is a
+  number was stored in a temporary and then written as the statement `_tv1;`,
+  which is not valid WGSL.
+
+- **Python: a nested `Block` used as a statement no longer returns its value.**
+  Its statements are put in the enclosing statement list, with no `return`, and
+  each of its locals gets a fresh name, because Python has no block scope.
+  Before, `Block(Block(Declare(V, real); V ≔ x; V); x + 1)` emitted `return V`
+  before `return x + 1`.
+
+- **Compilation declines a block that uses a local before its `Declare`.** In
+  `Block(U ≔ 2; Declare(U, real); U ≔ 3; U + 1)`, the first statement writes the
+  local `U` of the block, which the interpreter reports as
+  `read-before-declaration`. Every target now declines such a block, for a write
+  or a read before the `Declare`. Before, JavaScript threw a `ReferenceError`
+  when the code ran, and GLSL and WGSL wrote a variable before its declaration,
+  which is not valid source. The check also runs on a loop body: in
+  `Loop(Block(If(k > 1, s ≔ s + U); Declare(U); U ≔ 100), k ∈ 1..2)`, Python
+  read the input `U` and gave 100. A use inside a function literal, or in a
+  nested block that declares the name again, is not affected.
+
+- **JavaScript and Python: a local of a nested block in a loop body or a branch
+  no longer writes an outer variable of the same name.** With
+  `Block(Declare(V); V ≔ 1; Loop(Block(Block(Declare(V); V ≔ 100); V ≔ 2V), k ∈ 1..3); V)`,
+  JavaScript gave 1 and Python gave 200, where the interpreter gives 8. In a
+  JavaScript loop body, a nested block that declares a local is now a block
+  statement (`{ … }`). On Python, each local of a block in a loop body or in a
+  statement-form `If` branch gets a fresh name
+  (`If(x > 0, Block(Declare(V); V ≔ 7), V ≔ 5)` gave 7 instead of 1). A
+  `Declare` with a value assigns the value. A `Declare` with no value sets the
+  local to the start value `_ce_unset("V")`, and a use of that value raises
+  `UnboundLocalError`, so a local of a loop body no longer keeps its value from
+  the previous pass (a sum that read such a local gave 5; JavaScript gives NaN).
+  A result of the function that is this start value raises too. The start value
+  is left out when the next statement assigns the local.
+
+- **Python: a `Declare` whose value is a block declines.** In
+  `Declare(t, real, Block(Declare(u, real, i); u + 1))`, the `return` of the
+  inner block was put after `t = `, and the function returned at the first pass
+  of a loop.
+
+- **Python: a `Loop` index no longer overwrites another variable of the same
+  name.** Python has no block scope: a `for` statement assigns its index in the
+  scope of the whole function. An index with the name of a parameter, of a local
+  of an enclosing block, of a free symbol, or of a name that a `vars` entry
+  reads now gets a fresh name. With
+  `Block(Declare(s); s ≔ 0; Loop(s ≔ s + x, x ∈ 1..3); s + x)` at x = 2, Python
+  gave 9; the interpreter gives 8. The names of the new Python helpers
+  (`_ce_unset`, `_ce_unset_type`, `_ce_checked`) start with `_ce_`, so a symbol,
+  a parameter or a function with one of these names fails to compile when the
+  code uses the helper.
+
+- **GLSL/WGSL: a coordinate of a symbol that can be a point or a list of
+  points** (ROADMAP CE-593). With
+  `P: list<tuple<number, number>> | tuple<number, number>`, the type of `P.x`
+  was `list<number> | missing | number`, and the shader targets declined it with
+  an internal message about a "missing" position. The type is now
+  `list<number> | number`: the coordinate of a point and the list of coordinates
+  of a list of points are never absent. When `P` has an assigned point and no
+  `vars` entry maps it, `P.x + y` compiles to `y + 1.0` on GLSL and WGSL, as for
+  a symbol declared as a point. Otherwise a shader has no value that can be both
+  a point and a list of points, and the compilation declines with a message that
+  names `P`, its type, and the declaration to write
+  (`ce.declare('P', 'tuple<real, real>')`). `compileFieldFunction()` declines
+  such a parameter with the same remedy, because a field of its parameter struct
+  has one fixed type.
+
+- **GLSL/WGSL: whole-vector uses of such a symbol** (ROADMAP CE-593). With the
+  same `P` and an assigned point, `P + (y, y)`, `2P`, `\sin(xP)`,
+  `\Vert P\Vert`, `Dot(P, (x, y))` and `\operatorname{distance}((x,y),P)`
+  declined with "an operand lowers to a shader ARRAY", because the compilation
+  read the declared type. A user function `f(t) := t P` compiled to
+  `float _fn_f(float t) { return vec2(1.0, 2.0) * t; }`, and a `Block` local
+  holding `2P` was declared `float`. When the shader computes the value of `P`
+  (no `vars` entry maps it), the shader compilation now writes the point in
+  place of `P`, in the expression and in the bodies of the user functions that
+  it compiles. A call of such a function, whose stored signature returns the
+  union, is replaced by its body when that body is then a point: `f(x).x`
+  compiles to `(x * vec2(1.0, 2.0)).x`. The stored definitions and signatures do
+  not change. A function that returns a list of points through the union
+  declines with a message that names the union. A bare `P` with no value
+  compiled to the name `P`, which the host then had to declare with a type that
+  the compilation cannot decide. A read of `P` as a shader input (no value, or a
+  `vars` entry) now declines with the message above.
+
+- **Compiled code: an assigned value in a non-radian angular unit.** The
+  compilation writes the value of an assigned symbol in place of the symbol, and
+  it did not convert that value to the radian convention of the compiled code.
+  In degree mode, `c := \sin(x)` compiled to `Math.sin(_.x)` (0.894 at `x = 90`
+  instead of 1) on every target, and `P := (\sin(x), 0)` compiled to
+  `vec2(sin(x), 0.0).x` on GLSL. The value is now converted, once. Also,
+  `compileToSource()` and `compileFunction()` of the GLSL, WGSL and Python
+  targets did not convert their expression at all; they now do, as `compile()`
+  does.
+
+- **The coordinate type of a tuple value under an `indexed_collection` option.**
+  With `P: indexed_collection<tuple<number, number>> | tuple<number, number>`
+  and `P := ((1, 2), (3, 4))`, `PointX(P)` is the point `(1, 2)`, which its type
+  `list<number> | number` did not admit. The type is now
+  `list<number> | missing | number | tuple<number, number>`.
+
+- **Non-radian angular unit: a compile-time fold or a closed-form integral that
+  reads a stored trigonometric value.** The compilation folds a constant
+  subtree, and tries the antiderivative of an integral, in the radian
+  convention, but it read the stored value of an assigned symbol in the engine's
+  unit. In degree mode, with `k := \sin(30)`, `2k` compiled to -1.976 instead of
+  1, and `\int_0^x k\,dt` gave -1.976 at `x = 2` instead of 1, on `javascript`,
+  `glsl` and `python` (and `interval-js` for the integral). A fold or an
+  antiderivative that reads such a stored definition (a symbol value, a function
+  literal or the clauses of a function) is now skipped: the structural compile
+  converts each value, and the integral uses the numeric route. Python
+  `compileLambda()` now converts its expression too.
+
+- **Non-radian angular unit: `AbsArg` declines.** The second component of
+  `AbsArg(z)` is an angle in the engine's unit, which the compiled code computed
+  in radians: in degree mode, `2·AbsArg(1+i)_2` compiled to 1.5708 instead
+  of 90. Every target now declines an expression that reaches `AbsArg`
+  (directly, through a stored value or through a function body) when the unit is
+  not radians, with a message that suggests `(Abs(z), Argument(z))`. Radian mode
+  does not change.
+
+- **`Argument` of a real NaN is NaN.** The `javascript`, `glsl` and `wgsl`
+  lowerings of `Argument` for a real operand gave π (180 in degrees) for NaN,
+  where the interpreter gives NaN.
+
+- **A declined compilation reports `strict` mode.** When the compilation
+  declines and the result runs the interpreter, the result could carry the mode
+  and the promotion flag of an earlier compilation of the same engine.
+
+- **Interval target: a narrowed branch inside a `Sum` reads no value computed
+  over all the inputs.** A `Sum` binds its loop-invariant subexpressions to
+  names. A branch of an `If` in its body, which is compiled over the inputs
+  narrowed to where it can be selected, read these names for equal
+  subexpressions, so it used values computed over all the inputs:
+  `Sum(If(x > 1, ln(k + x), If(x > 1, ln(x - 1), arccos(x))), k = 1..n)` over
+  `x ∈ [0.5, 1.5]` gave `partial` (domain clipped). It now gives an `interval`.
+
 - **A written `Missing` value beside a point or a list compiles to the absence
-  marker of that shape.** `If(c, (x, y), Missing)` compiled on `glsl` and
-  `wgsl` to a ternary with a scalar NaN beside a `vec2`, which is not a valid
-  shader; it now gives `vec2(NaN)`, also when the other value is itself a
-  selection that may be absent (`If(c, If(d, (x, y), Missing), Missing)`). On
-  `python` it gave `nan` where the interpreter gives `Missing`; it now gives
-  `None`. The same holds for `Which` and for a list value `[x, y]`.
-- **More selections compile on `glsl`, `wgsl` and `interval-js`.** A list of
-  2 to 4 numbers that may be absent (`If(c, [x, y])`, `When([x, y], c)`) now
+  marker of that shape.** `If(c, (x, y), Missing)` compiled on `glsl` and `wgsl`
+  to a ternary with a scalar NaN beside a `vec2`, which is not a valid shader;
+  it now gives `vec2(NaN)`, also when the other value is itself a selection that
+  may be absent (`If(c, If(d, (x, y), Missing), Missing)`). On `python` it gave
+  `nan` where the interpreter gives `Missing`; it now gives `None`. The same
+  holds for `Which` and for a list value `[x, y]`.
+- **More selections compile on `glsl`, `wgsl` and `interval-js`.** A list of 2
+  to 4 numbers that may be absent (`If(c, [x, y])`, `When([x, y], c)`) now
   compiles to a `vecN` on the shader targets. On `interval-js`, an `If` with a
   point or list value now compiles, as `Which` and `When` already did, and a
   value whose condition is a constant `False` is no longer compiled (it made
   `If(False, [Zeta(x), 1], 1)` decline).
 - **`interval-js` no longer reports "no value" for a selection of lists of
   different lengths.** With an undecided condition, `If(x > 0, L, [x])` over
-  `x ∈ [-1, 1]` gave the empty result, which claims that no value exists; it
-  now gives the whole domain (`entire`), also inside an enclosing selection.
-  When the lengths are known at compile time to differ, the compile declines.
-- **A long conditional with a `Missing` value compiles on `interval-js`.**
-  Past 2,000 characters of code, a conditional is emitted with closures, and a
-  `Missing` value made the generated function a syntax error. A chain of
-  nested selections also compiled each value several times per level (depth 10
+  `x ∈ [-1, 1]` gave the empty result, which claims that no value exists; it now
+  gives the whole domain (`entire`), also inside an enclosing selection. When
+  the lengths are known at compile time to differ, the compile declines.
+- **A long conditional with a `Missing` value compiles on `interval-js`.** Past
+  2,000 characters of code, a conditional is emitted with closures, and a
+  `Missing` value made the generated function a syntax error. A chain of nested
+  selections also compiled each value several times per level (depth 10
   overflowed the stack); depth 24 now compiles in a few milliseconds.
 - **The type of a compiled `run()` accepts a boolean or a string input.** With
-  `c` declared `boolean`, `ce.box(['When', 'x', 'c']).compile().run({ x: 2,
-  c: true })` worked on the JavaScript target but was a TypeScript error; the
-  input type of `run()` (and of a `broadcast()` list input) now admits
-  `boolean` and `string` values.
+  `c` declared `boolean`,
+  `ce.box(['When', 'x', 'c']).compile().run({ x: 2, c: true })` worked on the
+  JavaScript target but was a TypeScript error; the input type of `run()` (and
+  of a `broadcast()` list input) now admits `boolean` and `string` values.
 - **A value of the wrong type for a `string` variable throws.** With `s`
   declared `string`, `If(s = "a", 1, 2)` run with `s = 3` gave `2`; it now
   throws a `TypeError` that names `s`, on `run()` and on `broadcast()`, as a
@@ -49,23 +248,23 @@
 - **`subs()`, `map()` and a recursive `replace()` keep the function each call
   was written with.** With `h := a \mapsto a x`, `e = h(a) + 1`, and then a
   scope that declares `h := a \mapsto 100`, `e.subs({a: k}).evaluate()` gave
-  101: the rebuilt call looked `h` up in the current scope, while
-  `e.evaluate()` correctly gives `a x + 1`. It now gives `k x + 1`. An
-  integral, a derivative or a limit that writes in the body of a function
-  through these operations now also reads the function each inner call was
-  written with (an integral of `c(x)`, where `c` calls `n` and a scope
-  declares another `c` and `n`, gave 101 instead of 4/3). `isSame()` and the
-  hash still compare a call by its name, and the canonical form of a raw or
-  structural result (a `replace()` rule written as LaTeX strings) still binds
-  each call in the current scope (`docs/SCOPING-MODEL.md`).
+  101: the rebuilt call looked `h` up in the current scope, while `e.evaluate()`
+  correctly gives `a x + 1`. It now gives `k x + 1`. An integral, a derivative
+  or a limit that writes in the body of a function through these operations now
+  also reads the function each inner call was written with (an integral of
+  `c(x)`, where `c` calls `n` and a scope declares another `c` and `n`, gave 101
+  instead of 4/3). `isSame()` and the hash still compare a call by its name, and
+  the canonical form of a raw or structural result (a `replace()` rule written
+  as LaTeX strings) still binds each call in the current scope
+  (`docs/SCOPING-MODEL.md`).
 
 - **An integral written before its function is defined uses that function.**
   `\int_0^1 g(x)\,dx` parsed before `g(t) := t` stayed unevaluated after the
   definition (`.N()` gave 0.5), while `D` and `\sum` written the same way used
-  the later `g`. It now evaluates to 1/2, also for `\int_0^1
-  \operatorname{Apply}(f, x)\,dx` and `x \mapsto q(x)` written before `q`.
-  Under a scope that declares another `g`, such an integral keeps the `g` of
-  the scope where it was written (it gave 100 with `g := t \mapsto 100`). An
+  the later `g`. It now evaluates to 1/2, also for
+  `\int_0^1 \operatorname{Apply}(f, x)\,dx` and `x \mapsto q(x)` written before
+  `q`. Under a scope that declares another `g`, such an integral keeps the `g`
+  of the scope where it was written (it gave 100 with `g := t \mapsto 100`). An
   unknown data symbol of an integrand is unchanged.
 
 - **`Contains`, `Unique` and `Element` compile over a list of lists.** On the
@@ -75,14 +274,14 @@
   as `evaluate()` does, and so do `RangeOf`, `ContainsSequence`, `StartsWith`
   and `EndsWith`. These operators are still refused, and the interpreter
   evaluates them, when the elements are tuples, complex numbers or lists of a
-  type that may be absent, when the searched value may be a tuple, and when
-  the program (or a value or function that it reads) holds a `Map`, a
-  `Filter` or another lazy collection, or a `Range` other than a `Range` of
-  integers with literal bounds. The interpreter keeps those apart from a list
-  of the same values, and the compiled code would not. On the JavaScript
-  target, `Contains` and `IndexOf` over text also no longer fail when a
-  function parameter is named `_v`. (#499, contributed by
-  [enumeratio](https://github.com/enumeratio) in #500)
+  type that may be absent, when the searched value may be a tuple, and when the
+  program (or a value or function that it reads) holds a `Map`, a `Filter` or
+  another lazy collection, or a `Range` other than a `Range` of integers with
+  literal bounds. The interpreter keeps those apart from a list of the same
+  values, and the compiled code would not. On the JavaScript target, `Contains`
+  and `IndexOf` over text also no longer fail when a function parameter is named
+  `_v`. (#499, contributed by [enumeratio](https://github.com/enumeratio) in
+  #500)
 
 ## 0.174.0 _2026-10-30_
 
@@ -187,12 +386,12 @@
   was written with.** With `g := t ↦ t`, `I = \int_0^1 g(x)\,dx`, and then a
   scope that declares `g := t ↦ 100`, `I.evaluate()` gave 100 instead of 1/2,
   `\lim_{x\to2} g(x)` gave 100, and `D(g(x), x)` gave 0: these routes read the
-  function by its name in the current scope. They now use the function that
-  the call is bound to, as a plain call `g(3)` does, for a function defined
-  with `:=` and for a function held as a value. The numeric value of such an
-  integral (`.N()`) is now computed under that scope where it stayed
-  unevaluated; a compilation that would need two different functions of the
-  same name is refused, and the interpreter runs instead.
+  function by its name in the current scope. They now use the function that the
+  call is bound to, as a plain call `g(3)` does, for a function defined with
+  `:=` and for a function held as a value. The numeric value of such an integral
+  (`.N()`) is now computed under that scope where it stayed unevaluated; a
+  compilation that would need two different functions of the same name is
+  refused, and the interpreter runs instead.
 
 - **A compiled integral keeps a parameter named `e`, `i` or `\pi`.** With
   `q(y, e) := \int_0^1 e x\,dx`, the compiled `q(y, 2)` gave 1.359 (Euler's

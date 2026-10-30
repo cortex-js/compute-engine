@@ -33,6 +33,7 @@ import {
   recordBlockScalarLocals,
   recordIntegerRange,
   recordScopeParent,
+  recordVariableLocals,
   provenPointWidth,
   provenScalarPointWidth,
 } from './javascript-value-facts.js';
@@ -242,7 +243,12 @@ import {
 import { planProtocolDispatch } from './protocol-dispatch.js';
 import type { ReceiverGuard } from './protocol-dispatch.js';
 import { isMoreSpecific } from '../boxed-expression/overload.js';
-import { containsDerivativeHead, rewriteAngularUnit } from './angular-unit.js';
+import {
+  ABS_ARG_REFUSAL,
+  containsDerivativeHead,
+  rewriteAngularUnit,
+  UNIT_DEPENDENT_HEADS,
+} from './angular-unit.js';
 import { JUMP_FUNCTIONS } from '../jump-functions.js';
 import {
   compileJetDerivative,
@@ -3604,6 +3610,62 @@ export class BaseCompiler {
   }
 
   /**
+   * Join the statements of a list that has no value on a
+   * `bareStatementBlocks` target: one per line, with the `;` terminator of
+   * the shader targets (`joinShaderStatements`), or with no terminator on
+   * Python, where a statement ends at the end of its line.
+   */
+  static statementLines(
+    target: CompileTarget<Expression>,
+    lines: ReadonlyArray<string>
+  ): string {
+    return target.language === 'python'
+      ? lines.join('\n')
+      : BaseCompiler.joinShaderStatements(lines);
+  }
+
+  /**
+   * Refuse the compiled value `code` of an `Assign` or of a `Declare` of
+   * `name` when it is not one expression, on a target that writes a block
+   * as a bare statement sequence (Python, the shader targets).
+   *
+   * A value that compiles to several statements, or to a `return`, cannot
+   * be the right side of an assignment: splicing `u = s\nreturn 2 * u`
+   * after `t = ` gave `t = u = s` and a `return` that left the enclosing
+   * function with the value of the inner block. The shader targets move
+   * such a block into the enclosing statement list when they can
+   * (`valueBlock`), and its value then compiles to a single temporary;
+   * where no statement list is available, and on Python, which has no such
+   * lowering, the assignment declines.
+   */
+  static assertExpressionValue(
+    code: TargetSource,
+    target: CompileTarget<Expression>,
+    head: 'Assign' | 'Declare',
+    name: string
+  ): void {
+    if (
+      !target.bareStatementBlocks ||
+      typeof code !== 'string' ||
+      !(code.includes('\n') || /^\s*(?:return|break|continue)\b/.test(code))
+    )
+      return;
+    throw new Error(
+      head === 'Assign'
+        ? `Could not compile \`Assign\`: the value assigned to ` +
+            `"${name}" lowers to a statement sequence on target ` +
+            `'${target.language ?? 'unknown'}' (a block, or a loop), which ` +
+            `has no expression form there. Assign the value of the last ` +
+            `statement instead (\`Block(u ≔ s; t ≔ 2u)\`).`
+        : `Could not compile \`Declare\`: the value of "${name}" lowers to ` +
+            `a statement sequence on target '${target.language ?? 'unknown'}' ` +
+            `(a block, or a loop), which has no expression form there. ` +
+            `Declare the local with no value and assign the value of the ` +
+            `last statement instead.`
+    );
+  }
+
+  /**
    * Join statement lines for a `bareStatementBlocks` target, terminating each
    * with `;` unless it already ends with one or with a closing brace — a
    * hoisted statement (`float t = 0.0;`, a `for (…) { … }` loop, a compound
@@ -4502,17 +4564,17 @@ export class BaseCompiler {
     // are stable within one compilation but not across compilations, and a
     // boxed expression can outlive the compile that cached its answer.
     if (BaseCompiler._compileDepth === 0) {
-      BaseCompiler._invalidateComplexMemo();
-      // The fold-value memo has the same staleness boundary: engine symbol
-      // values are stable within one compilation but not across them.
-      BaseCompiler._foldValueMemo = new WeakMap();
-      BaseCompiler._foldValueBlockedMemo = new Map();
-      BaseCompiler._unknownsMemo = new WeakMap();
-      BaseCompiler._knownExponentMemo = new WeakMap();
-      BaseCompiler._constantPoleMemo = new WeakMap();
-      BaseCompiler._foldValueImpureMemo = new Map();
-      BaseCompiler._foldValueMentionsMemo = new Map();
-      BaseCompiler._unsafeOperandsMemo = new WeakMap();
+      BaseCompiler.resetCompilationMemos();
+      // The report of a compilation that declines is the neutral one (see
+      // the reset of `_lastReport` below). It is written here too, because
+      // the `AbsArg` refusal below throws before that reset.
+      BaseCompiler._lastReport = { mode: 'strict', promoted: false };
+      // `AbsArg` is refused in any angular unit other than radians, also
+      // when a stored value or a function body that the expression reads
+      // holds it. The test is made here, before any handler reads the
+      // operand, so that every target gives the same message.
+      if (expr.engine.angularUnit !== 'rad' && BaseCompiler.reachesAbsArg(expr))
+        throw new Error(ABS_ARG_REFUSAL);
       // (The fold-aware oracle latch `_oracleFoldTarget` is synced below,
       // OUTSIDE this depth-0 block — a re-entrant nested compile must be
       // able to switch it off.)
@@ -4726,6 +4788,13 @@ export class BaseCompiler {
       BaseCompiler._callSiteTarget = prevCallSiteTarget;
       if (BaseCompiler._compileDepth === 0)
         BaseCompiler._kindLowering = undefined;
+      // The memos are also emptied when the outermost compilation ends. A
+      // target runs passes BEFORE it calls `compile` (the GPU inlining of
+      // point calls reads `foldValueImpure`), and those passes would
+      // otherwise read the answers of an earlier compilation, made with
+      // other engine values: `r` recorded as pure, then `r := Random()`.
+      if (BaseCompiler._compileDepth === 0)
+        BaseCompiler.resetCompilationMemos();
       // Leaving the OUTERMOST compilation: freeze its report for the target
       // to attach (`withReferences` → `modeReport`), before the latches are
       // restored.
@@ -9100,6 +9169,55 @@ export class BaseCompiler {
    * just as folded code does) and the purity/unknowns/cost gates.
    */
   /**
+   * The start of the passes that a target runs on an expression BEFORE it
+   * calls `compile()` on it (the GPU inlining of point calls, of
+   * collection-valued calls and of shared calls). Called only for an
+   * outermost compilation (`_compileDepth` 0); a pass that runs while a
+   * compilation is in progress does nothing here.
+   *
+   * - The memos are emptied, as `compile()` empties them when it starts
+   *   and ends. A pass that throws (the inlining budget, the size limit)
+   *   ends the compilation before `compile()` runs, and the memos that the
+   *   pass filled would otherwise be read by the next compilation, made
+   *   with other engine values (`r` recorded as pure, then `r := Random()`).
+   * - The definitions that the calls of `expr` captured are checked, as
+   *   `compile()` checks them (`assertCapturedCallableBindings`,
+   *   `assertUserFunctionFreeBindings`). The passes replace a call by the
+   *   body of its function, and the check of `compile()` then no longer
+   *   sees the call: with `f(t) := t·P` defined where `P` is `(1, 2)`, and a
+   *   scope that declares another `P`, the inlined body read the inner `P`.
+   */
+  static beginRootPreprocessing(
+    expr: Expression,
+    target: CompileTarget<Expression>
+  ): void {
+    if (BaseCompiler._compileDepth !== 0) return;
+    BaseCompiler.resetCompilationMemos();
+    BaseCompiler.assertCapturedCallableBindings(expr, target);
+    BaseCompiler.assertUserFunctionFreeBindings(expr, target);
+  }
+
+  /**
+   * Empty the memos whose answers read engine symbol values or definitions.
+   * Those are stable within one compilation but not across compilations,
+   * and a boxed expression can outlive the compilation that cached its
+   * answer. Called when the outermost compilation starts and when it ends.
+   */
+  private static resetCompilationMemos(): void {
+    BaseCompiler._invalidateComplexMemo();
+    BaseCompiler._foldValueMemo = new WeakMap();
+    BaseCompiler._foldValueBlockedMemo = new Map();
+    BaseCompiler._unknownsMemo = new WeakMap();
+    BaseCompiler._knownExponentMemo = new WeakMap();
+    BaseCompiler._constantPoleMemo = new WeakMap();
+    BaseCompiler._foldValueImpureMemo = new Map();
+    BaseCompiler._foldValueMentionsMemo = new Map();
+    BaseCompiler._angularDefinitionMemo = new Map();
+    BaseCompiler._absArgMemo = new Map();
+    BaseCompiler._unsafeOperandsMemo = new WeakMap();
+  }
+
+  /**
    * Per-compilation memo of `constantFoldValue`'s post-gate EVALUATION
    * outcome, keyed per target then per expression. One compilation reaches
    * the same constant subtree from both the emission fold (`tryConstantFold`)
@@ -9161,6 +9279,145 @@ export class BaseCompiler {
     Expression,
     ReadonlySet<string>
   >();
+
+  /**
+   * Per-compilation memo of `nameHasAngularDefinition`, keyed by symbol
+   * name; reset with `_foldValueMemo` at each outermost compilation entry,
+   * since the definitions of the engine are stable within one compilation
+   * only.
+   */
+  private static _angularDefinitionMemo = new Map<string, boolean>();
+
+  /**
+   * Does `expr` read a stored definition — the value of an assigned symbol,
+   * or the body of a user function that it calls or passes as a value — that
+   * contains, at any depth, a head whose meaning depends on the angular unit
+   * (`Sin`, `Arcsin`, `Degrees`, …; see `UNIT_DEPENDENT_HEADS`)?
+   *
+   * The heads of `expr` itself do not count, unless `stored` says that
+   * `expr` is itself a stored definition: the compile entry rewrote the
+   * compiled tree for the angular unit, and only a stored definition keeps
+   * the engine's unit.
+   * Linear in the distinct nodes of `expr`; each name is answered once per
+   * compilation.
+   */
+  private static readsAngularDefinition(
+    expr: Expression,
+    stored = false
+  ): boolean {
+    const seen = new Set<Expression>();
+    const visit = (node: Expression): boolean => {
+      if (isSymbol(node))
+        return BaseCompiler.nameHasAngularDefinition(node.engine, node.symbol);
+      if (seen.has(node)) return false;
+      seen.add(node);
+      if (isDictionary(node)) return node.values.some(visit);
+      if (isFunction(node))
+        return (
+          (stored && UNIT_DEPENDENT_HEADS.has(node.operator)) ||
+          node.ops.some(visit) ||
+          BaseCompiler.nameHasAngularDefinition(node.engine, node.operator)
+        );
+      return false;
+    };
+    return visit(expr);
+  }
+
+  /**
+   * Does the stored definition of `name` (its assigned value, its function
+   * literal, or the literal of each clause of a multi-clause function)
+   * contain a unit-dependent head, directly or through the definitions it
+   * reads? A definition that refers to itself answers `false` at the
+   * re-entry.
+   */
+  private static nameHasAngularDefinition(
+    engine: ComputeEngine,
+    name: string
+  ): boolean {
+    const memo = BaseCompiler._angularDefinitionMemo;
+    const known = memo.get(name);
+    if (known !== undefined) return known;
+    memo.set(name, false);
+    const definitions = BaseCompiler.storedDefinitions(engine, name);
+    const hit = definitions.some((d) =>
+      BaseCompiler.readsAngularDefinition(d, true)
+    );
+    memo.set(name, hit);
+    return hit;
+  }
+
+  /**
+   * Per-compilation memo of `nameReachesAbsArg`, keyed by symbol name; reset
+   * with the other compilation memos.
+   */
+  private static _absArgMemo = new Map<string, boolean>();
+
+  /**
+   * Does `expr`, or a stored definition that it reads at any depth (the
+   * value of an assigned symbol, the body of a user function, the clauses
+   * of a multi-clause function), hold an `AbsArg` node?
+   */
+  private static reachesAbsArg(expr: Expression): boolean {
+    const seen = new Set<Expression>();
+    const visit = (node: Expression): boolean => {
+      if (isSymbol(node))
+        return BaseCompiler.nameReachesAbsArg(node.engine, node.symbol);
+      if (seen.has(node)) return false;
+      seen.add(node);
+      if (isDictionary(node)) return node.values.some(visit);
+      if (isFunction(node))
+        return (
+          node.operator === 'AbsArg' ||
+          node.ops.some(visit) ||
+          BaseCompiler.nameReachesAbsArg(node.engine, node.operator)
+        );
+      return false;
+    };
+    return visit(expr);
+  }
+
+  /** See `reachesAbsArg`. A definition that refers to itself answers
+   * `false` at the re-entry. */
+  private static nameReachesAbsArg(
+    engine: ComputeEngine,
+    name: string
+  ): boolean {
+    const memo = BaseCompiler._absArgMemo;
+    const known = memo.get(name);
+    if (known !== undefined) return known;
+    memo.set(name, false);
+    const hit = BaseCompiler.storedDefinitions(engine, name).some((d) =>
+      BaseCompiler.reachesAbsArg(d)
+    );
+    memo.set(name, hit);
+    return hit;
+  }
+
+  /**
+   * The stored definitions of `name`: its assigned value, its function
+   * literal, and the literal of each clause of a multi-clause function.
+   */
+  private static storedDefinitions(
+    engine: ComputeEngine,
+    name: string
+  ): Expression[] {
+    const definitions: Expression[] = [];
+    const value = engine._getSymbolValue(name);
+    if (value !== undefined) definitions.push(value);
+    let literal: Expression | undefined;
+    try {
+      literal = BaseCompiler.userFunctionLiteral(engine, name);
+    } catch {
+      // A literal whose captured types are no longer current is refused by
+      // the compilation of the call itself. This test only reads the body.
+      literal = undefined;
+    }
+    if (literal !== undefined && literal !== value) definitions.push(literal);
+    const clauses = multiClauseState(engine.lookupDefinition(name))?.clauses;
+    if (clauses !== undefined)
+      for (const c of clauses) definitions.push(c.literal);
+    return definitions;
+  }
 
   /**
    * Per-compilation memo of `unsafeIntegerOperands`, keyed per target then
@@ -10580,6 +10837,11 @@ export class BaseCompiler {
     // served later in degrees. (CE-345.1)
     const neutralizeAngle = engine.angularUnit !== 'rad';
     if (neutralizeAngle && containsDerivativeHead(expr)) return undefined;
+    // The angle of `AbsArg(z)` is in the engine's unit, and evaluating it in
+    // radians would give it in radians. `rewriteAngularUnit` refuses the
+    // compilation of `AbsArg` in that case; this decline also covers a
+    // subtree that did not go through the rewrite.
+    if (neutralizeAngle && expr.has('AbsArg')) return undefined;
 
     // The eligibility decision, and the LAST gate before the expensive part:
     // everything above is a cheap structural check, so the estimate is only
@@ -10591,6 +10853,19 @@ export class BaseCompiler {
     // ADMITTED an estimate that arithmetic had turned into `NaN` instead of
     // declining it. Only a finite estimate at or under the ceiling folds.
     if (!(BaseCompiler.foldCostEstimate(expr) <= CONSTANT_FOLD_MAX_COST))
+      return undefined;
+    // A subtree that reads a stored definition with a unit-dependent head is
+    // declined too. The compile entry rewrote the compiled tree into
+    // radians, but not the value of an assigned symbol or the body of a user
+    // function: `.N()` reads those as they are stored, in the engine's unit.
+    // Under the radian window below, `2k` with `k := Sin(30)` in degree mode
+    // evaluated `sin(30 rad)` and folded to -1.976 instead of 1. The
+    // structural compilation rewrites each such value and body for the unit
+    // (`foldedValueInRadians()`, and the rewrite of an inlined callee body),
+    // and still folds the parts that read no stored definition. The test
+    // runs after the cost estimate, which bounds the size of the subtree it
+    // walks.
+    if (neutralizeAngle && BaseCompiler.readsAngularDefinition(expr))
       return undefined;
     if (
       target.symbolDeps !== undefined &&
@@ -12125,26 +12400,7 @@ export class BaseCompiler {
       // call of a function literal whose captured symbol holds such a value
       // (`capturedValueMismatch()`, `function-utils.ts`).
       // (User decision 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
-      // Only the value of a definition that is not a constant is checked: a
-      // constant (`i`, `Pi`) has a library value that no host writes, and
-      // its name can also be the variable of a binder in the expression.
-      const heldDef = expr.engine.lookupDefinition(s);
-      const held =
-        isValueDef(heldDef) && !heldDef.value.isConstant
-          ? heldDef.value.value
-          : undefined;
-      if (
-        held !== undefined &&
-        !expr.type.isUnknown &&
-        !held.type.isUnknown &&
-        !held.type.matches(expr.type)
-      )
-        throw new Error(
-          `Could not compile the symbol '${s}': its value has the type ` +
-            `'${held.type.toString()}', which is not the type ` +
-            `'${expr.type.toString()}' that the expression was typed with. ` +
-            `The interpreter evaluates it instead.`
-        );
+      BaseCompiler.assertHeldValueType(expr);
       // A folded value is BAKED — there is no run-time binding, so the
       // "coerced at every entry" exemption that leaves a declared-complex
       // REFERENCE unlifted (see `liftWideReference`) does not apply here.
@@ -12188,6 +12444,41 @@ export class BaseCompiler {
       ),
       target
     );
+  }
+
+  /**
+   * Refuse the symbol `expr` when the value its definition holds has another
+   * type than the one the expression was typed with. A host can write the
+   * value of a definition directly, and the code that reads the symbol was
+   * compiled for its type. The interpreter refuses a call of a function
+   * literal whose captured symbol holds such a value
+   * (`capturedValueMismatch()`, `function-utils.ts`). (User decision
+   * 2026-10-25, option (c) of CE-473 in `ROADMAP.md`.)
+   *
+   * Only the value of a definition that is not a constant is checked: a
+   * constant (`i`, `Pi`) has a library value that no host writes, and its
+   * name can also be the variable of a binder in the expression.
+   */
+  static assertHeldValueType(expr: Expression): void {
+    if (!isSymbol(expr)) return;
+    const s = expr.symbol;
+    const heldDef = expr.engine.lookupDefinition(s);
+    const held =
+      isValueDef(heldDef) && !heldDef.value.isConstant
+        ? heldDef.value.value
+        : undefined;
+    if (
+      held !== undefined &&
+      !expr.type.isUnknown &&
+      !held.type.isUnknown &&
+      !held.type.matches(expr.type)
+    )
+      throw new Error(
+        `Could not compile the symbol '${s}': its value has the type ` +
+          `'${held.type.toString()}', which is not the type ` +
+          `'${expr.type.toString()}' that the expression was typed with. ` +
+          `The interpreter evaluates it instead.`
+      );
   }
 
   /**
@@ -16063,18 +16354,12 @@ export class BaseCompiler {
       // list when they can (`valueBlock`), and its value then compiles to a
       // single temporary; where no statement list is available, and on
       // Python, which has no such lowering, the assignment declines.
-      if (
-        target.bareStatementBlocks &&
-        typeof code === 'string' &&
-        (code.includes('\n') || /^\s*(?:return|break|continue)\b/.test(code))
-      )
-        throw new Error(
-          `Could not compile \`Assign\`: the value assigned to ` +
-            `"${args[0].symbol}" lowers to a statement sequence on target ` +
-            `'${target.language ?? 'unknown'}' (a block, or a loop), which ` +
-            `has no expression form there. Assign the value of the last ` +
-            `statement instead (\`Block(u ≔ s; t ≔ 2u)\`).`
-        );
+      BaseCompiler.assertExpressionValue(
+        code,
+        target,
+        'Assign',
+        args[0].symbol
+      );
       const stored = target.assignmentValue?.(args[1], code, target) ?? code;
       // An assignment that is an operand of an operator (`(t ≔ 1) + 2`, whose
       // value is the assigned value) was emitted without parentheses:
@@ -22291,7 +22576,7 @@ export class BaseCompiler {
    * means the assignment writes an OUTER binding (that shape has its own
    * pre-existing asymmetry, tracked separately).
    */
-  private static withImplicitLocalDeclares(
+  static withImplicitLocalDeclares(
     args: ReadonlyArray<Expression>,
     target: CompileTarget<Expression>,
     node: Expression | undefined,
@@ -22813,7 +23098,7 @@ export class BaseCompiler {
    * counted, since it happens when the function is called, nor is a read in
    * a nested scope that declares the same name again.
    */
-  private static assertLocalsAssignedBeforeRead(
+  static assertLocalsAssignedBeforeRead(
     stmts: ReadonlyArray<Expression>,
     locals: ReadonlyArray<string>
   ): void {
@@ -22895,6 +23180,71 @@ export class BaseCompiler {
     }
   }
 
+  /**
+   * Decline a block in which a statement reads or assigns a name before the
+   * `Declare` of that name in the same block (`Block(U ≔ 2; Declare(U); …)`).
+   *
+   * The local of the block exists from the start of the block, so the name
+   * of such a statement is the local, not a variable of an enclosing scope.
+   * The interpreter reports the use with the `read-before-declaration`
+   * error, for a write as for a read. The compiled code did not report it:
+   * JavaScript threw a `ReferenceError` when the code ran, and GLSL and WGSL
+   * wrote a variable before its declaration, which is not valid source.
+   *
+   * A use inside a function literal is not counted, since it happens when
+   * the function is called, nor is a use in a nested scope that declares
+   * the same name again.
+   */
+  static assertNoUseBeforeDeclare(stmts: ReadonlyArray<Expression>): void {
+    const declaredAt = new Map<string, number>();
+    stmts.forEach((stmt, i) => {
+      if (
+        isFunction(stmt, 'Declare') &&
+        isSymbol(stmt.ops[0]) &&
+        !declaredAt.has(stmt.ops[0].symbol)
+      )
+        declaredAt.set(stmt.ops[0].symbol, i);
+    });
+    if (declaredAt.size === 0) return;
+    // Each walk visits a node once: a subtree shared by several operands
+    // (a DAG) gives the same answer at every visit.
+    const uses = (root: Expression, name: string): boolean => {
+      const seen = new Set<Expression>();
+      const walk = (e: Expression): boolean => {
+        if (isSymbol(e)) return e.symbol === name;
+        if (!isFunction(e) || seen.has(e)) return false;
+        seen.add(e);
+        if (e.operator === 'Function') return false;
+        if (e.localScope?.bindings.has(name) && e.operator !== 'Block')
+          return false;
+        if (
+          e.operator === 'Block' &&
+          e.ops.some(
+            (s) =>
+              isFunction(s, 'Declare') &&
+              isSymbol(s.ops[0]) &&
+              s.ops[0].symbol === name
+          )
+        )
+          return false;
+        return e.ops.some(walk);
+      };
+      return walk(root);
+    };
+    for (const [name, at] of declaredAt)
+      for (let i = 0; i < at; i++)
+        if (uses(stmts[i], name))
+          throw new Error(
+            `Could not compile \`Block\`: a statement uses the block local ` +
+              `"${name}" before the \`Declare\` of "${name}" in the same ` +
+              `block. The local exists from the start of the block, so the ` +
+              `statement reads or writes the local, not a variable of an ` +
+              `enclosing scope, and the interpreter reports the use as ` +
+              `\`read-before-declaration\`. Move the \`Declare\` before the ` +
+              `first use, or give the local another name.`
+          );
+  }
+
   private static unassignedLocalRead(name: string): never {
     throw new Error(
       `Could not compile \`Block\`: a statement reads the block local ` +
@@ -22905,6 +23255,50 @@ export class BaseCompiler {
         `first, or give the ` +
         `local another name (\`Block(y ≔ ${name} + 1; 2y)\`), so that ` +
         `"${name}" is the input.`
+    );
+  }
+
+  /**
+   * True when the statement `stmts[i]` is a `Declare` with no value that
+   * Python gives the start value `_ce_unset(name)` (`PYTHON_UNSET_HELPER`
+   * in `python-target.ts`).
+   *
+   * The rule is conservative: every such `Declare` gets the start value,
+   * except when the first later statement of the same list that has the
+   * name anywhere in it is an `Assign` of the name. The statements before
+   * it do not use the name, and every statement after it runs after it, so
+   * no read can find the start value: a value of that `Assign` that reads
+   * the name is refused before this point
+   * (`assertLocalsAssignedBeforeRead`). The `Declare` statements that a
+   * bare assignment makes (`withImplicitLocalDeclares`) are all at the
+   * start of the block, so the `Assign` is often not the next statement. A
+   * start value that no read uses costs one assignment. A missing one let a
+   * read find the value of the previous pass of a loop.
+   */
+  static needsStartValue(stmts: ReadonlyArray<Expression>, i: number): boolean {
+    const s = stmts[i];
+    if (
+      !isFunction(s, 'Declare') ||
+      !isSymbol(s.ops[0]) ||
+      BaseCompiler.declareValueOperand(s.ops) !== undefined
+    )
+      return false;
+    const name = s.ops[0].symbol;
+    const mentions = (root: Expression): boolean => {
+      const seen = new Set<Expression>();
+      const walk = (e: Expression): boolean => {
+        if (isSymbol(e)) return e.symbol === name;
+        if (!isFunction(e) || seen.has(e)) return false;
+        seen.add(e);
+        return e.ops.some(walk);
+      };
+      return walk(root);
+    };
+    const next = stmts.slice(i + 1).find(mentions);
+    return !(
+      isFunction(next, 'Assign') &&
+      isSymbol(next.ops[0], name) &&
+      next.ops[1] !== undefined
     );
   }
 
@@ -22938,6 +23332,34 @@ export class BaseCompiler {
    * `withFreshBlockLocals` runs, which `assignLValue` accepts as the
    * spelling of a write. Cleared when the outermost call ends. */
   private static _freshLocalNames = new Set<string>();
+  /** The fresh names of loop indices that a target spells itself while the
+   * loop body compiles (`withWritableLoopIndices`), which `assignLValue`
+   * accepts as the spelling of a write. Kept apart from `_freshLocalNames`,
+   * which the end of an inner `withFreshBlockLocals` call clears. */
+  private static _writableLoopIndices = new Set<string>();
+
+  /**
+   * Run `fn` with the fresh names `names` of loop indices accepted by
+   * `assignLValue` as the spelling of a write. A target that gives a loop
+   * index a fresh name (the Python `for` statement, whose variable is a
+   * variable of the whole function) uses it while it compiles the body, so
+   * that a body that assigns its index compiles as it does with the
+   * original name. The names are removed when `fn` ends.
+   */
+  static withWritableLoopIndices<T>(
+    names: ReadonlyArray<string>,
+    fn: () => T
+  ): T {
+    const added = names.filter(
+      (n) => !BaseCompiler._writableLoopIndices.has(n)
+    );
+    for (const n of added) BaseCompiler._writableLoopIndices.add(n);
+    try {
+      return fn();
+    } finally {
+      for (const n of added) BaseCompiler._writableLoopIndices.delete(n);
+    }
+  }
 
   /**
    * Run `fn` with each local of each block that `compileBlock` compiles
@@ -22958,6 +23380,23 @@ export class BaseCompiler {
       if (BaseCompiler._freshBlockLocals === 0)
         BaseCompiler._freshLocalNames.clear();
     }
+  }
+
+  /**
+   * A fresh name for a block local that a target spells itself, while
+   * `withFreshBlockLocals` runs. `assignLValue` accepts it as the spelling
+   * of a write, as it accepts the fresh names that `compileBlock` gives.
+   * The name stays accepted until the outermost `withFreshBlockLocals`
+   * call ends.
+   */
+  static freshBlockLocalName(target: CompileTarget<Expression>): string {
+    if (BaseCompiler._freshBlockLocals === 0)
+      throw new Error(
+        'Internal: a fresh block-local name outside `withFreshBlockLocals`'
+      );
+    const fresh = BaseCompiler.tempVar(target);
+    BaseCompiler._freshLocalNames.add(fresh);
+    return fresh;
   }
 
   private static assignLValue(
@@ -23003,6 +23442,8 @@ export class BaseCompiler {
     if (resolved === name) return resolved;
     // A block local spelled with a fresh name (`withFreshBlockLocals`).
     if (BaseCompiler._freshLocalNames.has(resolved)) return resolved;
+    // A loop index spelled with a fresh name (`withWritableLoopIndices`).
+    if (BaseCompiler._writableLoopIndices.has(resolved)) return resolved;
     // A vars-object member access naming this very symbol (`_.s`) is the only
     // other assignable form the built-in targets produce. Matched by string
     // surgery, not a regexp built from `name` (a symbol may hold regexp
@@ -23205,6 +23646,7 @@ export class BaseCompiler {
           'representation. End the block with the value it should have.'
       );
 
+    BaseCompiler.assertNoUseBeforeDeclare(args);
     BaseCompiler.assertLocalsAssignedBeforeRead(args, locals);
 
     // A lone EMPTY block in a statement list evaluated for effect (a shader
@@ -23237,8 +23679,32 @@ export class BaseCompiler {
       // statement still gets a statement sink of its own, exactly as a
       // member of a longer list does: a loop-form `Sum` on the right of the
       // assignment has nowhere else to put its loop.
+      // A lone statement that is a nested `Block` compiles in statement
+      // mode too, as a statement of a longer list does (see `isStatement`
+      // below). Compiled through `compileOp`, it was a value, and its last
+      // statement became a `return` (`Block(Block(Block(Declare(t, x); t));
+      // x + 1)` returned `t`).
+      const lone = args[0];
+      if (
+        !valueUsed &&
+        target.bareStatementBlocks &&
+        isFunction(lone, 'Block')
+      ) {
+        if (target.language === 'python')
+          return BaseCompiler.withFreshBlockLocals(() =>
+            BaseCompiler.compileBlock(lone.ops, target, lone, false)
+          );
+        const inner = BaseCompiler.compileBlock(lone.ops, target, lone, false);
+        if (inner === '') return '';
+        return `{\n${inner
+          .split('\n')
+          .map((line) => `  ${line}`)
+          .join('\n')}\n}`;
+      }
+      // A Python statement has no terminator (`statementLines`).
       if (!valueUsed && target.bareStatementBlocks)
-        return BaseCompiler.joinShaderStatements(
+        return BaseCompiler.statementLines(
+          target,
           BaseCompiler.compileListStatement(target, args[0], (t) => [
             BaseCompiler.withCseScope(node, -1, t, () =>
               BaseCompiler.compileOp(args[0], -1, t, prec, args[0])
@@ -23344,6 +23810,20 @@ export class BaseCompiler {
       // Provably non-scalar, but with no single component count (a `Matrix`,
       // a multi-axis or unsized list): no declaration can be synthesized for
       // it, and the `float` default would disagree with its `matN` assignment.
+      // A value whose type admits a point and a list of points (`2P` with
+      // `P: list<tuple<number, number>> | tuple<number, number>`) has no
+      // width that its type states, and its emission can be a vector: a
+      // `float` declaration would disagree with it.
+      if (
+        count === undefined &&
+        BaseCompiler.pointOrPointListUnion(compilationType(value)) !== undefined
+      )
+        throw new Error(
+          `Could not compile the block local \`${name}\`: its value has the ` +
+            `type \`${typeToString(compilationType(value))}\`, which admits ` +
+            `a point and a list of points, so a shader local has no ` +
+            `declared type for it.`
+        );
       if (count === undefined && BaseCompiler.isNonScalarShape(value))
         throw new Error(
           `Could not compile the block local \`${name}\`: a matrix/tensor-valued local has no GPU ` +
@@ -23400,6 +23880,10 @@ export class BaseCompiler {
     // (`ownedLocalUpdateChains`).
     const ownedTemps: string[] = [];
     const ownedOps: ReadonlyArray<Expression>[] = [];
+    // The fresh names that this block gave to its locals that shadow a name
+    // bound outside it on a shader target (see `spelled` below). They are
+    // removed from `_freshLocalNames` in the `finally` below.
+    const shadowSpellings: string[] = [];
     // The statements of the block, for the proof of the type of a local by
     // its assignments (`assignmentsProveType`).
     const blockScope = node?.localScope;
@@ -23498,6 +23982,27 @@ export class BaseCompiler {
           spelled.set(local, fresh);
           BaseCompiler._freshLocalNames.add(fresh);
         }
+      // On a shader target, a local that has the name of a binding outside
+      // the block (a parameter of the function, a loop index, a local of an
+      // enclosing block) gets a fresh name too. The statements of the block
+      // that is the body of a function or of a loop are in the same scope as
+      // the parameters or the index, and GLSL and WGSL do not let a
+      // declaration have the name of a parameter of its scope
+      // (`float f(float U) { float[10] U;` is a redeclaration). WGSL also
+      // refuses a write of a parameter, and its check reads the name at the
+      // start of each emitted line, so a local of a nested block that hides
+      // a parameter must not have its name either, even when a local of an
+      // enclosing block has the same name.
+      else if (isGPUTarget)
+        for (const local of locals) {
+          if (target.boundVars?.has(local) !== true) continue;
+          const fresh = BaseCompiler.tempVar(target);
+          spelled.set(local, fresh);
+          if (!BaseCompiler._freshLocalNames.has(fresh)) {
+            BaseCompiler._freshLocalNames.add(fresh);
+            shadowSpellings.push(fresh);
+          }
+        }
       const spellLocal = (name: string): string => spelled.get(name) ?? name;
       const localTarget: CompileTarget<Expression> = {
         ...target,
@@ -23527,6 +24032,11 @@ export class BaseCompiler {
 
       if (target.language === 'javascript')
         recordBlockScalarLocals(args, localTarget);
+      // A shader target declares each local as a variable (`var U` in
+      // WGSL), which an expression can index with a run-time index. A read
+      // of a list local then indexes it as it is, with no copy
+      // (`isVariableLocal` in `compileGPUAt`, `gpu-target.ts`).
+      if (isGPUTarget) recordVariableLocals(localTarget, locals);
 
       // The statement LIST is one INERT region — no binding is placed at the
       // statement-list level, so early-exit reachability and inter-statement
@@ -23671,6 +24181,20 @@ export class BaseCompiler {
                       `let ${spellLocal(arg.ops[0].symbol)} = ${marker}`,
                     ];
                 }
+                // A Python local declared with no value starts with the value
+                // `_ce_unset(name)`, as in `compilePythonStatements`
+                // (`needsStartValue`). Python has no declaration, so without
+                // it a read found the value of a previous pass of a loop, or
+                // raised `UnboundLocalError`.
+                if (
+                  target.language === 'python' &&
+                  isFunction(arg, 'Declare') &&
+                  isSymbol(arg.ops[0]) &&
+                  BaseCompiler.needsStartValue(stmts, i)
+                )
+                  return [
+                    `${spellLocal(arg.ops[0].symbol)} = _ce_unset(${JSON.stringify(arg.ops[0].symbol)})`,
+                  ];
                 // For Declare, pass inferred type hint to the target hook
                 if (
                   isFunction(arg, 'Declare') &&
@@ -23704,6 +24228,12 @@ export class BaseCompiler {
                             0,
                             value
                           );
+                    BaseCompiler.assertExpressionValue(
+                      valueCode,
+                      stmtTarget,
+                      'Declare',
+                      name
+                    );
                     const stored =
                       stmtTarget.assignmentValue?.(
                         value,
@@ -23726,6 +24256,50 @@ export class BaseCompiler {
                   (!valueUsed || i < stmts.length - 1)
                 )
                   return [];
+                // A nested block in statement position on a shader target has
+                // no value that anything reads. It compiles for effect, as one
+                // compound statement (`{ … }`), so its locals stay in its own
+                // scope. Compiled as a value, the statements of a block whose
+                // last statement is a list were put in the enclosing scope
+                // with a `return` of that list (`return U; return x + 1.0;`),
+                // and a block with a scalar value was stored in a temporary
+                // that was then written as a statement (`_tv1;`, which is not
+                // valid WGSL).
+                //
+                // Python has no compound statement and no block scope. Its
+                // statements are put in the enclosing list, with no `return`,
+                // and each local of the nested block gets a fresh name
+                // (`withFreshBlockLocals`), so that a write of it does not
+                // change a variable of the enclosing code with the same name.
+                if (
+                  isStatement &&
+                  target.language === 'python' &&
+                  isFunction(arg, 'Block')
+                ) {
+                  const inner = BaseCompiler.withFreshBlockLocals(() =>
+                    BaseCompiler.compileBlock(arg.ops, stmtTarget, arg, false)
+                  );
+                  return inner === '' ? [] : [inner];
+                }
+                if (
+                  isStatement &&
+                  isGPUTarget &&
+                  target.bareStatementBlocks &&
+                  isFunction(arg, 'Block')
+                ) {
+                  const inner = BaseCompiler.compileBlock(
+                    arg.ops,
+                    stmtTarget,
+                    arg,
+                    false
+                  );
+                  if (inner === '') return [];
+                  const body = inner
+                    .split('\n')
+                    .map((line) => `  ${line}`)
+                    .join('\n');
+                  return [`{\n${body}\n}`];
+                }
                 // A bare expression statement is its own bindable region, keyed
                 // `(statement, -1)`; every other statement head reaches its own
                 // value edges from `compileExpr` (Assign RHS, Return value, …).
@@ -23810,7 +24384,7 @@ export class BaseCompiler {
       // destructuring or not.)
       if (!valueUsed)
         return target.bareStatementBlocks
-          ? BaseCompiler.joinShaderStatements(result)
+          ? BaseCompiler.statementLines(target, result)
           : result.join(`;${target.ws('\n')}`);
 
       // A multi-statement block that is a VALUE OPERAND on a shader target —
@@ -23908,6 +24482,8 @@ export class BaseCompiler {
       if (blockScope !== undefined) BaseCompiler._blockStatements.pop();
       unmarkFed?.();
       for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
+      for (const name of shadowSpellings)
+        BaseCompiler._freshLocalNames.delete(name);
     }
   }
 
@@ -25130,6 +25706,19 @@ export class BaseCompiler {
         expr,
         split.chained
       );
+      // The checks of `compileBlock` on the order of the statements: no use
+      // of a local before its `Declare`, and no read of a local before a
+      // statement gives it a value. Each pass of the loop runs the body
+      // with new locals, so a value of the previous pass does not count.
+      BaseCompiler.assertNoUseBeforeDeclare(withDecls);
+      BaseCompiler.assertLocalsAssignedBeforeRead(
+        withDecls,
+        withDecls.flatMap((s) =>
+          isFunction(s, 'Declare') && isSymbol(s.ops[0])
+            ? [s.ops[0].symbol]
+            : []
+        )
+      );
       // A body-scoped `localFunctions`, filled in statement order below. Held
       // as its own binding because the field on `CompileTarget` is a
       // `ReadonlyMap`: the target exposes it for READS during compilation, and
@@ -25168,7 +25757,16 @@ export class BaseCompiler {
                 bodyLocalFunctions,
                 bodyRebound
               );
-              return BaseCompiler.compileLoopBody(s, bodyTarget);
+              const code = BaseCompiler.compileLoopBody(s, bodyTarget);
+              // A nested block is a JavaScript block statement (`{ … }`), so
+              // that a `let` of it, written or implicit (a bare assignment of
+              // a name that nothing outside binds), does not hide a variable
+              // of the same name in the rest of the loop body. Without the
+              // braces, `let V` of the nested block made every later `V` of
+              // the loop body the local.
+              return isFunction(s, 'Block') && code !== ''
+                ? `{ ${code} }`
+                : code;
             })
             .join('; ')
         );
@@ -28608,6 +29206,20 @@ export class BaseCompiler {
     if (BaseCompiler.referencesVarsSymbol(args, target)) return undefined;
 
     const engine = args[0].engine;
+    // The attempt evaluates in radian mode (see below), but the value of an
+    // assigned symbol and the body of a user function that the integrand
+    // reads are stored in the engine's unit, and were not rewritten: in
+    // degree mode `∫₀ˣ k dt` with `k := Sin(30)` compiled to `x·sin(30 rad)`,
+    // -1.976 at x = 2 instead of 1. Such an integral is not attempted, and
+    // compiles by its numeric route, where the integrand compiles
+    // structurally with each stored value rewritten for the unit
+    // (`foldedValueInRadians()`). The test is the one of the constant
+    // folder (`readsAngularDefinition()`).
+    if (
+      engine.angularUnit !== 'rad' &&
+      args.some((a) => BaseCompiler.readsAngularDefinition(a))
+    )
+      return undefined;
     let closed: Expression | undefined;
     // Isolation scope — a child of the caller's scope, so everything the
     // caller declared stays visible; only what this attempt declares is
@@ -32100,9 +32712,16 @@ export class BaseCompiler {
     id: string,
     target: CompileTarget<Expression>
   ): string | undefined {
-    const value = engine._getSymbolValue(id);
-    if (value === undefined) return undefined;
-    BaseCompiler.assertFoldableSize(engine, id, value, target);
+    const stored = engine._getSymbolValue(id);
+    if (stored === undefined) return undefined;
+    BaseCompiler.assertFoldableSize(engine, id, stored, target);
+    // The compiled expression is in the radian convention: the compile entry
+    // rewrote it for the engine's angular unit (`rewriteAngularUnit()`). The
+    // stored value was not rewritten, so it is rewritten here, alone: in
+    // degree mode `c := sin(x)` compiles to the sine of `x` degrees, as
+    // `evaluate()` computes it, and the code around `c` is not converted a
+    // second time.
+    const value = BaseCompiler.foldedValueInRadians(stored, target);
     // The generated code bakes this symbol's current value: record it in the
     // capture set (see `CompileTarget.symbolDeps`). Nested symbols inside the
     // value are recorded by the recursive compile below.
@@ -32140,6 +32759,38 @@ export class BaseCompiler {
       inProgress.delete(id);
     }
   }
+
+  /**
+   * The stored value `value` of a symbol, rewritten for the engine's angular
+   * unit (`rewriteAngularUnit()`), with the exact factors on the
+   * `interval-javascript` target, as at the compile entry of that target.
+   * `value` itself in radian mode. The rewrite of each value is kept for its
+   * unit and factor kind, so a value read at many places is rewritten once.
+   */
+  static foldedValueInRadians(
+    value: Expression,
+    target: CompileTarget<Expression>
+  ): Expression {
+    const unit = value.engine.angularUnit;
+    if (unit === 'rad') return value;
+    const exactFactors = target.language === 'interval-javascript';
+    const key = `${unit}:${exactFactors}`;
+    let byKey = BaseCompiler._radianValues.get(value);
+    if (byKey === undefined)
+      BaseCompiler._radianValues.set(value, (byKey = new Map()));
+    let rewritten = byKey.get(key);
+    if (rewritten === undefined) {
+      rewritten = rewriteAngularUnit(value, { exactFactors });
+      byKey.set(key, rewritten);
+    }
+    return rewritten;
+  }
+
+  /** The rewrites of `foldedValueInRadians`, by stored value. */
+  private static readonly _radianValues = new WeakMap<
+    Expression,
+    Map<string, Expression>
+  >();
 
   /** Symbols whose value `tryFoldKnownSymbol` is currently folding INLINE. */
   private static readonly _inlineFoldInProgress = new Set<string>();
@@ -38838,6 +39489,36 @@ export class BaseCompiler {
   }
 
   /**
+   * When `type` is a union that admits a single point (a `tuple` option) and
+   * an ordered collection of points (`list<tuple<number, number>> |
+   * tuple<number, number>`), the arity of the point options when they all
+   * have the same arity, in `arity`. `undefined` for any other type.
+   *
+   * A shader has no value that can be either one: a point is a `vec2`,
+   * `vec3` or `vec4`, and a list of points is an array.
+   */
+  static pointOrPointListUnion(
+    type: Type
+  ): { arity: number | undefined } | undefined {
+    const t = resolveTypeAlias(type);
+    if (typeof t === 'string' || t.kind !== 'union') return undefined;
+    const arities = new Set<number>();
+    let pointList = false;
+    for (const branch of t.types) {
+      const arm = resolveTypeAlias(branch);
+      if (typeof arm === 'string') continue;
+      if (arm.kind === 'tuple') arities.add(arm.elements.length);
+      else if (isSubtype(arm, 'indexed_collection<any>')) {
+        const element = collectionElementType(arm);
+        if (element !== undefined && isPointElementType(element))
+          pointList = true;
+      }
+    }
+    if (arities.size === 0 || !pointList) return undefined;
+    return { arity: arities.size === 1 ? [...arities][0] : undefined };
+  }
+
+  /**
    * Whether a parameter declared `declared` accepts a `width`-component
    * point one of whose coordinates is a list (or any other non-scalar).
    *
@@ -44528,6 +45209,17 @@ export class BaseCompiler {
   }
 
   /**
+   * The report of a compilation that declined: `strict` and not promoted,
+   * since no code was emitted. It is not read from `_lastReport`, because a
+   * decline can be thrown before the outermost `compile()` resets it (the
+   * `AbsArg` refusal of `rewriteAngularUnit()` at a target's entry), and
+   * `_lastReport` then still holds the report of the previous compilation.
+   */
+  static declineReport(): { mode: 'strict'; promoted: false } {
+    return { mode: 'strict', promoted: false };
+  }
+
+  /**
    * Build the documented `success: false` compilation result for an expression
    * that could not be lowered to the target, with `run` set to an
    * interpreter-backed evaluator (the "fall back to interpretation" contract).
@@ -44923,7 +45615,7 @@ export class BaseCompiler {
         run: lambdaRun,
         error,
         diagnostic,
-        ...BaseCompiler.modeReport(),
+        ...BaseCompiler.declineReport(),
         ...refs,
         ...fallbackTypes(),
       } as CompilationResult<T>;
@@ -44991,7 +45683,7 @@ export class BaseCompiler {
       run: fallbackRun,
       error,
       diagnostic,
-      ...BaseCompiler.modeReport(),
+      ...BaseCompiler.declineReport(),
       ...refs,
       ...fallbackTypes(),
     } as CompilationResult<T>;
@@ -46771,6 +47463,72 @@ export class BaseCompiler {
     } finally {
       session.harvest = outer;
       session.availabilityFloor = outerFloor;
+    }
+  }
+
+  /**
+   * Compile `fn`, which emits `expr`, under a CSE harvest of `expr` of its
+   * own: `expr` shares its repeated nodes with itself, and reads no
+   * temporary that an enclosing instance bound (`withNestedCseHarvest`). For
+   * a target handler that compiles a node with
+   * other values for its symbols than the code around it: the interval
+   * target compiles a conditional arm with its symbols clamped to where the
+   * arm can be selected, and a temporary of the code around the arm holds a
+   * value over the inputs that are not clamped. With CSE inactive `fn`
+   * compiles as is.
+   *
+   * The names that the scope of `target` binds (`boundVars`, and the
+   * function-valued locals of an enclosing block: `localFunctions`,
+   * `lexicalFunctions`, `reboundFunctions`) are shadowed in the harvest, as
+   * `cseAdmission` does for a loop body. A call of such a name calls the
+   * local binding, but the harvest looks a callee up in the engine: with a
+   * block-local `f` and a pure engine-level `f`, it would decide about the
+   * engine-level `f` and could merge two calls of the local one.
+   */
+  static withOwnCseHarvest(
+    expr: Expression,
+    target: CompileTarget<Expression>,
+    fn: () => TargetSource
+  ): TargetSource {
+    const shadowed = [
+      ...(target.boundVars ?? []),
+      ...(target.localFunctions?.keys() ?? []),
+      ...(target.lexicalFunctions?.keys() ?? []),
+      ...(target.reboundFunctions?.keys() ?? []),
+    ];
+    return BaseCompiler.withNestedCseHarvest(expr, target, shadowed, fn);
+  }
+
+  /**
+   * Compile `fn` with no node-keyed code in effect: no entry of
+   * `_codeOverrides`, `_codeAliases` or `_prefixCallOverrides` installed by
+   * the code around it. Such an entry gives the code of a node as the name
+   * of a value computed outside `fn`: a loop-invariant binding of an
+   * enclosing `Sum` (`hoistLoopInvariants`), a temporary of a run-time
+   * guard. For a target handler that compiles a node with other values for
+   * its symbols than the code around it, or at another place: the interval
+   * target compiles a conditional arm with its symbols clamped to where the
+   * arm can be selected, and the arms nested in it as local functions
+   * defined outside the binders around them. A value computed outside is
+   * then over the inputs that are not clamped, or is a name that is not in
+   * scope where the function is defined. The entries that `fn` installs
+   * itself apply as usual, and the entries of the code around it are in
+   * effect again when `fn` returns.
+   */
+  static withoutNodeCodeOverrides<T>(fn: () => T): T {
+    const maps = [
+      BaseCompiler._codeOverrides,
+      BaseCompiler._codeAliases,
+      BaseCompiler._prefixCallOverrides,
+    ] as Map<Expression, unknown>[];
+    const saved = maps.map((map) => [...map]);
+    for (const map of maps) map.clear();
+    try {
+      return fn();
+    } finally {
+      maps.forEach((map, i) => {
+        for (const [node, value] of saved[i]) map.set(node, value);
+      });
     }
   }
 

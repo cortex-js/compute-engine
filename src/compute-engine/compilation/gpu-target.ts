@@ -1,4 +1,8 @@
-import type { Expression, RoundingTies } from '../global-types.js';
+import type {
+  Expression,
+  IComputeEngine as ComputeEngine,
+  RoundingTies,
+} from '../global-types.js';
 import { entrySource } from './function-purity.js';
 import {
   cseRecordingRules,
@@ -11,6 +15,7 @@ import {
   gpuIntegerFact,
   recordGPUCounter,
 } from './gpu-value-facts.js';
+import { isVariableLocal } from './javascript-value-facts.js';
 import {
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
@@ -89,6 +94,7 @@ import {
   statementBodyHead,
 } from './base-compiler.js';
 import type {
+  EnclosingDefinition,
   LoopInvariantBinding,
   MatchStatementClause,
 } from './base-compiler.js';
@@ -129,8 +135,14 @@ import {
 import { foldSeed } from '../numerics/random.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
-import { declaredBinders } from '../boxed-expression/binding-sites.js';
-import { boundVariableNames } from '../boxed-expression/binders.js';
+import {
+  declaredBinders,
+  scopeForRebuild,
+} from '../boxed-expression/binding-sites.js';
+import {
+  boundVariableNames,
+  rewriteWithBinders,
+} from '../boxed-expression/binders.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -6465,6 +6477,352 @@ function compileGpuLast(
 }
 
 /**
+ * The value that the shader computes in place of the symbol `e`, or
+ * `undefined` when `e` is not a symbol or the shader reads it as an input.
+ *
+ * A symbol with a value that no `vars` entry, binder (a parameter, an index,
+ * a local) or target constant resolves is compiled as its value, written
+ * into the shader (`tryFoldKnownSymbol()` in `base-compiler.ts`). A later
+ * assignment does not change the compiled code, so the value tells what the
+ * shader computes. The conditions are those of the base compiler: a `vars`
+ * key is never folded, and a definition that a checkpoint restore marked
+ * `_rewound` has no value.
+ */
+function gpuInlinedSymbolValue(
+  e: Expression,
+  target: CompileTarget<Expression>
+): Expression | undefined {
+  if (!isSymbol(e)) return undefined;
+  const s = e.symbol;
+  if (target.varsKeys?.has(s) === true || target.boundVars?.has(s) === true)
+    return undefined;
+  if (target.var(s) !== undefined) return undefined;
+  if ((e.valueDefinition as { _rewound?: true } | undefined)?._rewound)
+    return undefined;
+  return e.engine._getSymbolValue(s);
+}
+
+/**
+ * `expr` with each symbol whose type admits a point and a list of points
+ * (`gpuPointOrPointListUnion`) replaced by its value, when the shader
+ * computes that value anyway (`gpuInlinedSymbolValue`) and the value is a
+ * point (a `Tuple`). `expr` itself when there is no such symbol.
+ *
+ * The declared type of such a symbol has no shader type: a point is a
+ * vector and a list of points is an array. Its value has one. With the
+ * value written in place before the compilation, every type, shape and
+ * width that the compilation reads comes from an ordinary tuple, and agrees
+ * with the code, which is the code of the value.
+ *
+ * A name that the compiled code binds (`written`: a parameter, a local, an
+ * index) is not replaced, and neither is a symbol whose value reads such a
+ * name, which the binder would capture. The other symbols keep the
+ * reading of their declared type. The value is recorded in
+ * `target.symbolDeps`, as `tryFoldKnownSymbol()` records it, because the
+ * compiled code holds it.
+ */
+function gpuInlinePointValues(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  written: ReadonlySet<string>
+): Expression {
+  const values: Record<string, Expression> = {};
+  let found = false;
+  const visited = new Set<Expression>();
+  const walk = (e: Expression): void => {
+    if (visited.has(e)) return;
+    visited.add(e);
+    if (isSymbol(e)) {
+      const s = e.symbol;
+      if (Object.hasOwn(values, s) || written.has(s)) return;
+      if (gpuPointOrPointListUnion(e.type.type) === undefined) return;
+      const value = gpuInlinedSymbolValue(e, target);
+      if (value === undefined || !isFunction(value, 'Tuple')) return;
+      if (value.symbols.some((v) => written.has(v))) return;
+      // A value of another type than the declared union (a host wrote a
+      // 3-D point into the definition of a 2-D `P`) is refused, as
+      // `compileSymbol` refuses it where the symbol is read.
+      BaseCompiler.assertHeldValueType(e);
+      // The expression was rewritten for the engine's angular unit at the
+      // compile entry (`rewriteAngularUnit()`), and the stored value was
+      // not: the value is rewritten here, alone, so that `Sin(x)` in it is
+      // read in degrees in degree mode, and the rest of the expression is
+      // not converted a second time.
+      values[s] = BaseCompiler.foldedValueInRadians(value, target);
+      found = true;
+      return;
+    }
+    if (isFunction(e)) for (const op of e.ops) walk(op);
+  };
+  walk(expr);
+  if (!found) return expr;
+  for (const s of Object.keys(values)) target.symbolDeps?.add(s);
+  // `rewriteWithBinders()` keeps a node that several parents share as one
+  // node, and rewrites it once (`expr.subs()` rewrites it once for each
+  // path, which takes a time exponential in the depth of a shared graph).
+  // It also leaves an occurrence that a binder of the expression shadows.
+  return rewriteWithBinders(expr, (sym, shadowed) =>
+    Object.hasOwn(values, sym.symbol) && shadowed?.has(sym.symbol) !== true
+      ? values[sym.symbol]
+      : sym
+  );
+}
+
+/**
+ * How many function bodies one walk of `gpuInlinePointCalls` may substitute.
+ * The bodies of a chain of definitions that each call the one below twice
+ * double with each level: 511 bodies for 8 levels took about 0.1 s, and 8191
+ * bodies for 12 levels about 1.2 s.
+ */
+const GPU_MAX_POINT_CALL_INLINES = 512;
+
+/**
+ * `expr` with each call of a user function whose type admits a point and a
+ * list of points (`gpuPointOrPointListUnion`) replaced by the body of the
+ * function, when that body, with its point values written in place
+ * (`gpuInlinePointValues`), is a point. `expr` itself when there is no such
+ * call.
+ *
+ * The signature of such a function was derived from its stored body, which
+ * reads the union symbol, so the type of the call is the union, and the
+ * shape and type readings at the call site have no width for it
+ * (`f(t) := t·P` and `f(x).x`). The body with the point in place is an
+ * ordinary point expression, `x·(1, 2)`. The stored definition and its
+ * signature do not change. The body is the one that
+ * `BaseCompiler.substitutedUserFunctionBody()` gives, under its soundness
+ * conditions (a pure single-statement literal, arguments that are scalars
+ * or literal points, no capture). A node that binds names (a `Block`, a
+ * `Sum`) and a `Function` literal are left as written, as the root
+ * inlining of list-valued calls leaves a node whose scope it cannot reuse.
+ * The name of each substituted function is recorded in `target.symbolDeps`,
+ * as that inlining records it, because the compiled code holds its body.
+ *
+ * The results for a node are not kept while a callee body is walked, so a
+ * chain of definitions that each call the one below twice (`f₀(t) := t·P`,
+ * `fₙ(t) := fₙ₋₁(t) + fₙ₋₁(t + 1)`) substitutes a number of bodies that
+ * doubles with each level. One walk substitutes at most
+ * `GPU_MAX_POINT_CALL_INLINES` bodies, and the compilation fails when a walk
+ * needs more. A call left as written would have the union type, which has
+ * no shader type, so the compilation would fail on it anyway.
+ */
+function gpuInlinePointCalls(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  enclosing?: EnclosingDefinition
+): Expression {
+  if (target.userFunctions === undefined) return expr;
+  const engine = expr.engine as unknown as ComputeEngine;
+  const onPath = new Set<string>();
+  let inlinesLeft = GPU_MAX_POINT_CALL_INLINES;
+  // An expression is a graph that can share a node between many parents,
+  // and a walk of every path takes a time exponential in its depth (ROADMAP
+  // CE-584). The result for a node depends on the node, on the enclosing
+  // names and on the callees being substituted above it (`onPath`, where a
+  // call of one of them is left as written), so it is kept for each
+  // combination. A callee body that holds a shared graph is then walked
+  // once per node too.
+  const memo = new Map<
+    EnclosingDefinition | undefined,
+    Map<string, Map<Expression, Expression>>
+  >();
+  const visit = (e: Expression, within?: EnclosingDefinition): Expression => {
+    if (!isFunction(e) || e.operator === 'Function') return e;
+    let byPath = memo.get(within);
+    if (byPath === undefined) memo.set(within, (byPath = new Map()));
+    const pathKey = [...onPath].sort().join('\u0000');
+    let seen = byPath.get(pathKey);
+    if (seen === undefined) byPath.set(pathKey, (seen = new Map()));
+    const known = seen.get(e);
+    if (known !== undefined) return known;
+    const result = visitNode(e, within);
+    seen.set(e, result);
+    return result;
+  };
+  const visitNode = (
+    e: Expression,
+    within?: EnclosingDefinition
+  ): Expression => {
+    if (!isFunction(e)) return e;
+    // A head that the caller overrides (the `functions` or `operators`
+    // option) is left as written, and so is everything under it: the
+    // caller's implementation replaces the emission and receives the node's
+    // own operands (`CompileTarget.unrollSkipHeads`).
+    if (target.unrollSkipHeads?.has(e.operator) === true) return e;
+    const bound = boundVariableNames(e);
+    if (bound.length > 0) {
+      // A node that binds names is entered with those names as local
+      // names, so that a callee body whose free symbol one of them would
+      // capture is declined (`substitutedUserFunctionBody`). It is rebuilt
+      // on its own scope, or left as written when that scope cannot be
+      // reused (`scopeForRebuild`).
+      if (e.localScope === undefined) return e;
+      const inner: EnclosingDefinition = {
+        scalarNames: within?.scalarNames ?? new Set<string>(),
+        localNames: new Set([...(within?.localNames ?? []), ...bound]),
+      };
+      const ops = e.ops.map((op) => visit(op, inner));
+      if (ops.every((op, i) => op === e.ops[i])) return e;
+      const scope = scopeForRebuild(e.localScope, engine, e.operator, ops);
+      if (scope === undefined) return e;
+      return engine.function(e.operator, ops, { scope });
+    }
+    const ops = e.ops.map((op) => visit(op, within));
+    const node = ops.every((op, i) => op === e.ops[i])
+      ? e
+      : engine.function(e.operator, ops);
+    if (!isFunction(node)) return node;
+    if (gpuPointOrPointListUnion(node.type.type) === undefined) return node;
+    const h = node.operator;
+    if (onPath.has(h)) return node;
+    // A call of a name that the enclosing code binds is a call of that
+    // bound value, not of the user function of the same name.
+    if (within?.localNames.has(h) === true) return node;
+    // The substitution writes an argument at each occurrence of its
+    // parameter, so an argument whose value differs between two evaluations
+    // would be evaluated more than once: with `r := Random()`, `f(r)` for
+    // `f(t) := (t − t²)·P` would draw two numbers. `isPure` of a symbol does
+    // not read its value, so the test is the transitive one.
+    if (node.ops.some((a) => BaseCompiler.foldValueImpure(a))) return node;
+    const body = BaseCompiler.substitutedUserFunctionBody(
+      engine,
+      h,
+      node.ops,
+      target,
+      within
+    );
+    if (body === undefined) return node;
+    if (inlinesLeft <= 0)
+      throw new Error(
+        `Could not compile \`${h}\`: its value can be a point or a list of ` +
+          `points, which has no shader type, and the calls of the functions ` +
+          `that give a point would be written out more than ` +
+          `${GPU_MAX_POINT_CALL_INLINES} times. Declare the point-valued ` +
+          `symbol with the point type (\`tuple<real, real>\`).`
+      );
+    inlinesLeft -= 1;
+    onPath.add(h);
+    try {
+      const inner = visit(body, within);
+      const point = gpuInlinePointValues(
+        inner,
+        target,
+        new Set([
+          ...(within?.localNames ?? []),
+          ...gpuReachableSymbolNames(inner).written,
+        ])
+      );
+      const t = resolveTypeForCompilation(point.type.type);
+      if (typeof t === 'string' || t.kind !== 'tuple') return node;
+      target.symbolDeps?.add(h);
+      return point;
+    } finally {
+      onPath.delete(h);
+    }
+  };
+  return visit(expr, enclosing);
+}
+
+/**
+ * The first symbol in `expr` whose type admits a point and a list of points
+ * (`gpuPointOrPointListUnion`) and that no local shape frame of the
+ * compilation describes (a parameter or a local of the compiled code has an
+ * entry there), or `undefined` when there is none. A `Function` literal is
+ * not entered: its body is compiled with its own frames.
+ */
+function gpuReadsPointOrPointListSymbol(
+  expr: Expression
+): Expression | undefined {
+  const visited = new Set<Expression>();
+  const walk = (e: Expression): Expression | undefined => {
+    if (visited.has(e)) return undefined;
+    visited.add(e);
+    if (isSymbol(e))
+      return gpuPointOrPointListUnion(e.type.type) !== undefined &&
+        BaseCompiler.localShapeFrameOf(e.symbol) === undefined
+        ? e
+        : undefined;
+    if (!isFunction(e) || e.operator === 'Function') return undefined;
+    for (const op of e.ops) {
+      const found = walk(op);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  return walk(expr);
+}
+
+/**
+ * When `type` is a union that admits a single point (a `tuple` option) and
+ * an ordered collection of points, the arity of the point options (when
+ * they all have the same arity) in `arity`. `undefined` for any other type.
+ *
+ * A shader has no value that can be either one: a point is a `vec2`,
+ * `vec3` or `vec4`, and a list of points is an array. So a symbol of such a
+ * type can be compiled only when the shader computes its value. The rule is
+ * `BaseCompiler.pointOrPointListUnion()`, which the Block locals also read.
+ */
+export function gpuPointOrPointListUnion(
+  type: Type
+): { arity: number | undefined } | undefined {
+  return BaseCompiler.pointOrPointListUnion(type);
+}
+
+/**
+ * The declaration of `name` as a point of `arity` real numbers, to name in
+ * a decline: `ce.declare('P', 'tuple<real, real>')`. With no single arity,
+ * the declaration of a 2-D point.
+ */
+export function gpuPointDeclaration(
+  name: string,
+  arity: number | undefined
+): string {
+  const n = arity !== undefined && arity >= 2 && arity <= 4 ? arity : 2;
+  return `ce.declare('${name}', 'tuple<${Array(n).fill('real').join(', ')}>')`;
+}
+
+/**
+ * The decline of the operator `head` over the symbol `name`, whose type
+ * admits a point and a list of points (`gpuPointOrPointListUnion`), when
+ * the shader reads the symbol as an input. When `bound` is true (a
+ * parameter, an index or a local of the compiled code), the symbol has no
+ * assigned value that the shader can use, so only the declaration is named.
+ */
+function gpuPointOrPointListRefusal(
+  head: string,
+  name: string,
+  e: Expression,
+  union: { arity: number | undefined },
+  bound = false
+): string {
+  const declaration = gpuPointDeclaration(name, union.arity);
+  return (
+    `Could not compile \`${head}\`: "${name}" has the type ` +
+    `\`${e.type.toString()}\`, which admits a point and a list of points. ` +
+    `A shader value cannot be both: a point is a vector (\`vec2\`, ` +
+    `\`vec3\`, \`vec4\`) and a list of points is an array. ` +
+    (bound
+      ? `Declare "${name}" as a point (\`${declaration}\`).`
+      : `Declare "${name}" as a point (\`${declaration}\`), or assign a ` +
+        `point to "${name}" and do not map it with \`vars\`, so that the ` +
+        `shader uses its value.`)
+  );
+}
+
+/**
+ * True when the compiled code binds the name `s` where `target` compiles:
+ * a parameter, an index or a local, which a binder of the compiled code
+ * resolves (`boundVars`, or a `var` hook that answers for a name that no
+ * `vars` entry maps).
+ */
+function gpuSymbolIsBound(
+  s: string,
+  target: CompileTarget<Expression>
+): boolean {
+  if (target.boundVars?.has(s) === true) return true;
+  return target.varsKeys?.has(s) !== true && target.var(s) !== undefined;
+}
+
+/**
  * Compile a point-coordinate accessor (`PointX`/`PointY`/`PointZ`) as a GPU
  * swizzle. A single point is a `vec2`/`vec3`/`vec4`, so `.x`/`.y`/`.z` is
  * valid. A *list* of points is not a GPU value — a swizzle on it is invalid
@@ -6480,8 +6838,46 @@ function compilePointSwizzle(
   compile: (e: Expression) => string,
   target: CompileTarget<Expression>
 ): string {
-  const t = gpuType(arg);
   const idx = comp === 'x' ? 0 : comp === 'y' ? 1 : 2;
+  const head = `Point${comp.toUpperCase()}`;
+  // A symbol whose type admits a point and a list of points. The compile
+  // entries write its point value in place of it where the shader computes
+  // the value (`gpuInlinePointValues`), so a symbol of this type that
+  // reaches here is read as an input, or is bound by the compiled code. A
+  // bound local whose assignments give it a vector width (`a ≔ x·P`, a
+  // `vec2` local) has that width, and its coordinate is a swizzle. Any
+  // other such symbol has no shader type.
+  const union = isSymbol(arg)
+    ? gpuPointOrPointListUnion(arg.type.type)
+    : undefined;
+  if (union !== undefined && isSymbol(arg)) {
+    const bound = gpuSymbolIsBound(arg.symbol, target);
+    const width = BaseCompiler.localShapeFrameOf(arg.symbol)?.get(arg.symbol);
+    if (bound && width !== undefined && width >= 2 && width <= 4) {
+      if (width <= idx)
+        throw new Error(
+          `Could not compile \`${head}\`: the point has arity ${width} ` +
+            `— no ${['first', 'second', 'third'][idx]} coordinate.`
+        );
+      return gpuSwizzle(compile(arg), comp);
+    }
+    throw new Error(
+      gpuPointOrPointListRefusal(head, arg.symbol, arg, union, bound)
+    );
+  }
+  // Any other value of that type: a call of a user function whose body is
+  // not a point once the point values are in place (it reads a list of
+  // points, `h(t) := t·Q` with `Q := [(1, 2), (3, 4)]`), or a value that the
+  // compile entries did not rewrite.
+  if (!isSymbol(arg) && gpuPointOrPointListUnion(arg.type.type) !== undefined)
+    throw new Error(
+      `Could not compile \`${head}\`: \`${arg.toString()}\` has the type ` +
+        `\`${arg.type.toString()}\`, which admits a point and a list of ` +
+        `points. A shader value cannot be both: a point is a vector ` +
+        `(\`vec2\`, \`vec3\`, \`vec4\`) and a list of points is an array. ` +
+        `Make the value a point (a tuple such as \`tuple<real, real>\`).`
+    );
+  const t = gpuType(arg);
   // The two spellings of a SINGLE point, each stating its own arity: a tuple,
   // and the flat numeric list a data import produces. `[3, 4]` lowers to
   // `vec2(3.0, 4.0)` here — a genuine `vecN`, so `.x` is a valid swizzle on it
@@ -7831,6 +8227,16 @@ function compileGPUAt(
     isSymbol(base) &&
     !target.boundVars?.has(base.symbol) &&
     target.inputLocals?.has(base.symbol) === true;
+  // A `Block` local is a function-scope `var` too. A function parameter of
+  // the same name is a value, so `isVariableLocal` stops at the frame of the
+  // parameter. The spelling of the local must be a plain identifier: the
+  // code below indexes that name.
+  const localSpelling =
+    isSymbol(base) && isVariableLocal(base.symbol, target.boundVars)
+      ? target.var(base.symbol)
+      : undefined;
+  const isBlockVariable =
+    localSpelling !== undefined && /^[A-Za-z_]\w*$/.test(localSpelling);
 
   // A proven positive, in-range integer needs neither a guard nor a float
   // conversion. Textures retain their storage helper. Other WGSL array values
@@ -7853,13 +8259,32 @@ function compileGPUAt(
       n <= 4 ||
       inPlace !== undefined ||
       isInputLocal ||
+      isBlockVariable ||
       (BaseCompiler.canHoist(target) &&
         !conditionalGPUSinks.has(target.hoist!)))
   ) {
     if (inPlace !== undefined) return `${inPlace}[${fact.code} - 1]`;
     let code = compileBase();
-    if (target.language === 'wgsl' && n > 4 && !isInputLocal) {
+    if (
+      target.language === 'wgsl' &&
+      n > 4 &&
+      !isInputLocal &&
+      !(isBlockVariable && code === localSpelling)
+    ) {
       gpuAssertWGSLCopyFits(base, n, 4, decline);
+      // The copy is a statement ahead of the statement of the `At`. The
+      // condition above admits a `Block` local with no place for such a
+      // statement, because it expects to index the local by its name. If
+      // the base compiles to other code, there is no copy to index.
+      if (
+        !BaseCompiler.canHoist(target) ||
+        conditionalGPUSinks.has(target.hoist!)
+      )
+        decline(
+          `WGSL indexes a list value with a run-time index only after it ` +
+            `copies the list to a local variable, and this position has no ` +
+            `place for the statement of that copy`
+        );
       // The base runs ahead of the statement once it is bound, so a draw in
       // it must not come before a draw written before the `At`.
       const draws = BaseCompiler.foldValueImpure(base);
@@ -10627,13 +11052,20 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       // alone.
       return `${gpuAtan2(target)}(${gpuSwizzle(code, 'y')}, ${gpuSwizzle(code, 'x')})`;
     }
-    // A real value's argument is 0 (x ≥ 0) or π (x < 0). Use the
-    // target-appropriate conditional: WGSL has no `?:`, so this becomes
-    // `select(3.14159265359, 0.0, x >= 0.0)`.
+    // A real value's argument is 0 (x ≥ 0), π (x < 0), and NaN for NaN, as
+    // `evaluate()` gives. Use the target-appropriate conditional: WGSL has no
+    // `?:`, so this becomes nested `select()` calls. The operand is spliced
+    // twice, so an impure one is bound to a temporary (`gpuOperandOnce`).
+    const x = gpuOperandOnce('Argument', args[0], compile, target);
     return gpuConditional(
-      `${compile(args[0])} >= 0.0`,
+      `${x} >= 0.0`,
       '0.0',
-      '3.14159265359',
+      gpuConditional(
+        `${x} < 0.0`,
+        '3.14159265359',
+        gpuNonFiniteLiteral(NaN),
+        target
+      ),
       target
     );
   },
@@ -12772,6 +13204,57 @@ function gpuTextSymbols(expr: Expression | undefined): ReadonlySet<string> {
       if (isProvablyStringOperand(e) || isProvablyCharacterOperand(e))
         out.add(e.symbol);
       else walkUserFunctionBody(e, e.symbol);
+      return;
+    }
+    if (isFunction(e)) {
+      if (typeof e.operator === 'string' && e.operator !== '')
+        walkUserFunctionBody(e, e.operator);
+      for (const op of e.ops) walk(op);
+    }
+  };
+  if (expr !== undefined) walk(expr);
+  return out;
+}
+
+/**
+ * The symbols in `expr` whose type admits a point and a list of points
+ * (`gpuPointOrPointListUnion`), by name, with the refusal for a read of each
+ * one as a shader input. The walk also enters the body of each user function
+ * that `expr` calls, and the value of each symbol, because the shader
+ * targets write such a value in place. A body or a value is entered at most
+ * once, so a recursive definition cannot loop here.
+ */
+function gpuPointOrPointListSymbols(
+  expr: Expression | undefined
+): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  const expanded = new Set<string>();
+  const expandedValues = new Set<string>();
+  const walkUserFunctionBody = (e: Expression, name: string): void => {
+    if (expanded.has(name)) return;
+    expanded.add(name);
+    const engine = e.engine;
+    if (engine === undefined) return;
+    const literal = BaseCompiler.userFunctionLiteral(engine, name);
+    if (literal !== undefined && literal.ops.length > 0) walk(literal.ops[0]);
+  };
+  const visited = new Set<Expression>();
+  const walk = (e: Expression): void => {
+    if (visited.has(e)) return;
+    visited.add(e);
+    if (isSymbol(e)) {
+      const union = gpuPointOrPointListUnion(e.type.type);
+      if (union !== undefined && !out.has(e.symbol))
+        out.set(
+          e.symbol,
+          gpuPointOrPointListRefusal(e.symbol, e.symbol, e, union)
+        );
+      walkUserFunctionBody(e, e.symbol);
+      if (!expandedValues.has(e.symbol)) {
+        expandedValues.add(e.symbol);
+        const value = e.engine?._getSymbolValue(e.symbol);
+        if (value !== undefined) walk(value);
+      }
       return;
     }
     if (isFunction(e)) {
@@ -19981,6 +20464,14 @@ export function gpuTypeOfValue(
   }
   // A name framed `bool` by a synthesized user-function signature.
   if (isSymbol(expr) && BaseCompiler.isLocalBoolean(expr.symbol)) return 'bool';
+  // A value computed from a symbol whose type admits a point and a list of
+  // points, and that no local shape frame describes, has no static shader
+  // type. The compile entries write the point value of such a symbol in
+  // place of it (`gpuInlinePointValues`), so this is a symbol that they did
+  // not replace (its value reads a name that the compiled code binds): its
+  // declared type has no width, and the types read below could disagree
+  // with the code (a `float` declaration for a `vec2` value).
+  if (gpuReadsPointOrPointListSymbol(expr) !== undefined) return undefined;
   if (
     (!isSymbol(expr) || !BaseCompiler.localShapeFrameOf(expr.symbol)) &&
     (isSubtype(gpuType(expr), 'color') || colorSpaceOf(expr) !== undefined)
@@ -21099,6 +21590,37 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         return innerMangle ? innerMangle(id) : id;
       };
     }
+    // A symbol whose type admits a point and a list of points has no shader
+    // type: a point is a vector and a list of points is an array. The shader
+    // can use such a symbol only when it computes the value of the symbol
+    // (an assigned value, which `var` and `mangleId` do not see). A read of
+    // the symbol as an input fails closed: through `var` when the caller's
+    // `vars` maps it (the host would declare it, with a type that the
+    // compilation cannot decide), and through `mangleId` when it is emitted
+    // as a bare identifier. As for the text gate above, the gate is keyed by
+    // the name, so a binder of the same name is also refused, which is a
+    // decline and never a wrong value.
+    const pointOrList = gpuPointOrPointListSymbols(expr);
+    if (pointOrList.size > 0) {
+      const innerVar = target.var;
+      const innerMangle = target.mangleId;
+      target.var = (id) => {
+        const resolved = innerVar(id);
+        const refusal = pointOrList.get(id);
+        if (
+          resolved !== undefined &&
+          refusal !== undefined &&
+          target.varsKeys?.has(id) === true
+        )
+          throw new Error(refusal);
+        return resolved;
+      };
+      target.mangleId = (id) => {
+        const refusal = pointOrList.get(id);
+        if (refusal !== undefined) throw new Error(refusal);
+        return innerMangle ? innerMangle(id) : id;
+      };
+    }
     const state = gpuRandomState(target);
     state.stage = stage;
     state.hostFrame = expr?.engine?._randomFrame !== undefined;
@@ -21292,12 +21814,30 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           id,
           name,
           params,
-          body,
+          body: storedBody,
           literal,
           target,
           parameterTypes,
           extraParams,
         }) => {
+          // A symbol of the body whose type admits a point and a list of
+          // points is replaced by its point value, for this compilation only,
+          // as at the root (`gpuInlinePointValues`). The stored definition
+          // does not change. The parameters and the names that the body binds
+          // are not replaced.
+          // A call in the body of a user function whose stored signature
+          // returns that union, and whose body is a point, is replaced by
+          // the body too (`gpuInlinePointCalls`). The parameters are local
+          // names there, so a callee body cannot capture them.
+          const pointCalls = gpuInlinePointCalls(storedBody, target, {
+            scalarNames: new Set<string>(),
+            localNames: new Set(params),
+          });
+          const body = gpuInlinePointValues(
+            pointCalls,
+            target,
+            new Set([...params, ...gpuReachableSymbolNames(pointCalls).written])
+          );
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).
           gpuCheckIdentifier(name, language);
@@ -21434,6 +21974,23 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
             vectorFrame,
             () => {
               const ret = gpuTypeOfValue(body, isWGSL);
+              const pointOrList =
+                ret === undefined
+                  ? gpuReadsPointOrPointListSymbol(body)
+                  : undefined;
+              if (pointOrList !== undefined && isSymbol(pointOrList))
+                throw new Error(
+                  `Could not compile \`${id}\`: the return value reads ` +
+                    `"${pointOrList.symbol}", which has the type ` +
+                    `\`${pointOrList.type.toString()}\`. That type admits ` +
+                    `a point and a list of points, so the return value has ` +
+                    `no static ${language.toUpperCase()} type. Declare ` +
+                    `"${pointOrList.symbol}" as a point ` +
+                    `(\`${gpuPointDeclaration(
+                      pointOrList.symbol,
+                      gpuPointOrPointListUnion(pointOrList.type.type)?.arity
+                    )}\`).`
+                );
               if (ret === undefined)
                 throw new Error(
                   `Could not compile \`${id}\`: the return value has no static ` +
@@ -21685,6 +22242,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     options?: { constantFold?: boolean },
     writtenInputs?: ReadonlyArray<string>
   ): string {
+    // The engine's angular unit, in radian-based code, as `compile()` does
+    // at its entry. The second compilation of the body (with a local copy
+    // of each written input, `writtenInputs`) receives the expression that
+    // was already rewritten, so nothing is converted twice.
+    if (writtenInputs === undefined) expr = rewriteAngularUnit(expr);
     const declarations = parameters.map(([name, type]) => ({ name, type }));
     // The local copy of each input that the body writes, as in `compile()`
     // (`compileOrThrow`).
@@ -21704,6 +22266,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     for (const name of writtenInputs ?? [])
       inputLocals.set(name, BaseCompiler.tempVar(bodyTarget));
     const target = gpuDeclaredBodyTarget(bodyTarget, declarations);
+    BaseCompiler.beginRootPreprocessing(expr, target);
     let body = BaseCompiler.withLocalShapeFrame(
       new Map(),
       gpuDeclaredShapeFrame(declarations),
@@ -21711,7 +22274,23 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // A function body is a statement position: a nested loop-form
         // `Sum`/`Product` hoists its loop ahead of the `return` (Tycho item
         // 110).
-        BaseCompiler.compileFunctionBody(expr, target)
+        BaseCompiler.compileFunctionBody(
+          // A point value is written in place of its symbol, as in
+          // `compile()` (`gpuInlinePointValues`). The declared parameters
+          // are bound, so they are not replaced.
+          gpuInlinePointValues(
+            gpuInlinePointCalls(expr, target, {
+              scalarNames: new Set<string>(),
+              localNames: new Set(declarations.map((d) => d.name)),
+            }),
+            target,
+            new Set([
+              ...declarations.map((d) => d.name),
+              ...gpuReachableSymbolNames(expr).written,
+            ])
+          ),
+          target
+        )
     );
     // The caller's declared return type is not this analysis's to check, but
     // the PLACEMENT of an emitted `return` is: a `Return` in a conditional arm,
@@ -21988,6 +22567,15 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // substituted here as well, with the bodies it reaches, so the common
     // subexpressions below compute it once per invocation instead of once in
     // each function (`gpu-shared-calls.ts`, ROADMAP CE-525).
+    // A symbol whose type admits a point and a list of points is replaced
+    // by its point value where the shader computes the value anyway, so the
+    // compilation reads the type of a tuple (`gpuInlinePointValues`).
+    BaseCompiler.beginRootPreprocessing(expr, target);
+    expr = gpuInlinePointValues(
+      gpuInlinePointCalls(expr, target),
+      target,
+      reachable().written
+    );
     expr = unrollFixedWidthCollections(
       inlineSharedUserFunctionCalls(
         BaseCompiler.inlineCollectionValuedCallsAtRoot(
@@ -22505,6 +23093,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     expr: Expression,
     options: CompilationOptions<Expression> = {}
   ): string {
+    // The engine's angular unit, in radian-based code, as `compile()` does
+    // at its entry: in degree mode `sin(x)` is the sine of `x` degrees.
+    expr = rewriteAngularUnit(expr);
     // This route answers with a bare EXPRESSION string and has no preamble
     // channel — neither for the `_gpu_*` helpers nor for a user-function
     // definition, and a function declaration is not an expression. Opt out of
@@ -22535,13 +23126,38 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           'returns a bare expression with no preamble channel. Use ' +
           '`compile()`, whose result carries the preamble.'
       );
-    const code = BaseCompiler.compile(
+    const sourceTarget = this.createTargetFor(expr, undefined, {
+      userFunctions: undefined,
+      constantFold: options.constantFold,
+    });
+    // A point value is written in place of its symbol, as in `compile()`
+    // (`gpuInlinePointValues`).
+    const inlined = gpuInlinePointValues(
       expr,
-      this.createTargetFor(expr, undefined, {
-        userFunctions: undefined,
-        constantFold: options.constantFold,
-      })
+      sourceTarget,
+      gpuReachableSymbolNames(expr).written
     );
+    // This route has no common-subexpression pass, so a node that several
+    // paths reach is written once for each path. A point value written in
+    // place of its symbol can hold a deep shared graph, so the size is
+    // checked after the substitution, with the limit of `compile()`.
+    if (
+      inlined !== expr &&
+      gpuWrittenSize(inlined, {
+        ...cseRecordingRules(inlined),
+        share: false,
+      }) > GPU_MAX_WRITTEN_NODES
+    )
+      throw new Error(
+        `Could not compile \`compileToSource()\`: the ` +
+          `${this.languageId.toUpperCase()} code would have more than ` +
+          `${GPU_MAX_WRITTEN_NODES.toLocaleString('en-US')} nodes. A ` +
+          `subexpression that several paths reach is written once for each ` +
+          `path on this route, which has no common-subexpression pass. ` +
+          `Use \`compile()\`, or assign the subexpression to a variable of ` +
+          `its own (\`Block\`).`
+      );
+    const code = BaseCompiler.compile(inlined, sourceTarget);
     // The contract of this route is an EXPRESSION. A body that lowers to
     // statements has no emission here (D6) — this route throws, as it already
     // does for a user-function head with no definition channel.
@@ -22726,6 +23342,25 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       return ref;
     };
     const target = gpuDeclaredBodyTarget(rawTarget, framed);
+    // The names that the shader declares (its inputs, uniforms and outputs,
+    // the built-in variables of a GLSL stage, and the names of the stage).
+    // A body that reads one of them reads the declaration. So a point value
+    // that mentions one is not written in place of its symbol, and a callee
+    // body whose free symbol is one of them is not inlined: the declaration
+    // would capture the name, which the stored value or body reads as the
+    // engine symbol.
+    const shaderNames = new Set([...framed.map((d) => d.name), ...stageNames]);
+    // The body expressions after the point values and the point calls are
+    // written in place, by statement. The type and width checks of each
+    // statement and the reference analysis below read these expressions,
+    // because the code is compiled from them.
+    const inlined: Expression[] = [];
+    // The size of the body statements after the substitution. The check
+    // above reads the statements as written, and a point value written in
+    // place of its symbol can hold a deep shared graph: with `constantFold:
+    // false`, no other limit reads the value (`assertFoldableSize()` in
+    // `base-compiler.ts` measures a value that is folded as a literal).
+    let inlinedSize = 0;
     // Each assignment is a statement position of its own, so a loop-form
     // `Sum`/`Product` inside it hoists its loop into `stmts`, which the shader
     // assembly emits ahead of the assignment (Tycho item 110). The whole body
@@ -22764,8 +23399,37 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 `${this.languageId.toUpperCase()}. Assign a local copy of it ` +
                 `instead (\`Block(y ≔ ${written}; y ≔ y + 1; y)\`).`
             );
+          // A point value is written in place of its symbol, as in
+          // `compile()` (`gpuInlinePointValues`).
+          BaseCompiler.beginRootPreprocessing(assignment.expression, target);
+          const expression = gpuInlinePointValues(
+            gpuInlinePointCalls(assignment.expression, target, {
+              scalarNames: new Set<string>(),
+              localNames: shaderNames,
+            }),
+            target,
+            new Set([
+              ...shaderNames,
+              ...gpuReachableSymbolNames(assignment.expression).written,
+            ])
+          );
+          inlined[i] = expression;
+          inlinedSize += gpuWrittenSize(expression, {
+            ...cseRecordingRules(expression),
+            share: false,
+          });
+          if (inlinedSize > GPU_MAX_WRITTEN_NODES)
+            throw new Error(
+              `Could not compile \`compileShader()\`: the ` +
+                `${this.languageId.toUpperCase()} code of the body ` +
+                `statements would have more than ` +
+                `${GPU_MAX_WRITTEN_NODES.toLocaleString('en-US')} nodes. A ` +
+                `subexpression that several paths reach is written once for ` +
+                `each path in a body statement. Assign the subexpression to ` +
+                `a variable of its own (\`Block\`).`
+            );
           const compiled = BaseCompiler.compileStatementBody(
-            assignment.expression,
+            expression,
             target
           );
           const { stmts } = compiled;
@@ -22790,7 +23454,7 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
           // conversion that reads such a name in float arithmetic
           // (`gpuDeclaredBodyTarget`) would give a float, which the target
           // does not accept. Its type is then the integer type of the name.
-          const value = assignment.expression;
+          const value = expression;
           const integerName = isSymbol(value)
             ? framed.find((d) => d.name === value.symbol)
             : undefined;
@@ -22932,9 +23596,9 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // declaration, not the engine value or the user function of the same
     // name, so the analysis must not go into that value or function body.
     const undeclared = new Set<string>();
-    for (const assignment of body)
+    for (const expression of inlined)
       for (const name of BaseCompiler.analyzeReferences(
-        assignment.expression,
+        expression,
         target,
         inScope
       ).freeSymbols)

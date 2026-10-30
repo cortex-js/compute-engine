@@ -7519,8 +7519,22 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
   // that is neither a point nor a provable point list (a numeric collection,
   // whose elements are a point spelled flat; a bare `list`) states nothing
   // definite, so the whole union declines to distribute and falls through.
+  //
+  // The absence marker is added only for the arms whose reading can be
+  // absent. A point arm gets the marker of its coordinate, as the single
+  // point reading above does (`integer | nan` for a `tuple<integer,
+  // integer>`). A collection read as one point (written flat, or a tuple
+  // value under an option that is not a `list`) gets the marker of its
+  // element, because the position can be past its last element. A list of
+  // points read by broadcast gets no marker: that reading gives a list,
+  // which is always present, as for a `list<tuple<…>>` operand alone.
+  // Before, the marker of the whole join was added, and the `missing`
+  // marker of the list arm made `PointX` of a `list<tuple<number, number>>
+  // | tuple<number, number>` the type `list<number> | missing | number`,
+  // which the GPU targets cannot compile.
   if (typeof t !== 'string' && t.kind === 'union') {
     const parts: Type[] = [];
+    const markers: Type[] = [];
     let distributes = true;
     for (const branch of t.types) {
       const arm = resolveTypeAlias(branch);
@@ -7538,6 +7552,7 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
           break;
         }
         parts.push(ct);
+        markers.push(markerType(ct));
       } else if (
         isSubtype(arm, INDEXED_COLLECTION_SHAPE_TYPE) &&
         isPointOrNumberElementType(collectionElementType(arm))
@@ -7566,7 +7581,15 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
         // numeric ones alone.
         const element = collectionElementType(arm) as Type;
         const numeric = numericElementArms(element);
-        if (numeric.length > 0) parts.push(...elementTypeArms(element));
+        // An option that is not a `list` (`indexed_collection<tuple<…>>`)
+        // also admits a TUPLE whose elements are points, `((1, 2), (3, 4))`.
+        // The accessor reads a tuple as one point (`pointComponentAt`), so
+        // its coordinate is the element at this position, `(1, 2)`, or is
+        // absent when the tuple is shorter: that reading joins too.
+        if (numeric.length > 0 || arm.kind !== 'list') {
+          parts.push(...elementTypeArms(element));
+          markers.push(markerType(element));
+        }
         const points = pointElementArms(element);
         const coord = tupleComponentType(
           points.length === 1 ? points[0] : { kind: 'union', types: points },
@@ -7582,7 +7605,17 @@ function pointComponentTypeD(xs: OperandDescriptor, position: number): Type {
         break;
       }
     }
-    if (distributes && parts.length > 0) return withMarker(widen(...parts));
+    if (distributes && parts.length > 0) {
+      const joined = widen(...parts) as Type;
+      // An indeterminate join (`unknown`) keeps the normalization of
+      // `withMarker()`. The markers are joined with `reduceType()`, not with
+      // `widen()`, so that the numeric tier of the coordinate stays.
+      if (joined === 'unknown' || joined === 'any' || joined === 'never')
+        return withMarker(joined);
+      return markers.length === 0
+        ? joined
+        : reduceType({ kind: 'union', types: [joined, ...markers] });
+    }
   }
   // A coordinate of an empty collection, decided by the DECLARED element type
   // before the emptiness test, exactly as `pointComponentAt` decides the value.

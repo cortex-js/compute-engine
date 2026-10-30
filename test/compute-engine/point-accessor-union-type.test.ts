@@ -25,10 +25,10 @@ describe('coordinate accessor over a point-or-point-list union', () => {
     const ce = new ComputeEngine();
     ce.declare('P', UNION);
     expect(ce.box(['PointX', 'P']).type.toString()).toBe(
-      'list<number> | missing | number'
+      'list<number> | number'
     );
     expect(ce.box(['PointY', 'P']).type.toString()).toBe(
-      'list<number> | missing | number'
+      'list<number> | number'
     );
   });
 
@@ -65,7 +65,7 @@ describe('coordinate accessor over a point-or-point-list union', () => {
     // The x-coordinate of the list arm is a string; it must not be reported as
     // `list<number>`, or a numeric consumer would compile against strings.
     expect(ce.box(['PointX', 'P']).type.toString()).toBe(
-      'list<string> | missing | number'
+      'list<string> | number'
     );
   });
 
@@ -89,7 +89,7 @@ describe('coordinate accessor over a point-or-point-list union', () => {
       'list<tuple<number, number, number>> | tuple<number, number, number>'
     );
     expect(ce.box(['PointZ', 'P3']).type.toString()).toBe(
-      'list<number> | missing | number'
+      'list<number> | number'
     );
     // A 2-point arm has no z-coordinate, so the union cannot distribute a z:
     // it falls back to the collapsed collection type and fails closed.

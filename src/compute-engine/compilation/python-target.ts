@@ -16,6 +16,7 @@ import type {
   LanguageTarget,
   CompilationOptions,
   CompilationResult,
+  NamingContext,
 } from './types.js';
 import {
   CompileDeclineError,
@@ -1545,15 +1546,102 @@ function compilePythonStatements(
     // destructuring assign (`(a, b) := (b, a + b)`) lowers to temporaries +
     // writes. Its value is discarded here, which is what makes the rewrite
     // safe (see `desugarPatternAssign`).
-    const stmts = expr.ops.flatMap(
-      (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
+    // A bare assignment of a name that nothing outside the block binds
+    // makes a local of the block, as in `compileBlock`
+    // (`withImplicitLocalDeclares`).
+    const stmts = BaseCompiler.withImplicitLocalDeclares(
+      expr.ops.flatMap(
+        (s) => BaseCompiler.desugarPatternAssign(s, target) ?? [s]
+      ),
+      target,
+      expr
     );
-    const bodyTarget = BaseCompiler.loopBodyTempTarget(stmts, target);
-    return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
-      stmts
-        .map((s) => compilePythonStatements(s, bodyTarget))
-        .filter((s) => s !== '')
-        .join('\n')
+    const declared = stmts.flatMap((s) =>
+      isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
+    );
+    // The checks of `compileBlock` on the order of the statements.
+    BaseCompiler.assertNoUseBeforeDeclare(stmts);
+    BaseCompiler.assertLocalsAssignedBeforeRead(stmts, declared);
+    // Python has no block scope: the statements of the block run in the
+    // scope of the enclosing function. Two things keep a local of the block
+    // apart from the other variables of the function:
+    // - Each local is spelled with a fresh name, so that a write of it does
+    //   not change a variable of the same name outside the block (a
+    //   parameter, a loop index, an input, a local of an enclosing block, or
+    //   a name that the code after the block reads). The scopes of the
+    //   expression cannot tell all of these: the interpreter changes them
+    //   when it evaluates the expression.
+    // - Each `Declare` sets the local. A local is a new variable at each run
+    //   of the block, so a value from a previous pass of a loop, or from
+    //   another block that declares the same name, must not be read.
+    //   A `Declare` with a value emits `t = <value>`. The `declare` hook of
+    //   this target emits nothing for a `Declare`, so without this
+    //   assignment the value was lost and a read of `t` raised `NameError`.
+    //   A `Declare` with no value emits `t = _ce_unset('t')`
+    //   (`PYTHON_UNSET_HELPER`), unless the next statement assigns the
+    //   local (`BaseCompiler.needsStartValue`):
+    //   `assertLocalsAssignedBeforeRead` accepts a read after an assignment
+    //   in one branch of an `If` only. The start value makes a use of the
+    //   local raise `UnboundLocalError` when that branch did not run,
+    //   instead of reading the value of a previous pass of a loop.
+    const compileStatements = (
+      spelled?: ReadonlyMap<string, string>
+    ): string => {
+      // `loopBodyTempTarget` binds the locals to their own names, so the
+      // fresh names are put on top of it.
+      const scoped = BaseCompiler.loopBodyTempTarget(stmts, target);
+      const bodyTarget: CompileTarget<Expression> =
+        spelled === undefined
+          ? scoped
+          : { ...scoped, var: (id) => spelled.get(id) ?? scoped.var(id) };
+      const declareStatement = (
+        s: Expression,
+        ops: ReadonlyArray<Expression>,
+        name: string,
+        i: number
+      ): string => {
+        const local = bodyTarget.var(name) ?? name;
+        const value = BaseCompiler.declareValueOperand(ops);
+        if (value === undefined)
+          return BaseCompiler.needsStartValue(stmts, i)
+            ? `${local} = _ce_unset(${JSON.stringify(name)})`
+            : '';
+        // A value that reads the declared name is refused before this
+        // point (`assertLocalsAssignedBeforeRead`), so the value never reads
+        // the local that this statement sets. The value may not be an
+        // operand of `s` (it can come from a trailing attributes
+        // dictionary), and `-1` is the whole-node region sentinel, so such
+        // a value compiles plainly.
+        const valueIndex = ops.indexOf(value);
+        const code =
+          valueIndex < 0
+            ? BaseCompiler.compile(value, bodyTarget)
+            : BaseCompiler.compileOp(s, valueIndex, bodyTarget, 0, value);
+        // A value that is not one expression is refused, as for `Assign`.
+        BaseCompiler.assertExpressionValue(code, bodyTarget, 'Declare', name);
+        return `${local} = ${code}`;
+      };
+      return BaseCompiler.withCseScope(expr, -1, bodyTarget, () =>
+        stmts
+          .map((s, i) =>
+            isFunction(s, 'Declare') && isSymbol(s.ops[0])
+              ? declareStatement(s, s.ops, s.ops[0].symbol, i)
+              : compilePythonStatements(s, bodyTarget)
+          )
+          .filter((s) => s !== '')
+          .join('\n')
+      );
+    };
+    if (declared.length === 0) return compileStatements();
+    return BaseCompiler.withFreshBlockLocals(() =>
+      compileStatements(
+        new Map(
+          declared.map((name) => [
+            name,
+            BaseCompiler.freshBlockLocalName(target),
+          ])
+        )
+      )
     );
   }
 
@@ -1670,6 +1758,92 @@ function pythonElementSource(
 }
 
 /**
+ * The names that the expression compiled from a root boundary (`compile`,
+ * `compileToSource`, `compileFunction`, `compileLambda`) reads with no
+ * binding (`Expression.unknowns`), by the naming context of that
+ * compilation. The naming context is one object shared by every target
+ * derived from the root target, so a nested lowering finds the set of its
+ * compilation. See `pythonLoopIndexCollides`.
+ */
+const PYTHON_ROOT_FREE_NAMES = new WeakMap<
+  NamingContext,
+  ReadonlySet<string>
+>();
+
+/**
+ * The naming context of a root compilation boundary
+ * (`BaseCompiler.newNamingContext`), with the names that the compiled code
+ * reads from outside recorded in `PYTHON_ROOT_FREE_NAMES`:
+ * - the free names of `expr`;
+ * - the free names of the values of the symbols that `expr` reaches, at
+ *   any depth: the compiled code reads a symbol with a value as its value,
+ *   so with `a` holding `k + 1`, a read of `a` reads the Python
+ *   variable `k`;
+ * - each identifier of the code in `sources` (the preamble and the code of
+ *   each entry of the caller's `vars` mapping), with the Unicode rule of
+ *   Python identifiers: with `vars: { y: 'α' }`, a read of `y` reads the
+ *   Python variable `α`.
+ * A loop over one of these names must not overwrite it.
+ */
+function pythonRootNaming(
+  expr: Expression,
+  sources?: ReadonlyArray<string | undefined>,
+  extra?: ReadonlyArray<string>
+): NamingContext {
+  const naming = BaseCompiler.newNamingContext(expr, sources, extra);
+  const names = new Set(expr.unknowns);
+  const seen = new Set<string>();
+  const pending = [...expr.symbols];
+  while (pending.length > 0) {
+    const s = pending.pop()!;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    const value = expr.engine._getSymbolValue(s);
+    if (value === undefined) continue;
+    for (const u of value.unknowns) names.add(u);
+    pending.push(...value.symbols);
+  }
+  for (const source of sources ?? [])
+    // A `vars` entry can also be a value that is not code.
+    if (typeof source === 'string')
+      for (const id of source.match(PYTHON_IDENTIFIER_TOKEN) ?? [])
+        names.add(id);
+  PYTHON_ROOT_FREE_NAMES.set(naming, names);
+  return naming;
+}
+
+/**
+ * True when the index `name` of a `Loop` clause, emitted as the variable of
+ * a Python `for` statement, would overwrite another variable of the
+ * compiled function.
+ *
+ * Python has no block scope: a `for` statement assigns its variable in the
+ * scope of the whole function, and the variable keeps the last value after
+ * the loop. In the interpreter the index of a `Loop` is a variable of the
+ * loop only. So an index with the name of a variable bound outside the loop
+ * (an index of an enclosing loop, a local of an enclosing block, a
+ * parameter, a `vars` entry: `target.var` resolves the name) changed that
+ * variable: with an inner loop over `i` in a loop over `i`, the outer body
+ * read the last value of the inner index. An index with the name of a free
+ * symbol of the compiled expression made that name a local of the function,
+ * so a read of the module global before the loop raised `UnboundLocalError`
+ * and a read after the loop gave the last index. Such an index is given a
+ * fresh name (`pythonElementHeaders`). A comprehension has its own scope
+ * and keeps the name.
+ */
+function pythonLoopIndexCollides(
+  name: string,
+  target: CompileTarget<Expression>
+): boolean {
+  if (target.var(name) !== undefined) return true;
+  const naming = target.naming;
+  return (
+    naming !== undefined &&
+    PYTHON_ROOT_FREE_NAMES.get(naming)?.has(name) === true
+  );
+}
+
+/**
  * The nested `for` headers of a loop's `Element` clauses, outermost first,
  * and the target that binds every clause's names for the body. Each clause's
  * source compiles under the names of the clauses before it, so an inner
@@ -1679,8 +1853,14 @@ function pythonElementSource(
  */
 function pythonElementHeaders(
   elements: ReadonlyArray<Expression>,
-  target: CompileTarget<Expression>
-): { headers: string[]; bodyTarget: CompileTarget<Expression> } {
+  target: CompileTarget<Expression>,
+  freshIndices = false
+): {
+  headers: string[];
+  bodyTarget: CompileTarget<Expression>;
+  /** The fresh names given to indices (`pythonLoopIndexCollides`). */
+  renamed: string[];
+} {
   const binders = BaseCompiler.elementClauseBinders(elements, target);
   // A Python comprehension is ONE scope: every `for` target is a local of the
   // whole comprehension, so a guard that names a binder of a LATER clause
@@ -1702,6 +1882,7 @@ function pythonElementHeaders(
           );
   });
   const headers: string[] = [];
+  const renamed: string[] = [];
   let scope = target;
   for (const b of binders) {
     const source = pythonElementSource(b.clause.ops[1], scope);
@@ -1709,11 +1890,27 @@ function pythonElementHeaders(
     for (const name of b.names) pythonCheckBindingName(name);
     const prev = scope;
     const bound = new Set(b.names);
+    // The spelling of each name of the clause: the name, or a fresh name
+    // for the index of a `for` statement that would overwrite another
+    // variable of the function (`pythonLoopIndexCollides`).
+    const spelled = new Map<string, string>();
+    if (freshIndices)
+      for (const name of b.names)
+        if (pythonLoopIndexCollides(name, prev)) {
+          const fresh = BaseCompiler.tempVar(prev);
+          spelled.set(name, fresh);
+          renamed.push(fresh);
+        }
     scope = {
       ...prev,
-      var: (id) => (bound.has(id) ? id : prev.var(id)),
+      var: (id) => (bound.has(id) ? (spelled.get(id) ?? id) : prev.var(id)),
       ...BaseCompiler.withBoundScope(prev, b.names),
     };
+    // A pattern is names, `_tvN` placeholders, parentheses and commas.
+    const pattern =
+      spelled.size === 0
+        ? b.pyPattern
+        : b.pyPattern.replace(/[^\s(),]+/g, (t) => spelled.get(t) ?? t);
     // A GUARDED clause, `Element(x, xs, cond)`, is the `if` of a Python
     // comprehension clause, `for x in xs if cond`. The guard reads the
     // clause's own binding, so it compiles under the scope that binds it.
@@ -1727,9 +1924,9 @@ function pythonElementHeaders(
       guard !== undefined && !isSymbol(guard, 'Nothing')
         ? ` if ${BaseCompiler.compileGuardTest(guard, scope, PYTHON_CONDITION_DIALECT)}`
         : '';
-    headers.push(`for ${b.pyPattern} in ${source}${guardCode}:`);
+    headers.push(`for ${pattern} in ${source}${guardCode}:`);
   }
-  return { headers, bodyTarget: scope };
+  return { headers, bodyTarget: scope, renamed };
 }
 
 /** Whether an `Element` clause carries a guard (a third operand): the
@@ -1769,6 +1966,7 @@ function compilePythonLoop(
 
   let headers: string[];
   let bodyTarget = target;
+  let renamed: string[] = [];
   if (elements.length === 0) headers = ['while True:'];
   else {
     // A `for` statement header has no `if` clause in Python; the guard of a
@@ -1778,15 +1976,24 @@ function compilePythonLoop(
         'Could not compile `Loop`: a guarded `Element` clause has no Python statement form. The interpreter evaluates it instead.'
       );
     BaseCompiler.assertBreakLeavesWholeLoop(elements, body);
-    ({ headers, bodyTarget } = pythonElementHeaders(elements, target));
+    // A `for` statement binds its index in the scope of the whole function
+    // (`pythonLoopIndexCollides`), unlike a comprehension.
+    ({ headers, bodyTarget, renamed } = pythonElementHeaders(
+      elements,
+      target,
+      true
+    ));
   }
 
   // Compile the body as statements — statement-form control flow
   // (`If`/`Break`/`Continue`/`Return`), a flattened `Block`, and nested `Loop`s
-  // all compose, for effect (no trailing `return`).
+  // all compose, for effect (no trailing `return`). An index with a fresh
+  // name stays a variable that the body can assign, as with its own name.
   let code = indentPythonStatements(
-    BaseCompiler.withCseScope(node, 0, bodyTarget, () =>
-      compilePythonStatements(body, bodyTarget)
+    BaseCompiler.withWritableLoopIndices(renamed, () =>
+      BaseCompiler.withCseScope(node, 0, bodyTarget, () =>
+        compilePythonStatements(body, bodyTarget)
+      )
     )
   );
   for (let i = headers.length - 1; i >= 0; i--)
@@ -2863,6 +3070,174 @@ const PYTHON_ROUND_HELPER = `def _ce_round(_x, _ties):
 `;
 
 /**
+ * The start value of a `Block` local that its `Declare` gives no value:
+ * `_ce_unset('t')`.
+ *
+ * Python has no declaration, so without a start value a read of the local
+ * in a loop found the value of the previous pass.
+ *
+ * Each use of the value raises `UnboundLocalError`: a comparison, a test of
+ * truth, a conversion to a number or an array, an arithmetic operator, a
+ * NumPy function, an index or an iteration. The interpreter keeps such a
+ * use symbolic, which compiled code cannot represent. `None` or
+ * `float('nan')` as the start value would not raise: a comparison with NaN
+ * is decided, and `None` is the absent value of an input.
+ *
+ * A read that only passes the value on (`s ≔ t`) does not raise there: the
+ * variable `s` then holds the `_ce_unset_type` object. A later operator on
+ * `s` raises, and each `return` of the compiled code passes its value
+ * through `_ce_checked(v)`, which raises when the value is the object, or
+ * a list, a tuple, a dict or a NumPy array of `dtype=object` that holds it
+ * at any depth (`pythonCheckedReturns`). So the object never leaves the
+ * function in its result. A NumPy array of another `dtype` cannot hold the
+ * object, so it is not walked.
+ *
+ * The names start with `_ce_`, so a symbol, a parameter or a function with
+ * one of these names fails to compile when the code uses the helper
+ * (`pythonAssertNoShadowedBuiltin`). A function named like the class would
+ * otherwise replace the class at module level.
+ */
+const PYTHON_UNSET_HELPER = `class _ce_unset_type:
+    __slots__ = ('_name',)
+    def __init__(self, _name):
+        self._name = _name
+    def __repr__(self):
+        return '<no value: %s>' % self._name
+    def _ce_fail(self, *_args, **_kwargs):
+        raise UnboundLocalError('read-before-declaration: "%s" is read before its first assignment' % self._name)
+    __eq__ = __ne__ = __lt__ = __le__ = __gt__ = __ge__ = _ce_fail
+    __bool__ = __float__ = __int__ = __index__ = __complex__ = _ce_fail
+    __len__ = __iter__ = __getitem__ = __contains__ = __array__ = _ce_fail
+    __array_ufunc__ = __array_function__ = _ce_fail
+    __neg__ = __pos__ = __abs__ = __invert__ = __round__ = _ce_fail
+    __add__ = __radd__ = __sub__ = __rsub__ = __mul__ = __rmul__ = _ce_fail
+    __truediv__ = __rtruediv__ = __floordiv__ = __rfloordiv__ = _ce_fail
+    __mod__ = __rmod__ = __pow__ = __rpow__ = __matmul__ = __rmatmul__ = _ce_fail
+    __and__ = __rand__ = __or__ = __ror__ = __xor__ = __rxor__ = _ce_fail
+def _ce_unset(_name):
+    return _ce_unset_type(_name)
+def _ce_checked(_v):
+    if isinstance(_v, _ce_unset_type):
+        _v._ce_fail()
+    if isinstance(_v, (list, tuple)):
+        for _e in _v:
+            _ce_checked(_e)
+    elif isinstance(_v, dict):
+        for _e in _v.values():
+            _ce_checked(_e)
+    elif getattr(_v, 'dtype', None) == object and hasattr(_v, 'flat'):
+        for _e in _v.flat:
+            _ce_checked(_e)
+    return _v
+`;
+
+/**
+ * Pass the value of each `return` statement of the Python code `code`
+ * through `_ce_checked(…)` (`PYTHON_UNSET_HELPER`), when the code uses
+ * the start value `_ce_unset(…)`: a result that is the start value of a
+ * block local raises `UnboundLocalError`, as any other use of it does.
+ *
+ * The body of each lambda in parentheses is passed through
+ * `_ce_checked(…)` too (`pythonCheckedLambdas`): a `Function` literal
+ * compiles to a lambda, and `_ce_checked` returns a lambda unchanged, so a
+ * lambda that returns the start value when it is called would let the
+ * object out of the function.
+ *
+ * Called on the code before the helper definitions are put in front of
+ * it, so the `return` statements of the helpers are not changed. A
+ * `return` whose value does not end on its line, or that is a tuple with
+ * no brackets (`return a, b`), is left as it is.
+ */
+function pythonCheckedReturns(code: string): string {
+  if (!code.includes('_ce_unset(')) return code;
+  return pythonCheckedLambdas(code).replace(
+    /^(\s*)return (.+)$/gm,
+    (line, indent: string, value: string) =>
+      pythonIsOneExpression(value)
+        ? `${indent}return _ce_checked(${value})`
+        : line
+  );
+}
+
+/**
+ * Pass the body of each lambda after a parenthesis of the Python code `code`,
+ * `(lambda p: body)`, through `_ce_checked(…)`: `(lambda p:
+ * _ce_checked(body))`. The internal lambdas of the target, which are
+ * applied at once, are changed too, which keeps their values. A lambda
+ * whose closing parenthesis is not found is left as it is. Characters
+ * inside a string literal are skipped.
+ */
+function pythonCheckedLambdas(code: string): string {
+  const start = /\(lambda(?=[\s:])/g;
+  let out = '';
+  let from = 0;
+  for (let m = start.exec(code); m !== null; m = start.exec(code)) {
+    if (m.index < from) continue;
+    // The colon that ends the parameters, and the end of the body: the
+    // parenthesis that closes the lambda, at the depth of the lambda.
+    let depth = 0;
+    let quote: string | undefined;
+    let colon = -1;
+    let close = -1;
+    for (let i = m.index + 1; i < code.length; i++) {
+      const c = code[i];
+      if (quote !== undefined) {
+        if (c === '\\') i += 1;
+        else if (c === quote) quote = undefined;
+        continue;
+      }
+      if (c === "'" || c === '"') quote = c;
+      else if (c === '(' || c === '[' || c === '{') depth += 1;
+      else if (c === ')' || c === ']' || c === '}') {
+        if (depth === 0) {
+          close = i;
+          break;
+        }
+        depth -= 1;
+      } else if (c === ':' && depth === 0 && colon < 0) colon = i;
+      // After the parameters, a comma at the depth of the lambda ends its
+      // body: `f(lambda a: a + 1, b)`.
+      else if (c === ',' && depth === 0 && colon >= 0) {
+        close = i;
+        break;
+      }
+    }
+    if (colon < 0 || close < 0) continue;
+    const body = code.slice(colon + 1, close).trim();
+    out +=
+      code.slice(from, colon + 1) +
+      ` _ce_checked(${pythonCheckedLambdas(body)})`;
+    from = close;
+    start.lastIndex = close;
+  }
+  return out + code.slice(from);
+}
+
+/**
+ * True when the Python source `s` has balanced brackets and no comma
+ * outside brackets. Characters inside a string literal are skipped.
+ */
+function pythonIsOneExpression(s: string): boolean {
+  let depth = 0;
+  let quote: string | undefined;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote !== undefined) {
+      if (c === '\\') i += 1;
+      else if (c === quote) quote = undefined;
+      continue;
+    }
+    if (c === "'" || c === '"') quote = c;
+    else if (c === '(' || c === '[' || c === '{') depth += 1;
+    else if (c === ')' || c === ']' || c === '}') {
+      depth -= 1;
+      if (depth < 0) return false;
+    } else if (c === ',' && depth === 0) return false;
+  }
+  return depth === 0 && quote === undefined;
+}
+
+/**
  * The Python code that rounds `c` to an integer, with a value halfway
  * between two integers rounded with the rule `ties`. `np.round` rounds a tie
  * to even and is exact at every magnitude, so it is used for `to-even`; the
@@ -3318,7 +3693,7 @@ def _ce_ugamma(_s, _z, _reg):
  * Idempotent per emission unit; a redefinition (if two units are concatenated)
  * is harmless in Python. */
 function withPythonHelpers(code: string): string {
-  let out = code;
+  let out = pythonCheckedReturns(code);
   if (
     out.includes('_ce_cplx(') ||
     out.includes('_ce_cisreal(') ||
@@ -3332,6 +3707,7 @@ function withPythonHelpers(code: string): string {
   if (out.includes('_ce_indexof(')) out = `${PYTHON_INDEXOF_HELPER}\n${out}`;
   if (out.includes('_ce_ord(')) out = `${PYTHON_ORD_HELPER}\n${out}`;
   if (out.includes('_ce_round(')) out = `${PYTHON_ROUND_HELPER}\n${out}`;
+  if (out.includes('_ce_unset(')) out = `${PYTHON_UNSET_HELPER}\n${out}`;
   if (out.includes('_ce_smoothstep(') || out.includes("_ce_bcast('smoothstep'"))
     out = `${PYTHON_SMOOTHSTEP_HELPER}\n${out}`;
   if (out.includes('_ce_int_operands(') || out.includes('_ce_remainder('))
@@ -7334,7 +7710,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // The caller's requested compile mode; validated against
       // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
       mode: options.mode,
-      naming: BaseCompiler.newNamingContext(expr, [
+      naming: pythonRootNaming(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),
       ]),
@@ -7429,6 +7805,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // assignment body emits `s = x` and a root `Declare` emits the empty
     // string. Checked structurally, before the body is compiled (D6).
     pythonAssertExpressionBody('compileToSource()', expr);
+    // The engine's angular unit, in radian-based code, as `compile()` does
+    // at its entry: in degree mode `sin(x)` is the sine of `x` degrees.
+    expr = rewriteAngularUnit(expr);
     const vars = options.vars as Record<string, string> | undefined;
     // Root compilation boundary (see `compile`). `varsKeys`/`constantFold`:
     // same constant-folder contract as `compileOrThrow` above.
@@ -7439,7 +7818,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       // The caller's requested compile mode; validated against
       // `supportedModes` and latched by `BaseCompiler.compile` at depth 0.
       mode: options.mode,
-      naming: BaseCompiler.newNamingContext(expr, [
+      naming: pythonRootNaming(expr, [
         options.preamble,
         ...(vars ? Object.values(vars) : []),
       ]),
@@ -7509,6 +7888,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // free symbol (`def f(lambda):` is a syntax error).
     pythonCheckBindingName(functionName);
     for (const p of parameters) pythonCheckBindingName(p);
+    // The engine's angular unit, in radian-based code, as `compile()` does
+    // at its entry.
+    expr = rewriteAngularUnit(expr);
     // Shadow the declared parameters so they stay bare identifiers (never
     // folded to an assigned engine value).
     // Root compilation boundary (see `compile`). The declared parameters are
@@ -7516,7 +7898,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),
       constantFold: options?.constantFold,
-      naming: BaseCompiler.newNamingContext(expr, undefined, parameters),
+      naming: pythonRootNaming(expr, undefined, parameters),
       inputWrites: new Set<string>(),
     });
     // CSE is default-enabled; `options.cse` is the opt-out.
@@ -7579,6 +7961,8 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ].join('\n');
     }
 
+    // A result that is the start value of a block local raises.
+    body = pythonCheckedReturns(body);
     const params = parameters.map(ids.name).join(', ');
     let code = '';
 
@@ -7613,6 +7997,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
     )
       code += `${PYTHON_SMOOTHSTEP_HELPER}\n`;
     if (body.includes('_ce_round(')) code += `${PYTHON_ROUND_HELPER}\n`;
+    if (body.includes('_ce_unset(')) code += `${PYTHON_UNSET_HELPER}\n`;
     if (body.includes('_ce_int_operands(') || body.includes('_ce_remainder('))
       code += `${PYTHON_INT_OPERAND_HELPER}\n`;
     if (body.includes('_ce_pow(')) code += `${pythonPowHelper()}\n`;
@@ -7721,11 +8106,14 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The declared parameters are emitted as bare Python identifiers, so a
     // Python keyword fails closed, as it does for a free symbol.
     for (const p of parameters) pythonCheckBindingName(p);
+    // The engine's angular unit, in radian-based code, as `compile()` does
+    // at its entry.
+    expr = rewriteAngularUnit(expr);
     // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),
       constantFold: options?.constantFold,
-      naming: BaseCompiler.newNamingContext(expr, undefined, parameters),
+      naming: pythonRootNaming(expr, undefined, parameters),
     });
     // Default-enabled, like `compileFunction`; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
@@ -7769,6 +8157,7 @@ export class PythonTarget implements LanguageTarget<Expression> {
       ['_ce_ord(', 'an ordering over a collection operand'],
       ['_ce_pow(', 'a power whose base may be negative'],
       ['_ce_round(', 'Round'],
+      ['_ce_unset(', 'a block local declared with no value'],
       ['_ce_predicate(', 'a predicate whose result is not provably a boolean'],
       [
         '_ce_ugamma(',

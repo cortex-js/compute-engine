@@ -865,6 +865,10 @@ type Replay = {
   /** Whether the first walk recorded `replayOf` itself, at trace index
    * `end`. */
   readonly recorded: boolean;
+  /** The region of the first walk. It is the region of the replay, except
+   * for a conditional arm that replays a walk of an enclosing region
+   * (`Harvester.earlierWalkAbove`). */
+  readonly walkRegion: MutableRegion;
 };
 
 /** What the first walk of a node object in one walk context left behind,
@@ -883,6 +887,8 @@ type VisitRecord = {
   readonly openedSites: number;
   /** Whether the node itself got an occurrence record. */
   readonly recorded: boolean;
+  /** The region of the walk. */
+  readonly region: MutableRegion;
 };
 
 /** A structural equivalence class within one hash bucket. */
@@ -919,7 +925,64 @@ export function harvestCse(
   root: Expression,
   options: CseHarvestOptions = {}
 ): CseHarvest {
-  return new Harvester(root, options).run();
+  // First the walk in full, which opens a copy of the regions below a node
+  // for each conditional arm that reads the node again. When the walk opens
+  // more regions than `harvestRegionBudget` allows, the number of regions
+  // grows faster than the number of nodes (it can double at each level of
+  // a graph), and the harvest is made again with the arms that read a node
+  // walked before them replaying that walk (`Harvester.earlierWalkAbove`).
+  // Below the budget, the result is the result of the walk in full.
+  try {
+    return new Harvester(root, options, undefined, true).run();
+  } catch (error) {
+    if (error !== OVER_REGION_BUDGET) throw error;
+  }
+  return new Harvester(root, options, new Set()).run();
+}
+
+/** Thrown by a harvest in full that opens too many regions (see
+ * `harvestCse`). */
+const OVER_REGION_BUDGET = new Error('CSE harvest: too many regions');
+
+/**
+ * The most regions that the walk in full may open for a root with `sites`
+ * region-opening edges (`Harvester.regionSites`, counted over the distinct
+ * node objects). A tree, or a graph whose shared nodes are not read again in
+ * conditional arms, opens about one region for each binder body, binder
+ * clause, conditional arm and statement: at most one region for each site.
+ * The budget does not depend on the nodes that open no region: a large
+ * expression with a few conditionals has a small budget, and the walk in
+ * full stops early when the regions below the conditionals are copied many
+ * times.
+ */
+function harvestRegionBudget(sites: number): number {
+  return 4 * sites + 256;
+}
+
+/**
+ * The number of edges of `node` that can open a region in the walk: a value
+ * larger than or equal to the number of regions that the walk opens below
+ * `node` itself in one visit. Each operand of a binder, of a node with lazy
+ * operands, of a block, a loop, a function literal or a statement can open
+ * one, and a block or a statement can open one more for itself (the edge
+ * with index `-1`). Other nodes open none.
+ */
+function regionSites(node: Expression): number {
+  if (!isFunction(node)) return 0;
+  const op = node.operator;
+  if (
+    op === 'Block' ||
+    op === 'Loop' ||
+    op === 'Function' ||
+    op === 'Assign' ||
+    op === 'Declare' ||
+    op === 'Return' ||
+    op === 'If' ||
+    node.operatorDefinition?.scoped === true ||
+    lazyOperandRegions(node).length > 0
+  )
+    return node.nops + 1;
+  return 0;
 }
 
 class Harvester {
@@ -963,6 +1026,13 @@ class Harvester {
   private readonly traceExit: number[] = [];
   /** Per trace entry: the number of paths it stands for (`computeWeights`). */
   private readonly traceWeight: number[] = [];
+  /** Per trace entry: the part of `traceWeight` that does not come from a
+   * conditional arm that replays a walk of an enclosing region
+   * (`computeWeights`). */
+  private readonly traceBase: number[] = [];
+  /** Per trace entry: its region. The region of a replay is the region
+   * where the walk was replaced, not the region of the first walk. */
+  private readonly traceRegion: MutableRegion[] = [];
   private readonly traceIndex = new Map<MutableOccurrence, number>();
   /** Every first walk of a function node: the first walk that holds it
    * (`-1` at the top) and the trace indices of its replays. The replays that
@@ -982,6 +1052,11 @@ class Harvester {
     MutableRegion,
     Map<Expression, VisitRecord>[]
   >();
+  /** The occurrence records that a conditional arm made with a replay of a
+   * walk of an enclosing region (`earlierWalkAbove`). */
+  private readonly armReplays: MutableOccurrence[] = [];
+  /** The most regions the walk may open (see `budgeted`). */
+  private regionBudget = Number.POSITIVE_INFINITY;
   /** Count of region-opening edges taken, merged or not — see
    * `VisitRecord.openedSites`. */
   private openedSites = 0;
@@ -1020,9 +1095,19 @@ class Harvester {
   private buckets = 0;
   private nextCandidateId = 0;
 
+  /**
+   * @param replayArms when defined, a conditional arm can replay a walk of
+   * an enclosing region (`earlierWalkAbove`), except for the node objects
+   * in the set. `run()` adds to the set each node whose arm the selection
+   * does not credit to a candidate, and makes the harvest again.
+   * @param budgeted the walk throws `OVER_REGION_BUDGET` when it opens more
+   * regions than `harvestRegionBudget` allows.
+   */
   constructor(
     private readonly root: Expression,
-    options: CseHarvestOptions
+    private readonly options: CseHarvestOptions,
+    private readonly replayArms?: ReadonlySet<Expression>,
+    private readonly budgeted = false
   ) {
     this.engine = root.engine as ComputeEngine;
     this.isOverriddenOperator = options.isOverriddenOperator ?? (() => false);
@@ -1089,7 +1174,13 @@ class Harvester {
   }
 
   run(): CseHarvest {
-    this.prepass(this.root, new Set<Expression>());
+    const seen = new Set<Expression>();
+    this.prepass(this.root, seen);
+    if (this.budgeted) {
+      let sites = 0;
+      for (const node of seen) sites += regionSites(node);
+      this.regionBudget = harvestRegionBudget(sites);
+    }
 
     const rootRegion = this.createRegion(undefined, 'root', false, undefined, [
       // no bound names at the root
@@ -1100,6 +1191,27 @@ class Harvester {
 
     this.computeWeights();
     const candidates = this.selectCandidates();
+
+    // An arm that replays a walk of an enclosing region has no regions of
+    // its own below `node`. That is correct only when the arm reads the
+    // temporary of a candidate of an enclosing region. Otherwise the arm
+    // emits `node` in full: the harvest is made again, and the arms that
+    // read such a node walk it in full, so they have the regions and
+    // candidates below it. The other arms still replay. Each harvest adds
+    // at least one node to the set, so the repetition ends.
+    if (this.armReplays.length > 0 && this.replayArms !== undefined) {
+      const served = new Set<CseOccurrence>();
+      for (const candidate of candidates)
+        for (const occurrence of candidate.served) served.add(occurrence);
+      const unserved = this.armReplays.filter(
+        (occurrence) => !served.has(occurrence)
+      );
+      if (unserved.length > 0) {
+        const excluded = new Set(this.replayArms);
+        for (const occurrence of unserved) excluded.add(occurrence.node);
+        return new Harvester(this.root, this.options, excluded).run();
+      }
+    }
 
     return {
       root: rootRegion,
@@ -1166,6 +1278,7 @@ class Harvester {
     site: CseRegionSite | undefined,
     boundNames: string[]
   ): MutableRegion {
+    if (this.regions.length >= this.regionBudget) throw OVER_REGION_BUDGET;
     const region: MutableRegion = {
       id: this.regions.length,
       kind,
@@ -1241,7 +1354,11 @@ class Harvester {
     let contextVisits: Map<Expression, VisitRecord> | undefined;
     if (isFunction(node)) {
       contextVisits = this.contextVisits(region, underMapped, asStatement);
-      const first = contextVisits.get(node);
+      let first = contextVisits.get(node);
+      if (first === undefined) {
+        first = this.earlierWalkAbove(node, region, underMapped, asStatement);
+        if (first !== undefined) contextVisits.set(node, first);
+      }
       if (first !== undefined) {
         this.replay(node, region, first);
         return;
@@ -1288,7 +1405,92 @@ class Harvester {
       edges: this.edges - edgesBefore,
       openedSites: this.openedSites - openedBefore,
       recorded,
+      region,
     });
+  }
+
+  /**
+   * The first walk of `node` in an enclosing region, when the walk of
+   * `node` in the conditional arm `region` can be a replay of it.
+   *
+   * In `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))`, the walk reaches `e_k`
+   * in the region of `Arctan2` and then again in the arm of the `If`. The
+   * arm is another region, so the second walk is not a replay of the first
+   * one, and it opens a copy of every region below `e_k`. Each level then
+   * doubles the regions: `2^d` regions for `d` levels, and the selection of
+   * the candidates takes exponential time. The emitted code is linear: the
+   * arm comes after the first occurrence of `e_k`, which binds `e_k` to a
+   * temporary, and the arm reads the temporary (the dominance rule in
+   * `selectCandidates`). Nothing below `e_k` is emitted in the arm.
+   *
+   * So the arm replays the first walk, as a second walk in the same region
+   * does, and the arm gets the occurrence record of `e_k`. The entries
+   * below `e_k` in the enclosing region stand for one more path. The
+   * entries below `e_k` in the regions below the enclosing region do not:
+   * in the walk in full they would be in copies of these regions, whose
+   * candidates the emission never reaches (see `replayReach`).
+   *
+   * The counts of the selection are then not the counts of the walk in
+   * full. The walk in full counts the occurrences in the copies, and they
+   * can give a binding that the emission uses once (a temporary for one
+   * read), or make the per-region cap, the size and benefit thresholds and
+   * the subsumption test decide differently. So the selection can bind
+   * other nodes, and the emitted code can be different: other temporaries,
+   * at other places. The values that the code computes are the same. For
+   * this reason `harvestCse` uses these replays only when the walk in full
+   * opens more regions than `harvestRegionBudget` allows.
+   *
+   * This replay is used only when the arm is sure to read the temporary if
+   * `e_k` is bound in the enclosing region:
+   * - `region` and each region between it and the enclosing region are
+   *   lazy operands (a conditional arm), not inert, and bind no names, so
+   *   the arm can read a temporary of the enclosing region;
+   * - the enclosing region is not inert, and its walk of `node` records an
+   *   occurrence of `node`;
+   * - the walk is not below an operator emitted by caller source and not
+   *   in a statement position (the walk context of the enclosing walk is
+   *   `(false, false)`, as is the context of this one).
+   *
+   * The first walk ended before this one began, so its occurrence comes
+   * first in the emission order. When the selection does not credit the
+   * occurrence of the arm to a candidate of an enclosing region, the arm
+   * would emit `node` in full: then `run()` makes the harvest again, with a
+   * walk in full of `node` in each arm (see `armReplays`).
+   *
+   * A limit: the arm reads the temporary only when the emission binds it
+   * (the state `'bound'` of `compileWithCse`, `base-compiler.ts`). A
+   * candidate stays unbound when its right-hand side compiles to more than
+   * one line on a target with `bareStatementBlocks` (the Python and shader
+   * targets: a binder or a statement construct in the node), or folds to a
+   * constant. Then the arm emits `node` in full, without the regions below
+   * it, so without sharing inside it. The code is correct, but it can be
+   * larger than the code of the walk in full.
+   */
+  private earlierWalkAbove(
+    node: Expression,
+    region: MutableRegion,
+    underMapped: boolean,
+    asStatement: boolean
+  ): VisitRecord | undefined {
+    if (
+      this.replayArms === undefined ||
+      this.replayArms.has(node) ||
+      underMapped ||
+      asStatement
+    )
+      return undefined;
+    for (
+      let r: MutableRegion | undefined = region;
+      r !== undefined && r.kind === 'lazy-operand' && !r.inert;
+      r = r.parent as MutableRegion | undefined
+    ) {
+      if (r.boundNames.length > 0) return undefined;
+      const above = r.parent as MutableRegion | undefined;
+      if (above === undefined || above.inert) continue;
+      const earlier = this.visits.get(above)?.[0]?.get(node);
+      if (earlier !== undefined && earlier.recorded) return earlier;
+    }
+    return undefined;
   }
 
   /** The first walks of the walk context `(region, underMapped,
@@ -1326,9 +1528,13 @@ class Harvester {
     region: MutableRegion,
     first: VisitRecord
   ): void {
+    // A walk in a conditional arm that replays a walk of an enclosing
+    // region (`earlierWalkAbove`) would have opened new regions, not merged
+    // them.
+    const inArm = first.region !== region;
     this.edges += first.edges;
     this.openedSites += first.openedSites;
-    this.mergedRegionSites += first.openedSites;
+    if (!inArm) this.mergedRegionSites += first.openedSites;
     const enter = this.clock++;
     const exit = this.clock++;
     if (first.end > first.start) {
@@ -1339,19 +1545,27 @@ class Harvester {
           start: first.start,
           end: first.end,
           recorded: first.recorded,
+          walkRegion: first.region,
         },
+        region,
         enter,
         exit
       );
     }
-    if (first.recorded) this.record(node, region, enter, exit);
+    if (first.recorded) {
+      this.record(node, region, enter, exit);
+      if (inArm)
+        this.armReplays.push(this.occurrences[this.occurrences.length - 1]);
+    }
   }
 
   private pushTrace(
     entry: MutableOccurrence | Replay,
+    region: MutableRegion,
     enter: number,
     exit: number
   ): void {
+    this.traceRegion.push(region);
     this.traceWalk.push(this.walkStack.at(-1) ?? -1);
     this.traceEnter.push(enter);
     this.traceExit.push(exit);
@@ -1414,7 +1628,43 @@ class Harvester {
     };
     this.occurrences.push(occurrence);
     this.traceIndex.set(occurrence, this.trace.length);
-    this.pushTrace(occurrence, enter, exit);
+    this.pushTrace(occurrence, region, enter, exit);
+  }
+
+  /**
+   * Which paths of replay `r` are paths of trace entry `index`, when the
+   * range of `r` holds `index`.
+   *
+   * A replay in the region of its first walk stands for a second walk in
+   * the same regions: each path of `r` is a path of `index`. A conditional
+   * arm that replays a walk of an enclosing region (`earlierWalkAbove`)
+   * stands for a walk that would have opened a copy of each region below
+   * the replayed node. Its paths are counted only for the entries in the
+   * region of the first walk: these entries are in the arm in the walk in
+   * full, which the selection credits to the enclosing region, as it
+   * credits the occurrence of the arm. The entries in the regions below
+   * would be in the copies, whose candidates the emission never reaches,
+   * because the arm reads the temporary of the replayed node. The paths of
+   * `r` that come from such arms (the "arm" part of its weight) are in turn
+   * counted only for the entries of the region of `r`.
+   *
+   * - `'all'`: each path of `r` is a path of `index`;
+   * - `'base'`: only the paths of `r` that do not come from an arm;
+   * - `'arm'`: each path of `r` is a path of `index`, in its arm part;
+   * - `'none'`: no path of `r` is a path of `index`.
+   *
+   * With no arm replay, the result is `'all'` or `'base'`, and the two give
+   * the same counts.
+   */
+  private replayReach(
+    r: number,
+    index: number
+  ): 'all' | 'base' | 'arm' | 'none' {
+    const replay = this.trace[r] as Replay;
+    const region = this.traceRegion[index];
+    if (replay.walkRegion === this.traceRegion[r])
+      return region === this.traceRegion[r] ? 'all' : 'base';
+    return region === replay.walkRegion ? 'arm' : 'none';
   }
 
   /**
@@ -1426,19 +1676,87 @@ class Harvester {
    * end, with a difference array for the range sums, computes every weight in
    * linear time. Weights are capped at {@link CSE_MAX_OCCURRENCE_WEIGHT} so
    * that every sum stays an exact integer.
+   *
+   * The paths of an arm that replays a walk of an enclosing region count
+   * only for some entries of its range (`replayReach`). They are summed
+   * apart, in the "arm" part of the weights, with a difference array for
+   * each region over the entries of that region.
    */
   private computeWeights(): void {
     const n = this.trace.length;
     const diff: number[] = new Array(n).fill(0);
     let running = 0;
+    // The trace indices of the entries of each region, in increasing order,
+    // and the position of each entry in the list of its region. Only needed
+    // when an arm replays a walk of an enclosing region.
+    const hasArms = this.armReplays.length > 0;
+    const entriesOf: number[][] = [];
+    const rank: number[] = [];
+    const armDiff: number[][] = [];
+    const armRunning: number[] = [];
+    if (hasArms) {
+      for (let i = 0; i < n; i++) {
+        const id = this.traceRegion[i].id;
+        let list = entriesOf[id];
+        if (list === undefined) {
+          list = [];
+          entriesOf[id] = list;
+          armDiff[id] = [];
+          armRunning[id] = 0;
+        }
+        rank[i] = list.length;
+        list.push(i);
+        armDiff[id].push(0);
+      }
+    }
+    // The first position in the list of `regionId` whose trace index is at
+    // or after `index`.
+    const lowerBound = (regionId: number, index: number): number => {
+      const list = entriesOf[regionId] ?? [];
+      let lo = 0;
+      let hi = list.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (list[mid] < index) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    // Add `weight` to the arm part of each entry of region `regionId` in
+    // the trace range `[start, end)`.
+    const addToRegion = (
+      regionId: number,
+      start: number,
+      end: number,
+      weight: number
+    ): void => {
+      if (entriesOf[regionId] === undefined) return;
+      const first = lowerBound(regionId, start);
+      const last = lowerBound(regionId, end) - 1;
+      if (last < first) return;
+      armDiff[regionId][last] += weight;
+      if (first > 0) armDiff[regionId][first - 1] -= weight;
+    };
     for (let i = n - 1; i >= 0; i--) {
       running += diff[i];
-      const weight = Math.min(1 + running, CSE_MAX_OCCURRENCE_WEIGHT);
+      const base = Math.min(1 + running, CSE_MAX_OCCURRENCE_WEIGHT);
+      let arm = 0;
+      if (hasArms) {
+        const id = this.traceRegion[i].id;
+        armRunning[id] += armDiff[id][rank[i]];
+        arm = Math.min(armRunning[id], CSE_MAX_OCCURRENCE_WEIGHT);
+      }
+      const weight = Math.min(base + arm, CSE_MAX_OCCURRENCE_WEIGHT);
+      this.traceBase[i] = base;
       this.traceWeight[i] = weight;
       const entry = this.trace[i];
       if ('replayOf' in entry) {
-        diff[entry.end - 1] += weight;
-        if (entry.start > 0) diff[entry.start - 1] -= weight;
+        if (entry.walkRegion === this.traceRegion[i]) {
+          diff[entry.end - 1] += base;
+          if (entry.start > 0) diff[entry.start - 1] -= base;
+          if (arm > 0)
+            addToRegion(this.traceRegion[i].id, entry.start, entry.end, arm);
+        } else addToRegion(entry.walkRegion.id, entry.start, entry.end, weight);
       } else entry.weight = weight;
     }
   }
@@ -1454,19 +1772,45 @@ class Harvester {
   private pathsAfter(
     index: number,
     stamp: number,
-    memo: Map<number, number>
+    memo: Map<number, [number, number]>
   ): number {
-    if (this.traceEnter[index] >= stamp) return this.traceWeight[index];
+    const [base, arm] = this.pathsAfterParts(index, stamp, memo);
+    return Math.min(base + arm, CSE_MAX_OCCURRENCE_WEIGHT);
+  }
+
+  /** {@link pathsAfter}, as its base part and its arm part (see
+   * `replayReach`). */
+  private pathsAfterParts(
+    index: number,
+    stamp: number,
+    memo: Map<number, [number, number]>
+  ): [number, number] {
+    if (this.traceEnter[index] >= stamp)
+      return [
+        this.traceBase[index],
+        this.traceWeight[index] - this.traceBase[index],
+      ];
     const cached = memo.get(index);
     if (cached !== undefined) return cached;
-    let total = 0;
+    let base = 0;
+    let arm = 0;
     this.forEachCoveringReplay(index, (replay) => {
-      total += this.pathsAfter(replay, stamp, memo);
+      const reach = this.replayReach(replay, index);
+      if (reach === 'none') return true;
+      const [b, a] = this.pathsAfterParts(replay, stamp, memo);
+      if (reach === 'arm') arm += b + a;
+      else {
+        base += b;
+        if (reach === 'all') arm += a;
+      }
       return true;
     });
-    total = Math.min(total, CSE_MAX_OCCURRENCE_WEIGHT);
-    memo.set(index, total);
-    return total;
+    const result: [number, number] = [
+      Math.min(base, CSE_MAX_OCCURRENCE_WEIGHT),
+      Math.min(arm, CSE_MAX_OCCURRENCE_WEIGHT),
+    ];
+    memo.set(index, result);
+    return result;
   }
 
   /**
@@ -1487,6 +1831,12 @@ class Harvester {
    * occurrence of `outer` exactly when the paths of `r` are — the same
    * question, asked of `r`. In a tree where no node object is reached twice
    * there is no replay, and the test is the containment of each record.
+   *
+   * A replay none of whose paths are paths of the record (`replayReach`)
+   * is passed over. For an arm that replays a walk of an enclosing region,
+   * the copy of the replayed node is the occurrence record of the arm, not
+   * the record of the first walk: so the record of the replayed node counts
+   * only when the record of the arm is in `outer`.
    */
   private everyPathInside(
     inner: MutableOccurrence[],
@@ -1507,6 +1857,11 @@ class Harvester {
       if (last < 0 || this.traceExit[index] >= outer[last].exit) return -1;
       return this.traceIndex.get(outer[last])!;
     };
+    let outerIndices: Set<number> | undefined;
+    const isOuter = (index: number): boolean => {
+      outerIndices ??= new Set(outer.map((occ) => this.traceIndex.get(occ)!));
+      return outerIndices.has(index);
+    };
     const memo = new Map<number, boolean>();
     const inside = (index: number): boolean => {
       const cached = memo.get(index);
@@ -1515,9 +1870,15 @@ class Harvester {
       const result =
         c >= 0 &&
         this.forEachCoveringReplay(index, (r) => {
+          const reach = this.replayReach(r, index);
+          if (reach === 'none') return true;
           const replay = this.trace[r] as Replay;
-          const last = replay.recorded ? replay.end : replay.end - 1;
-          return (c >= replay.start && c <= last) || inside(r);
+          if (c >= replay.start && c < replay.end) return true;
+          if (c === replay.end && replay.recorded) {
+            // The record of the arm comes right after its replay.
+            if (reach !== 'arm' || isOuter(r + 1)) return true;
+          }
+          return inside(r);
         });
       memo.set(index, result);
       return result;
@@ -2692,7 +3053,7 @@ class Harvester {
           const served: MutableOccurrence[] = [];
           let servedPaths = 0;
           const first = occurrences[0].enter;
-          const after = new Map<number, number>();
+          const after = new Map<number, [number, number]>();
           for (const occ of cls.occurrences) {
             if (occ.region === region) continue;
             // A record before the first own occurrence can still stand for

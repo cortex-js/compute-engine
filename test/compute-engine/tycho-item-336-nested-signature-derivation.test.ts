@@ -428,7 +428,7 @@ describe('TYCHO ITEM 336: WRITES TO SCRATCH BINDINGS', () => {
     );
     const result = (t: string) => t.slice(t.lastIndexOf('->') + 3);
     expect(result(derived)).toBe(result(direct.type.toString()));
-    expect(result(derived)).toBe('list<number> | missing | number');
+    expect(result(derived)).toBe('list<number> | number');
   });
 });
 

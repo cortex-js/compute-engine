@@ -254,7 +254,12 @@ function assignSlots(
 
 /**
  * The first name of `params` that `expr` assigns (`Assign(x, …)` with `x` in
- * `params`), at any depth, or `undefined` when it assigns none.
+ * `params`), at any depth, or `undefined` when it assigns none. In a `Block`,
+ * the statements after a `Declare` of a name of `params` see a local of the
+ * block with that name, so an assignment to it there does not write the
+ * parameter. A statement before the `Declare` still writes the parameter:
+ * the interpreter refuses that order (`read-before-declaration`), so the
+ * compiled function declines too.
  */
 function wgslAssignedParameter(
   expr: Expression,
@@ -267,9 +272,20 @@ function wgslAssignedParameter(
     params.has(expr.ops[0].symbol)
   )
     return expr.ops[0].symbol;
+  let visible = params;
   for (const op of expr.ops) {
-    const found = wgslAssignedParameter(op, params);
+    const found = wgslAssignedParameter(op, visible);
     if (found !== undefined) return found;
+    if (
+      expr.operator === 'Block' &&
+      isFunction(op, 'Declare') &&
+      isSymbol(op.ops[0]) &&
+      visible.has(op.ops[0].symbol)
+    ) {
+      const rest = new Set(visible);
+      rest.delete(op.ops[0].symbol);
+      visible = rest;
+    }
   }
   return undefined;
 }
@@ -594,8 +610,10 @@ export class WGSLTarget extends GPUShaderTarget {
    * (`wgslAssignedParameter`); this route receives only the compiled body, so
    * it checks the emitted source: a line that starts with `<parameter> = `
    * is an assignment to that parameter, since a WGSL comparison is spelled
-   * `==`. The test is conservative: a write to a block local that has the
-   * same name as a parameter also declines.
+   * `==`. A block local that has the name of a parameter is spelled with a
+   * fresh name (`compileBlock` in `base-compiler.ts`), also in a nested
+   * block and also when a local of an enclosing block has the same name, so
+   * a write to it does not match the test.
    */
   protected declareGPUFunction(
     name: string,

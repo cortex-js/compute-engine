@@ -268,7 +268,11 @@ describe('Python keeps the statement-form harvest of a body `If`', () => {
     // harvested as regions that bind a temporary.
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
-    const big = ['Multiply', ['Sin', ['Add', 'x', 1]], ['Cos', ['Add', 'x', 2]]];
+    const big = [
+      'Multiply',
+      ['Sin', ['Add', 'x', 1]],
+      ['Cos', ['Add', 'x', 2]],
+    ];
     const expr = ce.box([
       'If',
       ['Less', 0, 'x'],
@@ -282,7 +286,9 @@ describe('Python keeps the statement-form harvest of a body `If`', () => {
     ]);
     const result = compile(expr, { to: 'python' });
     expect(result.success).toBe(true);
-    expect(result.code).toContain('if a < x:');
+    // Python has no block scope, so the block local `a` is spelled with a
+    // fresh name (`compilePythonStatements`).
+    expect(result.code).toContain('if _tv1 < x:');
   });
 });
 

@@ -9343,7 +9343,11 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (parts !== undefined) return `Math.atan2(${parts.im}, ${parts.re})`;
       return complexUnary(target, '_SYS.carg', compile(args[0]));
     }
-    return `(${compile(args[0])} >= 0 ? 0 : Math.PI)`;
+    // A real value's argument is 0 (x ≥ 0) or π (x < 0), and NaN for NaN,
+    // as `evaluate()` gives. `Math.atan2(0, x)` is all three, and reads the
+    // operand once. The `+ 0` makes a negative zero `+0`: the interpreter
+    // has no signed zero, and `Math.atan2(0, -0)` is π.
+    return `Math.atan2(0, (${compile(args[0])}) + 0)`;
   },
   Conjugate: (args, compile, target) => {
     if (BaseCompiler.isComplexValued(args[0]))

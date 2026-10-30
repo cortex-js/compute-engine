@@ -652,7 +652,9 @@ describe('GLSL vector-valued block locals declare a vecN', () => {
     ]);
     const code = glsl.compile(expr, { vars: { x: 'x', y: 'y' } }).code;
     expect(code).toContain('vec2 p;');
-    expect(code).toContain('float p;');
+    // The inner local hides a name bound outside its block, so it gets a
+    // fresh name (`compileBlock`); its declared type is still `float`.
+    expect(code).toContain('float _tv1;\n  _tv1 = x;');
   });
 });
 

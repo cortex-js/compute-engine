@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-649.
+Next free reference: CE-650.
 
 **Entry format.**
 
@@ -784,6 +784,47 @@ the evaluation-cache audit (`docs/plans/2026-10-28-evaluation-cache-audit-handof
 - **CE-621.4** A synchronous throw at the start of `evaluateAsync` does not
   release that evaluation's host-derived source values (only memory, until
   the engine is idle).
+
+### CE-649. An async host handler that evaluates the node containing it waits on itself
+
+**Status:** open; defect (a hang), needs a design decision. Found 2026-10-30
+by the review of the store-guard work (evaluation-cache plan, step 1); the
+same on HEAD `00869b80a`.
+
+When `evaluateAsync()` reads a lazy collection node, a second caller of the
+same node with the same signal, frames and effects joins the walk in progress
+(`_lazyValuePending`, `boxed-expression/boxed-function.ts`) instead of
+starting its own. If a host operator inside the node has an `evaluateAsync`
+handler that itself calls `evaluateAsync()` on that node, the handler joins
+the walk that is waiting for the handler, and neither promise settles.
+Repro: a host operator `g`, `pure: true`, whose `evaluateAsync` handler runs
+`await node.evaluateAsync(); return 5`, where `node` is
+`Reverse(List(1, g()))`; `node.evaluateAsync()` never settles. The
+synchronous route ends: it stops the recursion and gives `[5,1]`.
+
+Three attempted fixes each gave a new defect, so a fix needs a design:
+
+- Refusing a join when the caller has the same async evaluation number as
+  the walk misses a handler that calls after an `await` (it gets a new
+  number), and made a handler that always re-evaluates its node recurse
+  without limit (each refused caller starts a walk that is not shared).
+- Refusing a join while the walk has a pending host handler misses a
+  deadlock through two separately started nested walks (an outer walk joins
+  an inner walk, whose handler then awaits the outer node).
+- Limiting the number of open async walks per node counts unrelated
+  concurrent callers as recursion; at the limit the synchronous fallback
+  does not run async-only operators and gives a wrong value.
+
+Options:
+
+- (a) Carry the evaluation context across `await` (`AsyncLocalStorage` in
+  Node.js; browsers have no equivalent), so that a handler's nested call is
+  known to belong to the walk it would wait on. The engine then refuses that
+  join and stops the recursion as the synchronous route does.
+- (b) Never join a walk for a caller that host code started. Two concurrent
+  evaluations of one node then each run the node's host code, where today
+  they share one run.
+- If nothing is decided: the hang stays, as on HEAD.
 
 ### CE-628. The derivative cache keeps a value that host code computed
 
@@ -3234,39 +3275,11 @@ An expression with 160 terms `g_j · g_j`, where each `g_j` is 30 nested
 `Sin`/`Add` levels (about 4,800 distinct nodes, no conditional), takes about
 650 ms in `harvestCse` and 1.6 s for the whole `javascript` compile at HEAD
 `0f1020490`. The number of nodes is small, so a linear harvest would take a
-few milliseconds. Probe: `cap.mts` with the arguments `0 160 30` (the
-CE-595 review scripts; the first argument is the depth of the conditional
-chain, here none). Expected: the harvest time is about linear in the number of
-distinct nodes. Measure where the time goes before changing the code.
-
-### CE-583. WGSL: a list held by a `Block` local is copied again at each read
-
-**Status:** open; defect (memory and speed). Found 2026-10-27 while fixing
-CE-574. The fix needs a change in `base-compiler.ts`.
-
-On WGSL, a read with a proven index of a list held by a `Block` local emits a
-second function-scope copy before the statement (`var U = …; var _tv1 = U;
-… _tv1[k - 1]`), once per read. The local is already a `var`, which WGSL
-can index with a run-time index, so the copy doubles the memory and the work
-for nothing. The compiler cannot tell a block-local `var` from a function
-parameter of the same name, and a parameter (a value) must be copied before a
-dynamic index. Expected: the block-local binding is marked as a variable, and
-its reads index it directly. A written input already does this (CE-574).
-
-### CE-595. The common-subexpression pass takes exponential time on a graph that reuses a value inside an `If` arm
-
-**Status:** open; defect (performance). Found 2026-10-28 while fixing CE-584.
-
-With `e_0 = sin(x)` and `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))`, the
-emitted code is linear in the depth (the `If` arm reuses the binding made by
-the first argument), but the pass that finds shared subexpressions
-(`selectCandidates`, `pathsAfter` and `forEachCoveringReplay` in
-`compilation/cse.ts`) takes 1.6 s at depth 12, 8 s at depth 13 and 36 s at
-depth 14. The graph `e_{k+1} = When(sin(e_k), e_k > k)` has the same problem
-(126 ms at depth 10, 2.1 s at depth 12, 9.8 s at depth 13, for 1,510
-characters of code). The size limit of CE-584 runs before the pass and lets
-these graphs through, because their written size is small. Expected: the pass is linear (or
-close to it) in the number of distinct nodes, as the written-size estimate is.
+few milliseconds. To reproduce, build each `g_j` once with `ce.function()` so
+that the nodes are shared, and time `harvestCse` (in
+`src/compute-engine/compilation/cse.ts`) on the sum. Expected: the harvest
+time is about linear in the number of distinct nodes. Measure where the time
+goes before changing the code.
 
 ### CE-602. Re-boxing an invalid function literal over a shared graph is exponential
 
@@ -3281,25 +3294,6 @@ error. Both assignments end in an error (`Invalid function …` for the
 recursive literal, a type error for the declared one), but only after the
 exponential re-box. Expected: the raw copy canonicalizes the valid nodes
 around an `Error` itself, so the route is linear for an invalid literal too.
-
-### CE-593. GPU targets: a point declared `list<tuple<number, number>> | tuple<number, number>` declines with a "missing" position
-
-**Status:** open; defect. Reported 2026-10-28 by Tycho (session tycho-3b):
-some Tycho points have this union type, and their rows decline on the shader
-targets.
-
-Repro: declare `P: list<tuple<number, number>> | tuple<number, number>`,
-assign `(1, 2)`, then `compile(ce.parse('P.x + y'), { to: 'glsl', fallback:
-false })` throws `Could not compile an object-domain absent ('missing')
-position (type 'list<number> | missing | number') to target 'glsl': it has no
-object null representation. Discharge with 'Coalesce' first.` The `javascript`
-target compiles it (`_SYS.pointComponent(_val_P, 0)` under a broadcast).
-Expected: on a shader target, a symbol whose union admits a point and a list of
-points is read by its value when the value is known and fixed (a point is a
-`vec2`), and otherwise declines with a message that names the union and the
-declaration to write (`tuple<real, real>`), not an internal "missing" position.
-Find also where `missing` enters the type of `P.x`: a component of a
-`tuple<number, number>` cannot be absent.
 
 ### CE-592. `compileFieldFunction()`: a user function that reads a parameter with an inferred integer type declines
 

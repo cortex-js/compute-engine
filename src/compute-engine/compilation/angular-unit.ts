@@ -8,6 +8,8 @@
  * `compile()` entry.
  */
 export {
+  ABS_ARG_REFUSAL,
   containsDerivativeHead,
   rewriteAngularUnit,
+  UNIT_DEPENDENT_HEADS,
 } from '../symbolic/angular-unit.js';

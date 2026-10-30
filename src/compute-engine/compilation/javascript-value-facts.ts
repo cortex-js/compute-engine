@@ -180,6 +180,45 @@ function isScalarParam(
   return false;
 }
 
+// The names that a `Block` binds to a local variable that the emitted code
+// declares (`var U: array<f32, 10>;` in WGSL), keyed on the bound-variable
+// set of the block. A function parameter is not one: in WGSL a parameter is
+// a value, which an expression cannot index with a run-time index.
+const variableLocals = new WeakMap<ReadonlySet<string>, ReadonlySet<string>>();
+
+/**
+ * Record that, inside the statement list compiling under `target`, each of
+ * `names` is a local variable that the emitted code declares.
+ */
+export function recordVariableLocals(
+  target: CompileTarget<Expression>,
+  names: ReadonlyArray<string>
+): void {
+  if (target.boundVars && names.length > 0)
+    variableLocals.set(target.boundVars, new Set(names));
+}
+
+/**
+ * Is `name`, read under `boundVars`, a local variable that a `Block`
+ * declares (`recordVariableLocals`)? The search goes out through the
+ * enclosing scopes, and stops at a frame that binds the name without
+ * recording it (a function parameter or a loop index of the same name),
+ * because that frame binds a different variable.
+ */
+export function isVariableLocal(
+  name: string,
+  boundVars: ReadonlySet<string> | undefined
+): boolean {
+  let scope = boundVars;
+  while (scope !== undefined) {
+    if (variableLocals.get(scope)?.has(name) === true) return true;
+    const link = scopeParents.get(scope);
+    if (link === undefined || link.added.includes(name)) return false;
+    scope = link.parent;
+  }
+  return false;
+}
+
 // Fixed-width scalar points supplied by proven calls to private helpers.
 const constructedPointParams = new WeakMap<
   ReadonlySet<string>,

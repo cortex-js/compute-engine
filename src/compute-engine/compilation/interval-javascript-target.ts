@@ -280,7 +280,10 @@ function assignedLiteral(
   // 2)` to an element) would otherwise bypass that implementation.
   if (target.unrollSkipHeads?.has(h) === true) return undefined;
   target.symbolDeps?.add(id);
-  return value;
+  // The value is rewritten for the angular unit, as `tryFoldKnownSymbol`
+  // rewrites it (`foldedValueInRadians`): the expression around it is
+  // already in the radian convention.
+  return BaseCompiler.foldedValueInRadians(value, target);
 }
 
 /** The operands of a literal `List`/`Tuple` node — written inline or held as
@@ -1419,8 +1422,16 @@ function assertSpelledLocalCallsConsumed(expr: Expression): void {
   // The names that a statement binds to a function literal whose body value
   // was spelled as a collection.
   const names = new Set<string>();
+  // An expression is a graph: a node object can have several parents. Each
+  // walk visits a node object once (once for each value of `consumed` in
+  // `check`), so the time is linear in the number of distinct node objects,
+  // not in the number of paths. The result is the same: a second visit of a
+  // node with the same arguments finds the same names and throws the same
+  // error, and the first visit has already done it.
+  const collected = new Set<Expression>();
   const collect = (e: Expression): void => {
-    if (!isFunction(e)) return;
+    if (!isFunction(e) || collected.has(e)) return;
+    collected.add(e);
     if (
       (e.operator === 'Assign' || e.operator === 'Declare') &&
       isSymbol(e.ops[0]) &&
@@ -1432,7 +1443,12 @@ function assertSpelledLocalCallsConsumed(expr: Expression): void {
   collect(expr);
   if (names.size === 0) return;
 
+  const checkedConsumed = new Set<Expression>();
+  const checkedOther = new Set<Expression>();
   const check = (e: Expression, consumed: boolean): void => {
+    const checked = consumed ? checkedConsumed : checkedOther;
+    if (checked.has(e)) return;
+    checked.add(e);
     if (isSymbol(e) && names.has(e.symbol))
       throw new Error(
         `Could not compile \`${e.symbol}\`: the block-local function ` +
@@ -2208,6 +2224,8 @@ function resetIntervalConditionals(target: CompileTarget<Expression>): void {
   const naming = BaseCompiler.namingContext(target);
   INTERVAL_CONDITION_VARS.delete(naming);
   INTERVAL_RESULT_CODES.delete(naming);
+  INTERVAL_CLAMP_RANGES.delete(naming);
+  INTERVAL_ARM_TABLES.delete(naming);
 }
 
 /**
@@ -2412,8 +2430,19 @@ function intervalCanClip(e: Expression): boolean {
  * The symbol's value is its own compiled code (`target.var`), so a symbol
  * bound by an enclosing construct (a `Sum` index, a parameter) is clamped as
  * that construct resolves it, and a name the arm binds again (a `Sum` inside
- * the arm) is resolved by that binder first. The arm compiles without the CSE
- * pass, whose temporaries would hold the unclamped values.
+ * the arm) is resolved by that binder first. The arm compiles under a CSE
+ * harvest of its own (`BaseCompiler.withOwnCseHarvest`): it shares its
+ * repeated nodes with itself, and reads no temporary of the code around it,
+ * which holds a value over the inputs that are not clamped. Without the
+ * pass, an arm over a shared graph was written once per path: with
+ * `s_{k+1} = s_k + sin(s_k)` and the branches `sqrt(s_20)` and `ln(s_20)`,
+ * about 2^20 copies of `s_0`.
+ *
+ * A clamp that cannot change the value of the symbol is not written
+ * (`intervalClampRanges`), and the arm then reads the temporaries of the
+ * code around it as an arm that is not narrowed does. The arms nested in a
+ * narrowed arm are functions of the table of that arm (`IntervalArmTable`),
+ * so each one is compiled once.
  *
  * An arm defined for every input (`intervalCanClip`) is not narrowed: there
  * is no domain to clip, and the clamp would only cost. Neither is an arm whose
@@ -2426,18 +2455,52 @@ function compileNarrowedIntervalArm(
 ): string | undefined {
   if (bounds.size === 0 || !intervalCanClip(val)) return undefined;
   const ce = val.engine;
-  const params: string[] = [];
-  const clamps: string[] = [];
-  let inner: CompileTarget<Expression> = { ...target, cse: undefined };
+  const ranges = intervalClampRanges(target);
+  // Each symbol to clamp: its clamped value, and the range of that value.
+  const clamped = new Map<string, { code: string; range: IntervalRange }>();
   for (const [name, { symbol, lo, hi }] of bounds) {
     if (!val.symbols.includes(name)) continue;
     if (lo !== undefined && hi !== undefined && lo > hi) return undefined;
     let code = BaseCompiler.compileValueOperand(symbol, target);
-    if (hi !== undefined)
+    // A clamp that cannot change the value is left out (see
+    // `intervalClampRanges`). An arm nested in a narrowed arm is often
+    // narrowed by a bound that the enclosing clamp already ensures:
+    // `If(x > 2, f(If(x > 1, g(x), 0)), 0)`. Without a clamp the inner arm
+    // keeps the symbol of the enclosing arm, and reads the temporaries of
+    // the CSE harvest of the enclosing arm, which are over the same value.
+    // With a clamp, it is compiled again in full, under a harvest of its
+    // own: in `e_{k+1} = Arctan2(e_k, If(x > k, e_k, 0))` the code doubled
+    // at each level.
+    const known = ranges.get(code) ?? { lo: -Infinity, hi: Infinity };
+    const clampHi = hi !== undefined && !intervalBoundHolds(known.hi, hi);
+    const clampLo = lo !== undefined && !intervalBoundHolds(lo, known.lo);
+    if (!clampHi && !clampLo) continue;
+    let range: IntervalRange = known;
+    if (clampHi) {
       code = `_IA.min(${code}, ${BaseCompiler.compileValueOperand(ce.number(hi), target)})`;
-    if (lo !== undefined)
+      range = { lo: Math.min(range.lo, hi), hi: Math.min(range.hi, hi) };
+    }
+    if (clampLo) {
       code = `_IA.max(${code}, ${BaseCompiler.compileValueOperand(ce.number(lo), target)})`;
+      range = { lo: Math.max(range.lo, lo), hi: Math.max(range.hi, lo) };
+    }
+    clamped.set(name, { code, range });
+  }
+  if (clamped.size === 0) return undefined;
+
+  // In the scope of an enclosing narrowed arm, the arm is a call of a
+  // function of the arm table of that arm (see `IntervalArmTable`).
+  const tables = intervalArmTables(target);
+  const table = tables.at(-1);
+  if (table !== undefined && inIntervalArmTableScope(table, target))
+    return compileTabledIntervalArm(val, clamped, table, target);
+
+  const params: string[] = [];
+  const clamps: string[] = [];
+  let inner: CompileTarget<Expression> = { ...target };
+  for (const [name, { code, range }] of clamped) {
     const t = BaseCompiler.tempVar(target);
+    ranges.set(t, range);
     params.push(t);
     clamps.push(code);
     const outerVar = inner.var;
@@ -2447,9 +2510,238 @@ function compileNarrowedIntervalArm(
       ...BaseCompiler.withBoundScope(inner, [t]),
     };
   }
-  if (params.length === 0) return undefined;
-  const arm = BaseCompiler.compileValueOperand(val, inner);
-  return `((${params.join(', ')}) => ${arm})(${clamps.join(', ')})`;
+  const own: IntervalArmTable = {
+    base: inner,
+    scopes: new Set([inner.var]),
+    functions: new Map(),
+    definitions: [],
+  };
+  tables.push(own);
+  let arm: string;
+  try {
+    // The code around the arm can give a node of the arm the name of a
+    // value computed over the inputs that are not clamped (a loop-invariant
+    // binding of an enclosing `Sum`), so no such name is read in the arm.
+    arm = BaseCompiler.withoutNodeCodeOverrides(() =>
+      BaseCompiler.withOwnCseHarvest(val, inner, () =>
+        BaseCompiler.compileValueOperand(val, inner)
+      )
+    );
+  } finally {
+    tables.pop();
+  }
+  if (own.definitions.length === 0)
+    return `((${params.join(', ')}) => ${arm})(${clamps.join(', ')})`;
+  return (
+    `((${params.join(', ')}) => { const ${own.definitions.join(', ')}; ` +
+    `return ${arm}; })(${clamps.join(', ')})`
+  );
+}
+
+/**
+ * The functions that compile the narrowed arms nested in one narrowed arm
+ * (the owner of the table), with the scope that they are defined in.
+ *
+ * A narrowed arm whose clamp is not left out (see `intervalClampRanges`) is
+ * compiled under a CSE harvest of its own, so it does not share its nodes
+ * with the code around it. When narrowed arms are nested, as in
+ * `e_{k+1} = e_k + If(x > k, e_k, 0) + If(x < -k, Sqrt(e_k), 1)`, the arm of
+ * `e_k` holds the arms of `e_{k-1}`, which hold the arms of `e_{k-2}`, and
+ * so on: the same arm is reached through each path, and compiled again each
+ * time, so the code grows exponentially with the depth.
+ *
+ * So, in the owner, a nested narrowed arm is compiled once to a function of
+ * the clamped values of its symbols, `(p1, p2) => arm`, and each occurrence
+ * is a call of the function with the clamped values: `f(_IA.max(_tv1, 2))`.
+ * The function is a function of the arm and of the range of each parameter
+ * (`intervalClampRanges`), because the range decides which clamps of the
+ * arms nested in it are left out. The values are those of the code without
+ * the functions: each function computes the arm with the same operations
+ * on the same values, and the call is evaluated only where the arm is.
+ *
+ * The functions are defined at the start of the body of the owner, so they
+ * can read what the owner can read. A narrowed arm uses the table only in
+ * the scope of the owner or of one of its functions
+ * (`inIntervalArmTableScope`): a binder or a block between the owner and the
+ * arm (a `Sum` in the arm) binds names that the functions cannot read, and
+ * the arm is then the owner of a table of its own.
+ */
+/**
+ * Whether `target` is in the scope of the owner of `table` or of one of its
+ * functions, so that a function of the table resolves each name as `target`
+ * does: the same `var` (see `IntervalArmTable`), the same function-valued
+ * locals (a block in the arm can bind a local `f` without a new `var`, and a
+ * function of the table would call the engine-level `f`), and no bound name
+ * other than those of the owner and the clamp parameters.
+ */
+function inIntervalArmTableScope(
+  table: IntervalArmTable,
+  target: CompileTarget<Expression>
+): boolean {
+  const base = table.base;
+  if (!table.scopes.has(target.var)) return false;
+  if (
+    target.localFunctions !== base.localFunctions ||
+    target.lexicalFunctions !== base.lexicalFunctions ||
+    target.reboundFunctions !== base.reboundFunctions
+  )
+    return false;
+  const ranges = intervalClampRanges(target);
+  for (const name of target.boundVars ?? [])
+    if (!(base.boundVars?.has(name) ?? false) && !ranges.has(name))
+      return false;
+  return true;
+}
+
+type IntervalArmTable = {
+  /** The target that the owner compiles its arm with. */
+  readonly base: CompileTarget<Expression>;
+  /** The `var` of `base` and of the target of each function. */
+  readonly scopes: Set<CompileTarget<Expression>['var']>;
+  /** Per arm, per key of the ranges of the parameters: the function name. */
+  readonly functions: Map<Expression, Map<string, string>>;
+  /** The definitions, `name = (params) => arm`, in creation order. */
+  readonly definitions: string[];
+};
+
+/** The tables of the owners being compiled, innermost last, per
+ * compilation (keyed by the naming context). */
+const INTERVAL_ARM_TABLES = new WeakMap<object, IntervalArmTable[]>();
+
+function intervalArmTables(
+  target: CompileTarget<Expression>
+): IntervalArmTable[] {
+  const naming = BaseCompiler.namingContext(target);
+  let tables = INTERVAL_ARM_TABLES.get(naming);
+  if (tables === undefined) {
+    tables = [];
+    INTERVAL_ARM_TABLES.set(naming, tables);
+  }
+  return tables;
+}
+
+/**
+ * The narrowed arm `val` as a call of a function of `table` (see
+ * `IntervalArmTable`). `clamped` maps each symbol of `val` that is clamped
+ * here to its clamped value and the range of that value.
+ *
+ * The parameters of the function are the symbols of `val` that are clamped
+ * here, and the symbols of `val` whose value in this scope is a clamped
+ * value of an enclosing arm (a name in `intervalClampRanges`). Every other
+ * symbol of `val` has the same value in this scope as in the scope of the
+ * owner, where the function is defined: the target of a function resolves
+ * a symbol that is not one of its parameters as the owner does.
+ */
+function compileTabledIntervalArm(
+  val: Expression,
+  clamped: ReadonlyMap<string, { code: string; range: IntervalRange }>,
+  table: IntervalArmTable,
+  target: CompileTarget<Expression>
+): string {
+  const ranges = intervalClampRanges(target);
+  const names: string[] = [];
+  const args: string[] = [];
+  const argRanges: IntervalRange[] = [];
+  for (const name of new Set(val.symbols)) {
+    const own = clamped.get(name);
+    if (own !== undefined) {
+      names.push(name);
+      args.push(own.code);
+      argRanges.push(own.range);
+      continue;
+    }
+    const code = target.var(name);
+    const range = code === undefined ? undefined : ranges.get(code);
+    if (code === undefined || range === undefined) continue;
+    names.push(name);
+    args.push(code);
+    argRanges.push(range);
+  }
+  const end = (v: number): string => (Object.is(v, -0) ? '-0' : `${v}`);
+  const key = names
+    .map((name, i) => `${name}:${end(argRanges[i].lo)}:${end(argRanges[i].hi)}`)
+    .join('|');
+  let byKey = table.functions.get(val);
+  if (byKey === undefined) {
+    byKey = new Map();
+    table.functions.set(val, byKey);
+  }
+  let fn = byKey.get(key);
+  if (fn === undefined) {
+    fn = BaseCompiler.tempVar(target);
+    const params = names.map(() => BaseCompiler.tempVar(target));
+    params.forEach((p, i) => ranges.set(p, argRanges[i]));
+    const baseVar = table.base.var;
+    const fnVar: CompileTarget<Expression>['var'] = (id) => {
+      const i = names.indexOf(id);
+      return i >= 0 ? params[i] : baseVar(id);
+    };
+    const fnTarget: CompileTarget<Expression> = {
+      ...table.base,
+      var: fnVar,
+      ...BaseCompiler.withBoundScope(table.base, params),
+    };
+    table.scopes.add(fnVar);
+    // Recorded before the body is compiled: an arm is not nested in itself,
+    // so the body does not call the function.
+    byKey.set(key, fn);
+    // As for the owner, no name of a value computed by the code around the
+    // call is read: it is over other inputs, and the function is defined
+    // outside that code (a `Sum` that binds a loop invariant in its own
+    // body), so the name is not in scope there.
+    const body = BaseCompiler.withoutNodeCodeOverrides(() =>
+      BaseCompiler.withOwnCseHarvest(val, fnTarget, () =>
+        BaseCompiler.compileValueOperand(val, fnTarget)
+      )
+    );
+    table.definitions.push(`${fn} = (${params.join(', ')}) => ${body}`);
+  }
+  return `${fn}(${args.join(', ')})`;
+}
+
+/**
+ * The range of the bounds of the value of each clamp parameter that
+ * `compileNarrowedIntervalArm` introduced, per compilation (keyed by the
+ * naming context, as `INTERVAL_CONDITION_VARS`): the parameter name ↦ `lo`
+ * and `hi` such that both ends of the interval it holds are in `[lo, hi]`
+ * (or are `NaN`).
+ *
+ * `_IA.min(v, a)` and `_IA.max(v, a)` take the minimum or the maximum of
+ * each end of `v` and of the point `a`, and keep the kind of `v` and its
+ * flags (`partial`, the location of a jump). So when each end of `v` is
+ * already at most `a`, `_IA.min(v, a)` is the same value as `v`: same ends,
+ * same kind, same flags. A clamp of a parameter whose range shows this is
+ * the identity, and is not written. The range of a new parameter is the
+ * range of the clamped value: `_IA.min` maps `[lo, hi]` to
+ * `[min(lo, a), min(hi, a)]` and `_IA.max` to `[max(lo, a), max(hi, a)]`.
+ * Any other value (an input, a symbol bound by a binder) has no range.
+ */
+const INTERVAL_CLAMP_RANGES = new WeakMap<object, Map<string, IntervalRange>>();
+
+/** Bounds on both ends of an interval (see `INTERVAL_CLAMP_RANGES`). */
+type IntervalRange = { lo: number; hi: number };
+
+function intervalClampRanges(
+  target: CompileTarget<Expression>
+): Map<string, IntervalRange> {
+  const naming = BaseCompiler.namingContext(target);
+  let ranges = INTERVAL_CLAMP_RANGES.get(naming);
+  if (ranges === undefined) {
+    ranges = new Map();
+    INTERVAL_CLAMP_RANGES.set(naming, ranges);
+  }
+  return ranges;
+}
+
+/**
+ * Whether `a ≤ b` such that `Math.min(a, b)` is `a` and `Math.max(a, b)` is
+ * `b`: then a value at most `a` is not changed by `Math.min(·, b)`, and a
+ * value at least `b` is not changed by `Math.max(·, a)`. `Math.min(0, -0)`
+ * is `-0` and `Math.max(-0, 0)` is `0`, so two equal numbers hold only when
+ * they are the same zero.
+ */
+function intervalBoundHolds(a: number, b: number): boolean {
+  return a < b || (a === b && Object.is(a, b));
 }
 
 /**
@@ -6135,6 +6427,9 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // This pass also writes the norm of a point with a list component as its
     // explicit form (`explicitBroadcastPointNorm`), before the common
     // subexpressions are read, so the two share them.
+    // The memos are emptied and the captured definitions are checked before
+    // the substitution removes the calls (`beginRootPreprocessing`).
+    BaseCompiler.beginRootPreprocessing(expr, target);
     expr = unrollFixedWidthCollections(
       BaseCompiler.inlineCollectionValuedCallsAtRoot(expr, target),
       {
@@ -6268,7 +6563,7 @@ function compileToIntervalTarget(
       code: '',
       error: (e as Error).message,
       diagnostic: compileDiagnosticOf(e),
-      ...BaseCompiler.modeReport(),
+      ...BaseCompiler.declineReport(),
     } as CompilationResult<'interval-js', IntervalValue>;
   }
   // Prepend any user-defined function definitions accumulated while compiling
