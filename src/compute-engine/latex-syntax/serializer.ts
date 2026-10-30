@@ -649,7 +649,13 @@ export class Serializer {
       this.level -= 1;
       this.depth -= 1;
       return result ?? '';
-    } catch {}
+    } catch {
+      // Any error thrown while serializing this sub-expression becomes an
+      // empty string, and the caller does not see the error. For this
+      // reason, an invalid option must be reported before serialization
+      // starts (see `validateStyleOptions()` and `validateDisplayDigits()`),
+      // not by a throw from here.
+    }
 
     this.level -= 1;
     this.depth -= 1;

@@ -2866,7 +2866,17 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     latexTrigger: ['\\left', '['],
     parse: parseAt('\\right', ']'),
   },
-  // When-restriction: `expr\left\{cond\right\}` → `When(expr, cond)` (D3)
+  // When-restriction: `expr\left\{cond\right\}` → `When(expr, cond)`.
+  //
+  // Precedence 800 binds tighter than juxtaposition and prefix minus, so the
+  // restriction applies to the last factor only: `2x\{c\}` is
+  // `Multiply(2, When(x, c))` and `-x\{c\}` is `Negate(When(x, c))`. A power
+  // or a fraction before it is restricted whole. This matches Desmos, which
+  // reads `\{c\}` as a factor whose value is 1 when `c` holds and undefined
+  // otherwise (`3\{c\}` is 3), so `2x\{c\}` is a product there too. A masked
+  // value is `NaN`, which propagates through the product, so every grouping
+  // gives the same value. User decision 2026-10-30 (ROADMAP CE-650, closed):
+  // keep this precedence.
   {
     name: 'When',
     kind: 'postfix',

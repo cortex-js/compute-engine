@@ -22,8 +22,13 @@ Useful commands:
 | ---------------------------------- | ------------------------------------------------------------------------------------------- |
 | `npm run build`                    | Bundle the extension, language server, debug adapter/worker and inline runner into `dist/`. |
 | `npm run watch`                    | Same, rebuilding on change.                                                                 |
-| `npm test`                         | Build, then run the end-to-end DAP test suite (`test/dap.test.mjs`).                        |
+| `npm test`                         | Build, then run the DAP and LSP test suites (`test/dap.test.mjs`, `test/lsp.test.mjs`).     |
 | `./node_modules/.bin/tsc --noEmit` | Type-check the extension (esbuild does the emit).                                           |
+
+The extension sources do not follow the root prettier configuration. Do not
+run the repository's prettier on files under `vscode-epsil/`:
+`npx prettier --check vscode-epsil/src/server.ts` reports changes, and
+`--write` reformats a large part of the file.
 
 The server is transport-agnostic (`vscode-languageserver` picks its transport
 from the command line), so it can also be driven directly for debugging:

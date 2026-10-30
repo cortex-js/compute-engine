@@ -46,6 +46,22 @@ rebuilt from a result (`subs()`) is a new call; both resolve their head as
 before (`EVALUATED_UNRESOLVED_CALLS`, `boxed-expression/boxed-function.ts`;
 decided in `docs/plans/2026-10-21-function-declaration-hoisting.md`, rule 1).
 
+An `Apply` whose callee has the type `unknown` (an undeclared head, not a
+`Function` or a `Block`, and without a wildcard) holds the callee as a function
+value: `Apply(g(f), x)` stays as written, and once `g` is assigned
+`(a, b) ↦ a + b`, it evaluates to `f + x` (the partial application `g(f)` is a
+curried function). The unknowns of such a callee are not read as the
+parameters of a shorthand function literal, which would make the answer change
+when `g` gets a value (`isHeldCallee()` in `function-utils.ts`; user decision
+2026-10-09). A callee with a known type that is not a function still uses the
+shorthand: `Apply(x + 1, 2)` is `3`.
+
+`subs()` replaces only the free occurrences of a name: a name that a binder
+binds (the index of a `Sum`, a parameter of a `Function`, a local of a `Block`)
+is not replaced inside that binder, so `j + Sum(j, j=1..3)` with `j` replaced
+by `5` is `5 + Sum(j, j=1..3)`. The full rules are in the documentation of
+`subs()` in `types-expression.ts`.
+
 `subs()` rebuilds each call with the function the call was written with, not
 with the function that its name has in the current scope. With
 `h := a ↦ a·x`, take `e = h(a) + 1`, then push a scope that declares another
@@ -193,7 +209,21 @@ complementary guarantee: it must not resolve them at all. The names come from
 the operator definition's binding sites (`declaredBinderNames`,
 `binding-sites.ts`), the only source available to a tree that has no
 `localScope` yet. Resolving them instead rewrote `Sum`'s `i` to the imaginary
-unit, binding site included.
+unit, binding site included. Such a pass must also not call a helper that
+canonicalizes by default: `flatten()` (`boxed-expression/flatten.ts`) has a
+third parameter `canonicalize` that is `true` unless the caller passes
+`false`, and a canonicalization there resolves the bound names against the
+ambient scope in the same way.
+
+The shadowed-parameter frames (`_pushShadowedParameters()`) are a dynamic
+stack, not part of a scope. While a function literal or a `Block` is
+canonicalized, any boxing that runs in another scope (for example the
+derivation of a stored function's signature, started by a `.type` read) sees
+the names of the construct being canonicalized: a local `b` of the block
+captured the free `b` of the called function, and the derived signature was
+wrong. Such a computation runs inside `ce._withoutShadowedParameters()`. The
+parent of the root scope is `undefined`, so a walk up the scope chain must
+stop there.
 
 ## Canonical and runtime scopes
 

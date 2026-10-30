@@ -1,14 +1,13 @@
 # Architecture
 
-This document describes the overall architecture of the **Epsil Compute
-Engine** — a TypeScript library for symbolic manipulation and numeric
-evaluation of mathematical expressions, published as
+This document describes the overall architecture of the **Epsil Compute Engine**
+— a TypeScript library for symbolic manipulation and numeric evaluation of
+mathematical expressions, published as
 [`@cortex-js/compute-engine`](https://www.npmjs.com/package/@cortex-js/compute-engine).
 
 It is the high-level map of the codebase, intended for contributors and
-maintainers. For the public API and usage guides, see
-[`README.md`](./README.md) and
-[cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/). Internal
+maintainers. For the public API and usage guides, see [`README.md`](./README.md)
+and [cortexjs.io/compute-engine](https://cortexjs.io/compute-engine/). Internal
 architecture history is summarized in
 [`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md).
 
@@ -111,38 +110,38 @@ src/
     └── tensor/               Vectors, matrices, multi-dimensional arrays
 ```
 
-Outside `src/`: **`data/`** holds the Rubi and Fungrim rule corpora consumed
-by the plugin entries (see "Integration rules" below); **`benchmarks/`** is
-the cross-library benchmark and audit harness (see
+Outside `src/`: **`data/`** holds the Rubi and Fungrim rule corpora consumed by
+the plugin entries (see "Integration rules" below); **`benchmarks/`** is the
+cross-library benchmark and audit harness (see
 [`benchmarks/README.md`](./benchmarks/README.md)). Completed internal review
 campaigns are summarized in [`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md).
 
 ## Where does X live?
 
-A task-oriented index — where to start for the most common kinds of work
-(paths relative to `src/compute-engine/` unless noted):
+A task-oriented index — where to start for the most common kinds of work (paths
+relative to `src/compute-engine/` unless noted):
 
-| Task | Start here |
-|---|---|
-| Parse bug (LaTeX → wrong MathJSON) | `latex-syntax/dictionary/definitions-*.ts` |
-| Serialization bug (expression → wrong LaTeX) | `latex-syntax/serializer.ts` + the operator's dictionary entry |
-| Wrong canonical form | `boxed-expression/arithmetic-*.ts`, `boxed-expression/canonical.ts` |
-| Wrong `evaluate()`/`N()` result | the operator's `evaluate` handler in `library/<domain>.ts`, then `numerics/` for the kernel |
-| Simplification missing or wrong | `symbolic/simplify-rules.ts` + [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md) |
-| Trig simplification | `symbolic/fu*.ts`, `boxed-expression/trigonometry.ts` (`constructibleValues`) |
-| Integration (symbolic) | `symbolic/antiderivative.ts` for built-ins; `rubi/` for the rule-based integrator; `latex-syntax/dictionary/README.md` for the ∫ parse→eval→serialize pipeline |
-| Solve | `boxed-expression/solve.ts`, `boxed-expression/solve-linear-system.ts` |
-| Type-inference bug | `library/type-handlers.ts`, `src/common/type/` |
-| Compilation target bug | `compilation/<target>.ts`; the tree walk is in `compilation/base-compiler.ts` |
-| Assumptions / `verify()` / `ask()` | `engine-assumptions.ts`, `assume.ts` |
-| Step-by-step explanations | `boxed-expression/explain.ts`, `explain-labels.ts` |
+| Task                                         | Start here                                                                                                                                                     |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Parse bug (LaTeX → wrong MathJSON)           | `latex-syntax/dictionary/definitions-*.ts`                                                                                                                     |
+| Serialization bug (expression → wrong LaTeX) | `latex-syntax/serializer.ts` + the operator's dictionary entry                                                                                                 |
+| Wrong canonical form                         | `boxed-expression/arithmetic-*.ts`, `boxed-expression/canonical.ts`                                                                                            |
+| Wrong `evaluate()`/`N()` result              | the operator's `evaluate` handler in `library/<domain>.ts`, then `numerics/` for the kernel                                                                    |
+| Simplification missing or wrong              | `symbolic/simplify-rules.ts` + [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md)                                                                                        |
+| Trig simplification                          | `symbolic/fu*.ts`, `boxed-expression/trigonometry.ts` (`constructibleValues`)                                                                                  |
+| Integration (symbolic)                       | `symbolic/antiderivative.ts` for built-ins; `rubi/` for the rule-based integrator; `latex-syntax/dictionary/README.md` for the ∫ parse→eval→serialize pipeline |
+| Solve                                        | `boxed-expression/solve.ts`, `boxed-expression/solve-linear-system.ts`                                                                                         |
+| Type-inference bug                           | `library/type-handlers.ts`, `src/common/type/`                                                                                                                 |
+| Compilation target bug                       | `compilation/<target>.ts`; the tree walk is in `compilation/base-compiler.ts`                                                                                  |
+| Assumptions / `verify()` / `ask()`           | `engine-assumptions.ts`, `assume.ts`                                                                                                                           |
+| Step-by-step explanations                    | `boxed-expression/explain.ts`, `explain-labels.ts`                                                                                                             |
 
 ## Layered module architecture
 
 Within `src/compute-engine/`, modules are organized into layers with a strict,
 acyclic dependency direction (enforced by the per-layer `no-restricted-imports`
-overrides in `.oxlintrc.json` and a zero-circular-dependency budget checked
-with `madge`):
+overrides in `.oxlintrc.json` and a zero-circular-dependency budget checked with
+`madge`):
 
 ```
 4. Composition root      index.ts (ComputeEngine) — composes services, public API
@@ -178,29 +177,29 @@ model, and the outside world.
 
 ## Boxed expressions: the runtime object model
 
-`src/compute-engine/boxed-expression/` is the heart of the engine. A
-"boxed" expression is a class instance that wraps a piece of math with a
-consistent interface for evaluation, comparison, and serialization.
+`src/compute-engine/boxed-expression/` is the heart of the engine. A "boxed"
+expression is a class instance that wraps a piece of math with a consistent
+interface for evaluation, comparison, and serialization.
 
 ### Class hierarchy
 
 `_BoxedExpression` (`abstract-boxed-expression.ts`) is the abstract base; the
 concrete subclasses are:
 
-| Class | File | Represents |
-|---|---|---|
-| `BoxedNumber` | `boxed-number.ts` | Numeric literals (int, rational, radical, float, bignum, complex) |
-| `BoxedSymbol` | `boxed-symbol.ts` | Symbols/identifiers, bound to a value definition when canonical |
-| `BoxedFunction` | `boxed-function.ts` | Function applications `[operator, ...operands]`, bound to an operator definition |
-| `BoxedString` | `boxed-string.ts` | String literals (stored NFC-normalized) |
-| `BoxedDictionary` | `boxed-dictionary.ts` | Key/value maps |
+| Class             | File                  | Represents                                                                       |
+| ----------------- | --------------------- | -------------------------------------------------------------------------------- |
+| `BoxedNumber`     | `boxed-number.ts`     | Numeric literals (int, rational, radical, float, bignum, complex)                |
+| `BoxedSymbol`     | `boxed-symbol.ts`     | Symbols/identifiers, bound to a value definition when canonical                  |
+| `BoxedFunction`   | `boxed-function.ts`   | Function applications `[operator, ...operands]`, bound to an operator definition |
+| `BoxedString`     | `boxed-string.ts`     | String literals (stored NFC-normalized)                                          |
+| `BoxedDictionary` | `boxed-dictionary.ts` | Key/value maps                                                                   |
 
 There is no dedicated tensor class: a vector/matrix/n-dimensional array is a
-canonical `List` `BoxedFunction`. Tensor-ness is a **lazy view** over a
-`List`'s ops (`boxed-expression/tensor-view.ts`) — `isTensor`, `.shape`,
-`.rank` and the `List` type handler all agree via one shared shape-claim
-predicate, and packed numeric kernels obtain an `AbstractTensor` per operation
-through `packTensor` (never cached on the node).
+canonical `List` `BoxedFunction`. Tensor-ness is a **lazy view** over a `List`'s
+ops (`boxed-expression/tensor-view.ts`) — `isTensor`, `.shape`, `.rank` and the
+`List` type handler all agree via one shared shape-claim predicate, and packed
+numeric kernels obtain an `AbstractTensor` per operation through `packTensor`
+(never cached on the node).
 
 The shared public surface (on `_BoxedExpression`) includes the getters/methods
 most consumers use: `.json`, `.latex`/`.toLatex()`, `.operator`, `.ops`,
@@ -239,34 +238,34 @@ Canonicalization applies a small set of algebraic folds to **generic**
 generic value of that variable. These are deliberate conventions, not bugs: they
 trade exactness at a measure-zero point for a simpler canonical form.
 
-| Input                    | Canonical form              |
-| ------------------------ | --------------------------- |
-| `x / x`, `(x + 1)/(x + 1)` | `1`                       |
-| `1 ^ x`                  | `1`                         |
-| `x / 0`                  | `~∞` (`ComplexInfinity`)    |
-| `0 / x`                  | `0`                         |
-| `x / ∞`                  | `0`                         |
+| Input                      | Canonical form           |
+| -------------------------- | ------------------------ |
+| `x / x`, `(x + 1)/(x + 1)` | `1`                      |
+| `1 ^ x`                    | `1`                      |
+| `x / 0`                    | `~∞` (`ComplexInfinity`) |
+| `0 / x`                    | `0`                      |
+| `x / ∞`                    | `0`                      |
 
 The cancellation **asserts genericity**: `x/x → 1` treats `x` as a generic
 (hence non-zero) value. This is why the fold survives a later substitution —
-`ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `Indeterminate`, because the `.json`
-is already the literal `1` before the substitution reaches it. To recover the
-true value at an excluded point, keep the expression uncanonicalized
+`ce.parse('\\frac{x}{x}').subs({ x: 0 })` is `1`, not `Indeterminate`, because
+the `.json` is already the literal `1` before the substitution reaches it. To
+recover the true value at an excluded point, keep the expression uncanonicalized
 (`{ canonical: false }`) and evaluate after substituting.
 
 **Constant operands are protected.** These folds fire only on operands that
-carry a free variable. A numerator or denominator that is a *constant
-expression* is never collapsed by the generic rules; it is evaluated instead, so
+carry a free variable. A numerator or denominator that is a _constant
+expression_ is never collapsed by the generic rules; it is evaluated instead, so
 a provably-zero constant denominator surfaces the true indeterminate:
 
-- `0 / (1 − 1)` canonicalizes to `Indeterminate` — the denominator evaluates
-  to `0`, giving `0/0` — **not** to `0`: the `0/x → 0` fold does not reach a
+- `0 / (1 − 1)` canonicalizes to `Indeterminate` — the denominator evaluates to
+  `0`, giving `0/0` — **not** to `0`: the `0/x → 0` fold does not reach a
   constant zero.
 - `(1 − 1) / 0` and `0 / 0` likewise canonicalize to `Indeterminate`. With a
   float operand (`0.0 / 0.0`) the canonical form is `NaN`.
-- `(π + 1)/(π + 1)` is left as a fraction at canonicalization (a constant, so the
-  identical-operand fold is skipped); it reduces to `1` only under `.simplify()`,
-  which first proves the denominator non-zero.
+- `(π + 1)/(π + 1)` is left as a fraction at canonicalization (a constant, so
+  the identical-operand fold is skipped); it reduces to `1` only under
+  `.simplify()`, which first proves the denominator non-zero.
 
 Larger cancellations (`x²/(5x²) → 1/5`) and the wider policy that governs which
 `.simplify()` rewrites treat an unknown as a generic **real** (why
@@ -277,123 +276,128 @@ declared-`complex` one) are **simplify-level**, documented in
 ### Who provides a type (user decision 2026-09-26)
 
 Whoever constructs a function or a symbol is responsible for giving it an
-accurate type. A host such as Tycho declares its symbols and the parameters
-of its functions with narrow types (`real | signed_infinity | nan`, not
-`number`), and a declared result type is a promise the host makes: the
-interpreter does not check a function's value against it (decision
-2026-09-24). CE constructs the **return values** of its operators and of the
-bodies it types, so CE owes an accurate, narrow result type for them: an
-operator's type handler claims the tightest type its operand types prove
-(`Clamp(x, -1, 1)` is `real<-1..1>`, `tanh(y)` is `real`), and a function
-literal assigned under a declared signature whose result is `unknown`
-reports the result its body has with the DECLARED parameter types
-(`resultUnderDeclaredParameters()` in `engine-declarations.ts`). Where no type
-information exists, a reasonable assumption is acceptable: a compiler that
-meets a `number` operand assumes a real value. A result type that is too wide
-is a defect of the return type, not a reason to change that assumption.
+accurate type. A host such as Tycho declares its symbols and the parameters of
+its functions with narrow types (`real | signed_infinity | nan`, not `number`),
+and a declared result type is a promise the host makes: the interpreter does not
+check a function's value against it (decision 2026-09-24). CE constructs the
+**return values** of its operators and of the bodies it types, so CE owes an
+accurate, narrow result type for them: an operator's type handler claims the
+tightest type its operand types prove (`Clamp(x, -1, 1)` is `real<-1..1>`,
+`tanh(y)` is `real`), and a function literal assigned under a declared signature
+whose result is `unknown` reports the result its body has with the DECLARED
+parameter types (`resultUnderDeclaredParameters()` in `engine-declarations.ts`).
+Where no type information exists, a reasonable assumption is acceptable: a
+compiler that meets a `number` operand assumes a real value. A result type that
+is too wide is a defect of the return type, not a reason to change that
+assumption.
 
 ### Non-finite typing convention for type handlers
 
 The numeric lattice is finite-by-default (ratified 2026-08-27; the decision
 record is `docs/plans/2026-08-26-numeric-lattice-ratification-brief.md`). The
-top type partitions into three groups of values that share no member:
-`number` holds exactly the finite complex numbers (`complex` and everything
-below it — `real`, `rational`, `integer`, `imaginary`), the infinite values
-(`infinity`: the signed `+∞`/`-∞`, the unsigned `~oo`, and mixed values such
-as `∞ + i`), and the not-a-number marker (`nan`). Bare `real`, `rational`,
-`integer` and `complex` contain only finite values. The signed pair
-**exactly `{+∞, −∞}`** is spelled `signed_infinity` — the union of the two value
-types; its former one-word name `non_finite_number` was retired 2026-08-31
-(the name was misleading: `~∞` and `∞ + i` are non-finite numbers, yet
-neither was a member). The sign-aware gates
-and the `1/±∞ = 0` folds consume its signedness, which `infinity` (which
-admits the unsigned `~oo`) does not guarantee. The five `finite_*` names it
-used to sit beside are gone: `finite_integer`, `finite_rational`,
-`finite_real`, `finite_complex` and `finite_number` are retired from the
-type system, and the bare names carry those meanings. The old spellings
-still parse for one release cycle as deprecated aliases — each normalizes to
-its bare name, and `finite_number` to `complex` — and are never emitted.
-Every operator `type` handler follows these rules:
+top numeric type `number` partitions into three groups of values that share no
+member: the finite complex numbers (`complex` and everything below it — `real`,
+`rational`, `integer`, `imaginary`), the infinite values (`infinity`: the signed
+`+∞`/`-∞`, the unsigned `~oo`, and mixed values such as `∞ + i`), and the
+not-a-number marker (`nan`). Bare `real`, `rational`, `integer` and `complex`
+contain only finite values. The signed pair **exactly `{+∞, −∞}`** is spelled
+`signed_infinity` — the union of the two value types; its former one-word name
+`non_finite_number` was retired 2026-08-31 (the name was misleading: `~∞` and
+`∞ + i` are non-finite numbers, yet neither was a member). The sign-aware gates
+and the `1/±∞ = 0` folds consume its signedness, which `infinity` (which admits
+the unsigned `~oo`) does not guarantee. The five `finite_*` names it used to sit
+beside are gone: `finite_integer`, `finite_rational`, `finite_real`,
+`finite_complex` and `finite_number` are retired from the type system, and the
+bare names carry those meanings. The old spellings still parse for one release
+cycle as deprecated aliases — each normalizes to its bare name, and
+`finite_number` to `complex` — and are never emitted. Every operator `type`
+handler follows these rules:
 
 1. **Claim the signed pair `signed_infinity` only when the value is _provably_
-   `±∞`.**
-   Examples: `Ln(0) = −∞`; `Round/Ceil/Floor/Truncate` of a provably real ±∞;
-   `±∞ · (finite reals all provably non-zero)`; `EllipticK(1) = +∞`;
+   `±∞`.** Examples: `Ln(0) = −∞`; `Round/Ceil/Floor/Truncate` of a provably
+   real ±∞; `±∞ · (finite reals all provably non-zero)`; `EllipticK(1) = +∞`;
    `(+∞)^p` for finite real `p > 0`; `±∞ + (real terms)`.
-2. **A result that may blow up is claimed as a union with the non-finite
-   branch spelled out.** A pole-capable operator whose argument may land on a
-   pole claims `complex | +oo | -oo` (the unknown-sign `Ln`, the
-   bounded inverse functions at their poles); a result that may be `~oo` or
-   NaN — `x · ∞` with a possibly-zero complex `x`, `∞/∞`, `k/0` — claims
-   `number`, the only type that admits every numeric value. A claim of bare
-   `complex` is a finiteness promise and must not cover a path that reaches a
-   pole. **Exception for extended-real operands** (user decision 2026-09-25):
-   a product or sum whose operands are all on the extended real line
-   (`real | signed_infinity`, with or without `nan`) cannot be complex, so it
-   claims `real | signed_infinity`, with a `nan` arm when one factor may be
-   infinite and a different factor may be zero (`0 · ∞`), or when two terms
-   may be infinite (`∞ − ∞`). The same holds for a power with a
-   non-negative base or an integer exponent (`extendedPowerType()`), an
-   elementary function whose values are real (`extendedElementaryFunctionType()`
-   in `library/type-handlers.ts`; a function with no value at `±∞`, such as
-   `Sin`, takes a `nan` arm for it), `Max`/`Min`, the reductions
-   `Sum`/`Product`/`Mean` (`extendedReductionType()`), and the element type of
-   a literal list (`widenElementTypes()`). `x · ∞` with `x: real` is
-   `nan | signed_infinity`, and `2y` with `y: real | signed_infinity` is
-   `real | signed_infinity`. A host reads `number` and `infinity` as possibly
-   complex, so the wider claims cost it the real value layout. The rules live
-   in the `Multiply` and `Add` type handlers (`library/arithmetic.ts`,
-   `signedInfinitySum()` for `Add`).
+2. **A result that may blow up is claimed as a union with the non-finite branch
+   spelled out.** A pole-capable operator whose argument may land on a pole
+   claims `complex | +oo | -oo` (the unknown-sign `Ln`, the bounded inverse
+   functions at their poles); a result that may be `~oo` or NaN — `x · ∞` with a
+   possibly-zero complex `x`, `∞/∞`, `k/0` — claims `number`, the only type that
+   admits every numeric value. A claim of bare `complex` is a finiteness promise
+   and must not cover a path that reaches a pole. **Exception for extended-real
+   operands** (user decision 2026-09-25): a product or sum whose operands are
+   all on the extended real line (`real | signed_infinity`, with or without
+   `nan`) cannot be complex, so it claims `real | signed_infinity`, with a `nan`
+   arm when one factor may be infinite and a different factor may be zero
+   (`0 · ∞`), or when two terms may be infinite (`∞ − ∞`). The same holds for a
+   power with a non-negative base or an integer exponent
+   (`extendedPowerType()`), an elementary function whose values are real
+   (`extendedElementaryFunctionType()` in `library/type-handlers.ts`; a function
+   with no value at `±∞`, such as `Sin`, takes a `nan` arm for it), `Max`/`Min`,
+   the reductions `Sum`/`Product`/`Mean` (`extendedReductionType()`), and the
+   element type of a literal list (`widenElementTypes()`). `x · ∞` with
+   `x: real` is `nan | signed_infinity`, and `2y` with
+   `y: real | signed_infinity` is `real | signed_infinity`. A host reads
+   `number` and `infinity` as possibly complex, so the wider claims cost it the
+   real value layout. The rules live in the `Multiply` and `Add` type handlers
+   (`library/arithmetic.ts`, `signedInfinitySum()` for `Add`).
 3. **Unknown finiteness no longer exists for the bare tiers.** An operand
-   declared `real` (or `integer`, `rational`, `complex`) is finite by its
-   type; `Sin(x)` with `x: real` claims `real` because the input provably is
-   one. Only an operand whose type admits an infinity (`number`, `infinity`,
-   the `±oo` value types, an extended union) triggers the non-finite analysis
-   — and once an operand is provably non-finite, a claim that depends on
-   another operand being non-zero (e.g. `x · ∞ = ±∞`, where `x = 0` gives
-   NaN) must _prove_ it (via `sgn`), never assume it. An undeclared symbol
-   is such an operand: it has no finiteness evidence, so a generic numeric
-   application over undeclared operands — `x · y` — claims the top type
-   `number`. The finite tiers are claimed at the rungs where finiteness is
-   provable, not by default.
+   declared `real` (or `integer`, `rational`, `complex`) is finite by its type;
+   `Sin(x)` with `x: real` claims `real` because the input provably is one. Only
+   an operand whose type admits an infinity (`number`, `infinity`, the `±oo`
+   value types, an extended union) triggers the non-finite analysis — and once
+   an operand is provably non-finite, a claim that depends on another operand
+   being non-zero (e.g. `x · ∞ = ±∞`, where `x = 0` gives NaN) must _prove_ it
+   (via `sgn`), never assume it. An undeclared symbol is such an operand: it has
+   no finiteness evidence, so a generic numeric application over undeclared
+   operands — `x · y` — claims the top type `number`. The finite tiers are
+   claimed at the rungs where finiteness is provable, not by default.
+
+A `type` handler receives `OperandDescriptor`s (`types-definitions.ts`), not
+expressions. `d.type` is a plain `Type` (a string or an AST object), not a
+`BoxedType`: `d.type.isUnknown` is always `undefined`, so test
+`d.type === 'unknown'`. Read the operand's structure with `d.structureOf?.()`
+and test its `kind` before reading `head` or `name`. The general join `widen()`
+drops `unknown` and `nothing` arms, so a handler that wants an `unknown` operand
+to widen its result must test for it itself. A predicate's handler may claim the
+value type `true` or `false` when the operand types prove the answer:
+`Greater(r, 0)` with `r: real<1..>` is typed `true`.
 
 The **values** type onto the new names: `oo` and `-oo` carry the singleton
 value-literal types `+oo`/`-oo` (widening to `infinity`); the value `~oo`
 carries the `~oo` singleton (also below `infinity`); NaN and `Indeterminate`
-type `nan`; a value
-with an infinite real or imaginary part and a finite other part (`∞ + i`)
-types `infinity`. Every spelling of the same value — the `ComplexInfinity`
-constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`, `Gamma(-2)`,
-`Zeta(1)` — types identically. The extended real line is spelled
+type `nan`; a value with an infinite real or imaginary part and a finite other
+part (`∞ + i`) types `infinity`. Every spelling of the same value — the
+`ComplexInfinity` constant, `1/0`, `Divide(~oo, 5)`, `Add(1, ~oo)`, `(-1)!`,
+`Gamma(-2)`, `Zeta(1)` — types identically. The extended real line is spelled
 `real | +oo | -oo` (the `EXTENDED_REAL_TYPE` constant in
 `src/common/type/primitive.ts`), and the value predicate for it is
 `isExtendedReal` — the former `isReal`, renamed when bare `real` became a
 finiteness promise; NaN answers `false` to it.
 
-Three non-finite results are kept apart. A pole is `~oo` (`5/0`, `Gamma(0)`).
-An exact form with no value (`0/0`, `0·∞`, `∞ − ∞`, `0^0`, `Mod(5, 0)`) is
+Three non-finite results are kept apart. A pole is `~oo` (`5/0`, `Gamma(0)`). An
+exact form with no value (`0/0`, `0·∞`, `∞ − ∞`, `0^0`, `Mod(5, 0)`) is
 `Indeterminate` on the exact route. A floating-point failure or an absent
 numeric operand is `NaN` (`0.0/0.0`, `Missing + 2`), and `.N()` and every
-compiled target answer `NaN` for `Indeterminate` too. `Indeterminate` and
-`NaN` are both number literals with `isNaN` true and both type `nan`; only
-`Indeterminate` has `isIndeterminate` true, and `isSame` does not match one
-with the other (design: `docs/plans/2026-09-28-indeterminate-value.md`).
+compiled target answer `NaN` for `Indeterminate` too. `Indeterminate` and `NaN`
+are both number literals with `isNaN` true and both type `nan`; only
+`Indeterminate` has `isIndeterminate` true, and `isSame` does not match one with
+the other (design: `docs/plans/2026-09-28-indeterminate-value.md`).
 
 On a float-only compile target, a `~oo` lowers to IEEE `+Infinity` (ruled
-2026-08-28): the pole's magnitude survives, and the direction `~oo` never had
-is dropped. This holds on the constant-folded, structural, and shader paths,
-and — since 2026-08-30 — for a `~oo` handed ACROSS the boundary as an argument
-to a compiled function, which is projected to `+Infinity` instead of being
-refused as a complex value. One consequence is that no compiled guard over a
-plain JS number can distinguish `~oo` from a true `+oo`; another is that float
-arithmetic can change a pole's non-finite class where the interpreter's
-projective arithmetic does not (`Infinity - Infinity` is `NaN`, while the
-interpreter's `~oo - ~oo` stays `~oo`). A multi-clause parameter guard for the
-`infinity` or `nan` type, or for the signed pair `signed_infinity`, therefore
-cannot be faithful,
-and such a clause set declines to compile whole-function, running interpreted
-instead; the same holds for non-finite VALUE-literal clauses (`oo`, `-oo`,
-`NaN`). The measurements behind each decline are recorded in `ROADMAP.md`.
+2026-08-28): the pole's magnitude survives, and the direction `~oo` never had is
+dropped. This holds on the constant-folded, structural, and shader paths, and —
+since 2026-08-30 — for a `~oo` handed ACROSS the boundary as an argument to a
+compiled function, which is projected to `+Infinity` instead of being refused as
+a complex value. One consequence is that no compiled guard over a plain JS
+number can distinguish `~oo` from a true `+oo`; another is that float arithmetic
+can change a pole's non-finite class where the interpreter's projective
+arithmetic does not (`Infinity - Infinity` is `NaN`, while the interpreter's
+`~oo - ~oo` stays `~oo`). A multi-clause parameter guard for the `infinity` or
+`nan` type, or for the signed pair `signed_infinity`, therefore cannot be
+faithful, and such a clause set declines to compile whole-function, running
+interpreted instead; the same holds for non-finite VALUE-literal clauses (`oo`,
+`-oo`, `NaN`). The measurements behind each decline are recorded in
+`ROADMAP.md`.
 
 The shared handler implementations (and per-operator dispatch) live in
 `src/compute-engine/library/type-handlers.ts`; the convention is pinned by
@@ -406,8 +410,8 @@ during binding against the current scope:
 
 - `boxed-value-definition.ts` — `_BoxedValueDefinition`: a symbol's type, value,
   constancy, and `holdUntil` evaluation semantics.
-- `boxed-operator-definition.ts` — `_BoxedOperatorDefinition`: a function's
-  type signature, algebraic flags (`associative`, `commutative`, `idempotent`,
+- `boxed-operator-definition.ts` — `_BoxedOperatorDefinition`: a function's type
+  signature, algebraic flags (`associative`, `commutative`, `idempotent`,
   `pure`, `lazy`, `broadcastable`, …), and its handlers (`canonical`,
   `evaluate`, `evaluateAsync`, `compile`, comparison, collection).
 
@@ -415,10 +419,11 @@ The standard library (below) is just a large table of such definitions.
 
 ### Evaluation, simplification, and other operations
 
-`BoxedFunction.evaluate()` looks up the operator definition and dispatches to its
-`evaluate` handler. `simplify.ts` drives rule-based simplification with guards
-against infinite recursion (deduplication, a step limit, and loop detection —
-see [implementation conventions](CODING-STYLEGUIDE.md#engine-implementation)).
+`BoxedFunction.evaluate()` looks up the operator definition and dispatches to
+its `evaluate` handler. `simplify.ts` drives rule-based simplification with
+guards against infinite recursion (deduplication, a step limit, and loop
+detection — see
+[implementation conventions](CODING-STYLEGUIDE.md#engine-implementation)).
 `serialize.ts` produces MathJSON from a boxed expression. The directory also
 holds focused modules for `expand.ts`, `factor.ts`, `solve.ts` /
 `solve-linear-system.ts`, `polynomials.ts`, `trigonometry.ts`, pattern matching
@@ -426,8 +431,8 @@ holds focused modules for `expand.ts`, `factor.ts`, `solve.ts` /
 exported to consumers (`type-guards.ts`).
 
 **Step-by-step explanations.** `explain.ts` / `explain-labels.ts` implement
-`expr.explain('simplify' | 'solve' | 'D')`, which returns a structured trace
-of the operation with human-readable labels (a ~250-entry registry in
+`expr.explain('simplify' | 'solve' | 'D')`, which returns a structured trace of
+the operation with human-readable labels (a ~250-entry registry in
 `explain-labels.ts`; the registry lives in `boxed-expression/` rather than
 `symbolic/` for layering reasons). The derivative driver
 (`symbolic/explain-derivative.ts`) self-registers via `_setExplainDDriver`,
@@ -435,51 +440,50 @@ keeping `boxed-expression/` free of an upward import into `symbolic/`.
 
 ### Bound variables, free symbols, and assigned values
 
-*(Convention ratified 2026-07-24. It governs every operator, including future
-ones — check new binder operators against it.)*
+_(Convention ratified 2026-07-24. It governs every operator, including future
+ones — check new binder operators against it.)_
 
 One rule governs how an assigned symbol value interacts with every operation:
 
 > **A bound variable is a pure symbol: its declared type and in-scope
-> assumptions apply, its assigned value never does. A free symbol's value
-> always applies under evaluation — in every operator uniformly.**
+> assumptions apply, its assigned value never does. A free symbol's value always
+> applies under evaluation — in every operator uniformly.**
 
-There is no taxonomy of "symbolic" vs "value-considering" operators. What
-varies is whether an operator **binds** a variable:
+There is no taxonomy of "symbolic" vs "value-considering" operators. What varies
+is whether an operator **binds** a variable:
 
 - **Binder operators** — `D`/`Derivative`, `Integrate`, `Limit`, `Sum`,
   `Product`, `Solve`, `Function` (lambda parameters), comprehension/table
   indices, quantifiers — bind their own variable. (Most declare their binding
   sites via a selector on the `scoped` definition flag — see
-  `docs/SCOPING-MODEL.md`. `Minimize`/`Maximize`,
-  once listed here, have no library definition and would be a new feature.) That
-  variable is shielded from any same-named global assignment for the whole
-  operation, **including in the result**: with `x := 5`, `D(x², x)` is `2x`
-  and `Integrate(x², x)` is `x³/3`, both left in terms of the still-symbolic
-  `x`. Any *other* symbol in the operand is free and resolves normally:
-  with `a := 3` as well, `D(a·x², x)` is `6x`.
+  `docs/SCOPING-MODEL.md`. `Minimize`/`Maximize`, once listed here, have no
+  library definition and would be a new feature.) That variable is shielded from
+  any same-named global assignment for the whole operation, **including in the
+  result**: with `x := 5`, `D(x², x)` is `2x` and `Integrate(x², x)` is `x³/3`,
+  both left in terms of the still-symbolic `x`. Any _other_ symbol in the
+  operand is free and resolves normally: with `a := 3` as well, `D(a·x², x)` is
+  `6x`.
 - **Non-binder operators** — `Together`, `Expand`, `Factor`, `Simplify`,
-  arithmetic, everything else — bind nothing, so all their symbols are free
-  and all values apply: `Together(1/x + a/x²)` with those assignments is
-  `8/25`.
-- **`HoldValues`** is not an exception but the rule made available à la
-  carte: it is itself a binder, binding the assigned free symbols of its body
-  (all of them, or a listed subset via a second operand) — the analogue of
-  Mathematica's `Block[{x}, …]`. `HoldValues(Together(1/x + a/x²))` is
-  `(x + a)/x²`. The granular compositional form also works:
-  `Block(Declare(w, 'real'), …)` shadow-declares `w` valueless for the body.
+  arithmetic, everything else — bind nothing, so all their symbols are free and
+  all values apply: `Together(1/x + a/x²)` with those assignments is `8/25`.
+- **`HoldValues`** is not an exception but the rule made available à la carte:
+  it is itself a binder, binding the assigned free symbols of its body (all of
+  them, or a listed subset via a second operand) — the analogue of Mathematica's
+  `Block[{x}, …]`. `HoldValues(Together(1/x + a/x²))` is `(x + a)/x²`. The
+  granular compositional form also works: `Block(Declare(w, 'real'), …)`
+  shadow-declares `w` valueless for the body.
 
 Two footnotes:
 
 - The `.simplify()` **method** (engine API, not reachable from the operator
   surface) is value-blind wholesale — as if the expression were wrapped in
   `HoldValues`. That is its documented contract (see
-  [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md)); the `Simplify` *operator*
-  evaluates its argument like any operator.
+  [`docs/SIMPLIFY.md`](./docs/SIMPLIFY.md)); the `Simplify` _operator_ evaluates
+  its argument like any operator.
 - Shielding is implemented by shadow-declaring the bound variable valueless
-  (keeping its type; assumptions survive) in a temporary scope — use the
-  shared `withValueShield` helper (`boxed-expression/utils.ts`), do not
-  invent per-operator renames or new shadow-declare loops.
+  (keeping its type; assumptions survive) in a temporary scope — use the shared
+  `withValueShield` helper (`boxed-expression/utils.ts`), do not invent
+  per-operator renames or new shadow-declare loops.
 
 Implementation status: the convention is enforced across the binder operators
 (`D`, `Integrate`, `Limit`, `Solve` — positional and bundled — and
@@ -498,53 +502,51 @@ the types of mathematical expressions. It models:
   (e.g. `matrix<number^(2x3)>` for a matrix). A list type with no dimensions,
   `list<E>`, is read by its elements: a matrix of integers is a
   `list<vector<integer>>`, not a `list<integer>`. A `list<U^n>`, a vector, a
-  matrix and a tensor (`tensor<U^(2x3x4)>`, or `tensor<U>` of any rank) are
-  read by their cells. Every head accepts every cell type that is not a list
+  matrix and a tensor (`tensor<U^(2x3x4)>`, or `tensor<U>` of any rank) are read
+  by their cells. Every head accepts every cell type that is not a list
   (`list<boolean^2>`, `matrix<boolean>` and `tensor<boolean>` are valid,
   `list<list<integer>^2>` and `matrix<list<integer>>` are not), and the bare
-  names `vector`, `matrix` and `tensor` mean number cells. A `list` has one
-  axis at most: `list<boolean^(2x2)>` is refused, and is spelled
+  names `vector`, `matrix` and `tensor` mean number cells. A `list` has one axis
+  at most: `list<boolean^(2x2)>` is refused, and is spelled
   `matrix<boolean^(2x2)>`. The rules are in `docs/TYPE-SYSTEM.md`, section
   "Lists, tensors and `broadcastable`".
-- **Broadcastable values**: `broadcastable<T>` — "a `T`, or an array of any
-  rank whose cells are `T`, element-wise" (`T | tensor<T>`, for a `T` that
-  cannot hold a list). The static type of arithmetic whose
-  operand may broadcast at runtime (an unknown-return call such as
-  `2h(x) - 1`). `T <: broadcastable<T>` and
-  `list<T> <: broadcastable<T>`, but `broadcastable<T>` is not a subtype of
+- **Broadcastable values**: `broadcastable<T>` — "a `T`, or an array of any rank
+  whose cells are `T`, element-wise" (`T | tensor<T>`, for a `T` that cannot
+  hold a list). The static type of arithmetic whose operand may broadcast at
+  runtime (an unknown-return call such as `2h(x) - 1`). `T <: broadcastable<T>`
+  and `list<T> <: broadcastable<T>`, but `broadcastable<T>` is not a subtype of
   `T`, of `list<T>` or of `T | list<T>` (a matrix is not a `list<number>`): a
   parameter that accepts a number or a numeric array of any rank is spelled
   `number | tensor`. Produced by the `Add`/`Multiply` type handlers and the
   generic broadcast typing (`broadcastLiftType()` in
-  `boxed-expression/broadcast-lift-type.ts`, called from
-  `boxed-function.ts`); the trigger is
-  applications-only (a bare symbol's `unknown` is inference-pending and
-  stays scalar). See the Broadcastable section of `cortexjs.io/docs/compute-engine/08-guide-types.md`.
+  `boxed-expression/broadcast-lift-type.ts`, called from `boxed-function.ts`);
+  the trigger is applications-only (a bare symbol's `unknown` is
+  inference-pending and stays scalar). See the Broadcastable section of
+  `cortexjs.io/docs/compute-engine/08-guide-types.md`.
 - **Function signatures**: `(x: number, number?) -> number`, including named,
   optional, and variadic arguments.
 - **Algebraic types**: union (`|`), intersection (`&`), negation (`!`), plus the
   special types `any`, `unknown`, `nothing`, `never`, `error`.
 - **`unknown` is an inference marker, not a content type**: every type is a
-  subtype of it (`any` and the absence markers included), and it is a
-  subtype only of `any` and itself, so it proves no contract. A site that
-  needs evidence that a type admits a marker asks `provablyAdmits()`
-  (`subtype.ts`). As a declaration (`list`, `list<unknown>`, bare `tuple`
-  or `record`) it asks the engine to refine from each assignment. Rules:
-  `docs/TYPE-SYSTEM.md`, section "The subtype hierarchy and the role of
-  `unknown`".
-- **Declared types and absence**: a declared type is a contract on every
-  value the symbol takes, so `s: string` refuses `Missing`, `real` refuses
-  `NaN`, and `string | missing` or `real | nan` admits them. A library
-  parameter typed as data refuses an absent argument. The postfix `x?!`
-  (`AssertPresent`) asserts presence at run time. Rules:
-  `docs/TYPE-SYSTEM.md`, section "Declared types and absence".
+  subtype of it (`any` and the absence markers included), and it is a subtype
+  only of `any` and itself, so it proves no contract. A site that needs evidence
+  that a type admits a marker asks `provablyAdmits()` (`subtype.ts`). As a
+  declaration (`list`, `list<unknown>`, bare `tuple` or `record`) it asks the
+  engine to refine from each assignment. Rules: `docs/TYPE-SYSTEM.md`, section
+  "The subtype hierarchy and the role of `unknown`".
+- **Declared types and absence**: a declared type is a contract on every value
+  the symbol takes, so `s: string` refuses `Missing`, `real` refuses `NaN`, and
+  `string | missing` or `real | nan` admits them. A library parameter typed as
+  data refuses an absent argument. The postfix `x?!` (`AssertPresent`) asserts
+  presence at run time. Rules: `docs/TYPE-SYSTEM.md`, section "Declared types
+  and absence".
 
 Types are written as strings in a small grammar and parsed through
 `lexer.ts → parser.ts → type-builder.ts` into a `Type` AST; `subtype.ts` and
 `reduce.ts` implement compatibility checking and simplification; `serialize.ts`
 renders types back to strings. `boxed-type.ts` provides `BoxedType`, the
-immutable wrapper used throughout the engine and exposed on every
-`Expression` via `.type`.
+immutable wrapper used throughout the engine and exposed on every `Expression`
+via `.type`.
 
 `src/common/` also hosts other shared utilities (an interruptible/cancellation
 helper, JSON/JSON5, Markdown rendering, grapheme handling, fuzzy string
@@ -579,8 +581,36 @@ input such as bare `sin(x)` and `x^(2)`; see the public
 `LatexSyntax` is an **injectable dependency** of `ComputeEngine`, not a static
 import. The full package entry wires it in via a factory so `ce.parse()` works
 out of the box; the core entry omits it (LaTeX methods then throw a clear
-error). This keeps LaTeX out of bundles that don't need it — see
-the package-entry table below for the corresponding wiring.
+error). This keeps LaTeX out of bundles that don't need it — see the
+package-entry table below for the corresponding wiring.
+
+### A symbol before a parenthesized group: call or product (user decision 2026-09-18)
+
+A known function — an operator or a value with a function type — is applied as a
+**call**. For a head not already recognized as a function, `f(x)` parses to
+`InvisibleOperator(f, Delimiter(x))`, and canonicalization decides whether it is
+a call or a product. It is a **call** when the head has no type information: the
+head is undeclared, or the engine declared it itself from a bare use and its
+type is still an inferred `unknown`. So `s(x+1)`, `f(3)^2` and `2f(x)` all
+contain the call of an undeclared head. In this fallback, a value name stays a
+**product** factor when:
+
+- it has a declared non-function type (including `value` and `any`) or holds a
+  non-function value;
+- the host declared it with the type `unknown` (a host can declare a value name
+  before it assigns it: after `ce.declare('k', 'unknown')`, `k(1-w)` is a
+  product);
+- the argument refers to the head (`x(x+1)`, `q(2q)`);
+- it is a parameter of the function literal being canonicalized
+  (`(x, N) \mapsto x(N+1)` is a product);
+- the `resolveSymbol` handler of the parse answers a non-function type for it.
+
+The serializer writes an explicit multiplication sign between a symbol and a
+parenthesized group (`s\times(x+1)`), so that a product parses back as a product
+in any engine. A library constant such as `\pi(x+1)` keeps the juxtaposition.
+The mechanism is in `headHasNoTypeInformation()`
+(`boxed-expression/invisible-operator.ts`) and in `serializeMultiply`
+(`latex-syntax/dictionary/definitions-arithmetic.ts`).
 
 ## The ComputeEngine and its services
 
@@ -602,20 +632,19 @@ public API groups into:
   cell-boundary state rewind. See
   [`docs/CHECKPOINT-MODEL.md`](./docs/CHECKPOINT-MODEL.md).
 - **Configuration**: `precision` (default 21 significant digits; `'machine'`
-  selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit`
-  (default `'rad'`), `strict` (validation depth), `iterationLimit` (default 1024),
+  selects 64-bit float), `tolerance` (default `1e-10`), `angularUnit` (default
+  `'rad'`), `strict` (validation depth), `iterationLimit` (default 1024),
   `recursionLimit` (default 256; a full JavaScript stack gives the same
   `recursion-depth-exceeded` error). Time budgets are set with `withTimeLimit`
   spans; the former global `timeLimit` property was removed (see
-  `docs/TIMEOUT-MODEL.md` §5) — an evaluation with no enclosing span has no
-  time budget.
+  `docs/TIMEOUT-MODEL.md` §5) — an evaluation with no enclosing span has no time
+  budget.
 
 Internally these responsibilities are delegated to focused services
 (`engine-startup-coordinator.ts`, `engine-scope.ts`, `engine-declarations.ts`,
 `engine-assumptions.ts`, `engine-numeric-configuration.ts`,
-`engine-runtime-state.ts`, `engine-cache.ts`,
-`engine-compilation-targets.ts`, `checkpoint.ts`, `checkpoint-journal.ts`,
-`engine-extension-contracts.ts`, …).
+`engine-runtime-state.ts`, `engine-cache.ts`, `engine-compilation-targets.ts`,
+`checkpoint.ts`, `checkpoint-journal.ts`, `engine-extension-contracts.ts`, …).
 
 **Scopes & assumptions.** Symbol and operator definitions live in lexical scopes
 with proper inheritance. Assumptions (e.g. "x > 0") are recorded per scope and
@@ -629,11 +658,11 @@ The assumptions subsystem (`engine-assumptions.ts`, `assume.ts`,
 otherwise-free symbols and query them back. Its public surface is `assume()`,
 `ask()`, `verify()`, and `forget()`.
 
-**Predicate forms.** `assume()` accepts an `Expression`, a MathJSON
-expression, or a **string** (parsed as LaTeX — `'x > 0'`, `'$x > 0$'`, or
-`'\pi > 0'`; `verify()` accepts the same three forms). The supported predicates
-are membership (`Element` / `NotElement`), (dis)equality (`Equal` / `NotEqual`),
-the inequalities (`Less` / `LessEqual` / `Greater` / `GreaterEqual`), and their
+**Predicate forms.** `assume()` accepts an `Expression`, a MathJSON expression,
+or a **string** (parsed as LaTeX — `'x > 0'`, `'$x > 0$'`, or `'\pi > 0'`;
+`verify()` accepts the same three forms). The supported predicates are
+membership (`Element` / `NotElement`), (dis)equality (`Equal` / `NotEqual`), the
+inequalities (`Less` / `LessEqual` / `Greater` / `GreaterEqual`), and their
 conjunction (`And`). The predicate is canonicalized, then stored in a normalized
 shape: inequalities as `Less`/`LessEqual` against `0` (e.g. `x + y > 0` →
 `Less(Add(Negate(x), Negate(y)), 0)`), equalities as `Equal(lhs − rhs, 0)`. A
@@ -647,10 +676,17 @@ copied on push) but discards its own additions on `popScope()`; a
 subsequently-restored scope therefore recovers the parent's original facts. Any
 mutation reports a state event (`ce._noteStateEvent`, the sole writer of the
 invalidation axes since the 2026-08-11 state-event migration — see
-`docs/EFFECTS-MODEL.md`), advancing
-`ce._anyVersion` and the finer axes, which invalidates the cached rule sets
-and the FactIndex (below) so stale sign/bound answers cannot survive a scope
-change.
+`docs/EFFECTS-MODEL.md`), advancing `ce._anyVersion` and the finer axes, which
+invalidates the cached rule sets and the FactIndex (below) so stale sign/bound
+answers cannot survive a scope change.
+
+**Assumptions and types.** An assumption never writes a symbol's type. The facts
+in force are combined with the symbol's declared or inferred type when the type
+is read: with `q: real` and `assume(q > 0)`, `q` reads `real<0<..>`, and after
+`forget(q)` it reads `real` again. A write that installs a lasting contract (a
+value, and through it a definition's type or signature) runs inside
+`ce._withoutFacts()`, so it stays true after the next `forget()`. Design:
+`docs/plans/2026-08-29-assumptions-as-facts-type.md`.
 
 **Three-valued discharge.** `verify(P)` returns `true` when `P` is provable from
 the current assumptions, `false` when its negation is provable, and `undefined`
@@ -661,27 +697,27 @@ DB directly (via `ask`) for opaque multi-symbol facts such as `x·y > 0` that th
 evaluator cannot reduce. `ask(pattern)` matches a pattern **containing
 wildcards** (`_k`, `_val`, …) against the stored facts and returns the list of
 binding substitutions; for a closed (wildcard-free) predicate it degrades to a
-`verify`-style existence check. Recursion between the two (`verify → ask →
-verify`) is broken by an `_isVerifying` re-entrancy flag: while it is set,
-`ask` skips its closed-predicate `verify` fallback.
+`verify`-style existence check. Recursion between the two
+(`verify → ask → verify`) is broken by an `_isVerifying` re-entrancy flag: while
+it is set, `ask` skips its closed-predicate `verify` fallback.
 
 **Bounds & the FactIndex.** Sign and bound queries are answered from a cached
 `FactIndex` (`getFactIndex`, keyed on the `any` invalidation axis
-(`ce._anyVersion`), the assumptions
-map identity, and the fact count). It maps each **subject** — a bare symbol or a
-part extractor of one (`Re(z)`, `Im(τ)`, `Abs(q)`, `Argument(z)`) — to its
-numeric `lower`/`upper` bounds with strictness flags. `assume()` uses it for the
-tautology/contradiction checks; the sign getters (`isPositive`, `isNonNegative`,
-…) and `verify()` both read the same bounds, so they **converge**: an assumption
-that fixes a sign is reflected identically whether queried through `expr.sgn` /
-`isPositive` or through `verify(Greater(x, 0))`. A legacy linear scan remains
-only as a fallback for facts the index does not capture.
+(`ce._anyVersion`), the assumptions map identity, and the fact count). It maps
+each **subject** — a bare symbol or a part extractor of one (`Re(z)`, `Im(τ)`,
+`Abs(q)`, `Argument(z)`) — to its numeric `lower`/`upper` bounds with strictness
+flags. `assume()` uses it for the tautology/contradiction checks; the sign
+getters (`isPositive`, `isNonNegative`, …) and `verify()` both read the same
+bounds, so they **converge**: an assumption that fixes a sign is reflected
+identically whether queried through `expr.sgn` / `isPositive` or through
+`verify(Greater(x, 0))`. A legacy linear scan remains only as a fallback for
+facts the index does not capture.
 
 One binding nuance: on a held `BoxedSymbol` instance, type-backed predicates
-(`type`, `isInteger`, …) read the definition captured when the symbol was
-bound, while sign predicates resolve dynamically by symbol name against the
-live assumptions (see the note on `sgn` in `boxed-symbol.ts`). Both agree in
-the common path — `assume()` mutates the bound definition in place.
+(`type`, `isInteger`, …) read the definition captured when the symbol was bound,
+while sign predicates resolve dynamically by symbol name against the live
+assumptions (see the note on `sgn` in `boxed-symbol.ts`). Both agree in the
+common path — `assume()` mutates the bound definition in place.
 
 **`forget()` and provenance.** `forget(symbol)` removes every stored fact that
 references the symbol and resets any value the symbol received **from an
@@ -698,22 +734,23 @@ explicit `ComputeEngine` setup.
 
 ### Randomness & seeding
 
-Random draws are **block-scoped**. There is no ambient seed: `WithRandomSeed(seed,
-body)` installs a frame — `{ seedLo, seedHi, next }` in a per-engine slot on
-`engine-runtime-state.ts`, swapped by `withRandomSeedFrame` with a `finally`
-restore, exactly like the deadline frame — and every draw inside it (dynamically,
-through user-function calls) is the counter-based `hash(seed, n)`. Outside a
-frame, draws are live. Because a draw is a pure function of the seed and the draw
-index, the interpreter, the compiled JavaScript target and the GPU targets all
-compute the same integer stream; compiled code reaches the same frame through its
-engine reference at call time, which is what keeps dynamic scoping from silently
-becoming lexical at the compile boundary.
+Random draws are **block-scoped**. There is no ambient seed:
+`WithRandomSeed(seed, body)` installs a frame — `{ seedLo, seedHi, next }` in a
+per-engine slot on `engine-runtime-state.ts`, swapped by `withRandomSeedFrame`
+with a `finally` restore, exactly like the deadline frame — and every draw
+inside it (dynamically, through user-function calls) is the counter-based
+`hash(seed, n)`. Outside a frame, draws are live. Because a draw is a pure
+function of the seed and the draw index, the interpreter, the compiled
+JavaScript target and the GPU targets all compute the same integer stream;
+compiled code reaches the same frame through its engine reference at call time,
+which is what keeps dynamic scoping from silently becoming lexical at the
+compile boundary.
 
 The generator (PCG3D), the normative `foldSeed`, the tiered parity contract, the
 draw-consumption table, and the GPU seed ABI are specified in
-[`docs/RANDOMNESS-MODEL.md`](./docs/RANDOMNESS-MODEL.md). The seed→stream mapping
-is a cross-version contract: a change there is a breaking change, not a test
-update.
+[`docs/RANDOMNESS-MODEL.md`](./docs/RANDOMNESS-MODEL.md). The seed→stream
+mapping is a cross-version contract: a change there is a breaking change, not a
+test update.
 
 ## Standard library
 
@@ -722,8 +759,9 @@ definitions, organized by domain: `core`, `arithmetic`, `trigonometry`,
 `calculus`, `polynomials`, `logic`, `collections`, `sets`, `linear-algebra`,
 `complex`, `combinatorics`, `number-theory`, `statistics`, `units`, and more.
 `library.ts` declares the domains, their `requires` dependencies, and a
-topological sort so dependencies load first. Libraries can be loaded selectively,
-and consumers can register their own (validated by the extension contracts).
+topological sort so dependencies load first. Libraries can be loaded
+selectively, and consumers can register their own (validated by the extension
+contracts).
 
 ## Simplification and symbolic algebra
 
@@ -748,21 +786,21 @@ Symbolic capabilities beyond the built-in tables come from two optional,
 separately-bundled plugins whose rule corpora live in `data/`:
 
 - **Rubi** (`src/compute-engine/rubi/`, corpus in `data/rubi/`, published as
-  `…/integration-rules`) is a port of the Rubi rule-based integrator: a
-  loader that compiles rule chapters into matchers, a normal-form module, and
-  a driver that applies rules during `Integrate` evaluation. Rules ship in
-  chapter bundles; **chapter bundles assume the chapter-1 foundation rules
-  are loaded first** — loading, say, the trig chapters without ch1 silently
-  degrades coverage rather than erroring.
+  `…/integration-rules`) is a port of the Rubi rule-based integrator: a loader
+  that compiles rule chapters into matchers, a normal-form module, and a driver
+  that applies rules during `Integrate` evaluation. Rules ship in chapter
+  bundles; **chapter bundles assume the chapter-1 foundation rules are loaded
+  first** — loading, say, the trig chapters without ch1 silently degrades
+  coverage rather than erroring.
 - **Fungrim** (`src/identities.ts`, corpus in `data/fungrim/`, published as
   `…/identities`) provides curated identities and special values, loadable as
   simplify/solve rules via `loadIdentities(ce, { topics: […] })`. The loader
-  uses only the public engine API, so this bundle shares no engine code with
-  the main entry.
+  uses only the public engine API, so this bundle shares no engine code with the
+  main entry.
 
-Because these plugins re-bundle engine code, `instanceof` and
-`constructor.name` checks fail across the host/plugin boundary — use string
-checks like `e.name === '…'` (see
+Because these plugins re-bundle engine code, `instanceof` and `constructor.name`
+checks fail across the host/plugin boundary — use string checks like
+`e.name === '…'` (see
 [implementation conventions](#implementation-conventions)).
 
 ## Numerics
@@ -782,12 +820,12 @@ fall back to floating or arbitrary precision when needed.
   functions. It replaces the former `decimal.js` dependency in `src/`;
   `decimal.js` now appears only in `test/big-decimal/` cross-validation and
   benchmarks.
-- **`numerics/`** holds the algorithms: rationals, primes/factorization,
-  special functions (gamma, zeta, Bessel, …), statistics, interval helpers,
-  and numeric integration/extrapolation. Complex numbers use the `complex.js`
-  package. `numerics/complex-scaling.ts` replaces the methods of its `Complex`
-  class that square the parts of a value (`abs`, `log`, `inverse`, ...), so
-  that they are correct for a very small or very large value.
+- **`numerics/`** holds the algorithms: rationals, primes/factorization, special
+  functions (gamma, zeta, Bessel, …), statistics, interval helpers, and numeric
+  integration/extrapolation. Complex numbers use the `complex.js` package.
+  `numerics/complex-scaling.ts` replaces the methods of its `Complex` class that
+  square the parts of a value (`abs`, `log`, `inverse`, ...), so that they are
+  correct for a very small or very large value.
 
 ### What `.N()` promises (user decision 2026-09-30)
 
@@ -818,8 +856,7 @@ exactly, also under `.N()`, and only then approximate the result:
   `Round(x, n)`, and `Fract`;
 - the comparisons `Less`, `LessEqual`, `Greater`, `GreaterEqual`, `Equal`,
   `NotEqual`;
-- `Sign`, `Heaviside` (jumps at 0) and `Mod` (jumps where `x/m` is an
-  integer).
+- `Sign`, `Heaviside` (jumps at 0) and `Mod` (jumps where `x/m` is an integer).
 
 To keep `.N()` fast, the operand is still approximated first. The handler
 evaluates the original operand again, exactly, in two cases only: when it is
@@ -834,19 +871,28 @@ method of some operators (`Integrate` found the antiderivative instead of
 integrating numerically). An approximation whose error is larger than that band
 is not detected.
 
+An operand at a parameter whose declared type is `integer` (in every arm of the
+signature) is evaluated exactly under `.N()`, once, before the handler reads it
+(`integerParameterPositions()` and `exactIntegerOperand()` in
+`boxed-expression/boxed-function.ts`). Without this, the float of a large
+integer is rounded to the working precision first: `DigitSum(2^1000).N()` gave
+84, where the digit sum is 1366. An operator with a wider parameter type (`GCD`,
+`LCM`, `IsPrime`, `IsEven`) is not covered by this rule; its handler reads the
+written operand itself (`exactIntegerOriginals()` in `library/arithmetic.ts`).
+
 The same rule applies when one of these functions is applied element-wise to a
 list or a tuple (`Floor(Range(1, 3)/3).N()` is `[0, 0, 1]`, although at 21
 digits `(1/3)·3` is `0.999…`): the element cells are built from the exact
 elements when an approximated element is near a jump and the collection operand
 is pure (`JUMP_BROADCAST_OPERATORS` and `exactJumpBroadcastOperands()` in
-`boxed-expression/boxed-function.ts`). A lazy element-wise result (more than
-100 elements) cannot check its elements without materializing them, so it
-always maps over the exact source when that source is pure and has no float
-literal, unless every operand is typed integer: then there is no fractional
-part to push across a jump, and the approximated source is kept (rebuilding it
-removed the marker that lets a chain of lazy maps fuse its levels,
-`lowerMapSpine()`). The comparisons build their element cells before the approximation,
-so they need no special case.
+`boxed-expression/boxed-function.ts`). A lazy element-wise result (more than 100
+elements) cannot check its elements without materializing them, so it always
+maps over the exact source when that source is pure and has no float literal,
+unless every operand is typed integer: then there is no fractional part to push
+across a jump, and the approximated source is kept (rebuilding it removed the
+marker that lets a chain of lazy maps fuse its levels, `lowerMapSpine()`). The
+comparisons build their element cells before the approximation, so they need no
+special case.
 
 This is how Mathematica's `N` works (checked with Mathematica 15.0):
 `N[Floor[(25!-1)/24!]]` is `24.`, while `Floor[N[(25!-1)/24!]]` is `25`, and
@@ -859,43 +905,43 @@ Two limits of the rule:
   is decided at the float's precision: `1/2 − 10⁻³⁰ < 0.5` is `False`, and
   `1/10 = 0.1` is `True`. Mathematica gives the same answers.
 - **An operand that is exact but not an exact number** (an exact constant
-  expression: `π·10³⁰`, `√2 + √3`, `ln 2`, with no free variable, no float
-  and no side effect) is decided by raising the precision, as Mathematica
-  does (`isExactConstantExpression()`, `refineExactConstants()` in
+  expression: `π·10³⁰`, `√2 + √3`, `ln 2`, with no free variable, no float and
+  no side effect) is decided by raising the precision, as Mathematica does
+  (`isExactConstantExpression()`, `refineExactConstants()` in
   `boxed-expression/compare.ts`). The operand is first evaluated exactly
-  (`exactFormOfConstant()`): a fold such as `π − π` may make it an exact
-  number, which is then decided exactly, so the `evaluate()` and `.N()` routes
-  agree on `π + 10⁻¹⁵⁰ − π`. Otherwise the engine computes an enclosure
-  `[v − E, v + E]` with the error model of `approximate()` at the working
-  precision plus 10 guard digits, then at double that, up to the working
-  precision plus 100 digits plus the number of integer digits of the value
-  (so `sin(10²⁰⁰)`, whose argument reduction needs 200 more digits, is still
-  decided), and decides when the enclosure does not contain the jump. A value
-  with more than 500 integer digits (`MAX_MAGNITUDE_DIGITS`) is not refined:
-  no jump can be separated at that size, and the float is used. `Floor(π·10³⁰)` is the exact `3141592653589793238462643383279`
-  under `evaluate()`, and `Fract(π)` is `π − 3`. The enclosure is used at any
-  distance from the jump, because cancellation can make a working-precision
-  value wrong by far more than the tolerance: at 21 digits,
-  `√(10⁶⁰ + 10⁴⁰) − 10³⁰` is `10¹⁰`, while its value is
-  `4.99999…·10⁹`. When the enclosure still contains the jump at the limit and
-  is NARROW (narrower than `10^−(working + 50)` of the distance between jumps,
-  or of the magnitude of the compared values: `NARROW_MARGIN_DIGITS`), the
-  value is probably AT the jump (`(√2 + √3)² − 2√6` is `5`), and `evaluate()`
-  leaves a rounding function, `Sign` and `Heaviside` unevaluated, a
-  comparison answers equal, and `.N()` takes the value to be at the jump
+  (`exactFormOfConstant()`): a fold such as `π − π` may make it an exact number,
+  which is then decided exactly, so the `evaluate()` and `.N()` routes agree on
+  `π + 10⁻¹⁵⁰ − π`. Otherwise the engine computes an enclosure `[v − E, v + E]`
+  with the error model of `approximate()` at the working precision plus 10 guard
+  digits, then at double that, up to the working precision plus 100 digits plus
+  the number of integer digits of the value (so `sin(10²⁰⁰)`, whose argument
+  reduction needs 200 more digits, is still decided), and decides when the
+  enclosure does not contain the jump. A value with more than 500 integer digits
+  (`MAX_MAGNITUDE_DIGITS`) is not refined: no jump can be separated at that
+  size, and the float is used. `Floor(π·10³⁰)` is the exact
+  `3141592653589793238462643383279` under `evaluate()`, and `Fract(π)` is
+  `π − 3`. The enclosure is used at any distance from the jump, because
+  cancellation can make a working-precision value wrong by far more than the
+  tolerance: at 21 digits, `√(10⁶⁰ + 10⁴⁰) − 10³⁰` is `10¹⁰`, while its value is
+  `4.99999…·10⁹`. When the enclosure still contains the jump at the limit and is
+  NARROW (narrower than `10^−(working + 50)` of the distance between jumps, or
+  of the magnitude of the compared values: `NARROW_MARGIN_DIGITS`), the value is
+  probably AT the jump (`(√2 + √3)² − 2√6` is `5`), and `evaluate()` leaves a
+  rounding function, `Sign` and `Heaviside` unevaluated, a comparison answers
+  equal, and `.N()` takes the value to be at the jump
   (`Floor((√2 + √3)² − 2√6).N()` is `5`), as Mathematica does after its
-  `$MaxExtraPrecision` warning. A consequence: two constants that differ by
-  less than about `10^−(working + 50)` of their size are taken as equal
+  `$MaxExtraPrecision` warning. A consequence: two constants that differ by less
+  than about `10^−(working + 50)` of their size are taken as equal
   (`Less(kπ, kπ + 10⁻¹⁵⁰)` is `False`). Near 0 the test is absolute, and the
   width of an enclosure follows the size of the terms, not of the value, so a
   value that no fold simplifies and that is smaller than about
   `10^−(working + 50)` times its largest term is taken to be 0
-  (`(√2 + √3)² − 5 − 2√6 + 10⁻¹⁵⁰` has `Sign` `0` under `.N()`). An enclosure that is still WIDE at the
-  limit decides nothing, and the caller keeps its previous answer (the
-  tolerance comparison, or the float). An exact order (tolerance 0, used by `Max`,
-  sorting and `Abs`) never accepts "equal at the limit". The bound is sound
-  only for operators whose kernels `approximate()` covers; any other operator
-  gives no bound, and the result stays undecided.
+  (`(√2 + √3)² − 5 − 2√6 + 10⁻¹⁵⁰` has `Sign` `0` under `.N()`). An enclosure
+  that is still WIDE at the limit decides nothing, and the caller keeps its
+  previous answer (the tolerance comparison, or the float). An exact order
+  (tolerance 0, used by `Max`, sorting and `Abs`) never accepts "equal at the
+  limit". The bound is sound only for operators whose kernels `approximate()`
+  covers; any other operator gives no bound, and the result stays undecided.
 
 The form of the result does not depend on which of the two ways decided it:
 under `.N()`, the rounding family returns a float (`Floor(b/24!).N()` is the
@@ -911,48 +957,45 @@ for two different tolerances:
 1. **Roundoff** — is this tiny value floating-point noise? The rule (user
    decision 2026-10-02) depends on where the value comes from:
    - An EXACT input is reduced exactly before any float is formed, so its
-     roundoff never appears. An exact rational multiple of π in `sin`,
-     `cos`, `tan`, `sec`, `csc`, `cot`, in `e^{iθ}` and in a hyperbolic
-     function of `iθ` is reduced in half-turns with bigints
-     (`exactHalfTurns`, `reduceHalfTurns`), so a large multiple is exact
-     too: in the interpreter by `circularOfExactAngle` (machine precision),
-     `applyAngle`/`exactLargeAngle` (above it, and for an angle with a
-     rational term), `exactEulerN` (`boxed-expression/arithmetic-power.ts`)
-     and `hyperbolicOfImaginaryAngle`; in compiled code by `cosSinPi()`
-     (`numerics/numeric-complex.ts`) through `_SYS.sinpi`/`cospi`/`tanpi`/
-     `cexppi`, `_gpu_cossinpi` and an inline NumPy form for Python, for an
-     angle `π·u` and an exponent `a + iπu` written with the symbol `Pi`.
-     So `sin(π).N()` is `0` and `e^{iπ}.N()` is `−1` at every precision.
-     Only these functions are covered: another kernel at an exact argument
-     can still leave roundoff in a part whose value is `0` (`erf(i).N()`
-     has a real part of `2.2·10⁻¹⁶`; ROADMAP).
-   - The machine kernels give an exact zero part where the value has one:
-     the inverse trigonometric and hyperbolic functions use the formulas of
-     W. Kahan (`complexAsin()` and the others), `complexPow()` uses
-     repeated squaring for an integer exponent up to 64 and an exact angle
-     for a base on an axis or a diagonal, and `complexSqrt()` scales its
-     operand. No machine kernel, in the interpreter or in compiled code,
-     removes a part of its result.
-   - A small part of the value of a FLOAT input is the value at that float
-     and is kept, on every route: `e^{3.141592653589793i}` is
-     `−1 + 1.22·10⁻¹⁶i` at machine precision (`sin(Math.PI)`), and
-     `2^{10^{-100}i}` is `1 + 6.93·10^{-101}i`. The `Chop` operator removes
-     such a part on request, with `ce.tolerance`.
+     roundoff never appears. An exact rational multiple of π in `sin`, `cos`,
+     `tan`, `sec`, `csc`, `cot`, in `e^{iθ}` and in a hyperbolic function of
+     `iθ` is reduced in half-turns with bigints (`exactHalfTurns`,
+     `reduceHalfTurns`), so a large multiple is exact too: in the interpreter by
+     `circularOfExactAngle` (machine precision), `applyAngle`/`exactLargeAngle`
+     (above it, and for an angle with a rational term), `exactEulerN`
+     (`boxed-expression/arithmetic-power.ts`) and `hyperbolicOfImaginaryAngle`;
+     in compiled code by `cosSinPi()` (`numerics/numeric-complex.ts`) through
+     `_SYS.sinpi`/`cospi`/`tanpi`/ `cexppi`, `_gpu_cossinpi` and an inline NumPy
+     form for Python, for an angle `π·u` and an exponent `a + iπu` written with
+     the symbol `Pi`. So `sin(π).N()` is `0` and `e^{iπ}.N()` is `−1` at every
+     precision. Only these functions are covered: another kernel at an exact
+     argument can still leave roundoff in a part whose value is `0`
+     (`erf(i).N()` has a real part of `2.2·10⁻¹⁶`; ROADMAP).
+   - The machine kernels give an exact zero part where the value has one: the
+     inverse trigonometric and hyperbolic functions use the formulas of W. Kahan
+     (`complexAsin()` and the others), `complexPow()` uses repeated squaring for
+     an integer exponent up to 64 and an exact angle for a base on an axis or a
+     diagonal, and `complexSqrt()` scales its operand. No machine kernel, in the
+     interpreter or in compiled code, removes a part of its result.
+   - A small part of the value of a FLOAT input is the value at that float and
+     is kept, on every route: `e^{3.141592653589793i}` is `−1 + 1.22·10⁻¹⁶i` at
+     machine precision (`sin(Math.PI)`), and `2^{10^{-100}i}` is
+     `1 + 6.93·10^{-101}i`. The `Chop` operator removes such a part on request,
+     with `ce.tolerance`.
    - Two places still remove a part, because their kernel cannot avoid the
      roundoff: the big-decimal kernels of `BigNumericValue` remove a part at
      most `10^(2−precision)` times the modulus (`isComplexDust`,
-     `complexNoiseRatio`, `numeric-value/roundoff.ts`): their polar form
-     uses π at the working precision, so `i^{3.0}` at 21 digits would have
-     a real part of about `10^{-21}`. And the big-decimal `sin`/`cos` remove
-     real noise of the same size (`chopBignumDust`). An absolute cut erased
-     small results: `(10^{-10} i)^2` gave 0 instead of `-10^{-20}` until
-     2026-09-26.
+     `complexNoiseRatio`, `numeric-value/roundoff.ts`): their polar form uses π
+     at the working precision, so `i^{3.0}` at 21 digits would have a real part
+     of about `10^{-21}`. And the big-decimal `sin`/`cos` remove real noise of
+     the same size (`chopBignumDust`). An absolute cut erased small results:
+     `(10^{-10} i)^2` gave 0 instead of `-10^{-20}` until 2026-09-26.
 2. **Comparison tolerance** — should two values be considered equal _for the
    user_? That is `ce.tolerance` (default `1e-10`, user-configurable), used by
    `Equal`, the relational operators, `.is()`, and the `Chop` operator. It
    applies only when a float is involved: two EXACT numbers (integers,
-   rationals, rational multiples of a square root) are compared exactly, with
-   no tolerance, by the operators `Equal`, `NotEqual`, `Less`, `LessEqual`,
+   rationals, rational multiples of a square root) are compared exactly, with no
+   tolerance, by the operators `Equal`, `NotEqual`, `Less`, `LessEqual`,
    `Greater`, `GreaterEqual` and by the methods `.isEqual()`, `.isLess()`,
    `.isLessEqual()`, `.isGreater()`, `.isGreaterEqual()` (user decision
    2026-09-30). Before, `Equal` used the tolerance while `Less` sometimes did
@@ -960,96 +1003,92 @@ for two different tolerances:
    one of `<`, `=`, `>` now holds for two exact numbers, as in Mathematica
    (`1/3 == 3333333333333/10^13` is `False` there). A float stands for a value
    known only to its precision, so `1/10 = 0.1` is `True`. `.is()` keeps the
-   tolerance for exact numbers too: it is the loose check for external
-   callers.
+   tolerance for exact numbers too: it is the loose check for external callers.
 
 The invariant for complex values:
 
-- **No part is removed after the fact, except by the big-decimal kernels.**
-  The machine kernels (`boxed-expression/apply.ts`, the `pow`/`root`/`exp`
-  complex branches of `MachineNumericValue`, the compiled complex helpers)
-  return their value as computed; an exact input is reduced exactly before
-  it reaches them (see above). The complex branches of `BigNumericValue`
-  remove noise as described next.
+- **No part is removed after the fact, except by the big-decimal kernels.** The
+  machine kernels (`boxed-expression/apply.ts`, the `pow`/`root`/`exp` complex
+  branches of `MachineNumericValue`, the compiled complex helpers) return their
+  value as computed; an exact input is reduced exactly before it reaches them
+  (see above). The complex branches of `BigNumericValue` remove noise as
+  described next.
 - **In `BigNumericValue`, a legitimately small component does not reach the
-  chop, except in one case named below.** Magnitude alone cannot tell rounding noise from a small correct
-  component: `e^{iπ}` computes `-1 + 1.2e-21i` at 21 digits (noise), and
-  `e^{i·10^{-800}}` is `1 + 10^{-800}i` (correct), whose imaginary part is
-  smaller still. So the big-decimal kernels have two regimes. In the
-  small-component regime, one part of the input is less than
-  `10^(2−precision)` times the other (for `exp` and for the angle of a
-  complex power, the angle is less than `10^(2−precision)`). There the kernel
-  uses the first-order expansion, which is exact to the working precision
-  and has no cancellation: `exp(a + ib) = e^a·(1 + ib)`,
-  `ln(a + ib) = ln a + i·b/a`, `(a + ib)^n = a^n·(1 + i·n·b/a)`, and the
-  Cartesian `sqrt` (which computes the smaller part from `b/(2·larger)`).
-  Nothing is chopped in this regime. An integer power in the normal regime
-  uses repeated multiplication, which makes no polar noise, and is not
-  chopped either. A power of a value with a negative real part, an
-  imaginary part smaller than the real part and a real non-integer exponent
-  splits the angle into `±π·n`, whose unit `e^{±iπn}` alone is chopped, and
-  the small angle `n·atan(b/a)`, which is not. In the normal regime, the
+  chop, except in one case named below.** Magnitude alone cannot tell rounding
+  noise from a small correct component: `e^{iπ}` computes `-1 + 1.2e-21i` at 21
+  digits (noise), and `e^{i·10^{-800}}` is `1 + 10^{-800}i` (correct), whose
+  imaginary part is smaller still. So the big-decimal kernels have two regimes.
+  In the small-component regime, one part of the input is less than
+  `10^(2−precision)` times the other (for `exp` and for the angle of a complex
+  power, the angle is less than `10^(2−precision)`). There the kernel uses the
+  first-order expansion, which is exact to the working precision and has no
+  cancellation: `exp(a + ib) = e^a·(1 + ib)`, `ln(a + ib) = ln a + i·b/a`,
+  `(a + ib)^n = a^n·(1 + i·n·b/a)`, and the Cartesian `sqrt` (which computes the
+  smaller part from `b/(2·larger)`). Nothing is chopped in this regime. An
+  integer power in the normal regime uses repeated multiplication, which makes
+  no polar noise, and is not chopped either. A power of a value with a negative
+  real part, an imaginary part smaller than the real part and a real non-integer
+  exponent splits the angle into `±π·n`, whose unit `e^{±iπn}` alone is chopped,
+  and the small angle `n·atan(b/a)`, which is not. In the normal regime, the
   kernel uses the polar form at the working precision (with guard digits),
-  rounds each part to the working precision, and chops a part that is at
-  most `10^(2−precision)` times the modulus of the result. One case still
-  loses a legitimate small part there: a COMPLEX exponent whose real part is
-  a half-integer, at a base near the negative real axis — at 40 digits,
+  rounds each part to the working precision, and chops a part that is at most
+  `10^(2−precision)` times the modulus of the result. One case still loses a
+  legitimate small part there: a COMPLEX exponent whose real part is a
+  half-integer, at a base near the negative real axis — at 40 digits,
   `(-4 + 10^{-800}i)^{1.5 + 10^{-50}i}` gives `-8i`, where the real part is
   about `1.1·10^{-49}`.
 - **Never chop in ring arithmetic or constructors.** Results of
-  `add`/`mul`/`div` can be legitimately tiny (`(10⁻⁶ i)²`, user input
-  `1e-12i`); `chop()` is an _absolute_-tolerance test and would destroy them.
-  Only transcendental kernels produce dust at a known scale. (See the comment
-  in `apply2` in `boxed-expression/apply.ts` for the real-part version of this
+  `add`/`mul`/`div` can be legitimately tiny (`(10⁻⁶ i)²`, user input `1e-12i`);
+  `chop()` is an _absolute_-tolerance test and would destroy them. Only
+  transcendental kernels produce dust at a known scale. (See the comment in
+  `apply2` in `boxed-expression/apply.ts` for the real-part version of this
   principle: a legitimately small real result is not chopped either.)
 - **Read sites compare exactly.** Because a kernel gives an exact zero part
   where the value has one, and an exact input is reduced exactly, a stored
-  `im ≠ 0` is significant by construction. The many library dispatch
-  checks (`x.im === 0` / `x.im !== 0`) are therefore correct as written — do
-  not "fix" them to `ce.chop(x.im)`. A read-time chop would make a value
-  dispatch as real while still typing, printing, and serializing as complex,
-  and would tie expression identity to the mutable `ce.tolerance`.
-  (`ce._numericValue`'s exact `im === 0` collapse to a real value is likewise
-  correct by construction.)
+  `im ≠ 0` is significant by construction. The many library dispatch checks
+  (`x.im === 0` / `x.im !== 0`) are therefore correct as written — do not "fix"
+  them to `ce.chop(x.im)`. A read-time chop would make a value dispatch as real
+  while still typing, printing, and serializing as complex, and would tie
+  expression identity to the mutable `ce.tolerance`. (`ce._numericValue`'s exact
+  `im === 0` collapse to a real value is likewise correct by construction.)
 
-The machine kernels remove no part (until 2026-10-02 they removed a part at
-most `1e-14` times the modulus, `ROUNDOFF_TOLERANCE` in `numerics/numeric.ts`,
-which also removed a correct small part: `arcoth(10⁻¹⁰⁰)` compiled was
-`−(π/2)i`, and in degrees `arcsin(10^{-200}i)` was `0`). The big-decimal
-kernels of `BigNumericValue` use `10^(2−precision)`, as described above.
-Using `ce.tolerance` for a kernel chop miscoupled the user knob
-— tightening it below dust scale re-introduced the 2026-07-30 regression where
-the compiled `arcsin`, projected to the real lane, returned `NaN` across its
-whole domain, and loosening it silently projected genuinely complex results to
-real (fixed 2026-07-31; the compile-time `realOnly` projection that first
-surfaced this has since been removed).
+The machine kernels remove no part (until 2026-10-02 they removed a part at most
+`1e-14` times the modulus, `ROUNDOFF_TOLERANCE` in `numerics/numeric.ts`, which
+also removed a correct small part: `arcoth(10⁻¹⁰⁰)` compiled was `−(π/2)i`, and
+in degrees `arcsin(10^{-200}i)` was `0`). The big-decimal kernels of
+`BigNumericValue` use `10^(2−precision)`, as described above. Using
+`ce.tolerance` for a kernel chop miscoupled the user knob — tightening it below
+dust scale re-introduced the 2026-07-30 regression where the compiled `arcsin`,
+projected to the real lane, returned `NaN` across its whole domain, and
+loosening it silently projected genuinely complex results to real (fixed
+2026-07-31; the compile-time `realOnly` projection that first surfaced this has
+since been removed).
 
 Two related cases that are neither kernel dust nor comparison:
 
-- **Numericization dust** — `.N()` substitutes a precision-limited
-  approximation for a symbolic constant, so `Sin(π)` at bignum precision
-  computes sin of π-to-`precision`-digits ≈ 10^−precision. The bignum
-  `Sin`/`Cos` kernels chop this _real_ dust at the bignum roundoff scale,
-  10^(2−precision) (`chopBignumDust` in `boxed-expression/trigonometry.ts`) —
-  a chop at `ce.tolerance` here destroyed legitimately-computed small results
-  (`sin(3.141592653588793)` ≈ 1.0e−12 returned 0; the #231 failure class).
-  The machine path does not chop a float argument
-  (`Sin(3.141592653589793).N()` → `1.22e-16`, matching Mathematica's
-  `Sin[N[π]]`); an EXACT rational multiple of π at machine precision is
-  reduced with bigints and computed in doubles (`circularOfExactAngle`), so
-  `Sin(π).N()` is `0` at every precision.
+- **Numericization dust** — `.N()` substitutes a precision-limited approximation
+  for a symbolic constant, so `Sin(π)` at bignum precision computes sin of
+  π-to-`precision`-digits ≈ 10^−precision. The bignum `Sin`/`Cos` kernels chop
+  this _real_ dust at the bignum roundoff scale, 10^(2−precision)
+  (`chopBignumDust` in `boxed-expression/trigonometry.ts`) — a chop at
+  `ce.tolerance` here destroyed legitimately-computed small results
+  (`sin(3.141592653588793)` ≈ 1.0e−12 returned 0; the #231 failure class). The
+  machine path does not chop a float argument (`Sin(3.141592653589793).N()` →
+  `1.22e-16`, matching Mathematica's `Sin[N[π]]`); an EXACT rational multiple of
+  π at machine precision is reduced with bigints and computed in doubles
+  (`circularOfExactAngle`), so `Sin(π).N()` is `0` at every precision.
 - **Numeric-algorithm residual cleanup** — `NullSpace`/eigenvector results in
   `library/linear-algebra.ts` chop components at `ce.tolerance`. Elimination
-  residuals scale with the algorithm and conditioning, not machine eps, and
-  the basis is a user-facing answer, so the user's tolerance is the right
-  knob there.
+  residuals scale with the algorithm and conditioning, not machine eps, and the
+  basis is a user-facing answer, so the user's tolerance is the right knob
+  there.
 
 ## Compilation
 
 `src/compute-engine/compilation/` turns a boxed expression into source code in a
-target language. `base-compiler.ts` walks the expression tree language-agnostically
-and delegates formatting to a `LanguageTarget` / `CompileTarget`
-(`types.ts`). Built-in targets:
+target language. `base-compiler.ts` walks the expression tree
+language-agnostically and delegates formatting to a `LanguageTarget` /
+`CompileTarget` (`types.ts`). Built-in targets:
 
 - `javascript-target.ts` — executable JavaScript (with `constant-folding.ts`).
 - `glsl-target.ts`, `wgsl-target.ts`, `gpu-target.ts` — GPU shaders.
@@ -1064,28 +1103,30 @@ instances directly to the standalone `compile()` function.
 
 The package ships several independently importable bundles (the `exports` map in
 `package.json`). Each is built by `scripts/build.mjs` (esbuild) as ESM only,
-minified, with `.d.ts` types in `dist/types/`. There is no UMD or CommonJS
-build (since 2026-10-26): Node loads an ESM entry through `require()` since
-Node 22.12, the floor in `engines.node`, and `exports` has no `require`
-condition. The entries that contain the engine (the full entry, `core`,
-`compile`, `epsil`, `integration-rules`, `identities`) are built in one
-code-splitting invocation, so the engine is emitted once into a shared chunk
-and a host that imports two of them loads one engine (duplicate class
-definitions would break `instanceof` across the two copies). `runtime` and
-`kernel-worker` are single self-contained files on purpose: compiled code runs
-on the runtime without the engine, and a host copies the worker script.
+with normal and minified variants and `.d.ts` types in `dist/types/`. There is
+no UMD or CommonJS build (since 2026-10-26): Node supports loading an ESM entry
+through `require()` without a flag since Node 22.12, and `exports` has no
+`require` condition. The project's minimum supported Node version is 26.13.0, as
+specified in `engines.node` and [BUILD.md](BUILD.md). The entries that contain
+the engine (the full entry, `core`, `compile`, `epsil`, `integration-rules`,
+`identities`) are built in one code-splitting invocation, so the engine is
+emitted once into a shared chunk and a host that imports two of them loads one
+engine (duplicate class definitions would break `instanceof` across the two
+copies). `runtime` and `kernel-worker` are single self-contained files on
+purpose: compiled code runs on the runtime without the engine, and a host copies
+the worker script.
 
-| Import path | Source | Contents |
-|---|---|---|
-| `@cortex-js/compute-engine` | `src/compute-engine.ts` | Full: engine + LaTeX + all five compilation targets + free functions |
-| `…/core` | `src/core.ts` | Engine + free functions, **no** LaTeX; only the `javascript` and `interval-js` targets (`ce.registerCompilationTarget()` adds one from `…/compile`) |
-| `…/math-json` | `src/math-json.ts` | MathJSON types + utilities only |
-| `…/latex-syntax` | `src/latex-syntax.ts` | Standalone LaTeX parser/serializer |
-| `…/numerics` | `src/numerics.ts` | Numeric primitives (BigDecimal, rationals, special functions) |
-| `…/interval` | `src/interval.ts` | Interval arithmetic |
-| `…/compile` | `src/compile.ts` | The `compile()` function and every target class (`GLSLTarget`, `WGSLTarget`, `PythonTarget`, …) |
-| `…/identities` | `src/identities.ts` | Fungrim identities loader (rules-as-data plugin) |
-| `…/integration-rules` | `src/integration-rules.ts` | Rubi rule-based integration plugin |
+| Import path                 | Source                     | Contents                                                                                                                                            |
+| --------------------------- | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@cortex-js/compute-engine` | `src/compute-engine.ts`    | Full: engine + LaTeX + all five compilation targets + free functions                                                                                |
+| `…/core`                    | `src/core.ts`              | Engine + free functions, **no** LaTeX; only the `javascript` and `interval-js` targets (`ce.registerCompilationTarget()` adds one from `…/compile`) |
+| `…/math-json`               | `src/math-json.ts`         | MathJSON types + utilities only                                                                                                                     |
+| `…/latex-syntax`            | `src/latex-syntax.ts`      | Standalone LaTeX parser/serializer                                                                                                                  |
+| `…/numerics`                | `src/numerics.ts`          | Numeric primitives (BigDecimal, rationals, special functions)                                                                                       |
+| `…/interval`                | `src/interval.ts`          | Interval arithmetic                                                                                                                                 |
+| `…/compile`                 | `src/compile.ts`           | The `compile()` function and every target class (`GLSLTarget`, `WGSLTarget`, `PythonTarget`, …)                                                     |
+| `…/identities`              | `src/identities.ts`        | Fungrim identities loader (rules-as-data plugin)                                                                                                    |
+| `…/integration-rules`       | `src/integration-rules.ts` | Rubi rule-based integration plugin                                                                                                                  |
 
 The **full** entry (`compute-engine.ts`) registers
 `ComputeEngine._latexSyntaxFactory` and a default-engine factory that injects
@@ -1096,49 +1137,49 @@ experimental `@cortex-js/compute-engine/epsil` published entry.
 
 ### Diagnostic flags and `_`-prefixed engine members (user decision 2026-10-17)
 
-Some diagnostics are turned on by an environment variable that the source
-reads from `process.env` when a module loads: `CE_DEBUG_DEPS`,
-`CE_MEMO_PARANOID`, `CE_TYPE_PURITY_GUARD`, `CE_CACHE_STATS` and others. These
-flags are for the debugging of the engine itself, in the repository's own Node
-runs (tests, benchmarks, `tsx` probes). A host cannot use them:
+Some diagnostics are turned on by an environment variable that the source reads
+from `process.env` when a module loads: `CE_DEBUG_DEPS`, `CE_MEMO_PARANOID`,
+`CE_TYPE_PURITY_GUARD`, `CE_CACHE_STATS` and others. These flags are for the
+debugging of the engine itself, in the repository's own Node runs (tests,
+benchmarks, `tsx` probes). A host cannot use them:
 
 - a browser has no `process` object, so the flag is always off there;
-- the functions that report what a flag records are module exports of files
-  such as `src/common/cache-stats.ts`, which the package does not export and
-  which minification renames.
+- the functions that report what a flag records are module exports of files such
+  as `src/common/cache-stats.ts`, which the package does not export and which
+  minification renames.
 
-A diagnostic that a host needs is an `_`-prefixed member of the engine,
-declared on `IComputeEngine` in `src/compute-engine/types-engine.ts` (an
-undeclared member is not visible to a host that uses the types). Such a member
-survives bundling and minification, needs no subpath export, and works in a
-browser. Examples: `ce._mapAutoCompileStats` (the counters of the
-auto-compilation of `Map` callbacks) and `ce._cacheStats` (the hit and miss
-counts of the memoization caches; set `ce._cacheStats.enabled = true` to start
-recording, then read `snapshot()` or `report()`). `CE_CACHE_STATS` still turns
-the cache statistics on at module load in a Node run. Add a new `process.env`
-flag only for the engine's own debugging; when a host asks for a diagnostic,
-convert it to an engine member.
+A diagnostic that a host needs is an `_`-prefixed member of the engine, declared
+on `IComputeEngine` in `src/compute-engine/types-engine.ts` (an undeclared
+member is not visible to a host that uses the types). Such a member survives
+bundling and minification, needs no subpath export, and works in a browser.
+Examples: `ce._mapAutoCompileStats` (the counters of the auto-compilation of
+`Map` callbacks) and `ce._cacheStats` (the hit and miss counts of the
+memoization caches; set `ce._cacheStats.enabled = true` to start recording, then
+read `snapshot()` or `report()`). `CE_CACHE_STATS` still turns the cache
+statistics on at module load in a Node run. Add a new `process.env` flag only
+for the engine's own debugging; when a host asks for a diagnostic, convert it to
+an engine member.
 
 ## Build, test, and docs tooling
 
-- **Build**: `npm run build` (dev → `/build`), `npm run build production`
-  (minified → `/dist`). Driven by `scripts/build.sh` → `scripts/build.mjs`
-  (esbuild) plus `tsc --emitDeclarationOnly` for types.
-- **Type check**: `npm run typecheck` (run when completing a task).
-- **Test**: `npm run test compute-engine/<name>` runs
-  `test/compute-engine/<name>.test.ts` (Jest via `config/jest.config.cjs`).
-  `npm run test snapshot` updates snapshots.
-- **Lint**: `npm run lint` runs every check of `npm run ci` except the test suite (Oxlint + Prettier, the type check, the corpus and artifact freshness checks). `npm run lint:code` runs only Oxlint + Prettier.
-- **Dependency check**: `npm run check:deps` (`madge` — zero circular
-  dependencies; Oxlint also enforces the layering rules and `import/no-cycle`).
-- **Docs**: `npm run doc` (TypeDoc + `concat-md`) regenerates `src/api.md`. It is
-  generated — do not edit it by hand.
+See [BUILD.md](BUILD.md) for setup, commands, build modes and validation
+requirements. The architectural pieces are:
+
+- **Build**: `scripts/build.sh` orchestrates declaration generation and the
+  esbuild bundler in `scripts/build.mjs`, writing bundles under `dist/`.
+- **Tests**: Jest discovers the root `jest.config.cjs`, which delegates to
+  `config/jest.config.cjs` while preserving that configuration's relative paths.
+- **Static checks**: Oxlint checks code, Prettier checks formatting, TypeScript
+  checks types, and Madge enforces zero circular dependencies. Oxlint also
+  enforces the layering rules and `import/no-cycle`.
+- **Docs**: `npm run doc` (TypeDoc + `concat-md`) regenerates `src/api.md`. It
+  is generated — do not edit it by hand.
 
 ## Architectural invariants
 
 These properties are intentional and enforced; preserve them when contributing:
 
-1. **Zero circular dependencies** in `src/compute-engine` (runtime *and*
+1. **Zero circular dependencies** in `src/compute-engine` (runtime _and_
    type-only), checked with `madge`. See
    [implementation conventions](#circular-dependencies).
 2. **Layered imports**: kernel types → wrappers → services → composition root;
@@ -1151,6 +1192,15 @@ These properties are intentional and enforced; preserve them when contributing:
 5. **Public type surfaces avoid explicit `any`.**
 6. **Don't call `.simplify()` from within simplification rules** or functions
    they invoke (infinite-recursion risk).
+7. **Serialization is a read.** `toMathJson()`, `.json`, `.latex` and
+   `toLatex()` must not declare a symbol, infer a type, or change any scope. The
+   serializer can re-canonicalize a structural copy (the `Multiply` → `Divide`
+   prettification does), and canonicalizing a call of an undeclared head
+   declares that head. So `serializeJson()` (`boxed-expression/serialize.ts`)
+   runs inside `ce._resolveOnly()`, and the auto-declaration in `box.ts` is
+   skipped while `ce._resolveOnlyDepth > 0`. Without this, an expression parsed
+   against one scope could declare its heads in the scope that is current when
+   it is serialized.
 
 ## Implementation conventions
 
@@ -1274,6 +1324,32 @@ collection contracts. In particular:
 - A lazy handler must canonicalize the held operands it consumes. Binding with
   `op.canonical` does not substitute assigned symbol values. Box and parse input
   can contain unresolved syntax that direct function construction has resolved.
+- A lazy handler that has evaluated its operands and cannot reduce further must
+  return a new expression built from the evaluated operands. When an `evaluate`
+  handler returns `undefined`, the engine rebuilds the expression from the
+  operands it passed to the handler, which for a lazy operator are the held,
+  unevaluated ones, so the handler's work is lost: `0 < D(x^2, x)` once stayed
+  unevaluated instead of becoming `0 < 2x`. A non-lazy operator does not have
+  this problem, because its operands are evaluated before the handler runs.
+- `isFinite === false` means "not a finite number". It is also the answer for a
+  value that is not a number at all (a tuple, a list, a string), so it does not
+  prove that a value is infinite. Check `isNumber` before reading
+  `isFinite === false` as "infinite": `1/(3·|(1, 2)|)` once folded to `0`
+  because of this.
+- A recursive user function that is called again, inside its own evaluation,
+  with an argument that contains a free symbol is not unrolled: `R(3, y)` stays
+  `R(3, y)`. The evaluated arguments are kept (`R(3, Sin(0), y)` becomes
+  `R(3, 0, y)`). Numeric arguments are not affected and use the application
+  memo. (`guardSymbolicRecursion` in `function-utils.ts`.)
+- Do not advance an invalidation counter (`ce._anyVersion` or another version)
+  to make a temporary cache epoch around a computation. A scope pop compares the
+  counters with their values at the push, so any advance inside the scope makes
+  the pop dirty, and a dirty pop advances the counter again; read-only probes
+  then recompute types without end. For the same reason, an event that fires
+  during a cached computation (type inference while canonicalizing) must not
+  advance a counter that the caches of that computation read, or the caches
+  filled during the walk are outdated at once and mutually typed nodes recompute
+  each other.
 - `evaluate()` preserves exact values and leaves exact transcendentals symbolic
   when no exact reduction exists. Numeric handlers honor `numericApproximation`
   and use `isExact` to distinguish exact from floating operands. See
@@ -1300,6 +1376,16 @@ collection contracts. In particular:
   symbols through `ce._bindingSymbol`, so library constants such as `Pi`, `e`,
   and `i` do not replace lexical symbols. Lift integrands with `liftIntegrand()`
   before passing them to integration providers.
+- `canonicalFunctionLiteral()` (`function-utils.ts`) turns any expression that
+  is not a string or a symbol into a function: a number becomes a constant
+  function (`5` gives `() => 5`) and an expression with unknowns becomes a
+  shorthand function (`x + 1` gives `(x) => x + 1`). A result that is not
+  `undefined` therefore does not show that the input was a function literal;
+  test the operator (`Function`) or the type of the input for that.
+- Small integer literals and common constants are interned:
+  `ce.box(7) === ce.box(7)`. A mechanism or a test that needs two distinct
+  instances of equal values must use function expressions, which are always new
+  instances.
 - `BigDecimal.precision` is module-global, and engine construction writes it.
   Save and restore it when later tests in the same file reuse an earlier engine.
   Boolean use also infers a symbol's type for the engine's lifetime.
@@ -1319,7 +1405,8 @@ Madge; do not use the check's limitations as permission to bypass the layering.
 ## Where to go next
 
 - [`README.md`](./README.md) — installation, quick start, public API examples.
-- [CODING-STYLEGUIDE.md](CODING-STYLEGUIDE.md) — code, comment, and testing conventions.
+- [CODING-STYLEGUIDE.md](CODING-STYLEGUIDE.md) — code, comment, and testing
+  conventions.
 - [AGENTS.md](AGENTS.md) — agent workflow and reference routing.
 - [`docs/STATUS_REPORT.md`](./docs/STATUS_REPORT.md) — internal architecture
   history and documentation lifecycle.

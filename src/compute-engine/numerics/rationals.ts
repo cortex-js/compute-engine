@@ -364,6 +364,11 @@ export function rationalGcd(lhs: Rational, rhs: Rational): Rational {
 
 //  Return the "reduced form" of the rational, that is a rational
 // such that gcd(numer, denom) = 1 and denom > 0
+//
+// The numerator and the denominator must be integers. A non-integer operand
+// gives `[NaN, NaN]` without an error (`[1.5, 2]` → `[NaN, NaN]`), except
+// when the other operand is 1, which returns the pair unchanged. For a value
+// with a decimal part, use `reducedRationalFromDecimal()`.
 export function reducedRational(
   r: [SmallInteger, SmallInteger]
 ): [SmallInteger, SmallInteger];

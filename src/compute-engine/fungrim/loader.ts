@@ -895,6 +895,12 @@ export function loadIdentities(
   // -- 2. Shell declarations: heads collected by `collectReferenced`,
   //       in the current scope, skipping already-defined names (built-ins
   //       are never widened). Re-run unconditionally — idempotent-safe.
+  //       When a name in the `declarations` table of
+  //       `fungrim-core-data.json` becomes a built-in operator, delete its
+  //       shell entry from that table. Otherwise this loop skips the name,
+  //       `report.declared` no longer equals the table, and the test
+  //       "declares shell heads in the current scope"
+  //       (`test/compute-engine/fungrim-loader.test.ts`) fails.
   for (const name of Object.keys(data.declarations).sort()) {
     if (!referenced.has(name)) continue;
     if (ce.lookupDefinition(name) !== undefined) continue; // never widen

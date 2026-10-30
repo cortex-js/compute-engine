@@ -557,6 +557,11 @@ function serializeAutoNotationNumber(
   // The mantissa is written even when it is `1`: `1\cdot10^{30}` is read
   // back as a number literal, but `10^{30}` is read back as a power, and the
   // Epsil `e22` as a symbol.
+  // An exact integer stored with an exponent above the upper bound of
+  // `avoidExponentsInRange` (20 by default) is therefore written
+  // `1\cdot10^{24}`, not with all its digits. User decision 2026-10-21: keep
+  // this behavior. A caller who wants all the digits sets a wider
+  // `avoidExponentsInRange`.
   if (!exponent) return wholePart + fractionalPart;
   return wholePart + fractionalPart + options.exponentProduct + exponent;
 }

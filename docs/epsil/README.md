@@ -4,7 +4,7 @@ This directory contains maintainer-facing Epsil status and forward-looking
 work. It is not the public language reference.
 
 - Public, executable language documentation: `src/epsil/docs/`
-- Implemented lowering and runtime invariants: `docs/LANGUAGE-MODEL.md`
+- Implemented lowering and runtime invariants: [`docs/EPSIL-LANGUAGE-MODEL.md`](../EPSIL-LANGUAGE-MODEL.md)
 - Effects shared with the Compute Engine: `docs/EFFECTS-MODEL.md`
 - Open Epsil work: [`ROADMAP.md`](./ROADMAP.md)
 - Import system draft: [`Design proposal`](../plans/2026-09-05-epsil-import-system.md)

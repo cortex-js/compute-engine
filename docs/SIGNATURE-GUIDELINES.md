@@ -106,13 +106,18 @@ exact value's type.
 5. **Administrative slots reject.** An index, a digit count, a
    dimension: `integer`-family carrier, `nanBehavior: 'reject'` (the
    mechanical default for integer slots), violation → `Error`. An
-   integer slot that is a *mathematical operand* (`GCD`) overrides to
+   integer slot that is a *mathematical operand* overrides to
    `propagate` explicitly.
 6. **Genuinely-infinite arguments are out of domain for finite-domain
-   operators, and the signature now says so** (ruling L9):
-   `GCD: (integer+) -> integer` rejects `GCD(oo, 2)` at validation.
+   operators, and their declared carrier excludes them** (ruling L9).
    An operator whose mathematics extends to the infinities declares it:
    `Limit`'s point is `real | infinity`.
+
+   `GCD` is not an integer-only signature example: it declares
+   `(any*) -> number` to support collections and polynomials as well as
+   integer operands. Its handler preserves exact integer operands under
+   `.N()` despite that wider signature; see
+   [the numerical evaluation contract](../ARCHITECTURE.md#what-n-promises-user-decision-2026-09-30).
 
 ## 4. When things happen: boxing versus evaluation
 
@@ -139,9 +144,17 @@ their deviations):
   A definition relying on it states it in a comment. (Operators with
   `canonical` handlers used to bypass declared-signature validation as
   well; since the boxing validation seam in `applyOperatorDefinition`
-  their same-head result is validated against the declaration as a
-  gate — provable violations error at boxing, nothing is inferred — so a
+  their same-head result is checked against the declaration without
+  inferring operand types. Provable violations error at boxing, so a
   `canonical` handler no longer buys a later timing.)
+  Separate inference follows that validation in only two cases: when every
+  parameter is numeric, it narrows valueless operands to `number`
+  (`inferNumericArgs`), and when a
+  parameter is a type variable with a numeric bound, it narrows them to the
+  bound (`inferGenericBoundArgs`, `boxed-expression/box.ts`). A handler whose
+  signature fits neither case types its own operands. The seam runs only
+  when the handler returns a node with the same head, so a handler that
+  returns another head gets neither the check nor the inference.
 
 The general principle: **boxing errors are for what the types already
 prove; evaluation is for what only values decide.** Nothing should wait

@@ -4138,6 +4138,13 @@ function rerootingIsNoop(
  *
  * Multi-level nesting (f returning g returning h) still works because each
  * evaluation of a Function triggers its own closure capture at that level.
+ *
+ * Each rebuilt scope is a new scope object that copies the bindings it
+ * keeps; changing the parent of the original scope is not sufficient. The
+ * original scope belongs to the expression that every closure of the literal
+ * shares, and evaluation writes to it (`evaluateBlock`, `Declare`), so two
+ * activations that shared it would overwrite each other's locals (see the
+ * comment on the scoped-expression case in `captureClosuresUncached`).
  */
 function captureClosures(
   ce: ComputeEngine,

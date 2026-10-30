@@ -430,6 +430,11 @@ interface PureEngineViewMirror {
     | undefined;
 }
 
+/** Mirror of the exported `BoxedOperatorDefinition` (types-definitions.ts).
+ * A field is declared in four places that must change together: the input
+ * `OperatorDefinition` and the runtime `BoxedOperatorDefinition` in
+ * `types-definitions.ts`, this copy, and the class in
+ * `boxed-expression/boxed-operator-definition.ts`. */
 interface BoxedOperatorDefinition
   extends BoxedBaseDefinition, OperatorDefinitionFlags {
   complexity: number;

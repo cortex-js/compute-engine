@@ -66,6 +66,12 @@ export {
 /**
  * LaTeX dictionary entries for physics constants that have LaTeX triggers.
  * These were previously inline in the physics library definition.
+ *
+ * `\mu_0` parses as the constant `Mu0` (vacuum permeability) and
+ * `\varepsilon_0` as `VacuumPermittivity`, on purpose (user decision
+ * 2026-06-22). The braced form `\mu_{0}` does not match the trigger and stays
+ * the symbol `mu_0`. Known limit: the symbol `mu_0` serializes as `\mu_0`,
+ * which parses back as `Mu0`, so this symbol does not round-trip.
  */
 export const DEFINITIONS_PHYSICS: LatexDictionary = [
   {

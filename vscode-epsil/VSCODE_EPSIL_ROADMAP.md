@@ -376,3 +376,12 @@ omits or over-includes files.
   share of users are on a VS Code fork.
 - **Publisher domain verification** — the marketplace's verified badge comes
   from a DNS TXT record on a domain you control.
+- **GitHub language recognition (Linguist)** — GitHub highlights `.epsil`
+  files and shows Epsil in the language bar only after a pull request to
+  `github-linguist/linguist` is merged. Linguist accepts a new language only
+  when GitHub search indexed at least 2,000 files with the extension in the
+  last year (200 for a file that usually appears once per repository),
+  excluding forks and spread across many unrelated repositories. A pull
+  request sent before that is closed. To measure adoption:
+  `gh search code --extension epsil --limit 100 --json repository -q '.[].repository.nameWithOwner' | sort -u`.
+  Rule source: Linguist's `CONTRIBUTING.md`, checked 2026-10-30.

@@ -928,13 +928,13 @@ function snapshotDepsUnderChain(
 
 /**
  * The dependency snapshot of `expr` for a dependency-precise memo, or
- * `undefined` when the instance is ineligible (see `snapshotDeps`). The
- * public seam of this module's dependency machinery, shared by the element
- * memo and the collection-facet memo (`BoxedFunction._memoizedFacet`) so the
- * two agree on what counts as a dependency, with one difference: a direct
- * raw-symbol operand of the instance (a callback named bare) is a dependency
- * for the element memo only (`rawOperands` of `snapshotDepsUnderChain`), so
- * the facet memo of such an instance stays ineligible. The returned value
+ * `undefined` when the instance is ineligible (see `snapshotDeps`). This is
+ * the public entry to this module's dependency machinery. The element memo
+ * does not call it: it calls `snapshotDeps` directly, with the same rules
+ * except one: a direct raw-symbol operand of the instance (a callback named
+ * bare) is a dependency for the element memo only (`rawOperands` of
+ * `snapshotDepsUnderChain`), so the facet memo of such an instance stays
+ * ineligible. The returned value
  * is opaque: hold it and hand it back to `memoDepsStillValid`.
  *
  * `bindingSites`: also record, for each variable bound inside the instance,
@@ -943,6 +943,15 @@ function snapshotDepsUnderChain(
  * definition, and each operator the instance applies with the write version
  * of its definition (`ElementMemoDep.operatorVersion`). A memo of the TYPE
  * of the instance needs them; a memo of its value does not.
+ *
+ * Many memos call this function: the collection-facet memo, the sequence
+ * term memo (`sequence.ts`), the application memo (`function-utils.ts`), the
+ * stored-value memo of a symbol (`boxed-symbol.ts`), the type memo of a
+ * value definition (`boxed-value-definition.ts`), the declined-derivative
+ * memo (`library/calculus.ts`), the `Slice` bounds memo
+ * (`library/collections.ts`) and the probe cache of `symbolic/limit.ts`. A
+ * change to the eligibility rules here changes all of them: to let one memo
+ * store more instances, widen the eligibility in that caller, not here.
  */
 export function snapshotMemoDeps(
   expr: Expression,

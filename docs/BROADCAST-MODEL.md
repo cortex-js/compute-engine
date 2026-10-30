@@ -34,6 +34,26 @@ wrote**, not by the operand shapes:
    the sines of the cells. Pinned by `test/compute-engine/apply-literal-maps.test.ts`
    ("a nested list is mapped at its leaves, and typed so").
 
+   A tuple argument is mapped at a parameter declared with a scalar type
+   (`real`, `number`, …), on every route: a built-in scalar function
+   (`Sin((1, 2))` is `(sin 1, sin 2)`), a declared named function, and a
+   function literal whose parameter is typed in place (`((u: real) ↦ 7)((3,
+   4))` is `(7, 7)`). The result is a tuple. A parameter with no declared type
+   binds the tuple whole: `(u ↦ Length(u))((3, 4))` is `2`. Compiled code
+   computes the same tuple (user decision 2026-10-03).
+
+   A function that passes a collection to itself at a parameter position (a
+   list literal, a range, a comprehension, any collection-typed argument)
+   makes that parameter a collection, so a list argument is passed whole, not
+   mapped (user decision 2026-10-08). With
+   `f(n, s) := s if n = 0 else f(n - 1, [1, 2])`, `s` is inferred `list<any>`
+   and `f(1, [0])` is `[1, 2]`; mapping would add one level of nesting per
+   recursion step. Forwarding the bare parameter (`f(n - 1, s)`) is not
+   evidence, and a function that does not call itself
+   (`g(s) := 5; g([1, 2])` gives `[5, 5]`) still maps. The evidence is
+   collected in `inferredCollectionParameterType()`
+   (`boxed-expression/effects-inference.ts`).
+
 2. **An explicit PAIRING constructor defines its length as the shortest
    input.** `Zip`, the variadic `Map`, and `PointList` are operations whose
    *defined output* is the pairing up to the shorter operand — the shortest
@@ -218,6 +238,13 @@ Two behaviors that differ on purpose, and that a reader may not expect:
 
 - `Divide(p, q)` of two matrices stays the quotient of each entry, while
   `p·q^-1` is the matrix product with the inverse of `q`.
+- `Exp` of a matrix, and a power of a matrix with an exponent that is not an
+  integer, apply to each entry: `Exp([[0, 1], [1, 0]])` is `[[1, e], [e, 1]]`,
+  not the matrix exponential, and `[[4, 9], [16, 25]]^{1/2}` is `[[2, 3], [4,
+  5]]`. An integer power is the matrix power. Because `Multiply` of two
+  matrices is the matrix product but these functions apply to each entry, a
+  rewrite rule that combines powers of the same base (`e^a·e^b = e^{a+b}`,
+  `x^{1/2}·x^{1/2} = x`) is wrong when the factors are matrices.
 - The order of the factors of a product is fixed when the product is boxed.
   Factors whose types are known to be matrices (or may be: `tensor<number>`,
   `any`, `broadcastable<number>`) keep the written order. Factors that are

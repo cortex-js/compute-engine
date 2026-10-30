@@ -165,6 +165,50 @@ Memoized collection elements record their actual dependencies. A state event
 invalidates only entries whose dependency axes changed. Cyclic lazy views stay
 symbolic rather than recursing without bound.
 
+A predicate walk (`Any`, `All`, `Find`, `CountIf`, `Reduce`, `Sum`, `Max`,
+`MaxBy` with an arbitrary callback) over a collection whose count is a bigint,
+such as `Permutations(Range(1, 25))`, has no engine-side limit: it walks until
+it has an answer or the host stops it. A walk that finds its answer early
+still answers (`Any(S, x ↦ True)` is `True` at once). A host that needs a
+bound evaluates inside `ce.withTimeLimit()`. A non-terminating read of a huge
+collection is a defect only when a facet of the collection could answer it
+without a walk. Decision of the user, 2026-10-18.
+
+A `Range` with no step counts toward its end in either direction, so it is
+never empty: `Range(7, 4)` is `[7, 6, 5, 4]`, and `Range(0)` is `[1, 0]`. Only
+a range with an explicit step can be empty: `Range(7, 4, 1)` is `[]`. A
+rewrite that turns a recursion or a comprehension into `Map(g, Range(s, K))`
+must write the step, or handle the case `s > K` itself (for example with
+`Which(s > K, [], …)`).
+
+The user decided five rules on 2026-09-29:
+
+- **A read that stops at the iteration limit stays unevaluated.** When an
+  element read walks a source that is not known to be finite and stops at
+  `ce.iterationLimit`, the walk did not prove that the element is absent, so
+  the read is not `NaN` or `Missing`: `Second(Dedup(Cycle([1, 1])))` stays as
+  written.
+- **A restriction over an infinite carrier, or a carrier of unknown length,
+  pairs over the length of the mask.** `When(Range(1, ∞), [True, False])` is
+  `[1, NaN]`: the second element is masked, and a masked number is `NaN`.
+  Before, it was `[Range(1, ∞), Missing]`. A carrier whose type has a tuple or
+  string arm is not read element by element: a point is one value
+  (`hasTupleOrStringArm()` in `collection-utils.ts`).
+- **A list literal with a spread is always a list,** whatever the spread
+  operand holds. Its canonical form is `ListJoin`: with `a` declared
+  `set<integer>`, `[...a, 0]` is `ListJoin(ListFrom(a), [0])`, of type
+  `list<integer>`. A set literal with a spread is always a set. `Join` and
+  `Append` over an operand declared `collection<T>`, which can hold a set, are
+  typed `collection<T>`.
+- **An undeclared parameter that is the only operand of a whole-collection
+  operator takes the whole collection.** With `h(x) := mean(x)`, `h([1, 2,
+  3])` is `2` and `h(5)` is `5`. The operators are listed in the comment of
+  `wholeCollectionParameterType()` (`boxed-expression/effects-inference.ts`).
+  `mean(x, 1)`, `norm(x)` and `String(x)` stay element-wise.
+- **A call of a user function over an argument declared `collection<T>` is
+  typed `broadcastable<R>`:** with `c: collection<real>` and `g(x) := x^2 +
+  1`, `g(c)` is typed `broadcastable<number>`.
+
 ## Lists of machine numbers
 
 A broadcast over more than a hundred elements answers a lazy `Map`. That form
@@ -277,6 +321,14 @@ Numeric tuples are point values only where the point contract applies; tuple
 structure in general remains structural data. `PointList` pairs its collection
 sources to the shortest source and lifts scalar components. Components are
 evaluated once in operand order.
+
+A tuple is one value in a collection operation. `Join` appends a tuple operand
+as one element, as `Append` does: `Join([1, 2], (3, 4))` is `[1, 2, (3, 4)]`,
+and `Join((1, 2), (3, 4))` is `[(1, 2), (3, 4)]`. The rule reads the static
+type, so a symbol typed as a tuple is appended whole too. `Map` over a tuple
+source gives an ordered list, in value and in type, for every form of the
+callback: with `f` assigned `x ↦ 2x`, `Map(f, (1, 2, 1))` is `[2, 4, 2]` of type `list<…>`, not a tuple and
+not a set without the repeated element (user decision 2026-09-14).
 
 A coordinate is a number or a list of numbers, so a component that is a
 point is refused. A component whose type is a tuple (the bare `tuple`,

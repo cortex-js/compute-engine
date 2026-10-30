@@ -69,10 +69,32 @@ there.
 - **Collection shape tests** use a bare family name, an explicit `<any>` content
   type, or the `*_SHAPE_TYPE` constants. These constrain kind only; use an
   explicit content type when contents matter. `tuple<any>` is one slot, whereas
-  bare `tuple` admits every arity.
+  bare `tuple` admits every arity. `string` and `range` are subtypes of
+  `collection<any>`: a test for a collection arm in a union must require a
+  type object, or it matches `string | integer` (`docs/TYPE-SYSTEM.md`,
+  "Collection family contracts").
+- **Type predicates and references.** A predicate that tests the shape of a
+  type unfolds a transparent alias and keeps a nominal reference folded
+  (`unfoldAliasOnDescent()`), and every function that unfolds a reference
+  has a cycle guard, because a recursive alias reaches itself
+  (`docs/TYPE-SYSTEM.md`, "Polymorphism").
+- **A change that makes an inferred type more precise than a pinned `any`**
+  keeps the precise type when no value contradicts it: check sample
+  arguments, including the case the old `any` existed for, then update the
+  pin and mention it in the report. Ask only when a value contradicts the
+  narrower type (user decision 2026-10-23).
 - **A lazy operator** (`lazy: true`) gets its operands unbound: the handler must
   call `.canonical` on each operand it uses. Its tests must include the
   `ce.box(...)` and `ce.parse(...)` routes, not only `ce.function(...)`.
+  Its `evaluate` handler must not return `undefined` after it has evaluated
+  operands: the engine then rebuilds the node from the held operands and the
+  evaluation is lost. Inference added to the lazy branch of boxing runs for every lazy operator,
+  and many of them have a collection slot that is not a source (`Subscript`,
+  `Matrix`, `Dictionary`, string slots). Such inference is opt-in by operator
+  name (`COLLECTION_SOURCE_OPERATORS`, `validate.ts`), checked on the boxed
+  operator and on the head of the handler's result. Test it by parsing the
+  same input twice in one engine: a wrong inference shows on the second
+  parse (`a_{n+1}` became `At(a, n + 1)`).
 - **An operator that binds a variable** declares it with a `scoped` binding site
   selector; binding symbols come from `ce._bindingSymbol`, never
   `ce.symbol(name)`.
@@ -84,6 +106,45 @@ there.
   result as `evaluate()`/`.N()` for the same input, or fail closed. A new
   operator or a new case in `evaluate` needs the same change in each target that
   supports the operator, or an explicit refusal there.
+- **A compile test with only literal inputs does not test the lowering.** The
+  compiler folds a constant subtree through the interpreter and emits the
+  result as a literal, so a broken lowering never runs. Give the input as a
+  free or `vars` symbol, or compile with `constantFold: false`.
+- **A compile rule that depends on how a symbol is supplied** (a `vars` entry,
+  `hideValues`, a declared or an inferred type) is also tested with the shape a
+  plot host uses for a slider: `ce.declare('T', 'real')`, `ce.assign('T', 2)`,
+  then `compile(…, { vars: { T: 'T' }, hideValues: ['T'] })`. A rule that
+  refuses every `vars` name misses such a host, which maps each uniform to its
+  own name.
+- **Before you defend a deliberate refusal, probe the sibling cases**: the same
+  mathematical situation through a variable, through an assigned symbol, and
+  with another operator of the same family. A refusal that applies at some
+  of these and not at the others is a defect, even when a comment explains it
+  and a test pins it. Keep a refusal only when it prevents a result that is
+  wrong with no error; "users do not write this" is not a reason. Example: the
+  compiler once refused to fold `Sqrt(-2)` to `NaN` while `Ln(-2)`, `arcsin(2)`
+  and the same `Sqrt` over a variable compiled and returned `NaN`.
+
+## LaTeX parse and serialize
+
+- **An absent operand is `null`, not a falsy value.** `operand(expr, n)`
+  (`src/math-json/utils.ts`) returns `null` for a missing slot. The MathJSON of
+  the literal number `0` is the JavaScript number `0`, so a test such as
+  `if (!op) return ''` also drops a zero operand: `When(0, c)` once serialized
+  to an empty string. Test with `=== null`. Where a value comes from
+  `operands()` destructuring, the absence marker is `undefined`; read the
+  source of the value before you choose the test.
+- **Verify a serializer change by a round trip on canonical forms.** Check
+  `ce.parse(e.latex).isSame(e)` and `ce.box(e.toMathJson()).isSame(e)`. Do not
+  compare strings or raw parse trees: the serializer may change the spelling
+  (`\operatorname{abs}(x)` comes back as `\vert x\vert`). Do not assert only that a substring
+  is present: `\sum_{i=1}^{10}0` contains a `0` even if the body was dropped.
+- **The LaTeX serializer hides errors.** `Serializer.serialize()`
+  (`latex-syntax/serializer.ts`) catches every error thrown while it serializes
+  a sub-expression and writes an empty string for it. Validate options before
+  serialization starts (as `LatexSyntax` does with `validateDisplayDigits()`),
+  and do not throw from serializer code on accepted input. When an operand is
+  missing from the LaTeX output, look first for an error that was caught.
 
 ## Conventions
 

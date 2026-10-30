@@ -985,6 +985,15 @@ slot and re-derives it on every assignment. `pure` in the slot is how an
 author asks for the first meaning where the second would otherwise
 apply.
 
+This trust has a direct consequence for caching. The results of applying a
+pure function literal to number arguments are kept for the life of the engine,
+not for one top-level evaluation (`_applicationMemo`, `function-utils.ts`), so
+a later evaluation reuses them. A function declared with `ce.declare()` and an
+`evaluate` handler that reads host state (a clock, a counter, a host variable)
+must declare an effect in its signature. If it does not, its bare arrow reads
+pure, and a user function that calls it is memoized and returns the first
+answer again.
+
 ### Projection and discharge — how applications get their effects
 
 *(Decision (a), respecified in v3.)* The effect set of an **application**:

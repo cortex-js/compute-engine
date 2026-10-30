@@ -414,7 +414,13 @@ a parameter is now:
   `unknown`, and the length is the largest literal index. The program above
   types `p` as `tuple<boolean, real>`; `v => v[3] + 1` types `v` as
   `tuple<unknown, unknown, number>`. A literal index above 32 counts as a
-  non-literal index.
+  non-literal index. The length of such a tuple is only the largest index
+  read, not a proof of the argument's length: `(s, k) => q(s[1])` types `s`
+  as `tuple<integer>` although the argument can hold three elements. Code
+  that reads a parameter's tuple type asks `isIndexReadTuple()`
+  (`boxed-expression/index-read-tuple.ts`) before it treats the length as
+  exact (the fold accumulator check `accumulatorTypeIsImprecise()`,
+  `library/collections.ts`, does).
 - When some read uses an index that is not a literal, the parameter is an
   indexed collection whose element type is the union (join) of the
   requirements of all the reads: `!p[1]`, `p[2] + 1` and `p[k] + 1` type `p`

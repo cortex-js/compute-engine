@@ -108,6 +108,17 @@ assignment route and the Epsil run time, and `declaredTypeMismatch()`
 reports a possibly absent initializer (`let y: string = xs[i]`, typed
 `missing | string`; `let r: real = zs[i]`, typed `nan | real`).
 
+A value whose type is `unknown` states nothing about itself, so
+`matchesDeclaredTypeAxes()` admits it at a declared type without a check,
+here or later (`xs: list<number>` binds the value of an undeclared `f(0)`).
+This matches the argument check, which also admits an `unknown`-typed
+argument at a typed parameter. A declared function signature is the
+exception: it keeps refusing an `unknown` value, because that value would
+satisfy the arity, effects and polymorphism checks all at once without
+proof. An absence symbol (`Missing`, `Undefined`) is tested before this
+rule, so a declaration that excludes absence still refuses `Undefined`,
+whose type is `unknown`.
+
 A library operator with no declared absence behavior refuses an absent
 operand at a parameter typed as data (`string`, `boolean`, `value`, …) with
 `incompatible-type` (decision P2, `refusesAbsentOperandAt()`,
@@ -140,7 +151,12 @@ remain numeric outcomes, even where named absence markers are excluded.
 Explicit element arguments remain explicit through parsing, reduction and
 serialization. In particular, `<unknown>` no longer collapses into a bare
 family name; bare `list` and `list<unknown>` denote the same values and both
-refine as declarations (previous section). The numeric
+refine as declarations (previous section). They differ when an element is
+read: an element of a bare `list` (that is, `list<any>`) reads `any`, which
+stops inference downstream, and an element of `list<unknown>` reads
+`unknown`, which later uses refine. With `g1: (number) -> list` and
+`g2: (number) -> list<unknown>`, `At(g1(x), 1)` is typed `any` and
+`At(g2(x), 1)` is typed `unknown`. This difference is intended. The numeric
 defaults and rank constraints of vector, matrix and tensor spellings remain;
 the next section gives their rules.
 
@@ -149,6 +165,40 @@ exclude Nothing. A raw lazy collection can retain omitted positions. Until
 compiled targets have a distinct omission representation, operations that
 need that distinction require an explicit omission-free content contract,
 a structural proof, or a compilation refusal.
+
+Some type tests that look exact are not. A check on the element type of a
+collection must allow for these facts:
+
+- `complex` is a supertype of `real`, so `list<integer>` matches
+  `list<complex>`. A test for "may hold complex elements" written as
+  `matches('list<complex>')` also accepts every list of integers; add
+  `!matches('list<real>')`, or use `couldBeNonRealNumber`
+  (`src/common/type/utils.ts`).
+- `number` is a supertype of both `real` and `complex`, so `list<number>`
+  matches neither `list<real>` nor `list<complex>`. No static test can
+  classify its elements.
+- A written list types `list<…>` or `vector<…>`, while a range or a declared
+  parameter often types `indexed_collection<…>`. `list<integer>` matches
+  `indexed_collection<integer>`, but not the reverse, so a test written
+  against `list<…>` misses those operands.
+- `tuple` is a subtype of `indexed_collection`. To leave tuples out, test the
+  tuple kind explicitly.
+- `.isCollection` is false for a computed list whose operands are symbols
+  (`L^2` or `|L - 1|` with `L` assigned a list), although its type is a list
+  type. Use the type for such a node.
+
+Because declared types are often wider than the values that reach them, the
+compiled targets prefer a run-time test that copies the interpreter (such as
+projecting an index to its real part) over a static "is this operand provably
+X" check, which refuses ordinary working code.
+
+`string` and `range` are subtypes of `collection<any>` (a string is an
+indexed collection of characters, `STRING_STRUCTURAL_TYPE` in
+`primitive.ts`), and `typeCouldBeCollection('string')` is true. A test for
+"this union has a collection arm" written as
+`arms.some((a) => isSubtype(a, 'collection<any>'))` therefore matches
+`string | integer`. When the test means a composite collection, require a
+type object: `typeof a !== 'string' && isSubtype(a, 'collection<any>')`.
 
 ### Lists, tensors and `broadcastable`
 
@@ -505,6 +555,24 @@ parameterized nominal reference retains its type arguments and variance;
 recursive nominal references are resolved through the global registry instead
 of eager alias expansion.
 
+Both kinds reach a type predicate as a `{kind: 'reference'}` node, not as the
+structure they name. A predicate that asks "is this type shaped like X" must
+unfold a transparent alias and leave a nominal reference folded
+(`unfoldAliasOnDescent()`, `common/type/utils.ts`). Reading `.kind` directly
+refuses an alias it should admit; resolving both admits a nominal type that
+the lattice refuses, because a nominal type is not a subtype of its
+definition. `resolveTypeForCompilation()` resolves both, because compilation
+erases types; it does not belong in a lattice predicate. A recursive alias
+reaches itself through the reference's `def`, so every function that unfolds
+a reference needs a cycle guard (`beginUnfold()` in `subtype.ts`, or the
+`seen` set of `unfoldAliasOnDescent()`); without one, a rejected value can
+overflow the stack.
+
+The broadcast lift follows the same rule: it unfolds a transparent
+collection alias and types its result by the structure it builds. With
+`nums` a transparent alias of `list<number>` and `v: nums`, `2v` and `Sin(v)`
+are typed `list<number>`, not `nums`.
+
 ## Declarations and the global registry
 
 Type and protocol declarations are engine-global and top-level only. The Epsil
@@ -517,6 +585,14 @@ function clauses are checked as one compilation unit. Across batches the newer
 definition replaces the older one; clients that require notebook replay use
 checkpoint/restore rather than depending on partially updated historical
 state.
+
+A constant is a property of the binding, not of the type. `isConstant` is
+stored on the value definition, next to its type, value and `holdUntil`
+(`_BoxedValueDefinition`, `boxed-value-definition.ts`); there is no `const`
+type. Constness says whether a name can be assigned again, not what values it
+holds: a constant declared `real` holds a value of type `real`, and putting
+constness in the type would make subtyping and joins answer questions about
+names instead of values.
 
 ## Functions, overloads, and callbacks
 
@@ -596,6 +672,14 @@ the body states is kept when it may fit the parameter: `Trace(g(2))` with the
 `list<list<unknown>>` as it is. The join of the two (the former behavior,
 `list<list<unknown>> | number | tensor`) is not a refinement, and it made
 `Determinant(g(x))` decline to compile.
+
+When a function literal annotates some parameters and leaves others bare
+(`(p, acc: list<number>) ↦ …`), a call checks its arguments only against the
+annotated slots. Each bare slot admits any argument, as every slot does when
+nothing is annotated, although `signature` still reports the type inferred
+for it from the body (user decision 2026-09-30). The definition keeps this
+call-time signature in `_validationSignature` (`types-definitions.ts`);
+`signature` is what result typing and broadcasting read.
 
 Where it is reasonable to require a declaration from the user, and where to
 guess, follows one principle: guess where a wrong guess is caught at run time,
@@ -1152,6 +1236,44 @@ and invalidation metadata.
 The current implementation entry points are the definition provenance journal,
 the engine inference transaction helpers, and the state-event funnel described
 in `EFFECTS-MODEL.md`.
+
+Writing the type `unknown` to a value definition clears its value: the type
+setter of `boxed-value-definition.ts` treats `unknown` as a reset. An
+inference that narrows a bound symbol against an `unknown` or `any` slot
+computes `unknown` and must not write it back, or it silently unbinds the
+symbol at parse time. Code that infers again for a symbol that already holds
+a value must skip an `unknown` result.
+
+## Adding a primitive type
+
+A primitive type (`range`, `string`) is a bare string in the type AST, while
+`list` or `tuple` types with arguments are objects with a `kind`. Adding one
+changes every switch over collection kinds, and the type check finds none of
+these sites; only the full test suite does. The sites, as of the `range`
+type:
+
+- Declaration: the `PrimitiveType` union (`common/type/types.ts`), the kind
+  arrays of `common/type/primitive.ts` (`INDEXED_COLLECTION_TYPES` feeds the
+  others), and a `PRIMITIVE_SUBTYPES` entry.
+- A primitive whose members have a known element type (`range` holds
+  integers) needs one shared structural constant (`RANGE_STRUCTURAL_TYPE`)
+  expanded at every structural site: `isSubtype()` before its bare-string
+  fall-through, `collectionElementType()` and `isCollectionLike()`
+  (`common/type/utils.ts`), `liftedElementTypeOf()`, `isMappedActual()` and
+  `walkPattern()` (`common/type/instantiate.ts`; without the last one a
+  type variable never binds, and `Sort(Range(1, 5))` is typed `list<any>`),
+  the `typeCouldBe…` predicates of `collection-utils.ts`, and
+  `mapResultType()` (`library/collections.ts`; without a case, `Map` over the
+  value rebuilds a `Set`).
+- Choose the element type that the value reported before the change, so
+  that downstream types do not change.
+- A narrower type can make a kind-preserving signature false: once spans
+  typed `range`, `Reverse: (T) -> T where T: indexed_collection` claimed
+  `range` for a descending result. Every `(T) -> T` operator that can change
+  the kind needs its own case in the same change.
+- A host that classifies types by `kind` does not see the new primitive as
+  a collection. The CHANGELOG entry says that it is a primitive name, not a
+  kind.
 
 ## Sources of truth
 

@@ -381,6 +381,12 @@ rule:
   branch runs, and short-circuiting `And`/`Or` likewise.
 - `Map` and comprehension bodies consume indices in iteration order: element
   *i*'s draws follow element *i−1*'s.
+- Compiled code keeps the order of the arguments. When a lowering must bind an
+  impure operand to a temporary (because the operand appears more than once in
+  the emitted code), it binds every impure operand of that node, in argument
+  order. Binding only one of them would run its draw before the draws of
+  operands written to its left (`javascript-target.ts` and `gpu-target.ts`,
+  the comments on binding impure chain operands).
 
 Consequence, stated rather than hidden: **editing a body so that it draws
 earlier shifts every later draw in the same frame.** That is inherent to a
@@ -615,6 +621,20 @@ step, non-finite bounds, an unbounded or empty `Interval`. Note that
 `Range(1, 0)` is *not* such a case — a two-operand `Range` infers a
 **descending** step, so it is the two-element range `[1, 0]` and both engines
 legitimately draw from it.
+
+### The interval target encloses every draw
+
+On `interval-js`, a nullary `Random()` lowers to the constant interval
+`[0, 1]`, the support of every possible draw. It does not follow the seeded
+stream: the interval code evaluates a cell at other points, and in another
+order, than the scalar code that plots the same expression, so a draw it took
+from the stream would not enclose the values the scalar code draws. For the
+same reason a `WithRandomSeed` frame adds nothing there and only its body is
+emitted; a seed that is not a literal fails closed, because the interpreter
+evaluates and validates the seed and this target cannot. `Random(source)` also
+fails closed, since the target does not derive the support of a source
+(`interval-javascript-target.ts`, the `Random` and `WithRandomSeed`
+handlers).
 
 ## 8. The GPU model, as implemented
 

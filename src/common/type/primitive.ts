@@ -72,6 +72,11 @@ export const RANGE_STRUCTURAL_TYPE: Type = Object.freeze({
  * there (a string is not a list, so it is not in the collection arm of a
  * `broadcastable`; see the `broadcastable` rules of `subtype.ts`).
  *
+ * Because of this expansion, `string` and `range` are subtypes of
+ * `collection<any>`. A test for "this union has a collection arm" must
+ * therefore require a composite arm (a constructed collection type such as
+ * `list<T>`), or it also matches `string | integer`.
+ *
  * Frozen for the same reason `RANGE_STRUCTURAL_TYPE` is: it is shared by
  * reference across every `string` subtype and pattern-match call in the
  * process, so an in-place mutation would silently corrupt every subsequent

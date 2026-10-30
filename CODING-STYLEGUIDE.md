@@ -29,6 +29,19 @@ references.
   only as development dependencies. Keep circular dependencies out of the
   engine; BUILD.md describes the automated check.
 - Remove debugging `console.log` calls. `console.assert` is permitted.
+- An operator-definition field is declared in more than one place, and the
+  declarations must stay identical: the input `OperatorDefinition` and the
+  runtime `BoxedOperatorDefinition` in `types-definitions.ts`, the separate copy
+  of `BoxedOperatorDefinition` in `types-expression.ts`, and the class in
+  `boxed-expression/boxed-operator-definition.ts`. A field that changes in only
+  some of them breaks the structural identity of the boxed-expression types, and
+  the type check then fails with errors far from the change.
+- The public `ComputeEngine` type is the `IComputeEngine` interface
+  (`compute-engine/types-engine.ts`), not the class, so a new public member of
+  the engine class is invisible to clients until it is also declared on
+  `IComputeEngine`. A new public static goes on `ComputeEngineConstructor` in
+  both entry files, `src/compute-engine.ts` and `src/core.ts`. Make both changes
+  in the same change as the member.
 
 ## Behavior and tests
 
@@ -39,7 +52,28 @@ references.
 - Test observable behavior and meaningful boundaries. Names and assertions
   should explain the contract; comments supply only context they cannot express.
 - Update documentation and release notes with user-visible behavior changes.
+  Write `CHANGELOG.md` for external users: one bold first sentence per item and
+  one or two short examples (old result, new result). Name only public
+  operators, methods, options, types and error codes. Do not name internal
+  functions or files, plans, ROADMAP entries, review rounds, test counts, or
+  other projects (Tycho, Desmos). The exceptions are contributor credits, the
+  benchmark tables, and Fungrim. Sections: Breaking Changes, New Features,
+  Improvements, Behavior Changes, Resolved Issues, Performance.
 - Generate derived documentation rather than editing it by hand.
+- Put a timing assertion (`expect(elapsed).toBeLessThan(…)`) only in a test that
+  runs under `CE_PERF=1` (`npm run test:perf`). In a normal run, other workers
+  and other sessions load the machine, and the assertion fails with no change to
+  the code.
+- A test that pins type inference uses its own `new ComputeEngine()`. The type
+  of a symbol is inferred at its first use and kept for the life of the engine,
+  so in a file that uses the shared engine of `test/utils.ts`, an earlier test
+  can infer the symbol first and hide a defect that depends on the order of use.
+- Jest runs each test file in a separate V8 context, where a call such as
+  `Math.imul(…)` is about 100 times slower than in plain Node.js. In a hot loop,
+  bind the function once at module scope (`const imul = Math.imul;`). For the
+  same reason, measure the duration of a test under Jest, not with `npx tsx`.
+- `npx jest -- <file> -t <name>` reads `-t <name>` as a path pattern and runs
+  the whole file. Put `-t <name>` before `--`.
 
 ## Engine implementation
 
@@ -57,9 +91,24 @@ its [implementation conventions](ARCHITECTURE.md#implementation-conventions).
   `BigDecimal.precision`, including changes made by constructing an engine.
   Avoid reusing numeric test symbols in Boolean contexts: that use infers a
   Boolean type. Use uppercase symbols in Boolean fixtures.
+- A change to the last digit of a machine-precision result is acceptable, in
+  particular for performance: a different summation order, or `Math.exp(x)`
+  instead of `Math.E ** x` (user decision 2026-09-21). Report the change in
+  `CHANGELOG.md` (which expressions, which digits). Exact values stay exact, and
+  complex values, poles (`~oo`) and `NaN` must not change.
 - A lazy operator needs tests through `ce.box` and `ce.parse`, as well as direct
   function construction. Shared-bundle behavior needs consumer tests against
   `dist`; source-only tests cannot establish package identity or resolution.
+- A table keyed by symbol names has no prototype: use a `Map`, or an object
+  created with `{ __proto__: null }`. A symbol name is any string, so a name
+  such as `toString` or `constructor` reads the inherited member of a plain
+  object. In the LaTeX parser this gave an undeclared name a function as its
+  type, and the next type check threw.
+- Code that makes an object for each node in a hot route uses a class, with
+  getters on the prototype, not an object literal that defines a getter. V8
+  creates such a literal on a slow route, about 150 ns against about 10 ns for a
+  class instance (measured 2026-10-23); the operand views of
+  `operand-descriptor.ts` were changed to classes for this reason.
 
 Public Compute Engine guides live in the separate
 `~/dev/cortexjs.io/docs/compute-engine/` checkout. Do not recreate this repo's

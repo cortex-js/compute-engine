@@ -1051,7 +1051,12 @@ export function isBareCutOnDescent(
  * a COULD predicate, `null` for a shape, the type unchanged for a rewrite).
  * Otherwise returns the unfolded type and the descent to hand to every
  * recursive call. A type that is not a transparent alias comes back
- * unchanged, with the same descent.
+ * unchanged, with the same descent. A nominal reference therefore stays
+ * folded: a nominal type is not the same type as its definition.
+ *
+ * Do not use `resolveTypeForCompilation()` in a lattice predicate instead:
+ * it unfolds every reference that has a definition, nominal references
+ * included, so a nominal type would be read as its body.
  */
 export function unfoldAliasOnDescent(
   t: Readonly<Type>,

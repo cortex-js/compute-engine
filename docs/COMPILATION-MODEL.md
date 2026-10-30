@@ -173,8 +173,29 @@ negation of the `Equal` test, so it answers `true` on a `NaN` operand, as the
 interpreter does. Two absent operands (`undefined` on JavaScript, `None` on
 Python) are not equal in the SCALAR lowering: the interpreter answers `Missing`
 for `Equal(Missing, Missing)`, and the emitted test guards the left operand when
-both sides may be absent. That scalar answer stays a genuine boolean on purpose,
-because the branch machinery is written against one.
+both sides may be absent.
+
+A comparison whose VALUE is the result (not a branch condition) has no value
+when it reads a variable that the caller leaves out of the vars object (user
+decision 2026-10-30). The JavaScript target answers `undefined` there, as the
+interpreter has no value for `x > 0` while `x` has none. The emission runs the
+plain comparison first, so its `true` costs nothing more:
+`((0 < _.x) || ((_.x !== undefined) ? false : undefined))`. `NotEqual` uses the
+`&&` form with `true` and `false` exchanged. The comparison runs first only when
+each operand reads an absent value as `NaN` or `undefined` (a variable,
+arithmetic, an elementary function). Otherwise it could be `true` for an absent
+read (`Boole(x > 0) = 0`), so the tests come first:
+`((_.x !== undefined) ? (cmp) : undefined)`; a string or boolean comparison
+also takes this form. A variable with no declared type is tested too, since it
+compiles to the same scalar comparison. A `NaN` operand still decides the
+comparison (`false`, or `true` for `NotEqual`), as in the interpreter: a `NaN`
+literal with no test at all, a computed or local operand when its own inputs
+are present, and, for an ordering, a complex operand that is not real. A
+consumer that reads only the truth of the comparison (`Boole`, the predicate of
+`Filter`, `Count` and the other selecting operators) gets the plain comparison
+with no test when it is numeric and its operands read an absent value as `NaN`,
+because there `false` and `undefined` select alike. See `docs/ERROR-MODEL.md`,
+the "An unsupplied variable" item.
 
 The ELEMENT-WISE runtime is three-valued, and that is where an absence shows.
 An absent CELL makes its comparison undecided, so the runtime marks exactly that
@@ -237,6 +258,13 @@ every such operand evaluates to an exact rational. Otherwise the fold
 declines, and the structural lowering throws at run time, or declines when
 the target has no lowering for the operator (`DigitSum`, `IntegerDigits`).
 The shader and interval targets have no error channel and are not changed.
+
+Whether a constant subtree is folded at all is decided by a deterministic
+estimate of the work its evaluation can cost (`foldCostEstimate` in
+`base-compiler.ts`), never by a time limit. The estimate depends on the
+expression only, so the same input always compiles to the same code on any
+machine and under any load. A definite integral is priced at the worst case of
+the adaptive quadrature, so a nested integral declines to fold.
 
 ## Running stored JavaScript
 
@@ -528,6 +556,20 @@ The rule applies only where it changes the lane of the body:
   this way: it is shared by every call site.
 - The shader targets never promote, so nothing changes there.
 
+The fold-before-shape rule: the analysis that decides whether a node is
+complex (`BaseCompiler.isComplexValued`) and the emitters that write the node
+must give the same answer, so they ask one question in one place. For a closed
+constant, that place reads the memoized constant fold first
+(`_withFoldedRealOverride` in `base-compiler.ts`): `√(5 − √5)` has a type that
+admits a complex value, but it folds to a real number, so it is read as real
+and emitted as a real literal. The fold is memoized for each target and
+expression, so the answer cannot change between analysis and emission. A
+change to how a shape is read must go into that shared question, not into one
+consumer: a consumer that reads the shape on its own wraps a plain number in
+the `{re, im}` convention, which turns a safe decline into a silent `NaN`.
+Where the compilation does not fold (`constantFold: false`, a `symbolDeps`
+capture, a target other than JavaScript), the type alone decides.
+
 A `Sum` or `Product` over a small constant range is unrolled by mapping the
 index NAME to a literal in the emitted code, so the analysis reads a body in
 which the index is still a free symbol. Each unrolled term therefore also
@@ -635,6 +677,21 @@ dispatch uses the same specificity order as the interpreter. If any required
 guard cannot be expressed, the entire function declines; compiling a subset of
 clauses would change dispatch.
 
+A compiled artifact contains each user function as it was defined when
+`compile()` ran. Assigning a new definition later does not change an artifact
+that is already compiled. The public `compile()` keeps no cache: each call
+compiles again and reads the current definitions. A caller that needs a
+function it can replace after compiling passes it through the `functions`
+option and reads the live implementation from `globalThis` (see "Running
+stored JavaScript" for how such a function is copied).
+
+A recursive or mutually recursive user function compiles to real recursion on
+the JavaScript target, with no depth guard: a runaway recursion throws a
+`RangeError` from the JavaScript stack, as an unbounded `Loop` already runs
+without a guard. The shader targets cannot recurse, so a recursive function
+fails closed there with a message that asks for a bounded loop. The Python
+target declines it too.
+
 Protocol calls resolve directly when static typing proves one implementation.
 Dynamic JavaScript dispatch uses the receiver's runtime nominal tag. Targets
 without the tag representation decline.
@@ -663,6 +720,42 @@ Compiled broadcasting preserves the interpreter's strict lifted regime.
 Compiled pairing preserves shortest-input semantics. `PointList`, elementwise
 selection, Map lowering/fusion, exact-map proof, and collection callbacks must
 retain evaluation-once and effect ordering.
+
+A `PointList` with list components compiles on the JavaScript target to a
+map over the shortest component, scalar components repeated in each point.
+An `iterationBudget` option caps that length, and the list is then truncated
+(user decision 2026-07-31). This differs on purpose from a `Sum` or `Product`
+over budget, which gives `NaN`: a truncated point list still draws its first
+points.
+
+A restriction `value\{conditions\}` (`When`) whose condition is a list
+compiles on the JavaScript target through `_SYS.restrict`, one position for
+each condition (user decision 2026-09-15). A list value is aligned with the
+conditions and truncated to the shorter of the two, as the interpreter aligns
+them; a number or a point is one value, repeated at each position. A position
+whose condition is not true holds the absence value: `NaN` (or its complex
+form) for a number, `undefined` for a point or a string. A value that may be
+either a list or a point at run time declines.
+
+An infinite collection compiles on the JavaScript target only under a
+bounding consumer, `Take` or `TakeWhile`. A `Range` with an infinite literal
+end, and a `Map`, `Filter`, `Drop` or `Rest` pipeline over one, lowers to lazy
+iterators (`_SYS.rangeIter`, `_SYS.mapIter`, …) under that consumer; every
+other consumer declines with "bound it with `Take` or `TakeWhile`". A finite
+collection keeps its eager array lowering. `DropWhile` over an infinite source
+declines, because the interpreter leaves it unevaluated. In
+`javascript-target.ts`, `isLazyStream` decides which operands take the lazy
+lowering and `emitLazyStream` writes it, so the two must accept exactly the
+same shapes.
+
+Two analyses decide whether an operand can be an array at run time on the
+JavaScript target, and they are separate code. The comparison and connective
+lowerings ask `isPossiblyCollectionTypedJS` in `javascript-target.ts`. The
+arithmetic broadcast (`Add`, `Multiply`, … through `tryCompileBroadcast`) asks
+`isBoundPossiblyCollectionTyped` in `base-compiler.ts`, which reads the
+"scalar by construction" facts of `javascript-value-facts.ts`
+(`isConstructedScalar`). A change to one does not change the other: when an
+arithmetic broadcast does not go away, look at `javascript-value-facts.ts`.
 
 A compiled user-function call whose parameters are all scalar carries a
 runtime `Array.isArray` guard around each argument that is not a literal, so
@@ -1256,3 +1349,40 @@ bindings, evaluation order, and target representation. Compiler-internal types
 stay structurally opaque where importing boxed-expression types would create a
 module cycle. The remaining CSE design work is in the active
 `plans/2026-07-28-compile-cse-design.md`.
+
+A target can set its own admission thresholds for a shared subexpression
+(`CompileTarget.cseMinSize` and `cseMinScore`; the defaults are 4 and 8 in
+`cse.ts`). The nested harvests of user-function bodies use the same
+thresholds. The `interval-js` target sets 2 and 4, so a node of size 2 or 3 is
+bound once it occurs three times: every interval operation is an allocating
+`_IA` call, so the size of its syntax does not measure its cost.
+
+## Compiler internals
+
+A lowering that rewrites one statement into several statements must be added
+to each of the four places that compile a list of statements, because none of
+them goes through another:
+
+1. `BaseCompiler.compileBlock` (`base-compiler.ts`) compiles a `Block` that is
+   compiled as an expression.
+2. `BaseCompiler.compileLoopBody` compiles the loop bodies of the JavaScript
+   and interval targets.
+3. `compilePythonStatements` (`python-target.ts`) is the Python dispatcher for
+   statements.
+4. `BaseCompiler.compileStatementList` compiles the loop bodies of the shader
+   targets, which reach statements through the ordinary `compile` route. It
+   calls `compileBlock` with the value of the last statement unused, so the
+   last statement is not emitted as a `return`.
+
+On a target with a `declare` hook (Python and the shader targets), the
+`Declare` case emits only the declaration, and `compileBlock` emits the initial
+value as a separate assignment. A rewrite that emits `Declare(sym, type,
+value)` from one of the other places therefore loses the value on those
+targets. Emit `Declare(sym, type)` and `Assign(sym, value)` as two statements.
+A temporary from `BaseCompiler.tempVar` must also be registered as a local of
+the statement list (`BaseCompiler.loopBodyTempTarget` does this), or it is
+emitted as a read of the caller's scope object (`_.name`).
+
+Check such a lowering on `javascript`, `python`, `glsl` and `wgsl` by reading
+`.code`: a comparison of `run()` with the interpreter checks the JavaScript
+target only.

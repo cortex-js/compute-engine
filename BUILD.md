@@ -65,6 +65,13 @@ Jest discovers `jest.config.cjs` automatically. For example, run
 `npx jest -w 2 -- test/compute-engine/arithmetic.test.ts`; no `--config` flag is
 needed.
 
+A file-name pattern does not select every compiler test. The pattern
+`test/compute-engine/compile-` misses `compile.test.ts` and
+`list-valued-summand-compile.test.ts`, and about 35 other test files compile to
+GLSL or WGSL, some through a helper such as `glslCode(…)` that a search for
+`to: 'glsl'` does not find. After a change to emitted code, search `test/` for
+the emitted text that changed, or run the full suite.
+
 ## Completing delegated tasks
 
 The orchestrator owns the validation plan. The task prompt can adapt these
@@ -86,10 +93,10 @@ Before returning a delegated implementation:
    "Out of scope" and "outside the diff" are not blocking decisions; fix the
    defect, or say that the task prompt forbade it.
 
-The orchestrator sorts every unfixed defect of a sub-agent report before
-writing its own summary: fix it (or send it back), ask the user for the
-blocking decision, or state why it is not a defect. Only the second goes to
-`ROADMAP.md` as an open entry.
+The orchestrator sorts every unfixed defect of a sub-agent report before writing
+its own summary: fix it (or send it back), ask the user for the blocking
+decision, or state why it is not a defect. Only the second goes to `ROADMAP.md`
+as an open entry.
 
 The orchestrator combines the results and normally runs typecheck, lint,
 dependency checks, and the required test sets once on that combined tree. It can
@@ -235,3 +242,19 @@ Alternatively, push the version commit and create a GitHub release tagged
 `ci:extended`, and publishes; `prepack` creates the production artifacts. The
 workflow does not generate documentation, so include it in the release commit.
 `npm pack` also triggers the clean production build.
+
+### Names that published versions point to
+
+Every published version of `@cortex-js/compute-engine` contains these URLs in
+its `package.json`, and a published version cannot be changed:
+
+- `homepage`: `https://cortexjs.io/compute-engine/`
+- `repository`: `https://github.com/cortex-js/compute-engine.git`
+- `bugs`: `https://github.com/cortex-js/compute-engine/issues/`
+
+Keep the GitHub organization `cortex-js` and the domain `cortexjs.io` registered
+permanently, also after a rename or a move of the project. GitHub redirects a
+moved repository only while its old name is not taken. If the organization is
+released, anyone can register it and receive the repository URL of every
+published version. If the domain moves, keep its redirect path-preserving
+(`cortexjs.io/compute-engine/` must reach the documentation).

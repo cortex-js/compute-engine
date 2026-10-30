@@ -7639,7 +7639,9 @@ export function checkEntry(
     }
     // A list-declared binding is read as it is: one `typeof` refuses a
     // string, one brand check refuses a typed array, and nothing else is
-    // read or converted (see the plan's description above).
+    // read or converted (see the plan's description above). A scalar passes
+    // on purpose: the declared type is often wider than the value a caller
+    // binds, and the lowerings dispatch on the run-time shape.
     for (const id of plan.lists) {
       const x = v[id];
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);

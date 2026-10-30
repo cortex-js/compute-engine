@@ -1325,7 +1325,13 @@ function triviallyAdmittedCall(
   return true;
 }
 
-/** True when every declared parameter of `signature` is numeric. */
+/** True when every declared parameter of `signature` is numeric.
+ *
+ * A parameter that is a type variable with a numeric bound is not numeric
+ * here. When this function returns false, the caller in the boxing step
+ * narrows a valueless operand of such a parameter to its bound with
+ * `inferGenericBoundArgs()` instead.
+ */
 function allParamsNumeric(ce: ComputeEngine, signature: Type): boolean {
   if (typeof signature === 'string' || signature.kind !== 'signature')
     return false;

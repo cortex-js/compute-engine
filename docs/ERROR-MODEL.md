@@ -185,7 +185,15 @@ What the decision does NOT change:
   each operand for NaN (`_.x === _.x`). The test applies to a variable of
   any type (`p.x > 0` tests `_.p`), and to a variable the comparison reads
   through an assigned value (`a := \sin x`, then `\cos a > 0` tests `_.x`)
-  or through the body of a user function it calls. A variable read only by
+  or through the body of a user function it calls. A local of a `Block` is
+  followed to every value the block assigns to it, in a loop or a branch
+  too: `Block(a := n + 1, a < m)` at `{m: 5}` has no value, and so has the
+  `If` over it. When the local is assigned more than once, the test requires
+  the variables of all its values, so it can give no value where the
+  interpreter has one (`a := 1; If(m > 0, a := n); a < m` at `{m: -5}`),
+  never the reverse. A local that no statement before the read assigns at
+  the top level of the block (it is assigned only in a branch or a loop) is
+  tested for `undefined` too (`blockLocalValueFrame`). A variable read only by
   an ARM of a nested `If`, `Which` or `When`, or by a later condition of a
   `Which`, is not tested, since it is read only when that arm is selected:
   `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = -1` is `1` with `y` unsupplied, as
@@ -196,6 +204,24 @@ What the decision does NOT change:
   else arm, no default; see the `Missing` item above); otherwise the
   comparison decides false, as for any NaN operand
   (`BaseCompiler.operandInputNodes`, `compilation/base-compiler.ts`).
+
+  A comparison that is not a branch condition, but whose value is the result,
+  has no value when it reads an unsupplied variable (user decision
+  2026-10-30). For `x > 0` with `x` declared `real`, input `{}`: before, the
+  compiled function returned `false` (`0 < undefined`); now it returns
+  `undefined`, as the interpreter has no value. `x ≠ 0` at `{}` returned
+  `true` and now returns `undefined`. A supplied `NaN` still decides:
+  `x = y` at `{x: NaN}` with `y` unsupplied is `false`. A chain is the
+  three-valued `And` of its links, so one decided `false` link decides it:
+  `x < y + 1 < 2` at `{y: 2}` is `false`, and so is `NaN < x` at `{}`. The
+  rule applies to a variable of any declared type, `unknown` included. An
+  operand that reads an absent value as a number (`Boole(x > 0) = 0`) cannot
+  let the comparison run first, since `0 = 0` is `true`: the tests come
+  first there. Where only the truth of a numeric comparison is read (`Boole`,
+  a `Filter` predicate), the plain comparison is emitted with no test,
+  because `false` and `undefined` give the same result there; not for a
+  string comparison (`Boole(s = t)` at `{}` is `0`)
+  (`BaseCompiler.unsuppliedComparisonGuard`, `compilation/base-compiler.ts`).
 - **A `partial` operand** on `interval-js` (undefined over part of the cell
   only) gives at most `'maybe'`: where it is undefined the comparison is
   false, so it cannot hold over the whole cell. Before 2026-10-20 the
@@ -588,7 +614,11 @@ throw-friendly than this model proposes, in two distinct ways:
   `Error("unexpected-argument", <the first surplus argument>)`, with the
   frame of the call (`makeLambda`, `function-utils.ts`). A literal with no
   parameter — including the shorthand constant function, `Apply(3, 5)` is
-  `3` — ignores its arguments.
+  `3` — ignores its arguments. `Pipe` and `Map` are stricter than `Apply`: a
+  number literal in the function position is the `incompatible-type` error
+  (`5 |> 3` and `Map(3, [1, 2])`), because it is never a function. A symbol
+  in that position is not refused, so that it can be assigned later: `5 |> f`
+  evaluates to `f(5)`.
 
 ## 2. Which channel, when — Proposed (codifies current behavior, with the deviations listed in §7)
 
