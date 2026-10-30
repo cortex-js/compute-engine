@@ -882,13 +882,18 @@ describe('a comparison as the result: the cases the review found', () => {
     expect(js(['Boole', ['Equal', 's', 't']]).run!({ s: 'a', t: 'a' })).toBe(1);
   });
 
-  test('a numeric block local that holds NaN decides the comparison', () => {
+  test('a numeric block local that holds NaN, with an input absent', () => {
     const json = [
       'Block',
       ['Assign', 'a2', ['Add', 'n', 1]],
       ['Less', 'a2', 'm'],
     ];
-    expect(js(json).run!({ n: NaN })).toBe(false);
+    // The interpreter gives `False` (`NaN < m`). A comparison of a block
+    // local tests every caller input of the block, `m` too, and a NaN local
+    // does not escape that test: too strict, which is accepted (user
+    // decision 2026-10-30).
+    expect(js(json).run!({ n: NaN })).toBeUndefined();
+    expect(js(json).run!({ n: NaN, m: 3 })).toBe(false);
     expect(js(json).run!({ n: 1, m: 3 })).toBe(true);
   });
 
@@ -1026,10 +1031,14 @@ describe('a comparison that reads a block local', () => {
       { m: 5 },
       { n: 1, m: 5 },
       { n: 9, m: 5 },
-      { n: NaN },
+      { n: NaN, m: 5 },
     ];
     for (const vars of runs) agrees(straight, vars);
     for (const vars of runs.slice(1)) agrees(straightIf, vars, true);
+    // With `m` absent, the interpreter gives `False` for `NaN < m`; the
+    // test of every caller input of the block gives no value (too strict,
+    // user decision 2026-10-30).
+    expect(js(straight).run!({ n: NaN })).toBeUndefined();
   });
 
   test('a local reassigned in a loop', () => {
@@ -1332,6 +1341,482 @@ describe('block locals matched by definition', () => {
       expect(r.code).not.toContain('!== undefined');
     }
   });
+
+  test('a condition on a block local compares first, then tests', () => {
+    // A comparison of a block local tests every caller input of the block
+    // (user decision 2026-10-30), but in a branch condition it compares
+    // first: `a < 1` is `true` with `a := 0`, so the branch is taken, as
+    // in the interpreter, and `a` is then `n`, with no value.
+    const branch = [
+      'Block',
+      ['Assign', 'a', 0],
+      ['If', ['Less', 'a', 1], ['Assign', 'a', 'n']],
+      'a',
+    ];
+    noValue(branch, {});
+    expect(both(branch, { n: 2 })).toEqual({ compiled: 2, interpreted: 2 });
+    // A `true` needs no test.
+    expect(
+      both(
+        ['Block', ['Assign', 'a', 'n'], ['Assign', 'a', 0], ['Less', 'a', 1]],
+        {}
+      )
+    ).toEqual({ compiled: true, interpreted: 'True' });
+    // An assignment in one branch.
+    const joined = [
+      'Block',
+      ['Assign', 'a', 0],
+      ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+      ['Less', 'a', 1],
+    ];
+    expect(both(joined, { x: -1 })).toEqual({
+      compiled: true,
+      interpreted: 'True',
+    });
+    noValue(joined, { x: 1 });
+    // The same for the arms of a `Which`.
+    const which = [
+      'Block',
+      ['Assign', 'a', 0],
+      [
+        'Which',
+        ['Greater', 'x', 0],
+        ['Assign', 'a', 'n'],
+        'True',
+        ['Assign', 'a', 1],
+      ],
+      ['Less', 'a', 5],
+    ];
+    expect(both(which, { x: -1 })).toEqual({
+      compiled: true,
+      interpreted: 'True',
+    });
+    noValue(which, { x: 1 });
+    // A local read through another local.
+    noValue(
+      [
+        'Block',
+        ['Assign', 'b', 'n'],
+        ['Assign', 'a', 'b'],
+        ['Assign', 'b', 0],
+        ['Less', 'a', 1],
+      ],
+      {}
+    );
+    expect(
+      both(
+        [
+          'Block',
+          ['Assign', 'b', 0],
+          ['Assign', 'a', 'b'],
+          ['Assign', 'b', 'n'],
+          ['Less', 'a', 1],
+        ],
+        {}
+      )
+    ).toEqual({ compiled: true, interpreted: 'True' });
+    // In a loop: the first iteration takes the first branch (`0 < 1`);
+    // in the second, `a` is `n + 1` with no value. The value of `b`
+    // depends on the branch taken.
+    const loop = [
+      'Block',
+      ['Assign', 'a', 0],
+      ['Assign', 'b', 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['If', ['Less', 'a', 1], ['Assign', 'b', 1], ['Assign', 'b', 2]],
+          ['Assign', 'a', ['Add', 'n', 1]],
+        ],
+        ['Element', 'k', ['Range', 1, 2]],
+      ],
+      'b',
+    ];
+    // In the second iteration `a` is NaN, and the test of the inputs of the
+    // block fails while the comparison reads no other variable: the
+    // interpreter may have a value there (it has, 1), so the whole run
+    // gives no value (`poisonSlot`), never the else branch's 2.
+    const looped = both(loop, {});
+    expect(looped.interpreted).toBe(1);
+    expect(looped.compiled).toBeNaN();
+    expect(both(loop, { n: 5 })).toEqual({ compiled: 2, interpreted: 2 });
+    // Too strict, which is accepted (user decision 2026-10-30): with `x =
+    // -1`, `a` is 5, and the interpreter gives `False`, but the comparison
+    // tests every caller input of the block, `n` too.
+    const strict = [
+      'Block',
+      ['Assign', 'a', 5],
+      ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+      ['Less', 'a', 1],
+    ];
+    const r = both(strict, { x: -1 });
+    expect(r.interpreted).toBe('False');
+    expect(r.compiled).toBeUndefined();
+    expect(both(strict, { x: -1, n: 0 })).toEqual({
+      compiled: false,
+      interpreted: 'False',
+    });
+  });
+
+  test('a condition that only the strict test leaves undecided', () => {
+    // `a` is 5 at `x = -1`, and the interpreter takes the second branch.
+    // The test of every input of the block (`n`) fails, while the
+    // comparison itself reads no other variable: the whole run gives no
+    // value, not the definite 0 of taking no branch.
+    const json = [
+      'Block',
+      ['Assign', 'a', 5],
+      ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+      ['Assign', 'b', 0],
+      ['If', ['Less', 'a', 1], ['Assign', 'b', 1], ['Assign', 'b', 2]],
+      'b',
+    ];
+    const absent = both(json, { x: -1 });
+    expect(absent.interpreted).toBe(2);
+    expect(absent.compiled).toBeNaN();
+    expect(both(json, { x: -1, n: 3 })).toEqual({
+      compiled: 2,
+      interpreted: 2,
+    });
+    expect(both(json, { x: 1, n: -5 })).toEqual({
+      compiled: 1,
+      interpreted: 1,
+    });
+    // The marker reaches the top of the run, through any block: the run
+    // gives no value (a later statement, here `Add(r, 10)` or an outer
+    // write, cannot give a value that the interpreter does not give).
+    const inner = ['Block', ['Assign', 'r', json], ['Add', 'r', 10]];
+    expect(both(inner, { x: -1 }).compiled).toBeNaN();
+    const outer = [
+      'Block',
+      ['Assign', 'a', 5],
+      ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+      [
+        'Assign',
+        'r',
+        [
+          'Block',
+          ['Assign', 'b', 0],
+          ['If', ['Less', 'a', 1], ['Assign', 'b', 1], ['Assign', 'b', 2]],
+          'b',
+        ],
+      ],
+      ['Add', 'r', 10],
+    ];
+    const r = both(outer, { x: -1 });
+    expect(r.interpreted).toBe(12);
+    expect(r.compiled).toBeNaN();
+    expect(both(outer, { x: -1, n: 0 })).toEqual({
+      compiled: 12,
+      interpreted: 12,
+    });
+    // Where the comparison's own read is absent, the interpreter has no
+    // value for it either: no branch is taken, as before, and the block
+    // goes on (`b` keeps 0).
+    const own = [
+      'Block',
+      ['Assign', 'a', 0],
+      ['Assign', 'b', 0],
+      ['If', ['Less', 'a', 'm'], ['Assign', 'b', 1], ['Assign', 'b', 2]],
+      'b',
+    ];
+    expect(both(own, {})).toEqual({ compiled: 0, interpreted: 0 });
+    // A later write to an outer local does not survive the marker: the
+    // run gives no value (the interpreter gives 9).
+    const later = [
+      'Block',
+      ['Assign', 'c', 0],
+      [
+        'Assign',
+        't',
+        [
+          'Block',
+          ['Assign', 'a', 5],
+          ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+          ['If', ['Less', 'a', 1], ['Assign', 'b', 1], ['Assign', 'b', 2]],
+          ['Assign', 'c', 9],
+          'b',
+        ],
+      ],
+      'c',
+    ];
+    const lost = both(later, { x: -1 });
+    expect(lost.interpreted).toBe(9);
+    expect(lost.compiled).toBeNaN();
+    expect(both(later, { x: -1, n: 0 })).toEqual({
+      compiled: 9,
+      interpreted: 9,
+    });
+    // A function literal whose run result has a type that could hold a
+    // function (here `unknown`) declines: the function could escape the
+    // run. The interpreter then evaluates it.
+    const call = [
+      'Block',
+      ['Assign', 'a', ['Add', 'n', 1]],
+      ['Assign', 'f', ['Function', ['If', ['Less', 'a', 't'], 1, 2], 't']],
+      ['f', 3],
+    ];
+    expect(() =>
+      compile(fresh().box(call as never), { fallback: false })
+    ).toThrow(/the function could run after the run has returned/);
+    const fallback = compile(fresh().box(call as never));
+    expect(fallback.success).toBe(false);
+    expect(fallback.run!({ n: 1 } as never)).toBe(1);
+    // A function literal that the run returns could run after the run: it
+    // declines.
+    expect(() =>
+      compile(
+        fresh().box([
+          'Block',
+          ['Assign', 'a', 5],
+          ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+          ['Assign', 'g', ['Function', ['If', ['Less', 'a', 't'], 1, 2], 't']],
+          'g',
+        ] as never),
+        { fallback: false }
+      )
+    ).toThrow(/the function could run after the run has returned/);
+  });
+
+  test('the fixes of review round 3', () => {
+    const strict = (last: unknown) => [
+      'Block',
+      ['Assign', 'a', 5],
+      ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+      ['Assign', 'b', 0],
+      ['If', ['Less', 'a', 1], ['Assign', 'b', 1], ['Assign', 'b', 2]],
+      last,
+    ];
+    // An effect after the condition must still happen (the interpreter
+    // draws once): the run would skip it, so the compile declines.
+    expect(() =>
+      compile(fresh().box(strict(['Random']) as never), { fallback: false })
+    ).toThrow(/an effect that must still happen/);
+    // A function in a collection built from another could escape the run.
+    const escaping = [
+      'Block',
+      ['Assign', 'a', 5],
+      ['If', ['Greater', 'x', 0], ['Assign', 'a', ['Add', 'n', 1]]],
+      ['Assign', 'g', ['Function', ['If', ['Less', 'a', 't'], 1, 2], 't']],
+      ['Reverse', ['List', 'g']],
+    ];
+    expect(() =>
+      compile(fresh().box(escaping as never), { fallback: false })
+    ).toThrow(/the function could run after the run has returned/);
+    // With no effect and no function, the run gives no value, as before.
+    const absent = both(strict('b'), { x: -1 });
+    expect(absent.interpreted).toBe(2);
+    expect(absent.compiled).toBeNaN();
+  });
+
+  test('the fixes of review round 2', () => {
+    // `Coalesce` discharges an absent value: its fallback is not guarded
+    // as an absent collection.
+    const ce = fresh();
+    ce.declare('k', 'integer');
+    const coalesce = compile(
+      ce.box(['Coalesce', ['List', 1], ['Take', 'L', 'k']] as never),
+      { fallback: false }
+    );
+    expect(coalesce.run!({ L: [1, 2] } as never)).toEqual([1]);
+    // A dependent local of an enclosing block brings the inputs of that
+    // block into a nested block.
+    const nested = [
+      'Block',
+      ['Assign', 'a', ['Add', 'n', 1]],
+      ['Block', ['Assign', 'b', 'a'], ['Less', 'b', 1]],
+    ];
+    noValue(nested, {});
+    expect(both(nested, { n: -5 })).toEqual({
+      compiled: true,
+      interpreted: 'True',
+    });
+    // A block with an early `Return` is not read through its last
+    // statement.
+    const withReturn = fresh();
+    withReturn.declare('f', 'function');
+    withReturn.assign(
+      'f',
+      withReturn.box(['Function', ['Block', ['Return', 'n'], 1], 't'] as never)
+    );
+    const r = compile(withReturn.box(['Greater', ['f', 1], 0] as never), {
+      fallback: false,
+    });
+    expect(r.run!({})).toBeUndefined();
+    expect(r.run!({ n: 2 })).toBe(true);
+  });
+
+  test('a local that no input can reach compares as it is', () => {
+    // A loop counter, a constant, a destructured constant, and a chain of
+    // locals through a block-local function over a constant: none can
+    // depend on `x`, so their comparisons test nothing, and the block keeps
+    // its value while `x` is absent.
+    const counter = [
+      'Block',
+      ['Declare', 'k', { str: 'unknown' }, 0],
+      [
+        'Loop',
+        [
+          'Block',
+          ['Assign', 'k', ['Add', 'k', 1]],
+          ['If', ['Greater', 'x', 0], ['Break']],
+          ['If', ['GreaterEqual', 'k', 5], ['Break']],
+        ],
+      ],
+      'k',
+    ];
+    expect(both(counter, {})).toEqual({ compiled: 5, interpreted: 5 });
+    const sum = [
+      'Block',
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        ['Assign', 's', ['Add', 's', 'k']],
+        ['Element', 'k', ['Range', 1, 3]],
+      ],
+      ['If', ['Less', 's', 10], ['Assign', 'q', 1], ['Assign', 'q', 2]],
+      ['Add', 'q', ['Boole', ['Greater', 'x', 0]]],
+    ];
+    expect(both(sum, { x: 1 })).toEqual({ compiled: 2, interpreted: 2 });
+    const pair = [
+      'Block',
+      ['Assign', ['Tuple', 'p', 'r'], ['Tuple', 1, 2]],
+      ['If', ['Less', 'p', 'r'], ['Assign', 'q', 1], ['Assign', 'q', 2]],
+      ['Add', 'q', 'x'],
+    ];
+    expect(both(pair, { x: 1 })).toEqual({ compiled: 2, interpreted: 2 });
+    const chain = (c: unknown) => [
+      'Block',
+      ['Assign', 'c', c],
+      ['Assign', 'gg', ['Function', ['Add', 't', 'c'], 't']],
+      ['Assign', 'd', ['gg', 2]],
+      ['Assign', 'w', 'd'],
+      ['If', ['Less', 'w', 100], ['Assign', 'q', 1], ['Assign', 'q', 2]],
+      ['Add', 'q', 'x'],
+    ];
+    const plain = compile(fresh().box(chain(3) as never), {
+      fallback: false,
+    }).code;
+    expect(plain).not.toContain('throw');
+    expect(both(chain(3), { x: 1 })).toEqual({ compiled: 2, interpreted: 2 });
+    // The flag is SET through the chain: `w` reads `d`, which calls `gg`,
+    // whose body reads `c`, which reads `n`.
+    const dependent = compile(fresh().box(chain(['Add', 'n', 1]) as never), {
+      fallback: false,
+    }).code;
+    expect(dependent).toContain('_.n !== undefined');
+    noValue(chain(['Add', 'n', 1]), { x: 1 }, undefined, NaN);
+    expect(both(chain(['Add', 'n', 1]), { x: 1, n: 1 })).toEqual({
+      compiled: 2,
+      interpreted: 2,
+    });
+    // A draw has effects: a local that holds one counts as dependent, so
+    // its comparison tests `x`. The run has an effect, which the marker of
+    // a failed test would skip, so the compile declines.
+    expect(() =>
+      compile(
+        fresh().box([
+          'Block',
+          ['Assign', 'r', ['Random']],
+          ['If', ['Less', 'r', 2], ['Assign', 'q', 1], ['Assign', 'q', 2]],
+          ['Add', 'q', 'x'],
+        ] as never),
+        { fallback: false }
+      )
+    ).toThrow(/an effect that must still happen/);
+  });
+
+  test('a block that needs no marker is emitted as before', () => {
+    // Every input of the block is a read of the comparison itself, so a
+    // failed test is a failed read: no marker object, no `try`.
+    const ce = fresh();
+    for (const json of [
+      [
+        'Block',
+        ['Assign', 'a', 0],
+        ['If', ['Less', 'a', 'm'], ['Assign', 'b', 1], ['Assign', 'b', 2]],
+        'b',
+      ],
+      ['Block', ['Assign', 'a', ['Add', 'n', 1]], ['Less', 'a', 'm']],
+      ['If', ['Less', 'x', 1], 1, 2],
+    ]) {
+      const code = compile(ce.box(json as never), { fallback: false }).code;
+      expect(code).not.toContain('throw');
+      expect(code).not.toContain('try');
+    }
+  });
+
+  test('a condition with effects is evaluated before it is tested', () => {
+    // `Block(a := n, 1) > 0` is `True` in the interpreter with `n` absent,
+    // and it assigns `a`. The value of the block operand is its last
+    // statement, which reads no input.
+    const json = [
+      'Block',
+      ['Assign', 'a', 0],
+      ['Assign', 'b', 0],
+      [
+        'If',
+        ['Greater', ['Block', ['Assign', 'a', 'n'], 1], 0],
+        ['Assign', 'b', 1],
+        ['Assign', 'b', 2],
+      ],
+      'b',
+    ];
+    expect(both(json, {})).toEqual({ compiled: 1, interpreted: 1 });
+    // The read of `a` after the `If` has no value.
+    const after = [
+      'Block',
+      ['Assign', 'a', 0],
+      [
+        'If',
+        ['Greater', ['Block', ['Assign', 'a', 'n'], 1], 0],
+        ['Assign', 'b', 1],
+        ['Assign', 'b', 2],
+      ],
+      ['Less', 'a', 1],
+    ];
+    noValue(after, {});
+  });
+
+  test('a variable outside the block that the block assigns', () => {
+    // `c` is declared in the engine, so `c := n + 1` writes `_.c`: after
+    // the write, `_.c` is present while `n` has none.
+    const withC = (): ComputeEngine => {
+      const ce = fresh();
+      ce.declare('c', 'number');
+      return ce;
+    };
+    const outer = [
+      'Block',
+      ['Assign', 'c', ['Add', 'n', 1]],
+      ['Less', ['Add', 'c', 1], 'm'],
+    ];
+    noValue(outer, { m: 5 }, withC());
+    expect(both(outer, { n: 1, m: 5 }, withC())).toEqual({
+      compiled: true,
+      interpreted: 'True',
+    });
+    // A function declared in the engine and assigned in the block: its
+    // call compiles to the run-time dispatch, which tests the inputs of the
+    // body.
+    const withG = (): ComputeEngine => {
+      const ce = fresh();
+      ce.declare('gg', 'function');
+      return ce;
+    };
+    const call = [
+      'Block',
+      ['Assign', 'c', ['Add', 'n', 1]],
+      ['Assign', 'gg', ['Function', ['Add', 't', 'c'], 't']],
+      ['Less', ['gg', 1], 'm'],
+    ];
+    noValue(call, { m: 5 }, withG());
+    expect(both(call, { n: 1, m: 5 }, withG())).toEqual({
+      compiled: true,
+      interpreted: 'True',
+    });
+  });
 });
 
 describe('a chain with an operand with effects after an undecided pair', () => {
@@ -1372,6 +1857,111 @@ describe('a chain with an operand with effects after an undecided pair', () => {
   });
 });
 
+describe('the draws of a truth test and of a branch condition', () => {
+  /** The draw that follows `json`, compiled and interpreted, from the same
+   * seeded stream: equal when both consumed the same number of draws. */
+  const nextDraw = (json: unknown, vars: Record<string, number>) => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const probe = ['Tuple', json, ['Random']];
+    const p = compile(ce.box(probe as never), {
+      fallback: false,
+      constantFold: false,
+    });
+    const compiled = withRandomSeedFrame(
+      ce,
+      7,
+      () => (p.run!(vars) as number[])[1]
+    );
+    const subs: Record<string, Expression> = {};
+    for (const [k, v] of Object.entries(vars)) subs[k] = ce.box(v);
+    const interpreted = withRandomSeedFrame(ce, 7, () => {
+      const value = ce
+        .box(probe as never)
+        .subs(subs)
+        .evaluate();
+      return isFunction(value) ? value.ops[1].re : NaN;
+    });
+    const first = withRandomSeedFrame(
+      ce,
+      7,
+      () => ce.box(['Random']).evaluate().re
+    );
+    return { compiled, interpreted, drew: interpreted !== first };
+  };
+
+  test('a connective with an operand with effects keeps its draw', () => {
+    // `x > 0` has no value at `x` absent, so the interpreter evaluates the
+    // second operand, and draws. The `And` is not read for truth only:
+    // its plain `&&` would stop at the `false` of `0 < undefined`.
+    const json = [
+      'Boole',
+      ['And', ['Greater', 'x', 0], ['Less', ['Random'], 0.5]],
+    ];
+    for (const vars of [{}, { x: 1 }, { x: -1 }] as Record<string, number>[]) {
+      const r = nextDraw(json, vars);
+      expect(r.compiled).toBe(r.interpreted);
+      expect(r.drew).toBe(vars.x !== -1);
+    }
+  });
+
+  test('a chain in a branch condition stops after a pair that is false', () => {
+    // As for the bare chain, `5 < 0.5` is `False`, and `Random()` is not
+    // evaluated.
+    const json = ['If', ['Less', 'x', 0.5, ['Random']], 1, 2];
+    for (const vars of [{ x: 5 }, { x: 0 }, {}] as Record<string, number>[]) {
+      const r = nextDraw(json, vars);
+      expect(r.compiled).toBe(r.interpreted);
+      expect(r.drew).toBe(vars.x !== 5);
+    }
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    expect(ce.box(json as never).evaluate().json).toBe(2);
+    // At `{}`, the first pair has no value and the draw is made. With the
+    // same draw, the compiled `If` and the interpreter agree: no arm when
+    // `0.5 < Random()` (the chain has no value), the second arm otherwise.
+    const fresh = new ComputeEngine();
+    fresh.declare('x', 'real');
+    const at = compile(fresh.box(json as never), { fallback: false });
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const c = withRandomSeedFrame(fresh, seed, () => at.run!({}));
+      const i = withRandomSeedFrame(
+        fresh,
+        seed,
+        () => fresh.box(json as never).evaluate().json
+      );
+      if (i === 2) expect(c).toBe(2);
+      else {
+        expect(typeof i).not.toBe('number');
+        expect(c).toBeNaN();
+      }
+    }
+  });
+
+  test('a branch condition that is a chain with effects selects by value', () => {
+    // `Less(x, 0.5, Block(c := c + 1, 1))` at `{}`: the first pair has no
+    // value, so the block runs, and the chain has no value. The `If` takes
+    // no arm; the plain truth test took the second.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('c', 'real');
+    const json = [
+      'If',
+      ['Less', 'x', 0.5, ['Block', ['Assign', 'c', ['Add', 'c', 1]], 1]],
+      1,
+      2,
+    ];
+    const r = compile(ce.box(json as never), { fallback: false });
+    expect(r.run!({})).toBeNaN();
+    expect(r.run!({ x: 0, c: 0 })).toBe(1);
+    expect(r.run!({ x: 5, c: 0 })).toBe(2);
+    expect(ce.box(json as never).evaluate().json).not.toBe(2);
+    ce.assign('x', 0);
+    ce.assign('c', 0);
+    expect(ce.box(json as never).evaluate().json).toBe(1);
+  });
+});
+
 describe('broadcastAsync() scans a boolean column in each inline slice', () => {
   const ce = new ComputeEngine();
   ce.declare('c', 'boolean');
@@ -1397,10 +1987,14 @@ describe('broadcastAsync() scans a boolean column in each inline slice', () => {
     const pending = only.broadcastAsync!({ c });
     c.length = 2;
     await expect(pending).rejects.toThrow(/changed length during the batch/);
+    // With a numeric column of the original length, the slice finds the
+    // boolean column shorter than the first array.
     const x = new Float64Array([1, 2, 3]);
     const d = [true, false, true];
     const other = r.broadcastAsync!({ x, c: d });
     d.length = 2;
-    await expect(other).rejects.toThrow(TypeError);
+    await expect(other).rejects.toThrow(
+      /the array for "c" holds 2 cells, the first array 3/
+    );
   });
 });

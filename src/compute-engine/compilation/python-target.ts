@@ -612,7 +612,7 @@ function pyTakeDropSlice(
   const limit = Number.MAX_SAFE_INTEGER;
   if (countMayBeNaN(count))
     return (
-      `(lambda _l, _c: None if np.isnan(_c) else (lambda _n: ${body})` +
+      `(lambda _l, _c: None if _c != _c else (lambda _n: ${body})` +
       `(int(np.clip(np.floor(_c + 0.5), -${limit}, ${limit}))))` +
       `(${coll}, ${compile(count)})`
     );

@@ -4521,6 +4521,11 @@ function absentArgumentAsNaN(x: unknown, elements?: boolean): unknown {
 
 export const SYS_HELPERS = {
   ...JET_HELPERS,
+  // The marker object that a comparison of a block local throws when the
+  // test of the inputs of its block fails where the interpreter may decide
+  // the comparison: the compiled result catches it at its top and gives no
+  // value (`BaseCompiler.catchNoValue`).
+  noValue: Object.freeze({ noValue: true }) as object,
   // The element count of an arithmetic `Range`, shared with the interpreter
   // (`numerics/range-count.ts`), so the compiled length agrees with the
   // interpreter's `count`.

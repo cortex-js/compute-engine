@@ -1852,6 +1852,39 @@ function isGatedPointList(a: Expression): boolean {
 }
 
 /**
+ * Whether a `Take`/`Drop` count can be `NaN` (or have no value) at run time.
+ * It cannot when it is a number literal other than `NaN` (a literal `±∞` is
+ * not a constant to `tryGetConstant` and takes the run-time branch, but it
+ * is never `NaN`), or when it is typed `integer` and reads no symbol.
+ *
+ * The type `integer` alone is not a proof. A variable the caller leaves
+ * out of the vars object reads as `undefined`, and `Math.round(undefined)`
+ * is `NaN`; and a user function with one clause accepts `NaN` at a
+ * parameter typed `integer` (`docs/ERROR-MODEL.md`, "A user function
+ * accepts `NaN` at a numeric parameter — RULED 2026-09-30"). So `Take(xs,
+ * k)` with `k: integer` unsupplied must give no value, as in the
+ * interpreter, and not `[]`.
+ *
+ * An integer count whose every symbol is an index of an enclosing binder
+ * that the compiler controls (`BaseCompiler.isCompiledIndex`: a loop index
+ * with literal bounds, the index of an unrolled `Sum` term) is proven too:
+ * `Sum(Length(Take(xs, i)), (i, 1, 3))` takes no test at each term.
+ */
+export function countMayBeNaN(
+  count: Expression,
+  target?: CompileTarget<Expression>
+): boolean {
+  if (isNumber(count) && !count.isComplex && !Number.isNaN(count.re))
+    return false;
+  if (
+    isSubtype(count.type.type, 'integer') &&
+    count.symbols.every((s) => BaseCompiler.isCompiledIndex(s, target))
+  )
+    return false;
+  return true;
+}
+
+/**
  * The present arms of a gated indexed collection (see
  * `isGatedIndexedCollection`), alias-resolved, or `undefined` when `a` is
  * not one.
@@ -2992,27 +3025,48 @@ type ReboundFunctionLocals = {
 /** See `BaseCompiler.blockLocalValueFrame`. */
 type LocalEntry = {
   name: string;
+  /** The frame that holds the local. */
+  frame: LocalValueFrame;
   /** The values assigned to the local, anywhere in the block. */
   values: Expression[];
-  /** A local of the block itself, not of a scope nested in it. */
+  /** A local of the block itself, not of a scope nested in it, or a
+   * variable outside the block that the block assigns. Its read is in
+   * scope everywhere in the block. */
   own: boolean;
-  /** The free variables and the locals that `values` read (`localInputs`). */
-  shallow?: { nodes: Expression[]; refs: LocalEntry[] };
-  /** The input nodes of the local, transitively (`localInputs`). */
-  inputs?: Expression[];
+  /** A variable outside the block that the block assigns: a variable of
+   * the vars object (`_.c = …`), or a parameter of the enclosing function. */
+  outer: boolean;
   /** Whether every value of the local reads an absent value as NaN
    * (`readsAbsenceAsNaN`), once it is known. */
   absenceAsNaN?: boolean;
+  /** Whether a value of the local could depend on a caller input
+   * (`localDependsOnInputs`), once it is known. */
+  dependent?: boolean;
 };
 
 type LocalValueFrame = {
-  /** The locals of the block and of the scopes nested in it, keyed by
-   * their definition. */
+  /** The locals of the block, of the scopes nested in it, and the
+   * variables outside it that it assigns, keyed by their definition. */
   byDef: Map<object, LocalEntry>;
   /** The same locals, by name (`blockLocalsNamed`). */
   byName: Map<string, LocalEntry[]>;
   /** The definitions that the binders inside the block create. */
   binderDefs: Set<object>;
+  /** The statements of the block. */
+  stmts: ReadonlyArray<Expression>;
+  /** The block node, when there is one. */
+  node: Expression | undefined;
+  /** The free variables of the block (`unknowns`). */
+  names: ReadonlySet<string>;
+  /** The caller inputs that the block reads (`blockInputs`), once known. */
+  inputs?: Expression[];
+  /** The index of each `Loop` clause of the block (`Element(k, xs)`),
+   * by its definition, with the collection it ranges over as its value
+   * (`localDependsOnInputs`). */
+  loopIndices: Map<object, LocalEntry>;
+  /** True once `localDependsOnInputs` has set `dependent` on every local
+   * of the frame. */
+  dependenceKnown?: boolean;
   /** For each statement, the locals assigned by a top-level statement
    * before it. */
   assignedBefore: Set<string>[];
@@ -5922,15 +5976,32 @@ export class BaseCompiler {
     const def = lookupApplicable(h, engine.context.lexicalScope);
     if (!isOperatorDef(def)) return undefined;
     const operator = def.operator;
+    // An operator that handles a `missing` operand itself, or passes it
+    // through (`First`, `Max`, `At`, `Mean`, `Flatten`), still reads an
+    // absent WHOLE collection as an array (`undefined[0]`,
+    // `undefined.length`, `undefined.flat()` throw), where the interpreter
+    // has no value. For it, only an operand that is absent at run time
+    // although its type has no `missing` arm (`mayBeAbsentCollection`:
+    // `Take(xs, k)` with `k` unsupplied) is guarded.
+    // Not an operator that discharges an absent value (`Coalesce`,
+    // `IsMissing`, `AssertPresent`) or a lazy one (`If`, `Which`, `When`):
+    // they read the operand themselves (`ABSENCE_DISCHARGING_HEADS`).
+    const handles =
+      (operator.resolvedMissingBehavior === 'handle' ||
+        operator.resolvedMissingBehavior === 'pass-through') &&
+      !operator.lazy &&
+      !BaseCompiler.ABSENCE_DISCHARGING_HEADS.has(h);
     if (
       !reduction &&
       (operator.broadcastable ||
-        operator.resolvedMissingBehavior !== 'propagate')
+        (operator.resolvedMissingBehavior !== 'propagate' && !handles))
     )
       return undefined;
     // An operand is guarded when its type has a `missing` arm, or when it
     // is a checked call of a user function with a collection result
-    // (`checkedCallMayBeAbsent`): the checking shim gives `undefined` when
+    // (`checkedCallMayBeAbsent`), or another operand that can be the absent
+    // collection at run time (`mayBeAbsentCollection`): the checking shim
+    // gives `undefined` when
     // an argument fails its test, while the type of the call is the
     // collection type.
     const presentArms = args.map((a) =>
@@ -5940,12 +6011,13 @@ export class BaseCompiler {
       (a, i) =>
         presentArms[i] === undefined &&
         !BaseCompiler.hasCodeOverride(a) &&
-        BaseCompiler.checkedCallMayBeAbsent(engine, a, target)
+        BaseCompiler.mayBeAbsentCollection(engine, a, target)
     );
-    const guarded = args.map(
-      (_a, i) =>
-        (reduction || operator.stripsMissingAt(i)) &&
-        (presentArms[i] !== undefined || checkedCalls[i])
+    const guarded = args.map((_a, i) =>
+      handles && !reduction
+        ? checkedCalls[i]
+        : (reduction || operator.stripsMissingAt(i)) &&
+          (presentArms[i] !== undefined || checkedCalls[i])
     );
     if (!guarded.some((x) => x)) return undefined;
     // An impure operand that is not guarded is bound too (see above). A
@@ -8863,6 +8935,20 @@ export class BaseCompiler {
     if (BaseCompiler._boundVarsCtx?.has(name)) return true;
     for (let i = BaseCompiler._binderShield.length - 1; i >= 0; i--)
       if (BaseCompiler._binderShield[i].has(name)) return true;
+    // A function-valued local of an enclosing block (`gg := t ↦ t + 10` in
+    // the block) is bound too, also when the engine assigns a function to
+    // the same name: a call `gg(1)` applies the block's function. Evaluated
+    // through the engine, the fold applied the engine's function and baked
+    // ITS value (`2` for an engine `gg = t ↦ t + 1`, where the interpreter
+    // gives 11). The call is compiled by `tryCompileLocalFunctionCall`,
+    // which folds it with the block's literal when that is sound.
+    const target = BaseCompiler._callSiteTarget;
+    if (
+      target?.localFunctions?.has(name) ||
+      target?.lexicalFunctions?.has(name) ||
+      target?.reboundFunctions?.has(name)
+    )
+      return true;
     return false;
   }
 
@@ -9408,6 +9494,7 @@ export class BaseCompiler {
    */
   private static resetCompilationMemos(): void {
     BaseCompiler._invalidateComplexMemo();
+    BaseCompiler._poisonConditions = new WeakSet();
     BaseCompiler._foldValueMemo = new WeakMap();
     BaseCompiler._foldValueBlockedMemo = new Map();
     BaseCompiler._unknownsMemo = new WeakMap();
@@ -23068,20 +23155,22 @@ export class BaseCompiler {
   private static _localValueFrames: LocalValueFrame[] = [];
 
   /**
-   * The values assigned to each local of a block, and the locals that a
-   * statement at the top level of the block gives a value before each
-   * statement, for the reads that a comparison of a local must test.
+   * The locals of a block, the values assigned to each of them, and the
+   * locals that a statement at the top level of the block gives a value
+   * before each statement, for the reads that a comparison of a local must
+   * test.
    *
    * A comparison that reads a local (`a2 < m` after `a2 := n + 1`) has no
    * value in the interpreter while `n` has none, since `a2` is then `n + 1`
-   * with no value. So the reads tested for the comparison (in a branch
-   * condition and in a comparison whose value is the result) include the
-   * vars-object reads of every value the block assigns to the local
-   * (`operandInputNodes`). Where the local is assigned more than once (in a
-   * loop, in each branch of an `If`), all these values are followed: the
-   * test can then require a variable that the value read at run time does
-   * not use, which gives no value where the interpreter may have one, but
-   * never a value where the interpreter has none.
+   * with no value. The rule is simple (user decision 2026-10-30): a
+   * comparison that reads a local of the block, or a variable outside the
+   * block that the block assigns, tests every caller input that the whole
+   * block reads (`blockInputs`), before it compares. It is too strict where
+   * the value read at run time does not use an input: `a := 5; If(x > 0,
+   * a := n + 1); a < 1` at `x = -1`, `n` absent, has no value, where the
+   * interpreter gives `False`. That is accepted. It never gives a value
+   * where the interpreter has none, whatever the order of the assignments,
+   * the branches and the loops of the block.
    *
    * A local that no top-level statement before the read assigns (it is
    * assigned only in a branch, in a loop body, or in a nested block) may
@@ -23089,59 +23178,103 @@ export class BaseCompiler {
    * for it. Such a read is tested itself (`isOmittableRead`):
    * `a2 !== undefined`.
    *
+   * A variable outside the block that the block assigns (`c := n + 1` with
+   * `c` declared in the engine compiles to `_.c = _.n + 1`, and so does a
+   * function `gg := t ↦ t + c`) is a local for this rule: after the write,
+   * `_.c !== undefined` is true while `n` has no value.
+   *
    * The locals are keyed by their definition (the binding of the scope
    * that declares them), not by their name, and so are the reads
    * (`blockLocalOf`): a binder nested in the block that uses the name of a
    * free variable (`Sum(2n, (n, 1, 3))`, `n ↦ 2n`, a `Loop` over `n`) is
    * neither the local nor a reason to skip that variable. A local of a
    * scope nested in the block (a local of a loop body: `n := n + a` in
-   * `while n < 4 { let a = 2; … }`) is not in scope where a value of
-   * another local reads it, so it is not tested there (it would compile to
-   * the vars read `_.a`, never present, and the loop condition would never
-   * decide); its own values are followed instead (`localInputs`). A leaf of
-   * a destructuring assignment is given the whole value.
-   *
-   * Each node is visited once, so the walk is linear in the distinct nodes
-   * of the block.
+   * `while n < 4 { let a = 2; … }`) and the variable of a binder inside the
+   * block are never inputs: at the loop condition they would compile to
+   * the vars read `_.a`, never present, and the loop would never end.
    */
   private static blockLocalValueFrame(
     stmts: ReadonlyArray<Expression>,
     locals: ReadonlyArray<string>,
     spell: (name: string) => string,
-    scope: Scope | undefined
+    scope: Scope | undefined,
+    node: Expression | undefined
   ): LocalValueFrame {
     const byDef = new Map<object, LocalEntry>();
     const byName = new Map<string, LocalEntry[]>();
+    // The definitions that a binder inside the block creates: a loop index
+    // (`for k in …`), a parameter, a `Sum` index. A `Block` is not counted:
+    // its scope also declares the free variables of its body.
+    const binderDefs = new Set<object>();
+    // The free variables of the block. Without the block node, those of
+    // its statements, less its locals.
+    const names = new Set<string>(
+      node !== undefined
+        ? node.unknowns
+        : stmts.flatMap((s) => s.unknowns).filter((n) => !locals.includes(n))
+    );
+    const frame: LocalValueFrame = {
+      byDef,
+      byName,
+      binderDefs,
+      stmts,
+      node,
+      loopIndices: new Map(),
+      names,
+      assignedBefore: [],
+      current: 0,
+      bySpelling: new Map(),
+    };
     // The definition that `name` resolves to in the innermost of `scopes`
-    // that binds it, the index of that scope, or `undefined` when none
-    // does (an assignment to a variable outside the block). Without a
-    // scope (a block that was not canonicalized), the own locals are keyed
-    // by name.
+    // that binds it, and whether that scope is the block's own. When no
+    // scope binds it: a local of a block with no scope, or a temporary
+    // that a desugar added (`_tv1` of a destructuring assignment), is keyed
+    // by name; a variable outside the block that an assignment writes
+    // (`target`, the symbol node of the assignment) is keyed by the
+    // definition that its reads have.
     const resolve = (
       name: string,
-      scopes: ReadonlyArray<Scope>
-    ): { def: object; own: boolean } | undefined => {
+      scopes: ReadonlyArray<Scope>,
+      target?: Expression
+    ): { def: object; own: boolean; outer: boolean } | undefined => {
       for (let i = scopes.length - 1; i >= 0; i--) {
         const binding = scopes[i].bindings.get(name);
         if (binding === undefined) continue;
         const def: object =
           'value' in binding ? (binding.value as object) : binding;
-        return { def, own: i === 0 };
+        return { def, own: i === 0, outer: false };
       }
-      // A local that no scope binds: every local of a block with no scope,
-      // and a temporary that a desugar added (`_tv1` of a destructuring
-      // assignment), which is in `locals` but not in the scope. Keyed by
-      // name.
-      return locals.includes(name)
-        ? { def: BaseCompiler.localNameKey(name), own: true }
-        : undefined;
+      if (locals.includes(name))
+        return {
+          def: BaseCompiler.localNameKey(name),
+          own: true,
+          outer: false,
+        };
+      if (target === undefined) return undefined;
+      // The target of an assignment is held, not bound, so its definition
+      // is looked up: in the scopes that enclose the block (a parameter of
+      // the enclosing function), then in the engine.
+      let binding: unknown;
+      for (let sc = scope?.parent; sc && binding === undefined; sc = sc.parent)
+        binding = sc.bindings.get(name);
+      binding ??= target.engine.lookupDefinition(name);
+      if (binding === undefined || binding === null) return undefined;
+      const def: object =
+        typeof binding === 'object' && 'value' in binding
+          ? (binding.value as object)
+          : (binding as object);
+      return { def, own: true, outer: true };
     };
-    const entryOf = (name: string, scopes: ReadonlyArray<Scope>) => {
-      const r = resolve(name, scopes);
+    const entryOf = (
+      name: string,
+      scopes: ReadonlyArray<Scope>,
+      target?: Expression
+    ): LocalEntry | undefined => {
+      const r = resolve(name, scopes, target);
       if (r === undefined) return undefined;
       let entry = byDef.get(r.def);
       if (entry === undefined) {
-        entry = { name, values: [], own: r.own };
+        entry = { name, frame, values: [], own: r.own, outer: r.outer };
         byDef.set(r.def, entry);
         const list = byName.get(name);
         if (list === undefined) byName.set(name, [entry]);
@@ -23151,26 +23284,20 @@ export class BaseCompiler {
     };
     const rootScopes: Scope[] = scope === undefined ? [] : [scope];
     for (const name of locals) entryOf(name, rootScopes);
-    // The symbols that a target of `Assign`/`Declare` names: the symbol, or
-    // the leaves of a destructuring pattern. A leaf is given the whole
-    // value, whose inputs include those of the leaf.
-    const targetNames = (t: Expression | undefined): string[] =>
+    // The symbol nodes that a target of `Assign`/`Declare` names: the
+    // symbol, or the leaves of a destructuring pattern. A leaf is given the
+    // whole value.
+    const targetSymbols = (t: Expression | undefined): Expression[] =>
       t === undefined
         ? []
         : isSymbol(t)
-          ? [t.symbol]
+          ? [t]
           : isFunction(t) && (t.operator === 'Tuple' || t.operator === 'List')
-            ? t.ops.flatMap(targetNames)
+            ? t.ops.flatMap(targetSymbols)
             : [];
     // Each node object once: a statement built from shared subtrees has
     // few distinct nodes but exponentially many paths.
     const seen = new Set<Expression>();
-    // The definitions that a binder inside the block creates: a loop index
-    // (`for k in …`), a parameter, a `Sum` index. A value that reads one
-    // reads it inside that binder, so it is never an input where a local is
-    // read (`localInputs`). A `Block` is not counted: its scope also
-    // declares the free variables of its body.
-    const binderDefs = new Set<object>();
     const visit = (e: Expression, scopes: ReadonlyArray<Scope>): void => {
       if (!isFunction(e) || seen.has(e)) return;
       seen.add(e);
@@ -23191,22 +23318,41 @@ export class BaseCompiler {
           e.operator === 'Assign'
             ? e.ops[1]
             : BaseCompiler.declareValueOperand(e.ops);
-        for (const name of targetNames(e.ops[0])) {
-          const entry = entryOf(name, inner);
-          if (entry !== undefined && value !== undefined)
-            entry.values.push(value);
-        }
+        if (value !== undefined)
+          for (const t of targetSymbols(e.ops[0])) {
+            if (!isSymbol(t)) continue;
+            entryOf(t.symbol, inner, t)?.values.push(value);
+          }
       }
+      // The index of a `Loop` clause holds an element of its collection
+      // (each leaf of a destructuring pattern, the whole element).
+      if (e.operator === 'Loop' && e.localScope !== undefined)
+        for (const clause of e.ops.slice(1)) {
+          if (!isFunction(clause, 'Element') || clause.nops < 2) continue;
+          for (const t of targetSymbols(clause.ops[0])) {
+            if (!isSymbol(t)) continue;
+            const binding = e.localScope.bindings.get(t.symbol);
+            if (binding === undefined) continue;
+            const def: object =
+              'value' in binding ? (binding.value as object) : binding;
+            frame.loopIndices.set(def, {
+              name: t.symbol,
+              frame,
+              values: [clause.ops[1]],
+              own: false,
+              outer: false,
+            });
+          }
+        }
       for (const op of e.ops) visit(op, inner);
     };
     for (const stmt of stmts) visit(stmt, rootScopes);
     // `assignedBefore[i]`: the locals that a top-level `Assign`, or a
     // `Declare` with a value, among the statements before statement `i`
     // gives a value.
-    const assignedBefore: Set<string>[] = [];
     let assigned = new Set<string>();
     for (const stmt of stmts) {
-      assignedBefore.push(assigned);
+      frame.assignedBefore.push(assigned);
       if (
         isFunction(stmt) &&
         isSymbol(stmt.ops[0]) &&
@@ -23219,16 +23365,296 @@ export class BaseCompiler {
         assigned.add(stmt.ops[0].symbol);
       }
     }
-    const bySpelling = new Map<string, string>();
-    for (const name of locals) bySpelling.set(spell(name), name);
-    return {
-      byDef,
-      byName,
-      binderDefs,
-      assignedBefore,
-      current: 0,
-      bySpelling,
+    for (const name of locals) frame.bySpelling.set(spell(name), name);
+    return frame;
+  }
+
+  /**
+   * The caller inputs that the block of `frame` reads, for a comparison
+   * that reads one of its locals (`blockLocalValueFrame`): a node for each
+   * free variable of the block (`unknowns`), the inputs of a symbol with an
+   * engine value and of the body of a user function that the block reads
+   * (`operandInputNodes`). A variable outside the block that the block
+   * assigns is read off the vars object, so its read is an input too. A local of a scope nested in the
+   * block and the variable of a binder inside the block are not inputs.
+   * Computed once for each frame; each node is visited once.
+   */
+  private static blockInputs(
+    frame: LocalValueFrame,
+    target: CompileTarget<Expression> | undefined
+  ): Expression[] {
+    if (frame.inputs !== undefined) return frame.inputs;
+    // A read of a local of this block met while the inputs are collected
+    // (through `operandInputNodes`) adds nothing more.
+    frame.inputs = [];
+    const found = new Map<string, Expression>();
+    const add = (n: Expression): void => {
+      if (
+        isSymbol(n) &&
+        !found.has(n.symbol) &&
+        !isDecidedLoopIndex(n.symbol, target?.boundVars)
+      )
+        found.set(n.symbol, n);
     };
+    const seen = new Set<Expression>();
+    const followed = new Set<string>();
+    const visit = (e: Expression): void => {
+      if (seen.has(e)) return;
+      seen.add(e);
+      if (isSymbol(e)) {
+        if (BaseCompiler.isInnerBinderRead(e)) return;
+        const local = BaseCompiler.blockLocalOf(e);
+        if (local !== undefined) {
+          // A variable outside the block that the block assigns is read off
+          // the vars object: its value before the write is an input. A
+          // local is not: its own read is tested where it is read
+          // (`isUnsetLocalRead`), and its test here could run before the
+          // local is declared.
+          if (local.frame === frame && local.outer) add(e);
+          // A dependent local of an enclosing block brings the inputs of
+          // that block (a frame being collected gives none, which ends a
+          // cycle).
+          else if (
+            local.frame !== frame &&
+            BaseCompiler.localDependsOnInputs(local, target)
+          )
+            BaseCompiler.blockInputs(local.frame, target).forEach(add);
+          return;
+        }
+        if (frame.names.has(e.symbol)) return add(e);
+        if (followed.has(e.symbol)) return;
+        followed.add(e.symbol);
+        if (e.engine._getSymbolValue(e.symbol) !== undefined)
+          BaseCompiler.operandInputNodes(e, target).forEach(add);
+        return;
+      }
+      if (!isFunction(e)) return;
+      if (!followed.has(e.operator)) {
+        followed.add(e.operator);
+        const literal = BaseCompiler.userFunctionLiteral(e.engine, e.operator);
+        if (literal !== undefined)
+          BaseCompiler.operandInputNodes(literal, target).forEach(add);
+      }
+      // The target of an assignment is written, not read, the type of a
+      // `Declare` is not a variable, and the pattern of a `MatchCase`
+      // (`_`, `[h, ...t]`) binds or ignores what it matches.
+      if (e.operator === 'MatchCase') {
+        e.ops.slice(1).forEach(visit);
+        return;
+      }
+      if (e.operator === 'Assign') {
+        if (e.nops > 1) visit(e.ops[1]);
+        return;
+      }
+      if (e.operator === 'Declare') {
+        const value = BaseCompiler.declareValueOperand(e.ops);
+        if (value !== undefined) visit(value);
+        return;
+      }
+      e.ops.forEach(visit);
+    };
+    frame.stmts.forEach(visit);
+    frame.inputs = [...found.values()];
+    return frame.inputs;
+  }
+
+  /** True when `expr` reads a local of a block being compiled that could
+   * depend on a caller input (`localDependsOnInputs`), or a variable
+   * outside the block that the block assigns, or calls a function that the
+   * block assigns and that could (`blockLocalOf`, `blockLocalsNamed`). */
+  private static readsBlockLocal(
+    expr: Expression,
+    target?: CompileTarget<Expression>
+  ): boolean {
+    if (BaseCompiler._localValueFrames.length === 0) return false;
+    const dependent = (l: LocalEntry) =>
+      BaseCompiler.localDependsOnInputs(l, target);
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): boolean => {
+      if (seen.has(e)) return false;
+      seen.add(e);
+      if (isSymbol(e)) {
+        const local = BaseCompiler.blockLocalOf(e);
+        return local !== undefined && dependent(local);
+      }
+      if (!isFunction(e)) return false;
+      if (BaseCompiler.blockLocalsNamed(e.operator).some(dependent))
+        return true;
+      return e.ops.some(visit);
+    };
+    return visit(expr);
+  }
+
+  /**
+   * True when a value of `local` could depend on a caller input: a value
+   * reads a caller input (a free variable of the block, or of the value of
+   * an engine symbol or the body of a user function that it reads), a
+   * variable outside the block, a local or a loop index that could, calls
+   * an operator that the engine does not define, or has effects (a
+   * `Random` draw). A variable outside the block that the block assigns
+   * could always hold the caller's value. Only such a local needs the test
+   * of every caller input of its block (`blockInputs`): a loop counter
+   * (`k := k + 1`) or a constant compares as it is.
+   *
+   * The flags of a frame are found once, together: each value is walked
+   * once, which records whether it depends by itself and which locals it
+   * reads; a local is then set dependent when one of its values is, or
+   * reads one that is (the least fixpoint, from "not dependent"). A cycle
+   * (`v0 := v0 + 1` in a loop) stays not dependent unless something on it
+   * depends. The cost is linear in the size of the values. The locals are
+   * matched by definition (`blockLocalOf`), with the name key of a desugar
+   * temporary; the index of a `Loop` clause is read through the collection
+   * it ranges over (`LocalValueFrame.loopIndices`), and a variable bound by
+   * a binder inside the value (a parameter, a `Sum` index) is read inside
+   * that value. Any other binder variable counts as dependent.
+   */
+  private static localDependsOnInputs(
+    local: LocalEntry,
+    target: CompileTarget<Expression> | undefined
+  ): boolean {
+    if (local.outer) return true;
+    if (local.dependent !== undefined) return local.dependent;
+    const frame = local.frame;
+    if (!frame.dependenceKnown) {
+      frame.dependenceKnown = true;
+      BaseCompiler.findDependentLocals(frame, target);
+    }
+    // A local found through another frame (a nested scope) is solved with
+    // its own frame; anything left unknown counts as dependent.
+    return local.dependent ?? true;
+  }
+
+  /** The fixpoint of `localDependsOnInputs` over the locals of `frame`. */
+  private static findDependentLocals(
+    frame: LocalValueFrame,
+    target: CompileTarget<Expression> | undefined
+  ): void {
+    const entries = [...frame.byDef.values(), ...frame.loopIndices.values()];
+    for (const entry of entries) entry.dependent = undefined;
+    const readers = new Map<LocalEntry, LocalEntry[]>();
+    const dependent = new Set<LocalEntry>();
+    // The engine values and user-function bodies already walked, and
+    // whether each reads an input.
+    const followed = new Map<string, boolean>();
+    const literalDepends = (root: Expression): boolean =>
+      BaseCompiler.operandInputNodes(root, target).length > 0 ||
+      root.isPure !== true;
+    for (const entry of entries) {
+      const refs = new Set<LocalEntry>();
+      let depends = false;
+      const seen = new Set<Expression>();
+      const visit = (e: Expression, bound: ReadonlySet<object>): void => {
+        if (depends || seen.has(e)) return;
+        seen.add(e);
+        if (isSymbol(e)) {
+          const def = e.valueDefinition as object | undefined;
+          if (def !== undefined && bound.has(def)) return;
+          const index =
+            def === undefined ? undefined : frame.loopIndices.get(def);
+          if (index !== undefined) {
+            refs.add(index);
+            return;
+          }
+          const ref = BaseCompiler.blockLocalOf(e);
+          if (ref !== undefined) {
+            if (ref.outer) depends = true;
+            else if (ref.frame === frame) refs.add(ref);
+            else if (BaseCompiler.localDependsOnInputs(ref, target))
+              depends = true;
+            return;
+          }
+          if (BaseCompiler.isInnerBinderRead(e)) {
+            depends = true;
+            return;
+          }
+          if (e.isConstant && e.engine._getSymbolValue(e.symbol) === undefined)
+            return;
+          const s = e.symbol;
+          let known = followed.get(s);
+          if (known === undefined) {
+            const value = e.engine._getSymbolValue(s);
+            known = value === undefined ? true : literalDepends(value);
+            followed.set(s, known);
+          }
+          if (known) depends = true;
+          return;
+        }
+        if (!isFunction(e)) return;
+        const h = e.operator;
+        // A call of a function that the block assigns is read through the
+        // function's values (its body has effects only if a node of it
+        // does).
+        const named = BaseCompiler.blockLocalsNamed(h);
+        if (named.length === 0 && h !== 'Function' && e.isPure === false) {
+          depends = true;
+          return;
+        }
+        if (named.length > 0) {
+          for (const ref of named) {
+            if (ref.outer) depends = true;
+            else if (ref.frame === frame) refs.add(ref);
+            else if (BaseCompiler.localDependsOnInputs(ref, target))
+              depends = true;
+          }
+        } else {
+          let known = followed.get(h);
+          if (known === undefined) {
+            const literal = BaseCompiler.userFunctionLiteral(e.engine, h);
+            known =
+              literal !== undefined
+                ? literalDepends(literal)
+                : !isOperatorDef(
+                    lookupApplicable(h, e.engine.context.lexicalScope)
+                  );
+            followed.set(h, known);
+          }
+          if (known) {
+            depends = true;
+            return;
+          }
+        }
+        // The variables that a binder in the value binds are read there.
+        // A `Block` scope is not one: it also declares the free variables
+        // of its body. The parameters of a function literal are declared
+        // in the scope of its body.
+        let inner = bound;
+        const bind = (binding: unknown) => {
+          if (binding === undefined || binding === null) return;
+          if (inner === bound) inner = new Set(bound);
+          (inner as Set<object>).add(
+            typeof binding === 'object' && 'value' in binding
+              ? (binding.value as object)
+              : (binding as object)
+          );
+        };
+        if (e.localScope !== undefined && h !== 'Block')
+          for (const binding of e.localScope.bindings.values()) bind(binding);
+        if (h === 'Function' && isFunction(e.ops[0], 'Block')) {
+          const scope = e.ops[0].localScope;
+          for (const param of e.ops.slice(1))
+            if (isSymbol(param)) bind(scope?.bindings.get(param.symbol));
+        }
+        for (const op of e.ops) visit(op, inner);
+      };
+      for (const value of entry.values) visit(value, new Set());
+      if (depends) dependent.add(entry);
+      for (const ref of refs) {
+        const list = readers.get(ref);
+        if (list === undefined) readers.set(ref, [entry]);
+        else list.push(entry);
+      }
+    }
+    // A dependent local makes every local that reads it dependent.
+    const work = [...dependent];
+    while (work.length > 0) {
+      const entry = work.pop()!;
+      for (const reader of readers.get(entry) ?? [])
+        if (!dependent.has(reader)) {
+          dependent.add(reader);
+          work.push(reader);
+        }
+    }
+    for (const entry of entries) entry.dependent = dependent.has(entry);
   }
 
   /** The key of the own local `name` of a block with no scope. */
@@ -23248,7 +23674,8 @@ export class BaseCompiler {
    * The node is matched by its definition (`valueDefinition`), so a binder
    * nested in the block that uses the same name (a `Sum` index, a
    * parameter) is not the local, and does not hide a free variable of the
-   * same name.
+   * same name. A variable outside the block that the block assigns is
+   * matched too.
    */
   private static blockLocalOf(e: Expression): LocalEntry | undefined {
     if (!isSymbol(e)) return undefined;
@@ -23274,49 +23701,12 @@ export class BaseCompiler {
   }
 
   /** The locals named `name` of the blocks being compiled, for a call of a
-   * block-local function (`g(1)` after `g := t ↦ t + n`). */
+   * function that the block assigns (`g(1)` after `g := t ↦ t + n`). */
   private static blockLocalsNamed(name: string): LocalEntry[] {
     const out: LocalEntry[] = [];
     for (const frame of BaseCompiler._localValueFrames)
       out.push(...(frame.byName.get(name) ?? []));
     return out;
-  }
-
-  /**
-   * The input nodes of the block local `local`: the free variables of every
-   * value assigned to it, and of the values of the locals those values
-   * read, transitively. Each local's own walk (`shallow`) is done once and
-   * cached on it, and so is this closure, so the cost over a block is
-   * linear in its size; a cycle (`v0 := v0 + v9` in a loop) ends because
-   * each local is visited once.
-   */
-  private static localInputs(
-    local: LocalEntry,
-    target: CompileTarget<Expression> | undefined
-  ): Expression[] {
-    if (local.inputs !== undefined) return local.inputs;
-    const nodes = new Map<string, Expression>();
-    const visited = new Set<LocalEntry>([local]);
-    const work = [local];
-    while (work.length > 0) {
-      const entry = work.pop()!;
-      if (entry.shallow === undefined) {
-        const refs = new Set<LocalEntry>();
-        const found: Expression[] = [];
-        for (const value of entry.values)
-          found.push(...BaseCompiler.operandInputNodes(value, target, refs));
-        entry.shallow = { nodes: found, refs: [...refs] };
-      }
-      for (const n of entry.shallow.nodes)
-        if (isSymbol(n) && !nodes.has(n.symbol)) nodes.set(n.symbol, n);
-      for (const r of entry.shallow.refs)
-        if (!visited.has(r)) {
-          visited.add(r);
-          work.push(r);
-        }
-    }
-    local.inputs = [...nodes.values()];
-    return local.inputs;
   }
 
   /** True when `code` is the read of a local of a block being compiled that
@@ -25161,13 +25551,14 @@ export class BaseCompiler {
             ownedOps.push(ops);
           }
         }
-      // The values assigned to each local, for the reads that a comparison
-      // of a local tests (`blockLocalValues`).
+      // The locals of the block, for the reads that a comparison of a local
+      // tests (`blockLocalValueFrame`).
       localValueFrame = BaseCompiler.blockLocalValueFrame(
         stmts,
         locals,
         spellLocal,
-        node?.localScope
+        node?.localScope,
+        node
       );
       BaseCompiler._localValueFrames.push(localValueFrame);
       const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
@@ -27819,6 +28210,32 @@ export class BaseCompiler {
         memo: new WeakMap(),
       });
     return { pushed: masked.size > 0, owned };
+  }
+
+  /**
+   * True when `name` is read as an index of an enclosing binder that the
+   * compiler controls: a loop index with literal bounds
+   * (`isDecidedLoopIndex`), or the index of an unrolled `Sum`/`Product`
+   * term, which compiles to its integer value (`_unrolledIndexValues`).
+   * Such an index is never `NaN` and never absent.
+   */
+  static isCompiledIndex(
+    name: string,
+    target: CompileTarget<Expression> | undefined
+  ): boolean {
+    if (isDecidedLoopIndex(name, target?.boundVars)) return true;
+    const frames = BaseCompiler._unrolledIndexValues;
+    for (let i = frames.length - 1; i >= 0; i--) {
+      if (frames[i].masked.has(name)) return false;
+      if (frames[i].values.has(name)) return true;
+    }
+    // A name that the target compiles to a number literal (the index of
+    // an unrolled term, emitted as its value through the target's
+    // variables).
+    if (target === undefined || !BaseCompiler._boundVarsCtx?.has(name))
+      return false;
+    const code = target.var?.(name);
+    return code !== undefined && Number.isFinite(Number(code));
   }
 
   /** Leave the scope `_enterUnrolledIndexBinder` opened. */
@@ -31575,6 +31992,26 @@ export class BaseCompiler {
           cond.ops.some(BaseCompiler.isObjectDomainMissingOperand)))
     )
       return { negate: false, test: { kind: 'value', expr: cond } };
+    // On the JavaScript target, a relation that has effects, or that reads
+    // a local of a block being compiled, is read by its VALUE: the
+    // comparison lowering (`unsuppliedComparisonGuard`) evaluates the
+    // operands first, compares, and gives `undefined` when the comparison
+    // has no value, and the selection takes the first arm only for `true`,
+    // the next one only for `false`, and no arm otherwise. A test placed
+    // before the comparison would skip an operand with effects (`If(Block(a
+    // := n, 1) > 0, …)` assigns `a` in the interpreter), and the test of a
+    // local is too strict (every caller input of its block,
+    // `blockInputs`): placed first, it would make a comparison that is
+    // `true` in the interpreter (`a < 1` after `a := 0`) take no arm.
+    if (
+      target?.language === 'javascript' &&
+      target.bindExpr !== undefined &&
+      (cond.isPure !== true || BaseCompiler.readsBlockLocal(cond, target)) &&
+      BaseCompiler.guardTakesOperands(cond.ops)
+    ) {
+      BaseCompiler._poisonConditions.add(cond);
+      return { negate: false, test: { kind: 'value', expr: cond } };
+    }
     if (cond.isPure !== true) {
       if (!canBind || cond.nops > 2) return null;
       if (cond.nops === 2 && cond.op1 === cond.op2 && cond.op1.isPure !== true)
@@ -31666,6 +32103,10 @@ export class BaseCompiler {
    *   the inputs of the body of a user function that `expr` calls. Each
    *   value and body is walked once, which also stops a value or a function
    *   that refers to itself.
+   * - A read of a local of a block being compiled, of a variable outside
+   *   it that the block assigns, and a call of a function that the block
+   *   assigns, add the read itself and every caller input that the whole
+   *   block reads (`blockInputs`, user decision 2026-10-30).
    * - Only the CONDITION of a nested `If`, the first condition of a `Which`,
    *   and the condition of a `When` are read every time. An arm, and a later
    *   condition of a `Which`, are read only when they are selected, so their
@@ -31697,10 +32138,7 @@ export class BaseCompiler {
    */
   private static operandInputNodes(
     expr: Expression,
-    target?: CompileTarget<Expression>,
-    /** The shallow walk of `localInputs`: a block local that the walk meets
-     * is recorded here, and its values are not followed. */
-    localRefs?: Set<LocalEntry>
+    target?: CompileTarget<Expression>
   ): Expression[] {
     const engine = expr.engine;
     const found = new Map<string, Expression>();
@@ -31708,20 +32146,16 @@ export class BaseCompiler {
       if (!found.has(name) && !isDecidedLoopIndex(name, target?.boundVars))
         found.set(name, node);
     };
-    // A block local (`blockLocalOf`): the read itself, when the local is in
-    // scope where it is read, and the inputs of every value assigned to it
-    // (`localInputs`). A local of a scope nested in the block, met in a
-    // value of another local (`n := n + a` with `a` a local of a loop
-    // body), is not in scope at the read, and only its values count.
+    // A block local (`blockLocalOf`): the read itself, and every caller
+    // input of the block that holds it (`blockInputs`).
     const addLocal = (local: LocalEntry, node: Expression | undefined) => {
-      if (localRefs !== undefined) {
-        localRefs.add(local);
-        if (local.own && node !== undefined) add(local.name, node);
-        return;
-      }
       if (node !== undefined) add(local.name, node);
-      for (const input of BaseCompiler.localInputs(local, target))
-        add(isSymbol(input) ? input.symbol : local.name, input);
+      if (BaseCompiler._directInputsOnly) return;
+      // A local that no caller input can reach (a loop counter, a
+      // constant) needs no test of the inputs of its block.
+      if (!BaseCompiler.localDependsOnInputs(local, target)) return;
+      for (const input of BaseCompiler.blockInputs(local.frame, target))
+        if (isSymbol(input)) add(input.symbol, input);
     };
     // The names whose value or function body was already walked.
     const followed = new Set<string>();
@@ -31742,17 +32176,16 @@ export class BaseCompiler {
         visited.add(e);
         if (isSymbol(e)) {
           const s = e.symbol;
+          const local = BaseCompiler.blockLocalOf(e);
+          // A variable outside the block that the block assigns is a local
+          // for this rule, also when it has an engine value.
+          if (local?.outer === true) {
+            addLocal(local, e);
+            return;
+          }
           if (names.has(s)) {
-            const local = BaseCompiler.blockLocalOf(e);
             if (local !== undefined) addLocal(local, e);
-            // In a value of a local, a loop index or a parameter of a
-            // binder inside the block is not an input where the local is
-            // read.
-            else if (
-              localRefs === undefined ||
-              !BaseCompiler.isInnerBinderRead(e)
-            )
-              add(s, e);
+            else add(s, e);
             return;
           }
           // A name that `unknowns` reports free is an input whatever a
@@ -31797,16 +32230,35 @@ export class BaseCompiler {
           if (e.nops > 1) visit(e.ops[1], boundIn(1));
           return;
         }
+        // The value of a `Block` is its last statement. When that statement
+        // reads no local of the block (each of its free variables is free
+        // in the block), the earlier statements do not change the value:
+        // `Block(a := n, 1) > 0` reads no input, and is `True` in the
+        // interpreter with `n` absent. A later read of `a` is tested where
+        // it is read.
+        if (
+          h === 'Block' &&
+          e.nops > 0 &&
+          !BaseCompiler.containsEarlyReturn(e)
+        ) {
+          const last = e.ops[e.nops - 1];
+          const free = new Set(e.unknowns);
+          if (last.unknowns.every((n) => free.has(n))) {
+            visit(last, boundIn(e.nops - 1));
+            return;
+          }
+        }
         if (!followed.has(h)) {
           followed.add(h);
           const literal = BaseCompiler.userFunctionLiteral(engine, h);
           if (literal !== undefined) collect(literal);
-          // A call of a function that the block assigns to a local
-          // (`g := t ↦ t + n`, then `g(1)`): the inputs of its body. The
-          // locals are matched by name, which can only add inputs.
-          for (const local of BaseCompiler.blockLocalsNamed(h))
-            addLocal(local, undefined);
         }
+        // A call of a function that the block assigns, to a local or to a
+        // variable outside the block (`g := t ↦ t + n`, then `g(1)`): every
+        // caller input of that block. The locals are matched by name, which
+        // can only add inputs.
+        for (const local of BaseCompiler.blockLocalsNamed(h))
+          addLocal(local, undefined);
         e.ops.forEach((x, i) => visit(x, boundIn(i)));
       };
       visit(root, new Set());
@@ -32152,8 +32604,9 @@ export class BaseCompiler {
    * operands that may both be `undefined`), over numeric operands that read
    * an absent value as NaN (see `markTruthOnlyNode`). `NotEqual` is not marked:
    * `undefined !== 0` is `true`, so it keeps its test. An `And`/`Or` is
-   * marked when each operand is: the plain `&&`/`||` of such comparisons is
-   * then `false` exactly when the three-valued value is `false` or has no
+   * marked when each operand can be and none has effects
+   * (`truthOnlyEligible`): the plain `&&`/`||` of such comparisons is then
+   * `false` exactly when the three-valued value is `false` or has no
    * value. A `Not` is not entered: `!false` is `true`. Called by the
    * lowerings whose consumer reads only truth.
    *
@@ -32186,45 +32639,68 @@ export class BaseCompiler {
   /**
    * The recursion of `withTruthOnly`: true when `expr` was marked. Each node
    * added to the mark set is pushed on `added`, so the caller can remove it.
+   * Whether `expr` can be marked is decided before any node is marked
+   * (`truthOnlyEligible`): a connective that is not marked keeps its
+   * three-valued lowering, and an operand marked inside it would give that
+   * lowering `false` for an absent read where it needs `undefined`.
    */
   private static markTruthOnlyNode(
     expr: Expression | undefined,
     added: Expression[]
   ): boolean {
+    if (!BaseCompiler.truthOnlyEligible(expr)) return false;
+    const install = (e: Expression): void => {
+      if (!isFunction(e)) return;
+      if (e.operator === 'Block') return install(e.ops[e.nops - 1]);
+      for (const node of [e, e.canonical])
+        if (!BaseCompiler._truthOnly.has(node)) {
+          BaseCompiler._truthOnly.add(node);
+          added.push(node);
+        }
+      if (e.operator === 'And' || e.operator === 'Or') e.ops.forEach(install);
+    };
+    install(expr!);
+    return true;
+  }
+
+  /**
+   * True when a truth test can read the plain value of `expr`
+   * (`markTruthOnlyNode`).
+   *
+   * - A `Block` (the body of a function literal) is read through its last
+   *   statement, its value.
+   * - A relation qualifies only over numeric operands that each read an
+   *   absent value as NaN or `undefined` (`readsAbsenceAsNaN`): its plain
+   *   value is then `false` for an absent read. Not over a string
+   *   (`_SYS.eqt(undefined, undefined)` is `true`) or a boolean, not over
+   *   `Boole(x > 0) = 0`, which is `true` for an absent `x`, and not
+   *   `NotEqual`.
+   * - An `And`/`Or` qualifies when each operand qualifies and none has
+   *   effects. The plain `&&` stops at the first `false` operand, also one
+   *   that is `false` because a variable is absent, where the interpreter
+   *   evaluates the next operand: `Boole(And(x > 0, Random() < 0.5))` at
+   *   `x` absent draws in the interpreter.
+   */
+  private static truthOnlyEligible(expr: Expression | undefined): boolean {
     if (expr === undefined || !isFunction(expr)) return false;
     const h = expr.operator;
-    // A function literal's body is a `Block`: its value is its last
-    // statement, so that statement is what the truth test reads.
     if (h === 'Block')
-      return BaseCompiler.markTruthOnlyNode(expr.ops[expr.nops - 1], added);
-    let safe = false;
-    // A relation is marked only over numeric operands that each read an
-    // absent value as NaN or `undefined` (`readsAbsenceAsNaN`): its plain
-    // value is then `false` for an absent read. Not over a string
-    // (`_SYS.eqt(undefined, undefined)` is `true`) or a boolean, and not
-    // over `Boole(x > 0) = 0`, which is `true` for an absent `x`.
+      return BaseCompiler.truthOnlyEligible(expr.ops[expr.nops - 1]);
     if (BaseCompiler.BRANCH_RELATIONS.has(h))
-      safe =
+      return (
         h !== 'NotEqual' &&
         expr.ops.every(
           (op) =>
             BaseCompiler.scalarOperandKind(op) === 'number' &&
             !BaseCompiler.isComplexValued(op) &&
             BaseCompiler.readsAbsenceAsNaN(op)
-        );
-    else if (h === 'And' || h === 'Or') {
-      const marked = expr.ops.map((op) =>
-        BaseCompiler.markTruthOnlyNode(op, added)
+        )
       );
-      safe = marked.every((m) => m);
-    }
-    if (safe)
-      for (const node of [expr, expr.canonical])
-        if (!BaseCompiler._truthOnly.has(node)) {
-          BaseCompiler._truthOnly.add(node);
-          added.push(node);
-        }
-    return safe;
+    if (h === 'And' || h === 'Or')
+      return expr.ops.every(
+        (op) => op.isPure === true && BaseCompiler.truthOnlyEligible(op)
+      );
+    return false;
   }
 
   /**
@@ -32273,8 +32749,12 @@ export class BaseCompiler {
    * (`Less(5, 0, w)` is `False` while `w` has no value). A computed operand
    * of such a chain is bound once first (`bindExpr`), and each link reads
    * the temporary. A chain with an operand that has effects at index 2 or
-   * later keeps its own lowering, which evaluates that operand only when
-   * the links before it are true, as the interpreter does.
+   * later is lowered pair by pair (`lazyChain`): each operand that is not a
+   * literal or a symbol is bound to a temporary just before the first pair
+   * that reads it, and is evaluated only when no pair before it is
+   * `false`, also after a pair with no value, as the interpreter does.
+   * `Less(x, 1, Random())` with `x` absent draws once, and is `False`,
+   * since the draw is less than 1.
    *
    * A comparison that a truth test reads (`withTruthOnly`) takes none of
    * this. A branch condition does not come through here with untested
@@ -32312,13 +32792,7 @@ export class BaseCompiler {
     // Such a comparison takes the tests first, so it has no value while a
     // variable it reads has none. An operand of a collection type keeps
     // its own lowering.
-    const dispatchedAt = (a: Expression, i: number): boolean =>
-      kinds[i] === undefined &&
-      !(isSymbol(a) && a.isConstant) &&
-      BaseCompiler.isTopTypedOperand(a) &&
-      isPossiblyCollectionTyped(a);
-    if (kinds.some((k, i) => k === undefined && !dispatchedAt(args[i], i)))
-      return undefined;
+    if (!BaseCompiler.guardTakesOperands(args)) return undefined;
     const dispatched =
       kinds.some((k) => k === undefined) ||
       ((h === 'Equal' || h === 'NotEqual') &&
@@ -32333,13 +32807,28 @@ export class BaseCompiler {
         ));
     const reads = BaseCompiler.unsuppliedReads(args, target);
     if (reads.length === 0) return undefined;
+    // A branch condition that reads a local of a block (`poisonSlot`): the
+    // tests of every caller input of the block are too strict, so where
+    // they fail while the reads of the comparison itself pass, the whole
+    // block gives no value.
+    const poison =
+      node !== undefined && BaseCompiler._poisonConditions.has(node)
+        ? BaseCompiler.poisonSlot(args, reads, target)
+        : undefined;
+    const otherwise =
+      poison === undefined
+        ? 'undefined'
+        : poison.direct === ''
+          ? poison.code
+          : `((${poison.direct}) ? ${poison.code} : undefined)`;
     if (dispatched)
       return BaseCompiler.testsFirst(
         args,
         reads,
         reads.map((r) => r.test).join(' && '),
         target,
-        emit
+        emit,
+        otherwise
       );
     const atomic = (a: Expression) => isSymbol(a) || isNumber(a) || isString(a);
 
@@ -32380,7 +32869,7 @@ export class BaseCompiler {
       // draws, and is `False`). The chain is then lowered pair by pair
       // (`lazyChain`).
       if (lateEffect && !repeatedEffect && target.bindExpr !== undefined)
-        return BaseCompiler.lazyChain(h, args, target);
+        return BaseCompiler.lazyChain(h, args, target, poison !== undefined);
       if (
         partialLink &&
         !lateEffect &&
@@ -32393,6 +32882,10 @@ export class BaseCompiler {
           () => {
             const ce = args[0].engine;
             const links = args.slice(1).map((b, i) => ce._fn(h, [args[i], b]));
+            // The links of a condition are conditions too (`poisonSlot`).
+            if (poison !== undefined)
+              for (const link of links)
+                BaseCompiler._poisonConditions.add(link);
             return BaseCompiler.compile(ce._fn('And', links), target);
           },
           node
@@ -32421,13 +32914,283 @@ export class BaseCompiler {
       const tests = numeric
         ? BaseCompiler.withNanTerms(h, args, reads, target, node)
         : reads.map((r) => r.test).join(' && ');
-      return BaseCompiler.testsFirst(args, reads, tests, target, emit);
+      return BaseCompiler.testsFirst(
+        args,
+        reads,
+        tests,
+        target,
+        emit,
+        otherwise
+      );
     }
     const test = BaseCompiler.withNanTerms(h, args, reads, target, node);
     const cmp = emitBare();
     return h === 'NotEqual'
-      ? `((${cmp}) && ((${test}) ? true : undefined))`
-      : `((${cmp}) || ((${test}) ? false : undefined))`;
+      ? `((${cmp}) && ((${test}) ? true : ${otherwise}))`
+      : `((${cmp}) || ((${test}) ? false : ${otherwise}))`;
+  }
+
+  /**
+   * The relations that a branch condition reads by value and that read a
+   * local of a block being compiled (`conditionNode`), and the links of
+   * such a chain.
+   */
+  private static _poisonConditions = new WeakSet<Expression>();
+
+  /** While true, `operandInputNodes` gives a block local only its own read,
+   * not the caller inputs of its block (`poisonSlot`). */
+  private static _directInputsOnly = false;
+
+  /**
+   * The emission that makes the whole run give no value, for a branch
+   * condition over `args` that reads a local of a block, or `undefined`
+   * when the condition reads no local of a block being compiled, or when
+   * the strict tests test only the reads of the comparison itself.
+   *
+   * Such a comparison tests every caller input of the block
+   * (`blockInputs`), which is too strict: the test can fail where the
+   * interpreter decides the comparison. In `a := 5; If(x > 0, a := n + 1);
+   * b := 0; If(a < 1, b := 1, b := 2); b` at `x = -1`, `n` absent, the
+   * interpreter takes the second branch and gives 2. Taking no branch gave
+   * the definite value 0. So when the comparison is not `true` (`false`
+   * for `≠`) and the strict tests fail, but the reads of the comparison
+   * itself pass (`direct`: its vars-object reads and its locals, without
+   * the inputs of their blocks), the run gives the absence marker of its
+   * result (user decision 2026-10-30: a compiled result is never a
+   * definite value that the interpreter does not give). When the direct
+   * reads fail, the interpreter has no value for the comparison either, and
+   * the branch takes no arm, as before.
+   *
+   * `code` throws the run-wide marker object `_SYS.noValue`, which the
+   * compiled result catches at its top (`catchNoValue`): the whole run then
+   * gives the absence marker of its result. The statements after the
+   * condition, inner or outer, cannot give a value that the interpreter
+   * does not give, since none of them reaches the result. A function
+   * literal that runs during the run is covered the same way; one that
+   * could run after the run has returned (the result can hold a function)
+   * declines.
+   */
+  private static poisonSlot(
+    args: ReadonlyArray<Expression>,
+    reads: ReadonlyArray<{ code: string; test: string }>,
+    target: CompileTarget<Expression>
+  ): { code: string; direct: string } | undefined {
+    const frames = BaseCompiler._localValueFrames;
+    let outer = -1;
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): void => {
+      if (seen.has(e)) return;
+      seen.add(e);
+      const locals: LocalEntry[] = [];
+      if (isSymbol(e)) {
+        const local = BaseCompiler.blockLocalOf(e);
+        if (local !== undefined) locals.push(local);
+      } else if (isFunction(e)) {
+        locals.push(...BaseCompiler.blockLocalsNamed(e.operator));
+        e.ops.forEach(visit);
+      }
+      for (const local of locals) {
+        const i = frames.indexOf(local.frame);
+        if (i >= 0 && (outer < 0 || i < outer)) outer = i;
+      }
+    };
+    args.forEach(visit);
+    if (outer < 0) return undefined;
+    const prev = BaseCompiler._directInputsOnly;
+    BaseCompiler._directInputsOnly = true;
+    let direct: { code: string; test: string }[];
+    try {
+      direct = BaseCompiler.unsuppliedReads(args, target);
+    } finally {
+      BaseCompiler._directInputsOnly = prev;
+    }
+    // When every read that the strict tests test is a direct read, a
+    // failed test is a failed direct read: no marker is needed.
+    if (reads.every((r) => direct.some((d) => d.code === r.code)))
+      return undefined;
+    const parents = BaseCompiler._compileParents;
+    const root = parents[0];
+    if (
+      parents.some((p) => isFunction(p, 'Function')) &&
+      (root === undefined ||
+        BaseCompiler.mayHoldFunctionType(root.type.type) ||
+        BaseCompiler.mayReturnFunction(root))
+    )
+      throw new Error(
+        'Could not compile a branch condition that reads a block local ' +
+          'in a function literal: where the test of the inputs of the ' +
+          'block fails, the whole run has no value, and the function could ' +
+          'run after the run has returned.'
+      );
+    // The marker skips everything after the condition: an effect there (a
+    // `Random` draw, a host call) would not run, where the interpreter runs
+    // it.
+    if (root === undefined || BaseCompiler.hasEffectNode(root))
+      throw new Error(
+        'Could not compile a branch condition that reads a block local: ' +
+          'where the test of the inputs of the block fails, the whole run ' +
+          'has no value, and the run has an effect that must still happen.'
+      );
+    BaseCompiler._noValueUsed = true;
+    return {
+      code: '(() => { throw _SYS.noValue; })()',
+      direct: direct.map((r) => r.test).join(' && '),
+    };
+  }
+
+  /**
+   * True when the value of `expr` could be, or hold, a function literal of
+   * the compilation, so that the function could run after the run has
+   * returned (`poisonSlot`). The value is followed through the last
+   * statement and the `Return`s of a block, the arms of a conditional, the
+   * elements of a list or a tuple, the values of a local and the bodies of
+   * a function that the block assigns. Any other value counts when its
+   * type is a function type.
+   */
+  private static mayReturnFunction(expr: Expression): boolean {
+    const isFunctionType = (t: Type): boolean => {
+      const r = resolveTypeForCompilation(stripMissingFromType(t));
+      return (
+        r !== 'never' &&
+        r !== 'unknown' &&
+        r !== 'any' &&
+        isSubtype(r, 'function')
+      );
+    };
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): boolean => {
+      if (seen.has(e)) return false;
+      seen.add(e);
+      if (isSymbol(e)) {
+        const local = BaseCompiler.blockLocalOf(e);
+        if (local !== undefined) return local.values.some(visit);
+        return isFunctionType(e.type.type);
+      }
+      if (!isFunction(e)) return false;
+      const h = e.operator;
+      if (h === 'Function') return true;
+      if (h === 'Block') {
+        const returns: Expression[] = [];
+        const collect = (x: Expression): void => {
+          if (!isFunction(x) || x.operator === 'Function') return;
+          if (x.operator === 'Return' && x.nops > 0) returns.push(x.ops[0]);
+          x.ops.forEach(collect);
+        };
+        e.ops.forEach(collect);
+        return (e.nops > 0 && visit(e.ops[e.nops - 1])) || returns.some(visit);
+      }
+      if (h === 'If') return e.ops.slice(1).some(visit);
+      if (h === 'Which') return e.ops.filter((_, i) => i % 2 === 1).some(visit);
+      if (h === 'List' || h === 'Tuple') return e.ops.some(visit);
+      const named = BaseCompiler.blockLocalsNamed(h);
+      if (named.length > 0)
+        return named.some((local) =>
+          local.values.some(
+            (v) => isFunction(v, 'Function') && v.nops > 0 && visit(v.ops[0])
+          )
+        );
+      return isFunctionType(e.type.type);
+    };
+    return visit(expr);
+  }
+
+  /**
+   * True when a value of type `t` could be, or hold, a function: anything
+   * but a number, a boolean, a string or a collection of those. `unknown`
+   * and `any` could.
+   */
+  private static mayHoldFunctionType(t: Type): boolean {
+    const r = resolveTypeForCompilation(stripMissingFromType(t));
+    if (r === 'never') return false;
+    return ![
+      'number',
+      'boolean',
+      'string',
+      'collection<number>',
+      'collection<boolean>',
+      'collection<string>',
+      'collection<collection<number>>',
+    ].some((safe) => isSubtype(r, safe));
+  }
+
+  /**
+   * True when `root` has a node with an effect of its own: a node that is
+   * not pure while its operands are (`Random()`, a host call). An
+   * assignment and a jump are not counted: they change only the state of
+   * the run. Neither is a call of a function that the block assigns.
+   */
+  private static hasEffectNode(root: Expression): boolean {
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): boolean => {
+      if (!isFunction(e) || seen.has(e)) return false;
+      seen.add(e);
+      if (e.ops.some(visit)) return true;
+      // A call of a function that the block assigns has the effects of its
+      // body, which is walked where the function is assigned.
+      return (
+        e.isPure === false &&
+        ![
+          'Assign',
+          'Declare',
+          'Break',
+          'Continue',
+          'Return',
+          'Function',
+        ].includes(e.operator) &&
+        BaseCompiler.blockLocalsNamed(e.operator).length === 0 &&
+        e.ops.every((op) => op.isPure !== false)
+      );
+    };
+    return visit(root);
+  }
+
+  /** True when a comparison of the compilation emitted the throw of
+   * `_SYS.noValue` (`poisonSlot`). Set by the compilation, read and cleared
+   * by `catchNoValue`. */
+  private static _noValueUsed = false;
+
+  /**
+   * The JavaScript code `js` of the whole result of `expr`, with a catch of
+   * the run-wide marker `_SYS.noValue` when a comparison of the compilation
+   * can throw it (`poisonSlot`): the run then gives the absence marker of
+   * its result, NaN for a number and `undefined` otherwise. Unchanged when
+   * no comparison throws it. Clears the record.
+   */
+  static catchNoValue(expr: Expression, js: string): string {
+    if (!BaseCompiler._noValueUsed) return js;
+    BaseCompiler._noValueUsed = false;
+    const r = resolveTypeForCompilation(stripMissingFromType(expr.type.type));
+    const absent =
+      r !== 'never' && r !== 'unknown' && r !== 'any' && isSubtype(r, 'number')
+        ? 'NaN'
+        : 'undefined';
+    return (
+      `(() => { try { return ${js}; } catch (_noValue) { ` +
+      `if (_noValue === _SYS.noValue) return ${absent}; throw _noValue; } })()`
+    );
+  }
+
+  /** Forget a record of `_SYS.noValue` (`catchNoValue`) of a compilation
+   * whose code is not used. */
+  static clearNoValue(): void {
+    BaseCompiler._noValueUsed = false;
+  }
+
+  /**
+   * True when `unsuppliedComparisonGuard` lowers a comparison over `args`:
+   * each operand is a scalar (`scalarOperandKind`), or an operand of a top
+   * type that may hold a list at run time and compiles to the run-time
+   * dispatch (a call of a block-local function, `gg(1)`). A symbol that is
+   * a constant (`Undefined`) is not such an operand.
+   */
+  private static guardTakesOperands(args: ReadonlyArray<Expression>): boolean {
+    return args.every(
+      (a) =>
+        BaseCompiler.scalarOperandKind(a) !== undefined ||
+        (!(isSymbol(a) && a.isConstant) &&
+          BaseCompiler.isTopTypedOperand(a) &&
+          isPossiblyCollectionTyped(a))
+    );
   }
 
   /**
@@ -32445,7 +33208,10 @@ export class BaseCompiler {
   private static lazyChain(
     h: string,
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    /** The chain is a branch condition that reads a block local
+     * (`poisonSlot`): so are its pairs. */
+    condition = false
   ): string {
     const ce = args[0].engine;
     const atomic = (a: Expression) => isSymbol(a) || isNumber(a) || isString(a);
@@ -32464,10 +33230,9 @@ export class BaseCompiler {
     };
     const from = (i: number): string =>
       bound(args[i], () => {
-        const pair = BaseCompiler.compile(
-          ce._fn(h, [args[i - 1], args[i]]),
-          target
-        );
+        const link = ce._fn(h, [args[i - 1], args[i]]);
+        if (condition) BaseCompiler._poisonConditions.add(link);
+        const pair = BaseCompiler.compile(link, target);
         if (i === args.length - 1) return pair;
         const l = BaseCompiler.tempVar(target);
         const r = BaseCompiler.tempVar(target);
@@ -32492,7 +33257,9 @@ export class BaseCompiler {
     reads: ReadonlyArray<{ code: string }>,
     tests: string,
     target: CompileTarget<Expression>,
-    emit: () => string
+    emit: () => string,
+    /** The value when the tests fail (`poisonSlot`). */
+    otherwise = 'undefined'
   ): string {
     const emitBare = (): string => {
       BaseCompiler._guardEmitting.add(args);
@@ -32506,7 +33273,7 @@ export class BaseCompiler {
       const temp = BaseCompiler.tempVar(target);
       return target.bindExpr(
         [[temp, emitBare()]],
-        `((${tests}) ? ${temp} : undefined)`
+        `((${tests}) ? ${temp} : ${otherwise})`
       );
     }
     const body = BaseCompiler.withPresentReads(
@@ -32514,7 +33281,7 @@ export class BaseCompiler {
       reads.map((r) => r.code),
       emitBare
     );
-    return `((${tests}) ? (${body}) : undefined)`;
+    return `((${tests}) ? (${body}) : ${otherwise})`;
   }
 
   /** True when the type of `a` is a top type (`unknown`, `any`), apart
@@ -37932,6 +38699,108 @@ export class BaseCompiler {
       return undefined;
     };
     return markerOf(signature) ?? markerOf(literal) ?? 'NaN';
+  }
+
+  /**
+   * True when the operand `a`, whose type is a collection with no `missing`
+   * arm, can still be the absent collection (`undefined`) at run time on
+   * the JavaScript target, so a consumer that reads it as an array must
+   * test it first (`absentCollectionOperandGuard`):
+   * - a checked call whose failed check gives `undefined`
+   *   (`checkedCallMayBeAbsent`);
+   * - a `Take` or a `Drop` whose count can be `NaN` or have no value at run
+   *   time (`countMayBeNaN`): the slice then gives `undefined`, as the
+   *   interpreter has no value;
+   * - an application that `absentCollectionOperandGuard` itself guards and
+   *   whose result is a collection: an absent operand at a position where
+   *   the operator propagates absence makes the application the absent
+   *   collection (`Reverse(Take(xs, k))`).
+   */
+  /**
+   * The operators that handle a `missing` operand and that give a value
+   * for an absent one (a fallback, a verdict, a raised error) or read it
+   * lazily, so that `absentCollectionOperandGuard` must not test it first.
+   * Every other operator that handles or passes through a `missing`
+   * operand reads an absent WHOLE collection as an array (`undefined[0]`,
+   * `undefined.length` throw), and is guarded.
+   */
+  private static readonly ABSENCE_DISCHARGING_HEADS: ReadonlySet<string> =
+    new Set(['Coalesce', 'IsMissing', 'AssertPresent', 'If', 'Which', 'When']);
+
+  private static mayBeAbsentCollection(
+    engine: ComputeEngine,
+    a: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    // Each node once: a collection built from shared subtrees
+    // (`Reverse(Join(e, e))` nested) has few distinct nodes but
+    // exponentially many paths.
+    const memo = new Map<Expression, boolean>();
+    const test = (x: Expression): boolean => {
+      const known = memo.get(x);
+      if (known !== undefined) return known;
+      memo.set(x, false);
+      const answer = BaseCompiler.mayBeAbsentCollectionNode(
+        engine,
+        x,
+        target,
+        test
+      );
+      memo.set(x, answer);
+      return answer;
+    };
+    return test(a);
+  }
+
+  /** One node of `mayBeAbsentCollection`; `operand` answers for an
+   * operand. */
+  private static mayBeAbsentCollectionNode(
+    engine: ComputeEngine,
+    a: Expression,
+    target: CompileTarget<Expression>,
+    operand: (x: Expression) => boolean
+  ): boolean {
+    if (BaseCompiler.checkedCallMayBeAbsent(engine, a, target)) return true;
+    if (target.language !== 'javascript' || !isFunction(a)) return false;
+    // A `Take` or `Drop` over an infinite source compiles to a lazy stream,
+    // not to the slice, and cannot be bound as an array.
+    if (
+      (a.operator === 'Take' || a.operator === 'Drop') &&
+      a.nops === 2 &&
+      a.ops[0].isFiniteCollection !== false &&
+      countMayBeNaN(a.ops[1], target)
+    )
+      return true;
+    const result = stripMissingFromType(resolveTypeForCompilation(a.type.type));
+    if (
+      result === 'never' ||
+      result === 'unknown' ||
+      result === 'any' ||
+      !isSubtype(result, 'collection')
+    )
+      return false;
+    if (BaseCompiler.CONTROL_FLOW_HEADS.has(a.operator)) return false;
+    const def = lookupApplicable(a.operator, engine.context.lexicalScope);
+    if (!isOperatorDef(def)) return false;
+    const operator = def.operator;
+    if (operator.broadcastable) return false;
+    // As in `absentCollectionOperandGuard`: an operator that handles or
+    // passes through a `missing` operand is the absent collection only for
+    // an operand absent at run time.
+    const behavior = operator.resolvedMissingBehavior;
+    if (behavior === 'handle' || behavior === 'pass-through')
+      return (
+        !operator.lazy &&
+        !BaseCompiler.ABSENCE_DISCHARGING_HEADS.has(a.operator) &&
+        a.ops.some((x) => !BaseCompiler.hasCodeOverride(x) && operand(x))
+      );
+    if (behavior !== 'propagate') return false;
+    return a.ops.some(
+      (x, i) =>
+        operator.stripsMissingAt(i) &&
+        !BaseCompiler.hasCodeOverride(x) &&
+        (gatedCollectionArms(x) !== undefined || operand(x))
+    );
   }
 
   /**

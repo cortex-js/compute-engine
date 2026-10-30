@@ -291,7 +291,13 @@ describe('CE-410: a connective of decided comparisons', () => {
     // itself does (`BaseCompiler.blockLocalValueFrame`).
     expect(decided.success).toBe(true);
     expect(decided.code).toContain('_.F !== undefined && _.i !== undefined');
-    expect(decided.run!({ F: [0, -0.5] } as never)).toEqual([NaN, NaN, NaN]);
+    // With `i` absent, the conditions read the local `v0`, which depends on
+    // `i` (`BaseCompiler.localDependsOnInputs`). The test of `F` and `i`
+    // fails while the comparisons read no other variable, and the compiled
+    // code cannot tell an absent `i` from a NaN element: the whole run
+    // gives no value (`BaseCompiler.poisonSlot`), where each component had
+    // none before.
+    expect(decided.run!({ F: [0, -0.5] } as never)).toBeUndefined();
   });
 
   test('the same values as the interpreter, NaN included', () => {

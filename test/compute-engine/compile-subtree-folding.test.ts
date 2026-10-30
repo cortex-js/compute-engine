@@ -773,6 +773,10 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
     expect(r.run?.({ n: 2.5 })).toEqual([1, 2, 3]);
     expect(r.run?.({ n: -2.5 })).toEqual([3, 4]);
     expect(r.run?.({ n: NaN })).toBeUndefined();
+    // The interpreter has no value for a NaN count either.
+    expect(
+      ce.box(['Take', ['List', 1, 2, 3, 4], 'NaN']).evaluate().operator
+    ).toBe('Take');
   });
 
   it('Drop emits a bare literal count', () => {
@@ -808,7 +812,7 @@ describe('COMPILE Python counts - rounding parity', () => {
     });
     // A count that can be NaN gives `None` for NaN before `int()`.
     expect(r.code).toBe(
-      '(lambda _l, _c: None if np.isnan(_c) else (lambda _n: _l[_n:] if _n < 0 else _l[:_n])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))([1, 2, 3, 4], n)'
+      '(lambda _l, _c: None if _c != _c else (lambda _n: _l[_n:] if _n < 0 else _l[:_n])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))([1, 2, 3, 4], n)'
     );
   });
 

@@ -185,18 +185,61 @@ What the decision does NOT change:
   each operand for NaN (`_.x === _.x`). The test applies to a variable of
   any type (`p.x > 0` tests `_.p`), and to a variable the comparison reads
   through an assigned value (`a := \sin x`, then `\cos a > 0` tests `_.x`)
-  or through the body of a user function it calls. A local of a `Block` is
-  followed to every value the block assigns to it, in a loop or a branch
-  too: `Block(a := n + 1, a < m)` at `{m: 5}` has no value, and so has the
-  `If` over it. When the local is assigned more than once, the test requires
-  the variables of all its values, so it can give no value where the
-  interpreter has one (`a := 1; If(m > 0, a := n); a < m` at `{m: -5}`),
-  never the reverse. A local that no statement before the read assigns at
-  the top level of the block (it is assigned only in a branch or a loop) is
-  tested for `undefined` too. Locals are matched by their binding, not
-  their name, so a nested binder of the same name (`Sum(2n, (n, 1, 3))`)
-  does not hide the free `n`, and a call of a function assigned to a local
-  (`g := t ↦ t + n`, then `g(1)`) follows its body (`blockLocalValueFrame`).
+  or through the body of a user function it calls. A comparison that reads
+  a local of a `Block`, or a variable outside the block that the block
+  assigns (`c := n + 1` with `c` declared in the engine writes `_.c`),
+  tests every caller input that the whole block reads (user decision
+  2026-10-30): `Block(a := n + 1, a < m)` at `{m: 5}` has no value, and so
+  has the `If` over it. This applies only to a local that could depend on a
+  caller input: one of its values reads an input, a variable outside the
+  block, or a local or a loop index that could, calls a function whose body
+  could, calls an operator the engine does not define, or has effects (a
+  `Random` draw). The flag is one yes/no per local, over all its values,
+  found as a least fixpoint over the locals of the block. A loop counter
+  (`k := k + 1`) or a constant compares as it is, with no test
+  (`BaseCompiler.localDependsOnInputs`). The rule does not follow which assignment gives the
+  value read, so it is too strict where that value does not use an input,
+  which is accepted: `a := 5; If(x > 0, a := n + 1); a < 1` at `x = -1`,
+  `n` absent, has no value, where the interpreter gives `False`. It never
+  gives a value where the interpreter has none. A local of a block that
+  holds NaN does not escape the test (`a := n + 1; a < m` at `{n: NaN}` has
+  no value; the interpreter gives `False`). In a branch condition such a
+  comparison is read by its value, as is a condition with effects: it runs
+  first, and is tested only when it is `false`; the first arm is taken for
+  `true`, the next one for `false`, and no arm when it has no value. So
+  `a := 0; If(a < 1, a := n); a` takes the branch, and its result is `n`,
+  with no value, as in the interpreter. When the comparison is `false` and
+  the test of the inputs of the block fails, there are two cases. If a
+  read of the comparison itself has no value (`a < m` with `m` absent), the
+  interpreter has no value for it either, and no arm is taken, as for any
+  undecided condition. Otherwise the interpreter may decide it (in `a := 5;
+  If(x > 0, a := n + 1); b := 0; If(a < 1, b := 1, b := 2); b` at `x = -1`,
+  `n` absent, it takes the second arm and gives 2), so taking no arm could
+  give a definite value that the interpreter does not give (here 0): the
+  whole run gives the absence marker of its result instead (NaN for a
+  number, `undefined` otherwise), user decision 2026-10-30. The comparison
+  throws a marker object, `_SYS.noValue`, which the compiled result catches
+  at its top, so no later statement, inner or outer, gives a value (a later
+  write `c := 9` to an outer local is not kept). This is too strict where
+  the interpreter has no value for the condition and goes on: a local that
+  is NaN because an input is absent cannot be told apart from a NaN
+  computed from present inputs. A result is emitted with the catch only
+  when a comparison can throw the marker; one whose block inputs are all
+  read by the comparison itself needs none. A function literal called
+  during the run is covered by the same catch; a condition in a function
+  literal that the run can return declines, since the function could run
+  after the run has returned (`BaseCompiler.poisonSlot`). The interval and Python targets
+  do not test the inputs of a block, and are not affected. A local that no statement before the read assigns at the
+  top level of the block (it is assigned only in a branch or a loop) is
+  tested for `undefined` too. A local of a scope nested in the block (a
+  local of a loop body) and the variable of a binder inside the block are
+  never inputs, so a loop condition always decides. Locals are matched by
+  their binding, not their name, so a nested binder of the same name
+  (`Sum(2n, (n, 1, 3))`) does not hide the free `n`, and a call of a
+  function that the block assigns (`g := t ↦ t + n`, then `g(1)`), to a
+  local or to a function declared in the engine, tests the inputs of the
+  block (`blockLocalValueFrame`, `blockInputs`). The value of a `Block`
+  operand is its last statement: `Block(a := n, 1) > 0` reads no input.
   A variable read only by
   an ARM of a nested `If`, `Which` or `When`, or by a later condition of a
   `Which`, is not tested, since it is read only when that arm is selected:
@@ -226,7 +269,13 @@ What the decision does NOT change:
   operand of a top type compiles to the run-time dispatch (`g(1) < m` with
   `g` a block-local function). A chain with an operand that has effects
   after its first pair is evaluated pair by pair: `x < 1 < Random()` with
-  `x` absent draws once and is `false`, as in the interpreter. Where only the truth of a numeric comparison is read (`Boole`,
+  `x` absent draws once and is `false`, as in the interpreter. The
+  interpreter evaluates a chain in a branch condition in the same way:
+  `If(x < 0.5 < Random(), 1, 2)` at `x = 5` does not draw
+  (`evaluateCondition`, `library/control-structures.ts`). A connective
+  with an operand that has effects is not read for truth only:
+  `Boole(x > 0 ∧ Random() < 0.5)` at `x` absent draws, as in the
+  interpreter. Where only the truth of a numeric comparison is read (`Boole`,
   a `Filter` predicate), the plain comparison is emitted with no test,
   because `false` and `undefined` give the same result there; not for a
   string comparison (`Boole(s = t)` at `{}` is `0`)

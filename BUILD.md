@@ -90,14 +90,22 @@ Before returning a delegated implementation:
 3. Leave integration and release validation to the orchestrator unless assigned
    a validation role. Do not independently repeat aggregate checks merely to
    satisfy a generic completion checklist.
-4. For each defect found and not fixed, name the decision that blocks the fix.
-   "Out of scope" and "outside the diff" are not blocking decisions; fix the
-   defect, or say that the task prompt forbade it.
+4. For each defect found and not fixed, say which of these applies: a user
+   decision blocks the fix (name it, with an example), or the defect is in
+   older code that the task does not change (report it as a follow-up task,
+   with a reproduction). "Out of scope" alone is not a reason; a defect that
+   the change introduces, or in code it rewrites, is fixed in the change.
+5. Before you ask the orchestrator or the user to decide, check the facts the
+   question rests on: run the probe, and read the documented contract in
+   `docs/` with its context. Several questions on 2026-10-30 rested on a
+   misread decision or an untested claim.
 
 The orchestrator sorts every unfixed defect of a sub-agent report before writing
-its own summary: fix it (or send it back), ask the user for the blocking
-decision, or state why it is not a defect. Only the second goes to `ROADMAP.md`
-as an open entry.
+its own summary: fix it (or send it back), queue it as the next task when it is
+in older code that the change does not touch, ask the user for the blocking
+decision, or state why it is not a defect. Only a defect that waits for a user
+decision goes to `ROADMAP.md` as an open entry. A queued follow-up is listed in
+the report and done after the current change is staged.
 
 The orchestrator combines the results and normally runs typecheck, lint,
 dependency checks, and the required test sets once on that combined tree. It can

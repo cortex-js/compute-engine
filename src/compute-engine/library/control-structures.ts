@@ -129,7 +129,10 @@ import {
   getMatchPlan,
 } from '../boxed-expression/match-dispatch.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import { isNearTiePair } from './relational-operator.js';
+import {
+  evaluateChainForCondition,
+  isNearTiePair,
+} from './relational-operator.js';
 import { isExactConstantExpression } from '../boxed-expression/compare.js';
 import {
   assignLoopIndex,
@@ -1954,14 +1957,29 @@ function evaluateCondition(
   const op = c.operator;
 
   if (BRANCH_RELATIONS.has(op)) {
+    // A chain of three or more operands is evaluated as the relation
+    // evaluates it (`evaluateChainForCondition`): left to right, and an
+    // operand after a pair that is `False` is not evaluated (no effect, no
+    // error, no random draw), so `If(Less(x, 0.5, Random()), 1, 2)` at
+    // `x = 5` takes the second arm with no draw.
+    const chain = evaluateChainForCondition(
+      ce,
+      op,
+      c.ops,
+      numericApproximation
+    );
+    if (chain !== undefined && !Array.isArray(chain))
+      return { value: chain, undecided: false };
     const ops: Expression[] = [];
-    for (const x of c.ops) {
-      const v = x.evaluate(options);
-      ops.push(v);
-      // An error operand decides the relation (it propagates); the
-      // remaining operands are not demanded.
-      if (errorValue(v) !== undefined) break;
-    }
+    if (chain !== undefined) ops.push(...chain);
+    else
+      for (const x of c.ops) {
+        const v = x.evaluate(options);
+        ops.push(v);
+        // An error operand decides the relation (it propagates); the
+        // remaining operands are not demanded.
+        if (errorValue(v) !== undefined) break;
+      }
     // Under the numeric request, the relation decides a near tie from its
     // operands AS WRITTEN: it evaluates them again exactly (a pure
     // expression, the recorded argument of a parameter) or compares an

@@ -24,14 +24,23 @@ nightly run, tell the user; do not take over that investigation unless asked.
   instructions.
 - Keep changes focused. Check documented contracts before treating surprising
   behavior as a bug. Do not change a snapshot to hide a failure.
-- Fix defects discovered during the task, in the same change. Record a defect in
+- Fix every defect you discover; never drop one. Fix it in the same change when
+  the change introduces it, when it is in code the change rewrites, or when it
+  blocks the task. A defect in older code that the change does not touch is the
+  next task, done in the same session after this change is staged, with its own
+  review (`~/.claude/SHARED-BOX-PROTOCOL.md` §5.2). Record a defect in
   `ROADMAP.md` instead only when the fix needs a user decision; the entry then
   states the decision, with an example, and the defect is reported to the user
-  in the same turn. These are not reasons to defer: the diff grows, the defect
-  is outside the files of the task, it predates the task, snapshots or pinned
-  emissions change (measure and report them instead), or a sub-agent reported it
-  as "not fixed". Use permanent `CE-<n>` references, allocated from the
-  next-free-reference line.
+  in the same turn. These are not reasons to defer a fix: the diff grows,
+  snapshots or pinned emissions change (measure and report them instead), or a
+  sub-agent reported it as "not fixed". Use permanent `CE-<n>` references,
+  allocated from the next-free-reference line.
+- When a rule that compiled code must follow (agreement with the interpreter)
+  needs a hard static analysis, implement the simple, sound version first: it
+  may give no value where the interpreter has one, and that case is documented
+  with an example, but it never gives a value where the interpreter has none.
+  A more precise version is a separate task, done when the user asks for it
+  (user decision 2026-10-30).
 - A reachable shape that a compile target declines (it falls back to the
   interpreter) or that gives a different value from the interpreter is a defect,
   even when a corpus shows it only a few times. How often it occurs sets the

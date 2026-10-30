@@ -42,6 +42,7 @@ import {
   numericArrayCells,
   recordIntegerRange,
   recordScalarParams,
+  recordDecidedLoopIndex,
 } from './javascript-value-facts.js';
 import { compileWithAutoEscalation } from './auto-escalation.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
@@ -535,7 +536,9 @@ import {
   isDeclaredTopListOperand,
   isDeclaredTopOperand,
   type LoopInvariantBinding,
+  countMayBeNaN,
 } from './base-compiler.js';
+export { countMayBeNaN } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import { kindEntryCheck } from './kind-lowering.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
@@ -5676,13 +5679,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       return `_SYS.takeIter(${emitLazyStream(args[0]!, compile, target)}, ${compileRealOperand(args[1], compile)})`;
     }
     const coll = elementsArg('Take', args[0], compile);
-    return joinIfString(args[0], takeDropSlice('Take', coll, args[1], compile));
+    return takeDropSlice('Take', coll, args[1], compile, target, (code) =>
+      joinIfString(args[0], code)
+    );
   },
-  Drop: (args, compile) => {
+  Drop: (args, compile, target) => {
     const coll = elementsArg('Drop', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Drop`: missing count');
-    return joinIfString(args[0], takeDropSlice('Drop', coll, args[1], compile));
+    return takeDropSlice('Drop', coll, args[1], compile, target, (code) =>
+      joinIfString(args[0], code)
+    );
   },
   // Reverse and (ascending, numeric) Sort — copy first so the source array is
   // not mutated. A custom `Sort` comparator is not lowered (fails closed).
@@ -11718,7 +11725,13 @@ function compileToTarget(
     }
   }
 
-  const js = BaseCompiler.compileCseRoot(expr, target);
+  BaseCompiler.clearNoValue();
+  // A comparison of a block local that throws `_SYS.noValue` makes the
+  // whole run give no value (`BaseCompiler.catchNoValue`).
+  const js = BaseCompiler.catchNoValue(
+    expr,
+    BaseCompiler.compileCseRoot(expr, target)
+  );
   // The value kinds whose compile contracts the code reads or makes: the
   // value of a call is then returned raw, the code cannot be stored, and it
   // is shippable only when every contract says so (below).
@@ -11799,7 +11812,11 @@ function compileToTarget(
     target.hostNames !== true
   ) {
     try {
+      BaseCompiler.clearNoValue();
       batch = batchBody(candidates);
+      // The batch body has no catch of `_SYS.noValue`: the batches then run
+      // the ordinary body, which has one.
+      if (BaseCompiler.catchNoValue(expr, '') !== '') batch = undefined;
     } catch (e) {
       throwIfCallerCancellation(e, expr.engine._deadlineFrame);
       batch = undefined;
@@ -12277,19 +12294,6 @@ function isNegativeConstantCount(count: Expression): boolean {
 }
 
 /**
- * Whether a `Take`/`Drop` count can be `NaN` at run time: it is not typed
- * `integer` (which excludes `NaN`) and it is not a number literal other than
- * `NaN` (a literal `±∞` is not a constant to `tryGetConstant` and takes the
- * run-time branch, but it is never `NaN`).
- */
-export function countMayBeNaN(count: Expression): boolean {
-  if (isSubtype(count.type.type, 'integer')) return false;
-  if (isNumber(count) && !count.isComplex && !Number.isNaN(count.re))
-    return false;
-  return true;
-}
-
-/**
  * The `slice` call for `Take(coll, count)` or `Drop(coll, count)` over the
  * compiled array `coll`. The count is rounded (the interpreter's `toInteger`
  * count contract — `Take([…], 2.5)` keeps 3 elements). A negative count
@@ -12314,25 +12318,35 @@ export function countMayBeNaN(count: Expression): boolean {
  * compiled code has for a list with no value (a bare slice answered `[]`
  * for `Take` and the whole array for `Drop`). A count that cannot be `NaN`
  * (`countMayBeNaN`) keeps the emission with no test.
+ *
+ * `finish` turns the sliced array into the result (`joinIfString` joins
+ * the clusters of a string source back into a string). It is applied to
+ * the slice, inside the test, so the `undefined` of a `NaN` count stays
+ * `undefined` (`undefined.join` throws), and the slice is evaluated once.
  */
 function takeDropSlice(
   op: 'Take' | 'Drop',
   coll: string,
   count: Expression,
-  compile: (expr: Expression) => string
+  compile: (expr: Expression) => string,
+  target: CompileTarget<Expression> | undefined,
+  finish: (code: string) => string = (code) => code
 ): string {
   const n = tryGetConstant(count);
   if (n !== undefined) {
     const k = Math.round(n);
     if (op === 'Take')
-      return k < 0 ? `(${coll}).slice(${k})` : `(${coll}).slice(0, ${k})`;
-    return k < 0 ? `(${coll}).slice(0, ${k})` : `(${coll}).slice(${k})`;
+      return finish(
+        k < 0 ? `(${coll}).slice(${k})` : `(${coll}).slice(0, ${k})`
+      );
+    return finish(k < 0 ? `(${coll}).slice(0, ${k})` : `(${coll}).slice(${k})`);
   }
-  const slice =
+  const slice = finish(
     op === 'Take'
       ? '_n < 0 ? _a.slice(_n) : _a.slice(0, _n)'
-      : '_n < 0 ? _a.slice(0, _n) : _a.slice(_n)';
-  const body = !countMayBeNaN(count)
+      : '_n < 0 ? _a.slice(0, _n) : _a.slice(_n)'
+  );
+  const body = !countMayBeNaN(count, target)
     ? slice
     : `Number.isNaN(_n) ? undefined : ${slice}`;
   return `((_a, _n) => ${body})(${coll}, ${sliceCount(count, compile)})`;
@@ -16265,7 +16279,14 @@ function emitSumProduct(
       return true;
     return expr.ops.some(writesCounter);
   };
-  if (!writesCounter(body)) recordScalarParams(innerTarget, new Set([index]));
+  // The counter is a safe integer at every iteration: the loop starts
+  // only when both bounds are (the entry guard below), and steps by 1. So
+  // it is never NaN and never absent (`recordDecidedLoopIndex`): a count
+  // or a comparison that reads it takes no test at each iteration.
+  if (!writesCounter(body)) {
+    recordScalarParams(innerTarget, new Set([index]));
+    recordDecidedLoopIndex(innerTarget, index);
+  }
   if (BaseCompiler.isEmissionSkippable([body], indices, target)) {
     // Inspect only a complete numeric spelling, optionally floored by
     // compileBound; a numeric prefix of runtime code is not a constant.

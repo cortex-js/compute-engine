@@ -67,10 +67,20 @@
   interpreter has no value there. The same holds for `Equal`, `NotEqual`, a
   chain (`x < 1 < y`, evaluated pair by pair) and a bare `Not`, `And` or `Or` of
   a variable declared `boolean`. A `NaN` operand still decides (`Less(NaN, x)`
-  is `false`), and a read through a `Block` local is tested through the values
-  assigned to the local. Where only the truth of a numeric comparison is read
+  is `false`). Where only the truth of a numeric comparison is read
   (`Boole(x > 0)`, a `Filter` predicate) the code has no test and no extra cost.
   A branch on such a comparison already took no arm.
+- **A comparison that reads a `Block` local tests every input of the block**
+  (user decision 2026-10-30). A local that can depend on a caller input
+  (`a := n + 1`) makes a comparison of it test every input that the block
+  reads; a loop counter or a constant local compares as it is. This can give
+  no value where the interpreter has one (`a := 5; If(x > 0, a := n + 1);
+  a < 1` with `n` missing and `x = -1`), never a value where the interpreter
+  has none. When this test alone leaves a branch condition undecided, the whole
+  run gives no value (`NaN` or `undefined`), so that no branch is taken in the
+  wrong way; such an expression is not compiled, and the interpreter evaluates
+  it, when the run has an effect after the condition (`Random()`) or can return
+  a function.
 - **A compiled list recursion stops at `ce.iterationLimit`.** A list-building
   recursion such as
   `F(n) = Which(n = D - 1, [p(n)], True, Join([p(n)], F(n + 1)))` now compiles
@@ -89,6 +99,24 @@
   (`Join([9], f(w))`) gives `undefined` instead of throwing.
 
 ### Resolved Issues
+
+- **A function assigned again inside a `Block` is called with its new value.**
+  With `gg := t ↦ t + 1` assigned in the engine, `Block(gg := t ↦ t + 10,
+  gg(1))` compiled to `2` on JavaScript and Python; it now gives `11`, as the
+  interpreter does.
+- **A list with no value no longer makes compiled code throw.** With
+  `k: integer` not supplied, `Take(L, k)` and `Drop(L, k)` gave `[]` and the
+  whole list; they now give `undefined`, and `First`, `Max`, `Min`, `Second`,
+  `GCD`, `Covariance`, `Quartiles`, `Length` and the other operators of such a
+  list give no value instead of throwing a `TypeError` or giving a value.
+  `Take` and `Drop` of a string do the same. On Python, a count that is a very
+  large integer (`2^100`) no longer raises.
+- **An `If` takes no branch when its compiled condition is undecided**, also
+  in a loop and when the condition is a chain with an effect; before, a
+  statement `If` could run its else branch.
+- **A chain in an `If` condition is evaluated pair by pair by the
+  interpreter**, as a bare chain already was: `If(x < 0.5 < Random(), 1, 2)`
+  with `x = 5` no longer draws.
 
 - **GLSL/WGSL: a call of a function that returns a coordinate of a point or a
   list of points.** With

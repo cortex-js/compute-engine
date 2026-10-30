@@ -585,6 +585,39 @@ const CHAIN_PAIR_IS_FALSE = {
 };
 
 /**
+ * The operands of the chain `op(rawOps)` (three or more operands, none
+ * collection-shaped), evaluated left to right as the relation's own
+ * handler evaluates them (`evaluateChainOperands`): the walk stops at the
+ * first adjacent pair that is `False`, and then returns `False`, or at an
+ * invalid operand, which it returns. Otherwise the values of the operands,
+ * in order. `undefined` when `op` is not a chainable relation, or the chain
+ * does not qualify.
+ *
+ * A branch condition evaluates its relation's operands itself
+ * (`evaluateCondition`, `library/control-structures.ts`), so it uses this
+ * walk for a chain: `If(Less(x, 0.5, Random()), 1, 2)` at `x = 5` does not
+ * draw, as the bare `Less(x, 0.5, Random())` does not.
+ */
+export function evaluateChainForCondition(
+  ce: ComputeEngine,
+  op: string,
+  rawOps: ReadonlyArray<Expression>,
+  numericApproximation: boolean | undefined
+): Expression[] | Expression | undefined {
+  if (!(op in CHAIN_PAIR_IS_FALSE)) return undefined;
+  if (rawOps.length < 3 || rawOps.some(isCollectionShaped)) return undefined;
+  return evaluateChainOperands(
+    ce,
+    rawOps,
+    numericApproximation,
+    CHAIN_PAIR_IS_FALSE[op as keyof typeof CHAIN_PAIR_IS_FALSE](
+      ce,
+      numericApproximation
+    )
+  );
+}
+
+/**
  * True when the adjacent pair `(a, b)` of a chain is `False` because an
  * operand is an undefined number (`NaN`, `Indeterminate`) or has a value
  * with no order (`nonRealKind()`; with `only: 'pole'`, only the pole, for

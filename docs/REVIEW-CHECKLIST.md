@@ -9,6 +9,21 @@ hard to see in a diff. The full rules are in `CODING-STYLEGUIDE.md`,
 Keep each item short and testable. Add an item when a review misses a mistake
 that a reader of the diff could have seen.
 
+## Scope of a finding
+
+Label each finding with where the defect comes from:
+
+- **introduced**: the diff causes it, or it is in a line that the diff adds or
+  changes;
+- **older**: it is in code that the diff does not change, and the review
+  reached it with a new example.
+
+Both kinds are reported. An `introduced` finding is fixed in the change; an
+`older` one becomes a follow-up task
+(`~/.claude/SHARED-BOX-PROTOCOL.md` §5.2). In a second review round, which
+reads only the delta of the round-1 fixes, report only regressions that those
+fixes caused.
+
 ## Automated trap scan
 
 Run this once on the changed files under `src/`. It is a read-only search, not a
