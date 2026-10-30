@@ -19,6 +19,8 @@ function countingDecline(ce: ComputeEngine, name: string): { calls: number } {
   const counter = { calls: 0 };
   ce.declare(name, {
     signature: '(number) -> number',
+    // A host operator is cached only when it states `pure: true`.
+    pure: true,
     evaluate: () => {
       counter.calls += 1;
       return undefined;
@@ -96,6 +98,8 @@ describe('an inert result is not walked again at the same state', () => {
     let calls = 0;
     ce.declare('g', {
       signature: '(number) -> number',
+      // A host operator is cached only when it states `pure: true`.
+      pure: true,
       evaluate: () => {
         calls += 1;
         return ce.number(2);
@@ -103,6 +107,8 @@ describe('an inert result is not walked again at the same state', () => {
     });
     ce.declare('f', {
       signature: '(number) -> number',
+      // A host operator is cached only when it states `pure: true`.
+      pure: true,
       evaluate: () => ce.function('g', [ce.number(1)]),
     });
     const r = ce.box(['f', 1]).evaluate();

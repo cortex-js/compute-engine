@@ -75,6 +75,8 @@ describe('a lazy view over an eager collection operator', () => {
     let calls = 0;
     local.declare('src', {
       signature: '(integer) -> list<integer>',
+      // A pure source: a host operator is cached only when it states it.
+      pure: true,
       evaluate: () => {
         calls += 1;
         return local.box(['List', 3, 1, 2]);
@@ -121,6 +123,8 @@ describe('a lazy view over an eager collection operator', () => {
       let calls = 0;
       local.declare('src', {
         signature: '(integer) -> list<integer>',
+        // A pure source: a host operator is cached only when it states it.
+        pure: true,
         evaluate: () => {
           calls += 1;
           return local.box(['List', 3, 1, 2]);
@@ -246,6 +250,8 @@ describe('a lazy view over an eager collection operator', () => {
       const counter = { calls: 0 };
       local.declare('src', {
         signature: '(integer) -> list<integer>',
+        // A pure source: a host operator is cached only when it states it.
+        pure: true,
         evaluate: () => {
           counter.calls += 1;
           return local.box(['List', 3, 1, 2]);
@@ -273,6 +279,8 @@ describe('a lazy view over an eager collection operator', () => {
       let calls = 0;
       local.declare('src', {
         signature: '(integer) -> list<integer>',
+        // A pure source: a host operator is cached only when it states it.
+        pure: true,
         evaluate: ([n]) => {
           calls += 1;
           return local.box(['List', ...Array(n.re).fill(n.re)]);
@@ -303,6 +311,8 @@ describe('a lazy view over an eager collection operator', () => {
       let value = 1;
       local.declare('src', {
         signature: '(integer) -> list<integer>',
+        // A pure source: a host operator is cached only when it states it.
+        pure: true,
         evaluate: () => {
           calls += 1;
           return local.box(['List', value]);

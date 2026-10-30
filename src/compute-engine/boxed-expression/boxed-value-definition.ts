@@ -44,6 +44,11 @@ import { isPolymorphicType } from '../../common/type/instantiate.js';
 import { reduceType } from '../../common/type/reduce.js';
 
 import { defaultCollectionHandlers } from '../collection-utils.js';
+import { isInstallingStandardLibrary } from './host-handler-changes.js';
+import {
+  noteHostCollectionSource,
+  withHostCollectionHandlers,
+} from './shared-evaluation-memo.js';
 import {
   type FactIndex,
   contextAssumedValues,
@@ -598,7 +603,19 @@ export class _BoxedValueDefinition
     if (def.cmp) this.cmp = def.cmp;
 
     if (def.collection) {
-      this.collection = defaultCollectionHandlers(def.collection);
+      // The collection handlers of a symbol that the host declared are host
+      // code, and a value definition cannot state its purity: each call
+      // counts as host code that no memo keeps a result across
+      // (`withHostCollectionHandlers`, `shared-evaluation-memo.ts`). The
+      // handlers of a symbol of a standard library are not host code.
+      if (isInstallingStandardLibrary())
+        this.collection = defaultCollectionHandlers(def.collection);
+      else {
+        this.collection = defaultCollectionHandlers(
+          withHostCollectionHandlers(ce, def.collection, () => true)
+        );
+        noteHostCollectionSource(this.collection, def.collection);
+      }
     }
 
     if (def.subscriptEvaluate) this.subscriptEvaluate = def.subscriptEvaluate;

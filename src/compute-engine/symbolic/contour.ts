@@ -20,6 +20,7 @@ import {
   refineExactConstants,
 } from '../boxed-expression/compare.js';
 import { expandAll } from '../boxed-expression/expand.js';
+import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
 
 type Point = { x: Expression; y: Expression };
 type Location = ContourPole['location'];
@@ -177,7 +178,10 @@ export function isUnfoldedZero(c: Expression): boolean {
  *
  * The verdicts are kept in a memo for each engine, keyed by the structure of
  * the expression (its hash, then `isSame()`): the series and limit code test
- * the same constant many times, and the value of a constant cannot change.
+ * the same constant many times. The verdict of an expression whose symbols
+ * are all constants stays valid, since the value of a constant cannot
+ * change; the verdict of an expression that reads another symbol is valid
+ * only for the cache generation of the engine when it was computed.
  * The value of `Exp` depends on the angular unit and the enclosures depend
  * on the precision, thus both are part of the key.
  */
@@ -185,6 +189,7 @@ export function exactZeroVerdict(c: Expression): boolean | undefined {
   const hit = memoizedZeroVerdict(c);
   if (hit !== 'none') return hit;
   const ce = c.engine;
+  const hostCallsBefore = uncachedHostCallCount();
   const v = c.evaluate();
   let zero: boolean | undefined;
   if (isNumber(v)) zero = v.isSame(0);
@@ -202,15 +207,30 @@ export function exactZeroVerdict(c: Expression): boolean | undefined {
       ? expanded.isSame(0)
       : exactlyEqual(expanded, ce.Zero);
   }
+  // A verdict computed with host code that does not state its purity, or
+  // with a host handler that changed state, is not kept: the host code can
+  // read state that the key does not record (`host-handler-changes.ts`).
+  if (uncachedHostCallCount() !== hostCallsBefore) return zero;
+  // The memo finds an entry by the structure of the expression, so the
+  // verdict of an expression that reads a symbol that is not a constant
+  // (`sin(a) − sin(1)` with `a := 1`) is valid only for the cache
+  // generation of the engine when it was computed: after `a := 2` it is not
+  // served. The verdict of an expression whose symbols are all constants
+  // stays valid.
+  const generation = hasOnlyConstantSymbols(c)
+    ? undefined
+    : ce._cacheGeneration();
   let memo = zeroMemo.get(ce);
-  if (!memo || memo.size > MAX_MEMO_SIZE) {
+  if (!memo) {
     memo = new Map();
     zeroMemo.set(ce, memo);
   }
-  const key = `${ce.angularUnit} ${ce.precision}`;
-  const bucket = memo.get(c.hash);
-  if (bucket) bucket.push({ c, key, zero });
-  else memo.set(c.hash, [{ c, key, zero }]);
+  storeMemoEntry(
+    memo,
+    c.hash,
+    { c, key: memoKeyOf(ce), zero, generation },
+    (e) => e.c.isSame(c)
+  );
   return zero;
 }
 
@@ -220,17 +240,34 @@ export function memoizedZeroVerdict(
   c: Expression
 ): boolean | undefined | 'none' {
   const ce = c.engine;
-  const key = `${ce.angularUnit} ${ce.precision}`;
+  const key = memoKeyOf(ce);
   const hit = zeroMemo
     .get(ce)
     ?.get(c.hash)
-    ?.find((entry) => entry.key === key && entry.c.isSame(c));
+    ?.find(
+      (entry) =>
+        entry.key === key &&
+        (entry.generation === undefined ||
+          entry.generation === ce._cacheGeneration()) &&
+        entry.c.isSame(c)
+    );
   return hit ? hit.zero : 'none';
 }
 
 const zeroMemo = new WeakMap<
   IComputeEngine,
-  Map<number, { c: Expression; key: string; zero: boolean | undefined }[]>
+  Map<
+    number,
+    {
+      c: Expression;
+      key: string;
+      zero: boolean | undefined;
+      /** `undefined` for an expression whose symbols are all constants;
+       * otherwise the cache generation of the engine when the verdict was
+       * computed. */
+      generation: number | undefined;
+    }[]
+  >
 >();
 
 /**
@@ -270,18 +307,20 @@ export function exactComplexParts(z: Expression): Point | undefined {
   if (!hasOnlyConstantSymbols(z)) return computeExactComplexParts(z);
   const ce = z.engine;
   let memo = partsMemo.get(ce);
-  if (!memo || memo.size > MAX_MEMO_SIZE) {
+  if (!memo) {
     memo = new Map();
     partsMemo.set(ce, memo);
   }
-  const key = `${ce.angularUnit} ${ce.precision}`;
+  const key = memoKeyOf(ce);
   const bucket = memo.get(z.hash);
   const hit = bucket?.find((entry) => entry.key === key && entry.z.isSame(z));
   if (hit) return hit.parts;
+  const hostCallsBefore = uncachedHostCallCount();
   const parts = computeExactComplexParts(z);
-  const entry = { z, key, parts };
-  if (bucket) bucket.push(entry);
-  else memo.set(z.hash, [entry]);
+  // Parts computed with host code that does not state its purity, or with a
+  // host handler that changed state, are not kept (`host-handler-changes.ts`).
+  if (uncachedHostCallCount() !== hostCallsBefore) return parts;
+  storeMemoEntry(memo, z.hash, { z, key, parts }, (e) => e.z.isSame(z));
   return parts;
 }
 
@@ -290,13 +329,73 @@ const partsMemo = new WeakMap<
   Map<number, { z: Expression; key: string; parts: Point | undefined }[]>
 >();
 
-/** When the memo of an engine has more entries than this, it is cleared. */
+/** When the memo of an engine has this many entries, it is cleared. */
 const MAX_MEMO_SIZE = 2000;
 
-function hasOnlyConstantSymbols(z: Expression): boolean {
+/** The number of entries in each memo map of this module. */
+const memoEntryCounts = new WeakMap<Map<number, unknown[]>, number>();
+
+/**
+ * Put `entry` in the bucket `hash` of `memo`, in place of the entries for
+ * the same expression (`sameExpression`): an entry made for an earlier key
+ * (another generation, precision or definition version) is obsolete or
+ * rarely read again, and keeping it made each look-up scan every earlier
+ * entry. The memo is cleared when it holds `MAX_MEMO_SIZE` entries.
+ */
+function storeMemoEntry<E>(
+  memo: Map<number, E[]>,
+  hash: number,
+  entry: E,
+  sameExpression: (e: E) => boolean
+): void {
+  let count = memoEntryCounts.get(memo) ?? 0;
+  if (count >= MAX_MEMO_SIZE) {
+    memo.clear();
+    count = 0;
+  }
+  const bucket = memo.get(hash);
+  if (bucket === undefined) {
+    memo.set(hash, [entry]);
+    memoEntryCounts.set(memo, count + 1);
+    return;
+  }
+  const kept = bucket.filter((e) => !sameExpression(e));
+  kept.push(entry);
+  memo.set(hash, kept);
+  memoEntryCounts.set(memo, count - bucket.length + kept.length);
+}
+
+/** For tests: the number of entries for `c` in the zero-verdict memo. */
+export function zeroVerdictEntryCount(c: Expression): number {
+  return (
+    zeroMemo
+      .get(c.engine)
+      ?.get(c.hash)
+      ?.filter((e) => e.c.isSame(c)).length ?? 0
+  );
+}
+
+/** The key of an entry of the memos of this module, with the expression.
+ * The value of `Exp` depends on the angular unit and the enclosures depend
+ * on the precision. A redefinition of an operator (it moves the definition
+ * version of the engine) can change the value of a constant expression that
+ * holds the operator, and the memos find an entry by the structure of the
+ * expression, not by the definitions that it is bound to. */
+function memoKeyOf(ce: IComputeEngine): string {
+  return `${ce.angularUnit} ${ce.precision} ${ce._definitionVersion}`;
+}
+
+function hasOnlyConstantSymbols(
+  z: Expression,
+  visited: Set<Expression> = new Set()
+): boolean {
   if (isSymbol(z)) return z.isConstant === true;
-  if (isFunction(z)) return z.ops.every(hasOnlyConstantSymbols);
-  return true;
+  if (!isFunction(z)) return true;
+  // A node that an expression uses at several places (a tower of `Max(t, t)`)
+  // is read once: without this, the scan followed every path to it.
+  if (visited.has(z)) return true;
+  visited.add(z);
+  return z.ops.every((op) => hasOnlyConstantSymbols(op, visited));
 }
 
 function computeExactComplexParts(z: Expression): Point | undefined {

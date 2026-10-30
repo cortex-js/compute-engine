@@ -596,6 +596,7 @@ describe('the defining law: `Slice(xs, RangeOf(xs, needle))`', () => {
     let calls = 0;
     ce.declare('CountingSpan', {
       signature: '() -> range | nothing',
+      pure: true,
       evaluate: () => {
         calls += 1;
         return ce.box(['Range', 2, 5]);

@@ -37,6 +37,10 @@ import {
   type MemoDeps,
 } from './boxed-expression/collection-element-memo.js';
 import { ConstantAssignmentError } from './constant-assignment-error.js';
+import {
+  markEngineSubscriptHandler,
+  uncachedHostCallCount,
+} from './boxed-expression/host-handler-changes.js';
 
 // ============================================================================
 // Sequence Registry (SUB-7: Introspection support)
@@ -785,6 +789,7 @@ export function createSequenceHandler(
       attempting: false,
       attemptEpoch: 0,
       count: 0,
+      hostCalls: uncachedHostCallCount(),
     };
     reads.set(readKey, read);
     activeSequenceReads += 1;
@@ -1031,9 +1036,15 @@ export function createSequenceHandler(
   ): Expression | undefined => {
     const term = acceptedTerm(result, numericApproximation);
     read.terms.set(indexKeyOf(indices), term);
+    // A term of a read that ran host code that does not state its purity
+    // (or a host handler that changed state) is kept in `read.terms` only:
+    // the host code can read state that the stamp does not record, and a
+    // later term of the read can read this term from `read.terms`
+    // (`host-handler-changes.ts`).
     if (
       termStamp !== undefined &&
       stamp === termStamp &&
+      uncachedHostCallCount() === read.hostCalls &&
       memoStampIsValid(engine, termStamp)
     )
       memoizeTerm(engine, indices, numericApproximation, term);
@@ -1125,7 +1136,7 @@ export function createSequenceHandler(
   };
   setSubscriptEvaluateReads(handler, () => sources(ce));
   sequenceOfHandler.set(handler, metadata);
-  return handler;
+  return markEngineSubscriptHandler(handler);
 }
 
 /**
@@ -1301,6 +1312,9 @@ interface SequenceRead {
   attemptEpoch: number;
   /** The number of terms that the read started to compute. */
   count: number;
+  /** The value of `uncachedHostCallCount()` when the read started. When it
+   * moved, no term of the read is put in the memos. */
+  hostCalls: number;
 }
 
 /**

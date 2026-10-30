@@ -345,6 +345,8 @@ import {
 } from '../boxed-expression/boxed-value-definition.js';
 import { reduceType } from '../../common/type/reduce.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { isEngineSubscriptHandler } from '../boxed-expression/host-handler-changes.js';
+import { noteUncachedHostEvaluation } from '../boxed-expression/shared-evaluation-memo.js';
 
 /**
  * Literal narrowing at a typed declaration or assignment: the character a
@@ -9300,6 +9302,13 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
           if (def?.subscriptEvaluate) {
             // Evaluate the subscript first
             const evalSubscript = subscript.evaluate({ numericApproximation });
+
+            // A handler that the host gave is host code that no memo keeps a
+            // result across: it can read state that the engine does not
+            // track, and a value definition cannot state its purity
+            // (`host-handler-changes.ts`).
+            if (!isEngineSubscriptHandler(def.subscriptEvaluate))
+              noteUncachedHostEvaluation(ce);
 
             // Call the custom handler
             const result = def.subscriptEvaluate(evalSubscript, {

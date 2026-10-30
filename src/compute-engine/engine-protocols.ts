@@ -76,6 +76,7 @@ import {
   isString,
   sym,
 } from './boxed-expression/type-guards.js';
+import { noteUncachedHostEvaluation } from './boxed-expression/shared-evaluation-memo.js';
 import { functionLiteralReturnMarker } from './boxed-expression/function-literal.js';
 import {
   describeEffects,
@@ -4837,6 +4838,9 @@ function invokeImplementation(
       numericApproximation: options.numericApproximation,
     });
 
+  // A host callback is host code that cannot state its purity: no memo
+  // keeps a result computed while it ran (`host-handler-changes.ts`).
+  noteUncachedHostEvaluation(ce);
   let result: unknown;
   try {
     result = impl.host(...ops);

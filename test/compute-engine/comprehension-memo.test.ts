@@ -18,6 +18,8 @@ beforeAll(() => {
   ce = new ComputeEngine();
   ce.declare('tick', {
     signature: '(number) -> number',
+    // A host operator is cached only when it states `pure: true`.
+    pure: true,
     evaluate: (ops) => {
       calls++;
       return ops[0].evaluate();

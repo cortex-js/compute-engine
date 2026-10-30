@@ -1279,6 +1279,15 @@ export interface IComputeEngine {
    * `EngineConfigurationLifecycle.definitionVersion`. @internal */
   readonly _definitionVersion: number;
 
+  /** Advanced by every state event that can change the value a node
+   * evaluates to in an evaluation frame that is still on the stack; see
+   * `EngineConfigurationLifecycle.evaluationVersion`. @internal */
+  readonly _evaluationVersion: number;
+
+  /** `_evaluationVersion` less the ephemeral value writes; see
+   * `EngineConfigurationLifecycle.persistentEvaluationVersion`. @internal */
+  readonly _persistentEvaluationVersion: number;
+
   /** When > 0, value writes are ephemeral loop-index writes.
    * @internal */
   _ephemeralWriteDepth: number;

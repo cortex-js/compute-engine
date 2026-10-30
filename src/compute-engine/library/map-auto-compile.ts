@@ -11,6 +11,7 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
+import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
 import { bignumPreferred, isValueDef } from '../boxed-expression/utils.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { lookup } from '../function-utils.js';
@@ -614,6 +615,41 @@ function attemptCompile(
   inner: Expression | undefined,
   /** The name of the user function whose literal `fn` is, for a `Map` that
    * names its element function. */
+  named?: string
+): MapCompileCache | undefined {
+  // A compilation that ran host code that does not state its purity, or a
+  // host handler that changed state (a constant subexpression folded at
+  // compile time), is not kept: the compiled code holds a value that the
+  // stamps of the record do not validate (`host-handler-changes.ts`). The
+  // instance is computed by the interpreter, as for a structural refusal.
+  const hostCallsBefore = uncachedHostCallCount();
+  const result = attemptCompileOnce(ce, tier, fn, inner, named);
+  if (
+    result === undefined ||
+    result.state !== 'compiled' ||
+    uncachedHostCallCount() === hostCallsBefore
+  )
+    return result;
+  return {
+    state: 'no-compile',
+    tier,
+    // A named user function can be redefined: its resolution is the reason,
+    // so that a redefinition allows one new attempt.
+    reason: named !== undefined ? resolveDep(ce, named) : 'structural',
+    generation: ce._semanticVersion,
+    epoch: ce._worldVersion,
+    tolerance: ce.tolerance,
+    angularUnit: ce.angularUnit,
+    roundingTies: ce.roundingTies,
+  };
+}
+
+/** One compile attempt, with no check of host code: see `attemptCompile()`. */
+function attemptCompileOnce(
+  ce: ComputeEngine,
+  tier: MapCompileTier,
+  fn: Expression,
+  inner: Expression | undefined,
   named?: string
 ): MapCompileCache | undefined {
   _mapAutoCompileStats.attempts++;

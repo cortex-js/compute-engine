@@ -125,6 +125,7 @@ import { containsObject } from './object-walk.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
 import { sequenceReadStopCount } from './sequence-read-stops.js';
+import { uncachedHostCallCount } from './host-handler-changes.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
 import { assignmentLocalsOf } from '../assignment-locals.js';
@@ -2188,6 +2189,7 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     const cyclesBefore = cycleDetectionCount();
     const rewritesBefore = ownBindingRewriteCount();
     const sequenceStopsBefore = sequenceReadStopCount();
+    const hostCallsBefore = uncachedHostCallCount();
     beginObjectDeps();
     let objectDeps: ObjectDeps | undefined;
     let result: Expression;
@@ -2206,6 +2208,13 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
       sequenceReadStopCount() !== sequenceStopsBefore ||
       result === this
     ) {
+      if (CACHE_STATS) recordCache('storedValue', 'declineCycle');
+      return result;
+    }
+    // A value computed with host code that does not state its purity, or
+    // with a host handler that changed state, is not kept: the host code can
+    // read state that the stamps above do not record (`host-handler-changes.ts`).
+    if (uncachedHostCallCount() !== hostCallsBefore) {
       if (CACHE_STATS) recordCache('storedValue', 'declineCycle');
       return result;
     }

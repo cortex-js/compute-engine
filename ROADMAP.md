@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-626.
+Next free reference: CE-627.
 
 **Entry format.**
 
@@ -5098,6 +5098,29 @@ with `g := a ↦ h(a) + 1`, `D(g(k), x)` under that scope gives 0 instead of
 calls an expression rebuilt by `subs()` "a new call", which does not say
 whether a call keeps its binding. Decision needed: does `subs()` keep the
 binding of each call it rebuilds?
+
+Two related effects, measured 2026-10-30 with the CE-614 fix:
+- With `c(t) := n(t) + 1`, `n := t ↦ t^2`, and a scope that declares another
+  `c` and another `n`, `∫_0^1 c(x)\,dx` evaluates to 101 (`.N()` gives the right
+  4/3): the integral inlines `c` through `betaReduceLambda`, whose `body.subs`
+  binds `n` again in the current scope.
+- `isSame` and the hash compare a call by its name, not by the function it is
+  bound to: a call of the outer `g` and a call of the inner `g` with the same
+  arguments are the same, so canonical `Add` merges `g_outer(k) + g_inner(k)`
+  into one term, and `D` of its square is wrong (`400k`).
+
+### CE-626. A call in an integrand to a function not yet defined becomes a local of the integrand
+
+**Status:** open; needs a decision. Found 2026-10-30 while fixing CE-614.
+
+`I = ce.parse('\int_0^1 g(x)\,dx')` before `g(t) := t`: the `Block` of the
+integrand's function literal declares `g` as a valueless local, so after
+`g(t) := t`, `I.evaluate()` stays unevaluated, while `D` and `Sum` of a call
+parsed the same way read the later `g` (they give 1 and 6). The compiled
+`.N()` reads the name: 0.5, or 100 under a scope that declares
+`g := t ↦ 100`. Decision needed: should an unknown call head in an integrand
+be a local of the integrand (today) or refer to the enclosing scope, as it
+does for `D` and `Sum`?
 
 ### CE-625. A limit of a call that passes a function as an argument leaves a parameter name in the result
 

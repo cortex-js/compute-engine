@@ -459,6 +459,14 @@ interface BoxedOperatorDefinition
    * `types-definitions.ts`.
    * @internal */
   _writeVersion: number;
+  /** Whether the definition stated its effects — mirror of the member
+   * documented in `types-definitions.ts`.
+   * @internal */
+  _purityStated: boolean;
+  /** Whether a standard library made this definition — mirror of the
+   * member documented in `types-definitions.ts`.
+   * @internal */
+  readonly _standardLibrary: boolean;
   /** The binding-site selector of the declaration's `scoped` flag, when one
    * was given — `undefined` for a plain `scoped: true` and for an unscoped
    * operator. Narrowed to the operand PATH here: `BindingSiteSelector` lives

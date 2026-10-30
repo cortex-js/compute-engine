@@ -22,6 +22,7 @@ import {
 } from './boxed-expression/binding-tombstone.js';
 import { ambientChainParent } from './boxed-expression/ambient-chain.js';
 import { _discardPendingSequencesOfScope } from './sequence.js';
+import { notePushedScope } from './pending-call-scopes.js';
 import {
   addChainingFrame,
   chainedScopeOf,
@@ -93,6 +94,9 @@ export function pushEvalContext(
   // its `localScope` again on every evaluation), so pushing it revokes the
   // debug tombstone its earlier pop left behind.
   if (ce._debugBindings) reviveBindings(scope.bindings.values());
+  // A frame reads the scope from now on: a declaration into it is a change
+  // of a binding that the frame reads (`pending-call-scopes.ts`).
+  notePushedScope(scope);
 
   ce._evalContextStack.push({
     lexicalScope: scope,

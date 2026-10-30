@@ -17,6 +17,7 @@ import { isValidSymbol, validateSymbol } from '../math-json/symbols.js';
 import { recordEngineCompileHandler } from './compilation/engine-compile-handlers.js';
 import type { ConfigurationChangeListener } from '../common/configuration-change.js';
 import { isFunction } from './boxed-expression/type-guards.js';
+import { withStandardLibraryInstall } from './boxed-expression/host-handler-changes.js';
 import {
   deferKindValueGates,
   kindTypesOfHeadName,
@@ -133,7 +134,11 @@ function installLibraryDefinitions(
       // only when this table installed a NEW binding for it.
       const names = Object.keys(table).map((name) => name.normalize());
       const before = names.map((name) => bindings.get(name));
-      setSymbolDefinitions(engine, table);
+      // The operator definitions that a standard library makes are marked as
+      // library code, not host code (`host-handler-changes.ts`).
+      if (custom) setSymbolDefinitions(engine, table);
+      else
+        withStandardLibraryInstall(() => setSymbolDefinitions(engine, table));
       names.forEach((name, i) => {
         const binding = bindings.get(name);
         if (binding !== undefined && binding !== before[i])

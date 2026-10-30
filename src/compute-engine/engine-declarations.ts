@@ -1,3 +1,4 @@
+import { isPendingCallScope } from './pending-call-scopes.js';
 import { noteScopeDeclaration } from './scope-declaration-count.js';
 import { noteKindTypeDeclaration } from './boxed-expression/residue-class.js';
 import {
@@ -107,6 +108,7 @@ import type {
   Scope,
   DeclareOptions,
   OperatorDefinitionPatch,
+  CollectionHandlers,
 } from './global-types.js';
 
 import {
@@ -178,6 +180,8 @@ import {
 import { typeToString } from '../common/type/serialize.js';
 import { journalCheckpointMapEntry } from './checkpoint-journal.js';
 import { ConstantAssignmentError } from './constant-assignment-error.js';
+import { withStandardLibraryInstall } from './boxed-expression/host-handler-changes.js';
+import { hostCollectionSource } from './boxed-expression/shared-evaluation-memo.js';
 
 export function lookupDefinition(
   ce: IComputeEngine,
@@ -573,7 +577,14 @@ export function declareSymbolValue(
   // install below, while the chain still shows any shadowed binding — and
   // resolved through the TARGET scope's chain, not the engine's current
   // lexical scope (an explicit `scope` argument may differ).
-  const shadowsCallable = defIsCallableShaped(lookup(name, scope));
+  const visibleBefore = lookup(name, scope);
+  const shadowsCallable = defIsCallableShaped(visibleBefore);
+  // Does this declaration change what a node evaluated in a frame that is
+  // on the stack now reads? Read before the placeholder is installed. See
+  // `changesFrameBinding()`.
+  const changesBinding =
+    (visibleBefore !== undefined || def.value !== undefined) &&
+    changesFrameBinding(scope);
 
   const rollbackFrame = activeRollbackFrame(ce);
   const previousBinding =
@@ -652,6 +663,7 @@ export function declareSymbolValue(
     kind: 'declare',
     callable: defIsCallableShaped(boxedDef),
     shadowsCallable,
+    ...(changesBinding ? { changesFrameBinding: true } : {}),
     // Keyed on the RESOLVED target scope, never on "is a scratch extent
     // running": a declaration made during one but aimed at a longer-lived
     // scope outlives it and must keep its axis advance. See `axisMaskOf`.
@@ -662,6 +674,29 @@ export function declareSymbolValue(
   });
 
   return boxedDef;
+}
+
+/**
+ * Whether a declaration into `scope` can change what a node evaluated in a
+ * frame that is on the evaluation stack reads. The caller asks only when the
+ * declaration installs a value or replaces a binding that the name has in
+ * the chain of `scope`.
+ *
+ * The answer is yes for every scope except the new scope of a function call
+ * that is not pushed yet (`isPendingCallScope`, `pending-call-scopes.ts`).
+ * A call declares its parameters, with their values, in a new scope before
+ * it pushes its frame: no frame reads that scope yet, so the results that
+ * the memo of shared evaluations keeps for the frames on the stack stay
+ * valid (`shared-evaluation-memo.ts`), and a recursive function whose body
+ * shares nodes is evaluated in linear time. Any other scope can be in the
+ * chain of a frame on the stack, the innermost one or a lower one: a host
+ * handler that runs `ce.declare('x', { value: 10 })` while an expression is
+ * evaluated changes what the nodes of a frame read. The test is one look-up
+ * in a set, where a walk of the chain of every frame would cost a time
+ * quadratic in the depth of a recursion.
+ */
+function changesFrameBinding(scope: Scope): boolean {
+  return !isPendingCallScope(scope);
 }
 
 /**
@@ -735,7 +770,12 @@ export function declareSymbolOperator(
 
   // State event: capture the shadow BEFORE the placeholder install, through
   // the TARGET scope's chain.
-  const shadowsCallable = defIsCallableShaped(lookup(name, scope));
+  const visibleBefore = lookup(name, scope);
+  const shadowsCallable = defIsCallableShaped(visibleBefore);
+  // See `changesFrameBinding()`: an operator declared over a name that a
+  // frame on the stack can read changes what that name resolves to.
+  const changesBinding =
+    visibleBefore !== undefined && changesFrameBinding(scope);
   const rollbackFrame = activeRollbackFrame(ce);
   const previousBinding =
     rollbackFrame === undefined ? undefined : scope.bindings.get(name);
@@ -821,6 +861,7 @@ export function declareSymbolOperator(
     kind: 'declare',
     callable: true,
     shadowsCallable,
+    ...(changesBinding ? { changesFrameBinding: true } : {}),
     // Same resolved-scope test as `declareSymbolValue` above: the two routes
     // must agree, or an operator-shaped stand-in would reintroduce the churn
     // the exemption removes.
@@ -2360,6 +2401,7 @@ function extendedOperatorDefinition(
 ): {
   def: OperatorDefinition;
   carry: (installed: BoxedOperatorDefinition) => void;
+  keepsStandardLibraryCode: boolean;
 } {
   if (
     patch === null ||
@@ -2394,6 +2436,37 @@ function extendedOperatorDefinition(
     );
 
   const def: OperatorDefinition = { ...old, ...fields };
+
+  // The collection handlers of a host operator are installed wrapped
+  // (`withHostCollectionHandlers`, `shared-evaluation-memo.ts`). The new
+  // definition wraps the handlers that the host gave, not the wrapped ones:
+  // thus a handler is wrapped one time, and the wrapper reads the purity of
+  // the new definition.
+  if (!('collection' in fields)) {
+    const source = hostCollectionSource(old.collection);
+    if (source !== undefined) def.collection = source as CollectionHandlers;
+  }
+
+  // An extension that keeps the `evaluate`, `evaluateAsync` and collection
+  // handlers of an operator of a standard library runs no host code when it
+  // evaluates: it is made as a definition of the standard library
+  // (`withStandardLibraryInstall()`, `host-handler-changes.ts`), so that
+  // the memos of evaluated results keep its results.
+  const keepsStandardLibraryCode =
+    old._standardLibrary &&
+    !('evaluate' in fields) &&
+    !('evaluateAsync' in fields) &&
+    !('collection' in fields);
+
+  // An update that states nothing about purity keeps the statement of the
+  // old definition (`_purityStated`). The constructor clears it for a
+  // definition that has a signature with no effects, and the copy above
+  // carries the signature of the old definition.
+  const keepsPurityStatement =
+    fields.pure === undefined &&
+    fields.drawsRandom !== true &&
+    fields.effects === undefined &&
+    fields.signature === undefined;
 
   // An explicit `commutativeMatch` is stored in a private field and read
   // through a getter, so the copy above does not carry it.
@@ -2544,6 +2617,7 @@ function extendedOperatorDefinition(
       : extendedLibraryOperator(old);
 
   const carry = (installed: BoxedOperatorDefinition): void => {
+    if (keepsPurityStatement) installed._purityStated = old._purityStated;
     if (copiesDeriver) installed._deriveEffects = old._deriveEffects;
     if (copiesSkeleton) installed._signatureSkeleton = old._signatureSkeleton;
     if (old._typeProvenance !== undefined)
@@ -2564,7 +2638,7 @@ function extendedOperatorDefinition(
       markLibraryExtension(installed, library);
   };
 
-  return { def, carry };
+  return { def, carry, keepsStandardLibraryCode };
 }
 
 export function declareFn(
@@ -2663,8 +2737,17 @@ export function declareFn(
   if (extend) {
     // If the definition constructor refuses the result, the declaration
     // puts the previous binding back (`declareSymbolOperator`).
-    const { def, carry } = extendedOperatorDefinition(ce, id, arg2, scope);
-    const installed = ce._declareSymbolOperator(id, def, scope);
+    const { def, carry, keepsStandardLibraryCode } = extendedOperatorDefinition(
+      ce,
+      id,
+      arg2,
+      scope
+    );
+    const installed = keepsStandardLibraryCode
+      ? withStandardLibraryInstall(() =>
+          ce._declareSymbolOperator(id, def, scope)
+        )
+      : ce._declareSymbolOperator(id, def, scope);
     if (isOperatorDef(installed)) carry(installed.operator);
     return ce;
   }

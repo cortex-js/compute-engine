@@ -13,6 +13,7 @@ import {
   keptEagerSourceValue,
   readSharingEagerSourceValues,
   releaseEagerSourceValues,
+  releaseHostEagerSourceValues,
   releaseKeptEagerSourceValues,
   takeDetachedEagerSourceValue,
   takeEagerSourceValue,
@@ -197,6 +198,7 @@ import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
 import {
   validElementMemo,
   elementMemoRecordingStream,
+  elementMemoWalkBaseline,
   elementMemoAt,
   elementMemoComputeCell,
   elementMemoParanoid,
@@ -415,9 +417,24 @@ import {
   mergeObjectDeps,
   objectDepsValid,
   objectReadCount,
+  engineHasObjects,
   type ObjectDeps,
 } from './object-deps.js';
+import {
+  beginSharedEvaluationMemo,
+  endSharedEvaluationMemo,
+  failClosedCount,
+  beginHostHandlerCall,
+  endHostHandlerCall,
+  noteUncachedHostEvaluation,
+  noteImpureEvaluation,
+  rememberEvaluation,
+  memoizableEvaluateOptions,
+  rememberedEvaluation,
+  sharedEvaluationMemo,
+} from './shared-evaluation-memo.js';
 import { containsObject } from './object-walk.js';
+import { uncachedHostCallCount } from './host-handler-changes.js';
 import { cycleDetectionCount } from './cycle-guard.js';
 import {
   apply,
@@ -1316,6 +1333,12 @@ export class BoxedFunction
   /** Re-entrancy marker for the lazy-collection evaluate memo — see
    * `_memoizedLazyCollectionValue()`. */
   private _lazyValueInFlight = false;
+
+  /** The number of the last top-level evaluation that evaluated this node
+   * (`SharedEvaluationMemo.mark`, `shared-evaluation-memo.ts`): the memo of
+   * shared evaluations keeps the result of a node from its second
+   * evaluation in the same top-level evaluation on. */
+  private _sharedEvaluationMark = 0;
 
   /** `ce._worldVersion` when the lazy-collection evaluate memo was filled,
    * checked on EVERY entry (including the generation-independent one): the
@@ -3821,8 +3844,12 @@ export class BoxedFunction
     // evaluation (`beginTopLevelEvaluation`, `evaluation-epoch.ts`). An
     // asynchronous evaluation that is pending reads the number that its own
     // context stack carries, so the new number does not change it.
-    if (capturesEffects && engine._evaluationDepth === 0)
+    if (capturesEffects && engine._evaluationDepth === 0) {
       beginTopLevelEvaluation(engine);
+      // The memo of the evaluations of shared nodes lives for this top-level
+      // evaluation (`shared-evaluation-memo.ts`).
+      beginSharedEvaluationMemo(engine, this, engineHasObjects(engine));
+    }
     engine._evaluationDepth += 1;
     // The numeric request of this evaluation, for the collection handlers
     // it calls, which receive no evaluation options
@@ -3830,7 +3857,78 @@ export class BoxedFunction
     const enclosingNumericRequest = engine._numericRequest;
     engine._numericRequest = options?.numericApproximation === true;
     const walksBefore = incompleteWalkCount();
+    // The memo of the evaluations of shared nodes (`shared-evaluation-memo.ts`):
+    // a pure node evaluated before in this frame, with no change of state
+    // since, gives the same result, so a node that the expression uses at
+    // many places is evaluated once, not once per path to it (ROADMAP
+    // CE-601). The start and the end of an impure node are counted: the node
+    // can change state with no state event.
+    const memo = sharedEvaluationMemo<Expression>(engine);
+    const numeric = options?.numericApproximation === true;
+    let impure = false;
+    // Whether the purity of this node was read at its start. It is not read
+    // while the memo holds no entry and no node is being kept: an impure
+    // evaluation then changes nothing that the memo compares.
+    let purityRead = false;
+    let remember = false;
+    let failClosedBefore = 0;
+    let impureBefore = 0;
+    let persistentBefore = 0;
+    // An application of a host operator that does not state `pure: true` is
+    // never kept, and no node that holds it is kept
+    // (`_isUncachedHostOperator`): it is counted below, before it runs.
+    const uncachedHost = this._isUncachedHostOperator();
     try {
+      if (memo !== undefined) {
+        const evaluatedBefore = this._sharedEvaluationMark === memo.mark;
+        if (!evaluatedBefore) {
+          // The first evaluation of this node in this top-level evaluation:
+          // it is only marked, and its impurity counted when it can matter.
+          // Most nodes are evaluated once, and for them the memo costs this
+          // write (`shared-evaluation-memo.ts`).
+          this._sharedEvaluationMark = memo.mark;
+          if (memo.frames !== undefined || memo.pending > 0) {
+            purityRead = true;
+            if (!this.isPure) {
+              impure = true;
+              noteImpureEvaluation(memo);
+            }
+          }
+        } else {
+          purityRead = true;
+          if (!this.isPure) {
+            impure = true;
+            noteImpureEvaluation(memo);
+          }
+        }
+        if (
+          evaluatedBefore &&
+          !impure &&
+          !uncachedHost &&
+          this.isCanonical &&
+          memoizableEvaluateOptions(options)
+        ) {
+          const hit = rememberedEvaluation(memo, engine, this, numeric);
+          if (hit !== undefined) {
+            // A hit takes the place of an evaluation, so it passes the same
+            // deadline checkpoint (`_computeValueUnabsorbed`): an
+            // expression whose evaluation is many hits is still stopped by
+            // an enclosing `withTimeLimit` span.
+            checkDeadlineEvery(engine._deadlineFrame, 0x3ff);
+            // The record of the evaluation that gave an error is made again,
+            // with a new stamp, as the evaluation would make it
+            // (`_deferredErrorFrame()` compares the stamp).
+            recordEvaluatedError(this, hit);
+            return hit;
+          }
+          remember = true;
+          memo.pending += 1;
+          failClosedBefore = failClosedCount();
+          impureBefore = memo.impure;
+          persistentBefore = engine._persistentEvaluationVersion;
+        }
+      }
+      if (uncachedHost) noteUncachedHostEvaluation(engine);
       // A deadline is armed only by an enclosing `withTimeLimit` span; work
       // outside a span runs unbounded. Evaluation checkpoints the ambient
       // deadline (`engine._deadlineFrame`) if one is in effect.
@@ -3847,6 +3945,11 @@ export class BoxedFunction
       // top-level evaluation resolves its head again.
       const sticky = isStickyUnresolvedCall(this);
       const canonical = sticky ? undefined : this._canonicalToEvaluate();
+      // Sampled before the eligibility test of the lazy-collection memo: its
+      // finiteness read can evaluate an operand that runs host code
+      // (`host-handler-changes.ts`), and the memo must not keep a value
+      // computed after it.
+      const hostCallsBeforeProbe = uncachedHostCallCount();
       const result = sticky
         ? evaluatedUnresolvedCall(
             this,
@@ -3854,9 +3957,12 @@ export class BoxedFunction
           )
         : canonical
           ? delegateEvaluation(engine, () => canonical.evaluate(options))
-          : this._isMemoizableLazyCollection(options, true) ||
-              this._isMemoizableInertEvaluation(options)
-            ? this._memoizedLazyCollectionValue(options)
+          : // An application of a host operator that does not state its
+            // purity is never kept (`_isUncachedHostOperator`).
+            !uncachedHost &&
+              (this._isMemoizableLazyCollection(options, true) ||
+                this._isMemoizableInertEvaluation(options))
+            ? this._memoizedLazyCollectionValue(options, hostCallsBeforeProbe)
             : this._computeValue(options)();
       // An evaluation whose result is a value takes back the incomplete
       // walks that it recorded: a read in it that met an inner collection
@@ -3866,17 +3972,57 @@ export class BoxedFunction
       if (resultHoldsNoIncompleteWalk(result))
         takeBackIncompleteWalks(walksBefore);
       recordEvaluatedError(this, result);
-      return options?.numericApproximation
-        ? indeterminateAsNaN(result)
-        : result;
+      const value = numeric ? indeterminateAsNaN(result) : result;
+      // A result is kept only when it is final: no read in the evaluation
+      // stayed incomplete (the walks it recorded were taken back above), no
+      // answer in it was provisional (`failClosedCount()`), no impure
+      // evaluation ran during it (the value of a symbol that is an impure
+      // call, a host operator that does not state `pure: true`:
+      // `noteUncachedHostEvaluation`), no state outside the node changed
+      // during it (`_persistentEvaluationVersion`: a host handler, even one
+      // of a collection that a library operator calls, that assigns a
+      // symbol),
+      // and no object
+      // was made, whose fields a later read could see changed. A re-entrant
+      // read of the lazy-collection memo (`_lazyValueProvisionalReads`) is
+      // not provisional here: it computes the full value of the node in its
+      // own frame, and this memo keys on the frame, where that memo does not.
+      if (
+        remember &&
+        incompleteWalkCount() === walksBefore &&
+        failClosedCount() === failClosedBefore &&
+        memo!.impure === impureBefore &&
+        engine._persistentEvaluationVersion === persistentBefore &&
+        !engineHasObjects(engine)
+      )
+        rememberEvaluation(memo!, engine, this, numeric, value);
+      return value;
     } finally {
+      if (memo !== undefined) {
+        if (remember) memo.pending -= 1;
+        // An impure node whose purity was not read at its start (the memo
+        // was empty then) ends with entries in the memo, kept while it ran:
+        // its end is counted, as for any impure node.
+        if (
+          impure ||
+          (!purityRead && memo.frames !== undefined && !this.isPure)
+        )
+          noteImpureEvaluation(memo);
+      }
       // The values of eager sources that the eligibility test above
       // evaluated are kept for this evaluation only.
       releaseEagerSourceValues(this);
       engine._evaluationDepth -= 1;
       engine._numericRequest = enclosingNumericRequest;
       releaseKeptEagerSourceValues(engine);
-      if (capturesEffects) engine._evaluationEffects = undefined;
+      if (capturesEffects) {
+        engine._evaluationEffects = undefined;
+        endSharedEvaluationMemo(engine, this);
+        // The values of eager sources that host code computed in this
+        // top-level evaluation are used in it only.
+        if (engine._evaluationDepth === 0)
+          releaseHostEagerSourceValues(engine, topLevelEvaluationEpoch(engine));
+      }
     }
   }
 
@@ -3940,6 +4086,60 @@ export class BoxedFunction
     result._def = this._def;
     if (sameOps) result._parseScope = this._parseScope;
     return result;
+  }
+
+  /**
+   * Is `def`, the operator definition of this node, code of the host: a
+   * definition with a handler (`evaluate`, `evaluateAsync` or collection
+   * handlers) that a standard library did not make, and that is not a user
+   * function?
+   *
+   * A standard library marks the definitions it makes when the engine
+   * installs it (`_standardLibrary`, `host-handler-changes.ts`). A library
+   * that the host passes to the constructor, a library loaded with
+   * `ce.loadLibrary()` and a `ce.declare()` make host definitions. A user
+   * function (a function literal, a clause set) is evaluated by the engine:
+   * its effects are inferred from its body.
+   */
+  private _isHostDefinition(
+    def: BoxedOperatorDefinition,
+    asyncRoute = false
+  ): boolean {
+    if (def._standardLibrary) return false;
+    // The asynchronous route calls the `evaluateAsync` handler when there is
+    // one, and it is always a host function, also on a definition whose
+    // `evaluate` is a function literal (a user function).
+    if (asyncRoute && def.evaluateAsync !== undefined) return true;
+    return (
+      (def.evaluate !== undefined ||
+        def.evaluateAsync !== undefined ||
+        def.collection !== undefined) &&
+      !isUserFunctionDef(def)
+    );
+  }
+
+  /**
+   * Is this node an application of an operator that the host declared
+   * without stating its purity (`pure`, `drawsRandom: true`, an `effects`
+   * set or an effect specifier on the signature)? Such an operator is pure by
+   * default, but no memo keeps a result that depends on it (user decision
+   * 2026-10-28, ROADMAP CE-601): it is evaluated at each occurrence
+   * (`noteUncachedHostEvaluation`, `shared-evaluation-memo.ts`).
+   */
+  private _isUncachedHostOperator(asyncRoute = false): boolean {
+    const binding = this._def;
+    if (!binding || !isOperatorDef(binding)) return false;
+    const def = binding.operator;
+    return !def._purityStated && this._isHostDefinition(def, asyncRoute);
+  }
+
+  /** Is the `evaluate` handler of `def` host code? Each of its calls is
+   * checked for a change of state (`beginHostHandlerCall`,
+   * `shared-evaluation-memo.ts`): a handler that changes state stops every
+   * memo from keeping a result computed across it, also when its operator
+   * states `pure: true`. */
+  private _hasHostHandler(def: BoxedOperatorDefinition): boolean {
+    return def.evaluate !== undefined && this._isHostDefinition(def);
   }
 
   private _isBoundToLibraryDefinition(): boolean {
@@ -4233,7 +4433,8 @@ export class BoxedFunction
    * stamp only AFTER a computation that consumed no provisional edge.
    */
   private _memoizedLazyCollectionValue(
-    options?: Partial<EvaluateOptions>
+    options?: Partial<EvaluateOptions>,
+    hostCallsBeforeProbe?: number
   ): Expression {
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return hit;
@@ -4258,6 +4459,10 @@ export class BoxedFunction
     this._lazyValueInFlight = true;
     const before = _lazyValueProvisionalReads;
     const cyclesBefore = cycleDetectionCount();
+    // Host code that no memo may keep a result across
+    // (`host-handler-changes.ts`), counted from before the eligibility test
+    // of the caller when it gives the count.
+    const hostCallsBefore = hostCallsBeforeProbe ?? uncachedHostCallCount();
     let result: Expression;
     // Collect the mutable-object field reads this evaluation performs, so the
     // entry can be dropped by a later store to any object it read. A throw
@@ -4282,7 +4487,8 @@ export class BoxedFunction
     // route ran first.
     if (
       _lazyValueProvisionalReads !== before ||
-      cycleDetectionCount() !== cyclesBefore
+      cycleDetectionCount() !== cyclesBefore ||
+      uncachedHostCallCount() !== hostCallsBefore
     ) {
       if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
       return result;
@@ -4594,6 +4800,11 @@ export class BoxedFunction
         _precisionWindow:
           options?._precisionWindow ?? capturedPrecisionWindow(this.engine),
       };
+    // An application of a host operator that does not state its purity is
+    // counted on this route as on the synchronous one: no memo keeps a
+    // result that depends on it (`_isUncachedHostOperator`).
+    if (this._isUncachedHostOperator(true))
+      noteUncachedHostEvaluation(this.engine);
     this.engine._inFlightAsyncEvaluations += 1;
     evaluation.pending += 1;
     let promise: Promise<Expression>;
@@ -4629,6 +4840,10 @@ export class BoxedFunction
         this.engine._inFlightAsyncEvaluations -= 1;
         evaluation.pending -= 1;
         releaseKeptEagerSourceValues(this.engine);
+        // The values of eager sources that host code computed in this
+        // asynchronous evaluation are used in it only.
+        if (evaluation.pending === 0)
+          releaseHostEagerSourceValues(this.engine, evaluation.epoch);
       });
   }
 
@@ -4668,17 +4883,27 @@ export class BoxedFunction
     // the read throws.
     let memoizable: boolean;
     let sourceValues: EagerSourceValues | undefined;
+    // Sampled before the eligibility test: see the synchronous route.
+    const hostCallsBeforeProbe = uncachedHostCallCount();
     try {
       // The inert rule (`_isMemoizableInertEvaluation`) is for the
       // synchronous route only: a node whose operator has only an
       // `evaluateAsync` handler stays inert on that route, and the entry it
       // stores must not be served here in place of running the handler.
-      memoizable = this._isMemoizableLazyCollection(options, true);
+      // An application of a host operator that does not state its purity is
+      // never kept (`_isUncachedHostOperator`).
+      memoizable =
+        !this._isUncachedHostOperator(true) &&
+        this._isMemoizableLazyCollection(options, true);
     } finally {
       sourceValues = detachEagerSourceValues(this);
     }
     const result = memoizable
-      ? this._memoizedLazyCollectionValueAsync(options, sourceValues)
+      ? this._memoizedLazyCollectionValueAsync(
+          options,
+          sourceValues,
+          hostCallsBeforeProbe
+        )
       : this._computeValueAsync(options, sourceValues)();
     // A value that the operand step did not use (the evaluation was
     // cancelled, threw, or found its value in the memo) is discarded when
@@ -4716,7 +4941,8 @@ export class BoxedFunction
    */
   private _memoizedLazyCollectionValueAsync(
     options?: Partial<EvaluateOptions>,
-    sourceValues?: EagerSourceValues
+    sourceValues?: EagerSourceValues,
+    hostCallsBeforeProbe?: number
   ): Promise<Expression> {
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return Promise.resolve(hit);
@@ -4748,7 +4974,11 @@ export class BoxedFunction
       // different caller must not join a walk that captured someone else's.
       return Promise.resolve().then(() =>
         this.engine.withEvaluationContext(options, () =>
-          this._settledLazyCollectionValueAsync(options, sourceValues)
+          this._settledLazyCollectionValueAsync(
+            options,
+            sourceValues,
+            hostCallsBeforeProbe
+          )
         )
       );
     }
@@ -4756,7 +4986,11 @@ export class BoxedFunction
     const pending: Promise<Expression> = Promise.resolve()
       .then(() =>
         this.engine.withEvaluationContext(options, () =>
-          this._settledLazyCollectionValueAsync(options, sourceValues)
+          this._settledLazyCollectionValueAsync(
+            options,
+            sourceValues,
+            hostCallsBeforeProbe
+          )
         )
       )
       .finally(() => {
@@ -4780,7 +5014,8 @@ export class BoxedFunction
    * the SYNC path (see `_lazyValuePending`), where that marker lives. */
   private async _settledLazyCollectionValueAsync(
     options?: Partial<EvaluateOptions>,
-    sourceValues?: EagerSourceValues
+    sourceValues?: EagerSourceValues,
+    hostCallsBeforeProbe?: number
   ): Promise<Expression> {
     // A synchronous `evaluate()` may have filled the memo while this
     // computation waited for its microtask — it ignores the pending slot by
@@ -4799,13 +5034,18 @@ export class BoxedFunction
     // channels beside it use, and for the same reason: no entry is always
     // safe, a dependency-free entry derived from a field is not.
     const objectReadsBefore = objectReadCount();
+    // Host code that no memo may keep a result across
+    // (`host-handler-changes.ts`), counted from before the eligibility test
+    // of the caller.
+    const hostCallsBefore = hostCallsBeforeProbe ?? uncachedHostCallCount();
 
     const result = await this._computeValueAsync(options, sourceValues)();
 
     if (
       _lazyValueProvisionalReads !== before ||
       cycleDetectionCount() !== cyclesBefore ||
-      objectReadCount() !== objectReadsBefore
+      objectReadCount() !== objectReadsBefore ||
+      uncachedHostCallCount() !== hostCallsBefore
     ) {
       if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
       return result;
@@ -5146,6 +5386,7 @@ export class BoxedFunction
     const provisionalBefore = _lazyValueProvisionalReads;
     const iterationBreachesBefore = iterationLimitCancellationCount();
     const incompleteWalksBefore = incompleteWalkCount();
+    const hostCallsBefore = uncachedHostCallCount();
     _facetComputeCount += 1;
     // A facet answer is a number or a boolean, so it can never CONTAIN an
     // object; it can perfectly well be DERIVED from one's fields, though
@@ -5178,7 +5419,13 @@ export class BoxedFunction
       // limit could produce a definite answer, and `iterationLimit` writes
       // advance no axis this memo's keys observe. Never frozen — recomputed
       // per read, which is exactly the pre-memo behavior for such answers.
-      iterationLimitCancellationCount() !== iterationBreachesBefore
+      iterationLimitCancellationCount() !== iterationBreachesBefore ||
+      // The computation ran host code that does not state its purity (a
+      // `count` handler of a host collection, or a host predicate that a
+      // library `count` evaluates), or a host handler that changed state:
+      // the answer can depend on state that the stamps do not record
+      // (`host-handler-changes.ts`).
+      uncachedHostCallCount() !== hostCallsBefore
     ) {
       if (CACHE_STATS) recordCache('collectionFacet', 'declineCycle');
       return value;
@@ -5571,6 +5818,10 @@ export class BoxedFunction
       }
     }
 
+    // Sampled before the iterator is built and the finiteness is read: both
+    // can evaluate an operand that runs host code, which is part of the walk
+    // that the element memo may commit (`elementMemoWalkBaseline()`).
+    const walkBaseline = memoized ? elementMemoWalkBaseline() : undefined;
     let iter = this.operatorDefinition?.collection?.iterator?.(this);
 
     if (!iter) {
@@ -5624,7 +5875,7 @@ export class BoxedFunction
     // never complete a drain, so recording would be pure buffering waste —
     // skip it. (`undefined` finiteness still records: the drain may finish.)
     if (memoized && this.isFiniteCollection !== false)
-      return elementMemoRecordingStream(this, source);
+      return elementMemoRecordingStream(this, source, walkBaseline);
 
     return source as Generator<Expression>;
   }
@@ -5748,6 +5999,7 @@ export class BoxedFunction
     // in place, so a generation-independent key would never expire. The full
     // account is on the same key in `get type`.
     const gen = this.engine._cacheGeneration();
+    const hostCallsBefore = uncachedHostCallCount();
     const evaluated = cachedValue(
       this._eagerSource,
       gen,
@@ -5755,6 +6007,14 @@ export class BoxedFunction
       undefined,
       this.engine
     );
+    // An evaluation that ran host code that does not state its purity, or a
+    // host handler that changed state, is not kept: the host code can read
+    // state that the generation does not record (`host-handler-changes.ts`).
+    if (uncachedHostCallCount() !== hostCallsBefore) {
+      const cell = cachedCell(this._eagerSource, gen);
+      cell.value = null;
+      cell.generation = undefined;
+    }
     // Drift tripwire (dev only): a `canEnumerate` handler that vouched `true`
     // must be backed by an evaluation that actually produced the collection.
     console.assert(
@@ -7595,6 +7855,16 @@ export class BoxedFunction
       const handlerOperands = declaredLambdaOperands(this.engine, def, tail);
       const walksBefore = walksMeasuredBy(def, handlerOperands);
       const failuresBefore = failedWalksMeasuredBy(def);
+      // A handler of a host operator that states `pure: true` can still
+      // change state that the rest of the expression reads (`ce.assign` of
+      // an outer symbol): the memos of evaluated results are told when the
+      // persistent evaluation version moved during the call
+      // (`endHostHandlerCall`, `shared-evaluation-memo.ts`). A host operator
+      // that does not state its purity is never cached
+      // (`_isUncachedHostOperator`).
+      const versionBefore = this._hasHostHandler(def)
+        ? beginHostHandlerCall(this.engine)
+        : undefined;
       let evalResult: Expression | undefined;
       try {
         // 6-kind/ At an APPLY SITE of a value kind (`applySiteOperands()`),
@@ -7656,6 +7926,8 @@ export class BoxedFunction
         );
       } finally {
         if (isScoped) this.engine._popEvalContext();
+        if (versionBefore !== undefined)
+          endHostHandlerCall(this.engine, versionBefore);
       }
       // A handler that read a walk which missed elements stays unevaluated.
       // When the walk FAILED (a comprehension over a domain that is an
@@ -9066,12 +9338,36 @@ export class BoxedFunction
                 // run, gives its error to a handler that declines
                 // (`failedWalksMeasuredBy()`).
                 const failuresBefore = failedWalksMeasuredBy(def);
-                const answer = def.evaluateAsync(
-                  kindAnswer !== undefined ? handlerOps : declaredOps,
-                  opts
-                );
+                // A host handler is checked for a change of state, from its
+                // call to the end of its promise (`noteUncachedHostEvaluation`).
+                // Another evaluation that runs at an `await` of the handler
+                // can move the version too: the result is then not kept,
+                // which is only a missed store.
+                const versionBefore = this._isHostDefinition(def, true)
+                  ? engine._persistentEvaluationVersion
+                  : undefined;
+                let answer: ReturnType<typeof def.evaluateAsync>;
+                try {
+                  answer = def.evaluateAsync(
+                    kindAnswer !== undefined ? handlerOps : declaredOps,
+                    opts
+                  );
+                } catch (e) {
+                  // A handler that changed state and threw before it
+                  // returned its promise is counted too.
+                  if (
+                    versionBefore !== undefined &&
+                    engine._persistentEvaluationVersion !== versionBefore
+                  )
+                    noteUncachedHostEvaluation(engine);
+                  throw e;
+                }
                 asyncSliceFailure = handlerWalkFailure(failuresBefore);
-                return answer;
+                if (versionBefore === undefined) return answer;
+                return Promise.resolve(answer).finally(() => {
+                  if (engine._persistentEvaluationVersion !== versionBefore)
+                    noteUncachedHostEvaluation(engine);
+                });
               }
               // A user function: the body statements are awaited.
               const applyAwaiting = (
@@ -9091,12 +9387,20 @@ export class BoxedFunction
                 return applyAwaiting(handlerOps, opts);
               const walksBefore = walksMeasuredBy(def, handlerOps);
               const failuresBefore = failedWalksMeasuredBy(def);
+              // See the synchronous call of the handler: a host handler
+              // that states `pure: true` and changes state is counted
+              // (`endHostHandlerCall`).
+              const versionBefore = this._hasHostHandler(def)
+                ? beginHostHandlerCall(engine)
+                : undefined;
               let declined = false;
               try {
                 const answer = def.evaluate?.(handlerOps, opts);
                 declined = answer === undefined;
                 return answer;
               } finally {
+                if (versionBefore !== undefined)
+                  endHostHandlerCall(engine, versionBefore);
                 handlerMissedElements = handlerWalkMissedElements(walksBefore);
                 if (handlerMissedElements)
                   handlerFailure = handlerWalkFailure(walksBefore);
@@ -19426,8 +19730,7 @@ function isSameCall(
       a.valueDefinition === b.valueDefinition &&
       a.operatorDefinition === b.operatorDefinition
     );
-  if (isNumber(a) && isNumber(b))
-    return a.isExact === b.isExact && a.isSame(b);
+  if (isNumber(a) && isNumber(b)) return a.isExact === b.isExact && a.isSame(b);
   if ((isString(a) && isString(b)) || (isCharacter(a) && isCharacter(b)))
     return a.string === b.string;
   return false;

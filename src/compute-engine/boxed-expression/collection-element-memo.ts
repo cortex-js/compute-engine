@@ -24,6 +24,7 @@ import { containsObject } from './object-walk';
 import { subscriptEvaluateReads } from './transitive-purity';
 import { sequenceReadStopCount } from './sequence-read-stops';
 import { incompleteWalkCount } from './incomplete-walks';
+import { uncachedHostCallCount } from './host-handler-changes';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -1181,10 +1182,15 @@ function commitRecordedWalk(
   complete: boolean,
   objectDeps: ObjectDeps | undefined,
   sequenceStopsBefore: number,
-  incompleteWalksBefore: number
+  incompleteWalksBefore: number,
+  hostCallsBefore: number
 ): void {
   // A partial entry with nothing in it would only churn the cache.
   if (!complete && buffer.length === 0) return;
+  // An element computed by host code that no memo may keep a result across
+  // (a host operator that does not state its purity, or a host handler that
+  // changed state) is not committed (`host-handler-changes.ts`).
+  if (uncachedHostCallCount() !== hostCallsBefore) return;
   // A read of a sequence term was stopped while the walk ran (too many
   // terms, or a recursion that is too deep): an element can hold that
   // declined term, and a later read can give it. Such a buffer is not
@@ -1250,9 +1256,34 @@ function commitRecordedWalk(
  * the CONSUMER while the generator is suspended are a different matter — see
  * `commitRecordedWalk`; the boundary flag below is what detects them.
  */
+/** The counts that a recorded walk compares at its commit, sampled when the
+ * walk starts (`elementMemoWalkBaseline()`). */
+export type ElementMemoWalkBaseline = {
+  sequenceStops: number;
+  incompleteWalks: number;
+  hostCalls: number;
+};
+
+/**
+ * Sample the counts that a recorded walk compares at its commit. The caller
+ * samples them BEFORE it builds the iterator of the walk: building it can
+ * evaluate an operand (the iterator of `Join` walks its operands at once,
+ * and a finiteness read evaluates an eager source), and host code that runs
+ * then is part of the walk (`host-handler-changes.ts`). A generator cannot
+ * sample them itself: its body runs at the first `next()`.
+ */
+export function elementMemoWalkBaseline(): ElementMemoWalkBaseline {
+  return {
+    sequenceStops: sequenceReadStopCount(),
+    incompleteWalks: incompleteWalkCount(),
+    hostCalls: uncachedHostCallCount(),
+  };
+}
+
 export function* elementMemoRecordingStream(
   expr: Expression,
-  iter: Iterator<Expression, undefined>
+  iter: Iterator<Expression, undefined>,
+  baseline?: ElementMemoWalkBaseline
 ): Generator<Expression> {
   const ce = expr.engine;
   const buffer: Expression[] = [];
@@ -1272,8 +1303,11 @@ export function* elementMemoRecordingStream(
   const startDeps = snapshotDeps(expr, true);
   // A stop of a sequence read between here and the commit, also one made
   // by the consumer between two pulls, prevents the commit.
-  const sequenceStopsBefore = sequenceReadStopCount();
-  const incompleteWalksBefore = incompleteWalkCount();
+  const sequenceStopsBefore =
+    baseline?.sequenceStops ?? sequenceReadStopCount();
+  const incompleteWalksBefore =
+    baseline?.incompleteWalks ?? incompleteWalkCount();
+  const hostCallsBefore = baseline?.hostCalls ?? uncachedHostCallCount();
   /** The mutable-object field reads made by the walk itself. A collector is
    * opened around each PULL rather than around the whole generator: the
    * generator suspends at every `yield`, and a collector left open across
@@ -1346,7 +1380,8 @@ export function* elementMemoRecordingStream(
       drained && !overflow,
       objectDeps,
       sequenceStopsBefore,
-      incompleteWalksBefore
+      incompleteWalksBefore,
+      hostCallsBefore
     );
   }
 }
@@ -1401,6 +1436,7 @@ export function elementMemoFillTo(
   let complete = false;
   const sequenceStopsBefore = sequenceReadStopCount();
   const incompleteWalksBefore = incompleteWalkCount();
+  const hostCallsBefore = uncachedHostCallCount();
   const iter = makeStream();
   // The drain is synchronous and uninterrupted by consumer code, so ONE
   // collector brackets the whole of it: every mutable-object field read below
@@ -1439,6 +1475,9 @@ export function elementMemoFillTo(
     !elements.some(containsObject) &&
     sequenceReadStopCount() === sequenceStopsBefore &&
     incompleteWalkCount() === incompleteWalksBefore &&
+    // Host code that no memo may keep a result across
+    // (`host-handler-changes.ts`).
+    uncachedHostCallCount() === hostCallsBefore &&
     // Elements computed inside a transient precision window are not stored
     // (see `validElementMemo`).
     !expr.engine._atTransientConfiguration
@@ -1521,6 +1560,7 @@ export function elementMemoComputeCell(
   if (ce._atTransientConfiguration || !expr.isPure) return compute();
   const sequenceStopsBefore = sequenceReadStopCount();
   const incompleteWalksBefore = incompleteWalkCount();
+  const hostCallsBefore = uncachedHostCallCount();
   let value: Expression | undefined;
   let objectDeps: ObjectDeps | undefined;
   beginObjectDeps();
@@ -1534,6 +1574,9 @@ export function elementMemoComputeCell(
     containsObject(value) ||
     sequenceReadStopCount() !== sequenceStopsBefore ||
     incompleteWalkCount() !== incompleteWalksBefore ||
+    // Host code that no memo may keep a result across
+    // (`host-handler-changes.ts`).
+    uncachedHostCallCount() !== hostCallsBefore ||
     ce._atTransientConfiguration
   )
     return value;

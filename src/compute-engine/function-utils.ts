@@ -131,6 +131,8 @@ import {
   type MemoDeps,
 } from './boxed-expression/collection-element-memo.js';
 import { sequenceReadStopCount } from './boxed-expression/sequence-read-stops.js';
+import { uncachedHostCallCount } from './boxed-expression/host-handler-changes.js';
+import { notePendingCallScope } from './pending-call-scopes.js';
 import {
   isEffectSubset,
   isPureComputedEffects,
@@ -5578,6 +5580,8 @@ function makeLambda(
       if (mismatch !== undefined) return mismatch;
       const freshScope: Scope = { parent: capturedScope, bindings: new Map() };
       FROZEN_CHAIN_SCOPES.add(freshScope);
+      // No frame reads this scope until it is pushed (`pending-call-scopes.ts`).
+      notePendingCallScope(freshScope);
       const savedParent = bodyScope.parent;
       bodyScope.parent = freshScope;
       enterAppliedBodyScope(bodyScope, savedParent);
@@ -6045,6 +6049,10 @@ function makeLambda(
         ? (Promise.resolve(hit) as unknown as Expression)
         : hit;
     const sequenceStopsBefore = sequenceReadStopCount();
+    // A body that evaluates a host operator that does not state
+    // `pure: true`, or the handler of one that states it but changed state,
+    // is not memoized (`host-handler-changes.ts`).
+    const hostCallsBefore = uncachedHostCallCount();
     // The substituted body is canonicalized and evaluated in a scope whose
     // parent is the scope where the literal was defined, as a call frame
     // is: a name of the body that is not a parameter (a local of the
@@ -6071,7 +6079,8 @@ function makeLambda(
     if (
       memoKey !== undefined &&
       result.isValid &&
-      sequenceReadStopCount() === sequenceStopsBefore
+      sequenceReadStopCount() === sequenceStopsBefore &&
+      uncachedHostCallCount() === hostCallsBefore
     )
       applicationMemoForStore(ce, fnExpr)?.results.set(memoKey, result);
     // The lambda is typed synchronous: a `Promise` comes back only for the
@@ -6442,6 +6451,8 @@ function makeLambda(
         bindings: new Map(),
       };
       FROZEN_CHAIN_SCOPES.add(freshScope);
+      // No frame reads this scope until it is pushed (`pending-call-scopes.ts`).
+      notePendingCallScope(freshScope);
       // The applied prefix binds exactly as a saturated call's parameters do,
       // destructuring included (step 5); a pattern in the prefix whose argument
       // has the wrong shape is the same error value here.
@@ -6655,6 +6666,10 @@ function makeLambda(
     // this read only. The result is then not memoized: a later application
     // can give the term (see `sequence-read-stops.ts`).
     const sequenceStopsBefore = sequenceReadStopCount();
+    // A body that evaluates a host operator that does not state
+    // `pure: true`, or the handler of one that states it but changed state,
+    // is not memoized (`host-handler-changes.ts`).
+    const hostCallsBefore = uncachedHostCallCount();
 
     // A recursive definition is not unrolled symbolically: a re-entrant
     // application with an argument that contains a free symbol abandons the
@@ -6719,6 +6734,8 @@ function makeLambda(
       bindings: new Map(),
     };
     FROZEN_CHAIN_SCOPES.add(freshScope);
+    // No frame reads this scope until it is pushed (`pending-call-scopes.ts`).
+    notePendingCallScope(freshScope);
 
     // Declare parameters in the fresh scope. Annotated parameters are declared
     // with their declared type, non-inferred (§6.4); bare parameters stay
@@ -6951,7 +6968,8 @@ function makeLambda(
       if (
         store &&
         memoKey !== undefined &&
-        sequenceReadStopCount() === sequenceStopsBefore
+        sequenceReadStopCount() === sequenceStopsBefore &&
+        uncachedHostCallCount() === hostCallsBefore
       ) {
         // The exact entry is stored whether or not the numeric pass produced
         // a valid result: the exact answer is what a recursive body, which

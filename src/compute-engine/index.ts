@@ -88,6 +88,10 @@ import type {
 import { validateStyleOptions } from './latex-syntax/style-options.js';
 import { validateDisplayDigits } from './numerics/strings.js';
 import { isOperatorDef, isValueDef } from './boxed-expression/utils.js';
+import {
+  markEngineSubscriptHandler,
+  withStandardLibraryInstall,
+} from './boxed-expression/host-handler-changes.js';
 import { isInferredDefinition } from './boxed-expression/definition-guards.js';
 import { markExternalFact } from './boxed-expression/forward-call-reference.js';
 import {
@@ -1171,6 +1175,26 @@ export class ComputeEngine implements IComputeEngine {
   }
 
   /**
+   * Advanced by every state event that can change the value a node
+   * evaluates to in an evaluation frame that is still on the stack. Keys the
+   * memo of the evaluations of shared nodes (`shared-evaluation-memo.ts`);
+   * see `EngineConfigurationLifecycle.evaluationVersion`. READ-ONLY.
+   * @internal
+   */
+  get _evaluationVersion(): number {
+    return this._configurationLifecycle.evaluationVersion;
+  }
+
+  /**
+   * `_evaluationVersion` less the ephemeral value writes (a loop index); see
+   * `EngineConfigurationLifecycle.persistentEvaluationVersion`. READ-ONLY.
+   * @internal
+   */
+  get _persistentEvaluationVersion(): number {
+    return this._configurationLifecycle.persistentEvaluationVersion;
+  }
+
+  /**
    * The `callable` invalidation axis (design §5, step 3) — events that can
    * change what the effects projection reads: world-class events, callable
    * writes/declares/retypes/swaps, and assumption-dirty pops. Keys
@@ -1702,17 +1726,21 @@ export class ComputeEngine implements IComputeEngine {
     // Create the system scope (top-level scope)
     this.pushScope(undefined, 'system');
 
-    // Declare the standard types
-    this.declareType('limits', 'expression<Limits>');
-    // `alias: true` makes `distribution` a *structural* type: a value whose
-    // type is `expression<NormalDistribution>` (etc.) is a subtype of the
-    // union. A nominal reference (the default) would not match, so `PDF`/
-    // `CDF`/`Mean`(distribution)… would reject their distribution argument.
-    this.declareType(
-      'distribution',
-      'expression<NormalDistribution> | expression<BinomialDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | expression<ExponentialDistribution>',
-      { alias: true }
-    );
+    // Declare the standard types. A definition that a declaration makes is a
+    // definition of the standard library, not host code
+    // (`host-handler-changes.ts`).
+    withStandardLibraryInstall(() => {
+      this.declareType('limits', 'expression<Limits>');
+      // `alias: true` makes `distribution` a *structural* type: a value whose
+      // type is `expression<NormalDistribution>` (etc.) is a subtype of the
+      // union. A nominal reference (the default) would not match, so `PDF`/
+      // `CDF`/`Mean`(distribution)… would reject their distribution argument.
+      this.declareType(
+        'distribution',
+        'expression<NormalDistribution> | expression<BinomialDistribution> | expression<PoissonDistribution> | expression<UniformDistribution> | expression<ExponentialDistribution>',
+        { alias: true }
+      );
+    });
 
     startup.bootstrapLibraries(options?.libraries);
 
@@ -4321,10 +4349,12 @@ export class ComputeEngine implements IComputeEngine {
             // subscript symbolic instead of folding it to a compound name.
             ...(fact.subscriptEvaluate
               ? {
-                  subscriptEvaluate: (subscript: Expression) =>
-                    this._inScope(parseScope, () =>
-                      this._fn('Subscript', [this.symbol(id), subscript])
-                    ),
+                  subscriptEvaluate: markEngineSubscriptHandler(
+                    (subscript: Expression) =>
+                      this._inScope(parseScope, () =>
+                        this._fn('Subscript', [this.symbol(id), subscript])
+                      )
+                  ),
                 }
               : {}),
           });

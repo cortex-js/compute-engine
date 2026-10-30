@@ -2058,13 +2058,16 @@ class Harvester {
       // For the skippability question the handler's PROVENANCE is not the
       // point — its effects are, and the operator definition is where they are
       // declared. A definition that declares `pure: false` (or a non-empty
-      // `effects` set) refuses; one that declares nothing is pure by the
-      // engine's standing default, the same default every other consumer of
-      // `isPure` already trusts. Note the handler cannot be analysed the way a
-      // `functions` entry's source can: a handler EMITS source, and at harvest
-      // time nothing has been emitted yet.
+      // `effects` set) refuses, and so does one that declares nothing: a
+      // host operator counts as pure for caching only when the host states
+      // `pure: true` (or an empty `effects` set, or the `pure` keyword on the
+      // signature), the rule that the memos of evaluated results follow
+      // (user decision 2026-10-28, ROADMAP CE-601). Note the handler cannot
+      // be analysed the way a `functions` entry's source can: a handler EMITS
+      // source, and at harvest time nothing has been emitted yet.
       if (!this.skippabilityQuery) return false;
-      if (this.callerCompileHandlerDef(node)?.pure !== true) return false;
+      const handlerDef = this.callerCompileHandlerDef(node);
+      if (handlerDef?.pure !== true || !handlerDef._purityStated) return false;
     }
 
     if (this.isOverriddenOperator(node.operator)) {

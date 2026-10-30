@@ -25,6 +25,8 @@ function setup(): { ce: ComputeEngine; calls: () => number; reset: () => void } 
   // s(Q) = Q + (cos Q.x, sin Q.y)
   ce.declare('s', {
     signature: '(tuple<number, number>) -> tuple<number, number>',
+    // A host operator is cached only when it states `pure: true`.
+    pure: true,
     evaluate: (ops) => {
       stepCalls += 1;
       const q = ops[0].evaluate();

@@ -637,6 +637,9 @@ describe('snapshot completeness — the drift guard', () => {
     // The list hypothesis a recursive call reads while `_deriveSignature`
     // verifies it, set only during that pass.
     '_recursionResult',
+    // Set when the definition is made (a standard library made it, or not)
+    // and never changed.
+    '_standardLibrary',
   ]);
 
   test('every mutable field of a value definition is in its snapshot', () => {

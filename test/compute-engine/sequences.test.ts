@@ -1362,6 +1362,7 @@ describe('SEQUENCE MEMO: cold reads, outdated terms and declined terms', () => {
     let calls = 0;
     ce.declare('f', {
       signature: '(integer) -> integer',
+      pure: true,
       evaluate: (ops) => {
         if (!ops[0].isNumberLiteral) return undefined;
         calls += 1;
@@ -1710,6 +1711,8 @@ describe('SEQUENCE TERMS: side effects of the recurrence', () => {
     const draws: number[] = [];
     ce.declare('draw', {
       signature: '(integer) -> integer',
+      // Stated pure, so that the memo keeps the term that it computes.
+      pure: true,
       evaluate: (ops) => {
         if (!ops[0].isNumberLiteral) return undefined;
         draws.push(ops[0].re);

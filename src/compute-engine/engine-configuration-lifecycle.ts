@@ -32,6 +32,11 @@ export type StateEvent =
        * `engine-declarations.ts`). See the `declare` case of
        * {@link axisMaskOf}. */
       parameter?: boolean;
+      /** The declaration installs a value, or replaces a binding of the
+       * name, in a scope that a frame on the evaluation stack reads
+       * (`changesFrameBinding`, `engine-declarations.ts`). It advances the
+       * evaluation version. */
+      changesFrameBinding?: boolean;
     }
   // variance settle, callable-swap repair, minted-ctor removal
   | {
@@ -336,6 +341,8 @@ export class EngineConfigurationLifecycle {
   private _worldVersion = 0;
   private _callableVersion = 0;
   private _definitionVersion = 0;
+  private _evaluationVersion = 0;
+  private _persistentEvaluationVersion = 0;
   private _ephemeralWriteDepth = 0;
   private _factSuppressionDepth = 0;
   private _scratchDeclarationScopes: object[] = [];
@@ -357,6 +364,35 @@ export class EngineConfigurationLifecycle {
 
   get callableVersion(): number {
     return this._callableVersion;
+  }
+
+  /** Advanced by every event that can change the value that a node
+   * evaluates to in an evaluation frame that is still on the stack: a value
+   * write (a loop index included), a redefinition, a retype, an inference,
+   * an assumption, a configuration change, a binding repair, a store to an
+   * object, a declaration that shadows a callable or that installs a value
+   * or replaces a binding in a scope that a frame on the stack reads
+   * (`changesFrameBinding`), and the pop of a scope
+   * that reverts an assumption. It is not advanced by the other
+   * declarations and scope pops: a function call declares its parameters
+   * in a new scope, read only by the nodes evaluated in the new frame of
+   * the call, and pops the frame when it returns, which gives back the
+   * bindings of the caller's frame unchanged. The memo of the evaluations
+   * of shared nodes keys on this counter (`shared-evaluation-memo.ts`):
+   * if a call advanced it, the nodes evaluated in the caller's frame after
+   * the call would be evaluated again, and an expression that shares a
+   * node with a call in it would take exponential time again. */
+  get evaluationVersion(): number {
+    return this._evaluationVersion;
+  }
+
+  /** The {@link evaluationVersion} less the ephemeral value writes (the
+   * index of a `Sum` or of a loop, written in the scope of its binder and
+   * gone when the binder returns). The evaluator reads it before and after
+   * the call of a host handler (`host-handler-changes.ts`): a handler that
+   * evaluates a `Sum` has changed no state that outlives the call. */
+  get persistentEvaluationVersion(): number {
+    return this._persistentEvaluationVersion;
   }
 
   /** Advanced when an existing definition changes: a symbol retyped (a
@@ -428,6 +464,18 @@ export class EngineConfigurationLifecycle {
       });
     }
     const m = axisMaskOf(e);
+    if (
+      e.kind === 'declare'
+        ? (e.shadowsCallable || e.changesFrameBinding === true) &&
+          e.scratch !== true
+        : e.kind === 'scope-pop'
+          ? e.assumptionsDirty
+          : e.kind !== 'binding-repair' || m.any
+    ) {
+      this._evaluationVersion += 1;
+      if (e.kind !== 'value-write' || !e.ephemeral)
+        this._persistentEvaluationVersion += 1;
+    }
     if (m.any) this._anyVersion += 1;
     if (m.semantic) this._semanticVersion += 1;
     if (m.world) this._worldVersion += 1;

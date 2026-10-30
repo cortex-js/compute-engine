@@ -98,9 +98,9 @@ describe('inferSourcePurity', () => {
 
   test('a native or bound function reads as [native code] and is rejected', () => {
     expect(inferSourcePurity(Math.sin.toString())).toBe(false);
-    expect(inferSourcePurity(((t: number) => t * 2).bind(null).toString())).toBe(
-      false
-    );
+    expect(
+      inferSourcePurity(((t: number) => t * 2).bind(null).toString())
+    ).toBe(false);
   });
 });
 
@@ -171,12 +171,15 @@ describe('the descriptor form reaches every target that takes `functions`', () =
   // that reads the entry as `string | Function` would silently discard the
   // caller's implementation and fall back to its built-in table.
   test.each(['javascript', 'glsl', 'interval-js'])(
-    'the %s target uses a descriptor\'s source',
+    "the %s target uses a descriptor's source",
     (to) => {
       const ce = new ComputeEngine();
       ce.declare('sq', '(number) -> number');
       const expr = ce.parse('\\operatorname{sq}(x)');
-      const bare = compile(expr, { to, functions: { sq: 'mySq' } } as any) as any;
+      const bare = compile(expr, {
+        to,
+        functions: { sq: 'mySq' },
+      } as any) as any;
       const descriptor = compile(expr, {
         to,
         functions: { sq: { source: 'mySq', pure: true } },
@@ -222,9 +225,7 @@ describe('the NaN exit is gated on effects, not on provenance', () => {
   }
 
   test('a pure body keeps every exit', () => {
-    expect(
-      exitsFor((ce) => ce.parse('\\sum_{n=1}^{31}\\sin(nx)'))
-    ).toBe(30);
+    expect(exitsFor((ce) => ce.parse('\\sum_{n=1}^{31}\\sin(nx)'))).toBe(30);
   });
 
   test('a built-in IMPURE operator in the body refuses the exit', () => {
@@ -233,13 +234,29 @@ describe('the NaN exit is gated on effects, not on provenance', () => {
     // value is already NaN by then. Provenance cannot see this: `Random` is
     // the engine's own operator, not caller-supplied.
     expect(
-      exitsFor((ce) =>
-        ce.parse('\\sum_{n=1}^{31}(\\operatorname{Random}()+n)')
-      )
+      exitsFor((ce) => ce.parse('\\sum_{n=1}^{31}(\\operatorname{Random}()+n)'))
     ).toBe(0);
   });
 
-  test('a caller `compile` handler whose definition declares no effects keeps the exit', () => {
+  test('a caller `compile` handler whose definition states `pure: true` keeps the exit', () => {
+    expect(
+      exitsFor((ce) => {
+        ce.declare('R', 'list<number>');
+        const d: any = ce.lookupDefinition('At');
+        ce.declare('At', {
+          ...(d?.operator ?? {}),
+          compile: () => '_SYS.at(_.R, 1)',
+          pure: true,
+        } as any);
+        return ce.box(['Sum', ['At', 'R', 'k'], ['Limits', 'k', 1, 31]]);
+      })
+    ).toBe(30);
+  });
+
+  test('a caller `compile` handler whose definition declares no effects refuses the exit', () => {
+    // A host operator counts as pure for caching only when the host states
+    // it (user decision 2026-10-28, ROADMAP CE-601): pure by default is not
+    // enough to skip its calls.
     expect(
       exitsFor((ce) => {
         ce.declare('R', 'list<number>');
@@ -250,7 +267,7 @@ describe('the NaN exit is gated on effects, not on provenance', () => {
         } as any);
         return ce.box(['Sum', ['At', 'R', 'k'], ['Limits', 'k', 1, 31]]);
       })
-    ).toBe(30);
+    ).toBe(0);
   });
 
   test('the same handler on a `pure: false` definition refuses the exit', () => {

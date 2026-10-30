@@ -109,6 +109,11 @@ import { defaultCollectionHandlers } from '../collection-utils.js';
 import { registerProvisionalDependents } from './provisional-application.js';
 import { latestDeclaredEffectsSite } from './effects-provenance.js';
 import { journalDefinitionRecord } from './boxed-value-definition.js';
+import { isInstallingStandardLibrary } from './host-handler-changes.js';
+import {
+  noteHostCollectionSource,
+  withHostCollectionHandlers,
+} from './shared-evaluation-memo.js';
 import {
   numericCanonicalHandlerName,
   numericCanonicalProfile,
@@ -455,6 +460,30 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
    * return-type-only `Typed(body, T)` ascription likewise carries no effect
    * contract. */
   effectsDeclared = false;
+
+  /** True when the definition STATED its purity: `pure: true` or
+   * `pure: false`, `drawsRandom: true`, the `effects` field, or an effect
+   * specifier on the signature (the `pure` keyword included). False when it
+   * said nothing about its effects (`drawsRandom: false` alone says nothing),
+   * so that it is pure by default.
+   *
+   * A memo of evaluated results keeps the result of an operator that the
+   * host declared only when the host stated `pure: true` (user decision
+   * 2026-10-28): a handler that is pure only by default is evaluated at each
+   * occurrence (`BoxedFunction._isUncachedHostOperator`, ROADMAP CE-601).
+   * The definitions of the standard libraries keep their own purity, and a
+   * user function its inferred effects.
+   * @internal */
+  _purityStated = false;
+
+  /** True when a standard library made this definition, while the engine
+   * installed it (`isInstallingStandardLibrary`,
+   * `host-handler-changes.ts`). Set when the definition is made, and never
+   * changed: a definition that a standard library made stays library code
+   * when another name reuses it, and a definition that a custom library made
+   * is host code even when it is bound in the system scope.
+   * @internal */
+  readonly _standardLibrary: boolean = isInstallingStandardLibrary();
 
   /** The latent effects of applying this operator. `undefined` (and its
    * stated-pure twin `[]`) is the empty set (pure); `'any'` is the top
@@ -1760,6 +1789,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       evaluateAsync: this.evaluateAsync,
       readsRandomFrame: this.readsRandomFrame,
       effectsDeclared: this.effectsDeclared,
+      _purityStated: this._purityStated,
       _effects: this._effects,
       _inferredDraws: this._inferredDraws,
       _deriveEffects: this._deriveEffects,
@@ -1783,6 +1813,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       evaluateAsync: _BoxedOperatorDefinition['evaluateAsync'];
       readsRandomFrame: boolean;
       effectsDeclared: boolean;
+      _purityStated: boolean;
       _effects: EffectSet | undefined;
       _inferredDraws: boolean;
       _deriveEffects: (() => EffectSet | undefined) | undefined;
@@ -1802,6 +1833,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.evaluateAsync = s.evaluateAsync;
     this.readsRandomFrame = s.readsRandomFrame;
     this.effectsDeclared = s.effectsDeclared;
+    this._purityStated = s._purityStated;
     this._effects = s._effects;
     this._inferredDraws = s._inferredDraws;
   }
@@ -1855,6 +1887,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       _effects: this._effects,
       _inferredDraws: this._inferredDraws,
       effectsDeclared: this.effectsDeclared,
+      _purityStated: this._purityStated,
       frameProtocol: this.frameProtocol,
       invokes: this.invokes,
       discharges: this.discharges,
@@ -1931,6 +1964,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this._effects = s._effects;
     this._inferredDraws = s._inferredDraws;
     this.effectsDeclared = s.effectsDeclared;
+    this._purityStated = s._purityStated;
     this.frameProtocol = s.frameProtocol;
     this.invokes = s.invokes;
     this.discharges = s.discharges;
@@ -2312,6 +2346,17 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       } else effects = legacy;
     }
 
+    // Restated like `effectsDeclared`: an update that states its purity
+    // sets it, one that gives a signature with no effects clears it, and one
+    // that says nothing keeps it. `drawsRandom: false` alone states nothing.
+    if (
+      def.pure !== undefined ||
+      def.drawsRandom === true ||
+      declaresEffectsNow
+    )
+      this._purityStated = true;
+    else if (def.signature !== undefined) this._purityStated = false;
+
     if (def.type !== undefined) this.type = def.type;
     this.evaluateAsync = def.evaluateAsync ?? this.evaluateAsync;
     this.canonical = dropsNumericCanonical
@@ -2351,8 +2396,24 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     );
     this.lazy = dropsLibraryLazy ? false : (def.lazy ?? this.lazy);
 
-    if (def.collection)
-      this.collection = defaultCollectionHandlers(def.collection);
+    if (def.collection) {
+      // The collection handlers of a host operator are host code: each call
+      // counts as host code that no memo keeps a result across when the
+      // definition does not state its purity, and is checked for a change of
+      // state otherwise (`withHostCollectionHandlers`,
+      // `shared-evaluation-memo.ts`).
+      this.collection = defaultCollectionHandlers(
+        this._standardLibrary
+          ? def.collection
+          : withHostCollectionHandlers(
+              this.engine,
+              def.collection,
+              () => !this._purityStated
+            )
+      );
+      if (!this._standardLibrary)
+        noteHostCollectionSource(this.collection, def.collection);
+    }
 
     // An `isCollection` handler declares that collection-ness is decided
     // per-instance from the operands (e.g. `When`, a collection only when the

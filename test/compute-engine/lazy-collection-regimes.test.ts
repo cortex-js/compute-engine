@@ -503,6 +503,8 @@ describe('lazy collection evaluate memo — async parity', () => {
     let cancel = true;
     ce.declare('BoomAsync', {
       signature: '() -> number',
+      // A host operator is cached only when it states `pure: true`.
+      pure: true,
       evaluateAsync: async (_ops, options) => {
         if (cancel && options.signal?.aborted)
           throw new CancellationError({ cause: options.signal.reason });
@@ -534,6 +536,8 @@ describe('lazy collection evaluate memo — async parity', () => {
     let fail = true;
     ce.declare('BoomAsync2', {
       signature: '() -> number',
+      // A host operator is cached only when it states `pure: true`.
+      pure: true,
       evaluateAsync: async () => {
         if (fail) throw new Error('boom');
         return ce.number(7);

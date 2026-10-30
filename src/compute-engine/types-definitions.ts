@@ -3154,7 +3154,40 @@ export type OperatorDefinitionFlags = {
    *
    * For example `Sin` is pure, `Random` isn't.
    *
-   * This information may be used to cache the value of expressions.
+   * This information may be used to cache the value of expressions. For an
+   * operator that the host declares (with `ce.declare()`, in a library
+   * passed to the constructor, with `ce.loadLibrary()`, or a JavaScript
+   * function assigned with `ce.assign()`), a value is cached only when the
+   * declaration states its purity: `pure: true` (or `pure: false`),
+   * `drawsRandom: true`, an `effects` set, or an effect specifier on the
+   * signature; `drawsRandom: false` alone states nothing. An extension
+   * (`ce.declare(name, patch, { extend: true })`) that states nothing about
+   * purity keeps the statement of the operator that it extends.
+   *
+   * An operator that states nothing is pure by default for the effects
+   * model, but it is evaluated at each occurrence, on the synchronous and
+   * the asynchronous routes, and each call of one of its collection
+   * handlers (`at`, `iterator` and each step of the iterator, `count`, …)
+   * is host code too. So is each call of a host callback of a protocol
+   * implementation, of a `subscriptEvaluate` handler that the host gives,
+   * and of a host `evaluateAsync` handler of a user function on the
+   * asynchronous route. No memo of the engine keeps a result computed while
+   * such host code ran: the shared subexpressions, the applications of a
+   * function literal, the lazy collection and inert values, the collection
+   * elements, the `count`/`isEmpty`/`isFinite` of a collection, the value
+   * that `at()` reads for a function expression with no collection
+   * handlers, the bounds of a slice, the values of symbols, the terms of
+   * sequences, the exact zeros and parts of the series and residue code, the
+   * approximations of the comparisons, the compiled probes of `Limit`, the
+   * compiled functions of `Map`, and the source values that the finiteness
+   * test of a lazy view shares with its operand step. The compiler does not skip the calls of
+   * its `compile` handler. A handler of a host operator that changes state
+   * (an assignment, also from a collection handler) stops these memos too,
+   * even when the operator states `pure: true`. The other hooks of a
+   * definition (`canonical`, `type`, `sgn`, `eq`, `neq`, `even`,
+   * `canEnumerate`, `elementCount`, `derivative`, `compile`, and the
+   * collection handlers `isCollection`, `isLazy`, `isEnumerable`, `eltsgn`
+   * and `elttype`) describe the operator and are not counted.
    *
    * **Default:** `true`
    *
@@ -3408,6 +3441,18 @@ export interface BoxedOperatorDefinition
    * know whether it must be checked again.
    * @internal */
   _writeVersion: number;
+
+  /** True when the definition stated its effects in any spelling (`pure`,
+   * `drawsRandom`, `effects`, an effect specifier on the signature). A memo
+   * keeps the result of an operator that the host declared only when this
+   * is true and the operator is pure (ROADMAP CE-601).
+   * @internal */
+  _purityStated: boolean;
+
+  /** True when a standard library made this definition: it is library
+   * code, not host code (ROADMAP CE-601).
+   * @internal */
+  readonly _standardLibrary: boolean;
 
   /** Write the signature, deriving it inside the write's fact-blind bracket:
    * the thunk and the write both run with the assumptions hidden, so a stored

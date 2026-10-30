@@ -8,6 +8,12 @@ import {
   polynomialDegree,
   getPolynomialCoefficients,
 } from '../boxed-expression/polynomials.js';
+import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
+import {
+  memoDepsStillValid,
+  snapshotMemoDeps,
+  type MemoDeps,
+} from '../boxed-expression/collection-element-memo.js';
 import {
   reduceTransformerHead,
   withValueShield,
@@ -2086,7 +2092,30 @@ const PROBES = [8, 30, 120];
 // limit value), so machine precision suffices — and, crucially, a compiled
 // tower overflows cleanly to ±Infinity instead of grinding. `null` marks an
 // expression that could not be compiled (fall back to interpreted `.N()`).
-const probeCache = new WeakMap<object, ((x: number) => number) | null>();
+// An entry is for one expression and one variable: the variable is part of
+// the entry, and a probe of the same expression in another variable
+// replaces it. The compiled code can hold the values of the symbols of the
+// expression and the definitions in force at the time of the compilation,
+// so an entry is valid while the dependencies of the expression
+// (`snapshotMemoDeps()`), the world and definition versions of the engine,
+// and the visibility of the assumptions are unchanged. The cache generation
+// (`ce._cacheGeneration()`) is not a usable stamp: each probe builds a
+// function literal, whose parameter declaration moves the generation, so a
+// generation stamp never matched. A probe whose compilation ran host code
+// that does not state its purity is not kept (`host-handler-changes.ts`).
+type ProbeEntry = {
+  x: string;
+  fn: ((x: number) => number) | null;
+  worldVersion: number;
+  definitionVersion: number;
+  factsHidden: boolean;
+  deps: MemoDeps;
+};
+const probeCache = new WeakMap<object, ProbeEntry>();
+
+/** The number of probes that `compiledProbe()` compiled, in this process.
+ * For tests. */
+export let limitProbeCompileCount = 0;
 
 function compiledProbe(
   e: Expression,
@@ -2094,9 +2123,23 @@ function compiledProbe(
   ce: ComputeEngine
 ): ((x: number) => number) | null {
   const key = e as unknown as object;
-  let fn = probeCache.get(key);
-  if (fn !== undefined) return fn;
-  fn = null;
+  const cached = probeCache.get(key);
+  if (
+    cached !== undefined &&
+    cached.x === x &&
+    cached.worldVersion === ce._worldVersion &&
+    cached.definitionVersion === ce._definitionVersion &&
+    cached.factsHidden === ce._factsHidden() &&
+    memoDepsStillValid(e, cached.deps)
+  )
+    return cached.fn;
+  const worldVersion = ce._worldVersion;
+  const definitionVersion = ce._definitionVersion;
+  const factsHidden = ce._factsHidden();
+  const deps = snapshotMemoDeps(e);
+  let fn: ((x: number) => number) | null = null;
+  const hostCallsBefore = uncachedHostCallCount();
+  limitProbeCompileCount += 1;
   try {
     const lit = ce.function('Function', [e, ce.symbol(x)]);
     // Budgeted so a probe of a Sum/Product with a variable-dependent (or
@@ -2109,11 +2152,20 @@ function compiledProbe(
   } catch {
     fn = null;
   }
+  if (deps === undefined || uncachedHostCallCount() !== hostCallsBefore)
+    return fn;
   // Checkpoint journal (funnel 7): the compiled probe closes over the
-  // definitions in force when it was built, and this memo carries no version
-  // stamp — a probe compiled during the window must not outlive a restore.
+  // definitions in force when it was built — a probe compiled during the
+  // window must not outlive a restore.
   journalCheckpointMemoEntry(ce, probeCache, key, 'limit-probe');
-  probeCache.set(key, fn);
+  probeCache.set(key, {
+    x,
+    fn,
+    worldVersion,
+    definitionVersion,
+    factsHidden,
+    deps,
+  });
   return fn;
 }
 

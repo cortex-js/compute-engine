@@ -10,6 +10,7 @@ import type {
 
 import { isValueDef } from './boxed-expression/utils.js';
 import { isExpression } from './boxed-expression/type-guards.js';
+import { markEngineSubscriptHandler } from './boxed-expression/host-handler-changes.js';
 
 import {
   createSequenceHandler,
@@ -69,7 +70,7 @@ export function declareSequence(
   // Declare the symbol first with a placeholder handler
   // This ensures the symbol exists when we parse the recurrence
   ce.declare(name, {
-    subscriptEvaluate: () => undefined,
+    subscriptEvaluate: markEngineSubscriptHandler(() => undefined),
   });
 
   // Now validate and create the actual handler

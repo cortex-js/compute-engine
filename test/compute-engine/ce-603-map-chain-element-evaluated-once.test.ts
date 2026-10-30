@@ -27,6 +27,9 @@ function countingEngine(): { ce: ComputeEngine; calls: () => number } {
   const ce = new ComputeEngine();
   let calls = 0;
   ce.declare('q', {
+    // A host operator is cached only when it states its purity (ROADMAP
+    // CE-601): the memo that this file tests applies to a pure operator.
+    pure: true,
     signature: '(number) -> number',
     broadcastable: true,
     evaluate: () => {
@@ -63,6 +66,9 @@ describe('CE-603: each level of a Map chain is applied once per element', () => 
     // its own value, it stayed `q("a")`.
     const ce = new ComputeEngine();
     ce.declare('q', {
+      // A host operator is cached only when it states its purity (ROADMAP
+      // CE-601): the memo that this file tests applies to a pure operator.
+      pure: true,
       signature: '(value) -> value',
       evaluate: ([x]) => {
         if (isString(x)) return ce.function('q', [ce.character('a')]);
@@ -83,6 +89,9 @@ describe('CE-603: each level of a Map chain is applied once per element', () => 
     const outer = ce.symbol('x');
     const outerDef = outer.valueDefinition;
     ce.declare('q', {
+      // A host operator is cached only when it states its purity (ROADMAP
+      // CE-601): the memo that this file tests applies to a pure operator.
+      pure: true,
       signature: '(real) -> real',
       evaluate: ([a]) => {
         if (!isSymbol(a)) return undefined;
@@ -127,6 +136,9 @@ describe('CE-603: each level of a Map chain is applied once per element', () => 
     expect(innerCall.valueDefinition).not.toBe(outerDef);
     let calls = 0;
     ce.declare('q', {
+      // A host operator is cached only when it states its purity (ROADMAP
+      // CE-601): the memo that this file tests applies to a pure operator.
+      pure: true,
       signature: '(any) -> any',
       evaluate: ([a]) => {
         calls += 1;
@@ -155,6 +167,9 @@ describe('CE-603: each level of a Map chain is applied once per element', () => 
     const ce = new ComputeEngine();
     let calls = 0;
     ce.declare('q', {
+      // A host operator is cached only when it states its purity (ROADMAP
+      // CE-601): the memo that this file tests applies to a pure operator.
+      pure: true,
       signature: '(any, any) -> any',
       evaluate: () => {
         calls += 1;

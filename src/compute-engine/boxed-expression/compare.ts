@@ -8,6 +8,7 @@ import type {
   IntervalBounds,
 } from '../global-types.js';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
+import { uncachedHostCallCount } from './host-handler-changes.js';
 import {
   compareBounds,
   exactCompareNumbers,
@@ -2759,8 +2760,13 @@ function approximateNode(
   const entry = known?.find((k) => k.key === key);
   if (entry !== undefined)
     return { approximation: entry.approximation, pure: true };
+  const hostCallsBefore = uncachedHostCallCount();
   const result = computeApproximation(x, logUnit);
-  if (result.pure) {
+  // An approximation computed with host code that does not state its
+  // purity (the value of a constant symbol can hold a host operator), or
+  // with a host handler that changed state, is not kept
+  // (`host-handler-changes.ts`).
+  if (result.pure && uncachedHostCallCount() === hostCallsBefore) {
     const kept = { key, approximation: result.approximation };
     // The newest entry is last: the oldest one is dropped.
     approximations.set(

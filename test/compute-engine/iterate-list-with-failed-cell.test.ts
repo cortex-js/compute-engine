@@ -518,6 +518,8 @@ describe('A VALID LAZY SOURCE THAT COMPUTES A FAILED ELEMENT', () => {
     let calls = 0;
     engine.declare('k', {
       signature: '(number) -> number',
+      // A host operator is cached only when it states `pure: true`.
+      pure: true,
       evaluate: ([x]) => {
         calls += 1;
         return x;
