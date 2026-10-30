@@ -4018,8 +4018,9 @@ function uniqueText(l: unknown[]): unknown[] {
  * The interpreter compares elements with `.isSame()` — the exact structural
  * check, with no numeric tolerance (`matchesSequenceAt` in
  * `library/collections.ts`). {@link eqText} reproduces it for every sort a
- * compiled artifact can hold: strict `===` for a number, a boolean or an array
- * reference, and conditioned (NFC, well-formed) content equality for a text
+ * compiled artifact can hold: strict `===` for a number or a boolean, an
+ * element-by-element comparison for a nested list, and conditioned (NFC,
+ * well-formed) content equality for a text
  * pair — which is what a string subject segmented by `_SYS.chars` yields, and
  * what bridges a `list<character>` needle against a string subject (a
  * character and a one-cluster string with the same content are the same value
@@ -4028,7 +4029,40 @@ function uniqueText(l: unknown[]): unknown[] {
  * carries the identical disjunct.
  */
 function sameSequenceElement(a: unknown, b: unknown): boolean {
+  // A nested list (a list-of-lists element) is the same value when it has the
+  // same length and pairwise-same elements; a list against a non-list never
+  // is. A host can supply a numeric row as a typed array (`Float64Array`),
+  // which `Array.isArray` does not recognize, so it is a list here too.
+  const aList = Array.isArray(a) || isNumericTypedArray(a);
+  const bList = Array.isArray(b) || isNumericTypedArray(b);
+  if (aList || bList) {
+    if (!aList || !bList || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++)
+      if (!sameSequenceElement(a[i], b[i])) return false;
+    return true;
+  }
   return (a !== a && b !== b) || eqText(a, b);
+}
+
+/** `conditionText` applied to every string leaf of a (nested) list. */
+function conditionDeep(x: unknown): unknown {
+  if (Array.isArray(x)) return x.map(conditionDeep);
+  return typeof x === 'string' ? conditionText(x) : x;
+}
+
+/**
+ * `Unique` over elements that are lists: first occurrences, compared
+ * structurally ({@link sameSequenceElement}), with string leaves conditioned
+ * as the interpreter's boxed strings are. Quadratic, as the elements have no
+ * hashable identity.
+ */
+function uniqueStructural(l: unknown[]): unknown[] {
+  const out: unknown[] = [];
+  for (const x of l) {
+    const c = conditionDeep(x);
+    if (!out.some((y) => sameSequenceElement(y, c))) out.push(c);
+  }
+  return out;
 }
 
 /**
@@ -4535,6 +4569,22 @@ export const SYS_HELPERS = {
   ct: conditionText,
   // `Unique` over possibly-text elements — see `uniqueText`.
   uniqt: uniqueText,
+  // Structural element equality and `Unique` for list-of-lists elements.
+  eqs: sameSequenceElement,
+  uniqs: uniqueStructural,
+  // `Contains`/`Element` over list-of-lists elements: true when an element of
+  // `coll` is structurally the same as `v`. A helper rather than an emitted
+  // arrow, so that the compiled operands run outside any generated binding.
+  hass: (coll: unknown[], v: unknown): boolean =>
+    coll.some((x) => sameSequenceElement(x, v)),
+  // `Contains` and `IndexOf` over possibly-text elements, by the text element
+  // test `eqt` (see `eqText`): true when an element of `coll` is `v`, and the
+  // 1-based index of the first such element (0 when there is none). Helpers
+  // for the same reason as `hass`.
+  hast: (coll: unknown[], v: unknown): boolean =>
+    coll.some((x) => eqText(x, v)),
+  idxt: (coll: unknown[], v: unknown): number =>
+    coll.findIndex((x) => eqText(x, v)) + 1,
   // Coerce a value to the `{ re, im }` complex representation, idempotently.
   //
   // A user function whose signature declares a `complex` PARAMETER compiles

@@ -438,7 +438,8 @@ describe('a run()-supplied string is conditioned exactly as at ingress', () => {
       constantFold: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toContain('_SYS.eqt');
+    // `_SYS.hast` is the text membership test, by `_SYS.eqt`.
+    expect(r.code).toContain('_SYS.hast');
     expect(
       (r.run as (v: Record<string, unknown>) => unknown)({
         needle: E_ACUTE_DECOMPOSED,

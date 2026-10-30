@@ -3051,19 +3051,36 @@ describe('COMPILE collections (fail-closed + supported folds)', () => {
     expect(runJs(e, ['At', 'd', 1])).toBe(10);
   });
 
-  it('Contains / Unique fail closed for compound element types', () => {
+  it('Contains / Unique compare list elements structurally', () => {
     const e = mkEngine();
-    const js = new JavaScriptTarget();
     const nested = ['List', ['List', 1], ['List', 1]];
     // The operands are constant, so constant folding would evaluate these at
-    // compile time and never reach the fail-closed lowering under test.
+    // compile time and never reach the lowering under test.
+    const unique = compile(e.box(['Unique', nested]), {
+      to: 'javascript',
+      fallback: false,
+      constantFold: false,
+    });
+    expect(unique.run!({})).toEqual([[1]]);
+    const contains = compile(e.box(['Contains', nested, ['List', 1]]), {
+      to: 'javascript',
+      fallback: false,
+      constantFold: false,
+    });
+    expect(contains.run!({})).toBe(true);
+  });
+
+  it('Contains / Unique fail closed for tuple elements', () => {
+    const e = mkEngine();
+    const js = new JavaScriptTarget();
+    const tuples = ['List', ['Tuple', 1, 2], ['Tuple', 1, 2]];
     expect(() =>
-      js.compile(e.box(['Unique', nested]), {
+      js.compile(e.box(['Unique', tuples]), {
         constantFold: false,
       })
     ).toThrow(/Could not compile/);
     expect(() =>
-      js.compile(e.box(['Contains', nested, ['List', 1]]), {
+      js.compile(e.box(['Contains', tuples, ['Tuple', 1, 2]]), {
         constantFold: false,
       })
     ).toThrow(/Could not compile/);

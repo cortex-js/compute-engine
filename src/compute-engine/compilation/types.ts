@@ -1916,6 +1916,19 @@ export interface CompileTarget<Expr = unknown> {
    */
   naming?: NamingContext;
 
+  /**
+   * The expression of the root compilation, set at the root compilation
+   * boundary and kept by the `{ ...target }` spreads. A lowering that must
+   * know what the whole compiled program can produce at run time reads it:
+   * the JavaScript `Contains`/`Unique` lowering of list-of-lists elements
+   * refuses when the program can make a `Range` or a lazy collection element
+   * that the interpreter keeps apart from a list (`mayMakeDistinctElement`,
+   * `javascript-target.ts`).
+   * Absent on a target that is not built by a root compilation; such a
+   * lowering then fails closed.
+   */
+  rootExpression?: Expr;
+
   /** Target language identifier (for debugging/logging) */
   language?: string;
 

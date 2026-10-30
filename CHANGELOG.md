@@ -36,6 +36,15 @@
   `Missing` value made the generated function a syntax error. A chain of
   nested selections also compiled each value several times per level (depth 10
   overflowed the stack); depth 24 now compiles in a few milliseconds.
+- **The type of a compiled `run()` accepts a boolean or a string input.** With
+  `c` declared `boolean`, `ce.box(['When', 'x', 'c']).compile().run({ x: 2,
+  c: true })` worked on the JavaScript target but was a TypeScript error; the
+  input type of `run()` (and of a `broadcast()` list input) now admits
+  `boolean` and `string` values.
+- **A value of the wrong type for a `string` variable throws.** With `s`
+  declared `string`, `If(s = "a", 1, 2)` run with `s = 3` gave `2`; it now
+  throws a `TypeError` that names `s`, on `run()` and on `broadcast()`, as a
+  string or a boolean for a number variable already did.
 
 - **`subs()`, `map()` and a recursive `replace()` keep the function each call
   was written with.** With `h := a \mapsto a x`, `e = h(a) + 1`, and then a
@@ -64,8 +73,15 @@
   (`xss: list<list<integer>>`), because the compiled `includes`/`Set` would
   compare the arrays by reference. They now compare the elements structurally,
   as `evaluate()` does, and so do `RangeOf`, `ContainsSequence`, `StartsWith`
-  and `EndsWith`. Elements that are tuples, complex numbers or lists of a type
-  that may be absent are still refused. (#499)
+  and `EndsWith`. These operators are still refused, and the interpreter
+  evaluates them, when the elements are tuples, complex numbers or lists of a
+  type that may be absent, when the searched value may be a tuple, and when
+  the program (or a value or function that it reads) holds a `Map`, a
+  `Filter` or another lazy collection, or a `Range` other than a `Range` of
+  integers with literal bounds. The interpreter keeps those apart from a list
+  of the same values, and the compiled code would not. On the JavaScript
+  target, `Contains` and `IndexOf` over text also no longer fail when a
+  function parameter is named `_v`. (#499)
 
 ## 0.174.0 _2026-10-30_
 
