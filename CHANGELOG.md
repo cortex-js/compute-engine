@@ -81,7 +81,8 @@
   integers with literal bounds. The interpreter keeps those apart from a list
   of the same values, and the compiled code would not. On the JavaScript
   target, `Contains` and `IndexOf` over text also no longer fail when a
-  function parameter is named `_v`. (#499)
+  function parameter is named `_v`. (#499, contributed by
+  [enumeratio](https://github.com/enumeratio) in #500)
 
 ## 0.174.0 _2026-10-30_
 
