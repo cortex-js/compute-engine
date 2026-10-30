@@ -17,6 +17,7 @@ left. A reader needs only this file and the plan.
 | `d7c8fe8b9` | Plan decision 5: the type strings that hot run-time code passed to `matches()`, `isSubtype()`, `new BoxedType()` and `ce.type()` are now `Type` constants built once. On the Tycho `evaluate` benchmark the reads of the type parse cache dropped from 463,619 to 2,270. |
 | `c814b92ae`, `fee72a864` | Plan revisions by session `compute-engine-aa`: step 3a counts, the timings for decision 1, the user's decisions. |
 | `5029c5d77` | Steps 0 and 1 (1a to 1d) of the plan, details below. |
+| `efdd47e57` | Step 5 and the CE-659 fix, details in the table of the other steps. |
 
 Steps 0 and 1 in `5029c5d77`:
 
@@ -70,9 +71,9 @@ and after.
 
 | Step | State | Owner |
 |---|---|---|
-| 5 | Done, STAGED 2026-10-30 (not committed; session `compute-engine-aa`): the enclosure endpoint cache and both contour memos (zero verdicts, complex parts) are removed, and CE-659 is fixed by the user's option (a): `Series` tests each constant coefficient instead of reading the zero-verdict memo, so its result no longer depends on the zero tests that the engine made before. The factor memo stays (decision 1 (a)). Checks in a worktree at HEAD `32096f0bd` with only this change: the 20 series, residue, contour, limit and memo test files (937 tests), the 11 `Enclosure` test files (1,070 tests), `npm run test:core` (5,400 passed), `check:deps`, `tsc`, oxlint, prettier; the paired benchmark (12 workloads, 3 alternating rounds): median ratios 0.99 to 1.17, every digest the same. Dual review of the enclosure part: Codex 0 findings, Claude 1 low (fixed). Dual review of the contour part: 3 rounds. Codex found, one after the other, that the new zero test could run host code through a coefficient that calls a host operator, through a symbol whose value does, and through a host-declared constant; each is fixed with a test in `ce-659-series-zero-coefficient.test.ts` (`isKnownZero()` tests only a coefficient whose calls, and the values of the symbols it reads, are all standard-library operators). The fix of round 3 had no further review (at most three rounds). The Claude reviewer found a missing CHANGELOG entry and two comment nits, all fixed. The paired benchmark ran before these review fixes. | — |
-| 4 | Not started. The dictionary memo compares the settings that the shared memo compares (its host-code fix is in step 1). Small. | Next session. |
-| CE-645 | Not started. A narrow fix instead of all of step 2: the element memo samples whether a transient precision or angular-unit window is open with the rest of its baseline, and does not store a walk during which that changed. | Next session. |
+| 5 | Done, COMMITTED 2026-10-30 (`efdd47e57`; session `compute-engine-aa`). The review of section 2.4 found that this commit made `Series` 1.4 to 1.6× slower on series with transcendental constant coefficients; section 3 says how that is handled. The enclosure endpoint cache and both contour memos (zero verdicts, complex parts) are removed, and CE-659 is fixed by the user's option (a): `Series` tests each constant coefficient instead of reading the zero-verdict memo, so its result no longer depends on the zero tests that the engine made before. The factor memo stays (decision 1 (a)). Checks in a worktree at HEAD `32096f0bd` with only this change: the 20 series, residue, contour, limit and memo test files (937 tests), the 11 `Enclosure` test files (1,070 tests), `npm run test:core` (5,400 passed), `check:deps`, `tsc`, oxlint, prettier; the paired benchmark (12 workloads, 3 alternating rounds): median ratios 0.99 to 1.17, every digest the same. Dual review of the enclosure part: Codex 0 findings, Claude 1 low (fixed). Dual review of the contour part: 3 rounds. Codex found, one after the other, that the new zero test could run host code through a coefficient that calls a host operator, through a symbol whose value does, and through a host-declared constant; each is fixed with a test in `ce-659-series-zero-coefficient.test.ts` (`isKnownZero()` tests only a coefficient whose calls, and the values of the symbols it reads, are all standard-library operators). The fix of round 3 had no further review (at most three rounds). The Claude reviewer found a missing CHANGELOG entry and two comment nits, all fixed. The paired benchmark ran before these review fixes. | — |
+| 4 | Not started; the user decides whether to do it (section 4). The host-code part is done in step 1. The settings part guards a route that the memo's own key already closes in every case found: the memo lives for one outermost dictionary evaluation, keys on the `any` version (a precision or angular-unit setter moves it) and compares the options object by identity (each transient window creates its own options object), and a dictionary that draws is not pure, so the random frame cannot matter. The proposal is a one-line refusal of a store while a transient window is open, instead of the comparison of seven settings. | User decision. |
+| CE-645 | Done 2026-10-30 (session `compute-engine-ac`): the element memo records, before each pull of a recorded walk, whether a transient precision or angular-unit window is open, and does not commit a walk that pulled inside one (`transientPull` in `collection-element-memo.ts`). Test `ce-645-element-memo-transient-window.test.ts` (fails without the fix on `32096f0bd`: 2 of 3). ROADMAP entry removed; CHANGELOG entry added. | — |
 | 2 | Postponed by the user (2026-10-30, reduced plan): the numeric context stamp of plan 6.3. Do it only if a new defect shows a cache that misses a setting. | — |
 | 3a | Done (counts in plan decision 3). | — |
 | 3b | Postponed by the user (reduced plan): the dependency stamp per value cache. Decision 3 (c) (a flag on the `type-write` event; explicit retypes and extensions move the world version) is small and can be done alone if wanted. | — |
@@ -127,6 +128,48 @@ benefit" of these caches was not a valid measurement. Step 0 fixed the
 driver, and session `compute-engine-aa` measured decision 1 again on the case
 each cache was added for (plan section 3.5).
 
+### 2.4 Review of the committed work (2026-10-30, session `compute-engine-ac`)
+
+The user asked for a review and challenge of `5029c5d77` and `efdd47e57`
+before the work continued. Results:
+
+- **The full suite had not run at HEAD.** 21 commits had landed since the
+  last recorded passing run (the repo's limit is 5). `bash
+  scripts/ci-nightly.sh run` at `efdd47e57`: typecheck, declarations, 73,533
+  tests and the checkpoint canary passed; the green mark is recorded.
+- **Two independent read-only reviews with probes** (one of the probe guard,
+  the asynchronous join and the constant key of `5029c5d77`; one of the
+  `Series` change and the removals of `efdd47e57`) found no wrong value and no
+  hang other than the filed CE-649.
+- **`efdd47e57` made `Series` slower.** `isKnownZero()` evaluates every
+  constant coefficient at assembly, where before it evaluated none, and the
+  Laurent tail is scanned twice. Paired timings against `32096f0bd` (same
+  process, median of 7 after 2 warm-ups): 7 of 9 cases with transcendental
+  constant coefficients at 1.38 to 1.62×, the two cases with rational
+  coefficients at 0.96 to 1.07×. Every result is the same except the intended
+  CE-659 case. The step 5 benchmark had one `Series` workload and ran before
+  the review fixes, so it did not show this. The comments that `contour.ts`
+  and `enclosure-arithmetic.ts` carry ("saved at most 14%") measured the
+  memos with the old `isKnownZero()`.
+- **`5029c5d77` had no CHANGELOG entry** for CE-628, CE-647, CE-648 or for
+  the constant-key change (a view over `f(1)` with `f(u) = u + x` follows
+  `x := 5`). Added by this session.
+- **Its commit message says the sequence term memo keeps its counts; the
+  code refuses six more.** No input was found where this changes a term (a
+  stopped read already declines its own terms); recorded in the plan's
+  section 6.2. `docs/RANDOMNESS-MODEL.md` does not mention sequences, while
+  CE-657 lists the sequence terms among the caches that define a result:
+  CE-657's design must decide this.
+- **Small points fixed by this session:** the `store-guard.ts` comment said a
+  change of the iteration limit moves no version (the setter is a
+  configuration event; the count matters for the caches that compare no
+  version); two tests in `ce-601-shared-evaluation.test.ts` were named after
+  the removed memo; the cache census described the contour memos in the
+  present tense.
+- **Not reproduced, kept as a note:** the `at()` cell keeps a value computed
+  with a cut cycle or an incomplete walk at the same generation (its rule
+  before the plan, kept by the user's decision 6).
+
 ### 2.3 Smaller points for the next steps
 
 - The derivative cache must read its versions AFTER `derivative()`
@@ -153,10 +196,35 @@ The user reduced the plan on 2026-10-30, after it took much longer than
 expected: finish step 5 (done), step 4 and a narrow fix of CE-645, and
 postpone steps 2, 3b and 6 until a defect needs them.
 
-1. **Review the work so far** (the user's next session): commits `5029c5d77`
-   (steps 0 and 1) and the staged step 5 change.
-2. **Step 4** and **the CE-645 fix**, as one change if they are small.
-3. For each change: the tests of the changed area, `npm run test:core`, the
+1. **Review the work so far**: done 2026-10-30 (section 2.4).
+2. **The `Series` cost** (user decision 2026-10-30, option (b): keep the test
+   of each constant coefficient, make it cheaper, measure). Session
+   `compute-engine-ac`: the verdicts of one `Series` call are kept for that
+   call only (no state survives the call, so CE-659 stays fixed), and a
+   coefficient that the enclosures of its parts prove not 0 is not evaluated
+   (`provedFiniteNonzero()` in `series.ts`). Measured against `32096f0bd`
+   (each variant in its own process, median of 7 after 2 warm-ups, two runs):
+   the per-call record alone leaves the nine cases at 1.04 to 2.05×; with the
+   enclosure test, eight cases are at 0.96 to 1.15×, the reciprocal case
+   `1/(x² − 3 − 2√2)` at `1 + √2` stays at 1.24 to 1.42× (its expansion engines
+   test the same constant term in two forms, each needing the full exact
+   test), and the unfolded-zero case itself is at 1.65 to 1.77× (the exact
+   test must run once per call; that is the price of the decision). Every
+   result is the same as at `efdd47e57`. Dual review: the Claude reviewer
+   found one low (the exactness claim of the enclosure sum; fixed with a
+   magnitude guard, `exactlySummable()`); Codex ran three rounds: the
+   per-call record kept a verdict of a coefficient with a host call (fixed:
+   such a coefficient is not recorded), then one whose symbol holds `Random()`
+   (fixed: `callsOnlyPureLibraryOperators()` requires each call to be pure,
+   with a test that counts the draws), then a machine-float operand such as
+   `2^(-2000.5)` that evaluates to 0 (fixed: only exact literals are decided
+   by the structural proof). The round-3 fix had no further review. One
+   round-3 finding was refuted: the enclosure of a host-declared constant
+   recomputes its value callback at the raised precision, which is the
+   documented use of `_valueAtCurrentPrecision()` (the exact ordering of the
+   comparisons does the same).
+3. **The CE-645 fix**: done (table above). **Step 4**: user decision.
+4. For each change: the tests of the changed area, `npm run test:core`, the
    full suite under the box lock when the change is under
    `boxed-expression/`, the paired benchmark against a baseline of HEAD (no
    workload's median ratio above 1.25), and the dual review. Stop the review
@@ -176,8 +244,6 @@ postpone steps 2, 3b and 6 until a defect needs them.
 - **CE-621.2** (`ROADMAP.md`): a nested asynchronous evaluation releases its
   parent's host-derived source values. Needs one count of the evaluations in
   progress for each evaluation number, shared by the sync and async routes.
-- **CE-645**: the element memo can store elements computed inside a
-  temporary precision window; the narrow fix of section 3 is next.
 - **CE-615**, decided (b): `{ extend: true }` applies only to expressions
   boxed after the extension. The user documentation of this, and a new
   "Caching" section on `pure: true`, are in

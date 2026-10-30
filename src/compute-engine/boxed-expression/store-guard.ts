@@ -23,8 +23,12 @@
  *   walks it recorded.
  * - `iterationLimit`: a computation was cancelled by `engine.iterationLimit`
  *   and its caller gave an "unknown" answer (`common/interruptible.ts`).
- *   A larger limit can give a definite answer, and a change of the limit
- *   advances no version that a cache compares.
+ *   A larger limit can give a definite answer. The setter of the limit is a
+ *   configuration event, which moves every engine version, but the caches
+ *   that compare no engine version (the approximations of the comparisons,
+ *   the constant entries of the factor memo, the memos of one Rubi call)
+ *   would keep the "unknown" answer, and a cache keyed on a version would
+ *   serve it until the next event.
  * - `lazyValueProvisional`: a re-entrant evaluation of a lazy collection
  *   node whose value is being computed (`boxed-function.ts`).
  * - `cellProvisional`: a re-entrant read of a description cache (type, sign)

@@ -1190,7 +1190,8 @@ function commitRecordedWalk(
   suspendedEpochChange: boolean,
   complete: boolean,
   objectDeps: ObjectDeps | undefined,
-  guard: StoreGuard
+  guard: StoreGuard,
+  transientPull: boolean
 ): void {
   // A partial entry with nothing in it would only churn the cache.
   if (!complete && buffer.length === 0) return;
@@ -1232,9 +1233,16 @@ function commitRecordedWalk(
     )
       return;
   }
-  // Elements computed inside a transient precision window are not stored
-  // (see `validElementMemo`).
-  if (expr.engine._atTransientConfiguration) return;
+  // Elements computed inside a transient precision or angular-unit window
+  // are not stored (see `validElementMemo`): a window open at the commit, or
+  // one that was open when an element was pulled (`transientPull`). The
+  // consumer can open and close a window between two pulls
+  // (`_withTransientPrecision()`, `engine-numeric-configuration.ts`), and a
+  // window moves no engine version, so the pulls themselves must record it.
+  // Without this, a walk started outside a window, pulled inside it and
+  // finished outside it stored elements computed at the precision of the
+  // window (ROADMAP CE-645).
+  if (transientPull || expr.engine._atTransientConfiguration) return;
   elementMemoCaches.set(expr, {
     worldVersion: expr.engine._worldVersion,
     factsHidden: expr.engine._factsHidden(),
@@ -1354,6 +1362,14 @@ function* recordingStream(
    * change may come from two environments; such a buffer is never
    * committed. Neither engine version moves for an ordinary scope change. */
   let suspendedScopeChange = false;
+  /** An element was pulled while a transient precision or angular-unit
+   * window was open (`_atTransientConfiguration`). The element then has the
+   * digits, or the unit, of the window, not of the engine, and the buffer is
+   * not committed (`commitRecordedWalk`). The test is made before each pull:
+   * a window that the element body opens closes before its pull returns, and
+   * a window that the consumer opens between two pulls is open when the next
+   * pull begins. */
+  let transientPull = false;
   let drained = false;
   const startDeps = boundary.deps;
   /** The mutable-object field reads made by the walk itself. A collector is
@@ -1386,6 +1402,7 @@ function* recordingStream(
     if (ce._semanticVersion !== gen) suspendedWrite = true;
     if (ce._worldVersion !== epoch) suspendedEpochChange = true;
     if (ce.context?.lexicalScope !== ambient) suspendedScopeChange = true;
+    if (ce._atTransientConfiguration) transientPull = true;
     let result = pull();
     // Bumps INSIDE `next()` are the walk's own and are absorbed; only a bump
     // observed across a yield boundary is the consumer's. Configuration
@@ -1404,6 +1421,7 @@ function* recordingStream(
       if (ce._semanticVersion !== gen) suspendedWrite = true;
       if (ce._worldVersion !== epoch) suspendedEpochChange = true;
       if (ce.context?.lexicalScope !== ambient) suspendedScopeChange = true;
+      if (ce._atTransientConfiguration) transientPull = true;
       result = pull();
       gen = ce._semanticVersion;
       epoch = ce._worldVersion;
@@ -1433,7 +1451,8 @@ function* recordingStream(
       suspendedEpochChange || suspendedScopeChange,
       drained && !overflow,
       objectDeps,
-      baseline
+      baseline,
+      transientPull
     );
   }
 }

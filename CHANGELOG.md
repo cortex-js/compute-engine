@@ -59,7 +59,22 @@
   constant for 0 once (`exactZeroVerdict()` kept its answers for the life of the
   engine). Each constant coefficient is now tested, so the result is always
   `x − 1/6·x³ + 1/120·x⁵ + O(x⁷)`. A coefficient that is not pure is not tested
-  and stays in the result.
+  and stays in the result. The test costs little on most series: a coefficient
+  such as `sin 1 + cos 1` is proved not 0 from the enclosures of its parts, with
+  no evaluation, and `Series(eˣ·sin(x + 1), x, 0, 15)` takes about the same
+  time as before. A coefficient that is an unfolded 0 runs the exact test at
+  each call, and a series whose expansion tests the same constant term in
+  several forms (`1/(x² − 3 − 2√2)` at `1 + √2`) takes about 1.3 times as long
+  as before.
+
+- **A lazy collection over a call of a user function follows the assignments
+  that change the call.** With `f(u) = u + x` and `x := 1`,
+  `Reverse(List(1, f(1)))` gave `[2, 1]`, and after `x := 5` it still gave
+  `[2, 1]`: the value of the collection was kept as if `f(1)` were a constant.
+  It now gives `[6, 1]`. The same holds after `f` is assigned another function,
+  for a dictionary that holds such a call, and for a call of an operator that
+  the host declared. A collection over calls of the standard library on
+  constants (`Reverse(List(1, Sqrt(2)))`) keeps its value as before.
 
 - **JavaScript: a comparison over a variable the caller did not supply has no
   value** (user decision 2026-10-30). With `x` declared `real`,
@@ -100,6 +115,30 @@
 
 ### Resolved Issues
 
+- **A derivative of a function whose body calls a host operator followed the
+  host state** (CE-628, CE-647). With `h` a host operator that does not state
+  `pure: true` and `f(x) = h(2) · x`, `D(f, x)` was computed once and kept for
+  the engine, so a change of the state that `h` reads was not seen by the next
+  `D(f, x)`, and neither was a new type given to a symbol that the body reads.
+  Both now give the derivative of the current state.
+- **The Rubi integrator kept a zero test or a simplification made with host
+  code** (CE-648). Inside one `Integrate` call, a constant such as `h(1) − 2`
+  with a host operator `h` was tested for 0 once; the second test in the same
+  call reused the first answer although the host state had changed. Each such
+  test is now made again.
+- **A derivative, a Rubi zero test, a dictionary value, or the value of a lazy
+  collection computed from a provisional answer is not kept.** A read cut short
+  by a reference cycle, a stopped sequence read, an iteration limit, or a
+  re-entrant type read gives an answer that a later read can give differently;
+  every cache of evaluated values now refuses such a value, where before each
+  cache tested its own subset of these events.
+- **A lazy collection whose element memo was filled while a transient
+  precision or angular-unit window was open kept the digits of the window**
+  (CE-645). With `a := [1/3]` and `j = Join(Map(x ↦ N(x), a), [9])`, a walk of
+  `j` started outside such a window and pulled inside it stored `0.33333`, and
+  a later `j.at(1)` gave `0.33333` at the engine precision of 21 digits. The
+  walk is no longer stored, and `j.at(1)` gives `0.333333333333333333333`.
+  Only internal callers open such a window.
 - **A function assigned again inside a `Block` is called with its new value.**
   With `gg := t ↦ t + 1` assigned in the engine, `Block(gg := t ↦ t + 10,
   gg(1))` compiled to `2` on JavaScript and Python; it now gives `11`, as the

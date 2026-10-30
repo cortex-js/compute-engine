@@ -116,12 +116,15 @@ host code returned, and survive past one top-level evaluation.
   valid" with different stamps: `_cacheGeneration()` (`_sgn`, `_type`,
   `_eagerSource`, `FACTOR_MEMO`), world version plus dependency snapshot (the
   element, facet, slice and stored-value memos, the `Limit` probes), a
-  structural key with no version (the contour memos, the approximations), and
+  structural key with no version (the contour memos, removed on 2026-10-30 by
+  step 5 of `docs/plans/2026-10-30-evaluation-cache-architecture.md`; the
+  approximations), and
   the `Map` record's own list of stamps. An audit could reduce these to two or
   three shared helpers.
 - **Keys that do not see a redefinition.** The world version does not move
-  when an extension replaces an `evaluate` handler. The contour memos now add
-  `_definitionVersion`. Other caches keyed on the world version with a
+  when an extension replaces an `evaluate` handler. The contour memos added
+  `_definitionVersion` (they are removed since 2026-10-30). Other caches keyed
+  on the world version with a
   dependency snapshot depend on the snapshot to see a new binding; whether
   every one of them sees an in-place extension was not checked.
 - **An extension does not reach expressions boxed before it** (ROADMAP

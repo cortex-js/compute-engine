@@ -945,7 +945,7 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     expect(sl.count).toBe(3);
   });
 
-  test('The zero verdict memo of the contour code: a constant that holds a host operator', () => {
+  test('exactZeroVerdict() of a constant that holds a host operator follows the host state', () => {
     const ce = new ComputeEngine();
     let m = 1;
     ce.declare('R', {
@@ -991,7 +991,7 @@ describe('CE-601: SHARED NODES ARE EVALUATED ONCE', () => {
     expect(lim.evaluate().json).toEqual(0);
   });
 
-  test('The zero verdict memo of the contour code after a redefinition', () => {
+  test('exactZeroVerdict() after a redefinition of an operator that the constant calls', () => {
     const ce = new ComputeEngine();
     ce.declare('F', {
       signature: '(number) -> number',

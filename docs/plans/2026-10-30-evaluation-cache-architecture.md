@@ -636,6 +636,16 @@ before step 1, because their store decision defines a result:
 | Eager source values | Refuses on host only | Host code runs once per evaluation |
 | `at()` cell | Is cleared on host only | The cell value ends a recursive read of the same node |
 
+Two sites accept one or two counts for a stated reason, and the sequence term
+memo refuses more than before (the commit message of `5029c5d77` says that it
+keeps its counts; the code does not):
+
+| Site | Rule after step 1 | Before step 1 |
+|---|---|---|
+| Shared memo | Accepts `incompleteWalk` (compared with its own sample, which a taken-back walk can bring below the guard's) and `lazyValueProvisional` (a re-entrant lazy-collection evaluation computes the full value of its node in its own frame) | Refused host, cycle, sequence stop, re-entrant signature |
+| Application memo | Accepts `lazyValueProvisional` and `reentrantSignature` (the first application of a recursive function reads its own signature while it is derived) | Refused host, sequence stop |
+| Sequence term memo | Accepts `lazyValueProvisional` only | Refused host only. The review of 2026-10-30 found no input where a newly refused count moves while the terms stay numeric (a stopped read already declines its own terms); the effect is fewer stores. CE-657 decides whether this memo defines a result (one draw per term) |
+
 The paired benchmark of step 1 on the 13 workloads gave median ratios from
 0.93 to 1.06, and no round above 1.19.
 

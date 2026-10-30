@@ -15,6 +15,11 @@ import { differentiate } from './derivative.js';
 import { trigToExp } from './trig-rewrite.js';
 import { getFunctionProperties } from '../function-properties/index.js';
 import { exactComplexParts, exactZeroVerdict } from './contour.js';
+import { BigDecimal } from '../../big-decimal/index.js';
+import {
+  isExactConstantExpression,
+  refineExactConstants,
+} from '../boxed-expression/compare.js';
 
 //
 // This module implements `Series` — symbolic Taylor expansion at a regular
@@ -120,11 +125,27 @@ function factorialBig(k: number): bigint {
  * unknown (a parameter such as `a`), is read as not 0: an expansion in a
  * parameter is valid for its generic values. A constant is decided by
  * `exactZeroVerdict()`.
+ *
+ * During a call of `computeSeries()`, the verdicts are kept in the state of
+ * that call (`ZeroTests`). A constant that calls only operators of the
+ * standard library, and that is proved finite and not 0 by the enclosures of
+ * its parts (`provedFiniteNonzero()`), is not evaluated. A constant with a
+ * host call or an impure call (`Random()`), or a symbol whose value has one,
+ * goes to `exactZeroVerdict()` at each test, as it does outside such a call,
+ * and its verdict is not kept: the enclosure of a host call would run its
+ * host code, a host operator that does not state its purity is pure by
+ * default (`isPure`) although its value can change between two calls
+ * (`host-handler-changes.ts`), and a draw must be made at each test.
  */
 function zeroVerdict(c: Expression): boolean | undefined {
   if (isNumber(c)) return c.isSame(0);
   if (!isFunction(c) || c.unknowns.length > 0) return false;
-  return exactZeroVerdict(c);
+  const tests = activeZeroTests;
+  if (!tests || !c.isPure || !callsOnlyPureLibraryOperators(c, new Set()))
+    return exactZeroVerdict(c);
+  return cachedByStructure(tests.verdicts, c, () =>
+    provedFiniteNonzero(c, tests) ? false : exactZeroVerdict(c)
+  );
 }
 
 /**
@@ -134,28 +155,260 @@ function zeroVerdict(c: Expression): boolean | undefined {
  * depend on the constants that the engine tested before.
  *
  * The test evaluates the coefficient. So it tests only a coefficient that
- * runs no host code: each call in it, and in the value of each symbol it
- * reads (`a := 1` in `sin(a) − sin(1)`), is a call of an operator that the
- * standard library defines (`callsOnlyLibraryOperators()`). Another
- * coefficient is not tested, and stays in the result as it is: a host
- * operator that does not state its purity is pure by default (`isPure` is
- * true), but its host code must not run more often than the expression asks.
+ * runs no host code and draws no random value: each call in it, and in the
+ * value of each symbol it reads (`a := 1` in `sin(a) − sin(1)`), is a pure
+ * call of an operator that the standard library defines
+ * (`callsOnlyPureLibraryOperators()`). Another coefficient is not tested, and
+ * stays in the result as it is: a host operator that does not state its
+ * purity is pure by default (`isPure` is true), but its host code must not
+ * run more often than the expression asks, and a value that draws must not
+ * be drawn more often either.
  */
 function isKnownZero(c: Expression): boolean {
   if (c.isSame(0)) return true;
-  if (!c.isPure || !callsOnlyLibraryOperators(c, new Set())) return false;
+  if (!c.isPure || !callsOnlyPureLibraryOperators(c, new Set())) return false;
   return zeroVerdict(c) === true;
 }
 
+/** An interval `[lo, hi]` that holds the exact value of a real constant. */
+type Enclosure = [BigDecimal, BigDecimal];
+
+/** Values computed for constants, in lists by `hash`. An entry matches a
+ * constant by `isSame()`, so two nodes with the same structure share it. */
+type StructureCache<T> = Map<number, { e: Expression; value: T }[]>;
+
+/**
+ * The state of the zero tests during one call of `computeSeries()`. The
+ * call creates it and drops it when it returns (`activeZeroTests`), so no
+ * verdict is kept from one call to the next: a coefficient that is an
+ * unfolded 0 is tested, and dropped, at every call.
+ *
+ * In one call, the engines and the assembly test the same constants more
+ * than once: the valuation of a Laurent value (`trueVal()`) and the test for
+ * a pole (`reciprocalC()`) read the same constant term, and the assembly of
+ * a Laurent value reads the coefficients past the cut twice. Each verdict is
+ * computed once in the call.
+ *
+ * Most coefficients are not 0, and `exactZeroVerdict()` evaluates each one
+ * before it computes an enclosure. The coefficients of one expansion are
+ * built from a few constants (`sin(1)` and `cos(1)` in each coefficient of
+ * `e^x·sin(x + 1)`). So `provedFiniteNonzero()` computes the enclosure of
+ * each such constant once in the call, and decides most coefficients from
+ * these enclosures, with no evaluation.
+ */
+interface ZeroTests {
+  /** The result of `zeroVerdict()` for each constant tested in the call. */
+  verdicts: StructureCache<boolean | undefined>;
+  /** The enclosure of each constant computed in the call (`enclosureOf()`),
+   * or `undefined` when the constant has none (a complex value, an
+   * operator with no error bound). */
+  enclosures: StructureCache<Enclosure | undefined>;
+}
+
+/** The state of the zero tests of the `computeSeries()` call that runs, or
+ * `undefined` outside such a call. */
+let activeZeroTests: ZeroTests | undefined;
+
+/** The value in `cache` for the constant `e`. When there is none, it is
+ * computed by `compute()` and put in `cache`. */
+function cachedByStructure<T>(
+  cache: StructureCache<T>,
+  e: Expression,
+  compute: () => T
+): T {
+  const hit = cache.get(e.hash)?.find((entry) => entry.e.isSame(e));
+  if (hit) return hit.value;
+  const value = compute();
+  const bucket = cache.get(e.hash);
+  if (bucket) bucket.push({ e, value });
+  else cache.set(e.hash, [{ e, value }]);
+  return value;
+}
+
+/**
+ * Whether the constant `e` is proved to be finite and not 0, with no
+ * evaluation. `false` means that this test did not decide, not that `e` is 0.
+ *
+ * A product, a quotient, a negation, a square root, and a power with an exact
+ * finite number-literal exponent, are finite and not 0 when each operand is
+ * finite and not 0. A sum is decided from the enclosures of its terms
+ * (`sumExcludesZero()`). Another constant (`sin(1)`, `π`, `ln 2`) is decided
+ * by its enclosure (`enclosureOf()`): an enclosure is finite, and one that
+ * excludes 0 proves that the value is not 0.
+ */
+function provedFiniteNonzero(e: Expression, tests: ZeroTests): boolean {
+  // Only an exact number literal is decided by its value: the evaluation of
+  // a product or a power of machine floats can underflow to 0 (`2^(-2000.5)`
+  // evaluates to 0), and the verdict must agree with the evaluation.
+  if (isNumber(e)) return e.isExact && e.isFinite === true && !e.isSame(0);
+  if (isFunction(e)) {
+    switch (e.operator) {
+      case 'Negate':
+      case 'Multiply':
+      case 'Divide':
+      case 'Sqrt':
+        return e.ops.every((op) => provedFiniteNonzero(op, tests));
+      case 'Power':
+        if (isNumber(e.op2) && e.op2.isExact && e.op2.isFinite === true)
+          return provedFiniteNonzero(e.op1, tests);
+        break;
+      case 'Add': {
+        const sum = sumExcludesZero(e.ops, tests);
+        if (sum !== undefined) return sum;
+        break;
+      }
+    }
+  }
+  const enclosure = enclosureOf(e, tests);
+  return enclosure !== undefined && excludesZero(enclosure);
+}
+
+function excludesZero([lo, hi]: Enclosure): boolean {
+  return lo.gt(0) || hi.lt(0);
+}
+
+/**
+ * Whether the sum of `terms` is proved not 0 by the enclosures of its
+ * factors. Each term is read as `(p/q)·a`, with a rational number `p/q` and
+ * a product `a` of constants (`a` is 1 for a rational term). With `Q` the
+ * least common multiple of the denominators `q`, the sum has the sign of
+ * `Σ (p·Q/q)·a`. The enclosure of this sum is computed from the enclosures
+ * of the factors of each `a`. A big decimal times an integer is exact. The
+ * sum of two big decimals is exact when the lowest digit of one operand and
+ * the highest digit of the other are at most 10,000 decimal places apart
+ * (`maxExactGap()` in `big-decimal.ts`; past that gap the smaller operand is
+ * replaced by one unit at the limit). So each scaled end must be 0 or
+ * between 10⁻⁴⁰⁰⁰ and 10⁴⁰⁰⁰ in magnitude (`exactlySummable()`): two such
+ * values are at most about 8,000 places apart, and so is each partial sum
+ * with the next end. Then the enclosure holds the exact value, and the sum
+ * is not 0 when its enclosure excludes 0. `undefined` when a term is not of
+ * this form, when a factor has no enclosure, or when an end is outside that
+ * range.
+ */
+function sumExcludesZero(
+  terms: ReadonlyArray<Expression>,
+  tests: ZeroTests
+): boolean | undefined {
+  const parts: [bigint, bigint, Enclosure][] = [];
+  let lcm = 1n;
+  for (const term of terms) {
+    const part = rationalTimesEnclosure(term, tests);
+    if (part === undefined) return undefined;
+    parts.push(part);
+    const q = part[1];
+    lcm = (lcm / gcdBig(lcm, q)) * q;
+  }
+  let lo = BigDecimal.ZERO;
+  let hi = BigDecimal.ZERO;
+  for (const [p, q, [termLo, termHi]] of parts) {
+    const k = new BigDecimal((p * lcm) / q);
+    const a = termLo.mul(k);
+    const b = termHi.mul(k);
+    if (!exactlySummable(a) || !exactlySummable(b)) return undefined;
+    if (p >= 0n) {
+      lo = lo.add(a);
+      hi = hi.add(b);
+    } else {
+      lo = lo.add(b);
+      hi = hi.add(a);
+    }
+  }
+  return excludesZero([lo, hi]);
+}
+
+const EXACT_SUM_MIN = new BigDecimal('1e-4000');
+const EXACT_SUM_MAX = new BigDecimal('1e4000');
+
+/** Whether `x` is 0 or between 10⁻⁴⁰⁰⁰ and 10⁴⁰⁰⁰ in magnitude, so that its
+ * sum with another such value is exact (`sumExcludesZero()`). */
+function exactlySummable(x: BigDecimal): boolean {
+  if (x.isZero()) return true;
+  const magnitude = x.abs();
+  return magnitude.gt(EXACT_SUM_MIN) && magnitude.lt(EXACT_SUM_MAX);
+}
+
+/** The term `t` as `[p, q, enclosure of a]`, where `t = (p/q)·a`, `q > 0`,
+ * and `a` is a product of constants that each have an enclosure; or
+ * `undefined` when `t` is not of this form. */
+function rationalTimesEnclosure(
+  t: Expression,
+  tests: ZeroTests
+): [bigint, bigint, Enclosure] | undefined {
+  let p = 1n;
+  let q = 1n;
+  let enclosure: Enclosure = [BigDecimal.ONE, BigDecimal.ONE];
+  let factors: ReadonlyArray<Expression> = [t];
+  if (isFunction(t, 'Negate')) {
+    p = -1n;
+    factors = [t.op1];
+  }
+  if (isFunction(factors[0], 'Multiply')) factors = factors[0].ops;
+  for (const factor of factors) {
+    if (isNumber(factor)) {
+      const r = asRational(factor);
+      if (r === undefined) return undefined;
+      p *= BigInt(r[0]);
+      q *= BigInt(r[1]);
+      continue;
+    }
+    const e = enclosureOf(factor, tests);
+    if (e === undefined) return undefined;
+    enclosure = multiplyEnclosures(enclosure, e);
+  }
+  if (q < 0n) [p, q] = [-p, -q];
+  return [p, q, enclosure];
+}
+
+/** The enclosure of the product of two values from their enclosures: the
+ * smallest and the largest of the four products of the ends. The products of
+ * big decimals are exact. */
+function multiplyEnclosures(
+  [aLo, aHi]: Enclosure,
+  [bLo, bHi]: Enclosure
+): Enclosure {
+  const products = [aLo.mul(bLo), aLo.mul(bHi), aHi.mul(bLo), aHi.mul(bHi)];
+  let lo = products[0];
+  let hi = products[0];
+  for (const x of products) {
+    if (x.lt(lo)) lo = x;
+    if (x.gt(hi)) hi = x;
+  }
+  return [lo, hi];
+}
+
+function gcdBig(a: bigint, b: bigint): bigint {
+  if (a < 0n) a = -a;
+  if (b < 0n) b = -b;
+  while (b !== 0n) [a, b] = [b, a % b];
+  return a;
+}
+
+/**
+ * The enclosure of the exact real constant `e` at the first precision of
+ * `refineExactConstants()`, computed from `e` as it is, with no evaluation.
+ * `undefined` when `e` is not an exact constant expression or has no
+ * enclosure. The enclosures are kept in `tests` for the rest of the call.
+ */
+function enclosureOf(e: Expression, tests: ZeroTests): Enclosure | undefined {
+  return cachedByStructure(tests.enclosures, e, () =>
+    isExactConstantExpression(e)
+      ? refineExactConstants([e], ([bounds]) => bounds)
+      : undefined
+  );
+}
+
 /** Whether every call in `e`, and in the value of each symbol that `e`
- * reads, is a call of an operator that the standard library defines. A
- * symbol with no value passes: `zeroVerdict()` does not evaluate a
- * coefficient that has an unknown. A value that the host declared as a
+ * reads, is a pure call of an operator that the standard library defines.
+ * The value of a symbol is tested too because `isPure` of a node does not
+ * follow the values of the symbols it reads: `Round(r)` with `r := Random()`
+ * is pure by `isPure`, and its value changes at each evaluation (ROADMAP
+ * CE-657). A symbol with no value passes: `zeroVerdict()` does not evaluate
+ * a coefficient that has an unknown. A value that the host declared as a
  * function is computed by this read, once, as the evaluation would compute
  * it. `seen` holds the nodes and symbols already visited, so a node that the
  * expression uses at several places is visited once, and a value that reads
  * its own symbol ends the walk. */
-function callsOnlyLibraryOperators(
+function callsOnlyPureLibraryOperators(
   e: Expression,
   seen: Set<Expression>
 ): boolean {
@@ -163,11 +416,12 @@ function callsOnlyLibraryOperators(
   seen.add(e);
   if (isSymbol(e)) {
     const value = e.valueDefinition?.value;
-    return value === undefined || callsOnlyLibraryOperators(value, seen);
+    return value === undefined || callsOnlyPureLibraryOperators(value, seen);
   }
   if (!isFunction(e)) return true;
-  if (e.operatorDefinition?._standardLibrary !== true) return false;
-  return e.ops.every((op) => callsOnlyLibraryOperators(op, seen));
+  if (e.operatorDefinition?._standardLibrary !== true || e.isPure !== true)
+    return false;
+  return e.ops.every((op) => callsOnlyPureLibraryOperators(op, seen));
 }
 
 /** `c`, or the number 0 when `c` is proved 0 (`zeroVerdict()`). The value of
@@ -1878,6 +2132,27 @@ export type LimitResolver = (
  * expansions at infinity should resolve (see `LimitResolver`).
  */
 export function computeSeries(
+  f: Expression,
+  x: string,
+  x0: Expression,
+  n: number,
+  ce: ComputeEngine,
+  resolveLimit?: LimitResolver
+): Expression | undefined {
+  // A call made while another one runs (a coefficient whose evaluation
+  // expands a series) gets its own state, and the state of the outer call is
+  // put back when it returns.
+  const outer = activeZeroTests;
+  activeZeroTests = { verdicts: new Map(), enclosures: new Map() };
+  try {
+    return computeSeriesInCall(f, x, x0, n, ce, resolveLimit);
+  } finally {
+    activeZeroTests = outer;
+  }
+}
+
+/** The work of `computeSeries()`, with the state of its zero tests set. */
+function computeSeriesInCall(
   f: Expression,
   x: string,
   x0: Expression,
