@@ -1868,8 +1868,12 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   declared `real<0..10>`), a product of factors that all have a known
  *   magnitude stays within half the largest f32, a power `b^n` with an
  *   integer literal `n` from 2 to 4 has a base of known magnitude (a
- *   declared range, `sin`, `cos`, a literal, or a sum of these) whose
- *   `n`-th power stays within half the largest f32, a quotient has a
+ *   declared range, `sin`, `cos`, a literal, a product of number literals
+ *   that are not rationals and one of the others, such as `2x` or
+ *   `-0.14·cos(T)`, or a sum of these) whose `n`-th power stays within half
+ *   the largest f32, a sum that holds such a power has terms whose bounds
+ *   (for a product term of that form with no range in its type, `|c|·m`)
+ *   add up to at most half the largest f32, a quotient has a
  *   non-zero literal divisor, and a subtree with no unknowns has a value
  *   that is finite in f32. A finite operand that
  *   overflows becomes `±∞` in the shader, and the guard turns `sin(∞)` into
@@ -2074,7 +2078,13 @@ function gpuFiniteProof(
           )
         ) {
           let s = 0;
-          for (const t of terms) s += magnitude(t) ?? Infinity;
+          // A product term of the form that a power base accepts
+          // (`productBound`: number literals and one atom) has the bound
+          // `|c|·m` when its type has no range: `(2x)^2 + 3x`. `magnitude`
+          // does not give that bound (see there). A negated term is read
+          // here as its operand, as `collect` unwraps `Negate`.
+          for (const t of terms)
+            s += magnitude(t) ?? productBound(t) ?? Infinity;
           result = Number.isFinite(s) && s <= GPU_F32_MAX / 2;
         } else result = true;
       }
@@ -2111,7 +2121,15 @@ function gpuFiniteProof(
   // declaration of a symbol gives, and that the type of a sum or a product
   // of such symbols carries: `k·t` with `k: real<0..10>` and
   // `t: real<-7..7>` is typed `real<-70..70>`). A declared range is a
-  // promise of the host, as a declared `real` is (see above).
+  // promise of the host, as a declared `real` is (see above). A product of
+  // number literals and one atom (`productBound`: `2x` with
+  // `x: real<-10..10>`) has no bound here unless its type has a range: the
+  // product rule, the call-site facts and a value written in place of a
+  // symbol read this bound, and the product rule accepts one factor of
+  // unknown magnitude beside factors with a bound: `sin(c·y)` with
+  // `c ≔ 10³⁰·cos(T)` and `y: real` would pass, and is `+∞` in f32 at
+  // `T = 0`, `y = 10⁹`. Only the sum check of `finite` and the base of a
+  // small power (`powerBaseMagnitude`) read the bound of such a product.
   const magnitude = (e: Expression, depth = 0): number | undefined => {
     if (isNumber(e))
       return e.im === 0 && Number.isFinite(e.re) ? Math.abs(e.re) : undefined;
@@ -2197,39 +2215,23 @@ function gpuFiniteProof(
   };
   // A bound of the magnitude of the base `b` of a small power, for three
   // forms only: a term, the negation of a term, or a sum or a difference of
-  // such terms (the sum of their bounds). A term is a finite number
-  // literal, `sin` or `cos` of a real operand (at most 1), or a symbol that the
+  // such terms (the sum of their bounds). A term is an atom, or a product of
+  // one atom that is not a literal and of one or more number literals (the
+  // product of the bounds: `|c|·m`). An atom is a finite number literal,
+  // `sin` or `cos` of a real operand (at most 1), or a symbol that the
   // shader reads as the host's input with a DECLARED type that has a finite
   // numeric range (`x: real<-10..10>`). A symbol whose type is inferred,
   // whose value the shader computes in its place, that the compiled code
   // writes, or that is a parameter of the body being compiled has no bound
-  // here. Any other form gives `undefined`.
+  // here. Any other form gives `undefined`: a product of two atoms that are
+  // not literals (`x·y`), a factor of another form (`0.5·exp(T)`), and a
+  // rational factor, which the shader computes as a division (`2x/3` is
+  // `x / 3.0 * 2.0`).
   const powerBaseMagnitude = (b: Expression): number | undefined => {
     const term = (t: Expression): number | undefined => {
       if (isFunction(t) && t.operator === 'Negate') t = t.op1;
-      if (isNumber(t))
-        return t.im === 0 && Number.isFinite(t.re) ? Math.abs(t.re) : undefined;
-      // A real operand only, as in `magnitude`: `cos(z)` of a complex `z`
-      // grows as `cosh(Im z)`.
-      if (isFunction(t) && (t.operator === 'Sin' || t.operator === 'Cos'))
-        return t.nops === 1 &&
-          (t.type.matches('real') || (strict && finite(t.op1)))
-          ? 1
-          : undefined;
-      if (!isSymbol(t)) return undefined;
-      if (
-        facts?.has(t.symbol) === true ||
-        isWritten(t.symbol) ||
-        bakedValue(t) !== undefined ||
-        t.valueDefinition?.inferredType === true
-      )
-        return undefined;
-      const type = t.type.type;
-      if (typeof type !== 'object' || type.kind !== 'numeric') return undefined;
-      const { lower, upper } = type;
-      if (lower === undefined || upper === undefined) return undefined;
-      const m = Math.max(Math.abs(lower), Math.abs(upper));
-      return Number.isFinite(m) ? m : undefined;
+      if (isFunction(t) && t.operator === 'Multiply') return productBound(t);
+      return atomBound(t);
     };
     if (isFunction(b) && (b.operator === 'Add' || b.operator === 'Subtract')) {
       let s = 0;
@@ -2241,6 +2243,53 @@ function gpuFiniteProof(
       return Number.isFinite(s) ? s : undefined;
     }
     return term(b);
+  };
+  // The bound of a product term of a small power base (see
+  // `powerBaseMagnitude`): number literals that are not rationals, and
+  // exactly one atom that is not a literal. Any other product gives
+  // `undefined`.
+  const productBound = (p: Expression): number | undefined => {
+    if (!isFunction(p) || p.operator !== 'Multiply') return undefined;
+    let bound = 1;
+    let literals = 0;
+    let others = 0;
+    for (const op of p.ops) {
+      if (isNumber(op)) {
+        if (op.operator === 'Rational') return undefined;
+        literals += 1;
+      } else others += 1;
+      const m = atomBound(op);
+      if (m === undefined) return undefined;
+      bound *= m;
+    }
+    if (literals === 0 || others !== 1) return undefined;
+    return Number.isFinite(bound) ? bound : undefined;
+  };
+  // The bound of an atom of a small power base (see `powerBaseMagnitude`).
+  const atomBound = (t: Expression): number | undefined => {
+    if (isNumber(t))
+      return t.im === 0 && Number.isFinite(t.re) ? Math.abs(t.re) : undefined;
+    // A real operand only, as in `magnitude`: `cos(z)` of a complex `z`
+    // grows as `cosh(Im z)`.
+    if (isFunction(t) && (t.operator === 'Sin' || t.operator === 'Cos'))
+      return t.nops === 1 &&
+        (t.type.matches('real') || (strict && finite(t.op1)))
+        ? 1
+        : undefined;
+    if (!isSymbol(t)) return undefined;
+    if (
+      facts?.has(t.symbol) === true ||
+      isWritten(t.symbol) ||
+      bakedValue(t) !== undefined ||
+      t.valueDefinition?.inferredType === true
+    )
+      return undefined;
+    const type = t.type.type;
+    if (typeof type !== 'object' || type.kind !== 'numeric') return undefined;
+    const { lower, upper } = type;
+    if (lower === undefined || upper === undefined) return undefined;
+    const m = Math.max(Math.abs(lower), Math.abs(upper));
+    return Number.isFinite(m) ? m : undefined;
   };
   return { finite, magnitude: (e) => magnitude(e) };
 }

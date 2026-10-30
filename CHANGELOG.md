@@ -1,5 +1,16 @@
 ## [Unreleased]
 
+### Performance
+
+- **GLSL/WGSL: a small power of a scaled bounded value no longer needs the
+  NaN-safe helper.** The base of a power `b^n` (`n` from 2 to 4) proven finite
+  for `sin`, `cos`, `sign`, `min`, `max` and `clamp` can now hold a product of
+  number literals and one bounded part: with `x, y: real<-10^{15}..10^{15}>`
+  and `T: real<-10..10>`, `\min((x - 0.14\cos(T+1.9) + 0.189)^2, y)` and
+  `\min((2x)^2, y)` compile to the built-in `min` instead of `_gpu_min`. A
+  rational factor (`\frac{2}{3}x`), two symbols (`xy`), or a product whose size
+  can overflow keeps the helper.
+
 ### Resolved Issues
 
 - **A written `Missing` value beside a point or a list compiles to the absence

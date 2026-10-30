@@ -4,8 +4,9 @@
  * finite for certain (`gpuProvablyFinite` in `compilation/gpu-target.ts`).
  * The proof now accepts one more head: `b^n` with an integer literal `n`
  * from 2 to 4, when the base `b` has a bound `m` of its magnitude read from
- * its parts (a literal, `sin` or `cos`, a symbol with a declared range, the
- * negation of one of these, or a sum of them) and `m^n` stays within half
+ * its parts (a literal, `sin` or `cos`, a symbol with a declared range, a
+ * product of number literals and one of these, the negation of one of
+ * these, or a sum of them) and `m^n` stays within half
  * the largest f32. The power is accepted only as the operand of the guarded
  * call itself, or as a term of a sum in that position: as a factor, or
  * under `floor`, `abs` or any other head, its size would be lost. Everything
@@ -246,6 +247,139 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565.6 on %s', (to) => {
       ce3.declare('Y', 'real<16777217..16777217>');
       ce3.declare('C', 'real<0..2e37>');
       expect(shader(ce3, '\\sin(C\\exp(X-Y))', to).code).toMatch(/^_gpu_sin\(/);
+    });
+  });
+
+  // A term of the base can be a product of number literals and one atom
+  // (a ranged symbol, `sin` or `cos` of a real), with the bound `|c|·m`.
+  // Tycho row 470: the voronoi operands.
+  describe('a product of literals and one atom in the base', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real<-1e15..1e15>');
+    ce.declare('y', 'real<-1e15..1e15>');
+    ce.declare('T', 'real<-10..10>');
+
+    const accepted: [string, string][] = [
+      ['\\min((x-0.14\\cos(T))^2, y)', 'min(_gpu_pow2(x + -0.14 * cos(T)), y)'],
+      ['\\min((2x)^2, y)', 'min(_gpu_pow2(2.0 * x), y)'],
+      [
+        '\\min((x - 0.14\\cos(T+1.9) + 0.189)^2, y)',
+        'min(_gpu_pow2(x + -0.14 * cos(T + 1.9) + 0.189), y)',
+      ],
+      // The bound of the product feeds the sum check.
+      ['\\min((2x)^2 + 3x, y)', 'min(_gpu_pow2(2.0 * x) + 3.0 * x, y)'],
+    ];
+
+    it.each(accepted)('%s uses the built-in', (latex, expected) => {
+      expect(shader(ce, latex, to).code).toBe(expected);
+    });
+
+    it.each(accepted)('%s matches the interpreter', (latex) => {
+      const { code, preamble } = shader(ce, latex, to);
+      const f = shaderOf(code, preamble, to);
+      const expr = ce.parse(latex);
+      for (const [x, y, T] of [
+        [0, 0, 0],
+        [0.3, 5, 1.2],
+        [-2.5, 100, -7.5],
+        [1e15, 1e15, 10],
+        [-1e15, 1e15, -10],
+        [3e7, 2e15, 2.7],
+      ]) {
+        // The interpreter reads its inputs as f32 values.
+        const xs = Math.fround(x);
+        const ys = Math.fround(y);
+        const Ts = Math.fround(T);
+        const expected = expr.subs({ x: xs, y: ys, T: Ts }).N().re;
+        expect(Number.isFinite(f(x, y, T))).toBe(true);
+        expect(
+          Math.abs(f(x, y, T) - expected) / Math.max(1, Math.abs(expected))
+        ).toBeLessThan(1e-5);
+      }
+    });
+
+    it.each([
+      // `(10²⁰·x)²` is up to 10⁷⁰: `+∞` in f32.
+      ['\\min((1e20 x)^2, y)', ce],
+      // Two atoms that are not literals: no literal factor.
+      ['\\min((x y)^2, y)', ce],
+      // A rational factor is a division in the shader (`x / 3.0 * 2.0`).
+      ['\\min((2 x / 3)^2, y)', ce],
+      // `exp` is not an atom.
+      ['\\min((0.5 \\exp(T))^2, y)', ce],
+    ] as const)('%s keeps the helper', (latex, engine) => {
+      expect(shader(engine, latex, to).code).toMatch(/^_gpu_min\(/);
+    });
+
+    it('keeps the helper for a factor with no range', () => {
+      const ce2 = new ComputeEngine();
+      ce2.declare('x', 'real');
+      ce2.declare('y', 'real');
+      expect(shader(ce2, '\\min((3x)^2, y)', to).code).toBe(
+        '_gpu_min(_gpu_pow2(3.0 * x), y)'
+      );
+    });
+
+    it('keeps the helper for two atoms with small ranges', () => {
+      // The bound `x·y ≤ 100` is small, but a product of two atoms that are
+      // not literals is not a term of the base.
+      expect(shader(ranged, '\\min((xy)^2, y)', to).code).toMatch(
+        /^_gpu_min\(/
+      );
+    });
+
+    it('keeps the helper near the limit of f32', () => {
+      const ce2 = new ComputeEngine();
+      ce2.declare('w', 'real<-3e9..3e9>');
+      ce2.declare('y', 'real<-10..10>');
+      // `w^4` is at most 8.1·10³⁷; `(2w)^4` is up to 1.3·10³⁹, `+∞` in f32.
+      expect(shader(ce2, '\\min(w^4, y)', to).code).toBe(
+        'min((w * w * w * w), y)'
+      );
+      expect(shader(ce2, '\\min((2w)^4, y)', to).code).toMatch(/^_gpu_min\(/);
+    });
+
+    it('keeps the helper for a sum whose product terms can overflow together', () => {
+      const ce2 = new ComputeEngine();
+      ce2.declare('u', 'real<-6e18..6e18>');
+      ce2.declare('v', 'real<-6e18..6e18>');
+      ce2.declare('y', 'real<-10..10>');
+      ce2.declare('r', 'real');
+      // Each square is at most 1.44·10³⁸; the sum is up to 2.9·10³⁸, more
+      // than half the largest f32.
+      expect(shader(ce2, '\\min((2u)^2, y)', to).code).toBe(
+        'min(_gpu_pow2(2.0 * u), y)'
+      );
+      expect(shader(ce2, '\\min((2u)^2+(2v)^2, y)', to).code).toMatch(
+        /^_gpu_min\(/
+      );
+      // A product term with no range beside the power.
+      expect(shader(ce2, '\\min((2u)^2+3r, y)', to).code).toMatch(
+        /^_gpu_min\(/
+      );
+    });
+
+    // The bound `|c|·m` of a product is read only by the sum check and the
+    // base of a small power. The product rule accepts one factor of unknown
+    // magnitude beside factors with a bound, so a bound of `c` there would
+    // accept `c·y` with `y: real`, which is `+∞` in f32 at `T = 0`,
+    // `y = 10⁹` when `c = 10³⁰·cos(T)`.
+    it.each([
+      [
+        'c := 1e30\\cos(T)',
+        '\\sin(c\\cdot y)',
+        '_gpu_sin((1e+30 * cos(T)) * y)',
+      ],
+      ['c := 2\\sin(T)', '\\sin(c\\cdot y)', '_gpu_sin((2.0 * sin(T)) * y)'],
+      // A call argument: the bound of the argument is the fact of `p`.
+      ['F(p) := \\sin(p y)', 'F(1e30\\cos(T))', 'return _gpu_sin(p * y);'],
+    ])('with %s, %s keeps the helper', (def, latex, expected) => {
+      const ce2 = new ComputeEngine();
+      ce2.declare('T', 'real');
+      ce2.declare('y', 'real');
+      ce2.parse(def).evaluate();
+      const { code, preamble } = shader(ce2, latex, to);
+      expect(`${preamble}\n${code}`).toContain(expected);
     });
   });
 });
