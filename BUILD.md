@@ -192,6 +192,10 @@ If extended validation already passed on the unchanged release tree, use
 supported path without the local suite-status helper. Never use this assertion
 for an unverified or subsequently changed tree.
 
+The build and the VS Code extension packaging print one line per step. Their
+output goes to a log in `$TMPDIR/compute-engine-publish/`, and a failing step
+prints the end of its log. `CE_VERBOSE=1 npm publish` shows all the output.
+
 </details>
 
 Alternatively, push the version commit and create a GitHub release tagged

@@ -17,9 +17,12 @@
 set -e  # exit immediately on error
 cd "$(dirname "$0")/../vscode-epsil"
 
-npm ci
-npm test
-npm run package
+# Each step writes its output to a log and prints one line; a failing step
+# prints its log (scripts/run-quietly.sh).
+QUIET="bash ../scripts/run-quietly.sh"
+$QUIET "VS Code extension: install" npm ci
+$QUIET "VS Code extension: build and test" npm test
+$QUIET "VS Code extension: package" npm run package
 
 VERSION=$(node -pe "require('./package.json').version")
 VSIX_PATH="$(pwd)/epsil.vsix"

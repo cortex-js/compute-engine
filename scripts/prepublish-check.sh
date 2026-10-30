@@ -76,6 +76,19 @@ if [ ! -f "$SUITE_STATUS" ]; then
 fi
 HEAD_FILE="$(git rev-parse --git-dir)/ce-publish-head"
 
+# release_check: run `suite-status.mjs release-check` and set STATUS to its
+# exit code. Its output is shown only when it refuses for a reason other
+# than "no passing full run covers HEAD" (exit 3): that case is expected
+# before a release, and this script handles it by running the suite.
+release_check() {
+  local out
+  out=$(node "$SUITE_STATUS" release-check --repo . 2>&1)
+  STATUS=$?
+  if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 3 ]; then
+    echo "$out"
+  fi
+}
+
 # refuse_status <exit code of release-check>: the message for a refusal.
 refuse_status() {
   echo ""
@@ -93,9 +106,11 @@ if [ "${1:-}" != "--after-pack" ]; then
   # needed, runs after the build (below), so that a failing build, a failing
   # declaration or documentation step, or a failing consumer smoke test is
   # found in a minute or two and not after the test run.
-  node "$SUITE_STATUS" release-check --repo .
-  STATUS=$?
+  release_check
   [ "$STATUS" -eq 0 ] || [ "$STATUS" -eq 3 ] || refuse_status "$STATUS"
+  if [ "$STATUS" -eq 3 ]; then
+    echo "· Full test suite: no passing run at HEAD yet; it runs after the build."
+  fi
   git rev-parse HEAD > "$HEAD_FILE"
   exit 0
 fi
@@ -110,19 +125,15 @@ if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
   echo ""
   exit 1
 fi
-node "$SUITE_STATUS" release-check --repo .
-STATUS=$?
+release_check
 if [ "$STATUS" -eq 3 ]; then
-  echo ""
-  echo "→ The build passed. Running the full test suite at HEAD now. It waits for"
-  echo "  the box lock, then takes about 7 minutes. (A one-time password given with"
-  echo "  --otp expires meanwhile: in that case run 'bash scripts/ci-nightly.sh run'"
-  echo "  first.)"
-  echo ""
+  echo "→ Running the full test suite at HEAD. It waits for the box lock, then"
+  echo "  takes about 7 minutes. (A one-time password given with --otp expires"
+  echo "  meanwhile: in that case run 'bash scripts/ci-nightly.sh run' first.)"
   bash scripts/ci-nightly.sh run --commit "$(git rev-parse HEAD)"
-  node "$SUITE_STATUS" release-check --repo .
-  STATUS=$?
+  release_check
   if [ "$STATUS" -eq 3 ]; then
+    node "$SUITE_STATUS" release-check --repo .
     echo ""
     echo "✗ The full test suite did not pass at HEAD, or did not complete (no box"
     echo "  lock, or interrupted). Its log is named above. Fix the cause, commit,"
