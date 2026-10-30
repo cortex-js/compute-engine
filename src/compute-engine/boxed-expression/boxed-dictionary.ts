@@ -1,6 +1,7 @@
 import { cacheOff } from '../../common/cache-switches.js';
 import { beginStoreGuard } from './store-guard.js';
 import type {
+  AngularUnit,
   Expression,
   PatternMatchOptions,
   BoxedSubstitution,
@@ -616,17 +617,33 @@ export class BoxedDictionary
     // evaluation of the outermost dictionary, the value of each pure
     // dictionary node is computed once (`dictionaryEvaluationMemo`). CE-372.
     const version = ce._anyVersion;
+    // A transient precision or angular-unit window (the engine methods
+    // `_withTransientPrecision()` and `_withTransientAngularUnit()`, which run
+    // `withTransientPrecision()` and `withTransientAngularUnit()` of
+    // `engine-numeric-configuration.ts`) moves no engine version, and a value
+    // computed in the window has the digits, or the unit, of the window;
+    // `N(x, p)` can set the requested precision with no window either
+    // (`_requestedPrecision`). So an entry also records the three settings it
+    // was computed at, and is used only at the same ones. A node keeps one
+    // entry per context: the entry of one context does not replace the entry
+    // of another, so a node read inside and outside a window at each level
+    // (`{a: d, b: W(d), c: d}`, where `W` opens a window) is still computed
+    // once per context, not once per path.
     const pure = this.isPure;
-    if (pure) {
-      const hit = cacheOff('dictionary')
-        ? undefined
-        : dictionaryEvaluationMemo?.get(this);
-      if (
-        hit !== undefined &&
-        hit.options === options &&
-        hit.version === version
-      )
-        return hit.value;
+    const context: DictionaryMemoContext | undefined = pure
+      ? {
+          options,
+          version,
+          precision: ce.precision,
+          requestedPrecision: ce._requestedPrecision,
+          angularUnit: ce.angularUnit,
+        }
+      : undefined;
+    if (context !== undefined && !cacheOff('dictionary')) {
+      const hit = dictionaryEvaluationMemo
+        ?.get(this)
+        ?.find((entry) => sameDictionaryMemoContext(entry, context));
+      if (hit !== undefined) return hit.value;
     }
     const outermost = dictionaryEvaluationMemo === undefined;
     if (outermost) dictionaryEvaluationMemo = new WeakMap();
@@ -643,8 +660,21 @@ export class BoxedDictionary
       // Nor when it ran host code that does not state its purity (a value
       // `h(2)` with a host operator `h`), or used a provisional answer
       // (`store-guard.ts`): each path to the node then evaluates it.
-      if (pure && ce._anyVersion === version && guard!.allowsStore())
-        memo.set(this, { options, version, value });
+      if (
+        context !== undefined &&
+        ce._anyVersion === version &&
+        guard!.allowsStore()
+      ) {
+        // The entries of other contexts stay; an entry of an earlier version
+        // can no longer be used and is dropped.
+        const kept = (memo.get(this) ?? []).filter(
+          (entry) =>
+            entry.version === version &&
+            !sameDictionaryMemoContext(entry, context)
+        );
+        kept.push({ ...context, value });
+        memo.set(this, kept);
+      }
       return value;
     } finally {
       ce._evaluationDepth -= 1;
@@ -737,22 +767,88 @@ function boxedExpressionToDictionaryValue(value: Expression): DictionaryValue {
 /**
  * The values of the dictionaries evaluated during the evaluation of the
  * outermost dictionary that is being evaluated, keyed by the dictionary
- * node; `undefined` when no dictionary is being evaluated. An entry is
- * used only for the same evaluation options and while the engine's
- * `_anyVersion` is the one it was computed at, so a state change (an
- * assignment, a declaration) makes it unused. Only a pure dictionary is
- * stored: one with a `Random()` value draws again at each evaluation.
+ * node; `undefined` when no dictionary is being evaluated. A node holds one
+ * entry for each context in which it was evaluated
+ * ({@link DictionaryMemoContext}): the same evaluation options, the same
+ * working precision, requested precision and angular unit (a transient window
+ * and `N(x, p)` change them with no engine event), and the engine's
+ * `_anyVersion` at the time, so a state change (an assignment, a declaration)
+ * makes an entry unused. Only a pure dictionary is stored: one with a
+ * `Random()` value draws again at each evaluation.
  */
 let dictionaryEvaluationMemo:
-  | WeakMap<
-      Expression,
-      {
-        options: Partial<EvaluateOptions> | undefined;
-        version: number;
-        value: Expression;
-      }
-    >
+  | WeakMap<Expression, (DictionaryMemoContext & { value: Expression })[]>
   | undefined;
+
+/** The state that the value of a pure dictionary depends on, besides the
+ * values of the symbols it reads (which the `any` version covers). */
+type DictionaryMemoContext = {
+  options: Partial<EvaluateOptions> | undefined;
+  version: number;
+  precision: number;
+  requestedPrecision: number | undefined;
+  angularUnit: AngularUnit;
+};
+
+function sameDictionaryMemoContext(
+  a: DictionaryMemoContext,
+  b: DictionaryMemoContext
+): boolean {
+  return (
+    a.version === b.version &&
+    a.precision === b.precision &&
+    a.requestedPrecision === b.requestedPrecision &&
+    a.angularUnit === b.angularUnit &&
+    sameEvaluateOptions(a.options, b.options)
+  );
+}
+
+/**
+ * Whether two evaluation options give a dictionary the same value. The
+ * options are compared field by field, not by identity: many callers make a
+ * new options object at each call (`x.N()` is `x.evaluate({
+ * numericApproximation: true })`), so an identity test would miss at every
+ * visit of a shared node through `N` and add one more entry to the node.
+ * An absent field and `undefined` are the same. The signal, the effect
+ * handlers and each frame of the context stack are compared by identity: two
+ * stacks with the same frames read the same values.
+ */
+function sameEvaluateOptions(
+  a: Partial<EvaluateOptions> | undefined,
+  b: Partial<EvaluateOptions> | undefined
+): boolean {
+  if (a === b) return true;
+  const x = a ?? {};
+  const y = b ?? {};
+  return (
+    (x.numericApproximation ?? false) === (y.numericApproximation ?? false) &&
+    sameMaterialization(x.materialization, y.materialization) &&
+    x.signal === y.signal &&
+    x._effects === y._effects &&
+    sameFrames(x._contextStack, y._contextStack) &&
+    x._precisionWindow?.working === y._precisionWindow?.working &&
+    x._precisionWindow?.requested === y._precisionWindow?.requested
+  );
+}
+
+function sameMaterialization(
+  a: EvaluateOptions['materialization'] | undefined,
+  b: EvaluateOptions['materialization'] | undefined
+): boolean {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b))
+    return a[0] === b[0] && a[1] === b[1];
+  return (a ?? false) === (b ?? false);
+}
+
+function sameFrames(
+  a: ReadonlyArray<object> | undefined,
+  b: ReadonlyArray<object> | undefined
+): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined || a.length !== b.length) return false;
+  return a.every((frame, i) => frame === b[i]);
+}
 
 /** Is `v` an already fully-evaluated dictionary value for the requested
  * evaluation mode? (Mirrors the `List` fast-path predicate.) */
