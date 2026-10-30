@@ -77,11 +77,13 @@ Section 7 says what in that work matches revision 2 and what does not.
   for the settings that can change a numeric value; one dependency stamp for
   the caches that track the values they read. The migration has eight steps
   that can land one at a time (section 7).
-- **Decisions for the user** (section 8): whether to remove the two caches
-  with no measured benefit (and what to do with the factor memo), whether the
-  per-call invalidation of the type and sign caches gets a design now, and
-  how to narrow the store-guard accept lists. Decided: an explicit retype or
-  extension moves the world version (decision 3, option (c)).
+- **Decisions** (section 8), all made by the user on 2026-10-30: remove the
+  contour memos and the enclosure endpoint cache, keep the factor memo
+  (decision 1); no per-call key for the type and sign caches now (decision
+  2); an explicit retype or extension moves the world version (decision 3,
+  option (c)); the store-guard accept lists are narrowed in one change
+  (decision 6). CE-615 (decision 4) stays open; the steps do not depend on
+  it.
 
 ## 2. Method
 
@@ -755,7 +757,7 @@ lock, paired with a baseline run made just before. All test paths are under
 | 0 | — | Keep the off switches (`CE_CACHE_OFF`, read once, like `CE_CACHE_STATS`) and add the workload driver as `benchmarks/evaluation-caches.ts`. Pass criteria of the switch test: each switch name matches a cache, and with each switch on alone the 13 workloads give the same digests as with all caches on | `cache-stats-member.test.ts`, a new switch test | The driver itself; record the baseline |
 | 1a | — | Fix CE-628, CE-647 (the derivative chains read the host count and the definition version) and CE-648 (the Rubi memos read the host count). Nothing else | `derivative-closed-form-cache.test.ts`, new tests from the repros of the three entries, the Rubi tests (`rubi-utils.test.ts`) | `simplify-factor` |
 | 1b | 1a | Add the store guard (6.2) and convert every store site with the accept list of the table in 6.2, so that no store decision changes | `ce-601-shared-evaluation.test.ts`, `impure-stored-value-reads.test.ts`, `inert-evaluate-memo.test.ts`, `collection-element-memo.test.ts`, `comprehension-memo.test.ts`, `sequences.test.ts`, `declare-extend.test.ts`, `recursive-application-memo-across-evaluations.test.ts`, `object-caching.test.ts`, the full suite (the change is under `boxed-expression/`) | `shared-max-22` (cost of the guard), all workloads (no change expected) |
-| 1c | 1b | Narrow the accept list of one site per commit (not the element memo or the eager source values), each with a test that counts host calls or random draws on that site | The site's own tests and the new one | The workload of that site |
+| 1c | 1b | With 1b in one change (decision 6). Narrow the accept list of every site (not the element memo or the eager source values), each with a test that counts host calls or random draws on that site | The site's own tests and the new one | The workload of that site |
 | 1d | 1b | CE-621: one change and one deterministic test per item. .1 (concurrent `evaluateAsync()` calls join one pending promise), .3 (look-up order of the eager source values), .4 (release after a synchronous throw); .2 (a nested asynchronous evaluation releases its parent's host values) needs one in-progress count per evaluation number, shared by the synchronous and asynchronous routes | A new test per CE-621 item, and an asynchronous read, field store, read test for `objectReadCount()` | — |
 | 2 | 1b | Numeric context stamp (6.3); replace the settings fields of the shared memo, the approximations, the contour memos, the `Map` compile cache, the enclosure endpoint cache, the application memo, the sequence numeric memo and the element memo (fixes CE-645); route the `_requestedPrecision` writes through one function | `ce-601-shared-evaluation.test.ts`, `relational-operators.test.ts`, `compare-set-and-scalar-or-collection.test.ts`, `limit-*.test.ts`, `compile-lazy-collections.test.ts`, `checkpoint-journal.test.ts`, a new test per cache that changes each setting through the setter and inside a transient window, a test with two engines at different precisions, a test of the CE-645 repro, a test that reads one random collection under two seed frames and outside both and gets the same draws | `compare-constants`, `limits-series`, `map-compile` |
 | 3a | — | Count, on the two Tycho document benchmarks, the `type-write` events that come from an explicit retype or extension and those that come from an inference. Report the counts to the user for decision 3 | — | `tycho-evaluate`, `rebind` |
@@ -763,7 +765,7 @@ lock, paired with a baseline run made just before. All test paths are under
 | 4 | 1b, 2 | The dictionary memo: store guard with no accepted host count, and the settings of the shared memo (6.5) | `dictionary-shared-value-evaluation.test.ts`, extended with a standalone `BoxedDictionary.evaluate()`, an engine with objects, a debugger hook, `evaluateAsync()`, and a dictionary that holds a host call | A new dictionary workload |
 | 5 | 0 | Remove the caches of decision 1 (option (a): the contour memos and the enclosure endpoint cache), one commit each. Can land before steps 1 to 3, so that the removed caches are not converted first. Add the probes of section 3.5 for the kept caches to the workload driver | Their own tests (a test that checks only that a cache hit happens is removed with the cache), the residue, series and contour-integral tests, the enclosure tests | All workloads, and the contour and enclosure probes of section 3.5 |
 | 6 | 3b | Counters: for each cache that reads both the semantic version and a dependency snapshot (`Map` compile, derivative chains, element memo), decide whether the semantic version is still needed; remove it only with a test that shows the snapshot sees each event the semantic version saw. The element memo keeps it for its between-pull checks | `compile-lazy-collections.test.ts`, `derivative-closed-form-cache.test.ts`, `collection-element-memo.test.ts` | `map-compile` |
-| 7 | 3b | Only with decision 2: a per-activation key for the description caches of body nodes (CE-531, CE-334, CE-321) | `lambda-param-collection-inference.test.ts`, `inert-evaluate-memo.test.ts`, `ce-535-531-binder-declaration-cache.test.ts`, the full suite | `recursion-fib`, `type-reads`, Tycho row 453 repro |
+| 7 | 3b | Not done (decision 2 is no). Only with decision 2: a per-activation key for the description caches of body nodes (CE-531, CE-334, CE-321) | `lambda-param-collection-inference.test.ts`, `inert-evaluate-memo.test.ts`, `ce-535-531-binder-declaration-cache.test.ts`, the full suite | `recursion-fib`, `type-reads`, Tycho row 453 repro |
 
 **The work of session `compute-engine-3e`** (2026-10-30, steps 0 and 1 of
 revision 1) against this table, as that session reported it:
@@ -784,6 +786,9 @@ revision 1) against this table, as that session reported it:
 ## 8. Open decisions
 
 ### Decision 1: remove the caches that have no measured benefit?
+
+**User decision 2026-10-30: option (a).** Step 5 removes the contour memos
+and the enclosure endpoint cache, one commit each; the factor memo stays.
 
 **The situation.** Each cache is code that must follow the host-code rule and
 the fail-closed rules; each review round of CE-601 found a cache that did
@@ -838,6 +843,9 @@ linear one; a measured 1.5× on a small input is the lower bound of what it
 saves on a larger one.
 
 ### Decision 2: give the type and sign caches a key per call now?
+
+**User decision 2026-10-30: no (option (b)).** The decision of 2026-09-24
+in CE-334 stays; step 7 is not done.
 
 **The situation.** Each call of a user function declares its parameters in a
 new scope. That declaration advances the engine's `any` version, which is
@@ -966,6 +974,11 @@ binding problem, not a cache problem. Step 3b's extension tests do not depend
 on the answer: they compare the cached read with the read with the cache off.
 
 ### Decision 6: narrow the store-guard accept lists in one commit or one per site?
+
+**User decision 2026-10-30: option (a).** Steps 1b and 1c land as one
+change, on the conditions of the recommendation below: a paired benchmark
+on all 13 workloads shows no ratio above 1.25, and the element memo and the
+eager source values keep the counts they read today.
 
 **The situation.** Section 5.1 shows that each store site reads its own
 subset of the seven fail-closed counts. The store guard makes every site
