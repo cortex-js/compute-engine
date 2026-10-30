@@ -5863,9 +5863,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // lowers to a JS array and a complex number to an object, so two structurally
   // equal elements would compare unequal and the search would answer `false`
   // where the interpreter's `.isSame()` answers `True`. Both operands therefore
-  // go through `requirePrimitiveElements`, which admits only real/boolean/
-  // string/character elements (and rejects complex CONTENT in a collection that
-  // merely reports the generic `number` element type).
+  // go through `requireComparableElements`, which admits real/boolean/string/
+  // character elements and lists of them (compared structurally by the same
+  // helper), and rejects complex CONTENT in a collection that merely reports
+  // the generic `number` element type.
   // (`docs/STRING_ROADMAP.md`, decision D8.)
 
   // The 1-based inclusive index SPAN of the first occurrence, or the
@@ -5878,8 +5879,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`RangeOf\`: expected \`RangeOf(xs, needle, from?)\`.`
       );
-    requirePrimitiveElements('RangeOf', args[0]);
-    requirePrimitiveElements('RangeOf', args[1]);
+    requireComparableElements('RangeOf', args[0]);
+    requireComparableElements('RangeOf', args[1]);
     const subject = elementsArg('RangeOf', args[0], compile, 1);
     // An EMPTY needle is an interpreter ERROR value here, not a span: an empty
     // span is not representable, because `Range(1, 0)` is the DESCENDING range
@@ -5952,8 +5953,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`ContainsSequence\`: expected ` +
           `\`ContainsSequence(xs, needle)\`.`
       );
-    requirePrimitiveElements('ContainsSequence', args[0]);
-    requirePrimitiveElements('ContainsSequence', args[1]);
+    requireComparableElements('ContainsSequence', args[0]);
+    requireComparableElements('ContainsSequence', args[1]);
     const subject = elementsArg('ContainsSequence', args[0], compile, 1);
     const needle = elementsArg('ContainsSequence', args[1], compile, 2);
     return `(_SYS.seqidx(${subject}, ${needle}, 0) >= 0)`;
@@ -5965,8 +5966,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`StartsWith\`: expected \`StartsWith(xs, prefix)\`.`
       );
-    requirePrimitiveElements('StartsWith', args[0]);
-    requirePrimitiveElements('StartsWith', args[1]);
+    requireComparableElements('StartsWith', args[0]);
+    requireComparableElements('StartsWith', args[1]);
     const subject = elementsArg('StartsWith', args[0], compile, 1);
     const prefix = elementsArg('StartsWith', args[1], compile, 2);
     return (
@@ -5981,8 +5982,8 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       throw new Error(
         `Could not compile \`EndsWith\`: expected \`EndsWith(xs, suffix)\`.`
       );
-    requirePrimitiveElements('EndsWith', args[0]);
-    requirePrimitiveElements('EndsWith', args[1]);
+    requireComparableElements('EndsWith', args[0]);
+    requireComparableElements('EndsWith', args[1]);
     const subject = elementsArg('EndsWith', args[0], compile, 1);
     const suffix = elementsArg('EndsWith', args[1], compile, 2);
     return (
@@ -6681,10 +6682,20 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // Membership via SameValueZero (`includes`) — value equality only for
   // primitive elements, so compound element types fail closed.
   Contains: (args, compile) => {
-    if (args[0]) requirePrimitiveElements('Contains', args[0]);
+    const structural =
+      args[0] !== undefined && requireComparableElements('Contains', args[0]);
     const coll = elementsArg('Contains', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Contains`: missing value');
+    // List elements are JS arrays: `includes` would compare them by reference.
+    if (structural)
+      return compileSearchedValue(
+        'Contains',
+        args[1],
+        args[0],
+        compile,
+        (v) => `((_v) => (${coll}).some((_x) => _SYS.eqs(_x, _v)))(${v})`
+      );
     // A TEXT membership test cannot be the raw SameValueZero of `includes`:
     // the interpreter compares strings by their CONDITIONED content (NFC, then
     // the lone-surrogate replacement), so a decomposed `"e" + U+0301` needle
@@ -6714,8 +6725,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   // order and uses SameValueZero — value equality only for primitive
   // elements, so compound element types fail closed).
   Unique: (args, compile) => {
-    if (args[0]) requirePrimitiveElements('Unique', args[0]);
+    const structural =
+      args[0] !== undefined && requireComparableElements('Unique', args[0]);
     const elements = elementsArg('Unique', args[0], compile);
+    if (structural) return `_SYS.uniqs(${elements})`;
     // TEXT elements are de-duplicated on their CONDITIONED content, because
     // that is what the interpreter's boxed strings hold: a decomposed
     // `"e" + U+0301` and a precomposed `"é"` supplied at run time are ONE
@@ -7065,8 +7078,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Element: (args, compile) => {
     if (args[0] == null || args[1] == null)
       throw new Error('Could not compile `Element`: missing argument');
-    requirePrimitiveElements('Element', args[1]);
+    const structural = requireComparableElements('Element', args[1]);
     const coll = collArg('Element', args[1], compile);
+    if (structural)
+      return compileSearchedValue(
+        'Element',
+        args[0],
+        args[1],
+        compile,
+        (v) => `((_v) => (${coll}).some((_x) => _SYS.eqs(_x, _v)))(${v})`
+      );
     // An absent value is an element where the same marker sits (see
     // `compileSearchedValue`).
     return compileSearchedValue(
@@ -13874,26 +13895,63 @@ function customCombinerWithLanes(
  */
 export function requirePrimitiveElements(kind: string, arg: Expression): void {
   const elt = collectionElementType(jsType(arg));
-  const primitive =
+  if (
     elt !== undefined &&
-    (elt === 'number' ||
-      // The extended reals: `Set` and `includes` use SameValueZero, under
-      // which `Infinity`, `-Infinity` and `NaN` each equal themselves, as
-      // they do for the interpreter's `isSame`. A host that declares
-      // `list<real | signed_infinity | nan>` (a plot axis) was refused while
-      // the wider `list<number>` was admitted.
-      isSubtype(elt, 'real | signed_infinity | nan') ||
-      isSubtype(elt, 'boolean') ||
-      isSubtype(elt, 'string') ||
-      // A character lowers to a one-cluster JS string, so it compares by
-      // value with `===` exactly as a string does.
-      isSubtype(elt, 'character'));
-  if (primitive && !BaseCompiler.isComplexValued(arg)) return;
+    isPrimitiveElementType(elt) &&
+    !BaseCompiler.isComplexValued(arg)
+  )
+    return;
   throw new Error(
     `Could not compile \`${kind}\`: the interpreter compares elements ` +
       `structurally, but only real/boolean/string elements compare by ` +
       `value on the JavaScript target.`
   );
+}
+
+function isPrimitiveElementType(elt: Type): boolean {
+  return (
+    elt === 'number' ||
+    // The extended reals: `Set` and `includes` use SameValueZero, under
+    // which `Infinity`, `-Infinity` and `NaN` each equal themselves, as
+    // they do for the interpreter's `isSame`. A host that declares
+    // `list<real | signed_infinity | nan>` (a plot axis) was refused while
+    // the wider `list<number>` was admitted.
+    isSubtype(elt, 'real | signed_infinity | nan') ||
+    isSubtype(elt, 'boolean') ||
+    isSubtype(elt, 'string') ||
+    // A character lowers to a one-cluster JS string, so it compares by
+    // value with `===` exactly as a string does.
+    isSubtype(elt, 'character')
+  );
+}
+
+/**
+ * True when `elt` is a list (any depth) whose leaves are primitive: such
+ * elements lower to JS arrays and compare through `_SYS.eqs`, the structural
+ * element test, instead of by reference.
+ */
+function isStructuralListElementType(elt: Type): boolean {
+  const t = resolveTypeForCompilation(elt);
+  if (typeof t === 'string' || t.kind !== 'list') return false;
+  const inner = resolveTypeForCompilation(t.elements);
+  return isPrimitiveElementType(inner) || isStructuralListElementType(inner);
+}
+
+/**
+ * `requirePrimitiveElements`, widened to collections whose elements are lists
+ * of primitives. Returns true for those (the caller then emits the structural
+ * element test `_SYS.eqs`); other element types still fail closed.
+ */
+function requireComparableElements(kind: string, arg: Expression): boolean {
+  const elt = collectionElementType(jsType(arg));
+  if (
+    elt !== undefined &&
+    isStructuralListElementType(elt) &&
+    !BaseCompiler.isComplexValued(arg)
+  )
+    return true;
+  requirePrimitiveElements(kind, arg);
+  return false;
 }
 
 /**

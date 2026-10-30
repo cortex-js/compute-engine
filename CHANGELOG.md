@@ -1,3 +1,15 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **`Contains`, `Unique` and `Element` compile over a list of lists.** On the
+  JavaScript target they were refused when the elements were lists
+  (`xss: list<list<integer>>`), because the compiled `includes`/`Set` would
+  compare the arrays by reference. They now compare the elements structurally,
+  as `evaluate()` does, and so do `RangeOf`, `ContainsSequence`, `StartsWith`
+  and `EndsWith`. Elements that are tuples, complex numbers or lists of a type
+  that may be absent are still refused. (#499)
+
 ## 0.173.0 _2026-10-28_
 
 ### Resolved Issues

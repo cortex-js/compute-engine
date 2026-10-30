@@ -4028,7 +4028,38 @@ function uniqueText(l: unknown[]): unknown[] {
  * carries the identical disjunct.
  */
 function sameSequenceElement(a: unknown, b: unknown): boolean {
+  // A nested list (a list-of-lists element) is the same value when it has the
+  // same length and pairwise-same elements; an array against a non-array never
+  // is.
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
+      return false;
+    for (let i = 0; i < a.length; i++)
+      if (!sameSequenceElement(a[i], b[i])) return false;
+    return true;
+  }
   return (a !== a && b !== b) || eqText(a, b);
+}
+
+/** `conditionText` applied to every string leaf of a (nested) list. */
+function conditionDeep(x: unknown): unknown {
+  if (Array.isArray(x)) return x.map(conditionDeep);
+  return typeof x === 'string' ? conditionText(x) : x;
+}
+
+/**
+ * `Unique` over elements that are lists: first occurrences, compared
+ * structurally ({@link sameSequenceElement}), with string leaves conditioned
+ * as the interpreter's boxed strings are. Quadratic, as the elements have no
+ * hashable identity.
+ */
+function uniqueStructural(l: unknown[]): unknown[] {
+  const out: unknown[] = [];
+  for (const x of l) {
+    const c = conditionDeep(x);
+    if (!out.some((y) => sameSequenceElement(y, c))) out.push(c);
+  }
+  return out;
 }
 
 /**
@@ -4535,6 +4566,9 @@ export const SYS_HELPERS = {
   ct: conditionText,
   // `Unique` over possibly-text elements — see `uniqueText`.
   uniqt: uniqueText,
+  // Structural element equality and `Unique` for list-of-lists elements.
+  eqs: sameSequenceElement,
+  uniqs: uniqueStructural,
   // Coerce a value to the `{ re, im }` complex representation, idempotently.
   //
   // A user function whose signature declares a `complex` PARAMETER compiles

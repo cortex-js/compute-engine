@@ -594,24 +594,8 @@ describe('D8: sequence search over strings and lists', () => {
     failsClosed(ce.box(['RangeOf', 'mixv', { str: 'b' }]));
   });
 
-  test('a COMPOUND-element subject or needle declines on every member', () => {
-    // The emitted element test compares text with conditioned equality and
-    // everything else with `===`, which is REFERENCE identity for the JS array
-    // a nested list lowers to. The interpreter's `.isSame()` compares them
-    // structurally, so each cell below has a definite interpreter answer that a
-    // compiled `===` search would contradict — which is why they must decline.
-    const nested = ['List', ['List', 1, 2], ['List', 3, 4]] as const;
-    const tail = ['List', ['List', 3, 4]] as const;
-    for (const [json, expected] of [
-      [['RangeOf', nested, tail], [2]],
-      [['ContainsSequence', nested, tail], true],
-      [['StartsWith', nested, ['List', ['List', 1, 2]]], true],
-      [['EndsWith', nested, tail], true],
-    ] as const) {
-      const expr = ce.box(json as never);
-      expect(project(expr.evaluate())).toEqual(expected);
-      failsClosed(expr);
-    }
+  test('a COMPLEX-element subject or needle declines on every member', () => {
+    // Nested lists now compile (see compile-structural-list-elements.test.ts).
     // A complex element is invisible in the element TYPE — a numeric list
     // reports the generic `number` whether its elements are real or complex —
     // so it is caught by the literal inspection instead. A complex number
