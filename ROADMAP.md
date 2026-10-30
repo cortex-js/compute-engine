@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-627.
+Next free reference: CE-628.
 
 **Entry format.**
 
@@ -5024,40 +5024,13 @@ class as commit `0904d0592` ("Fix exponential walks over shared expressions").
 Fix: remember the pairs already found equal during one top-level comparison,
 as `isSameCall()` (`boxed-function.ts`) does.
 
-### CE-614. An integral of a user-function call reads the function of the current scope, not the one it was written with
+### CE-627. A literal list integrand writes the body of the called function into each element
 
-**Status:** open; defect (wrong values). Found 2026-10-28 while fixing CE-604.
+**Status:** open; performance. Found 2026-10-28 while fixing CE-604.
 
-For a function held as a value, `evaluate()` gives a WRONG value:
-`ce.declare('g', 'function'); ce.assign('g', (t) ↦ t)`, then
-`I = ce.parse('\int_0^1 g(x)\,dx')`, then in a new scope
-`ce.declare('g', 'function'); ce.assign('g', (t) ↦ 100)`: `I.evaluate()` gives
-`100` (should be `1/2`); `I.N()` gives `0.5`. A plain call `g(3)` and
-`\sum_{k=1}^2 g(k)` read the right `g`, and with `g(t) := t` (an operator
-definition) the integral is right. Probable cause: `liftIntegrand()`
-(`boxed-expression/utils.ts`) calls `rebindEscaping()`, which binds each name
-that escapes the integrand again by looking it up in the current scope, so a
-call head held as a value is redirected to the shadowing declaration; the
-comment of `callableBindingInContext()` (`binders.ts`) says callable positions
-use lexical identity, so the lift should probably leave call heads alone. Under
-such a scope, Tycho's row-476 heads give `[50, 50]`, as the integral of one
-element does.
-
-A related case:
-
-With `c(y, D, e) := \int_{-D}^{D} n(x, y, e)\,dx` and `L := 0.5`,
-`∫_0^1 y·c(y, L, 0.001) dy` parsed while `c` is that function gives 1.98376
-under `.N()`. Evaluated under a scope that declares another `c`, `.N()` returns
-the integral unevaluated (same on main before CE-604). The call should keep the
-binding it was parsed with (`docs/SCOPING-MODEL.md`); a guess is that the
-numeric route of `Integrate` looks `c` up by name in the current scope. Before
-CE-604, the list route of the same integral gave numbers because it wrote the
-body of `c` in first; it now keeps the call and shows the same defect.
-
-Two related gaps of the CE-604 list route, not defects: a literal list
-integrand (`∫ [y·c(y, L, 0.1), y] dy`) still writes the body of `c` into each
-element, and a function held as a value (declared `function`, then assigned)
-is not split, so it takes the old, slower route. Both give the right values.
+`\int [y\,c(y, L, 0.1), y]\,dy` still writes the body of `c` into each
+element, where an integrand that calls `c` with a list argument keeps the call
+(CE-604). The values are right; the integral is slower.
 
 ### CE-616. A definite integral does not evaluate a `Sum`, `Product` or `D` held in its integrand
 

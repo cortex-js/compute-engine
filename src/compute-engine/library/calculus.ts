@@ -3849,7 +3849,10 @@ function inlineShadowedCalls(
       !isOperatorDef(system?.bindings.get(x.operator))
     )
       return x;
-    const body = bodyOf(x);
+    // The body is that of the function the call was made with, not of a
+    // declaration of the same name in a scope pushed later: `bodyOf()` reads
+    // the function by name (`withCallableBinding()`).
+    const body = withCallableBinding(x, () => bodyOf(x));
     if (body === undefined) failed = true;
     return body ?? x;
   });

@@ -12,6 +12,7 @@ import {
 } from '../boxed-expression/abstract-boxed-expression.js';
 import type { SymbolInterface } from '../types-expression.js';
 import type {
+  BoxedDefinition,
   Expression,
   FunctionInterface,
   IComputeEngine as ComputeEngine,
@@ -158,6 +159,7 @@ import { makeNumericRangeType } from '../../common/type/numeric-range.js';
 import {
   boundVariableNames,
   boundVariableNamesInOperand,
+  callableBindingInContext,
 } from '../boxed-expression/binders.js';
 import {
   clauseOperandShadow,
@@ -3736,6 +3738,49 @@ export class BaseCompiler {
                 ? `Could not compile \`${name}\`: the captured callable definition is not in scope.`
                 : `Could not compile \`${name}\`: the captured callable has a different binding from the ambient function.`
             );
+        } else if (
+          isFunction(node) &&
+          (value !== undefined || operator !== undefined)
+        ) {
+          // A call parsed before its function was defined is bound to a
+          // forward-call placeholder that holds no function. The function
+          // it calls is the binding that the placeholder resolves to
+          // (`callableBindingInContext()`), which the compiler must read
+          // too, not a declaration of the same name in a later scope.
+          const own: BoxedDefinition =
+            value !== undefined ? { value } : { operator: operator! };
+          const binding = callableBindingInContext(node.engine, name, own);
+          const resolved =
+            binding === undefined
+              ? undefined
+              : 'value' in binding
+                ? binding.value
+                : binding.operator;
+          const literal =
+            binding === undefined
+              ? undefined
+              : 'value' in binding
+                ? binding.value.value
+                : (binding.operator as { _lambdaLiteral?: Expression })
+                    ._lambdaLiteral;
+          if (resolved !== undefined && isFunction(literal, 'Function')) {
+            const ambient = lookupApplicable(
+              name,
+              node.engine.context.lexicalScope
+            );
+            const ambientHalf =
+              ambient === undefined
+                ? undefined
+                : isValueDef(ambient)
+                  ? ambient.value
+                  : isOperatorDef(ambient)
+                    ? ambient.operator
+                    : undefined;
+            if (ambientHalf !== resolved)
+              throw new Error(
+                `Could not compile \`${name}\`: the captured callable has a different binding from the ambient function.`
+              );
+          }
         }
       }
       if (!isFunction(node)) return;
@@ -28303,7 +28348,8 @@ export class BaseCompiler {
   private static antiderivativeKey(
     engine: ComputeEngine,
     args: ReadonlyArray<Expression>,
-    ops: ReadonlyArray<unknown>
+    ops: ReadonlyArray<unknown>,
+    shadowed: ReadonlyMap<string, Type>
   ): { key: string; types: Type[] } {
     const types: Type[] = [];
     const names = new Set(args.flatMap((a) => a.symbols));
@@ -28314,6 +28360,15 @@ export class BaseCompiler {
     };
     args.forEach(addHeads);
     const bindings = [...names].sort().map((n) => {
+      // A name that the attempt declares again in its isolation scope
+      // (`shadowedOperandSymbols`) reads as that declaration: a fresh
+      // symbol of the type below, whatever the caller's scope binds the
+      // name to.
+      const local = shadowed.get(n);
+      if (local !== undefined) {
+        types.push(local);
+        return `${n}:local`;
+      }
       const def = engine.lookupDefinition(n);
       // A name with no definition gets an INFERRED one the first time it is
       // used, which can be during the search itself. Both read as the bare
@@ -28352,6 +28407,54 @@ export class BaseCompiler {
       return `${n}#${id}`;
     });
     return { key: `${JSON.stringify(ops)}|${bindings.join(',')}`, types };
+  }
+
+  /**
+   * The symbols of the integral's operands that the caller's scope resolves,
+   * by name, to a definition other than their own, with their types.
+   *
+   * `closedFormIntegral` boxes the operands again from MathJSON, and the
+   * boxing resolves each symbol by NAME in the caller's scope. A symbol bound
+   * by a scope that is not visible there — a parameter of the function body
+   * being compiled — then becomes whatever the name means in that scope: a
+   * parameter `e` becomes Euler's number, `i` the imaginary unit, `Pi` the
+   * constant π, and a parameter `y` the global `y` with its value. With
+   * `q(y, e) := ∫₀¹ e·x dx`, the compiled `q(y, 2)` gave e/2 in place of 1.
+   * The attempt declares each of these names again in its isolation scope,
+   * so that the boxed operands read a plain symbol of the same type, which
+   * the caller's `compile()` then resolves by name against the target's
+   * bindings, as it does for every other free symbol of the closed form.
+   *
+   * A name the caller's scope does not define is not included: the boxing
+   * declares it in the isolation scope anyway. Only value bindings are
+   * checked; the head of a call is not a symbol operand.
+   *
+   * The table is keyed by name, and it also holds an index bound inside the
+   * operands (the `e` of `\sum_{e=1}^{3} e x`). A free use of the same name in
+   * the same integrand then reads as that index while the closed form is
+   * searched. This does not change a value: the binder declares its index
+   * again in its own scope, and the caller's `compile()` resolves the free
+   * symbols of a closed form by name.
+   */
+  private static shadowedOperandSymbols(
+    engine: ComputeEngine,
+    args: ReadonlyArray<Expression>
+  ): Map<string, Type> {
+    const result = new Map<string, Type>();
+    const visit = (e: Expression): void => {
+      if (isSymbol(e)) {
+        const own = e.valueDefinition;
+        if (own === undefined || result.has(e.symbol)) return;
+        const def = engine.lookupDefinition(e.symbol);
+        if (def === undefined) return;
+        if (isValueDef(def) && def.value === own) return;
+        result.set(e.symbol, e.type.type);
+        return;
+      }
+      if (isFunction(e)) e.ops.forEach(visit);
+    };
+    args.forEach(visit);
+    return result;
   }
 
   /**
@@ -28531,7 +28634,13 @@ export class BaseCompiler {
     // An attempt that timed out in this engine state is not repeated — see
     // `antiderivativeTimeouts`.
     const ops = args.map((x) => x.json);
-    const integral = BaseCompiler.antiderivativeKey(engine, args, ops);
+    const shadowed = BaseCompiler.shadowedOperandSymbols(engine, args);
+    const integral = BaseCompiler.antiderivativeKey(
+      engine,
+      args,
+      ops,
+      shadowed
+    );
     const timeouts = BaseCompiler.antiderivativeTimeouts.get(engine);
     if (timeouts !== undefined) {
       if (
@@ -28571,6 +28680,11 @@ export class BaseCompiler {
     const attemptStart = performance.now();
     engine.pushScope();
     try {
+      // A local binding in the operands (a function parameter named `e`, `i`
+      // or `Pi`, or one that hides a global of the same name) is declared
+      // again in the isolation scope, so the operands boxed from MathJSON
+      // read it as the local, not as the constant or global of that name.
+      for (const [name, type] of shadowed) engine.declare(name, type);
       closed = engine._withBudget(
         {
           ms: grantedMs,
@@ -32891,9 +33005,11 @@ export class BaseCompiler {
       (h === 'Apply' && literal.symbols.includes(element))
     )
       element = `_${element}`;
-    const call =
-      h === 'Apply' ? ['Apply', literal.json, element] : [h, element];
-    return engine.box(['Map', ['Function', call, element], arg.json] as never);
+    // The literal and the argument are kept boxed, not sent through MathJSON:
+    // boxed again in this scope, a symbol argument named `e`, `i` or `Pi`
+    // (a local or a parameter) would read as the constant of that name.
+    const call = h === 'Apply' ? ['Apply', literal, element] : [h, element];
+    return engine.box(['Map', ['Function', call, element], arg] as never);
   }
 
   /**
@@ -33304,10 +33420,12 @@ export class BaseCompiler {
       ) {
         let element = '_point';
         while (arg.symbols.includes(element)) element = `_${element}`;
+        // The argument is kept boxed: boxed again from MathJSON, a symbol
+        // named `e`, `i` or `Pi` would read as the constant of that name.
         return engine.box([
           'Map',
           ['Function', [h, element], element],
-          arg.json,
+          arg,
         ] as never);
       }
     }

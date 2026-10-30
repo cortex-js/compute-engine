@@ -57,6 +57,7 @@ import {
   binderBindingOf,
   boundVariableNames,
   boundVariableNamesInOperand,
+  callableBindingInContext,
   isShield,
   markShieldDeclaration,
   rewriteWithBinders,
@@ -456,9 +457,30 @@ function userFunctionLiteral(call: Expression): Expression | undefined {
   if (def !== undefined) return def._isLambda ? def._lambdaLiteral : undefined;
   const valueDef = call.valueDefinition;
   if (valueDef === undefined) return undefined;
-  const value = valueDef.isConstant
-    ? valueDef.value
-    : call.engine._getSymbolValue(call.operator);
+  // The value of a variable is read from the binding the call was made with
+  // (`callableBindingInContext()`), as `calleeValue()` does: a declaration
+  // of the same name in a scope pushed later does not redirect the call
+  // (`docs/SCOPING-MODEL.md`, "Callable resolution"). Reading the value by
+  // name gave the function of that declaration: with `g := t ↦ t`, the
+  // integral `∫₀¹ g(x) dx` evaluated in a scope that assigns `g := t ↦ 100`
+  // was 100, not 1/2.
+  let value: Expression | undefined;
+  if (valueDef.isConstant) value = valueDef.value;
+  else {
+    const binding = callableBindingInContext(call.engine, call.operator, {
+      value: valueDef,
+    });
+    // A call parsed before its function was defined with `g(t) := …` is
+    // bound to a value placeholder, and resolves to an operator definition.
+    if (binding !== undefined && !('value' in binding)) {
+      const op = binding.operator as BoxedOperatorDefinition & {
+        _isLambda?: boolean;
+        _lambdaLiteral?: Expression;
+      };
+      return op._isLambda ? op._lambdaLiteral : undefined;
+    }
+    value = binding?.value.value;
+  }
   return isFunction(value, 'Function') ? value : undefined;
 }
 

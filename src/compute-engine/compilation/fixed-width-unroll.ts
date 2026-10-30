@@ -1168,8 +1168,7 @@ function writtenBodies(e: Expression): number | undefined {
   } else if (isFunction(e, 'Comprehension') && e.nops >= 2) {
     size = 1;
     for (const clause of e.ops.slice(1)) {
-      if (!isFunction(clause, 'Element') || clause.nops !== 2)
-        return undefined;
+      if (!isFunction(clause, 'Element') || clause.nops !== 2) return undefined;
       const count = literalDomainCount(clause.op2);
       if (count === undefined) return undefined;
       size *= count;

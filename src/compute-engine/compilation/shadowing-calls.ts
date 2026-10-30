@@ -1,6 +1,10 @@
 import type { Expression, FunctionInterface } from '../global-types.js';
 import { isFunction, isSymbol } from '../boxed-expression/type-guards.js';
-import { withCallableBinding } from '../boxed-expression/binders.js';
+import {
+  markCallableFrame,
+  markCallableHome,
+  withCallableBinding,
+} from '../boxed-expression/binders.js';
 import { withScratchScope } from '../scratch-scopes.js';
 
 /**
@@ -348,6 +352,7 @@ export function withShadowingCallsRenamed<T>(
         rename(fn.literal),
       ]);
       renamedExpr = rename(expr);
+      const outerScope = ce.context.lexicalScope;
       ce.pushScope();
       innerScopePushed = true;
       withScratchScope(ce, ce.context.lexicalScope, () => {
@@ -361,6 +366,20 @@ export function withShadowingCallsRenamed<T>(
             literal
           );
       });
+      // A renamed call is bound to the valueless declaration of the outer
+      // scope. A part of the engine that reads the function of a call from
+      // the binding of the call, not from its name (the derivative of a
+      // call, `callableBindingInContext()`), must read the copy with its
+      // value, as the compiler does. The inner scope is marked as a runtime
+      // copy of the outer one, and each valueless declaration as a callable
+      // with its home in the outer scope: the declaration of the same name
+      // in the inner scope then stands for it.
+      for (const fn of renamed) {
+        const placeholder = outerScope.bindings.get(fn.privateName!);
+        if (placeholder !== undefined)
+          markCallableHome(placeholder, outerScope);
+      }
+      markCallableFrame(ce.context.lexicalScope, outerScope);
     });
     try {
       return compile(renamedExpr);

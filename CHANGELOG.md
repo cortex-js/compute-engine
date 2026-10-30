@@ -97,6 +97,17 @@
 
 ### Resolved Issues
 
+- **An integral, a derivative or a limit of a call keeps the function the call
+  was written with.** With `g := t ↦ t`, `I = \int_0^1 g(x)\,dx`, and then a
+  scope that declares `g := t ↦ 100`, `I.evaluate()` gave 100 instead of 1/2,
+  `\lim_{x\to2} g(x)` gave 100, and `D(g(x), x)` gave 0: these routes read the
+  function by its name in the current scope. They now use the function that
+  the call is bound to, as a plain call `g(3)` does, for a function defined
+  with `:=` and for a function held as a value. The numeric value of such an
+  integral (`.N()`) is now computed under that scope where it stayed
+  unevaluated; a compilation that would need two different functions of the
+  same name is refused, and the interpreter runs instead.
+
 - **A compiled integral keeps a parameter named `e`, `i` or `\pi`.** With
   `q(y, e) := \int_0^1 e x\,dx`, the compiled `q(y, 2)` gave 1.359 (Euler's
   number divided by 2) instead of 1: the compiler boxed the operands of a

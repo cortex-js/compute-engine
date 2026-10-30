@@ -47,6 +47,7 @@ import {
   rewriteWithBinders,
   sameBindingDef,
   valueDefinitionInContext,
+  withCallableBinding,
 } from '../boxed-expression/binders.js';
 import {
   angularChainFactor,
@@ -3427,7 +3428,13 @@ function containsOperator(expr: Expression, op: string): boolean {
  */
 function reachesUserFunction(expr: Expression, name: string): boolean {
   const ce = expr.engine;
-  const followed = new Set<string>();
+  // The functions whose body is walked already, keyed by their definition:
+  // two calls of one name can denote two different functions (a call made
+  // before a scope that declares another function of that name was pushed,
+  // and a call made in that scope). A call of `name` itself is a recursion
+  // whatever its definition: the test is by name, which can only answer
+  // `true` more often.
+  const followed = new Set<unknown>();
   const visited = new Set<Expression>();
   const pending: Expression[] = [expr];
   while (pending.length > 0) {
@@ -3439,12 +3446,16 @@ function reachesUserFunction(expr: Expression, name: string): boolean {
     else if (isFunction(e)) {
       if (e.operator === name) return true;
       if (e._numericStore === undefined) pending.push(...e.ops);
-      if (!followed.has(e.operator)) callee = ce.symbol(e.operator);
+      // The callee is the binding the call was made with, not the binding
+      // of the name in the current scope (`withCallableBinding()`).
+      callee = withCallableBinding(e, () => ce.symbol(e.operator));
     }
     if (callee === undefined || !isSymbol(callee)) continue;
     if (callee.symbol === name) return true;
-    if (followed.has(callee.symbol)) continue;
-    followed.add(callee.symbol);
+    const definition =
+      callee.operatorDefinition ?? callee.valueDefinition ?? callee.symbol;
+    if (followed.has(definition)) continue;
+    followed.add(definition);
     if (!isUserFunction(callee)) continue;
     const literal = userFunctionLiteral(callee);
     if (literal !== undefined && isFunction(literal)) pending.push(literal.op1);
@@ -3484,7 +3495,7 @@ function reachesUserFunction(expr: Expression, name: string): boolean {
  * keeps the derivative unevaluated.
  *
  * The expression is walked once: each node is visited once, also when it is
- * shared, and the body of each function (its name and its number of
+ * shared, and the body of each function (its definition and its number of
  * arguments) is followed once. The names written in the expression are
  * tested before any body is followed.
  */
@@ -3492,18 +3503,40 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
   const ce = expr.engine;
   // The nodes already walked, in `expr` and in the bodies followed.
   const visited = new Set<Expression>();
-  // For each function followed (keyed by its name and its number of
+  // For each function followed (keyed by its definition and its number of
   // arguments), whether its body depends on `v`. The entry is `false` while
   // the body is being walked, so that a recursive definition that meets the
-  // function again does not follow it a second time.
-  const followed = new Map<string, boolean>();
+  // function again does not follow it a second time. The key is the
+  // definition, not the name: two calls of `g` can denote two different
+  // functions (a call made before a scope that declares another `g` was
+  // pushed, and a call made in that scope), and the answer for one is not
+  // the answer for the other.
+  const followed = new Map<unknown, Map<number, boolean>>();
 
-  const follow = (name: string, nargs: number, fn?: Expression): boolean => {
-    const key = `${name}/${nargs}`;
-    const known = followed.get(key);
+  const follow = (
+    name: string,
+    nargs: number,
+    fn?: Expression,
+    call?: Expression
+  ): boolean => {
+    // The function of a call is the binding the call was made with, not the
+    // binding of the name in the current scope: the name resolves to it
+    // while the symbol is made and while the body is found
+    // (`withCallableBinding()`).
+    if (call !== undefined)
+      return withCallableBinding(call, () =>
+        followName(name, nargs, fn ?? ce.symbol(name))
+      );
+    return followName(name, nargs, fn ?? ce.symbol(name));
+  };
+
+  const followName = (name: string, nargs: number, fn: Expression): boolean => {
+    const definition = fn.operatorDefinition ?? fn.valueDefinition ?? name;
+    let byArity = followed.get(definition);
+    if (byArity === undefined) followed.set(definition, (byArity = new Map()));
+    const known = byArity.get(nargs);
     if (known !== undefined) return known;
-    followed.set(key, false);
-    fn ??= ce.symbol(name);
+    byArity.set(nargs, false);
     if (!isUserFunction(fn)) return false;
     const wildcards =
       nargs === 1
@@ -3534,13 +3567,18 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
       body ??= userFunctionBody(fn, wildcards);
       result = body !== undefined && (!body.isValid || walk(body));
     }
-    followed.set(key, result);
+    byArity.set(nargs, result);
     return result;
   };
 
   const walk = (root: Expression): boolean => {
     // The functions to follow once the names written in `root` are tested.
-    const calls: { name: string; nargs: number; fn?: Expression }[] = [];
+    const calls: {
+      name: string;
+      nargs: number;
+      fn?: Expression;
+      call?: Expression;
+    }[] = [];
     const pending: Expression[] = [root];
     while (pending.length > 0) {
       const e = pending.pop()!;
@@ -3563,7 +3601,7 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
         continue;
       }
       if (e.operator === v) return true;
-      calls.push({ name: e.operator, nargs: e.nops });
+      calls.push({ name: e.operator, nargs: e.nops, call: e });
       // A store-backed list has only number operands, which never depend on
       // `v`, so it is not walked (and its elements are not boxed).
       if (e._numericStore !== undefined) continue;
@@ -3577,7 +3615,9 @@ function dependsOnVariable(expr: Expression, v: string): boolean {
         continue;
       for (const op of e.ops) pending.push(op);
     }
-    return calls.some(({ name, nargs, fn }) => follow(name, nargs, fn));
+    return calls.some(({ name, nargs, fn, call }) =>
+      follow(name, nargs, fn, call)
+    );
   };
 
   return walk(expr);
@@ -3996,7 +4036,14 @@ function differentiateUnknownApplication(
   trace: DerivativeTrace | undefined
 ): Expression | undefined {
   const ce = expr.engine;
-  const opSym = ce.symbol(expr.operator);
+  // The function that the call denotes is the binding the call was made
+  // with, not the binding that the name has in the current scope: with
+  // `g := t ↦ t` and `D(g(x), x)` evaluated in a scope that declares another
+  // `g`, the derivative is that of `t ↦ t` (`docs/SCOPING-MODEL.md`,
+  // "Callable resolution"). `withCallableBinding()` makes the name resolve to
+  // the binding of the call while the symbol is made, and the symbol keeps
+  // that binding.
+  const opSym = withCallableBinding(expr, () => ce.symbol(expr.operator));
 
   // The `derivative` key of the definition, when there is one, comes first:
   // it is what the author of the operator stated, and it has precedence over
@@ -4008,7 +4055,12 @@ function differentiateUnknownApplication(
   // symbolic chain rule: the body of the function with the arguments in
   // place of its parameters (`userFunctionBody()`) is differentiated.
   if (isUserFunction(opSym) && !isRecursiveUserFunction(opSym)) {
-    const bodyWithArgs = userFunctionBody(opSym, expr.ops);
+    // A function with no literal is applied to wildcards by NAME
+    // (`userFunctionBody()`): the name must resolve to the binding of the
+    // call there too.
+    const bodyWithArgs = withCallableBinding(expr, () =>
+      userFunctionBody(opSym, expr.ops)
+    );
     // A body that holds the call itself (`G(G, x)` with
     // `G := (p, a) ↦ p(p, a)`) would be expanded again without end, and the
     // chain rule below has no meaning for a function given itself as an
@@ -4036,7 +4088,7 @@ function differentiateUnknownApplication(
   // respect to each argument slot is carried as a multi-index Derivative:
   //   d/dv f(g₁,…,g_k) = Σᵢ Apply(Derivative(f, eᵢ), g₁,…,g_k) · gᵢ'
   // For a univariate f this is the usual Apply(Derivative(f, 1), g) · g'.
-  const fSym = ce.symbol(expr.operator);
+  const fSym = opSym;
   const baseOrders = expr.ops.map(() => 0);
   return differentiateApplied(
     fSym,
