@@ -1,3 +1,4 @@
+import { cacheOff } from '../../common/cache-switches.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -8,7 +9,7 @@ import {
   polynomialDegree,
   getPolynomialCoefficients,
 } from '../boxed-expression/polynomials.js';
-import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
+import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 import {
   memoDepsStillValid,
   snapshotMemoDeps,
@@ -2123,7 +2124,7 @@ function compiledProbe(
   ce: ComputeEngine
 ): ((x: number) => number) | null {
   const key = e as unknown as object;
-  const cached = probeCache.get(key);
+  const cached = cacheOff('limitprobe') ? undefined : probeCache.get(key);
   if (
     cached !== undefined &&
     cached.x === x &&
@@ -2138,7 +2139,7 @@ function compiledProbe(
   const factsHidden = ce._factsHidden();
   const deps = snapshotMemoDeps(e);
   let fn: ((x: number) => number) | null = null;
-  const hostCallsBefore = uncachedHostCallCount();
+  const guard = beginStoreGuard();
   limitProbeCompileCount += 1;
   try {
     const lit = ce.function('Function', [e, ce.symbol(x)]);
@@ -2152,8 +2153,7 @@ function compiledProbe(
   } catch {
     fn = null;
   }
-  if (deps === undefined || uncachedHostCallCount() !== hostCallsBefore)
-    return fn;
+  if (deps === undefined || !guard.allowsStore()) return fn;
   // Checkpoint journal (funnel 7): the compiled probe closes over the
   // definitions in force when it was built — a probe compiled during the
   // window must not outlive a restore.

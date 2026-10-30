@@ -16,6 +16,7 @@ import {
 } from './function-literal.js';
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
 import { withScratchScope } from '../scratch-scopes.js';
+import { failClosedCounts } from './store-guard.js';
 
 /**
  * The scope the function literal `literal` was defined in: the parent of the
@@ -463,19 +464,17 @@ export function endSignatureDerivation(frame: SignatureDerivationFrame): void {
   if (i >= 0) derivationStack.splice(i, 1);
 }
 
-/** The number of calls of {@link noteReentrantSignatureRead} in this
- * process. It only increases. */
-let reentrantSignatureReads = 0;
-
 /**
  * The number of re-entrant signature reads so far
  * ({@link noteReentrantSignatureRead}). A memo that is not a signature
  * derivation, and so is not on the derivation stack, compares this count
  * before and after its computation: when it moved, the computation may have
- * read a provisional signature, and its result must not be stored.
+ * read a provisional signature, and its result must not be stored. It only
+ * increases. The count is kept in `failClosedCounts` (`store-guard.ts`), so
+ * that a store guard can read it.
  */
 export function reentrantSignatureReadCount(): number {
-  return reentrantSignatureReads;
+  return failClosedCounts.reentrantSignature;
 }
 
 /**
@@ -492,7 +491,7 @@ export function reentrantSignatureReadCount(): number {
  * `-> unknown`, was memoized, and stayed `-> unknown` after `F` settled.
  */
 export function noteReentrantSignatureRead(owner: object): void {
-  reentrantSignatureReads += 1;
+  failClosedCounts.reentrantSignature += 1;
   let i = derivationStack.length - 1;
   while (i >= 0 && derivationStack[i].owner !== owner) i -= 1;
   if (i < 0) return;

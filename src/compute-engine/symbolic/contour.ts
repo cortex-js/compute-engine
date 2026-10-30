@@ -1,3 +1,4 @@
+import { cacheOff } from '../../common/cache-switches.js';
 import type { Expression, IComputeEngine } from '../global-types.js';
 import type {
   ContourInput,
@@ -20,7 +21,7 @@ import {
   refineExactConstants,
 } from '../boxed-expression/compare.js';
 import { expandAll } from '../boxed-expression/expand.js';
-import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
+import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 
 type Point = { x: Expression; y: Expression };
 type Location = ContourPole['location'];
@@ -189,7 +190,7 @@ export function exactZeroVerdict(c: Expression): boolean | undefined {
   const hit = memoizedZeroVerdict(c);
   if (hit !== 'none') return hit;
   const ce = c.engine;
-  const hostCallsBefore = uncachedHostCallCount();
+  const guard = beginStoreGuard();
   const v = c.evaluate();
   let zero: boolean | undefined;
   if (isNumber(v)) zero = v.isSame(0);
@@ -210,7 +211,8 @@ export function exactZeroVerdict(c: Expression): boolean | undefined {
   // A verdict computed with host code that does not state its purity, or
   // with a host handler that changed state, is not kept: the host code can
   // read state that the key does not record (`host-handler-changes.ts`).
-  if (uncachedHostCallCount() !== hostCallsBefore) return zero;
+  // Nor is a verdict computed from a provisional answer (`store-guard.ts`).
+  if (!guard.allowsStore()) return zero;
   // The memo finds an entry by the structure of the expression, so the
   // verdict of an expression that reads a symbol that is not a constant
   // (`sin(a) − sin(1)` with `a := 1`) is valid only for the cache
@@ -240,6 +242,7 @@ export function memoizedZeroVerdict(
   c: Expression
 ): boolean | undefined | 'none' {
   const ce = c.engine;
+  if (cacheOff('contour')) return 'none';
   const key = memoKeyOf(ce);
   const hit = zeroMemo
     .get(ce)
@@ -304,7 +307,8 @@ const sign = exactSign;
  * are part of the key. */
 export function exactComplexParts(z: Expression): Point | undefined {
   if (!z.isPure) return undefined;
-  if (!hasOnlyConstantSymbols(z)) return computeExactComplexParts(z);
+  if (!hasOnlyConstantSymbols(z) || cacheOff('contour'))
+    return computeExactComplexParts(z);
   const ce = z.engine;
   let memo = partsMemo.get(ce);
   if (!memo) {
@@ -315,11 +319,12 @@ export function exactComplexParts(z: Expression): Point | undefined {
   const bucket = memo.get(z.hash);
   const hit = bucket?.find((entry) => entry.key === key && entry.z.isSame(z));
   if (hit) return hit.parts;
-  const hostCallsBefore = uncachedHostCallCount();
+  const guard = beginStoreGuard();
   const parts = computeExactComplexParts(z);
   // Parts computed with host code that does not state its purity, or with a
-  // host handler that changed state, are not kept (`host-handler-changes.ts`).
-  if (uncachedHostCallCount() !== hostCallsBefore) return parts;
+  // host handler that changed state, are not kept (`host-handler-changes.ts`),
+  // nor parts computed from a provisional answer (`store-guard.ts`).
+  if (!guard.allowsStore()) return parts;
   storeMemoEntry(memo, z.hash, { z, key, parts }, (e) => e.z.isSame(z));
   return parts;
 }

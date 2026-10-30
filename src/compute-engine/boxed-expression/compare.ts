@@ -1,3 +1,4 @@
+import { cacheOff } from '../../common/cache-switches.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { MACHINE_PRECISION } from '../numerics/numeric.js';
@@ -8,7 +9,7 @@ import type {
   IntervalBounds,
 } from '../global-types.js';
 import { getInequalityBoundsFromAssumptions } from './inequality-bounds.js';
-import { uncachedHostCallCount } from './host-handler-changes.js';
+import { beginStoreGuard } from './store-guard.js';
 import {
   compareBounds,
   exactCompareNumbers,
@@ -2756,17 +2757,18 @@ function approximateNode(
 ): { approximation: Approximation | undefined; pure: boolean } {
   const ce = x.engine;
   const key = `${ce.precision}:${BigDecimal.precision}:${ce.angularUnit}:${ce.roundingTies}`;
-  const known = approximations.get(x);
+  const known = cacheOff('approx') ? undefined : approximations.get(x);
   const entry = known?.find((k) => k.key === key);
   if (entry !== undefined)
     return { approximation: entry.approximation, pure: true };
-  const hostCallsBefore = uncachedHostCallCount();
+  const guard = beginStoreGuard();
   const result = computeApproximation(x, logUnit);
   // An approximation computed with host code that does not state its
   // purity (the value of a constant symbol can hold a host operator), or
   // with a host handler that changed state, is not kept
-  // (`host-handler-changes.ts`).
-  if (result.pure && uncachedHostCallCount() === hostCallsBefore) {
+  // (`host-handler-changes.ts`). Nor is one computed from a provisional
+  // answer (`store-guard.ts`).
+  if (result.pure && guard.allowsStore()) {
     const kept = { key, approximation: result.approximation };
     // The newest entry is last: the oldest one is dropped.
     approximations.set(

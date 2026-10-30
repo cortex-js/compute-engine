@@ -47,6 +47,8 @@
  * interrupted evaluation cannot leave a binding poisoned).
  */
 
+import { failClosedCounts } from './store-guard.js';
+
 /**
  * Single-entry query kinds. Each is one bit of a per-binding bitmask, so
  * entering and leaving a guarded query is a single map operation.
@@ -109,12 +111,12 @@ const _active = new Map<object, number>();
  * else. A caller that memoizes its result must therefore not freeze a
  * computation that consumed one (see the lazy-collection evaluate memo in
  * `boxed-function.ts`).
+ *
+ * The count is kept in `failClosedCounts` (`store-guard.ts`), so that a
+ * store guard can read it.
  */
-let _cycleDetections = 0;
-
-/** See {@link _cycleDetections}. */
 export function cycleDetectionCount(): number {
-  return _cycleDetections;
+  return failClosedCounts.cycle;
 }
 
 /**
@@ -131,7 +133,7 @@ export function cycleDetectionCount(): number {
 export function enterCycleQuery(key: object, kind: number): number {
   const flags = _active.get(key) ?? 0;
   if ((flags & kind) !== 0) {
-    _cycleDetections += 1;
+    failClosedCounts.cycle += 1;
     return CYCLE_DETECTED;
   }
   _active.set(key, flags | kind);
@@ -178,7 +180,7 @@ export function enterCycleDepthQuery(key: object, kind: number): number {
   const depths = _depths[kind];
   const depth = depths.get(key) ?? 0;
   if (depth >= MAX_CYCLE_DEPTH) {
-    _cycleDetections += 1;
+    failClosedCounts.cycle += 1;
     return CYCLE_DETECTED;
   }
   depths.set(key, depth + 1);

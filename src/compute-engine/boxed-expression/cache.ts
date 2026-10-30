@@ -15,6 +15,7 @@ import {
 import { asComputation } from '../../common/computation-depth.js';
 import { containsObject } from './object-walk.js';
 import { isExpression } from './type-guards.js';
+import { failClosedCounts } from './store-guard.js';
 
 /**
  * One memoized answer, with everything that decides whether it may be served.
@@ -65,18 +66,23 @@ export type CachedValueStats<T> = {
   same: (a: T, b: T) => boolean;
 };
 
-/**
- * How many re-entrant reads {@link cachedValue} has answered provisionally in
- * this process, ever. Monotonic, and only ever compared before/after a
- * computation — the same shape as `_lazyValueProvisionalReads` in
- * `boxed-function.ts` and `cycleDetectionCount()` in `cycle-guard.ts`, and
- * used for the same purpose: a computation that consumed a provisional answer
- * must not be frozen. Process-wide rather than per-entry because the
- * provisional answer travels upward — every entry whose computation was on the
- * stack when one was served has to decline, not just the one that was
- * re-entered.
- */
-let _provisionalReads = 0;
+// `failClosedCounts.cellProvisional` (`store-guard.ts`) counts the
+// re-entrant reads that {@link cachedValue} answered provisionally in this
+// process. It is only compared before and after a computation, as the other
+// counts of `store-guard.ts` are, and for the same purpose: a computation
+// that consumed a provisional answer must not be frozen. It is for the
+// process, not for one entry, because the provisional answer travels upward:
+// every entry whose computation was on the stack when one was served has to
+// decline, not just the one that was re-entered. It goes down only when the
+// outermost computation of a cell takes back the answers that only it
+// received (the settled-only gate below).
+//
+// `cachedValue()` compares only this count, not a whole store guard: its
+// callers are description caches (type, sign, structural form), whose
+// computation evaluates nothing, and a cell of such a cache is what ends a
+// recursive read. The one caller that evaluates, the value that `at()`
+// reads (`BoxedFunction._materializedAt`), begins a store guard around its
+// call.
 
 /**
  * The cell {@link cachedValue} uses for `generation`, allocated on first use.
@@ -239,7 +245,7 @@ export function cachedValue<T>(
       // nodes caching everywhere, which is what made those two suites fail
       // merely for sharing a jest worker with an object-constructing suite.
       if (engine !== undefined && engineHasObjects(engine))
-        _provisionalReads += 1;
+        failClosedCounts.cellProvisional += 1;
       if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
     } else if (stats && CACHE_STATS)
       recordCache(stats.cls, generation === undefined ? 'hitConstant' : 'hit');
@@ -288,7 +294,7 @@ export function cachedValue<T>(
     // outermost computation of this cell commit (see the settled-only gate
     // below).
     if (engine !== undefined && engineHasObjects(engine)) {
-      _provisionalReads += 1;
+      failClosedCounts.cellProvisional += 1;
       cell.emptyServed = (cell.emptyServed ?? 0) + 1;
     }
     if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
@@ -328,7 +334,7 @@ export function cachedValue<T>(
     objectDepsValid(twin.objectDeps)
   ) {
     mergeObjectDeps(twin.objectDeps);
-    _provisionalReads += 1;
+    failClosedCounts.cellProvisional += 1;
     if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
     return twin.value;
   }
@@ -347,7 +353,7 @@ export function cachedValue<T>(
   // section above). `objectDeps` is NOT touched: it describes the value still
   // sitting in the cell, which is the value such a read is served, and
   // clearing it would advertise that value as depending on nothing.
-  const provisionalBefore = _provisionalReads;
+  const provisionalBefore = failClosedCounts.cellProvisional;
   const emptyServedBefore = cell.emptyServed ?? 0;
   const prevGeneration = cell.generation;
   cell.generation = generation;
@@ -404,10 +410,10 @@ export function cachedValue<T>(
   if (
     ownEmptyServed > 0 &&
     !cell.inFlight &&
-    _provisionalReads - provisionalBefore === ownEmptyServed
+    failClosedCounts.cellProvisional - provisionalBefore === ownEmptyServed
   )
-    _provisionalReads -= ownEmptyServed;
-  if (_provisionalReads !== provisionalBefore) {
+    failClosedCounts.cellProvisional -= ownEmptyServed;
+  if (failClosedCounts.cellProvisional !== provisionalBefore) {
     cell.generation = prevGeneration;
     if (stats && CACHE_STATS) recordCache(stats.cls, 'declineStore');
     return result;
@@ -496,4 +502,19 @@ export async function cachedValueAsync<T>(
   // this entry is constrained by its generation alone.
   cell.objectDeps = undefined;
   return result;
+}
+
+/**
+ * Empty `cell`, unless a computation of it is in progress. For the off
+ * switches of `CE_CACHE_OFF` only (`common/cache-switches.ts`): the next read
+ * computes the value again, as with no cache. A computation in progress is
+ * left alone, so that a re-entrant read still gets the answers that end a
+ * recursive read in {@link cachedValue} (the same-cell value and the
+ * empty-cell answer); without them a recursive function types its body again
+ * at each level until the stack overflows.
+ */
+export function forgetSettledValue<T>(cell: CachedCell<T>): void {
+  if (cell.inFlight) return;
+  cell.value = null;
+  cell.generation = undefined;
 }

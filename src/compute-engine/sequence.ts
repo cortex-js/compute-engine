@@ -27,6 +27,7 @@ import { serialize as serializeLatex } from './latex-syntax/latex-syntax.js';
 import { noteSequenceReadStop } from './boxed-expression/sequence-read-stops.js';
 import { countLeaves } from './symbolic/fu-cost.js';
 import { checkDeadline } from '../common/interruptible.js';
+import { cacheOff } from '../common/cache-switches.js';
 import {
   isTransitivelyPure,
   setSubscriptEvaluateReads,
@@ -37,10 +38,11 @@ import {
   type MemoDeps,
 } from './boxed-expression/collection-element-memo.js';
 import { ConstantAssignmentError } from './constant-assignment-error.js';
+import { markEngineSubscriptHandler } from './boxed-expression/host-handler-changes.js';
 import {
-  markEngineSubscriptHandler,
-  uncachedHostCallCount,
-} from './boxed-expression/host-handler-changes.js';
+  beginStoreGuard,
+  type StoreGuard,
+} from './boxed-expression/store-guard.js';
 
 // ============================================================================
 // Sequence Registry (SUB-7: Introspection support)
@@ -789,7 +791,7 @@ export function createSequenceHandler(
       attempting: false,
       attemptEpoch: 0,
       count: 0,
-      hostCalls: uncachedHostCallCount(),
+      guard: beginStoreGuard(),
     };
     reads.set(readKey, read);
     activeSequenceReads += 1;
@@ -1040,11 +1042,21 @@ export function createSequenceHandler(
     // (or a host handler that changed state) is kept in `read.terms` only:
     // the host code can read state that the stamp does not record, and a
     // later term of the read can read this term from `read.terms`
-    // (`host-handler-changes.ts`).
+    // (`host-handler-changes.ts`). The same holds for a term of a read that
+    // used a provisional answer (`store-guard.ts`). A stop of the reads
+    // (`stopSequenceReads()`) also moves a count of the guard; the terms
+    // after it are declined anyway.
+    //
+    // A re-entrant evaluation of a lazy collection node (a node of the
+    // recurrence evaluated again for a lower term) is accepted: it computes
+    // the full value of the node for that term. Only the memo of that node,
+    // which keys on the node and not on the term, must not keep it
+    // (`_memoizedLazyCollectionValue`).
     if (
       termStamp !== undefined &&
       stamp === termStamp &&
-      uncachedHostCallCount() === read.hostCalls &&
+      read.guard.movedOnly('lazyValueProvisional') &&
+      !cacheOff('sequence') &&
       memoStampIsValid(engine, termStamp)
     )
       memoizeTerm(engine, indices, numericApproximation, term);
@@ -1312,9 +1324,9 @@ interface SequenceRead {
   attemptEpoch: number;
   /** The number of terms that the read started to compute. */
   count: number;
-  /** The value of `uncachedHostCallCount()` when the read started. When it
-   * moved, no term of the read is put in the memos. */
-  hostCalls: number;
+  /** The store guard begun when the read started (`store-guard.ts`).
+   * When it refuses, no term of the read is put in the memos. */
+  guard: StoreGuard;
 }
 
 /**

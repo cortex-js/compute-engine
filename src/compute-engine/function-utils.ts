@@ -1,3 +1,4 @@
+import { cacheOff } from '../common/cache-switches.js';
 import { clearForwardCallReference } from './boxed-expression/forward-call-reference.js';
 import { MathJsonSymbol } from '../math-json.js';
 import {
@@ -130,8 +131,7 @@ import {
   snapshotMemoDeps,
   type MemoDeps,
 } from './boxed-expression/collection-element-memo.js';
-import { sequenceReadStopCount } from './boxed-expression/sequence-read-stops.js';
-import { uncachedHostCallCount } from './boxed-expression/host-handler-changes.js';
+import { beginStoreGuard } from './boxed-expression/store-guard.js';
 import { notePendingCallScope } from './pending-call-scopes.js';
 import {
   isEffectSubset,
@@ -6055,11 +6055,11 @@ function makeLambda(
       return options.awaitStatements
         ? (Promise.resolve(hit) as unknown as Expression)
         : hit;
-    const sequenceStopsBefore = sequenceReadStopCount();
     // A body that evaluates a host operator that does not state
     // `pure: true`, or the handler of one that states it but changed state,
-    // is not memoized (`host-handler-changes.ts`).
-    const hostCallsBefore = uncachedHostCallCount();
+    // is not memoized (`host-handler-changes.ts`), nor a body that read a
+    // provisional answer (`store-guard.ts`).
+    const guard = beginStoreGuard();
     // The substituted body is canonicalized and evaluated in a scope whose
     // parent is the scope where the literal was defined, as a call frame
     // is: a name of the body that is not a parameter (a local of the
@@ -6083,11 +6083,12 @@ function makeLambda(
     result = bodyResultValue(result);
     // A read of a sequence term that was stopped in this application is not
     // memoized, as on the ordinary route (`sequence-read-stops.ts`).
+    // A re-entrant evaluation of a lazy collection node and a re-entrant
+    // read of a signature are accepted, as on the ordinary route below.
     if (
       memoKey !== undefined &&
       result.isValid &&
-      sequenceReadStopCount() === sequenceStopsBefore &&
-      uncachedHostCallCount() === hostCallsBefore
+      guard.movedOnly('lazyValueProvisional', 'reentrantSignature')
     )
       applicationMemoForStore(ce, fnExpr)?.results.set(memoKey, result);
     // The lambda is typed synchronous: a `Promise` comes back only for the
@@ -6668,15 +6669,15 @@ function makeLambda(
       const hit = validApplicationMemo(ce, fnExpr)?.results.get(memoKey);
       if (hit !== undefined) return hit;
     }
-    // A read of a sequence term that is stopped in this application (too
-    // many terms, or a recursion that is too deep) declines the term for
-    // this read only. The result is then not memoized: a later application
-    // can give the term (see `sequence-read-stops.ts`).
-    const sequenceStopsBefore = sequenceReadStopCount();
-    // A body that evaluates a host operator that does not state
-    // `pure: true`, or the handler of one that states it but changed state,
-    // is not memoized (`host-handler-changes.ts`).
-    const hostCallsBefore = uncachedHostCallCount();
+    // The result is not memoized when the store guard refuses it
+    // (`store-guard.ts`). For example, a read of a sequence term that is
+    // stopped in this application (too many terms, or a recursion that is
+    // too deep) declines the term for this read only, and a later
+    // application can give the term (see `sequence-read-stops.ts`). A body
+    // that evaluates a host operator that does not state `pure: true`, or
+    // the handler of one that states it but changed state, is not memoized
+    // either (`host-handler-changes.ts`).
+    const guard = beginStoreGuard();
 
     // A recursive definition is not unrolled symbolically: a re-entrant
     // application with an argument that contains a free symbol abandons the
@@ -6975,8 +6976,26 @@ function makeLambda(
       if (
         store &&
         memoKey !== undefined &&
-        sequenceReadStopCount() === sequenceStopsBefore &&
-        uncachedHostCallCount() === hostCallsBefore
+        // A re-entrant evaluation of a lazy collection node (a node of the
+        // body evaluated again by a recursive application) is not a
+        // provisional answer here: it computes the full value of the node
+        // in the scope of its own application. Only the memo of that node,
+        // which keys on the node and not on the application, must not keep
+        // it (`_memoizedLazyCollectionValue`). Refusing it would remove
+        // this memo from every recursive function whose body holds such a
+        // node.
+        //
+        // A re-entrant read of a signature is accepted too. The first
+        // application of a recursive function reads the type of its body,
+        // and that starts the derivation of the signature of the function;
+        // the recursive call in the body reads that signature while it is
+        // derived (`noteReentrantSignatureRead()`). The provisional answer
+        // is a type of the derivation, which the derivation does not keep;
+        // the values of the body are computed from the values of the
+        // arguments. Refusing it would remove this memo from the first
+        // application of every recursive function, so each level would be
+        // computed again (`recursive-application-memo-across-evaluations.test.ts`).
+        guard.movedOnly('lazyValueProvisional', 'reentrantSignature')
       ) {
         // The exact entry is stored whether or not the numeric pass produced
         // a valid result: the exact answer is what a recursive body, which
@@ -7228,7 +7247,9 @@ function validApplicationMemo(
   ce: ComputeEngine,
   fnExpr: Expression
 ): ApplicationMemo | undefined {
-  const memo = ce._applicationMemo?.get(fnExpr);
+  const memo = cacheOff('appmemo')
+    ? undefined
+    : ce._applicationMemo?.get(fnExpr);
   if (
     memo !== undefined &&
     memo.worldVersion === ce._worldVersion &&

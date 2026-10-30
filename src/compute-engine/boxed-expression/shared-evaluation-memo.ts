@@ -96,21 +96,16 @@
  * when the engine has made an object (a result that read a field of a
  * mutable object must not be kept: see `object-deps.ts`).
  *
- * The caller does not store a result when one of the fail-closed counters
- * moved during the computation (`failClosedCount`): such a result can hold
- * a provisional answer that a later read gives differently.
+ * The caller does not store a result when its store guard refuses it
+ * (`beginStoreGuard()`, `store-guard.ts`): host code ran, or the result can
+ * hold a provisional answer that a later read gives differently.
  */
 import {
   debugStatementHook,
   debugStatementResultHook,
 } from '../../common/debug-hook.js';
-import { cycleDetectionCount } from './cycle-guard.js';
-import { sequenceReadStopCount } from './sequence-read-stops.js';
-import { reentrantSignatureReadCount } from './declared-parameter-result.js';
-import {
-  noteUncachedHostCall,
-  uncachedHostCallCount,
-} from './host-handler-changes.js';
+import { noteUncachedHostCall } from './host-handler-changes.js';
+import { cacheOff } from '../../common/cache-switches.js';
 
 /** The parts of the engine that the memo reads. */
 type MemoEngine = {
@@ -201,6 +196,7 @@ export function beginSharedEvaluationMemo(
   let memo = memoOf(engine);
   if (
     noMemo ||
+    cacheOff('shared') ||
     debugStatementHook !== undefined ||
     debugStatementResultHook !== undefined
   ) {
@@ -536,25 +532,6 @@ export function rememberEvaluation<T>(
     verifying: engine.isVerifying,
     effects: engine._evaluationEffects ?? engine.effects,
   });
-}
-
-/**
- * The sum of the process counters that move when a computation used a
- * provisional answer: a guarded query that failed closed on a cycle
- * (`cycle-guard.ts`), a stopped read of a sequence term
- * (`sequence-read-stops.ts`), a re-entrant read of a signature that is
- * being derived (`declared-parameter-result.ts`), and host code that no
- * memo may keep a result across (`host-handler-changes.ts`). Each counter only
- * increases, so the sum is the same after a computation only when no
- * counter moved. A result computed while the sum moved is not kept.
- */
-export function failClosedCount(): number {
-  return (
-    cycleDetectionCount() +
-    sequenceReadStopCount() +
-    reentrantSignatureReadCount() +
-    uncachedHostCallCount()
-  );
 }
 
 /**

@@ -1,5 +1,6 @@
+import { cacheOff } from '../../common/cache-switches.js';
 import { registerProvedAbsentDomain } from '../boxed-expression/proved-absent-domain.js';
-import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
+import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 import { callableBindingInContext } from '../boxed-expression/binders.js';
 import { appliedLiteralResultType } from '../boxed-expression/call-result-type.js';
 import { isOperatorCallee } from '../boxed-expression/callee-type-derivation.js';
@@ -25512,7 +25513,7 @@ function sliceBounds(
   // reachable for this; a WeakMap keyed by the node holds the entry for
   // exactly as long as the node itself lives.
   const factsHidden = expr.engine._factsHidden();
-  const cached = SLICE_BOUNDS_MEMO.get(expr);
+  const cached = cacheOff('slice') ? undefined : SLICE_BOUNDS_MEMO.get(expr);
   if (
     cached !== undefined &&
     cached.worldVersion === expr.engine._worldVersion &&
@@ -25520,12 +25521,14 @@ function sliceBounds(
     memoDepsStillValid(expr, cached.deps)
   )
     return cached.bounds;
-  const hostCallsBefore = uncachedHostCallCount();
+  const guard = beginStoreGuard();
   const bounds = computeSliceBounds(expr);
   // Bounds computed with host code that does not state its purity (a host
   // `count` handler, a host operator in a span operand), or with a host
   // handler that changed state, are not kept (`host-handler-changes.ts`).
-  if (uncachedHostCallCount() !== hostCallsBefore) return bounds;
+  // Nor are bounds computed from a provisional answer, such as a `count`
+  // of the source that stopped at an incomplete walk (`store-guard.ts`).
+  if (!guard.allowsStore()) return bounds;
   const deps = snapshotMemoDeps(expr);
   if (deps !== undefined)
     SLICE_BOUNDS_MEMO.set(expr, {

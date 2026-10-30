@@ -1,3 +1,4 @@
+import { cacheOff } from '../../common/cache-switches.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -11,7 +12,7 @@ import {
   isNumber,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { uncachedHostCallCount } from '../boxed-expression/host-handler-changes.js';
+import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 import { bignumPreferred, isValueDef } from '../boxed-expression/utils.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { lookup } from '../function-utils.js';
@@ -621,13 +622,15 @@ function attemptCompile(
   // host handler that changed state (a constant subexpression folded at
   // compile time), is not kept: the compiled code holds a value that the
   // stamps of the record do not validate (`host-handler-changes.ts`). The
-  // instance is computed by the interpreter, as for a structural refusal.
-  const hostCallsBefore = uncachedHostCallCount();
+  // same holds for a compilation that used a provisional answer
+  // (`store-guard.ts`). The instance is computed by the interpreter, as for
+  // a structural refusal.
+  const guard = beginStoreGuard();
   const result = attemptCompileOnce(ce, tier, fn, inner, named);
   if (
     result === undefined ||
     result.state !== 'compiled' ||
-    uncachedHostCallCount() === hostCallsBefore
+    guard.allowsStore()
   )
     return result;
   return {
@@ -919,6 +922,9 @@ export function mapCompiledElementRunner(
   if (named === undefined && !calleesResolveLexically(ce, fn, new Set()))
     return undefined;
 
+  // With the `mapcompile` switch off, the entry is dropped, so each call
+  // compiles the element function again.
+  if (cacheOff('mapcompile')) mapCompileCaches.delete(expr);
   const existing = mapCompileCaches.get(expr);
   if (drainStart && existing) existing.attemptedThisDrain = false;
   // Cheap short-circuit: a deterministic no-compile is permanent for the

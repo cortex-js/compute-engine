@@ -87,9 +87,7 @@ import {
 } from '../boxed-expression/object-deps.js';
 import { containsObject } from '../boxed-expression/object-walk.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
-import { sequenceReadStopCount } from '../boxed-expression/sequence-read-stops.js';
-import { cycleDetectionCount } from '../boxed-expression/cycle-guard.js';
-import { incompleteWalkCount } from '../boxed-expression/incomplete-walks.js';
+import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 
 import {
   applicable,
@@ -4232,8 +4230,11 @@ function declinedDerivativeHit(
  * could not be validated later, the same rules as the memo of a stored value
  * (`BoxedSymbol._memoizedStoredValue()`):
  * - inside a transient precision or angular-unit window;
- * - when the attempt met a reference cycle, a stopped sequence read, a walk
- *   that missed elements, or a re-pointed binding;
+ * - when the store guard refuses it (`store-guard.ts`): the attempt ran
+ *   host code that does not state its purity, or met a provisional answer
+ *   (a reference cycle, a stopped sequence read, a walk that missed
+ *   elements);
+ * - when the attempt re-pointed a binding;
  * - when the node is not transitively pure (it can read a random number),
  *   holds a mutable object, or has a dependency that cannot be recorded
  *   (an unbound name);
@@ -4261,10 +4262,8 @@ function withDeclinedDerivativeMemo(
   )
     return attempt();
   const ce = expression.engine;
-  const cyclesBefore = cycleDetectionCount();
+  const guard = beginStoreGuard();
   const rewritesBefore = ownBindingRewriteCount();
-  const sequenceStopsBefore = sequenceReadStopCount();
-  const walksBefore = incompleteWalkCount();
   beginObjectDeps();
   let objectDeps: ObjectDeps | undefined;
   let result: Expression | undefined;
@@ -4275,10 +4274,8 @@ function withDeclinedDerivativeMemo(
   }
   if (result !== undefined) return result;
   if (
-    cycleDetectionCount() !== cyclesBefore ||
+    !guard.allowsStore() ||
     ownBindingRewriteCount() !== rewritesBefore ||
-    sequenceReadStopCount() !== sequenceStopsBefore ||
-    incompleteWalkCount() !== walksBefore ||
     !isTransitivelyPure(expression) ||
     containsObject(expression)
   )

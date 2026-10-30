@@ -17,12 +17,15 @@ type parse cache). Paths are relative to `src/compute-engine/` unless they
 start with `src/`, `test/`, `docs/` or `benchmarks/`.
 
 This document changes no source code. It found three defects, filed as
-ROADMAP CE-628, CE-647 and CE-648.
+ROADMAP CE-628, CE-647 and CE-648; step 1 fixes them.
 
-**Work in progress elsewhere.** On 2026-10-30, session `compute-engine-3e`
-implements steps 0 and 1 of revision 1 of this plan (off switches, a
-benchmark driver, the store guard, the CE-628 fix, and CE-621.1, .3 and .4).
-Section 7 says what in that work matches revision 2 and what does not.
+**Status of the steps.** Steps 0 and 1 (1a to 1d) are done by session
+`compute-engine-3e` and staged in the main tree on 2026-10-30, waiting for
+the user's commit: the off switches, the benchmark driver, the store guard,
+the fixes of CE-628, CE-647 and CE-648, and CE-621.1, .3 and .4. CE-621.2
+stays open. Section 7 says what that work does beyond the plan. Steps 2, 4
+and 5 come next (session `compute-engine-aa`), after that commit; step 3b is
+not assigned; step 6 is not started; step 7 is not done (decision 2).
 
 ## 1. Summary
 
@@ -480,8 +483,11 @@ collection keeps its draws when it is read under another seed frame
 - **Known gaps already filed**: CE-645 (the element memo can store elements
   computed inside a temporary precision or angular-unit window), CE-621.1 to
   CE-621.4 (host rule on the asynchronous route and in the eager source
-  store), CE-615 (an extension does not reach expressions boxed before it),
-  CE-36 (a derivation inside a cached type read can miss a widening).
+  store; .1, .3 and .4 fixed by step 1d), CE-615 (an extension does not reach
+  expressions boxed before it), CE-36 (a derivation inside a cached type read
+  can miss a widening). Filed during step 1: CE-657 (a cache keeps a random
+  draw or an impure value when the node does not look impure) and CE-649 (an
+  asynchronous host handler that evaluates its own node waits on itself).
 
 ## 5. Problems with the current structure
 
@@ -614,6 +620,19 @@ is refused; every other count is accepted):
 The table counts per file; where one file holds several caches (the lazy
 value, facet and `at()` caches), step 1b reads each store site and writes the
 subset that site reads.
+
+**What step 1 does (decision 6, option (a)).** Every site refuses a store
+when any count moved, except three sites that keep exactly the rule they had
+before step 1, because their store decision defines a result:
+
+| Site | Rule kept | Why |
+|---|---|---|
+| Element memo | Refuses on host, sequence stop and incomplete walk only | One instance gives one set of random draws |
+| Eager source values | Refuses on host only | Host code runs once per evaluation |
+| `at()` cell | Is cleared on host only | The cell value ends a recursive read of the same node |
+
+The paired benchmark of step 1 on the 13 workloads gave median ratios from
+0.93 to 1.06, and no round above 1.19.
 
 ### 6.3 One numeric context stamp
 
@@ -767,21 +786,30 @@ lock, paired with a baseline run made just before. All test paths are under
 | 6 | 3b | Counters: for each cache that reads both the semantic version and a dependency snapshot (`Map` compile, derivative chains, element memo), decide whether the semantic version is still needed; remove it only with a test that shows the snapshot sees each event the semantic version saw. The element memo keeps it for its between-pull checks | `compile-lazy-collections.test.ts`, `derivative-closed-form-cache.test.ts`, `collection-element-memo.test.ts` | `map-compile` |
 | 7 | 3b | Not done (decision 2 is no). Only with decision 2: a per-activation key for the description caches of body nodes (CE-531, CE-334, CE-321) | `lambda-param-collection-inference.test.ts`, `inert-evaluate-memo.test.ts`, `ce-535-531-binder-declaration-cache.test.ts`, the full suite | `recursion-fib`, `type-reads`, Tycho row 453 repro |
 
-**The work of session `compute-engine-3e`** (2026-10-30, steps 0 and 1 of
-revision 1) against this table, as that session reported it:
+**Steps 0 and 1 as done** (session `compute-engine-3e`, staged 2026-10-30;
+from that session's report):
 
-- Step 0: done, with the corrected `Map` workloads (a 150,000-element drain,
-  larger than the element memo's cap, and a check that the compile statistics
-  moved).
-- `objectReadCount()`: kept as a separate check next to the guard, as 6.2
-  says.
-- CE-621.1, .3 and .4: fixed (.1 with a test, .3 and .4 without one); .2
-  stays open. Step 1d asks for a test of .3 and .4 too.
-- The accept lists: the element memo will accept exactly what it reads today,
-  and the eager source values already do. The other sites refuse more counts
-  than they read today, in one commit. That is steps 1b and 1c in one; for
-  those sites a refused store means a computation again, not a different
-  result. Whether to split it is for the user (decision 6).
+- Step 0: the off switches and `benchmarks/evaluation-caches.ts`, with the
+  corrected `Map` workloads (a 150,000-element drain, larger than the element
+  memo's cap, and a check that the compile statistics moved).
+- Steps 1a to 1c, in one change (decision 6): the fixes of CE-628, CE-647 and
+  CE-648, and the store guard with the rules of the table in 6.2.
+  `objectReadCount()` stays a separate check next to the guard.
+- Step 1d: CE-621.1, .3 and .4 fixed with tests; CE-621.2 stays open.
+- Beyond the plan:
+  - The lazy value memo no longer gives the constant key (rule G+) to a node
+    that calls a user function, to a dictionary that holds such a call, or
+    to an operator that the host declared in the system scope.
+  - An asynchronous evaluation that joins another one's pending walk reads
+    the memo in its own context; when the joined walk is rejected, it runs
+    its own walk; an impure node never joins.
+- Taken out of step 1 by user decision (2026-10-30, option (b)) and filed:
+  CE-657, a cache keeps a random draw or the value of an impure operator when
+  the node does not look impure (four designs were tried and none held; it
+  needs a design).
+- Also filed: CE-649, an asynchronous host handler that evaluates the node
+  that contains it waits on itself (design options: `AsyncLocalStorage`, or
+  never join for a caller that host code started).
 
 ## 8. Open decisions
 

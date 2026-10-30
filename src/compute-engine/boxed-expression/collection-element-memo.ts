@@ -22,9 +22,8 @@ import {
 } from './object-deps';
 import { containsObject } from './object-walk';
 import { subscriptEvaluateReads } from './transitive-purity';
-import { sequenceReadStopCount } from './sequence-read-stops';
-import { incompleteWalkCount } from './incomplete-walks';
-import { uncachedHostCallCount } from './host-handler-changes';
+import { beginStoreGuard, type StoreGuard } from './store-guard';
+import { cacheOff } from '../../common/cache-switches';
 
 /**
  * Element memoization for lazy collection operators (Tycho item 126).
@@ -1098,6 +1097,7 @@ export function validElementMemo(
  * element of the entry. */
 function validEntryOf(expr: Expression): ElementMemoCache | undefined {
   const ce = expr.engine;
+  if (cacheOff('element')) return undefined;
   // Inside a transient precision window (`_withTransientPrecision`, the
   // window of a `N(x, p)` call), the elements that a read would compute have
   // more digits than the ones a memo holds, and the ones a read inside the
@@ -1190,26 +1190,22 @@ function commitRecordedWalk(
   suspendedEpochChange: boolean,
   complete: boolean,
   objectDeps: ObjectDeps | undefined,
-  sequenceStopsBefore: number,
-  incompleteWalksBefore: number,
-  hostCallsBefore: number
+  guard: StoreGuard
 ): void {
   // A partial entry with nothing in it would only churn the cache.
   if (!complete && buffer.length === 0) return;
-  // An element computed by host code that no memo may keep a result across
-  // (a host operator that does not state its purity, or a host handler that
-  // changed state) is not committed (`host-handler-changes.ts`).
-  if (uncachedHostCallCount() !== hostCallsBefore) return;
-  // A read of a sequence term was stopped while the walk ran (too many
-  // terms, or a recursion that is too deep): an element can hold that
-  // declined term, and a later read can give it. Such a buffer is not
-  // committed (`sequence-read-stops.ts`).
-  if (sequenceReadStopCount() !== sequenceStopsBefore) return;
-  // The walk met an inner collection that it could not walk (a `FlatMap`
-  // whose callback returned `Join([x], v)` for a valueless `v`), so the
-  // buffer misses elements. A later walk that read it would not see that
-  // (`incomplete-walks.ts`).
-  if (incompleteWalkCount() !== incompleteWalksBefore) return;
+  // The store guard (`store-guard.ts`), begun when the walk started. It
+  // refuses: an element computed by host code that no memo
+  // may keep a result across (`host-handler-changes.ts`); a read of a
+  // sequence term that was stopped while the walk ran, so that an element
+  // can hold the declined term, which a later read can give
+  // (`sequence-read-stops.ts`); a walk that met an inner collection that it
+  // could not walk (a `FlatMap` whose callback returned `Join([x], v)` for a
+  // valueless `v`), so that the buffer misses elements
+  // (`incomplete-walks.ts`). The consumer runs between two pulls, so an
+  // event of the consumer also prevents the commit; that is only a missed
+  // store. The other counts are accepted: see `ELEMENT_MEMO_ACCEPTED`.
+  if (!guard.movedOnly(...ELEMENT_MEMO_ACCEPTED)) return;
   // An element that IS (or transitively holds) a mutable object is never
   // memoized: the entry would keep it alive for as long as the collection
   // instance lives (ruling B12), and its contents are not part of what the
@@ -1265,28 +1261,40 @@ function commitRecordedWalk(
  * the CONSUMER while the generator is suspended are a different matter — see
  * `commitRecordedWalk`; the boundary flag below is what detects them.
  */
-/** The counts that a recorded walk compares at its commit, sampled when the
+/**
+ * The counts of the store guard that the element memo accepts. The memo
+ * refuses a store only when host code ran, a sequence read was stopped, or a
+ * walk missed elements, as it did before the store guard existed. The memo
+ * defines a result: one instance of a collection gives one set of random
+ * draws, and the host code of its elements that states its purity runs once
+ * (`docs/RANDOMNESS-MODEL.md` §6). Refusing a store for one more count would
+ * draw again, or call the host code again, on the next read, so narrowing
+ * this list is a separate change, with a test that counts the draws and the
+ * host calls.
+ */
+const ELEMENT_MEMO_ACCEPTED = [
+  'cycle',
+  'reentrantSignature',
+  'iterationLimit',
+  'lazyValueProvisional',
+  'cellProvisional',
+] as const;
+
+/** The store guard that a recorded walk asks at its commit, begun when the
  * walk starts (`elementMemoWalkBaseline()`). */
-export type ElementMemoWalkBaseline = {
-  sequenceStops: number;
-  incompleteWalks: number;
-  hostCalls: number;
-};
+export type ElementMemoWalkBaseline = StoreGuard;
 
 /**
- * Sample the counts that a recorded walk compares at its commit. The caller
- * samples them BEFORE it builds the iterator of the walk: building it can
- * evaluate an operand (the iterator of `Join` walks its operands at once,
- * and a finiteness read evaluates an eager source), and host code that runs
- * then is part of the walk (`host-handler-changes.ts`). A generator cannot
- * sample them itself: its body runs at the first `next()`.
+ * Begin the store guard that a recorded walk asks at its commit
+ * (`store-guard.ts`). The caller begins it BEFORE it builds the iterator of
+ * the walk: building it can evaluate an operand (the iterator of `Join`
+ * walks its operands at once, and a finiteness read evaluates an eager
+ * source), and host code that runs then is part of the walk
+ * (`host-handler-changes.ts`). A generator cannot begin it itself: its body
+ * runs at the first `next()`.
  */
 export function elementMemoWalkBaseline(): ElementMemoWalkBaseline {
-  return {
-    sequenceStops: sequenceReadStopCount(),
-    incompleteWalks: incompleteWalkCount(),
-    hostCalls: uncachedHostCallCount(),
-  };
+  return beginStoreGuard();
 }
 
 /**
@@ -1348,11 +1356,6 @@ function* recordingStream(
   let suspendedScopeChange = false;
   let drained = false;
   const startDeps = boundary.deps;
-  // A stop of a sequence read between the baseline and the commit, also one
-  // made by the consumer between two pulls, prevents the commit.
-  const sequenceStopsBefore = baseline.sequenceStops;
-  const incompleteWalksBefore = baseline.incompleteWalks;
-  const hostCallsBefore = baseline.hostCalls;
   /** The mutable-object field reads made by the walk itself. A collector is
    * opened around each PULL rather than around the whole generator: the
    * generator suspends at every `yield`, and a collector left open across
@@ -1430,9 +1433,7 @@ function* recordingStream(
       suspendedEpochChange || suspendedScopeChange,
       drained && !overflow,
       objectDeps,
-      sequenceStopsBefore,
-      incompleteWalksBefore,
-      hostCallsBefore
+      baseline
     );
   }
 }
@@ -1485,9 +1486,7 @@ export function elementMemoFillTo(
   );
   const elements: Expression[] = [];
   let complete = false;
-  const sequenceStopsBefore = sequenceReadStopCount();
-  const incompleteWalksBefore = incompleteWalkCount();
-  const hostCallsBefore = uncachedHostCallCount();
+  const guard = beginStoreGuard();
   const iter = makeStream();
   // The drain is synchronous and uninterrupted by consumer code, so ONE
   // collector brackets the whole of it: every mutable-object field read below
@@ -1516,19 +1515,15 @@ export function elementMemoFillTo(
   // …and the same payload rule: an element holding a mutable object is never
   // memoized, because the entry would keep that object alive (ruling B12) and
   // its contents are not part of what the version stamps validate.
-  // …and a fill during which a read of a sequence term was stopped is not
-  // committed: an element can hold the declined term, which a later read
-  // can give (`sequence-read-stops.ts`).
-  // …and a fill that met an inner collection that it could not walk is not
-  // committed: it misses elements (`incomplete-walks.ts`).
+  // …and a fill that the store guard refuses is not committed
+  // (`store-guard.ts`): host code ran, a read of a sequence term was stopped
+  // (an element can hold the declined term, which a later read can give),
+  // or the fill met an inner collection that it could not walk (it misses
+  // elements). The other counts are accepted (`ELEMENT_MEMO_ACCEPTED`).
   if (
     deps !== undefined &&
     !elements.some(containsObject) &&
-    sequenceReadStopCount() === sequenceStopsBefore &&
-    incompleteWalkCount() === incompleteWalksBefore &&
-    // Host code that no memo may keep a result across
-    // (`host-handler-changes.ts`).
-    uncachedHostCallCount() === hostCallsBefore &&
+    guard.movedOnly(...ELEMENT_MEMO_ACCEPTED) &&
     // Elements computed inside a transient precision window are not stored
     // (see `validElementMemo`).
     !expr.engine._atTransientConfiguration
@@ -1608,10 +1603,9 @@ export function elementMemoComputeCell(
 ): Expression | undefined {
   const ce = expr.engine;
   if (!Number.isInteger(index) || index < 1) return compute();
-  if (ce._atTransientConfiguration || !expr.isPure) return compute();
-  const sequenceStopsBefore = sequenceReadStopCount();
-  const incompleteWalksBefore = incompleteWalkCount();
-  const hostCallsBefore = uncachedHostCallCount();
+  if (ce._atTransientConfiguration || !expr.isPure || cacheOff('element'))
+    return compute();
+  const guard = beginStoreGuard();
   let value: Expression | undefined;
   let objectDeps: ObjectDeps | undefined;
   beginObjectDeps();
@@ -1623,11 +1617,9 @@ export function elementMemoComputeCell(
   if (
     value === undefined ||
     containsObject(value) ||
-    sequenceReadStopCount() !== sequenceStopsBefore ||
-    incompleteWalkCount() !== incompleteWalksBefore ||
-    // Host code that no memo may keep a result across
-    // (`host-handler-changes.ts`).
-    uncachedHostCallCount() !== hostCallsBefore ||
+    // Host code ran, a sequence read was stopped, or a walk missed elements
+    // (`store-guard.ts`; the other counts: `ELEMENT_MEMO_ACCEPTED`).
+    !guard.movedOnly(...ELEMENT_MEMO_ACCEPTED) ||
     ce._atTransientConfiguration
   )
     return value;

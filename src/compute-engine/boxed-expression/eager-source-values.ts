@@ -1,3 +1,4 @@
+import { cacheOff } from '../../common/cache-switches.js';
 import type { Expression } from '../global-types.js';
 import {
   beginObjectDeps,
@@ -6,7 +7,7 @@ import {
   objectDepsValid,
   type ObjectDeps,
 } from './object-deps.js';
-import { uncachedHostCallCount } from './host-handler-changes.js';
+import { beginStoreGuard } from './store-guard.js';
 import { noteUncachedHostEvaluation } from './shared-evaluation-memo.js';
 import { topLevelEvaluationEpoch } from './evaluation-epoch.js';
 
@@ -157,7 +158,7 @@ export function evaluateEagerSource(source: Expression): Expression {
   beginObjectDeps();
   let value: Expression;
   let objectDeps: ObjectDeps | undefined;
-  const hostCallsBefore = uncachedHostCallCount();
+  const guard = beginStoreGuard();
   try {
     value = source.evaluate();
   } finally {
@@ -172,7 +173,19 @@ export function evaluateEagerSource(source: Expression): Expression {
   // value and the host code runs once. Each use counts the host code again
   // (`entryValue()`), so that a memo around the use does not keep a result
   // that depends on it.
-  const hostCode = uncachedHostCallCount() !== hostCallsBefore;
+  //
+  // The value is kept whatever the other counts of the store guard
+  // (`store-guard.ts`) did: these values define a result (the host code runs
+  // once in the evaluation), so changing when they are kept is a separate
+  // change, with a test that counts the host calls. The entry lives for this
+  // evaluation only, and each use counts the host code again, so a memo
+  // around a use does not keep a result built on it. One memo accepts the
+  // host count: the memo of
+  // factorizations (`factor.ts`). That does not matter here: its only
+  // evaluation is a `.N()` of a candidate root, and a kept value is served
+  // only to a plain `evaluate()` (no numeric approximation), and the memo
+  // keeps a factor only after an exact polynomial division confirms it.
+  const hostCode = guard.moved('host');
   keepEagerSourceValue(source, value, objectDeps, hostCode);
   if (collecting !== undefined)
     collecting.set(source, {
@@ -232,7 +245,7 @@ export function takeDetachedEagerSourceValue(
   values: EagerSourceValues | undefined,
   operand: Expression
 ): Expression | undefined {
-  if (values === undefined) return undefined;
+  if (values === undefined || cacheOff('eagersource')) return undefined;
   const entry = values.get(operand);
   if (entry === undefined) return undefined;
   values.delete(operand);
@@ -356,11 +369,27 @@ const hostKeptByEngine = new WeakMap<
  * evaluation of `expr` (no numeric approximation, no materialization).
  */
 export function keptEagerSourceValue(expr: Expression): Expression | undefined {
-  if (keptCount === 0) return undefined;
+  if (keptCount === 0 || cacheOff('eagersource')) return undefined;
   const ce = expr.engine;
-  const entry =
-    keptByEngine.get(ce)?.get(expr) ??
-    hostKeptByEngine.get(ce)?.get(topLevelEvaluationEpoch(ce))?.get(expr);
+  // Each store is tried in turn: an ordinary entry that is out of date must
+  // not hide a valid entry that host code computed for the same source in
+  // this evaluation.
+  return (
+    keptEntryValue(ce, keptByEngine.get(ce)?.get(expr)) ??
+    keptEntryValue(
+      ce,
+      hostKeptByEngine.get(ce)?.get(topLevelEvaluationEpoch(ce))?.get(expr)
+    )
+  );
+}
+
+/** The value of `entry`, or `undefined` when there is no entry or it
+ * cannot be used in the current scope, assumptions and precision, or when
+ * `entryValue()` refuses it. */
+function keptEntryValue(
+  ce: Expression['engine'],
+  entry: KeptEntry | undefined
+): Expression | undefined {
   if (entry === undefined) return undefined;
   if (
     entry.scope !== ce.context?.lexicalScope ||

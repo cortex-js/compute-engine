@@ -17,6 +17,7 @@ import {
   validateDeclaredType,
 } from './instantiate.js';
 import { CACHE_STATS, recordCache } from '../cache-stats.js';
+import { cacheOff } from '../cache-switches.js';
 
 // Note: the authoritative BNF grammar for the type syntax lives with the
 // parser implementation in `./parser.ts`.
@@ -161,7 +162,7 @@ export function parseType(
   // Sound for resolver-aware calls too: `cacheResult()` admits only strings
   // whose resolver-less parse is resolver-independent; `cacheResult` enforces
   // that condition before inserting it.
-  const cached = TYPE_CACHE.get(s);
+  const cached = cacheOff('typeparse') ? undefined : TYPE_CACHE.get(s);
   if (cached !== undefined) {
     if (CACHE_STATS) recordCache('typeParse', 'hit');
     return cached;
@@ -185,7 +186,7 @@ export function parseType(
   // strings do occur on repeated routes, such as one `ce.declare` per function
   // with the same signature), and a known string skips the first attempt.
   if (typeResolver !== undefined) {
-    const names = RESOLVED_NAMES.get(s);
+    const names = cacheOff('typeparse') ? undefined : RESOLVED_NAMES.get(s);
     if (names !== undefined) {
       const entry = currentResolvedEntry(s, names, typeResolver);
       if (entry !== undefined) {

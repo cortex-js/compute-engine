@@ -30,6 +30,7 @@ import {
 } from '../boxed-expression/utils.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { isFoldingConstant } from '../boxed-expression/simplify.js';
+import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 import type { Type } from '../../common/type/types.js';
 import {
   type AliasDescent,
@@ -666,6 +667,13 @@ function containsSame(expr: Expression, node: Expression): boolean {
  */
 type DerivativeChainCache = {
   semanticVersion: number;
+  /** The engine's `_definitionVersion` when the entry was filled. A retype
+   * of a symbol (a write to the type of its definition) moves neither the
+   * semantic version nor, for a symbol that the closing simplification
+   * removed, a recorded dependency; it moves this version. A chain step
+   * that read the old type (`Element(b, Integers)` with `b` an integer) is
+   * not used after it. */
+  definitionVersion: number;
   iterates: Map<string, (Expression | undefined)[]>;
   /** For each chain of `iterates`, the state that the differentiation step
    * which built `iterates[k]` read (`iterateReads[k]`; index 0 is empty). A
@@ -936,7 +944,11 @@ export function memoizedDerivativeResult(
   cache.lastFinishedGeneration = undefined;
   cache.lastFinishedAny = undefined;
   cache.lastFinishedDeps = undefined;
+  const guard = beginStoreGuard();
   const value = compute();
+  // A result computed while host code ran, or with a provisional answer, is
+  // not kept (`store-guard.ts`).
+  if (!guard.allowsStore()) return value;
   const after = ce._cacheGeneration();
   // See the comment of this function for the rule. `derivativeChains` holds
   // a new entry when the semantic version moved during `compute`. "Equal to
@@ -993,10 +1005,16 @@ function partialDerivativeCache(
     partialDerivativeChains.set(ce, byKey);
   }
   const version = ce._semanticVersion;
+  const definitionVersion = ce._definitionVersion;
   let entry = byKey.get(key);
-  if (entry === undefined || entry.semanticVersion !== version) {
+  if (
+    entry === undefined ||
+    entry.semanticVersion !== version ||
+    entry.definitionVersion !== definitionVersion
+  ) {
     entry = {
       semanticVersion: version,
+      definitionVersion,
       iterates: new Map(),
       iterateReads: new Map(),
       results: new Map(),
@@ -1063,6 +1081,7 @@ export function memoizedPartialDerivative(
   const reads: StateReads = { deps: [], complete: true };
   const outerReads = activeStateReads;
   activeStateReads = reads;
+  const guard = beginStoreGuard();
   let value: Expression | undefined;
   try {
     value = compute();
@@ -1078,7 +1097,14 @@ export function memoizedPartialDerivative(
   noteStateReads(deps);
   // A definition changed during `compute`: the entry no longer describes
   // the state of the engine.
-  if (ce._semanticVersion !== cache.semanticVersion) return value;
+  if (
+    ce._semanticVersion !== cache.semanticVersion ||
+    ce._definitionVersion !== cache.definitionVersion
+  )
+    return value;
+  // A result computed while host code ran, or with a provisional answer, is
+  // not kept (`store-guard.ts`).
+  if (!guard.allowsStore()) return value;
   let byOrder = cache.results.get(subKey);
   if (byOrder === undefined) {
     byOrder = new Map();
@@ -1140,21 +1166,34 @@ function restampDisposed(
 }
 
 /**
- * The cache entry for `key`, emptied when the engine's semantic state moved.
- * The version is read BEFORE the differentiation runs, so a declaration the
- * differentiation itself makes — an evaluation inside a throwaway compile
- * scope can devolve a bare builtin symbol into a variable — moves the version
- * past the entry and the next read starts over.
+ * The cache entry for `key`, emptied when the engine's semantic state or a
+ * definition (a retype) changed.
+ *
+ * The versions are read at this call. In `derivative()` that is after the
+ * normalization of a function symbol, which evaluates `f(_)`: the first
+ * evaluation of `f(_)` can move the definition version itself (an
+ * inference), and an entry stamped with the version read before it would be
+ * out of date at the next request, so the cache would never be used. They
+ * are read before the differentiation and its closing simplification, so a
+ * declaration that the differentiation itself makes (an evaluation inside a
+ * throwaway compile scope can devolve a bare builtin symbol into a variable)
+ * moves the version past the entry, and the next read starts over.
  */
 function derivativeChainCache(
   ce: Expression['engine'],
   key: Expression
 ): DerivativeChainCache {
   const version = ce._semanticVersion;
+  const definitionVersion = ce._definitionVersion;
   let entry = derivativeChains.get(key);
-  if (entry === undefined || entry.semanticVersion !== version) {
+  if (
+    entry === undefined ||
+    entry.semanticVersion !== version ||
+    entry.definitionVersion !== definitionVersion
+  ) {
     entry = {
       semanticVersion: version,
+      definitionVersion,
       iterates: new Map(),
       iterateReads: new Map(),
       results: new Map(),
@@ -1177,6 +1216,10 @@ export function derivative(
 ): Expression | undefined {
   if (order === 0) return fn;
   const ce = fn.engine;
+  // Begun before the normalization below, which evaluates `f(_)`: that
+  // evaluation can run host code (a constant call `h(2)` in the body of
+  // `f`), and a result that depends on it is not kept (`store-guard.ts`).
+  const guard = beginStoreGuard();
   // Read the cache key from the ORIGINAL operand: the normalization below
   // rewrites a function symbol into an application of it, which is a fresh
   // expression on every call and so has no identity to key on.
@@ -1301,9 +1344,11 @@ export function derivative(
       // request, which depends on the state of the engine. So the state that
       // each step read is stored next to the iterate it built, and is added
       // to the reads of this request when the iterate is reused.
-      const chain = cache?.iterates.get(subKey) ?? [fn];
-      const chainReads: StateReads[] = cache?.iterateReads.get(subKey) ?? [
-        { deps: [], complete: true },
+      // Copies of the cached arrays: they are extended below, and put back
+      // only when the store guard allows it.
+      const chain = [...(cache?.iterates.get(subKey) ?? [fn])];
+      const chainReads: StateReads[] = [
+        ...(cache?.iterateReads.get(subKey) ?? [{ deps: [], complete: true }]),
       ];
       result = order < chain.length ? chain[order] : chain[chain.length - 1];
       let step = order < chain.length ? order : chain.length - 1;
@@ -1324,8 +1369,10 @@ export function derivative(
         chain[step] = result;
         chainReads[step] = stepReads;
       }
-      cache?.iterates.set(subKey, chain);
-      cache?.iterateReads.set(subKey, chainReads);
+      if (guard.allowsStore()) {
+        cache?.iterates.set(subKey, chain);
+        cache?.iterateReads.set(subKey, chainReads);
+      }
     } else {
       // Simplify each derivative of order 1 or more before it is
       // differentiated again. The chain rule and the product rule distribute
@@ -1402,7 +1449,10 @@ export function derivative(
   if (deps !== undefined && reads.complete) deps = [...reads.deps, ...deps];
   else deps = undefined;
   noteStateReads(deps);
-  if (cache !== undefined) {
+  // A result computed while host code ran (the evaluation of `f(_)` above,
+  // or a constant call that a simplification evaluates), or with a
+  // provisional answer, is not kept (`store-guard.ts`).
+  if (cache !== undefined && guard.allowsStore()) {
     let byOrder = cache.results.get(subKey);
     if (byOrder === undefined) {
       byOrder = new Map();

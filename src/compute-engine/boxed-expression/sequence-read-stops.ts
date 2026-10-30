@@ -15,18 +15,20 @@
  * the terms of the reads in progress of the other engines, because the
  * limit of the depth is a limit of the call stack, which they share.
  *
- * This module imports nothing, so that each cache module can import it
+ * The count is kept in `failClosedCounts` (`store-guard.ts`), so that a
+ * store guard can read it. This module imports only `store-guard.ts`,
+ * which imports no module of the engine, so that each cache module can import it
  * with no dependency cycle.
  */
 
-let sequenceReadStops = 0;
+import { failClosedCounts } from './store-guard.js';
 
 /** The number of the stopped reads of sequence terms in this process. */
 export function sequenceReadStopCount(): number {
-  return sequenceReadStops;
+  return failClosedCounts.sequenceStop;
 }
 
 /** Add one to the count of the stopped reads of sequence terms. */
 export function noteSequenceReadStop(): void {
-  sequenceReadStops += 1;
+  failClosedCounts.sequenceStop += 1;
 }

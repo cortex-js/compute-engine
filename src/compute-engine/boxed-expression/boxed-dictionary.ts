@@ -1,3 +1,5 @@
+import { cacheOff } from '../../common/cache-switches.js';
+import { beginStoreGuard } from './store-guard.js';
 import type {
   Expression,
   PatternMatchOptions,
@@ -616,7 +618,9 @@ export class BoxedDictionary
     const version = ce._anyVersion;
     const pure = this.isPure;
     if (pure) {
-      const hit = dictionaryEvaluationMemo?.get(this);
+      const hit = cacheOff('dictionary')
+        ? undefined
+        : dictionaryEvaluationMemo?.get(this);
       if (
         hit !== undefined &&
         hit.options === options &&
@@ -627,6 +631,7 @@ export class BoxedDictionary
     const outermost = dictionaryEvaluationMemo === undefined;
     if (outermost) dictionaryEvaluationMemo = new WeakMap();
     const memo = dictionaryEvaluationMemo!;
+    const guard = pure ? beginStoreGuard() : undefined;
     ce._evaluationDepth += 1;
     try {
       const pairs = entries.map(([k, v]) =>
@@ -635,7 +640,10 @@ export class BoxedDictionary
       const value = new BoxedDictionary(ce, ce._fn('Dictionary', pairs));
       // Not stored when the evaluation changed the state of the engine (an
       // assignment in a value): a later read can then give another value.
-      if (pure && ce._anyVersion === version)
+      // Nor when it ran host code that does not state its purity (a value
+      // `h(2)` with a host operator `h`), or used a provisional answer
+      // (`store-guard.ts`): each path to the node then evaluates it.
+      if (pure && ce._anyVersion === version && guard!.allowsStore())
         memo.set(this, { options, version, value });
       return value;
     } finally {

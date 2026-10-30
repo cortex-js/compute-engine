@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-658.
+Next free reference: CE-659.
 
 **Entry format.**
 
@@ -771,30 +771,21 @@ later `j.each()` gives `0.33333, 9` and `j.at(1)` gives `0.33333`, expected
 walk samples whether a transient window is open, or the window depths, with the
 rest of its baseline, and does not store a walk during which that changed.
 
-### CE-621. Host-code rule of CE-601: remaining gaps on the asynchronous route and in the store of host-derived source values
+### CE-621. Host-code rule of CE-601: a nested asynchronous evaluation releases the host-derived source values of its parent
 
-**Status:** open; defects. Found 2026-10-28 by the last review round of CE-601.
-None of them gives a result that 0.173.0 did not give (0.173.0 kept every host
-result); they cause extra host calls, or, in concurrent evaluations, a value
-that the rule says must not be shared. To be handled by the evaluation-cache
-audit (`docs/plans/2026-10-28-evaluation-cache-audit-handoff.md`).
+**Status:** open; defect. Found 2026-10-28 by the last review round of CE-601.
+It does not give a result that 0.173.0 did not give (0.173.0 kept every host
+result); it causes extra host calls. The fix needs one count of the
+evaluations in progress for each evaluation number, shared by the synchronous
+and the asynchronous evaluations (`evaluation-epoch.ts`); the store guard of
+the evaluation-cache migration does not decide it.
 
-- **CE-621.1** Two concurrent `evaluateAsync()` calls of the same node join one
-  pending promise even when the result depends on host code that does not state
-  its purity (`boxed-function.ts`, the pending-result join): with a source
-  returning `List(++calls)`, both evaluations get the first one's result.
 - **CE-621.2** A nested `evaluateAsync()` started by a handler without a carried
   context stack gets the parent's evaluation number but its own pending count;
   when it ends, it releases the parent's host-derived source values
   (`releaseHostEagerSourceValues`), and the parent calls the source again. The
   same happens when a synchronous top-level evaluation ends while a nested
   asynchronous evaluation that shares its number is pending.
-- **CE-621.3** `eager-source-values.ts`: a lookup takes the ordinary entry
-  before validating it, so an out-of-date ordinary entry hides a valid host
-  entry for the same source (repeated host calls within one evaluation).
-- **CE-621.4** A synchronous throw at the start of `evaluateAsync` does not
-  release that evaluation's host-derived source values (only memory, until the
-  engine is idle).
 
 ### CE-657. A cache keeps a random draw or the value of an impure operator when the node does not look impure
 
@@ -840,7 +831,12 @@ What a design must decide: which caches define a result and must keep one
 set of draws per instance (today: the element memo, the facet memo, the
 materialized `at()` cell, the sequence terms; see `docs/RANDOMNESS-MODEL.md`
 §6), and how a seeded frame is identified so that its draws can be cached
-only with it. The cost limit is the paired benchmark of
+only with it. The same design decides one related gap: the element memo
+accepts the provisional counts of the store guard (a cut cycle, a re-entrant
+signature read, an iteration limit, a provisional lazy value or cell), so it
+can keep an element computed from a provisional answer, where the other
+caches refuse such a store; it accepts them today so that its draws and host
+calls stay the same as before the store guard. The cost limit is the paired benchmark of
 `benchmarks/evaluation-caches.ts` (no workload slower than 1.25×).
 
 ### CE-649. An async host handler that evaluates the node containing it waits on itself
@@ -883,67 +879,6 @@ Options:
   evaluations of one node then each run the node's host code, where today they
   share one run.
 - If nothing is decided: the hang stays, as on HEAD.
-
-### CE-628. The derivative cache keeps a value that host code computed
-
-**Status:** open; wrong value. Found 2026-10-30 by the evaluation-cache audit
-(`docs/plans/2026-10-30-evaluation-cache-architecture.md`); the same on HEAD
-`9b86a0932`.
-
-The cache of derivative chains (`derivativeChains` and
-`partialDerivativeChains`, `symbolic/derivative.ts`) is keyed on the function
-literal, the semantic version and a snapshot of the dependencies. It does not
-read the count of host calls (`uncachedHostCallCount()`,
-`host-handler-changes.ts`), which every other cache of evaluated values reads.
-Differentiation simplifies the body, and the simplification evaluates a constant
-call of a host operator. Repro: declare `h` with
-`signature: '(number) -> number'` and an `evaluate` handler that returns
-`x + k`, where `k` is a JavaScript variable, and no purity statement.
-`ce.assign('f', ['Function', ['Multiply', 'x', ['h', 2]], 'x'])` with `k = 1`;
-`Derivative(f)` gives `(x) => 3`. Set `k = 1000`: a new `Derivative(f)`, and
-`Derivative(f)(5)`, still give `3`; a new engine gives `(x) => 1002`. Expected:
-no chain step is stored when the count moved while it was computed, as the other
-caches do.
-
-### CE-647. The derivative cache does not see a retype of a symbol that the function reads
-
-**Status:** open; wrong value. Found 2026-10-30 by the evaluation-cache audit
-(`docs/plans/2026-10-30-evaluation-cache-architecture.md`, section 4.4); the
-same on HEAD `d7c8fe8b9`.
-
-The cache of derivative chains (`derivativeChains`, `symbolic/derivative.ts`) is
-keyed on the function literal and is emptied when the semantic version moves. A
-retype (a write to the type of a value definition) does not move the semantic
-version, and the dependency snapshot of the chain does not see it. Repro:
-`ce.declare('b', 'integer')`;
-`ce.assign('f', ['Function', ['Multiply', 'x', ['If', ['Element', 'b', 'Integers'], 10, 20]], 'x'])`;
-`Derivative(f)` gives `(x) => 10`. Then
-`ce.box('b').valueDefinition.type = 'real'`: `f(1)` gives
-`If(Element(b, "Integers"), 10, 20)`, but `Derivative(f)`, also a new node,
-still gives `(x) => 10`. With the chain cache turned off (probe worktree), the
-same node gives
-`(x) => x * If(Element(b, "Integers"), 0, 0) + If(Element(b, "Integers"), 10, 20)`.
-Expected: a chain step is not used after a retype of a definition it read. The
-migration plan of the audit (step 3) gives this cache the definition version
-with its dependency stamp.
-
-### CE-648. The zero-test and simplification caches of the Rubi integrator keep values that host code computed
-
-**Status:** open; wrong value (only with the opt-in Rubi rules and a host
-operator whose value changes during one integration). Found 2026-10-30 by the
-evaluation-cache audit
-(`docs/plans/2026-10-30-evaluation-cache-architecture.md`).
-
-`zeroQ()` and `safeSimplify()` (`rubi/rubi-utils.ts`) keep their results for one
-integration call, keyed on the text of the expression. They call `simplify()`
-and `N()`, which run host operators, and they do not read the count of host
-calls (`uncachedHostCallCount()`, `host-handler-changes.ts`). The memo of shared
-subexpressions has the same lifetime (one evaluation) and does not keep such
-values. Repro (direct call, the caches installed as the driver does):
-`h(x) = x + k`, a host operator with no purity statement, `k = 1`;
-`zeroQ(h(1) - 2)` is `true`; set `k = 5`; `zeroQ(h(1) - 2)` is still `true`
-(expected `false`), and `h` runs once instead of twice. Expected: no entry is
-stored when the host count moved while it was computed.
 
 ### CE-606. `Equal(r(t), r(t))` of a drawing function evaluates to `True`
 
@@ -3276,6 +3211,30 @@ A related case: on `javascript`, a variable assigned without a `Declare` in a
 nested block (an implicit local) and read after that block reads the input of
 the same name (`_.W`), so the code gives `NaN` where the interpreter reports an
 error. Python reports `NameError` at run time for the same block.
+
+### CE-658. JavaScript: a coordinate of a point-or-point-list symbol with an assigned point declines
+
+**Status:** open; defect (decline). Found 2026-10-30 from Tycho ledger row 479,
+on the main tree after commit `f169546e9`.
+
+With `P: tuple<number, number> | list<tuple<number, number>>` and
+`P := (3, 4)`, the interpreter gives `At(P, 1) + x` = `3 + x`. The `glsl` and
+`wgsl` targets compile it to `x + 3.0`: they write the point in place of `P`
+before the compilation (`gpuInlinePointValues()` and `gpuInlinePointCalls()` in
+`gpu-target.ts`). The `javascript` target declines it with "an operand may be a
+point (a tuple) and another operand is a number", because the check of `Add` in
+`base-compiler.ts` reads the declared type of `At(P, 1)`,
+`missing | number | tuple<number, number>`. `At(P, 2) - x` declines in the same
+way, at the check of scalar arithmetic over a possibly list-valued operand, and
+so does `f(x) + x` with `f(t) := At(P, 1)`.
+
+A change of only the `Add` check is not sufficient: the next check that reads a
+declared type declines. The expected fix is to write the assigned point in
+place of such a symbol, and to replace such a call by its body, at the compile
+entry of every target, as the GPU targets do.
+
+Expected: the three examples above compile on `javascript`, `interval-js` and
+`python`, and give the interpreter's values.
 
 ### CE-651. interval-js: a `Break` condition that compares an interval input with a number never runs
 

@@ -124,8 +124,7 @@ import {
 import { containsObject } from './object-walk.js';
 import { isTransitivelyPure } from './transitive-purity.js';
 import { normalizeCount, smallCount } from './collection-count.js';
-import { sequenceReadStopCount } from './sequence-read-stops.js';
-import { uncachedHostCallCount } from './host-handler-changes.js';
+import { beginStoreGuard } from './store-guard.js';
 import { assertLiveBinding } from './binding-tombstone.js';
 import { isFunctionLiteralParameter } from './function-literal.js';
 import { assignmentLocalsOf } from '../assignment-locals.js';
@@ -135,6 +134,7 @@ import {
   beginAsyncEvaluation,
   copyContextStack,
 } from './evaluation-epoch.js';
+import { cacheOff } from '../../common/cache-switches.js';
 import {
   CYCLE_DETECTED,
   CycleDepthQuery,
@@ -143,7 +143,6 @@ import {
   enterCycleQuery,
   exitCycleDepthQuery,
   exitCycleQuery,
-  cycleDetectionCount,
 } from './cycle-guard.js';
 
 /**
@@ -2143,7 +2142,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     route: StoredValueRoute,
     compute: () => Expression
   ): Expression {
-    if (!isFunction(value) || value.isPure !== true) return compute();
+    if (!isFunction(value) || value.isPure !== true || cacheOff('storedvalue'))
+      return compute();
     // Inside a transient precision window (`_withTransientPrecision`, the
     // raised-precision step of the exact ordering), a computed value carries
     // the raised precision, and the memo below is keyed on the world version,
@@ -2186,10 +2186,8 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
         entry === undefined ? 'missCold' : 'missDependency'
       );
 
-    const cyclesBefore = cycleDetectionCount();
+    const guard = beginStoreGuard();
     const rewritesBefore = ownBindingRewriteCount();
-    const sequenceStopsBefore = sequenceReadStopCount();
-    const hostCallsBefore = uncachedHostCallCount();
     beginObjectDeps();
     let objectDeps: ObjectDeps | undefined;
     let result: Expression;
@@ -2198,23 +2196,16 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
     } finally {
       objectDeps = endObjectDeps();
     }
-    // Settled only: a dereference a cycle cut short answered a provisional
-    // value, which must not be frozen. The same applies to a value computed
-    // while a sequence read was stopped (too many terms, or a recursion that
-    // is too deep): the declined term is a provisional value too, and a later
-    // read, after the lower terms are known, can give the term.
-    if (
-      cycleDetectionCount() !== cyclesBefore ||
-      sequenceReadStopCount() !== sequenceStopsBefore ||
-      result === this
-    ) {
-      if (CACHE_STATS) recordCache('storedValue', 'declineCycle');
-      return result;
-    }
-    // A value computed with host code that does not state its purity, or
-    // with a host handler that changed state, is not kept: the host code can
-    // read state that the stamps above do not record (`host-handler-changes.ts`).
-    if (uncachedHostCallCount() !== hostCallsBefore) {
+    // Settled only (`store-guard.ts`): a dereference a cycle cut short
+    // answered a provisional value, which must not be frozen. The same
+    // applies to a value computed while a sequence read was stopped (too many
+    // terms, or a recursion that is too deep): the declined term is a
+    // provisional value too, and a later read, after the lower terms are
+    // known, can give the term. A value computed with host code that does
+    // not state its purity, or with a host handler that changed state, is
+    // not kept either: the host code can read state that the stamps above do
+    // not record (`host-handler-changes.ts`).
+    if (result === this || !guard.allowsStore()) {
       if (CACHE_STATS) recordCache('storedValue', 'declineCycle');
       return result;
     }

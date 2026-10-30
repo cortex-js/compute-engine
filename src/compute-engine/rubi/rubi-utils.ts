@@ -14,6 +14,7 @@ import type { Expr as Expression, Json } from './types.js';
 import type { IComputeEngine as ComputeEngine } from '../types-engine.js';
 import { isNumber } from '../boxed-expression/type-guards.js';
 import { throwIfCallerCancellation } from '../../common/interruptible.js';
+import { beginStoreGuard } from '../boxed-expression/store-guard.js';
 
 import { expand } from '../boxed-expression/expand.js';
 
@@ -473,6 +474,7 @@ function safeSimplify(e: Expression): Expression {
   const t0 = Date.now();
   let r: Expression;
   let cancelled = false;
+  const guard = beginStoreGuard();
   try {
     r = e.simplify();
   } catch (err) {
@@ -502,7 +504,10 @@ function safeSimplify(e: Expression): Expression {
     console.error(`slow simplify ${ms}ms: ${e.toString().slice(0, 120)}`);
   // A result that a cancellation cut short depends on the time that was
   // left, so it is not cached: a later call with more time can simplify it.
-  if (!cancelled) activeCaches?.simplify.set(key, r);
+  // Nor is a result computed while host code that does not state its purity
+  // ran, or from a provisional answer (`store-guard.ts`): the simplification
+  // evaluates constant calls of host operators.
+  if (!cancelled && guard.allowsStore()) activeCaches?.simplify.set(key, r);
   return r;
 }
 
@@ -523,6 +528,7 @@ export function zeroQ(d: Expression): boolean {
   if (cached !== undefined) return cached;
   let result = false;
   const cancellationsBefore = safeSimplifyCancellations;
+  const guard = beginStoreGuard();
   const s = safeSimplify(d);
   if (s.isSame(0)) result = true;
   else {
@@ -531,8 +537,10 @@ export function zeroQ(d: Expression): boolean {
       result = Math.abs(n.re) < 1e-12 && Math.abs(n.im) < 1e-12;
   }
   // Do not cache a result computed from a simplification that a cancellation
-  // cut short.
-  if (safeSimplifyCancellations === cancellationsBefore)
+  // cut short, or computed while host code that does not state its purity
+  // ran (`.N()` and `simplify()` evaluate host operators), or from a
+  // provisional answer (`store-guard.ts`).
+  if (safeSimplifyCancellations === cancellationsBefore && guard.allowsStore())
     activeCaches?.zeroQ.set(key, result);
   return result;
 }

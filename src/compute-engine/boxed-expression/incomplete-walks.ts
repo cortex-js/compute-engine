@@ -37,21 +37,23 @@
  * stayed unevaluated in it does not make an enclosing handler discard its
  * own result.
  *
- * This module imports nothing, so that each module can import it with no
- * dependency cycle.
+ * The count is kept in `failClosedCounts` (`store-guard.ts`), so that a
+ * store guard can read it. This module imports only `store-guard.ts`,
+ * which imports no module of the engine, so that each module can import it
+ * with no dependency cycle.
  */
 
-let incompleteWalks = 0;
+import { failClosedCounts } from './store-guard.js';
 
 /** The number of the walks that missed elements in this process. */
 export function incompleteWalkCount(): number {
-  return incompleteWalks;
+  return failClosedCounts.incompleteWalk;
 }
 
 /** Record that the walk in progress missed elements that it could not
  * compute. */
 export function noteIncompleteWalk(): void {
-  incompleteWalks += 1;
+  failClosedCounts.incompleteWalk += 1;
 }
 
 /**
@@ -71,7 +73,8 @@ export function noteIncompleteWalk(): void {
  * that the read recorded before the evaluation still shows.
  */
 export function takeBackIncompleteWalks(mark: number): void {
-  if (incompleteWalks > mark) incompleteWalks = mark;
+  if (failClosedCounts.incompleteWalk > mark)
+    failClosedCounts.incompleteWalk = mark;
   if (failedWalk !== undefined && failedWalk.mark > mark)
     failedWalk = undefined;
 }
@@ -97,8 +100,8 @@ let failedWalk: { mark: number; error: unknown } | undefined;
  * (`failedWalkErrorSince()`) answers `error`.
  */
 export function noteFailedWalk(error: unknown): void {
-  incompleteWalks += 1;
-  failedWalk = { mark: incompleteWalks, error };
+  failClosedCounts.incompleteWalk += 1;
+  failedWalk = { mark: failClosedCounts.incompleteWalk, error };
 }
 
 /**
@@ -108,7 +111,10 @@ export function noteFailedWalk(error: unknown): void {
  */
 export function failedWalkErrorSince(mark: number): unknown {
   if (failedWalk === undefined) return undefined;
-  if (failedWalk.mark <= mark || failedWalk.mark > incompleteWalks)
+  if (
+    failedWalk.mark <= mark ||
+    failedWalk.mark > failClosedCounts.incompleteWalk
+  )
     return undefined;
   return failedWalk.error;
 }
@@ -129,9 +135,9 @@ export function failedWalkErrorSince(mark: number): unknown {
  * the count gets `undefined` too.
  */
 export function unlessWalkMissedElements<T>(read: () => T): T | undefined {
-  const before = incompleteWalks;
+  const before = failClosedCounts.incompleteWalk;
   const value = read();
-  return incompleteWalks === before ? value : undefined;
+  return failClosedCounts.incompleteWalk === before ? value : undefined;
 }
 
 /**
@@ -184,9 +190,9 @@ export class MeasuredWalk<T> implements Iterable<T> {
   }
 
   *[Symbol.iterator](): Generator<T, void, undefined> {
-    const started = incompleteWalks;
+    const started = failClosedCounts.incompleteWalk;
     const iter = this.start()[Symbol.iterator]();
-    if (incompleteWalks !== started) {
+    if (failClosedCounts.incompleteWalk !== started) {
       this.missedElements = true;
       iter.return?.();
       return;
@@ -194,9 +200,9 @@ export class MeasuredWalk<T> implements Iterable<T> {
     try {
       let given = 0;
       while (true) {
-        const before = incompleteWalks;
+        const before = failClosedCounts.incompleteWalk;
         const step = iter.next();
-        if (incompleteWalks !== before) {
+        if (failClosedCounts.incompleteWalk !== before) {
           this.missedElements = true;
           return;
         }

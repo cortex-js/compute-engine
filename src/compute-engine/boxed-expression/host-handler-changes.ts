@@ -34,8 +34,10 @@
  *   persistent evaluation version of the engine moved: the handler changed
  *   state (`withHostHandlerCall()`, `shared-evaluation-memo.ts`).
  *
- * Every memo that keeps an evaluated result reads the count before a
- * computation and does not store the result when the count moved:
+ * Every memo that keeps an evaluated result begins a store guard before a
+ * computation (`beginStoreGuard()`, `store-guard.ts`), which samples this
+ * count with the counts of provisional answers, and does not store the
+ * result when the count moved:
  *
  * - the memo of shared evaluations (`shared-evaluation-memo.ts`);
  * - the memo of the applications of pure function literals
@@ -57,6 +59,10 @@
  * - the memo of the approximations of the comparisons (`compare.ts`);
  * - the compiled probes of `Limit` (`symbolic/limit.ts`);
  * - the compiled functions of `Map` (`library/map-auto-compile.ts`);
+ * - the derivative chains of function literals (`symbolic/derivative.ts`)
+ *   and the record of declined derivatives (`library/calculus.ts`);
+ * - the memo of the evaluations of a pure dictionary
+ *   (`boxed-dictionary.ts`);
  * - the values of eager sources that a finiteness read evaluates and shares
  *   with the operand step (`evaluateEagerSource`, `eager-source-values.ts`):
  *   a value computed with host code is kept for the top-level evaluation
@@ -70,8 +76,8 @@
  * made and after a change of configuration) describe the operator or the
  * symbol: the caches that keep their answers do not read the count.
  *
- * Two caches need no check. The memo of factorizations (`FACTOR_MEMO`,
- * `factor.ts`) finds a candidate root with `.N()`, which can run host code,
+ * The memo of factorizations (`FACTOR_MEMO`, `factor.ts`) accepts a moved
+ * count: it finds a candidate root with `.N()`, which can run host code,
  * but keeps a factor only after an exact polynomial division confirms it,
  * so the stored factorization does not depend on a value that the host code
  * returned. The cache of folded interval code (`FOLDED_INTERVAL_CODE`,
@@ -93,22 +99,24 @@
  * engine stops a store on another, which is only a missed store. It only
  * increases.
  *
- * This module imports nothing, so that each module can import it with no
- * dependency cycle.
+ * The count is kept in `failClosedCounts` (`store-guard.ts`), so that a
+ * store guard can read it. This module imports only `store-guard.ts`,
+ * which imports no module of the engine, so that each module can import it
+ * with no dependency cycle.
  */
 
-let uncachedHostCalls = 0;
+import { failClosedCounts } from './store-guard.js';
 
 /** The number of the evaluations of host code that a memo must not keep a
  * result across. */
 export function uncachedHostCallCount(): number {
-  return uncachedHostCalls;
+  return failClosedCounts.host;
 }
 
 /** Count an evaluation of host code that a memo must not keep a result
  * across. */
 export function noteUncachedHostCall(): void {
-  uncachedHostCalls += 1;
+  failClosedCounts.host += 1;
 }
 
 let standardLibraryInstalls = 0;

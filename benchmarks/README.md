@@ -33,6 +33,7 @@ open-source comparators — against what a mature commercial CAS does.
 | **Compilation (legacy)** | `python-performance.py` | compiled-JS · NumPy · Python | stdout |
 | **Worker threads** | `workers/*.mts` | CE (self, serial vs worker threads) | stdout |
 | **Tycho document open** | `tycho-document-open/evaluate.ts`, `rebind.ts` | CE (self; replays the `evaluate` and `rebind` calls Tycho makes when it opens `art/2ki2hjsouf`, from `2ki2hjsouf.fixture.json.gz`; ROADMAP CE-535, CE-536) | stdout |
+| **Caches of evaluated values** | `evaluation-caches.ts` | CE (self; each cache on and off with `CE_CACHE_OFF`) | stdout |
 | **Pool in a worker (browsers)** | `workers/nested-pool-browser-probe.mjs` | CE bundle in Chromium · Firefox · WebKit (needs a Playwright, `PLAYWRIGHT=`) | stdout |
 
 The first six are the **release baseline** (see below). Benchmark sources
@@ -426,6 +427,45 @@ session — cross-session absolute numbers vary by ~3×.
 npx tsx benchmarks/overload-resolution.ts          # RUNS=5 ITERS=2000
 RUNS=7 ITERS=5000 npx tsx benchmarks/overload-resolution.ts
 ```
+
+---
+
+## Caches of evaluated values (`evaluation-caches.ts`)
+
+A **self-comparison** harness: twelve workloads, each aimed at one or more of
+the engine's caches of evaluated values (the memo of shared subexpressions,
+the application memo, the element, facet and lazy value memos, the sequence
+terms, the stored values, the `Limit` probes, the `Map` compile cache, the
+approximations of the comparisons, the factor memo, and the type and sign
+caches). Each workload prints the median and the range of `RUNS` runs after
+one warm-up run, and a digest of its results.
+
+The environment variable `CE_CACHE_OFF` turns off the look-up of the caches
+it names (a comma-separated list of the names in `CACHE_SWITCHES`,
+`src/common/cache-switches.ts`, or `all`); it is read once when the engine
+loads. Run one Node process with every cache on and one per setting: the
+ratio of the medians is what the hits of that cache save on each workload. A
+digest that differs from the run with every cache on means that the setting
+changed a result. The script refuses an unknown switch name.
+
+```bash
+npx tsx benchmarks/evaluation-caches.ts                       # RUNS=5
+ONLY=shared-max-22,sequence npx tsx benchmarks/evaluation-caches.ts
+CE_CACHE_OFF=appmemo npx tsx benchmarks/evaluation-caches.ts
+```
+
+Hold the box lock for a timing run. With all the caches off, some workloads
+take minutes (`shared-max-22`). With `type` off, the type of a recursive
+function is computed again at each level of the recursion, which is
+exponential: `tycho-evaluate`, `shared-max-22` and `type-reads` do not
+finish in minutes, and the script skips them with a note. The digest is
+computed outside the timed part, and serializes each element of a finite
+collection (`toString()` shows only a preview). A result that is not valid
+stops its workload with an error and no digest; the `map-compile` workload
+also checks that its element function was compiled. The design that these measurements serve, and the first results,
+are in `docs/plans/2026-10-30-evaluation-cache-architecture.md` (section
+3.3). The Tycho document benchmarks (`tycho-document-open/evaluate.ts` and
+`rebind.ts`) complete the measurement of a change to these caches.
 
 ---
 

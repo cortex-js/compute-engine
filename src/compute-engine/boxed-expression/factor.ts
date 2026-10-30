@@ -1,3 +1,4 @@
+import { cacheOff } from '../../common/cache-switches.js';
 import type { Expression } from '../global-types.js';
 
 import { isRelationalOperator } from '../latex-syntax/utils.js';
@@ -20,7 +21,7 @@ import { mayHaveOrderedArithmetic } from './arithmetic-order-override.js';
 import { mayBeTensorProductOperand } from './matrix-operand.js';
 import { expand } from './expand.js';
 import { hasVolatileDigest, isOperatorDef } from './utils.js';
-import { cycleDetectionCount } from './cycle-guard.js';
+import { beginStoreGuard } from './store-guard.js';
 import { holdsKindValue, residueFoldOrKeep } from './residue-class.js';
 import { factorRationalExpression } from '../polynomial/boxed-factor.js';
 import { isMergeable } from './effects-of.js';
@@ -1408,7 +1409,7 @@ export function factor(expr: Expression): Expression {
   // expression, and an entry holding it would keep the object alive for as
   // long as the entry lives (the same rule `cachedValue()` applies to its
   // payloads in `cache.ts`).
-  if (hasVolatileDigest(expr)) {
+  if (hasVolatileDigest(expr) || cacheOff('factor')) {
     _factorMisses += 1;
     return factorUncached(expr);
   }
@@ -1429,7 +1430,7 @@ export function factor(expr: Expression): Expression {
   }
 
   _factorMisses += 1;
-  const cyclesBefore = cycleDetectionCount();
+  const guard = beginStoreGuard();
   const result = factorUncached(expr);
 
   // The settled-only gate. Factoring reads facts about its operands
@@ -1438,8 +1439,14 @@ export function factor(expr: Expression): Expression {
   // is still on the stack. That answer is provisional — the same query run
   // outside the window can legitimately answer something else — so a result
   // built on one is returned but not stored. The lazy-value memo in
-  // `boxed-function.ts` refuses to freeze such a result for the same reason.
-  if (cycleDetectionCount() !== cyclesBefore) return result;
+  // `boxed-function.ts` refuses to freeze such a result for the same reason,
+  // and so does every provisional answer of `store-guard.ts`.
+  //
+  // Host code is accepted. Factoring finds a candidate root with `.N()`,
+  // which can run host code, but keeps a factor only after an exact
+  // polynomial division confirms it, so the stored factorization does not
+  // depend on a value that the host code returned.
+  if (!guard.movedOnly('host')) return result;
 
   if (entries.size >= MAX_FACTOR_MEMO_ENTRIES) entries.clear();
   entries.set(key, { generation, input: expr, output: result });

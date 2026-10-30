@@ -409,8 +409,14 @@ import {
   nonPositiveSign,
   sgn,
 } from './sgn.js';
-import { cachedCell, cachedValue, CachedValue } from './cache.js';
+import {
+  cachedCell,
+  cachedValue,
+  CachedValue,
+  forgetSettledValue,
+} from './cache.js';
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
+import { cacheOff } from '../../common/cache-switches.js';
 import {
   beginObjectDeps,
   endObjectDeps,
@@ -423,7 +429,6 @@ import {
 import {
   beginSharedEvaluationMemo,
   endSharedEvaluationMemo,
-  failClosedCount,
   beginHostHandlerCall,
   endHostHandlerCall,
   noteUncachedHostEvaluation,
@@ -434,8 +439,11 @@ import {
   sharedEvaluationMemo,
 } from './shared-evaluation-memo.js';
 import { containsObject } from './object-walk.js';
-import { uncachedHostCallCount } from './host-handler-changes.js';
-import { cycleDetectionCount } from './cycle-guard.js';
+import {
+  beginStoreGuard,
+  failClosedCounts,
+  type StoreGuard,
+} from './store-guard.js';
 import {
   apply,
   callableApplication,
@@ -490,7 +498,6 @@ import {
   CancellationError,
   checkDeadline,
   checkDeadlineEvery,
-  iterationLimitCancellationCount,
 } from '../../common/interruptible.js';
 import {
   applyPoleOverride,
@@ -512,12 +519,44 @@ type FacetEntry<T> = { value: T; objectDeps?: ObjectDeps };
  * the memo. Monotonic; only ever compared before/after a computation. */
 let _effectsProvisionalReads = 0;
 
-/** The same protocol for the lazy-collection evaluate memo — see
- * `_memoizedLazyCollectionValue()`. A re-entrant evaluate of a node whose
- * memo is in flight (a self-referential binding, `xs := Append(xs, 1)`)
- * bumps this, and neither the re-entrant computation nor the one it is
- * nested in is frozen into the memo. */
-let _lazyValueProvisionalReads = 0;
+/** The store guard that `_isMemoizableLazyCollection()` began before the
+ * finiteness read of its eligibility test, for `evaluate()` and
+ * `evaluateAsync()`, which take it at once (`takeProbeGuard()`) and give it
+ * to the memo. A nested evaluation during the read sets and takes its own
+ * guard before the read ends, so the value is always the one of the last
+ * test that answered true. */
+let probeGuard: StoreGuard | undefined;
+
+function takeProbeGuard(): StoreGuard | undefined {
+  const guard = probeGuard;
+  probeGuard = undefined;
+  return guard;
+}
+
+// The lazy-collection evaluate memo (`_memoizedLazyCollectionValue()`)
+// fails closed on re-entry. When an evaluation of a node starts while the
+// walk that fills the memo of that node is not done (a self-referential
+// binding, `xs := Append(xs, 1)`), the inner evaluation adds one to
+// `failClosedCounts.lazyValueProvisional` (`store-guard.ts`). The store
+// guard of the outer walk sees that count move, so neither the inner value
+// nor the outer value goes into the memo.
+
+/** The end of an asynchronous walk of the lazy-collection memo of a node
+ * (`_lazyCollectionWalkAsync`). `shared` is set only when the walk passed
+ * its store guard and read no field of a mutable object. It holds the state
+ * that the value belongs to, as the memo records it: the `any` generation
+ * before the walk, and the world epoch, the lexical scope and whether the
+ * assumptions were hidden after the walk. A caller that joined the walk
+ * uses `value` as its own answer only when its own state is the same. */
+type LazyWalkOutcome = {
+  value: Expression;
+  shared?: {
+    generation: number;
+    epoch: number;
+    scope: Scope | undefined;
+    factsHidden: boolean;
+  };
+};
 
 /** Count of settled `_effectsOf` recomputations, engine-wide. A test
  * observable (the house instance-instrumentation pattern): a cache HIT
@@ -1374,13 +1413,18 @@ export class BoxedFunction
   private _lazyValueScope: Scope | undefined = undefined;
 
   /** The in-flight ASYNC computation of the lazy-collection evaluate memo,
-   * kept as the PROMISE so that concurrent `evaluateAsync()` calls on the same
-   * node await ONE walk instead of each running their own (the "Async"
-   * follow-up of
-   * `docs/COLLECTIONS-MODEL.md`). Cleared when
-   * the computation settles, in both directions: an aborted or rejected walk
-   * memoizes neither direction and leaves the slot empty, so the next call
-   * recomputes.
+   * kept as the PROMISE so that a concurrent `evaluateAsync()` call on the
+   * same node with the same signal, effects, context frames and precision
+   * window can wait for that walk (the "Async" follow-up of
+   * `docs/COLLECTIONS-MODEL.md`). The caller that waited uses the value of
+   * the walk only when the walk marked it as shared (it passed its store
+   * guard and read no object field: `LazyWalkOutcome`) and the state of the
+   * caller is the state of the value (generation, world epoch, lexical
+   * scope, hidden assumptions). Otherwise, and when the walk rejects, the
+   * caller runs a walk of its own. A node that is not pure does not use this
+   * slot. Cleared when the computation settles, in both directions: an
+   * aborted or rejected walk memoizes neither direction and leaves the slot
+   * empty, so the next call recomputes.
    *
    * Deliberately a SEPARATE field from `_lazyValueInFlight` rather than an
    * async flavor of it, for two reasons. (1) A synchronous `evaluate()`
@@ -1391,10 +1435,16 @@ export class BoxedFunction
    * inside its own walk means going through a symbol binding, and a symbol's
    * `evaluateAsync` is `Promise.resolve(this.evaluate())`
    * (`abstract-boxed-expression.ts`) — the re-entrant read therefore lands on
-   * the SYNC path, where `_lazyValueInFlight` catches it. Handing the pending
-   * promise to a caller nested inside the very computation it is waiting for
-   * would deadlock; no such route exists. */
-  private _lazyValuePending: Promise<Expression> | undefined = undefined;
+   * the SYNC path, where `_lazyValueInFlight` catches it.
+   *
+   * One route does reach this slot from inside the walk, and it waits for
+   * itself: an `evaluateAsync` handler of a host operator that the walk
+   * calls, and that calls `evaluateAsync()` of the node that holds it
+   * (`Reverse(List(1, g()))`, where the handler of `g` evaluates that
+   * `Reverse`). The call joins the pending walk, and the walk waits for the
+   * handler, so neither settles. The call cannot be told from an independent
+   * caller of the same node, which must join. ROADMAP CE-649. */
+  private _lazyValuePending: Promise<LazyWalkOutcome> | undefined = undefined;
   private _lazyValuePendingOptions: Partial<EvaluateOptions> | undefined;
   private _lazyValuePendingGeneration: number | undefined;
   private _lazyValuePendingEpoch: number | undefined;
@@ -1908,6 +1958,7 @@ export class BoxedFunction
     const callableVersion = this.engine._callableVersion;
     const scope = this.engine.context?.lexicalScope;
     if (
+      !cacheOff('effects') &&
       this._effects.generation === callableVersion &&
       this._effects.value !== null &&
       this._effectsScope === scope
@@ -2904,6 +2955,7 @@ export class BoxedFunction
       if (!this.isValid || this.isNumber !== true) return undefined;
       return sgn(this);
     };
+    if (cacheOff('sgn')) forgetSettledValue(cachedCell(this._sgn, gen));
     return cachedValue(
       this._sgn,
       gen,
@@ -3635,6 +3687,7 @@ export class BoxedFunction
     // since the value-shield key (`_cacheGeneration()`) can be the
     // value-blind answer of a shield, or the valued answer outside one.
     if (
+      !cacheOff('type') &&
       this._typeGeneration === generation &&
       typeCell.generation === generation &&
       typeCell.value !== null &&
@@ -3717,6 +3770,7 @@ export class BoxedFunction
               : this.engine._typeResolver
           );
     };
+    if (cacheOff('type')) forgetSettledValue(cachedCell(this._type, key));
     const result =
       cachedValue(
         this._type,
@@ -3883,7 +3937,7 @@ export class BoxedFunction
     // evaluation then changes nothing that the memo compares.
     let purityRead = false;
     let remember = false;
-    let failClosedBefore = 0;
+    let guard: StoreGuard | undefined;
     let impureBefore = 0;
     let persistentBefore = 0;
     // An application of a host operator that does not state `pure: true` is
@@ -3935,7 +3989,7 @@ export class BoxedFunction
           }
           remember = true;
           memo.pending += 1;
-          failClosedBefore = failClosedCount();
+          guard = beginStoreGuard();
           impureBefore = memo.impure;
           persistentBefore = engine._persistentEvaluationVersion;
         }
@@ -3957,11 +4011,6 @@ export class BoxedFunction
       // top-level evaluation resolves its head again.
       const sticky = isStickyUnresolvedCall(this);
       const canonical = sticky ? undefined : this._canonicalToEvaluate();
-      // Sampled before the eligibility test of the lazy-collection memo: its
-      // finiteness read can evaluate an operand that runs host code
-      // (`host-handler-changes.ts`), and the memo must not keep a value
-      // computed after it.
-      const hostCallsBeforeProbe = uncachedHostCallCount();
       const result = sticky
         ? evaluatedUnresolvedCall(
             this,
@@ -3974,7 +4023,7 @@ export class BoxedFunction
             !uncachedHost &&
               (this._isMemoizableLazyCollection(options, true) ||
                 this._isMemoizableInertEvaluation(options))
-            ? this._memoizedLazyCollectionValue(options, hostCallsBeforeProbe)
+            ? this._memoizedLazyCollectionValue(options, takeProbeGuard())
             : this._computeValue(options)();
       // An evaluation whose result is a value takes back the incomplete
       // walks that it recorded: a read in it that met an inner collection
@@ -3986,8 +4035,9 @@ export class BoxedFunction
       recordEvaluatedError(this, result);
       const value = numeric ? indeterminateAsNaN(result) : result;
       // A result is kept only when it is final: no read in the evaluation
-      // stayed incomplete (the walks it recorded were taken back above), no
-      // answer in it was provisional (`failClosedCount()`), no impure
+      // stayed incomplete (the walks it recorded were taken back above), the
+      // store guard allows it (`store-guard.ts`: no host code ran, no answer
+      // in it was provisional), no impure
       // evaluation ran during it (the value of a symbol that is an impure
       // call, a host operator that does not state `pure: true`:
       // `noteUncachedHostEvaluation`), no state outside the node changed
@@ -3995,14 +4045,19 @@ export class BoxedFunction
       // of a collection that a library operator calls, that assigns a
       // symbol),
       // and no object
-      // was made, whose fields a later read could see changed. A re-entrant
-      // read of the lazy-collection memo (`_lazyValueProvisionalReads`) is
-      // not provisional here: it computes the full value of the node in its
-      // own frame, and this memo keys on the frame, where that memo does not.
+      // was made, whose fields a later read could see changed.
+      //
+      // The guard accepts two counts. The incomplete walks are compared with
+      // `walksBefore`, sampled at the start of the node, before the guard:
+      // a walk taken back above can bring the count below the sample of the
+      // guard. A re-entrant read of the lazy-collection memo
+      // (`lazyValueProvisional`) is not provisional here: it computes the
+      // full value of the node in its own frame, and this memo keys on the
+      // frame, where that memo does not.
       if (
         remember &&
         incompleteWalkCount() === walksBefore &&
-        failClosedCount() === failClosedBefore &&
+        guard!.movedOnly('incompleteWalk', 'lazyValueProvisional') &&
         memo!.impure === impureBefore &&
         engine._persistentEvaluationVersion === persistentBefore &&
         !engineHasObjects(engine)
@@ -4370,17 +4425,25 @@ export class BoxedFunction
     const def = this.operatorDefinition;
     if (!def || def.lazy === true) return false;
     if (!this.isLazyCollection) return false;
+    let guard: StoreGuard | undefined;
     if (def.collection?.elementMemo === true) {
       // The finiteness of a view over an eager operand (`Join(src(1), [4])`)
       // is known only after the operand is evaluated. Called from
       // `evaluate()` or `evaluateAsync()`, the values that this read
       // computes are kept for the operand step of the same evaluation, which
       // then does not evaluate the operand again (`eager-source-values.ts`).
+      //
+      // The read can evaluate an operand that runs host code
+      // (`host-handler-changes.ts`), so for these callers the store guard of
+      // the memo begins before it, and the caller takes it
+      // (`takeProbeGuard()`). Nothing before this point evaluates.
+      if (sharesSourceValues) guard = beginStoreGuard();
       const finite = sharesSourceValues
         ? readSharingEagerSourceValues(this, () => this.isFiniteCollection)
         : this.isFiniteCollection;
       if (finite !== true) return false;
     }
+    probeGuard = guard;
     return true;
   }
 
@@ -4446,7 +4509,7 @@ export class BoxedFunction
    */
   private _memoizedLazyCollectionValue(
     options?: Partial<EvaluateOptions>,
-    hostCallsBeforeProbe?: number
+    guardBeforeProbe?: StoreGuard
   ): Expression {
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return hit;
@@ -4458,7 +4521,7 @@ export class BoxedFunction
       // unchanged behavior — and mark the pass so neither computation is
       // frozen.
       if (CACHE_STATS) recordCache('lazyValue', 'declineCycle');
-      _lazyValueProvisionalReads += 1;
+      failClosedCounts.lazyValueProvisional += 1;
       return this._computeValue(options)();
     }
 
@@ -4469,12 +4532,9 @@ export class BoxedFunction
     const prevEpoch = this._lazyValueEpoch;
 
     this._lazyValueInFlight = true;
-    const before = _lazyValueProvisionalReads;
-    const cyclesBefore = cycleDetectionCount();
-    // Host code that no memo may keep a result across
-    // (`host-handler-changes.ts`), counted from before the eligibility test
-    // of the caller when it gives the count.
-    const hostCallsBefore = hostCallsBeforeProbe ?? uncachedHostCallCount();
+    // Begun before the finiteness read of the eligibility test of the caller
+    // when that test read it (`_isMemoizableLazyCollection`).
+    const guard = guardBeforeProbe ?? beginStoreGuard();
     let result: Expression;
     // Collect the mutable-object field reads this evaluation performs, so the
     // entry can be dropped by a later store to any object it read. A throw
@@ -4489,19 +4549,15 @@ export class BoxedFunction
       this._lazyValueInFlight = false;
       objectDeps = endObjectDeps();
     }
-    // The settled-only gate, on BOTH provisional channels: this memo's own
-    // re-entrancy marker, and the symbol-binding cycle guard, whose
-    // fail-closed answers are provisional in exactly the same way. A
+    // The settled-only gate (`store-guard.ts`): no host code ran, and no
+    // answer was provisional. Two provisional answers matter most here: this
+    // memo's own re-entrancy marker, and the symbol-binding cycle guard. A
     // self-referential binding (`xs := Append(xs, 1)`) travels the second
     // one: evaluated through the symbol it answers `[1]` (the inner
     // dereference fails closed), evaluated directly `[1, 1]` — freezing
     // either as the node's value would make the answer depend on which
     // route ran first.
-    if (
-      _lazyValueProvisionalReads !== before ||
-      cycleDetectionCount() !== cyclesBefore ||
-      uncachedHostCallCount() !== hostCallsBefore
-    ) {
+    if (!guard.allowsStore()) {
       if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
       return result;
     }
@@ -4535,6 +4591,7 @@ export class BoxedFunction
    * The suppression stamp is checked on BOTH kinds of entry — see
    * {@link _lazyValueFactsHidden}. */
   private _lazyCollectionMemoHit(): Expression | undefined {
+    if (cacheOff('lazyvalue')) return undefined;
     const factsHidden = this.engine._factsHidden();
     if (
       this._value.value !== null &&
@@ -4723,7 +4780,39 @@ export class BoxedFunction
     // follows the write. The constant key is kept for a lazy collection
     // view, whose accumulator loop depends on it (see the memo's comment).
     if (!this.isLazyCollection) return generation;
-    return this._ops.every((x) => x.isConstant) ? undefined : generation;
+    const seen = new Set<Expression>();
+    return this._ops.every((x) => hasConstantValue(x, seen))
+      ? undefined
+      : generation;
+  }
+
+  /** Whether the value of this node can change only with the world epoch
+   * (`engine._worldVersion`). `isConstant` is not enough for a call: it
+   * is true for `f(1)` when `f` is a pure user function, but the value of
+   * `f(1)` changes when a free symbol of the body of `f` is assigned
+   * (`f(u) = u + x`, then `x := 5`), or when `f` is assigned another
+   * function, and an assignment moves the generation, not the epoch. So a
+   * call is constant here only when it is pure, its operator definition was
+   * made by a standard library (`_standardLibrary`: a definition that the
+   * host declares, also in the system scope or as an `extend` of a library
+   * operator, is not), and each operand is constant in the same sense
+   * (`hasConstantValue()`).
+   *
+   * The test reads the purity of this node (cached by `_effectsOf()`) and
+   * goes down the operands once, where `isConstant` would walk the operands
+   * again at each level. `seen` holds the nodes of this traversal already
+   * found constant (`hasConstantValue()`). */
+  _hasConstantValue(seen: Set<Expression>): boolean {
+    if (this._numericStore !== undefined) return this.isPure;
+    const binding = this._def;
+    if (
+      !binding ||
+      !isOperatorDef(binding) ||
+      !binding.operator._standardLibrary ||
+      !this.isPure
+    )
+      return false;
+    return this._ops.every((x) => hasConstantValue(x, seen));
   }
 
   evaluateAsync(options?: Partial<EvaluateOptions>): Promise<Expression> {
@@ -4839,6 +4928,9 @@ export class BoxedFunction
       this.engine._inFlightAsyncEvaluations -= 1;
       evaluation.pending -= 1;
       releaseKeptEagerSourceValues(this.engine);
+      // As when the promise settles (below).
+      if (evaluation.pending === 0)
+        releaseHostEagerSourceValues(this.engine, evaluation.epoch);
       throw error;
     }
     return promise
@@ -4895,8 +4987,7 @@ export class BoxedFunction
     // the read throws.
     let memoizable: boolean;
     let sourceValues: EagerSourceValues | undefined;
-    // Sampled before the eligibility test: see the synchronous route.
-    const hostCallsBeforeProbe = uncachedHostCallCount();
+    let guardBeforeProbe: StoreGuard | undefined;
     try {
       // The inert rule (`_isMemoizableInertEvaluation`) is for the
       // synchronous route only: a node whose operator has only an
@@ -4907,6 +4998,9 @@ export class BoxedFunction
       memoizable =
         !this._isUncachedHostOperator(true) &&
         this._isMemoizableLazyCollection(options, true);
+      // Begun before the finiteness read of the eligibility test, when the
+      // test reads it: see `_isMemoizableLazyCollection`.
+      if (memoizable) guardBeforeProbe = takeProbeGuard();
     } finally {
       sourceValues = detachEagerSourceValues(this);
     }
@@ -4914,7 +5008,7 @@ export class BoxedFunction
       ? this._memoizedLazyCollectionValueAsync(
           options,
           sourceValues,
-          hostCallsBeforeProbe
+          guardBeforeProbe
         )
       : this._computeValueAsync(options, sourceValues)();
     // A value that the operand step did not use (the evaluation was
@@ -4935,7 +5029,11 @@ export class BoxedFunction
    *
    * What async adds:
    * - **An in-flight promise slot.** Concurrent `evaluateAsync()` calls on the
-   *   same node share one walk. The slot must be installed BEFORE the walk
+   *   same node share one walk. A caller that joined it uses its value only
+   *   when the walk passed its store guard and read no object field
+   *   (`LazyWalkOutcome`); otherwise that caller runs a walk of its own. A
+   *   node that is not pure does not use the slot. The slot must be
+   *   installed BEFORE the walk
    *   starts, not when the call returns: `_computeValueAsync`'s synchronous
    *   prefix runs the whole operand walk whenever no operand actually
    *   suspends, so a second caller in the same tick would otherwise start a
@@ -4946,16 +5044,35 @@ export class BoxedFunction
    *   — and clears the slot, so a later call recomputes. A canceled walk must
    *   never poison the memo.
    *
-   * The settled-only gate samples its two provisional channels across
-   * `await`s, so a cycle detected — or a provisional read taken — by ANY
-   * evaluation interleaved with this one also suppresses the write. That is
-   * fail-closed (no entry), never a wrong entry.
+   * The store guard (`store-guard.ts`) compares its counts across
+   * `await`s, so host code, a cycle detected or a provisional read taken by
+   * ANY evaluation interleaved with this one also suppresses the write. That
+   * is fail-closed (no entry), never a wrong entry.
    */
   private _memoizedLazyCollectionValueAsync(
     options?: Partial<EvaluateOptions>,
     sourceValues?: EagerSourceValues,
-    hostCallsBeforeProbe?: number
+    guardBeforeProbe?: StoreGuard
   ): Promise<Expression> {
+    // A node that is not pure (an operator declared impure, `Random()`, a
+    // function whose body calls one) is never kept in the memo
+    // (`_lazyCollectionMemoKey`), and two evaluations of it must give two
+    // values, on this route as on the synchronous route. So it reads no
+    // memo entry and does not use the in-flight slot: each caller computes
+    // the value. The test comes before the memo read so that an entry
+    // stored while the node was pure is never served once it is not. No
+    // case is known where this matters: the purity of a node changes only
+    // when a definition that it calls changes, a node that calls a
+    // definition that the host can change takes the generation key
+    // (`_hasConstantValue()`), and the assignment moves the generation. The
+    // test is there so that this route does not depend on that reasoning.
+    if (!this.isPure)
+      return Promise.resolve().then(() =>
+        this.engine.withEvaluationContext(options, () =>
+          this._computeValueAsync(options, sourceValues)()
+        )
+      );
+
     const hit = this._lazyCollectionMemoHit();
     if (hit !== undefined) return Promise.resolve(hit);
 
@@ -4967,9 +5084,9 @@ export class BoxedFunction
       // `evaluation-epoch.ts`). So a caller of another evaluation joins the
       // walk, and receives a value computed under the number of the first
       // caller. This is the same as a hit in the settled memo, which also
-      // gives a value computed by an earlier evaluation: only a walk that
-      // passed the eligibility test of the memo (a pure lazy collection)
-      // gets here, and its value does not depend on the evaluation number.
+      // gives a value computed by an earlier evaluation: only a walk of a
+      // pure node that passed the eligibility test of the memo gets here,
+      // and its value does not depend on the evaluation number.
       if (
         previous?.signal === options?.signal &&
         previous?._effects === options?._effects &&
@@ -4980,8 +5097,64 @@ export class BoxedFunction
           options?._precisionWindow?.requested &&
         this._lazyValuePendingGeneration === this.engine._anyVersion &&
         this._lazyValuePendingEpoch === this.engine._worldVersion
-      )
-        return this._lazyValuePending;
+      ) {
+        // This caller uses the value of the joined walk when that walk
+        // passed its store guard and read no field of a mutable object
+        // (`LazyWalkOutcome.shared`), and when the state of this caller is
+        // the state that the value belongs to. The state is read inside the
+        // evaluation context of this caller: the same `any` generation and
+        // world epoch, the same lexical scope and the same answer to whether
+        // the assumptions are hidden. These are the checks that a hit in
+        // the memo makes. The walk does not have to store its value: a
+        // value that holds a mutable object, for example, is not kept in
+        // the memo but is shared here.
+        //
+        // Otherwise this caller runs a walk of its own, as two synchronous
+        // evaluations would. When the store guard refused the value (host
+        // code that does not state its purity ran, or an answer was
+        // provisional: `store-guard.ts`), the value belongs to the
+        // evaluation of that walk. When the walk read an object field, the
+        // value has no record of the objects it depends on (an asynchronous
+        // walk cannot collect them), and an object can change before this
+        // caller resumes. The own walk reads the memo first, inside the
+        // evaluation context of this caller, so it returns the entry when
+        // the joined walk, or another evaluation, stored one.
+        //
+        // When the joined walk rejects, this caller runs its own walk too,
+        // as an independent evaluation would: the rejection can come from
+        // the host code of that walk. A cancellation of the signal of this
+        // caller (which is the signal of the joined walk) is given to it.
+        const ownWalk = (): Promise<Expression> =>
+          this.engine.withEvaluationContext(options, () =>
+            this._settledLazyCollectionValueAsync(
+              options,
+              sourceValues,
+              guardBeforeProbe
+            )
+          );
+        return this._lazyValuePending.then(
+          (outcome) => {
+            const shared = outcome.shared;
+            if (
+              shared !== undefined &&
+              this.engine.withEvaluationContext(
+                options,
+                () =>
+                  shared.generation === this.engine._anyVersion &&
+                  shared.epoch === this.engine._worldVersion &&
+                  shared.scope === this.engine.context?.lexicalScope &&
+                  shared.factsHidden === this.engine._factsHidden()
+              )
+            )
+              return outcome.value;
+            return ownWalk();
+          },
+          (error: unknown) => {
+            if (options?.signal?.aborted) throw error;
+            return ownWalk();
+          }
+        );
+      }
       // Each caller owns its cancellation and resolution environment. A
       // different caller must not join a walk that captured someone else's.
       return Promise.resolve().then(() =>
@@ -4989,20 +5162,16 @@ export class BoxedFunction
           this._settledLazyCollectionValueAsync(
             options,
             sourceValues,
-            hostCallsBeforeProbe
+            guardBeforeProbe
           )
         )
       );
     }
 
-    const pending: Promise<Expression> = Promise.resolve()
+    const pending: Promise<LazyWalkOutcome> = Promise.resolve()
       .then(() =>
         this.engine.withEvaluationContext(options, () =>
-          this._settledLazyCollectionValueAsync(
-            options,
-            sourceValues,
-            hostCallsBeforeProbe
-          )
+          this._lazyCollectionWalkAsync(options, sourceValues, guardBeforeProbe)
         )
       )
       .finally(() => {
@@ -5017,7 +5186,7 @@ export class BoxedFunction
     this._lazyValuePendingOptions = options;
     this._lazyValuePendingGeneration = this.engine._anyVersion;
     this._lazyValuePendingEpoch = this.engine._worldVersion;
-    return pending;
+    return pending.then((outcome) => outcome.value);
   }
 
   /** The walk + settled-only gate + memo write of
@@ -5027,47 +5196,64 @@ export class BoxedFunction
   private async _settledLazyCollectionValueAsync(
     options?: Partial<EvaluateOptions>,
     sourceValues?: EagerSourceValues,
-    hostCallsBeforeProbe?: number
+    guardBeforeProbe?: StoreGuard
   ): Promise<Expression> {
+    return (
+      await this._lazyCollectionWalkAsync(
+        options,
+        sourceValues,
+        guardBeforeProbe
+      )
+    ).value;
+  }
+
+  /** The body of {@link _settledLazyCollectionValueAsync}. It also tells
+   * whether a caller that joined the walk may use the value
+   * ({@link LazyWalkOutcome}). */
+  private async _lazyCollectionWalkAsync(
+    options?: Partial<EvaluateOptions>,
+    sourceValues?: EagerSourceValues,
+    guardBeforeProbe?: StoreGuard
+  ): Promise<LazyWalkOutcome> {
     // A synchronous `evaluate()` may have filled the memo while this
     // computation waited for its microtask — it ignores the pending slot by
-    // design, and its entry is as valid here as one of our own.
+    // design, and its entry is as valid here as one of our own. A caller
+    // that joined this walk does not use the value of a hit
+    // (`shared` is not set): it reads the memo again, in its own context.
     const hit = this._lazyCollectionMemoHit();
-    if (hit !== undefined) return hit;
+    if (hit !== undefined) return { value: hit };
 
     const generation = this.engine._anyVersion;
-    const before = _lazyValueProvisionalReads;
-    const cyclesBefore = cycleDetectionCount();
+    // Begun before the finiteness read of the eligibility test of the caller
+    // when that test read it (`_isMemoizableLazyCollection`).
+    const guard = guardBeforeProbe ?? beginStoreGuard();
     // The object-dependency collector cannot be used here: it brackets a
     // dynamic extent of the host call stack, and every `await` below breaks
     // that extent. This path therefore SAMPLES the global field-read counter
-    // instead and declines to memoize at all if any object field was read
-    // while it ran — the same fail-closed sampling the two provisional
-    // channels beside it use, and for the same reason: no entry is always
-    // safe, a dependency-free entry derived from a field is not.
+    // instead, as the store guard samples its counts, and declines to
+    // memoize at all if any object field was read while it ran: no entry is
+    // always safe, a dependency-free entry derived from a field is not.
     const objectReadsBefore = objectReadCount();
-    // Host code that no memo may keep a result across
-    // (`host-handler-changes.ts`), counted from before the eligibility test
-    // of the caller.
-    const hostCallsBefore = hostCallsBeforeProbe ?? uncachedHostCallCount();
 
     const result = await this._computeValueAsync(options, sourceValues)();
 
-    if (
-      _lazyValueProvisionalReads !== before ||
-      cycleDetectionCount() !== cyclesBefore ||
-      objectReadCount() !== objectReadsBefore ||
-      uncachedHostCallCount() !== hostCallsBefore
-    ) {
+    if (!guard.allowsStore() || objectReadCount() !== objectReadsBefore) {
       if (CACHE_STATS) recordCache('lazyValue', 'declineStore');
-      return result;
+      return { value: result };
     }
 
-    this.engine.withEvaluationContext(options, () =>
-      this._storeLazyCollectionValue(result, generation, options)
-    );
-
-    return result;
+    return this.engine.withEvaluationContext(options, () => {
+      this._storeLazyCollectionValue(result, generation, options);
+      return {
+        value: result,
+        shared: {
+          generation,
+          epoch: this.engine._worldVersion,
+          scope: this.engine.context?.lexicalScope,
+          factsHidden: this.engine._factsHidden(),
+        },
+      };
+    });
   }
 
   /**
@@ -5348,11 +5534,14 @@ export class BoxedFunction
    * storm hammers (a comprehension whose BODY calls user functions is impure
    * even when its clause domains are pure).
    *
-   * Settled-only store, like the lazy-collection value memo: a computation
-   * that consumed a provisional answer — a symbol-binding cycle edge
-   * (`cycleDetectionCount`, which every `BoxedSymbol` facet delegation
-   * routes through), or a re-entrant lazy-collection evaluate
-   * (`_lazyValueProvisionalReads`) — is returned uncached. An instance
+   * Settled-only store, like the lazy-collection value memo: a store guard
+   * (`beginStoreGuard()`, `store-guard.ts`) samples the fail-closed counts
+   * before the computation, and when any of them moved the answer is
+   * returned uncached. The counts include a symbol-binding cycle edge (which
+   * every `BoxedSymbol` facet delegation routes through), a re-entrant
+   * lazy-collection evaluate, and host code that does not state its purity.
+   * A walk that could not visit every element gives no answer
+   * (`undefined`), which is not stored either. An instance
    * `snapshotMemoDeps` deems ineligible (a dependency no version tracks) is
    * simply never stored — recomputed per read, exactly today's behavior. A
    * deadline/timeout cancellation THROWS through this helper, so nothing
@@ -5367,6 +5556,7 @@ export class BoxedFunction
     const slot = this._facetMemo;
     if (
       slot !== undefined &&
+      !cacheOff('facet') &&
       slot.worldVersion === ce._worldVersion &&
       slot.factsHidden === factsHidden
     ) {
@@ -5394,11 +5584,7 @@ export class BoxedFunction
       );
     }
 
-    const cyclesBefore = cycleDetectionCount();
-    const provisionalBefore = _lazyValueProvisionalReads;
-    const iterationBreachesBefore = iterationLimitCancellationCount();
-    const incompleteWalksBefore = incompleteWalkCount();
-    const hostCallsBefore = uncachedHostCallCount();
+    const guard = beginStoreGuard();
     _facetComputeCount += 1;
     // A facet answer is a number or a boolean, so it can never CONTAIN an
     // object; it can perfectly well be DERIVED from one's fields, though
@@ -5418,27 +5604,22 @@ export class BoxedFunction
     // walk has no answer: the walk missed elements, and an element that it
     // gave can be a valueless symbol of a list type (see
     // `incomplete-walks.ts`). The answer is not known, and it is not stored.
-    if (incompleteWalkCount() !== incompleteWalksBefore) {
+    if (guard.moved('incompleteWalk')) {
       if (CACHE_STATS) recordCache('collectionFacet', 'declineCycle');
       return undefined as T;
     }
-    if (
-      cycleDetectionCount() !== cyclesBefore ||
-      _lazyValueProvisionalReads !== provisionalBefore ||
-      // A computation that gave up on `engine.iterationLimit` (the
-      // `countOrUndefinedOnIterationLimit`-style handlers convert the
-      // cancellation to an "unknown" answer) is limit-DEGRADED: a raised
-      // limit could produce a definite answer, and `iterationLimit` writes
-      // advance no axis this memo's keys observe. Never frozen — recomputed
-      // per read, which is exactly the pre-memo behavior for such answers.
-      iterationLimitCancellationCount() !== iterationBreachesBefore ||
-      // The computation ran host code that does not state its purity (a
-      // `count` handler of a host collection, or a host predicate that a
-      // library `count` evaluates), or a host handler that changed state:
-      // the answer can depend on state that the stamps do not record
-      // (`host-handler-changes.ts`).
-      uncachedHostCallCount() !== hostCallsBefore
-    ) {
+    // The settled-only gate (`store-guard.ts`). The counts that matter most
+    // here: a symbol-binding cycle edge (which every `BoxedSymbol` facet
+    // delegation routes through); a re-entrant lazy-collection evaluate; a
+    // computation that gave up on `engine.iterationLimit` (the
+    // `countOrUndefinedOnIterationLimit`-style handlers convert the
+    // cancellation to an "unknown" answer, which is recomputed per read, as
+    // before this memo existed); host code that does not state its purity (a
+    // `count` handler of a host collection, or a host predicate that a
+    // library `count` evaluates), or a host handler that changed state, whose
+    // answer can depend on state that the stamps do not record
+    // (`host-handler-changes.ts`).
+    if (!guard.allowsStore()) {
       if (CACHE_STATS) recordCache('collectionFacet', 'declineCycle');
       return value;
     }
@@ -6011,18 +6192,25 @@ export class BoxedFunction
     // in place, so a generation-independent key would never expire. The full
     // account is on the same key in `get type`.
     const gen = this.engine._cacheGeneration();
-    const hostCallsBefore = uncachedHostCallCount();
-    const evaluated = cachedValue(
-      this._eagerSource,
-      gen,
-      () => this.evaluate(),
-      undefined,
-      this.engine
-    );
+    const guard = beginStoreGuard();
+    const evaluated = cacheOff('materializedat')
+      ? this.evaluate()
+      : cachedValue(
+          this._eagerSource,
+          gen,
+          () => this.evaluate(),
+          undefined,
+          this.engine
+        );
     // An evaluation that ran host code that does not state its purity, or a
     // host handler that changed state, is not kept: the host code can read
     // state that the generation does not record (`host-handler-changes.ts`).
-    if (uncachedHostCallCount() !== hostCallsBefore) {
+    // The other counts of the store guard are not read here: `cachedValue()`
+    // already keeps nothing when it served a provisional answer of a cell,
+    // and it keeps the previous value of the cell on purpose, because that
+    // value ends a recursive read of the same cell. Clearing the cell for a
+    // provisional answer would remove it while such a read is in progress.
+    if (guard.moved('host')) {
       const cell = cachedCell(this._eagerSource, gen);
       cell.value = null;
       cell.generation = undefined;
@@ -20436,6 +20624,31 @@ function sameContextFrames(
   if (a === b) return true;
   if (a === undefined || b === undefined || a.length !== b.length) return false;
   return a.every((frame, i) => frame === b[i]);
+}
+
+/** Whether the value of `x` can change only with the world epoch: a call
+ * whose value is constant in that sense (`BoxedFunction._hasConstantValue()`),
+ * a dictionary whose values are, or another constant that is not a call
+ * (`isConstant`). A dictionary answers `isConstant` with no look at its
+ * values, so its values are tested here: `{"a": f(1)}` changes with the
+ * body of `f`. The key of the memo of a lazy collection view uses this
+ * test (`_lazyCollectionMemoKey`).
+ *
+ * `seen` holds the nodes of this traversal already found constant. A node
+ * can be reached by several paths (a dictionary that holds the same
+ * dictionary under two keys, level after level, has a number of paths
+ * exponential in its depth), and each node is tested once. A node found
+ * not constant ends the traversal, so only constant nodes are recorded. */
+function hasConstantValue(x: Expression, seen: Set<Expression>): boolean {
+  if (seen.has(x)) return true;
+  const constant =
+    x instanceof BoxedFunction
+      ? x._hasConstantValue(seen)
+      : isDictionary(x)
+        ? x.values.every((v) => hasConstantValue(v, seen))
+        : x.isConstant;
+  if (constant) seen.add(x);
+  return constant;
 }
 
 /**

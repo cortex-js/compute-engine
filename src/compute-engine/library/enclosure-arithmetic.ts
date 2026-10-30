@@ -57,6 +57,7 @@ import type {
 import type { Type } from '../../common/type/types.js';
 import { provablyDisjoint } from '../../common/type/subtype.js';
 import { SIGNED_INFINITY_TYPE } from '../../common/type/primitive.js';
+import { cacheOff } from '../../common/cache-switches.js';
 import {
   isFunction,
   isNumber,
@@ -127,6 +128,7 @@ function settingsPayload<T>(x: Expression, decode: (x: Expression) => T): T {
   const ce = x.engine;
   const angularUnit: string = ce.angularUnit;
   const precision = ce.precision;
+  if (cacheOff('settingspayload')) return decode(x);
   let entries = SETTINGS_PAYLOADS.get(x);
   if (entries === undefined) {
     entries = new Map();
