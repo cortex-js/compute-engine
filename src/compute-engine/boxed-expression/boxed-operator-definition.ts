@@ -1556,7 +1556,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     // answers the bare `NaN` for the whole application.
     const lifted =
       this.broadcastable &&
-      ops.some((x) => x.isCollection || x.type.matches('collection<any>'));
+      ops.some((x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE));
     // The NaN policy row runs BEFORE the domain rows (the derived behavior
     // table of `docs/ERROR-MODEL.md` §4, and the runtime gate order: the
     // NaN gate answers before the partiality gate), so a PROVEN NaN in a

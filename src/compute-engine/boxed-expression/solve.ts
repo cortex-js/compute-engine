@@ -32,6 +32,12 @@ import {
   realPolynomialRoots,
 } from '../numerics/polynomial-roots.js';
 import { halfTurnAngle } from './trigonometry.js';
+import { parseType } from '../../common/type/parse.js';
+
+// The two types `isRealWhereNumber` tests a root against, parsed once when
+// the module loads.
+const REAL_OR_NON_FINITE_TYPE = parseType('real | infinity | nan');
+const NON_FINITE_TYPE = parseType('infinity | nan');
 
 function numericApproximation(value: unknown): number | undefined {
   if (typeof value === 'number') return value;
@@ -3519,7 +3525,7 @@ function isRealWhereNumber(expr: Expression): boolean | undefined {
   const real = expr.isExtendedReal;
   if (real !== undefined) return real;
   const type = expr.type;
-  if (type.matches('real | infinity | nan') && !type.matches('infinity | nan'))
+  if (type.matches(REAL_OR_NON_FINITE_TYPE) && !type.matches(NON_FINITE_TYPE))
     return true;
   return undefined;
 }

@@ -16,6 +16,10 @@ import {
 } from './broadcast-lift-type.js';
 import { hasAsyncOnlyApplication } from './async-only-descendants.js';
 import { isTransitivelyPure } from './transitive-purity.js';
+import {
+  BARE_SET_STRUCTURAL_TYPE,
+  DICTIONARY_SHAPE_TYPE,
+} from '../../common/type/primitive.js';
 
 //
 // The listing of a finite lazy collection that a VALUE holds as an element:
@@ -507,7 +511,7 @@ export function holdsAsyncOnlyOperator(x: Expression): boolean {
  * count of `Join(Range(1, ∞), xs)` stays `∞`, which is true whatever `xs`
  * holds. */
 export function producesSet(expr: Expression): boolean {
-  if (expr.type.matches('set<any>')) return true;
+  if (expr.type.matches(BARE_SET_STRUCTURAL_TYPE)) return true;
   if (!isAbstractCollectionTypeOf(expr.type.type) || expr.isIndexedCollection)
     return false;
   if (producesKeyed(expr)) return false;
@@ -546,7 +550,7 @@ export function producesKeyed(expr: Expression): boolean {
 function producesKeyedAt(expr: Expression, depth: number): boolean {
   if (
     isRecordShapedType(expr.type.type) ||
-    expr.type.matches('dictionary<any>')
+    expr.type.matches(DICTIONARY_SHAPE_TYPE)
   )
     return true;
   if (!isFunction(expr, 'Join') && !isFunction(expr, 'Append')) return false;

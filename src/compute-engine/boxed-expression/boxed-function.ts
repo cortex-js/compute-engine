@@ -5262,7 +5262,7 @@ export class BoxedFunction
     // threaded WHOLE instead (`threadConditional`): `Sin([1,2,3]{0<t})` is
     // `[sin 1, sin 2, sin 3]{0<t}`, `Missing` once `t = -1`, where a
     // cell-by-cell map gave `[NaN, NaN, NaN]`.
-    if (this.type.matches('indexed_collection<any>')) return true;
+    if (this.type.matches(INDEXED_COLLECTION_SHAPE_TYPE)) return true;
 
     // An ABSTRACT collection type (`collection<T>`: not indexed, not a set,
     // not keyed) does not decide the kind of the value, it only admits
@@ -7306,7 +7306,9 @@ export class BoxedFunction
         // applies.
         !(
           def.broadcastable === true &&
-          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+          tail.some(
+            (x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE)
+          )
         )
       ) {
         // Per-overload attachment (`docs/ERROR-MODEL.md` §4): the derived
@@ -7370,7 +7372,9 @@ export class BoxedFunction
         (def.requires !== undefined || def.definedWhen !== undefined) &&
         !(
           def.broadcastable === true &&
-          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+          tail.some(
+            (x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE)
+          )
         )
       ) {
         // The predicates carry a never-throw purity contract, but a
@@ -8650,7 +8654,9 @@ export class BoxedFunction
         // applies.
         !(
           def.broadcastable === true &&
-          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+          tail.some(
+            (x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE)
+          )
         )
       ) {
         // Per-overload attachment (`docs/ERROR-MODEL.md` §4): the derived
@@ -8705,7 +8711,9 @@ export class BoxedFunction
         (def.requires !== undefined || def.definedWhen !== undefined) &&
         !(
           def.broadcastable === true &&
-          tail.some((x) => x.isCollection || x.type.matches('collection<any>'))
+          tail.some(
+            (x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE)
+          )
         )
       ) {
         // The predicates carry a never-throw purity contract, but a
@@ -10186,6 +10194,9 @@ function integerExponentOf(exponent: Expression): boolean | undefined {
   return undefined;
 }
 
+/** The `matrix` type, parsed once when the module loads. */
+const MATRIX_TYPE = parseType('matrix');
+
 /**
  * The shape of a matrix type for a matrix power: `'square'` or
  * `'non-square'` when the type is a matrix (its entries are numbers) of rank
@@ -10196,7 +10207,8 @@ function integerExponentOf(exponent: Expression): boolean | undefined {
 function matrixShapeOf(
   baseType: BoxedType
 ): 'square' | 'non-square' | 'unknown' | 'none' {
-  if (baseType.type === 'never' || !baseType.matches('matrix')) return 'none';
+  if (baseType.type === 'never' || !baseType.matches(MATRIX_TYPE))
+    return 'none';
   const dims = staticCollectionDims(baseType.type);
   if (dims === null || dims.length !== 2) return 'unknown';
   const [rows, columns] = dims;
@@ -19675,7 +19687,7 @@ function walksMeasuredBy(
  * (a valueless symbol declared `list<integer>`). */
 function isCollectionOperand(op: Expression): boolean {
   if (isNumber(op)) return false; // a number literal is never a collection
-  return op.isCollection || op.type.matches('collection<any>');
+  return op.isCollection || op.type.matches(COLLECTION_SHAPE_TYPE);
 }
 
 /**

@@ -36,6 +36,7 @@ import { declarationOf } from '../common/type/reference.js';
 import { parseType } from '../common/type/parse.js';
 import { reduceType } from '../common/type/reduce.js';
 import {
+  BARE_SET_STRUCTURAL_TYPE,
   COLLECTION_SHAPE_TYPE,
   INDEXED_COLLECTION_SHAPE_TYPE,
 } from '../common/type/primitive.js';
@@ -83,6 +84,10 @@ import {
   isSymbol,
   sym,
 } from './boxed-expression/type-guards.js';
+
+/** `list<number>`, parsed once when the module loads, so the predicates that
+ * test against it do not parse the string on each call. */
+const LIST_OF_NUMBER_TYPE = parseType('list<number>');
 
 /** If a collection has fewer than this many elements, eagerly evaluate it.
  *
@@ -2965,7 +2970,7 @@ function selectionArms(
  * `isValuelessCollectionTyped(x) || isPossiblyCollectionTyped(x)`.
  */
 export function isValuelessCollectionTyped(expr: Expression): boolean {
-  return !expr.isCollection && expr.type.matches('collection<any>');
+  return !expr.isCollection && expr.type.matches(COLLECTION_SHAPE_TYPE);
 }
 
 /**
@@ -3171,7 +3176,9 @@ export function isProvablyNumberOrNumberList(expr: Expression): boolean {
  * evaluation stops at the first deciding operand.
  */
 export function isCollectionShaped(x: Expression): boolean {
-  return x.type.matches('collection<any>') && !isTupleShapedType(x.type.type);
+  return (
+    x.type.matches(COLLECTION_SHAPE_TYPE) && !isTupleShapedType(x.type.type)
+  );
 }
 
 /**
@@ -4866,7 +4873,7 @@ export function isUnindexedCollectionOperand(x: Expression): boolean {
  */
 export function isCardinalityOperand(x: Expression): boolean {
   const type = x.type;
-  return type.matches('set<any>') || type.matches('string');
+  return type.matches(BARE_SET_STRUCTURAL_TYPE) || type.matches('string');
 }
 
 /**
@@ -5877,7 +5884,7 @@ function isPresentNumberCollectionType(s: Type, seen: AliasDescent): boolean {
   }
   // A bare spelling that names a list of numbers (`range`, a subtype of
   // `list<integer>`; not the bare `list`, whose elements are unknown).
-  if (typeof s === 'string') return isSubtype(s, 'list<number>');
+  if (typeof s === 'string') return isSubtype(s, LIST_OF_NUMBER_TYPE);
   if (s.kind !== 'list' && s.kind !== 'indexed_collection') return false;
   const element = unfoldAliasOnDescent(
     s.elements,

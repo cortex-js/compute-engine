@@ -1,5 +1,5 @@
 import type { NumericPrimitiveType, Type } from '../../common/type/types.js';
-import { BoxedType } from '../../common/type/boxed-type.js';
+import { parseType } from '../../common/type/parse.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 import type { Expression, NumberLiteralInterface } from '../global-types.js';
 import { SMALL_INTEGER, machineNthRoot } from '../numerics/numeric.js';
@@ -62,11 +62,14 @@ import {
   mayBeMatrixValued,
 } from './matrix-operand.js';
 
+/** The `matrix` type, parsed once when the module loads. */
+const MATRIX_TYPE = parseType('matrix');
+
 /** Is the expression statically a MATRIX — a shape decision, so the bottom
  * type must answer no: `never` is a subtype of `matrix` (of everything),
  * but an expression with no value has no shape to rewrite for. */
 export function isMatrixTyped(x: Expression): boolean {
-  return x.type.type !== 'never' && x.type.matches(new BoxedType('matrix'));
+  return x.type.type !== 'never' && x.type.matches(MATRIX_TYPE);
 }
 
 /** A number literal denoting the direction-less complex infinity `~oo` —

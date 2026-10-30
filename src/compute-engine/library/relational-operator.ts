@@ -44,6 +44,7 @@ import {
 } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import { parseType } from '../../common/type/parse.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   compareIntervals,
   intervalOfType,
@@ -2259,7 +2260,7 @@ function broadcastableComparisonOperands(
           // re-entered step 2 — `M = [1,2]` with `M: vector<2>` overflowed the
           // stack out of `evaluate()` on a bare engine, in the same way the
           // top-typed case described above once did.
-          op.type.matches('collection<any>'))
+          op.type.matches(COLLECTION_SHAPE_TYPE))
     ).length < 2
   );
 }

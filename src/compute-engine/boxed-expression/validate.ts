@@ -114,7 +114,7 @@ import {
   adoptTopPlaceholderSlots,
   functionLiteralParameterSlots,
 } from './effects-inference.js';
-import type { BoxedType } from '../../common/type/boxed-type.js';
+import { BoxedType } from '../../common/type/boxed-type.js';
 import type {
   Expression,
   IComputeEngine as ComputeEngine,
@@ -5521,6 +5521,12 @@ export function validateArguments(
   return substituted ? result : null;
 }
 
+// The two targets of `freshInferenceTarget`, boxed once when the module
+// loads. They have no type resolver: `matches()` reads the resolver only to
+// parse a type STRING argument, and `freshInferenceTarget` passes a `Type`.
+const MATRIX_BOXED_TYPE = new BoxedType('matrix');
+const LIST_OF_NUMBERS_BOXED_TYPE = new BoxedType('list<number>');
+
 /**
  * The collection type that the repair below gives its symbols for this
  * parameter, or `undefined` when the repair does not apply. It is `matrix`
@@ -5538,11 +5544,10 @@ export function validateArguments(
  * declined the repair for every union-typed parameter.
  */
 function freshInferenceTarget(
-  ce: ComputeEngine,
   expected: Type
 ): 'matrix' | 'list<number>' | undefined {
-  if (ce.type('matrix').matches(expected)) return 'matrix';
-  if (ce.type('list<number>').matches(expected)) return 'list<number>';
+  if (MATRIX_BOXED_TYPE.matches(expected)) return 'matrix';
+  if (LIST_OF_NUMBERS_BOXED_TYPE.matches(expected)) return 'list<number>';
   return undefined;
 }
 
@@ -5567,7 +5572,7 @@ function couldRepairFreshMatrixInference(
   expected: Type,
   freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): boolean {
-  if (!freshlyInferred || !freshInferenceTarget(ce, expected)) return false;
+  if (!freshlyInferred || !freshInferenceTarget(expected)) return false;
 
   const eligible = new Set<string>();
   for (const name of op.freeVariables) {
@@ -5620,7 +5625,7 @@ function repairFreshMatrixInference(
   expected: Type,
   freshlyInferred?: ReadonlySet<BoxedValueDefinition>
 ): Expression | null {
-  const targetType = freshInferenceTarget(ce, expected);
+  const targetType = freshInferenceTarget(expected);
   if (!freshlyInferred || !targetType) return null;
 
   const eligible = new Set<string>();

@@ -1,4 +1,5 @@
 import { isSubtype } from '../../common/type/subtype.js';
+import { parseType } from '../../common/type/parse.js';
 import { BigDecimal } from '../../big-decimal/index.js';
 
 import type {
@@ -111,6 +112,14 @@ import { addArray } from './arithmetic-add.js';
 import { holdsKindValue } from './residue-class.js';
 import { kindArithmetic } from './kind-dispatch.js';
 import { isMergeable } from './effects-of.js';
+
+/** The operand types a product accepts: a number, an indexed collection of
+ * numbers (broadcast), or an absent operand. A factor whose type is disjoint
+ * from this union is reported as an incompatible type, and a zero factor
+ * does not absorb it. Parsed once when the module loads. */
+const PRODUCT_OPERAND_TYPE = parseType(
+  'number | indexed_collection<number> | missing | nothing'
+);
 
 // Maximum number of decimal digits allowed in a *materialized* exact power
 // folded into a product's coefficient. Beyond this the factor is kept symbolic
@@ -1268,9 +1277,7 @@ export class Product {
       const error = this.terms.find((t) => t.term.operator === 'Error');
       if (error !== undefined) return error.term;
       const nonNumeric = this.terms.find((t) =>
-        t.term.type.isDisjointFrom(
-          'number | indexed_collection<number> | missing | nothing'
-        )
+        t.term.type.isDisjointFrom(PRODUCT_OPERAND_TYPE)
       );
       if (nonNumeric !== undefined)
         return ce.typeError('number', nonNumeric.term.type, nonNumeric.term);
@@ -3388,10 +3395,7 @@ function mulImpl(
     !xs.some((x) => isNumber(x) && (x.isNaN || x.isInfinity === true)) &&
     !xs.some(
       (x) =>
-        x.operator === 'Error' ||
-        x.type.isDisjointFrom(
-          'number | indexed_collection<number> | missing | nothing'
-        )
+        x.operator === 'Error' || x.type.isDisjointFrom(PRODUCT_OPERAND_TYPE)
     )
   ) {
     const held = xs.filter((x) => !isNumber(x) && hasAssignedVariable(x));

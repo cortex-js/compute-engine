@@ -340,6 +340,12 @@ import {
   protocolsWithMember,
 } from '../engine-protocols.js';
 
+// The list types the `Range` type handler reports, parsed once when the
+// module loads instead of on each type computation.
+const LIST_OF_INTEGER_TYPE = parseType('list<integer>');
+const LIST_OF_REAL_TYPE = parseType('list<real>');
+const LIST_OF_NUMBER_TYPE = parseType('list<number>');
+
 // From NumPy:
 /**
  * The error for reading a protocol FUNCTION member as a field (`b.span`), or
@@ -3423,7 +3429,7 @@ function hasCollectionLiteralOperand(expr: Expression): boolean {
 
 function mapSource(xs: Expression): Expression {
   if (xs.isCollection) return xs;
-  if (!xs.type.matches('collection<any>')) return xs;
+  if (!xs.type.matches(COLLECTION_SHAPE_TYPE)) return xs;
   // Guard: a self-referential binding (`xs := Map(f, xs)`) resolves to a value
   // that mentions `xs`, and that value's own shape predicates route straight
   // back here — `isFinite` → `mapSource` → `evaluate()` → `isFiniteCollection`
@@ -3620,10 +3626,10 @@ function eagerOperandsAreFinite(xs: Expression): boolean {
   const def = xs.operatorDefinition;
   if (def === undefined || def.isUserFunctionDefinition) return false;
   if (!xs.isPure) return false;
-  if (!xs.type.matches('collection<any>')) return false;
+  if (!xs.type.matches(COLLECTION_SHAPE_TYPE)) return false;
   let sawCollection = false;
   for (const op of xs.ops) {
-    if (op.type.matches('collection<any>')) {
+    if (op.type.matches(COLLECTION_SHAPE_TYPE)) {
       sawCollection = true;
       if (finitenessOfSource(op) !== true) return false;
     } else if (isFunction(op) && !op.isCollection) {
@@ -12290,16 +12296,16 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       // keeps the wide `number`.
       if (elementOps.every((op) => isSubtype(op.type, 'integer')))
         return BoxedType.forResult(
-          parseType('list<integer>'),
+          LIST_OF_INTEGER_TYPE,
           context.engine._typeResolver
         );
       if (elementOps.every((op) => isSubtype(op.type, 'real')))
         return BoxedType.forResult(
-          parseType('list<real>'),
+          LIST_OF_REAL_TYPE,
           context.engine._typeResolver
         );
       return BoxedType.forResult(
-        parseType('list<number>'),
+        LIST_OF_NUMBER_TYPE,
         context.engine._typeResolver
       );
     },

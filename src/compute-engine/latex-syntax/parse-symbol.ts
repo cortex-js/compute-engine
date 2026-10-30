@@ -6,6 +6,7 @@ import {
 } from '../../math-json/symbols.js';
 import { SYMBOLS } from './dictionary/definitions-symbols.js';
 import { Parser } from './types.js';
+import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 
 /** Lazy map from LaTeX command (e.g. '\\alpha') to symbol name (e.g.
  * 'alpha'). Built once from the SYMBOLS table on first access; first entry
@@ -583,7 +584,8 @@ export function parseSymbol(parser: Parser): MathJsonSymbol | null {
     // symbol, leaving any `_` for the Subscript parselet.
     if (info?.subscriptEvaluate) return id;
 
-    const isCollection = info?.type.matches('indexed_collection<any>') ?? false;
+    const isCollection =
+      info?.type.matches(INDEXED_COLLECTION_SHAPE_TYPE) ?? false;
 
     // Check if followed by subscript(s) - if so, include them in the symbol
     // name. An indexed-collection base only absorbs a subscript whose joined

@@ -21,6 +21,7 @@ import {
   stripMissingFromType,
 } from '../../common/type/utils.js';
 import { isSubtype, widen } from '../../common/type/subtype.js';
+import { parseType } from '../../common/type/parse.js';
 import {
   checkType,
   checkOperandType,
@@ -229,6 +230,10 @@ import {
   libraryNamesShadowedIn,
   shadowedLibraryNames,
 } from '../library-shadowing.js';
+
+/** `list<any>`, parsed once when the module loads, so the list tests below
+ * do not parse the string on each call. */
+const LIST_OF_ANY_TYPE = parseType('list<any>');
 
 /**
  * The highest order the `D(f, {x, n})` spelling expands into `n` repeated
@@ -2323,7 +2328,11 @@ function integralTypeOf(t: Readonly<Type> | undefined): Type {
       kind: 'tuple',
       elements: t.elements.map((e) => ({ ...e, type: integralTypeOf(e.type) })),
     };
-  if (typeof t === 'string' && t !== 'unknown' && isSubtype(t, 'list<any>'))
+  if (
+    typeof t === 'string' &&
+    t !== 'unknown' &&
+    isSubtype(t, LIST_OF_ANY_TYPE)
+  )
     return { kind: 'list', elements: 'number' };
   return 'number';
 }
@@ -2349,7 +2358,7 @@ function listIntegrandShape(
     x !== 'unknown' &&
     x !== 'never' &&
     x !== 'nothing' &&
-    (isSubtype(x, 'list<any>') || isTupleShapedType(x));
+    (isSubtype(x, LIST_OF_ANY_TYPE) || isTupleShapedType(x));
   const stripped = stripMissingFromType(t);
   if (isList(stripped)) return { lists: [stripped], scalar: false };
   if (typeof stripped !== 'object' || stripped.kind !== 'union')
@@ -6130,7 +6139,7 @@ volumes
             limit.head === 'Limits' &&
             limit.children
               .slice(1)
-              .some((bound) => isSubtype(bound.type, 'list<any>'))
+              .some((bound) => isSubtype(bound.type, LIST_OF_ANY_TYPE))
           );
         });
         // A tuple integrand with a list bound is one tuple per element of

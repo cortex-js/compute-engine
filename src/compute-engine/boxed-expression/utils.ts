@@ -30,6 +30,7 @@ import {
 } from './effects-provenance.js';
 import { withSeedFrame } from '../numerics/random.js';
 import { containsSignatureArm } from '../../common/type/utils.js';
+import { DICTIONARY_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { NumericValue } from '../numeric-value/types.js';
 import { ExactNumericValue } from '../numeric-value/exact-numeric-value.js';
 import { _BoxedOperatorDefinition } from './boxed-operator-definition.js';
@@ -129,7 +130,7 @@ export function isDictionary(expr: unknown): expr is DictionaryInterface {
     expr !== null &&
     expr !== undefined &&
     expr instanceof _BoxedExpression &&
-    expr.type.matches('dictionary<any>')
+    expr.type.matches(DICTIONARY_SHAPE_TYPE)
   );
 }
 

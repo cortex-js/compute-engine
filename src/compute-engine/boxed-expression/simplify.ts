@@ -42,6 +42,7 @@ import type {
 } from '../global-types.js';
 import type { Type } from '../../common/type/types.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import {
   isNumber,
   isSymbol,
@@ -255,7 +256,7 @@ function foldedConstant(expr: Expression): Expression | undefined {
     type.matches('function') ||
     type.matches('boolean') ||
     type.matches('string') ||
-    type.matches('collection<any>')
+    type.matches(COLLECTION_SHAPE_TYPE)
   )
     return undefined;
   if (expr.isPure !== true) return undefined;
@@ -1497,7 +1498,7 @@ function propagatedNanOperand(expr: Expression): Expression | undefined {
     return undefined;
   if (
     def.broadcastable === true &&
-    ops.some((x) => x.isCollection || x.type.matches('collection<any>'))
+    ops.some((x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE))
   )
     return undefined;
   let sawPropagate = false;
@@ -1564,7 +1565,7 @@ function handledNanOperand(expr: Expression): Expression | undefined {
   if (indeterminateAnswerReadsVariable(ops)) return undefined;
   if (
     def.broadcastable === true &&
-    ops.some((x) => x.isCollection || x.type.matches('collection<any>'))
+    ops.some((x) => x.isCollection || x.type.matches(COLLECTION_SHAPE_TYPE))
   )
     return undefined;
   let handledAt = false;

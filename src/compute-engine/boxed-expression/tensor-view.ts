@@ -29,6 +29,7 @@ import type {
 import { Complex } from 'complex.js';
 
 import { isSubtype } from '../../common/type/subtype.js';
+import { parseType } from '../../common/type/parse.js';
 import { collectionElementType } from '../../common/type/utils.js';
 import type { Type } from '../../common/type/types.js';
 import {
@@ -46,6 +47,9 @@ import {
   isSymbol,
   isTensor,
 } from './type-guards.js';
+
+/** `indexed_collection<number>`, parsed once when the module loads. */
+const INDEXED_COLLECTION_OF_NUMBER = parseType('indexed_collection<number>');
 
 /**
  * The value of a cell of a packed tensor (a value from `AbstractTensor.at()`
@@ -152,7 +156,7 @@ export function isNumericVectorSource(x: Expression): boolean {
   if (x.isIndexedCollection !== true || x.isFiniteCollection !== true)
     return false;
   const t = x.type.type;
-  if (!isSubtype(t, 'indexed_collection<number>')) return false;
+  if (!isSubtype(t, INDEXED_COLLECTION_OF_NUMBER)) return false;
   return !isSubtype(t, 'string') && !isSubtype(t, 'tuple');
 }
 

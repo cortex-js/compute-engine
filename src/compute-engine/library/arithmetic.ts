@@ -395,6 +395,12 @@ const RATIONAL_OR_COMPLEX_INFINITY_TYPE = parseType('rational | ~oo');
 // value at a pole is `+oo`.
 const REAL_OR_POSITIVE_INFINITY_TYPE = parseType('real | +oo');
 
+// The result types of a product whose factors are all on the extended real
+// line and one of which may be infinite: with NaN when another factor may be
+// zero, without NaN otherwise.
+const EXTENDED_REAL_PRODUCT_TYPE = parseType('real | +oo | -oo');
+const EXTENDED_REAL_OR_NAN_PRODUCT_TYPE = parseType('real | +oo | -oo | nan');
+
 /**
  * Above this many decimal digits an exact factorial is impractical to
  * materialize: the bigint product grows with every step, so a STEP cap
@@ -10553,7 +10559,9 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
               ops.some((y, j) => j !== i && !provablyNonZeroSign(y))
           );
           return BoxedType.forResult(
-            mayBeNaN ? 'real | +oo | -oo | nan' : 'real | +oo | -oo',
+            mayBeNaN
+              ? EXTENDED_REAL_OR_NAN_PRODUCT_TYPE
+              : EXTENDED_REAL_PRODUCT_TYPE,
             engine._typeResolver
           );
         }
