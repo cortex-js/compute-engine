@@ -186,6 +186,7 @@ import { JET_HELPERS } from './jet-helpers.js';
 import {
   broadcastNumbers,
   broadcastNumbersSlice,
+  nonStringAtTextMessage,
   type BroadcastBatchBody,
   type BroadcastSlice,
 } from './broadcast.js';
@@ -7149,9 +7150,13 @@ export function makeLazyStreamHelpers(
     // loop (`evaluateListRecursion`, `boxed-expression/recursive-list-
     // builder.ts`) under the same cap, so a definition with no reachable base
     // case reports the iteration-limit error on both routes instead of
-    // spinning. When no arm matches, `step` returns `undefined` like the
-    // original `Which`; at depth zero that is the result, and deeper the
-    // spread throws the same `TypeError` the original nested spread threw.
+    // spinning. A step that gives no control record has no value: no arm of
+    // the `Which` matches (`undefined`), or the arguments fail the test of a
+    // declared parameter type (`NaN`, the value the checking shim gives for
+    // the interpreter's `incompatible-type` error). The result of the whole
+    // call is then `undefined`, the value compiled code has for a list with
+    // no value, at the first step and at any later one. The interpreter
+    // answers the error as the value of the whole call there too.
     listRecursion: (op, args, step) => {
       const chunks: unknown[][] = [];
       let current = args;
@@ -7159,10 +7164,7 @@ export function makeLazyStreamHelpers(
       for (;;) {
         if (++iterations > source.iterationLimit()) throw exceeded(op);
         const result = step(...current) as unknown[] | undefined;
-        if (!Array.isArray(result)) {
-          if (chunks.length === 0) return result;
-          return [...chunks.flat(1), ...(result as unknown as unknown[])];
-        }
+        if (!Array.isArray(result)) return undefined;
         chunks.push(result[1] as unknown[]);
         if (result[0] === 0) return chunks.flat(1);
         current = result[2] as unknown[];
@@ -7428,8 +7430,23 @@ export function copyToPlainArray(x: ArrayLike<number>): number[] {
  *   indexed collection of grapheme clusters, so a bare `indexed_collection`
  *   or `collection` type admits one, but the compiled code would read it as
  *   an array of UTF-16 code units: `Length` of `"😀a"` would be 3, not 2;
- * - anything else (a string for any other binding, a boolean, an array,
- *   `undefined`) is left to today's behavior.
+ * - DECLARED with a number type by the host (`scalars`, `x: real`): an
+ *   array, a boolean or a string THROWS a `TypeError` that names the binding
+ *   (`refuseNonNumberAtScalar`). The compiled code reads the binding as a
+ *   number, and JavaScript would convert the value silently: `x + 1` gave
+ *   `"1,21"` for `[1, 2]`, `2` for `true` and `"a1"` for `"a"`;
+ * - DECLARED `string` by the host (`texts`, `s: string`): any value but a
+ *   string or `undefined` THROWS a `TypeError` that names the binding
+ *   (`throwNonStringAtText`). Such a binding is in neither `real` nor
+ *   `complex`. Without the check, `If(s = "a", 1, 2)` gave `2` for `s = 3`;
+ * - anything else (a string or a boolean for a binding of another type, an
+ *   array for a binding that is not declared with a number type,
+ *   `undefined`) is left to today's behavior. In particular a binding
+ *   declared `boolean` accepts any value: a condition tests it with
+ *   `=== true` and `=== false`, so a value that is not a boolean leaves the
+ *   condition undecided and the result is NaN, as the interpreter holds
+ *   `When(x, 1)` unevaluated (see
+ *   `test/compute-engine/ce-569-when-defects.test.ts`).
  *
  * One `typeof` (and, for a list binding, one brand check) per checked
  * binding per call, and never a read of the entries of a collection: the
@@ -7449,6 +7466,10 @@ export type EntryPlan =
       strings: Map<string, string>;
       kinds?: Map<string, KindEntry>;
       scalars?: string[];
+      texts?: string[];
+      /** The symbols declared `boolean` (also in `real`); read only by
+       * `broadcast()`, for which an empty array is an empty column. */
+      booleans?: string[];
     }
   | {
       kind: 'args';
@@ -7458,6 +7479,7 @@ export type EntryPlan =
       strings: Map<number, string>;
       kinds?: Map<number, KindEntry>;
       scalars?: number[];
+      texts?: number[];
     };
 
 /**
@@ -7516,26 +7538,56 @@ function entryCheckError(binding: string): TypeError {
 }
 
 /**
- * Throw for an array bound to a binding of `scalars`: a symbol or a parameter
- * that the host DECLARED with a number type (`x: real`), which the compiled
- * code reads as a scalar. Without this check the array reaches the
- * arithmetic of the body, and JavaScript converts it to a string: `x + 1`
- * with `x = [1, 2]` gave `"1,21"`. A binding whose type the engine inferred,
- * or that has no type, is not in `scalars`: the compiled code can broadcast
- * a call over an array bound to it at run time (`q(u)` with `u = [1, 2, 3]`).
- * The lookup runs only when the value is an array. `kind` names the scalar
- * kind in the message.
+ * Throw for an array, a boolean or a string bound to a binding of `scalars`:
+ * a symbol or a parameter that the host DECLARED with a number type
+ * (`x: real`), which the compiled code reads as a scalar. Without this check
+ * the value reaches the arithmetic of the body, and JavaScript converts it:
+ * `x + 1` gave `"1,21"` for `x = [1, 2]`, `2` for `x = true` and `"a1"` for
+ * `x = "a"`. A binding whose type the engine inferred, or that has no type,
+ * is not in `scalars`: the compiled code can broadcast a call over an array
+ * bound to it at run time (`q(u)` with `u = [1, 2, 3]`). The caller tests
+ * `typeof x === 'number'` first and runs the lookup only when the value is
+ * one of these three kinds (`isNonNumberScalarValue`), so a number pays one
+ * comparison. `kind` names the scalar kind in the message.
  */
-function refuseArrayAtScalar<K>(
+function refuseNonNumberAtScalar<K>(
   scalars: readonly K[] | undefined,
   key: K,
   label: string,
-  kind: 'real' | 'complex'
+  kind: 'real' | 'complex',
+  x: unknown
 ): void {
   if (scalars === undefined || !scalars.includes(key)) return;
+  if (Array.isArray(x))
+    throw new TypeError(
+      `${label} was compiled as a ${kind} number but received an array. Declare it as a list (for example \`list<real>\`) to pass a list.`
+    );
   throw new TypeError(
-    `${label} was compiled as a ${kind} number but received an array. Declare it as a list (for example \`list<real>\`) to pass a list.`
+    `${label} was compiled as a ${kind} number but received a ${typeof x}. Pass a number, or declare it \`${typeof x}\`.`
   );
+}
+
+/** True for a value that `refuseNonNumberAtScalar` refuses at a binding
+ * declared with a number type. The caller has already found that `x` is not
+ * a number. */
+function isNonNumberScalarValue(x: unknown): boolean {
+  return typeof x === 'boolean' || typeof x === 'string' || Array.isArray(x);
+}
+
+/**
+ * Throw for a value that is not a string bound to a binding of `texts`: a
+ * symbol or a parameter that the host DECLARED `string`. Without this check
+ * the compiled code compared the value with a string and answered from it:
+ * with `s = 3`, `If(s = "a", 1, 2)` gave `2`, where the interpreter refuses
+ * the value at assignment. `undefined` (a variable the caller left out) is
+ * not refused: it is the absent value, as for every other binding. The
+ * caller has already found that `x` is neither a string nor `undefined`.
+ * The bindings of `texts` are not in `real`, so a number bound to another
+ * binding is not tested here.
+ */
+function throwNonStringAtText(label: string, x: unknown): never {
+  // The message is shared with `broadcast()` (`nonStringAtTextMessage`).
+  throw new TypeError(nonStringAtTextMessage(label, x));
 }
 
 /**
@@ -7619,9 +7671,11 @@ export function checkEntry(
         if (!k.check(v[id])) throw kindEntryError(k.label);
     for (const id of plan.real) {
       const x = v[id];
+      // A number needs no other test: one comparison per binding.
+      if (typeof x === 'number') continue;
       if (typeof x === 'string') refuseStringEntry(plan.strings, id);
-      if (Array.isArray(x))
-        refuseArrayAtScalar(plan.scalars, id, `"${id}"`, 'real');
+      if (isNonNumberScalarValue(x))
+        refuseNonNumberAtScalar(plan.scalars, id, `"${id}"`, 'real', x);
       if (!isComplexObject(x)) continue;
       if (!isUnsignedPole(x)) throw entryCheckError(`"${id}"`);
       lifted ??= { ...v };
@@ -7629,14 +7683,22 @@ export function checkEntry(
     }
     for (const id of plan.complex) {
       const x = v[id];
-      if (typeof x === 'string') refuseStringEntry(plan.strings, id);
-      if (Array.isArray(x))
-        refuseArrayAtScalar(plan.scalars, id, `"${id}"`, 'complex');
       if (typeof x === 'number') {
         lifted ??= { ...v };
         lifted[id] = { re: x, im: 0 };
+        continue;
       }
+      if (typeof x === 'string') refuseStringEntry(plan.strings, id);
+      if (isNonNumberScalarValue(x))
+        refuseNonNumberAtScalar(plan.scalars, id, `"${id}"`, 'complex', x);
     }
+    // A binding declared `string` refuses any other value but `undefined`.
+    if (plan.texts !== undefined)
+      for (const id of plan.texts) {
+        const x = v[id];
+        if (typeof x !== 'string' && x !== undefined)
+          throwNonStringAtText(`"${id}"`, x);
+      }
     // A list-declared binding is read as it is: one `typeof` refuses a
     // string, one brand check refuses a typed array, and nothing else is
     // read or converted (see the plan's description above). A scalar passes
@@ -7658,9 +7720,11 @@ export function checkEntry(
   // free-symbol route above.
   for (const i of plan.real) {
     const x = argumentsList[i];
+    // A number needs no other test: one comparison per binding.
+    if (typeof x === 'number') continue;
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
-    if (Array.isArray(x))
-      refuseArrayAtScalar(plan.scalars, i, `argument ${i + 1}`, 'real');
+    if (isNonNumberScalarValue(x))
+      refuseNonNumberAtScalar(plan.scalars, i, `argument ${i + 1}`, 'real', x);
     if (!isComplexObject(x)) continue;
     if (!isUnsignedPole(x)) throw entryCheckError(`argument ${i + 1}`);
     lifted ??= [...argumentsList];
@@ -7668,16 +7732,29 @@ export function checkEntry(
   }
   for (const i of plan.complex) {
     const x = argumentsList[i];
-    if (typeof x === 'string') refuseStringEntry(plan.strings, i);
-    if (Array.isArray(x))
-      refuseArrayAtScalar(plan.scalars, i, `argument ${i + 1}`, 'complex');
     if (typeof x === 'number') {
       lifted ??= [...argumentsList];
       lifted[i] = { re: x, im: 0 };
+      continue;
     }
+    if (typeof x === 'string') refuseStringEntry(plan.strings, i);
+    if (isNonNumberScalarValue(x))
+      refuseNonNumberAtScalar(
+        plan.scalars,
+        i,
+        `argument ${i + 1}`,
+        'complex',
+        x
+      );
   }
-  // The positional-parameter route applies the same list rule as the
-  // free-symbol route above.
+  // The positional-parameter route applies the same `string` and list rules
+  // as the free-symbol route above.
+  if (plan.texts !== undefined)
+    for (const i of plan.texts) {
+      const x = argumentsList[i];
+      if (typeof x !== 'string' && x !== undefined)
+        throwNonStringAtText(`argument ${i + 1}`, x);
+    }
   for (const i of plan.lists) {
     const x = argumentsList[i];
     if (typeof x === 'string') refuseStringEntry(plan.strings, i);
@@ -7705,6 +7782,14 @@ export function storeEntryPlan(plan: EntryPlan): StoredEntryPlan {
     ...(plan.scalars !== undefined && plan.scalars.length > 0
       ? { scalars: [...plan.scalars] }
       : {}),
+    ...(plan.texts !== undefined && plan.texts.length > 0
+      ? { texts: [...plan.texts] }
+      : {}),
+    ...(plan.kind === 'vars' &&
+    plan.booleans !== undefined &&
+    plan.booleans.length > 0
+      ? { booleans: [...plan.booleans] }
+      : {}),
   };
 }
 
@@ -7725,6 +7810,12 @@ function restoreEntryPlan(stored: StoredEntryPlan): EntryPlan {
     strings: new Map(stored.strings ?? []),
     // A plan stored without the field refuses no array.
     ...(stored.scalars !== undefined ? { scalars: [...stored.scalars] } : {}),
+    // A plan stored without the field refuses no value at a `string`
+    // binding.
+    ...(stored.texts !== undefined ? { texts: [...stored.texts] } : {}),
+    ...(stored.booleans !== undefined
+      ? { booleans: [...stored.booleans] }
+      : {}),
   } as EntryPlan;
 }
 

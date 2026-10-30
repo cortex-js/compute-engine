@@ -2029,9 +2029,10 @@ export interface IComputeEngine {
    * The two built-in executable targets are typed concretely so their compiled
    * `run` needs no cast: `interval-js` accepts `number | Interval` variables
    * and returns `IntervalResult`; `javascript` accepts
-   * `number | ComplexResult | RunnerListInput` variables (plain reals, complex
-   * domain-coloring inputs, or a list for a symbol that the code reads as a
-   * list) and returns a `CompiledValue`. Any other name (source-only or custom targets)
+   * `number | boolean | string | ComplexResult | RunnerListInput` variables
+   * (plain reals, booleans, strings, complex domain-coloring inputs, or a
+   * list for a symbol that the code reads as a list) and returns a
+   * `CompiledValue`. Any other name (source-only or custom targets)
    * falls back to the generic `LanguageTarget<Expression>`.
    */
   _getCompilationTarget(

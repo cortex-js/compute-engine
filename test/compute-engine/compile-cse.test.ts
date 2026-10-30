@@ -108,7 +108,7 @@ describe('COMPILE deterministic naming', () => {
     expect(second).toBe(first);
     expect(third).toBe(first);
     expect(first).toMatchInlineSnapshot(
-      `((_tv1) => (0 < _tv1) && (_tv1 < 10))(_.x + 1)`
+      `((((_tv1) => (0 < _tv1) && (_tv1 < 10))(_.x + 1)) || ((_.x !== undefined) ? false : undefined))`
     );
   });
 
@@ -635,7 +635,7 @@ describe('COMPILE CSE — determinism', () => {
 
     expect(second).toBe(first);
     expect(first).toMatchInlineSnapshot(
-      `(() => { const _cse1 = Math.sin(6 * _.u); return ((_tv2) => (0 < _tv2) && (_tv2 < 10))(_SYS.pow2(_cse1) + _cse1 / (_cse1 + 2)); })()`
+      `(() => { const _cse1 = Math.sin(6 * _.u); return ((((_tv2) => (0 < _tv2) && (_tv2 < 10))(_SYS.pow2(_cse1) + _cse1 / (_cse1 + 2))) || ((_.u !== undefined) ? false : undefined)); })()`
     );
   });
 });
@@ -1939,10 +1939,14 @@ describe('COMPILE CSE — guard edge (§7.4)', () => {
     // instrument for what the CODE evaluates, so the check is switched off.
     const result = compile(expr, { fallback: false, entryChecks: false });
 
-    // The binding is INSIDE the guarded operand.
-    expect(result.code).toContain('const _cse1 = Math.sin((6 * _.u) / _.x)');
-    expect(result.code.indexOf('&&')).toBeLessThan(
-      result.code.indexOf('const _cse1')
+    // The binding is INSIDE the guarded operand: after the test of the
+    // first operand's value (the three-valued `And`, since `x ≠ 0` has no
+    // value for an unsupplied `x`).
+    expect(result.code).toMatch(
+      /const _cse\d+ = Math\.sin\(\(6 \* _\.u\) \/ _\.x\)/
+    );
+    expect(result.code.indexOf('_tv1 === false ? false')).toBeLessThan(
+      result.code.search(/const _cse\d+ =/)
     );
 
     // At `x = 0` the guarded operand evaluates NOTHING: a getter counts every
@@ -2316,21 +2320,27 @@ describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
       ce.box(['When', probe3('u'), ['Less', 'x', 0]]),
       '?',
     ],
+    // A comparison over a variable the caller can leave out has no value
+    // then, so the connective takes the three-valued lowering: the marker
+    // is the test of the first operand's value.
     [
       'And (operands after the first)',
       ce.box(['And', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
-      '&&',
+      '_tv1 === false ? false',
     ],
     [
       'Or (operands after the first)',
       ce.box(['Or', ['Less', 'x', 0], ['Less', 0, probe3('u')]]),
-      '||',
+      '_tv1 === true ? true',
     ],
     [
       'Coalesce (the default)',
       ce.box(['Coalesce', 'x', probe3('u')]),
       'Number.isNaN',
     ],
+    // `x` has no declared type here, so the chain keeps its plain lowering:
+    // a value of an unknown type may be a list, which a comparison reads
+    // element by element.
     [
       'chained relation (comparison after the first)',
       ce.box(['Less', 0, 'x', probe3('u')]),
@@ -2339,12 +2349,13 @@ describe('COMPILE CSE — conditionality, per lazy-operand entry', () => {
   ])('binds inside the conditional position: %s', (_name, expr, marker) => {
     const result = compile(expr as Expression, { fallback: false });
 
-    expect(occurrences(result.code, 'const _cse1')).toBe(1);
+    // The number of the binding depends on the temporaries named before it.
+    expect(result.code.match(/const _cse\d+ =/g) ?? []).toHaveLength(1);
     expect(occurrences(result.code, 'Math.sin(6 * _.u)')).toBe(1);
     // The binding sits AFTER the construct's conditional marker.
     expect(guardAt(result.code, marker as string)).toBeGreaterThanOrEqual(0);
     expect(guardAt(result.code, marker as string)).toBeLessThan(
-      result.code.indexOf('const _cse1')
+      result.code.search(/const _cse\d+ =/)
     );
   });
 

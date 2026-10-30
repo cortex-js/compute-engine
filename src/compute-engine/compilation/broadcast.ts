@@ -67,6 +67,23 @@
  * that `inputs` does not name reads as `undefined`, as it does for `run()`,
  * and its cells are `NaN` (or `error`).
  *
+ * **Boolean inputs.** A variable declared `boolean` takes a JavaScript
+ * boolean, the same value for every cell, or a plain array of booleans, one
+ * per cell, as a column (`grid`: an axis), for `javascript` and for
+ * `interval-js` alike: an `interval-js` column holds one boolean per cell,
+ * not a pair. An empty array is an empty column for a variable declared
+ * `boolean` (the batch has no cell), and is refused for any other variable.
+ * The `javascript` code tests such a variable with `=== true` and
+ * `=== false`, so the cell reads the boolean itself; the `interval-js` cell
+ * reads `'true'` or `'false'`, as its `run()` converts a boolean
+ * (`processInput`). A `Uint8Array` of `0`/`1` is not accepted, because each
+ * cell would read a number, which leaves a condition on the variable
+ * undecided, and a conversion would cost a test per cell in every loop or a
+ * copy of the column per slice. A boolean for a variable that the compiled
+ * code reads as a number (declared with a number type, or complex) throws,
+ * as `run()` refuses it, and so does any input for a variable declared
+ * `string` (a batch input is never a string).
+ *
  * **Parity.** For each cell, the value is the one `run()` gives for that
  * cell's inputs (`javascript`), or the encoding of the `IntervalResult` that
  * `run()` gives (`interval-js`): the same compiled body runs with the same
@@ -114,11 +131,22 @@ export interface BroadcastBatchBody {
  * What `broadcastNumbers` reads of a `javascript` result's entry plan (the
  * `EntryPlan` of `javascript-runtime.ts`, which imports this module, so the
  * shape is restated here instead of imported): which vars-object keys the
- * code reads as complex values and which as lists. A positional (`args`)
- * plan belongs to a lambda result, which has no `broadcast`.
+ * code reads as complex values, which as lists, and which the host declared
+ * with a number type (`scalars`, which refuse a boolean input). A positional
+ * (`args`) plan belongs to a lambda result, which has no `broadcast`.
  */
 export type BroadcastEntryPlan =
-  | { kind: 'vars'; complex: readonly string[]; lists: readonly string[] }
+  | {
+      kind: 'vars';
+      complex: readonly string[];
+      lists: readonly string[];
+      scalars?: readonly string[];
+      /** The variables declared `string`, which refuse every batch input. */
+      texts?: readonly string[];
+      /** The variables declared `boolean`, for which an empty array is an
+       * empty column. */
+      booleans?: readonly string[];
+    }
   | { kind: 'args' };
 
 /**
@@ -162,10 +190,13 @@ export type IntervalKindCode =
 interface BroadcastShape {
   /** The per-cell and per-batch scalar variables; not the shared inputs. */
   names: string[];
-  /** The array of each name, or `null` for a scalar or an index axis. */
-  arrays: (Float64Array | null)[];
-  /** The scalar of each name (`NaN` for an array or an index axis). */
-  scalars: number[];
+  /** The array of each name, or `null` for a scalar or an index axis. A
+   * plain array of booleans is the column of a boolean variable, one value
+   * per cell for both targets. */
+  arrays: (Float64Array | readonly boolean[] | null)[];
+  /** The scalar of each name (`NaN` for an array or an index axis). A
+   * boolean is the value of a boolean variable. */
+  scalars: (number | boolean)[];
   /** Whether each name is an index axis of the `grid` layout (see
    * `BroadcastOptions.indexes`): its value at a cell is the cell's position
    * along the axis. Its length is in `grid`. */
@@ -277,6 +308,142 @@ export function plainSharedArray(
   return value instanceof Float64Array ? Array.from(value) : value;
 }
 
+/** The error for a plain array that is not the column of a boolean
+ * variable (`readShape`, `rescanBooleanSlice`). */
+function plainArrayError(name: string, perCell: 1 | 2): TypeError {
+  return new TypeError(
+    perCell === 2
+      ? `broadcast: the input for "${name}" must be a Float64Array or a number; a plain array is accepted only as the column of a boolean variable (every element a boolean)`
+      : `broadcast: the input for "${name}" must be a Float64Array or a number; a plain array is accepted only for a shared input (a variable the compiled code reads as a list, or one the \`shared\` option names), or as the column of a boolean variable (every element a boolean)`
+  );
+}
+
+/**
+ * Scan again the boolean columns of `shape` over the cells of one inline
+ * slice of a `broadcastAsync()` batch: the batch yields to the event loop
+ * between its slices, and the caller can change an element during a yield.
+ * The `cells` layout scans the slice's own range, so the slices of a batch
+ * scan each element once in all; the `grid` layout scans each axis whole
+ * (an axis is short). Throws the error of `readShape` for an element that
+ * is no longer a boolean.
+ */
+function rescanBooleanSlice(
+  shape: BroadcastShape,
+  slice: BroadcastSlice,
+  perCell: 1 | 2
+): void {
+  const validated = slice.validated;
+  if (validated === undefined) return;
+  shape.names.forEach((name, k) => {
+    const a = shape.arrays[k];
+    if (a === null || a instanceof Float64Array) return;
+    // A column shortened (or lengthened) during a yield: its cells no
+    // longer match the batch, whose count was read before the first slice.
+    const length = validated.get(a);
+    if (length !== undefined && length !== a.length)
+      throw new TypeError(
+        `broadcast: the column of "${name}" changed length during the batch (from ${length} to ${a.length})`
+      );
+    const [from, to] =
+      shape.grid === null
+        ? [slice.from, Math.min(slice.to, a.length)]
+        : [0, a.length];
+    for (let j = from; j < to; j++)
+      if (typeof a[j] !== 'boolean') throw plainArrayError(name, perCell);
+  });
+}
+
+/** True when `v` is a plain array whose every element is a boolean: the
+ * column of a boolean variable. An empty array is one only for a variable
+ * declared `boolean` (`declaredBoolean`): otherwise its type is not known,
+ * and it keeps the refusal of a plain array.
+ *
+ * Every public batch call scans the column again, since the caller can
+ * change an element between two calls. `validated` holds the columns that
+ * the count of a `broadcastAsync()` batch already scanned whole; each
+ * inline slice of the batch then scans only its own cells again
+ * (`rescanBooleanSlice`), since the caller can change an element while the
+ * batch yields. A worker receives a copy of its slice of the column and
+ * scans that copy again. */
+function isBooleanColumn(
+  v: unknown,
+  declaredBoolean: boolean,
+  validated?: WeakMap<object, number>
+): v is readonly boolean[] {
+  if (!Array.isArray(v)) return false;
+  if (v.length === 0) return declaredBoolean;
+  if (validated?.has(v)) return true;
+  for (let k = 0; k < v.length; k++)
+    if (typeof v[k] !== 'boolean') return false;
+  // The length at the first scan: a slice refuses a column whose length
+  // changed since (`rescanBooleanSlice`).
+  validated?.set(v, v.length);
+  return true;
+}
+
+/**
+ * The message of the `TypeError` for a value that is not a string, given for
+ * a binding declared `string` (`label`): `run()` throws it at entry
+ * (`throwNonStringAtText` in `javascript-runtime.ts`), and `broadcast()`
+ * for any input of such a binding.
+ */
+export function nonStringAtTextMessage(label: string, x: unknown): string {
+  const shown =
+    typeof x === 'number' || typeof x === 'boolean' || typeof x === 'bigint'
+      ? String(x)
+      : x === null
+        ? 'null'
+        : Array.isArray(x) || ArrayBuffer.isView(x)
+          ? 'an array'
+          : `a value of type ${typeof x}`;
+  return `${label} was compiled as a string but received ${shown}. Pass a string.`;
+}
+
+/**
+ * Throw when a boolean input (a scalar or a column) is given for a variable
+ * that the compiled code reads as a number: one that the host declared with
+ * a number type (`scalars` of the entry plan), or a complex one. `run()`
+ * refuses such a value (`refuseNonNumberAtScalar` in
+ * `javascript-runtime.ts`), and the batch must not compute with it: `x + 1`
+ * would give `2` for `true`.
+ */
+function refuseBooleanAtNumber(
+  shape: BroadcastShape,
+  entry: BroadcastEntryPlan | undefined
+): void {
+  if (entry?.kind !== 'vars') return;
+  shape.names.forEach((name, k) => {
+    const a = shape.arrays[k];
+    // A variable declared `string`: a batch input is a number, a boolean,
+    // an array or an index axis, never a string, so it is always refused,
+    // with the message of `run()`.
+    if (entry.texts?.includes(name))
+      throw new TypeError(
+        nonStringAtTextMessage(
+          `"${name}"`,
+          // An index axis is given by its length, which the message shows.
+          shape.indexes[k]
+            ? shape.grid?.[k]?.length
+            : a !== null
+              ? []
+              : shape.scalars[k]
+        )
+      );
+    const isBoolean =
+      typeof shape.scalars[k] === 'boolean' ||
+      (a !== null && !(a instanceof Float64Array));
+    if (!isBoolean) return;
+    if (entry.complex.includes(name))
+      throw new TypeError(
+        `broadcast: "${name}" was compiled as a complex number but received a boolean`
+      );
+    if (entry.scalars?.includes(name))
+      throw new TypeError(
+        `broadcast: "${name}" was compiled as a real number but received a boolean`
+      );
+  });
+}
+
 /**
  * Validate the inputs and compute the cell count. `perCell` is 1 for a
  * `javascript` input and 2 for an interval (`lo, hi` pair). `lists` is the
@@ -289,7 +456,9 @@ function readShape(
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
   perCell: 1 | 2,
-  lists?: readonly string[]
+  lists?: readonly string[],
+  booleans?: readonly string[],
+  validated?: WeakMap<object, number>
 ): BroadcastShape {
   if (perCell === 2) {
     for (const option of ['shared', 'outputs'] as const)
@@ -304,8 +473,8 @@ function readShape(
   const layout = options?.layout ?? 'cells';
   const indexNames = broadcastIndexNames(inputs, options, layout, sharedNames);
   const names: string[] = [];
-  const arrays: (Float64Array | null)[] = [];
-  const scalars: number[] = [];
+  const arrays: BroadcastShape['arrays'] = [];
+  const scalars: BroadcastShape['scalars'] = [];
   const indexes: boolean[] = [];
   const shared: BroadcastShape['shared'] = [];
   for (const name of Object.keys(inputs)) {
@@ -334,6 +503,20 @@ function readShape(
       arrays.push(null);
       scalars.push(v);
       indexes.push(false);
+    } else if (
+      typeof v === 'boolean' ||
+      isBooleanColumn(v, booleans?.includes(name) === true, validated)
+    ) {
+      // The input of a boolean variable (see "Boolean inputs" above).
+      names.push(name);
+      if (typeof v === 'boolean') {
+        arrays.push(null);
+        scalars.push(v);
+      } else {
+        arrays.push(v);
+        scalars.push(NaN);
+      }
+      indexes.push(false);
     } else if (v instanceof Float64Array) {
       if (v.length % perCell !== 0)
         throw new TypeError(
@@ -343,17 +526,16 @@ function readShape(
       arrays.push(v);
       scalars.push(NaN);
       indexes.push(false);
-    } else if (Array.isArray(v))
-      throw new TypeError(
-        perCell === 2
-          ? `broadcast: the input for "${name}" must be a Float64Array or a number (a plain array is not accepted)`
-          : `broadcast: the input for "${name}" must be a Float64Array or a number; a plain array is accepted only for a shared input (a variable the compiled code reads as a list, or one the \`shared\` option names)`
-      );
+    } else if (Array.isArray(v)) throw plainArrayError(name, perCell);
     else
       throw new TypeError(
-        `broadcast: the input for "${name}" must be a Float64Array or a number`
+        `broadcast: the input for "${name}" must be a Float64Array, a number, a boolean or an array of booleans`
       );
   }
+  // The values per cell of an array: `perCell` for a `Float64Array`, one
+  // for a column of booleans.
+  const cellWidth = (a: Float64Array | readonly boolean[]): number =>
+    a instanceof Float64Array ? perCell : 1;
   if (layout === 'grid') {
     const grid: { stride: number; length: number }[] = [];
     let stride = 1;
@@ -363,7 +545,7 @@ function readShape(
         return;
       }
       const length =
-        a === null ? (inputs[names[k]] as number) : a.length / perCell;
+        a === null ? (inputs[names[k]] as number) : a.length / cellWidth(a);
       grid.push({ stride, length });
       stride *= length;
     });
@@ -382,7 +564,7 @@ function readShape(
   names.forEach((name, k) => {
     const a = arrays[k];
     if (a === null) return;
-    const n = a.length / perCell;
+    const n = a.length / cellWidth(a);
     if (count === -1) count = n;
     else if (n !== count)
       throw new TypeError(
@@ -454,7 +636,14 @@ export function broadcastNumbers(
   defaultOutputs?: number,
   batch?: BroadcastBatchBody
 ): Float64Array {
-  const shape = readShape(inputs, options, 1, listsOf(entry));
+  const shape = readShape(
+    inputs,
+    options,
+    1,
+    listsOf(entry),
+    booleansOf(entry)
+  );
+  refuseBooleanAtNumber(shape, entry);
   const stride = broadcastStride(options, defaultOutputs);
   const out = outputArray(options?.out, stride * shape.count);
   broadcastNumbersRange(
@@ -470,6 +659,13 @@ export function broadcastNumbers(
     batch
   );
   return out;
+}
+
+/** The variables an entry plan declares `boolean`. */
+function booleansOf(
+  entry: BroadcastEntryPlan | undefined
+): readonly string[] | undefined {
+  return entry?.kind === 'vars' ? entry.booleans : undefined;
 }
 
 /** The variables an entry plan reads as lists: the shared inputs. */
@@ -498,6 +694,10 @@ export interface BroadcastSlice {
    * an error enclosure), as for a cell whose value is not a number, so this
    * count is the only way to tell the two apart. */
   failures?: { count: number };
+  /** The boolean columns that the count of this `broadcastAsync()` batch
+   * scanned whole (`isBooleanColumn`). Each slice that is given it scans
+   * its own cells of them again (`rescanBooleanSlice`). */
+  validated?: WeakMap<object, number>;
 }
 
 /** Cells between two deadline checks. A multiple of `STOP_CHECK_EVERY`
@@ -512,15 +712,18 @@ const STOP_CHECK_EVERY = 64;
  * Validate `inputs` and return the cell count of the batch, without
  * evaluating anything. `perCell` is 1 for `javascript`, 2 for `interval-js`.
  * `lists` is the `lists` of a `javascript` entry plan: those variables are
- * shared inputs, which do not count.
+ * shared inputs, which do not count. `validated` collects the boolean
+ * columns it scanned, for the slices of the same batch.
  */
 export function broadcastCellCount(
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
   perCell: 1 | 2,
-  lists?: readonly string[]
+  lists?: readonly string[],
+  booleans?: readonly string[],
+  validated?: WeakMap<object, number>
 ): number {
-  return readShape(inputs, options, perCell, lists).count;
+  return readShape(inputs, options, perCell, lists, booleans, validated).count;
 }
 
 /**
@@ -545,7 +748,16 @@ export function broadcastNumbersSlice(
   defaultOutputs?: number,
   batch?: BroadcastBatchBody
 ): number {
-  const shape = readShape(inputs, options, 1, listsOf(entry));
+  const shape = readShape(
+    inputs,
+    options,
+    1,
+    listsOf(entry),
+    booleansOf(entry),
+    slice.validated
+  );
+  rescanBooleanSlice(shape, slice, 1);
+  refuseBooleanAtNumber(shape, entry);
   return broadcastNumbersRange(
     call,
     entry,
@@ -594,14 +806,20 @@ export function sharedInputsReadInPlace(
  * the output, which is rare. An array that does not share it is returned as
  * it is.
  */
-function unaliasedInputs(
-  arrays: (Float64Array | null)[],
+function unaliasedInputs<A extends Float64Array | readonly boolean[]>(
+  arrays: (A | null)[],
   out: Float64Array
-): (Float64Array | null)[] {
-  if (!arrays.some((a) => a !== null && a.buffer === out.buffer)) return arrays;
-  return arrays.map((a) =>
-    a !== null && a.buffer === out.buffer ? a.slice() : a
-  );
+): (A | null)[] {
+  // A plain array of booleans has no memory of its own to share.
+  const aliased = (a: A | null): boolean =>
+    a instanceof Float64Array && a.buffer === out.buffer;
+  if (!arrays.some(aliased)) return arrays;
+  return arrays.map((a) => (aliased(a) ? (a!.slice() as A) : a));
+}
+
+/** The answer string of the interval domain for a boolean input. */
+function boolInterval(b: unknown): 'true' | 'false' | 'maybe' {
+  return b === true ? 'true' : b === false ? 'false' : 'maybe';
 }
 
 /**
@@ -617,7 +835,7 @@ function unaliasedInputs(
  */
 type CellLoop = (
   vars: Record<string, unknown>,
-  arrays: (Float64Array | null)[],
+  arrays: BroadcastShape['arrays'],
   slots: ({ re: number; im: number } | null)[],
   out: Float64Array,
   from: number,
@@ -906,7 +1124,8 @@ function broadcastNumbersRange(
   // cell; `null` for a real input.
   const complexSlots: ({ re: number; im: number } | null)[] = shape.names.map(
     (name, k) =>
-      complexNames.has(name) ? { re: shape.scalars[k], im: 0 } : null
+      // `refuseBooleanAtNumber` refused a boolean for a complex input.
+      complexNames.has(name) ? { re: shape.scalars[k] as number, im: 0 } : null
   );
   const arrays = unaliasedInputs(shape.arrays, out);
   // The plain array of each shared input, made at most once per call.
@@ -985,7 +1204,8 @@ function broadcastNumbersRange(
       if (a === null && !shape.indexes[k]) continue;
       const v = a === null ? axisIndex(shape, k, i) : a[axisIndex(shape, k, i)];
       const slot = complexSlots[k];
-      if (slot !== null) slot.re = v;
+      // `refuseBooleanAtNumber` refused a boolean for a complex input.
+      if (slot !== null) slot.re = v as number;
       else vars[shape.names[k]] = v;
     }
     if (stride === 1) {
@@ -1121,11 +1341,12 @@ export function encodeIntervalResult(
  * variable and copies each answer out before the next cell overwrites it.
  */
 export function broadcastIntervals(
-  call: (vars: Record<string, Bounds>) => unknown,
+  call: (vars: Record<string, unknown>) => unknown,
   inputs: BroadcastInputs,
-  options?: BroadcastOptions
+  options?: BroadcastOptions,
+  booleans?: readonly string[]
 ): Float64Array {
-  const shape = readShape(inputs, options, 2);
+  const shape = readShape(inputs, options, 2, undefined, booleans);
   const out = outputArray(options?.out, 3 * shape.count);
   broadcastIntervalsRange(call, shape, out, 0, shape.count);
   return out;
@@ -1136,22 +1357,32 @@ export function broadcastIntervals(
  * `interval-js` batch, before the batch runs: the cells of an input array
  * (read with stride 2), or the one value of a scalar input. An index axis
  * of the `grid` layout is not visited: its values are the positions of the
- * cells. Returns the names of the inputs. The `interval-js` result checks
- * the host value of an input of a value kind with it (the entry check of
- * `run()`), so that a cell that the check refuses rejects the whole call
- * instead of being an error cell of the loop.
+ * cells. A boolean input has no bounds: each of its values is given to
+ * `visitBoolean` instead. Returns the
+ * names of the inputs. The `interval-js` result checks the host value of an
+ * input of a value kind with it (the entry check of `run()`), so that a
+ * cell that the check refuses rejects the whole call instead of being an
+ * error cell of the loop.
  */
 export function visitIntervalInputCells(
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
-  visit: (name: string, lo: number, hi: number) => void
+  visit: (name: string, lo: number, hi: number) => void,
+  booleans?: readonly string[],
+  visitBoolean?: (name: string, value: boolean) => void
 ): ReadonlyArray<string> {
-  const shape = readShape(inputs, options, 2);
+  const shape = readShape(inputs, options, 2, undefined, booleans);
   shape.names.forEach((name, k) => {
     if (shape.indexes[k]) return;
     const a = shape.arrays[k];
     if (a === null) {
-      visit(name, shape.scalars[k], shape.scalars[k]);
+      const v = shape.scalars[k];
+      if (typeof v === 'number') visit(name, v, v);
+      else visitBoolean?.(name, v);
+      return;
+    }
+    if (!(a instanceof Float64Array)) {
+      for (const b of a) visitBoolean?.(name, b);
       return;
     }
     for (let j = 0; j + 1 < a.length; j += 2) visit(name, a[j], a[j + 1]);
@@ -1162,13 +1393,22 @@ export function visitIntervalInputCells(
 /** The slice form of `broadcastIntervals`; see `broadcastNumbersSlice`. The
  * slice's cells are written at the start of `out`, three values each. */
 export function broadcastIntervalsSlice(
-  call: (vars: Record<string, Bounds>) => unknown,
+  call: (vars: Record<string, unknown>) => unknown,
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
   out: Float64Array,
-  slice: BroadcastSlice
+  slice: BroadcastSlice,
+  booleans?: readonly string[]
 ): number {
-  const shape = readShape(inputs, options, 2);
+  const shape = readShape(
+    inputs,
+    options,
+    2,
+    undefined,
+    booleans,
+    slice.validated
+  );
+  rescanBooleanSlice(shape, slice, 2);
   return broadcastIntervalsRange(
     call,
     shape,
@@ -1182,7 +1422,7 @@ export function broadcastIntervalsSlice(
 }
 
 function broadcastIntervalsRange(
-  call: (vars: Record<string, Bounds>) => unknown,
+  call: (vars: Record<string, unknown>) => unknown,
   shape: BroadcastShape,
   out: Float64Array,
   from: number,
@@ -1195,9 +1435,16 @@ function broadcastIntervalsRange(
     throw new TypeError(
       `broadcast: the output array holds ${out.length} values, ${3 * (to - from)} are needed`
     );
-  const vars: Record<string, Bounds> = Object.create(null);
+  const vars: Record<string, unknown> = Object.create(null);
+  // A boolean input is read as the answer string of the interval domain
+  // (`'true'`, `'false'`), as `run()` converts it (`processInput`): a
+  // scalar once, a column at each cell. Its slot is unused.
   const slots: Bounds[] = shape.names.map((name, k) => {
     const s = shape.scalars[k];
+    if (typeof s === 'boolean') {
+      vars[name] = boolInterval(s);
+      return { lo: NaN, hi: NaN };
+    }
     const slot = { lo: s, hi: s };
     vars[name] = slot;
     return slot;
@@ -1221,6 +1468,10 @@ function broadcastIntervalsRange(
         const j = axisIndex(shape, k, i);
         slots[k].lo = j;
         slots[k].hi = j;
+        continue;
+      }
+      if (!(a instanceof Float64Array)) {
+        vars[shape.names[k]] = boolInterval(a[axisIndex(shape, k, i)]);
         continue;
       }
       const j = 2 * axisIndex(shape, k, i);

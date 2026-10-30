@@ -11,6 +11,7 @@ import {
   type ReferencesMemo,
 } from '../boxed-expression/abstract-boxed-expression.js';
 import type { SymbolInterface } from '../types-expression.js';
+import type { Scope } from '../types-evaluation.js';
 import type {
   BoxedDefinition,
   Expression,
@@ -2989,6 +2990,39 @@ type ReboundFunctionLocals = {
   writes: Map<Expression, Set<string>>;
 };
 
+/** See `BaseCompiler.blockLocalValueFrame`. */
+type LocalEntry = {
+  name: string;
+  /** The values assigned to the local, anywhere in the block. */
+  values: Expression[];
+  /** A local of the block itself, not of a scope nested in it. */
+  own: boolean;
+  /** The free variables and the locals that `values` read (`localInputs`). */
+  shallow?: { nodes: Expression[]; refs: LocalEntry[] };
+  /** The input nodes of the local, transitively (`localInputs`). */
+  inputs?: Expression[];
+  /** Whether every value of the local reads an absent value as NaN
+   * (`readsAbsenceAsNaN`), once it is known. */
+  absenceAsNaN?: boolean;
+};
+
+type LocalValueFrame = {
+  /** The locals of the block and of the scopes nested in it, keyed by
+   * their definition. */
+  byDef: Map<object, LocalEntry>;
+  /** The same locals, by name (`blockLocalsNamed`). */
+  byName: Map<string, LocalEntry[]>;
+  /** The definitions that the binders inside the block create. */
+  binderDefs: Set<object>;
+  /** For each statement, the locals assigned by a top-level statement
+   * before it. */
+  assignedBefore: Set<string>[];
+  /** The index of the statement being compiled. */
+  current: number;
+  /** The local of each emitted name. */
+  bySpelling: Map<string, string>;
+};
+
 /** See `BaseCompiler.checkedLocalReads`. */
 type CheckedLocalsFrame = {
   /** The name of the marker object of each checked local. */
@@ -4466,12 +4500,24 @@ export class BaseCompiler {
         // which is an invalid shader — so a width outside 2–4 fails closed
         // below, as does a tuple with a non-numeric component (there is no
         // NaN for a string lane).
+        //
+        // A LIST of 2 to 4 real numbers (`vector<real^2>`, the type of
+        // `[x, y]`) lowers to a `vecN` as such a tuple does, and is exempt
+        // for the same reason: `If(c, [x, y])`, `When([x, y], c)` and
+        // `If(c, [x, y], Missing)` fill every lane with NaN. A list of
+        // another length, or with complex cells, has no `vecN` lowering and
+        // stays fail-closed.
         const numericShaped =
           typeof stripped !== 'string' &&
-          stripped.kind === 'tuple' &&
-          stripped.elements.length >= 2 &&
-          stripped.elements.length <= 4 &&
-          stripped.elements.every((el) => isSubtype(el.type, 'number'));
+          ((stripped.kind === 'tuple' &&
+            stripped.elements.length >= 2 &&
+            stripped.elements.length <= 4 &&
+            stripped.elements.every((el) => isSubtype(el.type, 'number'))) ||
+            (stripped.kind === 'list' &&
+              stripped.dimensions?.length === 1 &&
+              stripped.dimensions[0] >= 2 &&
+              stripped.dimensions[0] <= 4 &&
+              isSubtype(stripped.elements, 'real')));
         // A LIST whose cells are numbers that may be absent
         // (`list<integer | missing>`, the type of `[sin x, x{x > 0}]`) is
         // exempt for the same reason a scalar number is: an absent cell is a
@@ -4481,6 +4527,9 @@ export class BaseCompiler {
         // type, qualifies. `missing | list<number>` — the whole list may be
         // absent — does not: the no-match lowering pairs an array arm with a
         // scalar NaN there, which is not a shader, so it stays fail-closed.
+        // (A whole list of 2 to 4 real numbers that may be absent,
+        // `missing | vector<real^2>`, is a `vecN` and is exempt as
+        // `numericShaped` above.)
         const numericCells = (() => {
           const whole = resolveTypeForCompilation(t);
           if (typeof whole === 'string' || whole.kind !== 'list') return false;
@@ -5426,6 +5475,57 @@ export class BaseCompiler {
   private static readonly _codeAliases = new Map<Expression, string>();
 
   /**
+   * The reads of the vars object (`_.x`) that the code being emitted has
+   * already tested for `undefined`, for each target object: the code is
+   * inside the branch of such a test (the condition of an `If` that tests
+   * `_.x !== undefined`, or the guard of `unsuppliedComparisonGuard`
+   * itself). A comparison over such a read needs no test of its own. Keyed
+   * by the target object, so that a definition compiled with another
+   * target (a user function, a nested scope) does not see the marks: such
+   * code can run where the test did not happen. A derived target that does
+   * not see a mark emits one more test, which costs a comparison but is
+   * never wrong. Each entry counts its nested marks.
+   */
+  private static readonly _presentReads = new WeakMap<
+    object,
+    Map<string, number>
+  >();
+
+  /** Run `fn` with the vars-object reads `reads` marked as tested for
+   * `undefined` on `target` (see `_presentReads`). */
+  private static withPresentReads<T>(
+    target: CompileTarget<Expression>,
+    reads: ReadonlyArray<string>,
+    fn: () => T
+  ): T {
+    if (reads.length === 0) return fn();
+    let marks = BaseCompiler._presentReads.get(target);
+    if (marks === undefined) {
+      marks = new Map();
+      BaseCompiler._presentReads.set(target, marks);
+    }
+    for (const r of reads) marks.set(r, (marks.get(r) ?? 0) + 1);
+    try {
+      return fn();
+    } finally {
+      for (const r of reads) {
+        const n = marks.get(r)! - 1;
+        if (n === 0) marks.delete(r);
+        else marks.set(r, n);
+      }
+    }
+  }
+
+  /** True when the vars-object read `code` is marked as tested for
+   * `undefined` on `target` (see `_presentReads`). */
+  static isPresentRead(
+    code: string,
+    target: CompileTarget<Expression>
+  ): boolean {
+    return BaseCompiler._presentReads.get(target)?.has(code) === true;
+  }
+
+  /**
    * Does `compile()` currently emit fixed code for `expr` (an entry in
    * `_codeOverrides` or `_codeAliases`) instead of lowering it? A target
    * handler that takes a node apart and compiles its operands directly (the
@@ -5769,11 +5869,12 @@ export class BaseCompiler {
    *   `undefined`.
    * - the operator is broadcastable. Its element-wise lowering already
    *   answers the absent value for an absent operand (`_SYS.bcastAbsent`).
-   * - another operand is not pure. The interpreter evaluates every operand
-   *   before it tests for an absent one, and the lowering emitted here
-   *   evaluates the other operands only when the collection is present, so an
-   *   operand with an effect (a `Random` draw) would run a different number
-   *   of times.
+   *
+   * An operand that is not pure (a `Random` draw) is bound to a temporary
+   * too, and tested for absence like a guarded one. The interpreter
+   * evaluates every operand once, in order, before it tests for an absent
+   * one, and the bindings are evaluated in operand order before the test,
+   * so the effects run the same number of times and in the same order.
    */
   private static absentCollectionOperandGuard(
     engine: ComputeEngine,
@@ -5797,14 +5898,45 @@ export class BaseCompiler {
         operator.resolvedMissingBehavior !== 'propagate')
     )
       return undefined;
-    const guarded = args.map(
+    // An operand is guarded when its type has a `missing` arm, or when it
+    // is a checked call of a user function with a collection result
+    // (`checkedCallMayBeAbsent`): the checking shim gives `undefined` when
+    // an argument fails its test, while the type of the call is the
+    // collection type.
+    const presentArms = args.map((a) =>
+      BaseCompiler._codeOverrides.has(a) ? undefined : gatedCollectionArms(a)
+    );
+    const checkedCalls = args.map(
       (a, i) =>
+        presentArms[i] === undefined &&
+        !BaseCompiler.hasCodeOverride(a) &&
+        BaseCompiler.checkedCallMayBeAbsent(engine, a, target)
+    );
+    const guarded = args.map(
+      (_a, i) =>
         (reduction || operator.stripsMissingAt(i)) &&
-        !BaseCompiler._codeOverrides.has(a) &&
-        gatedCollectionArms(a) !== undefined
+        (presentArms[i] !== undefined || checkedCalls[i])
     );
     if (!guarded.some((x) => x)) return undefined;
-    if (args.some((a, i) => !guarded[i] && a.isPure === false))
+    // An impure operand that is not guarded is bound too (see above). A
+    // node with a code override is emitted as its override and is not bound.
+    const bound = args.map(
+      (a, i) =>
+        guarded[i] || (a.isPure !== true && !BaseCompiler.hasCodeOverride(a))
+    );
+    // An impure node that is used at two positions is read through a copy of
+    // the node at each later position (below). Only a function application
+    // can be copied.
+    if (
+      args.some(
+        (a, i) =>
+          bound[i] &&
+          !(guarded[i] && !checkedCalls[i]) &&
+          a.isPure !== true &&
+          args.indexOf(a) !== i &&
+          !isFunction(a)
+      )
+    )
       return undefined;
     const application = node ?? engine._fn(h, [...args]);
     if (declaredBinders(application, 'post') !== undefined) return undefined;
@@ -5832,12 +5964,40 @@ export class BaseCompiler {
 
     const names: string[] = [];
     const bindings: Array<[string, TargetSource]> = [];
+    // A checked call, and an impure operand that is not guarded, keep their
+    // node, read through an alias of the temporary (`_codeAliases`): the
+    // type of the node is already the present type, and the analyses of the
+    // node (the element lane of a recursive call, for example) must still
+    // read it as they do without the guard. The aliases are installed only
+    // after every initializer has compiled, so that no initializer reads a
+    // temporary of the binding (the arguments of the binding cannot see its
+    // parameters), and they are removed on every exit, a failed compilation
+    // included: a node left in `_codeAliases` would compile to an unbound
+    // temporary at its next use.
+    //
+    // A node that occurs at two positions: when it is pure, it is bound
+    // once, and both operands read its temporary. When it is impure, each
+    // position has its own binding, evaluated in operand order as the
+    // interpreter evaluates each operand, and each later position reads a
+    // copy of the node aliased to its own temporary (an alias is keyed by
+    // the node, so one node cannot read two temporaries).
+    const aliases = new Map<Expression, string>();
     const presentArgs = args.map((a, i) => {
-      if (!guarded[i]) return a;
-      const arms = gatedCollectionArms(a)!;
+      if (!bound[i]) return a;
+      const aliasedNode = !guarded[i] || checkedCalls[i];
+      if (aliasedNode && aliases.has(a) && a.isPure === true) return a;
       const name = BaseCompiler.tempVar(target);
       names.push(name);
       bindings.push([name, BaseCompiler.compileValueOperand(a, target)]);
+      if (aliasedNode) {
+        const operand =
+          aliases.has(a) && isFunction(a)
+            ? engine._fn(a.operator, [...a.ops])
+            : a;
+        aliases.set(operand, name);
+        return operand;
+      }
+      const arms = presentArms[i]!;
       return BaseCompiler.typedTemp(
         engine,
         name,
@@ -5851,7 +6011,20 @@ export class BaseCompiler {
       var: (id) => (names.includes(id) ? id : target.var(id)),
       ...BaseCompiler.withBoundScope(target, names),
     };
-    const body = BaseCompiler.compile(engine._fn(h, presentArgs), inner);
+    let body: TargetSource;
+    const previous = new Map<Expression, string | undefined>();
+    try {
+      for (const [a, name] of aliases) {
+        previous.set(a, BaseCompiler._codeAliases.get(a));
+        BaseCompiler._codeAliases.set(a, name);
+      }
+      body = BaseCompiler.compile(engine._fn(h, presentArgs), inner);
+    } finally {
+      for (const [a, old] of previous) {
+        if (old === undefined) BaseCompiler._codeAliases.delete(a);
+        else BaseCompiler._codeAliases.set(a, old);
+      }
+    }
     const absent = names.map((n) => absence.object!.isAbsent(n)).join(' || ');
     return target.bindExpr(bindings, `(${absent} ? ${marker} : ${body})`);
   }
@@ -13276,7 +13449,7 @@ export class BaseCompiler {
     // (typed `boolean | missing`, `undefined` or `None` at run time) follow
     // the Kleene tables, as in the interpreter. See `kleeneValueConnective`.
     {
-      const kleene = BaseCompiler.kleeneValueConnective(h, args, target);
+      const kleene = BaseCompiler.kleeneValueConnective(h, args, target, node);
       if (kleene !== undefined) return kleene;
     }
 
@@ -13598,6 +13771,20 @@ export class BaseCompiler {
     // possibly-collection-typed, so plain scalar plot bodies are unaffected.
     sub = BaseCompiler.compileExprBroadcastPython(engine, h, args, target);
     if (sub !== undefined) return sub;
+
+    // A comparison over a variable the caller can leave out (`x > 0`, read
+    // as `_.x`) has no value when it is left out, as in the interpreter and
+    // as in a branch condition (`unsuppliedComparisonGuard`).
+    {
+      const guarded = BaseCompiler.unsuppliedComparisonGuard(
+        h,
+        args,
+        target,
+        () => BaseCompiler.compileExpr(engine, h, args, prec, target, node),
+        node
+      );
+      if (guarded !== undefined) return guarded;
+    }
 
     // A comparison with an operand that may be absent (`w > 0` with
     // `w: number | missing`) is absent when that operand is absent, on a
@@ -16474,10 +16661,14 @@ export class BaseCompiler {
         decidability,
         target
       );
+      // An arm runs only after the condition tested its vars-object reads
+      // for `undefined`, so a comparison in the arm does not test them
+      // again (`unsuppliedComparisonGuard`).
+      const tested = BaseCompiler.testedReadsOf(decidability, target);
       return BaseCompiler.exactSelect(
         compiledCond,
-        `(${arm(args[1], 1)})`,
-        `(${arm(args[2], 2)})`,
+        `(${BaseCompiler.withPresentReads(target, tested, () => arm(args[1], 1))})`,
+        `(${BaseCompiler.withPresentReads(target, tested, () => arm(args[2], 2))})`,
         BaseCompiler.noBranchValue(node, target, coerce !== undefined),
         target
       );
@@ -16872,7 +17063,17 @@ export class BaseCompiler {
         decidability === null ||
         BaseCompiler.isFalsyWhenUndecided(decidability, target)
       ) {
-        const cond = BaseCompiler.guardCondition(args[1], target);
+        // An undecided comparison here reads as `false`, which masks the
+        // value as the undecided answer does, so the comparisons of the
+        // condition need no test of their own for an unsupplied variable
+        // (`unsuppliedComparisonGuard`).
+        const cond = BaseCompiler.withPresentReads(
+          target,
+          decidability === null
+            ? []
+            : BaseCompiler.falsyReadsOf(decidability, target),
+          () => BaseCompiler.guardCondition(args[1], target)
+        );
         const val = BaseCompiler.compileOp(node, 0, target, 0, args[0]);
         return `((${cond}) ? (${val}) : ${nan})`;
       }
@@ -16932,6 +17133,56 @@ export class BaseCompiler {
    * caller can supply a value that is not a boolean, such as `1`, which is
    * truthy, where the interpreter has no value.
    */
+  /**
+   * The vars-object reads (`_.x`) that the decidedness test of a lone
+   * relation `node` tests for `undefined` (`withConditionOperands`). The
+   * arms of the selection run only when the test passed. Empty for a
+   * connective or a value-shaped condition, whose arms can run with such a
+   * read undecided.
+   */
+  private static testedReadsOf(
+    node: ConditionNode,
+    target: CompileTarget<Expression>
+  ): string[] {
+    if (node.test.kind !== 'operands') return [];
+    const reads: string[] = [];
+    for (const op of node.test.operands) {
+      if (!isSymbol(op)) continue;
+      const code = BaseCompiler.compile(op, target);
+      if (BaseCompiler.isVarsObjectRead(code, target)) reads.push(code);
+    }
+    // With the NaN escape (`withNanEscape`), the arms can run while a read
+    // is unsupplied: nothing is proven present.
+    const expr = node.test.expr;
+    if (
+      isFunction(expr) &&
+      BaseCompiler.withNanEscape(
+        expr.ops,
+        reads.map((r) => `${r} !== undefined`),
+        target
+      ).some((t) => t.includes(' || '))
+    )
+      return [];
+    return reads;
+  }
+
+  /**
+   * The vars-object reads of the relations of a condition that
+   * `isFalsyWhenUndecided` admits: there an unsupplied variable makes the
+   * comparison `false`, which the selection reads as it reads the undecided
+   * answer.
+   */
+  private static falsyReadsOf(
+    node: ConditionNode,
+    target: CompileTarget<Expression>
+  ): string[] {
+    if (node.test.kind === 'connective')
+      return node.test.operands.flatMap((n) =>
+        BaseCompiler.falsyReadsOf(n, target)
+      );
+    return BaseCompiler.testedReadsOf(node, target);
+  }
+
   private static isFalsyWhenUndecided(
     node: ConditionNode,
     target: CompileTarget<Expression>
@@ -20730,15 +20981,28 @@ export class BaseCompiler {
    * evaluated. An operand that follows an undecided one is evaluated, because
    * the table needs it.
    *
-   * Applied only when an operand's static type has a `missing` arm and every
-   * operand is a boolean or absent, on the targets with an object null
-   * (JavaScript, Python). An ordinary boolean connective keeps the plain
-   * infix lowering, with no extra code.
+   * Applied only when every operand is a boolean or absent, on the targets
+   * with an object null (JavaScript, Python), and one of these is true:
+   *
+   * - an operand's static type has a `missing` arm;
+   * - on JavaScript, an operand is not proven a DECIDED boolean
+   *   (`isDecidedBooleanValue`). A symbol declared `boolean` is not: the
+   *   caller can leave it out (`undefined`) or pass a value that is not a
+   *   boolean (`1`). The plain `!_.c` gave `true` for an unsupplied `c` and
+   *   `false` for `c = 1`, where the interpreter keeps `¬c` unevaluated; the
+   *   Kleene value is `undefined`, the absence marker of a boolean result.
+   *   (Python keeps the plain lowering for such an operand: its variables
+   *   are the parameters of the compiled function, and there is no
+   *   unsupplied value to read.)
+   *
+   * A connective whose every operand is proven a decided boolean keeps the
+   * plain infix lowering, with no extra code.
    */
   private static kleeneValueConnective(
     h: string,
     args: ReadonlyArray<Expression>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    node?: Expression
   ): TargetSource | undefined {
     if (h !== 'And' && h !== 'Or' && h !== 'Not') return undefined;
     if (target.language !== 'javascript' && target.language !== 'python')
@@ -20771,12 +21035,36 @@ export class BaseCompiler {
     };
     const operandArms = args.map(arms);
     if (operandArms.some((a) => a === undefined)) return undefined;
-    if (!operandArms.some((a) => a!.includes('missing'))) return undefined;
+    if (
+      !operandArms.some((a) => a!.includes('missing')) &&
+      (target.language !== 'javascript' ||
+        args.every((a) => BaseCompiler.isDecidedBooleanValue(a, target)))
+    )
+      return undefined;
+    // A call whose declared `boolean` result its body contradicts (it answers
+    // a list) is refused here as in the plain lowering, which reaches the
+    // same check later in `compileExpr`.
+    BaseCompiler.assertNoContradictedScalarOperand(args[0].engine, h, args);
     const d = BaseCompiler.conditionDialectOf(target);
-    const code = (a: Expression) => BaseCompiler.compileValueOperand(a, target);
+    // Each operand is compiled in the common-subexpression region of its
+    // edge (`withCseOperand`), as the plain lowering compiles it
+    // (`compileOp`) and as the condition lowering does (`kleeneConnective`):
+    // an operand after the first is evaluated only when the ones before it
+    // did not settle the result, so a subexpression shared inside it is
+    // bound there, and never outside the binding that may not be entered.
+    // The operand is read off `node` when there is one (`operandAt`), as
+    // `compileOp` reads it: the common-subexpression plan is keyed by the
+    // nodes of that tree, and `args` can hold other objects for them.
+    const code = (a: Expression, i: number) =>
+      BaseCompiler.withCseOperand(node, i, target, () =>
+        BaseCompiler.compileValueOperand(
+          node !== undefined ? (BaseCompiler.operandAt(node, i) ?? a) : a,
+          target
+        )
+      );
     if (h === 'Not') {
       const k = BaseCompiler.tempVar(target);
-      return d.bind([k], d.kleeneOfValue(k, true), [code(args[0])]);
+      return d.bind([k], d.kleeneOfValue(k, true), [code(args[0], 0)]);
     }
     const settles = h === 'And' ? d.isFalse : d.isTrue;
     const settled = h === 'And' ? d.falseValue : d.trueValue;
@@ -20790,11 +21078,66 @@ export class BaseCompiler {
       other,
       d.undecided
     );
+    // The operands are compiled in their order, before the nesting is
+    // assembled from the last one out: a subexpression shared with an
+    // earlier operand is bound where that operand first meets it, as the
+    // plain lowering binds it (compiled from the last operand first, the
+    // shared `Math.sin(_.x)` of `And(sin x < 1, sin x > 0)` was computed
+    // twice).
+    const codes = args.map((a, i) => code(a, i));
     for (let i = args.length - 1; i >= 0; i--)
       body = d.bind([names[i]], d.ternary(settles(names[i]), settled, body), [
-        code(args[i]),
+        codes[i],
       ]);
     return body;
+  }
+
+  /**
+   * True when the compiled value of `a` is always `true` or `false` on the
+   * JavaScript target, whatever the caller passes. Proven for:
+   *
+   * - the symbols `True` and `False`;
+   * - a comparison (`Less`, `LessEqual`, `Greater`, `GreaterEqual`, `Equal`,
+   *   `NotEqual`) whose operands have no `missing` arm, are not an
+   *   application of a top type (`isObjectDomainMissingOperand`), and read
+   *   no variable that the caller can leave out (`unsuppliedReads`: a
+   *   literal, a local, a loop index, or a read already tested around the
+   *   code). Its compiled value is a JavaScript comparison, which is a
+   *   boolean: a NaN operand gives `false` (`true` for `NotEqual`). A
+   *   comparison with an operand that may be absent compiles to `undefined`
+   *   when it is absent (`absentComparisonGuard`,
+   *   `unsuppliedComparisonGuard`), so it is not proven;
+   * - an `And`, `Or` or `Not` whose every operand is proven.
+   *
+   * Anything else is not proven: a symbol (the caller can leave it out or
+   * pass any value), an element read out of a list (`undefined` past the
+   * end), a call. A connective over such an operand takes the Kleene
+   * lowering of `kleeneValueConnective`. Being wrong here in the cautious
+   * direction costs only code size: the Kleene value of a decided boolean
+   * is that boolean.
+   */
+  private static isDecidedBooleanValue(
+    a: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    // Read only by a truth test (`withTruthOnly`): its plain value is
+    // `false` where the three-valued one has no value, which that test
+    // reads alike.
+    if (BaseCompiler._truthOnly.has(a)) return true;
+    if (isSymbol(a, 'True') || isSymbol(a, 'False')) return true;
+    if (!isFunction(a)) return false;
+    const h = a.operator;
+    if (BaseCompiler.BRANCH_RELATIONS.has(h))
+      return (
+        a.ops.every(
+          (x) =>
+            !typeContainsMissing(compilationType(x)) &&
+            !BaseCompiler.isObjectDomainMissingOperand(x)
+        ) && BaseCompiler.unsuppliedReads(a.ops, target).length === 0
+      );
+    if (h === 'And' || h === 'Or' || h === 'Not')
+      return a.ops.every((x) => BaseCompiler.isDecidedBooleanValue(x, target));
+    return false;
   }
 
   /**
@@ -22689,6 +23032,278 @@ export class BaseCompiler {
   }
 
   /**
+   * The frames of `blockLocalValueFrame`, innermost last, while the
+   * statements of their blocks are compiled.
+   */
+  private static _localValueFrames: LocalValueFrame[] = [];
+
+  /**
+   * The values assigned to each local of a block, and the locals that a
+   * statement at the top level of the block gives a value before each
+   * statement, for the reads that a comparison of a local must test.
+   *
+   * A comparison that reads a local (`a2 < m` after `a2 := n + 1`) has no
+   * value in the interpreter while `n` has none, since `a2` is then `n + 1`
+   * with no value. So the reads tested for the comparison (in a branch
+   * condition and in a comparison whose value is the result) include the
+   * vars-object reads of every value the block assigns to the local
+   * (`operandInputNodes`). Where the local is assigned more than once (in a
+   * loop, in each branch of an `If`), all these values are followed: the
+   * test can then require a variable that the value read at run time does
+   * not use, which gives no value where the interpreter may have one, but
+   * never a value where the interpreter has none.
+   *
+   * A local that no top-level statement before the read assigns (it is
+   * assigned only in a branch, in a loop body, or in a nested block) may
+   * still hold `undefined` at the read, where the interpreter has no value
+   * for it. Such a read is tested itself (`isOmittableRead`):
+   * `a2 !== undefined`.
+   *
+   * The locals are keyed by their definition (the binding of the scope
+   * that declares them), not by their name, and so are the reads
+   * (`blockLocalOf`): a binder nested in the block that uses the name of a
+   * free variable (`Sum(2n, (n, 1, 3))`, `n ↦ 2n`, a `Loop` over `n`) is
+   * neither the local nor a reason to skip that variable. A local of a
+   * scope nested in the block (a local of a loop body: `n := n + a` in
+   * `while n < 4 { let a = 2; … }`) is not in scope where a value of
+   * another local reads it, so it is not tested there (it would compile to
+   * the vars read `_.a`, never present, and the loop condition would never
+   * decide); its own values are followed instead (`localInputs`). A leaf of
+   * a destructuring assignment is given the whole value.
+   *
+   * Each node is visited once, so the walk is linear in the distinct nodes
+   * of the block.
+   */
+  private static blockLocalValueFrame(
+    stmts: ReadonlyArray<Expression>,
+    locals: ReadonlyArray<string>,
+    spell: (name: string) => string,
+    scope: Scope | undefined
+  ): LocalValueFrame {
+    const byDef = new Map<object, LocalEntry>();
+    const byName = new Map<string, LocalEntry[]>();
+    // The definition that `name` resolves to in the innermost of `scopes`
+    // that binds it, the index of that scope, or `undefined` when none
+    // does (an assignment to a variable outside the block). Without a
+    // scope (a block that was not canonicalized), the own locals are keyed
+    // by name.
+    const resolve = (
+      name: string,
+      scopes: ReadonlyArray<Scope>
+    ): { def: object; own: boolean } | undefined => {
+      for (let i = scopes.length - 1; i >= 0; i--) {
+        const binding = scopes[i].bindings.get(name);
+        if (binding === undefined) continue;
+        const def: object =
+          'value' in binding ? (binding.value as object) : binding;
+        return { def, own: i === 0 };
+      }
+      // A local that no scope binds: every local of a block with no scope,
+      // and a temporary that a desugar added (`_tv1` of a destructuring
+      // assignment), which is in `locals` but not in the scope. Keyed by
+      // name.
+      return locals.includes(name)
+        ? { def: BaseCompiler.localNameKey(name), own: true }
+        : undefined;
+    };
+    const entryOf = (name: string, scopes: ReadonlyArray<Scope>) => {
+      const r = resolve(name, scopes);
+      if (r === undefined) return undefined;
+      let entry = byDef.get(r.def);
+      if (entry === undefined) {
+        entry = { name, values: [], own: r.own };
+        byDef.set(r.def, entry);
+        const list = byName.get(name);
+        if (list === undefined) byName.set(name, [entry]);
+        else list.push(entry);
+      }
+      return entry;
+    };
+    const rootScopes: Scope[] = scope === undefined ? [] : [scope];
+    for (const name of locals) entryOf(name, rootScopes);
+    // The symbols that a target of `Assign`/`Declare` names: the symbol, or
+    // the leaves of a destructuring pattern. A leaf is given the whole
+    // value, whose inputs include those of the leaf.
+    const targetNames = (t: Expression | undefined): string[] =>
+      t === undefined
+        ? []
+        : isSymbol(t)
+          ? [t.symbol]
+          : isFunction(t) && (t.operator === 'Tuple' || t.operator === 'List')
+            ? t.ops.flatMap(targetNames)
+            : [];
+    // Each node object once: a statement built from shared subtrees has
+    // few distinct nodes but exponentially many paths.
+    const seen = new Set<Expression>();
+    // The definitions that a binder inside the block creates: a loop index
+    // (`for k in …`), a parameter, a `Sum` index. A value that reads one
+    // reads it inside that binder, so it is never an input where a local is
+    // read (`localInputs`). A `Block` is not counted: its scope also
+    // declares the free variables of its body.
+    const binderDefs = new Set<object>();
+    const visit = (e: Expression, scopes: ReadonlyArray<Scope>): void => {
+      if (!isFunction(e) || seen.has(e)) return;
+      seen.add(e);
+      const inner =
+        e.localScope !== undefined && scope !== undefined
+          ? [...scopes, e.localScope]
+          : scopes;
+      if (e.operator !== 'Block' && e.localScope !== undefined)
+        for (const name of boundVariableNames(e)) {
+          const binding = e.localScope.bindings.get(name);
+          if (binding !== undefined)
+            binderDefs.add(
+              'value' in binding ? (binding.value as object) : binding
+            );
+        }
+      if (e.operator === 'Assign' || e.operator === 'Declare') {
+        const value =
+          e.operator === 'Assign'
+            ? e.ops[1]
+            : BaseCompiler.declareValueOperand(e.ops);
+        for (const name of targetNames(e.ops[0])) {
+          const entry = entryOf(name, inner);
+          if (entry !== undefined && value !== undefined)
+            entry.values.push(value);
+        }
+      }
+      for (const op of e.ops) visit(op, inner);
+    };
+    for (const stmt of stmts) visit(stmt, rootScopes);
+    // `assignedBefore[i]`: the locals that a top-level `Assign`, or a
+    // `Declare` with a value, among the statements before statement `i`
+    // gives a value.
+    const assignedBefore: Set<string>[] = [];
+    let assigned = new Set<string>();
+    for (const stmt of stmts) {
+      assignedBefore.push(assigned);
+      if (
+        isFunction(stmt) &&
+        isSymbol(stmt.ops[0]) &&
+        locals.includes(stmt.ops[0].symbol) &&
+        (stmt.operator === 'Assign' ||
+          (stmt.operator === 'Declare' &&
+            BaseCompiler.declareValueOperand(stmt.ops) !== undefined))
+      ) {
+        assigned = new Set(assigned);
+        assigned.add(stmt.ops[0].symbol);
+      }
+    }
+    const bySpelling = new Map<string, string>();
+    for (const name of locals) bySpelling.set(spell(name), name);
+    return {
+      byDef,
+      byName,
+      binderDefs,
+      assignedBefore,
+      current: 0,
+      bySpelling,
+    };
+  }
+
+  /** The key of the own local `name` of a block with no scope. */
+  private static readonly _localNameKeys = new Map<string, object>();
+  private static localNameKey(name: string): object {
+    let key = BaseCompiler._localNameKeys.get(name);
+    if (key === undefined) {
+      key = { name };
+      BaseCompiler._localNameKeys.set(name, key);
+    }
+    return key;
+  }
+
+  /**
+   * The block local that the symbol node `e` reads, in the innermost block
+   * being compiled that binds it (`blockLocalValueFrame`), or `undefined`.
+   * The node is matched by its definition (`valueDefinition`), so a binder
+   * nested in the block that uses the same name (a `Sum` index, a
+   * parameter) is not the local, and does not hide a free variable of the
+   * same name.
+   */
+  private static blockLocalOf(e: Expression): LocalEntry | undefined {
+    if (!isSymbol(e)) return undefined;
+    const def = e.valueDefinition as object | undefined;
+    const frames = BaseCompiler._localValueFrames;
+    const nameKey = BaseCompiler._localNameKeys.get(e.symbol);
+    for (let i = frames.length - 1; i >= 0; i--) {
+      const frame = frames[i];
+      const entry =
+        (def !== undefined ? frame.byDef.get(def) : undefined) ??
+        (nameKey !== undefined ? frame.byDef.get(nameKey) : undefined);
+      if (entry !== undefined) return entry;
+    }
+    return undefined;
+  }
+
+  /** True when the symbol node `e` reads a name that a binder inside a
+   * block being compiled binds (`binderDefs`): a loop index, a parameter. */
+  private static isInnerBinderRead(e: Expression): boolean {
+    const def = e.valueDefinition as object | undefined;
+    if (def === undefined) return false;
+    return BaseCompiler._localValueFrames.some((f) => f.binderDefs.has(def));
+  }
+
+  /** The locals named `name` of the blocks being compiled, for a call of a
+   * block-local function (`g(1)` after `g := t ↦ t + n`). */
+  private static blockLocalsNamed(name: string): LocalEntry[] {
+    const out: LocalEntry[] = [];
+    for (const frame of BaseCompiler._localValueFrames)
+      out.push(...(frame.byName.get(name) ?? []));
+    return out;
+  }
+
+  /**
+   * The input nodes of the block local `local`: the free variables of every
+   * value assigned to it, and of the values of the locals those values
+   * read, transitively. Each local's own walk (`shallow`) is done once and
+   * cached on it, and so is this closure, so the cost over a block is
+   * linear in its size; a cycle (`v0 := v0 + v9` in a loop) ends because
+   * each local is visited once.
+   */
+  private static localInputs(
+    local: LocalEntry,
+    target: CompileTarget<Expression> | undefined
+  ): Expression[] {
+    if (local.inputs !== undefined) return local.inputs;
+    const nodes = new Map<string, Expression>();
+    const visited = new Set<LocalEntry>([local]);
+    const work = [local];
+    while (work.length > 0) {
+      const entry = work.pop()!;
+      if (entry.shallow === undefined) {
+        const refs = new Set<LocalEntry>();
+        const found: Expression[] = [];
+        for (const value of entry.values)
+          found.push(...BaseCompiler.operandInputNodes(value, target, refs));
+        entry.shallow = { nodes: found, refs: [...refs] };
+      }
+      for (const n of entry.shallow.nodes)
+        if (isSymbol(n) && !nodes.has(n.symbol)) nodes.set(n.symbol, n);
+      for (const r of entry.shallow.refs)
+        if (!visited.has(r)) {
+          visited.add(r);
+          work.push(r);
+        }
+    }
+    local.inputs = [...nodes.values()];
+    return local.inputs;
+  }
+
+  /** True when `code` is the read of a local of a block being compiled that
+   * no top-level statement before the current one assigned: it may still be
+   * `undefined` (`blockLocalValueFrame`). */
+  private static isUnsetLocalRead(code: TargetSource): boolean {
+    const frames = BaseCompiler._localValueFrames;
+    for (let i = frames.length - 1; i >= 0; i--) {
+      const frame = frames[i];
+      const name = frame.bySpelling.get(code);
+      if (name !== undefined)
+        return !frame.assignedBefore[frame.current]?.has(name);
+    }
+    return false;
+  }
+
+  /**
    * The frames of `checkedLocalReads`, innermost last, while the statements
    * of their blocks are compiled.
    */
@@ -23889,6 +24504,7 @@ export class BaseCompiler {
     const blockScope = node?.localScope;
     if (blockScope !== undefined)
       BaseCompiler._blockStatements.push({ scope: blockScope, args });
+    let localValueFrame: LocalValueFrame | undefined;
     try {
       // The locals that only an assignment in a nested block gives a value
       // (`nestedOnlyLocals`). Their shape is read from these assignments.
@@ -24071,6 +24687,15 @@ export class BaseCompiler {
             ownedOps.push(ops);
           }
         }
+      // The values assigned to each local, for the reads that a comparison
+      // of a local tests (`blockLocalValues`).
+      localValueFrame = BaseCompiler.blockLocalValueFrame(
+        stmts,
+        locals,
+        spellLocal,
+        node?.localScope
+      );
+      BaseCompiler._localValueFrames.push(localValueFrame);
       const result = BaseCompiler.withCseScope(node, -1, localTarget, () =>
         stmts
           .flatMap((arg, i) =>
@@ -24078,6 +24703,7 @@ export class BaseCompiler {
               localTarget,
               arg,
               (stmtTarget) => {
+                localValueFrame!.current = i;
                 // Bring this statement's own function-valued binding into scope
                 // before compiling it (see `localFunctions` above).
                 BaseCompiler.noteLocalFunction(
@@ -24480,6 +25106,7 @@ export class BaseCompiler {
       if (pushedEnforced) BaseCompiler._enforcedTargets.pop();
       if (checkedFrame !== undefined) BaseCompiler._checkedLocals.pop();
       if (blockScope !== undefined) BaseCompiler._blockStatements.pop();
+      if (localValueFrame !== undefined) BaseCompiler._localValueFrames.pop();
       unmarkFed?.();
       for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
       for (const name of shadowSpellings)
@@ -28347,7 +28974,11 @@ export class BaseCompiler {
     // a complex element (`x + [1, 2, i]`), but such a collection has one slot
     // per element, not the two of a complex `vec2(re, im)`: its count comes
     // from its type, below. CE-280.6.
-    const t = compilationType(expr);
+    //
+    // A value that may be absent (`missing | tuple<real, real>`, the type of
+    // `If(c, (x, y), Missing)`, or `nan | tuple<real, real>`) has the width
+    // of its present value: the absent value is a NaN in every lane.
+    const t = BaseCompiler.withoutAbsentArms(compilationType(expr));
     const collectionTyped =
       typeof t !== 'string' && (t.kind === 'list' || t.kind === 'tuple');
     if (!collectionTyped && BaseCompiler.isComplexValued(expr)) return 2;
@@ -28563,6 +29194,19 @@ export class BaseCompiler {
     )
       return true;
     return false;
+  }
+
+  /**
+   * The type `t` with the `missing` and `nan` arms of a top-level union
+   * removed: `missing | tuple<real, real>` is `tuple<real, real>`. The arms
+   * nested inside a constructor (`list<real | missing>`) are kept. A type
+   * that is only absent arms is returned unchanged.
+   */
+  static withoutAbsentArms(t: Readonly<Type>): Readonly<Type> {
+    if (typeof t === 'string' || t.kind !== 'union') return t;
+    const present = t.types.filter((x) => x !== 'missing' && x !== 'nan');
+    if (present.length === 0 || present.length === t.types.length) return t;
+    return present.length === 1 ? present[0] : { ...t, types: present };
   }
 
   /**
@@ -30353,6 +30997,19 @@ export class BaseCompiler {
       return BaseCompiler.connectiveNode(cond, h, canBind, target);
     if (!BaseCompiler.BRANCH_RELATIONS.has(h))
       return { negate: false, test: { kind: 'value', expr: cond } };
+    // A pair with a NaN literal operand is decided whatever the other
+    // operand holds: `NaN < x` is `False` and `NaN ≠ x` is `True` in the
+    // interpreter while `x` has no value, and the plain comparison gives
+    // that answer. So it needs no test, as `True` and `False` need none.
+    if (
+      cond.nops === 2 &&
+      cond.ops.some((op) => BaseCompiler.isNanLiteral(op)) &&
+      cond.ops.every((op) => op.isPure === true)
+    )
+      return {
+        negate: false,
+        test: { kind: 'operands', expr: cond, operands: [] },
+      };
     // An `Equal`/`NotEqual` over an operand that may be a COLLECTION at run
     // time is the one relation whose compiled value is not a genuine boolean.
     // It lowers to the runtime dispatch (`_SYS.eq`/`_SYS.neq` in the
@@ -30539,20 +31196,62 @@ export class BaseCompiler {
    */
   private static operandInputNodes(
     expr: Expression,
-    target?: CompileTarget<Expression>
+    target?: CompileTarget<Expression>,
+    /** The shallow walk of `localInputs`: a block local that the walk meets
+     * is recorded here, and its values are not followed. */
+    localRefs?: Set<LocalEntry>
   ): Expression[] {
     const engine = expr.engine;
     const found = new Map<string, Expression>();
+    const add = (name: string, node: Expression): void => {
+      if (!found.has(name) && !isDecidedLoopIndex(name, target?.boundVars))
+        found.set(name, node);
+    };
+    // A block local (`blockLocalOf`): the read itself, when the local is in
+    // scope where it is read, and the inputs of every value assigned to it
+    // (`localInputs`). A local of a scope nested in the block, met in a
+    // value of another local (`n := n + a` with `a` a local of a loop
+    // body), is not in scope at the read, and only its values count.
+    const addLocal = (local: LocalEntry, node: Expression | undefined) => {
+      if (localRefs !== undefined) {
+        localRefs.add(local);
+        if (local.own && node !== undefined) add(local.name, node);
+        return;
+      }
+      if (node !== undefined) add(local.name, node);
+      for (const input of BaseCompiler.localInputs(local, target))
+        add(isSymbol(input) ? input.symbol : local.name, input);
+    };
     // The names whose value or function body was already walked.
     const followed = new Set<string>();
+    // The nodes already visited, for each set of bound names: a value built
+    // from shared subtrees (a block local assigned `t := s + s` with `s`
+    // itself shared) is walked once per node, not once per path, so the
+    // walk stays linear in the size of the expression.
+    const visitedUnder = new Map<ReadonlySet<string>, Set<Expression>>();
     const collect = (root: Expression): void => {
       const names = new Set(root.unknowns);
       const visit = (e: Expression, bound: ReadonlySet<string>): void => {
+        let visited = visitedUnder.get(bound);
+        if (visited === undefined) {
+          visited = new Set();
+          visitedUnder.set(bound, visited);
+        }
+        if (visited.has(e)) return;
+        visited.add(e);
         if (isSymbol(e)) {
           const s = e.symbol;
           if (names.has(s)) {
-            if (!found.has(s) && !isDecidedLoopIndex(s, target?.boundVars))
-              found.set(s, e);
+            const local = BaseCompiler.blockLocalOf(e);
+            if (local !== undefined) addLocal(local, e);
+            // In a value of a local, a loop index or a parameter of a
+            // binder inside the block is not an input where the local is
+            // read.
+            else if (
+              localRefs === undefined ||
+              !BaseCompiler.isInnerBinderRead(e)
+            )
+              add(s, e);
             return;
           }
           // A name that `unknowns` reports free is an input whatever a
@@ -30598,11 +31297,14 @@ export class BaseCompiler {
           return;
         }
         if (!followed.has(h)) {
+          followed.add(h);
           const literal = BaseCompiler.userFunctionLiteral(engine, h);
-          if (literal !== undefined) {
-            followed.add(h);
-            collect(literal);
-          }
+          if (literal !== undefined) collect(literal);
+          // A call of a function that the block assigns to a local
+          // (`g := t ↦ t + n`, then `g(1)`): the inputs of its body. The
+          // locals are matched by name, which can only add inputs.
+          for (const local of BaseCompiler.blockLocalsNamed(h))
+            addLocal(local, undefined);
         }
         e.ops.forEach((x, i) => visit(x, boundIn(i)));
       };
@@ -30708,7 +31410,8 @@ export class BaseCompiler {
     code: TargetSource,
     target: CompileTarget<Expression>,
     decided: DecidedNumberTest = DECIDED_NUMBER_JS,
-    present?: DecidedNumberTest
+    present?: DecidedNumberTest,
+    operand?: Expression
   ): TargetSource[] {
     // A fragment the compiler already reduced to a finite numeric literal
     // holds that number at every call, so it can decide every comparison it
@@ -30722,9 +31425,55 @@ export class BaseCompiler {
     const conjuncts: TargetSource[] = [];
     if (present !== undefined) conjuncts.push(present(atom));
     if (present !== undefined) conjuncts.push(decided(atom));
-    if (BaseCompiler.isVarsObjectRead(code, target))
-      conjuncts.push(`${atom} !== undefined`);
+    if (BaseCompiler.isOmittableRead(code, target))
+      conjuncts.push(BaseCompiler.presenceTest(atom, operand));
     return conjuncts;
+  }
+
+  /**
+   * True when `code` reads a value that the caller can leave out, and that
+   * is then `undefined`: a read of the vars object (`isVarsObjectRead`), a
+   * lambda parameter listed in `CompileTarget.omittableParams`, or a block
+   * local that may not be assigned yet (`isUnsetLocalRead`).
+   */
+  private static isOmittableRead(
+    code: TargetSource,
+    target: CompileTarget<Expression>
+  ): boolean {
+    return (
+      BaseCompiler.isVarsObjectRead(code, target) ||
+      target.omittableParams?.has(code) === true ||
+      // The test of such a local is written in JavaScript
+      // (`presenceTest`), and only the JavaScript targets compile a local
+      // that may still be `undefined`.
+      ((target.language === 'javascript' ||
+        target.language === 'interval-javascript') &&
+        BaseCompiler.isUnsetLocalRead(code))
+    );
+  }
+
+  /**
+   * The test that the vars-object read `code` of the operand `operand`
+   * holds a value a comparison can decide: `typeof code === 'boolean'` for
+   * an operand of type `boolean`, `code !== undefined` otherwise. The entry
+   * check of `run()` accepts any value for a variable declared `boolean`
+   * (a value that is not a boolean leaves a condition on it undecided), so
+   * such a read is tested for being a boolean: `c = True` with `c = 1` has
+   * no value, as `If(c, …)` takes no arm for it. A variable declared with a
+   * number type, or `string`, refuses a value of another type at entry, so
+   * only the unsupplied value remains to test.
+   */
+  private static presenceTest(
+    code: TargetSource,
+    operand: Expression | undefined
+  ): TargetSource {
+    if (
+      operand !== undefined &&
+      isSymbol(operand) &&
+      isSubtype(operand.type.type, 'boolean')
+    )
+      return `typeof ${code} === 'boolean'`;
+    return `${code} !== undefined`;
   }
 
   /**
@@ -30797,6 +31546,845 @@ export class BaseCompiler {
     return types.every((type) => BaseCompiler.absentDomainIsObject(type))
       ? 'object'
       : 'numeric';
+  }
+
+  /**
+   * The reads of the vars object (`_.x`) that a comparison over `args`
+   * needs to test for `undefined`: one for each variable that an operand
+   * reads every time it is evaluated (`operandInputNodes`, the same
+   * variables a branch condition tests), on the `javascript` target, except
+   * the reads already tested around the code being emitted
+   * (`isPresentRead`). A literal, a local, a parameter and a loop index are
+   * not vars-object reads. An operand that `mayBeUndecided` exempts (a
+   * complex value) is not tested, as in a branch condition. Empty on every
+   * other target.
+   */
+  private static unsuppliedReads(
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): { code: string; test: string }[] {
+    if (
+      target.language !== 'javascript' ||
+      (target.varsObjectName === undefined &&
+        target.omittableParams === undefined)
+    )
+      return [];
+    const reads: { code: string; test: string }[] = [];
+    for (const op of args) {
+      if (isNumber(op) || isString(op)) continue;
+      if (!BaseCompiler.mayBeUndecided(op, target)) continue;
+      // An operand with a `missing` arm has its own absence lowering
+      // (`absentComparisonGuard`, the Kleene `Equal`/`NotEqual` guard).
+      if (typeContainsMissing(compilationType(op))) continue;
+      for (const s of BaseCompiler.operandInputNodes(op, target)) {
+        const code = BaseCompiler.compile(s, target);
+        if (
+          BaseCompiler.isOmittableRead(code, target) &&
+          !BaseCompiler.isPresentRead(code, target) &&
+          !reads.some((r) => r.code === code)
+        )
+          reads.push({ code, test: BaseCompiler.presenceTest(code, s) });
+      }
+    }
+    return reads;
+  }
+
+  /**
+   * The presence tests `tests` of a comparison over `args`, with the escape
+   * that a NaN operand decides the comparison: the interpreter answers
+   * `False` for `NaN = y` (`True` for `NaN ≠ y`) while `y` has no value,
+   * as it does for every comparison with a NaN operand (user decisions
+   * 2026-10-20 and 2026-10-23). When two or more reads are tested and an
+   * operand is itself a numeric vars-object read (`_.x`), the tests become
+   * one: `((_.x !== undefined && _.y !== undefined) || _.x !== _.x)`. The
+   * comparison then runs with `_.y` unsupplied only when `_.x` is NaN, and
+   * gives the IEEE answer, `false` (`true` for `≠`). With one read the
+   * escape is not needed: a NaN read is present. A computed operand or a
+   * block local that is NaN (`x + 1` with `x = NaN`) is tested when its own
+   * reads are present, as in a comparison whose value is the result
+   * (`nanEscapeTerms`): `(_.x !== undefined && (_.x + 1) !== (_.x + 1))`.
+   * Otherwise the tests are returned as they are.
+   */
+  private static withNanEscape(
+    args: ReadonlyArray<Expression>,
+    tests: ReadonlyArray<TargetSource>,
+    target: CompileTarget<Expression>
+  ): TargetSource[] {
+    const joined = tests.join(' && ');
+    if (tests.length < 2) return tests.length === 0 ? [] : [joined];
+    // The reads that `tests` test for a value (`presenceTest`).
+    const readCodes: string[] = [];
+    for (const t of tests) {
+      const m =
+        /^(\S+) !== undefined$/.exec(t) ??
+        /^typeof (\S+) === 'boolean'$/.exec(t);
+      if (m !== null) readCodes.push(m[1]);
+    }
+    // `Equal` stands for any relation here: a complex operand is not given
+    // its ordering escape in a branch condition.
+    const terms = BaseCompiler.nanEscapeTerms('Equal', args, readCodes, target);
+    if (terms.length === 0) return [joined];
+    return [`((${joined}) || ${terms.join(' || ')})`];
+  }
+
+  /**
+   * The argument lists whose comparison `unsuppliedComparisonGuard` is
+   * emitting: the comparison inside the guard reaches `compileExpr` again
+   * with the same list, and must then take its own lowering.
+   */
+  private static readonly _guardEmitting = new WeakSet<
+    ReadonlyArray<Expression>
+  >();
+
+  /**
+   * The comparisons, and the `And`/`Or` of them, whose value only a truth
+   * test reads (`withTruthOnly`): `Boole`, a selecting predicate. There an
+   * unsupplied variable needs no test, because the plain comparison already
+   * gives `false` for it, which the consumer reads as it reads `undefined`.
+   */
+  private static readonly _truthOnly = new WeakSet<Expression>();
+
+  /**
+   * Mark `expr` as read only by a truth test (`_truthOnly`), when the plain
+   * comparison is `false` for an unsupplied variable: an ordering (`0 <
+   * undefined` is `false`) or an `Equal` (its own lowering tests two
+   * operands that may both be `undefined`), over numeric operands that read
+   * an absent value as NaN (see `markTruthOnlyNode`). `NotEqual` is not marked:
+   * `undefined !== 0` is `true`, so it keeps its test. An `And`/`Or` is
+   * marked when each operand is: the plain `&&`/`||` of such comparisons is
+   * then `false` exactly when the three-valued value is `false` or has no
+   * value. A `Not` is not entered: `!false` is `true`. Called by the
+   * lowerings whose consumer reads only truth.
+   *
+   * The mark holds only while `fn` runs, and is then removed: the same
+   * expression object compiled later as a value (`compile(c)` after
+   * `compile(Boole(c))`) keeps its test.
+   */
+  static withTruthOnly<T>(expr: Expression | undefined, fn: () => T): T {
+    const added: Expression[] = [];
+    BaseCompiler.markTruthOnlyNode(expr, added);
+    try {
+      return fn();
+    } finally {
+      for (const node of added) BaseCompiler._truthOnly.delete(node);
+    }
+  }
+
+  /**
+   * True when a binding of type `t` holds a boolean or is absent:
+   * `boolean`, or `boolean | missing`. Shared by the targets that read such
+   * a binding in a special way (an empty array is an empty `broadcast()`
+   * column; the interval target reads `'true'`/`'false'`).
+   */
+  static isBooleanBindingType(t: Type | undefined): boolean {
+    if (t === undefined) return false;
+    const r = resolveTypeForCompilation(stripMissingFromType(t));
+    return r !== 'never' && isSubtype(r, 'boolean');
+  }
+
+  /**
+   * The recursion of `withTruthOnly`: true when `expr` was marked. Each node
+   * added to the mark set is pushed on `added`, so the caller can remove it.
+   */
+  private static markTruthOnlyNode(
+    expr: Expression | undefined,
+    added: Expression[]
+  ): boolean {
+    if (expr === undefined || !isFunction(expr)) return false;
+    const h = expr.operator;
+    // A function literal's body is a `Block`: its value is its last
+    // statement, so that statement is what the truth test reads.
+    if (h === 'Block')
+      return BaseCompiler.markTruthOnlyNode(expr.ops[expr.nops - 1], added);
+    let safe = false;
+    // A relation is marked only over numeric operands that each read an
+    // absent value as NaN or `undefined` (`readsAbsenceAsNaN`): its plain
+    // value is then `false` for an absent read. Not over a string
+    // (`_SYS.eqt(undefined, undefined)` is `true`) or a boolean, and not
+    // over `Boole(x > 0) = 0`, which is `true` for an absent `x`.
+    if (BaseCompiler.BRANCH_RELATIONS.has(h))
+      safe =
+        h !== 'NotEqual' &&
+        expr.ops.every(
+          (op) =>
+            BaseCompiler.scalarOperandKind(op) === 'number' &&
+            !BaseCompiler.isComplexValued(op) &&
+            BaseCompiler.readsAbsenceAsNaN(op)
+        );
+    else if (h === 'And' || h === 'Or') {
+      const marked = expr.ops.map((op) =>
+        BaseCompiler.markTruthOnlyNode(op, added)
+      );
+      safe = marked.every((m) => m);
+    }
+    if (safe)
+      for (const node of [expr, expr.canonical])
+        if (!BaseCompiler._truthOnly.has(node)) {
+          BaseCompiler._truthOnly.add(node);
+          added.push(node);
+        }
+    return safe;
+  }
+
+  /**
+   * The lowering of a comparison `h(args)` (`<`, `≤`, `>`, `≥`, `=`, `≠`,
+   * chained or not) whose VALUE is the result, when an operand reads a
+   * variable the caller can leave out of the vars object (`unsuppliedReads`),
+   * or `undefined` when there is none.
+   *
+   * The interpreter has no value for `x > 0` while `x` has none, and a
+   * branch condition already reads such a comparison as undecided (it tests
+   * `_.x !== undefined`). The plain comparison gave `false` for an
+   * unsupplied `x` (`0 < undefined`), and `true` for `x ≠ 0` (user decision
+   * 2026-10-30: such a comparison has no value, `undefined`).
+   *
+   * Over numbers the lowering is `((0 < _.x) || ((_.x !== undefined) ?
+   * false : undefined))`: the comparison runs first, and its `true` is the
+   * answer with no test. Only a `false` pays the tests, one per variable
+   * read (`typeof _.c === 'boolean'` for a `boolean` variable, see
+   * `presenceTest`). `NotEqual` is the mirror image, `((_.x !== 0) &&
+   * ((_.x !== undefined) ? true : undefined))`, because `undefined !== 0` is
+   * `true`. The comparison is emitted as it would be without the tests, so
+   * an `Equal` of two variables keeps its own test that both are not
+   * `undefined` (`undefined === undefined` is `true`). The comparison runs
+   * first only when each operand reads an absent value as NaN or
+   * `undefined` (`readsAbsenceAsNaN`). Over a string or a boolean operand
+   * the comparison may call a helper that does not accept `undefined`, and
+   * an operand such as `Boole(x > 0)` reads an absent `x` as a number, so
+   * there the tests come first: `((_.s !== undefined) ? (cmp) : undefined)`,
+   * and the comparison inside is emitted with the reads marked as tested
+   * (`withPresentReads`). With an operand that has effects, the comparison
+   * still runs first, and its bound value is then tested. An operand of
+   * type `unknown` compiles to the same scalar comparison and is tested
+   * too (user decision 2026-10-30: an unsupplied variable gives no value,
+   * whatever its declared type).
+   *
+   * A NaN operand decides the comparison (user decisions 2026-10-20 and
+   * 2026-10-23), also while another variable has no value: the interpreter
+   * answers `False` for `NaN = y`. A NaN literal decides a pair with no test
+   * at all. Otherwise the tests pass when an operand is NaN, or, for an
+   * ordering, a complex operand is not real (`withNanTerms`), and the
+   * comparison gives its IEEE answer.
+   *
+   * A chain whose links read different variables, or that has a link
+   * between two literals, is the three-valued `And` of its links, each with
+   * its own tests, so that a link that is `false` decides the chain
+   * (`Less(5, 0, w)` is `False` while `w` has no value). A computed operand
+   * of such a chain is bound once first (`bindExpr`), and each link reads
+   * the temporary. A chain with an operand that has effects at index 2 or
+   * later keeps its own lowering, which evaluates that operand only when
+   * the links before it are true, as the interpreter does.
+   *
+   * A comparison that a truth test reads (`withTruthOnly`) takes none of
+   * this. A branch condition does not come through here with untested
+   * reads: `withConditionOperands` and `kleeneRelationLeaf` mark the reads
+   * they test before they emit the comparison.
+   */
+  private static unsuppliedComparisonGuard(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    emit: () => string,
+    node?: Expression
+  ): string | undefined {
+    if (!BaseCompiler.BRANCH_RELATIONS.has(h)) return undefined;
+    if (BaseCompiler._guardEmitting.has(args)) return undefined;
+    if (node !== undefined && BaseCompiler._truthOnly.has(node))
+      return undefined;
+    // A NaN literal operand decides a pair whatever the other operand
+    // holds: the interpreter answers `False` for `NaN < x` and `True` for
+    // `NaN ≠ x` while `x` has no value. The plain comparison gives that
+    // IEEE answer, so a pair takes no test. A chain with one is split
+    // below, and each link that holds the literal is such a pair.
+    const nanLiteral = args.some((a) => BaseCompiler.isNanLiteral(a));
+    if (nanLiteral && args.length === 2) return undefined;
+    // Scalar operands only: a comparison with a collection operand is
+    // element-wise, or compares whole collections, and keeps its own
+    // lowering. An operand of type `unknown` (an undeclared variable)
+    // compiles to the same scalar comparison (`0 < _.u`, `_.u === 0`), so
+    // it is tested too, unless the target sends it to its collection
+    // equality dispatch (`collectionEqualityOperand`).
+    const kinds = args.map((a) => BaseCompiler.scalarOperandKind(a));
+    // An operand of a top type that may hold a list at run time (a call of
+    // a block-local function, `gg(1)`) compiles to the run-time dispatch
+    // (`_SYS.bcast`, `_SYS.eq`), which reads an absent value as a value.
+    // Such a comparison takes the tests first, so it has no value while a
+    // variable it reads has none. An operand of a collection type keeps
+    // its own lowering.
+    const dispatchedAt = (a: Expression, i: number): boolean =>
+      kinds[i] === undefined &&
+      !(isSymbol(a) && a.isConstant) &&
+      BaseCompiler.isTopTypedOperand(a) &&
+      isPossiblyCollectionTyped(a);
+    if (kinds.some((k, i) => k === undefined && !dispatchedAt(args[i], i)))
+      return undefined;
+    const dispatched =
+      kinds.some((k) => k === undefined) ||
+      ((h === 'Equal' || h === 'NotEqual') &&
+        target.collectionEqualityOperand !== undefined &&
+        // A text operand is a collection of characters in the lattice, but
+        // it compares by content (`_SYS.eqt`), not through the dispatch.
+        args.some(
+          (a, i) =>
+            kinds[i] === 'number' &&
+            !isNumber(a) &&
+            target.collectionEqualityOperand!(a)
+        ));
+    const reads = BaseCompiler.unsuppliedReads(args, target);
+    if (reads.length === 0) return undefined;
+    if (dispatched)
+      return BaseCompiler.testsFirst(
+        args,
+        reads,
+        reads.map((r) => r.test).join(' && '),
+        target,
+        emit
+      );
+    const atomic = (a: Expression) => isSymbol(a) || isNumber(a) || isString(a);
+
+    if (args.length > 2) {
+      // A link that does not read every tested variable can decide `false`
+      // while one of the others has no value (`x < y + 1 < 2` at `y = 2`,
+      // `x` unsupplied; `x < 5 < 1`; `x < NaN < y`). Then the chain is the
+      // three-valued `And` of its links. When every link reads every tested
+      // variable, one test around the plain chain is the same answer
+      // (`-1 < x < 1`, `0.1 < x + 1 < 0.9`).
+      const readsOf = args.map((a) =>
+        BaseCompiler.unsuppliedReads([a], target).map((r) => r.code)
+      );
+      const partialLink =
+        nanLiteral ||
+        args.some(
+          (_, i) =>
+            i > 0 &&
+            reads.some(
+              (r) =>
+                !readsOf[i - 1].includes(r.code) && !readsOf[i].includes(r.code)
+            )
+        );
+      const lateEffect = args.some(
+        (a, i) => i >= 2 && a.isPure !== true && !atomic(a)
+      );
+      const bound = args.filter((a, i) => !atomic(a) && args.indexOf(a) === i);
+      // A node with effects that occurs twice (`Less(q, q, 1)` with
+      // `q = x + Random()`) is evaluated once per occurrence by the
+      // interpreter: one temporary cannot stand for both draws, so such a
+      // chain keeps its own lowering.
+      const repeatedEffect = bound.some(
+        (a) => a.isPure !== true && args.filter((b) => b === a).length > 1
+      );
+      // An operand with effects at index 2 or later is evaluated by the
+      // interpreter only when the pairs before it are not `False`, also
+      // after an undecided pair (`Less(x, 1, Random())` with `x` absent
+      // draws, and is `False`). The chain is then lowered pair by pair
+      // (`lazyChain`).
+      if (lateEffect && !repeatedEffect && target.bindExpr !== undefined)
+        return BaseCompiler.lazyChain(h, args, target);
+      if (
+        partialLink &&
+        !lateEffect &&
+        !repeatedEffect &&
+        (bound.length === 0 || target.bindExpr !== undefined)
+      )
+        return BaseCompiler.withBoundOperands(
+          bound,
+          target,
+          () => {
+            const ce = args[0].engine;
+            const links = args.slice(1).map((b, i) => ce._fn(h, [args[i], b]));
+            return BaseCompiler.compile(ce._fn('And', links), target);
+          },
+          node
+        );
+    }
+
+    const emitBare = (): string => {
+      BaseCompiler._guardEmitting.add(args);
+      try {
+        return emit();
+      } finally {
+        BaseCompiler._guardEmitting.delete(args);
+      }
+    };
+    const numeric = kinds.every((k) => k === 'number');
+    // The comparison runs first only when it cannot give a wrong `true`
+    // for an absent read: each operand then reads an absent value as NaN
+    // or `undefined` (`readsAbsenceAsNaN`), which no ordering or `Equal`
+    // holds true of. `Boole(x > 0) = 0` reads an absent `x` as the number
+    // 0, so its `true` at `x` unsupplied would be wrong; it, and every
+    // comparison over a string or a boolean (whose helper may not accept
+    // `undefined`, and `_SYS.eqt(undefined, undefined)` is `true`), takes
+    // the tests first: `((tests) ? (cmp) : undefined)`, the comparison
+    // inside emitted with the reads marked as tested (`withPresentReads`).
+    if (!numeric || !args.every((a) => BaseCompiler.readsAbsenceAsNaN(a))) {
+      const tests = numeric
+        ? BaseCompiler.withNanTerms(h, args, reads, target, node)
+        : reads.map((r) => r.test).join(' && ');
+      return BaseCompiler.testsFirst(args, reads, tests, target, emit);
+    }
+    const test = BaseCompiler.withNanTerms(h, args, reads, target, node);
+    const cmp = emitBare();
+    return h === 'NotEqual'
+      ? `((${cmp}) && ((${test}) ? true : undefined))`
+      : `((${cmp}) || ((${test}) ? false : undefined))`;
+  }
+
+  /**
+   * A chain `h(args)` as the three-valued `And` of its pairs, evaluated in
+   * order as the interpreter evaluates it: each operand that is not a
+   * literal or a symbol is bound to a temporary just before the first pair
+   * that reads it, inside the branch where the pairs before it are not
+   * `false`. So an operand with effects is evaluated once, after an
+   * undecided pair too, and never after a pair that is `false`. Each pair
+   * is the comparison of two operands, with its own tests
+   * (`unsuppliedComparisonGuard`):
+   * `((_l) => _l === false ? false : ((_r) => _l === true ? _r : (_r ===
+   * false ? false : undefined))(rest))(pair)`.
+   */
+  private static lazyChain(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>
+  ): string {
+    const ce = args[0].engine;
+    const atomic = (a: Expression) => isSymbol(a) || isNumber(a) || isString(a);
+    // Bind `a` to a temporary around `body` (which may read it through its
+    // alias), unless it is a literal or a symbol.
+    const bound = (a: Expression, body: () => string): string => {
+      if (atomic(a) || BaseCompiler._codeAliases.has(a)) return body();
+      const code = BaseCompiler.compileValueOperand(a, target);
+      const temp = BaseCompiler.tempVar(target);
+      BaseCompiler._codeAliases.set(a, temp);
+      try {
+        return target.bindExpr!([[temp, code]], body());
+      } finally {
+        BaseCompiler._codeAliases.delete(a);
+      }
+    };
+    const from = (i: number): string =>
+      bound(args[i], () => {
+        const pair = BaseCompiler.compile(
+          ce._fn(h, [args[i - 1], args[i]]),
+          target
+        );
+        if (i === args.length - 1) return pair;
+        const l = BaseCompiler.tempVar(target);
+        const r = BaseCompiler.tempVar(target);
+        return (
+          `((${l}) => ${l} === false ? false : ((${r}) => ${l} === true ? ${r} : ` +
+          `(${r} === false ? false : undefined))(${from(i + 1)}))(${pair})`
+        );
+      });
+    return bound(args[0], () => from(1));
+  }
+
+  /**
+   * The tests-first form of `unsuppliedComparisonGuard`:
+   * `((tests) ? (cmp) : undefined)`, the comparison emitted with the reads
+   * marked as tested (`withPresentReads`). An operand with effects (a
+   * `Random` draw) is evaluated by the interpreter whether or not the
+   * comparison has a value, so then the comparison runs first and its
+   * value is bound, then tested: `((_tv1) => (tests) ? _tv1 : undefined)(cmp)`.
+   */
+  private static testsFirst(
+    args: ReadonlyArray<Expression>,
+    reads: ReadonlyArray<{ code: string }>,
+    tests: string,
+    target: CompileTarget<Expression>,
+    emit: () => string
+  ): string {
+    const emitBare = (): string => {
+      BaseCompiler._guardEmitting.add(args);
+      try {
+        return emit();
+      } finally {
+        BaseCompiler._guardEmitting.delete(args);
+      }
+    };
+    if (args.some((a) => a.isPure !== true) && target.bindExpr !== undefined) {
+      const temp = BaseCompiler.tempVar(target);
+      return target.bindExpr(
+        [[temp, emitBare()]],
+        `((${tests}) ? ${temp} : undefined)`
+      );
+    }
+    const body = BaseCompiler.withPresentReads(
+      target,
+      reads.map((r) => r.code),
+      emitBare
+    );
+    return `((${tests}) ? (${body}) : undefined)`;
+  }
+
+  /** True when the type of `a` is a top type (`unknown`, `any`), apart
+   * from `missing`. */
+  private static isTopTypedOperand(a: Expression): boolean {
+    const t = resolveTypeForCompilation(
+      stripMissingFromType(compilationType(a))
+    );
+    return t === 'unknown' || t === 'any';
+  }
+
+  /** True when `a` is the number literal NaN. */
+  static isNanLiteral(a: Expression): boolean {
+    return isNumber(a) && Number.isNaN(a.re) && a.im === 0;
+  }
+
+  /**
+   * The kind of a scalar comparison operand, for
+   * `unsuppliedComparisonGuard`: `'number'` for a number literal, an
+   * operand of a numeric type, or an operand of type `unknown`/`any` (an
+   * undeclared variable, which compiles to the scalar comparison; not a
+   * constant symbol such as the written absence `Undefined`);
+   * `'other'` for a string or a boolean; `undefined` for any other type (a
+   * collection), which keeps its own lowering.
+   */
+  private static scalarOperandKind(
+    a: Expression
+  ): 'number' | 'other' | undefined {
+    if (isNumber(a)) return 'number';
+    if (isString(a)) return 'other';
+    const t = resolveTypeForCompilation(
+      stripMissingFromType(compilationType(a))
+    );
+    // A written absence (`Undefined`, `Missing`) or another constant symbol
+    // of a top type is not a variable: it keeps its own lowering
+    // (`absentComparisonGuard`).
+    // An operand that may hold a list at run time (a top-typed application
+    // such as `Sin(y)` with `y` a top-typed block local,
+    // `isPossiblyCollectionTyped`) compiles to the element-wise broadcast,
+    // not to the scalar comparison, and keeps that lowering too.
+    if (t === 'unknown' || t === 'any')
+      return (isSymbol(a) &&
+        (a.symbol === 'Undefined' || a.symbol === 'Missing' || a.isConstant)) ||
+        isPossiblyCollectionTyped(a)
+        ? undefined
+        : 'number';
+    if (t === 'never') return undefined;
+    if (isSubtype(t, 'number')) return 'number';
+    if (isSubtype(t, 'number | boolean | string')) return 'other';
+    return undefined;
+  }
+
+  /**
+   * The operators whose JavaScript lowering reads an absent (`undefined`)
+   * or NaN operand as NaN: arithmetic and the elementary functions
+   * (`undefined + 1`, `Math.sin(undefined)` and `Math.max(undefined, 1)` are
+   * `NaN`). `Boole`, `Count`, `Length` and the like read an absent value
+   * as a number, so they are not here.
+   */
+  private static readonly ABSENCE_AS_NAN_OPERATORS = new Set([
+    'Add',
+    'Subtract',
+    'Negate',
+    'Multiply',
+    'Divide',
+    'Power',
+    'Square',
+    'Sqrt',
+    'Root',
+    'Exp',
+    'Ln',
+    'Log',
+    'Lb',
+    'Lg',
+    'Sin',
+    'Cos',
+    'Tan',
+    'Cot',
+    'Sec',
+    'Csc',
+    'Arcsin',
+    'Arccos',
+    'Arctan',
+    'Sinh',
+    'Cosh',
+    'Tanh',
+    'Abs',
+    'Sign',
+    'Floor',
+    'Ceil',
+    'Round',
+    'Truncate',
+    'Max',
+    'Min',
+  ]);
+
+  /**
+   * True when the compiled value of the comparison operand `a` is NaN or
+   * `undefined` whenever a variable it reads is absent: a literal, a
+   * variable, or an `ABSENCE_AS_NAN_OPERATORS` application of such operands.
+   * Then a comparison over `a` cannot be `true` for an absent read, and may
+   * run before the tests for one (`unsuppliedComparisonGuard`).
+   *
+   * A symbol that stands for a value is read through that value: a block
+   * local through every value the block assigns to it (`blockLocalOf`), a
+   * symbol with an engine value through that value. `a := Boole(x > 0)`,
+   * then `a = 0`, is `true` for an absent `x`, so it does not qualify.
+   * `Max` and `Min` qualify only over scalar operands: over a list the
+   * lowering reads the list (`Max(L)` with `L` absent throws).
+   *
+   * A value can read its own local (`a := a + n` in a loop), or another
+   * local that reads it back. The answers are therefore computed over the
+   * whole graph of the symbols reachable from `a`: each symbol's values are
+   * walked once, which records whether they qualify apart from the symbols
+   * they read, and which symbols those are. A symbol whose own values do
+   * not qualify is `false`, and so is every symbol that reads it, found by
+   * following the readers back. Every other symbol is `true` (the greatest
+   * fixpoint: `a := a + n` qualifies). Each node is read once per walk, and
+   * each symbol once, so the cost is linear in the reachable values. The
+   * answer of a local is final and is cached on it.
+   */
+  private static readsAbsenceAsNaN(a: Expression): boolean {
+    type Key = LocalEntry | string;
+    const valuesOf = new Map<Key, ReadonlyArray<Expression>>();
+    const keyOf = (e: Expression & { symbol: string }): Key | undefined => {
+      const local = BaseCompiler.blockLocalOf(e);
+      if (local !== undefined) {
+        valuesOf.set(local, local.values);
+        return local;
+      }
+      const value = e.engine._getSymbolValue(e.symbol);
+      if (value === undefined) return undefined;
+      valuesOf.set(e.symbol, [value]);
+      return e.symbol;
+    };
+    // Whether `root` qualifies apart from the symbols it reads, which are
+    // added to `refs`. A local whose answer is already known counts as
+    // that answer.
+    const walk = (root: Expression, refs: Set<Key>): boolean => {
+      const memo = new Map<Expression, boolean>();
+      const read = (e: Expression): boolean => {
+        const known = memo.get(e);
+        if (known !== undefined) return known;
+        let answer: boolean;
+        if (isNumber(e) || isString(e)) answer = true;
+        else if (isSymbol(e)) {
+          const key = keyOf(e);
+          if (key === undefined) answer = true;
+          else if (typeof key === 'object' && key.absenceAsNaN !== undefined)
+            answer = key.absenceAsNaN;
+          else {
+            refs.add(key);
+            answer = true;
+          }
+        } else if (
+          !isFunction(e) ||
+          !BaseCompiler.ABSENCE_AS_NAN_OPERATORS.has(e.operator)
+        )
+          answer = false;
+        else if (
+          (e.operator === 'Max' || e.operator === 'Min') &&
+          !e.ops.every(
+            (op) =>
+              isNumber(op) ||
+              (isSubtype(compilationType(op), 'number') &&
+                !isPossiblyCollectionTyped(op))
+          )
+        )
+          answer = false;
+        else answer = e.ops.every(read);
+        memo.set(e, answer);
+        return answer;
+      };
+      return read(root);
+    };
+    const rootRefs = new Set<Key>();
+    if (!walk(a, rootRefs)) return false;
+    // Every symbol reachable from `a`, with its own verdict and its readers.
+    const own = new Map<Key, boolean>();
+    const readers = new Map<Key, Key[]>();
+    const work = [...rootRefs];
+    const met = new Set<Key>(work);
+    while (work.length > 0) {
+      const key = work.pop()!;
+      const refs = new Set<Key>();
+      own.set(
+        key,
+        valuesOf.get(key)!.every((v) => walk(v, refs))
+      );
+      for (const r of refs) {
+        const list = readers.get(r);
+        if (list === undefined) readers.set(r, [key]);
+        else list.push(key);
+        if (!met.has(r)) {
+          met.add(r);
+          work.push(r);
+        }
+      }
+    }
+    // A `false` reaches every symbol that reads it.
+    const answer = new Map(own);
+    const falses = [...met].filter((k) => !answer.get(k));
+    while (falses.length > 0) {
+      const k = falses.pop()!;
+      for (const reader of readers.get(k) ?? [])
+        if (answer.get(reader)) {
+          answer.set(reader, false);
+          falses.push(reader);
+        }
+    }
+    for (const [key, value] of answer)
+      if (typeof key === 'object') key.absenceAsNaN = value;
+    return [...rootRefs].every((k) => answer.get(k));
+  }
+
+  /**
+   * Run `fn` with each operand of `operands` bound once to a temporary, in
+   * operand order: `compile()` emits the temporary for it (`_codeAliases`),
+   * and the result is wrapped in the bindings (`bindExpr`). The
+   * initializers are compiled before any alias is installed. When `parent`
+   * is the node whose operands these are, each initializer is compiled in
+   * the CSE region of its operand edge (`withCseOperand`), so a repeated
+   * subexpression inside it is still bound once.
+   */
+  private static withBoundOperands(
+    operands: ReadonlyArray<Expression>,
+    target: CompileTarget<Expression>,
+    fn: () => string,
+    parent?: Expression
+  ): string {
+    if (operands.length === 0) return fn();
+    const parentOps =
+      parent !== undefined && isFunction(parent) ? parent.ops : undefined;
+    const codes = operands.map((a) => {
+      const index = parentOps?.indexOf(a) ?? -1;
+      const compileIt = () => BaseCompiler.compileValueOperand(a, target);
+      return index < 0
+        ? compileIt()
+        : BaseCompiler.withCseOperand(parent, index, target, compileIt);
+    });
+    const temps = operands.map(() => BaseCompiler.tempVar(target));
+    try {
+      operands.forEach((a, i) => BaseCompiler._codeAliases.set(a, temps[i]));
+      return target.bindExpr!(
+        operands.map((_, i) => [temps[i], codes[i]] as [string, string]),
+        fn()
+      );
+    } finally {
+      for (const a of operands) BaseCompiler._codeAliases.delete(a);
+    }
+  }
+
+  /**
+   * True when a NaN value of the numeric operand `a` decides a comparison
+   * while a tested read `reads` has no value: one of the reads is not a
+   * read of `a` itself.
+   */
+  private static nanCanDecide(
+    a: Expression,
+    reads: ReadonlyArray<{ code: string }>,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (
+      BaseCompiler.scalarOperandKind(a) !== 'number' ||
+      BaseCompiler.isComplexValued(a)
+    )
+      return false;
+    const own = BaseCompiler.operandInputNodes(a, target).map((s) =>
+      BaseCompiler.compile(s, target)
+    );
+    return reads.some((r) => !own.includes(r.code));
+  }
+
+  /**
+   * The presence tests of a comparison `h(args)` (`reads`), with the
+   * escapes that decide it while another variable has no value:
+   * `(_.x !== undefined && _.y !== undefined) || _.x !== _.x`. The escapes
+   * are read only when a test fails (`||`), so a call with every variable
+   * supplied pays none of them.
+   *
+   * - An operand that is a numeric vars-object read is NaN-tested as it is
+   *   (`_.x !== _.x`), whether or not its own read is tested here: a read
+   *   that an enclosing branch tested still holds its NaN.
+   * - Any other operand that `nanCanDecide` admits (a local such as `a` in
+   *   `a := n + 1; a < m`, a parameter, a computed operand) is NaN-tested
+   *   only when its own reads are present, since an absent read makes it
+   *   NaN too: `(_.n !== undefined && a !== a)`. A computed operand is
+   *   tested through its temporary when a chain bound it
+   *   (`withBoundOperands`); otherwise its code is repeated in the escape,
+   *   which is safe because it is pure, and costs only on the call that
+   *   reaches the escape. An operand with effects is not tested.
+   * - For an ordering, a complex operand that is not real decides `false`
+   *   (`Less(√n, m)` at `n = -1`): `(_.n !== undefined &&
+   *   !_SYS.cisreal(…))` (`complexIsReal` of the target). Not for `Equal`
+   *   and `NotEqual`, where `i = m` has no value while `m` has none.
+   */
+  private static withNanTerms(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    reads: ReadonlyArray<{ code: string; test: string }>,
+    target: CompileTarget<Expression>,
+    parent?: Expression
+  ): string {
+    const joined = reads.map((r) => r.test).join(' && ');
+    const unique = BaseCompiler.nanEscapeTerms(
+      h,
+      args,
+      reads.map((r) => r.code),
+      target,
+      parent
+    );
+    if (unique.length === 0) return joined;
+    return `(${joined}) || ${unique.join(' || ')}`;
+  }
+
+  /**
+   * The escapes of `withNanTerms`: one term per operand of `h(args)` whose
+   * value decides the comparison while one of the tested reads `reads` (their
+   * codes) has no value. Shared by the comparison whose value is the result
+   * and by a branch condition (`withNanEscape`).
+   */
+  private static nanEscapeTerms(
+    h: string,
+    args: ReadonlyArray<Expression>,
+    readCodes: ReadonlyArray<string>,
+    target: CompileTarget<Expression>,
+    parent?: Expression
+  ): string[] {
+    const reads = readCodes.map((code) => ({ code }));
+    const terms: string[] = [];
+    const ordering = h !== 'Equal' && h !== 'NotEqual';
+    const parentOps =
+      parent !== undefined && isFunction(parent) ? parent.ops : undefined;
+    const codeOf = (a: Expression): string => {
+      if (isSymbol(a) || BaseCompiler._codeAliases.has(a))
+        return BaseCompiler.compile(a, target);
+      const index = parentOps?.indexOf(a) ?? -1;
+      const compileIt = () => BaseCompiler.compileValueOperand(a, target);
+      return index < 0
+        ? compileIt()
+        : BaseCompiler.withCseOperand(parent, index, target, compileIt);
+    };
+    const ownPresent = (a: Expression): string[] =>
+      BaseCompiler.operandInputNodes(a, target)
+        .map((s) => BaseCompiler.compile(s, target))
+        .filter((c) => BaseCompiler.isOmittableRead(c, target))
+        .map((c) => `${c} !== undefined`);
+    const term = (own: string[], escape: string): string =>
+      own.length === 0 ? escape : `(${own.join(' && ')} && ${escape})`;
+    for (const a of args) {
+      if (isNumber(a)) continue;
+      const pureOrBound =
+        isSymbol(a) || a.isPure === true || BaseCompiler._codeAliases.has(a);
+      if (!pureOrBound) continue;
+      if (BaseCompiler.isComplexValued(a)) {
+        if (!ordering || target.complexIsReal === undefined) continue;
+        const own = ownPresent(a);
+        if (!reads.some((r) => !own.includes(`${r.code} !== undefined`)))
+          continue;
+        terms.push(term(own, `!${target.complexIsReal(codeOf(a))}`));
+        continue;
+      }
+      if (!BaseCompiler.nanCanDecide(a, reads, target)) continue;
+      const code = codeOf(a);
+      if (isSymbol(a) && BaseCompiler.isVarsObjectRead(code, target)) {
+        terms.push(`${code} !== ${code}`);
+        continue;
+      }
+      terms.push(term(ownPresent(a), `(${code}) !== (${code})`));
+    }
+    return [...new Set(terms)];
   }
 
   /**
@@ -31175,6 +32763,10 @@ export class BaseCompiler {
     const params: string[] = [];
     const args: TargetSource[] = [];
     const installed: Expression[] = [];
+    // The vars-object reads the conjuncts test: the comparison below is
+    // emitted inside that test, so it does not test them again
+    // (`unsuppliedComparisonGuard`).
+    const tested: string[] = [];
     try {
       const conjuncts: TargetSource[] = [];
       for (const op of test.operands) {
@@ -31186,11 +32778,13 @@ export class BaseCompiler {
           code,
           target,
           dialect.decidedNumber,
-          present
+          present,
+          op
         );
         // No test at all: the operand is a constant the compiler already
         // folded, so it decides every comparison it takes part in.
         if (inline.length === 0) continue;
+        if (BaseCompiler.isOmittableRead(code, target)) tested.push(code);
         if (
           BaseCompiler.ATOMIC_FRAGMENT.test(code) ||
           BaseCompiler._codeOverrides.has(op)
@@ -31212,13 +32806,22 @@ export class BaseCompiler {
           )
         );
       }
-      const compare = BaseCompiler.compile(test.expr, target);
+      const compare = BaseCompiler.withPresentReads(target, tested, () =>
+        BaseCompiler.compile(test.expr, target)
+      );
       const value = negate ? `${dialect.not}(${compare})` : `(${compare})`;
+      // A NaN operand decides the relation even while another variable has
+      // no value (`withNanEscape`); JavaScript family only, the spelling of
+      // the escape.
+      const tests =
+        dialect === CONDITION_DIALECT_JS && isFunction(test.expr)
+          ? BaseCompiler.withNanEscape(test.expr.ops, conjuncts, target)
+          : conjuncts;
       const body =
-        conjuncts.length === 0
+        tests.length === 0
           ? value
           : dialect.ternary(
-              conjuncts.join(` ${dialect.and} `),
+              tests.join(` ${dialect.and} `),
               value,
               dialect.undecided
             );
@@ -31371,6 +32974,10 @@ export class BaseCompiler {
   ): { value: T; bindings: Array<[string, TargetSource]> } {
     const bindings: Array<[string, TargetSource]> = [];
     const installed: Expression[] = [];
+    // The vars-object reads the conjuncts test: `fn` emits the condition
+    // inside that test, so a comparison in it does not test them again
+    // (`unsuppliedComparisonGuard`).
+    const tested: string[] = [];
     try {
       const conjuncts: TargetSource[] = [];
       for (const op of operands) {
@@ -31382,11 +32989,13 @@ export class BaseCompiler {
           code,
           target,
           dialect.decidedNumber,
-          present
+          present,
+          op
         );
         // No test at all: the operand is a constant the compiler already
         // folded, so it decides every comparison it takes part in.
         if (inline.length === 0) continue;
+        if (BaseCompiler.isOmittableRead(code, target)) tested.push(code);
         if (
           !canBind ||
           BaseCompiler.ATOMIC_FRAGMENT.test(code) ||
@@ -31408,7 +33017,12 @@ export class BaseCompiler {
           )
         );
       }
-      return { value: fn(conjuncts), bindings };
+      return {
+        value: BaseCompiler.withPresentReads(target, tested, () =>
+          fn(conjuncts)
+        ),
+        bindings,
+      };
     } finally {
       for (const op of installed) BaseCompiler._codeOverrides.delete(op);
     }
@@ -31510,7 +33124,21 @@ export class BaseCompiler {
       decidability.test.operands,
       target,
       target.bindExpr !== undefined,
-      (conjuncts) => ({ code: BaseCompiler.compile(cond, target), conjuncts }),
+      (conjuncts) => ({
+        code: BaseCompiler.compile(cond, target),
+        // A NaN operand decides the relation even while another variable
+        // has no value (`withNanEscape`). The escape reads the operands of
+        // the relation the analysis tested (`decidability.test.expr`), not
+        // of `cond`, which may be a `Not` of it: `If(Not(x < y), 1, 2)` at
+        // `x = NaN` takes the first arm, as in the interpreter.
+        conjuncts: isFunction(decidability.test.expr)
+          ? BaseCompiler.withNanEscape(
+              decidability.test.expr.ops,
+              conjuncts,
+              target
+            )
+          : conjuncts,
+      }),
       CONDITION_DIALECT_JS
     );
     return { ...value, bindings, negate: false };
@@ -35448,7 +37076,7 @@ export class BaseCompiler {
     );
     return (
       `((${callee}) => ${call})` +
-      `(${BaseCompiler.localCheckingCallee(`(${literalCode})`, checks, target)})`
+      `(${BaseCompiler.localCheckingCallee(`(${literalCode})`, checks, target, signature)})`
     );
   }
 
@@ -35482,15 +37110,18 @@ export class BaseCompiler {
    * declared types of parameter `i` that the call tests. As the checking
    * shim of an engine-level function (`checkingShimName`), the test reads
    * the real projection of the argument, the function receives that
-   * projection, and the call answers `NaN` when a test fails: `NaN` is the
-   * value compiled code has where the interpreter answers an error. The
-   * shim is written at the call, since the value of a block local is read
-   * where the call runs. `callee` itself when no parameter is tested.
+   * projection, and the call answers the marker of the declared result
+   * type of `signature` when a test fails (`failedCheckMarker`: `undefined`
+   * for a collection result, `NaN` otherwise), the value compiled code has
+   * where the interpreter answers an error. The shim is written at the
+   * call, since the value of a block local is read where the call runs.
+   * `callee` itself when no parameter is tested.
    */
   private static localCheckingCallee(
     callee: string,
     types: ReadonlyArray<ReadonlyArray<Type>>,
-    target: CompileTarget<Expression>
+    target: CompileTarget<Expression>,
+    signature: Type | undefined
   ): string {
     if (types.every((t) => t.length === 0)) return callee;
     const params = types.map(() => BaseCompiler.tempVar(target));
@@ -35504,7 +37135,8 @@ export class BaseCompiler {
     });
     return (
       `((${params.join(', ')}) => (${tests.join(' && ')}) ? ` +
-      `${callee}(${passed.join(', ')}) : NaN)`
+      `${callee}(${passed.join(', ')}) : ` +
+      `${BaseCompiler.failedCheckMarker(signature)})`
     );
   }
 
@@ -35739,7 +37371,137 @@ export class BaseCompiler {
     if (!registry || target.language !== 'javascript') return undefined;
     const literal = BaseCompiler.userFunctionLiteral(engine, h);
     if (literal === undefined) return undefined;
-    const nParams = literal.ops.length - 1;
+    const { params, passed, tests } = BaseCompiler.checkingShimTests(
+      engine,
+      h,
+      literal.ops.length - 1,
+      target
+    );
+    if (tests.length === 0) return undefined;
+    const shim = `${name}$t`;
+    const marker = BaseCompiler.failedCheckMarker(
+      BaseCompiler.userFunctionSignature(engine, h),
+      literal.type.type
+    );
+    if (!registry.defs.has(shim))
+      registry.defs.set(
+        shim,
+        `const ${shim} = (${params.join(', ')}) => ` +
+          `(${tests.join(' && ')}) ? ${name}(${passed.join(', ')}) : ${marker};`
+      );
+    return shim;
+  }
+
+  /**
+   * The value that a checking shim (`checkingShimName`,
+   * `localCheckingCallee`) gives when an argument fails the test of its
+   * declared parameter type, where the interpreter answers an
+   * `incompatible-type` error: the absence marker of the declared result
+   * type of the function, chosen as `absentCollectionOperandGuard` chooses
+   * it, after the `missing` arm of the result is removed (a result typed
+   * `list<real> | missing` is a collection). `undefined`, the value
+   * compiled code has for an absent collection or an absent boolean, when
+   * the result is a collection (`list`, `list<real>`, …) or a boolean, and
+   * `NaN`, the numeric marker, when the result is a number.
+   *
+   * A declared result that does not decide it (`unknown`, `any`, a union of
+   * a collection and a number such as `list | number`, no declared
+   * signature) is decided by the result type of the literal itself,
+   * `literal`. That is the type a call of the function carries: the type
+   * of the call is narrowed to the type of the body, so with
+   * `f: (real) -> list | number` and `f := x ↦ [x, 1]`, `f(w)` is typed
+   * `vector<2>`, and a `Join` reads it as a collection. The marker must be
+   * the one that consumer tests (`absentCollectionOperandGuard`), or the
+   * consumer spreads a `NaN`. When neither type decides it, the marker is
+   * `NaN`.
+   */
+  private static failedCheckMarker(
+    signature: Type | undefined,
+    literal?: Type
+  ): 'undefined' | 'NaN' {
+    const markerOf = (t: Type | undefined): 'undefined' | 'NaN' | undefined => {
+      const declared = functionResult(t);
+      if (declared === undefined) return undefined;
+      const result = stripMissingFromType(declared);
+      if (result === 'unknown' || result === 'any' || result === 'never')
+        return undefined;
+      if (isSubtype(result, 'collection') || isSubtype(result, 'boolean'))
+        return 'undefined';
+      if (isSubtype(result, 'number')) return 'NaN';
+      return undefined;
+    };
+    return markerOf(signature) ?? markerOf(literal) ?? 'NaN';
+  }
+
+  /**
+   * True when the operand `a` compiles to a call through the checking shim
+   * of an engine-defined user function whose failed check gives `undefined`
+   * (`failedCheckMarker`): a call on the JavaScript target with an argument
+   * that `parameterCheckNeeded` must test, of a function whose declared
+   * result is a collection. The call then has no value at run time when the
+   * test fails, although its type is the collection type, so a consumer
+   * that reads it as an array must test it first
+   * (`absentCollectionOperandGuard`). A call whose arguments are all proven
+   * has no shim and is not affected.
+   */
+  private static checkedCallMayBeAbsent(
+    engine: ComputeEngine,
+    a: Expression,
+    target: CompileTarget<Expression>
+  ): boolean {
+    if (target.language !== 'javascript' || !isFunction(a)) return false;
+    const h = a.operator;
+    // A block-local function (`tryCompileLocalFunctionCall`) is tested by
+    // `localCheckingCallee`, with the marker of the signature of its
+    // literal, read at the ground bounds of a generic signature as there.
+    const local = target.localFunctions?.get(h);
+    if (local !== undefined) {
+      if (!isFunction(local, 'Function')) return false;
+      const declared = local.type?.type;
+      const signature =
+        declared !== undefined && isPolymorphicType(declared)
+          ? BaseCompiler.groundSignature(declared)
+          : declared;
+      if (BaseCompiler.failedCheckMarker(signature) !== 'undefined')
+        return false;
+      try {
+        return BaseCompiler.localParameterChecks(h, local, a.ops, target).some(
+          (t) => t.length > 0
+        );
+      } catch (e) {
+        // The call compiles to its own error (a number literal that cannot
+        // be of the declared type), which is not this guard's business.
+        if (e instanceof Error && e.name === 'CancellationError') throw e;
+        return false;
+      }
+    }
+    const literal = BaseCompiler.userFunctionLiteral(engine, h);
+    if (literal === undefined) return false;
+    if (
+      BaseCompiler.failedCheckMarker(
+        BaseCompiler.userFunctionSignature(engine, h),
+        literal.type.type
+      ) !== 'undefined'
+    )
+      return false;
+    return a.ops.some((x, i) =>
+      BaseCompiler.parameterCheckNeeded(engine, h, x, i, target)
+    );
+  }
+
+  /**
+   * The parameter tests of the checking shim of `h` (`checkingShimName`):
+   * the shim's parameter names (`_$0`, `_$1`, …), the value it passes for
+   * each one (the real projection `_SYS.creal(_$i)` of a tested parameter,
+   * the parameter itself otherwise), and one JavaScript test for each tested
+   * parameter. `tests` is empty when no parameter needs a test.
+   */
+  private static checkingShimTests(
+    engine: ComputeEngine,
+    h: string,
+    nParams: number,
+    target: CompileTarget<Expression>
+  ): { params: string[]; passed: string[]; tests: string[] } {
     const params = Array.from({ length: nParams }, (_, i) => `_$${i}`);
     const passed = [...params];
     const tests: string[] = [];
@@ -35752,15 +37514,7 @@ export class BaseCompiler {
       tests.push(test);
       passed[i] = projected;
     }
-    if (tests.length === 0) return undefined;
-    const shim = `${name}$t`;
-    if (!registry.defs.has(shim))
-      registry.defs.set(
-        shim,
-        `const ${shim} = (${params.join(', ')}) => ` +
-          `(${tests.join(' && ')}) ? ${name}(${passed.join(', ')}) : NaN;`
-      );
-    return shim;
+    return { params, passed, tests };
   }
 
   /**
@@ -37207,7 +38961,12 @@ export class BaseCompiler {
         ? local
         : target.language === 'interval-javascript'
           ? BaseCompiler.intervalCheckingCallee(local, parameterChecks, target)
-          : BaseCompiler.localCheckingCallee(local, parameterChecks, target),
+          : BaseCompiler.localCheckingCallee(
+              local,
+              parameterChecks,
+              target,
+              signature
+            ),
       args,
       target,
       coerceToComplex,
@@ -42194,11 +43953,37 @@ export class BaseCompiler {
         // instead of the natively recursive arrow below, when the target and
         // the definition allow it (`emitListRecursionLoop`). A definition the
         // loop form declines takes the ordinary arrow.
-        if (lowering === undefined && specialization === undefined) {
+        //
+        // A call-shape specialization whose key is `h` itself is the SCALAR
+        // definition: the call has only scalar arguments, and the
+        // specialization is emitted under the ordinary name, so it is the
+        // definition that every call of `h` reaches. A function with no
+        // declared signature (assigned with no declaration, or declared
+        // `function`) comes here: its parameter is open (`unknown`), and the
+        // scalar argument of the call narrows it to `number`. The loop is
+        // then built from the function's own literal, not from the rebuilt
+        // copy: `listRecursionPlan` recognizes a recursive call only when
+        // the call reaches the literal it is given, and the copy is not the
+        // value of `h`. That is also the definition this name had before
+        // the parameter was narrowed, so the loop gives the values of the
+        // generic definition. When the loop form declines, the copy is
+        // emitted as the ordinary arrow below. Any other specialization (a
+        // range, a point, a list or a complex copy) has its own name and
+        // keeps the arrow.
+        const loopLiteral =
+          specialization === undefined
+            ? literal
+            : specialization.key === h
+              ? BaseCompiler.userFunctionLiteral(
+                  literal.engine as unknown as ComputeEngine,
+                  h
+                )
+              : undefined;
+        if (lowering === undefined && loopLiteral !== undefined) {
           const loop = BaseCompiler.emitListRecursionLoop(
             h,
             name,
-            literal,
+            loopLiteral,
             target,
             registry,
             prefixed !== undefined
@@ -42631,6 +44416,24 @@ export class BaseCompiler {
    *    elementwise (`_SYS.select`), whose result is an array of control
    *    records the loop cannot read as one.
    *
+   * A parameter declared `real` or `integer` (or another type with a
+   * run-time test, `checkedParameterType`) is tested at each step, as the
+   * recursive call tests it through the checking shim (`checkingShimName`).
+   * The first step is tested too, also when the call site did not test the
+   * argument because its static type proves the parameter type: the step
+   * cannot tell the first arguments from the next ones. For an argument
+   * that has its static type the test passes, so the first step gives the
+   * value the call gives without it. An argument that breaks its own
+   * static type (a `run()` value `Infinity` for a symbol declared `real`,
+   * which the interpreter refuses to assign) gives `NaN` where the
+   * recursive arrow ran the body. The step receives the real projection of
+   * each tested argument, and a step whose arguments fail a test gives
+   * `NaN`, the value the shim gives (`NaN` itself passes the test of a
+   * numeric parameter, `jsParameterGuard`). The runtime loop then gives
+   * `undefined` for the whole call, at the first step and at a later one:
+   * the value compiled code has for a list with no value, where the
+   * interpreter answers the `incompatible-type` error.
+   *
    * Returns `'declined-variant'` when the requested emission is an
    * invariant-prefix VARIANT of a recognized recursion: no variant is
    * emitted, so the call site falls back to the ordinary call and reaches
@@ -42663,7 +44466,9 @@ export class BaseCompiler {
       vector: new Map<string, number>(),
     };
     BaseCompiler.addDeclaredComplexParams(h, literal, target, frames);
-    if (frames.complex.size > 0) return undefined;
+    // A parameter declared real has an entry too, with the value `false`.
+    if ([...frames.complex.values()].some((complex) => complex))
+      return undefined;
     const step = plan.step;
     if (!isFunction(step, 'Which')) return undefined;
     for (let i = 0; i < step.nops; i += 2)
@@ -42701,11 +44506,28 @@ export class BaseCompiler {
     const stepArrow = statements?.has(stepBody)
       ? `(${params}) => { ${statements.functionBody(stepBody)} }`
       : `(${params}) => ${stepBody}`;
+    const {
+      params: tested,
+      passed,
+      tests,
+    } = BaseCompiler.checkingShimTests(
+      engine,
+      h,
+      prepared.params.length,
+      target
+    );
+    const stepName = `${name}$s`;
+    const checkedStep =
+      tests.length === 0
+        ? stepArrow
+        : `(${tested.join(', ')}) => (${tests.join(' && ')}) ? ` +
+          `${stepName}(${passed.join(', ')}) : NaN`;
     (registry.literals ??= new Map()).set(name, literal);
     registry.defs.set(
       name,
-      `const ${name} = (${params}) => _SYS.listRecursion(` +
-        `${JSON.stringify(h)}, [${params}], ${stepArrow});`
+      (tests.length === 0 ? '' : `const ${stepName} = ${stepArrow};\n`) +
+        `const ${name} = (${params}) => _SYS.listRecursion(` +
+        `${JSON.stringify(h)}, [${params}], ${checkedStep});`
     );
     return name;
   }
@@ -43113,8 +44935,13 @@ export class BaseCompiler {
    * plus inclusive bound checks (a NaN argument fails `>=`, as it should);
    * primitives → `typeof`/`Number.isInteger`/`Number.isFinite` where JS can
    * express them. Every bare numeric name denotes a FINITE value, so its
-   * guard rejects `Infinity` and `NaN` at run time exactly as the
-   * interpreter's signature check does. The `+oo | -oo`, `infinity`
+   * guard rejects `Infinity` and `NaN` at run time. This is the test of the
+   * DISPATCH of a multi-clause function, where the interpreter also refuses
+   * `NaN` at a numeric parameter: no clause is the correct one for it (user
+   * decision 2026-10-17, which amends the ruling "A user function accepts
+   * `NaN` at a numeric parameter — RULED 2026-09-30" in
+   * `docs/ERROR-MODEL.md`). The parameter check of a function with ONE
+   * clause accepts `NaN` (`jsParameterGuard`). The `+oo | -oo`, `infinity`
    * and `nan` primitives, and the NON-FINITE numeric value types `NaN`,
    * `oo` and `-oo`, have no faithful JS test and therefore decline; see the
    * comment on those cases below.
@@ -43132,12 +44959,30 @@ export class BaseCompiler {
    * The shape test is used for parameter checks only, not for the dispatch
    * of a multi-clause function: there a test that does not tell a tuple
    * from a list would select a clause that the interpreter does not select.
+   *
+   * At a parameter whose type is numeric (a subtype of `number`: `real`,
+   * `integer`, `real<0..>`, …) the test also accepts `NaN`. A user function
+   * with one clause accepts `NaN` at every parameter typed with a numeric
+   * type, and its body runs with `NaN`: `f := x ↦ 7` declared
+   * `(real) -> number` gives `f(NaN) = 7`. `NaN` is what a numeric
+   * computation gives when it has no value, so `f(n: integer)` must not
+   * refuse an argument that `f(n: number)` accepts. `Indeterminate` is
+   * accepted in the same way, and compiled code holds it as `NaN` too. A
+   * number that is not `NaN` is still tested (`1.5` at `integer` is
+   * refused). The ruling is "A user function accepts `NaN` at a numeric
+   * parameter — RULED 2026-09-30" in `docs/ERROR-MODEL.md`, and the
+   * interpreter applies it in `acceptNaNAtNumericParams`
+   * (`function-utils.ts`) and `declaredScalarConformance`
+   * (`boxed-expression/boxed-function.ts`). The dispatch of a multi-clause
+   * function keeps refusing `NaN` (`jsClauseParamGuard`).
    */
   private static jsParameterGuard(
     t: Type,
     a: string
   ): string | null | undefined {
     const test = BaseCompiler.jsClauseParamGuard(t, a);
+    if (typeof test === 'string' && isSubtype(t, 'number'))
+      return `(Number.isNaN(${a}) || ${test})`;
     return test !== undefined
       ? test
       : BaseCompiler.jsCollectionShapeGuard(t, a);

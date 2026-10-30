@@ -377,9 +377,12 @@ describe('an interval-js result refuses both options', () => {
     expect(() =>
       createIntervalRuntime().loadBroadcast(stored)({ x }, { shared: [] })
     ).toThrow(/not supported by an interval-js result/);
-    // A plain array is refused for an interval input.
+    // A plain array of numbers is refused for an interval input (a plain
+    // array is accepted only as the column of a boolean variable).
     expect(() =>
       r.broadcast!({ x: [0, 1] as unknown as Float64Array })
-    ).toThrow(/plain array is not accepted/);
+    ).toThrow(
+      /plain array is accepted only as the column of a boolean variable/
+    );
   });
 });

@@ -264,16 +264,48 @@ describe('other operands that can be absent as a whole', () => {
   });
 });
 
-describe('the rule stands aside', () => {
-  test('when another operand is not pure', () => {
-    // The interpreter evaluates every operand before it tests for an
-    // absent one; the guarded lowering would evaluate the count only when
-    // the row is present, so a `Random` count would be drawn a different
-    // number of times. The operator declines instead.
-    const { error } = compiled(['Take', ['At', 'x', 'i'], ['Random']], PRESENT);
-    expect(error).toContain('Could not compile `Take`');
+describe('an operand that is not pure', () => {
+  test('is evaluated once, before the test for an absent operand', () => {
+    // The interpreter evaluates every operand once, in order, before it
+    // tests for an absent one. The `Random` count is bound to a temporary
+    // with the row, in operand order, so it is drawn once whether the row
+    // is present or absent. (The operator declined before CE-579, and the
+    // guard of a checked call then spread an absent value.)
+    const run = (i: number) => {
+      let draws = 0;
+      const spy = jest
+        .spyOn(Math, 'random')
+        .mockImplementation(() => (++draws, 0.75));
+      try {
+        return {
+          ...compiled(['Take', ['At', 'x', 'i'], ['Random']], {
+            ...PRESENT,
+            i,
+          }),
+          draws,
+        };
+      } finally {
+        spy.mockRestore();
+      }
+    };
+    const present = run(1);
+    expect(present.error).toBeUndefined();
+    expect(present.code).toContain('_SYS.drawNextRandomNumber()');
+    // The count rounds as in the interpreter: `Take([3, 1, 2], 0.75)` is
+    // `[3]` there too.
+    expect(present.value).toEqual([3]);
+    expect(interpreted(['Take', ['At', 'x', 'i'], 0.75], { i: 1 })).toEqual([
+      'List',
+      3,
+    ]);
+    expect(present.draws).toBe(1);
+    const absent = run(7);
+    expect(absent.value).toBeUndefined();
+    expect(absent.draws).toBe(1);
   });
+});
 
+describe('the rule stands aside', () => {
   test('for a broadcastable operator, whose absence lands in each cell', () => {
     // `[1, 2, 3] · P{c}` with the restricted point absent is a list of
     // absent cells, not one absent value (user decision of 2026-09-27).

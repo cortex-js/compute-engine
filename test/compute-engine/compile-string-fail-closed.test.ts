@@ -1090,14 +1090,21 @@ describe('the gate does not reach past string operands', () => {
   test('an unknown-typed symbol does not gate (plot shapes keep compiling)', () => {
     const r = compile(ce.box(['Equal', 'xq', 4]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"((_.xq) === (4))"`);
+    // An unsupplied variable gives no value, whatever its declared type: the
+    // scalar `===` runs first, and its `false` stands only when `xq` has a
+    // value (user decision 2026-10-30).
+    expect(r.code).toMatchInlineSnapshot(
+      `"((((_.xq) === (4))) || ((_.xq !== undefined) ? false : undefined))"`
+    );
   });
 
   test('an inferred-parameter plot equality keeps its numeric fast path', () => {
     const r = compile(ce.parse('x^2 + y^2 = 4'), { fallback: false });
     expect(r.success).toBe(true);
+    // The exact test runs first; its `false` stands only when `x` and `y`
+    // have values (`BaseCompiler.unsuppliedComparisonGuard`).
     expect(r.code).toMatchInlineSnapshot(
-      `"(((_.x * _.x) + (_.y * _.y)) === (4))"`
+      `"(((((_.x * _.x) + (_.y * _.y)) === (4))) || ((_.x !== undefined && _.y !== undefined) ? false : undefined))"`
     );
   });
 
@@ -1455,14 +1462,21 @@ describe('tier 2: a UNION arm that is a collection disqualifies the scalar ===',
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"(_SYS.eqt(_.anyq, "a"))"`);
+    // An unsupplied variable gives no value, whatever its declared type
+    // (user decision 2026-10-30), so `anyq` is tested too.
+    expect(r.code).toMatchInlineSnapshot(
+      `"((_.anyq !== undefined) ? ((_SYS.eqt(_.anyq, "a"))) : undefined)"`
+    );
     // …and a union with NO collection arm is admitted as well.
     ce.declare('sbq', 'string | boolean');
     const r2 = compile(ce.box(['Equal', 'sbq', { str: 'a' }]), {
       fallback: false,
     });
     expect(r2.success).toBe(true);
-    expect(r2.code).toMatchInlineSnapshot(`"(_SYS.eqt(_.sbq, "a"))"`);
+    // A declared `sbq` is tested for a value, as `anyq` above is.
+    expect(r2.code).toMatchInlineSnapshot(
+      `"((_.sbq !== undefined) ? ((_SYS.eqt(_.sbq, "a"))) : undefined)"`
+    );
     // `_SYS.eqt` only conditions a STRING/STRING pair; everything else keeps
     // strict identity, so an admitted possibly-text participant holding a
     // NUMBER is not stringified into a false match. (The interpreter answers
@@ -1521,7 +1535,12 @@ describe('tier 2: NotEqual over `string | missing` keeps the Kleene guard', () =
     ce.declare('pq', 'number');
     const r = compile(ce.box(['NotEqual', 'pq', 3]), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toMatchInlineSnapshot(`"((_.pq) !== (3))"`);
+    // One test that `pq` has a value, read only when the plain test is
+    // `true`, as for any comparison whose value is the result; not the
+    // Kleene guard of a `missing` operand.
+    expect(r.code).toMatchInlineSnapshot(
+      `"((((_.pq) !== (3))) && ((_.pq !== undefined) ? true : undefined))"`
+    );
   });
 });
 

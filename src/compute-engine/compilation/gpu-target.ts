@@ -2924,7 +2924,10 @@ function gpuHasShaderScalarElements(expr: Expression): boolean {
     // the width came from a bound value whose components are shader floats.
     return declared?.value === undefined || declared.value.element === 'f';
   }
-  const t = gpuType(expr);
+  // The absent arms of a value that may be absent (`missing | tuple<real,
+  // real>`) are set aside, as `aggregateComponentCount` sets them aside when
+  // it reads the width.
+  const t = BaseCompiler.withoutAbsentArms(gpuType(expr));
   if (typeof t === 'string') return true;
   // Reached only with a `tuple` or 1-axis `list` type — the two type shapes
   // `aggregateComponentCount` reads a width from once the sources above are
@@ -3370,7 +3373,13 @@ function compileGPUStatementSelection(
   // In a complex selection the caller lifts each real scalar arm to a `vec2`
   // (`gpuSelectionArm`), so such an arm has the complex type here.
   const complex = gpuSelectionIsComplex('Which', args);
-  const types = arms.map((a) =>
+  // A written `Missing` (or `NaN`) arm has no type of its own here: the
+  // caller compiles it as the NaN of the shape of the other arms
+  // (`gpuAbsentArm`). It is set aside unless every arm is one.
+  const typedArms = arms.some((a) => !gpuIsWrittenAbsence(a, target))
+    ? arms.filter((a) => !gpuIsWrittenAbsence(a, target))
+    : arms;
+  const types = typedArms.map((a) =>
     complex && gpuOperandShape(a) === 'scalar'
       ? gpuVecType(2, isWGSL)
       : gpuTypeOfValue(a, isWGSL)
@@ -3945,6 +3954,47 @@ function gpuSelectionIsComplex(
 }
 
 /**
+ * True when `value` is a written absence: the symbol `Missing` or
+ * `Undefined`, or a real NaN literal. On a shader target each of them is a
+ * NaN, and as an arm of a selection it takes the shape of the other arms
+ * (`gpuAbsentArm`). A bound name or a key of the caller's `vars` spelled
+ * `Missing` is a variable and keeps its meaning, as in
+ * `BaseCompiler._compileInner`.
+ */
+function gpuIsWrittenAbsence(
+  value: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (isSymbol(value, 'Missing') || isSymbol(value, 'Undefined'))
+    return (
+      target.boundVars?.has(value.symbol) !== true &&
+      target.varsKeys?.has(value.symbol) !== true
+    );
+  return isNumber(value) && Number.isNaN(value.re) && value.im === 0;
+}
+
+/**
+ * The code of a written absence arm of a selection whose value arms are
+ * `arms`: the NaN of the shape the other arms have. In a complex selection it
+ * is `vec2(NaN)`; beside a point or a list of 2 to 4 numbers it is a `vecN`
+ * NaN (`gpuNaNFor`); otherwise it is a scalar NaN. The interpreter gives
+ * `Missing` (or `NaN`) there, and the NaN in each lane is the shader
+ * spelling of that value, the same value the else-less `If(c, (x, y))` and
+ * `When((x, y), c)` give when no arm is selected.
+ */
+function gpuAbsentArm(
+  arms: ReadonlyArray<Expression>,
+  complex: boolean,
+  target: CompileTarget<Expression>
+): string {
+  if (complex) return `${gpuVec2(target)}(${gpuNaN(target)})`;
+  const shapeRef =
+    arms.find((a) => !gpuIsWrittenAbsence(a, target) && gpuComponentCount(a)) ??
+    null;
+  return gpuNaNFor(shapeRef, target);
+}
+
+/**
  * The code of one value arm of a selection. In a complex selection
  * (`gpuSelectionIsComplex`) a real scalar arm is lifted to `vec2(v, 0.0)`;
  * an arm that is not a scalar (a point, a list), or a scalar whose type
@@ -3956,8 +4006,14 @@ function gpuSelectionArm(
   value: Expression,
   code: string,
   complex: boolean,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  arms?: ReadonlyArray<Expression>
 ): string {
+  // A written absence arm takes the NaN of the shape of the other arms. A
+  // GLSL ternary and a WGSL `select` need both operands of one type, so a
+  // scalar NaN beside a `vec2` arm is not a valid shader.
+  if (arms !== undefined && gpuIsWrittenAbsence(value, target))
+    return gpuAbsentArm(arms, complex, target);
   if (!complex || BaseCompiler.isComplexValued(value)) return code;
   // An arm whose type is not known (an undeclared uniform `z`) is read as a
   // float, as it is in a selection with no complex arm, and is lifted. An
@@ -10478,8 +10534,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     gpuAssertSelectableArms('If', [args[1], args[2]]);
     // With one complex arm, a real arm is lifted to `vec2(v, 0.0)`.
     const complex = gpuSelectionIsComplex('If', args);
+    // A written `Missing` (or `NaN`) arm takes the NaN of the shape of the
+    // other arm (`gpuAbsentArm`).
+    const values = [args[1], args[2]];
     const arm = (i: 1 | 2): string =>
-      gpuSelectionArm('If', args[i], compile(args[i], i), complex, target);
+      gpuSelectionArm(
+        'If',
+        args[i],
+        compile(args[i], i),
+        complex,
+        target,
+        values
+      );
     // An arm that needs statements, or that repeats a subexpression a
     // ternary would expand once per occurrence, takes the statement form;
     // the clause list is in `Which` shape, so its position 3 is the `If`
@@ -10504,7 +10570,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
                 e,
                 compile(e, i === 3 ? 2 : i),
                 complex,
-                target
+                target,
+                values
               )
             : compile(e, i),
         target
@@ -10574,8 +10641,18 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // With one complex value, a real value is lifted to `vec2(v, 0.0)`, and
     // the fall-through NaN is a `vec2` too.
     const complex = gpuSelectionIsComplex('Which', args);
+    // A written `Missing` (or `NaN`) value takes the NaN of the shape of the
+    // other values (`gpuAbsentArm`).
+    const values = args.filter((_, i) => i % 2 === 1);
     const value = (i: number): string =>
-      gpuSelectionArm('Which', args[i], compile(args[i], i), complex, target);
+      gpuSelectionArm(
+        'Which',
+        args[i],
+        compile(args[i], i),
+        complex,
+        target,
+        values
+      );
     // An arm, or a condition past the first, that needs statements takes the
     // statement form (`compileGPUStatementSelection`); the ternary chain
     // below cannot hold them.
@@ -10595,7 +10672,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         args,
         (e, i) =>
           i % 2 === 1
-            ? gpuSelectionArm('Which', e, compile(e, i), complex, target)
+            ? gpuSelectionArm(
+                'Which',
+                e,
+                compile(e, i),
+                complex,
+                target,
+                values
+              )
             : compile(e, i),
         target
       );

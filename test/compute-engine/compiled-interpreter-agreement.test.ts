@@ -194,6 +194,300 @@ describe('DECLARED PARAMETER TYPES IN COMPILED CALLS AND CALLBACKS', () => {
   });
 });
 
+// A user function with ONE clause accepts `NaN` at a parameter typed with a
+// numeric type (`real`, `integer`, …), and its body runs with `NaN`. A
+// multi-clause function refuses it, since no clause is the correct one for
+// `NaN`. Decision: `docs/ERROR-MODEL.md`, "A user function accepts `NaN` at
+// a numeric parameter — RULED 2026-09-30", amended 2026-10-17. The checking
+// shim of compiled code answered `NaN` without running the body.
+describe('NaN AT A NUMERIC PARAMETER OF A USER FUNCTION', () => {
+  for (const sig of ['(real) -> number', '(integer) -> number']) {
+    test(`one clause, ${sig}: the body runs with NaN on both routes`, () => {
+      const ce = new ComputeEngine();
+      ce.declare('f', sig);
+      ce.assign('f', ce.box(['Function', 7, 'x']));
+      ce.declare('y', 'number');
+      expect(ce.box(['f', 'NaN']).evaluate().re).toBe(7);
+      const c = compile(ce.box(['f', 'y']), { engine: ce } as any) as any;
+      expect(String(c.code)).toBe('_fn_f$t(_.y)');
+      expect(c.run({ y: NaN })).toBe(7);
+      // A number that is not NaN is still tested.
+      if (sig.startsWith('(integer)')) expect(c.run({ y: 1.5 })).toBeNaN();
+      expect(c.run({ y: Infinity })).toBeNaN();
+      ce.assign('y', ce.NaN);
+      expect(ce.box(['f', 'y']).evaluate().re).toBe(7);
+    });
+  }
+
+  test('a failed check gives the marker of the declared result type', () => {
+    // When an argument fails the test of its declared parameter type, the
+    // checking shim gives the absence marker of the declared result:
+    // `undefined` for a collection, `NaN` for a number, and `NaN` for a
+    // result typed `unknown`. The interpreter answers the
+    // `incompatible-type` error in each case.
+    const run = (sig: string, body: unknown) => {
+      const ce = new ComputeEngine();
+      ce.declare('f', sig);
+      ce.assign('f', ce.box(['Function', body, 'x'] as any));
+      ce.declare('w', 'number');
+      ce.declare('x', 'real');
+      const c = compile(ce.box(['f', 'w']), { engine: ce } as any) as any;
+      expect(String(c.code)).toBe('_fn_f$t(_.w)');
+      return { ce, value: c.run({ w: Infinity }) };
+    };
+    const list = run('(real) -> list<real>', ['List', 'x', 1]);
+    expect(list.value).toBeUndefined();
+    expect(run('(real) -> number', 7).value).toBeNaN();
+    expect(run('(real) -> unknown', 7).value).toBeNaN();
+
+    // A list consumer tests the checked call before it reads it as an
+    // array. A call whose argument is proven has no shim and no test.
+    const ce = list.ce;
+    const joined = compile(ce.box(['Join', ['List', 9], ['f', 'w']]), {
+      engine: ce,
+    } as any) as any;
+    expect(String(joined.code)).toBe(
+      '((_tv1) => ((_tv1 === undefined) ? undefined : [...([9]), ...(_tv1)]))(_fn_f$t(_.w))'
+    );
+    expect(joined.run({ w: Infinity })).toBeUndefined();
+    expect(joined.run({ w: 2 })).toEqual([9, 2, 1]);
+    const proven = compile(ce.box(['Join', ['List', 9], ['f', 'x']]), {
+      engine: ce,
+    } as any) as any;
+    expect(String(proven.code)).toBe('[...([9]), ...(_fn_f(_.x))]');
+  });
+
+  test('the marker is read from the result without its missing arm; a boolean result is undefined', () => {
+    const shim = (sig: string, body: unknown, expr: unknown) => {
+      const ce = new ComputeEngine();
+      ce.declare('f', sig);
+      ce.assign('f', ce.box(['Function', body, 'x'] as any));
+      ce.declare('w', 'number');
+      const c = compile(ce.box(expr as any), { engine: ce } as any) as any;
+      const line = String(c.preamble)
+        .split('\n')
+        .find((l: string) => l.startsWith('const _fn_f$t ='));
+      return { ce, c, line: line ?? '' };
+    };
+    // `list<real> | missing` is a collection: `undefined`, and the `Join`
+    // tests it before the spread.
+    const opt = shim(
+      '(real) -> list<real> | missing',
+      ['List', 'x', 1],
+      ['Join', ['List', 9], ['f', 'w']]
+    );
+    expect(opt.line.endsWith(': undefined;')).toBe(true);
+    expect(opt.c.run({ w: Infinity })).toBeUndefined();
+    expect(opt.c.run({ w: 2 })).toEqual([9, 2, 1]);
+    // `list | number` is not a collection. With a body that can give a
+    // number or a list, the type of the call is `number | vector<2>` too,
+    // and the shim keeps `NaN`.
+    const mixed = shim(
+      '(real) -> list | number',
+      ['Which', ['Greater', 'x', 0], ['List', 'x', 1], 'True', 'x'],
+      ['f', 'w']
+    );
+    expect(mixed.line.endsWith(': NaN;')).toBe(true);
+    expect(mixed.c.run({ w: Infinity })).toBeNaN();
+    // A boolean result: `undefined`, the absent boolean. `If` of it has no
+    // value, which a numeric result holds as `NaN`; the interpreter answers
+    // the `incompatible-type` error.
+    const bool = shim(
+      '(real) -> boolean',
+      ['Greater', 'x', 0],
+      ['If', ['f', 'w'], 1, 2]
+    );
+    expect(bool.line.endsWith(': undefined;')).toBe(true);
+    expect(bool.c.run({ w: Infinity })).toBeNaN();
+    expect(bool.c.run({ w: 3 })).toBe(1);
+    bool.ce.assign('w', Infinity);
+    expect(
+      bool.ce
+        .box(['If', ['f', 'w'], 1, 2])
+        .evaluate()
+        .toString()
+    ).toMatch(/^Error\(ErrorCode\("incompatible-type", "real"/);
+  });
+
+  test('a declared result `list | number`: the marker follows the type of the call', () => {
+    // The type of a call is narrowed to the type of the body. With
+    // `f := x ↦ [x, 1]`, `f(w)` is a `vector<2>`, so `Join` spreads it, and
+    // a failed check must give `undefined`, which the `Join` tests. The
+    // shim gave `NaN`, chosen from the declared `list | number`, and the
+    // spread threw.
+    const ce = new ComputeEngine();
+    ce.declare('f', '(real) -> list | number');
+    ce.assign('f', ce.box(['Function', ['List', 'x', 1], 'x'] as any));
+    ce.declare('w', 'number');
+    const c = compile(ce.box(['Join', ['List', 9], ['f', 'w']]), {
+      engine: ce,
+      fallback: false,
+    } as any) as any;
+    expect(String(c.preamble)).toContain(': undefined;');
+    expect(c.run({ w: 2 })).toEqual([9, 2, 1]);
+    expect(c.run({ w: Infinity })).toBeUndefined();
+
+    // A body that can return a number: the call is typed
+    // `number | vector<2>`, which `Join` does not spread, so the
+    // compilation declines and the interpreter answers. The interpreter
+    // joins a number as one element: `Join([9], 3)` is `[9, 3]`.
+    const ce2 = new ComputeEngine();
+    ce2.declare('f', '(real) -> list | number');
+    ce2.assign(
+      'f',
+      ce2.box([
+        'Function',
+        ['Which', ['Greater', 'x', 0], ['List', 'x', 1], 'True', 'x'],
+        'x',
+      ] as any)
+    );
+    ce2.declare('w', 'number');
+    const join = ce2.box(['Join', ['List', 9], ['f', 'w']]);
+    expect(() =>
+      compile(join, { engine: ce2, fallback: false } as any)
+    ).toThrow(/operand 2 is not an indexed collection/);
+    const fallback = compile(join, { engine: ce2 } as any) as any;
+    expect(fallback.success).toBe(false);
+    expect(fallback.run({ w: -3 })).toEqual([9, -3]);
+    expect(fallback.run({ w: 2 })).toEqual([9, 2, 1]);
+  });
+
+  test('a checked call of a block-local function with a collection result is tested before the spread', () => {
+    const ce = new ComputeEngine();
+    ce.declare('w', 'number');
+    const block = ce.box([
+      'Block',
+      ['Declare', 'g', { str: '(real) -> list<real>' }],
+      ['Assign', 'g', ['Function', ['List', 'x', 1], 'x']],
+      ['Join', ['List', 9], ['g', 'w']],
+    ] as any);
+    const c = compile(block, { engine: ce, fallback: false } as any) as any;
+    expect(String(c.code)).toContain('(_tv1 === undefined) ? undefined :');
+    expect(c.run({ w: Infinity })).toBeUndefined();
+    expect(c.run({ w: 2 })).toEqual([9, 2, 1]);
+  });
+
+  describe('the guard of a checked call', () => {
+    const setup = () => {
+      const ce = new ComputeEngine();
+      ce.declare('F', '(real) -> list<real>');
+      ce.assign('F', ce.box(['Function', ['List', 'x', 1], 'x']));
+      ce.declare('w', 'number');
+      return ce;
+    };
+
+    test('a compilation that fails leaves no alias behind', () => {
+      // `G` cannot be compiled (`Foo` has no lowering). The guard of
+      // `Join(F(w), G(w))` compiles the initializer of `F(w)`, then fails
+      // on `G(w)`. The node `F(w)` was left aliased to the temporary of
+      // the failed binding, and the next compilation of the same node
+      // emitted that unbound temporary (`[...([9]), ...(_tv1)]`).
+      const ce = setup();
+      ce.declare('G', '(real) -> list<real>');
+      ce.assign('G', ce.box(['Function', ['List', ['Foo', 'x'], 1], 'x']));
+      const fw = ce.box(['F', 'w']);
+      const gw = ce.box(['G', 'w']);
+      expect(() =>
+        compile(ce.function('Join', [fw, gw]), {
+          engine: ce,
+          fallback: false,
+        } as any)
+      ).toThrow(/Foo/);
+      const c = compile(ce.function('Join', [ce.box(['List', 9]), fw]), {
+        engine: ce,
+        fallback: false,
+      } as any) as any;
+      expect(String(c.code)).toBe(
+        '((_tv1) => ((_tv1 === undefined) ? undefined : [...([9]), ...(_tv1)]))(_fn_F$t(_.w))'
+      );
+      expect(c.run({ w: 2 })).toEqual([9, 2, 1]);
+    });
+
+    // Run `c` with `Math.random` replaced by a counter: the n-th draw is
+    // `0.25 · n`. Returns the value and the number of draws.
+    const counted = (c: any, w: number) => {
+      let draws = 0;
+      const spy = jest
+        .spyOn(Math, 'random')
+        .mockImplementation(() => 0.25 * ++draws);
+      try {
+        return { value: c.run({ w }), draws };
+      } finally {
+        spy.mockRestore();
+      }
+    };
+
+    test('the same impure checked call twice draws twice', () => {
+      // One node `F(w · Random())` used as both operands of `Join`. The
+      // interpreter evaluates each operand, so there are two draws. Each
+      // position has its own binding, and both are tested: a failed check
+      // gives `undefined` (an unguarded spread of it threw).
+      const ce = setup();
+      const rnd = ce.box(['F', ['Multiply', 'w', ['Random']]]);
+      const c = compile(ce.function('Join', [rnd, rnd]), {
+        engine: ce,
+        fallback: false,
+      } as any) as any;
+      expect(counted(c, 1)).toEqual({ value: [0.25, 1, 0.5, 1], draws: 2 });
+      expect(counted(c, Infinity)).toEqual({ value: undefined, draws: 2 });
+    });
+
+    test('an impure operand beside a guarded one is bound and tested too', () => {
+      // `Join(rnd, Join([7], rnd))`: the second operand is not a checked
+      // call, but it is impure, so it is bound and evaluated before the test,
+      // in operand order, and it is tested for absence (the inner `Join`
+      // gives `undefined` at a failed check). The guard declined here
+      // before, and the spread of `undefined` threw.
+      const ce = setup();
+      const rnd = ce.box(['F', ['Multiply', 'w', ['Random']]]);
+      const c = compile(
+        ce.function('Join', [
+          rnd,
+          ce.function('Join', [ce.box(['List', 7]), rnd]),
+        ]),
+        { engine: ce, fallback: false } as any
+      ) as any;
+      expect(counted(c, 1)).toEqual({
+        value: [0.25, 1, 7, 0.5, 1],
+        draws: 2,
+      });
+      expect(counted(c, Infinity)).toEqual({ value: undefined, draws: 2 });
+    });
+
+    test('the same pure checked call twice is bound once', () => {
+      const ce = setup();
+      const fw = ce.box(['F', 'w']);
+      const c = compile(ce.function('Join', [fw, fw]), {
+        engine: ce,
+        fallback: false,
+      } as any) as any;
+      expect(c.run({ w: 2 })).toEqual([2, 1, 2, 1]);
+      expect(c.run({ w: Infinity })).toBeUndefined();
+    });
+  });
+
+  test('several clauses: NaN selects no clause on both routes', () => {
+    const ce = new ComputeEngine();
+    ce.box([
+      'DefineFunction',
+      'g',
+      ['Function', 1, ['Typed', 'n', { str: 'integer' }]],
+    ]).evaluate();
+    ce.box([
+      'DefineFunction',
+      'g',
+      ['Function', 2, ['Typed', 's', { str: 'string' }]],
+    ]).evaluate();
+    expect(ce.box(['g', 'NaN']).evaluate().toString()).toMatch(
+      /^Error\(.*incompatible-type/
+    );
+    const c = compile(ce.box(['g', 'y']), { engine: ce } as any) as any;
+    expect(c.success).toBe(true);
+    expect(c.run({ y: 3 })).toBe(1);
+    expect(() => c.run({ y: NaN })).toThrow('no-matching-clause: g');
+  });
+});
+
 describe('A PARAMETER THAT REACHES A WHOLE-COLLECTION OPERATOR INDIRECTLY', () => {
   const ce = new ComputeEngine();
   ce.declare('v', 'list<number>');

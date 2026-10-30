@@ -52,13 +52,18 @@ export interface StoredKernel {
   /** The batch body of a `javascript` result, as the result carries it
    * (`StoredBatchBody`). */
   batch?: StoredBatchBody;
+  /** The free variables declared `boolean` of an `interval-js` result
+   * (`CompilationResult.booleanInputs`). */
+  booleanInputs?: string[];
 }
 
 /** The inputs of a batch in wire form: the names and, in the same order, a
  * `Float64Array` per array variable or a number per scalar variable. */
 export interface WireInputs {
   names: string[];
-  values: (Float64Array | number)[];
+  /** A boolean and an array of booleans are the scalar and the column of a
+   * boolean variable, for both targets. */
+  values: (Float64Array | number | boolean | readonly boolean[])[];
 }
 
 /** The shared inputs of a `javascript` batch in wire form: the names and, in

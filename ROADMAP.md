@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-651.
+Next free reference: CE-657.
 
 **Entry format.**
 
@@ -3287,6 +3287,104 @@ correctly:
 Expected: the compiled code gives the interpreter's result for every case in the
 first list, or refuses it, and compiles every case in the second list.
 
+### CE-651. interval-js: a `Break` condition that compares an interval input with a number never runs
+
+**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
+CE-636. Also at HEAD `fee72a864`.
+
+`Block(n ≔ 0; Loop(Block(n ≔ i; If(i > x, Break)), i ∈ 1..5); n + 1)` at
+`x = 2`: the interpreter and Python give 4. `interval-js` gives the point
+interval 6. In a `Loop` body, the statement-form `If` of the `Break` is
+emitted as `if (_.x !== undefined && (_.x < i)) { break }`. On `interval-js`,
+`_.x` is an interval object, so the JavaScript comparison `_.x < i` is always
+false and the loop never stops early. Expected: the condition of a statement
+`If` on `interval-js` goes through the interval comparison, and the compiler
+refuses the loop when the comparison is not certain over the whole input
+interval, because a loop cannot take both paths.
+
+### CE-652. JavaScript, GLSL, WGSL: a `Sum`/`Product` bound that names the loop index reads the new index
+
+**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
+CE-636. Also at HEAD `fee72a864`.
+
+In `Sum(n, Limits(n, 1, n))` the upper bound `n` is evaluated in the
+enclosing scope: it is the outer `n`, not the index. With
+`Block(Declare(n); If(x > 3, n ≔ 5); Sum(n, Limits(n, 1, n)))` at `x = 5`, the
+interpreter and Python give 15. JavaScript gives 1: the loop is emitted as
+`let n = 1; const _upper = Math.floor(n); …`, so the bound reads the new index
+(five template strings in `javascript-target.ts`). A lower bound that names the
+index, `Limits(n, n, 10)`, becomes `let n = n`, which throws a `ReferenceError`
+when the code runs. GLSL and WGSL emit `for (int n = 1; n <= int(floor(n));
+n++)`, which reads the index in the test at each pass. Python and `interval-js`
+evaluate the bounds in the enclosing scope and are correct. Expected: every
+target evaluates the bounds before the index is declared, or gives the index
+a fresh name when a bound names it.
+
+### CE-653. JavaScript: a `Return` inside a block used as a value returns only from that block
+
+**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
+CE-636. Also at HEAD `fee72a864`.
+
+In `Block(tmp ≔ Block(42, Return(0)); tmp + 1)` the interpreter's result is
+`Return(0)`: a `Return` ends the whole program. The `javascript` target
+compiles the inner block as a nested function whose `return` gives only the
+value of that block, so the outer block continues and gives 1. Expected: a
+`Return` in a value position ends the compiled function, as in the
+interpreter, or the compiler refuses it.
+
+### CE-654. Compiled code: a constant shortcut drops an assignment in the operand it skips
+
+**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
+CE-636. Also at HEAD `fee72a864`.
+
+Several lowerings return a constant without evaluating an operand: the
+JavaScript `Power` handler returns `1` when the exponent is the constant 0
+(`javascript-target.ts`, `if (eConst === 0) return '1';`), the GLSL and WGSL
+handlers return `1.0` (`gpu-target.ts`), and the JavaScript `Multiply` lowering
+returns `0` for an operand that is the literal 0. When the skipped operand
+contains an assignment, the assignment does not happen. Example:
+`Block(Declare(y, integer); s ≔ Power(Block(y ≔ 1; x), 0); y)`. The interpreter
+gives 1. At HEAD, JavaScript returned `undefined`, and GLSL and WGSL read an
+unassigned `y`. Since CE-636, JavaScript throws `read-before-declaration` at
+the read, and GLSL and WGSL refuse. Expected: a shortcut applies only when the
+skipped operand has no effect (no assignment, and pure). Otherwise the operand
+is evaluated and its value discarded. When every lowering keeps this rule, the
+operators can return to the list that the CE-636 analysis treats as evaluating
+all operands (`STRICT_OPERATORS` in `base-compiler.ts`).
+
+### CE-655. interval-js: a `Loop` over `Range(1, x)` with an input bound gives 0
+
+**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
+CE-636. Also at HEAD `fee72a864`.
+
+A `Loop` statement whose range has an input as its upper bound, for example
+`Block(s ≔ 0; Loop(s ≔ s + i, i ∈ Range(1, x)); s)` at `x = 3`, gives 0 on
+`interval-js`. The interpreter gives 6. Expected: the loop runs over the range
+when the bound interval is a single integer, and the compiler refuses the loop
+when the bound interval holds more than one integer, because the number of
+passes is then not known.
+
+### CE-656. JavaScript: a condition on a block local that holds an absent input is decided
+
+**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
+CE-636. Also at HEAD `fee72a864`.
+
+`Block(Declare(y, integer); v ≔ w; If(v > 0, y ≔ 1, y ≔ 2); y)` with the input
+`w` not supplied: the interpreter cannot decide `v > 0`, runs neither branch,
+and gives the symbol `y`. JavaScript emits
+`v = _.w; ((0 < v) ? (y = 1) : (y = 2)); return y` and gives 2. With the input
+in the condition directly, `If(w > 0, 1, 2)` gives `null`, because the
+condition gets the guard `_.w !== undefined`. `operandInputNodes()` in
+`base-compiler.ts`, which decides which operands of a condition may be absent,
+follows a symbol to its value only through the engine's global value, not
+through an assignment to a block local. The same happens with `v ≔ 2w`, a
+declared `v`, a value from a loop, a function parameter that receives an absent
+input, and an outer block local read in a nested block. The CE-636 analysis
+reads the same answer, so it treats such a condition as decided. Expected: a
+condition operand that is a block local or a parameter whose value can come
+from an absent input is treated as possibly absent, so the condition gets the
+guard.
+
 ### CE-643. Compilation: the shared-subexpression harvest takes about 0.6 s for 160 repeated terms
 
 **Status:** open; defect (speed). Found 2026-10-30 in the review of CE-595.
@@ -3847,75 +3945,6 @@ deliberate factor of three. The composed hyperbolic and reciprocal routines are
 built from unrounded kernels and take one rounding step at their own export,
 except `remainder`, whose three-operation composition takes three.
 
-### CE-631. javascript: a bare `Not(c)` gives `true` for an unsupplied `c`
-
-**Status:** open; defect. Found 2026-10-30.
-
-With `c` declared `boolean`, `ce.box(['Not', 'c']).compile().run({})` returns
-`true` (the code is `!_.c`), and with `c = 1` it returns `false`. The
-interpreter keeps `¬c` unevaluated in both cases, so the compiled value should
-be the absence marker. Inside a condition (`If`, `When`, `Which`), `Not` is
-already lowered with three values and is correct; only a `Not` whose value is
-the result is wrong. Check `And`, `Or` and `Xor` as results too.
-
-### CE-632. interval-js: a boolean input is read as "maybe"
-
-**Status:** open; defect, needs a decision on the input form. Found 2026-10-30.
-
-The interval runner reads a `boolean` variable as one of the strings `'true'`,
-`'false'` or `'maybe'`. A JavaScript `true` or `false` is read as `'maybe'`:
-with `c: true`, `If(c, 1, 2)` gives the hull `[1, 2]`, and `When(x, false)`
-gives a partial `[2, 2]` instead of an empty result. The input type
-`IntervalInput` admits neither form, so a caller must cast. The choice: accept
-JavaScript booleans (and map them to `'true'`/`'false'`), or document the string
-form and admit it in the type.
-
-### CE-633. `broadcast()` cannot bind a `boolean` variable
-
-**Status:** open; defect. Found 2026-10-30.
-
-`broadcast()` on the javascript target refuses a `boolean` variable with "must
-be a Float64Array or a number", although `run()` accepts it. The column input of
-`broadcast()` has no boolean form; an array of booleans (or a `Uint8Array`)
-would be the natural one.
-
-### CE-634. javascript: a number passed for a `string` variable is accepted silently
-
-**Status:** open; decision. Found 2026-10-30.
-
-With `s` declared `string`, `If(s = "a", 1, 2)` run with `s = 3` gives `2`
-(`_SYS.eqt(3, "a")` is `false`); the interpreter would refuse the value at
-assignment. Since 2026-10-30 a boolean or a string passed for a variable
-declared with a number type throws (`refuseNonNumberAtScalar` in
-`javascript-runtime.ts`); a number for a `boolean` variable is accepted on
-purpose (the condition is undecided, as in the interpreter). Decide whether a
-number for a `string` variable is refused or kept, and pin it.
-
-### CE-589. The type of a compiled `run()` refuses a boolean input that the `javascript` target accepts
-
-**Status:** open; defect (public type). Found 2026-10-28.
-
-With `c` declared `boolean`,
-`ce.box(['When', 'x', 'c']).compile().run({ x: 2, c: true })` returns `2` at run
-time, but TypeScript refuses the call: the variable type of a runner is
-`number | ComplexResult | RunnerListInput` (`DefaultRunnerVars` and
-`JavaScriptCompilationTarget` in `compilation/types.ts`), with no `boolean`. A
-caller must cast. The list case of the same type was fixed as CE-581. Check what
-the entry guards of the `javascript` target do with a boolean for a `real`
-variable before widening the type, and whether a list of booleans should be
-admitted too.
-
-### CE-588. An `If` whose written else branch is `Missing` beside a point value compiles wrongly on GLSL and Python
-
-**Status:** open; defect. Found 2026-10-28.
-
-`If(c, (x, y), Missing)` compiles on GLSL to a ternary whose else branch is a
-scalar NaN beside a `vec2` branch, which is not a valid shader, and on Python to
-`math.nan`, where the interpreter gives `Missing` (`None` in Python). The
-else-less `If(c, (x, y))` and `When((x, y), c)` give the right absence marker on
-each target (`vec2` NaN on GLSL, `None` on Python), so the written `Missing`
-branch must be compiled with the marker of the other branch's shape.
-
 ### CE-568. CSE: share a pure call across the statements of a `Block`
 
 **Status:** open; performance.
@@ -3942,36 +3971,6 @@ probe found an unsound type: each answer contains the values of `F(0)` … `F(5)
 The derived result of the binding is kept by whichever read derives it first.
 `definition-order.test.ts` already pins order independence for compiled results;
 a check of this case belongs there.
-
-### CE-579. javascript: `asOklab(c_f)` in Tycho `art/s8ishknvhe` declines during the Tycho compile only
-
-**Status:** open; defect (probably the same cause as the recursive-signature fix
-of 2026-10-27, `_deriveSignatureOnce` in `boxed-value-definition.ts`).
-
-The row compiled at CE 0.171.0 (it mapped `N` over the list of points, as the
-interpreter does) and declines at HEAD: "the argument `C_c` has the type
-`list<tuple<…>>`, which does not match the type `tuple<number, number, number>`
-of the parameter". During Tycho's compile of the row, `C_c` is typed
-`list<tuple<list<…> | number | tuple, …>>`; after the run it is
-`list<tuple<number, number, number>>` and the compile succeeds. `F` is a
-recursive function declared `function`, like `R` in Tycho `ndqj7hupta`, whose
-decline the recursive-signature fix of 2026-10-27 removed. Not reproduced
-without Tycho. The interpreter cannot give the row's value with the document's
-`D = 10000` (the iteration limit is reached, at 0.171.0 too); with `D = 4` it
-applies `N` to each point.
-
-Checked by Tycho on 2026-10-30 with CE 0.174.0, which has that fix: the row is
-no longer reached. With Tycho's probe
-`scripts/repros/2026-10-23-d298-s8is-bind-throw-probe.mts`, `F(0)` is now typed
-`list<tuple<number, number, number>>` (narrow), but evaluating the body of
-`c_{Cc}` in the document engine throws "Maximum call stack size exceeded" after
-31.6 s, the resolver times out on `C_c`, and the compile of `F(0)` declines
-because of the same overflow. The same failure occurs on 0.173.0. The probe
-expected `C_c` to resolve in under 100 ms after a Tycho fix of 2026-10-23, so a
-change after that date (in Tycho or in CE) made the evaluation recurse without
-end. Tycho is finding which change. Also seen: `C_{cf}` evaluates to an
-`incompatible-type` error, a `PointList` where `tuple<number, number, number>`
-is expected, which may be the shape of the original decline.
 
 ### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
 

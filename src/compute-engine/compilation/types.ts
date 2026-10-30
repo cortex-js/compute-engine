@@ -1770,6 +1770,19 @@ export interface CompileTarget<Expr = unknown> {
   varsObjectName?: string;
 
   /**
+   * The parameters of a compiled lambda that a caller can omit and that a
+   * comparison must then read as having no value: those annotated `string`
+   * (or `string | missing`). An omitted argument is `undefined`, and
+   * `_SYS.eqt(undefined, "a")` is an ordinary `false`, so
+   * `(t: string) ↦ If(t = "a", 1, 2)` called with no argument took the
+   * else arm. A comparison over such a parameter tests it for `undefined`,
+   * as it tests a read of the vars object. A parameter of another type is
+   * not listed: a number parameter that is omitted reads as NaN, and its
+   * comparisons are decided by the IEEE rules.
+   */
+  omittableParams?: ReadonlySet<string>;
+
+  /**
    * Identifiers this target bakes into emitted code as LITERAL tokens — the
    * runtime helper namespaces (`_SYS` on JavaScript, `_IA` on the interval
    * target). A function parameter spelled like one shadows it for that
@@ -2362,8 +2375,21 @@ export type IntervalValue =
  * collection-valued variable, read by `At`/`Length`/`PointX`… — an array of
  * these, nested as the collection is; every number in it is converted to a
  * point interval on the way in.
+ *
+ * A variable declared `boolean` takes a JavaScript boolean or a
+ * {@link BoolInterval} string. The runner converts `true` to `'true'` and
+ * `false` to `'false'` on the way in, the strings the compiled code tests.
+ * `'maybe'` says that the condition can be either value, and the result
+ * covers both: `If(c, 1, 2)` gives `[1, 2]` for `c = 'maybe'`, `1` for
+ * `c = true` or `c = 'true'`. When the result runs the interpreter (an
+ * expression this target cannot compile), the strings are read as the
+ * booleans for a variable declared `boolean` (`'maybe'` as a variable with
+ * no value), and as text for a variable declared `string`. `broadcast()`
+ * takes a JavaScript boolean (every cell) or a plain array of booleans
+ * (one per cell, not a pair), and not the strings.
  */
-export type IntervalInput = number | Interval | IntervalInput[];
+export type IntervalInput =
+  number | Interval | boolean | BoolInterval | IntervalInput[];
 
 /**
  * The `interval-js` target, typed concretely: its compiled `run` accepts
@@ -2380,16 +2406,17 @@ export type IntervalJsCompilationTarget<Expr = unknown> = LanguageTarget<
 
 /**
  * The `javascript` target, typed concretely: its compiled `run` accepts
- * `number | ComplexResult | RunnerListInput` variables (plain reals, complex
- * domain-coloring inputs, or a list for a symbol that the code reads as a
- * list) and returns a `CompiledValue`. Returned by
- * `_getCompilationTarget("javascript")`.
+ * `number | boolean | string | ComplexResult | RunnerListInput` variables
+ * (plain reals, booleans, strings, complex domain-coloring inputs, or a
+ * list for a symbol that the code reads as a list) and returns a
+ * `CompiledValue`. Returned by `_getCompilationTarget("javascript")`. This
+ * is the same value type as {@link DefaultRunnerVars}.
  */
 export type JavaScriptCompilationTarget<Expr = unknown> = LanguageTarget<
   Expr,
   'javascript',
   CompiledValue,
-  number | ComplexResult | RunnerListInput
+  number | boolean | string | ComplexResult | RunnerListInput
 >;
 
 /**
@@ -2548,6 +2575,15 @@ export interface CompilationOptions<Expr = unknown> {
    * and a string bound to one declared with a list or collection type whose
    * elements are not text (`indexed_collection`, `list<number>`) throws a
    * `TypeError` naming it, because the compiled code reads it as an array.
+   * An array, a boolean or a string bound to a symbol or parameter that the
+   * host declared with a number type (`x: real`) throws a `TypeError` naming
+   * it, and so does any value but a string (or `undefined`, an unsupplied
+   * variable) bound to one declared `string`: JavaScript would convert the
+   * value silently (`x + 1` gives `2` for `x = true`). A symbol whose type
+   * the engine inferred, one declared with a wider type (`real | boolean`,
+   * `any`), an unannotated parameter, and a `boolean` one are not checked
+   * this way; a value that is not a boolean leaves a condition on a
+   * `boolean` symbol undecided (the result is `NaN`).
    * The entries of a list are never read and a returned collection is never
    * copied: the compiled route requires inputs of the shape the code reads
    * (plain arrays, not typed arrays) and its results are read-only by
@@ -2929,9 +2965,19 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  * target but not a `V`, selected on the same target-dependent basis as
  * {@link DefaultRunnerResult}: `interval-js` binds variables to intervals (a
  * plain number is auto-converted to a point interval), while every other
- * executable target accepts a real or a complex domain-coloring input, or a
- * list of them ({@link RunnerListInput}) for a symbol that the compiled code
- * reads as a list.
+ * executable target accepts a real, a complex domain-coloring input, a
+ * boolean (for a symbol declared `boolean`), a string (for a symbol declared
+ * `string`), or a list of these ({@link RunnerListInput}) for a symbol that
+ * the compiled code reads as a list.
+ *
+ * The type does not relate a value to the declared type of its symbol: it
+ * admits `true` for a symbol declared `real`. On the `javascript` target,
+ * the entry guards (the default `entryChecks`) refuse such a value at run
+ * time with a message that names the variable: an array, a boolean or a
+ * string for a symbol declared with a number type, and any value but a
+ * string for a symbol declared `string`. A symbol declared
+ * `boolean` accepts any value: a value that is not a boolean leaves a
+ * condition on it undecided, and the result is NaN.
  *
  * Deliberately keyed on the TARGET and not on the compilation MODE, even
  * though a complex variable is only meaningful under `mode: 'complex'`. On the
@@ -2957,17 +3003,20 @@ export type DefaultRunnerResult<T extends string> = T extends 'interval-js'
  */
 export type DefaultRunnerVars<T extends string> = T extends 'interval-js'
   ? IntervalInput
-  : number | ComplexResult | RunnerListInput;
+  : number | boolean | string | ComplexResult | RunnerListInput;
 
 /**
- * A list argument of a compiled runner: an array of numbers, of complex
- * values or of such lists (a list of points is an array of arrays). The
- * `javascript` target reads it for a symbol that it compiles as a list
- * (`run({ S: [1, 2, 3] })` for `S: list<real>`). A typed array
- * (`Float64Array`) is refused at run time, with a message.
+ * A list argument of a compiled runner: an array of numbers, of booleans,
+ * of strings, of complex values or of such lists (a list of points is an
+ * array of arrays). The `javascript` target reads it for a symbol that it
+ * compiles as a list (`run({ S: [1, 2, 3] })` for `S: list<real>`,
+ * `run({ B: [true, false] })` for `B: list<boolean>`). A typed array
+ * (`Float64Array`) is refused at run time, with a message. The entries are
+ * not checked at run time: an entry of the wrong type computes as it would
+ * in plain JavaScript.
  */
 export type RunnerListInput = ReadonlyArray<
-  number | ComplexResult | RunnerListInput
+  number | boolean | string | ComplexResult | RunnerListInput
 >;
 
 /**
@@ -3005,9 +3054,10 @@ export type LambdaRunner<R = CompiledValue, V = number> = (...args: V[]) => R;
  * (the `javascript` target's real-valued convention). Non-`number` targets
  * bind it to their own value type — e.g. `interval-js` uses
  * `number | Interval` (a plain number is auto-converted to a point interval),
- * and the `javascript` runner uses `number | ComplexResult | RunnerListInput`
- * (a complex domain-coloring input, or a list for a symbol that the code
- * reads as a list).
+ * and the `javascript` runner uses
+ * `number | boolean | string | ComplexResult | RunnerListInput` (a boolean or
+ * a string for a symbol declared with that type, a complex domain-coloring
+ * input, or a list for a symbol that the code reads as a list).
  */
 export interface CompiledRunner<R = CompiledValue, V = number> {
   /** Call with a variables object (for compiled expressions) */
@@ -3033,9 +3083,18 @@ export type StoredEntryPlan = {
    * of the host, which stored data cannot carry, so a runtime refuses to
    * load a plan that lists one. */
   kinds?: (string | number)[];
-  /** The bindings that refuse an array: those that the host declared with
-   * a number type, which the compiled code reads as a scalar. */
+  /** The bindings that refuse an array, a boolean and a string: those that
+   * the host declared with a number type, which the compiled code reads as a
+   * scalar. */
   scalars?: (string | number)[];
+  /** The bindings that refuse any value but a string (and `undefined`, a
+   * binding the caller left out): those that the host declared `string`.
+   * They are not in `real` or `complex`. A plan stored without the field
+   * refuses nothing at such a binding. */
+  texts?: (string | number)[];
+  /** The symbols declared `boolean` (`vars` plans only). `broadcast()`
+   * reads an empty array for one as an empty column. */
+  booleans?: (string | number)[];
 };
 
 /**
@@ -3044,12 +3103,16 @@ export type StoredEntryPlan = {
  * or one number, the same value for every cell. A shared input of a
  * `javascript` result (a variable that the compiled code reads as a list, or
  * one that `BroadcastOptions.shared` names) is a plain array of numbers or a
- * `Float64Array`, bound once for the whole batch. See
+ * `Float64Array`, bound once for the whole batch. A variable declared
+ * `boolean` of a `javascript` result takes a boolean (every cell) or a plain
+ * array of booleans (one per cell), and so does one of an `interval-js`
+ * result; an empty array is an empty column for such a variable, and a
+ * `Uint8Array` is not accepted. See
  * `compilation/broadcast.ts` for the layouts and the output encoding.
  */
 export type BroadcastInputs = Record<
   string,
-  Float64Array | number | readonly number[]
+  Float64Array | number | readonly number[] | boolean | readonly boolean[]
 >;
 
 export interface BroadcastOptions {
@@ -3243,9 +3306,9 @@ export type StoredBatchBody = {
  *   — and see the arithmetic example below.
  * - `V` — the type of the variable/argument values `run` accepts. Defaults to
  *   `number`; `interval-js` binds it to `number | Interval`, the `javascript`
- *   runner to `number | ComplexResult | RunnerListInput`. (Positioned after
- *   `R` so existing
- *   `CompilationResult<T, R>` uses keep the `number` default.)
+ *   runner to `number | boolean | string | ComplexResult | RunnerListInput`.
+ *   (Positioned after `R` so existing `CompilationResult<T, R>` uses keep
+ *   the `number` default.)
  *
  * The `calling` field indicates which convention `run` uses:
  * - `'expression'` — call with a vars object: `run({ x: 0.5 })`
@@ -3306,12 +3369,24 @@ export type CompilationResult<
    * code reads them, at a constant cost per binding: a complex-declared
    * symbol given a real is lifted to `{re, im: 0}`, a complex value bound to
    * a real symbol is refused, a string bound to a symbol the code reads as an
-   * array is refused. The entries of a list are never read, and a typed
+   * array is refused, an array, a boolean or a string bound to a symbol
+   * declared with a number type is refused, and a value that is not a string
+   * bound to a symbol declared `string` is refused. Each refusal is a
+   * `TypeError` that names the binding. The entries of a list are never read, and a typed
    * array is not converted: the caller passes plain arrays. A runtime that
    * loads the stored code applies the same plan. Absent when there is
    * nothing to check.
    */
   entryPlan?: StoredEntryPlan;
+
+  /**
+   * `interval-js` only. The free variables declared `boolean` (or
+   * `boolean | missing`). `broadcast()` reads an empty array for one as an
+   * empty column, and a runtime that loads the stored code
+   * (`createIntervalRuntime().loadBroadcast`) reads it the same way. Absent
+   * when there is none.
+   */
+  booleanInputs?: string[];
 
   /**
    * JavaScript only. The value kind types (`gf8`, a type declared by the

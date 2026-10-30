@@ -47,6 +47,8 @@ echo "Checking CLI and type-level assertions..."
   ./test/compute-engine/user-collection-handlers.test.ts \
   ./test/compute-engine/declare-definition-input.test.ts \
   ./test/compute-engine/bigint-count.test.ts \
-  ./test/compute-engine/ce-581-runner-list-argument-type.test.ts
+  ./test/compute-engine/ce-581-runner-list-argument-type.test.ts \
+  ./test/compute-engine/ce-589-runner-boolean-input.test.ts \
+  ./test/compute-engine/ce-631-633-boolean-results-and-inputs.test.ts
 
 echo 'PASS typecheck'

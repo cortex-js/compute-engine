@@ -285,10 +285,13 @@ describe('CE-410: a connective of decided comparisons', () => {
     ])
   );
 
-  test('compiles to a plain conditional', () => {
+  test('tests the variables that the local reads', () => {
+    // `v0` holds `F[i + 1]`, which has no value while `F` or `i` has none,
+    // so each comparison of `v0` tests them, as a comparison of `F[i + 1]`
+    // itself does (`BaseCompiler.blockLocalValueFrame`).
     expect(decided.success).toBe(true);
-    expect(decided.code).not.toContain('_CND');
-    expect(decided.code).not.toContain('=== undefined');
+    expect(decided.code).toContain('_.F !== undefined && _.i !== undefined');
+    expect(decided.run!({ F: [0, -0.5] } as never)).toEqual([NaN, NaN, NaN]);
   });
 
   test('the same values as the interpreter, NaN included', () => {
@@ -316,7 +319,6 @@ describe('CE-410: a connective of decided comparisons', () => {
         ['If', ['Or', ['LessEqual', 'v0', 0], ['Greater', 'v0', 0]], 1, 0],
       ])
     );
-    expect(r.code).not.toContain('_CND');
     expect(r.run!({ i: 0, F: [NaN] } as never)).toBe(0);
     expect(r.run!({ i: 0, F: [3] } as never)).toBe(1);
   });

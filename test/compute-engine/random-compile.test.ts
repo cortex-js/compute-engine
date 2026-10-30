@@ -821,8 +821,10 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
   });
 
   test('JS: Equal keeps the pure emission (byte-identical pins)', () => {
+    // `x` has no declared type here; the chain still compiles to the scalar
+    // test, so an unsupplied `x` gives no value (user decision 2026-10-30).
     expect(jsCode(['Equal', 0.1, 'x', 0.9])).toBe(
-      '(((0.1) === (_.x)) && ((_.x) === (0.9)))'
+      '(((((0.1) === (_.x)) && ((_.x) === (0.9)))) || ((_.x !== undefined) ? false : undefined))'
     );
     // A PURE complex operand is spliced twice, once per component. `x·i` is
     // a real operand scaled by the two constants of the imaginary unit, so
@@ -1122,14 +1124,62 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     const i = withRandomSeedFrame(ce, 7, () => ce.box(probe).evaluate().re);
     expect(c).toBe(i);
     expect(c).toBe(draw(7, 0));
-    // A binding for operand 0 or 1 still wraps the whole chain (both are
-    // always evaluated), and a bound middle at index ≥ 2 nests further in.
-    expect(
-      jsCode(['Less', 'a', ['Add', 'b', 1], 'c', ['Add', 'd', 1], 'x'])
-    ).toBe(
-      '((_tv1) => (_.a < _tv1) && (_tv1 < _.c) && ' +
-        '((_tv2) => (_.c < _tv2) && (_tv2 < _.x))(_.d + 1))(_.b + 1)'
+    // A chain of PURE operands that reads variables the caller can leave
+    // out is the three-valued `And` of its links
+    // (`BaseCompiler.unsuppliedComparisonGuard`), so a link that decides
+    // `false` decides the chain while another variable has no value. Each
+    // computed operand is bound once, around the whole chain: it is pure,
+    // so evaluating it before the first link is decided changes no value.
+    const pure = ['Less', 'a', ['Add', 'b', 1], 'c', ['Add', 'd', 1], 'x'];
+    const code = jsCode(pure);
+    expect(code.startsWith('((_tv1, _tv2) => ')).toBe(true);
+    expect(code.endsWith(')(_.b + 1, _.d + 1)')).toBe(true);
+    const chain = compiled(ce, pure);
+    // `a < b + 1` is false, so the chain is false with `x` unsupplied.
+    expect(chain.run!({ a: 5, b: 1, c: 0, d: 0 })).toBe(false);
+    expect(chain.run!({ a: 0, b: 1, c: 3, d: 3 })).toBeUndefined();
+    expect(chain.run!({ a: 0, b: 1, c: 3, d: 3, x: 5 })).toBe(true);
+  });
+
+  test('JS: a chain that reads a variable does not draw an impure operand at index ≥ 2 up front', () => {
+    // `Less(x, 1, Random(), 0.9)` at `x = 5`: the first pair is `false`, so
+    // the interpreter never draws. A lowering that bound the index-2 draw
+    // around the whole chain (to test the chain as the `And` of its links)
+    // would draw once too often. Observed through the seeded stream: the
+    // following `Random()` must read draw 0 in both engines.
+    const probe = [
+      'Add',
+      ['Boole', ['Less', 'x', 1, ['Random'], 0.9]],
+      ['Random'],
+    ];
+    const r = compiled(ce, probe);
+    const c = withRandomSeedFrame(ce, 7, () => r.run!({ x: 5 }));
+    const i = withRandomSeedFrame(
+      ce,
+      7,
+      () => ce.box(probe).subs({ x: 5 }).evaluate().re
     );
+    expect(c).toBe(i);
+    expect(c).toBe(draw(7, 0));
+  });
+
+  test('JS: a repeated impure operand of a comparison draws at each occurrence', () => {
+    // `q = x + Random()` appears twice in `Less(q, q)`: each occurrence is
+    // its own draw, as in the interpreter. Binding the node once (to test
+    // the comparison for an unsupplied `x`) would draw once.
+    const q = ce.box(['Add', 'x', ['Random']]);
+    const expr = ce.function('Less', [q, q]);
+    const code =
+      compile(expr, { fallback: false, constantFold: false }).code ?? '';
+    expect((code.match(/drawNextRandomNumber/g) ?? []).length).toBe(2);
+    const probe = ce.function('Add', [
+      ce.function('Boole', [expr]),
+      ce.box(['Random']),
+    ]);
+    const r = compile(probe, { fallback: false });
+    const c = withRandomSeedFrame(ce, 7, () => r.run!({ x: 0 }) as number);
+    // Draws 0 and 1 are the two occurrences of `q`, draw 2 the last term.
+    expect(c).toBe((draw(7, 0) < draw(7, 1) ? 1 : 0) + draw(7, 2));
   });
 
   test('GLSL: an impure operand at index ≥ 2 that must be hoisted DECLINES', () => {
@@ -1189,9 +1239,11 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     expect(gpuCode(matchJSON('x'), 'wgsl')).toBe(
       'select(select(-1.0, 30.0, x == 3.0), 10.0, (x == 1.0 || x == 2.0))'
     );
-    // The JS chain (a `bindExpr` target) is untouched by the GPU arm.
+    // The JS chain (a `bindExpr` target) is untouched by the GPU arm. Each
+    // link reads `x`, so the plain chain runs first, and its `false` stands
+    // only when `x` has a value.
     expect(jsCode(['Less', 0.1, ['Add', 'x', 1], 0.9])).toBe(
-      '((_tv1) => (0.1 < _tv1) && (_tv1 < 0.9))(_.x + 1)'
+      '((((_tv1) => (0.1 < _tv1) && (_tv1 < 0.9))(_.x + 1)) || ((_.x !== undefined) ? false : undefined))'
     );
   });
 });

@@ -43,6 +43,9 @@ export interface StoredIntervalJavaScript {
   /** The value kind types whose compile contracts the code reads or makes
    * (`CompilationResult.valueKinds`). Code with one cannot be loaded. */
   valueKinds?: string[];
+  /** The free variables declared `boolean`
+   * (`CompilationResult.booleanInputs`). */
+  booleanInputs?: string[];
 }
 
 export interface IntervalRuntime {
@@ -115,6 +118,17 @@ function rawCallOf(
   return stage(IntervalArithmetic);
 }
 
+/** The `booleanInputs` of a stored result, when it is an array of names
+ * (stored data is plain data that a host can change). */
+function storedBooleanInputs(
+  stored: StoredIntervalJavaScript
+): string[] | undefined {
+  const b: unknown = stored.booleanInputs;
+  return Array.isArray(b) && b.every((n) => typeof n === 'string')
+    ? (b as string[])
+    : undefined;
+}
+
 export function createIntervalRuntime(): IntervalRuntime {
   return {
     runtimeVersion: INTERVAL_RUNTIME_VERSION,
@@ -135,14 +149,20 @@ export function createIntervalRuntime(): IntervalRuntime {
         }
       };
     },
+    // The variables declared `boolean` travel with the stored result
+    // (`CompilationResult.booleanInputs`): for them an empty array is an
+    // empty column, as in the `broadcast()` of the result.
     loadBroadcast: (stored) => {
       const raw = rawCallOf(stored);
-      return (inputs, options) => broadcastIntervals(raw, inputs, options);
+      const booleans = storedBooleanInputs(stored);
+      return (inputs, options) =>
+        broadcastIntervals(raw, inputs, options, booleans);
     },
     loadBroadcastSlice: (stored) => {
       const raw = rawCallOf(stored);
+      const booleans = storedBooleanInputs(stored);
       return (inputs, options, out, slice) =>
-        broadcastIntervalsSlice(raw, inputs, options, out, slice);
+        broadcastIntervalsSlice(raw, inputs, options, out, slice, booleans);
     },
   };
 }

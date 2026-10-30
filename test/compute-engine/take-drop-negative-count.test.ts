@@ -229,6 +229,41 @@ describe('a count that is not a safe integer, or is infinite', () => {
 
   test('NaN stays unevaluated', () => {
     expect(ce.box(['Take', L3, 'NaN']).evaluate().operator).toBe('Take');
+    expect(ce.box(['Drop', L3, 'NaN']).evaluate().operator).toBe('Drop');
+  });
+
+  test('compiled JavaScript gives no value for a NaN count', () => {
+    // The interpreter has no value for `Take(xs, NaN)`; compiled code gives
+    // `undefined`, the value of a list with no value (it gave `[]` for
+    // `Take` and the whole list for `Drop`). A non-integer count rounds as
+    // in the interpreter: `Take([1, 2, 3], 0.75)` is `[1]`. A count typed
+    // `integer` cannot be NaN, and its emission has no test.
+    const ce3 = new ComputeEngine();
+    ce3.declare('xs', 'list<number>');
+    ce3.declare('c', 'real');
+    ce3.declare('w', 'number');
+    ce3.declare('k', 'integer');
+    for (const op of ['Take', 'Drop']) {
+      const r = compile(ce3.box([op, 'xs', 'w'] as any), {
+        fallback: false,
+      }) as any;
+      expect(String(r.code)).toContain('Number.isNaN(_n) ? undefined :');
+      expect(r.run({ xs: [1, 2, 3], w: NaN })).toBeUndefined();
+      expect(r.run({ xs: [1, 2, 3], w: 0.75 })).toEqual(
+        op === 'Take' ? [1] : [2, 3]
+      );
+      expect(r.run({ xs: [1, 2, 3], w: Infinity })).toEqual(
+        op === 'Take' ? [1, 2, 3] : []
+      );
+      const integer = compile(ce3.box([op, 'xs', 'k'] as any), {
+        fallback: false,
+      }) as any;
+      expect(String(integer.code)).not.toContain('isNaN');
+    }
+    ce3.assign('xs', ce3.box(['List', 1, 2, 3] as any));
+    ce3.assign('c', 0.75);
+    expect(ce3.box(['Take', 'xs', 'c']).evaluate().toString()).toBe('[1]');
+    expect(ce3.box(['Drop', 'xs', 'c']).evaluate().toString()).toBe('[2,3]');
   });
 
   test('compiled JavaScript agrees with the interpreter', () => {
@@ -375,8 +410,8 @@ describe('compiled Python', () => {
 
   test('a count past every length clamps without overflow', () => {
     // A run-time count is clipped before `int()`: `int(inf)` raises
-    // `OverflowError`. The clip keeps a NaN, so `int()` still raises
-    // `ValueError` for it.
+    // `OverflowError`. A literal `±∞` count cannot be NaN, so it has no NaN
+    // test.
     expect(py(['Take', 'xs', 'PositiveInfinity'])).toBe(
       '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])(xs, int(np.clip(np.floor((np.inf) + 0.5), -9007199254740991, 9007199254740991)))'
     );
@@ -392,11 +427,19 @@ describe('compiled Python', () => {
   });
 
   test('a run-time count chooses the slice at run time', () => {
+    // A count that can be NaN gives `None`, the Python value of a list with
+    // no value, as the interpreter leaves `Take(xs, NaN)` unevaluated. The
+    // `int()` of a NaN raised `ValueError` before.
     expect(py(['Take', 'xs', 'n'])).toBe(
-      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])(xs, int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
+      '(lambda _l, _c: None if np.isnan(_c) else (lambda _n: _l[_n:] if _n < 0 else _l[:_n])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))(xs, n)'
     );
     expect(py(['Drop', 'xs', 'n'])).toBe(
-      '(lambda _l, _n: _l[:_n] if _n < 0 else _l[_n:])(xs, int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
+      '(lambda _l, _c: None if np.isnan(_c) else (lambda _n: _l[:_n] if _n < 0 else _l[_n:])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))(xs, n)'
+    );
+    // A count typed `integer` cannot be NaN: no test.
+    ce2.declare('k', 'integer');
+    expect(py(['Take', 'xs', 'k'])).toBe(
+      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])(xs, int(np.clip(np.floor((k) + 0.5), -9007199254740991, 9007199254740991)))'
     );
   });
 });

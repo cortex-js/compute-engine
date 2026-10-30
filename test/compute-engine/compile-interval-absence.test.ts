@@ -233,10 +233,12 @@ describe('a conditional with list-valued arms', () => {
       { kind: 'interval', value: iv(1, 3) },
       { kind: 'interval', value: iv(2, 5) },
     ]);
-    // Lengths that differ have no elementwise hull: the marker, which the
-    // runner answers as `empty`.
+    // Lengths that differ have no elementwise hull. The value is one list or
+    // the other, so the answer is `entire` ("cannot bound this"), not
+    // `empty`, which would say that there is no value (`hullValues`,
+    // `interval/comparison.ts`).
     expect(fn.run!({ x: iv(-1, 1), A, B: [iv(3, 3)] })).toEqual({
-      kind: 'empty',
+      kind: 'entire',
     });
   });
 });

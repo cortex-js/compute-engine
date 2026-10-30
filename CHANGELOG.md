@@ -51,7 +51,57 @@
   rational factor (`\frac{2}{3}x`), two symbols (`xy`), or a product whose size
   can overflow keeps the helper.
 
+### Behavior Changes
+
+- **JavaScript: a comparison over a variable the caller did not supply has no
+  value** (user decision 2026-10-30). With `x` declared `real`,
+  `compile("x > 0").run({})` gave `false`; it now gives `undefined`, as the
+  interpreter has no value there. The same holds for `Equal`, `NotEqual`, a
+  chain (`x < 1 < y`, evaluated pair by pair) and a bare `Not`, `And` or `Or`
+  of a variable declared `boolean`. A `NaN` operand still decides
+  (`Less(NaN, x)` is `false`), and a read through a `Block` local is tested
+  through the values assigned to the local. Where only the truth of a numeric
+  comparison is read (`Boole(x > 0)`, a `Filter` predicate) the code has no
+  test and no extra cost. A branch on such a comparison already took no arm.
+- **A compiled list recursion stops at `ce.iterationLimit`.** A list-building
+  recursion such as `F(n) = Which(n = D - 1, [p(n)], True, Join([p(n)],
+  F(n + 1)))` now compiles to a loop again (see below); the loop applies the
+  iteration limit, 1,024 by default, as the interpreter does. Before, the
+  recursive function returned up to about 5,000 elements and then overflowed
+  the stack. The interpreter's message is now the same as the compiled one:
+  "Iteration limit of 1024 exceeded while evaluating F()".
+- **A compiled user function with one clause accepts `NaN` at a numeric
+  parameter**, as the interpreter does (decision 2026-09-30 in
+  `docs/ERROR-MODEL.md`). With `f: (real) -> number` and `f := x ↦ 7`, the
+  compiled `f(y)` with `y = NaN` gave `NaN` without running the body; it now
+  gives `7`. A function with several clauses still refuses `NaN`. When an
+  argument fails the check, a function with a list or boolean result now gives
+  `undefined` (no value), not `NaN`, and a spread of that call
+  (`Join([9], f(w))`) gives `undefined` instead of throwing.
+
 ### Resolved Issues
+
+- **A list-building recursion compiles to a loop again** (ROADMAP CE-579, a
+  regression in 0.172.0). With `F` declared `function` and then assigned
+  `F(n) = Which(n = D - 1, [p(n)], True, Join([p(n)], F(n + 1)))`, the
+  JavaScript target compiled a recursive function, which overflowed the stack
+  at `D = 10000`. It now compiles to the `_SYS.listRecursion` loop, also when
+  `F` has no declaration or is declared `(real) -> list`. The interpreter uses
+  its loop for an `F` with no declaration too, where it stopped with
+  "Recursion limit exceeded", and it checks the argument of each step against
+  the declared parameter type, as a direct call does: under
+  `(integer) -> list`, a step `F(n + 1/2)` gives the `incompatible-type` error
+  of `F(1/2)` instead of a list with non-integer elements.
+- **`Take` and `Drop` with a `NaN` count have no value in compiled code.** The
+  interpreter leaves `Take(xs, NaN)` unevaluated. Compiled JavaScript gave `[]`
+  for `Take` and the whole list for `Drop`, and compiled Python raised a
+  `ValueError`; they now give `undefined` and `None`. A count typed `integer`
+  keeps the same code.
+- **A repeated call with a random argument is evaluated at each position.** In
+  `Join(F(w·Random()), F(w·Random()))` with a checked list function `F`, the
+  compiled code drew once, or threw when the check failed; it now draws twice
+  and gives `undefined` when the check fails. `Take(At(x, i), Random())`
+  compiles (it was refused) and draws once.
 
 - **WGSL: a list held by a `Block` local is no longer copied at each read**
   (ROADMAP CE-583). A read with a proven index of such a list indexes the local
@@ -244,6 +294,17 @@
   declared `string`, `If(s = "a", 1, 2)` run with `s = 3` gave `2`; it now
   throws a `TypeError` that names `s`, on `run()` and on `broadcast()`, as a
   string or a boolean for a number variable already did.
+- **Boolean inputs on every route.** `broadcast()` on the JavaScript target
+  refused a variable declared `boolean` ("must be a Float64Array or a
+  number"); it now accepts a boolean scalar, an array of booleans and an empty
+  column, on the sync, async and worker routes. On `interval-js` a JavaScript
+  boolean was read as "maybe"; it is now `'true'` or `'false'`, and
+  `broadcast()` accepts it too. A boolean column is checked again on each
+  batch, and `broadcastAsync()` refuses a column whose length or contents
+  change during the batch.
+- **A bare `Not`, `And` or `Or` of an unsupplied boolean has no value.** With
+  `c` declared `boolean`, `compile("\\lnot c").run({})` gave `true`; it now
+  gives `undefined`, as the interpreter has no value.
 
 - **`subs()`, `map()` and a recursive `replace()` keep the function each call
   was written with.** With `h := a \mapsto a x`, `e = h(a) + 1`, and then a

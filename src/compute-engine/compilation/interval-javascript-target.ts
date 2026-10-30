@@ -531,9 +531,14 @@ function compileIntervalCollectionValue(
   // compiles a list arm the ordinary way and declines it there, as before.
   // A `Which` the caller overrode (the `functions` compilation option) keeps
   // its ordinary dispatch, which reaches the caller's implementation.
+  //
+  // An `If` is the same selection: `If(c, t, f)` is `Which(c, t, True, f)`
+  // and `If(c, t)` is `Which(c, t)`. A point arm (`If(c, (x, y), Missing)`)
+  // is spelled here as in a `Which`; the `If` handler would compile it as a
+  // scalar and decline it.
   if (
-    literal.operator === 'Which' &&
-    target.unrollSkipHeads?.has('Which') !== true
+    (literal.operator === 'Which' || literal.operator === 'If') &&
+    target.unrollSkipHeads?.has(literal.operator) !== true
   )
     return compileIntervalSelectionValue(literal, target);
   // A `When` in a consuming position is a RESTRICTED collection value
@@ -836,53 +841,103 @@ function compileIntervalSelectionValue(
   target: CompileTarget<Expression>
 ): string | undefined {
   if (!isFunction(which)) return undefined;
-  const args = which.ops;
+  // An `If` is read as the `Which` of the same clauses: `If(c, t, f)` is
+  // `Which(c, t, True, f)`, `If(c, t)` is `Which(c, t)`. `operand` maps a
+  // clause position to the operand index of the node, which the
+  // common-subexpression pass reads: position 3 is the `If`'s operand 2,
+  // and position 2 is the added `True`, which is not an operand.
+  const isIf = which.operator === 'If';
+  if (isIf && which.ops.length !== 2 && which.ops.length !== 3)
+    return undefined;
+  const args =
+    isIf && which.ops.length === 3
+      ? [which.ops[0], which.ops[1], which.engine.True, which.ops[2]]
+      : which.ops;
+  const operand = (i: number): number => (isIf && i === 3 ? 2 : i);
   if (args.length < 2 || args.length % 2 !== 0) return undefined;
-  // The clauses that can be reached: up to and including the first
-  // unconditional one.
-  let reach = args.length;
-  for (let i = 0; i < args.length; i += 2)
-    if (isSymbol(args[i], 'True')) {
-      reach = i + 2;
-      break;
+  // The clauses that can be reached, by their condition position: a clause
+  // whose condition is `False`, or whose type proves it false
+  // (`BaseCompiler.booleanClaim`), is dropped, and the search stops at the first clause that is unconditional
+  // (`True`) or proved true. The base compiler prunes the same clauses
+  // (`liveSelectionArms`): a value that can never be selected is neither
+  // probed nor compiled, so `If(False, [Zeta(x), 1], 1)` does not fail on
+  // the `Zeta` this target has no lowering for.
+  const live: { at: number; always: boolean }[] = [];
+  for (let i = 0; i < args.length; i += 2) {
+    const claim = isSymbol(args[i], 'True')
+      ? true
+      : isSymbol(args[i], 'False')
+        ? false
+        : BaseCompiler.booleanClaim(args[i]);
+    if (claim === false) continue;
+    live.push({ at: i, always: claim === true });
+    if (claim === true) break;
+  }
+  // The collection spelling of each reachable value, compiled ONCE, in the
+  // value's own common-subexpression region, and kept: the same code is the
+  // answer to "is this value a collection" and the code that is emitted.
+  // A nested selection value compiles its own values the same way, so a
+  // chain `If(c1, If(c2, …, Missing), Missing)` compiles each value once.
+  // (Probing a value and then compiling it again made each level compile
+  // the levels below it several times, which is exponential in the depth.)
+  const spellings = new Map<number, string | undefined>();
+  const spelling = (i: number): string | undefined => {
+    if (spellings.has(i)) return spellings.get(i);
+    let spelled: string | undefined;
+    const code = BaseCompiler.withCseOperand(which, operand(i), target, () => {
+      spelled = compileIntervalCollectionValue(args[i], target);
+      return spelled ?? '';
+    });
+    const result = spelled === undefined ? undefined : code;
+    spellings.set(i, result);
+    return result;
+  };
+  if (!live.some(({ at }) => spelling(at + 1) !== undefined)) return undefined;
+  // Collection values of different lengths have no hull: where a condition
+  // is undecided the value is one list or the other, and no array encloses
+  // both (`If(x > 0, [x, y], [x])` over `x` in [-1, 1]). When the compiler
+  // knows the lengths, from the types and the expression tree
+  // (`aggregateComponentCount`, which compiles nothing), it declines. A
+  // length that only the run time knows gives `{ kind: 'entire' }` there
+  // (`hullValues`, `interval/comparison.ts`).
+  if (live.length > 1) {
+    const lengths = new Set<number>();
+    for (const { at } of live) {
+      if (spelling(at + 1) === undefined) continue;
+      const n = BaseCompiler.aggregateComponentCount(args[at + 1]);
+      if (n !== undefined) lengths.add(n);
     }
-  const spelled = (i: number): boolean =>
-    compileIntervalCollectionValue(args[i], target) !== undefined;
-  let any = false;
-  for (let i = 1; i < reach; i += 2) if (spelled(i)) any = true;
-  if (!any) return undefined;
+    if (lengths.size > 1)
+      throw new Error(
+        `Could not compile \`${which.operator}\`: its collection values have ` +
+          `different lengths (${[...lengths].join(', ')}), and where a ` +
+          `condition is undecided over an interval no single value encloses ` +
+          `them.`
+      );
+  }
   // Each scalar arm over the inputs narrowed to where it can be selected, as
   // in the `Which` handler (`compileNarrowedIntervalArm`).
   const compileArm = (i: number): string =>
-    BaseCompiler.compileOpValue(which, i, target, 0, args[i]);
-  const spellArm = (i: number): string =>
-    BaseCompiler.withCseOperand(
-      which,
-      i,
-      target,
-      () =>
-        compileIntervalCollectionValue(args[i], target) ??
-        BaseCompiler.compileValueOperand(args[i], target)
-    );
-  const build = (i: number, bounds: IntervalArmBounds): string => {
-    if (i >= reach) return `(${INTERVAL_MISSING})`;
+    BaseCompiler.compileOpValue(which, operand(i), target, 0, args[i]);
+  const build = (k: number, bounds: IntervalArmBounds): string => {
+    if (k >= live.length) return `(${INTERVAL_MISSING})`;
+    const { at: i, always } = live[k];
     const cond = args[i];
-    const region = isSymbol(cond, 'True')
-      ? undefined
-      : intervalConditionRegion(cond);
-    const arm = spelled(i + 1)
-      ? spellArm(i + 1)
-      : (compileNarrowedIntervalArm(
-          args[i + 1],
-          withIntervalBound(bounds, region, true),
-          target
-        ) ?? compileArm(i + 1));
-    if (isSymbol(cond, 'True')) return arm;
+    const region = always ? undefined : intervalConditionRegion(cond);
+    const arm =
+      spelling(i + 1) ??
+      compileNarrowedIntervalArm(
+        args[i + 1],
+        withIntervalBound(bounds, region, true),
+        target
+      ) ??
+      compileArm(i + 1);
+    if (always) return arm;
     BaseCompiler.assertScalarCondition(cond, target);
     return compileIntervalConditional(
       i === 0 ? BaseCompiler.compileValueOperand(cond, target) : compileArm(i),
       arm,
-      build(i + 2, withIntervalBound(bounds, region, false)),
+      build(k + 1, withIntervalBound(bounds, region, false)),
       target
     );
   };
@@ -905,12 +960,17 @@ function compileIntervalRestrictedValue(
 ): string | undefined {
   if (!isFunction(when)) return undefined;
   const [value, cond] = when.ops;
-  if (compileIntervalCollectionValue(value, target) === undefined)
-    return undefined;
+  // The value is compiled once, in its own region: the same code answers
+  // "is the value a collection" and is the code that is emitted (see
+  // `compileIntervalSelectionValue`; a probe followed by a second compile
+  // is exponential in the depth of nested restrictions and selections).
+  let present: string | undefined;
+  const spelled = BaseCompiler.withCseOperand(when, 0, target, () => {
+    present = compileIntervalCollectionValue(value, target);
+    return present ?? '';
+  });
+  if (present === undefined) return undefined;
   BaseCompiler.assertScalarCondition(cond, target);
-  const spelled = BaseCompiler.withCseOperand(when, 0, target, () =>
-    compileIntervalCollectionValue(value, target)!
-  );
   return `_IA.restrict(${BaseCompiler.compileValueOperand(cond, target)}, () => ${spelled})`;
 }
 
@@ -1615,7 +1675,16 @@ function guardedIntervalFunction(
       );
       if (broadcast !== undefined) return broadcast;
       const code = handler(args, compile, target);
-      assertScalarIntervalOperands(id, args, target);
+      // An `If` whose condition is written `True` or `False` compiles only
+      // the value it selects (see the `If` handler), and only that value is
+      // checked: the other one is never selected.
+      const checked =
+        id === 'If' && args.length === 3 && isSymbol(args[0], 'True')
+          ? [args[0], args[1]]
+          : id === 'If' && args.length === 3 && isSymbol(args[0], 'False')
+            ? [args[0], args[2]]
+            : args;
+      assertScalarIntervalOperands(id, checked, target);
       return code;
     };
     GUARDED_INTERVAL_FUNCTIONS.set(id, wrapped);
@@ -2271,10 +2340,14 @@ function compileIntervalConditional(
   whenFalse: string,
   target: CompileTarget<Expression> | undefined
 ): string {
+  // Each arm is parenthesized: an arm that is an object literal (the
+  // absence result `{ kind: 'empty', missing: true }` of a written
+  // `Missing`) would otherwise be read as the BLOCK body of the arrow
+  // function, a syntax error.
   const lazy = `_IA.piecewise(
       ${condition},
-      () => ${whenTrue},
-      () => ${whenFalse}
+      () => (${whenTrue}),
+      () => (${whenFalse})
     )`;
   if (target === undefined) return lazy;
   // The chain writes the condition once and each arm twice, plus about eighty
@@ -3453,6 +3526,13 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   If: (args, compile, target) => {
     if (args.length !== 3)
       throw new Error('Could not compile `If`: wrong number of arguments');
+    // A condition written `True` or `False` selects its value at compile
+    // time: the other value is never selected and is not compiled, so
+    // `If(False, Zeta(x), 1)` does not fail on the `Zeta` this target has no
+    // lowering for. (A condition whose TYPE proves it is pruned by the base
+    // compiler, `BaseCompiler.booleanClaim`, before this handler.)
+    if (isSymbol(args[0], 'True')) return compile(args[1], 1);
+    if (isSymbol(args[0], 'False')) return compile(args[2], 2);
     // For interval arithmetic, we need to handle indeterminate conditions.
     // Both arms are conditionally evaluated, so their operand indices are
     // passed to the compile callback (`OperandCompiler`), which opens the
@@ -3523,6 +3603,9 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       if (i >= args.length) return `(${INTERVAL_MISSING})`;
       const cond = args[i];
       const val = args[i + 1];
+      // A clause whose condition is written `False` is never selected, and
+      // its value is not compiled (see the `If` handler).
+      if (isSymbol(cond, 'False')) return buildPiecewise(i + 2, bounds);
       // If condition is the symbol True, it's the default branch
       if (isSymbol(cond, 'True')) {
         return (
@@ -5721,14 +5804,27 @@ function checkIntervalKindInputs(
 function checkIntervalKindCells(
   entries: ReadonlyArray<IntervalKindEntry>,
   inputs: BroadcastInputs,
-  options: BroadcastOptions | undefined
+  options: BroadcastOptions | undefined,
+  booleans?: readonly string[]
 ): void {
   const byName = new Map(entries.map((e) => [e.name, e]));
-  const names = visitIntervalInputCells(inputs, options, (name, lo, hi) => {
-    const entry = byName.get(name);
-    if (entry !== undefined && !entry.cell(lo, hi))
-      throw kindEntryError(entry.label);
-  });
+  const names = visitIntervalInputCells(
+    inputs,
+    options,
+    (name, lo, hi) => {
+      const entry = byName.get(name);
+      if (entry !== undefined && !entry.cell(lo, hi))
+        throw kindEntryError(entry.label);
+    },
+    booleans,
+    // A boolean for a variable of a kind type is refused, as `run()`
+    // refuses it (`checkIntervalKindInputs`).
+    (name, value) => {
+      const entry = byName.get(name);
+      if (entry !== undefined && !entry.value(value))
+        throw kindEntryError(entry.label);
+    }
+  );
   for (const entry of entries)
     if (!names.includes(entry.name)) throw kindEntryError(entry.label);
 }
@@ -5899,6 +5995,51 @@ function hasWideIntervalInput(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(hasWideIntervalInput);
   if (isRecord(value)) return Object.values(value).some(hasWideIntervalInput);
   return false;
+}
+
+/** The free variables of `expr` whose type is `boolean` or
+ * `boolean | missing` (`BaseCompiler.isBooleanBindingType`). */
+function declaredBooleanNames(expr: Expression): string[] {
+  return expr.unknowns.filter((name) =>
+    BaseCompiler.isBooleanBindingType(expr.engine.symbol(name).type?.type)
+  );
+}
+
+/**
+ * The arguments of the interpreter fallback with the boolean variables
+ * (`names`, declared `boolean`) of a vars object read as the interpreter
+ * reads them: `'true'` is `true` and `'false'` is `false`, the strings the
+ * compiled code of this target tests (`IntervalInput`). `'maybe'` says the
+ * value can be either one: the variable is left out, so a condition on it
+ * has no value, and `maybe` is true, which makes the call wide (a boolean
+ * result is then `'maybe'`, as over an interval wider than a point). A
+ * JavaScript boolean passes as it is. The caller's object is not changed.
+ */
+function booleanFallbackInputs(
+  args: unknown[],
+  names: ReadonlySet<string>
+): { args: unknown[]; maybe: boolean } {
+  const vars = args[0];
+  if (names.size === 0 || !isRecord(vars) || Array.isArray(vars))
+    return { args, maybe: false };
+  let copy: Record<string, unknown> | undefined;
+  let maybe = false;
+  for (const name of names) {
+    if (!Object.hasOwn(vars, name)) continue;
+    const v = vars[name];
+    if (v !== 'true' && v !== 'false' && v !== 'maybe') continue;
+    copy ??= Object.assign(Object.create(null), vars) as Record<
+      string,
+      unknown
+    >;
+    if (v === 'maybe') {
+      delete copy[name];
+      maybe = true;
+    } else copy[name] = v === 'true';
+  }
+  return copy === undefined
+    ? { args, maybe }
+    : { args: [copy, ...args.slice(1)], maybe };
 }
 
 /**
@@ -6208,11 +6349,18 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // the input. The interpreter still runs, so that the effects of the
     // expression (an `Assign`) happen once per call, as on every route.
     const isBoolean = expr.type.matches('boolean');
+    // The free variables declared `boolean`. The compiled code of this
+    // target reads such a variable as the string `'true'`, `'false'` or
+    // `'maybe'`, and the interpreter reads a boolean: the strings are
+    // converted for them, and for no other variable (a `string` variable
+    // keeps its text).
+    const booleanNames = new Set(declaredBooleanNames(expr));
     const run: CompiledRunner<IntervalValue, IntervalInput> = (
       ...args: unknown[]
     ): IntervalValue => {
-      const wide = args.some(hasWideIntervalInput);
-      const value = interpreterRun(...args.map(collapseIntervalInput));
+      const { args: read, maybe } = booleanFallbackInputs(args, booleanNames);
+      const wide = maybe || read.some(hasWideIntervalInput);
+      const value = interpreterRun(...read.map(collapseIntervalInput));
       if (wide && isBoolean) return 'maybe';
       return toIntervalValue(value, wide);
     };
@@ -6489,9 +6637,9 @@ function compileToIntervalTarget(
     // same spelling every consuming position uses
     // (`compileIntervalCollectionValue`); a root that spelling declines — a
     // list of booleans — compiles the ordinary way, which refuses it.
-    // A `Which` root is a collection root when one of its arms is spelled
-    // as a collection (`compileIntervalSelectionValue`); a scalar selection
-    // compiles through the `Which` handler as before.
+    // A `Which` or `If` root is a collection root when one of its arms is
+    // spelled as a collection (`compileIntervalSelectionValue`); a scalar
+    // selection compiles through its handler as before.
     // A `WithRandomSeed` root is one when its body is a seeded list draw
     // (`seededRandomChoicePlan`); any other body compiles through the
     // `WithRandomSeed` handler as before.
@@ -6503,6 +6651,19 @@ function compileToIntervalTarget(
       point === undefined &&
       (COLLECTION_VALUE_HEADS.has(rootLiteral.operator) ||
         rootLiteral.operator === 'Which' ||
+        // An `If` root only when an arm is a collection by its type, its
+        // absent arms set aside (`If(d, (x, y), Missing)` as an arm is a
+        // point): any other `If` root (a scalar selection, one whose arms are
+        // `Return` statements) keeps the ordinary route.
+        (isFunction(rootLiteral, 'If') &&
+          rootLiteral.ops
+            .slice(1)
+            .some((arm) =>
+              isSubtype(
+                BaseCompiler.withoutAbsentArms(arm.type.type),
+                'collection<any>'
+              )
+            )) ||
         rootLiteral.operator === 'When' ||
         (isFunction(rootLiteral, 'WithRandomSeed') &&
           isFunction(rootLiteral.ops[1], 'RandomChoice')) ||
@@ -6619,12 +6780,15 @@ function compileToIntervalTarget(
     declarations,
     kindEntries
   );
+  // The variables declared `boolean`: for them an empty array is an empty
+  // column of `broadcast()`.
+  const booleans = declaredBooleanNames(expr);
   const checkCells = (
     inputs: BroadcastInputs,
     options: BroadcastOptions | undefined
   ): void => {
     if (kindEntries.length > 0)
-      checkIntervalKindCells(kindEntries, inputs, options);
+      checkIntervalKindCells(kindEntries, inputs, options, booleans);
   };
   const result: CompilationResult<'interval-js', IntervalValue> = {
     target: 'interval-js',
@@ -6644,10 +6808,11 @@ function compileToIntervalTarget(
     ...(declarations && perCall ? { preamblePerCall: perCall } : {}),
     calling: 'expression',
     ...(kinds !== undefined ? { valueKinds: [...kinds.kinds] } : {}),
+    ...(booleans.length > 0 ? { booleanInputs: [...booleans] } : {}),
     run: fn as unknown as CompiledRunner<IntervalValue, IntervalInput>,
     broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {
       checkCells(inputs, options);
-      return broadcastIntervals(fn.rawCall, inputs, options);
+      return broadcastIntervals(fn.rawCall, inputs, options, booleans);
     },
   };
   // `broadcastAsync` ships the result itself (its `code`, preambles and
@@ -6664,8 +6829,16 @@ function compileToIntervalTarget(
       target.hostNames !== true &&
       isShippableCode(`${preamble}\n${body}`),
     iterationLimit: () => engine.iterationLimit,
+    booleans,
     slice: (inputs, options, out, slice) =>
-      broadcastIntervalsSlice(fn.rawCall, inputs, options, out, slice),
+      broadcastIntervalsSlice(
+        fn.rawCall,
+        inputs,
+        options,
+        out,
+        slice,
+        booleans
+      ),
     workers: () => engine.workers,
   };
   const broadcastAsync = makeBroadcastAsync(asyncSpec);

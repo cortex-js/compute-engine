@@ -925,6 +925,7 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
         reconstructionDigits: task.stored.reconstructionDigits,
         broadcastOutputs: task.stored.broadcastOutputs,
         batch: task.stored.batch,
+        booleanInputs: task.stored.booleanInputs,
       };
       slot.worker.postMessage({
         type: 'load',
@@ -953,12 +954,24 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
       if (sharedNames.has(name)) continue;
       const v = task.inputs[name];
       wire.names.push(name);
-      if (typeof v === 'number') {
+      if (typeof v === 'number' || typeof v === 'boolean') {
         wire.values.push(v);
         continue;
       }
+      // The column of a boolean variable (`readShape` checked that every
+      // element is a boolean), one value per cell for both targets: the
+      // slice's own cells, or the whole axis, as a cloned plain array. The
+      // worker scans its copy again.
+      if (Array.isArray(v)) {
+        wire.values.push(
+          layout === 'cells'
+            ? (v as readonly boolean[]).slice(from, to)
+            : Array.from(v as readonly boolean[])
+        );
+        continue;
+      }
       if (!(v instanceof Float64Array)) {
-        invalid = `broadcast: the input for "${name}" must be a Float64Array or a number`;
+        invalid = `broadcast: the input for "${name}" must be a Float64Array, a number, a boolean or an array of booleans`;
         break;
       }
       const copy =
@@ -1118,6 +1131,9 @@ export interface BroadcastAsyncSpec {
    * `lists` of the result's entry plan). Each is a shared input of a batch,
    * with the variables the `shared` option names. */
   lists?: readonly string[];
+  /** The variables declared `boolean`: for them an empty array is an empty
+   * column (`compilation/broadcast.ts`, "Boolean inputs"). */
+  booleans?: readonly string[];
   /** Whether the result can run on a worker at all (see the module
    * comment); a result that cannot always runs inline. */
   shippable: boolean;
@@ -1192,7 +1208,18 @@ export function makeBroadcastAsync(
   return async (inputs, options) => {
     // Validates the inputs, the `shared` option, and refuses `shared` and
     // `outputs` on an interval result.
-    const count = broadcastCellCount(inputs, options, perCellIn, spec.lists);
+    // The boolean columns that the count below scans whole. Each inline
+    // slice scans its own cells of them again, since the caller can change
+    // an element while the batch yields (`rescanBooleanSlice`).
+    const validated = new WeakMap<object, number>();
+    const count = broadcastCellCount(
+      inputs,
+      options,
+      perCellIn,
+      spec.lists,
+      spec.booleans,
+      validated
+    );
     const sharedNames = isInterval
       ? []
       : broadcastSharedNames(spec.lists, inputs, options);
@@ -1274,8 +1301,10 @@ export function makeBroadcastAsync(
       const copy: BroadcastInputs = { ...callInputs };
       for (const name of sharedNames) {
         const v = callInputs[name];
-        if (typeof v !== 'number' && !inPlace.has(name))
-          copy[name] = plainSharedArray(v);
+        // `readShape` accepted a shared input only as an array (a plain
+        // array of booleans, for a list of booleans, is returned as it is).
+        if (typeof v === 'object' && !inPlace.has(name))
+          copy[name] = plainSharedArray(v as Float64Array | readonly number[]);
       }
       return (inlineInputs = copy);
     };
@@ -1303,7 +1332,7 @@ export function makeBroadcastAsync(
           plainInputs(),
           layoutOptions,
           out.subarray(perCellOut * from, perCellOut * to),
-          { from, to, deadline, failures }
+          { from, to, deadline, failures, validated }
         );
         sliceMs += Date.now() - t0;
         done += n;

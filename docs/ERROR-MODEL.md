@@ -193,7 +193,11 @@ What the decision does NOT change:
   interpreter has one (`a := 1; If(m > 0, a := n); a < m` at `{m: -5}`),
   never the reverse. A local that no statement before the read assigns at
   the top level of the block (it is assigned only in a branch or a loop) is
-  tested for `undefined` too (`blockLocalValueFrame`). A variable read only by
+  tested for `undefined` too. Locals are matched by their binding, not
+  their name, so a nested binder of the same name (`Sum(2n, (n, 1, 3))`)
+  does not hide the free `n`, and a call of a function assigned to a local
+  (`g := t ↦ t + n`, then `g(1)`) follows its body (`blockLocalValueFrame`).
+  A variable read only by
   an ARM of a nested `If`, `Which` or `When`, or by a later condition of a
   `Which`, is not tested, since it is read only when that arm is selected:
   `If(If(x > 0, y, 1) > 0, 1, 0)` at `x = -1` is `1` with `y` unsupplied, as
@@ -217,7 +221,12 @@ What the decision does NOT change:
   rule applies to a variable of any declared type, `unknown` included. An
   operand that reads an absent value as a number (`Boole(x > 0) = 0`) cannot
   let the comparison run first, since `0 = 0` is `true`: the tests come
-  first there. Where only the truth of a numeric comparison is read (`Boole`,
+  first there, also when the operand is a local or a symbol whose value is
+  such an expression (`a := Boole(x > 0)`, then `a = 0`), and when an
+  operand of a top type compiles to the run-time dispatch (`g(1) < m` with
+  `g` a block-local function). A chain with an operand that has effects
+  after its first pair is evaluated pair by pair: `x < 1 < Random()` with
+  `x` absent draws once and is `false`, as in the interpreter. Where only the truth of a numeric comparison is read (`Boole`,
   a `Filter` predicate), the plain comparison is emitted with no test,
   because `false` and `undefined` give the same result there; not for a
   string comparison (`Boole(s = t)` at `{}` is `0`)

@@ -39,11 +39,19 @@ export function hasIntervalBounds(
  * - { lo: number, hi: number } - Direct interval
  * - { x: {...}, y: {...} } - Object with interval-valued properties
  * - number - Convert to point interval
+ * - boolean - Convert to the answer string of the interval domain: `true`
+ *   to `'true'` and `false` to `'false'`. The compiled code tests a boolean
+ *   variable against these strings (`_IA.not`, `_IA.and`, the `If`
+ *   selection), so a JavaScript boolean was read as neither and gave the
+ *   answer of `'maybe'`: `If(c, 1, 2)` gave the hull `[1, 2]` for
+ *   `c = true`. The strings `'true'`, `'false'` and `'maybe'` pass through.
  */
 export function processInput(input: unknown): unknown {
   if (input === null || input === undefined) {
     return input;
   }
+
+  if (typeof input === 'boolean') return input ? 'true' : 'false';
 
   // Already an interval
   if (hasIntervalBounds(input)) {

@@ -828,9 +828,49 @@ describe('COMPILE three-valued connectives — value position', () => {
     expect(run({ M: undefined, x: 2 })).toBe(false);
   });
 
-  it('keeps the plain infix spelling when no operand can be absent', () => {
-    expect(js(ce, ['And', 'p', 'q']).code).toBe('_.p && _.q');
-    expect(js(ce, ['Or', 'p', ['Not', 'q']]).code).toBe('_.p || !_.q');
+  it('keeps the plain infix spelling when every operand is a decided boolean', () => {
+    // A comparison over a parameter compiles to a JavaScript comparison,
+    // which is always `true` or `false`: a parameter is not read off the
+    // vars object, so it is not an unsupplied variable.
+    expect(
+      js(ce, ['Function', ['And', ['Greater', 't', 0], ['Less', 't', 1]], 't'])
+        .code
+    ).toBe('(t) => 0 < t && t < 1');
+    expect(
+      js(ce, [
+        'Function',
+        ['Or', ['Greater', 't', 0], ['Not', ['Less', 't', 1]]],
+        't',
+      ]).code
+    ).toBe('(t) => 0 < t || !(t < 1)');
+  });
+
+  it('a comparison over a variable the caller can leave out is three-valued', () => {
+    // The interpreter keeps `x > 0` unevaluated while `x` has no value. The
+    // plain comparison runs first; its `false` stands only when `x`, read
+    // off the vars object, is not `undefined` (user decision 2026-10-30).
+    const and = js(ce, ['And', ['Greater', 'x', 0], ['Less', 'x', 1]]);
+    expect(and.code).toContain(
+      '((0 < _.x) || ((_.x !== undefined) ? false : undefined))'
+    );
+    expect(and.run({})).toBeUndefined();
+    expect(and.run({ x: 0.5 })).toBe(true);
+    expect(and.run({ x: 2 })).toBe(false);
+  });
+
+  it('a symbol declared boolean takes the Kleene lowering (CE-631)', () => {
+    // The caller can leave `p` out, or pass a value that is not a boolean:
+    // the plain `_.p && _.q` gave `undefined` for `p` unsupplied and `q`
+    // false, where the interpreter answers `False`.
+    const and = js(ce, ['And', 'p', 'q']);
+    expect(and.code).toContain('_tv1 === false ? false');
+    expect(and.run({ q: false })).toBe(false);
+    expect(and.run({ p: true })).toBeUndefined();
+    expect(and.run({ p: true, q: true })).toBe(true);
+    const not = js(ce, ['Not', 'p']);
+    expect(not.run({})).toBeUndefined();
+    expect(not.run({ p: 1 })).toBeUndefined();
+    expect(not.run({ p: false })).toBe(true);
   });
 
   it('spells the Python And table with lambdas and None', () => {

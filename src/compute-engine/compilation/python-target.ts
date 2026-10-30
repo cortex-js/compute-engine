@@ -104,6 +104,7 @@ import {
   PREDICATE_RESULT_MODES,
   predicateResultCheck,
   stringRefusedEntryType,
+  countMayBeNaN,
 } from './javascript-target.js';
 
 /**
@@ -583,8 +584,12 @@ function pyRoundedCount(
  * written as a slice bound (`xs[:Infinity]` and `xs[:1e+21]` are not valid
  * Python). A runtime count is clipped to ±(2^53 − 1) before `int()`, because
  * `int()` of an infinite float raises `OverflowError`; no sequence is that
- * long, so the clip does not change the slice. A `NaN` count is not clipped
- * (`np.clip` keeps it), so `int()` raises `ValueError` for it, as before.
+ * long, so the clip does not change the slice. A `NaN` count has no value in
+ * the interpreter (`Take([1, 2, 3], NaN)` stays unevaluated), so the
+ * run-time branch gives `None`, the Python value of a list with no value,
+ * before `int()` (which raises `ValueError` for `NaN`). A count that cannot
+ * be `NaN` (`countMayBeNaN`, `javascript-target.ts`) keeps the emission
+ * with no test.
  */
 function pyTakeDropSlice(
   op: 'Take' | 'Drop',
@@ -605,6 +610,12 @@ function pyTakeDropSlice(
       ? '_l[_n:] if _n < 0 else _l[:_n]'
       : '_l[:_n] if _n < 0 else _l[_n:]';
   const limit = Number.MAX_SAFE_INTEGER;
+  if (countMayBeNaN(count))
+    return (
+      `(lambda _l, _c: None if np.isnan(_c) else (lambda _n: ${body})` +
+      `(int(np.clip(np.floor(_c + 0.5), -${limit}, ${limit}))))` +
+      `(${coll}, ${compile(count)})`
+    );
   const rounded = `int(np.clip(np.floor((${compile(count)}) + 0.5), -${limit}, ${limit}))`;
   return `(lambda _l, _n: ${body})(${coll}, ${rounded})`;
 }
@@ -4765,10 +4776,54 @@ function pythonAbsent(
   arms: ReadonlyArray<Expression | undefined>,
   target: CompileTarget<Expression>
 ): string {
-  const types = arms.flatMap((a) => (a === undefined ? [] : [a.type.type]));
+  // A written `Missing` arm does not decide the domain: `If(c, (x, y),
+  // Missing)` is a point that may be absent, and its absence literal is
+  // `None`, as for the else-less `If(c, (x, y))`. The arm's own type
+  // (`missing`) would make it `float('nan')`.
+  const present = arms.filter(
+    (a) => a !== undefined && !pythonIsWrittenAbsence(a, target)
+  );
+  const types = (present.length > 0 ? present : arms).flatMap((a) =>
+    a === undefined ? [] : [a.type.type]
+  );
   return BaseCompiler.absenceKind(types, target) === 'object'
     ? 'None'
     : "float('nan')";
+}
+
+/**
+ * True when `e` is a written absence symbol, `Missing` or `Undefined`, and
+ * not a variable of that name (a bound name or a key of the caller's
+ * `vars`, which keep their meaning, as in `BaseCompiler._compileInner`).
+ */
+function pythonIsWrittenAbsence(
+  e: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isSymbol(e, 'Missing') && !isSymbol(e, 'Undefined')) return false;
+  return (
+    target.boundVars?.has(e.symbol) !== true &&
+    target.varsKeys?.has(e.symbol) !== true
+  );
+}
+
+/**
+ * The code of the value arm `arm` of a selection whose absence literal is
+ * `absent` (`pythonAbsent`). A written `Missing` (or `Undefined`) arm is that
+ * literal: beside a point or a list it is `None`, the value the else-less
+ * `If(c, (x, y))` and `When((x, y), c)` give, where the written symbol alone
+ * compiles to `math.nan` on this target (`writtenSymbol: 'numeric'`). Any
+ * other arm is compiled as it stands.
+ */
+function pythonSelectionArm(
+  arm: Expression,
+  code: () => string,
+  absent: string,
+  target: CompileTarget<Expression>
+): string {
+  return absent === 'None' && pythonIsWrittenAbsence(arm, target)
+    ? 'None'
+    : code();
 }
 
 /**
@@ -6276,13 +6331,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // A condition that is not exactly `True` or `False` takes neither arm and
     // the value is the absence literal of the arms' domain — see
     // `compilePythonBranch` and `pythonAbsent`.
+    const absent = pythonAbsent([args[1], args[2]], target);
     return compilePythonBranch(
       args[0],
-      compile(args[1], 1),
-      compile(args[2], 2),
+      pythonSelectionArm(args[1], () => compile(args[1], 1), absent, target),
+      pythonSelectionArm(args[2], () => compile(args[2], 2), absent, target),
       (c) => compile(c),
       target,
-      pythonAbsent([args[1], args[2]], target)
+      absent
     );
   },
   // `When` tests its condition for truth rather than for being a boolean,
@@ -6371,13 +6427,15 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       if (i >= args.length) return absent;
       const cond = args[i];
       const val = args[i + 1];
+      const value = (): string =>
+        pythonSelectionArm(val, () => compile(val, i + 1), absent, target);
       // `True` marks the default (else) branch.
-      if (isSymbol(cond, 'True')) return `(${compile(val, i + 1)})`;
+      if (isSymbol(cond, 'True')) return `(${value()})`;
       // A clause whose condition cannot be decided selects no clause and ends
       // the search, with the same value as a search that matched nothing.
       return compilePythonBranch(
         cond,
-        compile(val, i + 1),
+        value(),
         build(i + 2),
         (c) => (i === 0 ? compile(c) : compile(c, i)),
         target,

@@ -58,10 +58,23 @@ function clipElements(list: unknown[]): IntervalModelValue[] {
 /**
  * The hull of two values of this target's value model, what a conditional
  * answers when its condition is undecided: for two enclosures their union;
- * for two ARRAYS the elementwise hull, or the absence marker when their
- * lengths differ (the same answer a broadcast gives a length mismatch); for
- * two VERDICTS the verdict both agree on, else `'maybe'`. A mix of domains
- * (an array against a scalar) is the marker: no single value encloses both.
+ * for two ARRAYS of one length the elementwise hull; for two VERDICTS the
+ * verdict both agree on, else `'maybe'`.
+ *
+ * Two arrays of DIFFERENT lengths give `{ kind: 'entire' }`, this target's
+ * "cannot bound this" answer. The value is one list or the other, and no
+ * array encloses both: `If(x > 0, [x, y], [x])` over `x` in [-1, 1] is a
+ * list of length 2 or of length 1. The absence marker that this function
+ * gave before reads as `empty`, which claims that there is no value, so
+ * `Length` of it was `empty` where the length is 1 or 2. The compiler
+ * declines such a selection when it knows both lengths
+ * (`compileIntervalSelectionValue`, `interval-javascript-target.ts`); this
+ * answer covers the lengths that only the run time knows.
+ *
+ * `entire` beside any value is `entire`.
+ *
+ * A mix of domains (an array against a scalar) is the absence marker: no
+ * single value encloses both.
  */
 export function hullValues(a: unknown, b: unknown): unknown {
   // `empty` contributes no value to a hull, whatever the other side is: a
@@ -77,11 +90,23 @@ export function hullValues(a: unknown, b: unknown): unknown {
     typeof x === 'object' &&
     !Array.isArray(x) &&
     (x as IntervalResult).kind === 'empty';
+  // `entire` (a value whose range is unknown, such as the hull of two lists
+  // of different lengths below) hulled with anything is `entire`. It is read
+  // first: beside an array it would otherwise be a mix of domains and give
+  // the absence marker, which reads as `empty` and claims there is no value
+  // (`If(c, [1], If(d, L, [2]))` with `L` of length 2 and both conditions
+  // undecided).
+  const isEntire = (x: unknown): boolean =>
+    x !== null &&
+    typeof x === 'object' &&
+    !Array.isArray(x) &&
+    (x as IntervalResult).kind === 'entire';
+  if (isEntire(a) || isEntire(b)) return { kind: 'entire' };
   if (isEmpty(a)) return restrict('maybe', () => b);
   if (isEmpty(b)) return restrict('maybe', () => a);
   if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length)
-      return { lo: NaN, hi: NaN };
+    if (!Array.isArray(a) || !Array.isArray(b)) return { lo: NaN, hi: NaN };
+    if (a.length !== b.length) return { kind: 'entire' };
     return a.map((x, i) => hullValues(x, b[i]));
   }
   if (isVerdict(a) || isVerdict(b)) {

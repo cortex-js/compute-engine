@@ -1,4 +1,5 @@
 import type { Expression } from '../types-expression.js';
+import type { Type } from '../../common/type/types.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { errorValue } from './error-value.js';
 import {
@@ -22,6 +23,9 @@ export interface ListRecursionPlan {
    * error among the next arguments gets the frame of that call, as it does
    * when the call is evaluated as an ordinary application. */
   callee: string;
+  /** The literal the plan was made from. A call boxed with the name
+   * `callee` is a recursive call when it reaches this literal. */
+  literal: Expression;
 }
 
 /**
@@ -48,14 +52,20 @@ export function listRecursionPlan(
   if (!isFunction(body, 'Which') || body.nops % 2 !== 0) return undefined;
 
   const ce = literal.engine;
+  // True when `expr` names or calls this literal. A function assigned to a
+  // symbol with a value definition (the symbol is declared first) is the
+  // value of that definition. A function assigned to a symbol with no
+  // declaration gets an OPERATOR definition, which keeps the literal it
+  // applies (`_lambdaLiteral`). Both are read at application time, so a
+  // later assignment of another function to the symbol is seen.
+  const isSelf = (expr: Expression): boolean =>
+    (isFunction(expr) || isSymbol(expr)) &&
+    (expr.valueDefinition?.value === literal ||
+      expr.operatorDefinition?._lambdaLiteral === literal);
   // Only the direct call in a Join arm is lowered. A nested self-call in a
   // guard, an element, or a next argument needs its own continuation.
   const containsSelf = (expr: Expression): boolean => {
-    if (
-      (isFunction(expr) || isSymbol(expr)) &&
-      expr.valueDefinition?.value === literal
-    )
-      return true;
+    if (isSelf(expr)) return true;
     return isFunction(expr) && expr.ops.some(containsSelf);
   };
   const eligible = (expr: Expression): boolean =>
@@ -90,7 +100,7 @@ export function listRecursionPlan(
     if (!isFunction(prefix, 'List') || !eligible(prefix)) return undefined;
     if (
       !isFunction(call) ||
-      call.valueDefinition?.value !== literal ||
+      !isSelf(call) ||
       call.nops !== literal.nops - 1 ||
       !call.ops.every(eligible)
     )
@@ -103,7 +113,7 @@ export function listRecursionPlan(
     clauses.push(ce._fn('Tuple', [ce.One, prefix, ce._fn('Tuple', call.ops)]));
   }
   return head !== undefined && callee !== undefined
-    ? { step: ce._fn('Which', clauses), head, callee }
+    ? { step: ce._fn('Which', clauses), head, callee, literal }
     : undefined;
 }
 
@@ -141,12 +151,15 @@ export function evaluateListRecursion(
   };
   let current = args;
   let iterations = 0;
+  // Whether the next arguments are checked against the declared parameter
+  // types (see below). `undefined` until the first recursive step.
+  let checkArguments: boolean | undefined;
   for (;;) {
     checkDeadline(ce._deadlineFrame);
     if (++iterations > ce.iterationLimit)
       throw new CancellationError({
         cause: 'iteration-limit-exceeded',
-        message: 'Iteration limit exceeded while evaluating list recursion',
+        message: `Iteration limit of ${ce.iterationLimit} exceeded while evaluating ${plan.callee}()`,
       });
     const result = invokeStep(current, plan.step);
     if (
@@ -189,6 +202,66 @@ export function evaluateListRecursion(
       if (tail === undefined) return undefined;
       return finish(tail);
     }
+    // The next arguments are checked against the declared parameter types
+    // as the ordinary recursive call checks them. The call is boxed with its
+    // name, and the boxing replaces an argument that the declared type
+    // refuses with an `incompatible-type` error: with `F` declared
+    // `(integer) -> list`, a next argument `1/2` is refused, as the direct
+    // call `F(1/2)` is. `NaN` at a numeric parameter is accepted (a user
+    // function with one clause accepts `NaN` there, `docs/ERROR-MODEL.md`,
+    // "A user function accepts `NaN` at a numeric parameter — RULED
+    // 2026-09-30"). The arguments are numeric literals here, so the static
+    // type the boxing checks is the type of the value. Without this check
+    // the loop ran the step on an argument that the recursive call refuses.
+    // The check is made only when the name still reaches this literal and
+    // its definition declares a parameter type that can refuse a number. A
+    // signature inferred from the literal, or a declaration with no
+    // signature (`function`), checks nothing, so the boxing (about four
+    // times the cost of a step) is skipped for the rest of the loop.
+    if (checkArguments !== false) {
+      const call = ce.function(plan.callee, next.ops);
+      checkArguments ??= declaresParameterTypes(call, plan.literal);
+      if (checkArguments && isFunction(call)) {
+        const failed = call.ops.findIndex((x) => isFunction(x, 'Error'));
+        if (failed >= 0) {
+          const err = errorValue(call.ops[failed], {
+            operator: plan.callee,
+            index: failed + 1,
+          });
+          if (err !== undefined) return finish(err);
+        }
+      }
+    }
     current = next.ops;
   }
+}
+
+/**
+ * True when `call` is a call of `literal` (through a value definition or an
+ * operator definition) whose definition has a DECLARED signature with a
+ * parameter type other than `unknown` or `any`: the boxing of such a call
+ * can refuse an argument.
+ */
+function declaresParameterTypes(
+  call: Expression,
+  literal: Expression
+): boolean {
+  if (!isFunction(call)) return false;
+  let signature: Type | undefined;
+  const vdef = call.valueDefinition;
+  const odef = call.operatorDefinition;
+  if (vdef?.value === literal) {
+    if (vdef.inferredType) return false;
+    signature = vdef.type.type;
+  } else if (odef?._lambdaLiteral === literal) {
+    if (odef.inferredSignature) return false;
+    signature = odef.signature.type;
+  } else return false;
+  if (typeof signature !== 'object' || signature.kind !== 'signature')
+    return false;
+  return [
+    ...(signature.args ?? []),
+    ...(signature.optArgs ?? []),
+    ...(signature.variadicArg ? [signature.variadicArg] : []),
+  ].some((arg) => arg.type !== 'unknown' && arg.type !== 'any');
 }

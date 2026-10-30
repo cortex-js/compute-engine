@@ -585,11 +585,12 @@ import type {
 
 /**
  * The values that the `run()` of a `javascript` compilation accepts for a
- * variable or an argument: a real, a complex value (`mode: 'complex'`), or a
- * list for a symbol that the code reads as a list. This is
- * `DefaultRunnerVars<'javascript'>` in `types.ts`.
+ * variable or an argument: a real, a complex value (`mode: 'complex'`), a
+ * boolean, a string, or a list for a symbol that the code reads as a list.
+ * This is `DefaultRunnerVars<'javascript'>` in `types.ts`.
  */
-type JavaScriptRunnerVars = number | ComplexResult | RunnerListInput;
+type JavaScriptRunnerVars =
+  number | boolean | string | ComplexResult | RunnerListInput;
 
 /**
  * The state of the compilation of a `broadcast()` batch body
@@ -1432,6 +1433,9 @@ function mayReadUndefinedJS(
   if (JS_NUMERIC_LITERAL.test(code)) return false;
   if (isSymbol(e) && isDecidedLoopIndex(e.symbol, target.boundVars))
     return false;
+  // A vars-object read that the code around this one already tested for
+  // `undefined` (`BaseCompiler.unsuppliedComparisonGuard`) holds a value.
+  if (BaseCompiler.isPresentRead(code, target)) return false;
   if (isFunction(e) && typeof e.operator === 'string')
     return !JS_ALWAYS_NUMBER_HEADS.has(e.operator);
   return true;
@@ -7052,7 +7056,10 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Boole: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Boole`: missing argument');
-    const c = compile(args[0]);
+    // Only the truth of the operand is read: a comparison over an
+    // unsupplied variable is `false` with no test, and gives 0, as its
+    // `undefined` would (`BaseCompiler.withTruthOnly`).
+    const c = BaseCompiler.withTruthOnly(args[0], () => compile(args[0]));
     if (BaseCompiler.isBooleanValued(args[0])) return `((${c}) ? 1 : 0)`;
     return `(_SYS.cond(${c}) ? 1 : 0)`;
   },
@@ -11331,6 +11338,25 @@ function admitsStringAsText(t: Type): boolean {
 }
 
 /**
+ * True when a binding of type `t` holds a string and nothing else: `string`
+ * or a subtype of it (`character`), or such a type with a `missing` arm
+ * (`string | missing`: the absent value is `undefined`, which the entry
+ * accepts). Such a binding refuses any other value at entry. A union with
+ * another type (`string | real`) is not one.
+ */
+function isTextEntryType(t: Type): boolean {
+  const r = resolveTypeForCompilation(stripMissingFromType(t));
+  return r !== 'never' && isSubtype(r, 'string');
+}
+
+/** True when a binding of type `t` holds a boolean (or is absent):
+ * `boolean`, or `boolean | missing`. For such a binding `broadcast()` reads
+ * an empty array as an empty column. */
+function isBooleanEntryType(t: Type): boolean {
+  return BaseCompiler.isBooleanBindingType(t);
+}
+
+/**
  * The D3 entry plan of the LAMBDA route: parameter `i` is list-shaped when its
  * annotation proves a JS array, complex-shaped when its annotation is a
  * non-real number type, real-shaped otherwise (an unannotated parameter is
@@ -11348,6 +11374,7 @@ function lambdaEntryPlan(
   const strings = new Map<number, string>();
   const kinds = new Map<number, KindEntry>();
   const scalars: number[] = [];
+  const texts: number[] = [];
   literalParams.forEach((p, i) => {
     // The shared accessor reads a user-declared type name too (with the
     // engine's type resolver), not only a built-in type.
@@ -11378,6 +11405,12 @@ function lambdaEntryPlan(
       lists.push(i);
       return;
     }
+    // A parameter annotated `string` refuses any other value
+    // (`throwNonStringAtText`), and no number rule applies to it.
+    if (t !== undefined && isTextEntryType(t)) {
+      texts.push(i);
+      return;
+    }
     // Under the complex discipline an unannotated (wide) parameter is
     // complex-shaped too — a number is lifted at entry, an object accepted.
     const isComplex =
@@ -11387,7 +11420,8 @@ function lambdaEntryPlan(
         : mode === 'complex';
     (isComplex ? complex : real).push(i);
     // An annotation with a number type makes the parameter a scalar: an
-    // array for it is refused at entry (`refuseArrayAtScalar`).
+    // array, a boolean or a string for it is refused at entry
+    // (`refuseNonNumberAtScalar`).
     if (t !== undefined && isSubtype(t, 'number')) scalars.push(i);
   });
   return {
@@ -11398,6 +11432,7 @@ function lambdaEntryPlan(
     strings,
     ...(kinds.size > 0 ? { kinds } : {}),
     ...(scalars.length > 0 ? { scalars } : {}),
+    ...(texts.length > 0 ? { texts } : {}),
   };
 }
 
@@ -11421,6 +11456,8 @@ function varsEntryPlan(
   const strings = new Map<string, string>();
   const kinds = new Map<string, KindEntry>();
   const scalars: string[] = [];
+  const texts: string[] = [];
+  const booleans: string[] = [];
   for (const id of refs) {
     const sym = engine.symbol(id);
     // A symbol whose declared type proves an array is classed as a list
@@ -11453,16 +11490,30 @@ function varsEntryPlan(
       lists.push(id);
       continue;
     }
+    // A symbol that the host declared `string` refuses any other value
+    // (`throwNonStringAtText`), and no number rule applies to it. A type
+    // the engine inferred is not a declaration, as for `scalars` below.
+    if (
+      declared !== undefined &&
+      sym.valueDefinition?.inferredType !== true &&
+      isTextEntryType(declared)
+    ) {
+      texts.push(id);
+      continue;
+    }
     // Built OUTSIDE the compilation (the mode latch has been restored), so
     // the complex discipline's wide rule is applied here explicitly.
     const isComplex =
       BaseCompiler.isComplexValued(sym) ||
       (mode === 'complex' && BaseCompiler.wideNumericType(sym.type?.type));
     (isComplex ? complex : real).push(id);
+    if (declared !== undefined && isBooleanEntryType(declared))
+      booleans.push(id);
     // A symbol that the host declared with a number type is a scalar: an
-    // array for it is refused at entry (`refuseArrayAtScalar`). A type the
-    // engine inferred is not a declaration: the compiled code can broadcast
-    // over an array bound to such a symbol at run time.
+    // array, a boolean or a string for it is refused at entry
+    // (`refuseNonNumberAtScalar`). A type the engine inferred is not a
+    // declaration: the compiled code can broadcast over an array bound to
+    // such a symbol at run time.
     if (
       declared !== undefined &&
       sym.valueDefinition?.inferredType !== true &&
@@ -11478,6 +11529,8 @@ function varsEntryPlan(
     strings,
     ...(kinds.size > 0 ? { kinds } : {}),
     ...(scalars.length > 0 ? { scalars } : {}),
+    ...(texts.length > 0 ? { texts } : {}),
+    ...(booleans.length > 0 ? { booleans } : {}),
   };
 }
 
@@ -11519,10 +11572,18 @@ function compileToTarget(
       .slice(1)
       .map((x) => functionLiteralParameterName(x) || '_');
     const lambdaScope = BaseCompiler.withBoundScope(target, params);
+    // The parameters annotated `string`: a comparison over one has no value
+    // when the caller omits it (`CompileTarget.omittableParams`).
+    const textParams = new Set<string>();
+    args.slice(1).forEach((p, i) => {
+      const t = functionLiteralParameterType(p);
+      if (t !== undefined && isTextEntryType(t)) textParams.add(params[i]);
+    });
     const lambdaTarget: CompileTarget<Expression> = {
       ...target,
       var: (id) => (params.includes(id) ? id : target.var(id)),
       ...lambdaScope,
+      ...(textParams.size > 0 ? { omittableParams: textParams } : {}),
       declaredVarTypes: {
         ...lambdaScope.declaredVarTypes,
         ...BaseCompiler.literalDeclaredParamTypes(expr),
@@ -11803,6 +11864,7 @@ function compileToTarget(
     kind: 'javascript',
     stored: result,
     lists: entryPlan?.kind === 'vars' ? entryPlan.lists : undefined,
+    booleans: entryPlan?.kind === 'vars' ? entryPlan.booleans : undefined,
     // A worker has no engine: code that names a host identifier or draws
     // from the engine's random stream stays on this thread.
     shippable:
@@ -12193,8 +12255,7 @@ function compileSumProduct(
  * elements), while `slice` truncates its argument — so a count that is not
  * statically a literal integer is wrapped in `Math.round`. A literal-integer
  * count keeps the bare emission, byte-identical to the historical output.
- * (`Math.round(NaN)` is NaN, so the NaN-count behavior — slice from/to 0 —
- * is unchanged.)
+ * (`Math.round(NaN)` is NaN; `takeDropSlice` tests for it.)
  */
 function sliceCount(
   count: Expression,
@@ -12216,6 +12277,19 @@ function isNegativeConstantCount(count: Expression): boolean {
 }
 
 /**
+ * Whether a `Take`/`Drop` count can be `NaN` at run time: it is not typed
+ * `integer` (which excludes `NaN`) and it is not a number literal other than
+ * `NaN` (a literal `±∞` is not a constant to `tryGetConstant` and takes the
+ * run-time branch, but it is never `NaN`).
+ */
+export function countMayBeNaN(count: Expression): boolean {
+  if (isSubtype(count.type.type, 'integer')) return false;
+  if (isNumber(count) && !count.isComplex && !Number.isNaN(count.re))
+    return false;
+  return true;
+}
+
+/**
  * The `slice` call for `Take(coll, count)` or `Drop(coll, count)` over the
  * compiled array `coll`. The count is rounded (the interpreter's `toInteger`
  * count contract — `Take([…], 2.5)` keeps 3 elements). A negative count
@@ -12233,8 +12307,13 @@ function isNegativeConstantCount(count: Expression): boolean {
  * compile time (`Take(xs, 10)` → `.slice(0, 10)`, `Take(xs, -2)` →
  * `.slice(-2)`). A runtime count is evaluated once and the branch is chosen
  * at run time. A non-finite literal (`NaN`, `±∞`) is not a constant to
- * `tryGetConstant` and takes the run-time branch: a `NaN` count compares
- * false with 0, so `Take` answers `[]` and `Drop` the whole array.
+ * `tryGetConstant` and takes the run-time branch.
+ *
+ * A `NaN` count has no value in the interpreter: `Take([1, 2, 3], NaN)`
+ * stays unevaluated. The run-time branch then gives `undefined`, the value
+ * compiled code has for a list with no value (a bare slice answered `[]`
+ * for `Take` and the whole array for `Drop`). A count that cannot be `NaN`
+ * (`countMayBeNaN`) keeps the emission with no test.
  */
 function takeDropSlice(
   op: 'Take' | 'Drop',
@@ -12249,10 +12328,13 @@ function takeDropSlice(
       return k < 0 ? `(${coll}).slice(${k})` : `(${coll}).slice(0, ${k})`;
     return k < 0 ? `(${coll}).slice(0, ${k})` : `(${coll}).slice(${k})`;
   }
-  const body =
+  const slice =
     op === 'Take'
       ? '_n < 0 ? _a.slice(_n) : _a.slice(0, _n)'
       : '_n < 0 ? _a.slice(0, _n) : _a.slice(_n)';
+  const body = !countMayBeNaN(count)
+    ? slice
+    : `Number.isNaN(_n) ? undefined : ${slice}`;
   return `((_a, _n) => ${body})(${coll}, ${sliceCount(count, compile)})`;
 }
 
@@ -13196,13 +13278,17 @@ function fnArg(
   // A predicate whose result type cannot be a boolean (`x ↦ 1`) is refused
   // before its body is compiled.
   const check = predicateResultCheck(kind, callback);
-  const code = callbackArg(
-    kind,
-    callback,
-    source,
-    compile,
-    extraArgTypes,
-    target
+  // A selecting predicate (`Filter`, `Count`, …) and a prefix predicate
+  // (`TakeWhile`) read only whether the result is `true`: a `false` and an
+  // absent value select nothing alike. So a comparison that is the body of
+  // a predicate literal needs no test for an unsupplied variable
+  // (`BaseCompiler.withTruthOnly`).
+  const truthOnly =
+    (mode === 'select' || mode === 'prefix') && isFunction(callback, 'Function')
+      ? callback.ops[0]
+      : undefined;
+  const code = BaseCompiler.withTruthOnly(truthOnly, () =>
+    callbackArg(kind, callback, source, compile, extraArgTypes, target)
   );
   return check
     ? `_SYS.predicateResult(${code}, ${JSON.stringify(kind)}, "${mode}")`

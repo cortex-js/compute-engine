@@ -33,6 +33,44 @@ function codeOf(ce: ComputeEngine, latex: string): string {
   return r.code;
 }
 
+/** The index of the parenthesis that closes the one at `open` in `code`. */
+function closingParen(code: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === '(') depth += 1;
+    else if (code[i] === ')' && --depth === 0) return i;
+  }
+  throw new Error(`unbalanced: ${code}`);
+}
+
+/**
+ * The plain comparison inside the tests for unsupplied variables that a
+ * comparison whose value is the result takes (`BaseCompiler.
+ * unsuppliedComparisonGuard`): the exact test is what these pins are about.
+ * Two forms:
+ * - the comparison first, when each operand reads an absent value as NaN:
+ *   `((cmp) || ((tests) ? false : undefined))`, or `((cmp) && ((tests) ?
+ *   true : undefined))` for `NotEqual`;
+ * - the tests first, when an operand does not (`Length(L)` is a number for
+ *   any array): `((tests) ? (cmp) : undefined)`.
+ */
+function exactTest(code: string): string {
+  expect(code.startsWith('((')).toBe(true);
+  if (
+    code.endsWith(') : undefined)') &&
+    !/ \? (false|true) : undefined\)\)$/.test(code)
+  ) {
+    const testEnd = closingParen(code, 1);
+    expect(code.slice(testEnd + 1, testEnd + 5)).toBe(' ? (');
+    return code.slice(testEnd + 5, -') : undefined)'.length);
+  }
+  const cmpEnd = closingParen(code, 1);
+  expect(code.slice(cmpEnd + 1)).toMatch(
+    /^ (\|\| \(\(.*\) \? false : undefined\)|&& \(\(.*\) \? true : undefined\))\)$/
+  );
+  return code.slice(2, cmpEnd);
+}
+
 describe('J8: equality between integer-valued operands is exact', () => {
   const ce = newEngine({
     a: 'real',
@@ -43,30 +81,36 @@ describe('J8: equality between integer-valued operands is exact', () => {
   });
 
   test('Sign/Floor/Ceil/Length/integer literal compare with === and !==', () => {
-    expect(codeOf(ce, '\\mathrm{Sign}(a) = \\mathrm{Sign}(b)')).toBe(
+    expect(exactTest(codeOf(ce, '\\mathrm{Sign}(a) = \\mathrm{Sign}(b)'))).toBe(
       '((Math.sign(_.a)) === (Math.sign(_.b)))'
     );
-    expect(codeOf(ce, '\\mathrm{Sign}(a) \\ne \\mathrm{Sign}(b)')).toBe(
-      '((Math.sign(_.a)) !== (Math.sign(_.b)))'
-    );
-    expect(codeOf(ce, '\\lfloor a \\rfloor = \\lceil b \\rceil')).toBe(
-      '((Math.floor(_.a)) === (Math.ceil(_.b)))'
-    );
-    expect(codeOf(ce, '\\mathrm{Length}(L) = 3')).toBe(
+    expect(
+      exactTest(codeOf(ce, '\\mathrm{Sign}(a) \\ne \\mathrm{Sign}(b)'))
+    ).toBe('((Math.sign(_.a)) !== (Math.sign(_.b)))');
+    expect(
+      exactTest(codeOf(ce, '\\lfloor a \\rfloor = \\lceil b \\rceil'))
+    ).toBe('((Math.floor(_.a)) === (Math.ceil(_.b)))');
+    expect(exactTest(codeOf(ce, '\\mathrm{Length}(L) = 3'))).toBe(
       '(((_.L).length) === (3))'
     );
-    expect(codeOf(ce, 'n = 3')).toBe('((_.n) === (3))');
+    expect(exactTest(codeOf(ce, 'n = 3'))).toBe('((_.n) === (3))');
   });
 
   test('a chained form takes the exact test on each pair', () => {
-    expect(codeOf(ce, '\\lfloor a \\rfloor = n = 3')).toBe(
-      '(((Math.floor(_.a)) === (_.n)) && ((_.n) === (3)))'
+    // The link `n = 3` does not read `a`, so it can decide `false` while
+    // `a` has no value: the chain is the three-valued `And` of its links,
+    // each with its own exact test.
+    const code = codeOf(ce, '\\lfloor a \\rfloor = n = 3');
+    expect(code).toContain('((((_tv1) === (_.n))) || (');
+    expect(code).toContain(
+      '((((_.n) === (3))) || ((_.n !== undefined) ? false : undefined))'
     );
+    expect(code.endsWith('(Math.floor(_.a))')).toBe(true);
   });
 
   test('a real operand compares exactly too', () => {
-    expect(codeOf(ce, 'x = 3')).toBe('((_.x) === (3))');
-    expect(codeOf(ce, 'x = 0.5')).toBe('((_.x) === (0.5))');
+    expect(exactTest(codeOf(ce, 'x = 3'))).toBe('((_.x) === (3))');
+    expect(exactTest(codeOf(ce, 'x = 0.5'))).toBe('((_.x) === (0.5))');
   });
 
   test('the engine tolerance does not reach compiled equality', () => {
@@ -76,7 +120,7 @@ describe('J8: equality between integer-valued operands is exact', () => {
     const coarse = new ComputeEngine();
     coarse.tolerance = 1;
     coarse.declare('m', 'integer');
-    expect(codeOf(coarse, 'm = 3')).toBe('((_.m) === (3))');
+    expect(exactTest(codeOf(coarse, 'm = 3'))).toBe('((_.m) === (3))');
   });
 
   test('the compiled value matches the interpreter', () => {

@@ -151,7 +151,9 @@ describe('list-building recursion compiles to a loop', () => {
     expect(() => r!.run!({})).toThrow(
       /Iteration limit of 1024 exceeded while evaluating F\(\)/
     );
-    expect(() => ce.box(['F', 0]).evaluate()).toThrow(/Iteration limit/);
+    expect(() => ce.box(['F', 0]).evaluate()).toThrow(
+      /^Iteration limit of 1024 exceeded while evaluating F\(\)$/
+    );
     ce.iterationLimit = 6_000;
     expect((r!.run!({}) as number[]).length).toBe(5_000);
   });
@@ -197,14 +199,17 @@ describe('list-building recursion compiles to a loop', () => {
     expect(() => r!.run!({ D: NaN })).toThrow(/Iteration limit of 1024/);
   });
 
-  it('an undecided guard after a collected prefix throws the TypeError the nested spread threw', () => {
+  it('an undecided guard after a collected prefix gives undefined', () => {
     // The guard `n < 1 ∨ m ≠ 5` is decided `True` by its first disjunct at
     // the first step, and undecided at the second when the caller leaves `m`
     // out of the vars object. A NaN operand cannot leave a guard undecided
     // any more: it decides every relation (user decisions 2026-10-20 and
-    // 2026-10-23; the case used `NaN ≠ 5` before). The recursive arrow then
-    // spread `undefined` into the collected prefix (`[...[n], ...undefined]`),
-    // a `TypeError`, and the loop keeps that outcome.
+    // 2026-10-23; the case used `NaN ≠ 5` before). The second step then has
+    // no value (no arm of the `Which` matches), and the whole call is
+    // `undefined`, the value compiled code has for a list with no value. The
+    // recursive arrow spread `undefined` into the collected prefix
+    // (`[...[n], ...undefined]`) and threw a `TypeError`; the loop gave that
+    // `TypeError` too before CE-579.
     const ce = new ComputeEngine();
     ce.declare('m', 'number');
     ce.declare('F', '(number) -> list<number>');
@@ -227,7 +232,7 @@ describe('list-building recursion compiles to a loop', () => {
     );
     const r = compile(ce.box(['F', 0]), { fallback: false });
     expect(String(r!.preamble)).toContain('_SYS.listRecursion');
-    expect(() => r!.run!({})).toThrow(TypeError);
+    expect(r!.run!({})).toBeUndefined();
     expect(r!.run!({ m: 5 })).toEqual([0, 1]);
   });
 

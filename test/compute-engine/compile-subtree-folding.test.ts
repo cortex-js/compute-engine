@@ -168,7 +168,9 @@ describe('COMPILE constant folding - constant collections', () => {
     // straddling it: 49 elements fold (to a hoisted literal), 50 do not.
     const folded = compile(ce.box(['At', MAP_SQUARES(49), 'k'] as any));
     expect(folded.code).toBe('_SYS.at(_lit_1, _.k)');
-    expect(folded.preambleOnce).toMatch(/^const _lit_1 = \[1, 4, 9, .*, 2401\];\n$/);
+    expect(folded.preambleOnce).toMatch(
+      /^const _lit_1 = \[1, 4, 9, .*, 2401\];\n$/
+    );
     expect(compile(ce.box(['At', MAP_SQUARES(50), 'k'] as any)).code).toContain(
       '_SYS.rangeCount('
     );
@@ -558,7 +560,10 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
       [['Any', R, ['Function', ['Greater', 'x', 99998], 'x']], true],
       [['Reduce', R, 'Add'], 4999950000],
       // An indexed `Sum` with 60 000 iterations.
-      [['Sum', ['Multiply', 'k', 'k'], ['Limits', 'k', 1, 60000]], 72001800010000],
+      [
+        ['Sum', ['Multiply', 'k', 'k'], ['Limits', 'k', 1, 60000]],
+        72001800010000,
+      ],
     ] as const;
     for (const [json, value] of shapes) {
       const r = compile(ce.box(json as any), { fallback: false });
@@ -569,12 +574,17 @@ describe('COMPILE constant folding - eligibility is deterministic', () => {
 
     // A walk at the cap still folds.
     expect(
-      compile(ce.box(['Sum', ['Filter', ['Range', 1, 10000], 'IsPrime']] as any))
-        .code
+      compile(
+        ce.box(['Sum', ['Filter', ['Range', 1, 10000], 'IsPrime']] as any)
+      ).code
     ).toBe('5736396');
     expect(
       compile(
-        ce.box(['Sum', ['Multiply', 'k', 'k'], ['Limits', 'k', 1, 10000]] as any)
+        ce.box([
+          'Sum',
+          ['Multiply', 'k', 'k'],
+          ['Limits', 'k', 1, 10000],
+        ] as any)
       ).code
     ).toBe('333383335000');
     // An operator with no callback is not priced per element: `Length` of
@@ -755,11 +765,14 @@ describe('COMPILE Take/Drop - literal count peephole', () => {
 
   it('chooses the slice at run time for a non-constant count', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']));
+    // A count that can be NaN has no value for NaN, as in the interpreter,
+    // so the slice tests it first.
     expect(r.code).toBe(
-      '((_a, _n) => _n < 0 ? _a.slice(_n) : _a.slice(0, _n))(_lit_1, Math.round(_.n))'
+      '((_a, _n) => Number.isNaN(_n) ? undefined : _n < 0 ? _a.slice(_n) : _a.slice(0, _n))(_lit_1, Math.round(_.n))'
     );
     expect(r.run?.({ n: 2.5 })).toEqual([1, 2, 3]);
     expect(r.run?.({ n: -2.5 })).toEqual([3, 4]);
+    expect(r.run?.({ n: NaN })).toBeUndefined();
   });
 
   it('Drop emits a bare literal count', () => {
@@ -793,8 +806,9 @@ describe('COMPILE Python counts - rounding parity', () => {
     const r = compile(ce.box(['Take', ['List', 1, 2, 3, 4], 'n']), {
       to: 'python',
     });
+    // A count that can be NaN gives `None` for NaN before `int()`.
     expect(r.code).toBe(
-      '(lambda _l, _n: _l[_n:] if _n < 0 else _l[:_n])([1, 2, 3, 4], int(np.clip(np.floor((n) + 0.5), -9007199254740991, 9007199254740991)))'
+      '(lambda _l, _c: None if np.isnan(_c) else (lambda _n: _l[_n:] if _n < 0 else _l[:_n])(int(np.clip(np.floor(_c + 0.5), -9007199254740991, 9007199254740991))))([1, 2, 3, 4], n)'
     );
   });
 

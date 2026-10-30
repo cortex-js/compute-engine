@@ -445,7 +445,12 @@ describe('CE-569 — the cases the fixes do not change', () => {
     const ce = engine();
     const json = ['When', 'x', ['List', ['Greater', 'x', 0], ['Less', 'x', 1]]];
     const f = js(ce, json);
-    expect(f.code).toBe('_SYS.restrict([0 < _.x, _.x < 1], _.x, false, NaN)');
+    // Each condition is a value with no value for an unsupplied `x`
+    // (`unsuppliedComparisonGuard`), so every cell is masked then.
+    expect(f.code).toBe(
+      '_SYS.restrict([((0 < _.x) || ((_.x !== undefined) ? false : undefined)), ((_.x < 1) || ((_.x !== undefined) ? false : undefined))], _.x, false, NaN)'
+    );
+    expect((f.run!({}) as number[]).every((v) => Number.isNaN(v))).toBe(true);
     for (const x of [-1, 0.5, 2]) {
       const cells = Array.from(
         ce
