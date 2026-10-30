@@ -1746,7 +1746,7 @@ function gpuNaNSafeUnary(
   // the built-in call of a literal at compile time: the helper call
   // `_gpu_cos(2.4)` was not folded, and the small difference changed a
   // threshold test in Tycho's `voronoi-diagram` on WebGPU.
-  if (GPU_FINITE_LITERAL.test(code) || gpuProvablyFinite(x, target))
+  if (GPU_FINITE_LITERAL.test(code) || gpuProvablyFinite(x, target, true))
     return `${name}(${code})`;
   const shape = gpuOperandShape(x);
   if (shape === 'scalar') return `_gpu_${name}(${code})`;
@@ -1866,9 +1866,12 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   magnitude is a number literal, `sin`, `cos` or `tanh` of a real, or an
  *   expression whose static type has a finite range, such as a symbol
  *   declared `real<0..10>`), a product of factors that all have a known
- *   magnitude stays within half the largest f32, a quotient has a non-zero
- *   literal divisor, and a subtree with no unknowns has a value that is
- *   finite in f32. A finite operand that
+ *   magnitude stays within half the largest f32, a power `b^n` with an
+ *   integer literal `n` from 2 to 4 has a base of known magnitude (a
+ *   declared range, `sin`, `cos`, a literal, or a sum of these) whose
+ *   `n`-th power stays within half the largest f32, a quotient has a
+ *   non-zero literal divisor, and a subtree with no unknowns has a value
+ *   that is finite in f32. A finite operand that
  *   overflows becomes `±∞` in the shader, and the guard turns `sin(∞)` into
  *   NaN, where the built-in gives 0 on Apple GPUs. One limit is accepted:
  *   a sum, or a product by a literal, of finite values overflows when they
@@ -1891,7 +1894,8 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  */
 function gpuProvablyFinite(
   x: Expression,
-  target: CompileTarget<Expression>
+  target: CompileTarget<Expression>,
+  guardOperand = false
 ): boolean {
   // The static type of an expression that reads a parameter of the body
   // being compiled says nothing (the parameter is typed `number`), so a
@@ -1903,7 +1907,7 @@ function gpuProvablyFinite(
     if (gpuOperandShape(x) !== 'scalar') return false;
     strict = true;
   }
-  return gpuFiniteProof(target, strict)?.finite(x) === true;
+  return gpuFiniteProof(target, strict)?.finite(x, guardOperand) === true;
 }
 
 /**
@@ -1924,7 +1928,7 @@ function gpuFiniteProof(
   strict: boolean
 ):
   | {
-      finite: (e: Expression) => boolean;
+      finite: (e: Expression, top?: boolean) => boolean;
       magnitude: (e: Expression) => number | undefined;
     }
   | undefined {
@@ -1946,6 +1950,7 @@ function gpuFiniteProof(
   const isWritten = (s: string): boolean =>
     written === 'all' || written?.has(s) === true;
   const seen = new Map<Expression, boolean>();
+  const seenTop = new Map<Expression, boolean>();
   const reading = new Set<string>();
   const isMapped = (s: string): boolean =>
     target.varsKeys?.has(s) === true || caller.isVarsKey?.(s) === true;
@@ -1963,9 +1968,21 @@ function gpuFiniteProof(
     if (target.var(e.symbol) !== undefined) return undefined;
     return e.engine._getSymbolValue(e.symbol);
   };
-  const finite = (e: Expression): boolean => {
-    const known = seen.get(e);
+  // `top` is true for the operand of the guarded call itself, and for a term
+  // of a sum, difference or negation in that position: only there is a
+  // small power accepted (`smallPowerStaysFinite`). Elsewhere its size
+  // would be lost: `floor(x^4)` is typed an integer with no range, and
+  // `1000·floor(x^4)` with `x: real<-10⁹..10⁹>` would pass the product rule
+  // with one factor of unknown magnitude, but is `+∞` in f32 at `x = 10⁹`.
+  const finite = (e: Expression, top = false): boolean => {
+    const memo = top ? seenTop : seen;
+    const known = memo.get(e);
     if (known !== undefined) return known;
+    const sum =
+      isFunction(e) &&
+      (e.operator === 'Add' ||
+        e.operator === 'Subtract' ||
+        e.operator === 'Negate');
     let result = false;
     // A literal is finite in the shader when it is finite in f32: `1e39` is
     // a finite f64 value, but `+∞` in f32.
@@ -2003,7 +2020,7 @@ function gpuFiniteProof(
     } else if (
       isFunction(e) &&
       caller.isOverriddenOperator?.(e.operator) !== true &&
-      e.ops.every(finite)
+      e.ops.every((op) => finite(op, top && sum))
     ) {
       // A subtree with no unknowns is a constant, whose value is known: it
       // is finite in the shader when it is finite in f32 (`Γ(20)`, but not
@@ -2016,11 +2033,51 @@ function gpuFiniteProof(
           Math.abs(v) <= GPU_F32_MAX &&
           (!strict || n.im === 0)
         ) {
-          seen.set(e, true);
+          memo.set(e, true);
           return true;
         }
       }
       if (e.operator === 'Multiply') result = productStaysFinite(e.ops);
+      else if (e.operator === 'Power') result = top && smallPowerStaysFinite(e);
+      // A sum with a small power among its terms, read through nested sums,
+      // differences and negations (`-u^2 - v^2 - w^2` is a sum of
+      // `Negate(Power(…))` terms): the magnitudes of the terms (the power
+      // has one, `m^n`) must add up to at most half the largest
+      // f32, so that the powers cannot overflow together: `u^2 + v^2 + w^2`
+      // with `u, v, w: real<-1.2·10¹⁹..1.2·10¹⁹>` is `+∞` in f32.
+      else if (sum) {
+        const terms: Expression[] = [];
+        const collect = (t: Expression): void => {
+          if (
+            isFunction(t) &&
+            (t.operator === 'Add' ||
+              t.operator === 'Subtract' ||
+              t.operator === 'Negate')
+          )
+            t.ops.forEach(collect);
+          else terms.push(t);
+        };
+        collect(e);
+        // Every term must then have a known magnitude: `u^2 + y` with `y`
+        // declared `real` and no range is `+∞` in f32 for `u = 10¹⁹`,
+        // `y = 3·10³⁸`.
+        // A power with no unknowns (`e^20`) is a constant, which the test of
+        // constants above accepts: only a power that `smallPowerStaysFinite`
+        // accepts counts here (`sin(x + e^20)` is the built-in).
+        if (
+          terms.some(
+            (t) =>
+              isFunction(t) &&
+              t.operator === 'Power' &&
+              t.unknowns.length > 0 &&
+              smallPowerStaysFinite(t)
+          )
+        ) {
+          let s = 0;
+          for (const t of terms) s += magnitude(t) ?? Infinity;
+          result = Number.isFinite(s) && s <= GPU_F32_MAX / 2;
+        } else result = true;
+      }
       // A written vector (`[t, k, 1]` is `vec3(t, k, 1.0)`) is finite when
       // each of its components is.
       else if (e.operator === 'List' || e.operator === 'Tuple') result = true;
@@ -2043,7 +2100,7 @@ function gpuFiniteProof(
             : isNumber(e.op1) && isNumber(e.op2) && !e.op1.isSame(e.op2);
       else result = GPU_F32_BOUNDED_HEADS.has(e.operator);
     }
-    seen.set(e, result);
+    memo.set(e, result);
     return result;
   };
   // The largest magnitude that the finite operand `e` can have in the
@@ -2081,6 +2138,15 @@ function gpuFiniteProof(
       (e.type.matches('real') || (strict && finite(e.op1)))
     )
       return 1;
+    // A small power that `finite` accepts: `m^n` for the bound `m` of its
+    // base, with the same margin. Without it, `1000·x^4` with
+    // `x: real<-10⁹..10⁹>` would count `x^4` as a factor of unknown
+    // magnitude, and the product rule would accept it.
+    else if (isFunction(e) && e.operator === 'Power' && isNumber(e.op2)) {
+      const m = powerBaseMagnitude(e.op1);
+      if (m !== undefined && smallPowerStaysFinite(e))
+        return Math.max(1, m) ** e.op2.re * (1 + 2 ** -10);
+    }
     const t = e.type.type;
     if (typeof t !== 'object' || t.kind !== 'numeric') return undefined;
     const { lower, upper } = t;
@@ -2108,6 +2174,73 @@ function gpuFiniteProof(
     }
     if (unknown > 1) return false;
     return Number.isFinite(bound) && bound <= GPU_F32_MAX / 2;
+  };
+  // `b^n` with an integer literal `n` from 2 to 4, whose operands are
+  // finite (checked by `finite` before), is finite when `b` has a bound `m`
+  // of its magnitude, read from its parts only (`powerBaseMagnitude`), with
+  // `m^n` (`m` counted as at least 1, so that each partial product is
+  // bounded too) at most half the largest f32, less a margin of 2^-10 for
+  // the rounding: `(x - cos(T))^2` with `x: real<-10..10>`. For these
+  // exponents the shader multiplies (`x * x`, `_gpu_pow2`–`_gpu_pow4`). Any
+  // other exponent, and a base of another form, is refused: `x^2` with `x`
+  // declared `real` and no range is `+∞` in f32 for `x = 10²⁰`, and a
+  // larger exponent of a compound base calls `_gpu_powi`, which computes
+  // `pow(abs(x), n)` with an error that the GPU does not specify.
+  const smallPowerStaysFinite = (e: Expression): boolean => {
+    if (!isFunction(e) || !isNumber(e.op2) || e.op2.im !== 0) return false;
+    const n = e.op2.re;
+    if (!Number.isInteger(n) || n < 2 || n > 4) return false;
+    const m = powerBaseMagnitude(e.op1);
+    return (
+      m !== undefined && Math.max(1, m) ** n * (1 + 2 ** -10) <= GPU_F32_MAX / 2
+    );
+  };
+  // A bound of the magnitude of the base `b` of a small power, for three
+  // forms only: a term, the negation of a term, or a sum or a difference of
+  // such terms (the sum of their bounds). A term is a finite number
+  // literal, `sin` or `cos` of a real operand (at most 1), or a symbol that the
+  // shader reads as the host's input with a DECLARED type that has a finite
+  // numeric range (`x: real<-10..10>`). A symbol whose type is inferred,
+  // whose value the shader computes in its place, that the compiled code
+  // writes, or that is a parameter of the body being compiled has no bound
+  // here. Any other form gives `undefined`.
+  const powerBaseMagnitude = (b: Expression): number | undefined => {
+    const term = (t: Expression): number | undefined => {
+      if (isFunction(t) && t.operator === 'Negate') t = t.op1;
+      if (isNumber(t))
+        return t.im === 0 && Number.isFinite(t.re) ? Math.abs(t.re) : undefined;
+      // A real operand only, as in `magnitude`: `cos(z)` of a complex `z`
+      // grows as `cosh(Im z)`.
+      if (isFunction(t) && (t.operator === 'Sin' || t.operator === 'Cos'))
+        return t.nops === 1 &&
+          (t.type.matches('real') || (strict && finite(t.op1)))
+          ? 1
+          : undefined;
+      if (!isSymbol(t)) return undefined;
+      if (
+        facts?.has(t.symbol) === true ||
+        isWritten(t.symbol) ||
+        bakedValue(t) !== undefined ||
+        t.valueDefinition?.inferredType === true
+      )
+        return undefined;
+      const type = t.type.type;
+      if (typeof type !== 'object' || type.kind !== 'numeric') return undefined;
+      const { lower, upper } = type;
+      if (lower === undefined || upper === undefined) return undefined;
+      const m = Math.max(Math.abs(lower), Math.abs(upper));
+      return Number.isFinite(m) ? m : undefined;
+    };
+    if (isFunction(b) && (b.operator === 'Add' || b.operator === 'Subtract')) {
+      let s = 0;
+      for (const op of b.ops) {
+        const m = term(op);
+        if (m === undefined) return undefined;
+        s += m;
+      }
+      return Number.isFinite(s) ? s : undefined;
+    }
+    return term(b);
   };
   return { finite, magnitude: (e) => magnitude(e) };
 }
@@ -2532,7 +2665,7 @@ function gpuNaNSafeTernaryCall(
   if (
     name === 'clamp' &&
     shapes.every((s) => s === 'scalar') &&
-    args.every((a) => gpuProvablyFinite(a, target))
+    args.every((a) => gpuProvablyFinite(a, target, true))
   ) {
     const [x, lo, hi] = args.map((a) => compile(a));
     return `min(max(${x}, ${lo}), ${hi})`;
@@ -2551,7 +2684,7 @@ function gpuNaNSafeTernaryCall(
   // with the vector constructor (WGSL has no `max(vecN, f32)`), and the
   // proof reads the bound as written: `vecN(s)` is finite exactly when `s`
   // is. So `Clamp(v, 0, 1)` is `min(max(v, vec3(0.0)), vec3(1.0))`.
-  if (name === 'clamp' && args.every((a) => gpuProvablyFinite(a, target)))
+  if (name === 'clamp' && args.every((a) => gpuProvablyFinite(a, target, true)))
     return `min(max(${codes[0]}, ${codes[1]}), ${codes[2]})`;
   return `_gpu_${name}${width}(${codes.join(', ')})`;
 }
@@ -4250,7 +4383,7 @@ function compileGPUBroadcastUnary(
   // prove the operand finite; a vector whose components are all finite for
   // certain (`gpuProvablyFinite`) takes the built-in, which is componentwise.
   const width = gpuComponentCount(operand);
-  const finiteOperand = gpuProvablyFinite(operand, target);
+  const finiteOperand = gpuProvablyFinite(operand, target, true);
   let emitted = code;
   let judged = code;
   for (const name of GPU_NAN_SAFE_UNARY) {
@@ -5879,7 +6012,7 @@ function compileGPUElementExtremum(
   // `vecN(s)` is finite exactly when `s` is. Operands of one shape (all
   // scalars, or `vecN` values of one width) go to the built-in fold as they
   // are.
-  const finite = args.every((a) => gpuProvablyFinite(a, target));
+  const finite = args.every((a) => gpuProvablyFinite(a, target, true));
   if (
     finite &&
     new Set(shapes).size === 1 &&
@@ -6020,7 +6153,7 @@ function compileGPUExtremum(
     if (codes.length === 1)
       return gpuParenthesizeIdentity(args[0], codes[0], target);
     // Finite operands need no guard (`gpuProvablyFinite`): the built-in.
-    if (args.every((a) => gpuProvablyFinite(a, target)))
+    if (args.every((a) => gpuProvablyFinite(a, target, true)))
       return codes
         .slice(1)
         .reduce((acc, c) => `${name}(${acc}, ${c})`, codes[0]);
@@ -6050,7 +6183,7 @@ function compileGPUExtremum(
   // reduction has no extremum), and the shader NaN is reachable for a literal.
   if (parts.length === 0) return `(${gpuNaN(target)})`;
   // Each component of a finite vector is finite: the built-in fold.
-  if (args.every((a, i) => isEmpty[i] || gpuProvablyFinite(a, target)))
+  if (args.every((a, i) => isEmpty[i] || gpuProvablyFinite(a, target, true)))
     return `(${parts.slice(1).reduce((acc, c) => `${name}(${acc}, ${c})`, parts[0])})`;
   return `(${fold(parts)})`;
 }
