@@ -41,6 +41,12 @@ Take the box lock for full suites, aggregate CI, builds, corpus checks, and
 and run serially. Type checking and capped targeted tests do not need the lock.
 Worktrees share these CPU limits.
 
+Exception: a local release (`npm run release`, or `npm publish`) takes no lock
+for its checks and builds (`scripts/release-checks.sh`, `npm run doc`, the
+production build, the VS Code extension), because the user releases only when
+no other session is active (user decision 2026-10-30). The full test suite of a
+release runs through `scripts/ci-nightly.sh`, which still takes the lock.
+
 ## §3 Checking for running tests
 
 Check both the runner and its workers:
