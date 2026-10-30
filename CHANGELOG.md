@@ -57,19 +57,20 @@
   value** (user decision 2026-10-30). With `x` declared `real`,
   `compile("x > 0").run({})` gave `false`; it now gives `undefined`, as the
   interpreter has no value there. The same holds for `Equal`, `NotEqual`, a
-  chain (`x < 1 < y`, evaluated pair by pair) and a bare `Not`, `And` or `Or`
-  of a variable declared `boolean`. A `NaN` operand still decides
-  (`Less(NaN, x)` is `false`), and a read through a `Block` local is tested
-  through the values assigned to the local. Where only the truth of a numeric
-  comparison is read (`Boole(x > 0)`, a `Filter` predicate) the code has no
-  test and no extra cost. A branch on such a comparison already took no arm.
+  chain (`x < 1 < y`, evaluated pair by pair) and a bare `Not`, `And` or `Or` of
+  a variable declared `boolean`. A `NaN` operand still decides (`Less(NaN, x)`
+  is `false`), and a read through a `Block` local is tested through the values
+  assigned to the local. Where only the truth of a numeric comparison is read
+  (`Boole(x > 0)`, a `Filter` predicate) the code has no test and no extra cost.
+  A branch on such a comparison already took no arm.
 - **A compiled list recursion stops at `ce.iterationLimit`.** A list-building
-  recursion such as `F(n) = Which(n = D - 1, [p(n)], True, Join([p(n)],
-  F(n + 1)))` now compiles to a loop again (see below); the loop applies the
-  iteration limit, 1,024 by default, as the interpreter does. Before, the
-  recursive function returned up to about 5,000 elements and then overflowed
-  the stack. The interpreter's message is now the same as the compiled one:
-  "Iteration limit of 1024 exceeded while evaluating F()".
+  recursion such as
+  `F(n) = Which(n = D - 1, [p(n)], True, Join([p(n)], F(n + 1)))` now compiles
+  to a loop again (see below); the loop applies the iteration limit, 1,024 by
+  default, as the interpreter does. Before, the recursive function returned up
+  to about 5,000 elements and then overflowed the stack. The interpreter's
+  message is now the same as the compiled one: "Iteration limit of 1024 exceeded
+  while evaluating F()".
 - **A compiled user function with one clause accepts `NaN` at a numeric
   parameter**, as the interpreter does (decision 2026-09-30 in
   `docs/ERROR-MODEL.md`). With `f: (real) -> number` and `f := x ↦ 7`, the
@@ -81,17 +82,50 @@
 
 ### Resolved Issues
 
+- **Compiled code: a `Block` local that may have no value is no longer read as
+  `undefined`, 0 or an earlier value** (ROADMAP CE-636). With a local declared
+  with no value (`Declare(n, integer)`) and assigned on some paths only, at
+  `x = 1` the loop
+  `Block(s ≔ 0; Loop(Block(Declare(n, integer); If(i > 3, n ≔ 1); If(n ≠ 1, s ≔ s + i)), i ∈ 1..5); s)`
+  gave 6 on JavaScript (`undefined != 1` is `true`), where the interpreter gives
+  0; WGSL read 0 and GLSL read an undefined value. Each read of such a local is
+  now classified at compile time:
+  - a read that comes after an assignment on every path compiles with no check,
+    as before;
+  - a read with no assignment on any path before it fails to compile on every
+    target, with a message that names the local;
+  - another read is checked when the code runs: JavaScript and interval
+    JavaScript throw an error with `read-before-declaration` and the name of the
+    local when the read finds no value, and Python raises `UnboundLocalError`
+    through the start value `_ce_unset(name)`. GLSL and WGSL cannot raise an
+    error, so they refuse to compile such a read.
+
+  On Python, a local whose reads all come after an assignment on every path no
+  longer gets the start value `_ce_unset(name)`. A branch whose condition the
+  compiled code may not decide runs no branch, so an assignment in both branches
+  of such an `If` is not on every path: on JavaScript this is the case for a
+  condition that reads an input the caller can leave out (`x > 5`), and for a
+  condition that reads a `boolean` input on JavaScript and Python. A `Which`
+  whose last condition is `True` always runs a branch. The bounds of a `Sum` or
+  a `Product` whose index has the name of the local are reads of the local. A
+  local assigned in a loop that can stop early gets a run-time check on
+  JavaScript, and so does a read after an early `Return`. An assignment inside
+  an operand of an operator other than `Add`, `Subtract`, `Negate`, `List` or
+  `Tuple` counts as possible, not certain, because some lowerings skip an
+  operand (`x^0` compiles to `1`): a later read gets a run-time check on
+  JavaScript, and GLSL and WGSL refuse it.
+
 - **A list-building recursion compiles to a loop again** (ROADMAP CE-579, a
   regression in 0.172.0). With `F` declared `function` and then assigned
   `F(n) = Which(n = D - 1, [p(n)], True, Join([p(n)], F(n + 1)))`, the
-  JavaScript target compiled a recursive function, which overflowed the stack
-  at `D = 10000`. It now compiles to the `_SYS.listRecursion` loop, also when
-  `F` has no declaration or is declared `(real) -> list`. The interpreter uses
-  its loop for an `F` with no declaration too, where it stopped with
-  "Recursion limit exceeded", and it checks the argument of each step against
-  the declared parameter type, as a direct call does: under
-  `(integer) -> list`, a step `F(n + 1/2)` gives the `incompatible-type` error
-  of `F(1/2)` instead of a list with non-integer elements.
+  JavaScript target compiled a recursive function, which overflowed the stack at
+  `D = 10000`. It now compiles to the `_SYS.listRecursion` loop, also when `F`
+  has no declaration or is declared `(real) -> list`. The interpreter uses its
+  loop for an `F` with no declaration too, where it stopped with "Recursion
+  limit exceeded", and it checks the argument of each step against the declared
+  parameter type, as a direct call does: under `(integer) -> list`, a step
+  `F(n + 1/2)` gives the `incompatible-type` error of `F(1/2)` instead of a list
+  with non-integer elements.
 - **`Take` and `Drop` with a `NaN` count have no value in compiled code.** The
   interpreter leaves `Take(xs, NaN)` unevaluated. Compiled JavaScript gave `[]`
   for `Take` and the whole list for `Drop`, and compiled Python raised a
@@ -295,13 +329,12 @@
   throws a `TypeError` that names `s`, on `run()` and on `broadcast()`, as a
   string or a boolean for a number variable already did.
 - **Boolean inputs on every route.** `broadcast()` on the JavaScript target
-  refused a variable declared `boolean` ("must be a Float64Array or a
-  number"); it now accepts a boolean scalar, an array of booleans and an empty
-  column, on the sync, async and worker routes. On `interval-js` a JavaScript
-  boolean was read as "maybe"; it is now `'true'` or `'false'`, and
-  `broadcast()` accepts it too. A boolean column is checked again on each
-  batch, and `broadcastAsync()` refuses a column whose length or contents
-  change during the batch.
+  refused a variable declared `boolean` ("must be a Float64Array or a number");
+  it now accepts a boolean scalar, an array of booleans and an empty column, on
+  the sync, async and worker routes. On `interval-js` a JavaScript boolean was
+  read as "maybe"; it is now `'true'` or `'false'`, and `broadcast()` accepts it
+  too. A boolean column is checked again on each batch, and `broadcastAsync()`
+  refuses a column whose length or contents change during the batch.
 - **A bare `Not`, `And` or `Or` of an unsupplied boolean has no value.** With
   `c` declared `boolean`, `compile("\\lnot c").run({})` gave `true`; it now
   gives `undefined`, as the interpreter has no value.

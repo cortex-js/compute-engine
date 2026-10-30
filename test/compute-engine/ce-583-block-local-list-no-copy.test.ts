@@ -477,9 +477,10 @@ describe('CE-583: a nested Block in statement position on Python', () => {
         ['Block', ['Assign', 'W', ['Multiply', 2, 'x']]],
         ['Add', 'W', 1],
       ],
-      // The write of `W` is in a nested block, so `W` gets the start value.
-      'W = _ce_unset("W")\nW = 2 * x\nreturn _ce_checked(W + 1)',
-      'def f(x):\n    W = _ce_unset("W")\n    W = 2 * x\n    return _ce_checked(W + 1)\n',
+      // The nested block assigns `W` on every path before the read, so
+      // `W` gets no start value (CE-636).
+      'W = 2 * x\nreturn W + 1',
+      'def f(x):\n    W = 2 * x\n    return W + 1\n',
       6,
     ],
     [
@@ -748,7 +749,8 @@ describe('CE-583: a Python block local has no value from a previous pass', () =>
   // whose use in arithmetic raises `UnboundLocalError` (`_ce_unset`). The
   // interpreter has no number for the read in the pass where `k = 2`: its
   // result is the symbol `t`, which compiled code cannot represent, so
-  // JavaScript gives NaN and Python raises.
+  // Python raises, and JavaScript throws `read-before-declaration` (CE-636;
+  // it gave NaN before).
   test('a local declared in a loop body', () => {
     const ce = new ComputeEngine();
     const D = (n: string) => ['Declare', n, "'real'"];
@@ -769,7 +771,9 @@ describe('CE-583: a Python block local has no value from a previous pass', () =>
       's',
     ] as any);
     const js = compile(expr, { to: 'javascript', fallback: false });
-    expect((js.run as () => number)()).toBeNaN();
+    expect(() => (js.run as () => number)()).toThrow(
+      /read-before-declaration: "t"/
+    );
     const fn = new PythonTarget().compileFunction(expr, 'f', []);
     expect(fn).toContain(
       '        _tv1 = _ce_unset("t")\n        if ((k) == (1)):\n            _tv1 = 5'
@@ -997,8 +1001,8 @@ describe('CE-583: a branch on a block local that the compiled code reads', () =>
   // Each of these programs reads a local declared with no value in a branch
   // condition, and has a value on every run. They compile and give the value
   // of the interpreter, as before CE-583. The Python start value of a local
-  // (`_ce_unset`) does not change them. A condition that reads a local that
-  // may have no value is ROADMAP CE-636.
+  // (`_ce_unset`) does not change them. A read of a local that may have no
+  // value is tested in `ce-636-block-local-without-value.test.ts`.
   const cases: Array<[string, unknown, number, boolean]> = [
     [
       'both arms of an If assign',

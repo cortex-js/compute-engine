@@ -340,7 +340,6 @@ import { isBeyondSafeInteger } from '../numerics/numeric.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
 import {
   assignmentLocalsOf,
-  isFunctionBodyBlock,
   laterDeclarationLocalsOf,
 } from '../assignment-locals.js';
 import {
@@ -3021,6 +3020,37 @@ type LocalValueFrame = {
   current: number;
   /** The local of each emitted name. */
   bySpelling: Map<string, string>;
+};
+
+/**
+ * The operators whose compiled code evaluates each operand exactly once, on
+ * every target (`classifyLocalReads`): an assignment that an operand makes is
+ * then certain after the operator. An operator that is not in the list, or
+ * that has a lazy operand (`lazyOperandRegions`, a chained relation), is
+ * taken to evaluate an operand maybe not at all.
+ *
+ * A lowering that skips an operand keeps an operator out of the list:
+ * `Power(b, 0)` compiles to `1` and `Multiply` with a `0` operand compiles to
+ * `0` on JavaScript and the shader targets, with no evaluation of the other
+ * operands. The lowerings of these operators skip only number literals
+ * (`tryGetConstant`), which assign nothing.
+ */
+const STRICT_OPERATORS: ReadonlySet<string> = new Set([
+  'Add',
+  'Subtract',
+  'Negate',
+  'List',
+  'Tuple',
+]);
+
+/** See `BaseCompiler.classifyLocalReads`. */
+type LocalReadClasses = {
+  /** The locals that have a read of class 3 (assigned on some paths only),
+   * with the value definition of each one when the scope of the block has
+   * one. */
+  unproved: ReadonlyMap<string, object | undefined>;
+  /** The reads of class 1 (assigned on every path). */
+  safe: ReadonlySet<Expression>;
 };
 
 /** See `BaseCompiler.checkedLocalReads`. */
@@ -23310,202 +23340,651 @@ export class BaseCompiler {
   private static _checkedLocals: CheckedLocalsFrame[] = [];
 
   /**
-   * The locals of the function body `node` that a read can find with no
-   * value, so that the read must check it.
+   * Classify each read of a local of the statement list `args` that its
+   * `Declare` gives no value (`Declare(n, integer)`, or the `Declare` that
+   * `withImplicitLocalDeclares` makes for a bare assignment). There are
+   * three classes of read:
    *
-   * In a function body, each call starts with no value for an assignment
-   * local (`declareAssignmentLocals()`, `function-utils.ts`), and the
-   * interpreter answers a read before its first assignment with the
-   * `read-before-declaration` error. Compiled code must not answer where the
-   * interpreter gives an error. So each read that the analysis below cannot
-   * prove to come after an assignment compiles with a check: the local
-   * starts with a marker object of its own, and the read throws when the
-   * local still holds the marker. In `function g(c) { if c { t = 1 }; t }`,
-   * the read after the `if` is checked. A read after a statement that
-   * assigns the local on every path (`t = 1`, an `if` that assigns in both
-   * branches) is not checked.
+   * 1. The local is assigned on every path before the read. The read
+   *    compiles with no check.
+   * 2. The local is assigned on no path before the read. The compilation
+   *    fails, with a message that names the local (`localReadWithNoWrite`).
+   * 3. The local is assigned on some paths only. The read is put in the
+   *    `unproved` result: each target decides how it handles it
+   *    (`checkedLocalReads`).
    *
-   * The analysis follows the order of evaluation: a `Block` in order, both
-   * branches of an `If` (the local is assigned after the `If` when both
-   * assign it), the first operand of an `And` or an `Or`, the clauses of a
-   * `Loop` before its body. An assignment in any other construct (a loop
-   * body, which can run no time, a function literal, an operand of another
-   * operator) is not counted after it, and it does not prove a read in
-   * another operand of the same operator, whose order of evaluation is not
-   * known. A read in a function literal is checked unless the local is
-   * assigned when the literal is created. A read is compared by its
-   * binding: a read of another binding with the same name (a `let` of a
-   * nested block, a parameter of another function) is not checked
-   * (`checkedLocalRead`).
+   * The interpreter has no value for a read of class 2 or 3 that finds the
+   * local with no value: it reports `read-before-declaration` in a function
+   * body, and it keeps the read symbolic in a top-level block. Compiled code
+   * cannot give that answer. Without a check, JavaScript read `undefined`
+   * (`undefined != 1` is `true`), WGSL read the zero that a `var` starts
+   * with, and GLSL read an undefined value.
    *
-   * The checks are written in the code of the function body only. While
-   * the definition of another function compiles (a module-level helper,
-   * `emitFunctionLiteralDefinition`), the frames are hidden
-   * (`hideCheckedLocals`): the marker objects are not visible there.
+   * The analysis follows the order of evaluation with two facts for each
+   * local: it is certainly assigned (on every path), and it is possibly
+   * assigned (on one path at least). A read is of class 1 when the first
+   * fact holds, of class 3 when only the second holds, and of class 2 when
+   * neither holds.
+   * - A `Block` is walked in order. An `Assign` of the local sets both
+   *   facts after its value is walked.
+   * - The branches of an `If` start after its condition. After the `If`,
+   *   the local is certainly assigned when both branches assign it (a
+   *   missing branch assigns nothing), and possibly assigned when one
+   *   branch can. A `Which` is walked as a chain of `If`, and an `And` or an
+   *   `Or` as its first operand followed by the others, which may not run.
+   *   When the compiled code may not decide the condition, the path on
+   *   which no branch runs counts too (`mayRunNoBranch` below).
+   * - `Break` and `Continue` end the path that reaches them: the facts of
+   *   that path do not count after a branch. A `Return` does not end a
+   *   path, because a target can compile a nested block to a function of
+   *   its own, which the `Return` leaves.
+   * - A loop body can run several times, so a read in the body sees an
+   *   assignment of an earlier pass as possible. After the loop, an
+   *   assignment of the body is certain only when the loop runs at least
+   *   once (each clause is a constant `Range` or a `List` or `Tuple` literal
+   *   with an element) and the body has no `Break`, `Continue` or `Return`.
+   *   A loop that can stop early is not analyzed further: a read after
+   *   `Loop(Block(y ≔ i; If(i > 3, Break)), i ∈ 1..10)` is checked on
+   *   JavaScript, although the first pass assigns `y` before the `Break`.
+   * - A read in a function literal happens when the function is called,
+   *   which can be later. It is of class 1 when the local is certainly
+   *   assigned where the literal is, and of class 3 otherwise, never of
+   *   class 2. An assignment in a function literal is possible after it.
+   * - In the operands of any other operator, whose order of evaluation is
+   *   not known, an assignment is possible but not certain for a read in
+   *   another operand. After the expression it is certain only for an
+   *   operator that evaluates every operand (`STRICT_OPERATORS`).
+   * - A nested block that declares the same name again, and an operator
+   *   whose index or parameter has the name, bind another variable: they
+   *   are not walked.
    *
-   * Only the JavaScript and the interval JavaScript targets can write the
-   * check. On another target, a body with such a read is refused.
+   * Each approximation makes a read of class 1 a read of class 3, never the
+   * other way, and a read is of class 2 only when no path can assign the
+   * local before it. A node that several paths reach is walked once for each
+   * state, so the time is linear in the size of the statements.
+   *
+   * A read is compared by its binding, as `checkedLocalRead` does: a symbol
+   * that is bound to another definition (a parameter of a function with the
+   * same name) is not a read of the local. A symbol with no binding is.
    */
-  private static checkedLocalReads(
+  static classifyLocalReads(
     args: ReadonlyArray<Expression>,
     locals: ReadonlyArray<string>,
     node: Expression | undefined,
-    target: CompileTarget<Expression>,
-    spellLocal: (name: string) => string
-  ): CheckedLocalsFrame | undefined {
-    const scope = node?.localScope;
-    if (scope === undefined || !isFunctionBodyBlock(scope)) return undefined;
-    const names = (assignmentLocalsOf(scope) ?? []).filter((name) =>
-      locals.includes(name)
-    );
-    if (names.length === 0) return undefined;
-    const markers = new Map<string, string>();
-    const spelled = new Map<string, string>();
-    const defs = new Map<string, object>();
+    target: CompileTarget<Expression>
+  ): LocalReadClasses {
+    const unproved = new Map<string, object | undefined>();
     const safe = new Set<Expression>();
-    // The reads that come before every assignment on one path at least. A
-    // symbol node can be shared by several places of the body: when one of
-    // them is not proved, the node is checked at all of them.
+    // The read nodes of class 3. A symbol node can be shared by several
+    // places of the statements: when one of them is of class 3, the node is
+    // checked at all of them.
     const unsafe = new Set<Expression>();
-    for (const name of names) {
-      const binding = scope.bindings.get(name);
+    const valueless = locals.filter((name) => {
+      const decl = args.find(
+        (s) => isFunction(s, 'Declare') && isSymbol(s.ops[0], name)
+      );
+      return (
+        isFunction(decl) &&
+        BaseCompiler.declareValueOperand(decl.ops) === undefined
+      );
+    });
+    if (valueless.length === 0) return { unproved, safe };
+    const scope = node?.localScope;
+    // The state of a path is two bits: MUST (the local is certainly
+    // assigned) and MAY (it is possibly assigned). On a live path MUST
+    // implies MAY, so MUST without MAY marks a path that does not continue
+    // (after a `Break`, `Continue` or `Return`). That state is the neutral
+    // element of `join`, the merge of two paths.
+    const MUST = 1;
+    const MAY = 2;
+    const ENDED = MUST;
+    const join = (a: number, b: number): number =>
+      (a & b & MUST) | ((a | b) & MAY);
+    const withMay = (s: number, may: boolean): number =>
+      may && s !== ENDED ? s | MAY : s;
+    // Whether the compiled code can run no branch for the condition `cond`
+    // of an `If` or a `Which`. A condition that the code cannot decide when
+    // it runs selects no branch, as in the interpreter: the statement then
+    // assigns nothing. The analysis is the one the targets use to emit that
+    // test (`conditionDecidability`), read as the emitters read it
+    // (`withConditionOperands`, `operandDecidedConjuncts`):
+    // - a condition decided by construction runs one branch;
+    // - a relation can be undecided only through an operand that may be
+    //   absent: a `missing` value (`operandMayBeAbsent`), or, on a target
+    //   with a vars object, an input that the caller can leave out (`_.x`,
+    //   `isInputOperand`). A `NaN` operand decides a relation;
+    // - a condition read by its value (a `boolean` input, a call) can be
+    //   undecided, and so can a connective with such an operand.
+    // GLSL and WGSL always run one branch. The answer does not depend on the
+    // local, so it is kept for all of them.
+    // A symbol is an input when the compiled code reads it from the vars
+    // object, unless its binding is one that the compiler makes a variable
+    // of the compiled code (`compiledLocalDefinitions`): a local of a block
+    // made by a `Declare` or an assignment, an index, a parameter. Any other
+    // symbol is an input, also one with no binding (a node that the
+    // compiler made) and an undeclared symbol, which the engine declares in
+    // the scope of the block that holds it when it boxes the block.
+    let localDefs: ReadonlySet<object> | undefined;
+    // The local test comes first: `target.var` of a name that the target
+    // does not bind declares the name in the engine (JavaScript), and a
+    // compilation must not change the engine. Such a call is made only for
+    // a name that the compiled code reads as an input anyway.
+    const isInputOperand = (op: Expression): boolean => {
+      if (!isSymbol(op)) return false;
+      const def = op.valueDefinition;
+      if (def !== undefined) {
+        localDefs ??= BaseCompiler.compiledLocalDefinitions(args, locals, node);
+        if (localDefs.has(def)) return false;
+      }
+      return BaseCompiler.isVarsObjectRead(target.var(op.symbol) ?? '', target);
+    };
+    // The value of a condition that is known at compile time.
+    const provedCondition = (cond: Expression): boolean | undefined =>
+      isSymbol(cond, 'True')
+        ? true
+        : isSymbol(cond, 'False')
+          ? false
+          : BaseCompiler.booleanClaim(cond);
+    const noBranchMemo = new Map<Expression, boolean>();
+    const mayBeUndecided = (n: ConditionNode): boolean => {
+      const t = n.test;
+      if (t.kind === 'value') return true;
+      if (t.kind === 'connective') return t.operands.some(mayBeUndecided);
+      return t.operands.some(
+        (op) => BaseCompiler.operandMayBeAbsent(op) || isInputOperand(op)
+      );
+    };
+    const mayRunNoBranch = (cond: Expression): boolean => {
+      if (target.language === 'glsl' || target.language === 'wgsl')
+        return false;
+      let known = noBranchMemo.get(cond);
+      if (known === undefined) {
+        const node = BaseCompiler.conditionDecidability(cond, true, target);
+        known = node !== null && mayBeUndecided(node);
+        noBranchMemo.set(cond, known);
+      }
+      return known;
+    };
+    for (const name of valueless) {
+      const binding = scope?.bindings.get(name);
       const def =
         binding !== undefined && 'value' in binding ? binding.value : undefined;
-      let unproved = false;
       const isOurs = (e: Expression): boolean =>
-        isSymbol(e) &&
-        e.symbol === name &&
-        (def === undefined || e.valueDefinition === def);
-      // `shadowed`: in a block that declares its own `name` (a `let`), or in
-      // a function literal, where an assignment writes another binding.
-      // A node shared in several places (a dictionary that holds the same
-      // value under two keys) is walked once for each state.
-      const done = new Map<string, Map<Expression, boolean>>();
+        isSymbol(e, name) &&
+        (def === undefined ||
+          e.valueDefinition === undefined ||
+          e.valueDefinition === def);
+      // A construct that binds another variable with the name: a block that
+      // declares it again, or a function literal with a parameter of that
+      // name. An operator with an index of that name (`Sum`, `Loop`) is
+      // walked by `walkBinder`.
+      const isOther = (e: Expression): boolean =>
+        (isFunction(e, 'Function') &&
+          e.localScope?.binderNames?.has(name) === true) ||
+        (isFunction(e, 'Block') &&
+          e.ops.some(
+            (op) =>
+              (isFunction(op, 'Declare') || isFunction(op, 'DefineFunction')) &&
+              isSymbol(op.ops[0], name)
+          ));
+      // Whether a subtree can assign the name: an `Assign` whose target has
+      // the name anywhere (a destructuring target too). It is an
+      // over-approximation, used only for the MAY fact.
+      const writesMemo = new Map<Expression, boolean>();
+      const mayWrite = (e: Expression): boolean => {
+        if (!isFunction(e)) return false;
+        const known = writesMemo.get(e);
+        if (known !== undefined) return known;
+        writesMemo.set(e, false);
+        const mentions = (t: Expression): boolean =>
+          isSymbol(t, name) || (isFunction(t) && t.ops.some(mentions));
+        const result =
+          (e.operator === 'Assign' &&
+            e.ops[0] !== undefined &&
+            mentions(e.ops[0])) ||
+          e.ops.some(mayWrite);
+        writesMemo.set(e, result);
+        return result;
+      };
+      // Whether a subtree has a `Return` outside a function literal, at any
+      // depth.
+      const returnsMemo = new Map<Expression, boolean>();
+      const hasReturn = (e: Expression): boolean => {
+        if (!isFunction(e) || e.operator === 'Function') return false;
+        const known = returnsMemo.get(e);
+        if (known !== undefined) return known;
+        returnsMemo.set(e, false);
+        const result = e.operator === 'Return' || e.ops.some(hasReturn);
+        returnsMemo.set(e, result);
+        return result;
+      };
+      // Whether a subtree has a `Break`, a `Continue` or a `Return`, at any
+      // depth.
+      const jumpsMemo = new Map<Expression, boolean>();
+      const hasJump = (e: Expression): boolean => {
+        if (!isFunction(e)) return false;
+        const known = jumpsMemo.get(e);
+        if (known !== undefined) return known;
+        jumpsMemo.set(e, false);
+        const result =
+          e.operator === 'Break' ||
+          e.operator === 'Continue' ||
+          e.operator === 'Return' ||
+          e.ops.some(hasJump);
+        jumpsMemo.set(e, result);
+        return result;
+      };
+      // `deferred`: inside a function literal, whose body runs when the
+      // function is called.
+      // `stmt`: in statement position of the statement list, or of a
+      // statement of it (a nested block, a branch, a loop body). There a
+      // `Return`, a `Break` or a `Continue` ends the path. Elsewhere (the
+      // value of an assignment, an operand) a block is compiled as a value of
+      // its own (an immediately applied function on JavaScript), and a
+      // `Return` in it gives the value of that block only.
+      const memo = new Map<Expression, number[]>();
       const walk = (
         e: Expression,
-        assigned: boolean,
-        shadowed = false
-      ): boolean => {
-        const key = `${assigned}${shadowed}`;
-        let byNode = done.get(key);
-        if (byNode === undefined) done.set(key, (byNode = new Map()));
-        const known = byNode.get(e);
+        s: number,
+        deferred: boolean,
+        stmt: boolean
+      ): number => {
+        const key = s + (deferred ? 4 : 0) + (stmt ? 8 : 0);
+        let byState = memo.get(e);
+        if (byState === undefined) memo.set(e, (byState = []));
+        const known = byState[key];
         if (known !== undefined) return known;
-        const result = walkNode(e, assigned, shadowed);
-        byNode.set(e, result);
+        let result = walkNode(e, s, deferred, stmt);
+        // A construct in value position that holds a `Return`, a `Break` or
+        // a `Continue` can end before its assignments: they are not certain
+        // after it.
+        if (!stmt && isFunction(e) && e.operator !== 'Function' && hasJump(e))
+          result = withMay(s, mayWrite(e) || (result & MAY) !== 0);
+        // A nested block with a `Return`, in any position, keeps only the
+        // facts from before it. JavaScript can compile a nested block to a
+        // function of its own (`(() => { if (c) { return 0 }; y = 1 })()`):
+        // the `Return` leaves that function only, and the statements after
+        // the block run with the assignments after the `Return` not made.
+        else if (isFunction(e, 'Block') && hasReturn(e))
+          result = withMay(s, mayWrite(e) || (result & MAY) !== 0);
+        byState[key] = result;
         return result;
+      };
+      // The operands of an operator whose order of evaluation is not known:
+      // each one starts with the state before the operator, with MAY set
+      // when one of them can assign the local.
+      const walkOperands = (
+        ops: ReadonlyArray<Expression>,
+        s: number,
+        deferred: boolean
+      ): number => {
+        const after = withMay(s, ops.some(mayWrite));
+        for (const op of ops) walk(op, after, deferred, false);
+        return after;
+      };
+      // An operator with an index of the name (`Sum(n, Limits(n, 1, n))`,
+      // `Loop(…, Element(n, …))`). The body and the index are another
+      // variable. The clauses before the one of that index, and the bounds or
+      // the collection of that clause, are evaluated in the enclosing scope,
+      // so their reads are reads of the local. A condition of the clause
+      // (`Element(n, xs, cond)`) sees the index, and a later clause can too:
+      // they are not walked. A clause of another shape ends the walk.
+      const walkBinder = (
+        e: Expression & { ops: ReadonlyArray<Expression> },
+        s: number,
+        deferred: boolean
+      ): number => {
+        const after = withMay(s, mayWrite(e));
+        for (const clause of e.ops.slice(1)) {
+          if (
+            !isFunction(clause) ||
+            (clause.operator !== 'Limits' && clause.operator !== 'Element') ||
+            clause.nops < 2
+          )
+            break;
+          const ownIndex = isSymbol(clause.ops[0], name);
+          const evaluated =
+            ownIndex && clause.operator === 'Element'
+              ? clause.ops.slice(1, 2)
+              : clause.ops.slice(1);
+          for (const op of evaluated) walk(op, after, deferred, false);
+          if (ownIndex) break;
+        }
+        return after;
       };
       const walkNode = (
         e: Expression,
-        assigned: boolean,
-        shadowed: boolean
-      ): boolean => {
+        s: number,
+        deferred: boolean,
+        stmt: boolean
+      ): number => {
         if (isSymbol(e)) {
-          if (isOurs(e)) {
-            if (assigned) safe.add(e);
-            else {
-              unproved = true;
-              unsafe.add(e);
-            }
-          }
-          return assigned;
+          if (!isOurs(e)) return s;
+          if ((s & MUST) !== 0) safe.add(e);
+          else if (deferred || (s & MAY) !== 0) {
+            unsafe.add(e);
+            unproved.set(name, def);
+          } else BaseCompiler.localReadWithNoWrite(name);
+          return s;
         }
-        if (isDictionary(e)) {
-          let a = assigned;
-          for (const value of e.values) a = walk(value, a, shadowed);
-          return a;
-        }
-        if (!isFunction(e)) return assigned;
+        if (isDictionary(e)) return walkOperands([...e.values], s, deferred);
+        if (!isFunction(e) || isOther(e)) return s;
         const ops = e.ops;
-        // A function literal, a block with a `let` of the name, or an
-        // operator whose index has the name: an assignment of the name in
-        // it writes another binding.
-        const inner =
-          shadowed ||
-          e.operator === 'Function' ||
-          e.localScope?.binderNames?.has(name) === true ||
-          (e.operator === 'Block' &&
-            ops.some(
-              (op) =>
-                (isFunction(op, 'Declare') ||
-                  isFunction(op, 'DefineFunction')) &&
-                isSymbol(op.ops[0], name)
-            ));
+        if (
+          e.operator !== 'Block' &&
+          e.operator !== 'Function' &&
+          e.localScope?.binderNames?.has(name) === true
+        )
+          return walkBinder(e, s, deferred);
         switch (e.operator) {
+          case 'Function': {
+            // The body runs when the function is called. The parameters
+            // are names, not reads.
+            if (ops[0] !== undefined) walk(ops[0], s, true, true);
+            return withMay(s, mayWrite(e));
+          }
           case 'Assign': {
             const after =
-              ops[1] === undefined ? assigned : walk(ops[1], assigned, inner);
-            // The target of a canonical `Assign` is not bound: it is
-            // compared by name.
-            return !inner && isSymbol(ops[0], name) ? true : after;
+              ops[1] === undefined ? s : walk(ops[1], s, deferred, false);
+            if (!isSymbol(ops[0], name)) {
+              // A target that is not a name or a destructuring pattern (an
+              // indexed target) reads its operands.
+              const target = ops[0];
+              if (isFunction(target) && target.operator !== 'Tuple')
+                walkOperands(target.ops, s, deferred);
+              return withMay(after, mayWrite(e));
+            }
+            // In a function literal, the assignment happens only when the
+            // function is called.
+            if (deferred || after === ENDED) return after;
+            return MUST | MAY;
           }
           case 'Declare': {
-            // The target is a name, not a read.
+            // The target is a name, not a read. A `Declare` of the local
+            // with a value assigns it.
             const value = BaseCompiler.declareValueOperand(ops);
-            return value === undefined
-              ? assigned
-              : walk(value, assigned, inner);
+            if (value === undefined) return s;
+            const after = walk(value, s, deferred, false);
+            if (!isSymbol(ops[0], name) || deferred || after === ENDED)
+              return after;
+            return MUST | MAY;
           }
           case 'Block': {
-            let a = assigned;
-            for (const op of ops) a = walk(op, a, inner);
-            return inner ? assigned : a;
+            // The statements of a block in value position are in statement
+            // position of that block: a `Return` there ends the rest of
+            // the block (the result is then corrected by `walk`).
+            let a = s;
+            for (const op of ops) a = walk(op, a, deferred, true);
+            return a;
           }
           case 'If': {
-            const c =
-              ops[0] === undefined ? assigned : walk(ops[0], assigned, inner);
-            const yes = ops[1] === undefined ? c : walk(ops[1], c, inner);
-            const no = ops[2] === undefined ? c : walk(ops[2], c, inner);
-            return yes && no;
+            if (ops[0] === undefined) return s;
+            // A condition that is the symbol `True` or `False`, or whose
+            // type proves its value (`booleanClaim`), selects one arm when
+            // the code runs: the other arm never runs.
+            const claim = provedCondition(ops[0]);
+            if (claim !== undefined) {
+              const arm = claim ? ops[1] : ops[2];
+              return arm === undefined ? s : walk(arm, s, deferred, stmt);
+            }
+            const c = walk(ops[0], s, deferred, false);
+            const yes =
+              ops[1] === undefined ? c : walk(ops[1], c, deferred, stmt);
+            const no =
+              ops[2] === undefined ? c : walk(ops[2], c, deferred, stmt);
+            const both = join(yes, no);
+            return mayRunNoBranch(ops[0]) ? join(both, c) : both;
+          }
+          case 'Which': {
+            // `Which(c1, v1, c2, v2, …)`: each condition is evaluated after
+            // the conditions before it, when they are false. A condition
+            // that the code cannot decide ends the search with no value.
+            // When no condition holds, no value is evaluated, except after
+            // a condition that is the symbol `True`, which ends the chain.
+            let c = s;
+            let result = ENDED;
+            let fallThrough = true;
+            for (let i = 0; i < ops.length; i += 2) {
+              const cond = ops[i];
+              const value = ops[i + 1];
+              // A condition that `booleanClaim` proves false selects
+              // nothing, and one that it proves true ends the chain, as the
+              // symbol `True` does.
+              const claim = provedCondition(cond);
+              if (claim === false) continue;
+              if (claim === true) {
+                if (value !== undefined)
+                  result = join(result, walk(value, c, deferred, stmt));
+                fallThrough = value === undefined;
+                break;
+              }
+              c = walk(cond, c, deferred, false);
+              if (value !== undefined)
+                result = join(result, walk(value, c, deferred, stmt));
+              if (mayRunNoBranch(cond)) result = join(result, c);
+            }
+            return fallThrough ? join(result, c) : result;
           }
           case 'And':
           case 'Or': {
-            const first =
-              ops[0] === undefined ? assigned : walk(ops[0], assigned, inner);
-            for (const op of ops.slice(1)) walk(op, first, inner);
-            return first;
+            // The first operand is always evaluated, the others may not be.
+            if (ops[0] === undefined) return s;
+            let a = walk(ops[0], s, deferred, false);
+            for (const op of ops.slice(1))
+              a = withMay(a, (walk(op, a, deferred, false) & MAY) !== 0);
+            return a;
           }
           case 'Loop': {
             // The clauses (the collection of each `Element`) are evaluated
-            // before the body, which `Loop` stores first. The body can run
-            // no time: an assignment in it is not counted after the loop,
-            // and it does not prove a read in a clause.
-            let a = assigned;
-            for (const op of ops.slice(1)) a = walk(op, a, inner);
-            if (ops[0] !== undefined) walk(ops[0], a, inner);
-            return a;
+            // before the body, which `Loop` stores first.
+            let a = s;
+            for (const op of ops.slice(1)) a = walk(op, a, deferred, false);
+            if (ops[0] === undefined) return a;
+            const writes = mayWrite(e);
+            const end = walk(ops[0], withMay(a, writes), deferred, true);
+            const certain =
+              (a & MUST) !== 0 ||
+              (!deferred &&
+                (end & MUST) !== 0 &&
+                !hasJump(ops[0]) &&
+                BaseCompiler.loopRunsOnce(ops.slice(1)));
+            if (a === ENDED) return ENDED;
+            return (certain ? MUST : 0) | ((a & MAY) !== 0 || writes ? MAY : 0);
+          }
+          case 'Break':
+          case 'Continue': {
+            walkOperands(ops, s, deferred);
+            return ENDED;
+          }
+          case 'Return':
+            // A `Return` does not end a path here. Some targets compile a
+            // nested block to a function of its own, which a `Return`
+            // leaves, and the statements after the block still run. A read
+            // after an early `Return` keeps its check.
+            return walkOperands(ops, s, deferred);
+          case 'Apply': {
+            // A function literal applied in place runs here, after its
+            // arguments, so a read in its body is classified as any other
+            // read. An assignment in its body is not certain after it: it
+            // can write a local of the function body.
+            const fn = ops[0];
+            if (!isFunction(fn, 'Function') || isOther(fn))
+              return walkOperands(ops, s, deferred);
+            const a = walkOperands(ops.slice(1), s, deferred);
+            if (fn.ops[0] !== undefined) walk(fn.ops[0], a, deferred, true);
+            return withMay(a, mayWrite(fn));
           }
           default: {
-            // The operands may be evaluated in another order, or not at
-            // all: each one is analyzed with the state before the
-            // expression, so an assignment in one operand does not prove a
-            // read in another, and it is not counted after the expression.
-            for (const op of ops) walk(op, assigned, inner);
-            return assigned;
+            // An operator that evaluates each operand once (`Add`), in an
+            // order that is not known: a read in an operand sees only the
+            // state before the operator, and an assignment that an operand
+            // makes on every path is certain after the operator. An operand
+            // with a `Break`, a `Continue` or a `Return` can end before its
+            // assignment.
+            const after = withMay(s, ops.some(mayWrite));
+            const results = ops.map((op) => walk(op, after, deferred, false));
+            if (
+              after === ENDED ||
+              !STRICT_OPERATORS.has(e.operator) ||
+              lazyOperandRegions(e).length > 0
+            )
+              return after;
+            const certain = ops.some(
+              (op, i) => (results[i] & MUST) !== 0 && !hasJump(op)
+            );
+            return certain ? after | MUST : after;
           }
         }
       };
-      let assigned = false;
-      for (const arg of args) assigned = walk(arg, assigned);
-      if (!unproved) continue;
-      markers.set(name, BaseCompiler.tempVar(target));
-      spelled.set(name, spellLocal(name));
-      if (def !== undefined) defs.set(name, def);
+      let state = 0;
+      for (const arg of args) state = walk(arg, state, false, true);
     }
-    if (markers.size === 0) return undefined;
     for (const e of unsafe) safe.delete(e);
+    return { unproved, safe };
+  }
+
+  /**
+   * The value definitions of the variables that the compiled code of the
+   * statements `args` of the block `node` declares itself: the locals
+   * `locals` of the block, the names that a `Declare` or an assignment of a
+   * nested block makes local (a destructuring pattern too), and the index or
+   * parameter names of each construct (`binderNames`). A symbol bound to
+   * one of these is not an input (`classifyLocalReads`). A symbol that the
+   * engine declared in the scope of a block because nothing declared it is
+   * an input, and its definition is not in the set.
+   */
+  private static compiledLocalDefinitions(
+    args: ReadonlyArray<Expression>,
+    locals: ReadonlyArray<string>,
+    node: Expression | undefined
+  ): ReadonlySet<object> {
+    const defs = new Set<object>();
+    const add = (
+      scope: Expression['localScope'],
+      names: Iterable<string>
+    ): void => {
+      if (scope === undefined) return;
+      for (const name of names) {
+        const binding = scope.bindings.get(name);
+        if (binding !== undefined && 'value' in binding)
+          defs.add(binding.value);
+      }
+    };
+    const patternNames = (t: Expression): string[] =>
+      isSymbol(t)
+        ? [t.symbol]
+        : isFunction(t, 'Tuple')
+          ? t.ops.flatMap(patternNames)
+          : [];
+    add(node?.localScope, locals);
+    const seen = new Set<Expression>();
+    const visit = (e: Expression): void => {
+      if (!isFunction(e) || seen.has(e)) return;
+      seen.add(e);
+      add(e.localScope, e.localScope?.binderNames ?? []);
+      if (e.operator === 'Block')
+        add(
+          e.localScope,
+          e.ops.flatMap((op) =>
+            (isFunction(op, 'Declare') ||
+              isFunction(op, 'Assign') ||
+              isFunction(op, 'DefineFunction')) &&
+            op.ops[0] !== undefined
+              ? patternNames(op.ops[0])
+              : []
+          )
+        );
+      for (const op of e.ops) visit(op);
+    };
+    for (const arg of args) visit(arg);
+    return defs;
+  }
+
+  /**
+   * Whether a `Loop` with the clauses `clauses` runs its body at least once:
+   * each clause is `Element(index, collection)` with no condition, over a
+   * `Range` whose bounds and step are number literals and that has an
+   * element, or over a `List` or `Tuple` literal with an element.
+   */
+  private static loopRunsOnce(clauses: ReadonlyArray<Expression>): boolean {
+    if (clauses.length === 0) return false;
+    return clauses.every((clause) => {
+      if (!isFunction(clause, 'Element') || clause.nops !== 2) return false;
+      const coll = clause.ops[1];
+      if (isFunction(coll, 'List') || isFunction(coll, 'Tuple'))
+        return coll.nops > 0;
+      if (!isFunction(coll, 'Range') || coll.nops < 2 || coll.nops > 3)
+        return false;
+      const [lo, hi, step] = coll.ops;
+      if (!isNumber(lo) || !isNumber(hi)) return false;
+      if (step !== undefined && !isNumber(step)) return false;
+      const values = [lo.re, hi.re, step === undefined ? 1 : step.re];
+      if (!values.every((v) => Number.isFinite(v))) return false;
+      return rangeCount(values[0], values[1], values[2]) >= 1;
+    });
+  }
+
+  /** The failure for a read of class 2 (`classifyLocalReads`). */
+  private static localReadWithNoWrite(name: string): never {
+    throw new Error(
+      `Could not compile \`Block\`: a statement reads the block local ` +
+        `"${name}", and no path to that read gives "${name}" a value. ` +
+        `Inside a function body the interpreter reports that read as ` +
+        `\`read-before-declaration\`, and in a top-level block it leaves the ` +
+        `read symbolic; the compiled code would read an uninitialized ` +
+        `variable. Give "${name}" a value first, or give the local another ` +
+        `name, so that "${name}" is the input.`
+    );
+  }
+
+  /**
+   * The frame of the locals of a statement list whose reads compile with a
+   * check, from the reads of class 3 that `classifyLocalReads` found.
+   *
+   * On the JavaScript and the interval JavaScript targets, each such local
+   * starts with a marker object of its own, and a read of class 3 throws an
+   * `Error` with `read-before-declaration` and the name of the local when
+   * the local still holds the marker (`checkedLocalRead`).
+   *
+   * Python needs no frame: a local with a read of class 3 starts with the
+   * value `_ce_unset(name)`, whose use raises (`PYTHON_UNSET_HELPER` in
+   * `python-target.ts`). GLSL and WGSL cannot raise an error, so a read of
+   * class 3 is refused there.
+   *
+   * The checks are written in the code of the statement list only. While
+   * the definition of another function compiles (a module-level helper,
+   * `emitFunctionLiteralDefinition`), the frames are hidden
+   * (`hideCheckedLocals`): the marker objects are not visible there.
+   */
+  private static checkedLocalReads(
+    classes: LocalReadClasses,
+    target: CompileTarget<Expression>,
+    spellLocal: (name: string) => string
+  ): CheckedLocalsFrame | undefined {
+    if (classes.unproved.size === 0) return undefined;
+    if (target.language === 'python') return undefined;
     if (
       target.language !== 'javascript' &&
       target.language !== 'interval-javascript'
     )
       throw new Error(
-        `Could not compile \`Block\`: a statement can read the local ` +
-          `"${[...markers.keys()][0]}" of the function body when no ` +
-          `assignment gave it a value (after a branch that did not run). ` +
-          `The interpreter reports that read as \`read-before-declaration\`, ` +
-          `and target '${target.language ?? 'unknown'}' has no way to check it.`
+        `Could not compile \`Block\`: a statement can read the block local ` +
+          `"${[...classes.unproved.keys()][0]}" when no assignment gave it a ` +
+          `value (the assignment is on some paths only, for example in one ` +
+          `branch of an \`If\`). The interpreter has no value for that read, ` +
+          `and target '${target.language ?? 'unknown'}' cannot raise an ` +
+          `error at run time. Give the local a value on every path before ` +
+          `the read.`
       );
-    return { markers, spelled, defs, safe };
+    const markers = new Map<string, string>();
+    const spelled = new Map<string, string>();
+    const defs = new Map<string, object>();
+    for (const [name, def] of classes.unproved) {
+      markers.set(name, BaseCompiler.tempVar(target));
+      spelled.set(name, spellLocal(name));
+      if (def !== undefined) defs.set(name, def);
+    }
+    return { markers, spelled, defs, safe: classes.safe };
   }
 
   /**
@@ -23525,11 +24004,14 @@ export class BaseCompiler {
       if (marker === undefined) continue;
       // A read of another binding with the same name: a parameter of a
       // function whose definition compiles while this body compiles, or a
-      // `let` of a nested block.
+      // `let` of a nested block. A symbol with no binding (a node that the
+      // compiler made) is taken to read the local, as `classifyLocalReads`
+      // does.
       const def = frame.defs.get(s);
       if (
         def !== undefined &&
-        (!isSymbol(expr) || expr.valueDefinition !== def)
+        (!isSymbol(expr) ||
+          (expr.valueDefinition !== undefined && expr.valueDefinition !== def))
       )
         continue;
       if (frame.safe.has(expr) || resolved !== frame.spelled.get(s))
@@ -23878,42 +24360,26 @@ export class BaseCompiler {
    * Python gives the start value `_ce_unset(name)` (`PYTHON_UNSET_HELPER`
    * in `python-target.ts`).
    *
-   * The rule is conservative: every such `Declare` gets the start value,
-   * except when the first later statement of the same list that has the
-   * name anywhere in it is an `Assign` of the name. The statements before
-   * it do not use the name, and every statement after it runs after it, so
-   * no read can find the start value: a value of that `Assign` that reads
-   * the name is refused before this point
-   * (`assertLocalsAssignedBeforeRead`). The `Declare` statements that a
-   * bare assignment makes (`withImplicitLocalDeclares`) are all at the
-   * start of the block, so the `Assign` is often not the next statement. A
-   * start value that no read uses costs one assignment. A missing one let a
-   * read find the value of the previous pass of a loop.
+   * A local gets the start value when a read of it may find it with no
+   * value: a read of class 3 of `classifyLocalReads`, `classes` being the
+   * result of that analysis on `stmts`. The use of the start value raises.
+   * A local whose reads all come after an assignment on every path gets no
+   * start value: no read can find it, and Python has no declaration to
+   * write in its place. Without a start value, a read on a path with no
+   * assignment found the value of the previous pass of a loop, or raised
+   * `UnboundLocalError` with no name of a local.
    */
-  static needsStartValue(stmts: ReadonlyArray<Expression>, i: number): boolean {
+  static needsStartValue(
+    stmts: ReadonlyArray<Expression>,
+    i: number,
+    classes: LocalReadClasses
+  ): boolean {
     const s = stmts[i];
-    if (
-      !isFunction(s, 'Declare') ||
-      !isSymbol(s.ops[0]) ||
-      BaseCompiler.declareValueOperand(s.ops) !== undefined
-    )
-      return false;
-    const name = s.ops[0].symbol;
-    const mentions = (root: Expression): boolean => {
-      const seen = new Set<Expression>();
-      const walk = (e: Expression): boolean => {
-        if (isSymbol(e)) return e.symbol === name;
-        if (!isFunction(e) || seen.has(e)) return false;
-        seen.add(e);
-        return e.ops.some(walk);
-      };
-      return walk(root);
-    };
-    const next = stmts.slice(i + 1).find(mentions);
-    return !(
-      isFunction(next, 'Assign') &&
-      isSymbol(next.ops[0], name) &&
-      next.ops[1] !== undefined
+    return (
+      isFunction(s, 'Declare') &&
+      isSymbol(s.ops[0]) &&
+      BaseCompiler.declareValueOperand(s.ops) === undefined &&
+      classes.unproved.has(s.ops[0].symbol)
     );
   }
 
@@ -24263,6 +24729,14 @@ export class BaseCompiler {
 
     BaseCompiler.assertNoUseBeforeDeclare(args);
     BaseCompiler.assertLocalsAssignedBeforeRead(args, locals);
+    // The reads of a local that may have no value (`classifyLocalReads`).
+    // A read with no assignment on any path before it is refused here.
+    const readClasses = BaseCompiler.classifyLocalReads(
+      args,
+      locals,
+      node,
+      target
+    );
 
     // A lone EMPTY block in a statement list evaluated for effect (a shader
     // loop body reaching `compileStatementList`) is an empty statement.
@@ -24637,9 +25111,7 @@ export class BaseCompiler {
         ),
       };
       checkedFrame = BaseCompiler.checkedLocalReads(
-        args,
-        locals,
-        node,
+        readClasses,
         target,
         spellLocal
       );
@@ -24678,6 +25150,8 @@ export class BaseCompiler {
       // targets keep the copying form.
       if (target.language === 'javascript')
         for (const local of locals) {
+          // The first update of a checked local reads it with no check.
+          if (checkedFrame?.markers.has(local) === true) continue;
           const chains = ownedLocalUpdateChains(args, local);
           if (chains === undefined) continue;
           const temp = BaseCompiler.tempVar(target);
@@ -24816,7 +25290,7 @@ export class BaseCompiler {
                   target.language === 'python' &&
                   isFunction(arg, 'Declare') &&
                   isSymbol(arg.ops[0]) &&
-                  BaseCompiler.needsStartValue(stmts, i)
+                  BaseCompiler.needsStartValue(stmts, i, readClasses)
                 )
                   return [
                     `${spellLocal(arg.ops[0].symbol)} = _ce_unset(${JSON.stringify(arg.ops[0].symbol)})`,
@@ -26338,13 +26812,19 @@ export class BaseCompiler {
       // statement gives it a value. Each pass of the loop runs the body
       // with new locals, so a value of the previous pass does not count.
       BaseCompiler.assertNoUseBeforeDeclare(withDecls);
-      BaseCompiler.assertLocalsAssignedBeforeRead(
+      const bodyLocals = withDecls.flatMap((s) =>
+        isFunction(s, 'Declare') && isSymbol(s.ops[0]) ? [s.ops[0].symbol] : []
+      );
+      BaseCompiler.assertLocalsAssignedBeforeRead(withDecls, bodyLocals);
+      // The reads of a local of the body that may have no value
+      // (`classifyLocalReads`): a read with no assignment on any path before
+      // it is refused, and the others are checked when the code runs, as in
+      // `compileBlock`.
+      const readClasses = BaseCompiler.classifyLocalReads(
         withDecls,
-        withDecls.flatMap((s) =>
-          isFunction(s, 'Declare') && isSymbol(s.ops[0])
-            ? [s.ops[0].symbol]
-            : []
-        )
+        bodyLocals,
+        expr,
+        target
       );
       // A body-scoped `localFunctions`, filled in statement order below. Held
       // as its own binding because the field on `CompileTarget` is a
@@ -26366,11 +26846,18 @@ export class BaseCompiler {
           bodyRebound
         ),
       };
+      const checkedFrame = BaseCompiler.checkedLocalReads(
+        readClasses,
+        target,
+        (name) => bodyTarget.var(name) ?? name
+      );
       const complexFrame = new Map<string, boolean>();
       for (const s of withDecls)
         if (isFunction(s, 'Declare') && isSymbol(s.ops[0]))
           complexFrame.set(s.ops[0].symbol, BaseCompiler.localComplexDefault());
       BaseCompiler._pushLocalComplex(complexFrame);
+      if (checkedFrame !== undefined)
+        BaseCompiler._checkedLocals.push(checkedFrame);
       try {
         for (const s of withDecls)
           BaseCompiler.noteLocalComplex(s, complexFrame);
@@ -26384,6 +26871,19 @@ export class BaseCompiler {
                 bodyLocalFunctions,
                 bodyRebound
               );
+              // A checked local starts with its own marker of "no value",
+              // as in `compileBlock`.
+              if (
+                checkedFrame !== undefined &&
+                isFunction(s, 'Declare') &&
+                isSymbol(s.ops[0]) &&
+                BaseCompiler.declareValueOperand(s.ops) === undefined
+              ) {
+                const name = s.ops[0].symbol;
+                const marker = checkedFrame.markers.get(name);
+                if (marker !== undefined)
+                  return `const ${marker} = {}; let ${checkedFrame.spelled.get(name)} = ${marker}`;
+              }
               const code = BaseCompiler.compileLoopBody(s, bodyTarget);
               // A nested block is a JavaScript block statement (`{ … }`), so
               // that a `let` of it, written or implicit (a bare assignment of
@@ -26399,6 +26899,7 @@ export class BaseCompiler {
         );
       } finally {
         BaseCompiler._popLocalComplex();
+        if (checkedFrame !== undefined) BaseCompiler._checkedLocals.pop();
       }
     }
 

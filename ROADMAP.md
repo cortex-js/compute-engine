@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-657.
+Next free reference: CE-658.
 
 **Entry format.**
 
@@ -795,6 +795,53 @@ audit (`docs/plans/2026-10-28-evaluation-cache-audit-handoff.md`).
 - **CE-621.4** A synchronous throw at the start of `evaluateAsync` does not
   release that evaluation's host-derived source values (only memory, until the
   engine is idle).
+
+### CE-657. A cache keeps a random draw or the value of an impure operator when the node does not look impure
+
+**Status:** open; wrong values; needs a design. Found 2026-10-30 by the
+reviews of the store-guard work (evaluation-cache plan, step 1); the same on
+HEAD `d1b7d0838`. Taken out of step 1 by user decision 2026-10-30, after four
+attempted designs each gave a new defect.
+
+`isPure` of a node does not follow the value of a symbol it reads, and the
+store guard (`boxed-expression/store-guard.ts`) counts only host code that
+states no purity. So a cache can keep a value that changes at each
+evaluation:
+
+- A symbol whose value draws or calls an impure operator: with `q` a host
+  operator declared `pure: false` and `ce.declare('r', { value: ce.box(['q']) })`,
+  `r` alone gives 2, then 3, but `Reverse(List(5, r))` gives `[1,5]` at every
+  evaluation, and two concurrent `evaluateAsync()` calls share one call of
+  `q`. The same with `r` holding `Random()`, a dictionary that holds `q()`,
+  a raw (not canonical) `Random()`, `ReleaseHold(Hold(Random()))`, or
+  `At(Map(x ↦ x + q(), [1,2]), 1)`.
+- A draw under a seed served under another seed: `r := Random()`,
+  `x = Reverse(List(1, r))`; `WithRandomSeed(3, x)`, then
+  `WithRandomSeed(4, x)` on the same `x` gives the seed-3 draw, and `x` alone
+  gives it again.
+
+Attempts and why each failed:
+
+- Count when a symbol whose value is not `isPure` is read: it also counted
+  undeclared function calls (`a := g(1)`), so many caches stopped storing (a
+  sequence workload went from 45 ms to 963 ms), and it changed the result of
+  the sequence term memo, which defines one draw per term.
+- Count only a value that calls a nondeterministic operator, found by a walk
+  of the value: the walk missed a raw value, `ReleaseHold`, and a function
+  literal applied by `Map`.
+- Exempt the draws made inside a `WithRandomSeed` frame: gave the seed case
+  above.
+- Count at the evaluation of each nondeterministic operator, and take back
+  the draws of a seeded frame when it ends: not reviewed to the end; it makes
+  a count go down, and it is not clear that a computation holding the whole
+  frame is deterministic when the seed is not a constant.
+
+What a design must decide: which caches define a result and must keep one
+set of draws per instance (today: the element memo, the facet memo, the
+materialized `at()` cell, the sequence terms; see `docs/RANDOMNESS-MODEL.md`
+§6), and how a seeded frame is identified so that its draws can be cached
+only with it. The cost limit is the paired benchmark of
+`benchmarks/evaluation-caches.ts` (no workload slower than 1.25×).
 
 ### CE-649. An async host handler that evaluates the node containing it waits on itself
 
@@ -3229,63 +3276,6 @@ A related case: on `javascript`, a variable assigned without a `Declare` in a
 nested block (an implicit local) and read after that block reads the input of
 the same name (`_.W`), so the code gives `NaN` where the interpreter reports an
 error. Python reports `NameError` at run time for the same block.
-
-### CE-636. Compiled code: a block local that may have no value is read as `undefined`, 0 or an earlier value
-
-**Status:** open; defect (wrong value), in progress. Found 2026-10-30 in the
-review of CE-583. User decision 2026-10-30 (design): a read of a block local is
-classified at compile time. A read that certainly follows an assignment compiles
-with no check. A read that certainly comes before any assignment fails to
-compile (use before assignment). Only a read that the compiler cannot decide
-gets a check at run time: on `javascript` it throws `read-before-declaration`
-when the local has no value, and on Python the `_ce_unset` start value already
-raises. GLSL and WGSL cannot raise an error, so they refuse every read that is
-not certain to follow an assignment on every path. A read of a local with no
-value never gives a value. This is expected to be rare. User decision
-2026-10-30: this is a separate task. Two attempts made during CE-583 were
-removed (see below).
-
-A block local declared with no value and assigned on only some paths can be read
-before it has a value. Example, `x = 1`:
-`Block(s ≔ 0; Loop(Block(Declare(n, integer); If(i > 3, n ≔ 1); If(n ≠ 1, s ≔ s + i)), i ∈ 1..5); s)`.
-The interpreter gives 0: a comparison that reads a local with no value is
-undecided, and an `If` statement with an undecided condition runs neither
-branch. `javascript` gives 6, because `n` is `undefined` and `undefined != 1` is
-true. Python raises `UnboundLocalError`, because the local starts at the
-`_ce_unset` value (since CE-583). Other forms of the same defect:
-
-- a read outside a branch condition: `n ≠ 1` as the block's value gives `true`
-  on `javascript`, where the interpreter gives the symbolic `n ≠ 1`;
-  `5 + Boole(n ≠ 1)` gives 6;
-- GLSL and WGSL compile any such read: WGSL reads 0 (a `var` starts at zero),
-  GLSL reads an undefined value;
-- a copy: `m ≔ n; If(m ≠ 1, …)`;
-- a condition inside a function literal called while `n` has no value;
-- a lazy read under another operator: `If(i > 2, n + 1, 2) = 2` gives 112 on
-  `javascript`, where the interpreter gives 12.
-
-Attempts that were removed:
-
-1. A run-time test that the local has a value before each comparison. Review
-   rounds found wrong values in lazy operands, in operand evaluation order, in
-   operands that assign the local, and in nested blocks.
-2. A compile-time refusal backed by an analysis of which locals are definitely
-   assigned (about 750 lines). It refused programs that HEAD `0f1020490`
-   compiled correctly, and every review round found new cases.
-
-A design must keep these programs compiling, because HEAD compiles them
-correctly:
-
-- a conditional update that keeps the old value, `n ≔ If(x > 5, 1, n)`;
-- a first-pass accumulator,
-  `Loop(If(i = 1, m ≔ i, If(i·x > m, m ≔ i·x)), i ∈ 1..5)`;
-- a function literal that reads `n` and is called only after `n` is assigned;
-- a local assigned in both arms of an `If`, in a nested block, in a loop over a
-  constant non-empty range or list, or first in a loop body before the condition
-  reads it.
-
-Expected: the compiled code gives the interpreter's result for every case in the
-first list, or refuses it, and compiles every case in the second list.
 
 ### CE-651. interval-js: a `Break` condition that compares an interval input with a number never runs
 

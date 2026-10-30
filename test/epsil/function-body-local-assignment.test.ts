@@ -1414,12 +1414,14 @@ describe('COMPILED CODE CHECKS A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', ()
   test.each([
     ['an assignment before the read', ['Block', ['Assign', 't', 'c'], 't']],
     [
-      'an assignment in each branch',
+      // `c > 0` compares a parameter, so it is always decided and one
+      // branch runs.
+      'an assignment in each branch of a decided condition',
       [
         'Block',
         [
           'If',
-          'c',
+          ['Greater', 'c', 0],
           ['Block', ['Assign', 't', 1]],
           ['Block', ['Assign', 't', 2]],
         ],
@@ -1444,6 +1446,30 @@ describe('COMPILED CODE CHECKS A READ THAT CAN COME BEFORE EVERY ASSIGNMENT', ()
       fallback: false,
     } as never)!;
     expect(result.code).not.toContain('read-before-declaration');
+  });
+
+  test('a check: an assignment in each branch of a condition read by its value', () => {
+    // The condition `c` selects a branch only when it is `true` or `false`.
+    // Any other value runs no branch (CE-636), so the read is checked.
+    const result = compile(
+      literal([
+        'Block',
+        [
+          'If',
+          'c',
+          ['Block', ['Assign', 't', 1]],
+          ['Block', ['Assign', 't', 2]],
+        ],
+        't',
+      ]),
+      { to: 'javascript', fallback: false } as never
+    )!;
+    expect(result.code).toContain('read-before-declaration');
+    expect(result.run!(true as never)).toBe(1);
+    expect(result.run!(false as never)).toBe(2);
+    expect(() => result.run!(3 as never)).toThrow(
+      /read-before-declaration: "t"/
+    );
   });
 });
 
@@ -1717,16 +1743,22 @@ describe('THE COMPILED CHECK OF A READ BEFORE THE FIRST ASSIGNMENT', () => {
   test('an assignment in a loop body does not prove a read in its collection', () => {
     // The collection `1..t` is evaluated before the body: the read of `t`
     // there comes before every assignment. Before, the assignment in the
-    // body, which `Loop` stores first, proved the read.
-    const source = 'function g() { for k in 1..t { t = 2 }; 0 }\ng()';
-    const result = compile(
-      new ComputeEngine().box(parseEpsil(source)[0] as never),
-      {
+    // body, which `Loop` stores first, proved the read. No path gives `t` a
+    // value before the read, so the compilation fails (CE-636).
+    const compiled = (source: string) =>
+      compile(new ComputeEngine().box(parseEpsil(source)[0] as never), {
         to: 'javascript',
         fallback: false,
-      } as never
-    )!;
-    expect(() => result.run!({} as never)).toThrow(/read-before-declaration/);
+      } as never)!;
+    expect(() =>
+      compiled('function g() { for k in 1..t { t = 2 }; 0 }\ng()')
+    ).toThrow(/no path to that read gives "t" a value/);
+    // An earlier statement that may assign `t`: the read is checked.
+    const g = 'function g(c) { if c { t = 3 }; for k in 1..t { t = 2 }; 0 }\n';
+    expect(compiled(`${g}g(true)`).run!({} as never)).toBe(0);
+    expect(() => compiled(`${g}g(false)`).run!({} as never)).toThrow(
+      /read-before-declaration/
+    );
   });
 
   test('a node read before and after an assignment is checked', () => {

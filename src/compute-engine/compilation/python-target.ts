@@ -1573,6 +1573,14 @@ function compilePythonStatements(
     // The checks of `compileBlock` on the order of the statements.
     BaseCompiler.assertNoUseBeforeDeclare(stmts);
     BaseCompiler.assertLocalsAssignedBeforeRead(stmts, declared);
+    // A read with no assignment on any path before it is refused here
+    // (`classifyLocalReads`).
+    const readClasses = BaseCompiler.classifyLocalReads(
+      stmts,
+      declared,
+      expr,
+      target
+    );
     // Python has no block scope: the statements of the block run in the
     // scope of the enclosing function. Two things keep a local of the block
     // apart from the other variables of the function:
@@ -1589,12 +1597,11 @@ function compilePythonStatements(
     //   this target emits nothing for a `Declare`, so without this
     //   assignment the value was lost and a read of `t` raised `NameError`.
     //   A `Declare` with no value emits `t = _ce_unset('t')`
-    //   (`PYTHON_UNSET_HELPER`), unless the next statement assigns the
-    //   local (`BaseCompiler.needsStartValue`):
-    //   `assertLocalsAssignedBeforeRead` accepts a read after an assignment
-    //   in one branch of an `If` only. The start value makes a use of the
-    //   local raise `UnboundLocalError` when that branch did not run,
-    //   instead of reading the value of a previous pass of a loop.
+    //   (`PYTHON_UNSET_HELPER`) when a read can find the local with no
+    //   value, for example after an assignment in one branch of an `If`
+    //   only (`BaseCompiler.needsStartValue`). The start value makes a use
+    //   of the local raise `UnboundLocalError` when that branch did not
+    //   run, instead of reading the value of a previous pass of a loop.
     const compileStatements = (
       spelled?: ReadonlyMap<string, string>
     ): string => {
@@ -1614,7 +1621,7 @@ function compilePythonStatements(
         const local = bodyTarget.var(name) ?? name;
         const value = BaseCompiler.declareValueOperand(ops);
         if (value === undefined)
-          return BaseCompiler.needsStartValue(stmts, i)
+          return BaseCompiler.needsStartValue(stmts, i, readClasses)
             ? `${local} = _ce_unset(${JSON.stringify(name)})`
             : '';
         // A value that reads the declared name is refused before this
