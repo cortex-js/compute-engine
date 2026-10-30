@@ -34,6 +34,19 @@ fi
 
 echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 
+# scripts/release.sh sets CE_RELEASE_SHA to the release commit that it made.
+# Another session can commit before this hook runs: the package would then
+# contain that commit, not the release commit. This check runs before the
+# build and again after it, before the upload (an upload cannot be undone),
+# also when the full-suite check below is skipped.
+if [ -n "${CE_RELEASE_SHA:-}" ] && [ "$(git rev-parse HEAD)" != "$CE_RELEASE_SHA" ]; then
+  echo ""
+  echo "✗ HEAD is $(git rev-parse --short HEAD), not the release commit ${CE_RELEASE_SHA:0:9}:"
+  echo "  another commit was made after the release commit. Nothing was published."
+  echo ""
+  exit 1
+fi
+
 # A session does not run the full test suite before each commit, so a
 # release must make sure that the full suite passed on the code being
 # published. `suite-status.mjs release-check` refuses uncommitted source
@@ -61,8 +74,20 @@ echo "✓ Authenticated with $REGISTRY as $NPM_USER"
 #   tree and it passed. Use it on a machine without the helper script.
 # Rules: ~/.claude/SHARED-BOX-PROTOCOL.md, section 5.7 (user decision
 # 2026-10-28).
+# mark_upload_next: scripts/release.sh sets CE_RELEASE_UPLOAD_MARK to a file
+# path. The file is created when the last check before the upload has
+# passed, so that release.sh knows whether a failure of `npm publish` came
+# before the upload (nothing was published) or after this point (the upload
+# may have succeeded).
+mark_upload_next() {
+  if [ "${1:-}" = "--after-pack" ] && [ -n "${CE_RELEASE_UPLOAD_MARK:-}" ]; then
+    touch "$CE_RELEASE_UPLOAD_MARK"
+  fi
+}
+
 if [ "${GITHUB_ACTIONS:-}" = "true" ] || [ "${CE_FULL_SUITE_PASSED:-}" = "1" ]; then
   echo "✓ Full test suite: checked by the caller (GitHub Actions or CE_FULL_SUITE_PASSED=1)"
+  mark_upload_next "${1:-}"
   exit 0
 fi
 SUITE_STATUS="$HOME/.claude/scripts/suite-status.mjs"
@@ -77,14 +102,15 @@ fi
 HEAD_FILE="$(git rev-parse --git-dir)/ce-publish-head"
 
 # release_check: run `suite-status.mjs release-check` and set STATUS to its
-# exit code. Its output is shown only when it refuses for a reason other
-# than "no passing full run covers HEAD" (exit 3): that case is expected
-# before a release, and this script handles it by running the suite.
+# exit code. Exit 3 means that no passing full run covers HEAD. That is
+# expected before a release, and this script handles it by running the
+# suite, so its message is hidden, except when the cause is a full run that
+# failed: that message names the failed jobs and the log.
 release_check() {
   local out
   out=$(node "$SUITE_STATUS" release-check --repo . 2>&1)
   STATUS=$?
-  if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 3 ]; then
+  if [ "$STATUS" -ne 0 ] && { [ "$STATUS" -ne 3 ] || printf '%s' "$out" | grep -q 'latest full run at .* failed'; }; then
     echo "$out"
   fi
 }
@@ -110,6 +136,18 @@ if [ "${1:-}" != "--after-pack" ]; then
   [ "$STATUS" -eq 0 ] || [ "$STATUS" -eq 3 ] || refuse_status "$STATUS"
   if [ "$STATUS" -eq 3 ]; then
     echo "· Full test suite: no passing run at HEAD yet; it runs after the build."
+  fi
+  # The checks of `npm run ci` that the full suite does not run (lint,
+  # documentation references, circular imports, script tests, corpus).
+  # scripts/release.sh runs them before the version change and sets
+  # CE_RELEASE_CHECKS_DONE=1.
+  if [ "${CE_RELEASE_CHECKS_DONE:-}" != "1" ]; then
+    bash scripts/release-checks.sh || {
+      echo ""
+      echo "✗ A release check failed (above). Nothing was built or published."
+      echo ""
+      exit 1
+    }
   fi
   git rev-parse HEAD > "$HEAD_FILE"
   exit 0
@@ -152,3 +190,4 @@ if [ "$(git rev-parse HEAD)" != "$(cat "$HEAD_FILE" 2>/dev/null)" ]; then
   exit 1
 fi
 echo "✓ Full test suite: passed at HEAD; the package is the checked code"
+mark_upload_next "${1:-}"

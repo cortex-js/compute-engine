@@ -10,6 +10,7 @@
     "start": "bash ./scripts/start.sh",
     "snapshot": "bash ./scripts/test.sh snapshot",
     "version": "bash ./scripts/version.sh",
+    "release": "bash ./scripts/release.sh",
     "prepublishOnly": "bash ./scripts/prepublish-check.sh",
     "postpack": "bash ./scripts/prepublish-check.sh --after-pack",
     "postpublish": "bash ./scripts/package-vsix.sh",

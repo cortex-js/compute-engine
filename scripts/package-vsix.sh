@@ -15,6 +15,14 @@
 # .github/workflows/publish.yml require a VSCE_PAT that is not set up yet.
 
 set -e  # exit immediately on error
+
+# scripts/release.sh sets CE_RELEASE_SKIP_VSIX=1 and runs this script itself
+# after it tags the release. Otherwise a failure here makes `npm publish`
+# exit non-zero after the upload, which looks like a failed upload.
+if [ "${CE_RELEASE_SKIP_VSIX:-}" = "1" ]; then
+  exit 0
+fi
+
 cd "$(dirname "$0")/../vscode-epsil"
 
 # Each step writes its output to a log and prints one line; a failing step

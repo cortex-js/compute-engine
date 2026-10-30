@@ -47,12 +47,14 @@ agents. Repository-wide validation remains the orchestrator's responsibility.
 | Opening a PR                  | `npm run ci`. GitHub also builds and checks the package.                     |
 | Changing the Python compiler  | `npm run test:python` in addition to the normal checks.                      |
 | Changing documentation inputs | `npm run doc`; review the generated changes.                                 |
-| Preparing a release           | Follow the release sequence below, including `npm run ci:extended`.          |
+| Preparing a release           | `npm run release`; see the release sequence below.                           |
 
 Prettier runs automatically on staged source files when committing. Normal
 checks do not require Python. Release CI runs extended validation, and slower
-suites also run nightly. Run extended validation locally before publishing to
-npm.
+suites also run nightly. A local release runs the same checks: the publish check
+runs the full test suite (`scripts/ci-nightly.sh`), and
+`scripts/release-checks.sh` runs the checks of `npm run ci` that the full suite
+does not run.
 
 On the shared development machine, follow the
 [shared-box specifics](docs/COMPUTE-ENGINE-BOX-SPECIFICS.md) for worker limits,
@@ -80,6 +82,14 @@ Before returning a delegated implementation:
 3. Leave integration and release validation to the orchestrator unless assigned
    a validation role. Do not independently repeat aggregate checks merely to
    satisfy a generic completion checklist.
+4. For each defect found and not fixed, name the decision that blocks the fix.
+   "Out of scope" and "outside the diff" are not blocking decisions; fix the
+   defect, or say that the task prompt forbade it.
+
+The orchestrator sorts every unfixed defect of a sub-agent report before
+writing its own summary: fix it (or send it back), ask the user for the
+blocking decision, or state why it is not a defect. Only the second goes to
+`ROADMAP.md` as an open entry.
 
 The orchestrator combines the results and normally runs typecheck, lint,
 dependency checks, and the required test sets once on that combined tree. It can
@@ -154,31 +164,53 @@ already perform the whole-source check; they do not replace repository checks.
 
 ## Releasing to npm
 
-Bump the version before generating documentation, so generated references use
-the release version. Defer npm's automatic commit and tag until the
-documentation is included:
+One command makes a release:
 
 ```sh
-npm version patch --no-git-tag-version # or minor, major, or an explicit version
-npm run doc
-# Review and commit the version changes and generated documentation.
-# Tag that release commit as v<version> when ready.
-npm run ci:extended
-npm publish
+npm run release # a minor release; or: npm run release -- patch (major, or an explicit version)
+                # --yes skips the confirmation question
 ```
 
-The version hook updates the changelog and the VS Code extension's version and
-stages those files. Review them alongside the root package/lockfile changes.
-Without `--no-git-tag-version`, `npm version` creates its commit and tag before
-the subsequent documentation generation.
+`scripts/release.sh` does these steps, in this order:
 
-On a shared machine, take the box lock for aggregate validation/build runs as
-required by the shared protocol. Agents leave commits and publishing to the user
-unless explicitly instructed otherwise.
+1. It refuses when files are staged, when a file that the release writes (the
+   version files, `CHANGELOG.md`, the generated documentation) has uncommitted
+   changes, when the publish check would refuse the tree (an uncommitted change
+   or an untracked file that a test can see; markdown outside `src/` and `test/`
+   is allowed), or when npm does not accept the login. It warns when
+   `CHANGELOG.md` has no `## [Unreleased]` heading, and when the latest full
+   test run failed. Then it runs `scripts/release-checks.sh`: lint,
+   `check:docs`, `check:deps`, `test:tools` and the corpus pipeline, the checks
+   of `npm run ci` that the full test suite does not run.
+2. `npm version <bump> --no-git-tag-version`. The version hook
+   (`scripts/version.sh`) writes the version and date in the changelog and the
+   version of the VS Code extension.
+3. `npm run doc`. It runs after the version change, so that the generated
+   references show the release version.
+4. It shows the changed files, asks for confirmation, and commits only those
+   files as `<version>`.
+5. `npm publish` (see below), without its VS Code extension step, so that a
+   failure of `npm publish` means that nothing was uploaded.
+6. After the upload, it tags the release commit `v<version>`.
+7. It packages the VS Code extension (`scripts/package-vsix.sh`). It does not
+   push; it prints the push command.
 
-`npm publish` automatically checks release eligibility and performs a clean
-production build with consumer smoke tests. Documentation must be generated
-beforehand and included in the release commit.
+When `npm publish` fails, nothing is published, and the release commit stays
+without a tag. Fix the cause, commit, run `npm publish`, then tag the published
+commit. When only step 7 fails, fix the cause and run
+`bash scripts/package-vsix.sh`.
+
+A local release takes no box lock, except for the full test suite, which
+`scripts/ci-nightly.sh` runs under the lock: no other session is active during a
+release (user decision 2026-10-30). Agents leave commits and publishing to the
+user unless explicitly instructed otherwise.
+
+`npm publish` checks release eligibility, runs `scripts/release-checks.sh`
+(unless `npm run release` ran it already), performs a clean production build
+with consumer smoke tests, runs the full test suite at HEAD when no passing run
+covers it, uploads the package, and packages the VS Code extension. When you run
+`npm publish` without `npm run release`, generate the documentation first and
+include it in the release commit.
 
 <details>
 <summary>Local release guard and previously completed validation</summary>
