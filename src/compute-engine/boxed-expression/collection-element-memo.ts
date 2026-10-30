@@ -1280,10 +1280,50 @@ export function elementMemoWalkBaseline(): ElementMemoWalkBaseline {
   };
 }
 
-export function* elementMemoRecordingStream(
+/**
+ * Record a walk of `iter` (see the comment above `ElementMemoWalkBaseline`).
+ *
+ * This function is not a generator, so its body runs when the caller calls
+ * it, and not at the first `next()`. It samples the dependency snapshot of
+ * the instance, the semantic version, the world version and the lexical
+ * scope at that time. The caller calls it after it built the iterator and
+ * before it returns the stream to the consumer. An iterator that reads its
+ * operands when it is built (`Join`, `Filter`) holds the elements of the
+ * values it read, so a change made by the consumer between the return of
+ * `each()` and the first pull must be compared like a change made between
+ * two pulls: a write to a dependency moves it against this snapshot, and a
+ * change of the world version or of the scope prevents the commit. Changes
+ * made while the iterator was built are the walk's own and are absorbed, the
+ * same as changes made inside `next()`.
+ *
+ * Without `baseline`, the counts are sampled here too.
+ */
+export function elementMemoRecordingStream(
   expr: Expression,
   iter: Iterator<Expression, undefined>,
   baseline?: ElementMemoWalkBaseline
+): Generator<Expression> {
+  const ce = expr.engine;
+  return recordingStream(expr, iter, baseline ?? elementMemoWalkBaseline(), {
+    // Dependencies are static in the tree, so a pre-walk snapshot is valid;
+    // it is the baseline the end-of-walk snapshot is diffed against.
+    deps: snapshotDeps(expr, true),
+    semanticVersion: ce._semanticVersion,
+    worldVersion: ce._worldVersion,
+    scope: ce.context?.lexicalScope,
+  });
+}
+
+function* recordingStream(
+  expr: Expression,
+  iter: Iterator<Expression, undefined>,
+  baseline: ElementMemoWalkBaseline,
+  boundary: {
+    deps: ElementMemoDep[] | undefined;
+    semanticVersion: number;
+    worldVersion: number;
+    scope: unknown;
+  }
 ): Generator<Expression> {
   const ce = expr.engine;
   const buffer: Expression[] = [];
@@ -1298,16 +1338,12 @@ export function* elementMemoRecordingStream(
    * committed. Neither engine version moves for an ordinary scope change. */
   let suspendedScopeChange = false;
   let drained = false;
-  // Dependencies are static in the tree, so a pre-walk snapshot is valid; it
-  // is the baseline the end-of-walk snapshot is diffed against.
-  const startDeps = snapshotDeps(expr, true);
-  // A stop of a sequence read between here and the commit, also one made
-  // by the consumer between two pulls, prevents the commit.
-  const sequenceStopsBefore =
-    baseline?.sequenceStops ?? sequenceReadStopCount();
-  const incompleteWalksBefore =
-    baseline?.incompleteWalks ?? incompleteWalkCount();
-  const hostCallsBefore = baseline?.hostCalls ?? uncachedHostCallCount();
+  const startDeps = boundary.deps;
+  // A stop of a sequence read between the baseline and the commit, also one
+  // made by the consumer between two pulls, prevents the commit.
+  const sequenceStopsBefore = baseline.sequenceStops;
+  const incompleteWalksBefore = baseline.incompleteWalks;
+  const hostCallsBefore = baseline.hostCalls;
   /** The mutable-object field reads made by the walk itself. A collector is
    * opened around each PULL rather than around the whole generator: the
    * generator suspends at every `yield`, and a collector left open across
@@ -1328,10 +1364,16 @@ export function* elementMemoRecordingStream(
   // post-yield comparison, so the `finally` must re-compare against the last
   // sample or a pull-mutate-break consumer would commit a prefix stamped
   // with the post-mutation state (the second reviewer-round catch).
-  let gen = ce._semanticVersion;
-  let epoch = ce._worldVersion;
-  let ambient = ce.context?.lexicalScope;
+  // The first sample is the one taken when the stream was created
+  // (`elementMemoRecordingStream()`), so the gap between `each()` and the
+  // first pull is compared like the gap between two pulls.
+  let gen = boundary.semanticVersion;
+  let epoch = boundary.worldVersion;
+  let ambient: unknown = boundary.scope;
   try {
+    if (ce._semanticVersion !== gen) suspendedWrite = true;
+    if (ce._worldVersion !== epoch) suspendedEpochChange = true;
+    if (ce.context?.lexicalScope !== ambient) suspendedScopeChange = true;
     let result = pull();
     // Bumps INSIDE `next()` are the walk's own and are absorbed; only a bump
     // observed across a yield boundary is the consumer's. Configuration

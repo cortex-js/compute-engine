@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-628.
+Next free reference: CE-646.
 
 **Entry format.**
 
@@ -738,24 +738,26 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
-### CE-620. The element memo samples part of its baseline at the first pull, not when the walk starts
+### CE-645. The element memo can store elements computed inside a temporary precision or angular-unit window
 
-**Status:** open; defect. Found 2026-10-28 by the review of CE-601; the same
-on HEAD `bd814978c` without CE-601.
+**Status:** open; defect. Found 2026-10-30 by the review of the CE-620 fix;
+the same on HEAD before that fix.
 
-`each()` builds the operator's iterator before the element memo's recording
-stream reads its baseline: the dependency snapshot of the expression, the
-semantic and world versions and the lexical scope are read at the first
-`next()`. Eager iterators (`Join`, `Filter`) read their operands when the
-iterator is built. If the state changes between the two, the walk holds the
-old elements and is stored under the new state. Repro:
-`ce.assign('a', [1,2,3])`; `j = Join(a, [9])`; `it = j.each()`;
-`ce.assign('a', [7,8])`; draining `it` gives `1,2,3,9`, and a later
-`j.each()` also gives `1,2,3,9` (expected `7,8,9`), `j.at(1)` gives 1, while
-`j.evaluate()` gives `[7,8,9]`. `Filter` behaves the same. Expected: sample the
-whole baseline in `each()` before the iterator is built, as CE-601 does for
-the host-call, sequence-stop and incomplete-walk counts
-(`elementMemoWalkBaseline()`).
+The element memo of a collection walk compares, before each pull and when it
+stores the walk, the dependency snapshot of the expression, the semantic and
+world versions and the lexical scope. `_withTransientPrecision()` and
+`_withTransientAngularUnit()` (`engine-numeric-configuration.ts`) change the
+working precision or the angular unit without moving any of these; the memo
+checks `_atTransientConfiguration` only when it stores the walk. So a walk
+started outside such a window, pulled inside it and finished outside it stores
+the elements computed in the window. Repro: `ce.assign('a', [1/3])`;
+`j = Join(Map(x ↦ N(x), a), [9])`; `it = j.each()`;
+`ce._withTransientPrecision(5, () => { it.next(); it.next(); })`;
+`it.next()`; a later `j.each()` gives `0.33333, 9` and `j.at(1)` gives
+`0.33333`, expected `0.3333333333333333`. Only the internal `_with…` methods
+reach it. Expected: the walk samples whether a transient window is open, or
+the window depths, with the rest of its baseline, and does not store a walk
+during which that changed.
 
 ### CE-621. Host-code rule of CE-601: remaining gaps on the asynchronous route and in the store of host-derived source values
 
@@ -783,20 +785,26 @@ the evaluation-cache audit (`docs/plans/2026-10-28-evaluation-cache-audit-handof
   release that evaluation's host-derived source values (only memory, until
   the engine is idle).
 
-### CE-615. An operator extended with `{ extend: true }` keeps its old handler in expressions boxed before the extension
+### CE-628. The derivative cache keeps a value that host code computed
 
-**Status:** open; defect (needs a decision). Found 2026-10-28 by the review
-of CE-601; the same on HEAD.
+**Status:** open; wrong value. Found 2026-10-30 by the evaluation-cache audit
+(`docs/plans/2026-10-30-evaluation-cache-architecture.md`); the same on HEAD
+`9b86a0932`.
 
-`ce.declare('g', { evaluate: … }, { extend: true })` makes a new definition
-object. An expression boxed before the extension keeps the old definition:
-with `g(x) = 2x` extended to `3x`, a `g(3)` boxed earlier (or stored in a
-symbol, `v := g(3)`) still evaluates to 6, while a fresh `g(3)` gives 9; a
-`Sum` built earlier gives 12 and a fresh one 18. The decision: must an
-extension reach expressions that already exist? If yes, the definition is
-changed in place (or `_definitionVersion` moves and an expression rebinds on
-its next evaluation). If no, the documentation of `extend` says that only
-expressions boxed after it see the change.
+The cache of derivative chains (`derivativeChains` and
+`partialDerivativeChains`, `symbolic/derivative.ts`) is keyed on the function
+literal, the semantic version and a snapshot of the dependencies. It does not
+read the count of host calls (`uncachedHostCallCount()`,
+`host-handler-changes.ts`), which every other cache of evaluated values reads.
+Differentiation simplifies the body, and the simplification evaluates a
+constant call of a host operator. Repro: declare `h` with
+`signature: '(number) -> number'` and an `evaluate` handler that returns
+`x + k`, where `k` is a JavaScript variable, and no purity statement.
+`ce.assign('f', ['Function', ['Multiply', 'x', ['h', 2]], 'x'])` with `k = 1`;
+`Derivative(f)` gives `(x) => 3`. Set `k = 1000`: a new `Derivative(f)`, and
+`Derivative(f)(5)`, still give `3`; a new engine gives `(x) => 1002`.
+Expected: no chain step is stored when the count moved while it was computed,
+as the other caches do.
 
 ### CE-606. `Equal(r(t), r(t))` of a drawing function evaluates to `True`
 
@@ -3071,6 +3079,103 @@ isolated zeros, branch boundaries, subnormals and overflow. Tycho's profile
 Design answer: `docs/plans/2026-10-27-tycho-rows-461-463-gpu-design-answers.md`
 (the same document answers CE-571 and CE-572).
 
+### CE-635. `.N()` of a constant expression with shared subexpressions takes exponential time, which slows the GPU compile
+
+**Status:** open; defect (performance). Found 2026-10-30 while fixing CE-593.
+
+The GPU lowering calls `.N()` on constant subtrees (`gpuProvablyFinite`,
+`gpuReduceTrigOffset`, `gpuLibraryConstant` in `compilation/gpu-target.ts`).
+For an exact expression whose subexpressions are shared objects
+(`e_{k+1} = e_k + sin(e_k)` with a constant base), `.N()` is not memoized,
+so it evaluates each shared node once per path: on GLSL at depth 16, a base of
+`1 + sqrt(2)` takes 8.9 s and `PointX((1, 2))` 1.4 s (a declared
+`tuple<real, real>` symbol as the base takes 0.12 s). The time is in
+`.N()` of `boxed-function`, `arithmetic-add` and `exact-operands-under-n`.
+Expected: `.N()` of a shared node is computed once per evaluation (a memo for
+the duration of one `.N()` call), so the time is linear in the number of
+distinct nodes.
+
+### CE-630. Compiled code: a call of a block-local function before the `Declare` of a name it reads is not refused
+
+**Status:** open; defect. Found 2026-10-30 in the review of CE-583.
+
+`Block(g ≔ (t ↦ U + t); y ≔ g(1); Declare(U, real); U ≔ 3; U + y)`: the
+interpreter reports `read-before-declaration`. The `javascript` target
+compiles it, and the code throws `Cannot access 'U' before initialization`
+when it runs; the Python target raises `UnboundLocalError`. A direct use of
+`U` before its `Declare` is refused at compile time on every target (CE-583).
+A first attempt followed the calls of the block's function literals, and was
+removed: it refused a valid block where the function reads `U` only in a
+branch that does not run (`g ≔ (t ↦ If(t > 0, U, 0))` called with `-1`, which
+the interpreter evaluates to 3), and it missed calls through an immediately
+applied lambda, a nested block, `Map` and an alias. Expected: the compiled
+code fails at the same point as the interpreter (a compiled check at the
+call, or a refusal when the call provably runs before the `Declare`), never
+a value where the interpreter reports an error.
+
+A related case: on `javascript`, a variable assigned without a `Declare` in a
+nested block (an implicit local) and read after that block reads the input of
+the same name (`_.W`), so the code gives `NaN` where the interpreter reports an
+error. Python reports `NameError` at run time for the same block.
+
+### CE-636. JavaScript: a declared local assigned in only one branch is compared as `undefined`
+
+**Status:** open; defect (wrong value). Found 2026-10-30 in the review of
+CE-583.
+
+`Block(s ≔ 0; Loop(Block(Declare(n, integer); If(i > 3, n ≔ 1); If(n ≠ 1, s ≔ s + i)), i ∈ 1..5); s)`:
+the interpreter gives 0, because `n ≠ 1` cannot be decided while `n` has no
+value. The `javascript` target gives 6: `n` is `undefined` on the passes where
+the first `If` does not assign it, and `undefined != 1` is true, so the second
+branch runs. The compile-time check `assertLocalsAssignedBeforeRead` accepts
+the read because a write comes before it in one branch. The interpreter does
+not report an error: a comparison that reads a local with no value is
+undecided, and an `If` statement with an undecided condition runs neither
+branch. Expected: the compiled code does the same. The comparison is
+undecided, and the `If` runs neither branch.
+
+### CE-644. Compiled code: a lazy read of a local with no value, under another operator, decides a comparison
+
+**Status:** open; defect (wrong value on `javascript`; run-time error on
+Python). Found 2026-10-30 in the review of CE-583.
+
+Inside a loop body, `Block(Declare(n, integer); If(i > 3, n ≔ 1); If(<condition>, s ≔ s + i))`
+leaves `n` with no value on some passes. When the condition compares a value
+that reads `n` lazily (in an `If` arm, a `Which` value or a `Coalesce`
+fallback) and the read sits under another operator, the interpreter treats the
+comparison as undecided when the read runs, and the `If` statement runs
+neither branch. The compiled code does not:
+
+| Condition | Interpreter | `javascript` | Python |
+| --- | --- | --- | --- |
+| `If(i > 2, n + 1, 2) = 2` | 12 | 112 | `UnboundLocalError` |
+| `Equal(And(i > 2, n ≠ 1), False)` | 12 | 112 | `UnboundLocalError` |
+| `Equal(Or(i < 3, n ≠ 1), True)` | 12 | 206 | `UnboundLocalError` |
+| `Coalesce(When(n, i > 2), 1) = 1` | 12 | 15 | `UnboundLocalError` |
+
+On `javascript` the read gives `undefined`, the operator turns it into `NaN`
+or a boolean, and the comparison is then decided. A read whose value becomes
+the compared value directly (`If(i > 2, n, 1) = 1`, `Coalesce(1, n) = 1`) is
+already correct on both targets: the compiled condition tests that value
+(`lazyUnassignedLocalValue()` in `base-compiler.ts`). The same limit applies
+to an input with no value read in an arm (the comment on
+`operandInputNodes()`). Expected: the compiled code records at run time
+whether a lazy read of a local with no value ran, and makes the comparison
+undecided in that case.
+
+### CE-643. Compilation: the shared-subexpression harvest takes about 0.6 s for 160 repeated terms
+
+**Status:** open; defect (speed). Found 2026-10-30 in the review of CE-595.
+
+An expression with 160 terms `g_j · g_j`, where each `g_j` is 30 nested
+`Sin`/`Add` levels (about 4,800 distinct nodes, no conditional), takes about
+650 ms in `harvestCse` and 1.6 s for the whole `javascript` compile at HEAD
+`0f1020490`. The number of nodes is small, so a linear harvest would take a
+few milliseconds. Probe: `cap.mts` with the arguments `0 160 30` (the
+CE-595 review scripts; the first argument is the depth of the conditional
+chain, here none). Expected: the harvest time is about linear in the number of
+distinct nodes. Measure where the time goes before changing the code.
+
 ### CE-583. WGSL: a list held by a `Block` local is copied again at each read
 
 **Status:** open; defect (memory and speed). Found 2026-10-27 while fixing
@@ -3665,6 +3770,52 @@ deliberate factor of three. The composed hyperbolic and reciprocal routines are
 built from unrounded kernels and take one rounding step at their own export,
 except `remainder`, whose three-operation composition takes three.
 
+### CE-631. javascript: a bare `Not(c)` gives `true` for an unsupplied `c`
+
+**Status:** open; defect. Found 2026-10-30.
+
+With `c` declared `boolean`, `ce.box(['Not', 'c']).compile().run({})` returns
+`true` (the code is `!_.c`), and with `c = 1` it returns `false`. The
+interpreter keeps `¬c` unevaluated in both cases, so the compiled value
+should be the absence marker. Inside a condition (`If`, `When`, `Which`),
+`Not` is already lowered with three values and is correct; only a `Not`
+whose value is the result is wrong. Check `And`, `Or` and `Xor` as results
+too.
+
+### CE-632. interval-js: a boolean input is read as "maybe"
+
+**Status:** open; defect, needs a decision on the input form. Found
+2026-10-30.
+
+The interval runner reads a `boolean` variable as one of the strings
+`'true'`, `'false'` or `'maybe'`. A JavaScript `true` or `false` is read as
+`'maybe'`: with `c: true`, `If(c, 1, 2)` gives the hull `[1, 2]`, and
+`When(x, false)` gives a partial `[2, 2]` instead of an empty result. The
+input type `IntervalInput` admits neither form, so a caller must cast. The
+choice: accept JavaScript booleans (and map them to `'true'`/`'false'`), or
+document the string form and admit it in the type.
+
+### CE-633. `broadcast()` cannot bind a `boolean` variable
+
+**Status:** open; defect. Found 2026-10-30.
+
+`broadcast()` on the javascript target refuses a `boolean` variable with
+"must be a Float64Array or a number", although `run()` accepts it. The
+column input of `broadcast()` has no boolean form; an array of booleans
+(or a `Uint8Array`) would be the natural one.
+
+### CE-634. javascript: a number passed for a `string` variable is accepted silently
+
+**Status:** open; decision. Found 2026-10-30.
+
+With `s` declared `string`, `If(s = "a", 1, 2)` run with `s = 3` gives `2`
+(`_SYS.eqt(3, "a")` is `false`); the interpreter would refuse the value at
+assignment. Since 2026-10-30 a boolean or a string passed for a variable
+declared with a number type throws (`refuseNonNumberAtScalar` in
+`javascript-runtime.ts`); a number for a `boolean` variable is accepted on
+purpose (the condition is undecided, as in the interpreter). Decide whether
+a number for a `string` variable is refused or kept, and pin it.
+
 ### CE-589. The type of a compiled `run()` refuses a boolean input that the `javascript` target accepts
 
 **Status:** open; defect (public type). Found 2026-10-28.
@@ -3733,8 +3884,21 @@ recursive function declared `function`, like `R` in Tycho `ndqj7hupta`, whose
 decline the recursive-signature fix of 2026-10-27 removed. Not reproduced
 without Tycho. The interpreter cannot give the row's value with the
 document's `D = 10000` (the iteration limit is reached, at 0.171.0 too); with
-`D = 4` it applies `N` to each point. Next step: run the Tycho row against a
-CE build that has that fix.
+`D = 4` it applies `N` to each point.
+
+Checked by Tycho on 2026-10-30 with CE 0.174.0, which has that fix: the
+row is no longer reached. With Tycho's probe
+`scripts/repros/2026-10-23-d298-s8is-bind-throw-probe.mts`, `F(0)` is now
+typed `list<tuple<number, number, number>>` (narrow), but evaluating the body
+of `c_{Cc}` in the document engine throws "Maximum call stack size exceeded"
+after 31.6 s, the resolver times out on `C_c`, and the compile of `F(0)`
+declines because of the same overflow. The same failure occurs on 0.173.0.
+The probe expected `C_c` to resolve in under 100 ms after a Tycho fix of
+2026-10-23, so a change after that date (in Tycho or in CE) made the
+evaluation recurse without end. Tycho is finding which change. Also seen:
+`C_{cf}` evaluates to an `incompatible-type` error, a `PointList` where
+`tuple<number, number, number>` is expected, which may be the shape of the
+original decline.
 
 ### CE-565. GLSL `sin`/`cos` of a plot parameter go through the NaN guard
 
@@ -5032,6 +5196,67 @@ as `isSameCall()` (`boxed-function.ts`) does.
 element, where an integrand that calls `c` with a list argument keeps the call
 (CE-604). The values are right; the integral is slower.
 
+### CE-637. `CircularIntegrate` does not inline a call of a user function
+
+**Status:** open; capability. Found 2026-10-30 while fixing CE-626.
+
+With `g(t) := 1/t`, `\oint_{|z|=2} g(z)\,dz` stays
+`CircularIntegrate(g(z), Limits(z, |z| = 2, Nothing))`, while
+`\oint_{|z|=2} \frac{1}{z}\,dz` gives `2iπ`. Both should give `2iπ`: the
+contour integral does not write in the body of a user function, as
+`Integrate` does.
+
+### CE-638. `g \mapsto \int_0^1 g(x)\,dx` reads `g(x)` as a product
+
+**Status:** open; defect. Found 2026-10-30 while reviewing CE-626 (also on
+0.174.0).
+
+On the parse route, with no global `g`, the integrand of
+`g \mapsto \int_0^1 g(x)\,dx` is `Multiply(g, x)`: the parameter `g` of the
+function literal is not read as a function in a call position, so applying
+the literal to `t \mapsto t^2` does not give 1/3. The same happens to a
+parameter of a definition: `h(p, a) := p(a)` reads `p(a)` as `p·a`, so
+`h(g, 0.5)` gives `0.5·g`. Check first whether the documented reading of a
+juxtaposition with an unknown head covers a parameter.
+
+### CE-639. A local function assigned inside an integrand gives an `incompatible-type` error
+
+**Status:** open; defect. Found 2026-10-30 while reviewing CE-626 (also on
+0.174.0).
+
+`\int_0^1 (g \coloneq t\mapsto t^2; g(x))\,dx` evaluates to an
+`incompatible-type` error; it should give 1/3.
+
+### CE-640. A call head defined later as a data symbol: `evaluate()` reports an error, `.N()` stays unevaluated
+
+**Status:** open; defect (consistency). Found 2026-10-30 while reviewing
+CE-626.
+
+Parse `\int_0^1 g(x)\,dx`, then `ce.declare('g', 'real'); ce.assign('g', 5)`:
+`evaluate()` gives `Error(expected-function, g, real)`, `.N()` returns the
+`Integrate` unevaluated, and `D` of `g(x)` gives `Apply(Derivative(g, 1), x)`.
+The box route behaved this way before CE-626, and `Sum` also gives the error.
+`.N()` should report the same error as `evaluate()`.
+
+### CE-641. `.N()` of an integrand that calls `g` and passes `g` as a callback depends on the order of definition
+
+**Status:** open; defect. Found 2026-10-30 while fixing CE-626.
+
+On the box route, `∫_0^1 g(x) + At(Map(g, [x]), 1)\,dx`: written after
+`g(t) := t`, `.N()` gives 1; written before it, `.N()` stays unevaluated,
+although the interpreter gives 1 at x = 0.5 and a direct compilation succeeds.
+With only the callback (`At(Map(g, [x]), 1)`) `.N()` gives 0.5 in both orders.
+Not checked on 0.174.0.
+
+### CE-642. An integrand that maps a function over a list is not integrated symbolically
+
+**Status:** open; capability. Found 2026-10-30 while fixing CE-626.
+
+`∫_0^1 At(Map(g, [x]), 1)\,dx` with `g(t) := t` stays unevaluated under
+`evaluate()` (`.N()` gives 0.5), and
+`∫_0^1 Total(Map(t \mapsto t^2, [x, x]))\,dx` stays unevaluated under both
+`evaluate()` and `.N()` (the value is 2/3).
+
 ### CE-616. A definite integral does not evaluate a `Sum`, `Product` or `D` held in its integrand
 
 **Status:** open; defect. Found 2026-10-28 while fixing CE-604.
@@ -5056,44 +5281,6 @@ derivative reads the integral's `dx` as the product `d·x`, so the integral has
 no variable (`Nothing`), and `evaluate()` with `E = [1, 2]` gives
 `[2x^3, 4x^3]`, which still holds `x` after a definite integral. The MathJSON
 route (`["Integrate", ["D", ["Power", "x", 3], "x"], …]`) gives `[1, 2]`.
-
-### CE-622. `subs()` binds a rebuilt call to the function of the current scope
-
-**Status:** open; defect (wrong values); needs a decision. Found 2026-10-28
-while fixing CE-614.
-
-With `h := a ↦ a·x`, take `Add(h(a), 1)`, then push a scope that declares
-`h := a ↦ 100`: `.subs({a: k})` gives `h(k)` bound to the inner `h`, which
-evaluates to 101 (the call was written with the outer `h`: `k·x + 1`). So,
-with `g := a ↦ h(a) + 1`, `D(g(k), x)` under that scope gives 0 instead of
-`k`, and an integral or a limit of a nested call reads the inner `h` too
-(through `betaReduceLambda`, which uses `body.subs`). `docs/SCOPING-MODEL.md`
-calls an expression rebuilt by `subs()` "a new call", which does not say
-whether a call keeps its binding. Decision needed: does `subs()` keep the
-binding of each call it rebuilds?
-
-Two related effects, measured 2026-10-30 with the CE-614 fix:
-- With `c(t) := n(t) + 1`, `n := t ↦ t^2`, and a scope that declares another
-  `c` and another `n`, `∫_0^1 c(x)\,dx` evaluates to 101 (`.N()` gives the right
-  4/3): the integral inlines `c` through `betaReduceLambda`, whose `body.subs`
-  binds `n` again in the current scope.
-- `isSame` and the hash compare a call by its name, not by the function it is
-  bound to: a call of the outer `g` and a call of the inner `g` with the same
-  arguments are the same, so canonical `Add` merges `g_outer(k) + g_inner(k)`
-  into one term, and `D` of its square is wrong (`400k`).
-
-### CE-626. A call in an integrand to a function not yet defined becomes a local of the integrand
-
-**Status:** open; needs a decision. Found 2026-10-30 while fixing CE-614.
-
-`I = ce.parse('\int_0^1 g(x)\,dx')` before `g(t) := t`: the `Block` of the
-integrand's function literal declares `g` as a valueless local, so after
-`g(t) := t`, `I.evaluate()` stays unevaluated, while `D` and `Sum` of a call
-parsed the same way read the later `g` (they give 1 and 6). The compiled
-`.N()` reads the name: 0.5, or 100 under a scope that declares
-`g := t ↦ 100`. Decision needed: should an unknown call head in an integrand
-be a local of the integrand (today) or refer to the enclosing scope, as it
-does for `D` and `Sum`?
 
 ### CE-625. A limit of a call that passes a function as an argument leaves a parameter name in the result
 
