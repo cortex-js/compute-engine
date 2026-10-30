@@ -2805,15 +2805,27 @@ export class BoxedFunction
     // `rewriteWithBinders` (`binders.ts`). `scopeForRebuild` withholds the
     // reuse from a substitution that RENAMES the binding site, which would
     // otherwise declare the new name into the original expression's live scope.
-    return this.engine.function(this._operator, ops, {
-      form,
-      scope: scopeForRebuild(
-        this._localScope,
-        this.engine,
-        this._operator,
-        ops
-      ),
-    });
+    //
+    // A call is rebuilt with the function it was written with, not with the
+    // function that its name has in the current scope: with `h := a ↦ a·x`,
+    // `h(a) + 1` substituted at `a := k` in a scope that declares another `h`
+    // is `k·x + 1`. `withCallableBinding()` binds the name to the definition
+    // of this node while the rebuild runs, and does nothing more when that
+    // definition is the one that the current scope gives the name. A call that
+    // the substitution itself puts in the result keeps the binding that its
+    // caller gave it. `isSame()` and the hash still compare a call by its
+    // name (`docs/SCOPING-MODEL.md`, "Callable resolution").
+    return withCallableBinding(this, () =>
+      this.engine.function(this._operator, ops, {
+        form,
+        scope: scopeForRebuild(
+          this._localScope,
+          this.engine,
+          this._operator,
+          ops
+        ),
+      })
+    );
   }
 
   replace(

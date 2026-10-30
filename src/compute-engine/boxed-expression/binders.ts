@@ -26,6 +26,7 @@ import {
 } from './binding-sites.js';
 import { isInvalidNonCollection } from './error-value.js';
 import { copyContextStack } from './evaluation-epoch.js';
+import { chainedScopeOf } from '../scope-chaining.js';
 
 /**
  * The names bound BY THIS NODE (not by its descendants).
@@ -225,7 +226,15 @@ export function withCallableBinding<T>(expr: Expression, build: () => T): T {
   if (binding === undefined || ce.lookupDefinition(expr.operator) === binding)
     return build();
   const bindings = new Map([[expr.operator, binding]]);
-  ce.pushScope({ parent: ce.context.lexicalScope, bindings });
+  // The scope holds only the borrowed binding. A name that the build
+  // declares automatically (a new symbol of a raw operand) goes to the
+  // enclosing scope: a declaration in this scope would be lost when the
+  // scope is popped.
+  ce.pushScope({
+    parent: ce.context.lexicalScope,
+    bindings,
+    noAutoDeclare: true,
+  });
   try {
     return build();
   } finally {
@@ -269,11 +278,17 @@ export function callableBindingInContext(
   }
   // Forward calls wait for a definition in their original lexical chain.
   // A type/evaluation read never binds them to an unrelated caller's scope.
+  // The walk follows the link each scope was created with: while a node that
+  // owns the scope (a `Block`, the body of an integrand) is evaluated, the
+  // scope is chained onto the ambient scope (`scope-chaining.ts`), and a
+  // declaration of the same name in a scope pushed later would capture the
+  // call. With `∫₀¹ g(x) dx` made before `g(t) := t`, a scope that declares
+  // `g := t ↦ 100` made the integral 100, not 1/2.
   if ('value' in own) {
     for (
       let scope = forwardCallScope(own.value);
       scope;
-      scope = scope.parent ?? undefined
+      scope = creationParentOf(scope)
     ) {
       const found = scope.bindings.get(name);
       if (
@@ -328,6 +343,17 @@ export function callableBindingInContext(
     }
   }
   return own;
+}
+
+/** The parent link `scope` was created with. A live evaluation frame can
+ * re-point the link onto the ambient scope; the registry of chained scopes
+ * keeps the link the scope had before (`chainedScopeOf`,
+ * `scope-chaining.ts`). */
+function creationParentOf(scope: Scope): Scope | undefined {
+  const chained = chainedScopeOf(scope);
+  const parent = (chained !== undefined ? chained.parent : scope.parent) as
+    Scope | null | undefined;
+  return parent ?? undefined;
 }
 
 /**

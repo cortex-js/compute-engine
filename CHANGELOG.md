@@ -1,3 +1,61 @@
+## [Unreleased]
+
+### Resolved Issues
+
+- **A written `Missing` value beside a point or a list compiles to the absence
+  marker of that shape.** `If(c, (x, y), Missing)` compiled on `glsl` and
+  `wgsl` to a ternary with a scalar NaN beside a `vec2`, which is not a valid
+  shader; it now gives `vec2(NaN)`, also when the other value is itself a
+  selection that may be absent (`If(c, If(d, (x, y), Missing), Missing)`). On
+  `python` it gave `nan` where the interpreter gives `Missing`; it now gives
+  `None`. The same holds for `Which` and for a list value `[x, y]`.
+- **More selections compile on `glsl`, `wgsl` and `interval-js`.** A list of
+  2 to 4 numbers that may be absent (`If(c, [x, y])`, `When([x, y], c)`) now
+  compiles to a `vecN` on the shader targets. On `interval-js`, an `If` with a
+  point or list value now compiles, as `Which` and `When` already did, and a
+  value whose condition is a constant `False` is no longer compiled (it made
+  `If(False, [Zeta(x), 1], 1)` decline).
+- **`interval-js` no longer reports "no value" for a selection of lists of
+  different lengths.** With an undecided condition, `If(x > 0, L, [x])` over
+  `x ∈ [-1, 1]` gave the empty result, which claims that no value exists; it
+  now gives the whole domain (`entire`), also inside an enclosing selection.
+  When the lengths are known at compile time to differ, the compile declines.
+- **A long conditional with a `Missing` value compiles on `interval-js`.**
+  Past 2,000 characters of code, a conditional is emitted with closures, and a
+  `Missing` value made the generated function a syntax error. A chain of
+  nested selections also compiled each value several times per level (depth 10
+  overflowed the stack); depth 24 now compiles in a few milliseconds.
+
+- **`subs()`, `map()` and a recursive `replace()` keep the function each call
+  was written with.** With `h := a \mapsto a x`, `e = h(a) + 1`, and then a
+  scope that declares `h := a \mapsto 100`, `e.subs({a: k}).evaluate()` gave
+  101: the rebuilt call looked `h` up in the current scope, while
+  `e.evaluate()` correctly gives `a x + 1`. It now gives `k x + 1`. An
+  integral, a derivative or a limit that writes in the body of a function
+  through these operations now also reads the function each inner call was
+  written with (an integral of `c(x)`, where `c` calls `n` and a scope
+  declares another `c` and `n`, gave 101 instead of 4/3). `isSame()` and the
+  hash still compare a call by its name, and the canonical form of a raw or
+  structural result (a `replace()` rule written as LaTeX strings) still binds
+  each call in the current scope (`docs/SCOPING-MODEL.md`).
+
+- **An integral written before its function is defined uses that function.**
+  `\int_0^1 g(x)\,dx` parsed before `g(t) := t` stayed unevaluated after the
+  definition (`.N()` gave 0.5), while `D` and `\sum` written the same way used
+  the later `g`. It now evaluates to 1/2, also for `\int_0^1
+  \operatorname{Apply}(f, x)\,dx` and `x \mapsto q(x)` written before `q`.
+  Under a scope that declares another `g`, such an integral keeps the `g` of
+  the scope where it was written (it gave 100 with `g := t \mapsto 100`). An
+  unknown data symbol of an integrand is unchanged.
+
+- **`Contains`, `Unique` and `Element` compile over a list of lists.** On the
+  JavaScript target they were refused when the elements were lists
+  (`xss: list<list<integer>>`), because the compiled `includes`/`Set` would
+  compare the arrays by reference. They now compare the elements structurally,
+  as `evaluate()` does, and so do `RangeOf`, `ContainsSequence`, `StartsWith`
+  and `EndsWith`. Elements that are tuples, complex numbers or lists of a type
+  that may be absent are still refused. (#499)
+
 ## 0.174.0 _2026-10-30_
 
 ### Breaking Changes

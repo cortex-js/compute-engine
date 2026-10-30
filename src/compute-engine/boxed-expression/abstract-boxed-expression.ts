@@ -57,7 +57,7 @@ import {
   isObject,
 } from './type-guards.js';
 import { functionLiteralParameterNames } from './function-literal.js';
-import { bindingInContext } from './binders.js';
+import { bindingInContext, withCallableBinding } from './binders.js';
 import {
   binderBoundAt,
   bindsClauseSymbols,
@@ -1321,16 +1321,23 @@ export abstract class _BoxedExpression implements Expression {
     // node"). `scopeForRebuild` withholds the reuse when `fn` renamed the
     // binding site, which would otherwise declare the new name into the
     // original expression's live scope.
+    //
+    // A call is rebuilt with the function it was written with, not with the
+    // function that its name has in the current scope, as `subs()` does
+    // (`withCallableBinding()`). A node that `fn` returns keeps the binding
+    // that `fn` gave it.
     return fn(
-      this.engine.function(this.operator, ops, {
-        form: structuralForm ? 'structural' : canonical ? 'canonical' : 'raw',
-        scope: scopeForRebuild(
-          this.localScope,
-          this.engine,
-          this.operator,
-          ops
-        ),
-      })
+      withCallableBinding(this, () =>
+        this.engine.function(this.operator, ops, {
+          form: structuralForm ? 'structural' : canonical ? 'canonical' : 'raw',
+          scope: scopeForRebuild(
+            this.localScope,
+            this.engine,
+            this.operator,
+            ops
+          ),
+        })
+      )
     );
   }
 

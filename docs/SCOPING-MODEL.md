@@ -46,6 +46,32 @@ rebuilt from a result (`subs()`) is a new call; both resolve their head as
 before (`EVALUATED_UNRESOLVED_CALLS`, `boxed-expression/boxed-function.ts`;
 decided in `docs/plans/2026-10-21-function-declaration-hoisting.md`, rule 1).
 
+`subs()` rebuilds each call with the function the call was written with, not
+with the function that its name has in the current scope. With
+`h := a ↦ a·x`, take `e = h(a) + 1`, then push a scope that declares another
+`h := a ↦ 100`: `e.subs({a: k})` evaluates to `k·x + 1`, not 101. A call that
+the substitution value holds keeps the binding its caller gave it (a value
+boxed in the inner scope calls the inner `h`). The inlining of a user function
+by an integral, a derivative or a limit (`betaReduceLambda()`,
+`inlineLambdaApplications()`, `boxed-expression/utils.ts`), `map()` and the
+recursive `replace()` follow the same rule. A node that a `map()` callback or a
+replace rule returns is a new node, and keeps the binding that the callback or
+the rule gave it: a rule that rewrites `h(_x)` into `q(_x)` calls `q`. The
+rebuild uses `withCallableBinding()` (`boxed-expression/binders.ts`), which
+pushes a temporary scope only when the binding of the call differs from the
+current definition of its name. A name that the rebuild declares
+automatically goes to the enclosing scope, not to the temporary scope. The
+canonical form (`.canonical`) of a raw or a structural call still binds its
+name in the current scope. So a raw result (`subs(…, {canonical: false})`) or
+a structural result of these operations reads the inner function when it is
+made canonical or evaluated: in the example above,
+`e.subs({a: k}, {canonical: false}).canonical.evaluate()` is 101.
+
+`isSame()` and the hash compare a call by its name and its operands, not by
+the function it is bound to: a call of the outer `h` and a call of the inner
+`h` with the same arguments are `isSame`, and canonical `Add` can merge them
+into one term. This is a known limit, accepted by user decision 2026-10-30.
+
 Ordinary data-symbol lookup keeps the compatibility behavior below. This
 callable rule changes function application, not every symbol read.
 

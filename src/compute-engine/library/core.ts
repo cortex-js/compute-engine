@@ -134,7 +134,10 @@ import {
 import { typeToString } from '../../common/type/serialize.js';
 
 import { randomExpression } from './random-expression.js';
-import { canonicalInvisibleOperator } from '../boxed-expression/invisible-operator.js';
+import {
+  canonicalInvisibleOperator,
+  markBodyCopyAsForwardCall,
+} from '../boxed-expression/invisible-operator.js';
 import {
   collectionElementType,
   functionResult,
@@ -5770,7 +5773,17 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // A missing callee is an `Error("missing")` operand (`checkArity()`).
         if (args.length === 0) return ce._fn('Apply', checkArity(ce, args, 1));
         const s = sym(args[0]);
-        if (s) return ce.function(s, args.slice(1));
+        if (s) {
+          // The callee was canonicalized as a symbol: when the name is not
+          // defined yet, that declared it in the scope of the body of a
+          // function literal, as a valueless local. The call reads the
+          // definition of the enclosing scope, as the call `f(x)` written
+          // directly does (`markBodyCopyAsForwardCall()`): with
+          // `∫₀¹ Apply(f, x) dx` made before `f(t) := t²`, the integral
+          // stayed unevaluated.
+          markBodyCopyAsForwardCall(ce, s);
+          return ce.function(s, args.slice(1));
+        }
         // `Nothing` is ERASED from the call argument list, uniformly on every
         // application route (error-propagation design §4): `Apply(f, Nothing)`
         // is `f()`. The `f(Nothing)` route erases at canonicalization

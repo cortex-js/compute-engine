@@ -44,6 +44,7 @@ import {
 } from './type-guards.js';
 import { getRuleIndex, candidateRules } from './rule-index.js';
 import { scopeForRebuild } from './binding-sites.js';
+import { withCallableBinding } from './binders.js';
 
 /** Condition functions that already triggered the one-time "non-boolean
  * condition result" warning (see `applyRule`). */
@@ -1156,10 +1157,18 @@ export function applyRule(
       // `scopeForRebuild` withholds the reuse when the rule renamed the binding
       // site, which would otherwise declare the new name into the original
       // expression's live scope.
-      expr = ce.function(expr.operator, newOps, {
-        form,
-        scope: scopeForRebuild(expr.localScope, ce, expr.operator, newOps),
-      });
+      //
+      // A call is rebuilt with the function it was written with, not with
+      // the function that its name has in the current scope, as `subs()`
+      // does (`withCallableBinding()`). A node that a rule returns keeps the
+      // binding that the rule gave it.
+      const node = expr;
+      expr = withCallableBinding(node, () =>
+        ce.function(node.operator, newOps, {
+          form,
+          scope: scopeForRebuild(node.localScope, ce, node.operator, newOps),
+        })
+      );
     }
   }
 

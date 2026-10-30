@@ -61,6 +61,7 @@ import {
   isShield,
   markShieldDeclaration,
   rewriteWithBinders,
+  withCallableBinding,
 } from './binders.js';
 import {
   declaredBinders,
@@ -338,6 +339,22 @@ export function reduceTransformerHead(expr: Expression): Expression {
 }
 
 /**
+ * The node `expr` over the rewritten operands `ops`. A call keeps the
+ * function it was written with (`withCallableBinding()`): a rebuild by name
+ * alone reads the function that the name has in the current scope, which can
+ * declare another function with that name. When the two are the same, the
+ * rebuild is a plain `ce.function()`.
+ */
+function rebuildCall(
+  expr: Expression,
+  ops: ReadonlyArray<Expression>
+): Expression {
+  return withCallableBinding(expr, () =>
+    expr.engine.function(expr.operator, ops)
+  );
+}
+
+/**
  * Reduce transformer heads anywhere in `expr`, not only at its root: in
  * `Solve(Simplify(u) = 2, w)` the transformer sits inside the `Equal`, so a
  * root-only check left it opaque and the solve returned `[]`.
@@ -360,7 +377,7 @@ function reduceTransformerHeads(expr: Expression): Expression {
   const ops = expr.ops;
   const reduced = ops.map(reduceTransformerHeads);
   if (reduced.every((op, i) => op === ops[i])) return expr;
-  return expr.engine.function(expr.operator, reduced);
+  return rebuildCall(expr, reduced);
 }
 
 /**
@@ -654,7 +671,7 @@ function inlineLambdaApplications(
   const ops = expr.ops;
   const inlined = ops.map((op) => inlineLambdaApplications(op, budget));
   if (inlined.every((op, i) => op === ops[i])) return expr;
-  return expr.engine.function(expr.operator, inlined);
+  return rebuildCall(expr, inlined);
 }
 
 /**
@@ -733,7 +750,7 @@ export function resolveBoundSymbols(
     return resolveBoundSymbols(op, protectIn(i), seen);
   });
   if (resolved.every((op, i) => op === ops[i])) return expr;
-  return expr.engine.function(expr.operator, resolved);
+  return rebuildCall(expr, resolved);
 }
 
 /**
@@ -760,7 +777,7 @@ export function reduceStructuralIndex(expr: Expression): Expression {
   const reduced = ops.map(reduceStructuralIndex);
   const self = reduced.every((op, i) => op === ops[i])
     ? expr
-    : expr.engine.function(expr.operator, reduced);
+    : rebuildCall(expr, reduced);
 
   if (!isFunction(self, 'At') || self.nops !== 2) return self;
 
@@ -871,7 +888,7 @@ function reduceProducerHeads(expr: Expression): Expression {
   const ops = expr.ops;
   const reduced = ops.map(reduceProducerHeads);
   if (reduced.every((op, i) => op === ops[i])) return expr;
-  return expr.engine.function(expr.operator, reduced);
+  return rebuildCall(expr, reduced);
 }
 
 export function normalizedUnknownsForSolve(
