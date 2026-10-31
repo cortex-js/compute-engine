@@ -311,7 +311,12 @@ What the decision does NOT change:
   Python) and return `float('nan')` or `None`. The code of `compile()` and
   `compileToSource()` has no entry of its own (the host places it), so it has
   no test, and an absent input there still raises a `TypeError`
-  (`pythonNoValueGuard`, `compilation/python-target.ts`). The interpreter
+  (`pythonNoValueGuard`, `compilation/python-target.ts`). On `interval-js`
+  the test is the first part of the code itself, so `run()` and a stored copy
+  of the code both make it, and the run answers `empty`, the
+  value of that target that has no value (`compileToIntervalTarget`,
+  `compilation/interval-javascript-target.ts`). A name that the caller maps to
+  its own source through `vars` is not tested, on either JavaScript target. The interpreter
   rule for a `Loop` over such an input (it runs zero times today) is ROADMAP
   CE-660.
 - **A `partial` operand** on `interval-js` (undefined over part of the cell

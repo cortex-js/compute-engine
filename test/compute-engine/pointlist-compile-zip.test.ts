@@ -735,7 +735,7 @@ describe('PointList — GPU construction and the other targets are unchanged', (
       ce.box(['PointList', -6, 'n'])
     );
     expect(r.success).toBe(true);
-    expect(r.code).toBe("_IA.pointList('sl', _k1, _.n)");
+    expect(r.code).toBe("(_.n === undefined ? { kind: 'empty' } : _IA.pointList('sl', _k1, _.n))");
     // A component whose role the type does not state (`number | list`) is
     // not guessed: the node declines, as before.
     const wide = new IntervalJavaScriptTarget().compile(

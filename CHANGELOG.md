@@ -1,3 +1,20 @@
+## [Unreleased]
+
+### Bug Fixes
+
+- **Interval target: a loop over a list input gives the correct value.** With
+  `L` declared `list<number>` and `L = [1, 2, 3]`, the `interval-js` code of
+  `Block(c := 5, Loop(c := c + k, Element(k, L)), c)` gave an interval whose
+  bounds were the string `"5[object Object][object Object][object Object]"`,
+  and `[2k for k in L]` gave `empty` for each element. The run converts each
+  element of `L` to an interval, and the loop wrapped each element as an
+  interval again. The two now give the point intervals `11` and `2`, `4`, `6`,
+  as the interpreter does. When the caller leaves out a collection input that
+  the code iterates, reduces or indexes, the run now gives `empty` (no value)
+  before any code runs, as on the JavaScript target: before, the loop gave
+  `entire` and `Sum(L)` gave `undefined`. The `code` of such a result starts
+  with this test.
+
 ## 0.175.0 _2026-10-30_
 
 ### Performance

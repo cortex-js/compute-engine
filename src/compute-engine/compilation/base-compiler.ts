@@ -26533,12 +26533,27 @@ export class BaseCompiler {
     const narrowedElements = binders.map((b) => b.clause);
 
     // For wrapping targets (e.g. interval-js where `target.number(0)` is
-    // `_IA.point(0)`), each loop variable must be wrapped wherever it appears
-    // in the body or in an inner collection expression. Without this, code
-    // like `_IA.add(x, y)` is invoked with raw numbers and produces incorrect
-    // intervals.
+    // `_IA.point(0)`), a loop variable over a `Range` must be wrapped wherever
+    // it appears in the body or in an inner collection expression: the
+    // iterable of a `Range` (`compileRangeIterable`) emits plain numbers, and
+    // `_IA.add(x, y)` invoked with raw numbers produces incorrect intervals.
+    // Any other source is a collection value of the target, whose elements
+    // are usually wrapped already (on interval-js, `run()` converts each
+    // element of a list input to a `{lo, hi}` interval, and a compiled list
+    // holds intervals). A second wrap gave `_IA.point({lo, hi})`, an interval
+    // whose bounds are objects: a `Loop` over a `list<number>` input summed
+    // to the string `"5[object Object]…"`. But a source that the caller maps
+    // through `vars` (`L: '[1, 2, 3]'`), or a host that runs the code with
+    // its own vars object, can give plain numbers. So such an element is
+    // wrapped only when it is a number, as the `Sum` lowering of
+    // interval-js does.
     const loopVarSet = new Set(binders.flatMap((b) => b.names));
     const needsWrap = target.number(0) !== '0';
+    const wrappedVars = new Set(
+      binders
+        .filter((b) => isFunction(b.clause.ops[1], 'Range'))
+        .flatMap((b) => b.names)
+    );
     // The wrap rule below re-wraps each loop variable as a NUMBER; a
     // destructured leaf is a component of a tuple value, whose wrapping on
     // such a target this lowering does not know. Decline rather than
@@ -26559,7 +26574,9 @@ export class BaseCompiler {
       var: (id: string) =>
         loopVarSet.has(id)
           ? needsWrap
-            ? target.number(0).replace('0', id)
+            ? wrappedVars.has(id)
+              ? target.number(0).replace('0', id)
+              : `(typeof ${id} === 'number' ? ${target.number(0).replace('0', id)} : ${id})`
             : id
           : target.var(id),
       ...BaseCompiler.withBoundScope(target, [...loopVarSet]),

@@ -1543,7 +1543,7 @@ describe('INTERVAL JS - collection access', () => {
   test('Length of a declared list', () => {
     const fn = compile(ceColl.box(['Length', 'L']), { to: 'interval-js' });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.length(_.L)');
+    expect(fn.code).toBe("(_.L === undefined ? { kind: 'empty' } : _IA.length(_.L))");
     expect(fn.run!({ L: [10, 20, 30] })).toEqual({
       kind: 'interval',
       value: { lo: 3, hi: 3 },
@@ -1563,7 +1563,7 @@ describe('INTERVAL JS - collection access', () => {
     const fx = compile(ceColl.box(['PointX', 'P']), { to: 'interval-js' });
     const fy = compile(ceColl.box(['PointY', 'P']), { to: 'interval-js' });
     expect(fx.success).toBe(true);
-    expect(fx.code).toBe('_IA.component(_.P, 0)');
+    expect(fx.code).toBe("(_.P === undefined ? { kind: 'empty' } : _IA.component(_.P, 0))");
     expect(fx.run!({ P: [1, 2] })).toEqual({
       kind: 'interval',
       value: { lo: 1, hi: 1 },
@@ -1642,7 +1642,7 @@ describe('INTERVAL JS - collections decline where the value model has no room', 
       to: 'interval-js',
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.length(_IA.pointComponent(_.PL, 0, true, true))');
+    expect(fn.code).toBe("(_.PL === undefined ? { kind: 'empty' } : _IA.length(_IA.pointComponent(_.PL, 0, true, true)))");
     expect(
       fn.run!({
         PL: [
@@ -1858,7 +1858,7 @@ describe('INTERVAL JS - ACCESSORS OVER AN ASSIGNED LITERAL', () => {
       vars: { La: '_.La' },
     });
     expect(fn.success).toBe(true);
-    expect(fn.code).toBe('_IA.at(_.La, _k1)');
+    expect(fn.code).toBe("(_.La === undefined ? { kind: 'empty' } : _IA.at(_.La, _k1))");
     expect(fn.preamble).toBe('const _k1 = _IA.point(2);');
     expect(fn.run!({ La: [7, 8, 9] })).toEqual({
       kind: 'interval',

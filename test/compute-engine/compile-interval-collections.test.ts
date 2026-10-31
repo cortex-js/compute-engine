@@ -250,7 +250,7 @@ describe('Interval target — collection values across a user-function boundary'
   test('a scalar-parameter helper is mapped over a provable list argument', () => {
     const ce = engine();
     const { code, out } = run(ce, 'f(V)', { V: [1, 2, 3] });
-    expect(code).toBe('_IA.bcastFn((_tv1) => _fn_f(_tv1), _.V)');
+    expect(code).toBe("(_.V === undefined ? { kind: 'empty' } : _IA.bcastFn((_tv1) => _fn_f(_tv1), _.V))");
     expectEncloses(out, [1, 4, 9]);
     // The interpreter zips zero elements into the empty list.
     const r = compile(ce.parse('f([])'), { to: 'interval-js' });
@@ -735,7 +735,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_IA.pointComponent(_.PL, 1, true, true)');
+    expect(r.code).toBe("(_.PL === undefined ? { kind: 'empty' } : _IA.pointComponent(_.PL, 1, true, true))");
     expect(bands(r.run!({ PL: POINTS }))).toEqual([
       [2, 2],
       [4, 4],
@@ -767,7 +767,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(r.success).toBe(true);
-    expect(r.code).toBe('_IA.pointComponent(_.c, 1)');
+    expect(r.code).toBe("(_.c === undefined ? { kind: 'empty' } : _IA.pointComponent(_.c, 1))");
     expect(bands(r.run!({ c: POINTS }))).toEqual([
       [2, 2],
       [4, 4],
@@ -822,7 +822,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(numeric.success).toBe(true);
-    expect(numeric.code).toBe('_IA.pointComponent(_.S, 1, true, true)');
+    expect(numeric.code).toBe("(_.S === undefined ? { kind: 'empty' } : _IA.pointComponent(_.S, 1, true, true))");
     expect(
       bands(
         numeric.run!({
@@ -845,7 +845,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
       fallback: false,
     });
     expect(at.success).toBe(true);
-    expect(at.code).toBe('_IA.at(_IA.pointComponent(_.PL, 1, true, true), _.k)');
+    expect(at.code).toBe("(_.PL === undefined ? { kind: 'empty' } : _IA.at(_IA.pointComponent(_.PL, 1, true, true), _.k))");
     expect(bands(at.run!({ PL: POINTS, k: pt(2) }))).toEqual([4, 4]);
 
     const length = compile(ce.box(['Length', ['PointX', 'PL']]), {
@@ -869,7 +869,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     });
     expect(plus.success).toBe(true);
     expect(plus.code).toBe(
-      '_IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(_.PL, 1, true, true))'
+      "(_.PL === undefined ? { kind: 'empty' } : _IA.bcast((_tv1) => _IA.add(_tv1, _k1), _IA.pointComponent(_.PL, 1, true, true)))"
     );
     expect(bands(plus.run!({ PL: POINTS }))).toEqual([
       [3, 3],
@@ -1029,7 +1029,7 @@ describe('Interval target — a coordinate accessor over a list of points', () =
     });
     expect(mapped.success).toBe(true);
     expect(mapped.code).toBe(
-      '_IA.pointComponent(_IA.bcastFn((_tv1, _tv2) => _fn_U(_tv1, _tv2), _.L, _k2), 1, true, true)'
+      "(_.L === undefined ? { kind: 'empty' } : _IA.pointComponent(_IA.bcastFn((_tv1, _tv2) => _fn_U(_tv1, _tv2), _.L, _k2), 1, true, true))"
     );
     expect(bands(mapped.run!({ L: [1, 2] }))).toEqual([
       [2, 2],
@@ -1147,7 +1147,7 @@ describe('Interval target — a PointList of list-typed symbols', () => {
   test('sources of equal length', () => {
     const values = { L_1: [1, 2, 3], L_2: [4, 5, 6] };
     expect(agrees(PX, values)).toBe(
-      "_IA.pointComponent(_IA.pointList('ll', _.L_1, _.L_2), 0, true, true)"
+      "(_.L_1 === undefined || _.L_2 === undefined ? { kind: 'empty' } : _IA.pointComponent(_IA.pointList('ll', _.L_1, _.L_2), 0, true, true))"
     );
     agrees(PY, values);
     agrees(['Min', PX], values);

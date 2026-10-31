@@ -6441,6 +6441,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       }
     }
 
+    const varsObjectRefs = new Set<string>();
     const target = this.createTarget({
       // The caller's requested compile mode; validated against
       // `supportedModes` (strict only here) by `BaseCompiler.compile`.
@@ -6520,7 +6521,16 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // Own-property test: a caller's `vars` map is a plain object, so
         // `in` finds `Object.prototype` members and a symbol named
         // `toString` would read the inherited FUNCTION as its spliced source.
-        if (vars && Object.hasOwn(vars, id)) return vars[id] as string;
+        // A mapping to the spelling this target emits anyway (`'_.L'`)
+        // still reads the vars object, so it is recorded as such a read.
+        if (vars && Object.hasOwn(vars, id)) {
+          if (
+            typeof vars[id] === 'string' &&
+            !isOpaqueVarsSource(vars[id], varsObjectSpelling(id))
+          )
+            varsObjectRefs.add(id);
+          return vars[id] as string;
+        }
         // A library constant whose name a user binding shadows is read as
         // any other symbol (see the symbol branch of `BaseCompiler.compile`).
         const constant = INTERVAL_JAVASCRIPT_CONSTANTS[id];
@@ -6534,6 +6544,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // guard, or a missing symbol reads the inherited function.
         if (unknowns.includes(id)) {
           assertIntervalRealSymbol(expr.engine, id);
+          varsObjectRefs.add(id);
           return intervalVarsAccess(id);
         }
         // An assigned value / declared constant: returning `undefined` lets
@@ -6544,8 +6555,15 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
         // folded value (so absent from `unknowns`). Emit the vars-object lookup
         // rather than a bare, dangling reference.
         assertIntervalRealSymbol(expr.engine, id);
+        varsObjectRefs.add(id);
         return intervalVarsAccess(id);
       },
+      // The free symbols read off the vars object (`_.<id>`). A name that
+      // the caller maps to its own source through `vars` is not one (unless
+      // the source is that same spelling): the code never reads it from the
+      // vars object, so the absent-input test of `compileToIntervalTarget`
+      // must not require it.
+      varsObjectRefs,
       preamble: (preamble ?? '') + preambleImports,
       // Opt in to compiling calls to user-defined function literals (`f(x) :=
       // …`) as named local functions collected into the preamble.
@@ -6765,7 +6783,28 @@ function compileToIntervalTarget(
   // the caller's object already (`processInput`), but `code` is also run by
   // hosts that pass their own object.
   const localVars = BaseCompiler.localVarsObjectStatement(target);
-  const body = localVars ? `(${localVars}, ${hoistedJs})` : hoistedJs;
+  const withLocals = localVars ? `(${localVars}, ${hoistedJs})` : hoistedJs;
+  // A collection input that the code iterates, spreads, reduces or indexes
+  // (`BaseCompiler.collectionReadInputs`) and that the caller leaves out
+  // makes the run have no value, as on the JavaScript target: the body
+  // answers `empty`, the value of this target that has no value, before any
+  // other code runs. Without the test a `Loop` over an absent `L` threw a
+  // `TypeError`, which `run()` answers `entire`, and `Sum(L)` gave
+  // `undefined`, which is not an interval value. The test is part of the
+  // body, so `run()` and a stored copy of the code both make it.
+  // Only a name that the code reads off the vars object (`varsObjectRefs`)
+  // is tested: a name that the caller maps to its own source is not read
+  // from it.
+  const required = BaseCompiler.collectionReadInputs(
+    expr,
+    target.varsObjectRefs
+  );
+  const body =
+    required.length === 0
+      ? withLocals
+      : `(${required
+          .map((name) => `${intervalVarsAccess(name)} === undefined`)
+          .join(' || ')} ? { kind: 'empty' } : ${withLocals})`;
   // The value kinds whose compile contracts the code reads or makes (the
   // enclosure), and the run-time checks of the host values of the free
   // symbols of a kind. The checks are functions of this host: the result is
