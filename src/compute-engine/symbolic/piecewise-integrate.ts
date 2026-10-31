@@ -278,6 +278,12 @@ export function integratePiecewise(
 
   // Sampling chooses a branch only after all roots and domain boundaries of
   // its supported continuous operands have been accounted for.
+  // A chain `a < b < c` (a comparison with more than two operands) holds
+  // when each link of adjacent operands, `a < b` and `b < c`, holds.
+  const chainLinks = (e: Expression): Expression[] =>
+    isFunction(e)
+      ? e.ops.slice(1).map((rhs, i) => ce.function(e.operator, [e.ops[i], rhs]))
+      : [];
   const condition = (e: Expression): boolean => {
     if (++nodes > MAX_NODES) return false;
     if (!e.has(variable)) {
@@ -289,6 +295,8 @@ export function integratePiecewise(
     if (e.operator === 'Not' && e.nops === 1) return condition(e.op1);
     if (e.operator === 'And' || e.operator === 'Or')
       return e.ops.every(condition);
+    if (COMPARISONS.has(e.operator) && e.nops > 2)
+      return chainLinks(e).every(condition);
     return (
       COMPARISONS.has(e.operator) &&
       e.nops === 2 &&
@@ -405,6 +413,11 @@ export function integratePiecewise(
       const short = e.operator === 'Or';
       if (values.includes(short)) return short;
       return values.includes(undefined) ? undefined : !short;
+    }
+    if (COMPARISONS.has(e.operator) && e.nops > 2) {
+      const values = chainLinks(e).map((link) => truthAt(link, sample));
+      if (values.includes(false)) return false;
+      return values.includes(undefined) ? undefined : true;
     }
     const order = sign(e.op1.sub(e.op2).subs({ [variable]: sample }));
     if (order === undefined) return undefined;

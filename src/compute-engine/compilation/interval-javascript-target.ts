@@ -105,6 +105,8 @@ import {
   staticListWidth,
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
+import { reachesCallerCodeOn } from './compile-folding.js';
+import { cseSharingOff } from './compile-cse.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
 import type {
@@ -1410,6 +1412,37 @@ function compileIntervalChain(
   // a non-trivial operand. Bind each non-trivial middle operand to a temporary
   // (the same treatment the scalar infix path in `BaseCompiler` gives them; a
   // symbol or number literal is safe to duplicate and stays inline).
+  //
+  // An operand that runs code the caller supplied (a `vars` entry
+  // `W: 'nextValue()'`, a head mapped through `functions`) can count its
+  // calls or draw a number (`reachesCallerCodeOn`), so it is not safe to
+  // duplicate, also when it is a bare symbol. And the interpreter evaluates
+  // the operands in order and stops at the first pair that is `False`, so
+  // `Less(5, 1, W)` does not run `W`. So when some operand runs caller code,
+  // the chain is lowered lazily: every operand that is not a number literal
+  // or a plain symbol is bound in its own scope, in operand order, and the
+  // scope of operand `i+1` is entered only when the pair `(i−1, i)` is not
+  // `'false'`: `((t) => t === 'false' ? 'false' : _IA.and(t, rest))(pair)`.
+  // `_IA.and` is `'false'` when one side is, so the value is the value of
+  // the strict conjunction. On point values a pair is `'false'` exactly
+  // when the interpreter's pair is `False`. An enclosure that is not a
+  // point gives `'maybe'`, and the chain goes on, since some point of it
+  // goes on in the interpreter. (`Random()` is a constant enclosure on this
+  // target, not a draw, so it needs none of this.)
+  const callerCodeAt = args.map(
+    (arg) => target !== undefined && reachesCallerCodeOn(arg, target)
+  );
+  const callerCode = args.length > 2 && callerCodeAt.some((c) => c);
+  // Caller code can also write a value that an earlier operand reads (a
+  // global read by `y` in `Less(0, y, W)`): a pair after the binding of `W`
+  // reads the earlier operand there, after `W` has run. So an earlier
+  // symbol that is not a constant is bound too, in operand order.
+  const lastCallerCode = callerCodeAt.lastIndexOf(true);
+  if (callerCode && target?.bindExpr === undefined)
+    throw new Error(
+      `Could not compile \`${op}\`: an operand runs code that the caller ` +
+        `supplied, and this target cannot bind it to a temporary.`
+    );
   const bindings: Array<[name: string, value: string]> = [];
   const codes = args.map((arg, i) => {
     // Operands from index 2 on are the chained-relation lazy positions of the
@@ -1422,9 +1455,12 @@ function compileIntervalChain(
     const isMiddle = i >= 1 && i <= args.length - 2;
     if (
       target?.bindExpr !== undefined &&
-      isMiddle &&
-      !isSymbol(arg) &&
-      !isNumber(arg)
+      (callerCode
+        ? !isNumber(arg) &&
+          (!isSymbol(arg) ||
+            callerCodeAt[i] ||
+            (i < lastCallerCode && !arg.isConstant))
+        : isMiddle && !isSymbol(arg) && !isNumber(arg))
     ) {
       const name = BaseCompiler.tempVar(target);
       bindings.push([name, code]);
@@ -1432,6 +1468,28 @@ function compileIntervalChain(
     }
     return code;
   });
+  if (callerCode && target?.bindExpr !== undefined) {
+    const bind = target.bindExpr;
+    // The binding of each bound operand, by its temporary.
+    const boundAt = codes.map((c) => bindings.find(([name]) => name === c));
+    const scoped = (i: number, body: string): string => {
+      const b = boundAt[i];
+      return b === undefined ? body : bind([b], body);
+    };
+    const from = (i: number): string => {
+      const pair = `${op}(${codes[i - 1]}, ${codes[i]})`;
+      if (i === codes.length - 1) return scoped(i, pair);
+      const t = BaseCompiler.tempVar(target);
+      return scoped(
+        i,
+        bind(
+          [[t, pair]],
+          `${t} === 'false' ? 'false' : _IA.and(${t}, ${from(i + 1)})`
+        )
+      );
+    };
+    return scoped(0, from(1));
+  }
   let result = `${op}(${codes[0]}, ${codes[1]})`;
   for (let i = 1; i < codes.length - 1; i++)
     result = `_IA.and(${result}, ${op}(${codes[i]}, ${codes[i + 1]}))`;
@@ -1981,7 +2039,7 @@ function tryIntervalBroadcast(
   // in `compileIntervalDynamicRangeReduce`.)
   const inner: CompileTarget<Expression> = {
     ...target,
-    cse: undefined,
+    cse: cseSharingOff(target),
     var: (name) => (names.includes(name) ? name : target.var(name)),
     ...BaseCompiler.withBoundScope(target, names),
   };
@@ -4528,7 +4586,7 @@ function compileIntervalDynamicRangeReduce(
   const acc = BaseCompiler.tempVar(target);
   const inner: CompileTarget<Expression> = {
     ...target,
-    cse: undefined,
+    cse: cseSharingOff(target),
     var: (id) => (id === index ? index : target.var(id)),
     ...BaseCompiler.withBoundScope(target, [index]),
   };
@@ -4829,7 +4887,8 @@ function compileIntervalIntegrate(
     ? { lambdaVars: [] as string[], bodyExpr: args[0] }
     : BaseCompiler.integrandLambda(
         args[0],
-        limits.map((l) => l.index)
+        limits.map((l) => l.index),
+        args.slice(1)
       );
   if (!indefinite) {
     // A collection-valued body would make the integrand lambda answer a JS

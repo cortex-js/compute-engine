@@ -15,9 +15,17 @@ import {
 } from './base-compiler.js';
 import { foldSeed } from '../numerics/random.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
-import { gpuBindEveryDraw, gpuDrawComesAfter } from './gpu-draw-order.js';
+import {
+  gpuAssertCallerCodeNotRepeated,
+  gpuAssertHoistKeepsCallerOrder,
+  gpuBindEveryDraw,
+  gpuDrawComesAfter,
+  gpuReachesCallerCode,
+} from './gpu-draw-order.js';
+import { isShaderVariableRead } from './compile-folding.js';
 import { gpuCanPlaceStatement } from './gpu-statements.js';
 import { gpuPointOrPointListUnion } from './gpu-declared-types.js';
+import { gpuTupleWithoutShaderType } from './gpu-shapes.js';
 import { gpuPointOrPointListRefusal } from './gpu-points.js';
 import { formatGPUNumber } from './gpu-emit.js';
 
@@ -248,6 +256,43 @@ export function gpuRandomDraw(target: CompileTarget<Expression>): string {
     mode.inline = true;
     return code;
   }
+  // The temporary runs ahead of the statement, so the draw must not move
+  // ahead of caller code written before it. The temporary holds the draw
+  // only: the operands of the node (the endpoints of `Random(Interval(W,
+  // 1))`) stay in the statement, and the interpreter evaluates them before
+  // it draws. So an operand with caller code declines.
+  const node = path[path.length - 1];
+  // The operands of `Random(Interval(lo, hi))` are its endpoints, which the
+  // lowering writes in the statement (`Open` and `Closed` are read through).
+  const domain = node !== undefined && isFunction(node) ? node.op1 : undefined;
+  const operands =
+    node === undefined || !isFunction(node)
+      ? []
+      : isFunction(node, 'Random') && isFunction(domain, 'Interval')
+        ? domain.ops.map((x) =>
+            isFunction(x, 'Open') || isFunction(x, 'Closed') ? x.op1 : x
+          )
+        : node.ops;
+  if (
+    operands.some(
+      (op) =>
+        !isShaderVariableRead(op, target) && gpuReachesCallerCode(op, target)
+    )
+  )
+    throw new Error(
+      'Could not compile `Random`: an operand of the draw contains code ' +
+        'supplied by the caller (a `vars` source, a `functions` or ' +
+        '`operators` entry, or a `compile` handler), and the draw, bound to ' +
+        'a temporary ahead of the statement, would run before that code.'
+    );
+  // The endpoints are checked above, so the temporary holds a draw with no
+  // caller code (`drawOnly`).
+  gpuAssertHoistKeepsCallerOrder(
+    'Random',
+    node === undefined ? undefined : [node],
+    target,
+    true
+  );
   const t = BaseCompiler.tempVar(target);
   BaseCompiler.hoistStatement(
     target,
@@ -378,7 +423,11 @@ export function gpuTextSymbols(
 /**
  * The symbols in `expr` whose type admits a point and a list of points
  * (`gpuPointOrPointListUnion`), by name, with the refusal for a read of each
- * one as a shader input. The walk also enters the body of each user function
+ * one as a shader input. The map also holds the symbols whose type is a
+ * tuple that no shader type holds (`gpuTupleWithoutShaderType`: a nested
+ * or mixed tuple, a tuple with a `complex` element, a tuple with a
+ * `boolean` element that is not a boolean vector of 2 to 4 elements), with
+ * their refusal. The walk also enters the body of each user function
  * that `expr` calls, and the value of each symbol, because the shader
  * targets write such a value in place. A body or a value is entered at most
  * once, so a recursive definition cannot loop here.
@@ -407,6 +456,18 @@ export function gpuPointOrPointListSymbols(
         out.set(
           e.symbol,
           gpuPointOrPointListRefusal(e.symbol, e.symbol, e, union)
+        );
+      const tupleReason =
+        union === undefined && !out.has(e.symbol)
+          ? gpuTupleWithoutShaderType(e.type.type)
+          : undefined;
+      if (tupleReason !== undefined)
+        out.set(
+          e.symbol,
+          `Could not compile \`${e.symbol}\`: "${e.symbol}" has the type ` +
+            `\`${e.type.toString()}\`, and ${tupleReason}. A shader can ` +
+            `read a tuple of 2 to 4 real numbers (a point) as a vector, ` +
+            `and a longer tuple of real numbers as an array.`
         );
       walkUserFunctionBody(e, e.symbol);
       if (!expandedValues.has(e.symbol)) {
@@ -578,6 +639,22 @@ export function gpuRandomDomainDraw(
     // Symbolic endpoints (typically uniforms) stay live. `lo` is spliced
     // twice, so an endpoint with a side effect (a nested draw) would be
     // consumed twice — endpoints are expected to be uniforms or constants.
+    // The engine does not see caller code (`gpuReachesCallerCode`) as an
+    // effect, so it is checked here: in `lo` it would run twice, and in
+    // `hi` it would run after the draw, where the interpreter evaluates both
+    // endpoints before it draws. A read of one variable
+    // (`isShaderVariableRead`) runs no code and is accepted.
+    gpuAssertCallerCodeNotRepeated('Random', [loExpr], target);
+    if (
+      !isShaderVariableRead(hiExpr, target) &&
+      gpuReachesCallerCode(hiExpr, target)
+    )
+      throw new Error(
+        'Could not compile `Random(Interval(a, b))`: the upper endpoint ' +
+          'contains code supplied by the caller (a `vars` source, a ' +
+          '`functions` or `operators` entry, or a `compile` handler), and ' +
+          'the draw would run before that code.'
+      );
     const loSrc = compile(loExpr);
     const hiSrc = compile(hiExpr);
     return `((${loSrc}) + ${gpuRandomDraw(

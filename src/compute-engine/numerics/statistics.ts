@@ -119,12 +119,25 @@ function bigWelford(values: Iterable<BigDecimal>): {
   let n = 0;
   let mean = BigDecimal.ZERO;
   let m2 = BigDecimal.ZERO;
+  let first: BigDecimal | undefined;
+  let allEqual = true;
   for (const x of values) {
     n += 1;
+    // A datum that is not finite keeps the result of the update (`NaN`), as
+    // in `welford()`: `[NaN]` and `[∞, ∞]` have no variance.
+    if (!x.isFinite()) allEqual = false;
+    else if (first === undefined) first = x;
+    else if (allEqual && !x.eq(first)) allEqual = false;
     const before = x.sub(mean);
     mean = mean.add(before.div(new BigDecimal(n)));
     m2 = m2.add(before.mul(x.sub(mean)));
   }
+  // When all the data are equal, every deviation from the mean is zero, so
+  // the sum of squared deviations is exactly zero. The update above can give
+  // a small value that is not zero: a division rounds to the working
+  // precision, and a datum such as `√2` has more digits than that, so the
+  // running mean of `[√2]` is not `√2` exactly.
+  if (allEqual) m2 = BigDecimal.ZERO;
   return { n, m2 };
 }
 
@@ -151,6 +164,9 @@ function bigVarImpl(
 ): BigDecimal {
   const { n, m2 } = bigWelford(values);
   if (n === 0) return BigDecimal.NAN;
+  // The sample variance of one datum is `0/0`, which has no value: `NaN`,
+  // as the machine version and the exact route (`Indeterminate`) give.
+  if (n === 1 && !population) return BigDecimal.NAN;
   return m2.div(new BigDecimal(population ? n : n - 1));
 }
 
@@ -190,111 +206,197 @@ export function bigPopulationStandardDeviation(
   return bigPopulationVariance(values).sqrt();
 }
 
-export function kurtosis(values: Iterable<number>): number {
-  let sum = 0;
-  let sum2 = 0;
-  let sum3 = 0;
-  let sum4 = 0;
-  let count = 0;
-  for (const op of values) {
-    const v = op;
-    if (!Number.isFinite(v)) return NaN;
-    sum += v;
-    sum2 += v * v;
-    sum3 += v * v * v;
-    sum4 += v * v * v * v;
-    count++;
+//
+// Skewness and kurtosis use the sums of the 2nd, 3rd and 4th powers of the
+// deviations from the mean, `M2 = Σ(x − x̄)²`, `M3 = Σ(x − x̄)³` and
+// `M4 = Σ(x − x̄)⁴`. These sums are not expanded into raw power sums
+// (`Σx² − (Σx)²/n` and longer forms for `M3` and `M4`): when the data are
+// far from zero compared with their spread, the raw sums are nearly equal
+// and their difference loses all its digits (`[10⁸, 10⁸ + 1, 10⁸ + 3]` gave
+// a skewness of about `1.16·10⁸`).
+//
+// Each datum is first replaced by its deviation from the first datum (the
+// origin). This difference is exact when the two numbers are within a
+// factor of 2 of each other, and otherwise it is a number of the size of
+// the spread. The deviations are then accumulated in one pass with the
+// update of Terriberry and Pébay, which extends Welford's update to the
+// higher moments: each deviation changes the running mean and the running
+// sums through its distance to the running mean, so the rounding errors are
+// relative to the spread of the data, not to its size. A running mean held
+// at the size of the data cannot take small increments
+// (`10¹⁶ + 2/3` is not a double), which is why the origin is subtracted
+// first. The stream is consumed once, so a lazy iterable is never buffered.
+// The `BigDecimal` version has the same shape.
+//
+// Reference: P. Pébay, "Formulas for robust, one-pass parallel computation
+// of covariances and arbitrary-order statistical moments", Sandia report
+// SAND2008-6212 (2008).
+//
+
+/**
+ * The count and the central-moment sums `M2`, `M3` and `M4` of a stream of
+ * machine numbers, or `undefined` when the moment ratios have no value: the
+ * stream is empty, a datum is not finite, or all the data are equal (one
+ * datum included). When all the data are equal, every deviation from the
+ * mean is zero, so the moment ratio is `0/0`, which has no value: `NaN`, as
+ * the exact route gives `Indeterminate`. The test is made on the data, the
+ * same test as in `bigCentralMoments()`. In that version, the update can
+ * give a small `M2` that is not zero: a division rounds to the working
+ * precision, and a datum such as `√2` has more digits than that.
+ *
+ * The sums are returned in units of `2^e`, for an exponent `e` that is not
+ * returned: skewness and kurtosis do not change when all the deviations are
+ * multiplied by the same factor. The unit is a power of 2 near the largest
+ * deviation seen, so each scaled deviation is at most 1 in magnitude, and
+ * no power of a deviation overflows or underflows. Without this, the cube
+ * of the deviations of `[5·10¹⁰², −5·10¹⁰²]` overflows and the skewness is
+ * `NaN`, not `0`. When a larger deviation comes, the sums are converted to
+ * the new unit. A multiplication by a power of 2 is exact, so the unit does
+ * not add a rounding error.
+ */
+function centralMoments(
+  values: Iterable<number>
+): { n: number; m2: number; m3: number; m4: number } | undefined {
+  let n = 0;
+  let origin = 0;
+  // The exponent of the unit of the sums, or `undefined` while every
+  // deviation from the origin is zero (the sums are then zero).
+  let unit: number | undefined;
+  let mean = 0;
+  let m2 = 0;
+  let m3 = 0;
+  let m4 = 0;
+  let allEqual = true;
+  for (const x of values) {
+    if (!Number.isFinite(x)) return undefined;
+    if (n === 0) origin = x;
+    else if (x !== origin) allEqual = false;
+    // The deviation from the origin is `y · 2^shift`. The difference of two
+    // finite numbers of opposite signs can overflow (`10³⁰⁸ − (−10³⁰⁸)`),
+    // and then the halves are subtracted.
+    let y = x - origin;
+    let shift = 0;
+    if (!Number.isFinite(y)) {
+      y = x / 2 - origin / 2;
+      shift = 1;
+    }
+    if (y !== 0) {
+      const e = Math.floor(Math.log2(Math.abs(y))) + 1 + shift;
+      if (unit === undefined) unit = e;
+      else if (e > unit) {
+        const k = unit - e;
+        mean = scaleByPowerOfTwo(mean, k);
+        m2 = scaleByPowerOfTwo(m2, 2 * k);
+        m3 = scaleByPowerOfTwo(m3, 3 * k);
+        m4 = scaleByPowerOfTwo(m4, 4 * k);
+        unit = e;
+      }
+    }
+    const u = unit === undefined ? 0 : scaleByPowerOfTwo(y, shift - unit);
+    const before = n;
+    n += 1;
+    const delta = u - mean;
+    const deltaN = delta / n;
+    const deltaN2 = deltaN * deltaN;
+    const term = delta * deltaN * before;
+    mean += deltaN;
+    // `M4` uses the values of `M2` and `M3` before this update, and `M3`
+    // uses the value of `M2` before this update.
+    m4 +=
+      term * deltaN2 * (n * n - 3 * n + 3) + 6 * deltaN2 * m2 - 4 * deltaN * m3;
+    m3 += term * deltaN * (n - 2) - 3 * deltaN * m2;
+    m2 += term;
   }
-  if (count === 0) return NaN;
-  const n = count;
-  const m = sum / n;
+  if (n === 0 || allEqual) return undefined;
+  return { n, m2, m3, m4 };
+}
+
+/**
+ * The `BigDecimal` version of `centralMoments()`, with the same update, the
+ * same origin and the same cases without a value. The subtraction of the
+ * origin is exact (`sub()` does not round to the working precision), so
+ * data such as `[10⁵⁰ + 1, 10⁵⁰ + 2, 10⁵⁰ + 3]` at 50 digits give the
+ * deviations `[0, 1, 2]` exactly. A `BigDecimal` does not overflow, so the
+ * sums are not scaled.
+ */
+function bigCentralMoments(
+  values: Iterable<BigDecimal>
+): { n: number; m2: BigDecimal; m3: BigDecimal; m4: BigDecimal } | undefined {
+  let n = 0;
+  let origin = BigDecimal.ZERO;
+  let mean = BigDecimal.ZERO;
+  let m2 = BigDecimal.ZERO;
+  let m3 = BigDecimal.ZERO;
+  let m4 = BigDecimal.ZERO;
+  let allEqual = true;
+  for (const x of values) {
+    if (!x.isFinite()) return undefined;
+    if (n === 0) origin = x;
+    else if (allEqual && !x.eq(origin)) allEqual = false;
+    const before = n;
+    n += 1;
+    const count = new BigDecimal(n);
+    const delta = x.sub(origin).sub(mean);
+    const deltaN = delta.div(count);
+    const deltaN2 = deltaN.mul(deltaN);
+    const term = delta.mul(deltaN).mul(before);
+    mean = mean.add(deltaN);
+    // `M4` uses the values of `M2` and `M3` before this update, and `M3`
+    // uses the value of `M2` before this update. The coefficient
+    // `n² − 3n + 3` is computed as a `BigDecimal`, because in doubles `n²`
+    // is not exact when `n` is more than about 9.5·10⁷.
+    const coefficient = count.mul(count).sub(count.mul(3)).add(3);
+    m4 = m4
+      .add(term.mul(deltaN2).mul(coefficient))
+      .add(deltaN2.mul(m2).mul(6))
+      .sub(deltaN.mul(m3).mul(4));
+    m3 = m3.add(term.mul(deltaN).mul(n - 2)).sub(deltaN.mul(m2).mul(3));
+    m2 = m2.add(term);
+  }
+  if (n === 0 || allEqual) return undefined;
+  return { n, m2, m3, m4 };
+}
+
+export function kurtosis(values: Iterable<number>): number {
+  const moments = centralMoments(values);
+  if (moments === undefined) return NaN;
+  const { n } = moments;
   // Central moments: m2 = (1/n)Σ(x−m)², m4 = (1/n)Σ(x−m)⁴.
-  const m2 = (sum2 - (sum * sum) / n) / n;
-  const m4 =
-    (sum4 -
-      4 * m * sum3 +
-      6 * m * m * sum2 -
-      4 * m * m * m * sum +
-      n * m * m * m * m) /
-    n;
+  const m2 = moments.m2 / n;
+  const m4 = moments.m4 / n;
   // Non-excess kurtosis β₂ = m4 / m2² (a normal distribution gives 3).
   return m4 / (m2 * m2);
 }
 
 export function bigKurtosis(values: Iterable<BigDecimal>): BigDecimal {
-  let sum = BigDecimal.ZERO;
-  let sum2 = BigDecimal.ZERO;
-  let sum3 = BigDecimal.ZERO;
-  let sum4 = BigDecimal.ZERO;
-  let count = 0;
-  for (const op of values) {
-    const v = op;
-    if (!v.isFinite()) return BigDecimal.NAN;
-    sum = sum.add(v);
-    sum2 = sum2.add(v.mul(v));
-    sum3 = sum3.add(v.mul(v).mul(v));
-    sum4 = sum4.add(v.mul(v).mul(v).mul(v));
-    count++;
-  }
-  if (count === 0) return BigDecimal.NAN;
-  const m = sum.div(count); // mean
+  const moments = bigCentralMoments(values);
+  if (moments === undefined) return BigDecimal.NAN;
+  const { n } = moments;
   // Central moments: m2 = (1/n)Σ(x−m)², m4 = (1/n)Σ(x−m)⁴.
-  const m2 = sum2.sub(sum.mul(sum).div(count)).div(count);
-  const m4 = sum4
-    .sub(m.mul(sum3).mul(4))
-    .add(m.mul(m).mul(sum2).mul(6))
-    .sub(m.mul(m).mul(m).mul(sum).mul(4))
-    .add(m.mul(m).mul(m).mul(m).mul(count))
-    .div(count);
+  const m2 = moments.m2.div(n);
+  const m4 = moments.m4.div(n);
   // Non-excess kurtosis β₂ = m4 / m2² (a normal distribution gives 3).
   return m4.div(m2.mul(m2));
 }
 
 export function skewness(values: Iterable<number>): number {
-  let sum = 0;
-  let sum2 = 0;
-  let sum3 = 0;
-  let count = 0;
-  for (const op of values) {
-    const v = op;
-    if (!Number.isFinite(v)) return NaN;
-    sum += v;
-    sum2 += v * v;
-    sum3 += v * v * v;
-    count++;
-  }
-  if (count === 0) return NaN;
-  const n = count;
-  const m = sum / n;
+  const moments = centralMoments(values);
+  if (moments === undefined) return NaN;
+  const { n } = moments;
   // Central moments: m2 = (1/n)Σ(x−m)², m3 = (1/n)Σ(x−m)³.
-  const m2 = (sum2 - (sum * sum) / n) / n;
-  const m3 = (sum3 - 3 * m * sum2 + 3 * m * m * sum - n * m * m * m) / n;
+  const m2 = moments.m2 / n;
+  const m3 = moments.m3 / n;
   // Moment coefficient of skewness g₁ = m3 / m2^(3/2).
   return m3 / Math.pow(m2, 3 / 2);
 }
 
 export function bigSkewness(values: Iterable<BigDecimal>): BigDecimal {
-  let sum = BigDecimal.ZERO;
-  let sum2 = BigDecimal.ZERO;
-  let sum3 = BigDecimal.ZERO;
-  let count = 0;
-  for (const op of values) {
-    const v = op;
-    if (!v.isFinite()) return BigDecimal.NAN;
-    sum = sum.add(v);
-    sum2 = sum2.add(v.mul(v));
-    sum3 = sum3.add(v.mul(v).mul(v));
-    count++;
-  }
-  if (count === 0) return BigDecimal.NAN;
-  const m = sum.div(count); // mean
+  const moments = bigCentralMoments(values);
+  if (moments === undefined) return BigDecimal.NAN;
+  const { n } = moments;
   // Central moments: m2 = (1/n)Σ(x−m)², m3 = (1/n)Σ(x−m)³.
-  const m2 = sum2.sub(sum.mul(sum).div(count)).div(count);
-  const m3 = sum3
-    .sub(m.mul(sum2).mul(3))
-    .add(m.mul(m).mul(sum).mul(3))
-    .sub(m.mul(m).mul(m).mul(count))
-    .div(count);
+  const m2 = moments.m2.div(n);
+  const m3 = moments.m3.div(n);
   // Moment coefficient of skewness g₁ = m3 / m2^(3/2) = m3 / (m2·√m2).
   return m3.div(m2.mul(m2.sqrt()));
 }

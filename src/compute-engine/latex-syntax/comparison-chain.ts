@@ -180,7 +180,8 @@ export function isComparisonChainLink(expr: MathJsonExpression): boolean {
  * Maximal runs of the same operator become one n-ary comparison. A run of
  * `NotEqual` stays n-ary too: the canonical form of an n-ary `NotEqual`
  * compares the adjacent pairs only (`a \ne b \ne c` is
- * `a \ne b \land b \ne c`). A negated link is always a pair.
+ * `a \ne b \land b \ne c`; it stays n-ary when `b` is impure, so that `b`
+ * is evaluated once). A negated link is always a pair.
  */
 export function chainComparison(
   op: string,

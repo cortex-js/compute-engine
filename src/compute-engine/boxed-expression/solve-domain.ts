@@ -1556,6 +1556,12 @@ function classifyPredicate(ceq: Expression): {
   predBody: Expression;
   isEquation: boolean;
 } {
+  // A chain `a = b = c` has no single residual: `a - b` drops the link
+  // `b = c`. It is a predicate, tested against `True` at each candidate. Thus
+  // a domain that cannot be enumerated gives no answer: `Solve(x² = 4 =
+  // x + 2, x ∈ [-10, 10])` stays unevaluated, although its solution is `2`.
+  if (isFunction(ceq, 'Equal') && ceq.nops > 2)
+    return { predBody: ceq, isEquation: false };
   if (isFunction(ceq, 'Equal'))
     return { predBody: ceq.op1.sub(ceq.op2), isEquation: true };
   // A `broadcastable<boolean>` expression is a predicate as well

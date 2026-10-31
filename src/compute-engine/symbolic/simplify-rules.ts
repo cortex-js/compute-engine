@@ -145,8 +145,11 @@ const ODD_SPECIAL_FUNCTIONS = new Set([
  *     guarded by an `isSame` re-fire check.
  *   - Congruent rule (`Mod(...).simplify()` ×2 and the outer `Equal`): operands
  *     are the congruence arguments/modulus, never the Congruent itself.
- *   - `simplifyRelationalOperator` (`expr.op1/op2.simplify()`): each side of the
- *     relation is a proper sub-expression.
+ *   - `simplifyRelationalOperator` (`expr.op1/op2.simplify()`, and
+ *     `op.simplify()` for each operand of a chain of three or more operands):
+ *     each side of the relation, and each operand of a chain, is a proper
+ *     sub-expression. The chain step returns no step when no operand
+ *     changed (an `isSame` check of each operand), so it does not re-fire.
  *   - `simplifySystemOfEquations` (`x.simplify()` per element): each list
  *     element is a proper sub-expression; guarded by an `isSame` re-fire check.
  *   - `simplifySum` / `simplifyProduct` (`symbolic/simplify-sum.ts`,
@@ -1510,6 +1513,25 @@ function simplifyRelationalOperator(expr: Expression): RuleStep | undefined {
   //
 
   if (!isFunction(expr)) return undefined;
+  // A chain of three or more operands (`x < z < y`) only gets its operands
+  // simplified: the steps below read the first two operands only, and they
+  // dropped the others (`Less(x, z, y)` became `Less(x, z)`).
+  // A chain of number literals is decided by `evaluate()`, as a relation of
+  // two numbers is below.
+  // Sanctioned `.simplify()` (see the file header note): each operand of the
+  // chain is a proper sub-expression.
+  if (expr.nops !== 2) {
+    const chainOps = expr.ops;
+    const ops = chainOps.map((op) => op.simplify());
+    const chain = ce._fn(h, ops);
+    if (ops.every((op) => isNumber(op))) {
+      const value = chain.evaluate();
+      if (isSymbol(value, 'True') || isSymbol(value, 'False'))
+        return { value, because: 'relation of numbers' };
+    }
+    if (ops.every((op, i) => op.isSame(chainOps[i]))) return undefined;
+    return { value: chain, because: 'simplify-relational-operator' };
+  }
   // Sanctioned `.simplify()` (see the file header note): each side of the
   // relation is a proper sub-expression, so this terminates by induction.
   const op1 = expr.op1.simplify();

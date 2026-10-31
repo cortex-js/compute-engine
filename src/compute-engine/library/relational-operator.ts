@@ -522,12 +522,23 @@ const CHAIN_PAIR_IS_FALSE = {
       return eq(a, b) === false;
     },
   NotEqual:
-    (_ce: ComputeEngine, numericApproximation: boolean | undefined) =>
+    (ce: ComputeEngine, numericApproximation: boolean | undefined) =>
     (
       a: Expression,
       b: Expression,
       written: readonly [Expression, Expression]
     ) => {
+      // The absence rules of the binary `NotEqual` come first, as in
+      // `decideNotEqual`: a pair with `Missing` is `Missing` and a pair with
+      // `NaN` is `True`, so neither is a `False` pair, also when the two
+      // values are the same (`Missing.isEqual(Missing)` is true).
+      const vals = readComparisonAbsence(ce, [a, b]);
+      if (
+        vals.some(
+          (v) => isSymbol(v, 'Missing') || (isNumber(v) && v.isNaN === true)
+        )
+      )
+        return false;
       const k = kindEqual(
         a,
         b,
@@ -1030,6 +1041,27 @@ function decideNotEqual(
   if (!Array.isArray(chain)) return chain;
   const ops = chain;
   if (ops.length < 2) return ce.False;
+  // A chain of three or more operands is the conjunction of its adjacent
+  // pairs (the canonical form keeps it n-ary only when a middle operand is
+  // impure, see `canonicalComparisonChain`). The operands are already
+  // evaluated, once each, so decide each pair as a binary `NotEqual` over
+  // the values and join the verdicts with `And`. This gives the value of
+  // the `And` of pairs, with the NaN, `Missing` and inert rules of each pair.
+  if (ops.length > 2) {
+    const pairs = ops
+      .slice(1)
+      .map(
+        (v, i) =>
+          decideNotEqual(
+            ce,
+            [rawOps[i], rawOps[i + 1]],
+            [ops[i], v],
+            numericApproximation
+          ) ?? ce._fn('NotEqual', [ops[i], v])
+      );
+    if (pairs.some((p) => isSymbol(p, 'False'))) return ce.False;
+    return ce._fn('And', pairs).evaluate({ numericApproximation });
+  }
   // Broadcast over a list operand that only appeared after evaluation (e.g.
   // `R^2` with `R = [1,2,3]`), matching `Equal` and the literal-list form;
   // list-vs-scalar only (see `Equal`'s handler for why 2+ collections stay
@@ -1370,6 +1402,10 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       if (prover === false) return undefined;
       if (a.operator !== b.operator) return undefined;
       if (!isFunction(a) || !isFunction(b)) return undefined;
+      // A chain of three or more operands is not one equation: the test
+      // below reads only the first two operands, so `Equal(x, y, 1)` and
+      // `Equal(x, y, 2)` would be equivalent.
+      if (a.nops !== 2 || b.nops !== 2) return undefined;
 
       const ce = a.engine;
 
@@ -1580,7 +1616,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     wikidata: 'Q28113351',
     complexity: 11000,
 
-    signature: '(any, any) -> boolean',
+    // Three or more operands when a middle operand is impure (see the
+    // `canonical` handler).
+    signature: '(any, any*) -> boolean',
 
     // Kleene over the `Missing` symbol, IEEE over `NaN` (§3.D, family coherence
     // with `Equal`, amended 2026-07-24): `NotEqual(Missing, x) = Missing`;
@@ -1601,8 +1639,8 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
     broadcastExemptions: ['whole-collection-compare'],
 
     // `lazy` like `Equal`. The `canonical` handler makes the n-ary
-    // `a ≠ b ≠ c` the conjunction `And(a ≠ b, b ≠ c)` (see
-    // `canonicalComparisonChain`).
+    // `a ≠ b ≠ c` the conjunction `And(a ≠ b, b ≠ c)` when `b` is pure, and
+    // keeps it n-ary otherwise (see `canonicalComparisonChain`).
     lazy: true,
 
     canonical: (args, { engine: ce }) =>
@@ -1615,6 +1653,9 @@ export const RELOP_LIBRARY: SymbolDefinitions = {
       if (prover === false) return undefined;
       if (a.operator !== b.operator) return undefined;
       if (!isFunction(a) || !isFunction(b)) return undefined;
+      // A chain of three or more operands is not symmetric: the swap test
+      // below reads only the first two operands.
+      if (a.nops !== 2 || b.nops !== 2) return undefined;
       // Equality is commutative.
       // Comparing two relations asks whether they express the same condition:
       // an identity question in their free variables, hence the prover tier
@@ -2750,8 +2791,20 @@ function canonicalComparisonChain(
 
   // `NotEqual` is not transitive: `a ≠ b ≠ c` means `a ≠ b ∧ b ≠ c`
   // (adjacent pairs), NOT the n-ary "all distinct". Decompose it into an
-  // `And` of its adjacent pairs.
-  if (operator === 'NotEqual' && terms.length > 2)
+  // `And` of its adjacent pairs, when every middle operand is pure. A middle
+  // operand is in two pairs, so the `And` holds it twice and evaluates it
+  // twice: `NotEqual(1, Random(), 2)` drew two values and compared `1 ≠ r₀`
+  // and `r₁ ≠ 2`. Thus a chain with an impure middle operand stays n-ary,
+  // and its evaluation (`decideNotEqual`) evaluates each operand once, from
+  // left to right, and decides the adjacent pairs. The test follows the
+  // values that a middle operand reads (`isTransitivelyPure`): a symbol whose
+  // stored value is `Random()` is pure to `isPure`, but each read of it
+  // draws.
+  if (
+    operator === 'NotEqual' &&
+    terms.length > 2 &&
+    terms.slice(1, -1).every((t) => isTransitivelyPure(t))
+  )
     return ce.function(
       'And',
       terms.slice(1).map((t, i) => buildComparison(ce, operator, [terms[i], t]))

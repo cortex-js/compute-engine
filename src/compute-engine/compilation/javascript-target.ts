@@ -31,6 +31,7 @@ import {
   isCallerMapped,
   isOpaqueVarsSource,
   varsObjectSpelling,
+  type CseHarvestOptions,
 } from './cse.js';
 import { javascriptStatements } from './javascript-statements.js';
 import { compileNumericSelection } from './javascript-selection-fusion.js';
@@ -85,6 +86,8 @@ import { Complex } from 'complex.js';
 import { realPowerReconstructionDigits } from '../numerics/real-power.js';
 import { logSpaceProduct } from '../symbolic/log-space-product.js';
 import { isTransitivelyPure } from '../boxed-expression/transitive-purity.js';
+import { operandMayBeAbsent } from './compile-absence.js';
+import { reachesCallerCodeOn } from './compile-folding.js';
 import {
   tryGetConstant,
   negativeBaseRealPow,
@@ -119,6 +122,7 @@ import {
 } from '../../common/type/subtype.js';
 import {
   isBroadcastablePointType,
+  isCollectionShaped,
   isNestedPointCollectionType,
   isTupleOrTupleUnionShapedType,
   leafwardElementType,
@@ -1605,6 +1609,49 @@ function compileJSEquality(
   const guardedPair = (i: number, j: number): boolean =>
     mayReadUndefinedJS(args[i], direct[i], target) &&
     mayReadUndefinedJS(args[j], direct[j], target);
+  // The pairs of a chain are joined with `&&`, so a compiled pair that is
+  // `false` stops the evaluation of the operands after it. That is the
+  // interpreter's order only when the pair is also `False` in the
+  // interpreter (`evaluateChainOperands` in `library/relational-operator.ts`).
+  // An `Equal` pair with an absent operand is `false` in compiled code, but
+  // the interpreter reads `Missing` there, which is not `False`, and it goes
+  // on to evaluate the later operands. So `Equal(a, b, Random())` with `a`
+  // absent drew once in the interpreter and did not draw in compiled code.
+  // Such a chain does not compile when an impure operand comes after a pair
+  // that may read an absent operand. (A `NotEqual` pair with an absent
+  // operand is `true` in compiled code, so its chain goes on as the
+  // interpreter does.)
+  // An operand is impure when it, or a value that it reads, has an effect
+  // (`isTransitivelyPure`): a symbol whose stored value is `Random()` is pure
+  // to `isPure`, but its compiled code draws at each place it is spliced.
+  // An operand that runs code the caller supplied (a `vars` entry
+  // `W: 'nextValue()'`, a head mapped through `functions`) is impure too,
+  // also when it is a bare symbol: that code can count its calls or draw a
+  // number (`reachesCallerCodeOn`).
+  const impure = args.map(
+    (a) => !isTransitivelyPure(a) || reachesCallerCodeOn(a, target)
+  );
+  if (kind === 'Equal' && args.length > 2) {
+    // A `false` pair skips every later operand, so each pair before the
+    // LAST impure operand counts (`Equal(Random(), a, Random())` with `a`
+    // absent skips the second draw).
+    const lastImpure = impure.lastIndexOf(true);
+    // The test reads the TYPE (a `missing` option, `operandMayBeAbsent`),
+    // not `mayReadUndefinedJS`, which also counts `True` and a comparison
+    // operand: that answer is safe for the choice of a type test, but here
+    // it would decline `Equal(True, True, Less(Random(), 0.5))`. An input
+    // that the caller leaves out (`c: boolean` not supplied) does not reach
+    // this code: the comparison absence guard compiles such a chain as the
+    // Kleene `And` of its pairs, which evaluates the later pairs when a pair
+    // reads `undefined`, as the interpreter does.
+    for (let j = 1; j < lastImpure; j++)
+      if (operandMayBeAbsent(args[j - 1]) || operandMayBeAbsent(args[j]))
+        throw new Error(
+          'Could not compile `Equal`: a chained comparison with an operand ' +
+            'that may be absent before an operand with an effect. The ' +
+            'interpreter evaluates it instead.'
+        );
+  }
   // An IMPURE operand (the Random family) must be evaluated exactly once — the
   // interpreter evaluates each operand once. Three positions splice an operand
   // MORE than once: the LEFT operand of a guarded pair appears in the absence
@@ -1630,11 +1677,25 @@ function compileJSEquality(
   const conditionallySpliced = (i: number): boolean =>
     i >= 1 && guardedPair(i - 1, i);
   const bind = args.some(
-    (a, i) => a.isPure === false && (multiSpliced(i) || conditionallySpliced(i))
+    (_a, i) => impure[i] && (multiSpliced(i) || conditionallySpliced(i))
   );
+  // Caller code can also write a value that an earlier operand reads (a
+  // global read by `y + 1` in `Equal(0, y + 1, W)`). A pair after the
+  // binding of `W` reads the earlier operand there, after `W` has run,
+  // where the interpreter has its value from before. So every earlier
+  // operand that is not a literal or a constant is bound too, in operand
+  // order, and the pairs read its temporary.
+  const lastCallerCode = bind
+    ? args.map((a) => reachesCallerCodeOn(a, target)).lastIndexOf(true)
+    : -1;
+  const capture = (a: Expression, i: number): boolean =>
+    i < lastCallerCode &&
+    !isNumber(a) &&
+    !isString(a) &&
+    !(isSymbol(a) && a.isConstant);
   const bindings: string[] = [];
   const codes = args.map((a, i) => {
-    if (!bind || a.isPure !== false) return undefined;
+    if (!bind || !(impure[i] || capture(a, i))) return undefined;
     const t = BaseCompiler.tempVar(target);
     bindings.push(`${t} = ${direct[i]}`);
     return t;
@@ -1666,6 +1727,31 @@ function compileJSEquality(
     }
     return `((${code(i)}) ${kind === 'Equal' ? '===' : '!=='} (${code(j)}))`;
   };
+  // A chain (three or more operands) with bound operands binds each one at
+  // the first pair that reads it, and joins the pairs with `&&`. The
+  // interpreter evaluates the operands from left to right and stops at the
+  // first pair that is `False` (`evaluateChainOperands` in
+  // `library/relational-operator.ts`), so an operand after that pair is not
+  // evaluated and does not draw. A single scope that binds all the operands
+  // before the first pair drew them all: `Equal(0.1, Random(), 0.9,
+  // Random())` drew twice, and the interpreter draws once. A compiled pair
+  // that is `false` is also `False` in the interpreter here: an `Equal`
+  // chain with an absent operand before an impure one does not compile (see
+  // above), and a `NotEqual` pair is `false` only for two present, equal
+  // operands.
+  if (args.length > 2 && bindings.length > 0) {
+    const link = (i: number): string => {
+      const rest = i + 1 < args.length ? ` && ${link(i + 1)}` : '';
+      const e = `${pair(i - 1, i)}${rest}`;
+      return codes[i] === undefined
+        ? e
+        : `((${codes[i]}) => ${e})(${direct[i]})`;
+    };
+    const chain = `(${link(1)})`;
+    return codes[0] === undefined
+      ? chain
+      : `((${codes[0]}) => ${chain})(${direct[0]})`;
+  }
   let body: string;
   if (args.length === 2) body = pair(0, 1);
   else {
@@ -1848,6 +1934,35 @@ function compileJSCollectionBoolean(
     // to reproduce that here, and it cannot occur without a collection operand
     // having diverted us in the first place.
   } else if (args.every(admitsRuntimeBroadcast)) {
+    // The interpreter reads a chained ordering element-wise only when an
+    // operand is a collection by its TYPE (`isCollectionShaped`). Otherwise
+    // (an operand of unknown type) it evaluates the operands in order and
+    // stops at the first pair that is `False` (`evaluateChainOperands` in
+    // `library/relational-operator.ts`). `_SYS.bcast` evaluates every
+    // operand before any pair, so an operand at index 2 or later with an
+    // effect (`Random()`, caller code such as `functions: { f: '_.f' }`)
+    // would run when the interpreter does not run it: `Less(y, 0, f(y))`
+    // at `y = 1` called `f` once in the broadcast and never in the
+    // interpreter. Such a chain is lowered lazily (`lazyChain` below).
+    // A call of a head that the caller mapped through `functions` and
+    // declared pure (`isPureOverriddenOperator`) has no effect in the
+    // compiled code, although the engine does not know the head and counts
+    // the call as impure: it takes the eager broadcast.
+    const pureMapped = (target.cse?.harvestOptions as CseHarvestOptions)
+      ?.isPureOverriddenOperator;
+    const hasEffect = (a: Expression): boolean =>
+      reachesCallerCodeOn(a, target) ||
+      (!isTransitivelyPure(a) &&
+        !(
+          isFunction(a) &&
+          pureMapped?.(a.operator) === true &&
+          a.ops.every((op) => isTransitivelyPure(op))
+        ));
+    const lazyChain =
+      kind in JS_ORDERING_OPERATORS &&
+      args.length > 2 &&
+      !args.some(isCollectionShaped) &&
+      args.some((a, i) => i >= 2 && hasEffect(a));
     // Bind one element parameter per operand and build the scalar body from
     // them. A chained ordering becomes ONE closure over all the operands
     // (`(a < b) && (b < c)`), which also evaluates each operand exactly once —
@@ -1862,17 +1977,6 @@ function compileJSCollectionBoolean(
     const realness =
       kind in JS_ORDERING_OPERATORS &&
       args.some((a) => BaseCompiler.isComplexValued(a));
-    const scalarBody = BaseCompiler.guardConnectiveAbsence(
-      kind,
-      params,
-      realness
-        ? `(${params.map((p) => `_SYS.cisreal(${p})`).join(' && ')} ? ` +
-            `${compileScalarBooleanBody(
-              kind,
-              params.map((p) => `_SYS.creal(${p})`)
-            )} : false)`
-        : compileScalarBooleanBody(kind, params)
-    );
     // An operand of unknown type that may be absent (`g(x)[5]` with
     // `g := t ↦ [t, 2t]` and `x: any`, typed `missing | unknown`) spells its
     // absent value `undefined`, and an ordering on it is absent, as the
@@ -1886,14 +1990,29 @@ function compileJSCollectionBoolean(
     const absentCells = args.map(
       (a) => topTypeBesideAbsence(jsType(a)) !== undefined
     );
-    const body =
-      kind in JS_ORDERING_OPERATORS && absentCells.some((c) => c)
-        ? `((${params
-            .filter((_p, i) => absentCells[i])
+    // The closure body over the parameters `ps`, which stand for the
+    // operands at `idx` (all of them, or one pair of the lazy chain below).
+    const bodyOf = (ps: string[], idx: number[]): string => {
+      const scalarBody = BaseCompiler.guardConnectiveAbsence(
+        kind,
+        ps,
+        realness
+          ? `(${ps.map((p) => `_SYS.cisreal(${p})`).join(' && ')} ? ` +
+              `${compileScalarBooleanBody(
+                kind,
+                ps.map((p) => `_SYS.creal(${p})`)
+              )} : false)`
+          : compileScalarBooleanBody(kind, ps)
+      );
+      return kind in JS_ORDERING_OPERATORS && idx.some((i) => absentCells[i])
+        ? `((${ps
+            .filter((_p, k) => absentCells[idx[k]])
             .map((p) => `${p} === undefined`)
             .join(' || ')}) ? undefined : ${scalarBody})`
         : scalarBody;
-    const operands = args.map((a, i) => `(${compile(a, i)})`).join(', ');
+    };
+    const all = args.map((_a, i) => i);
+    const body = bodyOf(params, all);
     // A connective reads an absent operand in its closure
     // (`guardConnectiveAbsence`): a decisive operand wins over it,
     // `And(absent, false)` is `false`. `_SYS.bcast` would make the result
@@ -1903,7 +2022,34 @@ function compileJSCollectionBoolean(
       kind === 'And' || kind === 'Or' || kind === 'Not'
         ? '_SYS.bcastPlain'
         : '_SYS.bcast';
-    return `${helper}((${params.join(', ')}) => ${body}, ${operands})`;
+    if (!lazyChain) {
+      const operands = args.map((a, i) => `(${compile(a, i)})`).join(', ');
+      return `${helper}((${params.join(', ')}) => ${body}, ${operands})`;
+    }
+    // The lazy chain: operand `i` is bound, then the pair `(i−1, i)` is
+    // decided by the same broadcast over the two values, and the chain is
+    // `false` when that pair is `false`, before operand `i+1` is
+    // evaluated. A pair whose value is an array, or `undefined` (an absent
+    // operand), does not stop the chain, as a pair that is not `False` does
+    // not stop the interpreter. After the last pair, the value is the
+    // broadcast over all the bound values, as before:
+    // `((t0) => ((t1) => bcast(pair, t0, t1) === false ? false :
+    // ((t2) => … bcast(all, t0, t1, t2))(c))(b))(a)`.
+    const temps = args.map(() => BaseCompiler.tempVar(target));
+    const codes = args.map((a, i) => compile(a, i));
+    const pairFalse = (i: number): string =>
+      `${helper}((${params[i - 1]}, ${params[i]}) => ` +
+      `${bodyOf([params[i - 1], params[i]], [i - 1, i])}, ` +
+      `${temps[i - 1]}, ${temps[i]}) === false`;
+    const scope = (i: number): string => {
+      const rest =
+        i + 1 < args.length
+          ? scope(i + 1)
+          : `${helper}((${params.join(', ')}) => ${body}, ${temps.join(', ')})`;
+      const inner = i === 0 ? rest : `(${pairFalse(i)} ? false : ${rest})`;
+      return target.bindExpr!([[temps[i], codes[i]]], inner);
+    };
+    return scope(0);
   }
   throw new Error(
     `Could not compile \`${kind}\`: a comparison or logical connective over an ` +
@@ -4237,6 +4383,25 @@ const JS_REAL_ONLY_LOWERINGS: ReadonlySet<string> = new Set([
   'DirichletBeta',
   'StieltjesGamma',
   'ClausenCl',
+  // These function-codegen lowerings call kernels that take plain numbers:
+  // `_SYS.binomial` (for `Binomial` and `Choose`), `_SYS.agm`,
+  // `_SYS.ellipticF`, the two `_SYS.ellipticPi…` kernels and
+  // `_SYS.hypergeometric1F1`, and the `Degrees` lowering multiplies its
+  // operand by `Math.PI / 180`. A `{re, im}` operand gave a wrong value:
+  // `Binomial(a, √x)` at `a = 3, x = 4` was 0 (the interpreter gives 3),
+  // `AGM(√x)` was `Infinity`, and `Degrees(√x)`, `EllipticF(a, √x)` and
+  // `Hypergeometric1F1(a, a, √x)` were NaN at `x = 4`. As real-only
+  // lowerings they take the run-time realness rule: the kernel runs on the
+  // real part when the imaginary part is exactly zero, and the value is NaN
+  // otherwise. (The two-operand `EllipticE` takes the same rule in its own
+  // lowering: its one-operand form has a complex kernel.)
+  'Binomial',
+  'Choose',
+  'AGM',
+  'Degrees',
+  'EllipticF',
+  'EllipticPi',
+  'Hypergeometric1F1',
 ]);
 
 /**
@@ -9288,17 +9453,43 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       target,
       () => `_SYS.ellipticK(${compile(args[0])})`
     ),
-  EllipticE: (args, compile, target) =>
-    args.length === 2
-      ? `_SYS.ellipticEIncomplete(${compile(args[0])}, ${compile(args[1])})`
-      : continuationCall(
-          'EllipticE',
-          '_SYS.cellipticE',
-          args,
-          compile,
-          target,
-          () => `_SYS.ellipticE(${compile(args[0])})`
-        ),
+  EllipticE: (args, compile, target) => {
+    if (args.length !== 2)
+      return continuationCall(
+        'EllipticE',
+        '_SYS.cellipticE',
+        args,
+        compile,
+        target,
+        () => `_SYS.ellipticE(${compile(args[0])})`
+      );
+    // The incomplete E(φ | m) has a real kernel only. An operand on the
+    // complex lane (`EllipticE(a, √x)` with `x` real) takes the run-time
+    // realness rule of a real-only head: the kernel runs on the real parts
+    // when every imaginary part is exactly zero, and the value is NaN
+    // otherwise. The head cannot be declared real-only for the target,
+    // because its one-operand form has a complex kernel, so the rule is
+    // applied here. `isComplexValued` reads this head as complex when an
+    // operand is complex (it is a continuation head), so the guarded real
+    // value is lifted to `{ re, im: 0 }` to keep the value shape that the
+    // parent expects.
+    const incomplete = () =>
+      `_SYS.ellipticEIncomplete(${compile(args[0])}, ${compile(args[1])})`;
+    if (!args.some((x) => BaseCompiler.isComplexValued(x))) return incomplete();
+    const guarded = BaseCompiler.realOperandGuard(
+      args[0].engine,
+      'EllipticE',
+      args,
+      target,
+      incomplete,
+      'number'
+    );
+    if (guarded === undefined)
+      throw new Error(
+        'Could not compile `EllipticE`: the incomplete elliptic integral has a real-only lowering and cannot represent a complex-valued argument.'
+      );
+    return `({ re: ${guarded}, im: 0 })`;
+  },
   EllipticF: (args, compile) =>
     `_SYS.ellipticF(${compile(args[0])}, ${compile(args[1])})`,
   EllipticPi: (args, compile) =>
@@ -16699,7 +16890,8 @@ function compileIntegrate(
   // mismatch fails closed — see `BaseCompiler.integrandLambda`).
   const { lambdaVars, bodyExpr } = BaseCompiler.integrandLambda(
     args[0],
-    limits.map((l) => l.index)
+    limits.map((l) => l.index),
+    args.slice(1)
   );
 
   // Starting-panel count per level, sized by the nesting depth the TREE shows

@@ -2142,3 +2142,18 @@ describe('NDSolveFunction (interpolating-function result surface)', () => {
     expect(bad.operator).toBe('InterpolatingFunction');
   });
 });
+
+// `y' = y = 2x` is two equations. The solver reads one equation, so it
+// must not answer for the chain.
+describe('DSOLVE OF AN EQUALITY CHAIN', () => {
+  test('a chain is not solved as its first link', () => {
+    const y = ['y', 'x'];
+    expect(
+      dsolve(['Equal', ['D', y, 'x'], y, ['Multiply', 2, 'x']]).operator
+    ).toBe('DSolve');
+    expect(
+      dsolve(['List', ['Equal', ['D', y, 'x'], y], ['Equal', ['y', 0], 1, 2]])
+        .operator
+    ).toBe('DSolve');
+  });
+});

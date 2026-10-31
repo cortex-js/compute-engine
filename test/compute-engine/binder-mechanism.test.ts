@@ -2,6 +2,7 @@ import { ComputeEngine } from '../../src/compute-engine';
 // Stage 11 (§2.1) has no public surface: an activation exists only while its
 // call frame is pushed, so the pins below read the internal relation directly.
 import { sameBindingDef } from '../../src/compute-engine/boxed-expression/binders';
+import { compile } from '../../src/compile';
 
 /**
  * Pins for the binders migrated onto the sanctioned binder mechanism in
@@ -373,6 +374,113 @@ describe('Limit: all three canonical paths bind the variable uniformly', () => {
     ).toEqual('1');
     expect(ce.box(['Limit', body, 'x', 0]).evaluate().toString()).toEqual('1');
     expect(ce.box('x').evaluate().re).toEqual(5);
+  });
+
+  // The implicit form `Limit(expr, point)` does not write its variable. The
+  // variable comes from the symbols written in the body, assigned or not, so
+  // the order of boxing and assignment does not change it. Before, an
+  // assignment made before boxing removed `x` from the unknowns of the body,
+  // and `Limit(√x, a)` was the limit of the constant `√4 = 2`.
+  describe('the implicit variable ignores an assigned value', () => {
+    const make = () => {
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      ce.declare('a', 'real');
+      ce.declare('y', 'real');
+      return ce;
+    };
+    const assign = (ce: ComputeEngine) => {
+      ce.assign('x', 4);
+      ce.assign('a', 3);
+      ce.assign('y', 5);
+    };
+    const cases: [string, any, number][] = [
+      ['Limit(√x, a)', ['Limit', ['Sqrt', 'x'], 'a'], Math.sqrt(3)],
+      ['Limit(√x, a, 1)', ['Limit', ['Sqrt', 'x'], 'a', 1], Math.sqrt(3)],
+      ['NLimit(√x, a)', ['NLimit', ['Sqrt', 'x'], 'a'], Math.sqrt(3)],
+      // A parenthesized operand is the expression it holds.
+      ['Limit((√x), a)', ['Limit', ['Delimiter', ['Sqrt', 'x']], 'a'], Math.sqrt(3)],
+      [
+        'NLimit((√x), a)',
+        ['NLimit', ['Delimiter', ['Sqrt', 'x']], 'a'],
+        Math.sqrt(3),
+      ],
+      // Several symbols: `x` is the variable, `y` keeps its value.
+      ['Limit(x·y, a)', ['Limit', ['Multiply', 'x', 'y'], 'a'], 15],
+      // A constant is not a candidate.
+      ['Limit(π·x, a)', ['Limit', ['Multiply', 'Pi', 'x'], 'a'], 3 * Math.PI],
+      // The index of a `Sum` is bound in the body: not a candidate.
+      [
+        'Limit(Σ n^x, a)',
+        ['Limit', ['Sum', ['Power', 'n', 'x'], ['Limits', 'n', 1, 3]], 'a'],
+        36,
+      ],
+    ];
+    // `NLimit` has no compiled form: only the interpreter is checked for it.
+    const check = (e: ReturnType<ComputeEngine['box']>, expected: number) => {
+      expect(e.N().re).toBeCloseTo(expected, 10);
+      if (e.operator === 'Limit') {
+        const c = compile(e, { to: 'javascript' });
+        expect(c.success).toBe(true);
+        expect(c.run!({}) as number).toBeCloseTo(expected, 10);
+      }
+    };
+    for (const [label, json, expected] of cases) {
+      test(`${label}: assign, then box`, () => {
+        const ce = make();
+        assign(ce);
+        check(ce.box(json), expected);
+      });
+      test(`${label}: box, then assign`, () => {
+        const ce = make();
+        const e = ce.box(json);
+        assign(ce);
+        check(e, expected);
+      });
+    }
+
+    test('the exact value and the LaTeX parse', () => {
+      const ce = make();
+      assign(ce);
+      expect(ce.box(['Limit', ['Sqrt', 'x'], 'a']).evaluate().toString()).toBe(
+        'sqrt(3)'
+      );
+      const parsed = ce.parse('\\lim_{x\\to a}\\sqrt{x}');
+      expect(parsed.json).toEqual([
+        'Limit',
+        ['Function', ['Block', ['Sqrt', 'x']], 'x'],
+        'a',
+      ]);
+      expect(parsed.evaluate().toString()).toBe('sqrt(3)');
+    });
+
+    // Several symbols and none is `x`: the variable is the first in sorted
+    // order, `y`, whether `y` has a value at boxing or not. `z` stays free.
+    test('Limit(y·z, 2): the first symbol in sorted order, in both orders', () => {
+      const json = ['Limit', ['Multiply', 'y', 'z'], 2];
+      for (const assignFirst of [true, false]) {
+        const ce = new ComputeEngine();
+        if (assignFirst) ce.assign('y', 3);
+        const e = ce.box(json);
+        if (!assignFirst) ce.assign('y', 3);
+        expect(e.evaluate().toString()).toBe('2z');
+        const c = compile(e, { to: 'javascript' });
+        expect(c.success).toBe(true);
+        expect(c.run!({ z: 7 })).toBe(14);
+      }
+    });
+
+    // With nothing assigned, the variable is the first unknown in sorted
+    // order, as before this rule, also when `x` is one of the symbols:
+    // `Limit(a·x, 2)` is the limit as a → 2. The literal has `a` as its one
+    // parameter, and compiled code reads `x` as a free input.
+    test('Limit(a·x, 2) with nothing assigned keeps its variable', () => {
+      const ce = new ComputeEngine();
+      const e = ce.box(['Limit', ['Multiply', 'a', 'x'], 2]);
+      expect(e.evaluate().toString()).toBe('2x');
+      const c = compile(e, { to: 'javascript' });
+      expect(c.run!({ x: 7 })).toBe(14);
+    });
   });
 });
 

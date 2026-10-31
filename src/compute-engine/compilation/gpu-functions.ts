@@ -2,6 +2,7 @@
 // entries (At, Sum and Product, broadcast) that recurse through the table.
 
 import type { Expression } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
 import { isCallerMapped } from './cse.js';
 import {
   clearGPUCounters,
@@ -40,8 +41,13 @@ import {
   explicitBroadcastPointNorm,
   pointHasBroadcastComponent,
   type LoopInvariantBinding,
+  type MatchStatementClause,
 } from './base-compiler.js';
-import { resolveTypeAlias } from '../../common/type/utils.js';
+import {
+  resolveTypeAlias,
+  resolveTypeForCompiledLanes as resolveTypeForCompilation,
+  stripMissingFromType,
+} from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import { collectBinderNames } from '../boxed-expression/utils.js';
 import {
@@ -71,6 +77,7 @@ import {
   gpuResultIsComplexValued,
   gpuRgbBoundary,
   gpuTopLevelCall,
+  gpuTupleWithoutShaderType,
   gpuWidenToVector,
   isBroadcastPointNormOperand,
   markAggregateConsuming,
@@ -128,10 +135,14 @@ import {
   gpuStorageOperandSource,
   gpuWGSLInPlaceArray,
 } from './gpu-at.js';
+import { targetFoldValueImpure } from './compile-folding.js';
 import {
   gpuArmDrawsWhileBinding,
   gpuAssertBindingKeepsDrawOrder,
+  gpuAssertCallerCodeNotRepeated,
+  gpuAssertHoistKeepsCallerOrder,
   gpuOperandOnce,
+  gpuReachesCallerCode,
   gpuRecordBoundDraws,
 } from './gpu-draw-order.js';
 import { gpuDeclaredTypeOf, gpuTypeOfValue } from './gpu-declared-types.js';
@@ -143,11 +154,7 @@ import {
   gpuRealTanh,
   gpuReciprocalComplex,
 } from './gpu-nan-safe.js';
-import {
-  compileGpuLast,
-  compilePointSwizzle,
-  gpuSwizzle,
-} from './gpu-points.js';
+import { compilePointSwizzle, gpuSwizzle } from './gpu-points.js';
 import {
   compileGPUElementExtremum,
   compileGPUExtremum,
@@ -160,7 +167,10 @@ import {
   gpuArmIsCostlyForSelect,
   gpuArmSharesWork,
   gpuAssertNoAssignmentOperand,
+  gpuAssertNoEagerCallerCode,
   gpuAssertNoEagerDraw,
+  gpuHasEagerCallerCode,
+  gpuMatchSelectedPieces,
   gpuAssertSelectableArms,
   gpuCanPlaceStatement,
   gpuConditional,
@@ -295,8 +305,15 @@ export function compileGPUBroadcastUnary(
   // placeholder, so its own guard does not apply. Such a lowering declines
   // below. The vector is not bound to a temporary: a hoisted statement runs
   // before the rest of the expression, so its draw would come before the
-  // draws written before it, and the random stream would change.
-  const impure = operand.isPure === false && !/^[A-Za-z_]\w*$/.test(vector);
+  // draws written before it, and the random stream would change. Code that
+  // the caller supplied (`gpuReachesCallerCode`: `List(W, x, 1)` with
+  // `vars: { W: 'nextValue()' }`) can count its calls, so it must run once
+  // too, and it declines in the same way. The value of a symbol that reads
+  // an input is not emitted, so it is not read (`targetFoldValueImpure`).
+  const impure =
+    (targetFoldValueImpure(operand, target) ||
+      gpuReachesCallerCode(operand, target)) &&
+    !/^[A-Za-z_]\w*$/.test(vector);
   // The scalar lowering of `Square` reads the shape of its operand to choose
   // between `_gpu_pow2` and the `vecN` overload `_gpu_pow2_vN`. Here its
   // operand is a placeholder for the vector code, which has no shape, so the
@@ -346,9 +363,9 @@ export function compileGPUBroadcastUnary(
   // that the check accepts. The original code is emitted.
   if (impure && emitted.split(vector).length > 2)
     decline(
-      `the operand \`${operand.toString()}\` draws a random value, and the ` +
-        `lowering \`${code}\` uses it more than once, so each use would draw ` +
-        `again.`
+      `the operand \`${operand.toString()}\` draws a random value or contains ` +
+        `code supplied by the caller, and the lowering \`${code}\` uses it ` +
+        `more than once, so each use would run that code again.`
     );
   const unsafe = gpuIsComponentwise(
     judged.split(vector).join('_operand'),
@@ -361,6 +378,149 @@ export function compileGPUBroadcastUnary(
         `lowering cannot be broadcast over a \`vecN\` at all.`
     );
   return emitted;
+}
+
+/**
+ * `First`, `Second`, `Third` and `Last` on a shader target. Each one reads
+ * one element at a fixed position (1, 2, 3 or -1), so it compiles as `At`
+ * with that constant index (`compileGPUAt`). `At` knows the shader shape of
+ * the operand: a `vecN` element is a swizzle (`p.x`), an element of an array
+ * is a subscript (`P[0]` for a list of points `vec2[3]`, `L[6]` for a
+ * `float[7]`), and a position past the end is the NaN of an absent value, as
+ * in the interpreter (`Third` of a list of 2 points is `Missing`). A swizzle
+ * on the compiled operand is not correct for these shapes: `P.x` reads an
+ * array of `vec2` as one vector, and `p.z` reads a component that a `vec2`
+ * does not have, so the shader is not valid. An operand that `At` cannot
+ * index (a list of unknown length, a matrix) declines with the reason of
+ * `At`.
+ *
+ * An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
+ * the target. Every component of an absent value is NaN, so each element of
+ * it is that NaN (`gpuSwizzle`). `At` declines an absent base, so this case
+ * does not go to `At`.
+ */
+function compileGPUPositional(
+  head: 'First' | 'Second' | 'Third' | 'Last',
+  arg: Expression,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>
+): string {
+  if (
+    isSymbol(arg, 'Missing') ||
+    isSymbol(arg, 'Undefined') ||
+    gpuType(arg) === 'missing'
+  )
+    return gpuSwizzle(compile(arg), 'x');
+  const index = { First: 1, Second: 2, Third: 3, Last: -1 }[head];
+  // An operand that can be absent, of type `missing | tuple<real, real>`
+  // (`At(P, k)` with `P` a list of points and `k` an integer input). `At`
+  // reads the type with the `missing` arm and declines. The shader value of
+  // such an operand is a `vecN`: the guarded element helper gives a vector
+  // of NaN components for an absent point, and each element of an absent
+  // point is NaN in the interpreter (`First(Missing)` is NaN when the
+  // element domain is numeric). So an element at a position in the vector
+  // is a swizzle of it.
+  //
+  // A boolean vector (`bvec2`, `vec2<bool>`) is also read with a swizzle,
+  // because `At` reads only float components. An operand is a boolean
+  // vector when the caller declares it so (a uniform `bvec3 B` for
+  // `B: list<boolean^3>`), or when its type is a tuple of 2 to 4 booleans
+  // (`b: tuple<boolean, boolean>`): `If(First(b), 1, 0)` is `float(b.x)`.
+  // A boolean tuple that can be absent has no NaN to stand for the absent
+  // value, so it goes to `At`, which declines.
+  //
+  // For both, a position past the end (`Third` of a pair) has no component
+  // to read, and the operand can have a draw that a constant would drop, so
+  // it declines.
+  const t = gpuType(arg);
+  // The width of a tuple of 2 to 4 booleans, else `undefined`.
+  const booleanVectorWidth = (u: Type): number | undefined =>
+    typeof u !== 'string' &&
+    u.kind === 'tuple' &&
+    u.elements.length >= 2 &&
+    u.elements.length <= 4 &&
+    u.elements.every((el) => isSubtype(el.type, 'boolean'))
+      ? u.elements.length
+      : undefined;
+  let width: number | undefined;
+  // A name that the caller declared with a spelling this target does not
+  // read (`bool[2]`) has an entry with no `value`. It is not undeclared:
+  // the engine type does not tell its shader shape, so it goes to `At`,
+  // which declines with the reason of the declaration.
+  const declaredEntry = gpuDeclaredTypeOf(arg);
+  const declared = declaredEntry?.value;
+  if (
+    declared !== undefined &&
+    declared.element === 'b' &&
+    declared.width >= 2 &&
+    declared.width <= 4
+  )
+    width = declared.width;
+  // Only a symbol: a constructed boolean tuple (`Tuple(B, C)`) is emitted
+  // as a float vector (`vec2(B, C)`), not as a boolean vector.
+  else if (
+    declaredEntry === undefined &&
+    isSymbol(arg) &&
+    booleanVectorWidth(t) !== undefined
+  )
+    width = booleanVectorWidth(t);
+  // Only an `At` call (the guarded element helper) or a conditional with no
+  // arm for the absent case (`When`, `If` with no else branch, `Which`):
+  // their shader value is a `vecN` with NaN components when the point is
+  // absent. A free symbol or a function call of this type has no such value.
+  else if (
+    declaredEntry === undefined &&
+    (isFunction(arg, 'At') ||
+      isFunction(arg, 'When') ||
+      isFunction(arg, 'If') ||
+      isFunction(arg, 'Which')) &&
+    typeof t !== 'string' &&
+    t.kind === 'union' &&
+    t.types.includes('missing')
+  ) {
+    const present = resolveTypeForCompilation(
+      stripMissingFromType({
+        kind: 'union',
+        types: t.types.filter((arm) => arm !== 'missing'),
+      })
+    );
+    if (
+      typeof present !== 'string' &&
+      present.kind === 'tuple' &&
+      present.elements.length >= 2 &&
+      present.elements.length <= 4 &&
+      gpuTupleWithoutShaderType(present) === undefined &&
+      booleanVectorWidth(present) === undefined
+    )
+      width = present.elements.length;
+  }
+  if (width !== undefined) {
+    const position = index === -1 ? width : index;
+    if (position > width)
+      throw new Error(
+        `Could not compile \`${head}\`: the operand (type ` +
+          `\`${arg.type.toString()}\`) is a vector of ${width} ` +
+          `components, which has no element at the position ${position}.`
+      );
+    return gpuSwizzle(compile(arg), 'xyzw'[position - 1]);
+  }
+  try {
+    return compileGPUAt([arg, arg.engine.number(index)], compile, target);
+  } catch (err) {
+    // The decline of `At` names `At`. Give the name of the operator that
+    // the source has, and keep the reason.
+    if (
+      err instanceof Error &&
+      !(err instanceof CompileDeclineError) &&
+      err.message.startsWith('Could not compile `At`: ')
+    )
+      throw new Error(
+        `Could not compile \`${head}\` (read as \`At\` with the index ` +
+          `${index}): ` +
+          err.message.slice('Could not compile `At`: '.length)
+      );
+    throw err;
+  }
 }
 
 /**
@@ -813,6 +973,7 @@ function compileGPUAt(
       // it must not come before a draw written before the `At`.
       const draws = BaseCompiler.foldValueImpure(base);
       if (draws) gpuAssertBindingKeepsDrawOrder('At', [base], target);
+      gpuAssertHoistKeepsCallerOrder('At', [base], target);
       const name = BaseCompiler.tempVar(target);
       BaseCompiler.hoistStatement(target, `var ${name} = ${code};`);
       if (draws) gpuRecordBoundDraws([base], target);
@@ -1034,6 +1195,10 @@ function compileGPUSumProduct(
       const sink = target.hoist?.stmts;
       const declarationsAt = sink?.length ?? 0;
       const terms: string[] = [];
+      // How many terms stay in the expression and how many are computed in
+      // hoisted statements (checked after the loop).
+      let inlineTerms = 0;
+      let hoistedTerms = 0;
       // Statements a term hoists (a nested loop-form Sum with a symbolic bound)
       // are drained into the ENCLOSING sink: the index is substituted as a
       // literal in `var` below, so nothing a term emits refers to the bound name,
@@ -1076,9 +1241,11 @@ function compileGPUSumProduct(
           clearGPUCounters(innerTarget);
         }
         if (termSink.stmts.length === 0) {
+          inlineTerms += 1;
           terms.push(`(${code})`);
           continue;
         }
+        hoistedTerms += 1;
         // The sink is non-empty only when `canHoist(target)` held above.
         //
         // A term whose value is already a bare name — a block term stores its
@@ -1089,6 +1256,7 @@ function compileGPUSumProduct(
         // `Sum`.
         if (BaseCompiler.foldValueImpure(args[0]))
           gpuAssertBindingKeepsDrawOrder(kind, [args[0]], target);
+        gpuAssertHoistKeepsCallerOrder(kind, [args[0]], target);
         if (/^[A-Za-z_$][\w$]*$/.test(code)) {
           BaseCompiler.hoistStatement(target, ...termSink.stmts);
           if (BaseCompiler.foldValueImpure(args[0]))
@@ -1107,6 +1275,22 @@ function compileGPUSumProduct(
           gpuRecordBoundDraws([args[0]], target);
         terms.push(`(${tv})`);
       }
+      // The statements of a hoisted term run ahead of the whole expression,
+      // so with some terms hoisted and others inline, the caller code of a
+      // later hoisted term would run before that of an earlier inline term.
+      // When every term hoists, the terms run in order.
+      if (
+        inlineTerms > 0 &&
+        hoistedTerms > 0 &&
+        gpuReachesCallerCode(args[0], target)
+      )
+        throw new Error(
+          `Could not compile \`${kind}\`: some unrolled terms are computed in ` +
+            'statements ahead of the expression and others stay in it, and ' +
+            'code supplied by the caller (a `vars` source, a `functions` or ' +
+            '`operators` entry, or a `compile` handler) in the terms would ' +
+            'then run out of the order of the interpreter.'
+        );
       const result = `(${terms.reduce((a, b) => combine(a, b))})`;
       if (sink !== undefined && invariants.length > 0)
         sink.splice(
@@ -1328,6 +1512,9 @@ function compileGPUSumProduct(
     // must not come before a draw written before the `Sum`.
     if (BaseCompiler.foldValueImpure(args[0]))
       gpuAssertBindingKeepsDrawOrder(kind, [args[0]], target);
+    // The bounds and the body run in the loop statement, so caller code in
+    // any of them must not move ahead of earlier code with an effect.
+    gpuAssertHoistKeepsCallerOrder(kind, args, target);
     BaseCompiler.hoistStatement(target, loop.join('\n'));
     if (BaseCompiler.foldValueImpure(args[0]))
       gpuRecordBoundDraws([args[0]], target);
@@ -1611,15 +1798,23 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     return `exp(${compile(args[0])})`;
   },
   Exp2: 'exp2',
-  // Component access — assumes the argument compiles to a vec2/vec3/vec4
-  // (the common case for 2D/3D points). For 5+-element tuples that compile
-  // to `float[N]` arrays, swizzle access is invalid GLSL and the shader
-  // will fail to compile; that's an edge case `First`/`Second`/`Third`
-  // aren't designed for. Vec swizzles are identical between GLSL and WGSL.
-  First: (args, compile) => gpuSwizzle(compile(args[0]), 'x'),
-  Second: (args, compile) => gpuSwizzle(compile(args[0]), 'y'),
-  Third: (args, compile) => gpuSwizzle(compile(args[0]), 'z'),
-  Last: (args, compile) => compileGpuLast(args[0], compile),
+  // Positional access at a fixed position: `At` with a constant index, which
+  // reads a `vecN` with a swizzle and an array (a list of points, a list of
+  // 5 or more numbers) with a subscript. See `compileGPUPositional`. Like
+  // `At`, these lowerings index INTO their operand, so they are declared
+  // aggregate-consuming.
+  First: markAggregateConsuming((args, compile, target) =>
+    compileGPUPositional('First', args[0], compile, target)
+  ),
+  Second: markAggregateConsuming((args, compile, target) =>
+    compileGPUPositional('Second', args[0], compile, target)
+  ),
+  Third: markAggregateConsuming((args, compile, target) =>
+    compileGPUPositional('Third', args[0], compile, target)
+  ),
+  Last: markAggregateConsuming((args, compile, target) =>
+    compileGPUPositional('Last', args[0], compile, target)
+  ),
   // Point-coordinate accessors. On the GPU a point is a `vec2`/`vec3`/`vec4`,
   // so a single point maps to the same swizzle as First/Second/Third. A list of
   // points is not a GPU value: emitting a swizzle on it produces invalid shader
@@ -1748,7 +1943,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // An arm that needs statements, or that repeats a subexpression a
     // ternary would expand once per occurrence, takes the statement form;
     // the clause list is in `Which` shape, so its position 3 is the `If`
-    // node's operand 2.
+    // node's operand 2. On WGSL, an arm with caller code takes it too, as
+    // `select` would compute that arm when it is not taken
+    // (`gpuHasEagerCallerCode`).
     if (
       gpuNeedsStatements(args[1]) ||
       gpuNeedsStatements(args[2]) ||
@@ -1758,7 +1955,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           gpuArmIsCostlyForSelect(args[1], target) ||
           gpuArmIsCostlyForSelect(args[2], target) ||
           gpuArmDrawsWhileBinding(args[1]) ||
-          gpuArmDrawsWhileBinding(args[2])))
+          gpuArmDrawsWhileBinding(args[2]) ||
+          gpuHasEagerCallerCode([args[1], args[2]], target)))
     ) {
       const statement = compileGPUStatementSelection(
         [args[0], args[1], args[0].engine.True, args[2]],
@@ -1782,12 +1980,13 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // The condition is evaluated unconditionally, so it may hoist; the two arms
     // are selected and must not (see `compileGPUConditionalArm`). Operand
     // indices preserve their CSE regions, allowing reuse of outer bindings.
-    return gpuConditional(
-      compile(args[0], 0),
-      compileGPUConditionalArm('If', () => arm(1), target),
-      compileGPUConditionalArm('If', () => arm(2), target),
-      target
-    );
+    const cond = compile(args[0], 0);
+    const whenTrue = compileGPUConditionalArm('If', () => arm(1), target);
+    const whenFalse = compileGPUConditionalArm('If', () => arm(2), target);
+    // Checked after the arms are compiled, so an arm that cannot be compiled
+    // at all reports its own reason first.
+    gpuAssertNoEagerCallerCode('If', [args[1], args[2]], target);
+    return gpuConditional(cond, whenTrue, whenFalse, target);
   },
   When: (args, compile, target) => {
     if (args.length !== 2)
@@ -1810,7 +2009,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
       (gpuCanPlaceStatement(target) &&
         (gpuArmSharesWork(args[0]) ||
           gpuArmIsCostlyForSelect(args[0], target) ||
-          gpuArmDrawsWhileBinding(args[0])))
+          gpuArmDrawsWhileBinding(args[0]) ||
+          gpuHasEagerCallerCode([args[0]], target)))
     ) {
       const statement = compileGPUStatementSelection(
         [args[1], args[0]],
@@ -1821,12 +2021,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     }
     gpuAssertNoAssignmentOperand('When', args, target);
     gpuAssertNoEagerDraw('When', [args[0]], target);
-    return gpuConditional(
-      compile(args[1], 1),
-      compileGPUConditionalArm('When', () => compile(args[0], 0), target),
-      gpuNaNFor(args[0], target),
+    const cond = compile(args[1], 1);
+    const value = compileGPUConditionalArm(
+      'When',
+      () => compile(args[0], 0),
       target
     );
+    gpuAssertNoEagerCallerCode('When', [args[0]], target);
+    return gpuConditional(cond, value, gpuNaNFor(args[0], target), target);
   },
   Which: (args, compile, target) => {
     if (args.length < 2 || args.length % 2 !== 0)
@@ -1852,9 +2054,23 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target,
         values
       );
+    // The operands that the chain below places behind an emitted `select`:
+    // every operand after the first, up to the value of the first clause
+    // whose condition is the symbol `True`. A leading `True` clause emits its
+    // value with no `select`, and the clauses after a `True` clause are not
+    // emitted.
+    const firstDefault = args.findIndex(
+      (a, i) => i % 2 === 0 && isSymbol(a, 'True')
+    );
+    const selected =
+      firstDefault === 0
+        ? []
+        : args.slice(1, firstDefault === -1 ? args.length : firstDefault + 2);
     // An arm, or a condition past the first, that needs statements takes the
     // statement form (`compileGPUStatementSelection`); the ternary chain
-    // below cannot hold them.
+    // below cannot hold them. On WGSL, a selected operand with caller code
+    // takes it too, as `select` would compute that operand when its branch
+    // is not taken (`gpuHasEagerCallerCode`).
     const canPlace = gpuCanPlaceStatement(target);
     if (
       args.some(
@@ -1865,7 +2081,8 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
               (gpuArmSharesWork(a) ||
                 gpuArmIsCostlyForSelect(a, target) ||
                 gpuArmDrawsWhileBinding(a))))
-      )
+      ) ||
+      (canPlace && gpuHasEagerCallerCode(selected, target))
     ) {
       const statement = compileGPUStatementSelection(
         args,
@@ -1944,7 +2161,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
         target
       );
     };
-    return build(0);
+    const code = build(0);
+    gpuAssertNoEagerCallerCode('Which', selected, target);
+    return code;
   },
   // Epsil `Match`: tier-0/1 constant dispatch as a nested `select`/ternary with
   // `==` comparisons, the subject inlined into each comparison (safe for a PURE
@@ -1959,16 +2178,50 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   //
   // A case body or guard that needs statements (a loop-form `Sum`) takes the
   // statement form of `If`/`Which` (`compileGPUMatchStatement`).
-  Match: (args, _compile, target) =>
-    BaseCompiler.compileMatchTernary(args[0]!.engine, args, target, {
-      ternary: (c, t, e) => gpuConditional(c, t, e, target),
-      eq: '==',
-      noMatch: gpuNaN(target),
-      allowStrings: false,
-      arm: (f) => compileGPUConditionalArm('Match', f, target),
-      statement: (clauses) =>
-        compileGPUMatchStatement(args[0]!, clauses, target),
-    }),
+  //
+  // Caller code (`gpuReachesCallerCode`) in the subject would run once per
+  // comparison, so it declines. In a case on WGSL, caller code takes the
+  // statement form (`compileGPUMatchStatement`), where only the selected
+  // case runs; when that form is refused, the `select` form would compute
+  // every case, so it declines (`gpuAssertNoEagerCallerCode`). A single
+  // case that always matches emits no `select` and is not checked. A
+  // subject that draws is bound to a temporary ahead of the statement, so
+  // the statement must have no caller code (`gpuAssertHoistKeepsCallerOrder`).
+  Match: (args, _compile, target) => {
+    gpuAssertCallerCodeNotRepeated('Match', [args[0]!], target);
+    if (args[0]!.isPure === false)
+      gpuAssertHoistKeepsCallerOrder('Match', [args[0]!], target);
+    let usesSelect = false;
+    // The cases that the compiler reaches, up to the first case that always
+    // matches; `undefined` when the statement form was not tried.
+    let reached: ReadonlyArray<MatchStatementClause> | undefined;
+    const code = BaseCompiler.compileMatchTernary(
+      args[0]!.engine,
+      args,
+      target,
+      {
+        ternary: (c, t, e) => {
+          usesSelect = true;
+          return gpuConditional(c, t, e, target);
+        },
+        eq: '==',
+        noMatch: gpuNaN(target),
+        allowStrings: false,
+        arm: (f) => compileGPUConditionalArm('Match', f, target),
+        statement: (clauses) => {
+          reached = clauses;
+          return compileGPUMatchStatement(args[0]!, clauses, target);
+        },
+      }
+    );
+    if (usesSelect)
+      gpuAssertNoEagerCallerCode(
+        'Match',
+        reached === undefined ? args.slice(1) : gpuMatchSelectedPieces(reached),
+        target
+      );
+    return code;
+  },
   Power: (args, compile, target) => {
     const base = args[0];
     const exp = args[1];
@@ -2384,7 +2637,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // later draw in the shader. Bind scalars to hoisted temporaries; where
     // there is no statement sink (a conditional arm), or the operand is not
     // a scalar, there is no safe reading — decline.
-    // Read through the value of a symbol, as the shader inlines it.
+    // Read through the value of a symbol, as the shader inlines it. Caller
+    // code would run once per copy (`gpuAssertCallerCodeNotRepeated`).
+    gpuAssertCallerCodeNotRepeated('Remainder', [a, b], target);
     if (BaseCompiler.foldValueImpure(a) || BaseCompiler.foldValueImpure(b)) {
       if (
         !BaseCompiler.canHoist(target) ||
@@ -2397,6 +2652,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
             'later value in the shader.'
         );
       gpuAssertBindingKeepsDrawOrder('Remainder', [a, b], target);
+      gpuAssertHoistKeepsCallerOrder('Remainder', [a, b], target);
       const ta = BaseCompiler.tempVar(target);
       const tb = BaseCompiler.tempVar(target);
       const decl = (n: string) =>
@@ -2419,6 +2675,9 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   // Reciprocal trigonometric functions (no GPU built-ins)
   Cot: ([x], compile, target) => {
     if (x === null) throw new Error('Could not compile `Cot`: no argument');
+    // The operand is written twice below, so caller code in it would run
+    // twice (`gpuAssertCallerCodeNotRepeated`).
+    gpuAssertCallerCodeNotRepeated('Cot', [x], target);
     if (BaseCompiler.isComplexValued(x)) {
       // The operand is spliced TWICE below, so an IMPURE one must first be
       // bound to a hoisted temporary — compiling it once is not enough, since
@@ -2432,6 +2691,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
               'every later value in the shader.'
           );
         gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
+        gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
         const t = BaseCompiler.tempVar(target);
         const decl =
           target.language === 'wgsl'
@@ -2457,6 +2717,7 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
             'value in the shader.'
         );
       gpuAssertBindingKeepsDrawOrder('Cot', [x], target);
+      gpuAssertHoistKeepsCallerOrder('Cot', [x], target);
       const t = BaseCompiler.tempVar(target);
       const decl = target.language === 'wgsl' ? `var ${t}: f32` : `float ${t}`;
       BaseCompiler.hoistStatement(
@@ -3047,6 +3308,14 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
           `temporary at this position — a repeated draw would shift every ` +
           `later value in the shader.`
       );
+    // Caller code in a color operand would run once per copy, or ahead of
+    // earlier code when the operand is bound to a temporary below.
+    if (target !== undefined)
+      gpuAssertCallerCodeNotRepeated(
+        'ContrastingColor',
+        args.slice(0, 3),
+        target
+      );
     // Every color operand is spliced twice, and `select` evaluates both arms,
     // so an operand written inline runs its `_gpu_srgb_to_oklch` conversion up
     // to four times per fragment. Bind each converted operand to a `vec3`
@@ -3514,68 +3783,22 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
   },
 
   // Loop — GPU for-loop (no IIFE, no let)
+  //
+  // A `Loop` over several `Element` clauses visits every combination of
+  // the indices, with the first clause as the outermost loop, as the
+  // interpreter does: `Loop(s := s + j, Element(i, Range(1, 3)),
+  // Element(j, Range(1, 3)))` adds 1 + 2 + 3 three times. Each clause
+  // emits one nested `for` statement.
   Loop: (args, _compile, target) => {
     if (!args[0]) throw new Error('Could not compile `Loop`: no body');
     if (!args[1]) throw new Error('Could not compile `Loop`: no indexing set');
 
-    const indexing = args[1];
-    if (!isFunction(indexing, 'Element'))
-      throw new Error(
-        'Could not compile `Loop`: expected Element(index, Range(lo, hi))'
-      );
-
-    const indexExpr = indexing.ops[0];
-    const rangeExpr = indexing.ops[1];
-
-    if (!isSymbol(indexExpr))
-      throw new Error('Could not compile `Loop`: index must be a symbol');
-    if (!isFunction(rangeExpr, 'Range'))
-      throw new Error('Could not compile `Loop`: expected Range(lo, hi)');
-
-    const index = indexExpr.symbol;
-    // The loop index is declared and referenced bare — reject a reserved name.
-    gpuCheckIdentifier(index, target.language);
-
-    // A shader loop needs its bounds and its step at compile time. A number
-    // literal, or a symbol whose value is known when the shader is compiled
-    // (`Range(1, N)` with `N := 4`), gives a finite value through `.re`, and
-    // the JavaScript target folds such a value the same way. The JavaScript
-    // target also reads a symbolic bound with no value (`Range(1, n)`) at run
-    // time, but a shader has no such lowering, so the decline names the
-    // requirement. A number literal that is not finite (`Range(1, +oo)`) is
-    // declined below with its own message.
-    const lowerValue = rangeExpr.ops[0].re;
-    const upperValue = rangeExpr.ops[1].re;
-    if (
-      (!Number.isFinite(lowerValue) && !isNumber(rangeExpr.ops[0])) ||
-      (!Number.isFinite(upperValue) && !isNumber(rangeExpr.ops[1]))
-    )
-      throw new Error(
-        'Could not compile `Loop` on this target: the bounds of the `Range` must be numbers known at compile time (a number literal, or a symbol with a value)'
-      );
-
-    const lower = Math.floor(lowerValue);
-    const upper = Math.floor(upperValue);
-
-    if (!Number.isFinite(lower) || !Number.isFinite(upper))
-      throw new Error(
-        'Could not compile `Loop`: bounds must be finite numbers'
-      );
-
-    // The step of the range. The JavaScript target advances the counter by
-    // it (`Range(1, 10, 3)` visits 1, 4, 7 and 10); the shader loop visited
-    // every integer of the range instead. The counter is a shader integer,
-    // so the step must be a non-zero integer known at compile time; a
-    // negative step counts down.
-    let step = 1;
-    if (rangeExpr.ops.length >= 3) {
-      const stepValue = rangeExpr.ops[2].re;
-      if (!Number.isInteger(stepValue) || stepValue === 0)
-        throw new Error(
-          'Could not compile `Loop` on this target: the step of the `Range` must be a non-zero integer known at compile time'
-        );
-      step = stepValue;
-    }
+    const clauses = args.slice(1);
+    // A `Break` stops the whole loop in the interpreter, but in nested
+    // `for` statements it leaves only the innermost one. A `Continue`
+    // goes to the next turn of the innermost loop on both, so it is
+    // accepted.
+    BaseCompiler.assertBreakLeavesWholeLoop(clauses, args[0]);
 
     const isWGSL = target.language === 'wgsl';
     const intType = isWGSL ? 'i32' : 'int';
@@ -3584,32 +3807,163 @@ export const GPU_FUNCTIONS: CompiledFunctions<Expression> = {
     // is float. Consume the index as a float (`float(i)` / `f32(i)`) so it is
     // type-consistent wherever the body uses it in float arithmetic — mirroring
     // the Sum/Product for-loop path.
-    const indexAsFloat = isWGSL ? `f32(${index})` : `float(${index})`;
+    const indexAsFloat = (index: string) =>
+      isWGSL ? `f32(${index})` : `float(${index})`;
+
+    const indices: string[] = [];
+    const headers: string[] = [];
+    // The compiled guard of each clause, or `undefined` for a clause with
+    // no guard.
+    const tests: (string | undefined)[] = [];
+    for (const indexing of clauses) {
+      if (!isFunction(indexing, 'Element'))
+        throw new Error(
+          'Could not compile `Loop`: expected Element(index, Range(lo, hi))'
+        );
+
+      const indexExpr = indexing.ops[0];
+      const rangeExpr = indexing.ops[1];
+
+      if (!isSymbol(indexExpr))
+        throw new Error('Could not compile `Loop`: index must be a symbol');
+      if (!isFunction(rangeExpr, 'Range'))
+        throw new Error('Could not compile `Loop`: expected Range(lo, hi)');
+
+      const index = indexExpr.symbol;
+      // The loop index is declared and referenced bare — reject a reserved
+      // name.
+      gpuCheckIdentifier(index, target.language);
+      // Two clauses with the same index would declare the same counter
+      // twice, and the inner one would hide the outer one.
+      if (indices.includes(index))
+        throw new Error(
+          `Could not compile \`Loop\` on this target: two Element clauses use the same index \`${index}\``
+        );
+      // A bound or a step that reads an outer index (`Element(j, Range(1,
+      // i))`) changes on each turn of the outer loop, but the bounds below
+      // are read at compile time, from the value of the symbol outside the
+      // loop. Decline it.
+      const outer = indices.find((name) => rangeExpr.has(name));
+      if (outer !== undefined)
+        throw new Error(
+          `Could not compile \`Loop\` on this target: the \`Range\` of the index \`${index}\` reads the outer index \`${outer}\`, and the bounds of a shader loop must be known at compile time`
+        );
+
+      // A shader loop needs its bounds and its step at compile time. A number
+      // literal, or a symbol whose value is known when the shader is compiled
+      // (`Range(1, N)` with `N := 4`), gives a finite value through `.re`, and
+      // the JavaScript target folds such a value the same way. The JavaScript
+      // target also reads a symbolic bound with no value (`Range(1, n)`) at run
+      // time, but a shader has no such lowering, so the decline names the
+      // requirement. A number literal that is not finite (`Range(1, +oo)`) is
+      // declined below with its own message.
+      const lowerValue = rangeExpr.ops[0].re;
+      const upperValue = rangeExpr.ops[1].re;
+      if (
+        (!Number.isFinite(lowerValue) && !isNumber(rangeExpr.ops[0])) ||
+        (!Number.isFinite(upperValue) && !isNumber(rangeExpr.ops[1]))
+      )
+        throw new Error(
+          'Could not compile `Loop` on this target: the bounds of the `Range` must be numbers known at compile time (a number literal, or a symbol with a value)'
+        );
+
+      const lower = Math.floor(lowerValue);
+      const upper = Math.floor(upperValue);
+
+      if (!Number.isFinite(lower) || !Number.isFinite(upper))
+        throw new Error(
+          'Could not compile `Loop`: bounds must be finite numbers'
+        );
+
+      // The step of the range. The JavaScript target advances the counter by
+      // it (`Range(1, 10, 3)` visits 1, 4, 7 and 10); the shader loop visited
+      // every integer of the range instead. The counter is a shader integer,
+      // so the step must be a non-zero integer known at compile time; a
+      // negative step counts down.
+      let step = 1;
+      if (rangeExpr.ops.length >= 3) {
+        const stepValue = rangeExpr.ops[2].re;
+        if (!Number.isInteger(stepValue) || stepValue === 0)
+          throw new Error(
+            'Could not compile `Loop` on this target: the step of the `Range` must be a non-zero integer known at compile time'
+          );
+        step = stepValue;
+      }
+
+      const indexDecl = isWGSL
+        ? `var ${index}: ${intType}`
+        : `${intType} ${index}`;
+      const condition =
+        step > 0 ? `${index} <= ${upper}` : `${index} >= ${upper}`;
+      const advance = step === 1 ? `${index}++` : `${index} += ${step}`;
+      indices.push(index);
+      headers.push(`for (${indexDecl} = ${lower}; ${condition}; ${advance}) {`);
+
+      // A guarded clause, `Element(i, Range(1, 5), Greater(i, 2))`: the
+      // interpreter visits an element (and runs the later clauses and the
+      // body for it) only when the guard evaluates to `True` (`runNested`).
+      // A guard that is `False` or undecided skips the element. The guard
+      // compiles to an `if` statement inside the `for` statement of its
+      // clause, around the code of the later clauses and the body. A shader
+      // comparison with a NaN operand is `false`, and the interpreter gives
+      // `False` for it too (`Greater(1, NaN)`), so `!(i > x)` with `x` NaN
+      // is `true` on both. The guard reads the indices of its clause and of
+      // the clauses before it. A guard that is not a boolean has no shader
+      // test, and a guard that needs statements (a loop-form `Sum`, a
+      // `Block`) has no place before the test, so both decline.
+      const guard = indexing.ops[2];
+      if (guard === undefined || isSymbol(guard, 'Nothing')) {
+        tests.push(undefined);
+        continue;
+      }
+      if (!isSubtype(guard.type.type, 'boolean'))
+        throw new Error(
+          `Could not compile \`Loop\` on this target: the guard of the index \`${index}\` is not a boolean (type \`${guard.type.toString()}\`)`
+        );
+      if (gpuNeedsStatements(guard))
+        throw new Error(
+          `Could not compile \`Loop\` on this target: the guard of the index \`${index}\` needs statements, which a shader \`if\` condition cannot hold`
+        );
+      const visible = [...indices];
+      tests.push(
+        BaseCompiler.compile(guard, {
+          ...target,
+          var: (id) =>
+            visible.includes(id) ? indexAsFloat(id) : target.var(id),
+          ...BaseCompiler.withBoundScope(target, visible),
+        })
+      );
+    }
+
     // The body is a STATEMENT LIST, not a value: compiled for a value, a
     // multi-statement body emitted `return <last statement>` inside the loop
     // — returning from the shader on the first iteration. It is also the
     // position where a destructuring assign (`(a, b) := (b, a + b)`) lowers.
     const bodyCode = BaseCompiler.compileStatementList(args[0], {
       ...target,
-      var: (id) => (id === index ? indexAsFloat : target.var(id)),
-      // The counter shadows any same-named engine symbol (an index named `i`
+      var: (id) => (indices.includes(id) ? indexAsFloat(id) : target.var(id)),
+      // The counters shadow any same-named engine symbol (an index named `i`
       // must not resolve to the imaginary unit in the operand analysis).
-      ...BaseCompiler.withBoundScope(target, [index]),
+      ...BaseCompiler.withBoundScope(target, indices),
     });
 
-    const indexDecl = isWGSL
-      ? `var ${index}: ${intType}`
-      : `${intType} ${index}`;
     // Every line of the body arrives terminated by the statement-list
     // joiner (`compileStatementList`), so the body is only indented here.
-    const body = bodyCode
-      .split('\n')
-      .map((line) => `  ${line}`)
-      .join('\n');
-    const condition =
-      step > 0 ? `${index} <= ${upper}` : `${index} >= ${upper}`;
-    const advance = step === 1 ? `${index}++` : `${index} += ${step}`;
-    return `for (${indexDecl} = ${lower}; ${condition}; ${advance}) {\n${body}\n}`;
+    // Each `for` statement, from the innermost one, then encloses the code
+    // inside it and indents it once more. The `if` statement of a guard is
+    // directly inside the `for` statement of its clause.
+    const indent = (code: string) =>
+      code
+        .split('\n')
+        .map((line) => `  ${line}`)
+        .join('\n');
+    let code = bodyCode;
+    for (let k = headers.length - 1; k >= 0; k--) {
+      const test = tests[k];
+      if (test !== undefined) code = `if (${test}) {\n${indent(code)}\n}`;
+      code = `${headers[k]}\n${indent(code)}\n}`;
+    }
+    return code;
   },
 
   // Statistical functions

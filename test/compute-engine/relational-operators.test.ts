@@ -1,5 +1,6 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { LatexSyntax, LATEX_DICTIONARY } from '../../src/latex-syntax';
+import { withRandomSeedFrame } from '../../src/compute-engine/boxed-expression/utils';
 
 const ce = new ComputeEngine();
 
@@ -496,6 +497,115 @@ describe('Chained NotEqual (pairwise, not all-distinct)', () => {
     expect(ce.parse('1 \\ne 2 \\ne 2').evaluate().json).toBe('False');
     // 1 ≠ 2 ≠ 1 is True (1 ≠ 2 and 2 ≠ 1), even though 1 repeats
     expect(ce.parse('1 \\ne 2 \\ne 1').evaluate().json).toBe('True');
+  });
+
+  // The `And` of pairs holds a middle operand twice, so it evaluates it
+  // twice. A chain with an impure middle operand stays n-ary, and each of
+  // its operands is evaluated once.
+  describe('an impure middle operand keeps the n-ary form', () => {
+    const engine = new ComputeEngine();
+    const values = [1, 5, 1, 3, 3];
+    let calls = 0;
+    engine.declare('f', {
+      signature: '() -> real',
+      pure: false,
+      evaluate: () => engine.number(values[calls++ % values.length]),
+    });
+    const run = (json: any) => {
+      calls = 0;
+      const e = engine.box(json);
+      return { canonical: e.json, value: e.evaluate().json, calls };
+    };
+
+    it('NotEqual(1, Random(), 2) stays n-ary', () => {
+      const e = engine.box(['NotEqual', 1, ['Random'], 2]);
+      expect(e.json).toEqual(['NotEqual', 1, ['Random'], 2]);
+      expect(e.latex).toBe('1\\ne\\mathrm{Random}()\\ne2');
+      // An impure first or last operand is in one pair only.
+      expect(engine.box(['NotEqual', ['Random'], 1, 2]).json).toEqual([
+        'And',
+        ['NotEqual', ['Random'], 1],
+        ['NotEqual', 1, 2],
+      ]);
+    });
+
+    it('evaluates each operand once and decides the adjacent pairs', () => {
+      // f() gives 1, 5, 1: the adjacent pairs differ, the first and the
+      // last operands are equal.
+      expect(run(['NotEqual', ['f'], ['f'], ['f']])).toEqual({
+        canonical: ['NotEqual', ['f'], ['f'], ['f']],
+        value: 'True',
+        calls: 3,
+      });
+      // f() gives 1, which equals the first operand.
+      expect(run(['NotEqual', 1, ['f'], 2]).value).toBe('False');
+      expect(run(['NotEqual', 1, ['f'], 2]).calls).toBe(1);
+      // f() gives 1, 5, 1, 3, 3: the last pair is equal.
+      expect(run(['NotEqual', ['f'], ['f'], ['f'], ['f'], ['f']]).value).toBe(
+        'False'
+      );
+    });
+
+    it('simplify() keeps every operand', () => {
+      expect(
+        engine.box(['NotEqual', 'x', ['Random'], 'y']).simplify().json
+      ).toEqual(['NotEqual', 'x', ['Random'], 'y']);
+    });
+
+    it('keeps the NaN, Missing and inert rules of each pair', () => {
+      // NaN ≠ 1 is True; the pair 1 ≠ x stays inert.
+      expect(run(['NotEqual', 'NaN', ['f'], 'x']).value).toEqual([
+        'NotEqual',
+        1,
+        'x',
+      ]);
+      expect(run(['NotEqual', 3, ['f'], 'Missing']).value).toBe('Missing');
+      // A False pair wins over a Missing pair.
+      expect(run(['NotEqual', 'Missing', ['f'], 1]).value).toBe('False');
+    });
+
+    it('a pair of two Missing values is not a False pair', () => {
+      // The walk over the operands stopped at `Missing ≠ Missing`, because
+      // the two values are the same, and gave `False`. The binary
+      // `NotEqual(Missing, Missing)` is `Missing`, so the chain is too.
+      const ce2 = new ComputeEngine();
+      ce2.declare('g', {
+        signature: '() -> any',
+        pure: false,
+        evaluate: () => ce2.Missing,
+      });
+      expect(ce2.box(['NotEqual', 'Missing', ['g'], 1]).evaluate().json).toBe(
+        'Missing'
+      );
+      expect(
+        ce2.box(['NotEqual', 'Missing', ['g'], 'Missing']).evaluate().json
+      ).toBe('Missing');
+      // `NaN ≠ NaN` is `True` (IEEE), so the walk goes on to the last pair.
+      expect(
+        ce2.box(['NotEqual', 'NaN', ['Random'], 'NaN']).evaluate().json
+      ).toBe('True');
+    });
+
+    it('a symbol whose value draws is an impure middle operand', () => {
+      // `isPure` is true for the symbol `r`, but each read of it evaluates
+      // its stored value `Random()`. The `And` of pairs read it twice and
+      // drew twice.
+      const ce2 = new ComputeEngine();
+      ce2.assign('r', ce2.box(['Random'], { form: 'raw' }));
+      const e = ce2.box(['NotEqual', 1, 'r', 2]);
+      expect(e.json).toEqual(['NotEqual', 1, 'r', 2]);
+      const first = withRandomSeedFrame(ce2, 7, () => ce2._random());
+      const second = withRandomSeedFrame(ce2, 7, () => {
+        ce2._random();
+        return ce2._random();
+      });
+      const next = withRandomSeedFrame(ce2, 7, () => {
+        expect(e.evaluate().json).toBe('True');
+        return ce2._random();
+      });
+      expect(next).not.toBe(first);
+      expect(next).toBe(second);
+    });
   });
 
   it('mixes with directional links: a < b ≠ c → And(a < b, b ≠ c)', () => {
@@ -1482,5 +1592,46 @@ describe('Comparing exact constants that are not exact numbers', () => {
       ce.box(['Equal', 'Pi', ce.parse('3.14159265358979323846')]).evaluate()
         .symbol
     ).toBe('True');
+  });
+});
+
+describe('simplify() of a chain of three or more operands', () => {
+  // The relational simplification read the first two operands only, and
+  // its result dropped the others: `1 < 3 < 2` became `1 < 3`, which is
+  // `True`.
+  test.each([
+    ['1 < 2 < 3', 'True'],
+    ['1 < 3 < 2', 'False'],
+    ['3 = 3 = 4', 'False'],
+  ])('%s simplifies to %s', (latex, expected) => {
+    expect(ce.parse(latex).simplify().json).toBe(expected);
+  });
+
+  test('a chain with symbols keeps every operand', () => {
+    expect(ce.parse('2x < 4y < 6z').simplify().json).toEqual([
+      'Less',
+      ['Multiply', 2, 'x'],
+      ['Multiply', 4, 'y'],
+      ['Multiply', 6, 'z'],
+    ]);
+  });
+});
+
+describe('equivalence of two chains of three or more operands', () => {
+  // The equivalence test of `Equal` read only the first two operands, so
+  // `x = y = 1` and `x = y = 2` were equivalent.
+  test('Equal chains with different last operands are not equivalent', () => {
+    const a = ce.box(['Equal', 'x', 'y', 1]);
+    expect(a.isIdenticallyEqual(ce.box(['Equal', 'x', 'y', 2]))).not.toBe(
+      true
+    );
+    expect(a.isIdenticallyEqual(ce.box(['Equal', 'x', 'y', 1]))).toBe(true);
+  });
+
+  test('NotEqual chains with different last operands are not equivalent', () => {
+    const a = ce.box(['NotEqual', 'x', ['Random'], 1]);
+    expect(
+      a.isIdenticallyEqual(ce.box(['NotEqual', 'x', ['Random'], 2]))
+    ).not.toBe(true);
   });
 });

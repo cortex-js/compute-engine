@@ -12,6 +12,7 @@ import {
   gpuTopLevelCall,
 } from './gpu-shapes.js';
 import type { GPUShapeRules } from './gpu-shapes.js';
+import { isSymbol } from '../boxed-expression/type-guards.js';
 import {
   GPU_AGGREGATE_CONSTRUCTOR,
   GPU_AGGREGATE_CONSTRUCTOR_ANYWHERE,
@@ -25,10 +26,10 @@ import { gpuProvablyFinite } from './gpu-finite-proof.js';
 import { gpuCanPlaceStatement } from './gpu-statements.js';
 import {
   gpuAssertBindingKeepsDrawOrder,
+  gpuAssertHoistKeepsCallerOrder,
+  gpuReachesCallerCode,
   gpuRecordBoundDraws,
 } from './gpu-draw-order.js';
-import { isCallerMapped } from './cse.js';
-import { reachesCallerCode } from './compile-folding.js';
 
 /**
  * Can the emitted source of `expr` be written more than once with the same
@@ -44,16 +45,9 @@ function gpuRepeatableSource(
   expr: Expression,
   target: CompileTarget<Expression>
 ): boolean {
-  if (BaseCompiler.foldValueImpure(expr)) return false;
-  // A route with no common-subexpression session (`compileToSource`, a
-  // declared function body, a whole shader) has no `vars` or `functions`,
-  // but an operator declared with its own `compile` handler still emits
-  // caller code there, and `isCallerMapped` finds it from the definition.
-  const caller = target.cse?.harvestOptions ?? {};
-  return !reachesCallerCode(expr, {
-    isStringVar: caller.isStringVar,
-    isCallerMapped: (node) => isCallerMapped(node, caller),
-  });
+  return (
+    !BaseCompiler.foldValueImpure(expr) && !gpuReachesCallerCode(expr, target)
+  );
 }
 
 /**
@@ -318,6 +312,11 @@ export function gpuScalarComponents(
   if (!BaseCompiler.canHoist(target)) return undefined;
   const draws = BaseCompiler.foldValueImpure(expr);
   if (draws) gpuAssertBindingKeepsDrawOrder(expr.operator, [expr], target);
+  gpuAssertHoistKeepsCallerOrder(
+    isSymbol(expr) ? expr.symbol : expr.operator,
+    [expr],
+    target
+  );
   const tv = BaseCompiler.tempVar(target);
   const type =
     ctorType ?? (target.language === 'wgsl' ? `vec${width}f` : `vec${width}`);

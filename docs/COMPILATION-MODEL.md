@@ -449,17 +449,79 @@ loop-form `Sum` or `Product`, a `Block` used as a value, the statement form of
 a conditional, a lowering that binds an impure operand to a temporary — is
 hoisted into the enclosing statement sink, AHEAD of the whole enclosing
 expression. An operand written EARLIER in that expression therefore runs after
-the hoisted statements where the interpreter runs it first. With constant
-folding off, `(Random(), Σ_{n=1}^{⌊t⌋} Random())` emits the loop and then
-`return vec2(_gpu_rnd_draw(…), _tv1);`, so the first component is the draw
-after the loop's; `(k := 1, Σ_n k·n)` reads `k` before the assignment. This is
-a documented difference of the shader targets (decided 2026-09-21): an
-expression that mixes a hoisting operand with an effect written before it does
-not keep the interpreter's order. A general reordering (bind an earlier operand
+the hoisted statements where the interpreter runs it first. Random draws are
+the exception: when the order of the draws of a statement would change, the
+statement is compiled again with each draw bound to a temporary of its own, in
+the order of the interpreter. With constant folding off,
+`(Random(), Σ_{n=1}^{⌊t⌋} Random())` in a `WithRandomSeed` frame emits
+
+```glsl
+float _tv2 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);
+float _tv3 = 0.0;
+for (int n = 1; n <= int(floor(floor(t))); n++) {
+  float _tv4 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);
+  _tv3 += _tv4;
+}
+return vec2(_tv2, _tv3);
+```
+
+so the first component is the first draw. Other effects are not bound:
+`(k := 1, Σ_n k·n)` reads `k` into `_tv1` before the assignment. This is a
+documented difference of the shader targets (decided 2026-09-21): an
+expression that mixes a hoisting operand with an effect other than a draw
+written before it does not keep the interpreter's order. A general reordering (bind an earlier operand
 ahead of a hoisting sibling, decided per occurrence at the parent's lowering
 dispatch) was built and withdrawn in 2026-09 after review kept finding compile
 paths it did not cover; it is not planned. Pure expressions, which every corpus
 document has at this position, are unaffected.
+
+Code that the caller supplies is held to the interpreter's order: a `vars`
+entry whose value is shader source other than a plain read (`nextValue()`,
+`vec3(u + v)`; a uniform name such as `u_x` or `params.x` is a plain read), a
+head mapped through `functions` or `operators`, and an operator's own `compile`
+handler. Such code can count its calls or draw a number, and the compiler does
+not see inside it. The values of the symbols that an expression reads and the
+bodies of the user functions it calls are looked through, as the shader
+inlines them, except the value of a symbol that reads an input (a plain `vars`
+read, a bound variable): with `vars: { T: 'u_T' }`, `T` emits `u_T` whatever
+value `T` has. The shader targets decline, rather than emit, a form that would
+run caller code more than once, move it ahead of code with an effect written
+before it, or compute it in a branch that is not taken. With
+`vars: { W: 'nextValue()', V: 'vec3(nextValue())' }`:
+
+- `Max(V)` compiles to a temporary that holds `V` once, but `W + Max(V)`
+  declines (the temporary would call `V` before `W`), and so do `Cot(W)`
+  (`cos` and `sin` would each call `W`), `Cot([W, x, 1])`, `x < W < 3`,
+  `Random(Interval(W, 1))` (the draw would run before `W`) and
+  `(W, Cot(Random()))`.
+- A `vars` entry whose code is the read of one variable (`u_t`, `params.x`,
+  `v[0]`) runs no code, so a form may write it twice even when it counts as
+  caller source (`{ a: 'u_t', b: 'u_t' }`: `Cot(a)` is
+  `cos(u_t) / sin(u_t)`). A random draw can also move ahead of such a read,
+  as can a bound draw whose endpoints are such reads. Hoisted caller code
+  cannot move ahead of it (next item).
+- On WGSL, `select(f, t, c)` computes both branches. A branch with caller code
+  takes the statement form of the selection when a statement can be placed:
+  `If(c, W, 0)` emits `if (c) { _tv1 = nextValue(); } else { _tv1 = 0.0; }`,
+  and a `Match` case does the same. The statement form keeps the order check
+  above; when it is refused (`W + If(c, W, 0)`), the `select` form declines.
+  Only the operands that the `select` form places behind a `select` count: a
+  leading `True` clause of `Which`, a single `Match` case that always matches,
+  and the clauses after a `True` clause are not checked
+  (`Which(True, W)` is `(nextValue())`). GLSL's `?:` computes one branch and
+  keeps the ternary form.
+- Caller code can also write a variable that a plain read reads. So hoisted
+  caller code declines when the interpreter reads a `vars` key (whatever its
+  source) before it: with `vars: { W: 'state.value' }`, `(W, Max(V))`
+  declines, and `(Max(V), W)` compiles. A canonical `Add` can put the read
+  first: `Max(V) + U` declines.
+- A statement hoisted into the branch of a statement form runs ahead of the
+  rest of its clause only, so it is checked against that clause.
+
+The check is simple, not precise: a hoisted statement with caller code
+declines when anything else in its statement has an effect, also when that
+code comes after it. Binding caller code in order, as random draws are bound,
+is not implemented. A form with no caller code compiles as before.
 
 ## Complex modes
 

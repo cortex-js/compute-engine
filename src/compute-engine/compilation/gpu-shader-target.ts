@@ -108,6 +108,7 @@ import {
 } from './gpu-statements.js';
 import {
   gpuAssertBindingKeepsDrawOrder,
+  gpuAssertHoistKeepsCallerOrder,
   gpuRecompileWithBoundDraws,
   gpuRecordBoundDraws,
 } from './gpu-draw-order.js';
@@ -429,6 +430,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         const draws =
           block !== undefined && BaseCompiler.foldValueImpure(block);
         if (draws) gpuAssertBindingKeepsDrawOrder('Block', [block], current);
+        gpuAssertHoistKeepsCallerOrder(
+          'Block',
+          block === undefined ? undefined : [block],
+          current
+        );
         const isWGSL = current.language === 'wgsl';
         const type = gpuTypeOfValue(valueNode, isWGSL);
         if (type === undefined) return undefined;
@@ -790,7 +796,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // compilation cannot decide), and through `mangleId` when it is emitted
     // as a bare identifier. As for the text gate above, the gate is keyed by
     // the name, so a binder of the same name is also refused, which is a
-    // decline and never a wrong value.
+    // decline and never a wrong value. The same gate refuses a symbol whose
+    // type is a tuple that no shader type holds: `T` of type
+    // `tuple<tuple<real, real>, tuple<real, real>>` was emitted as a bare
+    // `T`, `First(T)` as `T.x`, and a local copy as `vec2 Q; Q = T;`.
     const pointOrList = gpuPointOrPointListSymbols(expr);
     if (pointOrList.size > 0) {
       const innerVar = target.var;

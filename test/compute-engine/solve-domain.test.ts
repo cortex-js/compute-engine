@@ -2034,3 +2034,96 @@ describe('SOLVE — the type of the unknown and free parameters', () => {
     ).toEqual([-2, 2]);
   });
 });
+
+// An equality chain `a = b = c` is two equations. The solvers that read
+// only the first two operands must not answer for the chain.
+describe('SOLVE AN EQUALITY CHAIN OVER A DOMAIN', () => {
+  test('a chain over two finite domains keeps only the common solutions', () => {
+    // 2x + 3y = 7 and 7 = x + 2: x = 5, y = -1.
+    const r = ce
+      .box([
+        'Solve',
+        [
+          'Equal',
+          ['Add', ['Multiply', 2, 'x'], ['Multiply', 3, 'y']],
+          7,
+          ['Add', 'x', 2],
+        ],
+        ['Element', 'x', ['Range', -10, 10]],
+        ['Element', 'y', ['Range', -10, 10]],
+      ])
+      .evaluate();
+    expect(r.json).toEqual(['List', ['Tuple', 5, -1]]);
+  });
+
+  test('a chain over the integers is not solved as its first link', () => {
+    const r = ce
+      .box([
+        'Solve',
+        [
+          'Equal',
+          ['Add', ['Multiply', 2, 'x'], ['Multiply', 3, 'y']],
+          7,
+          ['Add', 'x', 2],
+        ],
+        ['Element', 'x', 'Integers'],
+        ['Element', 'y', 'Integers'],
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Solve');
+  });
+
+  test('a periodic chain over an interval is not solved as its first link', () => {
+    // sin(x) = 0 = x has the only solution 0, not every k·π in [-10, 10].
+    const r = ce
+      .box([
+        'Solve',
+        ['Equal', ['Sin', 'x'], 0, 'x'],
+        ['Element', 'x', ['Interval', -10, 10]],
+      ])
+      .evaluate();
+    expect(r.operator).toBe('Solve');
+  });
+});
+
+describe('SOLVE A SYSTEM WITH A COMPARISON CHAIN', () => {
+  test('an equality chain in a linear system is two equations', () => {
+    const r = ce
+      .box([
+        'List',
+        ['Equal', ['Add', 'x', 'y'], 1, ['Subtract', 'x', 'y']],
+      ])
+      .solve(['x', 'y']) as Record<string, Expression>;
+    expect(r.x.json).toBe(1);
+    expect(r.y.json).toBe(0);
+  });
+
+  test('an inconsistent system with an equality chain has no solution', () => {
+    // x + y = 1 = x - y gives (1, 0), which is not on x = 2y.
+    const r = ce
+      .box([
+        'List',
+        ['Equal', ['Add', 'x', 'y'], 1, ['Subtract', 'x', 'y']],
+        ['Equal', 'x', ['Multiply', 2, 'y']],
+      ])
+      .solve(['x', 'y']);
+    expect(r).toBeNull();
+  });
+
+  test('an inequality chain bounds the region on each side', () => {
+    const r = ce
+      .box([
+        'List',
+        ['LessEqual', ['Add', 'x', 'y'], 10],
+        ['LessEqual', 0, 'x', 2],
+        ['GreaterEqual', 'y', 0],
+      ])
+      .solve(['x', 'y']) as Array<Record<string, Expression>>;
+    expect(r.map((v) => [v.x.json, v.y.json])).toEqual([
+      [0, 0],
+      [2, 0],
+      [2, 8],
+      [0, 10],
+    ]);
+  });
+});

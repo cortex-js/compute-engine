@@ -290,6 +290,13 @@ export function rSolve(
   const indexName = sym(index);
   if (!dependentName || !indexName) return undefined;
 
+  // A chain `a(n) = b = c` is two equations. The code below reads only the
+  // first two operands of an `Equal`, so it would drop the later links.
+  // Decline a chain, as the recurrence or as an initial condition.
+  const items = isFunction(equation, 'List') ? equation.ops : [equation];
+  if (items.some((item) => isFunction(item, 'Equal') && item.nops > 2))
+    return undefined;
+
   const problem = recurrenceProblem(equation);
   const ce = equation.engine;
   const collected = equationRecurrenceTerms(

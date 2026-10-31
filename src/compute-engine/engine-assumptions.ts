@@ -226,7 +226,10 @@ export function ask(
     )
       return [{ pattern: expr }];
 
-    if (!isFunction(expr)) return [{ pattern: expr }];
+    // A chain `a < b < c` has more than two operands. Its normalized form is
+    // not `Less(a - b, 0)`: that form drops the later links, and a fact about
+    // the first link alone would match the whole chain.
+    if (!isFunction(expr) || expr.nops !== 2) return [{ pattern: expr }];
     const lhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op2 : expr.op1;
     const rhs = op === 'Greater' || op === 'GreaterEqual' ? expr.op1 : expr.op2;
     const normalizedOp =
@@ -281,6 +284,7 @@ export function ask(
       pat.operator === 'Less' ||
       pat.operator === 'LessEqual') &&
     isFunction(pat) &&
+    pat.nops === 2 &&
     isWildcard(pat.op2)
   ) {
     const boundWildcard = wildcardName(pat.op2);
@@ -332,6 +336,7 @@ export function ask(
   if (
     (pat.operator === 'Less' || pat.operator === 'LessEqual') &&
     isFunction(pat) &&
+    pat.nops === 2 &&
     isWildcard(pat.op1) &&
     !isWildcard(pat.op2)
   ) {
@@ -455,6 +460,30 @@ function verifyInner(
       if (r === undefined) hasUnknown = true;
     }
     return hasUnknown ? undefined : false;
+  }
+
+  // A chain `a < b < c` (or `a = b = c`) means `a < b ∧ b < c`. The facts
+  // are stored one link at a time, so decide each link and combine the
+  // results with the same Kleene rule as `And`.
+  if (
+    isFunction(expr) &&
+    expr.nops > 2 &&
+    (op === 'Less' ||
+      op === 'LessEqual' ||
+      op === 'Greater' ||
+      op === 'GreaterEqual' ||
+      op === 'Equal')
+  ) {
+    let hasUnknown = false;
+    for (let i = 0; i + 1 < expr.nops; i++) {
+      const r = verifyInner(
+        ce,
+        ce.function(op, [expr.ops[i], expr.ops[i + 1]])
+      );
+      if (r === false) return false;
+      if (r === undefined) hasUnknown = true;
+    }
+    return hasUnknown ? undefined : true;
   }
 
   // Direct assumption-DB lookup (P1-4): `assume(P) ⇒ verify(P)`. Some facts

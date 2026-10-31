@@ -559,8 +559,11 @@ floating-point failure and the numeric absence marker, as described above.
 `Indeterminate` is the answer of the EXACT route to a form that has no
 value: `0/0`, `∞/∞`, `0·∞`, `∞ − ∞`, `0^0`, `∞^0`, `1^∞`, `(−1)^±∞`,
 `Mod(x, 0)`, `Remainder(x, 0)`, `Fract(±∞)`, `Log(1, 1)`, a special
-function at an infinite point where it has no limit (`Gamma(−∞)`), and
-`Variance([5])`. The same form with a float operand (`0.0/0.0`,
+function at an infinite point where it has no limit (`Gamma(−∞)`), the
+sample variance and standard deviation of one datum (`Variance([5])`), and
+the skewness and kurtosis of data whose values are all equal, one datum
+included (`Skewness([5])`, `Kurtosis([√2, √2])`). The population variance
+of one datum is `0`. The same form with a float operand (`0.0/0.0`,
 `Mod(5.0, 0)`), every form under `.N()` or
 `evaluate({numericApproximation: true})`, and every compiled target answer
 `NaN`: a float operand makes a numeric result a float, and the final step

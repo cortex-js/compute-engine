@@ -26,6 +26,10 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 const ce = new ComputeEngine();
 for (const s of ['u', 'v', 'n']) ce.declare(s, 'real');
 ce.declare('cond', 'boolean');
+ce.declare('k', 'integer');
+ce.declare('P', 'list<tuple<real, real>^3>');
+ce.declare('T', 'tuple<tuple<real, real>, tuple<real, real>>');
+ce.declare('F', '(real) -> list<tuple<real, real>^3>');
 
 const COLUMN = (k: unknown) => ['Multiply', k, ['List', 'v', 1, 'v']];
 const P = [
@@ -204,6 +208,38 @@ describe.each(['glsl', 'wgsl'] as const)('%s — guards', (to) => {
       ],
       to
     );
+    expect(r.declined).toMatch(
+      /list of points has no static shader declaration/
+    );
+  });
+
+  // The value of these locals is a list of points by its TYPE, not by its
+  // form. The component count of the type is the number of points, which
+  // declared the local as `vec3 Q` (GLSL) or `var Q: vec3f` (WGSL) over the
+  // `vec2[3]` value of `P`.
+  test.each([
+    ['a copy of a declared list', ['Block', ['Assign', 'Q', 'P'], ['At', 'Q', 'k']]],
+    [
+      'a declaration with a value',
+      ['Block', ['Declare', 'Q', "'list<tuple<real, real>^3>'", 'P'], ['At', 'Q', 'k']],
+    ],
+    [
+      'a copy of another local',
+      ['Block', ['Assign', 'Q', 'P'], ['Assign', 'R', 'Q'], ['At', 'R', 2]],
+    ],
+    ['the result of a call', ['Block', ['Assign', 'Q', ['F', 'u']], ['At', 'Q', 'k']]],
+    [
+      'an assignment in a nested block',
+      [
+        'Block',
+        ['Declare', 'Q', "'list<tuple<real, real>^3>'"],
+        ['If', 'cond', ['Assign', 'Q', 'P'], 'Nothing'],
+        ['At', 'Q', 'k'],
+      ],
+    ],
+    ['a copy of a tuple of points', ['Block', ['Assign', 'Q', 'T'], ['At', 'Q', 'k']]],
+  ])('a block local holding %s fails closed', (_, json) => {
+    const r = shader(json, to);
     expect(r.declined).toMatch(
       /list of points has no static shader declaration/
     );

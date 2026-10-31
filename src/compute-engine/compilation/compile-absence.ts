@@ -76,6 +76,62 @@ import {
   COLLECTION_HOLDING_HEADS,
   CONTROL_FLOW_HEADS,
 } from './compiler-tables.js';
+import { reachesCallerCodeOn } from './compile-folding.js';
+
+/**
+ * Can the evaluation of operand `a` have an effect? It can when `a` is
+ * impure (`Random()`, an assignment), and when it runs code that the
+ * caller supplied (`reachesCallerCodeOn`: a `vars` entry
+ * `W: 'nextValue()'`, a head mapped through `functions`), also when it is
+ * a bare symbol. That code can count its calls or draw a number, so the
+ * lowerings below evaluate such an operand once, in operand order, as the
+ * interpreter evaluates it, or decline.
+ */
+function operandHasEffect(
+  a: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  return a.isPure !== true || reachesCallerCodeOn(a, target);
+}
+
+/**
+ * Is operand `a` a symbol whose emitted code is itself a read that the
+ * presence tests check: an input the caller can leave out
+ * (`isOmittableRead`, such as `_.z` for `vars: { W: '_.z' }`), found among
+ * the reads of `a` (`unsuppliedReads`)? The tests read that variable at
+ * each pair, where the comparison reads it, so it is not bound to a
+ * temporary, which would hide the read from them.
+ *
+ * The emitted code decides, not the reads that `unsuppliedReads` finds:
+ * those also come from a stored value (`W := y` gives the read `_.y`), and
+ * a symbol whose code is `_.nextValue()` is caller code that must be bound.
+ */
+function isTestedInputRead(
+  a: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isSymbol(a) || _codeAliases.has(a)) return false;
+  const code = core.compile(a, target);
+  return (
+    isOmittableRead(code, target) &&
+    unsuppliedReads([a], target).some((r) => r.code === code)
+  );
+}
+
+/**
+ * Does operand `a` run caller code that the comparison lowerings of this
+ * file must evaluate once (`reachesCallerCodeOn`)? A symbol whose emitted
+ * code is a read that the presence tests check (`isTestedInputRead`:
+ * `vars: { W: '_.z' }`, a spelling that differs from the default one, so it
+ * counts as caller code) is not counted: it is read like any other input.
+ */
+function absenceCallerCode(
+  a: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!reachesCallerCodeOn(a, target)) return false;
+  return !isTestedInputRead(a, target);
+}
 
 /**
  * Compile `expr` as a **value operand** — a sub-expression spliced into a
@@ -491,7 +547,7 @@ export function compileAbsentRelation(
   const dialect = conditionDialectOf(target);
   if (args.length <= 2) {
     const effects = args.filter(
-      (a) => !isAbsenceSymbol(a) && a.isPure !== true
+      (a) => !isAbsenceSymbol(a) && operandHasEffect(a, target)
     );
     if (effects.length === 0) return nullLiteral;
     return dialect.bind(
@@ -500,7 +556,7 @@ export function compileAbsentRelation(
       effects.map((a) => compileValueOperand(a, target))
     );
   }
-  if (args.some((a) => a.isPure !== true))
+  if (args.some((a) => operandHasEffect(a, target)))
     throw new Error(
       `Could not compile \`${h}\`: a chained comparison with an absent ` +
         `operand and an operand that has effects. The chain is decided link ` +
@@ -1402,6 +1458,63 @@ export function unsuppliedComparisonGuard(
       ));
   const reads = unsuppliedReads(args, target);
   if (reads.length === 0) return undefined;
+  // An operand that runs caller code (`vars: { W: 'nextValue()' }`) is
+  // read by the comparison and again by the NaN escape of the tests
+  // (`nanEscapeTerms`), so it is bound first, with every operand before it
+  // that has an effect, in operand order. The interpreter evaluates
+  // operands 0 and 1 of a comparison in every case, so they can be bound
+  // around the whole comparison: `x < W` with `x` absent gives
+  // `((t) => (_.x < t) || (((_.x !== undefined) || t !== t) ? false :
+  // undefined))(nextValue())`. An operand at index 2 or later of a chain is
+  // bound by `lazyChain`, after the pairs before it. A node that runs caller
+  // code at two positions is evaluated twice by the interpreter, and one
+  // temporary cannot stand for both evaluations, so such a comparison
+  // declines, as does a target that cannot bind.
+  const callerCodeAt = args.map((a) => absenceCallerCode(a, target));
+  const lastCallerCode = callerCodeAt.lastIndexOf(true);
+  if (lastCallerCode >= 0) {
+    if (
+      target.bindExpr === undefined ||
+      args.some((a, i) => callerCodeAt[i] && args.indexOf(a) !== i)
+    )
+      throw new Error(
+        `Could not compile \`${h}\`: an operand runs code that the caller ` +
+          `supplied (a \`vars\` or \`functions\` entry), beside an operand ` +
+          `that may be absent, and it cannot be bound to one temporary. The ` +
+          `interpreter evaluates it instead.`
+      );
+    if (args.length === 2 || lastCallerCode <= 1) {
+      // An earlier operand that is not a literal or a constant is bound
+      // too, even when it is pure: caller code can write a value that it
+      // reads (a global read by `y + 1` in `y + 1 < W`), and the
+      // comparison runs after the binding of `W`. A variable that the
+      // caller can leave out is not: the tests read it for absence where the
+      // comparison reads it (see `capture` in `lazyChain`).
+      const early = args.filter(
+        (a, i) =>
+          i <= lastCallerCode &&
+          args.indexOf(a) === i &&
+          !_codeAliases.has(a) &&
+          !isNumber(a) &&
+          !isString(a) &&
+          !(isSymbol(a) && (a.isConstant || isTestedInputRead(a, target))) &&
+          (i < lastCallerCode || operandHasEffect(a, target))
+      );
+      // The recursive call makes progress only when it installs a binding:
+      // each bound operand then has an alias, so `callerCodeAt` is false
+      // for it on the next call. With nothing left to bind (every operand
+      // that runs caller code is already aliased, or is a constant), the
+      // guard goes on below.
+      if (early.length > 0)
+        return withBoundOperands(
+          early,
+          target,
+          () =>
+            unsuppliedComparisonGuard(h, args, target, emit, node) ?? emit(),
+          node
+        );
+    }
+  }
   // A branch condition that reads a local of a block (`poisonSlot`): the
   // tests of every caller input of the block are too strict, so where
   // they fail while the reads of the comparison itself pass, the whole
@@ -1425,7 +1538,12 @@ export function unsuppliedComparisonGuard(
       emit,
       otherwise
     );
-  const atomic = (a: Expression) => isSymbol(a) || isNumber(a) || isString(a);
+  // A symbol whose code is caller code (`vars: { W: 'nextValue()' }`) is
+  // not repeated: it is bound like a computed operand.
+  const atomic = (a: Expression) =>
+    (isSymbol(a) && !absenceCallerCode(a, target)) ||
+    isNumber(a) ||
+    isString(a);
 
   if (args.length > 2) {
     // A link that does not read every tested variable can decide `false`
@@ -1448,7 +1566,7 @@ export function unsuppliedComparisonGuard(
           )
       );
     const lateEffect = args.some(
-      (a, i) => i >= 2 && a.isPure !== true && !atomic(a)
+      (a, i) => i >= 2 && operandHasEffect(a, target) && !atomic(a)
     );
     const bound = args.filter((a, i) => !atomic(a) && args.indexOf(a) === i);
     // A node with effects that occurs twice (`Less(q, q, 1)` with
@@ -1456,7 +1574,8 @@ export function unsuppliedComparisonGuard(
     // interpreter: one temporary cannot stand for both draws, so such a
     // chain keeps its own lowering.
     const repeatedEffect = bound.some(
-      (a) => a.isPure !== true && args.filter((b) => b === a).length > 1
+      (a) =>
+        operandHasEffect(a, target) && args.filter((b) => b === a).length > 1
     );
     // An operand with effects at index 2 or later is evaluated by the
     // interpreter only when the pairs before it are not `False`, also
@@ -1785,11 +1904,37 @@ export function lazyChain(
   condition = false
 ): string {
   const ce = args[0].engine;
-  const atomic = (a: Expression) => isSymbol(a) || isNumber(a) || isString(a);
-  // Bind `a` to a temporary around `body` (which may read it through its
-  // alias), unless it is a literal or a symbol.
-  const bound = (a: Expression, body: () => string): string => {
-    if (atomic(a) || _codeAliases.has(a)) return body();
+  const atomic = (a: Expression) =>
+    (isSymbol(a) && !absenceCallerCode(a, target)) ||
+    isNumber(a) ||
+    isString(a);
+  // Caller code can also write a value that an earlier operand reads (a
+  // global read by `y` in `Less(x, y, W)`): a pair after the binding of `W`
+  // reads the earlier operand there, after `W` has run. So an earlier
+  // operand that is not a literal or a constant is bound too. A variable
+  // that the caller can leave out (`isTestedInputRead`) is not: the pair
+  // tests its read for absence where it compares it, and a temporary would
+  // hide the read from that test. So caller code that writes such a
+  // variable in the inputs object itself (`_.y = 10` in `_.w()`) is seen
+  // by the pair after it; that case is not modeled.
+  const lastCallerCode = args
+    .map((a) => absenceCallerCode(a, target))
+    .lastIndexOf(true);
+  const capture = (i: number): boolean =>
+    i < lastCallerCode &&
+    !isNumber(args[i]) &&
+    !isString(args[i]) &&
+    !(
+      isSymbol(args[i]) &&
+      (args[i].isConstant || isTestedInputRead(args[i], target))
+    );
+  // Bind operand `i` to a temporary around `body` (which may read it
+  // through its alias), unless it is a literal or a symbol. A symbol whose
+  // code is caller code (`vars: { W: 'nextValue()' }`) is bound too, and so
+  // is one that `capture` names.
+  const bound = (i: number, body: () => string): string => {
+    const a = args[i];
+    if ((atomic(a) && !capture(i)) || _codeAliases.has(a)) return body();
     const code = compileValueOperand(a, target);
     const temp = tempVar(target);
     _codeAliases.set(a, temp);
@@ -1800,7 +1945,7 @@ export function lazyChain(
     }
   };
   const from = (i: number): string =>
-    bound(args[i], () => {
+    bound(i, () => {
       const link = ce._fn(h, [args[i - 1], args[i]]);
       if (condition) CompilerState._poisonConditions.add(link);
       const pair = core.compile(link, target);
@@ -1812,7 +1957,7 @@ export function lazyChain(
         `(${r} === false ? false : undefined))(${from(i + 1)}))(${pair})`
       );
     });
-  return bound(args[0], () => from(1));
+  return bound(0, () => from(1));
 }
 
 /**
@@ -2191,7 +2336,11 @@ export function nanEscapeTerms(
     own.length === 0 ? escape : `(${own.join(' && ')} && ${escape})`;
   for (const a of args) {
     if (isNumber(a)) continue;
-    const pureOrBound = isSymbol(a) || a.isPure === true || _codeAliases.has(a);
+    // A symbol or an operand whose code is caller code is not repeated in
+    // the escape: its evaluation can have an effect.
+    const pureOrBound =
+      _codeAliases.has(a) ||
+      ((isSymbol(a) || a.isPure === true) && !absenceCallerCode(a, target));
     if (!pureOrBound) continue;
     if (core.isComplexValued(a)) {
       if (!ordering || target.complexIsReal === undefined) continue;
@@ -2276,7 +2425,7 @@ export function absentComparisonGuard(
   // order and goes on past an absent link, which neither this form nor the
   // ordinary lowering reproduces.
   if (args.length > 2) {
-    if (args.some((a) => a.isPure !== true))
+    if (args.some((a) => operandHasEffect(a, target)))
       throw new Error(
         `Could not compile \`${h}\`: a chained comparison with an operand ` +
           `that may be absent and an operand with an effect. The ` +
@@ -2299,7 +2448,7 @@ export function absentComparisonGuard(
   for (const a of args) {
     if (isNumber(a)) continue;
     if (operands.includes(a)) {
-      if (a.isPure !== true)
+      if (operandHasEffect(a, target))
         throw new Error(
           `Could not compile \`${h}\`: the same operand with an effect ` +
             `appears twice beside an operand that may be absent. The ` +

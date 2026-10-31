@@ -371,7 +371,9 @@ describe('GPU reductions over a vector splat read every component', () => {
     // two branches of the conditional had different types. Repeating the
     // constructor once per component would run the caller's code three
     // times (`vec3(nextValue())` can count its calls), and an arm has no
-    // place for a temporary, so the reduction declines.
+    // place for a temporary, so the reduction declines on GLSL. On WGSL,
+    // where `select` would compute both arms, an arm with caller code takes
+    // the statement form of `If`, whose branch holds the temporary.
     const cev = new ComputeEngine();
     cev.declare('V', 'list<real^3>');
     cev.declare('c', 'boolean');
@@ -381,8 +383,15 @@ describe('GPU reductions over a vector splat read every component', () => {
       expect(() => glsl.compile(expr, opts)).toThrow(
         /conditionally-evaluated branch/
       );
-      expect(() => wgsl.compile(expr, opts)).toThrow(
-        /conditionally-evaluated branch/
+      expect(wgsl.compile(expr, opts).code).toBe(
+        'var _tv1: f32;\n' +
+          'if (c) {\n' +
+          `  var _tv2 = ${source};\n` +
+          '  _tv1 = (_gpu_max(_gpu_max(_tv2.x, _tv2.y), _tv2.z));\n' +
+          '} else {\n' +
+          '  _tv1 = 0.0;\n' +
+          '}\n' +
+          'return _tv1;'
       );
     }
     // Outside an arm, the constructor is held once in a temporary.
@@ -511,5 +520,495 @@ describe('GPU reductions over a vector splat read every component', () => {
         gpuScalarComponents(s, 'mat2(1.0, 0.0, 0.0, y)', noSink('glsl'))
       ).toEqual(['1.0', '0.0', '0.0', 'y']);
     });
+  });
+});
+
+describe('GPU code supplied by the caller runs once, in order', () => {
+  // `W` and `V` are written by the caller as calls (`nextValue()` can count
+  // its calls or draw a number). The interpreter evaluates each operand
+  // once, from the first to the last, so a shader that runs such code twice,
+  // ahead of code written before it, or in a branch that is not taken gives
+  // a different value. These forms decline. `U` is a plain uniform read,
+  // which is not caller code: it compiles as a symbol with no `vars` entry
+  // does.
+  const cev = new ComputeEngine();
+  cev.declare('V', 'list<real^3>');
+  cev.declare('c', 'boolean');
+  cev.declare('x', 'real');
+  const opts = {
+    ...NO_FOLD,
+    vars: { W: 'nextValue()', V: 'vec3(nextValue())', U: 'u_u' },
+  };
+  const both = (expr: any, message: RegExp) => {
+    const boxed = cev.box(expr);
+    expect(() => glsl.compile(boxed, opts)).toThrow(message);
+    expect(() => wgsl.compile(boxed, opts)).toThrow(message);
+  };
+  const MOVED = /ahead of the rest of its statement/;
+  const REPEATED = /more than once/;
+
+  it('a temporary for caller code does not run ahead of earlier caller code', () => {
+    // `vec3 _tv = vec3(nextValue());` would run before the `W` of the sum.
+    both(['Add', 'W', ['Max', 'V']], MOVED);
+    // The same through the `dot(v, v)` form of a sum of squares.
+    both(['Add', 'W', ['Sum', ['Square', 'V']]], MOVED);
+  });
+
+  it('a loop or an unrolled sum does not run ahead of earlier caller code', () => {
+    both(['Add', 'W', ['Sum', ['Add', 'W', 'k'], ['Limits', 'k', 1, 'n']]], MOVED);
+    both(
+      ['Add', 'W', ['Sum', ['Multiply', ['Max', 'V'], 'k'], ['Limits', 'k', 1, 3]]],
+      MOVED
+    );
+    both(
+      ['Add', 'W', ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 'x']], 'a']],
+      MOVED
+    );
+  });
+
+  it('a hoisted draw does not run ahead of earlier caller code', () => {
+    both(['WithRandomSeed', 1, ['Tuple', 'W', ['Cot', ['Random']]]], MOVED);
+    both(
+      [
+        'WithRandomSeed',
+        1,
+        ['Add', 'W', ['Match', ['Random'], ['MatchCase', 1, 10], ['MatchCase', '_', 30]]],
+      ],
+      /Match/
+    );
+  });
+
+  it('caller code is not written more than once', () => {
+    both(['Cot', 'W'], REPEATED);
+    both(['Cot', ['Complex', 'W', 1]], REPEATED);
+    both(['Remainder', 'W', 2], REPEATED);
+    both(['Remainder', 2, 'W'], REPEATED);
+    both(['Binomial', 'W', 3], REPEATED);
+    both(['ContrastingColor', ['Tuple', 'W', 1, 1], ['Rgb', 1, 0, 0], ['Rgb', 0, 0, 1]], REPEATED);
+    both(['Match', 'W', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]], REPEATED);
+    // The middle operand of a chained comparison is in two comparisons.
+    both(['Less', 'x', 'W', 3], /chained comparison/);
+  });
+
+  it('a head mapped through `functions` is caller code', () => {
+    const boxed = cev.box(['Cot', ['F', 'x']]);
+    const fopts = { ...NO_FOLD, functions: { F: 'myF' } };
+    expect(() => glsl.compile(boxed, fopts)).toThrow(REPEATED);
+    expect(() => wgsl.compile(boxed, fopts)).toThrow(REPEATED);
+  });
+
+  it('WGSL computes caller code in a branch only when the branch is taken', () => {
+    // `select(f, t, c)` computes both branches, so on WGSL a branch with
+    // caller code takes the statement form, an `if` statement. GLSL's `?:`
+    // computes one branch and keeps the ternary form.
+    for (const expr of [
+      ['If', 'c', 'W', 0],
+      ['Which', 'c', 'W', 'True', 0],
+      ['When', 'W', 'c'],
+      ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]],
+    ]) {
+      const boxed = cev.box(expr);
+      const code = wgsl.compile(boxed, opts).code!;
+      expect(code).toMatch(/^var _tv1: f32;\nif \(/);
+      expect(code).not.toContain('select');
+      expect(code.split('nextValue()').length).toBe(2);
+      expect(glsl.compile(boxed, opts).code).toContain('?');
+    }
+    expect(wgsl.compile(cev.box(['If', 'c', 'W', 0]), opts).code).toBe(
+      'var _tv1: f32;\n' +
+        'if (c) {\n' +
+        '  _tv1 = nextValue();\n' +
+        '} else {\n' +
+        '  _tv1 = 0.0;\n' +
+        '}\n' +
+        'return _tv1;'
+    );
+  });
+
+  it('WGSL declines a branch with caller code when the statement form is refused', () => {
+    // The `if` statement would run ahead of the first `W`, so the statement
+    // form is refused, and `select` would compute the branch when it is not
+    // taken.
+    for (const expr of [
+      ['Add', 'W', ['If', 'c', 'W', 0]],
+      ['Add', 'W', ['Which', 'c', 'W', 'True', 0]],
+      ['Add', 'W', ['When', 'W', 'c']],
+      ['Add', 'W', ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]],
+    ]) {
+      const boxed = cev.box(expr);
+      expect(() => wgsl.compile(boxed, opts)).toThrow(/computes every branch/);
+      expect(glsl.compile(boxed, opts).code).toContain('?');
+    }
+    expect(
+      glsl.compile(
+        cev.box(['Add', 'W', ['Match', 'x', ['MatchCase', 1, 'W'], ['MatchCase', '_', 30]]]),
+        opts
+      ).code
+    ).toBe('nextValue() + ((x == 1.0) ? (nextValue()) : (30.0))');
+  });
+
+  it('WGSL takes the statement form for a function mapped through `functions` in a branch', () => {
+    const boxed = cev.box(['If', ['Greater', 'x', 0], ['f', 'x'], 0]);
+    expect(
+      wgsl.compile(boxed, { ...NO_FOLD, functions: { f: 'myFn' } }).code
+    ).toBe(
+      'var _tv1: f32;\n' +
+        'if (0.0 < x) {\n' +
+        '  _tv1 = myFn(x);\n' +
+        '} else {\n' +
+        '  _tv1 = 0.0;\n' +
+        '}\n' +
+        'return _tv1;'
+    );
+  });
+
+  it('a loop in a `Match` case with caller code runs in the branch of the case', () => {
+    const boxed = cev.box([
+      'Match',
+      'x',
+      ['MatchCase', 1, ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
+      ['MatchCase', '_', 0],
+    ]);
+    expect(wgsl.compile(boxed, opts).code).toBe(
+      'var _tv1: f32;\n' +
+        'if (x == 1.0) {\n' +
+        '  var _tv2: f32 = 0.0;\n' +
+        '  for (var k: i32 = 1; k <= i32(floor(n)); k++) {\n' +
+        '    _tv2 += nextValue() * f32(k);\n' +
+        '  }\n' +
+        '  _tv1 = _tv2;\n' +
+        '} else {\n' +
+        '  _tv1 = 0.0;\n' +
+        '}\n' +
+        'return _tv1;'
+    );
+    expect(glsl.compile(boxed, opts).code).toContain(
+      '    _tv2 += nextValue() * float(k);\n'
+    );
+    // In the branch, the loop would run ahead of the first `W` of the case.
+    both(
+      [
+        'Match',
+        'x',
+        [
+          'MatchCase',
+          1,
+          ['Add', 'W', ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']]],
+        ],
+        ['MatchCase', '_', 0],
+      ],
+      MOVED
+    );
+  });
+
+  it('a `Which` checks only the operands behind an emitted `select`', () => {
+    // A leading `True` clause is evaluated with no `select`, and the clauses
+    // after a `True` clause are not emitted.
+    expect(wgsl.compile(cev.box(['Which', 'True', 'W']), opts).code).toBe(
+      '(nextValue())'
+    );
+    expect(
+      wgsl.compile(cev.box(['Which', 'c', 1, 'True', 2, 'c', 'W']), opts).code
+    ).toBe('select((2.0), 1.0, c)');
+  });
+
+  it('the statement form of a selection is refused when it would move caller code', () => {
+    // The `if` statement holds the loop, and it would run ahead of the first
+    // `W`; the ternary form cannot hold the loop, so the selection declines.
+    both(
+      [
+        'Add',
+        'W',
+        ['If', 'c', ['Sum', ['Multiply', 'W', 'k'], ['Limits', 'k', 1, 'n']], 0],
+      ],
+      MOVED
+    );
+    // With a plain read, the statement form is placed as before.
+    expect(
+      glsl.compile(
+        cev.box([
+          'Add',
+          'U',
+          ['If', 'c', ['Sum', ['Multiply', 'x', 'k'], ['Limits', 'k', 1, 'n']], 0],
+        ]),
+        opts
+      ).code
+    ).toBe(
+      'float _tv1;\n' +
+        'if (c) {\n' +
+        '  float _tv2 = 0.0;\n' +
+        '  for (int k = 1; k <= int(floor(n)); k++) {\n' +
+        '    _tv2 += float(k) * x;\n' +
+        '  }\n' +
+        '  _tv1 = _tv2;\n' +
+        '} else {\n' +
+        '  _tv1 = 0.0;\n' +
+        '}\n' +
+        'return u_u + _tv1;'
+    );
+  });
+
+  it('a symbol that `vars` maps to a plain read does not read its stored value', () => {
+    // `T` has the value `Sin(x)`, and `Sin` is mapped through `functions`,
+    // but the code reads the uniform `u_T` only.
+    const ce2 = new ComputeEngine();
+    ce2.declare('x', 'real');
+    ce2.parse('T \\coloneq \\sin(x)').evaluate();
+    const topts = {
+      ...NO_FOLD,
+      vars: { T: 'u_T' },
+      functions: { Sin: 'hostSin' },
+    };
+    expect(glsl.compile(ce2.box(['Cot', 'T']), topts).code).toBe(
+      '(_gpu_cos(u_T) / _gpu_sin(u_T))'
+    );
+    expect(glsl.compile(ce2.box(['Less', 'x', 'T', 3]), topts).code).toBe(
+      '(x < u_T) && (u_T < 3.0)'
+    );
+  });
+
+  it('a draw does not run ahead of caller code in its own endpoints', () => {
+    both(['WithRandomSeed', 1, ['Random', ['Interval', 'W', 1]]], /Random/);
+    both(['Random', ['Interval', 'W', 1]], /Random/);
+    both(['Random', ['Interval', 0, 'W']], /Random/);
+    // A plain read in an endpoint compiles as before.
+    expect(
+      glsl.compile(cev.box(['Random', ['Interval', 'U', 1]]), opts).code
+    ).toBe(
+      '((u_u) + _gpu_rnd_draw(uvec2(floatBitsToUint(gl_FragCoord.x), ' +
+        'floatBitsToUint(gl_FragCoord.y)), _gpu_rnd_n0) * ((1.0) - (u_u)))'
+    );
+  });
+
+  it('an element-wise lowering does not repeat a vector with caller code', () => {
+    both(['Cot', ['List', 'W', 'x', 1]], /more than once/);
+    expect(glsl.compile(cev.box(['Cot', ['List', 'U', 'x', 1]]), opts).code).toBe(
+      '(_gpu_cos3(vec3(u_u, x, 1.0)) / _gpu_sin3(vec3(u_u, x, 1.0)))'
+    );
+  });
+
+  it('a `vars` entry that is a read of one variable can be written twice', () => {
+    // `u_t` is the source of two keys, so it is caller source, but two
+    // copies of a read run no code.
+    const aopts = { ...NO_FOLD, vars: { a: 'u_t', b: 'u_t' } };
+    expect(glsl.compile(cev.box(['Cot', 'a']), aopts).code).toBe(
+      '(_gpu_cos(u_t) / _gpu_sin(u_t))'
+    );
+    expect(glsl.compile(cev.box(['Less', 'x', 'a', 3]), aopts).code).toBe(
+      '(x < u_t) && (u_t < 3.0)'
+    );
+  });
+
+  it('a temporary for caller code is also looked for in function bodies', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('V', 'list<real^3>');
+    ce2.assign('g', ce2.box(['Function', ['Add', 'n', ['Max', 'V']], 'n']));
+    const expr = ce2.box(['Add', ['g', 1], ['Max', 'V']]);
+    const vopts = { ...NO_FOLD, vars: { V: 'vec3(nextValue())' } };
+    expect(() => glsl.compile(expr, vopts)).toThrow(MOVED);
+    expect(() => wgsl.compile(expr, vopts)).toThrow(MOVED);
+  });
+
+  it('hoisted caller code does not run ahead of an earlier read of a `vars` input', () => {
+    // `state.value` is a plain read, but `nextValue` can write the variable
+    // it reads, and the interpreter reads `W` first.
+    const sopts = {
+      ...NO_FOLD,
+      vars: { W: 'state.value', V: 'vec3(nextValue())' },
+      functions: { F: 'nextValue' },
+    };
+    const forBoth = (expr: any, message: RegExp) => {
+      const boxed = cev.box(expr);
+      expect(() => glsl.compile(boxed, sopts)).toThrow(message);
+      expect(() => wgsl.compile(boxed, sopts)).toThrow(message);
+    };
+    expect(() =>
+      wgsl.compile(cev.box(['Tuple', 'W', ['If', 'c', ['F', 'x'], 0]]), sopts)
+    ).toThrow(/If/);
+    forBoth(['Tuple', 'W', ['Max', 'V']], MOVED);
+    // A read after the hoisted code runs after it in both orders.
+    expect(glsl.compile(cev.box(['Tuple', ['Max', 'V'], 'W']), sopts).code).toBe(
+      'vec3 _tv1 = vec3(nextValue());\n' +
+        'return vec2((_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z)), state.value);'
+    );
+    expect(
+      wgsl.compile(cev.box(['Tuple', ['If', 'c', ['F', 'x'], 0], 'W']), sopts)
+        .code
+    ).toBe(
+      'var _tv1: f32;\n' +
+        'if (c) {\n' +
+        '  _tv1 = nextValue(x);\n' +
+        '} else {\n' +
+        '  _tv1 = 0.0;\n' +
+        '}\n' +
+        'return vec2f(_tv1, state.value);'
+    );
+  });
+
+  it('an element-wise lowering does not read the stored value of a mapped input', () => {
+    // `r` has the value `Random()`, but the code reads the uniform `u_r`.
+    const ce2 = new ComputeEngine();
+    ce2.declare('x', 'real');
+    ce2.declare('r', 'real');
+    ce2.assign('r', ce2.box(['Random']));
+    expect(
+      glsl.compile(ce2.box(['Cot', ['List', 'r', 'x', 1]]), {
+        ...NO_FOLD,
+        vars: { r: 'u_r' },
+      }).code
+    ).toBe('(_gpu_cos3(vec3(u_r, x, 1.0)) / _gpu_sin3(vec3(u_r, x, 1.0)))');
+  });
+
+  it('a bound draw reads endpoints that are reads of one variable', () => {
+    // The draws are bound in order (the loop draws too). `a` and `b` have
+    // the same source, so they count as caller source, but they run no code.
+    const expr = (first: any[]) =>
+      cev.box([
+        'WithRandomSeed',
+        1,
+        ['Tuple', ...first, ['Sum', ['Random'], ['Limits', 'n', 1, ['Floor', 't']]]],
+      ]);
+    const aopts = { ...NO_FOLD, vars: { a: 'u_t', b: 'u_t', W: 'nextValue()' } };
+    expect(glsl.compile(expr([['Random', ['Interval', 'a', 'b']]]), aopts).code).toBe(
+      'float _tv2 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);\n' +
+        'float _tv3 = 0.0;\n' +
+        'for (int n = 1; n <= int(floor(floor(t))); n++) {\n' +
+        '  float _tv4 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n1);\n' +
+        '  _tv3 += _tv4;\n' +
+        '}\n' +
+        'return vec2(((u_t) + _tv2 * ((u_t) - (u_t))), _tv3);'
+    );
+    expect(
+      wgsl.compile(expr([['Random', ['Interval', 'a', 'b']]]), aopts).code
+    ).toContain('return vec2f(((u_t) + _tv2 * ((u_t) - (u_t))), _tv3);');
+    // The bound draw would run before the call of `W`.
+    expect(() =>
+      glsl.compile(expr(['W', ['Random', ['Interval', 'a', 'b']]]), aopts)
+    ).toThrow(MOVED);
+  });
+
+  it('a `Match` whose first case always matches emits no selection', () => {
+    expect(wgsl.compile(cev.box(['Match', 'x', ['MatchCase', '_', 'W']]), opts).code).toBe(
+      'nextValue()'
+    );
+    expect(
+      wgsl.compile(
+        cev.box(['Match', 'x', ['MatchCase', '_', 'W'], ['MatchCase', 1, 'W']]),
+        opts
+      ).code
+    ).toBe('nextValue()');
+    // A case after a case that always matches is not emitted, so it is not
+    // checked.
+    expect(
+      wgsl.compile(
+        cev.box([
+          'Add',
+          'W',
+          ['Match', 'x', ['MatchCase', 1, 10], ['MatchCase', '_', 30], ['MatchCase', 2, 'W']],
+        ]),
+        opts
+      ).code
+    ).toBe('nextValue() + select(30.0, 10.0, x == 1.0)');
+  });
+
+  it('a `Match` pin with caller code runs only when the earlier cases fail', () => {
+    // The comparison with the pin of a later case is behind a `select` on
+    // WGSL, so the `Match` takes the statement form; GLSL's `?:` keeps it
+    // in its branch.
+    const popts = { ...NO_FOLD, vars: { Pi: 'nextValue()', W: 'nextValue()' } };
+    const match = [
+      'Match',
+      'x',
+      ['MatchCase', 1, 10],
+      ['MatchCase', ['Pin', 'Pi'], 20],
+      ['MatchCase', '_', 30],
+    ];
+    expect(wgsl.compile(cev.box(match), popts).code).toBe(
+      'var _tv1: f32;\n' +
+        'if (x == 1.0) {\n' +
+        '  _tv1 = 10.0;\n' +
+        '} else {\n' +
+        '  if (x == nextValue()) {\n' +
+        '    _tv1 = 20.0;\n' +
+        '  } else {\n' +
+        '    _tv1 = 30.0;\n' +
+        '  }\n' +
+        '}\n' +
+        'return _tv1;'
+    );
+    expect(glsl.compile(cev.box(match), popts).code).toBe(
+      '((x == 1.0) ? (10.0) : (((x == nextValue()) ? (20.0) : (30.0))))'
+    );
+    // The `if` statement would call the pin before `W`; `select` would call
+    // it when the first case matches.
+    const after = cev.box(['Add', 'W', match]);
+    expect(() => wgsl.compile(after, popts)).toThrow(/computes every branch/);
+    expect(glsl.compile(after, popts).code).toBe(
+      'nextValue() + ((x == 1.0) ? (10.0) : (((x == nextValue()) ? (20.0) : (30.0))))'
+    );
+  });
+
+  it('forms with no caller code compile as before', () => {
+    const c = (expr: any) => glsl.compile(cev.box(expr), opts).code;
+    const cw = (expr: any) => wgsl.compile(cev.box(expr), opts).code;
+    expect(c(['Match', 'x', ['MatchCase', 1, 10], ['MatchCase', 2, 20], ['MatchCase', '_', 30]])).toBe(
+      '((x == 1.0) ? (10.0) : (((x == 2.0) ? (20.0) : (30.0))))'
+    );
+    expect(cw(['Match', 'x', ['MatchCase', 1, 'U'], ['MatchCase', '_', 30]])).toBe(
+      'select(30.0, u_u, x == 1.0)'
+    );
+    expect(c(['Remainder', 'U', 2])).toBe(
+      '((u_u) - (2.0) * _gpu_round_up((u_u) / (2.0)))'
+    );
+    expect(cw(['Remainder', 'x', 'U'])).toBe(
+      '((x) - (u_u) * _gpu_round_up((x) / (u_u)))'
+    );
+    expect(cw(['Less', 'x', 'U', 3])).toBe('(x < u_u) && (u_u < 3.0)');
+    expect(
+      c(['Add', 'x', ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 'x']], 'a']])
+    ).toBe(
+      'float _tv1;\n{\n  float a;\n  a = (x * x);\n  _tv1 = a;\n}\nreturn x + _tv1;'
+    );
+    expect(
+      cw(['Add', 'U', ['Block', ['Declare', 'a'], ['Assign', 'a', ['Square', 'x']], 'a']])
+    ).toBe(
+      'var _tv1: f32;\n{\n  var a: f32;\n  a = (x * x);\n  _tv1 = a;\n}\nreturn u_u + _tv1;'
+    );
+    expect(
+      wgsl.compile(cev.box(['Add', 'x', ['Sum', ['Square', 'V']]]), {
+        ...NO_FOLD,
+        vars: { V: 'u_v' },
+      }).code
+    ).toBe('x + dot(u_v, u_v)');
+    expect(cw(['Which', 'True', 'U'])).toBe('(u_u)');
+  });
+
+  it('caller code with nothing before it is held in a temporary', () => {
+    expect(glsl.compile(cev.box(['Tuple', ['Max', 'V'], 'U']), opts).code).toBe(
+      'vec3 _tv1 = vec3(nextValue());\n' +
+        'return vec2((_gpu_max(_gpu_max(_tv1.x, _tv1.y), _tv1.z)), u_u);'
+    );
+    // The canonical `Add` puts `U` first, and the interpreter reads it
+    // before it calls `V`: the caller's code could write the variable that
+    // `u_u` reads, so the temporary is refused.
+    expect(() =>
+      glsl.compile(cev.box(['Add', ['Max', 'V'], 'U']), opts)
+    ).toThrow(MOVED);
+  });
+
+  it('a plain uniform read and a symbol with no `vars` entry compile as before', () => {
+    const c = (expr: any) => glsl.compile(cev.box(expr), opts).code;
+    const cw = (expr: any) => wgsl.compile(cev.box(expr), opts).code;
+    expect(c(['Cot', 'U'])).toBe('(_gpu_cos(u_u) / _gpu_sin(u_u))');
+    expect(c(['Cot', 'x'])).toBe('(cos(x) / sin(x))');
+    expect(c(['Binomial', 'U', 3])).toBe(
+      '(((u_u) * ((u_u) - 1.0) * ((u_u) - 2.0)) / 6.0)'
+    );
+    expect(c(['Less', 'x', 'U', 3])).toBe('(x < u_u) && (u_u < 3.0)');
+    expect(cw(['If', 'c', 'U', 0])).toBe('select(0.0, u_u, c)');
+    expect(c(['WithRandomSeed', 1, ['Tuple', 'U', ['Cot', ['Random']]]])).toBe(
+      'float _tv1 = _gpu_rnd_draw(uvec2(0x3ff00000u, 0x00000000u), _gpu_rnd_n0);\n' +
+        'return vec2(u_u, (_gpu_cos(_tv1) / _gpu_sin(_tv1)));'
+    );
   });
 });

@@ -18,6 +18,10 @@ import {
   type StepBudget,
 } from '../../common/interruptible.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  implicitIntegrationVariable,
+  unusedVariableName,
+} from '../boxed-expression/integration-variables.js';
 import { multiClauseState } from '../multi-clause.js';
 import { UNIT_DEPENDENT_HEADS } from './angular-unit.js';
 import type { CompileTarget } from './types.js';
@@ -418,9 +422,30 @@ export function referencesVarsSymbol(
  */
 export function integrandLambda(
   integrand: Expression,
-  limitIndices: ReadonlyArray<string>
+  limitIndices: ReadonlyArray<string>,
+  limitExprs?: ReadonlyArray<Expression>
 ): { lambdaVars: string[]; bodyExpr: Expression } {
-  const lambdaVars = [...limitIndices];
+  // A limit that names no variable (`Limits(Nothing, a, b)`, index
+  // `Nothing`) takes the variable that the interpreter gives it
+  // (`implicitIntegrationVariable`). When the integrand has no parameter for
+  // it, the integrand is constant in that dimension, and the lambda of the
+  // limit binds a name that the integrand and the bounds do not read.
+  const constantVars = new Set<string>();
+  const resolved = limitIndices.map((index, d) => {
+    if (index !== 'Nothing' || limitExprs === undefined) return index;
+    const implicit = implicitIntegrationVariable(integrand, limitExprs, d);
+    if (implicit === null)
+      throw new Error(
+        `Could not compile \`Integrate\`: a limit with no variable, for an ` +
+          `integrand whose parameter has no readable name or whose value is ` +
+          `a function. The interpreter keeps the integral unevaluated.`
+      );
+    if (implicit !== undefined) return implicit;
+    const fresh = unusedVariableName([integrand, ...limitExprs], constantVars);
+    constantVars.add(fresh);
+    return fresh;
+  });
+  const lambdaVars = [...resolved];
   if (!isFunction(integrand, 'Function'))
     return { lambdaVars, bodyExpr: integrand };
   const params = integrand.ops.slice(1);
@@ -438,15 +463,16 @@ export function integrandLambda(
         `enclosing scope. Use a named parameter, or an ` +
         `integrand expressed directly in the limits' index variables.`
     );
+  const bound = resolved.filter((v) => !constantVars.has(v));
   const oneToOne =
-    names.length === limitIndices.length &&
+    names.length === bound.length &&
     new Set(names).size === names.length &&
-    limitIndices.every((v) => names.includes(v));
+    bound.every((v) => names.includes(v));
   if (!oneToOne)
     throw new Error(
       `Could not compile \`Integrate\`: the integrand's parameters ` +
         `(${names.join(', ') || 'none'}) do not match the integration ` +
-        `variables (${limitIndices.join(', ') || 'none'}) one to one. The ` +
+        `variables (${resolved.join(', ') || 'none'}) one to one. The ` +
         `interpreter declines such an integral, and pairing them by ` +
         `position would bind a parameter to the wrong range.`
     );

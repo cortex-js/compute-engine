@@ -41,9 +41,12 @@ import { core } from './compiler-core-hooks.js';
 import { recordFoldedPromotions } from './compile-statements.js';
 import { storedDefinitions } from './compile-integrals.js';
 import {
+  blockLocalFunction,
   signatureParamType,
   userFunctionLiteral,
 } from './compile-assignment-checks.js';
+import { isCallerMapped, type CseHarvestOptions } from './cse.js';
+import { _codeAliases, _codeOverrides } from './compiler-mode.js';
 import type {
   FoldCostContext,
   UnsafeIntegerOperand,
@@ -499,6 +502,7 @@ export function resetCompilationMemos(): void {
   CompilerState._foldValueMentionsMemo = new Map();
   CompilerState._angularDefinitionMemo = new Map();
   CompilerState._absArgMemo = new Map();
+  CompilerState._callerCodeMemo = new WeakMap();
   CompilerState._unsafeOperandsMemo = new WeakMap();
 }
 
@@ -564,7 +568,9 @@ export function nameReachesAbsArg(
  * the literal of a function that the compiled block itself defines (it is
  * called instead of an engine function with the same name): `null` when
  * that literal cannot be read, which counts as caller code because its body
- * is not known, and `undefined` when the name is not a block local.
+ * is not known, and `undefined` when the name is not a block local. `skip`
+ * names a node that the walk does not enter (a node whose code a caller
+ * examines on its own).
  *
  * Each node, each symbol name and each function name is visited once, so a
  * value that refers to itself ends the walk.
@@ -578,6 +584,7 @@ export function reachesCallerCode(
     localFunction?: (
       name: string
     ) => (Expression & FunctionInterface) | null | undefined;
+    skip?: (node: Expression) => boolean;
   }
 ): boolean {
   const engine = expr.engine;
@@ -587,6 +594,7 @@ export function reachesCallerCode(
   const visit = (node: Expression): boolean => {
     if (seen.has(node)) return false;
     seen.add(node);
+    if (caller.skip?.(node) === true) return false;
     if (isSymbol(node)) {
       const name = node.symbol;
       if (caller.isStringVar?.(name) === true) return true;
@@ -625,6 +633,133 @@ export function reachesCallerCode(
     );
   };
   return visit(expr);
+}
+
+/**
+ * Does the emitted code of `expr` run code that the caller supplied, on
+ * `target` (`reachesCallerCode`)? Every target uses this one test: the
+ * JavaScript, interval-JavaScript and Python targets, and the GLSL and WGSL
+ * shader targets.
+ *
+ * The `vars`, `functions` and `operators` entries of the caller are those of
+ * the target's common-subexpression session (`isCallerMapped`). A route with
+ * no session (`compileToSource`, a declared function body, a whole shader)
+ * has no `vars` or `functions`, but an operator declared with its own
+ * `compile` handler still emits caller code there, and `isCallerMapped`
+ * finds it from the definition. A symbol that `vars` maps to a plain read of
+ * an input, or that a binder of the compiled code binds, is read from that
+ * input and never from its stored value (`targetReadsInput`), so the walk
+ * does not enter its value: with `vars: { T: 'u_T' }`, `T` emits `u_T`
+ * whatever value `T` has. A function that the compiled block defines
+ * (`blockLocalFunction`) is the block's own binding, and the walk enters its
+ * body.
+ *
+ * A pass that repeats, skips or moves the evaluation of `expr` must treat
+ * a `true` answer as an effect, as it treats `Random()`.
+ *
+ * A head mapped through `functions` that the caller declared pure, or
+ * whose source was found pure (`isPureOverriddenOperator`, see
+ * `function-purity.ts`), has no effect: running it again or not at all is
+ * not observable, so it does not count, and only its operands are looked
+ * at. An `operators` entry and an operator's own `compile` handler always
+ * count.
+ *
+ * A node that an enclosing lowering has bound to a temporary
+ * (`_codeAliases`, `_codeOverrides`) compiles to a read of that temporary,
+ * which runs no caller code, so the answer is `false` for it. That answer is
+ * not kept in the memo of the compilation (`_callerCodeMemo`), since the
+ * binding ends with the lowering that made it.
+ *
+ * `skip` names a node that the walk does not enter (a node whose code the
+ * caller of this function examines on its own). An answer computed with
+ * `skip` depends on it, so it is not kept in the memo and the memo is not
+ * read for it.
+ */
+export function reachesCallerCodeOn(
+  expr: Expression,
+  target: CompileTarget<Expression>,
+  skip?: (node: Expression) => boolean
+): boolean {
+  if (_codeAliases.has(expr) || _codeOverrides.has(expr)) return false;
+  const options = target.cse?.harvestOptions as CseHarvestOptions | undefined;
+  let memo: { answers: WeakMap<Expression, boolean> } | undefined;
+  // A block fills `localFunctions` in statement order on the same target, so
+  // an answer computed before a local function is bound (its body unknown,
+  // which counts as caller code) can be wrong after. The memo is not used
+  // while the target has block-local functions.
+  const inBlock =
+    (target.localFunctions?.size ?? 0) > 0 ||
+    (target.lexicalFunctions?.size ?? 0) > 0;
+  if (skip === undefined && !inBlock) {
+    let entry = CompilerState._callerCodeMemo.get(target);
+    if (entry === undefined || entry.options !== options) {
+      entry = { options, answers: new WeakMap() };
+      CompilerState._callerCodeMemo.set(target, entry);
+    }
+    memo = entry;
+    const known = memo.answers.get(expr);
+    if (known !== undefined) return known;
+  }
+  const caller: CseHarvestOptions = options ?? {};
+  // The same predicates with no `functions` or `operators` entry: they
+  // still find an operator's own `compile` handler.
+  const handlerOnly: CseHarvestOptions = {
+    ...caller,
+    isOverriddenOperator: () => false,
+  };
+  const answer = reachesCallerCode(expr, {
+    isStringVar: caller.isStringVar,
+    isCallerMapped: (node) =>
+      isCallerMapped(node, caller) &&
+      (caller.isPureOverriddenOperator?.(node.operator) !== true ||
+        isCallerMapped(node, handlerOnly)),
+    readsInput: (name) => targetReadsInput(name, target),
+    localFunction: (name) => blockLocalFunction(name, target),
+    skip,
+  });
+  memo?.answers.set(expr, answer);
+  return answer;
+}
+
+/**
+ * Does a reference to the symbol `name` read an input of the code compiled
+ * for `target`: a `vars` entry that is not caller source (a plain read), or
+ * a variable that a binder of the compiled code binds? Its stored value is
+ * then not emitted (`reachesCallerCodeOn`).
+ */
+export function targetReadsInput(
+  name: string,
+  target: CompileTarget<Expression>
+): boolean {
+  return (
+    target.cse?.harvestOptions?.isStringVar?.(name) !== true &&
+    (target.varsKeys?.has(name) === true ||
+      target.boundVars?.has(name) === true)
+  );
+}
+
+/**
+ * Is `expr` a symbol whose emitted code on a shader target is a read of one
+ * variable: a `vars` entry that is a bare identifier, optionally followed by
+ * field accesses and literal indexes (`u_t`, `params.x`, `v[0]`)? Such an
+ * entry is caller source for `reachesCallerCodeOn` when another `vars`
+ * key has the same source (`{ a: 'u_t', b: 'u_t' }`), but GLSL and WGSL
+ * have no getters, so a second copy of the read reads the same value and
+ * runs no code. A form that writes its operand more than once can then
+ * accept it. A form that moves the operand ahead of other code must not use
+ * this test: the order of reads and writes of the variable can matter.
+ */
+export function isShaderVariableRead(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  if (!isSymbol(expr) || target.varsKeys?.has(expr.symbol) !== true)
+    return false;
+  const code = target.var(expr.symbol);
+  return (
+    typeof code === 'string' &&
+    /^[A-Za-z_]\w*(?:\.\w+|\[\d+\])*$/.test(code.trim())
+  );
 }
 
 /**
@@ -684,6 +819,51 @@ export function foldValueImpure(expr: Expression): boolean {
   }
   memo.set(expr, impure);
   return impure;
+}
+
+/**
+ * `foldValueImpure` for the code compiled for `target`: the walk does not
+ * enter the stored value of a symbol that reads an input
+ * (`targetReadsInput`: a plain `vars` read, a bound variable), as that value
+ * is not emitted. With `r := Random()` and `vars: { r: 'u_r' }`, `r` emits
+ * `u_r`, which draws nothing. Each node, each symbol name and each function
+ * name is visited once, so a value that refers to itself ends the walk.
+ */
+export function targetFoldValueImpure(
+  expr: Expression,
+  target: CompileTarget<Expression>
+): boolean {
+  const engine = expr.engine;
+  const seen = new Set<Expression>();
+  const names = new Set<string>();
+  const visit = (node: Expression): boolean => {
+    if (seen.has(node)) return false;
+    seen.add(node);
+    if (node.isPure === false) return true;
+    if (isSymbol(node)) {
+      const name = node.symbol;
+      if (names.has(name) || targetReadsInput(name, target)) return false;
+      names.add(name);
+      const v = engine._getSymbolValue(name);
+      return v !== undefined && visit(v);
+    }
+    if (isDictionary(node)) {
+      for (const v of node.values) if (visit(v)) return true;
+      return false;
+    }
+    if (!isFunction(node)) return false;
+    for (const op of node.ops) if (visit(op)) return true;
+    if (names.has(node.operator)) return false;
+    names.add(node.operator);
+    const literal = userFunctionLiteral(engine, node.operator);
+    if (literal !== undefined) return visit(literal);
+    return (
+      multiClauseState(engine.lookupDefinition(node.operator))?.clauses.some(
+        (c) => visit(c.literal)
+      ) ?? false
+    );
+  };
+  return visit(expr);
 }
 
 /**

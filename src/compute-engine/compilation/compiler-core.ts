@@ -78,7 +78,7 @@ import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
 import { CompileDeclineError } from './diagnostics.js';
 import { isColorValued } from './color-space-fact.js';
-import { candidateAt, isCallerMapped } from './cse.js';
+import { candidateAt } from './cse.js';
 import {
   arraysArePoints,
   compilationType,
@@ -183,7 +183,7 @@ import {
   foldValueBlocked,
   foldValueImpure,
   foldableCollectionElements,
-  reachesCallerCode,
+  reachesCallerCodeOn,
   foldedRealNumber,
   hasUnknowns,
   jumpShiftRewrite,
@@ -1265,19 +1265,14 @@ export function realOperandGuard(
     (target.varsKeys?.has(name) === true ||
       target.boundVars?.has(name) === true);
   // The walk looks through symbol values and user-function bodies, as the
-  // compiled code inlines them (`reachesCallerCode`).
+  // compiled code inlines them (`reachesCallerCodeOn`).
   // One answer per operand node: the walk can be long (values and bodies),
   // and the tests below ask about the same operand several times.
   const callerCodeMemo = new Map<Expression, boolean>();
   const callerCode = (a: Expression): boolean => {
     let known = callerCodeMemo.get(a);
     if (known === undefined) {
-      known = reachesCallerCode(a, {
-        isStringVar: caller.isStringVar,
-        isCallerMapped: (node) => isCallerMapped(node, caller),
-        readsInput: inputName,
-        localFunction: (name) => blockLocalFunction(name, target),
-      });
+      known = reachesCallerCodeOn(a, target);
       callerCodeMemo.set(a, known);
     }
     return known;
@@ -4487,6 +4482,16 @@ export function conditionNode(
     return connectiveNode(cond, h, canBind, target);
   if (!BRANCH_RELATIONS.has(h))
     return { negate: false, test: { kind: 'value', expr: cond } };
+  // Whether evaluating operand `op` can have an effect: it is impure, or it
+  // runs code that the caller supplied (`reachesCallerCodeOn`: a `vars`
+  // entry `W: 'nextValue()'`, a head mapped through `functions`), also
+  // when it is a bare symbol. That code can count its calls or draw a
+  // number, so it is treated as `Random()` is treated below: evaluated
+  // once, never skipped by a test placed before it.
+  const hasEffect = (op: Expression): boolean =>
+    op.isPure !== true ||
+    (target !== undefined && reachesCallerCodeOn(op, target));
+  const condEffect = cond.isPure !== true || cond.ops.some(hasEffect);
   // A pair with a NaN literal operand is decided whatever the other
   // operand holds: `NaN < x` is `False` and `NaN ≠ x` is `True` in the
   // interpreter while `x` has no value, and the plain comparison gives
@@ -4494,7 +4499,7 @@ export function conditionNode(
   if (
     cond.nops === 2 &&
     cond.ops.some((op) => isNanLiteral(op)) &&
-    cond.ops.every((op) => op.isPure === true)
+    !cond.ops.some(hasEffect)
   )
     return {
       negate: false,
@@ -4576,15 +4581,15 @@ export function conditionNode(
   if (
     target?.language === 'javascript' &&
     target.bindExpr !== undefined &&
-    (cond.isPure !== true || readsBlockLocal(cond, target)) &&
+    (condEffect || readsBlockLocal(cond, target)) &&
     guardTakesOperands(cond.ops)
   ) {
     CompilerState._poisonConditions.add(cond);
     return { negate: false, test: { kind: 'value', expr: cond } };
   }
-  if (cond.isPure !== true) {
+  if (condEffect) {
     if (!canBind || cond.nops > 2) return null;
-    if (cond.nops === 2 && cond.op1 === cond.op2 && cond.op1.isPure !== true)
+    if (cond.nops === 2 && cond.op1 === cond.op2 && hasEffect(cond.op1))
       return null;
   }
   // A CHAIN (`Less(x, 0, w)`) is the Kleene conjunction of its links, as in

@@ -182,7 +182,8 @@ describe('compiled equality on NaN and on infinities — JavaScript target', () 
       fallback: false,
     });
     expect(middle.code!.match(/drawNextRandomNumber/g)).toHaveLength(1);
-    expect(middle.code).toContain('=> {');
+    // The draw is bound to a parameter that both pairs read.
+    expect(middle.code).toContain('(_tv1) =>');
     // Two SEPARATE draws stay two draws.
     const two = compile(engine.box(['Equal', ['Random'], ['Random']]), {
       fallback: false,

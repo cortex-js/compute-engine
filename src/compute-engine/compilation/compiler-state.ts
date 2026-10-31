@@ -306,6 +306,17 @@ export class CompilerState {
    */
   static _absArgMemo = new Map<string, boolean>();
   /**
+   * Per-compilation memo of `reachesCallerCodeOn`, keyed per target, then
+   * per expression. The answer also depends on the caller's provenance
+   * predicates of the target (`cse.harvestOptions`), which a new session can
+   * replace on the same target object, so each entry records the predicates
+   * it was computed with. Reset with the other compilation memos.
+   */
+  static _callerCodeMemo = new WeakMap<
+    CompileTarget<Expression>,
+    { options: object | undefined; answers: WeakMap<Expression, boolean> }
+  >();
+  /**
    * Per-compilation memo of `unsafeIntegerOperands`, keyed per target then
    * per expression, like `_foldValueMemo`; reset with `_foldValueMemo` at
    * each outermost compilation entry. Without it, every subtree was scanned

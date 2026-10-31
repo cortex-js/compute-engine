@@ -541,3 +541,19 @@ describe('A PIECEWISE INTEGRAND WITH A NOTHING BRANCH', () => {
     expect(integral(['Multiply', w, 2]).evaluate().re).toBeCloseTo(1.25, 12);
   });
 });
+
+// A condition `a < b < c` is a chain: it holds when `a < b` and `b < c`.
+describe('PIECEWISE INTEGRALS WITH A COMPARISON CHAIN', () => {
+  test.each([
+    [['If', ['Less', 0, 'x', 1], 1, 0], 1],
+    [['Which', ['Less', 0, 'x', 1], 'x', 'True', 0], 1 / 2],
+    [['If', ['Greater', 1, 'x', -1], 1, 0], 2],
+    // -1 ≤ x ≤ 2x ≤ 1 is 0 ≤ x ≤ 1/2.
+    [['If', ['LessEqual', -1, 'x', ['Multiply', 2, 'x'], 1], 'x', 0], 1 / 8],
+    [['If', ['Not', ['Less', 0, 'x', 1]], 1, 0], 3],
+  ] as [ExpressionInput, number][])('%j on [-2, 2]', (body, expected) => {
+    const result = integrate(body, -2, 2);
+    expect(result.operator).not.toBe('Integrate');
+    expect(result.re).toBeCloseTo(expected, 12);
+  });
+});

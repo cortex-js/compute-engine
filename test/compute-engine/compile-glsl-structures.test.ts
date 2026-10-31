@@ -103,6 +103,247 @@ describe('GLSL COMPILATION — structures and control flow', () => {
       expect(code).not.toContain('() =>');
       expect(code).not.toContain('})()');
     });
+
+    // A Loop over several Element clauses visits every combination of the
+    // indices, the first clause outermost. The shader loop read only the
+    // first clause, so `j` became a free input and the shader gave `3 * j`
+    // where the interpreter gives 18.
+    const multiClause = [
+      'Block',
+      ['Assign', 's', 0],
+      [
+        'Loop',
+        ['Assign', 's', ['Add', ['Multiply', 10, 's'], 'j']],
+        ['Element', 'i', ['Range', 1, 2]],
+        ['Element', 'j', ['Range', 1, 3]],
+      ],
+      's',
+    ];
+
+    it('should nest one GLSL for-loop per Element clause, first outermost', () => {
+      const expr = ce.expr(multiClause);
+      // 123, then 123123: the inner loop is the one over `j`.
+      expect(expr.evaluate().re).toBe(123123);
+      expect(glsl.compile(expr).code).toBe(
+        [
+          'float s;',
+          's = 0.0;',
+          'for (int i = 1; i <= 2; i++) {',
+          '  for (int j = 1; j <= 3; j++) {',
+          '    s = float(j) + 10.0 * s;',
+          '  }',
+          '}',
+          'return s;',
+        ].join('\n')
+      );
+    });
+
+    it('should nest one WGSL for-loop per Element clause, first outermost', () => {
+      const expr = ce.expr(multiClause);
+      expect(new WGSLTarget().compile(expr).code).toBe(
+        [
+          'var s: f32;',
+          's = 0.0;',
+          'for (var i: i32 = 1; i <= 2; i++) {',
+          '  for (var j: i32 = 1; j <= 3; j++) {',
+          '    s = f32(j) + 10.0 * s;',
+          '  }',
+          '}',
+          'return s;',
+        ].join('\n')
+      );
+    });
+
+    it('should decline a multi-clause Loop whose inner Range reads an outer index', () => {
+      // The bounds of a shader loop are read at compile time, but
+      // `Range(1, i)` changes on each turn of the loop over `i`.
+      const expr = ce.expr([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', 'j']],
+          ['Element', 'i', ['Range', 1, 3]],
+          ['Element', 'j', ['Range', 1, 'i']],
+        ],
+        's',
+      ]);
+      expect(() => glsl.compile(expr)).toThrow(/reads the outer index `i`/);
+      expect(() => new WGSLTarget().compile(expr)).toThrow(
+        /reads the outer index `i`/
+      );
+    });
+
+    it('should decline a multi-clause Loop whose body can Break', () => {
+      // A Break stops the whole loop in the interpreter, but leaves only
+      // the innermost of the nested for-loops.
+      const expr = ce.expr([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          ['Block', ['If', ['Greater', 'j', 1], ['Break']], ['Assign', 's', 'j']],
+          ['Element', 'i', ['Range', 1, 3]],
+          ['Element', 'j', ['Range', 1, 3]],
+        ],
+        's',
+      ]);
+      expect(() => glsl.compile(expr)).toThrow(/several Element clauses/);
+      expect(() => new WGSLTarget().compile(expr)).toThrow(
+        /several Element clauses/
+      );
+    });
+
+    // A guarded clause, `Element(i, Range(1, 5), Greater(i, 2))`, visits an
+    // element only when the guard is `True`. The shader loop visited every
+    // element, so it gave 15 where the interpreter gives 12.
+    it('should test the guard of a single Element clause', () => {
+      const expr = ce.expr([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', 'i']],
+          ['Element', 'i', ['Range', 1, 5], ['Greater', 'i', 2]],
+        ],
+        's',
+      ]);
+      expect(expr.evaluate().re).toBe(12);
+      expect(glsl.compile(expr).code).toBe(
+        [
+          'float s;',
+          's = 0.0;',
+          'for (int i = 1; i <= 5; i++) {',
+          '  if (2.0 < float(i)) {',
+          '    s = float(i) + s;',
+          '  }',
+          '}',
+          'return s;',
+        ].join('\n')
+      );
+      expect(new WGSLTarget().compile(expr).code).toBe(
+        [
+          'var s: f32;',
+          's = 0.0;',
+          'for (var i: i32 = 1; i <= 5; i++) {',
+          '  if (2.0 < f32(i)) {',
+          '    s = f32(i) + s;',
+          '  }',
+          '}',
+          'return s;',
+        ].join('\n')
+      );
+    });
+
+    it('should test the guard of each Element clause inside its own loop', () => {
+      // 2 + 3 for each of the 2 values of `i`. Without the guard of `j`
+      // the shader gave 12.
+      const expr = ce.expr([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', 'j']],
+          ['Element', 'i', ['Range', 1, 3], ['Less', 'i', 3]],
+          ['Element', 'j', ['Range', 1, 3], ['Greater', 'j', 1]],
+        ],
+        's',
+      ]);
+      expect(expr.evaluate().re).toBe(10);
+      expect(glsl.compile(expr).code).toBe(
+        [
+          'float s;',
+          's = 0.0;',
+          'for (int i = 1; i <= 3; i++) {',
+          '  if (float(i) < 3.0) {',
+          '    for (int j = 1; j <= 3; j++) {',
+          '      if (1.0 < float(j)) {',
+          '        s = float(j) + s;',
+          '      }',
+          '    }',
+          '  }',
+          '}',
+          'return s;',
+        ].join('\n')
+      );
+      expect(new WGSLTarget().compile(expr).code).toBe(
+        [
+          'var s: f32;',
+          's = 0.0;',
+          'for (var i: i32 = 1; i <= 3; i++) {',
+          '  if (f32(i) < 3.0) {',
+          '    for (var j: i32 = 1; j <= 3; j++) {',
+          '      if (1.0 < f32(j)) {',
+          '        s = f32(j) + s;',
+          '      }',
+          '    }',
+          '  }',
+          '}',
+          'return s;',
+        ].join('\n')
+      );
+    });
+
+    it('should decline a Loop guard that is not a boolean', () => {
+      const engine = new ComputeEngine();
+      engine.declare('x', 'real');
+      const expr = engine.expr([
+        'Block',
+        ['Assign', 's', 0],
+        [
+          'Loop',
+          ['Assign', 's', ['Add', 's', 'i']],
+          ['Element', 'i', ['Range', 1, 5], 'x'],
+        ],
+        's',
+      ]);
+      expect(() => glsl.compile(expr)).toThrow(/is not a boolean/);
+      expect(() => new WGSLTarget().compile(expr)).toThrow(/is not a boolean/);
+    });
+
+    // The interpreter evaluates the `Range` of an inner clause again each
+    // time the outer loop enters it, so a write in the body to a bound
+    // changes the next inner loop: with `N := 2` the inner loop runs 2
+    // times, then 4 times, and `s` is 6. The bound of a shader loop is read
+    // once, at compile time. A body that writes `N` declines: a symbol with
+    // a value is written in place in the shader, so the write cannot be
+    // compiled, and a block local has no value at compile time.
+    it('should decline a multi-clause Loop whose body writes an inner bound', () => {
+      const engine = new ComputeEngine();
+      const loop = (bound: string) => [
+        'Loop',
+        [
+          'Block',
+          ['Assign', bound, ['Add', bound, 1]],
+          ['Assign', 's', ['Add', 's', 1]],
+        ],
+        ['Element', 'i', ['Range', 1, 2]],
+        ['Element', 'j', ['Range', 1, bound]],
+      ];
+      engine.assign('N', 2);
+      const assigned = engine.expr([
+        'Block',
+        ['Assign', 's', 0],
+        loop('N'),
+        's',
+      ]);
+      const local = engine.expr([
+        'Block',
+        ['Assign', 'M', 2],
+        ['Assign', 's', 0],
+        loop('M'),
+        's',
+      ]);
+      expect(local.evaluate().re).toBe(6);
+      for (const target of [glsl, new WGSLTarget()]) {
+        expect(() => target.compile(assigned)).toThrow(
+          /Could not compile `Assign`: "N" has an assigned value/
+        );
+        expect(() => target.compile(local)).toThrow(
+          /bounds of the `Range` must be numbers known at compile time/
+        );
+      }
+    });
   });
 
   describe('Function (Lambda)', () => {

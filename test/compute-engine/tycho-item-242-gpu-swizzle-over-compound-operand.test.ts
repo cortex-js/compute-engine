@@ -110,8 +110,8 @@ describe('a component read over an absent operand', () => {
 });
 
 // `Last` reads the last component of a `vec2`/`vec3`/`vec4`, so its
-// swizzle follows the static width of the operand. An operand with no static
-// width of 2 to 4 (a list of unknown or greater length) has no lowering.
+// swizzle follows the static width of the operand. A list of unknown length
+// has no last position known at compile time, so it has no lowering.
 describe('Last reads the component at the static width', () => {
   test('a point of each width, and a compound operand', () => {
     ce.declare('p2', 'tuple<number, number>');
@@ -134,7 +134,9 @@ describe('Last reads the component at the static width', () => {
     ce.declare('v', 'list<real>');
     expect(() =>
       compile(ce.box(['Last', 'v']), { to: 'glsl', fallback: false })
-    ).toThrow(/Could not compile `Last`: the operand must be a point/);
+    ).toThrow(
+      /Could not compile `Last` \(read as `At` with the index -1\): .*no statically known length/
+    );
   });
 });
 

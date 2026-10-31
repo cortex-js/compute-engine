@@ -948,6 +948,7 @@ export function compileMatchTernary(
             : undefined;
         clauses.push({
           body: cc.body,
+          comparisons: [],
           compileBody: () => compileMatchBody(cc, acc, target),
         });
         // The cases after an irrefutable case are never reached.
@@ -962,6 +963,11 @@ export function compileMatchTernary(
       clauses.push({
         body: cc.body,
         guard,
+        comparisons: matchCaseComparisons(cc).flatMap((cmp) =>
+          cmp.kind === 'range'
+            ? [cmp.lo, cmp.hi]
+            : [cmp.kind === 'literal' ? cmp.value : cmp.expr]
+        ),
         test: () => {
           const cond = matchLeafCondition(
             engine,

@@ -51,7 +51,10 @@ import {
   nanOperandAnswer,
   sym,
 } from '../boxed-expression/type-guards.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  ANONYMOUS_SLOT_NAMES,
+  functionLiteralParameterName,
+} from '../boxed-expression/function-literal.js';
 import { paramsAreScalar } from '../boxed-expression/boxed-function.js';
 import {
   operandSites,
@@ -223,6 +226,10 @@ import {
   canonicalWithEscapingReturn,
 } from './utils.js';
 import { implicitCompile } from '../implicit-compile.js';
+import {
+  implicitIntegrationVariable,
+  unusedVariableName,
+} from '../boxed-expression/integration-variables.js';
 import { holdsKindValue } from '../boxed-expression/residue-class.js';
 import {
   libraryNamesShadowedIn,
@@ -1961,6 +1968,47 @@ function constantFactorPoleVerdict(
 }
 
 /**
+ * The integral over `[lower, upper]` of `integrand`, a lifted integrand that
+ * does not depend on the variable of the limit: a limit that names no
+ * variable, for an integrand with no parameter for it
+ * (`implicitIntegrationVariable`). The value is `c·(upper − lower)`, where
+ * `c` is the value of the integrand, with `evaluate()` or, when `numeric` is
+ * true, `N()`. A function literal with no parameter whose body is a block of
+ * several statements is not lifted (`liftIntegrand`): it is applied to no
+ * arguments, so that its block runs as a call does.
+ *
+ * - Equal bounds (`isSame`, also `+∞` and `+∞`) give `0`, before the
+ *   integrand is read: `∞ − ∞` and `∞·0` have no value.
+ * - An integrand whose VALUE is exactly `0` gives `0`, also over an infinite
+ *   interval. With `c := 0`, `\int_0^\infty c` is `0`, as compiled code
+ *   gives. The test is exact: `10^{-12}` over `[0, ∞)` is `+∞`.
+ * - A `NaN` product (a bound with the value `NaN`) gives `undefined`: the
+ *   integral stays unevaluated, as with a named variable.
+ * - A function literal that still has parameters gives `undefined`.
+ */
+function constantIntegral(
+  ce: ComputeEngine,
+  integrand: Expression,
+  lower: Expression,
+  upper: Expression,
+  numeric: boolean
+): Expression | undefined {
+  if (lower.isSame(upper)) return ce.Zero;
+  let body: Expression | undefined = integrand;
+  if (isFunction(integrand, 'Function')) {
+    if (integrand.nops > 1) return undefined;
+    body = applicable(integrand)([]);
+    if (body === undefined) return undefined;
+  }
+  const value = numeric ? body.N() : body.evaluate();
+  if (isNumber(value) && value.isSame(0)) return ce.Zero;
+  const result = ce
+    .function('Multiply', [value, ce.function('Subtract', [upper, lower])])
+    .evaluate({ numericApproximation: numeric });
+  return result.isNaN === true ? undefined : result;
+}
+
+/**
  * The name of the variable of the integrand `f(t)` that `NIntegrate` builds
  * for a function given by its name (`NIntegrate(Tan, 0, 3)`). The name is
  * unlikely to occur in the body of a user function: the interior-pole check
@@ -3076,10 +3124,27 @@ function nIntegrateMultiple(
   evaluatedBounds?: ReadonlyArray<ReadonlyArray<Expression>>
 ): Expression | undefined {
   const vars: string[] = [];
-  for (const l of limits) {
+  // The variables of the limits that name no variable and that the integrand
+  // has no parameter for. The integrand does not depend on them.
+  const constantVars = new Set<string>();
+  for (const [d, l] of limits.entries()) {
     if (!isFunction(l)) return undefined;
-    const v = sym(l.op1);
-    if (!v || v === 'Nothing') return undefined;
+    let v = sym(l.op1);
+    // A limit that names no variable reads it from the parameters of the
+    // integrand, as the exact route does (`implicitIntegrationVariable`).
+    // When the integrand has no parameter for it, the integrand is constant
+    // in that dimension, and the dimension gets a variable that the
+    // integrand does not read.
+    if (v === 'Nothing') {
+      const implicit = implicitIntegrationVariable(f, limits, d);
+      if (implicit === null) return undefined;
+      v = implicit;
+      if (v === undefined) {
+        v = unusedVariableName([f, ...limits], constantVars);
+        constantVars.add(v);
+      }
+    }
+    if (!v) return undefined;
     vars.push(v);
   }
 
@@ -3127,13 +3192,25 @@ function nIntegrateMultiple(
   // Map each integration variable to its parameter slot: a user-supplied
   // `Function` may list its parameters in a different order than the limits.
   // A variable with no parameter slot, a duplicated variable, or a spare
-  // parameter (which would be left unbound) all decline.
+  // parameter (which would be left unbound) all decline. The variable of a
+  // dimension in which the integrand is constant (`constantVars`) and that
+  // is not a parameter gets a slot after the parameters: the integrand is
+  // called with that argument too, and does not read it.
   const params = isFunction(fnExpr)
-    ? fnExpr.ops.slice(1).map((p) => sym(p))
+    ? fnExpr.ops.slice(1).map((p) => functionLiteralParameterName(p))
     : [];
-  const slots = vars.map((v) => params.indexOf(v));
+  const extraVars = vars.filter(
+    (v) => constantVars.has(v) && !params.includes(v)
+  );
+  const slots = vars.map((v) =>
+    params.includes(v)
+      ? params.indexOf(v)
+      : extraVars.includes(v)
+        ? params.length + extraVars.indexOf(v)
+        : -1
+  );
   if (
-    params.length !== vars.length ||
+    params.length + extraVars.length !== vars.length ||
     slots.some((i) => i < 0) ||
     new Set(slots).size !== slots.length
   )
@@ -3349,7 +3426,11 @@ function nIntegrateMultiple(
     );
   else {
     const app = applicable(fnExpr);
-    raw = (...args: number[]) => app(args.map((x) => ce.number(x)));
+    // Only the arguments of the parameters are passed: the arguments after
+    // them are the variables of the dimensions in which the integrand is
+    // constant.
+    raw = (...args: number[]) =>
+      app(args.slice(0, params.length).map((x) => ce.number(x)));
   }
   const integrand = numericIntegrandParts(raw);
   // The part being integrated: the real part first, then — only when a
@@ -4766,6 +4847,92 @@ function functionLiteralOf(
   }
   const value = ce._getSymbolValue(id);
   return isFunction(value, 'Function') ? value : undefined;
+}
+
+/**
+ * The function literal of the first operand of the implicit form of `Limit`
+ * and `NLimit`: `Limit(expr, point)` and `Limit(expr, point, direction)`,
+ * where the variable is not written.
+ *
+ * The variable is a bound variable. It never takes the value assigned to a
+ * symbol of the same name, and the order of boxing and assignment does not
+ * change it. The shared `canonicalFunctionLiteral()` makes the parameters
+ * from the unknowns of the body, that is the symbols with no value: after
+ * `x := 4`, the body `√x` had no parameter, and `Limit(√x, a)` was the limit
+ * of the constant 2. When `x` had no value at boxing, it was the limit as
+ * x → a. Here the variable comes from the symbols written in the body,
+ * assigned or not: the first of them in sorted order (code-unit order, so an
+ * uppercase letter comes before a lowercase one: `y` for `y·z`, `a` for
+ * `a·x`). When nothing is assigned, this is the first unknown, the variable
+ * that `canonicalFunctionLiteral()` gives. A constant (`Pi`, `ExponentialE`),
+ * a symbol of a library, a symbol that names a function and a symbol bound
+ * inside the body (the index of a `Sum`) are not candidates.
+ *
+ * A parenthesized operand `(√x)` is the expression it holds, as in
+ * `canonicalFunctionLiteral()`. When the body has no candidate, the result
+ * is that of `canonicalFunctionLiteral()`. A `Function` literal and a body
+ * with anonymous slots (`_`) keep that result too, because they name their
+ * own parameters. A bare symbol keeps it because it names a function
+ * (`Limit(Sin, 0)`). A parenthesized sequence of several expressions
+ * (`(a; b)`, which becomes a `Block`) also keeps it.
+ */
+function canonicalImplicitLimitFunction(
+  ce: ComputeEngine,
+  f: Expression | undefined
+): Expression | undefined {
+  // A parenthesized operand is the expression it holds. A sequence of one
+  // expression is that expression.
+  while (isFunction(f, 'Delimiter')) {
+    let inner: Expression | undefined = f.op1;
+    if (isFunction(inner, 'Sequence')) {
+      if (inner.nops !== 1) break;
+      inner = inner.op1;
+    }
+    if (inner === undefined) break;
+    f = inner;
+  }
+  const fn = canonicalFunctionLiteral(f);
+  if (
+    f === undefined ||
+    isSymbol(f) ||
+    isFunction(f, 'Function') ||
+    isFunction(f, 'Delimiter') ||
+    !isFunction(fn, 'Function')
+  )
+    return fn;
+  const params = fn.ops.slice(1).map((p) => functionLiteralParameterName(p));
+  if (params.some((p) => ANONYMOUS_SLOT_NAMES.has(p))) return fn;
+
+  // The candidates: the unknowns of the body, and the user symbols that the
+  // body reads and that have a value (the `references` of the body less the
+  // applied functions).
+  const body = fn.op1;
+  const functions = new Set(body.referencedFunctions);
+  const candidates = new Set<string>();
+  // Every unknown stays a candidate, as in `canonicalFunctionLiteral()`: an
+  // unknown can be bound in a scope of its own and still have the name of an
+  // operator in the caller's scope (`N` in `x + N`). The operator test applies
+  // only to the names that `references` adds.
+  const unknowns = new Set(body.unknowns);
+  for (const s of [...body.unknowns, ...body.references]) {
+    if (ANONYMOUS_SLOT_NAMES.has(s) || functions.has(s)) continue;
+    const def = unknowns.has(s) ? undefined : ce.lookupDefinition(s);
+    if (def !== undefined && isOperatorDef(def)) continue;
+    candidates.add(s);
+  }
+  if (candidates.size === 0) return fn;
+  const v = [...candidates].sort()[0];
+  // The literal has the variable as its one parameter. The other symbols are
+  // free: a literal `Function(y·z, y, z)` would make `z` a parameter that the
+  // limit never binds, and compiled code read it as an unbound parameter
+  // (NaN) where the interpreter reads the free symbol `z`.
+  if (params.length === 1 && params[0] === v) return fn;
+  return (
+    canonicalFunctionLiteralArguments(ce, [
+      f,
+      ce.symbol(v, { canonical: false }),
+    ]) ?? fn
+  );
 }
 
 /**
@@ -6240,6 +6407,47 @@ volumes
             return undefined;
         }
 
+        // A limit that names no variable takes it from the parameters of the
+        // integrand (`implicitIntegrationVariable`). The integral stays
+        // unevaluated, under `evaluate()` and `N()` alike, when that
+        // variable cannot be read (a destructuring parameter, a bare-symbol
+        // integrand whose value is a function), and for an indefinite limit
+        // with no variable for an integrand with no parameter
+        // (`Integrate(2, Nothing)`): its antiderivative was taken with
+        // respect to the symbol `Nothing`.
+        for (const [i, l] of ops.slice(1).entries()) {
+          if (!isFunction(l, 'Limits') || sym(l.op1) !== 'Nothing') continue;
+          const implicit = implicitIntegrationVariable(ops[0], ops.slice(1), i);
+          if (implicit === null) return undefined;
+          if (
+            implicit === undefined &&
+            sym(l.op2) === 'Nothing' &&
+            sym(l.op3) === 'Nothing'
+          )
+            return undefined;
+        }
+
+        // A bare-symbol integrand that is the variable of a limit that names
+        // no variable (`x` in `\int_0^1 x`): the integral is the one with the
+        // variable named, `\int_0^1 x\,dx`. That form binds `x` in the scope
+        // of the integral. Without it, the evaluation made the held symbol
+        // canonical, which declared `x` in the enclosing scope.
+        if (isSymbol(ops[0])) {
+          const name = ops[0].symbol;
+          const limits = ops.slice(1);
+          const named = limits.map((l, i) =>
+            isFunction(l, 'Limits') &&
+            sym(l.op1) === 'Nothing' &&
+            implicitIntegrationVariable(ops[0], limits, i) === name
+              ? ce.function('Limits', [ops[0], l.op2, l.op3], { form: 'raw' })
+              : l
+          );
+          if (named.some((l, i) => l !== limits[i]))
+            return ce
+              .function('Integrate', [ops[0], ...named])
+              .evaluate({ numericApproximation });
+        }
+
         // A parameter of the running function call that holds an expression
         // of an integration variable is not constant in that variable: in
         // `g(f) = ∫ f dx`, the call `g(x^2)` gives `f` the value `x^2`, which
@@ -6552,15 +6760,26 @@ volumes
         // assigned symbol, so compiling `x ↦ |x| cos x` with `x := 5` saw a
         // positive `x`, dropped the `Abs`, and `∫_{−π}^{π} |x| cos x dx`
         // numericized to `0` instead of `−4`.
+        // A limit that names no variable binds the variable that
+        // `implicitIntegrationVariable` gives it, and a typed parameter
+        // (`Typed(x, 'real')`) binds its name.
         const intVarNames: string[] = [];
-        for (const l of ops.slice(1))
+        for (const [i, l] of ops.slice(1).entries())
           if (isFunction(l)) {
             const v = sym(l.op1);
             if (v && v !== 'Nothing') intVarNames.push(v);
+            if (v === 'Nothing') {
+              const implicit = implicitIntegrationVariable(
+                ops[0],
+                ops.slice(1),
+                i
+              );
+              if (implicit) intVarNames.push(implicit);
+            }
           }
         if (isFunction(ops[0]))
           for (const p of ops[0].ops.slice(1)) {
-            const n = sym(p);
+            const n = functionLiteralParameterName(p);
             if (n) intVarNames.push(n);
           }
 
@@ -6701,9 +6920,16 @@ volumes
           // `ReferenceError: _ is not defined` escapes out of generated code
           // to the caller of `.N()`.
           const boundVars = new Set<string>();
-          for (const l of ops.slice(1)) {
+          for (const [k, l] of ops.slice(1).entries()) {
             const v = isFunction(l) ? sym(l.op1) : undefined;
             if (v) boundVars.add(v);
+            // A limit that names no variable binds the symbol of a
+            // bare-symbol integrand (`\int_0^1 x`).
+            const implicit =
+              v === 'Nothing'
+                ? implicitIntegrationVariable(f, ops.slice(1), k)
+                : undefined;
+            if (implicit) boundVars.add(implicit);
           }
           // `unknowns` is a SURFACE property: for `∫ n(x) dx` where
           // `n = x ↦ q + x`, it reports nothing, because `q` lives in `n`'s
@@ -6783,8 +7009,31 @@ volumes
           const [lower, upper] = [lowerValue.re, upperValue.re];
           if (isNaN(lower) || isNaN(upper)) return undefined;
 
-          // Get the integration variable from the limits
-          const variable = sym(firstLimit.op1) ?? 'x';
+          // Get the integration variable from the limits. A limit that names
+          // no variable reads it from the parameters of the integrand, as
+          // the exact route does (`implicitIntegrationVariable`). When the
+          // integrand has no parameter for it, the integrand is a constant
+          // (see below), so `∫₀¹ 2` is `2` here too. The cases that
+          // `implicitIntegrationVariable` declines were refused at the start
+          // of the evaluation.
+          let variable = sym(firstLimit.op1) ?? 'x';
+          if (variable === 'Nothing') {
+            const implicit = implicitIntegrationVariable(f, ops.slice(1), 0);
+            // A constant integrand: its integral is
+            // `integrand·(upper − lower)`, as on the exact route, with no
+            // quadrature (`constantIntegral`). Quadrature gave this value
+            // only when it recognized the constant tail of an infinite
+            // interval.
+            if (implicit === undefined)
+              return constantIntegral(
+                ce,
+                liftIntegrand(f),
+                lowerValue,
+                upperValue,
+                true
+              );
+            variable = implicit ?? variable;
+          }
 
           // Compile the integrand as a function.
           // If it's already a Function expression, compile directly.
@@ -6800,9 +7049,20 @@ volumes
           // compiles two-arity, is invoked unary, and quadrature reads `NaN`.
           // Mirror the parameter/variable agreement check `nIntegrateMultiple`
           // already performs, and stay symbolic instead.
+          // A literal with no parameter is a constant function, and is
+          // integrated as one when its body does not read a symbol with the
+          // name of the variable. With `x := 4`, the literal `() ↦ √x` with
+          // the limit `Limits(x, 0, 1)` reads `x`, which the limit binds:
+          // the exact route integrates it with respect to `x`, so it is not
+          // integrated as a constant here.
           if (isFunction(fnExpr, 'Function')) {
-            const params = fnExpr.ops.slice(1).map((p) => sym(p));
-            if (params.length !== 1 || params[0] !== variable) return undefined;
+            const params = fnExpr.ops
+              .slice(1)
+              .map((p) => functionLiteralParameterName(p));
+            const constant =
+              params.length === 0 && !fnExpr.op1.symbols.includes(variable);
+            if (!constant && (params.length !== 1 || params[0] !== variable))
+              return undefined;
           }
 
           // A pole strictly inside the bounds: the integral diverges, and no
@@ -7003,9 +7263,18 @@ volumes
             const [varExpr, lower, upper] = limitFn.ops;
             let variable = sym(varExpr);
 
+            // A limit that names no variable reads it from the parameters of
+            // the integrand (`implicitIntegrationVariable`). When the
+            // integrand has no parameter for it, `variable` stays `Nothing`
+            // and the integrand is a constant (see below). The cases that
+            // `implicitIntegrationVariable` declines (`null`) were refused at
+            // the start of the evaluation.
+            if (variable === 'Nothing')
+              variable =
+                implicitIntegrationVariable(ops[0], limitsSequence, i) ??
+                variable;
             // Default variable name if missing
-            if ((!variable || variable === 'Nothing') && i < argNames.length)
-              variable = argNames[i];
+            if (!variable && i < argNames.length) variable = argNames[i];
             if (!variable) variable = 'x';
 
             // Consult the opt-in provider before the built-in antiderivative.
@@ -7083,6 +7352,28 @@ volumes
                           upper,
                         ]),
                       ]);
+              continue;
+            }
+            // A limit that names no variable, for an integrand with no
+            // parameter for it: the integrand does not depend on the
+            // variable, and the integral is `integrand·(upper − lower)`.
+            // Without this, the integrand was integrated with respect to the
+            // symbol `Nothing`, and `\int_0^1 2` was `0`. See
+            // `constantIntegral` for the zero, `NaN` and equal-bound cases.
+            if (variable === 'Nothing' && isDefinite) {
+              isIndefinite = false;
+              expr =
+                constantIntegral(
+                  ce,
+                  integrand,
+                  lower,
+                  upper,
+                  numericApproximation ?? false
+                ) ??
+                ce.function('Integrate', [
+                  expr,
+                  ce.function('Limits', [ce.Nothing, lower, upper]),
+                ]);
               continue;
             }
             // Expensive exact reductions are fallbacks, not a new default path.
@@ -8031,7 +8322,20 @@ volumes
   {
     // Limits
     Limit: {
-      description: 'Limit of a function',
+      description: [
+        'Limit of a function.',
+        'Limit(f, x, a) is the limit of f as x approaches a.',
+        'Limit(f, a) does not write the variable: it is the first, in sorted',
+        'order (an uppercase letter before a lowercase one), of the symbols',
+        'that the expression f reads from outside: not a constant, a library',
+        'name, a function, or a symbol bound inside f such as the index of a',
+        'Sum. A symbol with an assigned value is a candidate too, so an',
+        'assignment does not change the variable. A bare symbol f names a',
+        'function: Limit(Sin, a) is the limit of sin(t) as t approaches a.',
+        'The variable is bound: it never takes the value assigned to a',
+        'symbol of the same name.',
+        'Example: Limit(Sqrt(x), 3) is sqrt(3), also after x := 4.',
+      ],
       complexity: 5000,
       broadcastable: false,
 
@@ -8098,7 +8402,7 @@ volumes
             ]);
           }
         }
-        const fn = canonicalFunctionLiteral(f);
+        const fn = canonicalImplicitLimitFunction(engine, f);
         if (!fn || !x) return null;
         if (dir === undefined) return engine._fn('Limit', [fn, x.canonical]);
         return engine._fn('Limit', [fn, x.canonical, dir.canonical]);
@@ -8195,7 +8499,13 @@ volumes
       },
     },
     NLimit: {
-      description: 'Numerical approximation of the limit of a function',
+      description: [
+        'Numerical approximation of the limit of a function.',
+        'NLimit(f, a) finds its variable with the same rule as Limit(f, a):',
+        'the first of the symbols written in the expression f, in sorted',
+        'order, also when it has an assigned value. A bare symbol f names a',
+        'function.',
+      ],
       complexity: 5000,
       broadcastable: false,
 
@@ -8206,7 +8516,7 @@ volumes
         const returnError = canonicalWithEscapingReturn(engine, 'NLimit', ops);
         if (returnError) return returnError;
         const [f, x, dir] = ops;
-        const fn = canonicalFunctionLiteral(f);
+        const fn = canonicalImplicitLimitFunction(engine, f);
         if (!fn || !x) return null;
         if (dir === undefined) return engine._fn('NLimit', [fn, x.canonical]);
         return engine._fn('NLimit', [fn, x.canonical, dir.canonical]);

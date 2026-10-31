@@ -232,10 +232,20 @@ export function realGuardCandidate(
  * edges are conjoined left to right, so a later operand is not evaluated
  * (and an impure one not drawn) once an earlier edge has failed — the
  * interpreter's short-circuit order. Each edge compares the real projections
- * under the guard that its operands are real; otherwise it is `false`.
+ * under the guard that its two operands are real; otherwise it is `false`.
  *
- * Emitted as nested `bindExpr` scopes: `((t0) => guard0 ? ((t1) => guard1 ?
- * (t0 < t1) && ((t2) => …)(c) : false)(b) : false)(a)`. Operands that are
+ * The interpreter (`evaluateChainOperands` in
+ * `library/relational-operator.ts`) evaluates operand `i` and only then
+ * decides the edge `(i−1, i)`, also when operand `i−1` is not real. So the
+ * guard of an operand is tested at the edge to its RIGHT, after that edge
+ * has bound its right operand, and never before. At `Less(√(r₀−½),
+ * √(r₁−½), 0)` with a complex first root, both roots are drawn (two draws)
+ * and the value is `false`, as in the interpreter. A guard tested when its
+ * operand is bound skipped the second draw.
+ *
+ * Emitted as nested `bindExpr` scopes: `((t0) => ((t1) => guard0 && guard1
+ * ? (t0 < t1) && ((t2) => guard1 && guard2 ? … : false)(c) : false)(b))(a)`.
+ * Operands that are
  * NOT maybe-complex are still bound (they must be evaluated exactly once,
  * and the temporaries keep the edges uniform); their guard is omitted. The
  * comparison is the raw operator over real projections: a chain reaches
@@ -284,13 +294,19 @@ export function realOperandChain(
     isMaybe(args[i]) ? [isReal(temps[i])] : [];
   const valueOf = (i: number): string =>
     isMaybe(args[i]) ? real(temps[i]) : temps[i];
-  // Scope i binds operand i (guarded), then — for i ≥ 1 — compares it with
-  // operand i−1 (bound by the enclosing scope) and continues the chain.
+  // The conjunction of the target (`and` in Python).
+  const and = target.chainOp ?? '&&';
+  // Scope i binds operand i. For i ≥ 1 it then tests that operands i−1
+  // (bound by the enclosing scope) and i are real, compares them, and
+  // continues the chain.
   const scope = (i: number): string => {
-    const cmp = i === 0 ? '' : `(${valueOf(i - 1)} ${op} ${valueOf(i)})`;
-    const rest = i + 1 < args.length ? scope(i + 1) : '';
-    const body = cmp === '' ? rest : rest === '' ? cmp : `${cmp} && ${rest}`;
-    return bind([[temps[i], codes[i]]], guard(guardOf(i), body, 'boolean'));
+    if (i === 0) return bind([[temps[0], codes[0]]], scope(1));
+    const cmp = `(${valueOf(i - 1)} ${op} ${valueOf(i)})`;
+    const body = i + 1 < args.length ? `${cmp} ${and} ${scope(i + 1)}` : cmp;
+    return bind(
+      [[temps[i], codes[i]]],
+      guard([...guardOf(i - 1), ...guardOf(i)], body, 'boolean')
+    );
   };
   return scope(0);
 }

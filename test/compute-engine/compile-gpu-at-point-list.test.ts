@@ -11,6 +11,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 const ce = new ComputeEngine();
 ce.declare('k', 'integer');
@@ -141,4 +142,230 @@ describe('GPU: At over a list of points', () => {
       glsl.compile(ce.box(['At', PL, ['List', 1, 2]] as any))
     ).toThrow(/Could not compile/);
   });
+});
+
+// `First`, `Second`, `Third` and `Last` read one element at a fixed position,
+// as `At` with a constant index does. A declared list of points is an array
+// of vectors in a shader (`vec2[3]`, `array<vec2f, 3>`), so its element is a
+// subscript. A swizzle (`P.x`) reads the array as one vector, which is not a
+// valid shader. A position past the end is an absent point (`Missing` in the
+// interpreter), a vector of NaN components in a shader.
+describe('GPU: First, Second, Third and Last of a list of points', () => {
+  const compileTo = (to: 'glsl' | 'wgsl', json: unknown) =>
+    compile(ce.box(json as any), { to, fallback: false });
+
+  for (const to of ['glsl', 'wgsl'] as const)
+    test(`a declared list of 3 points (${to})`, () => {
+      const r = compileTo(to, ['First', 'P']);
+      expect(r.code).toBe('P[0]');
+      expect(r.freeSymbolTypes?.P?.lowered).toBe(
+        to === 'glsl' ? 'vec2[3]' : 'array<vec2f, 3>'
+      );
+      expect(compileTo(to, ['Second', 'P']).code).toBe('P[1]');
+      expect(compileTo(to, ['Third', 'P']).code).toBe('P[2]');
+      expect(compileTo(to, ['Last', 'P']).code).toBe('P[2]');
+      // The element is a point: a sum with a point is a vector sum.
+      expect(compileTo(to, ['Add', ['First', 'P'], ['Tuple', 1, 2]]).code).toBe(
+        to === 'glsl' ? 'P[0] + vec2(1.0, 2.0)' : 'P[0] + vec2f(1.0, 2.0)'
+      );
+    });
+
+  test('the interpreter reads the same elements', () => {
+    const points = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4]];
+    expect(ce.box(['First', points] as any).evaluate().toString()).toBe(
+      '(1, 2)'
+    );
+    expect(ce.box(['Last', points] as any).evaluate().toString()).toBe(
+      '(3, 4)'
+    );
+    expect(ce.box(['Third', points] as any).evaluate().symbol).toBe('Missing');
+  });
+
+  test('a position past the end is an absent point', () => {
+    ce.declare('Q', 'list<tuple<real, real, real>^2>');
+    expect(compileTo('glsl', ['Last', 'Q']).code).toBe('Q[1]');
+    expect(compileTo('glsl', ['Third', 'Q']).code).toBe('vec3(_gpu_nan())');
+    expect(compileTo('wgsl', ['Third', 'Q']).code).toBe('vec3f(_gpu_nan())');
+  });
+
+  test('a literal list of points selects the element', () => {
+    expect(compileTo('glsl', ['Second', PL]).code).toBe('vec2(2.0, 5.0)');
+    expect(compileTo('wgsl', ['Last', PL]).code).toBe('vec2f(3.0, 6.0)');
+  });
+});
+
+// The same rule applies to the other operands that a shader holds as an
+// array, and to a point read past its last component.
+describe('GPU: First, Second, Third and Last of other operands', () => {
+  const code = (to: 'glsl' | 'wgsl', json: unknown) =>
+    compile(ce.box(json as any), { to, fallback: false }).code;
+
+  test('a list of 7 numbers is an array', () => {
+    ce.declare('L7', 'list<real^7>');
+    for (const to of ['glsl', 'wgsl'] as const) {
+      expect(code(to, ['First', 'L7'])).toBe('L7[0]');
+      expect(code(to, ['Last', 'L7'])).toBe('L7[6]');
+    }
+  });
+
+  test('a vector keeps the swizzle', () => {
+    for (const to of ['glsl', 'wgsl'] as const) {
+      expect(code(to, ['First', 'xs'])).toBe('xs.x');
+      expect(code(to, ['Last', 'ys'])).toBe('ys.w');
+    }
+  });
+
+  test('a component past the end of a point is NaN', () => {
+    // A `vec2` has no `.z`. The interpreter gives `NaN` for the third
+    // element of a pair of numbers.
+    ce.declare('p', 'tuple<real, real>');
+    expect(ce.box(['Third', ['Tuple', 1, 2]]).evaluate().isNaN).toBe(true);
+    expect(code('glsl', ['Third', 'p'])).toBe('_gpu_nan()');
+    expect(code('wgsl', ['Third', 'p'])).toBe('_gpu_nan()');
+  });
+
+  test('a matrix declines', () => {
+    // A `mat2` is indexed by column in a shader, and `First` of a matrix
+    // is its first row, so the compile declines.
+    ce.declare('M', 'matrix<real^2x2>');
+    for (const to of ['glsl', 'wgsl'] as const)
+      expect(() => code(to, ['First', 'M'])).toThrow(
+        /Could not compile `First` \(read as `At` with the index 1\): .*multi-axis/
+      );
+  });
+
+  test('a list of strings declines', () => {
+    // A shader has no text type. The element of a list of unknown length
+    // can also be absent, and an absent string has no shader value.
+    ce.declare('Ls', 'list<string>');
+    ce.declare('Ls3', 'list<string^3>');
+    for (const to of ['glsl', 'wgsl'] as const) {
+      expect(() => code(to, ['First', 'Ls'])).toThrow(
+        /Could not compile an object-domain absent \('missing'\) position \(type 'missing \| string'\)/
+      );
+      expect(() => code(to, ['First', 'Ls3'])).toThrow(
+        /Could not compile `First` \(read as `At` with the index 1\): the base's element type `string` is not a REAL scalar/
+      );
+    }
+  });
+
+  // `At(P, k)` with an integer input `k` can be past the end of `P`, so its
+  // type is `missing | tuple<real, real>`. Its shader value is a `vec2` (a
+  // vector of NaN for an absent point), and an element of an absent point is
+  // NaN in the interpreter, so the element is a swizzle.
+  test('a conditional point with no absent arm is read with a swizzle', () => {
+    // `When`, `If` with no else branch and `Which` give a vector of NaN
+    // when the point is absent, and the interpreter gives NaN.
+    for (const to of ['glsl', 'wgsl'] as const) {
+      expect(
+        code(to, ['First', ['When', ['Tuple', 'x', 2], ['Less', 0, 'x']]])
+      ).toMatch(/\)\.x$/);
+      expect(
+        code(to, ['Second', ['If', ['Less', 0, 'x'], ['Tuple', 'x', 2]]])
+      ).toMatch(/\)\.y$/);
+    }
+  });
+
+  test('only an At call and a boolean-tuple symbol take the swizzle', () => {
+    // A free symbol that can be absent has no shader value for the absent
+    // point, and a constructed boolean tuple is emitted as a float vector:
+    // both go to `At`, which declines.
+    ce.declare('pAbs', 'missing | tuple<real, real>');
+    ce.declare('Bq', 'boolean');
+    ce.declare('Cq', 'boolean');
+    for (const to of ['glsl', 'wgsl'] as const) {
+      expect(() => code(to, ['First', 'pAbs'])).toThrow(
+        /Could not compile `First`/
+      );
+      expect(() =>
+        code(to, ['Not', ['First', ['Tuple', 'Bq', 'Cq']]])
+      ).toThrow(/Could not compile `First`/);
+    }
+  });
+
+  test('an element of a point that can be absent is a swizzle', () => {
+    ce.declare('P3', 'list<tuple<real, real, real>^3>');
+    expect(ce.box(['At', 'P', 'k']).type.toString()).toBe(
+      'missing | tuple<real, real>'
+    );
+    expect(ce.box(['First', ['At', 'P', 'k']]).type.toString()).toBe(
+      'nan | real'
+    );
+    for (const to of ['glsl', 'wgsl'] as const) {
+      expect(code(to, ['First', ['At', 'P', 'k']])).toBe('_gpu_atp2_3(P, k).x');
+      expect(code(to, ['Second', ['At', 'P', 'k']])).toBe(
+        '_gpu_atp2_3(P, k).y'
+      );
+      expect(code(to, ['Last', ['At', 'P', 'k']])).toBe('_gpu_atp2_3(P, k).y');
+      expect(code(to, ['Third', ['At', 'P3', 'k']])).toBe(
+        '_gpu_atp3_3(P3, k).z'
+      );
+      expect(code(to, ['Last', ['At', 'P3', 'k']])).toBe(
+        '_gpu_atp3_3(P3, k).z'
+      );
+      // A `vec2` has no third component.
+      expect(() => code(to, ['Third', ['At', 'P', 'k']])).toThrow(
+        /Could not compile `Third`: .*no element at the position 3/
+      );
+    }
+    // The interpreter: an element of an absent point is NaN.
+    expect(
+      ce
+        .box(['First', ['At', ['List', ['Tuple', 1, 2]], 5]])
+        .evaluate().isNaN
+    ).toBe(true);
+  });
+
+  test('a boolean vector declared by the caller is read with a swizzle', () => {
+    // A list of 3 booleans that the caller declares as a `bvec3` uniform.
+    ce.declare('B3', 'list<boolean^3>');
+    const shader = new GLSLTarget().compileShader({
+      type: 'fragment',
+      uniforms: [{ name: 'B3', type: 'bvec3' }],
+      outputs: [{ name: 'o', type: 'float' }],
+      body: [
+        { variable: 'o', expression: ce.box(['If', ['First', 'B3'], 1, 0]) },
+      ],
+    });
+    expect(shader).toContain('o = float(B3.x);');
+  });
+});
+
+// The interpreter evaluates every element of the operand, so each random
+// draw in it happens. A compiled element read must keep each draw once, or
+// decline: a draw that is left out changes the random stream of the shader.
+// Only GLSL is tested: WGSL has no form of a draw outside `WithRandomSeed`.
+describe('GPU: First, Second, Third and Last of an operand with a draw', () => {
+  const draws = (s: string) => s.split('_gpu_rnd_draw(').length - 1;
+  const R = ['Random'];
+  const code = (to: 'glsl', json: unknown) =>
+    compile(ce.box(json as any), { to, fallback: false }).code!;
+
+  for (const to of ['glsl'] as const)
+    test(`each draw is kept once, or the compile declines (${to})`, () => {
+      // The selected element is the draw: the other elements are pure.
+      expect(draws(code(to, ['Second', ['Tuple', 'x', R]]))).toBe(1);
+      expect(draws(code(to, ['First', ['List', R, 2, 3]]))).toBe(1);
+      // A draw that is not selected would be left out, so these decline.
+      expect(() => code(to, ['First', ['Tuple', 'x', R]])).toThrow(
+        /Could not compile `First`.*impure/
+      );
+      expect(() => code(to, ['Last', ['List', R, 2]])).toThrow(
+        /Could not compile `Last`/
+      );
+      // A compound vector keeps its draw: the element is a swizzle of it.
+      const sum = code(to, ['First', ['Add', ['Tuple', 'x', 'y'], ['Tuple', R, 1]]]);
+      expect(draws(sum)).toBe(1);
+      expect(sum).toMatch(/\)\.x$/);
+      // A position past the end of a vector with a draw would drop the draw.
+      expect(() =>
+        code(to, ['Third', ['Multiply', R, ['Tuple', 'x', 'y']]])
+      ).toThrow(/Could not compile `Third`/);
+      // A list of points with a draw reads its element with the guarded
+      // helper, which evaluates the whole list once.
+      const points = ['List', ['Tuple', R, 2], ['Tuple', 'x', 4]];
+      const third = code(to, ['Third', points]);
+      expect(third).toMatch(/^_gpu_atp2_2\(/);
+      expect(draws(third)).toBe(1);
+    });
 });

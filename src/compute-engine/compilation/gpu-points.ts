@@ -137,48 +137,6 @@ function compilePointListProjection(
 }
 
 /**
- * Compile `Last` as a GPU swizzle. Unlike `First`/`Second`/`Third`, whose
- * component is fixed, the component of `Last` depends on the width of the
- * operand, so the width must be known statically: a `tuple` of 2 to 4 scalar
- * numbers, or a list of 2 to 4 scalar numbers (the two spellings that lower
- * to a `vec2`/`vec3`/`vec4`). The last component of a `vecN` is `.y`, `.z`
- * or `.w`.
- *
- * An absent operand (`Missing`, `Undefined`) compiles to the SCALAR NaN of
- * the target and has no static width. Every component of an absent value is
- * NaN, so its last component is that NaN, as `First` of an absent operand is
- * (see `gpuSwizzle`). Any other operand has no GPU lowering: a longer list
- * compiles to an array, not a vector, and has no swizzle.
- */
-export function compileGpuLast(
-  arg: Expression,
-  compile: (e: Expression) => string
-): string {
-  const code = compile(arg).trim();
-  if (code === gpuNonFiniteLiteral(NaN)) return code;
-  const t = gpuType(arg);
-  const width =
-    typeof t !== 'string'
-      ? t.kind === 'tuple'
-        ? t.elements.every((el) => isSubtype(el.type, 'number'))
-          ? t.elements.length
-          : undefined
-        : t.kind === 'list' &&
-            t.dimensions?.length === 1 &&
-            t.elements !== undefined &&
-            isSubtype(t.elements, 'number')
-          ? t.dimensions[0]
-          : undefined
-      : undefined;
-  if (width !== undefined && width >= 2 && width <= 4)
-    return gpuSwizzle(code, 'xyzw'[width - 1]);
-  throw new Error(
-    'Could not compile `Last`: the operand must be a point or a list of 2 to 4 ' +
-      'numbers of known length (a `vec2`/`vec3`/`vec4`).'
-  );
-}
-
-/**
  * The error of a shader compilation when `inlinePointCalls()` would
  * substitute more than `MAX_POINT_CALL_INLINES` function bodies. A call of
  * `head` left as written has the type of `call`, a union that has no shader

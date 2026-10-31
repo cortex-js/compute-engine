@@ -447,6 +447,16 @@ export function assume(
   }
 }
 
+/** The comparison heads whose canonical form can be a chain of 3 or more
+ * operands, read as the conjunction of the adjacent pairs. */
+const CHAIN_HEADS = new Set([
+  'Equal',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+]);
+
 /**
  * Apply one conjunct — or the whole proposition, when it is not a conjunction
  * — inside the open transaction, claiming for it the bindings it is the first
@@ -465,6 +475,33 @@ function assumeConjunct(
   // A conjunction is not a conjunct: claiming its names here would leave its
   // conjuncts nothing to answer for.
   if (proposition.operator === 'And') return assumeShielded(proposition);
+
+  // A comparison chain `a < b < c` is the conjunction of its links, and each
+  // link is a conjunct: a link that is not a predicate discards only the
+  // names that it alone introduced, and the links applied before it keep
+  // theirs (`x = 1 = Undefined` keeps `x = 1`). The result is aggregated as
+  // in `assumeConjunction`.
+  if (
+    isFunction(proposition) &&
+    proposition.nops > 2 &&
+    CHAIN_HEADS.has(proposition.operator)
+  ) {
+    const ce = proposition.engine;
+    const ops = proposition.ops;
+    let sawOk = false;
+    let sawNotAPredicate = false;
+    for (let i = 0; i + 1 < ops.length; i++) {
+      const r = assumeConjunct(
+        tx,
+        ce.function(proposition.operator, [ops[i], ops[i + 1]])
+      );
+      if (r === 'contradiction' || r === 'internal-error') return r;
+      if (r === 'not-a-predicate') sawNotAPredicate = true;
+      else if (r === 'ok') sawOk = true;
+    }
+    if (sawNotAPredicate) return 'not-a-predicate';
+    return sawOk ? 'ok' : 'tautology';
+  }
 
   const claimed: string[] = [];
   if (tx.unattributed.size !== 0)
@@ -689,6 +726,28 @@ function assumeEquality(proposition: Expression): AssumeResult {
 
   const ce = proposition.engine;
 
+  // A chain `a = b = c` means `a = b ∧ b = c`. Assume each link, so that
+  // every link is established. If only the first two operands are read,
+  // `x = 2 = 3` is accepted with `x = 2`, and `x = 2 = y` gives no value
+  // to `y`.
+  if (isFunction(proposition) && proposition.ops.length > 2) {
+    const chainOps = proposition.ops;
+    // As in `assumeConjunction`: a link that is not a predicate makes the
+    // chain `'not-a-predicate'`, and the links applied before it stand.
+    let sawOk = false;
+    let sawNotAPredicate = false;
+    for (let i = 0; i + 1 < chainOps.length; i++) {
+      const r = assumeEquality(
+        ce.function('Equal', [chainOps[i], chainOps[i + 1]])
+      );
+      if (r === 'contradiction' || r === 'internal-error') return r;
+      if (r === 'not-a-predicate') sawNotAPredicate = true;
+      else if (r === 'ok') sawOk = true;
+    }
+    if (sawNotAPredicate) return 'not-a-predicate';
+    return sawOk ? 'ok' : 'tautology';
+  }
+
   // Case 2
   // @todo: this is dubious. Should we allow this?
   // i.e. `ce.assume(ce.parse("x = 3"))`
@@ -812,14 +871,19 @@ function assumeInequality(proposition: Expression): AssumeResult {
   if (proposition.ops.length > 2) {
     const chainOps = proposition.ops;
     const chainOp = proposition.operator;
+    // As in `assumeConjunction`: a link that is not a predicate makes the
+    // chain `'not-a-predicate'`, and the links applied before it stand.
     let sawOk = false;
+    let sawNotAPredicate = false;
     for (let i = 0; i + 1 < chainOps.length; i++) {
       const r = assumeInequality(
         ce.function(chainOp, [chainOps[i], chainOps[i + 1]])
       );
       if (r === 'contradiction' || r === 'internal-error') return r;
-      if (r === 'ok') sawOk = true;
+      if (r === 'not-a-predicate') sawNotAPredicate = true;
+      else if (r === 'ok') sawOk = true;
     }
+    if (sawNotAPredicate) return 'not-a-predicate';
     return sawOk ? 'ok' : 'tautology';
   }
 

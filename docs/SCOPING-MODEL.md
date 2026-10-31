@@ -184,6 +184,11 @@ The governing value rule is:
 > but an assigned value of the same name does not. Free symbols resolve their
 > values normally.
 
+The implicit forms `Limit(expr, point)` and `NLimit(expr, point)` do not write
+their variable. It is found from the symbols written in `expr`, assigned or
+not (the first of them in sorted order, as for the unknowns of an unassigned body),
+so an assignment made before or after boxing does not change it.
+
 Shielding is implemented by a valueless shadow binding with the original type,
 not by renaming or by head-specific substitution. Binding tombstones prevent a
 lookup from falling through to a shadowed outer definition.

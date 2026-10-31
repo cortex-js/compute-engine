@@ -107,6 +107,99 @@ describe('freeSymbolTypes', () => {
     );
   });
 
+  it('a tuple that no shader type holds is not a point on the shader targets', () => {
+    // A pair of points, a mixed tuple, a tuple of complex numbers, a
+    // one-element tuple and the bare `tuple` type have no shader type. A read
+    // of such a symbol declines; it was emitted as a bare identifier with
+    // `lowered: 'point'`, `First(T)` as `T.x` and a local copy as
+    // `vec2 Q; Q = M;`.
+    for (const to of ['glsl', 'wgsl']) {
+      const ce = new ComputeEngine();
+      ce.declare('T', 'tuple<tuple<real, real>, tuple<real, real>>');
+      ce.declare('M', 'tuple<real, tuple<real, real>>');
+      ce.declare('C', 'tuple<complex, complex>');
+      ce.declare('O', 'tuple<real>');
+      ce.declare('X', 'tuple');
+      for (const [input, name] of [
+        ['T', 'T'],
+        [['At', 'T', 1], 'T'],
+        [['PointX', ['At', 'T', 1]], 'T'],
+        [['First', 'T'], 'T'],
+        ['M', 'M'],
+        [['At', 'M', 2], 'M'],
+        [['Block', ['Assign', 'Q', 'M'], 'Q'], 'M'],
+        [['Block', ['Assign', 'Q', 'T'], 'Q'], 'T'],
+        [['First', 'C'], 'C'],
+        ['O', 'O'],
+        ['X', 'X'],
+      ] as const) {
+        let error = '';
+        let result: any;
+        try {
+          result = run(ce, to, input);
+        } catch (e) {
+          error = (e as Error).message;
+        }
+        expect(result?.success ?? false).toBe(false);
+        expect(error).toMatch(/^Could not compile/);
+        // The `At` lowering declines first, with its own reason. `First`
+        // compiles as `At` with the index 1, so it declines there too.
+        const viaAt = /"(At|First)"/.test(JSON.stringify(input));
+        // A block local whose type is a tuple of tuples declines with the
+        // local's own reason before the symbol is read.
+        if (!viaAt)
+          expect(error).toMatch(
+            new RegExp(
+              `"${name}" has the type|a local holding a list of points`
+            )
+          );
+      }
+    }
+  });
+
+  it('a tuple of 2 to 4 booleans is a boolean vector on the shader targets', () => {
+    // A host can declare `b` as a `bvec2` (GLSL) or a `vec2<bool>` (WGSL),
+    // so a read of it compiles, as it did before `First` compiled as `At`.
+    // The interpreter gives 1 for `If(First((True, False)), 1, 0)`.
+    const ce = new ComputeEngine();
+    ce.declare('b', 'tuple<boolean, boolean>');
+    expect(
+      ce.box(['If', ['First', ['Tuple', 'True', 'False']], 1, 0]).evaluate().re
+    ).toBe(1);
+    for (const to of ['glsl', 'wgsl']) {
+      const conv = to === 'glsl' ? 'float' : 'f32';
+      expect(run(ce, to, 'b').code).toBe('b');
+      expect(run(ce, to, ['First', 'b']).code).toBe('b.x');
+      expect(run(ce, to, ['If', ['First', 'b'], 1, 0]).code).toBe(
+        `${conv}(b.x)`
+      );
+      expect(run(ce, to, ['If', ['Last', 'b'], 1, 0]).code).toBe(
+        `${conv}(b.y)`
+      );
+      // With a name for the input in `vars`.
+      expect(
+        run(ce, to, ['If', ['Second', 'b'], 1, 0], { vars: { b: 'u_b' } })
+          .code
+      ).toBe(`${conv}(u_b.y)`);
+      // A pair has no third element.
+      expect(() => run(ce, to, ['Third', 'b'])).toThrow(
+        /Could not compile `Third`: .*no element at the position 3/
+      );
+    }
+  });
+
+  it('a tuple of more than 4 real numbers is an array on the shader targets', () => {
+    const ce = new ComputeEngine();
+    ce.declare('F', 'tuple<real, real, real, real, real>');
+    ce.declare('k', 'integer');
+    const g = run(ce, 'glsl', ['At', 'F', 'k']);
+    expect(g.code).toBe('_gpu_at5(F, k)');
+    expect(g.freeSymbolTypes.F.lowered).toBe('float[5]');
+    const w = run(ce, 'wgsl', ['At', 'F', 'k']);
+    expect(w.code).toBe('_gpu_at5(F, k)');
+    expect(w.freeSymbolTypes.F.lowered).toBe('array<f32, 5>');
+  });
+
   it('a list of points is an array of vectors on the shader targets', () => {
     // `At(P, k)` passes `P` to the `_gpu_atpM_N` helper, whose parameter is
     // an array of `vecM`, so the host must declare the input with that type,

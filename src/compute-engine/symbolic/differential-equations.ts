@@ -122,6 +122,13 @@ function functionName(expr: Expression): string | undefined {
   return expr.operator;
 }
 
+/** True when `equation`, or an item of it when it is a `List`, is an
+ * `Equal` with more than two operands (a chain `a = b = c`). */
+function hasEqualChain(equation: Expression): boolean {
+  const items = isFunction(equation, 'List') ? equation.ops : [equation];
+  return items.some((item) => isFunction(item, 'Equal') && item.nops > 2);
+}
+
 function scalarProblem(
   equation: Expression,
   dependent: Expression
@@ -3310,6 +3317,10 @@ export function dSolve(
   dependent: Expression,
   independent: Expression
 ): Expression | undefined {
+  // A chain `y' = y = 2x` is two equations. The solvers below read only the
+  // first two operands of an `Equal`, so they would drop the later links.
+  // Decline a chain, as the equation or as an item of a list.
+  if (hasEqualChain(equation)) return undefined;
   const system = solveLinearHomogeneousSystem(equation, dependent, independent);
   if (system) return system;
 

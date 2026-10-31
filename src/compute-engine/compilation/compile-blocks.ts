@@ -1,6 +1,7 @@
 // compileBlock and the local function scopes of a block.
 
 import type { Expression } from '../global-types.js';
+import type { Type } from '../../common/type/types.js';
 import {
   recordBlockScalarLocals,
   recordVariableLocals,
@@ -385,11 +386,17 @@ export function compileBlock(
     // element count would declare a `vecN` over a `vecK[N]` initializer).
     // Fail closed rather than emit a declaration that contradicts
     // its own initializer.
+    // A value whose TYPE is a list of points (a copy of a declared
+    // `P: list<tuple<real, real>^3>`, of another local, or the result of a
+    // call) lowers as the same array of vectors, but its component count is
+    // the length of the list: the declaration would be `vec3 Q` over the
+    // `vec2[3]` value of `P`. It fails closed in the same way.
     if (
       isGPUTarget &&
-      (isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
-      value.nops > 0 &&
-      value.ops.every((op) => isNonScalarShape(op))
+      (((isFunction(value, 'List') || isFunction(value, 'Tuple')) &&
+        value.nops > 0 &&
+        value.ops.every((op) => isNonScalarShape(op))) ||
+        isListOfTuplesType(compilationType(value)))
     )
       throw new Error(
         `Could not compile \`${name}\`: a local holding a list of points has no static shader ` +
@@ -1058,4 +1065,27 @@ export function compileBlock(
     for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
     for (const name of shadowSpellings) _freshLocalNames.delete(name);
   }
+}
+
+/**
+ * True when `t` is a list of points: a list whose elements are tuples, or a
+ * tuple whose elements are all tuples. A shader lowers such a value as an
+ * array of vectors (`vec2[3]` in GLSL, `array<vec2f, 3>` in WGSL), for which
+ * a block local has no declaration. The component count of such a type is
+ * the number of points, so without this test the local would be declared
+ * `vec3` (three points) or `vec2` (two points).
+ */
+function isListOfTuplesType(t: Type): boolean {
+  const isTuple = (u: Type): boolean => {
+    const r = resolveTypeForCompilation(u);
+    return typeof r !== 'string' && r.kind === 'tuple';
+  };
+  const resolved = resolveTypeForCompilation(t);
+  if (typeof resolved === 'string') return false;
+  if (resolved.kind === 'list') return isTuple(resolved.elements);
+  return (
+    resolved.kind === 'tuple' &&
+    resolved.elements.length > 0 &&
+    resolved.elements.every((e) => isTuple(e.type))
+  );
 }

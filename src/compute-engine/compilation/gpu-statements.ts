@@ -36,7 +36,10 @@ import {
   gpuBindEveryDraw,
   gpuDrawCount,
   gpuDrawOrderError,
+  gpuHoistKeepsCallerOrder,
+  gpuInSelectionBranch,
   gpuOperandOnce,
+  gpuReachesCallerCode,
 } from './gpu-draw-order.js';
 import { gpuComponentCount, gpuNaNFor, gpuOperandShape } from './gpu-shapes.js';
 import { gpuTypeOfValue } from './gpu-declared-types.js';
@@ -451,6 +454,10 @@ export function compileGPUStatementSelection(
       }
     }
   }
+  // The hoisted selection runs ahead of the rest of the statement, so caller
+  // code in a clause must not move ahead of other code with an effect, nor a
+  // draw in a clause ahead of caller code (`gpuHoistKeepsCallerOrder`).
+  if (!gpuHoistKeepsCallerOrder(args, target)) return undefined;
   if (gpuWritesOutside(evaluated, new Set(args))) return undefined;
   const isWGSL = target.language === 'wgsl';
   const arms = args.filter((_, i) => i % 2 === 1);
@@ -483,7 +490,9 @@ export function compileGPUStatementSelection(
   // `lazy`: the clause is a lazily-evaluated operand of the selection (an
   // arm, a condition past the first), which the operand compiler hands to
   // `compileGPUConditionalArm`; the guard is skipped once for it. The first
-  // condition is evaluated unconditionally and carries no guard.
+  // condition is evaluated unconditionally and carries no guard. The
+  // statements of a lazy clause are placed in its branch, so their order
+  // check compares them with that clause only (`gpuInSelectionBranch`).
   const capture = (
     f: () => string,
     lazy: boolean
@@ -492,7 +501,7 @@ export function compileGPUStatementSelection(
     if (lazy) statementCaptureSinks.add(sink);
     let code: string;
     try {
-      code = f();
+      code = lazy ? gpuInSelectionBranch(sink, f) : f();
     } finally {
       statementCaptureSinks.delete(sink);
     }
@@ -579,11 +588,19 @@ export function compileGPUMatchStatement(
   clauses: ReadonlyArray<MatchStatementClause>,
   target: CompileTarget<Expression>
 ): string | undefined {
+  // On WGSL, a case body or guard with caller code takes the statement form
+  // too, where it is computed only when its case is selected
+  // (`gpuHasEagerCallerCode`). A first case that always matches (no test)
+  // is the only clause, and the ternary form emits it with no `select`.
   if (
     !clauses.some(
       (c) =>
         gpuNeedsStatements(c.body) ||
         (c.guard !== undefined && gpuNeedsStatements(c.guard))
+    ) &&
+    !(
+      gpuCanPlaceStatement(target) &&
+      gpuHasEagerCallerCode(gpuMatchSelectedPieces(clauses), target)
     )
   )
     return undefined;
@@ -603,6 +620,18 @@ export function compileGPUMatchStatement(
     c.body,
   ]);
   if (gpuSelectionIsComplex('Which', whichArgs)) return undefined;
+  // The clauses given to the statement form hold the guards, not the
+  // comparisons of the subject with the patterns, but the hoisted `if`
+  // statement computes those comparisons too. Caller code in a pin
+  // (`vars: { Pi: 'nextValue()' }`) must keep its order with the rest of the
+  // statement (`gpuHoistKeepsCallerOrder`).
+  if (
+    !gpuHoistKeepsCallerOrder(
+      [...whichArgs, ...clauses.flatMap((c) => c.comparisons)],
+      target
+    )
+  )
+    return undefined;
   return compileGPUStatementSelection(
     whichArgs,
     (_, i) => {
@@ -619,6 +648,28 @@ export function compileGPUMatchStatement(
     },
     target
   );
+}
+
+/**
+ * The pieces of a `Match` that its ternary form places behind a `select`:
+ * none when the first case always matches (it has no test), else the body
+ * and guard of every clause, and the comparison expressions of every clause
+ * after the first (`MatchStatementClause.comparisons`: with
+ * `vars: { Pi: 'nextValue()' }`, the pin of `MatchCase(Pin(Pi), 20)` would
+ * call `nextValue()` also when an earlier case matches). The comparison of
+ * the first clause is computed in every case. `clauses` stops at the first
+ * case that always matches (`BaseCompiler.compileMatchTernary`), so the
+ * cases after it are not included.
+ */
+export function gpuMatchSelectedPieces(
+  clauses: ReadonlyArray<MatchStatementClause>
+): Expression[] {
+  if (clauses.length === 0 || clauses[0].test === undefined) return [];
+  return clauses.flatMap((c, i) => [
+    c.body,
+    ...(c.guard === undefined ? [] : [c.guard]),
+    ...(i === 0 ? [] : c.comparisons),
+  ]);
 }
 
 /**
@@ -890,6 +941,7 @@ export function gpuAssertSelectableArms(
 
 /**
  * Fail closed on WGSL when an arm of a selection draws a random value.
+ * Caller code in an arm is checked by `gpuAssertNoEagerCallerCode`.
  */
 export function gpuAssertNoEagerDraw(
   head: string,
@@ -919,6 +971,48 @@ export function gpuAssertNoEagerDraw(
         `that is not taken would still advance the random stream and shift ` +
         `every later draw in the shader.`
     );
+}
+
+/**
+ * Fail closed on WGSL when an arm of a selection contains caller code
+ * (`gpuReachesCallerCode`). `select(f, t, c)` computes both arms, so with
+ * `vars: { W: 'nextValue()' }`, `If(c, W, 0)` would run the caller's code
+ * even when `c` is false, and that code can count its calls or draw a
+ * number. GLSL's `?:` evaluates only the selected arm.
+ */
+export function gpuAssertNoEagerCallerCode(
+  head: string,
+  lazyOperands: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): void {
+  if (gpuHasEagerCallerCode(lazyOperands, target))
+    throw new Error(
+      `Could not compile \`${head}\`: a branch contains code supplied by the ` +
+        `caller (a \`vars\` source, a \`functions\` or \`operators\` entry, ` +
+        `or a \`compile\` handler), and the WGSL selection \`select(…)\` ` +
+        `computes every branch, so that code would run even when its branch ` +
+        `is not taken.`
+    );
+}
+
+/**
+ * The test of `gpuAssertNoEagerCallerCode`, as a boolean: on WGSL, does an
+ * operand that the `select(…)` form would compute although its branch is
+ * not taken contain caller code (`gpuReachesCallerCode`)? A selection that
+ * can place a statement (`gpuCanPlaceStatement`) then takes its statement
+ * form, an `if` statement that computes only the branch that is taken
+ * (`compileGPUStatementSelection`, which keeps the order of caller code
+ * with `gpuHoistKeepsCallerOrder`). When that form is refused, the `select`
+ * form declines.
+ */
+export function gpuHasEagerCallerCode(
+  lazyOperands: ReadonlyArray<Expression>,
+  target: CompileTarget<Expression>
+): boolean {
+  return (
+    target.language === 'wgsl' &&
+    lazyOperands.some((e) => gpuReachesCallerCode(e, target))
+  );
 }
 
 /**

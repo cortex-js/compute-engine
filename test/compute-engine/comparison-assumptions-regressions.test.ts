@@ -239,3 +239,53 @@ describe('isEqual reads bounds that pin a symbol to one number', () => {
     expect(ce.symbol('c').isEqual(0)).toBeUndefined();
   });
 });
+
+// A comparison with three or more operands is a chain: `Less(a, b, c)` is
+// `a < b ∧ b < c`, and `Equal(a, b, c)` is `a = b ∧ b = c`. Each link must
+// count, not only the first two operands.
+describe('COMPARISON CHAINS IN ASSUMPTIONS', () => {
+  test('assume of an equality chain establishes every link', () => {
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.box(['Equal', 'x', 2, 3]))).toBe('contradiction');
+    expect(ce.assume(ce.box(['Equal', 2, 'x', 3]))).toBe('contradiction');
+    expect(ce.assume(ce.box(['Equal', 'y', 2, 'z']))).toBe('ok');
+    expect(ce.box('z').evaluate().json).toBe(2);
+  });
+
+  test('a chain with a link that is not a predicate is not a predicate', () => {
+    // As for the `And` of the links: `f(1) = 2` has no unknown and does not
+    // evaluate.
+    for (const json of [
+      ['Equal', 'x', ['f', 1], 2],
+      ['Less', 'x', ['f', 1], 2],
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('f', 'function');
+      expect(ce.assume(ce.box(json))).toBe('not-a-predicate');
+    }
+    // The links applied before the rejected one keep their bindings.
+    const ce = new ComputeEngine();
+    expect(ce.assume(ce.box(['Equal', 'x', 1, 'Undefined']))).toBe(
+      'not-a-predicate'
+    );
+    expect(ce.box('x').evaluate().json).toBe(1);
+  });
+
+  test('verify and ask do not accept a chain from its first link only', () => {
+    const ce = new ComputeEngine();
+    ce.assume(ce.box(['Greater', 'x', -1]));
+    expect(ce.verify(ce.box(['Less', -1, 'x', 5]))).toBeUndefined();
+    expect(ce.ask(ce.box(['Less', -1, 'x', 5]))).toEqual([]);
+    // Only `x > -1` is known: `5 > x` is not, so there is no bound to report.
+    expect(ce.ask(ce.box(['Greater', 5, 'x', '_k']))).toEqual([]);
+    ce.assume(ce.box(['Less', 'x', 5]));
+    expect(ce.verify(ce.box(['Less', -1, 'x', 5]))).toBe(true);
+  });
+
+  test('verify decides a chain of opaque facts link by link', () => {
+    const ce = new ComputeEngine();
+    const xy = ['Multiply', 'x', 'y'];
+    ce.assume(ce.box(['Less', 0, xy, 5]));
+    expect(ce.verify(ce.box(['Less', 0, xy, 5]))).toBe(true);
+  });
+});

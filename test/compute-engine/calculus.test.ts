@@ -1,5 +1,5 @@
 import { engine } from '../utils';
-import { ComputeEngine } from '../../src/compute-engine';
+import { ComputeEngine, compile } from '../../src/compute-engine';
 import type { Expression as MathJson } from '../../src/math-json/types.ts';
 
 function evaluate(expr: string): string {
@@ -2918,6 +2918,354 @@ describe('INTEGRATE: .N() keeps the integration variable free of an assigned val
     ce.assign('y', -2);
     const v = ce.parse('\\int_0^1\\int_{-1}^{1} |x|\\cdot|y|\\,dx\\,dy');
     expect(v.N().re).toBeCloseTo(0.5, 12);
+  });
+});
+
+describe('INTEGRATE: a limit that names no variable', () => {
+  // `Limits(Nothing, a, b)`: the variable is the parameter of the integrand.
+  // An integrand with no parameter is a constant `c`, and the integral is
+  // `c·(b − a)`. It was `0` under `evaluate()` (the integrand was integrated
+  // with respect to the symbol `Nothing`) and stayed unevaluated under `N()`.
+  const both = (ce: ComputeEngine, json: MathJson): [string, number] => {
+    const e = ce.box(json);
+    const n = e.N();
+    return [
+      e.evaluate().toString(),
+      n.operator === 'Measurement' ? n.op1.re : n.re,
+    ];
+  };
+
+  test('∫_0^1 2 is 2 under evaluate() and N()', () => {
+    const [exact, numeric] = both(new ComputeEngine(), [
+      'Integrate',
+      2,
+      ['Limits', 0, 1],
+    ]);
+    expect(exact).toBe('2');
+    expect(numeric).toBeCloseTo(2, 12);
+  });
+
+  test('∫_1^3 2 is 4, and ∫_0^∞ 0 is 0', () => {
+    const ce = new ComputeEngine();
+    expect(both(ce, ['Integrate', 2, ['Limits', 1, 3]])[0]).toBe('4');
+    expect(
+      both(ce, ['Integrate', 0, ['Limits', 0, 'PositiveInfinity']])[0]
+    ).toBe('0');
+  });
+
+  test('∫_0^1 √x is 2/3 under evaluate() and N()', () => {
+    const [exact, numeric] = both(new ComputeEngine(), [
+      'Integrate',
+      ['Sqrt', 'x'],
+      ['Limits', 0, 1],
+    ]);
+    expect(exact).toBe('2/3');
+    expect(numeric).toBeCloseTo(2 / 3, 12);
+  });
+
+  test('a bare-symbol integrand with no value is the variable: ∫_0^1 x is 1/2', () => {
+    const ce = new ComputeEngine();
+    const v = ce.parse('\\int_0^1 x');
+    expect(v.evaluate().toString()).toBe('1/2');
+    expect(v.N().re).toBeCloseTo(0.5, 12);
+  });
+
+  // With `x := 4`, the canonical integrand of `∫_0^1 √x` has no parameter:
+  // `x` has a value, so it is not an unknown of the integrand. The integrand
+  // is the constant `√4`. NIntegrate gives the same value.
+  test('with x := 4, ∫_0^1 √x is 2 under evaluate(), N() and NIntegrate', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 4);
+    const [exact, numeric] = both(ce, [
+      'Integrate',
+      ['Sqrt', 'x'],
+      ['Limits', 0, 1],
+    ]);
+    expect(exact).toBe('2');
+    expect(numeric).toBeCloseTo(2, 12);
+    expect(
+      ce.box(['NIntegrate', ['Sqrt', 'x'], 0, 1]).evaluate().re
+    ).toBeCloseTo(2, 12);
+  });
+
+  test('two limits with no variable: ∫∫ x·y and ∫∫ 2 agree under N()', () => {
+    const ce = new ComputeEngine();
+    const xy: MathJson = [
+      'Integrate',
+      ['Multiply', 'x', 'y'],
+      ['Limits', 0, 1],
+      ['Limits', 0, 2],
+    ];
+    const [exact, numeric] = both(ce, xy);
+    expect(exact).toBe('1');
+    expect(numeric).toBeCloseTo(1, 12);
+    const [exact2, numeric2] = both(ce, [
+      'Integrate',
+      2,
+      ['Limits', 0, 1],
+      ['Limits', 0, 2],
+    ]);
+    expect(exact2).toBe('4');
+    expect(numeric2).toBeCloseTo(4, 12);
+  });
+
+  test('compiled JavaScript agrees', () => {
+    const ce = new ComputeEngine();
+    const compiled = compile(ce.box(['Integrate', 2, ['Limits', 0, 1]]));
+    expect(compiled.success).toBe(true);
+    expect(compiled.run?.({})).toBeCloseTo(2, 12);
+  });
+
+  test('a small constant is not zero: ∫_0^∞ 10^-12 is +∞', () => {
+    const ce = new ComputeEngine();
+    const [exact, numeric] = both(ce, [
+      'Integrate',
+      ['Power', 10, -12],
+      ['Limits', 0, 1],
+    ]);
+    expect(exact).toBe('1/1000000000000');
+    expect(numeric).toBeCloseTo(1e-12, 20);
+    expect(
+      both(ce, [
+        'Integrate',
+        ['Power', 10, -12],
+        ['Limits', 0, 'PositiveInfinity'],
+      ])
+    ).toEqual(['+oo', Infinity]);
+  });
+
+  // The variable of a constant dimension does not capture a symbol of the
+  // integrand.
+  test('a bare symbol with a value is a constant, whatever its name', () => {
+    for (const name of ['NIntegrateVariable', 't']) {
+      const ce = new ComputeEngine();
+      ce.assign(name, 4);
+      const [exact, numeric] = both(ce, ['Integrate', name, ['Limits', 0, 1]]);
+      expect(exact).toBe('4');
+      expect(numeric).toBeCloseTo(4, 12);
+    }
+    const ce = new ComputeEngine();
+    ce.assign('t', 4);
+    const [exact, numeric] = both(ce, [
+      'Integrate',
+      ['Multiply', 't', 'x'],
+      ['Limits', 0, 1],
+      ['Limits', 0, 2],
+    ]);
+    expect(exact).toBe('4');
+    expect(numeric).toBeCloseTo(4, 12);
+  });
+
+  test('a typed parameter is the variable: ∫_0^1 (x: real) ↦ x² is 1/3', () => {
+    const [exact, numeric] = both(new ComputeEngine(), [
+      'Integrate',
+      ['Function', ['Power', 'x', 2], ['Typed', 'x', "'real'"]],
+      ['Limits', 'Nothing', 0, 1],
+    ]);
+    expect(exact).toBe('1/3');
+    expect(numeric).toBeCloseTo(1 / 3, 12);
+  });
+
+  // A limit with no variable takes a parameter that no named limit uses.
+  test('named and unnamed limits together', () => {
+    const ce = new ComputeEngine();
+    // The parameter `y` belongs to the second limit: the first limit has no
+    // parameter, and the integrand is constant in it.
+    expect(
+      both(ce, [
+        'Integrate',
+        'y',
+        ['Limits', 'Nothing', 0, 1],
+        ['Limits', 'y', 0, 2],
+      ])
+    ).toEqual(['2', expect.closeTo(2, 12)]);
+    // The first limit takes `b`, the parameter that `Limits(a, 0, 2)` does
+    // not use: ∫_0^2 ∫_0^1 b db da = 1.
+    expect(
+      both(ce, [
+        'Integrate',
+        ['Function', 'b', 'a', 'b'],
+        ['Limits', 'Nothing', 0, 1],
+        ['Limits', 'a', 0, 2],
+      ])
+    ).toEqual(['1', expect.closeTo(1, 12)]);
+  });
+
+  test('a bound with the value NaN leaves the integral unevaluated', () => {
+    const ce = new ComputeEngine();
+    ce.assign('c', ce.NaN);
+    const e = ce.box(['Integrate', 2, ['Limits', 0, 'c']]);
+    expect(e.evaluate().operator).toBe('Integrate');
+    expect(e.N().operator).toBe('Integrate');
+  });
+
+  test('a bare symbol whose value is a function is not a constant', () => {
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.parse('x \\mapsto x^2'));
+    // Not `g·1` (an `incompatible-type` error): the integral stays
+    // unevaluated, and the compile declines.
+    for (const e of [
+      ce.parse('\\int_0^1 g'),
+      ce.box(['Integrate', 'Sin', ['Limits', 0, 1]]),
+    ]) {
+      expect(e.evaluate().operator).toBe('Integrate');
+      expect(e.N().operator).toBe('Integrate');
+      expect(() => compile(e, { fallback: false })).toThrow(
+        /Could not compile/
+      );
+    }
+  });
+
+  // The variable of an unnamed limit, here the typed parameter `x`, hides
+  // the value of the assigned `x`: with `x := 5`, compiling `|x|` for
+  // quadrature read `x` as positive and dropped the `Abs`.
+  test('with x := 5, ∫_{−π}^{π} (x: real) ↦ |x| cos x is −4', () => {
+    const ce = new ComputeEngine();
+    ce.assign('x', 5);
+    const [exact, numeric] = both(ce, [
+      'Integrate',
+      [
+        'Function',
+        ['Multiply', ['Abs', 'x'], ['Cos', 'x']],
+        ['Typed', 'x', "'real'"],
+      ],
+      ['Limits', 'Nothing', ['Negate', 'Pi'], 'Pi'],
+    ]);
+    expect(exact).toBe('-4');
+    expect(numeric).toBeCloseTo(-4, 12);
+  });
+
+  test('N() of a constant over an infinite interval: +∞ and −∞', () => {
+    const ce = new ComputeEngine();
+    const n = (json: MathJson) => ce.box(json).N().toString();
+    expect(
+      n(['Integrate', ['Power', 10, -12], ['Limits', 0, 'PositiveInfinity']])
+    ).toBe('+oo');
+    expect(n(['Integrate', -2, ['Limits', 0, 'PositiveInfinity']])).toBe(
+      '-oo'
+    );
+  });
+
+  // With no closed form, the compiled integral is a quadrature over the
+  // variable that the interpreter uses: the parameter `x` of the integrand.
+  test('compiled quadrature for an unnamed limit agrees with N()', () => {
+    const ce = new ComputeEngine();
+    const json: MathJson = [
+      'Integrate',
+      ['Function', ['Multiply', 'a', ['Sin', ['Sin', 'x']]], 'x'],
+      ['Limits', 'Nothing', 0, 1],
+    ];
+    const compiled = compile(ce.box(json), { fallback: false });
+    expect(compiled.success).toBe(true);
+    // The interpreter's value with `a` replaced by 2.
+    const reference = both(ce, [
+      'Integrate',
+      ['Function', ['Multiply', 2, ['Sin', ['Sin', 'x']]], 'x'],
+      ['Limits', 'Nothing', 0, 1],
+    ])[1];
+    expect(reference).toBeCloseTo(0.8612122062413813, 10);
+    expect(compiled.run?.({ a: 2 })).toBeCloseTo(reference, 10);
+    // The interval target uses the same variable: its enclosure holds the
+    // value.
+    const interval = compile(ce.box(json), {
+      to: 'interval-js',
+      fallback: false,
+    });
+    expect(interval.success).toBe(true);
+    const r = interval.run?.({ a: 2 }) as {
+      value: { lo: number; hi: number };
+    };
+    expect(r.value.lo).toBeLessThanOrEqual(reference);
+    expect(r.value.hi).toBeGreaterThanOrEqual(reference);
+  });
+
+  // The value of a constant integrand under evaluate(), N() and compiled
+  // JavaScript.
+  const threeRoutes = (
+    e: ReturnType<ComputeEngine['box']>
+  ): [string, string, unknown] => {
+    const compiled = compile(e, { fallback: false });
+    return [e.evaluate().toString(), e.N().toString(), compiled.run?.({})];
+  };
+
+  test('a parameterless literal with a block of several statements is applied', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Integrate',
+      ['Function', ['Block', 1, 2]],
+      ['Limits', 'Nothing', 0, 2],
+    ]);
+    expect(threeRoutes(e)).toEqual(['4', '4', 4]);
+  });
+
+  test('equal bounds give 0, also +∞ to +∞ and an infinite integrand', () => {
+    const ce = new ComputeEngine();
+    expect(
+      threeRoutes(
+        ce.box([
+          'Integrate',
+          2,
+          ['Limits', 'Nothing', 'PositiveInfinity', 'PositiveInfinity'],
+        ])
+      )
+    ).toEqual(['0', '0', 0]);
+    expect(
+      threeRoutes(
+        ce.box(['Integrate', 'PositiveInfinity', ['Limits', 'Nothing', 1, 1]])
+      )
+    ).toEqual(['0', '0', 0]);
+  });
+
+  test('with c := 0, ∫_0^∞ c is 0 on every route', () => {
+    const ce = new ComputeEngine();
+    ce.assign('c', 0);
+    expect(threeRoutes(ce.parse('\\int_0^\\infty c'))).toEqual([
+      '0',
+      '0',
+      0,
+    ]);
+  });
+
+  test('∫_0^1 x does not declare x, under evaluate(), N() or compile', () => {
+    for (const run of [
+      (e: ReturnType<ComputeEngine['box']>) => e.evaluate(),
+      (e: ReturnType<ComputeEngine['box']>) => e.N(),
+      (e: ReturnType<ComputeEngine['box']>) => compile(e),
+    ]) {
+      const ce = new ComputeEngine();
+      run(ce.parse('\\int_0^1 x'));
+      expect(ce.lookupDefinition('x')).toBeUndefined();
+    }
+  });
+
+  // The compiled lambda of a dimension in which the integrand is constant
+  // binds a name that the integrand does not read, also through the value
+  // of `c`.
+  test('the variable of a constant dimension does not capture a symbol of an assigned value', () => {
+    for (const name of ['t', 'IntegrationVariable']) {
+      const ce = new ComputeEngine();
+      ce.assign('c', ce.box(['Add', name, 1]));
+      const json: MathJson = [
+        'Integrate',
+        ['Function', ['Multiply', 'c', ['Sin', ['Sin', 'x']]], 'x'],
+        ['Limits', 'Nothing', 0, 1],
+        ['Limits', 'Nothing', 0, 2],
+      ];
+      const compiled = compile(ce.box(json), { fallback: false });
+      expect(compiled.success).toBe(true);
+      expect(compiled.code).not.toMatch(new RegExp(`\\(${name}\\) =>`));
+      ce.assign(name, 2);
+      const reference = both(ce, json)[1];
+      // ∫_0^2 ∫_0^1 3·sin(sin x) dx dt = 6·0.4306…
+      expect(reference).toBeCloseTo(2.583636618724144, 10);
+      expect(compiled.run?.({ [name]: 2 })).toBeCloseTo(reference, 10);
+    }
+  });
+
+  test('an indefinite limit with no variable, and no parameter, stays unevaluated', () => {
+    const e = new ComputeEngine().box(['Integrate', 2, 'Nothing']);
+    expect(e.evaluate().operator).toBe('Integrate');
+    expect(e.N().operator).toBe('Integrate');
   });
 });
 

@@ -80,6 +80,7 @@ import {
 import { declareValueOperand } from './compile-declarations.js';
 import { core } from './compiler-core-hooks.js';
 import { CompilerState } from './compiler-state.js';
+import { implicitIntegrationVariable } from '../boxed-expression/integration-variables.js';
 
 /**
  * Analyze — without compiling, and never throwing — which external references
@@ -814,6 +815,17 @@ export function analyzeReferences(
             } else if (isFunction(p, 'Tuple')) for (const q of p.ops) leaves(q);
           };
           leaves(clause.ops[0]);
+          // A limit that names no variable binds the variable that the
+          // interpreter gives it (`implicitIntegrationVariable`): `x` in
+          // `\int_0^1 x` is not an input of the compiled code.
+          if (h === 'Integrate' && isSymbol(clause.ops[0], 'Nothing')) {
+            const implicit = implicitIntegrationVariable(
+              ops[0],
+              ops.slice(1),
+              ops.slice(1).indexOf(clause)
+            );
+            if (typeof implicit === 'string') names.push(implicit);
+          }
           indices.push(...names);
           const outer = h === 'Comprehension' ? earlier : bound;
           const own = names.length === 0 ? outer : union(outer, names);

@@ -1457,6 +1457,10 @@ export function factor(expr: Expression): Expression {
 function factorUncached(expr: Expression): Expression {
   const h = expr.operator;
   if (isFunction(expr) && isRelationalOperator(h)) {
+    // A chain of three or more operands (`x < z < y`) is not factored: the
+    // code below reads only the first two operands, and the result dropped
+    // the others (`Less(x, z, y)` became `Less(x, z)`).
+    if (expr.nops !== 2) return expr;
     let lhs = Product.from(expr.op1);
     let rhs = Product.from(expr.op2);
     const [coef, common] = commonTerms(lhs, rhs);

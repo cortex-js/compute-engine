@@ -416,6 +416,13 @@ export type MatchStatementClause = {
   /** The case guard, as written in the `Match`, if the case has one. */
   guard?: Expression;
   /**
+   * The expressions that the test of the case compiles to compare the
+   * subject with: each literal, each pin, the two endpoints of each range.
+   * Empty for the irrefutable case. A target reads them to see what the
+   * comparison runs, for example code supplied by the caller in a pin.
+   */
+  comparisons: ReadonlyArray<Expression>;
+  /**
    * Compile the test of the case: the comparison of the subject with the
    * case patterns, and the guard after `&&`. The guard is compiled through
    * the `arm` option of `compileMatchTernary`, as in the ternary form,

@@ -896,6 +896,26 @@ export function openCseSession(
   target.cse = { enabled: true, harvest, harvestOptions, instances: [] };
 }
 
+/**
+ * The CSE state for a nested lowering that must share nothing with the
+ * enclosing harvest (a closure body whose parameters the harvest does not
+ * know, a loop body emitted as statements): a disabled session that keeps
+ * the caller's provenance predicates (`harvestOptions`). Those predicates
+ * describe the caller's inputs (which `vars` entries are code, which heads
+ * the caller mapped), not the CSE transform. A plain `cse: undefined` loses
+ * them, and then an analysis such as `reachesCallerCodeOn` reads a `vars`
+ * entry `W: 'nextValue()'` as a plain input inside the nested body.
+ * `undefined` when the target has no session.
+ */
+export function cseSharingOff(
+  target: CompileTarget<Expression>
+): CompileTarget<Expression>['cse'] {
+  const harvestOptions = target.cse?.harvestOptions;
+  return harvestOptions === undefined
+    ? undefined
+    : { enabled: false, harvestOptions, instances: [] };
+}
+
 /** Add a harvest's symbol inventory to the compilation's collision
  * inventory, in place (a harvest runs at every boundary AND per emitted
  * user-function body — copying each time is pure churn). */

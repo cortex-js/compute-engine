@@ -4519,6 +4519,29 @@ function absentArgumentAsNaN(x: unknown, elements?: boolean): unknown {
   return x;
 }
 
+/**
+ * The iteration count of `_SYS.mandelbrot` and `_SYS.julia`, rounded to an
+ * integer. A count on the complex lane (`Mandelbrot(c, √x)` with `x` real)
+ * arrives as a `{re, im}` object. This operand takes the run-time realness
+ * rule of a real-only operand (`docs/COMPILATION-MODEL.md`, the paragraph
+ * on a real-only head over an operand that may be complex at run time): it
+ * is read as its real part when the imaginary part is exactly zero, and the
+ * value is NaN otherwise. So for any other object this function gives
+ * `undefined`, and the kernels return NaN instead of iterating a wrong number
+ * of times. The interpreter answers the `incompatible-type` error for a
+ * count that is not real, as it does for `Floor(√x)` at `x = −4`, which the
+ * same rule compiles to NaN. A value that is not an object (`undefined`,
+ * `null`) is rounded as it was before the complex lane, so `undefined`
+ * gives a NaN count and the loop does not run.
+ */
+function iterationCount(
+  maxIter: number | { re: number; im: number }
+): number | undefined {
+  if (typeof maxIter !== 'object' || maxIter === null)
+    return Math.round(maxIter as number);
+  return maxIter.im === 0 ? Math.round(maxIter.re) : undefined;
+}
+
 export const SYS_HELPERS = {
   ...JET_HELPERS,
   // The marker object that a comparison of a block local throws when the
@@ -6456,12 +6479,16 @@ export const SYS_HELPERS = {
   ellipticPiIncomplete,
   hypergeometric2F1,
   hypergeometric1F1,
-  mandelbrot: (c: number | { re: number; im: number }, maxIter: number) => {
+  mandelbrot: (
+    c: number | { re: number; im: number },
+    maxIter: number | { re: number; im: number }
+  ) => {
     let zx = 0,
       zy = 0;
     const cx = typeof c === 'number' ? c : c.re;
     const cy = typeof c === 'number' ? 0 : c.im;
-    const n = Math.round(maxIter);
+    const n = iterationCount(maxIter);
+    if (n === undefined) return NaN;
     for (let i = 0; i < n; i++) {
       const newZx = zx * zx - zy * zy + cx;
       zy = 2 * zx * zy + cy;
@@ -6477,13 +6504,14 @@ export const SYS_HELPERS = {
   julia: (
     z: number | { re: number; im: number },
     c: number | { re: number; im: number },
-    maxIter: number
+    maxIter: number | { re: number; im: number }
   ) => {
     let zx = typeof z === 'number' ? z : z.re;
     let zy = typeof z === 'number' ? 0 : z.im;
     const cx = typeof c === 'number' ? c : c.re;
     const cy = typeof c === 'number' ? 0 : c.im;
-    const n = Math.round(maxIter);
+    const n = iterationCount(maxIter);
+    if (n === undefined) return NaN;
     for (let i = 0; i < n; i++) {
       const newZx = zx * zx - zy * zy + cx;
       zy = 2 * zx * zy + cy;
@@ -6892,6 +6920,18 @@ export function makeRandomHelpers(source: RuntimeSource): RandomSysHelpers {
     drawNextRandomNumber: draw,
 
     withRandomSeed: <T>(seed: unknown, body: () => T): T => {
+      // A seed on the complex lane (`WithRandomSeed(√x, …)` with `x` real)
+      // arrives as a `{re, im}` object. The interpreter accepts a seed whose
+      // value is a real number, so an object whose imaginary part is exactly
+      // zero is read as its real part. Any other object is not a valid seed
+      // and fails below, as the interpreter answers an error for it.
+      if (
+        typeof seed === 'object' &&
+        seed !== null &&
+        (seed as { im?: unknown }).im === 0 &&
+        typeof (seed as { re?: unknown }).re === 'number'
+      )
+        seed = (seed as { re: number }).re;
       if (
         (typeof seed !== 'number' || !Number.isFinite(seed)) &&
         typeof seed !== 'string'

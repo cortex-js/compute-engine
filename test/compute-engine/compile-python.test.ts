@@ -2260,3 +2260,24 @@ describe('PYTHON TARGET — a search whose value may be Missing fails closed', (
     ).toContain('(_ce_indexof([1, np.nan], x) > 0)');
   });
 });
+
+describe('COMPILE PYTHON: a chained ordering over operands that may be complex', () => {
+  it('joins the pairs with `and` and tests realness at each pair', () => {
+    // Each operand is bound at the first pair that reads it, and the pair
+    // tests that its two operands are real. The pairs were joined with the
+    // JavaScript `&&`, which is not valid Python.
+    const scoped = new ComputeEngine();
+    scoped.declare('x', 'real');
+    scoped.declare('y', 'real');
+    const code = new PythonTarget()
+      .compile(scoped.box(['Less', ['Sqrt', 'x'], ['Sqrt', 'y'], 0]))
+      .code.split('\n')
+      .pop();
+    expect(code).toBe(
+      '(lambda _tv1: (lambda _tv2: (((_ce_creal(_tv1) < _ce_creal(_tv2)) and ' +
+        '(lambda _tv3: (((_ce_creal(_tv2) < _tv3)) if (_ce_cisreal(_tv2)) ' +
+        'else False))(0)) if (_ce_cisreal(_tv1) and _ce_cisreal(_tv2)) ' +
+        'else False))(np.emath.sqrt(y)))(np.emath.sqrt(x))'
+    );
+  });
+});

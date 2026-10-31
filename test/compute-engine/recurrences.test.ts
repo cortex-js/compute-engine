@@ -183,3 +183,16 @@ describe('RSolve', () => {
     );
   });
 });
+
+// An initial condition `a(0) = 1 = 2` is two equations, and they
+// contradict: the recurrence has no solution, not the solution of `a(0) = 1`.
+describe('RSOLVE OF AN EQUALITY CHAIN', () => {
+  test('a chain is not solved as its first link', () => {
+    const r = rsolve([
+      'List',
+      ['Equal', ['a', 'n'], ['Multiply', 2, ['a', ['Subtract', 'n', 1]]]],
+      ['Equal', ['a', 0], 1, 2],
+    ]);
+    expect(r.operator).toBe('RSolve');
+  });
+});

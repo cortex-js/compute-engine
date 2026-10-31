@@ -1261,7 +1261,10 @@ describe('a real-operand guard evaluates every impure operand in source order', 
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const r = compiled(ce, json);
-    const c = withRandomSeedFrame(ce, seed, () => [r.run!({ x }), ce._random()]);
+    const c = withRandomSeedFrame(ce, seed, () => [
+      r.run!({ x }),
+      ce._random(),
+    ]);
     const i = withRandomSeedFrame(ce, seed, () => [
       ce.box(json).subs({ x }).evaluate().re,
       ce._random(),
@@ -1311,6 +1314,264 @@ describe('a real-operand guard evaluates every impure operand in source order', 
     // count) are compared.
     expect(realCases).toBeGreaterThan(0);
   });
+
+  // A compiled input is a value that the variable HOLDS at run time, so the
+  // interpreter reference is an evaluation with `x` assigned. That
+  // evaluation evaluates both operands (one draw) and then refuses the
+  // imaginary divisor cell by cell. `subs({x: -4})` is a different
+  // expression: it boxes `Mod([Random(), 2], 2i)`, whose literal imaginary
+  // divisor is refused at boxing, so the whole expression is an error that
+  // takes no draw. The compiled code cannot see that literal at compile
+  // time, and it follows the assigned evaluation.
+  test.each(['Mod', 'Remainder'])(
+    '%s([Random(), 2], √x) draws once when √x is not real',
+    (head) => {
+      const json = [head, ['List', ['Random'], 2], ['Sqrt', 'x']];
+      const ce = new ComputeEngine();
+      ce.declare('x', 'real');
+      const r = compiled(ce, json);
+      const c = withRandomSeedFrame(ce, 7, () => [
+        r.run!({ x: -4 }),
+        ce._random(),
+      ]);
+      expect(c).toEqual([[NaN, NaN], draw(7, 1)]);
+
+      const ce2 = new ComputeEngine();
+      ce2.declare('x', 'real');
+      ce2.assign('x', -4);
+      const i = withRandomSeedFrame(ce2, 7, () => {
+        const v = ce2.box(json).evaluate();
+        return [v.ops!.map((cell) => cell.N().re), ce2._random()];
+      });
+      expect(i).toEqual(c);
+      if (head === 'Mod') {
+        // Each cell is the `incompatible-type` error, which compiled code
+        // gives as NaN.
+        const v = withRandomSeedFrame(ce2, 7, () => ce2.box(json).evaluate());
+        expect(v.ops!.every((cell) => cell.operator === 'Error')).toBe(true);
+        // The `subs` route boxes the imaginary literal and takes no draw.
+        const s = withRandomSeedFrame(ce, 7, () => [
+          ce.box(json).subs({ x: -4 }).evaluate().operator,
+          ce._random(),
+        ]);
+        expect(s).toEqual(['Error', draw(7, 0)]);
+      }
+      // The real case agrees with the interpreter too.
+      expect(
+        withRandomSeedFrame(ce, 7, () => [r.run!({ x: 4 }), ce._random()])
+      ).toEqual([[draw(7, 0), 0], draw(7, 1)]);
+    }
+  );
+});
+
+describe('a comparison chain evaluates the operands the interpreter evaluates', () => {
+  // The interpreter evaluates the operands of a chain (three or more
+  // operands) from left to right. It evaluates operand i, and then stops if
+  // the pair (i−1, i) is `False`, also when operand i−1 is not real. So in
+  // `Less(√(r₀−½), √(r₁−½), 0)` with a complex first root, both roots are
+  // drawn. The compiled chain tested the realness of the first root before
+  // it drew the second root, and drew once too few. An `Equal` chain with an
+  // impure middle operand bound every impure operand before the first pair,
+  // and drew too often when that pair was false.
+
+  /** The value and the index of the next draw, in both engines. */
+  function parity(json: any, seed: number) {
+    const ce = new ComputeEngine();
+    const r = compiled(ce, json);
+    const index = (v: number): number => {
+      for (let n = 0; n < 8; n++) if (draw(seed, n) === v) return n;
+      return -1;
+    };
+    const c = withRandomSeedFrame(ce, seed, () => [
+      r.run!(),
+      index(ce._random()),
+    ]);
+    const i = withRandomSeedFrame(ce, seed, () => {
+      const v = ce.box(json).evaluate().symbol;
+      return [
+        v === 'True' ? true : v === 'False' ? false : v,
+        index(ce._random()),
+      ];
+    });
+    return { compiled: c, interpreted: i };
+  }
+
+  const root = ['Sqrt', ['Subtract', ['Random'], 0.5]];
+
+  test('Less(√(r₀−½), √(r₁−½), 0) draws both roots when the first is complex', () => {
+    const json = ['Less', root, root, 0];
+    // Seed 2: the first draw is less than ½, so the first root is complex.
+    expect(draw(2, 0)).toBeLessThan(0.5);
+    expect(parity(json, 2).interpreted).toEqual([false, 2]);
+    for (let seed = 1; seed <= 12; seed++) {
+      const { compiled: c, interpreted: i } = parity(json, seed);
+      expect(c).toEqual(i);
+    }
+  });
+
+  test.each([
+    'Less',
+    'LessEqual',
+    'Greater',
+    'GreaterEqual',
+    'Equal',
+    'NotEqual',
+  ])(
+    '%s chains with maybe-complex and real draws agree with the interpreter',
+    (h) => {
+      const shapes = [
+        [h, root, root, 0],
+        [h, root, ['Random'], root],
+        [h, ['Random'], root, root, ['Random']],
+        [h, 0, root, ['Random']],
+        [h, root, root],
+      ];
+      for (const json of shapes)
+        for (let seed = 1; seed <= 12; seed++) {
+          const { compiled: c, interpreted: i } = parity(json, seed);
+          expect([json, seed, c]).toEqual([json, seed, i]);
+        }
+    }
+  );
+
+  test.each(['Equal', 'NotEqual'])(
+    '%s chain with an impure middle operand stops at the first false pair',
+    (h) => {
+      for (const json of [
+        [h, 0.1, ['Random'], 0.9, ['Random']],
+        [h, ['Random'], ['Random'], ['Random']],
+      ])
+        for (let seed = 1; seed <= 12; seed++) {
+          const { compiled: c, interpreted: i } = parity(json, seed);
+          expect([json, seed, c]).toEqual([json, seed, i]);
+        }
+      // The first pair of `Equal(0.1, r₀, 0.9, r₁)` is false, so only one
+      // draw is made.
+      if (h === 'Equal')
+        expect(
+          parity([h, 0.1, ['Random'], 0.9, ['Random']], 7).compiled
+        ).toEqual([false, 1]);
+    }
+  );
+
+  test('NotEqual with an impure middle operand draws it once', () => {
+    // The canonical form of a `NotEqual` chain was an `And` of its adjacent
+    // pairs, which holds a middle operand twice: `NotEqual(1, Random(), 2)`
+    // drew twice and compared `1 ≠ r₀` and `r₁ ≠ 2`. The chain stays n-ary
+    // when a middle operand is impure.
+    const ce = new ComputeEngine();
+    expect(ce.box(['NotEqual', 1, ['Random'], 2]).json).toEqual([
+      'NotEqual',
+      1,
+      ['Random'],
+      2,
+    ]);
+    for (let seed = 1; seed <= 6; seed++) {
+      expect(parity(['NotEqual', 1, ['Random'], 2], seed)).toEqual({
+        compiled: [true, 1],
+        interpreted: [true, 1],
+      });
+      expect(
+        parity(['NotEqual', ['Random'], ['Random'], ['Random']], seed)
+      ).toEqual({ compiled: [true, 3], interpreted: [true, 3] });
+      // `⌊r₀⌋ = 0`, so the first pair is false and the last operand is not
+      // drawn.
+      expect(
+        parity(['NotEqual', 0, ['Floor', ['Random']], ['Random']], seed)
+      ).toEqual({ compiled: [false, 1], interpreted: [false, 1] });
+    }
+  });
+
+  test('an Equal chain with an absent operand before a draw declines', () => {
+    // A compiled `Equal` pair with an absent operand is `false`, and the
+    // `&&` after it skipped the draw. The interpreter reads that pair as
+    // `Missing`, which is not `False`, and draws.
+    const json = ['Equal', 'a', 'b', ['Random']];
+    const ce = new ComputeEngine();
+    ce.declare('a', 'boolean | missing');
+    ce.declare('b', 'boolean | missing');
+    expect(() =>
+      compile(ce.box(json), { fallback: false, constantFold: false })
+    ).toThrow(/may be absent before an operand with an effect/);
+    ce.assign('a', ce.Missing);
+    ce.assign('b', ce.True);
+    const next = withRandomSeedFrame(ce, 7, () => {
+      // The last pair, `True = r₀`, is `False`.
+      expect(ce.box(json).evaluate().json).toBe('False');
+      return ce._random();
+    });
+    expect(next).toBe(draw(7, 1));
+    // With both operands present the chain compiles. The first pair is
+    // `false` in both engines, and neither draws.
+    const ce2 = new ComputeEngine();
+    ce2.declare('a', 'boolean');
+    ce2.declare('b', 'boolean');
+    const r = compiled(ce2, ['Equal', 'a', 'b', ['Random']]);
+    expect(
+      withRandomSeedFrame(ce2, 7, () => [
+        r.run!({ a: false, b: true }),
+        ce2._random(),
+      ])
+    ).toEqual([false, draw(7, 0)]);
+  });
+
+  test('an absent pair before the last draw declines, also after an earlier draw', () => {
+    // Each pair before the LAST impure operand counts: a `false` pair skips
+    // every operand after it.
+    const ce = new ComputeEngine();
+    ce.declare('a', 'boolean | missing');
+    ce.declare('b', 'boolean | missing');
+    for (const json of [
+      ['Equal', ['Random'], 'a', ['Random']],
+      ['Equal', 0.5, ['Random'], 'a', 'b', ['Random']],
+    ])
+      expect(() =>
+        compile(ce.box(json), { fallback: false, constantFold: false })
+      ).toThrow(/may be absent before an operand with an effect/);
+    // A symbol the caller leaves out reads `undefined`. The interpreter
+    // reads that pair as undecided and draws; the compiled chain (the Kleene
+    // `And` of its pairs) draws too.
+    const ce3 = new ComputeEngine();
+    ce3.declare('c', 'boolean');
+    ce3.declare('xr', 'real');
+    for (const [json, draws] of [
+      [['Equal', 'c', 'True', ['Less', ['Random'], 0.5]], 1],
+      [['Equal', ['Random'], 'xr', ['Random']], 2],
+    ] as const) {
+      const run = compiled(ce3, json).run!;
+      expect(withRandomSeedFrame(ce3, 7, () => (run({}), ce3._random()))).toBe(
+        draw(7, draws)
+      );
+    }
+    // Operands whose type has no `missing` option compile.
+    const r = compiled(new ComputeEngine(), [
+      'Equal',
+      'True',
+      'True',
+      ['Less', ['Random'], 0.5],
+    ]);
+    expect(r.success).toBe(true);
+  });
+
+  test('a symbol whose value draws is bound once in a NotEqual chain', () => {
+    // `isPure` is true for `r`, but its compiled code is the draw, spliced
+    // at each place that reads `r`. The middle operand of a chain is in two
+    // pairs, so `NotEqual(1, r, 2)` drew twice; the interpreter draws once.
+    const ce = new ComputeEngine();
+    ce.assign('r', ce.box(['Random'], { form: 'raw' }));
+    const expr = ce.box(['NotEqual', 1, 'r', 2]);
+    const r = compile(expr, { fallback: false, constantFold: false })!;
+    expect(r.success).toBe(true);
+    for (let seed = 1; seed <= 6; seed++) {
+      const c = withRandomSeedFrame(ce, seed, () => [r.run!(), ce._random()]);
+      const i = withRandomSeedFrame(ce, seed, () => [
+        expr.evaluate().json,
+        ce._random(),
+      ]);
+      expect(c).toEqual([true, draw(seed, 1)]);
+      expect(i).toEqual(['True', draw(seed, 1)]);
+    }
+  });
 });
 
 describe('a real-operand guard over an impure node shared by two positions', () => {
@@ -1322,7 +1583,10 @@ describe('a real-operand guard over an impure node shared by two positions', () 
   // fallback gives the value (CE-687).
   function bothRuns(ce: ComputeEngine, expr: any, seed: number, x = 0) {
     const r = compile(expr, { constantFold: false })!;
-    const c = withRandomSeedFrame(ce, seed, () => [r.run!({ x }), ce._random()]);
+    const c = withRandomSeedFrame(ce, seed, () => [
+      r.run!({ x }),
+      ce._random(),
+    ]);
     const i = withRandomSeedFrame(ce, seed, () => [
       expr.subs({ x }).evaluate().re,
       ce._random(),
@@ -1689,10 +1953,16 @@ describe('a real-operand guard reads each operand where the interpreter reads it
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
     const r = compiled(ce, json);
-    const c = withRandomSeedFrame(ce, seed, () => [r.run!({ x }), ce._random()]);
+    const c = withRandomSeedFrame(ce, seed, () => [
+      r.run!({ x }),
+      ce._random(),
+    ]);
     const i = withRandomSeedFrame(ce, seed, () => {
       const v = ce.box(json).subs({ x }).evaluate();
-      return [v.isNumberLiteral && v.im === 0 ? v.re : v.toString(), ce._random()];
+      return [
+        v.isNumberLiteral && v.im === 0 ? v.re : v.toString(),
+        ce._random(),
+      ];
     });
     return { compiled: c, interpreted: i };
   }
@@ -1750,5 +2020,401 @@ describe('a real-operand guard reads each operand where the interpreter reads it
     const fail = run(json, -4);
     expect(fail.interpreted[1]).toBe(draw(7, 2));
     expect(fail.compiled).toEqual([NaN, draw(7, 2)]);
+  });
+});
+
+describe('a chained comparison evaluates caller code once, in operand order', () => {
+  // A `vars` entry whose value is code (`_.w()`) or a head mapped through
+  // `functions` can count its calls. The interpreter evaluates each operand
+  // of a chain once, from left to right, and stops at the first pair that
+  // is `False`, so the caller's code runs once, and not at all after a
+  // false pair. A middle operand is read by two pairs, and the tests of an
+  // absent input read an operand again, so the compiled code binds it.
+  const V = { vars: { W: '_.w()', V: '_.v()' } };
+  function calls(
+    json: any,
+    inputs: Record<string, number>,
+    w: number,
+    v = 0,
+    options: any = V
+  ) {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    ce.declare('g', '(real) -> real');
+    const r = compile(ce.box(json), { fallback: false, ...options })!;
+    expect(r.success).toBe(true);
+    const log: string[] = [];
+    const value = r.run!({
+      ...inputs,
+      w: () => (log.push('w'), w),
+      v: () => (log.push('v'), v),
+      f: (t: number) => (log.push('f'), t / 2),
+    } as any);
+    return { value, log: log.join(',') };
+  }
+  // The interpreter's value with `W` and `V` bound to numbers.
+  function interpreted(
+    json: any,
+    inputs: Record<string, number>,
+    w: number,
+    v = 0
+  ) {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    const r = ce
+      .box(json)
+      .subs({ ...inputs, W: w, V: v })
+      .evaluate();
+    return r.symbol === 'True'
+      ? true
+      : r.symbol === 'False'
+        ? false
+        : r.toString();
+  }
+
+  test.each([
+    [['Less', 1, 'W', 3], 2],
+    [['Less', 1, 'W', 3], 5],
+    [['Less', 'x', 'W', 3], 2],
+    [['LessEqual', 'y', 'W', 3], 0],
+    [['Equal', 1, 'W', 1], 1],
+    [['Equal', 'x', 'W', 3], 3],
+    [['Less', 'x', 'W'], 2],
+  ])('%j with W = %d calls W once', (json, w) => {
+    const run = calls(json, { x: 1, y: 1 }, w);
+    expect(run.log).toBe('w');
+    expect(run.value).toBe(interpreted(json, { x: 1, y: 1 }, w));
+  });
+
+  test('an absent input does not repeat or skip caller code', () => {
+    for (const json of [
+      ['Less', 'x', 'W'],
+      ['Less', 'x', 'W', 3],
+      ['Equal', 'x', 'W', 3],
+    ]) {
+      expect(calls(json, {}, 2)).toEqual({
+        value: json[0] === 'Equal' ? false : undefined,
+        log: 'w',
+      });
+      // A NaN operand decides the comparison while `x` has no value.
+      expect(calls(json, {}, NaN)).toEqual({ value: false, log: 'w' });
+    }
+    // The pair `W = 3` holds, and the pair with the absent `x` has no
+    // value.
+    expect(calls(['Equal', 'x', 'W', 3], {}, 3)).toEqual({
+      value: undefined,
+      log: 'w',
+    });
+  });
+
+  test('caller code after a false pair does not run', () => {
+    const json = ['Less', 'x', 1, 'W'];
+    expect(calls(json, { x: 5 }, 2)).toEqual({ value: false, log: '' });
+    expect(calls(json, { x: 0 }, 2)).toEqual({ value: true, log: 'w' });
+    // A pair with an absent operand has no value, which is not `False`:
+    // the interpreter goes on to the next operand.
+    expect(calls(json, {}, 2)).toEqual({ value: undefined, log: 'w' });
+    expect(calls(['Less', 'x', 'W', 'V'], { x: 5 }, 1, 2)).toEqual({
+      value: false,
+      log: 'w',
+    });
+  });
+
+  test('two operands with caller code run in operand order', () => {
+    expect(calls(['Less', 'W', 'V', 3], {}, 1, 2)).toEqual({
+      value: true,
+      log: 'w,v',
+    });
+    expect(calls(['Equal', 'W', 'V'], {}, 1, 1)).toEqual({
+      value: true,
+      log: 'w,v',
+    });
+    expect(calls(['Less', 'x', 'W', 'V'], {}, 1, 2)).toEqual({
+      value: undefined,
+      log: 'w,v',
+    });
+  });
+
+  test('a branch condition calls the caller code once', () => {
+    const If = (c: any) => ['If', c, 10, 20];
+    expect(calls(If(['Less', 1, 'W', 3]), {}, 2)).toEqual({
+      value: 10,
+      log: 'w',
+    });
+    expect(calls(If(['Less', 'x', 'W', 3]), { x: 1 }, 2)).toEqual({
+      value: 10,
+      log: 'w',
+    });
+    // `x` absent: no branch is taken, and `W` is read as in the
+    // interpreter.
+    expect(calls(If(['Less', 'x', 'W']), {}, 2)).toEqual({
+      value: NaN,
+      log: 'w',
+    });
+    expect(calls(If(['Less', 'x', 1, 'W']), { x: 5 }, 2)).toEqual({
+      value: 20,
+      log: '',
+    });
+  });
+
+  test('a head mapped through `functions` runs once', () => {
+    // `g` is declared `(real) -> real` by `calls`; `f` has no signature.
+    const F = { functions: { f: '_.f', g: '_.f' } };
+    for (const json of [
+      ['Less', 0, ['g', 'y'], 1],
+      ['Equal', 0, ['g', 'y'], 1],
+      ['Less', 0, ['f', 'y'], 1],
+    ])
+      expect(calls(json, { y: 1 }, 0, 0, F).log).toBe('f');
+    // After the false pair `1 < 0`, `g(y)` is not called.
+    expect(calls(['Less', 'y', 0, ['g', 'y']], { y: 1 }, 0, 0, F)).toEqual({
+      value: false,
+      log: '',
+    });
+  });
+
+  test('a run-time broadcast chain evaluates a later operand only after the pairs before it', () => {
+    // `f` has no signature, so the chain goes through `_SYS.bcast`. The
+    // interpreter stops at the first pair that is `False`.
+    const F = { functions: { f: '_.f' } };
+    const json = ['Less', 'y', 0, ['f', 'y']];
+    expect(calls(json, { y: 1 }, 0, 0, F)).toEqual({ value: false, log: '' });
+    // `f(-1)` is `-0.5` (`calls` maps `_.f` to `t / 2`).
+    expect(calls(json, { y: -1 }, 0, 0, F)).toEqual({ value: false, log: 'f' });
+    expect(calls(['Less', 'y', 5, ['f', 'y'], 3], { y: 7 }, 0, 0, F)).toEqual(
+      { value: false, log: '' }
+    );
+    // A draw at index 2 is not consumed after a false pair.
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    const r = compile(ce.box(['Less', ['f', 'y'], 0, ['Random']]), {
+      fallback: false,
+      ...F,
+    })!;
+    expect(r.code).toContain('_SYS.bcast');
+    const after = (y: number) =>
+      withRandomSeedFrame(ce, 7, () => {
+        r.run!({ y, f: (t: number) => t } as any);
+        return ce._random();
+      });
+    expect(after(1)).toBe(draw(7, 0));
+    expect(after(-1)).toBe(draw(7, 1));
+  });
+
+  test('a head mapped through `functions` and declared pure keeps the eager broadcast', () => {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    expect(
+      compile(ce.box(['Less', 'y', 0, ['f', 'y']]), {
+        fallback: false,
+        functions: { f: { source: '_.f', pure: true } },
+      } as any)!.code
+    ).toBe(
+      '((_tv1) => ((_.y !== undefined) ? _tv1 : undefined))(_SYS.bcast((_tv2, _tv3, _tv4) => ((_tv2 < _tv3) && (_tv3 < _tv4)), (_.y), (0), (_.f(_.y))))'
+    );
+  });
+
+  test('interval-js runs caller code only after the pairs before it', () => {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    const r = compile(ce.box(['Less', 'y', 1, 'W']), {
+      to: 'interval-js',
+      fallback: false,
+      vars: { W: '_.w()' },
+    })!;
+    const run = (y: number, w: number) => {
+      const log: string[] = [];
+      const value = r.run!({
+        y,
+        w: () => (log.push('w'), { lo: w, hi: w }),
+      } as any);
+      return { value, log: log.join(',') };
+    };
+    expect(run(5, 2)).toEqual({ value: 'false', log: '' });
+    expect(run(0, 2)).toEqual({ value: 'true', log: 'w' });
+    expect(run(0, 0)).toEqual({ value: 'false', log: 'w' });
+  });
+
+  test('Python keeps the caller provenance in the loop body of a Sum', () => {
+    // The statement body of `Sum` is compiled with common-subexpression
+    // sharing off; the `vars` entry is still caller code there.
+    const ce = new ComputeEngine();
+    ce.declare('W', 'real');
+    const body = [
+      'Block',
+      ['Assign', 't', ['Multiply', 2, 'k']],
+      ['Boole', ['Less', 't', 'W', 30]],
+    ];
+    const code = compile(ce.box(['Sum', body, ['Tuple', 'k', 1, 3]]), {
+      to: 'python',
+      fallback: false,
+      vars: { W: 'next_value()' },
+    })!.code;
+    expect(code.split('next_value()').length - 1).toBe(1);
+  });
+
+  test('Python declines caller code after a pair that may read an absent operand', () => {
+    // At `m = None` Python stops at `m == 0`; the interpreter reads
+    // `Missing` there, goes on and evaluates `W`.
+    const ce = new ComputeEngine();
+    ce.declare('m', 'number | missing');
+    expect(() =>
+      compile(ce.box(['Equal', 'm', 0, 'W']), {
+        to: 'python',
+        fallback: false,
+        vars: { W: 'next_value()' },
+      })
+    ).toThrow(/may read an absent operand/);
+  });
+
+  test('interval-js and Python bind the caller code of a chain', () => {
+    const ce = new ComputeEngine();
+    const count = (code: string) => code.split('nextValue()').length - 1;
+    for (const to of ['interval-js', 'python'] as const)
+      for (const h of ['Less', 'Equal'])
+        expect(
+          count(
+            compile(ce.box([h, 1, 'W', 3]), {
+              to,
+              fallback: false,
+              vars: { W: 'nextValue()' },
+            })!.code
+          )
+        ).toBe(1);
+    ce.declare('y', 'real');
+    // A Python pair with the `None` guard reads its left operand twice.
+    expect(
+      count(
+        compile(ce.box(['Equal', 'W', 'y']), {
+          to: 'python',
+          fallback: false,
+          vars: { W: 'nextValue()' },
+        })!.code
+      )
+    ).toBe(1);
+  });
+
+  test('an earlier operand keeps the value it had before later caller code runs', () => {
+    // `_.w()` writes the input `y` and returns `w`. The interpreter has the
+    // value of each operand from before the next one is evaluated.
+    const run = (json: any, y: number, w: number) => {
+      const ce = new ComputeEngine();
+      ce.declare('y', 'real');
+      const r = compile(ce.box(json), { fallback: false, ...V })!;
+      const env: any = { y };
+      env.w = () => ((env.y = -50), w);
+      const interp = ce.box(json).subs({ y, W: w }).evaluate();
+      return { compiled: r.run!(env), interpreted: interp.symbol === 'True' };
+    };
+    for (const [json, y, w] of [
+      [['Equal', 0, ['Add', 'y', 1], 'W'], -1, 0],
+      [['Less', ['Add', 'y', 1], 'W', 3], -1, 1],
+      [['Less', 0, 'y', 'W'], 1, 2],
+      [['Less', ['Add', 'y', 1], 'W'], -1, 1],
+      [['If', ['Less', 0, 'y', 'W'], true, false], 1, 2],
+    ] as const)
+      expect(run(json, y, w)).toEqual({ compiled: true, interpreted: true });
+    // Python and interval-js read the temporary of the earlier operand.
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    const code = (to: 'python' | 'interval-js', json: any) =>
+      compile(ce.box(json), { to, fallback: false, vars: { W: 'nv()' } })!
+        .code;
+    expect(code('python', ['Equal', 0, ['Add', 'y', 1], 'W'])).toBe(
+      '((lambda _tv1: ((0) == (_tv1)) and (lambda _tv2: ((_tv1) == (_tv2)))(nv()))(y + 1))'
+    );
+    expect(code('interval-js', ['Less', 0, 'y', 'W'])).toContain(
+      '_IA.less(_tv1, _tv2))(nv())'
+    );
+  });
+
+  test('a `vars` entry that reads another input is tested for absence like an input', () => {
+    // `W: '_.z'` differs from the default spelling of `W`, so it counts as
+    // caller code, and it is also a read that the caller can leave out. The
+    // presence tests read it; the comparison compiles and terminates.
+    const ce = new ComputeEngine();
+    const interp = (json: any, inputs: Record<string, number>) => {
+      const subs: Record<string, number> = { ...inputs };
+      if ('z' in subs) {
+        subs.W = subs.z;
+        delete subs.z;
+      }
+      const v = ce.box(json).subs(subs).evaluate();
+      return v.symbol === 'True' ? true : v.symbol === 'False' ? false : undefined;
+    };
+    for (const json of [
+      ['Less', 'x', 'W'],
+      ['Equal', 'x', 'y', 'W'],
+    ]) {
+      const r = compile(ce.box(json), {
+        fallback: false,
+        vars: { W: '_.z' },
+      })!;
+      expect(r.success).toBe(true);
+      for (const inputs of [
+        {},
+        { x: 1 },
+        { z: 2 },
+        { x: 1, z: 2 },
+        { x: 2, y: 2, z: 2 },
+        { x: 1, y: 1, z: 1 },
+        { x: 1, z: NaN },
+        { z: NaN },
+      ])
+        expect(r.run!({ ...inputs } as any)).toBe(interp(json, inputs));
+    }
+  });
+
+  test('a symbol with caller code whose stored value reads an input is still bound', () => {
+    // `W := y` makes `_.y` a read of `W` for the presence tests, but the
+    // emitted code of `W` is `_.nextValue()`, which runs once.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.assign('W', ce.box('y', { form: 'raw' }));
+    for (const json of [
+      ['Less', 'x', 'W'],
+      ['Equal', 'x', 'y', 'W'],
+    ]) {
+      const r = compile(ce.box(json), {
+        fallback: false,
+        vars: { W: '_.nextValue()' },
+      })!;
+      for (const [inputs, w, expected, count] of [
+        [{ y: 1 }, 2, json[0] === 'Less' ? undefined : false, 1],
+        [{ y: 1 }, NaN, false, 1],
+        [{ x: 2, y: 2 }, 2, json[0] === 'Less' ? false : true, 1],
+        [{ x: 0, y: 1 }, 2, json[0] === 'Less', json[0] === 'Less' ? 1 : 0],
+      ] as const) {
+        let calls = 0;
+        const value = r.run!({
+          ...inputs,
+          nextValue: () => (calls++, w),
+        } as any);
+        expect({ value, calls }).toEqual({ value: expected, calls: count });
+        if (expected !== undefined) {
+          const v = ce.box(json).subs({ ...inputs, W: w }).evaluate();
+          expect(v.symbol).toBe(expected ? 'True' : 'False');
+        }
+      }
+    }
+  });
+
+  test('a chain with no caller code keeps its code', () => {
+    const ce = new ComputeEngine();
+    ce.declare('y', 'real');
+    expect(
+      compile(ce.box(['Less', 1, 'y', 3]), { fallback: false })!.code
+    ).toMatchInlineSnapshot(
+      `"(((1 < _.y) && (_.y < 3)) || ((_.y !== undefined) ? false : undefined))"`
+    );
+    expect(
+      compile(ce.box(['Less', 1, 'W', 3]), {
+        fallback: false,
+        vars: { W: '_.W' },
+      })!.code
+    ).toMatchInlineSnapshot(
+      `"(((1 < _.W) && (_.W < 3)) || ((_.W !== undefined) ? false : undefined))"`
+    );
   });
 });

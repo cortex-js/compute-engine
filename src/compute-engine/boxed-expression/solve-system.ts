@@ -3,7 +3,7 @@ import type {
   IComputeEngine as ComputeEngine,
   RuleSteps,
 } from '../global-types.js';
-import { isSymbol } from './type-guards.js';
+import { isFunction, isSymbol } from './type-guards.js';
 import {
   solveLinearSystem,
   solvePolynomialSystem,
@@ -12,6 +12,43 @@ import {
 import { congruenceResidue } from './solve-congruence.js';
 import { freshParameters } from './diophantine.js';
 import { chineseRemainder, lcm } from '../numerics/numeric-bigint.js';
+
+/** The comparisons that can be a chain: `Less(a, b, c)` is `a < b < c`. */
+const CHAIN_COMPARISONS: ReadonlySet<string> = new Set([
+  'Equal',
+  'Less',
+  'LessEqual',
+  'Greater',
+  'GreaterEqual',
+]);
+
+/**
+ * Replace each comparison chain of `equations` by the comparisons of its
+ * adjacent operands: `a = b = c` becomes `a = b` and `b = c`. The system
+ * solvers read only the first two operands of an equation or an inequality.
+ * Without this step, they drop the later links of a chain, and give a
+ * solution that does not satisfy them.
+ */
+function splitComparisonChains(
+  ce: ComputeEngine,
+  equations: ReadonlyArray<Expression>
+): ReadonlyArray<Expression> {
+  if (
+    !equations.some(
+      (eq) =>
+        isFunction(eq) && CHAIN_COMPARISONS.has(eq.operator) && eq.nops > 2
+    )
+  )
+    return equations;
+  const result: Expression[] = [];
+  for (const eq of equations) {
+    if (isFunction(eq) && CHAIN_COMPARISONS.has(eq.operator) && eq.nops > 2) {
+      for (let i = 0; i + 1 < eq.nops; i++)
+        result.push(ce.function(eq.operator, [eq.ops[i], eq.ops[i + 1]]));
+    } else result.push(eq);
+  }
+  return result;
+}
 
 /** Solve a system of equations or inequalities given as an array of
  * expressions (from List or And). Returns null if no solution found.
@@ -28,6 +65,7 @@ export function solveSystem(
   varNames: string[],
   trace?: RuleSteps
 ): null | Record<string, Expression> | Array<Record<string, Expression>> {
+  equations = splitComparisonChains(ce, equations);
   if (equations && equations.every((eq) => eq.operator === 'Equal')) {
     // Try linear system first
     const linTrace: RuleSteps | undefined = trace ? [] : undefined;

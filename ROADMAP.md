@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-698.
+Next free reference: CE-701.
 
 **Entry format.**
 
@@ -993,6 +993,60 @@ and `Chunk` have it (pins in
 
 ## Evaluation, canonical forms and scoping
 
+### CE-699. The implicit variable of `Integrate`, `D` and `Series` depends on the order of boxing and assignment
+
+**Status:** decision needed; design. `Limit` and `NLimit` already follow
+option (a) (2026-10-31, orchestrator's choice, reversible).
+
+An operator that does not write its variable takes it from the unknowns of
+its body: a symbol with an assigned value is not an unknown. So the result
+depends on whether the assignment came before or after boxing:
+
+- `x := 4`, then `["Integrate", ["Sqrt", "x"], ["Limits", 0, 1]]` is the
+  integral of the constant `√4 = 2`, so 2. Boxed before the assignment, it is
+  `∫₀¹ √x dx = 2/3`. The form with the variable written, `Limits(x, 0, 1)`,
+  gives 2/3 in both orders.
+- `x := 4`, then `["D", ["Power", "x", 3]]` finds no variable and stays
+  unevaluated; boxed before, it is `3x²`. `Series` is the same.
+- `docs/SCOPING-MODEL.md` ("Binders") says a bound variable hides an assigned
+  value of the same name. It does not say how an omitted variable is chosen.
+
+Options:
+
+- **(a)** The implicit variable is chosen from the symbols written in the
+  body, with or without a value: the first in sorted order, the same choice as
+  today when nothing is assigned. The result is the same in both orders.
+  `Limit`/`NLimit` do this (`canonicalImplicitLimitFunction()`,
+  `library/calculus.ts`). For `Integrate` the change is in its canonical
+  handler and `implicitIntegrationVariable()`
+  (`boxed-expression/integration-variables.ts`); for `D` and `Series`, in
+  `defaultUnknown()` (`boxed-expression/utils.ts`). Cost: the canonical form
+  of these expressions changes when a symbol has a value (the variable becomes
+  a parameter of the literal), and an expression that a user wrote to mean
+  "the constant `x`" now means "the variable `x`".
+- **(b)** Keep the current rule (an assigned symbol is a constant in an
+  implicit body), document it in the reference of each operator, and change
+  `Limit`/`NLimit` back to it.
+
+If nothing is decided, `Limit` follows (a) and the other operators follow (b).
+
+### CE-698. A partial application whose result writes a parameter stays unevaluated
+
+**Status:** on demand; capability. The simple, sound version is in place: the
+call declines (`bindingKeyedSubs()`, `function-utils.ts`, the
+written-parameter rule).
+
+`W = (y, w) ↦ (x ↦ Block(Block(y := 2, y + x)))` applied to `q`, then `1`, then
+`5` gave `7` and now stays unevaluated. A saturated call keeps a written
+parameter as a variable that the returned closure shares, but a partial
+application returns a new literal that has no call frame to share it with
+later applications, so it declines. A more precise version would substitute
+the value when every read of the parameter in the result comes after its
+first write, or would give the partial result a frame of its own. The same
+applies to a saturated result that reads the written parameter outside every
+returned closure (`y ↦ If(z > 0, y, () ↦ Block(y := y + 1, y))`) and to a held
+write (`y ↦ Hold(() ↦ Block(y := y + 1, y))`): both decline.
+
 ### CE-694. Applying a `Composition` can call the wrong step and loses exact arguments
 
 **Status:** open; wrong value. Found 2026-10-30 by a code review of the
@@ -1485,8 +1539,7 @@ collection through `runAsync`) already yield and honour an abort signal.
   `ND`, `NDSolve`, `InterpolatingFunction`, `EvaluateAt`.
 - **CE-111.1** These operators stay synchronous, can have a long operand, and
   need a design: `Assign` (the right-hand side is evaluated in about ten
-  branches, interleaved with writes to the scope), `Pipe` (the topic is handed
-  unevaluated to `apply()`, and the shape of the stage decides how), `When` and
+  branches, interleaved with writes to the scope), `When` and
   `Match` (conditional evaluation of a branch, with a large handler), `FlatMap`
   (its materialization walks a lazy view without a generator), `Timing` (a
   wall-clock measure that would include the yields), `WithRandomSeed` and
@@ -1502,6 +1555,23 @@ collection through `runAsync`) already yield and honour an abort signal.
   `ArgMax`, `ArgMin`, `Reduce`, `Fold`), a callback that is itself long runs to
   its end first. An asynchronous application of the callback
   (`ApplyOptions.awaitStatements`) would remove that.
+- **CE-111.4** Design needed. The elements of a lazy collection are computed
+  synchronously when they are read, also under `evaluateAsync()`. So an
+  operator that has only an `evaluateAsync` handler stays unevaluated in each
+  element. With `AsyncOnly` declared `(number) -> number` with only an
+  `evaluateAsync` handler that returns `x + 5`,
+  `await Take(Apply(y ↦ AsyncOnly(y), Range(1, 100000)), 2).evaluateAsync()`
+  gives `[AsyncOnly(1), AsyncOnly(2)]`; it should give `[6, 7]`. `Apply` makes
+  a lazy `Map` for a large source or a source of unknown length
+  (`applyLiteralMapped`, `library/core.ts`), and the reader computes each
+  element with `evaluate()`. A small source is mapped eagerly and is awaited
+  (`Apply(y ↦ AsyncOnly(y), [1, 2])` is `[6, 7]`). A fix needs a way for a
+  lazy collection to give its elements asynchronously (an asynchronous
+  iterator next to `each()`, used by the asynchronous readers), or a rule
+  that a lazy collection whose element expression holds an operator with only
+  an asynchronous handler is made eager under `evaluateAsync()`. The first
+  keeps the size of a large source; the second is simple but computes every
+  element.
 
 ### CE-112. A `WithRandomSeed` body that returns an eager operator holding a drawing view is reported pure
 
@@ -5859,9 +5929,41 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
 
 ## Performance
 
+### CE-700. The check `CE_TYPE_PARANOID` changes the signature that a recursive function derives
+
+**Status:** open; correctness of a debugging aid. Found 2026-10-31 while
+fixing CE-689.
+
+`CE_TYPE_PARANOID=1` (`boxed-function.ts`, `_checkServedType()`) computes
+the type of a node again at each served cache hit and throws when the two
+differ. The computation it adds is not free of side effects inside the
+derivation of a recursive signature (`verifiedListHypothesis`): with the
+flag, the signature of the CE-479 probe function becomes
+`(n: unknown) -> unknown`, without it the signature is the one the tests
+expect. About 42 tests in 14 files fail with the flag, with the old cache
+key as with the new one, so the cause is older than CE-689. Until it is
+fixed, a run with the flag cannot tell an outdated type from the check's own
+effect. It can also mean that an entry of the signature derivation is
+retired at HEAD only because unrelated events move the `any` version: find
+the cause before deciding which.
+
 ### CE-689. Evaluating nested folds recomputes the types and effects of the body at every step
 
-**Status:** decision needed; performance, large. GitHub issue #487
+**Status:** fixed, waiting to be staged (2026-10-31, session
+compute-engine-7b). User decision 2026-10-30: option (A), the type of a node
+of a function body comes from the declared (static) bindings only. The type
+cache of `BoxedFunction.type` is keyed on `typeVersion`
+(`engine-configuration-lifecycle.ts`), which the declarations and the frame
+pop of a call of a function literal do not advance, and on the innermost
+call frame; a type computation reads the static bindings
+(`static-typing-view.ts`); a type computed from an answer that holds only
+while another computation runs is kept under the `any` version. Measured:
+480 type recomputations per `Apply` instead of 6,332, about 19 ms instead
+of about 100 ms (from source), same values; full suite green in the main
+tree. Tests: `test/compute-engine/ce-689-type-cache-across-calls.test.ts`.
+The rest of this entry is the record that led to the decision.
+
+**Earlier status:** decision needed; performance, large. GitHub issue #487
 (2026-10-30). User decision 2026-10-30: a separate item, after the box part of
 the issue (fixed in `e8b748554`: the comparison type with an operand that may
 be an absent collection, and the rejected-fixpoint record of

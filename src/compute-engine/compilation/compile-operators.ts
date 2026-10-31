@@ -26,12 +26,17 @@ import {
   isNumber,
   isFunction,
   isDictionary,
+  isString,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
 import { multiClauseState } from '../multi-clause.js';
 import type { CompileTarget, TargetSource } from './types.js';
 import { candidateAt, isCallerMapped, type CseHarvestOptions } from './cse.js';
 import { userFunctionLiteral } from './compile-assignment-checks.js';
+import {
+  isShaderVariableRead,
+  reachesCallerCodeOn,
+} from './compile-folding.js';
 import { shadowedLibraryLoweringError } from './compile-definitions.js';
 import {
   ELEMENTWISE_TUPLE_EXEMPT_HEADS,
@@ -515,6 +520,14 @@ export function compileExprOperator(
             // both evaluate left to right, so the draws then follow argument
             // order. A chain with no impure operand is untouched.
             //
+            // On a target with `bindExpr` (JavaScript, interval-JavaScript,
+            // Python), an operand that runs code the caller supplied (a
+            // `vars` entry `W: 'nextValue()'`, a head mapped through
+            // `functions`) counts as impure here, also when it is a bare
+            // symbol: that code can count its calls or draw a number
+            // (`reachesCallerCodeOn`). The shader targets have no `bindExpr`
+            // and decline such a chain in the check below instead.
+            //
             // The interpreter SHORT-CIRCUITS a chain (since 2026-08-15,
             // `evaluateChainOperands` in `library/relational-operator.ts`):
             // `Less(5, 1, Random())` stops at `5 < 1` and never draws. A
@@ -528,9 +541,72 @@ export function compileExprOperator(
             // unconditional — so an impure operand at index ≥ 2 that must be
             // bound declines there (D6).
             const chainOp = target.chainOp ?? '&&';
-            const impureMiddle = args.some(
-              (arg, i) => i >= 1 && i <= args.length - 2 && arg.isPure === false
+            // Caller code is an effect here on every target but the shaders:
+            // the GPU check below declines a shader chain with caller code. A
+            // target with no `bindExpr` that is not a shader (a target that a
+            // caller builds) binds it by a hoisted temporary, or declines.
+            const bindsCallerCode = !(
+              target.language === 'glsl' || target.language === 'wgsl'
             );
+            const callerCode = (arg: Expression): boolean =>
+              bindsCallerCode && reachesCallerCodeOn(arg, target);
+            const impureArg = (arg: Expression): boolean =>
+              arg.isPure === false || callerCode(arg);
+            const impureMiddle = args.some(
+              (arg, i) => i >= 1 && i <= args.length - 2 && impureArg(arg)
+            );
+            // Caller code can also write a value that an earlier operand
+            // reads (a global `y` in `Less(0, y + 1, W)`). A pair after the
+            // binding of `W` reads the earlier operand there, after `W` has
+            // run, where the interpreter has its value from before. So every
+            // earlier operand that is not a literal or a constant is bound
+            // too, in operand order, and the pair reads its temporary.
+            const lastCallerCode = impureMiddle
+              ? args.map((arg) => callerCode(arg)).lastIndexOf(true)
+              : -1;
+            const capture = (arg: Expression, i: number): boolean =>
+              i < lastCallerCode &&
+              !isNumber(arg) &&
+              !isString(arg) &&
+              !(isSymbol(arg) && arg.isConstant);
+            // On the shader targets, code that the caller supplied (a `vars`
+            // source, a `functions` or `operators` entry, a `compile`
+            // handler) can count its calls or draw a number, and it is not
+            // impure to the engine. As a middle operand it would run once per
+            // comparison. With a draw bound to a hoisted temporary, the draw
+            // would run ahead of caller code written before it. Both decline.
+            if (
+              !target.bindExpr &&
+              (target.language === 'glsl' || target.language === 'wgsl')
+            ) {
+              const reaches = (e: Expression): boolean =>
+                reachesCallerCodeOn(e, target);
+              const unit = target.hoist?.unit;
+              // A middle operand whose code is the read of one variable
+              // (`isShaderVariableRead`) runs no code when it is read twice.
+              if (
+                args.some(
+                  (arg, i) =>
+                    i >= 1 &&
+                    i <= args.length - 2 &&
+                    !isShaderVariableRead(arg, target) &&
+                    reaches(arg)
+                ) ||
+                (impureMiddle &&
+                  (args.some(
+                    (arg, i) =>
+                      (i === 0 || i === args.length - 1) && reaches(arg)
+                  ) ||
+                    (unit !== undefined && reaches(unit))))
+              )
+                throw new Error(
+                  `Could not compile \`${h}\`: a chained comparison contains code ` +
+                    'supplied by the caller (a `vars` source, a `functions` or ' +
+                    '`operators` entry, or a `compile` handler), and the shader ' +
+                    'form would run that code more than once or out of the ' +
+                    'order of the interpreter.'
+                );
+            }
             // Per operand: its code, or a temporary name plus the binding
             // that introduces it.
             const outerBindings: Array<[name: string, value: string]> = [];
@@ -547,7 +623,7 @@ export function compileExprOperator(
                   ? compileOpValue(node, i, target, op[1], arg)
                   : compileValueOperand(arg, target, op[1]);
               const isMiddle = i >= 1 && i <= args.length - 2;
-              const isImpure = arg.isPure === false;
+              const isImpure = impureArg(arg) || capture(arg, i);
               if (
                 target.bindExpr &&
                 ((isMiddle && !isSymbol(arg) && !isNumber(arg)) ||

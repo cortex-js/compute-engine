@@ -422,6 +422,65 @@ describe('complex mode — D2/D6 runtime rules', () => {
     }
   });
 
+  describe('a function-codegen lowering over a real kernel takes the runtime rule', () => {
+    // These heads lower to a `_SYS` kernel that takes plain numbers, but
+    // were not declared real-only, so the `{re, im}` object of a promoted
+    // radical reached the kernel: `Binomial(a, √x)` at `a = 3, x = 4` was 0,
+    // `AGM(√x)` was `Infinity`, `Degrees(√x)` and `EllipticF(a, √x)` were
+    // NaN. The expected value is the interpreter's, with the symbols
+    // ASSIGNED: `subs` would fold `√(-4)` to a literal when it boxes.
+    const interpreted = (
+      json: MathJsonExpression,
+      values: Record<string, number>
+    ): number => {
+      const e = new ComputeEngine();
+      e.declare('a', 'real');
+      e.declare('x', 'real');
+      for (const [k, v] of Object.entries(values)) e.assign(k, v);
+      return e.box(json).N().re;
+    };
+    const ce = new ComputeEngine();
+    ce.declare('a', 'real');
+    ce.declare('x', 'real');
+    const S: MathJsonExpression = ['Sqrt', 'x'];
+    const cases: [MathJsonExpression, Record<string, number>][] = [
+      [['Binomial', 'a', S], { a: 3, x: 4 }],
+      [['Binomial', S, 'a'], { a: 2, x: 9 }],
+      [['Binomial', 'a', S], { a: 3, x: 2 }],
+      [['Choose', 'a', S], { a: 3, x: 4 }],
+      [['AGM', S], { x: 4 }],
+      [['AGM', 'a', S], { a: 3, x: 2 }],
+      [['Degrees', S], { x: 4 }],
+      [['EllipticF', 'a', S], { a: 0.3, x: 0.25 }],
+      [['EllipticPi', 'a', S], { a: 0.3, x: 0.25 }],
+      [['EllipticPi', 'a', 'a', S], { a: 0.3, x: 0.25 }],
+      [['EllipticE', 'a', S], { a: 0.3, x: 0.25 }],
+      [['Add', 1, ['EllipticE', 'a', S]], { a: 0.3, x: 0.25 }],
+      [['Hypergeometric1F1', 'a', 'a', S], { a: 0.3, x: 0.25 }],
+      [['Mandelbrot', 'a', S], { a: 2, x: 9 }],
+      [['WithRandomSeed', S, ['Random']], { x: 4 }],
+    ];
+    test.each(cases)('%j at %j', (json, values) => {
+      const r = compile(ce.box(json), { constantFold: false, fallback: false });
+      expect(r.success).toBe(true);
+      expect(r.run!(values)).toBeCloseTo(interpreted(json, values), 10);
+    });
+    const nonReal: [MathJsonExpression][] = [
+      [['Binomial', 'a', S]],
+      [['Binomial', S, 'a']],
+      [['AGM', S]],
+      [['Degrees', S]],
+      [['EllipticF', 'a', S]],
+      [['EllipticE', 'a', S]],
+      [['Hypergeometric1F1', 'a', 'a', S]],
+      [['Mandelbrot', 'a', S]],
+    ];
+    test.each(nonReal)('%j is NaN where the radical is not real', (json) => {
+      const r = compile(ce.box(json), { constantFold: false, fallback: false });
+      expect(r.run!({ a: 0.5, x: -4 })).toBeNaN();
+    });
+  });
+
   // The ELEMENT-WISE form of the runtime rule (`docs/COMPILATION-MODEL.md`,
   // "Complex modes"): a real-only head over an ARRAY operand whose elements
   // may be complex projects each operand element-wise — an exactly-real

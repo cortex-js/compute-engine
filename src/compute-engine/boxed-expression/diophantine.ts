@@ -408,6 +408,9 @@ export function tryDiophantineSolve(
     // a boolean predicate (`Congruent`, `Divides`, …) is left to enumeration.
     let residual: Expression;
     if (isFunction(eq, 'Equal')) {
+      // A chain `a = b = c` is two equations, not one residual: decline it
+      // and let the caller enumerate the domain.
+      if (eq.nops !== 2) return undefined;
       residual = ce.function('Subtract', [eq.op1, eq.op2]);
     } else if (isBooleanOrBroadcastableBooleanType(eq.type.type)) {
       return undefined;

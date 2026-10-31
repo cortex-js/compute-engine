@@ -50,6 +50,9 @@ import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
 import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { tryGetConstant } from './constant-folding.js';
+import { reachesCallerCodeOn } from './compile-folding.js';
+import { cseSharingOff } from './compile-cse.js';
+import { operandMayBeAbsent } from './compile-absence.js';
 import {
   COINCIDENCE_BUDGET,
   realPowerReconstructionDigits,
@@ -966,6 +969,18 @@ function compilePythonEquality(
       `Could not compile \`${kind}\`: expected at least two arguments`
     );
   const collCount = args.filter(isPyCollectionOperand).length;
+  // An operand that runs code the caller supplied (a `vars` entry
+  // `W: 'nextValue()'`, a head mapped through `functions`) can count its
+  // calls or draw a number (`reachesCallerCodeOn`), so it must be evaluated
+  // once, in operand order, as the interpreter evaluates it. The forms below
+  // that splice an operand more than once bind it or decline.
+  const callerCode = args.map((a) => reachesCallerCodeOn(a, target));
+  const callerCodeDecline = (where: string): Error =>
+    new Error(
+      `Could not compile \`${kind}\`: an operand runs code that the caller ` +
+        `supplied (a \`vars\` or \`functions\` entry), and ${where}. The ` +
+        `interpreter evaluates it instead.`
+    );
   // Ahead of every lowering below (the scalar `abs` form, `_ce_eqcoll`, and
   // both chain forms) — see `assertPyComparableAggregate` /
   // `assertPyNoStringOperand`.
@@ -1047,6 +1062,12 @@ function compilePythonEquality(
           `compiles that shape only for an ordered list of numbers whose other ` +
           `operands are numbers.`
       );
+    // `Equal(L, W)` with `W: 'nextValue()'` would call `nextValue()` once
+    // per element.
+    if (callerCode.some((c, i) => c && i !== index))
+      throw callerCodeDecline(
+        'the element-wise form evaluates it once for each element'
+      );
     const v = BaseCompiler.tempVar(target);
     const codes = args.map((a, i) => (i === index ? v : compile(a)));
     const op = kind === 'Equal' ? '==' : '!=';
@@ -1064,6 +1085,14 @@ function compilePythonEquality(
       return kind === 'Equal' ? eq : `(not ${eq})`;
     };
     if (args.length === 2) return collPair(args[0], args[1]);
+    // A middle operand is spliced by two pairs. And the interpreter
+    // evaluates every operand of a chain with a collection operand, where
+    // `and` skips the pairs after a false one.
+    if (callerCode.some((c) => c))
+      throw callerCodeDecline(
+        'this chain splices a middle operand twice and skips the operands ' +
+          'after a false pair'
+      );
     const collParts: string[] = [];
     // NOTE: a shared middle operand is compiled TWICE (as pair i's `b` and pair
     // i+1's `a`); that is only safe while this target has no impure lowering
@@ -1103,6 +1132,28 @@ function compilePythonEquality(
     const equal = `(${guard}(${ca}) == (${cb}))`;
     return kind === 'Equal' ? equal : `(not ${equal})`;
   };
+  // A guarded pair splices its left operand twice and evaluates its right
+  // operand only when the left one is not `None`; a middle operand of a
+  // chain is spliced by two pairs. And an operand at index 2 or later of a
+  // chain is evaluated only after the pairs before it: those pairs must not
+  // stop the chain where the interpreter goes on (an absent operand), which
+  // `pythonEqualityWithBoundOperands` checks.
+  const guarded = (i: number, j: number): boolean =>
+    mayBeNone(args[i]) && mayBeNone(args[j]);
+  const splicedOnce = (i: number): boolean =>
+    (i === 0 || i === args.length - 1) &&
+    !(i + 1 < args.length && guarded(i, i + 1)) &&
+    !(i >= 1 && guarded(i - 1, i));
+  if (callerCode.some((c, i) => c && (!splicedOnce(i) || i >= 2)))
+    return pythonEqualityWithBoundOperands(
+      kind,
+      args,
+      callerCode,
+      compile,
+      target,
+      mayBeNone,
+      callerCodeDecline
+    );
   if (args.length === 2) return pair(args[0], args[1]);
   const parts: string[] = [];
   // A shared middle operand is spliced by the two pairs that straddle it, on
@@ -1110,6 +1161,88 @@ function compilePythonEquality(
   for (let i = 0; i < args.length - 1; i++)
     parts.push(pair(args[i], args[i + 1]));
   return `(${parts.join(' and ')})`;
+}
+
+/**
+ * The scalar `Equal`/`NotEqual` of `compilePythonEquality` when some operand
+ * runs code that the caller supplied (`bound[i]`). Each such operand is
+ * compiled once and bound to a temporary (`bindExpr`, a Python `lambda`),
+ * and the pairs read the temporary. A pair with the `None` guard reads its
+ * left operand twice, and a middle operand of a chain is read by two pairs,
+ * so a direct splice would run the caller's code more than once.
+ *
+ * The interpreter evaluates the operands from left to right and stops at the
+ * first pair that is `False` (`evaluateChainOperands` in
+ * `library/relational-operator.ts`). So operand `i` (`i ≥ 1`) is bound
+ * around the pairs from `(i−1, i)` on, and is evaluated only when the pairs
+ * before it hold: `Equal(0.5, W, 0.5)` gives
+ * `(lambda t1: (0.5 == t1) and (t1 == 0.5))(W)`. Operand 0 is bound around
+ * the whole chain.
+ *
+ * An `Equal` pair with an absent operand is `False` in Python, where the
+ * interpreter reads `Missing`, which is not `False`, and goes on to evaluate
+ * the later operands. So an `Equal` chain declines when a pair that may read
+ * an absent operand comes before a bound operand. The JavaScript target has
+ * the same rule (`compileJSEquality`). A target with no `bindExpr` declines.
+ */
+function pythonEqualityWithBoundOperands(
+  kind: 'Equal' | 'NotEqual',
+  args: ReadonlyArray<Expression>,
+  bound: ReadonlyArray<boolean>,
+  compile: (e: Expression) => string,
+  target: CompileTarget<Expression>,
+  mayBeNone: (e: Expression) => boolean,
+  decline: (where: string) => Error
+): string {
+  const bind = target.bindExpr;
+  if (bind === undefined)
+    throw decline('this target cannot bind it to a temporary');
+  const lastBound = bound.lastIndexOf(true);
+  if (kind === 'Equal' && args.length > 2) {
+    for (let j = 1; j < lastBound; j++)
+      if (operandMayBeAbsent(args[j - 1]) || operandMayBeAbsent(args[j]))
+        throw decline(
+          'a pair before it may read an absent operand, which stops the ' +
+            'chain here but not in the interpreter'
+        );
+  }
+  // Each operand is compiled once, in operand order. Caller code can also
+  // write a value that an earlier operand reads (a global `y` in
+  // `Equal(0, y + 1, W)`): a pair after the binding of `W` reads the earlier
+  // operand there, after `W` has run, where the interpreter has its value
+  // from before. So every earlier operand that is not a literal or a
+  // constant is bound too, in operand order.
+  const direct = args.map((a) => compile(a));
+  const capture = (a: Expression, i: number): boolean =>
+    i < lastBound &&
+    !isNumber(a) &&
+    !isString(a) &&
+    !(isSymbol(a) && a.isConstant);
+  const temps = args.map((a, i) =>
+    bound[i] || capture(a, i) ? BaseCompiler.tempVar(target) : undefined
+  );
+  const code = (i: number): string => temps[i] ?? direct[i];
+  const pair = (i: number, j: number): string => {
+    const guard =
+      mayBeNone(args[i]) && mayBeNone(args[j])
+        ? `(${code(i)}) is not None and `
+        : '';
+    if (guard === '')
+      return `((${code(i)}) ${kind === 'Equal' ? '==' : '!='} (${code(j)}))`;
+    const equal = `(${guard}(${code(i)}) == (${code(j)}))`;
+    return kind === 'Equal' ? equal : `(not ${equal})`;
+  };
+  // Scope `i` binds operand `i` (when it is bound), then decides the pair
+  // `(i−1, i)` and continues the chain.
+  const link = (i: number): string => {
+    const rest = i + 1 < args.length ? ` and ${link(i + 1)}` : '';
+    const e = `${pair(i - 1, i)}${rest}`;
+    const t = temps[i];
+    return t === undefined ? e : bind([[t, direct[i]]], e);
+  };
+  const chain = `(${link(1)})`;
+  const t0 = temps[0];
+  return t0 === undefined ? chain : bind([[t0, direct[0]]], chain);
 }
 
 /**
@@ -1446,7 +1579,10 @@ function compilePythonSumProductLoop(
   if (jumps(body, false)) return undefined;
 
   const acc = BaseCompiler.tempVar(target);
-  const plain: CompileTarget<Expression> = { ...target, cse: undefined };
+  const plain: CompileTarget<Expression> = {
+    ...target,
+    cse: cseSharingOff(target),
+  };
   const { forClauses, idxTarget } = compilePythonSumProductClauses(
     kind,
     args.slice(1),

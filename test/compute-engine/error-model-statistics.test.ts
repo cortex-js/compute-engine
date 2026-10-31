@@ -32,6 +32,7 @@
  */
 
 import { ComputeEngine } from '../../src/compute-engine';
+import { compile } from '../../src/compute-engine/compilation/compile-expression';
 
 /** The declared signature of `name`, as the definition reports it. */
 function signatureOf(ce: ComputeEngine, name: string): string {
@@ -265,6 +266,140 @@ describe('the variance family', () => {
     expect(evaluated(ce, ['StandardDeviation', 5])).toBe('Indeterminate');
     expect(evaluated(ce, ['PopulationVariance', 5])).toBe('0');
     expect(evaluated(ce, ['PopulationStandardDeviation', 5])).toBe('0');
+  });
+
+  test('one datum and equal data agree between the exact route, .N() and compiled JavaScript', () => {
+    // The sample variance of one datum, and the skewness and kurtosis of data
+    // whose values are all equal (one datum included), are `0/0`:
+    // `Indeterminate` on the exact route, `NaN` under `.N()` and in compiled
+    // code. The population variance of such data is 0. A datum such as `√2`
+    // has more digits than the working precision, so the moment sums used
+    // to cancel with a rounding error and gave `+∞`, `-∞` or a tiny number.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('x', 2);
+    const cases: [string, any, string, string][] = [
+      ['Variance', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
+      ['StandardDeviation', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
+      ['Skewness', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
+      ['Kurtosis', ['Sqrt', 'x'], 'Indeterminate', 'NaN'],
+      ['Kurtosis', 2, 'Indeterminate', 'NaN'],
+      ['PopulationVariance', ['Sqrt', 'x'], '0', '0'],
+      ['PopulationStandardDeviation', ['Sqrt', 'x'], '0', '0'],
+      ['Variance', ['List', ['Sqrt', 2], ['Sqrt', 2], ['Sqrt', 2]], '0', '0'],
+      [
+        'Skewness',
+        ['List', ['Sqrt', 2], ['Sqrt', 2], ['Sqrt', 2]],
+        'Indeterminate',
+        'NaN',
+      ],
+      [
+        'Kurtosis',
+        ['List', ['Sqrt', 2], ['Sqrt', 2], ['Sqrt', 2]],
+        'Indeterminate',
+        'NaN',
+      ],
+    ];
+    for (const [h, arg, exact, numeric] of cases) {
+      const label = `${h}(${JSON.stringify(arg)})`;
+      expect(`${label}: ${evaluated(ce, [h, arg])}`).toBe(`${label}: ${exact}`);
+      expect(`${label}: ${ce.box([h, arg]).N().re}`).toBe(
+        `${label}: ${numeric}`
+      );
+    }
+    // Compiled with `x` as an input: the machine kernels see the double
+    // `Math.SQRT2`, whose power sums do not cancel exactly either.
+    const free = new ComputeEngine();
+    free.declare('x', 'real');
+    const one = ['Sqrt', 'x'];
+    const three = ['List', one, one, one];
+    const compiled: [string, any, string][] = [
+      ['Variance', one, 'NaN'],
+      ['StandardDeviation', one, 'NaN'],
+      ['Skewness', one, 'NaN'],
+      ['Kurtosis', one, 'NaN'],
+      ['PopulationVariance', one, '0'],
+      ['Variance', three, '0'],
+      ['Skewness', three, 'NaN'],
+      ['Kurtosis', three, 'NaN'],
+    ];
+    for (const [h, arg, expected] of compiled) {
+      const label = `compiled ${h}(${JSON.stringify(arg)})`;
+      const fn = compile(free.box([h, arg]));
+      expect(`${label}: ${fn.success}`).toBe(`${label}: true`);
+      expect(`${label}: ${fn.run!({ x: 2 })}`).toBe(`${label}: ${expected}`);
+    }
+  });
+
+  test('skewness and kurtosis of data far from zero do not cancel', () => {
+    // The mean of `[10⁸, 10⁸ + 1, 10⁸ + 3]` is large compared with the
+    // spread, so moments computed from raw power sums (`Σx² − (Σx)²/n`)
+    // subtracted nearly equal numbers: the machine skewness was about
+    // `1.16·10⁸` and the kurtosis about `2·10¹⁶`. The moments are
+    // accumulated from the deviations from the mean, so the result is the
+    // one of the shifted data `[0, 1, 3]` (skewness `0.3818…`, kurtosis
+    // `1.5`), on the exact route, under `.N()` at both precisions, and in
+    // compiled JavaScript.
+    const data = [1e8, 1e8 + 1, 1e8 + 3];
+    const expected: [string, number][] = [
+      ['Skewness', 0.3818017741606063],
+      ['Kurtosis', 1.5],
+    ];
+    for (const precision of [300, 'machine'] as const) {
+      const ce = new ComputeEngine();
+      ce.precision = precision;
+      ce.declare('L', 'list<real>');
+      for (const [h, value] of expected) {
+        const expr = ce.box([h, ['List', ...data]]);
+        const exact = expr.evaluate().N().re;
+        const numeric = expr.N().re;
+        expect(Math.abs(exact - value)).toBeLessThan(1e-14);
+        expect(Math.abs(numeric - value)).toBeLessThan(1e-14);
+        // Compiled code runs the machine kernel, as `.N()` does at machine
+        // precision.
+        const fn = compile(ce.box([h, 'L']));
+        expect(fn.success).toBe(true);
+        const run = fn.run!({ L: data }) as number;
+        expect(Math.abs(run - value)).toBeLessThan(1e-14);
+        if (precision === 'machine') expect(run).toBe(numeric);
+      }
+    }
+  });
+
+  test('skewness and kurtosis keep the deviations in range and representable', () => {
+    // `[5·10¹⁰², −5·10¹⁰²]`: the cube of a deviation is past the largest
+    // double, so the sums are held in a unit near the largest deviation.
+    // `[10¹⁶, 10¹⁶ + 2, 10¹⁶ + 4]`: a running mean of the size of the data
+    // cannot take the increment `2/3`, so the deviations are taken from the
+    // first datum. Each case is symmetric, so the skewness is 0.
+    const ce = new ComputeEngine();
+    ce.precision = 'machine';
+    ce.declare('L', 'list<real>');
+    const cases: [number[], number][] = [
+      [[5e102, -5e102], 1],
+      [[1e308, -1e308], 1],
+      [[1e16, 1e16 + 2, 1e16 + 4], 1.5],
+    ];
+    const skewness = compile(ce.box(['Skewness', 'L']));
+    const kurtosis = compile(ce.box(['Kurtosis', 'L']));
+    for (const [data, kurt] of cases) {
+      const label = JSON.stringify(data);
+      const list = ['List', ...data];
+      const n = ce.box(['Skewness', list]).N().re;
+      expect(`${label}: ${Math.abs(n) < 1e-15}`).toBe(`${label}: true`);
+      expect(`${label}: ${skewness.run!({ L: data })}`).toBe(`${label}: ${n}`);
+      const k = ce.box(['Kurtosis', list]).N().re;
+      expect(Math.abs(k - kurt)).toBeLessThan(1e-15);
+      expect(`${label}: ${kurtosis.run!({ L: data })}`).toBe(`${label}: ${k}`);
+    }
+    // At 50 digits, `[10⁵⁰ + 1, 10⁵⁰ + 2, 10⁵⁰ + 3]` has more digits than the
+    // working precision. The deviations from the first datum are exact, so
+    // the high-precision kernel sees `[0, 1, 2]`.
+    const big = new ComputeEngine();
+    big.precision = 50;
+    const data = ['List', ...[1, 2, 3].map((k) => ['Add', ['Power', 10, 50], k])];
+    expect(big.box(['Skewness', data]).N().toString()).toBe('0');
+    expect(big.box(['Kurtosis', data]).N().toString()).toBe('1.5');
   });
 
   test('a distribution operand keeps its closed form', () => {

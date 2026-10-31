@@ -33,6 +33,7 @@ import {
 } from '../../common/type/utils.js';
 import { couldMatch, isSubtype } from '../../common/type/subtype.js';
 import type { Type } from '../../common/type/types.js';
+import { typeToString } from '../../common/type/serialize.js';
 import {
   GPU_AGGREGATE_CONSTRUCTOR,
   GPU_OPERATORS,
@@ -250,6 +251,51 @@ function gpuElementIsShaderFloat(t: Type): boolean {
   // to `complex`, of which `isNonRealNumber` answers `true`.
   if (isNonRealNumber(finitePartOfType(t))) return false;
   return couldMatch(t, 'number');
+}
+
+/**
+ * A decline reason when the tuple type `t` has no shader type, or
+ * `undefined` when `t` is not a tuple or a shader type holds it.
+ *
+ * A shader reads a tuple of 2 or more shader floats (`gpuElementIsShaderFloat`,
+ * which also admits the wide types `unknown`, `any`, `value` and
+ * `expression`): as a `vecN` for 2 to 4 elements, and as an array of floats
+ * for more. A tuple of 2 to 4 booleans is a boolean vector (`bvec2`,
+ * `vec2<bool>`), which a host can declare: `If(First(b), 1, 0)` with a
+ * uniform `bvec2 b` compiles to `float(b.x)`. Each other tuple has no shader
+ * type:
+ * - an element that is not a shader float: a nested tuple
+ *   (`tuple<tuple<real, real>, tuple<real, real>>`, a pair of points), a
+ *   mixed tuple (`tuple<real, tuple<real, real>>`), a `complex` element, or
+ *   a `boolean` element in a tuple that is not a boolean vector;
+ * - fewer than 2 elements (there is no `vec1`);
+ * - the bare `tuple` type, which admits any elements.
+ * A free symbol of such a type was emitted as a bare identifier, which the
+ * host cannot declare, and a swizzle read of it gave a value that is not the
+ * interpreter's (`First(T)` was `T.x`).
+ */
+export function gpuTupleWithoutShaderType(t: Type): string | undefined {
+  const resolved = resolveTypeForCompilation(t);
+  if (resolved === 'tuple')
+    return `this type does not give the number or the types of the elements`;
+  if (typeof resolved === 'string' || resolved.kind !== 'tuple')
+    return undefined;
+  const m = resolved.elements.length;
+  if (m < 2)
+    return (
+      `a tuple of ${m} element${m === 1 ? '' : 's'} has no shader type ` +
+      `(there is no \`vec1\`)`
+    );
+  if (m <= 4 && resolved.elements.every((el) => isSubtype(el.type, 'boolean')))
+    return undefined;
+  for (let i = 0; i < m; i++)
+    if (!gpuElementIsShaderFloat(resolved.elements[i].type))
+      return (
+        `element ${i + 1} of the tuple (type ` +
+        `\`${typeToString(resolved.elements[i].type)}\`) is not a real ` +
+        `scalar — a shader vector or array of floats holds only real scalars`
+      );
+  return undefined;
 }
 
 /**
@@ -1878,6 +1924,18 @@ export function gpuLoweredSymbolTypeHook(
     }
     if (shape === 'array') {
       const t = gpuType(symbol);
+      // A tuple of 5 or more real scalars is read as an array of floats:
+      // the `At` lowering indexes it (`F[1]`, `_gpu_at5(F, k)`) as it
+      // indexes a `list<real^5>`.
+      if (
+        typeof t !== 'string' &&
+        t.kind === 'tuple' &&
+        t.elements.length > 4 &&
+        gpuTupleWithoutShaderType(t) === undefined
+      ) {
+        const n = t.elements.length;
+        return isWGSL ? `array<f32, ${n}>` : `float[${n}]`;
+      }
       if (typeof t === 'string' || t.kind !== 'list') return undefined;
       const n = t.dimensions?.length === 1 ? t.dimensions[0] : undefined;
       if (n === undefined || !(n > 0)) return undefined;
