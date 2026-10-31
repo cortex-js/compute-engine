@@ -664,6 +664,28 @@ symbol as a number was option (b) of CE-25, rejected). A call with a typed
 argument is typed from the body: `m := t ↦ [[t, 1], [2, 3]]` applied to `2` is
 a `matrix<integer^(2x2)>`, and applied to `r: real` a `matrix<real^(2x2)>`.
 
+The type of a node of a function body comes from the declared (static)
+bindings only: a type computation never reads the values that a call gives
+the parameters (user decision 2026-10-30, ROADMAP CE-689, GitHub issue #487).
+While a type is computed, a read by name, or a read of the value of a symbol,
+sees the bindings of the literal as they are outside every call: in the body
+of `x ↦ …`, `x` is the parameter, with no value, in the call `g(3)` as in the
+call `g("ab")` (`static-typing-view.ts`). So the type of a node of the body
+is the same in every call, and the engine does not compute it again at each
+call (`typeVersion`, `engine-configuration-lifecycle.ts`). Evaluation still
+reads the values of the call, and so do the sign and value of a node.
+
+Two kinds of type are still computed again. A type depends on the scope it
+is read in: a block-local function or variable is found only from inside
+the block, so `x / c` with a block local `c` is `rational` when read inside
+the call that runs the block and `infinity | nan | real` at global scope.
+So the key of a cached type also names the innermost call frame, and two
+calls of the same literal share their entries. And a type computed from an
+answer that holds only while another computation is in progress (the result
+of a recursive call, read while the result of the same function is being
+derived, is the declared `unknown`) is kept only until the next call
+(`stackDependentAnswerCount`, `static-typing-view.ts`).
+
 A use of a call at a typed parameter may refine a result that the body leaves
 `unknown`: `k := x ↦ x` used in `k(1) + 2` gets the result `real`
 (`_inferWithoutFacts`, `boxed-expression/boxed-function.ts`). A result that

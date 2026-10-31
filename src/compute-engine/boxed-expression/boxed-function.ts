@@ -419,6 +419,12 @@ import {
 import { CACHE_STATS, recordCache } from '../../common/cache-stats.js';
 import { cacheOff } from '../../common/cache-switches.js';
 import {
+  noteStackDependentAnswer,
+  stackDependentAnswerCount,
+  staticViewDiverges,
+  withStaticTypingView,
+} from '../static-typing-view.js';
+import {
   beginObjectDeps,
   endObjectDeps,
   mergeObjectDeps,
@@ -707,6 +713,25 @@ const EFFECTS_PARANOID: boolean = (() => {
   const flag = process.env?.CE_EFFECTS_PARANOID;
   return flag !== undefined && flag !== '0';
 })();
+
+/** `CE_TYPE_PARANOID`: the check of the type cache of a function expression
+ * (`BoxedFunction.type`). On every served type, the type handler runs again
+ * on the operands (whose own types are read from their caches) and a
+ * different answer THROWS. A validation aid for test runs, not a semantic
+ * mode, env-gated like `CE_EFFECTS_PARANOID`. It finds a type computation
+ * that reads a binding of a call of a function literal by a route that the
+ * static view of the bindings (`static-typing-view.ts`) does not cover: the
+ * type cache is keyed on the type version, which a call does not move, so
+ * the next call serves such a type. */
+const TYPE_PARANOID: boolean = (() => {
+  if (typeof process === 'undefined') return false;
+  const flag = process.env?.CE_TYPE_PARANOID;
+  return flag !== undefined && flag !== '0';
+})();
+
+/** Re-entrancy latch of the type check: the handler reads the types of the
+ * operands, and a check inside a check would recurse. */
+let _typeParanoidActive = false;
 
 /** Re-entrancy latch for the canary: the cross-check's own projection walk
  * reads children's `_effectsOf`, and a canary-within-a-canary recurses
@@ -1383,6 +1408,13 @@ export class BoxedFunction
    * clean scope pops leave the `callable` axis entirely (design §6). */
   private _effectsScope: Scope | undefined = undefined;
 
+  /** The `_effects` entry was computed in the static view of the bindings
+   * of a type computation while a call frame was on the stack
+   * (`staticViewDiverges()`, `static-typing-view.ts`): the projection then
+   * read a parameter of the call with no value. Such an entry is served
+   * only in that view, and an entry computed outside it only outside it. */
+  private _effectsStaticView = false;
+
   /** Re-entrancy marker for the lazy-collection evaluate memo — see
    * `_memoizedLazyCollectionValue()`. */
   private _lazyValueInFlight = false;
@@ -1975,7 +2007,8 @@ export class BoxedFunction
       !cacheOff('effects') &&
       this._effects.generation === callableVersion &&
       this._effects.value !== null &&
-      this._effectsScope === scope
+      this._effectsScope === scope &&
+      this._effectsStaticView === staticViewDiverges(this.engine)
     ) {
       if (CACHE_STATS) recordCache('effects', 'hit');
       // Canary (`CE_EFFECTS_PARANOID`, design §6): on every served hit,
@@ -2001,6 +2034,7 @@ export class BoxedFunction
     if (this._effectsInFlight) {
       if (CACHE_STATS) recordCache('effects', 'declineCycle');
       _effectsProvisionalReads += 1;
+      noteStackDependentAnswer();
       return 'any';
     }
 
@@ -2030,6 +2064,7 @@ export class BoxedFunction
         this._effects.generation = callableVersion;
         this._effects.value = value;
         this._effectsScope = scope;
+        this._effectsStaticView = staticViewDiverges(this.engine);
       } else if (CACHE_STATS) recordCache('effects', 'declineStore');
       return value;
     } finally {
@@ -3673,7 +3708,22 @@ export class BoxedFunction
 
   /** The type of the value of the function */
   get type(): BoxedType {
-    const generation = this.engine._cacheGeneration();
+    // Keyed on `_typeCacheGeneration()`, which the declarations of a call of
+    // a function literal and the pop of its frame do not move, so the nodes
+    // of a function body are not typed again at each call. That is sound
+    // because a type is computed in the static view of the bindings
+    // (`withStaticTypingView()` below, `static-typing-view.ts`): it never
+    // reads the bindings of a call. See `typeVersion` in
+    // `engine-configuration-lifecycle.ts`. Two exceptions: inside a call,
+    // the key is also the body scope of the innermost call frame, because
+    // some type computations read the bindings from the scope of the reader
+    // (`innermostCallFrameBody()`, `static-typing-view.ts`); and a type that
+    // read an answer that depends on the computations in progress is kept
+    // under the `any` axis (`_typeStackDependent`, below).
+    const typeKey = this.engine._typeCacheGeneration();
+    const generation = this._typeStackDependent
+      ? this.engine._typeCacheFallbackGeneration()
+      : typeKey;
     // Fast path: the cache was already consulted at this generation, so the
     // key it was consulted with — which costs a purity projection and an
     // `isConstant` subtree walk — is necessarily the same one now. See
@@ -3709,7 +3759,16 @@ export class BoxedFunction
     ) {
       mergeObjectDeps(typeCell.objectDeps);
       if (CACHE_STATS) recordCache('type', 'hitFastPath');
-      return typeCell.value ?? BoxedType.unknown;
+      // A type that depends on the computations in progress makes the type
+      // computation that reads it depend on them too. So does a read of the
+      // cell while it is being computed (`inFlight`): its key is set at the
+      // start of the computation, and the value served is the previous one,
+      // as in the re-entrant serve of `cachedValue()`.
+      if (this._typeStackDependent || typeCell.inFlight)
+        noteStackDependentAnswer();
+      const served = typeCell.value ?? BoxedType.unknown;
+      if (TYPE_PARANOID) this._checkServedType(served);
+      return served;
     }
 
     // Keyed on the engine generation, with ONE exception below. An earlier
@@ -3765,7 +3824,25 @@ export class BoxedFunction
     // of a point list then share one `tuple<real, real>` object, and the
     // list's cell fold joins them by identity. An interned type is bounded
     // by construction, so the size walk is skipped for it.
+    //
+    // The type is computed in the static view of the bindings: a read by
+    // name of a parameter of a function literal that is being applied
+    // finds the binding of the literal, with no value, not the binding of
+    // the call (`static-typing-view.ts`).
+    //
+    // A computation that read an answer that depends on the computations in
+    // progress (`noteStackDependentAnswer()`, `static-typing-view.ts`) is
+    // not the same in every call: such a type is kept under the `any` axis
+    // (`_typeCacheFallbackGeneration()`), which every call advances, and
+    // the node is read under that key until a computation reads no such
+    // answer.
+    let computed = false;
+    let stackDependent = false;
     const compute = (): BoxedType => {
+      computed = true;
+      return withStaticTypingView(this.engine, computeType);
+    };
+    const computeType = (): BoxedType => {
       // The `List` type handler receives operand DESCRIPTORS, which the
       // framework builds from boxed operands, so a store-backed list is typed
       // here, from its numbers, before the handler would box them.
@@ -3784,7 +3861,13 @@ export class BoxedFunction
               : this.engine._typeResolver
           );
     };
+    const fallbackOnEntry = this._typeStackDependent
+      ? generation
+      : this.engine._typeCacheFallbackGeneration();
     if (cacheOff('type')) forgetSettledValue(cachedCell(this._type, key));
+    // Counted around `cachedValue()`, which takes back the answers of the
+    // recursion that ends at this cell (`forgetStackDependentAnswers()`).
+    const answersBefore = stackDependentAnswerCount();
     const result =
       cachedValue(
         this._type,
@@ -3809,8 +3892,88 @@ export class BoxedFunction
       ) ?? BoxedType.unknown;
     // Record the generation OBSERVED ON ENTRY: a computation that bumped the
     // generation (signature inference does) must leave the fast path closed.
-    this._typeGeneration = generation;
+    let observed = generation;
+    stackDependent = computed && stackDependentAnswerCount() !== answersBefore;
+    if (computed && key !== undefined) {
+      const cell = cachedCell(this._type, key);
+      // The entry was committed under the key it was computed with; move it
+      // to the key of its kind (the fallback key is computed before the
+      // keys can move, as `generation` was).
+      if (
+        cell.generation === key &&
+        stackDependent !== this._typeStackDependent
+      ) {
+        observed = stackDependent ? fallbackOnEntry : typeKey;
+        cell.generation = observed;
+        this._typeStackDependent = stackDependent;
+      }
+    } else if (this._typeStackDependent) noteStackDependentAnswer();
+    this._typeGeneration = observed;
+    if (TYPE_PARANOID) {
+      if (computed)
+        this._typeParanoidStamp =
+          this.engine._anyVersion * 2 + (this.engine._factsHidden() ? 1 : 0);
+      // A read of the cell while its computation is in progress is served
+      // the previous value provisionally: it is not checked.
+      else if (
+        key !== undefined &&
+        stackDependentAnswerCount() === answersBefore
+      )
+        this._checkServedType(result);
+    }
     return result;
+  }
+
+  /** The cached type read an answer that depends on the computations in
+   * progress, and is kept under `_typeCacheFallbackGeneration()`, not under
+   * `_typeCacheGeneration()` (see `type`). */
+  private _typeStackDependent = false;
+
+  /** `CE_TYPE_PARANOID`: the `any` version (doubled, with the facts bit)
+   * when the cached type was computed. */
+  private _typeParanoidStamp: number | undefined = undefined;
+
+  /** `CE_TYPE_PARANOID`: compare a served type with a new computation.
+   * Only a type served at another `any` version than the one it was
+   * computed at is checked: a cache keyed on the `any` version serves the
+   * others too, so a difference there does not come from the type version.
+   */
+  private _checkServedType(served: BoxedType): void {
+    if (_typeParanoidActive || this._numericStore !== undefined) return;
+    // While a recursive signature is derived, a type read in the cycle is a
+    // provisional answer by design, and a computation here would change the
+    // derivation.
+    if (this.engine._recursionKnots.size > 0) return;
+    if (
+      this._typeParanoidStamp ===
+      this.engine._anyVersion * 2 + (this.engine._factsHidden() ? 1 : 0)
+    )
+      return;
+    _typeParanoidActive = true;
+    try {
+      const before = stackDependentAnswerCount();
+      const derived = withStaticTypingView(this.engine, () => type(this));
+      // A computation that read an answer that depends on the computations
+      // in progress is not a reference: it can differ from the cached type
+      // for that reason alone.
+      if (stackDependentAnswerCount() !== before) return;
+      const fresh =
+        derived instanceof BoxedType
+          ? derived
+          : new BoxedType(derived, this.engine._typeResolver);
+      const a = served.toString();
+      const b = BoxedType.from(
+        internType(boundTypeSize(fresh.type)),
+        this.engine._typeResolver
+      ).toString();
+      if (a !== b)
+        throw new Error(
+          `CE_TYPE_PARANOID: outdated type served for "${this._operator}": ` +
+            `cached ${a} vs fresh ${b}`
+        );
+    } finally {
+      _typeParanoidActive = false;
+    }
   }
 
   /** Is this node a `List` whose elements are number or string literals,

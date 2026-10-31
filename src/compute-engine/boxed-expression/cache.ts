@@ -16,6 +16,11 @@ import { asComputation } from '../../common/computation-depth.js';
 import { containsObject } from './object-walk.js';
 import { isExpression } from './type-guards.js';
 import { failClosedCounts } from './store-guard.js';
+import {
+  forgetStackDependentAnswers,
+  noteStackDependentAnswer,
+  stackDependentAnswerCount,
+} from '../static-typing-view.js';
 
 /**
  * One memoized answer, with everything that decides whether it may be served.
@@ -46,6 +51,12 @@ export type CachedCell<T> = {
    * cell, so that its outermost computation can commit when those answers
    * were the only provisional reads in its window. */
   emptyServed?: number;
+  /** The same count in every engine, for the count of answers that depend
+   * on the computations in progress (`noteStackDependentAnswer()`,
+   * `static-typing-view.ts`): an answer of the empty-cell terminator read by
+   * the outermost computation of the cell is not counted for the readers of
+   * that computation, as it is not counted as provisional. */
+  emptyServedAll?: number;
 };
 
 export type CachedValue<T> = CachedCell<T> & {
@@ -246,6 +257,9 @@ export function cachedValue<T>(
       // merely for sharing a jest worker with an object-constructing suite.
       if (engine !== undefined && engineHasObjects(engine))
         failClosedCounts.cellProvisional += 1;
+      // In every engine, a type computed from it is not kept under the type
+      // version (`noteStackDependentAnswer()`, `static-typing-view.ts`).
+      noteStackDependentAnswer();
       if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
     } else if (stats && CACHE_STATS)
       recordCache(stats.cls, generation === undefined ? 'hitConstant' : 'hit');
@@ -297,6 +311,8 @@ export function cachedValue<T>(
       failClosedCounts.cellProvisional += 1;
       cell.emptyServed = (cell.emptyServed ?? 0) + 1;
     }
+    cell.emptyServedAll = (cell.emptyServedAll ?? 0) + 1;
+    noteStackDependentAnswer();
     if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
     return reentrantEmpty;
   }
@@ -335,6 +351,7 @@ export function cachedValue<T>(
   ) {
     mergeObjectDeps(twin.objectDeps);
     failClosedCounts.cellProvisional += 1;
+    noteStackDependentAnswer();
     if (stats && CACHE_STATS) recordCache(stats.cls, 'declineCycle');
     return twin.value;
   }
@@ -355,6 +372,8 @@ export function cachedValue<T>(
   // clearing it would advertise that value as depending on nothing.
   const provisionalBefore = failClosedCounts.cellProvisional;
   const emptyServedBefore = cell.emptyServed ?? 0;
+  const emptyServedAllBefore = cell.emptyServedAll ?? 0;
+  const stackDependentBefore = stackDependentAnswerCount();
   const prevGeneration = cell.generation;
   cell.generation = generation;
   cell.inFlight = (cell.inFlight ?? 0) + 1;
@@ -407,6 +426,16 @@ export function cachedValue<T>(
   // computed the recursion again, and `F := n ↦ If(n = 0, [1, 2],
   // 2·F(n − 1))` read with the assumptions hidden did not finish.
   const ownEmptyServed = (cell.emptyServed ?? 0) - emptyServedBefore;
+  // The same rule for the answers that depend on the computations in
+  // progress: a recursion that ends at the outermost computation of this
+  // cell does not depend on what was computed around it.
+  const ownEmptyServedAll = (cell.emptyServedAll ?? 0) - emptyServedAllBefore;
+  if (
+    ownEmptyServedAll > 0 &&
+    !cell.inFlight &&
+    stackDependentAnswerCount() - stackDependentBefore === ownEmptyServedAll
+  )
+    forgetStackDependentAnswers(ownEmptyServedAll);
   if (
     ownEmptyServed > 0 &&
     !cell.inFlight &&

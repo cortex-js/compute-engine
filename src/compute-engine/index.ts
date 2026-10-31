@@ -9,6 +9,10 @@ import {
   TypeString,
 } from '../common/type/types.js';
 import { BoxedType } from '../common/type/boxed-type.js';
+import {
+  innermostCallFrameBody,
+  staticViewDiverges,
+} from './static-typing-view.js';
 import { dropSpacingOperands } from './latex-syntax/drop-spacing-operands.js';
 import { isValidPrimitiveType } from '../common/type/primitive.js';
 
@@ -1139,6 +1143,12 @@ export class ComputeEngine implements IComputeEngine {
     return this._configurationLifecycle.anyVersion;
   }
 
+  /** See `IComputeEngine._typeVersion`.
+   * @internal */
+  get _typeVersion(): number {
+    return this._configurationLifecycle.typeVersion;
+  }
+
   /**
    * The `semantic` invalidation axis — semantic mutations only; excludes
    * ephemeral loop-index writes and clean scope pops, so caches keyed on it
@@ -1294,6 +1304,31 @@ export class ComputeEngine implements IComputeEngine {
   /** See `IComputeEngine._cacheGeneration()`.
    * @internal */
   _cacheGeneration(): number {
+    const generation = this._baseCacheGeneration();
+    if (!staticViewDiverges(this)) return generation;
+    // Inside a type computation, while a call frame of a function literal is
+    // on the stack, the bindings are read in the static view
+    // (`static-typing-view.ts`): a parameter has no value. A sign, a value
+    // or an evaluation computed then is not the one an evaluation in the
+    // call reads, so it is kept under a key of its own: one key for each
+    // value of the key outside the view, minted as a shield key is, so that
+    // it never equals another key. The facts bit is kept.
+    const axis = Math.floor(generation / 2);
+    if (this._staticViewAxis !== axis) {
+      this._staticViewAxis = axis;
+      this._staticViewKey = this._nextValueShieldKey();
+    }
+    return this._staticViewKey * 2 + (generation & 1);
+  }
+
+  /** The key of `_cacheGeneration()` outside the static view of a type
+   * computation, and the key outside it that `_staticViewKey` was minted
+   * for. */
+  private _staticViewAxis = Number.NaN;
+  private _staticViewKey = 0;
+
+  /** `_cacheGeneration()` outside the static view of a type computation. */
+  private _baseCacheGeneration(): number {
     const facts = this._factsHidden() ? 1 : 0;
     const shields = this._valueShieldKeys;
     if (shields.length === 0) return this._anyVersion * 2 + facts;
@@ -1310,6 +1345,45 @@ export class ComputeEngine implements IComputeEngine {
       top.any = this._anyVersion;
     }
     return top.key * 2 + facts;
+  }
+
+  /** See `IComputeEngine._typeCacheGeneration()`.
+   * @internal */
+  _typeCacheGeneration(): number {
+    if (this._valueShieldKeys.length > 0) return this._baseCacheGeneration();
+    const facts = this._factsHidden() ? 1 : 0;
+    const typeVersion = this._configurationLifecycle.typeVersion;
+    // Outside every call of a function literal, the key is the type version,
+    // times four: a key of `_typeCacheFallbackGeneration()` is two more.
+    const body = innermostCallFrameBody(this);
+    if (body === undefined) return typeVersion * 4 + facts;
+    // Inside a call, one key for each body scope of the innermost frame and
+    // each type version (`innermostCallFrameBody()`), minted as a shield key
+    // is, so that it never equals another key.
+    let entry = this._typeFrameKeys.get(body);
+    if (entry === undefined || entry.typeVersion !== typeVersion) {
+      entry = { typeVersion, key: this._nextValueShieldKey() };
+      this._typeFrameKeys.set(body, entry);
+    }
+    return entry.key * 2 + facts;
+  }
+
+  /** For each body scope of a function literal, the key of the type cache
+   * inside its calls, and the type version that key was minted for. */
+  private readonly _typeFrameKeys = new WeakMap<
+    object,
+    { typeVersion: number; key: number }
+  >();
+
+  /** See `IComputeEngine._typeCacheFallbackGeneration()`.
+   * @internal */
+  _typeCacheFallbackGeneration(): number {
+    const generation = this._cacheGeneration();
+    // A minted key (negative) is unique. A key of the `any` axis is moved
+    // out of the values of `_typeCacheGeneration()`: four times the axis,
+    // plus two, plus the facts bit.
+    if (generation < 0) return generation;
+    return Math.floor(generation / 2) * 4 + 2 + (generation & 1);
   }
 
   /** The value shields on the stack, innermost last: the key in force inside

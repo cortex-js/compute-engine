@@ -37,6 +37,11 @@ export type StateEvent =
        * (`changesFrameBinding`, `engine-declarations.ts`). It advances the
        * evaluation version. */
       changesFrameBinding?: boolean;
+      /** The declaration is made in the new scope of a call of a function
+       * literal (a parameter or a destructured leaf of one), before the
+       * frame of the call is pushed (`isPendingCallScope`). It advances the
+       * `any` version but not the type version: see `typeVersion`. */
+      activation?: boolean;
     }
   // variance settle, callable-swap repair, minted-ctor removal
   | {
@@ -65,6 +70,13 @@ export type StateEvent =
       /** No cache axis advanced while this assumption-free scope was active,
        * so popping it cannot invalidate a version-keyed entry. */
       clean?: boolean;
+      /** The pop of the frame of a call of a function literal
+       * (`_bindsValues`) that would be clean but for the values of the
+       * parameters: no assumption changed, and the type version, the
+       * semantic version and the world version did not advance while the
+       * frame was on the stack. It advances the `any` version but not the
+       * type version: see `typeVersion`. */
+      activation?: boolean;
     }
   | { kind: 'assumption' } // assume / forget
   /** `valueType`: a symbol's value type was written by an inference.
@@ -337,6 +349,7 @@ export function axisMaskOf(e: StateEvent): AxisMask {
 
 export class EngineConfigurationLifecycle {
   private _anyVersion = 0;
+  private _typeVersion = 0;
   private _semanticVersion = 0;
   private _worldVersion = 0;
   private _callableVersion = 0;
@@ -352,6 +365,33 @@ export class EngineConfigurationLifecycle {
 
   get anyVersion(): number {
     return this._anyVersion;
+  }
+
+  /**
+   * The version that keys the type cache of a function expression
+   * (`BoxedFunction.type`). It advances with the `any` version, except for
+   * the events of a call of a function literal: the declaration of its
+   * parameters in the new scope of the call, and the pop of its frame (the
+   * `activation` flag of the `declare` and `scope-pop` events).
+   *
+   * Without this exception each call moved the key of every cached type,
+   * and all of them were computed again, with the same result. A call of
+   * the issue #487 function (8 nested `Fold`s, 75 calls of function
+   * literals) recomputed 6,332 types, each to the same answer, and took
+   * about 100 ms instead of about 19 ms from source (ROADMAP CE-689).
+   *
+   * This is sound because a type computation reads the bindings in the
+   * static view (`static-typing-view.ts`): a read by name, or a read of the
+   * value of a symbol, does not find the bindings that a call made, but the
+   * bindings of the function literal, as they are outside every call. So a
+   * type does not depend on the values that a call gives the parameters,
+   * and the events of a call cannot change it. The sign and value caches
+   * stay keyed on the `any` version: they depend on the values of the
+   * parameters (the sign of `x + 1` in a call with `x = 3` and in the next
+   * call with `x = -5`).
+   */
+  get typeVersion(): number {
+    return this._typeVersion;
   }
 
   get semanticVersion(): number {
@@ -477,6 +517,11 @@ export class EngineConfigurationLifecycle {
         this._persistentEvaluationVersion += 1;
     }
     if (m.any) this._anyVersion += 1;
+    if (
+      m.any &&
+      !((e.kind === 'declare' || e.kind === 'scope-pop') && e.activation)
+    )
+      this._typeVersion += 1;
     if (m.semantic) this._semanticVersion += 1;
     if (m.world) this._worldVersion += 1;
     if (callableAxisSelects(e)) this._callableVersion += 1;

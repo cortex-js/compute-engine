@@ -28,6 +28,12 @@ import {
 import { isInvalidNonCollection } from './error-value.js';
 import { copyContextStack } from './evaluation-epoch.js';
 import { chainedScopeOf } from '../scope-chaining.js';
+import { isPendingCallScope } from '../pending-call-scopes.js';
+import {
+  noteCallFrame,
+  staticBindingIn,
+  staticParentOf,
+} from '../static-typing-view.js';
 
 /**
  * The names bound BY THIS NODE (not by its descendants).
@@ -192,6 +198,10 @@ export function markCallableHome(def: BoxedDefinition, scope: Scope): void {
 }
 export function markCallableFrame(frame: Scope, template: Scope): void {
   callableFrames.set(frame, template);
+  // A call frame of a function literal, made for this call and not pushed
+  // yet: the static view of the bindings (`static-typing-view.ts`) reads
+  // the body scope in its place.
+  if (isPendingCallScope(frame)) noteCallFrame(frame, template);
 }
 
 /**
@@ -262,12 +272,11 @@ export function callableBindingInContext(
     activated._activationOf !== undefined ||
     activated._scopeActivationOf !== undefined;
   const home = isActivation ? undefined : callableHomes.get(half);
-  for (
-    let scope: Scope | null = ce.context.lexicalScope;
-    scope;
-    scope = scope.parent
-  ) {
-    const found = scope.bindings.get(name);
+  const start = ce.context.lexicalScope;
+  // Inside a type computation, the static view of the bindings
+  // (`static-typing-view.ts`): a call frame does not answer.
+  for (let scope: Scope | null = start; scope; scope = staticParentOf(scope)) {
+    const found = staticBindingIn(scope, name, scope === start);
     if (found === undefined) continue;
     const candidate = 'value' in found ? found.value : found.operator;
     if (
@@ -472,7 +481,9 @@ export function bindingInContext(
   const start = scope;
   let skippedBinder: BoxedDefinition | undefined;
   while (scope) {
-    const found = scope.bindings.get(name);
+    // Inside a type computation, the static view of the bindings
+    // (`static-typing-view.ts`): a call frame does not answer.
+    const found = staticBindingIn(scope, name, scope === start);
     if (found !== undefined) {
       if ('value' in found && isForeignBinderBinding(found.value, own)) {
         skippedBinder ??= found;
@@ -487,10 +498,12 @@ export function bindingInContext(
           sameBindingDef('value' in found ? found.value : found.operator, own)
         )
           return found;
-        return callerBinding(ce, name, own, start, scope.parent) ?? found;
+        return (
+          callerBinding(ce, name, own, start, staticParentOf(scope)) ?? found
+        );
       }
     }
-    scope = scope.parent;
+    scope = staticParentOf(scope);
   }
   if (own !== undefined)
     return callerBinding(ce, name, own, start, null) ?? skippedBinder;
@@ -555,10 +568,10 @@ function callerBinding(
       break;
     }
   if (!hasCall) return undefined;
-  if (ownBindingInChain(name, own, rest) !== undefined) return undefined;
+  if (ownBindingInChain(name, own, rest, false) !== undefined) return undefined;
   for (let i = stack.length - 1; i > 0; i--) {
     if (stack[i].name !== 'call') continue;
-    const found = ownBindingInChain(name, own, stack[i - 1].lexicalScope);
+    const found = ownBindingInChain(name, own, stack[i - 1].lexicalScope, true);
     if (found !== undefined) return found;
   }
   return undefined;
@@ -580,11 +593,16 @@ function callerBinding(
 function ownBindingInChain(
   name: string,
   own: BoxedBaseDefinition,
-  scope: Scope | null
+  scope: Scope | null,
+  isWalkStart: boolean
 ): BoxedDefinition | undefined {
   let innermost: BoxedDefinition | undefined;
+  const start = scope;
   while (scope) {
-    const found = scope.bindings.get(name);
+    // Inside a type computation, the static view (`static-typing-view.ts`).
+    // `scope` starts a walk when it is the scope of a caller, and continues
+    // the walk of `bindingInContext()` when it is the rest of its chain.
+    const found = staticBindingIn(scope, name, isWalkStart && scope === start);
     if (
       found !== undefined &&
       !('value' in found && isForeignBinderBinding(found.value, own))
@@ -593,7 +611,7 @@ function ownBindingInChain(
       if (sameBindingDef('value' in found ? found.value : found.operator, own))
         return innermost;
     }
-    scope = scope.parent;
+    scope = staticParentOf(scope);
   }
   return undefined;
 }

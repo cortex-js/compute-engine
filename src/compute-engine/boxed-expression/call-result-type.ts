@@ -53,6 +53,10 @@ import { INDEXED_COLLECTION_SHAPE_TYPE } from '../../common/type/primitive.js';
 import { signatureParamsAreScalar } from './callback-broadcast-admission.js';
 import { isFunction, isNumber, isSymbol } from './type-guards.js';
 import { provisionalRecursionResult } from './declared-parameter-result.js';
+import {
+  noteStackDependentAnswer,
+  stackDependentAnswerCount,
+} from '../static-typing-view.js';
 
 const cache = new WeakMap<
   IComputeEngine,
@@ -62,6 +66,14 @@ const cache = new WeakMap<
   }
 >();
 const active = new WeakMap<IComputeEngine, Set<Expression>>();
+/** For a map of results of `cache`, the keys of the results whose
+ * derivation read an answer that depends on the derivations in progress
+ * (`noteStackDependentAnswer()`, `static-typing-view.ts`): a read of such a
+ * result is counted again. */
+const stackDependentResults = new WeakMap<
+  Map<string, Type | undefined>,
+  Set<string>
+>();
 /** The number of derivations, per engine, that were declined because the
  * literal was already being derived (a recursive call). The body walk reads
  * it before and after a nested call to know whether the nested call reached
@@ -1516,6 +1528,9 @@ function literalBodyResultType(
   const running = active.get(engine) ?? new Set<Expression>();
   if (running.has(literal)) {
     recursionDeclines.set(engine, (recursionDeclines.get(engine) ?? 0) + 1);
+    // The answer depends on the derivation in progress: a type that reads
+    // it is not kept under the type version (`static-typing-view.ts`).
+    noteStackDependentAnswer();
     return undefined;
   }
   active.set(engine, running);
@@ -1577,7 +1592,14 @@ function literalBodyResultType(
       .map((t) => typeToString(t))
       .join(';') +
     (partialArgCount === undefined ? '' : `;partial ${partialArgCount}`);
-  if (results.has(key)) return results.get(key);
+  if (results.has(key)) {
+    // A result derived from an answer that depends on the derivations in
+    // progress makes the reader depend on them too.
+    if (stackDependentResults.get(results)?.has(key))
+      noteStackDependentAnswer();
+    return results.get(key);
+  }
+  const stackDependentBefore = stackDependentAnswerCount();
   running.add(literal);
   try {
     const memo = new Map<Expression, OperandDescriptor | undefined>();
@@ -1984,6 +2006,14 @@ function literalBodyResultType(
     // set of entries for one engine generation.
     if (results.size >= 256) results.delete(results.keys().next().value!);
     results.set(key, refined);
+    let dependent = stackDependentResults.get(results);
+    if (stackDependentAnswerCount() !== stackDependentBefore) {
+      if (dependent === undefined) {
+        dependent = new Set();
+        stackDependentResults.set(results, dependent);
+      }
+      dependent.add(key);
+    } else dependent?.delete(key);
     return refined;
   } finally {
     running.delete(literal);

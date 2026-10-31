@@ -17,6 +17,7 @@ import {
 import { scopeChainDeclarationCount } from '../scope-declaration-count.js';
 import { withScratchScope } from '../scratch-scopes.js';
 import { failClosedCounts } from './store-guard.js';
+import { noteStackDependentAnswer } from '../static-typing-view.js';
 
 /**
  * The scope the function literal `literal` was defined in: the parent of the
@@ -492,6 +493,10 @@ export function reentrantSignatureReadCount(): number {
  */
 export function noteReentrantSignatureRead(owner: object): void {
   failClosedCounts.reentrantSignature += 1;
+  // A type computed from a provisional signature is not kept under the type
+  // version, which a call does not move: it depends on the derivation in
+  // progress (`noteStackDependentAnswer()`, `static-typing-view.ts`).
+  noteStackDependentAnswer();
   let i = derivationStack.length - 1;
   while (i >= 0 && derivationStack[i].owner !== owner) i -= 1;
   if (i < 0) return;

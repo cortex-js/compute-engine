@@ -671,6 +671,10 @@ export function declareSymbolValue(
     ...(isShadowedParameterDeclaration(ce, name, scope)
       ? { parameter: true }
       : {}),
+    // A binding of a call, made before its frame is pushed: no type
+    // computation reads it (`static-typing-view.ts`), so it does not move
+    // the type version (`typeVersion`, `engine-configuration-lifecycle.ts`).
+    ...(isPendingCallScope(scope) ? { activation: true } : {}),
   });
 
   return boxedDef;
@@ -866,6 +870,7 @@ export function declareSymbolOperator(
     // must agree, or an operator-shaped stand-in would reintroduce the churn
     // the exemption removes.
     ...(scratchRootOf(ce, scope) !== undefined ? { scratch: true } : {}),
+    ...(isPendingCallScope(scope) ? { activation: true } : {}),
   });
 
   return boxedDef;

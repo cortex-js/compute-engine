@@ -1261,6 +1261,11 @@ export interface IComputeEngine {
    * `_noteStateEvent`). @internal */
   readonly _anyVersion: number;
 
+  /** The version that keys the type cache: the `any` axis without the
+   * events of a call of a function literal (`typeVersion`,
+   * `engine-configuration-lifecycle.ts`). @internal */
+  readonly _typeVersion: number;
+
   /** Semantic-mutation counter (see `ComputeEngine._semanticVersion`).
    * @internal */
   readonly _semanticVersion: number;
@@ -1366,6 +1371,33 @@ export interface IComputeEngine {
    * advance retired every node in the engine.
    * @internal */
   _cacheGeneration(): number;
+
+  /** The key of the type cache of a function expression
+   * (`BoxedFunction.type`): `_typeVersion` in place of the `any` axis, with
+   * the same facts bit. Inside a call of a function literal, it is also
+   * keyed on the body scope of the innermost call frame
+   * (`innermostCallFrameBody()`, `static-typing-view.ts`): a key minted for
+   * that scope and that type version. Only the type cache uses it, so its
+   * values never meet a key of `_cacheGeneration()` in one cell. Inside a
+   * value shield it is the shield key, which moves with the `any` axis and
+   * is negative, so it never equals a key made from `_typeVersion`.
+   * @internal */
+  _typeCacheGeneration(): number;
+
+  /** The key of the type cache of a function expression whose type
+   * computation read an answer that depends on the computations in
+   * progress, not only on the bindings: a cycle of type or effect reads
+   * answered provisionally, or a derivation of the result of a call
+   * declined because the same function literal was already being derived.
+   * Such a type is kept under the `any` axis (`_cacheGeneration()`), which
+   * every call advances, never under `_typeCacheGeneration()`. Outside a
+   * value shield, its values never equal those of `_typeCacheGeneration()`.
+   * Inside a value shield, both can be the key of the shield (they are,
+   * except while the static view of a type computation diverges,
+   * `staticViewDiverges()`): the type version does not key the cache there,
+   * so the two kinds of type are kept under the same key.
+   * @internal */
+  _typeCacheFallbackGeneration(): number;
 
   /** Run `f` as a value shield for the cache: `_cacheGeneration()` answers a
    * key of this shield extent while `f` runs, and the outer key again after

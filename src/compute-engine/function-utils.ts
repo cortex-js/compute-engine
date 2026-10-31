@@ -137,6 +137,13 @@ import {
 import { beginStoreGuard } from './boxed-expression/store-guard.js';
 import { notePendingCallScope } from './pending-call-scopes.js';
 import {
+  forgetHiddenBodyBindings,
+  noteHiddenBodyBindings,
+  staticBindingIn,
+  staticParentOf,
+  staticViewDiverges,
+} from './static-typing-view.js';
+import {
   isEffectSubset,
   isPureComputedEffects,
 } from '../common/type/effects.js';
@@ -3119,6 +3126,7 @@ function unwrapReturn(ce: ComputeEngine, expr: Expression): Expression {
  * state was actually observable.
  */
 function hideBodyScopeParams(
+  ce: ComputeEngine,
   bodyScope: Scope,
   paramNames: string[]
 ): Array<[string, BoxedDefinition]> {
@@ -3143,6 +3151,9 @@ function hideBodyScopeParams(
       }
     }
   }
+  // A type computation reads them as if they were still there
+  // (`static-typing-view.ts`).
+  noteHiddenBodyBindings(ce, bodyScope, hidden);
   return hidden;
 }
 
@@ -3373,6 +3384,8 @@ function restoreBodyScopeParams(
     return;
   }
   for (const [name, binding] of hidden) bodyScope.bindings.set(name, binding);
+  // No application of the literal runs any more.
+  forgetHiddenBodyBindings(bodyScope);
   const deferred = deferredBodyScopeParams.get(bodyScope);
   if (deferred !== undefined) {
     deferredBodyScopeParams.delete(bodyScope);
@@ -7250,7 +7263,7 @@ function makeLambda(
       // every NESTED scope that chains through bodyScope — a `while` loop's
       // condition then reads the valueless binding forever and never
       // terminates.
-      const hiddenBindings = hideBodyScopeParams(bodyScope, []);
+      const hiddenBindings = hideBodyScopeParams(ce, bodyScope, []);
       markCallableFrame(freshScope, bodyScope);
       // Each assignment local of the body is a new binding of this call.
       declareAssignmentLocals(ce, bodyScope, freshScope);
@@ -8138,7 +8151,11 @@ function makeLambda(
       bodyScope.parent = freshScope;
       enterAppliedBodyScope(bodyScope, savedParent);
       const curryParamNames = boundPrefix.leaves.map((l) => l.name);
-      const hiddenBindings = hideBodyScopeParams(bodyScope, curryParamNames);
+      const hiddenBindings = hideBodyScopeParams(
+        ce,
+        bodyScope,
+        curryParamNames
+      );
       markCallableFrame(freshScope, bodyScope);
       // Each assignment local of the body is a new binding of this call.
       declareAssignmentLocals(ce, bodyScope, freshScope);
@@ -8440,7 +8457,7 @@ function makeLambda(
     const savedParent = bodyScope.parent;
     bodyScope.parent = freshScope;
     enterAppliedBodyScope(bodyScope, savedParent);
-    const hiddenBindings = hideBodyScopeParams(bodyScope, paramNames);
+    const hiddenBindings = hideBodyScopeParams(ce, bodyScope, paramNames);
     markCallableFrame(freshScope, bodyScope);
     // Each assignment local of the body is a new binding of this call.
     declareAssignmentLocals(ce, bodyScope, freshScope);
@@ -8900,6 +8917,12 @@ function validApplicationMemo(
   ce: ComputeEngine,
   fnExpr: Expression
 ): ApplicationMemo | undefined {
+  // An application evaluated inside a type computation reads the static
+  // bindings (`static-typing-view.ts`): its parameters have no value there,
+  // so its result is not the result of the call. The memo is not keyed on
+  // the view, so it is neither read nor written while the view differs from
+  // the bindings.
+  if (staticViewDiverges(ce)) return undefined;
   const memo = cacheOff('appmemo')
     ? undefined
     : ce._applicationMemo?.get(fnExpr);
@@ -8926,6 +8949,8 @@ function applicationMemoForStore(
   ce: ComputeEngine,
   fnExpr: Expression
 ): ApplicationMemo | undefined {
+  // See `validApplicationMemo()`: no store while the static view differs.
+  if (staticViewDiverges(ce)) return undefined;
   ce._applicationMemo ??= new WeakMap();
   let memo = validApplicationMemo(ce, fnExpr);
   if (memo === undefined) {
@@ -9192,12 +9217,16 @@ export function lookup(
   scope: Scope
 ): undefined | BoxedDefinition {
   console.assert(typeof id === 'string' && id.length > 0);
+  // Inside a type computation, the scopes are read in the static view
+  // (`static-typing-view.ts`): a call frame of a function literal does not
+  // answer, and the body scope answers the bindings that the call took out
+  // of it.
   let currentScope: Scope | null = scope;
   while (currentScope) {
-    const def = currentScope.bindings.get(id);
+    const def = staticBindingIn(currentScope, id, currentScope === scope);
     if (def) return def;
 
-    currentScope = currentScope.parent;
+    currentScope = staticParentOf(currentScope);
   }
   return undefined;
 }
