@@ -3,7 +3,8 @@
 Read `~/.claude/SHARED-BOX-PROTOCOL.md` for shared-machine coordination. Section
 numbers below refer to that protocol. This file contains only Compute Engine
 rules; [BUILD.md](../BUILD.md) owns build, validation, formatting, and release
-commands.
+commands. The user has approved every rule in this file: follow each rule as
+written, and propose a change to a rule rather than skip it.
 
 ## §1 Worktrees and applying changes
 
@@ -59,7 +60,7 @@ Worktrees share these CPU limits.
 Exception: a local release (`npm run release`, or `npm publish`) takes no lock
 for its checks and builds (`scripts/release-checks.sh`, `npm run doc`, the
 production build, the VS Code extension), because the user releases only when
-no other session is active (user decision 2026-10-30). The full test suite of a
+no other session is active. The full test suite of a
 release runs through `scripts/ci-nightly.sh`, which still takes the lock.
 
 ## §3 Checking for running tests

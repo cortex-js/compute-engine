@@ -4,7 +4,9 @@ This is the command reference for contributors and agents. `package.json` owns
 command definitions; this document explains their responsibilities. Agent
 coordination, worker limits, review, and staging policy live in
 [the Compute Engine shared-box specifics](docs/COMPUTE-ENGINE-BOX-SPECIFICS.md)
-and the shared protocol it references.
+and the shared protocol it references. The user has approved every rule in this
+file: follow each rule as written, and propose a change to a rule rather than
+skip it.
 
 ## Setup and formatting
 
@@ -106,8 +108,7 @@ Before returning a delegated implementation:
    the change introduces, or in code it rewrites, is fixed in the change.
 5. Before you ask the orchestrator or the user to decide, check the facts the
    question rests on: run the probe, and read the documented contract in
-   `docs/` with its context. Several questions on 2026-10-30 rested on a
-   misread decision or an untested claim.
+   `docs/` with its context.
 
 The orchestrator sorts every unfixed defect of a sub-agent report before writing
 its own summary: fix it (or send it back), queue it as the next task when it is
@@ -227,8 +228,8 @@ commit. When only step 7 fails, fix the cause and run
 
 A local release takes no box lock, except for the full test suite, which
 `scripts/ci-nightly.sh` runs under the lock: no other session is active during a
-release (user decision 2026-10-30). Agents leave commits and publishing to the
-user unless explicitly instructed otherwise.
+release. Agents leave commits and publishing to the user unless explicitly
+instructed otherwise.
 
 `npm publish` checks release eligibility, runs `scripts/release-checks.sh`
 (unless `npm run release` ran it already), performs a clean production build

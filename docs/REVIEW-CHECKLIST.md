@@ -7,7 +7,9 @@ hard to see in a diff. The full rules are in `CODING-STYLEGUIDE.md`,
 `ARCHITECTURE.md` and the `docs/*-MODEL.md` files; each item names its source.
 
 Keep each item short and testable. Add an item when a review misses a mistake
-that a reader of the diff could have seen.
+that a reader of the diff could have seen. The user has approved every rule in
+this file: follow each rule as written, and propose a change to a rule rather
+than skip it.
 
 ## Scope of a finding
 
@@ -97,7 +99,7 @@ there.
   keeps the precise type when no value contradicts it: check sample
   arguments, including the case the old `any` existed for, then update the
   pin and mention it in the report. Ask only when a value contradicts the
-  narrower type (user decision 2026-10-23).
+  narrower type.
 - **A lazy operator** (`lazy: true`) gets its operands unbound: the handler must
   call `.canonical` on each operand it uses. Its tests must include the
   `ce.box(...)` and `ce.parse(...)` routes, not only `ce.function(...)`.
@@ -136,17 +138,18 @@ there.
   with another operator of the same family. A refusal that applies at some
   of these and not at the others is a defect, even when a comment explains it
   and a test pins it. Keep a refusal only when it prevents a result that is
-  wrong with no error; "users do not write this" is not a reason. Example: the
-  compiler once refused to fold `Sqrt(-2)` to `NaN` while `Ln(-2)`, `arcsin(2)`
-  and the same `Sqrt` over a variable compiled and returned `NaN`.
+  wrong with no error; "users do not write this" is not a reason. Example: a
+  compiler that refuses to fold `Sqrt(-2)` to `NaN` has this defect when
+  `Ln(-2)`, `arcsin(2)` and the same `Sqrt` over a variable compile and return
+  `NaN`.
 
 ## LaTeX parse and serialize
 
 - **An absent operand is `null`, not a falsy value.** `operand(expr, n)`
   (`src/math-json/utils.ts`) returns `null` for a missing slot. The MathJSON of
   the literal number `0` is the JavaScript number `0`, so a test such as
-  `if (!op) return ''` also drops a zero operand: `When(0, c)` once serialized
-  to an empty string. Test with `=== null`. Where a value comes from
+  `if (!op) return ''` also drops a zero operand, and serializes `When(0, c)` to
+  an empty string. Test with `=== null`. Where a value comes from
   `operands()` destructuring, the absence marker is `undefined`; read the
   source of the value before you choose the test.
 - **Verify a serializer change by a round trip on canonical forms.** Check

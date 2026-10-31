@@ -1,7 +1,8 @@
 # Agent instructions
 
 This is the shared instruction file for coding agents. Do not maintain copies in
-agent-specific files.
+agent-specific files. The user has approved every rule in this file: follow each
+rule as written, and propose a change to a rule rather than skip it.
 
 ## Read the relevant reference
 
@@ -39,19 +40,16 @@ nightly run, tell the user; do not take over that investigation unless asked.
   needs a hard static analysis, implement the simple, sound version first: it
   may give no value where the interpreter has one, and that case is documented
   with an example, but it never gives a value where the interpreter has none.
-  A more precise version is a separate task, done when the user asks for it
-  (user decision 2026-10-30).
+  A more precise version is a separate task, done when the user asks for it.
 - A reachable shape that a compile target declines (it falls back to the
   interpreter) or that gives a different value from the interpreter is a defect,
   even when a corpus shows it only a few times. How often it occurs sets the
   priority of the fix; it never closes the item. Do not resolve a ROADMAP entry
-  with "the decline stays" or "no consumer has asked" (user decision
-  2026-09-09).
+  with "the decline stays" or "no consumer has asked".
 - Judge a design change first by correctness (compiled values equal the
   interpreter's; no error becomes a value with no error) and by code-generation
   coverage (declines removed per target). The number of changed tests and
-  snapshots is a cost to report, not a reason to choose (user decision
-  2026-10-27).
+  snapshots is a cost to report, not a reason to choose.
 - When working autonomously, continue independent work while a decision is
   pending. Report unresolved decisions and verification failures explicitly. At
   a design choice, take the option you recommend, continue to the end, and

@@ -5,7 +5,8 @@ This guide owns conventions for writing code and comments. Use
 [ARCHITECTURE.md](ARCHITECTURE.md) for subsystem contracts, and
 [the review checklist](docs/REVIEW-CHECKLIST.md) when reviewing a change. Agent
 coordination belongs in [AGENTS.md](AGENTS.md) and the shared-box protocol it
-references.
+references. The user has approved every rule in this file: follow each rule as
+written, and propose a change to a rule rather than skip it.
 
 ## Formatting and scope
 
@@ -93,17 +94,16 @@ its [implementation conventions](ARCHITECTURE.md#implementation-conventions).
   Boolean type. Use uppercase symbols in Boolean fixtures.
 - A change to the last digit of a machine-precision result is acceptable, in
   particular for performance: a different summation order, or `Math.exp(x)`
-  instead of `Math.E ** x` (user decision 2026-09-21). Report the change in
-  `CHANGELOG.md` (which expressions, which digits). Exact values stay exact, and
-  complex values, poles (`~oo`) and `NaN` must not change.
+  instead of `Math.E ** x`. Report the change in `CHANGELOG.md` (which
+  expressions, which digits). Exact values stay exact, and complex values, poles
+  (`~oo`) and `NaN` must not change.
 - A lazy operator needs tests through `ce.box` and `ce.parse`, as well as direct
   function construction. Shared-bundle behavior needs consumer tests against
   `dist`; source-only tests cannot establish package identity or resolution.
 - A table keyed by symbol names has no prototype: use a `Map`, or an object
   created with `{ __proto__: null }`. A symbol name is any string, so a name
   such as `toString` or `constructor` reads the inherited member of a plain
-  object. In the LaTeX parser this gave an undeclared name a function as its
-  type, and the next type check threw.
+  object.
 - Code that makes an object for each node in a hot route uses a class, with
   getters on the prototype, not an object literal that defines a getter. V8
   creates such a literal on a slow route, about 150 ns against about 10 ns for a
