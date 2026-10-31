@@ -140,6 +140,7 @@ import {
   visitIntervalInputCells,
   type BroadcastInputs,
   type BroadcastOptions,
+  type IntervalSharedLists,
 } from './broadcast.js';
 import {
   makeBroadcastAsync,
@@ -5928,7 +5929,8 @@ function checkIntervalKindCells(
   entries: ReadonlyArray<IntervalKindEntry>,
   inputs: BroadcastInputs,
   options: BroadcastOptions | undefined,
-  booleans?: readonly string[]
+  booleans?: readonly string[],
+  lists?: readonly string[]
 ): void {
   const byName = new Map(entries.map((e) => [e.name, e]));
   const names = visitIntervalInputCells(
@@ -5946,7 +5948,8 @@ function checkIntervalKindCells(
       const entry = byName.get(name);
       if (entry !== undefined && !entry.value(value))
         throw kindEntryError(entry.label);
-    }
+    },
+    lists
   );
   for (const entry of entries)
     if (!names.includes(entry.name)) throw kindEntryError(entry.label);
@@ -6946,12 +6949,19 @@ function compileToIntervalTarget(
   // The variables declared `boolean`: for them an empty array is an empty
   // column of `broadcast()`.
   const booleans = declaredBooleanNames(expr);
+  // The list inputs that the code reads (`required` above) are the shared
+  // inputs of `broadcast()`: each is bound once for the batch, after the
+  // conversion `run()` applies to it (`processInput`).
+  const sharedLists: IntervalSharedLists = {
+    lists: required,
+    convert: processInput,
+  };
   const checkCells = (
     inputs: BroadcastInputs,
     options: BroadcastOptions | undefined
   ): void => {
     if (kindEntries.length > 0)
-      checkIntervalKindCells(kindEntries, inputs, options, booleans);
+      checkIntervalKindCells(kindEntries, inputs, options, booleans, required);
   };
   const result: CompilationResult<'interval-js', IntervalValue> = {
     target: 'interval-js',
@@ -6972,10 +6982,17 @@ function compileToIntervalTarget(
     calling: 'expression',
     ...(kinds !== undefined ? { valueKinds: [...kinds.kinds] } : {}),
     ...(booleans.length > 0 ? { booleanInputs: [...booleans] } : {}),
+    ...(required.length > 0 ? { listInputs: [...required] } : {}),
     run: fn as unknown as CompiledRunner<IntervalValue, IntervalInput>,
     broadcast: (inputs: BroadcastInputs, options?: BroadcastOptions) => {
       checkCells(inputs, options);
-      return broadcastIntervals(fn.rawCall, inputs, options, booleans);
+      return broadcastIntervals(
+        fn.rawCall,
+        inputs,
+        options,
+        booleans,
+        sharedLists
+      );
     },
   };
   // `broadcastAsync` ships the result itself (its `code`, preambles and
@@ -6992,6 +7009,7 @@ function compileToIntervalTarget(
       target.hostNames !== true &&
       isShippableCode(`${preamble}\n${body}`),
     iterationLimit: () => engine.iterationLimit,
+    lists: required,
     booleans,
     slice: (inputs, options, out, slice) =>
       broadcastIntervalsSlice(
@@ -7000,7 +7018,8 @@ function compileToIntervalTarget(
         options,
         out,
         slice,
-        booleans
+        booleans,
+        sharedLists
       ),
     workers: () => engine.workers,
   };

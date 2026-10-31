@@ -34,18 +34,30 @@
  * `Float64Array.from({ length: n }, (_, j) => j)` at the same place in key
  * order, with no column to send or read (ROADMAP CE-421).
  *
- * **Shared inputs** (`javascript` only). A variable that the compiled code
- * reads as a list (the `lists` of the entry plan, from a declared list type),
- * or that `options.shared` names, is bound once for the whole batch: the code
- * reads it by index (`F_{i+1}` with `i` the per-cell variable). Its value is
- * a plain array of numbers or a `Float64Array`. It is not a column of the
- * `cells` layout and not an axis of the `grid` layout. The ordinary compiled
- * body reads plain arrays only (its `at` helper gives `NaN` for a typed
- * array), so for it a `Float64Array` is copied into a plain array once,
- * before the cell loop. The batch body of a result compiled with
- * `broadcast: true` (`CompilationOptions.broadcast`, see
+ * **Shared inputs.** A variable that the compiled code reads as a list
+ * (`javascript`: the `lists` of the entry plan, from a declared list type;
+ * `interval-js`: the inputs that the code iterates, reduces or indexes,
+ * `BaseCompiler.collectionReadInputs`), or that `options.shared` names, is
+ * bound once for the whole batch: every cell reads the same list. It is not
+ * a column of the `cells` layout and not an axis of the `grid` layout.
+ *
+ * `javascript`: the code reads it by index (`F_{i+1}` with `i` the per-cell
+ * variable). Its value is a plain array of numbers or a `Float64Array`. The
+ * ordinary compiled body reads plain arrays only (its `at` helper gives
+ * `NaN` for a typed array), so for it a `Float64Array` is copied into a
+ * plain array once, before the cell loop. The batch body of a result
+ * compiled with `broadcast: true` (`CompilationOptions.broadcast`, see
  * `BroadcastBatchBody`) reads a `Float64Array` in place; without it, every
- * batch reads the copy. A plain array for any other variable throws.
+ * batch reads the copy.
+ *
+ * `interval-js`: its value is a plain array whose elements are numbers or
+ * `{ lo, hi }` objects, the forms `run()` accepts for a list. Each element
+ * is converted to an interval as `run()` converts it (a number is a point
+ * interval), once before the cell loop of each call or slice. A
+ * `Float64Array` throws: an `interval-js` `Float64Array` input is read as
+ * `lo, hi` pairs, so `[1, 2]` would be one interval, not two elements.
+ *
+ * A plain array for any other variable throws.
  *
  * **Output.** `javascript`: `outputs` values per cell (`options.outputs`, or
  * the default the result gives: the arity of an expression whose type is a
@@ -227,18 +239,36 @@ interface BroadcastShape {
    * spans (1 for the first axis), and the axis length; `null` for `cells`. */
   grid: { stride: number; length: number }[] | null;
   /** The shared inputs, as given: each is bound once on the vars object (a
-   * `Float64Array` after a copy into a plain array) and is neither a column
-   * nor an axis. Always empty for `interval-js`. */
-  shared: { name: string; value: Float64Array | readonly number[] }[];
+   * `Float64Array` after a copy into a plain array; for `interval-js`, a
+   * plain array after the conversion of its elements to intervals) and is
+   * neither a column nor an axis. */
+  shared: { name: string; value: Float64Array | readonly unknown[] }[];
+}
+
+/**
+ * The shared lists of an `interval-js` batch. `lists` are the variables that
+ * the compiled code reads as lists (`BaseCompiler.collectionReadInputs`):
+ * each is a shared input, with the variables that the `shared` option
+ * names. `convert` is the conversion that `run()` applies to its inputs
+ * (`processInput` in `interval/run-support.ts`), applied to each shared
+ * list once before the cell loop. It is given by the caller because this
+ * module has no value import: the runtime entry bundles it without the
+ * interval library. A batch that has a shared input and no `convert`
+ * throws.
+ */
+export interface IntervalSharedLists {
+  lists?: readonly string[];
+  convert?: (value: unknown) => unknown;
 }
 
 const hasOwn = (o: object, key: string): boolean =>
   Object.prototype.hasOwnProperty.call(o, key);
 
 /**
- * The names of the shared inputs of a `javascript` batch, in key order of
- * `inputs`: each key of `inputs` that `lists` holds (the variables the
- * compiled code reads as lists, from the entry plan) or that
+ * The names of the shared inputs of a batch, in key order of `inputs`: each
+ * key of `inputs` that `lists` holds (the variables the compiled code reads
+ * as lists: the entry plan of a `javascript` result, the
+ * `collectionReadInputs` of an `interval-js` result) or that
  * `options.shared` names. A name in `options.shared` that is not a key of
  * `inputs` throws, and so does a `shared` option that is not an array of
  * strings.
@@ -323,19 +353,17 @@ export function broadcastStride(
 
 /** A shared input as the compiled code reads it: a plain array. A
  * `Float64Array` is copied once; a plain array is returned as it is. */
-export function plainSharedArray(
-  value: Float64Array | readonly number[]
-): readonly number[] {
+export function plainSharedArray<T>(
+  value: Float64Array | readonly T[]
+): readonly (T | number)[] {
   return value instanceof Float64Array ? Array.from(value) : value;
 }
 
 /** The error for a plain array that is not the column of a boolean
  * variable (`readShape`, `rescanBooleanSlice`). */
-function plainArrayError(name: string, perCell: 1 | 2): TypeError {
+function plainArrayError(name: string): TypeError {
   return new TypeError(
-    perCell === 2
-      ? `broadcast: the input for "${name}" must be a Float64Array or a number; a plain array is accepted only as the column of a boolean variable (every element a boolean)`
-      : `broadcast: the input for "${name}" must be a Float64Array or a number; a plain array is accepted only for a shared input (a variable the compiled code reads as a list, or one the \`shared\` option names), or as the column of a boolean variable (every element a boolean)`
+    `broadcast: the input for "${name}" must be a Float64Array or a number; a plain array is accepted only for a shared input (a variable the compiled code reads as a list, or one the \`shared\` option names), or as the column of a boolean variable (every element a boolean)`
   );
 }
 
@@ -350,8 +378,7 @@ function plainArrayError(name: string, perCell: 1 | 2): TypeError {
  */
 function rescanBooleanSlice(
   shape: BroadcastShape,
-  slice: BroadcastSlice,
-  perCell: 1 | 2
+  slice: BroadcastSlice
 ): void {
   const validated = slice.validated;
   if (validated === undefined) return;
@@ -370,7 +397,7 @@ function rescanBooleanSlice(
         ? [slice.from, Math.min(slice.to, a.length)]
         : [0, a.length];
     for (let j = from; j < to; j++)
-      if (typeof a[j] !== 'boolean') throw plainArrayError(name, perCell);
+      if (typeof a[j] !== 'boolean') throw plainArrayError(name);
   });
 }
 
@@ -467,11 +494,14 @@ function refuseBooleanAtNumber(
 
 /**
  * Validate the inputs and compute the cell count. `perCell` is 1 for a
- * `javascript` input and 2 for an interval (`lo, hi` pair). `lists` is the
- * `lists` of a `javascript` entry plan: those variables are shared inputs
- * (see `broadcastSharedNames`). An interval batch takes neither the
- * `shared` nor the `outputs` option: its loop writes a `lo, hi, kind`
- * triple per cell and its compiled code reads no list.
+ * `javascript` input and 2 for an interval (`lo, hi` pair). `lists` are the
+ * variables the compiled code reads as lists (the `lists` of a `javascript`
+ * entry plan, the `collectionReadInputs` of an `interval-js` result): those
+ * variables are shared inputs, with the ones the `shared` option names (see
+ * `broadcastSharedNames`). An interval batch does not take the `outputs`
+ * option: its loop writes a `lo, hi, kind` triple per cell. A shared input
+ * of an interval batch must be a plain array, not a `Float64Array`, which
+ * an interval batch reads as `lo, hi` pairs (see "Shared inputs" above).
  */
 function readShape(
   inputs: BroadcastInputs,
@@ -481,16 +511,11 @@ function readShape(
   booleans?: readonly string[],
   validated?: WeakMap<object, number>
 ): BroadcastShape {
-  if (perCell === 2) {
-    for (const option of ['shared', 'outputs'] as const)
-      if (options?.[option] !== undefined)
-        throw new TypeError(
-          `broadcast: the \`${option}\` option is not supported by an interval-js result`
-        );
-  }
-  const sharedNames = new Set(
-    perCell === 1 ? broadcastSharedNames(lists, inputs, options) : []
-  );
+  if (perCell === 2 && options?.outputs !== undefined)
+    throw new TypeError(
+      'broadcast: the `outputs` option is not supported by an interval-js result'
+    );
+  const sharedNames = new Set(broadcastSharedNames(lists, inputs, options));
   const layout = options?.layout ?? 'cells';
   const indexNames = broadcastIndexNames(inputs, options, layout, sharedNames);
   const names: string[] = [];
@@ -512,6 +537,12 @@ function readShape(
       continue;
     }
     if (sharedNames.has(name)) {
+      if (perCell === 2 && !Array.isArray(v))
+        throw new TypeError(
+          v instanceof Float64Array
+            ? `broadcast: the shared input "${name}" of an interval-js result must be a plain array of numbers or { lo, hi } objects, not a Float64Array: an interval-js Float64Array is read as lo, hi pairs`
+            : `broadcast: the shared input "${name}" of an interval-js result must be a plain array of numbers or { lo, hi } objects`
+        );
       if (!(v instanceof Float64Array) && !Array.isArray(v))
         throw new TypeError(
           `broadcast: the shared input "${name}" must be an array of numbers or a Float64Array`
@@ -547,7 +578,7 @@ function readShape(
       arrays.push(v);
       scalars.push(NaN);
       indexes.push(false);
-    } else if (Array.isArray(v)) throw plainArrayError(name, perCell);
+    } else if (Array.isArray(v)) throw plainArrayError(name);
     else
       throw new TypeError(
         `broadcast: the input for "${name}" must be a Float64Array, a number, a boolean or an array of booleans`
@@ -777,7 +808,7 @@ export function broadcastNumbersSlice(
     booleansOf(entry),
     slice.validated
   );
-  rescanBooleanSlice(shape, slice, 1);
+  rescanBooleanSlice(shape, slice);
   refuseBooleanAtNumber(shape, entry);
   return broadcastNumbersRange(
     call,
@@ -1062,7 +1093,7 @@ return function (vars, arrays, slots, out, from, to, deadline, stop, grid, args,
  * while its length is the same (see `BroadcastBatchBody`).
  */
 function checkedSharedList(
-  value: Float64Array | readonly number[],
+  value: Float64Array | readonly unknown[],
   minLength: number,
   checked: WeakMap<object, number>
 ): boolean {
@@ -1095,7 +1126,7 @@ function batchArguments(
   shape: BroadcastShape,
   complexSlots: ({ re: number; im: number } | null)[],
   out: Float64Array,
-  plainOf: (s: BroadcastShape['shared'][number]) => readonly number[]
+  plainOf: (s: BroadcastShape['shared'][number]) => readonly unknown[]
 ): unknown[] | undefined {
   const args: unknown[] = [];
   for (const p of batch.params) {
@@ -1168,8 +1199,8 @@ function broadcastNumbersRange(
   );
   const arrays = unaliasedInputs(shape.arrays, out);
   // The plain array of each shared input, made at most once per call.
-  const plain = new Map<string, readonly number[]>();
-  const plainOf = (s: BroadcastShape['shared'][number]): readonly number[] => {
+  const plain = new Map<string, readonly unknown[]>();
+  const plainOf = (s: BroadcastShape['shared'][number]): readonly unknown[] => {
     let p = plain.get(s.name);
     if (p === undefined) {
       p = plainSharedArray(s.value);
@@ -1378,16 +1409,28 @@ export function encodeIntervalResult(
  * on a vars object of `{ lo, hi }` enclosures (the raw call of
  * `ComputeEngineIntervalFunction`); the loop reuses one enclosure object per
  * variable and copies each answer out before the next cell overwrites it.
+ * `lists` gives the shared lists of the batch and their conversion.
  */
 export function broadcastIntervals(
   call: (vars: Record<string, unknown>) => unknown,
   inputs: BroadcastInputs,
   options?: BroadcastOptions,
-  booleans?: readonly string[]
+  booleans?: readonly string[],
+  lists?: IntervalSharedLists
 ): Float64Array {
-  const shape = readShape(inputs, options, 2, undefined, booleans);
+  const shape = readShape(inputs, options, 2, lists?.lists, booleans);
   const out = outputArray(options?.out, 3 * shape.count);
-  broadcastIntervalsRange(call, shape, out, 0, shape.count);
+  broadcastIntervalsRange(
+    call,
+    shape,
+    out,
+    0,
+    shape.count,
+    undefined,
+    undefined,
+    undefined,
+    lists?.convert
+  );
   return out;
 }
 
@@ -1398,7 +1441,9 @@ export function broadcastIntervals(
  * of the `grid` layout is not visited: its values are the positions of the
  * cells. A boolean input has no bounds: each of its values is given to
  * `visitBoolean` instead. Returns the
- * names of the inputs. The `interval-js` result checks the host value of an
+ * names of the inputs, not those of the shared inputs (`lists` and the
+ * `shared` option), which are not visited. The `interval-js` result checks
+ * the host value of an
  * input of a value kind with it (the entry check of `run()`), so that a
  * cell that the check refuses rejects the whole call instead of being an
  * error cell of the loop.
@@ -1408,9 +1453,10 @@ export function visitIntervalInputCells(
   options: BroadcastOptions | undefined,
   visit: (name: string, lo: number, hi: number) => void,
   booleans?: readonly string[],
-  visitBoolean?: (name: string, value: boolean) => void
+  visitBoolean?: (name: string, value: boolean) => void,
+  lists?: readonly string[]
 ): ReadonlyArray<string> {
-  const shape = readShape(inputs, options, 2, undefined, booleans);
+  const shape = readShape(inputs, options, 2, lists, booleans);
   shape.names.forEach((name, k) => {
     if (shape.indexes[k]) return;
     const a = shape.arrays[k];
@@ -1437,17 +1483,18 @@ export function broadcastIntervalsSlice(
   options: BroadcastOptions | undefined,
   out: Float64Array,
   slice: BroadcastSlice,
-  booleans?: readonly string[]
+  booleans?: readonly string[],
+  lists?: IntervalSharedLists
 ): number {
   const shape = readShape(
     inputs,
     options,
     2,
-    undefined,
+    lists?.lists,
     booleans,
     slice.validated
   );
-  rescanBooleanSlice(shape, slice, 2);
+  rescanBooleanSlice(shape, slice);
   return broadcastIntervalsRange(
     call,
     shape,
@@ -1456,7 +1503,8 @@ export function broadcastIntervalsSlice(
     slice.to,
     slice.deadline,
     slice.stop,
-    slice.failures
+    slice.failures,
+    lists?.convert
   );
 }
 
@@ -1468,13 +1516,25 @@ function broadcastIntervalsRange(
   to: number,
   deadline?: number,
   stop?: () => boolean,
-  failures?: { count: number }
+  failures?: { count: number },
+  convert?: (value: unknown) => unknown
 ): number {
   if (out.length < 3 * (to - from))
     throw new TypeError(
       `broadcast: the output array holds ${out.length} values, ${3 * (to - from)} are needed`
     );
   const vars: Record<string, unknown> = Object.create(null);
+  // A shared list is converted once, before the cell loop, as `run()`
+  // converts a list input (`processInput`): a number element becomes a
+  // point interval and a `{ lo, hi }` element is kept. The loop below never
+  // writes it, so every cell reads the same list.
+  for (const s of shape.shared) {
+    if (convert === undefined)
+      throw new TypeError(
+        `broadcast: the shared input "${s.name}" cannot be read: this interval-js batch was given no conversion of its elements`
+      );
+    vars[s.name] = convert(s.value);
+  }
   // A boolean input is read as the answer string of the interval domain
   // (`'true'`, `'false'`), as `run()` converts it (`processInput`): a
   // scalar once, a column at each cell. Its slot is unused.

@@ -16,8 +16,8 @@
  * What a worker receives is text and numbers: the stored form of a
  * compilation result, which it rebuilds once and keeps under an id, and for
  * each task a slice of the batch's input arrays. The shared inputs of a
- * `javascript` batch (arrays the compiled code reads by index, bound once for
- * the batch) go to each worker once per `broadcastAsync()` call, with the
+ * batch (the lists the compiled code reads, bound once for the batch) go to
+ * each worker once per `broadcastAsync()` call, with the
  * first task of the call that the worker receives; the worker keeps them
  * under the call's batch id until the call ends (`release`). What it returns
  * is one `Float64Array` per task. Both the main thread and the worker run the same
@@ -221,6 +221,27 @@ const DEFAULT_CANCEL_GRACE = 250;
 
 /** The longest delay `setTimeout()` takes: a longer one fires at once. */
 const MAX_TIMER_DELAY = 0x7fffffff;
+
+/** An element of a shared plain array, in a form that structured clone
+ * copies with its value. Structured clone copies only the own data fields
+ * of an object, and cannot copy a Proxy. So a nested array is copied
+ * element by element, and an object as a plain object of its own
+ * enumerable fields, each copied the same way (functions are left out),
+ * which keeps the fields the interval runtime reads, such as `kind` and
+ * `value`. When the object has `lo` and `hi`, possibly as getters, their
+ * values are copied too. Any other element is kept as it is. */
+function wireSharedElement(element: unknown): unknown {
+  if (Array.isArray(element)) return Array.from(element, wireSharedElement);
+  if (element === null || typeof element !== 'object') return element;
+  const copy: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(element))
+    if (typeof value !== 'function') copy[key] = wireSharedElement(value);
+  if ('lo' in element && 'hi' in element) {
+    copy.lo = element.lo;
+    copy.hi = element.hi;
+  }
+  return copy;
+}
 
 /** Whether the deadline of `task` has passed, with the comparison the
  * worker makes before its first cell or point: the cell loop stops when
@@ -988,6 +1009,12 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
     // cannot copy a Proxy, nor an extra property of the array that holds a
     // function or a symbol. The copy keeps only the elements, in a plain
     // array, so the worker's `plainSharedArray()` does not copy it again.
+    // An element of an interval-js list is a number or an object with `lo`
+    // and `hi` (`processInput`), and such an object is copied as the plain
+    // `{ lo, hi }` of its two bounds: structured clone copies only own data
+    // properties, so the bounds of a class instance with `lo` and `hi`
+    // getters were lost, and a Proxy element (a reactive array) could not be
+    // copied at all.
     let shared: WireShared | undefined;
     if (
       invalid === undefined &&
@@ -1002,7 +1029,8 @@ class KernelPoolImpl implements KernelPool, FitSlicePool {
           const copy = v.slice();
           shared.values.push(copy);
           transfer.push(copy.buffer as ArrayBuffer);
-        } else if (Array.isArray(v)) shared.values.push(Array.from(v));
+        } else if (Array.isArray(v))
+          shared.values.push(Array.from(v, wireSharedElement));
         else {
           invalid = `broadcast: the shared input "${name}" must be an array of numbers or a Float64Array`;
           break;
@@ -1127,9 +1155,10 @@ export interface BroadcastAsyncSpec {
   /** The compilation result itself: the stored form a worker rebuilds, and
    * the identity the pool keys its kernel ids and calibration on. */
   stored: StoredResult;
-  /** `javascript` only: the variables the compiled code reads as lists (the
-   * `lists` of the result's entry plan). Each is a shared input of a batch,
-   * with the variables the `shared` option names. */
+  /** The variables the compiled code reads as lists (`javascript`: the
+   * `lists` of the result's entry plan; `interval-js`: its
+   * `collectionReadInputs`). Each is a shared input of a batch, with the
+   * variables the `shared` option names. */
   lists?: readonly string[];
   /** The variables declared `boolean`: for them an empty array is an empty
    * column (`compilation/broadcast.ts`, "Boolean inputs"). */
@@ -1206,8 +1235,8 @@ export function makeBroadcastAsync(
   const isInterval = spec.kind === 'interval-js';
   const perCellIn = isInterval ? 2 : 1;
   return async (inputs, options) => {
-    // Validates the inputs, the `shared` option, and refuses `shared` and
-    // `outputs` on an interval result.
+    // Validates the inputs and the `shared` option, and refuses `outputs` on
+    // an interval result.
     // The boolean columns that the count below scans whole. Each inline
     // slice scans its own cells of them again, since the caller can change
     // an element while the batch yields (`rescanBooleanSlice`).
@@ -1220,9 +1249,7 @@ export function makeBroadcastAsync(
       spec.booleans,
       validated
     );
-    const sharedNames = isInterval
-      ? []
-      : broadcastSharedNames(spec.lists, inputs, options);
+    const sharedNames = broadcastSharedNames(spec.lists, inputs, options);
     // The values per cell: the `lo, hi, kind` triple of an interval, or the
     // stride of a `javascript` result (the `outputs` option, or the default
     // the result stores, read at call time as the worker reads it).
@@ -1267,20 +1294,27 @@ export function makeBroadcastAsync(
       options?.deadline !== undefined
         ? Date.now() + options.deadline
         : undefined;
-    // The options of each slice: the layout, and for `javascript` the
-    // resolved stride and the shared names, so that the main thread and a
-    // worker lay the cells out the same way.
+    // The options of each slice: the layout, the shared names, and for
+    // `javascript` the resolved stride, so that the main thread and a worker
+    // lay the cells out the same way.
     const indexOptions =
       options?.indexes !== undefined ? { indexes: options.indexes } : {};
+    const sharedOptions = sharedNames.length > 0 ? { shared: sharedNames } : {};
     const layoutOptions: BroadcastOptions | undefined = isInterval
-      ? options?.layout !== undefined
-        ? { layout: options.layout, ...indexOptions }
+      ? options?.layout !== undefined || sharedNames.length > 0
+        ? {
+            ...(options?.layout !== undefined
+              ? { layout: options.layout }
+              : {}),
+            ...indexOptions,
+            ...sharedOptions,
+          }
         : undefined
       : {
           ...(options?.layout !== undefined ? { layout: options.layout } : {}),
           ...indexOptions,
           outputs: perCellOut,
-          ...(sharedNames.length > 0 ? { shared: sharedNames } : {}),
+          ...sharedOptions,
         };
     const pastDeadline = (): boolean =>
       deadline !== undefined && Date.now() > deadline;

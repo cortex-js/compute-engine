@@ -66,13 +66,16 @@ export interface WireInputs {
   values: (Float64Array | number | boolean | readonly boolean[])[];
 }
 
-/** The shared inputs of a `javascript` batch in wire form: the names and, in
- * the same order, the arrays that the compiled code reads by index, bound
- * once for the whole batch. A `Float64Array` travels as a transferred copy;
- * a plain array is cloned. */
+/** The shared inputs of a batch in wire form: the names and, in the same
+ * order, the lists that the compiled code reads, bound once for the whole
+ * batch. A `Float64Array` travels as a transferred copy; a plain array is
+ * cloned. A plain array of a `javascript` batch holds numbers; one of an
+ * `interval-js` batch holds numbers and `{ lo, hi }` objects. The worker
+ * reads the shared names of each task from its `shared` option, not from
+ * the stored kernel. */
 export interface WireShared {
   names: string[];
-  values: (Float64Array | readonly number[])[];
+  values: (Float64Array | readonly unknown[])[];
 }
 
 /**

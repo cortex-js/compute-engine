@@ -360,29 +360,32 @@ describe('the standalone runtime rebuilds the stored result', () => {
   });
 });
 
-describe('an interval-js result refuses both options', () => {
+describe('an interval-js result refuses the `outputs` option', () => {
   test('broadcast, broadcastAsync and the interval runtime throw', async () => {
     const r = compile(ce.parse('x^2'), { to: 'interval-js' });
     const x = new Float64Array([0, 1]);
     expect(() => r.broadcast!({ x }, { outputs: 2 })).toThrow(
       /`outputs` option is not supported by an interval-js result/
     );
-    expect(() => r.broadcast!({ x, F: [1, 2] }, { shared: ['F'] })).toThrow(
-      /`shared` option is not supported by an interval-js result/
-    );
+    // The `shared` option is accepted since CE-678: `F` is bound once for
+    // the batch, and `x^2` does not read it.
+    expect(
+      Array.from(r.broadcast!({ x, F: [1, 2] }, { shared: ['F'] }))
+    ).toEqual(Array.from(r.broadcast!({ x })));
     await expect(r.broadcastAsync!({ x }, { outputs: 1 })).rejects.toThrow(
       /not supported by an interval-js result/
     );
     const stored = JSON.parse(JSON.stringify(r));
     expect(() =>
-      createIntervalRuntime().loadBroadcast(stored)({ x }, { shared: [] })
+      createIntervalRuntime().loadBroadcast(stored)({ x }, { outputs: 1 })
     ).toThrow(/not supported by an interval-js result/);
-    // A plain array of numbers is refused for an interval input (a plain
-    // array is accepted only as the column of a boolean variable).
+    // A plain array of numbers is refused for an interval input that is not
+    // a shared input (a plain array is otherwise accepted only as the column
+    // of a boolean variable).
     expect(() =>
       r.broadcast!({ x: [0, 1] as unknown as Float64Array })
     ).toThrow(
-      /plain array is accepted only as the column of a boolean variable/
+      /plain array is accepted only for a shared input .* or as the column of a boolean variable/
     );
   });
 });

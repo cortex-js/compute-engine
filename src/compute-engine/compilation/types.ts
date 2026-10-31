@@ -3111,10 +3111,13 @@ export type StoredEntryPlan = {
 /**
  * The inputs of `CompilationResult.broadcast()`: one `Float64Array` per free
  * variable (one value per cell; a `lo, hi` pair per cell for `interval-js`),
- * or one number, the same value for every cell. A shared input of a
- * `javascript` result (a variable that the compiled code reads as a list, or
- * one that `BroadcastOptions.shared` names) is a plain array of numbers or a
- * `Float64Array`, bound once for the whole batch. A variable declared
+ * or one number, the same value for every cell. A shared input (a variable
+ * that the compiled code reads as a list, or one that
+ * `BroadcastOptions.shared` names) is bound once for the whole batch: for a
+ * `javascript` result, a plain array of numbers or a `Float64Array`; for an
+ * `interval-js` result, a plain array of numbers and `{ lo, hi }` objects
+ * (a `Float64Array` throws, since it would be read as `lo, hi` pairs). A
+ * variable declared
  * `boolean` of a `javascript` result takes a boolean (every cell) or a plain
  * array of booleans (one per cell), and so does one of an `interval-js`
  * result; an empty array is an empty column for such a variable, and a
@@ -3123,7 +3126,12 @@ export type StoredEntryPlan = {
  */
 export type BroadcastInputs = Record<
   string,
-  Float64Array | number | readonly number[] | boolean | readonly boolean[]
+  | Float64Array
+  | number
+  | readonly number[]
+  | readonly (number | { lo: number; hi: number })[]
+  | boolean
+  | readonly boolean[]
 >;
 
 export interface BroadcastOptions {
@@ -3152,11 +3160,12 @@ export interface BroadcastOptions {
    */
   out?: Float64Array;
   /**
-   * `javascript` only. The inputs that are bound once for the whole batch
-   * instead of one value per cell: the compiled code reads them by index
-   * (`F_{i+1}`). A variable whose declared type is a list is shared without
-   * being named here; this option is for a variable with no such type. Each
-   * name must be a key of `inputs`. An `interval-js` result throws.
+   * The inputs that are bound once for the whole batch instead of one value
+   * per cell: every cell reads the same list. A variable that the compiled
+   * code reads as a list (`javascript`: its declared type is a list;
+   * `interval-js`: the code iterates, reduces or indexes it) is shared
+   * without being named here; this option is for a variable with no such
+   * type. Each name must be a key of `inputs`.
    */
   shared?: readonly string[];
   /**
@@ -3398,6 +3407,15 @@ export type CompilationResult<
    * when there is none.
    */
   booleanInputs?: string[];
+
+  /**
+   * `interval-js` only. The free variables that the code reads as lists (it
+   * iterates, reduces or indexes them). `broadcast()` binds each one once
+   * for the whole batch, as a shared input, and a runtime that loads the
+   * stored code (`createIntervalRuntime().loadBroadcast`) does the same.
+   * Absent when there is none.
+   */
+  listInputs?: string[];
 
   /**
    * JavaScript only. The value kind types (`gf8`, a type declared by the
@@ -3683,8 +3701,9 @@ export type CompilationResult<
    * `javascript` result called with a vars object (`calling: 'expression'`)
    * and on an `interval-js` result. `inputs` maps each free variable to a
    * `Float64Array` (one value per cell; a `lo, hi` pair per cell for
-   * `interval-js`) or to one number for every cell; a `javascript` result
-   * also takes shared inputs, bound once for the batch. The result is a
+   * `interval-js`) or to one number for every cell, and a list input to a
+   * shared input, bound once for the batch (`interval-js`: a plain array of
+   * numbers and `{ lo, hi }` objects, not a `Float64Array`). The result is a
    * `Float64Array`: one value per cell (`outputs` values per cell for a
    * tuple), or a `lo, hi, kind` triple per cell with the `INTERVAL_KIND`
    * codes. Cell for cell, the value is the one `run()` gives. The input

@@ -168,7 +168,7 @@ const batches = new Map<
   number,
   Map<
     string,
-    { raw: Float64Array | readonly number[]; plain?: readonly number[] }
+    { raw: Float64Array | readonly unknown[]; plain?: readonly unknown[] }
   >
 >();
 
@@ -330,7 +330,7 @@ port.on((m) => {
       if (m.batch !== undefined && wireShared !== undefined) {
         const kept = new Map<
           string,
-          { raw: Float64Array | readonly number[]; plain?: readonly number[] }
+          { raw: Float64Array | readonly unknown[]; plain?: readonly unknown[] }
         >();
         wireShared.names.forEach((name, k) =>
           kept.set(name, { raw: wireShared.values[k] })
@@ -365,22 +365,29 @@ port.on((m) => {
         m.inputs.names.forEach(
           (name, k) => (inputs[name] = m.inputs.values[k])
         );
+        // A shared list holds what the main thread copied from an input of
+        // the call (numbers, or `{ lo, hi }` objects on interval-js), so it
+        // is an input of the call again.
         if (shared !== undefined)
           for (const [name, entry] of shared)
-            inputs[name] = kernel.inPlace.has(name)
-              ? entry.raw
-              : (entry.plain ??= plainSharedArray(entry.raw));
+            inputs[name] = (
+              kernel.inPlace.has(name)
+                ? entry.raw
+                : (entry.plain ??= plainSharedArray(entry.raw))
+            ) as BroadcastInputs[string];
         const perCellOut = kernel.interval
           ? kernel.perCellOut
           : (m.outputs ?? kernel.perCellOut);
         const indexes = m.indexes !== undefined ? { indexes: m.indexes } : {};
+        const sharedOption =
+          shared !== undefined ? { shared: [...shared.keys()] } : {};
         const options: BroadcastOptions = kernel.interval
-          ? { layout: m.layout, ...indexes }
+          ? { layout: m.layout, ...indexes, ...sharedOption }
           : {
               layout: m.layout,
               ...indexes,
               outputs: perCellOut,
-              ...(shared !== undefined ? { shared: [...shared.keys()] } : {}),
+              ...sharedOption,
             };
         const out = new Float64Array(perCellOut * (m.to - m.from));
         // The loop reads `stop` every 64 cells and the clock only every

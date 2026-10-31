@@ -25,6 +25,7 @@ import {
   broadcastIntervals,
   broadcastIntervalsSlice,
   type BroadcastSlice,
+  type IntervalSharedLists,
 } from './broadcast.js';
 import type {
   BroadcastInputs,
@@ -46,6 +47,9 @@ export interface StoredIntervalJavaScript {
   /** The free variables declared `boolean`
    * (`CompilationResult.booleanInputs`). */
   booleanInputs?: string[];
+  /** The free variables that the code reads as lists
+   * (`CompilationResult.listInputs`): the shared inputs of a batch. */
+  listInputs?: string[];
 }
 
 export interface IntervalRuntime {
@@ -123,7 +127,18 @@ function rawCallOf(
 function storedBooleanInputs(
   stored: StoredIntervalJavaScript
 ): string[] | undefined {
-  const b: unknown = stored.booleanInputs;
+  return storedNames(stored.booleanInputs);
+}
+
+/** The shared lists of a batch of a stored result: its `listInputs`, when
+ * it is an array of names, converted as `run()` converts a list input. */
+function storedSharedLists(
+  stored: StoredIntervalJavaScript
+): IntervalSharedLists {
+  return { lists: storedNames(stored.listInputs), convert: processInput };
+}
+
+function storedNames(b: unknown): string[] | undefined {
   return Array.isArray(b) && b.every((n) => typeof n === 'string')
     ? (b as string[])
     : undefined;
@@ -151,18 +166,31 @@ export function createIntervalRuntime(): IntervalRuntime {
     },
     // The variables declared `boolean` travel with the stored result
     // (`CompilationResult.booleanInputs`): for them an empty array is an
-    // empty column, as in the `broadcast()` of the result.
+    // empty column, as in the `broadcast()` of the result. So do the
+    // variables read as lists (`CompilationResult.listInputs`), the shared
+    // inputs of a batch. A kernel worker is also given the shared names in
+    // the `shared` option of each task.
     loadBroadcast: (stored) => {
       const raw = rawCallOf(stored);
       const booleans = storedBooleanInputs(stored);
+      const lists = storedSharedLists(stored);
       return (inputs, options) =>
-        broadcastIntervals(raw, inputs, options, booleans);
+        broadcastIntervals(raw, inputs, options, booleans, lists);
     },
     loadBroadcastSlice: (stored) => {
       const raw = rawCallOf(stored);
       const booleans = storedBooleanInputs(stored);
+      const lists = storedSharedLists(stored);
       return (inputs, options, out, slice) =>
-        broadcastIntervalsSlice(raw, inputs, options, out, slice, booleans);
+        broadcastIntervalsSlice(
+          raw,
+          inputs,
+          options,
+          out,
+          slice,
+          booleans,
+          lists
+        );
     },
   };
 }

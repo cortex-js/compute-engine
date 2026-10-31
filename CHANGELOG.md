@@ -1,5 +1,23 @@
 ## [Unreleased]
 
+### New Features
+
+- **The `broadcast()` of an `interval-js` result accepts a list input, as its
+  `run()` does.** With `L` declared `list<number>`, the code of `x + Sum(L)`
+  reads `L` as a list. `run({ x: { lo: 1, hi: 1 }, L: [1, 2] })` gave the point
+  `4`, but `broadcast({ x: new Float64Array([1, 1, 2, 2]), L: [1, 2] })` threw
+  "the input for "L" must be a Float64Array or a number". Now `L` is bound once
+  for the whole batch, as on a `javascript` result, and the two cells are the
+  point intervals `4` and `5`. The list is a plain array of numbers and
+  `{ lo, hi }` objects, the forms `run()` accepts. A `Float64Array` for it
+  throws a `TypeError` that asks for a plain array: an `interval-js`
+  `Float64Array` is read as `lo, hi` pairs, so `[1, 2]` would be one interval,
+  not two elements. The `shared` option of `broadcast()` is now accepted on an
+  `interval-js` result too, and `broadcastAsync()` sends the list to each
+  worker of `ce.workers`. A stored `interval-js` result has a new field,
+  `listInputs`, so that `createIntervalRuntime().loadBroadcast()` reads the
+  list the same way.
+
 ### Bug Fixes
 
 - **A list literal no longer fixes the type of its free symbols as `number`**

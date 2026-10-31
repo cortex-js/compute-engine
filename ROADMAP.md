@@ -617,41 +617,6 @@ Options:
 If nothing is decided, `javascript` keeps giving values where the
 interpreter has none, and interval-js keeps `entire` for the `Loop`.
 
-### CE-678. interval-js: `broadcast()` refuses a list input that `run()` accepts
-
-**Status:** open; missing capability. Found 2026-10-30. User decision
-2026-10-30: option (a), with a plain array only. A shared list on interval-js
-is a plain array of numbers or `{ lo, hi }` objects, the forms `run()`
-accepts; a `Float64Array` for it throws and asks for a plain array, because
-an interval-js `Float64Array` is read as `lo, hi` pairs, and `[1, 2]` would
-otherwise be read as one interval instead of two elements.
-
-With `L` declared `list<number>`, the `interval-js` code of `x + Sum(L)`
-accepts `L` in `run()`: `run({ x: { lo: 1, hi: 1 }, L: [1, 2] })` gives the
-point 4. `broadcast({ x: new Float64Array([1, 1, 2, 2]), L: [1, 2] })` throws
-"the input for "L" must be a Float64Array or a number". The `javascript`
-result binds such a variable once for the whole batch (a shared input) and
-gives `[4, 5]`. The header of `compilation/broadcast.ts` makes shared inputs
-`javascript` only, and `readShape` gives the reason "its compiled code reads
-no list". That reason is no longer true: interval-js code reads a list input
-in `Sum(L)` and in a loop over `L`. With `L` absent, each cell gives `empty`,
-as `run()` does.
-
-Options:
-
-- (a) Accept a shared input on interval-js, as on `javascript`: the
-  variables that the code reads as a list (`collectionReadInputs`) and the
-  `shared` option. Each element is converted to an interval once, before the
-  cell loop, as `run()` converts it. To decide: the form of an interval
-  element, either a plain array of numbers (point elements) and of `{ lo, hi }`
-  objects, or also a `Float64Array` read as `lo, hi` pairs, as an interval
-  column is.
-- (b) Keep the refusal, and correct the reason in `readShape` and the
-  header: the caller runs `run()` once per cell for such an expression.
-
-If nothing is decided, an interval-js expression that reads a list input
-cannot be broadcast.
-
 ### CE-665. A point beside a longer list is zipped to the shorter length, with no error, under heads that read it by position
 
 **Status:** open; wrong value. Found 2026-10-30 while fixing CE-661.
@@ -3429,8 +3394,8 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ### CE-680. The `python` target does not compile `Sum` over a list input
 
-**Status:** open; defect (decline). Found 2026-10-30 while comparing CE-678
-across the targets. Recorded by user decision 2026-10-30.
+**Status:** open; defect (decline). Found 2026-10-30 while comparing how each
+target takes a list input in `broadcast()`. Recorded by user decision 2026-10-30.
 
 With `L` declared `list<number>`, `compile(x + Sum(L), { to: "python" })`
 declines: "Could not compile `Sum`: no indexing set". The `javascript` and
