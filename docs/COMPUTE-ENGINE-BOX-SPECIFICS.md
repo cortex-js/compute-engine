@@ -7,7 +7,13 @@ commands.
 
 ## §1 Worktrees and applying changes
 
-Use a worktree for multi-file tasks. Link its dependencies to the main checkout:
+Choose the main tree or a worktree with the rules of the shared protocol §1: a
+worktree for a subagent, for work that keeps the tree broken for a while, and
+for files that another session is changing; the main tree for a small change
+done in one sitting. In this repo, many sessions change
+`src/compute-engine/compilation/base-compiler.ts` and
+`src/compute-engine/boxed-expression/`, so a change of more than a few lines
+there goes to a worktree. Link its dependencies to the main checkout:
 
 ```sh
 ln -s /Users/arno/dev/compute-engine/node_modules /tmp/wt-<session-name>/node_modules
@@ -35,6 +41,15 @@ Jest defaults to 12 local workers. Set a smaller limit for targeted runs:
 Jest discovers the root `jest.config.cjs` automatically. Confirm that the
 expected test files ran. In zsh, use `${=FILES}` to split a variable containing
 several paths.
+
+**The final check of a task is the full suite, not a large batch.** While a
+task is in progress, run only the test files that its change can affect. At
+the end, take the box lock and run `npm test`, with no extra argument (a
+first argument that does not start with `--` is read as a test path by
+`scripts/test.sh`). With all workers, the full suite takes about 4 minutes; a
+batch of about 500 files with `-w 3` took 5 to 10 minutes, and covered less
+(measured 2026-10-30). A sub-agent does this too, with its own box-lock owner
+name, unless the task prompt gives the final check to the orchestrator.
 
 Take the box lock for full suites, aggregate CI, builds, corpus checks, and
 `npm run test:python`. Timing tests (`npm run test:perf`) also require the lock
@@ -125,3 +140,27 @@ Follow [BUILD.md](../BUILD.md#releasing-to-npm) for releases.
 Before a long run, write `docs/scratch/<date>-<topic>-handoff.md` as required by
 the shared protocol. Record the command, log path, and actual exit status when
 it finishes; keep the handoff current.
+
+## §9 Context size, agent types and work areas
+
+Use `implementer` (Opus) for implementation and bug fixes, one ROADMAP item per
+agent, and `mechanic` (Sonnet) for recipe-driven edits, read-only audits,
+sweeps and censuses. Do not use `general-purpose` for implementation: only the
+two repo agents carry the stop rule of the shared protocol §9. Find code with
+the LSP tool or `scripts/where.ts`.
+
+Run at most three Compute Engine sessions at the same time, each in a different
+area. The areas, by the files they change most:
+
+| Area                       | Main files                                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------- |
+| Compilation                | `src/compute-engine/compilation/`, `src/compile.ts`, `src/runtime.ts`                         |
+| Evaluation and expressions | `src/compute-engine/boxed-expression/`, the `engine-*.ts` files, `src/compute-engine/numerics/` |
+| Library and symbolic       | `src/compute-engine/library/`, `src/compute-engine/symbolic/`, `src/compute-engine/rubi/`       |
+| LaTeX                      | `src/compute-engine/latex-syntax/`, `src/latex-syntax.ts`                                     |
+| Epsil                      | `src/epsil/`, `src/epsil.ts`                                                                  |
+| Types                      | `src/common/type/`, `src/compute-engine/types-*.ts`                                          |
+
+Two sessions in one area wait for each other at the box lock and the staging
+queue, and their changes to `base-compiler.ts` and `boxed-expression/`
+conflict.

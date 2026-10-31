@@ -78,10 +78,19 @@ the emitted text that changed, or run the full suite.
 The orchestrator owns the validation plan. The task prompt can adapt these
 defaults to the scope, risk, available checks, and work being done in parallel.
 
+Give each agent one ROADMAP item. Use the `implementer` agent (Opus) for
+implementation and the `mechanic` agent (Sonnet) for recipe-driven edits and
+read-only audits; both carry a stop rule that ends a run after about 150 tool
+calls or a third repeat of the same failure, with a report. The rule is in
+the shared protocol §9 and `docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §9.
+
 Before returning a delegated implementation:
 
 1. Run the checks assigned in the task. Otherwise, use focused tests or probes
-   when they provide useful implementation feedback. A compiler check can help
+   when they provide useful implementation feedback: only the test files that
+   the change can affect, not a large batch. When the task asks for a final
+   wide check, run the full suite once under the box lock
+   (`docs/COMPUTE-ENGINE-BOX-SPECIFICS.md` §2). A compiler check can help
    with a type-heavy change; repository-wide validation is not required from
    every sub-agent.
 2. Report changed files, exact commands and results, checks not run and why,
