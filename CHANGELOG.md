@@ -126,6 +126,21 @@
   which made the compiled code change from one compilation to the next; now it
   is not.
 
+- **The `evaluate` handler of `Solve` said "no answer" in two ways** (GitHub
+  issue #486). Since 0.168.0, when the solver had no answer it returned
+  `undefined` for an equation that was already canonical (`Solve(cos x = x, x)`
+  from `ce.box()`) and an unevaluated `Solve` with the canonical equation
+  otherwise (the same call from `ce.parse()`, or `Solve(e^x = x + 2, x)` from
+  `ce.box()`, whose `Exp` canonicalizes to a `Power`). `evaluate()` gave the
+  same result either way, but a host that wraps the handler to try its own
+  method when the solver gives up read the second shape as an answer. The
+  handler now returns the unevaluated `Solve`, with the canonical equation, in
+  every no-answer case: a wrapper checks that the operator of the result is
+  `Solve`. This is the rule for every lazy operator (`ARCHITECTURE.md`,
+  "Evaluation and rules"): a handler that cannot reduce returns the expression
+  built from the operands it canonicalized, because an `undefined` makes the
+  engine rebuild the expression from the held operands and loses that work.
+
 ### Behavior Changes
 
 - **Interval target: a loop over a literal list compiles.** On `interval-js`, a

@@ -8631,7 +8631,6 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       // does.
       evaluate: (ops, { engine: ce }) => {
         const solutions = evaluateSolve(ce, ops);
-        if (solutions === undefined) return undefined;
         // An inert or invalid `Solve` (an error operand, an unsupported
         // equation) keeps its operands under the `NSolve` head.
         if (isFunction(solutions, 'Solve'))

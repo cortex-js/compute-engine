@@ -43,7 +43,6 @@ import {
 } from './diophantine.js';
 import { contextAssumptions, isFactTrue } from './constraint-subject.js';
 import { holdsKindValue } from './residue-class.js';
-import { sameSyntactic } from './compare.js';
 import { shadowsLibraryName } from '../library-shadowing.js';
 import { halfTurnAngle } from './trigonometry.js';
 import { smallCount } from './collection-count.js';
@@ -568,26 +567,30 @@ function commonRoots(
  * - several domain specs → the multi-variable enumeration pipeline (Phase 2).
  *
  * When there is no answer, the result is the `Solve` with its equation in
- * canonical form. `canonicalSolve()` keeps the equation as written, because
- * `Solve` holds its operands, so an unevaluated `Solve` from a parse kept
- * the parse forms `InvisibleOperator` and `Delimiter` in its MathJSON
- * (CE-150). The canonical form of an equation is still an equation
- * (`x − x = 0` keeps its `Equal`: only evaluation collapses it to a
- * boolean), and the equation is canonicalized here in any case before it is
- * solved. A deferred pipeline stage (an equation that holds the topic `_`)
- * is returned as written, since `_` is bound only when the stage is applied.
+ * canonical form, and never `undefined`. `canonicalSolve()` keeps the
+ * equation as written, because `Solve` holds its operands, so an unevaluated
+ * `Solve` from a parse kept the parse forms `InvisibleOperator` and
+ * `Delimiter` in its MathJSON (CE-150). The canonical form of an equation is
+ * still an equation (`x − x = 0` keeps its `Equal`: only evaluation collapses
+ * it to a boolean), and the equation is canonicalized here in any case
+ * before it is solved. The handler returns this `Solve` also when the
+ * equation was already canonical: a host that wraps the handler to try its
+ * own method when the solver has no answer then reads one shape, the result
+ * whose operator is `Solve` (GitHub issue #486). A deferred pipeline stage
+ * (an equation that holds the topic `_`) is returned as written, since `_`
+ * is bound only when the stage is applied. A `Solve` with no operands gets
+ * its `missing` error operands from `canonicalSolve()`.
  */
 export function evaluateSolve(
   ce: ComputeEngine,
   ops: ReadonlyArray<Expression>
-): Expression | undefined {
+): Expression {
   const result = evaluateSolveOperands(ce, ops);
   if (result !== undefined) return result;
   const eq = ops[0];
-  if (eq === undefined || eq.isCanonical || eq.has('_')) return undefined;
-  const canonical = eq.canonical;
-  if (sameSyntactic(canonical, eq)) return undefined;
-  return ce._fn('Solve', [canonical, ...ops.slice(1)]);
+  if (eq === undefined) return canonicalSolve(ce, ops);
+  if (eq.has('_')) return ce._fn('Solve', ops);
+  return ce._fn('Solve', [eq.canonical, ...ops.slice(1)]);
 }
 
 function evaluateSolveOperands(
@@ -1186,8 +1189,7 @@ function solveWithRenamedUnknowns(
     for (const fact of facts) ce.assume(fact);
     return evaluateSolve(ce, renamedOps);
   });
-  if (value === undefined || (isFunction(value, 'Solve') && value.isValid))
-    return undefined;
+  if (isFunction(value, 'Solve') && value.isValid) return undefined;
   for (const [name, id] of renamed) {
     if (
       value.has(id) &&
