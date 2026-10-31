@@ -334,12 +334,36 @@ changes.
 1. **Admission (R1, R3).** Refuse `unknown` and `any` inputs with their
    names; decline a produced value with no settled shape. Measure the
    declines on the corpus. This step is the prototype the user asked for: a
-   local build for Tycho follows it.
+   local build for Tycho follows it. One test pins the behavior that this
+   step changes: in `test/compute-engine/tycho-row-426-apply-lambda-type.test.ts`,
+   `At(Apply(a ↦ Block(If(Length(a) > 1, Return(First(a))), Reverse(a)), M), 1)`
+   with `M: list<real>` compiles today, and `_SYS.atWithValueMarker` throws
+   at run time when the early `Return` gives a number. In the compiled code,
+   where `a` is typed from `M`, the `Apply` has the type
+   `list<real> | nan | real`, a value with no settled shape, so under R3 the
+   compilation declines. Step 1 changes the test to expect a decline, and
+   adds the same case with `a: list<real>` written by hand.
 2. **Call sites (R2).** The argument's static type selects the variant; remove
    the `bcastFn` dispatch, the `Array.isArray` guards and the scalar proofs.
    The callback wrappers (`_fn_f$b`) become the variant for the element shape.
    A declared union at a parameter or an input gets its one entry dispatch
    with a monomorphic body per member; CE-658 closes with it.
+   Two constraints come from the typing of an immediately applied function
+   literal (GitHub issue #498, `appliedLiteralTypedFromArguments()` in
+   `src/compute-engine/compilation/applied-literal-types.ts`), which already
+   gives a bare parameter the static type of its collection argument:
+   - The parameter type of a variant must also admit each value that the
+     body assigns to the parameter. The argument type is the type of the
+     first value only. With `C: list<real>` and an argument of type
+     `list<integer>`, `a ↦ Block(Assign(a, C), Length(a))` typed
+     `a: list<integer>` declines the assignment, which the interpreter
+     accepts. Today such a parameter keeps the type that the body infers.
+   - A parameter type that the compiler makes is not a host declaration. A
+     union written by the compiler must not cause a dispatch at the
+     parameter. Today an argument whose type is a union of shapes does not
+     type the parameter: with `P: tuple<real, real> | list<tuple<real, real>>`,
+     `Apply(d ↦ Length(d), P)` keeps the inferred type of `d`, and the shape
+     is decided by the dispatch at the entry of `P` (R4).
 3. **Host values (R6).** Remove the entry refusals and the unsupplied-input
    guards, after Tycho has `hasUnresolvedInput` at its five sites.
 4. **Declared types (R5).** Reduce the CE-662 check to its decline; close

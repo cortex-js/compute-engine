@@ -143,6 +143,18 @@ describe('PYTHON: A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
       '((lambda t: 1))([1, 2])',
       '1',
     ],
+    // `Apply` and `ApplyWhole` bind the tuple whole, and the compiled code
+    // gives the parameter the type of its argument,
+    // `tuple<integer, integer>`. `At` then reads a tuple, not a value that
+    // can be a string.
+    ...(['Apply', 'ApplyWhole'] as const).map(
+      (head): [string, unknown, string, string] => [
+        `${head} of At of a tuple at a parameter with no declaration`,
+        [head, ['Function', ['At', 'p', 1], 'p'], ['Tuple', 1, 2]],
+        "((lambda p: (lambda _l, _i: (float('nan') if _l is None else float('nan')) if not isinstance(_l, (list, tuple, np.ndarray)) else (_l[int(_i) - 1] if 1 <= _i <= len(_l) else (_l[int(_i)] if -len(_l) <= _i <= -1 else float('nan'))))(p, 1)))((1, 2))",
+        '1',
+      ]
+    ),
   ];
   test.each(COMPILED)('%s compiles', (_, json, code, value) => {
     const { result } = compilePython(json);
@@ -157,7 +169,8 @@ describe('PYTHON: A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
   // string or a tuple (`2 * "abc"` is `"abcabc"`), and a tuple whose
   // component is a list (`2 * (1, 2)[0]` with `p[0] = [1, 2]`) is not
   // mapped as the interpreter maps it. The interpreter evaluates the call.
-  const AT_P1 = ['Function', ['At', 'p', 1], 'p'];
+  // (A tuple of numbers gives its type to the parameter, and the call
+  // compiles: see the cases that compile, above.)
   const WHOLE: Array<[string, unknown, string]> = [
     [
       'a string at a parameter with no declaration',
@@ -168,16 +181,6 @@ describe('PYTHON: A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
       'a string at a parameter declared any',
       ['Apply', ['Function', 't', param('any')], "'abc'"],
       '"abc"',
-    ],
-    [
-      'At of a tuple at a parameter with no declaration',
-      ['Apply', AT_P1, ['Tuple', 1, 2]],
-      '1',
-    ],
-    [
-      'ApplyWhole of At of a tuple',
-      ['ApplyWhole', AT_P1, ['Tuple', 1, 2]],
-      '1',
     ],
     [
       '2 At(p, 1) of a tuple whose component is a list',

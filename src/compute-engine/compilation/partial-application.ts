@@ -12,6 +12,7 @@ import {
   isDestructuringParameter,
   isRestParameter,
 } from '../boxed-expression/function-literal.js';
+import { appliedLiteralTypedFromArguments } from './applied-literal-types.js';
 
 /**
  * The compilation of a PARTIAL APPLICATION of a function literal: an
@@ -345,6 +346,12 @@ function unlessDeclined<T>(f: () => T): T | undefined {
  * of the target declines it with the reason. So the pass itself never
  * declines.
  *
+ * The pass also gives each bare parameter of a function literal applied by
+ * `Apply` or `ApplyWhole` the type of its collection argument, when the
+ * application binds that argument whole
+ * (`appliedLiteralTypedFromArguments`): `Apply(d ↦ Sum(d), L)` with `L` of
+ * type `list<integer>` compiles as `Apply((d: list<integer>) ↦ Sum(d), L)`.
+ *
  * The registered shader targets do not run this pass: there, the residual
  * literal would be declined as a `Function`, with a message that does not
  * name the partial application. A direct target (`compile(expr, { target })`)
@@ -399,7 +406,28 @@ export function rewritePartialApplications(
       return e;
     }
     let changed = merged !== undefined;
-    const ops = (merged ?? e.ops).map((op, i) => {
+    let callOps = merged ?? e.ops;
+    // A function literal applied to all its arguments gets the types of its
+    // collection arguments on its bare parameters
+    // (`appliedLiteralTypedFromArguments`). This is done before the
+    // operands are visited, so the visit sees the body canonicalized with
+    // the typed parameters.
+    // A head that the caller overrides receives its operands as written.
+    if (
+      (e.operator === 'Apply' || e.operator === 'ApplyWhole') &&
+      skipHeads?.has(e.operator) !== true
+    ) {
+      const typed = unlessDeclined(() =>
+        appliedLiteralTypedFromArguments(callOps, {
+          whole: e.operator === 'ApplyWhole',
+        })
+      );
+      if (typed !== undefined) {
+        callOps = [typed, ...callOps.slice(1)];
+        changed = true;
+      }
+    }
+    const ops = callOps.map((op, i) => {
       const t = walk(op, operandPosition(e, i, position));
       if (t !== op) changed = true;
       return t;

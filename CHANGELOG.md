@@ -72,6 +72,20 @@
 
 ### Bug Fixes
 
+- **The parameter of a function literal that is applied at once has the type
+  of its argument in compiled code** (GitHub issue #498). With `n` declared
+  `integer` and `evens` the list `Filter(Range(1, n), i ↦ Mod(i, 2) = 0)`,
+  `Apply(d ↦ Sum(d), evens)` and
+  `Apply(d ↦ If(Length(d) = 0, 0, Max(d)), evens)` did not compile ("possible
+  'Nothing' elements"), and `Apply(d ↦ At(d, 1), evens)` compiled to a
+  general element read. A bare parameter took only the type that its uses in
+  the body give (`collection`). Now a bare parameter that receives a
+  collection, and that `Apply` or `ApplyWhole` binds whole, has the type of
+  the argument in compiled code (here `list<integer>`), as when the argument
+  is written in place of the parameter. The expression itself is not
+  changed, and a function literal with scalar parameters still maps over a
+  list argument.
+
 - **The MCP server enforces its resource and network security boundaries.** A
   tool call can shorten the server's time limit, but `timeLimit: 0` can no
   longer disable it and a larger value cannot extend it; checking, parsing,

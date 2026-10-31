@@ -388,10 +388,11 @@ describe('row 426 review: statements the body walk cannot type in order', () => 
     expect(fits).toBe(true);
   });
 
-  test('the compiled code of an early Return declines, as the interpreter refuses', () => {
+  test('the compiled code of an early Return gives no value where the interpreter refuses', () => {
     // `First(M)` is returned, so `At(…, 1)` reads a number: the interpreter
     // answers `incompatible-type`. Typed `list<real>`, the compiled code
-    // returned `null`.
+    // returned `null`. The compiled code gives `a` the type of its argument
+    // `M`, `list<real>`, and its run-time check of `At` now throws.
     const ce = rowEngine();
     const json: Json = [
       'At',
@@ -409,7 +410,14 @@ describe('row 426 review: statements the body walk cannot type in order', () => 
       ],
       1,
     ];
-    expect(compile(ce.box(json)).success).toBe(false);
+    const r = compile(ce.box(json), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(() => r.run!({ M: [1, 2, 3] })).toThrow(
+      'At: the collection is not a list at run time'
+    );
+    // With one element there is no early Return, and the value is
+    // `Reverse([5])[1]`, as in the interpreter.
+    expect(r.run!({ M: [5] })).toBe(5);
   });
 });
 

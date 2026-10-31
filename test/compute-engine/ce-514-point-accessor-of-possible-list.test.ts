@@ -86,15 +86,36 @@ describe('a coordinate accessor of a possible list of points in PointList', () =
     // of coordinates is: the operand, a list that is not a list of points,
     // decides that it is one slot, guarded to `NaN`. Read as a source, it
     // gave the points `[[1, 7], [2, 7]]`.
+    // The parameter is declared with the type that the body infers for it.
+    // A bare parameter gets the type of the argument (the next test).
+    const ce = new ComputeEngine();
+    const e = ce.box([
+      'Apply',
+      [
+        'Function',
+        ['PointList', ['PointY', 'v'], 7],
+        ['Typed', 'v', "'collection<any> | tuple'"],
+      ],
+      ['List', 5, ['Tuple', 1, 2]],
+    ]);
+    const value = compile(e, { fallback: false }).run!({}) as unknown[];
+    expect(Number.isNaN(value[0])).toBe(true);
+    expect(value[1]).toBe(7);
+  });
+
+  test('a tuple coordinate of a typed flat list is declined', () => {
+    // The compiled code gives `v` the type of the argument,
+    // `list<integer | tuple<integer, integer>>`, so `PointY(v)` can be a
+    // tuple, which is not a slot of a point. The interpreter gives an
+    // `incompatible-type` error.
     const ce = new ComputeEngine();
     const e = ce.box([
       'Apply',
       ['Function', ['PointList', ['PointY', 'v'], 7], 'v'],
       ['List', 5, ['Tuple', 1, 2]],
     ]);
-    const value = compile(e, { fallback: false }).run!({}) as unknown[];
-    expect(Number.isNaN(value[0])).toBe(true);
-    expect(value[1]).toBe(7);
+    expect(e.evaluate().operator).toBe('Error');
+    expect(compile(e).success).toBe(false);
   });
 
   test('an accessor typed as a list keeps the static source route', () => {
