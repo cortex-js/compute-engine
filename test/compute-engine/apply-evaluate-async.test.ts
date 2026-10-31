@@ -599,55 +599,79 @@ describe('SORT AND ORDERING AWAIT THEIR KEY OR COMPARATOR', () => {
 });
 
 describe('THE AWAITED WALKS CHECK THE ABORT SIGNAL BETWEEN TWO STEPS', () => {
-  // An operator that has only an `evaluateAsync` handler and aborts the
-  // evaluation on its second call. The evaluation then rejects, and the
-  // operator is not called for the third element. The test does not show
-  // which check stops the third call: the check of the walk after the
-  // awaited step, or a check in the evaluation of the next application,
-  // which receives the same signal.
-  function abortingEngine(): {
+  // `AbortOnSecond` has only an `evaluateAsync` handler and aborts the
+  // evaluation on its second call. The source is the lazy view
+  // `Map(CountRead, [1, 2, 3])`: `CountRead` has a synchronous handler that
+  // counts its calls, so the count is the number of source elements that
+  // the walk has read. The walk reads an element before it applies the
+  // callback to it. So the count shows which check stops the walk:
+  //  - when the walk itself checks the signal after the awaited second
+  //    step, it does not read the third element, and the count is 2;
+  //  - when only the evaluation of the next application checks the signal,
+  //    the walk reads the third element first, and the count is 3.
+  // With no abort, the walk reads the three elements (the last test).
+  function abortingEngine(abort = true): {
     ce: ComputeEngine;
     signal: AbortSignal;
     calls: () => number;
+    reads: () => number;
   } {
     const ce = new ComputeEngine();
     const controller = new AbortController();
     let calls = 0;
+    let reads = 0;
     ce.declare('AbortOnSecond', {
       signature: '(number) -> number',
       evaluateAsync: async ([x]) => {
         calls += 1;
-        if (calls === 2) controller.abort();
+        if (abort && calls === 2) controller.abort();
         return ce.number(x.re);
       },
     } as never);
-    return { ce, signal: controller.signal, calls: () => calls };
+    ce.declare('CountRead', {
+      signature: '(number) -> number',
+      evaluate: ([x]) => {
+        reads += 1;
+        return x;
+      },
+    } as never);
+    return {
+      ce,
+      signal: controller.signal,
+      calls: () => calls,
+      reads: () => reads,
+    };
   }
 
+  const source = ['Map', 'CountRead', ['List', 1, 2, 3]];
+  const reducer = ['Function', ['Add', 'a', ['AbortOnSecond', 'b']], 'a', 'b'];
+
   test('a fold', async () => {
-    const { ce, signal, calls } = abortingEngine();
-    const reducer = [
-      'Function',
-      ['Add', 'a', ['AbortOnSecond', 'b']],
-      'a',
-      'b',
-    ];
+    const { ce, signal, calls, reads } = abortingEngine();
     await expect(
-      ce
-        .box(['Fold', reducer, 0, ['List', 1, 2, 3]] as never)
-        .evaluateAsync({ signal })
+      ce.box(['Fold', reducer, 0, source] as never).evaluateAsync({ signal })
     ).rejects.toThrow('Operation canceled');
     expect(calls()).toBe(2);
+    expect(reads()).toBe(2);
   });
 
   test('a count', async () => {
-    const { ce, signal, calls } = abortingEngine();
+    const { ce, signal, calls, reads } = abortingEngine();
     const predicate = ['Function', ['Greater', ['AbortOnSecond', 'y'], 0], 'y'];
     await expect(
-      ce
-        .box(['CountIf', ['List', 1, 2, 3], predicate] as never)
-        .evaluateAsync({ signal })
+      ce.box(['CountIf', source, predicate] as never).evaluateAsync({ signal })
     ).rejects.toThrow('Operation canceled');
     expect(calls()).toBe(2);
+    expect(reads()).toBe(2);
+  });
+
+  test('with no abort, the walk reads every element', async () => {
+    const { ce, signal, calls, reads } = abortingEngine(false);
+    const result = await ce
+      .box(['Fold', reducer, 0, source] as never)
+      .evaluateAsync({ signal });
+    expect(result.toString()).toBe('6');
+    expect(calls()).toBe(3);
+    expect(reads()).toBe(3);
   });
 });
