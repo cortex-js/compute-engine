@@ -2585,10 +2585,9 @@ export function runtimeConformanceError(
  * constructor (`tuple<list<T>, U>`, `tuple<tuple<T, U>, V>`) is not tested
  * further, so the whole parameter fails the test and distributes nothing,
  * not even to its bare slots: this writes less than it could, and is
- * sound. The join of
- * the slots (`collectionElementType()`) is not used: it is never a bare
- * variable when two slots differ, and it gives the open variables to
- * `widen()`, which requires ground types (`docs/TYPE-SYSTEM.md` §4.2).
+ * sound. The element type of the tuple (`collectionElementType()`) is not
+ * used: it is the union of the slots, which is never a bare variable when
+ * two slots differ.
  */
 function elementIsBareOrGround(param: Type | undefined): boolean {
   if (param === undefined || freeTypeVariables(param).size === 0) return true;

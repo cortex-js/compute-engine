@@ -265,10 +265,7 @@ function dictionaryValuePart(key: string): (r: Type) => Type | undefined {
  * read by `collectionElementType()` for a type that such a literal can have
  * (a list, a tensor, a set, a `collection`, an `indexed_collection`, a
  * `broadcastable`). The other collection kinds are not read: a `List` or
- * `Set` literal cannot be a tuple, a dictionary or a record, and
- * `collectionElementType()` builds the entry type of a dictionary by parsing
- * the spelling of its value type, which fails for a user alias
- * (`dictionary<json>`).
+ * `Set` literal cannot be a tuple, a dictionary or a record.
  */
 function literalElementPart(r: Type): Type | undefined {
   const literalKind =

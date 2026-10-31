@@ -1,7 +1,7 @@
 import { makeNumericRangeType } from './numeric-range.js';
 import { immutableNumericType } from './immutable.js';
 import { isEffectSubset, unionEffectSets } from './effects.js';
-import { substituteTypeVariables } from './instantiate.js';
+import { freeTypeVariables, substituteTypeVariables } from './instantiate.js';
 import { parseType } from './parse.js';
 import {
   COLLECTION_SHAPE_TYPE,
@@ -625,8 +625,79 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
   if (type.kind === 'broadcastable')
     return listElementType(broadcastCollectionArm(type.elements));
 
+  // The join of `types` when some of them hold an open type variable:
+  // `widen()` requires ground types, so only the ground members are joined
+  // (`tuple<T, integer, real>` gives `T | real`), and each open member is
+  // added as written (a member of a nested union counts alone). The result
+  // is a sound supertype of each type. `any` absorbs every member.
+  //
+  // `widen()` drops a `nothing` member (evidence widening absorbs it), but a
+  // `nothing` slot or field is a value of the collection, so it is added
+  // back, as the tuple branch below does for ground slots:
+  // `tuple<T, integer, nothing>` gives `integer | nothing | T`.
+  //
+  // Only bare variables are compared, by name, so `tuple<T, T>` gives `T`.
+  // Another open member is kept even when it repeats one (a repeated union
+  // member is harmless): `typeToDedupKey()` gives the same key to the
+  // variable named `integer` and to the type `integer` (a quantified name
+  // can shadow a type name), and a structural key would follow the
+  // definition of a recursive named type (`tree<T>`) without end. `types` is
+  // never empty here: the caller found an open member in it.
+  const joinWithOpenMembers = (types: ReadonlyArray<Type>): Type => {
+    const ground: Type[] = [];
+    const open: Type[] = [];
+    const variables = new Set<string>();
+    for (const t of types)
+      for (const m of typeof t === 'object' && t.kind === 'union'
+        ? t.types
+        : [t]) {
+        if (freeTypeVariables(m).size === 0) {
+          ground.push(m);
+          continue;
+        }
+        if (typeof m === 'object' && m.kind === 'variable') {
+          if (variables.has(m.name)) continue;
+          variables.add(m.name);
+        }
+        open.push(m);
+      }
+    let joined = ground.length > 0 ? widen(...ground) : undefined;
+    if (joined === 'any') return 'any';
+    if (
+      joined !== undefined &&
+      !provablyAdmits('nothing', joined) &&
+      ground.some((t) => provablyAdmits('nothing', t))
+    )
+      joined = {
+        kind: 'union',
+        types: [
+          ...(typeof joined === 'object' && joined.kind === 'union'
+            ? joined.types
+            : [joined]),
+          'nothing',
+        ],
+      };
+    const members = [
+      ...(joined === undefined
+        ? []
+        : typeof joined === 'object' && joined.kind === 'union'
+          ? joined.types
+          : [joined]),
+      ...open,
+    ];
+    return members.length === 1
+      ? members[0]
+      : { kind: 'union', types: members };
+  };
+
   if (type.kind === 'tuple') {
     const slots = type.elements.map((x) => x.type);
+    // A slot that holds an open type variable (`tuple<T, U>` in a generic
+    // signature) cannot be joined: `widen()` requires ground types
+    // (`docs/TYPE-SYSTEM.md` §4.2). The union of the slots is a supertype of
+    // each slot, so it is a sound element type.
+    if (slots.some((t) => freeTypeVariables(t).size > 0))
+      return joinWithOpenMembers(slots);
     // The slots are a value's cells: an `unknown` slot beside absence
     // markers only is kept as an arm (`joinUnresolvedArm`), so
     // `tuple<unknown, missing>` reads `missing | unknown`, not `missing`;
@@ -648,8 +719,14 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
       : joined;
   }
 
+  // The tuple type is built directly: parsing `tuple<string, …>` from the
+  // string form of the value type fails for a type variable
+  // (`dictionary<T>` gave `Unknown type "T"`).
   if (type.kind === 'dictionary')
-    return parseType(`tuple<string, ${typeToString(type.values)}>`);
+    return {
+      kind: 'tuple',
+      elements: [{ type: 'string' }, { type: type.values }],
+    };
 
   // A record type is open: `record{a: integer}` matches `{a: 1, b: Missing}`,
   // a value with fields it does not declare, of any type. An entry of such a
@@ -665,10 +742,17 @@ export function collectionElementType(type: Readonly<Type>): Type | undefined {
       elements: [
         { type: 'string' },
         {
+          // A field type that holds an open type variable cannot be
+          // joined (`widen()` requires ground types): the union of the
+          // fields is a sound supertype instead.
           type:
-            type.closed === true
-              ? widen(...Object.values(type.elements))
-              : 'any',
+            type.closed !== true
+              ? 'any'
+              : Object.values(type.elements).some(
+                    (t) => freeTypeVariables(t).size > 0
+                  )
+                ? joinWithOpenMembers(Object.values(type.elements))
+                : widen(...Object.values(type.elements)),
         },
       ],
     };
