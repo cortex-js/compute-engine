@@ -836,14 +836,28 @@ export function noteDefinitionCapturedTypes(
   const bindings: Array<
     readonly [binding: BoxedValueDefinition, type: BoxedType, name: string]
   > = [];
+  // Computed once for this record, from the types of now.
+  let cells: Set<object> | undefined;
   for (const entry of capturedSymbols(literal)) {
     const own = entry.occurrence.valueDefinition;
     const binding =
       own !== undefined && own.inferredType && own.value === undefined
         ? (outerBindingOf(literal, entry) ?? own)
         : own;
-    if (binding !== undefined)
-      bindings.push([binding, binding.type, entry.name] as const);
+    if (binding === undefined) continue;
+    // The type of a list literal reads an element that is a free symbol of
+    // type `unknown` as a number cell (`[-x, y]` is typed `vector<2>`), but
+    // it does not infer the symbol (`narrowFreeSymbolCells()`,
+    // `canonical-utils.ts`). So the type of the definition relied on a
+    // number there, and `number` is recorded: a later string value of `y`
+    // makes the type outdated. A recorded `unknown` would admit it.
+    let type = binding.type;
+    if (type.isUnknown) {
+      cells ??= numberCellBindings(literal);
+      if ((own !== undefined && cells.has(own)) || cells.has(binding))
+        type = literal.engine.type('number');
+    }
+    bindings.push([binding, type, entry.name] as const);
   }
   if (bindings.length === 0 && !DEFINITION_CAPTURED_TYPES.has(def)) return;
   journalCheckpointMemoEntry(
@@ -854,6 +868,51 @@ export function noteDefinitionCapturedTypes(
   );
   if (bindings.length === 0) DEFINITION_CAPTURED_TYPES.delete(def);
   else DEFINITION_CAPTURED_TYPES.set(def, bindings);
+}
+
+/**
+ * The bindings of the symbols that the type of a `List` literal in the body
+ * of the function literal `literal` reads as number cells: the symbols of
+ * type `unknown` that are elements of a list whose element type is known
+ * (`[-x, y]`, typed `vector<2>`). A list whose element type is `unknown`
+ * (`[y, x]` with a parameter `x`, typed `list<unknown>`) relies on no type of
+ * its elements. A list in a nested function literal counts: the type of the
+ * outer literal contains the type of the nested one. A symbol is matched by
+ * its binding, so a parameter of a nested literal with the same name as a
+ * captured symbol does not count. The walk reads each node one time, so a
+ * body that shares its operands is not unfolded, as in `capturedSymbols()`.
+ */
+function numberCellBindings(literal: Expression): Set<object> {
+  const out = new Set<object>();
+  if (!isFunction(literal, 'Function')) return out;
+  const seen = new Set<Expression>();
+  const visit = (e: Expression): void => {
+    if (seen.has(e) || !isFunction(e) || e._numericStore !== undefined) return;
+    seen.add(e);
+    if (e.operator === 'List' && listReadsNumberCells(e))
+      for (const op of e.ops) {
+        const def = isSymbol(op) ? op.valueDefinition : undefined;
+        if (def !== undefined && op.type.isUnknown) out.add(def);
+      }
+    for (const op of e.ops) visit(op);
+  };
+  visit(literal);
+  return out;
+}
+
+/** True when the type of the list literal `list` gives its elements a known
+ * type, the test that `narrowFreeSymbolCells()` (`canonical-utils.ts`) makes
+ * before it reads the cells. */
+function listReadsNumberCells(list: Expression): boolean {
+  const t = list.type.type;
+  if (typeof t === 'string' || t.kind !== 'list') return false;
+  const e = t.elements;
+  return !(
+    e === 'unknown' ||
+    (typeof e !== 'string' &&
+      e.kind === 'union' &&
+      e.types.some((x) => x === 'unknown'))
+  );
 }
 
 /**
@@ -899,7 +958,22 @@ export function capturedTypeWidenings(
   const out: Array<{ name: string; before: BoxedType; now: BoxedType }> = [];
   for (const [binding, before, name] of snapshot) {
     const now = binding.type;
-    if (now === before || now.isUnknown) continue;
+    if (now === before) continue;
+    if (now.isUnknown) {
+      // A binding that stays `unknown` can still hold a value, written on
+      // the definition without the type setter. The value is compared with
+      // the recorded type: for `y` in `x ↦ [-x, y]` the record is `number`
+      // (the list reads `y` as a number cell), and a string value makes the
+      // type of the definition outdated.
+      const value = binding.value?.type;
+      if (
+        value !== undefined &&
+        !value.isUnknown &&
+        !isSubtype(value.type, before.type)
+      )
+        out.push({ name, before, now: value });
+      continue;
+    }
     if (!isSubtype(now.type, before.type)) out.push({ name, before, now });
   }
   return out;

@@ -2577,9 +2577,16 @@ export function runtimeConformanceError(
  * List/Tuple LITERAL operand, so `f([a, b])` against `(list<number>) -> …`
  * infers `a: number` and `b: number` — the same write `f(a)` would make,
  * which previously died at the literal's boundary. Conservative: only
- * literal List/Tuple operands, only SYMBOL elements (nested structure keeps
- * its own inference), and only a usable element type (`unknown`/`any`
- * distribute nothing).
+ * literal List/Tuple operands, only SYMBOL elements, and only a usable
+ * element type (`unknown`/`any` distribute nothing).
+ *
+ * An element that is itself a List/Tuple literal receives the element type
+ * in the same way: a row of a `matrix` parameter must be a vector, so
+ * `PseudoInverse([[x, y], [z, w]])` infers `x`, `y`, `z` and `w` as
+ * numbers. Another application keeps its own inference. A literal list does
+ * not infer its free symbols by itself (`narrowFreeSymbolCells()`,
+ * `canonical-utils.ts`): only a parameter that requires a type of its
+ * elements does.
  */
 function distributeLiteralElementInference(op: Expression, param: Type): void {
   if (!isFunction(op, 'List') && !isFunction(op, 'Tuple')) return;
@@ -2597,13 +2604,16 @@ function distributeLiteralElementInference(op: Expression, param: Type): void {
       const slot = param.elements[i].type;
       if (slot === 'unknown' || slot === 'any') return;
       if (isSymbol(el)) el._infer(() => slot, 'narrow');
+      else distributeLiteralElementInference(el, slot);
     });
     return;
   }
   const element = collectionElementType(param);
   if (element === undefined || element === 'unknown' || element === 'any')
     return;
-  for (const el of op.ops) if (isSymbol(el)) el._infer(() => element, 'narrow');
+  for (const el of op.ops)
+    if (isSymbol(el)) el._infer(() => element, 'narrow');
+    else distributeLiteralElementInference(el, element);
 }
 
 /**

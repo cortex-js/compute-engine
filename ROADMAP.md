@@ -88,8 +88,22 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ### CE-663. A list literal fixes the type of its free symbols as `number` for the life of the engine
 
-**Status:** decision needed; types. Reported in GitHub issue #485 (0.170.0,
-0.171.0); reproduced at `1f36c5d48` (0.175.0) on 2026-10-30.
+**Status:** fixed (pending commit); types. Reported in GitHub issue #485
+(0.170.0, 0.171.0); reproduced at `1f36c5d48` (0.175.0) on 2026-10-30. User
+decision 2026-10-30: option (c), with one addition. A list literal does not
+infer its free symbols. An operator that requires a numeric vector or matrix
+infers the cells of a literal operand as numbers
+(`Determinant([[a, b], [c, d]])` infers the four symbols). The narrowing of the
+symbols of an arithmetic cell (CE-39.6) stays. Still open: `Reverse([p, q])` and
+`Sort([p, q])` infer `p` as a number, because their generic `T` is solved from
+the list type `vector<2>` itself (`distributeLiteralElementInference()`,
+`validate.ts`). Also open (limitation of the simple, sound version): for a
+function assigned `g := x ↦ Length([-x, y])`, `y` is recorded as a number cell
+(`noteDefinitionCapturedTypes()`, `function-literal.ts`), so after `y := "abc"`
+the compiled `g` is refused, although the result `2` does not depend on `y`.
+This refusal also occurred before this change. A precise version must find
+whether the result depends on the element types of the list; it is a separate
+task.
 
 Since CE-39.4 (option (a), user decision 2026-10-25), boxing a list literal
 narrows each free symbol in it to `number` (`narrowFreeSymbolCells()`,

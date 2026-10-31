@@ -188,14 +188,20 @@ describe('CE-597: a call of the library operator after a value use', () => {
     const ce = new ComputeEngine();
     const expr = ce.parse('\\int_0^1 D\\,dt');
     expect(expr.unknowns).toEqual(['D']);
-    expect(ce.box(['D', ['Power', 'x', 2], 'x']).evaluate().toString()).toBe(
-      '2x'
-    );
+    expect(
+      ce
+        .box(['D', ['Power', 'x', 2], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('2x');
     ce.assign('D', 3);
     expect(expr.evaluate().toString()).toBe('3');
-    expect(ce.box(['D', ['Power', 'x', 2], 'x']).evaluate().toString()).toBe(
-      '2x'
-    );
+    expect(
+      ce
+        .box(['D', ['Power', 'x', 2], 'x'])
+        .evaluate()
+        .toString()
+    ).toBe('2x');
   });
 });
 
@@ -417,7 +423,9 @@ describe('CE-597: the arguments that `Apply` forwards', () => {
       ['Function', ['Block', ['Map', 'r', 'v']], 'v'],
       'N',
     ]);
-    expect(expr.type.toString()).toBe(ce.box(['Map', 'r', 'N']).type.toString());
+    expect(expr.type.toString()).toBe(
+      ce.box(['Map', 'r', 'N']).type.toString()
+    );
   });
 
   test('a named callee with a function parameter keeps the operator', () => {
@@ -530,15 +538,16 @@ describe('CE-597: `IdenticallyEqual` compares values', () => {
 });
 
 // The LaTeX parser reads `N(2.3)` as a call or a product from the binding of
-// `N`. Once a value use has made `N` a variable typed as a number (`x + N`,
-// the element of a list of numbers), the product is the consistent reading
-// (user decision 2026-10-28). A variable that is not typed as a number (the
-// operand of `N = 2`, of `f(N)`, the coordinate of a tuple) is not, so the
-// parser still reads the call of the library `N`.
+// `N`. Once a value use has made `N` a variable typed as a number (`x + N`),
+// the product is the consistent reading (user decision 2026-10-28). A
+// variable that is not typed as a number (the operand of `N = 2`, of `f(N)`,
+// the coordinate of a tuple, the element of a list) is not, so the parser
+// still reads the call of the library `N`. A list literal does not infer its
+// elements (ROADMAP CE-663, user decision 2026-10-30).
 describe('CE-597: the LaTeX `N(2.3)` after a value use of `N`', () => {
   test.each([
     ['x+N', ['Multiply', 2.3, 'N']],
-    ['[N,1]', ['Multiply', 2.3, 'N']],
+    ['[N,1]', ['N', 2.3]],
     ['(N,1)', ['N', 2.3]],
     ['N=2', ['N', 2.3]],
     ['f(N)', ['N', 2.3]],

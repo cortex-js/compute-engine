@@ -161,15 +161,14 @@ export const FREE_SYMBOL_ARITHMETIC_OPERATORS: ReadonlySet<string> = new Set([
  * `g(Set(1, 2))` is `[Set(1, 2)]`), a `let` local of a block has a type
  * that is not known yet, the variable of a binder (a `Sum` index) is typed
  * by its binder, and a wildcard such as `_a` matches any expression in a
- * pattern. The type of such a symbol is not inferred from a literal list.
- * A symbol of a scope that `ce.pushScope()` added is free: it is inferred
- * as a symbol of the global scope is.
+ * pattern. A symbol of a scope that `ce.pushScope()` added is free, as a
+ * symbol of the global scope is.
  *
  * The symbol node of an operand descriptor carries this fact (`free`, set
  * by `structureOfExpression()` in `operand-descriptor.ts`), and the type of
  * a literal list reads a symbol as a number cell only when the fact is
- * present. So the type of the list reads as numbers exactly the symbols
- * that `narrowFreeSymbolCells()` infers as numbers.
+ * present. `narrowFreeSymbolCells()` infers as numbers only the free
+ * symbols of an arithmetic cell, not a free symbol that is an element.
  */
 export function isFreeSymbol(op: Expression): boolean {
   if (!isSymbol(op) || op.symbol === 'Undefined') return false;
@@ -252,40 +251,45 @@ function isArithmeticOverFreeSymbols(
 }
 
 /**
- * Infer the type `number` on each free symbol of the literal list `list`
- * that the type of the list reads as a number, and return `list`.
+ * Infer the type `number` on each free symbol of an arithmetic cell of the
+ * literal list `list`, when the type of the list reads the cell as a
+ * number, and return `list`.
  *
- * The type of a literal list reads an element that is a free symbol (a
- * symbol of type `unknown` with no value, which is not a `let` local of a
- * block that did not run yet) as a `number` cell (`classifyCellD()`,
- * `library/collections.ts`): `[u, v]` is typed `vector<2>`. Before this
- * inference the symbol itself stayed `unknown`, so the value of `At(L, 1)`
- * with `L := [u, v]`, which is `u`, had a type that is not a subtype of the
- * static type `number`. The use in the literal now declares the symbol as a
- * number, as the use `u + 1` does. A symbol that already has a type (a
- * boolean `A`, a list `xs`) is not changed, and the type of the list does
- * not read it as a number.
+ * The type of a literal list reads an arithmetic cell over free symbols
+ * (`isArithmeticOverFreeSymbols()`) as a number. Such a cell is typed
+ * `unknown` only because `.neg()`, `.add()` and `.div()` build it without
+ * the operand inference of `ce.box()`, and the arithmetic operator does
+ * require a number of each operand. So the free symbols of the cell are
+ * inferred as numbers, and the type of the cell is then `number`: the cells
+ * `-y` and `x / (x·w - y·z)` of `AdjugateMatrix` and `PseudoInverse` of
+ * `[[x, y], [z, w]]` are typed as numbers, and the value is a matrix.
  *
- * The type of the list also reads an arithmetic cell over free symbols as a
- * number (`isArithmeticOverFreeSymbols()`), and the free symbols of such a
- * cell are inferred as numbers too. Then the type of the cell is `number`:
- * the cells `-y` and `x / (x·w - y·z)` of `AdjugateMatrix` and
- * `PseudoInverse` of `[[x, y], [z, w]]` are typed as numbers, and the value
- * is a matrix.
+ * An element that is a free symbol is NOT inferred. The type of the list
+ * reads it as a `number` cell (`classifyCellD()`, `library/collections.ts`:
+ * `[p, q]` is typed `vector<2>`), but the list does not require a number:
+ * `[p, q]` is also a list of propositions or of strings. When the symbol was
+ * inferred as a number, boxing `[p, q]` made a later `p ∧ q` an
+ * `incompatible-type` error, and the result depended on the order of the
+ * uses. As a consequence, with `L := [u, v]`, `At(L, 1)` is typed `number`
+ * and its value `u` is typed `unknown`. A use that does require a number
+ * infers the symbol: `u + 1`, or a matrix operator applied to the literal
+ * (the `inferOperandTypes` handler of `List`, `library/collections.ts`).
  *
  * The inference applies only when the type of the list gives its cells a
  * known type: when another element blocks that reading (an application of
  * unknown result type), the element type of the list is `unknown` and the
  * symbols stay as they are.
  *
- * User decision 2026-10-25, option (a) of CE-39.4 and of CE-39.6 in
+ * User decisions: option (a) of CE-39.6 (2026-10-25), and CE-663
+ * (2026-10-30, GitHub issue #485), which reversed option (a) of CE-39.4, in
  * `ROADMAP.md`.
  */
 export function narrowFreeSymbolCells(list: Expression): Expression {
   if (!isFunction(list)) return list;
   let candidates: Expression[] | undefined;
+  let elements: Expression[] | undefined;
   for (const op of list.ops) {
-    if (isFreeSymbolCell(op)) (candidates ??= []).push(op);
+    if (isFreeSymbolCell(op)) (elements ??= []).push(op);
     else if (
       isFunction(op) &&
       FREE_SYMBOL_ARITHMETIC_OPERATORS.has(op.operator)
@@ -298,7 +302,7 @@ export function narrowFreeSymbolCells(list: Expression): Expression {
         (candidates ??= []).push(...symbols);
     }
   }
-  if (candidates === undefined) return list;
+  if (candidates === undefined && elements === undefined) return list;
   const t = list.type.type;
   if (typeof t === 'string' || t.kind !== 'list') return list;
   const e = t.elements;
@@ -309,6 +313,15 @@ export function narrowFreeSymbolCells(list: Expression): Expression {
       e.types.some((x) => x === 'unknown'))
   )
     return list;
-  for (const op of candidates) op._infer(() => 'number', 'narrow');
+  for (const op of candidates ?? []) op._infer(() => 'number', 'narrow');
+  // A free symbol that is an element is not inferred. In the body of a
+  // function literal, it is bound to its outer binding with no inference
+  // (`_bindToOuterBinding()`, `boxed-symbol.ts`), so that the type of the
+  // list, which reads it as a number cell, follows that binding. The method
+  // is not on the `Expression` interface, and a type import of `BoxedSymbol`
+  // here makes a circular import (`npm run check:deps`), so the call is cast.
+  // It is not an optional call: if the method is renamed, the call throws.
+  for (const op of elements ?? [])
+    (op as unknown as { _bindToOuterBinding(): void })._bindToOuterBinding();
   return list;
 }

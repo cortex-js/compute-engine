@@ -3,24 +3,24 @@
 ### Bug Fixes
 
 - **A list literal no longer fixes the type of its free symbols as `number`**
-  (ROADMAP CE-663, GitHub issue #485). Since 0.170.0, boxing `[p, q]` made `p`
-  a `number` for the life of the engine, also when the list was never
-  evaluated or assigned, so a later `p ∧ q` was an `incompatible-type` error,
-  and the result depended on the order of the uses. Now `p` stays `unknown`,
-  and `p ∧ q` gives `p` the type `boolean`. The list is still typed
-  `vector<2>`. A use that requires a number still infers the symbol: `p + 1`,
-  or a matrix operator applied to the literal. `Determinant`, `PseudoInverse`
-  and `AdjugateMatrix` of `[[x, y], [z, w]]` infer the four cells as numbers,
-  and the value of `PseudoInverse` is a `matrix<2x2>`. An operator whose
-  parameter is `matrix | vector` (`MatrixMultiply`) infers nothing: a cell of
-  its operand could be a vector or a number. Other changes:
-  - With `L := [u, v]`, `At(L, 1)` is typed `number`, and its value `u` is
-    typed `unknown` (it was typed `number`).
-  - `At([u, v], 1, 2)` stays unevaluated, as `u` can still be a list (it was
-    an `incompatible-dimensions` error).
+  (ROADMAP CE-663, GitHub issue #485). Since 0.170.0, boxing `[p, q]` made `p` a
+  `number` for the life of the engine, also when the list was never evaluated or
+  assigned, so a later `p ∧ q` was an `incompatible-type` error, and the result
+  depended on the order of the uses. Now `p` stays `unknown`, and `p ∧ q` gives
+  `p` the type `boolean`. The list is still typed `vector<2>`. A use that
+  requires a number still infers the symbol: `p + 1`, or a matrix operator
+  applied to the literal. `Determinant`, `PseudoInverse` and `AdjugateMatrix` of
+  `[[x, y], [z, w]]` infer the four cells as numbers, and the value of
+  `PseudoInverse` is a `matrix<2x2>`. An operator whose parameter is
+  `matrix | vector` (`MatrixMultiply`) infers nothing: a cell of its operand
+  could be a vector or a number. Other changes:
+  - With `L := [u, v]`, `At(L, 1)` is typed `number`, and its value `u` is typed
+    `unknown` (it was typed `number`).
+  - `At([u, v], 1, 2)` stays unevaluated, as `u` can still be a list (it was an
+    `incompatible-dimensions` error).
   - `TupleFrom([p, q])` is typed `tuple` (it was `tuple<number, number>`).
-  - In LaTeX, `N(2.3)` after `[N, 1]` is the call of the library `N`, as
-    after `(N, 1)` (it was the product `2.3N`).
+  - In LaTeX, `N(2.3)` after `[N, 1]` is the call of the library `N`, as after
+    `(N, 1)` (it was the product `2.3N`).
   - In a function literal, `x ↦ [-x, y]` is still typed
     `(x: unknown) -> vector<2>`, and `y` stays `unknown`. A function `g`
     assigned this literal keeps its check: after `y := "abc"`, `g(3)` is an
@@ -29,25 +29,24 @@
 - **Interval target: a loop over a list input gives the correct value.** With
   `L` declared `list<number>` and `L = [1, 2, 3]`, the `interval-js` code of
   `Block(c := 5, Loop(c := c + k, Element(k, L)), c)` gave an interval whose
-  bounds were the string `"5[object Object][object Object][object Object]"`,
-  and `[2k for k in L]` gave `empty` for each element. The run converts each
-  element of `L` to an interval, and the loop wrapped each element as an
-  interval again. The two now give the point intervals `11` and `2`, `4`, `6`,
-  as the interpreter does. When the caller leaves out a collection input that
-  the code iterates, reduces or indexes, the run now gives `empty` (no value)
-  before any code runs, as on the JavaScript target: before, the loop gave
-  `entire` and `Sum(L)` gave `undefined`. The `code` of such a result starts
-  with this test.
+  bounds were the string `"5[object Object][object Object][object Object]"`, and
+  `[2k for k in L]` gave `empty` for each element. The run converts each element
+  of `L` to an interval, and the loop wrapped each element as an interval again.
+  The two now give the point intervals `11` and `2`, `4`, `6`, as the
+  interpreter does. When the caller leaves out a collection input that the code
+  iterates, reduces or indexes, the run now gives `empty` (no value) before any
+  code runs, as on the JavaScript target: before, the loop gave `entire` and
+  `Sum(L)` gave `undefined`. The `code` of such a result starts with this test.
 - **Interval target: a loop over a range with an input bound gives the correct
   value** (ROADMAP CE-655). With `n = 3`, the `interval-js` code of
   `Block(c := 0, Loop(c := c + k, Element(k, Range(1, n))), c)` gave the point
   interval `0`, and `[2k for k in 1..n]` gave an empty list: the code computed
   the length of the range with plain arithmetic on the bound intervals. The two
-  now give `6` and `2`, `4`, `6`, as the interpreter does. This also applies
-  to a range with a step, a range that counts down, and an inner range whose
-  bound is the variable of an outer loop. When a bound is an interval that is
-  not a single number, the number of elements is not known: `run()` gives
-  `entire`, and a cell of `broadcast()` gives the kind `error`.
+  now give `6` and `2`, `4`, `6`, as the interpreter does. This also applies to
+  a range with a step, a range that counts down, and an inner range whose bound
+  is the variable of an outer loop. When a bound is an interval that is not a
+  single number, the number of elements is not known: `run()` gives `entire`,
+  and a cell of `broadcast()` gives the kind `error`.
 
 ## 0.175.0 _2026-10-30_
 
@@ -110,14 +109,14 @@
   threw a `TypeError` (`_.L is not iterable`) at `run({})`. The run now returns
   `NaN` for a number result and `undefined` for other results, before any code
   runs, as the interpreter has no value for `Sum(L)`. The test also covers an
-  input read through a user function, a callback, a block-local copy
-  (`M ≔ L`) or a folded symbol value, and it applies to stored runtimes and to
+  input read through a user function, a callback, a block-local copy (`M ≔ L`)
+  or a folded symbol value, and it applies to stored runtimes and to
   `broadcast()` (the cells are `NaN`, with no failure counted). It is strict:
   `If(c, Sum(L), 0)` with `c` false has no value too. `run({L: null})` still
   throws. In Python, `compileFunction()`, `compileVectorized()` and
   `compileLambda()` return `nan` or `None` for `L = None`; `compile()` and
-  `compileToSource()` do not change. See `docs/ERROR-MODEL.md`, "An
-  unsupplied collection input".
+  `compileToSource()` do not change. See `docs/ERROR-MODEL.md`, "An unsupplied
+  collection input".
 
 - **`Series` drops a term whose constant coefficient is an unfolded 0 at every
   call** (CE-659). `Series(sin x + (sin²1 + cos²1 − 1)·x², x, 0, 5)` kept the
@@ -127,11 +126,11 @@
   `x − 1/6·x³ + 1/120·x⁵ + O(x⁷)`. A coefficient that is not pure is not tested
   and stays in the result. The test costs little on most series: a coefficient
   such as `sin 1 + cos 1` is proved not 0 from the enclosures of its parts, with
-  no evaluation, and `Series(eˣ·sin(x + 1), x, 0, 15)` takes about the same
-  time as before. A coefficient that is an unfolded 0 runs the exact test at
-  each call, and a series whose expansion tests the same constant term in
-  several forms (`1/(x² − 3 − 2√2)` at `1 + √2`) takes about 1.3 times as long
-  as before.
+  no evaluation, and `Series(eˣ·sin(x + 1), x, 0, 15)` takes about the same time
+  as before. A coefficient that is an unfolded 0 runs the exact test at each
+  call, and a series whose expansion tests the same constant term in several
+  forms (`1/(x² − 3 − 2√2)` at `1 + √2`) takes about 1.3 times as long as
+  before.
 
 - **A lazy collection over a call of a user function follows the assignments
   that change the call.** With `f(u) = u + x` and `x := 1`,
@@ -153,15 +152,14 @@
   A branch on such a comparison already took no arm.
 - **A comparison that reads a `Block` local tests every input of the block**
   (user decision 2026-10-30). A local that can depend on a caller input
-  (`a := n + 1`) makes a comparison of it test every input that the block
-  reads; a loop counter or a constant local compares as it is. This can give
-  no value where the interpreter has one (`a := 5; If(x > 0, a := n + 1);
-  a < 1` with `n` missing and `x = -1`), never a value where the interpreter
-  has none. When this test alone leaves a branch condition undecided, the whole
-  run gives no value (`NaN` or `undefined`), so that no branch is taken in the
-  wrong way; such an expression is not compiled, and the interpreter evaluates
-  it, when the run has an effect after the condition (`Random()`) or can return
-  a function.
+  (`a := n + 1`) makes a comparison of it test every input that the block reads;
+  a loop counter or a constant local compares as it is. This can give no value
+  where the interpreter has one (`a := 5; If(x > 0, a := n + 1); a < 1` with `n`
+  missing and `x = -1`), never a value where the interpreter has none. When this
+  test alone leaves a branch condition undecided, the whole run gives no value
+  (`NaN` or `undefined`), so that no branch is taken in the wrong way; such an
+  expression is not compiled, and the interpreter evaluates it, when the run has
+  an effect after the condition (`Random()`) or can return a function.
 - **A compiled list recursion stops at `ce.iterationLimit`.** A list-building
   recursion such as
   `F(n) = Which(n = D - 1, [p(n)], True, Join([p(n)], F(n + 1)))` now compiles
@@ -198,30 +196,30 @@
   re-entrant type read gives an answer that a later read can give differently;
   every cache of evaluated values now refuses such a value, where before each
   cache tested its own subset of these events.
-- **A lazy collection whose element memo was filled while a transient
-  precision or angular-unit window was open kept the digits of the window**
-  (CE-645). With `a := [1/3]` and `j = Join(Map(x ↦ N(x), a), [9])`, a walk of
-  `j` started outside such a window and pulled inside it stored `0.33333`, and
-  a later `j.at(1)` gave `0.33333` at the engine precision of 21 digits. The
-  walk is no longer stored, and `j.at(1)` gives `0.333333333333333333333`.
-  Only internal callers open such a window.
+- **A lazy collection whose element memo was filled while a transient precision
+  or angular-unit window was open kept the digits of the window** (CE-645). With
+  `a := [1/3]` and `j = Join(Map(x ↦ N(x), a), [9])`, a walk of `j` started
+  outside such a window and pulled inside it stored `0.33333`, and a later
+  `j.at(1)` gave `0.33333` at the engine precision of 21 digits. The walk is no
+  longer stored, and `j.at(1)` gives `0.333333333333333333333`. Only internal
+  callers open such a window.
 - **A function assigned again inside a `Block` is called with its new value.**
-  With `gg := t ↦ t + 1` assigned in the engine, `Block(gg := t ↦ t + 10,
-  gg(1))` compiled to `2` on JavaScript and Python; it now gives `11`, as the
-  interpreter does.
+  With `gg := t ↦ t + 1` assigned in the engine,
+  `Block(gg := t ↦ t + 10, gg(1))` compiled to `2` on JavaScript and Python; it
+  now gives `11`, as the interpreter does.
 - **A list with no value no longer makes compiled code throw.** With
   `k: integer` not supplied, `Take(L, k)` and `Drop(L, k)` gave `[]` and the
   whole list; they now give `undefined`, and `First`, `Max`, `Min`, `Second`,
   `GCD`, `Covariance`, `Quartiles`, `Length` and the other operators of such a
-  list give no value instead of throwing a `TypeError` or giving a value.
-  `Take` and `Drop` of a string do the same. On Python, a count that is a very
-  large integer (`2^100`) no longer raises.
-- **An `If` takes no branch when its compiled condition is undecided**, also
-  in a loop and when the condition is a chain with an effect; before, a
-  statement `If` could run its else branch.
-- **A chain in an `If` condition is evaluated pair by pair by the
-  interpreter**, as a bare chain already was: `If(x < 0.5 < Random(), 1, 2)`
-  with `x = 5` no longer draws.
+  list give no value instead of throwing a `TypeError` or giving a value. `Take`
+  and `Drop` of a string do the same. On Python, a count that is a very large
+  integer (`2^100`) no longer raises.
+- **An `If` takes no branch when its compiled condition is undecided**, also in
+  a loop and when the condition is a chain with an effect; before, a statement
+  `If` could run its else branch.
+- **A chain in an `If` condition is evaluated pair by pair by the interpreter**,
+  as a bare chain already was: `If(x < 0.5 < Random(), 1, 2)` with `x = 5` no
+  longer draws.
 
 - **GLSL/WGSL: a call of a function that returns a coordinate of a point or a
   list of points.** With

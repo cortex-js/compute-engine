@@ -97,13 +97,10 @@ describe('At: a value that could still be a collection stays inert', () => {
   test('unbound symbol base', () =>
     expect(boxEval(['At', 'w', 1, 2])).toBe('At(w, 1, 2)'));
 
-  // A literal list infers its free symbols as numbers (CE-39.4), so the
-  // elements of `[u, v]` are not collections, and a second index is an
-  // error.
+  // A literal list does not infer its free symbols (CE-663): `u` can still
+  // be a collection, so a second index stays inert.
   test('unbound symbol element', () =>
-    expect(boxEval(['At', ['List', 'u', 'v'], 1, 2])).toBe(
-      'Error("incompatible-dimensions", "2 indices vs 1-dimensional collection")'
-    ));
+    expect(boxEval(['At', ['List', 'u', 'v'], 1, 2])).toBe('At([u,v], 1, 2)'));
 });
 
 describe('At: box and parse routes agree', () => {

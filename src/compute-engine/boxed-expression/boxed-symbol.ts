@@ -775,17 +775,49 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
   }
 
   /**
+   * Bind a free symbol of the body of a function literal that is being
+   * canonicalized to its outer binding, with no inference: when the symbol
+   * has no outer binding, it is declared in the scope that the outermost
+   * literal is written in, with the inferred type `unknown`. The guards are
+   * those of `_inferOnOuterBinding()`.
+   *
+   * A list literal calls this for each of its elements that is a symbol
+   * (`narrowFreeSymbolCells()`, `canonical-utils.ts`). The list does not
+   * require a type of the symbol, so nothing is narrowed. But the body must
+   * read the outer binding, as a list written outside a literal does: the
+   * type of the list then reads the symbol as a number cell (`() ↦ [x]` is
+   * typed `() -> vector<1>`), and that type follows a later assignment of the
+   * outer binding. A valueless copy in the scope of the body is hidden by a
+   * call, so a type read from the copy did not follow that assignment.
+   *
+   * A binding with assignment evidence (a local of the body that an
+   * `Assign` gives a value, `t` in `function g(c) { if c { t = h() }; [t] }`)
+   * is not a copy of an outer binding, and is left as it is: `_infer()`
+   * does not reach the outer binding for it either. Declaring it outside
+   * made the assignment a write outside the function.
+   */
+  _bindToOuterBinding(): void {
+    if (this.engine._resolveOnlyDepth > 0) return;
+    const def = this._def;
+    if (def === undefined || !isValueDef(def)) return;
+    if (def.value._assignmentEvidence) return;
+    if (!def.value.inferredType && !def.value.type.isUnknown) return;
+    if (this.isShadowedByBinder()) return;
+    this._inferOnOuterBinding('unknown');
+  }
+
+  /**
    * Write the narrowing `t` of this symbol on its outer binding too, when
    * this symbol is a free symbol of the body of a function literal that is
    * being canonicalized, bound to the copy that the body scope declared for
    * it.
    *
-   * A free symbol of a body (`y` in `x ↦ [-x, y]`) that has no binding yet
+   * A free symbol of a body (`y` in `x ↦ x + y`) that has no binding yet
    * is declared in the scope of the body. A call of the literal hides that
    * valueless copy and reads the binding of the scope that the literal is
-   * written in. So a narrowing written only on the copy (the list `[-x, y]`
-   * infers `y: number`) gave the literal a type that relied on `y: number`
-   * while the outer `y` could hold a string. The narrowing is written on the
+   * written in. So a narrowing written only on the copy (`x + y` infers
+   * `y: number`) gave the literal a type that relied on `y: number` while
+   * the outer `y` could hold a string. The narrowing is written on the
    * outer binding as a use of the symbol outside the literal writes it: the
    * outer binding is narrowed, or it is declared with the type `t` (an
    * inferred type) in the scope that the outermost literal is written in.
@@ -793,6 +825,9 @@ export class BoxedSymbol extends _BoxedExpression implements SymbolInterface {
    * boxed (`noteDeclarationIn()`, `engine-boxing-state.ts`): the rebuild binds
    * the body to the outer binding, and the type of the literal then follows
    * a later assignment of that binding.
+   *
+   * A list literal calls this with `unknown` (`_bindToOuterBinding()`): it
+   * narrows nothing, and only binds the body to the outer binding.
    *
    * A narrowing to a function type is not written: an unresolved call head
    * has its own mechanism (`markForwardCallReference()`).

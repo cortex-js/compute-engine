@@ -4,11 +4,14 @@
  * from the binding of the scope that the literal is written in when the
  * literal is called.
  *
- * - (a) A use of the symbol in the body (the list `[-x, y]`, the operand of
- *   `Not`) narrows that outer binding, as a use outside the literal does.
- *   Before, it narrowed a copy in the scope of the body, so with
- *   `y := "abc"`, `Apply(g, 3)` had the static type `vector<2>` and the
- *   value `[-3, "abc"]`.
+ * - (a) A use of the symbol in the body (the operand of `Not`) narrows that
+ *   outer binding, as a use outside the literal does. Before, it narrowed a
+ *   copy in the scope of the body. A list literal (`[-x, y]`) binds the
+ *   body to the outer binding too, but it does not narrow it: the list does
+ *   not require a number (ROADMAP CE-663, user decision 2026-10-30, GitHub
+ *   issue #485). The type of the list still reads `y` as a number cell, so
+ *   the literal is typed `(x: unknown) -> vector<2>`, and that type follows
+ *   a later assignment of `y`.
  * - (c) A call whose captured symbol holds a value outside the type that
  *   the body was typed with, or whose stored signature no longer holds the
  *   type of the literal, gives an `incompatible-type` error. The compiled
@@ -24,6 +27,14 @@ import { compile } from '../../src/compute-engine/compilation/compile-expression
 import { capturedTypesWidened } from '../../src/compute-engine/boxed-expression/function-literal';
 
 const LITERAL = ['Function', ['List', ['Negate', 'x'], 'y'], 'x'] as const;
+
+/** A literal whose body requires a number of `y` (`2y`), so `y` is
+ * narrowed to `number`. */
+const NUMERIC_LITERAL = [
+  'Function',
+  ['List', ['Negate', 'x'], ['Multiply', 2, 'y']],
+  'x',
+] as const;
 
 /** The value of `expr`, after a check that it is of the static type of
  * `expr`, or that it is an `incompatible-type` error. */
@@ -43,18 +54,18 @@ function isTypeError(value: Expression): boolean {
 }
 
 describe('CE-473 (a): THE USE NARROWS THE OUTER BINDING', () => {
-  test('box route: the list literal narrows the outer `y`', () => {
+  test('box route: the list literal binds the outer `y` and does not narrow it', () => {
     const ce = new ComputeEngine();
     const g = ce.box(LITERAL as any);
     expect(g.type.toString()).toBe('(x: unknown) -> vector<2>');
-    expect(ce.box('y').type.toString()).toBe('number');
+    expect(ce.box('y').type.toString()).toBe('unknown');
   });
 
-  test('parse route: the list literal narrows the outer `y`', () => {
+  test('parse route: the list literal binds the outer `y` and does not narrow it', () => {
     const ce = new ComputeEngine();
     const g = ce.parse('x \\mapsto [-x, y]');
     expect(g.type.toString()).toBe('(x: unknown) -> vector<2>');
-    expect(ce.box('y').type.toString()).toBe('number');
+    expect(ce.box('y').type.toString()).toBe('unknown');
   });
 
   test('an operator use narrows the outer binding too', () => {
@@ -111,7 +122,7 @@ describe('CE-473 (a): THE USE NARROWS THE OUTER BINDING', () => {
 describe('CE-473 (c): A CALL CHECKS THE CAPTURED VALUES', () => {
   test('a value written on the definition directly is refused', () => {
     const ce = new ComputeEngine();
-    const g = ce.box(LITERAL as any);
+    const g = ce.box(NUMERIC_LITERAL as any);
     const def = ce.lookupDefinition('y') as {
       value: { value: Expression | undefined };
     };
@@ -123,7 +134,7 @@ describe('CE-473 (c): A CALL CHECKS THE CAPTURED VALUES', () => {
 
   test('a nullary literal is checked too', () => {
     const ce = new ComputeEngine();
-    const h = ce.box(['Function', ['List', 'u']]);
+    const h = ce.box(['Function', ['List', ['Multiply', 2, 'u']]]);
     expect(h.type.toString()).toBe('() -> vector<1>');
     const def = ce.lookupDefinition('u') as {
       value: { value: Expression | undefined };
@@ -204,7 +215,7 @@ describe('CE-473: THE COMPILED ROUTE GIVES THE VALUE OF THE INTERPRETER OR REFUS
 
   test('a value written on the definition directly is refused', () => {
     const ce = new ComputeEngine();
-    const g = ce.box(LITERAL as any);
+    const g = ce.box(NUMERIC_LITERAL as any);
     const def = ce.lookupDefinition('y') as {
       value: { value: Expression | undefined };
     };
@@ -221,6 +232,33 @@ describe('CE-473: THE COMPILED ROUTE GIVES THE VALUE OF THE INTERPRETER OR REFUS
     expect(() => compile(ce.box(['g', 3]), { fallback: false })).toThrow(
       /Could not compile the function 'g'/
     );
+  });
+
+  test('a value written directly for a list cell is refused by a named call', () => {
+    // The list does not narrow `y`, but the signature of `g` read it as a
+    // number cell, so the check compares the value with `number`.
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.box(LITERAL as any));
+    const def = ce.lookupDefinition('y') as {
+      value: { value: Expression | undefined };
+    };
+    def.value.value = ce.string('abc');
+    const call = ce.box(['g', 3]);
+    expect(call.type.toString()).toBe('vector<2>');
+    expect(isTypeError(sound(call))).toBe(true);
+  });
+
+  test('a list whose type does not read its cells as numbers is not checked', () => {
+    // `[y, x]` holds the parameter `x`, so it is typed `list<unknown>`, and
+    // the type of `g` relies on no type of `y`: a string `y` keeps the
+    // compiled code.
+    const ce = new ComputeEngine();
+    ce.assign('g', ce.box(['Function', ['Length', ['List', 'y', 'x']], 'x']));
+    ce.assign('y', ce.string('abc'));
+    const call = ce.box(['g', 3]);
+    expect(sound(call).toString()).toBe('2');
+    const result = compile(call, { fallback: false });
+    expect(result.run!({})).toBe(2);
   });
 
   test('a named function whose captured value keeps its type compiles', () => {
@@ -295,12 +333,39 @@ describe('CE-473 (c): THE COMPILED ROUTE WHATEVER THE TYPE OF THE DEFINITION', (
 });
 
 describe('CE-473 (c): A CHECKPOINT RESTORES THE RECORDED CAPTURED TYPES', () => {
+  test('a list cell is recorded from the types when the definition is assigned', () => {
+    // `z` is a string when `g` is first assigned, and `unknown` again after
+    // the restore. The second assignment records `z` as a number cell, so a
+    // string written on its definition later makes the call an error.
+    const ce = new ComputeEngine();
+    const literal = ce.box([
+      'Function',
+      ['List', ['Negate', 'x'], 'y', 'z'],
+      'x',
+    ]);
+    const cp = ce.checkpoint();
+    ce.assign('z', ce.string('s'));
+    ce.assign('g', literal);
+    ce.restore(cp);
+    ce.assign('g', literal);
+    ce.assign('y', 5);
+    const def = ce.lookupDefinition('z') as {
+      value: { value: Expression | undefined };
+    };
+    def.value.value = ce.string('abc');
+    const call = ce.box(['g', 3]);
+    expect(call.type.toString()).toBe('vector<3>');
+    expect(isTypeError(sound(call))).toBe(true);
+  });
+
   test('the types recorded for a definition come back with its value', () => {
     const ce = new ComputeEngine();
     ce.declare('w', 'string');
     ce.declare('g', 'function');
     ce.assign('g', ce.box(LITERAL as any));
-    expect(ce.box('y').type.toString()).toBe('number');
+    // The list does not narrow `y`, but the type of `g` read it as a number
+    // cell, and the record keeps `number`.
+    expect(ce.box('y').type.toString()).toBe('unknown');
     const def = (ce.lookupDefinition('g') as { value: object }).value;
     const cp = ce.checkpoint();
     ce.assign('g', ce.box(['Function', ['List', 'x', 'w'], 'x']));

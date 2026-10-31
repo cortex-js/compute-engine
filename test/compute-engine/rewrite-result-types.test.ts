@@ -366,12 +366,9 @@ describe('TUPLEFROM RESULT TYPE', () => {
     ],
     ['string', ['TupleFrom', "'abc'"], 'tuple'],
     ['set', ['TupleFrom', ['Set', 1, 2]], 'tuple'],
-    // The literal list infers its free symbols as numbers (CE-39.4).
-    [
-      'symbols with no type',
-      ['TupleFrom', ['List', 'p', 'q']],
-      'tuple<number, number>',
-    ],
+    // The literal list does not infer its free symbols (CE-663), and the
+    // components of the tuple are read from the elements.
+    ['symbols with no type', ['TupleFrom', ['List', 'p', 'q']], 'tuple'],
     ['Missing', ['TupleFrom', 'Missing'], 'missing | tuple'],
   ])('%s', (_label, json, expected) => {
     expect(staticType(ce.box(json as any))).toBe(expected);

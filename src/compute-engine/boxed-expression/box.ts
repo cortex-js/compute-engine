@@ -2916,8 +2916,9 @@ function makeCanonicalFunctionCore(
     // (`devolveAtValuePositions`, which `canonicalList` gets through the
     // lazy route).
     canonicalOps = devolveValueElements(ce, canonicalOps);
-    // The free symbols of the literal are inferred as numbers here too, as
-    // in `canonicalList` (`narrowFreeSymbolCells`, `canonical-utils.ts`).
+    // The free symbols of an arithmetic cell of the literal are inferred as
+    // numbers here too, as in `canonicalList` (`narrowFreeSymbolCells`,
+    // `canonical-utils.ts`).
     return narrowFreeSymbolCells(
       new BoxedFunction(ce, 'List', canonicalOps, {
         metadata,

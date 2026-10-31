@@ -7889,10 +7889,11 @@ function classifyCellD(op: OperandDescriptor): Type | null {
 
   if (t === 'unknown' || t === 'any') {
     // The generic-symbol fold is for a FREE symbol (`s.free`, set from
-    // `isFreeSymbol()` in `boxed-expression/canonical-utils.ts`), the same
-    // symbols that the canonical form of the list infers as numbers. Other
-    // symbols of type `unknown` block the shape claim, and the literal falls
-    // back on the honest `list<unknown>`:
+    // `isFreeSymbol()` in `boxed-expression/canonical-utils.ts`). The type of
+    // the list reads it as a number, but the symbol itself stays `unknown`:
+    // the list does not require a number (`[p, q]` can be a list of
+    // propositions). Other symbols of type `unknown` block the shape claim,
+    // and the literal falls back on the honest `list<unknown>`:
     // - A block-local binding a `Block` hoisted for a `let` that has not run
     //   yet is a variable whose type is simply not known yet: with
     //   `let c = match …` and `out = join(out, [c])`, `out` was typed
