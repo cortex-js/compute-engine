@@ -66,6 +66,7 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import { compositionLiteral } from '../function-utils.js';
 import {
   absentBaseReadIsNumeric,
   tupleSlotReadType,
@@ -4667,10 +4668,15 @@ function pyCallbackArg(
   op: Expression | undefined,
   compile: (expr: Expression) => string
 ): string {
-  if (op && isFunction(op, 'Function')) return compile(op);
-  if (op && isSymbol(op)) {
+  // A composition (`Composition(Sin, Exp)`) lowers as its function literal
+  // (`compositionLiteral`), as on the other targets. A composition whose
+  // last step has no fixed parameter count has no literal and declines
+  // below.
+  const fn = op && (compositionLiteral(op) ?? op);
+  if (fn && isFunction(fn, 'Function')) return compile(fn);
+  if (fn && isSymbol(fn)) {
     const glyph = { Add: '+', Subtract: '-', Multiply: '*', Divide: '/' }[
-      op.symbol
+      fn.symbol
     ];
     if (glyph !== undefined) return `(lambda _a, _b: _a ${glyph} _b)`;
   }

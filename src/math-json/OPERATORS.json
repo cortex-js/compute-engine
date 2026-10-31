@@ -1535,6 +1535,22 @@
       ]
     },
     {
+      "name": "Composition",
+      "category": "Core",
+      "arity": "variadic",
+      "signature": "(function*) -> function",
+      "associative": false,
+      "commutative": false,
+      "idempotent": false,
+      "lazy": false,
+      "broadcastable": false,
+      "description": "The composition of functions, applied right to left: `Composition(f, g, h)(x)` is `f(g(h(x)))`",
+      "examples": [
+        "Composition(Sin, Exp)(0)",
+        "Composition(f, g)(x)"
+      ]
+    },
+    {
       "name": "Comprehension",
       "category": "Control Structures",
       "arity": "variadic",

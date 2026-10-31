@@ -2284,7 +2284,9 @@ function isQualifiedProtocolMember(e: Expression): boolean {
 function isRawFunctionValuedApplication(e: Expression): boolean {
   return (
     isFunction(e) &&
-    (e.operator === 'InverseFunction' || e.operator === 'Derivative') &&
+    (e.operator === 'InverseFunction' ||
+      e.operator === 'Derivative' ||
+      e.operator === 'Composition') &&
     freeAnonymousSlots(e).size === 0
   );
 }
@@ -2442,6 +2444,145 @@ function isCheapWrittenArgument(source: Expression): boolean {
 }
 
 /**
+ * The application `steps[0](steps[1](… steps[n-1](...args)))` of a
+ * composition, as an unevaluated canonical expression. The last step takes
+ * all the arguments, every other step the single result of the one after it
+ * (Wolfram's `Composition[f, g, h][x, y]` is `f[g[h[x, y]]]`). A symbol step
+ * is called by name, so a library head or a user function dispatches as in a
+ * direct call; any other step (a function literal, a held callee) is applied
+ * with `Apply`. Shared by `apply()` and the compilers, which lower the nested
+ * call and so agree with the interpreter by construction.
+ *
+ * The call of a symbol step is boxed against the definition that the step
+ * was boxed with (`callableBindingInContext`, `callableApplication`), as
+ * the application of a symbol is in `makeLambda`. A definition of the same
+ * name in the scope where the composition is applied (a block local `f`)
+ * does not replace the function that the step names.
+ */
+export function composedApplication(
+  ce: ComputeEngine,
+  steps: ReadonlyArray<Expression>,
+  args: ReadonlyArray<Expression>
+): Expression {
+  let value: ReadonlyArray<Expression> = args;
+  let result: Expression | undefined;
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i];
+    const name = sym(step);
+    if (name !== undefined) {
+      result = callableApplication(
+        ce,
+        name,
+        [...value],
+        callableBindingInContext(ce, name, ownCallableBinding(step))
+      );
+    } else result = ce.function('Apply', [step, ...value]);
+    value = [result];
+  }
+  return result ?? ce.function('Identity', [...args]);
+}
+
+/** The definition a symbol `step` was boxed with, in the form that
+ * `callableBindingInContext` reads, or `undefined` when it has none. */
+function ownCallableBinding(step: Expression): BoxedDefinition | undefined {
+  return step.valueDefinition !== undefined
+    ? { value: step.valueDefinition }
+    : step.operatorDefinition !== undefined
+      ? { operator: step.operatorDefinition }
+      : undefined;
+}
+
+/**
+ * True when each symbol step of the composition `fn` names, in the current
+ * scope, the definition that `composedApplication` calls: the definition the
+ * step was boxed with (`callableBindingInContext`). A compiler resolves a
+ * call by its name in the scope of the compilation, so when a definition of
+ * the same name hides the one the step names (a composition made with a
+ * global `f`, compiled inside a scope that declares another `f`), the
+ * compiled call would not call the function that the interpreter calls.
+ * The compilers decline such a composition.
+ */
+export function compositionStepsResolveHere(fn: Expression): boolean {
+  if (!isFunction(fn)) return true;
+  const ce = fn.engine;
+  return fn.ops.every((step) => {
+    const name = sym(step);
+    if (name === undefined) return true;
+    return (
+      callableBindingInContext(ce, name, ownCallableBinding(step)) ===
+      ce.lookupDefinition(name)
+    );
+  });
+}
+
+/**
+ * The function literal `(_x1, …, _xn) => f(g(h(_x1, …, _xn)))` of the
+ * composition `fn` = `Composition(f, g, h)`, or `undefined`. The compilers
+ * lower a composition that is an operand, not a call head (the callback of
+ * `Map(Composition(Sin, Exp), xs)`), as this literal, which each target
+ * compiles like any other callback literal.
+ *
+ * `n` is the parameter count of the last step, read from its signature. When
+ * that count is not fixed (an optional or a variadic parameter, an overload
+ * set, a step with no signature, as for `Add`), there is no literal: a guessed
+ * count could call the steps with other arguments than the interpreter does.
+ * The parameter names are chosen so that no symbol of a step is captured.
+ *
+ * There is no literal either for a composition with a free anonymous slot
+ * (`Composition(Sin, _)`, the shorthand of a function of `_`, see `apply()`),
+ * or for one whose symbol step names a definition that a definition of the
+ * same name hides in the current scope (`compositionStepsResolveHere`).
+ *
+ * With `canonical` false, the literal is returned non-canonical, so that the
+ * caller can put it in place of the composition in an operand of another
+ * expression and canonicalize that expression: the literal is then
+ * canonicalized in the context of its consumer, as a literal written there
+ * is (the parameter of a callback of `Map` gets the element type).
+ */
+export function compositionLiteral(
+  fn: Expression,
+  canonical = true
+): Expression | undefined {
+  if (!isFunction(fn, 'Composition') || fn.nops === 0) return undefined;
+  if (freeAnonymousSlots(fn).size > 0 || !compositionStepsResolveHere(fn))
+    return undefined;
+  // The callback compilers can hand over a step that is not canonical, and
+  // the type of a symbol that is not canonical is `unknown`.
+  const arms = signatureArms(fn.ops[fn.nops - 1].canonical.type.type);
+  if (arms?.length !== 1) return undefined;
+  const [arm] = arms;
+  if (arm.optArgs?.length || arm.variadicArg || arm.typeParams?.length)
+    return undefined;
+  const count = arm.args?.length ?? 0;
+  const ce = fn.engine;
+  const used = new Set(fn.symbols);
+  let prefix = '_x';
+  while ([...used].some((s) => s.startsWith(prefix))) prefix = `_${prefix}`;
+  // The literal is built non-canonical and canonicalized as a whole, so its
+  // parameters are bound in the scope of the literal. A canonical parameter
+  // symbol made here would be bound in the enclosing scope instead: it would
+  // take the type of a declaration of the same name there (`_x: string`),
+  // or declare the name there when it has none.
+  const params = Array.from({ length: count }, (_, i) =>
+    ce.symbol(count === 1 ? prefix : `${prefix}${i + 1}`, { canonical: false })
+  );
+  let value: ReadonlyArray<Expression> = params;
+  for (let i = fn.nops - 1; i >= 0; i--) {
+    const step = fn.ops[i];
+    const name = sym(step);
+    value = [
+      name !== undefined
+        ? ce._fn(name, [...value], { canonical: false })
+        : ce._fn('Apply', [step, ...value], { canonical: false }),
+    ];
+  }
+  const literal = ce._fn('Function', [value[0], ...params], {
+    canonical: false,
+  });
+  return canonical ? literal.canonical : literal;
+}
+
+/**
  * Apply arguments to an expression which is either:
  * - a `["Function"]` expression
  * - the symbol for a function, e.g. `Sin`.
@@ -2472,6 +2613,52 @@ export function apply(
   if (errorPolicy === 'bubble' && !isSymbol(fn)) {
     const err = errorValue(fn) ?? firstErrorArg(args);
     if (err !== undefined) return err;
+  }
+
+  // `Composition(f, g)` applied is the nested call `f(g(…args))`, each step
+  // through its own head (`composedApplication`). Under `.N()` the caller
+  // has approximated the arguments already, and the approximation can lose
+  // the exact value that a step reads (the float of `(25! − 1)/24!` is the
+  // integer 25, so its `Floor` is 25, not 24). So the nested call takes the
+  // written argument (`ApplyOptions.exactSources`) at each position where
+  // one is recorded, and the approximated argument elsewhere. A recorded
+  // source is pure (`exactArgumentSources`), so evaluating it again repeats
+  // no effect. The application of a function literal uses a costly source
+  // only through the activation of its parameter, which re-reads it near a
+  // jump of the body; a composition has no activation, so it always uses
+  // the source, at the cost of a second approximation of that argument.
+  //
+  // A composition with a free anonymous slot (`Composition(Sin, _)`) is not
+  // a composition value: as for any other expression with a free slot, it
+  // is the shorthand of a function of `_` (`_ ↦ Composition(Sin, _)`), and
+  // it is applied below through `makeLambda`.
+  if (isFunction(fn, 'Composition') && freeAnonymousSlots(fn).size === 0) {
+    const sources = options?.exactSources;
+    const callArgs =
+      options?.numericApproximation === true &&
+      sources !== undefined &&
+      sources.length === args.length
+        ? args.map((arg, i) => sources[i] ?? arg)
+        : args;
+    const call = composedApplication(fn.engine, fn.ops, callArgs);
+    // On the asynchronous route (`awaitStatements`), the nested call is
+    // evaluated with `evaluateAsync`, so a step that has only an
+    // `evaluateAsync` handler is evaluated, with the abort signal, the effect
+    // handlers, the evaluation-context stack and the precision window of the
+    // enclosing evaluation, as each statement of a body is
+    // (`evaluateStatementsAsync`). The answer is then a `Promise`, as for a
+    // function literal on that route.
+    if (options?.awaitStatements)
+      return call.evaluateAsync({
+        signal: options.signal,
+        numericApproximation: options.numericApproximation,
+        _effects: options._effects,
+        _contextStack: options._contextStack,
+        _precisionWindow: options._precisionWindow,
+      }) as unknown as Expression;
+    return call.evaluate(
+      options?.numericApproximation ? { numericApproximation: true } : undefined
+    );
   }
 
   if (denotesFunction(fn) || isHeldCallee(fn))

@@ -22,7 +22,12 @@ import {
   isNonSquareMatrixPower,
   isSquareMatrixPower,
 } from '../boxed-expression/boxed-function.js';
-import { lookupApplicable } from '../function-utils.js';
+import {
+  composedApplication,
+  compositionLiteral,
+  compositionStepsResolveHere,
+  lookupApplicable,
+} from '../function-utils.js';
 import {
   isBroadcastablePointType,
   isNestedPointCollectionType,
@@ -62,7 +67,11 @@ import {
   isFunction,
   isDictionary,
 } from '../boxed-expression/type-guards.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  freeAnonymousSlots,
+  functionLiteralParameterName,
+} from '../boxed-expression/function-literal.js';
+import { withCallableBinding } from '../boxed-expression/binders.js';
 import { ABS_ARG_REFUSAL, containsDerivativeHead } from './angular-unit.js';
 import { sumVariantInfo, taggedSumInType } from '../sum-representation.js';
 import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
@@ -2416,6 +2425,69 @@ export function _compileInner(
   // target compiles with its own indexing rules).
   if (isFunction(expr) && expr.ops.some((x) => x.operator === 'Spread'))
     return core.compile(spliceSpreadOperands(expr), target, prec);
+  // `Apply(Composition(f, g), …args)` is the nested call `f(g(…args))`,
+  // the same rewrite `apply()` makes, so the lanes agree with `evaluate()`.
+  // A composition with a free anonymous slot is the shorthand of a function
+  // of `_`, not a composition value, so it is not rewritten. The nested call
+  // keeps the definition each symbol step was boxed with, but the compiler
+  // resolves a call by its name: when a definition of the same name hides
+  // that definition in the scope of the compilation, the call declines
+  // (`compositionStepsResolveHere`).
+  if (
+    isFunction(expr, 'Apply') &&
+    isFunction(expr.ops[0], 'Composition') &&
+    freeAnonymousSlots(expr.ops[0]).size === 0
+  ) {
+    if (!compositionStepsResolveHere(expr.ops[0]))
+      throw new Error(
+        `Could not compile \`${expr.ops[0].toString()}\`: a step names a ` +
+          `function that a definition of the same name hides here, and the ` +
+          `compiled call would call that other definition.`
+      );
+    return core.compile(
+      composedApplication(expr.engine, expr.ops[0].ops, expr.ops.slice(1)),
+      target,
+      prec
+    );
+  }
+  // A composition that is an operand of another expression (the callback of
+  // `Map(Composition(Sin, Exp), xs)`) is replaced by its function literal
+  // (`compositionLiteral`), and the expression is rebuilt, so that the
+  // literal is canonicalized in the context of its consumer, as a literal
+  // written there is: the parameter of a `Map` callback gets the element
+  // type. A literal canonicalized on its own has a parameter of unknown
+  // type, which the compiler broadcasts over a list argument, so
+  // `Map(Composition(Rank, Exp), xs)` over a list of lists ranked each
+  // element of each row. The operator keeps its binding
+  // (`withCallableBinding`). An expression that opens a scope (a `Block`, a
+  // `Function`, a `Sum`) is not rebuilt, so that no scope is made again; a
+  // composition operand there is lowered by the rule below.
+  if (
+    isFunction(expr) &&
+    expr.operator !== 'Composition' &&
+    !expr.isScoped &&
+    expr.ops.some((op) => isFunction(op, 'Composition'))
+  ) {
+    const ops = expr.ops.map((op) =>
+      isFunction(op, 'Composition') ? (compositionLiteral(op, false) ?? op) : op
+    );
+    if (ops.some((op, i) => op !== expr.ops[i]))
+      return core.compile(
+        withCallableBinding(expr, () =>
+          expr.engine.function(expr.operator, ops)
+        ),
+        target,
+        prec
+      );
+  }
+  // A composition that is not an operand of a rebuilt expression is lowered
+  // as its function literal canonicalized on its own (`compositionLiteral`).
+  // A composition whose last step has no fixed parameter count has no
+  // literal and declines.
+  if (isFunction(expr, 'Composition')) {
+    const literal = compositionLiteral(expr);
+    if (literal !== undefined) return core.compile(literal, target, prec);
+  }
 
   // A user definition that shadows a library operator (`function
   // Square(x) { x + 100 }`) is what the interpreter calls, but the target's

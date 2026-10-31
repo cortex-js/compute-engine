@@ -39,7 +39,7 @@ type CallbackArity = { required: number; max: number };
  * The parameter-count range of a callback operand, or `undefined` when it
  * cannot be read statically — the deliberate DECLINE, never a guess.
  *
- * Two shapes are decidable:
+ * Three shapes are decidable:
  *
  * - a canonical function LITERAL `["Function", body, ...params]`. Every
  *   parameter of a literal is required (the grammar has no optional, default
@@ -57,6 +57,10 @@ type CallbackArity = { required: number; max: number };
  *   it: the required parameters, through the optional ones, unbounded with a
  *   variadic tail — and a `+` tail's mandatory occurrences count on top of the
  *   optional parameters, since those are filled first.
+ * - a `["Composition", ...steps]` with at least one step. Its last step
+ *   takes all the arguments of the call (each other step takes the single
+ *   result of the step after it), so its range is the range of the last step,
+ *   read by the two rules above.
  *
  * Everything else declines: the bare `function` wildcard (which promises
  * nothing about arity), a generic signature (its arity is a pattern until
@@ -83,6 +87,10 @@ export function callbackArity(fn: Expression): CallbackArity | undefined {
       return { required: n - 1, max: Infinity };
     return { required: n, max: n };
   }
+  // The last step of a composition takes all the arguments of the call, so
+  // the composition accepts what its last step accepts.
+  if (isFunction(fn, 'Composition') && fn.nops > 0)
+    return callbackArity(fn.ops[fn.nops - 1]);
   if (!isSymbol(fn)) return undefined;
   if (fn.valueDefinition !== undefined)
     return signatureArity(fn.valueDefinition.type.type);

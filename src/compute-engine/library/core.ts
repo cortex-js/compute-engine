@@ -200,7 +200,11 @@ import type {
   DeclarationOrigin,
   FunctionSignature,
 } from '../../common/type/types.js';
-import { isSubtype, provablyDisjoint } from '../../common/type/subtype.js';
+import {
+  couldMatch,
+  isSubtype,
+  provablyDisjoint,
+} from '../../common/type/subtype.js';
 import {
   freeTypeVariables,
   isPolymorphicType,
@@ -294,7 +298,10 @@ import {
   shallowApplicationEffects,
   valueContainerCells,
 } from '../boxed-expression/effects-of.js';
-import { hasDeclaredEffectLabel } from '../../common/type/effects.js';
+import {
+  hasDeclaredEffectLabel,
+  unionEffectSets,
+} from '../../common/type/effects.js';
 import {
   canEnumerateOperand,
   isEnumerableSource,
@@ -5718,6 +5725,137 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
       signature: '(T) -> T where T',
       examples: ['Identity(x + 1)'],
       evaluate: ([x]) => x,
+    },
+
+    Composition: {
+      description:
+        'The composition of functions, applied right to left: ' +
+        '`Composition(f, g, h)(x)` is `f(g(h(x)))`',
+      examples: ['Composition(Sin, Exp)(0)', 'Composition(f, g)(x)'],
+      // Building a composition only stores its steps: no step is applied
+      // until the composition is. Without this flag the effect channels read
+      // each step as an invoking position, so a function that only returns
+      // `Composition(Random, Sin)` was typed as drawing a random number. The
+      // effects of the steps are in the signature of the composition (its
+      // `type` handler), and an application of it carries them.
+      invokes: false,
+      signature: '(function*) -> function',
+      // The type is that of the rightmost step's parameters and the leftmost
+      // step's result, when each step's signature is known. An application
+      // of the composition applies every step, so its effects are the union
+      // of the effects of all the steps, read from every signature of every
+      // step (a step with no signature contributes nothing, as an operand of
+      // an invoking position does). The field is left out when that union is
+      // empty, as on a pure signature with no annotation.
+      //
+      // When the precise signature cannot be given, the type is the generic
+      // `function`, unless a step has effects: it is then `(any*) E -> any`
+      // with those effects `E`. The `Composition` operator does not invoke
+      // its steps (`invokes: false`), so its type is the only record of
+      // them, and the generic `function` would read as pure.
+      type: (ops, { engine: ce }) => {
+        if (ops.length === 0) return undefined;
+        const arms = ops.map((op) => signatureArms(op.type));
+        const effects = arms.reduce(
+          (acc, a) =>
+            (a ?? []).reduce(
+              (inner, arm) => unionEffectSets(inner, arm.effects),
+              acc
+            ),
+          undefined as FunctionSignature['effects']
+        );
+        const hasEffects =
+          effects === 'any' || (effects !== undefined && effects.length > 0);
+        const generic = hasEffects
+          ? BoxedType.forResult(
+              {
+                kind: 'signature',
+                variadicArg: { type: 'any' },
+                variadicMin: 0,
+                effects,
+                result: 'any',
+              },
+              ce._typeResolver
+            )
+          : undefined;
+        if (arms.some((a) => a === undefined || a.length !== 1)) return generic;
+        const first = arms[0]![0];
+        const last = arms[ops.length - 1]![0];
+        if (first.typeParams?.length || last.typeParams?.length) return generic;
+        // Each step before the last is applied to the single result of the
+        // step after it. A step that needs more than one argument is then a
+        // partial application that returns a function, and a step that takes
+        // no argument refuses it, so the result of the first step is not the
+        // result of the composition: the type is the generic one.
+        // The bounds are read as `validateArguments` reads a signature: the
+        // optional parameters are filled before a variadic one.
+        const takesOneArgument = (arm: FunctionSignature): boolean => {
+          const required = arm.args?.length ?? 0;
+          const optional = arm.optArgs?.length ?? 0;
+          if (arm.variadicArg !== undefined) {
+            const variadicMin = arm.variadicMin ?? 0;
+            return (
+              (variadicMin > 0
+                ? required + optional + variadicMin
+                : required) <= 1
+            );
+          }
+          return required <= 1 && required + optional >= 1;
+        };
+        if (arms.slice(0, -1).some((a) => !takesOneArgument(a![0])))
+          return generic;
+        // A step whose parameter does not admit the whole result of the step
+        // after it can broadcast over that result: `Sin` maps over the list
+        // that `Range(1, 3)` returns, so `Composition(Sin, Range)` returns a
+        // list, not the number `Sin` declares. The precise signature is
+        // given only when the result of each step is a subtype of the type
+        // of the single parameter of the step before it, or is a number that
+        // can match that type. A number is not a collection, so it is never
+        // broadcast over: `Exp` returns a `number`, which is not a subtype of
+        // the `complex | quantity` parameter of `Sin` (it admits `NaN`), and
+        // `Sin(Exp(x))` is typed `number` as a direct call.
+        for (let i = 0; i < arms.length - 1; i++) {
+          const outer = arms[i]![0];
+          const param =
+            outer.args?.[0] ?? outer.optArgs?.[0] ?? outer.variadicArg;
+          const inner = arms[i + 1]![0].result;
+          if (
+            param === undefined ||
+            !(
+              isSubtype(inner, param.type) ||
+              (isSubtype(inner, 'number') && couldMatch(inner, param.type))
+            )
+          )
+            return generic;
+        }
+        const sig: FunctionSignature = { ...last, result: first.result };
+        delete sig.effects;
+        if (hasEffects) sig.effects = effects;
+        return BoxedType.forResult(sig, ce._typeResolver);
+      },
+      // Nested compositions flatten, `Identity` steps drop, the empty
+      // composition is `Identity` and a single step is itself, as in
+      // Wolfram's `Composition`.
+      canonical: (args, { engine: ce }) => {
+        const steps = args
+          .flatMap((arg) => {
+            const op = arg.canonical;
+            return isFunction(op, 'Composition') ? op.ops : [op];
+          })
+          .filter((op) => !isSymbol(op, 'Identity'));
+        if (steps.length === 0) return ce.symbol('Identity');
+        // A single step stands for the composition, so it is checked as a
+        // step of a longer composition is by the signature: a step whose
+        // type is known and cannot be a function (`Composition(3)`) is an
+        // `incompatible-type` error, not the value `3`. A step whose type is
+        // `unknown` or `any` can still be a function and is kept.
+        if (steps.length === 1) {
+          const [step] = steps;
+          if (step.type.isUnknown || step.type.type === 'any') return step;
+          return checkType(ce, step, 'function');
+        }
+        return ce._fn('Composition', steps);
+      },
     },
   },
   {
