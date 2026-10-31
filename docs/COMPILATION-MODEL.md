@@ -867,6 +867,14 @@ construction but not by its static type); the operator then takes
 the JavaScript target maps a call over a list argument, so the rule does not
 apply on the other targets.
 
+This rule agrees with the rule that only a symbol declared `any` or `value`
+is read as a possible list (user decision 2026-10-17, Tycho ledger row 379;
+`isPossiblyCollectionTyped()` in `collection-utils.ts`): the run-time test is
+on the result of the call, not on the undeclared symbol `u`, and the compiled
+call already maps over a list `u` (user decision 2026-10-31). The other
+choice, a decline of every operator over such a call, would send expressions
+such as `q(x) + 1` with an untyped plot variable `x` to the interpreter.
+
 The value of such a call is a number at almost every evaluation (a plot
 variable), and `_SYS.bcast` costs a closure call per evaluation. So when the
 calls are reached from the operator through library operators only
