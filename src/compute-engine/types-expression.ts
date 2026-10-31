@@ -552,6 +552,13 @@ interface BoxedOperatorDefinition
   /** See `OperatorDefinition.eq` (types-definitions.ts) for `prover`. */
   eq?: (a: Expression, b: Expression, prover?: boolean) => boolean | undefined;
   neq?: (a: Expression, b: Expression) => boolean | undefined;
+  /** For an operator that returns a collection but has no `collection`
+   * handlers: the element at the 1-based position `index` of the
+   * collection that `evaluate()` would produce, built from the operands
+   * with no evaluation, or `undefined` when it is not cheaply known. Mirror
+   * of the member documented on `OperatorDefinition.elementAt`
+   * (types-definitions.ts), which states the contract. */
+  elementAt?: (expr: Expression, index: number) => Expression | undefined;
   canonical?: (
     ops: ReadonlyArray<Expression>,
     options: { engine: ComputeEngine; scope: Scope | undefined }

@@ -550,6 +550,7 @@ import {
   overriddenHeadPredicate,
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
+import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { compileDiagnosticOf } from './diagnostics.js';
 import {
@@ -11185,6 +11186,27 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // never against whichever nested target requested the emission (see
     // `CompileTarget.userFunctions.root`).
     target.userFunctions!.root = target;
+    // A symbol whose type admits a point and a list of points, with an
+    // assigned point that the code holds anyway, is replaced by that point,
+    // and a call whose body then is a point or a number by that body, as on
+    // the shader targets (`inlinePointValuesAtRoot`). The checks of the
+    // compilation then read the type of a tuple, not the union: with
+    // `P := (3, 4)`, `At(P, 1) + x` is `3 + x`. The registry of user
+    // functions exists only now, so this pass follows the target's creation,
+    // and the collections that the rewrite gives a known width are unrolled
+    // again.
+    const pointsInlined = inlinePointValuesAtRoot(expr, target, {
+      vars,
+      readsCallerSource: opaqueVar,
+    });
+    if (pointsInlined !== expr)
+      expr = unrollFixedWidthCollections(pointsInlined, {
+        skipHeads: unrollSkipHeads,
+        overridesHead,
+        iterationBudget: options.iterationBudget,
+        readsLiveSource: opaqueVar,
+        typedPointLists: true,
+      });
     // The parameter of the batch body that receives each shared list read
     // directly.
     if (batch !== undefined)

@@ -143,8 +143,10 @@ describe('GLSL: the exact form', () => {
       ],
       1,
     ]);
+    // `x` has no declared range: the products can overflow f32, so `sin`
+    // keeps the NaN-safe helper (CE-619.2).
     expect(rounded.code).toBe(
-      'fract(fract(10000.0 * sin(10000.0 * floor(5.0 * x))))'
+      'fract(fract(10000.0 * _gpu_sin(10000.0 * floor(5.0 * x))))'
     );
     expect(rounded.warnings?.[0]?.code).toBe('float32-unsafe-argument');
     const e = new ComputeEngine();
@@ -244,7 +246,9 @@ describe('a warning where no exact form exists', () => {
       ['Multiply', 1.9e9, ['Sin', ['Multiply', 10000, 'x']]],
       1,
     ]);
-    expect(r.code).toBe('fract(fract(1900000000.0 * sin(10000.0 * x)))');
+    expect(r.code).toBe(
+      'fract(fract(1900000000.0 * _gpu_sin(10000.0 * x)))'
+    );
     // No warning for an operand that is not amplified.
     expect(glsl('\\operatorname{mod}(\\sin(x)+1,1)').warnings).toBe(undefined);
   });

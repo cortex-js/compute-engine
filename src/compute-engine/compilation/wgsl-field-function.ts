@@ -41,9 +41,9 @@ import {
   gpuCheckIdentifier,
   gpuPointDeclaration,
   gpuPointOrPointListUnion,
-  gpuReachableSymbolNames,
   gpuTypeOfValue,
 } from './gpu-target.js';
+import { reachableSymbolNames } from './point-value-inlining.js';
 import { withShadowingCallsRenamed } from './shadowing-calls.js';
 import { withVarsValuesHidden } from './vars-inputs.js';
 import { WGSL_PREDECLARED } from './wgsl-predeclared.js';
@@ -700,7 +700,7 @@ export function compileWGSLFieldFunction(
   };
   try {
     discovery = withShadowingCallsRenamed(expr, { vars }, (renamed) => {
-      const reachable = gpuReachableSymbolNames(renamed, vars);
+      const reachable = reachableSymbolNames(renamed, vars);
       const valued: string[] = [];
       const inlined = new Map<string, Expression>();
       for (const s of reachable.all) {
@@ -830,7 +830,7 @@ export function compileWGSLFieldFunction(
         if (literal === undefined) return;
         if (
           declaring === undefined &&
-          gpuReachableSymbolNames(literal, vars).written.has(paramsVariable)
+          reachableSymbolNames(literal, vars).written.has(paramsVariable)
         )
           declaring = id;
         const owner = userFunctionOwner(ce, id);

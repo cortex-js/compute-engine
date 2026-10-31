@@ -105,6 +105,7 @@ import {
   staticListWidth,
   unrollFixedWidthCollections,
 } from './fixed-width-unroll.js';
+import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
 import type {
   CompileDiagnostic,
@@ -6722,9 +6723,21 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
     // subexpressions are read, so the two share them.
     // The memos are emptied and the captured definitions are checked before
     // the substitution removes the calls (`beginRootPreprocessing`).
+    // A symbol whose type admits a point and a list of points, with an
+    // assigned point that the code holds anyway, is replaced by that point,
+    // and a call whose body then is a point or a number by that body, as on
+    // the shader targets (`inlinePointValuesAtRoot`): with `P := (3, 4)`,
+    // `At(P, 1) + x` is `3 + x`.
     BaseCompiler.beginRootPreprocessing(expr, target);
     expr = unrollFixedWidthCollections(
-      BaseCompiler.inlineCollectionValuedCallsAtRoot(expr, target),
+      BaseCompiler.inlineCollectionValuedCallsAtRoot(
+        inlinePointValuesAtRoot(expr, target, {
+          vars,
+          readsCallerSource: opaqueVar,
+          rootPreprocessed: true,
+        }),
+        target
+      ),
       {
         ...unrollOptions,
         explicitPointNorm: (point) => {

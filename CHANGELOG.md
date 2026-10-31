@@ -91,31 +91,6 @@
   `vars` entry maps, a `P` with no value, and a `P` that holds a list of points
   behave as before. A call whose head the `operators` option overrides, or whose
   argument reads `vars` source, is not replaced by its body.
-- **Compiled code tests a value assigned to a `Block` local declared with a
-  type** (ROADMAP CE-662). With `Declare(p, "integer")`, the interpreter gives
-  an `incompatible-type` error for `Assign(p, 0.5)` and for `Assign(p, u/2)` at
-  `u = 1`; the compiled code had no test and gave `0.5`. Each assigned value is
-  now classified at compile time:
-  - a value whose static type is a subtype of the declared type compiles with no
-    test, as before;
-  - a value that is never of the declared type (`0.5` into `integer`, a point or
-    a string into `real`) fails to compile on every target;
-  - another value is tested when the code runs: JavaScript throws an `Error` and
-    Python raises a `TypeError`, with `incompatible-type` and the name of the
-    local. GLSL, WGSL and interval JavaScript refuse to compile such a value,
-    and so does every target for a declared type that has no simple test
-    (`rational`, a tuple, a matrix).
-
-  The test is for `integer`, `real`, number ranges such as `real<0..1>`,
-  `number`, `boolean`, `string`, unions of these, and lists and vectors of
-  these. A local declared `real` refuses `NaN` and `±∞`, as the interpreter
-  does. For `ReplaceAt(xs, i, v)` assigned to `xs`, declared `list<T>`, only `v`
-  is tested, so the update stays in place. A type written as a symbol
-  (`Declare(p, integer)`) is checked as a string type is, and a `list<T^0>`
-  local accepts only an empty list. The type of a free input that the engine
-  inferred from a use (`h(x)` with `h: (integer) -> integer`) is not taken as a
-  proof that the value is of the declared type.
-
 - **Shader targets: the NaN guard stays on operands that can overflow f32**
   (ROADMAP CE-619). The proof that an operand of `sin`, `cos`, `min`, `max`,
   `sign` or `clamp` is finite, which lets the GLSL and WGSL targets call the

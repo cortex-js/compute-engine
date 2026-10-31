@@ -145,15 +145,17 @@ describe('CE-571 compileFieldFunction: the gyroid witness', () => {
 
   test('a struct-field parameter keeps no NaN guard that a self-mapped one drops', () => {
     // `compile()` with `vars: { c: 'ce_params.c' }` cannot tell a struct
-    // field from other source of the caller, and keeps the guard.
-    const e = ce.parse('\\sin(x + c)');
+    // field from other source of the caller, and keeps the guard. The
+    // operand is `x + sin(c)`, not `x + c`: a sum of two terms of unknown
+    // size can overflow f32 (CE-619.5).
+    const e = ce.parse('\\sin(x + \\sin(c))');
     const plain = compile(e, {
       to: 'wgsl',
       vars: { x: 'x', c: 'ce_params.c' },
     });
-    expect(plain.code).toBe('_gpu_sin(ce_params.c + x)');
+    expect(plain.code).toBe('_gpu_sin(x + _gpu_sin(ce_params.c))');
     const f = w.compileFieldFunction(e, { name: 'f', coordinates: ['x'] });
-    expect(f.function).toContain('return sin(ce_params.c + x);');
+    expect(f.function).toContain('return sin(x + sin(ce_params.c));');
     expect(f.helpers).toEqual({});
   });
 });

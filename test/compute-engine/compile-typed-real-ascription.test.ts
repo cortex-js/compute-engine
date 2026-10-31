@@ -339,9 +339,10 @@ describe('Targets that never promote are unchanged', () => {
       expect(r.success).toBe(true);
       expect(r.promoted).toBe(false);
       // Every call passes a finite argument (`3`, and `x` declared `real`),
-      // so `sin` is the built-in (CE-565.4).
+      // but `x` has no declared range: `2.4k` is `+∞` in f32 for
+      // `k ≥ 1.5·10³⁸`, so `sin` keeps its helper (CE-619.2).
       expect(r.preamble).toContain(
-        'return sin(2.4 * k) * sqrt(0.0625 * (k + -0.5));'
+        'return _gpu_sin(2.4 * k) * sqrt(0.0625 * (k + -0.5));'
       );
     });
 });

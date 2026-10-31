@@ -137,7 +137,10 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565.6 on %s', (to) => {
       ce2.declare('y', 'real');
       ce2.declare('x', 'real<-10..10>');
       expect(shader(ce2, '\\sin(u^2+y)', to).code).toMatch(/^_gpu_sin\(/);
-      expect(shader(ce2, '\\sin(x^2-y)', to).code).toMatch(/^_gpu_sin\(/);
+      // One term of unknown magnitude beside terms whose bounds add up to
+      // at most 2¹⁰⁰ cannot overflow: `x² ≤ 100` is far below the rounding
+      // step of f32 near its largest value (CE-619.5).
+      expect(shader(ce2, '\\sin(x^2-y)', to).code).toBe('sin((x * x) + -y)');
       expect(shader(ce2, '\\sin(x^2+1)', to).code).toBe('sin((x * x) + 1.0)');
       expect(shader(ce2, '\\sin(-x^2)', to).code).toBe('sin(-(x * x))');
     });

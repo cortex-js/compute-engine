@@ -47,6 +47,7 @@ import {
   isDefinitelyCollectionType,
 } from './in-place-update.js';
 import { unrollFixedWidthCollections } from './fixed-width-unroll.js';
+import { inlinePointValuesAtRoot } from './point-value-inlining.js';
 import { isLibraryFoldCombiner } from './builtin-callback.js';
 import { tryGetConstant } from './constant-folding.js';
 import {
@@ -7846,6 +7847,17 @@ export class PythonTarget implements LanguageTarget<Expression> {
         ...(vars ? Object.values(vars) : []),
       ]),
     });
+    // A symbol whose type admits a point and a list of points, with an
+    // assigned point that the code holds anyway, is replaced by that point,
+    // as on the shader targets (`inlinePointValuesAtRoot`): with
+    // `P := (3, 4)`, `At(P, 1) + x` is `3 + x`. The collections that the
+    // rewrite gives a known width are unrolled again.
+    const pointsInlined = inlinePointValuesAtRoot(expr, target, { vars });
+    if (pointsInlined !== expr)
+      expr = unrollFixedWidthCollections(pointsInlined, {
+        iterationBudget: options.iterationBudget,
+        readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+      });
     // Common-subexpression elimination (design §4.2). This target has no
     // `functions`/`operators` override channel, so the only G1b provenance to
     // record is the string-valued `vars` keys.
@@ -7957,6 +7969,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // A `vars`-mapped symbol is compiled as the valueless input of its
     // declared type (`withVarsValuesHidden`).
     const body = withVarsValuesHidden(expr, vars, () => {
+      // A point value is written in place of its symbol, as in `compile()`
+      // (`inlinePointValuesAtRoot`).
+      expr = inlinePointValuesAtRoot(expr, target, { vars });
       BaseCompiler.openCseSession(expr, target, {
         enabled: options.cse,
         isStringVar: (name) =>
@@ -8032,6 +8047,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
       naming: pythonRootNaming(expr, undefined, parameters),
       inputWrites: new Set<string>(),
     });
+    // A point value is written in place of its symbol, as in `compile()`
+    // (`inlinePointValuesAtRoot`). The declared parameters are resolved by
+    // the target, so they are not replaced.
+    expr = inlinePointValuesAtRoot(expr, target);
     // CSE is default-enabled; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
     let body = compilePythonRoot(expr, target);
@@ -8254,6 +8273,10 @@ export class PythonTarget implements LanguageTarget<Expression> {
       constantFold: options?.constantFold,
       naming: pythonRootNaming(expr, undefined, parameters),
     });
+    // A point value is written in place of its symbol, as in `compile()`
+    // (`inlinePointValuesAtRoot`). The declared parameters are resolved by
+    // the target, so they are not replaced.
+    expr = inlinePointValuesAtRoot(expr, target);
     // Default-enabled, like `compileFunction`; `options.cse` is the opt-out.
     BaseCompiler.openCseSession(expr, target, { enabled: options?.cse });
     let body: string;

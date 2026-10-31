@@ -181,9 +181,15 @@ describe('item 280 — the loop-invariant hoist shares its own subexpressions', 
   it('computes the shared hash once on the glsl target', () => {
     const { code } = glsl(expr);
     expect(count(code, 'floor(x)')).toBe(1);
-    expect(code).toMatch(/float _tv2 = sin\(floor\(x\) \+ floor\(y\)\);/);
-    expect(code).toMatch(/(?<!_gpu_)cos\(_tv2\)/);
-    expect(code).toMatch(/(?<!_gpu_)sin\(_tv2\)/);
+    // Two terms of unknown size can overflow f32: the NaN-safe helper
+    // (CE-619.5).
+    expect(code).toMatch(
+      /float _tv2 = _gpu_sin\(floor\(x\) \+ floor\(y\)\);/
+    );
+    // `_tv2` is NaN where the sum overflows, so its `cos` and `sin` keep
+    // the helper too.
+    expect(code).toMatch(/_gpu_cos\(_tv2\)/);
+    expect(code).toMatch(/_gpu_sin\(_tv2\)/);
   });
 
   it('returns the interpreter value, NaN included', () => {

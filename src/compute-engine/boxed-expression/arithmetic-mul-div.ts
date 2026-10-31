@@ -4045,6 +4045,71 @@ function mulTuples(
 }
 
 /**
+ * The cell product whose evaluation is in progress in
+ * `evaluateCellProduct()`, and its factors that are already values.
+ */
+let cellProductValues:
+  { product: Expression; values: ReadonlyArray<Expression> } | undefined;
+
+/**
+ * Evaluate `product`, a cell product that `mulTensors()` built from a scalar
+ * and the cells of a tensor, without evaluating again the factors in
+ * `values`, which are already values.
+ *
+ * A cell of the tensor comes from the evaluated operands of the product, so
+ * it is a value. The `Multiply` handler evaluates each operand of the
+ * product it receives (`Multiply` is `lazy`), and the evaluation of a cell
+ * that is an unevaluated integral tries the antiderivatives again: for
+ * `y · [∫ f(x, 1) dx, …]` each integral was evaluated twice (ROADMAP CE-618).
+ * The `Multiply` handler asks `cellProductOperandIsValue()` for each operand,
+ * and uses as its value an operand that is one of the objects in `values`.
+ * The other operands (a scalar factor, a factor that `multiply` made) are
+ * evaluated as before.
+ *
+ * Only the operand step of the handler changes: the evaluation of the
+ * product runs all its other steps (the absence and string checks of the
+ * driver, the fold of the handler), so a cell that is a string, an absence
+ * marker or an error gives the same result as before.
+ *
+ * When `multiply` returns one of the objects in `values` unchanged (the
+ * product of a cell and `1`), that object is the value: evaluating it again
+ * would give the same expression, and would run again the handler of a lazy
+ * operator in it (an integral times a unit cell integrated twice).
+ */
+function evaluateCellProduct(
+  product: Expression,
+  values: ReadonlyArray<Expression>
+): Expression {
+  if (values.includes(product)) return product;
+  if (!isFunction(product, 'Multiply')) return product.evaluate();
+  const saved = cellProductValues;
+  cellProductValues = { product, values };
+  try {
+    return product.evaluate();
+  } finally {
+    cellProductValues = saved;
+  }
+}
+
+/**
+ * True when `operand` is a factor of `product` that is already a value,
+ * because `product` is a cell product that `evaluateCellProduct()` is
+ * evaluating. The `Multiply` evaluate handler does not evaluate such an
+ * operand again. Only the product itself matches: another product that the
+ * evaluation reaches (inside an operand) evaluates all its operands.
+ */
+export function cellProductOperandIsValue(
+  product: Expression | undefined,
+  operand: Expression
+): boolean {
+  return (
+    cellProductValues !== undefined &&
+    cellProductValues.product === product &&
+    cellProductValues.values.includes(operand)
+  );
+}
+
+/**
  * Multiply operands when at least one is a tensor (vector or matrix),
  * following the matrix-product convention:
  *
@@ -4089,9 +4154,25 @@ function mulTensors(
   // `Multiply` handler's closed-inexact-constant rule applies to it exactly as
   // to a scalar product: `0.5 · [π, 1]` is `[1.57…, 0.5]`, not `[0.5π, 0.5]`.
   // The `.N()` route has already floated every cell.
+  // The first factor is the scalar; each other factor is a cell, which is
+  // already a value, and the `Multiply` handler does not evaluate it again
+  // (`evaluateCellProduct()`). The scalar is not evaluated again either when
+  // it is `valueScalar`.
+  // `valueScalar` is the scalar when it is known to be a value: it is one
+  // operand of the product, and that operand is a value of the caller
+  // (`operandsAreValues`) or the result of the evaluation below. Without
+  // this, a scalar that is an unevaluated integral was integrated again for
+  // each cell: `∫…·[1, 2]` integrated three times. A scalar that `multiply`
+  // made from several factors is not a value (`0.5·π` is not yet a float),
+  // and is evaluated as before.
+  let valueScalar: Expression | undefined;
   const multiplyCell = numericApproximation
     ? multiply
-    : (...xs: ReadonlyArray<Expression>) => multiply(...xs).evaluate();
+    : (...xs: ReadonlyArray<Expression>) =>
+        evaluateCellProduct(
+          multiply(...xs),
+          valueScalar !== undefined && xs[0] === valueScalar ? xs : xs.slice(1)
+        );
   // A flat list literal whose cells name assigned variables, times scalars:
   // each cell stays a product on the exact routes, as a scalar factor does.
   // Evaluating the cells would store the values that the variables hold now
@@ -4109,7 +4190,16 @@ function mulTensors(
         (x) => x === list || (x.type.matches('number') && !x.isCollection)
       )
     ) {
-      const scalar = multiply(...xs.filter((x) => x !== list));
+      const scalarFactors = xs.filter((x) => x !== list);
+      const scalar = multiply(...scalarFactors);
+      // The operands are not evaluated on this route: the scalar is a value
+      // only when the caller's operands are values.
+      if (
+        operandsAreValues &&
+        scalarFactors.length === 1 &&
+        scalar === scalarFactors[0]
+      )
+        valueScalar = scalar;
       // Only the cells that read an assigned variable stay products; the
       // other cells are evaluated as the cell product below does, so
       // `0.5·[w, π]` still floats the `π` cell.
@@ -4299,6 +4389,9 @@ function mulTensors(
   // open `(x+1)·2` into `2x + 2` before it ever reached a cell.
   const scalar: Expression | null =
     scalars.length === 0 ? null : multiply(...scalars);
+  // Each scalar factor is in `evaluated`: a value of the caller, or the
+  // result of the evaluation above (or `NaN` for an absence marker).
+  if (scalars.length === 1 && scalar === scalars[0]) valueScalar = scalar;
 
   // Fold the tensors left to right, in order.
   let product: Expression = tensors[0];
@@ -4348,7 +4441,11 @@ function mulTensors(
         // elements stay exact under `evaluate()`; finished as a cell product
         // so an inexact element floats an exact-constant one (`[0.5,1]·[π,1]`
         // is `[1.57…, 1]`), as for a scalar-scaled tensor.
-        elements.push(multiplyCell(a, b));
+        elements.push(
+          numericApproximation
+            ? multiply(a, b)
+            : evaluateCellProduct(multiply(a, b), [a, b])
+        );
       }
       product = ce.function('List', elements);
       continue;

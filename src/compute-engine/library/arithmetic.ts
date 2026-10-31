@@ -196,6 +196,7 @@ import {
   mulNEvaluated,
   mulAroundNotationalProducts,
   isOutOfDoubleRangeLiteral,
+  cellProductOperandIsValue,
 } from '../boxed-expression/arithmetic-mul-div.js';
 import { indexingSetSites } from '../boxed-expression/binding-sites.js';
 import {
@@ -10692,11 +10693,16 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
         // `Multiply` is `lazy`, so the driver did NOT evaluate the operands —
         // this map is the (single) operand evaluation, not a re-evaluation.
         // Under a numeric approximation the operands are evaluated
-        // numerically, for the reasons given in `Add`.
+        // numerically, for the reasons given in `Add`. A factor of a cell
+        // product of a tensor that is already a value (a cell of the
+        // evaluated tensor) is not evaluated again
+        // (`cellProductOperandIsValue()`).
         const evaluated = ops.map((x) =>
           numericApproximation
             ? x.evaluate({ numericApproximation: true })
-            : x.evaluate()
+            : cellProductOperandIsValue(expression, x)
+              ? x
+              : x.evaluate()
         );
         if (evaluated.some((x) => containsContinuationOperand(x)))
           return mulAroundFoldBarriers(ops, evaluated, {

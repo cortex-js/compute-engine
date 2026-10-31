@@ -40,9 +40,10 @@ describe('the emitted argument', () => {
     expect(code('\\cot(x+10^6)', Target)).toBe(
       '(cos(x + -0.35756418) / sin(x + -0.35756418))'
     );
-    // `k·(u + c)` reduces `c` by `P/k`.
+    // `k·(u + c)` reduces `c` by `P/k`. The product by 2 of `x`, which has
+    // no declared range, can overflow f32: the NaN-safe helper.
     expect(code('\\sin(2(x+10^6))', Target)).toBe(
-      'sin(2.0 * (x + -0.35756418))'
+      '_gpu_sin(2.0 * (x + -0.35756418))'
     );
     // `e^{iπu}` reduces `u` by 2.
     expect(code('e^{i\\pi(x+10^6)}', Target)).toBe('_gpu_cossinpi(x)');

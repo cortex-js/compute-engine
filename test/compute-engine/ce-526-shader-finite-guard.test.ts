@@ -16,6 +16,7 @@ const ce = new ComputeEngine();
 ce.declare('x', 'real');
 ce.declare('y', 'real');
 ce.declare('u', 'number');
+ce.declare('s', 'real<-10..10>');
 ce.assign('p', ce.parse('k \\mapsto \\cos(x + 1.9k)'));
 
 const code = (expr: unknown, to: 'glsl' | 'wgsl', options = {}) =>
@@ -58,9 +59,11 @@ describe.each(['glsl', 'wgsl'] as const)('on %s', (to) => {
     );
     expect(code('\\sin(e^x)', to).code).toBe('_gpu_sin(exp(x))');
     expect(code('\\sin(xy)', to).code).toBe('_gpu_sin(x * y)');
-    // A product by a literal, and a quotient by one, cannot overflow more
-    // than a sum can.
-    expect(code('\\sin(2x+1)', to).code).toBe('sin(2.0 * x + 1.0)');
+    // A product by a literal overflows when the other factor has no known
+    // size: `2x` is `+∞` in f32 for `x ≥ 1.8·10³⁸` (CE-619.2). With a
+    // declared range, the product has a known size.
+    expect(code('\\sin(2x+1)', to).code).toBe('_gpu_sin(2.0 * x + 1.0)');
+    expect(code('\\sin(2s+1)', to).code).toBe('sin(2.0 * s + 1.0)');
     // A constant is read by its value: Γ(40) ≈ 2·10⁴⁶ is +∞ in f32.
     expect(code('\\sin(x+\\Gamma(20))', to).code).toMatch(/^sin\(/);
     expect(code('\\sin(x+\\Gamma(40))', to).code).toMatch(/^_gpu_sin\(/);
@@ -74,9 +77,13 @@ describe.each(['glsl', 'wgsl'] as const)('on %s', (to) => {
   it('a parameter whose type is inferred keeps the guard', () => {
     // `p(0/0)` is NaN in the interpreter, and so is `p(u)` for `u: number`.
     expect(code('p(u)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
-    // When every call passes a finite value (`x` is declared `real`), the
-    // parameter is finite for certain (CE-565.4).
-    expect(code('p(x)', to).preamble).toContain(' cos(1.9 * k + x)');
+    // When every call passes a finite value of known size (`s` is declared
+    // `real<-10..10>`), the parameter is finite for certain (CE-565.4), and
+    // `1.9k` cannot overflow. A finite value of unknown size (`x` is
+    // declared `real`) makes `1.9k` `+∞` in f32 for `k ≥ 1.8·10³⁸`
+    // (CE-619.1).
+    expect(code('p(s)', to).preamble).toContain(' cos(1.9 * k + x)');
+    expect(code('p(x)', to).preamble).toContain('_gpu_cos(1.9 * k + x)');
   });
 
   it('a uniform that vars maps to its own name keeps the built-in', () => {

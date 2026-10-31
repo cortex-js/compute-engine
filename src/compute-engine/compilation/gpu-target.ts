@@ -1,8 +1,4 @@
-import type {
-  Expression,
-  IComputeEngine as ComputeEngine,
-  RoundingTies,
-} from '../global-types.js';
+import type { Expression, RoundingTies } from '../global-types.js';
 import { entrySource } from './function-purity.js';
 import {
   cseRecordingRules,
@@ -94,7 +90,6 @@ import {
   statementBodyHead,
 } from './base-compiler.js';
 import type {
-  EnclosingDefinition,
   LoopInvariantBinding,
   MatchStatementClause,
 } from './base-compiler.js';
@@ -135,14 +130,13 @@ import {
 import { foldSeed } from '../numerics/random.js';
 import { rangeCount } from '../numerics/range-count.js';
 import { smallCount } from '../boxed-expression/collection-count.js';
+import { boundVariableNames } from '../boxed-expression/binders.js';
 import {
-  declaredBinders,
-  scopeForRebuild,
-} from '../boxed-expression/binding-sites.js';
-import {
-  boundVariableNames,
-  rewriteWithBinders,
-} from '../boxed-expression/binders.js';
+  MAX_POINT_CALL_INLINES,
+  inlinePointCalls,
+  inlinePointValues,
+  reachableSymbolNames,
+} from './point-value-inlining.js';
 
 /**
  * GPU shader operators shared by GLSL and WGSL.
@@ -1766,15 +1760,6 @@ function gpuNaNSafeUnary(
   return `${name}(${code})`;
 }
 
-/**
- * The heads whose value is finite in f32 when their operands are, and that
- * `gpuProvablyFinite` therefore accepts: their result does not grow past
- * the size of their operands (a sum can only double the largest), or is
- * bounded (`sin`, `tanh`). `Multiply` and `Divide` have their own rule
- * there. A head such as `Exp`, `Cosh` or `Power` can overflow to `+∞` in
- * f32 where the interpreter's f64 value is finite: `cosh(x) − sinh(x)` is
- * typed `real`, and at `x = 100` it is `∞ − ∞` in f32.
- */
 /** The largest finite f32 value, 2¹²⁸ − 2¹⁰⁴. */
 const GPU_F32_MAX = 3.4028234663852886e38;
 
@@ -1797,10 +1782,19 @@ function gpuFiniteRealCells(x: Expression): boolean {
   );
 }
 
+/**
+ * The heads whose value is finite in f32 when their operands are, and that
+ * `gpuProvablyFinite` therefore accepts: their result does not grow past
+ * the size of their operands, or is bounded (`sin`, `tanh`). A sum
+ * (`Add`, `Subtract`, `Negate`), `Multiply`, `Divide`, `Mod` and `Power`
+ * are not in this set: they have their own rule in `gpuFiniteProof`, which
+ * reads the size of the operands, since a sum, a product or a quotient of
+ * finite values can overflow f32. A head such as `Exp` or `Cosh` can
+ * overflow to `+∞` in f32 where the interpreter's f64 value is finite:
+ * `cosh(x) − sinh(x)` is typed `real`, and at `x = 100` it is `∞ − ∞` in
+ * f32.
+ */
 const GPU_F32_BOUNDED_HEADS = new Set([
-  'Add',
-  'Subtract',
-  'Negate',
   'Sin',
   'Cos',
   'Tanh',
@@ -1817,7 +1811,6 @@ const GPU_F32_BOUNDED_HEADS = new Set([
   'Max',
   'ElementMin',
   'ElementMax',
-  'Mod',
   'Smoothstep',
   'Random',
 ]);
@@ -1873,34 +1866,49 @@ const GPU_F32_BOUNDED_HEADS = new Set([
  *   that `vars` maps to its own identifier (`{ T: 'T' }`, the way Tycho
  *   passes a uniform) is the exception: it is the host's input, of its
  *   declared type;
- * - it cannot overflow in f32: each head is in `GPU_F32_BOUNDED_HEADS`, a
- *   product has at most one factor of unknown magnitude (a factor of known
- *   magnitude is a number literal, `sin`, `cos` or `tanh` of a real, or an
- *   expression whose static type has a finite range, such as a symbol
- *   declared `real<0..10>`), a product of factors that all have a known
- *   magnitude stays within half the largest f32, a power `b^n` with an
- *   integer literal `n` from 2 to 4 has a base of known magnitude (a
- *   declared range, `sin`, `cos`, a literal, a product of number literals
- *   that are not rationals and one of the others, such as `2x` or
- *   `-0.14·cos(T)`, or a sum of these) whose `n`-th power stays within half
- *   the largest f32, a sum that holds such a power has terms whose bounds
- *   (for a product term of that form with no range in its type, `|c|·m`)
- *   add up to at most half the largest f32, a quotient has a
- *   non-zero literal divisor, and a subtree with no unknowns has a value
- *   that is finite in f32. A finite operand that
- *   overflows becomes `±∞` in the shader, and the guard turns `sin(∞)` into
- *   NaN, where the built-in gives 0 on Apple GPUs. One limit is accepted:
- *   a sum, or a product by a literal, of finite values overflows when they
- *   are within that factor of the largest f32 (3.4·10³⁸): `cos(2T)` at
- *   `T = 2·10³⁸` gives 0 there on Apple, where the guard gave NaN. A proof
- *   that excluded it would need a range for every symbol, and would keep
- *   the guard on every declared `real` that has none. For the same reason
- *   `k·t` of two declared `real` symbols keeps the guard: the operand can
- *   be `+∞` in f32 (`k = t = 10²⁰`), where the interpreter's f64 value is
- *   finite. Declared ranges (`k: real<0..10>`, `t: real<0..6.3>`) prove it
- *   finite. The product `a·b` of two parameters of a definition keeps the
- *   guard for the same reason, unless the arguments of every call bound
- *   the magnitude of one of them.
+ * - it cannot overflow in f32. A value of unknown magnitude is a finite
+ *   f32 value, which can be as large as 3.4·10³⁸; a value of known
+ *   magnitude is a number literal, `sin`, `cos` or `tanh` of a real (at
+ *   most 1), `arctan` of a real, `Random()`, a constant, a symbol that the
+ *   shader reads as the host's input with a declared finite range
+ *   (`k: real<0..10>`; the range in the static type of a compound
+ *   expression is not read), a product of such values, a sum, difference
+ *   or negation of such values (the sum of the bounds of the operands), or
+ *   `abs`, `min` or `max` of real scalar operands of known magnitude (the
+ *   largest bound of the operands; `|(x, x)|` is a Euclidean norm and has
+ *   no bound from this rule). Each head is in
+ *   `GPU_F32_BOUNDED_HEADS`, or is one of these:
+ *   - a product whose factors all have a known magnitude, and whose
+ *     magnitudes multiply to at most half the largest f32, or a product of
+ *     one factor of unknown magnitude and number literals of magnitude at
+ *     most 1 (`0.5·x`, `x/3`) (`productStaysFinite`): `H·x` with
+ *     `H: real<0..10³⁰>` and `x` declared `real` is `+∞` in f32 for
+ *     `x ≥ 3.5·10⁸`, and `k·t` of two declared `real` symbols for
+ *     `k = t = 10²⁰`, where the interpreter's f64 value is finite;
+ *   - a sum whose terms have magnitudes that add up to at most half the
+ *     largest f32, or one term of unknown magnitude beside terms whose
+ *     magnitudes add up to at most 2¹⁰⁰ (`x + 1`) (`sumStaysFinite`):
+ *     `R + Q` with `R, Q: real<0..2·10³⁸>` is `+∞` in f32;
+ *   - a power `b^n` with an integer literal `n` from 2 to 4, as the operand
+ *     of the guarded call or a term of a sum there, whose base has a known
+ *     magnitude (a declared range, `sin`, `cos`, a literal, a product of
+ *     number literals that are not rationals and one of the others, such
+ *     as `2x` or `-0.14·cos(T)`, or a sum of these) and whose `n`-th power
+ *     stays within half the largest f32;
+ *   - a quotient by a number literal (`quotientStaysFinite`), and a
+ *     floored modulo (`modStaysFinite`), whose quotient cannot overflow:
+ *     `mod(R, 10⁻³⁰)` with `R: real<0..10¹⁷>` is NaN in f32;
+ *   - a pure subtree with no unknowns, whose value is finite in f32.
+ *     `Random()` is not such a subtree: it is drawn at run time. Neither is
+ *     `5r` with `r := Random()` (`BaseCompiler.foldValueImpure` looks
+ *     through the value of a symbol).
+ *
+ *   A finite operand that overflows becomes `±∞` in the shader, and the
+ *   guard turns `sin(∞)` into NaN, where the built-in gives 0 on Apple
+ *   GPUs. A declared range proves a product of declared `real` symbols
+ *   finite (`k: real<0..10>`, `t: real<0..6.3>`). The product `a·b` of two
+ *   parameters of a definition keeps the guard for the same reason, unless
+ *   the arguments of every call bound the magnitude of both.
  *
  * The guard costs a bit test and a selection per call: about 10% of the
  * frame time of Tycho's `voronoi-diagram` on WebGPU. On a finite argument it
@@ -1967,6 +1975,19 @@ function gpuFiniteProof(
     written === 'all' || written?.has(s) === true;
   const seen = new Map<Expression, boolean>();
   const seenTop = new Map<Expression, boolean>();
+  // The real value of the literal that the emitter writes in place of the
+  // function node `e`, or `undefined` when the emitter does not fold `e`
+  // into one literal. The emitter folds a constant subtree top-down at each
+  // function node with the gates of `foldedRealNumber()` in
+  // `base-compiler.ts`: no unknowns, pure (also through the value of each
+  // symbol), within the work estimate, and no `constantFold: false` on the
+  // target. The value is the interpreter's f64 value of `e`, which the
+  // shader reads rounded to f32. A subtree that is not folded is computed
+  // by the shader in f32, and its value can be far from the f64 value: with
+  // `A := 100000005` and `B := 100000003`, `A - B` is 2 in f64, but 8 in
+  // f32, where `A` rounds to 100000008 and `B` to 10^8.
+  const gpuFoldedValue = (e: Expression): number | undefined =>
+    isFunction(e) ? BaseCompiler.foldedRealNumber(e, target) : undefined;
   const reading = new Set<string>();
   const isMapped = (s: string): boolean =>
     target.varsKeys?.has(s) === true || caller.isVarsKey?.(s) === true;
@@ -1977,19 +1998,24 @@ function gpuFiniteProof(
   // (`tryFoldKnownSymbol()` in `base-compiler.ts`). A later assignment does
   // not change the compiled code, so the value, not the type of the symbol,
   // tells what the shader computes: `c := 2.5` gives `c` the INFERRED type
-  // `real`, and `sin(c + x)` is `sin(2.5 + x)` in the shader.
+  // `real`, and `sin(c + x)` is `sin(2.5 + x)` in the shader. The value is
+  // read as the shader computes it: rewritten for the engine's angular unit,
+  // as `tryFoldKnownSymbol()` rewrites it before it compiles it. In degree
+  // mode `c := |\arccos(-1) - \pi|` is about 176.86 in the shader, not 0.
   const bakedValue = (e: Expression & { symbol: string }) => {
     if (isMapped(e.symbol) || target.boundVars?.has(e.symbol) === true)
       return undefined;
     if (target.var(e.symbol) !== undefined) return undefined;
-    return e.engine._getSymbolValue(e.symbol);
+    const stored = e.engine._getSymbolValue(e.symbol);
+    return stored === undefined
+      ? undefined
+      : BaseCompiler.foldedValueInRadians(stored, target);
   };
   // `top` is true for the operand of the guarded call itself, and for a term
   // of a sum, difference or negation in that position: only there is a
   // small power accepted (`smallPowerStaysFinite`). Elsewhere its size
   // would be lost: `floor(x^4)` is typed an integer with no range, and
-  // `1000·floor(x^4)` with `x: real<-10⁹..10⁹>` would pass the product rule
-  // with one factor of unknown magnitude, but is `+∞` in f32 at `x = 10⁹`.
+  // would count as a value of unknown magnitude.
   const finite = (e: Expression, top = false): boolean => {
     const memo = top ? seenTop : seen;
     const known = memo.get(e);
@@ -2038,29 +2064,20 @@ function gpuFiniteProof(
       caller.isOverriddenOperator?.(e.operator) !== true &&
       e.ops.every((op) => finite(op, top && sum))
     ) {
-      // A subtree with no unknowns is a constant, whose value is known: it
-      // is finite in the shader when it is finite in f32 (`Γ(20)`, but not
-      // `Γ(40)`).
-      if (e.unknowns.length === 0) {
-        const n = e.N();
-        const v = n.re;
-        if (
-          Number.isFinite(v) &&
-          Math.abs(v) <= GPU_F32_MAX &&
-          (!strict || n.im === 0)
-        ) {
-          memo.set(e, true);
-          return true;
-        }
+      // A subtree that the emitter folds into one literal (`gpuFoldedValue`)
+      // is finite in the shader when its value is finite in f32 (`Γ(20)`,
+      // but not `Γ(40)`). A subtree that it does not fold is evaluated by
+      // the shader in f32, and is judged by the rules below.
+      const v = gpuFoldedValue(e);
+      if (v !== undefined && Number.isFinite(v) && Math.abs(v) <= GPU_F32_MAX) {
+        memo.set(e, true);
+        return true;
       }
       if (e.operator === 'Multiply') result = productStaysFinite(e.ops);
       else if (e.operator === 'Power') result = top && smallPowerStaysFinite(e);
-      // A sum with a small power among its terms, read through nested sums,
-      // differences and negations (`-u^2 - v^2 - w^2` is a sum of
-      // `Negate(Power(…))` terms): the magnitudes of the terms (the power
-      // has one, `m^n`) must add up to at most half the largest
-      // f32, so that the powers cannot overflow together: `u^2 + v^2 + w^2`
-      // with `u, v, w: real<-1.2·10¹⁹..1.2·10¹⁹>` is `+∞` in f32.
+      // A sum, read through nested sums, differences and negations
+      // (`-u^2 - v^2 - w^2` is a sum of `Negate(Power(…))` terms), is
+      // finite when its terms cannot overflow together (`sumStaysFinite`).
       else if (sum) {
         const terms: Expression[] = [];
         const collect = (t: Expression): void => {
@@ -2074,52 +2091,23 @@ function gpuFiniteProof(
           else terms.push(t);
         };
         collect(e);
-        // Every term must then have a known magnitude: `u^2 + y` with `y`
-        // declared `real` and no range is `+∞` in f32 for `u = 10¹⁹`,
-        // `y = 3·10³⁸`.
-        // A power with no unknowns (`e^20`) is a constant, which the test of
-        // constants above accepts: only a power that `smallPowerStaysFinite`
-        // accepts counts here (`sin(x + e^20)` is the built-in).
-        if (
-          terms.some(
-            (t) =>
-              isFunction(t) &&
-              t.operator === 'Power' &&
-              t.unknowns.length > 0 &&
-              smallPowerStaysFinite(t)
-          )
-        ) {
-          let s = 0;
-          // A product term of the form that a power base accepts
-          // (`productBound`: number literals and one atom) has the bound
-          // `|c|·m` when its type has no range: `(2x)^2 + 3x`. `magnitude`
-          // does not give that bound (see there). A negated term is read
-          // here as its operand, as `collect` unwraps `Negate`.
-          for (const t of terms)
-            s += magnitude(t) ?? productBound(t) ?? Infinity;
-          result = Number.isFinite(s) && s <= GPU_F32_MAX / 2;
-        } else result = true;
+        result = sumStaysFinite(terms);
       }
       // A written vector (`[t, k, 1]` is `vec3(t, k, 1.0)`) is finite when
       // each of its components is.
       else if (e.operator === 'List' || e.operator === 'Tuple') result = true;
-      else if (e.operator === 'Divide')
-        result = isNumber(e.op2) && e.op2.isSame(0) === false;
-      // Over finite operands, `Mod` is NaN for a divisor 0 and `Smoothstep`
-      // has no defined value when its two edges are equal. The static type
-      // of the node excludes it for symbols (`Mod(x, y)` is typed
-      // `nan | real`), but a parameter of the body being compiled is typed
-      // `number`, and so is the node: then the divisor must be a non-zero
-      // literal, and the edges two different literals.
+      else if (e.operator === 'Divide') result = quotientStaysFinite(e);
+      else if (e.operator === 'Mod') result = modStaysFinite(e);
+      // Over finite operands, `Smoothstep` has no defined value when its two
+      // edges are equal. The static type of the node excludes it for symbols,
+      // but a parameter of the body being compiled is typed `number`, and so
+      // is the node: then the edges must be two different literals.
       else if (
         facts !== undefined &&
-        (e.operator === 'Mod' || e.operator === 'Smoothstep') &&
+        e.operator === 'Smoothstep' &&
         !e.type.matches('finite_real')
       )
-        result =
-          e.operator === 'Mod'
-            ? isNumber(e.op2) && e.op2.isSame(0) === false
-            : isNumber(e.op1) && isNumber(e.op2) && !e.op1.isSame(e.op2);
+        result = isNumber(e.op1) && isNumber(e.op2) && !e.op1.isSame(e.op2);
       else result = GPU_F32_BOUNDED_HEADS.has(e.operator);
     }
     memo.set(e, result);
@@ -2128,20 +2116,18 @@ function gpuFiniteProof(
   // The largest magnitude that the finite operand `e` can have in the
   // shader, or `undefined` when no bound is known: the value of a number
   // literal; the bound of the value written in place of a symbol; 1 for
-  // `sin`, `cos` and `tanh` of a real operand; else the bounds of a numeric
-  // range in the static type of `e` (`real<0..10>`, a range that the
-  // declaration of a symbol gives, and that the type of a sum or a product
-  // of such symbols carries: `k·t` with `k: real<0..10>` and
-  // `t: real<-7..7>` is typed `real<-70..70>`). A declared range is a
-  // promise of the host, as a declared `real` is (see above). A product of
-  // number literals and one atom (`productBound`: `2x` with
-  // `x: real<-10..10>`) has no bound here unless its type has a range: the
-  // product rule, the call-site facts and a value written in place of a
-  // symbol read this bound, and the product rule accepts one factor of
-  // unknown magnitude beside factors with a bound: `sin(c·y)` with
-  // `c ≔ 10³⁰·cos(T)` and `y: real` would pass, and is `+∞` in f32 at
-  // `T = 0`, `y = 10⁹`. Only the sum check of `finite` and the base of a
-  // small power (`powerBaseMagnitude`) read the bound of such a product.
+  // `sin`, `cos` and `tanh` of a real operand and for `Random()`; π/2 for
+  // `arctan` of a real operand; the product of the bounds of
+  // the factors of a product when each factor has one; the magnitude of the
+  // literal that the emitter folds a constant subtree into (`2π`); the sum of the bounds
+  // of the operands of a sum, a difference or a negation; the largest bound
+  // of the real scalar operands of `abs`, `min` and `max`; else the bounds
+  // of the declared range of a
+  // symbol that the shader reads as the host's input (`k: real<0..10>`). A
+  // declared range is a promise of the host, as a declared `real` is (see
+  // above). The range in the static type of a compound expression is not
+  // read. The bound is the exact bound of the value: the rules that read it
+  // keep a margin for the rounding to f32.
   const magnitude = (e: Expression, depth = 0): number | undefined => {
     if (isNumber(e))
       return e.im === 0 && Number.isFinite(e.re) ? Math.abs(e.re) : undefined;
@@ -2160,23 +2146,117 @@ function gpuFiniteProof(
       const fact = facts?.get(e.symbol);
       if (fact?.finite === true) return fact.magnitude;
       if (isWritten(e.symbol)) return undefined;
+      // Past the depth limit a stored value gives no bound: the constant
+      // rule below would read the interpreter's value, which the shader does
+      // not compute when the value is not folded. The limit counts every
+      // level of nesting of `magnitude()`, not only the steps through
+      // stored values, so a stored value deep in a sum or a product also
+      // gives no bound: the helper stays (a decline of the built-in, never
+      // a wrong value).
       const baked = bakedValue(e);
-      if (baked !== undefined && depth < 8) return magnitude(baked, depth + 1);
+      if (baked !== undefined)
+        return depth < 8 ? magnitude(baked, depth + 1) : undefined;
     } else if (
       isFunction(e) &&
       (e.operator === 'Sin' || e.operator === 'Cos' || e.operator === 'Tanh') &&
       (e.type.matches('real') || (strict && finite(e.op1)))
     )
       return 1;
+    // `arctan` of a real operand is at most π/2, and `Random()` is in
+    // [0, 1).
+    else if (
+      isFunction(e) &&
+      e.operator === 'Arctan' &&
+      e.nops === 1 &&
+      (e.type.matches('real') || (strict && finite(e.op1)))
+    )
+      return Math.PI / 2;
+    else if (isFunction(e) && e.operator === 'Random' && e.nops === 0) return 1;
     // A small power that `finite` accepts: `m^n` for the bound `m` of its
-    // base, with the same margin. Without it, `1000·x^4` with
-    // `x: real<-10⁹..10⁹>` would count `x^4` as a factor of unknown
-    // magnitude, and the product rule would accept it.
+    // base, with the same margin, so that a sum that holds it
+    // (`x^2 + y^2`) adds that bound.
     else if (isFunction(e) && e.operator === 'Power' && isNumber(e.op2)) {
       const m = powerBaseMagnitude(e.op1);
       if (m !== undefined && smallPowerStaysFinite(e))
         return Math.max(1, m) ** e.op2.re * (1 + 2 ** -10);
+    } else if (isFunction(e) && e.operator === 'Multiply') {
+      let bound = 1;
+      for (const op of e.ops) {
+        const m = magnitude(op, depth + 1);
+        if (m === undefined) {
+          bound = NaN;
+          break;
+        }
+        bound *= m;
+      }
+      if (Number.isFinite(bound)) return bound;
     }
+    // A library constant (`Pi`) that the caller does not map has a value
+    // known here. The shader reads a symbol that is not a constant from its
+    // input or a binder, not from its value. A subtree that the emitter
+    // folds into one literal (`gpuFoldedValue`) has the magnitude of that
+    // literal; another subtree is evaluated by the shader in f32, and its
+    // bound comes from the bounds of its parts (the rules above and below).
+    if (isSymbol(e)) {
+      if (
+        e.valueDefinition?.isConstant === true &&
+        !isMapped(e.symbol) &&
+        e.unknowns.length === 0
+      ) {
+        const n = e.N();
+        if (n.im === 0 && Number.isFinite(n.re)) return Math.abs(n.re);
+      }
+    } else {
+      const v = gpuFoldedValue(e);
+      if (v !== undefined && Number.isFinite(v)) return Math.abs(v);
+    }
+    // A sum, a difference or a negation: the sum of the bounds of its
+    // operands. `abs`, `min` and `max` of real scalar operands: the largest
+    // bound of their operands. A point or a list operand gives no bound
+    // here: `|(x, x, x, x)|` compiles to the Euclidean norm `length(…)`,
+    // which is 2 for `x = 1`, not the largest component magnitude 1 that
+    // the bound of a written vector gives. `min` and `max` have the same
+    // requirement, so that only the scalar meaning of these heads is read.
+    if (
+      isFunction(e) &&
+      (e.operator === 'Add' ||
+        e.operator === 'Subtract' ||
+        e.operator === 'Negate' ||
+        e.operator === 'Abs' ||
+        e.operator === 'Min' ||
+        e.operator === 'Max')
+    ) {
+      const sum = e.operator === 'Add' || e.operator === 'Subtract';
+      const extremum = !sum && e.operator !== 'Negate';
+      let bound = 0;
+      for (const op of e.ops) {
+        if (
+          extremum &&
+          (gpuOperandShape(op) !== 'scalar' || BaseCompiler.isComplexValued(op))
+        )
+          return undefined;
+        const m = magnitude(op, depth + 1);
+        if (m === undefined) return undefined;
+        bound = sum ? bound + m : Math.max(bound, m);
+      }
+      return Number.isFinite(bound) ? bound : undefined;
+    }
+    // The range in the static type of a symbol that the shader reads as
+    // the host's input, under the conditions of `atomBound`: a declared
+    // range is a promise of the host, as a declared `real` is. The range
+    // in the static type of another expression is computed over the exact
+    // values of its operands, and does not hold after their rounding to
+    // f32: with `A: real<100000005..100000006>` and
+    // `B: real<100000003..100000003>`, `A − B` is typed in [2, 3], but `A`
+    // rounds to 100000008 and `B` to 10⁸ in f32, and `A − B` is 8 there.
+    if (
+      !isSymbol(e) ||
+      facts?.has(e.symbol) === true ||
+      isWritten(e.symbol) ||
+      bakedValue(e) !== undefined ||
+      e.valueDefinition?.inferredType === true
+    )
+      return undefined;
     const t = e.type.type;
     if (typeof t !== 'object' || t.kind !== 'numeric') return undefined;
     const { lower, upper } = t;
@@ -2188,22 +2268,132 @@ function gpuFiniteProof(
   // has a known magnitude and the product of those magnitudes (each counted
   // as at least 1, so that every partial product of the shader's evaluation
   // order is bounded too) is at most half the largest f32. The half covers
-  // the rounding of each factor and each partial product to f32. A product
-  // with one factor of unknown magnitude is accepted when the product of the
-  // known magnitudes meets the same bound, as a product by a literal is (see
-  // the limit above): `5·x` is accepted, but `H·G·t` with
-  // `H, G: real<0..10³⁰>` is not, as `H·G` alone overflows f32. Two factors
-  // of unknown magnitude can overflow: `x·y` with `x = y = 10²⁰`.
+  // the rounding of each factor and each partial product to f32. A factor
+  // of unknown magnitude can be any finite f32 value, up to 3.4·10³⁸, so a
+  // product with one is refused: `H·x` with `H: real<0..10³⁰>` and `x`
+  // declared `real` is `+∞` in f32 for `x ≥ 3.5·10⁸`, and `5·x` is `+∞`
+  // for `x ≥ 6.9·10³⁷`. The exception is a product of one factor of
+  // unknown magnitude and number literals of magnitude at most 1 (`0.5·x`,
+  // the conversion `0.017453292·x` of degrees): the shader languages round
+  // a product correctly, so each partial product is at most the factor of
+  // unknown magnitude, a finite f32. A rational literal `±1/q` is such a
+  // factor too, for an integer `q` from 1 to 2¹²⁶: the shader multiplies by
+  // its value (`0.25 * x`) or divides by `q` (`x / 3.0`), and a division by
+  // `q ≥ 1` in the range where its error is specified (2.5 ulp) cannot
+  // overflow. Another rational literal (`2/3`) is refused, and so is
+  // `sin(t)`, whose GPU value is not specified to be at most 1.
   const productStaysFinite = (ops: ReadonlyArray<Expression>): boolean => {
-    let unknown = 0;
     let bound = 1;
+    let unknown = 0;
+    let smallLiterals = true;
     for (const op of ops) {
       const m = magnitude(op);
       if (m === undefined) unknown += 1;
-      else bound *= Math.max(1, m);
+      else {
+        bound *= Math.max(1, m);
+        const small =
+          isNumber(op) &&
+          m <= 1 &&
+          (op.operator !== 'Rational' ||
+            (Math.abs(op.numerator.re) === 1 && op.denominator.re <= 2 ** 126));
+        if (!small) smallLiterals = false;
+      }
     }
-    if (unknown > 1) return false;
-    return Number.isFinite(bound) && bound <= GPU_F32_MAX / 2;
+    if (unknown === 1) return smallLiterals;
+    return unknown === 0 && Number.isFinite(bound) && bound <= GPU_F32_MAX / 2;
+  };
+  // A sum of finite terms (read through nested sums, differences and
+  // negations) cannot overflow in f32 when the magnitudes of its terms add
+  // up to at most half the largest f32: `R + Q` with
+  // `R, Q: real<0..2·10³⁸>` can be 4·10³⁸, `+∞` in f32. A product term of
+  // the form that a power base accepts (`productBound`: number literals and
+  // one atom) has the bound `|c|·m` when `magnitude` gives none.
+  //
+  // One term of unknown magnitude is accepted when the other terms add up
+  // to at most 2¹⁰⁰ (about 1.3·10³⁰): `x + 1` and `x - 0.14·cos(T)` with
+  // `x` declared `real`. The term of unknown magnitude is a finite f32
+  // value, at most 2¹²⁸ − 2¹⁰⁴, and an f32 sum rounds to `+∞` only from
+  // 2¹²⁸ − 2¹⁰³ (the half-way point to the next power of two). Whatever
+  // order the shader adds the terms in, each partial sum that holds the
+  // term of unknown magnitude is then below that point, and rounds to at
+  // most the largest f32; the margin from 2¹⁰⁰ to 2¹⁰³ covers the rounding
+  // of the partial sums of the other terms. Two terms of unknown magnitude
+  // can overflow: `x + y` with `x = y = 2·10³⁸`.
+  const sumStaysFinite = (terms: ReadonlyArray<Expression>): boolean => {
+    let s = 0;
+    let unknown = 0;
+    for (const t of terms) {
+      const m = magnitude(t) ?? productBound(t);
+      if (m === undefined) unknown += 1;
+      else s += m;
+    }
+    if (!Number.isFinite(s)) return false;
+    if (unknown === 0) return s <= GPU_F32_MAX / 2;
+    return unknown === 1 && s <= 2 ** 100;
+  };
+  // The quotient `a / d` of finite operands, for a number literal `d`
+  // whose magnitude is from 2⁻¹²⁶ to 2¹²⁶ (the range where the shader
+  // languages specify the error of a division, 2.5 ulp): finite when `a`
+  // has a magnitude `m` with `m / |d|` at most half the largest f32, or,
+  // when `a` has no known magnitude, when `|d| ≥ 2` (the quotient is then
+  // at most half of `a`). Any other divisor is refused: `x / 10⁻³⁰` is
+  // `+∞` in f32 for `|x| ≥ 3.5·10⁸`, and a divisor that can be 0 or tiny
+  // makes the quotient `±∞` or NaN.
+  const quotientStaysFinite = (e: Expression): boolean => {
+    if (!isFunction(e) || !isNumber(e.op2) || e.op2.im !== 0) return false;
+    const d = Math.abs(e.op2.re);
+    if (!(d >= 2 ** -126 && d <= 2 ** 126)) return false;
+    const m = magnitude(e.op1);
+    if (m === undefined) return d >= 2;
+    return m / d <= GPU_F32_MAX / 2;
+  };
+  // The floored modulo `Mod(a, d)` of finite operands. The shader computes
+  // it from the quotient `a / d` (`gpuFloorModLibrary`), which is `±∞` in
+  // f32 when `d` is tiny: `mod(R, 10⁻³⁰)` with `R: real<0..10¹⁷>` is NaN.
+  // The product of the divisor and the rounded quotient can also reach
+  // `|a| + |d|`. So it is finite when:
+  // - `d` is the literal 1, which the shader computes as `fract(fract(a))`
+  //   (`a - floor(a)`), finite for every finite `a`; or
+  // - `a` has a known magnitude `m`, `d` has a known magnitude `M` of at
+  //   most 2¹²⁶ (the range where the shader languages specify the error of
+  //   a division), and a known lower bound `l` of its magnitude, at least
+  //   2⁻¹²⁶ (a smaller divisor can be flushed to 0). Then `m / l` and
+  //   `m + M` must each be at most half the largest f32. The lower bound is
+  //   the value of a number literal, or, when the proof reads static types
+  //   (not `strict`, see `gpuFiniteProof`), the declared range of a symbol
+  //   that the shader reads as the host's input, under the conditions of
+  //   `atomBound` (`d: real<0.5..2>`). The range in the static type of
+  //   another divisor does not hold in f32: with
+  //   `A: real<100000000.5..100000002>` and `B: real<100000000..100000000>`,
+  //   `A − B` is typed in [0.5, 2], but both round to 10⁸ in f32, the
+  //   divisor is 0, and the shader gives NaN. The value that the shader
+  //   computes in place of a symbol is such a divisor too.
+  const modStaysFinite = (e: Expression): boolean => {
+    if (!isFunction(e) || e.nops !== 2) return false;
+    const d = e.op2;
+    if (isNumber(d) && d.im === 0 && d.re === 1) return true;
+    let low: number | undefined;
+    if (isNumber(d)) low = d.im === 0 ? Math.abs(d.re) : undefined;
+    else if (
+      !strict &&
+      isSymbol(d) &&
+      facts?.has(d.symbol) !== true &&
+      !isWritten(d.symbol) &&
+      bakedValue(d) === undefined &&
+      d.valueDefinition?.inferredType !== true
+    ) {
+      const t = d.type.type;
+      if (typeof t === 'object' && t.kind === 'numeric') {
+        const { lower, upper } = t;
+        if (lower !== undefined && lower > 0) low = lower;
+        else if (upper !== undefined && upper < 0) low = -upper;
+      }
+    }
+    if (low === undefined || !(low >= 2 ** -126)) return false;
+    const m = magnitude(e.op1);
+    const M = magnitude(d);
+    if (m === undefined || M === undefined || M > 2 ** 126) return false;
+    return m / low <= GPU_F32_MAX / 2 && m + M <= GPU_F32_MAX / 2;
   };
   // `b^n` with an integer literal `n` from 2 to 4, whose operands are
   // finite (checked by `finite` before), is finite when `b` has a bound `m`
@@ -6533,281 +6723,20 @@ function compileGpuLast(
 }
 
 /**
- * The value that the shader computes in place of the symbol `e`, or
- * `undefined` when `e` is not a symbol or the shader reads it as an input.
- *
- * A symbol with a value that no `vars` entry, binder (a parameter, an index,
- * a local) or target constant resolves is compiled as its value, written
- * into the shader (`tryFoldKnownSymbol()` in `base-compiler.ts`). A later
- * assignment does not change the compiled code, so the value tells what the
- * shader computes. The conditions are those of the base compiler: a `vars`
- * key is never folded, and a definition that a checkpoint restore marked
- * `_rewound` has no value.
+ * The error of a shader compilation when `inlinePointCalls()` would
+ * substitute more than `MAX_POINT_CALL_INLINES` function bodies. A call of
+ * `head` left as written has the type of `call`, a union that has no shader
+ * type, so the compilation would fail on it anyway.
  */
-function gpuInlinedSymbolValue(
-  e: Expression,
-  target: CompileTarget<Expression>
-): Expression | undefined {
-  if (!isSymbol(e)) return undefined;
-  const s = e.symbol;
-  if (target.varsKeys?.has(s) === true || target.boundVars?.has(s) === true)
-    return undefined;
-  if (target.var(s) !== undefined) return undefined;
-  if ((e.valueDefinition as { _rewound?: true } | undefined)?._rewound)
-    return undefined;
-  return e.engine._getSymbolValue(s);
-}
-
-/**
- * `expr` with each symbol whose type admits a point and a list of points
- * (`gpuPointOrPointListUnion`) replaced by its value, when the shader
- * computes that value anyway (`gpuInlinedSymbolValue`) and the value is a
- * point (a `Tuple`). `expr` itself when there is no such symbol.
- *
- * The declared type of such a symbol has no shader type: a point is a
- * vector and a list of points is an array. Its value has one. With the
- * value written in place before the compilation, every type, shape and
- * width that the compilation reads comes from an ordinary tuple, and agrees
- * with the code, which is the code of the value.
- *
- * A name that the compiled code binds (`written`: a parameter, a local, an
- * index) is not replaced, and neither is a symbol whose value reads such a
- * name, which the binder would capture. The other symbols keep the
- * reading of their declared type. The value is recorded in
- * `target.symbolDeps`, as `tryFoldKnownSymbol()` records it, because the
- * compiled code holds it.
- */
-function gpuInlinePointValues(
-  expr: Expression,
-  target: CompileTarget<Expression>,
-  written: ReadonlySet<string>
-): Expression {
-  const values: Record<string, Expression> = {};
-  let found = false;
-  const visited = new Set<Expression>();
-  const walk = (e: Expression): void => {
-    if (visited.has(e)) return;
-    visited.add(e);
-    if (isSymbol(e)) {
-      const s = e.symbol;
-      if (Object.hasOwn(values, s) || written.has(s)) return;
-      if (gpuPointOrPointListUnion(e.type.type) === undefined) return;
-      const value = gpuInlinedSymbolValue(e, target);
-      if (value === undefined || !isFunction(value, 'Tuple')) return;
-      if (value.symbols.some((v) => written.has(v))) return;
-      // A value of another type than the declared union (a host wrote a
-      // 3-D point into the definition of a 2-D `P`) is refused, as
-      // `compileSymbol` refuses it where the symbol is read.
-      BaseCompiler.assertHeldValueType(e);
-      // The expression was rewritten for the engine's angular unit at the
-      // compile entry (`rewriteAngularUnit()`), and the stored value was
-      // not: the value is rewritten here, alone, so that `Sin(x)` in it is
-      // read in degrees in degree mode, and the rest of the expression is
-      // not converted a second time.
-      values[s] = BaseCompiler.foldedValueInRadians(value, target);
-      found = true;
-      return;
-    }
-    if (isFunction(e)) for (const op of e.ops) walk(op);
-  };
-  walk(expr);
-  if (!found) return expr;
-  for (const s of Object.keys(values)) target.symbolDeps?.add(s);
-  // `rewriteWithBinders()` keeps a node that several parents share as one
-  // node, and rewrites it once (`expr.subs()` rewrites it once for each
-  // path, which takes a time exponential in the depth of a shared graph).
-  // It also leaves an occurrence that a binder of the expression shadows.
-  return rewriteWithBinders(expr, (sym, shadowed) =>
-    Object.hasOwn(values, sym.symbol) && shadowed?.has(sym.symbol) !== true
-      ? values[sym.symbol]
-      : sym
+function gpuPointCallsOverBudget(head: string, call: Expression): Error {
+  return new Error(
+    `Could not compile \`${head}\`: its value has the type ` +
+      `\`${call.type.toString()}\`, which has no shader type, and the ` +
+      `calls of the functions that give such a value would be written ` +
+      `out more than ${MAX_POINT_CALL_INLINES} times. If the value ` +
+      `reads a symbol that can be a point or a list of points, declare ` +
+      `that symbol with the point type (\`tuple<real, real>\`).`
   );
-}
-
-/**
- * How many function bodies one walk of `gpuInlinePointCalls` may substitute.
- * The bodies of a chain of definitions that each call the one below twice
- * double with each level: 511 bodies for 8 levels took about 0.1 s, and 8191
- * bodies for 12 levels about 1.2 s.
- */
-const GPU_MAX_POINT_CALL_INLINES = 512;
-
-/**
- * `expr` with each call of a user function whose type is a union that has a
- * point option and no shader type (`gpuCallTypeAdmitsInlinedPoint`)
- * replaced by the body of the function, when that body, with its point
- * values written in place (`gpuInlinePointValues`), is a point or a number.
- * `expr` itself when there is no such call.
- *
- * The signature of such a function was derived from its stored body, which
- * reads the union symbol, so the type of the call is the union (or, for
- * `f(t) := At(P, 1)`, `missing | number | tuple<number, number>`), and the
- * shape and type readings at the call site have no width for it
- * (`f(t) := t·P` and `f(x).x`). The body with the point in place is an
- * ordinary point expression, `x·(1, 2)`. The stored definition and its
- * signature do not change. The body is the one that
- * `BaseCompiler.substitutedUserFunctionBody()` gives, under its soundness
- * conditions (a pure single-statement literal, arguments that are scalars
- * or literal points, no capture). A node that binds names (a `Block`, a
- * `Sum`) and a `Function` literal are left as written, as the root
- * inlining of list-valued calls leaves a node whose scope it cannot reuse.
- * The name of each substituted function is recorded in `target.symbolDeps`,
- * as that inlining records it, because the compiled code holds its body.
- *
- * The results for a node are not kept while a callee body is walked, so a
- * chain of definitions that each call the one below twice (`f₀(t) := t·P`,
- * `fₙ(t) := fₙ₋₁(t) + fₙ₋₁(t + 1)`) substitutes a number of bodies that
- * doubles with each level. One walk substitutes at most
- * `GPU_MAX_POINT_CALL_INLINES` bodies, and the compilation fails when a walk
- * needs more. A call left as written would have the union type, which has
- * no shader type, so the compilation would fail on it anyway.
- */
-function gpuInlinePointCalls(
-  expr: Expression,
-  target: CompileTarget<Expression>,
-  enclosing?: EnclosingDefinition
-): Expression {
-  if (target.userFunctions === undefined) return expr;
-  const engine = expr.engine as unknown as ComputeEngine;
-  const onPath = new Set<string>();
-  let inlinesLeft = GPU_MAX_POINT_CALL_INLINES;
-  // An expression is a graph that can share a node between many parents,
-  // and a walk of every path takes a time exponential in its depth (ROADMAP
-  // CE-584). The result for a node depends on the node, on the enclosing
-  // names and on the callees being substituted above it (`onPath`, where a
-  // call of one of them is left as written), so it is kept for each
-  // combination. A callee body that holds a shared graph is then walked
-  // once per node too.
-  const memo = new Map<
-    EnclosingDefinition | undefined,
-    Map<string, Map<Expression, Expression>>
-  >();
-  const visit = (e: Expression, within?: EnclosingDefinition): Expression => {
-    if (!isFunction(e) || e.operator === 'Function') return e;
-    let byPath = memo.get(within);
-    if (byPath === undefined) memo.set(within, (byPath = new Map()));
-    const pathKey = [...onPath].sort().join('\u0000');
-    let seen = byPath.get(pathKey);
-    if (seen === undefined) byPath.set(pathKey, (seen = new Map()));
-    const known = seen.get(e);
-    if (known !== undefined) return known;
-    const result = visitNode(e, within);
-    seen.set(e, result);
-    return result;
-  };
-  const visitNode = (
-    e: Expression,
-    within?: EnclosingDefinition
-  ): Expression => {
-    if (!isFunction(e)) return e;
-    // A head that the caller overrides (the `functions` or `operators`
-    // option) is left as written, and so is everything under it: the
-    // caller's implementation replaces the emission and receives the node's
-    // own operands (`CompileTarget.unrollSkipHeads`).
-    if (target.unrollSkipHeads?.has(e.operator) === true) return e;
-    const bound = boundVariableNames(e);
-    if (bound.length > 0) {
-      // A node that binds names is entered with those names as local
-      // names, so that a callee body whose free symbol one of them would
-      // capture is declined (`substitutedUserFunctionBody`). It is rebuilt
-      // on its own scope, or left as written when that scope cannot be
-      // reused (`scopeForRebuild`).
-      if (e.localScope === undefined) return e;
-      const inner: EnclosingDefinition = {
-        scalarNames: within?.scalarNames ?? new Set<string>(),
-        localNames: new Set([...(within?.localNames ?? []), ...bound]),
-      };
-      const ops = e.ops.map((op) => visit(op, inner));
-      if (ops.every((op, i) => op === e.ops[i])) return e;
-      const scope = scopeForRebuild(e.localScope, engine, e.operator, ops);
-      if (scope === undefined) return e;
-      return engine.function(e.operator, ops, { scope });
-    }
-    const ops = e.ops.map((op) => visit(op, within));
-    const node = ops.every((op, i) => op === e.ops[i])
-      ? e
-      : engine.function(e.operator, ops);
-    if (!isFunction(node)) return node;
-    if (!gpuCallTypeAdmitsInlinedPoint(node.type.type)) return node;
-    const h = node.operator;
-    if (onPath.has(h)) return node;
-    // A call of a name that the enclosing code binds is a call of that
-    // bound value, not of the user function of the same name.
-    if (within?.localNames.has(h) === true) return node;
-    // The substitution writes an argument at each occurrence of its
-    // parameter, so an argument whose value differs between two evaluations
-    // would be evaluated more than once: with `r := Random()`, `f(r)` for
-    // `f(t) := (t − t²)·P` would draw two numbers. `isPure` of a symbol does
-    // not read its value, so the test is the transitive one.
-    if (node.ops.some((a) => BaseCompiler.foldValueImpure(a))) return node;
-    const body = BaseCompiler.substitutedUserFunctionBody(
-      engine,
-      h,
-      node.ops,
-      target,
-      within
-    );
-    if (body === undefined) return node;
-    if (inlinesLeft <= 0)
-      throw new Error(
-        `Could not compile \`${h}\`: its value has the type ` +
-          `\`${node.type.toString()}\`, which has no shader type, and the ` +
-          `calls of the functions that give such a value would be written ` +
-          `out more than ${GPU_MAX_POINT_CALL_INLINES} times. If the value ` +
-          `reads a symbol that can be a point or a list of points, declare ` +
-          `that symbol with the point type (\`tuple<real, real>\`).`
-      );
-    inlinesLeft -= 1;
-    onPath.add(h);
-    try {
-      const inner = visit(body, within);
-      const point = gpuInlinePointValues(
-        inner,
-        target,
-        new Set([
-          ...(within?.localNames ?? []),
-          ...gpuReachableSymbolNames(inner).written,
-        ])
-      );
-      // The body is kept when it has a shader type: a point, or a number
-      // (`f(t) := P.x` gives `3` for `P := (3, 4)`). A number type can be
-      // a name (`real`), a range (`integer` from 0 up, for `Square(P.x)`)
-      // or a literal value, so it is tested with `isSubtype`. A body that
-      // is still a union has no shader type, and the call is left as
-      // written.
-      const t = resolveTypeForCompilation(point.type.type);
-      const isPoint = typeof t !== 'string' && t.kind === 'tuple';
-      if (!isPoint && !isSubtype(point.type.type, 'number')) return node;
-      target.symbolDeps?.add(h);
-      return point;
-    } finally {
-      onPath.delete(h);
-    }
-  };
-  return visit(expr, enclosing);
-}
-
-/**
- * Whether `gpuInlinePointCalls` tries to replace a call of type `type` by
- * the body of the function. This is the case for a union that admits a
- * point and a list of points (`gpuPointOrPointListUnion`), and for any other
- * union that has a `tuple` option and an option that is not a tuple. The
- * signature of a function whose body reads a coordinate of such a symbol
- * (`f(t) := At(P, 1)`) has the second kind of type,
- * `missing | number | tuple<number, number>`: the coordinate of a point or
- * the first point of a list of points. Neither union has a shader type. A
- * union of tuples only, or a type that is not a union, is left to the
- * ordinary compilation.
- */
-function gpuCallTypeAdmitsInlinedPoint(type: Type): boolean {
-  if (gpuPointOrPointListUnion(type) !== undefined) return true;
-  const t = resolveTypeForCompilation(type);
-  if (typeof t === 'string' || t.kind !== 'union') return false;
-  const isTupleArm = (arm: Type): boolean => {
-    const a = resolveTypeForCompilation(arm);
-    return typeof a !== 'string' && a.kind === 'tuple';
-  };
-  return t.types.some(isTupleArm) && !t.types.every(isTupleArm);
 }
 
 /**
@@ -6930,7 +6859,7 @@ function compilePointSwizzle(
   const head = `Point${comp.toUpperCase()}`;
   // A symbol whose type admits a point and a list of points. The compile
   // entries write its point value in place of it where the shader computes
-  // the value (`gpuInlinePointValues`), so a symbol of this type that
+  // the value (`inlinePointValues`), so a symbol of this type that
   // reaches here is read as an input, or is bound by the compiled code. A
   // bound local whose assignments give it a vector width (`a ≔ x·P`, a
   // `vec2` local) has that width, and its coordinate is a swizzle. Any
@@ -13384,85 +13313,6 @@ function gpuPointOrPointListSymbols(
 }
 
 /**
- * Every symbol name in `expr` and in the definition of each user function it
- * reaches, transitively, parameters included. On the shader targets a symbol
- * is emitted with its own name (`gpuCheckIdentifier`), so this set holds every
- * identifier that a local, an assignment target, a loop or binder variable or
- * a parameter of the compiled code can have. It also holds names that are
- * only read; that makes the set larger than needed, which is safe for its
- * use in {@link gpuPlainUniformRead}.
- *
- * `written` is the subset that the compiled code declares or writes: the
- * target of a `Declare` or an `Assign`, a variable bound by a binder (the
- * index of a `Sum`, a `Loop` element), and a parameter of a function literal,
- * the reachable user-function definitions included. A shader variable of
- * that name exists in the emitted code, and it hides a uniform of the same
- * name ({@link gpuRefuseShadowedVarsSources}).
- *
- * A symbol with a value that no `vars` entry maps is compiled as its value,
- * written into the shader (`tryFoldKnownSymbol()` in `base-compiler.ts`), so
- * the walk also reaches that value: a local or a binder inside it is emitted
- * with its own name.
- */
-export function gpuReachableSymbolNames(
-  expr: Expression,
-  vars?: Readonly<Record<string, unknown>>
-): {
-  all: ReadonlySet<string>;
-  written: ReadonlySet<string>;
-} {
-  const out = new Set<string>();
-  const written = new Set<string>();
-  const expanded = new Set<string>();
-  const expandedValues = new Set<string>();
-  const walkValue = (e: Expression, name: string): void => {
-    if (vars !== undefined && Object.hasOwn(vars, name)) return;
-    if (expandedValues.has(name)) return;
-    expandedValues.add(name);
-    const value = e.engine?._getSymbolValue(name);
-    if (value !== undefined) walk(value);
-  };
-  const walkUserFunction = (e: Expression, name: string): void => {
-    if (expanded.has(name)) return;
-    expanded.add(name);
-    const engine = e.engine;
-    if (engine === undefined) return;
-    const literal = BaseCompiler.userFunctionLiteral(engine, name);
-    if (literal !== undefined) walk(literal);
-  };
-  // An expression is a graph that can share a node between many parents. A
-  // visit of a node only adds to the sets, and what it adds depends only on
-  // the node, so a node is visited once: a walk of the tree that the graph
-  // unfolds to can take an exponential time.
-  const visited = new Set<Expression>();
-  const walk = (e: Expression): void => {
-    if (visited.has(e)) return;
-    visited.add(e);
-    if (isSymbol(e)) {
-      out.add(e.symbol);
-      walkUserFunction(e, e.symbol);
-      walkValue(e, e.symbol);
-      return;
-    }
-    if (isFunction(e)) {
-      if (typeof e.operator === 'string' && e.operator !== '')
-        walkUserFunction(e, e.operator);
-      if (
-        (e.operator === 'Declare' || e.operator === 'Assign') &&
-        isSymbol(e.ops[0])
-      )
-        written.add(e.ops[0].symbol);
-      const binders = declaredBinders(e, 'post');
-      if (binders !== undefined)
-        for (const name of binders.visibleFrom.keys()) written.add(name);
-      for (const op of e.ops) walk(op);
-    }
-  };
-  walk(expr);
-  return { all: out, written };
-}
-
-/**
  * Is the `vars` source `path`, given for the symbol `name`, a plain read of
  * a shader variable (a uniform) whose value cannot change while the shader
  * runs? Then reading it twice gives the same value, and the passes may
@@ -13477,7 +13327,7 @@ export function gpuReachableSymbolNames(
  * variable, or a parameter, here or in a user-function definition that the
  * code reaches. Each of these is emitted with its symbol name, so the read
  * is refused when `root` is the name of any symbol in `symbols` (see
- * {@link gpuReachableSymbolNames}), when it is another `vars` key, or when
+ * {@link reachableSymbolNames}), when it is another `vars` key, or when
  * another `vars` key has the source `path` or `root`. These tests are
  * stricter than necessary, as a symbol that is only read also counts.
  */
@@ -13503,7 +13353,7 @@ function gpuPlainUniformRead(
 /**
  * Refuse a `vars` entry whose source is a bare identifier that names a
  * variable the compiled code declares or writes (`written`, see
- * {@link gpuReachableSymbolNames}). A source that is a read path
+ * {@link reachableSymbolNames}). A source that is a read path
  * (`k.x`, `k[0]`, see `isOpaqueVarsSource()` in `cse.ts`) is refused when
  * its first identifier names such a variable, for the same reason.
  *
@@ -20583,7 +20433,7 @@ export function gpuTypeOfValue(
   // A value computed from a symbol whose type admits a point and a list of
   // points, and that no local shape frame describes, has no static shader
   // type. The compile entries write the point value of such a symbol in
-  // place of it (`gpuInlinePointValues`), so this is a symbol that they did
+  // place of it (`inlinePointValues`), so this is a symbol that they did
   // not replace (its value reads a name that the compiled code binds): its
   // declared type has no width, and the types read below could disagree
   // with the code (a `float` declaration for a `vec2` value).
@@ -21938,21 +21788,23 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         }) => {
           // A symbol of the body whose type admits a point and a list of
           // points is replaced by its point value, for this compilation only,
-          // as at the root (`gpuInlinePointValues`). The stored definition
+          // as at the root (`inlinePointValues`). The stored definition
           // does not change. The parameters and the names that the body binds
           // are not replaced.
           // A call in the body of a user function whose stored signature
           // returns that union, and whose body is a point, is replaced by
-          // the body too (`gpuInlinePointCalls`). The parameters are local
+          // the body too (`inlinePointCalls`). The parameters are local
           // names there, so a callee body cannot capture them.
-          const pointCalls = gpuInlinePointCalls(storedBody, target, {
-            scalarNames: new Set<string>(),
-            localNames: new Set(params),
-          });
-          const body = gpuInlinePointValues(
+          const pointCalls = inlinePointCalls(
+            storedBody,
+            target,
+            { scalarNames: new Set<string>(), localNames: new Set(params) },
+            gpuPointCallsOverBudget
+          );
+          const body = inlinePointValues(
             pointCalls,
             target,
-            new Set([...params, ...gpuReachableSymbolNames(pointCalls).written])
+            new Set([...params, ...reachableSymbolNames(pointCalls).written])
           );
           // The generated name is emitted bare; a shader reserved word here
           // would be source no driver accepts (D6).
@@ -22392,17 +22244,22 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
         // 110).
         BaseCompiler.compileFunctionBody(
           // A point value is written in place of its symbol, as in
-          // `compile()` (`gpuInlinePointValues`). The declared parameters
+          // `compile()` (`inlinePointValues`). The declared parameters
           // are bound, so they are not replaced.
-          gpuInlinePointValues(
-            gpuInlinePointCalls(expr, target, {
-              scalarNames: new Set<string>(),
-              localNames: new Set(declarations.map((d) => d.name)),
-            }),
+          inlinePointValues(
+            inlinePointCalls(
+              expr,
+              target,
+              {
+                scalarNames: new Set<string>(),
+                localNames: new Set(declarations.map((d) => d.name)),
+              },
+              gpuPointCallsOverBudget
+            ),
             target,
             new Set([
               ...declarations.map((d) => d.name),
-              ...gpuReachableSymbolNames(expr).written,
+              ...reachableSymbolNames(expr).written,
             ])
           ),
           target
@@ -22533,10 +22390,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // collected once, on the first question, from the expression before the
     // passes below change it: they inline user-function bodies, whose names
     // the walk already reaches.
-    let symbolNames: ReturnType<typeof gpuReachableSymbolNames> | undefined;
+    let symbolNames: ReturnType<typeof reachableSymbolNames> | undefined;
     const rootForNames = expr;
-    const reachable = (): ReturnType<typeof gpuReachableSymbolNames> =>
-      (symbolNames ??= gpuReachableSymbolNames(rootForNames, options.vars));
+    const reachable = (): ReturnType<typeof reachableSymbolNames> =>
+      (symbolNames ??= reachableSymbolNames(rootForNames, options.vars));
     const reachableNames = (): ReadonlySet<string> => reachable().all;
     if (options.vars !== undefined)
       gpuRefuseShadowedVarsSources(
@@ -22685,10 +22542,10 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
     // each function (`gpu-shared-calls.ts`, ROADMAP CE-525).
     // A symbol whose type admits a point and a list of points is replaced
     // by its point value where the shader computes the value anyway, so the
-    // compilation reads the type of a tuple (`gpuInlinePointValues`).
+    // compilation reads the type of a tuple (`inlinePointValues`).
     BaseCompiler.beginRootPreprocessing(expr, target);
-    expr = gpuInlinePointValues(
-      gpuInlinePointCalls(expr, target),
+    expr = inlinePointValues(
+      inlinePointCalls(expr, target, undefined, gpuPointCallsOverBudget),
       target,
       reachable().written
     );
@@ -23247,11 +23104,11 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
       constantFold: options.constantFold,
     });
     // A point value is written in place of its symbol, as in `compile()`
-    // (`gpuInlinePointValues`).
-    const inlined = gpuInlinePointValues(
+    // (`inlinePointValues`).
+    const inlined = inlinePointValues(
       expr,
       sourceTarget,
-      gpuReachableSymbolNames(expr).written
+      reachableSymbolNames(expr).written
     );
     // This route has no common-subexpression pass, so a node that several
     // paths reach is written once for each path. A point value written in
@@ -23516,17 +23373,19 @@ export abstract class GPUShaderTarget implements LanguageTarget<Expression> {
                 `instead (\`Block(y ≔ ${written}; y ≔ y + 1; y)\`).`
             );
           // A point value is written in place of its symbol, as in
-          // `compile()` (`gpuInlinePointValues`).
+          // `compile()` (`inlinePointValues`).
           BaseCompiler.beginRootPreprocessing(assignment.expression, target);
-          const expression = gpuInlinePointValues(
-            gpuInlinePointCalls(assignment.expression, target, {
-              scalarNames: new Set<string>(),
-              localNames: shaderNames,
-            }),
+          const expression = inlinePointValues(
+            inlinePointCalls(
+              assignment.expression,
+              target,
+              { scalarNames: new Set<string>(), localNames: shaderNames },
+              gpuPointCallsOverBudget
+            ),
             target,
             new Set([
               ...shaderNames,
-              ...gpuReachableSymbolNames(assignment.expression).written,
+              ...reachableSymbolNames(assignment.expression).written,
             ])
           );
           inlined[i] = expression;

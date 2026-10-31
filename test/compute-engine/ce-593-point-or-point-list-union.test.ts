@@ -95,14 +95,22 @@ describe('CE-593: the type of a coordinate of a point or a list of points', () =
 });
 
 describe('CE-593: the javascript target', () => {
-  test('compiles the coordinate with a broadcast', () => {
+  // The compilation writes the assigned point in place of `P` before it
+  // starts, as the shader targets do (CE-658), so `P.x` is the first
+  // coordinate of the tuple `(1, 2)`.
+  test('compiles the coordinate of the assigned point', () => {
     const ce = engine(['Tuple', 1, 2]);
     const r = compile(ce.parse('P.x + y'), { fallback: false });
     expect(r.success).toBe(true);
-    expect(r.code).toBe(
-      '_SYS.bcast((_tv1, _tv2) => (_tv1 + _tv2), _.y, _SYS.pointComponent(_val_P, 0))'
-    );
+    expect(r.code).toBe('_.y + 1');
     expect(r.run!({ y: 3 })).toBe(4);
+  });
+
+  test('compiles the coordinate of an assigned list with a broadcast', () => {
+    const ce = engine(['List', ['Tuple', 1, 2], ['Tuple', 3, 4]]);
+    const r = compile(ce.parse('P.x + y'), { fallback: false });
+    expect(r.success).toBe(true);
+    expect(r.run!({ y: 3 })).toEqual([4, 6]);
   });
 });
 
@@ -130,8 +138,10 @@ describe('CE-593: the shader targets read the assigned point', () => {
   test.each([
     ['glsl', 'P', 'vec2(1.0, 2.0)'],
     ['glsl', 'P + (y, y)', 'vec2(y, y) + vec2(1.0, 2.0)'],
-    ['glsl', '\\sin(xP)', 'sin(x * vec2(1.0, 2.0))'],
-    ['wgsl', '\\sin(xP)', 'sin(x * vec2f(1.0, 2.0))'],
+    // `x` has no declared range: `2x` can overflow f32, so the NaN-safe
+    // helper (CE-619.2).
+    ['glsl', '\\sin(xP)', '_gpu_sin2(x * vec2(1.0, 2.0))'],
+    ['wgsl', '\\sin(xP)', '_gpu_sin2(x * vec2f(1.0, 2.0))'],
     ['glsl', '2P', 'vec2(2.0, 4.0)'],
     [
       'glsl',

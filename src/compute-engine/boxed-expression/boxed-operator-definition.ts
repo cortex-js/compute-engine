@@ -189,6 +189,7 @@ const OPERATOR_DEF_KEYS = new Set([
   'arithmetic',
   'canEnumerate',
   'elementCount',
+  'elementAt',
   'inferOperandTypes',
 ]);
 
@@ -749,6 +750,10 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
   /** The eager producer's element count — see the `elementCount` contract on
    * `OperatorDefinition` (types-definitions.ts). */
   elementCount?: (expr: Expression) => number | undefined;
+
+  /** The eager producer's element read — see the `elementAt` contract on
+   * `OperatorDefinition` (types-definitions.ts). */
+  elementAt?: (expr: Expression, index: number) => Expression | undefined;
 
   /** Use-driven element inference — see the `inferOperandTypes` contract on
    * `OperatorDefinition` (types-definitions.ts). */
@@ -1914,6 +1919,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
       neq: this.neq,
       canEnumerate: this.canEnumerate,
       elementCount: this.elementCount,
+      elementAt: this.elementAt,
       inferOperandTypes: this.inferOperandTypes,
       even: this.even,
       canonical: this.canonical,
@@ -1995,6 +2001,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.neq = s.neq;
     this.canEnumerate = s.canEnumerate;
     this.elementCount = s.elementCount;
+    this.elementAt = s.elementAt;
     this.inferOperandTypes = s.inferOperandTypes;
     this.even = s.even;
     this.canonical = s.canonical;
@@ -2389,6 +2396,7 @@ export class _BoxedOperatorDefinition implements BoxedOperatorDefinition {
     this.neq = def.neq ?? this.neq;
     this.canEnumerate = def.canEnumerate ?? this.canEnumerate;
     this.elementCount = def.elementCount ?? this.elementCount;
+    this.elementAt = def.elementAt ?? this.elementAt;
     this.inferOperandTypes = def.inferOperandTypes ?? this.inferOperandTypes;
     this.setScoped(
       def.scoped,

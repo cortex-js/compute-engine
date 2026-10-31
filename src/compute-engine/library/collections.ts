@@ -9945,6 +9945,135 @@ function rawAccessorOperand(expression?: Expression): Expression | undefined {
   return expression.op1;
 }
 
+// The list of points that the point-coordinate accessor `expr` (`PointX`,
+// `PointY` or `PointZ`, reading the coordinate at `position`) maps over, or
+// `undefined` when the type of its operand does not prove that the operand is
+// a list of points with that coordinate. Such an accessor gives one
+// coordinate for each point (`pointComponentOf`), so its result has the
+// length of the list, and its element `k` is the accessor applied to the
+// point `k`. An element of the list can be absent (`list<tuple<…> | missing>`,
+// a list that holds a restricted point): its coordinate is then absent at the
+// same position. A list of lists of points (a tensor of points) and a list
+// whose elements are not proven to be points are declined: the accessor reads
+// them in other ways (see `pointComponentAt`).
+function pointListOfAccessor(
+  expr: Expression,
+  position: number
+): Expression | undefined {
+  if (!isFunction(expr) || expr.nops !== 1) return undefined;
+  const xs = expr.op1;
+  const t = resolveTypeAlias(xs.type.type);
+  if (typeof t === 'string' || t.kind !== 'list') return undefined;
+  if ((t.dimensions?.length ?? 0) > 1) return undefined;
+  const point = resolveTypeAlias(stripMissingFromType(t.elements));
+  if (typeof point === 'string' || point.kind !== 'tuple') return undefined;
+  if (point.elements.length < position) return undefined;
+  return xs;
+}
+
+// The `elementCount` handler of the point-coordinate accessor that reads the
+// coordinate at `position`: the length of the list of points it maps over
+// (`pointListOfAccessor`).
+function pointAccessorElementCount(
+  position: number
+): (expr: Expression) => number | undefined {
+  return (expr) => {
+    const xs = pointListOfAccessor(expr, position);
+    if (xs === undefined) return undefined;
+    const n = smallCount(xs);
+    return n !== undefined && Number.isFinite(n) ? n : undefined;
+  };
+}
+
+// The `elementAt` handler of the point-coordinate accessor that reads the
+// coordinate at `position`: the accessor applied to the point `k` of the list
+// it maps over, `PointX(L)` at `k` is `PointX(L.at(k))`.
+//
+// A point that may be absent (`(1, 1) {1 < 0}`) is declined, so that `at()`
+// evaluates the accessor. The accessor gives a different marker for an
+// absent point inside a list (`Missing`, from `pointComponentOf`) and for an
+// absent point alone (`NaN`, from `missingBehavior: 'propagate'`), so
+// `PointX(L.at(k))` would not be the element `k` of the evaluation.
+function pointAccessorElementAt(
+  position: number
+): (expr: Expression, k: number) => Expression | undefined {
+  return (expr, k) => {
+    const xs = pointListOfAccessor(expr, position);
+    if (xs === undefined) return undefined;
+    const point = xs.at(k);
+    if (point === undefined || !isTupleShapedType(point.type.type))
+      return undefined;
+    return expr.engine.function(POINT_ACCESSOR_BY_POSITION[position - 1], [
+      point,
+    ]);
+  };
+}
+
+// Is a component of type `t` of a `PointList` a LIST component, one that
+// supplies one coordinate to each point? The test of the `PointList` type
+// handler: an indexed collection that is not a point or a string.
+function isPointListListComponentType(t: Type): boolean {
+  if (isPointElementType(t) || t === 'string') return false;
+  return isSubtype(t, INDEXED_COLLECTION_SHAPE_TYPE);
+}
+
+// Does the `PointList` application `expr` zip its list components into a
+// list of points whose length its components give without evaluation? It
+// does when it is valid, has at least one list component
+// (`isPointListListComponentType`), and every other component has a type
+// that cannot be a collection, so that it is repeated in each point. A
+// component that may be absent (`isAbsentablePointListSourceType`) is
+// declined: when it is absent, the value is `Missing`.
+function isCountablePointList(expr: Expression): boolean {
+  if (!isFunction(expr) || !expr.isValid) return false;
+  let hasList = false;
+  for (const op of expr.ops) {
+    const t = op.type.type;
+    if (isAbsentablePointListSourceType(t)) return false;
+    if (isPointListListComponentType(t)) hasList = true;
+    else if (typeCouldBeCollection(t)) return false;
+  }
+  return hasList;
+}
+
+// The `elementCount` handler of `PointList`: the smallest count of its list
+// components, since the zip stops at the shortest one
+// (`docs/BROADCAST-MODEL.md`). `undefined` when a list component has no
+// known finite count, or when the application is not countable
+// (`isCountablePointList`).
+function pointListElementCount(expr: Expression): number | undefined {
+  if (!isFunction(expr) || !isCountablePointList(expr)) return undefined;
+  let n: number | undefined;
+  for (const op of expr.ops) {
+    if (!isPointListListComponentType(op.type.type)) continue;
+    const c = smallCount(op);
+    if (c === undefined || !Number.isFinite(c)) return undefined;
+    n = n === undefined ? c : Math.min(n, c);
+  }
+  return n;
+}
+
+// The `elementAt` handler of `PointList`: the point `k` is the tuple of the
+// elements `k` of the list components, with each other component repeated
+// unchanged.
+function pointListElementAt(
+  expr: Expression,
+  k: number
+): Expression | undefined {
+  if (!isFunction(expr) || !isCountablePointList(expr)) return undefined;
+  const coordinates: Expression[] = [];
+  for (const op of expr.ops) {
+    if (!isPointListListComponentType(op.type.type)) {
+      coordinates.push(op);
+      continue;
+    }
+    const c = op.at(k);
+    if (c === undefined) return undefined;
+    coordinates.push(c);
+  }
+  return expr.engine.function('Tuple', coordinates);
+}
+
 // Evaluate a point-component accessor, broadcasting the coordinate over a list
 // of points. We inspect the actual elements (not the declared element type,
 // which is unreliable for a literal list of points) to decide whether to
@@ -11009,6 +11138,15 @@ const JOIN_COLLECTION_HANDLERS: CollectionHandlers = {
       if (index <= count) {
         if (isAtomicJoinOperand(op)) return op;
         if (op.isIndexedCollection) return op.at(index);
+        // An application with no collection handlers whose type is a list
+        // (a broadcast `L + P`, `PointList(A, B)`) is not an indexed
+        // collection before it is evaluated, but it reads its elements by
+        // position, without evaluation when it can (`at()` in
+        // `boxed-function.ts`).
+        if (op.type.matches('list<any>')) {
+          const element = op.at(index);
+          if (element !== undefined) return element;
+        }
         // An operand that is not indexed (a set, a dictionary, or a lazy
         // view over one) has no positional `at`: a dictionary answers `at`
         // only for a key. A `ListJoin` is typed as a list, so it reports
@@ -11771,6 +11909,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         context.engine._typeResolver
       );
     },
+    elementCount: pointListElementCount,
+    elementAt: pointListElementAt,
     evaluate: (ops, { engine: ce, numericApproximation, expression }) => {
       // A source that may be absent (`A\{0 < t\}`) and IS absent makes the
       // whole point list absent (`isAbsentablePointListSourceType`): there
@@ -17625,6 +17765,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         pointComponentTypeD(xs, 1),
         context.engine._typeResolver
       ),
+    elementCount: pointAccessorElementCount(1),
+    elementAt: pointAccessorElementAt(1),
     evaluate: ([xs], { engine: ce, numericApproximation, expression }) =>
       pointComponentAt(
         xs,
@@ -17650,6 +17792,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         pointComponentTypeD(xs, 2),
         context.engine._typeResolver
       ),
+    elementCount: pointAccessorElementCount(2),
+    elementAt: pointAccessorElementAt(2),
     evaluate: ([xs], { engine: ce, numericApproximation, expression }) =>
       pointComponentAt(
         xs,
@@ -17689,6 +17833,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
         pointComponentTypeD(xs, 3),
         context.engine._typeResolver
       ),
+    elementCount: pointAccessorElementCount(3),
+    elementAt: pointAccessorElementAt(3),
     evaluate: ([xs], { engine: ce, numericApproximation, expression }) => {
       // The type was not decisive (a bare `tuple`, `list<tuple>`, `unknown`),
       // but the concrete value is 2-D: the WHOLE application errors — a

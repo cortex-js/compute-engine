@@ -74,9 +74,10 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
       expect(shader(ce, '\\cos(KT\\cos(T))', to).code).toBe(
         'cos(K * T * cos(T))'
       );
-      // A range on one factor is enough: the other factor is multiplied by
-      // a value of known size, as by a literal.
-      expect(shader(ce, '\\sin(Kt)', to).code).toBe('sin(K * t)');
+      // A range on one factor is not enough: the other factor can be any
+      // finite f32 value, and `K·t` is `+∞` in f32 for `K = 10`,
+      // `t ≥ 3.5·10³⁷` (CE-619.2).
+      expect(shader(ce, '\\sin(Kt)', to).code).toBe('_gpu_sin(K * t)');
     });
 
     it('a uniform with a declared range uses the built-in', () => {
@@ -97,8 +98,13 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
     });
 
     it('a factor `sin`, `cos` or `tanh` has a magnitude of at most 1', () => {
+      expect(shader(ce, '\\sin(t+K\\sin(t))', to).code).toBe(
+        'sin(t + K * sin(t))'
+      );
+      // `k·sin(t)` has no known size: with `t`, two terms of unknown size,
+      // whose sum is `+∞` in f32 at `t = k = 3·10³⁸` (CE-619.5).
       expect(shader(ce, '\\sin(t+k\\sin(t))', to).code).toBe(
-        'sin(t + k * sin(t))'
+        '_gpu_sin(t + k * sin(t))'
       );
       // Two factors of unknown size.
       expect(shader(ce, '\\sin(kt\\cos(t))', to).code).toBe(
@@ -145,10 +151,21 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
     ce.declare('a', 'real');
     ce.declare('y', 'real');
     ce.declare('t', 'real');
+    ce.declare('T', 'real<-7..7>');
     ce.declare('b', '(real) -> real');
     ce.parse('b(c) := \\arcsin(y/(0.04c+1.32))').evaluate();
 
     it('is finite when the expression it holds is', () => {
+      // `arctan` of a real is at most π/2 in magnitude.
+      expect(
+        shader(
+          ce,
+          '(3t\\cos(2T-2\\arctan(y))+\\cos(a),3t\\sin(2T-2\\arctan(y)))',
+          to,
+          { vars: { a: 'a' } }
+        ).code
+      ).toMatch(/cos\(_cse1\) \+ cos\(a\), 3\.0 \* t \* sin\(_cse1\)/);
+      // `2a` has no known size: `+∞` in f32 for `a ≥ 1.8·10³⁸` (CE-619.2).
       expect(
         shader(
           ce,
@@ -156,7 +173,7 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
           to,
           { vars: { a: 'a' } }
         ).code
-      ).toMatch(/cos\(_cse1\) \+ cos\(a\), 3\.0 \* t \* sin\(_cse1\)/);
+      ).toMatch(/_gpu_cos\(_cse1\) \+ cos\(a\), 3\.0 \* t \* _gpu_sin\(_cse1\)/);
     });
 
     it('that holds `asin` of a call keeps the guard', () => {
@@ -176,15 +193,21 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
   describe('a symbol whose type is inferred', () => {
     const ce = new ComputeEngine();
     ce.declare('x', 'real');
+    ce.declare('X', 'real<-10..10>');
     ce.assign('c', 2.5);
     ce.assign('a', 0.5);
     ce.parse('w := 3x+1').evaluate();
+    ce.parse('W := 3X+1').evaluate();
     ce.assign('p', ce.parse('c \\mapsto \\cos(x + 1.9c)'));
 
     it('a value the shader computes in place of the symbol is read', () => {
       expect(shader(ce, '\\sin(c+x)', to).code).toBe('sin(2.5 + x)');
-      expect(shader(ce, '\\sin(cx)', to).code).toBe('sin(2.5 * x)');
-      expect(shader(ce, '\\cos(w)', to).code).toBe('cos((3.0 * x + 1.0))');
+      expect(shader(ce, '\\sin(cX)', to).code).toBe('sin(X * 2.5)');
+      expect(shader(ce, '\\cos(W)', to).code).toBe('cos((3.0 * X + 1.0))');
+      // `x` has no declared range: `2.5·x` and `3x` have no known size, and
+      // are `+∞` in f32 for `x ≥ 1.4·10³⁸` (CE-619.2).
+      expect(shader(ce, '\\sin(cx)', to).code).toBe('_gpu_sin(2.5 * x)');
+      expect(shader(ce, '\\cos(w)', to).code).toBe('_gpu_cos((3.0 * x + 1.0))');
     });
 
     it('a value that is finite in f64 but not in f32 keeps the guard', () => {
@@ -207,10 +230,15 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
 
     it('a parameter keeps the guard, also when a global of its name has a value', () => {
       // The parameter `c` of `p` is not the global `c := 2.5`. The argument
-      // `u` has no declared type, so the parameter is not finite for certain
-      // (`p(x)`, with `x` declared `real`, proves it: CE-565.4).
+      // `u` has no declared type, so the parameter is not finite for certain.
+      // With `p(x)`, `x` declared `real`, the parameter is finite but of no
+      // known size: at `x = 1.5e38`, `x + 1.9x` is +∞ in f32, so the guard
+      // stays there too (CE-619: the size of `1.9c` is not read from the
+      // value of the global `c`).
       expect(shader(ce, 'p(u)', to).preamble).toMatch(/_gpu_cos\(/);
-      expect(shader(ce, 'p(x)', to).preamble).toMatch(/ cos\(1\.9 \* c/);
+      expect(shader(ce, 'p(x)', to).preamble).toMatch(
+        /_gpu_cos\(1\.9 \* c \+ x/
+      );
     });
   });
 
@@ -272,8 +300,8 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
       );
       expect(shader(ce, '\\cos(v)', to).code).toBe('cos(v)');
       expect(shader(ce, '\\cos(p)', to).code).toBe('cos(p)');
-      expect(shader(ce, '\\sin(2v+[t,k,1])', to).code).toBe(
-        `sin(2.0 * v + ${vec3}(t, k, 1.0))`
+      expect(shader(ce, '\\sin(v+[1,2,1])', to).code).toBe(
+        `sin(v + ${vec3}(1.0, 2.0, 1.0))`
       );
       expect(shader(ce, '\\operatorname{sign}(v)', to).code).toBe('sign(v)');
       expect(box(['ElementMax', 'v', 'a'])).toBe('max(v, a)');
@@ -299,6 +327,11 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
       expect(box(['Max', 'w'])).toBe('(_gpu_max(_gpu_max(w.x, w.y), w.z))');
       // Two factors of unknown size: `t·v` can overflow in f32.
       expect(shader(ce, '\\sin(tv)', to).code).toBe('_gpu_sin3(t * v)');
+      // A factor of unknown size (`2v`), and a sum of two terms of unknown
+      // size (`2v + [t, k, 1]`) (CE-619.2, CE-619.5).
+      expect(shader(ce, '\\sin(2v+[t,k,1])', to).code).toBe(
+        `_gpu_sin3(2.0 * v + ${vec3}(t, k, 1.0))`
+      );
       // A mapping to other source.
       expect(shader(ce, '\\sin(v)', to, { vars: { v: 'uv' } }).code).toBe(
         '_gpu_sin3(uv)'
@@ -340,10 +373,10 @@ describe.each(['glsl', 'wgsl'] as const)('CE-565 on %s', (to) => {
           },
         };
       };
-      const sin = run('\\sin([t, 2k])', 0.5, -1.25);
-      expect(sin.code).toBe(`sin(${vt}(t, 2.0 * k))`);
+      const sin = run('\\sin([t, k+2])', 0.5, -1.25);
+      expect(sin.code).toBe(`sin(${vt}(t, k + 2.0))`);
       expect(sin.value.x).toBeCloseTo(Math.sin(0.5), 6);
-      expect(sin.value.y).toBeCloseTo(Math.sin(-2.5), 6);
+      expect(sin.value.y).toBeCloseTo(Math.sin(0.75), 6);
       const cos = run('\\cos([t, k] + [1, 2])', 0.5, -1.25);
       expect(cos.code).toMatch(/^cos\(/);
       expect(cos.value.x).toBeCloseTo(Math.cos(1.5), 6);

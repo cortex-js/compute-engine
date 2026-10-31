@@ -1349,6 +1349,27 @@ export type OperatorDefinition = Partial<BaseDefinition> &
     elementCount?: (expr: Expression) => number | undefined;
 
     /**
+     * For an operator that RETURNS a collection but has no `collection`
+     * handlers: the element at the 1-based position `index` of the
+     * collection that `evaluate()` would produce, built from the operands
+     * with no evaluation. `PointX(L)` at `k` is `PointX(L.at(k))`.
+     *
+     * The `at()` twin of {@link elementCount}. Contract:
+     *
+     * - Called only for a valid, pure expression whose `count` is known, with
+     *   `1 ≤ index ≤ count`.
+     * - MUST NOT evaluate the expression. The element it returns can be
+     *   unevaluated, and its evaluation MUST equal
+     *   `expr.evaluate().at(index)`: `at()` returns that evaluation.
+     * - Anything not cheaply knowable must report `undefined` (decline):
+     *   `at()` then evaluates the expression and reads the element of the
+     *   result.
+     *
+     * Consulted only when the definition has no `collection.at` handler.
+     */
+    elementAt?: (expr: Expression, index: number) => Expression | undefined;
+
+    /**
      * Use-driven element inference. Called when a type REQUIREMENT reaches
      * an application of this operator: its result is an operand of a typed
      * parameter (`k(xs[1])` with `k: (integer) -> integer` requires
@@ -3185,9 +3206,9 @@ export type OperatorDefinitionFlags = {
    * (an assignment, also from a collection handler) stops these memos too,
    * even when the operator states `pure: true`. The other hooks of a
    * definition (`canonical`, `type`, `sgn`, `eq`, `neq`, `even`,
-   * `canEnumerate`, `elementCount`, `derivative`, `compile`, and the
-   * collection handlers `isCollection`, `isLazy`, `isEnumerable`, `eltsgn`
-   * and `elttype`) describe the operator and are not counted.
+   * `canEnumerate`, `elementCount`, `elementAt`, `derivative`, `compile`,
+   * and the collection handlers `isCollection`, `isLazy`, `isEnumerable`,
+   * `eltsgn` and `elttype`) describe the operator and are not counted.
    *
    * **Default:** `true`
    *
@@ -3651,6 +3672,10 @@ export interface BoxedOperatorDefinition
   /** The eager producer's element count — see the `elementCount` contract on
    * {@link OperatorDefinition}. */
   elementCount?: (expr: Expression) => number | undefined;
+
+  /** The eager producer's element read — see the `elementAt` contract on
+   * {@link OperatorDefinition}. */
+  elementAt?: (expr: Expression, index: number) => Expression | undefined;
 
   /** Use-driven element inference — see the `inferOperandTypes` contract on
    * {@link OperatorDefinition}. */

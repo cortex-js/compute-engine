@@ -40,10 +40,10 @@ describe('CE-604: the operands of a product with a list are evaluated once', () 
       ['Multiply', 'y', ['Held', 2]],
       ['Multiply', 'y', ['Held', 3]],
     ]);
-    // Each cell is evaluated with the list operand, and once more in its
-    // cell product (`multiplyCell`). It was 9 when the list was evaluated a
-    // second time.
-    expect(calls()).toBe(6);
+    // Each cell is evaluated once, with the list operand: its cell product
+    // (`multiplyCell`) does not evaluate it again (CE-618). It was 9 when the
+    // list was evaluated a second time, and 6 before CE-618.
+    expect(calls()).toBe(3);
   });
 
   test('an exact constant cell still becomes a float beside a float factor', () => {
@@ -54,8 +54,8 @@ describe('CE-604: the operands of a product with a list are evaluated once', () 
     expect(value.ops![0].json).toEqual(['Multiply', 0.5, ['Held', 1]]);
     expect(value.ops![1].isExact).toBe(false);
     expect(value.ops![1].re).toBeCloseTo(Math.PI / 2, 12);
-    // It was 4.
-    expect(calls()).toBe(3);
+    // It was 4, and 3 before CE-618.
+    expect(calls()).toBe(2);
   });
 
   test('the integrals of the Tycho case are the same', () => {

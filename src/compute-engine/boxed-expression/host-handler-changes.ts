@@ -71,9 +71,9 @@
  *   the use runs no host code that an enclosing memo could see.
  *
  * The other hooks of a definition (`canonical`, `type`, `sgn`, `eq`, `neq`,
- * `cmp`, `even`, `canEnumerate`, `elementCount`, `derivative`, `compile`,
- * and the function `value` of a constant, called when the definition is
- * made and after a change of configuration) describe the operator or the
+ * `cmp`, `even`, `canEnumerate`, `elementCount`, `elementAt`, `derivative`,
+ * `compile`, and the function `value` of a constant, called when the
+ * definition is made and after a change of configuration) describe the operator or the
  * symbol: the caches that keep their answers do not read the count.
  *
  * The memo of factorizations (`FACTOR_MEMO`, `factor.ts`) accepts a moved

@@ -3500,7 +3500,18 @@ length) of the element type, as for `list<T>`.
 
 ### CE-662. Compiled code does not check the declared type of a local when a value is assigned to it
 
-**Status:** fixed (pending commit), 2026-10-30; defect. Each value assigned to a
+**Status:** open; defect. User decision 2026-10-30: option B (a smaller rule),
+with this contract: the host must respect what the program declares or
+implies about a value (an argument of `h(x)` with `h: (integer) -> integer`
+must be an integer). When the host does not, the compiled result is undefined:
+it may differ from the interpreter, give a wrong value, throw or hang. So a
+static type, also one inferred from a use, may be trusted, and the next
+version classifies a value by its static type only: a subtype of the declared
+type compiles with no test, a type with no common value declines on every
+target, and an overlap gets a run-time test on `javascript` and `python` and a
+decline on `glsl`, `wgsl` and `interval-js`. The first version below was taken
+out of the main tree on 2026-10-30; it is saved, with its test file and
+CHANGELOG text, in `docs/scratch/2026-10-30-ce662-first-version/`. Each value assigned to a
 local declared with a type (`Assign`, the value of `Declare`, an Epsil typed
 `let`) is classified at compile time (`assertLocalWritesMatchDeclarations()`,
 `compilation/base-compiler.ts`): certain (its static type is a subtype of the
@@ -3508,10 +3519,17 @@ declared type and is a fact about the value: no test), never (no common value:
 every target declines) or undecidable (`javascript` throws and `python` raises
 `incompatible-type` when the value fails a run-time test; `glsl`, `wgsl` and
 `interval-js` decline, and so does every target for a declared type with no
-simple test, such as `rational` or a tuple). For `ReplaceAt(xs, i, v)` only `v`
-is tested. Tests:
-`test/compute-engine/compile-declared-local-assignment-type.test.ts`. Still a
-decline by this simple rule: on `interval-js`,
+simple test, such as `rational` or a tuple). Three review rounds found 7, 9
+and 9 more holes, most in the rule that decides when a static type is a fact
+about the value (a type narrowed by a use, a function literal that reads such a
+symbol, a parameter type that only `javascript` tests, a value node shared by
+two blocks, a float result that rounds to an integer, `2⁵⁴/3`); the full suite
+also fails in 10 files with the change (Tycho 332 programs, Python loops,
+compile time of shared subtrees). The decision is between keeping this design
+and fixing each hole, or a smaller rule (no test only for a value known at
+compile time; a run-time test on `javascript` and `python` for every other
+value; a decline on the other targets). Still a decline by this simple rule:
+on `interval-js`,
 `Function(Block(Declare(z, "number"), Assign(z, u + 1), Tuple(z, 2)), u)`,
 because the parameter `u` has no type (it can be a list) and `interval-js` has
 no run-time test; proving the parameter from the argument of each call is

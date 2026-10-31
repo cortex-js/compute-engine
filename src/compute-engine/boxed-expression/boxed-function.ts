@@ -143,6 +143,7 @@ import {
   hasUnresolvedCollectionOperand,
   isUnresolvedCollectionOperand,
   isTupleShapedType,
+  isTupleOrTupleUnionShapedType,
   isBroadcastableCollection,
   isBroadcastCollectionType,
   isDrawFreeBroadcast,
@@ -1317,6 +1318,19 @@ export class BoxedFunction
     value: null,
     generation: -1,
   };
+  /** `isTransitivelyPure(this)` for the structural element read of `at()`
+   * (`_structuralAt`), kept for one engine generation: the walk reads every
+   * operand, stored value and function body, and a loop of `at(k)` would
+   * otherwise repeat it for each element. An assignment or a declaration
+   * advances the generation, so a new value of a symbol is read again. The
+   * world version is in the key too: a redefinition of a sequence
+   * (`tryFinalizeSequence()`) can leave the generation unchanged, and the
+   * new recurrence can draw where the old one did not. */
+  private _transitivelyPure: {
+    generation: number;
+    world: number;
+    value: boolean;
+  } = { generation: -1, world: -1, value: false };
   private _sgn: CachedValue<Sign | undefined> = {
     value: null,
     generation: -1,
@@ -5747,11 +5761,23 @@ export class BoxedFunction
       return this._lambdaBroadcastCount();
     const ops = this.ops;
     if (ops === undefined) return undefined;
+    // A tensor product has a length that the operand counts do not give
+    // (see `isTensorProductBroadcast`).
+    if (isTensorProductBroadcast(this)) return undefined;
+    const tuplesLifted = tupleOperandsAreLifted(this);
     let count: number | bigint | undefined;
     for (const op of ops) {
       // A scalar operand is a LIFT, not a participant. Broadcast participants
       // are UNKEYED collections only — keyed operands are never admitted.
       if (!typeCouldBeUnkeyedCollection(op.type.type)) continue;
+      // A point beside a list is a lift too, for the heads that combine
+      // points themselves (see `tupleOperandsAreLifted`). A tuple with a
+      // list component is not a point (`isLiftablePoint`): its evaluation
+      // is a list of points, and the count is not known here.
+      if (tuplesLifted && isTuple(op)) {
+        if (isLiftablePoint(op)) continue;
+        return undefined;
+      }
       const c = op.count;
       if (c === undefined) return undefined;
       if (count === undefined) count = c;
@@ -5922,10 +5948,13 @@ export class BoxedFunction
       typeCouldBeUnkeyedCollection(this.type.type)
     ) {
       let result: boolean | undefined = true;
+      const tuplesLifted = tupleOperandsAreLifted(this);
       for (const op of this.ops) {
         // A scalar operand is a LIFT, not a participant (UNKEYED, as in
-        // `_broadcastCount`: keyed operands are never admitted to broadcast).
+        // `_broadcastCount`: keyed operands are never admitted to broadcast),
+        // and so is a point that `_broadcastCount` reads as a lift.
         if (!typeCouldBeUnkeyedCollection(op.type.type)) continue;
+        if (tuplesLifted && isLiftablePoint(op)) continue;
         const e = op.isEnumerableCollection;
         if (e === false) return false;
         if (e === undefined) result = undefined;
@@ -6076,7 +6105,11 @@ export class BoxedFunction
   at(index: number): Expression | undefined {
     if (this._optedOutOfCollection) return undefined;
     const handler = this.operatorDefinition?.collection?.at;
-    if (!handler) return this._materializedAt(index);
+    if (!handler) {
+      const structural = this._structuralAt(index);
+      if (structural === null) return undefined;
+      return structural ?? this._materializedAt(index);
+    }
 
     // Centralize negative-index normalization so every collection `at`
     // handler gets a 1-based positive index. Most handlers reject `index < 1`
@@ -6134,6 +6167,82 @@ export class BoxedFunction
     // it finds is then not known to be at `idx`, so the answer is
     // `undefined` (see `unlessWalkMissedElements()`).
     return unlessWalkMissedElements(() => handler(this, idx));
+  }
+
+  /**
+   * The element at `index`, built from the elements of the operands with no
+   * evaluation of the whole expression, for an application with no
+   * collection handlers whose count is known: a broadcast
+   * (`structuralBroadcastAt`), or an operator with an `elementAt` handler
+   * (`PointX`, `PointList`). The answer is the evaluation of that one
+   * element, which equals the element at `index` of `this.evaluate()`.
+   * Without this read, `at()` evaluates the whole expression
+   * (`_materializedAt`) to give one element.
+   *
+   * Answers `null` for an index outside the known count (there is no
+   * element), and `undefined` when the read does not apply, so that the
+   * caller evaluates. The read applies only to a valid, pure expression: an
+   * expression that draws random numbers gives a new draw for each element
+   * read in this way, where its evaluation draws once for all the elements.
+   * It applies only when the count is known, so not to an expression whose
+   * count depends on a free variable (`[1, 2] + Range(1, Floor(u))`).
+   *
+   * The test that the read applies (`structuralBroadcastApplies`) comes
+   * before the count is read: for a shape that the read declines, such as
+   * the matrix product `Multiply([1, 2], [[1, 2, 3], [4, 5, 6]])`, the count
+   * of the operands is not the length of the evaluation, so it cannot tell
+   * that an index has no element.
+   *
+   * When the evaluation of the whole expression is already cached for the
+   * current generation (`_materializedAt` filled it), the read does not
+   * apply either: one element of the cached value is cheaper than the
+   * evaluation of one element.
+   */
+  private _structuralAt(index: number): Expression | undefined | null {
+    const def = this.operatorDefinition;
+    if (def === undefined) return undefined;
+    if (def.elementAt === undefined && !structuralBroadcastApplies(this))
+      return undefined;
+    if (!Number.isInteger(index)) return undefined;
+    if (!this.isValid || !this.isPure) return undefined;
+    const gen = this.engine._cacheGeneration();
+    if (!cacheOff('materializedat')) {
+      const cell = cachedCell(this._eagerSource, gen);
+      if (cell.generation === gen && cell.value !== null && !cell.inFlight)
+        return undefined;
+    }
+    // Transitive purity, not only `isPure`: with `r := q()` for an impure
+    // `q`, `[1, 2] + r` is pure, but each structural read would evaluate `r`
+    // again and draw again, where the reads of the cached evaluation of
+    // `_materializedAt` give one draw for the instance. The cheap tests above
+    // run first; the walk runs once per generation (`_transitivelyPure`).
+    const purity = this._transitivelyPure;
+    const world = this.engine._worldVersion;
+    if (
+      cacheOff('materializedat') ||
+      purity.generation !== gen ||
+      purity.world !== world
+    ) {
+      purity.value = isTransitivelyPure(this);
+      purity.generation = gen;
+      purity.world = world;
+    }
+    if (!purity.value) return undefined;
+    const count = smallCount(this);
+    if (count === undefined || !Number.isFinite(count)) return undefined;
+    const k = index < 0 ? count + 1 + index : index;
+    if (k < 1 || k > count) return null;
+    const element =
+      def.elementAt !== undefined
+        ? def.elementAt(this, k)
+        : structuralBroadcastAt(this, k);
+    // The element is evaluated, as the element that `_materializedAt` reads
+    // from the evaluation is: a reader of `at()` can then test it as a value
+    // (the `at` handler of `When` reads the condition `k` of a list of
+    // conditions, `2 < [1, 2, 3]`, and must see `True`, not `2 < 3`), and
+    // `at()` agrees with `each()`. The evaluation is that of one element,
+    // not of the whole expression.
+    return element?.evaluate();
   }
 
   /**
@@ -9729,6 +9838,160 @@ export class BoxedFunction
  */
 function isBroadcastParticipant(op: Expression): boolean {
   return isFiniteBroadcastParticipant(op);
+}
+
+/**
+ * Does a broadcast application of `expr` lift each of its point (tuple)
+ * operands whole into every cell, so that a point supplies no cells and its
+ * component count is not the length of the result?
+ *
+ * This is the participant rule of the evaluation for a head that declares
+ * the `'tuples'` broadcast exemption (`Add`, `Multiply`, `Subtract`,
+ * `Divide`, `Negate`): its own handlers combine a point with each element of
+ * a list operand, so `Add(L, PointList(1.8, 0))`, with `L` a list of four
+ * points, is a list of four points. The answer is `true` only when an
+ * operand that is not a point can supply the cells. When every collection
+ * operand is a point (`Add((1, 2), (3, 4))`), the result is a point with the
+ * components of the operands, and the components are the cells.
+ *
+ * Other broadcasting heads read a point beside a list by position
+ * (`Power((1, 2), [3, 4])` is `[1, 16]`), so a point stays a participant
+ * there.
+ */
+function tupleOperandsAreLifted(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const def = expr.operatorDefinition;
+  if (def === undefined || !def.broadcastExemptions.includes('tuples'))
+    return false;
+  return expr.ops.some(
+    (op) => typeCouldBeUnkeyedCollection(op.type.type) && !isTuple(op)
+  );
+}
+
+/**
+ * Can a broadcast participant `op` give its elements to a structural read
+ * (`structuralBroadcastAt`)? Its elements must be scalars or points. An
+ * element that is itself a list (a row of a matrix) is declined: a head with
+ * the `'tensors'` exemption reads such a participant as a whole tensor, so
+ * `Multiply([[1, 2], [3, 4]], [5, 6])` is the matrix product `[17, 39]`, not
+ * one product for each row.
+ */
+function hasCellElements(op: Expression): boolean {
+  const element = collectionElementType(op.type.type);
+  if (element === undefined) return false;
+  if (!typeCouldBeUnkeyedCollection(element)) return true;
+  return isTupleOrTupleUnionShapedType(stripMissingFromType(element));
+}
+
+/**
+ * Is the operand `op`, a tuple (`isTuple`), a point that a head with the
+ * `'tuples'` exemption can lift whole into each cell? It is when no
+ * component of the tuple can be a collection. `isTuple` is also true for a
+ * Desmos-style point list, a tuple with a list component such as `(-6, n)`
+ * with `n` a list, which evaluates to a list of points: such a tuple is not
+ * a point, and it is not lifted.
+ *
+ * The components are read from the type of `op`, or, when that type does
+ * not give them (`any`, or the bare `tuple`), from the type of the value of
+ * the symbol `op`. When neither gives them, the answer is `false`.
+ */
+function isLiftablePoint(op: Expression): boolean {
+  if (!isTuple(op)) return false;
+  let t = resolveTypeAlias(op.type.type);
+  if (typeof t === 'string' || t.kind !== 'tuple') {
+    if (!isSymbol(op)) return false;
+    const v = op.value;
+    if (v === undefined) return false;
+    t = resolveTypeAlias(v.type.type);
+    if (typeof t === 'string' || t.kind !== 'tuple') return false;
+  }
+  return t.elements.every((e) => !typeCouldBeCollection(e.type));
+}
+
+/**
+ * Does the broadcast application `expr` read the elements of its
+ * participants one by one, with no element whose length differs from the
+ * count of the participants? It does not, and the operand counts do not
+ * give the length of the evaluation, when `Multiply` (the one head with the
+ * `'tensors'` exemption whose tensor route contracts its operands) has a
+ * participant whose elements can be lists (the rows of a matrix,
+ * `hasCellElements`) beside a second collection operand: the evaluation is
+ * then a tensor product, and `Multiply([1, 2], [[1, 2, 3], [4, 5, 6]])` is
+ * `[9, 12, 15]`, with 3 elements, not 2. The tensor route of `Add` is
+ * element by element, so a sum of two matrices keeps the count of its rows,
+ * and so does a tensor beside scalars only (`2M`, `M + 1`).
+ */
+function isTensorProductBroadcast(expr: Expression): boolean {
+  if (!isFunction(expr) || expr.operator !== 'Multiply') return false;
+  const def = expr.operatorDefinition;
+  if (def === undefined || !def.broadcastExemptions.includes('tensors'))
+    return false;
+  const collections = expr.ops.filter((op) =>
+    typeCouldBeUnkeyedCollection(op.type.type)
+  );
+  if (collections.length < 2) return false;
+  return collections.some((op) => !isTuple(op) && !hasCellElements(op));
+}
+
+/**
+ * Can the element at a position of the broadcast application `expr` be
+ * built from the elements of its participants (`structuralBroadcastAt`)?
+ *
+ * It cannot (the caller then evaluates `expr`) for a shape whose evaluation
+ * does not combine the participants element by element: a head that is not
+ * broadcastable, a head that compares or joins whole collections, a tuple
+ * beside a list under a head that reads the tuple by position (see
+ * `tupleOperandsAreLifted`), a tuple that is not a point
+ * (`isLiftablePoint`), a string operand, or a participant whose elements are
+ * lists (`hasCellElements`).
+ */
+function structuralBroadcastApplies(expr: Expression): boolean {
+  if (!isFunction(expr)) return false;
+  const def = expr.operatorDefinition;
+  if (def === undefined || def.broadcastable !== true) return false;
+  if (
+    def.broadcastExemptions.includes('whole-collection-compare') ||
+    def.broadcastExemptions.includes('single-collection-join')
+  )
+    return false;
+  const tuplesLifted = tupleOperandsAreLifted(expr);
+  for (const op of expr.ops) {
+    if (!typeCouldBeUnkeyedCollection(op.type.type)) continue;
+    if (isTuple(op)) {
+      if (!tuplesLifted || !isLiftablePoint(op)) return false;
+      continue;
+    }
+    if (isTextAtom(op) || !hasCellElements(op)) return false;
+  }
+  return true;
+}
+
+/**
+ * The element at the 1-based position `k` of the broadcast application
+ * `expr`, built from the elements of its participants, with no evaluation:
+ * `Add(L, P)` at `k` is `Add(L.at(k), P)`. The caller has checked that the
+ * read applies (`structuralBroadcastApplies`), that `expr` is valid and
+ * pure, and that its count is known and holds `k`.
+ *
+ * Answers `undefined` (the caller then evaluates `expr`) when a participant
+ * does not give its element.
+ */
+function structuralBroadcastAt(
+  expr: Expression,
+  k: number
+): Expression | undefined {
+  if (!isFunction(expr)) return undefined;
+  const ops: Expression[] = [];
+  for (const op of expr.ops) {
+    if (!typeCouldBeUnkeyedCollection(op.type.type) || isTuple(op)) {
+      ops.push(op);
+      continue;
+    }
+    const element = op.at(k);
+    if (element === undefined) return undefined;
+    ops.push(element);
+  }
+  return expr.engine.function(expr.operator, ops);
 }
 
 /**
