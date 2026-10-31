@@ -385,11 +385,12 @@ describe('§4.5 parity on the VALUE-definition route', () => {
 
   test('GROUND value-route rows are unchanged', () => {
     const ce = fresh();
-    // The `(any) -> any` single-wrap convention of the ground value route.
+    // A parameter declared `any` receives a list whole, so the call is typed
+    // with the declared result (user decision 2026-10-30, GitHub issue
+    // #488). Before, the parameter was read as a scalar parameter, and the
+    // call was typed `list<any^3>`.
     ce.declare('ga', '(any) -> any');
-    expect(ce.box(['ga', ['List', 1, 2, 3]]).type.toString()).toBe(
-      'list<any^3>'
-    );
+    expect(ce.box(['ga', ['List', 1, 2, 3]]).type.toString()).toBe('any');
     ce.declare('gn', '(number) -> number');
     expect(ce.box(['gn', ['List', 1, 2, 3]]).type.toString()).toBe('vector<3>');
     ce.declare('gc', '(indexed_collection) -> indexed_collection');

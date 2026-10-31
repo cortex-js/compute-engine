@@ -430,12 +430,58 @@ export function functionLiteralParameterType(
   return undefined;
 }
 
-/** A type is "scalar" for broadcasting purposes if it is NOT a known
- * collection-like type. Conservative: unknown/any → scalar.
+/** True for the wide types `any`, `expression` and `value`. Each of them
+ * admits a collection, and a parameter DECLARED with one of them receives
+ * a collection argument whole (see {@link isScalarType}). `unknown` is not
+ * one of them: it is the type of a parameter with no declaration.
+ *
+ * A transparent alias is unfolded first, as {@link isScalarType} unfolds it:
+ * with `type alias A = expression`, `A` is a wide type. A nominal reference
+ * stays opaque, and is not a wide type.
+ * @internal
+ */
+export function isWideParameterType(
+  t: Type,
+  seen?: Set<TypeReference>
+): boolean {
+  if (typeof t === 'string')
+    return t === 'any' || t === 'expression' || t === 'value';
+  if (t.kind !== 'reference' || t.alias !== true || t.def === undefined)
+    return false;
+  // Cycle guard, as in `isScalarType`: a pure reference cycle is not a wide
+  // type.
+  if (seen === undefined) seen = new Set();
+  else if (seen.has(t)) return false;
+  seen.add(t);
+  try {
+    return isWideParameterType(t.def, seen);
+  } finally {
+    seen.delete(t);
+  }
+}
+
+/** A type is "scalar" for broadcasting purposes if a function whose
+ * parameter has this type is mapped over the elements of a collection
+ * argument at that parameter, instead of receiving the collection whole.
+ *
+ * A known collection-like type is not scalar. The wide types `any`,
+ * `expression` and `value` are not scalar either: a parameter declared with
+ * one of them accepts a collection, so it receives the collection whole
+ * (user decision 2026-10-30, GitHub issue #488). With
+ * `f := (t: any) ↦ (0 if t ∈ ℤ else 1)`, `f([[0, 0], 5])` is `1`, not
+ * `[[0, 0], 0]`.
+ *
+ * `unknown`, the type of a parameter with no declaration, stays scalar, so
+ * an untyped parameter is mapped: with `g := t ↦ (0 if t ∈ ℤ else 1)`,
+ * `g([[0, 0], 5])` is `[[0, 0], 0]` (user decision 2026-10-15,
+ * `docs/BROADCAST-MODEL.md`). An explicit `unknown` declaration is read as
+ * no declaration, and other types that are not collection-like (`number`,
+ * `integer`, `boolean`, …) are scalar.
  * @internal
  */
 export function isScalarType(t: Type, seen?: Set<TypeReference>): boolean {
   if (typeof t === 'string') {
+    if (isWideParameterType(t)) return false;
     // String types like 'collection', 'list', 'tuple', 'set' are non-scalar.
     if (
       t === 'collection' ||

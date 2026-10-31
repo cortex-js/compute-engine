@@ -61,6 +61,9 @@ import {
   declareValueOperand,
 } from './compile-declarations.js';
 import {
+  collectionAtExpressionParameter,
+  expressionParameterDecline,
+  expressionParameterReadAt,
   paramElementTypeIsOpen,
   provablyScalarOrFramedScalar,
   signatureParamsLowerToScalars,
@@ -70,7 +73,7 @@ import {
   userFunctionLiteral,
   userFunctionParamsAreScalar,
 } from './compile-assignment-checks.js';
-import { userFunctionSignature } from './compile-absence.js';
+import { blockLocalOf, userFunctionSignature } from './compile-absence.js';
 import type {
   DeclineNote,
   ReboundFunctionLocals,
@@ -857,6 +860,45 @@ export function ensureUserFunctionValueRef(
   target: CompileTarget<Expression>,
   decline?: DeclineNote
 ): string | undefined {
+  // The value of a function with a parameter declared `expression` that
+  // the body reads is declined on every target, unless the consumer of the
+  // value has checked the arguments it passes (`withCheckedCallback`): the
+  // interpreter binds a collection whole to such a parameter and the body
+  // maps over it, while the emitted definition reads the parameter as a
+  // scalar. With `h := (t: expression) ↦ 2t`, `Map(h, rows)` over
+  // `[[1, 2], [3, 4]]` gave `[null, null]` where the interpreter gives
+  // `[[2, 4], [6, 8]]`.
+  const marks = checkedFunctionValues.get(h);
+  if (marks === undefined) {
+    const literal = userFunctionLiteral(engine, h);
+    const at =
+      literal === undefined
+        ? -1
+        : expressionParameterReadAt(literal, (i) =>
+            userFunctionParamType(engine, h, i)
+          );
+    if (at >= 0)
+      throw expressionParameterDecline(`the function value \`${h}\``, at);
+    return userFunctionValueRef(engine, h, target, decline);
+  }
+  // The mark covers this value only. The definition of `h`, emitted below,
+  // can read `h` as a value again, and that value is checked as any other.
+  checkedFunctionValues.delete(h);
+  try {
+    return userFunctionValueRef(engine, h, target, decline);
+  } finally {
+    checkedFunctionValues.set(h, marks);
+  }
+}
+
+/** `ensureUserFunctionValueRef` after the check of a parameter declared
+ * `expression`. */
+function userFunctionValueRef(
+  engine: ComputeEngine,
+  h: string,
+  target: CompileTarget<Expression>,
+  decline?: DeclineNote
+): string | undefined {
   const name = core.ensureUserFunctionEmitted(engine, h, target, decline);
   if (name === undefined) return undefined;
   if (target.language !== 'javascript') return name;
@@ -1135,6 +1177,155 @@ export function markScalarFedLiterals(
 }
 
 /**
+ * The `Function` literals whose every call has its arguments checked at the
+ * call site, with the number of nested marks of each. A literal with a
+ * parameter declared `expression` that the body reads is declined when it
+ * is compiled as a function value, because an argument can then be a
+ * collection (`compileExprFunctionLiteral`); a literal in this map is
+ * compiled, because each call site declines a collection argument at such
+ * a parameter (`collectionAtExpressionParameter`). An entry exists only
+ * while the literal is compiled at the position that checks its calls, so
+ * the same node compiled in another position is not affected.
+ */
+export const checkedLiteralApplications = new Map<Expression, number>();
+
+/**
+ * Mark each of `literals` in `checkedLiteralApplications` for the time of
+ * a compilation. The caller runs the returned function when that
+ * compilation is done; it removes the marks.
+ */
+export function markCheckedLiteralApplications(
+  literals: ReadonlyArray<Expression>
+): () => void {
+  const map = checkedLiteralApplications;
+  for (const literal of literals) map.set(literal, (map.get(literal) ?? 0) + 1);
+  return () => {
+    for (const literal of literals) {
+      const n = map.get(literal) ?? 1;
+      if (n <= 1) map.delete(literal);
+      else map.set(literal, n - 1);
+    }
+  };
+}
+
+/**
+ * The names of the functions defined on the engine whose value is being
+ * compiled for a callback consumer that has checked the arguments it
+ * passes (`withCheckedCallback`), with the number of nested marks of each.
+ * The value of a function with a parameter declared `expression` that the
+ * body reads is declined (`ensureUserFunctionValueRef`), unless its name is
+ * in this map. An entry exists only while the consumer compiles the
+ * callback, so a value of the same function in another position is not
+ * affected.
+ */
+const checkedFunctionValues = new Map<string, number>();
+
+/**
+ * Compile the callback `callback` of the consumer `kind` (`Map`, `Filter`,
+ * `Reduce`, …) with `compile`, after a check of the parameters of the
+ * callback that are declared `expression` and that the body reads.
+ * `argTypes[i]` is the provable type of the value that the consumer passes
+ * to parameter `i`, `undefined` when it is not provable (as for
+ * `assertCallbackAnnotations`).
+ *
+ * The interpreter binds a collection whole to a parameter declared
+ * `expression`, and the body maps over it, while compiled code reads the
+ * parameter as a scalar. So:
+ * - when the value at such a parameter can be a collection (a source of
+ *   type `list<list<real>>` or `list<any>`, or a type that is not
+ *   provable), the consumer is declined (`expressionParameterDecline`);
+ * - else the callback is compiled marked as checked: a `Function` literal
+ *   in `checkedLiteralApplications`, a function defined on the engine in
+ *   `checkedFunctionValues`. Without the mark, the compilation of the
+ *   callback as a function value declines (`compileExprFunctionLiteral`,
+ *   `ensureUserFunctionValueRef`). With `L` declared `list<real>`,
+ *   `Map((t: expression) ↦ 2t, L)` compiles, and `Map((t: expression) ↦
+ *   2t, rows)` with `rows` declared `list<list<real>>` declines.
+ *
+ * A function local to the enclosing block is compiled where it is
+ * defined, not here, so it is not marked; the check still declines a
+ * possible collection.
+ *
+ * `sources[i]`, when given, is the collection whose elements the consumer
+ * passes to parameter `i`, and `argTypes[i]` its element type. The element
+ * type of a block local is not provable when the local is not assigned
+ * exactly once (`untrustedCallbackSource`): with `L := [1, 2]` then
+ * `L := [[1, 2]]` in the same block, the static type of `L` is still
+ * `list<integer>`.
+ */
+export function withCheckedCallback<T>(
+  kind: string,
+  callback: Expression | undefined,
+  argTypes: ReadonlyArray<Type | undefined>,
+  target: CompileTarget<Expression> | undefined,
+  compile: () => T,
+  sources?: ReadonlyArray<Expression | undefined>
+): T {
+  if (callback === undefined) return compile();
+  const literal = callbackLiteral(callback, target);
+  if (literal === undefined) return compile();
+  const named =
+    isSymbol(callback) &&
+    target?.localFunctions?.get(callback.symbol) === undefined
+      ? callback.symbol
+      : undefined;
+  const declaredType =
+    named === undefined
+      ? undefined
+      : (i: number) => userFunctionParamType(callback.engine, named, i);
+  if (expressionParameterReadAt(literal, declaredType) < 0) return compile();
+  const types = literal.ops
+    .slice(1)
+    .map((_, i) =>
+      untrustedCallbackSource(sources?.[i]) ? undefined : argTypes[i]
+    );
+  const at = collectionAtExpressionParameter(literal, types, declaredType);
+  if (at >= 0)
+    throw expressionParameterDecline(`\`${kind}\``, at, types[at] ?? null);
+  let unmark: () => void;
+  if (named !== undefined) {
+    checkedFunctionValues.set(
+      named,
+      (checkedFunctionValues.get(named) ?? 0) + 1
+    );
+    unmark = () => {
+      const n = checkedFunctionValues.get(named) ?? 1;
+      if (n <= 1) checkedFunctionValues.delete(named);
+      else checkedFunctionValues.set(named, n - 1);
+    };
+  } else if (isFunction(callback, 'Function'))
+    unmark = markCheckedLiteralApplications([literal]);
+  else unmark = () => {};
+  try {
+    return compile();
+  } finally {
+    unmark();
+  }
+}
+
+/**
+ * True when `source` is a local of a block being compiled whose static
+ * element type the block does not prove: the local is assigned more than
+ * once, or not at all, or its one value has no provable element type
+ * (`collectionElementTypeOf`). The static type of a block local is the
+ * type of its first value, and a later assignment does not change it:
+ * with `L := [1, 2]` then `L := [[1, 2]]`, `L` is still typed
+ * `list<integer>` where `Map` reads it. The read `At(L, 1)` is checked at
+ * run time for the same reason (`_SYS.atNumeric`).
+ */
+export function untrustedCallbackSource(
+  source: Expression | undefined
+): boolean {
+  if (source === undefined || !isSymbol(source)) return false;
+  const entry = blockLocalOf(source);
+  if (entry === undefined) return false;
+  return (
+    entry.values.length !== 1 ||
+    collectionElementTypeOf(entry.values[0]) === undefined
+  );
+}
+
+/**
  * The function literals of the statement list `stmts` that are bound to a
  * local function which the list only ever calls, so that the literal is
  * never handed out as a value.
@@ -1157,11 +1348,24 @@ export function markScalarFedLiterals(
  * function literal that returns `g`, hands the value out, and the literal
  * keeps the wrapper. A nested scope that binds the same name is counted
  * as a mention too, which can only keep a wrapper that is not needed.
+ *
+ * With `checkedCallbacks`, a mention of the local as the callback of a
+ * consumer of `CHECKED_CALLBACK_CONSUMERS` is not counted either, when no
+ * value that the consumer passes can be a collection at a parameter
+ * declared `expression` that the body reads
+ * (`collectionAtExpressionParameter`). This is the list that
+ * `markCheckedLiteralApplications` marks: such a literal is compiled as a
+ * value at its definition, and each of its uses is checked. With
+ * `g := (t: expression) ↦ 2t`, `Map(g, L)` is accepted when `L` is
+ * declared `list<real>`, and `Map(g, rows)` is a mention when `rows` is
+ * declared `list<list<real>>`. Such a literal can receive a list, so it is
+ * not for `markScalarFedLiterals`.
  */
 export function callOnlyLocalFunctionLiterals(
   stmts: ReadonlyArray<Expression>,
   locals: ReadonlyArray<string>,
-  rebound: ReboundFunctionLocals
+  rebound: ReboundFunctionLocals,
+  checkedCallbacks = false
 ): Expression[] {
   const candidates = new Map<string, Expression>();
   for (const stmt of stmts) {
@@ -1206,14 +1410,127 @@ export function callOnlyLocalFunctionLiterals(
     // does not read its value.
     const skipTarget =
       top && (e.operator === 'Assign' || e.operator === 'Declare');
+    const checked = checkedCallbacks
+      ? checkedCallbackOperand(e, candidates, stmts, locals)
+      : -1;
     e.ops.forEach((op, i) => {
-      if (!(skipTarget && i === 0)) walk(op, false);
+      if (!(skipTarget && i === 0) && i !== checked) walk(op, false);
     });
   };
   for (const stmt of stmts) walk(stmt, true);
   return [...candidates]
     .filter(([name]) => !mentioned.has(name))
     .map(([, literal]) => literal);
+}
+
+/**
+ * The consumers whose callback operand is compiled through
+ * `withCheckedCallback` on the targets that compile them, with the
+ * position of the callback operand and the types of the values that the
+ * consumer passes to the parameters of the callback. A type is
+ * `undefined` when it is not provable (the accumulator of `Reduce` and
+ * `Scan`), and is then counted as a possible collection.
+ */
+const CHECKED_CALLBACK_CONSUMERS: Readonly<
+  Record<
+    string,
+    {
+      callback: number;
+      argTypes: (ops: ReadonlyArray<Expression>) => (Type | undefined)[];
+      /** The collection whose elements each parameter receives. */
+      sources?: (ops: ReadonlyArray<Expression>) => (Expression | undefined)[];
+    }
+  >
+> = {
+  // `Map(f, xs, ys, …)` passes one element of each source.
+  Map: {
+    callback: 0,
+    argTypes: (ops) => ops.slice(1).map((x) => collectionElementTypeOf(x)),
+    sources: (ops) => ops.slice(1),
+  },
+  Filter: {
+    callback: 1,
+    argTypes: (ops) => [collectionElementTypeOf(ops[0])],
+    sources: (ops) => [ops[0]],
+  },
+  Reduce: {
+    callback: 1,
+    argTypes: (ops) => [undefined, collectionElementTypeOf(ops[0])],
+    sources: (ops) => [undefined, ops[0]],
+  },
+  Scan: {
+    callback: 1,
+    argTypes: (ops) => [undefined, collectionElementTypeOf(ops[0])],
+    sources: (ops) => [undefined, ops[0]],
+  },
+  Tabulate: { callback: 0, argTypes: () => ['integer', 'integer'] },
+  Fill: { callback: 0, argTypes: () => ['integer', 'integer'] },
+};
+
+/**
+ * The position of the operand of `e` that is a candidate local of
+ * `candidates` used as the callback of a consumer of
+ * `CHECKED_CALLBACK_CONSUMERS`, when no value that the consumer passes can
+ * be a collection at a parameter of the literal declared `expression` that
+ * the body reads. `-1` otherwise.
+ */
+function checkedCallbackOperand(
+  e: Expression,
+  candidates: ReadonlyMap<string, Expression>,
+  stmts: ReadonlyArray<Expression>,
+  locals: ReadonlyArray<string>
+): number {
+  if (!isFunction(e)) return -1;
+  const consumer = CHECKED_CALLBACK_CONSUMERS[e.operator];
+  if (consumer === undefined) return -1;
+  const callback = e.ops[consumer.callback];
+  if (!isSymbol(callback)) return -1;
+  const literal = candidates.get(callback.symbol);
+  if (literal === undefined) return -1;
+  const sources = consumer.sources?.(e.ops) ?? [];
+  const argTypes = consumer
+    .argTypes(e.ops)
+    .map((t, i) =>
+      untrustedListSource(sources[i], stmts, locals) ? undefined : t
+    );
+  return collectionAtExpressionParameter(literal, argTypes) < 0
+    ? consumer.callback
+    : -1;
+}
+
+/**
+ * `untrustedCallbackSource` for a source read in the statement list
+ * `stmts`, whose own locals are `locals`. The frame of that list is not
+ * known yet when its literals are marked, so the assignments of an own
+ * local are counted in `stmts`: the local must be assigned exactly once,
+ * by a `Assign` or a `Declare` anywhere in the list, from a value with a
+ * provable element type. A local of an enclosing block is read from its
+ * frame (`untrustedCallbackSource`).
+ */
+function untrustedListSource(
+  source: Expression | undefined,
+  stmts: ReadonlyArray<Expression>,
+  locals: ReadonlyArray<string>
+): boolean {
+  if (source === undefined || !isSymbol(source)) return false;
+  const name = source.symbol;
+  if (!locals.includes(name)) return untrustedCallbackSource(source);
+  const values: (Expression | undefined)[] = [];
+  const visit = (x: Expression): void => {
+    if (!isFunction(x)) return;
+    if (
+      (x.operator === 'Assign' || x.operator === 'Declare') &&
+      isSymbol(x.ops[0], name)
+    )
+      values.push(
+        x.operator === 'Assign' ? x.ops[1] : declareValueOperand(x.ops)
+      );
+    for (const op of x.ops) visit(op);
+  };
+  for (const stmt of stmts) visit(stmt);
+  return (
+    values.length !== 1 || collectionElementTypeOf(values[0]) === undefined
+  );
 }
 
 /**

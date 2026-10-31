@@ -17,6 +17,7 @@ import {
   isValueDef,
   freeSymbolNames,
 } from '../boxed-expression/utils.js';
+import { boundVariableNames } from '../boxed-expression/binders.js';
 import {
   broadcastableParamSlots,
   declaresBroadcastableParam,
@@ -33,6 +34,7 @@ import {
   typeContainsMissing,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { factsOf } from '../../common/type/facts.js';
 import { typeToString } from '../../common/type/serialize.js';
 import { isPolymorphicType } from '../../common/type/instantiate.js';
 import type { Type } from '../../common/type/types.js';
@@ -948,6 +950,161 @@ export function isElementWiseOperand(body: Expression, name: string): boolean {
     return e.ops.some(visit);
   };
   return visit(body);
+}
+
+/**
+ * True when `t` is the type `expression`, or a transparent alias of it
+ * (`type alias A = expression`). A nominal type is not unfolded, and is not
+ * read as `expression`.
+ */
+function isExpressionParameterType(t: Type): boolean {
+  return resolveTypeAlias(t) === 'expression';
+}
+
+/**
+ * True when a value of the static type `t` can be a collection: a
+ * collection type, a union with a collection arm, or one of the wide types
+ * `any`, `expression`, `value` and `unknown`, which can hold one. A string
+ * is not read as a collection.
+ */
+function typeMayBeCollection(t: Type): boolean {
+  const r = resolveTypeAlias(t);
+  if (r === 'any' || r === 'expression' || r === 'value' || r === 'unknown')
+    return true;
+  if (r === 'never' || r === 'error' || r === 'nothing') return false;
+  if (isSubtype(r, 'string')) return false;
+  return factsOf(r).collection !== false;
+}
+
+/**
+ * True when the name `name` is free in `body`: the reading of
+ * `freeSymbolNames(body).has(name)`, where a nested `Function` literal that
+ * binds `name` hides it. The answer for each distinct subtree is kept, so a
+ * body that shares subtrees (a DAG, `e_k = e_(k-1) + e_(k-1)`) is read in
+ * time linear in its number of distinct nodes, where `freeSymbolNames`
+ * walks every path.
+ */
+function bodyReadsName(body: Expression, name: string): boolean {
+  const memo = new Map<Expression, boolean>();
+  const visit = (e: Expression): boolean => {
+    if (isSymbol(e)) return e.symbol === name;
+    if (!isFunction(e)) return false;
+    const known = memo.get(e);
+    if (known !== undefined) return known;
+    let result: boolean;
+    if (e.operator === 'Function')
+      result =
+        !boundVariableNames(e).includes(name) &&
+        e.ops[0] !== undefined &&
+        visit(e.ops[0]);
+    else result = e.ops.some(visit);
+    memo.set(e, result);
+    return result;
+  };
+  return visit(body);
+}
+
+/**
+ * The 0-based position of the first parameter of the `Function` literal
+ * `literal` that is DECLARED `expression` (or with an alias of it) and that
+ * the body reads, or `-1` when there is none. `declaredType(i)` gives the
+ * type of parameter `i` when the literal has no annotation for it (the
+ * signature that a host declared for a named function).
+ *
+ * The interpreter binds a collection argument whole to such a parameter
+ * (`isScalarType` refuses the wide types), and the body then maps over it:
+ * `((t: expression) ↦ 2t)([[1, 2], [3, 4]])` is `[[2, 4], [6, 8]]`.
+ * Compiled code reads a parameter declared `expression` as a scalar, and
+ * emits `2 * t`, which gives `NaN` or `null` for an array. A parameter
+ * declared `any` or `value` does not have this problem: compiled code tests
+ * it at run time (`Array.isArray(t) ? … : 2 * t`).
+ */
+export function expressionParameterReadAt(
+  literal: Expression,
+  declaredType?: (i: number) => Type | undefined
+): number {
+  if (!isFunction(literal, 'Function')) return -1;
+  const params = literal.ops.slice(1);
+  for (const [i, param] of params.entries()) {
+    const declared = functionLiteralParameterType(param) ?? declaredType?.(i);
+    if (declared === undefined || !isExpressionParameterType(declared))
+      continue;
+    const name = functionLiteralParameterName(param);
+    if (name && bodyReadsName(literal.ops[0], name)) return i;
+  }
+  return -1;
+}
+
+/**
+ * The 0-based position of the first argument of a call of the `Function`
+ * literal `literal` that can be a collection (`typeMayBeCollection`) and
+ * that reaches a parameter declared `expression` which the body reads
+ * (`expressionParameterReadAt`), or `-1` when there is none.
+ *
+ * Compiled code cannot follow the interpreter for such a call, so the
+ * caller declines it (`expressionParameterDecline`). A scalar argument at
+ * such a parameter (`5`, or a symbol declared `real`) is not counted, and
+ * the call compiles. This is the simple, sound reading: a run-time test of
+ * the argument, as compiled code emits for a parameter declared `any` or
+ * `value`, would compile more of these calls.
+ *
+ * `argTypes[i]` is the static type of argument `i`. The caller reads the
+ * types before a constant fold of the arguments, which can narrow them.
+ * An argument with no provable type (`undefined`, for example the element
+ * of a source whose element type is not known) is counted as a possible
+ * collection.
+ */
+export function collectionAtExpressionParameter(
+  literal: Expression,
+  argTypes: ReadonlyArray<Type | undefined>,
+  declaredType?: (i: number) => Type | undefined
+): number {
+  if (!isFunction(literal, 'Function')) return -1;
+  const params = literal.ops.slice(1);
+  for (const [i, t] of argTypes.entries()) {
+    const param = params[i];
+    if (param === undefined) break;
+    const declared = functionLiteralParameterType(param) ?? declaredType?.(i);
+    if (declared === undefined || !isExpressionParameterType(declared))
+      continue;
+    const name = functionLiteralParameterName(param);
+    if (!name || !bodyReadsName(literal.ops[0], name)) continue;
+    if (t === undefined || typeMayBeCollection(t)) return i;
+  }
+  return -1;
+}
+
+/**
+ * The error of a call that `collectionAtExpressionParameter` refuses, or of
+ * a function that `expressionParameterReadAt` refuses when it is compiled
+ * as a function value (its arguments are not known at compile time).
+ * `callee` names the function or the consumer in the message; `position`
+ * is the 0-based position of the parameter. `argumentType` is the type of
+ * the argument at that position, `null` when the type is not provable, and
+ * `undefined` for a function value.
+ */
+export function expressionParameterDecline(
+  callee: string,
+  position: number,
+  argumentType?: Type | null
+): Error {
+  const what =
+    argumentType === undefined
+      ? `parameter ${position + 1} is declared \`expression\`, and an ` +
+        `argument of the compiled function can be a collection`
+      : argumentType === null
+        ? `the type of argument ${position + 1} is not provable, so it ` +
+          `can be a collection, and its parameter is declared \`expression\``
+        : `argument ${position + 1} has the type ` +
+          `\`${typeToString(argumentType)}\`, which can be a ` +
+          `collection, and its parameter is declared \`expression\``;
+  return new Error(
+    `Could not compile ${callee}: ${what}. The interpreter binds a ` +
+      `collection whole to such a parameter, and the body maps over it. ` +
+      `Compiled code reads a parameter declared \`expression\` as a ` +
+      `scalar. Declare the parameter \`any\` or \`value\` (compiled code ` +
+      `then tests the argument at run time), or with a collection type.`
+  );
 }
 
 /**

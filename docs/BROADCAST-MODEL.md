@@ -34,12 +34,60 @@ wrote**, not by the operand shapes:
    the sines of the cells. Pinned by `test/compute-engine/apply-literal-maps.test.ts`
    ("a nested list is mapped at its leaves, and typed so").
 
+   A parameter declared with one of the wide types `any`, `expression` or
+   `value` is not a scalar parameter. These types admit a collection, so the
+   parameter receives a collection argument whole (user decision 2026-10-30,
+   GitHub issue #488). With `f := (t: any) ↦ (0 if t ∈ ℤ else 1)`,
+   `f([[0, 0], 5])` is `1`; with no declaration, `t ↦ (0 if t ∈ ℤ else 1)`
+   gives `[[0, 0], 0]`. A recursive function that descends into a nested
+   list works with a wide declaration too: with
+   `leaves := (t: any) ↦ (1 if t ∈ ℤ else leaves(t[1]) + leaves(t[2]))`,
+   `leaves([[0, 0], 0])` is `3`, not `[[1, 1], 1]`. A transparent alias of
+   a wide type is a wide type; a nominal type is not. A parameter declared
+   `unknown` is read as a parameter with no declaration and is still
+   mapped. The test is `isScalarType()`
+   (`boxed-expression/function-literal.ts`). Pinned by
+   `test/compute-engine/apply-literal-maps.test.ts` ("A PARAMETER DECLARED
+   WITH A WIDE TYPE").
+
+   Compiled code tests a parameter declared `any` or `value` at run time,
+   and maps the body over a collection argument as the interpreter does.
+   It does not test a parameter declared `expression`, so it declines (falls
+   back to the interpreter) a call where an argument that can be a
+   collection reaches such a parameter:
+   `((t: expression) ↦ 2t)([[1, 2], [3, 4]])` is computed by the
+   interpreter as `[[2, 4], [6, 8]]`, and `((t: expression) ↦ 2t)(5)` still
+   compiles. The rule is the same for a function literal and for a named
+   function, in the two positions where it can be met. A direct call
+   (`h(L)`) declines when an argument that can be a collection reaches such
+   a parameter. A function VALUE (`compile(h)`, or `h` handed to a consumer)
+   declines, because its arguments are not known, except at a callback
+   consumer (`Map`, `Filter`, `Reduce`, `Scan`, `Tabulate`, `Fill`) that
+   passes values whose type cannot be a collection: with `h := (t:
+   expression) ↦ 2t`, `Map(h, L)` compiles when `L` is declared
+   `list<real>`, and `Map(h, rows)` declines when `rows` is declared
+   `list<list<real>>`. A more precise version, with a run-time test as for
+   `any` and `value`, is available on request (ROADMAP CE-693). The tests are
+   `collectionAtExpressionParameter()` (`compilation/compile-user-calls.ts`)
+   and `withCheckedCallback()` (`compilation/compile-callbacks.ts`).
+
+   A call where a collection is bound whole at such a parameter is not
+   typed by the result of the signature, scalar or not: `(t: expression) ↦
+   2t` has the result `number`, and its value for `[1, 2]` is `[2, 4]`.
+   When the argument is certainly a collection, the call is typed from the
+   body with the parameter typed as the argument (`list<integer>` for a
+   `list<integer>` argument). When the argument can be a collection but is
+   not certainly one (`L` declared `any`, or `list<integer> | integer`), the
+   call is typed `any`. The test is `wideParameterArgument()`
+   (`boxed-expression/call-result-type.ts`).
+
    A tuple argument is mapped at a parameter declared with a scalar type
    (`real`, `number`, …), on every route: a built-in scalar function
    (`Sin((1, 2))` is `(sin 1, sin 2)`), a declared named function, and a
    function literal whose parameter is typed in place (`((u: real) ↦ 7)((3,
    4))` is `(7, 7)`). The result is a tuple. A parameter with no declared type
-   binds the tuple whole: `(u ↦ Length(u))((3, 4))` is `2`. Compiled code
+   binds the tuple whole: `(u ↦ Length(u))((3, 4))` is `2`. So does a
+   parameter declared `any`, `expression` or `value`. Compiled code
    computes the same tuple (user decision 2026-10-03).
 
    A function that passes a collection to itself at a parameter position (a

@@ -781,7 +781,17 @@ function compileIntervalCollectionValue(
   const coll =
     compileIntervalCollectionValue(source, target) ??
     BaseCompiler.compileValueOperand(source, target);
-  return `_IA.map(${BaseCompiler.compileValueOperand(fn, target)}, ${coll})`;
+  // A parameter declared `expression` is checked against the type of the
+  // element it receives (`withCheckedCallback`).
+  const callee = BaseCompiler.withCheckedCallback(
+    'Map',
+    fn,
+    [BaseCompiler.collectionElementTypeOf(source)],
+    target,
+    () => BaseCompiler.compileValueOperand(fn, target),
+    [source]
+  );
+  return `_IA.map(${callee}, ${coll})`;
 }
 
 /**
@@ -3817,6 +3827,13 @@ const INTERVAL_JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
           `${args.length - 1} argument(s) are supplied — the interpreter ` +
           `curries or throws there, which this target cannot express.`
       );
+    // A collection at a parameter of the literal declared `expression` is
+    // declined; otherwise the literal is compiled as a checked callee.
+    compile = BaseCompiler.checkedAppliedLiteralCompile(
+      fn,
+      args.slice(1),
+      compile
+    );
     return `(${compile(fn)})(${args
       .slice(1)
       .map((a) => compile(a))

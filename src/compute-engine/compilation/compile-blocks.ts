@@ -80,6 +80,7 @@ import { _blockStatements } from './compile-user-functions.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
 import {
   callOnlyLocalFunctionLiterals,
+  markCheckedLiteralApplications,
   markScalarFedLiterals,
 } from './compile-callbacks.js';
 import { _localValueFrames } from './compile-absence.js';
@@ -484,6 +485,8 @@ export function compileBlock(
   let checkedFrame: CheckedLocalsFrame | undefined;
   // Removes the marks of `markScalarFedLiterals`.
   let unmarkFed: (() => void) | undefined;
+  // Removes the marks of `markCheckedLiteralApplications`.
+  let unmarkChecked: (() => void) | undefined;
   // The list updates of this block that write in place, and the
   // temporaries that hold the arrays the block owns
   // (`ownedLocalUpdateChains`).
@@ -646,6 +649,18 @@ export function compileBlock(
       unmarkFed = markScalarFedLiterals(
         callOnlyLocalFunctionLiterals(args, locals, reboundLocals)
       );
+    // On every target, each call of such a literal checks its arguments at
+    // the call site (`tryCompileLocalFunctionCall`), so the literal is not
+    // declined for a parameter declared `expression`
+    // (`markCheckedLiteralApplications`). So is a literal whose other uses
+    // are the callback of a consumer that passes no collection to such a
+    // parameter (`Map(g, L)` with `L` declared `list<real>`; the argument
+    // `true` of `callOnlyLocalFunctionLiterals`). The marks are removed in
+    // the `finally` below, so they do not reach a later block; a nested
+    // block marks its own literals, which are other nodes.
+    unmarkChecked = markCheckedLiteralApplications(
+      callOnlyLocalFunctionLiterals(args, locals, reboundLocals, true)
+    );
     // A local that the list replaces element by element
     // (`xs = ReplaceAt(xs, i, v)`) and never hands out is copied once, at
     // its first update, and then written in place
@@ -1039,6 +1054,7 @@ export function compileBlock(
     if (blockScope !== undefined) _blockStatements.pop();
     if (localValueFrame !== undefined) _localValueFrames.pop();
     unmarkFed?.();
+    unmarkChecked?.();
     for (const ops of ownedOps) OWNED_LOCAL_UPDATE_OPS.delete(ops);
     for (const name of shadowSpellings) _freshLocalNames.delete(name);
   }

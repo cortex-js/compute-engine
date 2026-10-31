@@ -4614,7 +4614,8 @@ function pyFnArg(
   kind: string,
   op: Expression | undefined,
   compile: (expr: Expression) => string,
-  argTypes: ReadonlyArray<Type | undefined> = []
+  argTypes: ReadonlyArray<Type | undefined> = [],
+  sources?: ReadonlyArray<Expression | undefined>
 ): string {
   // A parameter ANNOTATION the emitted lambda cannot enforce fails closed
   // (D6), exactly as on the JavaScript target — see
@@ -4657,9 +4658,29 @@ function pyFnArg(
             `interpreter evaluates it instead.`
         );
     }
-    return `_ce_predicate(${pyCallbackArg(kind, op, compile)}, '${kind}', '${mode}')`;
+    return `_ce_predicate(${pyCheckedCallbackArg(kind, op, compile, argTypes, sources)}, '${kind}', '${mode}')`;
   }
-  return pyCallbackArg(kind, op, compile);
+  return pyCheckedCallbackArg(kind, op, compile, argTypes, sources);
+}
+
+/** `pyCallbackArg` after the check of a parameter declared `expression`
+ * against the type of the value it receives
+ * (`BaseCompiler.withCheckedCallback`). */
+function pyCheckedCallbackArg(
+  kind: string,
+  op: Expression | undefined,
+  compile: (expr: Expression) => string,
+  argTypes: ReadonlyArray<Type | undefined>,
+  sources?: ReadonlyArray<Expression | undefined>
+): string {
+  return BaseCompiler.withCheckedCallback(
+    kind,
+    op,
+    argTypes,
+    undefined,
+    () => pyCallbackArg(kind, op, compile),
+    sources
+  );
 }
 
 /** `pyFnArg` without the check of a predicate's result. */
@@ -6909,59 +6930,84 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         'Map',
         args[0],
         compile,
-        BaseCompiler.zipCallbackArgTypes('Map', sources, 2)
+        BaseCompiler.zipCallbackArgTypes('Map', sources, 2),
+        sources
       );
       return `(lambda _f, *_ls: [_f(*_t) for _t in zip(*_ls)])(${fn}, ${colls.join(', ')})`;
     }
     const coll = pyCollArg('Map', args[1], compile);
-    const fn = pyFnArg('Map', args[0], compile, [
-      BaseCompiler.collectionElementTypeOf(args[1]),
-    ]);
+    const fn = pyFnArg(
+      'Map',
+      args[0],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[1])],
+      [args[1]]
+    );
     return `(lambda _f: [_f(_x) for _x in ${coll}])(${fn})`;
   },
   Filter: (args, compile) => {
     const coll = pyCollArg('Filter', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Filter`: missing predicate');
-    const fn = pyFnArg('Filter', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'Filter',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f: [_x for _x in ${coll} if _f(_x)])(${fn})`;
   },
   CountIf: (args, compile) => {
     const coll = pyCollArg('CountIf', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `CountIf`: missing predicate');
-    const fn = pyFnArg('CountIf', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'CountIf',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f: sum(1 for _x in ${coll} if _f(_x)))(${fn})`;
   },
   Find: (args, compile) => {
     const coll = pyCollArg('Find', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Find`: missing predicate');
-    const fn = pyFnArg('Find', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'Find',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f: next((_x for _x in ${coll} if _f(_x)), float('nan')))(${fn})`;
   },
   IndexWhere: (args, compile) => {
     const coll = pyCollArg('IndexWhere', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `IndexWhere`: missing predicate');
-    const fn = pyFnArg('IndexWhere', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'IndexWhere',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f: next((_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)), 0))(${fn})`;
   },
   Position: (args, compile) => {
     const coll = pyCollArg('Position', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `Position`: missing predicate');
-    const fn = pyFnArg('Position', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'Position',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f: [_i + 1 for _i, _x in enumerate(${coll}) if _f(_x)])(${fn})`;
   },
   Any: (args, compile) => {
@@ -6973,9 +7019,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     // An absent element makes the interpreter's answer `Missing` (Kleene),
     // which `any` cannot express: fail closed (`refuseKleeneQuantifier`).
     refuseKleeneQuantifier('Any', args[0], args[1]);
-    const fn = pyFnArg('Any', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'Any',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f: any(_f(_x) for _x in ${coll}))(${fn})`;
   },
   All: (args, compile) => {
@@ -6985,27 +7035,39 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
         `Could not compile \`All\`: only the predicate form compiles.`
       );
     refuseKleeneQuantifier('All', args[0], args[1]);
-    const fn = pyFnArg('All', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'All',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f: all(_f(_x) for _x in ${coll}))(${fn})`;
   },
   TakeWhile: (args, compile) => {
     const coll = pyCollArg('TakeWhile', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `TakeWhile`: missing predicate');
-    const fn = pyFnArg('TakeWhile', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'TakeWhile',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f, _l: _l[:next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l))])(${fn}, ${coll})`;
   },
   DropWhile: (args, compile) => {
     const coll = pyCollArg('DropWhile', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `DropWhile`: missing predicate');
-    const fn = pyFnArg('DropWhile', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'DropWhile',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f, _l: _l[next((_i for _i, _x in enumerate(_l) if not _f(_x)), len(_l)):])(${fn}, ${coll})`;
   },
   // A collection-valued mapping is spliced; a scalar result is kept as-is.
@@ -7013,9 +7075,13 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const coll = pyCollArg('FlatMap', args[0], compile);
     if (args[1] == null)
       throw new Error('Could not compile `FlatMap`: missing mapping function');
-    const fn = pyFnArg('FlatMap', args[1], compile, [
-      BaseCompiler.collectionElementTypeOf(args[0]),
-    ]);
+    const fn = pyFnArg(
+      'FlatMap',
+      args[1],
+      compile,
+      [BaseCompiler.collectionElementTypeOf(args[0])],
+      [args[0]]
+    );
     return `(lambda _f, _l: [_y for _x in _l for _y in (lambda _r: _r if isinstance(_r, list) else [_r])(_f(_x))])(${fn}, ${coll})`;
   },
   // Fold. Built-in combiners use the native reductions; an empty collection
@@ -7072,10 +7138,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
       for (const ops of chains ?? []) PY_IN_PLACE_UPDATE_OPS.add(ops);
       let fn: string;
       try {
-        fn = pyFnArg('Reduce', op, compile, [
-          BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
-          BaseCompiler.collectionElementTypeOf(args[0]),
-        ]);
+        fn = pyFnArg(
+          'Reduce',
+          op,
+          compile,
+          [
+            BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
+            BaseCompiler.collectionElementTypeOf(args[0]),
+          ],
+          [undefined, args[0]]
+        );
       } finally {
         for (const ops of chains ?? []) PY_IN_PLACE_UPDATE_OPS.delete(ops);
       }
@@ -7114,10 +7186,16 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
     const fn =
       builtin ??
       ((isFunction(op, 'Function') && op.nops - 1 === 2) || isSymbol(op)
-        ? pyFnArg('Scan', op, compile, [
-            BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
-            BaseCompiler.collectionElementTypeOf(args[0]),
-          ])
+        ? pyFnArg(
+            'Scan',
+            op,
+            compile,
+            [
+              BaseCompiler.foldAccumulatorArgType(args[0]!, op, init),
+              BaseCompiler.collectionElementTypeOf(args[0]),
+            ],
+            [undefined, args[0]]
+          )
         : undefined);
     if (fn === undefined)
       throw new Error(
@@ -7215,6 +7293,14 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Apply: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
+    // A collection at a parameter of the literal declared `expression` is
+    // declined; otherwise the literal is compiled as a checked callee.
+    if (isFunction(args[0], 'Function'))
+      compile = BaseCompiler.checkedAppliedLiteralCompile(
+        args[0],
+        args.slice(1),
+        compile
+      );
     return `(${compile(args[0])})(${args
       .slice(1)
       .map((a) => compile(a))

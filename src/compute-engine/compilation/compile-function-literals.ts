@@ -38,13 +38,20 @@ import {
 } from './compile-definitions.js';
 import {
   broadcastingWrapper,
+  checkedLiteralApplications,
   complexCoercingWrapper,
+  markCheckedLiteralApplications,
   declaredParamType,
   literalDeclaredParamTypes,
   scalarFedLiterals,
 } from './compile-callbacks.js';
 import { tempVar, withBoundScope } from './compiler-naming.js';
-import { signatureParamsLowerToScalars } from './compile-user-calls.js';
+import {
+  collectionAtExpressionParameter,
+  expressionParameterDecline,
+  expressionParameterReadAt,
+  signatureParamsLowerToScalars,
+} from './compile-user-calls.js';
 import { assignedNamesIn, withNestedCseHarvest } from './compile-cse.js';
 import {
   LOCAL_UNSHAPED,
@@ -53,6 +60,42 @@ import {
 } from './compile-shapes.js';
 import { cseRegionOf, cseTop, withCseOperand } from './compile-conditions.js';
 import { core } from './compiler-core-hooks.js';
+
+/**
+ * Check an application of the `Function` literal `literal` to `args`, and
+ * return the `compile` callback that the `Apply` handler of a target uses
+ * for the rest of the application.
+ *
+ * An argument that can be a collection, at a parameter declared
+ * `expression` that the body reads, is declined
+ * (`collectionAtExpressionParameter`): the interpreter binds the collection
+ * whole, and the body maps over it, while compiled code reads the parameter
+ * as a scalar. Otherwise the returned callback compiles `literal` marked as
+ * checked, and the lowering of the literal does not decline it for its
+ * parameter declared `expression` (see `compileExprFunctionLiteral`). Any
+ * other expression is compiled as `compile` compiles it.
+ */
+export function checkedAppliedLiteralCompile<T>(
+  literal: Expression,
+  args: ReadonlyArray<Expression>,
+  compile: (e: Expression) => T
+): (e: Expression) => T {
+  const at = collectionAtExpressionParameter(
+    literal,
+    args.map((a) => a.type.type)
+  );
+  if (at >= 0)
+    throw expressionParameterDecline('`Apply`', at, args[at].type.type);
+  return (e) => {
+    if (e !== literal) return compile(e);
+    const unmark = markCheckedLiteralApplications([literal]);
+    try {
+      return compile(e);
+    } finally {
+      unmark();
+    }
+  };
+}
 
 /**
  * A `Function` literal. A case of `compileExpr`: it returns the code, or
@@ -66,6 +109,29 @@ export function compileExprFunctionLiteral(
   node: Expression | undefined
 ): TargetSource | undefined {
   if (h === 'Function') {
+    // A literal with a parameter declared `expression` that the body reads
+    // is declined when it is compiled as a function value: its arguments
+    // are not known at compile time, and one of them can be a collection.
+    // The interpreter binds a collection whole to such a parameter and the
+    // body maps over it, while compiled code reads the parameter as a
+    // scalar: `(t: expression) ↦ 2t` compiles to `(t) => 2 * t`, which
+    // gives `NaN` for `[1, 2]` where the interpreter gives `[2, 4]`. The
+    // literal is compiled when each of its calls checks its arguments (an
+    // `Apply` handler, `checkedAppliedLiteralCompile`, the calls of a
+    // block local that is only called, `markCheckedLiteralApplications`, or
+    // a callback consumer whose elements cannot be collections,
+    // `withCheckedCallback`), or when its consumer passes it run-time
+    // scalars only (`withScalarFedLiteral`).
+    if (
+      node === undefined ||
+      (!checkedLiteralApplications.has(node) &&
+        scalarFedLiterals.get(node) === undefined)
+    ) {
+      const at = expressionParameterReadAt(
+        node ?? engine.function('Function', [...args])
+      );
+      if (at >= 0) throw expressionParameterDecline('a `Function` literal', at);
+    }
     // Dispatch to target-specific handler if available (e.g. GPU throws)
     const fnFn = target.functions?.(h);
     if (typeof fnFn === 'function')

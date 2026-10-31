@@ -41,6 +41,7 @@ import {
   isRestParameter,
   isDestructuringParameter,
   isScalarType,
+  isWideParameterType,
 } from './function-literal.js';
 import {
   isPointListArgumentType,
@@ -161,6 +162,59 @@ function mayBroadcast(type: Type): boolean {
 }
 
 /**
+ * How an argument of type `type` (its absent arm removed) meets a parameter
+ * declared with a wide type (`any`, `expression` or `value`), which
+ * receives a collection whole. A string is not read as a collection. Unlike
+ * {@link mayBroadcast}, a numeric tuple is a collection here.
+ * - `'top'` when `type` is itself a wide type (`L` declared `any`, with the
+ *   value `[1, 2]`), `unknown`, or when it can be a collection and can also
+ *   be a value that is not one (`list<integer> | integer`). The walk of the
+ *   body types `2t` as a number for such an argument, so it cannot tell
+ *   whether the value is a collection, and the call is typed `any`. An
+ *   `unknown` argument can hold a list: with `L` declared `list<unknown>`
+ *   and the value `[[1, 2]]`, `L[1]` is `[1, 2]`.
+ * - `'collection'` when every value of `type` is a collection
+ *   (`list<integer>`, `tuple<integer, integer>`). The walk of the body,
+ *   with the parameter typed as the argument, then describes the value.
+ * - `undefined` when no value of `type` is a collection, and for `error`
+ *   and `never`.
+ *
+ * Only an argument at a parameter declared with a wide type is read here,
+ * so an `unknown` argument at another parameter keeps its typing.
+ */
+/**
+ * `wideParameterArgument` for the argument `arg`, its absent arm removed.
+ * A FREE symbol of type `unknown` (an undeclared `x`, the structure flag
+ * `free`) is a generic value, as the `List` type handler reads it (a
+ * number cell), so it does not make the call `any`: with `U` declared
+ * `(any, any) -> tuple<number, number>`, `U(x, y)` keeps its declared
+ * result. Any other `unknown` argument can hold a list, as `L[1]` with `L`
+ * declared `list<unknown>` does, and gives `'top'`.
+ */
+function wideArgumentKind(
+  arg: OperandDescriptor
+): 'top' | 'collection' | undefined {
+  const t = presentPart(arg.type);
+  const kind = wideParameterArgument(t);
+  if (kind !== 'top' || resolveTypeAlias(t) !== 'unknown') return kind;
+  const structure = arg.structureOf?.();
+  return structure?.kind === 'symbol' && structure.free === true
+    ? undefined
+    : kind;
+}
+
+function wideParameterArgument(type: Type): 'top' | 'collection' | undefined {
+  if (isWideParameterType(type)) return 'top';
+  const t = resolveTypeAlias(type);
+  if (t === 'unknown') return 'top';
+  if (t === 'error' || t === 'never') return undefined;
+  if (isSubtype(t, 'string')) return undefined;
+  const collection = factsOf(t).collection;
+  if (collection === false) return undefined;
+  return collection === true ? 'collection' : 'top';
+}
+
+/**
  * Does a call of `head` hand each argument to the body WHOLE, a collection
  * argument included? It does when the signature that decides the binding has
  * a parameter that is not a scalar (a collection, a point): the interpreter
@@ -206,16 +260,26 @@ function bindsArgumentsWhole(
  * checked against: there a bare parameter is `any`, and its type in
  * `signature` was only inferred from the body. That signature is read, so
  * that an inferred type is not read as a contract.
+ *
+ * With `declaredOnly`, the `signature` of an operator definition is read
+ * even when it has a `_validationSignature`: the `any` of a bare parameter
+ * there is not a declaration, and the rule for a parameter declared with a
+ * wide type (`argumentAtWideParameter`) must not read it as one. With
+ * `ce.declare('k', { signature: '(unknown) -> unknown', evaluate })`, the
+ * parameter of `k` is `unknown`, not `any`.
  */
 function declaredParameterTypes(
-  binding: BoxedDefinition | undefined
+  binding: BoxedDefinition | undefined,
+  declaredOnly = false
 ): ReadonlyArray<Type> | undefined {
   if (!binding) return undefined;
   let sig: Type | undefined;
   if ('operator' in binding) {
     if (binding.operator.inferredSignature) return undefined;
-    sig =
-      binding.operator._validationSignature ?? binding.operator.signature?.type;
+    sig = declaredOnly
+      ? binding.operator.signature?.type
+      : (binding.operator._validationSignature ??
+        binding.operator.signature?.type);
   } else {
     if (binding.value.inferredType) return undefined;
     sig = binding.value.type?.type;
@@ -358,8 +422,15 @@ function callResultTypeOfBinding(
   // fit its parameters (`argumentOutsideInferredSignature`), so it does not
   // bound the type derived from the body for another argument. That type
   // replaces the scalar result only when the result does not hold it.
+  // A collection at a parameter declared with a wide type is bound whole,
+  // and the result of the signature, scalar or not, does not describe the
+  // call (`argumentAtWideParameter`): the call is typed from the body with
+  // no bound, else `any`.
+  const wide = argumentAtWideParameter(called, binding, args);
+  if (wide === 'top') return 'any';
   let scalar: Type | undefined;
-  if (isScalarResult(declared)) {
+  if (wide === 'collection') declared = 'any';
+  else if (isScalarResult(declared)) {
     if (!argumentOutsideInferredSignature(binding, args)) return undefined;
     scalar = declared;
     declared = 'any';
@@ -370,7 +441,7 @@ function callResultTypeOfBinding(
     (args.some((x) => mayBroadcast(presentPart(x.type))) &&
       !bindsArgumentsWhole(binding, literal))
   )
-    return undefined;
+    return wide === 'collection' ? 'any' : undefined;
   const t = literalBodyResultType(
     engine,
     literal,
@@ -379,11 +450,64 @@ function callResultTypeOfBinding(
     derive,
     declaredParameterTypes(binding)
   );
+  if (wide === 'collection')
+    return t === undefined || t === 'unknown' ? 'any' : t;
   // The walk of the body, bounded by a result that is not a scalar, ran and
   // gave no type (`mayDeriveUnbounded`).
   if (declined !== undefined && t === undefined && scalar === undefined)
     declined.walk = true;
   return scalar === undefined ? t : outsideScalarResult(t, scalar);
+}
+
+/**
+ * How the arguments of a call of the function literal `literal` meet its
+ * parameters declared with a wide type (`any`, `expression` or `value`).
+ * The type of a parameter is the annotation of the literal, else the type
+ * of the parameter in the signature declared for `binding`: the engine does
+ * not copy a declared `any` onto the literal (`ce.declare('h', '(any) ->
+ * number')`, then `h := t ↦ 2t`), and the parameter still receives a
+ * collection whole.
+ *
+ * Such an argument is bound whole (`isScalarType` refuses these types), and
+ * the result of the signature, inferred with the parameter read as that
+ * wide type, does not describe the call: with `g := (t: expression) ↦ 2t`,
+ * the result is inferred `number`, and `g([1, 2, 3])` is `[2, 4, 6]`; with
+ * `(t: expression) ↦ [2t]`, the result is inferred a list of numbers, and
+ * the value for `[1, 2]` is `[[2, 4]]`. The answer is:
+ * - `'top'` when `wideParameterArgument` gives `'top'` for an argument at
+ *   such a parameter (a wide type, or a type such as `list<integer> |
+ *   integer` that can be a collection or not). The call is typed `any`.
+ * - `'collection'` when an argument at such a parameter is certainly a
+ *   collection. The call is then typed from the body with no bound, else
+ *   `any`.
+ * - `undefined` otherwise.
+ */
+function argumentAtWideParameter(
+  literal: Expression | undefined,
+  binding: BoxedDefinition | undefined,
+  args: readonly OperandDescriptor[]
+): 'top' | 'collection' | undefined {
+  if (!isFunction(literal, 'Function')) return undefined;
+  const params = literal.ops.slice(1);
+  // The declared signature is read only for a parameter that the literal
+  // does not annotate, and only once: this runs for every call typing.
+  let signatureTypes: ReturnType<typeof declaredParameterTypes> | null = null;
+  let result: 'collection' | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const param = params[i];
+    if (param === undefined) continue;
+    let declared = functionLiteralParameterType(param);
+    if (declared === undefined) {
+      if (signatureTypes === null)
+        signatureTypes = declaredParameterTypes(binding, true);
+      declared = signatureTypes?.[i];
+    }
+    if (declared === undefined || !isWideParameterType(declared)) continue;
+    const kind = wideArgumentKind(args[i]);
+    if (kind === 'top') return 'top';
+    if (kind === 'collection') result = 'collection';
+  }
+  return result;
 }
 
 /**
@@ -1070,10 +1194,32 @@ export function appliedLiteralResultType(
   // parameter type when the result of the signature is not a scalar.
   const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])];
   let outside = false;
+  let wideCollection = false;
+  let keep = false;
   for (let i = 0; i < args.length; i++) {
     const slot = slots[i]?.type;
     if (slot === undefined) continue;
     const t = presentPart(args[i].type);
+    // A collection at a parameter declared `any`, `expression` or `value`
+    // is bound whole (`isScalarType` refuses these types). The result of the
+    // signature was inferred with the parameter read as that wide type, and
+    // it does not describe this call, scalar or not: with `t: expression`,
+    // the body `2t` is typed `number`, but applied to `[1, 2, 3]` its value
+    // is `[2, 4, 6]`. When the argument is certainly a collection, the call
+    // is typed from the body with no bound, else `any`. When the argument
+    // can be a collection but is not certainly one (a wide type, or
+    // `list<integer> | integer`), the walk of the body types `2t` as a
+    // number, so it cannot tell whether the value is a collection, and the
+    // call is typed `any` (`wideArgumentKind`; `argumentAtWideParameter`
+    // has the same rule for a named function).
+    if (isWideParameterType(slot)) {
+      const kind = wideArgumentKind(args[i]);
+      if (kind === 'top') return 'any';
+      if (kind === 'collection') {
+        wideCollection = true;
+        continue;
+      }
+    }
     if (isSubtype(t, slot)) continue;
     if (
       t === 'unknown' ||
@@ -1081,10 +1227,15 @@ export function appliedLiteralResultType(
       t === 'error' ||
       functionLiteralParameterType(literal.ops[i + 1]) !== undefined ||
       isScalarParameter(slot)
-    )
-      return undefined;
+    ) {
+      // The result of the signature is kept, unless another argument is a
+      // collection at a parameter declared with a wide type.
+      keep = true;
+      continue;
+    }
     outside = true;
   }
+  if (keep) return wideCollection ? 'any' : undefined;
   // A string or a boolean argument at a parameter that the literal does not
   // annotate: when the rules below keep the result of the signature, that
   // result was inferred with the parameter read as a number, so the call is
@@ -1100,14 +1251,26 @@ export function appliedLiteralResultType(
     if (!outside) derives = false;
     else scalar = declared;
   } else if (outside) derives = false;
-  if (!derives && !dataArgument) return undefined;
+  if (!derives && !dataArgument && !wideCollection) return undefined;
   // An applied literal in the body of another is typed by this function
   // again, and the walk of its body is not memoized across the different
   // argument types it meets. Beyond a depth of 8 the result type of the
-  // literal is kept, which bounds the work.
-  if (appliedLiteralDepth >= 8) return undefined;
+  // literal is kept, which bounds the work (`any` for a collection at a
+  // parameter declared with a wide type, whose result the literal does not
+  // describe).
+  if (appliedLiteralDepth >= 8) return wideCollection ? 'any' : undefined;
   appliedLiteralDepth += 1;
   try {
+    if (wideCollection) {
+      const t = literalBodyResultType(
+        literal.engine,
+        literal,
+        args,
+        'any',
+        derive
+      );
+      return t === undefined || t === 'unknown' ? 'any' : t;
+    }
     if (derives) {
       let t = literalBodyResultType(
         literal.engine,

@@ -5463,17 +5463,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       // (`BaseCompiler.foldAccumulatorArgType`), which is what an annotated
       // accumulator provably receives on every step.
       const plan = BaseCompiler.combinerPlan(coll, op, init, target);
-      BaseCompiler.assertCallbackAnnotations(
-        'Reduce',
-        op,
-        [
-          plan?.accComplex
-            ? 'complex'
-            : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
-          BaseCompiler.collectionElementTypeOf(coll),
-        ],
-        target
-      );
+      const argTypes = [
+        plan?.accComplex
+          ? 'complex'
+          : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
+        BaseCompiler.collectionElementTypeOf(coll),
+      ];
+      BaseCompiler.assertCallbackAnnotations('Reduce', op, argTypes, target);
       assertAccumulatorFitsStep('Reduce', op, init);
       // ACCUMULATOR and ELEMENT lanes (`combinerPlan`): the combiner is
       // compiled with its two parameters bound to the lanes the fold actually
@@ -5491,7 +5487,16 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       const chains = plan?.coerceSeed ? undefined : inPlaceUpdateChains(op);
       for (const ops of chains ?? []) IN_PLACE_UPDATE_OPS.add(ops);
       try {
-        combiner = customCombinerWithLanes(op, plan, compile, target);
+        // A parameter declared `expression` is checked against the type of
+        // the value it receives (`withCheckedCallback`).
+        combiner = BaseCompiler.withCheckedCallback(
+          'Reduce',
+          op,
+          argTypes,
+          target,
+          () => customCombinerWithLanes(op, plan, compile, target),
+          [undefined, coll]
+        );
       } finally {
         for (const ops of chains ?? []) IN_PLACE_UPDATE_OPS.delete(ops);
       }
@@ -6451,7 +6456,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       ['integer', 'integer'],
       target
     );
-    const f = hoistedCallbackLambda(args[0], compile, target);
+    const f = BaseCompiler.withCheckedCallback(
+      'Tabulate',
+      args[0],
+      ['integer', 'integer'],
+      target,
+      () => hoistedCallbackLambda(args[0], compile, target)
+    );
     const n = compile(args[1]);
     if (args.length === 2)
       return `((_f, _n) => Array.from({ length: Math.max(0, Math.round(_n)) }, (_, _i) => _f(_i + 1)))(${f}, ${n})`;
@@ -6475,7 +6486,13 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       ['integer', 'integer'],
       target
     );
-    const f = hoistedCallbackLambda(args[0], compile, target);
+    const f = BaseCompiler.withCheckedCallback(
+      'Fill',
+      args[0],
+      ['integer', 'integer'],
+      target,
+      () => hoistedCallbackLambda(args[0], compile, target)
+    );
     const rows = compile(dims.ops[0]);
     const cols = compile(dims.ops[1]);
     return `((_f, _r, _c) => Array.from({ length: Math.max(0, Math.round(_r)) }, (_, _i) => Array.from({ length: Math.max(0, Math.round(_c)) }, (_, _j) => _f(_i + 1, _j + 1))))(${f}, ${rows}, ${cols})`;
@@ -7018,18 +7035,17 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
       builtin === undefined
         ? BaseCompiler.combinerPlan(coll, op, init, target)
         : undefined;
+    const argTypes =
+      builtin === undefined
+        ? [
+            plan?.accComplex
+              ? 'complex'
+              : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
+            BaseCompiler.collectionElementTypeOf(coll),
+          ]
+        : [];
     if (builtin === undefined)
-      BaseCompiler.assertCallbackAnnotations(
-        'Scan',
-        op,
-        [
-          plan?.accComplex
-            ? 'complex'
-            : BaseCompiler.foldAccumulatorArgType(coll, op, init, target),
-          BaseCompiler.collectionElementTypeOf(coll),
-        ],
-        target
-      );
+      BaseCompiler.assertCallbackAnnotations('Scan', op, argTypes, target);
     assertAccumulatorFitsStep('Scan', op, init);
     // Accumulator and element lanes as for `Reduce` above (`combinerPlan`).
     // `Scan` was wrong the same way from the SECOND element on — over
@@ -7040,7 +7056,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
     const combiner =
       builtin ??
       (isFunction(op, 'Function') || isSymbol(op)
-        ? customCombinerWithLanes(op, plan, compile, target)
+        ? BaseCompiler.withCheckedCallback(
+            'Scan',
+            op,
+            argTypes,
+            target,
+            () => customCombinerWithLanes(op, plan, compile, target),
+            [undefined, coll]
+          )
         : undefined);
     if (combiner === undefined)
       throw new Error(
@@ -7136,6 +7159,14 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Apply: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
+    // A collection at a parameter of the literal declared `expression` is
+    // declined; otherwise the literal is compiled as a checked callee.
+    if (isFunction(args[0], 'Function'))
+      compile = BaseCompiler.checkedAppliedLiteralCompile(
+        args[0],
+        args.slice(1),
+        compile
+      );
     // `Apply(Derivative(f, n), x)` — the parse of `f''(x)` — would otherwise
     // compile its callee through `compileDerivative`, which differentiates
     // `f`'s body n times at compile time. That closed form multiplies out,
@@ -11614,6 +11645,16 @@ function compileToTarget(
 
   if (isFunction(expr, 'Function')) {
     const args = expr.ops;
+    // The caller of the compiled function can pass a collection to a
+    // parameter declared `expression`. The interpreter binds it whole and
+    // the body maps over it, while the compiled body reads the parameter as
+    // a scalar, so such a literal is declined.
+    const expressionAt = BaseCompiler.expressionParameterReadAt(expr);
+    if (expressionAt >= 0)
+      throw BaseCompiler.expressionParameterDecline(
+        'a `Function` literal',
+        expressionAt
+      );
     BaseCompiler.assertNoDestructuringParams(args.slice(1));
     BaseCompiler.assertNoRestParams(args.slice(1));
     const params = args
@@ -13444,12 +13485,11 @@ function callbackArg(
   extraArgTypes: ReadonlyArray<Type | undefined> = [],
   target?: CompileTarget<Expression>
 ): string {
-  BaseCompiler.assertCallbackAnnotations(
-    kind,
-    callback,
-    [...extraArgTypes, BaseCompiler.collectionElementTypeOf(source)],
-    target
-  );
+  const argTypes = [
+    ...extraArgTypes,
+    BaseCompiler.collectionElementTypeOf(source),
+  ];
+  BaseCompiler.assertCallbackAnnotations(kind, callback, argTypes, target);
   // STRICT shapes: a bare user-function symbol with a WIDE parameter over
   // complex ELEMENTS is a lane mismatch (the one emission of the function is
   // real-shaped) — a decline under `strict`, an escalation to complex mode
@@ -13483,7 +13523,16 @@ function callbackArg(
     return BaseCompiler.withScalarFedLiteral(callback, 'finite', () =>
       hoistedCallbackLambda(callback, compile, target)
     );
-  return hoistedCallbackLambda(callback!, compile, target);
+  // A parameter declared `expression` is checked against the type of the
+  // element it receives (`withCheckedCallback`).
+  return BaseCompiler.withCheckedCallback(
+    kind,
+    callback,
+    argTypes,
+    target,
+    () => hoistedCallbackLambda(callback!, compile, target),
+    [...extraArgTypes.map(() => undefined), source]
+  );
 }
 
 /**
@@ -13547,14 +13596,17 @@ function zipFnArg(
         `mapping compiles to a two-argument function, and ${sources.length} ` +
         `collections supply ${sources.length} arguments per call. The interpreter evaluates it instead.`
     );
-  BaseCompiler.assertCallbackAnnotations(
+  const argTypes = BaseCompiler.zipCallbackArgTypes(kind, sources, 2);
+  BaseCompiler.assertCallbackAnnotations(kind, callback, argTypes, target);
+  BaseCompiler.assertBuiltinCallbackUsable(kind, callback);
+  return BaseCompiler.withCheckedCallback(
     kind,
     callback,
-    BaseCompiler.zipCallbackArgTypes(kind, sources, 2),
-    target
+    argTypes,
+    target,
+    () => hoistedCallbackLambda(callback!, compile, target),
+    sources
   );
-  BaseCompiler.assertBuiltinCallbackUsable(kind, callback);
-  return hoistedCallbackLambda(callback!, compile, target);
 }
 
 //

@@ -35,6 +35,11 @@ import {
 import { symbolAtSite } from '../boxed-expression/binding-sites.js';
 import { isRelationalOperator } from '../latex-syntax/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { resolveTypeAlias } from '../../common/type/utils.js';
+import {
+  functionLiteralParameterName,
+  functionLiteralParameterType,
+} from '../boxed-expression/function-literal.js';
 
 // ---------------------------------------------------------------------------
 // Tunable thresholds are exported so tests can pin the named policy values.
@@ -1157,7 +1162,12 @@ class Harvester {
       this.prepass(this.root, new Set<Expression>());
       this.prepassDone = true;
     }
-    return isFunction(node) && node.isPure && this.isEligible(node);
+    return (
+      isFunction(node) &&
+      node.isPure &&
+      !readsExpressionParameter(node) &&
+      this.isEligible(node)
+    );
   }
 
   /**
@@ -1603,6 +1613,7 @@ class Harvester {
       isFunction(node) &&
       !underMapped &&
       node.isPure &&
+      !readsExpressionParameter(node) &&
       (this.sizeOf(node) >= this.minSize ||
         this.isNegationCredited(node) ||
         this.isAdmittedUserFnApp(node) ||
@@ -3324,6 +3335,54 @@ function functionLiteralParamNames(
       names.push((param.ops[0] as Expression & { symbol: string }).symbol);
   }
   return names;
+}
+
+/**
+ * True when `node` is a `Function` literal with a parameter annotated
+ * `expression` (or a transparent alias of it) whose name the body mentions.
+ *
+ * Such a literal is never recorded as an occurrence (`isRecorded`,
+ * `mayRecord`). It is compiled only at a position that checks every
+ * argument it receives (a callback consumer whose elements cannot be
+ * collections, an `Apply`), and it is declined as a function value
+ * anywhere else, because the interpreter binds a collection whole to such a
+ * parameter while compiled code reads it as a scalar. The check marks the
+ * literal NODE at the checked position. A binding shared by two equal
+ * literals is emitted once, so it would carry the mark to the other
+ * position: `Tuple(Map(G, L), G)`, with `G = (t: expression) ↦ 2t`, gave
+ * the second element the checked arrow, a function value that computes
+ * `NaN` for `[1, 2]` where the interpreter gives `[2, 4]`. An application
+ * that holds the literal stays a candidate: two equal applications hold
+ * the literal at the same consumer position, and that consumer checks and
+ * marks it again when the shared binding is compiled. The eligibility of
+ * nodes (`isEligible`), and so the skippability queries, are not affected.
+ *
+ * The mention test reads every symbol of the body, including one that a
+ * nested binder shadows, so it can only answer `true` more often than a
+ * scope-accurate test. Each distinct subtree is read once, so a body that
+ * shares subtrees (a DAG) is read in linear time. This is the test of
+ * `expressionParameterReadAt` (`compile-user-calls.ts`) for the annotations
+ * of the literal, written here to keep this module free of the compiler
+ * modules.
+ */
+function readsExpressionParameter(node: Expression): boolean {
+  if (!isFunction(node, 'Function')) return false;
+  const names: string[] = [];
+  for (const param of node.ops.slice(1)) {
+    const t = functionLiteralParameterType(param);
+    if (t === undefined || resolveTypeAlias(t) !== 'expression') continue;
+    const name = functionLiteralParameterName(param);
+    if (name) names.push(name);
+  }
+  if (names.length === 0 || node.ops[0] === undefined) return false;
+  const seen = new Set<Expression>();
+  const mentions = (e: Expression): boolean => {
+    if (isSymbol(e)) return names.includes(e.symbol);
+    if (!isFunction(e) || seen.has(e)) return false;
+    seen.add(e);
+    return e.ops.some(mentions);
+  };
+  return mentions(node.ops[0]);
 }
 
 /**

@@ -10,6 +10,8 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
+import { harvestCse } from '../../src/compute-engine/compilation/cse';
+import { expressionParameterReadAt } from '../../src/compute-engine/compilation/compile-user-calls';
 
 const SUM_BODY = ['Sum', ['Cos', 'n'], ['Limits', 'n', 1, 'i']];
 
@@ -664,12 +666,23 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
     expect(call.evaluate().toString()).toBe('Error("boom")');
   });
 
-  test('an annotated `value` parameter maps, as on the named route', () => {
+  // A parameter declared `value` admits a list, so it receives the list
+  // whole (user decision 2026-10-30, GitHub issue #488). Before, it was
+  // read as a scalar parameter and the call gave `[(1, 1),(2, 2)]`.
+  test('an annotated `value` parameter receives a list whole, as on the named route', () => {
     const ce = new ComputeEngine();
     const f = ['Function', ['Tuple', 'x', 'x'], ['Typed', 'x', "'value'"]];
-    expect(
-      ce.box(['Apply', f, ['List', 1, 2]] as never).evaluate().toString()
-    ).toBe('[(1, 1),(2, 2)]');
+    ce.declare('V', 'function');
+    ce.assign('V', ce.box(f as never));
+    for (const e of [
+      ['Apply', f, ['List', 1, 2]],
+      ['V', ['List', 1, 2]],
+    ]) {
+      const call = ce.box(e as never);
+      const value = call.evaluate();
+      expect(value.toString()).toBe('([1,2], [1,2])');
+      expect(value.type.matches(call.type)).toBe(true);
+    }
   });
 
   test('a ragged list is typed so that its value is a member', () => {
@@ -726,4 +739,816 @@ describe('A FUNCTION LITERAL APPLIED TO A COLLECTION', () => {
         'Error("incompatible-dimensions", "3 vs Infinity")'
       );
   });
+});
+
+// A parameter declared with one of the wide types `any`, `expression` or
+// `value` admits a collection, so it receives a collection argument whole. A
+// parameter with no declared type, or declared `unknown`, is still mapped
+// over the leaves of a list, and so is a parameter declared with a scalar
+// type (user decision 2026-10-30, GitHub issue #488).
+describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
+  const ARG = ['List', ['List', 0, 0], 5];
+  const BODY = ['If', ['Element', 't', 'Integers'], 0, 1];
+  const param = (type: string | undefined) =>
+    type === undefined ? 't' : ['Typed', 't', `'${type}'`];
+
+  test.each([
+    [undefined, '[[0,0],0]'],
+    ['unknown', '[[0,0],0]'],
+    ['integer', '[[0,0],0]'],
+    ['any', '1'],
+    ['expression', '1'],
+    ['value', '1'],
+    ['list', '1'],
+  ])('a list at a parameter declared %s', (type, expected) => {
+    const ce = new ComputeEngine();
+    const f = ['Function', BODY, param(type)];
+    for (const e of [
+      [f, ARG],
+      ['Apply', f, ARG],
+    ]) {
+      const call = ce.box(e as never);
+      const value = call.evaluate();
+      expect(value.toString()).toBe(expected);
+      expect(value.type.matches(call.type)).toBe(true);
+    }
+  });
+
+  // The recursion descends into the list only when the list reaches the body
+  // whole. Mapped at the leaves, each leaf gives `1`, and the result is
+  // `[[1,1],1]`.
+  test.each([[undefined], ['any'], ['value'], ['integer | list']])(
+    'a recursive function with a parameter declared %s receives the list whole',
+    (type) => {
+      const ce = new ComputeEngine();
+      ce.box([
+        'Assign',
+        'leaves',
+        [
+          'Function',
+          [
+            'If',
+            ['Element', 't', 'Integers'],
+            1,
+            ['Add', ['leaves', ['At', 't', 1]], ['leaves', ['At', 't', 2]]],
+          ],
+          param(type),
+        ],
+      ] as never).evaluate();
+      expect(
+        ce
+          .box(['leaves', ['List', ['List', 0, 0], 0]] as never)
+          .evaluate()
+          .toString()
+      ).toBe('3');
+    }
+  );
+
+  test.each([['any'], ['expression'], ['value'], ['unknown'], [undefined]])(
+    'a tuple at a parameter declared %s is bound whole',
+    (type) => {
+      const ce = new ComputeEngine();
+      const u = type === undefined ? 'u' : ['Typed', 'u', `'${type}'`];
+      const call = ce.box([
+        ['Function', ['Length', 'u'], u],
+        ['Tuple', 3, 4],
+      ] as never);
+      const value = call.evaluate();
+      expect(value.toString()).toBe('2');
+      expect(value.type.matches(call.type)).toBe(true);
+    }
+  );
+
+  // With `t: expression`, the body `2t` is typed `number`. A collection
+  // argument is bound whole, so the call is typed from the body with `t`
+  // typed as the argument, on the three routes.
+  test.each([
+    ['any', ['List', 1, 2, 3], '[2,4,6]'],
+    ['expression', ['List', 1, 2, 3], '[2,4,6]'],
+    ['value', ['List', 1, 2, 3], '[2,4,6]'],
+    ['any', ['Tuple', 3, 4], '(6, 8)'],
+    ['expression', ['Tuple', 3, 4], '(6, 8)'],
+    ['value', ['Tuple', 3, 4], '(6, 8)'],
+  ])(
+    'the type of a call with a parameter declared %s agrees with its value for %j',
+    (type, arg, expected) => {
+      const ce = new ComputeEngine();
+      const f = ['Function', ['Multiply', 't', 2], param(type)];
+      ce.declare('W', 'function');
+      ce.assign('W', ce.box(f as never));
+      for (const e of [
+        [f, arg],
+        ['Apply', f, arg],
+        ['W', arg],
+      ]) {
+        const call = ce.box(e as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe(expected);
+        expect(value.type.matches(call.type)).toBe(true);
+      }
+    }
+  );
+
+  test.each([['any'], ['expression'], ['value']])(
+    'compiled code receives the list whole at a parameter declared %s',
+    (type) => {
+      const ce = new ComputeEngine();
+      const call = ce.box([
+        ['Function', ['Sum', 't'], param(type)],
+        ['List', 1, 2, 3],
+      ] as never);
+      expect(call.evaluate().toString()).toBe('6');
+      // Without constant folding, the JavaScript target declines `Sum` over
+      // an operand declared with a wide type (as for a free symbol declared
+      // `any`), and the interpreter computes the sum. The value is the
+      // same: the list is summed whole, not mapped.
+      const result = compile(call, {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(false);
+      expect(result.run!({})).toBe(6);
+    }
+  );
+
+  // The body `2t` maps over the list at run time. The compiled value is the
+  // value of the interpreter, on the literal route (with constant folding
+  // off, so that the generated code computes it) and on the named route
+  // (with the list as a run-time input). The same calls with a parameter
+  // declared `expression` are declined (see the tests below).
+  test.each([
+    ['any', [[0, 0], 5], [[0, 0], 10]],
+    ['value', [[0, 0], 5], [[0, 0], 10]],
+    [
+      'any',
+      [
+        [1, 2],
+        [3, 4],
+      ],
+      [
+        [2, 4],
+        [6, 8],
+      ],
+    ],
+    [
+      'value',
+      [
+        [1, 2],
+        [3, 4],
+      ],
+      [
+        [2, 4],
+        [6, 8],
+      ],
+    ],
+  ])(
+    'compiled code maps the body over a nested list at a parameter declared %s (%j)',
+    (type, arg, expected) => {
+      const ce = new ComputeEngine();
+      const toList = (x: unknown): unknown =>
+        Array.isArray(x) ? ['List', ...x.map(toList)] : x;
+      const f = ['Function', ['Multiply', 2, 't'], param(type)];
+      const literalCall = ce.box([f, toList(arg)] as never);
+      expect(literalCall.evaluate().json).toEqual(toList(expected));
+      const literalRun = compile(literalCall, {
+        to: 'javascript',
+        fallback: false,
+        constantFold: false,
+      } as never)!.run!;
+      expect(literalRun({})).toEqual(expected);
+
+      ce.declare('W', 'function');
+      ce.assign('W', ce.box(f as never));
+      ce.declare('L', 'list');
+      const namedCall = ce.box(['W', 'L'] as never);
+      const namedRun = compile(namedCall, {
+        to: 'javascript',
+        fallback: false,
+      } as never)!.run!;
+      expect(namedRun({ L: arg })).toEqual(expected);
+      ce.assign('L', ce.box(toList(arg) as never));
+      expect(namedCall.evaluate().json).toEqual(toList(expected));
+    }
+  );
+
+  // Compiled code reads a parameter declared `expression` as a scalar, and
+  // it does not test the argument at run time as it does for `any` and
+  // `value`. So a call where an argument that can be a collection reaches
+  // such a parameter is declined, and the interpreter computes the value.
+  // The routes: a function literal (with constant folding off, so that the
+  // generated code would compute it), a named function with the list as a
+  // run-time input, a host-declared `(expression) -> any` with an untyped
+  // literal, an alias of `expression`, and the function literal compiled
+  // as a function value.
+  describe('compiled code declines a collection at a parameter declared `expression`', () => {
+    const NESTED = [
+      [1, 2],
+      [3, 4],
+    ];
+    const DOUBLED = [
+      [2, 4],
+      [6, 8],
+    ];
+    const NESTED_LIST = ['List', ['List', 1, 2], ['List', 3, 4]];
+    const literal = (type = 'expression') => [
+      'Function',
+      ['Multiply', 2, 't'],
+      ['Typed', 't', `'${type}'`],
+    ];
+
+    test('a function literal applied to a nested list', () => {
+      const ce = new ComputeEngine();
+      const call = ce.box([literal(), NESTED_LIST] as never);
+      expect(call.evaluate().json).toEqual([
+        'List',
+        ['List', 2, 4],
+        ['List', 6, 8],
+      ]);
+      const result = compile(call, {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(false);
+      expect(result.run!({})).toEqual(DOUBLED);
+    });
+
+    test('a named function applied to a list input', () => {
+      const ce = new ComputeEngine();
+      ce.declare('W', 'function');
+      ce.assign('W', ce.box(literal() as never));
+      ce.declare('L', 'list');
+      const result = compile(ce.box(['W', 'L'] as never), {
+        to: 'javascript',
+      } as never)!;
+      expect(result.success).toBe(false);
+      expect(result.run!({ L: NESTED })).toEqual(DOUBLED);
+    });
+
+    test('a host-declared `(expression) -> any` with an untyped literal', () => {
+      const ce = new ComputeEngine();
+      ce.declare('h', '(expression) -> any');
+      ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't'] as never));
+      const result = compile(ce.box(['h', NESTED_LIST] as never), {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(false);
+      expect(result.run!({})).toEqual(DOUBLED);
+    });
+
+    test('a parameter declared with an alias of `expression`', () => {
+      const ce = new ComputeEngine();
+      ce.declareType('A', 'expression', { alias: true });
+      const result = compile(ce.box([literal('A'), NESTED_LIST] as never), {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(false);
+      expect(result.run!({})).toEqual(DOUBLED);
+    });
+
+    test('the function literal compiled as a function value', () => {
+      const ce = new ComputeEngine();
+      const result = compile(ce.box(literal() as never), {
+        to: 'javascript',
+      } as never)!;
+      expect(result.success).toBe(false);
+    });
+
+    test.each([['javascript'], ['interval-js'], ['python']])(
+      'target %s declines a nested list at the function literal',
+      (to) => {
+        const ce = new ComputeEngine();
+        const result = compile(ce.box([literal(), NESTED_LIST] as never), {
+          to,
+          constantFold: false,
+        } as never)!;
+        expect(result.success).toBe(false);
+      }
+    );
+
+    // A scalar argument at such a parameter compiles as before.
+    test('a function literal applied to a scalar still compiles', () => {
+      const ce = new ComputeEngine();
+      const result = compile(ce.box([literal(), 5] as never), {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(true);
+      expect(result.run!({})).toBe(10);
+    });
+
+    test('a named function applied to a real input still compiles', () => {
+      const ce = new ComputeEngine();
+      ce.declare('W', 'function');
+      ce.assign('W', ce.box(literal() as never));
+      ce.declare('x', 'real');
+      const result = compile(ce.box(['W', 'x'] as never), {
+        to: 'javascript',
+      } as never)!;
+      expect(result.success).toBe(true);
+      expect(result.run!({ x: 5 })).toBe(10);
+    });
+
+    test('an alias of `expression` with a real input still compiles', () => {
+      const ce = new ComputeEngine();
+      ce.declareType('A', 'expression', { alias: true });
+      ce.declare('x', 'real');
+      const result = compile(ce.box([literal('A'), 'x'] as never), {
+        to: 'javascript',
+      } as never)!;
+      expect(result.success).toBe(true);
+      expect(result.run!({ x: 5 })).toBe(10);
+    });
+  });
+
+  // The host declares the parameter type, and the literal has no
+  // annotation. The engine does not copy a declared `any` onto the
+  // parameter of the literal, but the parameter still receives the list
+  // whole, and the call is typed from the body as for `value` and
+  // `expression`.
+  test.each([['any'], ['expression'], ['value']])(
+    'a host-declared `(%s) -> number` with an untyped literal: the type agrees with the value',
+    (type) => {
+      const ce = new ComputeEngine();
+      ce.declare('h', `(${type}) -> number`);
+      ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't'] as never));
+      const call = ce.box(['h', ['List', 1, 2, 3]] as never);
+      const value = call.evaluate();
+      expect(value.toString()).toBe('[2,4,6]');
+      expect(value.type.matches(call.type)).toBe(true);
+    }
+  );
+
+  // A transparent alias of a wide type is a wide type.
+  test('a parameter declared with an alias of `expression` receives the list whole', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('A', 'expression', { alias: true });
+    const f = ['Function', ['Multiply', 2, 't'], ['Typed', 't', "'A'"]];
+    ce.declare('W', 'function');
+    ce.assign('W', ce.box(f as never));
+    for (const e of [
+      [f, ['List', 1, 2]],
+      ['Apply', f, ['List', 1, 2]],
+      ['W', ['List', 1, 2]],
+    ]) {
+      const call = ce.box(e as never);
+      const value = call.evaluate();
+      expect(value.toString()).toBe('[2,4]');
+      expect(value.type.matches(call.type)).toBe(true);
+    }
+    const g = ['Function', BODY, ['Typed', 't', "'A'"]];
+    expect(ce.box([g, ARG] as never).evaluate().toString()).toBe('1');
+  });
+
+  // The argument `L` is declared with a wide type, and its value is a list.
+  // The walk of the body cannot tell whether `2t` is a list, so the call is
+  // typed with a wide type that holds the value.
+  test.each([
+    ['any', 'expression'],
+    ['any', 'any'],
+    ['any', 'value'],
+    ['value', 'expression'],
+    ['value', 'any'],
+    ['value', 'value'],
+  ])(
+    'an argument declared %s at a parameter declared %s: the type holds the value',
+    (argType, type) => {
+      const ce = new ComputeEngine();
+      ce.declare('L', argType);
+      ce.assign('L', ce.box(['List', 1, 2] as never));
+      const f = ['Function', ['Multiply', 2, 't'], param(type)];
+      ce.declare('W', 'function');
+      ce.assign('W', ce.box(f as never));
+      for (const e of [
+        [f, 'L'],
+        ['Apply', f, 'L'],
+        ['W', 'L'],
+      ]) {
+        const call = ce.box(e as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe('[2,4]');
+        expect(value.type.matches(call.type)).toBe(true);
+      }
+    }
+  );
+
+  // A function with a parameter declared `expression`, passed as a VALUE to
+  // a callback consumer. The consumer checks the type of the element that
+  // reaches the parameter: an element that cannot be a collection (`L`
+  // declared `list<real>`) compiles, and an element that can be one (`rows`
+  // declared `list<list<real>>`) is declined, and the interpreter computes
+  // the value. Before, the named function compiled to a plain reference,
+  // and `Map(h, rows)` gave `[null, null]` where the interpreter gives
+  // `[[2, 4], [6, 8]]`.
+  describe('a function with a parameter declared `expression` as a callback', () => {
+    const LITERAL = ['Function', ['Multiply', 2, 't'], ['Typed', 't', "'expression'"]];
+    const setup = (route: string) => {
+      const ce = new ComputeEngine();
+      if (route === 'host') {
+        ce.declare('h', '(expression) -> any');
+        ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't'] as never));
+      } else {
+        ce.declare('h', 'function');
+        ce.assign('h', ce.box(LITERAL as never));
+      }
+      ce.declare('L', 'list<real>');
+      ce.declare('rows', 'list<list<real>>');
+      ce.assign('L', ce.box(['List', 1, 2] as never));
+      ce.assign(
+        'rows',
+        ce.box(['List', ['List', 1, 2], ['List', 3, 4]] as never)
+      );
+      return ce;
+    };
+    const VARS = {
+      L: [1, 2],
+      rows: [
+        [1, 2],
+        [3, 4],
+      ],
+    };
+
+    test.each([
+      ['named', 'h'],
+      ['host', 'h'],
+      ['named', 'literal'],
+    ])('%s %s over a list of reals compiles', (route, callee) => {
+      const ce = setup(route);
+      const e = ce.box(['Map', callee === 'h' ? 'h' : LITERAL, 'L'] as never);
+      expect(e.evaluate().toString()).toBe('[2,4]');
+      const result = compile(e, {
+        to: 'javascript',
+        constantFold: false,
+        fallback: false,
+      } as never)!;
+      expect(result.success).toBe(true);
+      expect(result.run!(VARS)).toEqual([2, 4]);
+    });
+
+    test.each([
+      ['named', 'h'],
+      ['host', 'h'],
+      ['named', 'literal'],
+    ])('%s %s over a list of lists is declined', (route, callee) => {
+      const ce = setup(route);
+      const e = ce.box(['Map', callee === 'h' ? 'h' : LITERAL, 'rows'] as never);
+      expect(e.evaluate().toString()).toBe('[[2,4],[6,8]]');
+      const result = compile(e, {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(false);
+      expect(result.run!(VARS)).toEqual([
+        [2, 4],
+        [6, 8],
+      ]);
+    });
+
+    test.each([['named'], ['host']])(
+      'the %s function compiled as a value is declined',
+      (route) => {
+        const ce = setup(route);
+        for (const to of ['javascript', 'interval-js', 'python', 'glsl'])
+          expect(compile(ce.box('h'), { to } as never)!.success).toBe(false);
+      }
+    );
+
+    test('a combiner with a parameter declared `expression`', () => {
+      const ce = setup('named');
+      const step = ['Function', ['Add', 'a', 't'], 'a', ['Typed', 't', "'expression'"]];
+      const ok = compile(ce.box(['Reduce', 'L', step, 0] as never), {
+        to: 'javascript',
+        constantFold: false,
+        fallback: false,
+      } as never)!;
+      expect(ok.success).toBe(true);
+      expect(ok.run!(VARS)).toBe(3);
+      const declined = compile(ce.box(['Reduce', 'rows', step, 0] as never), {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(declined.success).toBe(false);
+    });
+
+    // A function local to a block, used as the callback of a consumer. The
+    // block checks the type of the element that reaches the parameter
+    // (`callOnlyLocalFunctionLiterals`): over a list of reals the local
+    // compiles, and over a list of lists, or when the block returns the
+    // local, it is declined. `Map` of a local does not compile on
+    // interval-js and Python for other reasons, so these tests are on JS.
+    describe('a block-local function used as a callback', () => {
+      const G = [
+        'Assign',
+        'g',
+        ['Function', ['Multiply', 2, 't'], ['Typed', 't', "'expression'"]],
+      ];
+      const run = (e: unknown) => {
+        const ce = setup('named');
+        const expr = ce.box(e as never);
+        const result = compile(expr, {
+          to: 'javascript',
+          constantFold: false,
+        } as never)!;
+        return { expr, result, value: result.run!(VARS) };
+      };
+
+      test('over a list of reals it compiles', () => {
+        const { expr, result, value } = run(['Block', G, ['Map', 'g', 'L']]);
+        expect(result.success).toBe(true);
+        expect(value).toEqual([2, 4]);
+        expect(expr.evaluate().toString()).toBe('[2,4]');
+      });
+
+      test('with a call and a callback use it compiles', () => {
+        const { result, value } = run([
+          'Block',
+          G,
+          ['Add', ['Sum', ['Map', 'g', 'L']], ['g', 3]],
+        ]);
+        expect(result.success).toBe(true);
+        expect(value).toBe(12);
+      });
+
+      test('as the element of a Reduce combiner it compiles', () => {
+        const { result, value } = run([
+          'Block',
+          G,
+          ['Reduce', 'L', ['Function', ['Add', 'a', ['g', 'x']], 'a', 'x'], 0],
+        ]);
+        expect(result.success).toBe(true);
+        expect(value).toBe(6);
+      });
+
+      test('over a list of lists it is declined', () => {
+        const { expr, result, value } = run([
+          'Block',
+          G,
+          ['Map', 'g', 'rows'],
+        ]);
+        expect(result.success).toBe(false);
+        expect(value).toEqual([
+          [2, 4],
+          [6, 8],
+        ]);
+        expect(expr.evaluate().toString()).toBe('[[2,4],[6,8]]');
+      });
+
+      test('with one use over a list of lists it is declined', () => {
+        const { result } = run([
+          'Block',
+          G,
+          ['List', ['Map', 'g', 'L'], ['Map', 'g', 'rows']],
+        ]);
+        expect(result.success).toBe(false);
+      });
+
+      // The first block marks its local; the mark does not reach the second
+      // block, which returns its own local as a value.
+      test('a block that returns the local is declined', () => {
+        const { result } = run([
+          'List',
+          ['Block', G, ['Map', 'g', 'L']],
+          [
+            'Block',
+            [
+              'Assign',
+              'k',
+              [
+                'Function',
+                ['Multiply', 2, 't'],
+                ['Typed', 't', "'expression'"],
+              ],
+            ],
+            'k',
+          ],
+        ]);
+        expect(result.success).toBe(false);
+      });
+    });
+
+    // Common subexpression elimination binds equal literals once. A
+    // literal with a parameter declared `expression` is not harvested, so
+    // the check made at the `Map` or the `Apply` does not reach the other
+    // copy, which is a function value and declines. Before, the second
+    // element of `Tuple(Map(G, L), G)` was the checked arrow, which gives
+    // `NaN` for `[1, 2]`. The fallback cannot express a function value, and
+    // gives `NaN` in its place.
+    test.each([
+      ['Tuple(Map(G, L), G)', ['Tuple', ['Map', LITERAL, 'L'], LITERAL], 0, [2, 4]],
+      ['Tuple(G, Map(G, L))', ['Tuple', LITERAL, ['Map', LITERAL, 'L']], 1, [2, 4]],
+      ['Tuple(Apply(G, x), G)', ['Tuple', ['Apply', LITERAL, 'x'], LITERAL], 0, 6],
+    ])('%s with CSE is declined', (_, e, at, expected) => {
+      const ce = setup('named');
+      ce.declare('x', 'real');
+      const result = compile(ce.box(e as never), {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(false);
+      const value = result.run!({ ...VARS, x: 3 }) as unknown[];
+      expect(value[at as number]).toEqual(expected);
+      expect(value[1 - (at as number)]).toBeNaN();
+    });
+
+    // Only the bare literal is not a candidate of the common subexpression
+    // elimination. An application that holds it is: two equal applications
+    // hold the literal at the same consumer position, which checks it again
+    // when the shared binding is compiled. So an invariant `Max(Map(G, L))`
+    // in a `Sum` is computed once, before the loop, and two equal uses
+    // share one binding.
+    test('an invariant consumer of the literal is hoisted out of a loop', () => {
+      // `L` has no value here, so the code reads it from the input.
+      const ce = new ComputeEngine();
+      ce.declare('L', 'list<real>');
+      ce.declare('n', 'integer');
+      const result = compile(
+        ce.box([
+          'Sum',
+          ['Add', ['Max', ['Map', LITERAL, 'L']], 'k'],
+          ['Limits', 'k', 1, 'n'],
+        ] as never),
+        { to: 'javascript', constantFold: false, fallback: false } as never
+      )!;
+      expect(result.success).toBe(true);
+      const code = result.code as string;
+      const loop = code.indexOf('while (');
+      expect(loop).toBeGreaterThan(0);
+      expect(code.indexOf('(_.L).map(')).toBeGreaterThan(0);
+      expect(code.indexOf('(_.L).map(')).toBeLessThan(loop);
+      expect(code.split('(_.L).map(').length).toBe(2);
+      // max(2, 4) + k, for k = 1..3.
+      expect(result.run!({ ...VARS, n: 3 })).toBe(18);
+    });
+
+    test('two equal consumers of the literal share one binding', () => {
+      const ce = new ComputeEngine();
+      ce.declare('L', 'list<real>');
+      const result = compile(
+        ce.box([
+          'Add',
+          ['Max', ['Map', LITERAL, 'L']],
+          ['Max', ['Map', LITERAL, 'L']],
+        ] as never),
+        { to: 'javascript', constantFold: false, fallback: false } as never
+      )!;
+      expect(result.success).toBe(true);
+      expect((result.code as string).split('(_.L).map(').length).toBe(2);
+      expect(result.run!(VARS)).toBe(8);
+    });
+
+    // The test for a parameter declared `expression` reads each distinct
+    // subtree of the body once. The body below is a doubling DAG of 40
+    // levels (`e_k = e_(k-1) + e_(k-1)`, with the same node twice) that
+    // reads `t` only after it. A walk of every path has 2^40 steps.
+    test('the parameter test reads a shared body in linear time', () => {
+      const ce = new ComputeEngine();
+      let e: Expression = ce._fn('Add', [ce.symbol('x'), ce.One]);
+      for (let k = 0; k < 40; k++) e = ce._fn('Add', [e, e]);
+      const raw = { canonical: false } as never;
+      const literal = ce._fn(
+        'Function',
+        [
+          ce._fn('Add', [e, ce.symbol('t')]),
+          ce._fn(
+            'Typed',
+            [ce.symbol('t', raw), ce.string('expression')],
+            raw
+          ),
+        ],
+        raw
+      );
+      expect(expressionParameterReadAt(literal)).toBe(0);
+      const harvest = harvestCse(ce._fn('Tuple', [literal, literal]));
+      expect(
+        harvest.candidates.some((c) =>
+          c.representative.operator === 'Function'
+        )
+      ).toBe(false);
+    });
+
+    // The static type of a block local is the type of its first value. A
+    // second assignment of a list of lists does not change it, so the
+    // element type of the local is not provable, and the consumer declines.
+    test.each([
+      [
+        'an inline literal',
+        [
+          'Block',
+          ['Assign', 'M', ['List', 1, 2]],
+          ['Assign', 'M', ['List', ['List', 1, 2]]],
+          ['Map', LITERAL, 'M'],
+        ],
+      ],
+      [
+        'a block-local function',
+        [
+          'Block',
+          ['Assign', 'g', LITERAL],
+          ['Assign', 'M', ['List', 1, 2]],
+          ['Assign', 'M', ['List', ['List', 1, 2]]],
+          ['Map', 'g', 'M'],
+        ],
+      ],
+    ])('a reassigned block local with %s is declined', (_, e) => {
+      const ce = setup('named');
+      const result = compile(ce.box(e as never), {
+        to: 'javascript',
+        constantFold: false,
+      } as never)!;
+      expect(result.success).toBe(false);
+      expect(result.run!(VARS)).toEqual([[2, 4]]);
+    });
+
+    test.each([['interval-js'], ['python']])(
+      'target %s compiles the literal over a list of reals, and declines it over a list of lists',
+      (to) => {
+        const ce = setup('named');
+        const options = { to, constantFold: false } as never;
+        expect(
+          compile(ce.box(['Map', LITERAL, 'L'] as never), options)!.success
+        ).toBe(true);
+        expect(
+          compile(ce.box(['Map', LITERAL, 'rows'] as never), options)!.success
+        ).toBe(false);
+      }
+    );
+  });
+
+  // An argument that can be a collection or a scalar (`M` declared
+  // `list<integer> | integer`) at a wide parameter: the walk of the body
+  // types `2t` as a number for such an argument, so the call is typed
+  // `any`, on the three routes.
+  test.each([['any'], ['expression'], ['value']])(
+    'an argument that can be a list or an integer at a parameter declared %s',
+    (type) => {
+      const ce = new ComputeEngine();
+      ce.declare('h', `(${type}) -> number`);
+      ce.assign('h', ce.box(['Function', ['Multiply', 2, 't'], 't'] as never));
+      const f = ['Function', ['Multiply', 2, 't'], param(type)];
+      ce.declare('g', 'function');
+      ce.assign('g', ce.box(f as never));
+      ce.declare('M', 'list<integer> | integer');
+      ce.assign('M', ce.box(['List', 1, 2] as never));
+      for (const e of [
+        ['h', 'M'],
+        ['g', 'M'],
+        [f, 'M'],
+      ]) {
+        const call = ce.box(e as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe('[2,4]');
+        expect(value.type.matches(call.type)).toBe(true);
+      }
+    }
+  );
+
+  // A result of the signature that is not a scalar does not describe the
+  // call either: `(t: expression) ↦ [2t]` has a list of numbers as its
+  // result, and applied to `[1, 2]` its value is `[[2, 4]]`.
+  test.each([['any'], ['expression'], ['value']])(
+    'a list result at a parameter declared %s agrees with its value',
+    (type) => {
+      const ce = new ComputeEngine();
+      const f = ['Function', ['List', ['Multiply', 2, 't']], param(type)];
+      ce.declare('g', 'function');
+      ce.assign('g', ce.box(f as never));
+      ce.declare('L', 'any');
+      ce.assign('L', ce.box(['List', 1, 2] as never));
+      ce.declare('N', 'list<integer>');
+      ce.assign('N', ce.box(['List', 1, 2] as never));
+      for (const e of [
+        [f, 'L'],
+        ['g', 'L'],
+        [f, 'N'],
+        ['g', 'N'],
+      ]) {
+        const call = ce.box(e as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe('[[2,4]]');
+        expect(value.type.matches(call.type)).toBe(true);
+      }
+    }
+  );
+
+  // An element of a `list<unknown>` can be a list: with `L` declared
+  // `list<unknown>` and the value `[[1, 2]]`, `L[1]` is `[1, 2]`. At a
+  // parameter declared `expression`, such an argument types the call
+  // `any`, on the literal and the named routes.
+  test.each([['literal'], ['named']])(
+    'an unknown argument at a parameter declared `expression` (%s)',
+    (route) => {
+      const ce = new ComputeEngine();
+      const f = ['Function', ['Multiply', 2, 't'], param('expression')];
+      ce.declare('g', 'function');
+      ce.assign('g', ce.box(f as never));
+      ce.declare('L', 'list<unknown>');
+      const call = ce.box([route === 'named' ? 'g' : f, ['At', 'L', 1]] as never);
+      const type = call.type;
+      ce.assign('L', ce.box(['List', ['List', 1, 2]] as never));
+      const value = call.evaluate();
+      expect(value.toString()).toBe('[2,4]');
+      expect(value.type.matches(type)).toBe(true);
+    }
+  );
 });

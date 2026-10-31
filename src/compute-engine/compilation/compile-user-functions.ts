@@ -129,7 +129,9 @@ import {
   absentArgumentChecks,
   checkDeclaredBroadcast,
   checkDeclaredBroadcastAgainst,
+  collectionAtExpressionParameter,
   complexCoordinateArgumentAt,
+  expressionParameterDecline,
   emitUserFunctionCall,
   ensureUserFunctionVariantEmitted,
   isRealListArg,
@@ -1224,6 +1226,26 @@ export function tryCompileUserFunction(
   // end all need it.
   const literal = userFunctionLiteral(engine, h);
   checkUserCallArity(h, literal, args);
+
+  // An argument that can be a collection, at a parameter declared
+  // `expression` that the body reads, is bound whole by the interpreter,
+  // and the body maps over it. The emitted definition reads that parameter
+  // as a scalar, so the call is declined. The parameter type is the
+  // annotation of the literal, else the type in the signature declared for
+  // `h` (`ce.declare('h', '(expression) -> any')`, then `h := t ↦ 2t`).
+  if (literal !== undefined) {
+    const at = collectionAtExpressionParameter(
+      literal,
+      args.map((a) => a.type.type),
+      (i) => userFunctionParamType(engine, h, i)
+    );
+    if (at >= 0)
+      throw expressionParameterDecline(
+        `a call of \`${h}\``,
+        at,
+        args[at].type.type
+      );
+  }
 
   // A list of points at a parameter declared as a point maps over the
   // points, as the interpreter does (`pointListParamSlots`).
@@ -2394,6 +2416,19 @@ export function tryCompileLocalFunctionCall(
         )
       : undefined;
   if (folded !== undefined) return folded;
+
+  // An argument that can be a collection, at a parameter declared
+  // `expression` that the body reads, is declined, as on the
+  // engine-defined route (`tryCompileUserFunction`). The argument types are
+  // the ones read before the constant fold (`argTypes`), which can narrow
+  // them.
+  const expressionAt = collectionAtExpressionParameter(literal, argTypes);
+  if (expressionAt >= 0)
+    throw expressionParameterDecline(
+      `a call of \`${h}\``,
+      expressionAt,
+      argTypes[expressionAt]
+    );
 
   const declared = literal.type?.type;
 

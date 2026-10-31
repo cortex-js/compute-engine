@@ -16227,7 +16227,7 @@ export function pointListParamSlots(
   // `incompatible-type` error.
   //
   // A slot whose type can hold a list but that `isScalarType` accepts
-  // (`unknown`, `any`, no annotation) follows the same rule as the
+  // (`unknown`, no annotation) follows the same rule as the
   // parameter of a one-parameter function: the signature here is the one
   // refined from the body of the assigned function, so a parameter the body
   // uses as a collection is typed `collection` and binds a list whole
@@ -16237,7 +16237,9 @@ export function pointListParamSlots(
   // `[(1, 2), (2, 2), (3, 2)]` for `f((1, 2), [0, 1, 2])` (user decision
   // 2026-10-24, ROADMAP CE-414.2). Before, every slot whose type can hold a
   // list bound its argument whole beside a point parameter. A union with a
-  // list arm is not a scalar type, and still binds whole.
+  // list arm is not a scalar type, and still binds whole. So does a slot
+  // declared `any`, `expression` or `value` (user decision 2026-10-30,
+  // GitHub issue #488).
   const slots = [...(sigType.args ?? []), ...(sigType.optArgs ?? [])].map(
     (arg): BroadcastSlot => {
       const t = substituteDeclaredBounds(sigType.typeParams, arg.type);

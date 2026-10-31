@@ -90,6 +90,7 @@ import {
   isDestructuringParameter,
   isFunctionLiteralParameter,
   isScalarType,
+  isWideParameterType,
   mentionsQuantifiedVariable,
   restParameterIndex,
   restParameterSignatureTail,
@@ -881,8 +882,12 @@ export function inferredCollectionParameterType(
 
 /** True when NO value of `t` is a scalar — every arm of a union has to be
  * collection-like. (`isScalarType` of a union is the dual "every arm is a
- * scalar", which is not the question here.) */
+ * scalar", which is not the question here.) A wide type (`any`,
+ * `expression`, `value`) admits scalars, so it does not exclude them, even
+ * though `isScalarType` reads it as "not scalar" (a parameter declared with
+ * it receives a collection whole). */
 function excludesEveryScalar(t: Type): boolean {
+  if (isWideParameterType(t)) return false;
   if (typeof t === 'object' && t.kind === 'union')
     return t.types.every((m) => excludesEveryScalar(m));
   return !isScalarType(t);
@@ -1145,8 +1150,13 @@ function wholeCollectionSlotArm(
   )
     return { kind: 'collection', elements: 'any' };
   const members = typeof t === 'object' && t.kind === 'union' ? t.types : [t];
+  // A wide arm (`any`, `expression`, `value`) is not a collection arm:
+  // `isScalarType` reads it as "not scalar" only because a parameter
+  // declared with it receives a collection whole. The listed operators
+  // above are the only ones whose wide slot is read as a whole collection.
   const collections = members.filter(
     (m) =>
+      !isWideParameterType(m) &&
       !isScalarType(m) &&
       !isSubtype(m, 'function') &&
       !isTupleOrTupleUnionShapedType(m) &&

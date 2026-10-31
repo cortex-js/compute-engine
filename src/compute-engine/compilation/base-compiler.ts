@@ -392,6 +392,7 @@ import {
   scalarFedLiterals,
   uniformElementComplexness,
   userFunctionSignatureIsInferred,
+  withCheckedCallback,
   withDerivativeArgument,
   withScalarFedLiteral,
 } from './compile-callbacks.js';
@@ -511,7 +512,10 @@ import {
   compileExprFunctionCall,
   compileExprTupleCall,
 } from './compile-calls.js';
-import { compileExprFunctionLiteral } from './compile-function-literals.js';
+import {
+  checkedAppliedLiteralCompile,
+  compileExprFunctionLiteral,
+} from './compile-function-literals.js';
 import {
   compileExprAssertPresent,
   compileExprIf,
@@ -781,6 +785,8 @@ import {
   ensureUserFunctionVariantEmitted,
   inlineCollectionValuedCallsAtRoot,
   inlinedUserFunctionCall,
+  expressionParameterDecline,
+  expressionParameterReadAt,
   isElementWiseOperand,
   isNominalAtomicArg,
   isRealListArg,
@@ -1364,6 +1370,7 @@ export class BaseCompiler {
   static readonly compileExprBroadcastPython = compileExprBroadcastPython;
   static readonly compileExprOperator = compileExprOperator;
   static readonly compileExprFunctionLiteral = compileExprFunctionLiteral;
+  static readonly checkedAppliedLiteralCompile = checkedAppliedLiteralCompile;
   static readonly compileExprAssign = compileExprAssign;
   static readonly compileExprIf = compileExprIf;
   static readonly compileExprWhich = compileExprWhich;
@@ -1983,6 +1990,8 @@ export class BaseCompiler {
     pointArgumentAtUntypedParameter;
   static readonly listArgumentAtOpenWholeParameter =
     listArgumentAtOpenWholeParameter;
+  static readonly expressionParameterReadAt = expressionParameterReadAt;
+  static readonly expressionParameterDecline = expressionParameterDecline;
   static readonly isElementWiseOperand = isElementWiseOperand;
   static readonly provablyScalarArg = provablyScalarArg;
   static readonly certainlyScalarArg = certainlyScalarArg;
@@ -2069,6 +2078,7 @@ export class BaseCompiler {
   static readonly multiClauseValueRef = multiClauseValueRef;
   static readonly scalarFedLiterals = scalarFedLiterals;
   static readonly withScalarFedLiteral = withScalarFedLiteral;
+  static readonly withCheckedCallback = withCheckedCallback;
   static readonly markScalarFedLiterals = markScalarFedLiterals;
   static readonly callOnlyLocalFunctionLiterals = callOnlyLocalFunctionLiterals;
   static readonly broadcastingWrapper = broadcastingWrapper;

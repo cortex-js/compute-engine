@@ -698,7 +698,9 @@ export function compileUntypedScalarSlotCall(
  * (`pointListParamSlots`): a parameter maps when `isScalarType` accepts
  * its type, refined from the body of the assigned function (`real`,
  * `boolean`, and also `unknown`, as for a one-parameter function: user
- * decision 2026-10-24, ROADMAP CE-414.2).
+ * decision 2026-10-24, ROADMAP CE-414.2). A parameter declared `any`,
+ * `expression` or `value` does not map: `isScalarType` refuses these types
+ * (user decision 2026-10-30, GitHub issue #488).
  */
 export function scalarSlotElementType(
   params: ReadonlyArray<Type | undefined>,

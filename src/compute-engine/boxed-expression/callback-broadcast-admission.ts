@@ -234,7 +234,7 @@ export function broadcastCallbackResultType(
   // the broadcast does not descend into it, and it reaches a parameter typed
   // as a function (a callback of a higher-order function).
   //
-  // `isScalarType` accepts the top types, so they are tested here. A leaf
+  // `isScalarType` accepts `unknown`, so the top types are tested here. A leaf
   // typed `unknown` is declined for the same reason as `any`: it can hold a
   // ragged list or a list of non-numeric values, so no fixed depth of the
   // result can be stated.
