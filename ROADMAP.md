@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-712.
+Next free reference: CE-713.
 
 **Entry format.**
 
@@ -3811,10 +3811,78 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-712. Static-shape compilation: settle every shape at compile time, emit no run-time test of a type
+
+**Status:** open; design decided, large. User decision 2026-10-31: option (A) of
+`docs/plans/2026-10-31-static-shape-compilation.md`, rules R1 to R6 there.
+Replaces CE-683 and CE-711, whose scope it widens.
+
+The compiler resolves every shape (scalar, list, point, list of points) from the
+static types at compile time, as the GLSL and WGSL targets already do, and emits
+no run-time test of a shape or of a type except where the host asks for one by
+declaring a union of shapes at a parameter or an input (one dispatch at that
+binding, a monomorphic body per member shape). An input typed `unknown` or `any`
+is refused with its name in `unsupported`. An untyped parameter is compiled once
+per argument shape used at the call sites, with the result type of each variant
+taken from its body (a declared return `unknown` carries no information; Tycho
+declares every document function `-> unknown`). A produced value with no settled
+shape declines. A value outside its declared or inferred type, `NaN` or
+`±Infinity` for `real` included, and an input with no value, give an undefined
+result that can differ per target. Evidence: in the 0.175.0 whole-corpus audit,
+510 `Array.isArray` tests and 3,459 unsupplied-input tests sit in the 8,071
+JavaScript compiles whose every input is a declared scalar; the plan's §2 has
+the counts and the classes of the defects of 2026-10-29 to 2026-10-31 that the
+run-time dispatch produced.
+
+Steps (plan §6; each in a worktree, with the dual review, the before/after
+corpus audit and a report of the declines per target and the `code` changes):
+
+- **CE-712.1** Admission: refuse `unknown` and `any` inputs by name; decline a
+  produced value with no settled shape; verify that the compiler reads the
+  `unknown` signature of a Tycho document function, not its
+  `broadcastable<number | tuple>` body binding. Closes CE-222, CE-706 (option
+  (c)), CE-463.
+- **CE-712.2** Call sites: the argument's static type selects the variant;
+  remove the `bcastFn` dispatch, the `Array.isArray` guards and the scalar
+  proofs (`provablyScalarArg`, `isConstructedScalar`, `certainlyScalarArg`,
+  `staticTypeIsEvidence`, `argumentProvesParameterType`,
+  `assignmentsProveType`); a declared union at a parameter or an input gets its
+  entry dispatch. Closes CE-256, CE-338, CE-669, CE-693, CE-342.3, CE-279.6;
+  changes CE-658, CE-245, CE-249, CE-268, CE-467, CE-237.1, CE-64.3.
+- **CE-712.3** Host values: remove the `run()`, `broadcast()` and
+  interval-runner entry refusals, the unsupplied-input guards
+  (`unsuppliedComparisonGuard`, `collectionReadInputs`, `withTruthOnly`),
+  `callResultGuard`, `declaredTopGuard` and `jsCollectionShapeGuard`, after
+  Tycho has `hasUnresolvedInput` at its five sites. Keep the `RangeError` of
+  `Mod`/`Remainder`/`GCD`/`LCM` beyond ±(2^53 − 1), the complete `freeSymbols`
+  list and the `unbound` decline (Tycho depends on them). Closes CE-212, CE-242,
+  CE-259, CE-656, CE-677, CE-216.2/.4, CE-279.7; changes CE-660, CE-507.12.
+- **CE-712.4** Declared types: reduce the CE-662 check to its decline (no
+  run-time class); CE-673 and CE-681 decline-only; CE-707 option (a) (the
+  declared result binds the body; the interpreter refuses with
+  `incompatible-type`); CE-276 closes (no check-emission table); CE-676 keeps
+  only its out-of-range question.
+- **CE-712.5** Documents: `docs/COMPILATION-MODEL.md` ("Fail closed"; the
+  `Array.isArray` guard paragraph; the callback wrapper paragraph; the
+  collections entry check), `docs/ERROR-MODEL.md` ("An unsupplied variable"),
+  AGENTS.md (the compiled-code rule, extended to shapes); the guidance to hosts
+  (declare the shapes you will pass, or compile one function per shape; a union
+  costs a dispatch per call). The sentence that the `javascript` target computes
+  a non-finite `real` input "as for `real | signed_infinity | nan`" becomes an
+  observation, not a guarantee.
+
+Tycho's side (answers of tycho-desk, 2026-10-31, in the plan's §8): read the
+refused input names in its warning (about a day), declare its deferred-gate
+symbols (one line), call `hasUnresolvedInput` before a run, and optionally
+narrow the point-or-point-list union in the plot sampler route (one to two days)
+to avoid the entry dispatch.
+
 ### CE-711. Remove the compile checks that exist only for unspecified cases
 
 **Status:** open; cleanup, large. User decision 2026-10-31 (option (b) of
-`docs/plans/2026-10-31-compiled-code-contract-for-errors.md`).
+`docs/plans/2026-10-31-compiled-code-contract-for-errors.md`). Superseded
+2026-10-31 by CE-712, which does this removal as its step 3 with a wider scope;
+the check list below stays as the inventory.
 
 Compiled code now equals the interpreter only for a well-typed expression
 whose inputs hold values of their types; an expression with a
@@ -3933,16 +4001,17 @@ case; check them in the fix.
 
 ### CE-683. Write the host's input contract in the compilation documents, and remove the guards it makes unnecessary
 
-**Status:** open; task (documentation and code). User decision 2026-10-30: the
-host must respect what the program declares OR IMPLIES about a value, also a
-type that the engine inferred from a use. When the host does not, the compiled
-result is undefined: it may differ from the interpreter, give a wrong value,
-throw or hang. For an error or a contract violation in general, compiled code
-need not match the interpreter, nor throw or give an error consistently. This
-decision applies to every compile target, and it replaces the earlier rule that
-an inferred type "is not a promise about the value the caller passes"
-(`docs/COMPILATION-MODEL.md`, the paragraph on the `Array.isArray` guard of a
-user-function call, user rulings 2026-08-30 and 2026-09-07).
+**Status:** open; task (documentation and code). Superseded 2026-10-31 by CE-712
+(steps 2, 3 and 5 do this work). User decision 2026-10-30: the host must respect
+what the program declares OR IMPLIES about a value, also a type that the engine
+inferred from a use. When the host does not, the compiled result is undefined:
+it may differ from the interpreter, give a wrong value, throw or hang. For an
+error or a contract violation in general, compiled code need not match the
+interpreter, nor throw or give an error consistently. This decision applies to
+every compile target, and it replaces the earlier rule that an inferred type "is
+not a promise about the value the caller passes" (`docs/COMPILATION-MODEL.md`,
+the paragraph on the `Array.isArray` guard of a user-function call, user rulings
+2026-08-30 and 2026-09-07).
 
 Work: (a) state the contract in `docs/COMPILATION-MODEL.md` and
 `docs/ERROR-MODEL.md`, and rewrite the guard paragraph; (b) find the run-time
