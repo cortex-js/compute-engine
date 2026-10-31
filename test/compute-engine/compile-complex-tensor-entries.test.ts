@@ -368,10 +368,12 @@ describe('A PARENT EXPRESSION OVER A FOLD OF POINTS, ROWS OR MATRICES', () => {
     );
     expect(typeOf('list<list<integer>>')).toBe('integer | list<integer>');
     expect(typeOf('matrix<integer^2x3>')).toBe('vector<integer^3>');
-    // The product of two points is an error, and two matrices that are not
-    // square do not multiply: the type stays `number`.
+    // The product of two points is an error: the type stays `number`. Two
+    // matrices that are not square do not multiply, but the length of the
+    // list is not known, and the product of a list of one matrix is that
+    // matrix: the type is `unknown`.
     expect(typeOf('list<tuple<real, real>>')).toBe('number');
-    expect(typeOf('list<matrix<integer^2x3>>')).toBe('number');
+    expect(typeOf('list<matrix<integer^2x3>>')).toBe('unknown');
   });
 });
 
@@ -413,10 +415,17 @@ describe('FOLDS WHOSE SHAPE THE TYPE DID NOT GIVE', () => {
     ]);
   });
 
-  test('Product of matrices that are not square refuses to compile', () => {
-    expect(() =>
-      run('list<matrix<integer^2x3>>', ['Product', 'P'], [])
-    ).toThrow(/the shape of the result is not known/);
+  // The product of no matrix is `1`, and of one matrix is that matrix, as in
+  // the interpreter. For two matrices that are not square the interpreter
+  // gives an `incompatible-dimensions` error; compiled code need not match an
+  // error (ROADMAP CE-683).
+  test('Product of matrices that are not square: the values of the interpreter', () => {
+    const m = [
+      [1, 2, 3],
+      [4, 5, 6],
+    ];
+    expect(run('list<matrix<integer^2x3>>', ['Product', 'P'], [])).toBe(1);
+    expect(run('list<matrix<integer^2x3>>', ['Product', 'P'], [m])).toEqual(m);
   });
 
   test('a scalar times a sum of points refuses to compile', () => {

@@ -259,3 +259,65 @@ describe('Constant folding over shared subtrees: linear walks', () => {
     expect(result.run!({ x: 1 }) as number).toBeCloseTo(2 ** d * 2, 0);
   });
 });
+
+// A callback of `Map` over a literal list is compiled as a lambda, and the
+// loop-invariant hoist looks in its body for the names it assigns and for
+// the subexpressions that read its parameter. These two walks did not
+// remember the nodes they had seen, so they visited every path of a DAG:
+// 820 ms at depth 26, and about twice as long at each further level.
+// `Arctan2` keeps the DAG: unlike `Add`, a canonical `Function` does not
+// flatten it into one node with 2^depth operands.
+describe('Loop-invariant hoist over shared subtrees: linear walks', () => {
+  const t = ce.symbol('t');
+  const mapOverList = (body: Expression) =>
+    F('Map', F('Function', body, t), F('List', ce.number(-1), ce.number(2)));
+  const atan2Dag = (d: number): Expression => {
+    let e: Expression = t;
+    for (let k = 0; k < d; k++) e = F('Arctan2', e, e);
+    return e;
+  };
+
+  it('compiles a Map whose callback is a 40-level DAG fast', () => {
+    const [result, ms] = timed(() => compile(mapOverList(atan2Dag(40))));
+    expectFast(ms, 2000);
+    expect(result.success).toBe(true);
+    // `atan2(a, a)` is `π/4` for `a > 0` and `-3π/4` for `a < 0`, at every
+    // level.
+    const [a, b] = result.run!() as number[];
+    expect(a).toBeCloseTo((-3 * Math.PI) / 4, 12);
+    expect(b).toBeCloseTo(Math.PI / 4, 12);
+  });
+
+  // `Max(L)` does not read the parameter, so the hoist records it as an
+  // invariant class, and the pass that attaches the members of each class
+  // walks the whole body, the DAG included. Without its own visited set,
+  // that pass did not finish at depth 40.
+  it('compiles a 40-level DAG next to an invariant reduction fast', () => {
+    const ce2 = new ComputeEngine();
+    ce2.declare('L', 'list<real>');
+    const t2 = ce2.symbol('t');
+    let dag: Expression = t2;
+    for (let k = 0; k < 40; k++) dag = ce2.function('Arctan2', [dag, dag]);
+    const body = ce2.function('Arctan2', [
+      dag,
+      ce2.function('Max', [ce2.symbol('L')]),
+    ]);
+    const e = ce2.function('Map', [
+      ce2.function('Function', [body, t2]),
+      ce2.function('List', [ce2.number(-1), ce2.number(2)]),
+    ]);
+    const [, ms] = timed(() => compile(e));
+    expectFast(ms, 2000);
+  });
+
+  it('gives the value of the interpreter at a small depth', () => {
+    const e = mapOverList(atan2Dag(3));
+    const result = compile(e);
+    expect(result.success).toBe(true);
+    // `N()` of a `Map` is a lazy view: its elements come from `each()`.
+    const expected = Array.from(e.N().each(), (x) => x.re);
+    const actual = result.run!() as number[];
+    expect(actual.length).toBe(expected.length);
+    actual.forEach((v, i) => expect(v).toBeCloseTo(expected[i], 12));
+  });
+});

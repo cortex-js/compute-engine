@@ -4084,7 +4084,28 @@ export function canonicalBigop(
   )
     body._infer(() => 'collection');
 
-  if (indexes.length === 0 && body.isCollection) {
+  // A variable that can be assigned a value that is not a collection is not
+  // rewritten: its `isCollection` reads its CURRENT value, and the canonical
+  // form outlives that value. With `x: any` and `x := [1, 2]`, the rewrite
+  // boxed `Product(x)` as `Reduce(x, Multiply, 1)`, and after `x := 5` that
+  // form gave an `incompatible-type` error where a `Product(x)` boxed then
+  // gives `5`. Such a variable keeps the `Product` head, and its `evaluate`
+  // handler reads the value at evaluation time, as it does for a variable
+  // that holds a list only after the boxing. An inferred type is not a
+  // sound test: the type of a variable with no declaration changes with its
+  // value. A constant, or a variable DECLARED with a collection type (every
+  // assignment is checked against it), always holds a collection, so it is
+  // still rewritten.
+  const valueCanStopBeingCollection =
+    isSymbol(body) &&
+    !body.isConstant &&
+    ((body.valueDefinition?.inferredType ?? true) ||
+      !body.type.matches('collection'));
+  if (
+    indexes.length === 0 &&
+    body.isCollection &&
+    !valueCanStopBeingCollection
+  ) {
     if (bigOp === 'Sum') return ce.expr(['Reduce', body, 'Add', 0]);
 
     return ce.expr(['Reduce', body, 'Multiply', 1]);

@@ -2421,10 +2421,12 @@ export function bigOpResultType(
  * the number `1`, so the type is then a union with `integer`.
  *
  * Returns `undefined` for elements that are points (the product of two
- * points is an error), for matrices that are known not to be square (the
- * product of two such matrices is not defined, and stays unevaluated), and
- * when an entry is not a number: the caller then answers `number`, as
- * before.
+ * points is an error), for matrices that are known not to be square in a
+ * list that is not known to have exactly one element (the product of two
+ * such matrices is an `incompatible-dimensions` error), and when an entry is
+ * not a number. The `Product` type handler then answers `number`, or
+ * `unknown` when the list can hold one matrix (`productOfCollectionType()`,
+ * `library/arithmetic.ts`).
  */
 function shapedProductType(d: OperandDescriptor): Type | undefined {
   const t = shapedOperandType(d);
@@ -2447,6 +2449,27 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
     return reduceType({
       kind: 'union',
       types: [elements, tensorOf(elements), 'integer'],
+    });
+  }
+  if (dims !== undefined && dims.length > 2 && dims[0] !== 0) {
+    // A tensor of rank 3 or more is a list of `dims[0]` tensors of one rank
+    // less: `tensor<integer^(2x2x2)>`, the type of a list of two 2x2
+    // matrices, is read as `list<matrix<integer^(2x2)>>` of length 2, and
+    // the rule for a list of matrices below types it. Without this, the
+    // product of such a list was typed `number`, which its value, a matrix,
+    // is not.
+    return shapedProductType({
+      facts: d.facts,
+      structureOf: d.structureOf,
+      type: {
+        kind: 'list',
+        elements: {
+          kind: 'list',
+          elements: t.elements,
+          dimensions: dims.slice(1),
+        },
+        dimensions: [dims[0]],
+      },
     });
   }
   if (dims !== undefined && dims.length > 1) {
@@ -2541,13 +2564,17 @@ function shapedProductType(d: OperandDescriptor): Type | undefined {
   if (elDims) {
     // A dimension of unknown size (`-1`, as in `matrix<real>`) stays
     // unknown; a matrix is refused only when it is KNOWN not to be square.
+    // A list of exactly one such matrix is not refused: `Product` multiplies
+    // the elements starting from `1`, so its product is that matrix. A list
+    // of no known length is refused, since it may have two elements.
     if (elDims.some((n) => n === 0)) return undefined;
     if (elDims.length > 2) return undefined;
     if (
       elDims.length === 2 &&
       elDims[0] > 0 &&
       elDims[1] > 0 &&
-      elDims[0] !== elDims[1]
+      elDims[0] !== elDims[1] &&
+      dims?.[0] !== 1
     )
       return undefined;
   }

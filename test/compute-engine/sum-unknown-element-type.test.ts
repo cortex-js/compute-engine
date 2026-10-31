@@ -244,11 +244,13 @@ describe('CE-361: the readings that do not change', () => {
   });
 
   test('elements that are matrices that are not square: Product', () => {
-    // The product of two such matrices is not defined and stays
-    // unevaluated, so no shape is given (`shapedProductType`).
+    // The product of two such matrices is an `incompatible-dimensions`
+    // error, but the length of `P` is not known, and the product of a list
+    // of one matrix is that matrix. So the type is `unknown`, not `number`
+    // (`productOfCollectionType()`, `library/arithmetic.ts`).
     const ce = new ComputeEngine();
     ce.declare('P', 'list<matrix<integer^2x3>>');
-    expect(ce.box(['Product', 'P']).type.toString()).toBe('number');
+    expect(ce.box(['Product', 'P']).type.toString()).toBe('unknown');
   });
 
   test('elements typed string', () => {

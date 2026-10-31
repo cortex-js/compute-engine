@@ -1392,11 +1392,18 @@ export function loopInvariantHoistCandidates(
   // pattern.
   const assigned = assignedNamesIn(expr);
 
+  // Memoized per node object: a shared subexpression (a DAG) is otherwise
+  // walked once per path that reaches it, 2^depth times.
+  const varyingMemo = new Map<Expression, boolean>();
   const mentionsVarying = (node: Expression): boolean => {
     if (isSymbol(node))
       return varying.has(node.symbol) || assigned.has(node.symbol);
     if (!isFunction(node)) return false;
-    return node.ops.some(mentionsVarying);
+    const cached = varyingMemo.get(node);
+    if (cached !== undefined) return cached;
+    const result = node.ops.some(mentionsVarying);
+    varyingMemo.set(node, result);
+    return result;
   };
 
   const isCollectionShaped = (node: Expression): boolean =>
@@ -1682,9 +1689,15 @@ export function loopInvariantHoistCandidates(
   // is unconditional). The pass reads the whole tree except lambdas and
   // binders (their names may rebind a symbol) and the opaque nodes above;
   // a node that joins a class is not descended into, since it emits as the
-  // class's name.
+  // class's name. A node object reached a second time (a body that shares
+  // a subexpression) adds nothing: the first visit put it in its class or
+  // walked the same operands. So each node object is visited once, and a
+  // body that is a DAG of shared nodes is walked in linear time.
+  const attached = new Set<Expression>();
   const attach = (node: Expression): void => {
     if (!isFunction(node)) return;
+    if (attached.has(node)) return;
+    attached.add(node);
     if (_codeOverrides.has(node)) return;
     if (isCallerMapped(node, admission)) return;
     const bucket = byHash.get(node.hash);
@@ -1715,8 +1728,14 @@ export function assignedNamesIn(expr: Expression): Set<string> {
     else if (isFunction(t, 'Tuple'))
       for (const leaf of t.ops) recordTarget(leaf);
   };
+  // A boxed tree can share one subexpression object at many places (a DAG:
+  // `Arctan2(b, b)` holds the same `b` twice), so a walk that does not
+  // remember the nodes it has seen visits 2^depth nodes. A second visit of
+  // the same object cannot add a name.
+  const seen = new Set<Expression>();
   const collect = (node: Expression): void => {
-    if (!isFunction(node)) return;
+    if (!isFunction(node) || seen.has(node)) return;
+    seen.add(node);
     if (node.operator === 'Assign' || node.operator === 'Declare')
       recordTarget(node.ops[0]);
     for (const op of node.ops) collect(op);
@@ -2037,11 +2056,20 @@ export function synthesizeInvariantPrefixes(
     varying.has(s) || assigned.has(s) || target.boundVars?.has(s) === true;
   const mentionsSiteVarying = (e: Expression): boolean =>
     e.symbols.some((s) => varying.has(s) || assigned.has(s));
-  const containsBinder = (e: Expression): boolean =>
-    isFunction(e) &&
-    (e.operator === 'Function' ||
-      e.operatorDefinition?.scoped ||
-      e.ops.some(containsBinder));
+  // Memoized per node object: an argument can be a DAG of shared nodes, and
+  // a walk without a memo visits each path.
+  const binderMemo = new Map<Expression, boolean>();
+  const containsBinder = (e: Expression): boolean => {
+    if (!isFunction(e)) return false;
+    const known = binderMemo.get(e);
+    if (known !== undefined) return known;
+    const result =
+      e.operator === 'Function' ||
+      e.operatorDefinition?.scoped === true ||
+      e.ops.some(containsBinder);
+    binderMemo.set(e, result);
+    return result;
+  };
   const invariantHere = (e: Expression): boolean =>
     !mentionsSiteVarying(e) &&
     e.isPure === true &&

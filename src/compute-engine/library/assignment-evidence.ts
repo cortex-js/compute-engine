@@ -43,8 +43,9 @@
  * read dependencies between the sites, which are not recorded.
  */
 
-import type { Type } from '../../common/type/types.js';
+import type { ListType, Type } from '../../common/type/types.js';
 import { reduceType } from '../../common/type/reduce.js';
+import { listElementType } from '../../common/type/subtype.js';
 
 /** A registered evidence site. `rejoin` joins the value's current type on
  * the binding and returns `true` when the recorded type changed; with
@@ -267,17 +268,8 @@ export function joinEvidenceTypes(a: Type, b: Type): Type {
   for (const m of members) {
     if (typeof m === 'object' && m.kind === 'list') {
       if (list === undefined) list = m;
-      else if (typeof list === 'object' && list.kind === 'list') {
-        const sameShape =
-          JSON.stringify(list.dimensions) === JSON.stringify(m.dimensions);
-        list = {
-          kind: 'list',
-          elements: joinEvidenceTypes(list.elements, m.elements),
-          ...(sameShape && list.dimensions !== undefined
-            ? { dimensions: list.dimensions }
-            : {}),
-        };
-      }
+      else if (typeof list === 'object' && list.kind === 'list')
+        list = joinListEvidence(list, m);
       continue;
     }
     if (typeof m === 'object' && m.kind === 'tuple') {
@@ -313,4 +305,54 @@ export function joinEvidenceTypes(a: Type, b: Type): Type {
   ];
   if (all.length === 1) return all[0];
   return reduceType({ kind: 'union', types: all });
+}
+
+/**
+ * The join of two list types, for `joinEvidenceTypes`.
+ *
+ * The `elements` of a list type with dimensions are its CELLS, not the
+ * values that one index returns (`listElementType()`, `subtype.ts`): the
+ * elements of `matrix<integer^(1x2)>` are `integer`, but its rows are
+ * `vector<integer^2>`. So the cells of the two types are joined only when
+ * the two types have the same rank. Each axis then keeps its length when
+ * the two lengths are equal, and is open (`-1`) otherwise:
+ * `vector<integer^2>` and `vector<real^3>` join to `vector<real>`. Two
+ * tensors of unknown rank join to a tensor of unknown rank of the joined
+ * cells: `tensor<integer>` and `tensor<real>` join to `tensor<real>`. In the
+ * other cases (different ranks, a plain list, one tensor of unknown rank) the
+ * result is a plain list of the join of the values that one index returns:
+ * `vector<integer^2>` and `matrix<integer^(1x2)>` join to
+ * `list<integer | vector<integer^2>>`. A plain list of the joined cells,
+ * `list<integer>`, is not a supertype of the matrix: a block local assigned
+ * `[1, 2]` and then `[[1, 2]]` was typed `list<integer>`, and a callback
+ * that `Map` applied to it was refused the row `[1, 2]`.
+ */
+function joinListEvidence(a: ListType, b: ListType): ListType {
+  const da = a.dimensions;
+  const db = b.dimensions;
+  if (Array.isArray(da) && Array.isArray(db) && da.length === db.length)
+    return {
+      kind: 'list',
+      elements: joinEvidenceTypes(a.elements, b.elements),
+      dimensions: da.map((d, i) => (d === db[i] ? d : -1)),
+    };
+  if (da === undefined && db === undefined)
+    return {
+      kind: 'list',
+      elements: joinEvidenceTypes(a.elements, b.elements),
+    };
+  // Two tensors of unknown rank: the result is a tensor of unknown rank of
+  // the joined cells. The general case below must not be used here: one
+  // index of `tensor<U>` returns `U | tensor<U>`, so the join of these values
+  // would join the two tensors again, with no end.
+  if (da === null && db === null)
+    return {
+      kind: 'list',
+      elements: joinEvidenceTypes(a.elements, b.elements),
+      dimensions: null,
+    };
+  return {
+    kind: 'list',
+    elements: joinEvidenceTypes(listElementType(a), listElementType(b)),
+  };
 }

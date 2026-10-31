@@ -4664,6 +4664,77 @@ function kindReductionType(
     : reduceType({ kind: 'union', types: [t, 'integer'] });
 }
 
+/**
+ * The type of `Product(L)` when the big-operator rules (`bigOpResultType`)
+ * answer `t`. When `t` is `number` but an element of the collection can be
+ * a list, `unknown` is answered. Examples: a ragged list of matrices and
+ * rows, a tensor of rank 4, or a matrix of strings. `number` claimed a
+ * number for a product whose value is a list. `Reduce(L, Multiply, 1)` is
+ * the canonical form of this product for a constant, or for a variable
+ * declared with a collection type. It also answers `unknown` for such
+ * elements (`foldResultTypeD()`, `library/collections.ts`).
+ *
+ * `t` is kept for an operand that is not a collection, and for elements
+ * that are not lists (numbers, points). It is also kept when every element
+ * is a matrix of one shape that is not square, in a collection known to
+ * have two or more elements: the product of two such matrices is an
+ * `incompatible-dimensions` error, which a type does not describe. In every
+ * other case where an element can be a list, `unknown` is answered:
+ * - `Product` multiplies the elements starting from `1`, so a collection of
+ *   exactly one such matrix (or of no known length) multiplies to that
+ *   matrix;
+ * - an element type with several arms can mix shapes that do multiply (a
+ *   2x3 and a 3x2 matrix give a 2x2 matrix) or a number and a matrix (`2M`
+ *   is a matrix).
+ */
+function productOfCollectionType(
+  ops: ReadonlyArray<OperandDescriptor>,
+  t: Type
+): Type {
+  if (t !== 'number' || ops.length !== 1) return t;
+  const element = collectionElementType(ops[0].type);
+  if (element === undefined) return t;
+  const e = resolveTypeAlias(stripMissingFromType(element));
+  const arms = typeof e === 'object' && e.kind === 'union' ? e.types : [e];
+  const outer = resolveTypeAlias(ops[0].type);
+  // The length from the type's first dimension, or else from the shape of
+  // the operand (a literal list has one). An open first axis (a negative
+  // dimension) of a typed operand gives no length, so `unknown` is answered.
+  const fromType =
+    typeof outer === 'object' &&
+    outer.kind === 'list' &&
+    Array.isArray(outer.dimensions)
+      ? outer.dimensions[0]
+      : undefined;
+  const length =
+    fromType !== undefined && fromType >= 0
+      ? fromType
+      : ops[0].facts.shape?.[0];
+  const listArms = arms.filter((arm) => {
+    const a = resolveTypeAlias(arm);
+    return typeof a === 'object' && a.kind === 'list';
+  });
+  if (listArms.length === 0) return t;
+  // An absent element (a `missing` arm) is not a matrix: `[M, Missing]`
+  // multiplies one matrix by an absent cell, which gives a matrix, not an
+  // `incompatible-dimensions` error. So `t` is kept only for an element type
+  // with no `missing` arm.
+  const rawElement = resolveTypeAlias(element);
+  const hasMissing =
+    rawElement === 'missing' ||
+    (typeof rawElement === 'object' &&
+      rawElement.kind === 'union' &&
+      rawElement.types.some((arm) => resolveTypeAlias(arm) === 'missing'));
+  if (!hasMissing && arms.length === 1 && length !== undefined && length >= 2) {
+    const a = resolveTypeAlias(listArms[0]);
+    const dims =
+      typeof a === 'object' && a.kind === 'list' ? a.dimensions : null;
+    if (dims?.length === 2 && dims[0] > 0 && dims[1] > 0 && dims[0] !== dims[1])
+      return t;
+  }
+  return 'unknown';
+}
+
 /** The type handler of `Add`, also used by `Subtract`
  * (`subtractTypeHandler`). */
 function addTypeHandler(
@@ -13738,7 +13809,10 @@ export const ARITHMETIC_LIBRARY: SymbolDefinitions[] = [
       type: (ops, context) =>
         BoxedType.forResult(
           kindReductionType(ops, context, 'Multiply') ??
-            bigOpResultTypeOnTypes(ops, 'Product'),
+            productOfCollectionType(
+              ops,
+              bigOpResultTypeOnTypes(ops, 'Product')
+            ),
           context.engine._typeResolver
         ),
 
