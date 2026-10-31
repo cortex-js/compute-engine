@@ -527,9 +527,17 @@
   an undecided verdict was read as `False`, so the leading run was taken to
   end at `6`. The views, their `Length` and their materialization now stay
   unevaluated, as `Filter` does. This also applies to a predicate that calls
-  an operator with only an `evaluateAsync` handler, under `evaluate()`. The
-  compiled JavaScript function, run with no value for `z`, still gives `[]`
-  and `[6, 7]`, as it gives `[]` for `Filter` (ROADMAP CE-710).
+  an operator with only an `evaluateAsync` handler, under `evaluate()`.
+
+- **The caller of a compiled function must supply every input.** When an
+  input is left out of the vars object of `run()`, the result is not
+  specified, and it can differ from the value of the interpreter
+  (`docs/ERROR-MODEL.md`, "An unsupplied variable"). The tests that the
+  compiled code makes today for an unsupplied variable are kept, but they
+  are not a promise. For example, with `z` declared `real` and not supplied,
+  the compiled `TakeWhile([6, 7], y ↦ y > z)` gives `[]`, while the
+  interpreter keeps it unevaluated. A host that cannot supply every input
+  checks the inputs before it runs the function.
 
 - **A numeric integral with a step or a bump next to a singular bound reports
   an error that covers its true error** (ROADMAP CE-691).

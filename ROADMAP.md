@@ -3859,45 +3859,6 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
-### CE-710. A compiled `Filter`, `TakeWhile` or `DropWhile` gives a list when its predicate reads an unsupplied variable
-
-**Status:** decision needed; wrong value.
-
-With `z` declared `real`, the interpreter keeps
-`Filter([6, 7], y ↦ y > z)`, `TakeWhile([6, 7], y ↦ y > z)` and
-`DropWhile([6, 7], y ↦ y > z)` unevaluated: the verdict `6 < z` is undecided
-(`isUndecidedVerdict()`, `library/collections.ts`), the walk records that it
-missed an element, and so has no value. The compiled JavaScript function
-(`compile(expr, { fallback: false })`), run with no value for `z`
-(`run({})`), gives `[]`, `[]` and `[6, 7]`. With `z` supplied, the values
-agree (`z = 6.5`: `[7]`, `[]`, `[6, 7]`). The cause: a predicate of the
-`select` and `prefix` modes reads only whether its result is `true`, so its
-comparison takes no test for an unsupplied variable (`withTruthOnly`, in
-`callbackArg`'s caller in `compilation/javascript-target.ts`; `_truthOnly`,
-`compilation/compile-absence.ts`), and `_SYS.predicateResult`
-(`compilation/javascript-runtime.ts`) reads any value that is not `true` as
-"not selected" or "end of the prefix". Under the rule "An unsupplied
-variable" of `docs/ERROR-MODEL.md`, a comparison over an unsupplied variable
-is undecided, and compiled code must not give a value where the interpreter
-has none. `TakeWhile` and `DropWhile` agreed before the interpreter fix of
-their undecided verdict (both gave `[]` and `[6, 7]`, the interpreter's
-value was wrong); `Filter` already disagreed. The Python and interval
-targets are not measured.
-
-Options:
-
-- (a) The comparison of a `select` or `prefix` predicate takes the test for
-  an unsupplied variable, and an undecided verdict makes the whole result
-  "no value": `NaN`, as a compiled list read gives for a non-finite index
-  (`_SYS` `At`, `javascript-runtime.ts`). Cost: the test per element, and
-  `run({})` gives `NaN` where it gives a list today.
-- (b) Keep the truth-only reading and document that, in compiled code, a
-  `Filter`/`TakeWhile`/`DropWhile` predicate reads an unsupplied variable as
-  making the comparison `False`. This keeps a value where the interpreter has
-  none, against the rule in `AGENTS.md`.
-- Recommendation: (a). If nothing is decided, the three operators keep the
-  values above.
-
 ### CE-706. A compiled root function with an untyped parameter gives `null` for a list argument
 
 **Status:** decision needed; wrong value. GitHub issue #488.

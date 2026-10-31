@@ -177,8 +177,20 @@ What the decision does NOT change:
   2026-09-21 marker ruling: the comparison is `Missing` and a branch on it
   takes no arm.
 - **An unsupplied variable** of a compiled JavaScript function (a variable
-  the caller leaves out of the vars object, which reads as `undefined`)
-  still makes a branch on a comparison that reads it take no arm (`NaN`),
+  the caller leaves out of the vars object, which reads as `undefined`).
+  *Contract* (user decision 2026-10-31): the caller must supply every input
+  of a compiled function. When an input is left out, the result is not
+  specified, and it can differ from the value of the interpreter. The tests
+  that this item describes are kept, but they are not a promise, and a later
+  change can remove them. An example of a result that differs: with `z`
+  declared `real`, `TakeWhile([6, 7], y ↦ y > z)` stays unevaluated in the
+  interpreter, and its compiled function run with no `z` gives `[]`, because
+  a predicate of `Filter`, `TakeWhile` or `DropWhile` reads its comparison
+  with no test for an unsupplied variable (`withTruthOnly`,
+  `compilation/javascript-target.ts`). A host that cannot supply every input
+  checks the inputs before it runs the function.
+  *Current behavior:* an unsupplied variable makes a branch on a comparison
+  that reads it take no arm (`NaN`),
   whether the comparison reads it directly (`x > 0`) or through arithmetic
   (`2x > 0`, `\sin x > 0`). The compiled guard tests each variable the
   comparison reads for `undefined` (`_.x !== undefined`) instead of testing
