@@ -731,7 +731,10 @@ const UNCOUNTED_SAFETY = 2;
  * change sign (a zero of a smooth factor), give no model. The result is
  * `UNCOUNTED_SAFETY` times the area of the model. A ratio of at least 1 is a
  * singularity that is not integrable, and the bound is `+∞`. When no four
- * shells give a model, the bound is 0.
+ * shells give a model, the bound is 0. When the shells decrease as a power of
+ * their index (a logarithmic singularity such as `1/(x·ln²x)`), the bound is
+ * also at least `UNCOUNTED_SAFETY` times the area of that power
+ * (`powerCornerArea`), because the geometric tail is then too small.
  *
  * A pole some doubles outside the interval does not make the last panel
  * infinite (the integrand is finite at the endpoint), so the model of a
@@ -751,25 +754,30 @@ export function uncountedArea(corner: CornerSeries): number {
 
 /**
  * `UNCOUNTED_SAFETY` times the integral over the distances `[0, delta]`
- * from the endpoint of the model of the shells of `uncountedArea`: `+∞` for
- * a ratio of at least 1. When there is no model, `fallbackArea` with
- * `fallback`, else 0.
+ * from the endpoint of the model of the shells of `uncountedArea`, or of the
+ * power of `powerCornerArea`: `+∞` for a ratio of at least 1. When there is
+ * no geometric model, the result is `fallbackArea` with `fallback` (else 0),
+ * or the power area when that is larger.
  *
- * The result is the larger of two areas: the area of the model of the
- * deepest shells (`cornerModel`), and the area of the model of the deepest
+ * The result is the largest of three areas: the area of the model of the
+ * deepest shells (`cornerModel`), the area of the model of the deepest
  * shells whose values are accurate enough for their ratios to mean
- * something (`skipNoisy`). The deepest shells can be only some doubles wide,
- * and their values are then off by several percent. For `1/√(0.3 − x)` with
- * a step at `1.6e-9` from `0.3` (the step stops the extrapolation), the
- * shells 2 to 16 doubles wide have ratios `0.745`, `0.721` and `0.56` that
- * fall toward the endpoint, the model of the deepest shells has the ratio
- * `0.567` instead of `2^(−1/2)`, and the area that tanh-sinh leaves out was
- * `4.7e-9` instead of about `2e-8`: the result was `± 4.7e-9` for a true
- * error of `1.08e-8`. The larger of the two areas is used, not the model of
- * the accurate shells alone: for `(x − 10⁹)^(−1/2) + 1.33e-5·(x − 10⁹)^(−0.99)`
- * on `[10⁹, 10⁹ + 1]`, the deepest shells carry the second term, and the
- * model of the accurate shells alone made the error `1.851e-3` for a true
- * error of `1.865e-3` (`1.890e-3` with the deepest shells).
+ * something (`skipNoisy`), and, when the shells decrease as a power of their
+ * index, the area of that power (`powerCornerArea`, which does not read
+ * `fallback`). The geometric models are not a bound for such shells.
+ *
+ * The deepest shells can be only some doubles wide, and their values are
+ * then off by several percent. For `1/√(0.3 − x)` with a step at `1.6e-9`
+ * from `0.3` (the step stops the extrapolation), the shells 2 to 16 doubles
+ * wide have ratios `0.745`, `0.721` and `0.56` that fall toward the endpoint,
+ * the model of the deepest shells has the ratio `0.567` instead of
+ * `2^(−1/2)`, and the area that tanh-sinh leaves out was `4.7e-9` instead of
+ * about `2e-8`: the result was `± 4.7e-9` for a true error of `1.08e-8`. The
+ * larger of the two geometric areas is used, not the model of the accurate
+ * shells alone: for `(x − 10⁹)^(−1/2) + 1.33e-5·(x − 10⁹)^(−0.99)` on
+ * `[10⁹, 10⁹ + 1]`, the deepest shells carry the second term, and the model
+ * of the accurate shells alone made the error `1.851e-3` for a true error of
+ * `1.865e-3` (`1.890e-3` with the deepest shells).
  */
 function cornerModelArea(
   corner: CornerSeries,
@@ -784,7 +792,158 @@ function cornerModelArea(
       ? UNCOUNTED_SAFETY * model.area
       : Number.POSITIVE_INFINITY;
   };
-  return Math.max(area(false), area(true));
+  return Math.max(
+    area(false),
+    area(true),
+    UNCOUNTED_SAFETY * powerCornerArea(corner, delta)
+  );
+}
+
+/**
+ * The smallest number of consecutive shells from which `powerCornerArea`
+ * reads a power. Next to `10⁶`, the corner panel of `u^(−1)·(−ln u)^(−q)` on
+ * an interval of width `1e-3` has 9 shells with a relative error of at most
+ * `MODEL_SHELL_RELATIVE_ERROR`: with 12 (`MIN_EXTRAPOLATION_SHELLS`), the
+ * result for `q = 1.1` was `± 1.08` for a true error of `7.32`. A power read
+ * from shells that are not a power only makes the area larger (`cornerModelArea`
+ * takes the largest of three areas): on the corpora of
+ * `docs/plans/2026-10-31-ce695-power-corner-area.md`, 8 shells instead of 12
+ * changed no other result.
+ */
+const POWER_MODEL_MIN_SHELLS = 8;
+
+/**
+ * The largest difference, in natural logarithm, between the logarithm of a
+ * shell and a fit of `powerCornerArea` that reads as a power of the depth.
+ * Measured: at most `8.1e-4` for `u^(−1)·(−ln u)^(−q)` (`q` from 1.1 to 4,
+ * next to 0, 0.3, 0.7, 1, 3.7, 1000.5 and `10⁶`; the largest is next to 0.7
+ * for `q = 1.1`, where the shells are 29). Shells that are not a power:
+ * `2.8e-2` to `4.0e-2` for `(1000.5 − x)^(−1/2)` plus a step next to 1000.5
+ * (two geometric terms), `1.7e-2` for `x^(−0.9)·(1 + 100u)` next to `10⁶`,
+ * and `3.5e-3` for `x^(−0.99)·(1 + 100u)` next to 1000.5.
+ */
+const POWER_MODEL_RESIDUAL = 2e-3;
+
+/**
+ * The largest value that `UNCOUNTED_SAFETY` times the area of a power can
+ * have in `powerCornerArea`: a larger area, or a tail that overflows, is
+ * capped at this value. The areas of the two corners and the other error
+ * terms are added, and a sum of finite doubles near `Number.MAX_VALUE` can
+ * overflow; a sixteenth leaves room for the terms.
+ */
+const POWER_AREA_LIMIT = Number.MAX_VALUE / 16;
+
+/**
+ * The integral over the distances `[0, delta]` from the endpoint of a power
+ * of the depth fitted to the deepest shells, when those shells decrease as a
+ * power of their index (`shellsDecayAsPower`), as next to a logarithmic
+ * singularity `1/(u·(−ln u)^q)`. Else 0. `cornerModelArea` takes the largest
+ * of this area and the two areas of the geometric model of `cornerModel`.
+ *
+ * The geometric model is not a bound for such shells. Shells that decrease
+ * as `1/kᵅ` have a ratio close to 1, and the tail of a geometric series with
+ * that ratio is about `(α − 1)/α` of the tail of the power. For `1/(x·ln²x)`
+ * on `[0, ½]` plus a step of area `1e-6` on `[0, 1e-3]`, the integrand
+ * overflows in the last corner panel `[0, 5e-324]`, the step stops the
+ * extrapolation, and the area of that panel was bounded by the geometric
+ * model only: the result was `± 1.28e-3` for a true error of `1.38e-3`. Next
+ * to `10⁶`, `u^(−1)·(−ln u)^(−1.1)` was `± 1.24` for a true error of `7.32`.
+ *
+ * The shells read: the deepest run of at least `POWER_MODEL_MIN_SHELLS`
+ * consecutive shells that are finite, not 0, of one sign, at least
+ * `UNCOUNTED_MODEL_SPACINGS` spacings wide, with a relative error of at most
+ * `MODEL_SHELL_RELATIVE_ERROR`, extended toward the interior as far as the
+ * shells are such. This is a weaker test than the `1e-8` test of
+ * `accurateShells`, which is for the extrapolation: next to `10⁶`, only 6
+ * shells pass that one. The index `k` of a shell is its index in `corner.shells`, and its depth is
+ * `y = k + beta + ½` (`beta` as in `extrapolateCorner`). The power
+ * `ln|shell| = c + q·ln y` is fitted (`fitShellModel`) to the last half of
+ * the run, to its last quarter, and to the quarter before it, and the area
+ * is the largest of their tails (`modelTail`) from the depth of `delta`. A
+ * range of fewer than 4 shells is not fitted: a power fits 2 or 3 shells
+ * with almost no residual, so the fit is no test, and its exponent is noisy.
+ * With 9 shells next to `10⁶` (`u^(−1)·(−ln u)^(−1.02)` on an interval of
+ * width `1e-3`), the last 2 shells fit `q = −0.995`, which refused the power,
+ * and the result was `± 1.50` for a true error of `47.0`; without that fit it
+ * is `± 111`.
+ *
+ * A fit is no evidence of a power, and the area is 0 (the geometric bound
+ * stays), when its largest difference to the logarithm of a shell is more
+ * than `POWER_MODEL_RESIDUAL`, or when `q ≥ −1` (the tail of such a power is
+ * not finite, and shells of a convergent integral that fit it are not a
+ * power: `x^(−0.99)·(1 + 100u)` next to `10⁶` fits `q = −0.135`). The area
+ * is capped so that `UNCOUNTED_SAFETY` times it is at most
+ * `POWER_AREA_LIMIT` (`Number.MAX_VALUE / 16`): the sum of the bounds of the
+ * two corners and the other error terms then stays finite. An error of `+∞`
+ * takes away `singularCorner` (see `resolveCorners`), and a caller can then
+ * use a Monte-Carlo estimate, which understates the uncertainty next to a
+ * singularity. A capped area is smaller than the tail, but it is the largest
+ * bound that the sums can hold.
+ */
+function powerCornerArea(corner: CornerSeries, delta: number): number {
+  if (!(delta > 0)) return 0;
+  const shells = corner.shells;
+  const errors = corner.shellQuadpackErrors ?? corner.shellErrors;
+  const spacing = Math.max(
+    Math.abs(corner.endpoint) * Number.EPSILON,
+    Number.MIN_VALUE
+  );
+  // A shell whose `shellErrors` is not finite is refused, as in
+  // `accurateShells`: its QUADPACK error can be finite all the same.
+  const usable = (k: number) =>
+    Number.isFinite(shells[k]) &&
+    Number.isFinite(corner.shellErrors[k]) &&
+    shells[k] !== 0 &&
+    errors[k] <= MODEL_SHELL_RELATIVE_ERROR * Math.abs(shells[k]) &&
+    corner.width / 2 ** (k + 1) >= UNCOUNTED_MODEL_SPACINGS * spacing;
+  // The runs from the deepest shell toward the interior: `last` is the
+  // deepest shell of a run, and `first` the shell where it starts.
+  let last = shells.length - 1;
+  let first = last;
+  for (; last >= 0; last = first - 1) {
+    while (last >= 0 && !usable(last)) last--;
+    if (last < 0) return 0;
+    first = last;
+    while (
+      first > 0 &&
+      usable(first - 1) &&
+      Math.sign(shells[first - 1]) === Math.sign(shells[last])
+    )
+      first--;
+    if (last - first + 1 >= POWER_MODEL_MIN_SHELLS) break;
+  }
+  if (last < 0) return 0;
+  const n = last - first + 1;
+  const beta = Math.max(1, -Math.log2(corner.width));
+  if (!shellsDecayAsPower(shells.slice(first, last + 1), beta + first))
+    return 0;
+  const half = first + Math.floor(n / 2);
+  const quarter = Math.floor(n / 4);
+  // `log2(width) − log2(delta)`, not `log2(width/delta)`: the quotient
+  // overflows when `delta` is a denormal, such as the width `5e-324` of the
+  // last corner panel next to 0.
+  const depth = beta + Math.log2(corner.width) - Math.log2(delta);
+  let largest = 0;
+  for (const [from, to] of [
+    [half, last + 1],
+    [last + 1 - quarter, last + 1],
+    [half, last + 1 - quarter],
+  ]) {
+    if (to - from < 4) continue;
+    const fit = fitShellModel(shells, from, to, beta, 'power');
+    if (
+      fit === undefined ||
+      !(fit.residual <= POWER_MODEL_RESIDUAL) ||
+      !(fit.model.q < -1)
+    )
+      return 0;
+    // With `q < −1`, `modelTail` is `undefined` only when the tail overflows.
+    largest = Math.max(
+      largest,
+      modelTail(fit.model, depth) ?? Number.POSITIVE_INFINITY
+    );
+  }
+  return Math.min(largest, POWER_AREA_LIMIT / UNCOUNTED_SAFETY);
 }
 
 /**
@@ -1049,7 +1208,8 @@ function shellsHaveOneSign(corner: CornerSeries): boolean {
  * The exponent `α` of the decrease `1/kᵅ` of the last half of the shells,
  * with the index `k` of a shell counted from a distance of 1 to the endpoint
  * (`offset` is the index of the first shell). Geometric shells give a large
- * value. `0` when the shells change sign or vanish.
+ * value. `0` when the shells change sign or vanish. The signs are compared,
+ * not the product, because the product of two small shells underflows to 0.
  */
 function shellDecayExponent(shells: number[], offset: number): number {
   const n = shells.length;
@@ -1057,7 +1217,7 @@ function shellDecayExponent(shells: number[], offset: number): number {
   const j = n - 1;
   const u = shells[i];
   const v = shells[j];
-  if (!(u * v > 0)) return 0;
+  if (!((u > 0 && v > 0) || (u < 0 && v < 0))) return 0;
   return Math.log(u / v) / Math.log((offset + j + 1) / (offset + i + 1));
 }
 
