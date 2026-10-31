@@ -40,6 +40,7 @@ import {
   gpuDeclaredIsIntegerScalar,
   gpuDeclaredTypeOf,
   gpuIsVectorComponentType,
+  gpuPointListArity,
 } from './gpu-declared-types.js';
 import { isPointListSource } from './gpu-points.js';
 
@@ -747,25 +748,8 @@ export function gpuPointListAtBase(
     };
   }
 
-  const t = gpuType(base);
-  if (typeof t === 'string' || t.kind !== 'list') return undefined;
-  const element = resolveTypeForCompilation(t.elements);
-  if (typeof element === 'string' || element.kind !== 'tuple') return undefined;
-  const m = element.elements.length;
-  if (m < 2 || m > 4)
-    return {
-      decline:
-        `the points of the base have ${m} coordinates, and a shader vector ` +
-        `holds 2 to 4`,
-    };
-  for (let i = 0; i < m; i++)
-    if (!gpuIsVectorComponentType(element.elements[i].type))
-      return {
-        decline:
-          `coordinate ${i + 1} of the points of the base (type ` +
-          `\`${typeToString(element.elements[i].type)}\`) is not a REAL ` +
-          `scalar — a shader vector's components are single floats`,
-      };
+  const m = gpuPointListArity(gpuType(base));
+  if (typeof m !== 'number') return m;
   const n = isFunction(base, 'List')
     ? base.nops
     : BaseCompiler.aggregateComponentCount(base);

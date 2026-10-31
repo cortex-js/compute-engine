@@ -23,6 +23,7 @@
 import { ComputeEngine } from '../../src/compute-engine';
 import { GLSLTarget } from '../../src/compute-engine/compilation/glsl-target';
 import { WGSLTarget } from '../../src/compute-engine/compilation/wgsl-target';
+import { gpuScalarComponents } from '../../src/compute-engine/compilation/gpu-extrema';
 
 const ce = new ComputeEngine();
 const glsl = new GLSLTarget();
@@ -264,5 +265,251 @@ describe('GPU ElementMax/ElementMin stay COMPONENTWISE', () => {
     expect(ce.box(['ElementMax', V3, W3]).evaluate().toString()).toBe(
       '[4,2,9]'
     );
+  });
+});
+
+describe('GPU reductions over a vector splat read every component', () => {
+  // `PointY(PointList(xs, y))` gives the second coordinate of each of the
+  // three points, which is `y` three times. It lowers to the splat
+  // constructor `vec3(y)`, which has ONE operand for three components. The
+  // reduction read the operands as the components, so it emitted `y` where
+  // the interpreter computes `3y` (Sum) or `y³` (Product). CE-684.
+  const ces = new ComputeEngine();
+  ces.declare('xs', 'list<real^3>');
+  ces.declare('y', 'real');
+  ces.declare('k', 'integer');
+  ces.declare('c', 'boolean');
+  const gs = (expr: any): string => glsl.compile(ces.box(expr), NO_FOLD).code!;
+  const ws = (expr: any): string => wgsl.compile(ces.box(expr), NO_FOLD).code!;
+  const AT = { y: 2, k: 6, c: true };
+  const interpAt = (expr: any): number =>
+    ces
+      .box(expr)
+      .subs({ xs: ces.box(['List', 1, 2, 3]), y: AT.y, k: AT.k, c: 'True' })
+      .evaluate().re;
+
+  /**
+   * Evaluate an emission at `AT` by rewriting it to JavaScript. It knows the
+   * forms these tests emit: the splat constructors `vec3`/`vec3f` of one
+   * operand, swizzles, the declarations of temporaries, `if`/`else`, the
+   * GLSL `?:` and the WGSL `select`, and the `_gpu_max`/`_gpu_gcd` helpers.
+   */
+  function runSplat(code: string): number {
+    let js = code
+      .replace(/\b(?:vec3|float|let|var)\s+(_tv\d+)(?::\s*\w+)?\s*=/g, 'let $1 =')
+      .replace(/\b(?:float|var)\s+(_tv\d+)(?::\s*\w+)?;/g, 'let $1;')
+      .replace(/\.([xyz])\b/g, (_m, c) => `[${'xyz'.indexOf(c)}]`);
+    if (!/\breturn\b/.test(js)) js = `return (${js});`;
+    // eslint-disable-next-line no-new-func
+    return new Function(
+      'y',
+      'k',
+      'c',
+      'const vec3 = (s) => [s, s, s], vec3f = vec3;' +
+        'const select = (f, t, cond) => (cond ? t : f);' +
+        'const _gpu_max = Math.max;' +
+        'const _gpu_gcd = (a, b) => (b === 0 ? Math.abs(a) : _gpu_gcd(b, a % b));' +
+        js
+    )(AT.y, AT.k, AT.c);
+  }
+
+  const P = (s: any) => ['PointY', ['PointList', 'xs', s]];
+  const Y1 = ['Add', 'y', 1];
+
+  it.each([
+    ['Sum', ['Sum', P('y')], 6],
+    ['Product', ['Product', P('y')], 8],
+    ['Max', ['Max', P('y')], 2],
+    ['GCD', ['GCD', P('k')], 6],
+    ['Sum, compound operand', ['Sum', P(Y1)], 9],
+    ['Max, compound operand', ['Max', P(Y1)], 3],
+    ['Sum in an If arm', ['If', 'c', ['Sum', P('y')], 0], 6],
+    ['Max in an If arm', ['If', 'c', ['Max', P('y')], 0], 2],
+    ['Sum, compound operand, in an If arm', ['If', 'c', ['Sum', P(Y1)], 0], 9],
+    ['Max, compound operand, in an If arm', ['If', 'c', ['Max', P(Y1)], 0], 3],
+    ['a literal splat', ['Sum', P(2)], 6],
+  ])('%s gives the interpreter value', (_label, expr, value) => {
+    expect(interpAt(expr)).toBe(value);
+    expect(runSplat(gs(expr))).toBe(value);
+    expect(runSplat(ws(expr))).toBe(value);
+  });
+
+  it('a splat of a symbol is read through the swizzles of the constructor', () => {
+    expect(gs(['Sum', P('y')])).toBe(
+      '((vec3(y).x) + (vec3(y).y) + (vec3(y).z))'
+    );
+    expect(ws(['Product', P('y')])).toBe(
+      '((vec3f(y).x) * (vec3f(y).y) * (vec3f(y).z))'
+    );
+  });
+
+  it('a compound splat operand is evaluated once, in a temporary', () => {
+    expect(gs(['Sum', P(Y1)])).toBe(
+      'vec3 _tv1 = vec3(y + 1.0);\nreturn ((_tv1.x) + (_tv1.y) + (_tv1.z));'
+    );
+    expect(ws(['Sum', P(Y1)])).toBe(
+      'var _tv1: vec3f = vec3f(y + 1.0);\nreturn ((_tv1.x) + (_tv1.y) + (_tv1.z));'
+    );
+  });
+
+  it('Max reads the swizzles of a pure compound splat in an If arm', () => {
+    // No temporary can be placed in a conditionally evaluated arm, so the
+    // pure constructor is repeated once per component.
+    expect(gs(['If', 'c', ['Max', P(Y1)], 0])).toBe(
+      '((c) ? ((_gpu_max(_gpu_max(vec3(y + 1.0).x, vec3(y + 1.0).y), ' +
+        'vec3(y + 1.0).z))) : (0.0))'
+    );
+    expect(ws(['If', 'c', ['Max', P(Y1)], 0])).toBe(
+      'select(0.0, (_gpu_max(_gpu_max(vec3f(y + 1.0).x, vec3f(y + 1.0).y), ' +
+        'vec3f(y + 1.0).z)), c)'
+    );
+  });
+
+  it('a constructor written by the caller is not repeated in an arm', () => {
+    // `vars` writes `V` as the conversion `vec3(u + v)` of a vector. Reading
+    // its one operand as the only component made `Max` a vector, and the
+    // two branches of the conditional had different types. Repeating the
+    // constructor once per component would run the caller's code three
+    // times (`vec3(nextValue())` can count its calls), and an arm has no
+    // place for a temporary, so the reduction declines.
+    const cev = new ComputeEngine();
+    cev.declare('V', 'list<real^3>');
+    cev.declare('c', 'boolean');
+    const expr = cev.box(['If', 'c', ['Max', 'V'], 0]);
+    for (const source of ['vec3(u + v)', 'vec3(nextValue())']) {
+      const opts = { ...NO_FOLD, vars: { V: source } };
+      expect(() => glsl.compile(expr, opts)).toThrow(
+        /conditionally-evaluated branch/
+      );
+      expect(() => wgsl.compile(expr, opts)).toThrow(
+        /conditionally-evaluated branch/
+      );
+    }
+    // Outside an arm, the constructor is held once in a temporary.
+    const outside = cev.box(['Max', 'V']);
+    const opts = { ...NO_FOLD, vars: { V: 'vec3(nextValue())' } };
+    expect(glsl.compile(outside, opts).code).toMatch(
+      /vec3 _tv\d+ = vec3\(nextValue\(\)\);/
+    );
+  });
+
+
+  it('a splat of a numeric literal repeats the literal', () => {
+    expect(gs(['Sum', P(2)])).toBe('((2.0) + (2.0) + (2.0))');
+    expect(ws(['Sum', P(2)])).toBe('((2.0) + (2.0) + (2.0))');
+  });
+
+  describe('gpuScalarComponents on a target with no statement sink', () => {
+    // A binder that installs no sink of its own has no place for a
+    // temporary. These calls use a target with no `hoist` sink.
+    const noSink = (language: 'glsl' | 'wgsl') => ({ language }) as any;
+    const s = ces.box('y');
+
+    it('a pure compound splat is read through its own swizzles', () => {
+      expect(gpuScalarComponents(s, 'vec2(y + 1.0)', noSink('glsl'))).toEqual(
+        ['vec2(y + 1.0).x', 'vec2(y + 1.0).y']
+      );
+    });
+
+    it('an impure compound splat declines', () => {
+      // Each repetition of the source would make a draw of its own.
+      const r = ces.box(['Random']);
+      expect(gpuScalarComponents(r, 'vec3(y + 1.0)', noSink('glsl'))).toBe(
+        undefined
+      );
+    });
+
+    it('a draw reached through a symbol value declines', () => {
+      // `r := Random()` makes `r + 1` impure once the value of `r` is looked
+      // through, though `(r + 1).isPure` is true. Repeating the source once
+      // per component would draw three times where the interpreter draws
+      // once.
+      const cer = new ComputeEngine();
+      cer.assign('r', cer.box(['Random'], { form: 'raw' }));
+      const e = cer.box(['Add', 'r', 1]);
+      expect(e.isPure).toBe(true);
+      expect(gpuScalarComponents(e, 'vec3(r + 1.0)', noSink('glsl'))).toBe(
+        undefined
+      );
+    });
+
+    it('a symbol whose `vars` entry is caller source declines', () => {
+      // The caller's text can count its calls; the compiler cannot see it.
+      const target = {
+        language: 'glsl',
+        cse: { harvestOptions: { isStringVar: (n: string) => n === 'V' } },
+      } as any;
+      const v = ces.box('V');
+      expect(gpuScalarComponents(v, 'vec3(nextValue())', target)).toBe(
+        undefined
+      );
+      // The same call when `V` is not caller source.
+      const plain = {
+        language: 'glsl',
+        cse: { harvestOptions: { isStringVar: () => false } },
+      } as any;
+      expect(gpuScalarComponents(v, 'vec3(nextValue())', plain)).toEqual([
+        'vec3(nextValue()).x',
+        'vec3(nextValue()).y',
+        'vec3(nextValue()).z',
+      ]);
+    });
+
+    it('caller source reached through a value or a body declines', () => {
+      // `r := Sin(y)` with `Sin` supplied by the caller, and `f(t) := t + w`
+      // with `w` mapped to caller source: the caller's code is inlined in
+      // the emission, so repeating it would run it once per component.
+      const cei = new ComputeEngine();
+      cei.declare('y', 'real');
+      cei.declare('w', 'real');
+      cei.assign('r', cei.box(['Sin', 'y']));
+      cei.assign('f', cei.box(['Function', ['Add', 't', 'w'], 't']));
+      const target = {
+        language: 'glsl',
+        cse: {
+          harvestOptions: {
+            isOverriddenOperator: (n: string) => n === 'Sin',
+            isStringVar: (n: string) => n === 'w',
+          },
+        },
+      } as any;
+      for (const e of [['Add', 'r', 1], ['f', 'y']])
+        expect(
+          gpuScalarComponents(cei.box(e as any), 'vec3(s + 1.0)', target)
+        ).toBe(undefined);
+      // The same shapes with no caller source are read through swizzles.
+      const plain = { language: 'glsl', cse: { harvestOptions: {} } } as any;
+      expect(
+        gpuScalarComponents(cei.box(['Add', 'r', 1]), 'vec2(s + 1.0)', plain)
+      ).toEqual(['vec2(s + 1.0).x', 'vec2(s + 1.0).y']);
+    });
+
+    it('a constructor of a vector and a scalar is not read as a splat', () => {
+      expect(gpuScalarComponents(s, 'vec3(v, z)', noSink('wgsl'))).toEqual([
+        'vec3(v, z).x',
+        'vec3(v, z).y',
+        'vec3(v, z).z',
+      ]);
+    });
+
+    it('the typed WGSL forms and an integer vector', () => {
+      expect(gpuScalarComponents(s, 'vec3<f32>(y)', noSink('wgsl'))).toEqual(
+        ['vec3<f32>(y).x', 'vec3<f32>(y).y', 'vec3<f32>(y).z']
+      );
+      expect(gpuScalarComponents(s, 'ivec2(k)', noSink('glsl'))).toEqual([
+        'ivec2(k).x',
+        'ivec2(k).y',
+      ]);
+    });
+
+    it('a matrix constructor with fewer operands than elements declines', () => {
+      // `mat2(y)` is the diagonal matrix of `y`, not four copies of `y`.
+      expect(gpuScalarComponents(s, 'mat2(y)', noSink('glsl'))).toBe(
+        undefined
+      );
+      expect(
+        gpuScalarComponents(s, 'mat2(1.0, 0.0, 0.0, y)', noSink('glsl'))
+      ).toEqual(['1.0', '0.0', '0.0', 'y']);
+    });
   });
 });

@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-689.
+Next free reference: CE-690.
 
 **Entry format.**
 
@@ -5201,84 +5201,6 @@ guards refuse a `Tabulate` or `Scan` that can omit elements until the targets
 have a distinct representation for an omitted element. `Iterate` is not
 supported by the compiler. Custom accumulator delivery policies are unchanged.
 
-### CE-684. Shader targets: a reduction over a vector splat reads one component
-
-**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
-gpu-target.ts split; the code is older than the split.
-
-With `xs` declared `list<real^3>` and `y` declared `real`,
-`Sum(PointY(PointList(xs, y)))` evaluates to `6` for `xs = [1, 2, 3]`,
-`y = 2` (three points, each with `y` as its second coordinate), and
-`Product(...)` to `8`. The GLSL and WGSL code for both is `((y))`: the
-projection lowers to the splat constructor `vec3(y)`, and
-`gpuScalarComponents` (`gpu-extrema.ts`) takes a constructor's operands as its
-components, so the one operand `y` stands for one component instead of three.
-The fix: when a `vecN` constructor has fewer operands than `N`, repeat the
-single operand (a splat) `N` times, keeping it evaluated once (a temporary when
-it is not a plain symbol or literal), or return `undefined` so the
-temporary-and-swizzle path is taken; add the two expressions above to
-`compile-gpu-extremum.test.ts` with their interpreter values.
-
-### CE-685. Shader targets: `freeSymbolTypes` reports a list of points as an array of floats
-
-**Status:** open; defect. Found 2026-10-30 by the Codex review of the
-gpu-target.ts split; the code is older than the split.
-
-With `P` declared `list<tuple<real, real>^3>` and `k` an integer, `At(P, k)`
-compiles on GLSL and WGSL to `_gpu_atp2_3(P, k)`, whose helper parameter is an
-array of `vec2`, but `freeSymbolTypes.P.lowered` is `float[3]` (GLSL) and
-`array<f32, 3>` (WGSL). A host that declares the input from that metadata
-declares an incompatible type. `gpuLoweredSymbolTypeHook` (`gpu-shapes.ts`)
-reports every fixed-length array as an array of floats. The fix: read the
-element shape of the list and report `vec2[3]` and `array<vec2f, 3>` here, and
-the equivalent for the other point arities the `At` lowering supports; test
-with the `freeSymbolTypes` of this expression on both targets.
-
-### CE-686. JavaScript: a real guard over a complex operand skips the draws of the other operands
-
-**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
-base-compiler.ts split; the code is older than the split (`compileExpr`'s
-real-operand guard, now in compiler-core.ts).
-
-With `x` declared `real`, `Max(Sqrt(x), Random())` compiles in `auto` mode to
-`((_tv1) => (_SYS.cisreal(_tv1) ? Math.max(_SYS.creal(_tv1), _SYS.drawNextRandomNumber()) : NaN))(_SYS.csqrt({re: _.x, im: 0}))`:
-the draw is inside the guard's true branch, so for `x = -4` the code gives
-`NaN` and consumes no draw, while the interpreter evaluates both operands and
-consumes one. The draw-consumption contract (`docs/RANDOMNESS-MODEL.md` §5)
-says every operation consumes a fixed number of indices, so the next seeded
-draw differs between the two. The fix: evaluate the operands that are not
-maybe-complex in their original order before the guard, binding the
-effectful ones to temporaries like the complex ones.
-
-### CE-687. JavaScript: two operand positions that share one impure node draw once
-
-**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
-base-compiler.ts split; the code is older than the split.
-
-Build `e = ce.box(['Sqrt', ['Subtract', ['Random'], 0.5]])` and compile
-`ce.function('Max', [e, e])`: the real-operand guard collects the maybe-complex
-operands in a `Set`, so the shared node gets one temporary and the code draws
-once, `Math.max(_SYS.creal(_tv1), _SYS.creal(_tv1))`. The interpreter
-evaluates each operand position and draws twice, so its value is the maximum
-of two draws. The fix: one binding per operand position (or fail closed when
-an impure node occurs more than once).
-
-### CE-688. A `Break` after a `Continue` in a loop over several `Element` clauses leaves only the innermost loop
-
-**Status:** open; wrong value. Found 2026-10-30 by the Codex review of the
-base-compiler.ts split; the code is older than the split.
-
-`assertBreakLeavesWholeLoop` (compile-match.ts) declines a multi-clause loop
-whose body has an escaping `Break`, but it tests `escapingControl(body) ===
-'Break'`, and `escapingControl` returns the FIRST control instruction it finds.
-For the body `Block(If(s < 0, Continue()), Assign(s, s + 1), Break())` over
-`Element(i, Range(1, 3))` and `Element(j, Range(1, 3))`, it finds the
-`Continue`, the check passes, and the emitted `break` leaves only the inner
-`for`: the compiled program gives `3`, the interpreter `1`. The fix: a
-predicate that searches every reachable descendant for an escaping `Break`,
-respecting nested `Loop` and `Function` boundaries, used by the check; add
-this program to `compile-loop-destructuring.test.ts`.
-
 ## LaTeX parsing and serialization
 
 ### CE-441. The LaTeX of a rest parameter or a destructuring parameter does not read back as that parameter
@@ -5705,6 +5627,59 @@ the installation is safe (four conditions in `prepareFunctionDeclarations`,
   call in the same statement (`String(g(3))`) does not agree.
 
 ## Performance
+
+### CE-689. Boxing and evaluating nested folds whose fixpoint is rejected costs about 3.5× what it did in 0.156.0
+
+**Status:** decision needed; performance. GitHub issue #487 (2026-10-30).
+
+The expression of the issue is about 1.8 KB of MathJSON: 8 `Fold`s nested 4
+deep, with `If`, `At`, `Join`, `Count`, `Min`, `Range`. Measured on the built
+packages (mean of 10 calls after a warm-up, 2026-10-30): `box` 30 ms (0.156.0), 65 ms (0.169.0),
+106 ms (0.173.0); `Apply` of a `Function` boxed once 23, 33, 42 ms. One
+canonical pass of the same tree with no fold handler (`Fold` renamed) went from
+3 to 5 ms, so about half of the growth is the cost of each pass and the other
+half is the number of passes.
+
+Box: one box makes 241 passes over callback bodies. The accumulators of the
+inner folds (`bacc`, `tacc`, `nacc`) are joined (`Join(acc, …)`) in a branch of
+an `If` whose condition compares with `At(st, 2)`, which can be a list. Since
+commit `418b4854e` (0.168.0) such a condition can be undecided and the `If` has
+a `missing` arm (`mayBeUndecidedCondition`, `control-structures.ts`). So the
+fixpoint of the fold settles on `list<unknown> | missing`, the binding that
+`Join` narrows is `list<unknown>`, and `fixpointLiteral()` (`collections.ts`)
+rejects it. A rejected fold costs 4 passes (admission, 2 steps, admission
+again), it writes no record, and every step of every enclosing fold repeats
+them.
+
+A prototype that records the rejection, so that the next step of the enclosing
+fold admits the fold once (164 passes; box 188 → 139 ms from source, median of
+15), gives the
+same types for the issue's expression and for the #462 shapes. It changes one
+type: in
+`Fold((st, k) => [Join(st[1], Fold((b, g) => If(st[1][g] > st[2], Join(b, [st[1][g]]), b), [], 1..Count(st[1]))), st[2]], [[3, 1, 4], 2], 1..2)`
+the inner accumulator is `b: collection<any>` with the prototype and
+`b: list<unknown>` at HEAD. The cause: the type of `If` is not monotone in its
+condition. With `y: list<integer> | integer`, `If(x > y, Join(b, [x]), b)` has
+a `missing` arm; with the wider `y: collection | integer`, the condition is
+`broadcastable<boolean>` and the `If` has none. So the inner fold is rejected
+at the first step of the enclosing fold and settles at the second. The
+prototype is in the worktree `/tmp/wt-compute-engine-40-i487`.
+
+Evaluation: no fold fixpoint runs (`Apply` of a boxed `Function`), but each
+step of a fold changes bindings, which moves the engine generation, so the
+types (`boundCallType`, `functionLiteralSignatureType`) and effects (`isPure`
+read by the shared-evaluation memo in `evaluate()`) of the body are computed
+again at every step. This is step 3b of the evaluation-cache plan (a
+dependency stamp per value cache,
+`docs/plans/2026-10-30-evaluation-cache-status-handoff.md`), which the user
+postponed on 2026-10-30.
+
+Decision: (a) take the rejected record and accept the less precise type where
+the `If` type is not monotone; (b) first make the `If` type monotone (a
+condition that can hold a collection gives the `missing` arm whatever its
+static shape), which may also remove the rejection in the issue's expression;
+(c) do step 3b of the evaluation-cache plan for the evaluation part. If
+nothing is decided, the cost stays as in 0.173.0.
 
 ### CE-668. The first `at()` of an evaluated lazy `Map` view advances the generation, so its cached evaluation is never used
 

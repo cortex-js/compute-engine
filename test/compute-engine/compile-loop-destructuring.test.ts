@@ -291,6 +291,71 @@ describe('COMPILE Loop — shapes that fail closed on both targets (review pins)
     expect(interpreted(program)).toBe('1');
   });
 
+  // The check searches the whole body for an escaping `Break`, not only the
+  // first control instruction: a `Continue` before the `Break` let the loop
+  // compile, and the emitted `break` left only the inner loop, so the
+  // compiled program gave 3 where the interpreter gives 1 (CE-688).
+  const twoClauseLoop = (body: MathJsonExpression): MathJsonExpression => [
+    'Block',
+    ['Declare', 's', ['Dictionary', ['KeyValuePair', 'value', 0]]],
+    [
+      'Loop',
+      body,
+      ['Element', 'i', ['Range', 1, 3]],
+      ['Element', 'j', ['Range', 1, 3]],
+    ],
+    's',
+  ];
+  const declinesOnEveryTarget = (program: MathJsonExpression): void => {
+    expect(() => js(program)).toThrow(/stops the whole loop/);
+    expect(() => py(program)).toThrow(/stops the whole loop/);
+    const interval = new IntervalJavaScriptTarget().compile(ce.box(program));
+    expect(interval.success).toBe(false);
+    expect(interval.error).toMatch(/stops the whole loop/);
+  };
+
+  it('a `Break` after a `Continue` under several Element clauses declines', () => {
+    const program = twoClauseLoop([
+      'Block',
+      ['If', ['Less', 's', 0], ['Continue']],
+      ['Assign', 's', ['Add', 's', 1]],
+      ['Break'],
+    ]);
+    declinesOnEveryTarget(program);
+    expect(interpreted(program)).toBe('1');
+  });
+
+  it('a `Break` before a `Continue` under several Element clauses declines', () => {
+    const program = twoClauseLoop([
+      'Block',
+      ['Assign', 's', ['Add', 's', 1]],
+      ['If', ['GreaterEqual', 's', 2], ['Break']],
+      ['If', ['Less', 's', 0], ['Continue']],
+    ]);
+    declinesOnEveryTarget(program);
+    // The first turn adds 1, the second adds 1 and stops the whole loop.
+    expect(interpreted(program)).toBe('2');
+  });
+
+  it('a `Break` that belongs to a nested Loop does not decline', () => {
+    // The nested `Loop` owns its `Break`, so the outer two-clause loop runs
+    // all nine turns, and each inner loop adds 1 before it stops.
+    const program = twoClauseLoop([
+      'Block',
+      ['If', ['Less', 's', 0], ['Continue']],
+      [
+        'Loop',
+        ['Block', ['Assign', 's', ['Add', 's', 1]], ['Break']],
+        ['Element', 'k', ['Range', 1, 3]],
+      ],
+    ]);
+    const r = js(program);
+    expect(r.success).toBe(true);
+    expect(r.run!({})).toBe(9);
+    expect(() => py(program)).not.toThrow();
+    expect(interpreted(program)).toBe('9');
+  });
+
   it('a name bound twice in one pattern declines', () => {
     // Refused at canonicalization (a duplicate name in a destructuring
     // pattern is an error there), so both targets see an invalid expression.

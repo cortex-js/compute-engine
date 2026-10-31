@@ -48,6 +48,7 @@ import {
   typeIsKindForCertain,
 } from '../boxed-expression/residue-class.js';
 import { kindTypeNames } from '../boxed-expression/value-kinds.js';
+import { multiClauseState } from '../multi-clause.js';
 import { hasEnclosureArm } from '../library/enclosure-compile.js';
 import { isSubtype, provablyAdmits } from '../../common/type/subtype.js';
 import { typeToIdentityKey } from '../../common/type/serialize.js';
@@ -68,7 +69,7 @@ import type { ShapeNode } from '../boxed-expression/match-dispatch.js';
 import type { CompileTarget, InvariantPrefix, TargetSource } from './types.js';
 import { CompileDeclineError } from './diagnostics.js';
 import { isColorValued } from './color-space-fact.js';
-import { candidateAt } from './cse.js';
+import { candidateAt, isCallerMapped } from './cse.js';
 import {
   arraysArePoints,
   compilationType,
@@ -171,6 +172,7 @@ import {
   closedExactJump,
   exactFoldValue,
   foldValueBlocked,
+  foldValueImpure,
   foldableCollectionElements,
   foldedRealNumber,
   hasUnknowns,
@@ -1058,6 +1060,21 @@ export function hasCodeOverride(expr: Expression): boolean {
 }
 
 /**
+ * The effect labels (`docs/EFFECTS-MODEL.md`) that cannot change the value
+ * of a symbol: a draw, a clock read, input and output. The other labels
+ * (`scope`, `state`, `environment`) and unknown effects may.
+ */
+const BINDING_NEUTRAL_EFFECTS: ReadonlySet<string> = new Set([
+  'console',
+  'entropy',
+  'fs_read',
+  'fs_write',
+  'network',
+  'random',
+  'time',
+]);
+
+/**
  * The D2/D6 RUNTIME RULE (design §8, `docs/COMPILATION-MODEL.md`)
  * around a head `h` whose lowering is real-only — an ordering comparison,
  * an integer-only head (`Floor`, `Mod`, …), a real-only library helper
@@ -1069,9 +1086,14 @@ export function hasCodeOverride(expr: Expression): boolean {
  * replaced by the temporary's real projection (`complexReal`), under the
  * guard that every temporary's imaginary part is exactly zero
  * (`complexIsReal`); otherwise the value is `elseCode` (`'false'` for a
- * comparison, `'NaN'` for a numeric head). Because the guard is emitted
- * WHERE the head is lowered, a head inside a conditional arm or a
- * short-circuited operand keeps its laziness.
+ * comparison, `'NaN'` for a numeric head). When some operand has an effect
+ * (`Random()`, an assignment), every operand that is not a number literal,
+ * a constant symbol or already a temporary is bound with them, in the same
+ * argument order: each operand is then evaluated once, in source order,
+ * whatever the guard decides, and a variable is read where the
+ * interpreter reads it. Because the
+ * guard is emitted WHERE the head is lowered, a head inside a conditional
+ * arm or a short-circuited operand keeps its laziness.
  *
  * A STATICALLY non-real operand (`isProvablyNonReal`: `i`, `2i`, an
  * `imaginary`-typed symbol) is the compile-time DECLINE, raised here as a
@@ -1119,6 +1141,11 @@ export function hasCodeOverride(expr: Expression): boolean {
  * `complexReal`, `realGuard`, and `complexRealElements` for the
  * element-wise form: the shader targets, a custom target without them).
  *
+ * Throws a `capability` diagnostic (`code: 'shared-impure-operand'`) when
+ * one operand node occurs at two or more positions and either has effects
+ * or reads a symbol that an operand may write: the override is keyed on
+ * the node, so it cannot give each position its own evaluation.
+ *
  * `emit` re-emits the head with the overrides active; the gate that called
  * this must skip an operand present in `_codeOverrides` on re-entry.
  */
@@ -1140,9 +1167,10 @@ export function realOperandGuard(
   // a real-only head fails closed as before (design D2/D6: "in strict mode
   // nothing changes").
   if (!runtimeRealGuards()) return undefined;
-  // Deduplicated by node identity: the same operand INSTANCE in two
-  // positions (`Max(e, e)`) is bound once, and an impure one is evaluated
-  // once.
+  // Deduplicated by node identity: the same PURE operand instance in two
+  // positions (`Max(e, e)`) is bound once, which is correct because its two
+  // evaluations give the same value. An impure instance in two positions is
+  // declined below.
   const maybe = [
     ...new Set(args.filter((a) => realGuardCandidate(a, engine, target))),
   ];
@@ -1199,6 +1227,114 @@ export function realOperandGuard(
   const projectScalars = elementwise && resultKind !== 'color';
   const projectElements = target.complexRealElements;
   if (elementwise && projectElements === undefined) return undefined;
+  // An operand that is a name or a constant reads no state and has no
+  // effect, so it can stay inline in the guarded real lowering: one that
+  // already has a code override (a temporary of an enclosing lowering), a
+  // number literal, a constant symbol.
+  const inert = (a: Expression): boolean =>
+    _codeOverrides.has(a) || isNumber(a) || (isSymbol(a) && a.isConstant);
+  // Whether an operand has an effect once the values of the symbols it
+  // reads and the bodies of the user functions it calls are looked through:
+  // `isPure` stops at a symbol with a value, so `r` with `r := Random()` is
+  // pure to it, but the value is evaluated again at each read, by the
+  // interpreter and in the compiled code (`foldValueImpure`).
+  //
+  // Code that the caller supplied (a `vars` string that is not a plain read
+  // of the input, a head mapped through `functions` or `operators`, an
+  // operator's own `compile` handler) counts as code with an effect: it can
+  // draw or count its calls (`_.draw()`), and the compiler cannot see
+  // inside it. A route with no common-subexpression session has no `vars`
+  // or `functions`, and `isCallerMapped` still finds a `compile` handler
+  // there from the definition.
+  const caller = target.cse?.harvestOptions ?? {};
+  const callerCode = (a: Expression): boolean => {
+    if (isSymbol(a)) return caller.isStringVar?.(a.symbol) === true;
+    if (!isFunction(a)) return false;
+    return isCallerMapped(a, caller) || a.ops.some(callerCode);
+  };
+  // A symbol that `vars` maps to a plain read of an input, or that a binder
+  // of the compiled code binds, is read from that input and never from its
+  // stored value, so its value does not count.
+  const readsInput = (a: Expression): boolean =>
+    isSymbol(a) &&
+    !callerCode(a) &&
+    (target.varsKeys?.has(a.symbol) === true ||
+      target.boundVars?.has(a.symbol) === true);
+  const impure = (a: Expression): boolean =>
+    a.isPure !== true ||
+    callerCode(a) ||
+    (!readsInput(a) && foldValueImpure(a));
+  // Whether some operand has an effect (`Random()`, an assignment). Then
+  // the ORDER in which the operands are evaluated and read is observable,
+  // and every operand that is not inert is bound, in source order (below).
+  const effects = args.some((a) => impure(a) && !inert(a));
+  // An operand node that occurs at two or more positions is bound once:
+  // the code override that replaces an operand by its temporary is keyed
+  // on the node, so the re-emitted head reads one temporary at every
+  // position. That is correct when every evaluation of the node gives the
+  // same value. It is not when the node has an effect (`Max(e, e)` with
+  // one boxed node `e = √(Random() − 0.5)`: the interpreter evaluates
+  // each position and draws twice), or when the node reads a symbol that
+  // an operand may write (`Max(y, Assign(y, 1), y)`: the second `y`
+  // reads 1). Left inline instead, the node would run inside the guarded
+  // branch, after the bindings, and not at all when the guard fails. So
+  // these two cases decline, with their own diagnostic (CE-687). An
+  // operand may write a symbol unless each of its effect labels is one
+  // that changes no binding (a draw, a clock read, input or output): an
+  // `Assign` carries `scope`, and unknown effects are `'any'`.
+  // The labels of an operand are those of its own nodes: a symbol's
+  // `effects` is always `undefined`, and a call does not add the labels of
+  // a user-function body. So an operand that reaches an impure symbol value
+  // or an impure body (`r` or `Random() + r` with `r := Assign(y, 1)`) may
+  // write a symbol that its labels do not show, and it counts as one that
+  // may write.
+  const hiddenEffect = (a: Expression): boolean => {
+    const seen = new Set<Expression>();
+    const visit = (node: Expression): boolean => {
+      if (seen.has(node)) return false;
+      seen.add(node);
+      if (isSymbol(node)) {
+        if (readsInput(node)) return false;
+        const value = engine._getSymbolValue(node.symbol);
+        return value !== undefined && foldValueImpure(value);
+      }
+      if (!isFunction(node)) return false;
+      if (node.ops.some(visit)) return true;
+      const literal = userFunctionLiteral(engine, node.operator);
+      if (literal !== undefined) return foldValueImpure(literal);
+      return (
+        multiClauseState(engine.lookupDefinition(node.operator))?.clauses.some(
+          (c) => foldValueImpure(c.literal)
+        ) ?? false
+      );
+    };
+    return visit(a);
+  };
+  const mayWriteSymbol = (a: Expression): boolean => {
+    if (!impure(a) || inert(a)) return false;
+    if (a.isPure === true || callerCode(a) || hiddenEffect(a)) return true;
+    const labels = a.effects;
+    return (
+      labels === 'any' ||
+      (labels ?? []).some((l) => !BINDING_NEUTRAL_EFFECTS.has(l))
+    );
+  };
+  const writes = args.some(mayWriteSymbol);
+  const shared = args.find(
+    (a, i) => !inert(a) && args.indexOf(a) !== i && (impure(a) || writes)
+  );
+  if (shared !== undefined)
+    throw new CompileDeclineError({
+      code: 'shared-impure-operand',
+      kind: 'capability',
+      message:
+        `Could not compile \`${h}\`: the operand \`${shared.toString()}\` ` +
+        (impure(shared)
+          ? `has effects and `
+          : `reads a value that another operand may change, and it `) +
+        `occurs at more than one position. Each position must be ` +
+        `evaluated on its own, and this lowering binds it once.`,
+    });
   const bindings: Array<[string, string]> = [];
   const guards: string[] = [];
   const bound: Expression[] = [];
@@ -1206,16 +1342,54 @@ export function realOperandGuard(
   // operand is overridden (it reads "real") must not survive the override.
   _pushComplexMemoLayer();
   try {
-    for (const a of maybe) {
+    // The bindings are evaluated before the guard, in argument order, and
+    // the head's real lowering reads the temporaries. Each maybe-complex
+    // operand is bound. When some operand has an effect, every operand
+    // that is not inert is bound too, so that each operand is evaluated
+    // exactly once, in source order, whatever the guard decides, as the
+    // interpreter evaluates it:
+    // - an operand with effects, left inline in the guarded lowering,
+    //   would run only when the guard passes (`Max(√x, Random())` at
+    //   `x = −4` consumed no draw where the interpreter consumes one), and
+    //   after the draws of a maybe-complex operand written to its right
+    //   (CE-686);
+    // - a pure operand that reads a variable, left inline, would read it
+    //   after the bound operands ran: `Max(√x, y, Assign(y, 1))` with
+    //   `y = 5` read 1 where the interpreter reads 5.
+    // When no operand has an effect, a pure operand stays inline: no
+    // operand can change what it reads, and its value is the same whether
+    // it is evaluated before the guard, inside it, or not at all.
+    //
+    // Every binding is compiled BEFORE any override of this call is set.
+    // The bindings are the parameters of one `bindExpr`, so a binding
+    // compiled after an earlier operand's override would read that
+    // operand's temporary, which is not in scope there
+    // (`Max(r, √(r − 0.5))` with one shared `r` node gave a
+    // `ReferenceError`). Compiled first, a node shared by two operands is
+    // evaluated in each of them, as the interpreter evaluates it (CE-687).
+    const maybeSet = new Set(maybe);
+    const temps: string[] = [];
+    for (const a of args) {
+      if (bound.includes(a)) continue;
+      if (!maybeSet.has(a) && (!effects || inert(a))) continue;
       const t = tempVar(target);
       bindings.push([t, compileValueOperand(a, target)]);
-      if (projectElements !== undefined && (positional(a) || projectScalars)) {
+      bound.push(a);
+      temps.push(t);
+    }
+    for (let k = 0; k < bound.length; k++) {
+      const a = bound[k];
+      const t = temps[k];
+      if (!maybeSet.has(a)) _codeOverrides.set(a, t);
+      else if (
+        projectElements !== undefined &&
+        (positional(a) || projectScalars)
+      )
         _codeOverrides.set(a, projectElements(t));
-      } else {
+      else {
         guards.push(target.complexIsReal(t));
         _codeOverrides.set(a, target.complexReal(t));
       }
-      bound.push(a);
     }
     const body = emit();
     // The conditional and its "else" literal are the TARGET's spelling

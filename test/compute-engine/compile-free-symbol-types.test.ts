@@ -107,6 +107,67 @@ describe('freeSymbolTypes', () => {
     );
   });
 
+  it('a list of points is an array of vectors on the shader targets', () => {
+    // `At(P, k)` passes `P` to the `_gpu_atpM_N` helper, whose parameter is
+    // an array of `vecM`, so the host must declare the input with that type,
+    // not as an array of floats. (CE-685)
+    for (const m of [2, 3, 4]) {
+      const ce = new ComputeEngine();
+      ce.declare('P', `list<tuple<${Array(m).fill('real').join(', ')}>^3>`);
+      ce.declare('k', 'integer');
+      const g = run(ce, 'glsl', ['At', 'P', 'k']);
+      expect(g.success).toBe(true);
+      expect(g.code).toBe(`_gpu_atp${m}_3(P, k)`);
+      expect(g.preamble).toContain(`_gpu_atp${m}_3(vec${m} v[3], float i)`);
+      expect(g.freeSymbolTypes.P.lowered).toBe(`vec${m}[3]`);
+      const w = run(ce, 'wgsl', ['At', 'P', 'k']);
+      expect(w.success).toBe(true);
+      expect(w.code).toBe(`_gpu_atp${m}_3(P, k)`);
+      expect(w.preamble).toContain(`_gpu_atp${m}_3(v: array<vec${m}f, 3>`);
+      expect(w.freeSymbolTypes.P.lowered).toBe(`array<vec${m}f, 3>`);
+    }
+    // Integer coordinates are read as floats, as for any other point.
+    const ce = new ComputeEngine();
+    ce.declare('P', 'list<tuple<integer, integer>^3>');
+    expect(run(ce, 'glsl', ['At', 'P', 1]).freeSymbolTypes.P.lowered).toBe(
+      'vec2[3]'
+    );
+  });
+
+  it('a long list of points on WGSL is read in place as an array of vec2f', () => {
+    // Past 1024 elements the WGSL `At` reads the module-scope array where it
+    // is (`_gpu_atp_P_2_N`, whose body returns `P[j]` as a `vec2f`) instead
+    // of passing a copy to a helper.
+    const ce = new ComputeEngine();
+    ce.declare('P', 'list<tuple<real, real>^2000>');
+    ce.declare('k', 'integer');
+    const w = run(ce, 'wgsl', ['At', 'P', 'k']);
+    expect(w.success).toBe(true);
+    expect(w.code).toBe('_gpu_atp_P_2_2000(k)');
+    expect(w.preamble).toContain('fn _gpu_atp_P_2_2000(_gpu_i: f32) -> vec2f');
+    expect(w.freeSymbolTypes.P.lowered).toBe('array<vec2f, 2000>');
+  });
+
+  it('a local copy of an assigned list of points has the reported type', () => {
+    // The assignment writes a local (`_tv1`) in place of the input `P`. The
+    // local is declared with the type that `freeSymbolTypes` reports for `P`.
+    for (const [to, decl] of [
+      ['glsl', 'vec2[3] _tv1;'],
+      ['wgsl', 'var _tv1: array<vec2f, 3>;'],
+    ]) {
+      const ce = new ComputeEngine();
+      ce.declare('P', 'list<tuple<real, real>^3>');
+      ce.declare('k', 'integer');
+      const points = ['List', ['Tuple', 1, 2], ['Tuple', 3, 4], ['Tuple', 5, 6]];
+      const r = run(ce, to, ['Block', ['Assign', 'P', points], ['At', 'P', 'k']]);
+      expect(r.success).toBe(true);
+      expect(r.code.split('\n')[0]).toBe(decl);
+      expect(r.freeSymbolTypes.P.lowered).toBe(
+        to === 'glsl' ? 'vec2[3]' : 'array<vec2f, 3>'
+      );
+    }
+  });
+
   it('a boolean is a bool on the shader targets', () => {
     const ce = new ComputeEngine();
     const r = run(ce, 'glsl', ['If', ['And', 'A', 'B'], 1, 2]);

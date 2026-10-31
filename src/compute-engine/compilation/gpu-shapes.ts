@@ -51,6 +51,7 @@ import {
   gpuDeclaredIsIntegerScalar,
   gpuDeclaredTypeOf,
   gpuMatrixOrArraySpelling,
+  gpuPointListArity,
   gpuTypeOfValue,
 } from './gpu-declared-types.js';
 import type { GPUValueType } from './gpu-declared-types.js';
@@ -1857,7 +1858,8 @@ export function gpuCheckOperandShapes(
  * a `vec3`; otherwise the type is read from the same analysis that types the
  * parameters and return values of emitted functions (`gpuTypeOfValue`),
  * then a matrix (`mat2`, `mat3x2f`) or an array (`float[5]`,
- * `array<f32, 5>`). `undefined` when none of these apply.
+ * `array<f32, 5>`; `vec2[3]`, `array<vec2f, 3>` for a list of points).
+ * `undefined` when none of these apply.
  */
 export function gpuLoweredSymbolTypeHook(
   isWGSL: boolean
@@ -1876,11 +1878,18 @@ export function gpuLoweredSymbolTypeHook(
     }
     if (shape === 'array') {
       const t = gpuType(symbol);
-      const n =
-        typeof t !== 'string' && t.kind === 'list' && t.dimensions?.length === 1
-          ? t.dimensions[0]
-          : undefined;
+      if (typeof t === 'string' || t.kind !== 'list') return undefined;
+      const n = t.dimensions?.length === 1 ? t.dimensions[0] : undefined;
       if (n === undefined || !(n > 0)) return undefined;
+      // A list of points (tuples of 2 to 4 real coordinates) is read as an
+      // array of `vecM`: the `At` lowering indexes it as `P[j]` and passes it
+      // to the `_gpu_atpM_N` helper, whose parameter is `vecM v[N]`
+      // (`array<vecMf, N>` on WGSL). `gpuPointListAtBase` uses the same test
+      // (`gpuPointListArity`), so the reported type and the emitted reads
+      // agree. (CE-685)
+      const m = gpuPointListArity(t);
+      if (typeof m === 'number')
+        return isWGSL ? `array<vec${m}f, ${n}>` : `vec${m}[${n}]`;
       return isWGSL ? `array<f32, ${n}>` : `float[${n}]`;
     }
     return gpuTypeOfValue(symbol, isWGSL);

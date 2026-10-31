@@ -387,6 +387,15 @@ rule:
   order. Binding only one of them would run its draw before the draws of
   operands written to its left (`javascript-target.ts` and `gpu-draw-order.ts`,
   the comments on binding impure chain operands).
+- The run-time real check of a real-only head in `auto` mode (`Max(√x, …)`,
+  an ordering comparison) does not move or skip a draw. When an operand has
+  an effect, every operand is evaluated before the check, once and in
+  argument order, so `Max(√x, Random())` consumes one index also when `√x`
+  is not real. The check binds an operand node once, so a head that has the
+  same boxed node with an effect at two positions (`Max(e, e)` with
+  `e = √(Random() − 0.5)`, which the interpreter evaluates twice) declines
+  with the code `shared-impure-operand`, and the interpreter gives the value
+  (`realOperandGuard()` in `compiler-core.ts`).
 
 Consequence, stated rather than hidden: **editing a body so that it draws
 earlier shifts every later draw in the same frame.** That is inherent to a

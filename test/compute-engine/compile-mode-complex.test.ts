@@ -667,23 +667,33 @@ describe('complex mode — D2/D6 runtime rules', () => {
     expect(draws).toBe(0);
   });
 
-  it('the same operand INSTANCE in two positions of a guarded head is bound once', () => {
-    // Review finding (2026-08-16): `Max(e, e)` with one shared node bound it
-    // twice (two temporaries, one orphaned) and evaluated an impure `e` twice.
+  it('the same PURE operand instance in two positions of a guarded head is bound once', () => {
+    // `Max(e, e)` with one shared pure node bound it twice (two
+    // temporaries, one orphaned). One binding is correct: both positions
+    // have the same value.
     const e = new ComputeEngine();
-    let draws = 0;
-    const orig = e._random.bind(e);
-    (e as unknown as { _random: () => number })._random = () => {
-      draws += 1;
-      return orig();
-    };
-    const shared = e.box(['Sqrt', ['Subtract', ['Random'], 1]]);
+    e.declare('x', 'real');
+    const shared = e.box(['Sqrt', 'x']);
     const r = compile(e.box(['Max', shared, shared]), {
       ...CX,
       constantFold: false,
     });
-    r.run!({});
-    expect(draws).toBe(1);
+    expect(r.code.match(/_tv\d+/g)?.every((t, _, all) => t === all[0])).toBe(
+      true
+    );
+    expect(r.run!({ x: 4 })).toBe(2);
+  });
+
+  it('the same IMPURE operand instance in two positions of a guarded head declines', () => {
+    // The interpreter evaluates `Max(e, e)` with one shared node
+    // `e = √(Random() − 1)` once per position, so it draws twice. The
+    // guard's override is keyed on the node and cannot give the two
+    // positions two evaluations, so the head declines (CE-687).
+    const e = new ComputeEngine();
+    const shared = e.box(['Sqrt', ['Subtract', ['Random'], 1]]);
+    expect(() =>
+      compile(e.box(['Max', shared, shared]), { ...CX, constantFold: false })
+    ).toThrow(/occurs at more than one position/);
   });
 
   it('the Python target emits its own syntax for the runtime rule and passes non-numbers through the lift', () => {

@@ -2809,7 +2809,9 @@ export type FreeSymbolType = {
    *   `float` / `f32`, `bool`, `vec2` / `vec2f` for a complex value or a
    *   two-component point, `vec3` / `vec3f` for a colour or a
    *   three-component point, `vec4`, a matrix (`mat2`, `mat3x3f`) or an
-   *   array (`float[5]`, `array<f32, 5>`). A list in a storage buffer
+   *   array (`float[5]`, `array<f32, 5>`; for a list of tuples of 2 to 4
+   *   real numbers an array of points, `vec2[3]`, `array<vec2f, 3>`). A
+   *   list in a storage buffer
    *   (`'storage-buffer'` storage hint) is the struct of its buffer
    *   (`CE_List_f32`), which the compilation declares itself.
    * - `javascript`: the runner value convention: `number`, `complex` (a

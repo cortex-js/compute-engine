@@ -1247,3 +1247,418 @@ describe('multi-splice × impure operand — the 2026-08-02 audit round', () => 
     );
   });
 });
+
+describe('a real-operand guard evaluates every impure operand in source order', () => {
+  // In the `auto` mode, a real-only head (`Max`) over an operand that may be
+  // complex at run time (`√x` with `x: real`) is emitted under a guard that
+  // the operand is real, and is NaN otherwise. The draws of the OTHER
+  // operands must happen before that guard, in argument order: the
+  // interpreter evaluates every operand of `Max`, so a draw placed inside
+  // the guarded branch was skipped at `x = -4`, and the next draw of the
+  // frame differed (CE-686).
+  function parity(json: any, x: number, seed: number) {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const r = compiled(ce, json);
+    const c = withRandomSeedFrame(ce, seed, () => [r.run!({ x }), ce._random()]);
+    const i = withRandomSeedFrame(ce, seed, () => [
+      ce.box(json).subs({ x }).evaluate().re,
+      ce._random(),
+    ]);
+    return { compiled: c, interpreted: i };
+  }
+
+  test('Max(√x, Random()) draws once when √x is not real', () => {
+    const json = ['Max', ['Sqrt', 'x'], ['Random']];
+    const { compiled: c, interpreted: i } = parity(json, -4, 7);
+    expect(i).toEqual([NaN, draw(7, 1)]);
+    expect(c).toEqual(i);
+    // The real case is unchanged: `max(2, draw0)` is 2.
+    expect(parity(json, 4, 7).compiled).toEqual([2, draw(7, 1)]);
+  });
+
+  test('Max(Random(), √x) draws once when √x is not real', () => {
+    const json = ['Max', ['Random'], ['Sqrt', 'x']];
+    const { compiled: c, interpreted: i } = parity(json, -4, 7);
+    expect(i).toEqual([NaN, draw(7, 1)]);
+    expect(c).toEqual(i);
+  });
+
+  test('a draw written before a maybe-complex draw runs first', () => {
+    // `√(Random() − 0.5)` is the maybe-complex operand. It is bound to a
+    // temporary, and before the fix it was evaluated before the draw
+    // written to its left, which was inlined in the guarded branch.
+    const json = [
+      'Max',
+      ['Random'],
+      ['Sqrt', ['Subtract', ['Random'], 0.5]],
+      ['Random'],
+    ];
+    let realCases = 0;
+    for (let seed = 1; seed <= 12; seed++) {
+      const { compiled: c, interpreted: i } = parity(json, 0, seed);
+      expect(i[1]).toBe(draw(seed, 3));
+      expect(c).toEqual(i);
+      if (draw(seed, 1) >= 0.5) {
+        realCases += 1;
+        expect(c[0]).toBe(
+          Math.max(draw(seed, 0), Math.sqrt(draw(seed, 1) - 0.5), draw(seed, 2))
+        );
+      }
+    }
+    // Some seeds give a real root, so the values (not only the draw
+    // count) are compared.
+    expect(realCases).toBeGreaterThan(0);
+  });
+});
+
+describe('a real-operand guard over an impure node shared by two positions', () => {
+  // A boxed node can be passed at two positions (`Max(e, e)`). The
+  // interpreter evaluates each position, so an impure node draws once per
+  // position. The guard replaces an operand by its temporary through an
+  // override keyed on the node, which cannot give the two positions two
+  // evaluations, so such a head keeps its decline and the interpreter
+  // fallback gives the value (CE-687).
+  function bothRuns(ce: ComputeEngine, expr: any, seed: number, x = 0) {
+    const r = compile(expr, { constantFold: false })!;
+    const c = withRandomSeedFrame(ce, seed, () => [r.run!({ x }), ce._random()]);
+    const i = withRandomSeedFrame(ce, seed, () => [
+      expr.subs({ x }).evaluate().re,
+      ce._random(),
+    ]);
+    return { result: r, compiled: c, interpreted: i };
+  }
+
+  /** The diagnostic code of the decline under `fallback: false`. */
+  function declineCode(expr: any): string | undefined {
+    try {
+      compile(expr, { fallback: false, constantFold: false });
+    } catch (err) {
+      return (err as { diagnostic?: { code: string } }).diagnostic?.code;
+    }
+    return undefined;
+  }
+
+  test('Max(e, e) with e = √(Random() − 0.5) declines and draws twice', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Sqrt', ['Subtract', ['Random'], 0.5]]);
+    const expr = ce.function('Max', [e, e]);
+    expect(declineCode(expr)).toBe('shared-impure-operand');
+    for (let seed = 1; seed <= 6; seed++) {
+      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, seed);
+      expect(result.success).toBe(false);
+      expect(i[1]).toBe(draw(seed, 2));
+      expect(c).toEqual(i);
+    }
+  });
+
+  test('Max(r, √x, r) with one Random node declines and draws twice', () => {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const r = ce.box(['Random']);
+    const expr = ce.function('Max', [r, ce.box(['Sqrt', 'x']), r]);
+    for (const x of [4, -4]) {
+      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, 7, x);
+      expect(result.success).toBe(false);
+      expect(i[1]).toBe(draw(7, 2));
+      expect(c).toEqual(i);
+    }
+  });
+
+  test('Less(e, e) declines with its own diagnostic, in every mode', () => {
+    const ce = new ComputeEngine();
+    const e = ce.box(['Sqrt', ['Subtract', ['Random'], 0.5]]);
+    const expr = ce.function('Less', [e, e]);
+    for (const mode of ['auto', 'complex'] as const) {
+      expect(() =>
+        compile(expr, { mode, fallback: false, constantFold: false })
+      ).toThrow(/occurs at more than one position/);
+    }
+    expect(declineCode(expr)).toBe('shared-impure-operand');
+    for (let seed = 1; seed <= 6; seed++) {
+      const r = compile(expr, { constantFold: false })!;
+      expect(r.success).toBe(false);
+      const c = withRandomSeedFrame(ce, seed, () => [r.run!({}), ce._random()]);
+      const i = withRandomSeedFrame(ce, seed, () => [
+        expr.evaluate().symbol === 'True',
+        ce._random(),
+      ]);
+      expect(i[1]).toBe(draw(seed, 2));
+      expect(c).toEqual(i);
+    }
+  });
+
+  test('Max(e, e, Random()) with one PURE shared node e = √x compiles', () => {
+    // Both positions of the pure `e` read the same value, and the draw
+    // writes no symbol, so one binding of `e` is correct.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const e = ce.box(['Sqrt', 'x']);
+    const expr = ce.function('Max', [e, e, ce.box(['Random'])]);
+    for (const x of [4, 0.25, -4]) {
+      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, 7, x);
+      expect(result.success).toBe(true);
+      expect(c[1]).toBe(draw(7, 1));
+      expect(i[1]).toBe(draw(7, 1));
+      if (x >= 0) expect(c).toEqual(i);
+      else expect(c[0]).toBeNaN();
+    }
+  });
+
+  test('a pure shared node beside an assignment to the symbol it reads declines', () => {
+    // `Max(y, Assign(y, 1), y, √x)` with one `y` node: the interpreter
+    // reads 5 at the first position and 1 at the third. One binding of `y`
+    // would read 5 at both.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.assign('y', 5);
+    const y = ce.box('y');
+    const expr = ce.function('Max', [
+      y,
+      ce.box(['Assign', 'y', 1]),
+      y,
+      ce.box(['Sqrt', 'x']),
+    ]);
+    expect(declineCode(expr)).toBe('shared-impure-operand');
+  });
+
+  test('a symbol whose value draws is impure to the guard', () => {
+    // `r := Random()` (held unevaluated) is pure to `isPure`, but the
+    // interpreter draws again at each read of `r`, and the compiled code
+    // inlines the draw at each reference.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('r', ce.box(['Random'], { form: 'raw' }));
+    const r = ce.box('r');
+    const sx = ce.box(['Sqrt', 'x']);
+    // One `r` node at two positions beside a draw declines.
+    const shared = ce.function('Max', [r, r, ce.box(['Random']), sx]);
+    expect(declineCode(shared)).toBe('shared-impure-operand');
+    for (const x of [4, -4]) {
+      const { compiled: c, interpreted: i } = bothRuns(ce, shared, 7, x);
+      expect(i[1]).toBe(draw(7, 3));
+      expect(c).toEqual(i);
+    }
+    // `Max(√x, r)`: the read of `r` draws whatever the guard decides.
+    const single = ce.function('Max', [sx, r]);
+    for (const x of [4, -4]) {
+      const { compiled: c, interpreted: i } = bothRuns(ce, single, 7, x);
+      expect(i[1]).toBe(draw(7, 1));
+      expect(c[1]).toBe(i[1]);
+      if (x >= 0) expect(c).toEqual(i);
+    }
+  });
+
+  test('a symbol mapped through `vars` is read from its input', () => {
+    // The stored value of `r` draws, but with `vars: { r: '_.r' }` the code
+    // reads the input `r` and never draws, so one shared `r` node compiles.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.assign('r', ce.box(['Random'], { form: 'raw' }));
+    const r = ce.box('r');
+    const expr = ce.function('Max', [r, r, ce.box(['Sqrt', 'x'])]);
+    const result = compile(expr, {
+      fallback: false,
+      constantFold: false,
+      vars: { r: '_.r' },
+    })!;
+    expect(result.success).toBe(true);
+    expect(result.run!({ x: 4, r: 3 })).toBe(3);
+  });
+
+  test('a `vars` entry that runs code is evaluated whatever the guard decides', () => {
+    // `_.draw()` is caller code that counts its calls. In `Max(√x, r)` it
+    // must run once also when √x is not real, as the interpreter reads `r`.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('r', 'real');
+    const expr = ce.box(['Max', ['Sqrt', 'x'], 'r']);
+    const result = compile(expr, {
+      fallback: false,
+      constantFold: false,
+      vars: { r: '_.draw()' },
+    })!;
+    expect(result.success).toBe(true);
+    for (const x of [4, -4]) {
+      let calls = 0;
+      result.run!({ x, draw: () => (++calls, 1) } as any);
+      expect(calls).toBe(1);
+    }
+  });
+
+  test('a symbol whose value assigns counts as a write', () => {
+    // `r := Assign(y, 1)` held unevaluated: the read of `r` in
+    // `Max(y, r, y, √x)` sets `y` to 1, so the second `y` reads 1 in the
+    // interpreter. One binding of the shared `y` would read 5 twice.
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    ce.declare('y', 'real');
+    ce.assign('r', ce.box(['Assign', 'y', 1], { form: 'raw' }));
+    const y = ce.box('y');
+    const expr = ce.function('Max', [y, ce.box('r'), y, ce.box(['Sqrt', 'x'])]);
+    expect(declineCode(expr)).toBe('shared-impure-operand');
+    // The same write inside an operand that also draws: the labels of
+    // `Random() + r` show only the draw.
+    const mixed = ce.function('Max', [
+      y,
+      ce.box(['Add', ['Random'], 'r']),
+      y,
+      ce.box(['Sqrt', 'x']),
+    ]);
+    expect(declineCode(mixed)).toBe('shared-impure-operand');
+  });
+
+  test('Max(r, r) with no maybe-complex operand compiles and draws twice', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Random']);
+    const expr = ce.function('Max', [r, r]);
+    const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, 7);
+    expect(result.success).toBe(true);
+    expect(c).toEqual([Math.max(draw(7, 0), draw(7, 1)), draw(7, 2)]);
+    expect(c).toEqual(i);
+  });
+
+  test('a Random node that is an operand and also inside another operand', () => {
+    // `Max(r, √(r − 0.5))` with one `r` node. Before the fix, the binding
+    // of `√(r − 0.5)` was compiled after `r` was replaced by its
+    // temporary, and read that temporary where it is not in scope (a
+    // `ReferenceError` at run time).
+    const ce = new ComputeEngine();
+    const r = ce.box(['Random']);
+    const expr = ce.function('Max', [
+      r,
+      ce.box(['Sqrt', ['Subtract', r, 0.5]]),
+    ]);
+    let realCases = 0;
+    for (let seed = 1; seed <= 12; seed++) {
+      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, seed);
+      expect(result.success).toBe(true);
+      expect(i[1]).toBe(draw(seed, 2));
+      expect(c).toEqual(i);
+      if (draw(seed, 1) >= 0.5) {
+        realCases += 1;
+        expect(c[0]).toBe(
+          Math.max(draw(seed, 0), Math.sqrt(draw(seed, 1) - 0.5))
+        );
+      }
+    }
+    expect(realCases).toBeGreaterThan(0);
+  });
+
+  test('an impure list literal beside a maybe-complex scalar draws once', () => {
+    // `Mod([Random(), 2], √x)`: the list is bound whole, and the
+    // element-wise lowering reads its temporary, so its draw is compiled
+    // once. (At `x = −4` the interpreter rejects the imaginary divisor
+    // before it evaluates the list, so only real divisors are compared.)
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const json = ['Mod', ['List', ['Random'], 2], ['Sqrt', 'x']];
+    const r = compiled(ce, json);
+    expect(r.code.split('drawNextRandomNumber').length - 1).toBe(1);
+    for (let seed = 1; seed <= 6; seed++) {
+      // A divisor of 2 keeps `floorMod` exact; the interpreter's `Mod` by
+      // 0.5 can round the last bit differently.
+      for (const x of [4, 16]) {
+        const c = withRandomSeedFrame(ce, seed, () => [
+          r.run!({ x }),
+          ce._random(),
+        ]);
+        const i = withRandomSeedFrame(ce, seed, () => {
+          const v = ce.box(json).subs({ x }).evaluate();
+          return [v.ops!.map((op) => op.re), ce._random()];
+        });
+        expect(i[1]).toBe(draw(seed, 1));
+        expect(c).toEqual(i);
+      }
+    }
+  });
+
+  test('a Random node shared by two different operands draws in each', () => {
+    const ce = new ComputeEngine();
+    const r = ce.box(['Random']);
+    const expr = ce.function('Max', [
+      ce.box(['Sqrt', ['Subtract', r, 0.5]]),
+      ce.function('Add', [r, 1]),
+    ]);
+    for (let seed = 1; seed <= 6; seed++) {
+      const { result, compiled: c, interpreted: i } = bothRuns(ce, expr, seed);
+      expect(result.success).toBe(true);
+      expect(i[1]).toBe(draw(seed, 2));
+      expect(c).toEqual(i);
+    }
+  });
+});
+
+describe('a real-operand guard reads each operand where the interpreter reads it', () => {
+  // When an operand of a guarded head has an effect, every operand that is
+  // not a literal or a constant is bound before the guard, in source
+  // order. A pure read of a variable left inline in the guarded lowering
+  // ran after the bound assignment.
+  function run(json: any, x: number, seed = 7) {
+    const ce = new ComputeEngine();
+    ce.declare('x', 'real');
+    const r = compiled(ce, json);
+    const c = withRandomSeedFrame(ce, seed, () => [r.run!({ x }), ce._random()]);
+    const i = withRandomSeedFrame(ce, seed, () => {
+      const v = ce.box(json).subs({ x }).evaluate();
+      return [v.isNumberLiteral && v.im === 0 ? v.re : v.toString(), ce._random()];
+    });
+    return { compiled: c, interpreted: i };
+  }
+
+  test('Max(√x, y, Assign(y, 1)) with y = 5 reads y before the assignment', () => {
+    const json = [
+      'Block',
+      ['Assign', 'y', 5],
+      ['Max', ['Sqrt', 'x'], 'y', ['Assign', 'y', 1]],
+    ];
+    for (const x of [1, 4]) {
+      const { compiled: c, interpreted: i } = run(json, x);
+      expect(i).toEqual([5, draw(7, 0)]);
+      expect(c).toEqual(i);
+    }
+    // A failing guard: the interpreter keeps `max(5, 2i)`, the compiled
+    // head gives NaN, and neither draws.
+    const { compiled: c, interpreted: i } = run(json, -4);
+    expect(i).toEqual(['max(5, 2i)', draw(7, 0)]);
+    expect(c).toEqual([NaN, draw(7, 0)]);
+  });
+
+  test('Max(y, √(Assign(y, 4))) with y = −1 reads y before the assignment', () => {
+    const json = [
+      'Block',
+      ['Assign', 'y', -1],
+      ['Max', 'y', ['Sqrt', ['Assign', 'y', 4]]],
+    ];
+    const { compiled: c, interpreted: i } = run(json, 0);
+    expect(i).toEqual([2, draw(7, 0)]);
+    expect(c).toEqual(i);
+  });
+
+  test('Max(y, Assign(y, 1), y, √x) reads y at each position', () => {
+    const json = [
+      'Block',
+      ['Assign', 'y', 5],
+      ['Max', 'y', ['Assign', 'y', 1], 'y', ['Sqrt', 'x']],
+    ];
+    for (const x of [1, 4]) {
+      const { compiled: c, interpreted: i } = run(json, x);
+      expect(i).toEqual([5, draw(7, 0)]);
+      expect(c).toEqual(i);
+    }
+  });
+
+  test('Max(r, √x, r) with two Random nodes draws twice before the guard', () => {
+    const json = ['Max', ['Random'], ['Sqrt', 'x'], ['Random']];
+    const pass = run(json, 4);
+    expect(pass.interpreted).toEqual([
+      Math.max(draw(7, 0), 2, draw(7, 1)),
+      draw(7, 2),
+    ]);
+    expect(pass.compiled).toEqual(pass.interpreted);
+    const fail = run(json, -4);
+    expect(fail.interpreted[1]).toBe(draw(7, 2));
+    expect(fail.compiled).toEqual([NaN, draw(7, 2)]);
+  });
+});

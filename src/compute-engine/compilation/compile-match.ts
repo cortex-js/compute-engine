@@ -324,12 +324,6 @@ export function compileMatchJS(
   return `((${s}) => {${nl}${stmts.join(nl)}${nl}})(${subjCode})`;
 }
 
-/** The head of the first `Break`, `Continue` or `Return` in `expr` that
- * would leave the expression, or `undefined` when there is none. A `Loop`
- * owns the `Break`/`Continue` inside it but passes a `Return` through (the
- * interpreter's `Loop` propagates a `Return` unchanged), so the walk keeps
- * looking for a `Return` under a nested loop; a `Function` literal owns
- * all three. */
 /**
  * Refuse a `Loop` over SEVERAL `Element` clauses whose body can `break`:
  * the interpreter runs the clauses as one loop and a `Break` stops the
@@ -337,13 +331,19 @@ export function compileMatchJS(
  * would leave only the innermost one and go on with the outer turns. A
  * `Continue` resumes the innermost turn on both, so it is fine; a `Break`
  * inside a nested `Loop` or a function literal belongs to that construct
- * (`escapingControl`).
+ * (`hasEscapingControl`).
+ *
+ * The test searches the whole body for an escaping `Break`. A test of the
+ * FIRST escaping control instruction only (`escapingControl`) missed a
+ * `Break` that follows a `Continue`, as in
+ * `Block(If(s < 0, Continue()), Assign(s, s + 1), Break())`: the loop
+ * compiled, and the emitted `break` left only the innermost loop (CE-688).
  */
 export function assertBreakLeavesWholeLoop(
   elements: ReadonlyArray<Expression>,
   body: Expression
 ): void {
-  if (elements.length > 1 && escapingControl(body) === 'Break')
+  if (elements.length > 1 && hasEscapingControl(body, 'Break'))
     throw new Error(
       'Could not compile `Loop`: a `break` inside a loop over several Element clauses stops ' +
         'the whole loop in the interpreter, but would leave only the ' +
@@ -351,6 +351,14 @@ export function assertBreakLeavesWholeLoop(
     );
 }
 
+/** The head of the first `Break`, `Continue` or `Return` in `expr` that
+ * would leave the expression, or `undefined` when there is none. A `Loop`
+ * owns the `Break`/`Continue` inside it but passes a `Return` through (the
+ * interpreter's `Loop` propagates a `Return` unchanged), so the walk keeps
+ * looking for a `Return` under a nested loop; a `Function` literal owns
+ * all three. Use it only to ask whether there is ANY escaping instruction:
+ * to ask about one head, use `hasEscapingControl`, because the first
+ * instruction found can have a different head. */
 export function escapingControl(
   expr: Expression,
   inLoop = false
@@ -366,6 +374,24 @@ export function escapingControl(
     if (found !== undefined) return found;
   }
   return undefined;
+}
+
+/** True when `expr` contains a `head` instruction (`Break`, `Continue` or
+ * `Return`) that would leave the expression. The walk visits every
+ * descendant, with the same ownership rules as `escapingControl`: a nested
+ * `Loop` owns the `Break` and `Continue` inside it, but not a `Return`; a
+ * `Function` literal owns all three. */
+export function hasEscapingControl(
+  expr: Expression,
+  head: 'Break' | 'Continue' | 'Return',
+  inLoop = false
+): boolean {
+  if (!isFunction(expr)) return false;
+  const h = expr.operator;
+  if (h === head) return head === 'Return' || !inLoop;
+  if (h === 'Function') return false;
+  const nested = inLoop || h === 'Loop';
+  return expr.ops.some((op) => hasEscapingControl(op, head, nested));
 }
 
 /** Emit one non-irrefutable case as a guarded early-return `if`. */

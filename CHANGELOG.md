@@ -20,6 +20,84 @@
 
 ### Bug Fixes
 
+- **A comparison with an operand that may be an absent collection is typed
+  with a `missing` arm** (GitHub issue #487). With `y` declared
+  `collection | integer | missing`, `y < x` was typed `broadcastable<boolean>`,
+  but for `y = Missing` and `x = 3` its value is `Missing`. Now it is typed
+  `broadcastable<boolean> | missing`, as `y < x` with `y: list<integer> |
+  missing` already had the arm. An `If` over such a comparison also has the
+  arm: `If(x > y, 1, 2)` is `integer | list<integer | list<any>> | missing`.
+  With `y: collection | integer | missing` and `x: list<integer>`, the type
+  gains the arm too (`list<boolean | missing> | missing`), as it does for a
+  definite list.
+
+- **The application of a curried function literal no longer captures a free
+  symbol of an argument** (GitHub issue #489). With `F = y ↦ (x ↦ y^x)`,
+  `F(x)` gave `x ↦ x^x`: the `x` of the argument became the parameter of the
+  inner literal, so `F(x)(y)` was `y^y`, and `G = y ↦ (x ↦ y + x)` gave
+  `G(x)(y) = 2y`. The compiled code gave `x^y` and `x + y`. Now a binder in
+  the result that binds a name of the argument is renamed before the argument
+  is put in its place: `F(x)` is `x_1 ↦ x^(x_1)`, `F(x)(y)` is `x^y`, and
+  `G(x)(y)` is `x + y`. This applies to the parameters of a nested literal,
+  destructuring parameters included, and to the index of a scoped operator
+  such as `Sum`: with `S = y ↦ (x ↦ Sum(y·x·k, k, 1, 3))`, `S(k)(2)` is `12k`,
+  not `28`. A binder that captures nothing keeps its names.
+
+- **Compiled JavaScript and Python: a real-only head with an operand that may
+  be complex now evaluates its operands as the interpreter does** (ROADMAP
+  CE-686, CE-687). In `auto` mode, `Max`, an ordering comparison and the
+  other real-only heads check at run time that a maybe-complex operand is
+  real. The other operands were evaluated inside that check, so
+  `Max(Sqrt(x), Random())` with `x` declared `real` gave `NaN` at `x = -4`
+  and took no draw, while the interpreter takes one, and every later seeded
+  draw was different. Now, when an operand has an effect (a draw, an
+  assignment, or a symbol whose value has one), every operand is evaluated
+  before the check, once and in source order. So `Max(Sqrt(x), y, Assign(y, 1))`
+  reads `y` before the assignment, as the interpreter does. One boxed node at
+  two operand positions is evaluated by the interpreter once per position.
+  The compiler binds a node once, so such a head now declines, with the
+  diagnostic code `shared-impure-operand`, when the node has an effect (for
+  `e = Sqrt(Random() - 0.5)`, `Max(e, e)` gave the maximum of one draw where
+  the interpreter takes two), or when it reads a symbol that another operand
+  may assign (`Max(y, Assign(y, 1), y, Sqrt(x))`). With the default fallback,
+  the interpreter then gives the value. A pure node at two positions beside a
+  draw (`Max(e, e, Random())` with `e = Sqrt(x)`) still compiles.
+
+- **GLSL and WGSL: a reduction over a vector constructor with fewer operands
+  than components reads every component** (ROADMAP CE-684). With `xs`
+  declared `list<real^3>` and `y` declared `real`, `PointY(PointList(xs, y))`
+  lowers to the splat `vec3(y)`, and the reductions took each operand of the
+  constructor as one component. `Sum(PointY(PointList(xs, y)))` gave `y` where
+  the interpreter gives `3y` (`6` for `y = 2`), and `Product(...)` gave `y`
+  for `y³`. `Sum`, `Product`, `Max`, `Min`, `GCD` and `LCM` now read the
+  components of such a constructor through its swizzles (`vec3(y).x`, …), or
+  through a temporary when an operand is not a plain name or number. In a
+  place where no temporary can be declared (an `If` branch, the body of a
+  `Sum` over an index), the constructor is written once per component; it
+  declines there when its operands have effects or contain code that the
+  caller supplied through `vars` or `functions`. A matrix constructor with
+  fewer operands than elements (`mat3(s)` is a diagonal matrix) now declines
+  instead of giving a wrong value.
+
+- **GLSL and WGSL: `freeSymbolTypes` reports a list of points as an array of
+  vectors** (ROADMAP CE-685). With `P` declared `list<tuple<real, real>^3>`,
+  `At(P, k)` compiles to a helper whose parameter is an array of `vec2`, but
+  `freeSymbolTypes.P.lowered` was `float[3]` (`array<f32, 3>` on WGSL), so a
+  host that declared its input from this value declared a type that does not
+  match the shader. It is now `vec2[3]` (`array<vec2f, 3>`), and the same for
+  points of 3 and 4 coordinates. A list of numbers is still `float[N]`.
+
+- **A compiled `Loop` over several `Element` clauses no longer gives a wrong
+  value when a `Break` comes after a `Continue` in its body** (ROADMAP CE-688).
+  For the body `Block(If(s < 0, Continue()), Assign(s, s + 1), Break())` over
+  `Element(i, Range(1, 3))` and `Element(j, Range(1, 3))`, the emitted `break`
+  left only the inner loop, so the compiled result was `3` where the
+  interpreter gives `1`. The check for a `Break` that must stop the whole loop
+  looked only at the first control instruction of the body. It now searches the
+  whole body, so such a loop declines on JavaScript, interval-js and Python,
+  and the interpreter evaluates it. A `Break` that belongs to a nested `Loop`
+  does not make the outer loop decline.
+
 - **A list literal no longer fixes the type of its free symbols as `number`**
   (ROADMAP CE-663, GitHub issue #485). Since 0.170.0, boxing `[p, q]` made `p` a
   `number` for the life of the engine, also when the list was never evaluated or
@@ -136,6 +214,25 @@
 
 ### Behavior Changes
 
+- **A function parameter declared `any`, `expression` or `value` receives a
+  collection argument whole** (GitHub issue #488). These types admit a
+  collection, but such a parameter was read as a scalar parameter, and the
+  function was mapped over the leaves of a list argument. With
+  `f := (t: any) ↦ (0 if t ∈ ℤ else 1)`, `f([[0, 0], 5])` gave `[[0, 0], 0]`;
+  now it gives `1`. A recursive function can now descend into a nested list:
+  with `leaves := (t: any) ↦ (1 if t ∈ ℤ else leaves(t[1]) + leaves(t[2]))`,
+  `leaves([[0, 0], 0])` gave `[[1, 1], 1]`; now it gives `3`. A parameter
+  with no declared type, or declared `unknown`, is still mapped, and so is a
+  parameter declared with a scalar type such as `number` or `integer`. A
+  call of a function declared `(any) -> any` with a list argument is now
+  typed `any` (it was `list<any^3>` for a list of 3 elements). An alias of
+  one of these types (`type alias A = expression`) has the same effect. When
+  the result of the function is declared or inferred as a scalar, a call
+  with a list argument is typed from the body: with
+  `g := (t: expression) ↦ 2t`, `g([1, 2, 3])` is typed `vector<integer^3>`.
+  When the argument is itself declared `any`, `expression` or `value`, the
+  call is typed `any`.
+
 - **Interval target: a loop over a literal list compiles.** On `interval-js`, a
   `Loop` or a `Comprehension` over a `List`, a `Tuple` or a `Map`, written
   inline or held as the value of a symbol, refused to compile ("no lowering"),
@@ -185,6 +282,22 @@
   product. A scalar that is already a value is also not evaluated again for each
   cell. `y·c(y, L, E)` with `E` a list of 6 takes about 85 ms, before 140 ms.
   The values and errors are the same, also for string cells and absent cells.
+- **Integer `Binomial` is faster** (GitHub issue #501). For integer `n` and `k`,
+  `binomial()` multiplies directly while the product is a safe integer, and
+  takes a gcd step only after the product grows past 2⁵³. The compiled
+  `Binomial` and `.N()` both use it. Over every `k` with `n ≤ 60`, a call takes
+  about 25 ns, before 187 ns. The results are the same, bit for bit.
+- **Boxing nested folds whose accumulator type cannot be refined is faster**
+  (GitHub issue #487). A fold whose accumulator is joined in a branch of an
+  `If` whose condition can be `Missing` (a comparison with a value that may
+  be a list) settles on an accumulator type with a `missing` arm, which the
+  binding of the accumulator does not admit, so the fold keeps the type it
+  was admitted with. Such a fold canonicalized its body four times in every
+  step of every fold around it. Now the next step of the enclosing fold
+  canonicalizes it once, when its seed has the same or a wider type. The RSK
+  row insertion of the issue (8 folds, 4 deep) boxes in 146 to 157 ms instead
+  of 180 to 191 ms (run from source; each figure the median of 15 boxes, in
+  separate runs). The types are the same.
 
 ## 0.175.0 _2026-10-30_
 

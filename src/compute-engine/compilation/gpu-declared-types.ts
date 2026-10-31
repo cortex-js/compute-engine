@@ -12,6 +12,7 @@ import {
   resolveTypeForCompiledLanes as resolveTypeForCompilation,
 } from '../../common/type/utils.js';
 import { isSubtype } from '../../common/type/subtype.js';
+import { typeToString } from '../../common/type/serialize.js';
 import type { Type } from '../../common/type/types.js';
 import { gpuScalarType, gpuType, gpuVecType } from './gpu-emit.js';
 
@@ -370,6 +371,42 @@ export function gpuIsVectorComponentType(t: Type): boolean {
   // convention. The language is irrelevant to the predicate, so it asks in
   // GLSL spelling.
   return gpuTypeOfDeclaredType(t, false) === gpuScalarType(false);
+}
+
+/**
+ * The point arity of the list type `t` on a shader target: `m` (2 to 4) when
+ * `t` is a list whose element type is a tuple of `m` real coordinates, which
+ * the shader reads as an array of `vecM`. `undefined` when `t` is not a list
+ * of tuples. A decline reason when it is a list of tuples that a shader
+ * vector cannot hold: another number of coordinates, or a coordinate that is
+ * not a real scalar.
+ *
+ * The `At` lowering (`gpuPointListAtBase`) and the type reported for a free
+ * symbol (`gpuLoweredSymbolTypeHook`) both use this test, so the type the
+ * host declares and the type the emitted code reads are the same.
+ */
+export function gpuPointListArity(
+  t: Type
+): number | { decline: string } | undefined {
+  if (typeof t === 'string' || t.kind !== 'list') return undefined;
+  const element = resolveTypeForCompilation(t.elements);
+  if (typeof element === 'string' || element.kind !== 'tuple') return undefined;
+  const m = element.elements.length;
+  if (m < 2 || m > 4)
+    return {
+      decline:
+        `the points of the base have ${m} coordinates, and a shader vector ` +
+        `holds 2 to 4`,
+    };
+  for (let i = 0; i < m; i++)
+    if (!gpuIsVectorComponentType(element.elements[i].type))
+      return {
+        decline:
+          `coordinate ${i + 1} of the points of the base (type ` +
+          `\`${typeToString(element.elements[i].type)}\`) is not a REAL ` +
+          `scalar — a shader vector's components are single floats`,
+      };
+  return m;
 }
 
 /**
