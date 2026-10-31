@@ -284,11 +284,23 @@ export function binomial(n: number, k: number): number {
     }
     if (k > n) return 0;
     const kk = Math.min(k, n - k);
-    // After step `i`, `result` is `C(n − kk + i, i)`, an integer. Dividing
-    // `i` by `g = gcd(result, i)` first keeps the product at the size of the
-    // next value, so no intermediate exceeds the final value.
+    // After step `i`, `result` is `C(n − kk + i, i)`, an integer. The steps
+    // run in two stages over the same `i`.
     let result = 1;
-    for (let i = 1; i <= kk; i++) {
+    let i = 1;
+    // First stage: `result · (n − kk + i)` is `i · C(n − kk + i, i)`, so `i`
+    // divides it, and both the product and the quotient are exact while the
+    // product is a safe integer. A true product of 2⁵³ or more rounds to 2⁵³
+    // or more, so the test below never lets an inexact product through.
+    for (; i <= kk; i++) {
+      const p = result * (n - kk + i);
+      if (p > Number.MAX_SAFE_INTEGER) break;
+      result = p / i;
+    }
+    // Second stage, once the product is past 2⁵³: dividing `i` by
+    // `g = gcd(result, i)` first keeps the product at the size of the next
+    // value, so no intermediate exceeds the final value.
+    for (; i <= kk; i++) {
       let a = result;
       let b = i;
       while (b !== 0) [a, b] = [b, a % b];
