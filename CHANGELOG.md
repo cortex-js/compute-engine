@@ -44,9 +44,115 @@
   the length of the range with plain arithmetic on the bound intervals. The two
   now give `6` and `2`, `4`, `6`, as the interpreter does. This also applies to
   a range with a step, a range that counts down, and an inner range whose bound
-  is the variable of an outer loop. When a bound is an interval that is not a
-  single number, the number of elements is not known: `run()` gives `entire`,
+  is the variable of an outer loop. When the number of elements is not known
+  (for example, a bound that is the interval `[2, 4]`), `run()` gives `entire`,
   and a cell of `broadcast()` gives the kind `error`.
+- **Interval target: a range with a computed bound has a value when its length
+  is known.** At `n = 1`, `n/3` is an interval about one ulp wide around 1/3,
+  because interval division rounds outward. The `interval-js` code of
+  `Block(c := 0, Loop(c := c + k, Element(k, Range(n/3, 5))), c)` gave
+  `entire`, because every bound that is not a single number gave `entire`.
+  Now a range whose number of elements is the same for every value inside its
+  bounds gives that many elements, each an interval that holds the
+  interpreter's element: here the result holds `11.67`, the interpreter's
+  value. A range whose number of elements can change inside its bounds still
+  gives `entire`, for example `Range(0, 2, n/3)`, where `2 / (n/3)` is near 6.
+- **Compiled code: a coordinate of a point-or-point-list symbol with an assigned
+  point compiles on `javascript`, `interval-js` and `python`** (ROADMAP CE-658).
+  With `P: tuple<number, number> | list<tuple<number, number>>` and
+  `P := (3, 4)`, `At(P, 1) + x` and `At(P, 2) - x` failed with "an operand may
+  be a point (a tuple) and another operand is a number"; they now compile to
+  `x + 3` and `-x + 4`, as on `glsl` and `wgsl`. On `javascript` and
+  `interval-js`, a call such as `f(x) + x` with `f(t) := At(P, 1)` compiles
+  too. The compiled code holds the value the point had at compile time. A `P`
+  that a `vars` entry maps, a `P` with no value, and a `P` that holds a list of
+  points behave as before. A call whose head the `operators` option overrides,
+  or whose argument reads `vars` source, is not replaced by its body.
+- **Compiled code tests a value assigned to a `Block` local declared with a
+  type** (ROADMAP CE-662). With `Declare(p, "integer")`, the interpreter gives
+  an `incompatible-type` error for `Assign(p, 0.5)` and for `Assign(p, u/2)` at
+  `u = 1`; the compiled code had no test and gave `0.5`. Each assigned value is
+  now classified at compile time:
+  - a value whose static type is a subtype of the declared type compiles with
+    no test, as before;
+  - a value that is never of the declared type (`0.5` into `integer`, a point
+    or a string into `real`) fails to compile on every target;
+  - another value is tested when the code runs: JavaScript throws an `Error`
+    and Python raises a `TypeError`, with `incompatible-type` and the name of
+    the local. GLSL, WGSL and interval JavaScript refuse to compile such a
+    value, and so does every target for a declared type that has no simple
+    test (`rational`, a tuple, a matrix).
+
+  The test is for `integer`, `real`, number ranges such as `real<0..1>`,
+  `number`, `boolean`, `string`, unions of these, and lists and vectors of
+  these. A local declared `real` refuses `NaN` and `±∞`, as the interpreter
+  does. For `ReplaceAt(xs, i, v)` assigned to `xs`, declared `list<T>`, only
+  `v` is tested, so the update stays in place. A type written as a symbol
+  (`Declare(p, integer)`) is checked as a string type is, and a `list<T^0>`
+  local accepts only an empty list. The type of a free input that the engine
+  inferred from a use (`h(x)` with `h: (integer) -> integer`) is not taken as
+  a proof that the value is of the declared type.
+- **Shader targets: the NaN guard stays on operands that can overflow f32**
+  (ROADMAP CE-619). The proof that an operand of `sin`, `cos`, `min`, `max`,
+  `sign` or `clamp` is finite, which lets the GLSL and WGSL targets call the
+  built-in instead of the NaN-safe helper, accepted operands that are `+∞` in
+  f32 for ordinary inputs: `\sin(Hx)` with `H: real<0..1e30>` (from
+  `x ≥ 3.5·10⁸`), `\sin(x/10^{-30})`, `\sin(R+Q)` with `R, Q: real<0..2e38>`,
+  `\sin(\operatorname{mod}(R, 10^{-30}))`, and `F(p) := \sin(Hp)` called as
+  `F(Hx)`. On Apple GPUs the built-in `sin(+∞)` gives 0, where the helper gives
+  NaN. Now:
+  - a product is accepted when every factor has a known size (a literal, a
+    symbol with a declared range, `sin`, `cos`, `tanh`, `arctan`) and the
+    product of the sizes stays within half the largest f32, or when its other
+    factors are literals of magnitude at most 1 (`0.5·x`, `x/3`);
+  - a sum is accepted when the sizes of its terms add up within that bound, or
+    when one term has no known size and the others add up to at most 2¹⁰⁰
+    (`x + 1`);
+  - a quotient and a `Mod` need a divisor that cannot make the quotient
+    overflow;
+  - the size of an expression is not read from its static type, which f32
+    rounding does not respect (`A − B` of two close large values), and a
+    constant gives its value only when it is folded into one literal.
+
+  So `\sin(2x)` with `x` declared `real` and no range now calls `_gpu_sin`; a
+  declared range (`x: real<-10..10>`) gives the built-in again. `Random()` was
+  also drawn at compile time by this proof, also through an assigned symbol,
+  which made the compiled code change from one compilation to the next; now it
+  is not.
+
+### Behavior Changes
+
+- **JavaScript target: a `vars` entry that is the default spelling `_.<name>`
+  gets the checks at entry of an unmapped input.** With `L` declared
+  `list<number>` and `vars: { L: '_.L' }`, `Sum(L)` and `Length(L)` threw a
+  `TypeError` at `run({})`; they now have no value (`NaN`), as with no `vars`
+  entry. The type checks of the input apply too: with `x` declared `real` and
+  `vars: { x: '_.x' }`, `run({ x: 'abc' })` now throws, and a number for a
+  `complex` input is read as a complex number. A `vars` entry with any other
+  source text is the caller's own value and is not checked, as before.
+
+### Performance
+
+- **The count and the elements of a family of points are known before
+  evaluation** (ROADMAP CE-661). `count` of a sum or product of a list of
+  points and a point is known: `Add(L, PointList(1.8, 0))` with `L` a list of
+  four points has the count 4. `PointX`, `PointY` and `PointZ` of a list of
+  points have the count of the list, `PointList` with list components has the
+  smallest count of them, and a `ListJoin` of such operands has the sum of
+  their counts. `at(k)` of a broadcast, of `PointX`, `PointY`, `PointZ` and of
+  `PointList` builds the element `k` from the elements of the operands and
+  evaluates only that element, instead of evaluating the whole expression,
+  when the count is known, the expression is pure, and no evaluation of it is
+  cached. A new operator definition hook, `elementAt(expr, k)`, is the `at()`
+  twin of `elementCount`.
+- **A product of a scalar and a list, or of two lists, no longer evaluates
+  each cell a second time** (ROADMAP CE-618). A list of integrals that stay
+  unevaluated, such as `y·[∫ f(x, 1) dx, ∫ f(x, 2) dx]`, tried each
+  antiderivative twice: once to evaluate the list, and again in each cell
+  product. A scalar that is already a value is also not evaluated again for
+  each cell. `y·c(y, L, E)` with `E` a list of 6 takes about 85 ms, before
+  140 ms. The values and errors are the same, also for string cells and absent
+  cells.
 
 ## 0.175.0 _2026-10-30_
 

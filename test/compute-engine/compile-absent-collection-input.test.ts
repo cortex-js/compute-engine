@@ -150,6 +150,39 @@ describe('COMPILE: a collection input that the caller leaves out', () => {
     expect(noValue(loop.run({}))).toBe(true);
   });
 
+  test('a vars mapping to the vars-object spelling is still tested', () => {
+    // `vars: { L: '_.L' }` keeps `L` a run-time input read off the vars
+    // object, so the entry test covers it. A mapping to other source is the
+    // caller's own value, and is not tested.
+    for (const json of [
+      ['Sum', 'L'],
+      ['Length', 'L'],
+    ]) {
+      const fn = compile(ce.box(json as any), {
+        to: 'javascript',
+        fallback: false,
+        vars: { L: '_.L' },
+      }) as any;
+      expect(fn.success).toBe(true);
+      expect(noValue(fn.run({}))).toBe(true);
+    }
+    const mapped = compile(ce.box(['Sum', 'L']), {
+      to: 'javascript',
+      fallback: false,
+      vars: { L: '[1, 2, 3]' },
+    }) as any;
+    expect(mapped.run({})).toBe(6);
+    // The type checks at entry apply to the mapped name too: a string for
+    // a `real` input is refused, as with no `vars`.
+    const real = compile(ce.box(['Add', 'x', 1]), {
+      to: 'javascript',
+      fallback: false,
+      vars: { x: '_.x' },
+    }) as any;
+    expect(real.run({ x: 2 })).toBe(3);
+    expect(() => real.run({ x: 'abc' })).toThrow();
+  });
+
   test('an input that the code does not iterate is not required', () => {
     // An element-wise operator gives `undefined` for an absent operand.
     expect(compiled(['Add', 'L', 1]).entryPlan?.required).toBeUndefined();

@@ -11104,8 +11104,17 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
         // FUNCTION as its value and splice `undefined` into the emitted
         // source (`JSON.stringify` of a function), instead of falling
         // through to the free-symbol lookup below.
+        // A string that is the spelling this target emits anyway (`'_.L'`,
+        // `opaqueVar` is false) still reads the vars object, so it is
+        // recorded as such a read. The checks at entry (`varsEntryPlan`) then
+        // apply to it as to an unmapped free symbol: the type checks, and the
+        // test for an absent collection input (`collectionReadInputs`), so
+        // `Sum(L)` with `vars: { L: '_.L' }` and no `L` has no value. On the
+        // lambda route every string is caller source, so nothing is recorded
+        // there.
         if (vars && Object.hasOwn(vars, id)) {
           const v = vars[id];
+          if (typeof v === 'string' && !opaqueVar(id)) varsObjectRefs.add(id);
           return typeof v === 'string' ? v : JSON.stringify(v);
         }
         // `Nothing` is the engine's ERASURE marker, not a variable (contrast
@@ -11455,8 +11464,11 @@ function lambdaEntryPlan(
  * vars-object lookup (`target.varsObjectRefs`) is list-shaped when its
  * declared type proves a JS array, complex-shaped when the analysis says so
  * — from its declared type — and real-shaped otherwise.
- * (A `vars`-option splice binds source text, never passes through `run()`,
- * and is not in the set: it is the caller's responsibility by contract.)
+ * (A `vars` string that is the spelling the target emits anyway, `'_.z'`,
+ * still reads the vars object, so it is in the set and gets the same checks
+ * as an unmapped free symbol. Any other `vars` string is caller source, never
+ * passes through `run()`, and is not in the set: it is the caller's
+ * responsibility by contract.)
  */
 function varsEntryPlan(
   engine: ComputeEngine,

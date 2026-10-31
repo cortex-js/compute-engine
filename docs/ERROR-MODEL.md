@@ -316,7 +316,9 @@ What the decision does NOT change:
   of the code both make it, and the run answers `empty`, the
   value of that target that has no value (`compileToIntervalTarget`,
   `compilation/interval-javascript-target.ts`). A name that the caller maps to
-  its own source through `vars` is not tested, on either JavaScript target. The interpreter
+  its own source through `vars` is not tested, on either JavaScript target; a
+  mapping to the spelling `_.<name>` still reads the vars object, so it is
+  tested. The interpreter
   rule for a `Loop` over such an input (it runs zero times today) is ROADMAP
   CE-660.
 - **A `partial` operand** on `interval-js` (undefined over part of the cell
