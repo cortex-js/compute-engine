@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-701.
+Next free reference: CE-705.
 
 **Entry format.**
 
@@ -85,6 +85,28 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
   (CE-354 to CE-359)
 
 ## Types and type inference
+
+### CE-704. The argument check of a generic function joins open type variables
+
+**Status:** open; defect, small. Found 2026-10-31: the test "two variables,
+structural positions" of `test/epsil/generic-function-sugar.test.ts` prints the
+assertion 4 times and still passes; HEAD `afbcdfc3e` prints it the same way.
+
+`function swap(p: tuple<T, U>) -> tuple<U, T> where T, U { (p[2], p[1]) }`
+applied to `(1, "a")` gives the correct `("a", 1)`, but each call prints
+`ASSERTION FAILURE "widen() received an open type variable T — the ground-type
+invariant (§4.2) leaked"`, and the same for `U`. The argument check of a
+generic function (`validateArguments()`, `distribute` in
+`src/compute-engine/boxed-expression/validate.ts`) asks
+`elementIsBareOrGround()` whether the element type of each declared parameter
+is ground or a bare type variable. That function calls
+`collectionElementType(param)` on `tuple<T, U>`, which joins the element types
+of the tuple, so `widen()` receives the open variables `T` and `U`. The
+assertion (`assertGroundType()`, `src/common/type/subtype.ts`) is removed in the
+production build, so there the join of open variables runs with no message.
+The proposed fix: for a tuple type, test each element type, which is ground or
+a bare variable, instead of their join; then check that the production-build
+result of `elementIsBareOrGround()` does not change for this input.
 
 ### CE-663. A list literal fixes the type of its free symbols as `number` for the life of the engine
 
@@ -2931,6 +2953,57 @@ panel ends there (fewer than about 24 accurate shells, at a large bound such as
 0.3, on `(0.3 − x)^(−1/2)`, is `± 1.57e-13` for a true error of `1.93e-13`,
 before and after the fix (`sweep.mts` with `SWEEP_HEIGHTS=1e-6,1e-8`: 1 of 600
 cases). The other limits are not measured.
+
+### CE-701. A step deep next to a logarithmic singularity makes a convergent integral divergent
+
+**Status:** open; wrong value; numerics. Found 2026-10-31 while measuring
+CE-695 (`docs/plans/2026-10-31-ce695-power-corner-area.md`).
+
+`adaptiveQuadrature(f, 0, ½, { singularEndpoints: true })` with
+`f = 1/(x·(−ln x)³)` plus a step of area `1e-6` on `[0, 1e-80]` (height
+`1e74`) returns `divergent: true`. The integral is `1/(2·ln²2) + 1e-6`. The
+same for the step at `1e-150` and `1e-300`, a bump of the same area at `1e-80`
+and `1e-150`, and the step or the bump on `1/(x·ln²x)` at `1e-300`: 7 of the
+162 cases of `docs/scratch/2026-10-30-ce691-quadrature/sweep-zero.mts`. The
+probable cause (not traced): the shell that holds the step is larger than the
+shells before it, and the shells of a logarithmic corner decrease slowly, so
+the test of `shellsDiverge()` (`numerics/gauss-kronrod.ts`: the sum of the
+last 20 shells against the 20 before) reads a sum that does not shrink. The sweep reads the estimate of a
+divergent result as a value, so these cases count there as an error that is
+too small. A caller gets no value.
+
+### CE-702. A converged result next to a singular bound misses a feature inside the last corner panel
+
+**Status:** open; wrong value; numerics. Found 2026-10-31 while measuring
+CE-695 (`docs/plans/2026-10-31-ce695-power-corner-area.md`).
+
+`x^(−1/2)·(−ln x)` on `[0, 1]` plus a step of area `1e-6` on `[0, 1e-80]`: the
+Gauss–Kronrod result converges, tanh-sinh agrees with it, and the result is
+`± 2.05e-11` for a true error of `1.00e-6` (the whole area of the step). The
+corner has 70 shells, and the step is inside the last corner panel, where the
+Gauss–Kronrod nodes do not reach it; the tanh-sinh value misses it too. With the
+step at `1e-12`, the Gauss–Kronrod result converges with `± 3.45e-11`,
+tanh-sinh does not converge, and the true error is `3.46e-9`. 25 of the 162
+cases of `docs/scratch/2026-10-30-ce691-quadrature/sweep-zero.mts` are like
+this: steps and bumps of area `1e-6` or `1e-9` at `1e-3` to `1e-300`. The
+converged route of `resolveCorners()` (`numerics/endpoint-quadrature.ts`) does
+not run `featureNearEndpoint`. A feature nearer than the last panel can be seen
+only by samples at each octave down to the bound (about 4300 evaluations next
+to 0 at 4 per octave), so a fix needs a decision on that cost.
+
+### CE-703. Tanh-sinh is not tried when the deepest corner shells overflow
+
+**Status:** open; accuracy; numerics. Found 2026-10-31 while measuring CE-695.
+
+`shellsHaveOneSign()` (`numerics/endpoint-quadrature.ts`) reads the last 8
+shells of a corner, also the shells that are not finite. Next to 0, the
+integrand `1/(x·ln²x)` overflows in the deepest shells, so the test fails, and
+`resolveCorners()` returns the Gauss–Kronrod result without trying tanh-sinh.
+The test is for an integrand that oscillates next to the bound, and an
+overflow is no sign of an oscillation; the `oneSign` test in the same function
+reads only the finite shells. What tanh-sinh gives for these integrands is not
+measured. A fix changes which route a result takes, so it must be measured on
+the corpora of `docs/scratch/2026-10-30-ce691-quadrature/`.
 
 ### CE-561. An interval one double wide reports `0 ± 0`
 
