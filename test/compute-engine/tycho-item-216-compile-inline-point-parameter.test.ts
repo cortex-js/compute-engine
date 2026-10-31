@@ -136,7 +136,11 @@ describe('Tycho item 216: point calls use shared helpers where supported', () =>
     expect(code(ce, String.raw`f(P)`, 'glsl')).toEqual(
       expect.stringMatching(/^_fn_f_.*\(P\)$/)
     );
-    expect(code(ce, String.raw`f(P)`, 'interval-js')).toBe('_fn_f(_.P)');
+    // The code first tests the point input `P`: with `P` absent, the run
+    // has no value.
+    expect(code(ce, String.raw`f(P)`, 'interval-js')).toBe(
+      "(_.P === undefined ? { kind: 'empty' } : _fn_f(_.P))"
+    );
     const point = (v: number) => ({ lo: v, hi: v });
     const r = compile(ce.parse(String.raw`f(P)`), { to: 'interval-js' });
     const out = r.run({ a: point(2), b: point(3), P: [point(1), point(2)] });

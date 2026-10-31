@@ -26798,15 +26798,16 @@ export class BaseCompiler {
       // a collection value only in such positions (`compileCollectionValue`:
       // the interval target has no ordinary lowering for a literal `List`,
       // `Tuple` or `Map`) is asked first, so `k ∈ [1, 2, 3]` compiles on
-      // interval-js. The hook is asked only for a `List`, `Tuple` or `Map`,
-      // written inline or held as a symbol's value: a `List` or `Tuple` is
-      // always an array, and a `Map` is an array unless its own source has no
-      // array value (a `Range` with a NaN or wide bound), where the loop
-      // answers `entire`, as a loop over that `Range` does. Its spelling of a
-      // selection (`When`, `If`, `Which`) can give a value that is not an
-      // array (`empty` when the condition of a `When` fails), which a
-      // `for … of` cannot iterate, so such a source keeps the ordinary
-      // lowering, which declines it.
+      // interval-js. The hook is asked only for a `List`, `Tuple`,
+      // `Linspace` or `Map`, written inline or held as a symbol's value: a
+      // `List` or `Tuple` is always an array. A `Linspace` is an array unless
+      // an endpoint has no finite value, and a `Map` unless its own source
+      // has no array value (a `Range` with a NaN or wide bound); the loop
+      // then answers `entire`, as a loop over that `Range` does. Its
+      // spelling of a selection (`When`, `If`, `Which`) can give a value
+      // that is not an array (`empty` when the condition of a `When`
+      // fails), which a `for … of` cannot iterate, so such a source keeps
+      // the ordinary lowering, which declines it.
       else
         collection =
           (BaseCompiler.isArrayValuedLoopSource(collExpr)
@@ -26819,11 +26820,12 @@ export class BaseCompiler {
   }
 
   /**
-   * True when the loop source `source` is a `List`, `Tuple` or `Map`,
-   * written inline or held as the value of a symbol: a collection whose
-   * spelling by `CompileTarget.compileCollectionValue` is an array that
-   * `for … of` can iterate. (A `Map` whose own source has no array value is
-   * the one exception; see the loop-source branch of `emitElementLoops`.)
+   * True when the loop source `source` is a `List`, `Tuple`, `Linspace` or
+   * `Map`, written inline or held as the value of a symbol: a collection
+   * whose spelling by `CompileTarget.compileCollectionValue` is an array that
+   * `for … of` can iterate. (A `Linspace` with an endpoint that has no
+   * finite value, and a `Map` whose own source has no array value, are the
+   * exceptions; see the loop-source branch of `emitElementLoops`.)
    */
   private static isArrayValuedLoopSource(source: Expression): boolean {
     const value = isSymbol(source)
@@ -26834,6 +26836,7 @@ export class BaseCompiler {
       isFunction(value) &&
       (value.operator === 'List' ||
         value.operator === 'Tuple' ||
+        value.operator === 'Linspace' ||
         value.operator === 'Map')
     );
   }

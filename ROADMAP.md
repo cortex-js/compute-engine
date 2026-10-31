@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-680.
+Next free reference: CE-683.
 
 **Entry format.**
 
@@ -537,11 +537,53 @@ but it refuses programs that are correct for a record with more fields.
 
 ## Collections, absence and broadcasting
 
+### CE-682. A `Linspace` with an infinite endpoint: its reads disagree with each other
+
+**Status:** decision needed; defect. Found 2026-10-30 in the review of the
+interval-js `Linspace` lowering.
+
+For `L = Linspace(0, +∞, 3)` the interpreter gives:
+
+| Read | Value |
+| --- | --- |
+| iteration (`L.each()`, a loop over `L`) | no elements |
+| `Sum(L)` | `0` |
+| `Count(L)`, `Length(L)` | `3` |
+| `At(L, 1)`, `At(L, 2)` | `NaN` |
+| `Max(L)` | `+∞` |
+
+So `L` is an empty list for iteration and `Sum`, and a list of three elements
+for `Count`, `At` and `Max`. A `NaN` endpoint (`Linspace(0, NaN, 3)`) splits
+in another way: iteration gives no elements, `Count` gives `3`, `Max` gives
+`NaN`, and `At` and `Sum` stay unevaluated. The iterator declines an endpoint
+that is not finite (`Linspace` in `library/collections.ts`), and `count`, `at`
+and the reducers do not.
+
+The compile targets cannot agree with all of these at once. Today the
+JavaScript target gives `[]` for `Linspace(0, +∞, 3)`, and `interval-js` gives
+no value (`empty`), so that it never gives a value that one of the
+interpreter's reads contradicts.
+
+Decide which reading is the value of `L`:
+
+- **(a) No value.** `L` has no value when an endpoint is not finite: every
+  read gives no value (`Sum` too, which gives `0` today). `interval-js`
+  already does this; the JavaScript target would test the endpoints.
+- **(b) The samples of the formula.** `L` is `[0, +∞, +∞]`: the iterator
+  gives these elements, so `Sum` is `+∞` and a loop runs 3 times; `At(L, 1)`
+  is `0`. `interval-js` would give these values.
+- **(c) An empty list.** `Count` and `Length` give 0, `At` gives no element,
+  `Max` gives its empty-list value; the targets give `[]`.
+
+With no decision, the reads stay in disagreement, and `interval-js` keeps
+giving no value for such a `Linspace`.
+
 ### CE-679. A `Range` with a `NaN` bound: the interpreter and the compile targets disagree
 
-**Status:** open; defect (wrong values), decision needed. Found 2026-10-30
-in the review of the interval-js loop over a literal list (session
-compute-engine-61); measured by session compute-engine-2c.
+**Status:** open; defect (wrong values). Found 2026-10-30 in the review of
+the interval-js loop over a literal list (session compute-engine-61);
+measured by session compute-engine-2c. User decision 2026-10-30: option (b),
+`Range(1, NaN)` has no value.
 
 With `n` declared `number` and `n = NaN`:
 
@@ -577,8 +619,12 @@ interpreter has none, and interval-js keeps `entire` for the `Loop`.
 
 ### CE-678. interval-js: `broadcast()` refuses a list input that `run()` accepts
 
-**Status:** open; missing capability, decision needed (it extends the
-documented `broadcast()` contract). Found 2026-10-30.
+**Status:** open; missing capability. Found 2026-10-30. User decision
+2026-10-30: option (a), with a plain array only. A shared list on interval-js
+is a plain array of numbers or `{ lo, hi }` objects, the forms `run()`
+accepts; a `Float64Array` for it throws and asks for a plain array, because
+an interval-js `Float64Array` is read as `lo, hi` pairs, and `[1, 2]` would
+otherwise be read as one interval instead of two elements.
 
 With `L` declared `list<number>`, the `interval-js` code of `x + Sum(L)`
 accepts `L` in `run()`: `run({ x: { lo: 1, hi: 1 }, L: [1, 2] })` gives the
@@ -3381,6 +3427,18 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-680. The `python` target does not compile `Sum` over a list input
+
+**Status:** open; defect (decline). Found 2026-10-30 while comparing CE-678
+across the targets. Recorded by user decision 2026-10-30.
+
+With `L` declared `list<number>`, `compile(x + Sum(L), { to: "python" })`
+declines: "Could not compile `Sum`: no indexing set". The `javascript` and
+`interval-js` targets compile it (`(_.L).reduce(…)`). The list is an argument of the Python
+function, so the reduction can run over it (`sum(L)`, or `np.sum(L)` for an
+array). `Product`, `Max` and `Min` over a list input are probably in the same
+case; check them in the fix.
+
 ### CE-664. The `python` target compiles no call of a user function
 
 **Status:** open; defect (decline). Found 2026-10-30 while fixing CE-658.
@@ -3402,6 +3460,18 @@ tests a value that is not of the declared type for certain, and `interval-js`
 has no run-time test, so it declines: `u` has no type, so `u + 1` can be a list.
 A sound fix proves the parameter from the argument of each call site (here `x`,
 a number), as `gpuRecordCallSiteFacts` does for finiteness on the GPU targets.
+
+### CE-681. Compiled code does not check the declared result type of a block-local function at a call
+
+**Status:** open; wrong value. Found 2026-10-30 while fixing CE-662.
+
+`Block(Declare(f, "(real) -> integer", Function(x/2, x)), f(3))`: the
+interpreter gives `incompatible-type`, because the result 1.5 is not an
+`integer`; the compiled code gives 1.5. The declared result type of a function
+local to a block is not compared with the value at the call. Fix by the simple
+sound rule: classify the result of each call as CE-662 classifies an assigned
+value (certain, never, undecidable with a run-time test on `javascript` and
+`python`, a decline on the other targets). Related: CE-673.
 
 ### CE-673. Compiled code does not check a function literal assigned to a local declared with a signature
 

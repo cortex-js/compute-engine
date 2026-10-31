@@ -1613,9 +1613,10 @@ export interface CompileTarget<Expr = unknown> {
    * binds its parameters whole (`userFunctionParamsAreScalar` is false), and
    * the source of an `Element` clause of a `Loop` or a `Comprehension`. A
    * loop source must be iterated by `for … of`, so the compiler asks the
-   * hook there only for a `List`, `Tuple` or `Map` (inline or as a symbol's
-   * value), whose spelling is an array (a `Map` whose own source has no
-   * array value excepted). A
+   * hook there only for a `List`, `Tuple`, `Linspace` or `Map` (inline or as
+   * a symbol's value), whose spelling is an array (a `Linspace` with an
+   * endpoint that has no finite value, and a `Map` whose own source has no
+   * array value, excepted). A
    * target that declares it has no ordinary lowering for a collection
    * literal — the interval target keeps its `List` out of the function table
    * on purpose (see `compileIntervalCollectionOperand`) — so the array

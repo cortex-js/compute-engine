@@ -134,9 +134,18 @@
   and the interpreter evaluated it. It now compiles, and gives the
   interpreter's value: `Block(c := 0, Loop(c := c + k, Element(k, [1, n, 3])),
   c)` at `n = 5` is the point interval `9`. A loop over a `When`, `If` or
-  `Which` still refuses to compile, because its value is not always a list. A
-  loop over a `Linspace` still refuses too: `Linspace` has no lowering on
-  `interval-js`.
+  `Which` still refuses to compile, because its value is not always a list.
+
+- **Interval target: `Linspace` compiles.** On `interval-js`, `Linspace` had
+  no lowering, so `Linspace(0, 1, 5)`, `Sum(Linspace(0, 1, 5))` and a loop over
+  a `Linspace` refused to compile. A `Linspace` whose count is omitted or is a
+  number literal (at most 100 samples) now gives the list of the enclosures of
+  its samples, each of which holds the sample that the interpreter computes,
+  also when `end − start` overflows (`Linspace(-1e308, 1e308, 3)`). The
+  endpoints can be inputs: a wide endpoint gives wide samples. An infinite or
+  NaN endpoint gives no value (`empty`). A count that is an input
+  (`Linspace(0, 1, m)`) or a NaN count still refuses to compile: the length of
+  the list would depend on an interval, or has no value.
 
 - **JavaScript target: a `vars` entry that is the default spelling `_.<name>`
   gets the checks at entry of an unmapped input.** With `L` declared

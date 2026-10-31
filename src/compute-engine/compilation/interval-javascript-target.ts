@@ -402,6 +402,124 @@ function intervalArrayCode(codes: readonly string[]): string {
 }
 
 /**
+ * The count of samples of a `Linspace` when its count is omitted or is not
+ * a finite number: 50, the interpreter's `DEFAULT_LINSPACE_COUNT`
+ * (`library/collections.ts`) and the JavaScript target's default.
+ */
+const INTERVAL_LINSPACE_DEFAULT_COUNT = 50;
+
+/**
+ * Spell `Linspace(start, end, count)` as the array of the enclosures of its
+ * samples, or answer `undefined` when this target cannot.
+ *
+ * The count must be known at compile time: omitted (the default), or a
+ * number literal, floored and clamped to 0 as the interpreter does, and at
+ * most `INTERVAL_UNROLL_LIMIT`. A count that is an input would give an array
+ * whose length depends on an interval, which no array holds, so it declines
+ * (`Linspace(0, 1, m)` with an input `m` is evaluated by the interpreter),
+ * and so does a NaN count, which has no value in the interpreter. The
+ * one-operand form `Linspace(end)` runs from 1, as in the interpreter. An
+ * endpoint that is an infinity or NaN gives no value (`empty`).
+ *
+ * The samples are computed with interval operations over the compiled
+ * endpoints, which may be inputs, by the form that the interpreter uses
+ * (`linspaceSample`, `library/collections.ts`); see the comment at the
+ * emitted code. Each enclosure contains the float sample that the
+ * interpreter computes. A count of 1 gives `[start]`, and a count of 0 the
+ * empty array (after the endpoints are evaluated).
+ */
+function compileIntervalLinspace(
+  literal: Expression,
+  target: CompileTarget<Expression>
+): string | undefined {
+  if (!isFunction(literal)) return undefined;
+  const ops = literal.ops;
+  const present = (op: Expression | undefined): op is Expression =>
+    op !== undefined && !isSymbol(op, 'Nothing');
+  if (!present(ops[0])) return undefined;
+  const oneOperand = !present(ops[1]);
+  const start = oneOperand ? undefined : ops[0];
+  const end = oneOperand ? ops[0] : ops[1]!;
+  let count = INTERVAL_LINSPACE_DEFAULT_COUNT;
+  if (!oneOperand && present(ops[2])) {
+    const c = ops[2];
+    if (!isNumber(c) || c.isComplex) return undefined;
+    // The interpreter reads a NaN count as a count with no value (no
+    // samples and no length), and an infinite count as the default.
+    if (Number.isNaN(c.re)) return undefined;
+    if (Number.isFinite(c.re)) count = Math.max(0, Math.floor(c.re));
+  }
+  if (count > INTERVAL_UNROLL_LIMIT) return undefined;
+  // A complex endpoint has no reading on this real-valued target. An
+  // infinite or NaN endpoint is tested at run time, below.
+  for (const endpoint of [start, end]) {
+    if (endpoint === undefined) continue;
+    if (!endpoint.type.matches('number')) return undefined;
+    if (isNumber(endpoint) && endpoint.isComplex) return undefined;
+  }
+  const startCode =
+    start === undefined
+      ? '_IA.point(1)'
+      : BaseCompiler.compileValueOperand(start, target);
+  const endCode = BaseCompiler.compileValueOperand(end, target);
+  // The two forms of sample `k`, as in the interpreter's `linspaceSample`:
+  // `start + (end − start)·k / (c − 1)`, and, when `end − start` overflows,
+  // the weighted mean `start·(1 − t) + end·t` with `t = k / (c − 1)`, the
+  // float that the interpreter computes (its shortest spelling, which reads
+  // back as the same float).
+  const usual: string[] = [];
+  const weighted: string[] = [];
+  for (let k = 0; k < count; k++) {
+    if (k === 0) {
+      usual.push('_s');
+      weighted.push('_s');
+      continue;
+    }
+    const t = String(k / (count - 1));
+    usual.push(
+      `_IA.add(_s, _IA.div(_IA.mul(_sp, _IA.point(${k})), _IA.point(${count - 1})))`
+    );
+    weighted.push(
+      `_IA.add(_IA.mul(_s, _IA.sub(_IA.point(1), _IA.point(${t}))), _IA.mul(_e, _IA.point(${t})))`
+    );
+  }
+  // The endpoints are tested at run time first, after both are evaluated
+  // (an endpoint can have an effect):
+  // - an endpoint with no enclosure (`empty`, `entire`) answers `entire`, as
+  //   `_IA.range` does;
+  // - a point endpoint that is an infinity or NaN answers `empty`, no
+  //   value: the interpreter has no samples there, and its other reads
+  //   disagree with each other (`Count` is the count, `Max` is the infinity);
+  // - a wider endpoint with an infinite bound holds finite values (samples)
+  //   and infinite ones (no value), so it answers `entire`.
+  // For point endpoints the form is chosen as the interpreter chooses it,
+  // from the float span. Each interval operation rounds outward, so the
+  // enclosure contains the float that the interpreter computes by the same
+  // form. For a wider endpoint, the usual form is used when its span is
+  // finite, and `entire` is the answer otherwise.
+  return (
+    `((_s, _e) => { ` +
+    `const _a = _IA.unwrap(_s), _b = _IA.unwrap(_e); ` +
+    `if (_a === undefined || _b === undefined) return { kind: 'entire' }; ` +
+    // A count of 0 has no samples whatever the endpoints are, and the
+    // interpreter gives the empty list for an infinite endpoint then; it has
+    // no value only for a NaN endpoint.
+    (count === 0
+      ? `return [_a.lo, _a.hi, _b.lo, _b.hi].some(Number.isNaN) ? { kind: 'empty' } : []; `
+      : `const _f = (x) => Number.isFinite(x.lo) && Number.isFinite(x.hi); ` +
+        `const _p = _a.lo === _a.hi && _b.lo === _b.hi; ` +
+        `if (!_f(_a) || !_f(_b)) { ` +
+        `const _q = (x) => x.lo === x.hi || (Number.isNaN(x.lo) && Number.isNaN(x.hi)); ` +
+        `return _q(_a) && _q(_b) ? { kind: 'empty' } : { kind: 'entire' }; } ` +
+        `const _sp = _IA.sub(_e, _s), _w = _IA.unwrap(_sp); ` +
+        `if (_p ? !Number.isFinite(_b.lo - _a.lo) : _w === undefined || !_f(_w)) ` +
+        `return _p ? [${weighted.join(', ')}] : { kind: 'entire' }; ` +
+        `return [${usual.join(', ')}]; `) +
+    `})(${startCode}, ${endCode})`
+  );
+}
+
+/**
  * Does `x` have an interval reading — is it a number by its type, a provable
  * list of numbers (its own array), or a symbol with no type evidence at all
  * (the free plot variable in `[x + 1, x − 1]`, which every scalar position on
@@ -432,6 +550,7 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
   'Tuple',
   'PointList',
   'Range',
+  'Linspace',
   'Map',
 ]);
 
@@ -447,14 +566,14 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
  * emitted, and it is reached only from the positions that consume a
  * collection value whole: the compilation root, the body root of an emitted
  * helper, a whole-bound call argument and the source of a loop over a
- * `List`, `Tuple` or `Map` (all three through
+ * `List`, `Tuple`, `Linspace` or `Map` (all three through
  * `CompileTarget.compileCollectionValue`), the operand of an accessor or a
  * reducer, a `Map` source, and an operand of the element-wise broadcast
  * (`tryIntervalBroadcast`). There is deliberately no `List`/`Range`/`Map`
  * entry in `INTERVAL_JAVASCRIPT_FUNCTIONS` — see
  * `compileIntervalCollectionOperand` for the reason.
  *
- * Five forms are spelled:
+ * Six forms are spelled:
  *
  * - a literal `List`/`Tuple` (written inline or held as a symbol's assigned
  *   value, `assignedLiteral`) whose every element is provably a number or is
@@ -464,6 +583,8 @@ const COLLECTION_VALUE_HEADS: ReadonlySet<string> = new Set([
  *   at run time by `_IA.range` — whose bounds must then be POINT intervals,
  *   since a wide bound gives a range of varying length, which no array holds
  *   (it answers `entire`);
+ * - a `Linspace` whose count is known at compile time, as the enclosures of
+ *   its samples (`compileIntervalLinspace`);
  * - `Map(f, collection)` with `f` a one-parameter function literal, as
  *   `_IA.map` over the spelled (or ordinarily compiled) source;
  * - a `PointList` with a list component, as the list of points
@@ -637,6 +758,7 @@ function compileIntervalCollectionValue(
       .map((x) => BaseCompiler.compileValueOperand(x, target))
       .join(', ')})`;
   }
+  if (head === 'Linspace') return compileIntervalLinspace(literal, target);
   // `Map(f, collection)`. The function literal compiles through the
   // ordinary `Function` lowering to an arrow over its parameter, the same
   // arrow `Apply` calls; `_IA.map` lifts a raw numeric element to a point
@@ -6139,7 +6261,7 @@ export class IntervalJavaScriptTarget implements LanguageTarget<Expression> {
       // The array spelling of a collection-building expression, for the
       // consuming positions the shared compiler owns (a helper's body root,
       // a whole-bound call argument, the source of a loop over a `List`,
-      // `Tuple` or `Map`). See `compileIntervalCollectionValue`.
+      // `Tuple`, `Linspace` or `Map`). See `compileIntervalCollectionValue`.
       compileCollectionValue: (e, t) => {
         const code = compileIntervalCollectionValue(e, t);
         if (code !== undefined) SPELLED_COLLECTION_VALUES.add(e);
