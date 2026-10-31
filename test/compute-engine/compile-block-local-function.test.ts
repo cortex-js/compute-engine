@@ -149,7 +149,7 @@ describe('COMPILE a block-local function definition', () => {
     // the compilation must not silently disagree.
     expect(
       program('const h = (a, b) => a + b\nh(1)').evaluate().toString()
-    ).toBe('(_) => _ + 1');
+    ).toBe('(_) => Apply((a, b) => a + b, 1, _)');
     expect(() => both('const h = (a, b) => a + b\nh(1)')).toThrow(
       /declared with 2 parameters but called with 1\. The interpreter reads a call with fewer arguments than parameters as a partial application/
     );

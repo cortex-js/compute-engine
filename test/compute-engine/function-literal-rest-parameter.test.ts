@@ -296,7 +296,22 @@ describe('Rest parameter — arity', () => {
     const curried = ce.function('Apply', [f, ce.number(1)]).evaluate();
     expect(curried.json).toEqual([
       'Function',
-      ['Block', ['Tuple', 1, '_1', '_2']],
+      [
+        'Block',
+        [
+          'Apply',
+          [
+            'Function',
+            ['Block', ['Tuple', 'a', 'b', 'more']],
+            'a',
+            'b',
+            ['Spread', 'more'],
+          ],
+          1,
+          '_1',
+          ['Spread', '_2'],
+        ],
+      ],
       '_1',
       ['Spread', '_2'],
     ]);

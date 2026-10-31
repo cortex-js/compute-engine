@@ -6,9 +6,6 @@ import {
   isSymbol,
 } from '../boxed-expression/type-guards.js';
 import { scopeForRebuild } from '../boxed-expression/binding-sites.js';
-import { effectsOf } from '../boxed-expression/effects-of.js';
-import { isPureComputedEffects } from '../../common/type/effects.js';
-import { couldMatch } from '../../common/type/subtype.js';
 import {
   functionLiteralBoundNames,
   functionLiteralDeclaredSignature,
@@ -24,43 +21,26 @@ import {
  * The interpreter CURRIES such an application (`makeLambda`, step 3,
  * `function-utils.ts`) when the literal has at least one parameter and the
  * call supplies fewer arguments than the FIXED parameters (the parameters
- * before a rest parameter, or all of them). Its value is a function of the
- * remaining parameters, built in one of two ways:
+ * before a rest parameter, or all of them). Its value is the DEFERRED
+ * residual `(_1, …, _m) ↦ Apply(f, a₁, …, aₖ, _1, …, _m)`, which applies the
+ * original literal to all the arguments when the last one arrives. The body
+ * is not evaluated at partial application, so a curried value equals the
+ * full call. A residual applied to too few arguments is curried the same
+ * way, so a chain of currying steps also equals the full call:
+ * `Apply(Apply(Apply(F, 1), 0), ∞)` is `Apply(F, 1, 0, ∞)`.
  *
- * - For a body with EFFECTS (`effectsOf(body)` is not pure), the DEFERRED
- *   residual `(_1, …, _m) ↦ Apply(f, a₁, …, aₖ, _1, …, _m)`, which applies
- *   the original literal to all the arguments when the last one arrives.
- * - For a PURE body, the body evaluated with the supplied arguments bound:
- *   `(x, y) ↦ x + y` applied to `1` is `(_1) ↦ _1 + 1`. This simplifies the
- *   body before the remaining arguments are known, so its value can differ
- *   from the full call: with `M = (x, y) ↦ x·y`, `Apply(Apply(M, 0), ∞)` is
- *   `0` and `Apply(M, 0, ∞)` is `Indeterminate`. A block local that the body
- *   reads is also read at this time, not at the later call. And the
- *   substitution can refuse (a body that writes a supplied parameter), which
- *   leaves the application unevaluated (ROADMAP CE-698).
- *
- * A compiled partial application follows the interpreter only where the two
- * are provably equal, which is the DEFERRED case: there, the residual is an
- * ordinary call of the literal, and the compiled code is that call. So a
- * partial application compiles only when all of these hold
- * (`partialApplicationRefusal` gives the reason when one does not):
+ * The compiled code is that call of the literal. A partial application
+ * compiles when all of these hold (`partialApplicationRefusal` gives the
+ * reason when one does not):
  *
  * - the literal is not GENERIC (the interpreter gives an error for it) and
  *   has no rest parameter;
- * - the body has effects, and every source of its effects is fixed at compile
- *   time: the body calls only library operators, and every symbol it reads
- *   that is not a parameter has a type that cannot be a function. The
- *   interpreter reads the effects of a call of a user function through the
- *   current binding of its name, which can change;
  * - each supplied argument is a literal whose evaluated value is the literal
  *   itself in an exact and in a numeric evaluation (`isLiteralArgument`): a
  *   machine number or a string. The residual holds the
  *   EVALUATED argument, which under `.N()` is its approximation, and the
  *   interpreter maps a call over a collection argument, so a partial
- *   application with a list argument is a list of residuals;
- * - the function is curried in ONE step (`CURRYING_CHAIN_REFUSAL`). A second
- *   step curries the residual, whose effects the interpreter reads from the
- *   signature of `f`, which can show none (a write to a parameter of `f`).
+ *   application with a list argument is a list of residuals.
  *
  * Two compile-time forms follow:
  *
@@ -104,40 +84,6 @@ function isUnderApplied(literal: Expression, count: number): boolean {
   if (!isFunction(literal, 'Function')) return false;
   if (literal.nops < 2) return false;
   return count < fixedParameterCount(literal.ops.slice(1));
-}
-
-/**
- * The first name in `body` whose binding can change what the interpreter
- * reads as the effects of the body, or `undefined`. That is a call whose head
- * is not a library operator (a user function, a block local, or a name with
- * no definition here), or a symbol that is not one of `params` and whose type
- * can be a function.
- */
-function variableEffectSource(
-  body: Expression,
-  params: ReadonlySet<string>
-): string | undefined {
-  const ce = body.engine;
-  const visit = (e: Expression): string | undefined => {
-    if (isSymbol(e)) {
-      if (params.has(e.symbol)) return undefined;
-      return couldMatch(e.type.type, 'function') ? e.symbol : undefined;
-    }
-    if (!isFunction(e)) return undefined;
-    const def = ce.lookupDefinition(e.operator);
-    const isLibraryOperator =
-      def !== undefined &&
-      'operator' in def &&
-      (def.operator as { _lambdaLiteral?: Expression })._lambdaLiteral ===
-        undefined;
-    if (!isLibraryOperator) return e.operator;
-    for (const op of e.ops) {
-      const found = visit(op);
-      if (found !== undefined) return found;
-    }
-    return undefined;
-  };
-  return visit(body);
 }
 
 /**
@@ -196,22 +142,6 @@ function partialApplicationRefusal(
     );
   if (params.some((p) => isRestParameter(p)))
     return 'a partial application of a function with a rest parameter does not compile.';
-  if (isPureComputedEffects(effectsOf(literal.op1)))
-    return (
-      'the interpreter simplifies the body of a curried pure function before ' +
-      'the remaining arguments are known, so its value can differ from the ' +
-      'full call.'
-    );
-  const source = variableEffectSource(
-    literal.op1,
-    new Set(functionLiteralBoundNames(params))
-  );
-  if (source !== undefined)
-    return (
-      `the body reads \`${source}\`, and the interpreter decides how it ` +
-      `curries the function from the effects of the body, which it reads ` +
-      `through the current binding of \`${source}\`.`
-    );
   const other = args.find((a) => !isLiteralArgument(a));
   if (other !== undefined)
     return (
@@ -228,50 +158,33 @@ function partialApplicationRefusal(
  * The literal and the arguments of `expr` when `expr` is a partial
  * application of a function literal, through any number of nested partial
  * applications (`Apply(Apply(f, 1), 2)` for a literal `f` with three
- * parameters gives `f` and `[1, 2]`), or `undefined`. `steps` is the number
- * of currying steps: 2 for that example, where the interpreter curries `f`
- * with `1`, then curries the residual with `2`.
+ * parameters gives `f` and `[1, 2]`), or `undefined`. The interpreter
+ * curries `f` with `1`, then curries the residual with `2`, and the value
+ * is the same as the partial application `Apply(f, 1, 2)`.
  */
 function curriedLiteral(
   expr: Expression
-):
-  | { literal: Expression; args: ReadonlyArray<Expression>; steps: number }
-  | undefined {
+): { literal: Expression; args: ReadonlyArray<Expression> } | undefined {
   if (!isFunction(expr, 'Apply') || expr.nops === 0) return undefined;
   let literal = expr.op1;
   let args = expr.ops.slice(1);
-  let steps = 1;
   const inner = curriedLiteral(literal);
   if (inner !== undefined) {
     literal = inner.literal;
     args = [...inner.args, ...args];
-    steps = inner.steps + 1;
   }
   if (!isUnderApplied(literal, args.length)) return undefined;
-  return { literal, args, steps };
+  return { literal, args };
 }
-
-/**
- * The decline of a chain of more than one currying step. The second step
- * curries the deferred residual `(_1, _2) ↦ Apply(f, 1, _1, _2)`, and the
- * interpreter reads the effects of that body from the SIGNATURE of `f`, which
- * does not show every effect: a write to a parameter of `f` is an effect at
- * run time and not in the signature. The residual can then be pure for the
- * interpreter, which simplifies its body: with
- * `F = (x, y, z) ↦ Block(y := y·z, x + y)`, `Apply(Apply(Apply(F, 1), 0), ∞)`
- * is `1`, and `Apply(F, 1, 0, ∞)` is `Indeterminate`.
- */
-const CURRYING_CHAIN_REFUSAL =
-  'Could not compile `Apply`: the function is curried in more than one step, ' +
-  'and the interpreter can simplify the body of an intermediate curried ' +
-  'function before the remaining arguments are known, so its value can ' +
-  'differ from the full call.';
 
 /**
  * The operands of one call of a function literal equivalent to the `Apply`
  * whose operands are `args`, when its callee is a partial application of a
  * literal: `[f, 1, u]` for `Apply(Apply(f, 1), u)`. `undefined` when the
- * callee is not such a partial application.
+ * callee is not such a partial application. The call can still supply too
+ * few arguments (`[f, 1, u]` for `Apply(Apply(f, 1), u)` when `f` has
+ * three parameters): it is then a partial application itself
+ * (`isPartialApplication`).
  *
  * Throws (a decline) when the callee is a partial application that does not
  * compile (`partialApplicationRefusal`).
@@ -286,13 +199,6 @@ export function curriedApplication(
   const reason = partialApplicationRefusal(inner.literal, inner.args);
   if (reason !== undefined)
     throw new Error(`Could not compile \`Apply\`: ${reason}`);
-  // A second currying step, inside the callee or by this call when it still
-  // supplies too few arguments, declines (`CURRYING_CHAIN_REFUSAL`).
-  if (
-    inner.steps > 1 ||
-    isUnderApplied(inner.literal, inner.args.length + actuals.length)
-  )
-    throw new Error(CURRYING_CHAIN_REFUSAL);
   return [inner.literal, ...inner.args, ...actuals];
 }
 
@@ -481,8 +387,8 @@ export function rewritePartialApplications(
         : undefined;
     // A callee that is a partial application whose merge declines is left
     // as it is, with its operands: rewriting the inner partial application
-    // to its residual would hide the chain of currying steps from the
-    // `Apply` lowering, which must decline it with the reason.
+    // to its residual would hide it from the `Apply` lowering, which must
+    // decline it with the reason.
     if (
       merged === undefined &&
       e.operator === 'Apply' &&

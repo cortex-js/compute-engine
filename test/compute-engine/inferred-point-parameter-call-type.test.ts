@@ -489,7 +489,8 @@ describe('An inferred signature is not a contract', () => {
         // boxed route of an operator definition, and the function type on
         // the other routes.
         expect(routes(ce, 'h', [P])).toEqual({
-          value: '[(_) => _ + 3,(_) => _ + 7]',
+          value:
+            '[(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (1, 2), _),(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (3, 4), _)]',
           type: 'list<(t: unknown) -> number>',
         });
       });

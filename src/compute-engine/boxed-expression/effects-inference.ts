@@ -1077,6 +1077,76 @@ export function wholeCollectionParameterType(
 }
 
 /**
+ * The collection type of the slot that the bare parameter `param` fills
+ * when the body `body` is one application of a function literal to which
+ * `param` is passed as an argument, or `undefined`.
+ *
+ * The deferred residual of a partial application has this form: with
+ * `F = (x, p) ↦ x + p[1] + p[2]`, `F(1)` is `(_1) ↦ Apply(F, 1, _1)`, where
+ * `F` is the literal (`makeLambda` in `function-utils.ts`). The only use of
+ * `_1` is an argument of `Apply`, so the other rules find no collection use
+ * of it, and its slot was `unknown`. A list argument was then applied to the
+ * residual element by element: `Apply(F(1), [2, 3])` was a list of two
+ * `incompatible-type` errors, while the full call `F(1, [2, 3])` binds the
+ * list whole to `p` and is `6`. Now the parameter takes the slot type that
+ * the same rules give to the parameter of the called literal at its
+ * position (`p` here), so a list argument is bound whole exactly when the
+ * full call binds it whole. Like the other inferred slot types, it is not an
+ * annotation, and an argument is not validated against it.
+ *
+ * The parameter must be one operand of the application, and must not occur
+ * in another operand. An operand before it that is a `Spread`, or a slot of
+ * the called literal that is a rest parameter or an annotated or a
+ * destructuring parameter, gives `undefined`.
+ */
+function forwardedCollectionParameterType(
+  param: Expression | undefined,
+  body: Expression | undefined
+): Type | undefined {
+  if (param === undefined || body === undefined || !isSymbol(param))
+    return undefined;
+  // The application, inside the scoped `Block` of the body and the
+  // return-type marker of the literal.
+  let call = body;
+  while (
+    (isFunction(call, 'Block') && call.nops === 1) ||
+    (isFunction(call, 'Typed') && call.nops === 2)
+  )
+    call = call.op1;
+  if (!isFunction(call, 'Apply') || !isFunction(call.op1, 'Function'))
+    return undefined;
+  const callee = call.op1;
+  const operands = call.ops.slice(1);
+  const isParam = (op: Expression): boolean =>
+    isSymbol(op) &&
+    (op.valueDefinition !== undefined
+      ? op.valueDefinition === param.valueDefinition
+      : op.symbol === param.symbol);
+  const at = operands.findIndex(isParam);
+  if (at < 0) return undefined;
+  if (operands.slice(0, at).some((op) => isFunction(op, 'Spread')))
+    return undefined;
+  if (
+    operands.some(
+      (op, i) => i !== at && !isParam(op) && op.symbols.includes(param.symbol)
+    ) ||
+    operands.filter(isParam).length !== 1
+  )
+    return undefined;
+  const calleeParams = callee.ops.slice(1);
+  const restAt = restParameterIndex(calleeParams);
+  if (restAt >= 0 && at >= restAt) return undefined;
+  const slot = calleeParams[at];
+  if (slot === undefined || !isSymbol(slot)) return undefined;
+  const calleeBody = functionLiteralBody(callee);
+  return (
+    inferredCollectionParameterType(slot) ??
+    wholeCollectionParameterType(slot, calleeBody) ??
+    forwardedCollectionParameterType(slot, calleeBody)
+  );
+}
+
+/**
  * The `value` entry of the dictionary operand of a canonical `Declare`
  * (`Declare(ys, {value: xs})`, the form of `let ys = xs` in a block: the
  * operand is a dictionary VALUE, written `Dictionary(KeyValuePair("value",
@@ -1567,9 +1637,13 @@ export function functionLiteralParameterSlots(
       return { type: destructuringParameterType(paramOps[i]) };
     // A parameter the body consumes whole is lifted too, even when its
     // inferred type admits a scalar (`wholeCollectionParameterType`).
+    // A parameter that the body only passes to a slot of another literal
+    // takes the collection type of that slot
+    // (`forwardedCollectionParameterType`).
     const inferred =
       inferredCollectionParameterType(paramOps[i]) ??
-      wholeCollectionParameterType(paramOps[i], body);
+      wholeCollectionParameterType(paramOps[i], body) ??
+      forwardedCollectionParameterType(paramOps[i], body);
     const name =
       paramOps[i] !== undefined
         ? inferredSignatureParameterName(paramOps[i])

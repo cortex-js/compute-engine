@@ -57,7 +57,9 @@ describe('A user-function call with the wrong number of arguments', () => {
 
   test('the interpreter answers the declined call', () => {
     const ce = engine();
-    expect(ce.parse('a(3, 4)').evaluate().toString()).toBe('(_) => _ + 7');
+    expect(ce.parse('a(3, 4)').evaluate().toString()).toBe(
+      '(_) => Apply((x, y, z) => x + y + z, 3, 4, _)'
+    );
     expect(ce.parse('a(1, 2, 3, 4)').evaluate().toString()).toBe(
       'Error("unexpected-argument", "4")'
     );

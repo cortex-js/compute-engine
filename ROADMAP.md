@@ -1101,69 +1101,21 @@ Options:
 
 If nothing is decided, `Limit` follows (a) and the other operators follow (b).
 
-### CE-698. A partial application whose result writes a parameter stays unevaluated
+### CE-698. A saturated result that reads a written parameter outside every closure stays unevaluated
 
 **Status:** on demand; capability. The simple, sound version is in place: the
 call declines (`bindingKeyedSubs()`, `function-utils.ts`, the
 written-parameter rule).
 
-`W = (y, w) ↦ (x ↦ Block(Block(y := 2, y + x)))` applied to `q`, then `1`, then
-`5` gave `7` and now stays unevaluated. A saturated call keeps a written
-parameter as a variable that the returned closure shares, but a partial
-application returns a new literal that has no call frame to share it with
-later applications, so it declines. A more precise version would substitute
-the value when every read of the parameter in the result comes after its
-first write, or would give the partial result a frame of its own. The same
-applies to a saturated result that reads the written parameter outside every
-returned closure (`y ↦ If(z > 0, y, () ↦ Block(y := y + 1, y))`) and to a held
-write (`y ↦ Hold(() ↦ Block(y := y + 1, y))`): both decline.
-
-### CE-708. A curried pure function can give a value that the full call does not
-
-**Status:** open; wrong value. Found 2026-10-31 in the review of the
-compilation of partial applications. User decision 2026-10-31: option (a),
-the interpreter always takes the deferred residual.
-
-The interpreter curries a call of a function literal with fewer arguments
-than parameters (`makeLambda`, step 3, `function-utils.ts`). For a body with
-an effect, the value is the deferred residual `(_1) ↦ Apply(f, 1, _1)`,
-which applies `f` to all the arguments when the last one arrives. For a PURE
-body, the interpreter evaluates the body with the supplied arguments first,
-so it simplifies the body before the remaining arguments are known:
-
-- `M = (x, y) ↦ x·y`: `Apply(Apply(M, 0), ∞)` is `0` and
-  `Apply(Apply(M, 0), u)` is `0`, but `Apply(M, 0, ∞)` is `Indeterminate`.
-- `D = (x, y) ↦ x·y/y`: `Apply(Apply(D, 2), 0)` is `2`, but `Apply(D, 2, 0)`
-  is `Indeterminate`.
-- A block local that the body reads is read when the function is curried:
-  `Block(c := 3, g := Apply((x, y) ↦ x + y + c, 1), c := 10, g(5))` is `9`.
-- A chain of two currying steps curries the deferred residual, whose effects
-  the interpreter reads from the signature of `f`, which can show none: with
-  `F = (x, y, z) ↦ Block(y := y·z, x + y)`, `Apply(Apply(F, 1), 0)` is
-  `(_1_0) ↦ 1` and `Apply(Apply(Apply(F, 1), 0), ∞)` is `1`, but
-  `Apply(F, 1, 0, ∞)` is `Indeterminate`.
-- The substitution can refuse and leave the call unevaluated (CE-698).
-
-Because of this, the compilation of a partial application declines for every
-pure body (`partialApplicationRefusal`, `compilation/partial-application.ts`).
-
-Options:
-
-- (a) The interpreter always takes the deferred residual. A curried value
-  then equals the full call, and the compilation of partial applications of
-  pure bodies can be turned on (remove the pure-body refusal). Printed
-  results change: `Apply((x, y) ↦ x + y, 1)` prints
-  `(_1) ↦ Apply((x, y) ↦ x + y, 1, _1)` instead of `(_1) ↦ _1 + 1`, and the
-  tests and snapshots that show simplified curried functions change; how many
-  must be measured. A block local read by the body is read at the full call.
-  A chain of currying steps then also equals the full call, and its
-  compilation (now declined) can be turned on.
-- (b) Keep the pre-evaluation. Curried pure functions keep their simplified
-  printed form; the cases above stay different from the full call, and the
-  compilation keeps declining every partial application of a pure body.
-
-If nothing is decided, (b) stays in effect: the values above stay as they
-are, and those partial applications are evaluated by the interpreter.
+A saturated call keeps a written parameter as a variable that the returned
+closure shares. When the result also reads the parameter outside every
+returned closure (`y ↦ If(z > 0, y, () ↦ Block(y := y + 1, y))`), or holds a
+write (`y ↦ Hold(() ↦ Block(y := y + 1, y))`), the call declines and stays
+unevaluated. A more precise version would substitute the value when every
+read of the parameter in the result comes before its first write. (The
+partial application of such a function is no longer part of this entry: since
+CE-708 it is the deferred call of the original function, and
+`W = (y, w) ↦ (x ↦ Block(Block(y := 2, y + x)))` gives `W(q)(1)(5) = 7`.)
 
 ### CE-694. Applying a `Composition` can call the wrong step and loses exact arguments
 

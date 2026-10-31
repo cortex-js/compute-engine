@@ -98,12 +98,12 @@ describe('Anonymous function', () => {
 describe('Anonymous function with missing param', () => {
   test('Missing Param Function', () =>
     expect(evaluate(['f1'])).toMatchInlineSnapshot(
-      `["Function", ["Add", "_1", 1]]`
+      `["Function", ["Apply", ["Function", ["Add", "q", 1], "q"], "_1"]]`
     ));
   test('Missing Param Expression', () =>
     expect(evaluate(['f2'])).toMatchInlineSnapshot(
-      `["Function", ["Add", "_1_0", 1], "_1_0"]`
-    )); // @fixme
+      `["Function", ["Apply", ["Function", ["Add", "_1", 1]], "_1_0"], "_1_0"]`
+    ));
   test('Missing Param JS Function', () =>
     expect(evaluate(['f3'])).toMatchInlineSnapshot(`NaN`)); // NaN is correct
   test('Missing Param Declared JS Function', () =>
@@ -442,9 +442,20 @@ describe('Currying', () => {
     // reserved for `_1`, `_2`, … (what boxing reads back off the body), and
     // `["Function", ["Add", "_2_0", …]]` alone would box as a function of no
     // argument.
-    expect(evaluate(['f10', 5])).toMatchInlineSnapshot(
-      `["Function", ["Add", "_2_0", ["Divide", 5, "_1_0"]], "_1_0", "_2_0"]`
-    ));
+    expect(evaluate(['f10', 5])).toMatchInlineSnapshot(`
+      [
+        "Function",
+        [
+          "Apply",
+          ["Function", ["Add", ["Divide", "_1", "_2"], "_3"]],
+          5,
+          "_1_0",
+          "_2_0"
+        ],
+        "_1_0",
+        "_2_0"
+      ]
+    `));
 });
 
 describe('Apply', () => {

@@ -1356,14 +1356,37 @@ arms already equally specific by argument type; a subset is more specific;
 existing tie-break.
 
 **Currying / partial application.** The residual signature carries the
-**full remaining effect set** on its arrow. Runtime alignment (today
-`makeLambda` *evaluates the body* with the supplied prefix before currying
-— `function-utils.ts` ~1266 — so effects could fire at partial
-application): Stage 2 gates that pre-evaluation on purity — a body whose
-`effectsOf` is pure keeps today's evaluate-then-curry optimization; an
-effectful body is **captured without evaluation** and fires exactly once,
-at saturation. Tests must pin: zero effects at partial application, exactly
-one at saturation, for `random` and `scope`.
+**full remaining effect set** on its arrow. At run time, `makeLambda`
+(`function-utils.ts`) captures EVERY body **without evaluation**: the value
+of a partial application is the deferred residual
+`(_1) ↦ Apply(f, a₁, …, aₖ, _1)`, which applies the original literal to all
+the arguments when the last one arrives. So the effects of the body fire
+exactly once, at saturation, and a curried value equals the full call. The
+supplied arguments are evaluated at the partial application.
+
+A supplied argument whose value is `Nothing` is a computed `Nothing`, which
+the full call binds to its parameter. A written `Nothing` operand of `Apply`
+is erased by the canonical form, so the residual holds the call
+`Apply(() ↦ Nothing)` in that slot instead: with `g = () ↦ Nothing` and
+`A = (a, b) ↦ a`, `A(g())(5)` is `Nothing`, as `A(g(), 5)` is.
+
+A function that holds its arguments (a `lazy` operator whose `evaluate` is
+a function literal) is not curried: a call of the residual would evaluate
+its own argument, and the `Apply` in its body would evaluate the held
+prefix. Its partial application is the `missing` error of the first absent
+argument, typed `error`, the same value as for a declared signature and for
+an Epsil `hold` function. When a supplied argument is already an error, that
+error is the value.
+
+Before, a body whose `effectsOf` was pure was evaluated with the supplied
+prefix before currying. That simplified the body before the remaining
+arguments were known: with `M = (x, y) ↦ x·y`, `M(0)(∞)` was `0`, while
+the full call `M(0, ∞)` is `Indeterminate`; a block local that the body
+reads was read at the partial application, not at the full call; and a
+second currying step read the effects of the residual from the signature
+of `f`, which does not show a write to a parameter of `f` (user decision
+2026-10-31, ROADMAP CE-708). Tests pin: zero effects at partial
+application, exactly one at saturation, for `random` and `scope`.
 
 `matches()` needs the effect-aware signature rule and **must stay
 write-free**; subset tests are stateless.
@@ -2244,8 +2267,8 @@ Each stage is useful without the next; per-stage pinning tests named.
   pending-draw walk re-keyed on it (all three seed-frame modes, incl.
   `readsRandomFrame`); discharge declarations (function parameters AND
   held positions, with the may-evaluate/quote split); internal co-finite
-  results for discharge-from-`any`; purity-gated currying
-  pre-evaluation; dominance-based confinement analysis for `scope`
+  results for discharge-from-`any`; currying that captures the body
+  without evaluation; dominance-based confinement analysis for `scope`
   (inference-only, per "Scope writes"); the dependency-order split
   (unresolved head → `{any}`; trusted-annotation escape) and the
   `effectsDeclared` provenance bit.

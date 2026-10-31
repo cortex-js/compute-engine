@@ -16,8 +16,6 @@ import {
   widen,
 } from '../../common/type/subtype.js';
 import { factsOf } from '../../common/type/facts.js';
-import { isPureComputedEffects } from '../../common/type/effects.js';
-import { effectsOf } from './effects-of.js';
 import {
   type AliasDescent,
   collectionElementType,
@@ -771,14 +769,17 @@ export function inferredPointSignature(
  * list of points gives `curried | list<curried>`. A DECLARED signature is a
  * contract and `curried` is returned unchanged.
  *
- * When the signature was INFERRED and the call does not map, the type is
- * `error` when the body, typed with the given arguments, is `error`
- * (`partialBodyIsError`). The evaluation of a partial application
- * evaluates the body with the given arguments before it curries, and its
- * value is then that error: with `h(a, t) := a[1] + a[2] + t`, `h("ab")`
- * evaluates `"a" + "b" + t`, an `incompatible-type` error.
- * `operands` are the descriptors of the arguments, and `derive` types an
- * application in the body.
+ * When the call does not map, the type is `curried`: the evaluation of a
+ * partial application does not evaluate the body, and its value is the
+ * function of the remaining parameters (`makeLambda` in
+ * `function-utils.ts`). When the signature was INFERRED and the body, typed
+ * with the given arguments, is `error` (`partialBodyIsError`), each call of
+ * that function gives the error of the full call, so the result of `curried`
+ * is `error`. With `h(a, t) := a[1] + a[2] + t`, `h(3)` is a function of
+ * type `(t: unknown) -> error`, and each call of it is an
+ * `incompatible-type` error, as the full call `h(3, 1)` is. `operands` are
+ * the descriptors of the arguments, and `derive` types an application in
+ * the body.
  */
 export function partialApplicationType(
   engine: IComputeEngine,
@@ -788,11 +789,29 @@ export function partialApplicationType(
   derive: (head: string, args: readonly OperandDescriptor[]) => Type | undefined
 ): Type {
   const types = operands.map((d) => d.type);
+  // A supplied argument that is an error is evaluated at the partial
+  // application, and the partial application gives that error before any
+  // function of the other parameters is made: with `h(a, t) := a[1] + a[2] +
+  // t` and `f(a, b) := a`, `f(h(3, 1))` is the `incompatible-type` error of
+  // `h(3, 1)`.
+  if (types.some((t) => t === 'error')) return 'error';
+  // A function defined by a literal that holds its arguments (a `lazy`
+  // operator) is not curried: its partial application is the `missing`
+  // error (`makeLambda` in `function-utils.ts`).
+  if (heldLiteral(binding)) return 'error';
+  // The curried signature whose calls give the error of the body. It is
+  // computed once, and the unmapped and the possibly mapped branches below
+  // both use it.
+  let signature: Type | undefined;
+  const unmapped = (): Type =>
+    (signature ??=
+      typeof curried === 'object' &&
+      curried.kind === 'signature' &&
+      partialBodyIsError(engine, binding, operands, derive)
+        ? { ...curried, result: 'error' }
+        : curried);
   const sig = inferredPointSignature(binding);
-  if (typeof sig !== 'object' || sig.kind !== 'signature')
-    return partialBodyIsError(engine, binding, operands, derive)
-      ? 'error'
-      : curried;
+  if (typeof sig !== 'object' || sig.kind !== 'signature') return unmapped();
   const slots = [...(sig.args ?? []), ...(sig.optArgs ?? [])].map(
     (x) => x.type
   );
@@ -811,11 +830,24 @@ export function partialApplicationType(
         return { kind: 'list', elements: 'any' };
     }
   }
+  // Each cell of a mapped call is the partial application of one element,
+  // whose type is not the type of the whole argument, so the cell keeps
+  // `curried`. This applies to the list part of a call that may map too.
   if (maps) return { kind: 'list', elements: curried };
-  if (maybe) return widen(curried, { kind: 'list', elements: curried });
-  return partialBodyIsError(engine, binding, operands, derive)
-    ? 'error'
-    : curried;
+  if (maybe) return widen(unmapped(), { kind: 'list', elements: curried });
+  return unmapped();
+}
+
+/**
+ * True when `binding` is an operator definition that holds its arguments
+ * (`lazy`) and whose evaluation is a function literal. A partial
+ * application of it is the `missing` error, not a function.
+ */
+function heldLiteral(binding: BoxedDefinition | undefined): boolean {
+  if (binding === undefined || !('operator' in binding)) return false;
+  return (
+    binding.operator.lazy === true && userFunctionLiteral(binding) !== undefined
+  );
 }
 
 /**
@@ -824,13 +856,14 @@ export function partialApplicationType(
  * first parameters typed as the arguments `operands` and each other
  * parameter typed as its parameter type, is `error`.
  *
- * The evaluation of a partial application of a function literal with a
- * pure body evaluates the body with the given arguments, and gives the
- * value of the body when it is an error (`apply` in `function-utils.ts`).
- * A body with an effect is not evaluated then: the value is a function,
- * and this function is false for it. A declared signature is a contract,
- * and this function is false for it too: the partial application is typed
- * as the function of the other parameters.
+ * A partial application of a function literal is the deferred residual
+ * that applies the literal to all the arguments when the last one arrives
+ * (`makeLambda` in `function-utils.ts`), so each call of the residual gives
+ * the value of the full call, which is then that error. A body with an
+ * effect is included: the residual also applies the literal. A declared
+ * signature is a contract, and this function is false for it: the partial
+ * application is typed as the function of the other parameters, with the
+ * declared result.
  */
 function partialBodyIsError(
   engine: IComputeEngine,
@@ -842,7 +875,6 @@ function partialBodyIsError(
   if (typeof sig !== 'object' || sig.kind !== 'signature') return false;
   const literal = userFunctionLiteral(binding);
   if (literal === undefined) return false;
-  if (!isPureComputedEffects(effectsOf(literal.op1))) return false;
   const params = sig.args ?? [];
   if (operands.length >= params.length) return false;
   const args = [

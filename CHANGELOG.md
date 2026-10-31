@@ -35,32 +35,29 @@
 
 - **A partial application of a function literal compiles, where it equals
   the interpreter.** The interpreter curries a call with fewer arguments than
-  parameters. For a body with an effect (`(x, y) ↦ x + y + 0·Random()`), its
-  value is the deferred function `(_1) ↦ Apply(f, 1, _1)`, which applies `f`
-  to all the arguments when the last one arrives. That case now compiles when
-  the function is curried in one step and each supplied argument is a number
-  literal whose value is a double, or a string literal: `Apply(Apply(f, 1),
-  u)` and `Apply(Apply(f, 1), u, 4)` are one call of `f` on `javascript`,
-  `interval-js` and `glsl`. `Apply(f, 1)` alone compiles to a function on
-  `javascript` and `interval-js` at the root of the compilation, where the
-  `javascript` result has `calling: 'lambda'`, and as the value of an
-  assignment to a block local (`g := Apply(f, 1); g(u)`); at any other
+  parameters: its value is the deferred function `(_1) ↦ Apply(f, 1, _1)`,
+  which applies `f` to all the arguments when the last one arrives (see
+  Behavior Changes). A partial application now compiles when each supplied
+  argument is a number literal whose value is a double, or a string literal,
+  for a pure body and for a body with an effect, and also for a chain of
+  currying steps: `Apply(Apply(f, 1), u)`, `Apply(Apply(f, 1), u, 4)` and
+  `Apply(Apply(Apply(f, 1), 2), u)` are one call of `f` on `javascript`,
+  `interval-js`, `glsl`, `wgsl` and `python` (with `f = (x, y) ↦ x + y`,
+  `glsl` gives `u + 1.0`). `Apply(f, 1)` alone compiles to a function on
+  `javascript`, `interval-js` and `python` at the root of the compilation,
+  where the `javascript` result has `calling: 'lambda'`, and as the value of
+  an assignment to a block local (`g := Apply(f, 1); g(u)`); at any other
   position (an `If` branch, a list element, an argument) it declines. Every
-  other partial application declines with the reason. A pure body declines,
-  because the interpreter simplifies the body before the remaining arguments
-  are known: with `M = (x, y) ↦ x·y`, `Apply(Apply(M, 0), ∞)` is `0`, but
-  `Apply(M, 0, ∞)` is `Indeterminate` (ROADMAP CE-708). A chain of two
-  currying steps (`Apply(Apply(Apply(f, 1), 2), u)`) declines for the same
-  reason. A supplied argument that is not such a literal (an exact rational,
-  a decimal with more digits than a double, `Pi`, `True`, a variable, a list)
-  declines: the interpreter curries with the evaluated argument, its
-  approximation under `.N()`, maps over a list, and `True` can name a local.
-  A generic literal, a rest parameter, and a body that calls a user function
-  or reads a name that can hold a function decline too. `glsl` and `wgsl`
-  have no function values and decline a partial application that is not
-  applied, with a message that says so. Before, every target declined all
-  these shapes with "the function takes 2 parameter(s) but 1 argument(s) are
-  supplied".
+  other partial application declines with the reason. A supplied argument
+  that is not such a literal (an exact rational, a decimal with more digits
+  than a double, `Pi`, `True`, a variable, a list) declines: the interpreter
+  curries with the evaluated argument, its approximation under `.N()`, maps
+  over a list, and `True` can name a local. A generic literal and a rest
+  parameter decline too. `glsl` and `wgsl` have no function values and
+  decline a partial application that is not applied, with a message that
+  says so. Before, every target declined all these shapes with "the function
+  takes 2 parameter(s) but 1 argument(s) are supplied", and `python` emitted
+  `((lambda x, y: x + y))(1)`, which raises a `TypeError` when it runs.
 
 ### Bug Fixes
 
@@ -792,6 +789,57 @@
   engine rebuild the expression from the held operands and loses that work.
 
 ### Behavior Changes
+
+- **A curried function is the deferred call of the original function, and
+  its value equals the full call.** A call of a function literal with fewer
+  arguments than parameters evaluated a body with no effect with the supplied
+  arguments, so the body was simplified before the remaining arguments were
+  known. Now every partial application is the deferred function that applies
+  the literal to all the arguments when the last one arrives (ROADMAP
+  CE-708). The printed form changes: `Apply((x, y) ↦ x + y, 1)` was
+  `(_1) ↦ _1 + 1` and is now `(_1) ↦ Apply((x, y) ↦ x + y, 1, _1)`. These
+  values change, and are now the values of the full call:
+  - With `M = (x, y) ↦ x·y`, `Apply(Apply(M, 0), ∞)` was `0` and is
+    `Indeterminate`.
+  - With `D = (x, y) ↦ x·y/y`, `Apply(Apply(D, 2), 0)` was `2` and is
+    `Indeterminate`.
+  - A block local that the body reads is read at the full call:
+    `Block(c := 3, g := Apply((x, y) ↦ x + y + c, 1), c := 10, g(5))` was
+    `9` and is `16`. A supplied argument is still read at the partial
+    application: with `c := 3`, `g := Apply((x, y) ↦ x + y, c)`, then
+    `c := 10`, `g(5)` is `8`.
+  - With `F = (x, y, z) ↦ Block(y := y·z, x + y)`, the chain
+    `Apply(Apply(Apply(F, 1), 0), ∞)` was `1` and is `Indeterminate`.
+  - A partial application whose result writes a supplied parameter, such as
+    `W = (y, w) ↦ (x ↦ Block(y := 2, y + x))` applied to `q`, stayed
+    unevaluated, and `W(q)(1)(5)` had no value. It is now a function, and
+    `W(q)(1)(5)` is `7`, as `W(q, 1)(5)` is.
+  - The static type of a partial application of a function whose signature
+    is inferred is the function of the remaining parameters, also when the
+    body is an error for the supplied arguments: with
+    `h(a, t) := a[1] + a[2] + t`, `h(3)` was typed `error` and evaluated to
+    an error; it is now typed `(t: unknown) -> error`, its value is a
+    function, and each call of it gives the `incompatible-type` error, as
+    the full call `h(3, 1)` does.
+  - A partial application that gives a value of the wrong shape to a
+    destructuring parameter is a function: with `L = ((u, v), y) ↦ u + v +
+    y`, `Apply(L, 5)` was an `incompatible-type` error; it is now a
+    function, and each call of it gives that error (`tuple` expected, `5`
+    given), as the full call `Apply(L, 5, 1)` does.
+  - A supplied argument whose value is `Nothing` keeps its parameter: with
+    `g = () ↦ Nothing` and `G = (a, b) ↦ b + 0·Random()`, `Apply(G(g()),
+    5)` was a function, because the `Nothing` was erased and `5` went to
+    `a`. It is now `5`, as `G(g(), 5)` is.
+  - A partial application of a function defined by a literal that holds its
+    arguments (a `lazy` operator whose `evaluate` is a function literal) is
+    the `missing` error. With `hf(a, b) = Head(a)` held and `c := 3`,
+    `hf(c + 1)` was a function; it is now `Error("missing")` with the frame
+    of the second argument, typed `error`. This is the value it has when the
+    signature of `hf` is declared, and the value of a partial application of
+    an Epsil `hold` function.
+  - A partial application that supplies a free symbol named like a fresh
+    parameter keeps it: with `A = (x, y) ↦ x + y`, `Apply(Apply(A, _1), 2)`
+    was `4` and is `_1 + 2`.
 
 - **The parameter of a family of roots is a new integer symbol.** It is the
   parameter of `Solve` of a periodic equation, and of diophantine and

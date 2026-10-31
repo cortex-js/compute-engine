@@ -17,7 +17,8 @@
  * When the result writes the parameter (an `Assign` or a `Declare` of it),
  * the parameter is not substituted at all: the result of a saturated call
  * keeps its binding, which the literals of the result share with the call
- * frame, and a partial application declines. A write outside every literal
+ * frame. A partial application is the deferred residual, whose call gives
+ * the value of the full call. A write outside every literal
  * of the result makes the saturated call decline too, and so do a read
  * outside every literal and an occurrence in held content, which find no
  * call frame when they run. The substitution
@@ -73,10 +74,10 @@ const C = [
 describe('partial application of a literal with several parameters', () => {
   test('the value of y is substituted into the inner literal', () => {
     const ce = new ComputeEngine();
-    expect(json(ce, [F2, 'x'])).toEqual([
+    expect(json(ce, [F2, 'x', 0])).toEqual([
       'Function',
-      ['Block', ['Function', ['Block', ['Power', 'x', 'x_1']], 'x_1']],
-      '_1',
+      ['Block', ['Power', 'x', 'x_1']],
+      'x_1',
     ]);
   });
 
@@ -168,7 +169,7 @@ describe('cases that keep their result', () => {
     // (y, w) ↦ (x ↦ Block(Block(y := 2, y + x))): the target of the
     // assignment is not replaced by the value of the parameter. The
     // saturated call keeps the occurrences, and the partial application
-    // declines.
+    // gives the same value.
     const ce = new ComputeEngine();
     const W = [
       'Function',
@@ -183,7 +184,7 @@ describe('cases that keep their result', () => {
     const saturated = ce.box([W, 'q', 1] as any).evaluate();
     expect(JSON.stringify(saturated.json)).not.toContain('"Assign","q"');
     expect(json(ce, [saturated, 5])).toBe(7);
-    expect(json(ce, [W, 'q'])[0]).toBe('Apply');
+    expect(json(ce, [[[W, 'q'], 1], 5])).toBe(7);
   });
 
   test('a function that calls itself from a Map callback', () => {
@@ -289,17 +290,18 @@ describe('a write or a declaration below a nested block', () => {
     ]);
   });
 
-  test('a read before a write of the parameter: the partial application declines', () => {
+  test('a read before a write of the parameter: the partial application gives the full-call value', () => {
     // (y, w) ↦ (x ↦ Block(Block(s := y, y := 2, s + x))): the read of y
     // must give the value of the argument, and the write cannot be
-    // substituted.
+    // substituted. The partial application is the deferred residual, whose
+    // full call keeps the binding of y.
     const P2 = curriedLiteral([
       'Block',
       ['Block', ['Assign', 's', 'y'], ['Assign', 'y', 2], ['Add', 's', 'x']],
     ]);
     const [curried, saturated] = curriedAndSaturated(P2);
-    expect((curried as unknown[])[0]).toBe('Apply');
     expect(saturated).toEqual(['Add', 'q', 5]);
+    expect(curried).toEqual(saturated);
   });
 
   test('the result of the saturated call shares the binding of y', () => {
@@ -317,7 +319,7 @@ describe('a write or a declaration below a nested block', () => {
     expect(json(ce, 'q')).toBe('q');
   });
 
-  test('a write in a dictionary value: the partial application declines', () => {
+  test('a write in a dictionary value: the partial application gives the full-call value', () => {
     // (y, w) ↦ (x ↦ Block(Block(s := y, {a: Block(y := 2)}, s + x)))
     const P = curriedLiteral([
       'Block',
@@ -330,13 +332,13 @@ describe('a write or a declaration below a nested block', () => {
     ]);
     const ce = new ComputeEngine();
     const partial = ce.box([P, 'q'] as any).evaluate();
-    expect(partial.json[0]).toBe('Apply');
-    expect(json(ce, [[partial, 1], 5])[0]).toBe('Apply');
+    expect(partial.json[0]).toBe('Function');
+    expect(json(ce, [[partial, 1], 5])).toEqual(['Add', 'q', 5]);
     expect(json(ce, [[P, 'q', 1], 5])).toEqual(['Add', 'q', 5]);
     expect(json(ce, 'q')).toBe('q');
   });
 
-  test('a write in the bound of a Sum over y: the partial application declines', () => {
+  test('a write in the bound of a Sum over y: the partial application gives the full-call value', () => {
     // (y, w) ↦ (x ↦ Block(Block(s := y, Sum(x, y = 1..Block(y := 2, 2)),
     // s + y + x))): the bound of the clause is outside the scope of the
     // index y, so its y is the parameter.
@@ -351,10 +353,12 @@ describe('a write or a declaration below a nested block', () => {
     ]);
     const ce = new ComputeEngine();
     const partial = ce.box([P, 'q'] as any).evaluate();
-    expect(partial.json[0]).toBe('Apply');
+    expect(partial.json[0]).toBe('Function');
     expect(JSON.stringify(partial.json)).not.toContain('"Assign","q"');
     const saturated = ce.box([P, 'q', 1] as any).evaluate();
     expect(JSON.stringify(saturated.json)).not.toContain('"Assign","q"');
+    // The partial application applied to 1 gives the value of the full call.
+    expect(json(ce, [[partial, 1], 5])).toEqual(json(ce, [saturated, 5]));
     expect(json(ce, 'q')).toBe('q');
   });
 
@@ -378,8 +382,8 @@ describe('a write or a declaration below a nested block', () => {
     ]);
     const ce = new ComputeEngine();
     const partial = ce.box([P7, 'q'] as any).evaluate();
-    expect(partial.json[0]).toBe('Apply');
-    expect(json(ce, [[partial, 1], 5])[0]).toBe('Apply');
+    expect(partial.json[0]).toBe('Function');
+    expect(json(ce, [[partial, 1], 5])).toEqual(['Add', 'q', 7]);
     expect(json(ce, 'q')).toBe('q');
     expect(json(ce, [[P7, 'q', 1], 5])).toEqual(['Add', 'q', 7]);
     expect(json(ce, 'q')).toBe('q');
@@ -389,8 +393,8 @@ describe('a write or a declaration below a nested block', () => {
     // (y, w) ↦ (x ↦ Block(s := y, y := 2, s + x)), and
     // (y, w) ↦ (x ↦ Block(s := y, Block(y := 2), s + y + x)): the result
     // of the saturated call keeps the binding of y, and each application
-    // reads the value that the previous one wrote. The partial application
-    // declines.
+    // reads the value that the previous one wrote. The result of the
+    // partial application applied to 1 does the same.
     const P2n = curriedLiteral([
       'Block',
       ['Assign', 's', 'y'],
@@ -413,8 +417,10 @@ describe('a write or a declaration below a nested block', () => {
       expect(JSON.stringify(saturated.json)).not.toContain('"Assign","q"');
       expect(json(ce, [saturated, 5])).toEqual(first);
       expect(json(ce, [saturated, 5])).toBe(second);
-      expect(json(ce, [P, 'q'])[0]).toBe('Apply');
-      expect(json(ce, [[[P, 'q'], 1], 5])[0]).toBe('Apply');
+      expect(json(ce, [P, 'q'])[0]).toBe('Function');
+      const curried = ce.box([[P, 'q'], 1] as any).evaluate();
+      expect(json(ce, [curried, 5])).toEqual(first);
+      expect(json(ce, [curried, 5])).toBe(second);
       expect(json(ce, 'q')).toBe('q');
     }
   });
@@ -440,24 +446,13 @@ describe('a write or a declaration below a nested block', () => {
       'Block',
       ['Block', ['Hold', ['Assign', ['At', 'L', 'y'], 7]], ['Add', 'y', 'x']],
     ]);
-    expect(json(ce, [P, 'q'])).toEqual([
+    expect(json(ce, [P, 'q', 0])).toEqual([
       'Function',
       [
         'Block',
-        [
-          'Function',
-          [
-            'Block',
-            [
-              'Block',
-              ['Hold', ['Assign', ['At', 'L', 'q'], 7]],
-              ['Add', 'q', 'x'],
-            ],
-          ],
-          'x',
-        ],
+        ['Block', ['Hold', ['Assign', ['At', 'L', 'q'], 7]], ['Add', 'q', 'x']],
       ],
-      '_1',
+      'x',
     ]);
   });
 
@@ -496,10 +491,13 @@ describe('a write or a declaration below a nested block', () => {
       ],
       raw
     );
-    const result = ce.box(['Apply', P, 'q']).evaluate();
-    // Function(Block(Function(Block(Block(q + x, tuple)), x)), _1)
+    // A saturated call: its result is the inner literal with `q` in place of
+    // `y`. (A partial application is the deferred residual, which holds the
+    // literal unchanged: no substitution runs in it.)
+    const result = ce.box(['Apply', P, 'q', 0]).evaluate();
+    // Function(Block(Block(q + x, tuple)), x)
     let sum: any = result;
-    for (let i = 0; i < 5; i++) sum = sum.ops[0];
+    for (let i = 0; i < 3; i++) sum = sum.ops[0];
     expect(sum.json).toEqual(['Add', 'q', 'x']);
   });
 });

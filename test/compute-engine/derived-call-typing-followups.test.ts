@@ -110,7 +110,10 @@ describe('THE DERIVED AT REFUSES A BASE THAT CANNOT BE INDEXED', () => {
   });
 });
 
-describe('A PARTIAL APPLICATION WITH A REFUSED BASE IS ERROR', () => {
+describe('A PARTIAL APPLICATION WITH A REFUSED BASE IS A FUNCTION', () => {
+  // The partial application does not evaluate the body: its value is the
+  // function of `t`, and each call of it is the error. Its type says so:
+  // the result of the function is `error`.
   const ce = new ComputeEngine();
   ce.parse('h(a, t) := a[1] + a[2] + t').evaluate();
 
@@ -119,11 +122,15 @@ describe('A PARTIAL APPLICATION WITH A REFUSED BASE IS ERROR', () => {
     ['h(\\mathrm{True})', ['h', 'True']],
     ['h(\\{1, 2\\})', ['h', ['Set', 1, 2]]],
   ] as const)(
-    '%s is typed error on the parse and box routes',
+    '%s is a function whose call is an error, on the parse and box routes',
     (latex, json) => {
       for (const e of [ce.parse(latex), ce.box(json as any)]) {
-        expect(e.type.toString()).toBe('error');
-        expect(e.evaluate().type.toString()).toBe('error');
+        expect(e.type.toString()).toBe('(t: unknown) -> error');
+        const value = e.evaluate();
+        expect(value.operator).toBe('Function');
+        expect(ce.box(['Apply', value, 1]).evaluate().type.toString()).toBe(
+          'error'
+        );
       }
     }
   );
@@ -148,7 +155,10 @@ describe('A PARTIAL APPLICATION KEEPS THE ARGUMENT IN A HELD OPERAND', () => {
 
   test('the parse route', () => {
     const p = ce.parse('f((1, 2))').evaluate();
-    expect(p.toString()).not.toMatch(/At\(a/);
+    // The residual applies `f` to the argument, which `f` binds to `a`.
+    expect(p.toString()).toBe(
+      '(_) => Apply((a, b) => If(b, At(a, 1) + At(a, 2), 42), (1, 2), _)'
+    );
     expect(ce.box(['Apply', p.json, 'True']).evaluate().toString()).toBe('3');
   });
 

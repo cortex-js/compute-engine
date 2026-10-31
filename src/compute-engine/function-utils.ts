@@ -4902,10 +4902,10 @@ type ParameterSub = readonly [
  * changes what a read in the other gives. So, when the result holds an
  * `Assign` or a `Declare` that writes the parameter `p`:
  *
- * - On a saturated call (`call` is `'saturated'`), every occurrence of `p`
- *   keeps the binding of the parameter. `captureClosures` has made the call
- *   frame the closure environment of each `Function` literal of the
- *   result, so the literal reads and writes the value of `p` in that frame.
+ * - Every occurrence of `p` keeps the binding of the parameter.
+ *   `captureClosures` has made the call frame the closure environment of
+ *   each `Function` literal of the result, so the literal reads and writes
+ *   the value of `p` in that frame.
  *   The literal then shares the binding of `p` across its applications:
  *   capturing a binding does not freeze its value, and a parameter reads
  *   the activation of its invocation, here the call that made the literal
@@ -4930,9 +4930,6 @@ type ParameterSub = readonly [
  *   and resolves by name when it runs: with a global `y = 100`, `y ↦
  *   Hold(() ↦ Block(y := y + 1, y))` applied to `5`, released and applied,
  *   gave `101` and set the global `y` to `101`.
- * - On a partial application (`call` is `'partial'`), the application
- *   declines: its residual literal does not capture the call frame, so it
- *   cannot share the written parameter with its later applications.
  *
  * `kept` holds the nodes of `expr` that `captureClosures` kept because
  * their chain does not read this call: a closure that another call made
@@ -4948,7 +4945,6 @@ type ParameterSub = readonly [
 function bindingKeyedSubs(
   expr: Expression,
   subs: ReadonlyArray<ParameterSub>,
-  call: 'saturated' | 'partial' = 'saturated',
   kept?: ReadonlySet<Expression>
 ): Expression {
   const substituted = subs.filter((sub) => {
@@ -4956,10 +4952,9 @@ function bindingKeyedSubs(
     if ((writes & (WRITE_OUTSIDE_LITERAL | WRITE_IN_LITERAL)) === 0)
       return true;
     if (
-      call === 'partial' ||
       (writes &
         (WRITE_OUTSIDE_LITERAL | READ_OUTSIDE_LITERAL | MATCHED_BY_NAME)) !==
-        0
+      0
     )
       throw new UnavoidableCapture();
     return false;
@@ -8337,68 +8332,40 @@ function makeLambda(
       if (isGenericLiteral)
         return ce.error(GENERIC_PARTIAL_APPLICATION_MESSAGE, expr.toString());
 
-      // Generate unique parameter names for the remaining (unapplied) params
-      const unappliedParams = params.slice(args.length);
-      const allSymbols = new Set([
-        ...body.symbols,
-        ...functionLiteralBoundNames(params),
-      ]);
-      const extraSymbols = unappliedParams.map((_, i) => {
-        let name = `_${i + 1}`;
-        let counter = 0;
-        while (allSymbols.has(name)) name = `_${i + 1}_${counter++}`;
-        allSymbols.add(name);
-        return ce.symbol(name, { canonical: false });
-      });
-
-      // The curried literal's remaining params keep their annotations (§6.5
-      // point 2): an unapplied `["Typed", p, T]` is re-wrapped around the fresh
-      // symbol with its original (already-normalized) type operand. The bare
-      // fresh symbols are used for body substitution; the wrapped versions
-      // become the new Function parameters.
+      // A function that holds its arguments is not curried: its partial
+      // application is the `missing` error of the first absent argument,
+      // with the frame of that argument (as `unexpected-argument` above),
+      // unless a supplied argument is already an error: step 2 above returns
+      // that error first, and it is the value. The
+      // residual below is an ordinary function literal: a call of it
+      // evaluates its own argument, and the `Apply` in its body evaluates
+      // the held prefix. So its value could differ from the full call: with
+      // `hf(a, b) = Head(a)` held and `c := 3`, the full call `hf(c + 1, 0)`
+      // is `Add`, and a call of the residual of `hf(c + 1)` with `0` was
+      // `Integer`.
       //
-      // An unapplied DESTRUCTURING parameter is carried over VERBATIM instead
-      // (`extras`, the PURE residual below): the body reads the pattern's own
-      // leaf names, and there is nothing to rename them to — a fresh symbol
-      // names the whole tuple, not its components. The DEFERRED residual is the
-      // opposite case: it re-applies the ORIGINAL literal, which does its own
-      // destructuring, so its parameter must be the single fresh symbol that
-      // receives the tuple whole (`extraSymbols`).
-      //
-      // An unapplied REST parameter stays a rest parameter in the residual:
-      // its fresh symbol is re-wrapped in `Spread`, so the residual still has
-      // no upper arity and still binds a tuple of whatever the saturating call
-      // supplies.
-      const extras = unappliedParams.map((param, i) => {
-        if (isDestructuringParameter(param)) return param;
-        if (isRestParameter(param))
-          return ce._fn('Spread', [extraSymbols[i]], { canonical: false });
-        return isFunction(param, 'Typed')
-          ? ce._fn('Typed', [extraSymbols[i], param.op2], { canonical: false })
-          : extraSymbols[i];
-      });
-
-      // Rename remaining params to fresh names in the body. A destructuring
-      // parameter is not renamed (see `extras` above), so it contributes none.
-      // The rename is keyed on the binding of the parameter
-      // (`bindingKeyedSubs`), not on its name: an argument can hold a free
-      // symbol with the name of an unapplied parameter. With `m(a, b) :=
-      // a + b`, `m(b)` was `(_1) ↦ _1 + _1`, which gave `2` for the
-      // argument `1` instead of `b + 1`.
-      const substitutions: ParameterSub[] = [];
-      for (let i = 0; i < unappliedParams.length; i++) {
-        if (isDestructuringParameter(unappliedParams[i])) continue;
-        const name = functionLiteralParameterName(unappliedParams[i]);
-        if (name)
-          substitutions.push([
-            staticParameterBinding(unappliedParams[i], name, bodyFn.localScope),
-            name,
-            extraSymbols[i],
-            false,
-          ]);
+      // This line gives the error for a `lazy` operator whose `evaluate` is
+      // a function literal and whose signature is not declared. The other
+      // held routes do not come here: a declared signature, and an Epsil
+      // `hold` function (`selectAndApply` in `multi-clause.ts`), check the
+      // arity of the call first, and put `Error("missing")` in the place of
+      // the absent argument. The three routes give the same error value.
+      if (options?.holdArguments) {
+        const frame = options.arityFrame;
+        return withErrorFrames(
+          ce.error('missing'),
+          frame === undefined
+            ? []
+            : [
+                {
+                  operator: frame.operator,
+                  index: frame.firstArgumentIndex + args.length,
+                },
+              ]
+        );
       }
 
-      // Evaluate body with known args in a fresh scope
+      // Evaluate the supplied arguments in the calling scope
       let evaluatedKnownArgs = absorbAbsenceAtNumericParams(args.map(argValue));
 
       // An argument that only became an error when EVALUATED (`f(g(1))` with
@@ -8446,15 +8413,60 @@ function makeLambda(
           }
         }
       }
-      // Purity-gated pre-evaluation (`docs/EFFECTS-MODEL.md`, "Currying /
-      // partial application"). Evaluating the body with the applied prefix is
-      // an optimization: the residual literal carries an already-reduced body.
-      // It is only sound for a PURE body — an effectful one would fire its
-      // effects at partial application, and again at saturation. So an
-      // effectful body is CAPTURED WITHOUT EVALUATION, as a residual that
-      // re-applies the ORIGINAL literal to the prefix once the last argument
-      // arrives: `(a, b) ↦ body` applied to `1` becomes
-      // `(_1) ↦ Apply((a, b) ↦ body, 1, _1)`.
+
+      // Generate unique parameter names for the remaining (unapplied)
+      // params. A name must also differ from every symbol of the supplied
+      // arguments: the residual passes them next to its own parameters, so
+      // with `A = (x, y) ↦ x + y`, `A(_1)` would otherwise be
+      // `(_1) ↦ Apply(A, _1, _1)`, which gives `4`, not `_1 + 2`, for `2`.
+      const unappliedParams = params.slice(args.length);
+      const allSymbols = new Set([
+        ...body.symbols,
+        ...functionLiteralBoundNames(params),
+        ...evaluatedKnownArgs.flatMap((arg) => arg.symbols),
+      ]);
+      const extraSymbols = unappliedParams.map((_, i) => {
+        let name = `_${i + 1}`;
+        let counter = 0;
+        while (allSymbols.has(name)) name = `_${i + 1}_${counter++}`;
+        allSymbols.add(name);
+        return ce.symbol(name, { canonical: false });
+      });
+
+      // The curried literal's remaining params keep their annotations (§6.5
+      // point 2): an unapplied `["Typed", p, T]` is re-wrapped around the fresh
+      // symbol with its original (already-normalized) type operand.
+      //
+      // An unapplied DESTRUCTURING parameter becomes the single fresh symbol:
+      // the residual re-applies the ORIGINAL literal, which does its own
+      // destructuring, so the residual's parameter receives the tuple whole.
+      //
+      // An unapplied REST parameter stays a rest parameter in the residual:
+      // its fresh symbol is re-wrapped in `Spread`, so the residual still has
+      // no upper arity and still binds a tuple of whatever the saturating call
+      // supplies.
+      const extras = unappliedParams.map((param, i) => {
+        if (isRestParameter(param))
+          return ce._fn('Spread', [extraSymbols[i]], { canonical: false });
+        return isFunction(param, 'Typed')
+          ? ce._fn('Typed', [extraSymbols[i], param.op2], { canonical: false })
+          : extraSymbols[i];
+      });
+
+      // The residual is DEFERRED for every body (`docs/EFFECTS-MODEL.md`,
+      // "Currying / partial application"): it re-applies the ORIGINAL literal
+      // to the prefix once the last argument arrives, so `(a, b) ↦ body`
+      // applied to `1` becomes `(_1) ↦ Apply((a, b) ↦ body, 1, _1)`. The body
+      // is not evaluated at partial application, for two reasons:
+      //
+      // - An effectful body would fire its effects at partial application,
+      //   and again at saturation.
+      // - A pure body evaluated with only the prefix is simplified before the
+      //   remaining arguments are known, so the curried value could differ
+      //   from the full call: with `M = (x, y) ↦ x·y`, `Apply(Apply(M, 0), ∞)`
+      //   was `0`, but `Apply(M, 0, ∞)` is `Indeterminate`. A block local that
+      //   the body reads was also read at partial application, not at the
+      //   call that supplies the last argument.
       //
       // Substituting the prefix VALUES into the body instead would be the
       // obvious encoding and is wrong: `subs()` is not capture-avoiding, so a
@@ -8463,150 +8475,54 @@ function makeLambda(
       // keeps the body untouched, and binding goes through the same scope
       // machinery as a saturated call.
       //
-      // The prefix ARGUMENTS are evaluated either way (above): producing an
-      // operand is not the body's effect, and eager operands are evaluated at
-      // the call that supplies them.
-      if (!isPureComputedEffects(effectsOf(body))) {
-        // A fresh symbol standing for an unapplied REST parameter holds the
-        // TUPLE of the trailing arguments, so it is passed on as `Spread(sym)`
-        // — spliced back into an argument run by the enclosing call — rather
-        // than as one tuple argument, which the original literal would have
-        // collected into a tuple of a tuple.
-        const deferred = ce._fn(
-          'Apply',
-          [
-            fnExpr,
-            ...evaluatedKnownArgs,
-            ...unappliedParams.map((param, i) =>
-              isRestParameter(param) ? extras[i] : extraSymbols[i]
-            ),
-          ],
-          { canonical: false }
-        );
-        return ce.function('Function', [
-          returnTypeOp !== undefined
-            ? ce._fn('Typed', [deferred, returnTypeOp], { canonical: false })
-            : deferred,
-          // The deferred residual re-applies the original literal, so an
-          // unapplied destructuring parameter takes its fresh SYMBOL here (the
-          // `Apply` above passes it whole, and the original literal
-          // destructures it), not the pattern `extras` carries for the pure
-          // residual.
-          ...unappliedParams.map((param, i) =>
-            isDestructuringParameter(param) ? extraSymbols[i] : extras[i]
+      // The prefix ARGUMENTS are evaluated here (above): producing an operand
+      // is not the body's effect, and eager operands are evaluated at the
+      // call that supplies them.
+      //
+      // A fresh symbol standing for an unapplied REST parameter holds the
+      // TUPLE of the trailing arguments, so it is passed on as `Spread(sym)`
+      // — spliced back into an argument run by the enclosing call — rather
+      // than as one tuple argument, which the original literal would have
+      // collected into a tuple of a tuple.
+      //
+      // A supplied argument whose value is `Nothing` is a COMPUTED `Nothing`
+      // (`docs/ERROR-MODEL.md`), which the full call binds to its parameter.
+      // Written as an operand of the `Apply` below, it would be a WRITTEN
+      // `Nothing`, which the canonical form of `Apply` erases, and each later
+      // argument would move one parameter to the left. So that operand is
+      // the call `Apply(() ↦ Nothing)`, whose value is a computed `Nothing`
+      // when the residual is called, which `Apply` binds to the parameter as
+      // the full call does. With `g = () ↦ Nothing` and `G = (a, b) ↦ b`,
+      // the residual of `G(g())` applied to `5` is `5`, as `G(g(), 5)` is,
+      // and with `A = (a, b) ↦ a`, the residual of `A(g())` applied to `5`
+      // is `Nothing`, as `A(g(), 5)` is. A held form does not work here:
+      // `Evaluate(Hold(Nothing))` and `ReleaseHold(Hold(Nothing))` give
+      // `Hold(Nothing)` as the value of the operand.
+      const deferred = ce._fn(
+        'Apply',
+        [
+          fnExpr,
+          ...evaluatedKnownArgs.map((arg) =>
+            isSymbol(arg, 'Nothing')
+              ? ce._fn(
+                  'Apply',
+                  [ce._fn('Function', [arg], { canonical: false })],
+                  { canonical: false }
+                )
+              : arg
           ),
-        ]);
-      }
-
-      const capturedScope =
-        definingScopeOf(ce, bodyFn.localScope!) ?? ce.context.lexicalScope;
-      const freshScope: Scope = {
-        parent: capturedScope,
-        bindings: new Map(),
-      };
-      FROZEN_CHAIN_SCOPES.add(freshScope);
-      addCallFrame(freshScope);
-      // No frame reads this scope until it is pushed (`pending-call-scopes.ts`).
-      notePendingCallScope(freshScope);
-      // The applied prefix binds exactly as a saturated call's parameters do,
-      // destructuring included (step 5); a pattern in the prefix whose argument
-      // has the wrong shape is the same error value here.
-      const boundPrefix = parameterBindings(params, evaluatedKnownArgs);
-      if (boundPrefix.error !== undefined) return boundPrefix.error;
-      for (const leaf of boundPrefix.leaves)
-        // Typed binding only in strict mode, where the applied prefix was
-        // validated in step 3.
-        declareParameterActivation(
-          ce,
-          leaf.name,
-          leaf.site,
-          leaf.value,
-          freshScope,
-          bodyFn.localScope
-        );
-
-      // Re-parent body scope to chain through freshScope, so nested
-      // scoped expressions (Sum, Product) can find params by walking up:
-      //   bigOpScope → bodyScope → freshScope(params) → capturedScope
-      // Also temporarily remove param bindings from bodyScope so they
-      // don't shadow the freshScope values during lookup.
-      const bodyScope = bodyFn.localScope!;
-      const savedParent = bodyScope.parent;
-      bodyScope.parent = freshScope;
-      enterAppliedBodyScope(bodyScope, savedParent);
-      const curryParamNames = boundPrefix.leaves.map((l) => l.name);
-      const hiddenBindings = hideBodyScopeParams(
-        ce,
-        bodyScope,
-        curryParamNames
+          ...unappliedParams.map((param, i) =>
+            isRestParameter(param) ? extras[i] : extraSymbols[i]
+          ),
+        ],
+        { canonical: false }
       );
-      markCallableFrame(freshScope, bodyScope);
-      // Each assignment local of the body is a new binding of this call.
-      declareAssignmentLocals(ce, bodyScope, freshScope);
-      // The scopes nested in the body (loops, big-ops, inner blocks) are
-      // private to this application: see `enterNestedBodyScopes`.
-      const nested = enterNestedBodyScopes(bodyFn);
-
-      // Named 'call': a function-application activation frame. The debugger's
-      // statement hook uses this to delimit stack frames (one per
-      // activation — nested unnamed Block/loop contexts group into it).
-      ce.pushScope(freshScope, 'call');
-      // The scope holds the values of the applied parameters: its pop must
-      // advance the cache version (see `_bindsValues`).
-      ce.context._bindsValues = true;
-      ACTIVE_FRAMES.add(freshScope);
-      let newBody: Expression;
-      try {
-        newBody = unwrapReturn(ce, evaluateStatements(ce, bodyFn.ops));
-        // A held operand of the body (a branch of an `If` whose condition
-        // reads an unapplied parameter) is not evaluated, so it still names
-        // an applied parameter. That name has no value once the frame is
-        // popped, so the value of each applied parameter is substituted
-        // into the result here, as a saturated call does after its body
-        // (`bindingKeyedSubs`, which does not substitute an occurrence that
-        // a nested binder rebinds). Before, with `f(a, b) := If(b, a[1] +
-        // a[2], 42)`, `f((1, 2))` was `(_1) ↦ If(_1, a[1] + a[2], 42)`, and
-        // applied to `True` it gave `a[1] + a[2]`, not `3`.
-        const prefixSubs: ParameterSub[] = [];
-        for (const leaf of boundPrefix.leaves) {
-          if (!hasReferencedName(newBody, leaf.name)) continue;
-          const frame = freshScope.bindings.get(leaf.name);
-          const value =
-            (frame !== undefined && 'value' in frame
-              ? frame.value.storedValue
-              : undefined) ?? leaf.value;
-          prefixSubs.push([
-            staticParameterBinding(leaf.site, leaf.name, bodyScope),
-            leaf.name,
-            value,
-            hasReferencedName(value, leaf.name),
-          ]);
-        }
-        if (prefixSubs.length > 0)
-          newBody = bindingKeyedSubs(newBody, prefixSubs, 'partial');
-      } finally {
-        ce.popScope();
-        ACTIVE_FRAMES.delete(freshScope);
-        bodyScope.parent = savedParent;
-        exitAppliedBodyScope(bodyScope);
-        restoreBodyScopeParams(bodyScope, hiddenBindings);
-        exitNestedBodyScopes(ce, nested);
-      }
-
-      // Re-attach the original return-type ascription onto the curried literal
-      // (§6.5 point 3): partial application does not change the result type.
-      // `newBody` is the evaluated body (the marker was consumed by
-      // evaluation), so wrap it again; canonicalization re-normalizes the
-      // ascription inside the Block (Phase 1).
-      const curriedBody =
-        substitutions.length > 0
-          ? bindingKeyedSubs(newBody, substitutions, 'partial')
-          : newBody;
-      const finalBody =
+      return ce.function('Function', [
         returnTypeOp !== undefined
-          ? ce._fn('Typed', [curriedBody, returnTypeOp], { canonical: false })
-          : curriedBody;
-      return ce.function('Function', [finalBody, ...extras]);
+          ? ce._fn('Typed', [deferred, returnTypeOp], { canonical: false })
+          : deferred,
+        ...extras,
+      ]);
     }
 
     // The element function of a lazy `Map` under `.N()` puts the arguments
@@ -8995,8 +8911,7 @@ function makeLambda(
             hasReferencedName(value, leaf.name),
           ]);
         }
-        if (subs.length > 0)
-          result = bindingKeyedSubs(result, subs, 'saturated', keptNodes);
+        if (subs.length > 0) result = bindingKeyedSubs(result, subs, keptNodes);
       }
 
       // Honor a numeric-approximation request (`N(f(2))`) by approximating

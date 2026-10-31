@@ -181,37 +181,46 @@ describe('A DERIVED CALL MAPS A LIST OF POINTS AT A DECLARED POINT PARAMETER', (
   });
 });
 
-describe('A PARTIAL APPLICATION WHOSE BODY IS AN ERROR IS TYPED ERROR', () => {
+describe('A PARTIAL APPLICATION WHOSE BODY IS AN ERROR IS A FUNCTION', () => {
+  // The partial application does not evaluate the body: its value is the
+  // function of `t`, and each call of it is the error. Its type says so:
+  // the result of the function is `error`.
   const ce = new ComputeEngine();
   ce.parse('h(a, t) \\coloneq a[1] + a[2] + t').evaluate();
 
   test('the box route', () => {
-    // `h("ab")` evaluates `"a" + "b" + t`, which is an error.
+    // `h('ab')(1)` evaluates `'a' + 'b' + 1`, which is an error.
     const call = ce.box(['h', { str: 'ab' }]);
-    expect(call.type.toString()).toBe('error');
-    expect(call.evaluate().type.toString()).toBe('error');
+    expect(call.type.toString()).toBe('(t: unknown) -> error');
+    const value = call.evaluate();
+    expect(value.operator).toBe('Function');
+    expect(ce.box(['Apply', value, 1]).evaluate().type.toString()).toBe(
+      'error'
+    );
   });
 
   test('the parse route', () => {
     const call = ce.parse('h(\\text{ab})');
-    expect(call.type.toString()).toBe('error');
-    expect(call.evaluate().type.toString()).toBe('error');
+    expect(call.type.toString()).toBe('(t: unknown) -> error');
+    expect(call.evaluate().operator).toBe('Function');
   });
 
   test('the derived route', () => {
-    expect(derived(ce, 'h', ['string'])).toBe('error');
+    expect(derived(ce, 'h', ['string'])).toBe('(t: unknown) -> error');
     // A call in the body of another function.
     ce.box(['Assign', 'G', ['Function', ['h', 's'], 's']]).evaluate();
     const call = ce.box(['G', { str: 'ab' }]);
-    expect(call.type.toString()).toBe('error');
-    expect(call.evaluate().type.toString()).toBe('error');
+    expect(call.type.toString()).toBe('(t: unknown) -> error');
+    expect(call.evaluate().operator).toBe('Function');
   });
 
   test('a partial application that is a function keeps its type', () => {
     expect(ce.parse('h((1, 2))').type.toString()).toBe(
       '(t: unknown) -> number'
     );
-    expect(ce.parse('h((1, 2))').evaluate().toString()).toBe('(_) => _ + 3');
+    expect(ce.parse('h((1, 2))').evaluate().toString()).toBe(
+      '(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (1, 2), _)'
+    );
     expect(derived(ce, 'h', ['tuple<integer, integer>'])).toBe(
       '(t: unknown) -> number'
     );
@@ -220,7 +229,9 @@ describe('A PARTIAL APPLICATION WHOSE BODY IS AN ERROR IS TYPED ERROR', () => {
   test('the point-list map before the partial application stays', () => {
     const call = ce.parse('h([(1, 2), (3, 4)])');
     expect(call.type.toString()).toBe('list<(t: unknown) -> number>');
-    expect(call.evaluate().toString()).toBe('[(_) => _ + 3,(_) => _ + 7]');
+    expect(call.evaluate().toString()).toBe(
+      '[(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (1, 2), _),(_) => Apply((a, t) => t + At(a, 1) + At(a, 2), (3, 4), _)]'
+    );
     expect(derived(ce, 'h', ['list<tuple<integer, integer>>'])).toBe(
       'list<(t: unknown) -> number>'
     );

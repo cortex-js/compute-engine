@@ -274,9 +274,10 @@ describe('CE-535: an operand boxed before the scope of a binder', () => {
 });
 
 // The partial application of a function literal (`f(3)` for a literal with
-// two parameters) evaluates the body in a call frame that holds the value of
-// the applied parameter. Its pop must advance the cache version too
-// (`_bindsValues`), so a sign cached in the body during the call is not kept.
+// two parameters) is a residual function, and its call evaluates the body in
+// a call frame that holds the value of each parameter. The pop of that frame
+// must advance the cache version too (`_bindsValues`), so a sign cached in
+// the body during the call is not kept.
 describe('CE-543: a partial application', () => {
   const ce4 = new ComputeEngine();
   ce4.declare('SignOf543b', {
@@ -308,7 +309,7 @@ describe('CE-543: a partial application', () => {
     expect(node.toString()).toBe('x + 1');
     expect(node.sgn).toBeUndefined();
     // Read the sign at each scope pop made outside every call frame: the
-    // first one is the pop of the frame of the partial application. Later
+    // first one is the pop of the frame of the call of the residual. Later
     // declarations (the residual literal is boxed after the pop) advance the
     // version anyway, so a read after the call alone would not see a pop
     // that left the cache in place.
@@ -326,14 +327,16 @@ describe('CE-543: a partial application', () => {
       )
         signs.push(String(node.sgn));
     };
+    let partial: Expression;
     let result: Expression;
     try {
-      result = make().evaluate();
+      partial = make().evaluate();
+      result = ce4.box(['Apply', partial, 5]).evaluate();
     } finally {
       engine4._noteStateEvent = original;
     }
     // A function of the remaining parameter `y`.
-    expect(result.operator).toBe('Function');
+    expect(partial.operator).toBe('Function');
     expect(result.toString()).toContain('"positive"');
     expect(signs.length).toBeGreaterThan(0);
     expect(signs.every((s) => s === 'undefined')).toBe(true);
