@@ -574,6 +574,12 @@ import { literalParamsMap } from '../library/core.js';
 import { isAccessorOfPossibleList } from '../boxed-expression/point-accessor-operand.js';
 import { elementwiseMaskRank } from '../library/control-structures.js';
 import { colorSpaceOf, isColorValued } from './color-space-fact.js';
+import {
+  curriedApplication,
+  isPartialApplication,
+  partialApplicationValueDecline,
+  rewritePartialApplications,
+} from './partial-application.js';
 import type {
   CompileMode,
   CompileTarget,
@@ -7324,6 +7330,15 @@ const JAVASCRIPT_FUNCTIONS: CompiledFunctions<Expression> = {
   Apply: (args, compile, target) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
+    // A partial application of a function literal applied to more arguments
+    // is one call of the literal (`curriedApplication`), when it compiles.
+    // A partial application on its own is a function value. Its residual is
+    // built at compile entry, at the positions where every call of it
+    // supplies all its arguments (`rewritePartialApplications`); one that
+    // reaches this handler declines (`partialApplicationValueDecline`).
+    args = curriedApplication(args) ?? args;
+    if (isPartialApplication(args))
+      throw new Error(partialApplicationValueDecline(args));
     // A collection at a parameter of the literal declared `expression` is
     // declined; otherwise the literal is compiled as a checked callee.
     if (isFunction(args[0], 'Function'))
@@ -11154,6 +11169,16 @@ export class JavaScriptTarget implements LanguageTarget<Expression> {
     // semantics (scaled trig args, scaled inverse-trig results) so compiled
     // output agrees with evaluate().
     expr = rewriteAngularUnit(expr);
+    // A partial application of a function literal has a function as its
+    // value, the residual literal over the remaining parameters
+    // (`rewritePartialApplications`). At the root, the result then has the
+    // `calling: 'lambda'` contract of a compiled `Function` literal, and a
+    // block local that holds one is a block-local function.
+    // A head the caller overrode is withheld, as from the unroll below.
+    expr = rewritePartialApplications(
+      expr,
+      overriddenCompilationHeads(options.operators, options.functions)
+    );
     // Turn a collection whose WIDTH is known at compile time into straight-line
     // scalar code, so this target sees the shape the interpreter computes
     // rather than a runtime array (`fixed-width-unroll.ts`). A head the caller

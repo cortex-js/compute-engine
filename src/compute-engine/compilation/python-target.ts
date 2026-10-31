@@ -41,6 +41,12 @@ import {
 } from './base-compiler.js';
 import { rewriteAngularUnit } from './angular-unit.js';
 import {
+  curriedApplication,
+  isPartialApplication,
+  partialApplicationValueDecline,
+  rewritePartialApplications,
+} from './partial-application.js';
+import {
   assertAccumulatorFitsStep,
   elementsMayBeCollections,
   inPlaceUpdateChains,
@@ -68,7 +74,10 @@ import {
   isString,
   isSymbol,
 } from '../boxed-expression/type-guards.js';
-import { functionLiteralParameterName } from '../boxed-expression/function-literal.js';
+import {
+  functionLiteralParameterName,
+  isRestParameter,
+} from '../boxed-expression/function-literal.js';
 import { compositionLiteral } from '../function-utils.js';
 import {
   absentBaseReadIsNumeric,
@@ -7429,6 +7438,37 @@ const PYTHON_FUNCTIONS: CompiledFunctions<Expression> = {
   Apply: (args, compile) => {
     if (args[0] == null)
       throw new Error('Could not compile `Apply`: missing function');
+    // A partial application of a function literal applied to more arguments
+    // is one call of the literal (`curriedApplication`), when it compiles.
+    // A partial application on its own is a function value. Its residual is
+    // built at compile entry, at the positions where every call of it
+    // supplies all its arguments (`rewritePartialApplications`); one that
+    // reaches this handler declines (`partialApplicationValueDecline`). A Python call with too
+    // few arguments raises a `TypeError`.
+    args = curriedApplication(args) ?? args;
+    if (isPartialApplication(args))
+      throw new Error(partialApplicationValueDecline(args));
+    // A call with too many arguments is an `unexpected-argument` error in the
+    // interpreter and a `TypeError` in Python, and a literal with no
+    // parameter ignores its arguments in the interpreter and raises in
+    // Python. Both are declined. A rest parameter takes any count of
+    // trailing arguments.
+    if (isFunction(args[0], 'Function')) {
+      const params = args[0].ops.slice(1);
+      if (
+        !params.some((p) => isRestParameter(p)) &&
+        params.length !== args.length - 1
+      )
+        throw new Error(
+          `Could not compile \`Apply\`: the function takes ${params.length} ` +
+            `parameter(s) but ${args.length - 1} argument(s) are supplied. ` +
+            (params.length === 0
+              ? `The interpreter ignores the arguments of a function with no ` +
+                `parameter, and the Python call raises a \`TypeError\`.`
+              : `The interpreter gives an \`unexpected-argument\` error, and ` +
+                `the Python call raises a \`TypeError\`.`)
+        );
+    }
     // A collection at a parameter of the literal declared `expression` is
     // declined; otherwise the literal is compiled as a checked callee.
     if (isFunction(args[0], 'Function'))
@@ -8039,6 +8079,11 @@ export class PythonTarget implements LanguageTarget<Expression> {
     const source = expr;
     // Reproduce the engine's `angularUnit` semantics in radian-based code.
     expr = rewriteAngularUnit(expr);
+    // A partial application of a function literal has a function as its
+    // value, the residual literal over the remaining parameters, which this
+    // target compiles as a lambda; a block local that holds one is then a
+    // block-local function (`rewritePartialApplications`).
+    expr = rewritePartialApplications(expr);
     // Turn a collection whose WIDTH is known at compile time into straight-line
     // scalar code, so this target sees the shape the interpreter computes
     // rather than a runtime array (`fixed-width-unroll.ts`). No head is
@@ -8179,6 +8224,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry: in degree mode `sin(x)` is the sine of `x` degrees.
     expr = rewriteAngularUnit(expr);
+    // A partial application of a function literal, as `compile()` does at
+    // its entry (`rewritePartialApplications`).
+    expr = rewritePartialApplications(expr);
     const vars = options.vars as Record<string, string> | undefined;
     // Root compilation boundary (see `compile`). `varsKeys`/`constantFold`:
     // same constant-folder contract as `compileOrThrow` above.
@@ -8265,6 +8313,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry.
     expr = rewriteAngularUnit(expr);
+    // A partial application of a function literal, as `compile()` does at
+    // its entry (`rewritePartialApplications`).
+    expr = rewritePartialApplications(expr);
     // Shadow the declared parameters so they stay bare identifiers (never
     // folded to an assigned engine value).
     // Root compilation boundary (see `compile`). The declared parameters are
@@ -8495,6 +8546,9 @@ export class PythonTarget implements LanguageTarget<Expression> {
     // The engine's angular unit, in radian-based code, as `compile()` does
     // at its entry.
     expr = rewriteAngularUnit(expr);
+    // A partial application of a function literal, as `compile()` does at
+    // its entry (`rewritePartialApplications`).
+    expr = rewritePartialApplications(expr);
     // Root compilation boundary (see `compile` and `compileFunction`).
     const target = this.createTarget({
       var: this.makeVarResolver(undefined, parameters),

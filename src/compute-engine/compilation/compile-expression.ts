@@ -18,6 +18,7 @@ import {
   isLaneMismatchError,
 } from './diagnostics.js';
 import { rewriteAngularUnit } from './angular-unit.js';
+import { rewritePartialApplications } from './partial-application.js';
 import {
   overriddenCompilationHeads,
   unrollFixedWidthCollections,
@@ -167,17 +168,27 @@ export function compile<
       // A head the caller overrode through the `operators`/`functions`
       // options is withheld from the unroll: the caller's implementation
       // replaces the emission and receives the node's own operands, which an
-      // unroll would change.
-      const rewritten = unrollFixedWidthCollections(rewriteAngularUnit(expr), {
-        skipHeads: overriddenCompilationHeads(
-          options.operators,
-          options.functions
-        ),
-        // The budget a DIRECT target applies is its own; the `iterationBudget`
-        // option is read by the registered-target route only.
-        iterationBudget: options.target.iterationBudget,
-        readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
-      });
+      // unroll would change, and from the rewrite of partial applications.
+      // A partial application of a function literal is rewritten as on a
+      // registered target (`rewritePartialApplications`): a call of one is
+      // merged into one call of the literal, and one whose value is a
+      // function becomes its residual `Function` literal, which this target
+      // compiles or declines as it does any `Function` literal.
+      const skipHeads = overriddenCompilationHeads(
+        options.operators,
+        options.functions
+      );
+      const rewritten = unrollFixedWidthCollections(
+        rewritePartialApplications(rewriteAngularUnit(expr), skipHeads),
+        {
+          skipHeads,
+          // The budget a DIRECT target applies is its own; the
+          // `iterationBudget` option is read by the registered-target route
+          // only.
+          iterationBudget: options.target.iterationBudget,
+          readsLiveSource: (name) => typeof options.vars?.[name] === 'string',
+        }
+      );
       // Install a fresh naming context for generated temporaries on every call,
       // so a target the caller reuses never carries stale numbering into the
       // next compilation; `compileRoot`'s signature is unchanged — this is the
