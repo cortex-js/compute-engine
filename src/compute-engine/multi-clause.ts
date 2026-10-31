@@ -546,8 +546,9 @@ function assertClauseFitsDeclared(
     // stamps most bare parameters to the declared type, but not all of them (a
     // declared type mentioning a quantified variable, or `unknown`/`any`, is
     // deliberately left alone), so those still arrive as `unknown` and must
-    // pass. Testing the TYPE instead would also wave through an author-written
-    // `x: unknown`, which is a stated arm and has to be checked like any other.
+    // pass. An author-written `x: unknown` is a bare parameter too: the
+    // canonical literal does not keep that annotation
+    // (`canonicalFunctionLiteralArguments()`, `function-utils.ts`).
     else if (bareParams[i] === true) continue;
     else if (!isSubtype(params[i].type, d))
       reject(
@@ -767,8 +768,10 @@ export function defineFunctionClause(
   // ascription below stamps them — afterwards a stamped parameter is
   // indistinguishable from one the author annotated. `assertClauseFitsDeclared`
   // needs the distinction: a bare parameter narrows nothing and its arm is the
-  // declared parameter, but an author-written `x: unknown` is a stated arm and
-  // must still be checked against the declared domain like any other.
+  // declared parameter, but an annotated parameter is a stated arm and must
+  // still be checked against the declared domain. A parameter annotated
+  // `unknown` arrives bare: canonicalization removes that annotation, because
+  // `unknown` is the type of a parameter with no declaration.
   const bareParams = isFunction(literal, 'Function')
     ? literal.ops.slice(1).map((p) => !isFunction(p, 'Typed'))
     : [];

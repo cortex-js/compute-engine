@@ -33,7 +33,52 @@
   parameters; when it does not (`Add`), the interpreter evaluates the `Map`.
   (#495, contributed by [enumeratio](https://github.com/enumeratio) in #496)
 
+- **A partial application of a function literal compiles.** The interpreter
+  curries a call with fewer arguments than parameters: `Apply((x, y) ↦ x + y,
+  1)` is the function `(_1) ↦ _1 + 1`. Every target declined it ("the function
+  takes 2 parameter(s) but 1 argument(s) are supplied"), and so did
+  `Apply(Apply((x, y) ↦ x + y, 1), u)`. Now a partial application that is
+  applied to the remaining arguments is one call of the literal on every
+  target: `u + 1.0` on `glsl` and `wgsl`. A partial application whose value
+  is a function compiles to a function on `javascript`, `interval-js` and
+  `python` when each argument it supplies is a constant: at the root, the
+  `javascript` result has `calling: 'lambda'` (`run(2)` is `3`), and a block
+  local can hold it (`g := Apply(f, 1); g(u)`). An argument that is not a
+  constant (a variable, `Random()`) declines, because the compiled function
+  reads it when it is called and the interpreter reads it when the partial
+  application is evaluated. A literal with a rest parameter declines. `glsl`
+  and `wgsl` have no function values and decline a partial application that
+  is not applied, with a message that says so.
+
 ### Bug Fixes
+
+- **Python: a call of a function literal with the wrong number of arguments
+  is declined.** `Apply((x, y) ↦ x + y, 1)` compiled to
+  `((lambda x, y: x + y))(1)`, which raises a `TypeError` in Python where the
+  interpreter gives a function. It now compiles to the function
+  `(lambda _1: ((lambda x, y: x + y))(1, _1))`. A call with too many arguments
+  (an `unexpected-argument` error in the interpreter) and a call of a literal
+  with no parameter (which ignores its arguments in the interpreter) are
+  declined.
+
+- **A held operand keeps `Nothing` as written.** `ce.box()` of a `Hold`
+  replaced every `Nothing` and every empty `Sequence` in the held operand with
+  `Error('missing')`: `ce.box(['Hold', ['List', 1, 'Nothing']])` gave
+  `Hold(List(1, Error('missing')))`, and the `Nothing` bounds of a held
+  indefinite `Integrate` became errors. The operand is now kept as written,
+  as `ce.function('Hold', …)` already did, and `ReleaseHold` gives the same
+  result as boxing the operand directly (`List(1)`). Only an absent operand
+  (`['Hold']`) is still reported as missing.
+
+- **A closure returned by a function keeps the local functions of the call.**
+  `(y ↦ Block(k := 1, f := z ↦ z + k, x ↦ y·x + f(x)))(3)(2)` gave `k + 8`:
+  the local function `f` lost the other locals of the call when the call
+  ended. It now gives `9`. A function literal evaluated in the body of a
+  function keeps the call frame of that call, and reads the last value of a
+  local that is assigned again after it is made. And
+  `(w ↦ (x ↦ Block(g := z ↦ 3, x + g(0))))(1)(5)` gave `5 + g(0)`: the
+  returned closure did not find the local function that its own body
+  defines. It now gives `8`. `evaluateAsync()` gives the same values.
 
 - **A held binder keeps its own index when a parameter has the same name.**
   `(k ↦ Hold(Sum(k·y, Limits(k, 1, 3))))(5)` gave
@@ -509,6 +554,25 @@
   whose elements cannot be collections: with `h := (t: expression) ↦ 2t`,
   `Map(h, rows)` over `[[1, 2], [3, 4]]` gave `[null, null]`; it now
   declines, and `Map(h, L)` with `L` declared `list<real>` still compiles.
+
+- **A function parameter declared `unknown` is the same as a parameter with no
+  declaration** (follow-up of GitHub issue #488). The type of a bare
+  parameter comes from the body, but the type of a parameter declared
+  `unknown` stayed `unknown`. So a body that reads the parameter as a list did
+  not change how a list argument is passed. With
+  `leaves := (t: unknown) ↦ (1 if t ∈ ℤ else leaves(t[1]) + leaves(t[2]))`,
+  `leaves([[0, 0], 0])` gave `[[1, 1], 1]`; now it gives `3`, as with
+  `leaves := t ↦ …`. With `f := (t: unknown) ↦ Count(t)`, `f([[0, 0], 5])`
+  gave a list of errors; now it gives `2`. The function literal now does not
+  keep the annotation: `(t: unknown) ↦ t + 1` is `t ↦ t + 1`. A transparent
+  alias of `unknown` (`type alias U = unknown`) is the same. This applies to
+  a function literal, `Apply`, `:=`, `DefineFunction`, a function declared
+  `function` or `(unknown) -> unknown` and then assigned with
+  `ce.assign()`, a callback at a declared callback slot, a function declared
+  with a value-kind parameter, a clause, and a function local to a block. A
+  clause `f(x: unknown) = 1` under
+  `let f: (integer) -> integer` is now accepted, as `f(x) = 1` is; before, it
+  was an invalid clause definition.
 
 - **Interval target: a loop over a literal list compiles.** On `interval-js`, a
   `Loop` or a `Comprehension` over a `List`, a `Tuple` or a `Map`, written

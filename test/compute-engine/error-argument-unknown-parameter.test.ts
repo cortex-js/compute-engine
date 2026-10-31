@@ -773,8 +773,12 @@ describe('THE OTHER ARGUMENT CHECKS ARE UNCHANGED', () => {
     expect(errorCode(call.evaluate())).toBe('incompatible-type list string');
   });
 
+  // The parameter is declared `any`, not `unknown`: a parameter declared
+  // `unknown` is a parameter with no declaration (user decision 2026-10-30,
+  // recorded with GitHub issue #488), and a call of a function with a bare
+  // parameter and no argument is a partial application, `(_) => _`.
   test('a missing argument is the `missing` error', () => {
-    defineIdentity('op', 'unknown');
+    defineIdentity('op', 'any');
     const call = ce.box(['op']);
     expect(call.isValid).toBe(false);
     expect(errorCode(call.evaluate())).toBe('missing');

@@ -44,8 +44,15 @@ wrote**, not by the operand shapes:
    `leaves := (t: any) ↦ (1 if t ∈ ℤ else leaves(t[1]) + leaves(t[2]))`,
    `leaves([[0, 0], 0])` is `3`, not `[[1, 1], 1]`. A transparent alias of
    a wide type is a wide type; a nominal type is not. A parameter declared
-   `unknown` is read as a parameter with no declaration and is still
-   mapped. The test is `isScalarType()`
+   `unknown`, or with a transparent alias of it, is the same as a parameter
+   with no declaration, also for the reading of the body: the canonical
+   literal does not keep the annotation, so `(t: unknown) ↦ …` is `t ↦ …`,
+   and the `leaves` function above with `t: unknown` also gives `3`. This
+   is tested for a function literal, `Apply`, `:=`, `DefineFunction`, a
+   function declared `function` or `(unknown) -> unknown` and then
+   assigned, a declared callback slot, a value-kind declaration, a clause
+   and a block-local function. The test is
+   `isScalarType()`
    (`boxed-expression/function-literal.ts`). Pinned by
    `test/compute-engine/apply-literal-maps.test.ts` ("A PARAMETER DECLARED
    WITH A WIDE TYPE").

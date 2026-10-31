@@ -1552,3 +1552,214 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
     }
   );
 });
+
+// A parameter declared `unknown` is a parameter with no declaration, on every
+// route (user decision 2026-10-30, recorded with GitHub issue #488). The
+// canonical literal does not keep the annotation, so the body narrows the
+// type of the parameter as it does for a bare one: in the `leaves` recursion,
+// `t[1]` makes `t` an indexed collection, and a list argument is bound whole.
+// Before, `(t: unknown) ↦ …` read the body as if `t` could only be a scalar,
+// mapped the call over the leaves of the list, and `leaves([[0, 0], 0])` was
+// `[[1,1],1]`, not `3`.
+describe('A PARAMETER DECLARED UNKNOWN IS A PARAMETER WITH NO DECLARATION', () => {
+  const LEAVES_BODY = [
+    'If',
+    ['Element', 't', 'Integers'],
+    1,
+    ['Add', ['leaves', ['At', 't', 1]], ['leaves', ['At', 't', 2]]],
+  ];
+  const CASES: Array<[string, unknown, unknown, string, string]> = [
+    [
+      'the leaves recursion',
+      LEAVES_BODY,
+      ['List', ['List', 0, 0], 0],
+      'leaves',
+      '3',
+    ],
+    [
+      'an integer test',
+      ['If', ['Element', 't', 'Integers'], 0, 1],
+      ['List', ['List', 0, 0], 5],
+      'f',
+      '[[0,0],0]',
+    ],
+    ['Count', ['Count', 't'], ['List', ['List', 0, 0], 5], 'f', '2'],
+    ['Length of a tuple', ['Length', 't'], ['Tuple', 3, 4], 'f', '2'],
+  ];
+  const BARE = 't';
+  const UNKNOWN = ['Typed', 't', "'unknown'"];
+
+  /** Each route that defines the function and calls it with `arg`, as a
+   * thunk that returns the call in a new engine. A function literal cannot
+   * call itself, so the recursive body is given only the named routes. */
+  function routes(body: unknown, param: unknown, arg: unknown, name: string) {
+    const f = ['Function', body, param];
+    const named = (define: (ce: ComputeEngine) => void) => () => {
+      const ce = new ComputeEngine();
+      define(ce);
+      return ce.box([name, arg] as never);
+    };
+    const all: Record<string, () => Expression> = {
+      Assign: named((ce) => {
+        ce.box(['Assign', name, f] as never).evaluate();
+      }),
+      DefineFunction: named((ce) => {
+        ce.box(['DefineFunction', name, f] as never).evaluate();
+      }),
+      'declared function, then assigned': named((ce) => {
+        ce.declare(name, 'function');
+        ce.assign(name, ce.box(f as never));
+      }),
+      'host signature (unknown) -> unknown, then assigned': named((ce) => {
+        ce.declare(name, '(unknown) -> unknown');
+        ce.assign(name, ce.box(f as never));
+      }),
+    };
+    if (name !== 'leaves') {
+      all['function literal'] = () =>
+        new ComputeEngine().box([f, arg] as never);
+      all['Apply'] = () => new ComputeEngine().box(['Apply', f, arg] as never);
+    }
+    return all;
+  }
+
+  const plain = (x: Expression): unknown =>
+    x.operator === 'List' || x.operator === 'Tuple'
+      ? x.ops!.map(plain)
+      : x.re;
+
+  test.each(CASES)(
+    '%s: the value and the type are the same as for a bare parameter',
+    (_, body, arg, name, expected) => {
+      const bare = routes(body, BARE, arg, name);
+      const unknown = routes(body, UNKNOWN, arg, name);
+      for (const route of Object.keys(bare)) {
+        const results = [bare[route](), unknown[route]()].map((call) => {
+          const value = call.evaluate();
+          expect([route, value.type.matches(call.type)]).toEqual([route, true]);
+          // The compiled code gives the value of the interpreter, or declines.
+          // With `fallback: false`, a decline throws. Only the compilation is
+          // in the `try`, so a wrong compiled value fails the test.
+          let compiled: unknown = 'declined';
+          let result: ReturnType<typeof compile> | undefined;
+          try {
+            result = compile(call, {
+              to: 'javascript',
+              constantFold: false,
+              fallback: false,
+            } as never);
+          } catch {
+            result = undefined;
+          }
+          if (result?.success) {
+            compiled = result.run!({});
+            expect([route, compiled]).toEqual([route, plain(value)]);
+          }
+          return [value.toString(), call.type.toString(), compiled];
+        });
+        expect([route, results[0][0]]).toEqual([route, expected]);
+        expect([route, ...results[1]]).toEqual([route, ...results[0]]);
+      }
+    }
+  );
+
+  // A function local to a `Block`. The type of the block is computed before
+  // the block runs, so it is not compared with the value here; it is the
+  // same for the two parameters.
+  test.each(CASES)(
+    '%s: a block-local function',
+    (_, body, arg, name, expected) => {
+      const results = [BARE, UNKNOWN].map((param) => {
+        const call = new ComputeEngine().box([
+          'Block',
+          ['Assign', name, ['Function', body, param]],
+          [name, arg],
+        ] as never);
+        return [call.evaluate().toString(), call.type.toString()];
+      });
+      expect(results[0][0]).toBe(expected);
+      expect(results[1]).toEqual(results[0]);
+    }
+  );
+
+  test('the parse route gives a bare parameter', () => {
+    const ce = new ComputeEngine();
+    const bare = ce.parse('(t)\\mapsto \\operatorname{Count}(t)');
+    const unknown = ce.parse(
+      '(t\\colon unknown)\\mapsto \\operatorname{Count}(t)'
+    );
+    expect(unknown.json).toEqual(bare.json);
+    expect(unknown.type.toString()).toBe(bare.type.toString());
+  });
+
+  // A callback literal at a declared callback slot takes the parameter type
+  // of the slot. The written literal is read before it is canonicalized
+  // (`annotateFunctionLiteralParams()`), so that step reads `x: unknown` as
+  // a bare `x` too.
+  test('a declared callback slot types the parameter', () => {
+    const types = ['x', ['Typed', 'x', "'unknown'"]].map((param) => {
+      const ce = new ComputeEngine();
+      ce.declare('h', '((integer) -> integer) -> integer');
+      const call = ce.box([
+        'h',
+        ['Function', ['Add', 'x', 1], param],
+      ] as never);
+      return call.ops![0].type.toString();
+    });
+    expect(types).toEqual(['(x: integer) -> integer', '(x: integer) -> integer']);
+  });
+
+  // A function declared with a value-kind parameter (`residue`) is
+  // canonicalized again from its written form, with the parameter typed by
+  // the declaration, so that the body keeps `x/x` instead of `1`
+  // (`kindTypedFunctionLiteral()`). The written form is recorded only for a
+  // literal with no annotation, so `x: unknown` must be recorded as `x`.
+  test('a value-kind declaration reads the written form', () => {
+    const values = ['x', ['Typed', 'x', "'unknown'"]].map((param) => {
+      const ce = new ComputeEngine();
+      ce.declare('g', '(residue) -> residue');
+      ce.assign(
+        'g',
+        ce.box([
+          'Function',
+          ['Divide', 'x', 'x'],
+          param,
+        ] as never)
+      );
+      return ce
+        .box(['g', ['ResidueClass', 3, 4]] as never)
+        .evaluate()
+        .toString();
+    });
+    expect(values).toEqual(['ResidueClass(1, 4)', 'ResidueClass(1, 4)']);
+  });
+
+  // A transparent alias of `unknown` is `unknown`. A nominal type is not
+  // unfolded, so it stays an annotation.
+  test('a transparent alias of unknown is unknown', () => {
+    const results = ["'unknown'", "'U'"].map((type) => {
+      const ce = new ComputeEngine();
+      ce.declareType('U', 'unknown', { alias: true });
+      const f = ['Function', ['Count', 't'], ['Typed', 't', type]];
+      const call = ce.box([f, ['List', ['List', 0, 0], 5]] as never);
+      return [
+        call.evaluate().toString(),
+        call.type.toString(),
+        JSON.stringify(ce.box(f as never).json),
+      ];
+    });
+    expect(results[0][0]).toBe('2');
+    expect(results[1]).toEqual(results[0]);
+
+    // A nominal type `N` defined as `unknown` keeps its annotation.
+    const ce = new ComputeEngine();
+    ce.declareType('N', 'unknown');
+    const nominal = ce.box([
+      'Function',
+      ['Count', 't'],
+      ['Typed', 't', "'N'"],
+    ] as never).json;
+    expect(JSON.stringify(nominal)).toContain('"Typed"');
+    expect(JSON.stringify(nominal)).not.toBe(results[0][2]);
+  });
+});

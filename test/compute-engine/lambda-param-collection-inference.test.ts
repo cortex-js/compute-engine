@@ -1098,10 +1098,16 @@ describe('a collection passed in a self-call types the parameter', () => {
       ).toBe('[1,2]');
     });
 
-    test('a slot annotated `unknown` keeps the broadcast', () => {
+    // A parameter declared `unknown` is a parameter with no declaration
+    // (user decision 2026-10-30, recorded with GitHub issue #488), so it
+    // reads the self-call as a bare slot does.
+    test('a slot annotated `unknown` reads the self-call, as a bare slot', () => {
       expect(
         run('f(n, s: unknown) = s if n == 0 else f(n - 1, [1, 2])\nf(1, [0])')
-      ).toBe('[[1,2]]');
+      ).toBe('[1,2]');
+      expect(
+        run('f(n, s) = s if n == 0 else f(n - 1, [1, 2])\nf(1, [0])')
+      ).toBe('[1,2]');
     });
   });
 

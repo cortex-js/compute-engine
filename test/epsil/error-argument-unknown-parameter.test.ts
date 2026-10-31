@@ -169,8 +169,12 @@ describe('THE OTHER ARGUMENT CHECKS ARE UNCHANGED', () => {
     ]);
   });
 
+  // The parameter is declared `any`, not `unknown`: a parameter declared
+  // `unknown` is a parameter with no declaration (user decision 2026-10-30,
+  // recorded with GitHub issue #488), and a call of a function with a bare
+  // parameter and no argument is a partial application.
   test('a missing argument is the `missing` error', () => {
-    expect(run('function op(a: unknown) { a }\nop()').value.json).toEqual([
+    expect(run('function op(a: any) { a }\nop()').value.json).toEqual([
       'Error',
       "'missing'",
       ['ErrorTrace', ['ErrorFrame', "'op'", 1]],

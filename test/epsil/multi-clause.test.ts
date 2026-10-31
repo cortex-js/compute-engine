@@ -328,18 +328,22 @@ fact(5)`);
     expect(executeEpsil(ce, 'f(1)').value.toString()).toBe('1');
   });
 
-  test('an explicit `x: unknown` annotation is still checked, unlike a bare parameter', () => {
-    // The bypass for an un-narrowed parameter keys on what the author WROTE,
-    // not on the resulting type. Keying on the type would wave through an
-    // author-written `unknown` annotation, which is a stated arm and is not a
-    // subtype of the declared domain — the same hole the adjacent test closes
-    // for `string`.
-    const ce = new ComputeEngine();
-    const { diagnostics } = executeEpsil(
-      ce,
-      'let f: (integer) -> integer\nf(x: unknown) = 1\nf(1)'
-    );
-    expect(JSON.stringify(diagnostics)).toContain('invalid clause definition');
+  test('an explicit `x: unknown` annotation is a bare parameter', () => {
+    // A parameter declared `unknown` is a parameter with no declaration, on
+    // every route (user decision 2026-10-30, recorded with GitHub issue
+    // #488). So `f(x: unknown) = 1` narrows nothing, and is accepted under
+    // the declaration as `f(x) = 1` is. An annotation that narrows, such as
+    // `string`, is still checked (see the next test).
+    for (const param of ['x', 'x: unknown']) {
+      const ce = new ComputeEngine();
+      const { value, diagnostics } = executeEpsil(
+        ce,
+        `let f: (integer) -> integer\nf(${param}) = 1\nf(1)`
+      );
+      expect(diagnostics).toEqual([]);
+      expect(value.toString()).toBe('1');
+      expect(ce.box('f').type.toString()).toBe('(integer) -> integer');
+    }
   });
 
   test('an ANNOTATED clause parameter is still checked against the declaration', () => {

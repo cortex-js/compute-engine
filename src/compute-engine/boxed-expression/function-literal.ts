@@ -460,6 +460,45 @@ export function isWideParameterType(
   }
 }
 
+/** True for `unknown`, the type of a parameter with no declaration, and for
+ * a transparent alias of it (`type alias U = unknown`). The alias is unfolded
+ * as {@link isWideParameterType} unfolds it; a nominal reference stays
+ * opaque.
+ * @internal
+ */
+export function isUnknownParameterType(
+  t: Type,
+  seen?: Set<TypeReference>
+): boolean {
+  if (typeof t === 'string') return t === 'unknown';
+  if (t.kind !== 'reference' || t.alias !== true || t.def === undefined)
+    return false;
+  // Cycle guard, as in `isWideParameterType`.
+  if (seen === undefined) seen = new Set();
+  else if (seen.has(t)) return false;
+  seen.add(t);
+  try {
+    return isUnknownParameterType(t.def, seen);
+  } finally {
+    seen.delete(t);
+  }
+}
+
+/** True for a function-literal parameter `["Typed", symbol, T]` where `T` is
+ * `unknown` or a transparent alias of it ({@link isUnknownParameterType}).
+ * Such a parameter is the same as the bare `symbol` (user decision
+ * 2026-10-30, recorded with GitHub issue #488): each step that reads the
+ * parameters of a literal, raw or canonical, reads it as the bare symbol.
+ * @internal
+ */
+export function isUnknownTypedParameter(
+  param: Expression
+): param is Expression & FunctionInterface {
+  if (!isFunction(param, 'Typed') || !isSymbol(param.op1)) return false;
+  const t = parseTypeOperand(param.op2);
+  return t !== undefined && isUnknownParameterType(t);
+}
+
 /** A type is "scalar" for broadcasting purposes if a function whose
  * parameter has this type is mapped over the elements of a collection
  * argument at that parameter, instead of receiving the collection whole.

@@ -68,6 +68,7 @@ import {
   ANONYMOUS_SLOT_NAMES,
   freeAnonymousSlots,
   isDestructuringParameter,
+  isUnknownTypedParameter,
   isRestParameter,
   capturedSymbols,
   markFunctionLiteralParameter,
@@ -533,7 +534,10 @@ export function canonicalFunctionLiteral(
  *   `_ > 5` lifts to a literal only later);
  * - an operand that is already CANONICAL — its raw structure is gone;
  * - a literal with no explicit parameter list, and any parameter that is
- *   already annotated (an author's annotation is never overwritten).
+ *   already annotated (an author's annotation is never overwritten). The
+ *   exception is an annotation `unknown`, or a transparent alias of it: it
+ *   is read as a bare parameter (`isUnknownTypedParameter()`), so the slot
+ *   type replaces it.
  */
 export function annotateFunctionLiteralParams(
   ce: ComputeEngine,
@@ -551,11 +555,14 @@ export function annotateFunctionLiteralParams(
   if (ops.length < 2) return undefined;
 
   let rewritten = false;
-  const params = ops.slice(1).map((param, i) => {
+  const params = ops.slice(1).map((written, i) => {
     const t = paramTypes[i];
-    if (t === undefined) return param;
+    if (t === undefined) return written;
+    // A parameter annotated `unknown` is a bare parameter, and takes the
+    // type of the slot as a bare one does.
+    const param = isUnknownTypedParameter(written) ? written.op1 : written;
     // Not a bare symbol: an already-annotated parameter, or an error.
-    if (!isSymbol(param)) return param;
+    if (!isSymbol(param)) return written;
     rewritten = true;
     // The same normalized spelling `normalizeTypedParameter` produces (a
     // string type operand), so the rebuilt literal behaves exactly like the
@@ -667,6 +674,11 @@ export function canonicalFunctionLiteralOperands(
   ops: ReadonlyArray<Expression>,
   options?: { inferredParamTypes?: ReadonlyMap<string, Type> }
 ): Expression | undefined {
+  // A parameter annotated `unknown` is a bare parameter: remove the
+  // annotation first, so that the written form recorded below is the one of
+  // a literal with no annotation (`writtenUntypedFunctionLiteral()`).
+  if (ops.slice(1).some((x) => isUnknownTypedParameter(x)))
+    ops = ops.map((x, i) => (i > 0 && isUnknownTypedParameter(x) ? x.op1 : x));
   if (ops.length === 1) {
     const [body, params] = anonymousParameters(ops[0]);
     if (params.length > 0)
@@ -854,7 +866,9 @@ export function canonicalFunctionLiteralArguments(
   // Parameters: a bare symbol (inferred type) or an annotated parameter
   // `["Typed", symbol, type]`. Anything else is an error. An annotated
   // parameter keeps its `Typed` wrapper, normalized so the type operand is a
-  // string (mirroring how `Declare` keeps its type operand raw).
+  // string (mirroring how `Declare` keeps its type operand raw), except a
+  // parameter annotated `unknown` (or an alias of it), which becomes the
+  // bare symbol.
   const params = ops.slice(1).map((x, i) => {
     if (isSymbol(x)) return x;
     // A REST parameter — `["Spread", symbol]`, spelled `(a, ...rest) => …` in
@@ -888,6 +902,14 @@ export function canonicalFunctionLiteralArguments(
       const t = functionLiteralParameterType(normalized);
       if (t !== undefined && isPolymorphicType(t))
         return ce.error(TYPE_VARIABLE_INTRODUCTION_MESSAGE, x.toString());
+      // A parameter declared `unknown`, or a transparent alias of it, is a
+      // parameter with no declaration (user decision 2026-10-30, recorded
+      // with GitHub issue #488). The annotation is removed here, so every
+      // later step sees a bare parameter: the body can narrow its type
+      // (`t[1]` makes `t` an indexed collection, so a list argument is bound
+      // whole), and a collection argument is mapped or bound whole exactly
+      // as for `t`.
+      if (isUnknownTypedParameter(normalized)) return x.op1;
       return normalized;
     }
     return ce.error('expected-a-symbol', x.toString());
