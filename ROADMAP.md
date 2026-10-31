@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-705.
+Next free reference: CE-709.
 
 **Entry format.**
 
@@ -86,27 +86,44 @@ identities), `docs/mathnet/README.md` (MathNet parser corpus),
 
 ## Types and type inference
 
-### CE-704. The argument check of a generic function joins open type variables
+### CE-707. A list value is accepted for a scalar declared result when no argument is a list
 
-**Status:** open; defect, small. Found 2026-10-31: the test "two variables,
-structural positions" of `test/epsil/generic-function-sugar.test.ts` prints the
-assertion 4 times and still passes; HEAD `afbcdfc3e` prints it the same way.
+**Status:** decision needed; defect. GitHub issue #488.
 
-`function swap(p: tuple<T, U>) -> tuple<U, T> where T, U { (p[2], p[1]) }`
-applied to `(1, "a")` gives the correct `("a", 1)`, but each call prints
-`ASSERTION FAILURE "widen() received an open type variable T — the ground-type
-invariant (§4.2) leaked"`, and the same for `U`. The argument check of a
-generic function (`validateArguments()`, `distribute` in
-`src/compute-engine/boxed-expression/validate.ts`) asks
-`elementIsBareOrGround()` whether the element type of each declared parameter
-is ground or a bare type variable. That function calls
-`collectionElementType(param)` on `tuple<T, U>`, which joins the element types
-of the tuple, so `widen()` receives the open variables `T` and `U`. The
-assertion (`assertGroundType()`, `src/common/type/subtype.ts`) is removed in the
-production build, so there the join of open variables runs with no message.
-The proposed fix: for a tuple type, test each element type, which is ground or
-a bare variable, instead of their join; then check that the production-build
-result of `elementIsBareOrGround()` does not change for this input.
+```
+ce.declare('h', '(number) -> number');  h := t ↦ [t, t]
+h(3)                         → [3,3], typed number
+(t ↦ Typed([t, t], number))(5)  → [5,5], typed number
+```
+
+The type of each call does not hold its value. `conformsUnderBroadcast()`
+(`src/compute-engine/library/core.ts`) accepts a list whose elements conform
+to a scalar ascribed type. That allowance is for a function computed once per
+element of a list argument (`(point | list<point>) -> number` applied to a
+list of points gives a list of numbers, and compiled code returns the same).
+Here no argument is a list. The 2026-08-12 ruling on a declaration that its
+body contradicts (Tycho item 171) says the compiler declines when it can prove
+the contradiction, and two tests of
+`test/compute-engine/list-valued-summand-compile.test.ts` require that the
+interpreter returns the list (`a: (number) -> number`, `a := t ↦ [cos t, sin
+t]`, `a(0.3)` gives `[cos 0.3, sin 0.3]`), and that a bare compiled `a(u)`
+returns the list too.
+
+Options:
+
+- (a) The interpreter refuses such a value with `incompatible-type`, and the
+  compiler declines a bare `a(u)` so that both agree. The two interpreter
+  tests and about 20 compile tests of the 2026-08-12 ruling change. The value
+  check must then know whether the call received a collection argument (for
+  example, a flag on the call frame that the `Typed` handler reads).
+- (b) Keep the value (the list), and type the call from the body when the
+  body can contradict a scalar declared result, so the type holds the value.
+  The declared result then no longer sets the type of such a call.
+- (c) Keep everything, and document that the type of such a call does not
+  hold its value.
+
+If nothing is decided, the calls above keep a type that does not hold their
+value.
 
 ### CE-663. A list literal fixes the type of its free symbols as `number` for the life of the engine
 
@@ -1017,8 +1034,9 @@ and `Chunk` have it (pins in
 
 ### CE-699. The implicit variable of `Integrate`, `D` and `Series` depends on the order of boxing and assignment
 
-**Status:** decision needed; design. `Limit` and `NLimit` already follow
-option (a) (2026-10-31, orchestrator's choice, reversible).
+**Status:** decided, to implement. User decision 2026-10-31: option (a) for
+`Integrate`, `D` and `Series`. `Limit` and `NLimit` already follow it
+(commit `afbcdfc3e`).
 
 An operator that does not write its variable takes it from the unknowns of
 its body: a symbol with an assigned value is not an unknown. So the result
@@ -1068,6 +1086,53 @@ first write, or would give the partial result a frame of its own. The same
 applies to a saturated result that reads the written parameter outside every
 returned closure (`y ↦ If(z > 0, y, () ↦ Block(y := y + 1, y))`) and to a held
 write (`y ↦ Hold(() ↦ Block(y := y + 1, y))`): both decline.
+
+### CE-708. A curried pure function can give a value that the full call does not
+
+**Status:** open; wrong value. Found 2026-10-31 in the review of the
+compilation of partial applications. User decision 2026-10-31: option (a),
+the interpreter always takes the deferred residual.
+
+The interpreter curries a call of a function literal with fewer arguments
+than parameters (`makeLambda`, step 3, `function-utils.ts`). For a body with
+an effect, the value is the deferred residual `(_1) ↦ Apply(f, 1, _1)`,
+which applies `f` to all the arguments when the last one arrives. For a PURE
+body, the interpreter evaluates the body with the supplied arguments first,
+so it simplifies the body before the remaining arguments are known:
+
+- `M = (x, y) ↦ x·y`: `Apply(Apply(M, 0), ∞)` is `0` and
+  `Apply(Apply(M, 0), u)` is `0`, but `Apply(M, 0, ∞)` is `Indeterminate`.
+- `D = (x, y) ↦ x·y/y`: `Apply(Apply(D, 2), 0)` is `2`, but `Apply(D, 2, 0)`
+  is `Indeterminate`.
+- A block local that the body reads is read when the function is curried:
+  `Block(c := 3, g := Apply((x, y) ↦ x + y + c, 1), c := 10, g(5))` is `9`.
+- A chain of two currying steps curries the deferred residual, whose effects
+  the interpreter reads from the signature of `f`, which can show none: with
+  `F = (x, y, z) ↦ Block(y := y·z, x + y)`, `Apply(Apply(F, 1), 0)` is
+  `(_1_0) ↦ 1` and `Apply(Apply(Apply(F, 1), 0), ∞)` is `1`, but
+  `Apply(F, 1, 0, ∞)` is `Indeterminate`.
+- The substitution can refuse and leave the call unevaluated (CE-698).
+
+Because of this, the compilation of a partial application declines for every
+pure body (`partialApplicationRefusal`, `compilation/partial-application.ts`).
+
+Options:
+
+- (a) The interpreter always takes the deferred residual. A curried value
+  then equals the full call, and the compilation of partial applications of
+  pure bodies can be turned on (remove the pure-body refusal). Printed
+  results change: `Apply((x, y) ↦ x + y, 1)` prints
+  `(_1) ↦ Apply((x, y) ↦ x + y, 1, _1)` instead of `(_1) ↦ _1 + 1`, and the
+  tests and snapshots that show simplified curried functions change; how many
+  must be measured. A block local read by the body is read at the full call.
+  A chain of currying steps then also equals the full call, and its
+  compilation (now declined) can be turned on.
+- (b) Keep the pre-evaluation. Curried pure functions keep their simplified
+  printed form; the cases above stay different from the full call, and the
+  compilation keeps declining every partial application of a pure body.
+
+If nothing is decided, (b) stays in effect: the values above stay as they
+are, and those partial applications are evaluated by the interpreter.
 
 ### CE-694. Applying a `Composition` can call the wrong step and loses exact arguments
 
@@ -1587,13 +1652,31 @@ collection through `runAsync`) already yield and honour an abort signal.
   a lazy `Map` for a large source or a source of unknown length
   (`applyLiteralMapped`, `library/core.ts`), and the reader computes each
   element with `evaluate()`. A small source is mapped eagerly and is awaited
-  (`Apply(y ↦ AsyncOnly(y), [1, 2])` is `[6, 7]`). A fix needs a way for a
+  (`Apply(y ↦ AsyncOnly(y), [1, 2])` is `[6, 7]`). `Map` and `Filter` are
+  always lazy views, for a source of any size: `Map` has no `evaluate` or
+  `evaluateAsync` handler, and its elements are computed when the view is read
+  (`materialize()`, `boxed-function.ts`). So, at commit `80a1c36c2`,
+  `await Map(AsyncOnly, [1, 2]).evaluateAsync()` and
+  `await Pipe([1, 2], Map(AsyncOnly)).evaluateAsync()` read
+  `[AsyncOnly(1), AsyncOnly(2)]`, and `Map(y ↦ -AsyncOnly(y), [1, 2])` and
+  `Map(Composition(Negate, AsyncOnly), [1, 2])` read
+  `[-AsyncOnly(1), -AsyncOnly(2)]`; `Filter([1, 2, 3], y ↦ AsyncOnly(y) > 7)`
+  reads as the error "Filter predicate must return "True" or "False"". Until
+  the iterator exists, `evaluateAsync({ materialization: true })` gives the
+  awaited values for `Map` (`[6, 7]` and `[-6, -7]`), because
+  `materializeAsync()` awaits each element; it does not help `Filter`, which
+  then throws the same error, because the predicate is still applied
+  synchronously. A fix needs a way for a
   lazy collection to give its elements asynchronously (an asynchronous
   iterator next to `each()`, used by the asynchronous readers), or a rule
   that a lazy collection whose element expression holds an operator with only
   an asynchronous handler is made eager under `evaluateAsync()`. The first
   keeps the size of a large source; the second is simple but computes every
-  element.
+  element. User decision 2026-10-31: the first option, an asynchronous
+  iterator of the elements of a lazy collection, used by the asynchronous
+  readers. A one-page spec comes before the implementation: which lazy
+  operators get the iterator, which readers use it, and how an abort signal
+  and the evaluation context carry across each `await`.
 
 ### CE-112. A `WithRandomSeed` body that returns an eager operator holding a drawing view is reported pure
 
@@ -2860,7 +2943,7 @@ feature in the tested range); for the 222 of them that were correct, the error
 grew from about `1e-13` to `1e-8` (median `1.9e-13 → 6e-8` at 0.7). No result
 of 420 integrals with no feature changed its extrapolation or its convergence.
 Tests: `test/compute-engine/quadrature-feature-near-endpoint.test.ts`. What
-the fix does not see: CE-695, CE-696, CE-697.
+the fix does not see: CE-696, CE-697 (and CE-695, fixed 2026-10-31).
 
 The record of the defect: `adaptiveQuadrature` with `singularEndpoints` of a
 pole `(c − x)^(−1/2)` on
@@ -2896,23 +2979,6 @@ refusals under rounding noise. `featureNearEndpoint` reads its noise level from
 the samples, so it does not fire on the 80 integrals with the cancellation of
 CE-690 (`docs/scratch/2026-10-30-ce691-quadrature/cancel.mts`: `covered 80`
 before and after).
-
-### CE-695. After a refused extrapolation, the error of a corner whose shells decrease like a power is too small
-
-**Status:** open; wrong value; numerics. Found 2026-10-30 while measuring
-CE-691; older than that fix (the same results at commit `fb5469f19`).
-
-`1/(x·ln²x)` on `[0, ½]` plus a step of area `1e-6` at `1e-3` from 0 (height
-`1e-3` on `[0, 1e-3]`): the extrapolation is refused (the step is seen), and
-the result is `± 1.28e-3` for a true error of `1.38e-3`. The same for 65 of the
-162 cases of `1/(x·ln²x)`, `1/(x·(−ln x)³)` and `x^(−1/2)·(−ln x)` with a step
-or a bump of area `1e-6`, `1e-9` or `1e-12` at `1e-3` to `1e-300` from 0
-(`docs/scratch/2026-10-30-ce691-quadrature/sweep-zero.mts`; these 65 are not
-extrapolated). The tail of such a corner past its last shell is not small
-(about `1/(n·ln 2)` after `n` shells of `1/(x·ln²x)`), and the widened error of
-the Gauss–Kronrod value (`spread` of `extrapolateCorner`, `resolveCorners`)
-does not cover it. A fix of CE-696 that refuses more extrapolations makes more
-results take this route, so this entry comes first.
 
 ### CE-696. A small feature in the shells that the Levin u-transform does not read is not seen
 
@@ -3732,6 +3798,37 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-706. A compiled root function with an untyped parameter gives `null` for a list argument
+
+**Status:** decision needed; wrong value. GitHub issue #488.
+
+`compile(t ↦ 2t, { to: "javascript" })` emits `(t) => 2 * t`, and
+`run([[1, 2], [3, 4]])` returns `null`. The interpreter maps an untyped
+parameter over a list and gives `[[2,4],[6,8]]`. With `t: any` the compiled
+code has a run-time array test and gives the interpreter's value. A function
+literal in value position is already wrapped (`broadcastingWrapper(…,
+'bcastFn')` in `compileExprFunctionLiteral`,
+`src/compute-engine/compilation/compile-function-literals.ts`); the root
+lambda branch of `compileToTarget()` (`javascript-target.ts`) is not. A
+refusal of an array at entry is not sound: `u ↦ q(u)` and `t ↦ t` give the
+right value for a list today.
+
+Options:
+
+- (a) Wrap the root lambda as a literal in value position is wrapped:
+  `(t) => 2 * t` becomes
+  `((f) => (_tv) => Array.isArray(_tv) ? _SYS.bcastFn(f, _tv) : f(_tv))((t) => 2 * t)`.
+  The `code` text of every compiled root function with scalar parameters
+  changes, and each call does one array test (a cost in a plotting loop).
+- (b) Map in the runner only: the function that `run` holds calls `bcastFn`
+  when an argument is an array. The `code` text does not change, but a host
+  that uses `code` directly still gets `null`.
+- (c) Read a list argument at an untyped parameter of a root function as a
+  host contract violation (the body `2t` implies a number, CE-683), and
+  document it. No code change.
+
+If nothing is decided, the wrong value `null` stays.
+
 ### CE-693. Compiled code declines where a parameter declared `expression` can receive a collection
 
 **Status:** on demand; capability (declines). GitHub issue #488 (user decision
@@ -3836,7 +3933,11 @@ interpreter gives `incompatible-type`, because the result 1.5 is not an
 local to a block is not compared with the value at the call. Fix by the simple
 sound rule: classify the result of each call as CE-662 classifies an assigned
 value (certain, never, undecidable with a run-time test on `javascript` and
-`python`, a decline on the other targets). Related: CE-673.
+`python`, a decline on the other targets). Related: CE-673. The same holds for
+a function declared at the top level: with `hh: (real) -> integer` assigned
+`t ↦ t/2`, the interpreter gives `incompatible-type` for `hh(3)` and the
+compiled code gives 1.5; with `g: (integer) -> integer` assigned `n ↦ "s"`,
+`compile(g(2))` succeeds.
 
 ### CE-673. Compiled code does not check a function literal assigned to a local declared with a signature
 
@@ -4791,6 +4892,25 @@ of a Tycho frame on WebGPU) unless the operand is finite for certain
   `sin(k t)` finite, but Desmos sliders are soft-bounded (typed input, actions
   and animation can leave the range), so only a hard-bounded slider can carry
   it.
+- **CE-565.7** (Tycho ledger row 480, 2026-10-30) FIXED 2026-10-31, pending
+  commit. In Tycho's `kelvin-wake`, `\sum_{j=1}^{300} w(j)\cos(\ldots/\cos(\theta(j))^2)`
+  with `\theta(j) = -1.35 + 2.7\frac{j-0.5}{300}` kept `_gpu_min`, `_gpu_sin` and
+  `_gpu_cos` (+9–10 % per WebGL draw). Now the GLSL and WGSL proof
+  (`gpu-finite-proof.ts`) knows that the index of a `Sum`/`Product` with integer
+  literal bounds is finite (also in the loop body when the bounds are known at
+  compile time), proves a user call through its body with the facts of that
+  call (only under `angularUnit: 'rad'`; results kept per compilation, 4096
+  body proofs per operand at most), and accepts a divisor whose magnitude has a
+  normal f32 lower bound (`cos(u)` with `|u| < π/2`, an exact rational factor
+  as the emitter writes it, `b^{-n}`). Also fixed: `Abs` of a vector or point
+  (emitted `length(…)`) was proven finite where the norm overflows f32
+  (`sin(|(x,x,x,x)|)`). User decision 2026-10-31: on GLSL the `cos` rule
+  assumes an absolute error of at most 2⁻⁶ on [-π/2, π/2] (GLSL ES specifies
+  none; WGSL specifies 2⁻¹¹), recorded in `docs/COMPILATION-MODEL.md`.
+  Precise version on request: a lower bound for `sin(u)` or a sum of trig terms
+  as a divisor (`x / \sin(\theta(j))` keeps its helper), and the user-call rule
+  under degrees or turns. Test:
+  `test/compute-engine/ce-480-loop-index-argument-finite.test.ts`.
 
 By design the helper stays for a product of two symbols with no declared range
 (`sin(k t)`: f32 overflow), for a symbol whose `real` type is only inferred, for
@@ -6022,8 +6142,8 @@ the cause before deciding which.
 
 ### CE-689. Evaluating nested folds recomputes the types and effects of the body at every step
 
-**Status:** fixed, waiting to be staged (2026-10-31, session
-compute-engine-7b). User decision 2026-10-30: option (A), the type of a node
+**Status:** fixed in `db796d62e` (2026-10-31, session compute-engine-7b).
+User decision 2026-10-30: option (A), the type of a node
 of a function body comes from the declared (static) bindings only. The type
 cache of `BoxedFunction.type` is keyed on `typeVersion`
 (`engine-configuration-lifecycle.ts`), which the declarations and the frame

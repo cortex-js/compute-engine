@@ -17031,7 +17031,15 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
       //  - the bare `value` primitive (e.g. inferred through a `(value*)`
       //    signature such as `Max`/`Min`): `value` is a strict supertype of
       //    `number` that also includes collection types, so it is no evidence
-      //    of scalar-ness (mirrors the `value` handling in `invisible-operator`).
+      //    of scalar-ness (mirrors the `value` handling in `invisible-operator`);
+      //    or
+      //  - the bare `expression` type, for the same reason: it is a
+      //    supertype of `value`, so it includes the collection types. A
+      //    function parameter declared `expression` receives a collection
+      //    argument whole, so with `f := (t: expression) ↦ t[1]`, `f([5, 6])`
+      //    is `5`. When this base was refused, the definition of such a
+      //    function was an `incompatible-type` error (the descriptor route
+      //    `atRefusesBase` already admitted the base).
       // A provably scalar base (`\pi`, `(5)`, `sin(3)`, `integer |
       // rational`) is not restored and still errors loudly.
       const valueType = value?.type.type;
@@ -17042,7 +17050,8 @@ export const COLLECTIONS_LIBRARY: SymbolDefinitions = {
           hasIndexableMember(value) ||
           (typeof valueType !== 'string' &&
             valueType?.kind === 'broadcastable') ||
-          value.type.type === 'value')
+          valueType === 'value' ||
+          valueType === 'expression')
       )
         patched[0] = value;
       // Absent base/index positions (`missing`, `T | missing`) are handled by

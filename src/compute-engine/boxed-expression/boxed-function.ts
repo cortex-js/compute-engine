@@ -128,8 +128,8 @@ import {
   viewOfDescriptor,
   isBroadcastCollectionTypeOf,
   isFixedShapeCollectionTypeOf,
-  isPossiblyCollectionTypedView,
   isNumericScalarOperandView,
+  descriptorMayBeOpenCollection,
 } from './broadcast-lift-type.js';
 import { listedBroadcastCells, producesKeyed } from './listed-element.js';
 import {
@@ -12012,8 +12012,8 @@ function lambdaCallOperandOfDescriptor(
   // as a symbol declared `any` is on the expression route: the call
   // `k(w)` with `k: (real) -> real` holding `x ↦ 2x` and `w: any` is typed
   // `any`, and its value is `[2, 4]` for `w := [1, 2]` (ROADMAP CE-485).
-  const structurelessTop =
-    structure === undefined && (t === 'any' || t === 'value');
+  // `descriptorMayBeOpenCollection` reads this fact, the `unknownCapture`
+  // fact and `isPossiblyCollectionTypedView`.
   return {
     type: d.type,
     participates:
@@ -12021,8 +12021,7 @@ function lambdaCallOperandOfDescriptor(
       (view.finiteBroadcastParticipant ||
         isBroadcastCollectionTypeOf(d.type) ||
         (typeof t !== 'string' && t.kind === 'list' && !!t.dimensions)),
-    possiblyCollectionTyped:
-      isPossiblyCollectionTypedView(view) || unknownCapture || structurelessTop,
+    possiblyCollectionTyped: descriptorMayBeOpenCollection(d, view),
     holdsUnindexedCollection: false,
     unknownCapture,
   };

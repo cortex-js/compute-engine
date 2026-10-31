@@ -317,7 +317,12 @@ import {
   shapedBroadcastResultType,
   withApproximatedInferredParams,
 } from '../collection-utils.js';
-import { abstractCollectionCell } from '../boxed-expression/broadcast-lift-type.js';
+import {
+  abstractCollectionCell,
+  descriptorMayBeOpenCollection,
+  openTriggerBroadcastType,
+  topTypeOfTriggers,
+} from '../boxed-expression/broadcast-lift-type.js';
 import { validatedLiteralApplicationOperands } from '../boxed-expression/box.js';
 import {
   annotateBroadcastErrors,
@@ -1342,7 +1347,31 @@ function applyLiteralMapType(
           abstractCollectionCell(t) !== undefined
         );
       });
-      if (!maybeMapped) return undefined;
+      if (!maybeMapped) {
+        // An argument whose type says nothing about its value can hold a
+        // list of any depth, which the call maps at its leaves, or a point,
+        // which binds whole to the parameter and which a numeric body maps:
+        // an application typed `unknown` (`L[1]` with `L` declared
+        // `list<unknown>`), or an application or a declared symbol typed
+        // `any` or `value` (`isPossiblyCollectionTypedView`). With
+        // `L := [[1, 2]]`, `(t ↦ 2t)(L[1])` is `[2, 4]`. The call is typed
+        // as the named route types a call of the same literal
+        // (`lambdaBroadcastType` in `boxed-function.ts`): the top type for
+        // a top-typed argument and a numeric result, else the open form
+        // `R | tuple | list<R | tuple | list<any>>`. As on the named route
+        // (`lambdaCallOperandOfDescriptor`), a symbol of type `unknown` with
+        // no value that the body of an enclosing literal reads from outside
+        // it (the `captured` fact) is such an argument too, and so is a
+        // descriptor typed `any` or `value` with no structure. A free
+        // symbol, and a symbol declared `unknown` at the top level, are read
+        // as scalars.
+        const open = args.filter((a) => descriptorMayBeOpenCollection(a));
+        if (open.length === 0) return undefined;
+        const cell = functionResult(fn.type) ?? 'unknown';
+        return (
+          topTypeOfTriggers(open, cell) ?? openTriggerBroadcastType(cell, true)
+        );
+      }
       return {
         kind: 'broadcastable',
         elements: functionResult(fn.type) ?? 'unknown',
@@ -2028,7 +2057,16 @@ function pipeImplicitMapType(
   // type when that gives nothing.
   const sig = stage.type;
   if (typeof sig === 'object' && sig.kind === 'signature') {
-    const topicDescriptor = [describeType(heldOperandType(context, topic))];
+    // The descriptor keeps the structure of the topic: `Apply`'s rule reads
+    // it to tell an index read typed `unknown` (`L[1]` with `L` declared
+    // `list<unknown>`), which can hold a list, from a free symbol, which is
+    // read as a scalar.
+    const topicDescriptor = [
+      {
+        ...describeType(heldOperandType(context, topic)),
+        structureOf: topic.structureOf,
+      },
+    ];
     return (
       applyLiteralMapType(stage, topicDescriptor, context) ??
       appliedLiteralResultType(

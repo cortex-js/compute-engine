@@ -339,6 +339,32 @@ export function isPossiblyCollectionTypedView(
   });
 }
 
+/** Whether an operand descriptor may hold a collection that its type does
+ * not show, so that a call of a function literal over it is typed by the
+ * open form or by a top type. This is the case for a view that
+ * `isPossiblyCollectionTypedView` accepts, for a symbol of type `unknown`
+ * with no value that the body of an enclosing literal reads from outside it
+ * (the `captured` fact: a later value of the symbol can be a list), and for
+ * a descriptor typed `any` or `value` with no structure (a descriptor made
+ * from a type only, which can be any value, also a list). The view is
+ * `viewOfDescriptor(d)`; a caller that already has it passes it. */
+export function descriptorMayBeOpenCollection(
+  d: OperandDescriptor,
+  view: BroadcastOperandView = viewOfDescriptor(d)
+): boolean {
+  if (isPossiblyCollectionTypedView(view)) return true;
+  const structure = d.structureOf?.();
+  if (structure === undefined) {
+    const t = resolveTypeAlias(d.type);
+    return t === 'any' || t === 'value';
+  }
+  return (
+    resolveTypeAlias(d.type) === 'unknown' &&
+    structure.kind === 'symbol' &&
+    structure.captured === true
+  );
+}
+
 /** Whether a type matches the absence-admitting collection top
  * `collection<any>`. */
 function matchesCollectionShape(t: Type): boolean {

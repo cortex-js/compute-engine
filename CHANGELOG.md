@@ -37,25 +37,51 @@
   the interpreter.** The interpreter curries a call with fewer arguments than
   parameters. For a body with an effect (`(x, y) ↦ x + y + 0·Random()`), its
   value is the deferred function `(_1) ↦ Apply(f, 1, _1)`, which applies `f`
-  to all the arguments when the last one arrives. That case now compiles:
-  `Apply(Apply(f, 1), u)` is one call of `f` on every target, and on
-  `javascript` and `interval-js` (and on `python` when the body compiles
-  there) `Apply(f, 1)` alone compiles to a function. At the root, the
-  `javascript` result has `calling: 'lambda'`, and a block local can hold it
-  (`g := Apply(f, 1); g(u)`). Every other partial application declines with
-  the reason. A pure body declines, because the interpreter simplifies the
-  body before the remaining arguments are known: with `M = (x, y) ↦ x·y`,
-  `Apply(Apply(M, 0), ∞)` is `0`, but `Apply(M, 0, ∞)` is `Indeterminate`
-  (ROADMAP CE-708). An argument whose type is not a number, a boolean or a
-  string declines (the interpreter maps over a list argument), and so do a
-  generic literal, a rest parameter, a body that calls a user function or
-  reads a name that can hold a function, and, for the function value, an
-  argument that is not a constant. `glsl` and `wgsl` have no function values
-  and decline a partial application that is not applied, with a message that
-  says so. Before, every target declined all these shapes with "the function
-  takes 2 parameter(s) but 1 argument(s) are supplied".
+  to all the arguments when the last one arrives. That case now compiles when
+  the function is curried in one step and each supplied argument is a number
+  literal whose value is a double, or a string literal: `Apply(Apply(f, 1),
+  u)` and `Apply(Apply(f, 1), u, 4)` are one call of `f` on `javascript`,
+  `interval-js` and `glsl`. `Apply(f, 1)` alone compiles to a function on
+  `javascript` and `interval-js` at the root of the compilation, where the
+  `javascript` result has `calling: 'lambda'`, and as the value of an
+  assignment to a block local (`g := Apply(f, 1); g(u)`); at any other
+  position (an `If` branch, a list element, an argument) it declines. Every
+  other partial application declines with the reason. A pure body declines,
+  because the interpreter simplifies the body before the remaining arguments
+  are known: with `M = (x, y) ↦ x·y`, `Apply(Apply(M, 0), ∞)` is `0`, but
+  `Apply(M, 0, ∞)` is `Indeterminate` (ROADMAP CE-708). A chain of two
+  currying steps (`Apply(Apply(Apply(f, 1), 2), u)`) declines for the same
+  reason. A supplied argument that is not such a literal (an exact rational,
+  a decimal with more digits than a double, `Pi`, `True`, a variable, a list)
+  declines: the interpreter curries with the evaluated argument, its
+  approximation under `.N()`, maps over a list, and `True` can name a local.
+  A generic literal, a rest parameter, and a body that calls a user function
+  or reads a name that can hold a function decline too. `glsl` and `wgsl`
+  have no function values and decline a partial application that is not
+  applied, with a message that says so. Before, every target declined all
+  these shapes with "the function takes 2 parameter(s) but 1 argument(s) are
+  supplied".
 
 ### Bug Fixes
+
+- **GLSL and WGSL: `sin(|(x, x, x, x)|)` no longer drops its NaN guard.** The
+  absolute value of a vector or point is emitted as `length(…)`, which
+  overflows to `+∞` in f32 for a large `x`; the shader used the built-in `sin`
+  anyway and could give a number where the result is NaN. Now the guard is
+  dropped only when the norm cannot overflow.
+
+- **`Solve` of an equality chain over a domain that cannot be enumerated.**
+  A chain `a = b = c` with exact sides over a real `Interval`, `RealNumbers`,
+  `ComplexNumbers` or a `Range` too large to enumerate now gives its
+  solutions: the roots of one link at which the whole chain is `True`.
+  `Solve(x² = 4 = x + 2, x ∈ [-10, 10])` is `[2]`,
+  `Solve(sin x = 0 = x, x ∈ [-10, 10])` is `[0]`, and
+  `Solve(x = |x| = 2, x ∈ [-10, 10])` is `[2]`. `Solve` stays unevaluated
+  when no link gives an answer that the chain can decide, and when the chain
+  has a float, because the chain accepts values within the tolerance that are
+  not roots of a link. The enumeration of a `Range` no longer compiles a
+  chain: the compiled chain compared its sides exactly, so
+  `Solve(x = 2 = 2.0000000000001, x ∈ -10..10)` gave `[]`; it is now `[2]`.
 
 - **An access into a value typed `expression` is accepted.** `expression`
   admits a collection, but `At` refused a base typed `expression` (it accepted
@@ -93,8 +119,8 @@
 - **Python: a call of a function literal with the wrong number of arguments
   no longer compiles to code that raises.** `Apply((x, y) ↦ x + y, 1)`
   compiled to `((lambda x, y: x + y))(1)`, which raises a `TypeError` where
-  the interpreter gives a function. It now compiles only under the conditions
-  of the partial-application entry above, and declines otherwise. A call with
+  the interpreter gives a function. It is now declined, as on the other
+  targets (see the partial-application entry above). A call with
   too many arguments (an `unexpected-argument` error in the interpreter) and a
   call with arguments of a literal with no parameter (the interpreter ignores
   them) are declined, where Python raised a `TypeError`.
@@ -300,6 +326,25 @@
   that an asynchronous-only `F` returns). For an expression with no such
   operator, the value of `evaluateAsync()` is the value of `evaluate()`, also
   under `numericApproximation` and for an error argument.
+
+- **`evaluateAsync()` of a collection operator that walks a callback awaits
+  the callback.** With the same `AsyncOnly` (it gives `x + 5`),
+  `Fold((a, b) ↦ a + AsyncOnly(b), 0, [1, 2])` stayed
+  `AsyncOnly(1) + AsyncOnly(2)` and is now `13`. This applies to `Reduce`,
+  `Fold` (also its initial value), `Any`, `All` (also without a predicate),
+  `MaxBy`, `MinBy`, `ArgMax`, `ArgMin`, `CountIf`, `Find`, `Position`,
+  `IndexWhere`, `GroupBy`, `Partition`, `ChunkBy`, `Sort` and `Ordering`.
+  Before, a predicate such as `y ↦ AsyncOnly(y) > 6` threw "predicate must
+  return True or False" in `CountIf`, `Find`, `Position` and `IndexWhere`.
+  For a callback with no such operator, the value of `evaluateAsync()` is the
+  value of `evaluate()`. There is one exception: a `Sort` or `Ordering`
+  comparator that is not consistent (it does not give opposite answers for
+  the two orders of a pair, for example `(a, b) ↦ a > b` over equal elements)
+  can give a different order of the elements under `evaluateAsync()`, because
+  the asynchronous route sorts with a stable merge sort that awaits each
+  comparison. `Map`, `Filter` and the other lazy views still compute their
+  elements without awaiting them (ROADMAP CE-111.4); for `Map`,
+  `evaluateAsync({ materialization: true })` gives the awaited values.
 
 - **A numeric integral with a step or a bump next to a singular bound reports
   an error that covers its true error** (ROADMAP CE-691).
@@ -676,6 +721,17 @@
   source text is the caller's own value and is not checked, as before.
 
 ### Performance
+
+- **GLSL and WGSL: a sum over an index with literal bounds that calls user
+  functions of that index uses the built-in `sin`, `cos` and `min` again.** In
+  `\sum_{j=1}^{300} w(j)\cos\left(\frac{x\cos(\theta(j))}{\cos(\theta(j))^2}\right)`
+  with `\theta(j) = -1.35 + 2.7\frac{j-0.5}{300}`, the shader called the
+  NaN-safe helpers `_gpu_min`, `_gpu_sin` and `_gpu_cos`, which cost about 10 %
+  per draw. Now the finiteness proof knows the bounds of the index, proves a
+  call of a user function through its body, and proves that a divisor such as
+  `\cos(\theta(j))^2` is not zero. On GLSL, the `cos` part assumes a GPU `cos`
+  error of at most 2⁻⁶; see `docs/COMPILATION-MODEL.md`. The helpers stay when a
+  value can be NaN or infinite.
 
 - **A call of a function literal no longer makes the engine type the nodes of
   the body again** (GitHub issue #487). Each call declares its parameters in

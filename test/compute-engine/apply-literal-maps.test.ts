@@ -12,6 +12,7 @@ import type { Expression } from '../../src/compute-engine/global-types';
 import { compile } from '../../src/compute-engine/compilation/compile-expression';
 import { harvestCse } from '../../src/compute-engine/compilation/cse';
 import { expressionParameterReadAt } from '../../src/compute-engine/compilation/compile-user-calls';
+import { typeAcceptsValue } from '../../src/compute-engine/boxed-expression/value-membership';
 
 const SUM_BODY = ['Sum', ['Cos', 'n'], ['Limits', 'n', 1, 'i']];
 
@@ -777,30 +778,61 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
   // The recursion descends into the list only when the list reaches the body
   // whole. Mapped at the leaves, each leaf gives `1`, and the result is
   // `[[1,1],1]`.
-  test.each([[undefined], ['any'], ['value'], ['integer | list']])(
+  //
+  // With `t: expression`, the definition was refused: `At` did not admit a
+  // base typed `expression`, although `expression` includes the
+  // collections.
+  //
+  // The call is checked on the three routes: the named call, the call of
+  // the literal and `Apply`, and its type agrees with its value on each.
+  test.each([
+    [undefined],
+    ['any'],
+    ['expression'],
+    ['value'],
+    ['integer | list'],
+  ])(
     'a recursive function with a parameter declared %s receives the list whole',
     (type) => {
       const ce = new ComputeEngine();
-      ce.box([
-        'Assign',
-        'leaves',
+      const f = [
+        'Function',
         [
-          'Function',
-          [
-            'If',
-            ['Element', 't', 'Integers'],
-            1,
-            ['Add', ['leaves', ['At', 't', 1]], ['leaves', ['At', 't', 2]]],
-          ],
-          param(type),
+          'If',
+          ['Element', 't', 'Integers'],
+          1,
+          ['Add', ['leaves', ['At', 't', 1]], ['leaves', ['At', 't', 2]]],
         ],
-      ] as never).evaluate();
-      expect(
-        ce
-          .box(['leaves', ['List', ['List', 0, 0], 0]] as never)
-          .evaluate()
-          .toString()
-      ).toBe('3');
+        param(type),
+      ];
+      ce.box(['Assign', 'leaves', f] as never).evaluate();
+      const arg = ['List', ['List', 0, 0], 0];
+      for (const e of [
+        ['leaves', arg],
+        [f, arg],
+        ['Apply', f, arg],
+      ]) {
+        const call = ce.box(e as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe('3');
+        expect(value.type.matches(call.type)).toBe(true);
+      }
+    }
+  );
+
+  // A base typed `expression` can be a collection, so `At` keeps it, as it
+  // keeps a base typed `value`, and the evaluation reads the value. A
+  // scalar value is refused there.
+  test.each([['expression'], ['value']])(
+    'an access into a parameter declared %s',
+    (type) => {
+      const ce = new ComputeEngine();
+      const f = ['Function', ['At', 't', 1], param(type)];
+      const list = ce.box([f, ['List', 5, 6]] as never);
+      expect(list.evaluate().toString()).toBe('5');
+      expect(list.evaluate().type.matches(list.type)).toBe(true);
+      const scalar = ce.box([f, 5] as never).evaluate();
+      expect(scalar.operator).toBe('Error');
     }
   );
 
@@ -1551,6 +1583,249 @@ describe('A PARAMETER DECLARED WITH A WIDE TYPE', () => {
       expect(value.type.matches(type)).toBe(true);
     }
   );
+
+  // At an untyped parameter, an argument whose type says nothing about its
+  // value (an index read typed `unknown`, a symbol declared `any`) can hold
+  // a list, which the call maps at its leaves, or a point, which binds whole
+  // and which the body maps. The call of the literal, `Apply` and `Pipe`
+  // are typed as the named call is. They were typed `number`, which holds
+  // none of these values.
+  describe('an argument of a top type at an untyped parameter', () => {
+    const U = ['Function', ['Multiply', 2, 't'], 't'];
+    const OPEN = 'list<list<any> | number | tuple> | number | tuple';
+    const ROUTES = (arg: unknown) => [
+      ['k', arg],
+      [U, arg],
+      ['Apply', U, arg],
+      ['Pipe', arg, U],
+    ];
+
+    test.each([
+      ['list<unknown>', ['At', 'L', 1], ['List', ['List', 1, 2]], '[2,4]', OPEN],
+      [
+        'list<unknown>',
+        ['At', 'L', 1],
+        ['List', ['List', ['List', 1], ['List', 2, 3]]],
+        '[[2],[4,6]]',
+        OPEN,
+      ],
+      ['list<unknown>', ['At', 'L', 1], ['List', ['Tuple', 1, 2]], '(2, 4)', OPEN],
+      ['list<any>', ['At', 'L', 1], ['List', ['List', 1, 2]], '[2,4]', 'any'],
+      ['any', 'L', ['List', 1, 2], '[2,4]', 'any'],
+    ])('`L: %s`, the argument %j', (decl, arg, value, expected, type) => {
+      for (const e of ROUTES(arg)) {
+        const ce = new ComputeEngine();
+        ce.declare('k', 'function');
+        ce.assign('k', ce.box(U as never));
+        ce.declare('L', decl);
+        const call = ce.box(e as never);
+        const t = call.type;
+        expect(t.toString()).toBe(type);
+        ce.assign('L', ce.box(value as never));
+        const result = call.evaluate();
+        expect(result.toString()).toBe(expected);
+        expect(result.type.matches(t)).toBe(true);
+      }
+    });
+
+    // A known scalar, and a free symbol, keep the scalar result.
+    test.each([
+      [3, 'number'],
+      [1.5, 'number'],
+      ['x', 'number'],
+    ])('the argument %j', (arg, type) => {
+      const ce = new ComputeEngine();
+      ce.declare('k', 'function');
+      ce.assign('k', ce.box(U as never));
+      for (const e of ROUTES(arg))
+        expect(ce.box(e as never).type.toString()).toBe(type);
+    });
+
+    // A symbol of type `unknown` with no value that the body of an enclosing
+    // literal reads from outside it can get a list before the call.
+    test('a captured symbol of type `unknown`', () => {
+      const ce = new ComputeEngine();
+      ce.declare('z', 'unknown');
+      const call = ce.box([['Function', [U, 'z'], 's'], 1] as never);
+      const t = call.type;
+      expect(t.toString()).toBe(OPEN);
+      ce.assign('z', ce.box(['List', 1, 2] as never));
+      const result = call.evaluate();
+      expect(result.toString()).toBe('[2,4]');
+      expect(result.type.matches(t)).toBe(true);
+    });
+  });
+
+  // A parameter declared with a collection type (`list`) also receives a
+  // list whole. When the body does not satisfy the declared scalar result
+  // (`2t` is not a number for a list `t`), the engine checks each value
+  // against the result, and that check admits a list whose elements conform
+  // to it: the result computed once per element of the list. So the call is
+  // typed from the body, on the named route, the `Apply` route, and a named
+  // call inside another function body. It was typed `number` for the value
+  // `[2,4,6]`.
+  describe('a list at a parameter declared with a collection type, under a scalar result', () => {
+    const ROUTES = (name: string, arg: unknown) => [
+      [name, arg],
+      ['Apply', name, arg],
+      ['Apply', ['Function', ['Add', [name, 'u'], 0], 'u'], arg],
+    ];
+
+    test.each([
+      ['(list) -> number', ['Multiply', 2, 't'], '[2,4,6]'],
+      ['(list) -> number', 't', '[1,2,3]'],
+      ['(list<number>) -> number', ['Multiply', 2, 't'], '[2,4,6]'],
+    ])('%s with the body %j', (signature, body, expected) => {
+      const ce = new ComputeEngine();
+      ce.declare('h', signature);
+      ce.assign('h', ce.box(['Function', body, 't'] as never));
+      for (const e of ROUTES('h', ['List', 1, 2, 3])) {
+        const call = ce.box(e as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe(expected);
+        expect(call.type.toString()).toBe('vector<integer^3>');
+        expect(value.type.matches(call.type)).toBe(true);
+      }
+    });
+
+    // The declared result computed once per point of a list of points
+    // (`declared-result-checked-at-application.test.ts`). The static type
+    // has a range, so the test asks whether the type accepts the value
+    // (`docs/TYPE-SYSTEM.md`, "Number literal types"). A single point keeps
+    // the declared result, and the compiled code gives the same list.
+    test('a list of points under a scalar result', () => {
+      const ce = new ComputeEngine();
+      ce.declare(
+        'norm',
+        '(list<tuple<number, number>> | tuple<number, number>) -> number'
+      );
+      ce.assign(
+        'norm',
+        ce.box(['Function', ['Abs', ['Subtract', 'P', ['Tuple', 1, 2]]], 'P'])
+      );
+      const points = ['List', ['Tuple', 4, 6], ['Tuple', 1, 2]];
+      for (const e of ROUTES('norm', points)) {
+        const call = ce.box(e as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe('[5,0]');
+        expect(call.type.toString()).toMatch(/^list</);
+        expect(typeAcceptsValue(value, call.type.type)).toBe(true);
+      }
+      expect(ce.box(['norm', ['Tuple', 4, 6]]).type.toString()).toBe(
+        'number'
+      );
+      ce.declare('L', 'list<tuple<number, number>>');
+      const compiled = compile(ce.box(['norm', 'L']), {
+        to: 'javascript',
+        fallback: false,
+      } as never)!;
+      expect(compiled.run!({ L: [[4, 6], [1, 2]] })).toEqual([5, 0]);
+    });
+
+    // A body whose type satisfies the declared result is not checked, and
+    // it keeps the result. A body that the walk cannot type gives the
+    // declared result or a list.
+    test.each([
+      ['(list<integer>) -> integer', ['Sum', 't'], '6', 'integer'],
+      ['(list) -> number', ['Length', 't'], '3', 'number'],
+      [
+        '(list) -> number',
+        ['If', ['Greater', ['Length', 't'], 1], ['Multiply', 2, 't'], 0],
+        '[2,4,6]',
+        'list<any> | number',
+      ],
+    ])('%s with the body %j', (signature, body, expected, type) => {
+      const ce = new ComputeEngine();
+      ce.declare('h', signature);
+      ce.assign('h', ce.box(['Function', body, 't'] as never));
+      const call = ce.box(['h', ['List', 1, 2, 3]]);
+      const value = call.evaluate();
+      expect(value.toString()).toBe(expected);
+      expect(call.type.toString()).toBe(type);
+      expect(value.type.matches(call.type)).toBe(true);
+    });
+
+    // In a `Block` body the result ascription holds only the last statement.
+    // An early `Return` gives a value that this statement does not give, so
+    // the walk gives no type and the call is typed `list<any> | number`.
+    test('a block body with an early return', () => {
+      const ce = new ComputeEngine();
+      ce.declare('h', '(list) -> number');
+      ce.assign(
+        'h',
+        ce.box([
+          'Function',
+          [
+            'Block',
+            ['If', ['Equal', ['Length', 't'], 0], ['Return', 0]],
+            ['Multiply', 2, 't'],
+          ],
+          't',
+        ] as never)
+      );
+      for (const [arg, expected] of [
+        [['List'], '0'],
+        [['List', 1, 2], '[2,4]'],
+      ] as const) {
+        const call = ce.box(['h', arg] as never);
+        const value = call.evaluate();
+        expect(value.toString()).toBe(expected);
+        expect(call.type.toString()).toBe('list<any> | number');
+        expect(value.type.matches(call.type)).toBe(true);
+      }
+    });
+
+    // The check refuses a list whose elements do not conform to the scalar
+    // result, so a list type with such leaves does not type the call.
+    test.each([
+      [['List', { str: 'a' }, { str: 'b' }]],
+      [['List', ['List', { str: 'a' }]]],
+    ])('a body of type list of strings under `number`: %j', (body) => {
+      const ce = new ComputeEngine();
+      ce.declare('h', '(list) -> number');
+      ce.assign('h', ce.box(['Function', body, 't'] as never));
+      const call = ce.box(['h', ['List', 1, 2]]);
+      expect(call.type.toString()).toBe('list<any> | number');
+      expect(call.evaluate().toString()).toMatch(/incompatible-type/);
+    });
+  });
+});
+
+describe('A TYPE ALIAS AT A CALL OF A FUNCTION LITERAL', () => {
+  // A recursive alias reaches itself through its list elements. The walk
+  // over the leaves of the body type stops there, and the call is typed
+  // without a stack overflow.
+  test('a list of a recursive alias at a parameter declared `list`', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('nest', 'integer | list<nest>', { alias: true });
+    ce.declare('L', 'list<nest>');
+    ce.declare('h', '(list) -> number');
+    ce.assign('h', ce.box(['Function', 't', 't'] as never));
+    ce.assign('L', ce.box(['List', 1, ['List', 2]] as never));
+    const call = ce.box(['h', 'L'] as never);
+    const t = call.type;
+    const value = call.evaluate();
+    expect(value.toString()).toBe('[1,[2]]');
+    expect(value.type.matches(t)).toBe(true);
+  });
+
+  // A captured symbol declared with an alias of `unknown` can get a list
+  // before the call, the same as a symbol declared `unknown`.
+  test('a captured symbol declared with an alias of `unknown`', () => {
+    const ce = new ComputeEngine();
+    ce.declareType('u', 'unknown', { alias: true });
+    ce.declare('z', 'u');
+    const U = ['Function', ['Multiply', 2, 't'], 't'];
+    const call = ce.box([['Function', [U, 'z'], 's'], 1] as never);
+    const t = call.type;
+    expect(t.toString()).toBe(
+      'list<list<any> | number | tuple> | number | tuple'
+    );
+    ce.assign('z', ce.box(['List', 1, 2] as never));
+    const result = call.evaluate();
+    expect(result.toString()).toBe('[2,4]');
+    expect(result.type.matches(t)).toBe(true);
+  });
 });
 
 // A parameter declared `unknown` is a parameter with no declaration, on every

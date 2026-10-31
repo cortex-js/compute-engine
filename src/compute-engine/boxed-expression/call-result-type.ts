@@ -19,10 +19,12 @@ import { factsOf } from '../../common/type/facts.js';
 import { isPureComputedEffects } from '../../common/type/effects.js';
 import { effectsOf } from './effects-of.js';
 import {
+  type AliasDescent,
   collectionElementType,
   isWildcardFunctionType,
   resolveTypeAlias,
   stripMissingFromType,
+  unfoldAliasOnDescent,
 } from '../../common/type/utils.js';
 import { absentMarkerIsNumeric } from './validate.js';
 import {
@@ -37,6 +39,8 @@ import {
   functionLiteralParameterNames,
   functionLiteralParameterType,
   functionLiteralReturnType,
+  functionLiteralReturnMarker,
+  functionLiteralDeclaredSignature,
   capturedSymbols,
   isRestParameter,
   isDestructuringParameter,
@@ -441,9 +445,15 @@ function callResultTypeOfBinding(
   const wide = argumentAtWideParameter(called, binding, args);
   if (wide === 'top') return 'any';
   let scalar: Type | undefined;
+  // A list at a parameter that receives it whole, under a scalar result
+  // that the body is checked against (`listAtWholeParameter`).
+  let listWhole = false;
   if (wide === 'collection') declared = 'any';
   else if (isScalarResult(declared)) {
-    if (!argumentOutsideInferredSignature(binding, args)) return undefined;
+    listWhole =
+      declared !== 'never' && listAtWholeParameter(called, binding, args);
+    if (!listWhole && !argumentOutsideInferredSignature(binding, args))
+      return undefined;
     scalar = declared;
     declared = 'any';
   }
@@ -468,7 +478,122 @@ function callResultTypeOfBinding(
   // gave no type (`mayDeriveUnbounded`).
   if (declined !== undefined && t === undefined && scalar === undefined)
     declined.walk = true;
+  // When the walk gives no type, the type of the ascribed body does not
+  // replace it: in a `Block` body the ascription holds only the last
+  // statement, and the walk gives no type when that statement does not give
+  // the value (an early `Return`, a loop).
+  if (listWhole) return listAtWholeParameterResult(t, scalar!);
   return scalar === undefined ? t : outsideScalarResult(t, scalar);
+}
+
+/** `list<any>`: a list with any contents, nested lists included. */
+const ANY_LIST: Type = { kind: 'list', elements: 'any' };
+
+/**
+ * Can a call of the function literal `literal` return a list that its
+ * scalar result does not hold, because an argument that can be a list is
+ * received whole?
+ *
+ * When the type of the body does not satisfy the declared result `R`, the
+ * engine stores the body with a result ascription, `Typed(body, R)`, and
+ * checks the value of each call against `R` (`ascriptionViolation`,
+ * `library/core.ts`). That check admits a list whose elements conform to
+ * `R`: it is `R` computed once per element of a list argument
+ * (`conformsUnderBroadcast`). With `h` declared `(list) -> number` and
+ * assigned `t ↦ 2t`, `h([1, 2, 3])` is `[2, 4, 6]`. So `R` does not hold the
+ * value of the call, and the call is typed from the body
+ * (`listAtWholeParameterResult`), as a call with a collection at a parameter
+ * declared `any` is (`argumentAtWideParameter`).
+ *
+ * True when the literal has such an ascription (a marker that holds a full
+ * signature is not checked, and is not one), and an argument that can be a
+ * list meets a parameter that receives it whole: a parameter that is not a
+ * scalar (`list`, `list<tuple<number, number>>`), as the literal annotates
+ * it, else as the declared signature types it. A scalar parameter maps over
+ * a list argument, and the broadcast rules type that call. A free symbol of
+ * type `unknown` is read as a generic value, as in `wideArgumentKind`, and
+ * does not count.
+ */
+function listAtWholeParameter(
+  literal: Expression | undefined,
+  binding: BoxedDefinition | undefined,
+  args: readonly OperandDescriptor[]
+): boolean {
+  if (!isFunction(literal, 'Function')) return false;
+  if (
+    functionLiteralReturnMarker(literal) === undefined ||
+    functionLiteralDeclaredSignature(literal) !== undefined
+  )
+    return false;
+  const params = literal.ops.slice(1);
+  let signatureTypes: ReturnType<typeof declaredParameterTypes> | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const p = params[i];
+    if (p === undefined) continue;
+    let param = functionLiteralParameterType(p);
+    if (param === undefined) {
+      if (signatureTypes === null)
+        signatureTypes = declaredParameterTypes(binding);
+      param = signatureTypes?.[i];
+    }
+    if (param === undefined || isScalarParameter(param)) continue;
+    const t = presentPart(args[i].type);
+    if (t === 'error' || t === 'never' || cannotHoldAList(t)) continue;
+    if (resolveTypeAlias(t) === 'unknown') {
+      const structure = args[i].structureOf?.();
+      if (structure?.kind === 'symbol' && structure.free === true) continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The type of a call with a list at a parameter that receives it whole,
+ * under the scalar result `scalar` that the body is checked against
+ * (`listAtWholeParameter`). `t` is the type of the body with each parameter
+ * typed as its argument, if the walk of the body gives one.
+ *
+ * The check refuses a scalar value outside `scalar`, so a `t` that cannot be
+ * a list, or that `scalar` holds, gives `scalar`. A list `t` is kept when
+ * its leaf elements can be values of `scalar`: the check admits a list only
+ * when each element conforms to `scalar`, so `list<string>` under `number`
+ * is not kept. Any other `t`, and no `t`, give `scalar | list<any>`, which
+ * holds every value that the check admits.
+ */
+function listAtWholeParameterResult(t: Type | undefined, scalar: Type): Type {
+  if (t === undefined || t === 'unknown' || t === 'any')
+    return widen(scalar, ANY_LIST);
+  if (isSubtype(t, scalar) || cannotHoldAList(t)) return scalar;
+  if (isSubtype(t, ANY_LIST) && !provablyDisjoint(listLeafType(t), scalar))
+    return t;
+  return widen(scalar, ANY_LIST);
+}
+
+/**
+ * The type of the leaves of the list type `t`: the element type, read
+ * again while it is a list (`list<list<integer>>` gives `integer`). A union
+ * gives the union of the leaves of its members. Any other type is its own
+ * leaf.
+ *
+ * A self-referential alias (`nest = integer | list<nest>`) reaches itself
+ * through its list elements, so each alias is unfolded on the descent
+ * `seen` and the walk stops when the alias reaches itself. The occurrence
+ * where it stops gives `any`, which no scalar type is disjoint from, so the
+ * caller keeps the list type.
+ */
+function listLeafType(t: Type, seen: AliasDescent = undefined): Type {
+  const unfolded = unfoldAliasOnDescent(t, seen);
+  if (unfolded === undefined) return 'any';
+  const r = unfolded.type;
+  if (typeof r === 'string') return r;
+  if (r.kind === 'list') return listLeafType(r.elements, unfolded.seen);
+  if (r.kind === 'union')
+    return {
+      kind: 'union',
+      types: r.types.map((x) => listLeafType(x, unfolded.seen)),
+    };
+  return r;
 }
 
 /**
