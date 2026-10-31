@@ -967,6 +967,21 @@ export function rewriteWithBinders(
     app: Expression,
     ops: ReadonlyArray<Expression>,
     shadowed: ReadonlySet<string> | undefined
+  ) => Expression | undefined,
+  // Called for every function node that binds a name
+  // (`boundVariableNames`), and for every function node that is not
+  // canonical, before the walk descends into it, with the names shadowed at
+  // the node. A node that is not canonical (a held operand) has no scope, so
+  // `boundVariableNames` does not see what it binds: the hook reads that
+  // from its syntax. It returns a replacement of the node, or
+  // `undefined` to keep it. The walk then rewrites the replacement in place
+  // of the node, and the memo records the result under the original node. A
+  // capture-avoiding substitution uses it to rename a bound variable of the
+  // node that a substituted value mentions (`bindingKeyedSubs`). It is not
+  // called for the root under `skipRootBinds`.
+  visitBinder?: (
+    node: Expression,
+    shadowed: ReadonlySet<string> | undefined
   ) => Expression | undefined
 ): Expression {
   if (isSymbol(expr)) return visit(expr, shadowed);
@@ -982,8 +997,26 @@ export function rewriteWithBinders(
     if (hit !== undefined) return hit;
   }
 
+  const replacement =
+    visitBinder !== undefined &&
+    !skipRootBinds &&
+    isFunction(expr) &&
+    (!expr.isCanonical || boundVariableNames(expr).length > 0)
+      ? visitBinder(expr, shadowed)
+      : undefined;
+
   let result: Expression;
-  if (isDictionary(expr)) {
+  if (replacement !== undefined && replacement !== expr) {
+    result = rewriteWithBinders(
+      replacement,
+      visit,
+      shadowed,
+      false,
+      memo,
+      visitApplication,
+      visitBinder
+    );
+  } else if (isDictionary(expr)) {
     // A dictionary is not a function node (`nops` 0): descend into its values
     // explicitly, or symbols inside them escape every rewrite pass.
     const ce = expr.engine;
@@ -996,7 +1029,8 @@ export function rewriteWithBinders(
         shadowed,
         false,
         memo,
-        visitApplication
+        visitApplication,
+        visitBinder
       );
       if (next !== value) changed = true;
       return ce.function('KeyValuePair', [ce.string(key), next]);
@@ -1034,7 +1068,15 @@ export function rewriteWithBinders(
       const own = ownIndexClauseAt(expr, i, binders);
       if (own !== undefined)
         return mapOwnIndexClause(op, own, shadowed, shadowedIn(i), (o, s) =>
-          rewriteWithBinders(o, visit, s, false, memo, visitApplication)
+          rewriteWithBinders(
+            o,
+            visit,
+            s,
+            false,
+            memo,
+            visitApplication,
+            visitBinder
+          )
         );
       return rewriteWithBinders(
         op,
@@ -1042,7 +1084,8 @@ export function rewriteWithBinders(
         shadowedIn(i),
         false,
         memo,
-        visitApplication
+        visitApplication,
+        visitBinder
       );
     });
     const replaced = visitApplication?.(expr, next, shadowed);

@@ -179,12 +179,26 @@ export function laterDeclarationLocalsOf(
  * the rebuilt block does not give its assignment locals a new binding, and
  * the effect inference counts a write to one as a write outside the
  * function.
+ *
+ * With `rename`, each name of the records that is a key of `rename` is
+ * replaced in the copy by its value: the block is rebuilt with its locals
+ * renamed (`renameBoundVariables()`, `function-utils.ts`). The records of
+ * `from` are not changed.
  */
-export function copyAssignmentLocals(from: object, to: object): void {
+export function copyAssignmentLocals(
+  from: object,
+  to: object,
+  rename?: ReadonlyMap<string, string>
+): void {
+  const renamed = (names: readonly string[]): readonly string[] =>
+    rename === undefined ? names : names.map((n) => rename.get(n) ?? n);
   const record = ASSIGNMENT_LOCALS.get(from);
   if (record !== undefined && !ASSIGNMENT_LOCALS.has(to))
-    ASSIGNMENT_LOCALS.set(to, record);
+    ASSIGNMENT_LOCALS.set(to, {
+      names: renamed(record.names),
+      inFunctionBody: record.inFunctionBody,
+    });
   const later = LATER_DECLARATION_LOCALS.get(from);
   if (later !== undefined && !LATER_DECLARATION_LOCALS.has(to))
-    LATER_DECLARATION_LOCALS.set(to, later);
+    LATER_DECLARATION_LOCALS.set(to, renamed(later));
 }

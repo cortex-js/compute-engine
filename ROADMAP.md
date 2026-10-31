@@ -18,7 +18,7 @@ code comments, plans and replies, for example "fixes CE-42.3".
 - Put a new entry in the section of its topic. In a section, entries are not in
   number order.
 
-Next free reference: CE-692.
+Next free reference: CE-695.
 
 **Entry format.**
 
@@ -992,6 +992,43 @@ and `Chunk` have it (pins in
   correct broadcast type lift. Both are tracked in CE-103.
 
 ## Evaluation, canonical forms and scoping
+
+### CE-694. Applying a `Composition` can call the wrong step and loses exact arguments
+
+**Status:** open; wrong value. Found 2026-10-30 by a code review of the
+uncommitted `Composition` support in `src/compute-engine/function-utils.ts`
+(`composedApplication()`, `compositionLiteral()`); not checked with a probe.
+
+- **CE-694.1** A step given as a symbol is called by its name in the current
+  scope: `composedApplication()` builds `ce.function(name, …)`, which drops
+  the binding that the step symbol carries. A `Composition(Sin, Exp)` made
+  before a scope that declares another `Sin` calls that inner `Sin` when it is
+  applied there, while lexical scoping (`docs/SCOPING-MODEL.md`) says the step
+  denotes the `Sin` of the scope where it was written. The compilers use the
+  same function, so the compiled code has the same defect. Fix: build each
+  named call from the binding of the step symbol.
+- **CE-694.2** Under `.N()`, `Apply` passes the approximated arguments and
+  their exact sources (`exactSources`), but the `Composition` case of
+  `apply()` uses only the approximations. A step with a jump then gets a
+  rounded input: `Apply(Composition(Negate, Floor), (25! − 1)/24!).N()` can
+  give `−25` instead of `−24`. Fix: give the exact sources to the last step,
+  as the application of a function literal does.
+
+### CE-692. Make `subs()` capture-avoiding
+
+**Status:** open; design, medium. User decisions 2026-10-30: `subs()` becomes
+capture-avoiding; for the two binders that cannot be renamed before evaluation
+(a held block's `Assign`, a `Declare` inside an `If` branch), option (a): the
+replacement is inserted as today, documented with examples, and an internal
+variant returns `undefined` there. Starts after the fix of GitHub issue #489 is
+committed. Plan:
+`docs/plans/2026-10-30-capture-avoiding-subs.md`.
+
+Today `Sum(j + k, Limits(k, 1, 3)).subs({j: k})` gives `Sum(k + k, …)`, which
+is `12`: the replacement `k` is captured by the index. After the change, the
+index is renamed first: `Sum(k + k_1, Limits(k_1, 1, 3))`, which is `3k + 6`.
+Nine internal callers check for this capture and decline today; each check is
+removed in its own step, with a test.
 
 ### CE-671. The error of a product with an absent cell has a `Divide` frame
 
@@ -3473,6 +3510,41 @@ the 301 passed-over terms plus `ζ(s, a+301)` by 6.8e−6.
 
 ## Compilation
 
+### CE-693. Compiled code declines where a parameter declared `expression` can receive a collection
+
+**Status:** on demand; capability (declines). GitHub issue #488 (user decision
+2026-10-30: a parameter declared `any`, `expression` or `value` receives a
+collection whole).
+
+The interpreter binds a collection whole to a parameter declared `expression`,
+and the body maps over it. Compiled code reads such a parameter as a scalar, and
+it has no run-time test for it, so it declines (falls back to the interpreter)
+in each shape where the parameter can receive a collection:
+
+- a direct call, of a named function or of a block local, with an argument that
+  can be a collection (`h(rows)` with `rows` declared `list<list<real>>`);
+- an `Apply` of a function literal with such an argument;
+- the function as a value (`compile(h)`, a function literal at the root, a
+  block local that the block returns or stores);
+- a consumer (`Map`, `Filter`, `Reduce`, `Scan`, …) over a source whose
+  elements can be collections, or have no provable type;
+- the accumulator of `Reduce` and `Scan` when it is declared `expression`,
+  even with a scalar initial value (the type of the accumulator is not
+  provable);
+- a consumer over a block local that is assigned more than once
+  (`Block(L := [1, 2], L := [[1, 2]], Map((t: expression) ↦ 2t, L))`).
+
+Example: with `h := (t: expression) ↦ 2t` and `rows` declared
+`list<list<real>>`, `Map(h, rows)` over `[[1, 2], [3, 4]]` declines, and the
+interpreter gives `[[2, 4], [6, 8]]`. `Map(h, L)` with `L` declared `list<real>`
+compiles. The checks are `collectionAtExpressionParameter()`
+(`compilation/compile-user-calls.ts`) and `withCheckedCallback()`
+(`compilation/compile-callbacks.ts`).
+
+The precise version emits a run-time test of the argument
+(`Array.isArray(t) ? … : 2 * t`), as compiled code does for a parameter declared
+`any` or `value`, and removes these declines. Do it when the user asks.
+
 ### CE-680. The `python` target does not compile `Sum` over a list input
 
 **Status:** open; defect (decline). Found 2026-10-30 while comparing how each
@@ -5736,8 +5808,36 @@ version, the key of the type, sign and structural caches of every node. The fix
 is step 7 of that plan (a cache key per activation), which Decision 2 rejected
 on 2026-10-30 (the decision of 2026-09-24 in CE-334 stays: a simple version
 gave wrong results, and the measured gain on the Tycho workloads was small).
-CE-334, CE-531 and CE-321 record the earlier measurements. Not yet measured:
-how much of the `Apply` time of this workload is such misses.
+CE-334, CE-531 and CE-321 record the earlier measurements.
+
+Measured 2026-10-30 at `399b29e6c` (session compute-engine-7b):
+
+- One `Apply` makes 75 calls of function literals. Each call declares its
+  parameters (131 declarations) and pops its frame (75 pops), so the `any`
+  version moves 206 times. The type cache then has 59,338 reads and 6,332
+  misses because the version moved; each of the 6,332 gives the same type
+  again. The effects cache has 1,960 reads and 1,050 misses because the
+  lexical scope changed (a new call scope); each gives the same effects
+  again. The shared-evaluation memo has 770 look-ups and 154 hits; with it
+  off (`CE_CACHE_OFF=shared`) the time does not change.
+- With every cache switch off except `type`, the values for five
+  permutations are the same. With `type` off the run does not end in 300 s
+  (the exponential case that `cache-switches.ts` documents). A check that
+  computes the type again at each served hit found no difference.
+- Experiment: a second version for the type cache only, which a declaration
+  into a call scope that is not pushed yet and the pop of that call frame
+  do not move (all other caches keep the `any` version). `Apply` goes from
+  about 100 ms to about 14 ms from source, and on a build from about 98 ms
+  to about 18 ms (0.156.0: about 48 ms; the box was loaded by another
+  session's suite during this paired run). The full suite passes with it
+  (1,691 files, 73,269 tests). The experiment has no guard for a type
+  handler that reads the value of a parameter through the call frame;
+  such a guard is needed before it can ship.
+- Timing of every first-parent commit from 0.156.0 to 0.158.0, 0.167.0 to
+  0.169.0 and 0.170.0 to 0.173.0: no commit stands out from the noise
+  (commits that change only documentation show rises of 2 to 6 ms). The
+  growth is many small costs, each multiplied by the 6,332 type
+  recomputations of each `Apply`.
 
 The box route is also still slower than in 0.156.0 (30 ms on 0.156.0, 106 ms on
 0.173.0, built packages). One canonical pass of the same tree with no fold
