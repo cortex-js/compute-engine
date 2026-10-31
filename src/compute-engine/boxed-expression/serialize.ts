@@ -1537,10 +1537,17 @@ function serializeJsonExpression(
         ),
       ];
     }
-    const dict: Record<string, MathJsonExpression> = {};
-    for (const [key, value] of expr.entries)
-      dict[key] = serializeJson(ce, value, options);
-    return { dict };
+    // Build data properties rather than assigning to `{}`: `__proto__` is a
+    // valid dictionary key, and assignment would call the inherited setter
+    // instead of serializing the entry.
+    return {
+      dict: Object.fromEntries(
+        expr.entries.map(([key, value]) => [
+          key,
+          serializeJson(ce, value, options),
+        ])
+      ),
+    };
   }
 
   // Is it an object (the mutable value kind)?

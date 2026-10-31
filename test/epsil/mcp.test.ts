@@ -9,7 +9,11 @@ import { version } from '../../src/epsil';
 /** Run `epsil mcp` over a scripted stdin and return the JSON responses. */
 async function runServer(
   requests: unknown[],
-  options?: { loadCard?: (card: string) => Promise<string>; raw?: string[] }
+  options?: {
+    args?: string[];
+    loadCard?: (card: string) => Promise<string>;
+    raw?: string[];
+  }
 ): Promise<any[]> {
   let out = '';
   let err = '';
@@ -34,7 +38,7 @@ async function runServer(
     env: {},
     loadCard: options?.loadCard,
   };
-  expect(await main(['mcp'], io)).toBe(0);
+  expect(await main(['mcp', ...(options?.args ?? [])], io)).toBe(0);
   expect(err).toBe('');
   return out
     .split('\n')
@@ -51,15 +55,13 @@ function callTool(id: number, name: string, args: unknown) {
 }
 
 async function startHttpServer(
-  extraArgs: string[] = []
+  extraArgs: string[] = [],
+  env: NodeJS.ProcessEnv = {}
 ): Promise<{ server: Server; endpoint: string }> {
-  const options = parseMcpArguments([
-    '--transport',
-    'streamable-http',
-    '--port',
-    '0',
-    ...extraArgs,
-  ]);
+  const options = parseMcpArguments(
+    ['--transport', 'streamable-http', '--port', '0', ...extraArgs],
+    env
+  );
   const server = createMcpHttpServer(
     options,
     async () => '# Epsil card fixture'
@@ -429,6 +431,26 @@ describe('MCP server tools', () => {
       severity: 'error',
       code: 'timeout',
     });
+  });
+
+  test('a call cannot disable or extend the server deadline', async () => {
+    const responses = await runServer(
+      [
+        callTool(1, 'evaluate', {
+          source: '\\sum_{k=1}^{10^{9}} \\frac{1}{k^2}',
+          format: 'latex',
+          timeLimit: 0,
+        }),
+        callTool(2, 'compile', {
+          source: '\\int_0^x \\frac{\\sin(t)^{7}\\cos(t)^{5}}{1+t^{4}}\\,dt',
+          format: 'latex',
+          timeLimit: 60_000,
+        }),
+      ],
+      { args: ['--time-limit', '1'] }
+    );
+    expect(payload(responses[0]).diagnostics[0].code).toBe('timeout');
+    expect(payload(responses[1]).diagnostic.code).toBe('timeout');
   });
 
   test('parse converts LaTeX to MathJSON as written', async () => {
@@ -858,6 +880,30 @@ describe('MCP Streamable HTTP transport', () => {
     }
   });
 
+  test('requires a configured bearer token when one is enabled', async () => {
+    const { server, endpoint } = await startHttpServer(
+      ['--auth-token-env', 'EPSIL_TEST_TOKEN'],
+      { EPSIL_TEST_TOKEN: 'correct horse battery staple' }
+    );
+    try {
+      const missing = await postMcp(endpoint, request(1, 'ping'));
+      expect(missing.status).toBe(401);
+      expect(missing.headers.get('www-authenticate')).toBe('Bearer');
+
+      const wrong = await postMcp(endpoint, request(2, 'ping'), {
+        authorization: 'Bearer wrong',
+      });
+      expect(wrong.status).toBe(401);
+
+      const allowed = await postMcp(endpoint, request(3, 'ping'), {
+        authorization: 'bearer correct horse battery staple',
+      });
+      expect(allowed.status).toBe(200);
+    } finally {
+      await stopHttpServer(server);
+    }
+  });
+
   test('reports malformed JSON as a JSON-RPC parse error', async () => {
     const { server, endpoint } = await startHttpServer();
     try {
@@ -889,6 +935,7 @@ describe('MCP server arguments', () => {
       port: 8000,
       path: '/mcp',
       allowedOrigins: [],
+      authToken: undefined,
       workers: 0,
     });
     expect(
@@ -915,6 +962,7 @@ describe('MCP server arguments', () => {
       port: 3000,
       path: '/epsil',
       allowedOrigins: ['https://chatgpt.com', 'http://localhost:6274'],
+      authToken: undefined,
       workers: 0,
     });
   });
@@ -942,6 +990,41 @@ describe('MCP server arguments', () => {
       ])
     ).toThrow(CliUsageError);
     expect(() => parseMcpArguments(['--port', '8000'])).toThrow(CliUsageError);
+    expect(() =>
+      parseMcpArguments(['--transport', 'streamable-http', '--host', '0.0.0.0'])
+    ).toThrow(/auth-token-env/);
+    expect(() =>
+      parseMcpArguments(
+        [
+          '--transport',
+          'streamable-http',
+          '--host',
+          '0.0.0.0',
+          '--auth-token-env',
+          'EPSIL_TOKEN',
+        ],
+        {}
+      )
+    ).toThrow(/empty or undefined/);
+    expect(() =>
+      parseMcpArguments(
+        ['--transport', 'streamable-http', '--auth-token-env', 'EPSIL_TOKEN'],
+        { EPSIL_TOKEN: ' secret' }
+      )
+    ).toThrow(/whitespace/);
+    expect(
+      parseMcpArguments(
+        [
+          '--transport',
+          'streamable-http',
+          '--host',
+          '0.0.0.0',
+          '--auth-token-env',
+          'EPSIL_TOKEN',
+        ],
+        { EPSIL_TOKEN: 'secret' }
+      ).authToken
+    ).toBe('secret');
   });
 });
 

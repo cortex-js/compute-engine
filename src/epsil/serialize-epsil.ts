@@ -13,6 +13,7 @@ import {
   matchesString,
 } from '../math-json/utils.js';
 import { splitGraphemes } from '../common/grapheme-splitter.js';
+import { checkDeadline, type DeadlineFrame } from '../common/interruptible.js';
 import {
   SUPERSCRIPT_UNICODE,
   DIGITS,
@@ -148,6 +149,8 @@ export function serializeEpsil(
     fancySymbols?: boolean;
     libraryNames?: 'epsil' | 'mathjson';
     isBound?: (name: string) => boolean;
+    /** @internal Deadline inherited from a host engine span. */
+    deadline?: DeadlineFrame;
   }
 ): string {
   // The names written and bound in the expression, collected once on first
@@ -156,7 +159,7 @@ export function serializeEpsil(
   const namesOf = (): ExpressionNames => {
     if (names === undefined) {
       names = { written: new Set(), bound: new Set() };
-      collectNames(expr, names);
+      collectNames(expr, names, false, options?.deadline);
     }
     return names;
   };
@@ -232,6 +235,7 @@ export function serializeEpsil(
   function serializeExpression(
     expr: MathJsonExpression | null
   ): FormattingBlock {
+    checkDeadline(options?.deadline);
     // Read and clear the flag at once, so that it applies to the key symbol
     // only and never to an expression serialized inside it.
     const isPairKey = atPairKey;
@@ -3238,8 +3242,10 @@ const BINDING_OPERANDS: ReadonlySet<string> = new Set([
 function collectNames(
   expr: MathJsonExpression | null,
   names: ExpressionNames,
-  pattern = false
+  pattern = false,
+  deadline?: DeadlineFrame
 ): void {
+  checkDeadline(deadline);
   if (expr === null || (typeof expr !== 'object' && typeof expr !== 'string'))
     return;
   if (typeof expr === 'string') {
@@ -3252,7 +3258,8 @@ function collectNames(
       expr[0] as MathJsonExpression,
       expr.slice(1) as MathJsonExpression[],
       names,
-      pattern
+      pattern,
+      deadline
     );
     return;
   }
@@ -3261,39 +3268,48 @@ function collectNames(
     return;
   }
   if ('fn' in expr) {
-    collectCall(expr.fn[0], expr.fn.slice(1), names, pattern);
+    collectCall(expr.fn[0], expr.fn.slice(1), names, pattern, deadline);
     return;
   }
   if ('dict' in expr)
     for (const value of Object.values(expr.dict))
-      collectNames(dictionaryValueToExpression(value), names, pattern);
+      collectNames(
+        dictionaryValueToExpression(value),
+        names,
+        pattern,
+        deadline
+      );
 }
 
 function collectCall(
   head: MathJsonExpression | string,
   args: MathJsonExpression[],
   names: ExpressionNames,
-  pattern: boolean
+  pattern: boolean,
+  deadline?: DeadlineFrame
 ): void {
   if (typeof head === 'string') names.written.add(head);
-  else collectNames(head, names, pattern);
+  else collectNames(head, names, pattern, deadline);
   // The binding positions of this head.
   if (typeof head === 'string') {
     if (head === 'Declare' || head === 'Assign' || head === 'DefineFunction')
-      bindLeaves(args[0], names);
+      bindLeaves(args[0], names, false, deadline);
     if (head === 'Function')
-      for (const param of args.slice(1)) bindLeaves(param, names);
-    if (head === 'Element' || head === 'Limits') bindLeaves(args[0], names);
+      for (const param of args.slice(1))
+        bindLeaves(param, names, false, deadline);
+    if (head === 'Element' || head === 'Limits')
+      bindLeaves(args[0], names, false, deadline);
     if (BINDING_OPERANDS.has(head))
-      for (const op of args.slice(1)) bindLeaves(op, names, true);
-    if (QUANTIFIERS.has(head)) bindLeaves(args[0], names, true);
+      for (const op of args.slice(1)) bindLeaves(op, names, true, deadline);
+    if (QUANTIFIERS.has(head)) bindLeaves(args[0], names, true, deadline);
     if (head === 'MatchCase') {
-      collectNames(args[0], names, true);
-      for (const arg of args.slice(1)) collectNames(arg, names, pattern);
+      collectNames(args[0], names, true, deadline);
+      for (const arg of args.slice(1))
+        collectNames(arg, names, pattern, deadline);
       return;
     }
   }
-  for (const arg of args) collectNames(arg, names, pattern);
+  for (const arg of args) collectNames(arg, names, pattern, deadline);
 }
 
 /**
@@ -3306,8 +3322,10 @@ function collectCall(
 function bindLeaves(
   op: MathJsonExpression | null | undefined,
   names: ExpressionNames,
-  shallow = false
+  shallow = false,
+  deadline?: DeadlineFrame
 ): void {
+  checkDeadline(deadline);
   if (op === null || op === undefined) return;
   const name = symbol(op);
   if (name !== null) {
@@ -3316,12 +3334,13 @@ function bindLeaves(
   }
   const head = operator(op);
   if (head === 'Typed' || head === 'Spread') {
-    bindLeaves(operand(op, 1), names, shallow);
+    bindLeaves(operand(op, 1), names, shallow, deadline);
     return;
   }
   if (head === 'Tuple' || head === 'List' || head === 'Set')
     for (const leaf of operands(op))
-      if (!shallow || symbol(leaf) !== null) bindLeaves(leaf, names, shallow);
+      if (!shallow || symbol(leaf) !== null)
+        bindLeaves(leaf, names, shallow, deadline);
 }
 
 /** `name` is written; inside a match pattern, a pattern-encoded symbol

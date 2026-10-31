@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises';
+import { timingSafeEqual } from 'node:crypto';
 import {
   createServer,
   type IncomingMessage,
@@ -17,6 +18,7 @@ import {
 import { explainErrorCode } from '../epsil/error-explanations.js';
 import {
   budgetCauseOf,
+  checkDeadline,
   isTimeoutCancellation,
 } from '../common/interruptible.js';
 import { compile } from '../compute-engine/compilation/compile-expression.js';
@@ -24,7 +26,11 @@ import type { CompileMode } from '../compute-engine/compilation/types.js';
 import type { KernelPool } from '../compute-engine/kernel-pool-types.js';
 import { resolveLibraryNames } from '../epsil/resolve-library-names.js';
 
-import { CliUsageError, parseMcpArguments } from './arguments.js';
+import {
+  CliUsageError,
+  isLoopbackHost,
+  parseMcpArguments,
+} from './arguments.js';
 import { checkSource, effectSummaryToJson, parseSource } from './check.js';
 import { lookupDoc } from './doc.js';
 import { diagnosticToJson, formatValue, hasErrors } from './format.js';
@@ -96,7 +102,7 @@ const TOOLS = [
         timeLimit: {
           type: 'number',
           description:
-            'Evaluation deadline in milliseconds; 0 disables it (default: 10000)',
+            'Evaluation deadline in milliseconds. A call may shorten but cannot extend the server deadline; 0 uses the server deadline (default: 10000)',
         },
         fancySymbols: {
           type: 'boolean',
@@ -217,7 +223,7 @@ const TOOLS = [
         timeLimit: {
           type: 'number',
           description:
-            'Compilation deadline in milliseconds; 0 disables it (default: 10000)',
+            'Compilation deadline in milliseconds. A call may shorten but cannot extend the server deadline; 0 uses the server deadline (default: 10000)',
         },
         declarations: {
           type: 'object',
@@ -323,7 +329,7 @@ export async function runMcp(
 ): Promise<number> {
   let options;
   try {
-    options = parseMcpArguments(args);
+    options = parseMcpArguments(args, io.env);
   } catch (error) {
     const message =
       error instanceof CliUsageError && error.message
@@ -469,11 +475,17 @@ async function handleHttpRequest(
     if (request.method === 'OPTIONS') {
       response.writeHead(204, {
         'Access-Control-Allow-Headers':
-          'Accept, Content-Type, MCP-Protocol-Version',
+          'Accept, Authorization, Content-Type, MCP-Protocol-Version',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
         'Access-Control-Max-Age': '600',
       });
       response.end();
+      return;
+    }
+
+    if (!hasValidAuthorization(request, options.authToken)) {
+      response.setHeader('WWW-Authenticate', 'Bearer');
+      sendHttpText(response, 401, 'Unauthorized');
       return;
     }
 
@@ -721,15 +733,15 @@ class McpServer {
         case 'evaluate':
           return await this.evaluate(args);
         case 'check':
-          return McpServer.check(args);
+          return this.check(args);
         case 'doc':
-          return McpServer.doc(args);
+          return this.doc(args);
         case 'parse':
-          return McpServer.parse(args);
+          return this.parse(args);
         case 'compile':
           return this.compile(args);
         default:
-          return McpServer.serialize(args);
+          return this.serialize(args);
       }
     } catch (error) {
       return {
@@ -746,10 +758,7 @@ class McpServer {
 
   private async evaluate(args: Record<string, unknown>): Promise<unknown> {
     const source = requireString(args, 'source');
-    const timeLimit =
-      args.timeLimit === undefined
-        ? this.timeLimit
-        : requireTimeLimit(args.timeLimit);
+    const timeLimit = effectiveTimeLimit(this.timeLimit, args.timeLimit);
 
     const fancySymbols = optionalBoolean(args, 'fancySymbols');
     const format = optionalFormat(args);
@@ -783,28 +792,31 @@ class McpServer {
     });
   }
 
-  private static check(args: Record<string, unknown>): unknown {
+  private check(args: Record<string, unknown>): unknown {
     const source = requireString(args, 'source');
     const wantEffects = optionalBoolean(args, 'effects');
-    const { diagnostics, effects } = checkSource(source, undefined, {
-      effects: wantEffects,
-    });
-    return toolResult({
-      ok: !diagnostics.some((x) => x.severity === 'error'),
-      diagnostics: diagnostics.map((x) => diagnosticToJson(x, source)),
-      // `null` when the parse failed and nothing was analyzed.
-      ...(effects === undefined
-        ? {}
-        : {
-            effects:
-              effects === null
-                ? null
-                : effects.map((x) => effectSummaryToJson(x, source)),
-          }),
+    return this.withDeadline('check', (engine) => {
+      const { diagnostics, effects } = checkSource(source, undefined, {
+        effects: wantEffects,
+        engine,
+      });
+      return toolResult({
+        ok: !diagnostics.some((x) => x.severity === 'error'),
+        diagnostics: diagnostics.map((x) => diagnosticToJson(x, source)),
+        // `null` when the parse failed and nothing was analyzed.
+        ...(effects === undefined
+          ? {}
+          : {
+              effects:
+                effects === null
+                  ? null
+                  : effects.map((x) => effectSummaryToJson(x, source)),
+            }),
+      });
     });
   }
 
-  private static doc(args: Record<string, unknown>): unknown {
+  private doc(args: Record<string, unknown>): unknown {
     const query = requireString(args, 'query');
     // Diagnostic codes are doc-addressable, mirroring `epsil doc <code>`.
     const explanation = explainErrorCode(query);
@@ -814,31 +826,35 @@ class McpServer {
       typeof args.limit === 'number' && Number.isInteger(args.limit)
         ? Math.min(Math.max(args.limit, 1), 100)
         : 10;
-    const { entries } = lookupDoc(new ComputeEngine(), query, limit);
-    return toolResult({ query, matches: entries });
+    return this.withDeadline('doc', (engine) => {
+      const { entries } = lookupDoc(engine, query, limit);
+      return toolResult({ query, matches: entries });
+    });
   }
 
-  private static parse(args: Record<string, unknown>): unknown {
+  private parse(args: Record<string, unknown>): unknown {
     const source = requireString(args, 'source');
-    if (optionalFormat(args) === 'latex') {
-      // Non-canonical, like the Epsil path: the structure as written.
-      const expr = new ComputeEngine().parse(source, { form: 'raw' });
-      const diagnostics = latexDiagnostics(expr.errors);
+    return this.withDeadline('parse', (engine) => {
+      if (optionalFormat(args) === 'latex') {
+        // Non-canonical, like the Epsil path: the structure as written.
+        const expr = engine.parse(source, { form: 'raw' });
+        const diagnostics = latexDiagnostics(expr.errors);
+        return toolResult({
+          ok: diagnostics.length === 0,
+          mathjson: expr.json,
+          diagnostics,
+        });
+      }
+      const { ast, diagnostics } = parseSource(source, undefined, engine);
+      // The raw AST is annotated with source offsets; a non-canonical box
+      // round-trip normalizes it to plain MathJSON without resolving sugar.
+      const mathjson =
+        ast === null ? null : engine.box(ast, { form: 'raw' }).json;
       return toolResult({
-        ok: diagnostics.length === 0,
-        mathjson: expr.json,
-        diagnostics,
+        ok: !diagnostics.some((x) => x.severity === 'error'),
+        mathjson,
+        diagnostics: diagnostics.map((x) => diagnosticToJson(x, source)),
       });
-    }
-    const { ast, diagnostics } = parseSource(source);
-    // The raw AST is annotated with source offsets; a non-canonical box
-    // round-trip normalizes it to plain MathJSON without resolving sugar.
-    const mathjson =
-      ast === null ? null : new ComputeEngine().box(ast, { form: 'raw' }).json;
-    return toolResult({
-      ok: !diagnostics.some((x) => x.severity === 'error'),
-      mathjson,
-      diagnostics: diagnostics.map((x) => diagnosticToJson(x, source)),
     });
   }
 
@@ -860,10 +876,7 @@ class McpServer {
       COMPILE_MODES
     );
     const declarations = optionalDeclarations(args);
-    const timeLimit =
-      args.timeLimit === undefined
-        ? this.timeLimit
-        : requireTimeLimit(args.timeLimit);
+    const timeLimit = effectiveTimeLimit(this.timeLimit, args.timeLimit);
 
     const ce = new ComputeEngine();
     // A declaration of a name the library already defines (`e`, `Sin`)
@@ -962,25 +975,47 @@ class McpServer {
     }
   }
 
-  private static serialize(args: Record<string, unknown>): unknown {
+  private serialize(args: Record<string, unknown>): unknown {
     if (args.mathjson === undefined)
       throw new Error('Expected a "mathjson" argument.');
     const fancySymbols = optionalBoolean(args, 'fancySymbols');
     if (optionalFormat(args) === 'latex') {
       // Boxed without canonicalization, so the LaTeX keeps the operand order
       // and structure of the input (as the Epsil serialization does).
-      const expr = new ComputeEngine().box(
-        args.mathjson as Parameters<ComputeEngine['box']>[0],
-        { form: 'raw' }
-      );
-      return toolResult({ latex: expr.latex });
+      return this.withDeadline('serialize', (engine) => {
+        const expr = engine.box(
+          args.mathjson as Parameters<ComputeEngine['box']>[0],
+          { form: 'raw' }
+        );
+        return toolResult({ latex: expr.latex });
+      });
     }
-    return toolResult({
-      epsil: serializeEpsil(
-        args.mathjson as Parameters<typeof serializeEpsil>[0],
-        { fancySymbols }
-      ),
-    });
+    return this.withDeadline('serialize', (engine) =>
+      toolResult({
+        epsil: serializeEpsil(
+          args.mathjson as Parameters<typeof serializeEpsil>[0],
+          { fancySymbols, deadline: engine._deadlineFrame }
+        ),
+      })
+    );
+  }
+
+  private withDeadline(
+    label: string,
+    run: (engine: ComputeEngine) => unknown
+  ): unknown {
+    const engine = new ComputeEngine();
+    if (this.timeLimit === 0) return run(engine);
+    return engine.withTimeLimit(
+      { ms: this.timeLimit, label: `epsil:${label}` },
+      () => {
+        const result = run(engine);
+        // Some short library walks have no internal cooperative check. Do
+        // not return a result when one of them finished after the deadline.
+        checkDeadline(engine._deadlineFrame);
+        return result;
+      }
+    );
   }
 }
 
@@ -1132,6 +1167,30 @@ function requireTimeLimit(value: unknown): number {
   return value;
 }
 
+/** A call may shorten the server's deadline, but never remove or extend it. */
+function effectiveTimeLimit(serverLimit: number, requested: unknown): number {
+  if (requested === undefined) return serverLimit;
+  const callLimit = requireTimeLimit(requested);
+  if (serverLimit === 0) return callLimit;
+  if (callLimit === 0) return serverLimit;
+  return Math.min(serverLimit, callLimit);
+}
+
+function hasValidAuthorization(
+  request: IncomingMessage,
+  expected: string | undefined
+): boolean {
+  if (expected === undefined) return true;
+  const authorization = request.headers.authorization;
+  // RFC 9110 makes authentication scheme names case-insensitive. Keep the
+  // credentials themselves byte- and case-sensitive.
+  const match = authorization?.match(/^Bearer +(.+)$/iu);
+  if (match === undefined || match === null) return false;
+  const supplied = Buffer.from(match[1], 'utf8');
+  const wanted = Buffer.from(expected, 'utf8');
+  return supplied.length === wanted.length && timingSafeEqual(supplied, wanted);
+}
+
 function requestPath(request: IncomingMessage): string {
   try {
     return new URL(request.url ?? '/', 'http://localhost').pathname;
@@ -1157,16 +1216,6 @@ function isAllowedOrigin(
   } catch {
     return false;
   }
-}
-
-function isLoopbackHost(host: string): boolean {
-  const normalized = host.replace(/^\[(.*)\]$/u, '$1').toLowerCase();
-  return (
-    normalized === 'localhost' ||
-    normalized === '::1' ||
-    normalized === '0:0:0:0:0:0:0:1' ||
-    /^127(?:\.\d{1,3}){3}$/u.test(normalized)
-  );
 }
 
 function hasJsonContentType(value: string | undefined): boolean {

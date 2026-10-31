@@ -1,0 +1,7 @@
+{
+  "name": "deepmerge",
+  "version": "4.3.2-security.1",
+  "description": "Vendored security-patched deepmerge for development tooling",
+  "license": "MIT",
+  "main": "index.js"
+}

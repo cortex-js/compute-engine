@@ -303,9 +303,12 @@ npx epsil mcp --transport streamable-http
 
 The HTTP endpoint defaults to `http://127.0.0.1:8000/mcp`. Configure it with
 `--host <address>`, `--port <number>`, and `--path <path>`. The server binds
-only to loopback by default; using a public bind address does not add HTTPS or
-authentication. Repeat `--allow-origin <origin>` to allow a browser client
-from a non-local origin.
+only to loopback by default. A non-loopback address requires
+`--auth-token-env <name>`; every request must then carry the value of that
+environment variable as a Bearer token. The value must be nonempty and have no
+leading or trailing whitespace. This adds authentication, not TLS, so put a
+public endpoint behind HTTPS. Repeat `--allow-origin <origin>` to allow a browser
+client from a non-local origin.
 
 | Tool        | Purpose                                                        |
 | :---------- | :------------------------------------------------------------- |
@@ -322,8 +325,8 @@ The server also exposes the agent-facing language card
 Each `evaluate` call runs in a fresh session: definitions do not persist
 between calls, so every program must be self-contained. The
 `--time-limit <ms>` option sets the default evaluation deadline for the
-`evaluate` tool (default 10000; each call can override it with its
-`timeLimit` argument).
+all tools (default 10000). An `evaluate` or `compile` call can shorten it with
+its `timeLimit` argument, but cannot extend or disable the server deadline.
 
 <ReadMore path="/epsil/mcp/">
 See how to **connect ChatGPT, Claude Code, Claude Desktop, or another MCP

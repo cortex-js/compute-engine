@@ -262,7 +262,8 @@ sequenceDiagram
   The assistant knows this and writes self-contained programs.
 - **Evaluations have a deadline.** By default a program is canceled after
   10 seconds. Start the server with `epsil mcp --time-limit <ms>` to change
-  the default (`0` disables it); the assistant can also adjust it per call.
+  the server maximum (`0` disables it). The assistant can shorten that limit
+  per `evaluate` or `compile` call, but cannot extend or disable it.
 - **Numeric work can run on worker threads.** Start the server with
   `epsil mcp --workers <n>` to give the engines of the `evaluate` calls a
   pool of `<n>` worker threads; a `findFit` with a global search then scans
@@ -276,7 +277,9 @@ sequenceDiagram
   requests to 1 MiB, and rejects unapproved browser origins. Use `--host`,
   `--port`, and `--path` to configure the listener. Repeat
   `--allow-origin <origin>` for browser clients that run on another origin.
-  Binding to a public interface does not add authentication or TLS.
+  A non-loopback bind requires `--auth-token-env <name>` and Bearer
+  authentication using that environment variable's value. It does not add
+  TLS; put a public endpoint behind HTTPS.
 
 <ReadMore path="/epsil/cli/">
 The same package also provides a **command-line interface and interactive

@@ -172,7 +172,10 @@ export function parseDocArguments(args: readonly string[]): DocOptions {
   };
 }
 
-export function parseMcpArguments(args: readonly string[]): McpOptions {
+export function parseMcpArguments(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env
+): McpOptions {
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({
@@ -186,6 +189,7 @@ export function parseMcpArguments(args: readonly string[]): McpOptions {
         'port': { type: 'string' },
         'path': { type: 'string' },
         'allow-origin': { type: 'string', multiple: true },
+        'auth-token-env': { type: 'string' },
         'workers': { type: 'string' },
       },
     });
@@ -200,17 +204,24 @@ export function parseMcpArguments(args: readonly string[]): McpOptions {
   const port = parseMcpPort(values.port);
   const path = parseMcpPath(values.path);
   const allowedOrigins = parseMcpOrigins(values['allow-origin']);
+  const authToken = parseMcpAuthToken(values['auth-token-env'], env);
 
   if (
     transport === 'stdio' &&
     (values.host !== undefined ||
       values.port !== undefined ||
       values.path !== undefined ||
-      values['allow-origin'] !== undefined)
+      values['allow-origin'] !== undefined ||
+      values['auth-token-env'] !== undefined)
   )
     throw new CliUsageError(
-      '--host, --port, --path and --allow-origin require ' +
+      '--host, --port, --path, --allow-origin and --auth-token-env require ' +
         '"--transport streamable-http".'
+    );
+
+  if (transport === 'streamable-http' && !isLoopbackHost(host) && !authToken)
+    throw new CliUsageError(
+      'A non-loopback --host requires --auth-token-env <name>.'
     );
 
   return {
@@ -222,8 +233,41 @@ export function parseMcpArguments(args: readonly string[]): McpOptions {
     port,
     path,
     allowedOrigins,
+    authToken,
     workers: parseWorkers(values.workers),
   };
+}
+
+function parseMcpAuthToken(
+  name: unknown,
+  env: NodeJS.ProcessEnv
+): string | undefined {
+  if (name === undefined) return undefined;
+  if (typeof name !== 'string' || !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name))
+    throw new CliUsageError(
+      '--auth-token-env must name an environment variable.'
+    );
+  const token = env[name];
+  if (token === undefined || token.length === 0)
+    throw new CliUsageError(
+      `--auth-token-env ${name} names an empty or undefined variable.`
+    );
+  if (token.trim() !== token)
+    throw new CliUsageError(
+      `--auth-token-env ${name} names a value with leading or trailing whitespace.`
+    );
+  return token;
+}
+
+/** Whether `host` names a loopback listener or browser origin. */
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.replace(/^\[(.*)\]$/u, '$1').toLowerCase();
+  return (
+    normalized === 'localhost' ||
+    normalized === '::1' ||
+    normalized === '0:0:0:0:0:0:0:1' ||
+    /^127(?:\.\d{1,3}){3}$/u.test(normalized)
+  );
 }
 
 function parseMcpTransport(value: unknown): McpOptions['transport'] {

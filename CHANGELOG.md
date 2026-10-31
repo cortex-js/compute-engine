@@ -59,7 +59,37 @@
   takes 2 parameter(s) but 1 argument(s) are supplied", and `python` emitted
   `((lambda x, y: x + y))(1)`, which raises a `TypeError` when it runs.
 
+### Behavior Changes
+
+- **MCP clients cannot remove or extend the server's deadline, and a public
+  listener must be authenticated.** With a nonzero server `--time-limit`, a
+  tool argument of `timeLimit: 0` now uses that server limit instead of
+  disabling it, and a larger argument is reduced to the server limit. Starting
+  Streamable HTTP with a non-loopback address, such as `--host 0.0.0.0`, now
+  fails unless `--auth-token-env <name>` names a nonempty environment variable
+  whose value has no leading or trailing whitespace; requests must send its
+  value as a Bearer token.
+
 ### Bug Fixes
+
+- **The MCP server enforces its resource and network security boundaries.** A
+  tool call can shorten the server's time limit, but `timeLimit: 0` can no
+  longer disable it and a larger value cannot extend it; checking, parsing,
+  documentation lookup, and serialization now run under the server limit too. A
+  Streamable HTTP listener on a non-loopback address requires
+  `--auth-token-env <name>` and Bearer authentication with that environment
+  variable's value, preventing an accidentally public unauthenticated server.
+
+- **MathJSON dictionaries preserve hostile-looking keys as data.** Converting or
+  serializing a dictionary with an own `__proto__` entry used to invoke the
+  inherited setter on a temporary object, changing that object's prototype and
+  dropping the entry. The conversion paths now define own data properties and
+  ignore inherited properties of JavaScript record inputs.
+
+- **Development dependencies no longer contain known npm advisories.** Patched
+  `glob` and `minimatch` versions are enforced across Jest, Madge, and TypeDoc,
+  and Jest's `deepmerge` dependency uses a vendored, MIT-licensed copy with
+  prototype-poisoning keys rejected. `npm audit` now reports zero findings.
 
 - **An expression with a sub-expression of type `error` declines on every
   compile target.** With `u` declared `real` and `ADD = (x, y) ↦ x + y`, the

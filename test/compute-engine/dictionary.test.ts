@@ -129,9 +129,8 @@ describe('Dictionary', () => {
     });
 
     test('dictionary shorthand with array values', () => {
-      expect(
-        evaluate({ dict: { list: [1, 2, 3], items: ['a', 'b', 'c'] } })
-      ).toMatchInlineSnapshot(`
+      expect(evaluate({ dict: { list: [1, 2, 3], items: ['a', 'b', 'c'] } }))
+        .toMatchInlineSnapshot(`
         {
           dict: {
             list: {fn: ["List", {num: "1"}, {num: "2"}, {num: "3"}]};
@@ -458,9 +457,9 @@ describe('Dictionary', () => {
       // The diagnostic used to be checked only at the two top-level boxing
       // sites, so a bad inner dictionary became a silently EMPTY one inside an
       // outer dictionary that reported itself as valid.
-      expect(malformed({ dict: { outer: { dict: { '': 1 } } } } as never)).toContain(
-        'incompatible-type'
-      );
+      expect(
+        malformed({ dict: { outer: { dict: { '': 1 } } } } as never)
+      ).toContain('incompatible-type');
     });
 
     test('malformed tuple', () => {
@@ -486,9 +485,9 @@ describe('Dictionary', () => {
     });
 
     test('a `Nothing` key is rejected', () => {
-      expect(malformed(['Dictionary', ['Tuple', 'Nothing', 'value']])).toContain(
-        'incompatible-type'
-      );
+      expect(
+        malformed(['Dictionary', ['Tuple', 'Nothing', 'value']])
+      ).toContain('incompatible-type');
     });
 
     test('a dictionary that holds an Error value is invalid (CE-99.1)', () => {
@@ -581,15 +580,26 @@ describe('dictionaryFromExpression (REVIEW.md C8)', () => {
     const d = dictionaryFromExpression(['Tuple', { str: 'k' }, 9] as any);
     expect(d).toEqual({ dict: { k: 9 } });
   });
+  it('preserves __proto__ as an own data property', () => {
+    const result = dictionaryFromExpression([
+      'Dictionary',
+      ['Tuple', { str: '__proto__' }, 9],
+    ] as any)!;
+    expect(Object.getPrototypeOf(result.dict)).toBe(Object.prototype);
+    expect(Object.hasOwn(result.dict, '__proto__')).toBe(true);
+    expect(result.dict.__proto__).toBe(9);
+  });
 });
 
 describe('Dictionary key access via At', () => {
   const dict: Expression = { dict: { height: 42, width: 7 } } as any;
 
   it('reads a value by string key', () => {
-    expect(box(['At', dict, { str: 'height' }] as any).evaluate().valueOf()).toBe(
-      42
-    );
+    expect(
+      box(['At', dict, { str: 'height' }] as any)
+        .evaluate()
+        .valueOf()
+    ).toBe(42);
   });
 
   it('returns the absence marker for a missing key', () => {
@@ -610,18 +620,20 @@ describe('Dictionary key access via At', () => {
     const data = ce.box(dict);
     ce.declare('data', data.type);
     ce.assign('data', data);
-    expect(ce.parse('\\mathrm{data}[\\text{height}]', { form: 'raw' }).json).toEqual(
-      ['At', 'data', "'height'"]
-    );
     expect(
-      ce.parse('\\mathrm{data}[\\text{width}]').evaluate().valueOf()
-    ).toBe(7);
+      ce.parse('\\mathrm{data}[\\text{height}]', { form: 'raw' }).json
+    ).toEqual(['At', 'data', "'height'"]);
+    expect(ce.parse('\\mathrm{data}[\\text{width}]').evaluate().valueOf()).toBe(
+      7
+    );
   });
 
   it('still indexes an indexed collection positionally', () => {
-    expect(box(['At', ['List', 7, 13, 5], 1] as any).evaluate().valueOf()).toBe(
-      7
-    );
+    expect(
+      box(['At', ['List', 7, 13, 5], 1] as any)
+        .evaluate()
+        .valueOf()
+    ).toBe(7);
   });
 });
 
@@ -733,6 +745,16 @@ describe('Dictionary serialization boundary (Tycho 0.72.0 report)', () => {
     }
   });
 
+  test('toMathJson preserves a __proto__ entry as data', () => {
+    const dict = box(['Dictionary', ['Tuple', { str: '__proto__' }, 1]]);
+    const json = dict.toMathJson({ shorthands: [] }) as {
+      dict: Record<string, unknown>;
+    };
+    expect(Object.getPrototypeOf(json.dict)).toBe(Object.prototype);
+    expect(Object.hasOwn(json.dict, '__proto__')).toBe(true);
+    expect(json.dict.__proto__).toEqual({ num: '1' });
+  });
+
   test('a symbol bound to a dictionary value serializes as a symbol', () => {
     const spy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     try {
@@ -836,14 +858,20 @@ describe('Dictionary subs()', () => {
 
   test('returns the receiver when no value changes', () => {
     const ce = new ComputeEngine();
-    const d = ce.box(['Dictionary', ['KeyValuePair', { str: 'a' }, ['Add', 'n', 1]]]);
+    const d = ce.box([
+      'Dictionary',
+      ['KeyValuePair', { str: 'a' }, ['Add', 'n', 1]],
+    ]);
     expect(d.subs({ z: 3 })).toBe(d);
   });
 
   test('reaches a dictionary nested in a list', () => {
     const ce = new ComputeEngine();
     const r = ce
-      .box(['List', ['Dictionary', ['KeyValuePair', { str: 'a' }, ['Add', 'n', 1]]]])
+      .box([
+        'List',
+        ['Dictionary', ['KeyValuePair', { str: 'a' }, ['Add', 'n', 1]]],
+      ])
       .subs({ n: 3 });
     expect(r.json).toEqual(['List', { dict: { a: 4 } }]);
   });

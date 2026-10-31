@@ -232,18 +232,22 @@ export function dictionaryFromExpression(
 
   // Is it a Dictionary expression?
   if (operator(expr) === 'Dictionary') {
-    const dict: Record<string, DictionaryValue> = {};
+    const entries: [string, DictionaryValue][] = [];
     // `operands()` is already 0-based and head-stripped — iterate from the
     // first operand (the loop used to start at 1, silently dropping the first
     // dictionary entry).
     for (const op of operands(expr)) {
       const kv = keyValuePair(op);
-      if (kv) {
-        dict[kv[0]] = expressionToDictionaryValue(kv[1]) ?? 'Nothing';
-      }
+      if (kv)
+        entries.push([kv[0], expressionToDictionaryValue(kv[1]) ?? 'Nothing']);
     }
 
-    return { dict } as unknown as MathJsonDictionaryObject;
+    // `Object.fromEntries()` defines data properties, including
+    // `__proto__`; assignment to a plain object would invoke its inherited
+    // setter and silently change the returned object's prototype instead.
+    return {
+      dict: Object.fromEntries(entries),
+    } as unknown as MathJsonDictionaryObject;
   }
 
   return null;
@@ -569,11 +573,17 @@ function jsValueToExpression(v: any): MathJsonExpression | null {
     return v as MathJsonExpression;
   }
   if (typeof v === 'object') {
-    const dict: Record<string, MathJsonExpression> = {};
-    for (const key in v) {
-      dict[key] = asDictionaryValue(jsValueToExpression(v[key]));
-    }
-    return { dict };
+    // Read own enumerable entries only: inherited properties are not part of
+    // a JavaScript record. Defining the result from entries also preserves an
+    // own `__proto__` key without invoking Object.prototype's setter.
+    return {
+      dict: Object.fromEntries(
+        Object.entries(v).map(([key, value]) => [
+          key,
+          asDictionaryValue(jsValueToExpression(value)),
+        ])
+      ),
+    };
   }
   return null;
 }

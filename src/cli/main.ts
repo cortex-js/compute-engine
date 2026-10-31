@@ -67,6 +67,8 @@ Options:
       --path <path>       MCP HTTP endpoint path (default: /mcp)
       --allow-origin <o>  allow a browser origin to call the MCP HTTP endpoint;
                           may be repeated
+      --auth-token-env <n> require the bearer token stored in environment
+                          variable <n>; required for a non-loopback MCP host
       --workers <n>       give the engine a pool of <n> worker threads and
                           run each program asynchronously, so that "findFit"
                           and other numeric work on many values can run on

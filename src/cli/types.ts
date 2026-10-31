@@ -64,6 +64,9 @@ export interface McpOptions {
   path: string;
   /** Browser origins allowed to call the HTTP endpoint. */
   allowedOrigins: string[];
+  /** Bearer token required by the HTTP transport, read from the environment.
+   * A non-loopback listener must have one. */
+  authToken?: string;
   /** The number of worker threads of the kernel pool that the engine of
    * each `evaluate` call uses (see `CliOptions.workers`). `0`, the default,
    * means no pool. */

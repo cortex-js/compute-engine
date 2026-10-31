@@ -165,13 +165,16 @@
     "check-node-version": "^4.2.1",
     "concat-md": "^0.5.1",
     "decimal.js": "^10.6.0",
+    "deepmerge": "file:vendor/deepmerge",
     "esbuild": "^0.28.2",
+    "glob": "14.0.2",
     "husky": "^9.1.7",
     "jest": "^30.5.2",
     "jest-silent-reporter": "^0.6.0",
     "lint-staged": "^16.4.0",
     "madge": "^8.0.0",
     "mdast-util-from-markdown": "^2.1.0",
+    "minimatch": "11.0.1",
     "open": "^11.0.4",
     "oxlint": "^1.89.0",
     "prettier": "^3.9.10",
@@ -189,6 +192,11 @@
   "dependencies": {
     "@arnog/colors": "^0.7.3",
     "complex.js": "^2.4.3"
+  },
+  "overrides": {
+    "deepmerge": "$deepmerge",
+    "glob": "$glob",
+    "minimatch": "$minimatch"
   },
   "lint-staged": {
     "src/**/*.{ts,js,css,md}": "prettier --write",

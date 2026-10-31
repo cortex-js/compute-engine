@@ -75,15 +75,14 @@ export function parseSource(
  * follow-on noise.
  *
  * One engine serves both phases (the `$…$` LaTeX injection of the parse and
- * the canonicalization pass) — it is created here and discarded, so a check is
- * still stateless: every call starts from a clean session. The MCP `check`
- * tool runs this per request, where the second engine construction was pure
- * overhead.
+ * the canonicalization pass). By default it is created here and discarded, so
+ * a check is stateless. A host can supply a fresh engine in `options.engine`;
+ * the MCP server does that so both phases inherit its deadline span.
  */
 export function checkSource(
   source: string,
   url?: string,
-  options?: { effects?: boolean }
+  options?: { effects?: boolean; engine?: ComputeEngine }
 ): {
   ast: MathJsonExpression | null;
   diagnostics: ParsingDiagnostic[];
@@ -95,7 +94,7 @@ export function checkSource(
    */
   effects?: EffectSummary[] | null;
 } {
-  const engine = new ComputeEngine();
+  const engine = options?.engine ?? new ComputeEngine();
   const { ast, diagnostics } = parseSource(source, url, engine);
   if (ast === null || diagnostics.some((x) => x.severity === 'error'))
     return { ast, diagnostics, ...(options?.effects ? { effects: null } : {}) };
