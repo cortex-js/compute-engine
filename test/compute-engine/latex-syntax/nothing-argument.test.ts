@@ -225,6 +225,39 @@ describe('A GROUPED NOTHING AND A CUSTOM DICTIONARY', () => {
 });
 
 describe('THE MARK OF AN AUTHORED NOTHING, AND A CUSTOM OPERATOR', () => {
+  test('a custom matchfix entry keeps an authored Nothing body', () => {
+    const syntax = new LatexSyntax({ dictionary: [...LATEX_DICTIONARY] });
+    syntax.addEntries([
+      {
+        kind: 'matchfix',
+        openTrigger: '\\llbracket',
+        closeTrigger: '\\rrbracket',
+        name: 'Bracket',
+      },
+    ]);
+    expect(
+      JSON.stringify(syntax.parse('\\llbracket \\mathrm{Nothing}\\rrbracket'))
+    ).toBe('["Bracket","Nothing"]');
+  });
+
+  test('a Nothing row of a semicolon list is a row holding Nothing', () => {
+    expect(raw('[1;\\mathrm{Nothing}]')).toBe(
+      '["List",["List",1],["List","Nothing"]]'
+    );
+    expect(raw('[\\mathrm{Nothing};1]')).toBe(
+      '["List",["List","Nothing"],["List",1]]'
+    );
+    expect(raw('[;1]')).toContain('Error');
+  });
+
+  test('an empty row of a semicolon list stays empty', () => {
+    // An empty segment also gives the symbol `Nothing`; only an authored
+    // one is a row that holds it.
+    expect(raw('[1;;2]')).toBe('["List",["List",1],["List"],["List",2]]');
+    expect(raw('[1;2]')).toBe('["List",["List",1],["List",2]]');
+    expect(raw('[1;2;]')).toBe('["List",["List",1],["List",2]]');
+  });
+
   test('a decoration after a Nothing in braces keeps it', () => {
     expect(raw('{\\mathrm{Nothing}\\strut}; x')).toBe(
       raw('{\\mathrm{Nothing}}; x')
@@ -375,5 +408,139 @@ describe('THE RESTORE CHECK AND A CUSTOM SYMBOL ENTRY', () => {
     expect(
       JSON.stringify(syntax.parse('\\myphantom{\\mathrm{Nothing}}x'))
     ).toBe('"x"');
+  });
+});
+
+describe('A NOTHING THAT IS THE ONLY CONTENT OF AN ENCLOSURE', () => {
+  // The parser gives the symbol `Nothing` for an empty enclosure and for an
+  // enclosure that holds only `\mathrm{Nothing}`. The authored symbol is an
+  // operand: `f(\mathrm{Nothing})` has one argument, `f()` has none.
+
+  function canonical(latex: string) {
+    return JSON.stringify(ce.parse(latex).json);
+  }
+
+  const syntax = new LatexSyntax();
+  function parsed(latex: string) {
+    return JSON.stringify(syntax.parse(latex));
+  }
+
+  test('a parenthesized Nothing is a Delimiter operand', () => {
+    expect(raw('(\\mathrm{Nothing})')).toBe('["Delimiter","Nothing"]');
+    expect(canonical('(\\mathrm{Nothing})')).toBe('"Nothing"');
+    expect(raw('({\\mathrm{Nothing}})')).toBe('["Delimiter","Nothing"]');
+    expect(raw('\\left(\\mathrm{Nothing}\\right)')).toBe(
+      '["Delimiter","Nothing"]'
+    );
+  });
+
+  test('the Nothing argument of a function is kept', () => {
+    // `f` is not declared: the raw form is the juxtaposition, as for `f(x)`.
+    const fresh = new ComputeEngine();
+    expect(JSON.stringify(fresh.parse('f(\\mathrm{Nothing})', { form: 'raw' }).json)).toBe(
+      '["InvisibleOperator","f",["Delimiter","Nothing"]]'
+    );
+    expect(JSON.stringify(fresh.parse('f(\\mathrm{Nothing})').json)).toBe(
+      '["f"]'
+    );
+
+    const declared = new ComputeEngine();
+    declared.declare('f', 'function');
+    expect(
+      JSON.stringify(declared.parse('f(\\mathrm{Nothing})', { form: 'raw' }).json)
+    ).toBe('["f","Nothing"]');
+    expect(JSON.stringify(declared.parse('f(\\mathrm{Nothing})').json)).toBe(
+      '["f"]'
+    );
+    expect(
+      JSON.stringify(declared.parse('f(\\mathrm{Nothing}, 1)', { form: 'raw' }).json)
+    ).toBe('["f","Nothing",1]');
+    expect(
+      JSON.stringify(declared.parse('f(1, \\mathrm{Nothing})', { form: 'raw' }).json)
+    ).toBe('["f",1,"Nothing"]');
+
+    expect(raw('\\sin(\\mathrm{Nothing})')).toBe('["Sin","Nothing"]');
+    expect(raw('\\gcd{\\mathrm{Nothing}}')).toBe('["GCD","Nothing"]');
+  });
+
+  test('the Nothing argument of Hold is kept', () => {
+    expect(parsed('\\mathrm{Hold}(\\mathrm{Nothing})')).toBe(
+      '["InvisibleOperator","Hold",["Delimiter","Nothing"]]'
+    );
+    // The parse route and the box route give the same expression, also when
+    // the argument count is wrong.
+    for (const [latex, json] of [
+      ['\\mathrm{Hold}(\\mathrm{Nothing})', ['Hold', 'Nothing']],
+      ['\\mathrm{Hold}(\\mathrm{Nothing}, 1)', ['Hold', 'Nothing', 1]],
+      ['\\mathrm{Hold}(x, 1)', ['Hold', 'x', 1]],
+      ['\\mathrm{Hold}(f(\\mathrm{Nothing}, 2))', ['Hold', ['f', 'Nothing', 2]]],
+    ] as const) {
+      const fresh = new ComputeEngine();
+      fresh.declare('f', 'function');
+      expect(
+        JSON.stringify(fresh.parse(latex, { form: 'raw' }).json)
+      ).toBe(JSON.stringify(fresh.box(json as any, { form: 'raw' }).json));
+      expect(JSON.stringify(fresh.parse(latex).json)).toBe(
+        JSON.stringify(fresh.box(json as any).json)
+      );
+    }
+  });
+
+  test('a Nothing in brackets, braces and bars is an element', () => {
+    expect(raw('[\\mathrm{Nothing}]')).toBe('["List","Nothing"]');
+    expect(canonical('[\\mathrm{Nothing}]')).toBe('["List"]');
+    expect(raw('\\{\\mathrm{Nothing}\\}')).toBe('["Set","Nothing"]');
+    expect(parsed('\\langle\\mathrm{Nothing}\\rangle')).toBe(
+      '["AngleBracket","Nothing"]'
+    );
+    expect(parsed('|\\mathrm{Nothing}|')).toBe('["Abs","Nothing"]');
+    expect(parsed('\\lfloor\\mathrm{Nothing}\\rfloor')).toBe(
+      '["Floor","Nothing"]'
+    );
+    expect(parsed('\\lceil\\mathrm{Nothing}\\rceil')).toBe('["Ceil","Nothing"]');
+    expect(parsed('\\Vert\\mathrm{Nothing}\\Vert')).toBe('["Norm","Nothing"]');
+  });
+
+  test('an empty enclosure is still empty', () => {
+    expect(raw('()')).toBe('["Delimiter"]');
+    expect(canonical('()')).toBe('["Tuple"]');
+    expect(raw('(\\displaystyle)')).toBe('["Delimiter"]');
+    expect(raw('(\\phantom{\\mathrm{Nothing}})')).toBe('["Delimiter"]');
+    expect(raw('[]')).toBe('["List"]');
+    expect(raw('\\{\\}')).toBe('"EmptySet"');
+    expect(parsed('\\langle\\rangle')).toBe('["AngleBracket"]');
+    expect(parsed('f()')).toBe('["InvisibleOperator","f",["Delimiter"]]');
+    expect(parsed('\\gcd{}')).toBe('"GCD"');
+    expect(raw('\\mathrm{Hold}()')).toBe(
+      JSON.stringify(ce.box(['Hold'], { form: 'raw' }).json)
+    );
+    expect(raw('\\mathrm{Nothing}')).toBe('"Nothing"');
+    // Nested bars still read an empty body as a nested opening.
+    expect(parsed('||x|-1|')).toBe('["Abs",["Subtract",["Abs","x"],1]]');
+  });
+
+  test('the LaTeX of a call with a Nothing argument parses back', () => {
+    for (const json of [
+      ['Hold', 'Nothing'],
+      ['f', 'Nothing'],
+      ['f', 'Nothing', 1],
+    ]) {
+      const fresh = new ComputeEngine();
+      fresh.declare('f', 'function');
+      const latex = syntax.serialize(json);
+      expect(
+        fresh.parse(latex, { form: 'raw' }).isSame(fresh.box(json, { form: 'raw' }))
+      ).toBe(true);
+    }
+    expect(syntax.serialize(['Hold', 'Nothing'])).toBe(
+      '\\mathrm{Hold}(\\mathrm{Nothing})'
+    );
+    const declared = new ComputeEngine();
+    declared.declare('f', 'function');
+    expect(
+      declared.parse(declared.box(['f', 'Nothing', 1], { form: 'raw' }).latex, {
+        form: 'raw',
+      }).json
+    ).toEqual(['f', 'Nothing', 1]);
   });
 });

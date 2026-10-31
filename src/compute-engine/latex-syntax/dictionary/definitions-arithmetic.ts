@@ -3141,8 +3141,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '|',
     closeTrigger: '|',
-    parse: (_parser: Parser, body: MathJsonExpression) =>
-      isEmptySequence(body) ? null : (['Abs', body] as MathJsonExpression),
+    parse: (parser: Parser, body: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(body)
+        ? null
+        : (['Abs', body] as MathJsonExpression),
     serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
       serializeAbs(serializer, expr),
   },
@@ -3150,8 +3152,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['\\vert'],
     closeTrigger: ['\\vert'],
-    parse: (_parser: Parser, body: MathJsonExpression) =>
-      isEmptySequence(body) ? null : (['Abs', body] as MathJsonExpression),
+    parse: (parser: Parser, body: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(body)
+        ? null
+        : (['Abs', body] as MathJsonExpression),
   },
   {
     symbolTrigger: 'abs',
@@ -3293,8 +3297,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '\\lceil',
     closeTrigger: '\\rceil',
-    parse: (_parser: Parser, body: MathJsonExpression) =>
-      isEmptySequence(body) ? null : (['Ceil', body] as MathJsonExpression),
+    parse: (parser: Parser, body: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(body)
+        ? null
+        : (['Ceil', body] as MathJsonExpression),
     // The step form `Ceil(x, step)` has no bracket notation: it is written
     // as a function, `\mathrm{ceil}(x, step)`, which parses back to it.
     serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
@@ -3310,8 +3316,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['\u2308'], // ⌈ U+2308 LEFT CEILING
     closeTrigger: ['\u2309'], // ⌉ U+2309 RIGHT CEILING
-    parse: (_parser: Parser, body: MathJsonExpression) =>
-      isEmptySequence(body) ? null : (['Ceil', body] as MathJsonExpression),
+    parse: (parser: Parser, body: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(body)
+        ? null
+        : (['Ceil', body] as MathJsonExpression),
   },
   {
     symbolTrigger: 'ceil',
@@ -3536,8 +3544,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '\\lfloor',
     closeTrigger: '\\rfloor',
-    parse: (_parser: Parser, body: MathJsonExpression) =>
-      isEmptySequence(body) ? null : (['Floor', body] as MathJsonExpression),
+    parse: (parser: Parser, body: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(body)
+        ? null
+        : (['Floor', body] as MathJsonExpression),
     // The step form `Floor(x, step)` has no bracket notation: it is written
     // as a function, `\mathrm{floor}(x, step)`, which parses back to it.
     serialize: (serializer: Serializer, expr: MathJsonExpression): string =>
@@ -3553,8 +3563,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['\u230a'], // ⌊ U+230A LEFT FLOOR
     closeTrigger: ['\u230b'], // ⌋ U+230B RIGHT FLOOR
-    parse: (_parser: Parser, body: MathJsonExpression) =>
-      isEmptySequence(body) ? null : (['Floor', body] as MathJsonExpression),
+    parse: (parser: Parser, body: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(body)
+        ? null
+        : (['Floor', body] as MathJsonExpression),
   },
   {
     symbolTrigger: 'floor',
@@ -4409,8 +4421,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: '||',
     closeTrigger: '||',
-    parse: (_parser: Parser, expr: MathJsonExpression) =>
-      isEmptySequence(expr) ? null : (['Norm', expr] as MathJsonExpression),
+    parse: (parser: Parser, expr: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(expr)
+        ? null
+        : (['Norm', expr] as MathJsonExpression),
   },
   {
     //   /** If the argument is a vector */
@@ -4419,8 +4433,10 @@ export const DEFINITIONS_ARITHMETIC: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['\\left', '\\Vert'],
     closeTrigger: ['\\right', '\\Vert'],
-    parse: (_parser: Parser, expr: MathJsonExpression) =>
-      isEmptySequence(expr) ? null : (['Norm', expr] as MathJsonExpression),
+    parse: (parser: Parser, expr: MathJsonExpression) =>
+      parser._isEmptyMatchfixBody(expr)
+        ? null
+        : (['Norm', expr] as MathJsonExpression),
     serialize: (serializer, expr) => {
       const arg = operand(expr, 1);
       const order = serializeNormOrder(serializer, operand(expr, 2));

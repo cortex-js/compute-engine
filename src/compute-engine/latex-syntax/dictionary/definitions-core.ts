@@ -685,6 +685,31 @@ export function hasTrailingEmptySegment(
 }
 
 /**
+ * The positions of the empty segments of a `Sequence` array that the `;`
+ * parselet built, as operand indices (the first operand is `1`). An empty
+ * segment (`[1;;2]`) and an authored `\mathrm{Nothing}`
+ * (`[1;\mathrm{Nothing}]`) both give the symbol `Nothing`, and a matrix row
+ * of the bracket handler must tell them apart: an empty row is `List()`, an
+ * authored one is `List(Nothing)`. The record is keyed by the array object
+ * itself, so it lives as long as the parse result and needs no reset.
+ */
+const EMPTY_SEGMENTS = new WeakMap<object, ReadonlySet<number>>();
+
+/** Is operand `index` (the first operand is `1`) of this `Sequence` an empty
+ * segment of a `;` list, not an authored expression? `false` for a
+ * `Sequence` that the `;` parselet did not build. */
+function isEmptySegment(
+  seq: MathJsonExpression | null,
+  index: number
+): boolean {
+  return (
+    typeof seq === 'object' &&
+    seq !== null &&
+    (EMPTY_SEGMENTS.get(seq)?.has(index) ?? false)
+  );
+}
+
+/**
  * Parse a sequence of expressions separated with `sep`
  *
  * `out.trailingEmpty` reports whether the LAST element came from an EMPTY
@@ -693,6 +718,9 @@ export function hasTrailingEmptySegment(
  * caller cannot tell them apart from the result alone — and the `;` parselet
  * must, since an empty trailing segment is a block marker to drop while an
  * authored `\mathrm{Nothing}` is a statement to keep.
+ *
+ * `out.emptyIndices`, when given, receives the index in the result of each
+ * element that came from an empty token segment, at any position.
  */
 function parseSequence(
   parser: Parser,
@@ -700,7 +728,7 @@ function parseSequence(
   lhs: MathJsonExpression | null,
   prec: number,
   sep: string,
-  out?: { trailingEmpty: boolean }
+  out?: { trailingEmpty: boolean; emptyIndices?: Set<number> }
 ): MathJsonExpression[] | null {
   if (terminator && terminator.minPrec >= prec) return null;
 
@@ -714,15 +742,19 @@ function parseSequence(
   };
 
   const result: MathJsonExpression[] = [];
+  const pushEmpty = () => {
+    out?.emptyIndices?.add(result.length);
+    result.push('Nothing');
+  };
   if (lhs) push(lhs);
-  else result.push('Nothing');
+  else pushEmpty();
   let done = false;
   while (!done) {
     done = true;
 
     parser.skipSpace();
     while (parser.match(sep)) {
-      result.push('Nothing');
+      pushEmpty();
       parser.skipSpace();
     }
     parser.skipVisualSpace();
@@ -730,7 +762,7 @@ function parseSequence(
     if (parser.atTerminator(terminator)) {
       // An empty segment at the very end of the sequence. `done` is still
       // `true`, so this is necessarily the last element.
-      result.push('Nothing');
+      pushEmpty();
       if (out) out.trailingEmpty = true;
     } else {
       const bareOp = parseBareOperatorElement(parser, terminator, sep);
@@ -741,7 +773,7 @@ function parseSequence(
         const elementStart = parser.index;
         const rhs = parser.parseExpression({ ...terminator, minPrec: prec });
         if (rhs !== null) push(rhs);
-        else result.push('Nothing');
+        else pushEmpty();
         // An element that is only a presentational command (`\phantom{x}`,
         // `\displaystyle`) reads tokens and gives no expression. It is an
         // empty element, as in `a,,b`, and the sequence goes on: before,
@@ -3065,8 +3097,8 @@ export const DEFINITIONS_CORE: LatexDictionary = [
     kind: 'matchfix',
     openTrigger: ['\\langle'],
     closeTrigger: ['\\rangle'],
-    parse: (_parser: Parser, body: MathJsonExpression) => {
-      if (body === null || isEmptySequence(body))
+    parse: (parser: Parser, body: MathJsonExpression) => {
+      if (parser._isEmptyMatchfixBody(body))
         return ['AngleBracket'] as MathJsonExpression;
       let inner = body;
       if (operator(inner) === 'Delimiter') inner = operand(inner, 1) ?? inner;
@@ -3277,7 +3309,10 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       lhs: MathJsonExpression,
       terminator: Readonly<Terminator>
     ) => {
-      const spelling = { trailingEmpty: false };
+      const spelling = {
+        trailingEmpty: false,
+        emptyIndices: new Set<number>(),
+      };
       const seq = parseSequence(parser, terminator, lhs, 19, ';', spelling);
       if (seq === null) return null;
 
@@ -3312,7 +3347,15 @@ export const DEFINITIONS_CORE: LatexDictionary = [
       if (trailingMarker && seq.length === 1)
         return buildBlockFromSequence(seq, parser);
 
-      return ['Delimiter', ['Sequence', ...seq], "';'"] as MathJsonExpression;
+      // Operand `i + 1` of the `Sequence` is element `i` of `seq`. The
+      // dropped trailing marker was the last element, so the other indices
+      // do not move.
+      const sequence: MathJsonExpression = ['Sequence', ...seq];
+      EMPTY_SEGMENTS.set(
+        sequence,
+        new Set([...spelling.emptyIndices].map((i) => i + 1))
+      );
+      return ['Delimiter', sequence, "';'"] as MathJsonExpression;
     },
   },
   // Keyword constructs (`if`/`then`/`else`, `for`, `where`, `and`, `or`,
@@ -4857,7 +4900,7 @@ function parsePrime(
 }
 
 function parseParenDelimiter(
-  _parser: Parser,
+  parser: Parser,
   body: MathJsonExpression
 ): MathJsonExpression | null {
   // During parsing, we keep a Delimiter expression as it captures the most
@@ -4866,8 +4909,9 @@ function parseParenDelimiter(
   // appropriate (Tuple, etc...).
 
   // Handle `()` used for example with `f()`. This will be handled in
-  // `canonicalInvisibleOperator()`
-  if (isEmptySequence(body)) return ['Delimiter'];
+  // `canonicalInvisibleOperator()`. An authored `\mathrm{Nothing}` is not an
+  // empty body: `f(\mathrm{Nothing})` has one argument.
+  if (parser._isEmptyMatchfixBody(body)) return ['Delimiter'];
 
   const h = operator(body);
 
@@ -4923,7 +4967,7 @@ function parseBrackets(
   parser: Parser,
   body: MathJsonExpression | null | undefined
 ): MathJsonExpression {
-  if (isEmptySequence(body)) return ['List'];
+  if (body == null || parser._isEmptyMatchfixBody(body)) return ['List'];
 
   const h = operator(body);
   // A comprehension (`[body for i=…]`) IS the collection: return it directly
@@ -4949,10 +4993,17 @@ function parseBrackets(
   if (h === 'Delimiter') {
     const delim = stringValue(operand(body, 2)) ?? '...';
     if (delim === ';' || delim === '.;.') {
+      // A row that is an authored `\mathrm{Nothing}` holds it
+      // (`[1; \mathrm{Nothing}]`); an empty row is empty (`[1;;2]`). The
+      // recursive call cannot tell them apart: the authored mark of the
+      // parser is for the whole bracket body, not for one row.
+      const rows = operand(body, 1);
       return [
         'List',
-        ...(operands(operand(body, 1)) ?? []).map((x) =>
-          parseBrackets(parser, x)
+        ...(operands(rows) ?? []).map((x, i) =>
+          x === 'Nothing' && !isEmptySegment(rows, i + 1)
+            ? (['List', 'Nothing'] as const)
+            : parseBrackets(parser, x)
         ),
       ];
     }

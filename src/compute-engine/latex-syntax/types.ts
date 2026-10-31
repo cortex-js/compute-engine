@@ -1243,6 +1243,18 @@ export interface Parser {
 
   /**
    * @internal
+   * True when `body`, the body that the `parse` handler of a matchfix entry
+   * receives, holds no expression: the enclosure is empty (`()`) or holds
+   * only decoration (`(\displaystyle)`). The parser gives the symbol
+   * `Nothing` for such a body. That symbol is also the value of an authored
+   * `\mathrm{Nothing}`, as in `(\mathrm{Nothing})`, which is an operand: for
+   * that body this function returns `false`. A handler that reads a `Nothing`
+   * body as "no operand" calls this function instead of `isEmptySequence()`.
+   */
+  _isEmptyMatchfixBody(body: MathJsonExpression | null | undefined): boolean;
+
+  /**
+   * @internal
    * Diagnostics: retroactively remove `undeclared-symbol` diagnostics for the
    * bound-variable `names` collected at or after `checkpoint`. When
    * `bodyStartToken` is given, pruning is span-aware: only references within

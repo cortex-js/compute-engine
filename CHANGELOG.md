@@ -33,33 +33,71 @@
   parameters; when it does not (`Add`), the interpreter evaluates the `Map`.
   (#495, contributed by [enumeratio](https://github.com/enumeratio) in #496)
 
-- **A partial application of a function literal compiles.** The interpreter
-  curries a call with fewer arguments than parameters: `Apply((x, y) ↦ x + y,
-  1)` is the function `(_1) ↦ _1 + 1`. Every target declined it ("the function
-  takes 2 parameter(s) but 1 argument(s) are supplied"), and so did
-  `Apply(Apply((x, y) ↦ x + y, 1), u)`. Now a partial application that is
-  applied to the remaining arguments is one call of the literal on every
-  target: `u + 1.0` on `glsl` and `wgsl`. A partial application whose value
-  is a function compiles to a function on `javascript`, `interval-js` and
-  `python` when each argument it supplies is a constant: at the root, the
-  `javascript` result has `calling: 'lambda'` (`run(2)` is `3`), and a block
-  local can hold it (`g := Apply(f, 1); g(u)`). An argument that is not a
-  constant (a variable, `Random()`) declines, because the compiled function
-  reads it when it is called and the interpreter reads it when the partial
-  application is evaluated. A literal with a rest parameter declines. `glsl`
-  and `wgsl` have no function values and decline a partial application that
-  is not applied, with a message that says so.
+- **A partial application of a function literal compiles, where it equals
+  the interpreter.** The interpreter curries a call with fewer arguments than
+  parameters. For a body with an effect (`(x, y) ↦ x + y + 0·Random()`), its
+  value is the deferred function `(_1) ↦ Apply(f, 1, _1)`, which applies `f`
+  to all the arguments when the last one arrives. That case now compiles:
+  `Apply(Apply(f, 1), u)` is one call of `f` on every target, and on
+  `javascript` and `interval-js` (and on `python` when the body compiles
+  there) `Apply(f, 1)` alone compiles to a function. At the root, the
+  `javascript` result has `calling: 'lambda'`, and a block local can hold it
+  (`g := Apply(f, 1); g(u)`). Every other partial application declines with
+  the reason. A pure body declines, because the interpreter simplifies the
+  body before the remaining arguments are known: with `M = (x, y) ↦ x·y`,
+  `Apply(Apply(M, 0), ∞)` is `0`, but `Apply(M, 0, ∞)` is `Indeterminate`
+  (ROADMAP CE-708). An argument whose type is not a number, a boolean or a
+  string declines (the interpreter maps over a list argument), and so do a
+  generic literal, a rest parameter, a body that calls a user function or
+  reads a name that can hold a function, and, for the function value, an
+  argument that is not a constant. `glsl` and `wgsl` have no function values
+  and decline a partial application that is not applied, with a message that
+  says so. Before, every target declined all these shapes with "the function
+  takes 2 parameter(s) but 1 argument(s) are supplied".
 
 ### Bug Fixes
 
+- **An access into a value typed `expression` is accepted.** `expression`
+  admits a collection, but `At` refused a base typed `expression` (it accepted
+  one typed `value`), so a function that reads an element of a parameter
+  declared `expression` could not be defined: with
+  `leaves := (t: expression) ↦ (1 if t ∈ ℤ else leaves(t[1]) + leaves(t[2]))`,
+  the definition was an `incompatible-type` error. It now gives
+  `leaves([[0, 0], 0]) = 3`, as for a parameter declared `any` or `value`. The
+  value is checked when the access is evaluated: `((t: expression) ↦ t[1])(5)`
+  is still an `incompatible-type` error.
+
+- **The type of a call with a list at a declared list parameter holds its
+  value.** With `h` declared `(list) -> number` and assigned `t ↦ 2t`,
+  `h([1, 2, 3])` evaluates to `[2, 4, 6]`: the parameter receives the list
+  whole, and the check of the declared result admits a list of numbers, the
+  result computed once per element. The call was typed `number`. It is now
+  typed from the body, `vector<integer^3>`, for the named call, for
+  `Apply(h, …)` and for a call inside another function body. The same holds
+  for a function declared `(list<tuple<number, number>>) -> number` applied
+  to a list of points. A body whose type satisfies the declared result (a
+  `Sum` declared `(list<integer>) -> integer`) keeps that result.
+
+- **The type of a function literal applied to an argument of a top type holds
+  its value.** With `L` declared `list<unknown>` and later assigned
+  `[[1, 2]]`, `(t ↦ 2t)(L[1])` evaluates to `[2, 4]`: the element `L[1]` is a
+  list, and the call maps over it. The call was typed `number`. It is now
+  typed as the call of a named function with the same body,
+  `number | tuple | list<number | tuple | list<any>>`, which also holds a
+  ragged list and a point. An argument typed `any` (a symbol declared `any`,
+  an element of a `list<any>`) types the call `any`. The same holds for
+  `Apply(t ↦ 2t, L[1])`, for `L[1] |> (t ↦ 2t)`, and for a symbol of type
+  `unknown` with no value that the body of an enclosing function reads from
+  outside it. A number argument and a free symbol keep the type `number`.
+
 - **Python: a call of a function literal with the wrong number of arguments
-  is declined.** `Apply((x, y) ↦ x + y, 1)` compiled to
-  `((lambda x, y: x + y))(1)`, which raises a `TypeError` in Python where the
-  interpreter gives a function. It now compiles to the function
-  `(lambda _1: ((lambda x, y: x + y))(1, _1))`. A call with too many arguments
-  (an `unexpected-argument` error in the interpreter) and a call of a literal
-  with no parameter (which ignores its arguments in the interpreter) are
-  declined.
+  no longer compiles to code that raises.** `Apply((x, y) ↦ x + y, 1)`
+  compiled to `((lambda x, y: x + y))(1)`, which raises a `TypeError` where
+  the interpreter gives a function. It now compiles only under the conditions
+  of the partial-application entry above, and declines otherwise. A call with
+  too many arguments (an `unexpected-argument` error in the interpreter) and a
+  call with arguments of a literal with no parameter (the interpreter ignores
+  them) are declined, where Python raised a `TypeError`.
 
 - **A held operand keeps `Nothing` as written.** `ce.box()` of a `Hold`
   replaced every `Nothing` and every empty `Sequence` in the held operand with
@@ -277,6 +315,19 @@
   integral with no feature next to the bound gives the same result as before.
   Of 900 such integrals, 187 had an error smaller than their true error; none
   does now.
+
+- **A numeric integral next to a logarithmic singularity reports an error
+  that covers its true error when the corner is not extrapolated** (ROADMAP
+  CE-695). `∫ dx/(x·ln²x) + (x ≤ 10⁻³ ? 10⁻³ : 0)` on `[0, ½]` reported
+  `± 1.28e-3` for a true error of `1.38e-3`, and `∫ du/(u·(−ln u)^1.1)` on
+  `[10⁶ − ¼, 10⁶]` (`u = 10⁶ − x`) reported `± 1.24` for a true error of
+  `7.32`. Next to such a singularity, most of the integral can be nearer to
+  the bound than the doubles allow, and the bound of that part assumed that
+  the integrand decreases like a power of the distance. It now also reads
+  the slower decrease of a power of the logarithm: `± 2.69e-3` and `± 14.6`
+  for these integrals. Of 302 such integrals with and without a step or a
+  bump, 54 more errors cover their true error, and no result has a smaller
+  error or loses its convergence.
 
 - **A numeric integral whose integrand is infinite at some doubles next to a
   singular bound has a finite error** (GitHub issue #494). In
@@ -503,6 +554,28 @@
   engine rebuild the expression from the held operands and loses that work.
 
 ### Behavior Changes
+
+- **An extra operand of `Hold` is an error.** `Hold` takes one operand, and
+  the others were dropped with no error: `ce.box(['Hold', 'x', 1])` and
+  `ce.function('Hold', [x, 1])` were the valid `Hold(x)`. Each extra operand
+  is now an `unexpected-argument` error, as for any other operator:
+  `Hold(x, Error('unexpected-argument', '1'))`, which is not valid, also
+  after `evaluate()`, and is not equal to `Hold(x)`.
+
+- **The parser keeps an explicit `\mathrm{Nothing}` in an enclosure.** An
+  enclosure whose only content is `\mathrm{Nothing}` was read as empty:
+  `f(\mathrm{Nothing})` was `f()`, `(\mathrm{Nothing})` was `()`,
+  `\{\mathrm{Nothing}\}` was `EmptySet`, `|\mathrm{Nothing}|` did not parse,
+  and `\gcd{\mathrm{Nothing}}` had no argument. Now the authored symbol is
+  kept: `["f", "Nothing"]` in the raw form (`["f"]` in the canonical form,
+  where `Nothing` is erased from the arguments), `Delimiter(Nothing)`,
+  `Set(Nothing)`, `Abs(Nothing)` and `GCD(Nothing)`. The same holds for
+  `[\mathrm{Nothing}]`, a row of a matrix (`[1; \mathrm{Nothing}]`), the
+  angle bracket, floor, ceiling and norm fences, and a matchfix entry of a
+  custom dictionary. So the LaTeX of `Hold(Nothing)`,
+  `\mathrm{Hold}(\mathrm{Nothing})`, parses back to `Hold(Nothing)`. An empty
+  enclosure (`f()`, `()`, `[]`) and one that holds only decoration
+  (`(\displaystyle)`, `(\phantom{x})`) are still empty.
 
 - **The type of a node of a function body no longer depends on the values of
   a call** (GitHub issue #487). A type computation reads the declared

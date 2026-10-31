@@ -4488,6 +4488,16 @@ function captureClosuresUncached(
       copyAssignmentLocals(innerBlock.localScope, closureScope);
       // Rebuild the body's own ops against the NEW scope: a scoped `Block`
       // nested inside the body (an `If` branch, a loop body) keeps its
+      // The new scope stands for the body scope of the literal. A call in
+      // the body finds its callee by the scope that holds the binding of the
+      // callee (`callableBindingInContext`, `binders.ts`), and the binding of
+      // an assignment local of the body (`g` in `g := z ↦ 3`) is made at
+      // each application, in the frame that stands for the body scope.
+      // Without this link, the frame of an application of the rebuilt
+      // literal stood for this new scope only, the call `g(0)` did not find
+      // `g` there, and `w ↦ (x ↦ Block(g := z ↦ 3, x + g(0)))` applied to
+      // `1` and then to `5` gave `5 + g(0)`, not `8`.
+      markCallableFrame(closureScope, innerBlock.localScope);
       // canonicalization-time parent chain otherwise, which reaches the stale
       // copies of these same lexical levels instead of the captured ones. That
       // is invisible for an arithmetic body — its symbols live directly in the
@@ -6602,6 +6612,47 @@ function rerootOnCreatingFrame(ce: ComputeEngine, fn: Expression): Expression {
 
 /** The bindings of one nested scope, and the stored value of each of its
  * (non-constant) value definitions, at the entry of an application. */
+/**
+ * The closure that the evaluation of the function literal `fn` creates, or
+ * `undefined` when the literal is its own value. The `Function` handler
+ * calls it.
+ *
+ * The closure keeps two parts of the scope chain where it is created:
+ * - The locals of the nested blocks that are in use (`captureNestedLocals`).
+ * - The call frame of the function whose body creates it, when the chain
+ *   reaches that frame through the body scope of the function
+ *   (`rerootOnCreatingFrame`). The frame holds the parameters and the
+ *   assignment locals of the call. When the call ends, the parent of the
+ *   body scope is set back to the defining scope, and a closure that was
+ *   not re-rooted no longer finds the frame. A closure that the call
+ *   returns is re-rooted when the call ends (`captureClosures`), but a
+ *   closure kept in a local of the frame is not part of the returned
+ *   value: with `y ↦ Block(k := 1, f := z ↦ z + k, x ↦ y·x + f(x))` applied
+ *   to `3` and then to `2`, the returned closure called `f`, which read a
+ *   free `k`, and the result was `k + 8`, not `9`. The closure keeps the
+ *   binding of `k`, not its value at the creation: a later assignment of
+ *   `k` in the same call is visible to `f`.
+ *
+ * The frame is read from the parent of the body scope, which all the
+ * applications of the literal share. It is the frame of the running call:
+ * under `evaluateAsync()`, an application of the same literal that is not
+ * nested in the running one waits until that one ends
+ * (`blockingAsyncApplication`).
+ *
+ * When both steps apply (a literal in a loop body of an applied function),
+ * each one rebuilds the literal, so the literal is rebuilt twice at each
+ * evaluation. On a loop that makes 900 closures, the measured cost was a
+ * few milliseconds.
+ */
+export function captureAtCreation(
+  ce: ComputeEngine,
+  fn: Expression | undefined
+): Expression | undefined {
+  if (fn === undefined) return undefined;
+  const closure = rerootOnCreatingFrame(ce, captureNestedLocals(ce, fn) ?? fn);
+  return closure === fn ? undefined : closure;
+}
+
 type NestedScopeSnapshot = {
   scope: Scope;
   entries: [string, BoxedDefinition][];

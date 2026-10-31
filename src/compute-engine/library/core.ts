@@ -72,7 +72,7 @@ import {
   canonicalFunctionLiteral,
   canonicalFunctionLiteralOperands,
   canonicalWithFreshPlaceholders,
-  captureNestedLocals,
+  captureAtCreation,
   exactArgumentSources,
   inlineCallParameters,
   isStatementListScope,
@@ -5560,13 +5560,22 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         }
       },
       // When comparing hold expressions, consider them equal if their
-      // arguments are structurally equal.
+      // arguments are structurally equal. A `Hold` with more than one
+      // operand is not valid (its extra operands are `unexpected-argument`
+      // errors), so it is never equal to a valid `Hold`.
       eq: (a, b) => {
-        if (isFunction(b, 'Hold')) b = b.ops[0];
-        if (!isFunction(a)) return false;
+        if (isFunction(b, 'Hold')) {
+          if (b.nops !== 1) return false;
+          b = b.ops[0];
+        }
+        if (!isFunction(a) || a.nops !== 1) return false;
         return a.ops[0].isSame(b);
       },
-      evaluate: ([x], { engine }) => engine.hold(x),
+      // A `Hold` with extra operands stays as it is: rebuilding it from its
+      // first operand would turn the not-valid `Hold(x, 1)` into the valid
+      // `Hold(x)`, and the error would be lost.
+      evaluate: (ops, { engine }) =>
+        ops.length === 1 ? engine.hold(ops[0]) : undefined,
     },
 
     ReleaseHold: {
@@ -8698,8 +8707,11 @@ export const CORE_LIBRARY: SymbolDefinitions[] = [
         // written in a nested block of a running function or loop, the
         // closure captures the bindings of that block now: a later
         // application or iteration writes to the same nested scopes (see
-        // `captureNestedLocals`). Otherwise the literal is its own value.
-        return captureNestedLocals(engine, expression) ?? undefined;
+        // `captureNestedLocals`). When the literal is written in the body of
+        // a function that is being applied, the closure also keeps the call
+        // frame of that application (`captureAtCreation`). Otherwise the
+        // literal is its own value.
+        return captureAtCreation(engine, expression);
       },
     },
 

@@ -1127,8 +1127,8 @@ function makeParseHandler(
   if (kind === 'matchfix') {
     const h = entry.parse ?? entry.name;
     if (h)
-      return (_parser: Parser, body: MathJsonExpression) => {
-        if (isEmptySequence(body)) return null;
+      return (parser: Parser, body: MathJsonExpression) => {
+        if (parser._isEmptyMatchfixBody(body)) return null;
         return [h, body];
       };
   }

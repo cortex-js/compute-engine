@@ -2578,16 +2578,29 @@ export function runtimeConformanceError(
  * the variable as its bound gives a requirement on the elements: the
  * variable is covariant there. A variable deeper in the element type (under
  * a function type, or in a named type that is not covariant) is not.
+ *
+ * A tuple parameter has one element type per slot, and each slot is
+ * covariant, so each slot is tested by itself: `tuple<T, U>` and
+ * `tuple<T, integer>` qualify. A slot that holds a variable under a
+ * constructor (`tuple<list<T>, U>`, `tuple<tuple<T, U>, V>`) is not tested
+ * further, so the whole parameter fails the test and distributes nothing,
+ * not even to its bare slots: this writes less than it could, and is
+ * sound. The join of
+ * the slots (`collectionElementType()`) is not used: it is never a bare
+ * variable when two slots differ, and it gives the open variables to
+ * `widen()`, which requires ground types (`docs/TYPE-SYSTEM.md` §4.2).
  */
 function elementIsBareOrGround(param: Type | undefined): boolean {
   if (param === undefined || freeTypeVariables(param).size === 0) return true;
   if (typeof param === 'object' && param.kind === 'variable') return true;
+  const isBareOrGround = (t: Type): boolean =>
+    freeTypeVariables(t).size === 0 ||
+    (typeof t === 'object' && t.kind === 'variable');
+  if (typeof param === 'object' && param.kind === 'tuple')
+    return param.elements.every((slot) => isBareOrGround(slot.type));
   const element = collectionElementType(param);
   if (element === undefined) return false;
-  return (
-    freeTypeVariables(element).size === 0 ||
-    (typeof element === 'object' && element.kind === 'variable')
-  );
+  return isBareOrGround(element);
 }
 
 /**
@@ -4397,7 +4410,9 @@ export function validateArguments(
   // The bound is an upper bound, so it is a requirement only where the
   // variable is covariant. So a generic parameter distributes only when its
   // element type is ground or a bare variable (`list<T>`,
-  // `indexed_collection<T>`; `elementIsBareOrGround()`). Under a function
+  // `indexed_collection<T>`), or, for a tuple parameter, when each slot is
+  // ground or a bare variable (`tuple<T, U>`; `elementIsBareOrGround()`).
+  // Under a function
   // type (`list<(T) -> number>`) the bound `number` would require more of an
   // element than the call does (`(integer) -> number` is valid with
   // `T = integer`), and so would a named type that is not covariant in its

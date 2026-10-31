@@ -877,6 +877,12 @@ export class _Parser implements Parser {
    * See `parsePrimary()`. */
   private _authoredNothingEnd = -1;
 
+  /** True while the `parse` handler of a matchfix entry runs on a body that
+   * is an authored `\mathrm{Nothing}`, and not on an empty enclosure. Both
+   * bodies are the symbol `Nothing`. See `parseEnclosure()` and
+   * `_isEmptyMatchfixBody()`. */
+  private _matchfixBodyIsAuthoredNothing = false;
+
   /** For each `<{>` token, the index of the `<}>` token that closes it.
    * See `matchingCloseBrace()`. */
   private _closeBraceOf: Map<number, number> | undefined = undefined;
@@ -1166,6 +1172,27 @@ export class _Parser implements Parser {
     for (let r = 0; r < d.length; r++)
       if (d[r]._seq < checkpoint) d[w++] = d[r];
     d.length = w;
+  }
+
+  _isEmptyMatchfixBody(body: MathJsonExpression | null | undefined): boolean {
+    if (body === 'Nothing' && this._matchfixBodyIsAuthoredNothing) return false;
+    return isEmptySequence(body);
+  }
+
+  /** True when `body`, which the parser read from token `start` to the
+   * current position, is an authored `\mathrm{Nothing}`: the symbol parser
+   * kept a `Nothing` that the source spells inside that span (see
+   * `parsePrimary()`). A body that is only decoration (`\displaystyle`) is
+   * not one. */
+  private isAuthoredNothing(
+    body: MathJsonExpression | null,
+    start: number
+  ): boolean {
+    return (
+      body === 'Nothing' &&
+      this._authoredNothingEnd > start &&
+      this._authoredNothingEnd <= this.index
+    );
   }
 
   /**
@@ -3416,7 +3443,8 @@ export class _Parser implements Parser {
    * element as an argument.
    *
    * An empty group is not an argument — `{}` is spacing/grouping decoration
-   * (see `skipSpace()`), so `\gcd{}` is left for other parsing paths.
+   * (see `skipSpace()`), so `\gcd{}` is left for other parsing paths. A group
+   * that holds an authored `\mathrm{Nothing}` is an argument.
    */
   parseBraceArguments(): ReadonlyArray<MathJsonExpression> | null {
     const start = this.index;
@@ -3424,7 +3452,10 @@ export class _Parser implements Parser {
     while (this.peek === '<{>') {
       const groupStart = this.index;
       const group = this.parseGroup();
-      if (group === null || group === 'Nothing') {
+      if (
+        group === null ||
+        (group === 'Nothing' && !this.isAuthoredNothing(group, groupStart))
+      ) {
         // Empty (or unparseable) group: not an argument. Leave it
         // unconsumed and stop collecting.
         this.index = groupStart;
@@ -3551,6 +3582,10 @@ export class _Parser implements Parser {
       if (isReversedInterval) this._reversedIntervalDepth += 1;
       let body = this.parseExpression();
       if (isReversedInterval) this._reversedIntervalDepth -= 1;
+      // An authored `\mathrm{Nothing}` body is an operand, not an empty body,
+      // although both are the symbol `Nothing`: `f(\mathrm{Nothing})` has one
+      // argument, `f()` has none.
+      let authoredBody = this.isAuthoredNothing(body, bodyStart);
       this.skipSpace();
       const boundary = this._boundaries[this._boundaries.length - 1]?.tokens;
       const matchedBoundary = this.matchBoundary();
@@ -3562,7 +3597,13 @@ export class _Parser implements Parser {
           Array.isArray(def.closeTrigger) &&
           def.openTrigger.length === def.closeTrigger.length &&
           def.openTrigger.every((tok, i) => tok === def.closeTrigger[i]));
-      if (matchedBoundary && isEmptySequence(body) && sameTrigger && boundary) {
+      if (
+        matchedBoundary &&
+        isEmptySequence(body) &&
+        !authoredBody &&
+        sameTrigger &&
+        boundary
+      ) {
         // The open and close delimiters are the same and the body came out
         // empty, so the delimiter that closed it is really the opening of a
         // nested enclosure ("||3-5|-4|"). Read the body again with the
@@ -3588,6 +3629,7 @@ export class _Parser implements Parser {
           this._boundaryBarrier = savedBarrier;
         }
         if (isReversedInterval) this._reversedIntervalDepth -= 1;
+        authoredBody = this.isAuthoredNothing(body, bodyStart);
         this.skipSpace();
         if (!this.matchBoundary()) {
           this.removeBoundary();
@@ -3616,6 +3658,7 @@ export class _Parser implements Parser {
           if (isReversedInterval) this._reversedIntervalDepth += 1;
           body = this.parseExpression();
           if (isReversedInterval) this._reversedIntervalDepth -= 1;
+          authoredBody = this.isAuthoredNothing(body, bodyStart);
           this.skipSpace();
           if (!this.matchAll(boundary)) {
             this.index = start;
@@ -3630,7 +3673,17 @@ export class _Parser implements Parser {
           continue;
         }
       }
-      const result = def.parse(this, body ?? 'Nothing');
+      // `_isEmptyMatchfixBody()` reads this flag. A handler can parse more,
+      // and so read a nested enclosure, which sets the flag for its own
+      // handler: each enclosure restores the flag of the enclosing one.
+      const outerAuthoredBody = this._matchfixBodyIsAuthoredNothing;
+      this._matchfixBodyIsAuthoredNothing = authoredBody;
+      let result: MathJsonExpression | null;
+      try {
+        result = def.parse(this, body ?? 'Nothing');
+      } finally {
+        this._matchfixBodyIsAuthoredNothing = outerAuthoredBody;
+      }
       if (result !== null) {
         this.emitAbsoluteValueAmbiguity(start);
         return result;

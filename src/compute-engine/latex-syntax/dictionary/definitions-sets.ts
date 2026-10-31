@@ -1238,7 +1238,7 @@ export const DEFINITIONS_SETS: LatexDictionary = [
     openTrigger: '{',
     closeTrigger: '}',
     parse: (parser: Parser, body: MathJsonExpression): MathJsonExpression => {
-      if (isEmptySequence(body)) return 'EmptySet';
+      if (parser._isEmptyMatchfixBody(body)) return 'EmptySet';
 
       // Unwrap a trailing-comma Delimiter (e.g. `{1, 2,}` parses as
       // `Delimiter(Sequence(1,2), ',')`) so the discriminators below see the

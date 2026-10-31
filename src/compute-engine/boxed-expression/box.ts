@@ -25,7 +25,6 @@ import {
   matchesNumber,
   matchesString,
   matchesSymbol,
-  missingIfEmpty,
   operator as mathJsonOperator,
   stringValue,
   symbol,
@@ -152,6 +151,7 @@ import {
 import {
   isNumber,
   isFunction,
+  isString,
   isSymbol,
   adoptsForeignEngineObject,
   indeterminateFormAnswer,
@@ -378,7 +378,13 @@ function boxHold(
 ): Expression {
   if (expr instanceof _BoxedExpression) return expr;
 
-  expr = missingIfEmpty(expr as MathJsonExpression);
+  // Only an ABSENT operand (`['Hold']`, or a `null` hole in the MathJSON) is
+  // reported as missing. A held operand is kept as written: `Nothing` and an
+  // empty `Sequence` are values of the held expression, not absent operands.
+  // `ReleaseHold` canonicalizes them later, and only then is `Nothing` erased
+  // from a list or from the arguments of a function (docs/ERROR-MODEL.md,
+  // "Nothing is an erasure marker").
+  if (expr === null || expr === undefined) return ce.error('missing');
 
   if (typeof expr === 'string') return box(ce, expr, options);
 
@@ -593,7 +599,26 @@ function boxFunctionInternal(
   //
 
   if (name === 'Hold') {
-    return new BoxedFunction(ce, 'Hold', [boxHold(ce, ops[0], options)], {
+    // `Hold` takes one operand. Each extra operand is reported as an
+    // `unexpected-argument` error, as for any other operator (`Sin(1, 2)` is
+    // `Sin(1, Error('unexpected-argument', '2'))`). They were dropped with no
+    // error, so `Hold(x, 1)` was the valid `Hold(x)`. The node is built as
+    // canonical, so no signature check runs after this one. The operands
+    // are not flattened (`checkArity()` would flatten a `Sequence`): a held
+    // operand is kept as written. An operand that is already this error
+    // (the node is boxed again from its boxed operands) is kept as it is.
+    const held = [boxHold(ce, ops[0] ?? null, options)];
+    for (const op of ops.slice(1)) {
+      const extra = boxHold(ce, op, options);
+      held.push(
+        isFunction(extra, 'Error') &&
+          isString(extra.op1) &&
+          extra.op1.string === 'unexpected-argument'
+          ? extra
+          : ce.error('unexpected-argument', extra.toString())
+      );
+    }
+    return new BoxedFunction(ce, 'Hold', held, {
       ...options,
       canonical: true,
       structural,
@@ -1591,8 +1616,8 @@ export function rebind(
         out = boxFunction(
           ce,
           node.operator,
-          node.operator === 'Hold' && ops.length === 1
-            ? [rebuildHeld(ops[0])]
+          node.operator === 'Hold'
+            ? ops.map(rebuildHeld)
             : ops.map((x) => rebuild(x, opsUnderBinder)),
           nodeOptions
         );
